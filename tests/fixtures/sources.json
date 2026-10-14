@@ -1,0 +1,37 @@
+[
+  {
+    "name": "guitarpro3-notes.gp3",
+    "url": "https://raw.githubusercontent.com/CoderLine/alphaTab/022a45c8e42370f9e12e68949d11eada370da83d/packages/alphatab/test-data/guitarpro3/notes.gp3",
+    "sha256": "a9ae6bb06ed259016e7a138a1b17d850491e9e2e8510c235df28a9ec81a706f1"
+  },
+  {
+    "name": "guitarpro4-notes.gp4",
+    "url": "https://raw.githubusercontent.com/CoderLine/alphaTab/022a45c8e42370f9e12e68949d11eada370da83d/packages/alphatab/test-data/guitarpro4/notes.gp4",
+    "sha256": "4f918d90aed2bdd12d229e612637b6f470a409771c805cc648c0682028f9125e"
+  },
+  {
+    "name": "guitarpro5-notes.gp5",
+    "url": "https://raw.githubusercontent.com/CoderLine/alphaTab/022a45c8e42370f9e12e68949d11eada370da83d/packages/alphatab/test-data/guitarpro5/notes.gp5",
+    "sha256": "74b6be1b298a86739ddb5745042901ced61cb8509ab282807048545f48177e27"
+  },
+  {
+    "name": "guitarpro6-notes.gpx",
+    "url": "https://raw.githubusercontent.com/CoderLine/alphaTab/022a45c8e42370f9e12e68949d11eada370da83d/packages/alphatab/test-data/guitarpro6/notes.gpx",
+    "sha256": "b437b7a2b3e212822acadd67877807baee48837ea76d9b737bfbf9f5db9c07fc"
+  },
+  {
+    "name": "guitarpro7-notes.gp",
+    "url": "https://raw.githubusercontent.com/CoderLine/alphaTab/022a45c8e42370f9e12e68949d11eada370da83d/packages/alphatab/test-data/guitarpro7/notes.gp",
+    "sha256": "44c5c7f3d15c9088fc23c3a4bb8cf2350bc8a2e0a5405816eb209eb764d5c81a"
+  },
+  {
+    "name": "guitarpro7-bends.gp",
+    "url": "https://raw.githubusercontent.com/CoderLine/alphaTab/022a45c8e42370f9e12e68949d11eada370da83d/packages/alphatab/test-data/guitarpro7/bends.gp",
+    "sha256": "3b64323117adcf0cb733320876ff4c814cc6fb0e5fd181ae0edf4b9f09e31a3f"
+  },
+  {
+    "name": "guitarpro8-beat-tempo-change.gp",
+    "url": "https://raw.githubusercontent.com/CoderLine/alphaTab/022a45c8e42370f9e12e68949d11eada370da83d/packages/alphatab/test-data/guitarpro8/beat-tempo-change.gp",
+    "sha256": "2820892be6f38c898956a3fabb6aec7c5cf0f155e5df63ba7f5c60e64158223d"
+  }
+]

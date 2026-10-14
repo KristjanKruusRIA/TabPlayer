@@ -35,21 +35,25 @@ async fn read_document(app: AppHandle) -> Result<Option<DocumentCandidate>, Stri
         return Ok(None);
     };
     let path = selected.into_path().map_err(|e| e.to_string())?;
+    read_candidate(path).map(Some)
+}
+
+fn read_candidate(path: PathBuf) -> Result<DocumentCandidate, String> {
     if path
         .extension()
         .is_some_and(|e| e.eq_ignore_ascii_case("tabplayer"))
     {
-        Ok(Some(DocumentCandidate {
+        Ok(DocumentCandidate {
             project: files::read_project(&path)?,
             path: Some(path.to_string_lossy().into_owned()),
-        }))
+        })
     } else {
         let bytes = std::fs::read(&path).map_err(|e| e.to_string())?;
         let original = std::fs::canonicalize(&path).map_err(|e| e.to_string())?;
-        Ok(Some(DocumentCandidate {
+        Ok(DocumentCandidate {
             project: Project::from_file(original.to_string_lossy().into_owned(), &bytes),
             path: None,
-        }))
+        })
     }
 }
 
@@ -140,11 +144,15 @@ async fn save_project(
         existing.unwrap()
     };
     let mut session = state.lock().unwrap();
+    save_to_path(&mut session, path).map(Some)
+}
+
+fn save_to_path(session: &mut ProjectSession, path: PathBuf) -> Result<ProjectSnapshot, String> {
     let project = session.snapshot().project;
     protect_source(&project, &path)?;
     files::write_project(&path, &project)?;
     session.mark_saved(path);
-    Ok(Some(session.snapshot()))
+    Ok(session.snapshot())
 }
 
 #[tauri::command]
@@ -164,27 +172,105 @@ async fn export_gp(
     };
     let path = with_extension(selected.into_path().map_err(|e| e.to_string())?, "gp");
     let project = state.lock().unwrap().snapshot().project;
-    protect_source(&project, &path)?;
-    files::write_bytes(&path, &bytes)?;
+    export_to_path(&project, &path, &bytes)?;
     Ok(true)
 }
 
+fn export_to_path(project: &Project, path: &Path, bytes: &[u8]) -> Result<(), String> {
+    protect_source(project, path)?;
+    files::write_bytes(path, bytes)?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod source_tests {
+    use super::*;
+    #[test]
+    fn source_path_and_identical_copy_are_protected() {
+        let directory = tempfile::tempdir().unwrap();
+        let original = directory.path().join("original.gp");
+        let copied = directory.path().join("copy.gp");
+        std::fs::write(&original, b"original music").unwrap();
+        let project =
+            Project::from_file(original.to_string_lossy().into_owned(), b"original music");
+        std::fs::write(&copied, b"original music").unwrap();
+        assert!(protect_source(&project, &copied).is_err());
+        std::fs::write(&original, b"externally updated music").unwrap();
+        assert!(protect_source(&project, &original).is_err());
+        assert!(protect_source(&project, &directory.path().join("new.gp")).is_ok());
+    }
+}
+
+#[cfg(feature = "desktop-test")]
+#[tauri::command]
+fn desktop_test_io(
+    action: String,
+    path: Option<PathBuf>,
+    bytes: Option<Vec<u8>>,
+    state: State<'_, Mutex<ProjectSession>>,
+) -> Result<serde_json::Value, String> {
+    if std::env::var("TABPLAYER_DESKTOP_TEST").as_deref() != Ok("1") {
+        return Err("Desktop test hooks are disabled.".into());
+    }
+    let variable = match action.as_str() {
+        "read" => "TABPLAYER_TEST_OPEN",
+        "save" => "TABPLAYER_TEST_SAVE",
+        "export" => "TABPLAYER_TEST_EXPORT",
+        _ => return Err("Unknown test action.".into()),
+    };
+    let path = path
+        .or_else(|| std::env::var_os(variable).map(PathBuf::from))
+        .ok_or("Test destination is missing.")?;
+    match action.as_str() {
+        "read" => serde_json::to_value(read_candidate(path)?).map_err(|e| e.to_string()),
+        "save" => serde_json::to_value(save_to_path(
+            &mut state.lock().unwrap(),
+            with_extension(path, "tabplayer"),
+        )?)
+        .map_err(|e| e.to_string()),
+        "export" => {
+            let project = state.lock().unwrap().snapshot().project;
+            export_to_path(
+                &project,
+                &with_extension(path, "gp"),
+                &bytes.ok_or("Test export bytes are missing.")?,
+            )?;
+            Ok(serde_json::json!(true))
+        }
+        _ => unreachable!(),
+    }
+}
+
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(Mutex::new(
             ProjectSession::new(Project::blank(), None).unwrap(),
-        ))
-        .invoke_handler(tauri::generate_handler![
-            project_snapshot,
-            read_document,
-            replace_project,
-            apply_edit,
-            undo_edit,
-            redo_edit,
-            save_project,
-            export_gp
-        ])
+        ));
+    #[cfg(not(feature = "desktop-test"))]
+    let builder = builder.invoke_handler(tauri::generate_handler![
+        project_snapshot,
+        read_document,
+        replace_project,
+        apply_edit,
+        undo_edit,
+        redo_edit,
+        save_project,
+        export_gp
+    ]);
+    #[cfg(feature = "desktop-test")]
+    let builder = builder.invoke_handler(tauri::generate_handler![
+        project_snapshot,
+        read_document,
+        replace_project,
+        apply_edit,
+        undo_edit,
+        redo_edit,
+        save_project,
+        export_gp,
+        desktop_test_io
+    ]);
+    builder
         .run(tauri::generate_context!())
         .expect("Could not start TabPlayer");
 }

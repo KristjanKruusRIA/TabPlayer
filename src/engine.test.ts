@@ -11,6 +11,10 @@ const target = { track: 0, staff: 0, bar: 0, voice: 0, beat: 0 };
 const beat = (score: ReturnType<typeof buildScore>) => score.tracks[0].staves[0].bars[0].voices[0].beats[0];
 
 describe('score editing', () => {
+  it('rejects retuning that would push existing frets outside MIDI range',()=>{
+    const note=previewEdit(base(),{type:'setNote',target,string:6,fret:7});
+    expect(()=>previewEdit(note.project,{type:'setTuning',track:0,tuning:[127,59,55,50,45,40]})).toThrow(/pitch range/i);
+  });
   it('turns a fret into its sounding MIDI pitch and adds chords', () => {
     const first = previewEdit(base(), { type: 'setNote', target, string: 6, fret: 7 });
     expect(beat(first.score).notes[0].realValue).toBe(71);

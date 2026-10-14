@@ -58,3 +58,4 @@ it('restores session mixer settings after edited MIDI becomes ready',()=>{
   expect(api.changeTrackSolo).toHaveBeenCalledWith([api.score!.tracks[0]],true);
   expect(api.changeTrackVolume).toHaveBeenCalledWith([api.score!.tracks[0]],.5);
 });
+it('reports metronome state to a remounted transport',()=>{const {player}=setup();player.setMetronome(.4);expect(player.getState().metronome).toBe(true);player.setMetronome(0);expect(player.getState().metronome).toBe(false);});

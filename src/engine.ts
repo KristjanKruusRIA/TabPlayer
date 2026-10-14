@@ -134,6 +134,11 @@ function apply(score: model.Score, edit: EditCommand) {
     case 'setTuning': {
       tuningValid(edit.tuning); const track = trackAt(score,edit.track);
       if (track.isPercussion || track.staves.some(s => s.tuning.length !== edit.tuning.length)) throw new Error('Retuning must keep the current string count.');
+      for (const staff of track.staves) for (const bar of staff.bars) for (const voice of bar.voices) for (const beat of voice.beats) for (const note of beat.notes) {
+        if (!note.string) continue;
+        const pitch=edit.tuning[edit.tuning.length-note.string]+note.fret+staff.capo-staff.transpositionPitch;
+        if (pitch<0 || pitch>127) throw new Error('That tuning puts an existing note outside the MIDI pitch range.');
+      }
       for (const staff of track.staves) staff.stringTuning.tunings = [...edit.tuning]; break;
     }
     case 'setScoreInfo':

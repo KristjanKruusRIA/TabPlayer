@@ -4,7 +4,7 @@ const clock=(ms:number)=>`${Math.floor(ms/60000)}:${Math.floor(ms/1000)%60<10?'0
 export function Transport({player,measures,busy}: {player:PlaybackController;measures:number;busy:boolean}) {
   const state=useSyncExternalStore(player.subscribe,player.getState);
   const [seek,setSeek]=useState(1);const [start,setStart]=useState(1);const [end,setEnd]=useState(1);
-  const [error,setError]=useState<string|null>(null);const [loop,setLoop]=useState(false);const [metro,setMetro]=useState(false);
+  const [error,setError]=useState<string|null>(null);const [loop,setLoop]=useState(false);
   const act=(action:()=>void)=>{try{action();setError(null);}catch(e){setError(String(e));}};
   return <div className="transport"><fieldset disabled={!state.ready || busy}>
     <button className="primary" onClick={()=>state.playing?player.pause():player.play()}>{state.playing?'Pause':'Play'}</button>
@@ -14,6 +14,6 @@ export function Transport({player,measures,busy}: {player:PlaybackController;mea
     <label>Loop start<input type="number" min={1} max={measures} value={start} onChange={e=>setStart(Number(e.target.value))}/></label>
     <label>Loop end<input type="number" min={1} max={measures} value={end} onChange={e=>setEnd(Number(e.target.value))}/></label>
     <button aria-pressed={loop} onClick={()=>act(()=>{if(loop){player.clearLoop();setLoop(false);}else{player.setLoop(start-1,end-1);setLoop(true);}})}>{loop?'Clear loop':'Loop'}</button>
-    <label className="check"><input type="checkbox" checked={metro} onChange={e=>{setMetro(e.target.checked);player.setMetronome(e.target.checked?.4:0);}}/>Metronome</label>
+    <label className="check"><input type="checkbox" checked={state.metronome} onChange={e=>player.setMetronome(e.target.checked?.4:0)}/>Metronome</label>
   </fieldset>{(error||state.error) && <p role="alert">{error||state.error}</p>}{!state.ready && !state.error && <span className="muted">Loading local audio…</span>}</div>;
 }

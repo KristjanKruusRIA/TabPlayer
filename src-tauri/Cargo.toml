@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.85"
 
+[features]
+desktop-test = []
+
 [lib]
 name = "tabplayer_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]

@@ -1,9 +1,9 @@
 import { type AlphaTabApi, type model, synth } from '@coderline/alphatab';
 export type PlaybackApi=Pick<AlphaTabApi,'score'|'tracks'|'tickCache'|'tickPosition'|'playbackRange'|'isLooping'|'playbackSpeed'|'metronomeVolume'|'isReadyForPlayback'|'play'|'pause'|'stop'|'renderScore'|'changeTrackMute'|'changeTrackSolo'|'changeTrackVolume'|'playerReady'|'midiLoaded'|'playerStateChanged'|'playerPositionChanged'|'error'>;
-export interface PlaybackState {ready:boolean;playing:boolean;time:number;endTime:number;measure:number;speed:number;error:string|null}
+export interface PlaybackState {ready:boolean;playing:boolean;time:number;endTime:number;measure:number;speed:number;metronome:boolean;error:string|null}
 
 export class PlaybackController {
-  private state:PlaybackState={ready:false,playing:false,time:0,endTime:0,measure:0,speed:100,error:null};
+  private state:PlaybackState={ready:false,playing:false,time:0,endTime:0,measure:0,speed:100,metronome:false,error:null};
   private listeners=new Set<()=>void>();private cleanup:Array<()=>void>=[];
   private mixes=new Map<number,{mute?:boolean;solo?:boolean;volume?:number}>();
   constructor(private api:PlaybackApi) {
@@ -40,7 +40,7 @@ export class PlaybackController {
   setTrackVolume(index:number,value:number){const volume=Math.max(0,Math.min(1,value));this.api.changeTrackVolume([this.track(index)],volume);this.mixes.set(index,{...this.mixes.get(index),volume});}
   setMute(index:number,value:boolean){this.api.changeTrackMute([this.track(index)],value);this.mixes.set(index,{...this.mixes.get(index),mute:value});}
   setSolo(index:number,value:boolean){this.api.changeTrackSolo([this.track(index)],value);this.mixes.set(index,{...this.mixes.get(index),solo:value});}
-  setMetronome(value:number){this.api.metronomeVolume=Math.max(0,Math.min(1,value));}
+  setMetronome(value:number){this.api.metronomeVolume=Math.max(0,Math.min(1,value));this.update({metronome:this.api.metronomeVolume>0});}
   beforeScoreChange(){this.stop();this.clearLoop();this.update({ready:false,error:null});}
   replaceScore(score:model.Score,track=0){const changed=this.api.score!==score;if(changed)this.update({ready:false,error:null});this.api.renderScore(score,[track]);if(!changed)this.update({ready:this.api.isReadyForPlayback});}
   destroy(){for(const remove of this.cleanup)remove();this.listeners.clear();}

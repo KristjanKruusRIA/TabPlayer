@@ -61,6 +61,6 @@ Verification commands run from the worktree. On this Windows host, Cargo is `C:/
 - [x] Complete the linked implementation tasks and preserve red/green and runtime evidence in the [expansion audit](../../validation/2026-10-14-tabplayer-expansion.md).
 - [x] Run the independent whole-change review; resolve all eight substantive findings and reverify affected behavior.
 - [x] Audit every scope row against actual source, outputs and native behavior; record unverified release credentials/runtime separately. Follow-up tuning presets and physical instrument views have separate [validation](../../validation/2026-10-15-tunings-and-instrument-views.md) and targeted review.
-- [ ] Build shipping packages without test hooks, hash the deliverables, verify their contents and finish the Git integration/push to main.
+- [x] Build shipping packages without test hooks, hash the deliverables, verify their actual contents and finish the Git integration/push to main. All three platform CI jobs pass at fbc63f0; actual Windows install/offline playback/uninstall and fresh main frontend/native/MSRV checks pass. Exact delivery commits and hashes are in `BUILD-INFO.json`.
 
 The full objective remains active until every feature is implemented and its applicable checks are evidenced. An intermediate editor or sound milestone is not completion.

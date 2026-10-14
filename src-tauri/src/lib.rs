@@ -1,20 +1,27 @@
+pub mod assets;
+pub mod audio;
+pub mod edit_types;
+pub mod export;
 pub mod files;
 pub mod project;
+mod runtime;
+pub mod settings;
 
-use project::{BaseDocument, EditCommand, Project, ProjectSession, ProjectSnapshot};
-use serde::Serialize;
+use project::{
+    BaseDocument, CandidateStore, DocumentCandidate, EditCommand, Project, ProjectSession,
+    ProjectSnapshot,
+};
+use runtime::{
+    audio_command, audio_devices, audio_prepare, audio_set_mix, audio_status, cancel_asset,
+    cancel_export, export_audio, export_midi, export_pdf, export_status, stage_backing,
+    stage_embedded_backing,
+};
 use std::{
     path::{Path, PathBuf},
     sync::Mutex,
 };
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_dialog::DialogExt;
-
-#[derive(Serialize)]
-struct DocumentCandidate {
-    project: Project,
-    path: Option<String>,
-}
 
 #[tauri::command]
 fn project_snapshot(state: State<'_, Mutex<ProjectSession>>) -> ProjectSnapshot {
@@ -22,7 +29,10 @@ fn project_snapshot(state: State<'_, Mutex<ProjectSession>>) -> ProjectSnapshot 
 }
 
 #[tauri::command]
-async fn read_document(app: AppHandle) -> Result<Option<DocumentCandidate>, String> {
+async fn read_document(
+    app: AppHandle,
+    candidates: State<'_, Mutex<CandidateStore>>,
+) -> Result<Option<DocumentCandidate>, String> {
     let selected = app
         .dialog()
         .file()
@@ -35,46 +45,64 @@ async fn read_document(app: AppHandle) -> Result<Option<DocumentCandidate>, Stri
         return Ok(None);
     };
     let path = selected.into_path().map_err(|e| e.to_string())?;
-    read_candidate(path).map(Some)
+    read_candidate(path, &mut candidates.lock().unwrap()).map(Some)
 }
 
-fn read_candidate(path: PathBuf) -> Result<DocumentCandidate, String> {
+fn read_candidate(
+    path: PathBuf,
+    candidates: &mut CandidateStore,
+) -> Result<DocumentCandidate, String> {
     if path
         .extension()
         .is_some_and(|e| e.eq_ignore_ascii_case("tabplayer"))
     {
-        Ok(DocumentCandidate {
-            project: files::read_project(&path)?,
-            path: Some(path.to_string_lossy().into_owned()),
-        })
+        candidates.stage_document(files::read_project(&path)?, Some(path))
     } else {
         let bytes = std::fs::read(&path).map_err(|e| e.to_string())?;
         let original = std::fs::canonicalize(&path).map_err(|e| e.to_string())?;
-        Ok(DocumentCandidate {
-            project: Project::from_file(original.to_string_lossy().into_owned(), &bytes),
-            path: None,
-        })
+        candidates.stage_document(
+            Project::from_file(original.to_string_lossy().into_owned(), &bytes),
+            None,
+        )
     }
 }
 
 #[tauri::command]
 fn replace_project(
-    project: Project,
-    path: Option<PathBuf>,
+    token: String,
+    candidates: State<'_, Mutex<CandidateStore>>,
     state: State<'_, Mutex<ProjectSession>>,
 ) -> Result<ProjectSnapshot, String> {
-    let candidate = ProjectSession::new(project, path)?;
-    let snapshot = candidate.snapshot();
-    *state.lock().unwrap() = candidate;
-    Ok(snapshot)
+    candidates
+        .lock()
+        .unwrap()
+        .commit_document(&token, &mut state.lock().unwrap())
+}
+
+#[tauri::command]
+fn new_document(candidates: State<'_, Mutex<CandidateStore>>) -> Result<DocumentCandidate, String> {
+    candidates
+        .lock()
+        .unwrap()
+        .stage_document(Project::blank(), None)
+}
+#[tauri::command]
+fn cancel_document(token: String, candidates: State<'_, Mutex<CandidateStore>>) -> bool {
+    candidates.lock().unwrap().cancel_document(&token)
 }
 
 #[tauri::command]
 fn apply_edit(
     command: EditCommand,
+    asset_token: Option<String>,
+    candidates: State<'_, Mutex<CandidateStore>>,
     state: State<'_, Mutex<ProjectSession>>,
 ) -> Result<ProjectSnapshot, String> {
-    state.lock().unwrap().apply_edit(command)
+    candidates.lock().unwrap().commit_edit(
+        asset_token.as_deref(),
+        command,
+        &mut state.lock().unwrap(),
+    )
 }
 #[tauri::command]
 fn undo_edit(state: State<'_, Mutex<ProjectSession>>) -> Result<ProjectSnapshot, String> {
@@ -97,23 +125,45 @@ fn with_extension(mut path: PathBuf, extension: &str) -> PathBuf {
     path
 }
 
-fn protect_source(project: &Project, path: &Path) -> Result<(), String> {
-    if let BaseDocument::File {
-        filename, sha256, ..
-    } = &project.base
-    {
-        if let (Ok(original), Ok(destination)) =
-            (std::fs::canonicalize(filename), std::fs::canonicalize(path))
-        {
-            if original == destination {
-                return Err("Choose a new destination to preserve the original score.".into());
-            }
+fn protect_source(project: &project::ProjectView, path: &Path) -> Result<(), String> {
+    let sources = match &project.base {
+        BaseDocument::File {
+            filename, sha256, ..
+        } => vec![(filename.as_str(), sha256.as_str())],
+        _ => Vec::new(),
+    };
+    let sources = sources
+        .into_iter()
+        .chain(
+            project
+                .assets
+                .iter()
+                .map(|(id, asset)| (asset.filename.as_str(), id.as_str())),
+        )
+        .collect::<Vec<_>>();
+    if sources.is_empty() {
+        return Ok(());
+    }
+    let destination = std::fs::canonicalize(path).ok();
+    for (filename, _) in &sources {
+        if destination.as_ref().is_some_and(|destination| {
+            std::fs::canonicalize(filename).ok().as_ref() == Some(destination)
+        }) {
+            return Err(
+                "Choose a new destination to preserve the original score and backing audio.".into(),
+            );
         }
-        if let Ok(bytes) = std::fs::read(path) {
-            use sha2::{Digest, Sha256};
-            if format!("{:x}", Sha256::digest(bytes)).eq_ignore_ascii_case(sha256) {
-                return Err("Choose a new destination to preserve the original score.".into());
-            }
+    }
+    if let Ok(bytes) = std::fs::read(path) {
+        use sha2::{Digest, Sha256};
+        let digest = format!("{:x}", Sha256::digest(bytes));
+        if sources
+            .iter()
+            .any(|(_, source)| digest.eq_ignore_ascii_case(source))
+        {
+            return Err(
+                "Choose a new destination to preserve the original score and backing audio.".into(),
+            );
         }
     }
     Ok(())
@@ -148,8 +198,8 @@ async fn save_project(
 }
 
 fn save_to_path(session: &mut ProjectSession, path: PathBuf) -> Result<ProjectSnapshot, String> {
-    let project = session.snapshot().project;
-    protect_source(&project, &path)?;
+    let project = session.stored_project();
+    protect_source(&session.snapshot().project, &path)?;
     files::write_project(&path, &project)?;
     session.mark_saved(path);
     Ok(session.snapshot())
@@ -176,7 +226,7 @@ async fn export_gp(
     Ok(true)
 }
 
-fn export_to_path(project: &Project, path: &Path, bytes: &[u8]) -> Result<(), String> {
+fn export_to_path(project: &project::ProjectView, path: &Path, bytes: &[u8]) -> Result<(), String> {
     protect_source(project, path)?;
     files::write_bytes(path, bytes)?;
     Ok(())
@@ -194,10 +244,57 @@ mod source_tests {
         let project =
             Project::from_file(original.to_string_lossy().into_owned(), b"original music");
         std::fs::write(&copied, b"original music").unwrap();
-        assert!(protect_source(&project, &copied).is_err());
+        assert!(protect_source(&project.view(), &copied).is_err());
         std::fs::write(&original, b"externally updated music").unwrap();
-        assert!(protect_source(&project, &original).is_err());
-        assert!(protect_source(&project, &directory.path().join("new.gp")).is_ok());
+        assert!(protect_source(&project.view(), &original).is_err());
+        assert!(protect_source(&project.view(), &directory.path().join("new.gp")).is_ok());
+    }
+
+    #[test]
+    fn backing_sources_remain_protected_after_undo_and_external_changes() {
+        use crate::{
+            assets::StoredAsset,
+            settings::{BackingSettings, ChannelMix},
+        };
+        let directory = tempfile::tempdir().unwrap();
+        let original = directory.path().join("original backing Ü.wav");
+        let copy = directory.path().join("copied.wav");
+        std::fs::write(&original, b"original backing audio").unwrap();
+        std::fs::write(&copy, b"original backing audio").unwrap();
+        let asset = StoredAsset::from_bytes(
+            original.to_string_lossy().into_owned(),
+            "audio/wav".into(),
+            b"original backing audio",
+        );
+        let id = asset.id().unwrap();
+        let mut session = ProjectSession::new(Project::blank(), None).unwrap();
+        session
+            .apply_edit_with_asset(
+                EditCommand::SetBacking {
+                    backing: Some(BackingSettings {
+                        asset_id: id.clone(),
+                        offset_ms: 0.0,
+                        anchors: vec![],
+                        mix: ChannelMix::default(),
+                    }),
+                },
+                Some((id, asset)),
+            )
+            .unwrap();
+        session.undo().unwrap();
+        assert!(session.stored_project().assets.is_empty());
+        let metadata = session.snapshot().project;
+        assert!(protect_source(&metadata, &copy).is_err());
+        std::fs::write(&original, b"externally updated backing").unwrap();
+        assert!(protect_source(&metadata, &original).is_err());
+        assert!(export_to_path(&metadata, &original, b"new mix").is_err());
+        assert_eq!(
+            std::fs::read(&original).unwrap(),
+            b"externally updated backing"
+        );
+        assert!(
+            export_to_path(&metadata, &directory.path().join("new mix.wav"), b"new mix").is_ok()
+        );
     }
 }
 
@@ -208,6 +305,7 @@ fn desktop_test_io(
     path: Option<PathBuf>,
     bytes: Option<Vec<u8>>,
     state: State<'_, Mutex<ProjectSession>>,
+    candidates: State<'_, Mutex<CandidateStore>>,
 ) -> Result<serde_json::Value, String> {
     if std::env::var("TABPLAYER_DESKTOP_TEST").as_deref() != Ok("1") {
         return Err("Desktop test hooks are disabled.".into());
@@ -222,7 +320,8 @@ fn desktop_test_io(
         .or_else(|| std::env::var_os(variable).map(PathBuf::from))
         .ok_or("Test destination is missing.")?;
     match action.as_str() {
-        "read" => serde_json::to_value(read_candidate(path)?).map_err(|e| e.to_string()),
+        "read" => serde_json::to_value(read_candidate(path, &mut candidates.lock().unwrap())?)
+            .map_err(|e| e.to_string()),
         "save" => serde_json::to_value(save_to_path(
             &mut state.lock().unwrap(),
             with_extension(path, "tabplayer"),
@@ -244,30 +343,73 @@ fn desktop_test_io(
 pub fn run() {
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .manage(Mutex::new(CandidateStore::default()))
         .manage(Mutex::new(
             ProjectSession::new(Project::blank(), None).unwrap(),
-        ));
+        ))
+        .manage(export::jobs::ExportJobs::default())
+        .setup(|app| {
+            let handle = app.handle().clone();
+            let root = app.path().resource_dir()?.join("audio");
+            app.manage(runtime::NativeAudio::new(
+                root,
+                std::sync::Arc::new(move |status| {
+                    let _ = handle.emit("native-audio-status", status);
+                }),
+            ));
+            Ok(())
+        });
     #[cfg(not(feature = "desktop-test"))]
     let builder = builder.invoke_handler(tauri::generate_handler![
         project_snapshot,
         read_document,
-        replace_project,
-        apply_edit,
-        undo_edit,
-        redo_edit,
-        save_project,
-        export_gp
-    ]);
-    #[cfg(feature = "desktop-test")]
-    let builder = builder.invoke_handler(tauri::generate_handler![
-        project_snapshot,
-        read_document,
+        new_document,
+        cancel_document,
         replace_project,
         apply_edit,
         undo_edit,
         redo_edit,
         save_project,
         export_gp,
+        audio_prepare,
+        audio_set_mix,
+        audio_command,
+        audio_devices,
+        audio_status,
+        stage_backing,
+        stage_embedded_backing,
+        cancel_asset,
+        export_pdf,
+        export_midi,
+        export_audio,
+        export_status,
+        cancel_export
+    ]);
+    #[cfg(feature = "desktop-test")]
+    let builder = builder.invoke_handler(tauri::generate_handler![
+        project_snapshot,
+        read_document,
+        new_document,
+        cancel_document,
+        replace_project,
+        apply_edit,
+        undo_edit,
+        redo_edit,
+        save_project,
+        export_gp,
+        audio_prepare,
+        audio_set_mix,
+        audio_command,
+        audio_devices,
+        audio_status,
+        stage_backing,
+        stage_embedded_backing,
+        cancel_asset,
+        export_pdf,
+        export_midi,
+        export_audio,
+        export_status,
+        cancel_export,
         desktop_test_io
     ]);
     builder

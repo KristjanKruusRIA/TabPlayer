@@ -1,0 +1,317 @@
+{
+  "schemaVersion": 1,
+  "sources": [
+    {
+      "id": "guitar",
+      "repository": "sfzinstruments/karoryfer.black-and-green-guitars",
+      "revision": "b3b3249d37dc977a1a297bd2dc053e6d9b6b805c",
+      "license": "CC0-1.0",
+      "licensePath": "LICENSE",
+      "inventoryPath": "guitar-inventory.json",
+      "instruments": [
+        {
+          "id": "green-guitar",
+          "name": "Green Guitar",
+          "maps": [
+            {
+              "path": "Programs/modules/maps_green/ord.sfz",
+              "articulation": "picked",
+              "opcodes": {
+                "ampeg_attack": 0.01,
+                "ampeg_release": 0.25,
+                "volume": 2
+              }
+            },
+            {
+              "path": "Programs/modules/maps_green/stac.sfz",
+              "articulation": "staccato",
+              "opcodes": {
+                "ampeg_attack": 0.01,
+                "ampeg_release": 0.05,
+                "volume": 2
+              }
+            },
+            {
+              "path": "Programs/modules/maps_green/hammer.sfz",
+              "articulation": "legato",
+              "opcodes": {
+                "ampeg_attack": 0.01,
+                "ampeg_release": 0.25,
+                "volume": 2
+              }
+            },
+            {
+              "path": "Programs/modules/maps_green/rel_tp.sfz",
+              "articulation": "release",
+              "opcodes": {
+                "ampeg_attack": 0.03,
+                "ampeg_release": 0.25,
+                "volume": 2,
+                "trigger": "release"
+              }
+            },
+            {
+              "path": "Programs/modules/maps_green/feedback_noise.sfz",
+              "articulation": "feedback",
+              "opcodes": {
+                "ampeg_attack": 0.08,
+                "ampeg_release": 0.5,
+                "volume": 2,
+                "lokey": 40,
+                "hikey": 86,
+                "pitch_keycenter": 60,
+                "pitch_keytrack": 0,
+                "loop_mode": "loop_continuous"
+              }
+            }
+          ]
+        },
+        {
+          "id": "black-guitar",
+          "name": "Black Guitar",
+          "maps": [
+            {
+              "path": "Programs/modules/maps_black/ord.sfz",
+              "articulation": "picked",
+              "opcodes": {
+                "ampeg_attack": 0.01,
+                "ampeg_release": 0.25,
+                "volume": 0
+              }
+            },
+            {
+              "path": "Programs/modules/maps_black/stac.sfz",
+              "articulation": "staccato",
+              "opcodes": {
+                "ampeg_attack": 0.01,
+                "ampeg_release": 0.05,
+                "volume": 0
+              }
+            },
+            {
+              "path": "Programs/modules/maps_black/btb.sfz",
+              "articulation": "dead",
+              "opcodes": {
+                "ampeg_attack": 0.01,
+                "ampeg_release": 0.08,
+                "volume": 0
+              }
+            },
+            {
+              "path": "Programs/modules/maps_black/rel_tp.sfz",
+              "articulation": "release",
+              "opcodes": {
+                "ampeg_attack": 0.03,
+                "ampeg_release": 0.25,
+                "volume": 0,
+                "trigger": "release"
+              }
+            },
+            {
+              "path": "Programs/modules/maps_black/feedback_noise.sfz",
+              "articulation": "feedback",
+              "opcodes": {
+                "ampeg_attack": 0.08,
+                "ampeg_release": 0.5,
+                "volume": 0,
+                "lokey": 40,
+                "hikey": 86,
+                "pitch_keycenter": 60,
+                "pitch_keytrack": 0,
+                "loop_mode": "loop_continuous"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "bass",
+      "repository": "sfzinstruments/karoryfer.black-and-blue-basses",
+      "revision": "6e7d674cdb41be7a54dbccb15472401ad01099b9",
+      "license": "CC0-1.0",
+      "licensePath": "license",
+      "inventoryPath": "bass-inventory.json",
+      "instruments": [
+        {
+          "id": "darkblack-bass",
+          "name": "Darkblack Bass",
+          "maps": [
+            {
+              "path": "Programs/maps/darkblack_reg_p_map.sfz",
+              "articulation": "fingered",
+              "opcodes": {
+                "lovel": 1,
+                "hivel": 31,
+                "ampeg_attack": 0.001,
+                "ampeg_release": 0.25,
+                "volume": 3,
+                "seq_length": 4,
+                "amp_velcurve_31": 1
+              }
+            },
+            {
+              "path": "Programs/maps/darkblack_reg_mp_map.sfz",
+              "articulation": "fingered",
+              "opcodes": {
+                "lovel": 32,
+                "hivel": 63,
+                "ampeg_attack": 0.001,
+                "ampeg_release": 0.25,
+                "volume": 3,
+                "seq_length": 4,
+                "amp_velcurve_63": 1
+              }
+            },
+            {
+              "path": "Programs/maps/darkblack_reg_mf_map.sfz",
+              "articulation": "fingered",
+              "opcodes": {
+                "lovel": 64,
+                "hivel": 95,
+                "ampeg_attack": 0.001,
+                "ampeg_release": 0.25,
+                "volume": 3,
+                "seq_length": 4,
+                "amp_velcurve_95": 1
+              }
+            },
+            {
+              "path": "Programs/maps/darkblack_reg_f_map.sfz",
+              "articulation": "fingered",
+              "opcodes": {
+                "lovel": 96,
+                "hivel": 127,
+                "ampeg_attack": 0.001,
+                "ampeg_release": 0.25,
+                "volume": 3,
+                "seq_length": 4
+              }
+            },
+            {
+              "path": "Programs/maps/darkblack_ghost_p_map.sfz",
+              "articulation": "ghost",
+              "opcodes": {
+                "lovel": 1,
+                "hivel": 63,
+                "ampeg_attack": 0.001,
+                "ampeg_release": 0.25,
+                "volume": 3,
+                "seq_length": 4,
+                "amp_velcurve_63": 1
+              }
+            },
+            {
+              "path": "Programs/maps/darkblack_ghost_f_map.sfz",
+              "articulation": "ghost",
+              "opcodes": {
+                "lovel": 64,
+                "hivel": 127,
+                "ampeg_attack": 0.001,
+                "ampeg_release": 0.25,
+                "volume": 3,
+                "seq_length": 4
+              }
+            },
+            {
+              "path": "Programs/maps/darkblack_stac_map.sfz",
+              "articulation": "staccato",
+              "opcodes": {
+                "lovel": 1,
+                "hivel": 127,
+                "ampeg_attack": 0.001,
+                "ampeg_release": 0.25,
+                "volume": 3,
+                "seq_length": 4
+              }
+            },
+            {
+              "path": "Programs/maps/darkblack_btb_map.sfz",
+              "articulation": "dead",
+              "opcodes": {
+                "lovel": 1,
+                "hivel": 127,
+                "ampeg_attack": 0.001,
+                "ampeg_release": 0.25,
+                "volume": 3,
+                "seq_length": 4
+              }
+            },
+            {
+              "path": "Programs/maps/darkblack_rel_map.sfz",
+              "articulation": "release",
+              "opcodes": {
+                "lovel": 1,
+                "hivel": 127,
+                "ampeg_attack": 0.01,
+                "ampeg_release": 0.25,
+                "trigger": "release",
+                "volume": 3,
+                "seq_length": 4
+              }
+            }
+          ]
+        },
+        {
+          "id": "babyblue-bass",
+          "name": "Babyblue Bass",
+          "maps": [
+            {
+              "path": "Programs/maps/babyblue_reg_f_map.sfz",
+              "articulation": "fingered",
+              "opcodes": {
+                "lovel": 1,
+                "hivel": 63,
+                "ampeg_attack": 0.001,
+                "ampeg_release": 0.25,
+                "volume": 3,
+                "amp_velcurve_63": 1
+              }
+            },
+            {
+              "path": "Programs/maps/babyblue_reg_ff_map.sfz",
+              "articulation": "fingered",
+              "opcodes": {
+                "lovel": 64,
+                "hivel": 127,
+                "ampeg_attack": 0.001,
+                "ampeg_release": 0.25,
+                "volume": 3
+              }
+            },
+            {
+              "path": "Programs/maps/babyblue_fake_ntp_f_map.sfz",
+              "articulation": "fingered",
+              "opcodes": {
+                "lovel": 1,
+                "hivel": 63,
+                "ampeg_attack": 0.001,
+                "ampeg_release": 0.25,
+                "volume": 3,
+                "amp_velcurve_63": 1
+              }
+            },
+            {
+              "path": "Programs/maps/babyblue_fake_ntp_ff_map.sfz",
+              "articulation": "fingered",
+              "opcodes": {
+                "lovel": 64,
+                "hivel": 127,
+                "ampeg_attack": 0.001,
+                "ampeg_release": 0.25,
+                "volume": 3
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "soundFont": {
+    "package": "@coderline/alphatab",
+    "version": "1.8.4",
+    "path": "dist/soundfont/sonivox.sf2",
+    "sha256": "4978cf37e7164206f2d22dc4fdf4020ffe040787210bf781e31bdc79961f59ef",
+    "license": "Apache-2.0"
+  }
+}

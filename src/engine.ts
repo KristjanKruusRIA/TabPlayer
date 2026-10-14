@@ -1,9 +1,15 @@
 import { exporter, importer, model, Settings } from '@coderline/alphatab';
-import type { BeatTarget, EditCommand, Project } from './project';
+import type { BeatTarget, EditCommand, Project, ProjectInput } from './project';
+import { isSettingsEdit } from './edit-types';
+import type { BackingSettings, ChannelMix, DocumentSettings } from './edit-types';
+import { defaultDocumentSettings, defaultMix, applySettingsEdit } from './document-settings';
+import { applyAdvancedEdit } from './editor/advanced';
+import { captureNoteLinks, restoreNoteLinks, detachNote } from './editor/links';
 
 const settings = new Settings();
 const { Score, Track, Staff, Bar, Voice, Beat, Note, MasterBar, Automation, JsonConverter } = model;
 const integer = (value: number, minimum = 0) => Number.isInteger(value) && value >= minimum;
+const supportedDurations=[-4,-2,1,2,4,8,16,32,64,128,256];
 const trackIdentities=new WeakMap<model.Track,string>();
 export const trackIdentity=(track:model.Track)=>trackIdentities.get(track) ?? `base/${track.index}`;
 
@@ -13,8 +19,9 @@ function tuningValid(tuning: number[]) {
 
 export function validateProject(value: unknown): Project {
   if (!value || typeof value !== 'object') throw new Error('Invalid project.');
-  const p = value as Project;
-  if (p.format !== 'TabPlayer' || p.schemaVersion !== 1) throw new Error('Unsupported project version.');
+  const input = value as ProjectInput;
+  if (input.format !== 'TabPlayer' || ![1,2].includes(input.schemaVersion)) throw new Error('Unsupported project version.');
+  const p:Project={...structuredClone(input),schemaVersion:2,assets:input.schemaVersion===1?{}:structuredClone(input.assets)};
   if (p.engineVersion !== '1.8.4') throw new Error('This project requires a different engine version.');
   if (!p.base || !['blank', 'file'].includes(p.base.kind) || !Array.isArray(p.edits)) throw new Error('Invalid project contents.');
   if (p.base.kind === 'blank') {
@@ -23,6 +30,11 @@ export function validateProject(value: unknown): Project {
   } else if (typeof p.base.bytesBase64 !== 'string' || typeof p.base.filename !== 'string' || !/^[a-f0-9]{64}$/i.test(p.base.sha256)) {
     throw new Error('Invalid original score data.');
   }
+  if(!p.assets || typeof p.assets!=='object' || Array.isArray(p.assets)) throw new Error('Invalid project asset metadata.');
+  for(const [id,asset] of Object.entries(p.assets)) {
+    if(!/^[a-f0-9]{64}$/i.test(id) || !asset || Object.keys(asset).some(key=>!['filename','mediaType','byteLength'].includes(key)) || typeof asset.filename!=='string' || typeof asset.mediaType!=='string' || !integer(asset.byteLength)) throw new Error('Invalid project asset metadata.');
+  }
+  for(const edit of p.edits) if(edit.type==='setBacking' && edit.backing && !p.assets[edit.backing.assetId]) throw new Error('Backing audio asset is missing.');
   return structuredClone(p);
 }
 
@@ -37,6 +49,8 @@ function appendBar(staff: model.Staff, master: model.MasterBar) {
   const voice = new Voice();
   for (let i = 0; i < master.timeSignatureNumerator; i++) voice.addBeat(rest(master.timeSignatureDenominator));
   bar.addVoice(voice); staff.addBar(bar);
+  const count=staff.bars[bar.index-1]?.voices.length ?? 1;
+  for(let i=1;i<count;i++){const extra=new Voice();const carrier=new Beat();carrier.isEmpty=true;extra.addBeat(carrier);bar.addVoice(extra);}
 }
 
 function addTrack(score: model.Score, name: string, tuning: number[], program: number) {
@@ -117,21 +131,21 @@ function removeNote(note: model.Note) {
   note.beat.removeNote(note);
 }
 
-function apply(score: model.Score, edit: EditCommand) {
+function apply(score: model.Score, edit: EditCommand, editIndex=0) {
   switch (edit.type) {
     case 'setNote': case 'removeNote': case 'setRest': case 'setDuration': case 'insertBeat': case 'deleteBeat': {
       const {staff, voice} = voiceAt(score, edit.target);
       const beat = voice.beats[edit.target.beat];
       if (edit.type === 'insertBeat') {
         if (voice.beats.length === 1 && voice.beats[0].isEmpty) voice.beats.splice(0);
-        if (edit.target.beat > voice.beats.length || ![1,2,4,8,16,32,64].includes(edit.duration) || !integer(edit.dots) || edit.dots > 3) throw new Error('Invalid beat insertion.');
+        if (edit.target.beat > voice.beats.length || !supportedDurations.includes(edit.duration) || !integer(edit.dots) || edit.dots > 3) throw new Error('Invalid beat insertion.');
         const inserted = rest(edit.duration, edit.dots); inserted.voice = voice;
         voice.beats.splice(edit.target.beat, 0, inserted); capacity(score, edit.target); break;
       }
       if (!beat) throw new Error('Select an existing beat.');
       if (edit.type === 'deleteBeat') { for (const note of [...beat.notes]) removeNote(note);voice.beats.splice(edit.target.beat, 1); break; }
       if (edit.type === 'setDuration') {
-        if (![1,2,4,8,16,32,64].includes(edit.duration) || !integer(edit.dots) || edit.dots > 3) throw new Error('Invalid rhythm.');
+        if (!supportedDurations.includes(edit.duration) || !integer(edit.dots) || edit.dots > 3) throw new Error('Invalid rhythm.');
         beat.duration = edit.duration; beat.dots = edit.dots;beat.overrideDisplayDuration=undefined;capacity(score, edit.target); break;
       }
       if (edit.type === 'setRest') { for (const note of [...beat.notes]) removeNote(note); beat.isEmpty = false; break; }
@@ -155,6 +169,7 @@ function apply(score: model.Score, edit: EditCommand) {
     case 'removeMeasure': {
       if (!integer(edit.bar) || !score.masterBars[edit.bar] || score.masterBars.length === 1) throw new Error('Keep at least one measure.');
       const tempo = score.tempo; score.masterBars.splice(edit.bar,1);
+      for(const track of score.tracks)track.lineBreaks=new Set([...(track.lineBreaks ?? [])].filter(index=>index!==edit.bar).map(index=>index>edit.bar?index-1:index));
       for (const track of score.tracks) for (const staff of track.staves) {
         for (const voice of staff.bars[edit.bar].voices) for (const beat of voice.beats) for (const note of [...beat.notes]) removeNote(note);
         staff.bars.splice(edit.bar,1);
@@ -163,7 +178,11 @@ function apply(score: model.Score, edit: EditCommand) {
       break;
     }
     case 'addTrack': addTrack(score,edit.name,edit.tuning,edit.program); break;
-    case 'removeTrack': trackAt(score,edit.track); if (score.tracks.length === 1) throw new Error('Keep at least one track.'); score.tracks.splice(edit.track,1); break;
+    case 'removeTrack': {
+      const track=trackAt(score,edit.track); if (score.tracks.length === 1) throw new Error('Keep at least one track.');
+      for(const staff of track.staves)for(const bar of staff.bars)for(const voice of bar.voices)for(const beat of voice.beats)for(const note of beat.notes)detachNote(note);
+      score.tracks.splice(edit.track,1); break;
+    }
     case 'setTuning': {
       tuningValid(edit.tuning); const track = trackAt(score,edit.track);
       if (track.isPercussion || track.staves.some(s => s.tuning.length !== edit.tuning.length)) throw new Error('Retuning must keep the current string count.');
@@ -178,24 +197,67 @@ function apply(score: model.Score, edit: EditCommand) {
       if (!Number.isFinite(edit.tempo) || edit.tempo <= 0) throw new Error('Tempo must be positive.');
       score.title = edit.title; score.artist = edit.artist;
       score.masterBars[0].tempoAutomations = [Automation.buildTempoAutomation(false,0,edit.tempo,2), ...score.masterBars[0].tempoAutomations.filter(a => a.ratioPosition !== 0)]; break;
-    default: throw new Error('Unknown edit command in project.');
+    default: if(!applyAdvancedEdit(score,edit,editIndex)) throw new Error('Unknown edit command in project.');
   }
 }
 
-export function buildScore(value: Project): model.Score {
+export interface BuiltDocument {
+  score:model.Score; settings:DocumentSettings; embeddedBacking:Uint8Array|null;
+  embeddedBackingSettings?:Omit<BackingSettings,'assetId'>; sourceMixes?:Record<string,ChannelMix>;
+}
+
+function removeBackingMeasure(backing:Pick<BackingSettings,'anchors'>|null|undefined,bar:number) {
+  if(backing) backing.anchors=backing.anchors.filter(a=>a.bar!==bar).map(a=>({...a,bar:a.bar>bar?a.bar-1:a.bar}));
+}
+
+export function buildDocument(value: ProjectInput): BuiltDocument {
   const project = validateProject(value); let score = initialScore(project);
   const identities=score.tracks.map((_,index)=>`base/${index}`);
+  const documentSettings=defaultDocumentSettings();
+  const embeddedBacking=score.backingTrack?.rawAudioFile?.slice() ?? null;
+  const embeddedBackingSettings=embeddedBacking?{
+    offsetMs:0,mix:defaultMix(),anchors:score.masterBars.flatMap((bar,index)=>(bar.syncPoints ?? []).flatMap(point=>point.syncPointValue?[{
+      bar:index,occurrence:point.syncPointValue.barOccurence,ratio:point.ratioPosition,audioMs:point.syncPointValue.millisecondOffset,
+    }]:[])),
+  }:undefined;
+  score.tracks.forEach((track,index)=>{documentSettings.mixes[identities[index]]={...defaultMix(),mute:track.playbackInfo.isMute,solo:track.playbackInfo.isSolo};});
+  const sourceMixes=structuredClone(documentSettings.mixes);
   for (const [index,edit] of project.edits.entries()) {
-    apply(score, edit);
+    if(isSettingsEdit(edit)) {applySettingsEdit(documentSettings,edit,score,identities);continue;}
+    apply(score, edit,index);
     if (edit.type==='addTrack') identities.push(`added/${index}/${JSON.stringify(edit)}`);
     if (edit.type==='removeTrack') identities.splice(edit.track,1);
-    if (['insertBeat','deleteBeat','appendMeasure','removeMeasure','addTrack','removeTrack'].includes(edit.type)) {
+    if(edit.type==='removeMeasure') {removeBackingMeasure(documentSettings.backing,edit.bar);removeBackingMeasure(embeddedBackingSettings,edit.bar);}
+    if (['insertBeat','deleteBeat','appendMeasure','removeMeasure','addTrack','removeTrack','addStaff','removeStaff','addVoice','removeVoice','copyVoice'].includes(edit.type)) {
       score = rebuild(score);
     }
   }
   // Transient conversion rebuilds derived links and caches; native files store source bytes and commands.
-  score=rebuild(score);score.tracks.forEach((track,index)=>trackIdentities.set(track,identities[index]));return score;
+  score=rebuild(score);score.tracks.forEach((track,index)=>trackIdentities.set(track,identities[index]));return {score,settings:documentSettings,embeddedBacking,embeddedBackingSettings,sourceMixes};
 }
+
+export function replayDocumentSettings(value:ProjectInput,current:BuiltDocument):BuiltDocument {
+  const project=validateProject(value);const next=defaultDocumentSettings();
+  next.mixes=structuredClone(current.sourceMixes ?? Object.fromEntries(current.score.tracks.map(track=>[trackIdentity(track),{...defaultMix(),mute:track.playbackInfo.isMute,solo:track.playbackInfo.isSolo}])));
+  // Applied history already passed candidate validation. Its earlier backing anchors
+  // refer to the measure layout at that point, before later deletions.
+  for(const edit of project.edits) switch(edit.type) {
+    case 'setTrackMix': next.mixes[edit.trackId]=structuredClone(edit.mix);break;
+    case 'setTrackSound': next.sounds[edit.trackId]=structuredClone(edit.sound);break;
+    case 'setBacking': next.backing=structuredClone(edit.backing);break;
+    case 'setPrintLayout': next.print=structuredClone(edit.layout);break;
+    case 'removeMeasure': removeBackingMeasure(next.backing,edit.bar);break;
+  }
+  return {score:current.score,settings:next,embeddedBacking:current.embeddedBacking,embeddedBackingSettings:current.embeddedBackingSettings,sourceMixes:current.sourceMixes};
+}
+
+export function effectiveAudioSettings(project:ProjectInput,built:BuiltDocument):DocumentSettings {
+  if(built.settings.backing || !built.embeddedBacking || project.edits.some(edit=>edit.type==='setBacking')) return built.settings;
+  const embedded=built.embeddedBackingSettings ?? {offsetMs:0,anchors:[],mix:defaultMix()};
+  return {...built.settings,backing:{assetId:'embedded',...structuredClone(embedded)}};
+}
+
+export function buildScore(value:ProjectInput):model.Score {return buildDocument(value).score;}
 
 function rebuild(score: model.Score) {
   // alphaTab's beat chain requires a carrier even in an empty following voice.
@@ -203,12 +265,22 @@ function rebuild(score: model.Score) {
     if (!voice.beats.length) { const empty=new Beat();empty.isEmpty=true;voice.addBeat(empty); }
     for (const beat of voice.beats) tripleDotTiming(beat);
   }
-  return JsonConverter.jsonToScore(JsonConverter.scoreToJson(score), settings);
+  const links=captureNoteLinks(score);
+  const result=JsonConverter.jsonToScore(JsonConverter.scoreToJson(score), settings);
+  restoreNoteLinks(result,links);
+  return result;
 }
 
-export function previewEdit(project: Project, edit: EditCommand) {
-  const next: Project = {...project, edits:[...project.edits,structuredClone(edit)]};
-  return {project:next, score:buildScore(next)};
+export function previewEdit(project: ProjectInput, edit: EditCommand, current?:BuiltDocument) {
+  const normalized=validateProject(project);
+  const next: Project = {...normalized, edits:[...normalized.edits,structuredClone(edit)]};
+  validateProject(next);
+  if(current && isSettingsEdit(edit)) {
+    const nextSettings=structuredClone(current.settings);
+    applySettingsEdit(nextSettings,edit,current.score,current.score.tracks.map(trackIdentity));
+    return {project:next,...current,settings:nextSettings};
+  }
+  return {project:next,...buildDocument(next)};
 }
 
 export function exportGp(score: model.Score): Uint8Array { return new exporter.Gp7Exporter().export(score, settings); }

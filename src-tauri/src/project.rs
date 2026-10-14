@@ -1,7 +1,14 @@
+use crate::assets::{AssetInfo, StoredAsset};
+pub use crate::edit_types::{EditCommand, NoteTarget};
+use crate::edit_types::{validate_tempo, validate_tuning};
 use base64::{Engine, engine::general_purpose::STANDARD};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::path::{Path, PathBuf};
+use std::{
+    collections::BTreeMap,
+    path::{Path, PathBuf},
+    sync::atomic::{AtomicU64, Ordering},
+};
 
 pub type ProjectError = String;
 
@@ -13,6 +20,18 @@ pub struct Project {
     pub engine_version: String,
     pub base: BaseDocument,
     pub edits: Vec<EditCommand>,
+    pub assets: BTreeMap<String, StoredAsset>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ProjectView {
+    pub format: String,
+    pub schema_version: u32,
+    pub engine_version: String,
+    pub base: BaseDocument,
+    pub edits: Vec<EditCommand>,
+    pub assets: BTreeMap<String, AssetInfo>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -47,108 +66,11 @@ pub struct BeatTarget {
     pub beat: u32,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(
-    tag = "type",
-    rename_all = "camelCase",
-    rename_all_fields = "camelCase",
-    deny_unknown_fields
-)]
-pub enum EditCommand {
-    SetNote {
-        target: BeatTarget,
-        string: u32,
-        fret: u32,
-    },
-    RemoveNote {
-        target: BeatTarget,
-        string: u32,
-    },
-    SetRest {
-        target: BeatTarget,
-    },
-    SetDuration {
-        target: BeatTarget,
-        duration: u32,
-        dots: u8,
-    },
-    InsertBeat {
-        target: BeatTarget,
-        duration: u32,
-        dots: u8,
-    },
-    DeleteBeat {
-        target: BeatTarget,
-    },
-    AppendMeasure,
-    RemoveMeasure {
-        bar: u32,
-    },
-    AddTrack {
-        name: String,
-        tuning: Vec<i32>,
-        program: u8,
-    },
-    RemoveTrack {
-        track: u32,
-    },
-    SetTuning {
-        track: u32,
-        tuning: Vec<i32>,
-    },
-    SetScoreInfo {
-        title: String,
-        artist: String,
-        tempo: f64,
-    },
-}
-
-fn validate_tuning(tuning: &[i32]) -> Result<(), ProjectError> {
-    if tuning.is_empty() || tuning.iter().any(|pitch| !(0..=127).contains(pitch)) {
-        return Err("Tuning must contain MIDI pitches from 0 to 127.".into());
-    }
-    Ok(())
-}
-
-fn validate_tempo(tempo: f64) -> Result<(), ProjectError> {
-    if !tempo.is_finite() || tempo <= 0.0 {
-        return Err("Tempo must be a positive number.".into());
-    }
-    Ok(())
-}
-
-impl EditCommand {
-    pub fn validate(&self) -> Result<(), ProjectError> {
-        match self {
-            Self::SetNote { string, .. } | Self::RemoveNote { string, .. } if *string == 0 => {
-                Err("Select a guitar string.".into())
-            }
-            Self::SetDuration { duration, dots, .. } | Self::InsertBeat { duration, dots, .. }
-                if ![1, 2, 4, 8, 16, 32, 64].contains(duration) || *dots > 3 =>
-            {
-                Err("Choose a supported duration and at most three dots.".into())
-            }
-            Self::AddTrack {
-                tuning, program, ..
-            } => {
-                validate_tuning(tuning)?;
-                if *program > 127 {
-                    return Err("Instrument program must be from 0 to 127.".into());
-                }
-                Ok(())
-            }
-            Self::SetTuning { tuning, .. } => validate_tuning(tuning),
-            Self::SetScoreInfo { tempo, .. } => validate_tempo(*tempo),
-            _ => Ok(()),
-        }
-    }
-}
-
 impl Project {
     pub fn blank() -> Self {
         Self {
             format: "TabPlayer".into(),
-            schema_version: 1,
+            schema_version: 2,
             engine_version: "1.8.4".into(),
             base: BaseDocument::Blank {
                 title: "Untitled".into(),
@@ -158,6 +80,7 @@ impl Project {
                 measure_count: 4,
             },
             edits: vec![],
+            assets: BTreeMap::new(),
         }
     }
 
@@ -173,7 +96,7 @@ impl Project {
     }
 
     pub fn validate(&self) -> Result<(), ProjectError> {
-        if self.format != "TabPlayer" || self.schema_version != 1 {
+        if self.format != "TabPlayer" || self.schema_version != 2 {
             return Err("This is not a supported TabPlayer project version.".into());
         }
         if self.engine_version != "1.8.4" {
@@ -210,15 +133,39 @@ impl Project {
         }
         for edit in &self.edits {
             edit.validate()?;
+            if edit
+                .asset_id()
+                .is_some_and(|id| !self.assets.contains_key(id))
+            {
+                return Err("Backing asset is missing from this project.".into());
+            }
+        }
+        for (id, asset) in &self.assets {
+            asset.validate(id)?;
         }
         Ok(())
+    }
+
+    pub fn view(&self) -> ProjectView {
+        ProjectView {
+            format: self.format.clone(),
+            schema_version: self.schema_version,
+            engine_version: self.engine_version.clone(),
+            base: self.base.clone(),
+            edits: self.edits.clone(),
+            assets: self
+                .assets
+                .iter()
+                .map(|(id, asset)| (id.clone(), asset.info().expect("validated asset")))
+                .collect(),
+        }
     }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectSnapshot {
-    pub project: Project,
+    pub project: ProjectView,
     pub can_undo: bool,
     pub can_redo: bool,
     pub dirty: bool,
@@ -228,26 +175,36 @@ pub struct ProjectSnapshot {
 pub struct ProjectSession {
     project: Project,
     cursor: usize,
-    saved: Project,
+    saved: Vec<EditCommand>,
+    asset_info: BTreeMap<String, AssetInfo>,
     path: Option<PathBuf>,
 }
 
 impl ProjectSession {
     pub fn new(project: Project, path: Option<PathBuf>) -> Result<Self, ProjectError> {
         project.validate()?;
+        let asset_info = project.view().assets;
         Ok(Self {
             cursor: project.edits.len(),
-            saved: project.clone(),
+            saved: project.edits.clone(),
+            asset_info,
             project,
             path,
         })
     }
 
     pub fn snapshot(&self) -> ProjectSnapshot {
-        let mut project = self.project.clone();
+        let mut project = ProjectView {
+            format: self.project.format.clone(),
+            schema_version: self.project.schema_version,
+            engine_version: self.project.engine_version.clone(),
+            base: self.project.base.clone(),
+            edits: self.project.edits.clone(),
+            assets: self.asset_info.clone(),
+        };
         project.edits.truncate(self.cursor);
         ProjectSnapshot {
-            dirty: project != self.saved,
+            dirty: project.edits != self.saved,
             project,
             can_undo: self.cursor > 0,
             can_redo: self.cursor < self.project.edits.len(),
@@ -256,7 +213,38 @@ impl ProjectSession {
     }
 
     pub fn apply_edit(&mut self, command: EditCommand) -> Result<ProjectSnapshot, ProjectError> {
+        self.apply_edit_with_asset(command, None)
+    }
+
+    pub fn apply_edit_with_asset(
+        &mut self,
+        command: EditCommand,
+        asset: Option<(String, StoredAsset)>,
+    ) -> Result<ProjectSnapshot, ProjectError> {
         command.validate()?;
+        let staged = if let Some((id, asset)) = asset {
+            asset.validate(&id)?;
+            if command.asset_id() != Some(id.as_str()) {
+                return Err("The edit must reference its staged asset.".into());
+            }
+            let info = asset.info()?;
+            Some((id, asset, info))
+        } else {
+            None
+        };
+        if let Some(id) = command.asset_id() {
+            if !self.project.assets.contains_key(id)
+                && staged
+                    .as_ref()
+                    .is_none_or(|(staged_id, _, _)| staged_id != id)
+            {
+                return Err("Backing asset is missing from this project.".into());
+            }
+        }
+        if let Some((id, asset, info)) = staged {
+            self.asset_info.entry(id.clone()).or_insert(info);
+            self.project.assets.entry(id).or_insert(asset);
+        }
         self.project.edits.truncate(self.cursor);
         self.project.edits.push(command);
         self.cursor += 1;
@@ -280,11 +268,147 @@ impl ProjectSession {
     }
 
     pub fn mark_saved(&mut self, path: PathBuf) {
-        self.saved = self.snapshot().project;
+        self.saved = self.project.edits[..self.cursor].to_vec();
         self.path = Some(path);
+    }
+
+    pub fn stored_project(&self) -> Project {
+        let edits = self.project.edits[..self.cursor].to_vec();
+        let assets = self
+            .project
+            .assets
+            .iter()
+            .filter(|(id, _)| {
+                edits
+                    .iter()
+                    .any(|edit| edit.asset_id() == Some(id.as_str()))
+            })
+            .map(|(id, asset)| (id.clone(), asset.clone()))
+            .collect();
+        Project {
+            format: self.project.format.clone(),
+            schema_version: self.project.schema_version,
+            engine_version: self.project.engine_version.clone(),
+            base: self.project.base.clone(),
+            edits,
+            assets,
+        }
+    }
+
+    pub fn asset_bytes(&self, id: &str) -> Result<Vec<u8>, ProjectError> {
+        self.project
+            .assets
+            .get(id)
+            .ok_or_else(|| "Backing asset is missing from this project.".to_string())?
+            .bytes()
     }
 
     pub fn path(&self) -> Option<&Path> {
         self.path.as_deref()
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DocumentCandidate {
+    pub project: ProjectView,
+    pub path: Option<String>,
+    pub token: String,
+}
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StagedAsset {
+    pub token: String,
+    pub asset_id: String,
+    pub info: AssetInfo,
+}
+
+#[derive(Default)]
+pub struct CandidateStore {
+    documents: BTreeMap<String, (Project, Option<PathBuf>)>,
+    assets: BTreeMap<String, (String, StoredAsset)>,
+}
+
+fn candidate_token() -> String {
+    static NEXT: AtomicU64 = AtomicU64::new(1);
+    format!(
+        "candidate-{}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    )
+}
+
+impl CandidateStore {
+    pub fn stage_document(
+        &mut self,
+        project: Project,
+        path: Option<PathBuf>,
+    ) -> Result<DocumentCandidate, ProjectError> {
+        project.validate()?;
+        let token = candidate_token();
+        let candidate = DocumentCandidate {
+            project: project.view(),
+            path: path
+                .as_ref()
+                .map(|path| path.to_string_lossy().into_owned()),
+            token: token.clone(),
+        };
+        self.documents.insert(token, (project, path));
+        Ok(candidate)
+    }
+    pub fn commit_document(
+        &mut self,
+        token: &str,
+        session: &mut ProjectSession,
+    ) -> Result<ProjectSnapshot, ProjectError> {
+        let (project, path) = self
+            .documents
+            .get(token)
+            .ok_or("Document candidate has expired.")?;
+        let replacement = ProjectSession::new(project.clone(), path.clone())?;
+        let snapshot = replacement.snapshot();
+        *session = replacement;
+        self.documents.clear();
+        self.assets.clear();
+        Ok(snapshot)
+    }
+    pub fn cancel_document(&mut self, token: &str) -> bool {
+        self.documents.remove(token).is_some()
+    }
+    pub fn stage_asset(&mut self, asset: StoredAsset) -> Result<StagedAsset, ProjectError> {
+        let asset_id = asset.id()?;
+        asset.validate(&asset_id)?;
+        let token = candidate_token();
+        let candidate = StagedAsset {
+            info: asset.info()?,
+            asset_id: asset_id.clone(),
+            token: token.clone(),
+        };
+        self.assets.insert(token, (asset_id, asset));
+        Ok(candidate)
+    }
+    pub fn commit_edit(
+        &mut self,
+        token: Option<&str>,
+        command: EditCommand,
+        session: &mut ProjectSession,
+    ) -> Result<ProjectSnapshot, ProjectError> {
+        let asset = match token {
+            Some(token) => Some(
+                self.assets
+                    .get(token)
+                    .ok_or("Asset candidate has expired.")?
+                    .clone(),
+            ),
+            None => None,
+        };
+        let snapshot = session.apply_edit_with_asset(command, asset)?;
+        if let Some(token) = token {
+            self.assets.remove(token);
+        }
+        Ok(snapshot)
+    }
+    pub fn cancel_asset(&mut self, token: &str) -> bool {
+        self.assets.remove(token).is_some()
     }
 }

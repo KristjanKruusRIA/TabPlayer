@@ -7,8 +7,8 @@ const manifest=new URL('../.analysis/user-files/manifest.json',import.meta.url);
 interface Entry {file:string;source:string;sha256:string;trackCount:number;meters:string[];tunings:number[][]}
 const entries:Entry[]=existsSync(manifest)?JSON.parse(readFileSync(manifest,'utf8').replace(/^\uFEFF/,'')):[];
 
-it.skipIf(!entries.length)('checks private score import/edit/reopen/export against independent GPIF fields',()=>{
-  for(const entry of entries) {
+it.skipIf(!entries.length).each(entries.length?entries:[null])('checks private score %# import/edit/reopen/export against independent GPIF fields',entry=>{
+    if(!entry) return;
     const bytes=readFileSync(new URL(`../.analysis/user-files/${entry.file}`,import.meta.url));
     const project:Project={...blankProject(),base:{kind:'file',filename:entry.file,bytesBase64:bytes.toString('base64'),sha256:entry.sha256}};
     const score=buildScore(project);
@@ -30,5 +30,4 @@ it.skipIf(!entries.length)('checks private score import/edit/reopen/export again
     expect(exportScore.masterBars.map(b=>`${b.timeSignatureNumerator}/${b.timeSignatureDenominator}`)).toEqual(entry.meters);
     expect(exportScore.tracks[target.track].staves[0].bars[target.bar].voices[target.voice].beats[target.beat].notes.find(n=>n.string===note.string)?.fret).toBe(note.fret+1);
     expect(createHash('sha256').update(readFileSync(entry.source)).digest('hex')).toBe(entry.sha256);
-  }
 },30000);

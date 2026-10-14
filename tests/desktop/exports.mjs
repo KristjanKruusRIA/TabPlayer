@@ -1,0 +1,39 @@
+import assert from 'node:assert/strict';
+import { readFile,mkdir,stat } from 'node:fs/promises';
+import { join } from 'node:path';
+import { launch,stop,connect,directory } from './harness.mjs';
+await mkdir(directory,{recursive:true});
+const runId=Date.now();
+for(const format of ['midi','pdf','wav','stems']) {
+  const destination=join(directory,`export-${runId}-${format}${format==='midi'?'.mid':format==='stems'?'':`.${format}`}`);
+  const id=launch({TABPLAYER_TEST_EXPORT:destination});let browser;
+  try {
+    browser=await connect();const page=browser.contexts()[0].pages()[0];
+    await page.getByLabel('Fret',{exact:true}).fill('7');await page.getByRole('button',{name:'Set note',exact:true}).click();
+    await page.waitForFunction(()=>!document.querySelector('nav button')?.disabled);
+    const snapshot=()=>page.evaluate(()=>window.__TAURI_INTERNALS__.invoke('project_snapshot'));
+    const before=await snapshot();assert.equal(before.dirty,true);
+    await page.getByRole('button',{name:/^Export(?: score)?$/,exact:true}).click();
+    const dialog=page.getByRole('dialog',{name:'Export score'});await dialog.getByLabel('Export format').selectOption(format);
+    if(format==='wav'||format==='stems'){await dialog.getByLabel('Bit depth').selectOption('24');await dialog.getByLabel('Effect tail (seconds)').fill('0.1');}
+    await dialog.getByRole('button',{name:'Export',exact:true}).click();
+    const deadline=Date.now()+120000;let exists=false;
+    while(Date.now()<deadline){
+      try{await stat(destination);exists=true;break;}catch{}
+      const progress=page.getByRole('progressbar',{name:'Export progress'});
+      if(await progress.count()){
+        const jobId=await progress.getAttribute('data-job-id');
+        if(jobId){const status=await page.evaluate(id=>window.__TAURI_INTERNALS__.invoke('export_status',{id}),jobId);assert.notEqual(status?.status,'failed',status?.error??'Native export failed.');assert.notEqual(status?.status,'cancelled','Export unexpectedly cancelled.');}
+      }
+      await new Promise(r=>setTimeout(r,200));
+    }
+    assert.ok(exists,`Missing ${format} output; UI: ${await page.locator('body').innerText()}`);
+    assert.deepEqual(await snapshot(),before,'Export must preserve document history, source bytes and dirty state.');
+    if(format==='midi'){const bytes=await readFile(destination);assert.equal(bytes.subarray(0,4).toString(),'MThd');assert.equal(bytes.readUInt16BE(12),960);}
+    if(format==='pdf'){assert.equal((await readFile(destination)).subarray(0,5).toString(),'%PDF-');}
+    if(format==='wav'){const b=await readFile(destination);assert.equal(b.subarray(0,4).toString(),'RIFF');assert.equal(b.readUInt16LE(22),2);assert.equal(b.readUInt32LE(24),48000);assert.equal(b.readUInt16LE(34),24);assert.equal(b.readUInt32LE(40)+44,b.length);assert.ok(b.subarray(44).some(n=>n!==0));}
+    if(format==='stems'){const m=JSON.parse(await readFile(join(destination,'manifest.json'),'utf8'));assert.ok(m.frames>0);assert.ok(m.tracks.some(t=>t.kind==='mix'));for(const t of m.tracks){assert.equal(t.filename.includes('/'),false);assert.equal(t.filename.includes('\\'),false);const b=await readFile(join(destination,t.filename));assert.equal(b.readUInt32LE(40)/(2*3),m.frames);}}
+    await page.screenshot({path:join(directory,`exports-${format}.png`)});
+    console.log(`${format}: native destination, valid output and immutable dirty snapshot passed.`);
+  }finally{if(browser)await browser.close();stop(id);}
+}

@@ -1,6 +1,6 @@
 # TabPlayer deferred-feature expansion
 
-Date: 2026-10-14. Status: architecture direction approved; written specifications awaiting user review.
+Date: 2026-10-14. Status: approved by the user. Subsequent scope design and plan reviews are auto-approved under the updated goal.
 
 ## Intended result
 

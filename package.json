@@ -1,15 +1,17 @@
 {
   "name": "tabplayer",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "scripts": {
-    "predev": "node scripts/copy-assets.mjs",
-    "prebuild": "node scripts/copy-assets.mjs && node scripts/copy-notices.mjs",
+    "predev": "node scripts/copy-assets.mjs && node scripts/prepare-fonts.mjs && node scripts/prepare-audio.mjs",
+    "prebuild": "node scripts/copy-assets.mjs && node scripts/prepare-fonts.mjs && node scripts/prepare-audio.mjs && node scripts/copy-notices.mjs",
     "pretest": "node scripts/fetch-fixtures.mjs",
     "dev": "vite --host 127.0.0.1 --port 1420 --strictPort",
     "build": "tsc --noEmit && vite build",
-    "test": "vitest run",
+    "test": "node --test scripts/prepare-audio.test.mjs scripts/verify-packaged-resources.test.mjs && vitest run",
+    "prepare:audio": "node scripts/prepare-audio.mjs",
+    "test:audio-assets": "node --test scripts/prepare-audio.test.mjs",
     "typecheck": "tsc --noEmit",
     "tauri": "tauri"
   },

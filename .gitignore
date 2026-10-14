@@ -7,6 +7,8 @@ public/alphatab/
 public/font/
 public/soundfont/
 public/licenses/
+public/export-fonts/
+src-tauri/resources/audio/
 src-tauri/icons/android/
 src-tauri/icons/ios/
 src-tauri/icons/StoreLogo.png

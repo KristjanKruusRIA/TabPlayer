@@ -1,0 +1,7 @@
+{
+  "schemaVersion": 1,
+  "fonts": [
+    {"filename":"Bravura.otf","family":"Bravura","license":"OFL-1.1","licenseFile":"Bravura-OFL.txt","source":"@coderline/alphatab@1.8.4 font/Bravura.otf","sha256":"883a86a8cfe77db6597b8ef56b9cf6efb079b0631a283a323945a41f976fb483"},
+    {"filename":"NotoSans-Regular.ttf","family":"Noto Sans","license":"OFL-1.1","licenseFile":"NotoSans-OFL.txt","source":"https://raw.githubusercontent.com/notofonts/noto-fonts/ffebf8c1ee449e544955a7e813c54f9b73848eac/hinted/ttf/NotoSans/NotoSans-Regular.ttf","revision":"ffebf8c1ee449e544955a7e813c54f9b73848eac","sha256":"b85c38ecea8a7cfb39c24e395a4007474fa5a4fc864f6ee33309eb4948d232d5"}
+  ]
+}

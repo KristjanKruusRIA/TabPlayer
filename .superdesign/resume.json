@@ -16,14 +16,14 @@
       },
       "drafts": {
         "441a4347-3b6b-42db-9274-8af38eea29ca": {
-          "title": "TabPlayer",
-          "currentVersion": 1,
+          "title": "TabPlayer - Refined Inspector & Track Settings",
+          "currentVersion": 2,
           "visualDirection": "slate shell, cream notation, lime accents"
         }
       },
       "activeDraftId": "441a4347-3b6b-42db-9274-8af38eea29ca",
       "targetKind": "new-target",
-      "updatedAt": "2026-10-14T14:02:00.2984730Z"
+      "updatedAt": "2026-10-14T17:57:19.8607754Z"
     }
   }
 }

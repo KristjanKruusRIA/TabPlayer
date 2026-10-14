@@ -1,0 +1,174 @@
+name: Desktop tests and unsigned packages
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      upload_packages:
+        description: Retain large unsigned installers for one day (uses artifact storage)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  RUSTUP_TOOLCHAIN: 1.85.1
+  CARGO_BUILD_JOBS: 2
+  CARGO_INCREMENTAL: 0
+  CARGO_PROFILE_DEV_DEBUG: 0
+  CARGO_PROFILE_TEST_DEBUG: 0
+  CARGO_PROFILE_RELEASE_STRIP: symbols
+
+jobs:
+  prepare-audio:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    outputs:
+      cache-key: ${{ steps.key.outputs.value }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24.20.0
+          cache: npm
+      - run: npm ci
+      - id: key
+        run: echo "value=audio-v1-${{ hashFiles('assets/audio/**', 'scripts/prepare-audio.mjs') }}" >> "$GITHUB_OUTPUT"
+      # One OS-independent recording cache; no raw downloads or Cargo targets.
+      - id: audio-cache
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: src-tauri/resources/audio
+          key: ${{ steps.key.outputs.value }}
+          enableCrossOsArchive: true
+      - if: steps.audio-cache.outputs.cache-hit != 'true'
+        run: npm run prepare:audio
+      - name: Verify complete prepared bank without downloading
+        run: node scripts/prepare-audio.mjs --offline
+
+  desktop:
+    needs: prepare-audio
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2022
+            bundles: msi,nsis
+          - os: macos-15
+            bundles: app,dmg
+          - os: ubuntu-24.04
+            bundles: deb,appimage
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24.20.0
+          cache: npm
+      - name: Linux native build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev libasound2-dev patchelf
+      - name: Install and verify declared Rust MSRV
+        run: |
+          rustup toolchain install 1.85.1 --profile minimal --component rustfmt
+          rustc --version
+          cargo --version
+      - run: npm ci
+      - uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: src-tauri/resources/audio
+          key: ${{ needs.prepare-audio.outputs.cache-key }}
+          enableCrossOsArchive: true
+          fail-on-cache-miss: true
+      - name: Verify restored offline recordings and prepare fonts
+        run: |
+          node scripts/prepare-audio.mjs --offline
+          node scripts/prepare-fonts.mjs
+      - name: Frontend and resource tests
+        run: |
+          npm test
+          npm run typecheck
+      - name: Native core, rendering, persistence and export tests
+        run: |
+          cargo test --locked --manifest-path src-tauri/Cargo.toml
+          cargo test --locked --manifest-path src-tauri/Cargo.toml --test audio_resources selected_real_100bar_fourtrack_resource_budget -- --ignored --nocapture
+          cargo fmt --manifest-path src-tauri/Cargo.toml --check
+      - name: Build unsigned shipping packages with locked dependencies
+        # No desktop-test feature, signing identity, updater key, or test server.
+        run: npm run tauri -- build --bundles ${{ matrix.bundles }} -- --locked
+      - name: Verify actual MSI and NSIS contents offline
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $taskMsi = Get-ChildItem -LiteralPath 'src-tauri/target/release/bundle/msi' -Filter '*.msi' | Select-Object -First 1
+          $taskRoot = Join-Path $env:GITHUB_WORKSPACE '.analysis/ci/msi'
+          New-Item -ItemType Directory -Force -Path $taskRoot | Out-Null
+          $taskArguments = @('/a', "`"$($taskMsi.FullName)`"", '/qn', "TARGETDIR=`"$taskRoot`"", 'REBOOT=ReallySuppress')
+          $taskProcess = Start-Process msiexec.exe -ArgumentList $taskArguments -Wait -PassThru -WindowStyle Hidden
+          if ($taskProcess.ExitCode -ne 0) { throw "MSI extraction failed: $($taskProcess.ExitCode)" }
+          node scripts/verify-packaged-resources.mjs --package-root $taskRoot --bundle-root src-tauri/target/release/bundle --formats msi,exe --report .analysis/ci/msi-resources.json
+          if ($LASTEXITCODE -ne 0) { throw 'MSI resource verification failed' }
+          $taskNsis = Get-ChildItem -LiteralPath 'src-tauri/target/release/bundle/nsis' -Filter '*.exe' | Select-Object -First 1
+          $taskNsisRoot = Join-Path $env:GITHUB_WORKSPACE '.analysis/ci/nsis'
+          & "$env:ProgramFiles/7-Zip/7z.exe" x $taskNsis.FullName "-o$taskNsisRoot" -y | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw 'NSIS extraction failed' }
+          node scripts/verify-packaged-resources.mjs --package-root $taskNsisRoot --report .analysis/ci/nsis-resources.json
+          if ($LASTEXITCODE -ne 0) { throw 'NSIS resource verification failed' }
+      - name: Verify actual macOS disk image contents offline
+        if: runner.os == 'macOS'
+        run: |
+          image=$(find src-tauri/target/release/bundle/dmg -name '*.dmg' -print -quit)
+          mount="$RUNNER_TEMP/tabplayer-dmg"
+          mkdir -p "$mount"
+          hdiutil attach "$image" -readonly -nobrowse -mountpoint "$mount"
+          trap 'hdiutil detach "$mount"' EXIT
+          app=$(find "$mount" -maxdepth 1 -name '*.app' -print -quit)
+          node scripts/verify-packaged-resources.mjs --package-root "$app" --bundle-root src-tauri/target/release/bundle --formats dmg --report .analysis/ci/dmg-resources.json
+      - name: Verify actual Debian and AppImage contents offline
+        if: runner.os == 'Linux'
+        run: |
+          deb=$(find src-tauri/target/release/bundle/deb -name '*.deb' -print -quit)
+          mkdir -p .analysis/ci/deb .analysis/ci/appimage
+          dpkg-deb --extract "$deb" .analysis/ci/deb
+          node scripts/verify-packaged-resources.mjs --package-root .analysis/ci/deb --bundle-root src-tauri/target/release/bundle --formats deb,appimage --report .analysis/ci/deb-resources.json
+          # Reclaim only this job's verified extraction before another 1.6 GB copy.
+          rm -r -- .analysis/ci/deb
+          appimage=$(find "$GITHUB_WORKSPACE/src-tauri/target/release/bundle/appimage" -name '*.AppImage' -print -quit)
+          chmod +x "$appimage"
+          (cd .analysis/ci/appimage && "$appimage" --appimage-extract >/dev/null)
+          node scripts/verify-packaged-resources.mjs --package-root .analysis/ci/appimage/squashfs-root --report .analysis/ci/appimage-resources.json
+      - name: Retain small package hashes and offline-resource evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: verification-${{ matrix.os }}-${{ github.sha }}
+          path: .analysis/ci/*-resources.json
+          include-hidden-files: true
+          retention-days: 7
+          if-no-files-found: warn
+      - name: Retain large unsigned installers only when requested
+        if: github.event_name == 'workflow_dispatch' && inputs.upload_packages
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: unsigned-packages-${{ matrix.os }}-${{ github.sha }}
+          path: |
+            src-tauri/target/release/bundle/**/*.msi
+            src-tauri/target/release/bundle/**/*.exe
+            src-tauri/target/release/bundle/**/*.dmg
+            src-tauri/target/release/bundle/**/*.deb
+            src-tauri/target/release/bundle/**/*.AppImage
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: error

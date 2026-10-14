@@ -1,21 +1,49 @@
 // @vitest-environment jsdom
 import { afterEach, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { App } from './App';
 import { DocumentController } from './controller';
-import { blankProject, type EditCommand } from './project';
+import { blankProject, type EditCommand, type Project, type AssetInfo } from './project';
 import type { NativeBridge } from './bridge';
+import type { BuiltDocument } from './engine';
+import { defaultMix } from './document-settings';
+
+const integration=vi.hoisted(()=>({loadDocument:vi.fn(),beforeScoreChange:vi.fn(),destroy:vi.fn(),stageBacking:vi.fn(),commits:vi.fn(),exportBusy:false,exportRun:vi.fn(async()=>true),exportCancel:vi.fn(async()=>{})}));
+vi.mock('./audio/bridge',()=>({nativeAudioBridge:{stageBacking:integration.stageBacking}}));
+vi.mock('./export/useExportCoordinator',()=>({useExportCoordinator:()=>({busy:integration.exportBusy,progress:undefined,run:integration.exportRun,cancel:integration.exportCancel})}));
+vi.mock('./audio/NativePlaybackController',()=>({NativePlaybackController:class {
+  built:BuiltDocument|null=null;state={ready:true,playing:false,time:0,endTime:4000,measure:0,speed:100,metronome:false,error:null};
+  constructor(private options:{onEdit:(command:EditCommand)=>void|Promise<void>}){}
+  subscribe=()=>()=>{};getState=()=>this.state;
+  loadDocument=async(project:unknown,built:BuiltDocument,track:number)=>{this.built=built;integration.loadDocument(project,built,track);};
+  beforeScoreChange=integration.beforeScoreChange;destroy=integration.destroy;
+  play=vi.fn();pause=vi.fn();stop=vi.fn();seekToMeasure=vi.fn();setSpeed=vi.fn();setLoop=vi.fn();clearLoop=vi.fn();setMetronome=vi.fn();
+  devices=async()=>[];deviceId=()=>null;selectDevice=vi.fn();backingDurationMs=()=>undefined;
+  mix=(track:{index:number})=>{const value=this.built?.settings.mixes[`base/${track.index}`];return value?{mute:value.mute,solo:value.solo,volume:value.gain,pan:value.pan}:undefined;};
+  setMix=(track:number,patch:object)=>this.options.onEdit({type:'setTrackMix',trackId:`base/${track}`,mix:{...(this.built?.settings.mixes[`base/${track}`]??defaultMix()),...patch}});
+  setMute=(track:number,mute:boolean)=>this.setMix(track,{mute});setSolo=(track:number,solo:boolean)=>this.setMix(track,{solo});setTrackVolume=(track:number,gain:number)=>this.setMix(track,{gain});setPan=(track:number,pan:number)=>this.setMix(track,{pan});
+}}));
 
 vi.mock('./ScoreView',()=>({ScoreView:({onSelect}: {onSelect: (target: unknown, string: number)=>void}) =>
-  <button onClick={()=>onSelect({track:0,staff:0,bar:0,voice:0,beat:1},5)}>Select rendered note</button>}));
-afterEach(cleanup);
+  <><button onClick={()=>onSelect({track:0,staff:0,bar:0,voice:0,beat:1},5)}>Select rendered note</button>
+    {[
+      {label:'fractional beat',field:'beat',value:0.5,string:6},
+      {label:'negative staff',field:'staff',value:-1,string:6},
+      {label:'non-finite measure',field:'bar',value:Infinity,string:6},
+      {label:'non-finite voice',field:'voice',value:NaN,string:6},
+      {label:'fractional string',field:'beat',value:0,string:1.5},
+    ].map(({label,field,value,string})=><button key={label} onClick={()=>onSelect({track:0,staff:0,bar:0,voice:0,beat:0,[field]:value},string)}>Select {label}</button>)}
+  </>}));
+afterEach(()=>{cleanup();vi.clearAllMocks();integration.exportBusy=false;});
 
-async function setup() {
-  let edits: EditCommand[]=[]; let cursor=0;
-  const snapshot=()=>({project:{...blankProject(),edits:edits.slice(0,cursor)},canUndo:cursor>0,canRedo:cursor<edits.length,dirty:cursor>0,path:null});
-  const bridge: NativeBridge={snapshot:async()=>snapshot(),readDocument:async()=>null,replaceProject:async()=>snapshot(),
-    applyEdit:async command=>{edits=edits.slice(0,cursor);edits.push(command);cursor++;return snapshot();},
+async function setup(initial=blankProject(),openProject?:Project) {
+  let edits: EditCommand[]=[...initial.edits]; let cursor=edits.length;let assets:Record<string,AssetInfo>={...initial.assets};
+  const snapshot=()=>({project:{...initial,assets,edits:edits.slice(0,cursor)},canUndo:cursor>0,canRedo:cursor<edits.length,dirty:cursor>0,path:null});
+  const bridge: NativeBridge={snapshot:async()=>snapshot(),readDocument:async()=>openProject?{project:openProject,path:'saved.tabplayer',token:'opened-document'}:null,
+    createBlankDocument:async()=>({project:blankProject(),path:null,token:'new-document'}),
+    replaceProject:async token=>{initial=token==='opened-document'?openProject!:blankProject();edits=[...initial.edits];assets={...initial.assets};cursor=edits.length;return snapshot();},
+    applyEdit:async(command,assetToken)=>{integration.commits(command,assetToken);if(assetToken&&command.type==='setBacking'&&command.backing)assets={...assets,[command.backing.assetId]:{filename:'backing.wav',mediaType:'audio/wav',byteLength:20}};edits=edits.slice(0,cursor);edits.push(command);cursor++;return snapshot();},
     undo:async()=>{cursor--;return snapshot();},redo:async()=>{cursor++;return snapshot();},
     saveProject:async()=>null,exportGp:async()=>false,askUnsaved:async()=> 'discard',confirmExport:async()=>false};
   const controller=await DocumentController.create(bridge); render(<App controller={controller}/>); return controller;
@@ -32,6 +60,39 @@ it('selects rendered notes and enters frets on empty strings to form chords',asy
   await waitFor(()=>expect(currentBeat(c,1).notes).toHaveLength(2));
   click('Remove note');await waitFor(()=>expect(currentBeat(c,1).notes).toHaveLength(1));
   click('Make rest');await waitFor(()=>expect(currentBeat(c,1).isRest).toBe(true));
+});
+it('persists selected track sound and mixer without replacing the score identity',async()=>{
+  const c=await setup(),score=c.getState().score;change('Sound source','green-guitar');await waitFor(()=>expect(c.getState().settings.sounds['base/0'].voiceId).toBe('green-guitar'));expect(c.getState().score).toBe(score);
+  fireEvent.click(screen.getByLabelText('Mute'));await waitFor(()=>expect(c.getState().settings.mixes['base/0'].mute).toBe(true));expect(c.getState().score).toBe(score);
+  expect(integration.beforeScoreChange).not.toHaveBeenCalled();expect(integration.loadDocument).toHaveBeenLastCalledWith(c.getState().snapshot.project,expect.objectContaining({score,settings:c.getState().settings}),0);
+});
+it('loads documents into native playback and opening does not reset saved mix',async()=>{
+  const c=await setup();await waitFor(()=>expect(integration.loadDocument).toHaveBeenCalled());fireEvent.click(screen.getByLabelText('Mute'));await waitFor(()=>expect(c.getState().settings.mixes['base/0'].mute).toBe(true));
+  click('New');await waitFor(()=>expect(c.getState().snapshot.project.edits).toHaveLength(0));expect(screen.getByLabelText('Mute')).not.toBeChecked();expect(integration.loadDocument).toHaveBeenLastCalledWith(c.getState().snapshot.project,expect.objectContaining({score:c.getState().score}),0);
+});
+it('opens the export dialog and persists print layout through the existing history',async()=>{
+  const c=await setup();click('Export score');expect(screen.getByRole('dialog',{name:'Export score'})).toBeInTheDocument();change('Export format','pdf');change('Paper','Letter');click('Export');await waitFor(()=>expect(c.getState().settings.print.paper).toBe('Letter'));await waitFor(()=>expect(integration.exportRun).toHaveBeenCalledWith(expect.objectContaining({format:'pdf',layout:expect.objectContaining({paper:'Letter'})})));await waitFor(()=>expect(screen.queryByRole('dialog',{name:'Export score'})).not.toBeInTheDocument());
+});
+it('opens saved mix and recorded voice without creating reset edits',async()=>{
+  const saved={...blankProject(),edits:[{type:'setTrackMix' as const,trackId:'base/0',mix:{gain:.4,pan:.2,mute:true,solo:false}}]};const c=await setup(blankProject(),saved);click('Open');await waitFor(()=>expect(c.getState().settings.mixes['base/0'].mute).toBe(true));await waitFor(()=>expect(screen.getByLabelText('Mute')).toBeChecked());expect(c.getState().snapshot.project.edits).toHaveLength(1);expect(integration.commits).not.toHaveBeenCalled();
+});
+it('stages backing and commits its token with the finite backing command',async()=>{
+  const assetId='a'.repeat(64);integration.stageBacking.mockResolvedValueOnce({assetId,token:'staged-audio',info:{filename:'backing.wav',mediaType:'audio/wav',byteLength:20},durationMs:1000});const c=await setup();const score=c.getState().score;
+  click('Import backing');await waitFor(()=>expect(c.getState().settings.backing?.assetId).toBe(assetId));expect(integration.commits).toHaveBeenLastCalledWith({type:'setBacking',backing:{assetId,offsetMs:0,anchors:[],mix:defaultMix()}},'staged-audio');expect(c.getState().snapshot.project.assets[assetId].byteLength).toBe(20);expect(c.getState().score).toBe(score);
+});
+it('default print export leaves exact history unchanged',async()=>{
+  const c=await setup(),before=c.getState().snapshot.project;click('Export score');change('Export format','pdf');click('Export');await waitFor(()=>expect(integration.exportRun).toHaveBeenCalled());expect(c.getState().snapshot.project).toEqual(before);expect(integration.commits).not.toHaveBeenCalled();
+});
+it('cancels an active export through the coordinator and closes the dialog',async()=>{
+  let finish:(value:boolean)=>void=()=>{};integration.exportRun.mockImplementationOnce(()=>new Promise<boolean>(resolve=>{finish=resolve;}));const c=await setup();click('Export score');click('Export');await waitFor(()=>expect(integration.exportRun).toHaveBeenCalled());integration.exportBusy=true;
+  change('Title','Export cancellation');click('Apply score info');await waitFor(()=>expect(c.getState().score.title).toBe('Export cancellation'));click('Cancel export');await waitFor(()=>expect(integration.exportCancel).toHaveBeenCalled());await waitFor(()=>expect(screen.queryByRole('dialog',{name:'Export score'})).not.toBeInTheDocument());finish(false);
+});
+it('shows native export failure inside the open modal without a duplicate background alert',async()=>{
+  integration.exportRun.mockRejectedValueOnce(new Error('Native export failed.'));await setup();click('Export score');click('Export');const dialog=screen.getByRole('dialog',{name:'Export score'});
+  await waitFor(()=>expect(within(dialog).getByRole('alert')).toHaveTextContent('Native export failed.'));expect(screen.getAllByRole('alert')).toHaveLength(1);expect(within(dialog).getByRole('button',{name:'Export'})).toBeEnabled();
+});
+it('focuses export options and Escape restores the toolbar opener',async()=>{
+  await setup();const opener=screen.getByRole('button',{name:'Export score'});opener.focus();fireEvent.click(opener);const format=screen.getByLabelText('Export format');expect(format).toHaveFocus();fireEvent.keyDown(format,{key:'Escape'});await waitFor(()=>expect(screen.queryByRole('dialog',{name:'Export score'})).not.toBeInTheDocument());expect(opener).toHaveFocus();
 });
 it('edits rhythm, reports overflow, and supports undo and redo',async()=>{
   const c=await setup();change('Duration','2');click('Apply rhythm');
@@ -67,4 +128,48 @@ it('inserts a beat into an empty voice and changes score information and tuning'
   await waitFor(()=>expect(c.getState().score.title).toBe('My study'));
   change('Tuning (MIDI, high to low)','64,59,55,50,45,38');click('Apply tuning');
   await waitFor(()=>expect(c.getState().score.tracks[0].staves[0].tuning.at(-1)).toBe(38));
+});
+
+it('refreshes_fret_after_undo_with_same_indices',async()=>{
+  const c=await setup();change('Fret','3');click('Set note');
+  await waitFor(()=>expect(currentBeat(c).notes[0]?.fret).toBe(3));
+  change('Fret','7');click('Set note');
+  await waitFor(()=>expect(currentBeat(c).notes[0]?.fret).toBe(7));
+  click('Undo');
+  await waitFor(()=>expect(currentBeat(c).notes[0]?.fret).toBe(3));
+  await waitFor(()=>expect(screen.getByLabelText('Fret')).toHaveValue(3));
+  expect(screen.getByLabelText('Measure')).toHaveValue(1);
+  expect(screen.getByLabelText('Beat')).toHaveValue(1);
+  click('Redo');
+  await waitFor(()=>expect(screen.getByLabelText('Fret')).toHaveValue(7));
+});
+
+it('refreshes fret after replacing a document at the same indices',async()=>{
+  const c=await setup();change('Fret','9');click('Set note');
+  await waitFor(()=>expect(currentBeat(c).notes[0]?.fret).toBe(9));
+  click('New');
+  await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(0));
+  await waitFor(()=>expect(screen.getByLabelText('Fret')).toHaveValue(0));
+});
+
+it('preserves selection when a rendered selection contains invalid indices',async()=>{
+  await setup();click('Select rendered note');
+  for (const label of ['fractional beat','negative staff','non-finite measure','non-finite voice','fractional string']) {
+    click(`Select ${label}`);
+    expect(screen.getByLabelText('Measure')).toHaveValue(1);
+    expect(screen.getByLabelText('Beat')).toHaveValue(2);
+    expect(screen.getByLabelText('String')).toHaveValue('5');
+  }
+});
+
+it('navigates backwards into the insertion location of an empty voice',async()=>{
+  const c=await setup();
+  for(let i=0;i<4;i++){click('Delete beat');await waitFor(()=>expect(c.getState().snapshot.project.edits).toHaveLength(i+1));}
+  const workspace=screen.getByRole('region',{name:'Score workspace'});
+  fireEvent.keyDown(workspace,{key:'ArrowRight'});
+  expect(screen.getByLabelText('Measure')).toHaveValue(2);
+  fireEvent.keyDown(workspace,{key:'ArrowLeft'});
+  expect(screen.getByLabelText('Measure')).toHaveValue(1);
+  expect(screen.getByLabelText('Beat')).toHaveValue(1);
+  expect(screen.getByRole('button',{name:'Insert beat'})).toBeEnabled();
 });

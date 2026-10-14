@@ -1,6 +1,6 @@
 # TabPlayer native sound and backing audio
 
-Date: 2026-10-14. Status: written specification awaiting user review. Shared requirements: [expansion specification](2026-10-14-tabplayer-deferred-features-design.md).
+Date: 2026-10-14. Status: approved by the user. Shared requirements: [expansion specification](2026-10-14-tabplayer-deferred-features-design.md).
 
 ## Native audio boundary
 

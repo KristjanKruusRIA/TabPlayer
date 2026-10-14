@@ -1,9 +1,10 @@
 import type { model } from '@coderline/alphatab';
-import { buildScore, exportGp, previewEdit } from './engine';
-import { blankProject, type EditCommand, type ProjectSnapshot } from './project';
+import { buildDocument, exportGp, previewEdit, replayDocumentSettings, type BuiltDocument } from './engine';
+import { type EditCommand, type ProjectSnapshot, type AssetCandidate, type DocumentCandidate } from './project';
+import { isSettingsEdit } from './edit-types';
 import type { NativeBridge } from './bridge';
 
-export interface DocumentState { snapshot: ProjectSnapshot; score: model.Score; busy: boolean; error: string | null }
+export interface DocumentState extends BuiltDocument { snapshot: ProjectSnapshot; busy: boolean; error: string | null }
 
 export class DocumentController {
   private state: DocumentState;
@@ -11,7 +12,7 @@ export class DocumentController {
   private tail: Promise<unknown> = Promise.resolve();
 
   private constructor(private bridge: NativeBridge, snapshot: ProjectSnapshot, private beforeChange: () => void) {
-    this.state={snapshot,score:buildScore(snapshot.project),busy:false,error:null};
+    this.state={snapshot,...buildDocument(snapshot.project),busy:false,error:null};
   }
   static async create(bridge: NativeBridge, beforeChange: () => void = () => {}) {
     return new DocumentController(bridge,await bridge.snapshot(),beforeChange);
@@ -39,29 +40,50 @@ export class DocumentController {
     const choice=await this.bridge.askUnsaved();
     return choice==='discard' || (choice==='save' && await this.saveNow(false));
   }
+  private async replaceDocument(candidate:DocumentCandidate) {
+    let built:BuiltDocument;let snapshot:ProjectSnapshot;
+    try {
+      built=buildDocument(candidate.project);this.beforeChange();
+      snapshot=await this.bridge.replaceProject(candidate.token);
+    } catch(error) {
+      try {await this.bridge.cancelDocument?.(candidate.token);} catch {}
+      throw error;
+    }
+    this.update({snapshot,...built});
+  }
   open() { return this.run(async()=>{
     if (!await this.canLeave()) return;
     const candidate=await this.bridge.readDocument(); if (!candidate) return;
-    const score=buildScore(candidate.project); this.beforeChange();
-    const snapshot=await this.bridge.replaceProject(candidate.project,candidate.path);
-    this.update({snapshot,score});
+    await this.replaceDocument(candidate);
   }); }
   new() { return this.run(async()=>{
     if (!await this.canLeave()) return;
-    const project=blankProject(); const score=buildScore(project); this.beforeChange();
-    const snapshot=await this.bridge.replaceProject(project,null); this.update({snapshot,score});
+    await this.replaceDocument(await this.bridge.createBlankDocument());
   }); }
-  edit(command: EditCommand) { return this.run(async()=>{
-    const candidate=previewEdit(this.state.snapshot.project,command); this.beforeChange();
-    const snapshot=await this.bridge.applyEdit(command); this.update({snapshot,score:candidate.score});
+  edit(command: EditCommand, asset?:AssetCandidate) { return this.run(async()=>{
+    let candidate:ReturnType<typeof previewEdit>;let snapshot:ProjectSnapshot;
+    try {
+      const project=asset?{...this.state.snapshot.project,assets:{...this.state.snapshot.project.assets,[asset.assetId]:asset.info}}:this.state.snapshot.project;
+      candidate=previewEdit(project,command,this.state);if(!isSettingsEdit(command)) this.beforeChange();
+      snapshot=await this.bridge.applyEdit(command,asset?.token);
+    } catch(error) {
+      if(asset) {try {await this.bridge.cancelAsset?.(asset.token);} catch {}}
+      throw error;
+    }
+    this.update({snapshot,score:candidate.score,settings:candidate.settings,embeddedBacking:candidate.embeddedBacking,embeddedBackingSettings:candidate.embeddedBackingSettings,sourceMixes:candidate.sourceMixes});
   }); }
+  private replaceHistory(snapshot:ProjectSnapshot,settingsOnly:boolean) {
+    if(!settingsOnly) this.beforeChange();
+    const built=settingsOnly?replayDocumentSettings(snapshot.project,this.state):buildDocument(snapshot.project);
+    this.update({snapshot,...built});
+  }
   undo() { return this.run(async()=>{
-    this.beforeChange(); const snapshot=await this.bridge.undo();
-    this.update({snapshot,score:buildScore(snapshot.project)});
+    const removed=this.state.snapshot.project.edits.at(-1);const snapshot=await this.bridge.undo();
+    this.replaceHistory(snapshot,!!removed && isSettingsEdit(removed));
   }); }
   redo() { return this.run(async()=>{
-    this.beforeChange(); const snapshot=await this.bridge.redo();
-    this.update({snapshot,score:buildScore(snapshot.project)});
+    const snapshot=await this.bridge.redo();const restored=snapshot.project.edits.at(-1);
+    this.replaceHistory(snapshot,!!restored && isSettingsEdit(restored));
   }); }
   save(saveAs = false) { return this.run(()=>this.saveNow(saveAs)); }
   export() { return this.run(async()=>{

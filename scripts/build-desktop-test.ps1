@@ -16,4 +16,11 @@ try {
         $null=$testProcess.WaitForExit(5000)
     }
     Copy-Item -LiteralPath (Join-Path $taskRoot 'src-tauri/target/release/tabplayer.exe') -Destination $destination
+    $testAudio=Join-Path $testDirectory 'audio'
+    $preparedAudio=(Resolve-Path (Join-Path $taskRoot 'src-tauri/resources/audio')).Path
+    if(-not (Test-Path -LiteralPath $testAudio)){
+        New-Item -ItemType Junction -Path $testAudio -Target $preparedAudio | Out-Null
+    } elseif ((Get-Item -LiteralPath $testAudio).Target -ne $preparedAudio) {
+        throw 'Desktop test audio path must point to this worktree prepared resources'
+    }
 } finally {Pop-Location;$env:VITE_DESKTOP_TEST=$previousTestFlag}

@@ -1,10 +1,10 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "TabPlayer", "version": "0.1.0", "identifier": "dev.tabplayer.desktop",
+  "productName": "TabPlayer", "version": "0.2.0", "identifier": "dev.tabplayer.desktop",
   "build": { "beforeDevCommand": "npm run dev", "beforeBuildCommand": "npm run build", "devUrl": "http://127.0.0.1:1420", "frontendDist": "../dist" },
   "app": {
     "windows": [{ "label": "main", "title": "TabPlayer", "width": 1440, "height": 900, "minWidth": 960, "minHeight": 600 }],
     "security": { "csp": "default-src 'self'; connect-src 'self' ipc: http://ipc.localhost; script-src 'self' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data:; media-src 'self' blob:", "devCsp": null }
   },
-  "bundle": { "active": true, "targets": "all", "icon": ["icons/icon.png","icons/icon.ico","icons/icon.icns"] }
+  "bundle": { "active": true, "targets": "all", "resources": { "resources/audio/": "audio/" }, "icon": ["icons/icon.png","icons/icon.ico","icons/icon.icns"] }
 }

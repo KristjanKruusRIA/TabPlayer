@@ -1,25 +1,24 @@
 import { useEffect, useRef } from 'react';
 import { AlphaTabApi, type model, StaveProfile } from '@coderline/alphatab';
 import type { BeatTarget } from './project';
-import { PlaybackController } from './playback';
+import type { NativePlaybackController } from './audio/NativePlaybackController';
 
-export function ScoreView({score,track,zoom,profile,onSelect,onPlayback}: {
+export function ScoreView({score,track,zoom,profile,onSelect,playback}: {
   score:model.Score;track:number;zoom:number;profile:string;onSelect:(target:BeatTarget,string?:number)=>void;
-  onPlayback:(player:PlaybackController|null)=>void;
+  playback:NativePlaybackController|null;
 }) {
   const container=useRef<HTMLDivElement>(null);const api=useRef<AlphaTabApi|null>(null);
   const selection=useRef(onSelect);selection.current=onSelect;
-  const ready=useRef(onPlayback);ready.current=onPlayback;const player=useRef<PlaybackController|null>(null);
   useEffect(()=>{
-    const view=new AlphaTabApi(container.current!,{core:{fontDirectory:'/font/',scriptFile:'/alphatab/alphaTab.mjs',includeNoteBounds:true,useWorkers:false},player:{playerMode:'EnabledSynthesizer',soundFont:'/soundfont/sonivox.sf2',enableCursor:true,scrollElement:'.paper-scroll'}});api.current=view;
-    player.current=new PlaybackController(view);ready.current(player.current);
+    const view=new AlphaTabApi(container.current!,{core:{fontDirectory:'/font/',scriptFile:'/alphatab/alphaTab.mjs',includeNoteBounds:true,useWorkers:false},player:{playerMode:'EnabledExternalMedia',enableCursor:true,scrollElement:'.paper-scroll'}});api.current=view;
     const beat=(b:model.Beat,s?:number)=>selection.current({track:b.voice.bar.staff.track.index,staff:b.voice.bar.staff.index,bar:b.voice.bar.index,voice:b.voice.index,beat:b.index},s);
     view.beatMouseDown.on(b=>beat(b));view.noteMouseDown.on(n=>beat(n.beat,n.string));
-    return ()=>{player.current?.destroy();view.destroy();api.current=null;ready.current(null);};
+    return ()=>{view.destroy();api.current=null;};
   },[]);
+  useEffect(()=>{if(playback&&api.current)playback.attachView(api.current);},[playback]);
   useEffect(()=>{const view=api.current!;view.settings.display.scale=zoom/100;
     view.settings.display.staveProfile=StaveProfile[profile as keyof typeof StaveProfile] as StaveProfile;
-    view.updateSettings();player.current!.replaceScore(score,track);
-  },[score,track,zoom,profile]);
+    view.updateSettings();playback?.replaceScore(score,track);
+  },[track,zoom,profile,playback]);
   return <div ref={container} aria-label="Music notation"/>;
 }

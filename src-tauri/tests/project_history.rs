@@ -46,7 +46,7 @@ fn disk_snapshot_excludes_unapplied_redo_commands() {
     session.apply_edit(note(7)).unwrap();
     session.apply_edit(note(9)).unwrap();
     session.undo().unwrap();
-    let json = serde_json::to_string(&session.snapshot().project).unwrap();
+    let json = serde_json::to_string(&session.stored_project()).unwrap();
     let reopened: Project = serde_json::from_str(&json).unwrap();
     assert_eq!(reopened.edits, vec![note(7)]);
     assert!(

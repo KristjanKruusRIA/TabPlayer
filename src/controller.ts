@@ -17,6 +17,7 @@ export class DocumentController {
     return new DocumentController(bridge,await bridge.snapshot(),beforeChange);
   }
   getState = () => this.state;
+  setBeforeChange(handler: () => void) { this.beforeChange=handler; }
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
   private update(change: Partial<DocumentState>) { this.state={...this.state,...change}; for (const listener of this.listeners) listener(); }
   private run<T>(action: () => Promise<T>): Promise<T> {

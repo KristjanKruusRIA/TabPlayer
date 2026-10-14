@@ -13,3 +13,4 @@ for (const name of ['alphaTab.mjs','alphaTab.core.mjs','alphaTab.worker.mjs','al
   await copyFile(new URL(name,distribution),new URL(name,destination));
 }
 await copyFile(new URL('../LICENSE',distribution),new URL('LICENSE',destination));
+await copyFile(new URL('../LICENSE.header',distribution),new URL('LICENSE.header',destination));

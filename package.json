@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "predev": "node scripts/copy-assets.mjs",
-    "prebuild": "node scripts/copy-assets.mjs",
+    "prebuild": "node scripts/copy-assets.mjs && node scripts/copy-notices.mjs",
     "pretest": "node scripts/fetch-fixtures.mjs",
     "dev": "vite --host 127.0.0.1 --port 1420 --strictPort",
     "build": "tsc --noEmit && vite build",

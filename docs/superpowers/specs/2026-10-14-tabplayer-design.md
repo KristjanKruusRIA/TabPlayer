@@ -1,6 +1,6 @@
 # TabPlayer player and editor design
 
-Date: 2026-10-14. Status: written design awaiting user review.
+Date: 2026-10-14. Status: approved by the user.
 
 TabPlayer will be a desktop alternative to Guitar Pro for Windows, macOS, and Linux. The user approved a Rust and Tauri application retaining alphaTab for notation and playback, with a usable player and tab editor as the first milestone and broader Guitar Pro features added in later milestones. The first milestone must open real scores, support basic composition and editing, play the edited result, and save work reliably.
 
@@ -65,7 +65,7 @@ Use the current backing-audio guide when planning that later milestone: the engi
 
 Use public engine APIs and retain dependency notices, including alphaTab's MPL-2.0 license and the bundled SoundFont's separate license. Fonts and audio assets must have explicit redistribution terms. The application contains independently written Rust core, UI, and editor code; extracted Guitar Pro executables, resources, and proprietary soundbanks are investigation inputs and stay outside the product and its versioned source.
 
-No application code has been written for this design yet. The next step after written-spec approval is a concrete implementation plan with its own review and execution selection.
+No application code has been written for this design yet. The [implementation plan](../plans/2026-10-14-tabplayer-player-editor.md) is ready for review and execution selection.
 
 ## References
 

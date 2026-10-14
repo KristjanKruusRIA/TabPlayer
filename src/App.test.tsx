@@ -9,14 +9,14 @@ import type { NativeBridge } from './bridge';
 import type { BuiltDocument } from './engine';
 import { defaultMix } from './document-settings';
 
-const integration=vi.hoisted(()=>({loadDocument:vi.fn(),beforeScoreChange:vi.fn(),destroy:vi.fn(),stageBacking:vi.fn(),commits:vi.fn(),exportBusy:false,exportRun:vi.fn(async()=>true),exportCancel:vi.fn(async()=>{})}));
+const integration=vi.hoisted(()=>({loadDocument:vi.fn(),beforeScoreChange:vi.fn(),destroy:vi.fn(),stageBacking:vi.fn(),commits:vi.fn(),practiceSpeed:100,exportOptions:vi.fn(),exportBusy:false,exportRun:vi.fn(async()=>true),exportCancel:vi.fn(async()=>{})}));
 vi.mock('./audio/bridge',()=>({nativeAudioBridge:{stageBacking:integration.stageBacking}}));
-vi.mock('./export/useExportCoordinator',()=>({useExportCoordinator:()=>({busy:integration.exportBusy,progress:undefined,run:integration.exportRun,cancel:integration.exportCancel})}));
+vi.mock('./export/useExportCoordinator',()=>({useExportCoordinator:(options:unknown)=>{integration.exportOptions(options);return {busy:integration.exportBusy,progress:undefined,run:integration.exportRun,cancel:integration.exportCancel};}}));
 vi.mock('./audio/NativePlaybackController',()=>({NativePlaybackController:class {
-  built:BuiltDocument|null=null;state={ready:true,playing:false,time:0,endTime:4000,measure:0,speed:100,metronome:false,error:null};
+  built:BuiltDocument|null=null;state={ready:true,playing:false,time:0,endTime:4000,measure:0,speed:integration.practiceSpeed,metronome:false,error:null};
   constructor(private options:{onEdit:(command:EditCommand)=>void|Promise<void>}){}
   subscribe=()=>()=>{};getState=()=>this.state;
-  loadDocument=async(project:unknown,built:BuiltDocument,track:number)=>{this.built=built;integration.loadDocument(project,built,track);};
+  loadDocument=async(project:unknown,built:BuiltDocument,track:number,documentEpoch:number)=>{this.built=built;integration.loadDocument(project,built,track,documentEpoch);};
   beforeScoreChange=integration.beforeScoreChange;destroy=integration.destroy;
   play=vi.fn();pause=vi.fn();stop=vi.fn();seekToMeasure=vi.fn();setSpeed=vi.fn();setLoop=vi.fn();clearLoop=vi.fn();setMetronome=vi.fn();
   devices=async()=>[];deviceId=()=>null;selectDevice=vi.fn();backingDurationMs=()=>undefined;
@@ -35,7 +35,7 @@ vi.mock('./ScoreView',()=>({ScoreView:({onSelect}: {onSelect: (target: unknown, 
       {label:'fractional string',field:'beat',value:0,string:1.5},
     ].map(({label,field,value,string})=><button key={label} onClick={()=>onSelect({track:0,staff:0,bar:0,voice:0,beat:0,[field]:value},string)}>Select {label}</button>)}
   </>}));
-afterEach(()=>{cleanup();vi.clearAllMocks();integration.exportBusy=false;});
+afterEach(()=>{cleanup();vi.clearAllMocks();integration.exportBusy=false;integration.practiceSpeed=100;});
 
 async function setup(initial=blankProject(),openProject?:Project) {
   let edits: EditCommand[]=[...initial.edits]; let cursor=edits.length;let assets:Record<string,AssetInfo>={...initial.assets};
@@ -52,6 +52,11 @@ const change=(label:string,value:string)=>fireEvent.change(screen.getByLabelText
 const click=(name:string)=>fireEvent.click(screen.getByRole('button',{name}));
 const currentBeat=(controller:DocumentController,index=0)=>controller.getState().score.tracks[0].staves[0].bars[0].voices[0].beats[index];
 
+it.each([25,50,100,200])('passes %i percent practice speed to export as a render ratio',async speed=>{
+  integration.practiceSpeed=speed;await setup();
+  await waitFor(()=>expect(integration.exportOptions).toHaveBeenLastCalledWith(expect.objectContaining({currentSpeed:speed/100})));
+});
+
 it('selects rendered notes and enters frets on empty strings to form chords',async()=>{
   const c=await setup(); click('Select rendered note'); expect(screen.getByLabelText('Beat')).toHaveValue(2);
   expect(screen.getByLabelText('String')).toHaveValue('5'); change('Fret','7'); click('Set note');
@@ -64,11 +69,11 @@ it('selects rendered notes and enters frets on empty strings to form chords',asy
 it('persists selected track sound and mixer without replacing the score identity',async()=>{
   const c=await setup(),score=c.getState().score;change('Sound source','green-guitar');await waitFor(()=>expect(c.getState().settings.sounds['base/0'].voiceId).toBe('green-guitar'));expect(c.getState().score).toBe(score);
   fireEvent.click(screen.getByLabelText('Mute'));await waitFor(()=>expect(c.getState().settings.mixes['base/0'].mute).toBe(true));expect(c.getState().score).toBe(score);
-  expect(integration.beforeScoreChange).not.toHaveBeenCalled();expect(integration.loadDocument).toHaveBeenLastCalledWith(c.getState().snapshot.project,expect.objectContaining({score,settings:c.getState().settings}),0);
+  expect(integration.beforeScoreChange).not.toHaveBeenCalled();expect(integration.loadDocument).toHaveBeenLastCalledWith(c.getState().snapshot.project,expect.objectContaining({score,settings:c.getState().settings}),0,0);
 });
 it('loads documents into native playback and opening does not reset saved mix',async()=>{
   const c=await setup();await waitFor(()=>expect(integration.loadDocument).toHaveBeenCalled());fireEvent.click(screen.getByLabelText('Mute'));await waitFor(()=>expect(c.getState().settings.mixes['base/0'].mute).toBe(true));
-  click('New');await waitFor(()=>expect(c.getState().snapshot.project.edits).toHaveLength(0));expect(screen.getByLabelText('Mute')).not.toBeChecked();expect(integration.loadDocument).toHaveBeenLastCalledWith(c.getState().snapshot.project,expect.objectContaining({score:c.getState().score}),0);
+  click('New');await waitFor(()=>expect(c.getState().snapshot.project.edits).toHaveLength(0));expect(screen.getByLabelText('Mute')).not.toBeChecked();expect(integration.loadDocument).toHaveBeenLastCalledWith(c.getState().snapshot.project,expect.objectContaining({score:c.getState().score}),0,1);
 });
 it('opens the export dialog and persists print layout through the existing history',async()=>{
   const c=await setup();click('Export score');expect(screen.getByRole('dialog',{name:'Export score'})).toBeInTheDocument();change('Export format','pdf');change('Paper','Letter');click('Export');await waitFor(()=>expect(c.getState().settings.print.paper).toBe('Letter'));await waitFor(()=>expect(integration.exportRun).toHaveBeenCalledWith(expect.objectContaining({format:'pdf',layout:expect.objectContaining({paper:'Letter'})})));await waitFor(()=>expect(screen.queryByRole('dialog',{name:'Export score'})).not.toBeInTheDocument());
@@ -126,7 +131,7 @@ it('inserts a beat into an empty voice and changes score information and tuning'
   click('Insert beat');await waitFor(()=>expect(currentBeat(c)).toBeDefined());
   change('Title','My study');change('Artist','Band');change('Initial tempo','90');click('Apply score info');
   await waitFor(()=>expect(c.getState().score.title).toBe('My study'));
-  change('Tuning (MIDI, high to low)','64,59,55,50,45,38');click('Apply tuning');
+  change('Tuning (notes, high to low)','E4 B3 G3 D3 A2 D2');click('Apply tuning');
   await waitFor(()=>expect(c.getState().score.tracks[0].staves[0].tuning.at(-1)).toBe(38));
 });
 

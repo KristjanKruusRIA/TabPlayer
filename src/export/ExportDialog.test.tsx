@@ -54,4 +54,18 @@ describe('export dialog',()=>{
     fireEvent.keyDown(busyCancel,{key:'Tab'});expect(busyCancel).toHaveFocus();fireEvent.keyDown(busyCancel,{key:'Escape'});expect(cancel).toHaveBeenCalledTimes(1);
     unmount();expect(opener).toHaveFocus();opener.remove();
   });
+  it('uses the existing hit-testable dialog backdrop to contain pointer input',()=>{
+    render(<ExportDialog score={fixture()} layout={layout} busy={false} onExport={()=>{}} onCancel={()=>{}}/>);
+    expect(screen.getByRole('dialog').parentElement).toHaveClass('dialog-backdrop');
+  });
+  it('reconciles track staff and measure selections when the score topology changes',()=>{
+    const submit=vi.fn();const {rerender}=render(<ExportDialog score={fixture()} layout={layout} busy={false} onExport={submit} onCancel={()=>{}}/>);
+    fireEvent.change(screen.getByLabelText('Export format'),{target:{value:'wav'}});fireEvent.change(screen.getByLabelText('Sample rate'),{target:{value:'44100'}});
+    fireEvent.click(screen.getByLabelText('Measure range'));fireEvent.change(screen.getByLabelText('First measure'),{target:{value:'3'}});
+    const changed=fixture();changed.masterBars.splice(1);const added=new model.Track();added.name='Bass';added.addStaff(new model.Staff());added.addStaff(new model.Staff());changed.addTrack(added);
+    rerender(<ExportDialog score={changed} layout={layout} busy={false} onExport={submit} onCancel={()=>{}}/>);
+    fireEvent.click(screen.getByLabelText('Bass'));expect(screen.getByLabelText('Bass staff 1')).toBeInTheDocument();expect(screen.getByLabelText('Bass staff 2')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button',{name:'Export'}));expect(submit).toHaveBeenCalledWith({format:'wav',selection:{tracks:[0,1],range:null},audio:{sampleRate:44100,bitDepth:16,speed:'saved',metronome:false,tailSeconds:2,backing:true,includeMix:true}});
+    rerender(<ExportDialog score={fixture()} layout={layout} busy={false} onExport={submit} onCancel={()=>{}}/>);fireEvent.click(screen.getByRole('button',{name:'Export'}));expect(submit.mock.calls[1][0].selection.tracks).toEqual([0]);
+  });
 });

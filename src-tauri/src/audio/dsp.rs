@@ -1,5 +1,8 @@
 use serde::{Deserialize, Serialize};
 
+/// Native track delay storage is bounded independently of score tempo and playback speed.
+pub const MAX_TRACK_DELAY_SECONDS: f64 = 16.0;
+
 macro_rules! block {
     ($name:ident { $($field:ident:$kind:ty=$value:expr),* $(,)? }) => {
         #[derive(Clone,Debug,PartialEq,Serialize,Deserialize)]
@@ -545,8 +548,10 @@ impl TrackDsp {
             } else {
                 120.0
             };
-            let offset =
-                self.rate * 60.0 / bpm * lerp(p.delay.quarter_notes, f.delay.quarter_notes);
+            // Extremely slow tempos retain a bounded echo rather than rejecting the score.
+            let offset = (self.rate * 60.0 / bpm
+                * lerp(p.delay.quarter_notes, f.delay.quarter_notes))
+            .min((self.delay.frames.len() - 2) as f64);
             let wet = self.delay.read(offset);
             let feedback = lerp(p.delay.feedback, f.delay.feedback) as f32;
             self.delay

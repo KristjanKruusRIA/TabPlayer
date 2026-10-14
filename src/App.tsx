@@ -30,7 +30,7 @@ export function App({controller}: {controller: DocumentController}) {
   const [zoom,setZoom]=useState(100); const [profile,setProfile]=useState('ScoreTab');
   const digits=useRef({text:'',time:0});
   const target=repairSelection(state.score,selection);
-  useEffect(()=>{if(player)void player.loadDocument(state.snapshot.project,state,target.track);},[player,state.snapshot.project,state.score,state.settings,state.embeddedBacking,target.track]);
+  useEffect(()=>{if(player)void player.loadDocument(state.snapshot.project,state,target.track,state.documentEpoch);},[player,state.snapshot.project,state.score,state.settings,state.embeddedBacking,target.track,state.documentEpoch]);
   const location=describeSelection(state.score,target);
   const string=Math.max(1,Math.min(selectedString,location.staff.tuning.length));
   useEffect(()=>{
@@ -41,7 +41,7 @@ export function App({controller}: {controller: DocumentController}) {
   const edit=(command:EditCommand)=>change(controller.edit(command));
   const documentAction=(job:Promise<unknown>)=>change(job);
   const [exportOpen,setExportOpen]=useState(false),[exportError,setExportError]=useState<string|null>(null),[exportLaunching,setExportLaunching]=useState(false);const exportCancelled=useRef(false);
-  const exports=useExportCoordinator({score:state.score,settings:effectiveAudioSettings(state.snapshot.project,state),currentSpeed:practiceSpeed,bridge:nativeBridge,embeddedBacking:state.embeddedBacking});
+  const exports=useExportCoordinator({score:state.score,settings:effectiveAudioSettings(state.snapshot.project,state),currentSpeed:practiceSpeed/100,bridge:nativeBridge,embeddedBacking:state.embeddedBacking});
   const runExport=(options:ExportOptions)=>{setExportError(null);setExportLaunching(true);exportCancelled.current=false;act((async()=>{
     if((options.format==='pdf'||options.format==='print')&&JSON.stringify(options.layout)!==JSON.stringify(state.settings.print))await controller.edit({type:'setPrintLayout',layout:options.layout});
     if(exportCancelled.current)return;

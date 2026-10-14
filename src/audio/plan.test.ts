@@ -2,7 +2,7 @@ import { expect, it, vi } from 'vitest';
 import { midi, model, Settings } from '@coderline/alphatab';
 import { createHash } from 'node:crypto';
 import { buildScore, exportGp } from '../engine';
-import { buildPlaybackPlan, buildPlaybackPlanFromJson, deadBrushMidiDurations, prepareMidiScore, preparePlan, validatePlaybackPlan } from './plan';
+import { buildPlaybackPlan, buildPlaybackPlanFromJson, deadBrushMidiDurations, prepareMidiScore, preparePlan, validateBackingAnchors, validatePlaybackPlan } from './plan';
 import { blankProject } from '../project';
 
 const settings = new Settings();
@@ -38,11 +38,102 @@ function agree(score: model.Score) {
   expect(plan.generation).toBe(7); expect(plan.ppq).toBe(960); return plan;
 }
 
+it.each([
+  {anchors:[{bar:0,occurrence:999,ratio:0,audioMs:0}]},
+  {anchors:[{bar:0,occurrence:0,ratio:0,audioMs:1000},{bar:1,occurrence:0,ratio:0,audioMs:0}]},
+  {anchors:[{bar:0,occurrence:0,ratio:1,audioMs:1000},{bar:1,occurrence:0,ratio:0,audioMs:2000}]},
+])('rejects_backing_locations_that_native_mapping_cannot_resolve_or_order_%j', ({anchors}) => {
+  const score=buildScore(blankProject());expect(()=>validateBackingAnchors(score,{offsetMs:0,anchors})).toThrow(/Backing anchor/i);
+});
+
+it('backing_validation_follows_performed_repeat_order_and_skipped_endings', () => {
+  const score=authored(3);score.masterBars[0].isRepeatStart=true;score.masterBars[1].repeatCount=2;score.rebuildRepeatGroups();score.finish(settings);
+  expect(()=>validateBackingAnchors(score,{offsetMs:0,anchors:[{bar:0,occurrence:1,ratio:0,audioMs:3000},{bar:1,occurrence:0,ratio:0,audioMs:2000}]})).not.toThrow();
+  const ending=authored(3);ending.masterBars[0].isRepeatStart=true;ending.masterBars[1].repeatCount=2;ending.masterBars[1].alternateEndings=1;ending.masterBars[2].alternateEndings=2;ending.rebuildRepeatGroups();ending.finish(settings);
+  expect(()=>validateBackingAnchors(ending,{offsetMs:0,anchors:[{bar:1,occurrence:1,ratio:0,audioMs:3000}]})).toThrow(/missing/i);
+});
+
+it('backing_validation_reuses_performed_locations_only_for_the_same_immutable_score', () => {
+  const score=buildScore(blankProject()),spy=vi.spyOn(midi.MidiFileGenerator.prototype,'generate');
+  try {
+    const backing={offsetMs:0,anchors:[{bar:0,occurrence:0,ratio:0,audioMs:0}]};
+    validateBackingAnchors(score,backing);validateBackingAnchors(score,{...backing,offsetMs:50});
+    expect(spy).toHaveBeenCalledOnce();
+    validateBackingAnchors(buildScore(blankProject()),backing);expect(spy).toHaveBeenCalledTimes(2);
+    validateBackingAnchors(score,null);validateBackingAnchors(score,{offsetMs:0,anchors:[]});expect(spy).toHaveBeenCalledTimes(2);
+  } finally {spy.mockRestore();}
+});
+
+it.each([3,6])('metronome_clicks_follow_%i_eighth_note_denominator_pulses', numerator => {
+  const score=authored(1),master=score.masterBars[0],voice=score.tracks[0].staves[0].bars[0].voices[0];master.timeSignatureNumerator=numerator;master.timeSignatureDenominator=8;
+  voice.beats=[];for(let i=0;i<numerator;i++){const b=new model.Beat();b.duration=model.Duration.Eighth;b.isEmpty=false;voice.addBeat(b);note(score,0,i);}
+  score.finish(settings);const plan=agree(score);expect(plan.occurrences[0].clickTicks).toEqual(Array.from({length:numerator},(_,i)=>i*480));
+});
+
+it('metronome_clicks_reset_at_pickup_end_and_each_repeated_measure', () => {
+  const score=authored(2),first=score.tracks[0].staves[0].bars[0].voices[0];first.beats.splice(1);first.beats[0].duration=model.Duration.Eighth;score.masterBars[0].isAnacrusis=true;score.finish(settings);
+  const plan=agree(score);expect(plan.occurrences.map(o=>o.clickTicks)).toEqual([[0],[480,1440,2400,3360]]);
+  const repeated=authored(2);repeated.masterBars[0].isRepeatStart=true;repeated.masterBars[1].repeatCount=2;repeated.rebuildRepeatGroups();repeated.finish(settings);
+  const repeatPlan=agree(repeated);for(const o of repeatPlan.occurrences)expect(o.clickTicks).toEqual([o.startTick,o.startTick+960,o.startTick+1920,o.startTick+2880]);
+});
+
+it('rejects_invalid_optional_click_ticks_and_accepts_old_missing_click_ticks', () => {
+  const valid=agree(buildScore(blankProject()));
+  for(const clicks of [[],[1],[0,0],[0,NaN],[0,3840],[0,-1]]){const p=structuredClone(valid);p.occurrences[0].clickTicks=clicks;expect(()=>validatePlaybackPlan(p)).toThrow(/Invalid native/);}
+  const old=structuredClone(valid);for(const o of old.occurrences)delete o.clickTicks;expect(()=>validatePlaybackPlan(old)).not.toThrow();
+});
+
 it('same_pitch_different_voice_keeps_identity', () => {
   const score = authored(2, 2); note(score, 0, 0, 1, 3, 0); note(score, 0, 0, 1, 3, 1); score.finish(settings);
   const plan = agree(score); expect(plan.notes).toHaveLength(2);
   expect(plan.notes.map(n => n.source.target.voice).sort()).toEqual([0, 1]);
   expect(plan.notes[0].key).toBe(plan.notes[1].key); expect(plan.notes[0].id).not.toBe(plan.notes[1].id);
+});
+
+it('same_pitch_voices_keep_exact_attack_channels_and_active_programs', () => {
+  const score=authored(2,2), a=note(score,0,0,1,3,0),b=note(score,0,0,1,3,1);
+  b.addBendPoint(new model.BendPoint(0,0));b.addBendPoint(new model.BendPoint(60,4));b.beat.automations.push(model.Automation.buildInstrumentAutomation(false,0,33));
+  score.finish(settings);const plan=agree(score);
+  expect(plan.notes.map(n=>[n.source.target.voice,n.channel,n.program,n.articulation])).toEqual([[0,0,25,'picked'],[1,1,33,'fingered']]);
+  expect(plan.notes[0].key).toBe(plan.notes[1].key);expect(a.beat.pickStroke).toBe(model.PickStroke.None);
+});
+
+it('same_tick_public_program_note_order_and_per_attack_programs_are_preserved', () => {
+  const score=authored(2,2);note(score,0,0,1,3,0);const b=note(score,0,0,1,3,1);b.beat.automations.push(model.Automation.buildInstrumentAutomation(false,0,33));score.finish(settings);
+  const expected:(string|number)[][]=[];
+  class Reference extends midi.AlphaSynthMidiFileHandler {
+    override addProgramChange(track:number,tick:number,channel:number,program:number){if(track===0&&tick===0&&channel===0)expected.push(['program',program]);super.addProgramChange(track,tick,channel,program);}
+    override addNote(track:number,start:number,length:number,key:number,velocity:number,channel:number){if(track===0&&start===0&&channel===0)expected.push(['noteOn',key]);super.addNote(track,start,length,key,velocity,channel);}
+  }
+  new midi.MidiFileGenerator(score,settings,new Reference(new midi.MidiFile())).generate();
+  const plan=agree(score),actual=plan.midi.filter(e=>e.tick===0&&e.channel===0&&(e.type==='program'||e.type==='noteOn')).map(e=>[e.type,e.type==='program'?e.program:(e as Extract<typeof e,{type:'noteOn'|'noteOff'}>).key]);
+  expect(actual).toEqual(expected);expect(plan.notes.map(n=>[n.channel,n.program])).toEqual([[0,25],[0,33]]);
+});
+
+it('whole_public_control_program_bend_note_stream_keeps_same_tick_handler_order', () => {
+  const score=authored(2,2),a=note(score,0,0,1,3,0),b=note(score,0,0,1,3,1);
+  a.addBendPoint(new model.BendPoint(0,0));a.addBendPoint(new model.BendPoint(60,4));b.beat.automations.push(model.Automation.buildInstrumentAutomation(false,0,33));note(score,0,1,1,5,0);
+  score.finish(settings);const reference:{tick:number;order:number;row:(string|number)[]}[]=[];let order=0;
+  const push=(tick:number,row:(string|number)[])=>reference.push({tick,order:order++,row:[tick,...row]});
+  class Reference extends midi.AlphaSynthMidiFileHandler {
+    override addControlChange(track:number,tick:number,channel:number,controller:midi.ControllerType,value:number){push(tick,['controller',track,channel,controller,value]);super.addControlChange(track,tick,channel,controller,value);}
+    override addProgramChange(track:number,tick:number,channel:number,program:number){push(tick,['program',track,channel,program]);super.addProgramChange(track,tick,channel,program);}
+    override addNoteBend(track:number,tick:number,channel:number,key:number,value:number){push(tick,['noteBend',track,channel,key,(value-8192)/8192*16]);super.addNoteBend(track,tick,channel,key,value);}
+    override addBend(track:number,tick:number,channel:number,value:number){push(tick,['bend',track,channel,(Math.min(16384,Math.floor(value))-8192)/8192*16]);super.addBend(track,tick,channel,value);}
+    override addNote(track:number,start:number,length:number,key:number,velocity:number,channel:number){push(start,['noteOn',track,channel,key,velocity]);push(start+length,['noteOff',track,channel,key,velocity]);super.addNote(track,start,length,key,velocity,channel);}
+  }
+  new midi.MidiFileGenerator(score,settings,new Reference(new midi.MidiFile())).generate();const plan=agree(score);
+  const actual=plan.midi.map(e=>[e.tick,e.type,0,e.channel,...e.type==='controller'?[e.controller,e.value]:e.type==='program'?[e.program]:e.type==='noteOn'||e.type==='noteOff'?[e.key,e.velocity]:e.type==='noteBend'?[e.key,e.value]:e.type==='bend'?[e.value]:[]]);
+  expect(actual).toEqual(reference.sort((a,b)=>a.tick-b.tick||a.order-b.order).map(e=>e.row));
+  expect(plan.midi.every(e=>!('order' in e))).toBe(true);
+  expect(plan.notes.map(n=>n.program)).toEqual([25,33,33]);
+});
+
+it('optional_exact_channel_program_are_strict_and_legacy_missing_fields_remain_valid', () => {
+  const score=authored();note(score,0,0);score.finish(settings);const valid=agree(score);
+  for(const value of [-1,16,NaN,.5]){const plan=structuredClone(valid);plan.notes[0].channel=value;expect(()=>validatePlaybackPlan(plan)).toThrow(/Invalid native/);}
+  for(const value of [-1,128,NaN,.5]){const plan=structuredClone(valid);plan.notes[0].program=value;expect(()=>validatePlaybackPlan(plan)).toThrow(/Invalid native/);}
+  const legacy=structuredClone(valid);delete legacy.notes[0].channel;delete legacy.notes[0].program;expect(()=>validatePlaybackPlan(legacy)).not.toThrow();
 });
 
 it('attacks_crossing_bar_boundaries_retain_authored_beat_identity', () => {
@@ -69,6 +160,14 @@ it('initial_grace_in_another_voice_preserves_full_score_tick_shift', () => {
   score.finish(settings);const plan=agree(score);
   expect(plan.notes.find(n=>n.source.target.voice===1)?.startTick).toBe(120);
   const other=plan.notes.find(n=>n.source.target.track===1)!;expect(other.startTick).toBe(120);expect(Math.max(...other.pitch.map(p=>p.semitones))).toBe(2);
+});
+
+it('leading_grace_uses_first_preloaded_public_program_before_later_changes', () => {
+  const score=authored(2,2),voice=score.tracks[0].staves[0].bars[0].voices[0],grace=new model.Beat();grace.duration=model.Duration.Eighth;grace.graceType=model.GraceType.BeforeBeat;grace.isEmpty=false;
+  const n=new model.Note();n.string=1;n.fret=3;grace.addNote(n);grace.voice=voice;voice.beats.unshift(grace);
+  const later=note(score,0,0,1,3,1);later.beat.automations.push(model.Automation.buildInstrumentAutomation(false,0,33));score.finish(settings);
+  const plan=agree(score),first=plan.midi.filter(e=>e.type==='program').find(e=>e.channel===0)!;expect([first.tick,first.program]).toEqual([0,25]);
+  expect(plan.notes.map(n=>[n.startTick,n.channel,n.program])).toEqual([[0,0,25],[120,0,33]]);
 });
 
 it('worker_json_preserves_explicit_nonadjacent_phrase_origin', () => {

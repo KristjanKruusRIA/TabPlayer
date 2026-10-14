@@ -6,19 +6,21 @@ import { blankProject, type EditCommand, type Project, type ProjectSnapshot } fr
 import { defaultEffects } from './document-settings';
 import { invoke } from '@tauri-apps/api/core';
 import { nativeBridge, type NativeBridge } from './bridge';
+import type { SyncAnchor } from './edit-types';
 
 vi.mock('@tauri-apps/api/core',()=>({invoke:vi.fn(async()=>true)}));
 
-function makeBridge(project:Project=blankProject()) {
-  let current: ProjectSnapshot = {project,canUndo:false,canRedo:false,dirty:false,path:null};
-  let undone:EditCommand[]=[];
+function makeBridge(project:Project=blankProject(),redoHistory:EditCommand[]=[]) {
+  let current: ProjectSnapshot = {project,canUndo:project.edits.length>0,canRedo:redoHistory.length>0,dirty:false,path:null};
+  let undone:EditCommand[]=[...redoHistory];
+  const snapshot=()=>({...structuredClone(current),redoEdit:structuredClone(undone.at(-1) ?? null)});
   const bridge: NativeBridge = {
-    snapshot: async () => structuredClone(current), readDocument: vi.fn(async () => null),
+    snapshot: async () => snapshot(), readDocument: vi.fn(async () => null),
     createBlankDocument: async()=>({project:blankProject(),path:null,token:'new-document'}),
-    replaceProject: async () => { current={project:blankProject(),canUndo:false,canRedo:false,dirty:false,path:null}; return structuredClone(current); },
-    applyEdit: vi.fn(async command => { undone=[];current={...current,project:{...current.project,edits:[...current.project.edits,command]},canUndo:true,canRedo:false,dirty:true}; return structuredClone(current); }),
-    undo: async () => { const edits=current.project.edits.slice();undone.push(edits.pop()!);current={...current,project:{...current.project,edits},canUndo:edits.length>0,canRedo:true,dirty:edits.length>0};return structuredClone(current); },
-    redo: async () => { const edits=[...current.project.edits,undone.pop()!];current={...current,project:{...current.project,edits},canUndo:true,canRedo:undone.length>0,dirty:true};return structuredClone(current); },
+    replaceProject: async () => { undone=[];current={project:blankProject(),canUndo:false,canRedo:false,dirty:false,path:null}; return snapshot(); },
+    applyEdit: vi.fn(async command => { undone=[];current={...current,project:{...current.project,edits:[...current.project.edits,command]},canUndo:true,canRedo:false,dirty:true}; return snapshot(); }),
+    undo: async () => { const edits=current.project.edits.slice();undone.push(edits.pop()!);current={...current,project:{...current.project,edits},canUndo:edits.length>0,canRedo:true,dirty:edits.length>0};return snapshot(); },
+    redo: async () => { const edits=[...current.project.edits,undone.pop()!];current={...current,project:{...current.project,edits},canUndo:true,canRedo:undone.length>0,dirty:true};return snapshot(); },
     saveProject: vi.fn(async () => null), exportGp: async () => false,
     askUnsaved: async () => 'discard', confirmExport: async () => true,
   };
@@ -111,6 +113,75 @@ it('maps staged cancellation tokens to native cancellation commands',async()=>{
   await nativeBridge.cancelDocument?.('document-token');await nativeBridge.cancelAsset?.('asset-token');
   expect(invoke).toHaveBeenCalledWith('cancel_document',{token:'document-token'});
   expect(invoke).toHaveBeenCalledWith('cancel_asset',{token:'asset-token'});
+});
+
+const invalidBackingAnchors:{reason:string;anchors:SyncAnchor[]}[]=[
+  {reason:'missing repeat occurrence',anchors:[{bar:0,occurrence:999,ratio:0,audioMs:0}]},
+  {reason:'backwards mapped audio time',anchors:[{bar:0,occurrence:0,ratio:0,audioMs:1000},{bar:1,occurrence:0,ratio:0,audioMs:0}]},
+  {reason:'aliased bar-boundary positions',anchors:[{bar:0,occurrence:0,ratio:1,audioMs:0},{bar:1,occurrence:0,ratio:0,audioMs:1000}]},
+];
+const backingAssetId='c'.repeat(64);
+const backingEdit=(anchors:SyncAnchor[]):EditCommand=>({type:'setBacking',backing:{assetId:backingAssetId,offsetMs:0,anchors,mix:{gain:1,pan:0,mute:false,solo:false}}});
+const projectForBacking=(edits:EditCommand[]=[])=>({...blankProject(),assets:{[backingAssetId]:{filename:'backing.wav',mediaType:'audio/wav',byteLength:100}},edits});
+const repeatStart:Extract<EditCommand,{type:'setMeasureSettings'}>={type:'setMeasureSettings',bar:0,numerator:4,denominator:4,pickup:false,freeTime:false,repeatStart:true,repeatCount:0,endings:[],section:'',tempos:[]};
+const repeatEnd={...repeatStart,bar:1,repeatStart:false,repeatCount:2};
+
+it.each(invalidBackingAnchors)('preserves document and audio state when an edit has $reason',async({anchors})=>{
+  const bridge=makeBridge(projectForBacking());const beforeChange=vi.fn();const controller=await DocumentController.create(bridge,beforeChange);const original=controller.getState();
+  await expect(controller.edit(backingEdit(anchors))).rejects.toThrow(/anchor|backing|occurrence/i);
+  expect(controller.getState().snapshot).toEqual(original.snapshot);expect(controller.getState().score===original.score).toBe(true);
+  expect(controller.getState().settings).toEqual(original.settings);expect(bridge.applyEdit).not.toHaveBeenCalled();expect(beforeChange).not.toHaveBeenCalled();
+});
+
+it('preserves document and audio state when repeat removal invalidates existing backing',async()=>{
+  const bridge=makeBridge(projectForBacking([repeatStart,repeatEnd,backingEdit([{bar:1,occurrence:1,ratio:.5,audioMs:6500}])]));
+  const beforeChange=vi.fn();const controller=await DocumentController.create(bridge,beforeChange);const original=controller.getState();
+  await expect(controller.edit({...repeatEnd,repeatCount:0})).rejects.toThrow(/anchor|backing|occurrence/i);
+  expect(controller.getState().snapshot).toEqual(original.snapshot);expect(controller.getState().score===original.score).toBe(true);
+  expect(controller.getState().settings).toEqual(original.settings);expect(bridge.applyEdit).not.toHaveBeenCalled();expect(beforeChange).not.toHaveBeenCalled();
+});
+
+it.each([
+  ...invalidBackingAnchors.map(({reason,anchors})=>({reason,project:projectForBacking([backingEdit(anchors)])})),
+  {reason:'a removed repeat occurrence',project:projectForBacking([repeatStart,repeatEnd,backingEdit([{bar:1,occurrence:1,ratio:.5,audioMs:6500}]),{...repeatEnd,repeatCount:0}])},
+])('preserves document and audio state and cancels staged open with $reason',async({project})=>{
+  const bridge=makeBridge();bridge.readDocument=async()=>({project,path:'candidate.tabplayer',token:'invalid-backing'});
+  bridge.cancelDocument=vi.fn(async()=>true);const replace=vi.spyOn(bridge,'replaceProject');const beforeChange=vi.fn();
+  const controller=await DocumentController.create(bridge,beforeChange);const original=controller.getState();
+  await expect(controller.open()).rejects.toThrow(/anchor|backing|occurrence/i);
+  expect(controller.getState().snapshot).toEqual(original.snapshot);expect(controller.getState().score===original.score).toBe(true);
+  expect(controller.getState().settings).toEqual(original.settings);expect(replace).not.toHaveBeenCalled();expect(beforeChange).not.toHaveBeenCalled();
+  expect(bridge.cancelDocument).toHaveBeenCalledWith('invalid-backing');
+});
+
+it('opens valid final backing history and preserves native cursor when Undo would expose an invalid past state',async()=>{
+  const project=projectForBacking([backingEdit([{bar:0,occurrence:999,ratio:0,audioMs:0}]),{type:'setBacking',backing:null}]);
+  const bridge=makeBridge(project);const undo=vi.spyOn(bridge,'undo');const redo=vi.spyOn(bridge,'redo');const beforeChange=vi.fn();
+  const controller=await DocumentController.create(bridge,beforeChange);const original=controller.getState();const nativeBefore=await bridge.snapshot();
+  expect(original.settings.backing).toBeNull();expect(original.snapshot.project.edits).toHaveLength(2);
+  await expect(controller.undo()).rejects.toThrow(/anchor|backing|occurrence/i);
+  const nativeAfter=await bridge.snapshot();
+  expect({nativeEdits:nativeAfter.project.edits.length,visibleEdits:controller.getState().snapshot.project.edits.length}).toEqual({nativeEdits:2,visibleEdits:2});
+  expect(nativeAfter).toEqual(nativeBefore);expect(controller.getState().snapshot).toEqual(original.snapshot);
+  expect(controller.getState().snapshot.canRedo).toBe(false);expect(controller.getState().score===original.score).toBe(true);
+  expect(controller.getState().settings).toEqual(original.settings);expect(controller.getState().documentEpoch).toBe(original.documentEpoch);
+  expect(controller.getState().error).toMatch(/anchor|backing|occurrence/i);expect(controller.getState().busy).toBe(false);
+  expect(undo).not.toHaveBeenCalled();expect(redo).not.toHaveBeenCalled();expect(beforeChange).not.toHaveBeenCalled();
+});
+
+it('preserves native cursor and redo availability when Redo would expose an invalid future backing state',async()=>{
+  const invalid=backingEdit([{bar:0,occurrence:999,ratio:0,audioMs:0}]);const bridge=makeBridge(projectForBacking(),[invalid]);
+  const undo=vi.spyOn(bridge,'undo');const redo=vi.spyOn(bridge,'redo');const beforeChange=vi.fn();
+  const controller=await DocumentController.create(bridge,beforeChange);const original=controller.getState();const nativeBefore=await bridge.snapshot();
+  expect(original.snapshot.canRedo).toBe(true);expect(original.snapshot).toHaveProperty('redoEdit',invalid);
+  await expect(controller.redo()).rejects.toThrow(/anchor|backing|occurrence/i);
+  const nativeAfter=await bridge.snapshot();
+  expect({nativeEdits:nativeAfter.project.edits.length,visibleEdits:controller.getState().snapshot.project.edits.length}).toEqual({nativeEdits:0,visibleEdits:0});
+  expect(nativeAfter).toEqual(nativeBefore);expect(controller.getState().snapshot).toEqual(original.snapshot);
+  expect(controller.getState().snapshot.canRedo).toBe(true);expect(controller.getState().score===original.score).toBe(true);
+  expect(controller.getState().settings).toEqual(original.settings);expect(controller.getState().documentEpoch).toBe(original.documentEpoch);
+  expect(controller.getState().error).toMatch(/anchor|backing|occurrence/i);expect(controller.getState().busy).toBe(false);
+  expect(undo).not.toHaveBeenCalled();expect(redo).not.toHaveBeenCalled();expect(beforeChange).not.toHaveBeenCalled();
 });
 
 it('updates persisted mix without stopping or rebuilding the score',async()=>{

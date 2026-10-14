@@ -90,3 +90,58 @@ fn optional_played_bar_preserves_source_identity_and_json_compatibility() {
     p.validate().unwrap();
     assert_eq!(serde_json::to_value(&p.notes[0]).unwrap()["playedBar"], 0);
 }
+
+#[test]
+fn optional_meter_clicks_are_strict_and_old_plans_remain_compatible() {
+    let original = fixture();
+    assert!(
+        serde_json::to_value(&original.occurrences[0])
+            .unwrap()
+            .get("clickTicks")
+            .is_none()
+    );
+    for ticks in [
+        vec![],
+        vec![1.0],
+        vec![0.0, 0.0],
+        vec![0.0, f64::NAN],
+        vec![0.0, 3840.0],
+        vec![0.0, -1.0],
+    ] {
+        let mut plan = fixture();
+        plan.occurrences[0].click_ticks = Some(ticks);
+        assert!(plan.validate().is_err());
+    }
+    let mut valid = fixture();
+    valid.occurrences[0].click_ticks = Some(vec![0.0, 480.0, 960.0]);
+    valid.validate().unwrap();
+    let json = serde_json::to_value(&valid).unwrap();
+    assert_eq!(
+        json["occurrences"][0]["clickTicks"],
+        serde_json::json!([0.0, 480.0, 960.0])
+    );
+    let roundtrip: PlaybackPlan = serde_json::from_value(json).unwrap();
+    roundtrip.validate().unwrap();
+}
+
+#[test]
+fn optional_exact_attack_channel_and_program_are_strict_and_compatible() {
+    let original = fixture();
+    let note = serde_json::to_value(&original.notes[0]).unwrap();
+    assert!(note.get("channel").is_none());
+    assert!(note.get("program").is_none());
+    let mut valid = fixture();
+    valid.notes[0].channel = Some(1);
+    valid.notes[0].program = Some(33);
+    valid.validate().unwrap();
+    let json = serde_json::to_value(&valid).unwrap();
+    assert_eq!(json["notes"][0]["channel"], 1);
+    assert_eq!(json["notes"][0]["program"], 33);
+    let roundtrip: PlaybackPlan = serde_json::from_value(json).unwrap();
+    roundtrip.validate().unwrap();
+    valid.notes[0].channel = Some(16);
+    assert!(valid.validate().is_err());
+    valid.notes[0].channel = Some(1);
+    valid.notes[0].program = Some(128);
+    assert!(valid.validate().is_err());
+}

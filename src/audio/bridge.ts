@@ -2,7 +2,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import type { DocumentSettings } from '../edit-types';
 import type { AssetInfo } from '../project';
-import type { PlaybackPlan } from './types';
+import type { PlaybackPlan, PracticeSettings } from './types';
 
 export interface NativeAudioStatus {generation:number;desiredGeneration?:number;ready:boolean;playing:boolean;tick:number;seconds:number;durationSeconds:number;speed:number;metronome:boolean;error:string|null;deviceId:string|null;backingDurationSeconds?:number|null;renderedFrames?:number;outputPeak?:number}
 export interface AudioDeviceInfo {id:string;name:string;isDefault:boolean}
@@ -16,7 +16,7 @@ export type TransportCommand =
   | {type:'setMetronome';enabled:boolean;generation:number}
   | {type:'selectDevice';deviceId:string|null;generation:number};
 export interface NativeAudioBridge {
-  prepare(plan:PlaybackPlan,settings:DocumentSettings,embedded:Uint8Array|null,sourceKey?:string):Promise<void>;
+  prepare(plan:PlaybackPlan,settings:DocumentSettings,embedded:Uint8Array|null,sourceKey?:string,practice?:PracticeSettings):Promise<void>;
   command(command:TransportCommand):Promise<void>;
   setMix(settings:DocumentSettings,generation:number):Promise<void>;
   devices():Promise<AudioDeviceInfo[]>;
@@ -27,7 +27,7 @@ export interface NativeAudioBridge {
 }
 let commandQueue:Promise<void>=Promise.resolve();
 export const nativeAudioBridge:NativeAudioBridge={
-  prepare:async(plan,settings,embedded,sourceKey)=>{await invoke('audio_prepare',{plan,settings,embeddedBytes:embedded?Array.from(embedded):null,sourceKey:sourceKey??'blank'});},
+  prepare:async(plan,settings,embedded,sourceKey,practice)=>{await invoke('audio_prepare',{plan,settings,embeddedBytes:embedded?Array.from(embedded):null,sourceKey:sourceKey??'blank',practice:practice??null});},
   command:command=>{
     if(command.type==='invalidate')return invoke('audio_command',{command});
     const next=commandQueue.then(()=>invoke<void>('audio_command',{command}));commandQueue=next.catch(()=>{});return next;

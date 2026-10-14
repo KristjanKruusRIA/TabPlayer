@@ -5,6 +5,7 @@ import type { BackingSettings, ChannelMix, DocumentSettings } from './edit-types
 import { defaultDocumentSettings, defaultMix, applySettingsEdit } from './document-settings';
 import { applyAdvancedEdit } from './editor/advanced';
 import { captureNoteLinks, restoreNoteLinks, detachNote } from './editor/links';
+import { validateBackingAnchors } from './audio/plan';
 
 const settings = new Settings();
 const { Score, Track, Staff, Bar, Voice, Beat, Note, MasterBar, Automation, JsonConverter } = model;
@@ -233,7 +234,9 @@ export function buildDocument(value: ProjectInput): BuiltDocument {
     }
   }
   // Transient conversion rebuilds derived links and caches; native files store source bytes and commands.
-  score=rebuild(score);score.tracks.forEach((track,index)=>trackIdentities.set(track,identities[index]));return {score,settings:documentSettings,embeddedBacking,embeddedBackingSettings,sourceMixes};
+  score=rebuild(score);score.tracks.forEach((track,index)=>trackIdentities.set(track,identities[index]));
+  const built={score,settings:documentSettings,embeddedBacking,embeddedBackingSettings,sourceMixes};
+  validateBackingAnchors(score,effectiveAudioSettings(project,built).backing);return built;
 }
 
 export function replayDocumentSettings(value:ProjectInput,current:BuiltDocument):BuiltDocument {
@@ -248,7 +251,8 @@ export function replayDocumentSettings(value:ProjectInput,current:BuiltDocument)
     case 'setPrintLayout': next.print=structuredClone(edit.layout);break;
     case 'removeMeasure': removeBackingMeasure(next.backing,edit.bar);break;
   }
-  return {score:current.score,settings:next,embeddedBacking:current.embeddedBacking,embeddedBackingSettings:current.embeddedBackingSettings,sourceMixes:current.sourceMixes};
+  const built={score:current.score,settings:next,embeddedBacking:current.embeddedBacking,embeddedBackingSettings:current.embeddedBackingSettings,sourceMixes:current.sourceMixes};
+  validateBackingAnchors(current.score,effectiveAudioSettings(project,built).backing);return built;
 }
 
 export function effectiveAudioSettings(project:ProjectInput,built:BuiltDocument):DocumentSettings {
@@ -278,7 +282,8 @@ export function previewEdit(project: ProjectInput, edit: EditCommand, current?:B
   if(current && isSettingsEdit(edit)) {
     const nextSettings=structuredClone(current.settings);
     applySettingsEdit(nextSettings,edit,current.score,current.score.tracks.map(trackIdentity));
-    return {project:next,...current,settings:nextSettings};
+    const candidate={project:next,...current,settings:nextSettings};
+    validateBackingAnchors(current.score,effectiveAudioSettings(next,candidate).backing);return candidate;
   }
   return {project:next,...buildDocument(next)};
 }

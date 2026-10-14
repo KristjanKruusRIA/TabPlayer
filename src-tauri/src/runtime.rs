@@ -3,7 +3,9 @@ use crate::{
     audio::{
         backing::BackingMap,
         decode::decode_audio,
-        device::{AudioDeviceInfo, AudioService, NativeAudioStatus, TransportCommand},
+        device::{
+            AudioDeviceInfo, AudioService, NativeAudioStatus, PracticeSettings, TransportCommand,
+        },
         plan::PlaybackPlan,
         renderer::Renderer,
         resources::AudioResources,
@@ -63,6 +65,7 @@ pub async fn audio_prepare(
     settings: DocumentSettings,
     embedded_bytes: Option<Vec<u8>>,
     source_key: String,
+    practice: Option<PracticeSettings>,
     app: AppHandle,
 ) -> Result<(), String> {
     settings.validate()?;
@@ -96,7 +99,12 @@ pub async fn audio_prepare(
         };
         let backing_id = settings.backing.as_ref().map(|b| b.asset_id.clone());
         let generation = plan.generation;
-        let result = audio.service.prepare(plan, settings, backing);
+        let result = audio.service.prepare_with_practice(
+            plan,
+            settings,
+            backing,
+            practice.unwrap_or_default(),
+        );
         if result.is_ok() || audio.service.prepared_generation() == Some(generation) {
             *audio.embedded.lock().unwrap() = original.map(|bytes| (source_key, bytes));
             *current_backing = backing_id;

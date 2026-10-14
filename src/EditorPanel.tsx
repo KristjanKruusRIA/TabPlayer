@@ -9,6 +9,7 @@ import { MeasurePanel } from './editor/MeasurePanel';
 import { ChordDialog } from './editor/ChordDialog';
 import { EnumInput } from './editor/controls';
 import type { ChordDefinition } from './edit-types';
+import { formatPitch } from './tuning';
 
 export function EditorPanel({score,target,string,fret,busy,onSelect,onString,onFret,onEdit}: {
   score:model.Score;target:BeatTarget;string:number;fret:number;busy:boolean;
@@ -26,7 +27,7 @@ export function EditorPanel({score,target,string,fret,busy,onSelect,onString,onF
     <IndexInput label="Beat" value={target.beat+1} min={1} max={Math.max(1,voice.beats.length)} onValue={value=>onSelect({...target,beat:value-1})}/></div>
     <div className="pair"><label>Staff<select value={target.staff} onChange={e=>onSelect({...target,staff:Number(e.target.value),voice:0,beat:0})}>{score.tracks[target.track].staves.map((s,i)=><option key={s.index} value={i}>{i+1}</option>)}</select></label>
     <label>Voice<select value={target.voice} onChange={e=>onSelect({...target,voice:Number(e.target.value),beat:0})}>{bar.voices.map(v=><option key={v.index} value={v.index}>{v.index+1}</option>)}</select></label></div>
-    <div className="pair"><label>String<select value={string} disabled={!staff.tuning.length} onChange={e=>onString(Number(e.target.value))}>{staff.tuning.map((pitch,i)=><option key={i} value={staff.tuning.length-i}>{staff.tuning.length-i} · MIDI {pitch}</option>)}</select></label>
+    <div className="pair"><label>String<select value={string} disabled={!staff.tuning.length} onChange={e=>onString(Number(e.target.value))}>{staff.tuning.map((pitch,i)=><option key={i} value={staff.tuning.length-i}>{staff.tuning.length-i} · {formatPitch(pitch)}</option>)}</select></label>
     <label>Fret<input type="number" min={0} max={127} value={fret} onChange={e=>onFret(Number(e.target.value))}/></label></div>
     <button className="primary" disabled={!beat || staff.isPercussion || !staff.tuning.length} onClick={()=>onEdit({type:'setNote',target,string,fret})}>Set note</button>
     <button disabled={!beat || !staff.tuning.length} onClick={()=>onEdit({type:'removeNote',target,string})}>Remove note</button>

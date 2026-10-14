@@ -30,3 +30,14 @@ it('all 128 programs are selectable and existing track settings dispatch exact p
   fireEvent.change(screen.getByLabelText('Track name'),{target:{value:'Lead'}});fireEvent.change(screen.getByLabelText('Track short name'),{target:{value:'Ld'}});fireEvent.change(select,{target:{value:'127'}});fireEvent.click(screen.getByRole('button',{name:'Apply instrument settings'}));
   expect(onEdit).toHaveBeenLastCalledWith({type:'setTrackInfo',track:0,name:'Lead',shortName:'Ld',program:127});
 });
+it('existing and new track tuning use note names and reject invalid drafts without an edit',()=>{
+  const score=previewEdit(blankProject(),{type:'setNote',target:{track:0,staff:0,bar:0,voice:0,beat:0},string:6,fret:3}).score,onEdit=vi.fn();render(<TrackPanel score={score} selected={0} busy={false} player={null} onSelect={()=>{}} onEdit={onEdit}/>);
+  const input=screen.getByLabelText('Tuning (notes, high to low)');expect(input).toHaveValue('E4 B3 G3 D3 A2 E2');
+  fireEvent.change(input,{target:{value:'E4 B3 G3 D3 A2 D2'}});fireEvent.click(screen.getByRole('button',{name:'Apply tuning'}));expect(onEdit).toHaveBeenLastCalledWith({type:'setTuning',track:0,tuning:[64,59,55,50,45,38]});onEdit.mockClear();
+  fireEvent.change(input,{target:{value:'E4 B3 nope'}});fireEvent.click(screen.getByRole('button',{name:'Apply tuning'}));expect(onEdit).not.toHaveBeenCalled();expect(screen.getByRole('alert')).toHaveTextContent(/note.*octave|E4/i);
+  expect(screen.getByLabelText('New track tuning')).toHaveValue('G2 D2 A1 E1');fireEvent.change(screen.getByLabelText('New track tuning'),{target:{value:'G2 D2 A1 Eb1'}});fireEvent.click(screen.getByRole('button',{name:'Add track'}));expect(onEdit).toHaveBeenLastCalledWith({type:'addTrack',name:'Bass',program:33,tuning:[43,38,33,27]});
+});
+it('tuning readback refreshes after same-index history replacement',()=>{
+  const before=previewEdit(blankProject(),{type:'setTuning',track:0,tuning:[64,59,55,50,45,38]}).score,onEdit=vi.fn();const props={selected:0,busy:false,player:null,onSelect:()=>{},onEdit};const view=render(<TrackPanel {...props} score={before}/>);expect(screen.getByLabelText('Tuning (notes, high to low)')).toHaveValue('E4 B3 G3 D3 A2 D2');
+  view.rerender(<TrackPanel {...props} score={previewEdit(blankProject(),{type:'setRest',target:{track:0,staff:0,bar:0,voice:0,beat:0}}).score}/>);expect(screen.getByLabelText('Tuning (notes, high to low)')).toHaveValue('E4 B3 G3 D3 A2 E2');
+});

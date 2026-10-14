@@ -168,6 +168,7 @@ pub struct ProjectSnapshot {
     pub project: ProjectView,
     pub can_undo: bool,
     pub can_redo: bool,
+    pub redo_edit: Option<EditCommand>,
     pub dirty: bool,
     pub path: Option<String>,
 }
@@ -208,6 +209,7 @@ impl ProjectSession {
             project,
             can_undo: self.cursor > 0,
             can_redo: self.cursor < self.project.edits.len(),
+            redo_edit: self.project.edits.get(self.cursor).cloned(),
             path: self.path.as_ref().map(|p| p.to_string_lossy().into_owned()),
         }
     }

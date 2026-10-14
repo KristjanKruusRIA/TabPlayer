@@ -5,7 +5,7 @@ import type { ChannelMix, EditCommand } from '../edit-types';
 import type { ProjectView } from '../project';
 import { nativeAudioBridge, type NativeAudioBridge, type NativeAudioStatus, type TransportCommand } from './bridge';
 import { preparePlan } from './plan';
-import type { PlaybackPlan, PlaybackState } from './types';
+import type { PlaybackPlan, PlaybackState, PracticeSettings } from './types';
 
 let nextGeneration=0;
 type Options={bridge?:NativeAudioBridge;onEdit:(edit:EditCommand)=>void|Promise<void>;preparePlan?:typeof preparePlan};
@@ -14,6 +14,7 @@ export class NativePlaybackController {
   private listeners=new Set<()=>void>();private view:AlphaTabApi|null=null;private cleanupView:()=>void=()=>{};
   private unlisten:()=>void=()=>{};private subscription:Promise<void>;private destroyed=false;private suppressHandler=false;private viewPlaying=false;
   private built:BuiltDocument|null=null;private plan:PlaybackPlan|null=null;private lastStatus:NativeAudioStatus|null=null;private operationError:string|null=null;private prepared=false;private embeddedSource:string|null=null;
+  private documentEpoch:number|undefined;private practice:PracticeSettings={speed:1,metronome:false};
   private bridge:NativeAudioBridge;private options:Options;generation=++nextGeneration;
   constructor(options:Options) {
     this.options=options;this.bridge=options.bridge??nativeAudioBridge;
@@ -30,7 +31,7 @@ export class NativePlaybackController {
   private receive(status:NativeAudioStatus){
     if(status.generation!==this.generation || this.destroyed)return;
     this.lastStatus=status;
-    if(status.ready)this.prepared=true;
+    if(status.ready){this.prepared=true;this.practice={speed:status.speed,metronome:status.metronome};}
     const occurrence=this.plan?.occurrences.find(o=>status.tick>=o.startTick && status.tick<o.endTick)??this.plan?.occurrences.at(-1);
     this.update({ready:status.ready,playing:status.playing,time:status.seconds*1000,endTime:status.durationSeconds*1000,measure:occurrence?.bar??0,speed:status.speed*100,metronome:status.metronome,error:status.error??this.operationError});
     const api=this.view;const output=api?.player?.output as synth.IExternalMediaSynthOutput|undefined;
@@ -63,14 +64,16 @@ export class NativePlaybackController {
   resetMix(){for(const track of this.built?.score.tracks??[])this.editMix(track.index,defaultMix());}
   beforeScoreChange(){this.generation=++nextGeneration;this.plan=null;this.prepared=false;this.operationError=null;this.send({type:'invalidate',generation:this.generation});this.update({ready:false,playing:false,error:null});}
   replaceScore(score:model.Score,track=0){const prior=this.suppressHandler;this.suppressHandler=true;try{this.view?.renderScore(score,[track]);this.view?.player?.updateSyncPoints([]);}finally{this.suppressHandler=prior;this.viewPlaying=false;}}
-  async loadDocument(project:ProjectView,built:BuiltDocument,visibleTrack=0){
+  async loadDocument(project:ProjectView,built:BuiltDocument,visibleTrack=0,documentEpoch=0){
     await this.subscription;if(this.destroyed)return;
-    if(this.built?.score===built.score && this.plan && this.prepared){const unchanged=this.built.settings===built.settings;this.built=built;if(unchanged)return;try{await this.bridge.setMix(effectiveAudioSettings(project,built),this.generation);this.operationError=null;this.update({error:null});}catch(error){this.fail(error);}this.update({});return;}
+    const documentChanged=this.documentEpoch!==documentEpoch;this.documentEpoch=documentEpoch;if(documentChanged)this.practice={speed:1,metronome:false};
+    if(!documentChanged && this.built?.score===built.score && this.plan && this.prepared){const unchanged=this.built.settings===built.settings;this.built=built;if(unchanged)return;try{await this.bridge.setMix(effectiveAudioSettings(project,built),this.generation);this.operationError=null;this.update({error:null});}catch(error){this.fail(error);}this.update({});return;}
+    const practice={...this.practice};
     this.beforeScoreChange();const generation=this.generation;this.built=built;this.replaceScore(built.score,visibleTrack);
     try {
       const plan=await (this.options.preparePlan??preparePlan)(project,generation);if(generation!==this.generation||this.destroyed)return;
       const sourceKey=project.base.kind==='file'?project.base.sha256:'blank';
-      this.plan=plan;await this.bridge.prepare(plan,effectiveAudioSettings(project,built),this.embeddedSource===sourceKey?null:built.embeddedBacking,sourceKey);if(generation!==this.generation||this.destroyed)return;this.embeddedSource=sourceKey;this.prepared=true;this.operationError=null;
+      this.plan=plan;await this.bridge.prepare(plan,effectiveAudioSettings(project,built),this.embeddedSource===sourceKey?null:built.embeddedBacking,sourceKey,practice);if(generation!==this.generation||this.destroyed)return;this.embeddedSource=sourceKey;this.prepared=true;this.operationError=null;
       const status=await this.bridge.status();if(status)this.receive(status);
     } catch(error){if(generation===this.generation){this.prepared=false;this.fail(error);}}
   }

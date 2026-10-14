@@ -49,6 +49,27 @@ pub fn voice_id_for_track<'a>(
     track: &super::plan::PlanTrack,
     settings: &'a crate::settings::DocumentSettings,
 ) -> Option<&'a str> {
+    voice_id_for_program(track, settings, track.program)
+}
+
+pub fn automatic_voice_id(program: u8, percussion: bool) -> Option<&'static str> {
+    if percussion {
+        return None;
+    }
+    match program {
+        24..=25 => Some("green-guitar"),
+        26..=31 => Some("black-guitar"),
+        33 => Some("babyblue-bass"),
+        32..=39 => Some("darkblack-bass"),
+        _ => None,
+    }
+}
+
+pub fn voice_id_for_program<'a>(
+    track: &super::plan::PlanTrack,
+    settings: &'a crate::settings::DocumentSettings,
+    program: u8,
+) -> Option<&'a str> {
     if let Some(id) = settings
         .sounds
         .get(&track.id)
@@ -56,16 +77,42 @@ pub fn voice_id_for_track<'a>(
     {
         return if id == "gm" { None } else { Some(id) };
     }
-    if track.percussion {
-        return None;
-    }
-    match track.program {
-        24..=25 => Some("green-guitar"),
-        26..=31 => Some("black-guitar"),
-        33 => Some("babyblue-bass"),
-        32..=39 => Some("darkblack-bass"),
-        _ => None,
-    }
+    automatic_voice_id(program, track.percussion)
+}
+
+pub fn note_program(plan: &super::plan::PlaybackPlan, note: &super::plan::PlanNote) -> u8 {
+    note.program.unwrap_or_else(|| {
+        plan.midi
+            .iter()
+            .take_while(|event| event.tick() <= note.start_tick)
+            .filter_map(|event| match event {
+                super::plan::PlanMidiEvent::Program {
+                    track_id,
+                    channel,
+                    program,
+                    ..
+                } if track_id == &note.track_id && *channel == note.channel.unwrap_or(0) => {
+                    Some(*program)
+                }
+                _ => None,
+            })
+            .last()
+            .unwrap_or_else(|| {
+                plan.tracks
+                    .iter()
+                    .find(|t| t.id == note.track_id)
+                    .map_or(0, |t| t.program)
+            })
+    })
+}
+
+pub fn voice_id_for_note<'a>(
+    plan: &super::plan::PlaybackPlan,
+    note: &super::plan::PlanNote,
+    settings: &'a crate::settings::DocumentSettings,
+) -> Option<&'a str> {
+    let track = plan.tracks.iter().find(|track| track.id == note.track_id)?;
+    voice_id_for_program(track, settings, note_program(plan, note))
 }
 
 pub fn resource_requests(
@@ -77,8 +124,7 @@ pub fn resource_requests(
         .iter()
         .filter(|n| n.velocity > 0)
         .filter_map(|note| {
-            let track = plan.tracks.iter().find(|t| t.id == note.track_id)?;
-            let instrument_id = voice_id_for_track(track, settings)?;
+            let instrument_id = voice_id_for_note(plan, note, settings)?;
             Some(super::resources::SampleRequest {
                 instrument_id: instrument_id.into(),
                 key: note.key,

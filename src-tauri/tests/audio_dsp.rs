@@ -19,6 +19,25 @@ fn dsp_bypass_response_delay_tail() {
 }
 
 #[test]
+fn tempo_delay_caps_at_prepared_storage_instead_of_wrapping_or_growing() {
+    let mut fx = FxSettings::default();
+    fx.delay.enabled = true;
+    fx.delay.quarter_notes = 4.0;
+    fx.delay.mix = 0.5;
+    fx.delay.feedback = 0.0;
+    let mut dsp = TrackDsp::new(fx, 48000, 0.01).unwrap();
+    let output: Vec<_> = (0..1000)
+        .map(|n| dsp.process([if n == 0 { 1.0 } else { 0.0 }; 2], 1.0))
+        .collect();
+    assert!(output[1..480].iter().all(|x| x[0].abs() < 1e-7));
+    assert!(
+        (output[480][0] - 0.5).abs() < 1e-6,
+        "long musical delay must cap at exact 10ms test capacity"
+    );
+    assert!(output[481..].iter().all(|x| x[0].abs() < 1e-7));
+}
+
+#[test]
 fn preset_replay_and_strict_bounds() {
     for name in ["gm", "clean", "crunch", "lead", "bass"] {
         let preset = FxSettings::preset(name).unwrap();

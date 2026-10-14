@@ -1,5 +1,6 @@
 import { expect, it, vi } from 'vitest';
-import { buildDocument, previewEdit, trackIdentity } from '../engine';
+import { createHash } from 'node:crypto';
+import { buildDocument, exportGp, previewEdit, trackIdentity } from '../engine';
 import { blankProject } from '../project';
 import { NativePlaybackController } from './NativePlaybackController';
 import type { NativeAudioBridge, NativeAudioStatus } from './bridge';
@@ -33,7 +34,7 @@ it('late_generation_cannot_replace_score',async()=>{
   const pending=next.loadDocument(p,first);const old=next.generation;
   const other={...p,base:{...p.base,kind:'blank' as const,title:'Next',artist:'',tempo:120,tuning:[64,59,55,50,45,40],measureCount:4}};
   await next.loadDocument(other,buildDocument(other));release(buildPlaybackPlan(first.score,old));await pending;
-  expect(bridge.prepare).toHaveBeenCalledTimes(1);expect(bridge.prepare).toHaveBeenCalledWith(expect.objectContaining({generation:next.generation}),expect.anything(),null,'blank');
+  expect(bridge.prepare).toHaveBeenCalledTimes(1);expect(bridge.prepare).toHaveBeenCalledWith(expect.objectContaining({generation:next.generation}),expect.anything(),null,'blank',{speed:1,metronome:false});
   emit({generation:old,playing:true});expect(next.getState().playing).toBe(false);next.destroy();
 });
 it('inclusive_loop_seek_pause_resume',async()=>{
@@ -41,6 +42,30 @@ it('inclusive_loop_seek_pause_resume',async()=>{
   player.setLoop(1,2);expect(bridge.command).toHaveBeenLastCalledWith({type:'setLoop',startTick:3840,endTick:11520,generation:player.generation});
   player.seekToMeasure(3);expect(bridge.command).toHaveBeenLastCalledWith({type:'seekTick',tick:11520,generation:player.generation});
   player.setSpeed(25);expect(()=>player.setSpeed(24)).toThrow('25%');emit({playing:true,seconds:6,tick:11520,speed:.25});player.pause();expect(player.getState().playing).toBe(true);emit({seconds:6,tick:11520,speed:.25});expect(player.getState()).toMatchObject({playing:false,time:6000,speed:25,measure:3});player.destroy();
+});
+it('retains acknowledged speed and metronome across musical edit undo and redo in one document',async()=>{
+  const {player,bridge,emit}=fixture();const project=blankProject(),built=buildDocument(project);
+  bridge.prepare=vi.fn(async(_plan,_settings,_embedded,_sourceKey?:string,practice?:{speed:number;metronome:boolean})=>emit({speed:practice?.speed??1,metronome:practice?.metronome??false}));
+  await player.loadDocument(project,built,0,0);player.setSpeed(50);player.setMetronome(.4);emit({speed:.5,metronome:true});
+  const edited=previewEdit(project,{type:'setNote',target:{track:0,staff:0,bar:0,voice:0,beat:0},string:6,fret:5});
+  for(const document of [{project:edited.project,built:edited},{project,built:buildDocument(project)},{project:edited.project,built:buildDocument(edited.project)}]) {
+    player.beforeScoreChange();await player.loadDocument(document.project,document.built,0,0);
+    expect(player.getState()).toMatchObject({speed:50,metronome:true,playing:false});
+    expect(vi.mocked(bridge.prepare).mock.calls.at(-1)?.[4]).toEqual({speed:.5,metronome:true});
+  }
+  player.destroy();
+});
+it.each(['blank','file'])('resets practice after explicit New/Open of the same %s base',async kind=>{
+  const {player,bridge,emit}=fixture();const blank=blankProject();const bytes=exportGp(buildDocument(blank).score);
+  const project=kind==='blank'?blank:{...blank,base:{kind:'file' as const,filename:'authored.gp',bytesBase64:Buffer.from(bytes).toString('base64'),sha256:createHash('sha256').update(bytes).digest('hex')}};
+  const built=buildDocument(project);
+  bridge.prepare=vi.fn(async(_plan,_settings,_embedded,_sourceKey?:string,practice?:{speed:number;metronome:boolean})=>emit({speed:practice?.speed??1,metronome:practice?.metronome??false}));
+  await player.loadDocument(project,built,0,0);
+  for(const epoch of [1,2]) {
+    emit({speed:.75,metronome:true});player.beforeScoreChange();await player.loadDocument(project,built,0,epoch);
+    expect(vi.mocked(bridge.prepare).mock.calls.at(-1)?.[4]).toEqual({speed:1,metronome:false});expect(player.getState()).toMatchObject({speed:100,metronome:false});
+  }
+  player.destroy();
 });
 it('seeks and inclusively loops the generated variable-meter measure boundaries',async()=>{
   const {player,bridge,emit}=fixture();const target={track:0,staff:0,bar:1,voice:0,beat:3};
@@ -93,7 +118,7 @@ it('embedded backing travels once per source and retains sync metadata through r
   const base=(sha256:string)=>({...blankProject(),base:{kind:'file' as const,filename:'Authored.gp',sha256,bytesBase64:'AA=='}});
   const audio=new Uint8Array([1,2,3]);let built={...original,embeddedBacking:audio,embeddedBackingSettings:{offsetMs:120,anchors:[{bar:0,occurrence:0,ratio:0,audioMs:100}],mix:{gain:1,pan:0,mute:false,solo:false}}};
   const first=base('a'.repeat(64)),second=base('b'.repeat(64));
-  await player.loadDocument(first,built);expect(bridge.prepare).toHaveBeenLastCalledWith(expect.anything(),expect.objectContaining({backing:{assetId:'embedded',...built.embeddedBackingSettings}}),audio,first.base.sha256);
+  await player.loadDocument(first,built);expect(bridge.prepare).toHaveBeenLastCalledWith(expect.anything(),expect.objectContaining({backing:{assetId:'embedded',...built.embeddedBackingSettings}}),audio,first.base.sha256,{speed:1,metronome:false});
   built={...built,settings:{...built.settings,mixes:{'base/0':{gain:.4,pan:0,mute:false,solo:false}}}};await player.loadDocument(first,built);expect(bridge.prepare).toHaveBeenCalledTimes(1);expect(bridge.setMix).toHaveBeenCalledTimes(1);
   built={...built,score:buildDocument(blankProject()).score};await player.loadDocument(first,built);expect(vi.mocked(bridge.prepare).mock.calls.at(-1)?.[2]).toBeNull();
   built={...built,score:buildDocument(blankProject()).score};await player.loadDocument(second,built);expect(vi.mocked(bridge.prepare).mock.calls.at(-1)?.[2]).toBe(audio);
@@ -110,5 +135,5 @@ it('cosmetic view renders do not forward external media stop or seek to native a
 });
 it('webview reload generation starts after the native pending preparation',async()=>{
   const {player,bridge}=fixture();bridge.status=vi.fn(async()=>({generation:10000,desiredGeneration:10002,ready:false,playing:false,tick:0,seconds:0,durationSeconds:0,speed:1,metronome:false,error:null,deviceId:null}));
-  const p=blankProject();await player.loadDocument(p,buildDocument(p));expect(player.generation).toBeGreaterThan(10002);expect(bridge.prepare).toHaveBeenCalledWith(expect.objectContaining({generation:player.generation}),expect.anything(),null,'blank');player.destroy();
+  const p=blankProject();await player.loadDocument(p,buildDocument(p));expect(player.generation).toBeGreaterThan(10002);expect(bridge.prepare).toHaveBeenCalledWith(expect.objectContaining({generation:player.generation}),expect.anything(),null,'blank',{speed:1,metronome:false});player.destroy();
 });

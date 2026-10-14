@@ -37,6 +37,8 @@ pub struct MeasureOccurrence {
     pub end_tick: f64,
     pub start_ms: f64,
     pub end_ms: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub click_ticks: Option<Vec<f64>>,
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -67,6 +69,10 @@ pub struct PlanNote {
     pub occurrence: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub played_bar: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub channel: Option<u8>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub program: Option<u8>,
     pub start_tick: f64,
     pub end_tick: f64,
     pub key: u8,
@@ -200,6 +206,18 @@ impl PlaybackPlan {
             {
                 return Err(invalid());
             }
+            if let Some(clicks) = &o.click_ticks {
+                if clicks.first().is_none_or(|tick| *tick != o.start_tick)
+                    || clicks.iter().enumerate().any(|(i, tick)| {
+                        !tick.is_finite()
+                            || *tick < o.start_tick
+                            || *tick >= o.end_tick
+                            || i > 0 && clicks[i - 1] >= *tick
+                    })
+                {
+                    return Err(invalid());
+                }
+            }
             *count += 1;
             occurrences.insert((o.bar, o.occurrence));
             prior = o.end_tick;
@@ -224,6 +242,8 @@ impl PlaybackPlan {
                 || n.end_tick > self.duration_tick + 0.001
                 || n.key > 127
                 || n.velocity > 127
+                || n.channel.is_some_and(|channel| channel > 15)
+                || n.program.is_some_and(|program| program > 127)
                 || n.pitch.is_empty()
             {
                 return Err(invalid());

@@ -9,7 +9,7 @@ export interface AssetCandidate { token:string; assetId:string; info:AssetInfo; 
 export interface ProjectView { format: 'TabPlayer'; schemaVersion: 2; engineVersion: '1.8.4'; base: BaseDocument; edits: EditCommand[]; assets: Record<string,AssetInfo> }
 export type Project = ProjectView;
 export type ProjectInput = ProjectView | Omit<ProjectView,'schemaVersion'|'assets'> & {schemaVersion:1};
-export interface ProjectSnapshot { project: Project; canUndo: boolean; canRedo: boolean; dirty: boolean; path: string | null }
+export interface ProjectSnapshot { project: Project; canUndo: boolean; canRedo: boolean; redoEdit?: EditCommand | null; dirty: boolean; path: string | null }
 export interface DocumentCandidate { project: Project; path: string | null; token: string }
 export const blankProject = (): Project => ({
   format: 'TabPlayer', schemaVersion: 2, engineVersion: '1.8.4', assets: {},

@@ -7,6 +7,7 @@ export function ExportDialog({score,layout,busy,progress,failure,onExport,onCanc
   const [range,setRange]=useState(false),[first,setFirst]=useState('1'),[last,setLast]=useState(String(score.masterBars.length));
   const [print,setPrint]=useState({...layout});const [audio,setAudio]=useState<AudioExportOptions>({sampleRate:48000,bitDepth:16,speed:'saved',metronome:false,tailSeconds:2,backing:true,includeMix:true});
   const [error,setError]=useState('');
+  const topology=`${score.masterBars.length}:${score.tracks.map(track=>track.staves.length).join(',')}`;
   const dialog=useRef<HTMLDivElement>(null),cancel=useRef<HTMLButtonElement>(null);
   const visibleError=error||progress?.error||failure;
   useEffect(()=>{
@@ -15,6 +16,11 @@ export function ExportDialog({score,layout,busy,progress,failure,onExport,onCanc
     return ()=>{if(opener instanceof HTMLElement&&opener.isConnected)opener.focus();};
   },[]);
   useEffect(()=>{if(busy)cancel.current?.focus();},[busy]);
+  useEffect(()=>{
+    setTracks(selected=>selected.filter(index=>score.tracks[index]!==undefined));
+    setStaves(Object.fromEntries(score.tracks.map(track=>[track.index,track.staves.map(staff=>staff.index)])));
+    setRange(false);setFirst('1');setLast(String(score.masterBars.length));setError('');
+  },[topology]);
   function handleKeyDown(event:KeyboardEvent<HTMLDivElement>){
     if(event.key==='Escape'){event.preventDefault();event.stopPropagation();onCancel();return;}
     if(event.key!=='Tab')return;
@@ -33,7 +39,7 @@ export function ExportDialog({score,layout,busy,progress,failure,onExport,onCanc
       setError('');onExport(format==='pdf'||format==='print'?{format,selection,layout:print}:format==='wav'||format==='stems'?{format,selection,audio}:{format,selection});
     }catch(e){setError((e as Error).message);}
   }
-  return <div ref={dialog} onKeyDown={handleKeyDown} role="dialog" aria-modal="true" aria-label="Export score" className="export-dialog"><h2>Export score</h2>
+  return <div className="dialog-backdrop"><div ref={dialog} onKeyDown={handleKeyDown} role="dialog" aria-modal="true" aria-label="Export score" className="export-dialog"><h2>Export score</h2>
     <fieldset disabled={busy}>
       <label>Export format<select value={format} onChange={e=>setFormat(e.target.value as ExportOptions['format'])}><option value="gp">Guitar Pro</option><option value="pdf">PDF</option><option value="print">Print</option><option value="midi">MIDI</option><option value="wav">Mixed WAV</option><option value="stems">WAV stems</option></select></label>
       <><div aria-label="Tracks to export">{score.tracks.map(t=><label key={t.index}><input type="checkbox" checked={tracks.includes(t.index)} onChange={e=>setTracks(e.target.checked?[...tracks,t.index].sort((a,b)=>a-b):tracks.filter(n=>n!==t.index))}/>{t.name||`Track ${t.index+1}`}</label>)}</div>
@@ -61,5 +67,5 @@ export function ExportDialog({score,layout,busy,progress,failure,onExport,onCanc
     </fieldset>
     {visibleError&&<p role="alert">{visibleError}</p>}{progress&&<><progress aria-label="Export progress" data-job-id={progress.id} max={Math.max(1,progress.totalFrames)} value={progress.frames}/><p role="status">{progress.status==='running'?'Exporting…':progress.status}</p></>}
     <button type="button" disabled={busy} onClick={submit}>Export</button><button ref={cancel} type="button" onClick={onCancel}>{busy?'Cancel export':'Cancel'}</button>
-  </div>;
+  </div></div>;
 }

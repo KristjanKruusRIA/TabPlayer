@@ -28,6 +28,28 @@ use std::{
 
 const CONTROL_CAPACITY: usize = 64;
 const BLOCK: usize = 512;
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PracticeSettings {
+    pub speed: f64,
+    pub metronome: bool,
+}
+impl Default for PracticeSettings {
+    fn default() -> Self {
+        Self {
+            speed: 1.0,
+            metronome: false,
+        }
+    }
+}
+impl PracticeSettings {
+    fn validate(self) -> Result<(), String> {
+        if !self.speed.is_finite() || !(0.25..=2.0).contains(&self.speed) {
+            return Err("Speed must be between 25% and 200%.".into());
+        }
+        Ok(())
+    }
+}
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AudioDeviceInfo {
@@ -290,9 +312,18 @@ impl CallbackTransport {
     /// Returns allocations to the caller; live callers retire them off the callback.
     pub fn install(
         &mut self,
+        renderer: Box<Renderer>,
+        generation: u64,
+        preserve: bool,
+    ) -> Option<Box<Renderer>> {
+        self.install_with_practice(renderer, generation, preserve, PracticeSettings::default())
+    }
+    pub fn install_with_practice(
+        &mut self,
         mut renderer: Box<Renderer>,
         generation: u64,
         preserve: bool,
+        practice: PracticeSettings,
     ) -> Option<Box<Renderer>> {
         if generation < self.generation || generation < self.shared.desired.load(Ordering::Acquire)
         {
@@ -307,8 +338,10 @@ impl CallbackTransport {
             self.tick = 0.0;
             self.seconds = 0.0;
             self.loop_range = None;
-            self.speed = 1.0;
-            self.metronome = false;
+            self.speed = practice.speed;
+            self.metronome = practice.metronome;
+            let _ = renderer.set_speed(self.speed);
+            renderer.set_metronome(self.metronome);
             self.shared.frames.store(0, Ordering::Relaxed);
             self.shared.peak.store(0f64.to_bits(), Ordering::Relaxed);
         }
@@ -474,6 +507,7 @@ enum CallbackCommand {
         renderer: Box<Renderer>,
         generation: u64,
         preserve: bool,
+        practice: PracticeSettings,
     },
     Mix {
         mix: PreparedMix,
@@ -512,8 +546,12 @@ impl OutputCallback {
                     renderer,
                     generation,
                     preserve,
+                    practice,
                 } => {
-                    if let Some(old) = self.transport.install(renderer, generation, preserve) {
+                    if let Some(old) = self
+                        .transport
+                        .install_with_practice(renderer, generation, preserve, practice)
+                    {
                         let _ = self.retired.try_push(Retired::Renderer(old));
                     }
                 }
@@ -561,6 +599,7 @@ struct PreparedDocument {
     settings: DocumentSettings,
     resources: Arc<AudioResources>,
     backing: Option<Arc<DecodedAudio>>,
+    practice: PracticeSettings,
 }
 struct ControlState {
     producer: Option<HeapProd<CallbackCommand>>,
@@ -651,10 +690,20 @@ impl AudioService {
         settings: DocumentSettings,
         backing_bytes: Option<Vec<u8>>,
     ) -> Result<(), String> {
+        self.prepare_with_practice(plan, settings, backing_bytes, PracticeSettings::default())
+    }
+    pub fn prepare_with_practice(
+        &self,
+        plan: PlaybackPlan,
+        settings: DocumentSettings,
+        backing_bytes: Option<Vec<u8>>,
+        practice: PracticeSettings,
+    ) -> Result<(), String> {
+        practice.validate()?;
         plan.validate()?;
         let generation = plan.generation;
         let previous = self.shared.desired.fetch_max(generation, Ordering::AcqRel);
-        let result = self.prepare_current(plan, settings, backing_bytes);
+        let result = self.prepare_current(plan, settings, backing_bytes, practice);
         if result.is_err() {
             let live = self
                 .control
@@ -677,6 +726,7 @@ impl AudioService {
         plan: PlaybackPlan,
         settings: DocumentSettings,
         backing_bytes: Option<Vec<u8>>,
+        practice: PracticeSettings,
     ) -> Result<(), String> {
         let generation = plan.generation;
         let mut state = self.control.lock().unwrap();
@@ -695,6 +745,7 @@ impl AudioService {
             settings,
             resources,
             backing,
+            practice,
         };
         if state.producer.is_none() || self.shared.fault.load(Ordering::Acquire) != 0 {
             // Validate music independently of the available device. Retain it after
@@ -719,6 +770,7 @@ impl AudioService {
                     renderer,
                     generation,
                     preserve: false,
+                    practice,
                 },
             )?;
             self.set_backing_duration(&document);
@@ -828,6 +880,7 @@ impl AudioService {
                 backing,
                 resources,
                 settings,
+                practice: old.practice,
             };
             let renderer = Self::renderer(&document, state.rate)?;
             Self::enqueue(
@@ -836,6 +889,7 @@ impl AudioService {
                     renderer,
                     generation,
                     preserve: true,
+                    practice: document.practice,
                 },
             )?;
             self.set_backing_duration(&document);
@@ -874,6 +928,7 @@ impl AudioService {
                 settings: document.settings.clone(),
                 resources: document.resources.clone(),
                 backing: document.backing.clone(),
+                practice: document.practice,
             };
             state.device = device_id;
             return self.open(&mut state, saved, true);
@@ -881,7 +936,18 @@ impl AudioService {
         if self.shared.fault.load(Ordering::Acquire) != 0 {
             return Err("Audio output stopped. Select an output device to recover.".into());
         }
-        Self::enqueue(&mut state, CallbackCommand::Transport(command))
+        let accepted = command.clone();
+        Self::enqueue(&mut state, CallbackCommand::Transport(command))?;
+        match accepted {
+            TransportCommand::SetSpeed { speed, .. } => {
+                state.document.as_mut().unwrap().practice.speed = speed
+            }
+            TransportCommand::SetMetronome { enabled, .. } => {
+                state.document.as_mut().unwrap().practice.metronome = enabled
+            }
+            _ => {}
+        }
+        Ok(())
     }
     fn open(
         &self,
@@ -896,10 +962,11 @@ impl AudioService {
         let rate = config.sample_rate();
         let mut renderer = Self::renderer(&document, rate)?;
         let snapshot = self.status();
-        if preserve {
-            renderer.set_speed(snapshot.speed)?;
+        let preserve_position = preserve && snapshot.generation == document.plan.generation;
+        renderer.set_speed(document.practice.speed)?;
+        renderer.set_metronome(document.practice.metronome);
+        if preserve_position {
             renderer.seek_tick(snapshot.tick);
-            renderer.set_metronome(snapshot.metronome);
         }
         if document.plan.generation != self.shared.desired.load(Ordering::Acquire) {
             return Err("A newer score preparation superseded this request.".into());
@@ -912,12 +979,15 @@ impl AudioService {
         transport.renderer = Some(renderer);
         transport.generation = document.plan.generation;
         transport.ready = true;
-        if preserve {
+        transport.speed = document.practice.speed;
+        transport.metronome = document.practice.metronome;
+        if preserve_position {
             transport.tick = snapshot.tick;
             transport.seconds = snapshot.seconds;
-            transport.speed = snapshot.speed;
-            transport.metronome = snapshot.metronome;
             transport.playing = snapshot.playing;
+        } else {
+            self.shared.frames.store(0, Ordering::Relaxed);
+            self.shared.peak.store(0f64.to_bits(), Ordering::Relaxed);
         }
         let actual_id = device.id().map_err(|e| e.to_string())?.to_string();
         let (reply, answer) = mpsc::channel();
@@ -1062,6 +1132,111 @@ fn device_manager(requests: mpsc::Receiver<ManagerRequest>, shared: Arc<SharedSt
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn unavailable_device_with_practice() -> AudioService {
+        let service = AudioService::new(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/audio"),
+            Arc::new(|_| {}),
+        );
+        service.control.lock().unwrap().device = Some("unavailable-test-device".into());
+        let plan: PlaybackPlan = serde_json::from_value(serde_json::json!({"generation":1,"ppq":960,"durationTick":3840,"durationMs":2000,"tracks":[{"id":"gm","program":0,"percussion":false}],"tempos":[{"tick":0,"bpm":120}],"occurrences":[{"bar":0,"occurrence":0,"startTick":0,"endTick":3840,"startMs":0,"endMs":2000}],"notes":[],"midi":[]})).unwrap();
+        assert!(
+            service
+                .prepare_with_practice(
+                    plan,
+                    DocumentSettings::default(),
+                    None,
+                    PracticeSettings {
+                        speed: 0.5,
+                        metronome: true
+                    }
+                )
+                .is_err()
+        );
+        assert_eq!(service.prepared_generation(), Some(1));
+        service
+    }
+    #[test]
+    fn initial_device_failure_retains_prepared_practice_for_recovery() {
+        let service = unavailable_device_with_practice();
+        let document = service.control.lock().unwrap().document.clone().unwrap();
+        assert_eq!(document.practice.speed, 0.5);
+        assert!(document.practice.metronome);
+        let mut transport = CallbackTransport::headless(48_000);
+        transport.install_with_practice(
+            AudioService::renderer(&document, 48_000).unwrap(),
+            1,
+            true,
+            document.practice,
+        );
+        assert_eq!(transport.status().speed, 0.5);
+        assert!(transport.status().metronome);
+        transport
+            .command(TransportCommand::Play { generation: 1 })
+            .unwrap();
+        transport.render_into(&mut [[0.0; 2]; 512]);
+        assert!(transport.status().tick > 10.0 && transport.status().tick < 11.0);
+        assert!(transport.status().output_peak > 0.001);
+    }
+    #[test]
+    #[ignore = "Requires an available native audio output device."]
+    fn actual_initial_device_recovery_keeps_prepared_practice() {
+        let service = unavailable_device_with_practice();
+        service
+            .command(TransportCommand::SelectDevice {
+                generation: 1,
+                device_id: None,
+            })
+            .unwrap();
+        service
+            .command(TransportCommand::Play { generation: 1 })
+            .unwrap();
+        let until = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            let status = service.status();
+            if status.ready && status.playing && status.rendered_frames > 512 {
+                assert_eq!(status.speed, 0.5);
+                assert!(status.metronome);
+                assert!(status.output_peak > 0.001);
+                break;
+            }
+            assert!(std::time::Instant::now() < until, "{status:?}");
+            thread::sleep(Duration::from_millis(10));
+        }
+        service
+            .command(TransportCommand::Stop { generation: 1 })
+            .unwrap();
+    }
+    #[test]
+    fn invalid_practice_does_not_replace_a_retained_document() {
+        let service = unavailable_device_with_practice();
+        let plan = service
+            .control
+            .lock()
+            .unwrap()
+            .document
+            .as_ref()
+            .unwrap()
+            .plan
+            .as_ref()
+            .clone();
+        for speed in [f64::NAN, 0.24, 2.01] {
+            assert!(
+                service
+                    .prepare_with_practice(
+                        plan.clone(),
+                        DocumentSettings::default(),
+                        None,
+                        PracticeSettings {
+                            speed,
+                            metronome: false
+                        }
+                    )
+                    .is_err()
+            );
+            assert_eq!(service.prepared_generation(), Some(1));
+            assert_eq!(service.shared.desired.load(Ordering::Acquire), 1);
+        }
+    }
     #[test]
     fn invalidate_does_not_wait_for_preparation_mutex() {
         let service = Arc::new(AudioService::new(PathBuf::new(), Arc::new(|_| {})));

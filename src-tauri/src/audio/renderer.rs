@@ -2,17 +2,20 @@
 use super::{
     backing::{BackingMap, BackingVoice},
     decode::DecodedAudio,
-    dsp::{FxSettings, TrackDsp},
+    dsp::{FxSettings, MAX_TRACK_DELAY_SECONDS, TrackDsp},
     plan::{Articulation, PlanMidiEvent, PlaybackPlan, Timeline},
     resources::{AudioResources, Region},
     voices::{
-        SampleVoice, VoiceParameters, articulation_name, pitch_at, select_region,
-        voice_id_for_track,
+        SampleVoice, VoiceParameters, articulation_name, automatic_voice_id, note_program,
+        pitch_at, select_region, voice_id_for_note, voice_id_for_track,
     },
 };
 use crate::settings::{ChannelMix, DocumentSettings};
 use rustysynth::{Synthesizer, SynthesizerSettings};
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::{HashMap, VecDeque},
+    sync::Arc,
+};
 
 #[derive(Clone, Copy)]
 struct Gain {
@@ -70,12 +73,6 @@ impl PreparedMix {
     ) -> Result<Self, String> {
         settings.validate()?;
         plan.validate()?;
-        let minimum_bpm = plan
-            .tempos
-            .iter()
-            .map(|t| t.bpm)
-            .fold(f64::INFINITY, f64::min);
-        let maximum_delay = 60.0 / minimum_bpm * 4.0 / 0.25;
         let any_solo = plan
             .tracks
             .iter()
@@ -90,7 +87,7 @@ impl PreparedMix {
                 .get(&track.id)
                 .map(|s| s.effects.clone())
                 .unwrap_or_else(FxSettings::default);
-            let dsp = TrackDsp::new(fx, sample_rate, maximum_delay)?;
+            let dsp = TrackDsp::new(fx, sample_rate, MAX_TRACK_DELAY_SECONDS)?;
             channels.push(PreparedChannel {
                 dsp,
                 gain: Gain::new(&mix, !mix.mute && (!any_solo || mix.solo)),
@@ -163,6 +160,7 @@ impl VoiceSample {
 #[derive(Clone)]
 struct SelectedNote {
     track: usize,
+    instrument: usize,
     attack: VoiceSample,
     release: Option<VoiceSample>,
     noise: Option<VoiceSample>,
@@ -172,6 +170,7 @@ struct SelectedNote {
 struct ActiveVoice {
     note: usize,
     track: usize,
+    channel: u8,
     voice: SampleVoice,
     end_tick: f64,
     released: bool,
@@ -179,11 +178,48 @@ struct ActiveVoice {
     started_seconds: f64,
     unpitched: bool,
 }
+#[derive(Clone, Copy)]
+struct MidiChannel {
+    program: u8,
+    volume: f32,
+    expression: f32,
+    pan: [f32; 2],
+    sustain: bool,
+}
+impl MidiChannel {
+    fn new(program: u8) -> Self {
+        Self {
+            program,
+            volume: 1.0,
+            expression: 1.0,
+            pan: [1.0; 2],
+            sustain: false,
+        }
+    }
+    fn process(&self, sample: [f32; 2]) -> [f32; 2] {
+        std::array::from_fn(|c| sample[c] * self.volume * self.expression * self.pan[c])
+    }
+}
+#[derive(Clone, Copy)]
+struct MidiAttack {
+    program: u8,
+    recorded: bool,
+}
 struct Track {
     synth: Option<Synthesizer>,
+    automatic: bool,
+    fixed_recorded: bool,
+    percussion: bool,
+    channels: [MidiChannel; 16],
     ranges: [f64; 16],
     rpn_msb: [u8; 16],
     rpn_lsb: [u8; 16],
+}
+impl Track {
+    fn recorded_program(&self, program: u8) -> bool {
+        self.fixed_recorded
+            || self.automatic && automatic_voice_id(program, self.percussion).is_some()
+    }
 }
 pub struct Renderer {
     plan: Arc<PlaybackPlan>,
@@ -194,6 +230,10 @@ pub struct Renderer {
     seconds: f64,
     tracks: Vec<Track>,
     selected: Vec<Option<SelectedNote>>,
+    midi_attacks: Vec<Option<MidiAttack>>,
+    note_has_midi: Vec<bool>,
+    note_programs: Vec<u8>,
+    note_end_ticks: Vec<f64>,
     slots: Vec<Option<ActiveVoice>>,
     active: Vec<usize>,
     next_note: usize,
@@ -203,7 +243,7 @@ pub struct Renderer {
     backing: Option<BackingVoice>,
     tail: bool,
     metronome: bool,
-    last_quarter: i64,
+    last_click: Option<(usize, usize)>,
     click_age: usize,
     click_frequency: f64,
 }
@@ -229,19 +269,17 @@ impl Renderer {
             .map(|(i, n)| (n.id.as_str(), i))
             .collect();
         let mut tracks = Vec::with_capacity(plan.tracks.len());
-        let mut instruments = Vec::with_capacity(plan.tracks.len());
         for track in &plan.tracks {
-            let instrument = voice_id_for_track(track, &settings)
-                .map(|id| {
-                    resources
-                        .manifest
-                        .instruments
-                        .iter()
-                        .position(|i| i.id == id)
-                        .ok_or_else(|| format!("Unknown recorded instrument {id}."))
-                })
-                .transpose()?;
-            let synth = if instrument.is_none() {
+            if let Some(id) = voice_id_for_track(track, &settings) {
+                if !resources.manifest.instruments.iter().any(|i| i.id == id) {
+                    return Err(format!("Unknown recorded instrument {id}."));
+                }
+            }
+            let has_gm = voice_id_for_track(track, &settings).is_none()
+                || plan.notes.iter().any(|n| {
+                    n.track_id == track.id && voice_id_for_note(&plan, n, &settings).is_none()
+                });
+            let synth = if has_gm {
                 let mut config = SynthesizerSettings::new(sample_rate as i32);
                 config.maximum_polyphony = 256;
                 config.block_size = 8;
@@ -257,21 +295,76 @@ impl Renderer {
             };
             tracks.push(Track {
                 synth,
+                automatic: settings
+                    .sounds
+                    .get(&track.id)
+                    .and_then(|s| s.voice_id.as_ref())
+                    .is_none(),
+                fixed_recorded: settings
+                    .sounds
+                    .get(&track.id)
+                    .and_then(|s| s.voice_id.as_deref())
+                    .is_some_and(|id| id != "gm"),
+                percussion: track.percussion,
+                channels: [MidiChannel::new(track.program); 16],
                 ranges: [2.0; 16],
                 rpn_msb: [127; 16],
                 rpn_lsb: [127; 16],
             });
-            instruments.push(instrument);
         }
-        let mut counters = HashMap::<(usize, u8, u8, &str), usize>::new();
+        let note_programs: Vec<_> = plan.notes.iter().map(|n| note_program(&plan, n)).collect();
+        let sustain_events: Vec<_> = plan
+            .midi
+            .iter()
+            .filter_map(|event| match event {
+                PlanMidiEvent::Controller {
+                    track_id,
+                    tick,
+                    channel,
+                    controller: 64,
+                    value,
+                } => Some((track_id.as_str(), *tick, *channel, *value >= 64)),
+                _ => None,
+            })
+            .collect();
+        let note_end_ticks: Vec<_> = plan
+            .notes
+            .iter()
+            .map(|note| {
+                let mut down = false;
+                for &(track, tick, channel, sustain) in &sustain_events {
+                    if track != note.track_id || channel != note.channel.unwrap_or(0) {
+                        continue;
+                    }
+                    if tick <= note.end_tick {
+                        down = sustain;
+                    } else if down && !sustain {
+                        return tick;
+                    }
+                }
+                if down {
+                    plan.duration_tick.max(note.end_tick)
+                } else {
+                    note.end_tick
+                }
+            })
+            .collect();
+        let mut counters = HashMap::<(usize, usize, u8, u8, &str), usize>::new();
         let mut selected = Vec::with_capacity(plan.notes.len());
         for note in &plan.notes {
             let track = track_indices[note.track_id.as_str()];
-            if let Some(index) = instruments[track] {
+            if let Some(id) = voice_id_for_note(&plan, note, &settings) {
+                let index = resources
+                    .manifest
+                    .instruments
+                    .iter()
+                    .position(|i| i.id == id)
+                    .ok_or_else(|| format!("Unknown recorded instrument {id}."))?;
                 let instrument = &resources.manifest.instruments[index];
                 let counter = counters
                     .entry((
                         track,
+                        index,
                         note.key,
                         note.velocity,
                         articulation_name(note.articulation),
@@ -345,6 +438,7 @@ impl Renderer {
                 }
                 selected.push(Some(SelectedNote {
                     track,
+                    instrument: index,
                     attack,
                     release,
                     noise,
@@ -361,6 +455,49 @@ impl Renderer {
                 selected.push(None);
             }
         }
+        let mut attacks = HashMap::<(usize, u8, u8, u64), VecDeque<usize>>::new();
+        for (index, note) in plan.notes.iter().enumerate() {
+            attacks
+                .entry((
+                    track_indices[note.track_id.as_str()],
+                    note.channel.unwrap_or(0),
+                    note.key,
+                    note.start_tick.to_bits(),
+                ))
+                .or_default()
+                .push_back(index);
+        }
+        let mut note_has_midi = vec![false; plan.notes.len()];
+        let midi_attacks = plan
+            .midi
+            .iter()
+            .map(|event| {
+                if let PlanMidiEvent::NoteOn {
+                    track_id,
+                    channel,
+                    key,
+                    tick,
+                    ..
+                } = event
+                {
+                    let note = attacks
+                        .get_mut(&(
+                            track_indices[track_id.as_str()],
+                            *channel,
+                            *key,
+                            tick.to_bits(),
+                        ))?
+                        .pop_front()?;
+                    note_has_midi[note] = true;
+                    Some(MidiAttack {
+                        program: note_programs[note],
+                        recorded: selected[note].is_some(),
+                    })
+                } else {
+                    None
+                }
+            })
+            .collect();
         let capacity = plan.notes.len().saturating_mul(3).max(8);
         let slots = (0..capacity).map(|_| None).collect();
         let scratch = vec![[0.0; 2]; plan.tracks.len() + 2];
@@ -373,6 +510,10 @@ impl Renderer {
             seconds: 0.0,
             tracks,
             selected,
+            midi_attacks,
+            note_has_midi,
+            note_programs,
+            note_end_ticks,
             slots,
             active: Vec::with_capacity(capacity),
             next_note: 0,
@@ -382,7 +523,7 @@ impl Renderer {
             backing: None,
             tail: false,
             metronome: false,
-            last_quarter: -1,
+            last_click: None,
             click_age: usize::MAX,
             click_frequency: 2000.0,
         })
@@ -400,6 +541,7 @@ impl Renderer {
             self.slots[slot] = Some(ActiveVoice {
                 note,
                 track,
+                channel: self.plan.notes[note].channel.unwrap_or(0),
                 voice,
                 end_tick,
                 released: false,
@@ -417,20 +559,26 @@ impl Renderer {
         let note = &self.plan.notes[index];
         if let Some(origin) = selected.chain {
             if let Some(slot) = self.active.iter().copied().find(|&i| {
-                self.slots[i]
-                    .as_ref()
-                    .is_some_and(|v| v.note == origin && !v.unpitched && v.voice.is_active())
+                self.slots[i].as_ref().is_some_and(|v| {
+                    v.note == origin
+                        && !v.unpitched
+                        && v.voice.is_active()
+                        && self.selected[origin]
+                            .as_ref()
+                            .is_some_and(|from| from.instrument == selected.instrument)
+                })
             }) {
                 let active = self.slots[slot].as_mut().unwrap();
                 active.voice.transition(note.key, note.articulation);
                 active.note = index;
-                active.end_tick = note.end_tick;
+                active.channel = note.channel.unwrap_or(0);
+                active.end_tick = self.note_end_ticks[index];
                 active.released = false;
                 active.release = selected.release;
                 return;
             }
         }
-        let end = note.end_tick;
+        let end = self.note_end_ticks[index];
         let mut voice = selected.attack.instantiate(self.rate);
         if selected.suppress_pick {
             voice.seek_elapsed_seconds(0.025, pitch_at(&note.pitch, note.start_tick));
@@ -448,23 +596,47 @@ impl Renderer {
             );
         }
     }
-    fn midi_event(track: &mut Track, event: &PlanMidiEvent) {
-        let Some(synth) = &mut track.synth else {
-            return;
-        };
+    fn gm_note_on(track: &mut Track, channel: u8, key: u8, velocity: u8, program: u8) {
+        if let Some(synth) = &mut track.synth {
+            synth.process_midi_message(channel as i32, 0xc0, program as i32, 0);
+            synth.note_on(channel as i32, key as i32, velocity as i32);
+            synth.process_midi_message(
+                channel as i32,
+                0xc0,
+                track.channels[channel as usize].program as i32,
+                0,
+            );
+        }
+    }
+    fn midi_event(track: &mut Track, event: &PlanMidiEvent, attack: Option<MidiAttack>) {
         match event {
             PlanMidiEvent::NoteOn {
                 channel,
                 key,
                 velocity,
                 ..
-            } => synth.note_on(*channel as i32, *key as i32, *velocity as i32),
+            } => {
+                let program =
+                    attack.map_or(track.channels[*channel as usize].program, |a| a.program);
+                let recorded =
+                    attack.map_or_else(|| track.recorded_program(program), |a| a.recorded);
+                if !recorded {
+                    Self::gm_note_on(track, *channel, *key, *velocity, program);
+                }
+            }
             PlanMidiEvent::NoteOff { channel, key, .. } => {
-                synth.note_off(*channel as i32, *key as i32)
+                if let Some(synth) = &mut track.synth {
+                    synth.note_off(*channel as i32, *key as i32);
+                }
             }
             PlanMidiEvent::Program {
                 channel, program, ..
-            } => synth.process_midi_message(*channel as i32, 0xc0, *program as i32, 0),
+            } => {
+                track.channels[*channel as usize].program = *program;
+                if let Some(synth) = &mut track.synth {
+                    synth.process_midi_message(*channel as i32, 0xc0, *program as i32, 0);
+                }
+            }
             PlanMidiEvent::Controller {
                 channel,
                 controller,
@@ -472,6 +644,20 @@ impl Renderer {
                 ..
             } => {
                 let c = *channel as usize;
+                match *controller {
+                    7 => track.channels[c].volume = *value as f32 / 127.0,
+                    11 => track.channels[c].expression = *value as f32 / 127.0,
+                    10 => {
+                        let pan = (*value as f64 - 64.0) / if *value < 64 { 64.0 } else { 63.0 };
+                        let angle = (pan + 1.0) * std::f64::consts::FRAC_PI_4;
+                        track.channels[c].pan = [
+                            (angle.cos() * std::f64::consts::SQRT_2) as f32,
+                            (angle.sin() * std::f64::consts::SQRT_2) as f32,
+                        ];
+                    }
+                    64 => track.channels[c].sustain = *value >= 64,
+                    _ => {}
+                }
                 if *controller == 101 {
                     track.rpn_msb[c] = *value;
                 }
@@ -481,19 +667,23 @@ impl Renderer {
                 if *controller == 6 && track.rpn_msb[c] == 0 && track.rpn_lsb[c] == 0 {
                     track.ranges[c] = (*value as f64).max(1.0);
                 }
-                synth.process_midi_message(
-                    *channel as i32,
-                    0xb0,
-                    *controller as i32,
-                    *value as i32,
-                );
+                if let Some(synth) = &mut track.synth {
+                    synth.process_midi_message(
+                        *channel as i32,
+                        0xb0,
+                        *controller as i32,
+                        *value as i32,
+                    );
+                }
             }
             PlanMidiEvent::Bend { channel, value, .. }
             | PlanMidiEvent::NoteBend { channel, value, .. } => {
                 let wheel = (8192.0 + *value / track.ranges[*channel as usize] * 8192.0)
                     .round()
                     .clamp(0.0, 16383.0) as i32;
-                synth.process_midi_message(*channel as i32, 0xe0, wheel & 127, wheel >> 7);
+                if let Some(synth) = &mut track.synth {
+                    synth.process_midi_message(*channel as i32, 0xe0, wheel & 127, wheel >> 7);
+                }
             }
         }
     }
@@ -517,7 +707,11 @@ impl Renderer {
                     .iter()
                     .position(|t| t.id == event.track_id())
                 {
-                    Self::midi_event(&mut self.tracks[index], event);
+                    Self::midi_event(
+                        &mut self.tracks[index],
+                        event,
+                        self.midi_attacks[self.next_midi],
+                    );
                 }
                 self.next_midi += 1;
             }
@@ -541,7 +735,8 @@ impl Renderer {
             } else {
                 pitch_at(&self.plan.notes[voice.note].pitch, tick)
             };
-            let sample = voice.voice.next_frame(pitch);
+            let sample = self.tracks[voice.track].channels[voice.channel as usize]
+                .process(voice.voice.next_frame(pitch));
             for c in 0..2 {
                 self.scratch[voice.track][c] += sample[c];
             }
@@ -590,11 +785,11 @@ impl Renderer {
         }
         if self.metronome {
             let (beat, _, accent) = self.beat_grid(tick);
-            if beat != self.last_quarter
+            if Some(beat) != self.last_click
                 && !self.tail
                 && self.seconds < self.plan.duration_ms / 1000.0
             {
-                self.last_quarter = beat;
+                self.last_click = Some(beat);
                 self.click_age = 0;
                 self.click_frequency = if accent { 2400.0 } else { 1800.0 };
             }
@@ -679,29 +874,8 @@ impl Renderer {
         }
         self.next_note = self.plan.notes.partition_point(|n| n.start_tick < tick);
         self.next_midi = self.plan.midi.partition_point(|m| m.tick() < tick);
-        for index in 0..self.next_note {
-            if self.plan.notes[index].end_tick > tick {
-                self.start_note(index);
-                if let Some(slot) = self.active.iter().copied().find(|&i| {
-                    self.slots[i]
-                        .as_ref()
-                        .is_some_and(|v| v.note == index && !v.unpitched)
-                }) {
-                    let elapsed = (self.seconds
-                        - self
-                            .timeline
-                            .tick_to_seconds(self.plan.notes[index].start_tick))
-                        / self.speed;
-                    let pitch = pitch_at(&self.plan.notes[index].pitch, tick);
-                    self.slots[slot]
-                        .as_mut()
-                        .unwrap()
-                        .voice
-                        .seek_elapsed_seconds(elapsed, pitch);
-                }
-            }
-        }
         for (track_index, track) in self.tracks.iter_mut().enumerate() {
+            track.channels = [MidiChannel::new(self.plan.tracks[track_index].program); 16];
             if let Some(synth) = &mut track.synth {
                 synth.reset();
                 for channel in 0..16 {
@@ -717,13 +891,16 @@ impl Renderer {
             track.rpn_msb = [127; 16];
             track.rpn_lsb = [127; 16];
             let mut held = [[0u8; 128]; 16];
+            let mut sustained = [[false; 128]; 16];
             let mut velocities = [[0u8; 128]; 16];
-            for event in self
+            let mut programs = [[0u8; 128]; 16];
+            for (event_index, event) in self
                 .plan
                 .midi
                 .iter()
                 .take(self.next_midi)
-                .filter(|e| e.track_id() == self.plan.tracks[track_index].id)
+                .enumerate()
+                .filter(|(_, e)| e.track_id() == self.plan.tracks[track_index].id)
             {
                 match event {
                     PlanMidiEvent::NoteOn {
@@ -732,24 +909,79 @@ impl Renderer {
                         velocity,
                         ..
                     } => {
-                        held[*channel as usize][*key as usize] =
-                            held[*channel as usize][*key as usize].saturating_add(1);
-                        velocities[*channel as usize][*key as usize] = *velocity;
-                    }
-                    PlanMidiEvent::NoteOff { channel, key, .. } => {
-                        held[*channel as usize][*key as usize] =
-                            held[*channel as usize][*key as usize].saturating_sub(1);
-                    }
-                    _ => Self::midi_event(track, event),
-                }
-            }
-            if let Some(synth) = &mut track.synth {
-                for c in 0..16 {
-                    for key in 0..128 {
-                        if held[c][key] > 0 {
-                            synth.note_on(c as i32, key as i32, velocities[c][key] as i32);
+                        let c = *channel as usize;
+                        let k = *key as usize;
+                        if self.midi_attacks[event_index].is_none()
+                            && !track.recorded_program(track.channels[c].program)
+                        {
+                            held[c][k] = held[c][k].saturating_add(1);
+                            velocities[c][k] = *velocity;
+                            programs[c][k] = track.channels[c].program;
                         }
                     }
+                    PlanMidiEvent::NoteOff { channel, key, .. } => {
+                        let c = *channel as usize;
+                        let k = *key as usize;
+                        if held[c][k] > 0 {
+                            held[c][k] -= 1;
+                            sustained[c][k] = track.channels[c].sustain;
+                        }
+                    }
+                    _ => {
+                        Self::midi_event(track, event, None);
+                        if let PlanMidiEvent::Controller {
+                            channel,
+                            controller: 64,
+                            value,
+                            ..
+                        } = event
+                        {
+                            if *value < 64 {
+                                sustained[*channel as usize].fill(false);
+                            }
+                        }
+                    }
+                }
+            }
+            for c in 0..16 {
+                for key in 0..128 {
+                    if held[c][key] > 0 || sustained[c][key] {
+                        Self::gm_note_on(
+                            track,
+                            c as u8,
+                            key as u8,
+                            velocities[c][key],
+                            programs[c][key],
+                        );
+                    }
+                }
+            }
+        }
+        for index in 0..self.next_note {
+            if self.note_end_ticks[index] > tick {
+                self.start_note(index);
+                if let Some(slot) = self.active.iter().copied().find(|&i| {
+                    self.slots[i]
+                        .as_ref()
+                        .is_some_and(|v| v.note == index && !v.unpitched)
+                }) {
+                    let note = &self.plan.notes[index];
+                    let elapsed = (self.seconds - self.timeline.tick_to_seconds(note.start_tick))
+                        / self.speed;
+                    self.slots[slot]
+                        .as_mut()
+                        .unwrap()
+                        .voice
+                        .seek_elapsed_seconds(elapsed, pitch_at(&note.pitch, tick));
+                } else if self.selected[index].is_none() && self.note_has_midi[index] {
+                    let note = &self.plan.notes[index];
+                    Self::gm_note_on(
+                        &mut self.tracks[note.source.target.track as usize],
+                        note.channel.unwrap_or(0),
+                        note.key,
+                        note.velocity,
+                        self.note_programs[index],
+                    );
                 }
             }
         }
@@ -806,31 +1038,32 @@ impl Renderer {
         self.metronome = enabled;
         self.reset_click_position();
     }
-    fn beat_grid(&self, tick: f64) -> (i64, f64, bool) {
+    fn beat_grid(&self, tick: f64) -> ((usize, usize), f64, bool) {
         let occurrence = self
             .plan
             .occurrences
             .partition_point(|o| o.start_tick <= tick + 1e-7)
             .saturating_sub(1);
-        let start = self
-            .plan
-            .occurrences
-            .get(occurrence)
-            .map_or(0.0, |o| o.start_tick);
-        let beat = ((tick - start + 1e-7) / self.plan.ppq as f64).floor() as i64;
-        (
-            occurrence as i64 * 1_000_000 + beat,
-            start + beat as f64 * self.plan.ppq as f64,
-            beat == 0,
-        )
+        let measure = self.plan.occurrences.get(occurrence);
+        let (beat, start) = if let Some(clicks) = measure.and_then(|o| o.click_ticks.as_ref()) {
+            let beat = clicks
+                .partition_point(|t| *t <= tick + 1e-7)
+                .saturating_sub(1);
+            (beat, clicks[beat])
+        } else {
+            let start = measure.map_or(0.0, |o| o.start_tick);
+            let beat = ((tick - start + 1e-7) / self.plan.ppq as f64).floor() as usize;
+            (beat, start + beat as f64 * self.plan.ppq as f64)
+        };
+        ((occurrence, beat), start, beat == 0)
     }
     fn reset_click_position(&mut self) {
         let tick = self.timeline.seconds_to_tick(self.seconds);
         let (beat, start, _) = self.beat_grid(tick);
-        self.last_quarter = if (tick - start).abs() < 1e-6 {
-            -1
+        self.last_click = if (tick - start).abs() < 1e-6 {
+            None
         } else {
-            beat
+            Some(beat)
         };
         self.click_age = usize::MAX;
     }

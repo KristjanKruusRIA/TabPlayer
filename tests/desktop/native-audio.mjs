@@ -56,7 +56,9 @@ try {
   await button('Stop');await page.getByRole('combobox',{name:/^Speed/}).selectOption('50');await button('Loop');await button('Play');
   await waitStatus(s=>s.speed===.5&&s.tick>3600);
   await waitStatus(s=>s.playing&&s.tick<960);await button('Stop');await button('Clear loop');
-  await button('Play');await waitStatus(s=>s.playing);const beforeEdit=await status();await page.getByLabel('Fret',{exact:true}).fill('7');await button('Set note');await waitStatus(s=>s.generation>beforeEdit.generation);await ready();assert.equal((await status()).playing,false);
+  await page.getByLabel('Metronome',{exact:true}).click();await waitStatus(s=>s.metronome);
+  await button('Play');await waitStatus(s=>s.playing);const beforeEdit=await status();await page.getByLabel('Fret',{exact:true}).fill('7');await button('Set note');await waitStatus(s=>s.generation>beforeEdit.generation);await ready();assert.equal((await status()).playing,false);assert.equal((await status()).speed,.5);assert.equal((await status()).metronome,true);
+  for(const action of ['Undo','Redo']){await button(action);await ready();assert.equal((await status()).speed,.5);assert.equal((await status()).metronome,true);}
   await button('Play');await waitStatus(s=>s.playing&&s.renderedFrames>4096&&s.outputPeak>.001);await button('Stop');await waitStatus(s=>!s.playing&&s.tick===0);
   await button('Import backing');await waitStatus(s=>Math.abs(s.backingDurationSeconds-2)<.001);
   const withBacking=await snapshot();const setBacking=withBacking.project.edits.findLast(edit=>edit.type==='setBacking');assert.ok(setBacking.backing.assetId);const asset=withBacking.project.assets[setBacking.backing.assetId];assert.equal(asset.byteLength,bytes.length);assert.equal('bytesBase64' in asset,false);
@@ -74,7 +76,7 @@ try {
   await page.locator('.track-card').first().getByLabel('Mute',{exact:true}).click();await waitMute(true);await idle();await button('Play');
   const reopenedBackingSignal=await waitStatus(s=>s.playing&&s.renderedFrames>4096&&s.outputPeak>.01);await button('Stop');await waitStatus(s=>!s.playing&&s.tick===0);
   await button('Undo');await waitMute(false);assert.deepEqual((await snapshot()).project,savedSnapshot.project);
-  const beforeNew=await status();await button('New');await ready();assert.ok((await status()).generation>beforeNew.generation);assert.equal((await status()).playing,false);
+  const beforeNew=await status();await button('New');await ready();assert.ok((await status()).generation>beforeNew.generation);assert.equal((await status()).playing,false);assert.equal((await status()).speed,1);assert.equal((await status()).metronome,false);
   assert.equal((await page.evaluate(()=>window.__nativeAudioSmoke)).webAudioSamples,0,'External media mode must never emit a second synthesizer stream.');
   const result={actualNativeCallbacks:true,played,captured,capturedPath,cursorMoved:true,noSecondSynth:true,settingsUndoPreservesPlayback:true,inclusiveLoop:true,musicalEditStopsAndRefreshesPlayback:true,backingTransaction:true,selfContainedBackingRestartReopen:true,authoredBackingUnavailableDuringReopen:true,reopenedBackingSignal,newClearsTransport:true,offlineWebview:true,blockedExternal:[...new Set(blockedExternal)]};
   writeFileSync(join(directory,'native-audio-result.json'),JSON.stringify(result,null,2));await page.screenshot({path:join(directory,'native-audio.png')});

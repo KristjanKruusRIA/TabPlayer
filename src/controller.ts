@@ -4,15 +4,16 @@ import { type EditCommand, type ProjectSnapshot, type AssetCandidate, type Docum
 import { isSettingsEdit } from './edit-types';
 import type { NativeBridge } from './bridge';
 
-export interface DocumentState extends BuiltDocument { snapshot: ProjectSnapshot; busy: boolean; error: string | null }
+export interface DocumentState extends BuiltDocument { snapshot: ProjectSnapshot; documentEpoch:number; busy: boolean; error: string | null }
 
 export class DocumentController {
   private state: DocumentState;
   private listeners = new Set<() => void>();
   private tail: Promise<unknown> = Promise.resolve();
+  private undone:EditCommand[]=[];
 
   private constructor(private bridge: NativeBridge, snapshot: ProjectSnapshot, private beforeChange: () => void) {
-    this.state={snapshot,...buildDocument(snapshot.project),busy:false,error:null};
+    this.state={snapshot,...buildDocument(snapshot.project),documentEpoch:0,busy:false,error:null};
   }
   static async create(bridge: NativeBridge, beforeChange: () => void = () => {}) {
     return new DocumentController(bridge,await bridge.snapshot(),beforeChange);
@@ -49,7 +50,7 @@ export class DocumentController {
       try {await this.bridge.cancelDocument?.(candidate.token);} catch {}
       throw error;
     }
-    this.update({snapshot,...built});
+    this.undone=[];this.update({snapshot,...built,documentEpoch:this.state.documentEpoch+1});
   }
   open() { return this.run(async()=>{
     if (!await this.canLeave()) return;
@@ -70,20 +71,22 @@ export class DocumentController {
       if(asset) {try {await this.bridge.cancelAsset?.(asset.token);} catch {}}
       throw error;
     }
-    this.update({snapshot,score:candidate.score,settings:candidate.settings,embeddedBacking:candidate.embeddedBacking,embeddedBackingSettings:candidate.embeddedBackingSettings,sourceMixes:candidate.sourceMixes});
+    this.undone=[];this.update({snapshot,score:candidate.score,settings:candidate.settings,embeddedBacking:candidate.embeddedBacking,embeddedBackingSettings:candidate.embeddedBackingSettings,sourceMixes:candidate.sourceMixes});
   }); }
-  private replaceHistory(snapshot:ProjectSnapshot,settingsOnly:boolean) {
-    if(!settingsOnly) this.beforeChange();
-    const built=settingsOnly?replayDocumentSettings(snapshot.project,this.state):buildDocument(snapshot.project);
-    this.update({snapshot,...built});
-  }
   undo() { return this.run(async()=>{
-    const removed=this.state.snapshot.project.edits.at(-1);const snapshot=await this.bridge.undo();
-    this.replaceHistory(snapshot,!!removed && isSettingsEdit(removed));
+    const project=this.state.snapshot.project,removed=project.edits.at(-1);if(!removed)return;
+    const settingsOnly=isSettingsEdit(removed),previous={...project,edits:project.edits.slice(0,-1)};
+    const built=settingsOnly?replayDocumentSettings(previous,this.state):buildDocument(previous);
+    if(!settingsOnly)this.beforeChange();const snapshot=await this.bridge.undo();
+    this.undone.push(removed);this.update({snapshot,...built});
   }); }
   redo() { return this.run(async()=>{
-    const snapshot=await this.bridge.redo();const restored=snapshot.project.edits.at(-1);
-    this.replaceHistory(snapshot,!!restored && isSettingsEdit(restored));
+    const restored=this.state.snapshot.redoEdit ?? this.undone.at(-1);
+    if(!restored){if(this.state.snapshot.canRedo)throw new Error('The next redo command is unavailable; reopen the document.');return;}
+    const project={...this.state.snapshot.project,edits:[...this.state.snapshot.project.edits,restored]},settingsOnly=isSettingsEdit(restored);
+    const built=settingsOnly?replayDocumentSettings(project,this.state):buildDocument(project);
+    if(!settingsOnly)this.beforeChange();const snapshot=await this.bridge.redo();
+    this.undone.pop();this.update({snapshot,...built});
   }); }
   save(saveAs = false) { return this.run(()=>this.saveNow(saveAs)); }
   export() { return this.run(async()=>{

@@ -2,13 +2,15 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { importer, model } from '@coderline/alphatab';
 import { buildDocument, buildScore, effectiveAudioSettings, previewEdit, replayDocumentSettings } from './engine';
 import { blankProject, type EditCommand } from './project';
+import type { SyncAnchor } from './edit-types';
+import { buildPlaybackPlan } from './audio/plan';
 
 afterEach(()=>vi.restoreAllMocks());
 
 function embeddedProject(edits:EditCommand[]=[]) {
   const source=buildScore(blankProject());const bytes=new Uint8Array([82,73,70,70]);
   source.backingTrack={rawAudioFile:bytes};source.tracks[0].playbackInfo.isMute=true;
-  for (const [bar,occurrence,ratio,audioMs] of [[0,0,0,120],[2,1,.5,4200],[3,0,.75,6900]]) {
+  for (const [bar,occurrence,ratio,audioMs] of [[0,0,0,120],[2,0,.5,4200],[3,0,.75,6900]]) {
     const sync=new model.Automation();sync.ratioPosition=ratio;sync.syncPointValue=new model.SyncPointData();
     sync.syncPointValue.barOccurence=occurrence;sync.syncPointValue.millisecondOffset=audioMs;
     source.masterBars[bar].syncPoints=[sync];
@@ -23,7 +25,7 @@ it('captures original embedded audio anchors before rebuilding the score',()=>{
   expect(built.embeddedBacking).toEqual(bytes);
   expect(built.embeddedBacking===bytes).toBe(false);
   expect(built).toHaveProperty('embeddedBackingSettings',{
-    offsetMs:0,anchors:[{bar:0,occurrence:0,ratio:0,audioMs:120},{bar:2,occurrence:1,ratio:.5,audioMs:4200},{bar:3,occurrence:0,ratio:.75,audioMs:6900}],
+    offsetMs:0,anchors:[{bar:0,occurrence:0,ratio:0,audioMs:120},{bar:2,occurrence:0,ratio:.5,audioMs:4200},{bar:3,occurrence:0,ratio:.75,audioMs:6900}],
     mix:{gain:1,pan:0,mute:false,solo:false},
   });
 });
@@ -38,7 +40,7 @@ it('shifts and deletes embedded synchronization anchors with removed measures',(
 it('uses original embedded backing until an explicit score-only edit and restores it on undo',()=>{
   const {project}=embeddedProject();const built=buildDocument(project);
   expect(effectiveAudioSettings(project,built).backing).toEqual({assetId:'embedded',offsetMs:0,
-    anchors:[{bar:0,occurrence:0,ratio:0,audioMs:120},{bar:2,occurrence:1,ratio:.5,audioMs:4200},{bar:3,occurrence:0,ratio:.75,audioMs:6900}],
+    anchors:[{bar:0,occurrence:0,ratio:0,audioMs:120},{bar:2,occurrence:0,ratio:.5,audioMs:4200},{bar:3,occurrence:0,ratio:.75,audioMs:6900}],
     mix:{gain:1,pan:0,mute:false,solo:false},
   });
   expect(built.settings.backing).toBeNull();expect(project.assets).toEqual({});
@@ -60,10 +62,10 @@ it('preserves explicitly selected backing instead of the original embedded audio
 it('replays earlier backing anchors against their historical measure layout',()=>{
   const assetId='b'.repeat(64);const project=blankProject();
   project.assets[assetId]={filename:'backing.wav',mediaType:'audio/wav',byteLength:100};
-  project.edits=[{type:'setBacking',backing:{assetId,offsetMs:0,anchors:[{bar:3,occurrence:1,ratio:.5,audioMs:4000}],mix:{gain:1,pan:0,mute:false,solo:false}}},{type:'removeMeasure',bar:1}];
+  project.edits=[{type:'setBacking',backing:{assetId,offsetMs:0,anchors:[{bar:3,occurrence:0,ratio:.5,audioMs:4000}],mix:{gain:1,pan:0,mute:false,solo:false}}},{type:'removeMeasure',bar:1}];
   const built=buildDocument(project);const cleared=previewEdit(project,{type:'setBacking',backing:null},built);
   const restored=replayDocumentSettings(project,cleared);
-  expect(restored.settings.backing?.anchors).toEqual([{bar:2,occurrence:1,ratio:.5,audioMs:4000}]);
+  expect(restored.settings.backing?.anchors).toEqual([{bar:2,occurrence:0,ratio:.5,audioMs:4000}]);
   expect(restored.score===built.score).toBe(true);
 });
 
@@ -86,4 +88,36 @@ it('distinguishes original embedded backing from explicit score-only playback', 
   const candidate = previewEdit(project, { type: 'setBacking', backing: null } as unknown as EditCommand);
   expect(candidate.project.edits).toEqual([{ type: 'setBacking', backing: null }]);
   expect(candidate).toHaveProperty('settings.backing', null);
+});
+
+const invalidBackingAnchors:{reason:string;anchors:SyncAnchor[]}[]=[
+  {reason:'missing repeat occurrence',anchors:[{bar:0,occurrence:999,ratio:0,audioMs:0}]},
+  {reason:'backwards mapped audio time',anchors:[{bar:0,occurrence:0,ratio:0,audioMs:1000},{bar:1,occurrence:0,ratio:0,audioMs:0}]},
+  {reason:'aliased bar-boundary positions',anchors:[{bar:0,occurrence:0,ratio:1,audioMs:0},{bar:1,occurrence:0,ratio:0,audioMs:1000}]},
+];
+const backingAssetId='c'.repeat(64);
+const backingEdit=(anchors:SyncAnchor[]):EditCommand=>({type:'setBacking',backing:{assetId:backingAssetId,offsetMs:0,anchors,mix:{gain:1,pan:0,mute:false,solo:false}}});
+const projectForBacking=(edits:EditCommand[]=[])=>({...blankProject(),assets:{[backingAssetId]:{filename:'backing.wav',mediaType:'audio/wav',byteLength:100}},edits});
+const repeatStart:Extract<EditCommand,{type:'setMeasureSettings'}>={type:'setMeasureSettings',bar:0,numerator:4,denominator:4,pickup:false,freeTime:false,repeatStart:true,repeatCount:0,endings:[],section:'',tempos:[]};
+const repeatEnd={...repeatStart,bar:1,repeatStart:false,repeatCount:2};
+
+it.each(invalidBackingAnchors)('rejects a preview with $reason before installing candidate settings',({anchors})=>{
+  const project=projectForBacking();const original=structuredClone(project);const current=buildDocument(project);const originalSettings=structuredClone(current.settings);
+  expect(()=>previewEdit(project,backingEdit(anchors),current)).toThrow(/anchor|backing|occurrence/i);
+  expect(project).toEqual(original);expect(current.settings).toEqual(originalSettings);
+});
+
+it('rejects repeat removal when an existing backing anchor loses its played occurrence',()=>{
+  const project=projectForBacking([repeatStart,repeatEnd,backingEdit([{bar:1,occurrence:1,ratio:.5,audioMs:6500}])]);
+  const current=buildDocument(project);const original=structuredClone(project);const originalSettings=structuredClone(current.settings);
+  expect(buildPlaybackPlan(current.score,1).occurrences.map(o=>[o.bar,o.occurrence])).toEqual([[0,0],[1,0],[0,1],[1,1],[2,0],[3,0]]);
+  expect(()=>previewEdit(project,{...repeatEnd,repeatCount:0},current)).toThrow(/anchor|backing|occurrence/i);
+  expect(project).toEqual(original);expect(current.settings).toEqual(originalSettings);
+});
+
+it('accepts backing anchors in performed repeat order instead of lexical bar order',()=>{
+  const project=projectForBacking([repeatStart,repeatEnd]);const current=buildDocument(project);
+  const candidate=previewEdit(project,backingEdit([{bar:1,occurrence:0,ratio:0,audioMs:2000},{bar:0,occurrence:1,ratio:0,audioMs:3000}]),current);
+  expect(candidate.settings.backing?.anchors).toEqual([{bar:1,occurrence:0,ratio:0,audioMs:2000},{bar:0,occurrence:1,ratio:0,audioMs:3000}]);
+  expect(candidate.score===current.score).toBe(true);
 });

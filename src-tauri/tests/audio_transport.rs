@@ -1,7 +1,7 @@
 use std::{path::PathBuf, sync::Arc};
 use tabplayer_lib::{
     audio::{
-        device::{CallbackTransport, TransportCommand},
+        device::{CallbackTransport, PracticeSettings, TransportCommand},
         plan::PlaybackPlan,
         renderer::Renderer,
         resources::AudioResources,
@@ -140,6 +140,57 @@ fn inclusive_loop_seek_pause_resume() {
     assert_eq!(transport.status().tick, 0.0);
 }
 #[test]
+fn same_document_generation_replacement_retains_practice_and_clears_loop() {
+    let mut transport = CallbackTransport::headless(48_000);
+    transport.install(renderer(1), 1, false);
+    transport
+        .command(TransportCommand::SetSpeed {
+            generation: 1,
+            speed: 0.5,
+        })
+        .unwrap();
+    transport
+        .command(TransportCommand::SetMetronome {
+            generation: 1,
+            enabled: true,
+        })
+        .unwrap();
+    transport
+        .command(TransportCommand::SetLoop {
+            generation: 1,
+            start_tick: 0.0,
+            end_tick: 3840.0,
+        })
+        .unwrap();
+    transport
+        .command(TransportCommand::Invalidate { generation: 2 })
+        .unwrap();
+    transport.install_with_practice(
+        renderer(2),
+        2,
+        false,
+        PracticeSettings {
+            speed: 0.5,
+            metronome: true,
+        },
+    );
+    assert_eq!(transport.status().speed, 0.5);
+    assert!(transport.status().metronome);
+    assert!(!transport.status().playing);
+    transport
+        .command(TransportCommand::Play { generation: 2 })
+        .unwrap();
+    let mut block = [[0.0; 2]; 512];
+    for _ in 0..469 {
+        transport.render_into(&mut block);
+    }
+    assert!(transport.status().tick > 4800.0 && transport.status().tick < 4805.0);
+    assert!(transport.status().output_peak > 0.001);
+    transport.install(renderer(3), 3, false);
+    assert_eq!(transport.status().speed, 1.0);
+    assert!(!transport.status().metronome);
+}
+#[test]
 fn device_error_is_recoverable() {
     let mut transport = CallbackTransport::headless(48_000);
     transport.install(renderer(1), 1, false);
@@ -227,7 +278,7 @@ fn default_device_playback_and_recovery() {
     assert!(played.seconds > 0.0);
     assert!(played.device_id.is_some());
     println!("Native default output: {played:?}");
-    let mut failed_plan = plan;
+    let mut failed_plan = plan.clone();
     failed_plan.generation = 11;
     let mut bad_settings = DocumentSettings::default();
     bad_settings.sounds.insert(
@@ -250,6 +301,19 @@ fn default_device_playback_and_recovery() {
         .command(TransportCommand::Play { generation: 10 })
         .unwrap();
     wait(&|s| s.playing);
+    service
+        .command(TransportCommand::SetSpeed {
+            generation: 10,
+            speed: 0.5,
+        })
+        .unwrap();
+    service
+        .command(TransportCommand::SetMetronome {
+            generation: 10,
+            enabled: true,
+        })
+        .unwrap();
+    wait(&|s| s.speed == 0.5 && s.metronome);
     assert!(
         service
             .command(TransportCommand::SelectDevice {
@@ -266,7 +330,7 @@ fn default_device_playback_and_recovery() {
             device_id: None,
         })
         .unwrap();
-    wait(&|s| s.ready);
+    wait(&|s| s.ready && s.speed == 0.5 && s.metronome);
     service
         .command(TransportCommand::Play { generation: 10 })
         .unwrap();
@@ -275,6 +339,44 @@ fn default_device_playback_and_recovery() {
         .command(TransportCommand::Stop { generation: 10 })
         .unwrap();
     wait(&|s| !s.playing && s.tick == 0.0);
+    let mut edited = plan.clone();
+    edited.generation = 12;
+    service
+        .prepare_with_practice(
+            edited,
+            DocumentSettings::default(),
+            None,
+            PracticeSettings {
+                speed: 0.5,
+                metronome: true,
+            },
+        )
+        .unwrap();
+    wait(&|s| {
+        s.generation == 12
+            && s.ready
+            && !s.playing
+            && s.tick == 0.0
+            && s.speed == 0.5
+            && s.metronome
+    });
+    service
+        .command(TransportCommand::Play { generation: 12 })
+        .unwrap();
+    wait(&|s| s.playing && s.rendered_frames > 512 && s.output_peak > 0.001);
+    let mut replacement = plan;
+    replacement.generation = 13;
+    service
+        .prepare(replacement, DocumentSettings::default(), None)
+        .unwrap();
+    wait(&|s| {
+        s.generation == 13
+            && s.ready
+            && !s.playing
+            && s.tick == 0.0
+            && s.speed == 1.0
+            && !s.metronome
+    });
     assert!(
         events
             .lock()

@@ -226,6 +226,27 @@ fn saved_copy_compacts_assets_without_losing_live_redo() {
 }
 
 #[test]
+fn redo_metadata_references_backing_without_serializing_audio_bytes() {
+    let mut session = ProjectSession::new(Project::blank(), None).unwrap();
+    let asset = asset();
+    let id = asset.id().unwrap();
+    let command = backing(&id);
+    session
+        .apply_edit_with_asset(command.clone(), Some((id.clone(), asset)))
+        .unwrap();
+    let snapshot = session.undo().unwrap();
+    let value = serde_json::to_value(&snapshot).unwrap();
+    assert_eq!(value.get("redoEdit"), Some(&serde_json::json!(command)));
+    assert_eq!(value["project"]["assets"][&id]["byteLength"], 19);
+    assert!(
+        !serde_json::to_string(&snapshot)
+            .unwrap()
+            .contains("bytesBase64")
+    );
+    assert_eq!(session.asset_bytes(&id).unwrap(), b"encoded audio bytes");
+}
+
+#[test]
 fn repeat_anchor_coordinates_are_valid_without_lexicographic_order() {
     let settings = BackingSettings {
         asset_id: "embedded".into(),

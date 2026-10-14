@@ -2,6 +2,7 @@ import { midi, model, Settings } from '@coderline/alphatab';
 import { buildScore, trackIdentity } from '../engine';
 import { captureNoteLinks, restoreNoteLinks } from '../editor/links';
 import type { ProjectView } from '../project';
+import type { BackingSettings } from '../edit-types';
 import type { Articulation, MeasureOccurrence, PlanMidiEvent, PlanNote, PlanTempo, PlaybackPlan } from './types';
 
 const settings = new Settings();
@@ -28,10 +29,11 @@ export function prepareMidiScore(score: model.Score): model.Score {
   return copy;
 }
 
-type RawNote = { track: number; trackAttack: number; start: number; end: number; channel: number; key: number; rawKey: number; velocity: number; provenance?: string };
-type RawEvent = Omit<Extract<PlanMidiEvent, { type: 'program' }>, 'trackId'> & { track: number }
+type RawNote = { track: number; trackAttack: number; onOrder: number; offOrder: number; start: number; end: number; channel: number; program?: number; key: number; rawKey: number; velocity: number; provenance?: string };
+type RawEvent = (Omit<Extract<PlanMidiEvent, { type: 'program' }>, 'trackId'> & { track: number }
   | { type: 'controller'; track: number; tick: number; channel: number; controller: number; value: number }
-  | { type: 'bend' | 'noteBend'; track: number; tick: number; channel: number; key?: number; value: number };
+  | { type: 'bend' | 'noteBend'; track: number; tick: number; channel: number; key?: number; value: number }) & { order: number };
+type OrderedMidiEvent = PlanMidiEvent & { order: number };
 
 // The public handler preserves addNote pairs and generation order, which an SMF
 // loses when several same-pitch note-ons overlap on the same MIDI channel.
@@ -43,26 +45,73 @@ class Collector implements midi.IMidiFileHandler {
   end = 0;
   provenance?: string;
   private attacks = new Map<number, number>();
+  private order = 0;
   addTickShift(tickShift: number) { this.shift = tickShift; }
   addTimeSignature() {}
   addRest() {}
   addNote(track: number, start: number, length: number, key: number, velocity: number, channel: number) {
     const trackAttack = this.attacks.get(track) ?? 0; this.attacks.set(track, trackAttack + 1);
-    this.notes.push({ track, trackAttack, start: start + this.shift, end: start + length + this.shift, key: Math.max(0, Math.min(127, key)), rawKey: key, velocity: Math.max(0, Math.min(127, velocity)), channel, provenance: this.provenance });
+    this.notes.push({ track, trackAttack, onOrder: this.order++, offOrder: this.order++, start: start + this.shift, end: start + length + this.shift, key: Math.max(0, Math.min(127, key)), rawKey: key, velocity: Math.max(0, Math.min(127, velocity)), channel, provenance: this.provenance });
   }
-  addControlChange(track: number, tick: number, channel: number, controller: midi.ControllerType, value: number) { this.events.push({ type: 'controller', track, tick: tick + this.shift, channel, controller, value: Math.max(0, Math.min(127, value)) }); }
+  addControlChange(track: number, tick: number, channel: number, controller: midi.ControllerType, value: number) { this.events.push({ type: 'controller', track, tick: tick + this.shift, channel, controller, value: Math.max(0, Math.min(127, value)), order: this.order++ }); }
   addProgramChange(track: number, tick: number, channel: number, program: number) {
     if (program >= 128) this.provenance = `${program}/${tick + this.shift}`;
-    this.events.push({ type: 'program', track, tick: tick + this.shift, channel, program });
+    this.events.push({ type: 'program', track, tick: tick + this.shift, channel, program, order: this.order++ });
   }
   addTempo(tick: number, bpm: number) { this.tempos.push({ tick: tick + this.shift, bpm }); }
-  addBend(track: number, tick: number, channel: number, value: number) { this.events.push({ type: 'bend', track, tick: tick + this.shift, channel, value: Math.min(16384, Math.floor(value)) }); }
-  addNoteBend(track: number, tick: number, channel: number, key: number, value: number) { this.events.push({ type: 'noteBend', track, tick: tick + this.shift, channel, key, value }); }
+  addBend(track: number, tick: number, channel: number, value: number) { this.events.push({ type: 'bend', track, tick: tick + this.shift, channel, value: Math.min(16384, Math.floor(value)), order: this.order++ }); }
+  addNoteBend(track: number, tick: number, channel: number, key: number, value: number) { this.events.push({ type: 'noteBend', track, tick: tick + this.shift, channel, key, value, order: this.order++ }); }
   finishTrack(_track: number, tick: number) { this.end = Math.max(this.end, tick + this.shift); }
 }
 function generate(score: model.Score) {
   const events = new Collector(), generator = new midi.MidiFileGenerator(score, settings, events); generator.generate();
   return { events, lookup: generator.tickLookup };
+}
+
+function resolvePrograms(score: model.Score, events: Collector) {
+  const stream = [
+    ...events.events.filter(e => e.type === 'program').map(e => ({ tick: e.tick, order: e.order, channel: e.channel, program: e.program })),
+    ...events.notes.map(note => ({ tick: note.start, order: note.onOrder, channel: note.channel, note })),
+  ].sort((a, b) => a.tick - b.tick || a.order - b.order);
+  const programs = new Map<number, number>();
+  // Start with the first public channel program for leading attacks, then
+  // follow actual playback order, including same-tick source event order.
+  for (const event of stream) if ('program' in event && event.program < 128 && !programs.has(event.channel)) programs.set(event.channel, event.program);
+  for (const event of stream) {
+    if ('note' in event) event.note.program = programs.get(event.channel) ?? score.tracks[event.note.track].playbackInfo.program;
+    else if (event.program < 128) programs.set(event.channel, event.program);
+  }
+}
+
+type PerformedLocation = Pick<MeasureOccurrence, 'bar' | 'occurrence' | 'startTick' | 'endTick'>;
+// Committed/candidate scores are immutable; settings edits retain their object
+// identity, while notation/history replacements construct a different score.
+const backingLocations = new WeakMap<model.Score, PerformedLocation[]>();
+export function validateBackingAnchors(score: model.Score, backing: Pick<BackingSettings, 'offsetMs' | 'anchors'> | null | undefined): void {
+  if (!backing) return;
+  if (!Number.isFinite(backing.offsetMs)) throw new Error('Invalid backing offset.');
+  if (!backing.anchors.length) return;
+  let locations = backingLocations.get(score);
+  if (!locations) {
+    let shift = 0;
+    const handler: midi.IMidiFileHandler = {
+      addTickShift(value) { shift = value; }, addTimeSignature() {}, addRest() {}, addNote() {}, addControlChange() {}, addProgramChange() {}, addTempo() {}, addBend() {}, addNoteBend() {}, finishTrack() {},
+    };
+    const generator = new midi.MidiFileGenerator(score, settings, handler); generator.generate();
+    const counts = new Map<number, number>();
+    locations = generator.tickLookup.masterBars.map(m => {
+      const bar = m.masterBar.index, occurrence = counts.get(bar) ?? 0; counts.set(bar, occurrence + 1);
+      return { bar, occurrence, startTick: m.start + shift, endTick: m.end + shift };
+    });
+    backingLocations.set(score, locations);
+  }
+  const points = backing.anchors.map(anchor => {
+    if (!Number.isSafeInteger(anchor.bar) || anchor.bar < 0 || !Number.isSafeInteger(anchor.occurrence) || anchor.occurrence < 0 || !Number.isFinite(anchor.ratio) || anchor.ratio < 0 || anchor.ratio > 1 || !Number.isFinite(anchor.audioMs) || anchor.audioMs < 0) throw new Error('Backing anchor has an invalid synchronization position.');
+    const occurrence = locations.find(o => o.bar === anchor.bar && o.occurrence === anchor.occurrence);
+    if (!occurrence) throw new Error('Backing anchor refers to missing score music.');
+    return { tick: occurrence.startTick + (occurrence.endTick - occurrence.startTick) * anchor.ratio, audioMs: anchor.audioMs };
+  }).sort((a, b) => a.tick - b.tick);
+  if (points.some((point, i) => i > 0 && (points[i - 1].tick >= point.tick || points[i - 1].audioMs >= point.audioMs))) throw new Error('Backing anchors must have distinct score positions and increasing audio times in playback order.');
 }
 function timeAt(tick: number, tempos: PlanTempo[]) {
   let seconds = 0, previous = 0, bpm = tempos[0].bpm;
@@ -87,7 +136,7 @@ function channelMapping(score: model.Score, events: Collector) {
   });
   return (track: number, channel: number) => maps[track].get(channel)!;
 }
-function converted(events: RawEvent[], identities: string[], nativeChannel: (track: number, channel: number) => number): PlanMidiEvent[] {
+function converted(events: RawEvent[], identities: string[], nativeChannel: (track: number, channel: number) => number): OrderedMidiEvent[] {
   const states = new Map<string, { msb: number; lsb: number; range: number; coarse: number }>();
   // alphaTab can place an initial whammy controller at -1 tick. At a native
   // clock starting at zero it is initial state, after the channel range setup.
@@ -106,8 +155,8 @@ function converted(events: RawEvent[], identities: string[], nativeChannel: (tra
         if (event.controller === 38) state.range = state.coarse + event.value / 100;
       }
     }
-    if (event.type === 'bend' || event.type === 'noteBend') return { ...data, trackId: identities[track], value: (event.value - 8192) / 8192 * state.range } as PlanMidiEvent;
-    return { ...data, trackId: identities[track] } as PlanMidiEvent;
+    if (event.type === 'bend' || event.type === 'noteBend') return { ...data, trackId: identities[track], value: (event.value - 8192) / 8192 * state.range } as OrderedMidiEvent;
+    return { ...data, trackId: identities[track] } as OrderedMidiEvent;
   });
 }
 type Source = { note: model.Note; track: number; staff: number; bar: number; voice: number; beat: number; index: number; lane: string };
@@ -200,13 +249,17 @@ function buildWithIdentities(original: model.Score, generation: number, ids: str
   const score = prepareMidiScore(original);
   if (ids.length !== score.tracks.length || new Set(ids).size !== ids.length || ids.some(id => typeof id !== 'string' || !id)) throw new Error('Invalid playback track identities.');
   const complete = generate(score), all = sources(score), nativeChannel = channelMapping(score, complete.events);
+  resolvePrograms(score, complete.events);
   const tempos = [...new Map(complete.events.tempos.map(t => [t.tick, t])).values()].sort((a, b) => a.tick - b.tick);
   if (!tempos.length || tempos[0].tick !== 0) tempos.unshift({ tick: 0, bpm: score.tempo });
   const counts = new Map<number, number>();
   const occurrences: MeasureOccurrence[] = complete.lookup.masterBars.map(m => {
     const bar = m.masterBar.index, occurrence = counts.get(bar) ?? 0; counts.set(bar, occurrence + 1);
     const startTick = m.start + complete.events.shift, endTick = m.end + complete.events.shift;
-    return { bar, occurrence, startTick, endTick, startMs: timeAt(startTick, tempos), endMs: timeAt(endTick, tempos) };
+    const step = 960 * 4 / m.masterBar.timeSignatureDenominator, clickTicks: number[] = [];
+    if (!Number.isFinite(step) || step <= 0) throw new Error('Invalid score meter.');
+    for (let pulse = 0; startTick + pulse * step < endTick; pulse++) clickTicks.push(startTick + pulse * step);
+    return { bar, occurrence, startTick, endTick, startMs: timeAt(startTick, tempos), endMs: timeAt(endTick, tempos), clickTicks };
   });
   const lanes = new Map<string, Source[]>();
   for (const source of all) { const lane = lanes.get(source.lane) ?? []; lane.push(source); lanes.set(source.lane, lane); }
@@ -262,20 +315,21 @@ function buildWithIdentities(original: model.Score, generation: number, ids: str
           trackId: ids[source.track], source: { target: { track: source.track, staff: source.staff, bar: source.bar, voice: source.voice, beat: source.beat }, string },
           ...(source.bar !== occurrence.bar ? { playedBar: occurrence.bar } : {}),
           occurrence: occurrence.occurrence, startTick: actual.start, endTick: actual.end, key: actual.key, velocity: actual.velocity,
-          articulation: source.note.beat.deadSlapped ? 'dead' : articulation(source.note, score.tracks[source.track].playbackInfo.program, !!from), legatoFrom: from?.id ?? null, pitch: pitchCurve({ ...isolated, channel: nativeChannel(source.track, isolated.channel) }, actual, lane.bends),
+          channel: nativeChannel(source.track, actual.channel), program: actual.program ?? score.tracks[source.track].playbackInfo.program,
+          articulation: source.note.beat.deadSlapped ? 'dead' : articulation(source.note, actual.program ?? score.tracks[source.track].playbackInfo.program, !!from), legatoFrom: from?.id ?? null, pitch: pitchCurve({ ...isolated, channel: nativeChannel(source.track, isolated.channel) }, actual, lane.bends),
         };
         notes.push(note); const chain = played.get(source.note) ?? []; chain.push(note); played.set(source.note, chain);
       }
     }
   }
   if (fullIndex !== complete.events.notes.length) throw new Error('The score has MIDI attacks without an unambiguous source-note lane.');
-  const events: PlanMidiEvent[] = converted(complete.events.events, ids, nativeChannel);
+  const events: OrderedMidiEvent[] = converted(complete.events.events, ids, nativeChannel);
   for (const note of complete.events.notes) {
     const common = { trackId: ids[note.track], channel: nativeChannel(note.track, note.channel), key: note.key, velocity: note.velocity };
-    events.push({ ...common, type: 'noteOn', tick: note.start }, { ...common, type: 'noteOff', tick: note.end });
+    events.push({ ...common, type: 'noteOn', tick: note.start, order: note.onOrder }, { ...common, type: 'noteOff', tick: note.end, order: note.offOrder });
   }
   const durationTick = Math.max(complete.events.end, ...complete.events.notes.map(n => n.end), 0);
-  const plan: PlaybackPlan = { generation, ppq: 960, durationTick, durationMs: timeAt(durationTick, tempos), tracks: score.tracks.map(t => ({ id: ids[t.index], program: t.playbackInfo.program, percussion: t.isPercussion })), tempos, occurrences, notes: notes.sort((a, b) => a.startTick - b.startTick), midi: events.sort((a, b) => a.tick - b.tick) };
+  const plan: PlaybackPlan = { generation, ppq: 960, durationTick, durationMs: timeAt(durationTick, tempos), tracks: score.tracks.map(t => ({ id: ids[t.index], program: t.playbackInfo.program, percussion: t.isPercussion })), tempos, occurrences, notes: notes.sort((a, b) => a.startTick - b.startTick), midi: events.sort((a, b) => a.tick - b.tick || a.order - b.order).map(({ order, ...event }) => event as PlanMidiEvent) };
   validatePlaybackPlan(plan); return plan;
 }
 
@@ -309,9 +363,11 @@ export function validatePlaybackPlan(plan: PlaybackPlan) {
   for (const o of plan.occurrences) {
     if (!integer(o.bar, 0xffffffff) || !integer(o.occurrence, 0xffffffff) || o.occurrence !== (counts.get(o.bar) ?? 0) || !validTime(o.startTick) || o.startTick < previous || !validTime(o.endTick) || o.endTick <= o.startTick || o.endTick > plan.durationTick || !validTime(o.startMs) || !validTime(o.endMs) || o.endMs <= o.startMs || o.endMs > plan.durationMs + .001) fail();
     counts.set(o.bar, o.occurrence + 1); occurrences.add(`${o.bar}/${o.occurrence}`); previous = o.endTick;
+    if (o.clickTicks !== undefined && (!o.clickTicks.length || o.clickTicks[0] !== o.startTick || o.clickTicks.some((tick, i) => !validTime(tick) || tick < o.startTick || tick >= o.endTick || i > 0 && tick <= o.clickTicks![i - 1]))) fail('metronome ticks');
   }
   previous = -1;
   for (const n of plan.notes) {
+    if (n.channel !== undefined && !integer(n.channel, 15) || n.program !== undefined && !integer(n.program, 127)) fail('note channel/program');
     if (n.endTick <= n.startTick) fail(n.endTick === n.startTick ? 'zero note duration' : 'negative note duration');
     if (!integer(n.key, 127) || !integer(n.velocity, 127)) fail('note value');
     if (!n.id || ids.has(n.id) || !tracks.has(n.trackId) || plan.tracks[n.source.target.track]?.id !== n.trackId || Object.values(n.source.target).some(v => !integer(v, 0xffffffff)) || !integer(n.source.string, 0xffffffff) || n.playedBar !== undefined && (!integer(n.playedBar, 0xffffffff) || n.playedBar < n.source.target.bar) || !occurrences.has(`${n.playedBar ?? n.source.target.bar}/${n.occurrence}`) || !validTime(n.startTick) || n.startTick < previous || !validTime(n.endTick) || n.endTick > plan.durationTick || !n.pitch.length || n.pitch[0].tick !== n.startTick) fail('note structure');

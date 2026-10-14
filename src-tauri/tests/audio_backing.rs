@@ -175,6 +175,7 @@ fn unordered_repeat_anchors_resolve_before_order_validation() {
             end_tick: (index + 1) as f64 * 3840.0,
             start_ms: index as f64 * 2000.0,
             end_ms: (index + 1) as f64 * 2000.0,
+            click_ticks: None,
         })
         .collect();
     let anchors = vec![

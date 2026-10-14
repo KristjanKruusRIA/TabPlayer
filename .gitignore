@@ -3,3 +3,11 @@ node_modules/
 dist/
 src-tauri/target/
 src-tauri/gen/
+public/alphatab/
+public/font/
+public/soundfont/
+src-tauri/icons/android/
+src-tauri/icons/ios/
+src-tauri/icons/StoreLogo.png
+src-tauri/icons/Square*Logo.png
+.superdesign/tmp/

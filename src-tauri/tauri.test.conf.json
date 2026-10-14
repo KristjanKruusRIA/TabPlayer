@@ -1,0 +1,10 @@
+{
+  "app": {
+    "windows": [{
+      "label": "main", "title": "TabPlayer", "width": 1440, "height": 900,
+      "minWidth": 960, "minHeight": 600,
+      "additionalBrowserArgs": "--remote-debugging-port=9222",
+      "dataDirectory": "tabplayer-test"
+    }]
+  }
+}

@@ -1,0 +1,1 @@
+# / desktop dependencies: src/main.tsx -> src/controller.ts -> src/bridge.ts and src/engine.ts -> src/project.ts. Third party React/alphaTab/Tauri. All local source imports traced; no nested UI components or styles exist yet.

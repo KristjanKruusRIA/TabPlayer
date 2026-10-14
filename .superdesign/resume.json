@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "targets": {
+    "/": {
+      "projectId": "39e28fc3-e837-4f07-8f66-6632d49d5791",
+      "contextFiles": [
+        ".superdesign/design-system.md",
+        ".superdesign/init/theme.md",
+        ".superdesign/init/layouts.md"
+      ],
+      "designSystemPath": ".superdesign/design-system.md",
+      "fingerprints": {
+        ".superdesign/init/theme.md": "88d8ae9f27ef530c4b9971754607ee888bc5ceaa2068390f8d6336d425307977",
+        ".superdesign/design-system.md": "6a80d045547b38daad867807b4fc92d3bd199950ba31b622f56cb98ef0a84d8d",
+        ".superdesign/init/layouts.md": "ca9c20e04c4f45db883c9d130f3ea1bc783da98e61d4da478c7886b17f2c0356"
+      },
+      "drafts": {
+        "441a4347-3b6b-42db-9274-8af38eea29ca": {
+          "title": "TabPlayer",
+          "currentVersion": 1,
+          "visualDirection": "slate shell, cream notation, lime accents"
+        }
+      },
+      "activeDraftId": "441a4347-3b6b-42db-9274-8af38eea29ca",
+      "targetKind": "new-target",
+      "updatedAt": "2026-10-14T14:02:00.2984730Z"
+    }
+  }
+}

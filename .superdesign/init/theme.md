@@ -1,0 +1,1 @@
+# Theme: no current CSS/theme files; scaffold uses browser defaults. New intended tokens: dark shell #161c24, sidebar #1d2530, paper #fffdf8, text #edf1f5, muted #97a6b6, accent #b5df73. System sans; notation font Bravura. Compact labels, 8px spacing unit, 6px control radius. No photos or illustrations.

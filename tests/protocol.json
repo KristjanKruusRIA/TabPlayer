@@ -1,0 +1,14 @@
+[
+  {"type":"setNote","target":{"track":0,"staff":0,"bar":0,"voice":0,"beat":0},"string":1,"fret":7},
+  {"type":"removeNote","target":{"track":0,"staff":0,"bar":0,"voice":0,"beat":0},"string":1},
+  {"type":"setRest","target":{"track":0,"staff":0,"bar":0,"voice":0,"beat":0}},
+  {"type":"setDuration","target":{"track":0,"staff":0,"bar":0,"voice":0,"beat":0},"duration":8,"dots":1},
+  {"type":"insertBeat","target":{"track":0,"staff":0,"bar":0,"voice":0,"beat":0},"duration":8,"dots":0},
+  {"type":"deleteBeat","target":{"track":0,"staff":0,"bar":0,"voice":0,"beat":0}},
+  {"type":"appendMeasure"},
+  {"type":"removeMeasure","bar":0},
+  {"type":"addTrack","name":"Bass","tuning":[43,38,33,28],"program":33},
+  {"type":"removeTrack","track":1},
+  {"type":"setTuning","track":0,"tuning":[64,59,55,50,45,38]},
+  {"type":"setScoreInfo","title":"Song","artist":"Artist","tempo":100}
+]

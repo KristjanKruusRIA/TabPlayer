@@ -1,0 +1,19 @@
+[package]
+name = "tabplayer"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+
+[lib]
+name = "tabplayer_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+base64 = "0.22"
+sha2 = "0.10"
+atomic-write-file = "0.3"
+
+[dev-dependencies]
+tempfile = "3"

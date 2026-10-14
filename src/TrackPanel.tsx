@@ -4,6 +4,7 @@ import type { EditCommand } from './project';
 import type { NativePlaybackController } from './audio/NativePlaybackController';
 import { midiPrograms } from './midi-programs';
 import { formatTuning, parseTuning } from './tuning';
+import { TuningInput } from './TuningInput';
 const noSubscribe=()=>()=>{};const noState=()=>null;
 
 export function TrackPanel({score,selected,busy,onSelect,onEdit,player,children}: {
@@ -29,11 +30,11 @@ export function TrackPanel({score,selected,busy,onSelect,onEdit,player,children}
   </div>)}</div><fieldset disabled={busy}>
     <button disabled={score.tracks.length===1} onClick={()=>onEdit({type:'removeTrack',track:selected})}>Remove track</button>
     <details><summary>Selected instrument</summary><label>Track name<input value={trackName} onChange={e=>setTrackName(e.target.value)}/></label><label>Track short name<input value={shortName} onChange={e=>setShortName(e.target.value)}/></label><label>Track MIDI instrument<select value={program} onChange={e=>setProgram(Number(e.target.value))}>{midiPrograms.map((name,index)=><option key={index} value={index}>{index+1}. {name}</option>)}</select></label><button onClick={()=>onEdit({type:'setTrackInfo',track:selected,name:trackName,shortName,program})}>Apply instrument settings</button></details>
-    <label>Tuning (notes, high to low)<input disabled={current.isPercussion} placeholder="E4 B3 G3 D3 A2 E2" value={tuning} onChange={e=>{setTuning(e.target.value);setTuningError(null);}}/></label>
+    <TuningInput label="Tuning (notes, high to low)" presetLabel="Tuning preset" disabled={current.isPercussion} placeholder="E4 B3 G3 D3 A2 E2" value={tuning} revision={current} onChange={notes=>{setTuning(notes);setTuningError(null);}}/>
     <button disabled={current.isPercussion} onClick={()=>applyTuning()}>Apply tuning</button>
     <details open><summary>Add instrument</summary><label>New track name<input value={name} onChange={e=>setName(e.target.value)}/></label>
       <label>MIDI instrument<select value={instrument} onChange={e=>setInstrument(Number(e.target.value))}>{midiPrograms.map((label,value)=><option key={value} value={value}>{value+1}. {label}</option>)}</select></label>
-      <label>New track tuning<input placeholder="G2 D2 A1 E1" value={newTuning} onChange={e=>{setNewTuning(e.target.value);setTuningError(null);}}/></label>
+      <TuningInput label="New track tuning" presetLabel="New track tuning preset" placeholder="G2 D2 A1 E1" value={newTuning} onChange={notes=>{setNewTuning(notes);setTuningError(null);}}/>
       <button onClick={()=>applyTuning(true)}>Add track</button>
     </details>
   </fieldset>{tuningError&&<p role="alert">{tuningError}</p>}{children}</aside>;

@@ -6,24 +6,30 @@
       "contextFiles": [
         ".superdesign/design-system.md",
         ".superdesign/init/theme.md",
-        ".superdesign/init/layouts.md"
+        ".superdesign/init/layouts.md",
+        "src/styles.css"
       ],
       "designSystemPath": ".superdesign/design-system.md",
       "fingerprints": {
-        ".superdesign/init/theme.md": "88d8ae9f27ef530c4b9971754607ee888bc5ceaa2068390f8d6336d425307977",
         ".superdesign/design-system.md": "6a80d045547b38daad867807b4fc92d3bd199950ba31b622f56cb98ef0a84d8d",
-        ".superdesign/init/layouts.md": "ca9c20e04c4f45db883c9d130f3ea1bc783da98e61d4da478c7886b17f2c0356"
+        ".superdesign/init/theme.md": "88d8ae9f27ef530c4b9971754607ee888bc5ceaa2068390f8d6336d425307977",
+        ".superdesign/init/layouts.md": "ca9c20e04c4f45db883c9d130f3ea1bc783da98e61d4da478c7886b17f2c0356",
+        "src/styles.css": "e4a8e358ac3e771c817075f4ec7502e20ae87fb80f9695da253b46476a24f1bc"
       },
       "drafts": {
         "441a4347-3b6b-42db-9274-8af38eea29ca": {
-          "title": "TabPlayer - Refined Inspector & Track Settings",
-          "currentVersion": 2,
+          "title": "TabPlayer - Realistic Instrument Visualizer Refinement",
+          "currentVersion": 4,
           "visualDirection": "slate shell, cream notation, lime accents"
         }
       },
       "activeDraftId": "441a4347-3b6b-42db-9274-8af38eea29ca",
       "targetKind": "new-target",
-      "updatedAt": "2026-10-14T17:57:19.8607754Z"
+      "updatedAt": "2026-10-14T21:05:43.8298091Z",
+      "referenceIds": [
+        "903f1fd3-29ad-4d66-bb96-a84fad807408",
+        "21a709b1-5b0c-4281-a1d5-f3d999425f5b"
+      ]
     }
   }
 }

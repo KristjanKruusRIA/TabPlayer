@@ -57,6 +57,10 @@ it('staff tuning uses named notes, validates drafts and refreshes from history',
   fireEvent.change(input,{target:{value:'E4 bad'}});fireEvent.click(screen.getByRole('button',{name:'Apply staff settings'}));expect(onEdit).not.toHaveBeenCalled();expect(screen.getByRole('alert')).toHaveTextContent(/note|octave/i);
   view.rerender(<StructurePanel {...props} score={music()}/>);expect(input).toHaveValue('E4 B3 G3 D3 A2 E2');
 });
+it('staff preset readback resets Custom on staff selection and percussion disables tuning',()=>{
+  const score=music(),staff=score.tracks[0].staves[0],second=new model.Staff();second.stringTuning.tunings=[...staff.tuning];score.tracks[0].addStaff(second);const bar=new model.Bar(),voice=new model.Voice(),beat=new model.Beat();beat.isEmpty=true;voice.addBeat(beat);bar.addVoice(voice);second.addBar(bar);
+  const props={score,target,string:6,busy:false,onEdit:vi.fn(),onSelect:vi.fn()},view=render(<StructurePanel {...props}/>);fireEvent.change(screen.getByLabelText('Staff tuning preset'),{target:{value:'custom'}});expect(screen.getByLabelText('Staff tuning preset')).toHaveValue('custom');view.rerender(<StructurePanel {...props} target={{...target,staff:1}}/>);expect(screen.getByLabelText('Staff tuning preset')).toHaveValue('guitar-6-standard-e');second.isPercussion=true;view.rerender(<StructurePanel {...props} target={{...target,staff:1}}/>);expect(screen.getByLabelText('Staff tuning preset')).toBeDisabled();expect(screen.getByLabelText('Staff tuning (notes, high to low)')).toBeDisabled();
+});
 it('measure meter and tempo controls dispatch current musical values',()=>{
   const onEdit=vi.fn();render(<MeasurePanel score={music()} target={target} string={6} busy={false} onEdit={onEdit}/>);
   fireEvent.change(screen.getByLabelText('Time numerator'),{target:{value:'3'}});fireEvent.click(screen.getByRole('button',{name:'Apply measure settings'}));expect(onEdit).toHaveBeenLastCalledWith(expect.objectContaining({type:'setMeasureSettings',bar:0,numerator:3,denominator:4}));

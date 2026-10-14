@@ -17,6 +17,7 @@ import { ExportDialog } from './export/ExportDialog';
 import { useExportCoordinator } from './export/useExportCoordinator';
 import type { ExportOptions } from './export/types';
 import { Transport } from './Transport';
+import { LiveInstrumentView } from './instruments/LiveInstrumentView';
 const noPlaybackSubscribe=()=>()=>{};
 
 export function App({controller}: {controller: DocumentController}) {
@@ -28,6 +29,7 @@ export function App({controller}: {controller: DocumentController}) {
   const [selection,setSelection]=useState<BeatTarget>({track:0,staff:0,bar:0,voice:0,beat:0});
   const [selectedString,setString]=useState(6); const [fret,setFret]=useState(0);
   const [zoom,setZoom]=useState(100); const [profile,setProfile]=useState('ScoreTab');
+  const [instrumentVisible,setInstrumentVisible]=useState(false);
   const digits=useRef({text:'',time:0});
   const target=repairSelection(state.score,selection);
   useEffect(()=>{if(player)void player.loadDocument(state.snapshot.project,state,target.track,state.documentEpoch);},[player,state.snapshot.project,state.score,state.settings,state.embeddedBacking,target.track,state.documentEpoch]);
@@ -97,9 +99,11 @@ export function App({controller}: {controller: DocumentController}) {
         <div className="score-tools"><span>{state.score.masterBars.length} measures · {state.score.tracks.length} tracks</span>
           <label>View<select value={profile} onChange={e=>setProfile(e.target.value)}><option>ScoreTab</option><option>Tab</option><option>Score</option></select></label>
           <label>Zoom<select value={zoom} onChange={e=>setZoom(Number(e.target.value))}>{[70,85,100,115,130].map(z=><option key={z} value={z}>{z}%</option>)}</select></label>
+          <button aria-pressed={instrumentVisible} onClick={()=>setInstrumentVisible(visible=>!visible)}>{instrumentVisible?'Hide instrument':'Show instrument'}</button>
         </div>
         <div className="paper-scroll"><div className="paper"><ScoreView score={state.score} track={target.track} zoom={zoom} profile={profile} onSelect={select} playback={player}/></div></div>
         <div className="score-hint">Measure {target.bar+1} · Beat {target.beat+1} · String {string} · Fret {fret} — Click the score, then use arrow keys, digits and Enter.</div>
+        {instrumentVisible&&<LiveInstrumentView score={state.score} track={target.track} staff={target.staff} player={player}/>}
       </section>
       <EditorPanel score={state.score} target={target} string={string} fret={fret} busy={state.busy} onSelect={select} onString={s=>select(target,s)} onFret={setFret} onEdit={edit}/>
     </div>

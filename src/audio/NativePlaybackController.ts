@@ -5,7 +5,7 @@ import type { ChannelMix, EditCommand } from '../edit-types';
 import type { ProjectView } from '../project';
 import { nativeAudioBridge, type NativeAudioBridge, type NativeAudioStatus, type TransportCommand } from './bridge';
 import { preparePlan } from './plan';
-import type { PlaybackPlan, PlaybackState, PracticeSettings } from './types';
+import type { PlanNote, PlaybackPlan, PlaybackState, PracticeSettings } from './types';
 
 let nextGeneration=0;
 type Options={bridge?:NativeAudioBridge;onEdit:(edit:EditCommand)=>void|Promise<void>;preparePlan?:typeof preparePlan};
@@ -15,6 +15,7 @@ export class NativePlaybackController {
   private unlisten:()=>void=()=>{};private subscription:Promise<void>;private destroyed=false;private suppressHandler=false;private viewPlaying=false;
   private built:BuiltDocument|null=null;private plan:PlaybackPlan|null=null;private lastStatus:NativeAudioStatus|null=null;private operationError:string|null=null;private prepared=false;private embeddedSource:string|null=null;
   private documentEpoch:number|undefined;private practice:PracticeSettings={speed:1,metronome:false};
+  private notesByTrack=new Map<string,PlanNote[]>();private noteMode:'stopped'|'waiting'|'seeking'|'playing'|'paused'='stopped';private pendingNoteTick:number|undefined;
   private bridge:NativeAudioBridge;private options:Options;generation=++nextGeneration;
   constructor(options:Options) {
     this.options=options;this.bridge=options.bridge??nativeAudioBridge;
@@ -25,12 +26,23 @@ export class NativePlaybackController {
     }).catch(error=>this.fail(error));
   }
   getState=()=>this.state;
+  activeNotes(trackId:string):readonly PlanNote[]{
+    const status=this.lastStatus;
+    if(this.destroyed || !this.prepared || !this.state.ready || this.state.error || !status || status.generation!==this.generation || this.plan?.generation!==this.generation || (this.noteMode!=='playing' && this.noteMode!=='paused'))return [];
+    return (this.notesByTrack.get(trackId)??[]).filter(note=>note.startTick<=status.tick && status.tick<note.endTick);
+  }
   subscribe=(listener:()=>void)=>{this.listeners.add(listener);return()=>{this.listeners.delete(listener);};};
   private update(change:Partial<PlaybackState>){if(this.destroyed)return;this.state={...this.state,...change};for(const listener of this.listeners)listener();}
-  private fail(error:unknown){this.operationError=error instanceof Error?error.message:String(error);this.update({error:this.operationError});}
+  private fail(error:unknown){this.noteMode='stopped';this.pendingNoteTick=undefined;this.operationError=error instanceof Error?error.message:String(error);this.update({error:this.operationError});}
   private receive(status:NativeAudioStatus){
     if(status.generation!==this.generation || this.destroyed)return;
     this.lastStatus=status;
+    if(!status.ready || status.error || (this.plan && status.tick>=this.plan.durationTick)){this.noteMode='stopped';this.pendingNoteTick=undefined;}
+    else if((this.noteMode==='waiting' && status.playing)
+      || (this.noteMode==='seeking' && (status.playing || Math.abs(status.tick-this.pendingNoteTick!)<1e-6))
+      || this.noteMode==='playing' || this.noteMode==='paused'){
+      this.noteMode=status.playing?'playing':'paused';this.pendingNoteTick=undefined;
+    }
     if(status.ready){this.prepared=true;this.practice={speed:status.speed,metronome:status.metronome};}
     const occurrence=this.plan?.occurrences.find(o=>status.tick>=o.startTick && status.tick<o.endTick)??this.plan?.occurrences.at(-1);
     this.update({ready:status.ready,playing:status.playing,time:status.seconds*1000,endTime:status.durationSeconds*1000,measure:occurrence?.bar??0,speed:status.speed*100,metronome:status.metronome,error:status.error??this.operationError});
@@ -45,9 +57,10 @@ export class NativePlaybackController {
     }
   }
   private send(command:TransportCommand){void this.bridge.command(command).then(()=>{if(command.generation===this.generation){this.operationError=null;this.update({error:null});}}).catch(error=>{if(command.generation===this.generation)this.fail(error);});}
-  play(){this.send({type:'play',generation:this.generation});}pause(){this.send({type:'pause',generation:this.generation});}stop(){this.send({type:'stop',generation:this.generation});}
+  play(){this.noteMode='waiting';this.pendingNoteTick=undefined;this.update({});this.send({type:'play',generation:this.generation});}pause(){this.send({type:'pause',generation:this.generation});}stop(){this.noteMode='stopped';this.pendingNoteTick=undefined;this.update({});this.send({type:'stop',generation:this.generation});}
   private occurrence(bar:number){const found=this.plan?.occurrences.find(o=>o.bar===bar);if(!Number.isInteger(bar)||!found)throw new Error('Select a measure after playback is ready.');return found;}
-  seekToMeasure(index:number){this.send({type:'seekTick',tick:this.occurrence(index).startTick,generation:this.generation});}
+  private seekToTick(tick:number){this.noteMode='seeking';this.pendingNoteTick=tick;this.update({});this.send({type:'seekTick',tick,generation:this.generation});}
+  seekToMeasure(index:number){this.seekToTick(this.occurrence(index).startTick);}
   setSpeed(percent:number){if(!Number.isFinite(percent)||percent<25||percent>200)throw new Error('Speed must be between 25% and 200%.');this.send({type:'setSpeed',speed:percent/100,generation:this.generation});}
   setLoop(start:number,end:number){if(end<start)throw new Error('Loop end must follow its start.');this.send({type:'setLoop',startTick:this.occurrence(start).startTick,endTick:this.occurrence(end).endTick,generation:this.generation});}
   clearLoop(){this.send({type:'clearLoop',generation:this.generation});}
@@ -62,7 +75,7 @@ export class NativePlaybackController {
   setPan(index:number,value:number){this.editMix(index,{pan:Math.max(-1,Math.min(1,value))});}
   setMute(index:number,value:boolean){this.editMix(index,{mute:value});}setSolo(index:number,value:boolean){this.editMix(index,{solo:value});}
   resetMix(){for(const track of this.built?.score.tracks??[])this.editMix(track.index,defaultMix());}
-  beforeScoreChange(){this.generation=++nextGeneration;this.plan=null;this.prepared=false;this.operationError=null;this.send({type:'invalidate',generation:this.generation});this.update({ready:false,playing:false,error:null});}
+  beforeScoreChange(){this.generation=++nextGeneration;this.plan=null;this.notesByTrack.clear();this.noteMode='stopped';this.pendingNoteTick=undefined;this.prepared=false;this.operationError=null;this.send({type:'invalidate',generation:this.generation});this.update({ready:false,playing:false,error:null});}
   replaceScore(score:model.Score,track=0){const prior=this.suppressHandler;this.suppressHandler=true;try{this.view?.renderScore(score,[track]);this.view?.player?.updateSyncPoints([]);}finally{this.suppressHandler=prior;this.viewPlaying=false;}}
   async loadDocument(project:ProjectView,built:BuiltDocument,visibleTrack=0,documentEpoch=0){
     await this.subscription;if(this.destroyed)return;
@@ -73,7 +86,8 @@ export class NativePlaybackController {
     try {
       const plan=await (this.options.preparePlan??preparePlan)(project,generation);if(generation!==this.generation||this.destroyed)return;
       const sourceKey=project.base.kind==='file'?project.base.sha256:'blank';
-      this.plan=plan;await this.bridge.prepare(plan,effectiveAudioSettings(project,built),this.embeddedSource===sourceKey?null:built.embeddedBacking,sourceKey,practice);if(generation!==this.generation||this.destroyed)return;this.embeddedSource=sourceKey;this.prepared=true;this.operationError=null;
+      this.plan=plan;for(const note of plan.notes){let track=this.notesByTrack.get(note.trackId);if(!track){track=[];this.notesByTrack.set(note.trackId,track);}track.push(note);}
+      await this.bridge.prepare(plan,effectiveAudioSettings(project,built),this.embeddedSource===sourceKey?null:built.embeddedBacking,sourceKey,practice);if(generation!==this.generation||this.destroyed)return;this.embeddedSource=sourceKey;this.prepared=true;this.operationError=null;
       const status=await this.bridge.status();if(status)this.receive(status);
     } catch(error){if(generation===this.generation){this.prepared=false;this.fail(error);}}
   }
@@ -84,7 +98,7 @@ export class NativePlaybackController {
       const prior=this.suppressHandler;this.suppressHandler=true;
       try {
         output.handler={get backingTrackDuration(){return controller.plan?.durationMs??0;},get playbackRate(){return controller.state.speed/100;},set playbackRate(value){if(!controller.suppressHandler)controller.setSpeed(value*100);},masterVolume:1,
-          seekTo(time){if(!controller.suppressHandler){const tick=controller.tickAtSeconds(time/1000);controller.send({type:'seekTick',tick,generation:controller.generation});}},
+          seekTo(time){if(!controller.suppressHandler)controller.seekToTick(controller.tickAtSeconds(time/1000));},
           play(){if(!controller.suppressHandler)controller.play();},pause(){if(!controller.suppressHandler)controller.pause();}};
         api.player?.updateSyncPoints([]);
       } finally {this.suppressHandler=prior;}

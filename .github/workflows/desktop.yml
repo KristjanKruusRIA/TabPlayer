@@ -105,6 +105,30 @@ jobs:
           cargo test --locked --manifest-path src-tauri/Cargo.toml
           cargo test --locked --manifest-path src-tauri/Cargo.toml --test audio_resources selected_real_100bar_fourtrack_resource_budget -- --ignored --nocapture
           cargo fmt --manifest-path src-tauri/Cargo.toml --check
+      - name: Make room for Linux shipping packages
+        if: runner.os == 'Linux'
+        run: |
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          df -h "$GITHUB_WORKSPACE"
+          # Tests are complete; remove only this job's verified debug output.
+          task_debug=$(realpath -e "$GITHUB_WORKSPACE/src-tauri/target/debug")
+          test "$task_debug" = "$(realpath -e "$GITHUB_WORKSPACE")/src-tauri/target/debug"
+          du -sh -- "$task_debug"
+          rm -rf -- "$task_debug"
+          # These preinstalled hosted-runner SDKs are unused by Linux Tauri.
+          for task_sdk in /usr/local/lib/android/sdk /usr/share/dotnet; do
+            if test -d "$task_sdk"; then
+              du -sh -- "$task_sdk"
+              sudo rm -rf -- "$task_sdk"
+            fi
+          done
+          df -h "$GITHUB_WORKSPACE"
+          # Allow release output, four added bank copies, archives and margin.
+          task_free=$(df --output=avail -B1 "$GITHUB_WORKSPACE" | tail -n 1)
+          if (( task_free < 20 * 1024 * 1024 * 1024 )); then
+            echo "::error::Linux packaging needs 20 GiB free; available bytes: $task_free"
+            exit 1
+          fi
       - name: Build unsigned shipping packages with locked dependencies
         # No desktop-test feature, signing identity, updater key, or test server.
         run: npm run tauri -- build --bundles ${{ matrix.bundles }} -- --locked

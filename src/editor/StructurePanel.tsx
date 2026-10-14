@@ -7,6 +7,7 @@ import type { EditorProps } from './TechniquePanel';
 import { EnumInput } from './controls';
 import { IndexInput } from './IndexInput';
 import { formatTuning, parseTuning } from '../tuning';
+import { TuningInput } from '../TuningInput';
 
 const readSettings=(staff:model.Staff,clef:number):StaffSettings=>({tuning:[...staff.tuning],capo:staff.capo,transposition:staff.transpositionPitch,displayTransposition:staff.displayTranspositionPitch,clef,showTab:staff.showTablature,showNotation:staff.showStandardNotation});
 export function StructurePanel({score,target,busy,onEdit,onSelect}:EditorProps&{onSelect:(target:BeatTarget)=>void}) {
@@ -15,7 +16,7 @@ export function StructurePanel({score,target,busy,onEdit,onSelect}:EditorProps&{
   useEffect(()=>{setSettings(readSettings(staff,bar.clef));setTuning(formatTuning(staff.tuning));setTuningError(null);setDestination(target.voice===0&&bar.voices.length>1?1:0);setStart(1);setEnd(score.masterBars.length);setBarsPerSystem(track.defaultSystemsLayout||4);setLineBreaks([...track.lineBreaks??[]].map(n=>n+1).join(','));},[score,staff,bar,track,target.voice]);
   const applyStaff=(add=false)=>{try{const current={...settings,tuning:staff.isPercussion?[...staff.tuning]:parseTuning(tuning)};setTuningError(null);onEdit(add?{type:'addStaff',track:target.track,settings:current}:{type:'setStaffSettings',track:target.track,staff:target.staff,settings:current});}catch(error){setTuningError(error instanceof Error?error.message:String(error));}};
   return <details><summary>Staff, voices & layout</summary><fieldset disabled={busy}><h3>Staff {target.staff+1}</h3>
-    <label>Staff tuning (notes, high to low)<input disabled={staff.isPercussion} placeholder="E4 B3 G3 D3 A2 E2" value={tuning} onChange={e=>{setTuning(e.target.value);setTuningError(null);}}/></label>
+    <TuningInput label="Staff tuning (notes, high to low)" presetLabel="Staff tuning preset" disabled={staff.isPercussion} placeholder="E4 B3 G3 D3 A2 E2" value={tuning} revision={staff} onChange={notes=>{setTuning(notes);setTuningError(null);}}/>
     <div className="pair"><label>Capo<input type="number" min={0} value={settings.capo} onChange={e=>setSettings({...settings,capo:Number(e.target.value)})}/></label><EnumInput label="Staff clef" value={settings.clef} enumeration={model.Clef} onValue={clef=>setSettings({...settings,clef})}/></div>
     <div className="pair"><label>Sounding transposition<input type="number" value={settings.transposition} onChange={e=>setSettings({...settings,transposition:Number(e.target.value)})}/></label><label>Display transposition<input type="number" value={settings.displayTransposition} onChange={e=>setSettings({...settings,displayTransposition:Number(e.target.value)})}/></label></div>
     <div className="pair"><label className="check"><input type="checkbox" checked={settings.showTab} onChange={e=>setSettings({...settings,showTab:e.target.checked})}/>Show tablature</label><label className="check"><input type="checkbox" checked={settings.showNotation} onChange={e=>setSettings({...settings,showNotation:e.target.checked})}/>Show notation</label></div>

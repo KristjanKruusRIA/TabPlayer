@@ -9,13 +9,14 @@ import type { NativeBridge } from './bridge';
 import type { BuiltDocument } from './engine';
 import { defaultMix } from './document-settings';
 
-const integration=vi.hoisted(()=>({loadDocument:vi.fn(),beforeScoreChange:vi.fn(),destroy:vi.fn(),stageBacking:vi.fn(),commits:vi.fn(),practiceSpeed:100,exportOptions:vi.fn(),exportBusy:false,exportRun:vi.fn(async()=>true),exportCancel:vi.fn(async()=>{})}));
+const integration=vi.hoisted(()=>({loadDocument:vi.fn(),beforeScoreChange:vi.fn(),destroy:vi.fn(),stageBacking:vi.fn(),commits:vi.fn(),activeNotes:vi.fn((_trackId:string)=>[]),practiceSpeed:100,exportOptions:vi.fn(),exportBusy:false,exportRun:vi.fn(async()=>true),exportCancel:vi.fn(async()=>{})}));
 vi.mock('./audio/bridge',()=>({nativeAudioBridge:{stageBacking:integration.stageBacking}}));
 vi.mock('./export/useExportCoordinator',()=>({useExportCoordinator:(options:unknown)=>{integration.exportOptions(options);return {busy:integration.exportBusy,progress:undefined,run:integration.exportRun,cancel:integration.exportCancel};}}));
 vi.mock('./audio/NativePlaybackController',()=>({NativePlaybackController:class {
   built:BuiltDocument|null=null;state={ready:true,playing:false,time:0,endTime:4000,measure:0,speed:integration.practiceSpeed,metronome:false,error:null};
   constructor(private options:{onEdit:(command:EditCommand)=>void|Promise<void>}){}
   subscribe=()=>()=>{};getState=()=>this.state;
+  activeNotes=(trackId:string)=>integration.activeNotes(trackId);
   loadDocument=async(project:unknown,built:BuiltDocument,track:number,documentEpoch:number)=>{this.built=built;integration.loadDocument(project,built,track,documentEpoch);};
   beforeScoreChange=integration.beforeScoreChange;destroy=integration.destroy;
   play=vi.fn();pause=vi.fn();stop=vi.fn();seekToMeasure=vi.fn();setSpeed=vi.fn();setLoop=vi.fn();clearLoop=vi.fn();setMetronome=vi.fn();
@@ -177,4 +178,29 @@ it('navigates backwards into the insertion location of an empty voice',async()=>
   expect(screen.getByLabelText('Measure')).toHaveValue(1);
   expect(screen.getByLabelText('Beat')).toHaveValue(1);
   expect(screen.getByRole('button',{name:'Insert beat'})).toBeEnabled();
+});
+
+it('toggles the selected-track instrument view without editing the document',async()=>{
+  const c=await setup();const before=c.getState().snapshot;
+  expect(screen.queryByRole('region',{name:'Instrument view'})).not.toBeInTheDocument();
+  click('Show instrument');
+  expect(screen.getByRole('region',{name:'Instrument view'})).toHaveTextContent('Guitar');
+  expect(screen.getByLabelText('Instrument view mode')).toHaveValue('auto');
+  expect(screen.getByRole('button',{name:'Hide instrument'})).toHaveAttribute('aria-pressed','true');
+  expect(integration.activeNotes).toHaveBeenCalledWith('base/0');
+  expect(c.getState().snapshot).toBe(before);
+  click('Hide instrument');
+  expect(screen.queryByRole('region',{name:'Instrument view'})).not.toBeInTheDocument();
+  expect(c.getState().snapshot).toBe(before);
+});
+
+it('follows a newly selected bass track and repairs the viewer after New',async()=>{
+  const c=await setup();click('Show instrument');click('Add track');
+  await waitFor(()=>expect(c.getState().score.tracks).toHaveLength(2));
+  click('Track 2: Bass');
+  expect(screen.getByRole('region',{name:'Instrument view'})).toHaveTextContent('Bass');
+  click('New');
+  await waitFor(()=>expect(c.getState().score.tracks).toHaveLength(1));
+  expect(screen.getByRole('region',{name:'Instrument view'})).toHaveTextContent('Guitar');
+  expect(screen.getByLabelText('Instrument view mode')).toHaveValue('auto');
 });

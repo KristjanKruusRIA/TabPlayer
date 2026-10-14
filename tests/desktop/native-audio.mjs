@@ -34,12 +34,14 @@ try {
   const ready=async()=>{await waitStatus(s=>s.ready&&!s.error);await page.waitForFunction(()=>{const play=Array.from(document.querySelectorAll('button')).find(button=>button.textContent==='Play');return play&&!play.matches(':disabled');});};
   const button=async(name)=>{await page.getByRole('button',{name,exact:true}).click();await idle();};
   await page.getByRole('combobox',{name:/^String/}).selectOption('6');await page.getByLabel('Fret',{exact:true}).fill('5');await button('Set note');await ready();
+  await button('Show instrument');const instrument=page.getByRole('region',{name:'Instrument view'});await instrument.getByRole('img',{name:'Guitar fretboard'}).waitFor();assert.equal(await instrument.locator('g[data-note-id]').count(),0);
   const helper=resolve('src-tauri/target/debug/examples/capture_loopback.exe');if(!existsSync(helper))throw new Error('Build the capture_loopback Cargo example before this native smoke.');
   const capturedPath=join(directory,'native-app-loopback.wav');const readyDevice=await status();const capture=spawn(helper,[capturedPath,readyDevice.deviceId],{windowsHide:true});let captureLog='';
   const captureFinished=new Promise((resolve,reject)=>{capture.on('error',reject);capture.on('exit',code=>code===0?resolve():reject(new Error(`Loopback capture failed: ${code}; ${captureLog}`)));});
   void captureFinished.catch(()=>{});
   await new Promise((resolve,reject)=>{const until=setTimeout(()=>reject(new Error('Loopback capture did not become ready.')),5000);capture.stdout.on('data',bytes=>{captureLog+=bytes.toString();if(captureLog.includes('"ready":true')){clearTimeout(until);resolve();}});capture.stderr.on('data',bytes=>{captureLog+=bytes.toString();});capture.on('error',error=>{clearTimeout(until);reject(error);});});
   await button('Play');await waitStatus(s=>s.playing&&s.renderedFrames>4096&&s.outputPeak>.001);
+  await instrument.locator('g[data-note-id][data-string="6"][data-fret="5"][data-key="69"]').waitFor({state:'visible'});
   const played=await status();assert.ok(played.deviceId);const cursor=page.locator('.at-cursor-beat').first();await cursor.waitFor({state:'visible'});const first=await cursor.boundingBox();
   await waitStatus(s=>s.seconds>.8);
   const later=await cursor.boundingBox();assert.ok(first&&later&&(first.x!==later.x||first.y!==later.y),'The native clock must move the public notation cursor.');
@@ -52,8 +54,17 @@ try {
   await button('Redo');await waitMute(true);assert.equal((await status()).generation,played.generation);
   await mute.click();await waitMute(false);await idle();await button('Pause');await waitStatus(s=>!s.playing);
   const paused=await status();await page.waitForTimeout(100);assert.equal((await status()).tick,paused.tick);
+  await page.getByLabel('Seek measure',{exact:true}).fill('1');await button('Seek');await waitStatus(s=>s.tick===0);await instrument.locator('g[data-note-id][data-key="69"]').waitFor({state:'visible'});
+  await button('Play');await waitStatus(s=>s.playing);await button('Pause');await waitStatus(s=>!s.playing);
+  const frozenMarks=await instrument.locator('g[data-note-id]').evaluateAll(nodes=>nodes.map(node=>[node.dataset.noteId,node.dataset.string,node.dataset.fret,node.dataset.key]));assert.ok(frozenMarks.length>0);await page.waitForTimeout(100);assert.deepEqual(await instrument.locator('g[data-note-id]').evaluateAll(nodes=>nodes.map(node=>[node.dataset.noteId,node.dataset.string,node.dataset.fret,node.dataset.key])),frozenMarks);
+  const viewMode=instrument.getByRole('combobox',{name:/^Instrument view mode/});await viewMode.selectOption('keys');await instrument.locator('g[data-key="69"][data-active="true"]').waitFor({state:'visible'});await viewMode.selectOption('drums');await instrument.locator('[data-percussion-key="69"][data-active="true"]').waitFor({state:'visible'});await viewMode.selectOption('bass');await instrument.getByRole('img',{name:'Bass fretboard'}).waitFor();await viewMode.selectOption('auto');await instrument.getByRole('img',{name:'Guitar fretboard'}).waitFor();await instrument.screenshot({path:join(directory,'instrument-view.png')});
   await page.getByLabel('Seek measure',{exact:true}).fill('4');await button('Seek');await waitStatus(s=>Math.abs(s.tick-11520)<.01);
-  await button('Stop');await page.getByRole('combobox',{name:/^Speed/}).selectOption('50');await button('Loop');await button('Play');
+  await button('Stop');await waitStatus(s=>!s.playing&&s.tick===0);await page.waitForFunction(()=>document.querySelectorAll('.instrument-view g[data-note-id]').length===0);
+  await button('Add track');await ready();await button('Track 2: Bass');await instrument.getByRole('img',{name:'Bass fretboard'}).waitFor();assert.equal(await instrument.locator('[data-string-row]').count(),4);
+  await page.getByRole('combobox',{name:/^String/}).selectOption('4');await page.getByLabel('Fret',{exact:true}).fill('2');await button('Set note');await ready();await button('Play');await waitStatus(s=>s.playing);await instrument.locator('g[data-note-id][data-string="4"][data-fret="2"][data-key="45"]').waitFor({state:'visible'});
+  await button('Track 1: Guitar');await instrument.getByRole('img',{name:'Guitar fretboard'}).waitFor();assert.equal(await instrument.locator('[data-string-row]').count(),6);await button('Stop');await waitStatus(s=>!s.playing&&s.tick===0);await button('Track 2: Bass');await button('Remove track');await ready();await instrument.getByRole('img',{name:'Guitar fretboard'}).waitFor();
+  await page.getByRole('combobox',{name:/^String/}).selectOption('6');await button('Hide instrument');assert.equal(await instrument.count(),0);
+  await page.getByRole('combobox',{name:/^Speed/}).selectOption('50');await button('Loop');await button('Play');
   await waitStatus(s=>s.speed===.5&&s.tick>3600);
   await waitStatus(s=>s.playing&&s.tick<960);await button('Stop');await button('Clear loop');
   await page.getByLabel('Metronome',{exact:true}).click();await waitStatus(s=>s.metronome);
@@ -78,7 +89,7 @@ try {
   await button('Undo');await waitMute(false);assert.deepEqual((await snapshot()).project,savedSnapshot.project);
   const beforeNew=await status();await button('New');await ready();assert.ok((await status()).generation>beforeNew.generation);assert.equal((await status()).playing,false);assert.equal((await status()).speed,1);assert.equal((await status()).metronome,false);
   assert.equal((await page.evaluate(()=>window.__nativeAudioSmoke)).webAudioSamples,0,'External media mode must never emit a second synthesizer stream.');
-  const result={actualNativeCallbacks:true,played,captured,capturedPath,cursorMoved:true,noSecondSynth:true,settingsUndoPreservesPlayback:true,inclusiveLoop:true,musicalEditStopsAndRefreshesPlayback:true,backingTransaction:true,selfContainedBackingRestartReopen:true,authoredBackingUnavailableDuringReopen:true,reopenedBackingSignal,newClearsTransport:true,offlineWebview:true,blockedExternal:[...new Set(blockedExternal)]};
+  const result={actualNativeCallbacks:true,played,captured,capturedPath,cursorMoved:true,noSecondSynth:true,settingsUndoPreservesPlayback:true,inclusiveLoop:true,instrumentViewsFollowSelectedTrack:true,instrumentViewsPauseStudyAndStop:true,instrumentViewModes:true,musicalEditStopsAndRefreshesPlayback:true,backingTransaction:true,selfContainedBackingRestartReopen:true,authoredBackingUnavailableDuringReopen:true,reopenedBackingSignal,newClearsTransport:true,offlineWebview:true,blockedExternal:[...new Set(blockedExternal)]};
   writeFileSync(join(directory,'native-audio-result.json'),JSON.stringify(result,null,2));await page.screenshot({path:join(directory,'native-audio.png')});
   console.log('Native CPAL playback and independent bounded WASAPI loopback PCM, cursor, pause/seek/loop/speed, sound history, backing transaction, self-contained offline restart/reopen and New passed.',captured);
 } catch(error) {

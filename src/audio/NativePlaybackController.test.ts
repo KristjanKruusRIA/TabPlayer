@@ -5,14 +5,84 @@ import { blankProject } from '../project';
 import { NativePlaybackController } from './NativePlaybackController';
 import type { NativeAudioBridge, NativeAudioStatus } from './bridge';
 import { buildPlaybackPlan } from './plan';
+import type { PlanNote } from './types';
 
-function fixture() {
+function fixture(preparePlan?:ConstructorParameters<typeof NativePlaybackController>[0]['preparePlan']) {
   let receive: (status:NativeAudioStatus)=>void=()=>{};
   const bridge:NativeAudioBridge={prepare:vi.fn(async()=>{}),command:vi.fn(async()=>{}),setMix:vi.fn(async()=>{}),devices:vi.fn(async()=>[]),status:vi.fn(async()=>null),subscribe:vi.fn(async listener=>{receive=listener;return()=>{};}),stageBacking:vi.fn(async()=>null),stageEmbeddedBacking:vi.fn(async()=>null)};
-  const onEdit=vi.fn();const player=new NativePlaybackController({bridge,onEdit});
+  const onEdit=vi.fn();const player=new NativePlaybackController({bridge,onEdit,preparePlan});
   const emit=(change:Partial<NativeAudioStatus>={})=>receive({generation:player.generation,ready:true,playing:false,tick:0,seconds:0,durationSeconds:8,speed:1,metronome:false,error:null,deviceId:null,...change});
   return {bridge,onEdit,player,emit};
 }
+async function soundingFixture() {
+  const target={track:0,staff:0,bar:0,voice:0,beat:0};let project=blankProject();
+  for(const edit of [
+    {type:'setNote' as const,target,string:6,fret:5},
+    {type:'setNote' as const,target,string:5,fret:7},
+    {type:'setNote' as const,target:{...target,bar:1},string:6,fret:7},
+    {type:'addTrack' as const,name:'Bass',tuning:[43,38,33,28],program:33},
+    {type:'setNote' as const,target:{...target,track:1},string:4,fret:2},
+  ])project=previewEdit(project,edit).project;
+  const test=fixture(),built=buildDocument(project);await test.player.loadDocument(project,built);
+  const plan=vi.mocked(test.bridge.prepare).mock.calls.at(-1)![0];return {...test,project,built,plan};
+}
+it('exposes performed track chords with half-open native tick intervals',async()=>{
+  const {player,emit,built,plan}=await soundingFixture();const bass=trackIdentity(built.score.tracks[1]);
+  emit();expect(player.activeNotes('base/0')).toEqual([]);player.play();expect(player.activeNotes('base/0')).toEqual([]);
+  emit({playing:true,tick:0,seconds:7,speed:.5});expect(player.activeNotes('base/0').map(n=>n.key).sort()).toEqual([66,69]);
+  expect(player.activeNotes(bass).map(n=>n.key)).toEqual([45]);expect(player.activeNotes('missing')).toEqual([]);
+  const chordEnd=Math.max(...plan.notes.filter(n=>n.trackId==='base/0'&&n.startTick===0).map(n=>n.endTick));
+  emit({playing:true,tick:chordEnd,seconds:0,speed:2});expect(player.activeNotes('base/0')).toEqual([]);player.destroy();
+});
+it('freezes paused study notes and keeps Stop suppressed until Play or acknowledged seek',async()=>{
+  const {player,emit,plan}=await soundingFixture();player.play();emit({playing:true,tick:100});const chord=player.activeNotes('base/0');expect(chord).toHaveLength(2);
+  player.pause();emit({tick:100});expect(player.activeNotes('base/0')).toEqual(chord);await Promise.resolve();expect(player.activeNotes('base/0')).toEqual(chord);
+  player.stop();expect(player.activeNotes('base/0')).toEqual([]);emit({tick:0});emit({playing:true,tick:100});expect(player.activeNotes('base/0')).toEqual([]);
+  player.seekToMeasure(1);emit({tick:0});expect(player.activeNotes('base/0')).toEqual([]);
+  const seek=plan.occurrences.find(o=>o.bar===1)!.startTick;emit({tick:seek});expect(player.activeNotes('base/0').map(n=>n.key)).toEqual([71]);
+  player.stop();player.play();expect(player.activeNotes('base/0')).toEqual([]);emit({playing:true,tick:0});expect(player.activeNotes('base/0')).toHaveLength(2);
+  emit({tick:plan.durationTick,seconds:plan.durationMs/1000});expect(player.activeNotes('base/0')).toEqual([]);player.destroy();
+});
+it('uses repeated performed occurrences and native seek/loop ticks without a second clock',async()=>{
+  const {player,emit,project}=await soundingFixture();
+  let repeated=previewEdit(project,{type:'setMeasureSettings',bar:0,numerator:4,denominator:4,pickup:false,freeTime:false,repeatStart:true,repeatCount:0,endings:[],section:'',tempos:[]}).project;
+  repeated=previewEdit(repeated,{type:'setMeasureSettings',bar:1,numerator:4,denominator:4,pickup:false,freeTime:false,repeatStart:false,repeatCount:2,endings:[],section:'',tempos:[]}).project;
+  await player.loadDocument(repeated,buildDocument(repeated));const prepared=buildPlaybackPlan(buildDocument(repeated).score,player.generation);
+  const repeatedNote=prepared.notes.find(n=>n.trackId==='base/0'&&n.key===69&&n.occurrence===1)!;expect(repeatedNote).toBeDefined();
+  player.play();emit({playing:true,tick:repeatedNote.startTick+1,seconds:0,speed:.25});expect(player.activeNotes('base/0').filter(n=>n.key===69)).toEqual([expect.objectContaining({occurrence:1,startTick:repeatedNote.startTick})]);
+  emit({playing:true,tick:0,seconds:99,speed:2});expect(player.activeNotes('base/0').every(n=>n.occurrence===0)).toBe(true);player.destroy();
+});
+it('keeps settings-only notes but clears stale generations, faults, musical replacement and New',async()=>{
+  const {player,bridge,emit,project,built}=await soundingFixture();player.play();emit({playing:true,tick:100});const chord=player.activeNotes('base/0'),generation=player.generation;
+  const mixed=previewEdit(project,{type:'setTrackMix',trackId:'base/0',mix:{gain:.4,pan:0,mute:false,solo:false}},built);await player.loadDocument(mixed.project,mixed);expect(player.activeNotes('base/0')).toEqual(chord);
+  emit({generation:generation-1,ready:false,error:'stale'});expect(player.activeNotes('base/0')).toEqual(chord);
+  emit({playing:true,tick:100,error:'Device lost'});expect(player.activeNotes('base/0')).toEqual([]);
+  player.play();emit({playing:true,tick:100});expect(player.activeNotes('base/0')).toHaveLength(2);
+  emit({ready:false,tick:100});expect(player.activeNotes('base/0')).toEqual([]);
+  player.beforeScoreChange();expect(player.activeNotes('base/0')).toEqual([]);emit({generation,playing:true,tick:100});expect(player.activeNotes('base/0')).toEqual([]);
+  const next=previewEdit(mixed.project,{type:'setNote',target:{track:0,staff:0,bar:0,voice:0,beat:0},string:6,fret:9});await player.loadDocument(next.project,next);emit();expect(player.activeNotes('base/0')).toEqual([]);
+  player.play();emit({playing:true,tick:100});expect(player.activeNotes('base/0').map(n=>n.key).sort()).toEqual([66,73]);
+  const fresh=blankProject();await player.loadDocument(fresh,buildDocument(fresh),0,1);emit();expect(player.activeNotes('base/0')).toEqual([]);expect(bridge.prepare).toHaveBeenCalledTimes(3);player.destroy();expect(player.activeNotes('base/0')).toEqual([]);
+});
+async function largeNoteFixture() {
+  const source=previewEdit(blankProject(),{type:'setNote',target:{track:0,staff:0,bar:0,voice:0,beat:0},string:6,fret:5});
+  const template=buildPlaybackPlan(source.score,1).notes[0];const notes:PlanNote[]=Array.from({length:100000},(_,index)=>({...template,id:`display/${index}`,trackId:index%2?'other':'base/0',startTick:index*120,endTick:index*120+240}));
+  const {player,emit}=fixture(async(_,generation)=>({...buildPlaybackPlan(source.score,generation),durationTick:12000240,notes}));await player.loadDocument(source.project,source);player.play();emit({playing:true,tick:6000001});
+  return {player,emit};
+}
+it('returns only the selected track from a large prepared plan',async()=>{
+  const {player}=await largeNoteFixture();
+  expect(player.activeNotes('base/0').map(note=>note.id)).toEqual(['display/50000']);
+  expect(player.activeNotes('other').map(note=>note.id)).toEqual(['display/49999']);
+  expect(player.activeNotes('missing')).toEqual([]);player.destroy();
+});
+// Run explicitly with TABPLAYER_AUDIO_BENCHMARK=1 in a serial, otherwise idle session.
+it.skipIf(process.env.TABPLAYER_AUDIO_BENCHMARK!=='1')('benchmarks selected-track scans against the 5 ms/query view budget',async()=>{
+  const {player}=await largeNoteFixture();
+  const start=performance.now();let active=0;for(let query=0;query<200;query++)active+=player.activeNotes('base/0').length;
+  const elapsed=performance.now()-start;expect(elapsed).toBeLessThan(1000);console.info(`Active selected-track scan: ${(elapsed/200).toFixed(3)} ms/query for 50,000 notes.`);player.destroy();
+  expect(active).toBe(200);
+});
 it('native_state_ack_not_button_intent',async()=>{
   const {player,bridge,emit}=fixture();const p=blankProject();await player.loadDocument(p,buildDocument(p));
   bridge.command=vi.fn(async()=>{throw new Error('Device disconnected');});player.play();

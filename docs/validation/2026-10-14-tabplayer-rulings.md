@@ -17,6 +17,8 @@ These decisions record approved-milestone tradeoffs, cases the independent revie
 - Final: Ruling: changing either end of an imported tie updates the entire tied note — a tie represents one sustained pitch, and destination-only changes are silently reverted by alphaTab — cost if wrong: editing one segment independently requires a later break-tie command.
 - Final: Ruling: render notation synchronously while retaining worker audio — native rapid-deletion testing reproduced alphaTab 1.8.4 rebuilding stale worker bounds against the replacement score, which throws and can break hit testing — cost if wrong: large-score rendering can block the UI; native redraw timings must be checked and worker rendering can be revisited later.
 
+- Final: Ruling: retain the generated plan workspace after preserving its records — automatic approval review rejected recursive cleanup as blocked by policy without further detail — cost if wrong: ignored execution files remain as local clutter.
+
 ## Deferred minors
 
 - Final: minor (deferred): fractional Measure/Beat input can produce an uncaught selection-handler error; use whole-number selections. Existing score and native project remain intact.

@@ -4,6 +4,8 @@ import type { BeatTarget, EditCommand, Project } from './project';
 const settings = new Settings();
 const { Score, Track, Staff, Bar, Voice, Beat, Note, MasterBar, Automation, JsonConverter } = model;
 const integer = (value: number, minimum = 0) => Number.isInteger(value) && value >= minimum;
+const trackIdentities=new WeakMap<model.Track,string>();
+export const trackIdentity=(track:model.Track)=>trackIdentities.get(track) ?? `base/${track.index}`;
 
 function tuningValid(tuning: number[]) {
   if (!Array.isArray(tuning) || !tuning.length || tuning.some(n => !integer(n) || n > 127)) throw new Error('Use MIDI tuning pitches from 0 to 127.');
@@ -79,16 +81,40 @@ function voiceAt(score: model.Score, target: BeatTarget) {
 
 export function describeSelection(score: model.Score, target: BeatTarget) {
   const location = voiceAt(score, target);
-  const beat = location.voice.beats[target.beat];
+  const beat = location.voice.beats[target.beat]?.isEmpty ? undefined : location.voice.beats[target.beat];
   return {...location, beat, master: score.masterBars[target.bar]};
 }
 
 function capacity(score: model.Score, target: BeatTarget) {
   const {voice} = voiceAt(score, target);
-  for (const beat of voice.beats) beat.updateDurations();
+  for (const beat of voice.beats) { tripleDotTiming(beat);beat.updateDurations(); }
   const duration = voice.beats.reduce((sum, b) => sum + (b.isEmpty || b.graceType !== model.GraceType.None ? 0 : b.playbackDuration), 0);
   const master = score.masterBars[target.bar];
   if (!master.isFreeTime && duration > master.calculateDuration(false)) throw new Error('That rhythm would overfill this measure. Shorten or remove another beat first.');
+}
+
+function tripleDotTiming(beat: model.Beat) {
+  if (beat.dots !== 3) return;
+  // 1.8.4 calculates only one and two dots. The public duration override
+  // keeps its renderer, beat chain and MIDI generator on the same ticks.
+  const base=Math.trunc(3840/(beat.duration < 0 ? 1/-beat.duration : beat.duration));
+  let ticks=base+Math.trunc(base/2)+Math.trunc(base/4)+Math.trunc(base/8);
+  if (beat.tupletDenominator > 0 && beat.tupletNumerator >= 0) ticks=Math.trunc(ticks*beat.tupletDenominator/beat.tupletNumerator);
+  beat.overrideDisplayDuration=beat.isFullBarRest ? beat.voice.bar.masterBar.calculateDuration() : ticks;
+}
+
+function removeNote(note: model.Note) {
+  if (note.tieOrigin) note.tieOrigin.tieDestination=null;
+  if (note.tieDestination) { note.tieDestination.tieOrigin=null;note.tieDestination.isTieDestination=false; }
+  if (note.slurOrigin) note.slurOrigin.slurDestination=null;
+  if (note.slurDestination) { note.slurDestination.slurOrigin=null;note.slurDestination.isSlurDestination=false; }
+  if (note.slideOrigin) { note.slideOrigin.slideTarget=null;note.slideOrigin.slideOutType=model.SlideOutType.None; }
+  if (note.slideTarget) note.slideTarget.slideOrigin=null;
+  if (note.hammerPullOrigin) { note.hammerPullOrigin.hammerPullDestination=null;note.hammerPullOrigin.isHammerPullOrigin=false; }
+  if (note.hammerPullDestination) note.hammerPullDestination.hammerPullOrigin=null;
+  note.tieOrigin=null;note.tieDestination=null;note.slurOrigin=null;note.slurDestination=null;
+  note.slideOrigin=null;note.slideTarget=null;note.hammerPullOrigin=null;note.hammerPullDestination=null;
+  note.beat.removeNote(note);
 }
 
 function apply(score: model.Score, edit: EditCommand) {
@@ -97,25 +123,29 @@ function apply(score: model.Score, edit: EditCommand) {
       const {staff, voice} = voiceAt(score, edit.target);
       const beat = voice.beats[edit.target.beat];
       if (edit.type === 'insertBeat') {
+        if (voice.beats.length === 1 && voice.beats[0].isEmpty) voice.beats.splice(0);
         if (edit.target.beat > voice.beats.length || ![1,2,4,8,16,32,64].includes(edit.duration) || !integer(edit.dots) || edit.dots > 3) throw new Error('Invalid beat insertion.');
         const inserted = rest(edit.duration, edit.dots); inserted.voice = voice;
         voice.beats.splice(edit.target.beat, 0, inserted); capacity(score, edit.target); break;
       }
       if (!beat) throw new Error('Select an existing beat.');
-      if (edit.type === 'deleteBeat') { voice.beats.splice(edit.target.beat, 1); break; }
+      if (edit.type === 'deleteBeat') { for (const note of [...beat.notes]) removeNote(note);voice.beats.splice(edit.target.beat, 1); break; }
       if (edit.type === 'setDuration') {
         if (![1,2,4,8,16,32,64].includes(edit.duration) || !integer(edit.dots) || edit.dots > 3) throw new Error('Invalid rhythm.');
-        beat.duration = edit.duration; beat.dots = edit.dots; capacity(score, edit.target); break;
+        beat.duration = edit.duration; beat.dots = edit.dots;beat.overrideDisplayDuration=undefined;capacity(score, edit.target); break;
       }
-      if (edit.type === 'setRest') { for (const note of [...beat.notes]) beat.removeNote(note); beat.isEmpty = false; break; }
+      if (edit.type === 'setRest') { for (const note of [...beat.notes]) removeNote(note); beat.isEmpty = false; break; }
       if (staff.isPercussion || !integer(edit.string,1) || edit.string > staff.tuning.length) throw new Error('Select a string on a guitar or bass track.');
       const existing = beat.notes.find(n => n.string === edit.string);
-      if (edit.type === 'removeNote') { if (existing) beat.removeNote(existing); break; }
+      if (edit.type === 'removeNote') { if (existing) removeNote(existing); break; }
       const pitch = staff.tuning[staff.tuning.length-edit.string] + edit.fret + staff.capo - staff.transpositionPitch;
       if (!integer(edit.fret) || pitch < 0 || pitch > 127) throw new Error('That fret is outside the playable MIDI pitch range.');
-      if (existing) existing.fret = edit.fret;
+      if (existing) {
+        let first=existing;while(first.tieOrigin)first=first.tieOrigin;
+        for (let note:model.Note|null=first;note;note=note.tieDestination) note.fret=edit.fret;
+      }
       else { const note = new Note(); note.string = edit.string; note.fret = edit.fret; beat.addNote(note); }
-      beat.isEmpty = false; break;
+      beat.isEmpty = false; capacity(score,edit.target); break;
     }
     case 'appendMeasure': {
       const previous = score.masterBars.at(-1)!; const master = new MasterBar();
@@ -125,7 +155,10 @@ function apply(score: model.Score, edit: EditCommand) {
     case 'removeMeasure': {
       if (!integer(edit.bar) || !score.masterBars[edit.bar] || score.masterBars.length === 1) throw new Error('Keep at least one measure.');
       const tempo = score.tempo; score.masterBars.splice(edit.bar,1);
-      for (const track of score.tracks) for (const staff of track.staves) staff.bars.splice(edit.bar,1);
+      for (const track of score.tracks) for (const staff of track.staves) {
+        for (const voice of staff.bars[edit.bar].voices) for (const beat of voice.beats) for (const note of [...beat.notes]) removeNote(note);
+        staff.bars.splice(edit.bar,1);
+      }
       if (edit.bar === 0 && !score.masterBars[0].tempoAutomations.length) score.masterBars[0].tempoAutomations = [Automation.buildTempoAutomation(false,0,tempo,2)];
       break;
     }
@@ -151,13 +184,25 @@ function apply(score: model.Score, edit: EditCommand) {
 
 export function buildScore(value: Project): model.Score {
   const project = validateProject(value); let score = initialScore(project);
-  for (const edit of project.edits) {
+  const identities=score.tracks.map((_,index)=>`base/${index}`);
+  for (const [index,edit] of project.edits.entries()) {
     apply(score, edit);
+    if (edit.type==='addTrack') identities.push(`added/${index}/${JSON.stringify(edit)}`);
+    if (edit.type==='removeTrack') identities.splice(edit.track,1);
     if (['insertBeat','deleteBeat','appendMeasure','removeMeasure','addTrack','removeTrack'].includes(edit.type)) {
-      score = JsonConverter.jsonToScore(JsonConverter.scoreToJson(score), settings);
+      score = rebuild(score);
     }
   }
   // Transient conversion rebuilds derived links and caches; native files store source bytes and commands.
+  score=rebuild(score);score.tracks.forEach((track,index)=>trackIdentities.set(track,identities[index]));return score;
+}
+
+function rebuild(score: model.Score) {
+  // alphaTab's beat chain requires a carrier even in an empty following voice.
+  for (const track of score.tracks) for (const staff of track.staves) for (const bar of staff.bars) for (const voice of bar.voices) {
+    if (!voice.beats.length) { const empty=new Beat();empty.isEmpty=true;voice.addBeat(empty); }
+    for (const beat of voice.beats) tripleDotTiming(beat);
+  }
   return JsonConverter.jsonToScore(JsonConverter.scoreToJson(score), settings);
 }
 

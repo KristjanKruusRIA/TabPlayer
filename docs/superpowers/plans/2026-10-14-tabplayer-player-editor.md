@@ -47,8 +47,8 @@ The durable `Project` fields are `format: "TabPlayer"`, `schemaVersion: 1`, `eng
 
 **Interfaces:** Produce `Project`, `BaseDocument`, `EditCommand`, `ProjectSnapshot`, `ProjectSession`, and `ProjectError` with explicit display messages. Methods: `ProjectSession::new(project, path)`, `snapshot()`, `apply_edit(command)`, `undo()`, `redo()`, `mark_saved(path)`. File functions: `read_project(path: &Path) -> Result<Project, ProjectError>` and `write_project(path: &Path, project: &Project) -> Result<(), ProjectError>`.
 
-- [ ] Check for an existing Rust installation beyond PATH; if absent, install the official stable Rust toolchain with the minimal profile. Existing Visual Studio 2022 C++ Build Tools and WebView2 were detected. Verify `rustc --version` and `cargo --version`; use the installed tool paths in this shell.
-- [ ] Scaffold the Cargo package and write failing tests for blank-project JSON, schema/engine rejection, unknown command rejection, source-byte integrity, history, dirty state, and persistence. Example assertions:
+- [x] Check for an existing Rust installation beyond PATH; if absent, install the official stable Rust toolchain with the minimal profile. Existing Visual Studio 2022 C++ Build Tools and WebView2 were detected. Verify `rustc --version` and `cargo --version`; use the installed tool paths in this shell.
+- [x] Scaffold the Cargo package and write failing tests for blank-project JSON, schema/engine rejection, unknown command rejection, source-byte integrity, history, dirty state, and persistence. Example assertions:
 
 ```rust
 assert_eq!(snapshot.project.schema_version, 1);
@@ -58,9 +58,9 @@ assert!(!session.snapshot().can_redo); // undo, then a new edit
 assert_eq!(std::fs::read(path).unwrap(), old_bytes); // failed replacement
 ```
 
-- [ ] Run `cargo test --manifest-path src-tauri/Cargo.toml --tests` and confirm failure on missing behavior, then implement the contract and history. Preserve saved-state identity across undo/redo; save marks clean only after successful replacement. Verify Base64 and its digest rather than trusting stored metadata.
-- [ ] Implement `write_project` using a maintained atomic-file-write library after inspecting its Windows replacement contract; verify a failure before commit leaves the old file intact. Use temporary directories in tests rather than user documents.
-- [ ] Rerun native tests, check formatting with `cargo fmt --manifest-path src-tauri/Cargo.toml --check`, and commit the independently testable Rust core.
+- [x] Run `cargo test --manifest-path src-tauri/Cargo.toml --tests` and confirm failure on missing behavior, then implement the contract and history. Preserve saved-state identity across undo/redo; save marks clean only after successful replacement. Verify Base64 and its digest rather than trusting stored metadata.
+- [x] Implement `write_project` using a maintained atomic-file-write library after inspecting its Windows replacement contract; verify a failure before commit leaves the old file intact. Use temporary directories in tests rather than user documents.
+- [x] Rerun native tests, check formatting with `cargo fmt --manifest-path src-tauri/Cargo.toml --check`, and commit the independently testable Rust core.
 
 ## Task 2: Score import, replay, and editing validation
 
@@ -68,12 +68,12 @@ assert_eq!(std::fs::read(path).unwrap(), old_bytes); // failed replacement
 
 **Interfaces:** Consume Task 1's durable contract. Produce `buildScore(project: Project): Score`, `previewEdit(project: Project, edit: EditCommand): {project: Project; score: Score}`, `exportGp(score: Score): Uint8Array`, `describeSelection(score: Score, target: BeatTarget)`, and `validateProject(project: unknown): Project`. Import `Score` from alphaTab; constrain application state to the explicit project contract.
 
-- [ ] Install pinned alphaTab 1.8.4 and the frontend development dependencies, keeping lockfiles. Use the engine's official Vite integration and public APIs; inspect current package declarations and upstream examples before choosing initialization calls.
-- [ ] Write failing tests using the defined four-measure blank base. Verify an entered fret 7 on the high E string produces MIDI pitch 71; a second string creates a chord; rest entry removes sounding notes; supported duration/dot changes have the expected tick length. Reject fret -1 and a pitch beyond MIDI 127 without changing the original project.
-- [ ] Add failing tests for overflowing durations, empty voices after deletion, invalid targets, preserving imported technique fields during fret edits, measure alignment after additions/removals on two tracks, tuning changes, and rejecting removal of the last measure/track. Test replay of an invalid native command before changing the active document.
-- [ ] Run `npm test -- src/engine.test.ts` to confirm failures, implement the finite command operations, and call supported score finalization APIs to rebuild timing/links. Duration overflow uses actual meter and tuplet timing rather than an assumed four quarters. Preserve supported imported data outside the edited field.
-- [ ] Obtain minimal GP3/4/5, GPX, and GP7/8 compatibility fixtures from a primary public upstream test corpus, recording source revision, hashes, and permissions. Author new fixtures when redistribution terms are unclear; keep reference-only inputs in `.analysis`. Pin known track/tuning/measure/note/duration expectations from their upstream tests or explicit fixture construction. Never substitute exporter-generated `.gp` for a GP3/GPX test.
-- [ ] Verify those fixture expectations, a corrupt-file error, and supported-field export/reimport. Record advanced-feature limits, including bends, separately. Run `npm test -- src/engine.test.ts src/compatibility.test.ts` and `npm run typecheck`, then commit the working music adapter.
+- [x] Install pinned alphaTab 1.8.4 and the frontend development dependencies, keeping lockfiles. Use the engine's official Vite integration and public APIs; inspect current package declarations and upstream examples before choosing initialization calls.
+- [x] Write failing tests using the defined four-measure blank base. Verify an entered fret 7 on the high E string produces MIDI pitch 71; a second string creates a chord; rest entry removes sounding notes; supported duration/dot changes have the expected tick length. Reject fret -1 and a pitch beyond MIDI 127 without changing the original project.
+- [x] Add failing tests for overflowing durations, empty voices after deletion, invalid targets, preserving imported technique fields during fret edits, measure alignment after additions/removals on two tracks, tuning changes, and rejecting removal of the last measure/track. Test replay of an invalid native command before changing the active document.
+- [x] Run `npm test -- src/engine.test.ts` to confirm failures, implement the finite command operations, and call supported score finalization APIs to rebuild timing/links. Duration overflow uses actual meter and tuplet timing rather than an assumed four quarters. Preserve supported imported data outside the edited field.
+- [x] Obtain minimal GP3/4/5, GPX, and GP7/8 compatibility fixtures from a primary public upstream test corpus, recording source revision, hashes, and permissions. Author new fixtures when redistribution terms are unclear; keep reference-only inputs in `.analysis`. Pin known track/tuning/measure/note/duration expectations from their upstream tests or explicit fixture construction. Never substitute exporter-generated `.gp` for a GP3/GPX test.
+- [x] Verify those fixture expectations, a corrupt-file error, and supported-field export/reimport. Record advanced-feature limits, including bends, separately. Run `npm test -- src/engine.test.ts src/compatibility.test.ts` and `npm run typecheck`, then commit the working music adapter.
 
 ## Task 3: Tauri window and native document workflow
 
@@ -81,10 +81,10 @@ assert_eq!(std::fs::read(path).unwrap(), old_bytes); // failed replacement
 
 **Interfaces:** Consume Tasks 1 and 2. Define `DocumentCandidate = {project: Project; path: string | null}` in the Rust/TypeScript contracts. Native command names are `read_document`, `replace_project`, `project_snapshot`, `apply_edit`, `undo_edit`, `redo_edit`, `save_project`, and `export_gp`. TypeScript `NativeBridge` maps these to camelCase methods with typed results. `readDocument(): Promise<DocumentCandidate | null>` stages a candidate or cancellation; imports use path=null so native Save cannot overwrite the Guitar Pro source. `saveProject(saveAs: boolean): Promise<ProjectSnapshot | null>` returns the resulting snapshot or cancellation; `exportGp(bytes: Uint8Array): Promise<boolean>` uses a separate `.gp` destination. `DocumentController` methods are `open()`, `new()`, `edit(command)`, `undo()`, `redo()`, `save(saveAs)`, `export()`, and `requestClose()`.
 
-- [ ] Write failing controller tests: cancelled open/save keeps the existing snapshot; malformed project replay keeps the active score; failed native edit commit discards the candidate; failed save leaves dirty=true; overlapping document actions are serialized. Use a mock bridge here and native file tests in Task 1.
-- [ ] Run `npm test -- src/controller.test.ts` to confirm failure. Implement the narrow bridge and sequential controller. Validate/project music first, commit native state second, publish the displayed score last. Open/new/close use save/discard/cancel when dirty.
-- [ ] Wire Tauri's dialog support, app state, file commands, and close-request behavior. File reads stage documents rather than replacing active state; writes use Task 1's safe writer. Check Rust/TypeScript protocol serialization against `tests/protocol.json` for every command variant.
-- [ ] Start the Tauri development application, render a score through the real bridge, and test native open/save cancellation and an unwritable destination. Run native/frontend tests plus `cargo check --manifest-path src-tauri/Cargo.toml`; commit the functioning desktop document workflow.
+- [x] Write failing controller tests: cancelled open/save keeps the existing snapshot; malformed project replay keeps the active score; failed native edit commit discards the candidate; failed save leaves dirty=true; overlapping document actions are serialized. Use a mock bridge here and native file tests in Task 1.
+- [x] Run `npm test -- src/controller.test.ts` to confirm failure. Implement the narrow bridge and sequential controller. Validate/project music first, commit native state second, publish the displayed score last. Open/new/close use save/discard/cancel when dirty.
+- [x] Wire Tauri's dialog support, app state, file commands, and close-request behavior. File reads stage documents rather than replacing active state; writes use Task 1's safe writer. Check Rust/TypeScript protocol serialization against `tests/protocol.json` for every command variant.
+- [x] Start the Tauri development application, render a score through the real bridge, and test native open/save cancellation and an unwritable destination. Run native/frontend tests plus `cargo check --manifest-path src-tauri/Cargo.toml`; commit the functioning desktop document workflow.
 
 ## Task 4: Score, tracks, and editing interface
 
@@ -92,10 +92,10 @@ assert_eq!(std::fs::read(path).unwrap(), old_bytes); // failed replacement
 
 **Interfaces:** Consume `DocumentController`, `ProjectSnapshot`, and the engine selection description. `ScoreView` renders a `Score` and publishes `BeatTarget`/string selection. `EditorPanel` publishes the finite `EditCommand` values. `TrackPanel` selects tracks and edits name/tuning/instrument through the existing commands. Components receive callbacks rather than importing native commands.
 
-- [ ] Write failing interaction tests covering selection of a rendered note and an empty string/rest, fret entry, chords, duration/rest edits, keyboard beat/string navigation, structural edits, and undo/redo buttons. Following deletion of the selected last beat/bar/track, assert selection points to a surviving location.
-- [ ] Run `npm test -- src/App.test.tsx` to confirm failure. Implement a clear original desktop layout with file/undo toolbar, track list, central notation, and beat inspector. Enable engine note bounds and use supported note events; the inspector supplies targets for empty strings and rests.
-- [ ] Add controls for every milestone edit, title/artist/initial tempo, and tuning. Show overflow errors and remaining measure duration. Buttons reflect valid selections, history state, and native-action progress. Use labels, keyboard focus, and accessible controls.
-- [ ] Verify a two-track composition visually in the app and test the same edits through the interface. Run frontend tests/typecheck, review React components with the applicable skill, and commit the complete basic editor.
+- [x] Write failing interaction tests covering selection of a rendered note and an empty string/rest, fret entry, chords, duration/rest edits, keyboard beat/string navigation, structural edits, and undo/redo buttons. Following deletion of the selected last beat/bar/track, assert selection points to a surviving location.
+- [x] Run `npm test -- src/App.test.tsx` to confirm failure. Implement a clear original desktop layout with file/undo toolbar, track list, central notation, and beat inspector. Enable engine note bounds and use supported note events; the inspector supplies targets for empty strings and rests.
+- [x] Add controls for every milestone edit, title/artist/initial tempo, and tuning. Show overflow errors and remaining measure duration. Buttons reflect valid selections, history state, and native-action progress. Use labels, keyboard focus, and accessible controls.
+- [x] Verify a two-track composition visually in the app and test the same edits through the interface. Run frontend tests/typecheck, review React components with the applicable skill, and commit the complete basic editor.
 
 ## Task 5: Offline playback and practice controls
 
@@ -103,10 +103,10 @@ assert_eq!(std::fs::read(path).unwrap(), old_bytes); // failed replacement
 
 **Interfaces:** `PlaybackController` wraps alphaTab's player with `play()`, `pause()`, `stop()`, `seekToMeasure(index)`, `setSpeed(percent)`, `setLoop(startMeasure, endMeasureInclusive)`, `clearLoop()`, `setTrackVolume(track, value)`, `setMute(track, value)`, `setSolo(track, value)`, and `setMetronome(value)`. `beforeScoreChange()` stops playback; `replaceScore(score)` refreshes render/MIDI state. Transport uses these methods and subscribed player events.
 
-- [ ] Write failing tests using the actual generated MIDI/tick information: inclusive loop endpoints, first/last measure seeking, speed changes, mute/solo combinations, and stop-before-edit ordering. Convert measure ranges through engine tick information; do not multiply by a constant measure duration.
-- [ ] Run `npm test -- src/playback.test.ts` to confirm failure, then implement the public player controls and cursor synchronization. Enable audio after a user gesture and keep transport state tied to engine events rather than optimistic labels.
-- [ ] Bundle fonts, workers, and a SoundFont with verified redistribution terms and notices. Load assets from the packaged app; test playback using a score with sounding notes, not an all-rest score. Make no claim of RSE sound equivalence.
-- [ ] Run all unit/type checks and test actual audible playback, seeking, looping, and edited notes in the native app with networking disabled. Record any platform-specific webview limitations; commit the practice player.
+- [x] Write failing tests using the actual generated MIDI/tick information: inclusive loop endpoints, first/last measure seeking, speed changes, mute/solo combinations, and stop-before-edit ordering. Convert measure ranges through engine tick information; do not multiply by a constant measure duration.
+- [x] Run `npm test -- src/playback.test.ts` to confirm failure, then implement the public player controls and cursor synchronization. Enable audio after a user gesture and keep transport state tied to engine events rather than optimistic labels.
+- [x] Bundle fonts, workers, and a SoundFont with verified redistribution terms and notices. Load assets from the packaged app; test playback using a score with sounding notes, not an all-rest score. Make no claim of RSE sound equivalence.
+- [x] Run all unit/type checks and test actual audible playback, seeking, looping, and edited notes in the native app with networking disabled. Record any platform-specific webview limitations; commit the practice player.
 
 ## Task 6: Packaged workflow, compatibility evidence, and delivery
 
@@ -114,11 +114,11 @@ assert_eq!(std::fs::read(path).unwrap(), old_bytes); // failed replacement
 
 **Interfaces:** Exercise the full application from Tasks 1–5 through actual file dialogs or native test hooks restricted to development/test builds. The delivery report distinguishes passing tests, observed packaged behavior, and unavailable OS/runtime validations.
 
-- [ ] Build the Windows native distribution. Use the Tauri-supported desktop automation path where available; verify actual native file writes, then restart the packaged application and reopen the saved project. If automation cannot inspect a control, perform and record an equivalent native smoke check rather than substituting a mocked bridge.
-- [ ] Cover open → edit → play → native save → restart → reopen → `.gp` export. Compare preserved source bytes and supported musical fields. Open exports in Guitar Pro when that runtime is available; report model reimport and original-runtime acceptance as distinct checks.
-- [ ] Create a 100-measure/four-track fixture, measure load/edit/redraw times, and resolve stalls that obstruct normal use. Run packaged checks with networking disabled and verify no extracted Guitar Pro assets entered the distribution.
-- [ ] Run the full frontend/native test suites, typecheck, Rust formatting, and `git diff --check`; capture the observed output once. Test Linux/macOS builds and packaged audio on actual corresponding runners when available. Keep those validations explicitly pending if this Windows environment cannot execute them.
-- [ ] Review the whole change independently, resolve actionable findings, update notices and documentation, and deliver the executable/source with remaining compatibility and OS verification limits clearly stated.
+- [x] Build the Windows native distribution. Use the Tauri-supported desktop automation path where available; verify actual native file writes, then restart the packaged application and reopen the saved project. If automation cannot inspect a control, perform and record an equivalent native smoke check rather than substituting a mocked bridge.
+- [x] Cover open → edit → play → native save → restart → reopen → `.gp` export. Compare preserved source bytes and supported musical fields. Open exports in Guitar Pro when that runtime is available; report model reimport and original-runtime acceptance as distinct checks.
+- [x] Create a 100-measure/four-track fixture, measure load/edit/redraw times, and resolve stalls that obstruct normal use. Run packaged checks with networking disabled and verify no extracted Guitar Pro assets entered the distribution.
+- [x] Run the full frontend/native test suites, typecheck, Rust formatting, and `git diff --check`; capture the observed output once. Test Linux/macOS builds and packaged audio on actual corresponding runners when available. Keep those validations explicitly pending if this Windows environment cannot execute them.
+- [x] Review the whole change independently, resolve actionable findings, update notices and documentation, and deliver the executable/source with remaining compatibility and OS verification limits clearly stated.
 
 ## Plan review
 

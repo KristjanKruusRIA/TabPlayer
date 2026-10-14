@@ -33,7 +33,7 @@ export function App({controller}: {controller: DocumentController}) {
   const string=Math.max(1,Math.min(selectedString,location.staff.tuning.length));
   const act=(job: Promise<unknown>)=>{void job.catch(()=>{});};
   const change=(job:Promise<unknown>)=>act(job.then(()=>setSelection(old=>repair(controller.getState().score,old))));
-  const edit=(command:EditCommand)=>change(controller.edit(command).then(()=>{if(command.type==='removeTrack'){player?.removeTrackMix(command.track);setDocumentRevision(v=>v+1);}}));
+  const edit=(command:EditCommand)=>change(controller.edit(command));
   const documentAction=(job:Promise<unknown>)=>change(job.then(()=>{if(controller.getState().score!==state.score){player?.resetMix();setDocumentRevision(v=>v+1);}}));
   const select=(next:BeatTarget,s=string)=>{
     const fixed=repair(state.score,next);setSelection(fixed);

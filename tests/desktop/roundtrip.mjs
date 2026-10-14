@@ -15,6 +15,9 @@ try {
   await page.getByRole('button',{name:'Open',exact:true}).click();await idle();
   assert.equal((await snapshot()).project.base.sha256,hash);
   assert.equal((await snapshot()).project.base.bytesBase64,bytes.toString('base64'));
+  if(await page.getByRole('button',{name:'Set note',exact:true}).isDisabled()){
+    await page.getByRole('button',{name:'Insert beat',exact:true}).click();await idle();
+  }
   await page.getByLabel('String').selectOption('2');await page.getByLabel('Fret',{exact:true}).fill('7');await page.getByRole('button',{name:'Set note',exact:true}).click();await idle();
   assert.equal((await snapshot()).dirty,true);
   const failed=await page.evaluate(async path=>{try{await window.__TAURI_INTERNALS__.invoke('desktop_test_io',{action:'save',path});return false;}catch{return true;}},resolve(directory,'missing-directory/out.tabplayer'));

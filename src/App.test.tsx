@@ -60,7 +60,7 @@ it('repairs selection after deleting the last beat, measure, and track',async()=
   expect(Number((screen.getByLabelText('String') as HTMLSelectElement).value)).toBeLessThanOrEqual(6);
 });
 it('inserts a beat into an empty voice and changes score information and tuning',async()=>{
-  const c=await setup();for(let i=0;i<4;i++){click('Delete beat');await waitFor(()=>expect(c.getState().score.tracks[0].staves[0].bars[0].voices[0].beats).toHaveLength(3-i));}
+  const c=await setup();for(let i=0;i<4;i++){click('Delete beat');await waitFor(()=>expect(c.getState().snapshot.project.edits).toHaveLength(i+1));}
   expect(screen.getByRole('button',{name:'Set note'})).toBeDisabled();
   click('Insert beat');await waitFor(()=>expect(currentBeat(c)).toBeDefined());
   change('Title','My study');change('Artist','Band');change('Initial tempo','90');click('Apply score info');

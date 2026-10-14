@@ -6,7 +6,7 @@ const browser=await connect();const page=browser.contexts()[0].pages()[0];
 try {
   const start=performance.now();await page.getByRole('button',{name:'Open',exact:true}).click();
   await page.waitForFunction(()=>!document.querySelector('nav button').disabled && document.querySelector('.score-tools').textContent.includes('100 measures'));
-  await page.getByText('Performance study',{exact:true}).waitFor();
+  await page.locator('svg text').filter({hasText:/^Performance study$/}).first().waitFor();
   const openRenderMs=performance.now()-start;
   const before=performance.now();await page.getByLabel('Fret',{exact:true}).fill('13');await page.getByRole('button',{name:'Set note',exact:true}).click();
   await page.waitForFunction(()=>!document.querySelector('nav button').disabled);

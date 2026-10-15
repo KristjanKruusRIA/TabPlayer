@@ -1,16 +1,27 @@
 param(
     [Parameter(Mandatory=$true)][int]$AppProcessId,
     [Parameter(Mandatory=$true)][string]$AppExecutable,
-    [Parameter(Mandatory=$true)][ValidateSet('Save','Discard','Cancel')][string]$Decision
+    [Parameter(Mandatory=$true)][ValidateSet('Save','Discard','Cancel')][string]$Decision,
+    [long]$AppStartTicks=0
 )
 $ErrorActionPreference='Stop'
 $ownedExecutable=(Resolve-Path -LiteralPath $AppExecutable).Path
 if ([System.IO.Path]::GetFileName($ownedExecutable) -ine 'tabplayer.exe') { throw 'Only the owned TabPlayer executable may be controlled.' }
+if ($AppStartTicks -lt 0) { throw 'The captured process start token must be positive.' }
+$initialOwnedProcess=Get-Process -Id $AppProcessId -ErrorAction Stop
+$ownedStartTicks=if($AppStartTicks -gt 0){$AppStartTicks}else{$initialOwnedProcess.StartTime.ToUniversalTime().Ticks}
 function Assert-OwnedProcess {
-    $appProcess=Get-Process -Id $AppProcessId -ErrorAction Stop
+    param([switch]$AllowExited)
+    $appProcess=Get-Process -Id $AppProcessId -ErrorAction SilentlyContinue
+    if ($null -eq $appProcess) {
+        if ($AllowExited) { return $false }
+        throw 'The owned process exited before the requested dialog action.'
+    }
     if (-not [string]::Equals($appProcess.Path,$ownedExecutable,[StringComparison]::OrdinalIgnoreCase)) { throw 'The PID does not belong to the exact owned executable.' }
+    if ($appProcess.StartTime.ToUniversalTime().Ticks -ne $ownedStartTicks) { throw 'The PID no longer belongs to the captured process instance.' }
+    return $true
 }
-Assert-OwnedProcess
+$null=Assert-OwnedProcess
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
 Add-Type @'
@@ -52,7 +63,7 @@ public static class TabPlayerUnsavedDialogTest {
 # Pinned rfd 0.16 custom task-dialog IDs, confirmed against the actual UIA tree.
 $buttonId=@{Save=1004;Discard=1008;Cancel=1001}[$Decision]
 for($attempt=0;$attempt -lt 200;$attempt++) {
-    Assert-OwnedProcess
+    $null=Assert-OwnedProcess
     $dialogs=@([TabPlayerUnsavedDialogTest]::Find($AppProcessId))
     if ($dialogs.Count -gt 1) { throw 'More than one owned Unsaved score dialog appeared.' }
     if ($dialogs.Count -eq 1) {
@@ -66,11 +77,10 @@ for($attempt=0;$attempt -lt 200;$attempt++) {
         if ($buttons.Count -eq 0) { Start-Sleep -Milliseconds 50; continue }
         $button=$buttons.Item(0)
         if (-not $button.Current.IsEnabled -or $button.Current.ProcessId -ne $AppProcessId -or $button.Current.ClassName -cne 'CCPushButton') { throw 'Requested dialog button is not enabled or owned.' }
-        Assert-OwnedProcess
+        $null=Assert-OwnedProcess
         [TabPlayerUnsavedDialogTest]::Click($dialogs[0],[IntPtr]$button.Current.NativeWindowHandle,$AppProcessId,$buttonId)
         for($dismissal=0;$dismissal -lt 100;$dismissal++) {
-            Assert-OwnedProcess
-            if (@([TabPlayerUnsavedDialogTest]::Find($AppProcessId)) -notcontains $dialogs[0]) {
+            if (-not (Assert-OwnedProcess -AllowExited) -or @([TabPlayerUnsavedDialogTest]::Find($AppProcessId)) -notcontains $dialogs[0]) {
                 Write-Output "Owned Unsaved score dialog answered: $Decision"
                 exit 0
             }

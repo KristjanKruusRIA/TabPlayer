@@ -321,3 +321,157 @@ fn real_oversize_failure_retains_live_state_and_discard_commits_clean() {
         clean.manifest.current.generation
     );
 }
+
+#[test]
+#[ignore = "manual native acceptance: oversized checkpoint, thirteen real saves, preferences-off exit"]
+fn real_oversize_successful_saves_and_preferences_off_commit_empty_clean() {
+    use sha2::{Digest, Sha256};
+    let directory = tempfile::tempdir().unwrap();
+    let runtime = SessionRuntime::open(directory.path().into(), Arc::new(|_| {})).unwrap();
+    let audio = NativeAudio::new(PathBuf::new(), Arc::new(|_| {}));
+    let jobs = ExportJobs::default();
+    runtime.resolve(None, vec![], &audio, &jobs).unwrap();
+    let acknowledged = runtime.status();
+    let manifest_path = directory.path().join("recovery-v1/manifest.json");
+    let manifest = std::fs::read(&manifest_path).unwrap();
+    let original_manifest: serde_json::Value = serde_json::from_slice(&manifest).unwrap();
+    let project = authored_project();
+    let encoded_asset = project.assets.values().next().unwrap().bytes_base64.clone();
+    let lower_bound = encoded_asset.len() as u64 * 12;
+    assert!(lower_bound > MAX_CHECKPOINT_BYTES);
+    for _ in 0..12 {
+        add(&runtime, &audio, &jobs, project.clone());
+    }
+    let workspace = runtime.workspace();
+    {
+        let mut state = workspace.lock().unwrap();
+        for document in state.snapshot().documents {
+            state
+                .apply_edit(
+                    &DocumentRevision {
+                        document_id: document.document_id,
+                        revision: document.revision,
+                    },
+                    EditCommand::AppendMeasure,
+                    None,
+                )
+                .unwrap();
+        }
+    }
+    let before = capture(&workspace).unwrap();
+    for document in before.0.iter().skip(1) {
+        assert!(Arc::ptr_eq(
+            &encoded_asset,
+            &document
+                .session
+                .project
+                .assets
+                .values()
+                .next()
+                .unwrap()
+                .bytes_base64
+        ));
+    }
+    let started = Instant::now();
+    runtime.retry().unwrap();
+    wait_for(|| runtime.status().state == RecoveryState::Failed);
+    runtime.inner.drain();
+    let failed = runtime.status();
+    assert!(failed.error.as_deref().unwrap().contains("exceeds 512 MiB"));
+    assert_eq!(failed.generation, acknowledged.generation);
+    assert_eq!(failed.captured_at_unix_ms, acknowledged.captured_at_unix_ms);
+    assert_eq!(std::fs::read(&manifest_path).unwrap(), manifest);
+    assert_eq!(capture(&workspace).unwrap(), before);
+    assert!(!workspace.lock().unwrap().is_frozen());
+    let failed_after = started.elapsed();
+    let mut saved_files = Vec::new();
+    let save_started = Instant::now();
+    for (index, document) in before.0.iter().enumerate() {
+        let path = directory.path().join(format!("saved-{index}.tabplayer"));
+        let saved = workspace
+            .lock()
+            .unwrap()
+            .save_to_path(
+                &DocumentRevision {
+                    document_id: document.document_id.clone(),
+                    revision: document.revision,
+                },
+                path.clone(),
+            )
+            .unwrap();
+        assert!(!saved.snapshot.dirty);
+        assert_eq!(saved.snapshot.path.as_deref(), Some(path.to_str().unwrap()));
+        let (reopened, digest) = crate::files::read_project_with_digest(&path).unwrap();
+        // This fixture has no redo: every applied command and backing byte must reopen.
+        assert_eq!(
+            document.session.cursor,
+            document.session.project.edits.len()
+        );
+        assert_eq!(reopened, document.session.project);
+        let reopened_session = ProjectSession::new(reopened, Some(path.clone())).unwrap();
+        assert_eq!(reopened_session.snapshot(), saved.snapshot);
+        saved_files.push((path, digest));
+    }
+    let saved_after = save_started.elapsed();
+    let saved_live = capture(&workspace).unwrap();
+    for (old, saved) in before.0.iter().zip(&saved_live.0) {
+        assert_eq!(saved.session.project, old.session.project);
+        assert_eq!(saved.session.cursor, old.session.cursor);
+        assert_eq!(saved.session.saved, old.session.project.edits);
+        assert!(saved.session.path.is_some());
+    }
+    assert!(
+        !runtime
+            .set_preferences(false)
+            .unwrap()
+            .restore_previous_session
+    );
+    assert!(
+        !runtime
+            .inner
+            .store
+            .lock()
+            .unwrap()
+            .read_preferences()
+            .unwrap()
+            .restore_previous_session
+    );
+    let closes = workspace
+        .lock()
+        .unwrap()
+        .snapshot()
+        .documents
+        .into_iter()
+        .map(|document| {
+            assert!(!document.snapshot.dirty);
+            CloseDocument {
+                document_id: document.document_id,
+                revision: document.revision,
+                discard: false,
+            }
+        })
+        .collect();
+    runtime.shutdown(closes, &audio, &jobs).unwrap();
+    let store = runtime.inner.store.lock().unwrap();
+    let clean = store.load().unwrap().unwrap();
+    assert_eq!(clean.manifest.lifecycle, SessionLifecycle::Clean);
+    assert!(clean.manifest.epoch > original_manifest["epoch"].as_u64().unwrap());
+    assert!(clean.manifest.previous.is_none());
+    assert!(clean.recovery.envelope.documents.is_empty());
+    assert_eq!(capture(&workspace).unwrap(), saved_live);
+    assert!(workspace.lock().unwrap().is_frozen());
+    for (path, digest) in &saved_files {
+        assert_eq!(
+            format!("{:x}", Sha256::digest(std::fs::read(path).unwrap())),
+            *digest
+        );
+    }
+    eprintln!(
+        "oversize successful-save exit: encoded lower bound={lower_bound}, actual cap failure after {failed_after:?}; prior acknowledgement {:?}/{:?} retained; {} ordinary schema2 saves/reopens/history+path+clean assertions in {saved_after:?}; native preferences false persisted; empty Clean epoch {} generation {} with no fallback; all saved file hashes and live histories unchanged by shutdown",
+        acknowledged.generation,
+        acknowledged.captured_at_unix_ms,
+        saved_files.len(),
+        clean.manifest.epoch,
+        clean.manifest.current.generation
+    );
+}

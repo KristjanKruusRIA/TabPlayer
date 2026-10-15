@@ -1,6 +1,7 @@
 use crate::project::BeatTarget;
 use crate::settings::{BackingSettings, ChannelMix, PrintLayout, TrackSound};
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -14,6 +15,141 @@ pub struct NoteTarget {
 pub struct IndexedNoteTarget {
     pub target: BeatTarget,
     pub note_index: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct VoiceAddress {
+    pub track: u32,
+    pub staff: u32,
+    pub voice: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct MusicPoint {
+    pub bar: u32,
+    pub tick: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct BeatRange {
+    pub start: MusicPoint,
+    pub end: MusicPoint,
+    pub lanes: Vec<VoiceAddress>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+pub enum MusicSelection {
+    Range {
+        range: BeatRange,
+    },
+    Notes {
+        notes: Vec<IndexedNoteTarget>,
+    },
+    Bars {
+        tracks: Vec<u32>,
+        first_bar: u32,
+        last_bar: u32,
+    },
+}
+
+impl MusicSelection {
+    fn validate(&self) -> Result<(), String> {
+        match self {
+            Self::Range { range } => {
+                if (range.start.bar, range.start.tick) >= (range.end.bar, range.end.tick) {
+                    return Err("Select a nonempty ordered music range.".into());
+                }
+                let mut seen = HashSet::new();
+                if range.lanes.is_empty()
+                    || range
+                        .lanes
+                        .iter()
+                        .any(|lane| !seen.insert((lane.track, lane.staff, lane.voice)))
+                {
+                    return Err("Select nonempty distinct voice lanes.".into());
+                }
+            }
+            Self::Notes { notes } => {
+                let mut seen = HashSet::new();
+                if notes.is_empty()
+                    || notes.iter().any(|note| {
+                        let target = &note.target;
+                        !seen.insert((
+                            target.track,
+                            target.staff,
+                            target.bar,
+                            target.voice,
+                            target.beat,
+                            note.note_index,
+                        ))
+                    })
+                {
+                    return Err("Select nonempty distinct notes.".into());
+                }
+            }
+            Self::Bars {
+                tracks,
+                first_bar,
+                last_bar,
+            } => {
+                let mut seen = HashSet::new();
+                if tracks.is_empty() || tracks.iter().any(|track| !seen.insert(*track)) {
+                    return Err("Select nonempty distinct tracks.".into());
+                }
+                if first_bar > last_bar {
+                    return Err("Select an ordered inclusive bar range.".into());
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", try_from = "String")]
+pub enum StringMoveDirection {
+    Higher,
+    Lower,
+}
+
+impl TryFrom<String> for StringMoveDirection {
+    type Error = String;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        match value.as_str() {
+            "higher" => Ok(Self::Higher),
+            "lower" => Ok(Self::Lower),
+            _ => Err("Unsupported string move direction.".into()),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", try_from = "String")]
+pub enum SustainKind {
+    LetRing,
+    PalmMute,
+}
+
+impl TryFrom<String> for SustainKind {
+    type Error = String;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        match value.as_str() {
+            "letRing" => Ok(Self::LetRing),
+            "palmMute" => Ok(Self::PalmMute),
+            _ => Err("Unsupported sustain kind.".into()),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -458,6 +594,35 @@ pub enum EditCommand {
     RemoveMeasure {
         bar: u32,
     },
+    InsertMeasures {
+        before_bar: u32,
+        count: u32,
+    },
+    RemoveMeasures {
+        first_bar: u32,
+        last_bar: u32,
+    },
+    EraseSelection {
+        selection: MusicSelection,
+    },
+    TransposeSelection {
+        selection: MusicSelection,
+        semitones: i32,
+    },
+    MoveSelectionStrings {
+        selection: MusicSelection,
+        direction: StringMoveDirection,
+    },
+    RefingerSelection {
+        selection: MusicSelection,
+        max_fret: u32,
+    },
+    SetSelectionSustain {
+        selection: MusicSelection,
+        strings: Vec<u32>,
+        kind: SustainKind,
+        enabled: bool,
+    },
     AddTrack {
         name: String,
         tuning: Vec<i32>,
@@ -760,6 +925,45 @@ impl EditCommand {
     }
     pub fn validate(&self) -> Result<(), String> {
         match self {
+            Self::EraseSelection { selection }
+            | Self::TransposeSelection { selection, .. }
+            | Self::MoveSelectionStrings { selection, .. }
+            | Self::RefingerSelection { selection, .. }
+            | Self::SetSelectionSustain { selection, .. } => {
+                selection.validate()?;
+                match self {
+                    Self::TransposeSelection { semitones, .. }
+                        if *semitones == 0 || !(-127..=127).contains(semitones) =>
+                    {
+                        return Err(
+                            "Transpose by a nonzero semitone count from -127 to 127.".into()
+                        );
+                    }
+                    Self::RefingerSelection { max_fret, .. } if !(1..=127).contains(max_fret) => {
+                        return Err("Maximum fret must be from 1 to 127.".into());
+                    }
+                    Self::SetSelectionSustain { strings, .. } => {
+                        let mut seen = HashSet::new();
+                        if strings.is_empty()
+                            || strings
+                                .iter()
+                                .any(|string| *string == 0 || !seen.insert(*string))
+                        {
+                            return Err("Select nonempty distinct positive strings.".into());
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            Self::InsertMeasures { count, .. } if !(1..=1000).contains(count) => {
+                return Err("Insert from 1 to 1000 measures.".into());
+            }
+            Self::RemoveMeasures {
+                first_bar,
+                last_bar,
+            } if first_bar > last_bar => {
+                return Err("Select an ordered inclusive measure range.".into());
+            }
             Self::SetNote { string, .. }
             | Self::RemoveNote { string, .. }
             | Self::SetNoteTechniques { string, .. }
@@ -1047,6 +1251,306 @@ impl EditCommand {
 mod tests {
     use super::EditCommand;
     use serde_json::{Value, json};
+
+    fn music_selections() -> Vec<Value> {
+        vec![
+            json!({"kind": "range", "range": {
+                "start": {"bar": 0, "tick": 0}, "end": {"bar": 0, "tick": 960},
+                "lanes": [{"track": 0, "staff": 0, "voice": 0}]
+            }}),
+            json!({"kind": "notes", "notes": [{
+                "target": {"track": 0, "staff": 0, "bar": 0, "voice": 0, "beat": 0},
+                "noteIndex": 0
+            }]}),
+            json!({"kind": "bars", "tracks": [0], "firstBar": 0, "lastBar": 0}),
+        ]
+    }
+
+    fn range_measure_commands() -> Vec<Value> {
+        let mut commands = Vec::new();
+        for selection in music_selections() {
+            commands.extend([
+                json!({"type": "eraseSelection", "selection": selection}),
+                json!({"type": "transposeSelection", "selection": selection, "semitones": 12}),
+                json!({"type": "moveSelectionStrings", "selection": selection, "direction": "higher"}),
+                json!({"type": "refingerSelection", "selection": selection, "maxFret": 24}),
+                json!({"type": "setSelectionSustain", "selection": selection,
+                    "strings": [1, 3], "kind": "letRing", "enabled": false}),
+            ]);
+        }
+        commands.extend([
+            json!({"type": "insertMeasures", "beforeBar": 0, "count": 1}),
+            json!({"type": "removeMeasures", "firstBar": 0, "lastBar": 0}),
+        ]);
+        commands
+    }
+
+    #[test]
+    fn range_measure_commands_roundtrip_all_selection_variants() {
+        for value in range_measure_commands() {
+            assert_eq!(serde_json::to_value(accepted(&value)).unwrap(), value);
+        }
+    }
+
+    #[test]
+    fn range_measure_commands_require_every_field_and_exact_envelopes() {
+        for value in range_measure_commands() {
+            accepted(&value);
+            let mut unknown = value.clone();
+            unknown["unexpected"] = json!(true);
+            rejected(&unknown);
+            for field in value.as_object().unwrap().keys() {
+                let mut missing = value.clone();
+                missing.as_object_mut().unwrap().remove(field);
+                rejected(&missing);
+            }
+        }
+    }
+
+    #[test]
+    fn music_selection_nested_objects_require_exact_complete_shapes() {
+        for selection in music_selections() {
+            let value = json!({"type": "eraseSelection", "selection": selection});
+            accepted(&value);
+            let mut paths = vec!["/selection"];
+            match value["selection"]["kind"].as_str().unwrap() {
+                "range" => paths.extend([
+                    "/selection/range",
+                    "/selection/range/start",
+                    "/selection/range/end",
+                    "/selection/range/lanes/0",
+                ]),
+                "notes" => paths.extend(["/selection/notes/0", "/selection/notes/0/target"]),
+                _ => {}
+            }
+            for path in paths {
+                let mut unknown = value.clone();
+                unknown.pointer_mut(path).unwrap()["unexpected"] = json!(true);
+                rejected(&unknown);
+                for field in value.pointer(path).unwrap().as_object().unwrap().keys() {
+                    let mut missing = value.clone();
+                    missing
+                        .pointer_mut(path)
+                        .unwrap()
+                        .as_object_mut()
+                        .unwrap()
+                        .remove(field);
+                    rejected(&missing);
+                }
+            }
+        }
+        for invalid in [
+            json!(null),
+            json!({}),
+            json!("notes"),
+            json!({"kind": "beats"}),
+        ] {
+            rejected(&json!({"type": "eraseSelection", "selection": invalid}));
+        }
+        rejected(&json!({"type": "eraseSelection", "selection": {
+            "kind": "bars", "tracks": [0], "firstBar": 0, "lastBar": 0, "notes": []
+        }}));
+    }
+
+    #[test]
+    fn music_selection_indices_and_ticks_use_unsigned_32_bit_domain() {
+        let selections = music_selections();
+        let paths = [
+            (0, "/selection/range/start/bar"),
+            (0, "/selection/range/start/tick"),
+            (0, "/selection/range/end/bar"),
+            (0, "/selection/range/end/tick"),
+            (0, "/selection/range/lanes/0/track"),
+            (0, "/selection/range/lanes/0/staff"),
+            (0, "/selection/range/lanes/0/voice"),
+            (1, "/selection/notes/0/noteIndex"),
+            (1, "/selection/notes/0/target/track"),
+            (1, "/selection/notes/0/target/staff"),
+            (1, "/selection/notes/0/target/bar"),
+            (1, "/selection/notes/0/target/voice"),
+            (1, "/selection/notes/0/target/beat"),
+            (2, "/selection/tracks/0"),
+            (2, "/selection/firstBar"),
+            (2, "/selection/lastBar"),
+        ];
+        for (index, path) in paths {
+            for invalid in [
+                json!(-1),
+                json!(4294967296_u64),
+                json!(0.5),
+                json!(null),
+                json!("0"),
+            ] {
+                let mut value = json!({"type": "eraseSelection", "selection": selections[index]});
+                *value.pointer_mut(path).unwrap() = invalid;
+                rejected(&value);
+            }
+        }
+        for selection in [
+            json!({"kind": "range", "range": {
+                "start": {"bar": u32::MAX, "tick": 0},
+                "end": {"bar": u32::MAX, "tick": u32::MAX},
+                "lanes": [{"track": u32::MAX, "staff": u32::MAX, "voice": u32::MAX}]
+            }}),
+            json!({"kind": "notes", "notes": [{"noteIndex": u32::MAX, "target": {
+                "track": u32::MAX, "staff": u32::MAX, "bar": u32::MAX,
+                "voice": u32::MAX, "beat": u32::MAX
+            }}]}),
+            json!({"kind": "bars", "tracks": [u32::MAX], "firstBar": u32::MAX, "lastBar": u32::MAX}),
+        ] {
+            accepted(&json!({"type": "eraseSelection", "selection": selection}));
+        }
+    }
+
+    #[test]
+    fn music_selection_collections_are_nonempty_and_unique() {
+        for (index, path) in [
+            (0, "/selection/range/lanes"),
+            (1, "/selection/notes"),
+            (2, "/selection/tracks"),
+        ] {
+            let selection = music_selections().remove(index);
+            let value = json!({"type": "eraseSelection", "selection": selection});
+            accepted(&value);
+            for invalid in [json!([]), json!(null), json!({})] {
+                let mut empty = value.clone();
+                *empty.pointer_mut(path).unwrap() = invalid;
+                rejected(&empty);
+            }
+            let mut duplicate = value.clone();
+            let items = duplicate.pointer_mut(path).unwrap().as_array_mut().unwrap();
+            items.push(items[0].clone());
+            rejected(&duplicate);
+            let mut distinct = value.clone();
+            let items = distinct.pointer_mut(path).unwrap().as_array_mut().unwrap();
+            let mut item = items[0].clone();
+            match index {
+                0 => item["voice"] = json!(1),
+                1 => item["noteIndex"] = json!(1),
+                _ => item = json!(1),
+            }
+            items.push(item);
+            accepted(&distinct);
+        }
+        let mut distinct = range_measure_commands().remove(5);
+        let items = distinct["selection"]["notes"].as_array_mut().unwrap();
+        let mut item = items[0].clone();
+        item["target"]["beat"] = json!(1);
+        items.push(item);
+        accepted(&distinct);
+    }
+
+    #[test]
+    fn music_ranges_are_half_open_but_bar_selections_are_inclusive() {
+        let mut value = range_measure_commands().remove(0);
+        value["selection"]["range"]["end"] = json!({"bar": 0, "tick": 0});
+        rejected(&value);
+        value["selection"]["range"]["start"] = json!({"bar": 1, "tick": 0});
+        rejected(&value);
+        value["selection"]["range"]["start"] = json!({"bar": 0, "tick": 961});
+        value["selection"]["range"]["end"] = json!({"bar": 0, "tick": 960});
+        rejected(&value);
+        value["selection"]["range"]["end"] = json!({"bar": 1, "tick": 0});
+        accepted(&value);
+        let mut bars = range_measure_commands().remove(10);
+        accepted(&bars);
+        bars["selection"]["firstBar"] = json!(1);
+        rejected(&bars);
+        bars["selection"]["lastBar"] = json!(1);
+        accepted(&bars);
+    }
+
+    #[test]
+    fn range_commands_enforce_shift_fret_and_strict_string_modes() {
+        let commands = range_measure_commands();
+        for (index, field, valid, invalid) in [
+            (
+                1,
+                "semitones",
+                vec![json!(-127), json!(-1), json!(1), json!(127)],
+                vec![json!(-128), json!(0), json!(128), json!(0.5), json!(null)],
+            ),
+            (
+                3,
+                "maxFret",
+                vec![json!(1), json!(127)],
+                vec![json!(-1), json!(0), json!(128), json!(0.5), json!(null)],
+            ),
+            (
+                2,
+                "direction",
+                vec![json!("higher"), json!("lower")],
+                vec![json!("up"), json!(0), json!(null), json!({"higher": null})],
+            ),
+            (
+                4,
+                "kind",
+                vec![json!("letRing"), json!("palmMute")],
+                vec![
+                    json!("sustain"),
+                    json!(0),
+                    json!(null),
+                    json!({"letRing": null}),
+                ],
+            ),
+            (
+                4,
+                "enabled",
+                vec![json!(false), json!(true)],
+                vec![json!(0), json!(1), json!("true"), json!(null)],
+            ),
+        ] {
+            for candidate in valid {
+                let mut value = commands[index].clone();
+                value[field] = candidate;
+                accepted(&value);
+            }
+            for candidate in invalid {
+                let mut value = commands[index].clone();
+                value[field] = candidate;
+                rejected(&value);
+            }
+        }
+        for strings in [json!([1]), json!([u32::MAX]), json!([2, 1])] {
+            let mut value = commands[4].clone();
+            value["strings"] = strings;
+            accepted(&value);
+        }
+        for strings in [
+            json!([]),
+            json!([1, 1]),
+            json!([0]),
+            json!([-1]),
+            json!([0.5]),
+            json!([4294967296_u64]),
+            json!([null]),
+            json!(null),
+        ] {
+            let mut value = commands[4].clone();
+            value["strings"] = strings;
+            rejected(&value);
+        }
+    }
+
+    #[test]
+    fn measure_commands_enforce_bounded_count_and_ordered_unsigned_indices() {
+        let commands = range_measure_commands();
+        for (index, field) in [(15, "beforeBar"), (16, "firstBar"), (16, "lastBar")] {
+            for invalid in [json!(-1), json!(4294967296_u64), json!(0.5), json!(null)] {
+                let mut value = commands[index].clone();
+                value[field] = invalid;
+                rejected(&value);
+            }
+        }
+        for count in [1, 1000] {
+            accepted(&json!({"type": "insertMeasures", "beforeBar": u32::MAX, "count": count}));
+        }
+        for count in [json!(-1), json!(0), json!(1001), json!(0.5), json!(null)] {
+            rejected(&json!({"type": "insertMeasures", "beforeBar": 0, "count": count}));
+        }
+        accepted(&json!({"type": "removeMeasures", "firstBar": u32::MAX, "lastBar": u32::MAX}));
+        rejected(&json!({"type": "removeMeasures", "firstBar": 1, "lastBar": 0}));
+    }
 
     fn lyrics_notation_commands() -> Vec<Value> {
         let target = json!({"track": 0, "staff": 0, "bar": 0, "voice": 0, "beat": 0});

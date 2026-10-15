@@ -49,5 +49,12 @@
   {"type":"setFermata","target":{"track":0,"staff":0,"bar":0,"voice":0,"beat":0},"fermata":{"type":2,"length":1.5}},
   {"type":"setBarGestures","track":0,"staff":0,"bar":0,"clefOttava":1},
   {"type":"setMasterBarGestures","bar":0,"commonTime":true,"doubleBar":false,"tripletFeel":6,"beaming":{"unit":8,"groups":[2,2,4]}},
-  {"type":"setSimile","track":0,"staff":0,"bar":1,"kind":"single"}
+  {"type":"setSimile","track":0,"staff":0,"bar":1,"kind":"single"},
+  {"type":"eraseSelection","selection":{"kind":"notes","notes":[{"target":{"track":0,"staff":0,"bar":0,"voice":0,"beat":0},"noteIndex":0}]}},
+  {"type":"transposeSelection","selection":{"kind":"range","range":{"start":{"bar":0,"tick":0},"end":{"bar":1,"tick":960},"lanes":[{"track":0,"staff":0,"voice":0}]}},"semitones":1},
+  {"type":"moveSelectionStrings","selection":{"kind":"bars","tracks":[0],"firstBar":0,"lastBar":0},"direction":"higher"},
+  {"type":"refingerSelection","selection":{"kind":"notes","notes":[{"target":{"track":0,"staff":0,"bar":0,"voice":0,"beat":0},"noteIndex":0}]},"maxFret":24},
+  {"type":"setSelectionSustain","selection":{"kind":"bars","tracks":[0],"firstBar":0,"lastBar":0},"strings":[1,2],"kind":"palmMute","enabled":true},
+  {"type":"insertMeasures","beforeBar":0,"count":2},
+  {"type":"removeMeasures","firstBar":0,"lastBar":1}
 ]

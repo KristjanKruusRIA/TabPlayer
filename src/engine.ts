@@ -11,6 +11,8 @@ import { validateParityCommand } from './parity-commands';
 import { copyGpInterchangeSource, exportGpInterchange, loadInterchangeScore } from './interchange/gp';
 import { reflowLyrics,removeLyricsMeasure } from './editor/lyrics';
 import { prepareScoreTimers } from './editor/timers';
+import { planMeasureMap,mapBackingMeasures } from './editor/measures';
+import { mapLyricsMeasures } from './editor/lyrics-measures';
 
 const settings = new Settings();
 const { Score, Track, Staff, Bar, Voice, Beat, Note, MasterBar, Automation, JsonConverter } = model;
@@ -214,6 +216,7 @@ function apply(score: model.Score, edit: EditCommand, editIndex=0) {
 export interface BuiltDocument {
   score:model.Score; settings:DocumentSettings; embeddedBacking:Uint8Array|null;
   embeddedBackingSettings?:Omit<BackingSettings,'assetId'>; sourceMixes?:Record<string,ChannelMix>;
+  sourceBarCount?:number;
 }
 
 function removeBackingMeasure(backing:Pick<BackingSettings,'anchors'>|null|undefined,bar:number) {
@@ -222,6 +225,7 @@ function removeBackingMeasure(backing:Pick<BackingSettings,'anchors'>|null|undef
 
 export function buildDocument(value: ProjectInput): BuiltDocument {
   const project = validateProject(value); let score = initialScore(project);
+  const sourceBarCount=score.masterBars.length;
   const identities=score.tracks.map((_,index)=>`base/${index}`);
   const documentSettings=defaultDocumentSettings();
   const embeddedBacking=score.backingTrack?.rawAudioFile?.slice() ?? null;
@@ -234,23 +238,28 @@ export function buildDocument(value: ProjectInput): BuiltDocument {
   const sourceMixes=structuredClone(documentSettings.mixes);
   for (const [index,edit] of project.edits.entries()) {
     if(isSettingsEdit(edit)) {applySettingsEdit(documentSettings,edit,score,identities);continue;}
-    if(['setOttava','setCrescendo','setFermata','setSimile'].includes(edit.type))score=rebuild(score);
+    if(['setOttava','setCrescendo','setFermata','setSimile','eraseSelection','transposeSelection','moveSelectionStrings','refingerSelection','setSelectionSustain','insertMeasures','removeMeasures'].includes(edit.type))score=rebuild(score);
+    const measureMap=edit.type==='insertMeasures'||edit.type==='removeMeasures'?planMeasureMap(score.masterBars.length,edit):null;
+    if(measureMap)mapLyricsMeasures(score,measureMap);
     apply(score, edit,index);
+    if(measureMap){mapBackingMeasures(documentSettings.backing,measureMap);mapBackingMeasures(embeddedBackingSettings,measureMap);}
     if (edit.type==='addTrack'||edit.type==='addPitchedTrack'||edit.type==='addPercussionTrack') identities.push(`added/${index}/${JSON.stringify(edit)}`);
     if (edit.type==='removeTrack') identities.splice(edit.track,1);
     if(edit.type==='removeMeasure') {removeBackingMeasure(documentSettings.backing,edit.bar);removeBackingMeasure(embeddedBackingSettings,edit.bar);}
-    if (['insertBeat','deleteBeat','appendMeasure','removeMeasure','addTrack','addPitchedTrack','addPercussionTrack','removeTrack','addStaff','removeStaff','addVoice','removeVoice','copyVoice'].includes(edit.type)) {
+    if (['insertBeat','deleteBeat','appendMeasure','removeMeasure','insertMeasures','removeMeasures','addTrack','addPitchedTrack','addPercussionTrack','removeTrack','addStaff','removeStaff','addVoice','removeVoice','copyVoice'].includes(edit.type)) {
       score = rebuild(score);
     }
   }
   // Transient conversion rebuilds derived links and caches; native files store source bytes and commands.
   score=rebuild(score);prepareScoreTimers(score);score.tracks.forEach((track,index)=>trackIdentities.set(track,identities[index]));
-  const built={score,settings:documentSettings,embeddedBacking,embeddedBackingSettings,sourceMixes};
+  const built={score,settings:documentSettings,embeddedBacking,embeddedBackingSettings,sourceMixes,sourceBarCount};
   validateBackingAnchors(score,effectiveAudioSettings(project,built).backing);return built;
 }
 
 export function replayDocumentSettings(value:ProjectInput,current:BuiltDocument):BuiltDocument {
   const project=validateProject(value);const next=defaultDocumentSettings();
+  const sourceBarCount=current.sourceBarCount??(project.base.kind==='blank'?project.base.measureCount:initialScore(project).masterBars.length);
+  let barCount=sourceBarCount;
   next.mixes=structuredClone(current.sourceMixes ?? Object.fromEntries(current.score.tracks.map(track=>[trackIdentity(track),{...defaultMix(),mute:track.playbackInfo.isMute,solo:track.playbackInfo.isSolo}])));
   // Applied history already passed candidate validation. Its earlier backing anchors
   // refer to the measure layout at that point, before later deletions.
@@ -259,9 +268,14 @@ export function replayDocumentSettings(value:ProjectInput,current:BuiltDocument)
     case 'setTrackSound': next.sounds[edit.trackId]=structuredClone(edit.sound);break;
     case 'setBacking': next.backing=structuredClone(edit.backing);break;
     case 'setPrintLayout': next.print=structuredClone(edit.layout);break;
-    case 'removeMeasure': removeBackingMeasure(next.backing,edit.bar);break;
+    case 'appendMeasure': barCount++;break;
+    case 'removeMeasure': removeBackingMeasure(next.backing,edit.bar);barCount--;break;
+    case 'insertMeasures': case 'removeMeasures': {
+      const map=planMeasureMap(barCount,edit);mapBackingMeasures(next.backing,map);
+      barCount=map.oldToNew.filter(bar=>bar!==null).length+map.inserted.length;break;
+    }
   }
-  const built={score:current.score,settings:next,embeddedBacking:current.embeddedBacking,embeddedBackingSettings:current.embeddedBackingSettings,sourceMixes:current.sourceMixes};
+  const built={score:current.score,settings:next,embeddedBacking:current.embeddedBacking,embeddedBackingSettings:current.embeddedBackingSettings,sourceMixes:current.sourceMixes,sourceBarCount};
   validateBackingAnchors(current.score,effectiveAudioSettings(project,built).backing);return built;
 }
 

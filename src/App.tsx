@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent }
 import { DocumentController } from './controller';
 import { describeSelection, effectiveAudioSettings } from './engine';
 import type { BeatTarget, EditCommand } from './project';
-import { repairSelection, validSelectionIndices } from './selection';
+import { repairMeasureSelection,repairSelection, validSelectionIndices } from './selection';
 import { ScoreView } from './ScoreView';
 import { EditorPanel } from './EditorPanel';
 import { TrackPanel } from './TrackPanel';
@@ -18,7 +18,11 @@ import { useExportCoordinator } from './export/useExportCoordinator';
 import type { ExportOptions } from './export/types';
 import { Transport } from './Transport';
 import { LiveInstrumentView } from './instruments/LiveInstrumentView';
+import type { MusicSelection } from './editor/range-types';
+import { rangeFromBeats,selectionForTrack } from './editor/range-selection';
+import { planMeasureMap } from './editor/measures';
 const noPlaybackSubscribe=()=>()=>{};
+const textEntry=(target:EventTarget)=>target instanceof HTMLElement&&(['INPUT','SELECT','TEXTAREA'].includes(target.tagName)||target.isContentEditable);
 
 export function App({controller}: {controller: DocumentController}) {
   const state=useSyncExternalStore(controller.subscribe,controller.getState);
@@ -27,6 +31,9 @@ export function App({controller}: {controller: DocumentController}) {
   useEffect(()=>{const playback=new NativePlaybackController({onEdit:command=>controller.edit(command).then(()=>setSelection(old=>repairSelection(controller.getState().score,old)))});setPlayer(playback);return()=>playback.destroy();},[controller]);
   useEffect(()=>{controller.setBeforeChange(()=>player?.beforeScoreChange());return()=>controller.setBeforeChange(()=>{});},[controller,player]);
   const [selection,setSelection]=useState<BeatTarget>({track:0,staff:0,bar:0,voice:0,beat:0});
+  const [musicSelection,setMusicSelection]=useState<MusicSelection|null>(null),rangeAnchor=useRef<BeatTarget|null>(null);
+  useEffect(()=>{setMusicSelection(null);rangeAnchor.current=null;},[state.documentEpoch]);
+  const editorSelection=(value:MusicSelection|null)=>{rangeAnchor.current=null;setMusicSelection(value);};
   const [selectedString,setString]=useState(6); const [fret,setFret]=useState(0);
   const [selectedNoteIndex,setNoteIndex]=useState<number|null>(null);
   const [zoom,setZoom]=useState(100); const [profile,setProfile]=useState('ScoreTab');
@@ -42,8 +49,15 @@ export function App({controller}: {controller: DocumentController}) {
     setFret(location.beat?.notes.find(n=>n.string===string)?.fret ?? 0);digits.current.text='';
   },[state.score,target.track,target.staff,target.bar,target.voice,target.beat,string]);
   const act=(job: Promise<unknown>)=>{void job.catch(()=>{});};
-  const change=(job:Promise<unknown>)=>act(job.then(()=>setSelection(old=>repairSelection(controller.getState().score,old))));
-  const edit=(command:EditCommand)=>change(controller.edit(command));
+  const change=(job:Promise<unknown>)=>act(job.then(()=>{setSelection(old=>repairSelection(controller.getState().score,old));editorSelection(null);}));
+  const edit=(command:EditCommand)=>{
+    const oldCount=state.score.masterBars.length;
+    act(controller.edit(command).then(()=>{
+      const score=controller.getState().score,map=command.type==='insertMeasures'||command.type==='removeMeasures'?planMeasureMap(oldCount,command):null;
+      setSelection(old=>map?repairMeasureSelection(score,old,map):repairSelection(score,old));
+      if(!('selection'in command)||command.type==='eraseSelection')editorSelection(null);
+    }));
+  };
   const documentAction=(job:Promise<unknown>)=>change(job);
   const [exportOpen,setExportOpen]=useState(false),[exportError,setExportError]=useState<string|null>(null),[exportLaunching,setExportLaunching]=useState(false);const exportCancelled=useRef(false);
   const exports=useExportCoordinator({score:state.score,settings:effectiveAudioSettings(state.snapshot.project,state),currentSpeed:practiceSpeed/100,bridge:nativeBridge,embeddedBacking:state.embeddedBacking});
@@ -66,7 +80,7 @@ export function App({controller}: {controller: DocumentController}) {
     setFret(beat?.notes.find(n=>n.string===chosen)?.fret ?? 0);digits.current.text='';
   };
   function keys(event:KeyboardEvent) {
-    if (['INPUT','SELECT','TEXTAREA','BUTTON'].includes((event.target as HTMLElement).tagName)) return;
+    if (textEntry(event.target)||(event.target as HTMLElement).tagName==='BUTTON') return;
     let next={...target};
     if(event.key==='ArrowRight') {
       if(next.beat<location.voice.beats.length-1) next.beat++;
@@ -83,9 +97,18 @@ export function App({controller}: {controller: DocumentController}) {
       digits.current.text=digits.current.text.slice(-2);digits.current.time=now;setFret(Number(digits.current.text));event.preventDefault();return;
     } else if(event.key==='Enter' && location.beat && !state.busy&&!indexed) {edit({type:'setNote',target,string,fret});event.preventDefault();return;}
     else return;
+    if(event.shiftKey&&(event.key==='ArrowLeft'||event.key==='ArrowRight')){
+      const anchor=rangeAnchor.current??target;
+      try{setMusicSelection({kind:'range',range:rangeFromBeats(state.score,anchor,next,[{track:target.track,staff:target.staff,voice:target.voice}])});rangeAnchor.current=anchor;}catch{ /* An empty voice has no attack endpoint. */ }
+    }else editorSelection(null);
     select(next);event.preventDefault();
   }
-  return <div className="app-shell">
+  function selectionKeys(event:KeyboardEvent){
+    if(textEntry(event.target)||exportOpen)return;
+    if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='a'){editorSelection(selectionForTrack(state.score,target.track));event.preventDefault();}
+    else if(event.key==='Escape'){editorSelection(null);event.preventDefault();}
+  }
+  return <div className="app-shell" onKeyDown={selectionKeys}>
     <header className="toolbar"><h1>TabPlayer</h1><nav aria-label="File and history">
       <button disabled={state.busy} onClick={()=>documentAction(controller.new())}>New</button>
       <button disabled={state.busy} onClick={()=>documentAction(controller.open())}>Open</button>
@@ -107,11 +130,11 @@ export function App({controller}: {controller: DocumentController}) {
           <label>Zoom<select value={zoom} onChange={e=>setZoom(Number(e.target.value))}>{[70,85,100,115,130].map(z=><option key={z} value={z}>{z}%</option>)}</select></label>
           <button aria-pressed={instrumentVisible} onClick={()=>setInstrumentVisible(visible=>!visible)}>{instrumentVisible?'Hide instrument':'Show instrument'}</button>
         </div>
-        <div className="paper-scroll"><div className="paper"><ScoreView score={state.score} track={target.track} zoom={zoom} profile={profile} onSelect={select} playback={player}/></div></div>
+        <div className="paper-scroll"><div className="paper"><ScoreView score={state.score} track={target.track} zoom={zoom} profile={profile} onSelect={select} playback={player} editorSelection={musicSelection} onEditorSelection={editorSelection}/></div></div>
         <div className="score-hint">Measure {target.bar+1} · Beat {target.beat+1} · {indexed?`${location.staff.isPercussion?'Percussion':'Pitched'} note ${noteIndex===null?'entry':noteIndex+1} — Click a note to edit it in the inspector.`:`String ${string} · Fret ${fret} — Click the score, then use arrow keys, digits and Enter.`}</div>
         {instrumentVisible&&<LiveInstrumentView score={state.score} track={target.track} staff={target.staff} player={player}/>}
       </section>
-      <EditorPanel score={state.score} target={target} string={string} fret={fret} noteIndex={noteIndex} onSelectNote={setNoteIndex} busy={state.busy} onSelect={select} onString={s=>select(target,s)} onFret={setFret} onEdit={edit}/>
+      <EditorPanel score={state.score} target={target} string={string} fret={fret} noteIndex={noteIndex} onSelectNote={setNoteIndex} busy={state.busy} onSelect={next=>{editorSelection(null);select(next);}} onString={s=>select(target,s)} onFret={setFret} onEdit={edit} musicSelection={musicSelection} onMusicSelection={editorSelection}/>
     </div>
     {player && <Transport player={player} measures={state.score.masterBars.length} busy={state.busy}/>}
     {exportOpen&&<ExportDialog score={state.score} layout={state.settings.print} busy={exports.busy||state.busy||exportLaunching} progress={exports.progress} failure={exportError} onExport={runExport} onCancel={cancelExport}/>}

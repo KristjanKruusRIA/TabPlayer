@@ -54,6 +54,27 @@ const change=(label:string,value:string)=>fireEvent.change(screen.getByLabelText
 const click=(name:string)=>fireEvent.click(screen.getByRole('button',{name}));
 const currentBeat=(controller:DocumentController,index=0)=>controller.getState().score.tracks[0].staves[0].bars[0].voices[0].beats[index];
 
+it('selects editable music with keyboard shortcuts without changing history or text editing',async()=>{
+  const c=await setup();change('Fret','5');click('Set note');await waitFor(()=>expect(currentBeat(c).notes[0]?.fret).toBe(5));
+  const history=c.getState().snapshot.project.edits.length,workspace=screen.getByRole('region',{name:'Score workspace'});
+  fireEvent.keyDown(workspace,{key:'a',ctrlKey:true});expect(screen.getByText('1 note · 16 beats')).toBeInTheDocument();
+  expect(c.getState().snapshot.project.edits).toHaveLength(history);
+  click('Up semitone');await waitFor(()=>expect(currentBeat(c).notes[0].fret).toBe(6));
+  expect(c.getState().snapshot.project.edits.at(-1)).toMatchObject({type:'transposeSelection',semitones:1});
+  fireEvent.keyDown(workspace,{key:'Escape'});expect(screen.getByText('0 notes · 0 beats')).toBeInTheDocument();
+  fireEvent.keyDown(screen.getByLabelText('Fret'),{key:'a',ctrlKey:true});expect(screen.getByText('0 notes · 0 beats')).toBeInTheDocument();
+  fireEvent.keyDown(workspace,{key:'ArrowRight',shiftKey:true});expect(screen.getByText('1 note · 2 beats')).toBeInTheDocument();
+  const selectedHistory=c.getState().snapshot.project.edits.length;click('New');await waitFor(()=>expect(c.getState().documentEpoch).toBe(1));
+  expect(screen.getByText('0 notes · 0 beats')).toBeInTheDocument();expect(selectedHistory).toBe(history+1);
+});
+it('keeps the beat cursor on its original music across insert and remove measure ranges',async()=>{
+  const c=await setup();change('Measure','3');change('Measures to insert','2');click('Insert before');
+  await waitFor(()=>expect(c.getState().score.masterBars).toHaveLength(6));await waitFor(()=>expect(screen.getByLabelText('Measure')).toHaveValue(5));
+  change('First measure to remove','1');change('Last measure to remove','2');click('Remove measure range');
+  await waitFor(()=>expect(c.getState().score.masterBars).toHaveLength(4));await waitFor(()=>expect(screen.getByLabelText('Measure')).toHaveValue(3));
+  expect(c.getState().snapshot.project.edits.map(edit=>edit.type)).toEqual(['insertMeasures','removeMeasures']);
+});
+
 it('creates piano chords, edits the clicked member and replays its history',async()=>{
   const c=await setup();change('New notation track name','Piano');click('Add pitched track');
   await waitFor(()=>expect(c.getState().score.tracks).toHaveLength(2));click('Track 2: Piano');

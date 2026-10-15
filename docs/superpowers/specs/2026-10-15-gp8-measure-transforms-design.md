@@ -61,11 +61,17 @@ Before removal, capture effective state at the start of the first surviving suff
 
 Capture track DSP volume/pan by **bar-relative ratioPosition**, sorted by bar/ratio regardless of carrier beat. The imported `DSPParam_11/12` objects can sit on a late beat while their actual ratio is.25. Preserve all surviving fractional positions, linear flags, text and visibility. Use the existing `trackMixAutomations` and `isGpMixAutomation` contracts. Non-DSP instrument/bank/ordinary beat automation keeps its established beat-relative semantics. Linear flags are retained, but existing continuous-ramp playback limitations stay open; effective boundary value here is the held preceding breakpoint, not invented interpolation. Preserve exact source events, removing no fade/swell events incidentally.
 
+Program/bank capture and explicit-boundary overrides count only voices visited by the public MIDI generator; inactive events remain stored. Restore onto a processed beat at tick zero across the track's staves/voices. If no such carrier exists, or a sounding pre-boundary grace would require the removed state before tick zero (even with an explicit zero override), reject before mutation. Do not delay state restoration or change authored rhythm. DSP extraction remains independent of processed voice carriers.
+
 Sustain is per staff; an explicit Up/Down at the surviving boundary takes precedence over inherited held state. Hold markers do not count as a new Up/Down state change. Do not add duplicate controller events when an explicit ratio0 event exists on another staff of the same track.
+
+This batch proves sustain-marker retention. Audible sustain-pedal/CC64 support remains open.
 
 ## Contextual notation guards
 
 Validate guards before mutation. A retained single simile must still point to the same original preceding musical bar; a retained double pair must stay adjacent and retain both original predecessor bars. Reject insertion/removal that splits a double pair or changes these sources. Materializing contextual similes into real notation is deferred; do not reuse export excerpt materialization as an editor mutation without its own complete music/link/lyric/controller proofs.
+
+The pinned public GP reader resolves ties only through three preceding bars and loses forward hammer/linked-slide relationships across newly inserted blank measures. Reject an insertion that newly expands an explicit tie beyond that measured bound or inserts a gap between forward hammer/linked-slide endpoints. Preserve unrelated preexisting long links. This is a temporary application import-compatibility restriction, not an asserted Guitar Pro format limit; explicit GPIF link reconstruction remains open.
 
 Reject removal intersecting only part of an existing repeat group, including alternate endings, when the retained structure would be orphaned. Removing a complete group is allowed. For directions, use a conservative first policy: if removed bars contain any directions and surviving bars also contain any directions, reject with an explicit direction-context error; a later target-aware normalization can relax it. Moving intact direction-bearing bars by insertion/removal elsewhere preserves their symbols. This guard avoids inventing a marker repair policy. It does not close repeat/direction-runtime gaps.
 

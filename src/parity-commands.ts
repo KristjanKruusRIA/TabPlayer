@@ -9,6 +9,9 @@ const shapes:Record<string,readonly string[]>={
   setCrescendo:['from','to','crescendo','targetDynamics'],setFermata:['target','fermata'],
   setBarGestures:['track','staff','bar','clefOttava'],setMasterBarGestures:['bar','commonTime','doubleBar','tripletFeel','beaming'],
   setSimile:['track','staff','bar','kind'],
+  eraseSelection:['selection'],transposeSelection:['selection','semitones'],moveSelectionStrings:['selection','direction'],
+  refingerSelection:['selection','maxFret'],setSelectionSustain:['selection','strings','kind','enabled'],
+  insertMeasures:['beforeBar','count'],removeMeasures:['firstBar','lastBar'],
 };
 const metadata=['subTitle','album','words','music','copyright','tab','notices','instructions'];
 function object(value:unknown):Record<string,unknown> {
@@ -33,6 +36,27 @@ function flag(value:unknown) {if(typeof value!=='boolean')throw new Error('Inval
 function range(from:unknown,to:unknown) {
   const a=target(from),b=target(to);
   if(a.track!==b.track||a.staff!==b.staff||a.voice!==b.voice||Number(b.bar)<Number(a.bar)||(a.bar===b.bar&&Number(b.beat)<Number(a.beat)))throw new Error('Select a forward range in one voice.');
+}
+function nonempty(value:unknown):unknown[] {
+  if(!Array.isArray(value)||!value.length)throw new Error('Select some music.');return value;
+}
+function unique(keys:unknown[]) {if(new Set(keys).size!==keys.length)throw new Error('Duplicate selection.');}
+function musicSelection(value:unknown) {
+  const selection=object(value);
+  if(selection.kind==='notes'){
+    exact(value,['kind','notes']);
+    unique(nonempty(selection.notes).map(note=>{const location=indexed(note);return [...['track','staff','bar','voice','beat'].map(key=>location[key]),object(note).noteIndex].join('/');}));
+  }else if(selection.kind==='bars'){
+    exact(value,['kind','tracks','firstBar','lastBar']);integer(selection.firstBar);integer(selection.lastBar);
+    if(Number(selection.firstBar)>Number(selection.lastBar))throw new Error('Invalid measure range.');
+    const tracks=nonempty(selection.tracks);tracks.forEach(value=>integer(value));unique(tracks);
+  }else if(selection.kind==='range'){
+    exact(value,['kind','range']);const range=exact(selection.range,['start','end','lanes']);
+    const start=exact(range.start,['bar','tick']),end=exact(range.end,['bar','tick']);
+    Object.values(start).forEach(value=>integer(value));Object.values(end).forEach(value=>integer(value));
+    if(Number(end.bar)<Number(start.bar)||(end.bar===start.bar&&Number(end.tick)<=Number(start.tick)))throw new Error('Invalid music range.');
+    unique(nonempty(range.lanes).map(value=>{const lane=exact(value,['track','staff','voice']);Object.values(lane).forEach(value=>integer(value));return [lane.track,lane.staff,lane.voice].join('/');}));
+  }else throw new Error('Invalid music selection.');
 }
 function gestureShape(value:unknown) {
   const patch=object(value),flags=['tap','slap','pop','deadSlapped','slashed','showTimer'];
@@ -77,6 +101,16 @@ export function validateParityCommand(value:unknown):void {
   for(const key of ['pitch','program'])if(key in edit)integer(edit[key],127);
   if('articulation'in edit)integer(edit.articulation,0x7fffffff);
   if('name'in edit&&typeof edit.name!=='string')throw new Error('Invalid track name.');
+  if('selection'in edit)musicSelection(edit.selection);
+  if(type==='transposeSelection'&&(typeof edit.semitones!=='number'||!Number.isInteger(edit.semitones)||edit.semitones===0||Math.abs(edit.semitones)>127))throw new Error('Choose a nonzero semitone shift from -127 to 127.');
+  if(type==='moveSelectionStrings'&&!['higher','lower'].includes(edit.direction as string))throw new Error('Invalid string direction.');
+  if(type==='refingerSelection'){integer(edit.maxFret,127);if(edit.maxFret===0)throw new Error('Invalid maximum fret.');}
+  if(type==='setSelectionSustain'){
+    flag(edit.enabled);if(!['letRing','palmMute'].includes(edit.kind as string))throw new Error('Invalid sustain technique.');
+    const strings=nonempty(edit.strings);for(const string of strings){integer(string);if(string===0)throw new Error('Invalid string.');}unique(strings);
+  }
+  if(type==='insertMeasures'){integer(edit.beforeBar);integer(edit.count,1000);if(edit.count===0)throw new Error('Insert at least one measure.');}
+  if(type==='removeMeasures'){integer(edit.firstBar);integer(edit.lastBar);if(Number(edit.firstBar)>Number(edit.lastBar))throw new Error('Invalid measure range.');}
   if(type==='setScoreMetadata') {
     const fields=exact(edit.fields,metadata);if(Object.values(fields).some(value=>typeof value!=='string'))throw new Error('Invalid score metadata.');
   }

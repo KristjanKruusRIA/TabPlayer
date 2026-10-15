@@ -1,10 +1,18 @@
 import { expect, it } from 'vitest';
 import { model } from '@coderline/alphatab';
-import { buildScore } from './engine';
+import { buildScore,previewEdit } from './engine';
 import { blankProject, type BeatTarget } from './project';
-import { repairSelection, validSelectionIndices } from './selection';
+import { repairMeasureSelection,repairSelection, validSelectionIndices } from './selection';
 
 const origin: BeatTarget={track:0,staff:0,bar:0,voice:0,beat:0};
+it('maps a measure cursor to retained music or the removed bar successor',()=>{
+  const inserted=previewEdit(blankProject(),{type:'insertMeasures',beforeBar:1,count:2});
+  expect(repairMeasureSelection(inserted.score,{...origin,bar:2},{oldToNew:[0,3,4,5],inserted:[1,2]})).toEqual({...origin,bar:4});
+  const removed=previewEdit(inserted.project,{type:'removeMeasures',firstBar:0,lastBar:1});
+  const map={oldToNew:[null,null,0,1,2,3],inserted:[]};
+  expect(repairMeasureSelection(removed.score,{...origin,bar:4},map)).toEqual({...origin,bar:2});
+  expect(repairMeasureSelection(removed.score,{...origin,bar:0},map)).toEqual(origin);
+});
 
 it('rejects fractional, negative and non-finite selection indices',()=>{
   expect(validSelectionIndices(origin)).toBe(true);

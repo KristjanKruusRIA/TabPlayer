@@ -10,7 +10,11 @@ import { applyNonTabEdit } from './non-tab';
 import { applyLyricsEdit } from './lyrics';
 import { applyGestureEdit } from './gestures';
 import { applyBarGestureEdit } from './bar-gestures';
+import { applyRangeEdit } from './range-edits';
+import { applyMeasureEdit } from './measures';
 export function applyAdvancedEdit(score:model.Score,command:EditCommand,editIndex:number):boolean {
+  if(command.type==='eraseSelection'||command.type==='transposeSelection'||command.type==='moveSelectionStrings'||command.type==='refingerSelection'||command.type==='setSelectionSustain')return applyRangeEdit(score,command);
+  if(command.type==='insertMeasures'||command.type==='removeMeasures')return applyMeasureEdit(score,command);
   if(command.type==='setTrackLyrics')return applyLyricsEdit(score,command);
   if(command.type==='setBeatGestures'||command.type==='setOttava'||command.type==='setCrescendo'||command.type==='setFermata')return applyGestureEdit(score,command);
   if(command.type==='setBarGestures'||command.type==='setMasterBarGestures'||command.type==='setSimile')return applyBarGestureEdit(score,command);

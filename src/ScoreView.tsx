@@ -1,24 +1,113 @@
-import { useEffect, useRef } from 'react';
-import { AlphaTabApi, type model, StaveProfile } from '@coderline/alphatab';
+import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
+import { AlphaTabApi, type model, StaveProfile, type PlaybackHighlightChangeEventArgs } from '@coderline/alphatab';
 import type { BeatTarget } from './project';
 import type { NativePlaybackController } from './audio/NativePlaybackController';
+import type { MusicSelection, VoiceAddress } from './editor/range-types';
+import { rangeFromBeats, resolveSelectionBeats, resolveSelectionNotes, selectionForBars, selectionForTrack } from './editor/range-selection';
 
-export function ScoreView({score,track,zoom,profile,onSelect,playback}: {
+const address=(beat:model.Beat):BeatTarget=>({track:beat.voice.bar.staff.track.index,staff:beat.voice.bar.staff.index,bar:beat.voice.bar.index,voice:beat.voice.index,beat:beat.index});
+const sameLane=(a:VoiceAddress,b:VoiceAddress)=>a.track===b.track&&a.staff===b.staff&&a.voice===b.voice;
+const sameBeat=(a:BeatTarget,b:BeatTarget)=>sameLane(a,b)&&a.bar===b.bar&&a.beat===b.beat;
+type Marker={x:number;y:number;w:number;h:number};
+type Handles={start:Marker&{target:BeatTarget};end:Marker&{target:BeatTarget}};
+type Drag={anchor:BeatTarget;last:BeatTarget;lanes:VoiceAddress[];bars?:Extract<MusicSelection,{kind:'bars'}>};
+
+export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSelection=null,onEditorSelection}: {
   score:model.Score;track:number;zoom:number;profile:string;onSelect:(target:BeatTarget,string?:number,noteIndex?:number)=>void;
   playback:NativePlaybackController|null;
+  editorSelection?:MusicSelection|null;onEditorSelection?:(selection:MusicSelection|null)=>void;
 }) {
-  const container=useRef<HTMLDivElement>(null);const api=useRef<AlphaTabApi|null>(null);
-  const selection=useRef(onSelect);selection.current=onSelect;
+  const wrapper=useRef<HTMLDivElement>(null),container=useRef<HTMLDivElement>(null),api=useRef<AlphaTabApi|null>(null);
+  const current=useRef({score,track,onSelect,editorSelection,onEditorSelection});current.current={score,track,onSelect,editorSelection,onEditorSelection};
+  const modifiers=useRef({shift:false,toggle:false,detail:0}),anchor=useRef<BeatTarget|null>(null),drag=useRef<Drag|null>(null);
+  const [markers,setMarkers]=useState<Marker[]>([]),[handles,setHandles]=useState<Handles|null>(null);
+  const refresh=useRef(()=>{});
+  const clearHighlight=(view:AlphaTabApi)=>{
+    const first=current.current.score.tracks[current.current.track]?.staves[0]?.bars[0]?.voices[0]?.beats[0];
+    // Clearing drawing alone retains alphaTab's endpoints across renders. An
+    // equal-beat range safely resets them without changing the playback loop.
+    if(first)view.highlightPlaybackRange(first,first);
+    view.clearPlaybackRangeHighlight();
+  };
+  const offset=()=>{
+    const view=api.current,root=wrapper.current;if(!view||!root)return {x:0,y:0};
+    const canvas=view.uiFacade.getOffset(null,view.canvasElement),bounds=root.getBoundingClientRect();
+    return {x:canvas.x-bounds.left-window.scrollX,y:canvas.y-bounds.top-window.scrollY};
+  };
+  const placeHandles=(event:PlaybackHighlightChangeEventArgs)=>{
+    if(!event.startBeat||!event.endBeat||!event.startBeatBounds||!event.endBeatBounds){setHandles(null);return;}
+    const delta=offset(),start=event.startBeatBounds.realBounds,end=event.endBeatBounds.realBounds;
+    setHandles({start:{...start,x:delta.x+start.x,y:delta.y+start.y,target:address(event.startBeat)},end:{...end,x:delta.x+end.x+end.w,y:delta.y+end.y,target:address(event.endBeat)}});
+  };
+  refresh.current=()=>{
+    const view=api.current;if(!view)return;const selected=current.current.editorSelection;
+    setMarkers([]);setHandles(null);
+    if(!selected){clearHighlight(view);return;}
+    try {
+      if(selected.kind==='notes'){
+        clearHighlight(view);const delta=offset();
+        setMarkers(resolveSelectionNotes(current.current.score,selected).filter(note=>note.beat.voice.bar.staff.track.index===current.current.track).flatMap(note=>(view.boundsLookup?.findBeats(note.beat)??[]).flatMap(bounds=>(bounds.notes??[]).filter(bound=>bound.note===note).map(bound=>({...bound.noteHeadBounds,x:delta.x+bound.noteHeadBounds.x,y:delta.y+bound.noteHeadBounds.y})))));return;
+      }
+      const beats=resolveSelectionBeats(current.current.score,selected).filter(beat=>beat.voice.bar.staff.track.index===current.current.track).sort((a,b)=>a.voice.bar.index-b.voice.bar.index||a.displayStart-b.displayStart||a.voice.bar.staff.index-b.voice.bar.staff.index||a.voice.index-b.voice.index||a.index-b.index);
+      if(!beats.length){clearHighlight(view);return;}
+      const first=beats[0],lane=address(first),laneBeats=beats.filter(beat=>sameLane(address(beat),lane)),last=laneBeats[laneBeats.length-1];
+      const startBeatBounds=view.boundsLookup?.findBeat(first),endBeatBounds=view.boundsLookup?.findBeat(last);
+      if(startBeatBounds?.beat!==first||endBeatBounds?.beat!==last){clearHighlight(view);return;}
+      view.highlightPlaybackRange(first,last);
+      placeHandles({startBeat:first,endBeat:last,startBeatBounds,endBeatBounds});if(first===last){const delta=offset(),bounds=startBeatBounds.realBounds;setMarkers([{...bounds,x:delta.x+bounds.x,y:delta.y+bounds.y}]);}
+    } catch {clearHighlight(view);}
+  };
   useEffect(()=>{
-    const view=new AlphaTabApi(container.current!,{core:{fontDirectory:'/font/',scriptFile:'/alphatab/alphaTab.mjs',includeNoteBounds:true,useWorkers:false},player:{playerMode:'EnabledExternalMedia',enableCursor:true,scrollElement:'.paper-scroll'}});api.current=view;
-    const beat=(b:model.Beat,s?:number,noteIndex?:number)=>selection.current({track:b.voice.bar.staff.track.index,staff:b.voice.bar.staff.index,bar:b.voice.bar.index,voice:b.voice.index,beat:b.index},s,noteIndex);
-    view.beatMouseDown.on(b=>beat(b));view.noteMouseDown.on(n=>beat(n.beat,n.string,n.index));
-    return ()=>{view.destroy();api.current=null;};
+    const view=new AlphaTabApi(container.current!,{core:{fontDirectory:'/font/',scriptFile:'/alphatab/alphaTab.mjs',includeNoteBounds:true,useWorkers:false},player:{playerMode:'EnabledExternalMedia',enableCursor:true,enableUserInteraction:false,scrollElement:'.paper-scroll'}});api.current=view;
+    const publish=(next:MusicSelection|null)=>{current.current.editorSelection=next;current.current.onEditorSelection?.(next);};
+    const chooseRange=(from:BeatTarget,to:BeatTarget,lanes:VoiceAddress[])=>{try{publish({kind:'range',range:rangeFromBeats(current.current.score,from,to,lanes)});}catch{return false;}return true;};
+    const move=(beat:model.Beat)=>{
+      const active=drag.current;if(!active||beat.voice.bar.staff.track.score!==current.current.score)return;const to=address(beat);if(!sameLane(active.anchor,to)||sameBeat(active.last,to))return;
+      if(active.bars){publish(selectionForBars(current.current.score,active.bars.tracks,Math.min(active.anchor.bar,to.bar),Math.max(active.anchor.bar,to.bar)));active.last=to;}
+      else if(chooseRange(active.anchor,to,active.lanes))active.last=to;
+    };
+    const subscriptions=[view.beatMouseDown.on(beat=>{
+      if(beat.voice.bar.staff.track.score!==current.current.score)return;
+      const point=address(beat);current.current.onSelect(point,undefined,undefined);if(!current.current.onEditorSelection)return;
+      if(modifiers.current.detail===3){anchor.current=point;drag.current=null;publish(selectionForTrack(current.current.score,point.track));return;}
+      if(modifiers.current.toggle)return;
+      if(modifiers.current.shift&&!anchor.current&&current.current.editorSelection){try{const first=resolveSelectionBeats(current.current.score,current.current.editorSelection).find(item=>sameLane(address(item),point));if(first)anchor.current=address(first);}catch{ /* A replaced document can invalidate an old indexed selection. */ }}
+      const from=modifiers.current.shift&&anchor.current&&sameLane(anchor.current,point)?anchor.current:point;
+      anchor.current=from;const lanes=[{track:point.track,staff:point.staff,voice:point.voice}];
+      drag.current={anchor:from,last:point,lanes};
+      if(!chooseRange(from,point,lanes))publish(selectionForBars(current.current.score,[point.track],point.bar,point.bar));
+    }),view.noteMouseDown.on(note=>{
+      if(note.beat.voice.bar.staff.track.score!==current.current.score)return;
+      const point=address(note.beat);current.current.onSelect(point,note.string,note.index);
+      if(!current.current.onEditorSelection||!modifiers.current.toggle||modifiers.current.detail===3)return;
+      let notes:model.Note[]=[];try{if(current.current.editorSelection)notes=resolveSelectionNotes(current.current.score,current.current.editorSelection);}catch{ /* A replaced document can invalidate an old indexed selection. */ }
+      const selected=notes.map(item=>({target:address(item.beat),noteIndex:item.index})),index=selected.findIndex(item=>sameBeat(item.target,point)&&item.noteIndex===note.index);
+      if(index>=0)selected.splice(index,1);else selected.push({target:point,noteIndex:note.index});anchor.current=point;drag.current=null;publish(selected.length?{kind:'notes',notes:selected}:null);
+    }),view.beatMouseMove.on(move),view.beatMouseUp.on(()=>{drag.current=null;}),view.postRenderFinished.on(()=>refresh.current()),view.playbackRangeHighlightChanged.on(event=>{
+      if(current.current.editorSelection&&current.current.editorSelection.kind!=='notes')placeHandles(event);
+    })];
+    const mouseMove=(event:MouseEvent)=>{
+      if(!drag.current)return;const bounds=view.uiFacade.getOffset(null,view.canvasElement),beat=view.boundsLookup?.getBeatAtPos(event.clientX+window.scrollX-bounds.x,event.clientY+window.scrollY-bounds.y);if(beat)move(beat);
+    };
+    const mouseUp=()=>{drag.current=null;};document.addEventListener('mousemove',mouseMove);document.addEventListener('mouseup',mouseUp);
+    return ()=>{for(const dispose of subscriptions)dispose();document.removeEventListener('mousemove',mouseMove);document.removeEventListener('mouseup',mouseUp);view.destroy();api.current=null;};
   },[]);
+  useEffect(()=>{anchor.current=null;drag.current=null;},[score,track]);
+  useEffect(()=>{if(!editorSelection)anchor.current=null;refresh.current();},[editorSelection,score,track,zoom,profile]);
   useEffect(()=>{if(playback&&api.current)playback.attachView(api.current);},[playback]);
   useEffect(()=>{const view=api.current!;view.settings.display.scale=zoom/100;
     view.settings.display.staveProfile=StaveProfile[profile as keyof typeof StaveProfile] as StaveProfile;
     view.updateSettings();playback?.replaceScore(score,track);
   },[track,zoom,profile,playback]);
-  return <div ref={container} aria-label="Music notation"/>;
+  const capture=(event:ReactMouseEvent<HTMLDivElement>)=>{if(event.button!==0)return;event.preventDefault();event.currentTarget.focus({preventScroll:true});modifiers.current={shift:event.shiftKey,toggle:event.ctrlKey||event.metaKey,detail:event.detail};drag.current=null;};
+  const resize=(edge:'start'|'end',event:ReactMouseEvent)=>{
+    event.preventDefault();event.stopPropagation();if(event.button!==0||!handles||!editorSelection||editorSelection.kind==='notes')return;
+    const fixed=handles[edge==='start'?'end':'start'].target;
+    drag.current={anchor:fixed,last:handles[edge].target,lanes:editorSelection.kind==='range'?editorSelection.range.lanes:[{track:fixed.track,staff:fixed.staff,voice:fixed.voice}],...(editorSelection.kind==='bars'?{bars:editorSelection}:{})};
+  };
+  return <div ref={wrapper} tabIndex={-1} style={{position:'relative'}} onMouseDownCapture={capture}>
+    <div ref={container} aria-label="Music notation"/>
+    {markers.map((marker,index)=><span key={index} role="img" aria-label={`Selected note ${index+1}`} style={{position:'absolute',left:marker.x,top:marker.y,width:marker.w,height:marker.h,boxSizing:'border-box',border:'2px solid #9aaf38',background:'rgba(185,205,105,.3)',borderRadius:3,pointerEvents:'none'}}/>)}
+    {handles&&(['start','end'] as const).map(edge=><button key={edge} type="button" aria-label={`Resize selection ${edge}`} onMouseDown={event=>resize(edge,event)} style={{position:'absolute',left:handles[edge].x-6,top:handles[edge].y+handles[edge].h/2-12,width:12,height:24,padding:0,border:'2px solid #60712b',borderRadius:3,background:'#bccf6e',cursor:'ew-resize',zIndex:4}}/>)}
+  </div>;
 }

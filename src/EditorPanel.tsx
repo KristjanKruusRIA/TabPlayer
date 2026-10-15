@@ -17,11 +17,15 @@ import { SpellingControl } from './editor/SpellingControl';
 import { LyricsPanel } from './editor/LyricsPanel';
 import { GesturePanel } from './editor/GesturePanel';
 import { BarGesturePanel } from './editor/BarGesturePanel';
+import { RangePanel } from './editor/RangePanel';
+import { MeasureTransformPanel } from './editor/MeasureTransformPanel';
+import type { MusicSelection } from './editor/range-types';
 
-export function EditorPanel({score,target,string,fret,noteIndex,onSelectNote,busy,onSelect,onString,onFret,onEdit}: {
+export function EditorPanel({score,target,string,fret,noteIndex,onSelectNote,busy,onSelect,onString,onFret,onEdit,musicSelection,onMusicSelection}: {
   score:model.Score;target:BeatTarget;string:number;fret:number;busy:boolean;
   noteIndex:number|null;onSelectNote:(index:number|null)=>void;
   onSelect:(target:BeatTarget)=>void;onString:(string:number)=>void;onFret:(fret:number)=>void;onEdit:(edit:EditCommand)=>void;
+  musicSelection:MusicSelection|null;onMusicSelection:(selection:MusicSelection|null)=>void;
 }) {
   const {staff,bar,voice,beat,master}=describeSelection(score,target);
   const indexed=staff.isPercussion||!staff.tuning.length;
@@ -53,10 +57,12 @@ export function EditorPanel({score,target,string,fret,noteIndex,onSelectNote,bus
     <div className="pair"><button onClick={()=>onEdit({type:'appendMeasure'})}>Append measure</button><button disabled={score.masterBars.length===1} onClick={()=>onEdit({type:'removeMeasure',bar:target.bar})}>Remove measure</button></div>
   </fieldset><SpellingControl score={score} target={target} noteIndex={indexed?noteIndex??-1:beat?.notes.findIndex(n=>n.string===string)??-1} busy={busy} onEdit={onEdit}/><TechniquePanel score={score} target={target} string={string} noteIndex={noteIndex} busy={busy} onEdit={onEdit}/>
   <GesturePanel score={score} target={target} busy={busy} onEdit={onEdit}/>
+  <RangePanel score={score} target={target} selection={musicSelection} busy={busy} onSelection={onMusicSelection} onEdit={onEdit}/>
   <details><summary>Beat text & chord</summary><fieldset disabled={busy||!beat}><label>Beat text<input value={text} onChange={e=>setText(e.target.value)}/></label><button onClick={()=>onEdit({type:'setBeatAnnotation',target,text,chord:beat?.chord?{name:beat.chord.name,firstFret:beat.chord.firstFret,frets:[...beat.chord.strings]}:null})}>Apply beat text</button><p className="muted">{beat?.chord?.name||'No chord diagram'}</p><button onClick={()=>setChordOpen(true)}>Edit chord diagram</button></fieldset></details>
   {chordOpen&&<ChordDialog strings={staff.tuning.length} disabled={busy} value={beat?.chord?{name:beat.chord.name,firstFret:beat.chord.firstFret,frets:[...beat.chord.strings]}:null} onChange={(chord:ChordDefinition|null)=>onEdit({type:'setBeatAnnotation',target,text,chord})} onClose={()=>setChordOpen(false)}/>}
   <MeasurePanel score={score} target={target} string={string} busy={busy} onEdit={onEdit}/><DirectionsPanel score={score} target={target} busy={busy} onEdit={onEdit}/><StructurePanel score={score} target={target} string={string} busy={busy} onEdit={onEdit} onSelect={onSelect}/>
   <BarGesturePanel score={score} track={target.track} staff={target.staff} bar={target.bar} busy={busy} onEdit={onEdit}/><LyricsPanel score={score} track={target.track} busy={busy} onEdit={onEdit}/>
+  <MeasureTransformPanel score={score} bar={target.bar} busy={busy} onEdit={onEdit}/>
   <details><summary>Score information</summary><fieldset disabled={busy}>
     <label>Title<input value={title} onChange={e=>setTitle(e.target.value)}/></label><label>Artist<input value={artist} onChange={e=>setArtist(e.target.value)}/></label>
     <label>Initial tempo<input type="number" min={1} value={tempo} onChange={e=>setTempo(Number(e.target.value))}/></label>

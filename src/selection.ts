@@ -1,5 +1,11 @@
 import type { model } from '@coderline/alphatab';
 import type { BeatTarget } from './project';
+import type { BarIndexMap } from './editor/measures-types';
+
+export function repairMeasureSelection(score:model.Score,target:BeatTarget,map:BarIndexMap):BeatTarget {
+  const bar=map.oldToNew[target.bar]??map.oldToNew.slice(target.bar+1).find(index=>index!==null)??score.masterBars.length-1;
+  return repairSelection(score,{...target,bar});
+}
 
 export function validSelectionIndices(target: BeatTarget): boolean {
   return [target.track,target.staff,target.bar,target.voice,target.beat].every(n=>Number.isInteger(n) && n>=0);

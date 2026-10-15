@@ -155,6 +155,23 @@ function sessionFixture():NativeSessionBridge {
 }
 async function sessionSetup(){const f=await setup(),session=sessionFixture();f.workspace.setSessionBridge(session);await f.workspace.flushViews();vi.mocked(session.setView).mockClear();return {...f,session};}
 
+it('retains score display and manual zoom across activation and forwarded writes without music changes',async()=>{
+  const {workspace:w,session,first}=await sessionSetup(),entry=current(w),controller=entry.controller;
+  await controller.edit(note);await controller.undo();const before=controller.getState(),owner=w.getState().active;
+  const view={...initialDocumentView(),zoom:137.5,scoreDisplay:{layout:'grid' as const,zoomMode:'fitPage' as const}};
+  w.setView(first,view);await w.flushViews();
+  expect(current(w).view).toEqual(view);expect(w.getState().active).toBe(owner);expect(controller.getState()).toBe(before);
+  expect(session.setView).toHaveBeenLastCalledWith(first,view);
+  await w.newDocument();expect(current(w).view).toEqual(initialDocumentView());await w.activate(first);
+  expect(current(w).controller).toBe(controller);expect(current(w).view).toEqual(view);expect(controller.getState()).toBe(before);
+  expect(controller.getState().snapshot.project).toBe(before.snapshot.project);
+  expect(controller.getState().revision).toBe(before.revision);expect(controller.getState().snapshot.dirty).toBe(before.snapshot.dirty);
+  expect(controller.getState().snapshot.canRedo).toBe(true);
+  const addressed=mocks.bridges.get(first)!;
+  expect(addressed.applyEdit).toHaveBeenCalledOnce();expect(addressed.undo).toHaveBeenCalledOnce();expect(addressed.redo).not.toHaveBeenCalled();
+  await controller.redo();expect(controller.getState().snapshot.project.edits).toEqual([note]);
+});
+
 it('seeds resolved ordered records and repairs their views without rereading or editing music',async()=>{
   const f=fixture();await f.bridge.addDocument(f.stage().token);const initial=f.snapshot(),firstRecord=initial.documents[0];
   const w=await WorkspaceController.create(f.bridge,{workspace:initial,views:{[f.first]:{...initialDocumentView(),target:{track:99,staff:-1,bar:99,voice:NaN,beat:99},selectedString:99,selectedNoteIndex:0,zoom:25,trackView:{kind:'custom',trackIds:['gone']},instrumentVisible:true}}});

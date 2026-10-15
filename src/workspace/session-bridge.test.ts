@@ -34,15 +34,15 @@ it('resolves only the supplied token and ordered successful document IDs, includ
   expect(native.invoke.mock.calls[0][1].documentIds).toBe(documentIds);
 });
 
-it('persists the complete addressed location and explicit preference without activation or transport state',async()=>{
+it('persists the complete addressed location and score display preference without activation or transport state',async()=>{
   const {nativeSessionBridge:bridge}=await import('./session-bridge');
-  const view:DocumentViewState={target:{track:2,staff:1,bar:4,voice:0,beat:3},selectedString:4,selectedNoteIndex:1,zoom:125,trackView:{kind:'custom',trackIds:['track-b','track-a']},instrumentVisible:false};
+  const view:DocumentViewState={target:{track:2,staff:1,bar:4,voice:0,beat:3},selectedString:4,selectedNoteIndex:1,zoom:137.5,trackView:{kind:'custom',trackIds:['track-b','track-a']},instrumentVisible:false,scoreDisplay:{layout:'grid',zoomMode:'fitPage'}};
   const preferences={version:1 as const,restorePreviousSession:false};
   native.invoke.mockResolvedValueOnce(undefined).mockResolvedValueOnce(preferences);
   await bridge.setView('stable-document',view);
   expect(await bridge.setPreferences(false)).toBe(preferences);
   expect(native.invoke.mock.calls).toEqual([
-    ['workspace_set_view',{documentId:'stable-document',view:{target:{track:2,staff:1,bar:4,voice:0,beat:3},selectedString:4,selectedNoteIndex:1,zoom:125,trackView:{kind:'custom',trackIds:['track-b','track-a']},instrumentVisible:false}}],
+    ['workspace_set_view',{documentId:'stable-document',view:{target:{track:2,staff:1,bar:4,voice:0,beat:3},selectedString:4,selectedNoteIndex:1,zoom:137.5,trackView:{kind:'custom',trackIds:['track-b','track-a']},instrumentVisible:false,scoreDisplay:{layout:'grid',zoomMode:'fitPage'}}}],
     ['session_preferences_set',{restorePreviousSession:false}],
   ]);
   expect(native.invoke.mock.calls[0][1].view).toBe(view);

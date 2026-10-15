@@ -150,6 +150,32 @@ pub enum TrackView {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ScoreLayoutMode {
+    VerticalPage,
+    HorizontalPage,
+    Grid,
+    Parchment,
+    VerticalScreen,
+    HorizontalScreen,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ScoreZoomMode {
+    Manual,
+    FitWidth,
+    FitPage,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ScoreDisplayPreferences {
+    pub layout: ScoreLayoutMode,
+    pub zoom_mode: ScoreZoomMode,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct DocumentViewState {
     pub target: ViewTarget,
@@ -161,6 +187,8 @@ pub struct DocumentViewState {
     pub zoom: f64,
     pub track_view: TrackView,
     pub instrument_visible: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub score_display: Option<ScoreDisplayPreferences>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -325,6 +353,7 @@ impl Default for DocumentViewState {
             zoom: 100.0,
             track_view: TrackView::Selected {},
             instrument_visible: false,
+            score_display: None,
         }
     }
 }
@@ -1314,6 +1343,105 @@ enum StoreFault {
 #[cfg(test)]
 mod store_tests {
     use super::*;
+    #[test]
+    fn score_display_grid_fit_page_roundtrip() {
+        let mut value = serde_json::to_value(DocumentViewState::default()).unwrap();
+        value["scoreDisplay"] = serde_json::json!({"layout":"grid","zoomMode":"fitPage"});
+        value["zoom"] = serde_json::json!(137.5);
+        let view: DocumentViewState = serde_json::from_value(value.clone()).unwrap();
+        assert_eq!(serde_json::to_value(view).unwrap(), value);
+    }
+    #[test]
+    fn score_display_old_view_omits_optional_preferences() {
+        let value = serde_json::to_value(DocumentViewState::default()).unwrap();
+        assert_eq!(
+            value,
+            serde_json::json!({
+                "target":{"track":0,"staff":0,"bar":0,"voice":0,"beat":0},
+                "selectedString":6,"selectedNoteIndex":null,"zoom":100.0,
+                "trackView":{"kind":"selected"},"instrumentVisible":false
+            })
+        );
+        assert!(value.get("scoreDisplay").is_none());
+        let view: DocumentViewState = serde_json::from_value(value.clone()).unwrap();
+        assert_eq!(serde_json::to_value(view).unwrap(), value);
+    }
+    #[test]
+    fn score_display_all_enum_pairs_roundtrip_without_applicability_repair() {
+        for layout in [
+            "verticalPage",
+            "horizontalPage",
+            "grid",
+            "parchment",
+            "verticalScreen",
+            "horizontalScreen",
+        ] {
+            for zoom_mode in ["manual", "fitWidth", "fitPage"] {
+                let mut value = serde_json::to_value(DocumentViewState::default()).unwrap();
+                value["scoreDisplay"] = serde_json::json!({"layout":layout,"zoomMode":zoom_mode});
+                let view: DocumentViewState = serde_json::from_value(value.clone()).unwrap();
+                assert_eq!(serde_json::to_value(view).unwrap(), value);
+            }
+        }
+    }
+    #[test]
+    fn score_display_null_is_absence_and_serializes_as_omission() {
+        let expected = serde_json::to_value(DocumentViewState::default()).unwrap();
+        let mut value = expected.clone();
+        value["scoreDisplay"] = serde_json::Value::Null;
+        let view: DocumentViewState = serde_json::from_value(value).unwrap();
+        assert_eq!(serde_json::to_value(view).unwrap(), expected);
+    }
+    #[test]
+    fn score_display_rejects_malformed_preferences() {
+        for preference in [
+            serde_json::json!({}),
+            serde_json::json!([]),
+            serde_json::json!(1),
+            serde_json::json!("grid"),
+            serde_json::json!({"layout":"grid"}),
+            serde_json::json!({"zoomMode":"manual"}),
+            serde_json::json!({"layout":"grid","zoomMode":"manual","extra":true}),
+            serde_json::json!({"layout":"Grid","zoomMode":"manual"}),
+            serde_json::json!({"layout":"unknown","zoomMode":"manual"}),
+            serde_json::json!({"layout":1,"zoomMode":"manual"}),
+            serde_json::json!({"layout":null,"zoomMode":"manual"}),
+            serde_json::json!({"layout":"grid","zoomMode":"Manual"}),
+            serde_json::json!({"layout":"grid","zoomMode":"unknown"}),
+            serde_json::json!({"layout":"grid","zoomMode":1}),
+            serde_json::json!({"layout":"grid","zoomMode":null}),
+        ] {
+            let mut value = serde_json::to_value(DocumentViewState::default()).unwrap();
+            value["scoreDisplay"] = preference;
+            assert!(serde_json::from_value::<DocumentViewState>(value).is_err());
+        }
+    }
+    #[test]
+    fn score_display_preserves_serde_positional_sequence_representation() {
+        let mut value = serde_json::to_value(DocumentViewState::default()).unwrap();
+        value["scoreDisplay"] = serde_json::json!(["grid", "manual"]);
+        let view: DocumentViewState = serde_json::from_value(value.clone()).unwrap();
+        value["scoreDisplay"] = serde_json::json!({"layout":"grid","zoomMode":"manual"});
+        assert_eq!(serde_json::to_value(view).unwrap(), value);
+    }
+    #[test]
+    fn score_display_preserves_strict_old_view_and_envelope_fields() {
+        let old = serde_json::to_value(DocumentViewState::default()).unwrap();
+        let mut root = old.clone();
+        root["extra"] = serde_json::json!(true);
+        let mut target = old.clone();
+        target["target"]["extra"] = serde_json::json!(true);
+        let mut tracks = old.clone();
+        tracks["trackView"]["extra"] = serde_json::json!(true);
+        let mut missing = old;
+        missing.as_object_mut().unwrap().remove("target");
+        for value in [root, target, tracks, missing] {
+            assert!(serde_json::from_value::<DocumentViewState>(value).is_err());
+        }
+        let mut envelope = serde_json::to_value(empty(1, 1)).unwrap();
+        envelope["extra"] = serde_json::json!(true);
+        assert!(serde_json::from_value::<RecoveryEnvelope>(envelope).is_err());
+    }
     fn empty(epoch: u64, generation: u64) -> RecoveryEnvelope {
         RecoveryEnvelope {
             format: "TabPlayerRecovery".into(),

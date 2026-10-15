@@ -75,6 +75,7 @@ fn view(zoom: f64) -> DocumentViewState {
             track_ids: vec!["authored-track".into()],
         },
         instrument_visible: false,
+        score_display: None,
     }
 }
 

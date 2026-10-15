@@ -26,6 +26,7 @@ fn view() -> DocumentViewState {
         zoom: 100.0,
         track_view: TrackView::Selected {},
         instrument_visible: false,
+        score_display: None,
     }
 }
 fn document(id: &str) -> RecoveryDocument {

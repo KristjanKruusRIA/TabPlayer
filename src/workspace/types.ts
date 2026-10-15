@@ -1,4 +1,5 @@
 import type { TrackView } from '../engraving/view';
+import type { ScoreDisplayPreferences } from '../engraving/screen-view';
 import type { BeatTarget, DocumentCandidate, ProjectSnapshot } from '../project';
 
 export type DocumentId=string;
@@ -11,6 +12,7 @@ export interface CloseDocument extends DocumentRevision {discard:boolean}
 export interface DocumentViewState {
   target:BeatTarget;selectedString:number;selectedNoteIndex:number|null;
   zoom:number;trackView:TrackView;instrumentVisible:boolean;
+  scoreDisplay?:ScoreDisplayPreferences;
 }
 export interface DocumentTab {id:DocumentId;title:string;path:string|null;dirty:boolean}
 export interface NativeWorkspaceBridge {

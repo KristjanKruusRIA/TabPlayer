@@ -617,3 +617,187 @@ impl TrackDsp {
         self.phase = 0.0;
     }
 }
+
+pub(crate) struct BackingFilterDsp {
+    filter: Option<Biquad>,
+}
+impl BackingFilterDsp {
+    pub(crate) fn new(mode: crate::settings::BackingFilter, rate: u32) -> Result<Self, String> {
+        use crate::settings::BackingFilter;
+        if !(8_000..=192_000).contains(&rate) {
+            return Err("Invalid backing filter sample rate.".into());
+        }
+        let mut filter = Biquad::default();
+        match mode {
+            BackingFilter::None => return Ok(Self { filter: None }),
+            BackingFilter::BassEnhance => filter.shelf(180.0, 6.0, rate as f64, false),
+            BackingFilter::BassAttenuation => filter.shelf(180.0, -6.0, rate as f64, false),
+            BackingFilter::MediumEnhance => filter.peak(1000.0, 6.0, rate as f64),
+            BackingFilter::MediumAttenuation => filter.peak(1000.0, -6.0, rate as f64),
+            BackingFilter::HighEnhance => filter.shelf(4000.0, 6.0, rate as f64, true),
+            BackingFilter::HighAttenuation => filter.shelf(4000.0, -6.0, rate as f64, true),
+        }
+        Ok(Self {
+            filter: Some(filter),
+        })
+    }
+    pub(crate) fn process(&mut self, frame: [f32; 2]) -> [f32; 2] {
+        match &mut self.filter {
+            Some(filter) => filter.process(frame),
+            None => frame,
+        }
+    }
+    pub(crate) fn reset(&mut self) {
+        if let Some(filter) = &mut self.filter {
+            filter.reset();
+        }
+    }
+}
+#[cfg(test)]
+mod backing_filter_tests {
+    use super::BackingFilterDsp;
+    use crate::settings::BackingFilter;
+
+    const MODES: [BackingFilter; 7] = [
+        BackingFilter::None,
+        BackingFilter::BassEnhance,
+        BackingFilter::BassAttenuation,
+        BackingFilter::MediumEnhance,
+        BackingFilter::MediumAttenuation,
+        BackingFilter::HighEnhance,
+        BackingFilter::HighAttenuation,
+    ];
+    const PATTERNS: [[f32; 2]; 4] = [[1.0, 1.0], [1.0, -1.0], [1.0, 0.0], [0.0, 1.0]];
+
+    // Measure settled PCM energy, without examining filter coefficients.
+    fn response(mode: BackingFilter, target: usize, sign: f64) {
+        for rate in [44_100, 48_000] {
+            for pattern in PATTERNS {
+                for (band, hz) in [80.0, 1000.0, 10000.0].into_iter().enumerate() {
+                    let mut dsp = BackingFilterDsp::new(mode, rate).unwrap();
+                    let mut input_energy = 0.0;
+                    let mut output_energy = [0.0; 2];
+                    for i in 0..rate {
+                        let s = (0.05 * (std::f64::consts::TAU * hz * i as f64 / rate as f64).sin())
+                            as f32;
+                        let output = dsp.process(pattern.map(|p| p * s));
+                        assert!(output.iter().all(|v| v.is_finite()));
+                        if pattern[0] == 0.0 {
+                            assert_eq!(output[0], 0.0);
+                        }
+                        if pattern[1] == 0.0 {
+                            assert_eq!(output[1], 0.0);
+                        }
+                        if pattern[0] == pattern[1] {
+                            assert_eq!(output[0], output[1]);
+                        }
+                        if pattern[0] == -pattern[1] {
+                            assert_eq!(output[0], -output[1]);
+                        }
+                        if i >= rate / 2 {
+                            input_energy += (s as f64).powi(2);
+                            for c in 0..2 {
+                                output_energy[c] += (output[c] as f64).powi(2);
+                            }
+                        }
+                    }
+                    for c in 0..2 {
+                        if pattern[c] == 0.0 {
+                            continue;
+                        }
+                        let db = 10.0 * (output_energy[c] / input_energy).log10();
+                        if band == target {
+                            assert!(
+                                (4.0..=7.0).contains(&(db * sign)),
+                                "{mode:?} {rate}Hz {hz}Hz {pattern:?} channel {c}: {db}dB"
+                            );
+                        } else {
+                            assert!(db.abs() < 1.0, "{mode:?} {rate}Hz {hz}Hz: {db}dB");
+                        }
+                    }
+                }
+            }
+        }
+    }
+    #[test]
+    fn bass_enhance_response() {
+        response(BackingFilter::BassEnhance, 0, 1.0);
+    }
+    #[test]
+    fn bass_attenuation_response() {
+        response(BackingFilter::BassAttenuation, 0, -1.0);
+    }
+    #[test]
+    fn medium_enhance_response() {
+        response(BackingFilter::MediumEnhance, 1, 1.0);
+    }
+    #[test]
+    fn medium_attenuation_response() {
+        response(BackingFilter::MediumAttenuation, 1, -1.0);
+    }
+    #[test]
+    fn high_enhance_response() {
+        response(BackingFilter::HighEnhance, 2, 1.0);
+    }
+    #[test]
+    fn high_attenuation_response() {
+        response(BackingFilter::HighAttenuation, 2, -1.0);
+    }
+
+    #[test]
+    fn none_is_bit_exact_bypass() {
+        for rate in [8_000, 44_100, 48_000, 192_000] {
+            let mut dsp = BackingFilterDsp::new(BackingFilter::None, rate).unwrap();
+            for frame in [
+                [0.0, -0.0],
+                [0.125, -0.3],
+                [2.0, -4.0],
+                [f32::MIN_POSITIVE, f32::from_bits(1)],
+            ] {
+                assert_eq!(
+                    dsp.process(frame).map(f32::to_bits),
+                    frame.map(f32::to_bits)
+                );
+            }
+            dsp.reset();
+            assert_eq!(dsp.process([0.25, -0.5]), [0.25, -0.5]);
+        }
+    }
+    #[test]
+    fn reset_matches_fresh_filter() {
+        for rate in [44_100, 48_000] {
+            for mode in MODES {
+                let mut used = BackingFilterDsp::new(mode, rate).unwrap();
+                for i in 0..1000 {
+                    used.process([(i as f32 * 0.17).sin() * 0.1, 0.0]);
+                }
+                used.reset();
+                let mut fresh = BackingFilterDsp::new(mode, rate).unwrap();
+                for i in 0..2000 {
+                    let frame = [(i as f32 * 0.23).sin() * 0.1, (i as f32 * 0.31).cos() * 0.1];
+                    assert_eq!(used.process(frame), fresh.process(frame));
+                }
+            }
+        }
+    }
+    #[test]
+    fn supported_boundary_rates_remain_finite() {
+        for rate in [8_000, 192_000] {
+            for mode in MODES {
+                let mut dsp = BackingFilterDsp::new(mode, rate).unwrap();
+                for i in 0..rate {
+                    let input = if i == 0 { [0.1, -0.2] } else { [0.0; 2] };
+                    assert!(dsp.process(input).iter().all(|v| v.is_finite()));
+                }
+            }
+        }
+    }
+    #[test]
+    fn rejects_unsupported_rates() {
+        for mode in MODES {
+            for rate in [0, 1, 7_999, 192_001, u32::MAX] {
+                assert!(BackingFilterDsp::new(mode, rate).is_err());
+            }
+        }
+    }
+}

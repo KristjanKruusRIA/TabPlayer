@@ -11,7 +11,7 @@ type TrackJson={staves:StaffJson[]};
 export function scoreFromJson(json:ReturnType<typeof model.JsonConverter.scoreToJson>,settings:Settings):model.Score {
   const source=JSON.parse(json) as {tracks:TrackJson[]};
   const dynamics=new Map(source.tracks.flatMap(t=>t.staves.flatMap(s=>s.bars.flatMap(b=>b.voices.flatMap(v=>v.beats.flatMap(b=>b.notes.map(n=>[n.id,n.dynamics] as const)))))));
-  const score=model.JsonConverter.jsonToScore(json,settings);
+  const score=model.JsonConverter.jsObjectToScore(source,settings);
   for(const track of score.tracks)for(const staff of track.staves)for(const bar of staff.bars)for(const voice of bar.voices)for(const beat of voice.beats)for(const note of beat.notes) {
     const value=dynamics.get(note.id);if(value!==undefined)note.dynamics=value;
   }

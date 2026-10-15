@@ -270,14 +270,38 @@ function buildWithIdentities(original: model.Score, generation: number, ids: str
   const lanes = new Map<string, Source[]>();
   for (const source of all) { const lane = lanes.get(source.lane) ?? []; lane.push(source); lanes.set(source.lane, lane); }
   const json = model.JsonConverter.scoreToJson(score);
+  const serialized = JSON.parse(json) as {tracks:{staves:unknown[]}[]};
+  const fullTracks = new Set<number>();
+  for (const source of all) {
+    const note = source.note;
+    for (const linked of [note.tieOrigin,note.tieDestination,note.slurOrigin,note.slurDestination,note.slideOrigin,note.slideTarget,note.hammerPullOrigin,note.hammerPullDestination,note.bendOrigin,note.letRingDestination,note.palmMuteDestination]) {
+      if (!linked) continue;
+      const other = linked.beat.voice.bar.staff.track.index;
+      if (other !== source.track) { fullTracks.add(source.track);fullTracks.add(other); }
+    }
+  }
+  // Pickup duration is the maximum across all tracks, including silent staves.
+  const fullTiming = score.masterBars.some(bar=>bar.isAnacrusis);
+  const trackJson = new Map<number,string>();
+  const jsonForTrack = (track:number):string => {
+    if (fullTiming || fullTracks.has(track)) return json;
+    let value = trackJson.get(track);
+    if (!value) {
+      // Keep global timing and every target staff/voice through finish. Empty
+      // track slots preserve the original indices before lane isolation.
+      value = JSON.stringify({...serialized,tracks:serialized.tracks.map((source,index)=>index===track?source:{...source,staves:[]})});
+      trackJson.set(track,value);
+    }
+    return value;
+  };
   const laneData = new Map<string, { events: Collector; bends: PlanMidiEvent[]; markers: Map<string, number>; attacks: Map<string, RawNote[]> }>();
   for (const [id, lane] of lanes) {
-    const isolated = laneScore(json, lane), generated = generate(isolated.score);
+    const isolated = laneScore(jsonForTrack(lane[0].track), lane), generated = generate(isolated.score);
     generated.events.notes = generated.events.notes.filter(n => n.rawKey < 500);
     generated.events.events = generated.events.events.filter(e => e.type !== 'noteBend' || e.key! < 500);
     const attacks = new Map<string, RawNote[]>();
     for (const note of generated.events.notes) { const group = attacks.get(note.provenance!) ?? []; group.push(note); attacks.set(note.provenance!, group); }
-    laneData.set(id, { events: generated.events, markers: isolated.markers, attacks, bends: converted(generated.events.events, ids, nativeChannel) });
+    laneData.set(id, { events: generated.events, markers: isolated.markers, attacks, bends: converted(generated.events.events, ids, nativeChannel).filter(event=>event.type==='bend'||event.type==='noteBend') });
   }
   const notes: PlanNote[] = [], played = new Map<model.Note, PlanNote[]>();
   const byNote = new Map(all.map(source => [source.note, source]));
@@ -305,7 +329,7 @@ function buildWithIdentities(original: model.Score, generation: number, ids: str
           // alphaTab subtracts brush offset from its short static dead duration.
           // Recover that public duration with the same transient beat unbrushed;
           // keep the original delayed attack and avoid an off-before-on voice.
-          const plain = laneScore(json, lanes.get(source.lane)!);
+          const plain = laneScore(jsonForTrack(source.track), lanes.get(source.lane)!);
           plain.score.tracks[0].staves[0].bars[source.bar].voices[0].beats[source.beat].brushType = model.BrushType.None;
           const baseline = generate(plain.score).events.notes.filter(n => n.rawKey < 500 && n.provenance === `${marker}/${logicalTick}`)[attack];
           if (!baseline || baseline.end <= baseline.start) throw new Error('Invalid public dead-note duration.');
@@ -416,7 +440,10 @@ export function validatePlaybackPlan(plan: PlaybackPlan) {
 // Worker inputs contain only transient public model data and stable track IDs.
 // Audio asset payloads remain outside this boundary.
 export async function preparePlan(project: ProjectView, generation: number): Promise<PlaybackPlan> {
-  const score = buildScore(project);
+  return preparePlanFromScore(buildScore(project),generation);
+}
+
+export async function preparePlanFromScore(score:model.Score,generation:number):Promise<PlaybackPlan> {
   if (typeof Worker === 'undefined') return buildPlaybackPlan(score, generation);
   const worker = new Worker(new URL('./plan.worker.ts', import.meta.url), { type: 'module' });
   try {

@@ -25,10 +25,13 @@ vi.mock('./audio/NativePlaybackController',()=>({NativePlaybackController:class 
   setPractice=()=>{};exportPracticeRatio=()=>1;
   devices=async()=>[];deviceId=()=>null;backingDurationMs=()=>undefined;mix=()=>undefined;
 }}));
-afterEach(cleanup);
+const originalViewportWidth=window.innerWidth;
+afterEach(()=>{cleanup();Object.defineProperty(window,'innerWidth',{configurable:true,writable:true,value:originalViewportWidth});});
 let workspace:WorkspaceController;
 const activeController=()=>workspace.getState().documents.find(entry=>entry.id===workspace.getState().active.documentId)!.controller;
 async function setup(initial=blankProject(),openProject:Project=blankProject()) {
+  // These exercise tuning/history, with both editing panes visible at the supported desktop width.
+  Object.defineProperty(window,'innerWidth',{configurable:true,writable:true,value:1280});
   documentBridges.clear();let next=0,activation=0,active={documentId:'',activationId:''};
   const records=new Map<string,DocumentSnapshot>(),staged=new Map<string,DocumentCandidate>();
   const add=(project:Project,path:string|null=null)=>{
@@ -48,8 +51,19 @@ async function setup(initial=blankProject(),openProject:Project=blankProject()) 
   const bridge:NativeWorkspaceBridge={snapshot:async()=>snapshot(),readDocument:async()=>openProject?{kind:'candidate',candidate:stage(openProject,'saved.tabplayer','opened-document')}:null,createBlankDocument:async()=>stage(blankProject(),null,'new-document'),cancelDocument:async token=>staged.delete(token),addDocument:async token=>{const candidate=staged.get(token);if(!candidate)throw new Error('Missing document candidate');staged.delete(token);return activate(add(candidate.project,candidate.path));},activateDocument:async id=>activate(id),closeDocuments:async decisions=>{const order=[...records.keys()],index=order.indexOf(active.documentId);for(const decision of decisions)records.delete(decision.documentId);if(!records.size)add(blankProject());return records.has(active.documentId)?snapshot():activate([...records.keys()][Math.min(index,records.size-1)]);}};
   workspace=await WorkspaceController.create(bridge);const controller=activeController();render(<WorkspaceApp workspace={workspace}/>);return controller;
 }
-const change=(label:string,value:string)=>fireEvent.change(screen.getByLabelText(label),{target:{value}});
-const click=(name:string)=>fireEvent.click(screen.getByRole('button',{name}));
+function exposeControl(element:HTMLElement){
+  const task=element.closest('.track-settings')?'Track':element.closest('.inspector')?'Inspector':null;
+  if(task&&element.closest('[hidden]'))fireEvent.click(within(screen.getByRole('navigation',{name:'Workspace panes'})).getByRole('button',{name:task}));
+  const ancestors:HTMLDetailsElement[]=[];for(let parent=element.parentElement;parent;parent=parent.parentElement)if(parent instanceof HTMLDetailsElement)ancestors.unshift(parent);
+  for(const disclosure of ancestors)if(!disclosure.open)fireEvent.click(disclosure.querySelector('summary')!);
+  expect(element).toBeVisible();return element;
+}
+const change=(label:string,value:string)=>fireEvent.change(exposeControl(screen.getByLabelText(label)),{target:{value}});
+const click=(name:string)=>{
+  if(/^Track \d+:/.test(name))fireEvent.click(screen.getByRole('button',{name:'Mixer'}));
+  else exposeControl(screen.getByText(name,{selector:'button'}));
+  fireEvent.click(screen.getByRole('button',{name}));
+};
 const trackLabel='Tuning (notes, high to low)',staffLabel='Staff tuning (notes, high to low)';
 it('App retunes from note names and refreshes both fields and string labels through undo redo',async()=>{
   const controller=await setup();expect(screen.getByLabelText(trackLabel)).toHaveValue('E4 B3 G3 D3 A2 E2');expect(screen.getByLabelText(staffLabel)).toHaveValue('E4 B3 G3 D3 A2 E2');

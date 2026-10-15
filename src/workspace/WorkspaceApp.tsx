@@ -66,7 +66,7 @@ export function WorkspaceApp({workspace,session}:{workspace:WorkspaceController;
   return <div ref={panel} role="tabpanel" id={`document-panel-${encodeURIComponent(documentId)}`} aria-labelledby={`document-tab-${encodeURIComponent(documentId)}`}
     onKeyDownCapture={keys} onFocusCapture={event=>{tabFocus.current=event.target instanceof Element&&!!event.target.closest('[role="tablist"]');}}>
     <App key={activationId} controller={active.controller} audioBridge={audio} exportBridge={exports} documentBridge={documentBridge}
-      documentView={active.view} onViewChange={onViewChange} clipboard={workspace.clipboard} workspaceBusy={state.busy} workspaceError={state.error}
+      documentView={active.view} onViewChange={onViewChange} clipboard={workspace.clipboard} workspaceBusy={state.busy} workspaceError={state.error} playbackResumeEpoch={state.playbackResumeEpoch}
       beginEditorOperation={beginEditorOperation} onNew={onNew} onOpen={onOpen} onClose={onClose} onCloseAll={onCloseAll}
       sessionMenu={sessionMenu} recoveryStatus={recoveryStatus}
       documentTabs={<DocumentTabs tabs={tabs} activeId={documentId} disabled={state.busy} onActivate={id=>run(perform(()=>workspace.activate(id)))} onClose={id=>run(perform(()=>workspace.close(id)))}/>}/>

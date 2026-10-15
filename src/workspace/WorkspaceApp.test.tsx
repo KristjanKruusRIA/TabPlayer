@@ -6,7 +6,9 @@ import { act,cleanup,fireEvent,render,screen,waitFor } from '@testing-library/re
 import '@testing-library/jest-dom/vitest';
 import type { AppProps } from '../App';
 import type { NativeBridge } from '../bridge';
-import type { NativeAudioBridge } from '../audio/bridge';
+import type { NativeAudioBridge,NativeAudioStatus } from '../audio/bridge';
+import type { NativePlaybackController } from '../audio/NativePlaybackController';
+import { DEFAULT_PRACTICE } from '../audio/practice-types';
 import type { ExportNativeBridge } from '../export/bridge';
 import { blankProject,type EditCommand,type Project,type DocumentCandidate } from '../project';
 import type { CloseDocument,DocumentSnapshot,NativeWorkspaceBridge,WorkspaceSnapshot } from './types';
@@ -144,6 +146,7 @@ it('native close ignores a second request while successful window destruction is
 
 it.each(['success','destroy-failure','resync-failure','resume-failure','cancel','native-failure'] as const)('mounted native window close keeps the existing editor reserved until destruction: %s',async result=>{
   const f=fixture(),session=closeSession(f),workspace=await WorkspaceController.create(f.bridge),original=workspace.getState().active,destruction=deferred<void>(),refresh=deferred<WorkspaceSnapshot>(),resuming=deferred<void>();workspace.setSessionBridge(session);
+  if(result==='destroy-failure'){await current(workspace).controller.edit(note);await current(workspace).controller.undo();workspace.setView(f.first,{...initialDocumentView(),zoom:125,instrumentVisible:true});}
   if(result==='cancel'){await current(workspace).controller.edit(note);vi.mocked(mocks.bridges.get(f.first)!.askUnsaved).mockResolvedValueOnce('cancel');}
   if(result==='native-failure')vi.mocked(session.shutdown).mockRejectedValueOnce(new Error('native close rejected'));
   type CloseEvent={preventDefault:()=>void};let onClose!:(event:CloseEvent)=>Promise<void>,reactRoot:Root|undefined;
@@ -151,11 +154,23 @@ it.each(['success','destroy-failure','resync-failure','resume-failure','cancel',
   vi.resetModules();vi.doMock('@tauri-apps/api/window',()=>({getCurrentWindow:()=>({onCloseRequested:vi.fn(async(callback:typeof onClose)=>{onClose=callback;return()=>{};}),destroy})}));
   vi.doMock('react-dom/client',async()=>{const actual=await vi.importActual<typeof import('react-dom/client')>('react-dom/client');return {...actual,createRoot:(container:Element)=>{reactRoot=actual.createRoot(container);return reactRoot;}};});
   vi.doMock('./WorkspaceController',()=>({WorkspaceController:{create:vi.fn(async()=>workspace)}}));vi.doMock('../bridge',()=>({nativeWorkspaceBridge:f.bridge,createDocumentBridge:(id:string)=>mocks.bridges.get(id)!}));
-  vi.doMock('../App',()=>vi.importActual('../App'));vi.doMock('../ScoreView',()=>({ScoreView:()=>null}));
+  const players=new Set<NativePlaybackController>();
+  vi.doMock('../App',()=>vi.importActual('../App'));vi.doMock('../ScoreView',()=>({ScoreView:({playback}:{playback:NativePlaybackController|null})=>{if(playback)players.add(playback);return null;}}));
   const root=document.createElement('div');root.id='root';document.body.append(root);let closing:Promise<void>|undefined;
   try{
     await act(async()=>{await import('../main');});await waitFor(()=>expect(onClose).toBeTypeOf('function'));
     const editor=root.querySelector('.app-shell'),audio=mocks.audio.get(original.activationId)!;expect(editor).not.toBeNull();await waitFor(()=>expect(audio.prepare).toHaveBeenCalledOnce());expect(audio.subscribe).toHaveBeenCalledOnce();
+    const retained=current(workspace),history=retained.controller.getState(),view=retained.view;
+    let nativeFloor=vi.mocked(audio.prepare).mock.calls[0][0].generation,nativeStatus:NativeAudioStatus={generation:nativeFloor,desiredGeneration:nativeFloor,ready:true,playing:false,tick:0,seconds:0,durationSeconds:8,speed:1,metronome:false,error:null,deviceId:null,range:null,loop:null,practice:{settings:structuredClone(DEFAULT_PRACTICE),phase:'idle',countInRemaining:0,completedPasses:0,effectiveRatio:1,currentBpm:120,pulse:null}};
+    const emit=(change:Partial<NativeAudioStatus>)=>{nativeStatus={...nativeStatus,...change};vi.mocked(audio.subscribe).mock.calls[0][0](nativeStatus);};
+    if(result==='destroy-failure'){
+      fireEvent.change(screen.getByRole('spinbutton',{name:'Fret'}),{target:{value:'19'}});
+      vi.mocked(audio.status).mockImplementation(async()=>nativeStatus);
+      vi.mocked(audio.prepare).mockImplementation(async(plan)=>{if(plan.generation<nativeFloor)throw new Error('Stale prepare generation.');nativeFloor=plan.generation;emit({generation:nativeFloor,desiredGeneration:nativeFloor,ready:true,playing:false});});
+      vi.mocked(audio.command).mockImplementation(async command=>{if(command.type==='invalidate'){nativeFloor=Math.max(nativeFloor,command.generation);return;}if(command.generation!==nativeFloor||command.generation!==nativeStatus.generation)throw new Error('Stale transport generation.');if(command.type==='playRange'||command.type==='play')emit({playing:true});if(command.type==='pause')emit({playing:false});});
+      const shutdown=vi.mocked(session.shutdown).getMockImplementation()!;vi.mocked(session.shutdown).mockImplementation(async documents=>{await shutdown(documents);nativeFloor+=100;emit({generation:nativeFloor,desiredGeneration:nativeFloor,ready:false,playing:false});});
+      act(()=>emit({}));
+    }
     await act(async()=>{closing=onClose({preventDefault:vi.fn()});});
     if(result==='cancel'||result==='native-failure'){
       await closing;expect(destroy).not.toHaveBeenCalled();expect(workspace.getState().active).toBe(original);expect(root.querySelector('.app-shell')).toBe(editor);expect(workspace.getState().busy).toBe(false);expect(fileButton('New')).toBeEnabled();
@@ -182,7 +197,13 @@ it.each(['success','destroy-failure','resync-failure','resume-failure','cancel',
     if(result==='resync-failure'){
       await act(async()=>{refresh.reject(new Error('workspace refresh failed'));await closing;});expect(workspace.getState().busy).toBe(true);expect(root.querySelector('.app-shell')).toBe(editor);expect(mocks.audio.size).toBe(1);expect(screen.getByRole('alert')).toHaveTextContent('window destruction failed');expect(screen.getByRole('alert')).toHaveTextContent('workspace refresh failed');return;
     }
-    await act(async()=>{refresh.resolve(f.snapshot());await closing;});expect(workspace.getState().active).toEqual(f.snapshot().active);expect(root.querySelector('.app-shell')).toBe(editor);expect(workspace.getState().busy).toBe(false);expect(mocks.audio.size).toBe(1);expect(screen.getByRole('alert')).toHaveTextContent('window destruction failed');expect(fileButton('New')).toBeEnabled();await waitFor(()=>expect(mocks.audio.get(workspace.getState().active.activationId)!.prepare).toHaveBeenCalledOnce());
+    await act(async()=>{refresh.resolve(f.snapshot());await closing;});expect(workspace.getState().active).toEqual(f.snapshot().active);expect(root.querySelector('.app-shell')).toBe(editor);expect(workspace.getState().busy).toBe(false);expect(mocks.audio.size).toBe(1);expect(screen.getByRole('alert')).toHaveTextContent('window destruction failed');expect(fileButton('New')).toBeEnabled();await waitFor(()=>expect(mocks.audio.get(workspace.getState().active.activationId)!.prepare).toHaveBeenCalledTimes(2));
+    if(result==='destroy-failure'){
+      expect(players.size).toBe(1);expect(current(workspace).controller).toBe(retained.controller);expect(retained.controller.getState().snapshot).toBe(history.snapshot);expect(retained.controller.getState().score).toBe(history.score);expect(retained.controller.getState().settings).toBe(history.settings);expect(current(workspace).view).toEqual(view);expect(screen.getByRole('spinbutton',{name:'Fret'})).toHaveValue(19);
+      expect([...players][0].getState()).toMatchObject({ready:true,playing:false,error:null});
+      fireEvent.click(screen.getByRole('button',{name:'Play'}));await waitFor(()=>expect(screen.getByRole('button',{name:'Pause'})).toBeEnabled());fireEvent.click(screen.getByRole('button',{name:'Pause'}));await waitFor(()=>expect(screen.getByRole('button',{name:'Play'})).toBeEnabled());
+      expect(retained.controller.getState().snapshot).toBe(history.snapshot);expect(audio.subscribe).toHaveBeenCalledOnce();
+    }
     await act(async()=>{await current(workspace).controller.edit({...note,fret:9});});expect(current(workspace).controller.getState().snapshot.project.edits.at(-1)).toEqual({...note,fret:9});
   }finally{
     destruction.resolve();resuming.resolve();refresh.resolve(f.snapshot());await closing?.catch(()=>{});await act(async()=>{reactRoot?.unmount();});root.remove();vi.doUnmock('./session-bridge');vi.doUnmock('@tauri-apps/api/event');vi.doUnmock('@tauri-apps/api/window');vi.doUnmock('react-dom/client');vi.doUnmock('./WorkspaceController');vi.doUnmock('../bridge');vi.doUnmock('../App');vi.doUnmock('../ScoreView');vi.resetModules();

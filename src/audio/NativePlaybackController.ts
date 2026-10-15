@@ -5,7 +5,7 @@ import type { ChannelMix, EditCommand } from '../edit-types';
 import type { BeatTarget,ProjectView } from '../project';
 import type { MusicSelection } from '../editor/range-types';
 import type { NativeAudioBridge, NativeAudioStatus, TransportCommand } from './bridge';
-import { preparePlan } from './plan';
+import { preparePlan,preparePlanFromScore } from './plan';
 import type { MeasureOccurrence,PlanNote, PlaybackPlan, PlaybackState } from './types';
 import { DEFAULT_PRACTICE,type PracticeSettings,type PracticeStatus } from './practice-types';
 import { practiceForBacking,validatePractice } from './practice';
@@ -23,6 +23,7 @@ export class NativePlaybackController {
   private unlisten:()=>void=()=>{};private subscription:Promise<void>;private destroyed=false;private suppressHandler=false;private viewPlaying=false;
   private built:BuiltDocument|null=null;private plan:PlaybackPlan|null=null;private lastStatus:NativeAudioStatus|null=null;private operationError:string|null=null;private prepared=false;private preparing=false;private audioSettingsKey:string|null=null;private desiredAudioSettingsKey:string|null=null;private mixQueue:Promise<void>=Promise.resolve();private mixRequest=0;private embeddedSource:string|null=null;
   private documentEpoch:number|undefined;private practice:PracticeSettings=structuredClone(DEFAULT_PRACTICE);private pendingPractice:PracticeSettings|null=null;private hasBacking=false;
+  private playbackResumeEpoch=0;private floorReadyEpoch=0;private resumeRefresh:Promise<boolean>|null=null;private loadRequest=0;
   private notesByTrack=new Map<string,PlanNote[]>();private noteMode:'stopped'|'waiting'|'seeking'|'playing'|'paused'='stopped';private pendingNoteTick:number|undefined;
   private bridge:NativeAudioBridge;private options:Options;generation=++nextGeneration;
   constructor(options:Options) {
@@ -113,11 +114,30 @@ export class NativePlaybackController {
   setPan(index:number,value:number){this.editMix(index,{pan:Math.max(-1,Math.min(1,value))});}
   setMute(index:number,value:boolean){this.editMix(index,{mute:value});}setSolo(index:number,value:boolean){this.editMix(index,{solo:value});}
   resetMix(){for(const track of this.built?.score.tracks??[])this.editMix(track.index,defaultMix());}
-  beforeScoreChange(){this.generation=++nextGeneration;this.plan=null;this.notesByTrack.clear();this.noteMode='stopped';this.pendingNoteTick=undefined;this.prepared=false;this.preparing=false;this.audioSettingsKey=null;this.desiredAudioSettingsKey=null;this.mixQueue=Promise.resolve();this.lastStatus=null;this.pendingPractice=null;this.operationError=null;this.send({type:'invalidate',generation:this.generation});const practice=idlePractice(this.practice);this.update({ready:false,playing:false,practice,practicePending:false,range:null,loop:null,speed:practice.effectiveRatio*100,metronome:this.practice.metronome.enabled,error:null});}
+  beforeScoreChange(notifyNative=true){this.generation=++nextGeneration;this.plan=null;this.notesByTrack.clear();this.noteMode='stopped';this.pendingNoteTick=undefined;this.prepared=false;this.preparing=false;this.audioSettingsKey=null;this.desiredAudioSettingsKey=null;this.mixQueue=Promise.resolve();this.lastStatus=null;this.pendingPractice=null;this.operationError=null;if(notifyNative)this.send({type:'invalidate',generation:this.generation});const practice=idlePractice(this.practice);this.update({ready:false,playing:false,practice,practicePending:false,range:null,loop:null,speed:practice.effectiveRatio*100,metronome:this.practice.metronome.enabled,error:null});}
   setRenderedScore(score:model.Score,tracks:number[]):void{if(this.destroyed)return;const prior=this.suppressHandler;this.suppressHandler=true;try{this.view?.renderScore(score,tracks);this.view?.player?.updateSyncPoints([]);}finally{this.suppressHandler=prior;this.viewPlaying=false;}}
   replaceScore(score:model.Score,track=0){this.setRenderedScore(score,[track]);}
-  async loadDocument(project:ProjectView,built:BuiltDocument,_visibleTrack=0,documentEpoch=0){
+  async loadDocument(project:ProjectView,built:BuiltDocument,_visibleTrack=0,documentEpoch=0,playbackResumeEpoch=0){
     await this.subscription;if(this.destroyed)return;
+    if(playbackResumeEpoch<this.playbackResumeEpoch)return;
+    // Supersede loads waiting for the floor, without canceling an identical preparing plan.
+    const loadRequest=++this.loadRequest;
+    while(playbackResumeEpoch>this.playbackResumeEpoch || this.floorReadyEpoch!==playbackResumeEpoch){
+      if(playbackResumeEpoch>this.playbackResumeEpoch || !this.resumeRefresh){
+        this.playbackResumeEpoch=playbackResumeEpoch;
+        this.beforeScoreChange(false);this.update({time:0,endTime:0,measure:0});const generation=this.generation;
+        const refresh=this.bridge.status().then(status=>{
+          if(this.destroyed||generation!==this.generation||playbackResumeEpoch!==this.playbackResumeEpoch)return false;
+          if(status)nextGeneration=Math.max(nextGeneration,status.generation,status.desiredGeneration??0);
+          this.floorReadyEpoch=playbackResumeEpoch;return true;
+        }).catch(error=>{if(!this.destroyed&&generation===this.generation)this.fail(error);return false;}).finally(()=>{if(this.resumeRefresh===refresh)this.resumeRefresh=null;});
+        this.resumeRefresh=refresh;
+      }
+      const ready=await this.resumeRefresh;
+      if(this.destroyed||playbackResumeEpoch!==this.playbackResumeEpoch||loadRequest!==this.loadRequest)return;
+      if(!ready&&this.operationError)return;
+    }
+    if(this.destroyed||playbackResumeEpoch!==this.playbackResumeEpoch)return;
     const documentChanged=this.documentEpoch!==documentEpoch;this.documentEpoch=documentEpoch;if(documentChanged){this.practice=structuredClone(DEFAULT_PRACTICE);this.update({practiceNotice:null});}
     const audioSettings=effectiveAudioSettings(project,built);this.hasBacking=audioSettings.backing!==null;
     const audioSettingsKey=JSON.stringify([audioSettings.sounds,audioSettings.mixes,audioSettings.backing]);
@@ -138,7 +158,7 @@ export class NativePlaybackController {
     const practice=structuredClone(this.practice);
     this.beforeScoreChange();const generation=this.generation;this.built=built;this.preparing=true;this.desiredAudioSettingsKey=audioSettingsKey;
     try {
-      const plan=await (this.options.preparePlan??preparePlan)(project,generation);if(generation!==this.generation||this.destroyed)return;
+      const plan=await (this.options.preparePlan?this.options.preparePlan(project,generation):preparePlanFromScore(built.score,generation));if(generation!==this.generation||this.destroyed)return;
       const sourceKey=project.base.kind==='file'?project.base.sha256:'blank';
       this.plan=plan;for(const note of plan.notes){let track=this.notesByTrack.get(note.trackId);if(!track){track=[];this.notesByTrack.set(note.trackId,track);}track.push(note);}
       await this.bridge.prepare(plan,audioSettings,this.embeddedSource===sourceKey?null:built.embeddedBacking,sourceKey,practice);if(generation!==this.generation||this.destroyed)return;this.embeddedSource=sourceKey;this.prepared=true;this.audioSettingsKey=audioSettingsKey;this.operationError=null;

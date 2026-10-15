@@ -64,8 +64,8 @@ body { overflow:hidden; }
 .app-shell .paper-scroll { min-height:0; min-width:0; padding:16px; overscroll-behavior:contain; scrollbar-color:var(--ws-border) var(--ws-paper-surround); }
 .app-shell .paper { padding:16px; background:var(--ws-paper); box-shadow:none; }
 .app-shell .score-hint { padding:4px 8px; font-size:11px; background:var(--ws-panel); color:var(--ws-muted); }
-.workstation-inspector { grid-area:inspector; min-width:0; min-height:0; overflow:auto; border-left:1px solid var(--ws-border); background:var(--ws-panel); }
-.workstation-inspector>.inspector { border:0; min-height:100%; }
+.workstation-inspector { grid-area:inspector; min-width:0; min-height:0; overflow:auto; scroll-padding-top:126px; border-left:1px solid var(--ws-border); background:var(--ws-panel); }
+.workstation-inspector>.inspector { width:100%; min-height:100%; padding:8px; overflow:visible; border:0; }
 .workstation-dock { grid-area:dock; min-width:0; min-height:0; display:flex; flex-direction:column; background:var(--ws-panel); border-top:1px solid var(--ws-border); }
 .workstation-dock .dock-collapse { margin-left:auto; }
 .workstation-dock-content,.workstation-dock-tracks { flex:1; min-width:0; min-height:0; height:100%; overflow:hidden; }
@@ -79,7 +79,7 @@ body { overflow:hidden; }
 .transport-primary .practice-tempo { margin-left:auto; color:var(--ws-muted); font-variant-numeric:tabular-nums; }
 .transport .transport-more { margin-left:4px; }
 .transport-more>summary { margin:0; min-height:28px; padding:5px 6px; color:var(--ws-text); }
-.transport-more-content { position:absolute; top:40px; left:8px; right:8px; max-height:calc(100dvh - 160px); overflow:auto; z-index:12; padding:12px; background:var(--ws-panel); border:1px solid var(--ws-border); border-radius:4px; }
+.transport-more-content { position:absolute; top:100%; left:8px; right:8px; max-height:calc(100dvh - 160px); overflow:auto; z-index:12; padding:12px; background:var(--ws-panel); border:1px solid var(--ws-border); border-radius:4px; }
 .transport-more-content>fieldset { flex-wrap:wrap; gap:8px; }
 .transport .transport-feedback { margin:4px 0 0; color:var(--ws-muted); }
 .transport .transport-feedback[role=alert] { color:var(--ws-error); }
@@ -92,7 +92,7 @@ body { overflow:hidden; }
   .workstation-workspace { grid-template-columns:48px minmax(0,1fr) 280px !important; grid-template-areas:'rail score detail' 'rail dock detail'; }
   .workstation-workspace[data-left=false][data-inspector=false] { grid-template-columns:48px minmax(0,1fr) 0 !important; }
   .workstation-rail { grid-area:rail; display:flex; flex-direction:column; gap:4px; padding:4px 2px; background:var(--ws-panel); border-right:1px solid var(--ws-border); }
-  .workstation-rail>button { padding:4px 1px; min-height:40px; font-size:10px; overflow-wrap:anywhere; }
+  .workstation-rail>button { padding:4px 0; min-height:40px; font-size:10px; white-space:nowrap; overflow-wrap:normal; letter-spacing:-.02em; }
   .workstation-left,.workstation-inspector { grid-area:detail; border-left:1px solid var(--ws-border); border-right:0; }
   .workstation-left>nav { display:none; }
   .app-shell .paper-scroll { padding:10px; }

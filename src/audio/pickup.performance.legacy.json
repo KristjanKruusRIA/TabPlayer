@@ -1,0 +1,720 @@
+{
+  "provenance": {
+    "commit": "a80e0b8",
+    "src/audio/plan.ts": "d79720a178a9cf1da718268baf903ad1b6004074f3d94b04d3126617a900994d",
+    "src/model-clone.ts": "08439c0fcd12eccea93618046efb56d3c1b083c56eade264374408f58c68b292"
+  },
+  "plan": {
+    "generation": 17,
+    "ppq": 960,
+    "durationTick": 5760,
+    "durationMs": 3000,
+    "tracks": [
+      {
+        "id": "base/0",
+        "program": 25,
+        "percussion": false
+      },
+      {
+        "id": "base/1",
+        "program": 25,
+        "percussion": false
+      }
+    ],
+    "tempos": [
+      {
+        "tick": 0,
+        "bpm": 120
+      }
+    ],
+    "occurrences": [
+      {
+        "bar": 0,
+        "occurrence": 0,
+        "meterNumerator": 4,
+        "meterDenominator": 4,
+        "startTick": 0,
+        "endTick": 1920,
+        "startMs": 0,
+        "endMs": 1000,
+        "clickTicks": [
+          0,
+          960
+        ]
+      },
+      {
+        "bar": 1,
+        "occurrence": 0,
+        "meterNumerator": 4,
+        "meterDenominator": 4,
+        "startTick": 1920,
+        "endTick": 5760,
+        "startMs": 1000,
+        "endMs": 3000,
+        "clickTicks": [
+          1920,
+          2880,
+          3840,
+          4800
+        ]
+      }
+    ],
+    "performedBeats": [
+      {
+        "target": {
+          "track": 0,
+          "staff": 0,
+          "bar": 0,
+          "voice": 0,
+          "beat": 0
+        },
+        "occurrence": 0,
+        "startTick": 0,
+        "endTick": 960,
+        "leadInTick": 0
+      },
+      {
+        "target": {
+          "track": 1,
+          "staff": 0,
+          "bar": 0,
+          "voice": 0,
+          "beat": 0
+        },
+        "occurrence": 0,
+        "startTick": 0,
+        "endTick": 1920,
+        "leadInTick": 0
+      },
+      {
+        "target": {
+          "track": 0,
+          "staff": 0,
+          "bar": 1,
+          "voice": 0,
+          "beat": 0
+        },
+        "occurrence": 0,
+        "startTick": 1920,
+        "endTick": 2880,
+        "leadInTick": 1920
+      },
+      {
+        "target": {
+          "track": 1,
+          "staff": 0,
+          "bar": 1,
+          "voice": 0,
+          "beat": 0
+        },
+        "occurrence": 0,
+        "startTick": 1920,
+        "endTick": 2880,
+        "leadInTick": 1920
+      },
+      {
+        "target": {
+          "track": 0,
+          "staff": 0,
+          "bar": 1,
+          "voice": 0,
+          "beat": 1
+        },
+        "occurrence": 0,
+        "startTick": 2880,
+        "endTick": 3840,
+        "leadInTick": 2880
+      },
+      {
+        "target": {
+          "track": 1,
+          "staff": 0,
+          "bar": 1,
+          "voice": 0,
+          "beat": 1
+        },
+        "occurrence": 0,
+        "startTick": 2880,
+        "endTick": 3840,
+        "leadInTick": 2880
+      },
+      {
+        "target": {
+          "track": 0,
+          "staff": 0,
+          "bar": 1,
+          "voice": 0,
+          "beat": 2
+        },
+        "occurrence": 0,
+        "startTick": 3840,
+        "endTick": 4800,
+        "leadInTick": 3840
+      },
+      {
+        "target": {
+          "track": 1,
+          "staff": 0,
+          "bar": 1,
+          "voice": 0,
+          "beat": 2
+        },
+        "occurrence": 0,
+        "startTick": 3840,
+        "endTick": 4800,
+        "leadInTick": 3840
+      },
+      {
+        "target": {
+          "track": 0,
+          "staff": 0,
+          "bar": 1,
+          "voice": 0,
+          "beat": 3
+        },
+        "occurrence": 0,
+        "startTick": 4800,
+        "endTick": 5760,
+        "leadInTick": 4800
+      },
+      {
+        "target": {
+          "track": 1,
+          "staff": 0,
+          "bar": 1,
+          "voice": 0,
+          "beat": 3
+        },
+        "occurrence": 0,
+        "startTick": 4800,
+        "endTick": 5760,
+        "leadInTick": 4800
+      }
+    ],
+    "notes": [
+      {
+        "id": "base/0/0/0/0/0/0/0/0/0",
+        "trackId": "base/0",
+        "source": {
+          "target": {
+            "track": 0,
+            "staff": 0,
+            "bar": 0,
+            "voice": 0,
+            "beat": 0
+          },
+          "string": 1
+        },
+        "occurrence": 0,
+        "startTick": 0,
+        "endTick": 2880,
+        "key": 43,
+        "velocity": 95,
+        "channel": 1,
+        "program": 25,
+        "articulation": "picked",
+        "legatoFrom": null,
+        "pitch": [
+          {
+            "tick": 0,
+            "semitones": 0
+          },
+          {
+            "tick": 240,
+            "semitones": 0.166015625
+          },
+          {
+            "tick": 480,
+            "semitones": 0.333984375
+          },
+          {
+            "tick": 720,
+            "semitones": 0.5
+          },
+          {
+            "tick": 960,
+            "semitones": 0.666015625
+          },
+          {
+            "tick": 1200,
+            "semitones": 0.833984375
+          },
+          {
+            "tick": 1440,
+            "semitones": 1
+          },
+          {
+            "tick": 1680,
+            "semitones": 1.166015625
+          },
+          {
+            "tick": 1920,
+            "semitones": 1.333984375
+          },
+          {
+            "tick": 2160,
+            "semitones": 1.5
+          },
+          {
+            "tick": 2400,
+            "semitones": 1.666015625
+          },
+          {
+            "tick": 2640,
+            "semitones": 1.833984375
+          },
+          {
+            "tick": 2880,
+            "semitones": 2
+          }
+        ]
+      }
+    ],
+    "midi": [
+      {
+        "type": "controller",
+        "tick": 0,
+        "channel": 0,
+        "controller": 7,
+        "value": 120,
+        "trackId": "base/0"
+      },
+      {
+        "type": "controller",
+        "tick": 0,
+        "channel": 0,
+        "controller": 10,
+        "value": 64,
+        "trackId": "base/0"
+      },
+      {
+        "type": "controller",
+        "tick": 0,
+        "channel": 0,
+        "controller": 11,
+        "value": 127,
+        "trackId": "base/0"
+      },
+      {
+        "type": "controller",
+        "tick": 0,
+        "channel": 0,
+        "controller": 100,
+        "value": 0,
+        "trackId": "base/0"
+      },
+      {
+        "type": "controller",
+        "tick": 0,
+        "channel": 0,
+        "controller": 101,
+        "value": 0,
+        "trackId": "base/0"
+      },
+      {
+        "type": "controller",
+        "tick": 0,
+        "channel": 0,
+        "controller": 38,
+        "value": 0,
+        "trackId": "base/0"
+      },
+      {
+        "type": "controller",
+        "tick": 0,
+        "channel": 0,
+        "controller": 6,
+        "value": 16,
+        "trackId": "base/0"
+      },
+      {
+        "type": "controller",
+        "tick": 0,
+        "channel": 0,
+        "controller": 0,
+        "value": 0,
+        "trackId": "base/0"
+      },
+      {
+        "type": "controller",
+        "tick": 0,
+        "channel": 0,
+        "controller": 32,
+        "value": 0,
+        "trackId": "base/0"
+      },
+      {
+        "type": "program",
+        "tick": 0,
+        "channel": 0,
+        "program": 25,
+        "trackId": "base/0"
+      },
+      {
+        "type": "controller",
+        "tick": 0,
+        "channel": 1,
+        "controller": 7,
+        "value": 120,
+        "trackId": "base/0"
+      },
+      {
+        "type": "controller",
+        "tick": 0,
+        "channel": 1,
+        "controller": 10,
+        "value": 64,
+        "trackId": "base/0"
+      },
+      {
+        "type": "controller",
+        "tick": 0,
+        "channel": 1,
+        "controller": 11,
+        "value": 127,
+        "trackId": "base/0"
+      },
+      {
+        "type": "controller",
+        "tick": 0,
+        "channel": 1,
+        "controller": 100,
+        "value": 0,
+        "trackId": "base/0"
+      },
+      {
+        "type": "controller",
+        "tick": 0,
+        "channel": 1,
+        "controller": 101,
+        "value": 0,
+        "trackId": "base/0"
+      },
+      {
+        "type": "controller",
+        "tick": 0,
+        "channel": 1,
+        "controller": 38,
+        "value": 0,
+        "trackId": "base/0"
+      },
+      {
+        "type": "controller",
+        "tick": 0,
+        "channel": 1,
+        "controller": 6,
+        "value": 16,
+        "trackId": "base/0"
+      },
+      {
+        "type": "controller",
+        "tick": 0,
+        "channel": 1,
+        "controller": 0,
+        "value": 0,
+        "trackId": "base/0"
+      },
+      {
+        "type": "controller",
+        "tick": 0,
+        "channel": 1,
+        "controller": 32,
+        "value": 0,
+        "trackId": "base/0"
+      },
+      {
+        "type": "program",
+        "tick": 0,
+        "channel": 1,
+        "program": 25,
+        "trackId": "base/0"
+      },
+      {
+        "type": "controller",
+        "tick": 0,
+        "channel": 2,
+        "controller": 7,
+        "value": 120,
+        "trackId": "base/1"
+      },
+      {
+        "type": "controller",
+        "tick": 0,
+        "channel": 2,
+        "controller": 10,
+        "value": 64,
+        "trackId": "base/1"
+      },
+      {
+        "type": "controller",
+        "tick": 0,
+        "channel": 2,
+        "controller": 11,
+        "value": 127,
+        "trackId": "base/1"
+      },
+      {
+        "type": "controller",
+        "tick": 0,
+        "channel": 2,
+        "controller": 100,
+        "value": 0,
+        "trackId": "base/1"
+      },
+      {
+        "type": "controller",
+        "tick": 0,
+        "channel": 2,
+        "controller": 101,
+        "value": 0,
+        "trackId": "base/1"
+      },
+      {
+        "type": "controller",
+        "tick": 0,
+        "channel": 2,
+        "controller": 38,
+        "value": 0,
+        "trackId": "base/1"
+      },
+      {
+        "type": "controller",
+        "tick": 0,
+        "channel": 2,
+        "controller": 6,
+        "value": 16,
+        "trackId": "base/1"
+      },
+      {
+        "type": "controller",
+        "tick": 0,
+        "channel": 2,
+        "controller": 0,
+        "value": 0,
+        "trackId": "base/1"
+      },
+      {
+        "type": "controller",
+        "tick": 0,
+        "channel": 2,
+        "controller": 32,
+        "value": 0,
+        "trackId": "base/1"
+      },
+      {
+        "type": "program",
+        "tick": 0,
+        "channel": 2,
+        "program": 25,
+        "trackId": "base/1"
+      },
+      {
+        "type": "controller",
+        "tick": 0,
+        "channel": 3,
+        "controller": 7,
+        "value": 120,
+        "trackId": "base/1"
+      },
+      {
+        "type": "controller",
+        "tick": 0,
+        "channel": 3,
+        "controller": 10,
+        "value": 64,
+        "trackId": "base/1"
+      },
+      {
+        "type": "controller",
+        "tick": 0,
+        "channel": 3,
+        "controller": 11,
+        "value": 127,
+        "trackId": "base/1"
+      },
+      {
+        "type": "controller",
+        "tick": 0,
+        "channel": 3,
+        "controller": 100,
+        "value": 0,
+        "trackId": "base/1"
+      },
+      {
+        "type": "controller",
+        "tick": 0,
+        "channel": 3,
+        "controller": 101,
+        "value": 0,
+        "trackId": "base/1"
+      },
+      {
+        "type": "controller",
+        "tick": 0,
+        "channel": 3,
+        "controller": 38,
+        "value": 0,
+        "trackId": "base/1"
+      },
+      {
+        "type": "controller",
+        "tick": 0,
+        "channel": 3,
+        "controller": 6,
+        "value": 16,
+        "trackId": "base/1"
+      },
+      {
+        "type": "controller",
+        "tick": 0,
+        "channel": 3,
+        "controller": 0,
+        "value": 0,
+        "trackId": "base/1"
+      },
+      {
+        "type": "controller",
+        "tick": 0,
+        "channel": 3,
+        "controller": 32,
+        "value": 0,
+        "trackId": "base/1"
+      },
+      {
+        "type": "program",
+        "tick": 0,
+        "channel": 3,
+        "program": 25,
+        "trackId": "base/1"
+      },
+      {
+        "type": "noteBend",
+        "tick": 0,
+        "channel": 1,
+        "key": 43,
+        "value": 0,
+        "trackId": "base/0"
+      },
+      {
+        "type": "noteBend",
+        "tick": 0,
+        "channel": 1,
+        "key": 43,
+        "value": 0,
+        "trackId": "base/0"
+      },
+      {
+        "trackId": "base/0",
+        "channel": 1,
+        "key": 43,
+        "velocity": 95,
+        "type": "noteOn",
+        "tick": 0
+      },
+      {
+        "type": "noteBend",
+        "tick": 240,
+        "channel": 1,
+        "key": 43,
+        "value": 0.166015625,
+        "trackId": "base/0"
+      },
+      {
+        "type": "noteBend",
+        "tick": 480,
+        "channel": 1,
+        "key": 43,
+        "value": 0.333984375,
+        "trackId": "base/0"
+      },
+      {
+        "type": "noteBend",
+        "tick": 720,
+        "channel": 1,
+        "key": 43,
+        "value": 0.5,
+        "trackId": "base/0"
+      },
+      {
+        "type": "noteBend",
+        "tick": 960,
+        "channel": 1,
+        "key": 43,
+        "value": 0.666015625,
+        "trackId": "base/0"
+      },
+      {
+        "type": "noteBend",
+        "tick": 1200,
+        "channel": 1,
+        "key": 43,
+        "value": 0.833984375,
+        "trackId": "base/0"
+      },
+      {
+        "type": "noteBend",
+        "tick": 1440,
+        "channel": 1,
+        "key": 43,
+        "value": 1,
+        "trackId": "base/0"
+      },
+      {
+        "type": "noteBend",
+        "tick": 1680,
+        "channel": 1,
+        "key": 43,
+        "value": 1.166015625,
+        "trackId": "base/0"
+      },
+      {
+        "type": "noteBend",
+        "tick": 1920,
+        "channel": 1,
+        "key": 43,
+        "value": 1.333984375,
+        "trackId": "base/0"
+      },
+      {
+        "type": "noteBend",
+        "tick": 2160,
+        "channel": 1,
+        "key": 43,
+        "value": 1.5,
+        "trackId": "base/0"
+      },
+      {
+        "type": "noteBend",
+        "tick": 2400,
+        "channel": 1,
+        "key": 43,
+        "value": 1.666015625,
+        "trackId": "base/0"
+      },
+      {
+        "type": "noteBend",
+        "tick": 2640,
+        "channel": 1,
+        "key": 43,
+        "value": 1.833984375,
+        "trackId": "base/0"
+      },
+      {
+        "type": "noteBend",
+        "tick": 2880,
+        "channel": 1,
+        "key": 43,
+        "value": 2,
+        "trackId": "base/0"
+      },
+      {
+        "trackId": "base/0",
+        "channel": 1,
+        "key": 43,
+        "velocity": 95,
+        "type": "noteOff",
+        "tick": 2880
+      }
+    ]
+  }
+}

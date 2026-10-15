@@ -9,7 +9,7 @@ import { initialDocumentView,repairDocumentView } from './view-state';
 
 export interface WorkspaceState {
   documents:readonly {id:DocumentId;controller:DocumentController;view:DocumentViewState}[];
-  active:AudioOwner;busy:boolean;error:string|null;recoveryError:string|null;
+  active:AudioOwner;busy:boolean;error:string|null;recoveryError:string|null;playbackResumeEpoch:number;
 }
 export class WorkspaceController {
   readonly clipboard=new ClipboardStore();
@@ -18,6 +18,7 @@ export class WorkspaceController {
   private subscriptions=new Map<DocumentId,()=>void>();
   private transitioning=false;
   private windowClosing=false;
+  private resumeAcknowledged=false;
   private editorOperation:DocumentId|null=null;
   private session:NativeSessionBridge|null=null;
   private pendingViews=new Map<DocumentId,DocumentViewState>();
@@ -51,7 +52,7 @@ export class WorkspaceController {
       }));
     }
     for(const [id,unsubscribe] of this.subscriptions)if(!documents.some(entry=>entry.id===id)){unsubscribe();this.subscriptions.delete(id);this.pendingViews.delete(id);}
-    this.update({documents,active:snapshot.active,busy:this.transitioning||this.editorOperation!==null,error:null,recoveryError:this.state?.recoveryError ?? null});
+    this.update({documents,active:snapshot.active,busy:this.transitioning||this.editorOperation!==null,error:null,recoveryError:this.state?.recoveryError ?? null,playbackResumeEpoch:this.state?.playbackResumeEpoch ?? 0});
   }
   private conflict() {
     if(this.editorOperation!==null)return 'Finish or cancel the current editor operation before changing documents.';
@@ -98,17 +99,18 @@ export class WorkspaceController {
       const state=entry.controller.getState();decisions.push({documentId:id,revision:state.revision,discard:state.snapshot.dirty});
     }
     await this.flushViews();
-    if(windowClose){await this.session!.shutdown(decisions);this.windowClosing=true;}
+    if(windowClose){await this.session!.shutdown(decisions);this.windowClosing=true;this.resumeAcknowledged=false;}
     else await this.synchronize(await this.bridge.closeDocuments(decisions));return true;
   }
   close(documentId:DocumentId):Promise<boolean> {return this.transition(()=>this.closeNow([documentId]),true);}
   closeAll():Promise<boolean> {return this.transition(()=>this.closeNow(this.state.documents.map(entry=>entry.id)),true);}
   async requestWindowClose():Promise<boolean> {try{return await this.transition(()=>this.closeNow(this.state.documents.map(entry=>entry.id),true),true);}catch{return false;}}
   async resumeAfterWindowCloseFailure(error:unknown):Promise<void> {
+    if(!this.windowClosing)return;
     const message=error instanceof Error?error.message:String(error);
-    try {await this.session!.resume();await this.synchronize(await this.bridge.snapshot());}
+    try {if(!this.resumeAcknowledged){await this.session!.resume();this.resumeAcknowledged=true;}await this.synchronize(await this.bridge.snapshot());}
     catch(refreshError){this.update({error:`${message}. Could not refresh workspace: ${refreshError instanceof Error?refreshError.message:String(refreshError)}`});return;}
-    this.windowClosing=false;this.transitioning=false;this.update({busy:false,error:message});
+    this.windowClosing=false;this.resumeAcknowledged=false;this.transitioning=false;this.update({busy:false,error:message,playbackResumeEpoch:this.state.playbackResumeEpoch+1});
   }
   setView(documentId:DocumentId,view:DocumentViewState) {
     const entry=this.state.documents.find(entry=>entry.id===documentId);if(!entry)throw new Error('Select an open document.');

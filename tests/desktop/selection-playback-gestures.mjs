@@ -19,11 +19,12 @@ const transport=value=>({generation:value.generation,tick:value.tick,playing:val
 async function button(name){await clickWorkstationButton(page,name,{waitForIdle:false});await idle();await published();}
 async function waitStatus(predicate){const deadline=Date.now()+15000;let value;do{value=await status();if(predicate(value))return value;await page.waitForTimeout(20);}while(Date.now()<deadline);throw new Error(`Native gesture status timed out: ${JSON.stringify(value)}`);}
 async function disclosure(label){if(label==='Selected playback')await revealPlaybackControls(page);const summary=page.locator('summary').filter({hasText:new RegExp(`^${label}$`)}).first();if(!await summary.evaluate(node=>node.parentElement.open))await summary.click();await published();}
-async function center(locator){await locator.scrollIntoViewIfNeeded();await published();const box=await locator.boundingBox();assert.ok(box&&box.width>0&&box.height>0,'Actual rendered gesture target must have geometry');return {x:box.x+box.width/2,y:box.y+box.height/2};}
+async function dismissPlayback(){const summary=page.locator('.transport-more>summary');if(await summary.evaluate(node=>node.parentElement.open)){await summary.press('Escape');await published();}}
+async function center(locator){await dismissPlayback();await locator.scrollIntoViewIfNeeded();await published();const box=await locator.boundingBox();assert.ok(box&&box.width>0&&box.height>0,'Actual rendered gesture target must have geometry');return {x:box.x+box.width/2,y:box.y+box.height/2};}
 async function location(beat){await page.getByLabel('Editing location',{exact:true}).filter({hasText:`Selection guitar · Measure 1 · Beat ${beat}`}).waitFor();await published();}
 async function count(notes,beats){await page.locator('.inspector').getByText(`${notes} ${notes===1?'note':'notes'} · ${beats} ${beats===1?'beat':'beats'}`,{exact:true}).waitFor();await published();}
 const frets=value=>page.locator('[aria-label="Music notation"] svg text').filter({hasText:new RegExp(`^${value}$`)});
-const occurrence=async number=>{await revealPlaybackControls(page);return page.getByRole('combobox',{name:'Selection occurrence',exact:true}).selectOption({label:`Measure 1, occurrence ${number} → measure 1, occurrence ${number}`});};
+const occurrence=async number=>{await disclosure('Selected playback');return page.getByRole('combobox',{name:'Selection occurrence',exact:true}).selectOption({label:`Measure 1, occurrence ${number} → measure 1, occurrence ${number}`});};
 async function unchanged(before,native){assert.deepEqual(await snapshot(),before,'Gesture/transport must preserve complete project history and redo');if(native)assert.deepEqual(transport(await status()),transport(native),'Selecting alone must preserve native clock, range, loop, generation and run intent');}
 async function stopPlayback(){await button('Stop');await waitStatus(value=>value.tick===0&&!value.playing&&value.range===null);}
 async function playPassage(start,end){
@@ -35,7 +36,7 @@ async function playPassage(start,end){
 try{
   id=launch({TABPLAYER_TEST_OPEN:fixture.fixtures.main.path});browser=await connect();page=browser.contexts()[0].pages()[0];page.on('pageerror',error=>errors.push(error.message));
   await page.setViewportSize({width:1280,height:1100});await waitForWorkspaceIdle(page);await button('Open');await waitStatus(value=>value.ready&&!value.error);
-  await page.locator('[aria-label="Music notation"] svg').first().waitFor();await disclosure('Selected playback');
+  await page.locator('[aria-label="Music notation"] svg').first().waitFor();
   await page.getByRole('combobox',{name:'Displayed tracks',exact:true}).selectOption('all');await page.getByLabel('Zoom (%)',{exact:true}).fill('115');await published();
   // Make a real redo entry, then restore source music before acceptance.
   const beforeEdit=await status();await button('Edit');await disclosure('Beat text');await page.getByLabel('Beat text',{exact:true}).fill('Original gesture redo sentinel');await button('Apply beat text');
@@ -54,6 +55,7 @@ try{
   await occurrence(1);await published();await button('Loop selection');const loop=await waitStatus(value=>value.loop?.startTick===960&&value.loop?.endTick===3840);assert.equal(loop.playing,false);assert.equal(loop.range,null);assert.equal(loop.tick,960);await unchanged(baseline);await button('Clear loop');await waitStatus(value=>value.loop===null);checks.sparseBoundingLoopNoAutoplay=true;
 
   // Establish beat3's actual caret geometry in case its tied fret is omitted.
+  await dismissPlayback();
   await page.getByLabel('Beat',{exact:true}).fill('3');await page.getByRole('combobox',{name:'String',exact:true}).selectOption('6');await location(3);
   await page.getByRole('img',{name:'Edit target',exact:true}).scrollIntoViewIfNeeded();await published();
   // Keep both endpoints in the current score viewport, then measure anew.

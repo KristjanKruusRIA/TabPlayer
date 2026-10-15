@@ -53,10 +53,10 @@ export interface AppProps {
   workspaceBusy:boolean;workspaceError:string|null;beginEditorOperation:()=>()=>void;
   onNew:()=>Promise<boolean>;onOpen:()=>Promise<boolean>;onClose:()=>Promise<boolean>;onCloseAll:()=>Promise<boolean>;
   documentTabs:ReactNode;
-  sessionMenu?:ReactNode;recoveryStatus?:ReactNode;
+  sessionMenu?:ReactNode;recoveryStatus?:ReactNode;playbackResumeEpoch?:number;
 }
 
-export function App({controller,audioBridge,exportBridge,documentBridge,documentView,onViewChange,clipboard,workspaceBusy,workspaceError,beginEditorOperation,onNew,onOpen,onClose,onCloseAll,documentTabs,sessionMenu,recoveryStatus}:AppProps) {
+export function App({controller,audioBridge,exportBridge,documentBridge,documentView,onViewChange,clipboard,workspaceBusy,workspaceError,beginEditorOperation,onNew,onOpen,onClose,onCloseAll,documentTabs,sessionMenu,recoveryStatus,playbackResumeEpoch=0}:AppProps) {
   const state=useSyncExternalStore(controller.subscribe,controller.getState);
   const controlsBusy=state.busy||workspaceBusy;
   const [player,setPlayer]=useState<NativePlaybackController|null>(null);
@@ -117,7 +117,7 @@ export function App({controller,audioBridge,exportBridge,documentBridge,document
     try{return {page:effectivePageLayout(state.settings),error:null};}
     catch(error){return {page:effectivePageLayout({page:null,print:defaultPrintLayout()}),error:`Saved print layout cannot be exported: ${error instanceof Error?error.message:String(error)} Apply a valid page layout.`};}
   },[state.settings.page,state.settings.print]),page=pageState.page;
-  useEffect(()=>{if(player)void player.loadDocument(state.snapshot.project,state,target.track,state.documentEpoch);},[player,state.snapshot.project,state.score,state.settings,state.embeddedBacking,target.track,state.documentEpoch]);
+  useEffect(()=>{if(player)void player.loadDocument(state.snapshot.project,state,target.track,state.documentEpoch,playbackResumeEpoch);},[player,state.snapshot.project,state.score,state.settings,state.embeddedBacking,target.track,state.documentEpoch,playbackResumeEpoch]);
   const location=describeSelection(state.score,target);
   const indexed=location.staff.isPercussion||!location.staff.tuning.length;
   const noteIndex=selectedNoteIndex!==null&&location.beat?.notes[selectedNoteIndex]?selectedNoteIndex:null;

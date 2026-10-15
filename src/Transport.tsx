@@ -1,4 +1,4 @@
-import { useEffect, useState, useSyncExternalStore } from 'react';
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import type { NativePlaybackController } from './audio/NativePlaybackController';
 import { IndexInput } from './editor/IndexInput';
 import type { BeatTarget } from './project';
@@ -10,14 +10,21 @@ const clock=(ms:number)=>`${Math.floor(ms/60000)}:${Math.floor(ms/1000)%60<10?'0
 const display=(value:number)=>Number(value.toFixed(2));
 export function Transport({player,measures,busy,cursor,selection}: {player:Pick<NativePlaybackController,'subscribe'|'getState'|'play'|'pause'|'stop'|'setSpeed'|'setLoop'|'clearLoop'|'seekToMeasure'|'setPractice'|'generation'|'cursorPlaybackChoices'|'selectionPlaybackChoices'|'playbackOccurrences'|'playFromCursor'|'playSelection'|'loopSelection'>;measures:number;busy:boolean;cursor:BeatTarget;selection:MusicSelection|null}) {
   const state=useSyncExternalStore(player.subscribe,player.getState);
+  const occurrences=player.playbackOccurrences(),selectionAvailable=occurrences.length>0;
   const [seek,setSeek]=useState(1);const [start,setStart]=useState(1);const [end,setEnd]=useState(1);
   const [error,setError]=useState<string|null>(null);
   const [cursorChoice,setCursorChoice]=useState<CursorPlaybackChoice|null>(null),[passageChoice,setPassageChoice]=useState<PassagePlaybackChoice|null>(null),[nextStart,setNextStart]=useState<'cursor'|'position'>('cursor');
   const loop=state.loop!==null,practice=state.practice,fixed=practice.settings.tempo.kind==='fixed';
   const speeds=[...new Set([10,25,50,75,100,125,150,200,250,300,state.speed])].sort((a,b)=>a-b);
   const counting=practice.countInRemaining>0&&(practice.phase==='countIn'||practice.phase==='paused');
-  let cursorChoices:CursorPlaybackChoice[]=[],passageChoices:PassagePlaybackChoice[]=[],cursorError:string|null=null,passageError:string|null=null;
-  if(state.ready){try{cursorChoices=player.cursorPlaybackChoices(cursor);}catch(e){cursorError=e instanceof Error?e.message:String(e);}if(selection)try{passageChoices=player.selectionPlaybackChoices(selection);}catch(e){passageError=e instanceof Error?e.message:String(e);}}
+  const {choices:cursorChoices,error:cursorError}=useMemo(()=>{
+    if(!state.ready)return {choices:[],error:null};
+    try{return {choices:player.cursorPlaybackChoices(cursor),error:null};}catch(e){return {choices:[],error:e instanceof Error?e.message:String(e)};}
+  },[player,player.generation,state.ready,selectionAvailable,cursor.track,cursor.staff,cursor.bar,cursor.voice,cursor.beat]);
+  const {choices:passageChoices,error:passageError}=useMemo(()=>{
+    if(!state.ready||!selection)return {choices:[],error:null};
+    try{return {choices:player.selectionPlaybackChoices(selection),error:null};}catch(e){return {choices:[],error:e instanceof Error?e.message:String(e)};}
+  },[player,player.generation,state.ready,selectionAvailable,selection]);
   let currentCursor:CursorPlaybackChoice|null=null,currentPassage:PassagePlaybackChoice|null=null;
   try{if(cursorChoice)currentCursor=requireCursorChoice(cursorChoices,cursorChoice);}catch{/* A changed cursor or plan retires its controlled choice. */}
   try{if(passageChoice)currentPassage=requirePassageChoice(passageChoices,passageChoice);}catch{/* Native playback is unchanged while a new passage is chosen. */}
@@ -39,7 +46,7 @@ export function Transport({player,measures,busy,cursor,selection}: {player:Pick<
       <button disabled={startDisabled} aria-pressed={loop} onClick={()=>act(()=>loop?player.clearLoop():player.setLoop(start-1,end-1))}>{loop?'Clear loop':'Loop'}</button>
       <span role="status" aria-label="Practice passes" aria-live="off">Completed passes {practice.completedPasses}</span>
     {practice.pulse&&<span role="status" aria-label="Metronome pulse" aria-live="off" data-pulse-serial={practice.pulse.serial}>{practice.pulse.counting?'Count-in beat':'Beat'} {practice.pulse.beat+1} of {practice.pulse.beatsPerBar}{practice.pulse.accent?' · Accent':''}</span>}
-    </fieldset><SelectionPlaybackControls cursorChoices={cursorChoices} passageChoices={passageChoices} occurrences={player.playbackOccurrences()} cursorChoice={currentCursor} passageChoice={currentPassage} disabled={!state.ready||startDisabled} onCursorChoice={setCursorChoice} onPassageChoice={setPassageChoice} onPlayCursor={()=>{setNextStart('cursor');if(currentCursor)act(()=>player.playFromCursor(cursor,currentCursor));}} onPlaySelection={()=>{setNextStart('cursor');if(selection&&currentPassage)act(()=>player.playSelection(selection,currentPassage));}} onLoopSelection={()=>{if(selection&&currentPassage)act(()=>player.loopSelection(selection,currentPassage));}}/>
+    </fieldset><SelectionPlaybackControls cursorChoices={cursorChoices} passageChoices={passageChoices} occurrences={occurrences} cursorChoice={currentCursor} passageChoice={currentPassage} disabled={!state.ready||startDisabled} onCursorChoice={setCursorChoice} onPassageChoice={setPassageChoice} onPlayCursor={()=>{setNextStart('cursor');if(currentCursor)act(()=>player.playFromCursor(cursor,currentCursor));}} onPlaySelection={()=>{setNextStart('cursor');if(selection&&currentPassage)act(()=>player.playSelection(selection,currentPassage));}} onLoopSelection={()=>{if(selection&&currentPassage)act(()=>player.loopSelection(selection,currentPassage));}}/>
     {(cursorError||passageError)&&<p role="status">{cursorError||passageError}</p>}{state.range&&<p role="status" aria-label="Selected playback range" data-start-tick={state.range.startTick} data-end-tick={state.range.endTick}>Selected passage · {practice.phase==='ended'?'finished':practice.phase==='countIn'?'counting in':state.playing?'playing':'paused'}</p>}{counting&&<p role="status" aria-label="Count-in">{practice.phase==='paused'?'Count-in paused':'Count-in'} · {practice.countInRemaining} pulses remaining</p>}
     </div></details></fieldset>
     {state.practicePending&&<span className="transport-feedback">Applying practice settings…</span>}{state.practiceNotice&&<p className="transport-feedback">{state.practiceNotice}</p>}{(error||state.error) && <p className="transport-feedback" role="alert">{error||state.error}</p>}{!state.ready && !state.error && <span className="transport-feedback">Loading local audio…</span>}</div>;

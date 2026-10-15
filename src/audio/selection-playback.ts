@@ -34,14 +34,16 @@ function preparedRows(score:model.Score,plan:PlaybackPlan):PerformedBeat[] {
   for(const row of plan.performedBeats!)beatAt(score,row.target);
   return plan.performedBeats!;
 }
-function rowsIn(rows:readonly PerformedBeat[],occurrence:MeasureOccurrence) {
-  return rows.filter(row=>row.target.bar===occurrence.bar&&row.occurrence===occurrence.occurrence);
+function rowsIn(rows:ReadonlyMap<string,PerformedBeat[]>,occurrence:MeasureOccurrence) {
+  return rows.get(`${occurrence.bar}/${occurrence.occurrence}`)??[];
 }
 export function cursorPlaybackChoices(score:model.Score,plan:PlaybackPlan,target:BeatTarget):CursorPlaybackChoice[] {
   const rows=preparedRows(score,plan);beatAt(score,target);
+  const matching=new Map<number,PerformedBeat>();
+  for(const row of rows)if(sameTarget(row.target,target)&&!matching.has(row.occurrence))matching.set(row.occurrence,row);
   const choices:CursorPlaybackChoice[]=[];
   plan.occurrences.forEach((occurrence,occurrenceIndex)=>{
-    const row=rowsIn(rows,occurrence).find(row=>sameTarget(row.target,target));
+    const row=occurrence.bar===target.bar?matching.get(occurrence.occurrence):undefined;
     if(row&&row.leadInTick<plan.durationTick)choices.push({generation:plan.generation,occurrenceIndex,startTick:row.leadInTick});
   });
   if(!choices.length)throw new Error('This score position has no performed playback location.');return choices;
@@ -96,24 +98,26 @@ export function selectionPlaybackChoices(score:model.Score,plan:PlaybackPlan,sel
     }else {start={bar:selection.firstBar,tick:0};end={bar:selection.lastBar,tick:0};}
   }
   const requiredBars=targets.length?new Set(targets.map(target=>target.bar)):new Set(Array.from({length:end.bar-start.bar+1},(_,i)=>start.bar+i));
+  const grouped=new Map<string,PerformedBeat[]>();
+  for(const row of rows){const key=`${row.target.bar}/${row.occurrence}`,group=grouped.get(key);if(group)group.push(row);else grouped.set(key,[row]);}
   const choices:PassagePlaybackChoice[]=[];
   for(let first=0;first<plan.occurrences.length;first++){
     const firstOccurrence=plan.occurrences[first];if(firstOccurrence.bar!==start.bar)continue;
     const seenBars=new Set<number>(),seenTargets=new Set<BeatTarget>(),selectedRows:PerformedBeat[]=[];
     for(let last=first;last<plan.occurrences.length;last++){
-      const occurrence=plan.occurrences[last],currentRows=rowsIn(rows,occurrence);seenBars.add(occurrence.bar);
+      const occurrence=plan.occurrences[last],currentRows=rowsIn(grouped,occurrence);seenBars.add(occurrence.bar);
       for(const row of currentRows)for(const target of targets)if(sameTarget(row.target,target)){seenTargets.add(target);selectedRows.push(row);}
       if(occurrence.bar!==end.bar||[...requiredBars].some(bar=>!seenBars.has(bar))||targets.some(target=>!seenTargets.has(target)))continue;
       let startTick:number,endTick:number;
       if(selection.kind==='notes'){
         // A candidate must actually begin at a selected beat in its start occurrence.
-        if(!rowsIn(rows,firstOccurrence).some(row=>targets.some(target=>sameTarget(row.target,target))))break;
+        if(!rowsIn(grouped,firstOccurrence).some(row=>targets.some(target=>sameTarget(row.target,target))))break;
         startTick=Math.min(...selectedRows.map(row=>row.leadInTick));endTick=Math.max(...selectedRows.map(row=>row.endTick));
       }else if(selection.kind==='bars'){
-        const leadIns=rowsIn(rows,firstOccurrence).filter(row=>selection.tracks.includes(row.target.track)).map(row=>row.leadInTick);
+        const leadIns=rowsIn(grouped,firstOccurrence).filter(row=>selection.tracks.includes(row.target.track)).map(row=>row.leadInTick);
         startTick=Math.min(firstOccurrence.startTick,...leadIns);endTick=occurrence.endTick;
       }else {
-        startTick=Math.min(...lanes.map(lane=>rangePoint(score,start,lane,firstOccurrence,rowsIn(rows,firstOccurrence),'start')));
+        startTick=Math.min(...lanes.map(lane=>rangePoint(score,start,lane,firstOccurrence,rowsIn(grouped,firstOccurrence),'start')));
         endTick=Math.max(...lanes.map(lane=>rangePoint(score,end,lane,occurrence,currentRows,'end')));
       }
       if(Number.isFinite(startTick)&&Number.isFinite(endTick)&&startTick>=0&&endTick>startTick&&endTick<=plan.durationTick)choices.push({generation:plan.generation,startOccurrence:first,endOccurrence:last,startTick,endTick});

@@ -201,6 +201,23 @@ it('failed destruction keeps editing locked until Running resume and live snapsh
   await w.resumeAfterWindowCloseFailure(new Error('destroy failed'));expect(w.getState().busy).toBe(false);expect(current(w).id).toBe(first);expect(current(w).controller).toBe(controller);await controller.edit({...note,fret:11});expect(controller.getState().snapshot.project.edits).toHaveLength(2);
 });
 
+it('retries only the live snapshot after Running resume succeeded and advances playback once',async()=>{
+  const {workspace:w,session,bridge,first}=await sessionSetup();await current(w).controller.edit(note);await current(w).controller.undo();
+  w.setView(first,{...initialDocumentView(),zoom:175,instrumentVisible:true});await w.flushViews();
+  const entry=current(w),state=entry.controller.getState(),owner=w.getState().active;let running=false;
+  vi.mocked(session.shutdown).mockImplementation(async()=>{running=false;});
+  vi.mocked(session.resume).mockImplementation(async()=>{if(running)throw new Error('The session is not awaiting window destruction.');running=true;});
+  expect(await w.requestWindowClose()).toBe(true);vi.mocked(bridge.snapshot).mockRejectedValueOnce(new Error('snapshot unavailable'));
+  await w.resumeAfterWindowCloseFailure(new Error('destroy failed'));expect(w.getState().busy).toBe(true);
+  await expect(entry.controller.redo()).rejects.toThrow(/transition/i);
+  await w.resumeAfterWindowCloseFailure(new Error('destroy failed'));
+  expect.soft(session.resume).toHaveBeenCalledOnce();expect(w.getState()).toMatchObject({busy:false,playbackResumeEpoch:1,error:'destroy failed'});
+  expect(w.getState().active).toEqual(owner);expect(current(w).controller).toBe(entry.controller);expect(entry.controller.getState().snapshot).toBe(state.snapshot);expect(entry.controller.getState().score).toBe(state.score);expect(entry.controller.getState().settings).toBe(state.settings);expect(current(w).view).toEqual(entry.view);
+  await entry.controller.redo();expect(entry.controller.getState().snapshot.project.edits).toEqual([note]);
+  await w.resumeAfterWindowCloseFailure(new Error('already handled'));expect(session.resume).toHaveBeenCalledOnce();expect(w.getState()).toMatchObject({playbackResumeEpoch:1});
+  expect(await w.requestWindowClose()).toBe(true);await w.resumeAfterWindowCloseFailure(new Error('second destroy failed'));expect(session.resume).toHaveBeenCalledTimes(2);expect(w.getState()).toMatchObject({busy:false,playbackResumeEpoch:2});
+});
+
 it('flush includes a view enqueued by a subscriber as the previous tail settles',async()=>{
   const {workspace:w,session,first}=await sessionSetup(),firstSend=deferred<void>(),latest=deferred<void>(),started=deferred<void>();let queued=false;
   vi.mocked(session.setView).mockReturnValueOnce(firstSend.promise).mockImplementationOnce(async()=>{started.resolve();await latest.promise;});

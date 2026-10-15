@@ -2,6 +2,7 @@ import { useEffect,useLayoutEffect, useMemo,useRef, useState, useSyncExternalSto
 import { DocumentController } from './controller';
 import { describeSelection, effectiveAudioSettings } from './engine';
 import type { BeatTarget, EditCommand } from './project';
+import { projectCommands } from './project';
 import { repairMeasureSelection,repairSelection, validSelectionIndices } from './selection';
 import { ScoreView } from './ScoreView';
 import { EditorPanel } from './EditorPanel';
@@ -180,7 +181,7 @@ export function App({controller,audioBridge,exportBridge,documentBridge,document
   const cancelExport=()=>{exportCancelled.current=true;const running=exportRunning.current;act((async()=>{let failed=false;try{await exports.cancel();}catch(error){failed=true;setExportError(String(error));}await running;if(!failed)closeModal();})());};
   const backingEdit=(command:EditCommand,candidate?:BackingCandidate)=>controller.edit(command,candidate);
   const selectedTrack=state.score.tracks[target.track],trackId=trackIdentity(selectedTrack);
-  const originalBacking=state.embeddedBacking&&!state.snapshot.project.edits.some(edit=>edit.type==='setBacking');
+  const originalBacking=state.embeddedBacking&&!projectCommands(state.snapshot.project).some(edit=>edit.type==='setBacking');
   const select=(next:BeatTarget,s=string,index?:number)=>{
     if (!validSelectionIndices(next) || !Number.isInteger(s)) return;
     const fixed=repairSelection(state.score,next);setSelection(fixed);

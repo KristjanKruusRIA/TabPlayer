@@ -27,6 +27,7 @@ fn file_digest_matches_exact_read_and_successful_written_bytes() {
     let mut legacy = serde_json::to_value(&original).unwrap();
     legacy["schemaVersion"] = serde_json::json!(1);
     legacy.as_object_mut().unwrap().remove("assets");
+    legacy.as_object_mut().unwrap().remove("baselineEdits");
     let mut bytes = b" \n\t".to_vec();
     bytes.extend(serde_json::to_vec(&legacy).unwrap());
     bytes.extend(b"\n  ");
@@ -191,7 +192,7 @@ fn checkpoint_rejects_invalid_cursor_saved_refs_and_versions() {
                     .unwrap()
                     .bytes_base64 = "corrupt".into()
             }
-            "project-version" => checkpoint.project.schema_version = 3,
+            "project-version" => checkpoint.project.schema_version = 4,
             "engine-version" => checkpoint.project.engine_version = "9.0.0".into(),
             _ => unreachable!(),
         }
@@ -294,9 +295,9 @@ fn shared_payload_clone_has_identical_json() {
     assert_eq!(
         serde_json::to_string(&project).unwrap(),
         concat!(
-            "{\"format\":\"TabPlayer\",\"schemaVersion\":2,\"engineVersion\":\"1.8.4\",",
+            "{\"format\":\"TabPlayer\",\"schemaVersion\":3,\"engineVersion\":\"1.8.4\",",
             "\"base\":{\"kind\":\"file\",\"filename\":\"source.gp\",\"bytesBase64\":\"aGVsbG8=\",",
-            "\"sha256\":\"2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824\"},\"edits\":[],\"assets\":{}}"
+            "\"sha256\":\"2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824\"},\"baselineEdits\":[],\"edits\":[],\"assets\":{}}"
         )
     );
     let asset = StoredAsset::from_bytes("backing.wav".into(), "audio/wav".into(), b"hello");

@@ -118,3 +118,14 @@ it('titles_use_latest_applied_metadata_and_never_expose_source_directories',()=>
   expect(screen.queryByText(/private/)).not.toBeInTheDocument();
   expect(screen.getByText('Checkpoint time unavailable.')).toBeInTheDocument();
 });
+
+it('titles_use_baseline_metadata_until_a_user_edit_overrides_it',()=>{
+  const baseline=documentRecord('baseline','Base title'),override=documentRecord('override','Base title'),empty=documentRecord('empty','Base title');
+  baseline.snapshot.project.baselineEdits=[{type:'setScoreInfo',title:'Template ensemble',artist:'',tempo:120}];
+  override.snapshot.project.baselineEdits=structuredClone(baseline.snapshot.project.baselineEdits);
+  override.snapshot.project.edits=[{type:'setScoreInfo',title:'User ensemble',artist:'',tempo:120}];
+  empty.snapshot.project.baselineEdits=[{type:'setScoreInfo',title:'  ',artist:'',tempo:120}];
+  render(<RecoveryPrompt preview={preview({documents:[baseline,override,empty]})} busy={false} {...callbacks()}/>);
+  expect(screen.getByText('Template ensemble')).toBeInTheDocument();expect(screen.getByText('User ensemble')).toBeInTheDocument();expect(screen.getByText('Untitled')).toBeInTheDocument();
+  expect(screen.queryByText('Base title')).not.toBeInTheDocument();
+});

@@ -211,7 +211,7 @@ try{
   // processes after the harness force-stops its exact owned test PID. These
   // saved-file reopen checks establish no graceful-close or crash recovery.
   for(const [name,path,expected]of [['schema1',fixture.documents.A.schema1Path,null],['schema2',savedA,JSON.parse(readFileSync(savedA,'utf8'))],['redoCompacted',noRedo,noRedoDisk]]){
-    await start(output(`reopen-${name}-export`),output(`reopen-${name}-save.tabplayer`));const opened=await add(path);await reload();const value=await record(opened);assert.equal(value.snapshot.project.schemaVersion,2);assert.equal(value.snapshot.project.base.sha256,fixture.documents.A.sourceHash);assert.equal(value.snapshot.dirty,false);assert.equal(value.snapshot.canRedo,false);
+    await start(output(`reopen-${name}-export`),output(`reopen-${name}-save.tabplayer`));const opened=await add(path);await reload();const value=await record(opened);assert.equal(value.snapshot.project.schemaVersion,3);assert.deepEqual(value.snapshot.project.baselineEdits,[]);assert.equal(value.snapshot.project.base.sha256,fixture.documents.A.sourceHash);assert.equal(value.snapshot.dirty,false);assert.equal(value.snapshot.canRedo,false);
     if(expected)assert.deepEqual(value.snapshot.project.edits,expected.edits);if(name==='redoCompacted')assert.deepEqual(value.snapshot.project.assets,{});result.checks[`freshProcess-${name}`]=value;
   }
   // Destination is an inactive B backing source. Production WAV export must

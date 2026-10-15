@@ -3,6 +3,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { act,cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import userEvent from '@testing-library/user-event';
+import {importer} from '@coderline/alphatab';
 import { WorkspaceApp,type WorkspaceSession } from './workspace/WorkspaceApp';
 import { WorkspaceController } from './workspace/WorkspaceController';
 import type { DocumentSnapshot,NativeWorkspaceBridge,WorkspaceSnapshot } from './workspace/types';
@@ -63,6 +64,16 @@ afterEach(()=>{cleanup();vi.clearAllMocks();integration.exportBusy=false;integra
 
 let testWorkspace:WorkspaceController;
 let appRender:ReturnType<typeof render>;
+
+it('shows score only when a template baseline removed original embedded backing',async()=>{
+  const score=buildScore(blankProject());score.backingTrack={rawAudioFile:new Uint8Array([82,73,70,70])};
+  const load=vi.spyOn(importer.ScoreLoader,'loadScoreFromBytes').mockImplementation(()=>score);
+  try{
+    await setup({...blankProject(),base:{kind:'file',filename:'Original.gp',bytesBase64:'AA==',sha256:'a'.repeat(64)},baselineEdits:[{type:'setBacking',backing:null}]});
+    fireEvent.click(within(screen.getByRole('navigation',{name:'Workspace panes'})).getByRole('button',{name:'Backing'}));
+    expect(screen.getByText('Score only')).toBeVisible();expect(screen.queryByText('Original embedded audio, if available')).not.toBeInTheDocument();
+  }finally{load.mockRestore();}
+});
 const activeController=()=>testWorkspace.getState().documents.find(entry=>entry.id===testWorkspace.getState().active.documentId)!.controller;
 async function setup(initial=blankProject(),openProject?:Project,options:{width?:number;session?:WorkspaceSession;workspaceHeight?:number;instrumentVisible?:boolean}={}) {
   Object.defineProperty(window,'innerWidth',{configurable:true,writable:true,value:options.width??1280});

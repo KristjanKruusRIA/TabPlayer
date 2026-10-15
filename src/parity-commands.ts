@@ -3,6 +3,17 @@ import {validatePageLayout} from './engraving/page';
 import {validateHarmonyChord} from './harmony/chord-source';
 
 const shapes:Record<string,readonly string[]>={
+  setNote:['target','string','fret'],removeNote:['target','string'],setRest:['target'],setDuration:['target','duration','dots'],
+  insertBeat:['target','duration','dots'],deleteBeat:['target'],appendMeasure:[],removeMeasure:['bar'],
+  addTrack:['name','tuning','program'],removeTrack:['track'],setTuning:['track','tuning'],setScoreInfo:['title','artist','tempo'],
+  setNoteTechniques:['target','string','patch'],setBeatTechniques:['target','patch'],setNoteLink:['from','to','kind'],
+  setBeatRhythm:['target','duration','dots','tupletNumerator','tupletDenominator','graceType'],
+  setTrackInfo:['track','name','shortName','program'],setStaffSettings:['track','staff','settings'],addStaff:['track','settings'],
+  removeStaff:['track','staff'],addVoice:['track','staff'],removeVoice:['track','staff','voice'],
+  copyVoice:['track','staff','sourceVoice','destinationVoice','startBar','endBar'],setTrackLayout:['track','barsPerSystem','lineBreaks'],
+  setMeasureSettings:['bar','numerator','denominator','pickup','freeTime','repeatStart','repeatCount','endings','section','tempos'],
+  setBarNotation:['track','staff','bar','keySignature','keyMode','clef'],setBeatAnnotation:['target','text','chord'],
+  setTrackSound:['trackId','sound'],setTrackMix:['trackId','mix'],setBacking:['backing'],setPrintLayout:['layout'],
   setScoreMetadata:['fields'],setDirections:['bar','directions'],setNoteSpelling:['target','noteIndex','accidentalMode'],
   addPitchedTrack:['name','program'],addPercussionTrack:['name','program'],
   addPitchedNote:['target','pitch'],setPitchedNote:['target','noteIndex','pitch'],
@@ -141,10 +152,10 @@ function techniqueShape(value:unknown) {
   }
 }
 
-/** Exact new command envelopes; score-dependent note/technique validation stays in the editor. */
+/** Exact command envelopes; score-dependent note/technique validation stays in the editor. */
 export function validateParityCommand(value:unknown):void {
   const candidate=object(value),type=candidate.type;
-  if(typeof type!=='string'||!Object.hasOwn(shapes,type))return;
+  if(typeof type!=='string'||!Object.hasOwn(shapes,type))throw new Error('Unknown edit command in project.');
   const edit=exact(value,['type',...shapes[type]]);
   if('target'in edit)target(edit.target);
   for(const key of ['noteIndex','bar','track','staff'])if(key in edit)integer(edit[key]);

@@ -556,6 +556,46 @@ fn startup_reconciles_changed_saved_path_again_after_preview() {
 }
 
 #[test]
+fn clean_discard_retains_pathless_blank_template_baseline_after_restart() {
+    let directory = tempfile::tempdir().unwrap();
+    let runtime = open(directory.path());
+    let audio = audio();
+    let jobs = ExportJobs::default();
+    resolve(&runtime, &audio, &jobs);
+    let mut value = serde_json::to_value(Project::blank()).unwrap();
+    value["schemaVersion"] = serde_json::json!(3);
+    value["baselineEdits"] = serde_json::json!([{"type":"appendMeasure"}]);
+    let template: Project = serde_json::from_value(value).unwrap();
+    let workspace = runtime.workspace();
+    let candidate = workspace
+        .lock()
+        .unwrap()
+        .stage_document(template.clone(), None)
+        .unwrap();
+    crate::transition_workspace(&audio, &jobs, &workspace, |state| {
+        state.add_document(&candidate.token)
+    })
+    .unwrap();
+    let id = workspace.lock().unwrap().active_owner().document_id.clone();
+    edit(&runtime, 7);
+    runtime.shutdown(closes(&runtime), &audio, &jobs).unwrap();
+    drop(runtime);
+    let restarted = open(directory.path());
+    let preview = restarted.startup().preview.unwrap();
+    assert_eq!(preview.reason, RecoveryReason::Clean);
+    let recovered = preview
+        .documents
+        .iter()
+        .find(|record| record.document_id == id)
+        .unwrap();
+    assert_eq!(recovered.snapshot.project, template.view());
+    assert!(!recovered.snapshot.dirty);
+    assert!(!recovered.snapshot.can_undo);
+    assert!(!recovered.snapshot.can_redo);
+    assert!(recovered.snapshot.path.is_none());
+}
+
+#[test]
 fn clean_projection_preserves_saved_branch_imported_baseline_and_order() {
     let directory = tempfile::tempdir().unwrap();
     let runtime = open(directory.path());

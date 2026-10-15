@@ -170,6 +170,7 @@ pub struct DocumentWorkspace {
     active: AudioOwner,
     candidates: CandidateStore,
     candidate_digests: BTreeMap<String, String>,
+    fork_candidates: BTreeSet<String>,
     checkpoint_revision: u64,
     frozen: bool,
 }
@@ -292,6 +293,7 @@ impl DocumentWorkspace {
         self.active = active;
         self.candidates = CandidateStore::default();
         self.candidate_digests.clear();
+        self.fork_candidates.clear();
         self.checkpoint_revision = revision;
         Ok(self.snapshot())
     }
@@ -342,6 +344,7 @@ impl DocumentWorkspace {
             active,
             candidates: CandidateStore::default(),
             candidate_digests: BTreeMap::new(),
+            fork_candidates: BTreeSet::new(),
             checkpoint_revision: 0,
             frozen: false,
         })
@@ -440,11 +443,25 @@ impl DocumentWorkspace {
         Ok(self.entry(id)?.saved_file_sha256.as_deref())
     }
 
+    pub fn template_project(&self, address: &DocumentRevision) -> Result<Project, String> {
+        self.check_admission()?;
+        self.check_revision(address)?.session.fork_project()
+    }
+
+    pub fn stage_fork(&mut self, mut project: Project) -> Result<DocumentCandidate, String> {
+        self.check_admission()?;
+        project.baseline_edits.append(&mut project.edits);
+        let candidate = self.candidates.stage_document(project, None)?;
+        self.fork_candidates.insert(candidate.token.clone());
+        Ok(candidate)
+    }
+
     pub fn cancel_document(&mut self, token: &str) -> bool {
         if self.frozen {
             return false;
         }
         self.candidate_digests.remove(token);
+        self.fork_candidates.remove(token);
         self.candidates.cancel_document(token)
     }
 
@@ -453,14 +470,20 @@ impl DocumentWorkspace {
         let revision = self.next_checkpoint_revision()?;
         let (project, path) = self.candidates.take_document(token)?;
         let saved_file_sha256 = self.candidate_digests.remove(token);
+        let is_fork = self.fork_candidates.remove(token);
         let intake = path.as_deref().or_else(|| match &project.base {
             BaseDocument::File { filename, .. } => Some(Path::new(filename)),
             _ => None,
         });
-        if let Some(existing) = intake.and_then(|path| self.find_open_path(path)) {
-            return self.activate_document(&existing);
+        if !is_fork {
+            if let Some(existing) = intake.and_then(|path| self.find_open_path(path)) {
+                return self.activate_document(&existing);
+            }
         }
         let mut entry = DocumentEntry::new(project, path)?;
+        if is_fork {
+            entry.intake_path = None;
+        }
         self.probe_document_id(&mut entry);
         entry.saved_file_sha256 = saved_file_sha256;
         self.active = AudioOwner {
@@ -755,6 +778,56 @@ mod tests {
         workspace.checkpoint_revision = 0;
         assert!(workspace.cancel_asset(&id, &staged.token).unwrap());
         workspace.add_document(&pending.token).unwrap();
+    }
+
+    #[test]
+    fn fork_purpose_survives_exhaustion_and_clears_with_candidate_lifecycle() {
+        let mut workspace = DocumentWorkspace::new().unwrap();
+        let mut project = Project::from_file("authored.gp".into(), b"original source");
+        project.edits.push(EditCommand::AppendMeasure);
+        let ordinary = workspace.stage_document(project.clone(), None).unwrap();
+        let source = workspace
+            .add_document(&ordinary.token)
+            .unwrap()
+            .active
+            .document_id;
+        let fork = workspace.stage_fork(project.clone()).unwrap();
+        let before = workspace.snapshot();
+        workspace.checkpoint_revision = MAX_DOCUMENT_REVISION;
+        assert!(workspace.add_document(&fork.token).is_err());
+        assert_eq!(workspace.snapshot(), before);
+        let captured = workspace
+            .template_project(&DocumentRevision {
+                document_id: source.clone(),
+                revision: 0,
+            })
+            .unwrap();
+        assert_eq!(captured.baseline_edits, vec![EditCommand::AppendMeasure]);
+        assert!(captured.edits.is_empty());
+        workspace.checkpoint_revision = 0;
+        let independent = workspace.add_document(&fork.token).unwrap();
+        assert_ne!(independent.active.document_id, source);
+        assert!(!workspace.fork_candidates.contains(&fork.token));
+        assert!(
+            workspace
+                .entry(&independent.active.document_id)
+                .unwrap()
+                .intake_path
+                .is_none()
+        );
+        let cancelled = workspace.stage_fork(project.clone()).unwrap();
+        assert!(workspace.cancel_document(&cancelled.token));
+        assert!(!workspace.fork_candidates.contains(&cancelled.token));
+        assert!(workspace.add_document(&cancelled.token).is_err());
+        let pending = workspace.stage_fork(project.clone()).unwrap();
+        project.engine_version = "invalid".into();
+        assert!(workspace.stage_fork(project).is_err());
+        assert_eq!(workspace.fork_candidates.len(), 1);
+        let records = workspace.recovery_documents().unwrap();
+        let active = workspace.active.document_id.clone();
+        workspace.install_recovery(records, Some(active)).unwrap();
+        assert!(workspace.fork_candidates.is_empty());
+        assert!(workspace.add_document(&pending.token).is_err());
     }
 
     #[test]

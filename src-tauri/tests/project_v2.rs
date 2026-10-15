@@ -65,13 +65,15 @@ fn migrates_v1_without_music_change() {
     let mut legacy = serde_json::to_value(&original).unwrap();
     legacy["schemaVersion"] = serde_json::json!(1);
     legacy.as_object_mut().unwrap().remove("assets");
+    legacy.as_object_mut().unwrap().remove("baselineEdits");
     legacy["edits"] = serde_json::json!([{
         "type":"setNote", "target":{"track":0,"staff":0,"bar":0,"voice":0,"beat":0},
         "string":1, "fret":7
     }]);
     std::fs::write(&path, serde_json::to_vec(&legacy).unwrap()).unwrap();
     let loaded = read_project(&path).unwrap();
-    assert_eq!(loaded.schema_version, 2);
+    assert_eq!(loaded.schema_version, 3);
+    assert!(loaded.baseline_edits.is_empty());
     assert_eq!(loaded.base, original.base);
     assert_eq!(
         serde_json::to_value(&loaded.edits).unwrap(),
@@ -79,7 +81,8 @@ fn migrates_v1_without_music_change() {
     );
     write_project(&path, &loaded).unwrap();
     let saved: serde_json::Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
-    assert_eq!(saved["schemaVersion"], 2);
+    assert_eq!(saved["schemaVersion"], 3);
+    assert_eq!(saved["baselineEdits"], serde_json::json!([]));
     assert_eq!(saved["base"], legacy["base"]);
 }
 
@@ -93,6 +96,7 @@ fn snapshot_omits_large_audio() {
     let digest = format!("{:x}", Sha256::digest(&bytes));
     let mut value = serde_json::to_value(Project::from_file("score.gp".into(), b"source")).unwrap();
     value["schemaVersion"] = serde_json::json!(2);
+    value.as_object_mut().unwrap().remove("baselineEdits");
     value["assets"] = serde_json::json!({digest.clone(): {
         "filename":"backing.wav", "mediaType":"audio/wav", "bytesBase64":STANDARD.encode(&bytes)
     }});

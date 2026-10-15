@@ -35,6 +35,17 @@ function deferred<T>() {
   return {promise,resolve};
 }
 
+it('first user edit undo and redo never crosses a template baseline',async()=>{
+  const project={...blankProject(),baselineEdits:[{type:'setNote',target:{track:0,staff:0,bar:0,voice:0,beat:0},string:6,fret:5}] as EditCommand[]};
+  const baseline=structuredClone(project.baselineEdits),bridge=makeBridge(project),controller=await DocumentController.create(bridge);
+  const fret=()=>controller.getState().score.tracks[0].staves[0].bars[0].voices[0].beats[0].notes[0].fret;
+  expect(fret()).toBe(5);expect(controller.getState().snapshot.canUndo).toBe(false);
+  await controller.undo();expect(bridge.applyEdit).not.toHaveBeenCalled();expect(fret()).toBe(5);
+  await controller.edit({type:'setNote',target:{track:0,staff:0,bar:0,voice:0,beat:0},string:6,fret:7});expect(fret()).toBe(7);
+  await controller.undo();expect(fret()).toBe(5);expect(controller.getState().snapshot.canUndo).toBe(false);expect(controller.getState().snapshot.project.edits).toEqual([]);
+  await controller.redo();expect(fret()).toBe(7);expect(controller.getState().snapshot.project.edits).toHaveLength(1);expect(controller.getState().snapshot.project.baselineEdits).toEqual(baseline);expect(project.baselineEdits).toEqual(baseline);
+});
+
 it('controller_keeps_origin_revision_and_pending_count',async()=>{
   const bridge=makeBridge(),initial=await bridge.snapshot();vi.mocked(bridge.snapshot).mockClear();
   const controller=await DocumentController.create(bridge,undefined,initial);

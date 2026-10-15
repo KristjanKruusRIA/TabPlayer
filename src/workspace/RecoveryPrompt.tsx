@@ -1,5 +1,6 @@
 import { useEffect,useId,useRef,type KeyboardEvent } from 'react';
 import type { RecoveryPreview } from './recovery-types';
+import { projectCommands } from '../project';
 import './recovery.css';
 
 export interface RecoveryPromptProps {
@@ -8,8 +9,9 @@ export interface RecoveryPromptProps {
 }
 function documentTitle(document:RecoveryPreview['documents'][number]):string {
   const project=document.snapshot.project;
-  for(let index=project.edits.length-1;index>=0;index--){
-    const edit=project.edits[index];
+  const commands=projectCommands(project);
+  for(let index=commands.length-1;index>=0;index--){
+    const edit=commands[index];
     if(edit.type==='setScoreInfo')return edit.title.trim()?edit.title:'Untitled';
   }
   const title=project.base.kind==='blank'?project.base.title:project.base.filename.split(/[\\/]/).pop()??'';

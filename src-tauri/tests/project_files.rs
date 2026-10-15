@@ -32,7 +32,7 @@ fn invalid_project_does_not_replace_an_existing_save() {
 #[test]
 fn rejects_corruption_unknown_commands_and_future_schema() {
     for bad in [
-        serde_json::json!({"schemaVersion": 3}),
+        serde_json::json!({"schemaVersion": 4}),
         serde_json::json!({"engineVersion": "future"}),
         serde_json::json!({"edits": [{"type": "runCode", "code": "hello"}]}),
         serde_json::json!({"base": {"kind":"file", "filename":"x.gp", "bytesBase64":"aGVsbG8=", "sha256":"wrong"}}),

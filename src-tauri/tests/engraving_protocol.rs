@@ -458,7 +458,7 @@ fn engraving_native_history_retains_commands_undo_redo_and_rejects_invalid_edits
     }
     let configured = session.snapshot().project;
     assert_eq!(configured.base, base);
-    assert_eq!(configured.schema_version, 2);
+    assert_eq!(configured.schema_version, 3);
     assert_eq!(configured.engine_version, "1.8.4");
     assert_eq!(configured.edits.len(), 3);
     session.undo().unwrap();

@@ -1,5 +1,6 @@
 import { model, Settings } from '@coderline/alphatab';
 import type { BeatTarget, EditCommand, Project, ProjectInput } from './project';
+import { projectCommands } from './project';
 import { isSettingsEdit } from './edit-types';
 import type { BackingSettings, ChannelMix, DocumentSettings } from './edit-types';
 import { defaultDocumentSettings, defaultMix, applySettingsEdit } from './document-settings';
@@ -30,15 +31,19 @@ function tuningValid(tuning: number[]) {
 }
 
 export function validateProject(value: unknown): Project {
-  if (!value || typeof value !== 'object') throw new Error('Invalid project.');
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid project.');
   const input = value as ProjectInput;
-  if (input.format !== 'TabPlayer' || ![1,2].includes(input.schemaVersion)) throw new Error('Unsupported project version.');
-  const p:Project={...structuredClone(input),schemaVersion:2,assets:input.schemaVersion===1?{}:structuredClone(input.assets)};
+  if (input.format !== 'TabPlayer' || ![1,2,3].includes(input.schemaVersion)) throw new Error('Unsupported project version.');
+  const fields=['format','schemaVersion','engineVersion','base','edits',...(input.schemaVersion>=2?['assets']:[]),...(input.schemaVersion===3?['baselineEdits']:[])];
+  if(Object.keys(input).length!==fields.length || fields.some(field=>!Object.hasOwn(input,field)))throw new Error('Invalid project fields.');
+  const p:Project={...structuredClone(input),schemaVersion:3,assets:input.schemaVersion===1?{}:structuredClone(input.assets),baselineEdits:input.schemaVersion===3?structuredClone(input.baselineEdits):[]};
   if (p.engineVersion !== '1.8.4') throw new Error('This project requires a different engine version.');
-  if (!p.base || !['blank', 'file'].includes(p.base.kind) || !Array.isArray(p.edits)) throw new Error('Invalid project contents.');
+  if (!p.base || !['blank', 'file'].includes(p.base.kind) || !Array.isArray(p.edits) || !Array.isArray(p.baselineEdits)) throw new Error('Invalid project contents.');
+  const baseFields=p.base.kind==='blank'?['kind','title','artist','tempo','tuning','measureCount']:['kind','filename','bytesBase64','sha256'];
+  if(Object.keys(p.base).length!==baseFields.length || baseFields.some(field=>!Object.hasOwn(p.base,field)))throw new Error('Invalid project base fields.');
   if (p.base.kind === 'blank') {
     tuningValid(p.base.tuning);
-    if (!integer(p.base.measureCount, 1) || !Number.isFinite(p.base.tempo) || p.base.tempo <= 0) throw new Error('Invalid new-score settings.');
+    if (typeof p.base.title!=='string' || typeof p.base.artist!=='string' || !integer(p.base.measureCount, 1) || !Number.isFinite(p.base.tempo) || p.base.tempo <= 0) throw new Error('Invalid new-score settings.');
   } else if (typeof p.base.bytesBase64 !== 'string' || typeof p.base.filename !== 'string' || !/^[a-f0-9]{64}$/i.test(p.base.sha256)) {
     throw new Error('Invalid original score data.');
   }
@@ -46,7 +51,7 @@ export function validateProject(value: unknown): Project {
   for(const [id,asset] of Object.entries(p.assets)) {
     if(!/^[a-f0-9]{64}$/i.test(id) || !asset || Object.keys(asset).some(key=>!['filename','mediaType','byteLength'].includes(key)) || typeof asset.filename!=='string' || typeof asset.mediaType!=='string' || !integer(asset.byteLength)) throw new Error('Invalid project asset metadata.');
   }
-  for(const edit of p.edits) {
+  for(const edit of projectCommands(p)) {
     validateParityCommand(edit);
     if(edit.type==='setBacking' && edit.backing && !p.assets[edit.backing.assetId]) throw new Error('Backing audio asset is missing.');
   }
@@ -233,7 +238,7 @@ export function buildDocument(value: ProjectInput): BuiltDocument {
   }:undefined;
   score.tracks.forEach((track,index)=>{documentSettings.mixes[identities[index]]={...defaultMix(),mute:track.playbackInfo.isMute,solo:track.playbackInfo.isSolo};});
   const sourceMixes=structuredClone(documentSettings.mixes);
-  for (const [index,edit] of project.edits.entries()) {
+  for (const [index,edit] of projectCommands(project).entries()) {
     if(isSettingsEdit(edit)) {applySettingsEdit(documentSettings,edit,score,identities);continue;}
     if(edit.type==='pasteMusic'){
       const prepared=preparePasteMusic(rebuild(score),edit);score=rebuild(prepared.score);
@@ -261,13 +266,13 @@ export function buildDocument(value: ProjectInput): BuiltDocument {
 
 export function replayDocumentSettings(value:ProjectInput,current:BuiltDocument):BuiltDocument {
   const project=validateProject(value);const next=defaultDocumentSettings();
-  if(project.edits.some(edit=>edit.type==='pasteMusic'))return {...buildDocument(project),score:current.score,embeddedBacking:current.embeddedBacking};
+  if(projectCommands(project).some(edit=>edit.type==='pasteMusic'))return {...buildDocument(project),score:current.score,embeddedBacking:current.embeddedBacking};
   const sourceBarCount=current.sourceBarCount??(project.base.kind==='blank'?project.base.measureCount:initialScore(project).masterBars.length);
   let barCount=sourceBarCount;
   next.mixes=structuredClone(current.sourceMixes ?? Object.fromEntries(current.score.tracks.map(track=>[trackIdentity(track),{...defaultMix(),mute:track.playbackInfo.isMute,solo:track.playbackInfo.isSolo}])));
   // Applied history already passed candidate validation. Its earlier backing anchors
   // refer to the measure layout at that point, before later deletions.
-  for(const edit of project.edits) switch(edit.type) {
+  for(const edit of projectCommands(project)) switch(edit.type) {
     case 'setTrackMix': next.mixes[edit.trackId]=structuredClone(edit.mix);break;
     case 'setTrackSound': next.sounds[edit.trackId]=structuredClone(edit.sound);break;
     case 'setBacking': next.backing=structuredClone(edit.backing);break;
@@ -286,7 +291,7 @@ export function replayDocumentSettings(value:ProjectInput,current:BuiltDocument)
 }
 
 export function effectiveAudioSettings(project:ProjectInput,built:BuiltDocument):DocumentSettings {
-  if(built.settings.backing || !built.embeddedBacking || project.edits.some(edit=>edit.type==='setBacking')) return built.settings;
+  if(built.settings.backing || !built.embeddedBacking || projectCommands(project).some(edit=>edit.type==='setBacking')) return built.settings;
   const embedded=built.embeddedBackingSettings ?? {offsetMs:0,anchors:[],mix:defaultMix()};
   return {...built.settings,backing:{assetId:'embedded',...structuredClone(embedded)}};
 }

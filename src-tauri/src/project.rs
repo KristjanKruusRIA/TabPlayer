@@ -2,7 +2,7 @@ use crate::assets::{AssetInfo, StoredAsset};
 pub use crate::edit_types::{EditCommand, NoteTarget};
 use crate::edit_types::{validate_tempo, validate_tuning};
 use base64::{Engine, engine::general_purpose::STANDARD};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, de::Error};
 use sha2::{Digest, Sha256};
 use std::{
     collections::BTreeMap,
@@ -15,15 +15,71 @@ use std::{
 
 pub type ProjectError = String;
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Project {
     pub format: String,
     pub schema_version: u32,
     pub engine_version: String,
     pub base: BaseDocument,
+    pub baseline_edits: Vec<EditCommand>,
     pub edits: Vec<EditCommand>,
     pub assets: BTreeMap<String, StoredAsset>,
+}
+
+impl<'de> Deserialize<'de> for Project {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase", deny_unknown_fields)]
+        struct CanonicalProject {
+            format: String,
+            schema_version: u32,
+            engine_version: String,
+            base: BaseDocument,
+            baseline_edits: Vec<EditCommand>,
+            edits: Vec<EditCommand>,
+            assets: BTreeMap<String, StoredAsset>,
+        }
+        let mut value = serde_json::Value::deserialize(deserializer)?;
+        let fields = value
+            .as_object_mut()
+            .ok_or_else(|| D::Error::custom("A project must be an object."))?;
+        match fields
+            .get("schemaVersion")
+            .and_then(serde_json::Value::as_u64)
+        {
+            Some(version @ (1 | 2)) => {
+                if fields.contains_key("baselineEdits")
+                    || (version == 1 && fields.contains_key("assets"))
+                {
+                    return Err(D::Error::custom(
+                        "Legacy project contains fields from a newer version.",
+                    ));
+                }
+                if version == 1 {
+                    fields.insert("assets".into(), serde_json::json!({}));
+                }
+                fields.insert("baselineEdits".into(), serde_json::json!([]));
+                fields.insert("schemaVersion".into(), serde_json::json!(3));
+            }
+            Some(3) => {}
+            _ => {
+                return Err(D::Error::custom(
+                    "This is not a supported TabPlayer project version.",
+                ));
+            }
+        }
+        let wire: CanonicalProject = serde_json::from_value(value).map_err(D::Error::custom)?;
+        Ok(Self {
+            format: wire.format,
+            schema_version: wire.schema_version,
+            engine_version: wire.engine_version,
+            base: wire.base,
+            baseline_edits: wire.baseline_edits,
+            edits: wire.edits,
+            assets: wire.assets,
+        })
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -33,6 +89,7 @@ pub struct ProjectView {
     pub schema_version: u32,
     pub engine_version: String,
     pub base: BaseDocument,
+    pub baseline_edits: Vec<EditCommand>,
     pub edits: Vec<EditCommand>,
     pub assets: BTreeMap<String, AssetInfo>,
 }
@@ -73,7 +130,7 @@ impl Project {
     pub fn blank() -> Self {
         Self {
             format: "TabPlayer".into(),
-            schema_version: 2,
+            schema_version: 3,
             engine_version: "1.8.4".into(),
             base: BaseDocument::Blank {
                 title: "Untitled".into(),
@@ -82,6 +139,7 @@ impl Project {
                 tuning: vec![64, 59, 55, 50, 45, 40],
                 measure_count: 4,
             },
+            baseline_edits: vec![],
             edits: vec![],
             assets: BTreeMap::new(),
         }
@@ -99,7 +157,7 @@ impl Project {
     }
 
     pub fn validate(&self) -> Result<(), ProjectError> {
-        if self.format != "TabPlayer" || self.schema_version != 2 {
+        if self.format != "TabPlayer" || self.schema_version != 3 {
             return Err("This is not a supported TabPlayer project version.".into());
         }
         if self.engine_version != "1.8.4" {
@@ -134,7 +192,7 @@ impl Project {
                 }
             }
         }
-        for edit in &self.edits {
+        for edit in self.baseline_edits.iter().chain(&self.edits) {
             edit.validate()?;
             if edit
                 .asset_id()
@@ -155,6 +213,7 @@ impl Project {
             schema_version: self.schema_version,
             engine_version: self.engine_version.clone(),
             base: self.base.clone(),
+            baseline_edits: self.baseline_edits.clone(),
             edits: self.edits.clone(),
             assets: self
                 .assets
@@ -232,8 +291,10 @@ impl ProjectSession {
         let mut project = self.project.clone();
         project.edits = self.saved.clone();
         project.assets.retain(|id, _| {
-            self.saved
+            project
+                .baseline_edits
                 .iter()
+                .chain(&self.saved)
                 .any(|edit| edit.asset_id() == Some(id.as_str()))
         });
         project.validate()?;
@@ -263,6 +324,7 @@ impl ProjectSession {
             schema_version: self.project.schema_version,
             engine_version: self.project.engine_version.clone(),
             base: self.project.base.clone(),
+            baseline_edits: self.project.baseline_edits.clone(),
             edits: self.project.edits.clone(),
             assets: self.asset_info.clone(),
         };
@@ -344,8 +406,10 @@ impl ProjectSession {
             .assets
             .iter()
             .filter(|(id, _)| {
-                edits
+                self.project
+                    .baseline_edits
                     .iter()
+                    .chain(&edits)
                     .any(|edit| edit.asset_id() == Some(id.as_str()))
             })
             .map(|(id, asset)| (id.clone(), asset.clone()))
@@ -355,6 +419,7 @@ impl ProjectSession {
             schema_version: self.project.schema_version,
             engine_version: self.project.engine_version.clone(),
             base: self.project.base.clone(),
+            baseline_edits: self.project.baseline_edits.clone(),
             edits,
             assets,
         }
@@ -366,6 +431,12 @@ impl ProjectSession {
             .get(id)
             .ok_or_else(|| "Backing asset is missing from this project.".to_string())?
             .bytes()
+    }
+
+    pub fn fork_project(&self) -> Result<Project, ProjectError> {
+        let mut project = self.stored_project();
+        project.baseline_edits.append(&mut project.edits);
+        Ok(project)
     }
 
     pub fn path(&self) -> Option<&Path> {

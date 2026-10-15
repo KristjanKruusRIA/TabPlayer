@@ -3,6 +3,7 @@ pub mod audio;
 pub mod edit_types;
 pub mod engraving;
 pub mod export;
+pub mod file_library;
 pub mod files;
 pub mod harmony;
 pub mod harmony_library;

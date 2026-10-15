@@ -654,6 +654,7 @@ fn clean_projection(
         if dirty {
             if record.session.path.is_none()
                 && record.saved_file_sha256.is_none()
+                && record.session.project.baseline_edits.is_empty()
                 && matches!(record.session.project.base, BaseDocument::Blank { .. })
             {
                 continue;

@@ -39,8 +39,10 @@ function style():EngravingCommand {
   return {type:'setEngraving',engraving};
 }
 
-it.each([1,2] as const)('defaults missing presentation for unchanged version %s history',schemaVersion=>{
-  const built=buildDocument({...blankProject(),schemaVersion});
+it.each([1,2,3] as const)('defaults missing presentation for unchanged version %s history',schemaVersion=>{
+  const input=JSON.parse(JSON.stringify(blankProject()));input.schemaVersion=schemaVersion;
+  if(schemaVersion<3)delete input.baselineEdits;if(schemaVersion===1)delete input.assets;
+  const built=buildDocument(input);
   expect(built.settings.engraving).toEqual(defaultEngraving());expect(built.settings.page).toBeNull();expect(built.settings.print).toEqual(defaultPrintLayout());
 });
 

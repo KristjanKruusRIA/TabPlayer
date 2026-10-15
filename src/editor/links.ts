@@ -1,8 +1,8 @@
 import { model } from '@coderline/alphatab';
 
 export function detachNote(note:model.Note) {
-  if(note.tieOrigin)note.tieOrigin.tieDestination=null;
-  if(note.tieDestination){note.tieDestination.tieOrigin=null;note.tieDestination.isTieDestination=false;note.tieDestination.bendOrigin=null;note.tieDestination.isContinuedBend=false;}
+  if(note.tieOrigin?.tieDestination===note)note.tieOrigin.tieDestination=note.beat.notes.find(other=>other!==note&&other.tieOrigin===note.tieOrigin)??null;
+  if(note.tieDestination)for(const destination of note.tieDestination.beat.notes)if(destination.tieOrigin===note){destination.tieOrigin=null;destination.isTieDestination=false;destination.bendOrigin=null;destination.isContinuedBend=false;}
   if(note.slurOrigin)note.slurOrigin.slurDestination=null;
   if(note.slurDestination){note.slurDestination.slurOrigin=null;note.slurDestination.isSlurDestination=false;}
   if(note.slideOrigin){note.slideOrigin.slideTarget=null;note.slideOrigin.slideOutType=model.SlideOutType.None;}
@@ -18,8 +18,11 @@ export function detachNote(note:model.Note) {
 export const allNotes=(score:model.Score)=>score.tracks.flatMap(t=>t.staves.flatMap(s=>s.bars.flatMap(b=>b.voices.flatMap(v=>v.beats.flatMap(beat=>beat.notes)))));
 export type NoteLinks={from:number;to:number;kind:'tie'|'slur'|'slide'|'hammerPull';slideOutType?:model.SlideOutType}[];
 export function captureNoteLinks(score:model.Score):NoteLinks {
-  const links:NoteLinks=[];
-  for(const note of allNotes(score))for(const [kind,destination] of [['tie',note.tieDestination],['slur',note.slurDestination],['slide',note.slideTarget],['hammerPull',note.hammerPullDestination]] as const)if(destination)links.push({from:note.id,to:destination.id,kind,...kind==='slide'?{slideOutType:note.slideOutType}:{}});
+  const links:NoteLinks=[],notes=allNotes(score);
+  // Duplicate chord notes can share an origin. Restore their incoming-only
+  // ties first so the final forward edge retains the original destination.
+  for(const note of notes)if(note.tieOrigin&&note.tieOrigin.tieDestination!==note)links.push({from:note.tieOrigin.id,to:note.id,kind:'tie'});
+  for(const note of notes)for(const [kind,destination] of [['tie',note.tieDestination],['slur',note.slurDestination],['slide',note.slideTarget],['hammerPull',note.hammerPullDestination]] as const)if(destination)links.push({from:note.id,to:destination.id,kind,...kind==='slide'?{slideOutType:note.slideOutType}:{}});
   return links;
 }
 export function restoreNoteLinks(score:model.Score,links:NoteLinks) {

@@ -8,18 +8,21 @@ import { blankProject, type EditCommand, type Project, type AssetInfo } from './
 import type { NativeBridge } from './bridge';
 import type { BuiltDocument } from './engine';
 import { defaultMix } from './document-settings';
+import { DEFAULT_PRACTICE } from './audio/practice-types';
+import type { PlaybackState } from './audio/types';
 
-const integration=vi.hoisted(()=>({loadDocument:vi.fn(),beforeScoreChange:vi.fn(),destroy:vi.fn(),stageBacking:vi.fn(),commits:vi.fn(),activeNotes:vi.fn((_trackId:string)=>[]),practiceSpeed:100,exportOptions:vi.fn(),exportBusy:false,exportRun:vi.fn(async()=>true),exportCancel:vi.fn(async()=>{})}));
+const integration=vi.hoisted(()=>({loadDocument:vi.fn(),beforeScoreChange:vi.fn(),destroy:vi.fn(),stageBacking:vi.fn(),commits:vi.fn(),activeNotes:vi.fn((_trackId:string)=>[]),practiceSpeed:100,practiceFixed:false,setPractice:vi.fn(),exportOptions:vi.fn(),exportBusy:false,exportRun:vi.fn(async()=>true),exportCancel:vi.fn(async()=>{})}));
 vi.mock('./audio/bridge',()=>({nativeAudioBridge:{stageBacking:integration.stageBacking}}));
 vi.mock('./export/useExportCoordinator',()=>({useExportCoordinator:(options:unknown)=>{integration.exportOptions(options);return {busy:integration.exportBusy,progress:undefined,run:integration.exportRun,cancel:integration.exportCancel};}}));
 vi.mock('./audio/NativePlaybackController',()=>({NativePlaybackController:class {
-  built:BuiltDocument|null=null;state={ready:true,playing:false,time:0,endTime:4000,measure:0,speed:integration.practiceSpeed,metronome:false,error:null};
+  built:BuiltDocument|null=null;state:PlaybackState={ready:true,playing:false,time:0,endTime:4000,measure:0,speed:integration.practiceSpeed,metronome:false,practice:{settings:{...structuredClone(DEFAULT_PRACTICE),tempo:integration.practiceFixed?{kind:'fixed',bpm:90}:{kind:'relative',ratio:integration.practiceSpeed/100}},phase:'idle',countInRemaining:0,completedPasses:0,effectiveRatio:integration.practiceSpeed/100,currentBpm:120,pulse:null},practicePending:false,practiceNotice:null,loop:null,error:null};
   constructor(private options:{onEdit:(command:EditCommand)=>void|Promise<void>}){}
   subscribe=()=>()=>{};getState=()=>this.state;
   activeNotes=(trackId:string)=>integration.activeNotes(trackId);
   loadDocument=async(project:unknown,built:BuiltDocument,track:number,documentEpoch:number)=>{this.built=built;integration.loadDocument(project,built,track,documentEpoch);};
   beforeScoreChange=integration.beforeScoreChange;destroy=integration.destroy;
   play=vi.fn();pause=vi.fn();stop=vi.fn();seekToMeasure=vi.fn();setSpeed=vi.fn();setLoop=vi.fn();clearLoop=vi.fn();setMetronome=vi.fn();
+  setPractice=integration.setPractice;exportPracticeRatio=()=>integration.practiceFixed?null:this.state.speed/100;
   devices=async()=>[];deviceId=()=>null;selectDevice=vi.fn();backingDurationMs=()=>undefined;
   mix=(track:{index:number})=>{const value=this.built?.settings.mixes[`base/${track.index}`];return value?{mute:value.mute,solo:value.solo,volume:value.gain,pan:value.pan}:undefined;};
   setMix=(track:number,patch:object)=>this.options.onEdit({type:'setTrackMix',trackId:`base/${track}`,mix:{...(this.built?.settings.mixes[`base/${track}`]??defaultMix()),...patch}});
@@ -37,7 +40,7 @@ vi.mock('./ScoreView',()=>({ScoreView:({onSelect,track}: {track:number;onSelect:
       {label:'fractional string',field:'beat',value:0,string:1.5},
     ].map(({label,field,value,string})=><button key={label} onClick={()=>onSelect({track:0,staff:0,bar:0,voice:0,beat:0,[field]:value},string)}>Select {label}</button>)}
   </>}));
-afterEach(()=>{cleanup();vi.clearAllMocks();integration.exportBusy=false;integration.practiceSpeed=100;});
+afterEach(()=>{cleanup();vi.clearAllMocks();integration.exportBusy=false;integration.practiceSpeed=100;integration.practiceFixed=false;});
 
 async function setup(initial=blankProject(),openProject?:Project) {
   let edits: EditCommand[]=[...initial.edits]; let cursor=edits.length;let assets:Record<string,AssetInfo>={...initial.assets};
@@ -53,6 +56,31 @@ async function setup(initial=blankProject(),openProject?:Project) {
 const change=(label:string,value:string)=>fireEvent.change(screen.getByLabelText(label),{target:{value}});
 const click=(name:string)=>fireEvent.click(screen.getByRole('button',{name}));
 const currentBeat=(controller:DocumentController,index=0)=>controller.getState().score.tracks[0].staves[0].bars[0].voices[0].beats[index];
+
+it('keeps copied music and paste drafts across unrelated renders and New, with one repeated paste command',async()=>{
+  const c=await setup();change('Fret','5');click('Set note');await waitFor(()=>expect(currentBeat(c).notes[0]?.fret).toBe(5));click('Select bar');
+  const workspace=screen.getByRole('region',{name:'Score workspace'});fireEvent.keyDown(workspace,{key:'c',ctrlKey:true});
+  await waitFor(()=>expect(screen.getByText('Complete bars inserted before measure 1')).toBeInTheDocument());
+  const clipboard=screen.getByText('Musical clipboard').closest('details')!;clipboard.open=true;change('Paste repetitions','2');change('Fret','6');
+  expect(screen.getByLabelText('Paste repetitions')).toHaveValue(2);expect(c.getState().snapshot.project.edits).toHaveLength(1);
+  click('New');await waitFor(()=>expect(c.getState().documentEpoch).toBe(1));expect(screen.getByText('Complete bars inserted before measure 1')).toBeInTheDocument();
+  change('Paste repetitions','2');click('Paste music');await waitFor(()=>expect(c.getState().score.masterBars).toHaveLength(6));
+  expect(c.getState().snapshot.project.edits).toHaveLength(1);expect(c.getState().snapshot.project.edits[0]).toMatchObject({type:'pasteMusic',options:{count:2}});
+  expect(currentBeat(c).notes[0].fret).toBe(5);click('Undo');await waitFor(()=>expect(c.getState().score.masterBars).toHaveLength(4));
+});
+it('routes music clipboard shortcuts while preserving text input shortcuts and practice independence',async()=>{
+  const c=await setup();change('Fret','3');click('Set note');await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(1));click('Select bar');
+  const workspace=screen.getByRole('region',{name:'Score workspace'}),history=c.getState().snapshot.project.edits.length;
+  fireEvent.keyDown(screen.getByLabelText('Fret'),{key:'x',ctrlKey:true});expect(c.getState().snapshot.project.edits).toHaveLength(history);
+  fireEvent.keyDown(workspace,{key:'x',ctrlKey:true});await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(0));
+  fireEvent.keyDown(workspace,{key:'v',ctrlKey:true});await waitFor(()=>expect(c.getState().score.masterBars).toHaveLength(5));expect(currentBeat(c).notes[0].fret).toBe(3);
+  const before=c.getState().snapshot;const details=screen.getByText('Practice settings').closest('details')!;details.open=true;change('Relative speed (%)','123');click('Apply practice settings');
+  expect(integration.setPractice).toHaveBeenCalledWith(expect.objectContaining({tempo:{kind:'relative',ratio:1.23}}));expect(c.getState().snapshot).toEqual(before);
+});
+it('passes fixed-mode export unavailability without claiming a constant practice coefficient',async()=>{
+  integration.practiceFixed=true;await setup();await waitFor(()=>expect(integration.exportOptions).toHaveBeenLastCalledWith(expect.objectContaining({currentSpeed:null})));
+  click('Export score');change('Export format','wav');expect(screen.getByRole('option',{name:'Current speed coefficient'})).toBeDisabled();
+});
 
 it('selects editable music with keyboard shortcuts without changing history or text editing',async()=>{
   const c=await setup();change('Fret','5');click('Set note');await waitFor(()=>expect(currentBeat(c).notes[0]?.fret).toBe(5));
@@ -86,6 +114,23 @@ it('creates piano chords, edits the clicked member and replays its history',asyn
   change('Written pitch','F4');click('Update pitched note');await waitFor(()=>expect(notes().map(n=>n.realValue)).toEqual([60,65]));
   click('Undo');await waitFor(()=>expect(notes().map(n=>n.realValue)).toEqual([60,64]));
   click('Redo');await waitFor(()=>expect(notes().map(n=>n.realValue)).toEqual([60,65]));
+});
+
+it('clears the indexed chord member after successful clipboard paste',async()=>{
+  const target={track:1,staff:0,bar:0,voice:0,beat:0};
+  const c=await setup({...blankProject(),edits:[{type:'addPitchedTrack',name:'Piano',program:0},{type:'addPitchedNote',target,pitch:60},{type:'addPitchedNote',target,pitch:64}]});
+  click('Track 2: Piano');click('Select rendered chord note');expect(screen.getByLabelText('Chord note')).toHaveValue('1');click('Select bar');
+  const workspace=screen.getByRole('region',{name:'Score workspace'});fireEvent.keyDown(workspace,{key:'c',ctrlKey:true});await waitFor(()=>expect(screen.getByLabelText('Paste repetitions')).toBeInTheDocument());
+  fireEvent.keyDown(workspace,{key:'v',ctrlKey:true});await waitFor(()=>expect(c.getState().score.masterBars).toHaveLength(5));expect(screen.getByLabelText('Chord note')).toHaveValue('-1');
+});
+
+it('keeps clipboard shortcuts inside the chord modal from editing the score',async()=>{
+  const c=await setup({...blankProject(),edits:[{type:'setNote',target:{track:0,staff:0,bar:0,voice:0,beat:0},string:6,fret:3}]});click('Select bar');
+  fireEvent.keyDown(screen.getByRole('region',{name:'Score workspace'}),{key:'c',ctrlKey:true});await waitFor(()=>expect(screen.getByLabelText('Paste repetitions')).toBeInTheDocument());
+  click('Edit chord diagram');const dialog=screen.getByRole('dialog',{name:'Chord diagram'}),before=c.getState().snapshot;
+  const cancel=within(dialog).getByRole('button',{name:'Cancel'});cancel.focus();
+  for(const key of ['c','x','v'])fireEvent.keyDown(cancel,{key,ctrlKey:true});
+  await waitFor(()=>expect(c.getState().busy).toBe(false));expect(c.getState().snapshot).toBe(before);expect(dialog).toBeInTheDocument();
 });
 
 it('edits song metadata and measure directions through the integrated inspector',async()=>{

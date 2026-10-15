@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent } from 'react';
+import { useEffect, useMemo,useRef, useState, useSyncExternalStore, type KeyboardEvent } from 'react';
 import { DocumentController } from './controller';
 import { describeSelection, effectiveAudioSettings } from './engine';
 import type { BeatTarget, EditCommand } from './project';
@@ -21,17 +21,24 @@ import { LiveInstrumentView } from './instruments/LiveInstrumentView';
 import type { MusicSelection } from './editor/range-types';
 import { rangeFromBeats,selectionForTrack } from './editor/range-selection';
 import { planMeasureMap } from './editor/measures';
+import { ClipboardStore } from './editor/ClipboardStore';
+import { ClipboardPanel } from './editor/ClipboardPanel';
+import { musicClipSelection,scoreFromMusicClip } from './editor/clipboard-source';
+import type { ClipboardMode,PasteOptions } from './editor/clipboard-types';
+import { PracticePanel } from './audio/PracticePanel';
 const noPlaybackSubscribe=()=>()=>{};
 const textEntry=(target:EventTarget)=>target instanceof HTMLElement&&(['INPUT','SELECT','TEXTAREA'].includes(target.tagName)||target.isContentEditable);
 
 export function App({controller}: {controller: DocumentController}) {
   const state=useSyncExternalStore(controller.subscribe,controller.getState);
   const [player,setPlayer]=useState<NativePlaybackController|null>(null);
-  const practiceSpeed=useSyncExternalStore(player?.subscribe??noPlaybackSubscribe,()=>player?.getState().speed??100);
+  const playbackState=useSyncExternalStore(player?.subscribe??noPlaybackSubscribe,()=>player?.getState()??null);
   useEffect(()=>{const playback=new NativePlaybackController({onEdit:command=>controller.edit(command).then(()=>setSelection(old=>repairSelection(controller.getState().score,old)))});setPlayer(playback);return()=>playback.destroy();},[controller]);
   useEffect(()=>{controller.setBeforeChange(()=>player?.beforeScoreChange());return()=>controller.setBeforeChange(()=>{});},[controller,player]);
   const [selection,setSelection]=useState<BeatTarget>({track:0,staff:0,bar:0,voice:0,beat:0});
   const [musicSelection,setMusicSelection]=useState<MusicSelection|null>(null),rangeAnchor=useRef<BeatTarget|null>(null);
+  const [clipboard]=useState(()=>new ClipboardStore()),[clipboardVersion,setClipboardVersion]=useState(0),[clipboardError,setClipboardError]=useState<string|null>(null);
+  const clip=useMemo(()=>clipboard.get(),[clipboard,clipboardVersion]),clipboardSection=useRef<HTMLDivElement>(null);
   useEffect(()=>{setMusicSelection(null);rangeAnchor.current=null;},[state.documentEpoch]);
   const editorSelection=(value:MusicSelection|null)=>{rangeAnchor.current=null;setMusicSelection(value);};
   const [selectedString,setString]=useState(6); const [fret,setFret]=useState(0);
@@ -49,18 +56,40 @@ export function App({controller}: {controller: DocumentController}) {
     setFret(location.beat?.notes.find(n=>n.string===string)?.fret ?? 0);digits.current.text='';
   },[state.score,target.track,target.staff,target.bar,target.voice,target.beat,string]);
   const act=(job: Promise<unknown>)=>{void job.catch(()=>{});};
-  const change=(job:Promise<unknown>)=>act(job.then(()=>{setSelection(old=>repairSelection(controller.getState().score,old));editorSelection(null);}));
+  const change=(job:Promise<unknown>)=>{setClipboardError(null);act(job.then(()=>{setSelection(old=>repairSelection(controller.getState().score,old));editorSelection(null);}));};
   const edit=(command:EditCommand)=>{
+    setClipboardError(null);
     const oldCount=state.score.masterBars.length;
     act(controller.edit(command).then(()=>{
       const score=controller.getState().score,map=command.type==='insertMeasures'||command.type==='removeMeasures'?planMeasureMap(oldCount,command):null;
       setSelection(old=>map?repairMeasureSelection(score,old,map):repairSelection(score,old));
+      if(command.type==='pasteMusic')setNoteIndex(null);
       if(!('selection'in command)||command.type==='eraseSelection')editorSelection(null);
     }));
   };
+  const copyMusic=(mode:ClipboardMode,cut=false)=>{
+    if(!musicSelection||state.busy)return;setClipboardError(null);
+    try{
+      const scope=musicClipSelection(state.score,musicSelection,mode),bars=scope as Extract<MusicSelection,{kind:'bars'}>;
+      const map=cut&&mode==='multiTrack'?planMeasureMap(state.score.masterBars.length,{type:'removeMeasures',firstBar:bars.firstBar,lastBar:bars.lastBar}):null;
+      act((cut?controller.cutMusic(scope,mode):controller.copyMusic(scope,mode)).then(value=>{
+        clipboard.set(value);setClipboardVersion(version=>version+1);
+        if(cut){setSelection(old=>map?repairMeasureSelection(controller.getState().score,old,map):repairSelection(controller.getState().score,old));editorSelection(null);}
+      }).catch(reason=>setClipboardError(reason instanceof Error?reason.message:String(reason))));
+    }catch(reason){setClipboardError(reason instanceof Error?reason.message:String(reason));}
+  };
+  const pasteMusic=(options?:PasteOptions)=>{
+    if(!clip||state.busy)return;
+    try{
+      const source=options?null:scoreFromMusicClip(clip),multi=clip.mode==='multiTrack';
+      edit({type:'pasteMusic',clip,options:options??{target:{...target},destinations:source!.tracks.map((track,index)=>({sourceTrack:index,track:target.track+index,staffMap:track.staves.map((_,staff)=>clip.kind==='phrase'?target.staff:staff)})),count:1,placement:clip.kind==='phrase'?'currentBar':'beforeBar',filters:{diagrams:true,texts:true,timers:true,trackAutomations:true,masterAutomations:multi,sections:multi}}});
+    }catch(reason){setClipboardError(reason instanceof Error?reason.message:String(reason));}
+  };
+  const showClipboard=()=>{const section=clipboardSection.current?.querySelector('details');if(section){section.open=true;section.querySelector('summary')?.focus();section.scrollIntoView({block:'nearest'});}};
   const documentAction=(job:Promise<unknown>)=>change(job);
   const [exportOpen,setExportOpen]=useState(false),[exportError,setExportError]=useState<string|null>(null),[exportLaunching,setExportLaunching]=useState(false);const exportCancelled=useRef(false);
-  const exports=useExportCoordinator({score:state.score,settings:effectiveAudioSettings(state.snapshot.project,state),currentSpeed:practiceSpeed/100,bridge:nativeBridge,embeddedBacking:state.embeddedBacking});
+  const audioSettings=effectiveAudioSettings(state.snapshot.project,state),practiceRatio=player?player.exportPracticeRatio():1;
+  const exports=useExportCoordinator({score:state.score,settings:audioSettings,currentSpeed:practiceRatio,bridge:nativeBridge,embeddedBacking:state.embeddedBacking});
   const runExport=(options:ExportOptions)=>{setExportError(null);setExportLaunching(true);exportCancelled.current=false;act((async()=>{
     if((options.format==='pdf'||options.format==='print')&&JSON.stringify(options.layout)!==JSON.stringify(state.settings.print))await controller.edit({type:'setPrintLayout',layout:options.layout});
     if(exportCancelled.current)return;
@@ -104,8 +133,14 @@ export function App({controller}: {controller: DocumentController}) {
     select(next);event.preventDefault();
   }
   function selectionKeys(event:KeyboardEvent){
-    if(textEntry(event.target)||exportOpen)return;
-    if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='a'){editorSelection(selectionForTrack(state.score,target.track));event.preventDefault();}
+    if(textEntry(event.target)||exportOpen||(event.target instanceof Element&&event.target.closest('[role="dialog"]')))return;
+    const key=event.key.toLowerCase();
+    if((event.ctrlKey||event.metaKey)&&['c','x','v'].includes(key)){
+      event.preventDefault();if(state.busy)return;
+      if(key==='v'){if(event.shiftKey)showClipboard();else pasteMusic();}
+      else copyMusic(event.shiftKey?'multiTrack':'singleTrack',key==='x');
+    }
+    else if((event.ctrlKey||event.metaKey)&&key==='a'){editorSelection(selectionForTrack(state.score,target.track));event.preventDefault();}
     else if(event.key==='Escape'){editorSelection(null);event.preventDefault();}
   }
   return <div className="app-shell" onKeyDown={selectionKeys}>
@@ -118,7 +153,7 @@ export function App({controller}: {controller: DocumentController}) {
       <button disabled={state.busy || !state.snapshot.canRedo} onClick={()=>change(controller.redo())}>Redo</button>
     </nav><span className="document-title">{state.score.title || 'Untitled'}{state.snapshot.dirty?' •':''}</span>
     <button disabled={state.busy||exports.busy} onClick={()=>{setExportError(null);setExportOpen(true);}}>Export score</button><button disabled={state.busy||exports.busy} onClick={()=>act(controller.export())}>Export GP</button></header>
-    {(state.error||(!exportOpen&&exportError)) && <div className="error" role="alert">{state.error||exportError}</div>}
+    {(clipboardError||state.error||(!exportOpen&&exportError)) && <div className="error" role="alert">{clipboardError||state.error||exportError}</div>}
     <div className="workspace">
       <TrackPanel score={state.score} selected={target.track} busy={state.busy} player={player} onSelect={track=>select({track,staff:0,bar:target.bar,voice:0,beat:0},state.score.tracks[track].staves[0].tuning.length)} onEdit={edit}>
         <SoundPanel trackId={trackId} sound={state.settings.sounds[trackId]} onEdit={command=>controller.edit(command)} playback={player} busy={state.busy}/>
@@ -134,10 +169,13 @@ export function App({controller}: {controller: DocumentController}) {
         <div className="score-hint">Measure {target.bar+1} · Beat {target.beat+1} · {indexed?`${location.staff.isPercussion?'Percussion':'Pitched'} note ${noteIndex===null?'entry':noteIndex+1} — Click a note to edit it in the inspector.`:`String ${string} · Fret ${fret} — Click the score, then use arrow keys, digits and Enter.`}</div>
         {instrumentVisible&&<LiveInstrumentView score={state.score} track={target.track} staff={target.staff} player={player}/>}
       </section>
-      <EditorPanel score={state.score} target={target} string={string} fret={fret} noteIndex={noteIndex} onSelectNote={setNoteIndex} busy={state.busy} onSelect={next=>{editorSelection(null);select(next);}} onString={s=>select(target,s)} onFret={setFret} onEdit={edit} musicSelection={musicSelection} onMusicSelection={editorSelection}/>
+      <EditorPanel score={state.score} target={target} string={string} fret={fret} noteIndex={noteIndex} onSelectNote={setNoteIndex} busy={state.busy} onSelect={next=>{editorSelection(null);select(next);}} onString={s=>select(target,s)} onFret={setFret} onEdit={edit} musicSelection={musicSelection} onMusicSelection={editorSelection}>
+        <div ref={clipboardSection}><ClipboardPanel score={state.score} target={target} selection={musicSelection} clip={clip} busy={state.busy} onCopy={mode=>copyMusic(mode)} onCut={mode=>copyMusic(mode,true)} onPaste={pasteMusic}/></div>
+        {player&&playbackState&&<PracticePanel key={state.documentEpoch} settings={playbackState.practice.settings} busy={state.busy||playbackState.practicePending||!playbackState.ready} hasBacking={!!audioSettings.backing} onChange={settings=>player.setPractice(settings)}/>}
+      </EditorPanel>
     </div>
     {player && <Transport player={player} measures={state.score.masterBars.length} busy={state.busy}/>}
-    {exportOpen&&<ExportDialog score={state.score} layout={state.settings.print} busy={exports.busy||state.busy||exportLaunching} progress={exports.progress} failure={exportError} onExport={runExport} onCancel={cancelExport}/>}
+    {exportOpen&&<ExportDialog score={state.score} layout={state.settings.print} currentSpeedAvailable={practiceRatio!==null} busy={exports.busy||state.busy||exportLaunching} progress={exports.progress} failure={exportError} onExport={runExport} onCancel={cancelExport}/>}
     <footer className="statusbar">{state.busy?'Working…':state.snapshot.dirty?'Unsaved changes':'Saved'}<span>{state.snapshot.path ?? 'Save a .tabplayer project to keep the original score and edits.'}</span></footer>
   </div>;
 }

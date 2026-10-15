@@ -7,6 +7,8 @@ import { defaultEffects } from './document-settings';
 import { invoke } from '@tauri-apps/api/core';
 import { nativeBridge, type NativeBridge } from './bridge';
 import type { SyncAnchor } from './edit-types';
+import { scoreFromMusicClip } from './editor/clipboard-source';
+import { ClipboardStore } from './editor/ClipboardStore';
 
 vi.mock('@tauri-apps/api/core',()=>({invoke:vi.fn(async()=>true)}));
 
@@ -26,6 +28,47 @@ function makeBridge(project:Project=blankProject(),redoHistory:EditCommand[]=[])
   };
   return bridge;
 }
+
+const copyTarget={track:0,staff:0,bar:0,voice:0,beat:0};
+const copiedBars={kind:'bars' as const,tracks:[0],firstBar:0,lastBar:0};
+it.each(['edit','cut','undo','redo','new','open'] as const)('keeps playback valid when native %s rejects',async operation=>{
+  const note:EditCommand={type:'setNote',target:copyTarget,string:6,fret:3};
+  const bridge=makeBridge({...blankProject(),edits:operation==='redo'?[]:[note]},operation==='redo'?[note]:[]),beforeChange=vi.fn();
+  const reject=async()=>{throw new Error('native commit rejected');};
+  bridge.applyEdit=reject;bridge.undo=reject;bridge.redo=reject;bridge.replaceProject=reject;bridge.readDocument=bridge.createBlankDocument;
+  const controller=await DocumentController.create(bridge,beforeChange),before=controller.getState();
+  const result=operation==='edit'?controller.edit(note):operation==='cut'?controller.cutMusic(copiedBars,'singleTrack'):controller[operation]();
+  await expect(result).rejects.toThrow('native commit rejected');
+  expect(controller.getState().snapshot).toBe(before.snapshot);expect(controller.getState().score).toBe(before.score);expect(beforeChange).not.toHaveBeenCalled();
+});
+it('copies from committed queued music without changing history, dirty state or playback',async()=>{
+  const bridge=makeBridge(),beforeChange=vi.fn(),controller=await DocumentController.create(bridge,beforeChange);
+  const edit=controller.edit({type:'setNote',target:copyTarget,string:6,fret:11});
+  const copying=controller.copyMusic(copiedBars,'singleTrack');await edit;const committed=controller.getState().snapshot,clip=await copying;
+  expect(scoreFromMusicClip(clip).tracks[0].staves[0].bars[0].voices[0].beats[0].notes[0].fret).toBe(11);
+  expect(controller.getState().snapshot).toEqual(committed);expect(beforeChange).toHaveBeenCalledOnce();expect(bridge.applyEdit).toHaveBeenCalledOnce();
+});
+it('cuts inside the serialized queue with one command and publishes clipboard only after native success',async()=>{
+  const project={...blankProject(),edits:[{type:'setNote' as const,target:copyTarget,string:6,fret:3}]},bridge=makeBridge(project),controller=await DocumentController.create(bridge);
+  const store=new ClipboardStore();store.set(await controller.copyMusic(copiedBars,'singleTrack'));const old=store.get(),score=controller.getState().score;
+  vi.mocked(bridge.applyEdit).mockRejectedValueOnce(new Error('native commit failed'));
+  await expect(controller.cutMusic(copiedBars,'singleTrack').then(clip=>store.set(clip))).rejects.toThrow('native commit failed');
+  expect(store.get()).toEqual(old);expect(controller.getState().score===score).toBe(true);expect(controller.getState().snapshot.project).toEqual(project);
+  const clip=await controller.cutMusic(copiedBars,'singleTrack');store.set(clip);
+  expect(controller.getState().snapshot.project.edits.at(-1)).toEqual({type:'eraseSelection',selection:copiedBars});
+  expect(controller.getState().score.tracks[0].staves[0].bars[0].voices[0].beats[0].notes).toHaveLength(0);
+  expect(scoreFromMusicClip(store.get()!).tracks[0].staves[0].bars[0].voices[0].beats[0].notes).toHaveLength(1);
+  await controller.undo();expect(controller.getState().score.tracks[0].staves[0].bars[0].voices[0].beats[0].notes).toHaveLength(1);
+});
+it('multitrack cut expands the exact copied bars and a keep-one failure preserves history and clipboard',async()=>{
+  const controller=await DocumentController.create(makeBridge()),store=new ClipboardStore();
+  const clip=await controller.cutMusic({...copiedBars,lastBar:1},'multiTrack');store.set(clip);
+  expect(controller.getState().score.masterBars).toHaveLength(2);expect(scoreFromMusicClip(clip).masterBars).toHaveLength(2);
+  expect(controller.getState().snapshot.project.edits).toEqual([{type:'removeMeasures',firstBar:0,lastBar:1}]);
+  const before=controller.getState().snapshot,previous=store.get();
+  await expect(controller.cutMusic({...copiedBars,lastBar:1},'multiTrack').then(clip=>store.set(clip))).rejects.toThrow();
+  expect(controller.getState().snapshot).toEqual(before);expect(store.get()).toEqual(previous);
+});
 
 it('keeps the current document on open or save cancellation',async () => {
   const controller = await DocumentController.create(makeBridge()); const before=controller.getState().snapshot;

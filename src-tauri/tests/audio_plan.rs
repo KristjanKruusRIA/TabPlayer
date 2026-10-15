@@ -25,7 +25,7 @@ fn fixture() -> PlaybackPlan {
         "generation":1,"ppq":960,"durationTick":3840.0,"durationMs":3000.0,
         "tracks":[{"id":"base/0","program":25,"percussion":false}],
         "tempos":[{"tick":0.0,"bpm":120.0},{"tick":1920.0,"bpm":60.0}],
-        "occurrences":[{"bar":0,"occurrence":0,"startTick":0.0,"endTick":3840.0,"startMs":0.0,"endMs":3000.0}],
+        "occurrences":[{"bar":0,"occurrence":0,"meterNumerator":4,"meterDenominator":4,"startTick":0.0,"endTick":3840.0,"startMs":0.0,"endMs":3000.0}],
         "notes":[{"id":"n0","trackId":"base/0","source":{"target":{"track":0,"staff":0,"bar":0,"voice":0,"beat":0},"string":1},"occurrence":0,"startTick":0.0,"endTick":960.0,"key":64,"velocity":100,"articulation":"picked","legatoFrom":null,"pitch":[{"tick":0.0,"semitones":0.0},{"tick":960.0,"semitones":2.0}]}],
         "midi":[{"type":"noteOn","trackId":"base/0","tick":0.0,"channel":0,"key":64,"velocity":100}]
     })).unwrap()
@@ -92,7 +92,7 @@ fn optional_played_bar_preserves_source_identity_and_json_compatibility() {
 }
 
 #[test]
-fn optional_meter_clicks_are_strict_and_old_plans_remain_compatible() {
+fn optional_meter_clicks_are_strict_and_missing_clicks_remain_compatible() {
     let original = fixture();
     assert!(
         serde_json::to_value(&original.occurrences[0])
@@ -122,6 +122,60 @@ fn optional_meter_clicks_are_strict_and_old_plans_remain_compatible() {
     );
     let roundtrip: PlaybackPlan = serde_json::from_value(json).unwrap();
     roundtrip.validate().unwrap();
+}
+
+#[test]
+fn written_meter_accepts_all_denominators_and_positive_u32_numerators() {
+    for numerator in [1, 33, u32::MAX] {
+        for denominator in [1, 2, 4, 8, 16, 32, 64, 128, 256] {
+            let mut json = serde_json::to_value(fixture()).unwrap();
+            json["occurrences"][0]["meterNumerator"] = serde_json::json!(numerator);
+            json["occurrences"][0]["meterDenominator"] = serde_json::json!(denominator);
+            let plan: PlaybackPlan = serde_json::from_value(json).unwrap();
+            plan.validate().unwrap();
+            let encoded = serde_json::to_value(plan).unwrap();
+            assert_eq!(encoded["occurrences"][0]["meterNumerator"], numerator);
+            assert_eq!(encoded["occurrences"][0]["meterDenominator"], denominator);
+        }
+    }
+}
+
+#[test]
+fn written_meter_rejects_missing_fractional_and_invalid_values() {
+    let mut valid = serde_json::to_value(fixture()).unwrap();
+    valid["occurrences"][0]["meterNumerator"] = serde_json::json!(4);
+    valid["occurrences"][0]["meterDenominator"] = serde_json::json!(4);
+    for field in ["meterNumerator", "meterDenominator"] {
+        let mut missing = valid.clone();
+        missing["occurrences"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove(field);
+        assert!(serde_json::from_value::<PlaybackPlan>(missing).is_err());
+        for value in [
+            serde_json::Value::Null,
+            serde_json::json!(-1),
+            serde_json::json!(0.5),
+            serde_json::json!(4_294_967_296u64),
+            serde_json::json!("4"),
+            serde_json::json!(true),
+        ] {
+            let mut malformed = valid.clone();
+            malformed["occurrences"][0][field] = value;
+            assert!(serde_json::from_value::<PlaybackPlan>(malformed).is_err());
+        }
+    }
+    for (field, value) in [
+        ("meterNumerator", 0),
+        ("meterDenominator", 0),
+        ("meterDenominator", 3),
+        ("meterDenominator", 512),
+    ] {
+        let mut json = valid.clone();
+        json["occurrences"][0][field] = serde_json::json!(value);
+        let plan: PlaybackPlan = serde_json::from_value(json).unwrap();
+        assert!(plan.validate().is_err());
+    }
 }
 
 #[test]

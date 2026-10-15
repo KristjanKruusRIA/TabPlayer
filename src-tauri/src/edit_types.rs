@@ -153,6 +153,195 @@ impl TryFrom<String> for SustainKind {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", try_from = "String")]
+pub enum ClipboardMode {
+    SingleTrack,
+    MultiTrack,
+}
+
+impl TryFrom<String> for ClipboardMode {
+    type Error = String;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        match value.as_str() {
+            "singleTrack" => Ok(Self::SingleTrack),
+            "multiTrack" => Ok(Self::MultiTrack),
+            _ => Err("Unsupported clipboard mode.".into()),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", try_from = "String")]
+pub enum ClipboardKind {
+    Phrase,
+    Bars,
+}
+
+impl TryFrom<String> for ClipboardKind {
+    type Error = String;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        match value.as_str() {
+            "phrase" => Ok(Self::Phrase),
+            "bars" => Ok(Self::Bars),
+            _ => Err("Unsupported clipboard kind.".into()),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", try_from = "String")]
+pub enum ClipboardLinkKind {
+    Tie,
+    Slur,
+    Slide,
+    HammerPull,
+}
+
+impl TryFrom<String> for ClipboardLinkKind {
+    type Error = String;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        match value.as_str() {
+            "tie" => Ok(Self::Tie),
+            "slur" => Ok(Self::Slur),
+            "slide" => Ok(Self::Slide),
+            "hammerPull" => Ok(Self::HammerPull),
+            _ => Err("Unsupported clipboard link kind.".into()),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ClipboardLink {
+    pub from: u32,
+    pub to: u32,
+    pub kind: ClipboardLinkKind,
+    #[serde(deserialize_with = "required_nullable")]
+    pub slide_out_type: Option<i32>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct MusicClip {
+    pub format: String,
+    pub version: u32,
+    pub engine_version: String,
+    pub mode: ClipboardMode,
+    pub kind: ClipboardKind,
+    pub score_json: String,
+    pub links: Vec<ClipboardLink>,
+}
+
+impl MusicClip {
+    fn validate(&self) -> Result<(), String> {
+        if self.format != "TabPlayerClip" || self.version != 1 || self.engine_version != "1.8.4" {
+            return Err("Unsupported clipboard format, version or engine.".into());
+        }
+        if self.score_json.len() > 128_000_000 {
+            return Err("Clipboard score exceeds the 128,000,000-byte limit.".into());
+        }
+        let score: serde_json::Value = serde_json::from_str(&self.score_json)
+            .map_err(|_| "Clipboard score must contain valid JSON.".to_string())?;
+        if !score.is_object() {
+            return Err("Clipboard score JSON must be an object.".into());
+        }
+        let mut seen = HashSet::new();
+        for link in &self.links {
+            match (&link.kind, link.slide_out_type) {
+                (ClipboardLinkKind::Slide, Some(1 | 2)) => {}
+                (ClipboardLinkKind::Slide, _) | (_, Some(_)) => {
+                    return Err("Only slide links need a Shift or Legato slide type.".into());
+                }
+                (_, None) => {}
+            }
+            if !seen.insert((link.from, link.to, &link.kind, link.slide_out_type)) {
+                return Err("Clipboard links must be distinct.".into());
+            }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PasteFilters {
+    pub diagrams: bool,
+    pub texts: bool,
+    pub timers: bool,
+    pub track_automations: bool,
+    pub master_automations: bool,
+    pub sections: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PasteDestination {
+    pub source_track: u32,
+    pub track: u32,
+    pub staff_map: Vec<u32>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", try_from = "String")]
+pub enum PastePlacement {
+    CurrentBar,
+    BeforeBar,
+}
+
+impl TryFrom<String> for PastePlacement {
+    type Error = String;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        match value.as_str() {
+            "currentBar" => Ok(Self::CurrentBar),
+            "beforeBar" => Ok(Self::BeforeBar),
+            _ => Err("Unsupported paste placement.".into()),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PasteOptions {
+    pub target: BeatTarget,
+    pub destinations: Vec<PasteDestination>,
+    pub count: u32,
+    pub placement: PastePlacement,
+    pub filters: PasteFilters,
+}
+
+impl PasteOptions {
+    fn validate(&self) -> Result<(), String> {
+        if !(1..=1000).contains(&self.count) {
+            return Err("Paste from 1 to 1000 repetitions.".into());
+        }
+        if self.destinations.is_empty() {
+            return Err("Paste needs at least one track destination.".into());
+        }
+        let mut sources = HashSet::new();
+        let mut tracks = HashSet::new();
+        for destination in &self.destinations {
+            if !sources.insert(destination.source_track) || !tracks.insert(destination.track) {
+                return Err("Paste source and destination tracks must each be distinct.".into());
+            }
+            let mut staves = HashSet::new();
+            if destination.staff_map.is_empty()
+                || destination
+                    .staff_map
+                    .iter()
+                    .any(|staff| !staves.insert(*staff))
+            {
+                return Err("Paste staff mappings must be nonempty and distinct.".into());
+            }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ScoreMetadata {
     pub sub_title: String,
@@ -623,6 +812,10 @@ pub enum EditCommand {
         kind: SustainKind,
         enabled: bool,
     },
+    PasteMusic {
+        clip: MusicClip,
+        options: PasteOptions,
+    },
     AddTrack {
         name: String,
         tuning: Vec<i32>,
@@ -925,6 +1118,10 @@ impl EditCommand {
     }
     pub fn validate(&self) -> Result<(), String> {
         match self {
+            Self::PasteMusic { clip, options } => {
+                clip.validate()?;
+                options.validate()?;
+            }
             Self::EraseSelection { selection }
             | Self::TransposeSelection { selection, .. }
             | Self::MoveSelectionStrings { selection, .. }
@@ -1251,6 +1448,275 @@ impl EditCommand {
 mod tests {
     use super::EditCommand;
     use serde_json::{Value, json};
+
+    fn clipboard_command() -> Value {
+        json!({"type": "pasteMusic", "clip": {
+            "format": "TabPlayerClip", "version": 1, "engineVersion": "1.8.4",
+            "mode": "singleTrack", "kind": "phrase", "scoreJson": "{\"tracks\":[]}",
+            "links": [{"from": 0, "to": 1, "kind": "tie", "slideOutType": null}]
+        }, "options": {
+            "target": {"track": 0, "staff": 0, "bar": 0, "voice": 0, "beat": 0},
+            "destinations": [{"sourceTrack": 0, "track": 1, "staffMap": [0]}],
+            "count": 1, "placement": "currentBar", "filters": {
+                "diagrams": true, "texts": false, "timers": true, "trackAutomations": false,
+                "masterAutomations": false, "sections": false
+            }
+        }})
+    }
+
+    #[test]
+    fn clipboard_command_roundtrips_phrase_and_multitrack_bars() {
+        let value = clipboard_command();
+        assert_eq!(serde_json::to_value(accepted(&value)).unwrap(), value);
+        let mut bars = value;
+        bars["clip"]["mode"] = json!("multiTrack");
+        bars["clip"]["kind"] = json!("bars");
+        bars["clip"]["links"] = json!([]);
+        bars["options"]["placement"] = json!("beforeBar");
+        bars["options"]["count"] = json!(1000);
+        bars["options"]["destinations"] = json!([
+            {"sourceTrack": 0, "track": 2, "staffMap": [1, 0]},
+            {"sourceTrack": 1, "track": 3, "staffMap": [0]}
+        ]);
+        bars["options"]["filters"]["masterAutomations"] = json!(true);
+        bars["options"]["filters"]["sections"] = json!(true);
+        assert_eq!(serde_json::to_value(accepted(&bars)).unwrap(), bars);
+    }
+
+    #[test]
+    fn clipboard_envelopes_require_all_fields_and_reject_unknown_fields() {
+        let value = clipboard_command();
+        accepted(&value);
+        for path in [
+            "",
+            "/clip",
+            "/clip/links/0",
+            "/options",
+            "/options/target",
+            "/options/destinations/0",
+            "/options/filters",
+        ] {
+            let mut unknown = value.clone();
+            unknown.pointer_mut(path).unwrap()["unexpected"] = json!(true);
+            rejected(&unknown);
+            for field in value.pointer(path).unwrap().as_object().unwrap().keys() {
+                let mut missing = value.clone();
+                missing
+                    .pointer_mut(path)
+                    .unwrap()
+                    .as_object_mut()
+                    .unwrap()
+                    .remove(field);
+                rejected(&missing);
+            }
+        }
+    }
+
+    #[test]
+    fn clipboard_pins_format_version_engine_and_named_modes() {
+        let original = clipboard_command();
+        for (path, invalid) in [
+            (
+                "/clip/format",
+                vec![json!("TabPlayer"), json!(1), json!(null)],
+            ),
+            (
+                "/clip/version",
+                vec![json!(0), json!(2), json!(1.5), json!("1"), json!(null)],
+            ),
+            (
+                "/clip/engineVersion",
+                vec![json!("1.8.3"), json!(1.8), json!(null)],
+            ),
+            (
+                "/clip/mode",
+                vec![json!("track"), json!({"singleTrack": null}), json!(null)],
+            ),
+            (
+                "/clip/kind",
+                vec![json!("notes"), json!({"phrase": null}), json!(null)],
+            ),
+            (
+                "/options/placement",
+                vec![json!("afterBar"), json!({"currentBar": null}), json!(null)],
+            ),
+        ] {
+            for invalid in invalid {
+                let mut value = original.clone();
+                *value.pointer_mut(path).unwrap() = invalid;
+                rejected(&value);
+            }
+        }
+    }
+
+    #[test]
+    fn clipboard_links_require_nullable_slide_type_and_unsigned_endpoints() {
+        let original = clipboard_command();
+        for kind in ["tie", "slur", "hammerPull", "slide"] {
+            let mut value = original.clone();
+            value["clip"]["links"][0]["kind"] = json!(kind);
+            value["clip"]["links"][0]["slideOutType"] = if kind == "slide" {
+                json!(1)
+            } else {
+                json!(null)
+            };
+            accepted(&value);
+            if kind == "slide" {
+                value["clip"]["links"][0]["slideOutType"] = json!(2);
+                accepted(&value);
+            }
+            for invalid in [
+                json!(0),
+                json!(3),
+                json!(1.5),
+                json!("1"),
+                json!({"shift": null}),
+            ] {
+                value["clip"]["links"][0]["slideOutType"] = invalid;
+                rejected(&value);
+            }
+            value["clip"]["links"][0]["slideOutType"] = if kind == "slide" {
+                json!(null)
+            } else {
+                json!(1)
+            };
+            rejected(&value);
+        }
+        for path in ["/clip/links/0/from", "/clip/links/0/to"] {
+            let mut value = original.clone();
+            *value.pointer_mut(path).unwrap() = json!(u32::MAX);
+            accepted(&value);
+            for invalid in [json!(-1), json!(4294967296_u64), json!(0.5), json!(null)] {
+                *value.pointer_mut(path).unwrap() = invalid;
+                rejected(&value);
+            }
+        }
+        for invalid in [json!("bend"), json!({"tie": null}), json!(null)] {
+            let mut value = original.clone();
+            value["clip"]["links"][0]["kind"] = invalid;
+            rejected(&value);
+        }
+        let mut duplicate = original.clone();
+        let links = duplicate["clip"]["links"].as_array_mut().unwrap();
+        links.push(links[0].clone());
+        rejected(&duplicate);
+        duplicate["clip"]["links"][1]["from"] = json!(1);
+        duplicate["clip"]["links"][1]["to"] = json!(2);
+        accepted(&duplicate);
+    }
+
+    #[test]
+    fn clipboard_destinations_and_staff_maps_are_nonempty_and_unique() {
+        let original = clipboard_command();
+        for path in ["/options/destinations", "/options/destinations/0/staffMap"] {
+            for invalid in [json!([]), json!(null), json!({})] {
+                let mut value = original.clone();
+                *value.pointer_mut(path).unwrap() = invalid;
+                rejected(&value);
+            }
+        }
+        let mut value = original.clone();
+        value["clip"]["kind"] = json!("bars");
+        value["clip"]["mode"] = json!("multiTrack");
+        value["options"]["placement"] = json!("beforeBar");
+        let mapping = value["options"]["destinations"][0].clone();
+        value["options"]["destinations"] = json!([mapping, mapping]);
+        rejected(&value);
+        value["options"]["destinations"][1]["track"] = json!(2);
+        rejected(&value);
+        value["options"]["destinations"][1]["track"] = json!(1);
+        value["options"]["destinations"][1]["sourceTrack"] = json!(1);
+        rejected(&value);
+        value["options"]["destinations"][1]["track"] = json!(2);
+        accepted(&value);
+        value["options"]["destinations"][0]["staffMap"] = json!([0, 0]);
+        rejected(&value);
+        value["options"]["destinations"][0]["staffMap"] = json!([1, 0]);
+        accepted(&value);
+    }
+
+    #[test]
+    fn clipboard_destination_indices_count_and_filters_have_strict_domains() {
+        let original = clipboard_command();
+        for path in [
+            "/options/target/track",
+            "/options/target/staff",
+            "/options/target/bar",
+            "/options/target/voice",
+            "/options/target/beat",
+            "/options/destinations/0/sourceTrack",
+            "/options/destinations/0/track",
+            "/options/destinations/0/staffMap/0",
+        ] {
+            let mut value = original.clone();
+            *value.pointer_mut(path).unwrap() = json!(u32::MAX);
+            accepted(&value);
+            for invalid in [json!(-1), json!(4294967296_u64), json!(0.5), json!(null)] {
+                *value.pointer_mut(path).unwrap() = invalid;
+                rejected(&value);
+            }
+        }
+        for count in [json!(0), json!(1001), json!(-1), json!(0.5), json!(null)] {
+            let mut value = original.clone();
+            value["options"]["count"] = count;
+            rejected(&value);
+        }
+        for field in [
+            "diagrams",
+            "texts",
+            "timers",
+            "trackAutomations",
+            "masterAutomations",
+            "sections",
+        ] {
+            for flag in [true, false] {
+                let mut value = original.clone();
+                value["options"]["filters"][field] = json!(flag);
+                accepted(&value);
+            }
+            for invalid in [json!(0), json!(1), json!("true"), json!(null)] {
+                let mut value = original.clone();
+                value["options"]["filters"][field] = invalid;
+                rejected(&value);
+            }
+        }
+    }
+
+    #[test]
+    fn clipboard_score_json_requires_valid_json_object() {
+        for source in ["{}", "{\"tracks\":[],\"text\":\"♫ café\"}", " { }\r\n"] {
+            let mut value = clipboard_command();
+            value["clip"]["scoreJson"] = json!(source);
+            accepted(&value);
+        }
+        for source in [
+            "",
+            "{",
+            "{}[]",
+            "[]",
+            "null",
+            "1",
+            "\"score\"",
+            "{\"tempo\":NaN}",
+            "{\"tempo\":1e999}",
+        ] {
+            let mut value = clipboard_command();
+            value["clip"]["scoreJson"] = json!(source);
+            rejected(&value);
+        }
+    }
+
+    #[test]
+    fn clipboard_score_json_budget_counts_utf8_bytes() {
+        for (extra, valid) in [("", true), (" ", false)] {
+            let mut value = clipboard_command();
+            let source = format!("{{\"text\":\"{}\"}} {extra}", "é".repeat(63_999_994));
+            assert_eq!(source.len(), 128_000_000 + extra.len());
+            value["clip"]["scoreJson"] = Value::String(source);
+            let command: EditCommand = serde_json::from_value(value).unwrap();
+            assert_eq!(command.validate().is_ok(), valid);
+        }
+    }
 
     fn music_selections() -> Vec<Value> {
         vec![

@@ -9,8 +9,22 @@ use tabplayer_lib::{
     settings::DocumentSettings,
 };
 
+fn practice(speed: f64, enabled: bool) -> PracticeSettings {
+    PracticeSettings {
+        tempo: tabplayer_lib::audio::practice::PracticeTempo::Relative { ratio: speed },
+        metronome: tabplayer_lib::audio::practice::MetronomeSettings {
+            enabled,
+            volume: 0.4,
+            visual: false,
+        },
+        count_in: tabplayer_lib::audio::practice::CountInSettings {
+            bars: 0,
+            between_loops: false,
+        },
+    }
+}
 fn renderer(generation: u64) -> Box<Renderer> {
-    let plan:PlaybackPlan=serde_json::from_value(serde_json::json!({"generation":generation,"ppq":960,"durationTick":7680,"durationMs":4000,"tracks":[{"id":"gm","program":0,"percussion":false}],"tempos":[{"tick":0,"bpm":120}],"occurrences":[{"bar":0,"occurrence":0,"startTick":0,"endTick":3840,"startMs":0,"endMs":2000},{"bar":1,"occurrence":0,"startTick":3840,"endTick":7680,"startMs":2000,"endMs":4000}],"notes":[],"midi":[]})).unwrap();
+    let plan:PlaybackPlan=serde_json::from_value(serde_json::json!({"generation":generation,"ppq":960,"durationTick":7680,"durationMs":4000,"tracks":[{"id":"gm","program":0,"percussion":false}],"tempos":[{"tick":0,"bpm":120}],"occurrences":[{"bar":0,"occurrence":0,"meterNumerator":4,"meterDenominator":4,"startTick":0,"endTick":3840,"startMs":0,"endMs":2000},{"bar":1,"occurrence":0,"meterNumerator":4,"meterDenominator":4,"startTick":3840,"endTick":7680,"startMs":2000,"endMs":4000}],"notes":[],"midi":[]})).unwrap();
     let resources = Arc::new(
         AudioResources::load_for_requests(
             &PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/audio"),
@@ -51,9 +65,9 @@ fn fresh_generation_cannot_report_the_previous_document_signal() {
     let mut transport = CallbackTransport::headless(48_000);
     transport.install(renderer(1), 1, false);
     transport
-        .command(TransportCommand::SetMetronome {
+        .command(TransportCommand::SetPractice {
             generation: 1,
-            enabled: true,
+            settings: practice(0.5, true),
         })
         .unwrap();
     transport
@@ -92,9 +106,9 @@ fn inclusive_loop_seek_pause_resume() {
     let mut transport = CallbackTransport::headless(48_000);
     transport.install(renderer(1), 1, false);
     transport
-        .command(TransportCommand::SetSpeed {
+        .command(TransportCommand::SetPractice {
             generation: 1,
-            speed: 0.5,
+            settings: practice(0.5, false),
         })
         .unwrap();
     transport
@@ -144,15 +158,15 @@ fn same_document_generation_replacement_retains_practice_and_clears_loop() {
     let mut transport = CallbackTransport::headless(48_000);
     transport.install(renderer(1), 1, false);
     transport
-        .command(TransportCommand::SetSpeed {
+        .command(TransportCommand::SetPractice {
             generation: 1,
-            speed: 0.5,
+            settings: practice(0.5, false),
         })
         .unwrap();
     transport
-        .command(TransportCommand::SetMetronome {
+        .command(TransportCommand::SetPractice {
             generation: 1,
-            enabled: true,
+            settings: practice(0.5, true),
         })
         .unwrap();
     transport
@@ -165,15 +179,7 @@ fn same_document_generation_replacement_retains_practice_and_clears_loop() {
     transport
         .command(TransportCommand::Invalidate { generation: 2 })
         .unwrap();
-    transport.install_with_practice(
-        renderer(2),
-        2,
-        false,
-        PracticeSettings {
-            speed: 0.5,
-            metronome: true,
-        },
-    );
+    transport.install_with_practice(renderer(2), 2, false, practice(0.5, true));
     assert_eq!(transport.status().speed, 0.5);
     assert!(transport.status().metronome);
     assert!(!transport.status().playing);
@@ -213,9 +219,9 @@ fn invalid_controls_preserve_transport() {
     transport.install(renderer(1), 1, false);
     assert!(
         transport
-            .command(TransportCommand::SetSpeed {
+            .command(TransportCommand::SetPractice {
                 generation: 1,
-                speed: f64::NAN
+                settings: practice(f64::NAN, false)
             })
             .is_err()
     );
@@ -255,7 +261,7 @@ fn default_device_playback_and_recovery() {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/audio"),
         Arc::new(move |status| publisher.lock().unwrap().push(status)),
     );
-    let plan:PlaybackPlan=serde_json::from_value(serde_json::json!({"generation":10,"ppq":960,"durationTick":3840,"durationMs":2000,"tracks":[{"id":"gm","program":0,"percussion":false}],"tempos":[{"tick":0,"bpm":120}],"occurrences":[{"bar":0,"occurrence":0,"startTick":0,"endTick":3840,"startMs":0,"endMs":2000}],"notes":[],"midi":[{"type":"noteOn","trackId":"gm","tick":0,"channel":0,"key":69,"velocity":100},{"type":"noteOff","trackId":"gm","tick":1920,"channel":0,"key":69,"velocity":0}]})).unwrap();
+    let plan:PlaybackPlan=serde_json::from_value(serde_json::json!({"generation":10,"ppq":960,"durationTick":3840,"durationMs":2000,"tracks":[{"id":"gm","program":0,"percussion":false}],"tempos":[{"tick":0,"bpm":120}],"occurrences":[{"bar":0,"occurrence":0,"meterNumerator":4,"meterDenominator":4,"startTick":0,"endTick":3840,"startMs":0,"endMs":2000}],"notes":[],"midi":[{"type":"noteOn","trackId":"gm","tick":0,"channel":0,"key":69,"velocity":100},{"type":"noteOff","trackId":"gm","tick":1920,"channel":0,"key":69,"velocity":0}]})).unwrap();
     service
         .prepare(plan.clone(), DocumentSettings::default(), None)
         .unwrap();
@@ -302,15 +308,15 @@ fn default_device_playback_and_recovery() {
         .unwrap();
     wait(&|s| s.playing);
     service
-        .command(TransportCommand::SetSpeed {
+        .command(TransportCommand::SetPractice {
             generation: 10,
-            speed: 0.5,
+            settings: practice(0.5, false),
         })
         .unwrap();
     service
-        .command(TransportCommand::SetMetronome {
+        .command(TransportCommand::SetPractice {
             generation: 10,
-            enabled: true,
+            settings: practice(0.5, true),
         })
         .unwrap();
     wait(&|s| s.speed == 0.5 && s.metronome);
@@ -346,10 +352,7 @@ fn default_device_playback_and_recovery() {
             edited,
             DocumentSettings::default(),
             None,
-            PracticeSettings {
-                speed: 0.5,
-                metronome: true,
-            },
+            practice(0.5, true),
         )
         .unwrap();
     wait(&|s| {

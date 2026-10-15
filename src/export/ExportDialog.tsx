@@ -1,7 +1,7 @@
 import { useEffect,useRef,useState,type KeyboardEvent } from 'react';
 import type { model } from '@coderline/alphatab';
 import { validateSelection,type AudioExportOptions,type ExportOptions,type ExportProgress,type PrintLayout } from './types';
-export function ExportDialog({score,layout,busy,progress,failure,onExport,onCancel}:{score:model.Score;layout:PrintLayout;busy:boolean;progress?:ExportProgress;failure?:string|null;onExport:(options:ExportOptions)=>void;onCancel:()=>void}) {
+export function ExportDialog({score,layout,busy,progress,failure,currentSpeedAvailable,onExport,onCancel}:{score:model.Score;layout:PrintLayout;busy:boolean;progress?:ExportProgress;failure?:string|null;currentSpeedAvailable:boolean;onExport:(options:ExportOptions)=>void;onCancel:()=>void}) {
   const [format,setFormat]=useState<ExportOptions['format']>('gp');const [tracks,setTracks]=useState(score.tracks.map(t=>t.index));
   const [staves,setStaves]=useState<Record<number,number[]>>(Object.fromEntries(score.tracks.map(t=>[t.index,t.staves.map(s=>s.index)])));
   const [range,setRange]=useState(false),[first,setFirst]=useState('1'),[last,setLast]=useState(String(score.masterBars.length));
@@ -16,6 +16,7 @@ export function ExportDialog({score,layout,busy,progress,failure,onExport,onCanc
     return ()=>{if(opener instanceof HTMLElement&&opener.isConnected)opener.focus();};
   },[]);
   useEffect(()=>{if(busy)cancel.current?.focus();},[busy]);
+  useEffect(()=>{if(!currentSpeedAvailable)setAudio(previous=>previous.speed==='current'?{...previous,speed:'saved'}:previous);},[currentSpeedAvailable]);
   useEffect(()=>{
     setTracks(selected=>selected.filter(index=>score.tracks[index]!==undefined));
     setStaves(Object.fromEntries(score.tracks.map(track=>[track.index,track.staves.map(staff=>staff.index)])));
@@ -58,7 +59,9 @@ export function ExportDialog({score,layout,busy,progress,failure,onExport,onCanc
       {(format==='wav'||format==='stems')&&<>
         <label>Sample rate<select value={audio.sampleRate} onChange={e=>setAudio({...audio,sampleRate:Number(e.target.value) as AudioExportOptions['sampleRate']})}><option value="44100">44.1 kHz</option><option value="48000">48 kHz</option></select></label>
         <label>Bit depth<select value={audio.bitDepth} onChange={e=>setAudio({...audio,bitDepth:Number(e.target.value) as AudioExportOptions['bitDepth']})}><option value="16">16 bit</option><option value="24">24 bit</option></select></label>
-        <label>Speed<select value={audio.speed} onChange={e=>setAudio({...audio,speed:e.target.value as AudioExportOptions['speed']})}><option value="saved">100%</option><option value="current">Current practice speed</option></select></label>
+        <label>Speed<select value={audio.speed} onChange={e=>setAudio({...audio,speed:e.target.value as AudioExportOptions['speed']})}><option value="saved">100%</option><option value="current" disabled={!currentSpeedAvailable}>Current speed coefficient</option></select></label>
+        {!currentSpeedAvailable&&<p>Fixed BPM has no single speed coefficient. Export at saved speed is available.</p>}
+        <p>Audio export does not include count-in or progressive speed changes.</p>
         <label><input type="checkbox" checked={audio.metronome} onChange={e=>setAudio({...audio,metronome:e.target.checked})}/>Metronome</label>
         <label><input type="checkbox" checked={audio.backing} onChange={e=>setAudio({...audio,backing:e.target.checked})}/>Include backing</label>
         <label>Effect tail (seconds)<input type="number" min="0" max="30" step=".1" value={audio.tailSeconds} onChange={e=>setAudio({...audio,tailSeconds:Number(e.target.value)})}/></label>

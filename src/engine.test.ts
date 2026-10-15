@@ -32,6 +32,16 @@ function linkedProject(kind:'tie'|'slide'|'slur'|'hammer') {
 }
 
 describe('score editing', () => {
+  it.each(['removeNote','setRest','deleteBeat','removeMeasure'] as const)('repairs duplicate incoming ties after legacy %s',type=>{
+    const source=buildScore(base()),origin=source.tracks[0].staves[0].bars[0].voices[0].beats[3],destination=source.tracks[0].staves[0].bars[1].voices[0].beats[0];
+    const first=new model.Note();first.string=1;first.fret=3;origin.addNote(first);
+    for(let index=0;index<2;index++){const note=new model.Note();note.string=1;note.fret=3;note.isTieDestination=true;destination.addNote(note);}
+    source.finish(new Settings());const project=imported(source),before=JSON.stringify(project);
+    const edit=type==='removeMeasure'?{type,bar:0}:type==='removeNote'?{type,target:originTarget,string:1}:{type,target:originTarget};
+    const changed=previewEdit(project,edit),survivors=changed.score.tracks[0].staves[0].bars[type==='removeMeasure'?0:1].voices[0].beats[0].notes;
+    expect(survivors).toHaveLength(2);expect(survivors.every(note=>!note.isTieDestination&&note.tieOrigin===null)).toBe(true);
+    expect(()=>buildScore(imported(changed.score))).not.toThrow();expect(JSON.stringify(project)).toBe(before);
+  });
   it.each(['removeNote','setRest','deleteBeat','removeMeasure'] as const)('repairs imported cross-measure ties after %s',type=>{
     const project=linkedProject('tie');
     expect(describeSelection(buildScore(project),destinationTarget).beat!.notes[0].isTieDestination).toBe(true);

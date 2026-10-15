@@ -19,7 +19,7 @@ const commands=[
 ];
 const validate=(edit:unknown)=>validateProject({...blankProject(),edits:[edit]}).edits;
 it('accepts the seven range/measure commands and every selection variant',()=>{
-  expect(shared.slice(51)).toEqual(commands);
+  expect(shared.slice(51,58)).toEqual(commands);
   for(const command of commands)expect(validate(command)).toEqual([command]);
   for(const selection of [notes,range,bars])expect(validate({type:'eraseSelection',selection})).toEqual([{type:'eraseSelection',selection}]);
 });

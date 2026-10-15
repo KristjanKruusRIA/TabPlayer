@@ -12,7 +12,7 @@ import { validateSelection,type ExportOptions,type ExportProgress } from './type
 import { scoreFromJson } from '../model-clone';
 import { copyGpInterchangeSource } from '../interchange/gp';
 import { captureNoteLinks,restoreNoteLinks } from '../editor/links';
-export function useExportCoordinator({score,settings,currentSpeed,bridge,native=nativeExportBridge,embeddedBacking=null}:{score:model.Score;settings:DocumentSettings;currentSpeed:number;bridge:Pick<NativeBridge,'confirmExport'|'exportGp'>;native?:ExportNativeBridge;embeddedBacking?:Uint8Array|null}) {
+export function useExportCoordinator({score,settings,currentSpeed,bridge,native=nativeExportBridge,embeddedBacking=null}:{score:model.Score;settings:DocumentSettings;currentSpeed:number|null;bridge:Pick<NativeBridge,'confirmExport'|'exportGp'>;native?:ExportNativeBridge;embeddedBacking?:Uint8Array|null}) {
   const [busy,setBusy]=useState(false),[progress,setProgress]=useState<ExportProgress>();
   const pending=useRef(false),cancelled=useRef(false),job=useRef<string|null>(null),alive=useRef(true),generation=useRef(0);
   useEffect(()=>{alive.current=true;return()=>{alive.current=false;cancelled.current=true;if(job.current)void native.cancel(job.current).catch(()=>{});};},[native]);
@@ -27,8 +27,13 @@ export function useExportCoordinator({score,settings,currentSpeed,bridge,native=
   async function run(options:ExportOptions):Promise<boolean>{
     if(pending.current)throw new Error('An export is already running.');
     validateSelection(score.tracks.length,score.masterBars.length,options.selection,score.tracks.map(t=>t.staves.length));
+    let speed=1;
+    if((options.format==='wav'||options.format==='stems')&&options.audio.speed==='current'){
+      if(currentSpeed===null)throw new Error('Fixed BPM has no single speed coefficient. Export at saved speed is available.');
+      speed=currentSpeed;
+    }
     const json=model.JsonConverter.scoreToJson(score),ids=score.tracks.map(trackIdentity),frozenSettings=structuredClone(settings),embedded=embeddedBacking?.slice()??null;
-    const frozenOptions=structuredClone(options),speed=currentSpeed;pending.current=true;cancelled.current=false;job.current=null;setBusy(true);setProgress(undefined);
+    const frozenOptions=structuredClone(options);pending.current=true;cancelled.current=false;job.current=null;setBusy(true);setProgress(undefined);
     try{
       const copy=scoreFromJson(json,new Settings()),selection=frozenOptions.selection;
       restoreNoteLinks(copy,captureNoteLinks(score));copyGpInterchangeSource(score,copy);
@@ -38,7 +43,7 @@ export function useExportCoordinator({score,settings,currentSpeed,bridge,native=
       const audio=frozenOptions.audio;
       const plan=buildPlaybackPlanFromJson(model.JsonConverter.scoreToJson(selectStaves(copy,selection)),ids,++generation.current);
       if(cancelled.current)return false;
-      return await watch(await native.exportAudio({plan,settings:frozenSettings,embeddedBytes:embedded?Array.from(embedded):null,stems:frozenOptions.format==='stems',request:{tracks:selection.tracks.map(i=>({id:ids[i],name:copy.tracks[i].name,preset:frozenSettings.sounds[ids[i]]?.presetId??'gm',kind:'score'})),range:selection.range,format:{sampleRate:audio.sampleRate,bitDepth:audio.bitDepth},speed:audio.speed==='current'?speed:1,metronome:audio.metronome,tailSeconds:audio.tailSeconds,includeBacking:audio.backing,includeMix:audio.includeMix}}));
+      return await watch(await native.exportAudio({plan,settings:frozenSettings,embeddedBytes:embedded?Array.from(embedded):null,stems:frozenOptions.format==='stems',request:{tracks:selection.tracks.map(i=>({id:ids[i],name:copy.tracks[i].name,preset:frozenSettings.sounds[ids[i]]?.presetId??'gm',kind:'score'})),range:selection.range,format:{sampleRate:audio.sampleRate,bitDepth:audio.bitDepth},speed,metronome:audio.metronome,tailSeconds:audio.tailSeconds,includeBacking:audio.backing,includeMix:audio.includeMix}}));
     }finally{pending.current=false;job.current=null;if(alive.current)setBusy(false);}
   }
   return {busy,progress,run,cancel};

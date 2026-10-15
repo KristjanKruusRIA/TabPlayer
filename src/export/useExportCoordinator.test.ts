@@ -25,6 +25,36 @@ it.each([true,false])('freezes exact raw and hidden lyrics through the export di
   expect(getTrackLyrics(score,0).lines[0].text).toBe('Later');
 });
 function native():ExportNativeBridge{return {exportPdf:async()=>null,exportMidi:async()=>true,exportAudio:async()=>null,status:async()=>null,cancel:async()=>{}};}
+it('rejects an unavailable current coefficient before launching or entering a native job',async()=>{
+  const score=buildScore(blankProject()),api=native(),exportAudio=vi.fn(api.exportAudio);api.exportAudio=exportAudio;
+  const bridge={confirmExport:async()=>true,exportGp:async()=>true};
+  const {result}=renderHook(()=>useExportCoordinator({score,settings:defaultDocumentSettings(),currentSpeed:null,bridge,native:api}));
+  await act(async()=>{await expect(result.current.run({format:'wav',selection:{tracks:[0],range:null},audio:{sampleRate:48000,bitDepth:16,speed:'current',metronome:false,tailSeconds:0,backing:false,includeMix:false}})).rejects.toThrow(/fixed BPM.*saved speed/i);});
+  expect(exportAudio).not.toHaveBeenCalled();expect(result.current.busy).toBe(false);expect(result.current.progress).toBeUndefined();
+});
+it('exports saved speed and interchange files when fixed BPM has no coefficient',async()=>{
+  const score=buildScore(blankProject()),api=native();let payload:NativeAudioExportPayload|undefined, gp:Uint8Array|undefined, midi:Uint8Array|undefined;
+  api.exportAudio=async value=>{payload=value;return 'saved';};api.status=async()=>({id:'saved',frames:1,totalFrames:1,status:'complete'});api.exportMidi=async bytes=>{midi=bytes;return true;};
+  const bridge={confirmExport:async()=>true,exportGp:async(bytes:Uint8Array)=>{gp=bytes;return true;}};
+  const {result}=renderHook(()=>useExportCoordinator({score,settings:defaultDocumentSettings(),currentSpeed:null,bridge,native:api}));
+  await act(async()=>{expect(await result.current.run({format:'wav',selection:{tracks:[0],range:null},audio:{sampleRate:48000,bitDepth:16,speed:'saved',metronome:false,tailSeconds:0,backing:false,includeMix:false}})).toBe(true);});
+  expect(payload!.request.speed).toBe(1);expect(payload!.request.metronome).toBe(false);
+  await act(async()=>{expect(await result.current.run({format:'gp',selection:{tracks:[0],range:null}})).toBe(true);});
+  await act(async()=>{expect(await result.current.run({format:'midi',selection:{tracks:[0],range:null}})).toBe(true);});
+  expect(importer.ScoreLoader.loadScoreFromBytes(gp!,new Settings()).masterBars).toHaveLength(4);expect(Array.from(midi!.slice(0,4))).toEqual([77,84,104,100]);
+});
+it('freezes one progressive coefficient and explicit audio options when the job starts',async()=>{
+  const score=buildScore(blankProject()),api=native();let payload:NativeAudioExportPayload|undefined, finish!:(id:string)=>void;
+  api.exportAudio=async value=>{payload=value;return new Promise<string>(resolve=>{finish=resolve;});};api.status=async()=>({id:'frozen',frames:1,totalFrames:1,status:'complete'});
+  const bridge={confirmExport:async()=>true,exportGp:async()=>true},settings=defaultDocumentSettings();
+  const {result,rerender}=renderHook(({ratio}:{ratio:number|null})=>useExportCoordinator({score,settings,currentSpeed:ratio,bridge,native:api}),{initialProps:{ratio:.7 as number|null}});
+  const options={format:'wav' as const,selection:{tracks:[0],range:null},audio:{sampleRate:48000 as const,bitDepth:16 as const,speed:'current' as const,metronome:true,tailSeconds:0,backing:false,includeMix:false}};
+  let pending!:Promise<boolean>;act(()=>{pending=result.current.run(options);});
+  rerender({ratio:.9});options.audio.metronome=false;options.audio.tailSeconds=8;rerender({ratio:null});
+  finish('frozen');await act(async()=>{expect(await pending).toBe(true);});
+  expect(payload!.request.speed).toBe(.7);expect(payload!.request.metronome).toBe(true);expect(payload!.request.tailSeconds).toBe(0);
+  expect(payload!.request).not.toHaveProperty('countIn');expect(payload!.request).not.toHaveProperty('practice');
+});
 it('freezes GP music before awaiting confirmation and clears busy when destination cancels',async()=>{
   const score=buildScore(blankProject());score.title='Frozen title';let allow!:(v:boolean)=>void;let bytes:Uint8Array|undefined;
   const bridge={confirmExport:()=>new Promise<boolean>(r=>{allow=r;}),exportGp:async(data:Uint8Array)=>{bytes=data;return false;}};

@@ -49,7 +49,7 @@ impl RenderSchedule {
         plan.validate()?;
         if ![44100, 48000].contains(&rate)
             || !speed.is_finite()
-            || !(0.25..=2.0).contains(&speed)
+            || !(0.1..=3.0).contains(&speed)
             || !tail_seconds.is_finite()
             || !(0.0..=30.0).contains(&tail_seconds)
             || !whole_seconds.is_finite()
@@ -362,7 +362,7 @@ mod tests {
                 .unwrap(),
             ),
         });
-        let plan:Arc<PlaybackPlan>=Arc::new(serde_json::from_value(serde_json::json!({"generation":1,"ppq":960,"durationTick":3840,"durationMs":2000,"tracks":[{"id":"a","program":24,"percussion":false}],"tempos":[{"tick":0,"bpm":120}],"occurrences":[{"bar":0,"occurrence":0,"startTick":0,"endTick":3840,"startMs":0,"endMs":2000}],"notes":[{"id":"n","trackId":"a","source":{"target":{"track":0,"staff":0,"bar":0,"voice":0,"beat":0},"string":1},"occurrence":0,"startTick":960,"endTick":1920,"key":57,"velocity":100,"articulation":"picked","legatoFrom":null,"pitch":[{"tick":960,"semitones":0}]}],"midi":[]})).unwrap());
+        let plan:Arc<PlaybackPlan>=Arc::new(serde_json::from_value(serde_json::json!({"generation":1,"ppq":960,"durationTick":3840,"durationMs":2000,"tracks":[{"id":"a","program":24,"percussion":false}],"tempos":[{"tick":0,"bpm":120}],"occurrences":[{"bar":0,"occurrence":0,"meterNumerator":4,"meterDenominator":4,"startTick":0,"endTick":3840,"startMs":0,"endMs":2000}],"notes":[{"id":"n","trackId":"a","source":{"target":{"track":0,"staff":0,"bar":0,"voice":0,"beat":0},"string":1},"occurrence":0,"startTick":960,"endTick":1920,"key":57,"velocity":100,"articulation":"picked","legatoFrom":null,"pitch":[{"tick":960,"semitones":0}]}],"midi":[]})).unwrap());
         let request = AudioExportRequest {
             tracks: vec![StemTrack {
                 id: "a".into(),
@@ -440,7 +440,7 @@ mod tests {
     }
     #[test]
     fn selected_repeated_bars_have_exact_shared_frame_budgets_and_tail() {
-        let plan:PlaybackPlan=serde_json::from_value(serde_json::json!({"generation":1,"ppq":960,"durationTick":11520,"durationMs":6000,"tracks":[{"id":"base/0","program":25,"percussion":false}],"tempos":[{"tick":0,"bpm":120}],"occurrences":[{"bar":0,"occurrence":0,"startTick":0,"endTick":3840,"startMs":0,"endMs":2000},{"bar":1,"occurrence":0,"startTick":3840,"endTick":7680,"startMs":2000,"endMs":4000},{"bar":0,"occurrence":1,"startTick":7680,"endTick":11520,"startMs":4000,"endMs":6000}],"notes":[],"midi":[]})).unwrap();
+        let plan:PlaybackPlan=serde_json::from_value(serde_json::json!({"generation":1,"ppq":960,"durationTick":11520,"durationMs":6000,"tracks":[{"id":"base/0","program":25,"percussion":false}],"tempos":[{"tick":0,"bpm":120}],"occurrences":[{"bar":0,"occurrence":0,"meterNumerator":4,"meterDenominator":4,"startTick":0,"endTick":3840,"startMs":0,"endMs":2000},{"bar":1,"occurrence":0,"meterNumerator":4,"meterDenominator":4,"startTick":3840,"endTick":7680,"startMs":2000,"endMs":4000},{"bar":0,"occurrence":1,"meterNumerator":4,"meterDenominator":4,"startTick":7680,"endTick":11520,"startMs":4000,"endMs":6000}],"notes":[],"midi":[]})).unwrap();
         let schedule = RenderSchedule::new(
             &plan,
             Some(MeasureRange { first: 0, last: 0 }),
@@ -457,6 +457,13 @@ mod tests {
         assert_eq!(schedule.tail_frames, 24000);
         let whole = RenderSchedule::new(&plan, None, 44100, 1.0, 0.0, 8.0).unwrap();
         assert_eq!(whole.total_frames, 352800);
+        for speed in [0.1, 1.23, 3.0] {
+            let schedule = RenderSchedule::new(&plan, None, 48000, speed, 0.0, 6.0).unwrap();
+            assert_eq!(schedule.total_frames, (288000.0 / speed).round() as u64);
+        }
+        for speed in [0.099, 3.001, f64::NAN, f64::INFINITY] {
+            assert!(RenderSchedule::new(&plan, None, 48000, speed, 0.0, 6.0).is_err());
+        }
         assert!(
             RenderSchedule::new(
                 &plan,
@@ -471,7 +478,7 @@ mod tests {
     }
     #[test]
     fn selected_first_measure_keeps_its_generated_grace_prelude() {
-        let plan:PlaybackPlan=serde_json::from_value(serde_json::json!({"generation":1,"ppq":960,"durationTick":3960,"durationMs":2062.5,"tracks":[{"id":"a","program":24,"percussion":false}],"tempos":[{"tick":0,"bpm":120}],"occurrences":[{"bar":0,"occurrence":0,"startTick":120,"endTick":3960,"startMs":62.5,"endMs":2062.5}],"notes":[{"id":"grace","trackId":"a","source":{"target":{"track":0,"staff":0,"bar":0,"voice":0,"beat":0},"string":1},"occurrence":0,"startTick":0,"endTick":120,"key":64,"velocity":90,"articulation":"picked","legatoFrom":null,"pitch":[{"tick":0,"semitones":0}]}],"midi":[]})).unwrap();
+        let plan:PlaybackPlan=serde_json::from_value(serde_json::json!({"generation":1,"ppq":960,"durationTick":3960,"durationMs":2062.5,"tracks":[{"id":"a","program":24,"percussion":false}],"tempos":[{"tick":0,"bpm":120}],"occurrences":[{"bar":0,"occurrence":0,"meterNumerator":4,"meterDenominator":4,"startTick":120,"endTick":3960,"startMs":62.5,"endMs":2062.5}],"notes":[{"id":"grace","trackId":"a","source":{"target":{"track":0,"staff":0,"bar":0,"voice":0,"beat":0},"string":1},"occurrence":0,"startTick":0,"endTick":120,"key":64,"velocity":90,"articulation":"picked","legatoFrom":null,"pitch":[{"tick":0,"semitones":0}]}],"midi":[]})).unwrap();
         let schedule = RenderSchedule::new(
             &plan,
             Some(MeasureRange { first: 0, last: 0 }),

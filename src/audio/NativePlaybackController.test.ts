@@ -6,12 +6,16 @@ import { NativePlaybackController } from './NativePlaybackController';
 import type { NativeAudioBridge, NativeAudioStatus } from './bridge';
 import { buildPlaybackPlan } from './plan';
 import type { PlanNote } from './types';
+import { DEFAULT_PRACTICE,type PracticeSettings,type PracticeStatus } from './practice-types';
+
+const defaults=():PracticeSettings=>structuredClone(DEFAULT_PRACTICE);
+function practiceStatus(settings=defaults(),change:Partial<PracticeStatus>={}):PracticeStatus{return {settings,phase:'idle',countInRemaining:0,completedPasses:0,effectiveRatio:settings.tempo.kind==='relative'?settings.tempo.ratio:settings.tempo.kind==='progressive'?settings.tempo.start:1,currentBpm:120,pulse:null,...change};}
 
 function fixture(preparePlan?:ConstructorParameters<typeof NativePlaybackController>[0]['preparePlan']) {
   let receive: (status:NativeAudioStatus)=>void=()=>{};
   const bridge:NativeAudioBridge={prepare:vi.fn(async()=>{}),command:vi.fn(async()=>{}),setMix:vi.fn(async()=>{}),devices:vi.fn(async()=>[]),status:vi.fn(async()=>null),subscribe:vi.fn(async listener=>{receive=listener;return()=>{};}),stageBacking:vi.fn(async()=>null),stageEmbeddedBacking:vi.fn(async()=>null)};
   const onEdit=vi.fn();const player=new NativePlaybackController({bridge,onEdit,preparePlan});
-  const emit=(change:Partial<NativeAudioStatus>={})=>receive({generation:player.generation,ready:true,playing:false,tick:0,seconds:0,durationSeconds:8,speed:1,metronome:false,error:null,deviceId:null,...change});
+  const emit=(change:Partial<NativeAudioStatus>={})=>{const settings=defaults();settings.tempo={kind:'relative',ratio:change.speed??1};settings.metronome.enabled=change.metronome??false;receive({generation:player.generation,ready:true,playing:false,tick:0,seconds:0,durationSeconds:8,speed:1,metronome:false,error:null,deviceId:null,loop:null,practice:practiceStatus(settings,{phase:change.playing?'playing':'paused'}),...change});};
   return {bridge,onEdit,player,emit};
 }
 async function soundingFixture() {
@@ -104,24 +108,24 @@ it('late_generation_cannot_replace_score',async()=>{
   const pending=next.loadDocument(p,first);const old=next.generation;
   const other={...p,base:{...p.base,kind:'blank' as const,title:'Next',artist:'',tempo:120,tuning:[64,59,55,50,45,40],measureCount:4}};
   await next.loadDocument(other,buildDocument(other));release(buildPlaybackPlan(first.score,old));await pending;
-  expect(bridge.prepare).toHaveBeenCalledTimes(1);expect(bridge.prepare).toHaveBeenCalledWith(expect.objectContaining({generation:next.generation}),expect.anything(),null,'blank',{speed:1,metronome:false});
+  expect(bridge.prepare).toHaveBeenCalledTimes(1);expect(bridge.prepare).toHaveBeenCalledWith(expect.objectContaining({generation:next.generation}),expect.anything(),null,'blank',DEFAULT_PRACTICE);
   emit({generation:old,playing:true});expect(next.getState().playing).toBe(false);next.destroy();
 });
 it('inclusive_loop_seek_pause_resume',async()=>{
   const {player,bridge,emit}=fixture();const p=blankProject();await player.loadDocument(p,buildDocument(p));emit();
   player.setLoop(1,2);expect(bridge.command).toHaveBeenLastCalledWith({type:'setLoop',startTick:3840,endTick:11520,generation:player.generation});
   player.seekToMeasure(3);expect(bridge.command).toHaveBeenLastCalledWith({type:'seekTick',tick:11520,generation:player.generation});
-  player.setSpeed(25);expect(()=>player.setSpeed(24)).toThrow('25%');emit({playing:true,seconds:6,tick:11520,speed:.25});player.pause();expect(player.getState().playing).toBe(true);emit({seconds:6,tick:11520,speed:.25});expect(player.getState()).toMatchObject({playing:false,time:6000,speed:25,measure:3});player.destroy();
+  player.setSpeed(10);expect(()=>player.setSpeed(9)).toThrow('10%');emit({playing:true,seconds:6,tick:11520,speed:.25});player.pause();expect(player.getState().playing).toBe(true);emit({seconds:6,tick:11520,speed:.25});expect(player.getState()).toMatchObject({playing:false,time:6000,speed:25,measure:3});player.destroy();
 });
 it('retains acknowledged speed and metronome across musical edit undo and redo in one document',async()=>{
   const {player,bridge,emit}=fixture();const project=blankProject(),built=buildDocument(project);
-  bridge.prepare=vi.fn(async(_plan,_settings,_embedded,_sourceKey?:string,practice?:{speed:number;metronome:boolean})=>emit({speed:practice?.speed??1,metronome:practice?.metronome??false}));
-  await player.loadDocument(project,built,0,0);player.setSpeed(50);player.setMetronome(.4);emit({speed:.5,metronome:true});
+  bridge.prepare=vi.fn(async(_plan,_settings,_embedded,_sourceKey?:string,practice?:PracticeSettings)=>emit({practice:practiceStatus(practice),speed:practice?.tempo.kind==='relative'?practice.tempo.ratio:1,metronome:practice?.metronome.enabled??false}));
+  await player.loadDocument(project,built,0,0);player.setSpeed(50);emit({speed:.5});player.setMetronome(.4);emit({speed:.5,metronome:true});
   const edited=previewEdit(project,{type:'setNote',target:{track:0,staff:0,bar:0,voice:0,beat:0},string:6,fret:5});
   for(const document of [{project:edited.project,built:edited},{project,built:buildDocument(project)},{project:edited.project,built:buildDocument(edited.project)}]) {
     player.beforeScoreChange();await player.loadDocument(document.project,document.built,0,0);
     expect(player.getState()).toMatchObject({speed:50,metronome:true,playing:false});
-    expect(vi.mocked(bridge.prepare).mock.calls.at(-1)?.[4]).toEqual({speed:.5,metronome:true});
+    expect(vi.mocked(bridge.prepare).mock.calls.at(-1)?.[4]).toEqual({...DEFAULT_PRACTICE,tempo:{kind:'relative',ratio:.5},metronome:{enabled:true,volume:.4,visual:false}});
   }
   player.destroy();
 });
@@ -129,11 +133,11 @@ it.each(['blank','file'])('resets practice after explicit New/Open of the same %
   const {player,bridge,emit}=fixture();const blank=blankProject();const bytes=exportGp(buildDocument(blank).score);
   const project=kind==='blank'?blank:{...blank,base:{kind:'file' as const,filename:'authored.gp',bytesBase64:Buffer.from(bytes).toString('base64'),sha256:createHash('sha256').update(bytes).digest('hex')}};
   const built=buildDocument(project);
-  bridge.prepare=vi.fn(async(_plan,_settings,_embedded,_sourceKey?:string,practice?:{speed:number;metronome:boolean})=>emit({speed:practice?.speed??1,metronome:practice?.metronome??false}));
+  bridge.prepare=vi.fn(async(_plan,_settings,_embedded,_sourceKey?:string,practice?:PracticeSettings)=>emit({practice:practiceStatus(practice),speed:practice?.tempo.kind==='relative'?practice.tempo.ratio:1,metronome:practice?.metronome.enabled??false}));
   await player.loadDocument(project,built,0,0);
   for(const epoch of [1,2]) {
     emit({speed:.75,metronome:true});player.beforeScoreChange();await player.loadDocument(project,built,0,epoch);
-    expect(vi.mocked(bridge.prepare).mock.calls.at(-1)?.[4]).toEqual({speed:1,metronome:false});expect(player.getState()).toMatchObject({speed:100,metronome:false});
+    expect(vi.mocked(bridge.prepare).mock.calls.at(-1)?.[4]).toEqual(DEFAULT_PRACTICE);expect(player.getState()).toMatchObject({speed:100,metronome:false});
   }
   player.destroy();
 });
@@ -188,7 +192,7 @@ it('embedded backing travels once per source and retains sync metadata through r
   const base=(sha256:string)=>({...blankProject(),base:{kind:'file' as const,filename:'Authored.gp',sha256,bytesBase64:'AA=='}});
   const audio=new Uint8Array([1,2,3]);let built={...original,embeddedBacking:audio,embeddedBackingSettings:{offsetMs:120,anchors:[{bar:0,occurrence:0,ratio:0,audioMs:100}],mix:{gain:1,pan:0,mute:false,solo:false}}};
   const first=base('a'.repeat(64)),second=base('b'.repeat(64));
-  await player.loadDocument(first,built);expect(bridge.prepare).toHaveBeenLastCalledWith(expect.anything(),expect.objectContaining({backing:{assetId:'embedded',...built.embeddedBackingSettings}}),audio,first.base.sha256,{speed:1,metronome:false});
+  await player.loadDocument(first,built);expect(bridge.prepare).toHaveBeenLastCalledWith(expect.anything(),expect.objectContaining({backing:{assetId:'embedded',...built.embeddedBackingSettings}}),audio,first.base.sha256,DEFAULT_PRACTICE);
   built={...built,settings:{...built.settings,mixes:{'base/0':{gain:.4,pan:0,mute:false,solo:false}}}};await player.loadDocument(first,built);expect(bridge.prepare).toHaveBeenCalledTimes(1);expect(bridge.setMix).toHaveBeenCalledTimes(1);
   built={...built,score:buildDocument(blankProject()).score};await player.loadDocument(first,built);expect(vi.mocked(bridge.prepare).mock.calls.at(-1)?.[2]).toBeNull();
   built={...built,score:buildDocument(blankProject()).score};await player.loadDocument(second,built);expect(vi.mocked(bridge.prepare).mock.calls.at(-1)?.[2]).toBe(audio);
@@ -204,6 +208,109 @@ it('cosmetic view renders do not forward external media stop or seek to native a
   await player.loadDocument(p,built,1);expect(bridge.setMix).not.toHaveBeenCalled();player.destroy();
 });
 it('webview reload generation starts after the native pending preparation',async()=>{
-  const {player,bridge}=fixture();bridge.status=vi.fn(async()=>({generation:10000,desiredGeneration:10002,ready:false,playing:false,tick:0,seconds:0,durationSeconds:0,speed:1,metronome:false,error:null,deviceId:null}));
-  const p=blankProject();await player.loadDocument(p,buildDocument(p));expect(player.generation).toBeGreaterThan(10002);expect(bridge.prepare).toHaveBeenCalledWith(expect.objectContaining({generation:player.generation}),expect.anything(),null,'blank',{speed:1,metronome:false});player.destroy();
+  const {player,bridge}=fixture();bridge.status=vi.fn(async()=>({generation:10000,desiredGeneration:10002,ready:false,playing:false,tick:0,seconds:0,durationSeconds:0,speed:1,metronome:false,error:null,deviceId:null,practice:practiceStatus(),loop:null}));
+  const p=blankProject();await player.loadDocument(p,buildDocument(p));expect(player.generation).toBeGreaterThan(10002);expect(bridge.prepare).toHaveBeenCalledWith(expect.objectContaining({generation:player.generation}),expect.anything(),null,'blank',DEFAULT_PRACTICE);player.destroy();
+});
+
+it('waits for matching native practice acknowledgement, rejects concurrent Apply, and ignores unchanged settings',async()=>{
+  const {player,bridge,emit,onEdit}=fixture();const project=blankProject();await player.loadDocument(project,buildDocument(project));emit();vi.mocked(bridge.command).mockClear();
+  const settings:PracticeSettings={tempo:{kind:'progressive',start:.5,end:1,step:.2,repetitions:2},metronome:{enabled:true,volume:0,visual:true},countIn:{bars:1,betweenLoops:true}};
+  player.setPractice(settings);settings.metronome.volume=.8;
+  const accepted={...settings,metronome:{enabled:true,volume:0,visual:true}};
+  expect(bridge.command).toHaveBeenCalledExactlyOnceWith({type:'setPractice',generation:player.generation,settings:accepted});
+  expect(player.getState()).toMatchObject({practicePending:true,practice:{settings:DEFAULT_PRACTICE}});await Promise.resolve();
+  expect(player.getState().practicePending).toBe(true);expect(()=>player.setPractice(defaults())).toThrow('pending');
+  emit({practice:practiceStatus(defaults(),{currentBpm:130})});expect(player.getState().practicePending).toBe(true);
+  emit({practice:practiceStatus(accepted,{phase:'playing',effectiveRatio:.7,currentBpm:84,completedPasses:2})});
+  expect(player.getState()).toMatchObject({practicePending:false,speed:70,metronome:true,practice:{settings:accepted,currentBpm:84,completedPasses:2}});expect(player.exportPracticeRatio()).toBe(.7);
+  player.setPractice(structuredClone(accepted));expect(bridge.command).toHaveBeenCalledTimes(1);expect(onEdit).not.toHaveBeenCalled();player.destroy();
+});
+it('practice rejection retains accepted settings and generation changes retire pending acknowledgements',async()=>{
+  const {player,bridge,emit}=fixture();const project=blankProject(),built=buildDocument(project);await player.loadDocument(project,built);emit();
+  bridge.command=vi.fn(async()=>{throw new Error('Practice refused');});player.setPractice({...defaults(),tempo:{kind:'fixed',bpm:90}});
+  await vi.waitFor(()=>expect(player.getState()).toMatchObject({practicePending:false,error:'Practice refused',practice:{settings:DEFAULT_PRACTICE}}));
+  bridge.command=vi.fn(async()=>{});player.setPractice({...defaults(),tempo:{kind:'fixed',bpm:90}});const generation=player.generation;
+  player.beforeScoreChange();expect(player.getState().practicePending).toBe(false);expect(player.getState().loop).toBeNull();
+  emit({generation,practice:practiceStatus({...defaults(),tempo:{kind:'fixed',bpm:90}})});expect(player.getState().practice.settings).toEqual(DEFAULT_PRACTICE);player.destroy();
+});
+it('validates complete practice settings before IPC and convenience controls retain other settings',async()=>{
+  const {player,bridge,emit}=fixture();const project=blankProject();await player.loadDocument(project,buildDocument(project));
+  const accepted:PracticeSettings={tempo:{kind:'fixed',bpm:90},metronome:{enabled:true,volume:0,visual:true},countIn:{bars:2,betweenLoops:true}};
+  emit({practice:practiceStatus(accepted)});expect(player.exportPracticeRatio()).toBeNull();vi.mocked(bridge.command).mockClear();
+  expect(()=>player.setPractice({...accepted,countIn:{bars:17,betweenLoops:false}})).toThrow();expect(bridge.command).not.toHaveBeenCalled();
+  player.setSpeed(123);expect(bridge.command).toHaveBeenLastCalledWith({type:'setPractice',generation:player.generation,settings:{...accepted,tempo:{kind:'relative',ratio:1.23}}});
+  emit({practice:practiceStatus({...accepted,tempo:{kind:'relative',ratio:1.23}})});player.setMetronome(.2);
+  expect(bridge.command).toHaveBeenLastCalledWith({type:'setPractice',generation:player.generation,settings:{...accepted,tempo:{kind:'relative',ratio:1.23},metronome:{enabled:true,volume:.2,visual:true}}});player.destroy();
+});
+it('keeps alphaTab paused and notes empty during live or paused count while retaining paused score notes',async()=>{
+  const {player,emit}=await soundingFixture();const output={handler:undefined,updatePosition:vi.fn()};
+  const api={player:{output,updateSyncPoints:vi.fn()},playerReady:{on:vi.fn(),off:vi.fn()},play:vi.fn(),pause:vi.fn()} as unknown as Parameters<typeof player.attachView>[0];player.attachView(api);
+  player.play();emit({playing:true,tick:100,seconds:.1,practice:practiceStatus(defaults(),{phase:'countIn',countInRemaining:3})});
+  expect(player.getState().playing).toBe(true);expect(api.play).not.toHaveBeenCalled();expect(output.updatePosition).toHaveBeenLastCalledWith(100);expect(player.activeNotes('base/0')).toEqual([]);
+  emit({tick:100,seconds:.1,practice:practiceStatus(defaults(),{phase:'paused',countInRemaining:3})});expect(player.activeNotes('base/0')).toEqual([]);
+  emit({playing:true,tick:100,seconds:.1,practice:practiceStatus(defaults(),{phase:'playing'})});expect(api.play).toHaveBeenCalledTimes(1);expect(player.activeNotes('base/0')).toHaveLength(2);
+  emit({tick:100,practice:practiceStatus(defaults(),{phase:'paused'})});expect(api.pause).toHaveBeenCalledTimes(1);expect(player.activeNotes('base/0')).toHaveLength(2);player.destroy();
+});
+it('fixed native cursor updates cannot feed a relative setting back through alphaTab playbackRate',async()=>{
+  const {player,bridge,emit}=fixture();const project=blankProject();await player.loadDocument(project,buildDocument(project));
+  const output:{handler?:{playbackRate:number};updatePosition:(milliseconds:number)=>void}={updatePosition:()=>{if(output.handler)output.handler.playbackRate=.75;}};
+  const api={player:{output,updateSyncPoints:vi.fn()},playerReady:{on:vi.fn(),off:vi.fn()},play:vi.fn(),pause:vi.fn()} as unknown as Parameters<typeof player.attachView>[0];player.attachView(api);vi.mocked(bridge.command).mockClear();
+  const settings={...defaults(),tempo:{kind:'fixed' as const,bpm:90}};
+  emit({playing:true,seconds:2,tick:3840,practice:practiceStatus(settings,{phase:'playing',effectiveRatio:.75,currentBpm:90})});
+  emit({playing:true,seconds:4,tick:4800,practice:practiceStatus(settings,{phase:'playing',effectiveRatio:1.5,currentBpm:90})});
+  expect(player.getState()).toMatchObject({speed:150,practice:{currentBpm:90,settings}});expect(bridge.command).not.toHaveBeenCalled();expect(player.exportPracticeRatio()).toBeNull();player.destroy();
+});
+it.each(['imported','embedded'])('normalizes fixed before preparing %s backing, including muted backing',async kind=>{
+  const {player,bridge,emit}=fixture();const project=blankProject(),built=buildDocument(project);await player.loadDocument(project,built);
+  const settings:PracticeSettings={tempo:{kind:'fixed',bpm:90},metronome:{enabled:true,volume:0,visual:true},countIn:{bars:2,betweenLoops:true}};emit({practice:practiceStatus(settings)});
+  const backing={assetId:'recording',offsetMs:0,anchors:[],mix:{gain:1,pan:0,mute:true,solo:false}};
+  const next=kind==='imported'?{...built,settings:{...built.settings,backing}}:{...built,embeddedBacking:new Uint8Array([1,2]),embeddedBackingSettings:{offsetMs:0,anchors:[],mix:backing.mix}};
+  await player.loadDocument(project,next);expect(vi.mocked(bridge.prepare).mock.calls.at(-1)?.[4]).toEqual({...settings,tempo:{kind:'relative',ratio:1}});
+  expect(player.getState().practiceNotice).toBe('Fixed tempo disabled because this score has backing audio.');
+  expect(()=>player.setPractice(settings)).toThrow('backing track');expect(player.getState().practice.settings.tempo).not.toEqual({kind:'fixed',bpm:90});player.destroy();
+});
+it('publishes loop only after native acknowledgement and clears it on generation replacement',async()=>{
+  const {player,bridge,emit}=fixture();const project=blankProject();await player.loadDocument(project,buildDocument(project));emit();
+  player.setLoop(1,2);await Promise.resolve();expect(player.getState().loop).toBeNull();emit({loop:{startTick:3840,endTick:11520}});expect(player.getState().loop).toEqual({startTick:3840,endTick:11520});
+  bridge.command=vi.fn(async()=>{throw new Error('Loop refused');});player.clearLoop();await vi.waitFor(()=>expect(player.getState().error).toBe('Loop refused'));expect(player.getState().loop).toEqual({startTick:3840,endTick:11520});
+  player.beforeScoreChange();expect(player.getState().loop).toBeNull();player.destroy();
+});
+
+it.each(['relative','fixed','progressive'] as const)('retains full acknowledged %s practice through edit undo redo while clearing runtime',async kind=>{
+  const {player,bridge,emit,onEdit}=fixture();const project=blankProject(),built=buildDocument(project),before=exportGp(built.score),snapshot=JSON.stringify(project);
+  await player.loadDocument(project,built);
+  const tempo:PracticeSettings['tempo']=kind==='relative'?{kind,ratio:1.23}:kind==='fixed'?{kind,bpm:90}:{kind,start:.5,end:1,step:.2,repetitions:2};
+  const settings:PracticeSettings={tempo,metronome:{enabled:true,volume:0,visual:true},countIn:{bars:2,betweenLoops:true}};
+  player.setPractice(settings);emit({practice:practiceStatus(settings,{completedPasses:3,effectiveRatio:.7}),loop:{startTick:0,endTick:3840}});
+  expect(JSON.stringify(project)).toBe(snapshot);expect(exportGp(built.score)).toEqual(before);expect(onEdit).not.toHaveBeenCalled();
+  const edited=previewEdit(project,{type:'setNote',target:{track:0,staff:0,bar:0,voice:0,beat:0},string:6,fret:5});
+  for(const doc of [{project:edited.project,built:edited},{project,built:buildDocument(project)},{project:edited.project,built:buildDocument(edited.project)}]){
+    await player.loadDocument(doc.project,doc.built);expect(vi.mocked(bridge.prepare).mock.calls.at(-1)?.[4]).toEqual(settings);
+    expect(player.getState()).toMatchObject({playing:false,loop:null,practicePending:false,practice:{settings,phase:'idle',countInRemaining:0,completedPasses:0,pulse:null}});
+  }
+  player.destroy();
+});
+it('retains only acknowledged settings when a musical edit replaces a pending Apply',async()=>{
+  const {player,bridge,emit}=fixture();const project=blankProject(),built=buildDocument(project);await player.loadDocument(project,built);
+  emit({speed:1.23});const generation=player.generation;player.setPractice({...defaults(),tempo:{kind:'fixed',bpm:90}});
+  const edited=previewEdit(project,{type:'setNote',target:{track:0,staff:0,bar:0,voice:0,beat:0},string:6,fret:5});await player.loadDocument(edited.project,edited);
+  expect(vi.mocked(bridge.prepare).mock.calls.at(-1)?.[4]).toEqual({...DEFAULT_PRACTICE,tempo:{kind:'relative',ratio:1.23}});
+  emit({generation,practice:practiceStatus({...defaults(),tempo:{kind:'fixed',bpm:90}})});expect(player.getState()).toMatchObject({practicePending:false,practice:{settings:{tempo:{kind:'relative',ratio:1.23}}}});player.destroy();
+});
+it('removing backing permits a later fixed Apply without restoring the former fixed tempo',async()=>{
+  const {player,bridge,emit}=fixture();const project=blankProject(),built=buildDocument(project);
+  const backing={assetId:'recording',offsetMs:0,anchors:[],mix:{gain:1,pan:0,mute:true,solo:false}};
+  await player.loadDocument(project,{...built,settings:{...built.settings,backing}});emit();
+  expect(()=>player.setPractice({...defaults(),tempo:{kind:'fixed',bpm:90}})).toThrow('backing track');
+  await player.loadDocument(project,built);expect(player.getState().practice.settings.tempo).toEqual({kind:'relative',ratio:1});
+  player.setPractice({...defaults(),tempo:{kind:'fixed',bpm:90}});expect(bridge.command).toHaveBeenLastCalledWith({type:'setPractice',generation:player.generation,settings:{...DEFAULT_PRACTICE,tempo:{kind:'fixed',bpm:90}}});player.destroy();
+});
+
+it('an older Apply promise cannot fail a newer pending Apply after native acknowledgement',async()=>{
+  const {player,bridge,emit}=fixture();const project=blankProject();await player.loadDocument(project,buildDocument(project));emit();
+  let rejectFirst!:(reason:Error)=>void;bridge.command=vi.fn().mockImplementationOnce(()=>new Promise<void>((_resolve,reject)=>{rejectFirst=reject;})).mockResolvedValue(undefined);
+  const first={...defaults(),tempo:{kind:'relative' as const,ratio:1.23}},second={...defaults(),tempo:{kind:'fixed' as const,bpm:90}};
+  player.setPractice(first);emit({practice:practiceStatus(first)});player.setPractice(second);rejectFirst(new Error('Old request response lost'));
+  await new Promise(resolve=>setTimeout(resolve,0));expect(player.getState()).toMatchObject({practicePending:true,error:null,practice:{settings:first}});
+  emit({practice:practiceStatus(second)});expect(player.getState()).toMatchObject({practicePending:false,error:null,practice:{settings:second}});player.destroy();
 });

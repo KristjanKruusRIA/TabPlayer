@@ -77,6 +77,40 @@ it('metronome_clicks_reset_at_pickup_end_and_each_repeated_measure', () => {
   const repeatPlan=agree(repeated);for(const o of repeatPlan.occurrences)expect(o.clickTicks).toEqual([o.startTick,o.startTick+960,o.startTick+1920,o.startTick+2880]);
 });
 
+it('meter_fields_keep_written_pickup_and_rare_denominators_after_gp_import_and_repeats', () => {
+  const score=authored(3);
+  for(const [bar,numerator,denominator] of [[0,3,8],[1,5,128],[2,33,256]]) {
+    const master=score.masterBars[bar],voice=score.tracks[0].staves[0].bars[bar].voices[0];
+    master.timeSignatureNumerator=numerator;master.timeSignatureDenominator=denominator;voice.beats=[];
+    for(let i=0;i<numerator;i++){const beat=new model.Beat();beat.duration=denominator;beat.isEmpty=false;voice.addBeat(beat);note(score,bar,i);}
+  }
+  score.masterBars[0].isRepeatStart=true;score.masterBars[2].repeatCount=2;score.rebuildRepeatGroups();score.finish(settings);
+  const bytes=exportGp(score),project={...blankProject(),base:{kind:'file' as const,filename:'written-meter.gp',bytesBase64:Buffer.from(bytes).toString('base64'),sha256:createHash('sha256').update(bytes).digest('hex')}};
+  const imported=buildScore(project),plan=agree(imported);
+  expect(plan.occurrences.map(o=>[o.bar,o.occurrence,o.endTick-o.startTick])).toEqual([[0,0,1440],[1,0,150],[2,0,495],[0,1,1440],[1,1,150],[2,1,495]]);
+  expect(plan.occurrences).toMatchObject([
+    {meterNumerator:3,meterDenominator:8},{meterNumerator:5,meterDenominator:128},{meterNumerator:33,meterDenominator:256},
+    {meterNumerator:3,meterDenominator:8},{meterNumerator:5,meterDenominator:128},{meterNumerator:33,meterDenominator:256},
+  ]);
+  const pickup=authored(2),first=pickup.tracks[0].staves[0].bars[0].voices[0];first.beats.splice(1);first.beats[0].duration=model.Duration.Eighth;pickup.masterBars[0].isAnacrusis=true;pickup.finish(settings);
+  expect(agree(pickup).occurrences[0]).toMatchObject({meterNumerator:4,meterDenominator:4,startTick:0,endTick:480,clickTicks:[0]});
+});
+
+it('requires_exact_written_meter_bounds_without_a_32_numerator_cap', () => {
+  const valid=agree(buildScore(blankProject()));
+  for(const meterNumerator of [1,33,0xffffffff])for(const meterDenominator of [1,2,4,8,16,32,64,128,256]) {
+    const plan=structuredClone(valid);Object.assign(plan.occurrences[0],{meterNumerator,meterDenominator});expect(()=>validatePlaybackPlan(plan)).not.toThrow();
+  }
+  for(const [field,values] of [['meterNumerator',[undefined,null,0,-1,.5,NaN,Infinity,0x100000000,'4',true]],['meterDenominator',[undefined,null,0,-1,3,.5,NaN,Infinity,512,'4',true]]] as const)for(const value of values) {
+    const plan=structuredClone(valid);Object.assign(plan.occurrences[0],{[field]:value});expect(()=>validatePlaybackPlan(plan)).toThrow(/Invalid native/);
+  }
+});
+
+it.each([[0,4],[4,3]])('rejects_invalid_written_score_meter_%i_over_%i', (numerator,denominator) => {
+  const score=authored(1);score.masterBars[0].timeSignatureNumerator=numerator;score.masterBars[0].timeSignatureDenominator=denominator;score.finish(settings);
+  expect(()=>buildPlaybackPlan(score,7)).toThrow(/Invalid score meter/);
+});
+
 it('rejects_invalid_optional_click_ticks_and_accepts_old_missing_click_ticks', () => {
   const valid=agree(buildScore(blankProject()));
   for(const clicks of [[],[1],[0,0],[0,NaN],[0,3840],[0,-1]]){const p=structuredClone(valid);p.occurrences[0].clickTicks=clicks;expect(()=>validatePlaybackPlan(p)).toThrow(/Invalid native/);}
@@ -88,6 +122,16 @@ it('same_pitch_different_voice_keeps_identity', () => {
   const plan = agree(score); expect(plan.notes).toHaveLength(2);
   expect(plan.notes.map(n => n.source.target.voice).sort()).toEqual([0, 1]);
   expect(plan.notes[0].key).toBe(plan.notes[1].key); expect(plan.notes[0].id).not.toBe(plan.notes[1].id);
+});
+
+it('duplicate_chord_tie_destinations_keep_the_public_single_attack_and_source_links',()=>{
+  const score=authored(1),origin=note(score,0,0),first=note(score,0,1),last=note(score,0,1);
+  first.isTieDestination=true;last.isTieDestination=true;score.finish(settings);
+  expect(first.tieOrigin).toBe(origin);expect(last.tieOrigin).toBe(origin);expect(origin.tieDestination).toBe(last);
+  const before=model.JsonConverter.scoreToJson(score),plan=agree(score);
+  expect(plan.notes).toHaveLength(1);expect(plan.notes[0]).toMatchObject({startTick:0,endTick:1920});
+  expect(buildPlaybackPlanFromJson(before,['base/0'],7)).toEqual(plan);
+  expect(model.JsonConverter.scoreToJson(score)).toBe(before);expect(first.tieOrigin).toBe(origin);expect(last.tieOrigin).toBe(origin);expect(origin.tieDestination).toBe(last);
 });
 
 it('same_pitch_voices_keep_exact_attack_channels_and_active_programs', () => {
@@ -158,6 +202,7 @@ it('initial_grace_in_another_voice_preserves_full_score_tick_shift', () => {
   const n=new model.Note();n.string=1;n.fret=3;grace.addNote(n);grace.voice=voice;voice.beats.unshift(grace);
   note(score,0,0,1,3,1);const bent=note(score,0,0,1,3,0,1);bent.addBendPoint(new model.BendPoint(0,0));bent.addBendPoint(new model.BendPoint(60,4));
   score.finish(settings);const plan=agree(score);
+  expect(plan.occurrences[0]).toMatchObject({meterNumerator:4,meterDenominator:4,startTick:120,endTick:3960});
   expect(plan.notes.find(n=>n.source.target.voice===1)?.startTick).toBe(120);
   const other=plan.notes.find(n=>n.source.target.track===1)!;expect(other.startTick).toBe(120);expect(Math.max(...other.pitch.map(p=>p.semitones))).toBe(2);
 });

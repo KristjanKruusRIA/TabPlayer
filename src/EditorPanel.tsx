@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState,type ReactNode } from 'react';
 import { model } from '@coderline/alphatab';
 import { describeSelection } from './engine';
 import type { BeatTarget, EditCommand } from './project';
@@ -21,11 +21,12 @@ import { RangePanel } from './editor/RangePanel';
 import { MeasureTransformPanel } from './editor/MeasureTransformPanel';
 import type { MusicSelection } from './editor/range-types';
 
-export function EditorPanel({score,target,string,fret,noteIndex,onSelectNote,busy,onSelect,onString,onFret,onEdit,musicSelection,onMusicSelection}: {
+export function EditorPanel({score,target,string,fret,noteIndex,onSelectNote,busy,onSelect,onString,onFret,onEdit,musicSelection,onMusicSelection,children}: {
   score:model.Score;target:BeatTarget;string:number;fret:number;busy:boolean;
   noteIndex:number|null;onSelectNote:(index:number|null)=>void;
   onSelect:(target:BeatTarget)=>void;onString:(string:number)=>void;onFret:(fret:number)=>void;onEdit:(edit:EditCommand)=>void;
   musicSelection:MusicSelection|null;onMusicSelection:(selection:MusicSelection|null)=>void;
+  children?:ReactNode;
 }) {
   const {staff,bar,voice,beat,master}=describeSelection(score,target);
   const indexed=staff.isPercussion||!staff.tuning.length;
@@ -58,6 +59,7 @@ export function EditorPanel({score,target,string,fret,noteIndex,onSelectNote,bus
   </fieldset><SpellingControl score={score} target={target} noteIndex={indexed?noteIndex??-1:beat?.notes.findIndex(n=>n.string===string)??-1} busy={busy} onEdit={onEdit}/><TechniquePanel score={score} target={target} string={string} noteIndex={noteIndex} busy={busy} onEdit={onEdit}/>
   <GesturePanel score={score} target={target} busy={busy} onEdit={onEdit}/>
   <RangePanel score={score} target={target} selection={musicSelection} busy={busy} onSelection={onMusicSelection} onEdit={onEdit}/>
+  {children}
   <details><summary>Beat text & chord</summary><fieldset disabled={busy||!beat}><label>Beat text<input value={text} onChange={e=>setText(e.target.value)}/></label><button onClick={()=>onEdit({type:'setBeatAnnotation',target,text,chord:beat?.chord?{name:beat.chord.name,firstFret:beat.chord.firstFret,frets:[...beat.chord.strings]}:null})}>Apply beat text</button><p className="muted">{beat?.chord?.name||'No chord diagram'}</p><button onClick={()=>setChordOpen(true)}>Edit chord diagram</button></fieldset></details>
   {chordOpen&&<ChordDialog strings={staff.tuning.length} disabled={busy} value={beat?.chord?{name:beat.chord.name,firstFret:beat.chord.firstFret,frets:[...beat.chord.strings]}:null} onChange={(chord:ChordDefinition|null)=>onEdit({type:'setBeatAnnotation',target,text,chord})} onClose={()=>setChordOpen(false)}/>}
   <MeasurePanel score={score} target={target} string={string} busy={busy} onEdit={onEdit}/><DirectionsPanel score={score} target={target} busy={busy} onEdit={onEdit}/><StructurePanel score={score} target={target} string={string} busy={busy} onEdit={onEdit} onSelect={onSelect}/>

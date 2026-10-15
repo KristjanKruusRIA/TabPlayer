@@ -4,6 +4,7 @@ use super::{
     decode::DecodedAudio,
     dsp::{FxSettings, MAX_TRACK_DELAY_SECONDS, TrackDsp},
     plan::{Articulation, PlanMidiEvent, PlaybackPlan, Timeline},
+    practice::{ClickVoice, MetronomeSettings, PulsePosition, RenderTempo},
     resources::{AudioResources, Region},
     voices::{
         SampleVoice, VoiceParameters, articulation_name, automatic_voice_id, note_program,
@@ -113,6 +114,8 @@ pub struct RenderStatus {
     pub tick: f64,
     pub seconds: f64,
     pub ended: bool,
+    pub pulse_count: u32,
+    pub last_pulse: Option<PulsePosition>,
 }
 #[derive(Clone)]
 struct VoiceSample {
@@ -226,8 +229,11 @@ pub struct Renderer {
     timeline: Timeline,
     _resources: Arc<AudioResources>,
     rate: u32,
-    speed: f64,
+    tempo: RenderTempo,
     seconds: f64,
+    clock_origin_seconds: f64,
+    clock_origin_tick: f64,
+    clock_frames: u64,
     tracks: Vec<Track>,
     selected: Vec<Option<SelectedNote>>,
     midi_attacks: Vec<Option<MidiAttack>>,
@@ -241,11 +247,11 @@ pub struct Renderer {
     mix: PreparedMix,
     scratch: Vec<[f32; 2]>,
     backing: Option<BackingVoice>,
+    configured_backing: bool,
     tail: bool,
-    metronome: bool,
+    metronome: MetronomeSettings,
     last_click: Option<(usize, usize)>,
-    click_age: usize,
-    click_frequency: f64,
+    click: ClickVoice,
 }
 impl Renderer {
     pub fn new(
@@ -506,8 +512,11 @@ impl Renderer {
             timeline,
             _resources: resources,
             rate: sample_rate,
-            speed: 1.0,
+            tempo: RenderTempo::Relative { ratio: 1.0 },
             seconds: 0.0,
+            clock_origin_seconds: 0.0,
+            clock_origin_tick: 0.0,
+            clock_frames: 0,
             tracks,
             selected,
             midi_attacks,
@@ -521,11 +530,15 @@ impl Renderer {
             mix,
             scratch,
             backing: None,
+            configured_backing: settings.backing.is_some(),
             tail: false,
-            metronome: false,
+            metronome: MetronomeSettings {
+                enabled: false,
+                volume: 0.4,
+                visual: false,
+            },
             last_click: None,
-            click_age: usize::MAX,
-            click_frequency: 2000.0,
+            click: ClickVoice::new(sample_rate),
         })
     }
     fn spawn(
@@ -687,7 +700,7 @@ impl Renderer {
             }
         }
     }
-    fn frame(&mut self) -> [f32; 2] {
+    fn frame(&mut self) -> ([f32; 2], Option<PulsePosition>) {
         let tick = self.timeline.seconds_to_tick(self.seconds);
         self.scratch.fill([0.0; 2]);
         if !self.tail {
@@ -757,12 +770,10 @@ impl Renderer {
                 );
             }
         }
-        let tempo_index = self
-            .plan
-            .tempos
-            .partition_point(|t| t.tick <= tick)
-            .saturating_sub(1);
-        let bpm = self.plan.tempos[tempo_index].bpm * self.speed;
+        let bpm = match self.tempo {
+            RenderTempo::Relative { ratio } => self.authored_bpm_at(tick) * ratio,
+            RenderTempo::Fixed { bpm } => bpm,
+        };
         for (index, track) in self.tracks.iter_mut().enumerate() {
             if let Some(synth) = &mut track.synth {
                 let mut left = [0.0];
@@ -783,24 +794,28 @@ impl Renderer {
                     self.mix.backing.process(backing.next_frame(self.seconds));
             }
         }
-        if self.metronome {
+        let mut pulse = None;
+        if self.metronome.enabled || self.metronome.visual {
             let (beat, _, accent) = self.beat_grid(tick);
             if Some(beat) != self.last_click
                 && !self.tail
                 && self.seconds < self.plan.duration_ms / 1000.0
             {
                 self.last_click = Some(beat);
-                self.click_age = 0;
-                self.click_frequency = if accent { 2400.0 } else { 1800.0 };
+                self.click.trigger(accent);
+                pulse = Some(PulsePosition {
+                    beat: beat.1 as u32,
+                    beats_per_bar: self.meter_at(tick).0,
+                    accent,
+                });
             }
-            if self.click_age < (self.rate as f64 * 0.05) as usize {
-                let age = self.click_age as f64 / self.rate as f64;
-                let click = (std::f64::consts::TAU * self.click_frequency * age).sin()
-                    * (-age * 100.0).exp()
-                    * 0.1;
-                self.scratch[backing_index + usize::from(self.backing.is_some())] =
-                    [click as f32; 2];
-                self.click_age += 1;
+            let click = self.click.frame(if self.metronome.enabled {
+                self.metronome.volume
+            } else {
+                0.0
+            });
+            if self.metronome.enabled {
+                self.scratch[backing_index + usize::from(self.backing.is_some())] = [click; 2];
             }
         }
         let mut sum = [0.0; 2];
@@ -809,34 +824,64 @@ impl Renderer {
                 sum[c] += sample[c];
             }
         }
-        self.seconds += self.speed / self.rate as f64;
-        sum.map(master_limit)
+        self.clock_frames += 1;
+        self.seconds = match self.tempo {
+            RenderTempo::Relative { ratio } => {
+                self.clock_origin_seconds + self.clock_frames as f64 * ratio / self.rate as f64
+            }
+            RenderTempo::Fixed { bpm } => self.timeline.tick_to_seconds(
+                self.clock_origin_tick
+                    + self.clock_frames as f64 * bpm * self.plan.ppq as f64
+                        / (60.0 * self.rate as f64),
+            ),
+        };
+        (sum.map(master_limit), pulse)
     }
-    fn status(&self, frames: usize) -> RenderStatus {
+    fn status(
+        &self,
+        frames: usize,
+        pulse_count: u32,
+        last_pulse: Option<PulsePosition>,
+    ) -> RenderStatus {
         RenderStatus {
             frames,
             tick: self.timeline.seconds_to_tick(self.seconds),
             seconds: self.seconds,
             ended: self.tail || self.seconds + 1e-9 >= self.duration_seconds(),
+            pulse_count,
+            last_pulse,
         }
     }
     pub fn render_into(&mut self, output: &mut [[f32; 2]]) -> RenderStatus {
+        let mut pulse_count: u32 = 0;
+        let mut last_pulse = None;
         for chunk in output.chunks_mut(512) {
             for sample in chunk {
-                *sample = self.frame();
+                let (value, pulse) = self.frame();
+                *sample = value;
+                if pulse.is_some() {
+                    pulse_count = pulse_count.saturating_add(1);
+                    last_pulse = pulse;
+                }
             }
         }
-        self.status(output.len())
+        self.status(output.len(), pulse_count, last_pulse)
     }
     pub fn render_stems_into(&mut self, outputs: &mut [&mut [[f32; 2]]]) -> RenderStatus {
         let frames = outputs.iter().map(|o| o.len()).min().unwrap_or(0);
+        let mut pulse_count: u32 = 0;
+        let mut last_pulse = None;
         for frame in 0..frames {
-            self.frame();
+            let (_, pulse) = self.frame();
+            if pulse.is_some() {
+                pulse_count = pulse_count.saturating_add(1);
+                last_pulse = pulse;
+            }
             for (channel, output) in outputs.iter_mut().enumerate() {
                 output[frame] = self.scratch.get(channel).copied().unwrap_or([0.0; 2]);
             }
         }
-        self.status(frames)
+        self.status(frames, pulse_count, last_pulse)
     }
     pub fn render_stems_and_mix_into(
         &mut self,
@@ -849,13 +894,20 @@ impl Renderer {
             .min()
             .unwrap_or(mix.len())
             .min(mix.len());
+        let mut pulse_count: u32 = 0;
+        let mut last_pulse = None;
         for frame in 0..frames {
-            mix[frame] = self.frame();
+            let (value, pulse) = self.frame();
+            mix[frame] = value;
+            if pulse.is_some() {
+                pulse_count = pulse_count.saturating_add(1);
+                last_pulse = pulse;
+            }
             for (channel, output) in outputs.iter_mut().enumerate() {
                 output[frame] = self.scratch.get(channel).copied().unwrap_or([0.0; 2]);
             }
         }
-        self.status(frames)
+        self.status(frames, pulse_count, last_pulse)
     }
     pub fn seek_tick(&mut self, tick: f64) {
         let tick = if tick.is_finite() {
@@ -864,6 +916,7 @@ impl Renderer {
             0.0
         };
         self.seconds = self.timeline.tick_to_seconds(tick);
+        self.reset_clock_origin();
         self.tail = false;
         for slot in &mut self.slots {
             *slot = None;
@@ -966,8 +1019,14 @@ impl Renderer {
                         .is_some_and(|v| v.note == index && !v.unpitched)
                 }) {
                     let note = &self.plan.notes[index];
-                    let elapsed = (self.seconds - self.timeline.tick_to_seconds(note.start_tick))
-                        / self.speed;
+                    let elapsed = match self.tempo {
+                        RenderTempo::Relative { ratio } => {
+                            (self.seconds - self.timeline.tick_to_seconds(note.start_tick)) / ratio
+                        }
+                        RenderTempo::Fixed { bpm } => {
+                            (tick - note.start_tick) * 60.0 / (bpm * self.plan.ppq as f64)
+                        }
+                    };
                     self.slots[slot]
                         .as_mut()
                         .unwrap()
@@ -991,11 +1050,74 @@ impl Renderer {
         self.reset_click_position();
     }
     pub fn set_speed(&mut self, speed: f64) -> Result<(), String> {
-        if !speed.is_finite() || !(0.25..=2.0).contains(&speed) {
-            return Err("Practice speed must be 25–200%.".into());
+        self.set_practice_tempo(RenderTempo::Relative { ratio: speed })
+    }
+    pub fn set_practice_tempo(&mut self, tempo: RenderTempo) -> Result<(), String> {
+        match tempo {
+            RenderTempo::Relative { ratio }
+                if !ratio.is_finite() || !(0.1..=3.0).contains(&ratio) =>
+            {
+                return Err("Practice speed must be between 10% and 300%.".into());
+            }
+            RenderTempo::Fixed { bpm } => {
+                if !bpm.is_finite() || !(10.0..=300.0).contains(&bpm) {
+                    return Err("Fixed tempo must be between 10 and 300 BPM.".into());
+                }
+                if self.has_backing() {
+                    return Err(
+                        "Fixed tempo is unavailable while a backing track is present.".into(),
+                    );
+                }
+            }
+            _ => {}
         }
-        self.speed = speed;
+        if self.tempo != tempo {
+            self.tempo = tempo;
+            self.reset_clock_origin();
+        }
         Ok(())
+    }
+    fn reset_clock_origin(&mut self) {
+        self.clock_origin_seconds = self.seconds;
+        self.clock_origin_tick = self.timeline.seconds_to_tick(self.seconds);
+        self.clock_frames = 0;
+    }
+    pub fn output_frames_until(&self, end_tick: f64) -> usize {
+        let tick = self.timeline.seconds_to_tick(self.seconds);
+        let frames = match self.tempo {
+            RenderTempo::Relative { ratio } => {
+                (self.timeline.tick_to_seconds(end_tick) - self.seconds) * self.rate as f64 / ratio
+            }
+            RenderTempo::Fixed { bpm } => {
+                (end_tick - tick) * 60.0 * self.rate as f64 / (bpm * self.plan.ppq as f64)
+            }
+        };
+        if frames <= 0.0 {
+            0
+        } else {
+            (frames - 1e-7).ceil().max(1.0) as usize
+        }
+    }
+    pub fn authored_bpm_at(&self, tick: f64) -> f64 {
+        let index = self
+            .plan
+            .tempos
+            .partition_point(|tempo| tempo.tick <= tick)
+            .saturating_sub(1);
+        self.plan.tempos[index].bpm
+    }
+    pub fn meter_at(&self, tick: f64) -> (u32, u32) {
+        let index = self
+            .plan
+            .occurrences
+            .partition_point(|measure| measure.start_tick <= tick + 1e-7)
+            .saturating_sub(1);
+        self.plan.occurrences.get(index).map_or((4, 4), |measure| {
+            (measure.meter_numerator, measure.meter_denominator)
+        })
+    }
+    pub fn has_backing(&self) -> bool {
+        self.configured_backing || self.backing.is_some()
     }
     /// Callback callers retire the returned old configuration on a control thread.
     pub fn replace_mix(&mut self, mut settings: PreparedMix) -> PreparedMix {
@@ -1020,6 +1142,9 @@ impl Renderer {
         map: BackingMap,
         mix: ChannelMix,
     ) -> Result<(), String> {
+        if matches!(self.tempo, RenderTempo::Fixed { .. }) {
+            return Err("Fixed tempo is unavailable while a backing track is present.".into());
+        }
         validate_mix(&mix)?;
         let mut voice = BackingVoice::new(audio, map, self.rate)?;
         voice.seek(self.seconds);
@@ -1035,8 +1160,18 @@ impl Renderer {
         Ok(())
     }
     pub fn set_metronome(&mut self, enabled: bool) {
-        self.metronome = enabled;
-        self.reset_click_position();
+        self.set_metronome_settings(MetronomeSettings {
+            enabled,
+            volume: 0.4,
+            visual: false,
+        });
+    }
+    pub fn set_metronome_settings(&mut self, settings: MetronomeSettings) {
+        let active = self.metronome.enabled || self.metronome.visual;
+        self.metronome = settings;
+        if active != (settings.enabled || settings.visual) {
+            self.reset_click_position();
+        }
     }
     fn beat_grid(&self, tick: f64) -> ((usize, usize), f64, bool) {
         let occurrence = self
@@ -1052,8 +1187,9 @@ impl Renderer {
             (beat, clicks[beat])
         } else {
             let start = measure.map_or(0.0, |o| o.start_tick);
-            let beat = ((tick - start + 1e-7) / self.plan.ppq as f64).floor() as usize;
-            (beat, start + beat as f64 * self.plan.ppq as f64)
+            let pulse_ticks = self.plan.ppq as f64 * 4.0 / self.meter_at(tick).1 as f64;
+            let beat = ((tick - start + 1e-7) / pulse_ticks).floor() as usize;
+            (beat, start + beat as f64 * pulse_ticks)
         };
         ((occurrence, beat), start, beat == 0)
     }
@@ -1065,7 +1201,7 @@ impl Renderer {
         } else {
             Some(beat)
         };
-        self.click_age = usize::MAX;
+        self.click = ClickVoice::new(self.rate);
     }
     pub fn begin_tail(&mut self) {
         self.tail = true;
@@ -1080,10 +1216,12 @@ impl Renderer {
                 synth.note_off_all(false);
             }
         }
-        self.click_age = usize::MAX;
+        self.click = ClickVoice::new(self.rate);
     }
     pub fn stem_count(&self) -> usize {
-        self.plan.tracks.len() + usize::from(self.backing.is_some()) + usize::from(self.metronome)
+        self.plan.tracks.len()
+            + usize::from(self.backing.is_some())
+            + usize::from(self.metronome.enabled)
     }
     pub fn duration_tick(&self) -> f64 {
         self.timeline.seconds_to_tick(self.duration_seconds())
@@ -1099,7 +1237,7 @@ impl Renderer {
         self.timeline.tick_to_seconds(tick)
     }
     pub fn position(&self) -> RenderStatus {
-        self.status(0)
+        self.status(0, 0, None)
     }
 }
 pub fn master_limit(value: f32) -> f32 {

@@ -12,6 +12,7 @@ const shapes:Record<string,readonly string[]>={
   eraseSelection:['selection'],transposeSelection:['selection','semitones'],moveSelectionStrings:['selection','direction'],
   refingerSelection:['selection','maxFret'],setSelectionSustain:['selection','strings','kind','enabled'],
   insertMeasures:['beforeBar','count'],removeMeasures:['firstBar','lastBar'],
+  pasteMusic:['clip','options'],
 };
 const metadata=['subTitle','album','words','music','copyright','tab','notices','instructions'];
 function object(value:unknown):Record<string,unknown> {
@@ -41,6 +42,28 @@ function nonempty(value:unknown):unknown[] {
   if(!Array.isArray(value)||!value.length)throw new Error('Select some music.');return value;
 }
 function unique(keys:unknown[]) {if(new Set(keys).size!==keys.length)throw new Error('Duplicate selection.');}
+export function validateMusicClipEnvelope(value:unknown):void {
+  const clip=exact(value,['format','version','engineVersion','mode','kind','scoreJson','links']);
+  if(clip.format!=='TabPlayerClip'||clip.version!==1||clip.engineVersion!=='1.8.4'||!['singleTrack','multiTrack'].includes(clip.mode as string)||!['phrase','bars'].includes(clip.kind as string))throw new Error('Unsupported musical clipboard.');
+  if(typeof clip.scoreJson!=='string'||new TextEncoder().encode(clip.scoreJson).byteLength>128000000)throw new Error('Invalid clipboard model size.');
+  const json:unknown=JSON.parse(clip.scoreJson,(_key,value:unknown)=>{if(typeof value==='number'&&!Number.isFinite(value))throw new Error('Invalid clipboard number.');return value;});object(json);
+  if(!Array.isArray(clip.links))throw new Error('Invalid clipboard links.');
+  unique(Array.from(clip.links,value=>{
+    const link=exact(value,['from','to','kind','slideOutType']);integer(link.from);integer(link.to);
+    if(!['tie','slur','slide','hammerPull'].includes(link.kind as string)||(link.kind==='slide'?![1,2].includes(link.slideOutType as number):link.slideOutType!==null))throw new Error('Invalid clipboard relationship.');
+    return [link.from,link.to,link.kind,link.slideOutType].join('/');
+  }));
+}
+function pasteOptions(value:unknown) {
+  const options=exact(value,['target','destinations','count','placement','filters']);target(options.target);integer(options.count,1000);
+  if(options.count===0||!['currentBar','beforeBar'].includes(options.placement as string))throw new Error('Invalid paste placement or count.');
+  const filters=exact(options.filters,['diagrams','texts','timers','trackAutomations','masterAutomations','sections']);Object.values(filters).forEach(flag);
+  const destinations=Array.from(nonempty(options.destinations),value=>{
+    const destination=exact(value,['sourceTrack','track','staffMap']);integer(destination.sourceTrack);integer(destination.track);
+    const staves=nonempty(destination.staffMap);for(const staff of staves)integer(staff);unique(staves);return destination;
+  });
+  unique(destinations.map(value=>value.sourceTrack));unique(destinations.map(value=>value.track));
+}
 function musicSelection(value:unknown) {
   const selection=object(value);
   if(selection.kind==='notes'){
@@ -111,6 +134,7 @@ export function validateParityCommand(value:unknown):void {
   }
   if(type==='insertMeasures'){integer(edit.beforeBar);integer(edit.count,1000);if(edit.count===0)throw new Error('Insert at least one measure.');}
   if(type==='removeMeasures'){integer(edit.firstBar);integer(edit.lastBar);if(Number(edit.firstBar)>Number(edit.lastBar))throw new Error('Invalid measure range.');}
+  if(type==='pasteMusic'){validateMusicClipEnvelope(edit.clip);pasteOptions(edit.options);}
   if(type==='setScoreMetadata') {
     const fields=exact(edit.fields,metadata);if(Object.values(fields).some(value=>typeof value!=='string'))throw new Error('Invalid score metadata.');
   }

@@ -262,7 +262,7 @@ fn renderer_fixture(
     } else {
         serde_json::json!([])
     };
-    let plan=serde_json::from_value(serde_json::json!({"generation":1,"ppq":960,"durationTick":3840,"durationMs":2000,"tracks":tracks,"tempos":[{"tick":0,"bpm":120}],"occurrences":[{"bar":0,"occurrence":0,"startTick":0,"endTick":3840,"startMs":0,"endMs":2000}],"notes":notes,"midi":midi})).unwrap();
+    let plan=serde_json::from_value(serde_json::json!({"generation":1,"ppq":960,"durationTick":3840,"durationMs":2000,"tracks":tracks,"tempos":[{"tick":0,"bpm":120}],"occurrences":[{"bar":0,"occurrence":0,"meterNumerator":4,"meterDenominator":4,"startTick":0,"endTick":3840,"startMs":0,"endMs":2000}],"notes":notes,"midi":midi})).unwrap();
     (
         Arc::new(plan),
         Arc::new(resources),
@@ -298,6 +298,354 @@ fn stem_sum_matches_pre_limiter_and_speed_keeps_sample_pitch() {
         renderer.render_into(&mut repeat);
         assert_eq!(mix, repeat);
     }
+}
+
+#[test]
+fn relative_10_123_300_keeps_attack_clock_and_pitch() {
+    use tabplayer_lib::{
+        audio::{plan::PlanMidiEvent, renderer::Renderer},
+        settings::TrackSound,
+    };
+    let (source, resources, settings) = renderer_fixture(false);
+    let mut plan = (*source).clone();
+    plan.tracks.truncate(1);
+    plan.notes.truncate(1);
+    plan.notes[0].key = 69;
+    plan.notes[0].end_tick = 240.0;
+    for index in 1..4 {
+        let mut note = plan.notes[0].clone();
+        note.id = format!("quarter{index}");
+        note.start_tick = index as f64 * 960.0;
+        note.end_tick += note.start_tick;
+        note.pitch[0].tick = note.start_tick;
+        plan.notes.push(note);
+    }
+    plan.midi = plan
+        .notes
+        .iter()
+        .flat_map(|note| {
+            [
+                PlanMidiEvent::NoteOn {
+                    track_id: "a".into(),
+                    tick: note.start_tick,
+                    channel: 0,
+                    key: note.key,
+                    velocity: note.velocity,
+                },
+                PlanMidiEvent::NoteOff {
+                    track_id: "a".into(),
+                    tick: note.end_tick,
+                    channel: 0,
+                    key: note.key,
+                    velocity: 0,
+                },
+                // Isolate each SoundFont attack from its sampled release tail.
+                PlanMidiEvent::Controller {
+                    track_id: "a".into(),
+                    tick: note.end_tick,
+                    channel: 0,
+                    controller: 120,
+                    value: 0,
+                },
+            ]
+        })
+        .collect();
+    for rate in [44_100, 48_000] {
+        for speed in [0.1, 1.23, 3.0] {
+            for recorded in [true, false] {
+                let mut settings = settings.clone();
+                if !recorded {
+                    settings.sounds.insert(
+                        "a".into(),
+                        TrackSound {
+                            voice_id: Some("gm".into()),
+                            ..Default::default()
+                        },
+                    );
+                }
+                let mut renderer =
+                    Renderer::new(Arc::new(plan.clone()), resources.clone(), settings, rate)
+                        .unwrap();
+                renderer.set_speed(speed).unwrap();
+                let spacing = 0.5 * rate as f64 / speed;
+                let mut output =
+                    vec![[0.0; 2]; (spacing * 3.0 + rate as f64 * 0.08).ceil() as usize];
+                renderer.render_into(&mut output);
+                // Find PCM attacks independently in each expected quarter window.
+                // Rustysynth's minimum block is eight frames; recorded attacks use
+                // the sample clock directly and retain the tighter two-frame bound.
+                let attacks: Vec<_> = (0..4)
+                    .map(|quarter| {
+                        let start = (quarter as f64 * spacing).floor() as usize;
+                        start
+                            + output[start..start + rate as usize / 25]
+                                .iter()
+                                .position(|sample| sample[0].abs() > 0.001)
+                                .unwrap_or_else(|| panic!("No attack: rate={rate} speed={speed} recorded={recorded} quarter={quarter}"))
+                    })
+                    .collect();
+                for pair in attacks.windows(2) {
+                    assert!(
+                        (pair[1] as f64 - pair[0] as f64 - spacing).abs()
+                            <= if recorded { 2.0 } else { 8.0 },
+                        "rate={rate} speed={speed} recorded={recorded}: {attacks:?}"
+                    );
+                }
+                let start = attacks[0] + rate as usize / 100;
+                let end = start + rate as usize / 40;
+                let measured = if recorded {
+                    frequency(&output[start..end]) * rate as f64 / 48_000.0
+                } else {
+                    // The SoundFont guitar's attack has strong upper partials, so
+                    // estimate its fundamental from waveform recurrence instead
+                    // of counting every harmonic's zero crossing.
+                    let wave = &output[start..end];
+                    let recurrence = |lag: usize| {
+                        let mut cross = 0.0;
+                        let mut left = 0.0;
+                        let mut right = 0.0;
+                        for pair in wave.iter().zip(wave.iter().skip(lag)) {
+                            let a = pair.0[0] as f64;
+                            let b = pair.1[0] as f64;
+                            cross += a * b;
+                            left += a * a;
+                            right += b * b;
+                        }
+                        cross / (left * right).sqrt()
+                    };
+                    let lag = (rate as usize / 600..rate as usize / 300)
+                        .max_by(|&a, &b| recurrence(a).total_cmp(&recurrence(b)))
+                        .unwrap();
+                    let (before, peak, after) =
+                        (recurrence(lag - 1), recurrence(lag), recurrence(lag + 1));
+                    let fractional = 0.5 * (before - after) / (before - 2.0 * peak + after);
+                    rate as f64 / (lag as f64 + fractional)
+                };
+                assert!(
+                    (measured - 440.0).abs() < if recorded { 2.0 } else { 12.0 },
+                    "rate={rate} speed={speed} recorded={recorded}: {measured}"
+                );
+            }
+        }
+    }
+}
+
+fn changing_tempo_practice_plan() -> Arc<tabplayer_lib::audio::plan::PlaybackPlan> {
+    Arc::new(serde_json::from_value(serde_json::json!({
+        "generation":1,"ppq":960,"durationTick":7680,"durationMs":6000,
+        "tracks":[{"id":"a","program":24,"percussion":false}],
+        "tempos":[{"tick":0,"bpm":120},{"tick":3840,"bpm":60}],
+        "occurrences":[
+            {"bar":0,"occurrence":0,"meterNumerator":4,"meterDenominator":4,"startTick":0,"endTick":3840,"startMs":0,"endMs":2000},
+            {"bar":1,"occurrence":0,"meterNumerator":4,"meterDenominator":4,"startTick":3840,"endTick":7680,"startMs":2000,"endMs":6000}
+        ],"notes":[],"midi":[]
+    })).unwrap())
+}
+
+#[test]
+fn fixed_90_ignores_source_120_then_60() {
+    use tabplayer_lib::audio::{practice::RenderTempo, renderer::Renderer};
+    let (source, mut resources, settings) = renderer_fixture(false);
+    let mut plan = (*changing_tempo_practice_plan()).clone();
+    for index in 0..8 {
+        let mut note = source.notes[0].clone();
+        note.id = format!("fixed-quarter-{index}");
+        note.source.target.bar = index / 4;
+        note.source.target.beat = index % 4;
+        note.start_tick = index as f64 * 960.0;
+        note.end_tick = note.start_tick + 240.0;
+        note.pitch[0].tick = note.start_tick;
+        plan.notes.push(note);
+    }
+    let bank = Arc::get_mut(&mut resources).unwrap();
+    let audio = Arc::get_mut(bank.samples.get_mut("tone").unwrap()).unwrap();
+    let frames = Arc::get_mut(&mut audio.frames).unwrap();
+    frames.fill([0.0; 2]);
+    frames[0] = [1.0; 2];
+    let plan = Arc::new(plan);
+    let original = serde_json::to_vec(&*plan).unwrap();
+    let mut renderer = Renderer::new(plan.clone(), resources, settings, 48_000).unwrap();
+    renderer
+        .set_practice_tempo(RenderTempo::Fixed { bpm: 90.0 })
+        .unwrap();
+    renderer.set_metronome(true);
+    let mut score = vec![[0.0; 2]; 256_000];
+    let mut click = score.clone();
+    let status = renderer.render_stems_into(&mut [&mut score, &mut click]);
+    let onsets = click_onsets(&click, 48_000);
+    assert_eq!(onsets.len(), 8, "{onsets:?}");
+    for (beat, onset) in onsets.into_iter().enumerate() {
+        assert!(onset.abs_diff(beat * 32_000 + 1) <= 2);
+    }
+    let attacks: Vec<_> = score
+        .iter()
+        .enumerate()
+        .filter(|(_, sample)| sample[0] > 0.3)
+        .map(|(frame, _)| frame)
+        .collect();
+    assert_eq!(attacks.len(), 8, "{attacks:?}");
+    for (beat, frame) in attacks.into_iter().enumerate() {
+        assert!(frame.abs_diff(beat * 32_000) <= 1);
+    }
+    assert!((status.tick - 7680.0).abs() < 0.031);
+    assert!((status.seconds - 6.0).abs() < 1.0 / 48_000.0);
+    assert!(status.ended);
+    assert_eq!(serde_json::to_vec(&*plan).unwrap(), original);
+}
+
+#[test]
+fn fixed_output_budget_crosses_tempo_step_and_rejects_backing_atomically() {
+    use tabplayer_lib::{
+        audio::{backing::BackingMap, practice::RenderTempo, renderer::Renderer},
+        settings::ChannelMix,
+    };
+    let (_, resources, settings) = renderer_fixture(false);
+    let plan = changing_tempo_practice_plan();
+    let mut renderer =
+        Renderer::new(plan.clone(), resources.clone(), settings.clone(), 48_000).unwrap();
+    renderer.seek_tick(2880.0);
+    renderer
+        .set_practice_tempo(RenderTempo::Fixed { bpm: 90.0 })
+        .unwrap();
+    assert_eq!(renderer.output_frames_until(2880.000000001), 1);
+    assert_eq!(renderer.output_frames_until(4800.0), 64_000);
+    renderer.render_into(&mut vec![[0.0; 2]; 32_000]);
+    assert_eq!(renderer.output_frames_until(4800.0), 32_000);
+    renderer.render_into(&mut vec![[0.0; 2]; 31_999]);
+    assert_eq!(renderer.output_frames_until(4800.0), 1);
+    renderer.render_into(&mut [[0.0; 2]; 1]);
+    assert_eq!(renderer.output_frames_until(4800.0), 0);
+    assert_eq!(renderer.authored_bpm_at(2880.0), 120.0);
+    assert_eq!(renderer.authored_bpm_at(4800.0), 60.0);
+    assert_eq!(renderer.meter_at(4800.0), (4, 4));
+    assert!(!renderer.has_backing());
+    let mut backed = Renderer::new(plan.clone(), resources, settings, 48_000).unwrap();
+    backed.set_speed(1.23).unwrap();
+    backed.seek_tick(2880.0);
+    backed
+        .install_backing(
+            tone(),
+            BackingMap::new(&[], 0.0, &plan).unwrap(),
+            ChannelMix {
+                mute: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert!(backed.has_backing());
+    let before = backed.position();
+    let budget = backed.output_frames_until(4800.0);
+    assert_eq!(
+        backed
+            .set_practice_tempo(RenderTempo::Fixed { bpm: 90.0 })
+            .unwrap_err(),
+        "Fixed tempo is unavailable while a backing track is present."
+    );
+    assert_eq!(backed.position().tick, before.tick);
+    assert_eq!(backed.output_frames_until(4800.0), budget);
+    assert!(
+        renderer
+            .install_backing(
+                tone(),
+                BackingMap::new(&[], 0.0, &plan).unwrap(),
+                ChannelMix::default()
+            )
+            .is_err()
+    );
+    assert!(!renderer.has_backing());
+}
+
+#[test]
+fn irregular_relative_buffers_do_not_add_an_endpoint_frame() {
+    use tabplayer_lib::audio::renderer::Renderer;
+    let (_, resources, settings) = renderer_fixture(false);
+    let plan = changing_tempo_practice_plan();
+    for rate in [44_100, 48_000] {
+        for ratio in [0.1, 0.5, 0.7, 1.23, 3.0] {
+            let mut renderer =
+                Renderer::new(plan.clone(), resources.clone(), settings.clone(), rate).unwrap();
+            renderer.set_speed(ratio).unwrap();
+            let expected = (2.0 * rate as f64 / ratio - 1e-7).ceil() as usize;
+            let mut frames = 0;
+            let mut block = [[0.0; 2]; 511];
+            while frames < expected {
+                let remaining = renderer.output_frames_until(3840.0);
+                assert_eq!(
+                    remaining,
+                    expected - frames,
+                    "rate={rate} ratio={ratio} atframe={frames}"
+                );
+                let count = remaining.min(if frames % 2 == 0 { 127 } else { 511 });
+                renderer.render_into(&mut block[..count]);
+                frames += count;
+            }
+            assert_eq!(
+                renderer.output_frames_until(3840.0),
+                0,
+                "rate={rate} ratio={ratio}"
+            );
+            // Reapplying accepted settings must not change the clock origin.
+            renderer.set_speed(ratio).unwrap();
+            assert_eq!(renderer.output_frames_until(3840.0), 0);
+            renderer.seek_tick(0.0);
+            assert_eq!(renderer.output_frames_until(3840.0), expected);
+        }
+    }
+}
+
+#[test]
+fn visual_only_pulses_and_gain_preserve_stems() {
+    use tabplayer_lib::audio::{
+        practice::{MetronomeSettings, PulsePosition},
+        renderer::Renderer,
+    };
+    let (_, resources, settings) = renderer_fixture(false);
+    let plan = changing_tempo_practice_plan();
+    let mut energies = Vec::new();
+    for volume in [0.0, 0.2, 0.4] {
+        let mut renderer =
+            Renderer::new(plan.clone(), resources.clone(), settings.clone(), 48_000).unwrap();
+        renderer.set_metronome_settings(MetronomeSettings {
+            enabled: true,
+            volume,
+            visual: true,
+        });
+        assert_eq!(renderer.stem_count(), 2);
+        let mut score = vec![[0.0; 2]; 72_000];
+        let mut click = score.clone();
+        let mut mix = score.clone();
+        let status = renderer.render_stems_and_mix_into(&mut [&mut score, &mut click], &mut mix);
+        assert_eq!(status.pulse_count, 3);
+        assert_eq!(
+            status.last_pulse,
+            Some(PulsePosition {
+                beat: 2,
+                beats_per_bar: 4,
+                accent: false
+            })
+        );
+        assert!(score.iter().flatten().all(|sample| *sample == 0.0));
+        assert_eq!(mix, click);
+        energies.push(energy(&click));
+        let status = renderer.render_into(&mut []);
+        assert_eq!(status.pulse_count, 0);
+        assert_eq!(status.last_pulse, None);
+        assert_eq!(renderer.position().pulse_count, 0);
+    }
+    assert_eq!(energies[0], 0.0);
+    assert!((energies[2] / energies[1] - 4.0).abs() < 1e-5);
+    let mut renderer = Renderer::new(plan, resources, settings, 48_000).unwrap();
+    renderer.set_metronome_settings(MetronomeSettings {
+        enabled: false,
+        volume: 0.4,
+        visual: true,
+    });
+    assert_eq!(renderer.stem_count(), 1);
+    let mut output = vec![[0.0; 2]; 72_000];
+    let status = renderer.render_into(&mut output);
+    assert_eq!(status.pulse_count, 3);
+    assert_eq!(status.last_pulse.unwrap().beat, 2);
+    assert!(output.iter().flatten().all(|sample| *sample == 0.0));
 }
 
 #[test]
@@ -409,6 +757,11 @@ fn render_seek_and_prepared_mix_install_do_not_touch_heap() {
     );
     let mix = PreparedMix::prepare(&settings, &plan, 48_000).unwrap();
     let mut renderer = Renderer::new(plan, resources, settings, 48_000).unwrap();
+    renderer.set_metronome_settings(tabplayer_lib::audio::practice::MetronomeSettings {
+        enabled: true,
+        volume: 0.4,
+        visual: true,
+    });
     let mut block = [[0.0; 2]; 512];
     HEAP_OPERATIONS.with(|n| n.set(0));
     COUNT_HEAP.with(|f| f.set(true));
@@ -416,6 +769,10 @@ fn render_seek_and_prepared_mix_install_do_not_touch_heap() {
         renderer.render_into(&mut block);
     }
     renderer.seek_tick(960.0);
+    renderer
+        .set_practice_tempo(tabplayer_lib::audio::practice::RenderTempo::Fixed { bpm: 90.0 })
+        .unwrap();
+    let _ = renderer.output_frames_until(2880.0);
     let retired = renderer.replace_mix(mix);
     renderer.render_into(&mut block);
     COUNT_HEAP.with(|f| f.set(false));
@@ -601,6 +958,8 @@ fn metronome_accents_actual_measure_grid_and_seek_waits_for_beat() {
         .map(|bar| MeasureOccurrence {
             bar,
             occurrence: 0,
+            meter_numerator: 3,
+            meter_denominator: 4,
             start_tick: bar as f64 * 2880.0,
             end_tick: (bar + 1) as f64 * 2880.0,
             start_ms: bar as f64 * 1500.0,
@@ -626,16 +985,16 @@ fn metronome_accents_actual_measure_grid_and_seek_waits_for_beat() {
 fn meter_plan(mixed: bool) -> Arc<tabplayer_lib::audio::plan::PlaybackPlan> {
     let occurrences = if mixed {
         serde_json::json!([
-            {"bar":0,"occurrence":0,"startTick":0,"endTick":720,"startMs":0,"endMs":375,"clickTicks":[0,480]},
-            {"bar":1,"occurrence":0,"startTick":720,"endTick":2160,"startMs":375,"endMs":1125,"clickTicks":[720,1200,1680]},
-            {"bar":2,"occurrence":0,"startTick":2160,"endTick":5040,"startMs":1125,"endMs":3125,"clickTicks":[2160,2640,3120,3600,4080,4560]},
-            {"bar":1,"occurrence":1,"startTick":5040,"endTick":6480,"startMs":3125,"endMs":4125,"clickTicks":[5040,5520,6000]},
-            {"bar":3,"occurrence":0,"startTick":6480,"endTick":8400,"startMs":4125,"endMs":5125,"clickTicks":[6480,7440]}
+            {"bar":0,"occurrence":0,"meterNumerator":3,"meterDenominator":8,"startTick":0,"endTick":720,"startMs":0,"endMs":375,"clickTicks":[0,480]},
+            {"bar":1,"occurrence":0,"meterNumerator":3,"meterDenominator":8,"startTick":720,"endTick":2160,"startMs":375,"endMs":1125,"clickTicks":[720,1200,1680]},
+            {"bar":2,"occurrence":0,"meterNumerator":6,"meterDenominator":8,"startTick":2160,"endTick":5040,"startMs":1125,"endMs":3125,"clickTicks":[2160,2640,3120,3600,4080,4560]},
+            {"bar":1,"occurrence":1,"meterNumerator":3,"meterDenominator":8,"startTick":5040,"endTick":6480,"startMs":3125,"endMs":4125,"clickTicks":[5040,5520,6000]},
+            {"bar":3,"occurrence":0,"meterNumerator":2,"meterDenominator":4,"startTick":6480,"endTick":8400,"startMs":4125,"endMs":5125,"clickTicks":[6480,7440]}
         ])
     } else {
         serde_json::json!([
-            {"bar":0,"occurrence":0,"startTick":0,"endTick":1440,"startMs":0,"endMs":750,"clickTicks":[0,480,960]},
-            {"bar":0,"occurrence":1,"startTick":1440,"endTick":2880,"startMs":750,"endMs":1500,"clickTicks":[1440,1920,2400]}
+            {"bar":0,"occurrence":0,"meterNumerator":3,"meterDenominator":8,"startTick":0,"endTick":1440,"startMs":0,"endMs":750,"clickTicks":[0,480,960]},
+            {"bar":0,"occurrence":1,"meterNumerator":3,"meterDenominator":8,"startTick":1440,"endTick":2880,"startMs":750,"endMs":1500,"clickTicks":[1440,1920,2400]}
         ])
     };
     Arc::new(
@@ -884,7 +1243,7 @@ fn automatic_program_changes_prepare_recorded_and_gm_attacks_and_seek() {
     let plan: Arc<tabplayer_lib::audio::plan::PlaybackPlan> = Arc::new(serde_json::from_value(serde_json::json!({
         "generation":1,"ppq":960,"durationTick":5760,"durationMs":3000,
         "tracks":[{"id":"a","program":25,"percussion":false}],"tempos":[{"tick":0,"bpm":120}],
-        "occurrences":[{"bar":0,"occurrence":0,"startTick":0,"endTick":5760,"startMs":0,"endMs":3000}],
+        "occurrences":[{"bar":0,"occurrence":0,"meterNumerator":6,"meterDenominator":4,"startTick":0,"endTick":5760,"startMs":0,"endMs":3000}],
         "notes":notes,"midi":midi
     })).unwrap());
     let requests = resource_requests(&plan, &settings);
@@ -1185,6 +1544,8 @@ fn pinned_recorded_presets_render_at_both_export_rates() {
             .map(|bar| MeasureOccurrence {
                 bar,
                 occurrence: 0,
+                meter_numerator: 4,
+                meter_denominator: 4,
                 start_tick: bar as f64 * 3840.0,
                 end_tick: (bar + 1) as f64 * 3840.0,
                 start_ms: bar as f64 * 2000.0,

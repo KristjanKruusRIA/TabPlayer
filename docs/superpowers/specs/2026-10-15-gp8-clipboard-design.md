@@ -60,6 +60,7 @@ Public snapshot APIs in `src/editor/clipboard-source.ts`:
 ```ts
 makeMusicClip(score:model.Score,selection:MusicSelection,mode:ClipboardMode):MusicClip
 readMusicClip(value:unknown):MusicClip
+musicClipSelection(score:model.Score,selection:MusicSelection,mode:ClipboardMode):MusicSelection
 ```
 
 Public paste API in `src/editor/clipboard-paste.ts`:
@@ -69,6 +70,8 @@ preparePasteMusic(score:model.Score,command:ClipboardCommand):PreparedMusicPaste
 ```
 
 It returns a detached candidate plus the original-to-result bar map; it never mutates the input score/command/clip. The returned score may require root's normal final rebuild. Source preparation, paste core, store/UI and root integration have distinct ownership; no worker edits existing range/measure/fingering modules.
+
+makeMusicClip and serialized Cut share musicClipSelection, so canonical end-at-zero ranges and multitrack expansion cannot disagree between copied music and removed music.
 
 ## Snapshot scope, privacy and validation
 
@@ -98,6 +101,8 @@ Collect GP volume/pan from trackMixAutomations, independently of its carrier bea
 
 Before insertion/fill, capture destination tempo/program/bank/volume/pan/sustain state at the untouched suffix. If copied state changes would leak into that suffix, restore the original state there unless its explicit ratio-zero event overrides it. Never leave later destination music playing the source clip's final instrument or tempo by accident. If no processed beat exists for an exact program/bank boundary, reject instead of moving the event or dropping grace-note sound. This follows the existing measure transform's boundary constraints.
 
+Contradictory program/bank streams across processed lanes in an affected or restored suffix bar reject: the pinned generator can suppress their effective MIDI events through its lane-local state cache. Identical streams and supported same-lane changes remain valid. Duplicate incoming tie ownership also rejects in this bounded clip schema; ordinary score cloning preserves those public-model relationships without flattening their playback.
+
 ## Instrument conversion and links
 
 Melodic-to-melodic preserves actual sounding pitch including source capo/sounding offset. Pitched destination writes octave/tone with its destination sounding offset; stringed destination uses planFingering with preferred source string or null and fixed existing destination notes when applicable. The solver supports 1..12 strings; empty requests return [], preferredString may be a positive safe source-string integer exceeding the destination count, and fixedString preserves the current destination placement. Preserve written accidental only when it still describes the converted pitch; otherwise Default.
@@ -112,13 +117,15 @@ preparePasteMusic makes a detached **destination** clone with scoreFromJson, cap
 
 Root replaces the current replay score with this candidate, applies mapBackingMeasures to document and embedded backing settings, performs the existing final rebuild/timer/managed-lyric reflow, and validates effective backing anchors before native commit. Raw lyrics are not copied: existing destination text/comments/slots/visibility/managed flags remain exact except mapped start bars. Unmanaged destination beat lyrics outside a filled rest suffix retain their assignments. Invalid surviving backing occurrence rejects the paste. Preserve sourceBarCount/track identities; no track addition/removal is part of this delivery.
 
-For correctness with existing settings-only replay, if history contains pasteMusic, root's replayDocumentSettings falls back to buildDocument(project). This avoids persisting a redundant derived bar map or recomputing fill decisions without their score. Later caching can optimize proven behavior; this bounded delivery needs exact settings/history replay first.
+For correctness with existing settings-only replay, if history contains pasteMusic, root's replayDocumentSettings derives settings/maps through buildDocument(project), retaining the current canonical score and embedded-byte objects. The caller has changed only settings history, so music is unchanged; retaining these identities prevents settings undo/redo from restarting playback. This avoids persisting a redundant derived bar map or recomputing fill decisions without their score.
 
 ## Controller, store and UI
 
 `ClipboardStore` in `src/editor/ClipboardStore.ts` owns a private MusicClip|null with get():MusicClip|null and set(clip:MusicClip):void. It stores/returns deep copies. App creates one store for its lifetime, independent of DocumentController replacement/epoch; New/Open never clear it. No OS clipboard tools/plugin or text clipboard JSON are introduced.
 
 Root adds DocumentController.copyMusic(selection,mode):Promise<MusicClip> and cutMusic(selection,mode):Promise<MusicClip>. Both run in the existing serialized run queue against committed score. For Cut, construct/validate the snapshot first, then use one eraseSelection (singleTrack) or removeMeasures (multiTrack expanded bars), returning the clip only after native commit. Extract the current edit body into private editNow(command,asset?) for use inside the existing run lock; do not call public edit from inside run, which would deadlock the queue. Existing public edit delegates to run(()=>editNow(...)) without behavior changes. Root stores the returned clip only after success; failures preserve previous store/history. Paste uses existing controller.edit with the embedded clip snapshot.
+
+Playback invalidation follows a successful native commit and precedes frontend score publication. Rejected native edits, history changes and document replacements preserve the existing playback preparation. Successful paste clears indexed chord-member selection; score shortcuts ignore dialog descendants as well as text-entry controls.
 
 `ClipboardPanel` consumes ClipboardPanelProps. Copy/Cut expose Single track vs Multitrack; show scope/global cut implications. Paste defaults phrase/currentBar or bars/beforeBar, displays track/staff mappings, count, six filters and concrete restrictions. It submits one PasteOptions object against the store snapshot. Ctrl/Cmd+C/X/V and Shift variants select the documented single/multitrack/special actions; input/select/textarea/contenteditable keep normal text editing. Busy disables actions so stale selections do not queue hidden edits. Paste clears stale indexed selection after success; Copy does not dirty or seek. Clipboard content is never logged or displayed as raw JSON.
 

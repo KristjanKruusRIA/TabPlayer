@@ -33,6 +33,8 @@ pub struct PlanTempo {
 pub struct MeasureOccurrence {
     pub bar: u32,
     pub occurrence: u32,
+    pub meter_numerator: u32,
+    pub meter_denominator: u32,
     pub start_tick: f64,
     pub end_tick: f64,
     pub start_ms: f64,
@@ -193,7 +195,12 @@ impl PlaybackPlan {
         prior = 0.0;
         for o in &self.occurrences {
             let count = counts.entry(o.bar).or_insert(0);
-            if !nonnegative(o.start_tick)
+            if o.meter_numerator == 0
+                || !matches!(
+                    o.meter_denominator,
+                    1 | 2 | 4 | 8 | 16 | 32 | 64 | 128 | 256
+                )
+                || !nonnegative(o.start_tick)
                 || o.start_tick < prior
                 || !nonnegative(o.end_tick)
                 || o.end_tick <= o.start_tick

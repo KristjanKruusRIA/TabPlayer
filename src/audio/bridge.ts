@@ -2,18 +2,18 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import type { DocumentSettings } from '../edit-types';
 import type { AssetInfo } from '../project';
-import type { PlaybackPlan, PracticeSettings } from './types';
+import type { PlaybackPlan } from './types';
+import type { PracticeLoop,PracticeSettings,PracticeStatus } from './practice-types';
 
-export interface NativeAudioStatus {generation:number;desiredGeneration?:number;ready:boolean;playing:boolean;tick:number;seconds:number;durationSeconds:number;speed:number;metronome:boolean;error:string|null;deviceId:string|null;backingDurationSeconds?:number|null;renderedFrames?:number;outputPeak?:number}
+export interface NativeAudioStatus {generation:number;desiredGeneration?:number;ready:boolean;playing:boolean;tick:number;seconds:number;durationSeconds:number;speed:number;metronome:boolean;practice:PracticeStatus;loop:PracticeLoop|null;error:string|null;deviceId:string|null;backingDurationSeconds?:number|null;renderedFrames?:number;outputPeak?:number}
 export interface AudioDeviceInfo {id:string;name:string;isDefault:boolean}
 export interface BackingCandidate {token:string;assetId:string;info:AssetInfo;durationMs?:number}
 export type TransportCommand =
   | {type:'play'|'pause'|'stop'|'clearLoop';generation:number}
   | {type:'invalidate';generation:number}
   | {type:'seekTick';tick:number;generation:number}
-  | {type:'setSpeed';speed:number;generation:number}
+  | {type:'setPractice';settings:PracticeSettings;generation:number}
   | {type:'setLoop';startTick:number;endTick:number;generation:number}
-  | {type:'setMetronome';enabled:boolean;generation:number}
   | {type:'selectDevice';deviceId:string|null;generation:number};
 export interface NativeAudioBridge {
   prepare(plan:PlaybackPlan,settings:DocumentSettings,embedded:Uint8Array|null,sourceKey?:string,practice?:PracticeSettings):Promise<void>;

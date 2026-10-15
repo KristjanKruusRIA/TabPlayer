@@ -87,7 +87,7 @@ pub enum RenderTempo { Relative {ratio:f64}, Fixed {bpm:f64} }
 pub struct PulsePosition {pub beat:u32,pub beats_per_bar:u32,pub accent:bool}
 pub struct CountInSnapshot {
   pub bars:u8,pub numerator:u32,pub denominator:u32,pub bpm:f64,
-  pub rate:u32,pub elapsed_frames:u64,pub emitted_pulses:u32,
+  pub rate:u32,pub elapsed_frames:u64,pub total_frames:u64,pub emitted_pulses:u32,
 }
 pub struct CountFrame {
   pub pulse:Option<PulsePosition>,pub remaining:u32,pub finished:bool,
@@ -111,6 +111,8 @@ impl ClickVoice {
 `progressive_ratio` is called only with a validated progressive variant and returns `min(end,start+floor(completedPasses/repetitions)*step)`. Passes50,50,70,70,90,90,100…% result from start.5/end1/step.2/repetitions2. No explicit Loop means no automatic trainer repeat.
 
 Count bars0 produces an already-finished clock. For a live count freeze starting actual BPM/meter: pulse period is `60/BPM*4/denominator` wall seconds; schedule from rounded absolute cumulative frames, not repeated rounded intervals. `next_frame.finished` means no count sample is consumed by that call; the caller uses that output slot for score audio. Remaining includes the current pulse until the final count sample. Pause simply stops calling next_frame. Snapshot restoration changes sample rate by preserving elapsed/remaining wall duration to the nearest new sample and emitted_pulses, so no pulse is replayed. Count constructor checks total pulses fit u32 and total frames fit u64; live count plans are prevalidated off callback.
+
+Snapshot total_frames preserves the actual rounded endpoint across device rates. Recomputing a canonical endpoint from BPM can lose several destination samples after a large rate increase. Rescale actual elapsed and total frame boundaries with integer nearest rounding; their difference preserves remaining wall duration within one new sample, including repeated restoration. Publish both under the same runtime seqlock.
 
 ClickVoice retains existing2400Hz accent/1800Hz ordinary,50ms exponentially decaying sine. Wave amplitude is `.25*volume`; default.4 reproduces current.1 amplitude. It never allocates. A new pulse retriggers it. Normal pulses are generated when audible or visual metronome is enabled; only enabled with positive volume sounds. Count generates pulses independently of playback-metronome enabled and uses the same volume.
 

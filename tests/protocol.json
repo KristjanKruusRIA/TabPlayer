@@ -56,5 +56,6 @@
   {"type":"refingerSelection","selection":{"kind":"notes","notes":[{"target":{"track":0,"staff":0,"bar":0,"voice":0,"beat":0},"noteIndex":0}]},"maxFret":24},
   {"type":"setSelectionSustain","selection":{"kind":"bars","tracks":[0],"firstBar":0,"lastBar":0},"strings":[1,2],"kind":"palmMute","enabled":true},
   {"type":"insertMeasures","beforeBar":0,"count":2},
-  {"type":"removeMeasures","firstBar":0,"lastBar":1}
+  {"type":"removeMeasures","firstBar":0,"lastBar":1},
+  {"type":"pasteMusic","clip":{"format":"TabPlayerClip","version":1,"engineVersion":"1.8.4","mode":"singleTrack","kind":"phrase","scoreJson":"{}","links":[]},"options":{"target":{"track":0,"staff":0,"bar":0,"voice":0,"beat":0},"destinations":[{"sourceTrack":0,"track":0,"staffMap":[0]}],"count":1,"placement":"currentBar","filters":{"diagrams":true,"texts":true,"timers":true,"trackAutomations":true,"masterAutomations":false,"sections":false}}}
 ]

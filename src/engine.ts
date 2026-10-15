@@ -13,6 +13,7 @@ import { reflowLyrics,removeLyricsMeasure } from './editor/lyrics';
 import { prepareScoreTimers } from './editor/timers';
 import { planMeasureMap,mapBackingMeasures } from './editor/measures';
 import { mapLyricsMeasures } from './editor/lyrics-measures';
+import { preparePasteMusic } from './editor/clipboard-paste';
 
 const settings = new Settings();
 const { Score, Track, Staff, Bar, Voice, Beat, Note, MasterBar, Automation, JsonConverter } = model;
@@ -129,16 +130,7 @@ function tripleDotTiming(beat: model.Beat) {
 }
 
 function removeNote(note: model.Note) {
-  if (note.tieOrigin) note.tieOrigin.tieDestination=null;
-  if (note.tieDestination) { note.tieDestination.tieOrigin=null;note.tieDestination.isTieDestination=false; }
-  if (note.slurOrigin) note.slurOrigin.slurDestination=null;
-  if (note.slurDestination) { note.slurDestination.slurOrigin=null;note.slurDestination.isSlurDestination=false; }
-  if (note.slideOrigin) { note.slideOrigin.slideTarget=null;note.slideOrigin.slideOutType=model.SlideOutType.None; }
-  if (note.slideTarget) note.slideTarget.slideOrigin=null;
-  if (note.hammerPullOrigin) { note.hammerPullOrigin.hammerPullDestination=null;note.hammerPullOrigin.isHammerPullOrigin=false; }
-  if (note.hammerPullDestination) note.hammerPullDestination.hammerPullOrigin=null;
-  note.tieOrigin=null;note.tieDestination=null;note.slurOrigin=null;note.slurDestination=null;
-  note.slideOrigin=null;note.slideTarget=null;note.hammerPullOrigin=null;note.hammerPullDestination=null;
+  detachNote(note);
   note.beat.removeNote(note);
 }
 
@@ -238,6 +230,10 @@ export function buildDocument(value: ProjectInput): BuiltDocument {
   const sourceMixes=structuredClone(documentSettings.mixes);
   for (const [index,edit] of project.edits.entries()) {
     if(isSettingsEdit(edit)) {applySettingsEdit(documentSettings,edit,score,identities);continue;}
+    if(edit.type==='pasteMusic'){
+      const prepared=preparePasteMusic(rebuild(score),edit);score=rebuild(prepared.score);
+      mapBackingMeasures(documentSettings.backing,prepared.barMap);mapBackingMeasures(embeddedBackingSettings,prepared.barMap);continue;
+    }
     if(['setOttava','setCrescendo','setFermata','setSimile','eraseSelection','transposeSelection','moveSelectionStrings','refingerSelection','setSelectionSustain','insertMeasures','removeMeasures'].includes(edit.type))score=rebuild(score);
     const measureMap=edit.type==='insertMeasures'||edit.type==='removeMeasures'?planMeasureMap(score.masterBars.length,edit):null;
     if(measureMap)mapLyricsMeasures(score,measureMap);
@@ -258,6 +254,7 @@ export function buildDocument(value: ProjectInput): BuiltDocument {
 
 export function replayDocumentSettings(value:ProjectInput,current:BuiltDocument):BuiltDocument {
   const project=validateProject(value);const next=defaultDocumentSettings();
+  if(project.edits.some(edit=>edit.type==='pasteMusic'))return {...buildDocument(project),score:current.score,embeddedBacking:current.embeddedBacking};
   const sourceBarCount=current.sourceBarCount??(project.base.kind==='blank'?project.base.measureCount:initialScore(project).masterBars.length);
   let barCount=sourceBarCount;
   next.mixes=structuredClone(current.sourceMixes ?? Object.fromEntries(current.score.tracks.map(track=>[trackIdentity(track),{...defaultMix(),mute:track.playbackInfo.isMute,solo:track.playbackInfo.isSolo}])));

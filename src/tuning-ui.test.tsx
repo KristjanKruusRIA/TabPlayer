@@ -6,12 +6,14 @@ import { App } from './App';
 import { DocumentController } from './controller';
 import { blankProject, type EditCommand } from './project';
 import type { NativeBridge } from './bridge';
+import { DEFAULT_PRACTICE } from './audio/practice-types';
 
 vi.mock('./ScoreView',()=>({ScoreView:()=>null}));
 vi.mock('./export/useExportCoordinator',()=>({useExportCoordinator:()=>({busy:false,progress:undefined,run:async()=>true,cancel:async()=>{}})}));
 vi.mock('./audio/NativePlaybackController',()=>({NativePlaybackController:class {
-  state={ready:true,playing:false,time:0,endTime:4000,measure:0,speed:100,metronome:false,error:null};
+  state={ready:true,playing:false,time:0,endTime:4000,measure:0,speed:100,metronome:false,error:null,practice:{settings:structuredClone(DEFAULT_PRACTICE),phase:'idle',countInRemaining:0,completedPasses:0,effectiveRatio:1,currentBpm:120,pulse:null},practicePending:false,practiceNotice:null,loop:null};
   subscribe=()=>()=>{};getState=()=>this.state;loadDocument=async()=>{};beforeScoreChange=()=>{};destroy=()=>{};
+  setPractice=()=>{};exportPracticeRatio=()=>1;
   devices=async()=>[];deviceId=()=>null;backingDurationMs=()=>undefined;mix=()=>undefined;
 }}));
 afterEach(cleanup);

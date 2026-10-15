@@ -3,6 +3,7 @@ pub mod decode;
 pub mod device;
 pub mod dsp;
 pub mod plan;
+pub mod practice;
 pub mod renderer;
 pub mod resources;
 pub mod voices;

@@ -8,6 +8,7 @@ import { scoreFromJson } from '../model-clone';
 import { gpControllerEvents, prepareGpMidiScore } from '../interchange/automation';
 
 const settings = new Settings();
+const validMeter = (numerator:number,denominator:number) => Number.isSafeInteger(numerator) && numerator > 0 && numerator <= 0xffffffff && [1,2,4,8,16,32,64,128,256].includes(denominator);
 const beatsOf = (score: model.Score) => score.tracks.flatMap(t => t.staves.flatMap(s => s.bars.flatMap(b => b.voices.flatMap(v => v.beats))));
 function cloneWithLinks(score: model.Score) {
   const copy = scoreFromJson(model.JsonConverter.scoreToJson(score), settings);
@@ -248,6 +249,7 @@ function pitchCurve(note: RawNote, destination: RawNote, events: PlanMidiEvent[]
 
 function buildWithIdentities(original: model.Score, generation: number, ids: string[], corrected?: (track: number, attack: number, length: number) => void): PlaybackPlan {
   if (!Number.isSafeInteger(generation) || generation < 0) throw new Error('Invalid playback generation.');
+  if (original.masterBars.some(bar=>!validMeter(bar.timeSignatureNumerator,bar.timeSignatureDenominator))) throw new Error('Invalid score meter.');
   const score = prepareGpMidiScore(prepareMidiScore(original),settings);
   if (ids.length !== score.tracks.length || new Set(ids).size !== ids.length || ids.some(id => typeof id !== 'string' || !id)) throw new Error('Invalid playback track identities.');
   const complete = generate(score), all = sources(score), nativeChannel = channelMapping(score, complete.events);
@@ -261,7 +263,7 @@ function buildWithIdentities(original: model.Score, generation: number, ids: str
     const step = 960 * 4 / m.masterBar.timeSignatureDenominator, clickTicks: number[] = [];
     if (!Number.isFinite(step) || step <= 0) throw new Error('Invalid score meter.');
     for (let pulse = 0; startTick + pulse * step < endTick; pulse++) clickTicks.push(startTick + pulse * step);
-    return { bar, occurrence, startTick, endTick, startMs: timeAt(startTick, tempos), endMs: timeAt(endTick, tempos), clickTicks };
+    return { bar, occurrence, meterNumerator:m.masterBar.timeSignatureNumerator, meterDenominator:m.masterBar.timeSignatureDenominator, startTick, endTick, startMs: timeAt(startTick, tempos), endMs: timeAt(endTick, tempos), clickTicks };
   });
   const lanes = new Map<string, Source[]>();
   for (const source of all) { const lane = lanes.get(source.lane) ?? []; lane.push(source); lanes.set(source.lane, lane); }
@@ -364,6 +366,7 @@ export function validatePlaybackPlan(plan: PlaybackPlan) {
   for (const tempo of plan.tempos) { if (!validTime(tempo.tick) || tempo.tick <= previous || tempo.tick > plan.durationTick || !Number.isFinite(tempo.bpm) || tempo.bpm <= 0 || !Number.isFinite(60 / (tempo.bpm * 960))) fail(); previous = tempo.tick; }
   const occurrences = new Set<string>(), counts = new Map<number, number>(); previous = 0;
   for (const o of plan.occurrences) {
+    if (!validMeter(o.meterNumerator,o.meterDenominator)) fail('meter');
     if (!integer(o.bar, 0xffffffff) || !integer(o.occurrence, 0xffffffff) || o.occurrence !== (counts.get(o.bar) ?? 0) || !validTime(o.startTick) || o.startTick < previous || !validTime(o.endTick) || o.endTick <= o.startTick || o.endTick > plan.durationTick || !validTime(o.startMs) || !validTime(o.endMs) || o.endMs <= o.startMs || o.endMs > plan.durationMs + .001) fail();
     counts.set(o.bar, o.occurrence + 1); occurrences.add(`${o.bar}/${o.occurrence}`); previous = o.endTick;
     if (o.clickTicks !== undefined && (!o.clickTicks.length || o.clickTicks[0] !== o.startTick || o.clickTicks.some((tick, i) => !validTime(tick) || tick < o.startTick || tick >= o.endTick || i > 0 && tick <= o.clickTicks![i - 1]))) fail('metronome ticks');

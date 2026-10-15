@@ -1,5 +1,6 @@
 import type { PrintLayout,SvgPage,SvgSystem } from '../export/types';
 import type { PageLayout } from './types';
+import {pageTitleFontSize} from '../export/page-title';
 
 export interface PageGeometry {
   widthMm:number;heightMm:number;width:number;height:number;
@@ -43,7 +44,7 @@ export function pageGeometry(layout:PageLayout):PageGeometry {
 }
 
 export function paginateEngravedSystems(systems:SvgSystem[],title:string,layout:PageLayout):SvgPage[] {
-  const d=pageGeometry(layout),groups:SvgSystem[][]=[[]];let height=0;
+  const d=pageGeometry(layout),titleSize=pageTitleFontSize(title,d.usableWidth),groups:SvgSystem[][]=[[]];let height=0;
   for(const system of systems) {
     // alphaTab may round the reported system width by one pixel, as in legacy export.
     if(!finite(system.height)||system.height<=0||system.height>d.usableHeight||!finite(system.width)||system.width<=0||system.width>d.usableWidth+1)throw new Error('A notation system does not fit this page. Reduce print scale, use landscape, or export fewer staves.');
@@ -53,6 +54,6 @@ export function paginateEngravedSystems(systems:SvgSystem[],title:string,layout:
   return groups.map((group,index)=>{
     let y=d.top+40;
     const content=group.map(system=>{const at=y;y+=system.height;return `<g transform="translate(${d.left} ${at})">${system.svg.replace(/<svg\b[^>]*>/,'').replace(/<\/svg>\s*$/,'')}</g>`;}).join('');
-    return {widthMm:d.widthMm,heightMm:d.heightMm,svg:`<svg xmlns="http://www.w3.org/2000/svg" width="${d.widthMm}mm" height="${d.heightMm}mm" viewBox="0 0 ${d.width} ${d.height}"><style>.at{font-family:Bravura;font-size:34px}text{fill:#111}</style><text x="${d.left}" y="${d.top+22}" font-family="Noto Sans" font-size="18">${escaped(title)}</text>${content}<text x="${d.width/2}" y="${d.height-d.bottom}" text-anchor="middle" font-family="Noto Sans" font-size="11">${index+1} / ${groups.length}</text></svg>`};
+    return {widthMm:d.widthMm,heightMm:d.heightMm,svg:`<svg xmlns="http://www.w3.org/2000/svg" width="${d.widthMm}mm" height="${d.heightMm}mm" viewBox="0 0 ${d.width} ${d.height}"><style>.at{font-family:Bravura;font-size:34px}text{fill:#111}</style><text x="${d.left}" y="${d.top+22}" font-family="Noto Sans, Noto Sans CJK JP, Noto Emoji" font-size="${titleSize}">${escaped(title)}</text>${content}<text x="${d.width/2}" y="${d.height-d.bottom}" text-anchor="middle" font-family="Noto Sans, Noto Sans CJK JP, Noto Emoji" font-size="11">${index+1} / ${groups.length}</text></svg>`};
   });
 }

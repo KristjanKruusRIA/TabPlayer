@@ -1,3 +1,4 @@
+import { readActiveDocument } from './document-context.mjs';
 import assert from 'node:assert/strict';
 import {mkdirSync,readFileSync,writeFileSync} from 'node:fs';
 import {createHash} from 'node:crypto';
@@ -32,7 +33,7 @@ try{
   result.clipboardReveal=true;await click('Open');await page.waitForFunction(()=>document.querySelector('.document-title')?.textContent?.includes('engraving'));
   assert.ok((await page.locator('.statusbar').innerText()).startsWith('Not saved'),'Imported score must not claim to be saved or new');
   await page.getByRole('img',{name:'Edit target',exact:true}).waitFor();await page.waitForTimeout(250);
-  result.initial=await page.evaluate(()=>window.__TAURI_INTERNALS__.invoke('project_snapshot'));
+  result.initial=await readActiveDocument(page);
   const caret=page.getByRole('img',{name:'Edit target',exact:true});
   const oldCaret=await caret.boundingBox();await workspace.focus();await page.keyboard.press('ArrowRight');
   await page.waitForFunction(()=>document.querySelector('.score-hint')?.textContent?.includes('Beat 2'));
@@ -75,7 +76,7 @@ try{
   await exports.getByRole('combobox',{name:'Export format'}).selectOption('gp');await exports.locator('.export-track>label input').evaluateAll(nodes=>nodes.forEach(node=>{if(node.checked)node.click();}));
   await exports.getByRole('button',{name:'Export',exact:true}).click();assert.equal(await exports.getByRole('alert').innerText(),'Select at least one track to export.');await page.keyboard.press('Escape');
   await page.waitForFunction(()=>!document.querySelector('.transport fieldset')?.disabled,{},{timeout:60000});await workspace.focus();await page.keyboard.press('Space');await page.getByRole('button',{name:'Pause',exact:true}).waitFor();await page.keyboard.press('Space');await page.getByRole('button',{name:'Play',exact:true}).waitFor();await click('Stop');
-  result.final=await page.evaluate(()=>window.__TAURI_INTERNALS__.invoke('project_snapshot'));assert.deepEqual(result.final.project,result.initial.project);assert.equal(hash(),result.sourceHash);assert.deepEqual(result.errors,[]);
+  result.final=await readActiveDocument(page);assert.deepEqual(result.final.project,result.initial.project);assert.equal(hash(),result.sourceHash);assert.deepEqual(result.errors,[]);
   result.passed=true;save();console.log(JSON.stringify({passed:true,states:result.states.map(state=>state.name),sourceHash:result.sourceHash,pid}));
 }catch(error){result.failure=String(error.stack??error);if(page)await page.screenshot({path:resolve(output,'failure.png')}).catch(()=>{});save();throw error;}
 finally{if(browser)await browser.close();if(pid){stop(pid);result.stoppedPid=pid;save();console.log(`STOPPED ${pid}`);}}

@@ -9,6 +9,7 @@ import { defaultDocumentSettings } from '../document-settings';
 import { music,noteAt } from '../editor/fixtures';
 import { useExportCoordinator } from './useExportCoordinator';
 import type { ExportNativeBridge,NativeAudioExportPayload } from './bridge';
+import type { ExportOptions,ExportProgress } from './types';
 import { getTrackLyrics,applyLyricsEdit } from '../editor/lyrics';
 import { loadInterchangeScore } from '../interchange/gp';
 import * as pdf from './pdf';
@@ -17,17 +18,17 @@ it('freezes custom page and engraving at launch and uses explicit export tracks'
   const score=music(),settings=defaultDocumentSettings();settings.page={widthMm:250,heightMm:350,marginsMm:{top:12,right:22,bottom:32,left:42},scale:.8,profile:'document'};settings.engraving.stylesheet.hideDynamics=true;
   let release!:()=>void;vi.spyOn(pdf,'loadExportFonts').mockImplementation(()=>new Promise<void>(resolve=>{release=resolve;}));
   const renderPages=vi.spyOn(pdf,'renderPdfPages').mockReturnValue([{widthMm:250,heightMm:350,svg:'<svg/>'}]),api=native(),exportPdf=vi.fn(api.exportPdf);api.exportPdf=exportPdf;
-  const {result}=renderHook(()=>useExportCoordinator({score,settings,currentSpeed:1,bridge:{confirmExport:async()=>true,exportGp:async()=>true},native:api}));
+  const {result}=renderHook(()=>useExportCoordinator({revision:7,score,settings,currentSpeed:1,bridge:{confirmExport:async()=>true,exportGp:async()=>true},native:api}));
   const layout={paper:'A4' as const,orientation:'portrait' as const,marginMm:15,scale:1,profile:'ScoreTab' as const};
   let pending!:Promise<boolean>;act(()=>{pending=result.current.run({format:'pdf',selection:{tracks:[0],range:null},layout,page:settings.page!});});
   settings.page.widthMm=300;settings.engraving.stylesheet.hideDynamics=false;release();await act(async()=>{await pending;});
   expect(renderPages).toHaveBeenCalledWith(expect.anything(),{tracks:[0],range:null},layout,{page:expect.objectContaining({widthMm:250}),engraving:expect.objectContaining({stylesheet:expect.objectContaining({hideDynamics:true})}),trackIds:['base/0']});
-  expect(exportPdf).toHaveBeenCalledWith([{widthMm:250,heightMm:350,svg:'<svg/>'}],false);
+  expect(exportPdf).toHaveBeenCalledWith([{widthMm:250,heightMm:350,svg:'<svg/>'}],false,7);
 });
 it('honors explicit legacy export geometry when the caller omits a custom page',async()=>{
   const score=music(),settings=defaultDocumentSettings();vi.spyOn(pdf,'loadExportFonts').mockResolvedValue();
   const renderPages=vi.spyOn(pdf,'renderPdfPages').mockReturnValue([{widthMm:279.4,heightMm:215.9,svg:'<svg/>'}]);
-  const {result}=renderHook(()=>useExportCoordinator({score,settings,currentSpeed:1,bridge:{confirmExport:async()=>true,exportGp:async()=>true},native:native()})),layout={paper:'Letter' as const,orientation:'landscape' as const,marginMm:20,scale:.8,profile:'Score' as const};
+  const {result}=renderHook(()=>useExportCoordinator({revision:7,score,settings,currentSpeed:1,bridge:{confirmExport:async()=>true,exportGp:async()=>true},native:native()})),layout={paper:'Letter' as const,orientation:'landscape' as const,marginMm:20,scale:.8,profile:'Score' as const};
   await act(async()=>{await result.current.run({format:'pdf',selection:{tracks:[0],range:null},layout});});
   expect(renderPages.mock.calls[0][3]?.page).toEqual({widthMm:279.4,heightMm:215.9,marginsMm:{top:20,right:20,bottom:20,left:20},scale:.8,profile:'Score'});
 });
@@ -36,7 +37,7 @@ it.each([true,false])('freezes exact raw and hidden lyrics through the export di
   const score=buildScore({...blankProject(),edits:[{type:'setNote',target:{track:0,staff:0,bar:0,voice:0,beat:0},string:1,fret:0},{type:'setTrackLyrics',track:0,visible,lines:[{startBar:0,text:raw}]}]});
   let allow!:(value:boolean)=>void,bytes:Uint8Array|undefined;
   const bridge={confirmExport:()=>new Promise<boolean>(resolve=>{allow=resolve;}),exportGp:async(value:Uint8Array)=>{bytes=value;return true;}};
-  const api=native(),{result}=renderHook(()=>useExportCoordinator({score,settings:defaultDocumentSettings(),currentSpeed:1,bridge,native:api}));
+  const api=native(),{result}=renderHook(()=>useExportCoordinator({revision:7,score,settings:defaultDocumentSettings(),currentSpeed:1,bridge,native:api}));
   let pending!:Promise<boolean>;act(()=>{pending=result.current.run({format:'gp',selection:{tracks:[0],range:null}});});
   applyLyricsEdit(score,{type:'setTrackLyrics',track:0,visible:true,lines:[{startBar:0,text:'Later'}]});allow(true);
   await act(async()=>{expect(await pending).toBe(true);});
@@ -47,7 +48,7 @@ function native():ExportNativeBridge{return {exportPdf:async()=>null,exportMidi:
 it('rejects an unavailable current coefficient before launching or entering a native job',async()=>{
   const score=buildScore(blankProject()),api=native(),exportAudio=vi.fn(api.exportAudio);api.exportAudio=exportAudio;
   const bridge={confirmExport:async()=>true,exportGp:async()=>true};
-  const {result}=renderHook(()=>useExportCoordinator({score,settings:defaultDocumentSettings(),currentSpeed:null,bridge,native:api}));
+  const {result}=renderHook(()=>useExportCoordinator({revision:7,score,settings:defaultDocumentSettings(),currentSpeed:null,bridge,native:api}));
   await act(async()=>{await expect(result.current.run({format:'wav',selection:{tracks:[0],range:null},audio:{sampleRate:48000,bitDepth:16,speed:'current',metronome:false,tailSeconds:0,backing:false,includeMix:false}})).rejects.toThrow(/fixed BPM.*saved speed/i);});
   expect(exportAudio).not.toHaveBeenCalled();expect(result.current.busy).toBe(false);expect(result.current.progress).toBeUndefined();
 });
@@ -55,7 +56,7 @@ it('exports saved speed and interchange files when fixed BPM has no coefficient'
   const score=buildScore(blankProject()),api=native();let payload:NativeAudioExportPayload|undefined, gp:Uint8Array|undefined, midi:Uint8Array|undefined;
   api.exportAudio=async value=>{payload=value;return 'saved';};api.status=async()=>({id:'saved',frames:1,totalFrames:1,status:'complete'});api.exportMidi=async bytes=>{midi=bytes;return true;};
   const bridge={confirmExport:async()=>true,exportGp:async(bytes:Uint8Array)=>{gp=bytes;return true;}};
-  const {result}=renderHook(()=>useExportCoordinator({score,settings:defaultDocumentSettings(),currentSpeed:null,bridge,native:api}));
+  const {result}=renderHook(()=>useExportCoordinator({revision:7,score,settings:defaultDocumentSettings(),currentSpeed:null,bridge,native:api}));
   await act(async()=>{expect(await result.current.run({format:'wav',selection:{tracks:[0],range:null},audio:{sampleRate:48000,bitDepth:16,speed:'saved',metronome:false,tailSeconds:0,backing:false,includeMix:false}})).toBe(true);});
   expect(payload!.request.speed).toBe(1);expect(payload!.request.metronome).toBe(false);
   await act(async()=>{expect(await result.current.run({format:'gp',selection:{tracks:[0],range:null}})).toBe(true);});
@@ -66,7 +67,7 @@ it('freezes one progressive coefficient and explicit audio options when the job 
   const score=buildScore(blankProject()),api=native();let payload:NativeAudioExportPayload|undefined, finish!:(id:string)=>void;
   api.exportAudio=async value=>{payload=value;return new Promise<string>(resolve=>{finish=resolve;});};api.status=async()=>({id:'frozen',frames:1,totalFrames:1,status:'complete'});
   const bridge={confirmExport:async()=>true,exportGp:async()=>true},settings=defaultDocumentSettings();
-  const {result,rerender}=renderHook(({ratio}:{ratio:number|null})=>useExportCoordinator({score,settings,currentSpeed:ratio,bridge,native:api}),{initialProps:{ratio:.7 as number|null}});
+  const {result,rerender}=renderHook(({ratio}:{ratio:number|null})=>useExportCoordinator({revision:7,score,settings,currentSpeed:ratio,bridge,native:api}),{initialProps:{ratio:.7 as number|null}});
   const options={format:'wav' as const,selection:{tracks:[0],range:null},audio:{sampleRate:48000 as const,bitDepth:16 as const,speed:'current' as const,metronome:true,tailSeconds:0,backing:false,includeMix:false}};
   let pending!:Promise<boolean>;act(()=>{pending=result.current.run(options);});
   rerender({ratio:.9});options.audio.metronome=false;options.audio.tailSeconds=8;rerender({ratio:null});
@@ -77,7 +78,7 @@ it('freezes one progressive coefficient and explicit audio options when the job 
 it('freezes GP music before awaiting confirmation and clears busy when destination cancels',async()=>{
   const score=buildScore(blankProject());score.title='Frozen title';let allow!:(v:boolean)=>void;let bytes:Uint8Array|undefined;
   const bridge={confirmExport:()=>new Promise<boolean>(r=>{allow=r;}),exportGp:async(data:Uint8Array)=>{bytes=data;return false;}};
-  const api=native();const {result}=renderHook(()=>useExportCoordinator({score,settings:defaultDocumentSettings(),currentSpeed:1,bridge,native:api}));
+  const api=native();const {result}=renderHook(()=>useExportCoordinator({revision:7,score,settings:defaultDocumentSettings(),currentSpeed:1,bridge,native:api}));
   let pending!:Promise<boolean>;act(()=>{pending=result.current.run({format:'gp',selection:{tracks:[0],range:null}});});
   expect(result.current.busy).toBe(true);score.title='Later title';allow(true);await act(async()=>{expect(await pending).toBe(false);});
   expect(result.current.busy).toBe(false);expect(importer.ScoreLoader.loadScoreFromBytes(bytes!,new Settings()).title).toBe('Frozen title');expect(score.title).toBe('Later title');
@@ -87,7 +88,7 @@ it('freezes the explicit phrase-slur origin before awaiting GP export confirmati
   origin.slurDestination=destination;destination.slurOrigin=origin;destination.isSlurDestination=true;
   const exported=vi.spyOn(engine,'exportGp');
   let allow!:(v:boolean)=>void;let bytes:Uint8Array|undefined;const bridge={confirmExport:()=>new Promise<boolean>(resolve=>{allow=resolve;}),exportGp:async(value:Uint8Array)=>{bytes=value;return true;}};
-  const api=native();const settings=defaultDocumentSettings();const {result}=renderHook(()=>useExportCoordinator({score,settings,currentSpeed:1,bridge,native:api}));
+  const api=native();const settings=defaultDocumentSettings();const {result}=renderHook(()=>useExportCoordinator({revision:7,score,settings,currentSpeed:1,bridge,native:api}));
   let pending!:Promise<boolean>;act(()=>{pending=result.current.run({format:'gp',selection:{tracks:[0],range:{first:0,last:2}}});});
   origin.slurDestination=null;destination.slurOrigin=null;destination.isSlurDestination=false;allow(true);await act(async()=>{expect(await pending).toBe(true);});
   const frozen=exported.mock.calls[0][0];expect(noteAt(frozen,2).slurOrigin?.id).toBe(origin.id);expect(noteAt(frozen,2).slurOrigin===noteAt(frozen)).toBe(true);expect(frozen).not.toBe(score);
@@ -98,16 +99,77 @@ it('prepares selected audio with original stable identities frozen settings and 
   const project=previewEdit(blankProject(),{type:'addTrack',name:'Bass',program:33,tuning:[43,38,33,28]}).project;
   const score=buildScore(project);const settings=defaultDocumentSettings();settings.mixes[trackIdentity(score.tracks[1])]={gain:.3,pan:.2,mute:false,solo:false};
   let payload:NativeAudioExportPayload|undefined;const api=native();api.exportAudio=async value=>{payload=value;return 'audio';};api.status=async()=>({id:'audio',frames:100,totalFrames:100,status:'complete'});
-  const bridge={confirmExport:async()=>true,exportGp:async()=>true};const {result}=renderHook(()=>useExportCoordinator({score,settings,currentSpeed:.5,bridge,native:api,embeddedBacking:new Uint8Array([1,2,3])}));
+  const bridge={confirmExport:async()=>true,exportGp:async()=>true};const {result}=renderHook(()=>useExportCoordinator({revision:7,score,settings,currentSpeed:.5,bridge,native:api,embeddedBacking:new Uint8Array([1,2,3])}));
   await act(async()=>{expect(await result.current.run({format:'stems',selection:{tracks:[1],range:{first:1,last:2}},audio:{sampleRate:44100,bitDepth:24,speed:'current',metronome:false,tailSeconds:.1,backing:true,includeMix:true}})).toBe(true);});
   expect(payload!.plan.tracks[1].id).toBe(trackIdentity(score.tracks[1]));expect(payload!.request.tracks[0].id).toBe(trackIdentity(score.tracks[1]));expect(payload!.request.speed).toBe(.5);expect(payload!.embeddedBytes).toEqual([1,2,3]);expect(payload!.stems).toBe(true);expect(payload!.settings.mixes[trackIdentity(score.tracks[1])].gain).toBe(.3);
   expect(result.current.progress?.status).toBe('complete');expect(result.current.busy).toBe(false);
 });
 it('waits for native cancellation acknowledgement and reports failed jobs as errors',async()=>{
   const score=buildScore(blankProject()),api=native();let cancelled=false;api.exportAudio=async()=> 'job';api.cancel=async()=>{cancelled=true;};api.status=async()=>({id:'job',frames:0,totalFrames:10,status:cancelled?'cancelled':'running'});
-  const props={score,settings:defaultDocumentSettings(),currentSpeed:1,bridge:{confirmExport:async()=>true,exportGp:async()=>true},native:api};const {result}=renderHook(()=>useExportCoordinator(props));
+  const props={revision:7,score,settings:defaultDocumentSettings(),currentSpeed:1,bridge:{confirmExport:async()=>true,exportGp:async()=>true},native:api};const {result}=renderHook(()=>useExportCoordinator(props));
   const options={format:'wav' as const,selection:{tracks:[0],range:null},audio:{sampleRate:48000 as const,bitDepth:16 as const,speed:'saved' as const,metronome:false,tailSeconds:0,backing:false,includeMix:false}};
   let pending!:Promise<boolean>;act(()=>{pending=result.current.run(options);});await waitFor(()=>expect(result.current.progress?.status).toBe('running'));
   await act(async()=>{await result.current.cancel();expect(await pending).toBe(false);});expect(result.current.busy).toBe(false);
   api.status=async()=>({id:'job',frames:0,totalFrames:10,status:'failed',error:'Disk full'});await act(async()=>{await expect(result.current.run(options)).rejects.toThrow('Disk full');});expect(result.current.busy).toBe(false);
+});
+
+it.each(['gp','midi','pdf','print','wav','stems'] as const)('captures a coherent explicit source and revision for %s',async format=>{
+  const old=music(),score=music();old.title='Old';score.title='Latest';
+  const settings=defaultDocumentSettings();settings.mixes['base/0']={gain:.2,pan:0,mute:false,solo:false};
+  const api=native(),gp=vi.fn(async(_bytes:Uint8Array,_revision:number)=>true),bridge={confirmExport:async()=>true,exportGp:gp};
+  api.exportMidi=vi.fn(async()=>true);api.exportPdf=vi.fn(async()=> 'job');api.exportAudio=vi.fn(async()=> 'job');
+  api.status=async()=>({id:'job',frames:1,totalFrames:1,status:'complete'});
+  vi.spyOn(pdf,'loadExportFonts').mockResolvedValue();const pages=vi.spyOn(pdf,'renderPdfPages').mockReturnValue([{widthMm:210,heightMm:297,svg:'<svg/>'}]);
+  const {result}=renderHook(()=>useExportCoordinator({revision:1,score:old,settings:defaultDocumentSettings(),currentSpeed:1,bridge,native:api}));
+  const source={score,settings,embeddedBacking:Uint8Array.of(5,6),revision:19};
+  const options:ExportOptions=format==='wav'||format==='stems'?{format,selection:{tracks:[0],range:null},audio:{sampleRate:48000 as const,bitDepth:16 as const,speed:'saved' as const,metronome:false,tailSeconds:0,backing:true,includeMix:false}}:format==='pdf'||format==='print'?{format,selection:{tracks:[0],range:null},layout:{paper:'A4' as const,orientation:'portrait' as const,marginMm:15,scale:1,profile:'Score' as const}}:{format,selection:{tracks:[0],range:null}};
+  await act(async()=>{expect(await result.current.run(options,source)).toBe(true);});
+  if(format==='gp'){expect(gp).toHaveBeenCalledWith(expect.any(Uint8Array),19);expect(loadInterchangeScore(gp.mock.calls[0][0],new Settings()).title).toBe('Latest');}
+  else if(format==='midi')expect(api.exportMidi).toHaveBeenCalledWith(expect.any(Uint8Array),19);
+  else if(format==='pdf'||format==='print'){expect(api.exportPdf).toHaveBeenCalledWith(expect.any(Array),format==='print',19);expect(pages.mock.calls[0][0].title).toBe('Latest');}
+  else expect(api.exportAudio).toHaveBeenCalledWith(expect.objectContaining({settings,embeddedBytes:[5,6],stems:format==='stems'}),19);
+});
+it.each(['pdf','print','wav','stems'] as const)('cancel before a late %s job id waits for cancellation and native terminal state',async format=>{
+  const api=native();let create!:(id:string)=>void,ack!:()=>void,terminal!:(state:Awaited<ReturnType<ExportNativeBridge['status']>>)=>void;
+  api.exportAudio=()=>new Promise(resolve=>{create=resolve;});api.exportPdf=()=>new Promise(resolve=>{create=resolve;});
+  vi.spyOn(pdf,'loadExportFonts').mockResolvedValue();vi.spyOn(pdf,'renderPdfPages').mockReturnValue([{widthMm:210,heightMm:297,svg:'<svg/>'}]);
+  api.cancel=vi.fn(()=>new Promise<void>(resolve=>{ack=resolve;}));
+  api.status=vi.fn(()=>new Promise<ExportProgress|null>(resolve=>{terminal=resolve;}));
+  const {result}=renderHook(()=>useExportCoordinator({revision:7,score:music(),settings:defaultDocumentSettings(),currentSpeed:1,bridge:{confirmExport:async()=>true,exportGp:async()=>true},native:api}));
+  let pending!:Promise<boolean>,cancelling!:Promise<void>,resolved=false;
+  const options:ExportOptions=format==='pdf'||format==='print'?{format,selection:{tracks:[0],range:null},layout:{paper:'A4',orientation:'portrait',marginMm:15,scale:1,profile:'Score'}}:{format,selection:{tracks:[0],range:null},audio:{sampleRate:48000,bitDepth:16,speed:'saved',metronome:false,tailSeconds:0,backing:false,includeMix:false}};
+  await act(async()=>{pending=result.current.run(options);});
+  act(()=>{cancelling=result.current.cancel().then(()=>{resolved=true;});});
+  await act(async()=>{await Promise.resolve();});expect(resolved).toBe(false);expect(result.current.busy).toBe(true);
+  await act(async()=>{create('late');});expect(api.cancel).toHaveBeenCalledWith('late');expect(resolved).toBe(false);
+  await act(async()=>{ack();});expect(api.status).toHaveBeenCalledWith('late');expect(resolved).toBe(false);expect(result.current.busy).toBe(true);
+  await act(async()=>{terminal({id:'late',frames:0,totalFrames:10,status:'cancelled'});expect(await pending).toBe(false);await cancelling;});
+  expect(resolved).toBe(true);expect(result.current.busy).toBe(false);expect(api.cancel).toHaveBeenCalledTimes(1);
+});
+
+it('keeps a terminal export failure primary when cancellation also fails',async()=>{
+  const api=native();let terminal!:(state:Awaited<ReturnType<ExportNativeBridge['status']>>)=>void;
+  api.exportAudio=async()=> 'failed';api.status=()=>new Promise(resolve=>{terminal=resolve;});api.cancel=async()=>{throw new Error('Cancel unavailable');};
+  const {result}=renderHook(()=>useExportCoordinator({revision:7,score:music(),settings:defaultDocumentSettings(),currentSpeed:1,bridge:{confirmExport:async()=>true,exportGp:async()=>true},native:api}));
+  let pending!:Promise<boolean>,cancelling!:Promise<void>,settled=false;
+  await act(async()=>{pending=result.current.run({format:'wav',selection:{tracks:[0],range:null},audio:{sampleRate:48000,bitDepth:16,speed:'saved',metronome:false,tailSeconds:0,backing:false,includeMix:false}});});
+  act(()=>{cancelling=result.current.cancel();void cancelling.catch(()=>{settled=true;});});
+  await act(async()=>{await Promise.resolve();});expect(settled).toBe(false);expect(result.current.busy).toBe(true);
+  await act(async()=>{terminal({id:'failed',frames:0,totalFrames:10,status:'failed',error:'Disk full'});await expect(pending).rejects.toThrow('Disk full');await expect(cancelling).rejects.toThrow('Cancel unavailable');});
+  expect(result.current.busy).toBe(false);
+});
+
+it.each(['cancelled','complete','failed'] as const)('known job %s terminal waits for outstanding cancel acknowledgement before settling run',async status=>{
+  const api=native();let terminal!:(state:Awaited<ReturnType<ExportNativeBridge['status']>>)=>void,ack!:()=>void;
+  api.exportAudio=async()=> 'known';api.status=()=>new Promise(resolve=>{terminal=resolve;});api.cancel=vi.fn(()=>new Promise<void>(resolve=>{ack=resolve;}));
+  const {result}=renderHook(()=>useExportCoordinator({revision:7,score:music(),settings:defaultDocumentSettings(),currentSpeed:1,bridge:{confirmExport:async()=>true,exportGp:async()=>true},native:api}));
+  const options:ExportOptions={format:'wav',selection:{tracks:[0],range:null},audio:{sampleRate:48000,bitDepth:16,speed:'saved',metronome:false,tailSeconds:0,backing:false,includeMix:false}};
+  let pending!:Promise<boolean>,cancelling!:Promise<void>,runSettled=false,cancelSettled=false;
+  await act(async()=>{pending=result.current.run(options);void pending.then(()=>{runSettled=true;},()=>{runSettled=true;});});
+  act(()=>{cancelling=result.current.cancel().then(()=>{cancelSettled=true;});});expect(api.cancel).toHaveBeenCalledWith('known');
+  await act(async()=>{terminal({id:'known',frames:1,totalFrames:1,status,error:status==='failed'?'Disk full':undefined});});
+  expect(runSettled).toBe(false);expect(cancelSettled).toBe(false);expect(result.current.busy).toBe(true);
+  await act(async()=>{await expect(result.current.run(options)).rejects.toThrow('An export is already running.');});
+  await act(async()=>{ack();if(status==='failed')await expect(pending).rejects.toThrow('Disk full');else expect(await pending).toBe(status==='complete');await cancelling;});
+  expect(runSettled).toBe(true);expect(cancelSettled).toBe(true);expect(result.current.busy).toBe(false);expect(api.cancel).toHaveBeenCalledTimes(1);
 });

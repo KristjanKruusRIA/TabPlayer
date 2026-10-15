@@ -2,16 +2,16 @@ import {useState,useSyncExternalStore} from 'react';
 import {defaultMix} from '../document-settings';
 import type {BackingSettings,EditCommand,SyncAnchor} from '../edit-types';
 import type {AssetInfo} from '../project';
-import {nativeAudioBridge,type BackingCandidate} from './bridge';
+import type {BackingCandidate} from './bridge';
 import type {NativePlaybackController} from './NativePlaybackController';
 const noSubscribe=()=>()=>{},noState=()=>null;
 
-export function BackingPanel({settings,assets,onEdit,stageBacking=nativeAudioBridge.stageBacking,busy=false,durationMs,playback,embedded,originalSettings}:{settings:BackingSettings|null|undefined;assets:Record<string,AssetInfo>;onEdit:(edit:EditCommand,candidate?:BackingCandidate)=>void|Promise<void>;stageBacking?:()=>Promise<BackingCandidate|null>;busy?:boolean;durationMs?:number;playback?:NativePlaybackController|null;embedded?:Uint8Array|null;originalSettings?:BackingSettings|null}) {
+export function BackingPanel({settings,assets,onEdit,stageBacking,stageEmbeddedBacking,beginOperation,busy=false,durationMs,playback,embedded,originalSettings}:{settings:BackingSettings|null|undefined;assets:Record<string,AssetInfo>;onEdit:(edit:EditCommand,candidate?:BackingCandidate)=>void|Promise<void>;stageBacking:()=>Promise<BackingCandidate|null>;stageEmbeddedBacking:(bytes:Uint8Array)=>Promise<BackingCandidate|null>;beginOperation:()=>()=>void;busy?:boolean;durationMs?:number;playback?:NativePlaybackController|null;embedded?:Uint8Array|null;originalSettings?:BackingSettings|null}) {
   useSyncExternalStore(playback?.subscribe??noSubscribe,playback?.getState??noState);
   const [error,setError]=useState<string|null>(null),[staging,setStaging]=useState(false),[duration,setDuration]=useState<number|undefined>(durationMs);
   const [bar,setBar]=useState(1),[occurrence,setOccurrence]=useState(1),[ratio,setRatio]=useState(0),[audioMs,setAudioMs]=useState(0);
   const edit=(backing:BackingSettings|null,candidate?:BackingCandidate)=>{setError(null);void Promise.resolve(candidate?onEdit({type:'setBacking',backing},candidate):onEdit({type:'setBacking',backing})).catch(e=>setError(String(e)));};
-  const importAudio=async(original=false)=>{setStaging(true);setError(null);try{const candidate=original&&embedded?await nativeAudioBridge.stageEmbeddedBacking(embedded):await stageBacking();if(candidate){setDuration(candidate.durationMs);const prior=original?originalSettings:null;await onEdit({type:'setBacking',backing:{offsetMs:0,anchors:[],mix:defaultMix(),...prior,assetId:candidate.assetId}},candidate);}}catch(e){setError(String(e));}finally{setStaging(false);}};
+  const importAudio=async(original=false)=>{let release:(()=>void)|undefined;setStaging(true);setError(null);try{const end=beginOperation();let released=false;release=()=>{if(!released){released=true;end();}};const candidate=original&&embedded?await stageEmbeddedBacking(embedded):await stageBacking();if(candidate){setDuration(candidate.durationMs);const prior=original?originalSettings:null;await onEdit({type:'setBacking',backing:{offsetMs:0,anchors:[],mix:defaultMix(),...prior,assetId:candidate.assetId}},candidate);}}catch(e){setError(String(e));}finally{release?.();setStaging(false);}};
   const actualDuration=durationMs??playback?.backingDurationMs()??duration;
   const anchor=(index:number,patch:Partial<SyncAnchor>)=>{if(settings)edit({...settings,anchors:settings.anchors.map((a,i)=>i===index?{...a,...patch}:a)});};
   return <section className="backing-panel"><h3>Backing audio</h3><fieldset disabled={busy||staging}>

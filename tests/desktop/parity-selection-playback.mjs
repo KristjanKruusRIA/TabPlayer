@@ -1,3 +1,4 @@
+import { readActiveDocument } from './document-context.mjs';
 import assert from 'node:assert/strict';
 import {existsSync,readFileSync,realpathSync,writeFileSync} from 'node:fs';
 import {execFileSync,spawn} from 'node:child_process';
@@ -14,9 +15,9 @@ assert.ok(existsSync(helper),'Root must build the existing capture_loopback exam
 const workspace=realpathSync('.'),helperPath=realpathSync(helper),helperRelative=relative(workspace,helperPath);
 assert.ok(!isAbsolute(helperRelative)&&!helperRelative.startsWith('..'),'Capture helper must be inside this workspace');
 const errors=[],captures=new Set(),result={authored:true,fixture:fixture.metadataPath,sourceHashes:Object.fromEntries(Object.entries(fixture.fixtures).map(([name,value])=>[name,value.sha256])),screenshots:[],captures:[],checks:{},limits:[...fixture.limits],originalGp8RuntimeAcceptance:false};
-let id=null,browser=null,page=null,saved=output('saved.tabplayer');
+let id=null,browser=null,page=null,owner=null,saved=output('saved.tabplayer');
 const status=()=>page.evaluate(()=>window.__TAURI_INTERNALS__.invoke('audio_status'));
-const snapshot=()=>page.evaluate(()=>window.__TAURI_INTERNALS__.invoke('project_snapshot'));
+const snapshot=()=>readActiveDocument(page);
 const idle=()=>page.waitForFunction(()=>!document.querySelector('nav[aria-label="File and history"] button')?.disabled);
 async function waitStatus(predicate,timeout=15000){
   const deadline=Date.now()+timeout;let value;
@@ -34,6 +35,7 @@ async function open(path){
   await close();id=launch({TABPLAYER_TEST_OPEN:path,TABPLAYER_TEST_SAVE:saved,TABPLAYER_TEST_BACKING:fixture.backing.path});
   browser=await connect();page=browser.contexts()[0].pages()[0];page.on('pageerror',error=>errors.push(error.message));
   await page.setViewportSize({width:1600,height:1100});await page.getByRole('button',{name:'Open',exact:true}).waitFor();await button('Open');
+  owner=(await page.evaluate(()=>window.__TAURI_INTERNALS__.invoke('workspace_snapshot'))).active;
   await waitStatus(value=>value.ready&&!value.error);await page.locator('[aria-label="Music notation"] svg').first().waitFor();await disclosure('Selected playback');await noAlerts();
 }
 async function cursor(measure,beat=1,voice=0){
@@ -107,7 +109,7 @@ try{
 
   await selectTiePassage();await button('Play selection');await assertRange(960,2880);await waitStatus(value=>value.playing&&value.tick>1100);await button('Pause');const paused=await waitStatus(value=>!value.playing);await page.waitForTimeout(120);assert.equal((await status()).tick,paused.tick);assert.deepEqual(paused.range,{startTick:960,endTick:2880});
   // Healthy reselect is an existing finite bridge action, not a diagnostic hook.
-  await page.evaluate(value=>window.__TAURI_INTERNALS__.invoke('audio_command',{command:{type:'selectDevice',generation:value.generation,deviceId:value.deviceId}}),paused);
+  await page.evaluate(({owner,value})=>window.__TAURI_INTERNALS__.invoke('audio_command',{owner,command:{type:'selectDevice',generation:value.generation,deviceId:value.deviceId}}),{owner,value:paused});
   const recreated=await waitStatus(value=>value.ready&&value.practice.phase==='paused');assert.equal(recreated.tick,paused.tick);assert.deepEqual(recreated.range,paused.range);await button('Play');
   const ended=await waitStatus(value=>!value.playing&&value.practice.phase==='ended');assert.equal(ended.tick,2880);assert.equal(ended.practice.completedPasses,0);assert.equal(ended.practice.countInRemaining,0);assert.equal(ended.practice.pulse,null);await page.waitForFunction(()=>document.querySelectorAll('.instrument-view g[data-note-id]').length===0);result.checks.finitePauseResumeHealthyDevice=ended;
   await stopPlayback();await selectTiePassage();const selectedCapture=await capture('one-shot');await button('Play selection');await assertRange(960,2880);await waitStatus(value=>value.practice.phase==='ended'&&value.tick===2880);const bounded=await selectedCapture.finish();
@@ -131,7 +133,7 @@ try{
   await practice('relative',{'Relative speed (%)':100,'Count-in bars':0});await selectTiePassage();await button('Play selection');await assertRange(960,2880);
   // The existing measure button reads Loop while only a finite range is active.
   // Exercise its native ClearLoop contract with the existing finite bridge API.
-  await page.evaluate(generation=>window.__TAURI_INTERNALS__.invoke('audio_command',{command:{type:'clearLoop',generation}}),(await status()).generation);
+  await page.evaluate(({owner,generation})=>window.__TAURI_INTERNALS__.invoke('audio_command',{owner,command:{type:'clearLoop',generation}}),{owner,generation:(await status()).generation});
   await waitStatus(value=>value.range===null&&value.loop===null&&value.playing);await stopPlayback();
   await selectTiePassage();await button('Play selection');await assertRange(960,2880);await page.getByLabel('Seek measure',{exact:true}).fill('2');await button('Seek');await waitStatus(value=>value.range===null&&value.playing&&value.tick>=3840);await stopPlayback();result.checks.clearAndSeekRetireFiniteRange=true;
 

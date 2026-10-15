@@ -1,3 +1,4 @@
+import { readActiveDocument } from './document-context.mjs';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { existsSync,readFileSync,writeFileSync } from 'node:fs';
@@ -29,14 +30,14 @@ try{
   browser=await connect();page=browser.contexts()[0].pages()[0];await page.getByRole('button',{name:'Open',exact:true}).waitFor();
   await page.addInitScript(()=>{window.__practiceSmoke={webAudioSamples:0};const send=MessagePort.prototype.postMessage;MessagePort.prototype.postMessage=function(data,...args){if(data?.cmd==='alphaSynth.output.addSamples')window.__practiceSmoke.webAudioSamples+=data.samples.length;return send.call(this,data,...args);};});await page.reload();await page.getByRole('button',{name:'Open',exact:true}).waitFor();
   const errors=[];page.on('pageerror',error=>errors.push(error.message));
-  const snapshot=()=>page.evaluate(()=>window.__TAURI_INTERNALS__.invoke('project_snapshot'));
+  const snapshot=()=>readActiveDocument(page);
   const status=()=>page.evaluate(()=>window.__TAURI_INTERNALS__.invoke('audio_status'));
   const waitStatus=async(predicate,timeout=15000)=>{const deadline=Date.now()+timeout;let last;while(Date.now()<deadline){last=await status();if(predicate(last))return last;await page.waitForTimeout(25);}throw new Error(`Native practice timeout: ${JSON.stringify(last)}`);};
   const idle=async()=>{await page.waitForFunction(()=>!document.querySelector('nav button')?.disabled,undefined,{timeout:15000});assert.deepEqual(await page.getByRole('alert').allTextContents(),[]);};
   const button=async name=>{await page.getByRole('button',{name,exact:true}).click();await idle();};
   const toggle=async(locator,checked)=>{if(await locator.isChecked()!==checked)await locator.click();const deadline=Date.now()+5000;while(await locator.isChecked()!==checked){assert.ok(Date.now()<deadline,'Native checkbox change was not acknowledged.');await page.waitForTimeout(25);}await idle();};
   const ready=()=>waitStatus(value=>value.ready&&!value.error);
-  await button('Open');await ready();const baseline=await snapshot();await button('Show instrument');
+  await button('Open');await ready();const owner=(await page.evaluate(()=>window.__TAURI_INTERNALS__.invoke('workspace_snapshot'))).active;const baseline=await snapshot();await button('Show instrument');
   const panel=page.locator('summary').filter({hasText:'Practice settings'}).locator('..');await panel.evaluate(node=>{node.open=true;});
   const mode=value=>panel.getByRole('combobox',{name:/^Tempo mode/}).selectOption(value);
   const fill=(label,value)=>panel.getByLabel(label,{exact:true}).fill(String(value));
@@ -52,7 +53,7 @@ try{
   await mode('fixed');await fill('Fixed tempo (BPM)',90);await fill('Count-in bars',1);await fill('Metronome volume (%)',40);await apply(settings=>settings.tempo.kind==='fixed'&&settings.tempo.bpm===90&&settings.countIn.bars===1);
   await button('Play');const counting=await waitStatus(value=>value.practice.phase==='countIn');assert.equal(counting.tick,0);assert.equal(counting.seconds,0);assert.equal(await page.locator('.instrument-view g[data-note-id]').count(),0);
   await button('Pause');const paused=await waitStatus(value=>value.practice.phase==='paused'&&value.practice.countInRemaining>0);await page.waitForTimeout(120);const still=await status();assert.equal(still.tick,0);assert.equal(still.practice.countInRemaining,paused.practice.countInRemaining);assert.equal(still.practice.pulse.serial,paused.practice.pulse.serial);
-  await page.evaluate(value=>window.__TAURI_INTERNALS__.invoke('audio_command',{command:{type:'selectDevice',deviceId:value.deviceId,generation:value.generation}}),still);const restored=await waitStatus(value=>value.ready&&value.practice.phase==='paused');assert.equal(restored.tick,0);assert.equal(restored.practice.countInRemaining,still.practice.countInRemaining);assert.equal(restored.practice.pulse.serial,still.practice.pulse.serial);result.healthyDeviceCountRecovery=true;
+  await page.evaluate(({owner,value})=>window.__TAURI_INTERNALS__.invoke('audio_command',{owner,command:{type:'selectDevice',deviceId:value.deviceId,generation:value.generation}}),{owner,value:still});const restored=await waitStatus(value=>value.ready&&value.practice.phase==='paused');assert.equal(restored.tick,0);assert.equal(restored.practice.countInRemaining,still.practice.countInRemaining);assert.equal(restored.practice.pulse.serial,still.practice.pulse.serial);result.healthyDeviceCountRecovery=true;
   await button('Play');await waitStatus(value=>value.practice.phase==='playing'&&value.tick>0);await button('Stop');result.countPauseResume=true;
   const firstPath=resolve(directory,'gp8-practice-count-loopback.wav'),firstCapture=capture(firstPath,(await status()).deviceId);await firstCapture.ready;await button('Play');await firstCapture.done;
   const countWave=wave(firstPath);assert.ok(countWave.onsets.length>=5,JSON.stringify(countWave.onsets));for(let index=1;index<4;index++)assert.ok(Math.abs((countWave.onsets[index]-countWave.onsets[index-1])/countWave.rate-2/3)<.003);

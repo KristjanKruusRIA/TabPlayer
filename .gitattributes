@@ -1,0 +1,2 @@
+# Preserve the exact vendored source bytes recorded in UPSTREAM-SOURCE.json.
+vendor/usvg/** -text

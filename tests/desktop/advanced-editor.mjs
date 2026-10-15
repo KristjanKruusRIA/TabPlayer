@@ -1,3 +1,4 @@
+import { readActiveDocument } from './document-context.mjs';
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -8,7 +9,7 @@ const source=process.env.TABPLAYER_TEST_GP;
 if(!source)throw new Error('Set TABPLAYER_TEST_GP to an authorized private score.');
 const bytes=readFileSync(source),sourceHash=createHash('sha256').update(bytes).digest('hex'),saved=resolve(directory,`advanced-${Date.now()}.tabplayer`);
 let id=launch({TABPLAYER_TEST_OPEN:source,TABPLAYER_TEST_SAVE:saved}),browser=await connect(),page=browser.contexts()[0].pages()[0];
-const snapshot=()=>page.evaluate(()=>window.__TAURI_INTERNALS__.invoke('project_snapshot'));
+const snapshot=()=>readActiveDocument(page);
 const idle=async()=>{await page.waitForFunction(()=>!document.querySelector('nav button').disabled);const error=page.getByRole('alert');if(await error.count())throw new Error(await error.textContent());};
 const button=async name=>{await page.getByRole('button',{name,exact:true}).click();await idle();};
 const openDetails=async text=>{const summary=page.locator('summary').filter({hasText:text}).first();await summary.evaluate(node=>node.parentElement.open=true);};

@@ -1,38 +1,44 @@
 import { invoke } from '@tauri-apps/api/core';
 import { confirm, message } from '@tauri-apps/plugin-dialog';
-import type { DocumentCandidate, EditCommand, Project, ProjectSnapshot } from './project';
+import type { EditCommand } from './project';
+import type { DocumentId,DocumentSnapshot,NativeWorkspaceBridge } from './workspace/types';
 
 export interface NativeBridge {
-  snapshot(): Promise<ProjectSnapshot>;
-  readDocument(): Promise<DocumentCandidate | null>;
-  createBlankDocument(): Promise<DocumentCandidate>;
-  replaceProject(token: string): Promise<ProjectSnapshot>;
-  cancelDocument?(token: string): Promise<boolean>;
-  cancelAsset?(token: string): Promise<boolean>;
-  applyEdit(command: EditCommand, assetToken?:string): Promise<ProjectSnapshot>;
-  undo(): Promise<ProjectSnapshot>;
-  redo(): Promise<ProjectSnapshot>;
-  saveProject(saveAs: boolean): Promise<ProjectSnapshot | null>;
-  exportGp(bytes: Uint8Array): Promise<boolean>;
-  askUnsaved(): Promise<'save' | 'discard' | 'cancel'>;
+  readonly documentId:DocumentId;
+  snapshot(): Promise<DocumentSnapshot>;
+  cancelAsset(token: string): Promise<boolean>;
+  applyEdit(command: EditCommand, revision:number, assetToken?:string): Promise<DocumentSnapshot>;
+  undo(revision:number): Promise<DocumentSnapshot>;
+  redo(revision:number): Promise<DocumentSnapshot>;
+  saveProject(saveAs: boolean,revision:number): Promise<DocumentSnapshot | null>;
+  exportGp(bytes: Uint8Array,revision:number): Promise<boolean>;
+  askUnsaved(title:string,path:string|null): Promise<'save' | 'discard' | 'cancel'>;
   confirmExport(): Promise<boolean>;
 }
 
 const desktopTest=import.meta.env.VITE_DESKTOP_TEST==='1';
-export const nativeBridge: NativeBridge = {
-  snapshot: () => invoke('project_snapshot'),
+export const nativeWorkspaceBridge:NativeWorkspaceBridge={
+  snapshot:()=>invoke('workspace_snapshot'),
   readDocument: () => desktopTest?invoke('desktop_test_io',{action:'read'}):invoke('read_document'),
   createBlankDocument: () => invoke('new_document'),
-  replaceProject: token => invoke('replace_project',{token}),
   cancelDocument: token => invoke('cancel_document',{token}),
-  cancelAsset: token => invoke('cancel_asset',{token}),
-  applyEdit: (command,assetToken) => invoke('apply_edit',{command,assetToken}),
-  undo: () => invoke('undo_edit'), redo: () => invoke('redo_edit'),
-  saveProject: saveAs => desktopTest?invoke('desktop_test_io',{action:'save'}):invoke('save_project',{saveAs}),
-  exportGp: bytes => desktopTest?invoke('desktop_test_io',{action:'export',bytes:Array.from(bytes)}):invoke('export_gp',{bytes:Array.from(bytes)}),
-  askUnsaved: async () => {
-    const result = await message('Save your changes before continuing?',{title:'Unsaved score',kind:'warning',buttons:{yes:'Save',no:'Discard',cancel:'Cancel'}});
+  addDocument:token=>invoke('workspace_add',{token}),
+  activateDocument:documentId=>invoke('workspace_activate',{documentId}),
+  closeDocuments:documents=>invoke('workspace_close',{documents}),
+};
+export function createDocumentBridge(documentId:DocumentId):NativeBridge {
+  return {
+  documentId,
+  snapshot: () => invoke('project_snapshot',{documentId}),
+  cancelAsset: token => invoke('cancel_asset',{documentId,token}),
+  applyEdit: (command,revision,assetToken) => invoke('apply_edit',{document:{documentId,revision},command,assetToken}),
+  undo: revision => invoke('undo_edit',{document:{documentId,revision}}), redo: revision => invoke('redo_edit',{document:{documentId,revision}}),
+  saveProject: (saveAs,revision) => desktopTest?invoke('desktop_test_io',{action:'save',documentId,revision}):invoke('save_project',{document:{documentId,revision},saveAs}),
+  exportGp: (bytes,revision) => desktopTest?invoke('desktop_test_io',{action:'export',documentId,revision,bytes:Array.from(bytes)}):invoke('export_gp',{document:{documentId,revision},bytes:Array.from(bytes)}),
+  askUnsaved: async (title,path) => {
+    const result = await message(`Save changes to “${title}” before closing?${path?`\n${path}`:''}`,{title:'Unsaved score',kind:'warning',buttons:{yes:'Save',no:'Discard',cancel:'Cancel'}});
     return result === 'Yes' || result === 'Save' ? 'save' : result === 'No' || result === 'Discard' ? 'discard' : 'cancel';
   },
   confirmExport: () => desktopTest?Promise.resolve(true):confirm('Guitar Pro export rebuilds the score. Some techniques, layout, or sound settings may change. Your native project and original file are preserved.',{title:'Export Guitar Pro file',kind:'warning'}),
-};
+  };
+}

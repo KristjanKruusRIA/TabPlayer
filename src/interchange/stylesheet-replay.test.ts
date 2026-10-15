@@ -17,6 +17,7 @@ import {DocumentController} from '../controller';
 import type {NativeBridge} from '../bridge';
 import {defaultDocumentSettings} from '../document-settings';
 import {selectScore} from '../export/selection';
+import type {ExportNativeBridge} from '../export/bridge';
 import {useExportCoordinator} from '../export/useExportCoordinator';
 import {copyGpInterchangeSource,exportGpInterchange,loadInterchangeScore} from './gp';
 import {readGpStylesheetSymbol} from './stylesheet-wire';
@@ -152,7 +153,7 @@ it('XML-adapter export preserves raw lyrics, source siblings, MIDI and clocks wi
 
 const invalidCases=[['mixed',()=>project(authored(),[gestures(0,false)]),mixed],['inherited',()=>project(authored(absent),[gestures(0,false)]),inherited],['view',()=>project(authored(yes,yes),[gestures(0,false),gestures(1,false)]),'scoreview1.gpss']] as const;
 it.each(invalidCases)('direct controller %s export clears busy/error and never calls the writer on failure',async(_name,make,message)=>{
-  const exportGp=vi.fn(async()=>true),bridge={snapshot:async()=>({project:make(),path:null,dirty:false,canUndo:true,canRedo:false}),confirmExport:async()=>true,exportGp} as unknown as NativeBridge;
+  const exportGp=vi.fn(async()=>true),bridge={documentId:'stylesheet-test',snapshot:async()=>({documentId:'stylesheet-test',revision:0,snapshot:{project:make(),path:null,dirty:false,canUndo:true,canRedo:false}}),confirmExport:async()=>true,exportGp} as unknown as NativeBridge;
   const controller=await DocumentController.create(bridge),initial=controller.getState().snapshot;
   await expect(controller.export()).rejects.toThrow(message);expect(exportGp).not.toHaveBeenCalled();expect(controller.getState()).toMatchObject({busy:false,error:expect.stringContaining(message)});expect(controller.getState().snapshot).toBe(initial);
   for(const master of controller.getState().score.masterBars)if(master.timeSignatureNumerator===4||master.timeSignatureNumerator===2)master.timeSignatureCommon=true;
@@ -161,7 +162,7 @@ it.each(invalidCases)('direct controller %s export clears busy/error and never c
 
 it.each(invalidCases)('export coordinator %s error is atomic and a later uniform excerpt succeeds',async(_name,make,message)=>{
   const score=buildScore(make()),exportGp=vi.fn(async()=>true),bridge={confirmExport:async()=>true,exportGp};
-  const {result}=renderHook(()=>useExportCoordinator({score,settings:defaultDocumentSettings(),currentSpeed:1,bridge}));
+  const {result}=renderHook(()=>useExportCoordinator({revision:7,native:{exportPdf:async()=>null,exportMidi:async()=>true,exportAudio:async()=>null,status:async()=>null,cancel:async()=>{}} satisfies ExportNativeBridge,score,settings:defaultDocumentSettings(),currentSpeed:1,bridge}));
   await act(async()=>{await expect(result.current.run({format:'gp',selection:{tracks:[0],range:null}})).rejects.toThrow(message);});
   expect(exportGp).not.toHaveBeenCalled();expect(result.current.busy).toBe(false);expect(result.current.progress).toBeUndefined();
   await act(async()=>{expect(await result.current.run({format:'gp',selection:{tracks:[0],range:{first:2,last:2}}})).toBe(true);});expect(exportGp).toHaveBeenCalledOnce();expect(result.current.busy).toBe(false);

@@ -1,0 +1,210 @@
+{
+  "crate": "usvg",
+  "version": "0.45.1",
+  "upstreamRepository": "https://github.com/linebender/resvg",
+  "revision": "1b6c2fddbcbeffa8135df4323b02aaae84890907",
+  "upstreamPath": "crates/usvg",
+  "crateArchiveSource": "https://static.crates.io/crates/usvg/usvg-0.45.1.crate",
+  "crateArchiveSha256": "80be9b06fbae3b8b303400ab20778c80bbaf338f563afe567cf3c9eea17b47ef",
+  "licenses": [
+    "LICENSE-APACHE",
+    "LICENSE-MIT"
+  ],
+  "files": [
+    {
+      "path": ".cargo_vcs_info.json",
+      "bytes": 105,
+      "sha256": "002a92e4408504fc64cc3dc5199b2e71672ff4a2810bb9865b849b6782a19e15"
+    },
+    {
+      "path": "Cargo.lock",
+      "bytes": 9566,
+      "sha256": "d8d40596dae9c038c8d657fa67847ea4b487e449397301ec9e81dcfc4a794497"
+    },
+    {
+      "path": "Cargo.toml",
+      "bytes": 2398,
+      "sha256": "053775d4bd8b9bdb49524e44c3f0feccef8d4f24c51751642a23ba9e3d9f0079"
+    },
+    {
+      "path": "Cargo.toml.orig",
+      "bytes": 1694,
+      "sha256": "693208ac68fc1e36966995166e4aab4d7d668859ab7821620498ebeff1c59528"
+    },
+    {
+      "path": "docs/post-processing.md",
+      "bytes": 4516,
+      "sha256": "36c45f80a220c3616a49f44354f7316dbedf390ba21c422d9df29960fde8265e"
+    },
+    {
+      "path": "docs/spec.adoc",
+      "bytes": 20318,
+      "sha256": "65ef2b08c9beec5104de17a418be7c564af537eb78db10fab0fa1490ac5c19fb"
+    },
+    {
+      "path": "LICENSE-APACHE",
+      "bytes": 10173,
+      "sha256": "a6cba85bc92e0cff7a450b1d873c0eaa2e9fc96bf472df0247a26bec77bf3ff9"
+    },
+    {
+      "path": "LICENSE-MIT",
+      "bytes": 1057,
+      "sha256": "f5d934dc281b44e0003ee461ac740b18b6629a454decd872c774d34e4ee0b21d"
+    },
+    {
+      "path": "README.md",
+      "bytes": 3011,
+      "sha256": "cd3c2aff71e5417894b51e4b5f00b2fb7e82a05eda051ea46ec0094153b6a951"
+    },
+    {
+      "path": "src/lib.rs",
+      "bytes": 2584,
+      "sha256": "0b59945747b6c0abc5d6995a600ab87e7e3c05e44ddcbea3cff0f286bedfde23"
+    },
+    {
+      "path": "src/main.rs",
+      "bytes": 19172,
+      "sha256": "30975e5235245b2a1d8cc977fe0808b62f2a647af2d90884a068d54a095f0539"
+    },
+    {
+      "path": "src/parser/clippath.rs",
+      "bytes": 3661,
+      "sha256": "7c5fe4eca5cd4913b528e11578d19a5b79ecfe5fb8983e793e389ffb3ef3094e"
+    },
+    {
+      "path": "src/parser/converter.rs",
+      "bytes": 30660,
+      "sha256": "3ed4cd9c7f05d27ef84566611d09598d13da85432303f7d5c15e394e1d0d51b4"
+    },
+    {
+      "path": "src/parser/filter.rs",
+      "bytes": 42355,
+      "sha256": "751804ac84015f96d46c9a71dd865e6f2db6621684ff0d62babc2487bc62348d"
+    },
+    {
+      "path": "src/parser/image.rs",
+      "bytes": 13354,
+      "sha256": "4424266cd39c83e4718261e479f65e55f9ac143a0d7a1e7ab202149ec7613bee"
+    },
+    {
+      "path": "src/parser/marker.rs",
+      "bytes": 15776,
+      "sha256": "8ed7d80ac3fdb3ba920cfb666289d9d56027fd9acd66815f95a24939d9565b55"
+    },
+    {
+      "path": "src/parser/mask.rs",
+      "bytes": 4731,
+      "sha256": "e16a3a75c9670088af5b9097df7cac7a210101dab8386242f6dfbf79caf0bd7d"
+    },
+    {
+      "path": "src/parser/mod.rs",
+      "bytes": 4076,
+      "sha256": "d6118c69bc8638409b3638ef823fe62a3d593aa063e8c9ee38214ddbd093fc7a"
+    },
+    {
+      "path": "src/parser/options.rs",
+      "bytes": 4716,
+      "sha256": "d8d43effeb3092c1ff9d3f53a4b04e6c9a9a144df4325b602639e82be799a1d6"
+    },
+    {
+      "path": "src/parser/paint_server.rs",
+      "bytes": 34922,
+      "sha256": "dc4bdbec1f06bbd13c2a17318e3aa29829bfaa055e4b2194eaded2cc9c13cde9"
+    },
+    {
+      "path": "src/parser/shapes.rs",
+      "bytes": 9991,
+      "sha256": "8c56d8f94639104bfe989d558c7d5223bbb3f61a8ba0e2d4e6404aa7e9d3bf24"
+    },
+    {
+      "path": "src/parser/style.rs",
+      "bytes": 9322,
+      "sha256": "0ea342c755c94d0615b7a2e1b492b440c80b4de56444b4dc994459b3111fc16d"
+    },
+    {
+      "path": "src/parser/svgtree/mod.rs",
+      "bytes": 31435,
+      "sha256": "abe64a4423d76af8fd7469f63da01145b82364a3a290b35e4cf74166fe72b2b2"
+    },
+    {
+      "path": "src/parser/svgtree/names.rs",
+      "bytes": 18892,
+      "sha256": "2216441eebb321fd9797db1c61f56e45ce76f2791b25549b00712eed450d0148"
+    },
+    {
+      "path": "src/parser/svgtree/parse.rs",
+      "bytes": 25274,
+      "sha256": "28d9a5f069d442e3119d0df83f806b60e7d5b6365c8eccee555e0a8e3891c13c"
+    },
+    {
+      "path": "src/parser/svgtree/text.rs",
+      "bytes": 12157,
+      "sha256": "b8d557eda0dba714096f7df7b3520a76d83908cf9a7a271ad54fb792baceacb4"
+    },
+    {
+      "path": "src/parser/switch.rs",
+      "bytes": 4975,
+      "sha256": "4d383197647a4291913117ae4d22d9221854126db23df0983d38249d1dbc9923"
+    },
+    {
+      "path": "src/parser/text.rs",
+      "bytes": 28751,
+      "sha256": "4395cdfa6106e888b86a0e6aa848e270e136288961c73625e92f39f9fd24bd3c"
+    },
+    {
+      "path": "src/parser/units.rs",
+      "bytes": 4543,
+      "sha256": "efd72982854393e807c83ae16aef0d71af2c9a66d5778d77ed9a35bacc476688"
+    },
+    {
+      "path": "src/parser/use_node.rs",
+      "bytes": 13025,
+      "sha256": "f60ea8774a627f768e78112ad00f0b6a929350b6367c6638f3bcf3cad6430df6"
+    },
+    {
+      "path": "src/text/colr.rs",
+      "bytes": 12327,
+      "sha256": "fbd9f585cf654d125e29e8204864fa965a2ef28bad943f891f57e442eb18a23b"
+    },
+    {
+      "path": "src/text/flatten.rs",
+      "bytes": 11943,
+      "sha256": "3e2cd2e04c04ad2936ad4f308a9e45e603a697a168a61d9a12a7599f0f31c8ff"
+    },
+    {
+      "path": "src/text/layout.rs",
+      "bytes": 60011,
+      "sha256": "4832df2566a67d01190acda26a3003263fc3419d6defde1c545fedcd08789c05"
+    },
+    {
+      "path": "src/text/mod.rs",
+      "bytes": 8647,
+      "sha256": "7b06c159489c72167f000460f88eaf902416c203f4a43182fe542f721afacfe5"
+    },
+    {
+      "path": "src/tree/filter.rs",
+      "bytes": 24340,
+      "sha256": "f20a3014d98d372e7999c9050b78152d34e04b0a256fba7dcb16bd69957c4c24"
+    },
+    {
+      "path": "src/tree/geom.rs",
+      "bytes": 4913,
+      "sha256": "aa63ca073f10022624f70a68dc79d8e60102a77356670245765b9e7b63e1fd47"
+    },
+    {
+      "path": "src/tree/mod.rs",
+      "bytes": 50710,
+      "sha256": "8304b05a068c88323a21980c89185719e24b43848b207104009b1daef16acfd5"
+    },
+    {
+      "path": "src/tree/text.rs",
+      "bytes": 17105,
+      "sha256": "220189d2a99504bd9a03669b9b5719354577045288201895f4b11b6703654d4e"
+    },
+    {
+      "path": "src/writer.rs",
+      "bytes": 59489,
+      "sha256": "2673091ecb56c6bc1cfa2b877481871b1b6526af8cb33617a64e1a1cde73e7e7"
+    }
+  ]
+}

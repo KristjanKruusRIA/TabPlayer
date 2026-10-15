@@ -1,3 +1,4 @@
+import { readActiveDocument } from './document-context.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync,writeFileSync} from 'node:fs';
@@ -28,7 +29,7 @@ try {
     };
   },sourceHash);
   const status=()=>page.evaluate(()=>window.__TAURI_INTERNALS__.invoke('audio_status'));
-  const snapshot=()=>page.evaluate(()=>window.__TAURI_INTERNALS__.invoke('project_snapshot'));
+  const snapshot=()=>readActiveDocument(page);
   const waitStatus=async(predicate,timeout=10000)=>{const deadline=Date.now()+timeout;let last;while(Date.now()<deadline){last=await status();if(predicate(last))return last;await page.waitForTimeout(25);}throw new Error(`Native status timed out at ${stage}: ${JSON.stringify(last)}`);};
   const button=async name=>{stage=name;await page.getByRole('button',{name,exact:true}).click();await page.waitForFunction(()=>!document.querySelector('nav button')?.disabled);};
   await button('Open');const opened=await waitStatus(s=>s.ready&&!s.error&&s.generation===s.desiredGeneration);await page.waitForFunction(()=>[...document.querySelectorAll('button')].some(button=>button.textContent==='Play'&&!button.disabled));

@@ -2,7 +2,12 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { act,cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
-import { App } from './App';
+import { WorkspaceApp } from './workspace/WorkspaceApp';
+import { WorkspaceController } from './workspace/WorkspaceController';
+import type { DocumentSnapshot,NativeWorkspaceBridge,WorkspaceSnapshot } from './workspace/types';
+import type { DocumentCandidate } from './project';
+import type { NativeAudioBridge } from './audio/bridge';
+import type { ExportNativeBridge } from './export/bridge';
 import { DocumentController } from './controller';
 import { blankProject, type EditCommand, type Project, type AssetInfo } from './project';
 import type { NativeBridge } from './bridge';
@@ -14,15 +19,18 @@ import type { PlaybackState } from './audio/types';
 import {getHarmonyChord} from './harmony/chord-source';
 import type {HarmonyLibrary,HarmonyLibraryEntry} from './editor/harmony-types';
 const engravingView=vi.hoisted(()=>vi.fn());
+const documentBridges=vi.hoisted(()=>new Map<string,NativeBridge>());
+vi.mock('./bridge',async original=>({...await original<typeof import('./bridge')>(),createDocumentBridge:(id:string)=>{const bridge=documentBridges.get(id);if(!bridge)throw new Error('Missing addressed document bridge');return bridge;}}));
 const personalLibrary=vi.hoisted(()=>({read:vi.fn(async():Promise<HarmonyLibrary>=>({format:'TabPlayerHarmonyLibrary',version:1,entries:[]})),put:vi.fn(async(entry:HarmonyLibraryEntry):Promise<HarmonyLibrary>=>({format:'TabPlayerHarmonyLibrary',version:1,entries:[entry]})),remove:vi.fn(async():Promise<HarmonyLibrary>=>({format:'TabPlayerHarmonyLibrary',version:1,entries:[]}))}));
 vi.mock('./harmony/library',async original=>({...await original<typeof import('./harmony/library')>(),readHarmonyLibrary:personalLibrary.read,putHarmonyLibraryEntry:personalLibrary.put,removeHarmonyLibraryEntry:personalLibrary.remove}));
 
-const integration=vi.hoisted(()=>({loadDocument:vi.fn(),beforeScoreChange:vi.fn(),destroy:vi.fn(),stageBacking:vi.fn(),commits:vi.fn(),activeNotes:vi.fn((_trackId:string)=>[]),practiceSpeed:100,practiceFixed:false,setPractice:vi.fn(),play:vi.fn(),pause:vi.fn(),playFromCursor:vi.fn(),playSelection:vi.fn(),loopSelection:vi.fn(),exportOptions:vi.fn(),exportBusy:false,exportRun:vi.fn(async()=>true),exportCancel:vi.fn(async()=>{})}));
-vi.mock('./audio/bridge',()=>({nativeAudioBridge:{stageBacking:integration.stageBacking}}));
+const integration=vi.hoisted(()=>({loadDocument:vi.fn(),beforeScoreChange:vi.fn(),destroy:vi.fn(),playerOptions:vi.fn(),stop:vi.fn(),stageBacking:vi.fn<NativeAudioBridge['stageBacking']>(),commits:vi.fn(),activeNotes:vi.fn((_trackId:string)=>[]),practiceSpeed:100,practiceFixed:false,setPractice:vi.fn(),play:vi.fn(),pause:vi.fn(),playFromCursor:vi.fn(),playSelection:vi.fn(),loopSelection:vi.fn(),exportOptions:vi.fn(),exportBusy:false,exportRun:vi.fn(async(_options:unknown,_source?:unknown)=>true),exportCancel:vi.fn(async()=>{})}));
+vi.mock('./audio/bridge',()=>({createDocumentAudioBridge:vi.fn(()=>({prepare:vi.fn(async()=>{}),command:vi.fn(async()=>{}),setMix:vi.fn(async()=>{}),devices:vi.fn(async()=>[]),status:vi.fn(async()=>null),subscribe:vi.fn(async()=>()=>{}),stageBacking:integration.stageBacking,stageEmbeddedBacking:vi.fn(async()=>null)} satisfies NativeAudioBridge))}));
+vi.mock('./export/bridge',()=>({createDocumentExportBridge:vi.fn(()=>({exportPdf:vi.fn(async()=>null),exportMidi:vi.fn(async()=>false),exportAudio:vi.fn(async()=>null),status:vi.fn(async()=>null),cancel:vi.fn(async()=>{})} satisfies ExportNativeBridge))}));
 vi.mock('./export/useExportCoordinator',()=>({useExportCoordinator:(options:unknown)=>{integration.exportOptions(options);return {busy:integration.exportBusy,progress:undefined,run:integration.exportRun,cancel:integration.exportCancel};}}));
 vi.mock('./audio/NativePlaybackController',()=>({NativePlaybackController:class {
   built:BuiltDocument|null=null;state:PlaybackState={ready:true,playing:false,time:0,endTime:4000,measure:0,speed:integration.practiceSpeed,metronome:false,practice:{settings:{...structuredClone(DEFAULT_PRACTICE),tempo:integration.practiceFixed?{kind:'fixed',bpm:90}:{kind:'relative',ratio:integration.practiceSpeed/100}},phase:'idle',countInRemaining:0,completedPasses:0,effectiveRatio:integration.practiceSpeed/100,currentBpm:120,pulse:null},practicePending:false,practiceNotice:null,range:null,loop:null,error:null};
-  constructor(private options:{onEdit:(command:EditCommand)=>void|Promise<void>}){}
+  constructor(private options:{bridge:NativeAudioBridge;onEdit:(command:EditCommand)=>void|Promise<void>}){integration.playerOptions(options);}
   subscribe=()=>()=>{};getState=()=>this.state;
   generation=7;cursorPlaybackChoices=(target:{bar:number;beat:number})=>target?[{generation:7,occurrenceIndex:target.bar,startTick:target.bar*3840+target.beat*960}]:[];
   selectionPlaybackChoices=()=>[{generation:7,startOccurrence:0,endOccurrence:0,startTick:0,endTick:960}];
@@ -31,7 +39,7 @@ vi.mock('./audio/NativePlaybackController',()=>({NativePlaybackController:class 
   activeNotes=(trackId:string)=>integration.activeNotes(trackId);
   loadDocument=async(project:unknown,built:BuiltDocument,track:number,documentEpoch:number)=>{this.built=built;integration.loadDocument(project,built,track,documentEpoch);};
   beforeScoreChange=integration.beforeScoreChange;destroy=integration.destroy;
-  play=integration.play;pause=integration.pause;stop=vi.fn();seekToMeasure=vi.fn();setSpeed=vi.fn();setLoop=vi.fn();clearLoop=vi.fn();setMetronome=vi.fn();
+  play=integration.play;pause=integration.pause;stop=integration.stop;seekToMeasure=vi.fn();setSpeed=vi.fn();setLoop=vi.fn();clearLoop=vi.fn();setMetronome=vi.fn();
   setPractice=integration.setPractice;exportPracticeRatio=()=>integration.practiceFixed?null:this.state.speed/100;
   devices=async()=>[];deviceId=()=>null;selectDevice=vi.fn();backingDurationMs=()=>undefined;
   mix=(track:{index:number})=>{const value=this.built?.settings.mixes[`base/${track.index}`];return value?{mute:value.mute,solo:value.solo,volume:value.gain,pan:value.pan}:undefined;};
@@ -52,16 +60,27 @@ vi.mock('./ScoreView',()=>({ScoreView:({onSelect,track,...rest}: {track:number;o
   </>);}}));
 afterEach(()=>{cleanup();vi.clearAllMocks();integration.exportBusy=false;integration.practiceSpeed=100;integration.practiceFixed=false;});
 
+let testWorkspace:WorkspaceController;
+const activeController=()=>testWorkspace.getState().documents.find(entry=>entry.id===testWorkspace.getState().active.documentId)!.controller;
 async function setup(initial=blankProject(),openProject?:Project) {
-  let edits: EditCommand[]=[...initial.edits]; let cursor=edits.length;let assets:Record<string,AssetInfo>={...initial.assets};
-  const snapshot=()=>({project:{...initial,assets,edits:edits.slice(0,cursor)},canUndo:cursor>0,canRedo:cursor<edits.length,dirty:cursor>0,path:null});
-  const bridge: NativeBridge={snapshot:async()=>snapshot(),readDocument:async()=>openProject?{project:openProject,path:'saved.tabplayer',token:'opened-document'}:null,
-    createBlankDocument:async()=>({project:blankProject(),path:null,token:'new-document'}),
-    replaceProject:async token=>{initial=token==='opened-document'?openProject!:blankProject();edits=[...initial.edits];assets={...initial.assets};cursor=edits.length;return snapshot();},
-    applyEdit:async(command,assetToken)=>{integration.commits(command,assetToken);if(assetToken&&command.type==='setBacking'&&command.backing)assets={...assets,[command.backing.assetId]:{filename:'backing.wav',mediaType:'audio/wav',byteLength:20}};edits=edits.slice(0,cursor);edits.push(command);cursor++;return snapshot();},
-    undo:async()=>{cursor--;return snapshot();},redo:async()=>{cursor++;return snapshot();},
-    saveProject:async()=>null,exportGp:async()=>false,askUnsaved:async()=> 'discard',confirmExport:async()=>false};
-  const controller=await DocumentController.create(bridge); render(<App controller={controller}/>); return controller;
+  documentBridges.clear();let next=0,activation=0,active={documentId:'',activationId:''};
+  const records=new Map<string,DocumentSnapshot>(),staged=new Map<string,DocumentCandidate>();
+  const add=(project:Project,path:string|null=null)=>{
+    const documentId=`app-document-${++next}`;let edits:EditCommand[]=[...project.edits],cursor=edits.length,revision=0,assets:Record<string,AssetInfo>={...project.assets},dirty=cursor>0;
+    const record=():DocumentSnapshot=>({documentId,revision,snapshot:{project:{...project,assets,edits:edits.slice(0,cursor)},canUndo:cursor>0,canRedo:cursor<edits.length,redoEdit:edits[cursor]??null,dirty,path}});
+    const update=()=>{revision++;const value=record();records.set(documentId,value);return value;};
+    const check=(expected:number)=>{if(expected!==revision||!records.has(documentId))throw new Error('Invalid addressed revision');};
+    const bridge:NativeBridge={documentId,snapshot:async()=>record(),cancelAsset:vi.fn(async()=>true),
+      applyEdit:async(command,expected,assetToken)=>{check(expected);integration.commits(command,assetToken);if(assetToken&&command.type==='setBacking'&&command.backing)assets={...assets,[command.backing.assetId]:{filename:'backing.wav',mediaType:'audio/wav',byteLength:20}};edits=edits.slice(0,cursor);edits.push(command);cursor++;dirty=true;return update();},
+      undo:async expected=>{check(expected);cursor--;dirty=true;return update();},redo:async expected=>{check(expected);cursor++;dirty=true;return update();},saveProject:async()=>null,exportGp:vi.fn(async()=>false),askUnsaved:vi.fn(async()=> 'discard' as const),confirmExport:vi.fn(async()=>false)};
+    records.set(documentId,record());documentBridges.set(documentId,bridge);return documentId;
+  };
+  const snapshot=():WorkspaceSnapshot=>({documents:[...records.values()],active:{...active}});
+  const activate=(id:string)=>{if(id!==active.documentId)active={documentId:id,activationId:`app-activation-${++activation}`};return snapshot();};
+  const stage=(project:Project,path:string|null,token:string)=>{const candidate={project,path,token};staged.set(token,candidate);return candidate;};
+  activate(add(initial));
+  const bridge:NativeWorkspaceBridge={snapshot:async()=>snapshot(),readDocument:async()=>openProject?{kind:'candidate',candidate:stage(openProject,'saved.tabplayer','opened-document')}:null,createBlankDocument:async()=>stage(blankProject(),null,'new-document'),cancelDocument:async token=>staged.delete(token),addDocument:async token=>{const candidate=staged.get(token);if(!candidate)throw new Error('Missing document candidate');staged.delete(token);return activate(add(candidate.project,candidate.path));},activateDocument:async id=>activate(id),closeDocuments:async decisions=>{const order=[...records.keys()],index=order.indexOf(active.documentId);for(const decision of decisions)records.delete(decision.documentId);if(!records.size)add(blankProject());return records.has(active.documentId)?snapshot():activate([...records.keys()][Math.min(index,records.size-1)]);}};
+  testWorkspace=await WorkspaceController.create(bridge);const controller=activeController();render(<WorkspaceApp workspace={testWorkspace}/>);return controller;
 }
 const change=(label:string,value:string)=>fireEvent.change(screen.getByLabelText(label),{target:{value}});
 const click=(name:string)=>fireEvent.click(screen.getByRole('button',{name}));
@@ -153,7 +172,7 @@ it('keeps personal library management independent of project history and reloads
   const c=await setup(),before=c.getState().snapshot;click('Edit chord diagram');let dialog=within(await screen.findByRole('dialog',{name:'Harmony chord'}));await waitFor(()=>expect(dialog.getByRole('button',{name:'Save to library'})).toBeEnabled());
   fireEvent.change(dialog.getByLabelText('Chord name'),{target:{value:'Personal shape'}});fireEvent.change(dialog.getByLabelText('Library label'),{target:{value:'My chord'}});fireEvent.click(dialog.getByRole('button',{name:'Save to library'}));
   await waitFor(()=>expect(dialog.getByRole('status')).toHaveTextContent('Saved to library.'));expect(personalLibrary.put).toHaveBeenCalledWith(expect.objectContaining({label:'My chord',chord:expect.objectContaining({name:'Personal shape'})}));expect(c.getState().snapshot).toBe(before);
-  fireEvent.click(dialog.getByRole('button',{name:'Cancel'}));click('New');await waitFor(()=>expect(c.getState().documentEpoch).toBe(1));click('Edit chord diagram');dialog=within(await screen.findByRole('dialog',{name:'Harmony chord'}));await waitFor(()=>expect(dialog.getByRole('button',{name:'Apply chord'})).toBeEnabled());expect(personalLibrary.read).toHaveBeenCalledTimes(2);expect(c.getState().snapshot.project.edits).toHaveLength(0);
+  fireEvent.click(dialog.getByRole('button',{name:'Cancel'}));click('New');await waitFor(()=>expect(activeController()).not.toBe(c));expect(testWorkspace.getState().documents).toHaveLength(2);click('Edit chord diagram');dialog=within(await screen.findByRole('dialog',{name:'Harmony chord'}));await waitFor(()=>expect(dialog.getByRole('button',{name:'Apply chord'})).toBeEnabled());expect(personalLibrary.read).toHaveBeenCalledTimes(2);expect(activeController().getState().snapshot.project.edits).toHaveLength(0);expect(testWorkspace.getState().documents[0].controller).toBe(c);
 });
 it('applies a named harmony interval through one native history command',async()=>{
   const c=await setup();change('Fret','5');click('Set note');await waitFor(()=>expect(currentBeat(c).notes[0]?.realValue).toBe(69));click('Select bar');
@@ -188,7 +207,7 @@ it('keeps track visibility and fractional zoom in session state and resets them 
   change('Displayed tracks','all');change('Zoom (%)','127.5');
   expect(engravingView).toHaveBeenLastCalledWith(expect.objectContaining({visibleTracks:[0],zoom:127.5,projection:expect.objectContaining({score:expect.anything()})}));
   expect(c.getState().snapshot.project.edits).toHaveLength(0);expect(c.getState().score).toBe(original);
-  click('New');await waitFor(()=>expect(c.getState().documentEpoch).toBe(1));
+  click('New');await waitFor(()=>expect(activeController()).not.toBe(c));expect(testWorkspace.getState().documents).toHaveLength(2);
   expect(screen.getByLabelText('Displayed tracks')).toHaveValue('selected');expect(screen.getByLabelText('Zoom (%)')).toHaveValue(100);
 });
 it('applies engraving and custom page edits once while keeping canonical music through history',async()=>{
@@ -207,10 +226,10 @@ it('keeps copied music and paste drafts across unrelated renders and New, with o
   await waitFor(()=>expect(screen.getByText('Complete bars inserted before measure 1')).toBeInTheDocument());
   const clipboard=screen.getByText('Musical clipboard').closest('details')!;clipboard.open=true;change('Paste repetitions','2');change('Fret','6');
   expect(screen.getByLabelText('Paste repetitions')).toHaveValue(2);expect(c.getState().snapshot.project.edits).toHaveLength(1);
-  click('New');await waitFor(()=>expect(c.getState().documentEpoch).toBe(1));expect(screen.getByText('Complete bars inserted before measure 1')).toBeInTheDocument();
-  change('Paste repetitions','2');click('Paste music');await waitFor(()=>expect(c.getState().score.masterBars).toHaveLength(6));
-  expect(c.getState().snapshot.project.edits).toHaveLength(1);expect(c.getState().snapshot.project.edits[0]).toMatchObject({type:'pasteMusic',options:{count:2}});
-  expect(currentBeat(c).notes[0].fret).toBe(5);click('Undo');await waitFor(()=>expect(c.getState().score.masterBars).toHaveLength(4));
+  click('New');await waitFor(()=>expect(activeController()).not.toBe(c));expect(testWorkspace.getState().documents).toHaveLength(2);expect(screen.getByText('Complete bars inserted before measure 1')).toBeInTheDocument();
+  const destination=activeController();expect(c.getState().snapshot.project.edits).toHaveLength(1);change('Paste repetitions','2');click('Paste music');await waitFor(()=>expect(destination.getState().score.masterBars).toHaveLength(6));
+  expect(destination.getState().snapshot.project.edits).toHaveLength(1);expect(destination.getState().snapshot.project.edits[0]).toMatchObject({type:'pasteMusic',options:{count:2}});
+  expect(currentBeat(destination).notes[0].fret).toBe(5);click('Undo');await waitFor(()=>expect(destination.getState().score.masterBars).toHaveLength(4));
 });
 it('routes music clipboard shortcuts while preserving text input shortcuts and practice independence',async()=>{
   const c=await setup();change('Fret','3');click('Set note');await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(1));click('Select bar');
@@ -236,7 +255,7 @@ it('selects editable music with keyboard shortcuts without changing history or t
   fireEvent.keyDown(workspace,{key:'Escape'});expect(screen.getByText('0 notes · 0 beats')).toBeInTheDocument();
   fireEvent.keyDown(screen.getByLabelText('Fret'),{key:'a',ctrlKey:true});expect(screen.getByText('0 notes · 0 beats')).toBeInTheDocument();
   fireEvent.keyDown(workspace,{key:'ArrowRight',shiftKey:true});expect(screen.getByText('1 note · 2 beats')).toBeInTheDocument();
-  const selectedHistory=c.getState().snapshot.project.edits.length;click('New');await waitFor(()=>expect(c.getState().documentEpoch).toBe(1));
+  const selectedHistory=c.getState().snapshot.project.edits.length;click('New');await waitFor(()=>expect(activeController()).not.toBe(c));expect(testWorkspace.getState().documents).toHaveLength(2);
   expect(screen.getByText('0 notes · 0 beats')).toBeInTheDocument();expect(selectedHistory).toBe(history+1);
 });
 it('keeps the beat cursor on its original music across insert and remove measure ranges',async()=>{
@@ -306,13 +325,13 @@ it('persists selected track sound and mixer without replacing the score identity
 });
 it('loads documents into native playback and opening does not reset saved mix',async()=>{
   const c=await setup();await waitFor(()=>expect(integration.loadDocument).toHaveBeenCalled());fireEvent.click(screen.getByLabelText('Mute'));await waitFor(()=>expect(c.getState().settings.mixes['base/0'].mute).toBe(true));
-  click('New');await waitFor(()=>expect(c.getState().snapshot.project.edits).toHaveLength(0));expect(screen.getByLabelText('Mute')).not.toBeChecked();expect(integration.loadDocument).toHaveBeenLastCalledWith(c.getState().snapshot.project,expect.objectContaining({score:c.getState().score}),0,1);
+  const oldHistory=c.getState();click('New');await waitFor(()=>expect(activeController()).not.toBe(c));const fresh=activeController();expect(fresh.getState().snapshot.project.edits).toHaveLength(0);expect(c.getState()).toBe(oldHistory);expect(screen.getByLabelText('Mute')).not.toBeChecked();expect(integration.loadDocument).toHaveBeenLastCalledWith(fresh.getState().snapshot.project,expect.objectContaining({score:fresh.getState().score}),0,0);
 });
 it('opens the export dialog and persists custom page layout through the existing history',async()=>{
-  const c=await setup();click('Export score');const dialog=within(screen.getByRole('dialog',{name:'Export score'}));change('Export format','pdf');fireEvent.change(dialog.getByLabelText('Width (mm)'),{target:{value:'250'}});fireEvent.click(dialog.getByRole('button',{name:'Apply page layout'}));click('Export');await waitFor(()=>expect(c.getState().settings.page?.widthMm).toBe(250));await waitFor(()=>expect(integration.exportRun).toHaveBeenCalledWith(expect.objectContaining({format:'pdf',page:expect.objectContaining({widthMm:250})})));await waitFor(()=>expect(screen.queryByRole('dialog',{name:'Export score'})).not.toBeInTheDocument());
+  const c=await setup();click('Export score');const dialog=within(screen.getByRole('dialog',{name:'Export score'}));change('Export format','pdf');fireEvent.change(dialog.getByLabelText('Width (mm)'),{target:{value:'250'}});fireEvent.click(dialog.getByRole('button',{name:'Apply page layout'}));click('Export');await waitFor(()=>expect(c.getState().settings.page?.widthMm).toBe(250));await waitFor(()=>expect(integration.exportRun).toHaveBeenCalledWith(expect.objectContaining({format:'pdf',page:expect.objectContaining({widthMm:250})}),expect.objectContaining({revision:c.getState().revision,score:c.getState().score})));await waitFor(()=>expect(screen.queryByRole('dialog',{name:'Export score'})).not.toBeInTheDocument());
 });
 it('opens saved mix and recorded voice without creating reset edits',async()=>{
-  const saved={...blankProject(),edits:[{type:'setTrackMix' as const,trackId:'base/0',mix:{gain:.4,pan:.2,mute:true,solo:false}}]};const c=await setup(blankProject(),saved);click('Open');await waitFor(()=>expect(c.getState().settings.mixes['base/0'].mute).toBe(true));await waitFor(()=>expect(screen.getByLabelText('Mute')).toBeChecked());expect(c.getState().snapshot.project.edits).toHaveLength(1);expect(integration.commits).not.toHaveBeenCalled();
+  const saved={...blankProject(),edits:[{type:'setTrackMix' as const,trackId:'base/0',mix:{gain:.4,pan:.2,mute:true,solo:false}}]};const c=await setup(blankProject(),saved);const oldHistory=c.getState();click('Open');await waitFor(()=>expect(activeController()).not.toBe(c));const opened=activeController();expect(opened.getState().settings.mixes['base/0'].mute).toBe(true);expect(c.getState()).toBe(oldHistory);await waitFor(()=>expect(screen.getByLabelText('Mute')).toBeChecked());expect(opened.getState().snapshot.project.edits).toHaveLength(1);expect(integration.commits).not.toHaveBeenCalled();
 });
 it('stages backing and commits its token with the finite backing command',async()=>{
   const assetId='a'.repeat(64);integration.stageBacking.mockResolvedValueOnce({assetId,token:'staged-audio',info:{filename:'backing.wav',mediaType:'audio/wav',byteLength:20},durationMs:1000});const c=await setup();const score=c.getState().score;
@@ -323,7 +342,7 @@ it('default print export leaves exact history unchanged',async()=>{
 });
 it('cancels an active export through the coordinator and closes the dialog',async()=>{
   let finish:(value:boolean)=>void=()=>{};integration.exportRun.mockImplementationOnce(()=>new Promise<boolean>(resolve=>{finish=resolve;}));const c=await setup();click('Export score');click('Export');await waitFor(()=>expect(integration.exportRun).toHaveBeenCalled());integration.exportBusy=true;
-  change('Title','Export cancellation');click('Apply score info');await waitFor(()=>expect(c.getState().score.title).toBe('Export cancellation'));click('Cancel export');await waitFor(()=>expect(integration.exportCancel).toHaveBeenCalled());await waitFor(()=>expect(screen.queryByRole('dialog',{name:'Export score'})).not.toBeInTheDocument());finish(false);
+  expect(screen.getByRole('button',{name:'Apply score info'})).toBeDisabled();change('Zoom (%)','125');click('Cancel export');await waitFor(()=>expect(integration.exportCancel).toHaveBeenCalled());expect(testWorkspace.getState().busy).toBe(true);await act(async()=>{finish(false);});await waitFor(()=>expect(screen.queryByRole('dialog',{name:'Export score'})).not.toBeInTheDocument());
 });
 it('shows native export failure inside the open modal without a duplicate background alert',async()=>{
   integration.exportRun.mockRejectedValueOnce(new Error('Native export failed.'));await setup();click('Export score');click('Export');const dialog=screen.getByRole('dialog',{name:'Export score'});
@@ -382,11 +401,11 @@ it('refreshes_fret_after_undo_with_same_indices',async()=>{
   await waitFor(()=>expect(screen.getByLabelText('Fret')).toHaveValue(7));
 });
 
-it('refreshes fret after replacing a document at the same indices',async()=>{
+it('refreshes fret after adding a document at the same indices',async()=>{
   const c=await setup();change('Fret','9');click('Set note');
   await waitFor(()=>expect(currentBeat(c).notes[0]?.fret).toBe(9));
-  click('New');
-  await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(0));
+  const history=c.getState();click('New');
+  await waitFor(()=>expect(activeController()).not.toBe(c));expect(currentBeat(activeController()).notes).toHaveLength(0);expect(c.getState()).toBe(history);
   await waitFor(()=>expect(screen.getByLabelText('Fret')).toHaveValue(0));
 });
 
@@ -431,8 +450,63 @@ it('follows a newly selected bass track and repairs the viewer after New',async(
   await waitFor(()=>expect(c.getState().score.tracks).toHaveLength(2));
   click('Track 2: Bass');
   expect(screen.getByRole('region',{name:'Instrument view'})).toHaveTextContent('Bass');
-  click('New');
-  await waitFor(()=>expect(c.getState().score.tracks).toHaveLength(1));
-  expect(screen.getByRole('region',{name:'Instrument view'})).toHaveTextContent('Guitar');
+  const history=c.getState();click('New');
+  await waitFor(()=>expect(activeController()).not.toBe(c));expect(activeController().getState().score.tracks).toHaveLength(1);expect(c.getState()).toBe(history);
+  expect(screen.queryByRole('region',{name:'Instrument view'})).not.toBeInTheDocument();click('Show instrument');expect(screen.getByRole('region',{name:'Instrument view'})).toHaveTextContent('Guitar');
   expect(screen.getByLabelText('Instrument view mode')).toHaveValue('auto');
+});
+
+it('switching restores per-tab views, resets musical selection and drafts, and retires one bound player',async()=>{
+  const a=await setup();change('Fret','7');click('Set note');await waitFor(()=>expect(currentBeat(a).notes[0]?.fret).toBe(7));click('Select bar');change('Zoom (%)','137.5');change('Displayed tracks','all');click('Show instrument');change('Measure','3');change('Fret','19');const before=a.getState(),first=testWorkspace.getState().active;
+  expect(screen.getAllByRole('region',{name:'Score workspace'})).toHaveLength(1);expect(integration.playerOptions).toHaveBeenCalledTimes(1);
+  click('New');await waitFor(()=>expect(activeController()).not.toBe(a));const b=activeController();expect(screen.getByLabelText('Zoom (%)')).toHaveValue(100);expect(screen.getByLabelText('Measure')).toHaveValue(1);expect(screen.getByLabelText('Fret')).toHaveValue(0);expect(screen.queryByRole('region',{name:'Instrument view'})).not.toBeInTheDocument();expect(screen.getByText(/0 notes.*0 beats/)).toBeInTheDocument();
+  change('Zoom (%)','75');const bHistory=b.getState();fireEvent.click(screen.getAllByRole('tab')[0]);await waitFor(()=>expect(activeController()).toBe(a));expect(testWorkspace.getState().active.activationId).not.toBe(first.activationId);
+  expect(screen.getByLabelText('Zoom (%)')).toHaveValue(137.5);expect(screen.getByLabelText('Displayed tracks')).toHaveValue('all');expect(screen.getByLabelText('Measure')).toHaveValue(3);expect(screen.getByLabelText('Fret')).toHaveValue(0);expect(screen.getByRole('region',{name:'Instrument view'})).toBeInTheDocument();expect(screen.getByText(/0 notes.*0 beats/)).toBeInTheDocument();
+  expect(a.getState()).toBe(before);expect(b.getState()).toBe(bHistory);expect(integration.playerOptions).toHaveBeenCalledTimes(3);expect(integration.destroy).toHaveBeenCalledTimes(2);expect(screen.getAllByRole('region',{name:'Score workspace'})).toHaveLength(1);expect(integration.play).not.toHaveBeenCalled();expect(integration.playSelection).not.toHaveBeenCalled();expect(integration.playFromCursor).not.toHaveBeenCalled();
+});
+it.each([{ctrlKey:true},{metaKey:true}])('routes workspace New, Open, cycle and close shortcuts outside fields and dialogs: %j',async modifier=>{
+  const a=await setup(blankProject(),blankProject()),id=a.getState().documentId;let score=screen.getByRole('region',{name:'Score workspace'});
+  fireEvent.keyDown(score,{key:'n',...modifier});await waitFor(()=>expect(testWorkspace.getState().documents).toHaveLength(2));const b=activeController();score=screen.getByRole('region',{name:'Score workspace'});
+  fireEvent.keyDown(score,{key:'o',...modifier});await waitFor(()=>expect(testWorkspace.getState().documents).toHaveLength(3));const c=activeController();
+  fireEvent.keyDown(screen.getByRole('region',{name:'Score workspace'}),{key:'Tab',...modifier});await waitFor(()=>expect(activeController()).toBe(a));
+  fireEvent.keyDown(screen.getByRole('region',{name:'Score workspace'}),{key:'Tab',shiftKey:true,...modifier});await waitFor(()=>expect(activeController()).toBe(c));
+  for(const key of ['w','Tab','n','o'])fireEvent.keyDown(screen.getByLabelText('Fret'),{key,...modifier});expect(testWorkspace.getState().documents).toHaveLength(3);expect(activeController()).toBe(c);
+  click('Browse scales');const dialog=screen.getByRole('dialog',{name:'Scale browser'});for(const key of ['w','Tab','n','o'])fireEvent.keyDown(dialog,{key,...modifier});expect(testWorkspace.getState().documents).toHaveLength(3);expect(activeController()).toBe(c);click('Close scales');
+  fireEvent.keyDown(screen.getByRole('region',{name:'Score workspace'}),{key:'w',...modifier});await waitFor(()=>expect(testWorkspace.getState().documents).toHaveLength(2));expect(activeController()).toBe(b);expect(testWorkspace.getState().documents[0].id).toBe(id);
+});
+it.each([{open:'Edit chord diagram',dialog:'Harmony chord',close:'Cancel'},{open:'Browse scales',dialog:'Scale browser',close:'Close scales'},{open:'Export score',dialog:'Export score',close:'Cancel'}])('holds exactly one editor lease for $dialog and releases it when dismissed',async({open,dialog,close})=>{
+  await setup();const begin=vi.spyOn(testWorkspace,'beginEditorOperation');click(open);expect(screen.getByRole('dialog',{name:dialog})).toBeInTheDocument();expect(begin).toHaveBeenCalledTimes(1);expect(testWorkspace.getState().busy).toBe(true);expect(screen.getByRole('tab')).toBeDisabled();expect(screen.getByRole('button',{name:'New'})).toBeDisabled();expect(screen.getByRole('button',{name:'Apply score info'})).toBeDisabled();expect(screen.getByRole('button',{name:'Stop'})).toBeEnabled();
+  click(close);await waitFor(()=>expect(testWorkspace.getState().busy).toBe(false));expect(begin).toHaveBeenCalledTimes(1);expect(screen.getByRole('tab')).toBeEnabled();expect(screen.getByRole('button',{name:'Apply score info'})).toBeEnabled();
+});
+it('uses its existing export dialog lease through page commit, frozen revision and late cancellation',async()=>{
+  let finishRun!:(value:boolean)=>void,finishCancel!:()=>void;integration.exportRun.mockImplementationOnce(()=>new Promise<boolean>(resolve=>{finishRun=resolve;}));integration.exportCancel.mockImplementationOnce(()=>new Promise<void>(resolve=>{finishCancel=resolve;}));const c=await setup(),begin=vi.spyOn(testWorkspace,'beginEditorOperation');
+  click('Export score');change('Export format','pdf');const dialog=within(screen.getByRole('dialog',{name:'Export score'}));fireEvent.change(dialog.getByLabelText('Width (mm)'),{target:{value:'245'}});fireEvent.click(dialog.getByRole('button',{name:'Apply page layout'}));click('Export');await waitFor(()=>expect(integration.exportRun).toHaveBeenCalled());expect(c.getState().settings.page?.widthMm).toBe(245);expect(begin).toHaveBeenCalledTimes(1);expect(testWorkspace.getState().busy).toBe(true);
+  const source=integration.exportRun.mock.calls.at(-1)?.[1];expect(source).toMatchObject({revision:c.getState().revision,score:c.getState().score,settings:c.getState().settings});click('Cancel export');await waitFor(()=>expect(integration.exportCancel).toHaveBeenCalledTimes(1));expect(testWorkspace.getState().busy).toBe(true);expect(screen.getByRole('tab')).toBeDisabled();
+  await act(async()=>{finishRun(false);});expect(testWorkspace.getState().busy).toBe(true);await act(async()=>{finishCancel();});await waitFor(()=>expect(testWorkspace.getState().busy).toBe(false));expect(begin).toHaveBeenCalledTimes(1);
+});
+it.each(['success','cancel','error'] as const)('direct GP export reserves and releases one lease on %s',async result=>{
+  const c=await setup(),bridge=documentBridges.get(c.getState().documentId)!,begin=vi.spyOn(testWorkspace,'beginEditorOperation');let decide!:(value:boolean)=>void;vi.mocked(bridge.confirmExport).mockImplementationOnce(()=>new Promise<boolean>(resolve=>{decide=resolve;}));if(result==='error')vi.mocked(bridge.exportGp).mockRejectedValueOnce(new Error('GP write failed'));else vi.mocked(bridge.exportGp).mockResolvedValueOnce(result==='success');
+  click('Export GP');await waitFor(()=>expect(bridge.confirmExport).toHaveBeenCalledTimes(1));expect(testWorkspace.getState().busy).toBe(true);expect(begin).toHaveBeenCalledTimes(1);await act(async()=>{decide(result!=='cancel');});await waitFor(()=>expect(testWorkspace.getState().busy).toBe(false));expect(begin).toHaveBeenCalledTimes(1);if(result==='cancel')expect(bridge.exportGp).not.toHaveBeenCalled();else expect(bridge.exportGp).toHaveBeenCalledWith(expect.any(Uint8Array),c.getState().revision);if(result==='error')expect(screen.getByRole('alert')).toHaveTextContent('GP write failed');
+});
+it.each(['success','cancel','error'] as const)('backing import holds its origin lease through staging and releases once on %s',async result=>{
+  const c=await setup(),begin=vi.spyOn(testWorkspace,'beginEditorOperation'),assetId='d'.repeat(64);let finish!:(value:{assetId:string;token:string;info:AssetInfo;durationMs:number}|null)=>void,reject!:(error:Error)=>void;integration.stageBacking.mockImplementationOnce(()=>new Promise((resolve,fail)=>{finish=resolve;reject=fail;}));
+  click('Import backing');expect(testWorkspace.getState().busy).toBe(true);expect(begin).toHaveBeenCalledTimes(1);expect(screen.getByRole('tab')).toBeDisabled();await act(async()=>{if(result==='error')reject(new Error('Backing picker failed'));else finish(result==='cancel'?null:{assetId,token:'leased-backing',info:{filename:'backing.wav',mediaType:'audio/wav',byteLength:20},durationMs:1000});});await waitFor(()=>expect(testWorkspace.getState().busy).toBe(false));expect(begin).toHaveBeenCalledTimes(1);expect(c.getState().snapshot.project.edits).toHaveLength(result==='success'?1:0);if(result==='error')expect(screen.getByRole('alert')).toHaveTextContent('Backing picker failed');
+});
+
+it('keeps connected focus on the new active tab after toolbar Close score',async()=>{
+  const a=await setup();click('New');await waitFor(()=>expect(activeController()).not.toBe(a));const origin=screen.getByRole('button',{name:'Close score'});origin.focus();fireEvent.click(origin);await waitFor(()=>expect(activeController()).toBe(a));
+  expect(document.activeElement).not.toBe(document.body);expect(document.activeElement?.isConnected).toBe(true);expect(screen.getByRole('tab',{selected:true})).toHaveFocus();
+});
+it('keeps connected focus after Ctrl W from the score',async()=>{
+  const a=await setup();click('New');await waitFor(()=>expect(activeController()).not.toBe(a));screen.getByRole('region',{name:'Score workspace'}).focus();fireEvent.keyDown(document.activeElement!,{key:'w',ctrlKey:true});await waitFor(()=>expect(activeController()).toBe(a));
+  expect(document.activeElement).not.toBe(document.body);expect(document.activeElement?.isConnected).toBe(true);expect(screen.getByRole('tab',{selected:true})).toHaveFocus();
+});
+it('cycles twice with Ctrl Tab dispatched through the actual focused element',async()=>{
+  const a=await setup();click('New');await waitFor(()=>expect(activeController()).not.toBe(a));const b=activeController();screen.getByRole('region',{name:'Score workspace'}).focus();
+  fireEvent.keyDown(document.activeElement!,{key:'Tab',ctrlKey:true});await waitFor(()=>expect(activeController()).toBe(a));expect(document.activeElement).not.toBe(document.body);expect(document.activeElement?.isConnected).toBe(true);
+  fireEvent.keyDown(document.activeElement!,{key:'Tab',ctrlKey:true});await waitFor(()=>expect(activeController()).toBe(b));expect(document.activeElement).not.toBe(document.body);expect(document.activeElement?.isConnected).toBe(true);expect(screen.getByRole('tab',{selected:true})).toHaveFocus();
+});
+it('canceled toolbar close retains focus on its connected originating action',async()=>{
+  const c=await setup();change('Fret','7');click('Set note');await waitFor(()=>expect(currentBeat(c).notes[0]?.fret).toBe(7));const bridge=documentBridges.get(c.getState().documentId)!;vi.mocked(bridge.askUnsaved).mockResolvedValueOnce('cancel');const origin=screen.getByRole('button',{name:'Close score'});origin.focus();fireEvent.click(origin);
+  await waitFor(()=>expect(bridge.askUnsaved).toHaveBeenCalledTimes(1));await waitFor(()=>expect(testWorkspace.getState().busy).toBe(false));expect(activeController()).toBe(c);expect(origin.isConnected).toBe(true);expect(origin).toHaveFocus();
 });

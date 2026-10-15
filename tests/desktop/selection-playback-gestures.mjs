@@ -1,3 +1,4 @@
+import { readActiveDocument } from './document-context.mjs';
 import assert from 'node:assert/strict';
 import {readFileSync,writeFileSync} from 'node:fs';
 import {resolve} from 'node:path';
@@ -9,7 +10,7 @@ assert.equal(resolve(directory),selectionDirectory);
 const fixture=buildSelectionFixtures(`selection-gesture-${Date.now()}-${process.pid}`),prefix=fixture.prefix;
 const output=name=>resolve(directory,`${prefix}-${name}`),errors=[],checks={};
 let id=null,browser=null,page=null;
-const snapshot=()=>page.evaluate(()=>window.__TAURI_INTERNALS__.invoke('project_snapshot'));
+const snapshot=()=>readActiveDocument(page);
 const status=()=>page.evaluate(()=>window.__TAURI_INTERNALS__.invoke('audio_status'));
 const idle=()=>page.waitForFunction(()=>!document.querySelector('nav[aria-label="File and history"] button')?.disabled);
 const published=()=>page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));

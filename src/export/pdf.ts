@@ -5,6 +5,7 @@ import { prepareScoreTimers } from '../editor/timers';
 import { configureEngraving,projectEngraving } from '../engraving/projection';
 import { pageGeometry,paginateEngravedSystems } from '../engraving/page';
 import type { EngravingOverrides,PageLayout } from '../engraving/types';
+import {pageTitleFontSize} from './page-title';
 const pxPerMm=96/25.4;
 const escaped=(s:string)=>s.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&apos;'}[c]!));
 function dimensions(layout:PrintLayout) {
@@ -18,7 +19,7 @@ function dimensions(layout:PrintLayout) {
   return {widthMm,heightMm,width,height,margin,usableWidth:width-2*margin,usableHeight:height-2*margin-64};
 }
 export function paginateSystems(systems:SvgSystem[],title:string,layout:PrintLayout):SvgPage[] {
-  const d=dimensions(layout);const groups:SvgSystem[][]=[[]];let height=0;
+  const d=dimensions(layout),titleSize=pageTitleFontSize(title,d.usableWidth);const groups:SvgSystem[][]=[[]];let height=0;
   for(const system of systems) {
     if(!Number.isFinite(system.height)||system.height<=0||system.height>d.usableHeight||!Number.isFinite(system.width)||system.width>d.usableWidth+1)throw new Error('A notation system does not fit this page. Reduce print scale, use landscape, or export fewer staves.');
     if(height+system.height>d.usableHeight){groups.push([]);height=0;}
@@ -27,13 +28,13 @@ export function paginateSystems(systems:SvgSystem[],title:string,layout:PrintLay
   return groups.map((group,index)=>{
     let y=d.margin+40;
     const content=group.map(system=>{const at=y;y+=system.height;return `<g transform="translate(${d.margin} ${at})">${system.svg.replace(/<svg\b[^>]*>/,'').replace(/<\/svg>\s*$/,'')}</g>`;}).join('');
-    return {widthMm:d.widthMm,heightMm:d.heightMm,svg:`<svg xmlns="http://www.w3.org/2000/svg" width="${d.widthMm}mm" height="${d.heightMm}mm" viewBox="0 0 ${d.width} ${d.height}"><style>.at{font-family:Bravura;font-size:34px}text{fill:#111}</style><text x="${d.margin}" y="${d.margin+22}" font-family="Noto Sans" font-size="18">${escaped(title)}</text>${content}<text x="${d.width/2}" y="${d.height-d.margin}" text-anchor="middle" font-family="Noto Sans" font-size="11">${index+1} / ${groups.length}</text></svg>`};
+    return {widthMm:d.widthMm,heightMm:d.heightMm,svg:`<svg xmlns="http://www.w3.org/2000/svg" width="${d.widthMm}mm" height="${d.heightMm}mm" viewBox="0 0 ${d.width} ${d.height}"><style>.at{font-family:Bravura;font-size:34px}text{fill:#111}</style><text x="${d.margin}" y="${d.margin+22}" font-family="Noto Sans, Noto Sans CJK JP, Noto Emoji" font-size="${titleSize}">${escaped(title)}</text>${content}<text x="${d.width/2}" y="${d.height-d.margin}" text-anchor="middle" font-family="Noto Sans, Noto Sans CJK JP, Noto Emoji" font-size="11">${index+1} / ${groups.length}</text></svg>`};
   });
 }
 /** Load the bundled fonts before public SVG text measurement in the webview. */
 export async function loadExportFonts():Promise<void> {
   if(typeof document==='undefined')return;
-  const fonts=[new FontFace('Noto Sans','url(/export-fonts/NotoSans-Regular.ttf)'),new FontFace('Bravura','url(/export-fonts/Bravura.otf)')];
+  const fonts=[new FontFace('Noto Sans','url(/export-fonts/NotoSans-Regular.ttf)'),new FontFace('Bravura','url(/export-fonts/Bravura.otf)'),new FontFace('Noto Sans CJK JP','url(/export-fonts/NotoSansCJKjp-Regular.otf)'),new FontFace('Noto Emoji','url(/export-fonts/NotoEmoji.ttf)')];
   for(const font of fonts){await font.load();document.fonts.add(font);}
 }
 export function renderPdfPages(score:model.Score,selection:ExportSelection,layout:PrintLayout,options?:{page:PageLayout;engraving:EngravingOverrides;trackIds:string[]}):SvgPage[] {
@@ -60,8 +61,8 @@ export function renderPdfPages(score:model.Score,selection:ExportSelection,layou
   settings.display.scale=frozen?.page.scale??layout.scale;settings.display.padding=[0];settings.display.layoutMode=LayoutMode.Page;
   settings.display.systemsLayoutMode=SystemsLayoutMode.UseModelLayout;
   settings.display.startBar=(selection.range?.first??0)+1;settings.display.barCount=selection.range?selection.range.last-selection.range.first+1:-1;
-  for(const font of settings.display.resources.elementFonts.values())font.families=['Noto Sans'];
-  settings.display.resources.tablatureFont.families=['Noto Sans'];
+  for(const font of settings.display.resources.elementFonts.values())font.families=['Noto Sans','Noto Sans CJK JP','Noto Emoji'];
+  settings.display.resources.tablatureFont.families=['Noto Sans','Noto Sans CJK JP','Noto Emoji'];
   const renderer=new rendering.ScoreRenderer(settings);renderer.width=d.usableWidth;
   const systems:SvgSystem[]=[];let failure:Error|undefined;
   renderer.error.on(e=>{failure=e;});

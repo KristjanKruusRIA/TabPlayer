@@ -1,3 +1,4 @@
+import { readActiveDocument,readDocumentRecord } from './document-context.mjs';
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -9,7 +10,7 @@ const bytes=readFileSync(source),hash=createHash('sha256').update(bytes).digest(
 const run=Date.now();const saved=resolve(directory,`roundtrip-${run}.tabplayer`),exported=resolve(directory,`roundtrip-${run}.gp`);
 const environment={TABPLAYER_TEST_OPEN:source,TABPLAYER_TEST_SAVE:saved,TABPLAYER_TEST_EXPORT:exported};
 let id=launch(environment);let browser=await connect();let page=browser.contexts()[0].pages()[0];
-const snapshot=()=>page.evaluate(()=>window.__TAURI_INTERNALS__.invoke('project_snapshot'));
+const snapshot=()=>readActiveDocument(page);
 const idle=()=>page.waitForFunction(()=>!document.querySelector('nav button').disabled);
 try {
   await page.getByRole('button',{name:'Open',exact:true}).click();await idle();
@@ -20,7 +21,9 @@ try {
   }
   await page.getByRole('combobox',{name:/^String/}).selectOption('2');await page.getByLabel('Fret',{exact:true}).fill('7');await page.getByRole('button',{name:'Set note',exact:true}).click();await idle();
   assert.equal((await snapshot()).dirty,true);
-  const failed=await page.evaluate(async path=>{try{await window.__TAURI_INTERNALS__.invoke('desktop_test_io',{action:'save',path});return false;}catch{return true;}},resolve(directory,'missing-directory/out.tabplayer'));
+  const origin=(await page.evaluate(()=>window.__TAURI_INTERNALS__.invoke('workspace_snapshot'))).active;
+  const {documentId,revision}=await readDocumentRecord(page,origin.documentId);
+  const failed=await page.evaluate(async address=>{try{await window.__TAURI_INTERNALS__.invoke('desktop_test_io',{action:'save',...address});return false;}catch{return true;}},{documentId,revision,path:resolve(directory,'missing-directory/out.tabplayer')});
   assert.equal(failed,true);assert.equal((await snapshot()).dirty,true);
   await page.getByRole('button',{name:'Save',exact:true}).click();await idle();
   const before=await snapshot();assert.equal(before.dirty,false);assert.equal(JSON.parse(readFileSync(saved,'utf8')).base.bytesBase64,bytes.toString('base64'));

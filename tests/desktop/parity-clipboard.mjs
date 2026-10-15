@@ -1,3 +1,4 @@
+import { readActiveDocument } from './document-context.mjs';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFileSync,writeFileSync } from 'node:fs';
@@ -11,7 +12,7 @@ let id=launch({TABPLAYER_TEST_OPEN:fixturePath,TABPLAYER_TEST_SAVE:saved,TABPLAY
 try{
   browser=await connect();page=browser.contexts()[0].pages()[0];await page.getByRole('button',{name:'Open',exact:true}).waitFor();
   const errors=[];page.on('pageerror',error=>errors.push(error.message));
-  const snapshot=()=>page.evaluate(()=>window.__TAURI_INTERNALS__.invoke('project_snapshot'));
+  const snapshot=()=>readActiveDocument(page);
   const idle=async()=>{await page.waitForFunction(()=>!document.querySelector('nav button')?.disabled);assert.deepEqual(await page.getByRole('alert').allTextContents(),[]);};
   const button=async name=>{await page.getByRole('button',{name,exact:true}).click();await idle();};
   const details=label=>page.locator('summary').filter({hasText:label}).first().evaluate(node=>{node.parentElement.open=true;});

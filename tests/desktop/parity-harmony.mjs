@@ -1,3 +1,4 @@
+import { readActiveDocument } from './document-context.mjs';
 import assert from 'node:assert/strict';
 import {readFileSync,writeFileSync} from 'node:fs';
 import {resolve} from 'node:path';
@@ -10,7 +11,7 @@ let id=launch({TABPLAYER_TEST_SAVE:saved,TABPLAYER_TEST_EXPORT:exported}),browse
 try{
   browser=await connect();page=browser.contexts()[0].pages()[0];await page.getByRole('button',{name:'Open',exact:true}).waitFor();
   const errors=[];page.on('pageerror',error=>errors.push(error.message));
-  const snapshot=()=>page.evaluate(()=>window.__TAURI_INTERNALS__.invoke('project_snapshot'));
+  const snapshot=()=>readActiveDocument(page);
   const library=()=>page.evaluate(()=>window.__TAURI_INTERNALS__.invoke('harmony_library_read'));
   const baselineLibrary=await library();
   const idle=async()=>{await page.waitForFunction(()=>!document.querySelector('nav button')?.disabled);assert.deepEqual(await page.getByRole('alert').allTextContents(),[]);};

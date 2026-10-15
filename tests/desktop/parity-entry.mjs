@@ -1,3 +1,4 @@
+import { readActiveDocument } from './document-context.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync,writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -16,7 +17,7 @@ try {
     const url=new URL(route.request().url());
     return ['tauri.localhost','ipc.localhost','127.0.0.1','localhost'].includes(url.hostname)||['data:','blob:'].includes(url.protocol)?route.continue():route.abort();
   });
-  const snapshot=()=>page.evaluate(()=>window.__TAURI_INTERNALS__.invoke('project_snapshot'));
+  const snapshot=()=>readActiveDocument(page);
   const status=()=>page.evaluate(()=>window.__TAURI_INTERNALS__.invoke('audio_status'));
   const idle=async()=>{
     await page.waitForFunction(()=>!document.querySelector('nav button')?.disabled);

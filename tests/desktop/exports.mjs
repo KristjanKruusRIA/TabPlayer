@@ -1,3 +1,4 @@
+import { readDocumentRecord } from './document-context.mjs';
 import assert from 'node:assert/strict';
 import { readFile,mkdir,stat } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -11,8 +12,8 @@ for(const {format,current=false} of [{format:'midi'},{format:'pdf'},{format:'wav
     browser=await connect();const page=browser.contexts()[0].pages()[0];
     await page.getByLabel('Fret',{exact:true}).fill('7');await page.getByRole('button',{name:'Set note',exact:true}).click();
     await page.waitForFunction(()=>!document.querySelector('nav button')?.disabled);
-    const snapshot=()=>page.evaluate(()=>window.__TAURI_INTERNALS__.invoke('project_snapshot'));
-    const before=await snapshot();assert.equal(before.dirty,true);
+    const {documentId}=(await page.evaluate(()=>window.__TAURI_INTERNALS__.invoke('workspace_snapshot'))).active;
+    const origin=await readDocumentRecord(page,documentId),before=origin.snapshot;assert.equal(before.dirty,true);
     if(current)await page.getByRole('combobox',{name:/^Speed/}).selectOption('50');
     await page.getByRole('button',{name:/^Export(?: score)?$/,exact:true}).click();
     const dialog=page.getByRole('dialog',{name:'Export score'});await dialog.getByLabel('Export format').selectOption(format);
@@ -25,12 +26,12 @@ for(const {format,current=false} of [{format:'midi'},{format:'pdf'},{format:'wav
       const progress=page.getByRole('progressbar',{name:'Export progress'});
       if(await progress.count()){
         const jobId=await progress.getAttribute('data-job-id');
-        if(jobId){const status=await page.evaluate(id=>window.__TAURI_INTERNALS__.invoke('export_status',{id}),jobId);assert.notEqual(status?.status,'failed',status?.error??'Native export failed.');assert.notEqual(status?.status,'cancelled','Export unexpectedly cancelled.');}
+        if(jobId){const status=await page.evaluate(({documentId,id})=>window.__TAURI_INTERNALS__.invoke('export_status',{documentId,id}),{documentId,id:jobId});assert.notEqual(status?.status,'failed',status?.error??'Native export failed.');assert.notEqual(status?.status,'cancelled','Export unexpectedly cancelled.');}
       }
       await new Promise(r=>setTimeout(r,200));
     }
     assert.ok(exists,`Missing ${format} output; UI: ${await page.locator('body').innerText()}`);
-    assert.deepEqual(await snapshot(),before,'Export must preserve document history, source bytes and dirty state.');
+    assert.deepEqual(await readDocumentRecord(page,documentId),origin,'Export must preserve document history, source bytes and dirty state.');
     if(format==='midi'){const bytes=await readFile(destination);assert.equal(bytes.subarray(0,4).toString(),'MThd');assert.equal(bytes.readUInt16BE(12),960);}
     if(format==='pdf'){assert.equal((await readFile(destination)).subarray(0,5).toString(),'%PDF-');}
     if(format==='wav'){const b=await readFile(destination);assert.equal(b.subarray(0,4).toString(),'RIFF');assert.equal(b.readUInt16LE(22),2);assert.equal(b.readUInt32LE(24),48000);assert.equal(b.readUInt16LE(34),24);assert.equal(b.readUInt32LE(40)+44,b.length);assert.ok(b.subarray(44).some(n=>n!==0));if(current)assert.equal(b.readUInt32LE(40)/(2*3),772800);}

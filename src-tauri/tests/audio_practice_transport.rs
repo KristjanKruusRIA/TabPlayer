@@ -553,6 +553,8 @@ fn atomic_range_resolves_tempo_before_mid_note_seek_without_heap_operations() {
         // Warm the callback, then seek to the authored half-second point under
         // accepted tempo: the held sample must be at its one-second marker.
         transport.render_into(&mut [[0.0; 2]; 1]);
+        // Initialize the non-real-time status observer's platform mutex first.
+        let _ = transport.status();
         let mut output = [[0.0; 2]; 512];
         HEAP_OPERATIONS.with(|n| n.set(0));
         COUNT_HEAP.with(|flag| flag.set(true));

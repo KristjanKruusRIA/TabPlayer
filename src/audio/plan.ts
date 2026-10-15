@@ -6,6 +6,7 @@ import type { BackingSettings } from '../edit-types';
 import type { Articulation, MeasureOccurrence, PlanMidiEvent, PlanNote, PlanTempo, PlaybackPlan } from './types';
 import { scoreFromJson } from '../model-clone';
 import { gpControllerEvents, prepareGpMidiScore } from '../interchange/automation';
+import { buildPerformedBeats } from './performed-beats';
 
 const settings = new Settings();
 const validMeter = (numerator:number,denominator:number) => Number.isSafeInteger(numerator) && numerator > 0 && numerator <= 0xffffffff && [1,2,4,8,16,32,64,128,256].includes(denominator);
@@ -253,6 +254,7 @@ function buildWithIdentities(original: model.Score, generation: number, ids: str
   const score = prepareGpMidiScore(prepareMidiScore(original),settings);
   if (ids.length !== score.tracks.length || new Set(ids).size !== ids.length || ids.some(id => typeof id !== 'string' || !id)) throw new Error('Invalid playback track identities.');
   const complete = generate(score), all = sources(score), nativeChannel = channelMapping(score, complete.events);
+  const performedBeats=buildPerformedBeats(score,complete.lookup,complete.events.shift);
   resolvePrograms(score, complete.events);
   const tempos = [...new Map(complete.events.tempos.map(t => [t.tick, t])).values()].sort((a, b) => a.tick - b.tick);
   if (!tempos.length || tempos[0].tick !== 0) tempos.unshift({ tick: 0, bpm: score.tempo });
@@ -334,7 +336,7 @@ function buildWithIdentities(original: model.Score, generation: number, ids: str
     events.push({ ...common, type: 'noteOn', tick: note.start, order: note.onOrder }, { ...common, type: 'noteOff', tick: note.end, order: note.offOrder });
   }
   const durationTick = Math.max(complete.events.end, ...complete.events.notes.map(n => n.end), 0);
-  const plan: PlaybackPlan = { generation, ppq: 960, durationTick, durationMs: timeAt(durationTick, tempos), tracks: score.tracks.map(t => ({ id: ids[t.index], program: t.playbackInfo.program, percussion: t.isPercussion })), tempos, occurrences, notes: notes.sort((a, b) => a.startTick - b.startTick), midi: events.sort((a, b) => a.tick - b.tick || a.order - b.order).map(({ order, ...event }) => event as PlanMidiEvent) };
+  const plan: PlaybackPlan = { generation, ppq: 960, durationTick, durationMs: timeAt(durationTick, tempos), tracks: score.tracks.map(t => ({ id: ids[t.index], program: t.playbackInfo.program, percussion: t.isPercussion })), tempos, occurrences, performedBeats, notes: notes.sort((a, b) => a.startTick - b.startTick), midi: events.sort((a, b) => a.tick - b.tick || a.order - b.order).map(({ order, ...event }) => event as PlanMidiEvent) };
   validatePlaybackPlan(plan); return plan;
 }
 

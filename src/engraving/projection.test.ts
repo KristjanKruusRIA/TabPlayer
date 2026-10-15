@@ -74,7 +74,7 @@ it('inherit_and_reset_preserve_source_style_without_mutation',()=>{
 
 it('retains_source_archive_siblings_through_a_render_projection',()=>{
   const entries=unzipSync(new exporter.Gp7Exporter().export(music(),new Settings()));
-  entries['Content/score.gpss']=strToU8('unknown untouched style');entries['Content/BinaryStylesheet']=new Uint8Array([1,0,255]);entries['Content/Assets/backing.bin']=new Uint8Array([8,0,4]);
+  entries['Content/score.gpss']=strToU8('unknown untouched style');entries['Content/BinaryStylesheet']=new Uint8Array([0,0,0,0]);entries['Content/Assets/backing.bin']=new Uint8Array([8,0,4]);
   const bytes=zipSync(entries),source=loadInterchangeScore(bytes,new Settings()),value=defaultEngraving();value.stylesheet.hideDynamics=true;
   const output=unzipSync(exportGpInterchange(projectEngraving(source,ids,value).score,new Settings()));
   for(const [name,data]of Object.entries(entries))if(name!=='Content/score.gpif'){expect([...output[name]],name).toEqual([...data]);expect([...unzipSync(bytes)[name]],name).toEqual([...data]);}

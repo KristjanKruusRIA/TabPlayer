@@ -17,13 +17,17 @@ const engravingView=vi.hoisted(()=>vi.fn());
 const personalLibrary=vi.hoisted(()=>({read:vi.fn(async():Promise<HarmonyLibrary>=>({format:'TabPlayerHarmonyLibrary',version:1,entries:[]})),put:vi.fn(async(entry:HarmonyLibraryEntry):Promise<HarmonyLibrary>=>({format:'TabPlayerHarmonyLibrary',version:1,entries:[entry]})),remove:vi.fn(async():Promise<HarmonyLibrary>=>({format:'TabPlayerHarmonyLibrary',version:1,entries:[]}))}));
 vi.mock('./harmony/library',async original=>({...await original<typeof import('./harmony/library')>(),readHarmonyLibrary:personalLibrary.read,putHarmonyLibraryEntry:personalLibrary.put,removeHarmonyLibraryEntry:personalLibrary.remove}));
 
-const integration=vi.hoisted(()=>({loadDocument:vi.fn(),beforeScoreChange:vi.fn(),destroy:vi.fn(),stageBacking:vi.fn(),commits:vi.fn(),activeNotes:vi.fn((_trackId:string)=>[]),practiceSpeed:100,practiceFixed:false,setPractice:vi.fn(),play:vi.fn(),pause:vi.fn(),exportOptions:vi.fn(),exportBusy:false,exportRun:vi.fn(async()=>true),exportCancel:vi.fn(async()=>{})}));
+const integration=vi.hoisted(()=>({loadDocument:vi.fn(),beforeScoreChange:vi.fn(),destroy:vi.fn(),stageBacking:vi.fn(),commits:vi.fn(),activeNotes:vi.fn((_trackId:string)=>[]),practiceSpeed:100,practiceFixed:false,setPractice:vi.fn(),play:vi.fn(),pause:vi.fn(),playFromCursor:vi.fn(),playSelection:vi.fn(),loopSelection:vi.fn(),exportOptions:vi.fn(),exportBusy:false,exportRun:vi.fn(async()=>true),exportCancel:vi.fn(async()=>{})}));
 vi.mock('./audio/bridge',()=>({nativeAudioBridge:{stageBacking:integration.stageBacking}}));
 vi.mock('./export/useExportCoordinator',()=>({useExportCoordinator:(options:unknown)=>{integration.exportOptions(options);return {busy:integration.exportBusy,progress:undefined,run:integration.exportRun,cancel:integration.exportCancel};}}));
 vi.mock('./audio/NativePlaybackController',()=>({NativePlaybackController:class {
   built:BuiltDocument|null=null;state:PlaybackState={ready:true,playing:false,time:0,endTime:4000,measure:0,speed:integration.practiceSpeed,metronome:false,practice:{settings:{...structuredClone(DEFAULT_PRACTICE),tempo:integration.practiceFixed?{kind:'fixed',bpm:90}:{kind:'relative',ratio:integration.practiceSpeed/100}},phase:'idle',countInRemaining:0,completedPasses:0,effectiveRatio:integration.practiceSpeed/100,currentBpm:120,pulse:null},practicePending:false,practiceNotice:null,range:null,loop:null,error:null};
   constructor(private options:{onEdit:(command:EditCommand)=>void|Promise<void>}){}
   subscribe=()=>()=>{};getState=()=>this.state;
+  generation=7;cursorPlaybackChoices=(target:{bar:number;beat:number})=>target?[{generation:7,occurrenceIndex:target.bar,startTick:target.bar*3840+target.beat*960}]:[];
+  selectionPlaybackChoices=()=>[{generation:7,startOccurrence:0,endOccurrence:0,startTick:0,endTick:960}];
+  playbackOccurrences=()=>Array.from({length:this.built?.score.masterBars.length??4},(_,bar)=>({bar,occurrence:0,startTick:bar*3840,endTick:(bar+1)*3840,startMs:bar*2000,endMs:(bar+1)*2000,meterNumerator:4,meterDenominator:4,clickTicks:[]}));
+  playFromCursor=integration.playFromCursor;playSelection=integration.playSelection;loopSelection=integration.loopSelection;
   activeNotes=(trackId:string)=>integration.activeNotes(trackId);
   loadDocument=async(project:unknown,built:BuiltDocument,track:number,documentEpoch:number)=>{this.built=built;integration.loadDocument(project,built,track,documentEpoch);};
   beforeScoreChange=integration.beforeScoreChange;destroy=integration.destroy;
@@ -68,6 +72,14 @@ it('describes a new unsaved score accurately and passes canonical edit focus to 
   expect(engravingView.mock.lastCall?.[0]).toMatchObject({editTarget:{track:0,staff:0,bar:0,voice:0,beat:0},editString:6,editNoteIndex:null});
   fireEvent.keyDown(screen.getByRole('region',{name:'Score workspace'}),{key:'ArrowRight'});
   expect(engravingView.mock.lastCall?.[0]).toMatchObject({editTarget:{track:0,staff:0,bar:0,voice:0,beat:1}});
+});
+it('passes canonical paper targets and musical selections to transport only on explicit actions',async()=>{
+  const c=await setup(),before=c.getState().snapshot;click('Select rendered note');click('Select bar');
+  expect(integration.play).not.toHaveBeenCalled();expect(integration.playFromCursor).not.toHaveBeenCalled();expect(integration.playSelection).not.toHaveBeenCalled();expect(integration.loopSelection).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByText('Selected playback',{selector:'summary'}));click('Play from cursor');
+  expect(integration.playFromCursor).toHaveBeenCalledWith({track:0,staff:0,bar:0,voice:0,beat:1},{generation:7,occurrenceIndex:0,startTick:960});
+  click('Play selection');expect(integration.playSelection).toHaveBeenCalledWith({kind:'bars',tracks:[0],firstBar:0,lastBar:0},{generation:7,startOccurrence:0,endOccurrence:0,startTick:0,endTick:960});
+  click('Loop selection');expect(integration.loopSelection).toHaveBeenCalledTimes(1);expect(c.getState().snapshot).toBe(before);
 });
 
 it('places practice and page controls inside their inspector task landmarks',async()=>{

@@ -11,6 +11,8 @@ import { readGpifHarmony,writeGpifHarmony } from './harmony';
 import { copyHarmonySources } from '../harmony/chord-source';
 import { scoreFromJson } from '../model-clone';
 import { captureNoteLinks,restoreNoteLinks } from '../editor/links';
+import { copyTimeSignatureSources } from '../editor/time-signature-source';
+import { readStylesheetTimeSignatures,writeStylesheetTimeSignatures } from './stylesheet';
 
 const gpifPath='Content/score.gpif';
 const sourceEntries=new WeakMap<model.Score,Record<string,Uint8Array>>();
@@ -76,6 +78,7 @@ export function loadInterchangeScore(bytes:Uint8Array,settings:Settings):model.S
       owner.automations.push(Object.assign(new model.Automation(),{type:type==='DSPParam_11'?model.AutomationType.Balance:model.AutomationType.Volume,value:value*16,ratioPosition,isLinear:text(item,'Linear')==='true',isVisible:text(item,'Visible')!=='false',text:text(item,'Text')}));
     }
   });
+  readStylesheetTimeSignatures(score,entries);
   sourceEntries.set(score,entries);return score;
 }
 export function exportGpInterchange(score:model.Score,settings:Settings):Uint8Array {
@@ -96,9 +99,8 @@ export function exportGpInterchange(score:model.Score,settings:Settings):Uint8Ar
   const harmony=score.tracks.some(track=>track.staves.some(staff=>!!staff.chords?.size));
   const raw=new exporter.Gp7Exporter().export(score,settings),changes=score.tracks.map(trackMixAutomations),needsXml=harmony||lyrics||!!notation||changes.some(stream=>stream.length>0)||score.tracks.some(track=>track.isPercussion);
   const original=sourceEntries.get(score);
-  if(!needsXml&&!original)return raw;
   const generated=unzip(raw,settings);
-  if(!needsXml)return zipSync({...generated,...original,[gpifPath]:generated[gpifPath]});
+  if(!needsXml)return zipSync(writeStylesheetTimeSignatures(score,{...generated,...original,[gpifPath]:generated[gpifPath]}));
   const xml=new TextDecoder().decode(generated[gpifPath]),projection=projectGpifTracks(xml,notation),doc=parseXml(projection?.xml??xml);
   const references=writePercussionReferences(score,doc,settings);
   writeGpifLyrics(score,doc);writeGpifNotation(score,doc);if(harmony)writeGpifHarmony(score,doc);
@@ -146,12 +148,13 @@ export function exportGpInterchange(score:model.Score,settings:Settings):Uint8Ar
     }
   }
   const entries={...generated,...original,[gpifPath]:strToU8(outputXml)};
-  return zipSync(entries);
+  return zipSync(writeStylesheetTimeSignatures(score,entries));
 }
 /** Carry source archive siblings and binary backing data omitted by model JSON. */
 export function copyGpInterchangeSource(source:model.Score,destination:model.Score):void {
   copyLyricsSources(source,destination);
   copyHarmonySources(source,destination);
+  copyTimeSignatureSources(source,destination);
   const entries=sourceEntries.get(source);if(entries)sourceEntries.set(destination,entries);
   if(source.backingTrack?.rawAudioFile&&!destination.backingTrack?.rawAudioFile) {
     destination.backingTrack??=new model.BackingTrack();destination.backingTrack.rawAudioFile=source.backingTrack.rawAudioFile.slice();

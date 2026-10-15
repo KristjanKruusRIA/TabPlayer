@@ -225,7 +225,7 @@ export function App({controller}: {controller: DocumentController}) {
         <HarmonyTransposePanel key={`harmony/${state.documentEpoch}`} score={state.score} selection={musicSelection} busy={state.busy} onEdit={edit}/>
       </EditorPanel>
     </div>
-    {player && <Transport player={player} measures={state.score.masterBars.length} busy={state.busy}/>}
+    {player && <Transport player={player} measures={state.score.masterBars.length} busy={state.busy} cursor={target} selection={musicSelection}/>}
     {exportOpen&&<ExportDialog score={state.score} layout={state.settings.print} page={page} currentSpeedAvailable={practiceRatio!==null} busy={exports.busy||state.busy||exportLaunching} progress={exports.progress} failure={exportError} onExport={runExport} onCancel={cancelExport}/>}
     {harmonyOpen&&location.beat&&<HarmonyChordDialog score={state.score} target={target} selection={musicSelection} value={location.beat.chord?getHarmonyChord(location.beat.chord):null} busy={state.busy||libraryLoading} library={library} onEdit={edit} onClose={()=>setHarmonyOpen(false)} onLibraryPut={async entry=>{const revision=++libraryRevision.current,value=await putHarmonyLibraryEntry(entry);if(revision===libraryRevision.current)setLibrary(value);}} onLibraryRemove={async id=>{const revision=++libraryRevision.current,value=await removeHarmonyLibraryEntry(id);if(revision===libraryRevision.current)setLibrary(value);}}/>}
     {scaleOpen&&<ScaleToolPanel score={state.score} staff={location.staff} selection={musicSelection} busy={state.busy} onClose={()=>setScaleOpen(false)}/>}

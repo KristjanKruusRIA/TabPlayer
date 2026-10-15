@@ -388,6 +388,7 @@ struct RuntimeSnapshot {
     interrupted_count: bool,
     settings: PracticeSettings,
     loop_range: Option<(f64, f64)>,
+    range: Option<PlaybackSpan>,
     fault: bool,
     frames: u64,
     peak: f64,
@@ -428,6 +429,9 @@ struct SharedStatus {
     interrupted_count: AtomicBool,
     loop_start: AtomicU64,
     loop_end: AtomicU64,
+    range_present: AtomicBool,
+    range_start: AtomicU64,
+    range_end: AtomicU64,
     current_bpm: AtomicU64,
 }
 impl SharedStatus {
@@ -468,6 +472,9 @@ impl SharedStatus {
             interrupted_count: AtomicBool::new(false),
             loop_start: AtomicU64::new(f64::NAN.to_bits()),
             loop_end: AtomicU64::new(0),
+            range_present: AtomicBool::new(false),
+            range_start: AtomicU64::new(0),
+            range_end: AtomicU64::new(0),
             current_bpm: AtomicU64::new(0),
         }
     }
@@ -516,12 +523,19 @@ impl SharedStatus {
             interrupted_count: self.interrupted_count.load(Ordering::Relaxed),
             settings,
             loop_range,
+            range: self
+                .range_present
+                .load(Ordering::Relaxed)
+                .then(|| PlaybackSpan {
+                    start_tick: f64::from_bits(self.range_start.load(Ordering::Relaxed)),
+                    end_tick: f64::from_bits(self.range_end.load(Ordering::Relaxed)),
+                }),
             fault,
             frames: self.frames.load(Ordering::Relaxed),
             peak: f64::from_bits(self.peak.load(Ordering::Relaxed)),
         };
         let status = NativeAudioStatus {
-            range: None,
+            range: snapshot.range,
             generation: snapshot.generation,
             desired_generation: self.desired.load(Ordering::Acquire),
             ready: self.ready.load(Ordering::Relaxed) && !fault,
@@ -670,6 +684,7 @@ pub struct CallbackTransport {
     serial: u64,
     interrupted_count: bool,
     loop_range: Option<(f64, f64)>,
+    range: Option<PlaybackSpan>,
     rate: u32,
     shared: Arc<SharedStatus>,
     epoch: u64,
@@ -700,6 +715,7 @@ impl CallbackTransport {
             serial: 0,
             interrupted_count: false,
             loop_range: None,
+            range: None,
             rate,
             shared,
             epoch,
@@ -827,6 +843,17 @@ impl CallbackTransport {
             self.loop_range.map_or(0.0, |r| r.1).to_bits(),
             Ordering::Relaxed,
         );
+        self.shared
+            .range_present
+            .store(self.range.is_some(), Ordering::Relaxed);
+        self.shared.range_start.store(
+            self.range.map_or(0.0, |r| r.start_tick).to_bits(),
+            Ordering::Relaxed,
+        );
+        self.shared.range_end.store(
+            self.range.map_or(0.0, |r| r.end_tick).to_bits(),
+            Ordering::Relaxed,
+        );
         self.shared.frames.store(self.frames, Ordering::Relaxed);
         self.shared
             .peak
@@ -874,6 +901,7 @@ impl CallbackTransport {
             self.tick = 0.0;
             self.seconds = 0.0;
             self.loop_range = None;
+            self.range = None;
             self.practice = practice;
             self.phase = PracticePhase::Idle;
             self.cancel_count();
@@ -948,6 +976,7 @@ impl CallbackTransport {
             self.ready = false;
             self.playing = false;
             self.loop_range = None;
+            self.range = None;
             self.cancel_count();
             self.reset_passes();
             self.pulse = None;
@@ -960,15 +989,54 @@ impl CallbackTransport {
             return Err("Stale transport generation.");
         }
         let duration = self.renderer.as_ref().map_or(0.0, |r| r.duration_tick());
-        command.validate(duration)?;
+        let validation_duration = if matches!(command, TransportCommand::PlayRange { .. }) {
+            self.renderer
+                .as_ref()
+                .map_or(0.0, |r| r.score_duration_tick())
+        } else {
+            duration
+        };
+        command.validate(validation_duration)?;
         if !self.ready || self.shared.is_faulted() {
             return Err("Audio output is not ready. Select an output device to recover.");
         }
         match command {
-            TransportCommand::PlayRange { .. } => {
-                return Err(
-                    "Selected playback is not available until native range support is installed.",
-                );
+            TransportCommand::PlayRange {
+                start_tick,
+                end_tick,
+                ..
+            } => {
+                // Validate the fresh count before changing any accepted transport state.
+                if self.practice.count_in.bars > 0 {
+                    let renderer = self.renderer.as_ref().unwrap();
+                    let (numerator, denominator) = renderer.meter_at(start_tick);
+                    let bpm = match self.practice.tempo {
+                        PracticeTempo::Fixed { bpm } => bpm,
+                        _ => {
+                            renderer.authored_bpm_at(start_tick)
+                                * progressive_ratio(&self.practice.tempo, 0)
+                        }
+                    };
+                    CountInClock::new(
+                        self.practice.count_in.bars,
+                        numerator,
+                        denominator,
+                        bpm,
+                        self.rate,
+                    )?;
+                }
+                self.loop_range = None;
+                self.range = end_tick.map(|end_tick| PlaybackSpan {
+                    start_tick,
+                    end_tick,
+                });
+                self.cancel_count();
+                self.pulse = None;
+                self.reset_passes();
+                self.seek(start_tick);
+                self.playing = true;
+                self.phase = PracticePhase::Playing;
+                self.start_count();
             }
             TransportCommand::Play { .. } => {
                 if !self.playing {
@@ -992,6 +1060,8 @@ impl CallbackTransport {
                             if self.tick < start || self.tick >= end {
                                 self.seek(start);
                             }
+                        } else if let Some(range) = self.range {
+                            self.seek(range.start_tick);
                         } else if self.tick >= duration {
                             self.seek(0.0);
                         }
@@ -1009,6 +1079,7 @@ impl CallbackTransport {
                 }
             }
             TransportCommand::Stop { .. } => {
+                self.range = None;
                 self.playing = false;
                 self.cancel_count();
                 self.reset_passes();
@@ -1017,6 +1088,7 @@ impl CallbackTransport {
                 self.phase = PracticePhase::Idle;
             }
             TransportCommand::SeekTick { tick, .. } => {
+                self.range = None;
                 self.cancel_count();
                 self.reset_passes();
                 self.seek(tick);
@@ -1044,6 +1116,7 @@ impl CallbackTransport {
                 end_tick,
                 ..
             } => {
+                self.range = None;
                 self.cancel_count();
                 self.reset_passes();
                 self.loop_range = Some((start_tick, end_tick));
@@ -1060,6 +1133,7 @@ impl CallbackTransport {
                 };
             }
             TransportCommand::ClearLoop { .. } => {
+                self.range = None;
                 self.cancel_count();
                 self.reset_passes();
                 self.loop_range = None;
@@ -1161,10 +1235,13 @@ impl CallbackTransport {
                 self.playing = false;
                 break;
             };
-            let end = self.loop_range.map_or(renderer.duration_tick(), |r| r.1);
-            let count = (output.len() - offset)
-                .min(BLOCK)
-                .min(renderer.output_frames_until(end));
+            let ceiling = self
+                .loop_range
+                .map(|r| r.1)
+                .or(self.range.map(|r| r.end_tick));
+            let end = ceiling.unwrap_or_else(|| renderer.duration_tick());
+            let remaining = renderer.output_frames_until(end);
+            let count = (output.len() - offset).min(BLOCK).min(remaining);
             if count == 0 {
                 self.seek(end);
                 if let Some((start, _)) = self.loop_range {
@@ -1173,22 +1250,30 @@ impl CallbackTransport {
                 }
                 self.playing = false;
                 self.phase = PracticePhase::Ended;
+                self.cancel_count();
+                self.pulse = None;
                 break;
             }
-            let status = renderer.render_into(&mut output[offset..offset + count]);
+            let status = if let Some(end) = ceiling {
+                renderer.render_until(&mut output[offset..offset + count], end)
+            } else {
+                renderer.render_into(&mut output[offset..offset + count])
+            };
             self.tick = status.tick;
             self.seconds = status.seconds;
             offset += count;
             if let Some(pulse) = status.last_pulse {
                 self.add_pulse(pulse, false, status.pulse_count);
             }
-            if self.tick >= end - 1e-7 || status.ended {
+            if count == remaining || (ceiling.is_none() && status.ended) {
                 self.seek(end);
                 if let Some((start, _)) = self.loop_range {
                     self.wrap(start);
                 } else {
                     self.playing = false;
                     self.phase = PracticePhase::Ended;
+                    self.cancel_count();
+                    self.pulse = None;
                 }
             }
         }
@@ -1209,6 +1294,7 @@ impl CallbackTransport {
         self.seconds = snapshot.seconds;
         self.practice = snapshot.settings;
         self.loop_range = snapshot.loop_range;
+        self.range = snapshot.range;
         self.passes = snapshot.passes;
         self.pulse = snapshot.pulse;
         self.serial = snapshot.serial;
@@ -1763,10 +1849,13 @@ impl AudioService {
             .validate(document.plan.duration_tick)
             .map_err(str::to_string)?;
         if matches!(command, TransportCommand::PlayRange { .. }) {
-            return Err(
-                "Selected playback is not available until native range support is installed."
-                    .into(),
-            );
+            let status = self.shared.read();
+            if !status.ready || status.generation != command.generation() {
+                return Err(
+                    "Audio output is not ready. Select an output device to recover.".into(),
+                );
+            }
+            validate_count(&document.plan, document.practice, state.rate)?;
         }
         if let TransportCommand::SetPractice { settings, .. } = &command {
             settings
@@ -2124,6 +2213,213 @@ mod tests {
         next.shared.fault.store(0, Ordering::Release);
         next.publish();
         next
+    }
+    #[test]
+    fn range_survives_quiescent_switch_and_fault() {
+        let document = counted_document();
+        let mut old = CallbackTransport::headless(48_000);
+        old.install_with_practice(
+            AudioService::renderer(&document, 48_000).unwrap(),
+            1,
+            false,
+            document.practice,
+        );
+        old.command(TransportCommand::PlayRange {
+            generation: 1,
+            start_tick: 960.0,
+            end_tick: Some(1920.0),
+        })
+        .unwrap();
+        old.render_into(&mut [[0.0; 2]; 12345]);
+        old.command(TransportCommand::Pause { generation: 1 })
+            .unwrap();
+        let before = old.status();
+        let remaining = old.count.unwrap().remaining_wall_seconds();
+        let (mut producer, controls) = HeapRb::new(CONTROL_CAPACITY).split();
+        let (retired, _retirement_queue) = HeapRb::new(CONTROL_CAPACITY).split();
+        old.shared.barrier_request.store(1, Ordering::Release);
+        assert!(producer.try_push(CallbackCommand::Barrier(1)).is_ok());
+        let mut callback = OutputCallback {
+            transport: old,
+            controls,
+            retired,
+            scratch: [[0.0; 2]; BLOCK],
+            epoch: 0,
+            suspended: false,
+        };
+        callback.render(&mut [1.0f32; BLOCK * 2], 2);
+        assert!(callback.suspended);
+        assert_eq!(callback.transport.shared.barrier.load(Ordering::Acquire), 1);
+        let mut next = recreate(&mut callback.transport, &document, 44_100);
+        assert_eq!(next.status().range, before.range);
+        assert_eq!(next.tick, before.tick);
+        assert_eq!(next.phase, PracticePhase::Paused);
+        assert_eq!(next.pulse, before.practice.pulse);
+        assert!((next.count.unwrap().remaining_wall_seconds() - remaining).abs() <= 1.0 / 44_100.0);
+        let stable = serde_json::to_value(next.status()).unwrap();
+        callback.transport.publish();
+        callback.transport.device_error();
+        assert_eq!(serde_json::to_value(next.status()).unwrap(), stable);
+        next.device_error();
+        let mut recovered = recreate(&mut next, &document, 48_000);
+        assert_eq!(recovered.status().range, before.range);
+        assert_eq!(recovered.phase, PracticePhase::Paused);
+        assert!(recovered.interrupted_count);
+        recovered
+            .command(TransportCommand::Play { generation: 1 })
+            .unwrap();
+        assert_eq!(recovered.count.unwrap().snapshot().elapsed_frames, 0);
+        recovered.render_into(&mut [[0.0; 2]; 123]);
+        recovered
+            .command(TransportCommand::Play { generation: 1 })
+            .unwrap();
+        assert_eq!(recovered.count.unwrap().snapshot().elapsed_frames, 123);
+        recovered.render_into(&mut vec![[0.0; 2]; 240_000]);
+        assert_eq!(recovered.phase, PracticePhase::Ended);
+        assert_eq!(recovered.tick, 1920.0);
+        let ended = recreate(&mut recovered, &document, 44_100);
+        assert_eq!(ended.phase, PracticePhase::Ended);
+        assert_eq!(ended.status().range, before.range);
+        assert!(!ended.playing);
+        assert_eq!(ended.passes, 0);
+    }
+
+    #[test]
+    fn range_validation_and_queue_failure_preserve_accepted_state() {
+        let document = counted_document();
+        let service = AudioService::new(PathBuf::new(), Arc::new(|_| {}));
+        service.shared.desired.store(1, Ordering::Release);
+        let (producer, mut controls) = HeapRb::new(CONTROL_CAPACITY).split();
+        {
+            let mut state = service.control.lock().unwrap();
+            state.document = Some(document.clone());
+            state.producer = Some(producer);
+            state.rate = 48_000;
+        }
+        let request = TransportCommand::PlayRange {
+            generation: 1,
+            start_tick: 960.0,
+            end_tick: Some(1920.0),
+        };
+        let before = serde_json::to_value(service.status()).unwrap();
+        assert!(
+            service.command(request.clone()).is_err(),
+            "not-ready requests must reject before enqueue"
+        );
+        assert_eq!(serde_json::to_value(service.status()).unwrap(), before);
+        assert!(controls.try_pop().is_none());
+        let mut transport = CallbackTransport::new(48_000, service.shared.clone());
+        transport.install_with_practice(
+            AudioService::renderer(&document, 48_000).unwrap(),
+            1,
+            false,
+            document.practice,
+        );
+        transport.command(request.clone()).unwrap();
+        transport.render_into(&mut [[0.0; 2]; 123]);
+        let before = serde_json::to_value(service.status()).unwrap();
+        for command in [
+            TransportCommand::PlayRange {
+                generation: 1,
+                start_tick: 3840.0,
+                end_tick: None,
+            },
+            TransportCommand::PlayRange {
+                generation: 1,
+                start_tick: 960.0,
+                end_tick: Some(3841.0),
+            },
+            TransportCommand::PlayRange {
+                generation: 0,
+                start_tick: 960.0,
+                end_tick: None,
+            },
+        ] {
+            assert!(service.command(command).is_err());
+            assert_eq!(serde_json::to_value(service.status()).unwrap(), before);
+            assert!(controls.try_pop().is_none());
+        }
+        for _ in 0..CONTROL_CAPACITY {
+            service
+                .command(TransportCommand::Pause { generation: 1 })
+                .unwrap();
+        }
+        assert!(
+            service
+                .command(request.clone())
+                .unwrap_err()
+                .contains("queue is full")
+        );
+        assert_eq!(serde_json::to_value(service.status()).unwrap(), before);
+        while let Some(command) = controls.try_pop() {
+            assert!(matches!(
+                command,
+                CallbackCommand::Transport(TransportCommand::Pause { .. })
+            ));
+        }
+        service.command(request).unwrap();
+        // Queue acceptance alone cannot publish a new start or reset the count.
+        assert_eq!(serde_json::to_value(service.status()).unwrap(), before);
+        let CallbackCommand::Transport(command) = controls.try_pop().unwrap() else {
+            panic!("expected transport command")
+        };
+        transport.command(command).unwrap();
+        assert_eq!(transport.count.unwrap().snapshot().elapsed_frames, 0);
+        let before_mix = serde_json::to_value(transport.status()).unwrap();
+        let mix = PreparedMix::prepare(&document.settings, &document.plan, 48_000).unwrap();
+        AudioService::enqueue(
+            &mut service.control.lock().unwrap(),
+            CallbackCommand::Mix { mix, generation: 1 },
+        )
+        .unwrap();
+        let (retired, _retirement_queue) = HeapRb::new(CONTROL_CAPACITY).split();
+        let mut callback = OutputCallback {
+            transport,
+            controls,
+            retired,
+            scratch: [[0.0; 2]; BLOCK],
+            epoch: 0,
+            suspended: false,
+        };
+        callback.render(&mut [] as &mut [f32], 2);
+        assert_eq!(
+            serde_json::to_value(callback.transport.status()).unwrap(),
+            before_mix
+        );
+    }
+
+    #[test]
+    fn range_count_preflight_failure_leaves_complete_callback_state_unchanged() {
+        let mut document = counted_document();
+        let mut plan = document.plan.as_ref().clone();
+        plan.occurrences[0].meter_numerator = u32::MAX;
+        document.plan = Arc::new(plan);
+        document.practice.count_in.bars = 16;
+        let mut transport = CallbackTransport::headless(48_000);
+        transport.install_with_practice(
+            AudioService::renderer(&document, 48_000).unwrap(),
+            1,
+            false,
+            document.practice,
+        );
+        transport
+            .command(TransportCommand::SetLoop {
+                generation: 1,
+                start_tick: 0.0,
+                end_tick: 1920.0,
+            })
+            .unwrap();
+        let before = serde_json::to_value(transport.status()).unwrap();
+        assert!(
+            transport
+                .command(TransportCommand::PlayRange {
+                    generation: 1,
+                    start_tick: 960.0,
+                    end_tick: Some(1920.0)
+                })
+                .is_err()
+        );
+        assert_eq!(serde_json::to_value(transport.status()).unwrap(), before);
     }
     #[test]
     fn device_snapshot_preserves_fractional_count_and_epoch() {

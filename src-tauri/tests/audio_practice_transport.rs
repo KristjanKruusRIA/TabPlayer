@@ -536,3 +536,115 @@ fn count_freezes_score_and_backing_until_same_first_slot() {
     assert_eq!(&pcm[96_000..], &expected);
     assert!(pcm[96_000..].iter().any(|x| x[0] > 0.3));
 }
+
+#[test]
+fn atomic_range_resolves_tempo_before_mid_note_seek_without_heap_operations() {
+    for tempo in [
+        PracticeTempo::Fixed { bpm: 60.0 },
+        PracticeTempo::Relative { ratio: 0.5 },
+    ] {
+        let mut transport = CallbackTransport::headless(48_000);
+        transport.install_with_practice(
+            recorded_renderer(true, false),
+            1,
+            false,
+            settings(tempo, 0, false),
+        );
+        // Warm the callback, then seek to the authored half-second point under
+        // accepted tempo: the held sample must be at its one-second marker.
+        transport.render_into(&mut [[0.0; 2]; 1]);
+        let mut output = [[0.0; 2]; 512];
+        HEAP_OPERATIONS.with(|n| n.set(0));
+        COUNT_HEAP.with(|flag| flag.set(true));
+        let started = transport.command(TransportCommand::PlayRange {
+            generation: 1,
+            start_tick: 960.0,
+            end_tick: Some(970.0),
+        });
+        transport.render_into(&mut output);
+        let phase_before_replay = transport.status().practice.phase;
+        let replay = transport.command(TransportCommand::Play { generation: 1 });
+        transport.render_into(&mut [[0.0; 2]; 1024]);
+        let seek = transport.command(TransportCommand::SeekTick {
+            generation: 1,
+            tick: 960.0,
+        });
+        let looping = transport.command(TransportCommand::SetLoop {
+            generation: 1,
+            start_tick: 960.0,
+            end_tick: 960.01,
+        });
+        let play = transport.command(TransportCommand::Play { generation: 1 });
+        transport.render_into(&mut [[0.0; 2]; 8]);
+        COUNT_HEAP.with(|flag| flag.set(false));
+        assert_eq!(phase_before_replay, PracticePhase::Ended);
+        assert!(
+            started.is_ok() && replay.is_ok() && seek.is_ok() && looping.is_ok() && play.is_ok()
+        );
+        assert_eq!(HEAP_OPERATIONS.with(Cell::get), 0);
+        assert!(
+            output.iter().any(|x| x[0] > 0.3),
+            "held sample must seek with accepted tempo"
+        );
+        assert_eq!(transport.status().practice.completed_passes, 8);
+    }
+}
+
+#[test]
+fn fresh_range_resets_progressive_passes_and_count_before_seek() {
+    let mut transport = CallbackTransport::headless(48_000);
+    let practice = settings(
+        PracticeTempo::Progressive {
+            start: 0.5,
+            end: 1.0,
+            step: 0.25,
+            repetitions: 1,
+        },
+        0,
+        false,
+    );
+    transport.install_with_practice(recorded_renderer(true, false), 1, false, practice);
+    transport
+        .command(TransportCommand::SetLoop {
+            generation: 1,
+            start_tick: 960.0,
+            end_tick: 960.01,
+        })
+        .unwrap();
+    transport
+        .command(TransportCommand::Play { generation: 1 })
+        .unwrap();
+    transport.render_into(&mut [[0.0; 2]; 2]);
+    assert_eq!(transport.status().practice.completed_passes, 2);
+    assert_eq!(transport.status().practice.effective_ratio, 1.0);
+    transport
+        .command(TransportCommand::SetPractice {
+            generation: 1,
+            settings: PracticeSettings {
+                count_in: CountInSettings {
+                    bars: 1,
+                    between_loops: true,
+                },
+                ..practice
+            },
+        })
+        .unwrap();
+    transport
+        .command(TransportCommand::PlayRange {
+            generation: 1,
+            start_tick: 960.0,
+            end_tick: Some(970.0),
+        })
+        .unwrap();
+    assert_eq!(transport.status().practice.completed_passes, 0);
+    assert_eq!(transport.status().practice.effective_ratio, 0.5);
+    assert_eq!(transport.status().practice.current_bpm, 60.0);
+    transport.render_into(&mut vec![[0.0; 2]; 192_000]);
+    assert_eq!(transport.status().tick, 960.0);
+    let mut output = [[0.0; 2]; 1024];
+    transport.render_into(&mut output);
+    assert!(output[..256].iter().any(|x| x[0] > 0.3));
+    assert!(output[500..].iter().all(|frame| *frame == [0.0; 2]));
+    assert_eq!(transport.status().practice.phase, PracticePhase::Ended);
+    assert_eq!(transport.status().practice.completed_passes, 0);
+}

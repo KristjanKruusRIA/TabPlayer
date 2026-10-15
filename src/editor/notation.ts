@@ -1,4 +1,5 @@
 import { model } from '@coderline/alphatab';
+import { setTimeSignatureIntent } from './time-signature-source';
 import type { EditCommand } from '../edit-types';
 import { beatAt, durationValues, enumValue, integer, rhythmTicks, staffAt, validateCapacity } from './common';
 
@@ -23,7 +24,7 @@ export function applyNotationEdit(score:model.Score,command:EditCommand,editInde
         const start=reference.beats.slice(0,point.beat).reduce((sum,b)=>sum+rhythmTicks(b,measureTicks),0);return model.Automation.buildTempoAutomation(point.linear,start/measureTicks,point.bpm,2);
       });
       master.timeSignatureNumerator=command.numerator;master.timeSignatureDenominator=command.denominator;master.timeSignatureCommon=false;master.isAnacrusis=command.pickup;master.isFreeTime=command.freeTime;master.isRepeatStart=command.repeatStart;master.repeatCount=command.repeatCount;master.alternateEndings=command.endings.reduce((bits,n)=>bits|(1<<(n-1)),0);master.tempoAutomations=tempos;
-      if(command.section){master.section=new model.Section();master.section.text=command.section;master.section.marker=command.section;}else master.section=null;return true;
+      if(command.section){master.section=new model.Section();master.section.text=command.section;master.section.marker=command.section;}else master.section=null;setTimeSignatureIntent(master,false);return true;
     }
     case 'setBarNotation': {
       const staff=staffAt(score,command.track,command.staff),bar=staff.bars[command.bar];if(!integer(command.bar)||!bar||!integer(command.keySignature,-7,7))throw new Error('Invalid key signature.');enumValue(command.keyMode,model.KeySignatureType,'key mode');enumValue(command.clef,model.Clef,'clef');

@@ -700,18 +700,20 @@ impl Renderer {
             }
         }
     }
-    fn frame(&mut self) -> ([f32; 2], Option<PulsePosition>) {
+    fn frame(&mut self, end_tick: f64) -> ([f32; 2], Option<PulsePosition>) {
         let tick = self.timeline.seconds_to_tick(self.seconds);
         self.scratch.fill([0.0; 2]);
         if !self.tail {
             while self.next_note < self.plan.notes.len()
                 && self.plan.notes[self.next_note].start_tick <= tick + 1e-7
+                && self.plan.notes[self.next_note].start_tick < end_tick
             {
                 self.start_note(self.next_note);
                 self.next_note += 1;
             }
             while self.next_midi < self.plan.midi.len()
                 && self.plan.midi[self.next_midi].tick() <= tick + 1e-7
+                && self.plan.midi[self.next_midi].tick() < end_tick
             {
                 let event = &self.plan.midi[self.next_midi];
                 if let Some(index) = self
@@ -796,8 +798,9 @@ impl Renderer {
         }
         let mut pulse = None;
         if self.metronome.enabled || self.metronome.visual {
-            let (beat, _, accent) = self.beat_grid(tick);
+            let (beat, pulse_tick, accent) = self.beat_grid(tick);
             if Some(beat) != self.last_click
+                && pulse_tick < end_tick
                 && !self.tail
                 && self.seconds < self.plan.duration_ms / 1000.0
             {
@@ -853,11 +856,21 @@ impl Renderer {
         }
     }
     pub fn render_into(&mut self, output: &mut [[f32; 2]]) -> RenderStatus {
+        self.render_with_ceiling(output, f64::INFINITY)
+    }
+    /// Render only sample starts before an exclusive musical endpoint. The strict
+    /// event ceiling is independent of the near-tick dispatch tolerance.
+    pub fn render_until(&mut self, output: &mut [[f32; 2]], end_tick: f64) -> RenderStatus {
+        let frames = output.len().min(self.output_frames_until(end_tick));
+        output[frames..].fill([0.0; 2]);
+        self.render_with_ceiling(&mut output[..frames], end_tick)
+    }
+    fn render_with_ceiling(&mut self, output: &mut [[f32; 2]], end_tick: f64) -> RenderStatus {
         let mut pulse_count: u32 = 0;
         let mut last_pulse = None;
         for chunk in output.chunks_mut(512) {
             for sample in chunk {
-                let (value, pulse) = self.frame();
+                let (value, pulse) = self.frame(end_tick);
                 *sample = value;
                 if pulse.is_some() {
                     pulse_count = pulse_count.saturating_add(1);
@@ -872,7 +885,7 @@ impl Renderer {
         let mut pulse_count: u32 = 0;
         let mut last_pulse = None;
         for frame in 0..frames {
-            let (_, pulse) = self.frame();
+            let (_, pulse) = self.frame(f64::INFINITY);
             if pulse.is_some() {
                 pulse_count = pulse_count.saturating_add(1);
                 last_pulse = pulse;
@@ -897,7 +910,7 @@ impl Renderer {
         let mut pulse_count: u32 = 0;
         let mut last_pulse = None;
         for frame in 0..frames {
-            let (value, pulse) = self.frame();
+            let (value, pulse) = self.frame(f64::INFINITY);
             mix[frame] = value;
             if pulse.is_some() {
                 pulse_count = pulse_count.saturating_add(1);
@@ -1226,6 +1239,9 @@ impl Renderer {
     pub fn duration_tick(&self) -> f64 {
         self.timeline.seconds_to_tick(self.duration_seconds())
     }
+    pub fn score_duration_tick(&self) -> f64 {
+        self.plan.duration_tick
+    }
     pub fn duration_seconds(&self) -> f64 {
         self.backing
             .as_ref()
@@ -1249,5 +1265,182 @@ pub fn master_limit(value: f32) -> f32 {
         value
     } else {
         value.signum() * (0.9 + 0.1 * ((absolute - 0.9) / 0.1).tanh())
+    }
+}
+
+#[cfg(test)]
+mod selection_tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    fn held_renderer(rate: u32, endpoint: f64, endpoint_events: bool, bent: bool) -> Renderer {
+        let note = |id: &str, start: f64, key: u8| {
+            serde_json::json!({
+                "id":id,"trackId":"guitar","source":{"target":{"track":0,"staff":0,"bar":0,"voice":0,"beat":if start == 0.0 {0} else {1}},"string":1},
+                "occurrence":0,"channel":0,"program":24,"startTick":start,"endTick":2880,
+                "key":key,"velocity":127,"articulation":"picked","legatoFrom":null,
+            "pitch":if bent && start == 0.0 {
+                serde_json::json!([{"tick":0,"semitones":0},{"tick":480,"semitones":12}])
+            } else { serde_json::json!([{"tick":start,"semitones":0}]) }
+            })
+        };
+        let mut notes = vec![note("held", 0.0, 69)];
+        let mut midi = vec![
+            serde_json::json!({"type":"program","trackId":"guitar","tick":0,"channel":0,"program":24}),
+            serde_json::json!({"type":"controller","trackId":"guitar","tick":0,"channel":0,"controller":7,"value":64}),
+            serde_json::json!({"type":"controller","trackId":"guitar","tick":0,"channel":0,"controller":10,"value":0}),
+            serde_json::json!({"type":"controller","trackId":"guitar","tick":0,"channel":0,"controller":64,"value":127}),
+            serde_json::json!({"type":"noteOn","trackId":"guitar","tick":0,"channel":0,"key":69,"velocity":127}),
+            serde_json::json!({"type":"noteOff","trackId":"guitar","tick":480,"channel":0,"key":69,"velocity":0}),
+        ];
+        if endpoint_events {
+            notes.push(note("endpoint", endpoint, 81));
+            midi.extend([
+                serde_json::json!({"type":"program","trackId":"guitar","tick":endpoint,"channel":0,"program":0}),
+                serde_json::json!({"type":"controller","trackId":"guitar","tick":endpoint,"channel":0,"controller":7,"value":0}),
+                serde_json::json!({"type":"controller","trackId":"guitar","tick":endpoint,"channel":0,"controller":10,"value":127}),
+                serde_json::json!({"type":"controller","trackId":"guitar","tick":endpoint,"channel":0,"controller":64,"value":0}),
+                serde_json::json!({"type":"bend","trackId":"guitar","tick":endpoint,"channel":0,"value":12}),
+                serde_json::json!({"type":"noteBend","trackId":"guitar","tick":endpoint,"channel":0,"key":69,"value":12}),
+                serde_json::json!({"type":"noteOff","trackId":"guitar","tick":endpoint,"channel":0,"key":69,"velocity":0}),
+                serde_json::json!({"type":"noteOn","trackId":"guitar","tick":endpoint,"channel":0,"key":81,"velocity":127}),
+            ]);
+        }
+        let plan: PlaybackPlan = serde_json::from_value(serde_json::json!({
+            "generation":1,"ppq":960,"durationTick":3840,"durationMs":2000,
+            "tracks":[{"id":"guitar","program":24,"percussion":false}],
+            "tempos":[{"tick":0,"bpm":120}],
+            "occurrences":[{"bar":0,"occurrence":0,"meterNumerator":4,"meterDenominator":4,"startTick":0,"endTick":3840,"startMs":0,"endMs":2000}],
+            "notes":notes,"midi":midi
+        })).unwrap();
+        let mut resources = AudioResources::load_for_requests(
+            &PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/audio"),
+            &[],
+        )
+        .unwrap();
+        resources.manifest.instruments = vec![super::super::resources::Instrument {
+            id: "green-guitar".into(),
+            regions: vec![Region {
+                sample_id: "sine".into(),
+                root_key: 69,
+                key_low: 0,
+                key_high: 127,
+                velocity_low: 0,
+                velocity_high: 127,
+                articulation: "picked".into(),
+                variant: 1,
+                sequence_length: 1,
+                trigger: "attack".into(),
+                pitch_keytrack: 100.0,
+                velocity_gain_high: 127,
+                ..Default::default()
+            }],
+            ..Default::default()
+        }];
+        resources.samples.insert(
+            "sine".into(),
+            Arc::new(DecodedAudio {
+                sample_rate: 48_000,
+                channels: 2,
+                frames: Arc::new(
+                    (0..144_000)
+                        .map(|i| {
+                            [(std::f64::consts::TAU * 441.0 * i as f64 / 48_000.0).sin() as f32
+                                * 0.2; 2]
+                        })
+                        .collect(),
+                ),
+            }),
+        );
+        Renderer::new(
+            Arc::new(plan),
+            Arc::new(resources),
+            DocumentSettings::default(),
+            rate,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn exclusive_ceiling_blocks_same_tick_events() {
+        for rate in [44_100, 48_000] {
+            for end in [960.0, 960.0 + 3e-8] {
+                let mut renderer = held_renderer(rate, end, true, false);
+                renderer.set_metronome_settings(MetronomeSettings {
+                    enabled: true,
+                    visual: true,
+                    volume: 0.4,
+                });
+                renderer.seek_tick(end - 5e-8);
+                let mut output = [[1.0; 2]; 8];
+                let status = renderer.render_until(&mut output, end);
+                assert_eq!(status.frames, 1);
+                assert_eq!(renderer.next_note, 1, "endpoint attack dispatched");
+                assert_eq!(renderer.next_midi, 6, "endpoint MIDI dispatched");
+                assert_eq!(renderer.tracks[0].channels[0].program, 24);
+                assert_eq!(renderer.tracks[0].channels[0].volume, 64.0 / 127.0);
+                assert!(renderer.tracks[0].channels[0].sustain);
+                if end == 960.0 {
+                    assert_eq!(status.pulse_count, 0);
+                }
+                assert!(output[1..].iter().all(|sample| *sample == [0.0; 2]));
+            }
+        }
+    }
+
+    #[test]
+    fn range_seek_reconstructs_state_with_documented_fx_reset() {
+        for rate in [44_100, 48_000] {
+            let mut renderer = held_renderer(rate, 1920.0, true, true);
+            let mut settings = DocumentSettings::default();
+            let mut effects = FxSettings::default();
+            effects.delay.enabled = true;
+            effects.delay.quarter_notes = 0.125;
+            settings.sounds.insert(
+                "guitar".into(),
+                crate::settings::TrackSound {
+                    effects,
+                    ..Default::default()
+                },
+            );
+            renderer.set_mix(PreparedMix::prepare(&settings, &renderer.plan, rate).unwrap());
+            // Let the existing live mix transition settle before comparing two
+            // identical seeks with the same accepted effects configuration.
+            renderer.render_into(&mut [[0.0; 2]; 2048]);
+            renderer
+                .set_practice_tempo(RenderTempo::Fixed { bpm: 90.0 })
+                .unwrap();
+            renderer.seek_tick(960.0);
+            let channel = &renderer.tracks[0].channels[0];
+            assert_eq!(channel.program, 24);
+            assert_eq!(channel.volume, 64.0 / 127.0);
+            assert!(channel.sustain);
+            assert!(channel.pan[0] > 1.4 && channel.pan[1] == 0.0);
+            let mut first = vec![[0.0; 2]; rate as usize / 4];
+            renderer.render_until(&mut first, 1920.0);
+            assert!(first.iter().any(|x| x[0].abs() > 0.02));
+            assert!(first.iter().all(|x| x[1].abs() < 1e-6));
+            let crossings = first[rate as usize / 100..]
+                .windows(2)
+                .filter(|pair| pair[0][0] <= 0.0 && pair[1][0] > 0.0)
+                .count();
+            assert!(
+                (crossings as f64 / 0.24 - 882.0).abs() < 6.0,
+                "held 441 Hz source bent up one octave: {crossings}"
+            );
+            renderer.seek_tick(960.0);
+            let mut repeated = vec![[0.0; 2]; first.len()];
+            renderer.render_until(&mut repeated, 1920.0);
+            assert!(
+                first == repeated,
+                "seek resets effects and fade deterministically"
+            );
+            renderer.seek_tick(3000.0);
+            renderer.render_until(&mut repeated, 3840.0);
+            assert!(
+                repeated.iter().all(|sample| *sample == [0.0; 2]),
+                "no held voice or historical delay after seeking past its end"
+            );
+        }
     }
 }

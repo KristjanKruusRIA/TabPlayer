@@ -13,6 +13,7 @@ vi.mock('./export/useExportCoordinator',()=>({useExportCoordinator:()=>({busy:fa
 vi.mock('./audio/NativePlaybackController',()=>({NativePlaybackController:class {
   state={ready:true,playing:false,time:0,endTime:4000,measure:0,speed:100,metronome:false,error:null,practice:{settings:structuredClone(DEFAULT_PRACTICE),phase:'idle',countInRemaining:0,completedPasses:0,effectiveRatio:1,currentBpm:120,pulse:null},practicePending:false,practiceNotice:null,range:null,loop:null};
   subscribe=()=>()=>{};getState=()=>this.state;loadDocument=async()=>{};beforeScoreChange=()=>{};destroy=()=>{};
+  generation=7;cursorPlaybackChoices=()=>[];selectionPlaybackChoices=()=>[];playbackOccurrences=()=>[];playFromCursor=()=>{};playSelection=()=>{};loopSelection=()=>{};
   setPractice=()=>{};exportPracticeRatio=()=>1;
   devices=async()=>[];deviceId=()=>null;backingDurationMs=()=>undefined;mix=()=>undefined;
 }}));

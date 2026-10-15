@@ -1,4 +1,5 @@
 import { model } from '@coderline/alphatab';
+import { setTimeSignatureIntent } from './time-signature-source';
 import type { BarGestureCommand } from './gestures-types';
 import { integer,staffAt } from './common';
 
@@ -48,7 +49,7 @@ export function applyBarGestureEdit(score:model.Score,command:BarGestureCommand)
         if(![8,16,32].includes(unit)||!Array.isArray(groups)||!groups.length||groups.some(value=>!integer(value,1))||!Number.isSafeInteger(total)||groups.reduce((sum,value)=>sum+value,0)!==total)throw new Error('Beaming groups must fill the measure in eighths, sixteenths or thirty-seconds.');
         rules=new model.BeamingRules();rules.groups.set(unit,[...groups]);
       }
-      master.timeSignatureCommon=command.commonTime;master.isDoubleBar=command.doubleBar;master.tripletFeel=command.tripletFeel;master.beamingRules=rules;return true;
+      master.timeSignatureCommon=command.commonTime;master.isDoubleBar=command.doubleBar;master.tripletFeel=command.tripletFeel;master.beamingRules=rules;setTimeSignatureIntent(master,command.commonTime);return true;
     }
     case 'setSimile': {
       fields(command,['type','track','staff','bar','kind']);

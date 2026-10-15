@@ -10,6 +10,7 @@ import { DEFAULT_PRACTICE,type PracticeSettings,type PracticeStatus } from './pr
 import {defaultEngraving,projectEngraving} from '../engraving/projection';
 import {makeMusicClip} from '../editor/clipboard-source';
 import {defaultEffects} from '../document-settings';
+import type { MusicSelection } from '../editor/range-types';
 
 const defaults=():PracticeSettings=>structuredClone(DEFAULT_PRACTICE);
 function practiceStatus(settings=defaults(),change:Partial<PracticeStatus>={}):PracticeStatus{return {settings,phase:'idle',countInRemaining:0,completedPasses:0,effectiveRatio:settings.tempo.kind==='relative'?settings.tempo.ratio:settings.tempo.kind==='progressive'?settings.tempo.start:1,currentBpm:120,pulse:null,...change};}
@@ -33,6 +34,110 @@ async function soundingFixture() {
   const test=fixture(),built=buildDocument(project);await test.player.loadDocument(project,built);
   const plan=vi.mocked(test.bridge.prepare).mock.calls.at(-1)![0];return {...test,project,built,plan};
 }
+const cursor={track:0,staff:0,bar:0,voice:0,beat:1};
+const passage:MusicSelection={kind:'range',range:{start:{bar:0,tick:120},end:{bar:0,tick:1440},lanes:[{track:0,staff:0,voice:0}]}};
+async function selectionFixture(repeat=false) {
+  let project=blankProject();
+  if(repeat)project=previewEdit(project,{type:'setMeasureSettings',bar:0,numerator:4,denominator:4,pickup:false,freeTime:false,repeatStart:true,repeatCount:2,endings:[],section:'',tempos:[]}).project;
+  const built=buildDocument(project),test=fixture(async(_,generation)=>{
+    const plan=buildPlaybackPlan(built.score,generation);
+    return {...plan,performedBeats:plan.occurrences.filter(o=>o.bar===0).flatMap(o=>[
+      {target:{...cursor,beat:0},occurrence:o.occurrence,startTick:o.startTick,endTick:o.startTick+960,leadInTick:o.startTick},
+      {target:cursor,occurrence:o.occurrence,startTick:o.startTick+960,endTick:o.startTick+1920,leadInTick:o.startTick+960},
+    ])};
+  });
+  await test.player.loadDocument(project,built);test.emit({practice:practiceStatus()});vi.mocked(test.bridge.command).mockClear();
+  return {...test,project,built};
+}
+it('fresh_cursor_resume_loop_precedence',async()=>{
+  const {player,bridge,emit}=await selectionFixture();const choice={generation:player.generation,occurrenceIndex:0,startTick:960};
+  player.play(cursor);expect(bridge.command).toHaveBeenLastCalledWith({type:'playRange',generation:player.generation,startTick:960,endTick:null});
+  const range={startTick:120,endTick:1440};
+  emit({range,tick:300,practice:practiceStatus(defaults(),{phase:'paused',countInRemaining:2,completedPasses:3})});
+  player.play(cursor,{...choice,generation:0});expect(bridge.command).toHaveBeenLastCalledWith({type:'play',generation:player.generation});
+  expect(player.getState()).toMatchObject({range,practice:{countInRemaining:2,completedPasses:3}});
+  emit({loop:range,practice:practiceStatus()});player.play({...cursor,beat:999});expect(bridge.command).toHaveBeenLastCalledWith({type:'play',generation:player.generation});
+  emit({practice:practiceStatus(defaults(),{phase:'ended'})});player.play(cursor,choice);expect(bridge.command).toHaveBeenLastCalledWith({type:'playRange',generation:player.generation,startTick:960,endTick:null});
+  player.play();expect(bridge.command).toHaveBeenLastCalledWith({type:'play',generation:player.generation});
+  expect(bridge.command).toHaveBeenCalledTimes(5);player.destroy();
+});
+it('explicit starts and loop selection resolve exact fresh intervals without autoplay',async()=>{
+  const {player,bridge,emit,onEdit}=await selectionFixture();const generation=player.generation;
+  const choice={generation,startOccurrence:0,endOccurrence:0,startTick:120,endTick:1440};
+  expect(player.selectionPlaybackChoices(passage)).toEqual([choice]);
+  const cursorChoice={generation,occurrenceIndex:0,startTick:960};expect(player.cursorPlaybackChoices(cursor)).toEqual([cursorChoice]);
+  expect(player.playbackOccurrences()).toHaveLength(4);expect(bridge.command).not.toHaveBeenCalled();expect(bridge.prepare).toHaveBeenCalledTimes(1);
+  emit({playing:true,loop:{startTick:0,endTick:3840},practice:practiceStatus(defaults(),{phase:'playing'})});
+  player.playSelection(passage,choice);player.playFromCursor(cursor,cursorChoice);player.loopSelection(passage,choice);
+  expect(vi.mocked(bridge.command).mock.calls.map(call=>call[0])).toEqual([
+    {type:'playRange',generation,startTick:120,endTick:1440},
+    {type:'playRange',generation,startTick:960,endTick:null},
+    {type:'setLoop',generation,startTick:120,endTick:1440},
+  ]);
+  expect(player.getState()).toMatchObject({range:null,loop:{startTick:0,endTick:3840}});expect(onEdit).not.toHaveBeenCalled();expect(bridge.prepare).toHaveBeenCalledTimes(1);player.destroy();
+});
+it('rejects stale generations changed addresses and altered intervals before selected IPC',async()=>{
+  const {player,bridge}=await selectionFixture();const choice=player.cursorPlaybackChoices(cursor)[0],selected=player.selectionPlaybackChoices(passage)[0];
+  for(const invalid of [{...choice,generation:choice.generation-1},{...choice,startTick:961},{...choice,occurrenceIndex:1}])expect(()=>player.playFromCursor(cursor,invalid)).toThrow();
+  expect(()=>player.playFromCursor({...cursor,beat:0},choice)).toThrow();
+  expect(()=>player.playSelection(passage,{...selected,endTick:1441})).toThrow();
+  expect(()=>player.loopSelection({...passage,range:{...passage.range,end:{bar:0,tick:1500}}},{...selected})).toThrow();
+  expect(bridge.command).not.toHaveBeenCalled();player.beforeScoreChange();vi.mocked(bridge.command).mockClear();
+  expect(player.cursorPlaybackChoices(cursor)).toEqual([]);expect(player.selectionPlaybackChoices(passage)).toEqual([]);expect(player.playbackOccurrences()).toEqual([]);
+  expect(()=>player.playFromCursor(cursor,choice)).toThrow('after playback is ready');expect(()=>player.playSelection(passage,selected)).toThrow('after playback is ready');expect(()=>player.loopSelection(passage,selected)).toThrow('after playback is ready');expect(bridge.command).not.toHaveBeenCalled();player.destroy();
+});
+it('requires an explicit performed occurrence for ambiguous primary cursor starts',async()=>{
+  const {player,bridge}=await selectionFixture(true);const choices=player.cursorPlaybackChoices(cursor);
+  expect(choices).toEqual([{generation:player.generation,occurrenceIndex:0,startTick:960},{generation:player.generation,occurrenceIndex:1,startTick:4800}]);
+  expect(()=>player.play(cursor)).toThrow();expect(bridge.command).not.toHaveBeenCalled();
+  player.play(cursor,choices[1]);expect(bridge.command).toHaveBeenCalledExactlyOnceWith({type:'playRange',generation:player.generation,startTick:4800,endTick:null});player.destroy();
+});
+it('mid-score native ended hides the next note while paused study remains visible',async()=>{
+  const {player,emit,plan}=await soundingFixture();const tick=plan.occurrences[1].startTick;
+  player.play();emit({playing:true,tick:tick+1});expect(player.activeNotes('base/0').map(note=>note.key)).toEqual([71]);
+  emit({tick,range:{startTick:0,endTick:tick},practice:practiceStatus(defaults(),{phase:'ended'})});expect(player.activeNotes('base/0')).toEqual([]);
+  player.play();emit({tick,practice:practiceStatus(defaults(),{phase:'paused'})});expect(player.activeNotes('base/0')).toEqual([]);
+  emit({playing:true,tick});emit({tick,practice:practiceStatus(defaults(),{phase:'paused'})});expect(player.activeNotes('base/0').map(note=>note.key)).toEqual([71]);player.destroy();
+});
+it('a delayed ended status does not retire a repeated restart intent',async()=>{
+  const {player,emit}=await soundingFixture();const ended={tick:3840,range:{startTick:0,endTick:3840},practice:practiceStatus(defaults(),{phase:'ended'})};
+  player.play();emit({playing:true,tick:100});emit(ended);expect(player.activeNotes('base/0')).toEqual([]);
+  player.play();emit(ended);expect(player.activeNotes('base/0')).toEqual([]);
+  emit({playing:true,tick:0,range:ended.range});expect(player.activeNotes('base/0')).toHaveLength(2);player.destroy();
+});
+it('range display follows native status through repeated starts and queue rejection',async()=>{
+  const {player,bridge,emit}=await selectionFixture(),choice=player.selectionPlaybackChoices(passage)[0],range={startTick:40,endTick:200};
+  emit({range,tick:80,practice:practiceStatus(defaults(),{phase:'paused'})});
+  let release!:()=>void;bridge.command=vi.fn(()=>new Promise<void>(resolve=>{release=resolve;}));
+  player.playSelection(passage,choice);expect(player.getState().range).toEqual(range);release();await Promise.resolve();expect(player.getState().range).toEqual(range);
+  bridge.command=vi.fn(async()=>{});emit({range:{startTick:120,endTick:1440}});player.playSelection(passage,choice);player.playSelection(passage,choice);
+  await Promise.resolve();expect(bridge.command).toHaveBeenCalledTimes(2);expect(player.getState().range).toEqual({startTick:120,endTick:1440});
+  player.playFromCursor(cursor,player.cursorPlaybackChoices(cursor)[0]);await Promise.resolve();expect(player.getState().range).toEqual({startTick:120,endTick:1440});
+  emit({range:null});expect(player.getState().range).toBeNull();player.playFromCursor(cursor,player.cursorPlaybackChoices(cursor)[0]);await Promise.resolve();expect(player.getState().range).toBeNull();
+  emit({range});bridge.command=vi.fn(async()=>{throw new Error('Audio command queue is full');});player.playSelection(passage,choice);
+  await vi.waitFor(()=>expect(player.getState()).toMatchObject({range,error:'Audio command queue is full'}));
+  emit({generation:player.generation-1,range:null});expect(player.getState().range).toEqual(range);player.destroy();
+});
+it('older plans keep ordinary playback but report selected playback unavailable',async()=>{
+  const project=blankProject(),built=buildDocument(project),{player,bridge,emit}=fixture(async(_,generation)=>{const plan=buildPlaybackPlan(built.score,generation);delete plan.performedBeats;return plan;});
+  await player.loadDocument(project,built);emit({practice:practiceStatus()});vi.mocked(bridge.command).mockClear();
+  expect(()=>player.cursorPlaybackChoices(cursor)).toThrow('unavailable');expect(()=>player.selectionPlaybackChoices(passage)).toThrow('unavailable');
+  const choice={generation:player.generation,occurrenceIndex:0,startTick:960},selected={generation:player.generation,startOccurrence:0,endOccurrence:0,startTick:120,endTick:1440};
+  expect(()=>player.play(cursor,choice)).toThrow('unavailable');expect(()=>player.playFromCursor(cursor,choice)).toThrow('unavailable');expect(()=>player.playSelection(passage,selected)).toThrow('unavailable');expect(()=>player.loopSelection(passage,selected)).toThrow('unavailable');expect(bridge.command).not.toHaveBeenCalled();
+  player.play();expect(bridge.command).toHaveBeenCalledExactlyOnceWith({type:'play',generation:player.generation});player.destroy();
+});
+it('presentation and static mix preserve active range while musical generations clear it',async()=>{
+  const {player,bridge,emit,onEdit,project,built}=await selectionFixture(),range={startTick:120,endTick:1440},generation=player.generation,before=JSON.stringify(project);
+  emit({playing:true,tick:300,range});const choice=player.selectionPlaybackChoices(passage)[0];
+  const engraving=defaultEngraving();engraving.stylesheet.hideDynamics=true;const styled=previewEdit(project,{type:'setEngraving',engraving},built);
+  await player.loadDocument(styled.project,styled);expect(player.generation).toBe(generation);expect(player.getState().range).toEqual(range);
+  const mixed=previewEdit(styled.project,{type:'setTrackMix',trackId:'base/0',mix:{gain:.4,pan:0,mute:false,solo:false}},styled);await player.loadDocument(mixed.project,mixed);
+  expect(player.generation).toBe(generation);expect(player.getState().range).toEqual(range);expect(bridge.prepare).toHaveBeenCalledTimes(1);expect(bridge.setMix).toHaveBeenCalledTimes(1);
+  player.playSelection(passage,choice);expect(JSON.stringify(project)).toBe(before);expect(onEdit).not.toHaveBeenCalled();
+  const edited=previewEdit(mixed.project,{type:'setNote',target:cursor,string:6,fret:5},mixed);await player.loadDocument(edited.project,edited);
+  expect(player.generation).not.toBe(generation);expect(player.getState().range).toBeNull();emit({generation,range,playing:true});expect(player.getState().range).toBeNull();
+  emit({practice:practiceStatus()});vi.mocked(bridge.command).mockClear();expect(()=>player.playSelection(passage,choice)).toThrow('current performed occurrence');expect(bridge.command).not.toHaveBeenCalled();player.destroy();
+});
 it('exposes performed track chords with half-open native tick intervals',async()=>{
   const {player,emit,built,plan}=await soundingFixture();const bass=trackIdentity(built.score.tracks[1]);
   emit();expect(player.activeNotes('base/0')).toEqual([]);player.play();expect(player.activeNotes('base/0')).toEqual([]);
@@ -96,6 +201,16 @@ it('native_state_ack_not_button_intent',async()=>{
   await vi.waitFor(()=>expect(player.getState().error).toBe('Device disconnected'));expect(player.getState().playing).toBe(false);
   emit();expect(player.getState().error).toBe('Device disconnected');
   bridge.command=vi.fn(async()=>{});emit();player.play();expect(player.getState().playing).toBe(false);emit({playing:true,seconds:1,tick:1920});expect(player.getState()).toMatchObject({playing:true,time:1000});player.destroy();
+});
+it('a valid Seek retires its previous operation error before a same-message rejection',async()=>{
+  const {player,bridge,emit}=await selectionFixture(),range={startTick:120,endTick:1440};
+  emit({range,tick:1440,seconds:.75,practice:practiceStatus(defaults(),{phase:'ended'})});bridge.command=vi.fn(async()=>{throw new Error('Queue full');});
+  player.seekToMeasure(0);await vi.waitFor(()=>expect(player.getState().error).toBe('Queue full'));
+  expect(()=>player.seekToMeasure(999)).toThrow();expect(player.getState().error).toBe('Queue full');
+  const acknowledged=player.getState();player.seekToMeasure(1);expect(player.getState()).toMatchObject({...acknowledged,error:null});
+  emit({range,tick:1440,seconds:.75,practice:practiceStatus(defaults(),{phase:'ended'})});expect(player.getState().error).toBeNull();
+  await vi.waitFor(()=>expect(player.getState()).toMatchObject({...acknowledged,error:'Queue full'}));
+  emit({error:'Native device fault',ready:true,range});player.seekToMeasure(1);expect(player.getState().error).toBe('Native device fault');player.destroy();
 });
 it('a failed prepare can recover when the document settings change',async()=>{
   const {player,bridge}=fixture();const p=blankProject();let built=buildDocument(p);

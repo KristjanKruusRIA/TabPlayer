@@ -16,6 +16,7 @@ import { mapLyricsMeasures } from './editor/lyrics-measures';
 import { preparePasteMusic } from './editor/clipboard-paste';
 import { remapStylesheetTracks,validateEngravingTracks } from './engraving/projection';
 import { prepareHarmonyTranspose } from './harmony/transpose';
+import { copyMasterTimeSignatureSource } from './editor/time-signature-source';
 
 const settings = new Settings();
 const { Score, Track, Staff, Bar, Voice, Beat, Note, MasterBar, Automation, JsonConverter } = model;
@@ -169,6 +170,7 @@ function apply(score: model.Score, edit: EditCommand, editIndex=0) {
     case 'appendMeasure': {
       const previous = score.masterBars.at(-1)!; const master = new MasterBar();
       master.timeSignatureNumerator = previous.timeSignatureNumerator; master.timeSignatureDenominator = previous.timeSignatureDenominator;
+      copyMasterTimeSignatureSource(previous,master);
       score.addMasterBar(master); for (const track of score.tracks) for (const staff of track.staves) appendBar(staff, master); break;
     }
     case 'removeMeasure': {

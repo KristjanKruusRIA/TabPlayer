@@ -64,7 +64,7 @@ export function ExportDialog({score,layout,page,busy,progress,failure,currentSpe
         <label>Print scale (%)<input type="number" min="25" max="300" value={print.scale*100} onChange={e=>setPrint({...print,scale:Number(e.target.value)/100})}/></label>
         <label>Staves<select value={print.profile} onChange={e=>setPrint({...print,profile:e.target.value as PrintLayout['profile']})}><option value="ScoreTab">Score and tab</option><option value="Score">Score</option><option value="Tab">Tab</option></select></label>
       </>)}
-      {(format==='gp'||format==='pdf'||format==='print')&&<p>Engraving settings affect the screen and PDF. GP export preserves the source stylesheet.</p>}
+      {(format==='gp'||format==='pdf'||format==='print')&&<p>Engraving settings affect the screen and PDF. GP export preserves source styling and supports uniform common/cut choices; mixed measure choices cannot be exported.</p>}
       {format==='midi'&&<p>MIDI preserves generated notes and controls. Ordinary MIDI players share pitch bends on a channel, so simultaneous independent bends may differ.</p>}
       {(format==='wav'||format==='stems')&&<>
         <label>Sample rate<select value={audio.sampleRate} onChange={e=>setAudio({...audio,sampleRate:Number(e.target.value) as AudioExportOptions['sampleRate']})}><option value="44100">44.1 kHz</option><option value="48000">48 kHz</option></select></label>

@@ -6,6 +6,7 @@ import { buildPlaybackPlan, buildPlaybackPlanFromJson, deadBrushMidiDurations, p
 import { blankProject } from '../project';
 import selectionProtocol from '../../tests/selection-playback-protocol.json';
 import type { PlaybackPlan } from './types';
+import {captureNoteLinks} from '../editor/links';
 
 it('performed_map_accepts_missing_empty_and_pre_measure_grace_but_rejects_null',()=>{
   const plan=structuredClone(selectionProtocol.plan) as PlaybackPlan;
@@ -55,6 +56,27 @@ function agree(score: model.Score) {
   expect(new Set(plan.notes.map(n => n.id)).size).toBe(plan.notes.length);
   expect(plan.generation).toBe(7); expect(plan.ppq).toBe(960); return plan;
 }
+
+it('generated_performed_map_retains_rests_tie_destinations_and_worker_canonical_addresses',()=>{
+  const score=authored(1,2);note(score,0,1);note(score,0,2).isTieDestination=true;score.finish(settings);
+  const json=model.JsonConverter.scoreToJson(score),links=captureNoteLinks(score),reference=new midi.MidiFile();new midi.MidiFileGenerator(score,settings,new midi.AlphaSynthMidiFileHandler(reference,true)).generate();const smf=Array.from(reference.toBinary());
+  const plan=buildPlaybackPlan(score,7);expect(plan.performedBeats).toHaveLength(8);
+  expect(plan.performedBeats?.filter(row=>row.target.voice===0)).toEqual([0,1,2,3].map(beat=>({target:{track:0,staff:0,bar:0,voice:0,beat},occurrence:0,startTick:beat*960,endTick:(beat+1)*960,leadInTick:beat*960})));
+  expect(plan.notes).toHaveLength(1);expect(plan.notes[0]).toMatchObject({startTick:960,endTick:2880});
+  expect(buildPlaybackPlanFromJson(json,['base/0'],7).performedBeats).toEqual(plan.performedBeats);
+  expect(model.JsonConverter.scoreToJson(score)).toBe(json);expect(captureNoteLinks(score)).toEqual(links);
+  const after=new midi.MidiFile();new midi.MidiFileGenerator(score,settings,new midi.AlphaSynthMidiFileHandler(after,true)).generate();expect(Array.from(after.toBinary())).toEqual(smf);
+});
+
+it('generated_performed_map_shifts_grace_once_and_keeps_only_the_played_simile_placeholder',()=>{
+  const score=authored(2);const grace=new model.Beat();grace.duration=model.Duration.Eighth;grace.graceType=model.GraceType.BeforeBeat;grace.isEmpty=false;const n=new model.Note();n.string=1;n.fret=2;grace.addNote(n);
+  grace.voice=score.tracks[0].staves[0].bars[0].voices[0];grace.voice.beats.unshift(grace);note(score,0,1);score.tracks[0].staves[0].bars[1].simileMark=model.SimileMark.Simple;score.finish(settings);
+  const json=model.JsonConverter.scoreToJson(score),plan=buildPlaybackPlan(score,9),rows=plan.performedBeats;
+  expect(rows?.find(row=>row.target.bar===0&&row.target.beat===0)).toMatchObject({occurrence:0,startTick:0,endTick:120,leadInTick:0});
+  expect(rows?.find(row=>row.target.bar===0&&row.target.beat===1)).toMatchObject({occurrence:0,startTick:120,endTick:1080,leadInTick:0});
+  expect(rows?.filter(row=>row.target.bar===1)).toEqual([{target:{track:0,staff:0,bar:1,voice:0,beat:0},occurrence:0,startTick:3960,endTick:7800,leadInTick:3960}]);
+  expect(model.JsonConverter.scoreToJson(score)).toBe(json);
+});
 
 it.each([
   {anchors:[{bar:0,occurrence:999,ratio:0,audioMs:0}]},

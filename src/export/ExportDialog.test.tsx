@@ -9,6 +9,11 @@ afterEach(cleanup);
 function fixture(){const score=new model.Score();for(let i=0;i<3;i++)score.addMasterBar(new model.MasterBar());const track=new model.Track();track.name='Lead';score.addTrack(track);return score;}
 const layout={paper:'A4' as const,orientation:'portrait' as const,marginMm:15,scale:1,profile:'ScoreTab' as const};
 
+it('explains supported uniform common/cut interchange beside GP export options',()=>{
+  render(<ExportDialog score={fixture()} layout={layout} busy={false} currentSpeedAvailable={true} onExport={()=>{}} onCancel={()=>{}}/>);
+  expect(screen.getByText('Engraving settings affect the screen and PDF. GP export preserves source styling and supports uniform common/cut choices; mixed measure choices cannot be exported.')).toBeVisible();
+});
+
 it('keeps staves within their track group and the measure range separate while exporting partial staves',()=>{
   const score=fixture(),submit=vi.fn();score.tracks[0].addStaff(new model.Staff());score.tracks[0].addStaff(new model.Staff());
   const bass=new model.Track();bass.name='Bass';bass.addStaff(new model.Staff());score.addTrack(bass);

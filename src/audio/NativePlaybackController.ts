@@ -2,12 +2,15 @@ import type { AlphaTabApi, model, synth } from '@coderline/alphatab';
 import { effectiveAudioSettings, trackIdentity, type BuiltDocument } from '../engine';
 import { defaultMix } from '../document-settings';
 import type { ChannelMix, EditCommand } from '../edit-types';
-import type { ProjectView } from '../project';
+import type { BeatTarget,ProjectView } from '../project';
+import type { MusicSelection } from '../editor/range-types';
 import { nativeAudioBridge, type NativeAudioBridge, type NativeAudioStatus, type TransportCommand } from './bridge';
 import { preparePlan } from './plan';
-import type { PlanNote, PlaybackPlan, PlaybackState } from './types';
+import type { MeasureOccurrence,PlanNote, PlaybackPlan, PlaybackState } from './types';
 import { DEFAULT_PRACTICE,type PracticeSettings,type PracticeStatus } from './practice-types';
 import { practiceForBacking,validatePractice } from './practice';
+import { cursorPlaybackChoices,selectionPlaybackChoices,requireCursorChoice,requirePassageChoice } from './selection-playback';
+import type { CursorPlaybackChoice,PassagePlaybackChoice } from './selection-playback-types';
 
 let nextGeneration=0;
 function practiceKey(settings:PracticeSettings){const tempo=settings.tempo;return JSON.stringify([tempo.kind,tempo.kind==='relative'?[tempo.ratio]:tempo.kind==='fixed'?[tempo.bpm]:[tempo.start,tempo.end,tempo.step,tempo.repetitions],settings.metronome.enabled,settings.metronome.volume,settings.metronome.visual,settings.countIn.bars,settings.countIn.betweenLoops]);}
@@ -33,7 +36,7 @@ export class NativePlaybackController {
   getState=()=>this.state;
   activeNotes(trackId:string):readonly PlanNote[]{
     const status=this.lastStatus;
-    if(status?.practice.countInRemaining || status?.practice.phase==='countIn' || this.destroyed || !this.prepared || !this.state.ready || this.state.error || !status || status.generation!==this.generation || this.plan?.generation!==this.generation || (this.noteMode!=='playing' && this.noteMode!=='paused'))return [];
+    if(status?.practice.countInRemaining || status?.practice.phase==='countIn' || status?.practice.phase==='ended' || this.destroyed || !this.prepared || !this.state.ready || this.state.error || !status || status.generation!==this.generation || this.plan?.generation!==this.generation || (this.noteMode!=='playing' && this.noteMode!=='paused'))return [];
     return (this.notesByTrack.get(trackId)??[]).filter(note=>note.startTick<=status.tick && status.tick<note.endTick);
   }
   subscribe=(listener:()=>void)=>{this.listeners.add(listener);return()=>{this.listeners.delete(listener);};};
@@ -42,7 +45,7 @@ export class NativePlaybackController {
   private receive(status:NativeAudioStatus){
     if(status.generation!==this.generation || this.destroyed)return;
     this.lastStatus=status;
-    if(!status.ready || status.error || (this.plan && status.tick>=this.plan.durationTick)){this.noteMode='stopped';this.pendingNoteTick=undefined;}
+    if(!status.ready || status.error){this.noteMode='stopped';this.pendingNoteTick=undefined;}
     else if((this.noteMode==='waiting' && status.playing)
       || (this.noteMode==='seeking' && (status.playing || Math.abs(status.tick-this.pendingNoteTick!)<1e-6))
       || this.noteMode==='playing' || this.noteMode==='paused'){
@@ -64,9 +67,29 @@ export class NativePlaybackController {
     }
   }
   private send(command:TransportCommand){void this.bridge.command(command).then(()=>{if(command.generation===this.generation){this.operationError=null;this.update({error:null});}}).catch(error=>{if(command.generation===this.generation){if(command.type==='setPractice'){if(this.pendingPractice!==command.settings)return;this.pendingPractice=null;this.update({practicePending:false});}this.fail(error);}});}
-  play(){this.noteMode='waiting';this.pendingNoteTick=undefined;this.update({});this.send({type:'play',generation:this.generation});}pause(){this.send({type:'pause',generation:this.generation});}stop(){this.noteMode='stopped';this.pendingNoteTick=undefined;this.update({});this.send({type:'stop',generation:this.generation});}
+  private selectionReady(){return !this.destroyed&&!this.preparing&&this.prepared&&this.state.ready&&this.built!==null&&this.plan?.generation===this.generation;}
+  private requireSelectionReady(){if(!this.selectionReady())throw new Error('Select a measure after playback is ready.');return {score:this.built!.score,plan:this.plan!};}
+  cursorPlaybackChoices(target:BeatTarget):CursorPlaybackChoice[]{if(!this.selectionReady())return [];return cursorPlaybackChoices(this.built!.score,this.plan!,target);}
+  selectionPlaybackChoices(selection:MusicSelection):PassagePlaybackChoice[]{if(!this.selectionReady())return [];return selectionPlaybackChoices(this.built!.score,this.plan!,selection);}
+  playbackOccurrences():readonly Readonly<MeasureOccurrence>[]{return this.selectionReady()?this.plan!.occurrences:[];}
+  private startRange(startTick:number,endTick:number|null){this.noteMode='waiting';this.pendingNoteTick=undefined;this.update({});this.send({type:'playRange',generation:this.generation,startTick,endTick});}
+  play(cursor?:BeatTarget,choice?:CursorPlaybackChoice){
+    if(cursor){
+      const {score,plan}=this.requireSelectionReady();
+      if(!this.state.loop&&(this.state.practice.phase==='idle'||this.state.practice.phase==='ended')){
+        const choices=cursorPlaybackChoices(score,plan,cursor),selected=choice??(choices.length===1?choices[0]:undefined);
+        if(!selected)throw new Error('Choose a current performed occurrence.');
+        this.startRange(requireCursorChoice(choices,selected).startTick,null);return;
+      }
+    }
+    this.noteMode='waiting';this.pendingNoteTick=undefined;this.update({});this.send({type:'play',generation:this.generation});
+  }
+  playFromCursor(cursor:BeatTarget,choice:CursorPlaybackChoice){const {score,plan}=this.requireSelectionReady();const selected=requireCursorChoice(cursorPlaybackChoices(score,plan,cursor),choice);this.startRange(selected.startTick,null);}
+  playSelection(selection:MusicSelection,choice:PassagePlaybackChoice){const {score,plan}=this.requireSelectionReady();const selected=requirePassageChoice(selectionPlaybackChoices(score,plan,selection),choice);this.startRange(selected.startTick,selected.endTick);}
+  loopSelection(selection:MusicSelection,choice:PassagePlaybackChoice){const {score,plan}=this.requireSelectionReady();const selected=requirePassageChoice(selectionPlaybackChoices(score,plan,selection),choice);this.send({type:'setLoop',generation:this.generation,startTick:selected.startTick,endTick:selected.endTick});}
+  pause(){this.send({type:'pause',generation:this.generation});}stop(){this.noteMode='stopped';this.pendingNoteTick=undefined;this.update({});this.send({type:'stop',generation:this.generation});}
   private occurrence(bar:number){const found=this.plan?.occurrences.find(o=>o.bar===bar);if(!Number.isInteger(bar)||!found)throw new Error('Select a measure after playback is ready.');return found;}
-  private seekToTick(tick:number){this.noteMode='seeking';this.pendingNoteTick=tick;this.update({});this.send({type:'seekTick',tick,generation:this.generation});}
+  private seekToTick(tick:number){this.noteMode='seeking';this.pendingNoteTick=tick;this.operationError=null;this.update({error:this.lastStatus?.error??null});this.send({type:'seekTick',tick,generation:this.generation});}
   seekToMeasure(index:number){this.seekToTick(this.occurrence(index).startTick);}
   setPractice(settings:PracticeSettings){
     validatePractice(settings,this.hasBacking);

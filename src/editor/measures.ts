@@ -1,4 +1,5 @@
 import { model } from '@coderline/alphatab';
+import { copyMasterTimeSignatureSource } from './time-signature-source';
 import type { BackingSettings } from '../edit-types';
 import { isGpMixAutomation,trackMixAutomations } from '../interchange/automation';
 import { integer } from './common';
@@ -85,7 +86,7 @@ function blankMaster(context:model.MasterBar) {
   master.timeSignatureNumerator=context.timeSignatureNumerator;master.timeSignatureDenominator=context.timeSignatureDenominator;
   master.timeSignatureCommon=context.timeSignatureCommon;master.isFreeTime=context.isFreeTime;master.tripletFeel=context.tripletFeel;
   if(context.beamingRules){master.beamingRules=new model.BeamingRules();for(const [unit,groups]of context.beamingRules.groups)master.beamingRules.groups.set(unit,[...groups]);}
-  return master;
+  copyMasterTimeSignatureSource(context,master);return master;
 }
 function blankBar(context:model.Bar,master:model.MasterBar) {
   const bar=new model.Bar();bar.clef=context.clef;bar.clefOttava=context.clefOttava;bar.keySignature=context.keySignature;bar.keySignatureType=context.keySignatureType;

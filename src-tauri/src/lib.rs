@@ -1,5 +1,6 @@
 pub mod assets;
 pub mod audio;
+pub mod backing_waveform;
 pub mod edit_types;
 pub mod engraving;
 pub mod export;

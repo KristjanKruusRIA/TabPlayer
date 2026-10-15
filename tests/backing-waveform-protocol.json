@@ -1,0 +1,551 @@
+{
+  "format": "TabPlayerBackingWaveformProtocol",
+  "version": 1,
+  "valid": [
+    {
+      "name": "maximum-asset-request",
+      "request": {
+        "owner": {
+          "documentId": "waveform-document",
+          "activationId": "waveform-activation"
+        },
+        "document": {
+          "documentId": "waveform-document",
+          "revision": 7
+        },
+        "source": {
+          "kind": "asset",
+          "assetId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "buckets": 8192
+      }
+    },
+    {
+      "name": "minimum-embedded-request",
+      "request": {
+        "owner": {
+          "documentId": "waveform-document",
+          "activationId": "waveform-activation"
+        },
+        "document": {
+          "documentId": "waveform-document",
+          "revision": 7
+        },
+        "source": {
+          "kind": "embedded",
+          "sourceKey": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "sha256": "6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+          "bytesBase64": "AA=="
+        },
+        "buckets": 1
+      }
+    },
+    {
+      "name": "maximum-safe-revision",
+      "request": {
+        "owner": {
+          "documentId": "waveform-document",
+          "activationId": "waveform-activation"
+        },
+        "document": {
+          "documentId": "waveform-document",
+          "revision": 9007199254740991
+        },
+        "source": {
+          "kind": "asset",
+          "assetId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "buckets": 8192
+      }
+    }
+  ],
+  "invalid": [
+    {
+      "name": "zero-buckets",
+      "request": {
+        "owner": {
+          "documentId": "waveform-document",
+          "activationId": "waveform-activation"
+        },
+        "document": {
+          "documentId": "waveform-document",
+          "revision": 7
+        },
+        "source": {
+          "kind": "asset",
+          "assetId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "buckets": 0
+      }
+    },
+    {
+      "name": "too-many-buckets",
+      "request": {
+        "owner": {
+          "documentId": "waveform-document",
+          "activationId": "waveform-activation"
+        },
+        "document": {
+          "documentId": "waveform-document",
+          "revision": 7
+        },
+        "source": {
+          "kind": "asset",
+          "assetId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "buckets": 8193
+      }
+    },
+    {
+      "name": "fractional-buckets",
+      "request": {
+        "owner": {
+          "documentId": "waveform-document",
+          "activationId": "waveform-activation"
+        },
+        "document": {
+          "documentId": "waveform-document",
+          "revision": 7
+        },
+        "source": {
+          "kind": "asset",
+          "assetId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "buckets": 1.5
+      }
+    },
+    {
+      "name": "negative-buckets",
+      "request": {
+        "owner": {
+          "documentId": "waveform-document",
+          "activationId": "waveform-activation"
+        },
+        "document": {
+          "documentId": "waveform-document",
+          "revision": 7
+        },
+        "source": {
+          "kind": "asset",
+          "assetId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "buckets": -1
+      }
+    },
+    {
+      "name": "missing-buckets",
+      "request": {
+        "owner": {
+          "documentId": "waveform-document",
+          "activationId": "waveform-activation"
+        },
+        "document": {
+          "documentId": "waveform-document",
+          "revision": 7
+        },
+        "source": {
+          "kind": "asset",
+          "assetId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      }
+    },
+    {
+      "name": "unknown-request-field",
+      "request": {
+        "owner": {
+          "documentId": "waveform-document",
+          "activationId": "waveform-activation"
+        },
+        "document": {
+          "documentId": "waveform-document",
+          "revision": 7
+        },
+        "source": {
+          "kind": "asset",
+          "assetId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "buckets": 8192,
+        "extra": true
+      }
+    },
+    {
+      "name": "missing-owner",
+      "request": {
+        "document": {
+          "documentId": "waveform-document",
+          "revision": 7
+        },
+        "source": {
+          "kind": "asset",
+          "assetId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "buckets": 8192
+      }
+    },
+    {
+      "name": "empty-owner-document",
+      "request": {
+        "owner": {
+          "documentId": "",
+          "activationId": "waveform-activation"
+        },
+        "document": {
+          "documentId": "waveform-document",
+          "revision": 7
+        },
+        "source": {
+          "kind": "asset",
+          "assetId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "buckets": 8192
+      }
+    },
+    {
+      "name": "empty-activation",
+      "request": {
+        "owner": {
+          "documentId": "waveform-document",
+          "activationId": ""
+        },
+        "document": {
+          "documentId": "waveform-document",
+          "revision": 7
+        },
+        "source": {
+          "kind": "asset",
+          "assetId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "buckets": 8192
+      }
+    },
+    {
+      "name": "unknown-owner-field",
+      "request": {
+        "owner": {
+          "documentId": "waveform-document",
+          "activationId": "waveform-activation",
+          "extra": 1
+        },
+        "document": {
+          "documentId": "waveform-document",
+          "revision": 7
+        },
+        "source": {
+          "kind": "asset",
+          "assetId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "buckets": 8192
+      }
+    },
+    {
+      "name": "missing-document",
+      "request": {
+        "owner": {
+          "documentId": "waveform-document",
+          "activationId": "waveform-activation"
+        },
+        "source": {
+          "kind": "asset",
+          "assetId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "buckets": 8192
+      }
+    },
+    {
+      "name": "mismatched-document",
+      "request": {
+        "owner": {
+          "documentId": "waveform-document",
+          "activationId": "waveform-activation"
+        },
+        "document": {
+          "documentId": "another-document",
+          "revision": 7
+        },
+        "source": {
+          "kind": "asset",
+          "assetId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "buckets": 8192
+      }
+    },
+    {
+      "name": "empty-document",
+      "request": {
+        "owner": {
+          "documentId": "waveform-document",
+          "activationId": "waveform-activation"
+        },
+        "document": {
+          "documentId": "",
+          "revision": 7
+        },
+        "source": {
+          "kind": "asset",
+          "assetId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "buckets": 8192
+      }
+    },
+    {
+      "name": "negative-revision",
+      "request": {
+        "owner": {
+          "documentId": "waveform-document",
+          "activationId": "waveform-activation"
+        },
+        "document": {
+          "documentId": "waveform-document",
+          "revision": -1
+        },
+        "source": {
+          "kind": "asset",
+          "assetId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "buckets": 8192
+      }
+    },
+    {
+      "name": "fractional-revision",
+      "request": {
+        "owner": {
+          "documentId": "waveform-document",
+          "activationId": "waveform-activation"
+        },
+        "document": {
+          "documentId": "waveform-document",
+          "revision": 0.5
+        },
+        "source": {
+          "kind": "asset",
+          "assetId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "buckets": 8192
+      }
+    },
+    {
+      "name": "unsafe-revision",
+      "request": {
+        "owner": {
+          "documentId": "waveform-document",
+          "activationId": "waveform-activation"
+        },
+        "document": {
+          "documentId": "waveform-document",
+          "revision": 9007199254740992
+        },
+        "source": {
+          "kind": "asset",
+          "assetId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "buckets": 8192
+      }
+    },
+    {
+      "name": "unknown-document-field",
+      "request": {
+        "owner": {
+          "documentId": "waveform-document",
+          "activationId": "waveform-activation"
+        },
+        "document": {
+          "documentId": "waveform-document",
+          "revision": 7,
+          "extra": 1
+        },
+        "source": {
+          "kind": "asset",
+          "assetId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "buckets": 8192
+      }
+    },
+    {
+      "name": "missing-source",
+      "request": {
+        "owner": {
+          "documentId": "waveform-document",
+          "activationId": "waveform-activation"
+        },
+        "document": {
+          "documentId": "waveform-document",
+          "revision": 7
+        },
+        "buckets": 8192
+      }
+    },
+    {
+      "name": "unknown-source-kind",
+      "request": {
+        "owner": {
+          "documentId": "waveform-document",
+          "activationId": "waveform-activation"
+        },
+        "document": {
+          "documentId": "waveform-document",
+          "revision": 7
+        },
+        "source": {
+          "kind": "path",
+          "assetId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "buckets": 8192
+      }
+    },
+    {
+      "name": "uppercase-asset-digest",
+      "request": {
+        "owner": {
+          "documentId": "waveform-document",
+          "activationId": "waveform-activation"
+        },
+        "document": {
+          "documentId": "waveform-document",
+          "revision": 7
+        },
+        "source": {
+          "kind": "asset",
+          "assetId": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        },
+        "buckets": 8192
+      }
+    },
+    {
+      "name": "short-asset-digest",
+      "request": {
+        "owner": {
+          "documentId": "waveform-document",
+          "activationId": "waveform-activation"
+        },
+        "document": {
+          "documentId": "waveform-document",
+          "revision": 7
+        },
+        "source": {
+          "kind": "asset",
+          "assetId": "a"
+        },
+        "buckets": 8192
+      }
+    },
+    {
+      "name": "unknown-asset-field",
+      "request": {
+        "owner": {
+          "documentId": "waveform-document",
+          "activationId": "waveform-activation"
+        },
+        "document": {
+          "documentId": "waveform-document",
+          "revision": 7
+        },
+        "source": {
+          "kind": "asset",
+          "assetId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "path": "C:/not-authorized.wav"
+        },
+        "buckets": 8192
+      }
+    },
+    {
+      "name": "uppercase-embedded-base",
+      "request": {
+        "owner": {
+          "documentId": "waveform-document",
+          "activationId": "waveform-activation"
+        },
+        "document": {
+          "documentId": "waveform-document",
+          "revision": 7
+        },
+        "source": {
+          "kind": "embedded",
+          "sourceKey": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+          "sha256": "6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+          "bytesBase64": "AA=="
+        },
+        "buckets": 1
+      }
+    },
+    {
+      "name": "uppercase-audio-digest",
+      "request": {
+        "owner": {
+          "documentId": "waveform-document",
+          "activationId": "waveform-activation"
+        },
+        "document": {
+          "documentId": "waveform-document",
+          "revision": 7
+        },
+        "source": {
+          "kind": "embedded",
+          "sourceKey": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "sha256": "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC",
+          "bytesBase64": "AA=="
+        },
+        "buckets": 1
+      }
+    },
+    {
+      "name": "missing-embedded-bytes",
+      "request": {
+        "owner": {
+          "documentId": "waveform-document",
+          "activationId": "waveform-activation"
+        },
+        "document": {
+          "documentId": "waveform-document",
+          "revision": 7
+        },
+        "source": {
+          "kind": "embedded",
+          "sourceKey": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "sha256": "6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d"
+        },
+        "buckets": 1
+      }
+    },
+    {
+      "name": "nonstring-embedded-bytes",
+      "request": {
+        "owner": {
+          "documentId": "waveform-document",
+          "activationId": "waveform-activation"
+        },
+        "document": {
+          "documentId": "waveform-document",
+          "revision": 7
+        },
+        "source": {
+          "kind": "embedded",
+          "sourceKey": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "sha256": "6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+          "bytesBase64": 17
+        },
+        "buckets": 1
+      }
+    },
+    {
+      "name": "unknown-embedded-field",
+      "request": {
+        "owner": {
+          "documentId": "waveform-document",
+          "activationId": "waveform-activation"
+        },
+        "document": {
+          "documentId": "waveform-document",
+          "revision": 7
+        },
+        "source": {
+          "kind": "embedded",
+          "sourceKey": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "sha256": "6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d",
+          "bytesBase64": "AA==",
+          "extra": true
+        },
+        "buckets": 1
+      }
+    }
+  ]
+}

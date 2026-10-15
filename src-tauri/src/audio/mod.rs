@@ -8,3 +8,4 @@ pub mod practice;
 pub mod renderer;
 pub mod resources;
 pub mod voices;
+pub mod waveform;

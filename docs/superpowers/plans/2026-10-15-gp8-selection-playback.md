@@ -118,7 +118,7 @@ Tasks2–4 can run in parallel after Task1. Task3 can start with literal plan fi
 
 ### Task 7: Root performs bounded native delivery acceptance and final review
 
-**Files:** Create `tests/desktop/selection-playback-fixture.mjs`, `tests/desktop/parity-selection-playback.mjs`; record ignored `.analysis/parity/selection-playback-validation.md` and authored screenshots/captures under existing desktop-smoke directory. Do not change baseline counts/statuses.
+**Files:** Create `tests/desktop/selection-playback-fixture.mjs`, `tests/desktop/parity-selection-playback.mjs`, `tests/desktop/selection-playback-gestures.mjs`; record ignored `.analysis/parity/selection-playback-validation.md` and authored screenshots/captures under existing desktop-smoke directory. Do not change baseline counts/statuses.
 
 **Interfaces:** Use existing isolated native harness, original public-model fixture, TABPLAYER_TEST_OPEN and authorized loopback helper. The fixture exposes literal canonical targets, source hash, performed itinerary/tick boundaries and expected independent MIDI. Native status capture is an observer; commands remain through actual UI/IPC. Do not upload private scores/assets or start multiple test apps concurrently.
 
@@ -129,5 +129,7 @@ Tasks2–4 can run in parallel after Task1. Task3 can start with literal plan fi
 - [x] Obtain a fresh independent review of final immutable implementation diff, repair material findings with RED/GREEN proof, and repeat only affected checks. Commit reviewed paths and follow the existing branch/integration instructions. Report bounded P02/P03 evidence and remaining simile/target-runtime/platform/other-inventory gaps; do not claim full parity or mark historical counts complete.
 
 ## Plan self-review and handoff
+
+Task7 follow-up: actual Windows sparse Ctrl-click, mouse drag and resize-handle acceptance now passed at all-track/115% projection, with full exposed history including a nonempty redo entry and source bytes unchanged. Root inspected the single 1280px confirmation; the final script received independent acceptance. Two native tests additionally establish held-note/channel/pitch and configured delay reset over three actual partial-loop wraps; root all-target Rust verification passed236/6ignores. The two bundled unchecked rows remain partial for physical44.1/fault coverage and the unavailable hidden-simile-subdivision UI path (pure resolver rejection is tested). See the versioned selection validation for exact hashes/receipts and limits; no new physical capture is implied.
 
 Each spec contract has a producing task and consumer: Task1 types/protocol → Tasks2/3/4; map + choices → Task5; native ceiling/status → Task5; controller + controls → Task6; all behaviors → Task7. All five Review Focus cases have named tests. Native one-shot state, nullable ordinary EOF, route completeness, no causal old-status inference, canonical selection and source immutability are explicit. No user review/approval gate is added because this design/plan/execution method was explicitly preapproved. Root remains the integration and native acceptance owner.

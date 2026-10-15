@@ -650,3 +650,192 @@ fn fresh_range_resets_progressive_passes_and_count_before_seek() {
     assert_eq!(transport.status().practice.phase, PracticePhase::Ended);
     assert_eq!(transport.status().practice.completed_passes, 0);
 }
+
+fn held_loop_transport(sustain: bool, bent: bool, delay: bool, program: u8) -> CallbackTransport {
+    use tabplayer_lib::{
+        audio::{
+            decode::DecodedAudio,
+            resources::{Instrument, Region},
+        },
+        settings::TrackSound,
+    };
+    let bend = if bent { 12 } else { 0 };
+    let plan: PlaybackPlan = serde_json::from_value(serde_json::json!({
+        "generation":1,"ppq":960,"durationTick":3840,"durationMs":2000,
+        "tracks":[{"id":"guitar","program":0,"percussion":false}],
+        "tempos":[{"tick":0,"bpm":120}],
+        "occurrences":[{"bar":0,"occurrence":0,"meterNumerator":4,"meterDenominator":4,"startTick":0,"endTick":3840,"startMs":0,"endMs":2000}],
+        "notes":[{"id":"held","trackId":"guitar","source":{"target":{"track":0,"staff":0,"bar":0,"voice":0,"beat":0},"string":1},"occurrence":0,"channel":3,"startTick":0,"endTick":480,"key":69,"velocity":127,"articulation":"picked","legatoFrom":null,"pitch":[{"tick":0,"semitones":0},{"tick":480,"semitones":bend}]}],
+        "midi":[
+            {"type":"program","trackId":"guitar","tick":0,"channel":3,"program":program},
+            {"type":"controller","trackId":"guitar","tick":0,"channel":3,"controller":7,"value":64},
+            {"type":"controller","trackId":"guitar","tick":0,"channel":3,"controller":11,"value":96},
+            {"type":"controller","trackId":"guitar","tick":0,"channel":3,"controller":10,"value":0},
+            {"type":"controller","trackId":"guitar","tick":0,"channel":3,"controller":64,"value":if sustain {127} else {0}},
+            {"type":"noteOn","trackId":"guitar","tick":0,"channel":3,"key":69,"velocity":127},
+            {"type":"bend","trackId":"guitar","tick":480,"channel":3,"value":bend},
+            {"type":"noteOff","trackId":"guitar","tick":480,"channel":3,"key":69,"velocity":0},
+            {"type":"program","trackId":"guitar","tick":1440,"channel":3,"program":0},
+            {"type":"controller","trackId":"guitar","tick":1440,"channel":3,"controller":7,"value":32},
+            {"type":"controller","trackId":"guitar","tick":1440,"channel":3,"controller":11,"value":32},
+            {"type":"controller","trackId":"guitar","tick":1440,"channel":3,"controller":10,"value":127},
+            {"type":"controller","trackId":"guitar","tick":1680,"channel":3,"controller":64,"value":0}
+        ]
+    }))
+    .unwrap();
+    let mut resources = AudioResources::load_for_requests(
+        &PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/audio"),
+        &[],
+    )
+    .unwrap();
+    resources.manifest.instruments = vec![Instrument {
+        id: "green-guitar".into(),
+        regions: vec![Region {
+            sample_id: "loop-sine".into(),
+            root_key: 69,
+            key_low: 0,
+            key_high: 127,
+            velocity_low: 0,
+            velocity_high: 127,
+            articulation: "picked".into(),
+            variant: 1,
+            sequence_length: 1,
+            trigger: "attack".into(),
+            pitch_keytrack: 100.0,
+            velocity_gain_high: 127,
+            ..Default::default()
+        }],
+        ..Default::default()
+    }];
+    resources.samples.insert(
+        "loop-sine".into(),
+        Arc::new(DecodedAudio {
+            sample_rate: 48_000,
+            channels: 2,
+            frames: Arc::new(
+                (0..144_000)
+                    .map(|frame| {
+                        [(std::f64::consts::TAU * 441.0 * frame as f64 / 48_000.0).sin() as f32
+                            * 0.2; 2]
+                    })
+                    .collect(),
+            ),
+        }),
+    );
+    let mut document = DocumentSettings::default();
+    let mut sound = TrackSound::default();
+    sound.effects.delay.enabled = delay;
+    sound.effects.delay.quarter_notes = 0.125;
+    sound.effects.delay.feedback = 0.5;
+    sound.effects.delay.mix = 1.0;
+    document.sounds.insert("guitar".into(), sound);
+    let renderer = Renderer::new(Arc::new(plan), Arc::new(resources), document, 48_000).unwrap();
+    let mut transport = CallbackTransport::headless(48_000);
+    transport.install_with_practice(
+        Box::new(renderer),
+        1,
+        false,
+        settings(PracticeTempo::Relative { ratio: 1.0 }, 0, false),
+    );
+    transport
+        .command(TransportCommand::SetLoop {
+            generation: 1,
+            start_tick: 960.0,
+            end_tick: 1920.0,
+        })
+        .unwrap();
+    transport
+        .command(TransportCommand::Play { generation: 1 })
+        .unwrap();
+    transport
+}
+
+fn rising_crossings(pcm: &[[f32; 2]]) -> usize {
+    pcm.windows(2)
+        .filter(|pair| pair[0][0] <= 0.0 && pair[1][0] > 0.0)
+        .count()
+}
+
+#[test]
+fn partial_loop_wrap_reconstructs_held_channel_pitch_and_resets_wet_delay() {
+    let mut transport = held_loop_transport(true, true, true, 24);
+    // 960 ticks at 120 BPM and 960 PPQ = 0.5 s = 24,000 frames/pass.
+    let mut pcm = vec![[0.0; 2]; 72_000];
+    let mut offset = 0;
+    for size in [127, 511, 1024].into_iter().cycle() {
+        let end = (offset + size).min(pcm.len());
+        transport.render_into(&mut pcm[offset..end]);
+        offset = end;
+        if offset == pcm.len() {
+            break;
+        }
+    }
+    assert_eq!(transport.status().practice.completed_passes, 3);
+    assert_eq!(transport.status().tick, 960.0);
+    for (pass, output) in pcm.chunks_exact(24_000).enumerate() {
+        // Fully wet 0.125-quarter delay at 120 BPM = 3,000 silent frames.
+        assert!(
+            output[..3_000].iter().all(|frame| *frame == [0.0; 2]),
+            "pass {pass}: delay contains a historical tail"
+        );
+        let first_echo = &output[3_200..5_600];
+        let peak = first_echo
+            .iter()
+            .map(|frame| frame[0].abs())
+            .fold(0.0f32, f32::max);
+        // Source .2 * CC7 64/127 * CC11 96/127 = .07618575. MIDI hard
+        // left's sqrt(2) cancels the default track mix's sqrt(1/2).
+        assert!(
+            (0.074..0.077).contains(&peak),
+            "pass {pass}: held/program/channel gain peak {peak}"
+        );
+        assert!(
+            first_echo.iter().all(|frame| frame[1].abs() < 1e-7),
+            "pass {pass}: channel 3 pan was not reconstructed"
+        );
+        // The authored note ended before the selected start. Sustain must
+        // restore its 441 Hz sample, bent +12 semitones to 882 Hz: 44/45
+        // rising crossings in this independently chosen 0.05-second window.
+        let crossings = rising_crossings(first_echo);
+        assert!(
+            (44..=45).contains(&crossings),
+            "pass {pass}: held pitch crossings {crossings}"
+        );
+        assert!(
+            output[23_000..].iter().any(|frame| frame[1].abs() > 0.001),
+            "pass {pass}: nonzero configured feedback tail must reach the wrap"
+        );
+        assert_eq!(
+            output,
+            &pcm[..24_000],
+            "pass {pass}: reset is deterministic"
+        );
+    }
+}
+
+#[test]
+fn partial_loop_state_oracle_rejects_missing_sustain_bend_delay_and_program() {
+    for (sustain, bent, delay, program) in [
+        (false, true, true, 24),
+        (true, false, true, 24),
+        (true, true, false, 24),
+        (true, true, true, 0),
+    ] {
+        let mut transport = held_loop_transport(sustain, bent, delay, program);
+        let mut output = vec![[0.0; 2]; 5_600];
+        transport.render_into(&mut output);
+        let first_echo = &output[3_200..5_600];
+        if !sustain {
+            assert!(output.iter().all(|frame| *frame == [0.0; 2]));
+        } else if !bent {
+            assert!((22..=23).contains(&rising_crossings(first_echo)));
+        } else if !delay {
+            assert!(output[..3_000].iter().any(|frame| frame[0].abs() > 0.07));
+        } else {
+            assert!(
+                !(44..=45).contains(&rising_crossings(first_echo)),
+                "GM program 0 must not satisfy the mapped guitar sample oracle"
+            );
+        }
+    }
+}

@@ -16,10 +16,19 @@
     }
   },
   "current_revision": {
-    "value": "880c0a5",
-    "provenance": "Supplied by root integrator; no Git command run by this audit"
+    "value": "b73ae93682332c64029777cc4dfeaebfe2a77214",
+    "provenance": "Product revision supplied by root integrator; tracking e2ec67b and test-only follow-up f6350fc3e1bb33e1e63c7d81524c87e0df61c8de also supplied by root. No Git command run by this audit.",
+    "previous_overlay_revision": "880c0a5",
+    "ci_checkpoint": {
+      "run_id": "38724478672",
+      "observed_by": "root integrator; not independently polled by this audit",
+      "observed_at_utc": "2026-10-15T11:09:00Z",
+      "macos_frontend_and_native_tests": "success",
+      "packages_and_complete_other_os_results": "pending at this checkpoint",
+      "cross_platform_ci_success_claim": false
+    }
   },
-  "source_method": "Read all 258 baseline rows; inspect the seven dedicated versioned delivery reports and narrowly selected current source/test definitions. Graph tools unavailable; narrow rg/source reads used. No fresh runtime validation.",
+  "source_method": "The original overlay read all 258 baseline rows and inspected seven dedicated versioned delivery reports plus scoped source/test definitions. This follow-up reviews the versioned selection-playback and stylesheet-interchange reports and exact P02/P03/N13 acceptance, updating adjacent stale prose only. Graph tools unavailable; narrow rg/source reads used. No fresh runtime validation by this audit.",
   "assessment_definitions": {
     "evidence_reviewed": "Current source and/or versioned delivery evidence was mapped to this exact requirement; missing acceptance remains explicit.",
     "baseline_not_reaudited": "Historical status carried for coverage only; current_proven_status is null and no new implementation claim is made."
@@ -39,30 +48,30 @@
       "unverified": 8
     },
     "current_dispositions": {
-      "implemented": 67,
-      "partial": 94,
+      "implemented": 70,
+      "partial": 91,
       "missing": 89,
       "unverified": 8
     },
-    "evidence_reviewed_total": 93,
+    "evidence_reviewed_total": 95,
     "evidence_reviewed": {
-      "implemented": 25,
-      "partial": 64,
+      "implemented": 28,
+      "partial": 63,
       "missing": 0,
       "unverified": 4
     },
-    "baseline_not_reaudited_total": 165,
+    "baseline_not_reaudited_total": 163,
     "baseline_not_reaudited": {
       "implemented": 42,
-      "partial": 30,
+      "partial": 28,
       "missing": 89,
       "unverified": 4
     },
-    "status_changed_total": 60,
+    "status_changed_total": 62,
     "transition_counts": {
-      "missing -> implemented": 13,
-      "missing -> partial": 44,
-      "partial -> implemented": 3
+      "missing -> implemented": 14,
+      "missing -> partial": 43,
+      "partial -> implemented": 5
     }
   },
   "evidence": {
@@ -365,6 +374,72 @@
       "start_line": 18,
       "end_line": 41,
       "kind": "source"
+    },
+    "selection_playback": {
+      "path": "docs/validation/2026-10-15-gp8-selection-playback.md",
+      "start_line": 9,
+      "end_line": 11,
+      "kind": "validation_report"
+    },
+    "selection_playback_validation": {
+      "path": "docs/validation/2026-10-15-gp8-selection-playback.md",
+      "start_line": 15,
+      "end_line": 27,
+      "kind": "validation_report"
+    },
+    "selection_playback_windows": {
+      "path": "docs/validation/2026-10-15-gp8-selection-playback.md",
+      "start_line": 31,
+      "end_line": 37,
+      "kind": "validation_report"
+    },
+    "selection_playback_limits": {
+      "path": "docs/validation/2026-10-15-gp8-selection-playback.md",
+      "start_line": 47,
+      "end_line": 49,
+      "kind": "validation_report"
+    },
+    "stylesheet_interchange": {
+      "path": "docs/validation/2026-10-15-gp8-stylesheet-interchange.md",
+      "start_line": 9,
+      "end_line": 11,
+      "kind": "validation_report"
+    },
+    "stylesheet_interchange_validation": {
+      "path": "docs/validation/2026-10-15-gp8-stylesheet-interchange.md",
+      "start_line": 15,
+      "end_line": 19,
+      "kind": "validation_report"
+    },
+    "stylesheet_interchange_windows": {
+      "path": "docs/validation/2026-10-15-gp8-stylesheet-interchange.md",
+      "start_line": 23,
+      "end_line": 27,
+      "kind": "validation_report"
+    },
+    "stylesheet_interchange_limits": {
+      "path": "docs/validation/2026-10-15-gp8-stylesheet-interchange.md",
+      "start_line": 36,
+      "end_line": 38,
+      "kind": "validation_report"
+    },
+    "common_cut_beaming_test_source": {
+      "path": "src/editor/bar-gestures.test.ts",
+      "start_line": 105,
+      "end_line": 128,
+      "kind": "test_source_not_rerun"
+    },
+    "selection_loop_state_oracle": {
+      "path": "docs/validation/2026-10-15-gp8-selection-playback.md",
+      "start_line": 27,
+      "end_line": 27,
+      "kind": "validation_report"
+    },
+    "selection_loop_state_test_source": {
+      "path": "src-tauri/tests/audio_practice_transport.rs",
+      "start_line": 654,
+      "end_line": 841,
+      "kind": "test_source_not_rerun"
     }
   },
   "evidence_file_sha256": {
@@ -402,18 +477,25 @@
     "src/harmony/library.ts": "2c979c78331964aea4c01f98e3ef5190db397377b5939a5260bd2657884d4baf",
     "src/harmony/scales.ts": "a5c986bf6605c6b37773814dace381b9e32e2835121302625206b1091a49db8d",
     "src/harmony/transpose.test.ts": "f60cff2a9734ca330c079d9e37d76bec68904a4f6659d59a4f53ec22cf22c812",
-    "src/harmony/transpose.ts": "58f4084b36951dc4cec789573a3b3e49005b67de5a79c611f0c0db3f031a1e96"
+    "src/harmony/transpose.ts": "58f4084b36951dc4cec789573a3b3e49005b67de5a79c611f0c0db3f031a1e96",
+    "docs/validation/2026-10-15-gp8-selection-playback.md": "c8424e74d20f7681b58bb0b82de0e093c84608e4762aae5f680473c320622d81",
+    "docs/validation/2026-10-15-gp8-stylesheet-interchange.md": "aa068aed53bef2603a6ad5c736ce57ff223e1683c9330725119b80d891bf8b9b",
+    "src-tauri/tests/audio_practice_transport.rs": "aafb40d4fbcce1a21077b1b4dab2647dfac20342f6a7d5fb21d6b880b605456f"
   },
   "next_open_families": [
     {
       "priority": 1,
       "family": "Interchange and audible correctness boundaries",
-      "work": "Resolve explicit GP losses with authored independent fixtures: long links/slurs, transposed trills, curves, common/cut and changed styles; characterize empty chord-carrier timing. Establish fermata units/holds and distinguish gesture sound routes before claiming audible parity.",
+      "work": "Resolve explicit GP losses with authored independent fixtures: long links/slurs, transposed trills, curves, mixed per-measure common/cut representation, inherited defaults and complete score/view relationships; characterize empty chord-carrier timing. Uniform known common/cut stylesheet choices now import/export. Establish fermata units/holds and distinguish gesture sound routes.",
       "evidence": [
         "entry_limits",
         "notation_limits",
         "range_limits",
-        "harmony_limits"
+        "harmony_limits",
+        "stylesheet_interchange",
+        "stylesheet_interchange_limits",
+        "selection_playback",
+        "selection_playback_limits"
       ]
     },
     {
@@ -443,7 +525,7 @@
     {
       "priority": 5,
       "family": "Sound, hardware and external acceptance",
-      "work": "Effect families/routing/catalogue breadth, MIDI/audio input/output/tuner, backing waveform/pitch/filter tools and services remain largely untouched. Original-GP8, physical printers and macOS/platform runs require actual receipts, not more green model tests.",
+      "work": "Effect families/routing/catalogue breadth, MIDI/audio input/output/tuner, backing waveform/pitch/filter tools and services remain largely untouched. Original-GP8, physical printers and physical macOS/Linux input/audio require actual receipts; build/test CI is a separate check.",
       "evidence": [
         "practice_limits",
         "engraving_limits",
@@ -459,22 +541,30 @@
     },
     {
       "issue": "Earlier remaining-work prose is chronological",
-      "detail": "Entry-report remaining lyrics/range work, lyrics-report next range work and range-report remaining clipboard/engraving work are superseded only where later dedicated reports supply evidence. Older limitations about continuous ramps, long links, fermata timing and target runtime remain active.",
+      "detail": "Entry-report remaining lyrics/range work, lyrics-report next range work and range-report remaining clipboard/engraving work are superseded only where later dedicated reports supply evidence. Older limitations about continuous ramps, long links, fermata timing and target runtime remain active. The later selection-playback report supersedes the blanket partial-loop absence, and the stylesheet-interchange report supersedes blanket common/cut export absence only for uniform known choices. P03 loop-state acceptance is now supported by the dedicated actual-wrap oracle; mixed style representation and the documented target/platform limits remain open.",
       "evidence": [
         "entry_limits",
         "notation_limits",
         "range_limits",
         "clipboard",
-        "engraving"
+        "engraving",
+        "selection_playback",
+        "selection_playback_limits",
+        "stylesheet_interchange",
+        "stylesheet_interchange_limits",
+        "selection_loop_state_oracle"
       ]
     },
     {
-      "issue": "Native style provenance is partly known, proprietary edit schema is not",
-      "detail": "The supplied reader inspection establishes common/cut native field and preference for Content/Stylesheets/score.gpss over BinaryStylesheet. It does not justify guessed stylesheet patches; presentation overrides currently belong to native history/detached rendering, and changed GP stylesheet export remains open.",
+      "issue": "Native common/cut interchange is bounded; broader style fidelity remains open",
+      "detail": "The current native common/cut optional-boolean field and score.gpss-over-BinaryStylesheet precedence are established. Uniform known choices now import/export, untouched opaque style/view members are preserved, and mixed/inherited/conflicting changes reject atomically. Mixed per-measure representation, external inherited defaults, complete score/view relationships and original-GP8 runtime acceptance remain open; presentation-only engraving settings do not become a reusable stylesheet library.",
       "evidence": [
         "notation_provenance",
         "engraving",
-        "engraving_limits"
+        "engraving_limits",
+        "stylesheet_interchange",
+        "stylesheet_interchange_windows",
+        "stylesheet_interchange_limits"
       ]
     },
     {
@@ -497,12 +587,13 @@
   ],
   "limitations": [
     "This is a source/report audit only. No application, test, build, device, Git command or original Guitar Pro runtime was run for this overlay.",
-    "Audit revision 880c0a5 is supplied by the root integrator; this audit does not independently resolve Git state. Evidence files are versioned paths in that delivery workspace.",
+    "Product b73ae93682332c64029777cc4dfeaebfe2a77214, tracking e2ec67b and test-only follow-up f6350fc are supplied by the root integrator; this audit does not independently resolve Git state. Earlier evidence-file hashes retain their original overlay snapshot; the added versioned selection/stylesheet reports have their own recorded hashes.",
     "All 258 historical requirement and acceptance strings, statuses, references, evidence keys and behavior/gaps are copied without modification from the pinned baseline JSON.",
     "Combined current dispositions include carried historical rows. Only evidence_reviewed rows have a non-null current_proven_status; even implemented means the row acceptance in the documented scope, not whole-product parity.",
     "Existing report suite counts and RED-to-GREEN statements are attributed to their versioned reports. Source reads and test-source reads do not constitute new executions.",
     "Actual Windows CPAL/WASAPI and rendered native PDF receipts are distinguished from model tests. They do not establish physical printers, original GP8 acceptance, macOS/Linux, newly shipped installers, human listening equivalence or arbitrary-score engraving freedom.",
-    "Native history, alphaTab GP reimport and source hashes prove bounded preservation properties, not preservation of every target field. Known public reader/writer losses remain explicit."
+    "Native history, alphaTab GP reimport and source hashes prove bounded preservation properties, not preservation of every target field. Known public reader/writer losses remain explicit.",
+    "At the root-observed 2026-10-15 11:09 UTC checkpoint, CI38724478672 macOS frontend/native tests succeeded; packages and complete other-OS results remained pending. This is not a cross-platform CI success claim or physical-platform acceptance. Actual Windows Ctrl-click sparse/drag/end-handle resize acceptance subsequently passed, preserving source and the complete snapshot with a nonempty redo entry; no new PCM was captured. The subsequent independently reviewed actual-wrap oracle meets P03 under the documented reset policy; its logical 48 kHz controlled sample does not establish every effect combination, physical 44.1 kHz/fault behavior or GP8 waveform/historical-tail equivalence."
   ],
   "features": [
     {
@@ -2878,17 +2969,22 @@
       "acceptance_required": "Author common/cut time and asymmetric 7/8 beaming.",
       "runtime_rechecked": false,
       "historical_status": "missing",
-      "current_status": "partial",
-      "current_behavior": "Native common/cut display and explicit asymmetric beaming groups are authored; 7/8 group replay and standard GP beaming are covered.",
-      "remaining_gap": "Common/cut GP stylesheet fidelity remains open. The native loader style-source precedence is established, but no proprietary score.gpss patch or arbitrary per-bar export schema is assumed.",
+      "current_status": "implemented",
+      "current_behavior": "Public controls author common/cut display in 4/4 and 2/2 and asymmetric 7/8 beaming groups [2,2,3]. Native reconstruction and independently inspected/reopened standard GPIF retain explicit beaming. The actual Windows stylesheet run adds inspected common C/cut C/numeric display, save/restart, Undo/Redo and uniform common/cut export/reopen.",
+      "remaining_gap": "No remaining gap identified for the original authoring/display acceptance. Mixed per-measure GP representation, inherited external defaults, complete score/view relationships and original-GP8 runtime acceptance remain separate interchange fidelity limits; reusable stylesheet/default workflows remain missing in D13.",
       "current_evidence": [
         "lyrics_notation",
         "notation_provenance",
         "notation_limits",
-        "bar_source"
+        "bar_source",
+        "common_cut_beaming_test_source",
+        "stylesheet_interchange",
+        "stylesheet_interchange_validation",
+        "stylesheet_interchange_windows",
+        "stylesheet_interchange_limits"
       ],
       "assessment": "evidence_reviewed",
-      "current_proven_status": "partial",
+      "current_proven_status": "implemented",
       "runtime_rechecked_by_this_audit": false
     },
     {
@@ -5261,12 +5357,17 @@
       "acceptance_required": "Click a beat/partial selection and play exactly that region.",
       "runtime_rechecked": false,
       "historical_status": "partial",
-      "current_status": "partial",
-      "assessment": "baseline_not_reaudited",
-      "current_proven_status": null,
-      "current_behavior": "Explicit measure seek exists; score click selection does not generally establish playback start/range.",
-      "remaining_gap": "Not re-audited in this delivery-progress audit. The original baseline behavior, gap and acceptance remain authoritative historical context; this is not a new current proof.",
-      "current_evidence": [],
+      "current_status": "implemented",
+      "assessment": "evidence_reviewed",
+      "current_proven_status": "implemented",
+      "current_behavior": "Canonical score cursor and partial selections resolve to the actual performed route, with explicit repeated-occurrence choices, fresh cursor starts and finite full-mix selection playback. Actual Windows pointer input after zoom/all-track projection, Shift selection, native interval acknowledgement and physical endpoint/cutoff checks satisfy the stated click/partial-selection acceptance. Actual Ctrl-click sparse notes, mouse drag and end-handle resize at 115% zoom/all-track projection also passed literal native interval assertions and complete snapshot/source preservation with a nonempty redo entry; no new PCM capture was required.",
+      "remaining_gap": "No remaining gap identified for the stated Windows click/partial-selection acceptance, including the accepted sparse/drag/end-handle workflow. Hidden simile subdivisions, original-GP8 grace/interior/occurrence equivalence and physical other-platform input/audio remain separate limits.",
+      "current_evidence": [
+        "selection_playback",
+        "selection_playback_validation",
+        "selection_playback_windows",
+        "selection_playback_limits"
+      ],
       "runtime_rechecked_by_this_audit": false
     },
     {
@@ -5291,12 +5392,19 @@
       "acceptance_required": "Loop partial-bar selected notes with correct held-note/FX state.",
       "runtime_rechecked": false,
       "historical_status": "partial",
-      "current_status": "partial",
-      "assessment": "baseline_not_reaudited",
-      "current_proven_status": null,
-      "current_behavior": "Inclusive whole-measure loop only; no note/beat boundaries.",
-      "remaining_gap": "Not re-audited in this delivery-progress audit. The original baseline behavior, gap and acceptance remain authoritative historical context; this is not a new current proof.",
-      "current_evidence": [],
+      "current_status": "implemented",
+      "assessment": "evidence_reviewed",
+      "current_proven_status": "implemented",
+      "current_behavior": "Selected partial-bar intervals arm exact performed loops without autoplay; native passes, Pause/Resume, count-in, progressive practice and sparse/drag/end-handle arming have Windows runtime/output and complete history/source-preservation evidence. Fresh independently reviewed public-boundary native tests render three actual partial-loop wraps at logical 48 kHz, independently asserting 24,000-frame passes, a restored sustained program-mapped 882 Hz held tone with the expected channel gain/pan, and 3,000 silent delay frames despite a nonzero pre-wrap tail. Four controlled fixture mutations fail the positive oracle; the all-targets native suite passes 236 tests with six ignores.",
+      "remaining_gap": "No remaining gap identified for the original partial-loop held-note/FX-state acceptance under the documented deterministic DSP-reset policy. The controlled-sample logical 48 kHz oracle does not certify every effect combination, original-GP8 waveform or historical-tail equivalence, physical 44.1 kHz/macOS/Linux input/audio, or device-fault behavior. Hidden simile subdivisions remain unavailable.",
+      "current_evidence": [
+        "selection_playback",
+        "selection_playback_validation",
+        "selection_playback_windows",
+        "selection_playback_limits",
+        "selection_loop_state_oracle",
+        "selection_loop_state_test_source"
+      ],
       "runtime_rechecked_by_this_audit": false
     },
     {
@@ -5323,12 +5431,15 @@
       "historical_status": "partial",
       "current_status": "implemented",
       "current_behavior": "Ephemeral relative 10–300%, fixed BPM across saved tempo changes and progressive loop training are validated by deterministic timing tests and actual CPAL/WASAPI capture; pitch and document state are preserved.",
-      "remaining_gap": "No remaining gap identified for these practice controls in the documented Windows scenarios. Fixed mode intentionally rejects any embedded backing; full backing/partial-loop parity remains separately partial.",
+      "remaining_gap": "No remaining gap identified for these practice controls in the documented Windows scenarios. Fixed mode intentionally rejects any embedded backing. Selected partial loops are now supported; P03 now meets its held-note/FX loop-wrap acceptance under the documented deterministic-reset policy; physical/platform acceptance remains separate. The bounded Windows sparse/drag/end-handle selection workflow is now accepted.",
       "current_evidence": [
         "practice",
         "practice_validation",
         "practice_limits",
-        "practice_source"
+        "practice_source",
+        "selection_playback",
+        "selection_playback_windows",
+        "selection_playback_limits"
       ],
       "assessment": "evidence_reviewed",
       "current_proven_status": "implemented",
@@ -5356,12 +5467,15 @@
       "historical_status": "missing",
       "current_status": "implemented",
       "current_behavior": "Ephemeral relative 10–300%, fixed BPM across saved tempo changes and progressive loop training are validated by deterministic timing tests and actual CPAL/WASAPI capture; pitch and document state are preserved.",
-      "remaining_gap": "No remaining gap identified for these practice controls in the documented Windows scenarios. Fixed mode intentionally rejects any embedded backing; full backing/partial-loop parity remains separately partial.",
+      "remaining_gap": "No remaining gap identified for these practice controls in the documented Windows scenarios. Fixed mode intentionally rejects any embedded backing. Selected partial loops are now supported; P03 now meets its held-note/FX loop-wrap acceptance under the documented deterministic-reset policy; physical/platform acceptance remains separate. The bounded Windows sparse/drag/end-handle selection workflow is now accepted.",
       "current_evidence": [
         "practice",
         "practice_validation",
         "practice_limits",
-        "practice_source"
+        "practice_source",
+        "selection_playback",
+        "selection_playback_windows",
+        "selection_playback_limits"
       ],
       "assessment": "evidence_reviewed",
       "current_proven_status": "implemented",
@@ -5389,12 +5503,15 @@
       "historical_status": "missing",
       "current_status": "implemented",
       "current_behavior": "Ephemeral relative 10–300%, fixed BPM across saved tempo changes and progressive loop training are validated by deterministic timing tests and actual CPAL/WASAPI capture; pitch and document state are preserved.",
-      "remaining_gap": "No remaining gap identified for these practice controls in the documented Windows scenarios. Fixed mode intentionally rejects any embedded backing; full backing/partial-loop parity remains separately partial.",
+      "remaining_gap": "No remaining gap identified for these practice controls in the documented Windows scenarios. Fixed mode intentionally rejects any embedded backing. Selected partial loops are now supported; P03 now meets its held-note/FX loop-wrap acceptance under the documented deterministic-reset policy; physical/platform acceptance remains separate. The bounded Windows sparse/drag/end-handle selection workflow is now accepted.",
       "current_evidence": [
         "practice",
         "practice_validation",
         "practice_limits",
-        "practice_source"
+        "practice_source",
+        "selection_playback",
+        "selection_playback_windows",
+        "selection_playback_limits"
       ],
       "assessment": "evidence_reviewed",
       "current_proven_status": "implemented",
@@ -6077,8 +6194,8 @@
       "runtime_rechecked": false,
       "historical_status": "partial",
       "current_status": "partial",
-      "current_behavior": "Standard GPIF repairs cover per-note dynamics, non-tab sounding transposition, raw lyrics/visibility, stem inversion, exact offsets, fractional mix state, percussion mappings and richer diagram data.",
-      "remaining_gap": "Original GP8 reopen is unverified. Curves, some phrases/long links, pitched trills, stringed/percussion sounding transpose, common/cut and changed stylesheets remain lossy/unproved. Empty zero-duration chord carriers can become a 960-tick GP rest; some finger/barre data and native recipes cannot roundtrip.",
+      "current_behavior": "Standard GPIF repairs cover per-note dynamics, non-tab sounding transposition, raw lyrics/visibility, stem inversion, exact offsets, fractional mix state, percussion mappings and richer diagram data. Common/cut import now honors current native stylesheet precedence and optional intent; uniform known choices export through the current/legacy style path, untouched opaque members persist, and mixed/inherited/conflicting view changes reject atomically before writing.",
+      "remaining_gap": "Original GP8 reopen explicitly required by this row remains unverified. Curves, some phrases/long links, pitched trills, stringed/percussion sounding transpose, mixed per-measure common/cut representation, inherited external defaults and complete score/view relationships remain lossy/unproved. Empty zero-duration chord carriers can become a 960-tick GP rest; some finger/barre data and native recipes cannot roundtrip. Uniform common/cut support does not establish arbitrary changed-stylesheet fidelity.",
       "current_evidence": [
         "entry_limits",
         "notation_provenance",
@@ -6086,7 +6203,11 @@
         "range_limits",
         "engraving_limits",
         "harmony",
-        "harmony_limits"
+        "harmony_limits",
+        "stylesheet_interchange",
+        "stylesheet_interchange_validation",
+        "stylesheet_interchange_windows",
+        "stylesheet_interchange_limits"
       ],
       "assessment": "evidence_reviewed",
       "current_proven_status": "partial",

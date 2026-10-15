@@ -2,6 +2,8 @@
 
 Date: 2026-10-15. Branch `feat/gp8-parity`; released `main` remains `7fc41c7`. This records the accepted cursor/selection playback delivery against its specification and plan, without changing the historical parity inventory.
 
+Product revision: `b73ae93682332c64029777cc4dfeaebfe2a77214`, committed and remote-verified on `feat/gp8-parity`.
+
 ## Delivered behavior
 
 Canonical cursor and musical-selection coordinates resolve against the actual performed route. Repeated passages require an explicit occurrence; selecting alone sends no playback command. Fresh Play can start at the cursor, Play selection performs one finite full-mix passage, and Loop selection arms the exact interval without autoplay. Resume, acknowledged-loop and explicit measure-Seek intent retain their existing precedence. Native acknowledgement supplies the displayed range and complete clock.

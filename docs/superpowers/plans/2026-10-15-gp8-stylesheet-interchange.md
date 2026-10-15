@@ -10,7 +10,7 @@
 
 **Spec:** [Common/cut stylesheet interchange design](../specs/2026-10-15-gp8-stylesheet-interchange-design.md). Read it in full; its exact signatures, error copy, bounds and unchanged-export policy are normative.
 
-**Tracking update (2026-10-15):** Tasks 1–3 are committed as `8564623`. Task 4 integration and Task 5 checks/reviews are accepted; final source commit/push is pending. Actual native receipt: `style-1792061117306-result.json`; 19 exports, nine rejection/recovery cases and 16 inspected screenshots. Final validation: `docs/validation/2026-10-15-gp8-stylesheet-interchange.md`.
+**Tracking update (2026-10-15):** Tasks 1–5 are delivered, committed and remote-verified (`8564623` codecs/provenance; `b73ae93` integration/acceptance). Actual native receipt: `style-1792061117306-result.json`; 19 exports, nine rejection/recovery cases and 16 inspected screenshots. Final validation: `docs/validation/2026-10-15-gp8-stylesheet-interchange.md`. Target-runtime, inheritance/view fidelity and platform limits remain explicit.
 
 ## Global Constraints
 
@@ -99,7 +99,7 @@
 - [x] Write `adapter_preserves_music_and_source_siblings`: literal standard MIDI note/control events, measure clocks, raw lyrics, harmony/link snapshots and backing bytes match before/after all known-flag projections and GP reopen. Compare all archive members except regenerated GPIF and intentionally changed style members; compare unrelated raw style records separately. Run with both no-XML and existing XML-adapter export paths.
 - [x] Add direct controller and export-coordinator failure tests: mixed/unresolved/view errors reach the existing error surface, no `bridge.exportGp` call occurs, pending/busy state clears and subsequent valid exports still work. Cancel remains existing behavior. Update the export help sentence exactly as specified; test its visible copy without changing dialog flow.
 - [x] Run `npx vitest run src/interchange/stylesheet-replay.test.ts src/interchange/gp.test.ts src/editor/bar-gestures.test.ts src/editor/measures.test.ts src/export/selection.test.ts src/export/useExportCoordinator.test.ts src/controller.test.ts src/export/ExportDialog.test.tsx` and `npm run typecheck`; require GREEN. Request fresh independent root integration review, fix meaningful findings with REDs and obtain scoped acceptance before final verification.
-- [ ] Root stages only accepted owned files and commits a cohesive source change. Commit/branch/push strategy stays under the existing root workflow; do not change main or manufacture an approval gate.
+- [x] Root stages only accepted owned files and commits a cohesive source change. Commit/branch/push strategy stays under the existing root workflow; do not change main or manufacture an approval gate.
 
 ### Task 5: Native application and final evidence
 
@@ -112,7 +112,7 @@
 - [x] Export/reopen uniform true and false through direct and dialog paths; read the actual output current/legacy values independently and compare literal MIDI/events/clocks. Verify unrelated imported conflicting view styles pass with identical bytes, while changed conflicting/mixed/unresolved cases show the specified errors and leave the output file absent or unchanged. A valid export after each failure must succeed.
 - [x] Run the retained authored GPSS fixtures read-only as supplemental evidence; verify their hashes and original DLL hashes unchanged. Do not rerun the old Python producer, which overwrites retained evidence/archives. Do not launch/install/re-decompile GP8 merely to repeat static proof.
 - [x] Write final validation with independent review IDs/hashes, public/native/rendered evidence, exact preservation exceptions and remaining limits. Keep parent/default-style reconstruction, alphaTab's dependency on inactive legacy presentation data, arbitrary view relationships, mixed per-bar GP representation and original-GP8 runtime acceptance explicitly open. Do not change historical baseline counts without a separate requirement audit.
-- [ ] Root verifies the final diff contains no private scores, original binaries/descriptors, ignored evidence or new dependencies, commits/pushes via its standing authorized workflow and verifies the remote SHA. Keep the complete parity goal active unless every original requirement is independently proven complete.
+- [x] Root verifies the final diff contains no private scores, original binaries/descriptors, ignored evidence or new dependencies, commits/pushes via its standing authorized workflow and verifies the remote SHA. Keep the complete parity goal active unless every original requirement is independently proven complete.
 
 ## Self-review and execution handoff
 

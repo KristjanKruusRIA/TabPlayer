@@ -2,6 +2,8 @@
 
 Date: 2026-10-15. Branch `feat/gp8-parity`; released `main` remains `7fc41c7`. This records the bounded common/cut-time stylesheet delivery against the accepted stylesheet specification and plan. Earlier validation records and parity inventory counts remain historical evidence.
 
+Product revision: `b73ae93682332c64029777cc4dfeaebfe2a77214`, committed and remote-verified on `feat/gp8-parity`.
+
 ## Delivered behavior
 
 GP import applies the current `Content/Stylesheets/score.gpss` common/cut setting to eligible 4/4 and 2/2 measures. A present empty optional-boolean wrapper means false; an absent option remains inherited/unknown. A current member takes precedence over legacy styling, including when its option is absent. Legacy-only files use `Staff/drawTimeSignatureC`. Other meters retain their numeric signatures.

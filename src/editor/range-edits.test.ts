@@ -1,10 +1,11 @@
 import { expect,it } from 'vitest';
 import { model,Settings } from '@coderline/alphatab';
 import { music,target } from './fixtures';
-import { applyRangeEdit } from './range-edits';
+import { applyPitchTargets,applyRangeEdit } from './range-edits';
 import { captureNoteLinks } from './links';
 import { exportMidi } from '../export/midi';
 import type { MusicSelection } from './range-types';
+import type { PitchTarget } from './harmony-types';
 
 const at=(beat=0,noteIndex=0,bar=0)=>({target:{...target,bar,beat},noteIndex});
 const notes=(...addresses:ReturnType<typeof at>[]):MusicSelection=>({kind:'notes',notes:addresses});
@@ -113,4 +114,72 @@ it('emits literal MIDI pitches and retained dynamics after transposition and ref
   const guitar=music(),a=beatAt(guitar).notes[0];a.string=1;a.fret=5;a.dynamics=3;applyRangeEdit(guitar,{type:'refingerSelection',selection:notes(at()),maxFret:24});expect(midiNotes(exportMidi(guitar,{tracks:[0],range:{first:0,last:0}}))[0]).toEqual([45,63]);
   const offset=piano();offset.tracks[0].staves[0].transpositionPitch=12;applyRangeEdit(offset,{type:'transposeSelection',selection:notes(at()),semitones:1});expect(midiNotes(exportMidi(offset,{tracks:[0],range:{first:0,last:0}}))[0][0]).toBe(49);
   const octave=piano();beatAt(octave).addNote(Object.assign(new model.Note(),{octave:5,tone:4}));applyRangeEdit(octave,{type:'transposeSelection',selection:notes(at(),at(0,1)),semitones:12});expect(midiNotes(exportMidi(octave,{tracks:[0],range:{first:0,last:0}})).slice(0,2).map(note=>note[0])).toEqual([72,76]);
+});
+
+it('pitch_targets_move_chord_simultaneously without colliding with yet-unmoved chord members',()=>{
+  const score=piano(),beat=beatAt(score);for(const tone of [4,7])beat.addNote(Object.assign(new model.Note(),{octave:5,tone,dynamics:3}));beat.notes[0].dynamics=3;
+  const targets:PitchTarget[]=[{address:at(),pitch:64},{address:at(0,1),pitch:67},{address:at(0,2),pitch:71}],before=JSON.stringify(targets),ids=beat.notes.map(note=>note.id);
+  applyPitchTargets(score,targets);expect(beat.notes.map(note=>[note.realValue,note.dynamics])).toEqual([[64,3],[67,3],[71,3]]);expect(beat.notes.map(note=>note.id)).toEqual(ids);expect(JSON.stringify(targets)).toBe(before);
+  expect(midiNotes(exportMidi(score,{tracks:[0],range:{first:0,last:0}})).slice(0,3)).toEqual([[64,63],[67,63],[71,63]]);
+});
+it('pitch_targets_reject_invalid_final_pitch_address_and_new_collisions_without_mutation',()=>{
+  for(const invalid of [-1,128,NaN,1.5]){const score=piano(),before=fingerprint(score);expect(()=>applyPitchTargets(score,[{address:at(),pitch:64},{address:at(1),pitch:invalid}])).toThrow();expect(fingerprint(score)).toBe(before);}
+  for(const targets of [
+    [{address:at(),pitch:64},{address:at(),pitch:67}],
+    [{address:at(),pitch:64},{address:at(99),pitch:67}],
+    [{address:at(),pitch:64,extra:true}],
+    [{address:{...at(),extra:true},pitch:64}],
+  ]){const score=piano(),before=fingerprint(score);expect(()=>applyPitchTargets(score,targets as PitchTarget[])).toThrow();expect(fingerprint(score)).toBe(before);}
+  const score=piano();beatAt(score).addNote(Object.assign(new model.Note(),{octave:5,tone:4}));const before=fingerprint(score);expect(()=>applyPitchTargets(score,[{address:at(),pitch:64}])).toThrow(/collision|already|duplicate/i);expect(fingerprint(score)).toBe(before);
+});
+it('pitch_targets_use_sounding_offsets_and_preserve_trill_bend_intervals_and_dynamics',()=>{
+  const score=piano(),staff=score.tracks[0].staves[0],note=beatAt(score).notes[0];staff.transpositionPitch=12;note.trillValue=62;note.dynamics=3;note.accidentalMode=model.NoteAccidentalMode.ForceFlat;
+  applyPitchTargets(score,[{address:at(),pitch:52}]);expect(note).toMatchObject({octave:5,tone:4,trillValue:66,dynamics:3,accidentalMode:model.NoteAccidentalMode.Default});expect(note.realValue).toBe(52);expect(midiNotes(exportMidi(score,{tracks:[0],range:{first:0,last:0}}))[0]).toEqual([52,63]);
+  const guitar=music(),g=beatAt(guitar).notes[0];g.string=1;g.fret=5;g.addBendPoint(new model.BendPoint(0,0));g.addBendPoint(new model.BendPoint(60,4));g.trillValue=47;g.dynamics=3;const bend=g.bendPoints,points=bend?.map(point=>[point.offset,point.value]);
+  applyPitchTargets(guitar,[{address:at(),pitch:49}]);expect(g.realValue).toBe(49);expect(g.trillValue).toBe(51);expect(g.dynamics).toBe(3);expect(g.bendPoints).toBe(bend);expect(g.bendPoints?.map(point=>[point.offset,point.value])).toEqual(points);
+});
+it('pitch_targets_assign_nonmonotonic_strings_with_capo_and_offset_and_reserve_unselected_strings',()=>{
+  const score=music(),staff=score.tracks[0].staves[0],beat=beatAt(score),note=beat.notes[0];staff.stringTuning.tunings=[64,45,59,40,55,50,35,60,30];staff.capo=2;staff.transpositionPitch=12;note.string=4;note.fret=0;
+  const fixed=chord(score,6,0),fixedBefore=[fixed.string,fixed.fret,fixed.realValue,fixed.id];expect(note.realValue).toBe(40);
+  applyPitchTargets(score,[{address:at(),pitch:39}]);expect(note.realValue).toBe(39);expect(note.string).not.toBe(4);expect(note.string).not.toBe(6);expect([fixed.string,fixed.fret,fixed.realValue,fixed.id]).toEqual(fixedBefore);
+  expect(note.realValue).toBe(staff.tuning[staff.tuning.length-note.string]+staff.capo-staff.transpositionPitch+note.fret);
+  expect(midiNotes(exportMidi(score,{tracks:[0],range:{first:0,last:0}})).slice(0,2).map(value=>value[0])).toEqual([39,30]);
+});
+it('pitch_targets_keep_equal_internal_ties_and_reject_unequal_mappings_or_lost_continued_bends',()=>{
+  const score=piano(),a=beatAt(score).notes[0],b=beatAt(score,1).notes[0];tie(a,b);let before=fingerprint(score);
+  expect(()=>applyPitchTargets(score,[{address:at(),pitch:64},{address:at(1),pitch:65}])).toThrow(/relationship|tie/i);expect(fingerprint(score)).toBe(before);
+  applyPitchTargets(score,[{address:at(),pitch:64},{address:at(1),pitch:64}]);expect(a.tieDestination).toBe(b);expect(b.tieOrigin).toBe(a);expect([a.realValue,b.realValue]).toEqual([64,64]);
+  const guitar=music(),from=beatAt(guitar).notes[0],to=beatAt(guitar,1).notes[0];tie(from,to);from.addBendPoint(new model.BendPoint(0,0));from.addBendPoint(new model.BendPoint(60,4));to.bendOrigin=from;to.isContinuedBend=true;before=fingerprint(guitar);
+  expect(()=>applyPitchTargets(guitar,[{address:at(1),pitch:68}])).toThrow(/bend/i);expect(fingerprint(guitar)).toBe(before);
+});
+function duplicatePitchTies(stringed=false){
+  const score=stringed?music():piano(),origin=beatAt(score).notes[0],first=beatAt(score,1).notes[0],last=new model.Note();
+  Object.assign(last,stringed?{string:first.string,fret:first.fret}:{octave:first.octave,tone:first.tone});beatAt(score,1).addNote(last);tie(origin,first);tie(origin,last);return {score,origin,first,last};
+}
+it.each([false,true])('pitch_targets_preserve_duplicate_incoming_ties and canonical pointer (stringed=%s)',stringed=>{
+  const {score,origin,first,last}=duplicatePitchTies(stringed),expected=origin.realValue+2;applyPitchTargets(score,[{address:at(),pitch:expected},{address:at(1),pitch:expected},{address:at(1,1),pitch:expected}]);
+  expect([origin.realValue,first.realValue,last.realValue]).toEqual([expected,expected,expected]);expect(origin.tieDestination).toBe(last);expect(first.tieOrigin).toBe(origin);expect(last.tieOrigin).toBe(origin);
+  expect(captureNoteLinks(score).filter(link=>link.kind==='tie')).toEqual([{from:origin.id,to:first.id,kind:'tie'},{from:origin.id,to:last.id,kind:'tie'}]);
+});
+it.each([0,1])('pitch_targets_detach_only_boundary_destination_%s_and_retain_surviving_canonical_edge',index=>{
+  const {score,origin,first,last}=duplicatePitchTies(),removed=index===0?first:last,survivor=index===0?last:first;
+  applyPitchTargets(score,[{address:at(1,index),pitch:64}]);expect(removed.realValue).toBe(64);expect(removed.tieOrigin).toBeNull();expect(removed.isTieDestination).toBe(false);expect(removed.bendOrigin).toBeNull();expect(removed.isContinuedBend).toBe(false);
+  expect(origin.realValue).toBe(60);expect(survivor.realValue).toBe(60);expect(survivor.tieOrigin).toBe(origin);expect(survivor.isTieDestination).toBe(true);expect(origin.tieDestination).toBe(survivor);
+});
+it('pitch_targets_detach_all_boundary_destinations_when_only_origin_moves_and_reject_drums_or_impossible_harmonics',()=>{
+  const {score,origin,first,last}=duplicatePitchTies();applyPitchTargets(score,[{address:at(),pitch:64}]);expect(origin.tieDestination).toBeNull();expect([first.realValue,last.realValue]).toEqual([60,60]);expect([first.tieOrigin,last.tieOrigin]).toEqual([null,null]);
+  const guitar=music(),note=beatAt(guitar).notes[0];note.string=1;note.fret=12;note.harmonicType=model.HarmonicType.Natural;note.harmonicValue=12;let before=fingerprint(guitar);expect(()=>applyPitchTargets(guitar,[{address:at(),pitch:note.realValue+1}])).toThrow();expect(fingerprint(guitar)).toBe(before);
+  const drums=piano();beatAt(drums,1).notes[0].percussionArticulation=38;before=fingerprint(drums);expect(()=>applyPitchTargets(drums,[{address:at(),pitch:64},{address:at(1),pitch:40}])).toThrow(/percussion/i);expect(fingerprint(drums)).toBe(before);
+});
+it('pitch_targets_validate_every_harmonic_member_after_a_shared_duplicate_fingering_plan',()=>{
+  const score=music(),natural=beatAt(score).notes[0];natural.string=1;natural.fret=0;natural.harmonicType=model.HarmonicType.Natural;natural.harmonicValue=12;
+  const artificial=chord(score,1,0);artificial.harmonicType=model.HarmonicType.Artificial;artificial.harmonicValue=12;chord(score,6,20);
+  expect([natural.realValue,artificial.realValue]).toEqual([52,52]);const before=fingerprint(score);
+  expect(()=>applyPitchTargets(score,[{address:at(),pitch:57},{address:at(0,1),pitch:57}])).toThrow(/harmonic|pitch/i);expect(fingerprint(score)).toBe(before);
+});
+it('pitch_targets_reject_intervening_attack_that_would_break_an_untouched_later_duplicate_tie',()=>{
+  const score=piano(),origin=beatAt(score).notes[0],intervening=beatAt(score,1).notes[0],untied=beatAt(score,2).notes[0],destination=new model.Note();intervening.tone=1;destination.octave=5;destination.tone=0;beatAt(score,2).addNote(destination);tie(origin,destination);
+  expect([origin.realValue,intervening.realValue,untied.realValue,destination.realValue]).toEqual([60,61,60,60]);const before=fingerprint(score);
+  expect(()=>applyPitchTargets(score,[{address:at(1),pitch:60}])).toThrow(/relationship|tie/i);expect(fingerprint(score)).toBe(before);expect(origin.tieDestination).toBe(destination);
+  applyPitchTargets(score,[{address:at(1),pitch:62}]);expect(intervening.realValue).toBe(62);expect(origin.tieDestination).toBe(destination);expect(destination.tieOrigin).toBe(origin);expect(untied.tieOrigin).toBeNull();
 });

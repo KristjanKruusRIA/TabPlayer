@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act,cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { App } from './App';
 import { DocumentController } from './controller';
@@ -10,6 +10,11 @@ import type { BuiltDocument } from './engine';
 import { defaultMix } from './document-settings';
 import { DEFAULT_PRACTICE } from './audio/practice-types';
 import type { PlaybackState } from './audio/types';
+import {getHarmonyChord} from './harmony/chord-source';
+import type {HarmonyLibrary,HarmonyLibraryEntry} from './editor/harmony-types';
+const engravingView=vi.hoisted(()=>vi.fn());
+const personalLibrary=vi.hoisted(()=>({read:vi.fn(async():Promise<HarmonyLibrary>=>({format:'TabPlayerHarmonyLibrary',version:1,entries:[]})),put:vi.fn(async(entry:HarmonyLibraryEntry):Promise<HarmonyLibrary>=>({format:'TabPlayerHarmonyLibrary',version:1,entries:[entry]})),remove:vi.fn(async():Promise<HarmonyLibrary>=>({format:'TabPlayerHarmonyLibrary',version:1,entries:[]}))}));
+vi.mock('./harmony/library',async original=>({...await original<typeof import('./harmony/library')>(),readHarmonyLibrary:personalLibrary.read,putHarmonyLibraryEntry:personalLibrary.put,removeHarmonyLibraryEntry:personalLibrary.remove}));
 
 const integration=vi.hoisted(()=>({loadDocument:vi.fn(),beforeScoreChange:vi.fn(),destroy:vi.fn(),stageBacking:vi.fn(),commits:vi.fn(),activeNotes:vi.fn((_trackId:string)=>[]),practiceSpeed:100,practiceFixed:false,setPractice:vi.fn(),exportOptions:vi.fn(),exportBusy:false,exportRun:vi.fn(async()=>true),exportCancel:vi.fn(async()=>{})}));
 vi.mock('./audio/bridge',()=>({nativeAudioBridge:{stageBacking:integration.stageBacking}}));
@@ -29,7 +34,7 @@ vi.mock('./audio/NativePlaybackController',()=>({NativePlaybackController:class 
   setMute=(track:number,mute:boolean)=>this.setMix(track,{mute});setSolo=(track:number,solo:boolean)=>this.setMix(track,{solo});setTrackVolume=(track:number,gain:number)=>this.setMix(track,{gain});setPan=(track:number,pan:number)=>this.setMix(track,{pan});
 }}));
 
-vi.mock('./ScoreView',()=>({ScoreView:({onSelect,track}: {track:number;onSelect: (target: unknown, string: number,noteIndex?:number)=>void}) =>
+vi.mock('./ScoreView',()=>({ScoreView:({onSelect,track,...rest}: {track:number;onSelect: (target: unknown, string: number,noteIndex?:number)=>void}) =>{engravingView({track,...rest});return (
   <><button onClick={()=>onSelect({track:0,staff:0,bar:0,voice:0,beat:1},5)}>Select rendered note</button>
     <button onClick={()=>onSelect({track,staff:0,bar:0,voice:0,beat:0},-1,1)}>Select rendered chord note</button>
     {[
@@ -39,7 +44,7 @@ vi.mock('./ScoreView',()=>({ScoreView:({onSelect,track}: {track:number;onSelect:
       {label:'non-finite voice',field:'voice',value:NaN,string:6},
       {label:'fractional string',field:'beat',value:0,string:1.5},
     ].map(({label,field,value,string})=><button key={label} onClick={()=>onSelect({track:0,staff:0,bar:0,voice:0,beat:0,[field]:value},string)}>Select {label}</button>)}
-  </>}));
+  </>);}}));
 afterEach(()=>{cleanup();vi.clearAllMocks();integration.exportBusy=false;integration.practiceSpeed=100;integration.practiceFixed=false;});
 
 async function setup(initial=blankProject(),openProject?:Project) {
@@ -56,6 +61,67 @@ async function setup(initial=blankProject(),openProject?:Project) {
 const change=(label:string,value:string)=>fireEvent.change(screen.getByLabelText(label),{target:{value}});
 const click=(name:string)=>fireEvent.click(screen.getByRole('button',{name}));
 const currentBeat=(controller:DocumentController,index=0)=>controller.getState().score.tracks[0].staves[0].bars[0].voices[0].beats[index];
+
+it('opens the rich chord editor and keeps text edits from replacing its metadata',async()=>{
+  const chord={name:'Legacy',nameMode:'manual' as const,recipe:null,firstFret:0,frets:[0,19,-1,2,30,0],fingers:[-2,1,-1,0,4,-2],barreFrets:[0,19,19],showName:false,showDiagram:false,showFingering:false};
+  const c=await setup({...blankProject(),edits:[{type:'setHarmonyChord',target:{track:0,staff:0,bar:0,voice:0,beat:0},chord,fillEmptyBeat:false}]});
+  click('Edit chord diagram');const dialog=within(await screen.findByRole('dialog',{name:'Harmony chord'}));await waitFor(()=>expect(dialog.getByRole('button',{name:'Apply chord'})).toBeEnabled());
+  expect(dialog.getByLabelText('Chord name')).toHaveValue('Legacy');fireEvent.click(dialog.getByRole('button',{name:'Apply chord'}));await waitFor(()=>expect(c.getState().snapshot.project.edits).toHaveLength(2));
+  expect(getHarmonyChord(currentBeat(c).chord!)).toEqual(chord);change('Beat text','Exact text');click('Apply beat text');await waitFor(()=>expect(currentBeat(c).text).toBe('Exact text'));
+  expect(c.getState().snapshot.project.edits.at(-1)?.type).toBe('setBeatText');expect(getHarmonyChord(currentBeat(c).chord!)).toEqual(chord);
+  const history=c.getState().snapshot;click('Browse scales');expect(await screen.findByRole('dialog',{name:'Scale browser'})).toBeInTheDocument();click('Close scales');expect(c.getState().snapshot).toBe(history);
+});
+it('keeps personal library management independent of project history and reloads it when opened',async()=>{
+  const c=await setup(),before=c.getState().snapshot;click('Edit chord diagram');let dialog=within(await screen.findByRole('dialog',{name:'Harmony chord'}));await waitFor(()=>expect(dialog.getByRole('button',{name:'Save to library'})).toBeEnabled());
+  fireEvent.change(dialog.getByLabelText('Chord name'),{target:{value:'Personal shape'}});fireEvent.change(dialog.getByLabelText('Library label'),{target:{value:'My chord'}});fireEvent.click(dialog.getByRole('button',{name:'Save to library'}));
+  await waitFor(()=>expect(dialog.getByRole('status')).toHaveTextContent('Saved to library.'));expect(personalLibrary.put).toHaveBeenCalledWith(expect.objectContaining({label:'My chord',chord:expect.objectContaining({name:'Personal shape'})}));expect(c.getState().snapshot).toBe(before);
+  fireEvent.click(dialog.getByRole('button',{name:'Cancel'}));click('New');await waitFor(()=>expect(c.getState().documentEpoch).toBe(1));click('Edit chord diagram');dialog=within(await screen.findByRole('dialog',{name:'Harmony chord'}));await waitFor(()=>expect(dialog.getByRole('button',{name:'Apply chord'})).toBeEnabled());expect(personalLibrary.read).toHaveBeenCalledTimes(2);expect(c.getState().snapshot.project.edits).toHaveLength(0);
+});
+it('applies a named harmony interval through one native history command',async()=>{
+  const c=await setup();change('Fret','5');click('Set note');await waitFor(()=>expect(currentBeat(c).notes[0]?.realValue).toBe(69));click('Select bar');
+  change('Transposition mode','chromatic');change('Interval quality','minor');change('Interval direction','down');click('Transpose harmony');await waitFor(()=>expect(currentBeat(c).notes[0].realValue).toBe(66));
+  expect(c.getState().snapshot.project.edits).toHaveLength(2);expect(c.getState().snapshot.project.edits.at(-1)).toMatchObject({type:'transposeHarmony',interval:{kind:'chromatic',number:3,quality:'minor',direction:'down',octaves:0}});
+  click('Undo');await waitFor(()=>expect(currentBeat(c).notes[0].realValue).toBe(69));
+});
+it('uses the selected staff for scale preview without inventing a passage selection',async()=>{
+  const c=await setup({...blankProject(),edits:[{type:'addTrack',name:'Bass',program:33,tuning:[43,38,33,28]}]});click('Track 2: Bass');const before=c.getState().snapshot;click('Browse scales');
+  const svg=await screen.findByRole('img',{name:'Scale fretboard'}),labels=Array.from(svg.querySelectorAll('text')).filter(node=>node.getAttribute('x')==='3').map(node=>node.textContent);
+  expect(labels).toEqual(['G2','D2','A1','E1']);expect(screen.getByText('Select melodic notes to match scales.')).toBeInTheDocument();expect(c.getState().snapshot).toBe(before);
+});
+it('keeps a late previous-dialog library response from replacing newer records',async()=>{
+  let first!:HarmonyLibraryEntry,resolveFirst!:(value:HarmonyLibrary)=>void;
+  personalLibrary.put.mockImplementationOnce(entry=>{first=entry;return new Promise(resolve=>{resolveFirst=resolve;});});
+  const c=await setup(),before=c.getState().snapshot;click('Edit chord diagram');let dialog=within(await screen.findByRole('dialog',{name:'Harmony chord'}));await waitFor(()=>expect(dialog.getByRole('button',{name:'Save to library'})).toBeEnabled());
+  fireEvent.change(dialog.getByLabelText('Library label'),{target:{value:'First'}});fireEvent.click(dialog.getByRole('button',{name:'Save to library'}));await waitFor(()=>expect(personalLibrary.put).toHaveBeenCalledTimes(1));fireEvent.click(dialog.getByRole('button',{name:'Cancel'}));
+  personalLibrary.read.mockResolvedValueOnce({format:'TabPlayerHarmonyLibrary',version:1,entries:[first]});personalLibrary.put.mockImplementationOnce(async entry=>({format:'TabPlayerHarmonyLibrary',version:1,entries:[first,entry]}));
+  click('Edit chord diagram');dialog=within(await screen.findByRole('dialog',{name:'Harmony chord'}));await waitFor(()=>expect(dialog.getByRole('button',{name:'Save to library'})).toBeEnabled());fireEvent.change(dialog.getByLabelText('Library label'),{target:{value:'Second'}});fireEvent.click(dialog.getByRole('button',{name:'Save to library'}));await waitFor(()=>expect(dialog.getByRole('option',{name:'Second'})).toBeInTheDocument());
+  await act(async()=>{resolveFirst({format:'TabPlayerHarmonyLibrary',version:1,entries:[first]});});expect(dialog.getByRole('option',{name:'Second'})).toBeInTheDocument();expect(c.getState().snapshot).toBe(before);
+});
+
+it.each([{scale:.1,marginMm:15},{scale:1,marginMm:100}])('keeps old print geometry editable with a recoverable page notice: %j',async invalid=>{
+  const project={...blankProject(),edits:[{type:'setPrintLayout' as const,layout:{paper:'A4' as const,orientation:'portrait' as const,profile:'ScoreTab' as const,...invalid}}]},c=await setup(project);
+  expect(screen.getByRole('alert')).toHaveTextContent(/saved print layout/i);expect(c.getState().settings.print).toEqual(project.edits[0].layout);
+  expect(screen.getByLabelText('Width (mm)')).toHaveValue(210);click('Apply page layout');await waitFor(()=>expect(c.getState().settings.page?.widthMm).toBe(210));
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();expect(c.getState().snapshot.project.edits[0]).toEqual(project.edits[0]);
+});
+
+it('keeps track visibility and fractional zoom in session state and resets them on New',async()=>{
+  const c=await setup(),original=c.getState().score;
+  change('Displayed tracks','all');change('Zoom (%)','127.5');
+  expect(engravingView).toHaveBeenLastCalledWith(expect.objectContaining({visibleTracks:[0],zoom:127.5,projection:expect.objectContaining({score:expect.anything()})}));
+  expect(c.getState().snapshot.project.edits).toHaveLength(0);expect(c.getState().score).toBe(original);
+  click('New');await waitFor(()=>expect(c.getState().documentEpoch).toBe(1));
+  expect(screen.getByLabelText('Displayed tracks')).toHaveValue('selected');expect(screen.getByLabelText('Zoom (%)')).toHaveValue(100);
+});
+it('applies engraving and custom page edits once while keeping canonical music through history',async()=>{
+  const c=await setup(),original=c.getState().score;
+  change('Hide dynamics','true');click('Apply engraving');await waitFor(()=>expect(c.getState().settings.engraving.stylesheet.hideDynamics).toBe(true));
+  expect(c.getState().score).toBe(original);expect(c.getState().snapshot.project.edits).toHaveLength(1);
+  change('Width (mm)','250');click('Apply page layout');await waitFor(()=>expect(c.getState().settings.page?.widthMm).toBe(250));
+  expect(c.getState().snapshot.project.edits).toHaveLength(2);expect(c.getState().score).toBe(original);
+  click('Undo');await waitFor(()=>expect(c.getState().settings.page).toBeNull());expect(c.getState().score).toBe(original);
+  click('Redo');await waitFor(()=>expect(c.getState().settings.page?.widthMm).toBe(250));expect(c.getState().score).toBe(original);
+});
 
 it('keeps copied music and paste drafts across unrelated renders and New, with one repeated paste command',async()=>{
   const c=await setup();change('Fret','5');click('Set note');await waitFor(()=>expect(currentBeat(c).notes[0]?.fret).toBe(5));click('Select bar');
@@ -127,7 +193,7 @@ it('clears the indexed chord member after successful clipboard paste',async()=>{
 it('keeps clipboard shortcuts inside the chord modal from editing the score',async()=>{
   const c=await setup({...blankProject(),edits:[{type:'setNote',target:{track:0,staff:0,bar:0,voice:0,beat:0},string:6,fret:3}]});click('Select bar');
   fireEvent.keyDown(screen.getByRole('region',{name:'Score workspace'}),{key:'c',ctrlKey:true});await waitFor(()=>expect(screen.getByLabelText('Paste repetitions')).toBeInTheDocument());
-  click('Edit chord diagram');const dialog=screen.getByRole('dialog',{name:'Chord diagram'}),before=c.getState().snapshot;
+  click('Edit chord diagram');const dialog=screen.getByRole('dialog',{name:'Harmony chord'}),before=c.getState().snapshot;
   const cancel=within(dialog).getByRole('button',{name:'Cancel'});cancel.focus();
   for(const key of ['c','x','v'])fireEvent.keyDown(cancel,{key,ctrlKey:true});
   await waitFor(()=>expect(c.getState().busy).toBe(false));expect(c.getState().snapshot).toBe(before);expect(dialog).toBeInTheDocument();
@@ -164,8 +230,8 @@ it('loads documents into native playback and opening does not reset saved mix',a
   const c=await setup();await waitFor(()=>expect(integration.loadDocument).toHaveBeenCalled());fireEvent.click(screen.getByLabelText('Mute'));await waitFor(()=>expect(c.getState().settings.mixes['base/0'].mute).toBe(true));
   click('New');await waitFor(()=>expect(c.getState().snapshot.project.edits).toHaveLength(0));expect(screen.getByLabelText('Mute')).not.toBeChecked();expect(integration.loadDocument).toHaveBeenLastCalledWith(c.getState().snapshot.project,expect.objectContaining({score:c.getState().score}),0,1);
 });
-it('opens the export dialog and persists print layout through the existing history',async()=>{
-  const c=await setup();click('Export score');expect(screen.getByRole('dialog',{name:'Export score'})).toBeInTheDocument();change('Export format','pdf');change('Paper','Letter');click('Export');await waitFor(()=>expect(c.getState().settings.print.paper).toBe('Letter'));await waitFor(()=>expect(integration.exportRun).toHaveBeenCalledWith(expect.objectContaining({format:'pdf',layout:expect.objectContaining({paper:'Letter'})})));await waitFor(()=>expect(screen.queryByRole('dialog',{name:'Export score'})).not.toBeInTheDocument());
+it('opens the export dialog and persists custom page layout through the existing history',async()=>{
+  const c=await setup();click('Export score');const dialog=within(screen.getByRole('dialog',{name:'Export score'}));change('Export format','pdf');fireEvent.change(dialog.getByLabelText('Width (mm)'),{target:{value:'250'}});fireEvent.click(dialog.getByRole('button',{name:'Apply page layout'}));click('Export');await waitFor(()=>expect(c.getState().settings.page?.widthMm).toBe(250));await waitFor(()=>expect(integration.exportRun).toHaveBeenCalledWith(expect.objectContaining({format:'pdf',page:expect.objectContaining({widthMm:250})})));await waitFor(()=>expect(screen.queryByRole('dialog',{name:'Export score'})).not.toBeInTheDocument());
 });
 it('opens saved mix and recorded voice without creating reset edits',async()=>{
   const saved={...blankProject(),edits:[{type:'setTrackMix' as const,trackId:'base/0',mix:{gain:.4,pan:.2,mute:true,solo:false}}]};const c=await setup(blankProject(),saved);click('Open');await waitFor(()=>expect(c.getState().settings.mixes['base/0'].mute).toBe(true));await waitFor(()=>expect(screen.getByLabelText('Mute')).toBeChecked());expect(c.getState().snapshot.project.edits).toHaveLength(1);expect(integration.commits).not.toHaveBeenCalled();

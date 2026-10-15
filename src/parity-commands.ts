@@ -1,3 +1,7 @@
+import {validateEngraving} from './engraving/projection';
+import {validatePageLayout} from './engraving/page';
+import {validateHarmonyChord} from './harmony/chord-source';
+
 const shapes:Record<string,readonly string[]>={
   setScoreMetadata:['fields'],setDirections:['bar','directions'],setNoteSpelling:['target','noteIndex','accidentalMode'],
   addPitchedTrack:['name','program'],addPercussionTrack:['name','program'],
@@ -13,6 +17,9 @@ const shapes:Record<string,readonly string[]>={
   refingerSelection:['selection','maxFret'],setSelectionSustain:['selection','strings','kind','enabled'],
   insertMeasures:['beforeBar','count'],removeMeasures:['firstBar','lastBar'],
   pasteMusic:['clip','options'],
+  setEngraving:['engraving'],setPageLayout:['layout'],
+  setBeatText:['target','text'],setHarmonyChord:['target','chord','fillEmptyBeat'],
+  transposeHarmony:['selection','interval','includeKeySignatures','includeChords'],
 };
 const metadata=['subTitle','album','words','music','copyright','tab','notices','instructions'];
 function object(value:unknown):Record<string,unknown> {
@@ -34,6 +41,22 @@ function indexed(value:unknown) {
   const result=exact(value,['target','noteIndex']);integer(result.noteIndex);return target(result.target);
 }
 function flag(value:unknown) {if(typeof value!=='boolean')throw new Error('Invalid edit flag.');}
+function signedInteger(value:unknown,min:number,max:number):asserts value is number {
+  if(typeof value!=='number'||!Number.isInteger(value)||value<min||value>max)throw new Error('Invalid harmony interval.');
+}
+function harmonyInterval(value:unknown):boolean {
+  const interval=object(value);
+  if(interval.kind==='semitones'||interval.kind==='diatonic'){
+    const field=interval.kind==='semitones'?'semitones':'steps',limit=interval.kind==='semitones'?127:70;
+    exact(value,['kind',field]);signedInteger(interval[field],-limit,limit);if(interval[field]===0)throw new Error('Choose a nonzero interval.');return interval.kind==='diatonic';
+  }
+  exact(value,['kind','number','quality','direction','octaves']);signedInteger(interval.number,1,7);signedInteger(interval.octaves,0,9);
+  if(interval.kind!=='chromatic'||!['up','down'].includes(interval.direction as string))throw new Error('Invalid chromatic interval.');
+  const perfect=[1,4,5].includes(interval.number),quality=interval.quality;
+  if(!['perfect','major','minor','augmented','diminished'].includes(quality as string)||(quality==='perfect'&&!perfect)||(['major','minor'].includes(quality as string)&&perfect)||(interval.number===1&&quality==='diminished'))throw new Error('Invalid interval quality.');
+  const adjustment=quality==='minor'?-1:quality==='augmented'?1:quality==='diminished'?(perfect?-1:-2):0,magnitude=[0,2,4,5,7,9,11][interval.number-1]+adjustment+interval.octaves*12;
+  if(magnitude===0||magnitude>127)throw new Error('Choose a nonzero interval within 127 semitones.');return false;
+}
 function range(from:unknown,to:unknown) {
   const a=target(from),b=target(to);
   if(a.track!==b.track||a.staff!==b.staff||a.voice!==b.voice||Number(b.bar)<Number(a.bar)||(a.bar===b.bar&&Number(b.beat)<Number(a.beat)))throw new Error('Select a forward range in one voice.');
@@ -43,8 +66,12 @@ function nonempty(value:unknown):unknown[] {
 }
 function unique(keys:unknown[]) {if(new Set(keys).size!==keys.length)throw new Error('Duplicate selection.');}
 export function validateMusicClipEnvelope(value:unknown):void {
-  const clip=exact(value,['format','version','engineVersion','mode','kind','scoreJson','links']);
-  if(clip.format!=='TabPlayerClip'||clip.version!==1||clip.engineVersion!=='1.8.4'||!['singleTrack','multiTrack'].includes(clip.mode as string)||!['phrase','bars'].includes(clip.kind as string))throw new Error('Unsupported musical clipboard.');
+  const v2=object(value).version===2,clip=exact(value,['format','version','engineVersion','mode','kind','scoreJson','links',...v2?['harmony']:[]]);
+  if(clip.format!=='TabPlayerClip'||![1,2].includes(clip.version as number)||clip.engineVersion!=='1.8.4'||!['singleTrack','multiTrack'].includes(clip.mode as string)||!['phrase','bars'].includes(clip.kind as string))throw new Error('Unsupported musical clipboard.');
+  if(v2){
+    if(!Array.isArray(clip.harmony))throw new Error('Invalid clipboard harmony records.');
+    unique(Array.from(clip.harmony,value=>{const record=exact(value,['track','staff','chordId','chord']);integer(record.track);integer(record.staff);if(typeof record.chordId!=='string'||!record.chordId.length)throw new Error('Invalid clipboard chord identity.');validateHarmonyChord(record.chord);return JSON.stringify([record.track,record.staff,record.chordId]);}));
+  }
   if(typeof clip.scoreJson!=='string'||new TextEncoder().encode(clip.scoreJson).byteLength>128000000)throw new Error('Invalid clipboard model size.');
   const json:unknown=JSON.parse(clip.scoreJson,(_key,value:unknown)=>{if(typeof value==='number'&&!Number.isFinite(value))throw new Error('Invalid clipboard number.');return value;});object(json);
   if(!Array.isArray(clip.links))throw new Error('Invalid clipboard links.');
@@ -135,6 +162,14 @@ export function validateParityCommand(value:unknown):void {
   if(type==='insertMeasures'){integer(edit.beforeBar);integer(edit.count,1000);if(edit.count===0)throw new Error('Insert at least one measure.');}
   if(type==='removeMeasures'){integer(edit.firstBar);integer(edit.lastBar);if(Number(edit.firstBar)>Number(edit.lastBar))throw new Error('Invalid measure range.');}
   if(type==='pasteMusic'){validateMusicClipEnvelope(edit.clip);pasteOptions(edit.options);}
+  if(type==='setEngraving')validateEngraving(edit.engraving);
+  if(type==='setPageLayout')validatePageLayout(edit.layout);
+  if(type==='setBeatText'&&typeof edit.text!=='string')throw new Error('Invalid beat text.');
+  if(type==='setHarmonyChord'){flag(edit.fillEmptyBeat);if(edit.chord!==null)validateHarmonyChord(edit.chord);}
+  if(type==='transposeHarmony'){
+    flag(edit.includeKeySignatures);flag(edit.includeChords);
+    if(harmonyInterval(edit.interval)&&(edit.includeKeySignatures||edit.includeChords))throw new Error('Diatonic transposition does not update chords or keys.');
+  }
   if(type==='setScoreMetadata') {
     const fields=exact(edit.fields,metadata);if(Object.values(fields).some(value=>typeof value!=='string'))throw new Error('Invalid score metadata.');
   }

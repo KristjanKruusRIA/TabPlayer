@@ -1,12 +1,16 @@
 import { useEffect,useRef,useState,type KeyboardEvent } from 'react';
 import type { model } from '@coderline/alphatab';
 import { validateSelection,type AudioExportOptions,type ExportOptions,type ExportProgress,type PrintLayout } from './types';
-export function ExportDialog({score,layout,busy,progress,failure,currentSpeedAvailable,onExport,onCancel}:{score:model.Score;layout:PrintLayout;busy:boolean;progress?:ExportProgress;failure?:string|null;currentSpeedAvailable:boolean;onExport:(options:ExportOptions)=>void;onCancel:()=>void}) {
+import type { PageLayout } from '../engraving/types';
+import { PageLayoutPanel } from '../engraving/PageLayoutPanel';
+import { validatePageLayout } from '../engraving/page';
+export function ExportDialog({score,layout,page,busy,progress,failure,currentSpeedAvailable,onExport,onCancel}:{score:model.Score;layout:PrintLayout;page?:PageLayout;busy:boolean;progress?:ExportProgress;failure?:string|null;currentSpeedAvailable:boolean;onExport:(options:ExportOptions)=>void;onCancel:()=>void}) {
   const [format,setFormat]=useState<ExportOptions['format']>('gp');const [tracks,setTracks]=useState(score.tracks.map(t=>t.index));
   const [staves,setStaves]=useState<Record<number,number[]>>(Object.fromEntries(score.tracks.map(t=>[t.index,t.staves.map(s=>s.index)])));
   const [range,setRange]=useState(false),[first,setFirst]=useState('1'),[last,setLast]=useState(String(score.masterBars.length));
   const [print,setPrint]=useState({...layout});const [audio,setAudio]=useState<AudioExportOptions>({sampleRate:48000,bitDepth:16,speed:'saved',metronome:false,tailSeconds:2,backing:true,includeMix:true});
   const [error,setError]=useState('');
+  const [customPage,setCustomPage]=useState(()=>page?structuredClone(page):null);
   const topology=`${score.masterBars.length}:${score.tracks.map(track=>track.staves.length).join(',')}`;
   const dialog=useRef<HTMLDivElement>(null),cancel=useRef<HTMLButtonElement>(null);
   const visibleError=error||progress?.error||failure;
@@ -36,8 +40,9 @@ export function ExportDialog({score,layout,busy,progress,failure,currentSpeedAva
       const partial=Object.fromEntries(tracks.filter(t=>staves[t].length!==score.tracks[t].staves.length).map(t=>[t,staves[t]]));
       const selection={tracks,range:range?{first:Number(first)-1,last:Number(last)-1}:null,...(Object.keys(partial).length?{staves:partial}:{})};validateSelection(score.tracks.length,score.masterBars.length,selection,score.tracks.map(t=>t.staves.length));
       if(!Number.isFinite(audio.tailSeconds)||audio.tailSeconds<0||audio.tailSeconds>30)throw new Error('Effect tail must be between 0 and 30 seconds.');
-      if(!Number.isFinite(print.marginMm)||print.marginMm<0||print.marginMm>50||!Number.isFinite(print.scale)||print.scale<.25||print.scale>3)throw new Error('Use margins from 0 to 50 mm and scale from 25% to 300%.');
-      setError('');onExport(format==='pdf'||format==='print'?{format,selection,layout:print}:format==='wav'||format==='stems'?{format,selection,audio}:{format,selection});
+      if((format==='pdf'||format==='print')&&!customPage&&(!Number.isFinite(print.marginMm)||print.marginMm<0||print.marginMm>50||!Number.isFinite(print.scale)||print.scale<.25||print.scale>3))throw new Error('Use margins from 0 to 50 mm and scale from 25% to 300%.');
+      if((format==='pdf'||format==='print')&&customPage)validatePageLayout(customPage);
+      setError('');onExport(format==='pdf'||format==='print'?{format,selection,layout:print,...(customPage?{page:structuredClone(customPage)}:{})}:format==='wav'||format==='stems'?{format,selection,audio}:{format,selection});
     }catch(e){setError((e as Error).message);}
   }
   return <div className="dialog-backdrop"><div ref={dialog} onKeyDown={handleKeyDown} role="dialog" aria-modal="true" aria-label="Export score" className="export-dialog"><h2>Export score</h2>
@@ -48,13 +53,14 @@ export function ExportDialog({score,layout,busy,progress,failure,currentSpeedAva
         <label><input type="checkbox" checked={range} onChange={e=>setRange(e.target.checked)}/>Measure range</label>
         {range&&<><label>First measure<input type="number" min="1" max={score.masterBars.length} step="1" value={first} onChange={e=>setFirst(e.target.value)}/></label><label>Last measure<input type="number" min="1" max={score.masterBars.length} step="1" value={last} onChange={e=>setLast(e.target.value)}/></label></>}
       </>
-      {(format==='pdf'||format==='print')&&<>
+      {(format==='pdf'||format==='print')&&(customPage?<PageLayoutPanel value={customPage} busy={busy} onEdit={command=>setCustomPage(command.layout)}/>:<>
         <label>Paper<select value={print.paper} onChange={e=>setPrint({...print,paper:e.target.value as PrintLayout['paper']})}><option>A4</option><option>Letter</option></select></label>
         <label>Orientation<select value={print.orientation} onChange={e=>setPrint({...print,orientation:e.target.value as PrintLayout['orientation']})}><option value="portrait">Portrait</option><option value="landscape">Landscape</option></select></label>
         <label>Margin (mm)<input type="number" min="0" max="50" value={print.marginMm} onChange={e=>setPrint({...print,marginMm:Number(e.target.value)})}/></label>
         <label>Print scale (%)<input type="number" min="25" max="300" value={print.scale*100} onChange={e=>setPrint({...print,scale:Number(e.target.value)/100})}/></label>
         <label>Staves<select value={print.profile} onChange={e=>setPrint({...print,profile:e.target.value as PrintLayout['profile']})}><option value="ScoreTab">Score and tab</option><option value="Score">Score</option><option value="Tab">Tab</option></select></label>
-      </>}
+      </>)}
+      {(format==='gp'||format==='pdf'||format==='print')&&<p>Engraving settings affect the screen and PDF. GP export preserves the source stylesheet.</p>}
       {format==='midi'&&<p>MIDI preserves generated notes and controls. Ordinary MIDI players share pitch bends on a channel, so simultaneous independent bends may differ.</p>}
       {(format==='wav'||format==='stems')&&<>
         <label>Sample rate<select value={audio.sampleRate} onChange={e=>setAudio({...audio,sampleRate:Number(e.target.value) as AudioExportOptions['sampleRate']})}><option value="44100">44.1 kHz</option><option value="48000">48 kHz</option></select></label>

@@ -4,6 +4,8 @@ import type { GestureCommand, BarGestureCommand } from './editor/gestures-types'
 import type { RangeCommand } from './editor/range-types';
 import type { MeasureCommand } from './editor/measures-types';
 import type { ClipboardCommand } from './editor/clipboard-types';
+import type { EngravingCommand,EngravingOverrides,PageLayout } from './engraving/types';
+import type { HarmonyCommand } from './editor/harmony-types';
 
 export interface NoteTarget { target: BeatTarget; string: number }
 export interface IndexedNoteTarget { target: BeatTarget; noteIndex: number }
@@ -47,9 +49,10 @@ export interface PrintLayout {
 }
 export interface DocumentSettings {
   sounds: Record<string,TrackSound>; mixes: Record<string,ChannelMix>; backing: BackingSettings|null; print: PrintLayout;
+  engraving:EngravingOverrides;page:PageLayout|null;
 }
 
-export type EditCommand = LyricsCommand | GestureCommand | BarGestureCommand | RangeCommand | MeasureCommand | ClipboardCommand
+export type EditCommand = LyricsCommand | GestureCommand | BarGestureCommand | RangeCommand | MeasureCommand | ClipboardCommand | EngravingCommand | HarmonyCommand
   | { type: 'setNote'; target: BeatTarget; string: number; fret: number }
   | { type: 'removeNote'; target: BeatTarget; string: number }
   | { type: 'setRest'; target: BeatTarget }
@@ -94,6 +97,6 @@ export type EditCommand = LyricsCommand | GestureCommand | BarGestureCommand | R
   | { type: 'setBacking'; backing: BackingSettings|null }
   | { type: 'setPrintLayout'; layout: PrintLayout };
 
-export type SettingsEdit = Extract<EditCommand,{type:'setTrackSound'|'setTrackMix'|'setBacking'|'setPrintLayout'}>;
+export type SettingsEdit = Extract<EditCommand,{type:'setTrackSound'|'setTrackMix'|'setBacking'|'setPrintLayout'|'setEngraving'|'setPageLayout'}>;
 export const isSettingsEdit = (edit: EditCommand): edit is SettingsEdit =>
-  ['setTrackSound','setTrackMix','setBacking','setPrintLayout'].includes(edit.type);
+  ['setTrackSound','setTrackMix','setBacking','setPrintLayout','setEngraving','setPageLayout'].includes(edit.type);

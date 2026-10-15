@@ -1,4 +1,5 @@
 use crate::audio::dsp::FxSettings;
+use crate::engraving::{EngravingOverrides, PageLayout};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -160,6 +161,10 @@ pub struct DocumentSettings {
     #[serde(deserialize_with = "crate::edit_types::required_nullable")]
     pub backing: Option<BackingSettings>,
     pub print: PrintLayout,
+    #[serde(default)]
+    pub engraving: EngravingOverrides,
+    #[serde(default)]
+    pub page: Option<PageLayout>,
 }
 impl DocumentSettings {
     pub fn validate(&self) -> Result<(), String> {
@@ -178,6 +183,11 @@ impl DocumentSettings {
         if let Some(backing) = &self.backing {
             backing.validate()?;
         }
-        self.print.validate()
+        self.print.validate()?;
+        self.engraving.validate()?;
+        if let Some(page) = &self.page {
+            page.validate()?;
+        }
+        Ok(())
     }
 }

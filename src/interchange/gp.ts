@@ -7,6 +7,8 @@ import { preparePitchedGpScore } from './pitched';
 import { copyLyricsSources,getLyricsSource } from '../editor/lyrics-source';
 import { readGpifLyrics,writeGpifLyrics } from './lyrics';
 import { writeGpifNotation } from './notation';
+import { readGpifHarmony,writeGpifHarmony } from './harmony';
+import { copyHarmonySources } from '../harmony/chord-source';
 import { scoreFromJson } from '../model-clone';
 import { captureNoteLinks,restoreNoteLinks } from '../editor/links';
 
@@ -29,12 +31,32 @@ function orderedTracks(doc:Document){
 }
 const text=(node:Element,name:string)=>node.querySelector(`:scope > ${name}`)?.textContent??'';
 
+function prepareHarmonyGpCarriers(score:model.Score,settings:Settings):model.Score {
+  const carriers=score.tracks.flatMap((track,trackIndex)=>track.staves.flatMap((staff,staffIndex)=>staff.bars.flatMap((bar,barIndex)=>bar.voices.flatMap((voice,voiceIndex)=>voice.isEmpty&&voice.beats.some(beat=>beat.hasChord)?[{track:trackIndex,staff:staffIndex,bar:barIndex,voice:voiceIndex}]:[]))));
+  if(!carriers.length)return score;
+  for(const target of carriers){
+    const voice=score.tracks[target.track].staves[target.staff].bars[target.bar].voices[target.voice],beat=voice.beats[0];
+    if(voice.beats.length!==1||!beat.isEmpty||beat.notes.length||beat.duration!==model.Duration.Quarter||beat.dots!==0||beat.tupletNumerator>0||beat.tupletDenominator>0||beat.graceType!==model.GraceType.None||beat.overrideDisplayDuration!==undefined)throw new Error('GP export supports an annotated empty carrier only with one existing plain quarter rhythm.');
+    const clock=voice.bar.masterBar.calculateDuration();if(!Number.isFinite(clock)||clock<960)throw new Error('The empty chord carrier would extend the existing measure clock in GP export.');
+  }
+  const copy=scoreFromJson(model.JsonConverter.scoreToJson(score),settings);restoreNoteLinks(copy,captureNoteLinks(score));copyGpInterchangeSource(score,copy);
+  for(const target of carriers){
+    const voice=copy.tracks[target.track].staves[target.staff].bars[target.bar].voices[target.voice],beat=voice.beats[0];
+    // The public writer omits empty Voice references. GP therefore needs this
+    // existing silent carrier represented as a rest on the detached export only.
+    beat.isEmpty=false;voice.beats=[];voice.addBeat(beat);
+  }
+  if(copy.masterBars.some((bar,index)=>bar.calculateDuration()!==score.masterBars[index].calculateDuration()))throw new Error('The empty chord carrier would change the existing measure clock in GP export.');
+  return copy;
+}
+
 export function loadInterchangeScore(bytes:Uint8Array,settings:Settings):model.Score {
   const score=importer.ScoreLoader.loadScoreFromBytes(bytes,settings);
   if(bytes[0]!==0x50||bytes[1]!==0x4b)return score;
   const entries=unzip(bytes,settings);if(!entries[gpifPath])return score;
   const xml=new TextDecoder(settings.importer.encoding).decode(entries[gpifPath]),doc=parseXml(projectGpifTracks(xml)?.xml??xml);
   readGpifLyrics(score,doc);
+  readGpifHarmony(score,doc);
   orderedTracks(doc).forEach((node,index)=>{
     const track=score.tracks[index];if(!node||!track)return;
     const transpose=node.querySelector(':scope > Transpose');
@@ -58,6 +80,7 @@ export function loadInterchangeScore(bytes:Uint8Array,settings:Settings):model.S
 }
 export function exportGpInterchange(score:model.Score,settings:Settings):Uint8Array {
   const source=score;score=preparePitchedGpScore(score,settings);copyGpInterchangeSource(source,score);
+  score=prepareHarmonyGpCarriers(score,settings);
   const lyricBeatIds=new Set<number>();
   const allBeats=(value:model.Score)=>value.tracks.flatMap(track=>track.staves.flatMap(staff=>staff.bars.flatMap(bar=>bar.voices.flatMap(voice=>voice.beats))));
   if(allBeats(score).some(beat=>beat.lyrics?.some(text=>text.includes(']]>')))){
@@ -70,14 +93,15 @@ export function exportGpInterchange(score:model.Score,settings:Settings):Uint8Ar
   const beatIds=new Set([...lyricBeatIds,...allBeats(score).filter(beat=>beat.invertBeamDirection).map(beat=>beat.id)]);
   const masterBars=score.masterBars.some(bar=>!!bar.fermata?.size),notation=beatIds.size||masterBars?{beatIds,masterBars}:undefined;
   const lyrics=score.tracks.some(track=>{const source=getLyricsSource(track);return source&&(source.managed||!source.value.visible||source.value.lines.some(line=>line.text.length>0));});
-  const raw=new exporter.Gp7Exporter().export(score,settings),changes=score.tracks.map(trackMixAutomations),needsXml=lyrics||!!notation||changes.some(stream=>stream.length>0)||score.tracks.some(track=>track.isPercussion);
+  const harmony=score.tracks.some(track=>track.staves.some(staff=>!!staff.chords?.size));
+  const raw=new exporter.Gp7Exporter().export(score,settings),changes=score.tracks.map(trackMixAutomations),needsXml=harmony||lyrics||!!notation||changes.some(stream=>stream.length>0)||score.tracks.some(track=>track.isPercussion);
   const original=sourceEntries.get(score);
   if(!needsXml&&!original)return raw;
   const generated=unzip(raw,settings);
   if(!needsXml)return zipSync({...generated,...original,[gpifPath]:generated[gpifPath]});
   const xml=new TextDecoder().decode(generated[gpifPath]),projection=projectGpifTracks(xml,notation),doc=parseXml(projection?.xml??xml);
   const references=writePercussionReferences(score,doc,settings);
-  writeGpifLyrics(score,doc);writeGpifNotation(score,doc);
+  writeGpifLyrics(score,doc);writeGpifNotation(score,doc);if(harmony)writeGpifHarmony(score,doc);
   for(const node of doc.querySelectorAll('GPIF > Beats > Beat'))if(lyricBeatIds.has(Number(node.getAttribute('id')))){
     // alphaTab's reader keeps only the final adjacent CDATA chunk. Plain XML
     // text retains the combined literal syllable for both readers.
@@ -127,6 +151,7 @@ export function exportGpInterchange(score:model.Score,settings:Settings):Uint8Ar
 /** Carry source archive siblings and binary backing data omitted by model JSON. */
 export function copyGpInterchangeSource(source:model.Score,destination:model.Score):void {
   copyLyricsSources(source,destination);
+  copyHarmonySources(source,destination);
   const entries=sourceEntries.get(source);if(entries)sourceEntries.set(destination,entries);
   if(source.backingTrack?.rawAudioFile&&!destination.backingTrack?.rawAudioFile) {
     destination.backingTrack??=new model.BackingTrack();destination.backingTrack.rawAudioFile=source.backingTrack.rawAudioFile.slice();

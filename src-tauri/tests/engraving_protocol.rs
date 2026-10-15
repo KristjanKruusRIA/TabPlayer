@@ -1,0 +1,480 @@
+use serde_json::{Value, json};
+use tabplayer_lib::{
+    engraving::{EngravingOverrides, PageLayout},
+    project::{EditCommand, Project, ProjectSession},
+    settings::DocumentSettings,
+};
+
+fn engraving() -> Value {
+    json!({
+        "stylesheet": {
+            "hideDynamics": null, "brackets": "inherit", "extendBarLines": null,
+            "systemSeparators": null, "tuning": null, "chords": "inherit",
+            "singleNames": "inherit", "multiNames": "inherit", "firstNames": "inherit",
+            "otherNames": "inherit", "firstNameDirection": "inherit",
+            "otherNameDirection": "inherit", "barNumbers": "inherit", "multiRests": "inherit",
+            "hideEmptyStaves": null, "hideEmptyFirstSystem": null, "singleStaffBrackets": null
+        },
+        "notation": {
+            "tabRhythm": "inherit", "fingering": "inherit", "smallGraceTab": null,
+            "extendBendArrows": null, "extendLineEffects": null, "parenthesizeTiedBends": null,
+            "showTiedBendNumbers": null, "showDiveWhammyZeros": null
+        },
+        "systemSpacing": null, "profiles": []
+    })
+}
+
+fn page() -> Value {
+    json!({"widthMm": 180.0, "heightMm": 240.0,
+        "marginsMm": {"top": 10.0, "right": 12.0, "bottom": 14.0, "left": 16.0},
+        "scale": 1.0, "profile": "document"})
+}
+
+fn engraving_command() -> Value {
+    let mut value = engraving();
+    value["profiles"] = json!([{"trackId": "base/0", "profile": "source"}]);
+    json!({"type": "setEngraving", "engraving": value})
+}
+
+fn page_command() -> Value {
+    json!({"type": "setPageLayout", "layout": page()})
+}
+
+fn accepted(value: &Value) -> EditCommand {
+    let command: EditCommand = serde_json::from_value(value.clone())
+        .unwrap_or_else(|error| panic!("Expected command {value}: {error}"));
+    command
+        .validate()
+        .unwrap_or_else(|error| panic!("Expected valid command {value}: {error}"));
+    command
+}
+
+fn rejected(value: &Value) {
+    assert!(
+        serde_json::from_value::<EditCommand>(value.clone())
+            .map(|command| command.validate().is_err())
+            .unwrap_or(true),
+        "Accepted invalid command {value}"
+    );
+}
+
+#[test]
+fn engraving_commands_roundtrip_complete_nullable_and_explicit_overrides() {
+    let mut styled = engraving_command();
+    styled["engraving"]["stylesheet"]["hideDynamics"] = json!(false);
+    styled["engraving"]["notation"]["showTiedBendNumbers"] = json!(true);
+    styled["engraving"]["systemSpacing"] = json!(1.25);
+    for value in [engraving_command(), page_command(), styled] {
+        assert_eq!(serde_json::to_value(accepted(&value)).unwrap(), value);
+    }
+}
+
+#[test]
+fn engraving_commands_require_every_nested_field_and_reject_unknown_fields() {
+    for (value, paths) in [
+        (
+            engraving_command(),
+            vec![
+                "",
+                "/engraving",
+                "/engraving/stylesheet",
+                "/engraving/notation",
+                "/engraving/profiles/0",
+            ],
+        ),
+        (page_command(), vec!["", "/layout", "/layout/marginsMm"]),
+    ] {
+        for path in paths {
+            let mut unknown = value.clone();
+            unknown.pointer_mut(path).unwrap()["unexpected"] = json!(true);
+            rejected(&unknown);
+            for field in value.pointer(path).unwrap().as_object().unwrap().keys() {
+                let mut missing = value.clone();
+                missing
+                    .pointer_mut(path)
+                    .unwrap()
+                    .as_object_mut()
+                    .unwrap()
+                    .remove(field);
+                rejected(&missing);
+            }
+        }
+    }
+}
+
+#[test]
+fn engraving_nullable_booleans_accept_inheritance_and_reject_other_types() {
+    for (group, fields) in [
+        (
+            "stylesheet",
+            vec![
+                "hideDynamics",
+                "extendBarLines",
+                "systemSeparators",
+                "tuning",
+                "hideEmptyStaves",
+                "hideEmptyFirstSystem",
+                "singleStaffBrackets",
+            ],
+        ),
+        (
+            "notation",
+            vec![
+                "smallGraceTab",
+                "extendBendArrows",
+                "extendLineEffects",
+                "parenthesizeTiedBends",
+                "showTiedBendNumbers",
+                "showDiveWhammyZeros",
+            ],
+        ),
+    ] {
+        for field in fields {
+            for valid in [json!(null), json!(true), json!(false)] {
+                let mut value = engraving_command();
+                value["engraving"][group][field] = valid;
+                accepted(&value);
+            }
+            for invalid in [json!(0), json!(1), json!("true"), json!([]), json!({})] {
+                let mut value = engraving_command();
+                value["engraving"][group][field] = invalid;
+                rejected(&value);
+            }
+        }
+    }
+}
+
+#[test]
+fn engraving_named_modes_accept_only_the_specified_string_domains() {
+    for (path, modes) in [
+        (
+            "/engraving/stylesheet/brackets",
+            vec!["inherit", "none", "staves", "similar"],
+        ),
+        (
+            "/engraving/stylesheet/chords",
+            vec!["inherit", "hidden", "top", "inline", "both"],
+        ),
+        (
+            "/engraving/stylesheet/singleNames",
+            vec!["inherit", "hidden", "firstSystem", "allSystems"],
+        ),
+        (
+            "/engraving/stylesheet/multiNames",
+            vec!["inherit", "hidden", "firstSystem", "allSystems"],
+        ),
+        (
+            "/engraving/stylesheet/firstNames",
+            vec!["inherit", "full", "short"],
+        ),
+        (
+            "/engraving/stylesheet/otherNames",
+            vec!["inherit", "full", "short"],
+        ),
+        (
+            "/engraving/stylesheet/firstNameDirection",
+            vec!["inherit", "horizontal", "vertical"],
+        ),
+        (
+            "/engraving/stylesheet/otherNameDirection",
+            vec!["inherit", "horizontal", "vertical"],
+        ),
+        (
+            "/engraving/stylesheet/barNumbers",
+            vec!["inherit", "all", "firstSystem", "hidden"],
+        ),
+        (
+            "/engraving/stylesheet/multiRests",
+            vec!["inherit", "off", "on"],
+        ),
+        (
+            "/engraving/notation/tabRhythm",
+            vec!["inherit", "auto", "hidden", "beams", "connected"],
+        ),
+        (
+            "/engraving/notation/fingering",
+            vec!["inherit", "score", "piano", "above", "abovePiano"],
+        ),
+        (
+            "/engraving/profiles/0/profile",
+            vec![
+                "source",
+                "standard",
+                "tablature",
+                "standardTab",
+                "slash",
+                "numbered",
+            ],
+        ),
+    ] {
+        for mode in modes {
+            let mut value = engraving_command();
+            *value.pointer_mut(path).unwrap() = json!(mode);
+            assert_eq!(serde_json::to_value(accepted(&value)).unwrap(), value);
+        }
+        for invalid in [
+            json!("unknown"),
+            json!(0),
+            json!(null),
+            json!({"inherit": null}),
+        ] {
+            let mut value = engraving_command();
+            *value.pointer_mut(path).unwrap() = invalid;
+            rejected(&value);
+        }
+    }
+    for profile in ["document", "ScoreTab", "Score", "Tab"] {
+        let mut value = page_command();
+        value["layout"]["profile"] = json!(profile);
+        assert_eq!(serde_json::to_value(accepted(&value)).unwrap(), value);
+    }
+    for invalid in [
+        json!("scoreTab"),
+        json!("inherit"),
+        json!(null),
+        json!({"document": null}),
+    ] {
+        let mut value = page_command();
+        value["layout"]["profile"] = invalid;
+        rejected(&value);
+    }
+}
+
+#[test]
+fn engraving_profile_ids_are_nonempty_distinct_and_not_score_resolved_natively() {
+    let mut value = engraving_command();
+    value["engraving"]["profiles"] = json!([
+        {"trackId": "removed/track", "profile": "numbered"},
+        {"trackId": "future/track", "profile": "tablature"}
+    ]);
+    accepted(&value);
+    value["engraving"]["profiles"][1]["trackId"] = json!("removed/track");
+    rejected(&value);
+    for invalid in [json!(""), json!(null), json!(0)] {
+        value["engraving"]["profiles"][1]["trackId"] = invalid;
+        rejected(&value);
+    }
+    value["engraving"]["profiles"] = json!([]);
+    accepted(&value);
+    value["engraving"]["profiles"] = json!(null);
+    rejected(&value);
+}
+
+#[test]
+fn engraving_system_spacing_requires_null_or_a_bounded_factor() {
+    for valid in [json!(null), json!(0.25), json!(4.0)] {
+        let mut value = engraving_command();
+        value["engraving"]["systemSpacing"] = valid;
+        accepted(&value);
+    }
+    for invalid in [json!(0.249), json!(4.001), json!(-1), json!("1"), json!({})] {
+        let mut value = engraving_command();
+        value["engraving"]["systemSpacing"] = invalid;
+        rejected(&value);
+    }
+}
+
+#[test]
+fn engraving_page_geometry_has_bounded_dimensions_scale_and_independent_margins() {
+    for (field, values) in [
+        ("widthMm", vec![19.99, 1000.01, -1.0]),
+        ("heightMm", vec![19.99, 1000.01, -1.0]),
+        ("scale", vec![0.249, 3.001, 0.0]),
+    ] {
+        for invalid in values {
+            let mut value = page_command();
+            value["layout"][field] = json!(invalid);
+            rejected(&value);
+        }
+        let mut value = page_command();
+        value["layout"][field] = json!(null);
+        rejected(&value);
+    }
+    for scale in [0.25, 3.0] {
+        let mut value = page_command();
+        value["layout"]["scale"] = json!(scale);
+        accepted(&value);
+    }
+    let mut large = page_command();
+    large["layout"]["widthMm"] = json!(1000.0);
+    large["layout"]["heightMm"] = json!(1000.0);
+    accepted(&large);
+    for field in ["top", "right", "bottom", "left"] {
+        for invalid in [json!(-0.001), json!(1000.0), json!(null), json!("10")] {
+            let mut value = page_command();
+            value["layout"]["marginsMm"][field] = invalid;
+            rejected(&value);
+        }
+    }
+}
+
+#[test]
+fn engraving_page_body_reserves_the_header_footer_and_at_least_100_pixels() {
+    let mut value = page_command();
+    value["layout"]["widthMm"] = json!(100.0);
+    value["layout"]["heightMm"] = json!(100.0);
+    value["layout"]["marginsMm"] = json!({"top": 0.0, "right": 0.0, "bottom": 0.0, "left": 0.0});
+    for (axis, dimension, reservation) in [("right", 100.0, 0.0), ("bottom", 100.0, 64.0)] {
+        value["layout"]["marginsMm"][axis] = json!(dimension - (101.0 + reservation) * 25.4 / 96.0);
+        accepted(&value);
+        value["layout"]["marginsMm"][axis] = json!(dimension - (99.0 + reservation) * 25.4 / 96.0);
+        rejected(&value);
+        value["layout"]["marginsMm"][axis] = json!(0.0);
+    }
+}
+
+#[test]
+fn engraving_grouped_pixel_width_accepts_exactly_100_pixels() {
+    let mut value = page_command();
+    value["layout"]["widthMm"] = json!(100.0);
+    value["layout"]["marginsMm"]["left"] = json!(16.0);
+    value["layout"]["marginsMm"]["right"] = json!(57.54166666666667);
+    accepted(&value);
+}
+
+#[test]
+fn engraving_grouped_pixel_width_rejects_just_below_100_pixels() {
+    let mut value = page_command();
+    value["layout"]["widthMm"] = json!(50.0);
+    value["layout"]["marginsMm"]["left"] = json!(0.0);
+    value["layout"]["marginsMm"]["right"] = json!(23.541666666666668);
+    rejected(&value);
+}
+
+#[test]
+fn engraving_grouped_pixel_height_accepts_exactly_100_pixels_after_headers() {
+    let mut value = page_command();
+    value["layout"]["heightMm"] = json!(70.0);
+    value["layout"]["marginsMm"]["top"] = json!(0.0);
+    value["layout"]["marginsMm"]["bottom"] = json!(26.608333333333345);
+    accepted(&value);
+}
+
+#[test]
+fn engraving_grouped_pixel_height_rejects_just_below_100_pixels_after_headers() {
+    let mut value = page_command();
+    value["layout"]["heightMm"] = json!(50.0);
+    value["layout"]["marginsMm"]["top"] = json!(0.0);
+    value["layout"]["marginsMm"]["bottom"] = json!(6.608333333333339);
+    rejected(&value);
+}
+
+#[test]
+fn engraving_page_rejects_finite_margins_that_overflow_pixel_conversion() {
+    let mut value: PageLayout = serde_json::from_value(page()).unwrap();
+    value.margins_mm.left = f64::MAX;
+    assert!(value.validate().is_err());
+}
+
+#[test]
+fn engraving_native_float_validation_rejects_nonfinite_spacing_and_geometry() {
+    for invalid in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        let mut value = EngravingOverrides::default();
+        value.system_spacing = Some(invalid);
+        assert!(value.validate().is_err());
+        for field in [
+            "widthMm", "heightMm", "scale", "top", "right", "bottom", "left",
+        ] {
+            let mut value: PageLayout = serde_json::from_value(page()).unwrap();
+            match field {
+                "widthMm" => value.width_mm = invalid,
+                "heightMm" => value.height_mm = invalid,
+                "scale" => value.scale = invalid,
+                "top" => value.margins_mm.top = invalid,
+                "right" => value.margins_mm.right = invalid,
+                "bottom" => value.margins_mm.bottom = invalid,
+                _ => value.margins_mm.left = invalid,
+            }
+            assert!(value.validate().is_err(), "Accepted nonfinite {field}");
+        }
+    }
+}
+
+#[test]
+fn engraving_derived_settings_default_only_missing_new_top_level_fields() {
+    let old = json!({"sounds": {}, "mixes": {}, "backing": null, "print": {
+        "paper": "A4", "orientation": "portrait", "marginMm": 15.0, "scale": 1.0, "profile": "ScoreTab"
+    }});
+    let settings: DocumentSettings = serde_json::from_value(old.clone()).unwrap();
+    settings.validate().unwrap();
+    let derived = serde_json::to_value(settings).unwrap();
+    assert_eq!(derived["engraving"], engraving());
+    assert_eq!(derived.get("page"), Some(&Value::Null));
+    assert_eq!(derived["print"], old["print"]);
+    for field in ["sounds", "mixes", "backing", "print"] {
+        let mut missing = old.clone();
+        missing.as_object_mut().unwrap().remove(field);
+        assert!(serde_json::from_value::<DocumentSettings>(missing).is_err());
+    }
+    for field in ["engraving", "page"] {
+        let mut missing = derived.clone();
+        missing.as_object_mut().unwrap().remove(field);
+        let restored: DocumentSettings = serde_json::from_value(missing).unwrap();
+        assert_eq!(serde_json::to_value(restored).unwrap(), derived);
+    }
+    assert_eq!(
+        serde_json::to_value(DocumentSettings::default()).unwrap()["engraving"],
+        engraving()
+    );
+    for field in ["stylesheet", "notation", "systemSpacing", "profiles"] {
+        let mut missing = derived.clone();
+        missing["engraving"].as_object_mut().unwrap().remove(field);
+        assert!(serde_json::from_value::<DocumentSettings>(missing).is_err());
+    }
+    let mut invalid = derived.clone();
+    invalid["engraving"] = json!(null);
+    assert!(serde_json::from_value::<DocumentSettings>(invalid).is_err());
+    let mut invalid = derived.clone();
+    invalid["page"] = page();
+    invalid["page"]["marginsMm"]["left"] = json!(1000.0);
+    assert!(
+        serde_json::from_value::<DocumentSettings>(invalid)
+            .unwrap()
+            .validate()
+            .is_err()
+    );
+    let mut invalid = derived;
+    invalid["engraving"]["systemSpacing"] = json!(4.01);
+    assert!(
+        serde_json::from_value::<DocumentSettings>(invalid)
+            .unwrap()
+            .validate()
+            .is_err()
+    );
+}
+
+#[test]
+fn engraving_native_history_retains_commands_undo_redo_and_rejects_invalid_edits() {
+    let mut session = ProjectSession::new(Project::blank(), None).unwrap();
+    let base = session.snapshot().project.base;
+    let commands = [
+        engraving_command(),
+        page_command(),
+        json!({"type": "setPrintLayout", "layout": {"paper": "Letter", "orientation": "landscape",
+            "marginMm": 20.0, "scale": 1.5, "profile": "Score"}}),
+    ];
+    for command in &commands {
+        session.apply_edit(accepted(command)).unwrap();
+    }
+    let configured = session.snapshot().project;
+    assert_eq!(configured.base, base);
+    assert_eq!(configured.schema_version, 2);
+    assert_eq!(configured.engine_version, "1.8.4");
+    assert_eq!(configured.edits.len(), 3);
+    session.undo().unwrap();
+    assert_eq!(session.snapshot().project.edits.len(), 2);
+    session.redo().unwrap();
+    assert_eq!(session.snapshot().project, configured);
+    let before = session.snapshot();
+    let mut invalid = engraving_command();
+    invalid["engraving"]["systemSpacing"] = json!(4.01);
+    assert!(
+        session
+            .apply_edit(serde_json::from_value(invalid).unwrap())
+            .is_err()
+    );
+    assert_eq!(session.snapshot(), before);
+    let stored = serde_json::to_value(session.stored_project()).unwrap();
+    let reopened = ProjectSession::new(serde_json::from_value(stored).unwrap(), None).unwrap();
+    assert_eq!(reopened.snapshot().project, configured);
+}

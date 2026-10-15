@@ -7,6 +7,25 @@ import { ExportDialog } from './ExportDialog';
 afterEach(cleanup);
 function fixture(){const score=new model.Score();for(let i=0;i<3;i++)score.addMasterBar(new model.MasterBar());const track=new model.Track();track.name='Lead';score.addTrack(track);return score;}
 const layout={paper:'A4' as const,orientation:'portrait' as const,marginMm:15,scale:1,profile:'ScoreTab' as const};
+
+it('offers a custom page draft and explicit document notation without changing the supplied page',()=>{
+  const page={widthMm:250,heightMm:350,marginsMm:{top:12,right:22,bottom:32,left:42},scale:.8,profile:'document' as const},submit=vi.fn();
+  render(<ExportDialog score={fixture()} layout={layout} page={page} busy={false} currentSpeedAvailable={true} onExport={submit} onCancel={()=>{}}/>);
+  fireEvent.change(screen.getByLabelText('Export format'),{target:{value:'pdf'}});
+  fireEvent.change(screen.getByLabelText('Width (mm)'),{target:{value:'260'}});fireEvent.click(screen.getByRole('button',{name:'Apply page layout'}));
+  fireEvent.click(screen.getByRole('button',{name:'Export'}));
+  expect(submit).toHaveBeenCalledWith(expect.objectContaining({format:'pdf',page:expect.objectContaining({widthMm:260,profile:'document'})}));expect(page.widthMm).toBe(250);
+});
+it.each([{scale:.1,marginMm:15},{scale:1,marginMm:100}])('exports a valid custom recovery page despite inactive legacy geometry %j',invalid=>{
+  const page={widthMm:210,heightMm:297,marginsMm:{top:15,right:15,bottom:15,left:15},scale:1,profile:'document' as const},submit=vi.fn();
+  render(<ExportDialog score={fixture()} layout={{...layout,...invalid}} page={page} busy={false} currentSpeedAvailable={true} onExport={submit} onCancel={()=>{}}/>);
+  fireEvent.change(screen.getByLabelText('Export format'),{target:{value:'pdf'}});fireEvent.click(screen.getByRole('button',{name:'Export'}));
+  expect(submit).toHaveBeenCalledWith(expect.objectContaining({format:'pdf',page}));expect(screen.queryByRole('alert')).toBeNull();
+});
+it.each(['gp','midi','wav'])('keeps unused legacy print geometry out of %s export validation',format=>{
+  const submit=vi.fn();render(<ExportDialog score={fixture()} layout={{...layout,scale:.1}} busy={false} currentSpeedAvailable={true} onExport={submit} onCancel={()=>{}}/>);
+  fireEvent.change(screen.getByLabelText('Export format'),{target:{value:format}});fireEvent.click(screen.getByRole('button',{name:'Export'}));expect(submit).toHaveBeenCalledWith(expect.objectContaining({format}));
+});
 describe('export dialog',()=>{
   it('disables a false fixed-BPM coefficient and falls back to saved speed',()=>{
     const submit=vi.fn(),score=fixture();

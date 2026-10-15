@@ -14,6 +14,8 @@ import { prepareScoreTimers } from './editor/timers';
 import { planMeasureMap,mapBackingMeasures } from './editor/measures';
 import { mapLyricsMeasures } from './editor/lyrics-measures';
 import { preparePasteMusic } from './editor/clipboard-paste';
+import { remapStylesheetTracks,validateEngravingTracks } from './engraving/projection';
+import { prepareHarmonyTranspose } from './harmony/transpose';
 
 const settings = new Settings();
 const { Score, Track, Staff, Bar, Voice, Beat, Note, MasterBar, Automation, JsonConverter } = model;
@@ -185,6 +187,7 @@ function apply(score: model.Score, edit: EditCommand, editIndex=0) {
     case 'removeTrack': {
       const track=trackAt(score,edit.track); if (score.tracks.length === 1) throw new Error('Keep at least one track.');
       for(const staff of track.staves)for(const bar of staff.bars)for(const voice of bar.voices)for(const beat of voice.beats)for(const note of beat.notes)detachNote(note);
+      remapStylesheetTracks(score.stylesheet,score.tracks.map((_,index)=>index===edit.track?null:index>edit.track?index-1:index));
       score.tracks.splice(edit.track,1); break;
     }
     case 'setTuning': {
@@ -234,6 +237,7 @@ export function buildDocument(value: ProjectInput): BuiltDocument {
       const prepared=preparePasteMusic(rebuild(score),edit);score=rebuild(prepared.score);
       mapBackingMeasures(documentSettings.backing,prepared.barMap);mapBackingMeasures(embeddedBackingSettings,prepared.barMap);continue;
     }
+    if(edit.type==='transposeHarmony'){score=prepareHarmonyTranspose(rebuild(score),edit,index);continue;}
     if(['setOttava','setCrescendo','setFermata','setSimile','eraseSelection','transposeSelection','moveSelectionStrings','refingerSelection','setSelectionSustain','insertMeasures','removeMeasures'].includes(edit.type))score=rebuild(score);
     const measureMap=edit.type==='insertMeasures'||edit.type==='removeMeasures'?planMeasureMap(score.masterBars.length,edit):null;
     if(measureMap)mapLyricsMeasures(score,measureMap);
@@ -248,6 +252,7 @@ export function buildDocument(value: ProjectInput): BuiltDocument {
   }
   // Transient conversion rebuilds derived links and caches; native files store source bytes and commands.
   score=rebuild(score);prepareScoreTimers(score);score.tracks.forEach((track,index)=>trackIdentities.set(track,identities[index]));
+  validateEngravingTracks(score,identities,{...documentSettings.engraving,profiles:documentSettings.engraving.profiles.filter(entry=>identities.includes(entry.trackId))});
   const built={score,settings:documentSettings,embeddedBacking,embeddedBackingSettings,sourceMixes,sourceBarCount};
   validateBackingAnchors(score,effectiveAudioSettings(project,built).backing);return built;
 }
@@ -264,7 +269,9 @@ export function replayDocumentSettings(value:ProjectInput,current:BuiltDocument)
     case 'setTrackMix': next.mixes[edit.trackId]=structuredClone(edit.mix);break;
     case 'setTrackSound': next.sounds[edit.trackId]=structuredClone(edit.sound);break;
     case 'setBacking': next.backing=structuredClone(edit.backing);break;
-    case 'setPrintLayout': next.print=structuredClone(edit.layout);break;
+    case 'setPrintLayout': next.print=structuredClone(edit.layout);next.page=null;break;
+    case 'setEngraving':next.engraving=structuredClone(edit.engraving);break;
+    case 'setPageLayout':next.page=structuredClone(edit.layout);break;
     case 'appendMeasure': barCount++;break;
     case 'removeMeasure': removeBackingMeasure(next.backing,edit.bar);barCount--;break;
     case 'insertMeasures': case 'removeMeasures': {
@@ -305,7 +312,7 @@ export function previewEdit(project: ProjectInput, edit: EditCommand, current?:B
   if(current && isSettingsEdit(edit)) {
     const nextSettings=structuredClone(current.settings);
     applySettingsEdit(nextSettings,edit,current.score,current.score.tracks.map(trackIdentity));
-    const candidate={project:next,...current,settings:nextSettings};
+    const candidate={...current,project:next,settings:nextSettings};
     validateBackingAnchors(current.score,effectiveAudioSettings(next,candidate).backing);return candidate;
   }
   return {project:next,...buildDocument(next)};

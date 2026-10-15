@@ -15,3 +15,7 @@
 .export-dialog>button{margin-top:16px;margin-right:8px}.export-dialog progress{width:100%;margin-top:12px}
 .live-instrument-view{flex-shrink:0;max-height:280px;overflow:auto;border-top:1px solid #394454;background:#1d2530}
 .transport>fieldset{flex-wrap:wrap}
+.score-tools{flex-wrap:wrap;gap:8px}.score-tools>span{flex:1 1 120px}.score-tools>[aria-label="Score display"]{flex:1 1 240px}.score-tools>[aria-label="Score display"] input{width:76px}
+.chord-dialog[aria-label="Harmony chord"],.chord-dialog[aria-label="Scale browser"]{width:min(800px,94vw)}
+.editor-section label:has(>input[type=checkbox]){flex-direction:row;align-items:center}.editor-section input[type=checkbox]{width:auto}
+.score-workspace{isolation:isolate}

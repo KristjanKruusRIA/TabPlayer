@@ -1,7 +1,10 @@
-import { LayoutMode, model, rendering, Settings, SystemsLayoutMode } from '@coderline/alphatab';
+import { LayoutMode, model, rendering, Settings, SystemsLayoutMode,NotationElement } from '@coderline/alphatab';
 import { validateSelection, type ExportSelection, type PrintLayout, type SvgPage, type SvgSystem } from './types';
 import { selectStaves } from './selection';
 import { prepareScoreTimers } from '../editor/timers';
+import { configureEngraving,projectEngraving } from '../engraving/projection';
+import { pageGeometry,paginateEngravedSystems } from '../engraving/page';
+import type { EngravingOverrides,PageLayout } from '../engraving/types';
 const pxPerMm=96/25.4;
 const escaped=(s:string)=>s.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&apos;'}[c]!));
 function dimensions(layout:PrintLayout) {
@@ -33,15 +36,28 @@ export async function loadExportFonts():Promise<void> {
   const fonts=[new FontFace('Noto Sans','url(/export-fonts/NotoSans-Regular.ttf)'),new FontFace('Bravura','url(/export-fonts/Bravura.otf)')];
   for(const font of fonts){await font.load();document.fonts.add(font);}
 }
-export function renderPdfPages(score:model.Score,selection:ExportSelection,layout:PrintLayout):SvgPage[] {
-  validateSelection(score.tracks.length,score.masterBars.length,selection,score.tracks.map(t=>t.staves.length));const d=dimensions(layout);
+export function renderPdfPages(score:model.Score,selection:ExportSelection,layout:PrintLayout,options?:{page:PageLayout;engraving:EngravingOverrides;trackIds:string[]}):SvgPage[] {
+  validateSelection(score.tracks.length,score.masterBars.length,selection,score.tracks.map(t=>t.staves.length));
+  const frozen=options?structuredClone(options):null,d=frozen?pageGeometry(frozen.page):dimensions(layout);
   // Export modifies only a transient clone; screen zoom and staff visibility stay session state.
-  const copy=selectStaves(score,selection);
+  let copy=selectStaves(score,selection);
+  if(frozen){
+    // selectStaves retains source track indices but public JSON normalizes staff flags.
+    copy.tracks.forEach((track,ti)=>track.staves.forEach((staff,si)=>{const source=score.tracks[ti].staves[selection.staves?.[ti]?.[si]??si];staff.showStandardNotation=source.showStandardNotation;staff.showTablature=source.showTablature;staff.showSlash=source.showSlash;staff.showNumbered=source.showNumbered;}));
+    if(frozen.page.profile!=='document'){
+      const profile=frozen.page.profile==='Score'?'standard':frozen.page.profile==='Tab'?'tablature':'standardTab';
+      const selected=new Set(selection.tracks.map(index=>frozen.trackIds[index]));
+      frozen.engraving.profiles=frozen.engraving.profiles.filter(entry=>!selected.has(entry.trackId));
+      frozen.engraving.profiles.push(...[...selected].map(trackId=>({trackId,profile:profile as 'standard'|'tablature'|'standardTab'})));
+    }
+    copy=projectEngraving(copy,frozen.trackIds,frozen.engraving).score;
+  }
   prepareScoreTimers(copy);
   copy.title='';
-  for(const track of copy.tracks)for(const staff of track.staves){staff.showStandardNotation=layout.profile!=='Tab';staff.showTablature=layout.profile!=='Score';}
+  if(!frozen)for(const track of copy.tracks)for(const staff of track.staves){staff.showStandardNotation=layout.profile!=='Tab';staff.showTablature=layout.profile!=='Score';}
   const settings=new Settings();settings.core.engine='svg';settings.core.useWorkers=false;settings.core.enableLazyLoading=false;
-  settings.display.scale=layout.scale;settings.display.padding=[0];settings.display.layoutMode=LayoutMode.Page;
+  if(frozen){configureEngraving(settings,frozen.engraving);for(const element of [NotationElement.ScoreTitle,NotationElement.ScoreSubTitle,NotationElement.ScoreArtist,NotationElement.ScoreAlbum,NotationElement.ScoreWords,NotationElement.ScoreMusic,NotationElement.ScoreWordsAndMusic,NotationElement.ScoreCopyright])settings.notation.elements.set(element,false);}
+  settings.display.scale=frozen?.page.scale??layout.scale;settings.display.padding=[0];settings.display.layoutMode=LayoutMode.Page;
   settings.display.systemsLayoutMode=SystemsLayoutMode.UseModelLayout;
   settings.display.startBar=(selection.range?.first??0)+1;settings.display.barCount=selection.range?selection.range.last-selection.range.first+1:-1;
   for(const font of settings.display.resources.elementFonts.values())font.families=['Noto Sans'];
@@ -52,6 +68,6 @@ export function renderPdfPages(score:model.Score,selection:ExportSelection,layou
   renderer.partialRenderFinished.on(e=>{if(typeof e.renderResult==='string'&&e.height>0)systems.push({svg:e.renderResult,width:e.width,height:e.height});});
   try{renderer.renderScore(copy,selection.tracks);if(failure)throw failure;
     if(renderer.boundsLookup?.staffSystems.some(system=>system.bars.some(bar=>bar.visualBounds.x<-.5||bar.visualBounds.x+bar.visualBounds.w>d.usableWidth+1)))throw new Error('A notation system does not fit this page width. Reduce print scale, use landscape, or add a system break.');
-    if(!systems.length)throw new Error('Notation renderer produced no printable systems.');return paginateSystems(systems,score.title,layout);}
+    if(!systems.length)throw new Error('Notation renderer produced no printable systems.');return frozen?paginateEngravedSystems(systems,score.title,frozen.page):paginateSystems(systems,score.title,layout);}
   finally{renderer.destroy();}
 }

@@ -1,6 +1,7 @@
 import { model } from '@coderline/alphatab';
 import type { FingeringPlacement,RangeCommand } from './range-types';
-import { integer } from './common';
+import type { PitchTarget } from './harmony-types';
+import { integer,noteAt } from './common';
 import { allNotes,captureNoteLinks,detachNote } from './links';
 import { planFingering } from './fingering';
 import { resolveSelectionBeats,resolveSelectionNotes } from './range-selection';
@@ -21,7 +22,7 @@ function detachTie(from:model.Note,to:model.Note) {
   from.tieDestination=null;to.tieOrigin=null;to.isTieDestination=false;to.bendOrigin=null;to.isContinuedBend=false;
 }
 type Proposal={string?:number;fret?:number;octave?:number;tone?:number;trillValue?:number;accidentalMode?:model.NoteAccidentalMode};
-function validateRelationships(score:model.Score,selected:Set<model.Note>,proposals:Map<model.Note,Proposal>,transpose:boolean) {
+function validateRelationships(score:model.Score,selected:Set<model.Note>,proposals:Map<model.Note,Proposal>,transpose:boolean,duplicateTies=false) {
   const notes=allNotes(score),lookup=new Map(notes.map(note=>[note.id,note])),detached:{from:model.Note;to:model.Note}[]=[];
   const noteString=(note:model.Note)=>proposals.get(note)?.string??note.string;
   const notePitch=(note:model.Note)=>{
@@ -42,13 +43,57 @@ function validateRelationships(score:model.Score,selected:Set<model.Note>,propos
     if(a!==b&&((a&&changed(from))||(b&&changed(to))))throw new Error('A linked note outside the selection prevents changing this string.');
     const sameLane=from.beat.voice.bar.staff===to.beat.voice.bar.staff&&from.beat.voice.index===to.beat.voice.index;
     const forward=to.beat.voice.bar.index>from.beat.voice.bar.index||(to.beat.voice.bar===from.beat.voice.bar&&to.beat.index>from.beat.index);
-    const valid=sameLane&&forward&&(!from.isStringed||noteString(from)===noteString(to))&&(link.kind!=='tie'||notePitch(from)===notePitch(to))&&next(from,true)===to;
-    if((a||b||next(from,false)===to)&&!valid)throw new Error('The edit would break a forward, next-note relationship on this string or staff.');
+    const nextNote=next(from,true),valid=sameLane&&forward&&(!from.isStringed||noteString(from)===noteString(to))&&(link.kind!=='tie'||notePitch(from)===notePitch(to))&&(duplicateTies&&link.kind==='tie'?nextNote?.beat===to.beat:nextNote===to);
+    const previousNext=next(from,false),relevant=a||b||(duplicateTies&&link.kind==='tie'?previousNext?.beat===to.beat:previousNext===to);
+    if(relevant&&!valid)throw new Error('The edit would break a forward, next-note relationship on this string or staff.');
   }
   return detached;
 }
 function validatePlacements(placements:FingeringPlacement[]) {
   const strings=new Set<number>();for(const placement of placements){if(strings.has(placement.string))throw new Error('The destination string is occupied.');strings.add(placement.string);const note=candidate(placement.note,placement.string,placement.fret);pitch(note.realValueWithoutHarmonic);pitch(note.realValue);}
+}
+export function applyPitchTargets(score:model.Score,targets:PitchTarget[]):void {
+  if(!Array.isArray(targets))throw new Error('Choose pitch targets.');
+  for(const target of targets){fields(target,['address','pitch']);pitch(target.pitch);}
+  if(!targets.length)return;
+  // Resolve the complete address set first, including duplicate/last-invalid checks.
+  const notes=resolveSelectionNotes(score,{kind:'notes',notes:targets.map(target=>target.address)}),selected=new Set(notes),desired=new Map(targets.map(target=>[noteAt(score,target.address),target.pitch]));
+  const proposals=new Map<model.Note,Proposal>(),beats=[...new Set(notes.map(note=>note.beat))];
+  for(const note of notes){
+    if(note.isPercussion||note.beat.voice.bar.staff.isPercussion)throw new Error('Percussion notes cannot be transposed.');
+    const delta=desired.get(note)!-note.realValue;pitch(note.realValueWithoutHarmonic+delta);
+    if(note.isTrill)pitch(note.trillValue+delta,'trill pitch');
+    const origin=note.bendOrigin??(note.isContinuedBend?note.tieOrigin:null);
+    if((note.isContinuedBend||note.bendOrigin)&&(!origin||!selected.has(origin)||desired.get(origin)!-origin.realValue!==delta))throw new Error('A continued bend requires its origin to move by the same interval.');
+    const proposal:Proposal={accidentalMode:model.NoteAccidentalMode.Default,...note.isTrill?{trillValue:note.trillValue+delta}:{}};
+    if(!note.isStringed){if(!note.isPiano)throw new Error('Select a pitched note.');const written=desired.get(note)!+note.beat.voice.bar.staff.transpositionPitch;pitch(written,'written pitch');proposal.octave=Math.floor(written/12);proposal.tone=written%12;}
+    proposals.set(note,proposal);
+  }
+  for(const beat of beats){
+    for(let a=0;a<beat.notes.length;a++)for(let b=a+1;b<beat.notes.length;b++){
+      const first=beat.notes[a],second=beat.notes[b];
+      if(first.isPiano&&second.isPiano&&(desired.get(first)??first.realValue)===(desired.get(second)??second.realValue)&&first.realValue!==second.realValue)throw new Error('The proposed chord introduces a duplicate pitch collision.');
+    }
+    if(!beat.notes.some(note=>selected.has(note)&&note.isStringed))continue;
+    const staff=stringed(beat.notes[0]);for(const note of beat.notes)stringed(note);
+    // Preserve existing equal duplicate members as one physical placement.
+    const groups:model.Note[][]=[];
+    for(const note of beat.notes){const group=groups.find(group=>group[0].string===note.string&&group[0].fret===note.fret&&group[0].realValue===note.realValue&&(desired.get(group[0])??group[0].realValue)===(desired.get(note)??note.realValue));if(group)group.push(note);else groups.push([note]);}
+    let placements=groups.map(group=>{const note=group[0];return {note,string:note.string,fret:note.fret+(desired.get(note)??note.realValue)-note.realValue};});
+    if(placements.some(placement=>!integer(placement.fret,0,127)||candidate(placement.note,placement.string,placement.fret).realValue!==(desired.get(placement.note)??placement.note.realValue))||new Set(placements.map(placement=>placement.string)).size!==placements.length)
+      placements=planFingering(staff,groups.map(group=>{const note=group[0];return {note,pitch:desired.get(note)??note.realValue,preferredString:note.string,fixedString:group.some(member=>!selected.has(member))?note.string:null};}),127);
+    validatePlacements(placements);
+    placements.forEach((placement,index)=>{for(const note of groups[index])if(selected.has(note))Object.assign(proposals.get(note)!,{string:placement.string,fret:placement.fret});});
+  }
+  for(const note of notes)if(note.isStringed){const placement=proposals.get(note)!,result=candidate(note,placement.string!,placement.fret!);pitch(result.realValueWithoutHarmonic);if(result.realValue!==desired.get(note))throw new Error('The proposed fingering cannot preserve this exact harmonic pitch.');}
+  const detached=validateRelationships(score,selected,proposals,true,true);
+  // A moving bend origin must not strip the envelope from an unselected continuation.
+  for(const {to} of detached)if(to.isContinuedBend||to.bendOrigin)throw new Error('A continued bend cannot be detached by this transposition.');
+  for(const [note,proposal] of proposals)Object.assign(note,proposal);
+  for(const {from,to} of detached){
+    to.tieOrigin=null;to.isTieDestination=false;to.bendOrigin=null;to.isContinuedBend=false;
+    if(from.tieDestination===to)from.tieDestination=to.beat.notes.find(note=>note.tieOrigin===from)??null;
+  }
 }
 export function applyRangeEdit(score:model.Score,command:RangeCommand):boolean {
   if(!['eraseSelection','transposeSelection','moveSelectionStrings','refingerSelection','setSelectionSustain'].includes(command.type))return false;

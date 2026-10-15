@@ -26,6 +26,19 @@ import { ClipboardPanel } from './editor/ClipboardPanel';
 import { musicClipSelection,scoreFromMusicClip } from './editor/clipboard-source';
 import type { ClipboardMode,PasteOptions } from './editor/clipboard-types';
 import { PracticePanel } from './audio/PracticePanel';
+import { EngravingPanel } from './engraving/EngravingPanel';
+import { PageLayoutPanel } from './engraving/PageLayoutPanel';
+import { TrackDisplayControls } from './engraving/TrackDisplayControls';
+import { projectEngraving } from './engraving/projection';
+import { effectivePageLayout } from './engraving/page';
+import { resolveVisibleTracks,type TrackView } from './engraving/view';
+import { defaultPrintLayout } from './document-settings';
+import { HarmonyChordDialog } from './harmony/HarmonyChordDialog';
+import { ScaleToolPanel } from './harmony/ScaleToolPanel';
+import { getHarmonyChord } from './harmony/chord-source';
+import { readHarmonyLibrary,putHarmonyLibraryEntry,removeHarmonyLibraryEntry } from './harmony/library';
+import type { HarmonyLibrary } from './editor/harmony-types';
+import { HarmonyTransposePanel } from './harmony/HarmonyTransposePanel';
 const noPlaybackSubscribe=()=>()=>{};
 const textEntry=(target:EventTarget)=>target instanceof HTMLElement&&(['INPUT','SELECT','TEXTAREA'].includes(target.tagName)||target.isContentEditable);
 
@@ -43,10 +56,27 @@ export function App({controller}: {controller: DocumentController}) {
   const editorSelection=(value:MusicSelection|null)=>{rangeAnchor.current=null;setMusicSelection(value);};
   const [selectedString,setString]=useState(6); const [fret,setFret]=useState(0);
   const [selectedNoteIndex,setNoteIndex]=useState<number|null>(null);
-  const [zoom,setZoom]=useState(100); const [profile,setProfile]=useState('ScoreTab');
+  const [zoom,setZoom]=useState(100),[trackView,setTrackView]=useState<TrackView>({kind:'selected'});
+  useEffect(()=>{setZoom(100);setTrackView({kind:'selected'});},[state.documentEpoch]);
   const [instrumentVisible,setInstrumentVisible]=useState(false);
+  const [harmonyOpen,setHarmonyOpen]=useState(false),[scaleOpen,setScaleOpen]=useState(false),[libraryLoading,setLibraryLoading]=useState(false),[libraryError,setLibraryError]=useState<string|null>(null);
+  const [library,setLibrary]=useState<HarmonyLibrary>({format:'TabPlayerHarmonyLibrary',version:1,entries:[]});
+  const libraryRevision=useRef(0);
+  useEffect(()=>{setHarmonyOpen(false);setScaleOpen(false);},[state.documentEpoch]);
+  useEffect(()=>{
+    if(!harmonyOpen)return;let active=true;const revision=++libraryRevision.current;setLibraryLoading(true);setLibraryError(null);
+    void readHarmonyLibrary().then(value=>{if(active&&revision===libraryRevision.current)setLibrary(value);}).catch(error=>{if(active&&revision===libraryRevision.current)setLibraryError(`Chord library: ${error instanceof Error?error.message:String(error)}`);}).finally(()=>{if(active&&revision===libraryRevision.current)setLibraryLoading(false);});
+    return()=>{active=false;};
+  },[harmonyOpen]);
   const digits=useRef({text:'',time:0});
   const target=repairSelection(state.score,selection);
+  const trackIds=useMemo(()=>state.score.tracks.map(trackIdentity),[state.score]);
+  const visibleTracks=useMemo(()=>resolveVisibleTracks(trackIds,target.track,trackView),[trackIds,target.track,trackView]);
+  const projection=useMemo(()=>projectEngraving(state.score,trackIds,state.settings.engraving),[state.score,trackIds,state.settings.engraving]);
+  const pageState=useMemo(()=>{
+    try{return {page:effectivePageLayout(state.settings),error:null};}
+    catch(error){return {page:effectivePageLayout({page:null,print:defaultPrintLayout()}),error:`Saved print layout cannot be exported: ${error instanceof Error?error.message:String(error)} Apply a valid page layout.`};}
+  },[state.settings.page,state.settings.print]),page=pageState.page;
   useEffect(()=>{if(player)void player.loadDocument(state.snapshot.project,state,target.track,state.documentEpoch);},[player,state.snapshot.project,state.score,state.settings,state.embeddedBacking,target.track,state.documentEpoch]);
   const location=describeSelection(state.score,target);
   const indexed=location.staff.isPercussion||!location.staff.tuning.length;
@@ -91,7 +121,10 @@ export function App({controller}: {controller: DocumentController}) {
   const audioSettings=effectiveAudioSettings(state.snapshot.project,state),practiceRatio=player?player.exportPracticeRatio():1;
   const exports=useExportCoordinator({score:state.score,settings:audioSettings,currentSpeed:practiceRatio,bridge:nativeBridge,embeddedBacking:state.embeddedBacking});
   const runExport=(options:ExportOptions)=>{setExportError(null);setExportLaunching(true);exportCancelled.current=false;act((async()=>{
-    if((options.format==='pdf'||options.format==='print')&&JSON.stringify(options.layout)!==JSON.stringify(state.settings.print))await controller.edit({type:'setPrintLayout',layout:options.layout});
+    if(options.format==='pdf'||options.format==='print'){
+      if(options.page){if(pageState.error||JSON.stringify(options.page)!==JSON.stringify(page))await controller.edit({type:'setPageLayout',layout:options.page});}
+      else if(JSON.stringify(options.layout)!==JSON.stringify(state.settings.print))await controller.edit({type:'setPrintLayout',layout:options.layout});
+    }
     if(exportCancelled.current)return;
     if(await exports.run(options))setExportOpen(false);
   })().catch(error=>{setExportError(error instanceof Error?error.message:String(error));}).finally(()=>setExportLaunching(false)));};
@@ -153,7 +186,7 @@ export function App({controller}: {controller: DocumentController}) {
       <button disabled={state.busy || !state.snapshot.canRedo} onClick={()=>change(controller.redo())}>Redo</button>
     </nav><span className="document-title">{state.score.title || 'Untitled'}{state.snapshot.dirty?' •':''}</span>
     <button disabled={state.busy||exports.busy} onClick={()=>{setExportError(null);setExportOpen(true);}}>Export score</button><button disabled={state.busy||exports.busy} onClick={()=>act(controller.export())}>Export GP</button></header>
-    {(clipboardError||state.error||(!exportOpen&&exportError)) && <div className="error" role="alert">{clipboardError||state.error||exportError}</div>}
+    {(clipboardError||state.error||(!exportOpen&&exportError)||pageState.error||harmonyOpen&&libraryError) && <div className="error" role="alert">{clipboardError||state.error||exportError||pageState.error||libraryError}</div>}
     <div className="workspace">
       <TrackPanel score={state.score} selected={target.track} busy={state.busy} player={player} onSelect={track=>select({track,staff:0,bar:target.bar,voice:0,beat:0},state.score.tracks[track].staves[0].tuning.length)} onEdit={edit}>
         <SoundPanel trackId={trackId} sound={state.settings.sounds[trackId]} onEdit={command=>controller.edit(command)} playback={player} busy={state.busy}/>
@@ -161,21 +194,25 @@ export function App({controller}: {controller: DocumentController}) {
       </TrackPanel>
       <section className="score-workspace" aria-label="Score workspace" tabIndex={0} onKeyDown={keys}>
         <div className="score-tools"><span>{state.score.masterBars.length} measures · {state.score.tracks.length} tracks</span>
-          <label>View<select value={profile} onChange={e=>setProfile(e.target.value)}><option>ScoreTab</option><option>Tab</option><option>Score</option></select></label>
-          <label>Zoom<select value={zoom} onChange={e=>setZoom(Number(e.target.value))}>{[70,85,100,115,130].map(z=><option key={z} value={z}>{z}%</option>)}</select></label>
+          <TrackDisplayControls ids={trackIds} names={state.score.tracks.map(track=>track.name)} selected={target.track} view={trackView} zoom={zoom} disabled={state.busy} onView={setTrackView} onZoom={setZoom}/>
           <button aria-pressed={instrumentVisible} onClick={()=>setInstrumentVisible(visible=>!visible)}>{instrumentVisible?'Hide instrument':'Show instrument'}</button>
         </div>
-        <div className="paper-scroll"><div className="paper"><ScoreView score={state.score} track={target.track} zoom={zoom} profile={profile} onSelect={select} playback={player} editorSelection={musicSelection} onEditorSelection={editorSelection}/></div></div>
+        <div className="paper-scroll"><div className="paper"><ScoreView score={state.score} track={target.track} zoom={zoom} profile="Default" projection={projection} engraving={state.settings.engraving} visibleTracks={visibleTracks} onSelect={select} playback={player} editorSelection={musicSelection} onEditorSelection={editorSelection}/></div></div>
         <div className="score-hint">Measure {target.bar+1} · Beat {target.beat+1} · {indexed?`${location.staff.isPercussion?'Percussion':'Pitched'} note ${noteIndex===null?'entry':noteIndex+1} — Click a note to edit it in the inspector.`:`String ${string} · Fret ${fret} — Click the score, then use arrow keys, digits and Enter.`}</div>
         {instrumentVisible&&<LiveInstrumentView score={state.score} track={target.track} staff={target.staff} player={player}/>}
       </section>
-      <EditorPanel score={state.score} target={target} string={string} fret={fret} noteIndex={noteIndex} onSelectNote={setNoteIndex} busy={state.busy} onSelect={next=>{editorSelection(null);select(next);}} onString={s=>select(target,s)} onFret={setFret} onEdit={edit} musicSelection={musicSelection} onMusicSelection={editorSelection}>
+      <EditorPanel score={state.score} target={target} string={string} fret={fret} noteIndex={noteIndex} onSelectNote={setNoteIndex} busy={state.busy} onSelect={next=>{editorSelection(null);select(next);}} onString={s=>select(target,s)} onFret={setFret} onEdit={edit} musicSelection={musicSelection} onMusicSelection={editorSelection} onChord={()=>setHarmonyOpen(true)} onScales={()=>setScaleOpen(true)}>
         <div ref={clipboardSection}><ClipboardPanel score={state.score} target={target} selection={musicSelection} clip={clip} busy={state.busy} onCopy={mode=>copyMusic(mode)} onCut={mode=>copyMusic(mode,true)} onPaste={pasteMusic}/></div>
         {player&&playbackState&&<PracticePanel key={state.documentEpoch} settings={playbackState.practice.settings} busy={state.busy||playbackState.practicePending||!playbackState.ready} hasBacking={!!audioSettings.backing} onChange={settings=>player.setPractice(settings)}/>}
+        <EngravingPanel key={`engraving/${state.documentEpoch}`} score={state.score} trackIds={trackIds} value={state.settings.engraving} busy={state.busy} onEdit={edit}/>
+        <PageLayoutPanel key={`page/${state.documentEpoch}`} value={page} busy={state.busy} onEdit={edit}/>
+        <HarmonyTransposePanel key={`harmony/${state.documentEpoch}`} score={state.score} selection={musicSelection} busy={state.busy} onEdit={edit}/>
       </EditorPanel>
     </div>
     {player && <Transport player={player} measures={state.score.masterBars.length} busy={state.busy}/>}
-    {exportOpen&&<ExportDialog score={state.score} layout={state.settings.print} currentSpeedAvailable={practiceRatio!==null} busy={exports.busy||state.busy||exportLaunching} progress={exports.progress} failure={exportError} onExport={runExport} onCancel={cancelExport}/>}
+    {exportOpen&&<ExportDialog score={state.score} layout={state.settings.print} page={page} currentSpeedAvailable={practiceRatio!==null} busy={exports.busy||state.busy||exportLaunching} progress={exports.progress} failure={exportError} onExport={runExport} onCancel={cancelExport}/>}
+    {harmonyOpen&&location.beat&&<HarmonyChordDialog score={state.score} target={target} selection={musicSelection} value={location.beat.chord?getHarmonyChord(location.beat.chord):null} busy={state.busy||libraryLoading} library={library} onEdit={edit} onClose={()=>setHarmonyOpen(false)} onLibraryPut={async entry=>{const revision=++libraryRevision.current,value=await putHarmonyLibraryEntry(entry);if(revision===libraryRevision.current)setLibrary(value);}} onLibraryRemove={async id=>{const revision=++libraryRevision.current,value=await removeHarmonyLibraryEntry(id);if(revision===libraryRevision.current)setLibrary(value);}}/>}
+    {scaleOpen&&<ScaleToolPanel score={state.score} staff={location.staff} selection={musicSelection} busy={state.busy} onClose={()=>setScaleOpen(false)}/>}
     <footer className="statusbar">{state.busy?'Working…':state.snapshot.dirty?'Unsaved changes':'Saved'}<span>{state.snapshot.path ?? 'Save a .tabplayer project to keep the original score and edits.'}</span></footer>
   </div>;
 }

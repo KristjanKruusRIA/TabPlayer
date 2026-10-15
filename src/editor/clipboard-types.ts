@@ -2,12 +2,15 @@ import type { model } from '@coderline/alphatab';
 import type { BeatTarget } from '../project';
 import type { MusicSelection } from './range-types';
 import type { BarIndexMap } from './measures-types';
+import type { HarmonyChord } from './harmony-types';
 
 export type ClipboardMode='singleTrack'|'multiTrack';
 export interface ClipboardLink {from:number;to:number;kind:'tie'|'slur'|'slide'|'hammerPull';slideOutType:number|null}
-export interface MusicClip {
-  format:'TabPlayerClip';version:1;engineVersion:'1.8.4';mode:ClipboardMode;kind:'phrase'|'bars';scoreJson:string;links:ClipboardLink[];
+export interface ClipboardHarmony {track:number;staff:number;chordId:string;chord:HarmonyChord}
+interface MusicClipBase {
+  format:'TabPlayerClip';engineVersion:'1.8.4';mode:ClipboardMode;kind:'phrase'|'bars';scoreJson:string;links:ClipboardLink[];
 }
+export type MusicClip=MusicClipBase&({version:1}|{version:2;harmony:ClipboardHarmony[]});
 export interface PasteFilters {diagrams:boolean;texts:boolean;timers:boolean;trackAutomations:boolean;masterAutomations:boolean;sections:boolean}
 export interface PasteDestination {sourceTrack:number;track:number;staffMap:number[]}
 export interface PasteOptions {target:BeatTarget;destinations:PasteDestination[];count:number;placement:'currentBar'|'beforeBar';filters:PasteFilters}

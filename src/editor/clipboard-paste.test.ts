@@ -10,6 +10,10 @@ import { exportGpInterchange,loadInterchangeScore } from '../interchange/gp';
 import { unzipSync,zipSync,strToU8 } from 'fflate';
 import { rhythmTicks } from './common';
 import type { ClipboardCommand,MusicClip,PasteFilters } from './clipboard-types';
+import { getHarmonyChord,setHarmonyChordSource } from '../harmony/chord-source';
+import type { HarmonyChord } from './harmony-types';
+import { buildDocument,previewEdit } from '../engine';
+import { blankProject } from '../project';
 
 const all:PasteFilters={diagrams:true,texts:true,timers:true,trackAutomations:true,masterAutomations:false,sections:false};
 const json=(score:model.Score)=>model.JsonConverter.scoreToJson(score);
@@ -19,6 +23,35 @@ function bars(score=music(),mode:'singleTrack'|'multiTrack'='singleTrack'){retur
 function phrase(score=music(),last=1){return makeMusicClip(score,{kind:'range',range:{start:{bar:0,tick:0},end:{bar:0,tick:(last+1)*960},lanes:[{track:0,staff:0,voice:0}]}},'singleTrack');}
 function rests(score:model.Score,bar:number,from=0){for(const beat of score.tracks[0].staves[0].bars[bar].voices[0].beats.slice(from)){beat.notes=[];beat.isEmpty=false;}return rebuild(score);}
 const auto=(type:model.AutomationType,value:number,ratioPosition=0)=>Object.assign(new model.Automation(),{type,value,ratioPosition});
+function richChord(staff:model.Staff,value:HarmonyChord={name:'C',nameMode:'theory',recipe:{root:{step:0,alteration:0},formula:'major',alterations:[],omissions:[],bass:null},firstFret:1,frets:[0,1,0,2,3,-1],fingers:[-2,1,-2,2,3,-2],barreFrets:[],showName:true,showDiagram:true,showFingering:true}) {const chord=Object.assign(new model.Chord(),{name:value.name,firstFret:value.firstFret,strings:[...value.frets],barreFrets:[...value.barreFrets],showName:value.showName,showDiagram:value.showDiagram,showFingering:value.showFingering});staff.addChord('rich',chord);staff.bars[0].voices[0].beats[0].chordId='rich';setHarmonyChordSource(chord,value);return value;}
+function pianoMusic() {const score=music(),staff=score.tracks[0].staves[0];staff.stringTuning.tunings=[];for(const bar of staff.bars)for(const beat of bar.voices[0].beats)for(const note of beat.notes){note.string=-1;note.fret=-1;note.octave=5;note.tone=0;}return rebuild(score);}
+it('v2 matching-context repeated paste preserves rich metadata with detached fresh chord IDs',()=>{
+  const source=music(),value=richChord(source.tracks[0].staves[0]),clip=bars(source),edit=command(clip);expect(clip.version).toBe(2);edit.options.count=2;const destination=music(),before=json(destination),result=preparePasteMusic(destination,edit).score,staff=result.tracks[0].staves[0],first=staff.bars[1].voices[0].beats[0],second=staff.bars[3].voices[0].beats[0];
+  expect(first.chordId).not.toBe(second.chordId);expect(getHarmonyChord(staff.getChord(first.chordId!)!)).toEqual(value);expect(getHarmonyChord(staff.getChord(second.chordId!)!)).toEqual(value);expect(json(destination)).toBe(before);
+  staff.getChord(first.chordId!)!.strings[0]=12;expect(getHarmonyChord(staff.getChord(second.chordId!)!)).toEqual(value);expect(clip.version===2&&clip.harmony[0].chord).toEqual(value);
+  const restarted=JSON.parse(JSON.stringify(edit)) as ClipboardCommand;expect(getHarmonyChord(preparePasteMusic(destination,restarted).score.tracks[0].staves[0].getChord(first.chordId!)!)).toEqual(value);
+});
+it('v2 rich diagrams reject mismatched tuning, capo, sounding offset, string count and family atomically',()=>{
+  const source=music();richChord(source.tracks[0].staves[0]);const clip=bars(source);
+  for(const mismatch of ['tuning','capo','offset','strings','piano'] as const){const destination=mismatch==='piano'?pianoMusic():music(),staff=destination.tracks[0].staves[0];if(mismatch==='tuning')staff.stringTuning.tunings[0]--;if(mismatch==='capo')staff.capo=1;if(mismatch==='offset')staff.transpositionPitch=1;if(mismatch==='strings')staff.stringTuning.tunings.push(35);const before=json(destination),snapshot=structuredClone(clip);expect(()=>preparePasteMusic(destination,command(clip))).toThrow(/diagram|context|tuning/i);expect(json(destination)).toBe(before);expect(clip).toEqual(snapshot);}
+});
+it('diagrams off keeps v2 note conversion and v1 public-only diagrams keep their old meaning',()=>{
+  const source=music();richChord(source.tracks[0].staves[0]);const clip=bars(source),edit=command(clip);edit.options.filters.diagrams=false;const result=preparePasteMusic(pianoMusic(),edit).score;expect(result.tracks[0].staves[0].bars[1].voices[0].beats[0].chordId).toBeNull();expect(result.tracks[0].staves[0].bars[1].voices[0].beats[0].notes[0].isPiano).toBe(true);
+  richChord(source.tracks[0].staves[0],{...getHarmonyChord(source.tracks[0].staves[0].getChord('rich')!),nameMode:'manual',recipe:null,fingers:Array(6).fill(-2)});const legacy=bars(source);expect(legacy.version).toBe(1);const copied=preparePasteMusic(pianoMusic(),command(legacy)).score.tracks[0].staves[0];expect(copied.getChord(copied.bars[1].voices[0].beats[0].chordId!)!.strings).toEqual([0,1,0,2,3,-1]);
+});
+it('v2 manual zero-string name-only records paste between matching untuned contexts',()=>{
+  const source=pianoMusic(),value:HarmonyChord={name:'Label only',nameMode:'manual',recipe:null,firstFret:0,frets:[],fingers:[],barreFrets:[],showName:false,showDiagram:false,showFingering:false};richChord(source.tracks[0].staves[0],value);const clip:MusicClip={...bars(source),version:2,harmony:[{track:0,staff:0,chordId:'rich',chord:value}]},destination=pianoMusic(),result=preparePasteMusic(destination,command(clip)).score.tracks[0].staves[0];expect(getHarmonyChord(result.getChord(result.bars[1].voices[0].beats[0].chordId!)!)).toEqual(value);
+  destination.tracks[0].staves[0].capo=1;expect(()=>preparePasteMusic(destination,command(clip))).toThrow(/diagram|context|capo/i);
+});
+it('v2 native-style command history replays rich diagrams with an empty app clipboard and one undo step',()=>{
+  const source=music(),value=richChord(source.tracks[0].staves[0]),edit=command(bars(source));edit.options.count=2;const base=blankProject(),pasted=previewEdit(base,edit),saved=JSON.parse(JSON.stringify(pasted.project)),restarted=buildDocument(saved),staff=restarted.score.tracks[0].staves[0];
+  expect(pasted.project.edits).toHaveLength(1);expect(restarted.score.masterBars).toHaveLength(8);for(const bar of [1,3])expect(getHarmonyChord(staff.getChord(staff.bars[bar].voices[0].beats[0].chordId!)!)).toEqual(value);
+  expect(buildDocument({...saved,edits:saved.edits.slice(0,-1)}).score.masterBars).toHaveLength(4);const redone=buildDocument(JSON.parse(JSON.stringify(saved))).score.tracks[0].staves[0];expect(getHarmonyChord(redone.getChord(redone.bars[1].voices[0].beats[0].chordId!)!)).toEqual(value);expect(base.edits).toHaveLength(0);
+});
+it('preserves destination rich definitions and permissive imported manual values through paste cloning',()=>{
+  const destination=music(),original=richChord(destination.tracks[0].staves[0]),source=music(),manual:HarmonyChord={...original,name:'exact manual name',nameMode:'manual',recipe:null,firstFret:0,frets:[0,23,-1,2,15,0],fingers:[-2,4,-1,1,3,0],barreFrets:[0,2,2,23],showName:false,showDiagram:false,showFingering:false};richChord(source.tracks[0].staves[0],manual);
+  const result=preparePasteMusic(destination,command(bars(source))).score.tracks[0].staves[0],copied=result.getChord(result.bars[1].voices[0].beats[0].chordId!)!;expect(getHarmonyChord(result.getChord('rich')!)).toEqual(original);expect(getHarmonyChord(copied)).toEqual(manual);copied.barreFrets.push(9);expect(getHarmonyChord(source.tracks[0].staves[0].getChord('rich')!)).toEqual(manual);
+});
 
 it('inserts repeated bars globally with disjoint IDs and detached effects',()=>{
   const source=music();source.tracks[0].staves[0].bars[0].voices[0].beats[0].notes[0].dynamics=3;

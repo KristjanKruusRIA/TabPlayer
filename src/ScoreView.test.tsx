@@ -6,10 +6,11 @@ import { model, rendering, Settings, type PlaybackHighlightChangeEventArgs } fro
 import { ScoreView } from './ScoreView';
 import { music, target } from './editor/fixtures';
 import type { MusicSelection } from './editor/range-types';
+import {defaultEngraving,projectEngraving} from './engraving/projection';
 
 const view=vi.hoisted(()=>({options:null as unknown,beat:null as ((beat:model.Beat)=>void)|null,note:null as ((note:model.Note)=>void)|null,destroy:vi.fn(),settings:vi.fn(),api:null as unknown}));
 vi.mock('@coderline/alphatab',async original=>({...await original<typeof import('@coderline/alphatab')>(),AlphaTabApi:class {
-  settings={display:{scale:1,staveProfile:0}};constructor(_container:unknown,options:unknown){view.options=options;view.api=this;}
+  settings=new Settings();constructor(_container:unknown,options:unknown){view.options=options;view.api=this;}
   beatMouseDown=event<model.Beat>(handler=>{view.beat=handler;});noteMouseDown=event<model.Note>(handler=>{view.note=handler;});
   beatMouseMove=event<model.Beat>();beatMouseUp=event<model.Beat|null>();postRenderFinished=event<void>();playbackRangeHighlightChanged=event<PlaybackHighlightChangeEventArgs>();
   canvasElement={};uiFacade={getOffset:()=>({x:30,y:40,w:600,h:300})};
@@ -33,11 +34,40 @@ function setup(initial:MusicSelection|null=null,score=music()){
 }
 afterEach(()=>{cleanup();vi.clearAllMocks();});
 it('uses public external media output and keeps viewport changes out of native plan loading',()=>{
-  const score=music(),playback={attachView:vi.fn(),replaceScore:vi.fn()},onSelect=vi.fn();const props={score,track:0,zoom:100,profile:'ScoreTab',onSelect,playback:playback as never};const rendered=render(<ScoreView {...props}/>);
+  const score=music(),playback={attachView:vi.fn(),replaceScore:vi.fn(),setRenderedScore:vi.fn()},onSelect=vi.fn();const props={score,track:0,zoom:100,profile:'ScoreTab',onSelect,playback:playback as never};const rendered=render(<ScoreView {...props}/>);
   expect(view.options).toMatchObject({player:{playerMode:'EnabledExternalMedia',enableCursor:true}});expect((view.options as {player:object}).player).not.toHaveProperty('soundFont');expect(playback.attachView).toHaveBeenCalledTimes(1);
   view.note?.(score.tracks[0].staves[0].bars[0].voices[0].beats[0].notes[0]);expect(onSelect).toHaveBeenLastCalledWith(target,6,0);
-  rendered.rerender(<ScoreView {...props} zoom={130}/>);expect(playback.replaceScore).toHaveBeenLastCalledWith(score,0);expect(playback.attachView).toHaveBeenCalledTimes(1);
+  rendered.rerender(<ScoreView {...props} zoom={130}/>);expect(playback.setRenderedScore).toHaveBeenLastCalledWith(score,[0]);expect(playback.attachView).toHaveBeenCalledTimes(1);
   rendered.unmount();expect(view.destroy).toHaveBeenCalledTimes(1);
+});
+
+function twoTrackProjection(){
+  const score=music();score.addTrack(music().tracks[0]);score.finish(new Settings());
+  const engraving=defaultEngraving(),projection=projectEngraving(score,['base/0','base/1'],engraving);
+  return {score,engraving,projection};
+}
+it('renders visible projected tracks and resolves cloned note hits to canonical addresses',()=>{
+  const {score,engraving,projection}=twoTrackProjection(),onSelect=vi.fn(),playback={attachView:vi.fn(),replaceScore:vi.fn(),setRenderedScore:vi.fn()};
+  render(<ScoreView score={score} track={0} zoom={100} profile="Default" projection={projection} engraving={engraving} visibleTracks={[0,1]} playback={playback as never} onSelect={onSelect}/>);
+  expect(playback.setRenderedScore).toHaveBeenLastCalledWith(projection.score,[0,1]);
+  const note=projection.score.tracks[1].staves[0].bars[0].voices[0].beats[1].notes[0];act(()=>view.note?.(note));
+  expect(onSelect).toHaveBeenLastCalledWith({...target,track:1,beat:1},6,0);
+});
+it('uses rendered bounds for all visible selected notes and ignores stale or hidden hits',()=>{
+  const {score,engraving,projection}=twoTrackProjection(),onSelect=vi.fn(),editorSelection:MusicSelection={kind:'notes',notes:[{target,noteIndex:0},{target:{...target,track:1},noteIndex:0}]};
+  const props={score,engraving,track:0,zoom:100,profile:'Default',playback:null,onSelect,editorSelection};
+  const rendered=render(<ScoreView {...props} projection={projection} visibleTracks={[0,1]}/>);expect(screen.getAllByRole('img')).toHaveLength(2);
+  const api=view.api as FakeView;api.boundsLookup.findBeats=beat=>beat.voice.bar.staff.track.score===projection.score?[beatBounds(beat)]:[];act(()=>api.postRenderFinished.emit());expect(screen.getAllByRole('img')).toHaveLength(2);
+  const next=projectEngraving(score,['base/0','base/1'],engraving);rendered.rerender(<ScoreView {...props} projection={next} visibleTracks={[1]}/>);
+  act(()=>view.note?.(projection.score.tracks[1].staves[0].bars[0].voices[0].beats[0].notes[0]));
+  act(()=>view.note?.(next.score.tracks[0].staves[0].bars[0].voices[0].beats[0].notes[0]));expect(onSelect).not.toHaveBeenCalled();
+});
+it('resizes a canonical selection using public projected bounds and hit testing',()=>{
+  const {score,engraving,projection}=twoTrackProjection(),onEditorSelection=vi.fn(),selected:MusicSelection={kind:'range',range:{start:{bar:0,tick:0},end:{bar:0,tick:2880},lanes:[{track:1,staff:0,voice:0}]}};
+  render(<ScoreView score={score} track={1} zoom={100} profile="Default" projection={projection} engraving={engraving} visibleTracks={[0,1]} playback={null} onSelect={vi.fn()} editorSelection={selected} onEditorSelection={onEditorSelection}/>);
+  const api=view.api as FakeView,beats=projection.score.tracks[1].staves[0].bars[0].voices[0].beats;expect(api.highlighted?.[0]===beats[0]).toBe(true);
+  api.boundsLookup.getBeatAtPos=()=>beats[3];fireEvent.mouseDown(screen.getByRole('button',{name:'Resize selection end'}),{button:0});fireEvent.mouseMove(document,{clientX:200,clientY:70});fireEvent.mouseUp(document);
+  expect(onEditorSelection).toHaveBeenLastCalledWith({kind:'range',range:{start:{bar:0,tick:0},end:{bar:1,tick:0},lanes:[{track:1,staff:0,voice:0}]}});
 });
 it('collapses a click and extends Shift selection from its original same-voice anchor',()=>{
   const {down,changes,onSelect}=setup();down(1);down(3,{shiftKey:true});

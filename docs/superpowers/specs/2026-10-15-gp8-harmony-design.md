@@ -72,7 +72,7 @@ interface HarmonyChordDialogProps {
   onLibraryPut:(entry:HarmonyLibraryEntry)=>Promise<void>;
   onLibraryRemove:(id:string)=>Promise<void>;
 }
-interface ScaleToolPanelProps {score:model.Score;selection:MusicSelection|null;busy:boolean;onClose:()=>void}
+interface ScaleToolPanelProps {score:model.Score;staff?:model.Staff;selection:MusicSelection|null;busy:boolean;onClose:()=>void}
 interface ChordDiagramPreviewProps {
   chord:HarmonyChord;staff:model.Staff;highlightRoot:boolean;
   onToggle:((stringIndex:number,fret:number)=>void)|null;

@@ -1,4 +1,5 @@
 import type { PrintLayout } from '../document-settings';
+import type { PageLayout } from '../engraving/types';
 export type { PrintLayout } from '../document-settings';
 export interface ExportSelection { tracks:number[]; range:{first:number;last:number}|null;staves?:Record<number,number[]> }
 export interface SvgPage { svg:string; widthMm:number; heightMm:number }
@@ -7,8 +8,8 @@ export interface AudioExportOptions { sampleRate:44100|48000;bitDepth:16|24;spee
 export type ExportOptions =
   | {format:'gp';selection:ExportSelection}
   | {format:'midi';selection:ExportSelection}
-  | {format:'pdf';selection:ExportSelection;layout:PrintLayout}
-  | {format:'print';selection:ExportSelection;layout:PrintLayout}
+  | {format:'pdf';selection:ExportSelection;layout:PrintLayout;page?:PageLayout}
+  | {format:'print';selection:ExportSelection;layout:PrintLayout;page?:PageLayout}
   | {format:'wav';selection:ExportSelection;audio:AudioExportOptions}
   | {format:'stems';selection:ExportSelection;audio:AudioExportOptions};
 export interface ExportProgress { id:string;frames:number;totalFrames:number;status:'running'|'complete'|'cancelled'|'failed';error?:string|null }

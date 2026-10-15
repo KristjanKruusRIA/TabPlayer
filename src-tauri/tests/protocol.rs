@@ -31,7 +31,7 @@ fn accepts_triple_dots_and_rejects_more() {
 fn every_frontend_command_round_trips_through_rust() {
     let examples: Vec<serde_json::Value> =
         serde_json::from_str(include_str!("../../tests/protocol.json")).unwrap();
-    assert_eq!(examples.len(), 59);
+    assert_eq!(examples.len(), 68);
     for mut example in examples {
         let command: EditCommand = serde_json::from_value(example.clone()).unwrap();
         assert!(command.validate().is_ok(), "invalid fixture {example}");

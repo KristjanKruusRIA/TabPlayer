@@ -8,6 +8,7 @@ import { allNotes,captureNoteLinks,restoreNoteLinks,type NoteLinks } from './lin
 import { applyMeasureEdit,planMeasureMap } from './measures';
 import { mapLyricsMeasures } from './lyrics-measures';
 import { integer,rhythmTicks } from './common';
+import { copyHarmonyChord } from '../harmony/chord-source';
 import type { ClipboardCommand,MusicClip,PasteDestination,PasteFilters,PreparedMusicPaste } from './clipboard-types';
 import type { BarIndexMap } from './measures-types';
 
@@ -39,6 +40,10 @@ function targetAndMappings(score:model.Score,source:model.Score,command:Clipboar
     mapping.staffMap.forEach((index,staff)=>{if(!integer(index)||!track.staves[index])throw new Error('Map every copied staff to an existing destination staff.');for(const bar of original.staves[staff].bars)for(let voice=0;voice<bar.voices.length;voice++)if(command.clip.kind==='bars'&&!track.staves[index].bars[target.bar]?.voices[voice])throw new Error('The destination must already contain every copied voice.');});
   }
   if(command.clip.kind==='phrase'&&(destinations[0].track!==target.track||destinations[0].staffMap[0]!==target.staff))throw new Error('Map a phrase to the selected destination staff and voice.');
+  if(command.clip.version===2&&filters.diagrams)for(const record of command.clip.harmony){
+    const mapping=destinations.find(mapping=>mapping.sourceTrack===record.track)!,from=source.tracks[record.track].staves[record.staff],to=score.tracks[mapping.track].staves[mapping.staffMap[record.staff]];
+    if(from.capo!==to.capo||from.transpositionPitch!==to.transpositionPitch||from.tuning.length!==to.tuning.length||from.tuning.some((pitch,index)=>pitch!==to.tuning[index])||record.chord.frets.some(fret=>fret>=0)&&(to.isPercussion||!to.tuning.length))throw new Error('Rich clipboard diagrams require matching tuning, string count, capo and sounding transposition. Uncheck diagrams to convert notes.');
+  }
   return destinations;
 }
 function reserveIds(destination:model.Score) {
@@ -59,7 +64,7 @@ function finishFreshIds(score:model.Score,preserved:ReturnType<typeof preserveOb
 }
 function installChords(source:model.Staff,destination:model.Staff,repeat:number) {
   const renamed=new Map<string,string>();
-  for(const [id,chord] of source.chords??[]){let name=`clipboard-${repeat}-${id}`;while(destination.chords?.has(name))name=`_${name}`;destination.addChord(name,chord);renamed.set(id,name);}
+  for(const [id,chord] of source.chords??[]){let name=`clipboard-${repeat}-${id}`;while(destination.chords?.has(name))name=`_${name}`;const copy=Object.assign(new model.Chord(),chord,{strings:[...chord.strings],barreFrets:[...chord.barreFrets]});copyHarmonyChord(chord,copy);destination.addChord(name,copy);renamed.set(id,name);}
   return renamed;
 }
 function prepareBeat(beat:model.Beat,source:model.Staff,destination:model.Staff,filters:PasteFilters,chords:Map<string,string>) {

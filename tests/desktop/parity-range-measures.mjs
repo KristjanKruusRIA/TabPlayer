@@ -11,6 +11,7 @@ const sourceHash=createHash('sha256').update(readFileSync(fixturePath)).digest('
 let id=launch({TABPLAYER_TEST_OPEN:fixturePath,TABPLAYER_TEST_SAVE:saved,TABPLAYER_TEST_EXPORT:exported}),browser,page;
 try{
   browser=await connect();page=browser.contexts()[0].pages()[0];await page.getByRole('button',{name:'Open',exact:true}).waitFor();
+  await page.setViewportSize({width:1440,height:1400});
   const errors=[];page.on('pageerror',error=>errors.push(error.message));
   const snapshot=()=>page.evaluate(()=>window.__TAURI_INTERNALS__.invoke('project_snapshot'));
   const status=()=>page.evaluate(()=>window.__TAURI_INTERNALS__.invoke('audio_status'));
@@ -24,12 +25,14 @@ try{
     return {bars:score.masterBars.length,aligned:score.tracks.map(track=>track.staves.map(staff=>staff.bars.length)),notes:file.tracks.flatMap(track=>track.events).filter(event=>event instanceof midi.NoteOnEvent).map(event=>({track:event.track,tick:event.tick,pitch:event.noteKey,velocity:event.noteVelocity})),guitar:score.tracks[0].staves[0].bars.flatMap(bar=>bar.voices.flatMap(voice=>voice.beats.flatMap(beat=>beat.notes.map(note=>({bar:bar.index,beat:beat.index,string:note.string,fret:note.fret,letRing:note.isLetRing,palmMute:note.isPalmMute})))))};
   },[...readFileSync(exported)]);
   await button('Open');await details('Music selection');
+  await page.waitForFunction(async()=>{const status=await window.__TAURI_INTERNALS__.invoke('audio_status');return status.ready&&!status.error;},undefined,{timeout:20000});
   const workspace=page.getByRole('region',{name:'Score workspace'});
   await page.locator('[aria-label="Music notation"] svg').first().waitFor();
   const frets=page.locator('[aria-label="Music notation"] svg text').filter({hasText:/^\d+$/});
   const center=async locator=>{const rect=await locator.boundingBox();assert.ok(rect);return {x:rect.x+rect.width/2,y:rect.y+rect.height/2};};
   const first=await center(frets.first()),last=await center(frets.last()),middle=await center(frets.filter({hasText:/^5$/}).first());
   await page.getByLabel('Fret',{exact:true}).focus();await page.mouse.click(first.x,first.y);await page.keyboard.press('Shift+ArrowRight');
+  await page.waitForFunction(()=>document.querySelector('.inspector input')?.value==='2');
   assert.equal(await page.getByLabel('Measure',{exact:true}).inputValue(),'2');assert.match(await page.locator('.inspector').innerText(),/3 notes · 2 beats/);
   await page.keyboard.press('Escape');
   await page.mouse.click(first.x,first.y);await page.keyboard.down('Shift');await page.mouse.click(last.x,last.y);await page.keyboard.up('Shift');
@@ -54,7 +57,7 @@ try{
   await button('Transpose selection');assert.equal((await snapshot()).project.edits.at(-1).selection.kind,'range');
   await button('Undo');await button('Select track');await button('Enable let ring');await button('Enable palm mute');await button('Re-finger selection');
   await button('Export GP');const refingered=await music();assert.deepEqual(refingered.notes,transposed.notes);assert.ok(refingered.guitar.every(note=>note.letRing&&note.palmMute));result.refingerPitchPreserved=true;
-  await button('Track 2: Bass6');await button('Track 1: Guitar9');await page.getByRole('combobox',{name:/^Zoom/}).selectOption('115');
+  await button('Track 2: Bass6');await button('Track 1: Guitar9');await page.getByLabel('Zoom (%)',{exact:true}).fill('115');
   await change('Measure',2);await details('Insert & remove measures');await change('Measures to insert',2);await button('Insert before');
   assert.equal(await page.getByLabel('Measure',{exact:true}).inputValue(),'4');assert.equal((await snapshot()).project.edits.at(-1).count,2);
   await button('Export GP');const inserted=await music();assert.equal(inserted.bars,6);assert.ok(inserted.aligned.flat().every(count=>count===6));result.allTracksAligned=true;

@@ -8,10 +8,44 @@ import { scoreFromJson } from '../model-clone';
 import { getLyricsSource,setLyricsSource } from './lyrics-source';
 import { exportGpInterchange,loadInterchangeScore } from '../interchange/gp';
 import type { MusicSelection } from './range-types';
+import { getHarmonyChord,setHarmonyChordSource } from '../harmony/chord-source';
+import type { HarmonyChord } from './harmony-types';
+import type { MusicClip } from './clipboard-types';
 
 const notes=(...beats:number[]):MusicSelection=>({kind:'notes',notes:beats.map(beat=>({target:{...target,beat},noteIndex:0}))});
 const bars=(firstBar=0,lastBar=firstBar):MusicSelection=>({kind:'bars',tracks:[0],firstBar,lastBar});
 const decode=(clip:ReturnType<typeof makeMusicClip>)=>scoreFromJson(clip.scoreJson,new Settings());
+function richDefinition():HarmonyChord {return {name:'C',nameMode:'theory',recipe:{root:{step:0,alteration:0},formula:'major',alterations:[],omissions:[],bass:null},firstFret:1,frets:[0,1,0,2,3,-1],fingers:[-2,1,-2,2,3,-2],barreFrets:[],showName:true,showDiagram:true,showFingering:true};}
+function attachRich(staff:model.Staff,value=richDefinition(),id='rich') {const chord=Object.assign(new model.Chord(),{name:value.name,firstFret:value.firstFret,strings:[...value.frets],barreFrets:[...value.barreFrets],showName:value.showName,showDiagram:value.showDiagram,showFingering:value.showFingering});staff.addChord(id,chord);staff.bars[0].voices[0].beats[0].chordId=id;setHarmonyChordSource(chord,value);return chord;}
+it('clipboard v2 keeps only referenced effective theory and finger metadata',()=>{
+  const score=music(),staff=score.tracks[0].staves[0],value=richDefinition(),chord=attachRich(staff,value);const unused=attachRich(staff,{...value,name:'Private manual',nameMode:'manual',recipe:null},'unused');staff.bars[0].voices[0].beats[0].chordId='rich';
+  const before=model.JsonConverter.scoreToJson(score),original=getHarmonyChord(chord),clip=makeMusicClip(score,notes(0),'singleTrack');expect(clip.version).toBe(2);if(clip.version!==2)throw new Error('Expected rich snapshot');
+  expect(clip.harmony).toEqual([{track:0,staff:0,chordId:'rich',chord:value}]);expect(JSON.stringify(clip)).not.toContain(unused.name);expect(getHarmonyChord(scoreFromMusicClip(clip).tracks[0].staves[0].getChord('rich')!)).toEqual(value);
+  clip.harmony[0].chord.fingers[1]=4;expect(getHarmonyChord(chord)).toEqual(original);expect(model.JsonConverter.scoreToJson(score)).toBe(before);
+});
+it('public-only legacy and owned unknown manual chords preserve the v1 snapshot envelope',()=>{
+  const score=music(),value:HarmonyChord={...richDefinition(),name:' untouched ',nameMode:'manual',recipe:null,firstFret:0,frets:[0,23,-1,2,15,0],fingers:Array(6).fill(-2),barreFrets:[0,2,2,23],showName:false,showDiagram:false,showFingering:false},chord=attachRich(score.tracks[0].staves[0],value);
+  const clip=makeMusicClip(score,notes(0),'singleTrack');expect(clip.version).toBe(1);expect(Object.hasOwn(clip,'harmony')).toBe(false);expect(getHarmonyChord(scoreFromMusicClip(clip).tracks[0].staves[0].getChord('rich')!)).toEqual(value);
+  setHarmonyChordSource(chord,{...value,fingers:[-2,4,-1,1,3,0]});const rich=makeMusicClip(score,notes(0),'singleTrack');expect(rich.version).toBe(2);if(rich.version===2)expect(rich.harmony[0].chord).toEqual({...value,fingers:[-2,4,-1,1,3,0]});
+});
+it('v2 snapshots rebase selected track and staff indices without unrelated chord data',()=>{
+  const score=music(),track=music().tracks[0];score.addTrack(track);track.addStaff(music().tracks[0].staves[0]);attachRich(track.staves[1]);
+  const clip=makeMusicClip(score,{kind:'notes',notes:[{target:{...target,track:1,staff:1},noteIndex:0}]},'singleTrack');expect(clip.version).toBe(2);if(clip.version===2)expect(clip.harmony.map(record=>[record.track,record.staff,record.chordId])).toEqual([[0,0,'rich']]);
+});
+it('stale theory is copied as its effective manual snapshot without changing authored provenance',()=>{
+  const score=music(),staff=score.tracks[0].staves[0],chord=attachRich(staff);staff.capo=1;const clip=makeMusicClip(score,notes(0),'singleTrack');expect(clip.version).toBe(2);if(clip.version===2){expect(clip.harmony[0].chord.nameMode).toBe('manual');expect(clip.harmony[0].chord.recipe).toBeNull();expect(clip.harmony[0].chord.name).toBe('C');}
+  staff.capo=0;expect(getHarmonyChord(chord).nameMode).toBe('theory');
+});
+it('v2 read validates record identity, public data, dense arrays and effective source context',()=>{
+  const score=music();attachRich(score.tracks[0].staves[0]);const clip=makeMusicClip(score,notes(0),'singleTrack');expect(clip.version).toBe(2);if(clip.version!==2)throw new Error('Expected rich snapshot');
+  const accepted=readMusicClip(clip);if(accepted.version!==2)throw new Error('Expected rich snapshot');accepted.harmony[0].chord.recipe!.root.step=1;expect(clip.harmony[0].chord.recipe!.root.step).toBe(0);
+  for(const change of ['duplicate','track','staff','id','name','frets','flags','barres','sparse','theory','context'] as const){const invalid=structuredClone(clip);if(change==='duplicate')invalid.harmony.push(structuredClone(invalid.harmony[0]));if(change==='track')invalid.harmony[0].track=9;if(change==='staff')invalid.harmony[0].staff=9;if(change==='id')invalid.harmony[0].chordId='missing';if(change==='name')invalid.harmony[0].chord.name='Different';if(change==='frets')invalid.harmony[0].chord.frets[0]=3;if(change==='flags')invalid.harmony[0].chord.showDiagram=false;if(change==='barres')invalid.harmony[0].chord.barreFrets=[1];if(change==='sparse')delete invalid.harmony[0].chord.fingers[0];if(change==='theory'){const raw=JSON.parse(invalid.scoreJson);raw.tracks[0].staves[0].capo=1;invalid.scoreJson=JSON.stringify(raw);}if(change==='context'){const raw=JSON.parse(invalid.scoreJson);raw.tracks[0].staves[0].stringtuning.tunings.pop();invalid.scoreJson=JSON.stringify(raw);}expect(()=>readMusicClip(invalid)).toThrow();}
+});
+it('v2 accepts passive empty records and manual unknown metadata but rejects unreferenced definitions',()=>{
+  const score=music(),value={...richDefinition(),nameMode:'manual' as const,recipe:null,fingers:Array(6).fill(-2)};attachRich(score.tracks[0].staves[0],value);const legacy=makeMusicClip(score,notes(0),'singleTrack'),empty:MusicClip={...legacy,version:2,harmony:[]};expect(readMusicClip(empty)).toEqual(empty);
+  const passive:MusicClip={...empty,harmony:[{track:0,staff:0,chordId:'rich',chord:value}]};expect(readMusicClip(passive)).toEqual(passive);
+  const decoded=scoreFromMusicClip(legacy),unused=Object.assign(new model.Chord(),{name:value.name,strings:[...value.frets]});decoded.tracks[0].staves[0].addChord('unreferenced',unused);const invalid:MusicClip={...passive,scoreJson:model.JsonConverter.scoreToJson(decoded),harmony:[{...passive.harmony[0],chordId:'unreferenced'}]};expect(()=>readMusicClip(invalid)).toThrow(/reference/i);
+});
 it('snapshot_contains_only_selected_music',()=>{
   const source=music(),staff=source.tracks[0].staves[0];source.title='ROOT_SENTINEL';source.artist='PATH_SENTINEL';
   source.tracks[0].name='Selected guitar';staff.bars[1].voices[0].beats[0].text='UNSELECTED_BAR';

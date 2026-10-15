@@ -12,6 +12,7 @@ import { validateSelection,type ExportOptions,type ExportProgress } from './type
 import { scoreFromJson } from '../model-clone';
 import { copyGpInterchangeSource } from '../interchange/gp';
 import { captureNoteLinks,restoreNoteLinks } from '../editor/links';
+import { effectivePageLayout } from '../engraving/page';
 export function useExportCoordinator({score,settings,currentSpeed,bridge,native=nativeExportBridge,embeddedBacking=null}:{score:model.Score;settings:DocumentSettings;currentSpeed:number|null;bridge:Pick<NativeBridge,'confirmExport'|'exportGp'>;native?:ExportNativeBridge;embeddedBacking?:Uint8Array|null}) {
   const [busy,setBusy]=useState(false),[progress,setProgress]=useState<ExportProgress>();
   const pending=useRef(false),cancelled=useRef(false),job=useRef<string|null>(null),alive=useRef(true),generation=useRef(0);
@@ -39,7 +40,7 @@ export function useExportCoordinator({score,settings,currentSpeed,bridge,native=
       restoreNoteLinks(copy,captureNoteLinks(score));copyGpInterchangeSource(score,copy);
       if(frozenOptions.format==='gp'){if(!await bridge.confirmExport()||cancelled.current)return false;return await bridge.exportGp(exportGp(selectScore(copy,selection)));}
       if(frozenOptions.format==='midi'){if(cancelled.current)return false;return await native.exportMidi(exportMidi(copy,selection));}
-      if(frozenOptions.format==='pdf'||frozenOptions.format==='print'){await loadExportFonts();if(cancelled.current)return false;const pages=renderPdfPages(copy,selection,frozenOptions.layout);if(cancelled.current)return false;return await watch(await native.exportPdf(pages,frozenOptions.format==='print'));}
+      if(frozenOptions.format==='pdf'||frozenOptions.format==='print'){await loadExportFonts();if(cancelled.current)return false;const pages=renderPdfPages(copy,selection,frozenOptions.layout,{page:frozenOptions.page??effectivePageLayout({page:null,print:frozenOptions.layout}),engraving:frozenSettings.engraving,trackIds:ids});if(cancelled.current)return false;return await watch(await native.exportPdf(pages,frozenOptions.format==='print'));}
       const audio=frozenOptions.audio;
       const plan=buildPlaybackPlanFromJson(model.JsonConverter.scoreToJson(selectStaves(copy,selection)),ids,++generation.current);
       if(cancelled.current)return false;

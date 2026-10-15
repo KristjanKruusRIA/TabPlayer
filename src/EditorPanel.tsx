@@ -6,9 +6,7 @@ import { IndexInput } from './editor/IndexInput';
 import { TechniquePanel } from './editor/TechniquePanel';
 import { StructurePanel } from './editor/StructurePanel';
 import { MeasurePanel } from './editor/MeasurePanel';
-import { ChordDialog } from './editor/ChordDialog';
 import { EnumInput } from './editor/controls';
-import type { ChordDefinition } from './edit-types';
 import { formatPitch } from './tuning';
 import { NonTabPanel } from './editor/NonTabPanel';
 import { SongPanel } from './editor/SongPanel';
@@ -21,18 +19,19 @@ import { RangePanel } from './editor/RangePanel';
 import { MeasureTransformPanel } from './editor/MeasureTransformPanel';
 import type { MusicSelection } from './editor/range-types';
 
-export function EditorPanel({score,target,string,fret,noteIndex,onSelectNote,busy,onSelect,onString,onFret,onEdit,musicSelection,onMusicSelection,children}: {
+export function EditorPanel({score,target,string,fret,noteIndex,onSelectNote,busy,onSelect,onString,onFret,onEdit,musicSelection,onMusicSelection,onChord,onScales,children}: {
   score:model.Score;target:BeatTarget;string:number;fret:number;busy:boolean;
   noteIndex:number|null;onSelectNote:(index:number|null)=>void;
   onSelect:(target:BeatTarget)=>void;onString:(string:number)=>void;onFret:(fret:number)=>void;onEdit:(edit:EditCommand)=>void;
   musicSelection:MusicSelection|null;onMusicSelection:(selection:MusicSelection|null)=>void;
+  onChord:()=>void;onScales:()=>void;
   children?:ReactNode;
 }) {
   const {staff,bar,voice,beat,master}=describeSelection(score,target);
   const indexed=staff.isPercussion||!staff.tuning.length;
   const [duration,setDuration]=useState(4);const [dots,setDots]=useState(0);
-  const [tupletNumerator,setTupletNumerator]=useState(1),[tupletDenominator,setTupletDenominator]=useState(1),[graceType,setGraceType]=useState(0),[text,setText]=useState(beat?.text??''),[chordOpen,setChordOpen]=useState(false);
-  useEffect(()=>{setDuration(beat?.duration ?? 4);setDots(beat?.dots ?? 0);setTupletNumerator(beat?.tupletNumerator&&beat.tupletNumerator>0?beat.tupletNumerator:1);setTupletDenominator(beat?.tupletDenominator&&beat.tupletDenominator>0?beat.tupletDenominator:1);setGraceType(beat?.graceType??0);setText(beat?.text??'');setChordOpen(false);},[score,beat,target.bar,target.beat,target.track,target.staff,target.voice]);
+  const [tupletNumerator,setTupletNumerator]=useState(1),[tupletDenominator,setTupletDenominator]=useState(1),[graceType,setGraceType]=useState(0),[text,setText]=useState(beat?.text??'');
+  useEffect(()=>{setDuration(beat?.duration ?? 4);setDots(beat?.dots ?? 0);setTupletNumerator(beat?.tupletNumerator&&beat.tupletNumerator>0?beat.tupletNumerator:1);setTupletDenominator(beat?.tupletDenominator&&beat.tupletDenominator>0?beat.tupletDenominator:1);setGraceType(beat?.graceType??0);setText(beat?.text??'');},[score,beat,target.bar,target.beat,target.track,target.staff,target.voice]);
   const remaining=master.calculateDuration(false)-voice.beats.reduce((total,b)=>total+(b.isEmpty || b.graceType!==0?0:b.playbackDuration),0);
   const [title,setTitle]=useState(score.title);const [artist,setArtist]=useState(score.artist);const [tempo,setTempo]=useState(score.tempo);
   useEffect(()=>{setTitle(score.title);setArtist(score.artist);setTempo(score.tempo);},[score.title,score.artist,score.tempo]);
@@ -60,8 +59,7 @@ export function EditorPanel({score,target,string,fret,noteIndex,onSelectNote,bus
   <GesturePanel score={score} target={target} busy={busy} onEdit={onEdit}/>
   <RangePanel score={score} target={target} selection={musicSelection} busy={busy} onSelection={onMusicSelection} onEdit={onEdit}/>
   {children}
-  <details><summary>Beat text & chord</summary><fieldset disabled={busy||!beat}><label>Beat text<input value={text} onChange={e=>setText(e.target.value)}/></label><button onClick={()=>onEdit({type:'setBeatAnnotation',target,text,chord:beat?.chord?{name:beat.chord.name,firstFret:beat.chord.firstFret,frets:[...beat.chord.strings]}:null})}>Apply beat text</button><p className="muted">{beat?.chord?.name||'No chord diagram'}</p><button onClick={()=>setChordOpen(true)}>Edit chord diagram</button></fieldset></details>
-  {chordOpen&&<ChordDialog strings={staff.tuning.length} disabled={busy} value={beat?.chord?{name:beat.chord.name,firstFret:beat.chord.firstFret,frets:[...beat.chord.strings]}:null} onChange={(chord:ChordDefinition|null)=>onEdit({type:'setBeatAnnotation',target,text,chord})} onClose={()=>setChordOpen(false)}/>}
+  <details><summary>Beat text & chord</summary><fieldset disabled={busy||!beat}><label>Beat text<input value={text} onChange={e=>setText(e.target.value)}/></label><button onClick={()=>onEdit({type:'setBeatText',target,text})}>Apply beat text</button><p className="muted">{beat?.chord?.name||'No chord diagram'}</p><button onClick={onChord}>Edit chord diagram</button></fieldset><button disabled={busy} onClick={onScales}>Browse scales</button></details>
   <MeasurePanel score={score} target={target} string={string} busy={busy} onEdit={onEdit}/><DirectionsPanel score={score} target={target} busy={busy} onEdit={onEdit}/><StructurePanel score={score} target={target} string={string} busy={busy} onEdit={onEdit} onSelect={onSelect}/>
   <BarGesturePanel score={score} track={target.track} staff={target.staff} bar={target.bar} busy={busy} onEdit={onEdit}/><LyricsPanel score={score} track={target.track} busy={busy} onEdit={onEdit}/>
   <MeasureTransformPanel score={score} bar={target.bar} busy={busy} onEdit={onEdit}/>

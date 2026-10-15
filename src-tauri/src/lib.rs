@@ -1,8 +1,11 @@
 pub mod assets;
 pub mod audio;
 pub mod edit_types;
+pub mod engraving;
 pub mod export;
 pub mod files;
+pub mod harmony;
+pub mod harmony_library;
 pub mod project;
 mod runtime;
 pub mod settings;
@@ -22,6 +25,36 @@ use std::{
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_dialog::DialogExt;
+
+#[tauri::command]
+async fn harmony_library_read(app: AppHandle) -> Result<harmony::HarmonyLibrary, String> {
+    let directory = app.path().app_data_dir().map_err(|err| err.to_string())?;
+    tauri::async_runtime::spawn_blocking(move || harmony_library::read_library(&directory))
+        .await
+        .map_err(|err| err.to_string())?
+}
+
+#[tauri::command]
+async fn harmony_library_put(
+    app: AppHandle,
+    entry: harmony::HarmonyLibraryEntry,
+) -> Result<harmony::HarmonyLibrary, String> {
+    let directory = app.path().app_data_dir().map_err(|err| err.to_string())?;
+    tauri::async_runtime::spawn_blocking(move || harmony_library::put_entry(&directory, entry))
+        .await
+        .map_err(|err| err.to_string())?
+}
+
+#[tauri::command]
+async fn harmony_library_remove(
+    app: AppHandle,
+    id: String,
+) -> Result<harmony::HarmonyLibrary, String> {
+    let directory = app.path().app_data_dir().map_err(|err| err.to_string())?;
+    tauri::async_runtime::spawn_blocking(move || harmony_library::remove_entry(&directory, &id))
+        .await
+        .map_err(|err| err.to_string())?
+}
 
 #[tauri::command]
 fn project_snapshot(state: State<'_, Mutex<ProjectSession>>) -> ProjectSnapshot {
@@ -393,7 +426,10 @@ pub fn run() {
         export_midi,
         export_audio,
         export_status,
-        cancel_export
+        cancel_export,
+        harmony_library_read,
+        harmony_library_put,
+        harmony_library_remove
     ]);
     #[cfg(feature = "desktop-test")]
     let builder = builder.invoke_handler(tauri::generate_handler![
@@ -420,6 +456,9 @@ pub fn run() {
         export_audio,
         export_status,
         cancel_export,
+        harmony_library_read,
+        harmony_library_put,
+        harmony_library_remove,
         desktop_test_io
     ]);
     builder

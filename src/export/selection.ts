@@ -6,6 +6,7 @@ import { isGpMixAutomation,trackMixAutomations } from '../interchange/automation
 import { captureNoteLinks,restoreNoteLinks } from '../editor/links';
 import { applyLyricsEdit,reconstructTrackLyrics } from '../editor/lyrics';
 import { getLyricsSource,setLyricsSource } from '../editor/lyrics-source';
+import { remapStylesheetTracks } from '../engraving/projection';
 
 function materializeCutSimiles(score:model.Score,first:number,last:number):void {
   const links=captureNoteLinks(score),copies=new Map<number,Map<number,number>>();
@@ -41,6 +42,7 @@ function materializeCutSimiles(score:model.Score,first:number,last:number):void 
 /** A detached musical score for GP output. The original and its history are never edited. */
 export function selectScore(score:model.Score,selection:ExportSelection):model.Score {
   const copy=selectStaves(score,selection);
+  remapStylesheetTracks(copy.stylesheet,copy.tracks.map((_,index)=>{const next=selection.tracks.indexOf(index);return next<0?null:next;}));
   copy.tracks=selection.tracks.map(i=>copy.tracks[i]);
   if(selection.range){
     const {first,last}=selection.range;

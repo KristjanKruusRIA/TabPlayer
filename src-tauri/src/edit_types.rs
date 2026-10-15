@@ -1,3 +1,5 @@
+use crate::engraving::{EngravingOverrides, PageLayout};
+use crate::harmony::{HarmonyChord, HarmonyInterval};
 use crate::project::BeatTarget;
 use crate::settings::{BackingSettings, ChannelMix, PrintLayout, TrackSound};
 use serde::{Deserialize, Serialize};
@@ -225,6 +227,15 @@ pub struct ClipboardLink {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ClipboardHarmony {
+    pub track: u32,
+    pub staff: u32,
+    pub chord_id: String,
+    pub chord: HarmonyChord,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct MusicClip {
     pub format: String,
     pub version: u32,
@@ -233,11 +244,23 @@ pub struct MusicClip {
     pub kind: ClipboardKind,
     pub score_json: String,
     pub links: Vec<ClipboardLink>,
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub harmony: Option<Vec<ClipboardHarmony>>,
 }
 
 impl MusicClip {
     fn validate(&self) -> Result<(), String> {
-        if self.format != "TabPlayerClip" || self.version != 1 || self.engine_version != "1.8.4" {
+        if self.format != "TabPlayerClip"
+            || !matches!(
+                (self.version, self.harmony.is_some()),
+                (1, false) | (2, true)
+            )
+            || self.engine_version != "1.8.4"
+        {
             return Err("Unsupported clipboard format, version or engine.".into());
         }
         if self.score_json.len() > 128_000_000 {
@@ -259,6 +282,19 @@ impl MusicClip {
             }
             if !seen.insert((link.from, link.to, &link.kind, link.slide_out_type)) {
                 return Err("Clipboard links must be distinct.".into());
+            }
+        }
+        if let Some(harmony) = &self.harmony {
+            let mut records = HashSet::new();
+            for record in harmony {
+                if record.chord_id.is_empty()
+                    || !records.insert((record.track, record.staff, &record.chord_id))
+                {
+                    return Err(
+                        "Clipboard harmony needs distinct nonempty chord identities.".into(),
+                    );
+                }
+                record.chord.validate()?;
             }
         }
         Ok(())
@@ -1022,6 +1058,22 @@ pub enum EditCommand {
         #[serde(deserialize_with = "required_nullable")]
         chord: Option<ChordDefinition>,
     },
+    SetBeatText {
+        target: BeatTarget,
+        text: String,
+    },
+    SetHarmonyChord {
+        target: BeatTarget,
+        #[serde(deserialize_with = "required_nullable")]
+        chord: Option<HarmonyChord>,
+        fill_empty_beat: bool,
+    },
+    TransposeHarmony {
+        selection: MusicSelection,
+        interval: HarmonyInterval,
+        include_key_signatures: bool,
+        include_chords: bool,
+    },
     SetTrackSound {
         track_id: String,
         sound: TrackSound,
@@ -1036,6 +1088,12 @@ pub enum EditCommand {
     },
     SetPrintLayout {
         layout: PrintLayout,
+    },
+    SetEngraving {
+        engraving: EngravingOverrides,
+    },
+    SetPageLayout {
+        layout: PageLayout,
     },
 }
 
@@ -1118,6 +1176,25 @@ impl EditCommand {
     }
     pub fn validate(&self) -> Result<(), String> {
         match self {
+            Self::SetHarmonyChord {
+                chord: Some(chord), ..
+            } => chord.validate()?,
+            Self::TransposeHarmony {
+                selection,
+                interval,
+                include_key_signatures,
+                include_chords,
+            } => {
+                selection.validate()?;
+                interval.validate()?;
+                if matches!(interval, HarmonyInterval::Diatonic { .. })
+                    && (*include_key_signatures || *include_chords)
+                {
+                    return Err(
+                        "Diatonic transposition cannot include key signatures or chords.".into(),
+                    );
+                }
+            }
             Self::PasteMusic { clip, options } => {
                 clip.validate()?;
                 options.validate()?;
@@ -1438,6 +1515,8 @@ impl EditCommand {
                 backing: Some(backing),
             } => backing.validate()?,
             Self::SetPrintLayout { layout } => layout.validate()?,
+            Self::SetEngraving { engraving } => engraving.validate()?,
+            Self::SetPageLayout { layout } => layout.validate()?,
             _ => {}
         }
         Ok(())

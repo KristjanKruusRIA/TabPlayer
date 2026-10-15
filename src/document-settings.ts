@@ -1,5 +1,7 @@
 import type { model } from '@coderline/alphatab';
 import type { DocumentSettings, FxSettings, SettingsEdit, ChannelMix, PrintLayout } from './edit-types';
+import {defaultEngraving,validateEngravingTracks} from './engraving/projection';
+import {validatePageLayout} from './engraving/page';
 export type { DocumentSettings, FxSettings, TrackSound, ChannelMix, PrintLayout, SyncAnchor, BackingSettings } from './edit-types';
 
 export const defaultMix = (): ChannelMix => ({gain:1,pan:0,mute:false,solo:false});
@@ -11,7 +13,7 @@ export const defaultEffects = (): FxSettings => ({
   delay:{enabled:false,quarterNotes:1,feedback:.25,mix:.15},reverb:{enabled:false,room:.5,damping:.5,mix:.12},
 });
 export const defaultPrintLayout = (): PrintLayout => ({paper:'A4',orientation:'portrait',marginMm:15,scale:1,profile:'ScoreTab'});
-export const defaultDocumentSettings = (): DocumentSettings => ({sounds:{},mixes:{},backing:null,print:defaultPrintLayout()});
+export const defaultDocumentSettings = (): DocumentSettings => ({sounds:{},mixes:{},backing:null,print:defaultPrintLayout(),engraving:defaultEngraving(),page:null});
 
 export function validateMix(mix: ChannelMix) {
   if (!mix || !Number.isFinite(mix.gain) || mix.gain<0 || mix.gain>1 || !Number.isFinite(mix.pan) || Math.abs(mix.pan)>1 || typeof mix.mute!=='boolean' || typeof mix.solo!=='boolean') throw new Error('Invalid mixer settings.');
@@ -39,7 +41,9 @@ export function applySettingsEdit(settings: DocumentSettings, edit: SettingsEdit
     case 'setPrintLayout': {
       const p=edit.layout;
       if(!['A4','Letter'].includes(p.paper) || !['portrait','landscape'].includes(p.orientation) || !['ScoreTab','Score','Tab'].includes(p.profile) || !Number.isFinite(p.marginMm) || p.marginMm<0 || !Number.isFinite(p.scale) || p.scale<=0) throw new Error('Invalid print layout.');
-      settings.print=structuredClone(p); break;
+      settings.print=structuredClone(p);settings.page=null;break;
     }
+    case 'setEngraving':validateEngravingTracks(score,trackIds,edit.engraving);settings.engraving=structuredClone(edit.engraving);break;
+    case 'setPageLayout':validatePageLayout(edit.layout);settings.page=structuredClone(edit.layout);break;
   }
 }

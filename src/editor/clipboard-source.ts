@@ -7,8 +7,9 @@ import { allNotes,captureNoteLinks,restoreNoteLinks } from './links';
 import { resolveSelectionBeats,resolveSelectionNotes,validateMusicSelection } from './range-selection';
 import { resolvePercussionArticulation } from './percussion-catalog';
 import { nextLinkedNote,validateCurve } from './techniques';
+import { getHarmonyChord,setHarmonyChordSource,validateHarmonyChord } from '../harmony/chord-source';
 import type { MusicSelection } from './range-types';
-import type { ClipboardLink,ClipboardMode,MusicClip } from './clipboard-types';
+import type { ClipboardHarmony,ClipboardLink,ClipboardMode,MusicClip } from './clipboard-types';
 
 type RecordValue=Record<string,unknown>;
 const object=(value:unknown):RecordValue=>{if(!value||typeof value!=='object'||Array.isArray(value))throw new Error('Invalid clipboard model object.');return value as RecordValue;};
@@ -120,7 +121,23 @@ function validateModel(score:model.Score,clip:MusicClip) {
 export function readMusicClip(value:unknown):MusicClip {
   validateMusicClipEnvelope(value);const clip=value as MusicClip,raw=object(JSON.parse(clip.scoreJson));validateStructure(raw,clip);
   const score=scoreFromMusicClip(clip);knownFields(raw,JSON.parse(json(score)));validateModel(score,clip);
-  return {...clip,links:clip.links.map(link=>({...link}))};
+  return clip.version===2?{...clip,links:clip.links.map(link=>({...link})),harmony:structuredClone(clip.harmony)}:{...clip,links:clip.links.map(link=>({...link}))};
+}
+
+function installClipHarmony(score:model.Score,clip:MusicClip) {
+  if(clip.version!==2)return;const records=array(clip.harmony),seen=new Set<string>();
+  for(let index=0;index<records.length;index++){
+    if(!Object.hasOwn(records,index))throw new Error('Clipboard harmony records must be dense.');const record=object(records[index]);
+    if(Object.keys(record).length!==4||!['track','staff','chordId','chord'].every(key=>Object.hasOwn(record,key))||!integer(record.track as number,0,0xffffffff)||!integer(record.staff as number,0,0xffffffff)||typeof record.chordId!=='string')throw new Error('Invalid clipboard harmony reference.');
+    const key=JSON.stringify([record.track,record.staff,record.chordId]);if(seen.has(key))throw new Error('Duplicate clipboard harmony reference.');seen.add(key);
+    const staff=score.tracks[record.track as number]?.staves[record.staff as number],chord=staff?.getChord(record.chordId);
+    if(!staff||!chord||!staff.bars.some(bar=>bar.voices.some(voice=>voice.beats.some(beat=>beat.chordId===record.chordId))))throw new Error('Clipboard harmony must reference selected music and an existing chord.');
+    validateHarmonyChord(record.chord);const value=record.chord;
+    if(value.name!==chord.name||value.firstFret!==chord.firstFret||JSON.stringify(value.frets)!==JSON.stringify(chord.strings)||JSON.stringify(value.barreFrets)!==JSON.stringify(chord.barreFrets)||value.showName!==chord.showName||value.showDiagram!==chord.showDiagram||value.showFingering!==chord.showFingering)throw new Error('Clipboard harmony does not match its public chord definition.');
+    if(value.frets.length!==staff.tuning.length||value.frets.some(fret=>fret>=0)&&(staff.isPercussion||!staff.tuning.length))throw new Error('Clipboard harmony shape does not match its source staff context.');
+    setHarmonyChordSource(chord,value);
+    if(value.nameMode==='theory'&&getHarmonyChord(chord).nameMode!=='theory')throw new Error('Clipboard theory chord does not match its source tuning, capo and sounding transposition.');
+  }
 }
 
 /** Decode an already validated clip, retaining selected events despite public finish's default PC injection. */
@@ -130,7 +147,7 @@ export function scoreFromMusicClip(clip:MusicClip):model.Score {
     const beat=object(b);events.set(beat.id as number,array(beat.automations).map(value=>{const automation=object(value);return Object.assign(new model.Automation(),{isLinear:automation.islinear,type:automation.type,value:automation.value,ratioPosition:automation.ratioposition,text:automation.text,isVisible:automation.isvisible});}));
   }
   for(const track of score.tracks)for(const staff of track.staves)for(const bar of staff.bars)for(const voice of bar.voices)for(const beat of voice.beats)beat.automations=events.get(beat.id)??[];
-  restoreNoteLinks(score,clip.links.map(link=>({...link,slideOutType:link.slideOutType??undefined})));return score;
+  restoreNoteLinks(score,clip.links.map(link=>({...link,slideOutType:link.slideOutType??undefined})));installClipHarmony(score,clip);return score;
 }
 
 /** Copy and Cut resolve exactly the same finite scope against committed music. */
@@ -168,7 +185,7 @@ export function makeMusicClip(score:model.Score,selection:MusicSelection,mode:Cl
     const projection=new model.Score();for(const source of score.masterBars){const master=new model.MasterBar();master.isRepeatStart=source.isRepeatStart;master.repeatCount=source.repeatCount;master.alternateEndings=source.alternateEndings;projection.addMasterBar(master);}
     for(const group of new Set(projection.masterBars.map(master=>master.repeatGroup))){if(!group.isOpened&&!group.closings.length&&!group.masterBars.some(master=>master.alternateEndings))continue;const start=group.opening!.index;let end=group.closings.at(-1)?.index??group.masterBars.at(-1)!.index;while(end+1<projection.masterBars.length&&projection.masterBars[end+1].alternateEndings)end++;if(first<=end&&last>=start&&(first>start||last<end))throw new Error('Copy the complete repeat group and endings.');}
   }
-  const clone=scoreFromJson(json(score),settings()),snapshot=new model.Score(),keptIds=new Set<number>(),spans=new Map<number,{start:number;end:number}>();
+  const clone=scoreFromJson(json(score),settings()),snapshot=new model.Score(),keptIds=new Set<number>(),spans=new Map<number,{start:number;end:number}>(),harmony:ClipboardHarmony[]=[];
   for(let index=first;index<=last;index++){const master=clone.masterBars[index];master.syncPoints=undefined;master.nextMasterBar=null;master.previousMasterBar=null;
     if(mode==='singleTrack'){master.isRepeatStart=false;master.repeatCount=0;master.alternateEndings=0;master.section=null;master.tempoAutomations=[];master.directions=null;}
     snapshot.addMasterBar(master);
@@ -193,6 +210,7 @@ export function makeMusicClip(score:model.Score,selection:MusicSelection,mode:Cl
         staff.addBar(bar);
       }
       const referenced=new Set(staff.bars.flatMap(bar=>bar.voices.flatMap(voice=>voice.beats.map(beat=>beat.chordId))));staff.chords=staff.chords?new Map([...staff.chords].filter(([id])=>referenced.has(id))):null;
+      for(const [id]of staff.chords??[]){const originalChord=original.getChord(id);if(!originalChord)continue;const chord=getHarmonyChord(originalChord);if(chord.nameMode==='theory'||chord.fingers.some(finger=>finger!==-2))harmony.push({track:track.index,staff:staff.index,chordId:id,chord});}
     }
     for(const point of trackMixAutomations(source)){if(point.bar<first||point.bar>last)continue;const duration=score.masterBars[point.bar].calculateDuration(false),span=spans.get(point.bar)??{start:0,end:duration},tick=point.automation.ratioPosition*duration;if(tick<span.start||tick>=span.end)continue;
       const carrier=track.staves.flatMap(staff=>staff.bars[point.bar-first].voices.flatMap(voice=>voice.beats))[0];if(!carrier)throw new Error('Copied controller event requires an existing beat carrier.');
@@ -203,5 +221,6 @@ export function makeMusicClip(score:model.Score,selection:MusicSelection,mode:Cl
   for(const note of allNotes(score))if(keptIds.has(note.id)&&note.isContinuedBend&&(!note.bendOrigin||!keptIds.has(note.bendOrigin.id)))throw new Error('Continued bend needs its external origin; copy the full chain.');
   for(const note of allNotes(snapshot)){note.tieOrigin=null;note.tieDestination=null;note.isTieDestination=false;note.slurOrigin=null;note.slurDestination=null;note.isSlurDestination=false;note.hammerPullOrigin=null;note.hammerPullDestination=null;note.isHammerPullOrigin=false;note.slideOrigin=null;note.slideTarget=null;if(note.slideOutType===model.SlideOutType.Shift||note.slideOutType===model.SlideOutType.Legato)note.slideOutType=model.SlideOutType.None;note.bendOrigin=null;}
   restoreNoteLinks(snapshot,links.map(link=>({...link,slideOutType:link.slideOutType??undefined})));
-  const clip:MusicClip={format:'TabPlayerClip',version:1,engineVersion:'1.8.4',mode,kind,scoreJson:json(snapshot),links};return readMusicClip(clip);
+  const base={format:'TabPlayerClip' as const,engineVersion:'1.8.4' as const,mode,kind:kind as MusicClip['kind'],scoreJson:json(snapshot),links};
+  const clip:MusicClip=harmony.length?{...base,version:2,harmony}:{...base,version:1};return readMusicClip(clip);
 }

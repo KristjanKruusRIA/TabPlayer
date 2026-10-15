@@ -1,12 +1,15 @@
 import { expect, it, vi } from 'vitest';
 import { createHash } from 'node:crypto';
-import { buildDocument, exportGp, previewEdit, trackIdentity } from '../engine';
+import { buildDocument, exportGp, previewEdit, replayDocumentSettings,trackIdentity } from '../engine';
 import { blankProject } from '../project';
 import { NativePlaybackController } from './NativePlaybackController';
 import type { NativeAudioBridge, NativeAudioStatus } from './bridge';
 import { buildPlaybackPlan } from './plan';
 import type { PlanNote } from './types';
 import { DEFAULT_PRACTICE,type PracticeSettings,type PracticeStatus } from './practice-types';
+import {defaultEngraving,projectEngraving} from '../engraving/projection';
+import {makeMusicClip} from '../editor/clipboard-source';
+import {defaultEffects} from '../document-settings';
 
 const defaults=():PracticeSettings=>structuredClone(DEFAULT_PRACTICE);
 function practiceStatus(settings=defaults(),change:Partial<PracticeStatus>={}):PracticeStatus{return {settings,phase:'idle',countInRemaining:0,completedPasses:0,effectiveRatio:settings.tempo.kind==='relative'?settings.tempo.ratio:settings.tempo.kind==='progressive'?settings.tempo.start:1,currentBpm:120,pulse:null,...change};}
@@ -313,4 +316,96 @@ it('an older Apply promise cannot fail a newer pending Apply after native acknow
   player.setPractice(first);emit({practice:practiceStatus(first)});player.setPractice(second);rejectFirst(new Error('Old request response lost'));
   await new Promise(resolve=>setTimeout(resolve,0));expect(player.getState()).toMatchObject({practicePending:true,error:null,practice:{settings:first}});
   emit({practice:practiceStatus(second)});expect(player.getState()).toMatchObject({practicePending:false,error:null,practice:{settings:second}});player.destroy();
+});
+
+function renderedView(){
+  let ready=()=>{};const output:{handler?:{seekTo:(time:number)=>void;pause:()=>void};updatePosition:ReturnType<typeof vi.fn>}={updatePosition:vi.fn()};const sync=vi.fn();
+  const api={player:{output,updateSyncPoints:sync},playerReady:{on:(callback:()=>void)=>{ready=callback;},off:vi.fn()},renderScore:vi.fn(()=>{ready();sync(['source backing sync']);output.handler?.pause();output.handler?.seekTo(0);}),play:vi.fn(),pause:vi.fn()} as unknown as Parameters<NativePlaybackController['attachView']>[0];
+  return {api,output,sync,ready:()=>ready()};
+}
+it('renders an independently styled multi-track projection without changing canonical playback preparation',async()=>{
+  const {player,bridge}=fixture();const target={track:0,staff:0,bar:0,voice:0,beat:0};
+  const guitar=previewEdit(blankProject(),{type:'setNote',target,string:6,fret:5}),built=previewEdit(guitar.project,{type:'addPitchedTrack',name:'Keys',program:0});
+  const ids=built.score.tracks.map(trackIdentity),engraving=defaultEngraving();engraving.profiles=[{trackId:ids[0],profile:'standard'},{trackId:ids[1],profile:'slash'}];
+  const projection=projectEngraving(built.score,ids,engraving),view=renderedView();player.attachView(view.api);vi.mocked(bridge.command).mockClear();
+  player.setRenderedScore(projection.score,[0,1]);expect(view.api.renderScore).toHaveBeenLastCalledWith(projection.score,[0,1]);expect(bridge.command).not.toHaveBeenCalled();expect(view.sync).toHaveBeenLastCalledWith([]);
+  await player.loadDocument(built.project,built);expect(view.api.renderScore).toHaveBeenCalledTimes(1);expect(vi.mocked(bridge.prepare).mock.calls.at(-1)?.[0].notes[0].key).toBe(69);
+  expect(built.score.tracks[0].staves[0].showTablature).toBe(true);expect(projection.score.tracks[0].staves[0].showTablature).toBe(false);
+  player.replaceScore(projection.score,1);expect(view.api.renderScore).toHaveBeenLastCalledWith(projection.score,[1]);player.destroy();
+});
+it('retired view-ready callbacks cannot reinstall external-media handlers after replacement or destruction',async()=>{
+  const {player}=fixture(),first=renderedView(),second=renderedView();player.attachView(first.api);expect(first.output.handler).toBeDefined();
+  player.attachView(second.api);expect(first.api.playerReady.off).toHaveBeenCalled();expect(first.output.handler).toBeUndefined();expect(second.output.handler).toBeDefined();
+  first.ready();expect(first.output.handler).toBeUndefined();player.destroy();second.ready();expect(second.output.handler).toBeUndefined();
+});
+it('presentation changes during delayed musical preparation keep the newest projection and prepare once',async()=>{
+  let release!:(plan:ReturnType<typeof buildPlaybackPlan>)=>void;const prepare=vi.fn((_:unknown,_generation:number)=>new Promise<ReturnType<typeof buildPlaybackPlan>>(resolve=>{release=resolve;}));
+  const {player,bridge}=fixture(prepare),project=blankProject(),built=buildDocument(project),view=renderedView();player.attachView(view.api);
+  const pending=player.loadDocument(project,built);await vi.waitFor(()=>expect(prepare).toHaveBeenCalledTimes(1));const generation=player.generation;
+  const engraving=defaultEngraving();engraving.stylesheet.hideDynamics=true;const styled=previewEdit(project,{type:'setEngraving',engraving},built);
+  const projection=projectEngraving(built.score,built.score.tracks.map(trackIdentity),engraving);player.setRenderedScore(projection.score,[0]);
+  await player.loadDocument(styled.project,styled);expect(player.generation).toBe(generation);expect(prepare).toHaveBeenCalledTimes(1);
+  const replacement=renderedView();player.attachView(replacement.api);player.setRenderedScore(projection.score,[0]);view.ready();
+  release(buildPlaybackPlan(built.score,generation));await pending;expect(bridge.prepare).toHaveBeenCalledTimes(1);expect(view.api.renderScore).toHaveBeenCalledExactlyOnceWith(projection.score,[0]);expect(replacement.api.renderScore).toHaveBeenCalledExactlyOnceWith(projection.score,[0]);player.destroy();
+});
+it.each([['ordinary','playing'],['pasted','playing'],['ordinary','countIn'],['pasted','countIn']] as const)('presentation apply undo redo preserves %s canonical music during %s',async(history,phase)=>{
+  const target={track:0,staff:0,bar:0,voice:0,beat:0};let built=previewEdit(blankProject(),{type:'setNote',target,string:6,fret:5});
+  if(history==='pasted'){const clip=makeMusicClip(built.score,{kind:'bars',tracks:[0],firstBar:0,lastBar:0},'singleTrack');built=previewEdit(built.project,{type:'pasteMusic',clip,options:{target,destinations:[{sourceTrack:0,track:0,staffMap:[0]}],count:1,placement:'beforeBar',filters:{diagrams:true,texts:true,timers:true,trackAutomations:true,masterAutomations:false,sections:false}}},built);}
+  const {player,bridge,emit}=fixture(),canonical=built.score,backing=built.embeddedBacking;await player.loadDocument(built.project,built);player.play();
+  const settings:PracticeSettings={tempo:{kind:'progressive',start:.5,end:1,step:.2,repetitions:2},metronome:{enabled:true,volume:0,visual:true},countIn:{bars:1,betweenLoops:true}};
+  emit({playing:true,tick:100,seconds:.1,loop:{startTick:0,endTick:3840},practice:practiceStatus(settings,{phase,countInRemaining:phase==='countIn'?3:0,completedPasses:4,effectiveRatio:.9,currentBpm:108,pulse:{serial:23,beat:1,beatsPerBar:4,accent:true,counting:phase==='countIn'}})});
+  const state=player.getState(),notes=player.activeNotes('base/0'),generation=player.generation,view=renderedView();player.attachView(view.api);vi.mocked(bridge.command).mockClear();
+  const engraving=defaultEngraving();engraving.stylesheet.hideDynamics=true;engraving.profiles=[{trackId:'base/0',profile:'standard'}];
+  const styled=previewEdit(built.project,{type:'setEngraving',engraving},built),paged=previewEdit(styled.project,{type:'setPageLayout',layout:{widthMm:180,heightMm:240,marginsMm:{top:10,right:12,bottom:14,left:16},scale:1,profile:'document'}},styled);
+  const undoPage={...replayDocumentSettings(styled.project,paged),project:styled.project},undoStyle={...replayDocumentSettings(built.project,undoPage),project:built.project},redo={...replayDocumentSettings(paged.project,undoStyle),project:paged.project};
+  for(const next of [styled,paged,undoPage,undoStyle,redo]){expect(next.score).toBe(canonical);expect(next.embeddedBacking).toBe(backing);await player.loadDocument(next.project,next);const projection=projectEngraving(next.score,next.score.tracks.map(trackIdentity),next.settings.engraving);player.setRenderedScore(projection.score,[0]);expect(view.api.renderScore).toHaveBeenLastCalledWith(projection.score,[0]);expect(player.getState()).toEqual(state);expect(player.activeNotes('base/0')).toEqual(notes);expect(player.generation).toBe(generation);}
+  expect(bridge.prepare).toHaveBeenCalledTimes(1);expect(bridge.command).not.toHaveBeenCalled();expect(bridge.setMix).not.toHaveBeenCalled();
+  const mixed=previewEdit(redo.project,{type:'setTrackMix',trackId:'base/0',mix:{gain:.7,pan:0,mute:false,solo:false}},redo);await player.loadDocument(mixed.project,mixed);expect(bridge.setMix).toHaveBeenCalledTimes(1);expect(player.generation).toBe(generation);player.destroy();
+});
+it('compares actual sound mixer and backing values while presentation copies retain the canonical score',async()=>{
+  const {player,bridge}=fixture(),assetId='a'.repeat(64);let project={...blankProject(),assets:{[assetId]:{filename:'authored.wav',mediaType:'audio/wav',byteLength:96044}}},built=buildDocument(project);await player.loadDocument(project,built);const generation=player.generation;
+  for(const edit of [
+    {type:'setTrackSound' as const,trackId:'base/0',sound:{voiceId:null,presetId:'clean' as const,effects:defaultEffects()}},
+    {type:'setBacking' as const,backing:{assetId,offsetMs:0,anchors:[],mix:{gain:.5,pan:0,mute:false,solo:false}}},
+    {type:'setTrackMix' as const,trackId:'base/0',mix:{gain:.7,pan:.2,mute:false,solo:false}},
+  ]){const next=previewEdit(project,edit,built);built=next;project={...next.project,assets:project.assets};await player.loadDocument(next.project,next);}
+  expect(bridge.setMix).toHaveBeenCalledTimes(3);expect(bridge.prepare).toHaveBeenCalledTimes(1);expect(player.generation).toBe(generation);player.destroy();
+});
+
+it('a retired mixer acknowledgement cannot make a newer score presentation send an audio update',async()=>{
+  const {player,bridge}=fixture(),project=blankProject(),built=buildDocument(project);await player.loadDocument(project,built);
+  let release!:()=>void;bridge.setMix=vi.fn().mockImplementationOnce(()=>new Promise<void>(resolve=>{release=resolve;})).mockResolvedValue(undefined);
+  const mixed=previewEdit(project,{type:'setTrackMix',trackId:'base/0',mix:{gain:.7,pan:0,mute:false,solo:false}},built),pending=player.loadDocument(mixed.project,mixed);
+  await vi.waitFor(()=>expect(bridge.setMix).toHaveBeenCalledTimes(1));
+  const changed=previewEdit(project,{type:'setNote',target:{track:0,staff:0,bar:0,voice:0,beat:0},string:6,fret:5});await player.loadDocument(changed.project,changed);release();await pending;
+  const engraving=defaultEngraving();engraving.stylesheet.hideDynamics=true;const styled=previewEdit(changed.project,{type:'setEngraving',engraving},changed);
+  await player.loadDocument(styled.project,styled);expect(bridge.setMix).toHaveBeenCalledTimes(1);expect(bridge.prepare).toHaveBeenCalledTimes(2);player.destroy();
+});
+
+it('orders Undo behind an outstanding mix instead of treating its last acknowledgement as the desired state',async()=>{
+  const {player,bridge}=fixture(),project=blankProject(),built=buildDocument(project);await player.loadDocument(project,built);
+  let release!:()=>void;bridge.setMix=vi.fn().mockImplementationOnce(()=>new Promise<void>(resolve=>{release=resolve;})).mockResolvedValue(undefined);
+  const mixed=previewEdit(project,{type:'setTrackMix',trackId:'base/0',mix:{gain:.7,pan:0,mute:false,solo:false}},built);
+  const pending=player.loadDocument(mixed.project,mixed);await vi.waitFor(()=>expect(bridge.setMix).toHaveBeenCalledTimes(1));
+  const undo=player.loadDocument(project,built);release();await pending;await undo;
+  expect(bridge.setMix).toHaveBeenCalledTimes(2);expect(vi.mocked(bridge.setMix).mock.calls[1][0].mixes).toEqual(built.settings.mixes);player.destroy();
+});
+it('presentation does not resend an identical desired mix before acknowledgement',async()=>{
+  const {player,bridge}=fixture(),project=blankProject(),built=buildDocument(project);await player.loadDocument(project,built);
+  let release!:()=>void;bridge.setMix=vi.fn().mockImplementationOnce(()=>new Promise<void>(resolve=>{release=resolve;})).mockResolvedValue(undefined);
+  const mixed=previewEdit(project,{type:'setTrackMix',trackId:'base/0',mix:{gain:.7,pan:0,mute:false,solo:false}},built);
+  const pending=player.loadDocument(mixed.project,mixed);await vi.waitFor(()=>expect(bridge.setMix).toHaveBeenCalledTimes(1));
+  const engraving=defaultEngraving();engraving.stylesheet.hideDynamics=true;const styled=previewEdit(mixed.project,{type:'setEngraving',engraving},mixed);
+  const presentation=player.loadDocument(styled.project,styled);release();await pending;await presentation;
+  expect(bridge.setMix).toHaveBeenCalledTimes(1);player.destroy();
+});
+it('dispatches distinct desired mixes serially and retries the latest failed configuration',async()=>{
+  const {player,bridge}=fixture(),project=blankProject(),built=buildDocument(project);await player.loadDocument(project,built);
+  let release!:()=>void;bridge.setMix=vi.fn().mockImplementationOnce(()=>new Promise<void>(resolve=>{release=resolve;})).mockRejectedValueOnce(new Error('Latest mix refused')).mockResolvedValue(undefined);
+  const first=previewEdit(project,{type:'setTrackMix',trackId:'base/0',mix:{gain:.7,pan:0,mute:false,solo:false}},built),second=previewEdit(first.project,{type:'setTrackMix',trackId:'base/0',mix:{gain:.4,pan:0,mute:false,solo:false}},first);
+  const pendingFirst=player.loadDocument(first.project,first);await vi.waitFor(()=>expect(bridge.setMix).toHaveBeenCalledTimes(1));
+  const pendingSecond=player.loadDocument(second.project,second);await Promise.resolve();await Promise.resolve();expect(bridge.setMix).toHaveBeenCalledTimes(1);
+  release();await pendingFirst;await pendingSecond;expect(player.getState().error).toBe('Latest mix refused');expect(bridge.setMix).toHaveBeenCalledTimes(2);
+  const engraving=defaultEngraving();engraving.stylesheet.hideDynamics=true;const styled=previewEdit(second.project,{type:'setEngraving',engraving},second);await player.loadDocument(styled.project,styled);
+  expect(bridge.setMix).toHaveBeenCalledTimes(3);expect(vi.mocked(bridge.setMix).mock.calls.map(call=>call[0].mixes['base/0'].gain)).toEqual([.7,.4,.4]);expect(player.getState().error).toBeNull();player.destroy();
 });

@@ -5,10 +5,26 @@ import { paginateSystems, renderPdfPages } from './pdf';
 import { writeFileSync,mkdirSync } from 'node:fs';
 import { model,Settings } from '@coderline/alphatab';
 import { music,noteAt } from '../editor/fixtures';
+import { defaultEngraving } from '../engraving/projection';
 
 const layout = {paper:'A4' as const,orientation:'portrait' as const,marginMm:15,scale:1,profile:'ScoreTab' as const};
 const system=(height:number,id:string)=>({width:680,height,svg:`<svg xmlns="http://www.w3.org/2000/svg"><path id="${id}" d="M0 0L10 10"/></svg>`});
 describe('vector notation pagination',()=>{
+  it('uses explicit custom pages and shared engraving without changing musical sources',()=>{
+    const score=music();score.title='A & B';score.artist='HEADER MUST NOT REPEAT';score.defaultSystemsLayout=1;
+    const before=model.JsonConverter.scoreToJson(score),engraving=defaultEngraving(),page={widthMm:250,heightMm:350,marginsMm:{top:12,right:22,bottom:32,left:42},scale:.8,profile:'document' as const};
+    const options={page,engraving,trackIds:['base/0']},plain=renderPdfPages(score,{tracks:[0],range:null},layout,options);
+    expect(plain[0]).toMatchObject({widthMm:250,heightMm:350});expect(plain.map(p=>p.svg).join('')).not.toContain('HEADER MUST NOT REPEAT');
+    expect(plain[0].svg).toContain(`translate(${42*96/25.4} ${12*96/25.4+40})`);expect(plain[0].svg).toContain('A &amp; B');
+    engraving.stylesheet.hideDynamics=true;const hidden=renderPdfPages(score,{tracks:[0],range:null},layout,options);
+    expect(hidden.map(p=>p.svg).join('')).not.toBe(plain.map(p=>p.svg).join(''));expect(model.JsonConverter.scoreToJson(score)).toBe(before);
+  });
+  it('validates selected temporary profile applicability and keeps unselected instruments independent',()=>{
+    const score=music();score.addTrack(music().tracks[0]);score.tracks[1].staves[0].stringTuning.tunings=[];score.finish(new Settings());
+    const options={page:{widthMm:297,heightMm:420,marginsMm:{top:15,right:15,bottom:15,left:15},scale:.75,profile:'Tab' as const},engraving:defaultEngraving(),trackIds:['base/0','base/1']};
+    expect(renderPdfPages(score,{tracks:[0],range:null},layout,options).length).toBeGreaterThan(0);
+    expect(()=>renderPdfPages(score,{tracks:[1],range:null},layout,options)).toThrow(/tablature|tuned/i);
+  });
   it('packs complete systems onto physical pages with escaped headers and page numbers',()=>{
     const pages=paginateSystems([system(450,'first'),system(450,'second'),system(450,'third')],'A&B <solo>',layout);
     expect(pages).toHaveLength(2);expect(pages[0].widthMm).toBe(210);expect(pages[0].heightMm).toBe(297);

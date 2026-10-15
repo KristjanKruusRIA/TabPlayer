@@ -11,7 +11,26 @@ import { useExportCoordinator } from './useExportCoordinator';
 import type { ExportNativeBridge,NativeAudioExportPayload } from './bridge';
 import { getTrackLyrics,applyLyricsEdit } from '../editor/lyrics';
 import { loadInterchangeScore } from '../interchange/gp';
+import * as pdf from './pdf';
 afterEach(()=>{cleanup();vi.restoreAllMocks();});
+it('freezes custom page and engraving at launch and uses explicit export tracks',async()=>{
+  const score=music(),settings=defaultDocumentSettings();settings.page={widthMm:250,heightMm:350,marginsMm:{top:12,right:22,bottom:32,left:42},scale:.8,profile:'document'};settings.engraving.stylesheet.hideDynamics=true;
+  let release!:()=>void;vi.spyOn(pdf,'loadExportFonts').mockImplementation(()=>new Promise<void>(resolve=>{release=resolve;}));
+  const renderPages=vi.spyOn(pdf,'renderPdfPages').mockReturnValue([{widthMm:250,heightMm:350,svg:'<svg/>'}]),api=native(),exportPdf=vi.fn(api.exportPdf);api.exportPdf=exportPdf;
+  const {result}=renderHook(()=>useExportCoordinator({score,settings,currentSpeed:1,bridge:{confirmExport:async()=>true,exportGp:async()=>true},native:api}));
+  const layout={paper:'A4' as const,orientation:'portrait' as const,marginMm:15,scale:1,profile:'ScoreTab' as const};
+  let pending!:Promise<boolean>;act(()=>{pending=result.current.run({format:'pdf',selection:{tracks:[0],range:null},layout,page:settings.page!});});
+  settings.page.widthMm=300;settings.engraving.stylesheet.hideDynamics=false;release();await act(async()=>{await pending;});
+  expect(renderPages).toHaveBeenCalledWith(expect.anything(),{tracks:[0],range:null},layout,{page:expect.objectContaining({widthMm:250}),engraving:expect.objectContaining({stylesheet:expect.objectContaining({hideDynamics:true})}),trackIds:['base/0']});
+  expect(exportPdf).toHaveBeenCalledWith([{widthMm:250,heightMm:350,svg:'<svg/>'}],false);
+});
+it('honors explicit legacy export geometry when the caller omits a custom page',async()=>{
+  const score=music(),settings=defaultDocumentSettings();vi.spyOn(pdf,'loadExportFonts').mockResolvedValue();
+  const renderPages=vi.spyOn(pdf,'renderPdfPages').mockReturnValue([{widthMm:279.4,heightMm:215.9,svg:'<svg/>'}]);
+  const {result}=renderHook(()=>useExportCoordinator({score,settings,currentSpeed:1,bridge:{confirmExport:async()=>true,exportGp:async()=>true},native:native()})),layout={paper:'Letter' as const,orientation:'landscape' as const,marginMm:20,scale:.8,profile:'Score' as const};
+  await act(async()=>{await result.current.run({format:'pdf',selection:{tracks:[0],range:null},layout});});
+  expect(renderPages.mock.calls[0][3]?.page).toEqual({widthMm:279.4,heightMm:215.9,marginsMm:{top:20,right:20,bottom:20,left:20},scale:.8,profile:'Score'});
+});
 it.each([true,false])('freezes exact raw and hidden lyrics through the export dialog: visible=%s',async visible=>{
   const raw='[VERSE]\r\nHel-lo  world+today';
   const score=buildScore({...blankProject(),edits:[{type:'setNote',target:{track:0,staff:0,bar:0,voice:0,beat:0},string:1,fret:0},{type:'setTrackLyrics',track:0,visible,lines:[{startBar:0,text:raw}]}]});

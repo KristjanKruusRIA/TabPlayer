@@ -51,9 +51,10 @@ export interface AppProps {
   workspaceBusy:boolean;workspaceError:string|null;beginEditorOperation:()=>()=>void;
   onNew:()=>Promise<boolean>;onOpen:()=>Promise<boolean>;onClose:()=>Promise<boolean>;onCloseAll:()=>Promise<boolean>;
   documentTabs:ReactNode;
+  sessionMenu?:ReactNode;recoveryStatus?:ReactNode;
 }
 
-export function App({controller,audioBridge,exportBridge,documentBridge,documentView,onViewChange,clipboard,workspaceBusy,workspaceError,beginEditorOperation,onNew,onOpen,onClose,onCloseAll,documentTabs}:AppProps) {
+export function App({controller,audioBridge,exportBridge,documentBridge,documentView,onViewChange,clipboard,workspaceBusy,workspaceError,beginEditorOperation,onNew,onOpen,onClose,onCloseAll,documentTabs,sessionMenu,recoveryStatus}:AppProps) {
   const state=useSyncExternalStore(controller.subscribe,controller.getState);
   const controlsBusy=state.busy||workspaceBusy;
   const [player,setPlayer]=useState<NativePlaybackController|null>(null);
@@ -211,6 +212,7 @@ export function App({controller,audioBridge,exportBridge,documentBridge,document
   }
   return <div className="app-shell" onKeyDown={selectionKeys}>
     <header className="toolbar"><h1>TabPlayer</h1><nav aria-label="File and history">
+      {sessionMenu}
       <button disabled={controlsBusy} onClick={()=>documentAction(onNew())}>New</button>
       <button disabled={controlsBusy} onClick={()=>documentAction(onOpen())}>Open</button>
       <button disabled={controlsBusy} onClick={()=>act(controller.save())}>Save</button>
@@ -253,6 +255,6 @@ export function App({controller,audioBridge,exportBridge,documentBridge,document
     {exportOpen&&<ExportDialog score={state.score} layout={state.settings.print} page={page} currentSpeedAvailable={practiceRatio!==null} busy={exports.busy||state.busy||exportLaunching} progress={exports.progress} failure={exportError} onExport={runExport} onCancel={cancelExport}/>}
     {harmonyOpen&&location.beat&&<HarmonyChordDialog score={state.score} target={target} selection={musicSelection} value={location.beat.chord?getHarmonyChord(location.beat.chord):null} busy={state.busy||libraryLoading} library={library} onEdit={edit} onClose={closeModal} onLibraryPut={async entry=>{const revision=++libraryRevision.current,value=await putHarmonyLibraryEntry(entry);if(revision===libraryRevision.current)setLibrary(value);}} onLibraryRemove={async id=>{const revision=++libraryRevision.current,value=await removeHarmonyLibraryEntry(id);if(revision===libraryRevision.current)setLibrary(value);}}/>}
     {scaleOpen&&<ScaleToolPanel score={state.score} staff={location.staff} selection={musicSelection} busy={state.busy} onClose={closeModal}/>}
-    <footer className="statusbar">{state.busy?'Working…':state.snapshot.dirty?'Unsaved changes':state.snapshot.path?'Saved':state.snapshot.project.base.kind==='file'?'Not saved':'New score'}<span>{state.snapshot.path ?? 'Save a .tabplayer project to keep the original score and edits.'}</span></footer>
+    <footer className="statusbar">{state.busy?'Working…':state.snapshot.dirty?'Unsaved changes':state.snapshot.path?'Saved':state.snapshot.project.base.kind==='file'?'Not saved':'New score'}<span>{state.snapshot.path ?? 'Save a .tabplayer project to keep the original score and edits.'}</span>{recoveryStatus}</footer>
   </div>;
 }

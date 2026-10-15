@@ -148,7 +148,7 @@ export class WorkspaceController {
   async retryRecovery():Promise<RecoveryStatus> {
     await this.flushViews();
     if(!this.session)throw new Error('Session persistence is unavailable.');
-    try {const status=await this.session.retry();this.update({recoveryError:status.error});return status;}
+    try {const status=await this.session.retry();this.update({recoveryError:status.state==='failed'?status.error:null});return status;}
     catch(error){this.update({recoveryError:error instanceof Error?error.message:String(error)});throw error;}
   }
   beginEditorOperation(documentId:DocumentId):()=>void {

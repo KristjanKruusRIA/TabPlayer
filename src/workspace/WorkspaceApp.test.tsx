@@ -13,6 +13,7 @@ import type { CloseDocument,DocumentSnapshot,NativeWorkspaceBridge,WorkspaceSnap
 import { WorkspaceController } from './WorkspaceController';
 import { WorkspaceApp } from './WorkspaceApp';
 import { initialDocumentView } from './view-state';
+import type { NativeSessionBridge } from './recovery-types';
 
 const mocks=vi.hoisted(()=>({bridges:new Map<string,NativeBridge>(),audio:new Map<string,NativeAudioBridge>(),exports:new Map<string,ExportNativeBridge>(),props:[] as AppProps[],mounted:0,mounts:0,unmounts:0}));
 vi.mock('../bridge',()=>({createDocumentBridge:(id:string)=>{const bridge=mocks.bridges.get(id);if(!bridge)throw new Error('Missing addressed bridge');return bridge;}}));
@@ -92,41 +93,54 @@ it('Open adds and activates its candidate and duplicate Open activates the exist
   vi.mocked(bridge.readDocument).mockResolvedValueOnce({kind:'existing',documentId:first});fireEvent.click(screen.getByRole('button',{name:'Open probe'}));await waitFor(()=>expect(w.getState().active.documentId).toBe(first));expect(w.getState().documents).toHaveLength(2);expect(props().controller.getState()).toBe(original);expect(bridge.addDocument).toHaveBeenCalledOnce();
 });
 
+function closeSession(f:ReturnType<typeof fixture>):NativeSessionBridge {
+  let lifecycle:'running'|'clean'='running';
+  const session:NativeSessionBridge={startup:vi.fn(async()=>({preferences:{version:1 as const,restorePreviousSession:true},preview:null})),
+    resolve:vi.fn(async()=>({workspace:f.snapshot(),views:{},issues:[]})),setView:vi.fn(async()=>{}),
+    setPreferences:vi.fn(async (restorePreviousSession:boolean)=>({version:1 as const,restorePreviousSession})),
+    status:vi.fn(async()=>({state:'ready' as const,capturedAtUnixMs:1792050000000,generation:1,error:null})),
+    retry:vi.fn(async()=>({state:'ready' as const,capturedAtUnixMs:1792050000000,generation:2,error:null})),
+    shutdown:vi.fn(async documents=>{expect(documents).toHaveLength(f.records.size);for(const entry of documents){const record=f.records.get(entry.documentId)!;expect(entry.revision).toBe(record.revision);expect(entry.discard).toBe(record.snapshot.dirty);}lifecycle='clean';}),
+    resume:vi.fn(async()=>{lifecycle='running';})};
+  const snapshot=vi.mocked(f.bridge.snapshot).getMockImplementation()!;vi.mocked(f.bridge.snapshot).mockImplementation(async()=>{expect(lifecycle).toBe('running');return snapshot();});
+  vi.doMock('./session-bridge',()=>({nativeSessionBridge:session}));vi.doMock('@tauri-apps/api/event',()=>({listen:vi.fn(async()=>()=>{})}));return session;
+}
+
 it.each(['cancel','native-failure','success'] as const)('native close bootstrap prevents default, uses workspace decisions and destroys only after %s',async result=>{
-  const f=fixture(),workspace=await WorkspaceController.create(f.bridge);await current(workspace).controller.edit(note);const decision=deferred<'discard'|'cancel'>();vi.mocked(mocks.bridges.get(f.first)!.askUnsaved).mockReturnValueOnce(decision.promise);if(result==='native-failure')vi.mocked(f.bridge.closeDocuments).mockRejectedValueOnce(new Error('native close rejected'));
+  const f=fixture(),session=closeSession(f),workspace=await WorkspaceController.create(f.bridge);workspace.setSessionBridge(session);await current(workspace).controller.edit(note);const decision=deferred<'discard'|'cancel'>();vi.mocked(mocks.bridges.get(f.first)!.askUnsaved).mockReturnValueOnce(decision.promise);if(result==='native-failure')vi.mocked(session.shutdown).mockRejectedValueOnce(new Error('native close rejected'));
   type CloseEvent={preventDefault:()=>void};let onClose!: (event:CloseEvent)=>Promise<void>;const destroy=vi.fn(async()=>{}),rootRender=vi.fn(),request=vi.spyOn(workspace,'requestWindowClose');
   vi.resetModules();vi.doMock('@tauri-apps/api/window',()=>({getCurrentWindow:()=>({onCloseRequested:vi.fn(async(callback:typeof onClose)=>{onClose=callback;return()=>{};}),destroy})}));
   vi.doMock('react-dom/client',()=>({createRoot:vi.fn(()=>({render:rootRender}))}));vi.doMock('./WorkspaceController',()=>({WorkspaceController:{create:vi.fn(async()=>workspace)}}));vi.doMock('../bridge',()=>({nativeWorkspaceBridge:f.bridge,createDocumentBridge:(id:string)=>mocks.bridges.get(id)!}));
   const root=document.createElement('div');root.id='root';document.body.append(root);
   try{
-    await import('../main');await waitFor(()=>expect(onClose).toBeTypeOf('function'));expect(rootRender).toHaveBeenCalledTimes(1);
+    await import('../main');await waitFor(()=>expect(rootRender.mock.calls.at(-1)?.[0].props.workspace).toBe(workspace));expect((await import('react-dom/client')).createRoot).toHaveBeenCalledOnce();
     const event={preventDefault:vi.fn()},closing=onClose(event);expect(event.preventDefault).toHaveBeenCalledTimes(1);expect(request).toHaveBeenCalledTimes(1);expect(destroy).not.toHaveBeenCalled();expect(f.bridge.closeDocuments).not.toHaveBeenCalled();
-    const repeated={preventDefault:vi.fn()};await onClose(repeated);expect(repeated.preventDefault).toHaveBeenCalledTimes(1);expect(destroy).not.toHaveBeenCalled();expect(mocks.bridges.get(f.first)!.askUnsaved).toHaveBeenCalledTimes(1);
-    decision.resolve(result==='cancel'?'cancel':'discard');await closing;expect(destroy).toHaveBeenCalledTimes(result==='success'?1:0);expect(rootRender).toHaveBeenCalledTimes(1);expect(workspace.getState().documents[0].id).toBe(f.first);expect(workspace.getState().busy).toBe(result==='success');
-  }finally{root.remove();vi.doUnmock('@tauri-apps/api/window');vi.doUnmock('react-dom/client');vi.doUnmock('./WorkspaceController');vi.doUnmock('../bridge');vi.resetModules();}
+    await waitFor(()=>expect(mocks.bridges.get(f.first)!.askUnsaved).toHaveBeenCalledOnce());const repeated={preventDefault:vi.fn()};await onClose(repeated);expect(repeated.preventDefault).toHaveBeenCalledTimes(1);expect(destroy).not.toHaveBeenCalled();expect(mocks.bridges.get(f.first)!.askUnsaved).toHaveBeenCalledTimes(1);
+    decision.resolve(result==='cancel'?'cancel':'discard');await closing;expect(destroy).toHaveBeenCalledTimes(result==='success'?1:0);expect(rootRender).toHaveBeenCalled();expect(workspace.getState().documents[0].id).toBe(f.first);expect(workspace.getState().busy).toBe(result==='success');
+  }finally{root.remove();vi.doUnmock('./session-bridge');vi.doUnmock('@tauri-apps/api/event');vi.doUnmock('@tauri-apps/api/window');vi.doUnmock('react-dom/client');vi.doUnmock('./WorkspaceController');vi.doUnmock('../bridge');vi.resetModules();}
 });
 
 it('native close ignores a second request while successful window destruction is pending',async()=>{
-  const f=fixture(),workspace=await WorkspaceController.create(f.bridge),destruction=deferred<void>();
+  const f=fixture(),session=closeSession(f),workspace=await WorkspaceController.create(f.bridge),destruction=deferred<void>();workspace.setSessionBridge(session);
   type CloseEvent={preventDefault:()=>void};let onClose!:(event:CloseEvent)=>Promise<void>;
   const destroy=vi.fn(()=>destruction.promise),request=vi.spyOn(workspace,'requestWindowClose'),rootRender=vi.fn();
   vi.resetModules();vi.doMock('@tauri-apps/api/window',()=>({getCurrentWindow:()=>({onCloseRequested:vi.fn(async(callback:typeof onClose)=>{onClose=callback;return()=>{};}),destroy})}));
   vi.doMock('react-dom/client',()=>({createRoot:vi.fn(()=>({render:rootRender}))}));vi.doMock('./WorkspaceController',()=>({WorkspaceController:{create:vi.fn(async()=>workspace)}}));vi.doMock('../bridge',()=>({nativeWorkspaceBridge:f.bridge,createDocumentBridge:(id:string)=>mocks.bridges.get(id)!}));
   const root=document.createElement('div');root.id='root';document.body.append(root);let closing:Promise<void>|undefined,repeated:Promise<void>|undefined;
   try{
-    await import('../main');await waitFor(()=>expect(onClose).toBeTypeOf('function'));
-    const first={preventDefault:vi.fn()};closing=onClose(first);await waitFor(()=>expect(destroy).toHaveBeenCalledTimes(1));expect(first.preventDefault).toHaveBeenCalledTimes(1);expect(request).toHaveBeenCalledTimes(1);expect(f.bridge.closeDocuments).toHaveBeenCalledTimes(1);
+    await import('../main');await waitFor(()=>expect(rootRender.mock.calls.at(-1)?.[0].props.workspace).toBe(workspace));expect((await import('react-dom/client')).createRoot).toHaveBeenCalledOnce();
+    const first={preventDefault:vi.fn()};closing=onClose(first);await waitFor(()=>expect(destroy).toHaveBeenCalledTimes(1));expect(first.preventDefault).toHaveBeenCalledTimes(1);expect(request).toHaveBeenCalledTimes(1);expect(session.shutdown).toHaveBeenCalledTimes(1);expect(f.bridge.closeDocuments).not.toHaveBeenCalled();
     const replacement=workspace.getState().active,second={preventDefault:vi.fn()};repeated=onClose(second);expect(second.preventDefault).toHaveBeenCalledTimes(1);
-    expect(request).toHaveBeenCalledTimes(1);expect(f.bridge.closeDocuments).toHaveBeenCalledTimes(1);expect(destroy).toHaveBeenCalledTimes(1);expect(workspace.getState().active).toBe(replacement);expect(rootRender).toHaveBeenCalledTimes(1);
+    expect(request).toHaveBeenCalledTimes(1);expect(session.shutdown).toHaveBeenCalledTimes(1);expect(f.bridge.closeDocuments).not.toHaveBeenCalled();expect(destroy).toHaveBeenCalledTimes(1);expect(workspace.getState().active).toBe(replacement);expect(rootRender).toHaveBeenCalled();
     destruction.resolve();await Promise.all([closing,repeated]);expect(destroy).toHaveBeenCalledTimes(1);
-  }finally{destruction.resolve();await Promise.all([closing,repeated]);root.remove();vi.doUnmock('@tauri-apps/api/window');vi.doUnmock('react-dom/client');vi.doUnmock('./WorkspaceController');vi.doUnmock('../bridge');vi.resetModules();}
+  }finally{destruction.resolve();await Promise.all([closing,repeated]);root.remove();vi.doUnmock('./session-bridge');vi.doUnmock('@tauri-apps/api/event');vi.doUnmock('@tauri-apps/api/window');vi.doUnmock('react-dom/client');vi.doUnmock('./WorkspaceController');vi.doUnmock('../bridge');vi.resetModules();}
 });
 
 
-it.each(['success','destroy-failure','resync-failure','cancel','native-failure'] as const)('mounted native window close keeps the existing editor reserved until destruction: %s',async result=>{
-  const f=fixture(),workspace=await WorkspaceController.create(f.bridge),original=workspace.getState().active,destruction=deferred<void>(),refresh=deferred<WorkspaceSnapshot>();
+it.each(['success','destroy-failure','resync-failure','resume-failure','cancel','native-failure'] as const)('mounted native window close keeps the existing editor reserved until destruction: %s',async result=>{
+  const f=fixture(),session=closeSession(f),workspace=await WorkspaceController.create(f.bridge),original=workspace.getState().active,destruction=deferred<void>(),refresh=deferred<WorkspaceSnapshot>(),resuming=deferred<void>();workspace.setSessionBridge(session);
   if(result==='cancel'){await current(workspace).controller.edit(note);vi.mocked(mocks.bridges.get(f.first)!.askUnsaved).mockResolvedValueOnce('cancel');}
-  if(result==='native-failure')vi.mocked(f.bridge.closeDocuments).mockRejectedValueOnce(new Error('native close rejected'));
+  if(result==='native-failure')vi.mocked(session.shutdown).mockRejectedValueOnce(new Error('native close rejected'));
   type CloseEvent={preventDefault:()=>void};let onClose!:(event:CloseEvent)=>Promise<void>,reactRoot:Root|undefined;
   const destroy=vi.fn(()=>destruction.promise);
   vi.resetModules();vi.doMock('@tauri-apps/api/window',()=>({getCurrentWindow:()=>({onCloseRequested:vi.fn(async(callback:typeof onClose)=>{onClose=callback;return()=>{};}),destroy})}));
@@ -142,23 +156,30 @@ it.each(['success','destroy-failure','resync-failure','cancel','native-failure']
       await closing;expect(destroy).not.toHaveBeenCalled();expect(workspace.getState().active).toBe(original);expect(root.querySelector('.app-shell')).toBe(editor);expect(workspace.getState().busy).toBe(false);expect(screen.getByRole('button',{name:'New'})).toBeEnabled();
       await act(async()=>{await current(workspace).controller.edit({...note,fret:9});});expect(current(workspace).controller.getState().snapshot.project.edits.at(-1)).toEqual({...note,fret:9});return;
     }
-    await waitFor(()=>expect(destroy).toHaveBeenCalledOnce());expect(f.snapshot().active.documentId).not.toBe(f.first);
+    await waitFor(()=>expect(destroy).toHaveBeenCalledOnce());expect(f.snapshot().active.documentId).toBe(f.first);
     expect.soft(root.querySelector('.app-shell')===editor).toBe(true);expect.soft(mocks.audio.size).toBe(1);expect.soft(audio.subscribe).toHaveBeenCalledOnce();expect.soft(audio.prepare).toHaveBeenCalledOnce();expect.soft(workspace.getState().active).toBe(original);expect.soft(workspace.getState().busy).toBe(true);
     for(const name of ['New','Open','Close score','Close all scores'])expect.soft(screen.getByRole('button',{name})).toBeDisabled();
     await act(async()=>{await expect(workspace.newDocument()).rejects.toThrow(/transition/i);await expect(workspace.openDocument()).rejects.toThrow(/transition/i);await expect(workspace.activate(f.first)).rejects.toThrow(/transition/i);expect(await workspace.closeAll()).toBe(false);await expect(current(workspace).controller.edit(note)).rejects.toThrow(/transition/i);await onClose({preventDefault:vi.fn()});});
-    expect(f.bridge.createBlankDocument).not.toHaveBeenCalled();expect(f.bridge.readDocument).not.toHaveBeenCalled();expect(f.bridge.closeDocuments).toHaveBeenCalledOnce();expect(destroy).toHaveBeenCalledOnce();
+    expect(f.bridge.createBlankDocument).not.toHaveBeenCalled();expect(f.bridge.readDocument).not.toHaveBeenCalled();expect(session.shutdown).toHaveBeenCalledOnce();expect(f.bridge.closeDocuments).not.toHaveBeenCalled();expect(destroy).toHaveBeenCalledOnce();
     if(result==='success'){
       await act(async()=>{destruction.resolve();await closing;});expect(workspace.getState().busy).toBe(true);expect(root.querySelector('.app-shell')).toBe(editor);expect(mocks.audio.size).toBe(1);return;
     }
+    const snapshots=vi.mocked(f.bridge.snapshot).mock.calls.length;
+    const resume=vi.mocked(session.resume).getMockImplementation()!;vi.mocked(session.resume).mockImplementationOnce(()=>resuming.promise.then(resume));
     vi.mocked(f.bridge.snapshot).mockReturnValueOnce(refresh.promise);
-    await act(async()=>{destruction.reject(new Error('window destruction failed'));});await waitFor(()=>expect(f.bridge.snapshot).toHaveBeenCalledTimes(2));
+    await act(async()=>{destruction.reject(new Error('window destruction failed'));});await waitFor(()=>expect(session.resume).toHaveBeenCalledOnce());
+    expect(f.bridge.snapshot).toHaveBeenCalledTimes(snapshots);expect(workspace.getState().busy).toBe(true);expect(root.querySelector('.app-shell')).toBe(editor);expect(mocks.audio.size).toBe(1);expect(screen.getByRole('button',{name:'New'})).toBeDisabled();
+    if(result==='resume-failure'){
+      await act(async()=>{resuming.reject(new Error('Running manifest write failed'));await closing;});expect(f.bridge.snapshot).toHaveBeenCalledTimes(snapshots);expect(workspace.getState().busy).toBe(true);expect(root.querySelector('.app-shell')).toBe(editor);expect(mocks.audio.size).toBe(1);expect(screen.getByRole('alert')).toHaveTextContent('Running manifest write failed');expect(screen.getByRole('button',{name:'New'})).toBeDisabled();return;
+    }
+    await act(async()=>resuming.resolve());await waitFor(()=>expect(f.bridge.snapshot).toHaveBeenCalledTimes(snapshots+1));
     expect(workspace.getState().busy).toBe(true);expect(root.querySelector('.app-shell')).toBe(editor);expect(mocks.audio.size).toBe(1);expect(screen.getByRole('button',{name:'New'})).toBeDisabled();
     if(result==='resync-failure'){
       await act(async()=>{refresh.reject(new Error('workspace refresh failed'));await closing;});expect(workspace.getState().busy).toBe(true);expect(root.querySelector('.app-shell')).toBe(editor);expect(mocks.audio.size).toBe(1);expect(screen.getByRole('alert')).toHaveTextContent('window destruction failed');expect(screen.getByRole('alert')).toHaveTextContent('workspace refresh failed');return;
     }
-    await act(async()=>{refresh.resolve(f.snapshot());await closing;});expect(workspace.getState().active).toEqual(f.snapshot().active);expect(root.querySelector('.app-shell')).not.toBe(editor);expect(workspace.getState().busy).toBe(false);expect(mocks.audio.size).toBe(2);expect(screen.getByRole('alert')).toHaveTextContent('window destruction failed');expect(screen.getByRole('button',{name:'New'})).toBeEnabled();await waitFor(()=>expect(mocks.audio.get(workspace.getState().active.activationId)!.prepare).toHaveBeenCalledOnce());
+    await act(async()=>{refresh.resolve(f.snapshot());await closing;});expect(workspace.getState().active).toEqual(f.snapshot().active);expect(root.querySelector('.app-shell')).toBe(editor);expect(workspace.getState().busy).toBe(false);expect(mocks.audio.size).toBe(1);expect(screen.getByRole('alert')).toHaveTextContent('window destruction failed');expect(screen.getByRole('button',{name:'New'})).toBeEnabled();await waitFor(()=>expect(mocks.audio.get(workspace.getState().active.activationId)!.prepare).toHaveBeenCalledOnce());
     await act(async()=>{await current(workspace).controller.edit({...note,fret:9});});expect(current(workspace).controller.getState().snapshot.project.edits.at(-1)).toEqual({...note,fret:9});
   }finally{
-    destruction.resolve();refresh.resolve(f.snapshot());await closing?.catch(()=>{});await act(async()=>{reactRoot?.unmount();});root.remove();vi.doUnmock('@tauri-apps/api/window');vi.doUnmock('react-dom/client');vi.doUnmock('./WorkspaceController');vi.doUnmock('../bridge');vi.doUnmock('../App');vi.doUnmock('../ScoreView');vi.resetModules();
+    destruction.resolve();resuming.resolve();refresh.resolve(f.snapshot());await closing?.catch(()=>{});await act(async()=>{reactRoot?.unmount();});root.remove();vi.doUnmock('./session-bridge');vi.doUnmock('@tauri-apps/api/event');vi.doUnmock('@tauri-apps/api/window');vi.doUnmock('react-dom/client');vi.doUnmock('./WorkspaceController');vi.doUnmock('../bridge');vi.doUnmock('../App');vi.doUnmock('../ScoreView');vi.resetModules();
   }
 });

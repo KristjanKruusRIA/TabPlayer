@@ -59,12 +59,56 @@ class Context{
 }
 
 async function show(c){await revealLeftTask(c.page,'Backing');const summary=c.panel().locator('.backing-processing > summary');assert.equal(await summary.evaluate(node=>[...node.childNodes].filter(child=>child.nodeType===Node.TEXT_NODE).map(child=>child.textContent).join('').trim()),'Pitch & filter');if(!await summary.evaluate(node=>node.parentElement.open))await summary.click();await c.field('Semitones').waitFor();}
-async function observe(c){await c.page.evaluate(()=>{const api=window.__TAURI_INTERNALS__,original=api.invoke.bind(api);window.__processingEvidence={mix:[],prepare:[],hold:false,release:null};api.invoke=async(command,args,...rest)=>{const evidence=window.__processingEvidence;if(command==='audio_set_mix'||command==='audio_prepare'){const row={args:structuredClone(args),settled:false};evidence[command==='audio_set_mix'?'mix':'prepare'].push(row);const value=await original(command,args,...rest);row.settled=true;return value;}if(command==='apply_edit'&&args.command?.type==='setBacking'&&evidence.hold){evidence.hold=false;await new Promise(resolve=>{evidence.release=resolve;});}return original(command,args,...rest);};});}
+// Self-contained: serialize this exact installer for both the WebView and focused node check.
+export async function installBackingProcessingObserver(){
+  const api=window.__TAURI_INTERNALS__,original=window.fetch;
+  if(typeof original!=='function'||typeof api?.invoke!=='function'||typeof api?.convertFileSrc!=='function')throw Error('Processing transport capability unavailable');
+  const urls=new Map(['audio_set_mix','audio_prepare','apply_edit','audio_status'].map(command=>[api.convertFileSrc(command,'ipc'),command]));
+  const evidence={mix:[],prepare:[],edits:[],probe:[],hold:false,release:null,capable:false};
+  const invokeDescriptor=Object.getOwnPropertyDescriptor(api,'invoke');
+  evidence.invokeDescriptor={writable:invokeDescriptor?.writable===true,configurable:invokeDescriptor?.configurable===true};
+  const wrapper=async function(...request){
+    const [input,init]=request,command=urls.get(typeof input==='string'?input:input?.url);
+    if(!command)return original.apply(this,request);
+    // Only the initial read-only probe is retained. Later status traffic passes untouched.
+    if(command==='audio_status'&&evidence.probe.length)return original.apply(this,request);
+    const row={command,args:null,nativeAcknowledged:false};
+    evidence[command==='audio_set_mix'?'mix':command==='audio_prepare'?'prepare':command==='apply_edit'?'edits':'probe'].push(row);
+    try{
+      if(init?.method!=='POST'||typeof init.body!=='string')throw Error('Expected POST JSON IPC request');
+      const args=JSON.parse(init.body);if(!args||typeof args!=='object'||Array.isArray(args))throw Error('Expected object IPC payload');
+      row.args=args;row.postJson=true;
+    }catch(error){row.diagnosticError=String(error);}
+    if(command==='apply_edit'&&row.args?.command?.type==='setBacking'&&evidence.hold){
+      evidence.hold=false;await new Promise(resolve=>{evidence.release=resolve;});
+    }
+    let response;
+    try{response=await original.apply(this,request);}catch(error){row.transportError=String(error);throw error;}
+    // Never reject after forwarding: Tauri interprets a fetch rejection as permission to resend.
+    try{
+      row.nativeResponse=response.headers.get('Tauri-Response');
+      row.result=await response.clone().json();
+      if(row.nativeResponse==='error')row.nativeError=row.result;
+      row.nativeAcknowledged=!row.diagnosticError&&row.nativeResponse==='ok'&&(!['audio_set_mix','audio_prepare'].includes(command)||row.result===null);
+    }catch(error){row.diagnosticError=String(error);row.nativeAcknowledged=false;}
+    return response;
+  };
+  try{window.fetch=wrapper;}catch{throw Error('Processing fetch observer installation refused');}
+  if(window.fetch!==wrapper)throw Error('Processing fetch observer identity mismatch');
+  window.__processingEvidence=evidence;
+  const returned=await api.invoke('audio_status',{});
+  if(window.fetch!==wrapper)throw Error('Processing fetch observer identity changed during probe');
+  const probe=evidence.probe[0];
+  if(evidence.probe.length!==1||!probe.postJson||!probe.nativeAcknowledged||JSON.stringify(probe.result)!==JSON.stringify(returned))throw Error('Processing read-only transport probe failed');
+  evidence.capable=true;
+  return {probe,invokeDescriptor:evidence.invokeDescriptor,fetchIdentityVerified:true};
+}
+async function observe(c){c.step('Read-only native transport capability probe',await c.page.evaluate(installBackingProcessingObserver));}
 async function edit(c,label,action){
   c.action=label;const before=await c.record(),native=await c.nativeReady(),count=await c.page.evaluate(()=>window.__processingEvidence.mix.length);await action();await c.idle();await c.published();
   const after=await c.record();assert.equal(after.revision,before.revision+1);assert.equal(after.snapshot.project.edits.length,before.snapshot.project.edits.length+1);assert.deepEqual(after.snapshot.project.base,before.snapshot.project.base);assert.deepEqual(after.snapshot.project.assets,before.snapshot.project.assets);
   const processing=backingOf(after.snapshot.project).processing??{semitones:0,cents:0,filter:'none'};
-  const receipt=await c.poll(()=>c.page.evaluate(()=>window.__processingEvidence),value=>value.mix.length>count&&value.mix.at(-1).settled,'Actual native setMix acknowledgement');
+  const receipt=await c.poll(()=>c.page.evaluate(()=>window.__processingEvidence),value=>value.mix.length>count&&value.mix.at(-1).nativeAcknowledged,'Actual native setMix acknowledgement');
   assert.deepEqual(receipt.mix.at(-1).args.settings.backing.processing??{semitones:0,cents:0,filter:'none'},processing);assert.equal(receipt.mix.at(-1).args.generation,native.generation);
   const status=await c.nativeReady();for(const key of ['generation','desiredGeneration','tick','seconds','durationSeconds','backingDurationSeconds','speed','playing','practice','loop','range'])assert.deepEqual(status[key],native[key],`${label}: preserve ${key}`);
   assert.deepEqual(await c.record(),after);c.step(label,{revision:after.revision,processing,native,after:status,setMix:receipt.mix.at(-1)});return after;

@@ -7,7 +7,10 @@ use sha2::{Digest, Sha256};
 use std::{
     collections::BTreeMap,
     path::{Path, PathBuf},
-    sync::atomic::{AtomicU64, Ordering},
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
 };
 
 pub type ProjectError = String;
@@ -51,7 +54,7 @@ pub enum BaseDocument {
     },
     File {
         filename: String,
-        bytes_base64: String,
+        bytes_base64: Arc<str>,
         sha256: String,
     },
 }
@@ -88,7 +91,7 @@ impl Project {
         Self {
             base: BaseDocument::File {
                 filename,
-                bytes_base64: STANDARD.encode(bytes),
+                bytes_base64: STANDARD.encode(bytes).into(),
                 sha256: format!("{:x}", Sha256::digest(bytes)),
             },
             ..Self::blank()
@@ -124,7 +127,7 @@ impl Project {
                 ..
             } => {
                 let bytes = STANDARD
-                    .decode(bytes_base64)
+                    .decode(bytes_base64.as_bytes())
                     .map_err(|_| "Original score bytes are corrupt.".to_string())?;
                 if !format!("{:x}", Sha256::digest(&bytes)).eq_ignore_ascii_case(sha256) {
                     return Err("Original score checksum does not match.".into());
@@ -181,7 +184,67 @@ pub struct ProjectSession {
     path: Option<PathBuf>,
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ProjectCheckpoint {
+    pub project: Project,
+    pub cursor: usize,
+    pub saved: Vec<EditCommand>,
+    #[serde(deserialize_with = "Option::<PathBuf>::deserialize")]
+    pub path: Option<PathBuf>,
+}
+
 impl ProjectSession {
+    pub fn checkpoint(&self) -> ProjectCheckpoint {
+        ProjectCheckpoint {
+            project: self.project.clone(),
+            cursor: self.cursor,
+            saved: self.saved.clone(),
+            path: self.path.clone(),
+        }
+    }
+
+    pub fn from_checkpoint(value: ProjectCheckpoint) -> Result<Self, ProjectError> {
+        value.project.validate()?;
+        if value.cursor > value.project.edits.len() {
+            return Err("Recovery cursor exceeds the complete edit history.".into());
+        }
+        for edit in &value.saved {
+            edit.validate()?;
+            if edit
+                .asset_id()
+                .is_some_and(|id| !value.project.assets.contains_key(id))
+            {
+                return Err("Saved backing asset is missing from recovery.".into());
+            }
+        }
+        let asset_info = value.project.view().assets;
+        Ok(Self {
+            project: value.project,
+            cursor: value.cursor,
+            saved: value.saved,
+            asset_info,
+            path: value.path,
+        })
+    }
+
+    pub fn saved_checkpoint(&self) -> Result<ProjectCheckpoint, ProjectError> {
+        let mut project = self.project.clone();
+        project.edits = self.saved.clone();
+        project.assets.retain(|id, _| {
+            self.saved
+                .iter()
+                .any(|edit| edit.asset_id() == Some(id.as_str()))
+        });
+        project.validate()?;
+        Ok(ProjectCheckpoint {
+            project,
+            cursor: self.saved.len(),
+            saved: self.saved.clone(),
+            path: self.path.clone(),
+        })
+    }
+
     pub fn new(project: Project, path: Option<PathBuf>) -> Result<Self, ProjectError> {
         project.validate()?;
         let asset_info = project.view().assets;

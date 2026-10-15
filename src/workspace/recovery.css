@@ -1,0 +1,17 @@
+.recovery-backdrop{padding:20px}
+.recovery-dialog{background:#1d2530;color:#edf1f5;border:1px solid #465363;border-radius:8px;padding:20px;width:min(520px,100%);max-height:90dvh;overflow:auto;line-height:1.5;scrollbar-color:#465363 #1d2530}
+.recovery-dialog:focus{outline:none}
+.recovery-dialog h2{font-size:16px;letter-spacing:normal;text-transform:none;color:#edf1f5;margin:0 0 8px}
+.recovery-dialog p{margin:8px 0}
+.recovery-dialog .recovery-time{color:#b9c5d1;font-size:12px;font-variant-numeric:tabular-nums}
+.recovery-dialog .recovery-count{margin-top:20px;font-weight:600}
+.recovery-documents{max-height:30dvh;overflow:auto;overscroll-behavior:contain;border:1px solid #465363;border-radius:6px;padding:8px 12px;scrollbar-color:#465363 #1d2530}
+.recovery-documents:focus-visible{outline:2px solid #b5df73;outline-offset:2px}
+.recovery-documents ol{margin:0;padding-left:24px}
+.recovery-dialog li{overflow-wrap:anywhere;white-space:pre-wrap;padding:3px 0}
+.recovery-issues{margin-top:20px}
+.recovery-issues h3{font-size:13px;margin:0 0 6px;color:#b9c5d1}
+.recovery-issues ul{margin:0;padding-left:20px}
+.recovery-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:20px}
+.recovery-dialog [role=status]{color:#b9c5d1;margin-top:16px}
+.recovery-dialog ::selection{background:#b5df73;color:#161c24}

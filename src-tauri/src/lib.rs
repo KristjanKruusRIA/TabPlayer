@@ -7,6 +7,7 @@ pub mod files;
 pub mod harmony;
 pub mod harmony_library;
 pub mod project;
+pub mod recovery;
 mod runtime;
 pub mod settings;
 pub mod workspace;
@@ -175,23 +176,25 @@ fn read_candidate(
     if let Some(document_id) = workspace.lock().unwrap().find_open_path(&path) {
         return Ok(DocumentIntake::Existing { document_id });
     }
-    let (project, native_path) = if path
+    let (project, native_path, saved_file_sha256) = if path
         .extension()
         .is_some_and(|e| e.eq_ignore_ascii_case("tabplayer"))
     {
-        (files::read_project(&path)?, Some(path))
+        let (project, digest) = files::read_project_with_digest(&path)?;
+        (project, Some(path), Some(digest))
     } else {
         let bytes = std::fs::read(&path).map_err(|e| e.to_string())?;
         let original = std::fs::canonicalize(&path).map_err(|e| e.to_string())?;
         (
             Project::from_file(original.to_string_lossy().into_owned(), &bytes),
             None,
+            None,
         )
     };
     workspace
         .lock()
         .unwrap()
-        .stage_document(project, native_path)
+        .stage_document_with_digest(project, native_path, saved_file_sha256)
         .map(|candidate| DocumentIntake::Candidate { candidate })
 }
 

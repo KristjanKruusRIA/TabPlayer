@@ -82,7 +82,7 @@ use crate::{
     project::{BaseDocument, CandidateStore, EditCommand, Project, ProjectSession, StagedAsset},
 };
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     path::{Path, PathBuf},
     sync::atomic::{AtomicU64, Ordering},
 };
@@ -92,6 +92,7 @@ struct DocumentEntry {
     revision: u64,
     session: ProjectSession,
     intake_path: Option<PathBuf>,
+    saved_file_sha256: Option<String>,
     candidates: CandidateStore,
     asset_tokens: BTreeSet<String>,
 }
@@ -113,6 +114,7 @@ impl DocumentEntry {
             revision: 0,
             session: ProjectSession::new(project, path)?,
             intake_path,
+            saved_file_sha256: None,
             candidates: CandidateStore::default(),
             asset_tokens: BTreeSet::new(),
         })
@@ -164,6 +166,7 @@ pub struct DocumentWorkspace {
     documents: Vec<DocumentEntry>,
     active: AudioOwner,
     candidates: CandidateStore,
+    candidate_digests: BTreeMap<String, String>,
 }
 
 impl DocumentWorkspace {
@@ -177,6 +180,7 @@ impl DocumentWorkspace {
             documents: vec![document],
             active,
             candidates: CandidateStore::default(),
+            candidate_digests: BTreeMap::new(),
         })
     }
 
@@ -248,12 +252,35 @@ impl DocumentWorkspace {
         self.candidates.stage_document(project, path)
     }
 
+    pub fn stage_document_with_digest(
+        &mut self,
+        project: Project,
+        path: Option<PathBuf>,
+        saved_file_sha256: Option<String>,
+    ) -> Result<DocumentCandidate, String> {
+        if path.is_some() && saved_file_sha256.is_none() {
+            return Err("A native document requires its exact file digest.".into());
+        }
+        let candidate = self.candidates.stage_document(project, path)?;
+        if let Some(digest) = saved_file_sha256 {
+            self.candidate_digests
+                .insert(candidate.token.clone(), digest);
+        }
+        Ok(candidate)
+    }
+
+    pub fn saved_file_sha256(&self, id: &str) -> Result<Option<&str>, String> {
+        Ok(self.entry(id)?.saved_file_sha256.as_deref())
+    }
+
     pub fn cancel_document(&mut self, token: &str) -> bool {
+        self.candidate_digests.remove(token);
         self.candidates.cancel_document(token)
     }
 
     pub fn add_document(&mut self, token: &str) -> Result<WorkspaceSnapshot, String> {
         let (project, path) = self.candidates.take_document(token)?;
+        let saved_file_sha256 = self.candidate_digests.remove(token);
         let intake = path.as_deref().or_else(|| match &project.base {
             BaseDocument::File { filename, .. } => Some(Path::new(filename)),
             _ => None,
@@ -261,7 +288,8 @@ impl DocumentWorkspace {
         if let Some(existing) = intake.and_then(|path| self.find_open_path(path)) {
             return self.activate_document(&existing);
         }
-        let entry = DocumentEntry::new(project, path)?;
+        let mut entry = DocumentEntry::new(project, path)?;
+        entry.saved_file_sha256 = saved_file_sha256;
         self.active = AudioOwner {
             document_id: entry.id.clone(),
             activation_id: identity("activation"),
@@ -401,8 +429,9 @@ impl DocumentWorkspace {
         self.check_mutation(address)?;
         self.protect_destination(address, &path)?;
         let entry = self.entry_mut(&address.document_id)?;
-        files::write_project(&path, &entry.session.stored_project())?;
+        let digest = files::write_project_with_digest(&path, &entry.session.stored_project())?;
         entry.session.mark_saved(path);
+        entry.saved_file_sha256 = Some(digest);
         entry.revision += 1;
         Ok(entry.snapshot())
     }

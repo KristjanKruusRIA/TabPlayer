@@ -1,2 +1,4 @@
 .backing-processing>summary>button{float:right;margin-left:6px;padding:2px 0;border:0;background:transparent;text-decoration:underline;text-underline-offset:2px}
 .app-shell .backing-processing :is(summary,input,select,button):focus-visible{outline:2px solid #fff;outline-offset:2px}
+.app-shell .backing-processing input[aria-invalid="true"]{border-color:var(--ws-error)}
+.app-shell .backing-processing .processing-invalid{color:var(--ws-error)}

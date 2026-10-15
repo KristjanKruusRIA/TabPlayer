@@ -28,7 +28,18 @@ it.each(['Escape','blur','window blur','collapse','hide','settings','source','un
  if(action==='hide')p.view.rerender(<p.Harness visible={false}/>);if(action==='settings')p.view.rerender(<p.Harness settings={{...backing,offsetMs:121}}/>);if(action==='source')p.view.rerender(<p.Harness settings={{...backing,assetId:'other'}}/>);if(action==='unmount')p.view.unmount();
  expect(p.release).toHaveBeenCalledOnce();expect(p.onEdit).not.toHaveBeenCalled();
 });
-it.each(['','-','1.','1e','1.5','13','Infinity'])('invalid draft %j never commits an earlier valid value',text=>{const p=setup();fireEvent.change(semitones(),{target:{value:'2'}});fireEvent.change(semitones(),{target:{value:text}});expect(semitones()).toHaveAttribute('aria-invalid','true');fireEvent.keyDown(semitones(),{key:'Enter'});expect(p.onEdit).not.toHaveBeenCalled();fireEvent.blur(semitones());expect(p.release).toHaveBeenCalledOnce();});
+it.each(['Semitones','Cents'] as const)('%s invalid drafts show associated range feedback and clear it on correction or cancel',name=>{
+ const p=setup(),input=screen.getByRole('spinbutton',{name}),limit=name==='Semitones'?12:100,message=`${name}: enter a whole number from -${limit} to ${limit}.`;
+ for(const value of ['','-','1.','1e','1.5',String(limit+1),'Infinity']){
+  fireEvent.change(input,{target:{value:'2'}});fireEvent.change(input,{target:{value}});
+  expect(input).toHaveAttribute('aria-invalid','true');expect(input).toHaveAccessibleName(name);expect(input.closest('label')).toHaveTextContent(new RegExp(`^${name}$`));
+  const feedback=screen.getByText(message);expect(feedback).toBeVisible();expect(feedback.closest('label')).toBeNull();expect(input).toHaveAccessibleDescription(`Enter applies; Escape or blur cancels. Changes backing audio only. ${message}`);
+  fireEvent.keyDown(input,{key:'Enter'});expect(p.onEdit).not.toHaveBeenCalled();
+  fireEvent.change(input,{target:{value:'2'}});expect(screen.queryByText(message)).not.toBeInTheDocument();expect(input).not.toHaveAttribute('aria-invalid');expect(input).toHaveAccessibleDescription('Enter applies; Escape or blur cancels. Changes backing audio only.');
+  fireEvent.change(input,{target:{value}});fireEvent.blur(input);expect(screen.queryByText(message)).not.toBeInTheDocument();expect(input).not.toHaveAttribute('aria-invalid');
+ }
+ expect(p.release).toHaveBeenCalledTimes(7);expect(p.onEdit).not.toHaveBeenCalled();
+});
 it('steps and clamps both fields with 1/Shift10 and contains keyboard shortcuts',()=>{const p=setup();fireEvent.keyDown(semitones(),{key:'ArrowUp',shiftKey:true});fireEvent.keyDown(semitones(),{key:'ArrowUp',shiftKey:true});expect(semitones()).toHaveValue('12');fireEvent.keyDown(semitones(),{key:'Escape'});fireEvent.keyDown(cents(),{key:'ArrowDown'});fireEvent.keyUp(cents(),{key:'ArrowDown'});expect(cents()).toHaveValue('-1');expect(p.keys).not.toHaveBeenCalled();expect(p.onEdit).not.toHaveBeenCalled();});
 it('returning to the committed value releases without an edit',()=>{const p=setup();fireEvent.change(cents(),{target:{value:'1'}});fireEvent.change(cents(),{target:{value:'0'}});fireEvent.keyDown(cents(),{key:'Enter'});expect(p.onEdit).not.toHaveBeenCalled();expect(p.release).toHaveBeenCalledOnce();});
 it.each(['hide','settings','unmount','collapse'])('pending %s keeps its lease and suppresses stale rejection',async action=>{let reject!:(e:Error)=>void;const p=setup(vi.fn(()=>new Promise<void>((_,no)=>{reject=no;})));fireEvent.change(cents(),{target:{value:'50'}});fireEvent.keyDown(cents(),{key:'Enter'});

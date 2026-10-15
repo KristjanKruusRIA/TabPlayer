@@ -28,7 +28,7 @@ class Context{
   wave(){return this.page.getByRole('region',{name:'Backing waveform',exact:true});}
   panel(){return this.page.locator('.backing-panel');}
   field(name){return this.panel().getByLabel(name,{exact:true});}
-  filter(){return this.panel().getByLabel('Filter',{exact:true});}
+  filter(){return this.panel().getByRole('combobox',{name:'Filter',exact:true});}
   reset(){return this.panel().getByRole('button',{name:'Reset',exact:true});}
   idle(){return waitForWorkspaceIdle(this.page,{timeout:25000});}
   async published(){await this.page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));}

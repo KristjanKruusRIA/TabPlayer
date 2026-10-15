@@ -129,3 +129,10 @@ it('shows a rejected numeric commit and restores the committed source value',asy
   fireEvent.change(input,{target:{value:'8000'}});fireEvent.keyDown(input,{key:'Enter'});
   expect(await screen.findByRole('alert')).toHaveTextContent('Reference exit exceeds source duration.');await waitFor(()=>expect(input).toHaveValue('7000.75'));expect(p.release).toHaveBeenCalledOnce();
 });
+
+it('processing draft owns a usable field outside disabled mix ancestors and disables backing siblings',()=>{
+ const p=setup();const input=screen.getByRole('spinbutton',{name:'Semitones'});fireEvent.change(input,{target:{value:'2'}});
+ expect(input).toBeEnabled();expect(screen.getByRole('spinbutton',{name:'Cents'})).toBeDisabled();expect(screen.getByLabelText('Backing gain')).toBeDisabled();expect(entry()).toBeDisabled();expect(screen.getByRole('button',{name:'Replace backing'})).toBeDisabled();
+ fireEvent.keyDown(input,{key:'Escape'});expect(p.release).toHaveBeenCalledOnce();expect(screen.getByLabelText('Backing gain')).toBeEnabled();expect(p.onEdit).not.toHaveBeenCalled();
+});
+it.each(['score only','embedded'])('does not show committed processing controls for %s',mode=>{setup(mode==='score only'?{settings:null}:{missing:true});expect(screen.queryByText('Pitch & filter')).not.toBeInTheDocument();});

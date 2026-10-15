@@ -9,6 +9,7 @@ import type { MusicSelection } from './editor/range-types';
 import { makeMusicClip,musicClipSelection } from './editor/clipboard-source';
 import type {NativeBackingWaveformBridge} from './audio/backing-waveform-types';
 import {backingLocationsForScore} from './audio/plan';
+import {backingProcessingKey} from './audio/backing-processing';
 import {referenceSyncTiming,referenceTimingKey} from './audio/reference-sync';
 import {projectGpDocument} from './interchange/backing-projection';
 
@@ -18,7 +19,7 @@ const tempoState=(score:model.Score)=>JSON.stringify(score.masterBars.map(bar=>b
 ])));
 const backingState=(backing:BackingSettings|null)=>JSON.stringify(backing?[
   backing.assetId,backing.offsetMs,backing.anchors.map(a=>[a.bar,a.occurrence,a.ratio,a.audioMs]).sort((a,b)=>a[0]-b[0]||a[1]-b[1]||a[2]-b[2]||a[3]-b[3]),
-  [backing.mix.gain,backing.mix.pan,backing.mix.mute,backing.mix.solo],backing.referenceSync?[backing.referenceSync.entryAudioMs,backing.referenceSync.exitAudioMs]:null,
+  [backing.mix.gain,backing.mix.pan,backing.mix.mute,backing.mix.solo],backing.referenceSync?[backing.referenceSync.entryAudioMs,backing.referenceSync.exitAudioMs]:null,backingProcessingKey(backing.processing),
 ]:null);
 
 export interface DocumentState extends BuiltDocument { documentId:DocumentId; revision:number; snapshot: ProjectSnapshot; documentEpoch:number; busy: boolean; error: string | null }

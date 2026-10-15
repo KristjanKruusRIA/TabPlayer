@@ -1,4 +1,5 @@
 import {useEffect,useId,useRef,useState,useSyncExternalStore} from 'react';
+import {BackingProcessingControls} from './BackingProcessingControls';
 import {defaultMix} from '../document-settings';
 import type {BackingSettings,EditCommand,SyncAnchor} from '../edit-types';
 import type {AssetInfo} from '../project';
@@ -8,7 +9,7 @@ import type {ReferenceEndpoint,ReferenceSyncControls} from './reference-sync-typ
 const noSubscribe=()=>()=>{},noState=()=>null;
 const numberValue=(value:string)=>/^[+-]?(?:\d+(?:\.\d+)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(value)&&Number.isFinite(Number(value))?Number(value):NaN;
 
-export function BackingPanel({settings,assets,onEdit,stageBacking,stageEmbeddedBacking,beginOperation,busy=false,durationMs,playback,embedded,originalSettings,onShowWaveform,reference}:{settings:BackingSettings|null|undefined;assets:Record<string,AssetInfo>;onEdit:(edit:EditCommand,candidate?:BackingCandidate)=>void|Promise<void>;stageBacking:()=>Promise<BackingCandidate|null>;stageEmbeddedBacking:(bytes:Uint8Array)=>Promise<BackingCandidate|null>;beginOperation:()=>()=>void;busy?:boolean;durationMs?:number;playback?:NativePlaybackController|null;embedded?:Uint8Array|null;originalSettings?:BackingSettings|null;onShowWaveform?:()=>void;reference?:ReferenceSyncControls}) {
+export function BackingPanel({settings,assets,onEdit,stageBacking,stageEmbeddedBacking,beginOperation,busy=false,visible=true,durationMs,playback,embedded,originalSettings,onShowWaveform,reference}:{settings:BackingSettings|null|undefined;assets:Record<string,AssetInfo>;onEdit:(edit:EditCommand,candidate?:BackingCandidate)=>void|Promise<void>;stageBacking:()=>Promise<BackingCandidate|null>;stageEmbeddedBacking:(bytes:Uint8Array)=>Promise<BackingCandidate|null>;beginOperation:()=>()=>void;busy?:boolean;visible?:boolean;durationMs?:number;playback?:NativePlaybackController|null;embedded?:Uint8Array|null;originalSettings?:BackingSettings|null;onShowWaveform?:()=>void;reference?:ReferenceSyncControls}) {
   useSyncExternalStore(playback?.subscribe??noSubscribe,playback?.getState??noState);
   const [error,setError]=useState<string|null>(null),[staging,setStaging]=useState(false),[duration,setDuration]=useState<number|undefined>(durationMs);
   const [bar,setBar]=useState(1),[occurrence,setOccurrence]=useState(1),[ratio,setRatio]=useState(0),[audioMs,setAudioMs]=useState(0);
@@ -52,6 +53,7 @@ export function BackingPanel({settings,assets,onEdit,stageBacking,stageEmbeddedB
       <label className="check"><input type="checkbox" aria-label="Backing solo" checked={settings.mix.solo} onChange={e=>edit({...settings,mix:{...settings.mix,solo:e.target.checked}})}/>Solo</label>
     </>}
     </fieldset>
+    {settings&&<BackingProcessingControls settings={settings} busy={competing} visible={visible} beginOperation={beginOperation} onEdit={onEdit}/>}
     {reference&&<details open onToggle={e=>{if(!e.currentTarget.open&&referenceEdit.current?.active?.surface==='number')referenceEdit.current.cancel();}}><summary>Sync timing</summary><fieldset>
       <label>Timing<select value={settings?.referenceSync?'reference':'score'} disabled={!referenceReady||competing} onKeyDown={e=>e.stopPropagation()} onKeyUp={e=>e.stopPropagation()} onChange={e=>runReference(()=>reference.onModeChange(e.target.value as 'score'|'reference'))}><option value="score">Audio follows score</option><option value="reference">Score follows audio</option></select></label>
       <div className="pair">{numberField('entry')}{numberField('exit')}</div>

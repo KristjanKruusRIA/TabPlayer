@@ -54,10 +54,10 @@ export interface AppProps {
   workspaceBusy:boolean;workspaceError:string|null;beginEditorOperation:()=>()=>void;
   onNew:()=>Promise<boolean>;onOpen:()=>Promise<boolean>;onClose:()=>Promise<boolean>;onCloseAll:()=>Promise<boolean>;
   documentTabs:ReactNode;
-  sessionMenu?:ReactNode;recoveryStatus?:ReactNode;playbackResumeEpoch?:number;
+  sessionMenu?:ReactNode;libraryMenu?:ReactNode;onFileCommandCapture?:(element:HTMLElement)=>void;recoveryStatus?:ReactNode;playbackResumeEpoch?:number;
 }
 
-export function App({controller,audioBridge,exportBridge,documentBridge,documentView,onViewChange,clipboard,workspaceBusy,workspaceError,beginEditorOperation,onNew,onOpen,onClose,onCloseAll,documentTabs,sessionMenu,recoveryStatus,playbackResumeEpoch=0}:AppProps) {
+export function App({controller,audioBridge,exportBridge,documentBridge,documentView,onViewChange,clipboard,workspaceBusy,workspaceError,beginEditorOperation,onNew,onOpen,onClose,onCloseAll,documentTabs,sessionMenu,libraryMenu,onFileCommandCapture,recoveryStatus,playbackResumeEpoch=0}:AppProps) {
   const state=useSyncExternalStore(controller.subscribe,controller.getState);
   const controlsBusy=state.busy||workspaceBusy;
   const [player,setPlayer]=useState<NativePlaybackController|null>(null);
@@ -239,7 +239,7 @@ export function App({controller,audioBridge,exportBridge,documentBridge,document
     else if(event.key==='Escape'){editorSelection(null);event.preventDefault();}
   }
   return <div ref={shell} className="app-shell" aria-busy={controlsBusy} data-narrow={narrow} onKeyDown={selectionKeys}>
-    <header ref={commandBar} className="toolbar" onKeyDown={event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();closeCommands(true);}}} onClickCapture={event=>{if(!(event.target instanceof Element))return;const disclosure=event.target.closest('summary')?.parentElement;if(disclosure instanceof HTMLDetailsElement)commandBar.current?.querySelectorAll<HTMLDetailsElement>('details[open]').forEach(other=>{if(other!==disclosure)other.open=false;});else if(event.target.closest('button'))closeCommands(true);}}><h1>TabPlayer</h1><nav aria-label="File and history">
+    <header ref={commandBar} className="toolbar" onKeyDown={event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();closeCommands(true);}}} onClickCapture={event=>{if(!(event.target instanceof Element))return;if(event.target instanceof HTMLElement)onFileCommandCapture?.(event.target);const disclosure=event.target.closest('summary')?.parentElement;if(disclosure instanceof HTMLDetailsElement)commandBar.current?.querySelectorAll<HTMLDetailsElement>('details[open]').forEach(other=>{if(other!==disclosure)other.open=false;});else if(event.target.closest('button'))closeCommands(true);}}><h1>TabPlayer</h1><nav aria-label="File and history">
       <details className="command-menu" onToggle={event=>commandToggle(event.currentTarget)}><summary>File</summary><section aria-label="File commands">
       <button disabled={controlsBusy} onClick={()=>documentAction(onNew())}>New</button>
       <button disabled={controlsBusy} onClick={()=>documentAction(onOpen())}>Open</button>
@@ -248,7 +248,7 @@ export function App({controller,audioBridge,exportBridge,documentBridge,document
       <button disabled={controlsBusy} onClick={()=>documentAction(onClose())}>Close score</button>
       <button disabled={controlsBusy} onClick={()=>documentAction(onCloseAll())}>Close all scores</button>
       <button disabled={controlsBusy||exports.busy} onClick={()=>openModal('export')}>Export score</button><button disabled={controlsBusy||exports.busy} onClick={directExport}>Export GP</button>
-      {sessionMenu}</section></details>
+      {libraryMenu}{sessionMenu}</section></details>
       <details ref={viewMenu} className="command-menu" onToggle={event=>commandToggle(event.currentTarget)}><summary>View</summary><section aria-label="Workspace view">
         <label className="check"><input type="checkbox" checked={leftVisible} onChange={event=>event.target.checked?showTask(leftTask):setLeftVisible(false)}/>Track panel</label>
         <label className="check"><input type="checkbox" checked={inspectorVisible} onChange={event=>event.target.checked?showInspector():setInspectorVisible(false)}/>Inspector</label>

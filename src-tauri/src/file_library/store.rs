@@ -535,7 +535,7 @@ impl LibraryStore {
             self.history_warning = Some("Library history could not be saved. Only the latest 100 unpinned successful-file receipts can be retained; older pending history was dropped. Retry to save the retained history.".into());
         }
     }
-    fn reconcile_publication(&mut self) -> Result<(), String> {
+    pub(crate) fn reconcile_publication(&mut self) -> Result<(), String> {
         let Some(attempt) = self.uncertain_publication.as_ref() else {
             return Ok(());
         };

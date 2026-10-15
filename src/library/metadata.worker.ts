@@ -4,7 +4,8 @@ import type { MetadataResult } from './types';
 
 self.onmessage = (event: MessageEvent<MetadataWorkerRequest>) => {
   const request = event.data;
-  if (!request || !Number.isSafeInteger(request.id) || request.id < 1 || typeof request.sha256 !== 'string') return;
+  if (!request || request.cmd !== 'tabplayer.metadata.extract') return;
+  if (!Number.isSafeInteger(request.id) || request.id < 1 || typeof request.sha256 !== 'string') return;
   const { id, sha256, input } = request;
   let result: MetadataResult;
   try {

@@ -8,7 +8,9 @@ public/font/
 public/soundfont/
 public/licenses/
 public/export-fonts/
+public/library/
 src-tauri/resources/audio/
+src-tauri/resources/library/
 src-tauri/icons/android/
 src-tauri/icons/ios/
 src-tauri/icons/StoreLogo.png

@@ -175,6 +175,17 @@ pub struct DocumentWorkspace {
     frozen: bool,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct NativeFileReceipt {
+    pub document: DocumentRevision,
+    pub path: PathBuf,
+    pub digest: String,
+}
+
+#[cfg(test)]
+#[path = "file_library/workspace_receipt_tests.rs"]
+mod workspace_receipt_tests;
+
 pub(crate) struct PreparedClose {
     closing: BTreeSet<String>,
     replacement: Option<DocumentEntry>,
@@ -441,6 +452,36 @@ impl DocumentWorkspace {
 
     pub fn saved_file_sha256(&self, id: &str) -> Result<Option<&str>, String> {
         Ok(self.entry(id)?.saved_file_sha256.as_deref())
+    }
+
+    pub(crate) fn library_receipt(&self, id: &str) -> Result<Option<NativeFileReceipt>, String> {
+        self.check_admission()?;
+        let entry = self.entry(id)?;
+        let target = if let Some(path) = entry.session.path() {
+            entry
+                .saved_file_sha256
+                .as_deref()
+                .map(|digest| (path, digest))
+        } else {
+            entry
+                .intake_path
+                .as_deref()
+                .zip(entry.session.imported_digest())
+        };
+        Ok(target.map(|(path, digest)| NativeFileReceipt {
+            document: DocumentRevision {
+                document_id: entry.id.clone(),
+                revision: entry.revision,
+            },
+            path: path.to_owned(),
+            digest: digest.to_owned(),
+        }))
+    }
+
+    pub(crate) fn retire_intake(&mut self) {
+        self.candidates = CandidateStore::default();
+        self.candidate_digests.clear();
+        self.fork_candidates.clear();
     }
 
     pub fn template_project(&self, address: &DocumentRevision) -> Result<Project, String> {

@@ -442,6 +442,13 @@ impl ProjectSession {
     pub fn path(&self) -> Option<&Path> {
         self.path.as_deref()
     }
+
+    pub(crate) fn imported_digest(&self) -> Option<&str> {
+        match &self.project.base {
+            BaseDocument::File { sha256, .. } => Some(sha256),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]

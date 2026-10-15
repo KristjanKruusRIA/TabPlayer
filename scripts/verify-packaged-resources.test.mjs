@@ -1,13 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, writeFile, cp, readFile, unlink } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, cp, readFile, unlink, realpath, symlink, lstat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createHash } from 'node:crypto';
 const hash=bytes=>createHash('sha256').update(bytes).digest('hex');
 const api=()=>import('./verify-packaged-resources.mjs');
 async function fixture() {
-  const sourceRoot=await mkdtemp(join(tmpdir(),'tabplayer-package-'));
+  const sourceRoot=await mkdtemp(join(await realpath(tmpdir()),'tabplayer-package-'));
   const referenceRoot=join(sourceRoot,'reference');const packageRoot=join(sourceRoot,'unpacked');
   const audio=join(packageRoot,'usr/lib/tabplayer/audio');
   await mkdir(join(sourceRoot,'assets/audio'),{recursive:true});
@@ -19,7 +19,10 @@ async function fixture() {
   await writeFile(join(sourceRoot,'assets/audio/sources.json'),JSON.stringify({sources:[{id:'fixture',repository:'fixture/public',revision:'1'.repeat(40),license:'CC0-1.0',licensePath:'LICENSE',inventoryPath:'fixture-inventory.json'}],soundFont:{sha256:hash(sf)}}));
   await writeFile(join(sourceRoot,'assets/audio/fixture-inventory.json'),JSON.stringify([{path:'Samples/note.wav',sha256:hash(wave)},{path:'LICENSE',sha256:hash(license)}]));
   await cp(referenceRoot,audio,{recursive:true});
-  return {sourceRoot,referenceRoot,packageRoot,audio};
+  const library=join(packageRoot,'usr/lib/tabplayer/library');
+  await cp(new URL('../assets/library/',import.meta.url),join(sourceRoot,'assets/library'),{recursive:true});
+  await cp(join(sourceRoot,'assets/library'),library,{recursive:true});
+  return {sourceRoot,referenceRoot,packageRoot,audio,library};
 }
 
 test('extracted_package_contains_all_pinned_recordings_and_exact_licenses',async()=> {
@@ -27,6 +30,69 @@ test('extracted_package_contains_all_pinned_recordings_and_exact_licenses',async
   const report=await verifyPackage(options);
   assert.equal(report.sampleCount,1);assert.equal(report.regionCount,1);assert.equal(report.sourceRevisions.fixture,'1'.repeat(40));
   assert.equal(report.encodedSampleBytes,26);
+  assert.equal(report.library.templateCount,10);assert.equal(report.library.exampleCount,3);assert.equal(report.library.fileCount,16);
+});
+
+test('package_contains_all_offline_library_payloads_and_license_with_exact_source_hashes',async()=> {
+  const {verifyPackage}=await api();
+  for(const path of ['manifest.json','README.md','CC0-1.0.txt','templates/factory-guitar-6.tabplayer','examples/example-windowline.tabplayer']) {
+    const options=await fixture();await unlink(join(options.library,path));
+    await assert.rejects(verifyPackage(options),/Expected one extracted library manifest|Missing (prepared )?library resource/i);
+  }
+  for(const path of ['README.md','CC0-1.0.txt','templates/factory-guitar-6.tabplayer','examples/example-windowline.tabplayer']) {
+    const options=await fixture();await writeFile(join(options.library,path),'changed bytes');
+    await assert.rejects(verifyPackage(options),/Stale prepared library hash/i);
+  }
+});
+
+test('only_manifest_owned_library_scores_are_admitted_and_preparation_is_read_only',async()=> {
+  const {verifyPackage}=await api();const options=await fixture();
+  await writeFile(join(options.library,'private.gp'),'private');
+  await assert.rejects(verifyPackage(options),/unexpected|private/i);
+  const stale=await fixture();const path=join(stale.library,'templates/factory-bass-6.tabplayer');
+  await writeFile(path,'must survive verification');
+  await assert.rejects(verifyPackage(stale),/stale|hash/i);
+  assert.equal(await readFile(path,'utf8'),'must survive verification');
+});
+
+test('packaged_library_inventory_rejects_an_unknown_file_symlink_without_touching_its_target',async t=> {
+  const {verifyPackage}=await api();const options=await fixture();
+  const target=join(options.sourceRoot,'private-target.gp'),link=join(options.library,'private.gp');
+  await writeFile(target,'owned target must remain unchanged');
+  try{await symlink(target,link,'file');}catch(error){
+    if(process.platform==='win32'&&['EPERM','EACCES'].includes(error.code)){t.skip(`File symlink unavailable: ${error.code}`);return;}
+    throw error;
+  }
+  await assert.rejects(verifyPackage(options),/Unexpected library resource/i);
+  assert.equal(await readFile(target,'utf8'),'owned target must remain unchanged');
+  assert.equal((await lstat(link)).isSymbolicLink(),true);
+});
+
+test('packaged_library_inventory_rejects_an_unknown_directory_link_without_traversing_it',async()=> {
+  const {verifyPackage}=await api();const options=await fixture();
+  const target=join(options.sourceRoot,'owned-private-target'),link=join(options.library,'unowned');
+  await mkdir(target);await writeFile(join(target,'private.gp'),'owned directory target');
+  await symlink(target,link,process.platform==='win32'?'junction':'dir');
+  assert.equal((await lstat(link)).isSymbolicLink(),true);
+  await assert.rejects(verifyPackage(options),/Unexpected library resource/i);
+  assert.equal(await readFile(join(target,'private.gp'),'utf8'),'owned directory target');
+});
+
+test('packaged_library_inventory_rejects_an_unknown_empty_directory',async()=> {
+  const {verifyPackage}=await api();const options=await fixture();
+  await mkdir(join(options.library,'unowned-empty'));
+  await assert.rejects(verifyPackage(options),/Unexpected library resource/i);
+});
+
+test('outside_library_links_remain_untraversed_and_do_not_change_the_resource_policy',async()=> {
+  const {verifyPackage}=await api();const options=await fixture();
+  const target=join(options.sourceRoot,'owned-framework-target'),link=join(options.packageRoot,'framework-current');
+  await mkdir(target);await writeFile(join(target,'untraversed.gp'),'owned framework-link target');
+  await symlink(target,link,process.platform==='win32'?'junction':'dir');
+  const report=await verifyPackage(options);
+  assert.equal(report.library.fileCount,16);
+  assert.equal((await lstat(link)).isSymbolicLink(),true);
+  assert.equal(await readFile(join(target,'untraversed.gp'),'utf8'),'owned framework-link target');
 });
 
 test('package_missing_or_corrupt_resources_are_rejected_without_network',async()=> {

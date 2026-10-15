@@ -84,3 +84,14 @@ it('freezes export origin and sends the captured revision with every export kind
   ]);
   expect(api).not.toHaveProperty('nativeExportBridge');
 });
+
+it.each([false,true])('notifies the exact successful native save response in production or desktop mode %s without changing save outcome',async desktopTest=>{
+  const {document:api}=await bridges(desktopTest),record={documentId:'saved',revision:8,snapshot:{path:'C:/scores/saved.tabplayer'}},failure=new Error('History unavailable.'),saved=vi.fn().mockRejectedValue(failure),failed=vi.fn();
+  const bridge=api.createDocumentBridge('saved',{saved,failed});native.invoke.mockResolvedValueOnce(record);
+  expect(await bridge.saveProject(true,7)).toBe(record);await vi.waitFor(()=>expect(failed).toHaveBeenCalledWith(failure));expect(saved).toHaveBeenCalledExactlyOnceWith(record);
+  saved.mockClear();native.invoke.mockResolvedValueOnce(null);expect(await bridge.saveProject(false,8)).toBeNull();expect(saved).not.toHaveBeenCalled();
+  native.invoke.mockRejectedValueOnce(new Error('Write failed.'));await expect(bridge.saveProject(false,8)).rejects.toThrow('Write failed.');expect(saved).not.toHaveBeenCalled();
+});
+it('a response for a different document cannot trigger successful-save metadata notification',async()=>{
+  const {document:api}=await bridges(),saved=vi.fn(),failed=vi.fn(),bridge=api.createDocumentBridge('requested',{saved,failed});native.invoke.mockResolvedValueOnce({documentId:'other',revision:9,snapshot:{}});await bridge.saveProject(false,8);await Promise.resolve();expect(saved).not.toHaveBeenCalled();
+});

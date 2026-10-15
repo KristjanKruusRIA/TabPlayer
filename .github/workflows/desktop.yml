@@ -92,13 +92,14 @@ jobs:
           key: ${{ needs.prepare-audio.outputs.cache-key }}
           enableCrossOsArchive: true
           fail-on-cache-miss: true
-      - name: Verify restored offline recordings and prepare fonts
+      - name: Verify offline resources and prepare fonts
         run: |
           node scripts/prepare-audio.mjs --offline
           node scripts/prepare-fonts.mjs
+          node scripts/prepare-library.mjs
       - name: Frontend and resource tests
         run: |
-          npm test
+          npm test -- --maxWorkers=2 --testTimeout=15000
           npm run typecheck
       - name: Native core, rendering, persistence and export tests
         run: |

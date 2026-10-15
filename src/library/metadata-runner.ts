@@ -5,7 +5,7 @@ export interface MetadataRunner {
   dispose(): void;
 }
 
-export interface MetadataWorkerRequest { id: number; sha256: string; input: MetadataInput }
+export interface MetadataWorkerRequest { cmd: 'tabplayer.metadata.extract'; id: number; sha256: string; input: MetadataInput }
 export interface MetadataWorkerResponse { id: number; sha256: string; result: MetadataResult }
 
 const encoder = new TextEncoder();
@@ -83,7 +83,7 @@ export function createMetadataRunner(): MetadataRunner {
             unavailable(event.message ? `Metadata worker failed: ${event.message}` : 'Metadata worker failed.');
           };
           worker.onmessageerror = () => unavailable('Metadata worker message could not be read.');
-          worker.postMessage({ id, sha256, input } satisfies MetadataWorkerRequest);
+          worker.postMessage({ cmd: 'tabplayer.metadata.extract', id, sha256, input } satisfies MetadataWorkerRequest);
           if (!finished && performance.now() >= deadline) timedOut();
         } catch (error) {
           unavailable(error instanceof Error ? `Metadata worker failed: ${error.message}` : 'Metadata worker could not be started.');

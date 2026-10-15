@@ -26,14 +26,19 @@ export const nativeWorkspaceBridge:NativeWorkspaceBridge={
   activateDocument:documentId=>invoke('workspace_activate',{documentId}),
   closeDocuments:documents=>invoke('workspace_close',{documents}),
 };
-export function createDocumentBridge(documentId:DocumentId):NativeBridge {
+export interface DocumentSaveObserver {saved(record:DocumentSnapshot):void|Promise<void>;failed(error:unknown):void}
+export function createDocumentBridge(documentId:DocumentId,observer?:DocumentSaveObserver):NativeBridge {
   return {
   documentId,
   snapshot: () => invoke('project_snapshot',{documentId}),
   cancelAsset: token => invoke('cancel_asset',{documentId,token}),
   applyEdit: (command,revision,assetToken) => invoke('apply_edit',{document:{documentId,revision},command,assetToken}),
   undo: revision => invoke('undo_edit',{document:{documentId,revision}}), redo: revision => invoke('redo_edit',{document:{documentId,revision}}),
-  saveProject: (saveAs,revision) => desktopTest?invoke('desktop_test_io',{action:'save',documentId,revision}):invoke('save_project',{document:{documentId,revision},saveAs}),
+  saveProject: async (saveAs,revision) => {
+    const record=await (desktopTest?invoke<DocumentSnapshot|null>('desktop_test_io',{action:'save',documentId,revision}):invoke<DocumentSnapshot|null>('save_project',{document:{documentId,revision},saveAs}));
+    if(record?.documentId===documentId&&observer)void Promise.resolve().then(()=>observer.saved(record)).catch(error=>observer.failed(error));
+    return record;
+  },
   exportGp: (bytes,revision) => desktopTest?invoke('desktop_test_io',{action:'export',documentId,revision,bytes:Array.from(bytes)}):invoke('export_gp',{document:{documentId,revision},bytes:Array.from(bytes)}),
   askUnsaved: async (title,path) => {
     const result = await message(`Save changes to “${title}” before closing?${path?`\n${path}`:''}`,{title:'Unsaved score',kind:'warning',buttons:{yes:'Save',no:'Discard',cancel:'Cancel'}});

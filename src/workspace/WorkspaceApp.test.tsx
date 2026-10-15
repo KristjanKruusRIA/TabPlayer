@@ -2,7 +2,7 @@
 import { useEffect } from 'react';
 import type { Root } from 'react-dom/client';
 import { afterEach,beforeEach,expect,it,vi } from 'vitest';
-import { act,cleanup,fireEvent,render,screen,waitFor } from '@testing-library/react';
+import { act,cleanup,fireEvent,render,screen,waitFor,within } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import type { AppProps } from '../App';
 import type { NativeBridge } from '../bridge';
@@ -14,6 +14,7 @@ import { blankProject,type EditCommand,type Project,type DocumentCandidate } fro
 import type { CloseDocument,DocumentSnapshot,NativeWorkspaceBridge,WorkspaceSnapshot } from './types';
 import { WorkspaceController } from './WorkspaceController';
 import { WorkspaceApp } from './WorkspaceApp';
+import { WorkspaceLibrary } from './WorkspaceLibrary';
 import { initialDocumentView } from './view-state';
 import type { NativeSessionBridge } from './recovery-types';
 
@@ -208,4 +209,76 @@ it.each(['success','destroy-failure','resync-failure','resume-failure','cancel',
   }finally{
     destruction.resolve();resuming.resolve();refresh.resolve(f.snapshot());await closing?.catch(()=>{});await act(async()=>{reactRoot?.unmount();});root.remove();vi.doUnmock('./session-bridge');vi.doUnmock('@tauri-apps/api/event');vi.doUnmock('@tauri-apps/api/window');vi.doUnmock('react-dom/client');vi.doUnmock('./WorkspaceController');vi.doUnmock('../bridge');vi.doUnmock('../App');vi.doUnmock('../ScoreView');vi.resetModules();
   }
+});
+
+const librarySnapshot=()=>({version:1 as const,revision:0,welcomeSeen:true,recents:[],roots:[],templates:[],examples:[],warning:null});
+function libraryBridge():import('../library/types').NativeFileLibraryBridge {
+  return {snapshot:vi.fn(async()=>librarySnapshot()),retry:vi.fn(async()=>librarySnapshot()),change:vi.fn(async()=>({...librarySnapshot(),revision:1,welcomeSeen:true})),pickRoot:vi.fn(async()=>null),saveTemplate:vi.fn(async()=>({...librarySnapshot(),revision:1})),ackMetadata:vi.fn(async()=>librarySnapshot()),stage:vi.fn(),scanBegin:vi.fn(),scanNext:vi.fn(),scanRead:vi.fn(),scanAccept:vi.fn(),scanFinish:vi.fn(),scanCancel:vi.fn(),search:vi.fn(),reveal:vi.fn(),dropStage:vi.fn()};
+}
+it('Library catalog actions retain the one editor, audio owner and history, and its own Open hands off the browsing lease synchronously',async()=>{
+  const f=fixture(),w=await WorkspaceController.create(f.bridge),bridge=libraryBridge(),runner={run:vi.fn(),dispose:vi.fn()};
+  const library=await WorkspaceLibrary.create(w,bridge,runner,{blocked:()=>null,restoredWorkingDocument:true});render(<WorkspaceApp workspace={w} library={library}/>);
+  await act(async()=>{await current(w).controller.edit(note);await current(w).controller.undo();});const retained=current(w),history=retained.controller.getState(),owner=w.getState().active,editor=screen.getByTestId('active-editor'),audio=props().audioBridge;
+  act(()=>library.show('recent'));expect(screen.getByRole('dialog')).toBeInTheDocument();expect(w.getState().busy).toBe(true);
+  await act(async()=>{await library.controller.refresh();await library.controller.change({kind:'pin',id:'recent',pinned:true});});expect(screen.getByTestId('active-editor')).toBe(editor);expect(props().audioBridge).toBe(audio);expect(w.getState().active).toBe(owner);expect(retained.controller.getState()).toBe(history);expect(mocks.mounted).toBe(1);
+  bridge.stage=vi.fn(async()=>({kind:'existing' as const,documentId:f.first}));await act(async()=>{expect(await library.controller.open({kind:'recent',id:'recent'})).toBe(true);library.close();});expect(w.getState().busy).toBe(false);expect(screen.queryByRole('dialog')).not.toBeInTheDocument();expect(w.getState().active).toEqual(owner);expect(retained.controller.getState()).toBe(history);expect(mocks.mounted).toBe(1);
+});
+it('failed Library Open reacquires its lease, template capture uses that held lease, and native drop cannot bypass it',async()=>{
+  const f=fixture(),w=await WorkspaceController.create(f.bridge),bridge=libraryBridge(),library=await WorkspaceLibrary.create(w,bridge,{run:vi.fn(),dispose:vi.fn()},{blocked:()=>null,restoredWorkingDocument:true});render(<WorkspaceApp workspace={w} library={library}/>);
+  act(()=>library.show('templates'));bridge.stage=vi.fn(async()=>{throw new Error('Missing score.');});
+  await act(async()=>{expect(await library.controller.open({kind:'recent',id:'missing'})).toBe(false);});expect(library.getState().open).toBe(true);expect(w.getState().busy).toBe(true);expect(screen.getByRole('dialog')).toHaveTextContent('Missing score.');
+  await act(async()=>{expect(await library.controller.saveTemplate('My ensemble')).toBe(true);});expect(bridge.saveTemplate).toHaveBeenCalledExactlyOnceWith(0,{documentId:f.first,revision:0},'My ensemble');
+  await act(async()=>{await library.drop({dropToken:'drop',count:1});});expect(bridge.dropStage).not.toHaveBeenCalled();expect(library.getState().error).toMatch(/operation|Library/i);act(()=>library.close());expect(w.getState().busy).toBe(false);
+});
+it.each([false,true])('welcome suppression uses the actual restored-working-document outcome: %s',async restoredWorkingDocument=>{
+  const f=fixture(),w=await WorkspaceController.create(f.bridge),bridge=libraryBridge();bridge.snapshot=vi.fn(async()=>({...librarySnapshot(),welcomeSeen:false}));const library=await WorkspaceLibrary.create(w,bridge,{run:vi.fn(),dispose:vi.fn()},{blocked:()=>null,restoredWorkingDocument});
+  expect(library.getState().open).toBe(!restoredWorkingDocument);expect(bridge.change).not.toHaveBeenCalled();if(!restoredWorkingDocument){render(<WorkspaceApp workspace={w} library={library}/>);await waitFor(()=>expect(bridge.change).toHaveBeenCalledExactlyOnceWith(0,{kind:'welcomeSeen'}));act(()=>library.close());}library.dispose();
+});
+it('unavailable Library never prevents an existing workspace from rendering or using ordinary New',async()=>{
+  const f=fixture(),w=await WorkspaceController.create(f.bridge),bridge=libraryBridge();bridge.snapshot=vi.fn(async()=>{throw new Error('Catalog corrupt.');});const library=await WorkspaceLibrary.create(w,bridge,{run:vi.fn(),dispose:vi.fn()},{blocked:()=>null,restoredWorkingDocument:false});render(<WorkspaceApp workspace={w} library={library}/>);
+  expect(screen.getByTestId('active-editor')).toBeInTheDocument();act(()=>library.show());expect(screen.getByRole('dialog')).toHaveTextContent('Catalog corrupt.');act(()=>library.close());await act(async()=>{await w.newDocument();});expect(w.getState().documents).toHaveLength(2);library.dispose();
+});
+
+it('main installs one Library/drop listener after session resolution, rejects startup drops and keeps its Library through failed destruction',async()=>{
+  const f=fixture(),session=closeSession(f),workspace=await WorkspaceController.create(f.bridge),resolved=deferred<Awaited<ReturnType<NativeSessionBridge['resolve']>>>(),events=new Map<string,(event:{payload:unknown})=>void>(),unlisteners=new Map<string,ReturnType<typeof vi.fn>>();workspace.setSessionBridge(session);vi.mocked(session.resolve).mockReturnValueOnce(resolved.promise);
+  let close!:(event:{preventDefault():void})=>Promise<void>;const destroy=vi.fn().mockRejectedValueOnce(new Error('Destroy rejected.')).mockResolvedValue(undefined),rootRender=vi.fn(),library={refresh:vi.fn(async()=>{}),drop:vi.fn(async()=>{}),dispose:vi.fn()},create=vi.fn(async(..._args:unknown[])=>library);
+  vi.resetModules();vi.doMock('@tauri-apps/api/window',()=>({getCurrentWindow:()=>({onCloseRequested:vi.fn(async(callback:typeof close)=>{close=callback;}),destroy})}));vi.doMock('@tauri-apps/api/event',()=>({listen:vi.fn(async(name:string,callback:(event:{payload:unknown})=>void)=>{expect(events.has(name)).toBe(false);events.set(name,callback);const unlisten=vi.fn();unlisteners.set(name,unlisten);return unlisten;})}));vi.doMock('react-dom/client',()=>({createRoot:()=>({render:rootRender})}));vi.doMock('./WorkspaceController',()=>({WorkspaceController:{create:vi.fn(async()=>workspace)}}));vi.doMock('./WorkspaceLibrary',()=>({WorkspaceLibrary:{create}}));vi.doMock('../bridge',()=>({nativeWorkspaceBridge:f.bridge,createDocumentBridge:(id:string)=>mocks.bridges.get(id)!}));
+  const root=document.createElement('div');root.id='root';document.body.append(root);
+  try{
+    await import('../main');await waitFor(()=>expect(events.has('score-files-dropped')).toBe(true));events.get('score-files-dropped')!({payload:{dropToken:'startup',count:1}});expect(library.drop).not.toHaveBeenCalled();expect(create).not.toHaveBeenCalled();expect(rootRender.mock.calls.at(-1)?.[0].props.children[1].props.children).toMatch(/not opened/i);
+    resolved.resolve({workspace:f.snapshot(),views:{},issues:[]});await waitFor(()=>expect(create).toHaveBeenCalledOnce());await waitFor(()=>expect(rootRender.mock.calls.at(-1)?.[0].props.library).toBe(library));expect(create.mock.calls[0][3]).toMatchObject({restoredWorkingDocument:false});
+    events.get('file-library-changed')!({payload:{revision:3,warning:null}});await waitFor(()=>expect(library.refresh).toHaveBeenCalledOnce());events.get('score-files-dropped')!({payload:{dropToken:'ready',count:2}});expect(library.drop).toHaveBeenCalledExactlyOnceWith({dropToken:'ready',count:2});
+    await close({preventDefault:vi.fn()});expect(library.dispose).not.toHaveBeenCalled();expect(session.resume).toHaveBeenCalledOnce();expect(unlisteners.get('score-files-dropped')).not.toHaveBeenCalled();expect(unlisteners.get('file-library-changed')).not.toHaveBeenCalled();events.get('score-files-dropped')!({payload:{dropToken:'resumed',count:1}});expect(library.drop).toHaveBeenLastCalledWith({dropToken:'resumed',count:1});expect(events.size).toBe(3);expect(create).toHaveBeenCalledOnce();
+    await close({preventDefault:vi.fn()});expect(library.dispose).toHaveBeenCalledOnce();expect(unlisteners.get('score-files-dropped')).toHaveBeenCalledOnce();expect(unlisteners.get('file-library-changed')).toHaveBeenCalledOnce();
+  }finally{resolved.resolve({workspace:f.snapshot(),views:{},issues:[]});root.remove();for(const path of ['./session-bridge','@tauri-apps/api/event','@tauri-apps/api/window','react-dom/client','./WorkspaceController','./WorkspaceLibrary','../bridge'])vi.doUnmock(path);vi.resetModules();}
+});
+
+it('a real workspace transition retires a hidden Library scan and aborts its worker before new music is staged',async()=>{
+  const f=fixture(),w=await WorkspaceController.create(f.bridge),bridge=libraryBridge(),parse=deferred<import('../library/types').MetadataResult>(),started=deferred<void>();let signal:AbortSignal|undefined;
+  bridge.snapshot=vi.fn(async()=>({...librarySnapshot(),roots:[{id:'root',path:'C:/scores',configurationRevision:1,availability:'available' as const,indexedAtUnixMs:null}]}));const scan={jobId:'job',rootId:'root',configurationRevision:1,phase:'reading' as const,discovered:1,processed:0,skipped:0,issues:[]};bridge.scanBegin=vi.fn(async()=>scan);bridge.scanNext=vi.fn(async()=>({scan,files:[{fileId:'file',filename:'score.gp'}],done:true}));bridge.scanRead=vi.fn(async()=>({sha256:'a'.repeat(64),base:{kind:'blank' as const,title:'Original',artist:''},edits:[]}));bridge.scanCancel=vi.fn(async()=>{});
+  const library=await WorkspaceLibrary.create(w,bridge,{run:vi.fn((_input,abort)=>{signal=abort;started.resolve();return parse.promise;}),dispose:vi.fn()},{blocked:()=>null,restoredWorkingDocument:true});library.show('folders');const scanning=library.controller.scan('root');await started.promise;library.close();expect(signal?.aborted).toBe(false);
+  await w.newDocument();expect(signal?.aborted).toBe(true);expect(bridge.scanCancel).toHaveBeenCalledExactlyOnceWith('job');parse.resolve({sha256:'a'.repeat(64),metadata:null,error:'Cancelled'});await scanning;expect(bridge.scanAccept).not.toHaveBeenCalled();expect(bridge.scanFinish).not.toHaveBeenCalled();expect(w.getState().documents).toHaveLength(2);library.dispose();
+});
+
+it('the real File menu restores its exact Library trigger on dismissal and focuses the active tab after successful Open',async()=>{
+  const f=fixture(),w=await WorkspaceController.create(f.bridge),bridge=libraryBridge();bridge.snapshot=vi.fn(async()=>({...librarySnapshot(),recents:[{id:'recent',path:'C:/scores/ensemble.tabplayer',metadata:null,pinned:false,lastOpenedUnixMs:1,availability:'available' as const}]}));bridge.stage=vi.fn(async()=>({kind:'existing' as const,documentId:f.first}));const library=await WorkspaceLibrary.create(w,bridge,{run:vi.fn(),dispose:vi.fn()},{blocked:()=>null,restoredWorkingDocument:true});
+  vi.resetModules();vi.doMock('../App',()=>vi.importActual('../App'));vi.doMock('../ScoreView',()=>({ScoreView:()=>null}));
+  try{
+    const {WorkspaceApp:ActualWorkspaceApp}=await import('./WorkspaceApp');render(<ActualWorkspaceApp workspace={w} library={library}/>);const editor=document.querySelector('.app-shell');
+    const opener=fileButton('Recent scores');opener.focus();fireEvent.click(opener);await waitFor(()=>expect(screen.getByRole('dialog')).toBeInTheDocument());expect(library.opener).toBe(opener);expect(screen.getByLabelText('Search recent scores')).toHaveFocus();fireEvent.keyDown(screen.getByRole('dialog'),{key:'Escape'});await waitFor(()=>expect(opener).toHaveFocus());expect(opener.closest('details')).toHaveAttribute('open');expect(document.querySelector('.app-shell')).toBe(editor);
+    fireEvent.click(opener);const dialog=screen.getByRole('dialog');fireEvent.click(within(dialog).getByRole('button',{name:/Select ensemble/}));fireEvent.click(within(dialog).getByRole('button',{name:'Open'}));await waitFor(()=>expect(screen.queryByRole('dialog')).not.toBeInTheDocument());await waitFor(()=>expect(screen.getByRole('tab',{selected:true})).toHaveFocus());expect(document.querySelector('.app-shell')).toBe(editor);expect(mocks.audio.size).toBe(1);
+  }finally{library.dispose();cleanup();vi.doUnmock('../App');vi.doUnmock('../ScoreView');vi.resetModules();}
+});
+
+it('a Library bootstrap that finishes after successful window destruction is disposed instead of attached to the closed workspace',async()=>{
+  const f=fixture(),session=closeSession(f),workspace=await WorkspaceController.create(f.bridge),created=deferred<unknown>(),library={dispose:vi.fn()},create=vi.fn(()=>created.promise),rootRender=vi.fn();workspace.setSessionBridge(session);let close!:(event:{preventDefault():void})=>Promise<void>;
+  vi.resetModules();vi.doMock('@tauri-apps/api/window',()=>({getCurrentWindow:()=>({onCloseRequested:vi.fn(async(callback:typeof close)=>{close=callback;}),destroy:vi.fn(async()=>{})})}));vi.doMock('@tauri-apps/api/event',()=>({listen:vi.fn(async()=>()=>{})}));vi.doMock('react-dom/client',()=>({createRoot:()=>({render:rootRender})}));vi.doMock('./WorkspaceController',()=>({WorkspaceController:{create:vi.fn(async()=>workspace)}}));vi.doMock('./WorkspaceLibrary',()=>({WorkspaceLibrary:{create}}));vi.doMock('../bridge',()=>({nativeWorkspaceBridge:f.bridge,createDocumentBridge:(id:string)=>mocks.bridges.get(id)!}));
+  const root=document.createElement('div');root.id='root';document.body.append(root);
+  try{await import('../main');await waitFor(()=>expect(create).toHaveBeenCalledOnce());await close({preventDefault:vi.fn()});created.resolve(library);await waitFor(()=>expect(library.dispose).toHaveBeenCalledOnce());expect(rootRender.mock.calls.some(([node])=>node.props?.library===library)).toBe(false);}
+  finally{created.resolve(library);root.remove();for(const path of ['./session-bridge','@tauri-apps/api/event','@tauri-apps/api/window','react-dom/client','./WorkspaceController','./WorkspaceLibrary','../bridge'])vi.doUnmock(path);vi.resetModules();}
+});
+
+it.each([false,true])('a successful drop preserves a new Library history warning and per-item issues together: %s',async withFailure=>{
+  const f=fixture(),w=await WorkspaceController.create(f.bridge),bridge=libraryBridge(),library=await WorkspaceLibrary.create(w,bridge,{run:vi.fn(),dispose:vi.fn()},{blocked:()=>null,restoredWorkingDocument:true});bridge.dropStage=vi.fn().mockImplementationOnce(async()=>{library.reportError('History could not be written. Retry in Library.');return {kind:'existing' as const,documentId:f.first};}).mockRejectedValueOnce(new Error('Unsupported file.'));
+  await library.drop({dropToken:'native',count:withFailure?2:1});expect(library.getState().error).toBe('Library: History could not be written. Retry in Library.'+(withFailure?' 1 score opened. Unsupported file.':''));expect(w.getState().active.documentId).toBe(f.first);expect(w.getState().busy).toBe(false);library.dispose();
 });

@@ -1,12 +1,14 @@
 import { createDocumentBridge } from '../bridge';
 import { DocumentController } from '../controller';
 import { ClipboardStore } from '../editor/ClipboardStore';
-import { buildDocument } from '../engine';
+import { buildDocument,type BuiltDocument } from '../engine';
 import type { DocumentCandidate } from '../project';
-import type { AudioOwner,CloseDocument,DocumentId,DocumentViewState,NativeWorkspaceBridge,WorkspaceSnapshot } from './types';
+import type { LibrarySource,NativeFileLibraryBridge } from '../library/types';
+import type { AudioOwner,CloseDocument,DocumentId,DocumentIntake,DocumentRevision,DocumentViewState,NativeWorkspaceBridge,WorkspaceSnapshot } from './types';
 import type { NativeSessionBridge,RecoveryStatus } from './recovery-types';
 import { initialDocumentView,repairDocumentView } from './view-state';
 
+export interface LibraryDocumentObserver {committed(document:DocumentRevision,score:BuiltDocument['score']):void|Promise<void>;failed(error:unknown):void;transitioning?():void}
 export interface WorkspaceState {
   documents:readonly {id:DocumentId;controller:DocumentController;view:DocumentViewState}[];
   active:AudioOwner;busy:boolean;error:string|null;recoveryError:string|null;playbackResumeEpoch:number;
@@ -21,6 +23,7 @@ export class WorkspaceController {
   private resumeAcknowledged=false;
   private editorOperation:DocumentId|null=null;
   private session:NativeSessionBridge|null=null;
+  private libraryObserver:LibraryDocumentObserver|null=null;
   private pendingViews=new Map<DocumentId,DocumentViewState>();
   private viewTail:Promise<void>|null=null;
   private constructor(private bridge:NativeWorkspaceBridge) {}
@@ -40,7 +43,7 @@ export class WorkspaceController {
       const existing=cached.get(record.documentId);
       if(existing){documents.push(existing);continue;}
       const id=record.documentId;
-      const controller=await DocumentController.create(createDocumentBridge(id),undefined,record,()=>this.transitioning||!this.subscriptions.has(id));
+      const controller=await DocumentController.create(createDocumentBridge(id,{saved:record=>this.notifyCommitted(record),failed:error=>this.libraryObserver?.failed(error)}),undefined,record,()=>this.transitioning||!this.subscriptions.has(id));
       documents.push({id,controller,view:repairDocumentView(controller.getState().score,views[id] ?? initialDocumentView())});
       this.subscriptions.set(id,controller.subscribe(()=>{
         this.update({documents:this.state.documents.map(entry=>{
@@ -63,7 +66,7 @@ export class WorkspaceController {
   private async transition(action:()=>Promise<boolean>,closing=false):Promise<boolean> {
     const conflict=this.conflict();
     if(conflict){const message=closing&&this.editorOperation!==null?'Finish or cancel the current operation before closing.':conflict;this.update({error:message});if(closing)return false;throw new Error(message);}
-    this.transitioning=true;this.update({busy:true,error:null});
+    this.transitioning=true;this.libraryObserver?.transitioning?.();this.update({busy:true,error:null});
     try{await this.flushViews();return await action();}
     catch(error){this.update({error:error instanceof Error?error.message:String(error)});throw error;}
     finally{if(!this.windowClosing){this.transitioning=false;this.update({busy:this.editorOperation!==null});}}
@@ -80,11 +83,34 @@ export class WorkspaceController {
     }
   }
   newDocument():Promise<boolean> {return this.transition(async()=>this.add(await this.bridge.createBlankDocument()));}
+  setLibraryObserver(observer:LibraryDocumentObserver|null):void {this.libraryObserver=observer;}
+  private notifyCommitted(document:DocumentRevision):void {
+    const observer=this.libraryObserver,entry=this.state.documents.find(entry=>entry.id===document.documentId);if(!observer||!entry)return;
+    const score=entry.controller.getState().score;
+    void Promise.resolve().then(()=>observer.committed({documentId:document.documentId,revision:document.revision},score)).catch(error=>observer.failed(error));
+  }
+  private async intake(intake:DocumentIntake,metadata=true):Promise<boolean> {
+    if(intake.kind==='candidate')await this.add(intake.candidate);
+    else await this.synchronize(await this.bridge.activateDocument(intake.documentId));
+    if(metadata){const entry=this.state.documents.find(entry=>entry.id===this.state.active.documentId)!;this.notifyCommitted({documentId:entry.id,revision:entry.controller.getState().revision});}return true;
+  }
   openDocument():Promise<boolean> {return this.transition(async()=>{
-    const intake=await this.bridge.readDocument();if(!intake)return false;
-    if(intake.kind==='candidate')return this.add(intake.candidate);
-    await this.synchronize(await this.bridge.activateDocument(intake.documentId));return true;
+    const intake=await this.bridge.readDocument();return intake?this.intake(intake):false;
   });}
+  openSource(source:LibrarySource,library:Pick<NativeFileLibraryBridge,'stage'>):Promise<boolean> {
+    return this.transition(async()=>this.intake(await library.stage(source),source.kind==='recent'||source.kind==='indexed'));
+  }
+  async openDrop(dropToken:string,count:number,library:Pick<NativeFileLibraryBridge,'dropStage'>):Promise<{opened:number;issues:string[]}> {
+    if(!dropToken||!Number.isInteger(count)||count<1||count>32)throw new Error('Invalid score drop. Drop at most 32 files.');
+    const result={opened:0,issues:[] as string[]};
+    await this.transition(async()=>{
+      for(let index=0;index<count;index++) {
+        try{if(await this.intake(await library.dropStage(dropToken,index)))result.opened++;}
+        catch(error){result.issues.push(error instanceof Error?error.message:String(error));}
+      }
+      return result.opened>0;
+    });return result;
+  }
   activate(documentId:DocumentId):Promise<boolean> {return this.transition(async()=>{
     if(!this.state.documents.some(entry=>entry.id===documentId))throw new Error('Select an open document.');
     if(this.state.active.documentId===documentId)return true;

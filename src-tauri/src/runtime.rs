@@ -16,6 +16,7 @@ use crate::{
         jobs::{ExportJobs, ExportProgress, JobHandle},
         pdf::SvgPage,
     },
+    file_library::protected::ProtectedPaths,
     project::ProjectView,
     settings::DocumentSettings,
     workspace::{AudioOwner, DocumentRevision, DocumentWorkspace},
@@ -31,10 +32,39 @@ use tauri_plugin_dialog::DialogExt;
 #[path = "document_audio_ownership_tests.rs"]
 mod document_audio_ownership_tests;
 
+#[cfg(test)]
+#[path = "file_library/protected_runtime_tests.rs"]
+mod protected_runtime_tests;
+
 struct ExportCapture {
     job: JobHandle,
     backing: Option<Vec<u8>>,
     projects: Vec<ProjectView>,
+    protected_paths: ProtectedPaths,
+}
+
+impl ExportCapture {
+    fn protect_destination(&self, path: &Path) -> Result<(), String> {
+        self.protected_paths.check(path)?;
+        for project in &self.projects {
+            crate::protect_source(project, path)?;
+        }
+        Ok(())
+    }
+
+    fn protect_stem_destination(&self, path: &Path) -> Result<(), String> {
+        self.protected_paths
+            .check(path.parent().ok_or("Choose a new stem directory.")?)?;
+        self.protect_destination(path)
+    }
+
+    fn print_cache(&self, cache: &Path) -> Result<PathBuf, String> {
+        self.protected_paths.check(cache)?;
+        std::fs::create_dir_all(cache).map_err(|error| error.to_string())?;
+        let cache = std::fs::canonicalize(cache).map_err(|error| error.to_string())?;
+        self.protected_paths.check(&cache)?;
+        Ok(cache)
+    }
 }
 
 pub struct NativeAudio {
@@ -43,6 +73,7 @@ pub struct NativeAudio {
     pub(crate) access: Mutex<()>,
     embedded: Mutex<Option<(String, Vec<u8>)>>,
     current_backing: Mutex<Option<String>>,
+    protected_paths: ProtectedPaths,
 }
 impl NativeAudio {
     pub fn new(root: PathBuf, publish: Arc<dyn Fn(NativeAudioStatus) + Send + Sync>) -> Self {
@@ -52,7 +83,15 @@ impl NativeAudio {
             access: Mutex::new(()),
             embedded: Mutex::new(None),
             current_backing: Mutex::new(None),
+            protected_paths: ProtectedPaths::default(),
         }
+    }
+    pub fn with_protected_paths(mut self, protected_paths: ProtectedPaths) -> Self {
+        self.protected_paths = protected_paths;
+        self
+    }
+    pub(crate) fn protect_destination(&self, path: &Path) -> Result<(), String> {
+        self.protected_paths.check(path)
     }
     pub(crate) fn clear_owner_caches(&self) {
         *self.embedded.lock().unwrap() = None;
@@ -184,6 +223,9 @@ impl NativeAudio {
         embedded_bytes: Option<Vec<u8>>,
         total_frames: u64,
     ) -> Result<ExportCapture, String> {
+        if let Some(path) = destination {
+            self.protect_destination(path)?;
+        }
         let _access = self.access.lock().map_err(|e| e.to_string())?;
         let embedded = if settings
             .and_then(|settings| settings.backing.as_ref())
@@ -231,6 +273,7 @@ impl NativeAudio {
             job,
             backing,
             projects,
+            protected_paths: self.protected_paths.clone(),
         })
     }
 
@@ -510,9 +553,14 @@ pub async fn export_pdf(
         .join("print");
     let launch_app = app.clone();
     let launch_destination = destination.clone();
+    let launch_cache = cache.clone();
     let total = pages.len() as u64;
-    let ExportCapture { job, projects, .. } = tauri::async_runtime::spawn_blocking(move || {
-        launch_app.state::<NativeAudio>().launch_export(
+    let capture = tauri::async_runtime::spawn_blocking(move || {
+        let audio = launch_app.state::<NativeAudio>();
+        if launch_destination.is_none() {
+            audio.protect_destination(&launch_cache)?;
+        }
+        audio.launch_export(
             &launch_app.state::<ExportJobs>(),
             &launch_app.state::<Arc<Mutex<DocumentWorkspace>>>(),
             &document,
@@ -524,8 +572,9 @@ pub async fn export_pdf(
     })
     .await
     .map_err(|e| e.to_string())??;
-    let id = job.id.clone();
+    let id = capture.job.id.clone();
     tauri::async_runtime::spawn_blocking(move || {
+        let job = &capture.job;
         let result = (|| {
             let bytes =
                 crate::export::pdf::convert_pages_with_progress(&pages, &job.cancel, |frames| {
@@ -535,11 +584,10 @@ pub async fn export_pdf(
                 return Err("PDF export cancelled.".into());
             }
             if let Some(path) = destination {
-                for project in &projects {
-                    crate::protect_source(project, &path)?;
-                }
+                capture.protect_destination(&path)?;
                 crate::files::write_bytes(&path, &bytes)?;
             } else {
+                let cache = capture.print_cache(&cache)?;
                 crate::export::print::prepare_and_open(&bytes, &cache)?;
             }
             Ok(())
@@ -575,15 +623,12 @@ pub async fn export_audio(
     let launch_path = path.clone();
     let launch_settings = settings.clone();
     let include_backing = request.include_backing;
-    let (
-        ExportCapture {
-            job,
-            backing,
-            projects,
-        },
-        root,
-    ) = tauri::async_runtime::spawn_blocking(move || {
+    let (mut capture, root) = tauri::async_runtime::spawn_blocking(move || {
         let audio = launch_app.state::<NativeAudio>();
+        if stems {
+            audio
+                .protect_destination(launch_path.parent().ok_or("Choose a new stem directory.")?)?;
+        }
         let captured = audio.launch_export(
             &launch_app.state::<ExportJobs>(),
             &launch_app.state::<Arc<Mutex<DocumentWorkspace>>>(),
@@ -612,14 +657,18 @@ pub async fn export_audio(
             mix.solo = false;
         }
     }
-    let id = job.id.clone();
+    let id = capture.job.id.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let result = (|| {
             let resources = Arc::new(AudioResources::load_for_requests(
                 &root,
                 &resource_requests(&plan, &settings),
             )?);
-            if job.cancel.load(std::sync::atomic::Ordering::Acquire) {
+            if capture
+                .job
+                .cancel
+                .load(std::sync::atomic::Ordering::Acquire)
+            {
                 return Err("Audio export cancelled.".into());
             }
             let mut renderer = Renderer::new(
@@ -628,7 +677,7 @@ pub async fn export_audio(
                 settings.clone(),
                 request.format.sample_rate,
             )?;
-            if let Some(bytes) = backing {
+            if let Some(bytes) = capture.backing.take() {
                 let audio = Arc::new(decode_audio(&bytes, None)?);
                 let backing = settings
                     .backing
@@ -640,13 +689,12 @@ pub async fn export_audio(
                     backing.mix.clone(),
                 )?;
             }
-            for project in &projects {
-                crate::protect_source(project, &path)?;
-            }
             let format = request.format;
             let mut render = AudioExportRender::new(renderer, &plan, request)?;
+            let job = &capture.job;
             job.total_frames(render.total_frames());
             if stems {
+                capture.protect_stem_destination(&path)?;
                 crate::export::stems::write_stems(
                     &path,
                     &render.stem_spec(),
@@ -655,6 +703,7 @@ pub async fn export_audio(
                     |frames| job.progress(frames),
                 )?;
             } else {
+                capture.protect_destination(&path)?;
                 crate::export::wav::write_wav(
                     &path,
                     format,
@@ -665,7 +714,7 @@ pub async fn export_audio(
             }
             Ok(())
         })();
-        job.finish(result);
+        capture.job.finish(result);
     });
     Ok(Some(id))
 }

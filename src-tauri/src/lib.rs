@@ -7,13 +7,16 @@ pub mod file_library;
 pub mod files;
 pub mod harmony;
 pub mod harmony_library;
+pub mod intake;
 pub mod project;
 pub mod recovery;
+pub mod reveal;
 mod runtime;
 mod session;
 pub mod settings;
 pub mod workspace;
 
+use file_library::{commands::*, protected::ProtectedPaths, service::FileLibrary};
 #[cfg(test)]
 use project::ProjectSession;
 use project::{BaseDocument, DocumentCandidate, EditCommand, Project};
@@ -97,7 +100,28 @@ pub(crate) fn export_document_to_path(
     let workspace = workspace.lock().map_err(|error| error.to_string())?;
     validate_export_origin(&workspace, document)?;
     workspace.protect_destination(document, path)?;
+    audio.protect_destination(path)?;
     files::write_bytes(path, bytes)
+}
+
+fn save_document_to_path(
+    audio: &runtime::NativeAudio,
+    library: &FileLibrary,
+    workspace: &Mutex<DocumentWorkspace>,
+    document: &DocumentRevision,
+    path: PathBuf,
+) -> Result<DocumentSnapshot, String> {
+    let epoch = library.admit()?;
+    audio.protect_destination(&path)?;
+    let (saved, receipt) = {
+        let mut workspace = workspace.lock().map_err(|error| error.to_string())?;
+        library.check_epoch(epoch)?;
+        let saved = workspace.save_to_path(document, path)?;
+        let receipt = workspace.library_receipt(&saved.document_id).ok().flatten();
+        (saved, receipt)
+    };
+    library.record_success(receipt);
+    Ok(saved)
 }
 
 #[tauri::command]
@@ -146,6 +170,7 @@ fn workspace_snapshot(state: State<'_, Arc<Mutex<DocumentWorkspace>>>) -> Worksp
 #[tauri::command]
 async fn read_document(app: AppHandle) -> Result<Option<DocumentIntake>, String> {
     tauri::async_runtime::spawn_blocking(move || {
+        file_library::commands::admit_app(&app)?;
         let selected = app
             .dialog()
             .file()
@@ -168,52 +193,37 @@ async fn read_document(app: AppHandle) -> Result<Option<DocumentIntake>, String>
             return Ok(None);
         };
         let path = selected.into_path().map_err(|e| e.to_string())?;
-        read_candidate(path, &app.state::<Arc<Mutex<DocumentWorkspace>>>()).map(Some)
+        app.state::<FileLibrary>()
+            .stage_path(path, &app.state::<Arc<Mutex<DocumentWorkspace>>>())
+            .map(Some)
     })
     .await
     .map_err(|error| error.to_string())?
 }
 
-fn read_candidate(
-    path: PathBuf,
-    workspace: &Mutex<DocumentWorkspace>,
-) -> Result<DocumentIntake, String> {
-    if let Some(document_id) = workspace.lock().unwrap().find_open_path(&path) {
-        return Ok(DocumentIntake::Existing { document_id });
-    }
-    let (project, native_path, saved_file_sha256) = if path
-        .extension()
-        .is_some_and(|e| e.eq_ignore_ascii_case("tabplayer"))
-    {
-        let (project, digest) = files::read_project_with_digest(&path)?;
-        (project, Some(path), Some(digest))
-    } else {
-        let bytes = std::fs::read(&path).map_err(|e| e.to_string())?;
-        let original = std::fs::canonicalize(&path).map_err(|e| e.to_string())?;
-        (
-            Project::from_file(original.to_string_lossy().into_owned(), &bytes),
-            None,
-            None,
-        )
-    };
-    workspace
-        .lock()
-        .unwrap()
-        .stage_document_with_digest(project, native_path, saved_file_sha256)
-        .map(|candidate| DocumentIntake::Candidate { candidate })
-}
-
 #[tauri::command]
 async fn workspace_add(token: String, app: AppHandle) -> Result<WorkspaceSnapshot, String> {
     tauri::async_runtime::spawn_blocking(move || {
+        let library = app.state::<FileLibrary>();
+        let epoch = library.admit()?;
+        let mut receipt = None;
         let result = transition_workspace(
             &app.state::<runtime::NativeAudio>(),
             &app.state::<export::jobs::ExportJobs>(),
             &app.state::<Arc<Mutex<DocumentWorkspace>>>(),
-            |workspace| workspace.add_document(&token),
+            |workspace| {
+                library.check_epoch(epoch)?;
+                let snapshot = workspace.add_document(&token)?;
+                receipt = workspace
+                    .library_receipt(&snapshot.active.document_id)
+                    .ok()
+                    .flatten();
+                Ok(snapshot)
+            },
         );
         if result.is_ok() {
             app.state::<session::SessionRuntime>().changed();
+            library.record_success(receipt);
         }
         result
     })
@@ -227,14 +237,26 @@ async fn workspace_activate(
     app: AppHandle,
 ) -> Result<WorkspaceSnapshot, String> {
     tauri::async_runtime::spawn_blocking(move || {
+        let library = app.state::<FileLibrary>();
+        let epoch = library.admit()?;
+        let mut receipt = None;
         let result = transition_workspace(
             &app.state::<runtime::NativeAudio>(),
             &app.state::<export::jobs::ExportJobs>(),
             &app.state::<Arc<Mutex<DocumentWorkspace>>>(),
-            |workspace| workspace.activate_document(&document_id),
+            |workspace| {
+                library.check_epoch(epoch)?;
+                let snapshot = workspace.activate_document(&document_id)?;
+                receipt = workspace
+                    .library_receipt(&snapshot.active.document_id)
+                    .ok()
+                    .flatten();
+                Ok(snapshot)
+            },
         );
         if result.is_ok() {
             app.state::<session::SessionRuntime>().changed();
+            library.record_success(receipt);
         }
         result
     })
@@ -248,11 +270,22 @@ async fn workspace_close(
     app: AppHandle,
 ) -> Result<WorkspaceSnapshot, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        app.state::<session::SessionRuntime>().close(
+        let library = app.state::<FileLibrary>();
+        let workspace = app.state::<Arc<Mutex<DocumentWorkspace>>>();
+        library.retire(&workspace)?;
+        let result = app.state::<session::SessionRuntime>().close(
             documents,
             &app.state::<runtime::NativeAudio>(),
             &app.state::<export::jobs::ExportJobs>(),
-        )
+        );
+        if !workspace
+            .lock()
+            .map_err(|error| error.to_string())?
+            .is_frozen()
+        {
+            library.resume();
+        }
+        result
     })
     .await
     .map_err(|error| error.to_string())?
@@ -397,7 +430,13 @@ async fn save_project(
         } else {
             existing.unwrap()
         };
-        let result = workspace.lock().unwrap().save_to_path(&document, path);
+        let result = save_document_to_path(
+            &app.state::<runtime::NativeAudio>(),
+            &app.state::<FileLibrary>(),
+            &workspace,
+            &document,
+            path,
+        );
         if result.is_ok() {
             app.state::<session::SessionRuntime>().changed();
         }
@@ -512,6 +551,13 @@ mod source_tests {
 }
 
 #[cfg(feature = "desktop-test")]
+fn desktop_test_response(value: impl serde::Serialize) -> Result<tauri::ipc::Response, String> {
+    serde_json::to_string(&value)
+        .map(tauri::ipc::Response::new)
+        .map_err(|error| error.to_string())
+}
+
+#[cfg(feature = "desktop-test")]
 #[tauri::command]
 fn desktop_test_io(
     action: String,
@@ -521,7 +567,7 @@ fn desktop_test_io(
     revision: Option<u64>,
     app: AppHandle,
     state: State<'_, Arc<Mutex<DocumentWorkspace>>>,
-) -> Result<serde_json::Value, String> {
+) -> Result<tauri::ipc::Response, String> {
     if std::env::var("TABPLAYER_DESKTOP_TEST").as_deref() != Ok("1") {
         return Err("Desktop test hooks are disabled.".into());
     }
@@ -535,18 +581,21 @@ fn desktop_test_io(
         .or_else(|| std::env::var_os(variable).map(PathBuf::from))
         .ok_or("Test destination is missing.")?;
     match action.as_str() {
-        "read" => serde_json::to_value(read_candidate(path, &state)?).map_err(|e| e.to_string()),
+        "read" => desktop_test_response(app.state::<FileLibrary>().stage_path(path, &state)?),
         "save" => {
             let document = DocumentRevision {
                 document_id: document_id.ok_or("Test document address is missing.")?,
                 revision: revision.ok_or("Test document revision is missing.")?,
             };
-            let saved = state
-                .lock()
-                .unwrap()
-                .save_to_path(&document, with_extension(path, "tabplayer"))?;
+            let saved = save_document_to_path(
+                &app.state::<runtime::NativeAudio>(),
+                &app.state::<FileLibrary>(),
+                &state,
+                &document,
+                with_extension(path, "tabplayer"),
+            )?;
             app.state::<session::SessionRuntime>().changed();
-            serde_json::to_value(saved).map_err(|e| e.to_string())
+            desktop_test_response(saved)
         }
         "export" => {
             let document = DocumentRevision {
@@ -561,9 +610,51 @@ fn desktop_test_io(
                 &with_extension(path, "gp"),
                 &bytes.ok_or("Test export bytes are missing.")?,
             )?;
-            Ok(serde_json::json!(true))
+            desktop_test_response(true)
         }
         _ => unreachable!(),
+    }
+}
+
+#[cfg(all(test, feature = "desktop-test"))]
+mod desktop_test_response_tests {
+    use super::*;
+    use tauri::ipc::{InvokeResponseBody, IpcResponse};
+
+    fn body(value: impl IpcResponse) -> String {
+        match value.body().unwrap() {
+            InvokeResponseBody::Json(json) => json,
+            _ => panic!("Expected the typed JSON response contract"),
+        }
+    }
+
+    #[test]
+    fn diagnostic_read_and_save_preserve_typed_track_command_order() {
+        let mut project = Project::blank();
+        project.baseline_edits.push(EditCommand::AddTrack {
+            name: "Bass".into(),
+            tuning: vec![43, 38, 33, 28],
+            program: 33,
+        });
+        let command = r#"{"type":"addTrack","name":"Bass","tuning":[43,38,33,28],"program":33}"#;
+        assert_eq!(
+            serde_json::to_string(&project.baseline_edits[0]).unwrap(),
+            command
+        );
+        project.baseline_edits.push(EditCommand::SetTrackMix {
+            track_id: format!("added/0/{command}"),
+            mix: settings::ChannelMix::default(),
+        });
+        let mut workspace = DocumentWorkspace::new().unwrap();
+        let candidate = workspace.stage_document(project, None).unwrap();
+        let intake = DocumentIntake::Candidate {
+            candidate: candidate.clone(),
+        };
+        assert_eq!(body(desktop_test_response(&intake).unwrap()), body(&intake));
+        let added = workspace.add_document(&candidate.token).unwrap();
+        let saved = workspace.document(&added.active.document_id).unwrap();
+        assert_eq!(body(desktop_test_response(&saved).unwrap()), body(&saved));
+        assert_eq!(body(desktop_test_response(true).unwrap()), "true");
     }
 }
 
@@ -573,6 +664,13 @@ pub fn run() {
         .manage(export::jobs::ExportJobs::default())
         .setup(|app| {
             let directory = session::session_directory(app.path().app_data_dir()?)?;
+            let library_directory = directory.join("file-library-v1");
+            let bundled_directory = app.path().resource_dir()?.join("library");
+            let protected = ProtectedPaths::new(vec![
+                library_directory.clone(),
+                directory.join("recovery-v1"),
+                bundled_directory.clone(),
+            ])?;
             let session_handle = app.handle().clone();
             let session = session::SessionRuntime::open(
                 directory,
@@ -582,15 +680,49 @@ pub fn run() {
             )?;
             app.manage(session.workspace());
             app.manage(session);
-            let handle = app.handle().clone();
-            let root = app.path().resource_dir()?.join("audio");
-            app.manage(runtime::NativeAudio::new(
-                root,
-                std::sync::Arc::new(move |status| {
-                    let _ = handle.emit("native-audio-status", status);
+            let library_handle = app.handle().clone();
+            app.manage(FileLibrary::open(
+                library_directory,
+                bundled_directory,
+                Arc::new(move |event| {
+                    let _ = library_handle.emit("file-library-changed", event);
                 }),
             ));
+            let handle = app.handle().clone();
+            let root = app.path().resource_dir()?.join("audio");
+            app.manage(
+                runtime::NativeAudio::new(
+                    root,
+                    std::sync::Arc::new(move |status| {
+                        let _ = handle.emit("native-audio-status", status);
+                    }),
+                )
+                .with_protected_paths(protected),
+            );
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::DragDrop(tauri::DragDropEvent::Drop { paths, .. }) = event {
+                let app = window.app_handle().clone();
+                let epoch = app
+                    .try_state::<FileLibrary>()
+                    .and_then(|library| library.admit().ok());
+                let ready = epoch.is_some()
+                    && app
+                        .state::<export::jobs::ExportJobs>()
+                        .has_running()
+                        .is_ok_and(|running| !running);
+                let paths = paths.clone();
+                tauri::async_runtime::spawn_blocking(move || {
+                    if let Some(library) = app.try_state::<FileLibrary>() {
+                        let current =
+                            ready && epoch.is_some_and(|epoch| library.check_epoch(epoch).is_ok());
+                        if let Ok(event) = library.capture_drop(paths, current) {
+                            let _ = app.emit("score-files-dropped", event);
+                        }
+                    }
+                });
+            }
         });
     #[cfg(not(feature = "desktop-test"))]
     let builder = builder.invoke_handler(tauri::generate_handler![
@@ -630,7 +762,23 @@ pub fn run() {
         cancel_export,
         harmony_library_read,
         harmony_library_put,
-        harmony_library_remove
+        harmony_library_remove,
+        file_library_snapshot,
+        file_library_retry,
+        file_library_change,
+        file_library_root_pick,
+        file_library_template_save,
+        file_library_metadata_ack,
+        file_library_stage,
+        file_library_scan_begin,
+        file_library_scan_next,
+        file_library_scan_read,
+        file_library_scan_accept,
+        file_library_scan_finish,
+        file_library_scan_cancel,
+        file_library_search,
+        file_library_reveal,
+        workspace_drop_stage
     ]);
     #[cfg(feature = "desktop-test")]
     let builder = builder.invoke_handler(tauri::generate_handler![
@@ -671,6 +819,22 @@ pub fn run() {
         harmony_library_read,
         harmony_library_put,
         harmony_library_remove,
+        file_library_snapshot,
+        file_library_retry,
+        file_library_change,
+        file_library_root_pick,
+        file_library_template_save,
+        file_library_metadata_ack,
+        file_library_stage,
+        file_library_scan_begin,
+        file_library_scan_next,
+        file_library_scan_read,
+        file_library_scan_accept,
+        file_library_scan_finish,
+        file_library_scan_cancel,
+        file_library_search,
+        file_library_reveal,
+        workspace_drop_stage,
         desktop_test_io
     ]);
     builder

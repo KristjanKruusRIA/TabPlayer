@@ -6,5 +6,5 @@
     "windows": [{ "label": "main", "title": "TabPlayer", "width": 1440, "height": 900, "minWidth": 960, "minHeight": 600 }],
     "security": { "csp": "default-src 'self'; connect-src 'self' ipc: http://ipc.localhost; script-src 'self' blob:; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data:; media-src 'self' blob:", "devCsp": null }
   },
-  "bundle": { "active": true, "targets": "all", "resources": { "resources/audio/": "audio/" }, "windows": { "webviewInstallMode": { "type": "offlineInstaller" } }, "icon": ["icons/icon.png","icons/icon.ico","icons/icon.icns"] }
+  "bundle": { "active": true, "targets": "all", "resources": { "resources/audio/": "audio/", "resources/library/": "library/" }, "windows": { "webviewInstallMode": { "type": "offlineInstaller" } }, "icon": ["icons/icon.png","icons/icon.ico","icons/icon.icns"] }
 }

@@ -13,7 +13,7 @@ class FakeWorker {
   static instances: FakeWorker[] = [];
   static constructionError: Error | null = null;
   static post: ((worker: FakeWorker) => void) | null = null;
-  readonly requests: { id: number; sha256: string; input: MetadataInput }[] = [];
+  readonly requests: { cmd: 'tabplayer.metadata.extract'; id: number; sha256: string; input: MetadataInput }[] = [];
   onmessage: ((event: MessageEvent) => void) | null = null;
   onerror: ((event: ErrorEvent) => void) | null = null;
   onmessageerror: ((event: MessageEvent) => void) | null = null;
@@ -24,7 +24,7 @@ class FakeWorker {
     FakeWorker.instances.push(this);
   }
 
-  postMessage(request: { id: number; sha256: string; input: MetadataInput }) {
+  postMessage(request: { cmd: 'tabplayer.metadata.extract'; id: number; sha256: string; input: MetadataInput }) {
     this.requests.push(request);
     FakeWorker.post?.(this);
   }
@@ -56,14 +56,14 @@ describe('metadata runner', () => {
     vi.useRealTimers();
   });
 
-  it('returns metadata only for the matching worker receipt and terminates the worker', async () => {
+  it('sends the namespaced extraction command and returns metadata only for the matching receipt', async () => {
     const pending = runner.run(input, new AbortController().signal);
     const worker = FakeWorker.instances[0];
     expect(worker.url.pathname).toMatch(/\/metadata\.worker\.ts$/);
     expect(worker.options).toEqual({ type: 'module' });
-    expect(worker.requests).toEqual([{ id: 1, sha256: 'score-a', input }]);
     worker.reply();
     await expect(pending).resolves.toEqual(result);
+    expect(worker.requests).toEqual([{ cmd: 'tabplayer.metadata.extract', id: 1, sha256: 'score-a', input }]);
     expect(worker.terminated).toBe(true);
     expect(vi.getTimerCount()).toBe(0);
   });
@@ -256,7 +256,7 @@ describe('metadata worker entrypoint', () => {
   afterEach(() => vi.unstubAllGlobals());
 
   it('extracts real projected metadata and preserves the request ID and SHA receipt', () => {
-    scope.onmessage?.({ data: { id: 17, sha256: 'score-a', input: {
+    scope.onmessage?.({ data: { cmd: 'tabplayer.metadata.extract', id: 17, sha256: 'score-a', input: {
       ...input, edits: [{ type: 'setScoreInfo', title: 'Renamed', artist: 'Composer' }, { type: 'addTrack', name: 'Bass' }]
     } } } as MessageEvent);
     expect(scope.postMessage).toHaveBeenCalledWith({ id: 17, sha256: 'score-a', result: {
@@ -267,7 +267,7 @@ describe('metadata worker entrypoint', () => {
   });
 
   it('returns an explicit metadata-unavailable result for rejected score input', () => {
-    scope.onmessage?.({ data: { id: 18, sha256: 'score-a', input: {
+    scope.onmessage?.({ data: { cmd: 'tabplayer.metadata.extract', id: 18, sha256: 'score-a', input: {
       ...input, base: { kind: 'file', bytesBase64: 'aW52YWxpZA==' }
     } } } as MessageEvent);
     expect(scope.postMessage).toHaveBeenCalledWith({ id: 18, sha256: 'score-a', result: {
@@ -276,7 +276,7 @@ describe('metadata worker entrypoint', () => {
   });
 
   it('rejects a request whose input SHA differs from the worker receipt', () => {
-    scope.onmessage?.({ data: { id: 19, sha256: 'score-b', input } } as MessageEvent);
+    scope.onmessage?.({ data: { cmd: 'tabplayer.metadata.extract', id: 19, sha256: 'score-b', input } } as MessageEvent);
     expect(scope.postMessage).toHaveBeenCalledWith({ id: 19, sha256: 'score-b', result: {
       sha256: 'score-b', metadata: null, error: expect.stringMatching(/invalid.*request/i)
     } });
@@ -284,7 +284,16 @@ describe('metadata worker entrypoint', () => {
 
   it('ignores malformed requests without a safe request ID and SHA receipt', () => {
     expect(() => scope.onmessage?.({ data: null } as MessageEvent)).not.toThrow();
-    scope.onmessage?.({ data: { id: Number.NaN, sha256: 'score-a', input } } as MessageEvent);
+    scope.onmessage?.({ data: { cmd: 'tabplayer.metadata.extract', id: Number.NaN, sha256: 'score-a', input } } as MessageEvent);
+    expect(scope.postMessage).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['missing', { id: 20, sha256: 'score-a', input }],
+    ['unrelated', { cmd: 'alphaSynth.exporter.export', id: 20, sha256: 'score-a', input }],
+    ['non-string', { cmd: 17, id: 20, sha256: 'score-a', input }]
+  ])('ignores %s commands even when the extraction receipt is otherwise valid', (_name, request) => {
+    expect(() => scope.onmessage?.({ data: request } as MessageEvent)).not.toThrow();
     expect(scope.postMessage).not.toHaveBeenCalled();
   });
 });

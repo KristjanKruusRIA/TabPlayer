@@ -231,3 +231,21 @@ it('score repair mirrors the addressed location without adding music edits or re
   await controller.edit({type:'addTrack',name:'Bass',tuning:[43,38,33,28],program:33});w.setView(first,{...initialDocumentView(),target:{...target,track:1},selectedString:4,zoom:300});await w.flushViews();vi.mocked(session.setView).mockClear();
   await controller.edit({type:'removeTrack',track:1});await w.flushViews();expect(session.setView).toHaveBeenCalledExactlyOnceWith(first,{...initialDocumentView(),selectedString:4,zoom:300});expect(controller.getState().revision).toBe(2);expect(controller.getState().snapshot.project.edits).toHaveLength(2);
 });
+
+it('library intake validates before commit, activates aliases, and cancels a failed candidate without touching dirty tabs',async()=>{
+  const {workspace:w,bridge,stage,first}=await setup();await current(w).controller.edit(note);await current(w).controller.undo();const old=current(w).controller.getState(),owner=w.getState().active;
+  const library={stage:vi.fn(async()=>({kind:'candidate' as const,candidate:stage({...blankProject(),edits:[{type:'setRest' as const,target:{...target,bar:99}}]},'library-bad')}))};
+  await expect(w.openSource({kind:'recent',id:'opaque'},library)).rejects.toThrow();expect(bridge.addDocument).not.toHaveBeenCalled();expect(bridge.cancelDocument).toHaveBeenCalledExactlyOnceWith('library-bad');expect(current(w).controller.getState()).toBe(old);expect(w.getState().active).toBe(owner);
+  library.stage.mockResolvedValueOnce({kind:'existing',documentId:first} as never);expect(await w.openSource({kind:'indexed',rootId:'root',id:'result'},library)).toBe(true);expect(library.stage).toHaveBeenLastCalledWith({kind:'indexed',rootId:'root',id:'result'});expect(current(w).controller.getState()).toBe(old);
+});
+it('one drop transition preserves prior successes and dirty history through each item failure and cleanup',async()=>{
+  const {workspace:w,bridge,stage,first}=await setup();await current(w).controller.edit(note);await current(w).controller.undo();const original=current(w).controller.getState(),pending=deferred<import('./types').DocumentIntake>();
+  const library={dropStage:vi.fn().mockResolvedValueOnce({kind:'candidate',candidate:stage(blankProject(),'drop-first')}).mockRejectedValueOnce(new Error('Unsupported score file.')).mockResolvedValueOnce({kind:'candidate',candidate:stage({...blankProject(),edits:[{type:'setRest',target:{...target,bar:99}}]},'drop-bad')}).mockReturnValueOnce(pending.promise)};
+  const dropping=w.openDrop('native-token',4,library);await vi.waitFor(()=>expect(library.dropStage).toHaveBeenCalledTimes(4));expect(w.getState().busy).toBe(true);await expect(w.openDocument()).rejects.toThrow(/transition/i);expect(w.getState().documents).toHaveLength(2);
+  pending.resolve({kind:'existing',documentId:first});expect(await dropping).toEqual({opened:2,issues:['Unsupported score file.',expect.any(String)]});expect(library.dropStage.mock.calls).toEqual([['native-token',0],['native-token',1],['native-token',2],['native-token',3]]);expect(bridge.cancelDocument).toHaveBeenCalledExactlyOnceWith('drop-bad');expect(w.getState().documents[0].controller.getState()).toBe(original);expect(current(w).id).toBe(first);expect(w.getState().busy).toBe(false);
+});
+it('busy or invalid drops are rejected before consuming a native token',async()=>{
+  const {workspace:w,first}=await setup(),library={dropStage:vi.fn()};const release=w.beginEditorOperation(first);
+  await expect(w.openDrop('token',1,library)).rejects.toThrow(/finish/i);expect(library.dropStage).not.toHaveBeenCalled();release();
+  for(const count of [0,33,1.5,NaN])await expect(w.openDrop('token',count,library)).rejects.toThrow(/drop/i);expect(library.dropStage).not.toHaveBeenCalled();
+});

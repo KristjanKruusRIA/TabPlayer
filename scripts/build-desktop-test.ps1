@@ -16,6 +16,8 @@ try {
         $null=$testProcess.WaitForExit(5000)
     }
     Copy-Item -LiteralPath (Join-Path $taskRoot 'src-tauri/target/release/tabplayer.exe') -Destination $destination
+    node scripts/prepare-library.mjs --destination (Join-Path $testDirectory 'library')
+    if($LASTEXITCODE -ne 0){throw 'Desktop test Library resources could not be prepared'}
     $testAudio=Join-Path $testDirectory 'audio'
     $preparedAudio=(Resolve-Path (Join-Path $taskRoot 'src-tauri/resources/audio')).Path
     if(-not (Test-Path -LiteralPath $testAudio)){

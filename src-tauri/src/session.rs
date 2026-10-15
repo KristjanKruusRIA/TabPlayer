@@ -864,12 +864,17 @@ pub(crate) async fn session_resolve(
     app: AppHandle,
 ) -> Result<SessionResolution, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        app.state::<SessionRuntime>().resolve(
+        let result = app.state::<SessionRuntime>().resolve(
             token,
             document_ids,
             &app.state::<NativeAudio>(),
             &app.state::<ExportJobs>(),
-        )
+        );
+        if result.is_ok() {
+            app.state::<crate::file_library::service::FileLibrary>()
+                .resume();
+        }
+        result
     })
     .await
     .map_err(|e| e.to_string())?
@@ -910,11 +915,23 @@ pub(crate) async fn session_shutdown(
     app: AppHandle,
 ) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
-        app.state::<SessionRuntime>().shutdown(
+        let library = app.state::<crate::file_library::service::FileLibrary>();
+        let workspace = app.state::<Arc<Mutex<DocumentWorkspace>>>();
+        library.retire(&workspace)?;
+        let result = app.state::<SessionRuntime>().shutdown(
             documents,
             &app.state::<NativeAudio>(),
             &app.state::<ExportJobs>(),
-        )
+        );
+        if result.is_err()
+            && !workspace
+                .lock()
+                .map_err(|error| error.to_string())?
+                .is_frozen()
+        {
+            library.resume();
+        }
+        result
     })
     .await
     .map_err(|e| e.to_string())?
@@ -923,7 +940,10 @@ pub(crate) async fn session_shutdown(
 pub(crate) async fn session_resume(app: AppHandle) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
         app.state::<SessionRuntime>()
-            .resume(&app.state::<NativeAudio>(), &app.state::<ExportJobs>())
+            .resume(&app.state::<NativeAudio>(), &app.state::<ExportJobs>())?;
+        app.state::<crate::file_library::service::FileLibrary>()
+            .resume();
+        Ok(())
     })
     .await
     .map_err(|e| e.to_string())?

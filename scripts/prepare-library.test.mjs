@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,mkdir,readFile,writeFile,rm,symlink,lstat} from 'node:fs/promises';
+import {mkdtemp,mkdir,readFile,writeFile,rm,symlink,lstat,realpath} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {createHash} from 'node:crypto';
@@ -11,7 +11,7 @@ const hash=bytes=>createHash('sha256').update(bytes).digest('hex');
 const templateIds=['factory-guitar-6','factory-guitar-7','factory-guitar-8','factory-guitar-9','factory-bass-4','factory-bass-5','factory-bass-6','factory-keys','factory-drums','factory-band'];
 const exampleIds=['example-windowline','example-seven-steps-five-echoes','example-lantern-counterpoint'];
 async function fixture(t){
-  const directory=await mkdtemp(join(tmpdir(),'tabplayer-library-'));t.after(()=>rm(directory,{recursive:true,force:true}));
+  const directory=await mkdtemp(join(await realpath(tmpdir()),'tabplayer-library-'));t.after(()=>rm(directory,{recursive:true,force:true}));
   const source=join(directory,'source'),destination=join(directory,'prepared');await mkdir(source);await mkdir(destination);
   const manifest={format:'TabPlayerBundledLibrary',version:1,templates:[],examples:[],documents:[]};
   for(const [kind,ids] of [['templates',templateIds],['examples',exampleIds]]){

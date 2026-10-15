@@ -388,6 +388,7 @@ fn exact_project() -> Project {
     project.assets.insert(id.clone(), asset);
     project.baseline_edits.push(EditCommand::SetBacking {
         backing: Some(BackingSettings {
+            processing: None,
             reference_sync: None,
             asset_id: id,
             offset_ms: 12.0,

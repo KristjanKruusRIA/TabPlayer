@@ -780,6 +780,26 @@
       }
     },
     {
+      "id": "filter_tagged_none_object",
+      "backing": {
+        "assetId": "processing-fixture",
+        "offsetMs": 0,
+        "anchors": [],
+        "mix": {"gain": 1, "pan": 0, "mute": false, "solo": false},
+        "processing": {"semitones": 0, "cents": 0, "filter": {"none": null}}
+      }
+    },
+    {
+      "id": "filter_tagged_enhance_object",
+      "backing": {
+        "assetId": "processing-fixture",
+        "offsetMs": 0,
+        "anchors": [],
+        "mix": {"gain": 1, "pan": 0, "mute": false, "solo": false},
+        "processing": {"semitones": 0, "cents": 0, "filter": {"bassEnhance": null}}
+      }
+    },
+    {
       "id": "unknown_backing_neutral",
       "backing": {
         "assetId": "processing-fixture",

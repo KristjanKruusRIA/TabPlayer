@@ -67,6 +67,7 @@ fn authored_project() -> Project {
     }
     project.edits.push(EditCommand::SetBacking {
         backing: Some(BackingSettings {
+            processing: None,
             reference_sync: None,
             asset_id: asset_id.clone(),
             offset_ms: 0.0,

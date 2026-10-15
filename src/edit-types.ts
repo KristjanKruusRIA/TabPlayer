@@ -45,7 +45,9 @@ export interface FxSettings {
 export interface TrackSound { voiceId: string|null; presetId: 'clean'|'crunch'|'lead'|'bass'|'gm'; effects: FxSettings }
 export interface SyncAnchor { bar: number; occurrence: number; ratio: number; audioMs: number }
 export interface ReferenceSyncBounds { entryAudioMs: number; exitAudioMs: number }
-export interface BackingSettings { assetId: string; offsetMs: number; anchors: SyncAnchor[]; mix: ChannelMix; referenceSync?: ReferenceSyncBounds|null }
+export type BackingFilter = 'none'|'bassEnhance'|'bassAttenuation'|'mediumEnhance'|'mediumAttenuation'|'highEnhance'|'highAttenuation';
+export interface BackingProcessing { semitones:number; cents:number; filter:BackingFilter }
+export interface BackingSettings { assetId: string; offsetMs: number; anchors: SyncAnchor[]; mix: ChannelMix; referenceSync?: ReferenceSyncBounds|null; processing?: BackingProcessing|null }
 export interface PrintLayout {
   paper: 'A4'|'Letter'; orientation: 'portrait'|'landscape'; marginMm: number; scale: number; profile: 'ScoreTab'|'Score'|'Tab';
 }

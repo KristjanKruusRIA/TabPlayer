@@ -88,6 +88,58 @@ pub struct ReferenceSyncBounds {
     pub exit_audio_ms: f64,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", try_from = "String")]
+pub enum BackingFilter {
+    #[default]
+    None,
+    BassEnhance,
+    BassAttenuation,
+    MediumEnhance,
+    MediumAttenuation,
+    HighEnhance,
+    HighAttenuation,
+}
+
+impl TryFrom<String> for BackingFilter {
+    type Error = String;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        match value.as_str() {
+            "none" => Ok(Self::None),
+            "bassEnhance" => Ok(Self::BassEnhance),
+            "bassAttenuation" => Ok(Self::BassAttenuation),
+            "mediumEnhance" => Ok(Self::MediumEnhance),
+            "mediumAttenuation" => Ok(Self::MediumAttenuation),
+            "highEnhance" => Ok(Self::HighEnhance),
+            "highAttenuation" => Ok(Self::HighAttenuation),
+            _ => Err("Unknown backing filter.".into()),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct BackingProcessing {
+    pub semitones: f64,
+    pub cents: f64,
+    pub filter: BackingFilter,
+}
+impl BackingProcessing {
+    pub fn validate(&self) -> Result<(), String> {
+        if !self.semitones.is_finite()
+            || self.semitones.fract() != 0.0
+            || !(-12.0..=12.0).contains(&self.semitones)
+            || !self.cents.is_finite()
+            || self.cents.fract() != 0.0
+            || !(-100.0..=100.0).contains(&self.cents)
+        {
+            return Err("Backing pitch needs integer semitones -12–12 and cents -100–100.".into());
+        }
+        Ok(())
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct BackingSettings {
@@ -97,6 +149,8 @@ pub struct BackingSettings {
     pub mix: ChannelMix,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reference_sync: Option<ReferenceSyncBounds>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub processing: Option<BackingProcessing>,
 }
 impl BackingSettings {
     pub fn validate(&self) -> Result<(), String> {
@@ -145,6 +199,9 @@ impl BackingSettings {
             }) {
                 return Err("Backing anchors must have distinct score locations.".into());
             }
+        }
+        if let Some(processing) = &self.processing {
+            processing.validate()?;
         }
         self.mix.validate()
     }

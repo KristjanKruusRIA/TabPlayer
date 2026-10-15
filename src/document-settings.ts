@@ -21,9 +21,13 @@ export function validateMix(mix: ChannelMix) {
 
 export function validateBackingSettings(value:unknown):asserts value is BackingSettings {
   const exact=(candidate:unknown,keys:readonly string[]):candidate is Record<string,unknown>=>!!candidate&&typeof candidate==='object'&&!Array.isArray(candidate)&&Object.keys(candidate).length===keys.length&&keys.every(key=>Object.hasOwn(candidate,key));
-  if(!value||typeof value!=='object'||!exact(value,['assetId','offsetMs','anchors','mix',...Object.hasOwn(value,'referenceSync')?['referenceSync']:[]]))throw new Error('Invalid backing settings fields.');
+  if(!value||typeof value!=='object'||!exact(value,['assetId','offsetMs','anchors','mix',...Object.hasOwn(value,'referenceSync')?['referenceSync']:[],...Object.hasOwn(value,'processing')?['processing']:[]]))throw new Error('Invalid backing settings fields.');
   if(typeof value.assetId!=='string'||!value.assetId.length||typeof value.offsetMs!=='number'||!Number.isFinite(value.offsetMs)||!Array.isArray(value.anchors)||!exact(value.mix,['gain','pan','mute','solo']))throw new Error('Invalid backing settings.');
   validateMix(value.mix as unknown as ChannelMix);
+  const processing=value.processing;
+  if(Object.hasOwn(value,'processing')&&processing!==null) {
+    if(!exact(processing,['semitones','cents','filter'])||typeof processing.semitones!=='number'||!Number.isInteger(processing.semitones)||Math.abs(processing.semitones)>12||typeof processing.cents!=='number'||!Number.isInteger(processing.cents)||Math.abs(processing.cents)>100||typeof processing.filter!=='string'||!['none','bassEnhance','bassAttenuation','mediumEnhance','mediumAttenuation','highEnhance','highAttenuation'].includes(processing.filter))throw new Error('Invalid backing processing settings.');
+  }
   const bounds=value.referenceSync;
   let entry:number|null=null,exit:number|null=null;
   if(bounds!==undefined&&bounds!==null) {

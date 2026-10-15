@@ -12,6 +12,7 @@ const ASSET_ID: &str = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61
 
 fn backing(id: &str) -> BackingSettings {
     BackingSettings {
+        processing: None,
         asset_id: id.into(),
         offset_ms: 120.0,
         anchors: vec![],

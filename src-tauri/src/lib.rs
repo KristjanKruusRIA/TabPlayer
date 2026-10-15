@@ -526,6 +526,7 @@ mod source_tests {
             .apply_edit_with_asset(
                 EditCommand::SetBacking {
                     backing: Some(BackingSettings {
+                        processing: None,
                         reference_sync: None,
                         asset_id: id.clone(),
                         offset_ms: 0.0,

@@ -8,6 +8,7 @@ use tabplayer_lib::{
 fn backing(id: &str) -> EditCommand {
     EditCommand::SetBacking {
         backing: Some(BackingSettings {
+            processing: None,
             reference_sync: None,
             asset_id: id.into(),
             offset_ms: 0.0,
@@ -287,6 +288,7 @@ fn redo_metadata_references_backing_without_serializing_audio_bytes() {
 #[test]
 fn repeat_anchor_coordinates_are_valid_without_lexicographic_order() {
     let settings = BackingSettings {
+        processing: None,
         reference_sync: None,
         asset_id: "embedded".into(),
         offset_ms: 0.0,

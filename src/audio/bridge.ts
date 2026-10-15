@@ -4,14 +4,16 @@ import type { DocumentSettings } from '../edit-types';
 import type { AssetInfo } from '../project';
 import type { PlaybackPlan } from './types';
 import type { PracticeLoop,PracticeSettings,PracticeStatus } from './practice-types';
+import type { PlaybackSpan } from './selection-playback-types';
 
-export interface NativeAudioStatus {generation:number;desiredGeneration?:number;ready:boolean;playing:boolean;tick:number;seconds:number;durationSeconds:number;speed:number;metronome:boolean;practice:PracticeStatus;loop:PracticeLoop|null;error:string|null;deviceId:string|null;backingDurationSeconds?:number|null;renderedFrames?:number;outputPeak?:number}
+export interface NativeAudioStatus {generation:number;desiredGeneration?:number;ready:boolean;playing:boolean;tick:number;seconds:number;durationSeconds:number;speed:number;metronome:boolean;practice:PracticeStatus;loop:PracticeLoop|null;range:PlaybackSpan|null;error:string|null;deviceId:string|null;backingDurationSeconds?:number|null;renderedFrames?:number;outputPeak?:number}
 export interface AudioDeviceInfo {id:string;name:string;isDefault:boolean}
 export interface BackingCandidate {token:string;assetId:string;info:AssetInfo;durationMs?:number}
 export type TransportCommand =
   | {type:'play'|'pause'|'stop'|'clearLoop';generation:number}
   | {type:'invalidate';generation:number}
   | {type:'seekTick';tick:number;generation:number}
+  | {type:'playRange';generation:number;startTick:number;endTick:number|null}
   | {type:'setPractice';settings:PracticeSettings;generation:number}
   | {type:'setLoop';startTick:number;endTick:number;generation:number}
   | {type:'selectDevice';deviceId:string|null;generation:number};

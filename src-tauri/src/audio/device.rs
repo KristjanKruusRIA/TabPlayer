@@ -4,6 +4,7 @@ use super::{
     backing::BackingMap,
     decode::{DecodedAudio, decode_audio},
     plan::PlaybackPlan,
+    playback::PlaybackSpan,
     practice::{
         ClickVoice, CountInClock, CountInSnapshot, MetronomeSettings, PracticeTempo, PulsePosition,
         RenderTempo, progressive_ratio,
@@ -95,6 +96,7 @@ pub struct NativeAudioStatus {
     pub backing_duration_seconds: Option<f64>,
     pub practice: PracticeStatus,
     pub r#loop: Option<PracticeLoop>,
+    pub range: Option<PlaybackSpan>,
 }
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(
@@ -106,6 +108,12 @@ pub struct NativeAudioStatus {
 pub enum TransportCommand {
     Play {
         generation: u64,
+    },
+    PlayRange {
+        generation: u64,
+        start_tick: f64,
+        #[serde(deserialize_with = "crate::edit_types::required_nullable")]
+        end_tick: Option<f64>,
     },
     Pause {
         generation: u64,
@@ -141,6 +149,7 @@ impl TransportCommand {
     fn generation(&self) -> u64 {
         match self {
             Self::Play { generation }
+            | Self::PlayRange { generation, .. }
             | Self::Pause { generation }
             | Self::Stop { generation }
             | Self::Invalidate { generation }
@@ -153,6 +162,19 @@ impl TransportCommand {
     }
     fn validate(&self, duration: f64) -> Result<(), &'static str> {
         match self {
+            Self::PlayRange {
+                start_tick,
+                end_tick,
+                ..
+            } if !start_tick.is_finite()
+                || *start_tick < 0.0
+                || *start_tick >= duration
+                || end_tick.is_some_and(|end| {
+                    !end.is_finite() || end <= *start_tick || end > duration
+                }) =>
+            {
+                Err("Select a valid playback passage within the score.")
+            }
             Self::SeekTick { tick, .. } if !tick.is_finite() || *tick < 0.0 || *tick > duration => {
                 Err("Seek position is outside the score.")
             }
@@ -170,6 +192,51 @@ impl TransportCommand {
                 Err("Select a valid inclusive measure loop.")
             }
             _ => Ok(()),
+        }
+    }
+}
+#[cfg(test)]
+mod selection_command_contract_tests {
+    use super::TransportCommand;
+
+    #[test]
+    fn range_command_rejects_invalid_span_before_state_mutation() {
+        let cases: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../tests/selection-playback-protocol.json"
+        ))
+        .unwrap();
+        let duration = cases["durationTick"].as_f64().unwrap();
+        for case in cases["commands"].as_array().unwrap() {
+            if case["decode"] == false {
+                continue;
+            }
+            let command: TransportCommand = serde_json::from_value(case["value"].clone()).unwrap();
+            assert_eq!(
+                command.validate(duration).is_ok(),
+                case["valid"].as_bool().unwrap(),
+                "{}",
+                case["name"]
+            );
+        }
+        for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert!(
+                TransportCommand::PlayRange {
+                    generation: 7,
+                    start_tick: value,
+                    end_tick: None
+                }
+                .validate(duration)
+                .is_err()
+            );
+            assert!(
+                TransportCommand::PlayRange {
+                    generation: 7,
+                    start_tick: 0.0,
+                    end_tick: Some(value)
+                }
+                .validate(duration)
+                .is_err()
+            );
         }
     }
 }
@@ -454,6 +521,7 @@ impl SharedStatus {
             peak: f64::from_bits(self.peak.load(Ordering::Relaxed)),
         };
         let status = NativeAudioStatus {
+            range: None,
             generation: snapshot.generation,
             desired_generation: self.desired.load(Ordering::Acquire),
             ready: self.ready.load(Ordering::Relaxed) && !fault,
@@ -897,6 +965,11 @@ impl CallbackTransport {
             return Err("Audio output is not ready. Select an output device to recover.");
         }
         match command {
+            TransportCommand::PlayRange { .. } => {
+                return Err(
+                    "Selected playback is not available until native range support is installed.",
+                );
+            }
             TransportCommand::Play { .. } => {
                 if !self.playing {
                     if self.phase == PracticePhase::Paused {
@@ -1689,6 +1762,12 @@ impl AudioService {
         command
             .validate(document.plan.duration_tick)
             .map_err(str::to_string)?;
+        if matches!(command, TransportCommand::PlayRange { .. }) {
+            return Err(
+                "Selected playback is not available until native range support is installed."
+                    .into(),
+            );
+        }
         if let TransportCommand::SetPractice { settings, .. } = &command {
             settings
                 .validate(document.backing.is_some() || document.settings.backing.is_some())

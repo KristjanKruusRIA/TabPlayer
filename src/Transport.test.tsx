@@ -6,7 +6,7 @@ import { Transport } from './Transport';
 import type { PlaybackState } from './audio/types';
 import { DEFAULT_PRACTICE } from './audio/practice-types';
 afterEach(()=>{cleanup();vi.useRealTimers();});
-function snapshot(patch:Partial<PlaybackState>={}):PlaybackState {return {ready:true,playing:false,time:1000,endTime:6000,measure:0,speed:100,metronome:false,practice:{settings:structuredClone(DEFAULT_PRACTICE),phase:'paused',countInRemaining:0,completedPasses:0,effectiveRatio:1,currentBpm:120,pulse:null},practicePending:false,practiceNotice:null,loop:null,error:null,...patch};}
+function snapshot(patch:Partial<PlaybackState>={}):PlaybackState {return {ready:true,playing:false,time:1000,endTime:6000,measure:0,speed:100,metronome:false,practice:{settings:structuredClone(DEFAULT_PRACTICE),phase:'paused',countInRemaining:0,completedPasses:0,effectiveRatio:1,currentBpm:120,pulse:null},practicePending:false,practiceNotice:null,range:null,loop:null,error:null,...patch};}
 function playerFor(initial=snapshot()) {
   let state=initial;const listeners=new Set<()=>void>();
   const player={getState:()=>state,subscribe:(listener:()=>void)=>{listeners.add(listener);return ()=>{listeners.delete(listener);};},play:vi.fn(),pause:vi.fn(),stop:vi.fn(),setSpeed:vi.fn(),setLoop:vi.fn(),clearLoop:vi.fn(),seekToMeasure:vi.fn(),setMetronome:vi.fn(),setPractice:vi.fn()};

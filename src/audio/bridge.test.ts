@@ -18,3 +18,11 @@ it('queues the complete practice command unchanged behind earlier transport cont
   await Promise.resolve();expect(nativeInvoke.mock.calls.map(call=>call[1].command.type)).toEqual(['play']);release();await first;await second;
   expect(nativeInvoke.mock.calls).toEqual([['audio_command',{command:{type:'play',generation:5}}],['audio_command',{command:{type:'setPractice',generation:5,settings}}]]);
 });
+
+it('queues complete finite and nullable end playRange commands unchanged',async()=>{
+  vi.resetModules();nativeInvoke.mockClear();nativeInvoke.mockResolvedValue(undefined);
+  const {nativeAudioBridge}=await import('./bridge');
+  const finite={type:'playRange' as const,generation:7,startTick:960,endTick:1920},ordinary={...finite,endTick:null};
+  await nativeAudioBridge.command(finite);await nativeAudioBridge.command(ordinary);
+  expect(nativeInvoke.mock.calls).toEqual([['audio_command',{command:finite}],['audio_command',{command:ordinary}]]);
+});

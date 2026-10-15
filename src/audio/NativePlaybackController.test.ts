@@ -18,7 +18,7 @@ function fixture(preparePlan?:ConstructorParameters<typeof NativePlaybackControl
   let receive: (status:NativeAudioStatus)=>void=()=>{};
   const bridge:NativeAudioBridge={prepare:vi.fn(async()=>{}),command:vi.fn(async()=>{}),setMix:vi.fn(async()=>{}),devices:vi.fn(async()=>[]),status:vi.fn(async()=>null),subscribe:vi.fn(async listener=>{receive=listener;return()=>{};}),stageBacking:vi.fn(async()=>null),stageEmbeddedBacking:vi.fn(async()=>null)};
   const onEdit=vi.fn();const player=new NativePlaybackController({bridge,onEdit,preparePlan});
-  const emit=(change:Partial<NativeAudioStatus>={})=>{const settings=defaults();settings.tempo={kind:'relative',ratio:change.speed??1};settings.metronome.enabled=change.metronome??false;receive({generation:player.generation,ready:true,playing:false,tick:0,seconds:0,durationSeconds:8,speed:1,metronome:false,error:null,deviceId:null,loop:null,practice:practiceStatus(settings,{phase:change.playing?'playing':'paused'}),...change});};
+  const emit=(change:Partial<NativeAudioStatus>={})=>{const settings=defaults();settings.tempo={kind:'relative',ratio:change.speed??1};settings.metronome.enabled=change.metronome??false;receive({generation:player.generation,ready:true,playing:false,tick:0,seconds:0,durationSeconds:8,speed:1,metronome:false,error:null,deviceId:null,range:null,loop:null,practice:practiceStatus(settings,{phase:change.playing?'playing':'paused'}),...change});};
   return {bridge,onEdit,player,emit};
 }
 async function soundingFixture() {
@@ -211,7 +211,7 @@ it('cosmetic view renders do not forward external media stop or seek to native a
   await player.loadDocument(p,built,1);expect(bridge.setMix).not.toHaveBeenCalled();player.destroy();
 });
 it('webview reload generation starts after the native pending preparation',async()=>{
-  const {player,bridge}=fixture();bridge.status=vi.fn(async()=>({generation:10000,desiredGeneration:10002,ready:false,playing:false,tick:0,seconds:0,durationSeconds:0,speed:1,metronome:false,error:null,deviceId:null,practice:practiceStatus(),loop:null}));
+  const {player,bridge}=fixture();bridge.status=vi.fn(async()=>({generation:10000,desiredGeneration:10002,ready:false,playing:false,tick:0,seconds:0,durationSeconds:0,speed:1,metronome:false,error:null,deviceId:null,practice:practiceStatus(),range:null,loop:null}));
   const p=blankProject();await player.loadDocument(p,buildDocument(p));expect(player.generation).toBeGreaterThan(10002);expect(bridge.prepare).toHaveBeenCalledWith(expect.objectContaining({generation:player.generation}),expect.anything(),null,'blank',DEFAULT_PRACTICE);player.destroy();
 });
 
@@ -289,7 +289,7 @@ it.each(['relative','fixed','progressive'] as const)('retains full acknowledged 
   const edited=previewEdit(project,{type:'setNote',target:{track:0,staff:0,bar:0,voice:0,beat:0},string:6,fret:5});
   for(const doc of [{project:edited.project,built:edited},{project,built:buildDocument(project)},{project:edited.project,built:buildDocument(edited.project)}]){
     await player.loadDocument(doc.project,doc.built);expect(vi.mocked(bridge.prepare).mock.calls.at(-1)?.[4]).toEqual(settings);
-    expect(player.getState()).toMatchObject({playing:false,loop:null,practicePending:false,practice:{settings,phase:'idle',countInRemaining:0,completedPasses:0,pulse:null}});
+    expect(player.getState()).toMatchObject({playing:false,range:null,loop:null,practicePending:false,practice:{settings,phase:'idle',countInRemaining:0,completedPasses:0,pulse:null}});
   }
   player.destroy();
 });

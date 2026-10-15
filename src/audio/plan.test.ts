@@ -4,6 +4,24 @@ import { createHash } from 'node:crypto';
 import { buildScore, exportGp } from '../engine';
 import { buildPlaybackPlan, buildPlaybackPlanFromJson, deadBrushMidiDurations, prepareMidiScore, preparePlan, validateBackingAnchors, validatePlaybackPlan } from './plan';
 import { blankProject } from '../project';
+import selectionProtocol from '../../tests/selection-playback-protocol.json';
+import type { PlaybackPlan } from './types';
+
+it('performed_map_accepts_missing_empty_and_pre_measure_grace_but_rejects_null',()=>{
+  const plan=structuredClone(selectionProtocol.plan) as PlaybackPlan;
+  expect(()=>validatePlaybackPlan(plan)).not.toThrow();
+  expect(JSON.parse(JSON.stringify(plan))).not.toHaveProperty('performedBeats');
+  for(const performedBeats of [[],selectionProtocol.performedBeats])expect(()=>validatePlaybackPlan({...plan,performedBeats} as PlaybackPlan)).not.toThrow();
+  expect(()=>validatePlaybackPlan({...plan,performedBeats:null} as unknown as PlaybackPlan)).toThrow(/Invalid native playback plan/);
+});
+
+it('performed_map_rejects_bad_addresses_clocks_duplicates_and_extra_keys',()=>{
+  const plan=structuredClone(selectionProtocol.plan) as PlaybackPlan,base=selectionProtocol.performedBeats[0];
+  const invalid:unknown[]=[null,undefined,[base,base]];
+  for(const [key,value] of [['startTick',-1],['startTick',121],['endTick',3841],['leadInTick',1],['occurrence',1],['extra',0],['startTick',NaN],['endTick',Infinity]] as const)invalid.push([{...base,[key]:value}]);
+  for(const [key,value] of [['track',1],['bar',1],['beat',-1],['staff',.5],['voice',0x100000000],['extra',0]] as const)invalid.push([{...base,target:{...base.target,[key]:value}}]);
+  for(const performedBeats of invalid)expect(()=>validatePlaybackPlan({...plan,performedBeats} as PlaybackPlan)).toThrow(/Invalid native playback plan/);
+});
 
 const settings = new Settings();
 function authored(bars = 2, voices = 1, tracks = 1) {

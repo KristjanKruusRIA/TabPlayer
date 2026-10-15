@@ -371,6 +371,18 @@ export function validatePlaybackPlan(plan: PlaybackPlan) {
     counts.set(o.bar, o.occurrence + 1); occurrences.add(`${o.bar}/${o.occurrence}`); previous = o.endTick;
     if (o.clickTicks !== undefined && (!o.clickTicks.length || o.clickTicks[0] !== o.startTick || o.clickTicks.some((tick, i) => !validTime(tick) || tick < o.startTick || tick >= o.endTick || i > 0 && tick <= o.clickTicks![i - 1]))) fail('metronome ticks');
   }
+  if (Object.hasOwn(plan,'performedBeats')) {
+    const exact=(value:unknown,keys:readonly string[]):value is Record<string,unknown>=>!!value&&typeof value==='object'&&!Array.isArray(value)&&Object.keys(value).length===keys.length&&keys.every(key=>Object.hasOwn(value,key));
+    if (!Array.isArray(plan.performedBeats)) fail('performed beats');
+    const mapped=new Set<string>();
+    for (const row of plan.performedBeats!) {
+      if (!exact(row,['target','occurrence','startTick','endTick','leadInTick'])||!exact(row.target,['track','staff','bar','voice','beat'])) fail('performed beats');
+      const target=row.target;
+      if (Object.values(target).some(value=>!integer(value,0xffffffff))||target.track>=plan.tracks.length||!integer(row.occurrence,0xffffffff)||!occurrences.has(`${target.bar}/${row.occurrence}`)||!validTime(row.leadInTick)||!validTime(row.startTick)||!validTime(row.endTick)||row.leadInTick>row.startTick||row.startTick>row.endTick||row.endTick>plan.durationTick) fail('performed beats');
+      const key=`${target.track}/${target.staff}/${target.bar}/${target.voice}/${target.beat}/${row.occurrence}`;
+      if(mapped.has(key))fail('performed beats');mapped.add(key);
+    }
+  }
   previous = -1;
   for (const n of plan.notes) {
     if (n.channel !== undefined && !integer(n.channel, 15) || n.program !== undefined && !integer(n.program, 127)) fail('note channel/program');

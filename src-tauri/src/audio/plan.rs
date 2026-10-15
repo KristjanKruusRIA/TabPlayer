@@ -1,4 +1,4 @@
-use crate::project::NoteTarget;
+use crate::project::{BeatTarget, NoteTarget};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
@@ -12,8 +12,29 @@ pub struct PlaybackPlan {
     pub tracks: Vec<PlanTrack>,
     pub tempos: Vec<PlanTempo>,
     pub occurrences: Vec<MeasureOccurrence>,
+    #[serde(
+        default,
+        deserialize_with = "present_performed_beats",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub performed_beats: Option<Vec<PerformedBeat>>,
     pub notes: Vec<PlanNote>,
     pub midi: Vec<PlanMidiEvent>,
+}
+fn present_performed_beats<'de, D>(deserializer: D) -> Result<Option<Vec<PerformedBeat>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Vec::<PerformedBeat>::deserialize(deserializer).map(Some)
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PerformedBeat {
+    pub target: BeatTarget,
+    pub occurrence: u32,
+    pub start_tick: f64,
+    pub end_tick: f64,
+    pub lead_in_tick: f64,
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -228,6 +249,31 @@ impl PlaybackPlan {
             *count += 1;
             occurrences.insert((o.bar, o.occurrence));
             prior = o.end_tick;
+        }
+        if let Some(rows) = &self.performed_beats {
+            let mut mapped = HashSet::new();
+            for row in rows {
+                let target = &row.target;
+                if target.track as usize >= self.tracks.len()
+                    || !occurrences.contains(&(target.bar, row.occurrence))
+                    || !nonnegative(row.lead_in_tick)
+                    || !nonnegative(row.start_tick)
+                    || !nonnegative(row.end_tick)
+                    || row.lead_in_tick > row.start_tick
+                    || row.start_tick > row.end_tick
+                    || row.end_tick > self.duration_tick
+                    || !mapped.insert((
+                        target.track,
+                        target.staff,
+                        target.bar,
+                        target.voice,
+                        target.beat,
+                        row.occurrence,
+                    ))
+                {
+                    return Err(invalid());
+                }
+            }
         }
         let mut note_ids = HashMap::new();
         prior = -1.0;

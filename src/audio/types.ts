@@ -1,8 +1,9 @@
 import type { NoteTarget } from '../edit-types';
 import type { PracticeLoop,PracticeStatus } from './practice-types';
+import type { PerformedBeat,PlaybackSpan } from './selection-playback-types';
 export type { PracticeSettings } from './practice-types';
 
-export interface PlaybackState {ready:boolean;playing:boolean;time:number;endTime:number;measure:number;speed:number;metronome:boolean;practice:PracticeStatus;practicePending:boolean;practiceNotice:string|null;loop:PracticeLoop|null;error:string|null}
+export interface PlaybackState {ready:boolean;playing:boolean;time:number;endTime:number;measure:number;speed:number;metronome:boolean;practice:PracticeStatus;practicePending:boolean;practiceNotice:string|null;loop:PracticeLoop|null;range:PlaybackSpan|null;error:string|null}
 export type Articulation = 'picked' | 'fingered' | 'muted' | 'dead' | 'ghost' | 'staccato' | 'legato' | 'tapped' | 'harmonic' | 'feedback';
 export interface PlanTrack { id: string; program: number; percussion: boolean }
 export interface PlanTempo { tick: number; bpm: number }
@@ -16,4 +17,4 @@ export type PlanMidiEvent =
   | (MidiLocation & { type: 'controller'; controller: number; value: number })
   | (MidiLocation & { type: 'bend'; value: number })
   | (MidiLocation & { type: 'noteBend'; key: number; value: number });
-export interface PlaybackPlan { generation: number; ppq: 960; durationTick: number; durationMs: number; tracks: PlanTrack[]; tempos: PlanTempo[]; occurrences: MeasureOccurrence[]; notes: PlanNote[]; midi: PlanMidiEvent[] }
+export interface PlaybackPlan { generation: number; ppq: 960; durationTick: number; durationMs: number; tracks: PlanTrack[]; tempos: PlanTempo[]; occurrences: MeasureOccurrence[]; performedBeats?:PerformedBeat[]; notes: PlanNote[]; midi: PlanMidiEvent[] }

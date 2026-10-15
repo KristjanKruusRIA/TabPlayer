@@ -20,7 +20,7 @@ const integration=vi.hoisted(()=>({loadDocument:vi.fn(),beforeScoreChange:vi.fn(
 vi.mock('./audio/bridge',()=>({nativeAudioBridge:{stageBacking:integration.stageBacking}}));
 vi.mock('./export/useExportCoordinator',()=>({useExportCoordinator:(options:unknown)=>{integration.exportOptions(options);return {busy:integration.exportBusy,progress:undefined,run:integration.exportRun,cancel:integration.exportCancel};}}));
 vi.mock('./audio/NativePlaybackController',()=>({NativePlaybackController:class {
-  built:BuiltDocument|null=null;state:PlaybackState={ready:true,playing:false,time:0,endTime:4000,measure:0,speed:integration.practiceSpeed,metronome:false,practice:{settings:{...structuredClone(DEFAULT_PRACTICE),tempo:integration.practiceFixed?{kind:'fixed',bpm:90}:{kind:'relative',ratio:integration.practiceSpeed/100}},phase:'idle',countInRemaining:0,completedPasses:0,effectiveRatio:integration.practiceSpeed/100,currentBpm:120,pulse:null},practicePending:false,practiceNotice:null,loop:null,error:null};
+  built:BuiltDocument|null=null;state:PlaybackState={ready:true,playing:false,time:0,endTime:4000,measure:0,speed:integration.practiceSpeed,metronome:false,practice:{settings:{...structuredClone(DEFAULT_PRACTICE),tempo:integration.practiceFixed?{kind:'fixed',bpm:90}:{kind:'relative',ratio:integration.practiceSpeed/100}},phase:'idle',countInRemaining:0,completedPasses:0,effectiveRatio:integration.practiceSpeed/100,currentBpm:120,pulse:null},practicePending:false,practiceNotice:null,range:null,loop:null,error:null};
   constructor(private options:{onEdit:(command:EditCommand)=>void|Promise<void>}){}
   subscribe=()=>()=>{};getState=()=>this.state;
   activeNotes=(trackId:string)=>integration.activeNotes(trackId);

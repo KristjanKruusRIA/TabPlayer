@@ -16,12 +16,12 @@
     }
   },
   "current_revision": {
-    "value": "447d2a9240dc5727ff0679b5b0f84dd7107db603",
-    "accepted_source_revision": "447d2a9240dc5727ff0679b5b0f84dd7107db603",
+    "value": "a87bae29deb08e31a8974d6d2ed390e7b5adca0b",
+    "accepted_source_revision": "a87bae29deb08e31a8974d6d2ed390e7b5adca0b",
     "documentation_revision": null,
-    "documentation_status": "Working-tree P16 reviewed-partial documentation adoption at the locally accepted source checkpoint; delivery, final review, documentation commit and push remain pending with root.",
-    "provenance": "Root locally accepts P16 source 447d2a9240dc5727ff0679b5b0f84dd7107db603; delivery is pending and the source is not yet pushed at this checkpoint. The final versioned tempo report supports the bounded source/native/current Windows/GP-publication/visual scope. Proprietary GP bracket import/export and playback clipping remain unverified, and the report retains audible, platform and shipping limits. This documentation audit executes no runtime or Git/network operation. The unchanged CI checkpoint belongs to historical Library source only and supplies no P16/current-head CI proof.",
-    "previous_accepted_checkpoint": "8bbd56ced2219e03c94a2d3d840fd215fef01d59",
+    "documentation_status": "Working-tree P17/P18 documentation proposal for the locally accepted source checkpoint: P17 implemented within declared local numeric scope; P18 partial for six frequency filters. Independent final document/adoption review, documentation commit and delivery/push remain pending with root.",
+    "provenance": "Root locally accepts P16 source 447d2a9240dc5727ff0679b5b0f84dd7107db603; delivery is pending and the source is not yet pushed at this checkpoint. The final versioned tempo report supports the bounded source/native/current Windows/GP-publication/visual scope. Proprietary GP bracket import/export and playback clipping remain unverified, and the report retains audible, platform and shipping limits. This documentation audit executes no runtime or Git/network operation. The unchanged CI checkpoint belongs to historical Library source only and supplies no P16/current-head CI proof. 2026-10-16 P17/P18 checkpoint: root locally accepts source a87bae29deb08e31a8974d6d2ed390e7b5adca0b for the declared local pitch/filter scope after the frozen 57-step functional workflow at be9e61aa2383974821e7ecf70899e7f755f74f53 and sole 17-step/four-frame targeted confirmation at a87bae29deb08e31a8974d6d2ed390e7b5adca0b. The final UI source has its own admitted diagnostic build; the coherent 2647/617 whole-suite evidence belongs to earlier product source 4a01c341eca58cb25f52c89175ba1fb8c14ee803, not a rerun at this later source. The immutable visual receipt retains inherited observer metadata; the final report binds its additive provenance corrigendum and distinguishes current source/executable/admission/resource/log identities. P17 is implemented within declared local numeric scope and P18 remains partial without vocal/center/channel separation. P16 remains reviewed partial; GP bracket import/export and playback clipping remain unverified. Physical audio, original-GP8, macOS/Linux and shipping acceptance remain separate. Independent final document/adoption review and local documentation delivery/push remain pending; no current-head CI result is supplied and the unchanged CI object remains historical Library evidence. This documentation audit executes no runtime/build, Git or network operation.",
+    "previous_accepted_checkpoint": "447d2a9240dc5727ff0679b5b0f84dd7107db603",
     "ci_checkpoint": {
       "run_id": "38787714198",
       "head_sha": "764d926fbac039e844fbaa68e60969e2fcae2aaa",
@@ -56,7 +56,7 @@
       }
     }
   },
-  "source_method": "The original overlay read all 258 baseline rows and inspected seven dedicated versioned delivery reports plus scoped source/test definitions. This follow-up reviews the versioned selection-playback and stylesheet-interchange reports and exact P02/P03/N13 acceptance, updating adjacent stale prose only. Graph tools unavailable; narrow rg/source reads used. No fresh runtime validation by this audit. The earlier five-row adoption inspected the accepted recovery/workstation validation and reviews for exactly W10/W11/D04/D05/P15, preserving all historical fields and other 253 rows. This later six-row adoption maps W06/W07/W08/W09/W12/W14 to the final versioned Library validation, including actual Windows Core/restart/Folders/reveal and honest OS-drop/other-platform limits. All 258 historical field sets and 252 other complete row assessments remain unchanged. No product tests/apps/builds, Git or network operation was run by this adoption; bounded document consistency was checked separately. This later P15-only adoption maps the exact waveform/grid/timeline and visual sync-point acceptance to the final dedicated waveform validation, including two actual Windows runs and the accepted replacement readout/keyboard-focus capture. It preserves all 258 historical field sets, all 257 other complete feature assessments including P16, and every prior evidence entry/digest snapshot. The accepted waveform source is local pending root delivery; the unchanged CI checkpoint is historical Library evidence. This adoption executes only bounded documentation consistency checks, with no product test/app/build, Git or network operation. This P16-only documentation adoption reviews the final versioned tempo report and records P16 as evidence-reviewed partial for its bounded native/current Windows/GP-publication/visual scope. It preserves all 258 historical field sets, all 257 other complete feature objects and Markdown rows, and every prior evidence entry/digest snapshot; no runtime was executed by this documentation audit. Proprietary GP bracket import/export and playback clipping remain unverified; local source delivery is pending and CI remains historical only.",
+  "source_method": "The original overlay read all 258 baseline rows and inspected seven dedicated versioned delivery reports plus scoped source/test definitions. This follow-up reviews the versioned selection-playback and stylesheet-interchange reports and exact P02/P03/N13 acceptance, updating adjacent stale prose only. Graph tools unavailable; narrow rg/source reads used. No fresh runtime validation by this audit. The earlier five-row adoption inspected the accepted recovery/workstation validation and reviews for exactly W10/W11/D04/D05/P15, preserving all historical fields and other 253 rows. This later six-row adoption maps W06/W07/W08/W09/W12/W14 to the final versioned Library validation, including actual Windows Core/restart/Folders/reveal and honest OS-drop/other-platform limits. All 258 historical field sets and 252 other complete row assessments remain unchanged. No product tests/apps/builds, Git or network operation was run by this adoption; bounded document consistency was checked separately. This later P15-only adoption maps the exact waveform/grid/timeline and visual sync-point acceptance to the final dedicated waveform validation, including two actual Windows runs and the accepted replacement readout/keyboard-focus capture. It preserves all 258 historical field sets, all 257 other complete feature assessments including P16, and every prior evidence entry/digest snapshot. The accepted waveform source is local pending root delivery; the unchanged CI checkpoint is historical Library evidence. This adoption executes only bounded documentation consistency checks, with no product test/app/build, Git or network operation. This P16-only documentation adoption reviews the final versioned tempo report and records P16 as evidence-reviewed partial for its bounded native/current Windows/GP-publication/visual scope. It preserves all 258 historical field sets, all 257 other complete feature objects and Markdown rows, and every prior evidence entry/digest snapshot; no runtime was executed by this documentation audit. Proprietary GP bracket import/export and playback clipping remain unverified; local source delivery is pending and CI remains historical only. 2026-10-16 P17/P18 documentation adoption maps the final processing report to P17 implemented within its declared local integer semitone/cents and preserved-duration scope and P18 partial for six local frequency filters, without vocal/center/channel separation. Root accepted the frozen full functional evidence and sole targeted visual confirmation at local source a87bae29deb08e31a8974d6d2ed390e7b5adca0b; these are attributed existing receipts, not new runtime by this documentation audit. All 258 historical field sets, 256 other complete feature objects/Markdown rows, 99 earlier evidence entries and 45 earlier digest snapshots are preserved. P16 stays reviewed partial; GP bracket import/export and playback clipping remain unverified. Physical audio, original-GP8, macOS/Linux and shipping remain open; source delivery is pending and CI stays historical only.",
   "assessment_definitions": {
     "evidence_reviewed": "Current source and/or versioned delivery evidence was mapped to this exact requirement; missing acceptance remains explicit.",
     "baseline_not_reaudited": "Historical status carried for coverage only; current_proven_status is null and no new implementation claim is made."
@@ -76,29 +76,29 @@
       "unverified": 8
     },
     "current_dispositions": {
-      "implemented": 77,
-      "partial": 94,
-      "missing": 79,
+      "implemented": 78,
+      "partial": 95,
+      "missing": 77,
       "unverified": 8
     },
-    "evidence_reviewed_total": 107,
+    "evidence_reviewed_total": 109,
     "evidence_reviewed": {
-      "implemented": 35,
-      "partial": 68,
+      "implemented": 36,
+      "partial": 69,
       "missing": 0,
       "unverified": 4
     },
-    "baseline_not_reaudited_total": 151,
+    "baseline_not_reaudited_total": 149,
     "baseline_not_reaudited": {
       "implemented": 42,
       "partial": 26,
-      "missing": 79,
+      "missing": 77,
       "unverified": 4
     },
-    "status_changed_total": 72,
+    "status_changed_total": 74,
     "transition_counts": {
-      "missing -> implemented": 21,
-      "missing -> partial": 46,
+      "missing -> implemented": 22,
+      "missing -> partial": 47,
       "partial -> implemented": 5
     }
   },
@@ -696,6 +696,54 @@
       "start_line": 170,
       "end_line": 183,
       "kind": "validation_report"
+    },
+    "backing_processing_contracts": {
+      "path": "docs/validation/2026-10-16-gp8-backing-processing.md",
+      "start_line": 8,
+      "end_line": 20,
+      "kind": "validation_report"
+    },
+    "backing_processing_checks": {
+      "path": "docs/validation/2026-10-16-gp8-backing-processing.md",
+      "start_line": 24,
+      "end_line": 52,
+      "kind": "validation_report"
+    },
+    "backing_processing_pitch_native": {
+      "path": "docs/validation/2026-10-16-gp8-backing-processing.md",
+      "start_line": 60,
+      "end_line": 60,
+      "kind": "validation_report"
+    },
+    "backing_processing_actual": {
+      "path": "docs/validation/2026-10-16-gp8-backing-processing.md",
+      "start_line": 71,
+      "end_line": 99,
+      "kind": "validation_report"
+    },
+    "backing_processing_artifacts": {
+      "path": "docs/validation/2026-10-16-gp8-backing-processing.md",
+      "start_line": 103,
+      "end_line": 124,
+      "kind": "validation_report"
+    },
+    "backing_processing_visual": {
+      "path": "docs/validation/2026-10-16-gp8-backing-processing.md",
+      "start_line": 145,
+      "end_line": 189,
+      "kind": "validation_report"
+    },
+    "backing_processing_assessment": {
+      "path": "docs/validation/2026-10-16-gp8-backing-processing.md",
+      "start_line": 193,
+      "end_line": 199,
+      "kind": "validation_report"
+    },
+    "backing_processing_filter_native": {
+      "path": "docs/validation/2026-10-16-gp8-backing-processing.md",
+      "start_line": 61,
+      "end_line": 61,
+      "kind": "validation_report"
     }
   },
   "evidence_file_sha256": {
@@ -743,7 +791,8 @@
     "docs/validation/2026-10-14-tabplayer-expansion.md": "dc95c92f95005d9ec2345bc14367d1b2d9357fd4eaa44839de7279f4dc4bf1ac",
     "docs/validation/2026-10-15-gp8-file-library.md": "565765bd7a9ed396aa762265806e8fd3a336c034a4784437cf6d97ff8b5a700f",
     "docs/validation/2026-10-15-gp8-backing-waveform.md": "1d353f53d39c2155588efcdedc51572799b8d44501c951b9eff764fb19ee0b95",
-    "docs/validation/2026-10-15-gp8-backing-tempo.md": "153adf4f9366b9d588cc1ca6dedf03f19b9441f18f1674394a3c972693862076"
+    "docs/validation/2026-10-15-gp8-backing-tempo.md": "153adf4f9366b9d588cc1ca6dedf03f19b9441f18f1674394a3c972693862076",
+    "docs/validation/2026-10-16-gp8-backing-processing.md": "ef0abdcef8c6e52c8dfc5d0277105d01e8e74e6813d1625cd5993dcdb43ec1ad"
   },
   "next_open_families": [
     {
@@ -798,12 +847,15 @@
     {
       "priority": 5,
       "family": "Sound, hardware and external acceptance",
-      "work": "Effect families/routing/catalogue breadth, MIDI/audio input/output/tuner, backing pitch/filter tools, P16 tempo-generation/bracket work and services remain open. P15 waveform/timeline and visual sync editing meet only the recorded Windows diagnostic acceptance. Original-GP8, physical printers and physical macOS/Linux input/audio require actual receipts; build/test CI is a separate check.",
+      "work": "Effect families/routing/catalogue breadth, MIDI/audio input/output/tuner, backing pitch/filter tools, P16 tempo-generation/bracket work and services remain open. P15 waveform/timeline and visual sync editing meet only the recorded Windows diagnostic acceptance. Original-GP8, physical printers and physical macOS/Linux input/audio require actual receipts; build/test CI is a separate check. 2026-10-16 P17/P18 addendum: P17 meets the declared local integer semitone/cents and duration-preserving scope; P18 is partial for six local frequency filters, without vocal/center/channel separation. P16 is already evidence-reviewed partial for its recorded native tempo/reference work; GP bracket import/export and playback clipping remain unverified. Physical audio, original-GP8, macOS/Linux and shipping acceptance remain open.",
       "evidence": [
         "practice_limits",
         "engraving_limits",
         "harmony_limits",
-        "backing_waveform_limits"
+        "backing_waveform_limits",
+        "backing_processing_assessment",
+        "backing_processing_filter_native",
+        "backing_processing_visual"
       ]
     }
   ],
@@ -904,6 +956,14 @@
         "backing_tempo_visual_reference_confirmation",
         "backing_tempo_failures_limits"
       ]
+    },
+    {
+      "issue": "2026-10-16 P17/P18 local processing supersedes bounded historical absence statements only",
+      "detail": "The final processing report supports P17 within declared local integer pitch/duration scope and P18 partial for six frequency filters; it provides no vocal/center/channel separation. Earlier pitch/filter absence prose remains chronological and is superseded only for this proven local capability. P16 remains reviewed partial, and GP bracket import/export and playback clipping remain unverified. Platform, listening, shipping and current-CI acceptance remain independent.",
+      "evidence": [
+        "backing_processing_contracts",
+        "backing_processing_assessment"
+      ]
     }
   ],
   "limitations": [
@@ -919,7 +979,8 @@
     "The actual injected destruction-exception attempt stopped at an immutable-host guard before native close/resume. Mounted/real-controller regressions and the normal 12-group run remain separate evidence; no successful destruction-failure execution is claimed.",
     "Actual Windows Library Core/restart/Folders and observed Explorer reveal support only the cited narrow acceptance. W12 OS-drop delivery remains unproven after helper-only watchdogs; zero-motion input insertion is not delivery. Native late callback rejection is not an actual delayed browser-worker scheduling race. macOS/Linux reveal, extracted shipping resources and full physical-platform acceptance remain pending; W13 associations are unchanged.",
     "P15 closes only the recorded Windows diagnostic waveform and visual sync-point acceptance. The 512 MiB query ceiling bounds encoded container bytes, not decoded PCM heap; native full decode remains non-streaming/non-cancellable and stale results reject at publication. Original embedded viewing lacks independent native GP archive-extraction proof. P16 tempo generation/brackets, physical PCM fidelity, current macOS/Linux runtime, shipping/install/signing and original-GP8 equivalence remain open. Uncaptured pixel states retain the waveform report limits; final Task 7 joined review and delivery are separate root-owned gates.",
-    "P16 is evidence-reviewed partial for the final report's bounded source/native PCM/headless transport/current Windows workflow, actual GP publication and scoped visual confirmation. GP bracket import/export and playback clipping remain unverified; original-GP8 runtime, audible, macOS/Linux and shipping acceptance remain separate. Earlier blanket native P16 absence is superseded only within that supported scope. Local accepted source delivery is pending; the unchanged CI object is historical Library evidence only. This documentation audit executes no new runtime."
+    "P16 is evidence-reviewed partial for the final report's bounded source/native PCM/headless transport/current Windows workflow, actual GP publication and scoped visual confirmation. GP bracket import/export and playback clipping remain unverified; original-GP8 runtime, audible, macOS/Linux and shipping acceptance remain separate. Earlier blanket native P16 absence is superseded only within that supported scope. Local accepted source delivery is pending; the unchanged CI object is historical Library evidence only. This documentation audit executes no new runtime.",
+    "2026-10-16 P17/P18 acceptance is limited to declared local integer pitch and six local frequency filters with separate native PCM, frozen Windows publication and bounded visual evidence. Vocal/center/channel separation is not provided. Physical Play/device output, listening/capture, subjective/arbitrary-music or general transient/end quality, original-GP8 runtime, macOS/Linux and shipping acceptance remain unverified. P16 stays partial; GP bracket import/export and playback clipping remain unverified. The frozen CI checkpoint is historical only, and final review/documentation delivery remain root-owned."
   ],
   "features": [
     {
@@ -6230,12 +6291,20 @@
       "acceptance_required": "Change semitones/cents independently of score and preserve duration.",
       "runtime_rechecked": false,
       "historical_status": "missing",
-      "current_status": "missing",
-      "assessment": "baseline_not_reaudited",
-      "current_proven_status": null,
-      "current_behavior": "No backing pitch/fine-tune properties.",
-      "remaining_gap": "Not re-audited in this delivery-progress audit. The original baseline behavior, gap and acceptance remain authoritative historical context; this is not a new current proof.",
-      "current_evidence": [],
+      "current_status": "implemented",
+      "assessment": "evidence_reviewed",
+      "current_proven_status": "implemented",
+      "current_behavior": "Independent local integer semitone (-12 to 12) and cents (-100 to 100) settings preserve the raw pair, score clocks and duration. History, cancellation, persistence, shared native processing and frozen WAV/stem publication have bounded native/current Windows evidence; the sole targeted visual confirmation resolves invalid guidance and short-height/focus framing.",
+      "remaining_gap": "Implemented only within the declared local numeric scope. Proprietary GP bounds/processing metadata, perceptual or arbitrary-music quality, physical audio, original-GP8 runtime, macOS/Linux and shipping acceptance remain unverified. Nonneutral GP include rejects; explicit omit publishes notation.",
+      "current_evidence": [
+        "backing_processing_contracts",
+        "backing_processing_checks",
+        "backing_processing_pitch_native",
+        "backing_processing_actual",
+        "backing_processing_artifacts",
+        "backing_processing_visual",
+        "backing_processing_assessment"
+      ],
       "runtime_rechecked_by_this_audit": false
     },
     {
@@ -6258,12 +6327,20 @@
       "acceptance_required": "Verify each documented filter on independent stereo fixtures.",
       "runtime_rechecked": false,
       "historical_status": "missing",
-      "current_status": "missing",
-      "assessment": "baseline_not_reaudited",
-      "current_proven_status": null,
-      "current_behavior": "No audio filter modes.",
-      "remaining_gap": "Not re-audited in this delivery-progress audit. The original baseline behavior, gap and acceptance remain authoritative historical context; this is not a new current proof.",
-      "current_evidence": [],
+      "current_status": "partial",
+      "assessment": "evidence_reviewed",
+      "current_proven_status": "partial",
+      "current_behavior": "Six local frequency-emphasis/attenuation modes use 180 Hz low shelf, 1000 Hz peak and 4000 Hz high shelf at plus/minus 6 dB, with independent channel state. All-six native stereo response oracles and actual neutral/Bass Enhance publications support this narrower capability; the same Windows history/persistence and accepted processing-control visual workflow apply.",
+      "remaining_gap": "The historical vocal/instrument/center/channel requirement remains broader: no source separation, center cancellation, channel extraction or AI stems are provided. Exact proprietary curves/metadata, original-GP8 runtime, subjective quality, physical audio, macOS/Linux and shipping acceptance remain unverified.",
+      "current_evidence": [
+        "backing_processing_contracts",
+        "backing_processing_checks",
+        "backing_processing_filter_native",
+        "backing_processing_actual",
+        "backing_processing_artifacts",
+        "backing_processing_visual",
+        "backing_processing_assessment"
+      ],
       "runtime_rechecked_by_this_audit": false
     },
     {

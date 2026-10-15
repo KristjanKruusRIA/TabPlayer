@@ -16,12 +16,12 @@
     }
   },
   "current_revision": {
-    "value": "764d926fbac039e844fbaa68e60969e2fcae2aaa",
-    "accepted_source_revision": "764d926fbac039e844fbaa68e60969e2fcae2aaa",
+    "value": "8bbd56ced2219e03c94a2d3d840fd215fef01d59",
+    "accepted_source_revision": "8bbd56ced2219e03c94a2d3d840fd215fef01d59",
     "documentation_revision": null,
-    "documentation_status": "Working-tree Library validation/overlay adoption after the accepted source checkpoint; root owns final documentation commit/push.",
-    "provenance": "Root integrator reports accepted Library source 764d926fbac039e844fbaa68e60969e2fcae2aaa pushed to feat/gp8-parity and the exact remote ref verified; released main remains 7fc41c773a1b016d7249ceb98ab7929fcca1ce8f. This six-row documentation adoption used the final versioned Library report, ran no Git/network or product runtime operation, and does not certify all-OS or shipping acceptance.",
-    "previous_accepted_checkpoint": "1f85ce2ef90f2fa1940aa998490a5e7308de74fe",
+    "documentation_status": "Working-tree P15 waveform validation/overlay adoption after the locally accepted source checkpoint; root owns final joined review, documentation commit and push.",
+    "provenance": "Root locally accepts backing waveform source 8bbd56ced2219e03c94a2d3d840fd215fef01d59; it is not yet pushed at this adoption checkpoint. Released main remains 7fc41c773a1b016d7249ceb98ab7929fcca1ce8f. This one-row documentation adoption uses the final versioned waveform report and root-accepted Windows functional/visual evidence, runs no Git/network or product runtime operation, and does not certify all-OS or shipping acceptance. The unchanged CI object below belongs strictly to the prior Library source head, not P15 or the current waveform source.",
+    "previous_accepted_checkpoint": "764d926fbac039e844fbaa68e60969e2fcae2aaa",
     "ci_checkpoint": {
       "run_id": "38787714198",
       "head_sha": "764d926fbac039e844fbaa68e60969e2fcae2aaa",
@@ -56,7 +56,7 @@
       }
     }
   },
-  "source_method": "The original overlay read all 258 baseline rows and inspected seven dedicated versioned delivery reports plus scoped source/test definitions. This follow-up reviews the versioned selection-playback and stylesheet-interchange reports and exact P02/P03/N13 acceptance, updating adjacent stale prose only. Graph tools unavailable; narrow rg/source reads used. No fresh runtime validation by this audit. The earlier five-row adoption inspected the accepted recovery/workstation validation and reviews for exactly W10/W11/D04/D05/P15, preserving all historical fields and other 253 rows. This later six-row adoption maps W06/W07/W08/W09/W12/W14 to the final versioned Library validation, including actual Windows Core/restart/Folders/reveal and honest OS-drop/other-platform limits. All 258 historical field sets and 252 other complete row assessments remain unchanged. No product tests/apps/builds, Git or network operation was run by this adoption; bounded document consistency was checked separately.",
+  "source_method": "The original overlay read all 258 baseline rows and inspected seven dedicated versioned delivery reports plus scoped source/test definitions. This follow-up reviews the versioned selection-playback and stylesheet-interchange reports and exact P02/P03/N13 acceptance, updating adjacent stale prose only. Graph tools unavailable; narrow rg/source reads used. No fresh runtime validation by this audit. The earlier five-row adoption inspected the accepted recovery/workstation validation and reviews for exactly W10/W11/D04/D05/P15, preserving all historical fields and other 253 rows. This later six-row adoption maps W06/W07/W08/W09/W12/W14 to the final versioned Library validation, including actual Windows Core/restart/Folders/reveal and honest OS-drop/other-platform limits. All 258 historical field sets and 252 other complete row assessments remain unchanged. No product tests/apps/builds, Git or network operation was run by this adoption; bounded document consistency was checked separately. This later P15-only adoption maps the exact waveform/grid/timeline and visual sync-point acceptance to the final dedicated waveform validation, including two actual Windows runs and the accepted replacement readout/keyboard-focus capture. It preserves all 258 historical field sets, all 257 other complete feature assessments including P16, and every prior evidence entry/digest snapshot. The accepted waveform source is local pending root delivery; the unchanged CI checkpoint is historical Library evidence. This adoption executes only bounded documentation consistency checks, with no product test/app/build, Git or network operation.",
   "assessment_definitions": {
     "evidence_reviewed": "Current source and/or versioned delivery evidence was mapped to this exact requirement; missing acceptance remains explicit.",
     "baseline_not_reaudited": "Historical status carried for coverage only; current_proven_status is null and no new implementation claim is made."
@@ -76,16 +76,16 @@
       "unverified": 8
     },
     "current_dispositions": {
-      "implemented": 76,
+      "implemented": 77,
       "partial": 94,
-      "missing": 80,
+      "missing": 79,
       "unverified": 8
     },
     "evidence_reviewed_total": 106,
     "evidence_reviewed": {
-      "implemented": 34,
+      "implemented": 35,
       "partial": 67,
-      "missing": 1,
+      "missing": 0,
       "unverified": 4
     },
     "baseline_not_reaudited_total": 152,
@@ -95,9 +95,9 @@
       "missing": 79,
       "unverified": 4
     },
-    "status_changed_total": 71,
+    "status_changed_total": 72,
     "transition_counts": {
-      "missing -> implemented": 20,
+      "missing -> implemented": 21,
       "missing -> partial": 46,
       "partial -> implemented": 5
     }
@@ -612,6 +612,48 @@
       "start_line": 54,
       "end_line": 56,
       "kind": "validation_report"
+    },
+    "backing_waveform_scope": {
+      "path": "docs/validation/2026-10-15-gp8-backing-waveform.md",
+      "start_line": 7,
+      "end_line": 7,
+      "kind": "validation_report"
+    },
+    "backing_waveform_protocol_limits": {
+      "path": "docs/validation/2026-10-15-gp8-backing-waveform.md",
+      "start_line": 9,
+      "end_line": 11,
+      "kind": "validation_report"
+    },
+    "backing_waveform_source_review": {
+      "path": "docs/validation/2026-10-15-gp8-backing-waveform.md",
+      "start_line": 23,
+      "end_line": 25,
+      "kind": "validation_report"
+    },
+    "backing_waveform_joined_validation": {
+      "path": "docs/validation/2026-10-15-gp8-backing-waveform.md",
+      "start_line": 61,
+      "end_line": 70,
+      "kind": "validation_report"
+    },
+    "backing_waveform_windows": {
+      "path": "docs/validation/2026-10-15-gp8-backing-waveform.md",
+      "start_line": 96,
+      "end_line": 123,
+      "kind": "validation_report"
+    },
+    "backing_waveform_visual": {
+      "path": "docs/validation/2026-10-15-gp8-backing-waveform.md",
+      "start_line": 127,
+      "end_line": 152,
+      "kind": "validation_report"
+    },
+    "backing_waveform_limits": {
+      "path": "docs/validation/2026-10-15-gp8-backing-waveform.md",
+      "start_line": 158,
+      "end_line": 167,
+      "kind": "validation_report"
     }
   },
   "evidence_file_sha256": {
@@ -657,7 +699,8 @@
     "docs/superpowers/specs/2026-10-15-tabplayer-reference-workstation-design.md": "74cdfff49d6cfa5c22dcbd04736a1423da2adcde2deef16050ddca449fb86248",
     "docs/validation/2026-10-15-tabplayer-reference-workstation.md": "e0e53e8adc1ccccdd0614488cf5ad42004991a9ed26ddb77e08f58a3a275a494",
     "docs/validation/2026-10-14-tabplayer-expansion.md": "dc95c92f95005d9ec2345bc14367d1b2d9357fd4eaa44839de7279f4dc4bf1ac",
-    "docs/validation/2026-10-15-gp8-file-library.md": "565765bd7a9ed396aa762265806e8fd3a336c034a4784437cf6d97ff8b5a700f"
+    "docs/validation/2026-10-15-gp8-file-library.md": "565765bd7a9ed396aa762265806e8fd3a336c034a4784437cf6d97ff8b5a700f",
+    "docs/validation/2026-10-15-gp8-backing-waveform.md": "1d353f53d39c2155588efcdedc51572799b8d44501c951b9eff764fb19ee0b95"
   },
   "next_open_families": [
     {
@@ -712,11 +755,12 @@
     {
       "priority": 5,
       "family": "Sound, hardware and external acceptance",
-      "work": "Effect families/routing/catalogue breadth, MIDI/audio input/output/tuner, backing waveform/pitch/filter tools and services remain largely untouched. Original-GP8, physical printers and physical macOS/Linux input/audio require actual receipts; build/test CI is a separate check.",
+      "work": "Effect families/routing/catalogue breadth, MIDI/audio input/output/tuner, backing pitch/filter tools, P16 tempo-generation/bracket work and services remain open. P15 waveform/timeline and visual sync editing meet only the recorded Windows diagnostic acceptance. Original-GP8, physical printers and physical macOS/Linux input/audio require actual receipts; build/test CI is a separate check.",
       "evidence": [
         "practice_limits",
         "engraving_limits",
-        "harmony_limits"
+        "harmony_limits",
+        "backing_waveform_limits"
       ]
     }
   ],
@@ -794,20 +838,31 @@
         "library_drop_limits",
         "library_platform_limits"
       ]
+    },
+    {
+      "issue": "P15 waveform acceptance supersedes only its earlier missing assessment; P16 is unchanged",
+      "detail": "The final waveform report and accepted Windows functional/visual receipts close the exact P15 waveform/grid/timeline and visual sync-point acceptance, superseding only the earlier recovery/workstation P15-missing assessment. All 257 other feature objects and Markdown rows, including the complete carried partial P16 tempo-generation/brackets assessment, remain unchanged. The 512 MiB query cap covers encoded container bytes, not decoded PCM heap; full native decode is not streaming/cancellable, and original embedded viewing is not independent native archive-extraction provenance. Local accepted source and prior Library CI do not establish push, current all-OS, physical PCM, original-GP8 runtime or shipping acceptance.",
+      "evidence": [
+        "backing_waveform_windows",
+        "backing_waveform_visual",
+        "backing_waveform_protocol_limits",
+        "backing_waveform_limits"
+      ]
     }
   ],
   "limitations": [
     "This is a source/report adoption only. No application, product test, build, device, Git command or original Guitar Pro runtime was run for this overlay; document/data consistency was checked separately.",
-    "Accepted Library source 764d926fbac039e844fbaa68e60969e2fcae2aaa and its exact push/remote verification are supplied by root; this audit did not independently resolve Git state. Earlier evidence-file hashes retain their original snapshots; the new Library validation hash identifies this six-row adoption. The final validation and overlay documentation are working-tree changes pending root commit, distinct from the accepted source checkpoint.",
+    "Root locally accepts waveform source 8bbd56ced2219e03c94a2d3d840fd215fef01d59, not yet pushed at this checkpoint; this audit did not independently resolve Git state. Earlier evidence-file hashes retain their original snapshots. The new waveform validation hash identifies this P15-only adoption; final overlay documentation, joined review and delivery remain with root. The earlier Library source/push evidence remains historical.",
     "All 258 historical requirement and acceptance strings, statuses, references, evidence keys and behavior/gaps are copied without modification from the pinned baseline JSON.",
     "Combined current dispositions include carried historical rows. Only evidence_reviewed rows have a non-null current_proven_status; even implemented means the row acceptance in the documented scope, not whole-product parity.",
     "Existing report suite counts and RED-to-GREEN statements are attributed to their versioned reports. Source reads and test-source reads do not constitute new executions.",
     "Actual Windows CPAL/WASAPI and rendered native PDF receipts are distinguished from model tests. They do not establish physical printers, original GP8 acceptance, macOS/Linux, newly shipped installers, human listening equivalence or arbitrary-score engraving freedom.",
     "Native history, alphaTab GP reimport and source hashes prove bounded preservation properties, not preservation of every target field. Known public reader/writer losses remain explicit.",
     "At the root-observed 2026-10-15 11:09 UTC checkpoint, CI38724478672 macOS frontend/native tests succeeded; packages and complete other-OS results remained pending. This is not a cross-platform CI success claim or physical-platform acceptance. Actual Windows Ctrl-click sparse/drag/end-handle resize acceptance subsequently passed, preserving source and the complete snapshot with a nonempty redo entry; no new PCM was captured. The subsequent independently reviewed actual-wrap oracle meets P03 under the documented reset policy; its logical 48 kHz controlled sample does not establish every effect combination, physical 44.1 kHz/fault behavior or GP8 waveform/historical-tail equivalence.",
-    "Root reports current CI 38787714198 at exact 764d926fbac039e844fbaa68e60969e2fcae2aaa completed FAILURE in four seconds with prepare-audio job 116603918150 recording no runner/steps, desktop skipped, no artifacts and job logs 404 BlobNotFound; cause unknown. Earlier CI 38770187771 at 1f85ce2 had the same uninformative no-step symptom. Earlier W05 CI 38738258294 all-OS success remains confined to 64a1e8f7e416b93ca624a3c48196984424f4a28b. No source-test failure, billing cause, current all-OS pass or physical-platform acceptance is inferred.",
+    "At the earlier Library source checkpoint, root reported CI 38787714198 at exact 764d926fbac039e844fbaa68e60969e2fcae2aaa completed FAILURE in four seconds with prepare-audio job 116603918150 recording no runner/steps, desktop skipped, no artifacts and job logs 404 BlobNotFound; cause unknown. Earlier CI 38770187771 at 1f85ce2 had the same uninformative no-step symptom. Earlier W05 CI 38738258294 all-OS success remains confined to 64a1e8f7e416b93ca624a3c48196984424f4a28b. No source-test failure, billing cause, current all-OS pass or physical-platform acceptance is inferred.",
     "The actual injected destruction-exception attempt stopped at an immutable-host guard before native close/resume. Mounted/real-controller regressions and the normal 12-group run remain separate evidence; no successful destruction-failure execution is claimed.",
-    "Actual Windows Library Core/restart/Folders and observed Explorer reveal support only the cited narrow acceptance. W12 OS-drop delivery remains unproven after helper-only watchdogs; zero-motion input insertion is not delivery. Native late callback rejection is not an actual delayed browser-worker scheduling race. macOS/Linux reveal, extracted shipping resources and full physical-platform acceptance remain pending; W13 associations are unchanged."
+    "Actual Windows Library Core/restart/Folders and observed Explorer reveal support only the cited narrow acceptance. W12 OS-drop delivery remains unproven after helper-only watchdogs; zero-motion input insertion is not delivery. Native late callback rejection is not an actual delayed browser-worker scheduling race. macOS/Linux reveal, extracted shipping resources and full physical-platform acceptance remain pending; W13 associations are unchanged.",
+    "P15 closes only the recorded Windows diagnostic waveform and visual sync-point acceptance. The 512 MiB query ceiling bounds encoded container bytes, not decoded PCM heap; native full decode remains non-streaming/non-cancellable and stale results reject at publication. Original embedded viewing lacks independent native GP archive-extraction proof. P16 tempo generation/brackets, physical PCM fidelity, current macOS/Linux runtime, shipping/install/signing and original-GP8 equivalence remain open. Uncaptured pixel states retain the waveform report limits; final Task 7 joined review and delivery are separate root-owned gates."
   ],
   "features": [
     {
@@ -6046,15 +6101,19 @@
       "acceptance_required": "Move sync points visually and inspect exact bar/beat/audio relationships.",
       "runtime_rechecked": false,
       "historical_status": "missing",
-      "current_status": "missing",
+      "current_status": "implemented",
       "assessment": "evidence_reviewed",
-      "current_proven_status": "missing",
-      "current_behavior": "The existing real backing import/replace/remove, numeric offset/mix and occurrence-aware anchor controls remain reachable in the Backing pane. Those capabilities belong to P13/P14. The workstation batch adds no waveform/grid/audio-timeline or visual sync-marker movement workflow, and supplies no P15 visual-drag acceptance receipt.",
-      "remaining_gap": "The exact P15 acceptance remains open: waveform/timeline with zoom, matched score/audio positions and visually movable sync points showing bar/beat/audio relationships. A written-score overview, numeric anchors, sound-block disclosures and effect reorder limitations are not this feature.",
+      "current_proven_status": "implemented",
+      "current_behavior": "The existing Backing dock now shows true native per-channel peaks, a source-time ruler and performed bar/beat grid with repeated measures and intra-bar tempo. Zoom/pan and matched score selection preserve document/history and native transport state. Recorded Windows UI Add, pointer drag, 10 ms/1 ms keyboard movement, neighbor rejection, Delete, Undo/Redo and fresh Save/reopen establish visually movable sync points with exact score/audio relationships; the separately inspected selected-point readout and keyboard outline close the focused capture gap. Mono, original embedded read-only viewing and real decoder error/Retry are also recorded.",
+      "remaining_gap": "No remaining gap identified for the stated P15 waveform/grid/timeline and visual sync-point acceptance in the recorded Windows diagnostic workflow. P16 tempo generation and entry/exit brackets remain separate and unchanged. The 512 MiB query ceiling bounds encoded container bytes, not decoded PCM heap; native full decode remains non-streaming/non-cancellable and obsolete results reject at publication. Embedded viewing does not independently prove native archive extraction. Other-OS/runtime, shipping, physical PCM and original-GP8 equivalence remain unverified; uncaptured pixel states retain the validation report's explicit limits.",
       "current_evidence": [
-        "workstation_scope_limits",
-        "backing_existing_foundation",
-        "workstation_backing_check"
+        "backing_waveform_scope",
+        "backing_waveform_protocol_limits",
+        "backing_waveform_source_review",
+        "backing_waveform_joined_validation",
+        "backing_waveform_windows",
+        "backing_waveform_visual",
+        "backing_waveform_limits"
       ],
       "runtime_rechecked_by_this_audit": false
     },

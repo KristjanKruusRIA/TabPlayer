@@ -40,6 +40,13 @@ it('offers explicit timing conversions in the existing panel without starting an
   expect(p.onModeChange).toHaveBeenCalledWith('score');expect(p.onFromScore.mock.calls).toEqual([['replace'],['add']]);expect(p.onWriteScore).toHaveBeenCalledOnce();expect(p.begin).not.toHaveBeenCalled();
 });
 
+it('displays converted endpoint noise compactly without changing persisted precision on unchanged Enter',()=>{
+  const settings:BackingSettings={...backing,offsetMs:0,referenceSync:{entryAudioMs:1000.1234567,exitAudioMs:7000.000000000001}},original=structuredClone(settings),p=setup({settings});
+  expect(entry()).toHaveValue('1000.1234567');expect(exit()).toHaveValue('7000');
+  for(const input of [entry(),exit()]){fireEvent.focus(input);fireEvent.keyDown(input,{key:'Enter'});fireEvent.blur(input);}
+  expect(screen.getByLabelText('Active reference edit')).toHaveTextContent('none');expect(p.begin).not.toHaveBeenCalled();expect(p.release).not.toHaveBeenCalled();expect(p.onCommit).not.toHaveBeenCalled();expect(p.onEdit).not.toHaveBeenCalled();expect(settings).toEqual(original);
+});
+
 it('Escape closes From score and returns focus to its summary without editing history',()=>{
   const p=setup(),summary=screen.getByText('From score'),details=summary.closest('details')!;
   fireEvent.click(summary);expect(details).toHaveAttribute('open');const replace=screen.getByRole('button',{name:'Replace sync points'});replace.focus();
@@ -70,6 +77,12 @@ it('preserves fractional source values and applies one offset-aware command on E
   fireEvent.keyDown(input,{key:'Enter'});fireEvent.keyDown(input,{key:'Enter',repeat:true});fireEvent.blur(input);
   expect(p.onCommit).toHaveBeenCalledOnce();expect(p.onCommit).toHaveBeenCalledWith({...backing,referenceSync:{entryAudioMs:1145.375,exitAudioMs:7120.75}},documentRevision);expect(p.release).not.toHaveBeenCalled();
   await act(async()=>finish());await waitFor(()=>expect(p.release).toHaveBeenCalledOnce());expect(p.onEdit).not.toHaveBeenCalled();
+});
+
+it('keeps custom numeric draft precision when applying an endpoint edit',async()=>{
+  const p=setup(),input=entry();fireEvent.change(input,{target:{value:'1025.123456789'}});
+  expect(input).toHaveValue('1025.123456789');fireEvent.keyDown(input,{key:'Enter'});await waitFor(()=>expect(p.release).toHaveBeenCalledOnce());
+  expect(p.onCommit).toHaveBeenCalledOnce();expect(p.onCommit).toHaveBeenCalledWith({...backing,referenceSync:{entryAudioMs:1145.123456789,exitAudioMs:7120.75}},documentRevision);
 });
 
 it('collapsing Sync timing cancels a pending number edit and suppresses its later rejection until settlement releases the lease',async()=>{

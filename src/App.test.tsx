@@ -593,13 +593,23 @@ it('workstation dock Instrument follows per-document visibility while Overview a
   fireEvent.click(screen.getByRole('button',{name:'Mixer'}));expect(screen.getByRole('region',{name:'Mixer'})).toBeVisible();fireEvent.click(screen.getByRole('button',{name:'Overview'}));expect(screen.getByRole('grid',{name:'Written measure overview'})).toBeVisible();expect(a.getState()).toBe(before);expect(integration.playerOptions).toHaveBeenCalledOnce();expect(integration.destroy).not.toHaveBeenCalled();fireEvent.click(screen.getByRole('button',{name:'Instrument'}));
   fireEvent.click(within(openCommand('File')).getByRole('button',{name:'New'}));await waitFor(()=>expect(activeController()).not.toBe(a));expect(screen.queryByRole('region',{name:'Instrument view'})).not.toBeInTheDocument();await act(async()=>{await testWorkspace.activate(first);});expect(screen.getByRole('region',{name:'Instrument view'})).toBeVisible();expect(a.getState()).toBe(before);expectSilentNavigation();
 });
+it.each([{width:1280,height:620},{width:960,height:720}])('short Backing dock at $width×$height reserves the reference plot budget without resizing other dock views',async({width,height})=>{
+  const previousHeight=window.innerHeight;Object.defineProperty(window,'innerHeight',{configurable:true,writable:true,value:height});
+  try{
+    const c=await setup(blankProject(),undefined,{width,workspaceHeight:height-132}),before=c.getState(),workspace=document.querySelector<HTMLElement>('.workstation-workspace')!;
+    expect(workspace).toHaveStyle({'--dock-height':'144px'});const dock=within(screen.getByRole('region',{name:'Bottom dock'}));fireEvent.click(dock.getByRole('button',{name:'Backing'}));
+    const referencePlotHeight=Number.parseFloat(workspace.style.getPropertyValue('--dock-height'))-31-33-34;
+    expect(referencePlotHeight).toBeGreaterThanOrEqual(56);expect(workspace).toHaveAttribute('data-dock-collapsed','false');expect(screen.getByRole('region',{name:'Backing waveform'})).toBeVisible();
+    fireEvent.click(dock.getByRole('button',{name:'Instrument'}));expect(workspace).toHaveStyle({'--dock-height':'160px'});fireEvent.click(dock.getByRole('button',{name:'Overview'}));expect(workspace).toHaveStyle({'--dock-height':'144px'});expect(c.getState()).toBe(before);expectSilentNavigation();
+  }finally{Object.defineProperty(window,'innerHeight',{configurable:true,writable:true,value:previousHeight});}
+});
 it.each([960,1280,1600])('Backing waveform reveals the existing dock at %ipx and preserves drafts and history',async width=>{
   const c=await setup(blankProject(),undefined,{width}),before=c.getState();
   fireEvent.click(paneButton('Track'));const tuning=screen.getByLabelText('Tuning (notes, high to low)');fireEvent.change(tuning,{target:{value:'E4 B3 G3 D3 A2 D2'}});
   fireEvent.click(paneButton('Backing'));viewToggle('Bottom dock');click('Show waveform');
   expect(screen.getByRole('region',{name:'Backing waveform'})).toBeVisible();
   const dock=screen.getByRole('region',{name:'Bottom dock'});expect(within(dock).getByRole('button',{name:'Backing'})).toHaveAttribute('aria-pressed','true');
-  expect(document.querySelector('.workstation-workspace')).toHaveStyle({'--dock-height':`${window.innerHeight<800?144:width>=1440?192:176}px`});
+  expect(document.querySelector('.workstation-workspace')).toHaveStyle({'--dock-height':`${window.innerHeight<800?176:width>=1440?192:176}px`});
   fireEvent.click(within(dock).getByRole('button',{name:'Overview'}));expect(screen.getByRole('grid',{name:'Written measure overview'})).toBeVisible();
   fireEvent.click(paneButton('Track'));expect(tuning).toHaveValue('E4 B3 G3 D3 A2 D2');expect(c.getState()).toBe(before);expectSilentNavigation();
 });

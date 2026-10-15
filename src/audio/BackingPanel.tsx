@@ -23,7 +23,7 @@ export function BackingPanel({settings,assets,onEdit,stageBacking,stageEmbeddedB
   useEffect(()=>{if(active?.surface!=='number'){numberSession.current=null;setNumberDraft(null);}},[active]);
   useEffect(()=>()=>{if(referenceEdit.current?.active?.surface==='number')referenceEdit.current.cancel();},[]);
   const runReference=(action:()=>Promise<void>)=>{setError(null);void action().catch(e=>setError(String(e)));};
-  const sourceValue=(endpoint:ReferenceEndpoint)=>{const backing=reference?.edit.preview??settings,bounds=backing?.referenceSync;return bounds&&backing?String((endpoint==='entry'?bounds.entryAudioMs:bounds.exitAudioMs)-backing.offsetMs):'';};
+  const sourceValue=(endpoint:ReferenceEndpoint)=>{const backing=reference?.edit.preview??settings,bounds=backing?.referenceSync;return bounds&&backing?Number(((endpoint==='entry'?bounds.entryAudioMs:bounds.exitAudioMs)-backing.offsetMs).toFixed(7)).toString():'';};
   const updateNumber=(endpoint:ReferenceEndpoint,value:string)=>{
     if(!reference||!endpointReady||staging)return;
     if(!numberSession.current){if(value===sourceValue(endpoint)||!reference.edit.begin(endpoint,'number'))return;}

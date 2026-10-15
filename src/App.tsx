@@ -98,7 +98,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   const paneFocusIntent=useRef<{pane:'track'|'sound'|'backing'|'inspector';trigger:boolean}|null>(null),[paneFocusTick,setPaneFocusTick]=useState(0);
   const [workspaceHeight,setWorkspaceHeight]=useState(Infinity),[clipboardFocus,setClipboardFocus]=useState(0);
   const narrow=viewport.width<1180,leftShown=leftVisible&&(!narrow||narrowPane!=='inspector'),inspectorShown=inspectorVisible&&(!narrow||narrowPane==='inspector');
-  const dockHeight=instrumentVisible?(viewport.height<800?160:184):(viewport.height<800?144:viewport.width>=1440?192:176);
+  const dockHeight=instrumentVisible?(viewport.height<800?160:184):(viewport.height<800?dockMode==='backing'?176:144:viewport.width>=1440?192:176);
   const dockCollapsed=dockVisible&&!dockForced&&workspaceHeight-dockHeight<200;
   const instrumentShown=instrumentVisible&&dockVisible&&!dockCollapsed;
   const requestPaneFocus=(pane:'track'|'sound'|'backing'|'inspector',trigger=false)=>{paneFocusIntent.current={pane,trigger};setPaneFocusTick(value=>value+1);};

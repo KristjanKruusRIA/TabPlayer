@@ -1,0 +1,4577 @@
+{
+  "format": "TabPlayer",
+  "schemaVersion": 3,
+  "engineVersion": "1.8.4",
+  "base": {
+    "kind": "blank",
+    "title": "Lantern Counterpoint",
+    "artist": "TabPlayer Originals",
+    "tempo": 92,
+    "tuning": [
+      64,
+      59,
+      55,
+      50,
+      45,
+      40
+    ],
+    "measureCount": 8
+  },
+  "baselineEdits": [
+    {
+      "type": "addPitchedTrack",
+      "name": "Keys",
+      "program": 0
+    },
+    {
+      "type": "removeTrack",
+      "track": 0
+    },
+    {
+      "type": "addTrack",
+      "name": "7-string guitar",
+      "tuning": [
+        64,
+        59,
+        55,
+        50,
+        45,
+        40,
+        35
+      ],
+      "program": 25
+    },
+    {
+      "type": "setTrackInfo",
+      "track": 0,
+      "name": "Keys",
+      "shortName": "Keys",
+      "program": 0
+    },
+    {
+      "type": "setStaffSettings",
+      "track": 0,
+      "staff": 0,
+      "settings": {
+        "tuning": [],
+        "capo": 0,
+        "transposition": 0,
+        "displayTransposition": 0,
+        "clef": 4,
+        "showTab": false,
+        "showNotation": true
+      }
+    },
+    {
+      "type": "setTrackLayout",
+      "track": 0,
+      "barsPerSystem": 4,
+      "lineBreaks": []
+    },
+    {
+      "type": "setTrackSound",
+      "trackId": "added/0/{\"type\":\"addPitchedTrack\",\"name\":\"Keys\",\"program\":0}",
+      "sound": {
+        "voiceId": "gm",
+        "presetId": "gm",
+        "effects": {
+          "gate": {
+            "enabled": false,
+            "thresholdDb": -60,
+            "releaseMs": 100
+          },
+          "compressor": {
+            "enabled": false,
+            "thresholdDb": -18,
+            "ratio": 4,
+            "attackMs": 10,
+            "releaseMs": 100,
+            "makeupDb": 0
+          },
+          "amp": {
+            "enabled": false,
+            "model": "clean",
+            "drive": 0.1,
+            "gainDb": 0
+          },
+          "cabinet": {
+            "enabled": false,
+            "model": "open"
+          },
+          "eq": {
+            "enabled": false,
+            "lowDb": 0,
+            "midDb": 0,
+            "highDb": 0,
+            "midHz": 1000
+          },
+          "chorus": {
+            "enabled": false,
+            "rateHz": 1,
+            "depthMs": 5,
+            "mix": 0.15
+          },
+          "delay": {
+            "enabled": false,
+            "quarterNotes": 1,
+            "feedback": 0.25,
+            "mix": 0.15
+          },
+          "reverb": {
+            "enabled": false,
+            "room": 0.5,
+            "damping": 0.5,
+            "mix": 0.12
+          }
+        }
+      }
+    },
+    {
+      "type": "setTrackMix",
+      "trackId": "added/0/{\"type\":\"addPitchedTrack\",\"name\":\"Keys\",\"program\":0}",
+      "mix": {
+        "gain": 0.76,
+        "pan": 0.2,
+        "mute": false,
+        "solo": false
+      }
+    },
+    {
+      "type": "addStaff",
+      "track": 0,
+      "settings": {
+        "tuning": [],
+        "capo": 0,
+        "transposition": 0,
+        "displayTransposition": 0,
+        "clef": 3,
+        "showTab": false,
+        "showNotation": true
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 0,
+        "voice": 0,
+        "beat": 0
+      }
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 0,
+        "voice": 0,
+        "beat": 0
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 0,
+        "voice": 0,
+        "beat": 1
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 0,
+        "voice": 0,
+        "beat": 2
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 0,
+        "voice": 0,
+        "beat": 3
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 1,
+        "voice": 0,
+        "beat": 0
+      }
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 1,
+        "voice": 0,
+        "beat": 0
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 1,
+        "voice": 0,
+        "beat": 1
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 1,
+        "voice": 0,
+        "beat": 2
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 1,
+        "voice": 0,
+        "beat": 3
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 2,
+        "voice": 0,
+        "beat": 0
+      }
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 2,
+        "voice": 0,
+        "beat": 0
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 2,
+        "voice": 0,
+        "beat": 1
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 2,
+        "voice": 0,
+        "beat": 2
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 2,
+        "voice": 0,
+        "beat": 3
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 3,
+        "voice": 0,
+        "beat": 0
+      }
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 3,
+        "voice": 0,
+        "beat": 0
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 3,
+        "voice": 0,
+        "beat": 1
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 3,
+        "voice": 0,
+        "beat": 2
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 3,
+        "voice": 0,
+        "beat": 3
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 4,
+        "voice": 0,
+        "beat": 0
+      }
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 4,
+        "voice": 0,
+        "beat": 0
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 4,
+        "voice": 0,
+        "beat": 1
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 4,
+        "voice": 0,
+        "beat": 2
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 4,
+        "voice": 0,
+        "beat": 3
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 5,
+        "voice": 0,
+        "beat": 0
+      }
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 5,
+        "voice": 0,
+        "beat": 0
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 5,
+        "voice": 0,
+        "beat": 1
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 5,
+        "voice": 0,
+        "beat": 2
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 5,
+        "voice": 0,
+        "beat": 3
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 6,
+        "voice": 0,
+        "beat": 0
+      }
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 6,
+        "voice": 0,
+        "beat": 0
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 6,
+        "voice": 0,
+        "beat": 1
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 6,
+        "voice": 0,
+        "beat": 2
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 6,
+        "voice": 0,
+        "beat": 3
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 7,
+        "voice": 0,
+        "beat": 0
+      }
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 7,
+        "voice": 0,
+        "beat": 0
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 7,
+        "voice": 0,
+        "beat": 1
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 7,
+        "voice": 0,
+        "beat": 2
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 7,
+        "voice": 0,
+        "beat": 3
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "setTrackInfo",
+      "track": 1,
+      "name": "7-string guitar",
+      "shortName": "Gtr.",
+      "program": 25
+    },
+    {
+      "type": "setStaffSettings",
+      "track": 1,
+      "staff": 0,
+      "settings": {
+        "tuning": [
+          64,
+          59,
+          55,
+          50,
+          45,
+          40,
+          35
+        ],
+        "capo": 0,
+        "transposition": 0,
+        "displayTransposition": 0,
+        "clef": 4,
+        "showTab": true,
+        "showNotation": true
+      }
+    },
+    {
+      "type": "setTrackLayout",
+      "track": 1,
+      "barsPerSystem": 4,
+      "lineBreaks": []
+    },
+    {
+      "type": "setTrackSound",
+      "trackId": "added/2/{\"type\":\"addTrack\",\"name\":\"7-string guitar\",\"tuning\":[64,59,55,50,45,40,35],\"program\":25}",
+      "sound": {
+        "voiceId": "green-guitar",
+        "presetId": "clean",
+        "effects": {
+          "gate": {
+            "enabled": false,
+            "thresholdDb": -60,
+            "releaseMs": 100
+          },
+          "compressor": {
+            "enabled": false,
+            "thresholdDb": -18,
+            "ratio": 4,
+            "attackMs": 10,
+            "releaseMs": 100,
+            "makeupDb": 0
+          },
+          "amp": {
+            "enabled": true,
+            "model": "clean",
+            "drive": 0.1,
+            "gainDb": 0
+          },
+          "cabinet": {
+            "enabled": true,
+            "model": "open"
+          },
+          "eq": {
+            "enabled": false,
+            "lowDb": 0,
+            "midDb": 0,
+            "highDb": 0,
+            "midHz": 1000
+          },
+          "chorus": {
+            "enabled": false,
+            "rateHz": 1,
+            "depthMs": 5,
+            "mix": 0.15
+          },
+          "delay": {
+            "enabled": false,
+            "quarterNotes": 1,
+            "feedback": 0.25,
+            "mix": 0.15
+          },
+          "reverb": {
+            "enabled": false,
+            "room": 0.5,
+            "damping": 0.5,
+            "mix": 0.12
+          }
+        }
+      }
+    },
+    {
+      "type": "setTrackMix",
+      "trackId": "added/2/{\"type\":\"addTrack\",\"name\":\"7-string guitar\",\"tuning\":[64,59,55,50,45,40,35],\"program\":25}",
+      "mix": {
+        "gain": 0.76,
+        "pan": -0.2,
+        "mute": false,
+        "solo": false
+      }
+    },
+    {
+      "type": "setPrintLayout",
+      "layout": {
+        "paper": "A4",
+        "orientation": "portrait",
+        "marginMm": 15,
+        "scale": 1,
+        "profile": "ScoreTab"
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 0,
+        "voice": 0,
+        "beat": 3
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 0,
+        "voice": 0,
+        "beat": 2
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 0,
+        "voice": 0,
+        "beat": 1
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 0,
+        "voice": 0,
+        "beat": 0
+      }
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 0,
+        "voice": 0,
+        "beat": 0
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "addPitchedNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 0,
+        "voice": 0,
+        "beat": 0
+      },
+      "pitch": 65
+    },
+    {
+      "type": "addPitchedNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 0,
+        "voice": 0,
+        "beat": 0
+      },
+      "pitch": 69
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 0,
+        "voice": 0,
+        "beat": 1
+      },
+      "duration": 8,
+      "dots": 0
+    },
+    {
+      "type": "addPitchedNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 0,
+        "voice": 0,
+        "beat": 1
+      },
+      "pitch": 72
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 0,
+        "voice": 0,
+        "beat": 2
+      },
+      "duration": 8,
+      "dots": 0
+    },
+    {
+      "type": "addPitchedNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 0,
+        "voice": 0,
+        "beat": 2
+      },
+      "pitch": 74
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 0,
+        "voice": 0,
+        "beat": 3
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "addPitchedNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 0,
+        "voice": 0,
+        "beat": 3
+      },
+      "pitch": 69
+    },
+    {
+      "type": "addPitchedNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 0,
+        "voice": 0,
+        "beat": 3
+      },
+      "pitch": 77
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 0,
+        "voice": 0,
+        "beat": 4
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "addPitchedNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 0,
+        "voice": 0,
+        "beat": 4
+      },
+      "pitch": 65
+    },
+    {
+      "type": "addPitchedNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 0,
+        "voice": 0,
+        "beat": 4
+      },
+      "pitch": 74
+    },
+    {
+      "type": "setNoteTechniquesByIndex",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 0,
+        "voice": 0,
+        "beat": 4
+      },
+      "noteIndex": 0,
+      "patch": {
+        "staccato": true
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 0,
+        "voice": 0,
+        "beat": 3
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 0,
+        "voice": 0,
+        "beat": 2
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 0,
+        "voice": 0,
+        "beat": 1
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 0,
+        "voice": 0,
+        "beat": 0
+      }
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 0,
+        "voice": 0,
+        "beat": 0
+      },
+      "duration": 2,
+      "dots": 0
+    },
+    {
+      "type": "addPitchedNote",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 0,
+        "voice": 0,
+        "beat": 0
+      },
+      "pitch": 38
+    },
+    {
+      "type": "addPitchedNote",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 0,
+        "voice": 0,
+        "beat": 0
+      },
+      "pitch": 45
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 0,
+        "voice": 0,
+        "beat": 1
+      },
+      "duration": 2,
+      "dots": 0
+    },
+    {
+      "type": "addPitchedNote",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 0,
+        "voice": 0,
+        "beat": 1
+      },
+      "pitch": 50
+    },
+    {
+      "type": "addPitchedNote",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 0,
+        "voice": 0,
+        "beat": 1
+      },
+      "pitch": 57
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 0,
+        "voice": 0,
+        "beat": 3
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 0,
+        "voice": 0,
+        "beat": 2
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 0,
+        "voice": 0,
+        "beat": 1
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 0,
+        "voice": 0,
+        "beat": 0
+      }
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 0,
+        "voice": 0,
+        "beat": 0
+      },
+      "duration": 8,
+      "dots": 0
+    },
+    {
+      "type": "setNote",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 0,
+        "voice": 0,
+        "beat": 0
+      },
+      "string": 2,
+      "fret": 10
+    },
+    {
+      "type": "setNoteTechniques",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 0,
+        "voice": 0,
+        "beat": 0
+      },
+      "string": 2,
+      "patch": {
+        "letRing": true
+      }
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 0,
+        "voice": 0,
+        "beat": 1
+      },
+      "duration": 8,
+      "dots": 0
+    },
+    {
+      "type": "setNote",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 0,
+        "voice": 0,
+        "beat": 1
+      },
+      "string": 3,
+      "fret": 12
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 0,
+        "voice": 0,
+        "beat": 2
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "setNote",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 0,
+        "voice": 0,
+        "beat": 2
+      },
+      "string": 4,
+      "fret": 12
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 0,
+        "voice": 0,
+        "beat": 3
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "setNote",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 0,
+        "voice": 0,
+        "beat": 3
+      },
+      "string": 5,
+      "fret": 10
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 0,
+        "voice": 0,
+        "beat": 4
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "setNote",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 0,
+        "voice": 0,
+        "beat": 4
+      },
+      "string": 4,
+      "fret": 14
+    },
+    {
+      "type": "setNoteTechniques",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 0,
+        "voice": 0,
+        "beat": 4
+      },
+      "string": 4,
+      "patch": {
+        "staccato": true
+      }
+    },
+    {
+      "type": "setMeasureSettings",
+      "bar": 0,
+      "numerator": 4,
+      "denominator": 4,
+      "pickup": false,
+      "freeTime": false,
+      "repeatStart": false,
+      "repeatCount": 0,
+      "endings": [],
+      "section": "Lantern",
+      "tempos": [
+        {
+          "beat": 0,
+          "bpm": 92,
+          "linear": false
+        }
+      ]
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 1,
+        "voice": 0,
+        "beat": 3
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 1,
+        "voice": 0,
+        "beat": 2
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 1,
+        "voice": 0,
+        "beat": 1
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 1,
+        "voice": 0,
+        "beat": 0
+      }
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 1,
+        "voice": 0,
+        "beat": 0
+      },
+      "duration": 4,
+      "dots": 1
+    },
+    {
+      "type": "addPitchedNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 1,
+        "voice": 0,
+        "beat": 0
+      },
+      "pitch": 64
+    },
+    {
+      "type": "addPitchedNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 1,
+        "voice": 0,
+        "beat": 0
+      },
+      "pitch": 67
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 1,
+        "voice": 0,
+        "beat": 1
+      },
+      "duration": 8,
+      "dots": 0
+    },
+    {
+      "type": "addPitchedNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 1,
+        "voice": 0,
+        "beat": 1
+      },
+      "pitch": 69
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 1,
+        "voice": 0,
+        "beat": 2
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "addPitchedNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 1,
+        "voice": 0,
+        "beat": 2
+      },
+      "pitch": 72
+    },
+    {
+      "type": "addPitchedNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 1,
+        "voice": 0,
+        "beat": 2
+      },
+      "pitch": 76
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 1,
+        "voice": 0,
+        "beat": 3
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "addPitchedNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 1,
+        "voice": 0,
+        "beat": 3
+      },
+      "pitch": 67
+    },
+    {
+      "type": "addPitchedNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 1,
+        "voice": 0,
+        "beat": 3
+      },
+      "pitch": 74
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 1,
+        "voice": 0,
+        "beat": 3
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 1,
+        "voice": 0,
+        "beat": 2
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 1,
+        "voice": 0,
+        "beat": 1
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 1,
+        "voice": 0,
+        "beat": 0
+      }
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 1,
+        "voice": 0,
+        "beat": 0
+      },
+      "duration": 2,
+      "dots": 0
+    },
+    {
+      "type": "addPitchedNote",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 1,
+        "voice": 0,
+        "beat": 0
+      },
+      "pitch": 36
+    },
+    {
+      "type": "addPitchedNote",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 1,
+        "voice": 0,
+        "beat": 0
+      },
+      "pitch": 43
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 1,
+        "voice": 0,
+        "beat": 1
+      },
+      "duration": 2,
+      "dots": 0
+    },
+    {
+      "type": "addPitchedNote",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 1,
+        "voice": 0,
+        "beat": 1
+      },
+      "pitch": 48
+    },
+    {
+      "type": "addPitchedNote",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 1,
+        "voice": 0,
+        "beat": 1
+      },
+      "pitch": 55
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 1,
+        "voice": 0,
+        "beat": 3
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 1,
+        "voice": 0,
+        "beat": 2
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 1,
+        "voice": 0,
+        "beat": 1
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 1,
+        "voice": 0,
+        "beat": 0
+      }
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 1,
+        "voice": 0,
+        "beat": 0
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "setNote",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 1,
+        "voice": 0,
+        "beat": 0
+      },
+      "string": 2,
+      "fret": 8
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 1,
+        "voice": 0,
+        "beat": 1
+      },
+      "duration": 8,
+      "dots": 0
+    },
+    {
+      "type": "setNote",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 1,
+        "voice": 0,
+        "beat": 1
+      },
+      "string": 3,
+      "fret": 10
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 1,
+        "voice": 0,
+        "beat": 2
+      },
+      "duration": 8,
+      "dots": 0
+    },
+    {
+      "type": "setNote",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 1,
+        "voice": 0,
+        "beat": 2
+      },
+      "string": 4,
+      "fret": 10
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 1,
+        "voice": 0,
+        "beat": 3
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "setNote",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 1,
+        "voice": 0,
+        "beat": 3
+      },
+      "string": 5,
+      "fret": 9
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 1,
+        "voice": 0,
+        "beat": 4
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "setNote",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 1,
+        "voice": 0,
+        "beat": 4
+      },
+      "string": 4,
+      "fret": 12
+    },
+    {
+      "type": "setNoteTechniques",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 1,
+        "voice": 0,
+        "beat": 4
+      },
+      "string": 4,
+      "patch": {
+        "accent": 1
+      }
+    },
+    {
+      "type": "setMeasureSettings",
+      "bar": 1,
+      "numerator": 4,
+      "denominator": 4,
+      "pickup": false,
+      "freeTime": false,
+      "repeatStart": false,
+      "repeatCount": 0,
+      "endings": [],
+      "section": "",
+      "tempos": []
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 2,
+        "voice": 0,
+        "beat": 3
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 2,
+        "voice": 0,
+        "beat": 2
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 2,
+        "voice": 0,
+        "beat": 1
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 2,
+        "voice": 0,
+        "beat": 0
+      }
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 2,
+        "voice": 0,
+        "beat": 0
+      },
+      "duration": 2,
+      "dots": 0
+    },
+    {
+      "type": "addPitchedNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 2,
+        "voice": 0,
+        "beat": 0
+      },
+      "pitch": 65
+    },
+    {
+      "type": "addPitchedNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 2,
+        "voice": 0,
+        "beat": 0
+      },
+      "pitch": 70
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 2,
+        "voice": 0,
+        "beat": 1
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "addPitchedNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 2,
+        "voice": 0,
+        "beat": 1
+      },
+      "pitch": 69
+    },
+    {
+      "type": "addPitchedNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 2,
+        "voice": 0,
+        "beat": 1
+      },
+      "pitch": 74
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 2,
+        "voice": 0,
+        "beat": 2
+      },
+      "duration": 8,
+      "dots": 0
+    },
+    {
+      "type": "addPitchedNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 2,
+        "voice": 0,
+        "beat": 2
+      },
+      "pitch": 72
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 2,
+        "voice": 0,
+        "beat": 3
+      },
+      "duration": 8,
+      "dots": 0
+    },
+    {
+      "type": "addPitchedNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 2,
+        "voice": 0,
+        "beat": 3
+      },
+      "pitch": 69
+    },
+    {
+      "type": "setNoteTechniquesByIndex",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 2,
+        "voice": 0,
+        "beat": 3
+      },
+      "noteIndex": 0,
+      "patch": {
+        "staccato": true
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 2,
+        "voice": 0,
+        "beat": 3
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 2,
+        "voice": 0,
+        "beat": 2
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 2,
+        "voice": 0,
+        "beat": 1
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 2,
+        "voice": 0,
+        "beat": 0
+      }
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 2,
+        "voice": 0,
+        "beat": 0
+      },
+      "duration": 2,
+      "dots": 0
+    },
+    {
+      "type": "addPitchedNote",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 2,
+        "voice": 0,
+        "beat": 0
+      },
+      "pitch": 34
+    },
+    {
+      "type": "addPitchedNote",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 2,
+        "voice": 0,
+        "beat": 0
+      },
+      "pitch": 41
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 2,
+        "voice": 0,
+        "beat": 1
+      },
+      "duration": 2,
+      "dots": 0
+    },
+    {
+      "type": "addPitchedNote",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 2,
+        "voice": 0,
+        "beat": 1
+      },
+      "pitch": 46
+    },
+    {
+      "type": "addPitchedNote",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 2,
+        "voice": 0,
+        "beat": 1
+      },
+      "pitch": 53
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 2,
+        "voice": 0,
+        "beat": 3
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 2,
+        "voice": 0,
+        "beat": 2
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 2,
+        "voice": 0,
+        "beat": 1
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 2,
+        "voice": 0,
+        "beat": 0
+      }
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 2,
+        "voice": 0,
+        "beat": 0
+      },
+      "duration": 4,
+      "dots": 1
+    },
+    {
+      "type": "setNote",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 2,
+        "voice": 0,
+        "beat": 0
+      },
+      "string": 1,
+      "fret": 11
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 2,
+        "voice": 0,
+        "beat": 1
+      },
+      "duration": 8,
+      "dots": 0
+    },
+    {
+      "type": "setNote",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 2,
+        "voice": 0,
+        "beat": 1
+      },
+      "string": 2,
+      "fret": 13
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 2,
+        "voice": 0,
+        "beat": 2
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "setNote",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 2,
+        "voice": 0,
+        "beat": 2
+      },
+      "string": 3,
+      "fret": 12
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 2,
+        "voice": 0,
+        "beat": 3
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "setNote",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 2,
+        "voice": 0,
+        "beat": 3
+      },
+      "string": 4,
+      "fret": 12
+    },
+    {
+      "type": "setNoteTechniques",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 2,
+        "voice": 0,
+        "beat": 3
+      },
+      "string": 4,
+      "patch": {
+        "letRing": true
+      }
+    },
+    {
+      "type": "setMeasureSettings",
+      "bar": 2,
+      "numerator": 4,
+      "denominator": 4,
+      "pickup": false,
+      "freeTime": false,
+      "repeatStart": false,
+      "repeatCount": 0,
+      "endings": [],
+      "section": "",
+      "tempos": []
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 3,
+        "voice": 0,
+        "beat": 3
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 3,
+        "voice": 0,
+        "beat": 2
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 3,
+        "voice": 0,
+        "beat": 1
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 3,
+        "voice": 0,
+        "beat": 0
+      }
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 3,
+        "voice": 0,
+        "beat": 0
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "addPitchedNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 3,
+        "voice": 0,
+        "beat": 0
+      },
+      "pitch": 64
+    },
+    {
+      "type": "addPitchedNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 3,
+        "voice": 0,
+        "beat": 0
+      },
+      "pitch": 69
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 3,
+        "voice": 0,
+        "beat": 1
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "addPitchedNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 3,
+        "voice": 0,
+        "beat": 1
+      },
+      "pitch": 67
+    },
+    {
+      "type": "addPitchedNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 3,
+        "voice": 0,
+        "beat": 1
+      },
+      "pitch": 73
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 3,
+        "voice": 0,
+        "beat": 2
+      },
+      "duration": 8,
+      "dots": 0
+    },
+    {
+      "type": "addPitchedNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 3,
+        "voice": 0,
+        "beat": 2
+      },
+      "pitch": 76
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 3,
+        "voice": 0,
+        "beat": 3
+      },
+      "duration": 8,
+      "dots": 0
+    },
+    {
+      "type": "addPitchedNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 3,
+        "voice": 0,
+        "beat": 3
+      },
+      "pitch": 73
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 3,
+        "voice": 0,
+        "beat": 4
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "addPitchedNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 3,
+        "voice": 0,
+        "beat": 4
+      },
+      "pitch": 69
+    },
+    {
+      "type": "setNoteTechniquesByIndex",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 3,
+        "voice": 0,
+        "beat": 4
+      },
+      "noteIndex": 0,
+      "patch": {
+        "accent": 1
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 3,
+        "voice": 0,
+        "beat": 3
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 3,
+        "voice": 0,
+        "beat": 2
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 3,
+        "voice": 0,
+        "beat": 1
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 3,
+        "voice": 0,
+        "beat": 0
+      }
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 3,
+        "voice": 0,
+        "beat": 0
+      },
+      "duration": 2,
+      "dots": 0
+    },
+    {
+      "type": "addPitchedNote",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 3,
+        "voice": 0,
+        "beat": 0
+      },
+      "pitch": 33
+    },
+    {
+      "type": "addPitchedNote",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 3,
+        "voice": 0,
+        "beat": 0
+      },
+      "pitch": 40
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 3,
+        "voice": 0,
+        "beat": 1
+      },
+      "duration": 2,
+      "dots": 0
+    },
+    {
+      "type": "addPitchedNote",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 3,
+        "voice": 0,
+        "beat": 1
+      },
+      "pitch": 45
+    },
+    {
+      "type": "addPitchedNote",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 3,
+        "voice": 0,
+        "beat": 1
+      },
+      "pitch": 52
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 3,
+        "voice": 0,
+        "beat": 3
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 3,
+        "voice": 0,
+        "beat": 2
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 3,
+        "voice": 0,
+        "beat": 1
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 3,
+        "voice": 0,
+        "beat": 0
+      }
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 3,
+        "voice": 0,
+        "beat": 0
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "setNote",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 3,
+        "voice": 0,
+        "beat": 0
+      },
+      "string": 1,
+      "fret": 10
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 3,
+        "voice": 0,
+        "beat": 1
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "setNote",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 3,
+        "voice": 0,
+        "beat": 1
+      },
+      "string": 2,
+      "fret": 12
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 3,
+        "voice": 0,
+        "beat": 2
+      },
+      "duration": 8,
+      "dots": 0
+    },
+    {
+      "type": "setNote",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 3,
+        "voice": 0,
+        "beat": 2
+      },
+      "string": 3,
+      "fret": 11
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 3,
+        "voice": 0,
+        "beat": 3
+      },
+      "duration": 8,
+      "dots": 0
+    },
+    {
+      "type": "setNote",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 3,
+        "voice": 0,
+        "beat": 3
+      },
+      "string": 4,
+      "fret": 14
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 3,
+        "voice": 0,
+        "beat": 4
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "setNote",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 3,
+        "voice": 0,
+        "beat": 4
+      },
+      "string": 3,
+      "fret": 12
+    },
+    {
+      "type": "setNoteTechniques",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 3,
+        "voice": 0,
+        "beat": 4
+      },
+      "string": 3,
+      "patch": {
+        "staccato": true
+      }
+    },
+    {
+      "type": "setMeasureSettings",
+      "bar": 3,
+      "numerator": 4,
+      "denominator": 4,
+      "pickup": false,
+      "freeTime": false,
+      "repeatStart": false,
+      "repeatCount": 0,
+      "endings": [],
+      "section": "",
+      "tempos": []
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 4,
+        "voice": 0,
+        "beat": 3
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 4,
+        "voice": 0,
+        "beat": 2
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 4,
+        "voice": 0,
+        "beat": 1
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 4,
+        "voice": 0,
+        "beat": 0
+      }
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 4,
+        "voice": 0,
+        "beat": 0
+      },
+      "duration": 8,
+      "dots": 0
+    },
+    {
+      "type": "addPitchedNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 4,
+        "voice": 0,
+        "beat": 0
+      },
+      "pitch": 65
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 4,
+        "voice": 0,
+        "beat": 1
+      },
+      "duration": 8,
+      "dots": 0
+    },
+    {
+      "type": "addPitchedNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 4,
+        "voice": 0,
+        "beat": 1
+      },
+      "pitch": 69
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 4,
+        "voice": 0,
+        "beat": 2
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "addPitchedNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 4,
+        "voice": 0,
+        "beat": 2
+      },
+      "pitch": 72
+    },
+    {
+      "type": "addPitchedNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 4,
+        "voice": 0,
+        "beat": 2
+      },
+      "pitch": 77
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 4,
+        "voice": 0,
+        "beat": 3
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "addPitchedNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 4,
+        "voice": 0,
+        "beat": 3
+      },
+      "pitch": 69
+    },
+    {
+      "type": "addPitchedNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 4,
+        "voice": 0,
+        "beat": 3
+      },
+      "pitch": 74
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 4,
+        "voice": 0,
+        "beat": 4
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "addPitchedNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 4,
+        "voice": 0,
+        "beat": 4
+      },
+      "pitch": 65
+    },
+    {
+      "type": "addPitchedNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 4,
+        "voice": 0,
+        "beat": 4
+      },
+      "pitch": 72
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 4,
+        "voice": 0,
+        "beat": 3
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 4,
+        "voice": 0,
+        "beat": 2
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 4,
+        "voice": 0,
+        "beat": 1
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 4,
+        "voice": 0,
+        "beat": 0
+      }
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 4,
+        "voice": 0,
+        "beat": 0
+      },
+      "duration": 2,
+      "dots": 0
+    },
+    {
+      "type": "addPitchedNote",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 4,
+        "voice": 0,
+        "beat": 0
+      },
+      "pitch": 38
+    },
+    {
+      "type": "addPitchedNote",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 4,
+        "voice": 0,
+        "beat": 0
+      },
+      "pitch": 45
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 4,
+        "voice": 0,
+        "beat": 1
+      },
+      "duration": 2,
+      "dots": 0
+    },
+    {
+      "type": "addPitchedNote",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 4,
+        "voice": 0,
+        "beat": 1
+      },
+      "pitch": 50
+    },
+    {
+      "type": "addPitchedNote",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 4,
+        "voice": 0,
+        "beat": 1
+      },
+      "pitch": 57
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 4,
+        "voice": 0,
+        "beat": 3
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 4,
+        "voice": 0,
+        "beat": 2
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 4,
+        "voice": 0,
+        "beat": 1
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 4,
+        "voice": 0,
+        "beat": 0
+      }
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 4,
+        "voice": 0,
+        "beat": 0
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "setNote",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 4,
+        "voice": 0,
+        "beat": 0
+      },
+      "string": 1,
+      "fret": 3
+    },
+    {
+      "type": "setNoteTechniques",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 4,
+        "voice": 0,
+        "beat": 0
+      },
+      "string": 1,
+      "patch": {
+        "accent": 1
+      }
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 4,
+        "voice": 0,
+        "beat": 1
+      },
+      "duration": 8,
+      "dots": 0
+    },
+    {
+      "type": "setNote",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 4,
+        "voice": 0,
+        "beat": 1
+      },
+      "string": 2,
+      "fret": 5
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 4,
+        "voice": 0,
+        "beat": 2
+      },
+      "duration": 8,
+      "dots": 0
+    },
+    {
+      "type": "setNote",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 4,
+        "voice": 0,
+        "beat": 2
+      },
+      "string": 3,
+      "fret": 5
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 4,
+        "voice": 0,
+        "beat": 3
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "setNote",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 4,
+        "voice": 0,
+        "beat": 3
+      },
+      "string": 4,
+      "fret": 7
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 4,
+        "voice": 0,
+        "beat": 4
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "setNote",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 4,
+        "voice": 0,
+        "beat": 4
+      },
+      "string": 5,
+      "fret": 5
+    },
+    {
+      "type": "setMeasureSettings",
+      "bar": 4,
+      "numerator": 4,
+      "denominator": 4,
+      "pickup": false,
+      "freeTime": false,
+      "repeatStart": false,
+      "repeatCount": 0,
+      "endings": [],
+      "section": "Low reply",
+      "tempos": []
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 5,
+        "voice": 0,
+        "beat": 3
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 5,
+        "voice": 0,
+        "beat": 2
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 5,
+        "voice": 0,
+        "beat": 1
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 5,
+        "voice": 0,
+        "beat": 0
+      }
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 5,
+        "voice": 0,
+        "beat": 0
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "addPitchedNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 5,
+        "voice": 0,
+        "beat": 0
+      },
+      "pitch": 64
+    },
+    {
+      "type": "addPitchedNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 5,
+        "voice": 0,
+        "beat": 0
+      },
+      "pitch": 67
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 5,
+        "voice": 0,
+        "beat": 1
+      },
+      "duration": 8,
+      "dots": 0
+    },
+    {
+      "type": "addPitchedNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 5,
+        "voice": 0,
+        "beat": 1
+      },
+      "pitch": 72
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 5,
+        "voice": 0,
+        "beat": 2
+      },
+      "duration": 8,
+      "dots": 0
+    },
+    {
+      "type": "addPitchedNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 5,
+        "voice": 0,
+        "beat": 2
+      },
+      "pitch": 76
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 5,
+        "voice": 0,
+        "beat": 3
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "addPitchedNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 5,
+        "voice": 0,
+        "beat": 3
+      },
+      "pitch": 74
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 5,
+        "voice": 0,
+        "beat": 4
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "addPitchedNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 5,
+        "voice": 0,
+        "beat": 4
+      },
+      "pitch": 67
+    },
+    {
+      "type": "addPitchedNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 5,
+        "voice": 0,
+        "beat": 4
+      },
+      "pitch": 72
+    },
+    {
+      "type": "setNoteTechniquesByIndex",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 5,
+        "voice": 0,
+        "beat": 4
+      },
+      "noteIndex": 0,
+      "patch": {
+        "staccato": true
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 5,
+        "voice": 0,
+        "beat": 3
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 5,
+        "voice": 0,
+        "beat": 2
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 5,
+        "voice": 0,
+        "beat": 1
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 5,
+        "voice": 0,
+        "beat": 0
+      }
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 5,
+        "voice": 0,
+        "beat": 0
+      },
+      "duration": 2,
+      "dots": 0
+    },
+    {
+      "type": "addPitchedNote",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 5,
+        "voice": 0,
+        "beat": 0
+      },
+      "pitch": 36
+    },
+    {
+      "type": "addPitchedNote",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 5,
+        "voice": 0,
+        "beat": 0
+      },
+      "pitch": 43
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 5,
+        "voice": 0,
+        "beat": 1
+      },
+      "duration": 2,
+      "dots": 0
+    },
+    {
+      "type": "addPitchedNote",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 5,
+        "voice": 0,
+        "beat": 1
+      },
+      "pitch": 48
+    },
+    {
+      "type": "addPitchedNote",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 5,
+        "voice": 0,
+        "beat": 1
+      },
+      "pitch": 55
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 5,
+        "voice": 0,
+        "beat": 3
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 5,
+        "voice": 0,
+        "beat": 2
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 5,
+        "voice": 0,
+        "beat": 1
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 5,
+        "voice": 0,
+        "beat": 0
+      }
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 5,
+        "voice": 0,
+        "beat": 0
+      },
+      "duration": 8,
+      "dots": 0
+    },
+    {
+      "type": "setNote",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 5,
+        "voice": 0,
+        "beat": 0
+      },
+      "string": 1,
+      "fret": 1
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 5,
+        "voice": 0,
+        "beat": 1
+      },
+      "duration": 8,
+      "dots": 0
+    },
+    {
+      "type": "setNote",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 5,
+        "voice": 0,
+        "beat": 1
+      },
+      "string": 2,
+      "fret": 3
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 5,
+        "voice": 0,
+        "beat": 2
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "setNote",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 5,
+        "voice": 0,
+        "beat": 2
+      },
+      "string": 3,
+      "fret": 3
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 5,
+        "voice": 0,
+        "beat": 3
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "setNote",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 5,
+        "voice": 0,
+        "beat": 3
+      },
+      "string": 4,
+      "fret": 5
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 5,
+        "voice": 0,
+        "beat": 4
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "setNote",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 5,
+        "voice": 0,
+        "beat": 4
+      },
+      "string": 3,
+      "fret": 7
+    },
+    {
+      "type": "setNoteTechniques",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 5,
+        "voice": 0,
+        "beat": 4
+      },
+      "string": 3,
+      "patch": {
+        "staccato": true
+      }
+    },
+    {
+      "type": "setMeasureSettings",
+      "bar": 5,
+      "numerator": 4,
+      "denominator": 4,
+      "pickup": false,
+      "freeTime": false,
+      "repeatStart": false,
+      "repeatCount": 0,
+      "endings": [],
+      "section": "",
+      "tempos": []
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 6,
+        "voice": 0,
+        "beat": 3
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 6,
+        "voice": 0,
+        "beat": 2
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 6,
+        "voice": 0,
+        "beat": 1
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 6,
+        "voice": 0,
+        "beat": 0
+      }
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 6,
+        "voice": 0,
+        "beat": 0
+      },
+      "duration": 4,
+      "dots": 1
+    },
+    {
+      "type": "addPitchedNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 6,
+        "voice": 0,
+        "beat": 0
+      },
+      "pitch": 65
+    },
+    {
+      "type": "addPitchedNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 6,
+        "voice": 0,
+        "beat": 0
+      },
+      "pitch": 70
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 6,
+        "voice": 0,
+        "beat": 1
+      },
+      "duration": 8,
+      "dots": 0
+    },
+    {
+      "type": "addPitchedNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 6,
+        "voice": 0,
+        "beat": 1
+      },
+      "pitch": 69
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 6,
+        "voice": 0,
+        "beat": 2
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "addPitchedNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 6,
+        "voice": 0,
+        "beat": 2
+      },
+      "pitch": 65
+    },
+    {
+      "type": "addPitchedNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 6,
+        "voice": 0,
+        "beat": 2
+      },
+      "pitch": 74
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 6,
+        "voice": 0,
+        "beat": 3
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "addPitchedNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 6,
+        "voice": 0,
+        "beat": 3
+      },
+      "pitch": 64
+    },
+    {
+      "type": "addPitchedNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 6,
+        "voice": 0,
+        "beat": 3
+      },
+      "pitch": 73
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 6,
+        "voice": 0,
+        "beat": 3
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 6,
+        "voice": 0,
+        "beat": 2
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 6,
+        "voice": 0,
+        "beat": 1
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 6,
+        "voice": 0,
+        "beat": 0
+      }
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 6,
+        "voice": 0,
+        "beat": 0
+      },
+      "duration": 2,
+      "dots": 0
+    },
+    {
+      "type": "addPitchedNote",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 6,
+        "voice": 0,
+        "beat": 0
+      },
+      "pitch": 34
+    },
+    {
+      "type": "addPitchedNote",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 6,
+        "voice": 0,
+        "beat": 0
+      },
+      "pitch": 41
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 6,
+        "voice": 0,
+        "beat": 1
+      },
+      "duration": 2,
+      "dots": 0
+    },
+    {
+      "type": "addPitchedNote",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 6,
+        "voice": 0,
+        "beat": 1
+      },
+      "pitch": 33
+    },
+    {
+      "type": "addPitchedNote",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 6,
+        "voice": 0,
+        "beat": 1
+      },
+      "pitch": 40
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 6,
+        "voice": 0,
+        "beat": 3
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 6,
+        "voice": 0,
+        "beat": 2
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 6,
+        "voice": 0,
+        "beat": 1
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 6,
+        "voice": 0,
+        "beat": 0
+      }
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 6,
+        "voice": 0,
+        "beat": 0
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "setNote",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 6,
+        "voice": 0,
+        "beat": 0
+      },
+      "string": 1,
+      "fret": 11
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 6,
+        "voice": 0,
+        "beat": 1
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "setNote",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 6,
+        "voice": 0,
+        "beat": 1
+      },
+      "string": 2,
+      "fret": 13
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 6,
+        "voice": 0,
+        "beat": 2
+      },
+      "duration": 8,
+      "dots": 0
+    },
+    {
+      "type": "setNote",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 6,
+        "voice": 0,
+        "beat": 2
+      },
+      "string": 1,
+      "fret": 10
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 6,
+        "voice": 0,
+        "beat": 3
+      },
+      "duration": 8,
+      "dots": 0
+    },
+    {
+      "type": "setNote",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 6,
+        "voice": 0,
+        "beat": 3
+      },
+      "string": 2,
+      "fret": 12
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 6,
+        "voice": 0,
+        "beat": 4
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "setNote",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 6,
+        "voice": 0,
+        "beat": 4
+      },
+      "string": 3,
+      "fret": 11
+    },
+    {
+      "type": "setNoteTechniques",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 6,
+        "voice": 0,
+        "beat": 4
+      },
+      "string": 3,
+      "patch": {
+        "accent": 1
+      }
+    },
+    {
+      "type": "setMeasureSettings",
+      "bar": 6,
+      "numerator": 4,
+      "denominator": 4,
+      "pickup": false,
+      "freeTime": false,
+      "repeatStart": false,
+      "repeatCount": 0,
+      "endings": [],
+      "section": "",
+      "tempos": []
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 7,
+        "voice": 0,
+        "beat": 3
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 7,
+        "voice": 0,
+        "beat": 2
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 7,
+        "voice": 0,
+        "beat": 1
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 7,
+        "voice": 0,
+        "beat": 0
+      }
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 7,
+        "voice": 0,
+        "beat": 0
+      },
+      "duration": 2,
+      "dots": 0
+    },
+    {
+      "type": "addPitchedNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 7,
+        "voice": 0,
+        "beat": 0
+      },
+      "pitch": 65
+    },
+    {
+      "type": "addPitchedNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 7,
+        "voice": 0,
+        "beat": 0
+      },
+      "pitch": 69
+    },
+    {
+      "type": "addPitchedNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 7,
+        "voice": 0,
+        "beat": 0
+      },
+      "pitch": 74
+    },
+    {
+      "type": "setNoteTechniquesByIndex",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 7,
+        "voice": 0,
+        "beat": 0
+      },
+      "noteIndex": 0,
+      "patch": {
+        "accent": 3
+      }
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 7,
+        "voice": 0,
+        "beat": 1
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "addPitchedNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 7,
+        "voice": 0,
+        "beat": 1
+      },
+      "pitch": 64
+    },
+    {
+      "type": "addPitchedNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 7,
+        "voice": 0,
+        "beat": 1
+      },
+      "pitch": 67
+    },
+    {
+      "type": "addPitchedNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 7,
+        "voice": 0,
+        "beat": 1
+      },
+      "pitch": 73
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 7,
+        "voice": 0,
+        "beat": 2
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "addPitchedNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 7,
+        "voice": 0,
+        "beat": 2
+      },
+      "pitch": 65
+    },
+    {
+      "type": "addPitchedNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 7,
+        "voice": 0,
+        "beat": 2
+      },
+      "pitch": 69
+    },
+    {
+      "type": "addPitchedNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 7,
+        "voice": 0,
+        "beat": 2
+      },
+      "pitch": 74
+    },
+    {
+      "type": "setNoteTechniquesByIndex",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 7,
+        "voice": 0,
+        "beat": 2
+      },
+      "noteIndex": 0,
+      "patch": {
+        "accent": 1
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 7,
+        "voice": 0,
+        "beat": 3
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 7,
+        "voice": 0,
+        "beat": 2
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 7,
+        "voice": 0,
+        "beat": 1
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 7,
+        "voice": 0,
+        "beat": 0
+      }
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 7,
+        "voice": 0,
+        "beat": 0
+      },
+      "duration": 2,
+      "dots": 0
+    },
+    {
+      "type": "addPitchedNote",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 7,
+        "voice": 0,
+        "beat": 0
+      },
+      "pitch": 38
+    },
+    {
+      "type": "addPitchedNote",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 7,
+        "voice": 0,
+        "beat": 0
+      },
+      "pitch": 45
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 7,
+        "voice": 0,
+        "beat": 1
+      },
+      "duration": 2,
+      "dots": 0
+    },
+    {
+      "type": "addPitchedNote",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 7,
+        "voice": 0,
+        "beat": 1
+      },
+      "pitch": 38
+    },
+    {
+      "type": "addPitchedNote",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 7,
+        "voice": 0,
+        "beat": 1
+      },
+      "pitch": 50
+    },
+    {
+      "type": "setNoteTechniquesByIndex",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 7,
+        "voice": 0,
+        "beat": 1
+      },
+      "noteIndex": 0,
+      "patch": {
+        "accent": 3
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 7,
+        "voice": 0,
+        "beat": 3
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 7,
+        "voice": 0,
+        "beat": 2
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 7,
+        "voice": 0,
+        "beat": 1
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 7,
+        "voice": 0,
+        "beat": 0
+      }
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 7,
+        "voice": 0,
+        "beat": 0
+      },
+      "duration": 2,
+      "dots": 0
+    },
+    {
+      "type": "setNote",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 7,
+        "voice": 0,
+        "beat": 0
+      },
+      "string": 1,
+      "fret": 3
+    },
+    {
+      "type": "setNote",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 7,
+        "voice": 0,
+        "beat": 0
+      },
+      "string": 2,
+      "fret": 5
+    },
+    {
+      "type": "setNoteTechniques",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 7,
+        "voice": 0,
+        "beat": 0
+      },
+      "string": 1,
+      "patch": {
+        "letRing": true
+      }
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 7,
+        "voice": 0,
+        "beat": 1
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "setNote",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 7,
+        "voice": 0,
+        "beat": 1
+      },
+      "string": 2,
+      "fret": 4
+    },
+    {
+      "type": "setNote",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 7,
+        "voice": 0,
+        "beat": 1
+      },
+      "string": 3,
+      "fret": 7
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 7,
+        "voice": 0,
+        "beat": 2
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "setNote",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 7,
+        "voice": 0,
+        "beat": 2
+      },
+      "string": 1,
+      "fret": 3
+    },
+    {
+      "type": "setNote",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 7,
+        "voice": 0,
+        "beat": 2
+      },
+      "string": 2,
+      "fret": 5
+    },
+    {
+      "type": "setNoteTechniques",
+      "target": {
+        "track": 1,
+        "staff": 0,
+        "bar": 7,
+        "voice": 0,
+        "beat": 2
+      },
+      "string": 1,
+      "patch": {
+        "letRing": true
+      }
+    },
+    {
+      "type": "setMeasureSettings",
+      "bar": 7,
+      "numerator": 4,
+      "denominator": 4,
+      "pickup": false,
+      "freeTime": false,
+      "repeatStart": false,
+      "repeatCount": 0,
+      "endings": [],
+      "section": "",
+      "tempos": []
+    }
+  ],
+  "edits": [],
+  "assets": {}
+}

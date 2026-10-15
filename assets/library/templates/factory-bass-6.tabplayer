@@ -1,0 +1,136 @@
+{
+  "format": "TabPlayer",
+  "schemaVersion": 3,
+  "engineVersion": "1.8.4",
+  "base": {
+    "kind": "blank",
+    "title": "6-string bass — Standard B",
+    "artist": "TabPlayer Originals",
+    "tempo": 120,
+    "tuning": [
+      48,
+      43,
+      38,
+      33,
+      28,
+      23
+    ],
+    "measureCount": 4
+  },
+  "baselineEdits": [
+    {
+      "type": "setTrackInfo",
+      "track": 0,
+      "name": "6-string bass",
+      "shortName": "Bass",
+      "program": 33
+    },
+    {
+      "type": "setStaffSettings",
+      "track": 0,
+      "staff": 0,
+      "settings": {
+        "tuning": [
+          48,
+          43,
+          38,
+          33,
+          28,
+          23
+        ],
+        "capo": 0,
+        "transposition": 0,
+        "displayTransposition": 0,
+        "clef": 3,
+        "showTab": true,
+        "showNotation": true
+      }
+    },
+    {
+      "type": "setTrackLayout",
+      "track": 0,
+      "barsPerSystem": 4,
+      "lineBreaks": []
+    },
+    {
+      "type": "setTrackSound",
+      "trackId": "base/0",
+      "sound": {
+        "voiceId": "darkblack-bass",
+        "presetId": "bass",
+        "effects": {
+          "gate": {
+            "enabled": false,
+            "thresholdDb": -60,
+            "releaseMs": 100
+          },
+          "compressor": {
+            "enabled": true,
+            "thresholdDb": -18,
+            "ratio": 4,
+            "attackMs": 10,
+            "releaseMs": 100,
+            "makeupDb": 3
+          },
+          "amp": {
+            "enabled": true,
+            "model": "bass",
+            "drive": 0.2,
+            "gainDb": 0
+          },
+          "cabinet": {
+            "enabled": true,
+            "model": "bass"
+          },
+          "eq": {
+            "enabled": true,
+            "lowDb": 3,
+            "midDb": 0,
+            "highDb": -2,
+            "midHz": 1000
+          },
+          "chorus": {
+            "enabled": false,
+            "rateHz": 1,
+            "depthMs": 5,
+            "mix": 0.15
+          },
+          "delay": {
+            "enabled": false,
+            "quarterNotes": 1,
+            "feedback": 0.25,
+            "mix": 0.15
+          },
+          "reverb": {
+            "enabled": false,
+            "room": 0.5,
+            "damping": 0.5,
+            "mix": 0.12
+          }
+        }
+      }
+    },
+    {
+      "type": "setTrackMix",
+      "trackId": "base/0",
+      "mix": {
+        "gain": 0.8,
+        "pan": 0,
+        "mute": false,
+        "solo": false
+      }
+    },
+    {
+      "type": "setPrintLayout",
+      "layout": {
+        "paper": "A4",
+        "orientation": "portrait",
+        "marginMm": 15,
+        "scale": 1,
+        "profile": "ScoreTab"
+      }
+    }
+  ],
+  "edits": [],
+  "assets": {}
+}

@@ -1,0 +1,692 @@
+{
+  "format": "TabPlayer",
+  "schemaVersion": 3,
+  "engineVersion": "1.8.4",
+  "base": {
+    "kind": "blank",
+    "title": "Guitar, bass, drums and keys",
+    "artist": "TabPlayer Originals",
+    "tempo": 120,
+    "tuning": [
+      64,
+      59,
+      55,
+      50,
+      45,
+      40
+    ],
+    "measureCount": 4
+  },
+  "baselineEdits": [
+    {
+      "type": "addTrack",
+      "name": "4-string bass",
+      "tuning": [
+        43,
+        38,
+        33,
+        28
+      ],
+      "program": 33
+    },
+    {
+      "type": "addPercussionTrack",
+      "name": "Drums",
+      "program": 0
+    },
+    {
+      "type": "addPitchedTrack",
+      "name": "Keys",
+      "program": 0
+    },
+    {
+      "type": "setTrackInfo",
+      "track": 0,
+      "name": "6-string guitar",
+      "shortName": "Gtr.",
+      "program": 25
+    },
+    {
+      "type": "setStaffSettings",
+      "track": 0,
+      "staff": 0,
+      "settings": {
+        "tuning": [
+          64,
+          59,
+          55,
+          50,
+          45,
+          40
+        ],
+        "capo": 0,
+        "transposition": 0,
+        "displayTransposition": 0,
+        "clef": 4,
+        "showTab": true,
+        "showNotation": true
+      }
+    },
+    {
+      "type": "setTrackLayout",
+      "track": 0,
+      "barsPerSystem": 4,
+      "lineBreaks": []
+    },
+    {
+      "type": "setTrackSound",
+      "trackId": "base/0",
+      "sound": {
+        "voiceId": "green-guitar",
+        "presetId": "clean",
+        "effects": {
+          "gate": {
+            "enabled": false,
+            "thresholdDb": -60,
+            "releaseMs": 100
+          },
+          "compressor": {
+            "enabled": false,
+            "thresholdDb": -18,
+            "ratio": 4,
+            "attackMs": 10,
+            "releaseMs": 100,
+            "makeupDb": 0
+          },
+          "amp": {
+            "enabled": true,
+            "model": "clean",
+            "drive": 0.1,
+            "gainDb": 0
+          },
+          "cabinet": {
+            "enabled": true,
+            "model": "open"
+          },
+          "eq": {
+            "enabled": false,
+            "lowDb": 0,
+            "midDb": 0,
+            "highDb": 0,
+            "midHz": 1000
+          },
+          "chorus": {
+            "enabled": false,
+            "rateHz": 1,
+            "depthMs": 5,
+            "mix": 0.15
+          },
+          "delay": {
+            "enabled": false,
+            "quarterNotes": 1,
+            "feedback": 0.25,
+            "mix": 0.15
+          },
+          "reverb": {
+            "enabled": false,
+            "room": 0.5,
+            "damping": 0.5,
+            "mix": 0.12
+          }
+        }
+      }
+    },
+    {
+      "type": "setTrackMix",
+      "trackId": "base/0",
+      "mix": {
+        "gain": 0.76,
+        "pan": -0.2,
+        "mute": false,
+        "solo": false
+      }
+    },
+    {
+      "type": "setTrackInfo",
+      "track": 1,
+      "name": "4-string bass",
+      "shortName": "Bass",
+      "program": 33
+    },
+    {
+      "type": "setStaffSettings",
+      "track": 1,
+      "staff": 0,
+      "settings": {
+        "tuning": [
+          43,
+          38,
+          33,
+          28
+        ],
+        "capo": 0,
+        "transposition": 0,
+        "displayTransposition": 0,
+        "clef": 3,
+        "showTab": true,
+        "showNotation": true
+      }
+    },
+    {
+      "type": "setTrackLayout",
+      "track": 1,
+      "barsPerSystem": 4,
+      "lineBreaks": []
+    },
+    {
+      "type": "setTrackSound",
+      "trackId": "added/0/{\"type\":\"addTrack\",\"name\":\"4-string bass\",\"tuning\":[43,38,33,28],\"program\":33}",
+      "sound": {
+        "voiceId": "darkblack-bass",
+        "presetId": "bass",
+        "effects": {
+          "gate": {
+            "enabled": false,
+            "thresholdDb": -60,
+            "releaseMs": 100
+          },
+          "compressor": {
+            "enabled": true,
+            "thresholdDb": -18,
+            "ratio": 4,
+            "attackMs": 10,
+            "releaseMs": 100,
+            "makeupDb": 3
+          },
+          "amp": {
+            "enabled": true,
+            "model": "bass",
+            "drive": 0.2,
+            "gainDb": 0
+          },
+          "cabinet": {
+            "enabled": true,
+            "model": "bass"
+          },
+          "eq": {
+            "enabled": true,
+            "lowDb": 3,
+            "midDb": 0,
+            "highDb": -2,
+            "midHz": 1000
+          },
+          "chorus": {
+            "enabled": false,
+            "rateHz": 1,
+            "depthMs": 5,
+            "mix": 0.15
+          },
+          "delay": {
+            "enabled": false,
+            "quarterNotes": 1,
+            "feedback": 0.25,
+            "mix": 0.15
+          },
+          "reverb": {
+            "enabled": false,
+            "room": 0.5,
+            "damping": 0.5,
+            "mix": 0.12
+          }
+        }
+      }
+    },
+    {
+      "type": "setTrackMix",
+      "trackId": "added/0/{\"type\":\"addTrack\",\"name\":\"4-string bass\",\"tuning\":[43,38,33,28],\"program\":33}",
+      "mix": {
+        "gain": 0.8,
+        "pan": -0.08,
+        "mute": false,
+        "solo": false
+      }
+    },
+    {
+      "type": "setTrackInfo",
+      "track": 2,
+      "name": "Drums",
+      "shortName": "Dr.",
+      "program": 0
+    },
+    {
+      "type": "setStaffSettings",
+      "track": 2,
+      "staff": 0,
+      "settings": {
+        "tuning": [],
+        "capo": 0,
+        "transposition": 0,
+        "displayTransposition": 0,
+        "clef": 0,
+        "showTab": false,
+        "showNotation": true
+      }
+    },
+    {
+      "type": "setTrackLayout",
+      "track": 2,
+      "barsPerSystem": 4,
+      "lineBreaks": []
+    },
+    {
+      "type": "setTrackSound",
+      "trackId": "added/1/{\"type\":\"addPercussionTrack\",\"name\":\"Drums\",\"program\":0}",
+      "sound": {
+        "voiceId": "gm",
+        "presetId": "gm",
+        "effects": {
+          "gate": {
+            "enabled": false,
+            "thresholdDb": -60,
+            "releaseMs": 100
+          },
+          "compressor": {
+            "enabled": false,
+            "thresholdDb": -18,
+            "ratio": 4,
+            "attackMs": 10,
+            "releaseMs": 100,
+            "makeupDb": 0
+          },
+          "amp": {
+            "enabled": false,
+            "model": "clean",
+            "drive": 0.1,
+            "gainDb": 0
+          },
+          "cabinet": {
+            "enabled": false,
+            "model": "open"
+          },
+          "eq": {
+            "enabled": false,
+            "lowDb": 0,
+            "midDb": 0,
+            "highDb": 0,
+            "midHz": 1000
+          },
+          "chorus": {
+            "enabled": false,
+            "rateHz": 1,
+            "depthMs": 5,
+            "mix": 0.15
+          },
+          "delay": {
+            "enabled": false,
+            "quarterNotes": 1,
+            "feedback": 0.25,
+            "mix": 0.15
+          },
+          "reverb": {
+            "enabled": false,
+            "room": 0.5,
+            "damping": 0.5,
+            "mix": 0.12
+          }
+        }
+      }
+    },
+    {
+      "type": "setTrackMix",
+      "trackId": "added/1/{\"type\":\"addPercussionTrack\",\"name\":\"Drums\",\"program\":0}",
+      "mix": {
+        "gain": 0.72,
+        "pan": 0,
+        "mute": false,
+        "solo": false
+      }
+    },
+    {
+      "type": "setTrackInfo",
+      "track": 3,
+      "name": "Keys",
+      "shortName": "Keys",
+      "program": 0
+    },
+    {
+      "type": "setStaffSettings",
+      "track": 3,
+      "staff": 0,
+      "settings": {
+        "tuning": [],
+        "capo": 0,
+        "transposition": 0,
+        "displayTransposition": 0,
+        "clef": 4,
+        "showTab": false,
+        "showNotation": true
+      }
+    },
+    {
+      "type": "setTrackLayout",
+      "track": 3,
+      "barsPerSystem": 4,
+      "lineBreaks": []
+    },
+    {
+      "type": "setTrackSound",
+      "trackId": "added/2/{\"type\":\"addPitchedTrack\",\"name\":\"Keys\",\"program\":0}",
+      "sound": {
+        "voiceId": "gm",
+        "presetId": "gm",
+        "effects": {
+          "gate": {
+            "enabled": false,
+            "thresholdDb": -60,
+            "releaseMs": 100
+          },
+          "compressor": {
+            "enabled": false,
+            "thresholdDb": -18,
+            "ratio": 4,
+            "attackMs": 10,
+            "releaseMs": 100,
+            "makeupDb": 0
+          },
+          "amp": {
+            "enabled": false,
+            "model": "clean",
+            "drive": 0.1,
+            "gainDb": 0
+          },
+          "cabinet": {
+            "enabled": false,
+            "model": "open"
+          },
+          "eq": {
+            "enabled": false,
+            "lowDb": 0,
+            "midDb": 0,
+            "highDb": 0,
+            "midHz": 1000
+          },
+          "chorus": {
+            "enabled": false,
+            "rateHz": 1,
+            "depthMs": 5,
+            "mix": 0.15
+          },
+          "delay": {
+            "enabled": false,
+            "quarterNotes": 1,
+            "feedback": 0.25,
+            "mix": 0.15
+          },
+          "reverb": {
+            "enabled": false,
+            "room": 0.5,
+            "damping": 0.5,
+            "mix": 0.12
+          }
+        }
+      }
+    },
+    {
+      "type": "setTrackMix",
+      "trackId": "added/2/{\"type\":\"addPitchedTrack\",\"name\":\"Keys\",\"program\":0}",
+      "mix": {
+        "gain": 0.76,
+        "pan": 0.2,
+        "mute": false,
+        "solo": false
+      }
+    },
+    {
+      "type": "addStaff",
+      "track": 3,
+      "settings": {
+        "tuning": [],
+        "capo": 0,
+        "transposition": 0,
+        "displayTransposition": 0,
+        "clef": 3,
+        "showTab": false,
+        "showNotation": true
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 3,
+        "staff": 1,
+        "bar": 0,
+        "voice": 0,
+        "beat": 0
+      }
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 3,
+        "staff": 1,
+        "bar": 0,
+        "voice": 0,
+        "beat": 0
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 3,
+        "staff": 1,
+        "bar": 0,
+        "voice": 0,
+        "beat": 1
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 3,
+        "staff": 1,
+        "bar": 0,
+        "voice": 0,
+        "beat": 2
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 3,
+        "staff": 1,
+        "bar": 0,
+        "voice": 0,
+        "beat": 3
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 3,
+        "staff": 1,
+        "bar": 1,
+        "voice": 0,
+        "beat": 0
+      }
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 3,
+        "staff": 1,
+        "bar": 1,
+        "voice": 0,
+        "beat": 0
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 3,
+        "staff": 1,
+        "bar": 1,
+        "voice": 0,
+        "beat": 1
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 3,
+        "staff": 1,
+        "bar": 1,
+        "voice": 0,
+        "beat": 2
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 3,
+        "staff": 1,
+        "bar": 1,
+        "voice": 0,
+        "beat": 3
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 3,
+        "staff": 1,
+        "bar": 2,
+        "voice": 0,
+        "beat": 0
+      }
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 3,
+        "staff": 1,
+        "bar": 2,
+        "voice": 0,
+        "beat": 0
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 3,
+        "staff": 1,
+        "bar": 2,
+        "voice": 0,
+        "beat": 1
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 3,
+        "staff": 1,
+        "bar": 2,
+        "voice": 0,
+        "beat": 2
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 3,
+        "staff": 1,
+        "bar": 2,
+        "voice": 0,
+        "beat": 3
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 3,
+        "staff": 1,
+        "bar": 3,
+        "voice": 0,
+        "beat": 0
+      }
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 3,
+        "staff": 1,
+        "bar": 3,
+        "voice": 0,
+        "beat": 0
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 3,
+        "staff": 1,
+        "bar": 3,
+        "voice": 0,
+        "beat": 1
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 3,
+        "staff": 1,
+        "bar": 3,
+        "voice": 0,
+        "beat": 2
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 3,
+        "staff": 1,
+        "bar": 3,
+        "voice": 0,
+        "beat": 3
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "setPrintLayout",
+      "layout": {
+        "paper": "A4",
+        "orientation": "portrait",
+        "marginMm": 15,
+        "scale": 1,
+        "profile": "ScoreTab"
+      }
+    }
+  ],
+  "edits": [],
+  "assets": {}
+}

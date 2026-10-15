@@ -1,0 +1,180 @@
+{
+  "format": "TabPlayerBundledLibrary",
+  "version": 1,
+  "templates": [
+    {
+      "id": "factory-guitar-6",
+      "title": "6-string guitar — Standard E",
+      "description": "Four empty 4/4 measures; E4 B3 G3 D3 A2 E2 (high to low).",
+      "instruments": [
+        "6-string guitar"
+      ],
+      "origin": "factory",
+      "license": "CC0-1.0",
+      "sha256": "7025f8af334c83b16c048d5da32a6cdbca5a1a2106f075cc59152de6026efbd2",
+      "path": "templates/factory-guitar-6.tabplayer"
+    },
+    {
+      "id": "factory-guitar-7",
+      "title": "7-string guitar — Standard B",
+      "description": "Four empty 4/4 measures; E4 B3 G3 D3 A2 E2 B1 (high to low).",
+      "instruments": [
+        "7-string guitar"
+      ],
+      "origin": "factory",
+      "license": "CC0-1.0",
+      "sha256": "54a8016119728522204e61eb8fe1d6496009c45d84607aad900ef1585411c188",
+      "path": "templates/factory-guitar-7.tabplayer"
+    },
+    {
+      "id": "factory-guitar-8",
+      "title": "8-string guitar — Standard F#",
+      "description": "Four empty 4/4 measures; E4 B3 G3 D3 A2 E2 B1 F#1 (high to low).",
+      "instruments": [
+        "8-string guitar"
+      ],
+      "origin": "factory",
+      "license": "CC0-1.0",
+      "sha256": "fe4474ae36e95a83a2905fe034aaff3ce33c4619e12e112d9b808c573940e062",
+      "path": "templates/factory-guitar-8.tabplayer"
+    },
+    {
+      "id": "factory-guitar-9",
+      "title": "9-string guitar — Standard C#",
+      "description": "Four empty 4/4 measures; E4 B3 G3 D3 A2 E2 B1 F#1 C#1 (high to low).",
+      "instruments": [
+        "9-string guitar"
+      ],
+      "origin": "factory",
+      "license": "CC0-1.0",
+      "sha256": "e76f90f140192318e04f26310a005e77188a0fa6286ad4e97c990fd491cf8658",
+      "path": "templates/factory-guitar-9.tabplayer"
+    },
+    {
+      "id": "factory-bass-4",
+      "title": "4-string bass — Standard E",
+      "description": "Four empty 4/4 measures; G2 D2 A1 E1 (high to low).",
+      "instruments": [
+        "4-string bass"
+      ],
+      "origin": "factory",
+      "license": "CC0-1.0",
+      "sha256": "19bb90a22a0dad1b6d9b03959ca2c2d2cf5745383d2c56f6f6fa9184b86b872d",
+      "path": "templates/factory-bass-4.tabplayer"
+    },
+    {
+      "id": "factory-bass-5",
+      "title": "5-string bass — Standard B",
+      "description": "Four empty 4/4 measures; G2 D2 A1 E1 B0 (high to low).",
+      "instruments": [
+        "5-string bass"
+      ],
+      "origin": "factory",
+      "license": "CC0-1.0",
+      "sha256": "106f694726f30408d994e8cf46ae1b562d996f7a2d6a3d4a78157253b28ada91",
+      "path": "templates/factory-bass-5.tabplayer"
+    },
+    {
+      "id": "factory-bass-6",
+      "title": "6-string bass — Standard B",
+      "description": "Four empty 4/4 measures; C3 G2 D2 A1 E1 B0 (high to low).",
+      "instruments": [
+        "6-string bass"
+      ],
+      "origin": "factory",
+      "license": "CC0-1.0",
+      "sha256": "f0693eea07715c8a3d1e8598a6575068d863b79e54a126659f2286fdd017d2a7",
+      "path": "templates/factory-bass-6.tabplayer"
+    },
+    {
+      "id": "factory-keys",
+      "title": "Keys",
+      "description": "Grand staff, piano program and four empty 4/4 measures.",
+      "instruments": [
+        "Keys"
+      ],
+      "origin": "factory",
+      "license": "CC0-1.0",
+      "sha256": "160bf73fd33d9daff9c8ce145e5674c751738afff3ac9ef8a5220362dbe79a0b",
+      "path": "templates/factory-keys.tabplayer"
+    },
+    {
+      "id": "factory-drums",
+      "title": "Drums",
+      "description": "Notation staff, GM percussion channel and four empty 4/4 measures.",
+      "instruments": [
+        "Drums"
+      ],
+      "origin": "factory",
+      "license": "CC0-1.0",
+      "sha256": "b003b1f8cf9bf0dedd7857153a1d5fb375811dfcc5e72b1fad27cfba6b7755d9",
+      "path": "templates/factory-drums.tabplayer"
+    },
+    {
+      "id": "factory-band",
+      "title": "Guitar, bass, drums and keys",
+      "description": "Four independent tracks with standard tunings, grand staff and four empty 4/4 measures.",
+      "instruments": [
+        "6-string guitar",
+        "4-string bass",
+        "Drums",
+        "Keys"
+      ],
+      "origin": "factory",
+      "license": "CC0-1.0",
+      "sha256": "fb4a69fef75195bc4ae90c1919ec087b1faa11f83108114a4462d6ab6df8ae5a",
+      "path": "templates/factory-band.tabplayer"
+    }
+  ],
+  "examples": [
+    {
+      "id": "example-windowline",
+      "title": "Windowline",
+      "description": "Eight-bar E-Dorian guitar, bass and drum groove with syncopated eighths, dotted quarters and muted/staccato replies.",
+      "instruments": [
+        "6-string guitar",
+        "4-string bass",
+        "Drums"
+      ],
+      "origin": "example",
+      "license": "CC0-1.0",
+      "sha256": "317b020dcf03598aa94f46b58dbff6b9949bf3e7f638669ec3adf6d79cb7e32e",
+      "path": "examples/example-windowline.tabplayer"
+    },
+    {
+      "id": "example-seven-steps-five-echoes",
+      "title": "Seven Steps, Five Echoes",
+      "description": "Eight-bar percussion study alternating 7/8 and 5/8, with kick, snare, toms, hats and ride-bell answers.",
+      "instruments": [
+        "Drums"
+      ],
+      "origin": "example",
+      "license": "CC0-1.0",
+      "sha256": "dbb387deef614c9de07bd9bd9ab9e9ac25a085f40fd5d4c5d9f281313e3e03fc",
+      "path": "examples/example-seven-steps-five-echoes.tabplayer"
+    },
+    {
+      "id": "example-lantern-counterpoint",
+      "title": "Lantern Counterpoint",
+      "description": "Eight-bar piano and standard-B seven-string guitar duet; grand-staff chords answer a low-register line with sustained and detached notes.",
+      "instruments": [
+        "Keys",
+        "7-string guitar"
+      ],
+      "origin": "example",
+      "license": "CC0-1.0",
+      "sha256": "d969fe9adc1beba04fb55c6cc1789d47d7dd266dc9d95cb5167feb0f7422c015",
+      "path": "examples/example-lantern-counterpoint.tabplayer"
+    }
+  ],
+  "documents": [
+    {
+      "path": "README.md",
+      "sha256": "0fce884df2da25f7e816071be8b043eb46e81c9d1a094c26d9aac629691ec7fd"
+    },
+    {
+      "path": "CC0-1.0.txt",
+      "sha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499"
+    }
+  ]
+}

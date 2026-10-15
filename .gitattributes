@@ -1,2 +1,4 @@
 # Preserve the exact vendored source bytes recorded in UPSTREAM-SOURCE.json.
 vendor/usvg/** -text
+# Library manifests pin exact authored payload and license bytes on every OS.
+assets/library/** -text

@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach,expect,it } from 'vitest';
 import { cleanup,fireEvent,render,screen,waitFor,within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom/vitest';
 import { model } from '@coderline/alphatab';
 import { music,target } from '../editor/fixtures';
@@ -89,4 +90,28 @@ it('an_edited_barre_cannot_cross_an_open_or_muted_string',()=>{
 it('unchanged_passively_recalled_legacy_barres_remain_exact_on_apply',()=>{
   const {input,commands}=props();input.library.entries=[{id:'d1fb4ba1-6491-4bc9-932d-e194f72be671',label:'Legacy recall',chord:legacy,tuning:[...input.score.tracks[0].staves[0].tuning],capo:0,transposition:0}];render(<HarmonyChordDialog {...input}/>);
   fireEvent.change(screen.getByLabelText('Personal chord'),{target:{value:input.library.entries[0].id}});fireEvent.click(screen.getByRole('button',{name:'Recall library chord'}));fireEvent.click(screen.getByRole('button',{name:'Apply chord'}));expect(commands).toEqual([{type:'setHarmonyChord',target,chord:legacy,fillEmptyBeat:false}]);
+});
+it('initial_library_loading_keeps_focus_at_the_top_then_focuses_the_chord_name',()=>{
+  const {input}=props(),opener=document.createElement('button');document.body.append(opener);opener.focus();
+  const view=render(<HarmonyChordDialog {...input} busy/>),dialog=screen.getByRole('dialog'),cancel=screen.getByRole('button',{name:'Cancel'});
+  expect(dialog).toHaveFocus();expect(cancel).not.toHaveFocus();
+  fireEvent.keyDown(dialog,{key:'Tab'});expect(cancel).toHaveFocus();
+  dialog.focus();view.rerender(<HarmonyChordDialog {...input}/>);expect(screen.getByLabelText('Chord name')).toHaveFocus();
+  view.unmount();expect(opener).toHaveFocus();opener.remove();
+});
+it('compares_generated_shapes_with_passive_diagrams_and_marks_the_selected_shape',()=>{
+  const {input}=props();input.score.tracks[0].staves[0].stringTuning.tunings=[64,60,67];render(<HarmonyChordDialog {...input}/>);
+  const advanced=screen.getByText('Alterations and omissions').closest('details');expect(advanced).not.toHaveAttribute('open');
+  expect(screen.getByLabelText('Root letter').closest('details')).toBeNull();expect(screen.getByLabelText('Formula').closest('details')).toBeNull();
+  fireEvent.click(screen.getByRole('button',{name:'Generate shapes'}));
+  const second=screen.getByRole('button',{name:'Use shape 2'});expect(within(second).getByRole('group',{name:'Chord diagram preview'})).toBeInTheDocument();expect(second.querySelector('[role=button],button,[tabindex]')).toBeNull();
+  fireEvent.click(second);expect(second).toHaveAttribute('aria-pressed','true');expect(screen.getByRole('button',{name:'Use shape 1'})).toHaveAttribute('aria-pressed','false');
+  fireEvent.change(screen.getByLabelText('String 3 fret'),{target:{value:'1'}});expect(second).toHaveAttribute('aria-pressed','false');
+});
+
+it('diagram_positions_remain_keyboard_editable_after_the_comparison_relayout',async()=>{
+  const user=userEvent.setup(),{input,commands,closed}=props(),before=model.JsonConverter.scoreToJson(input.score);render(<HarmonyChordDialog {...input}/>);
+  const position=screen.getByRole('button',{name:'String 1 fret 1: F4'});position.focus();await user.keyboard('{Enter}');
+  expect(screen.getByLabelText('String 1 fret')).toHaveValue(1);expect(commands).toEqual([]);expect(model.JsonConverter.scoreToJson(input.score)).toBe(before);
+  await user.keyboard('{Escape}');expect(closed).toEqual(['closed']);
 });

@@ -13,7 +13,7 @@ export function Transport({player,measures,busy}: {player:Pick<NativePlaybackCon
   useEffect(()=>{setSeek(value=>Math.min(value,measures));setStart(value=>Math.min(value,measures));setEnd(value=>Math.min(value,measures));},[measures]);
   const act=(action:()=>void)=>{try{action();setError(null);}catch(e){setError(String(e));}};
   return <div className="transport"><fieldset disabled={!state.ready || busy}>
-    <button className="primary" onClick={()=>act(()=>state.playing?player.pause():player.play())}>{state.playing?'Pause':'Play'}</button>
+    <button className="primary" aria-keyshortcuts="Space" onClick={()=>act(()=>state.playing?player.pause():player.play())}>{state.playing?'Pause':'Play'}</button>
     <button onClick={()=>act(()=>player.stop())}>Stop</button><output aria-live="off">{clock(state.time)} / {clock(state.endTime)} · M{state.measure+1}</output>
     <label>Speed<select value={state.speed} disabled={state.practicePending||fixed} title={fixed?'Fixed tempo controls playback speed.':undefined} onChange={e=>act(()=>player.setSpeed(Number(e.target.value)))}>{speeds.map(speed=><option key={speed} value={speed}>{display(speed)}%</option>)}</select></label>
     <IndexInput label="Seek measure" min={1} max={measures} value={seek} onValue={setSeek}/><button onClick={()=>act(()=>player.seekToMeasure(seek-1))}>Seek</button>

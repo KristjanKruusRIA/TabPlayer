@@ -1,0 +1,32 @@
+.chord-dialog.harmony-dialog[aria-label="Harmony chord"]{width:min(900px,94vw);max-height:90dvh;padding:0;overflow:hidden;display:flex;flex-direction:column}
+.harmony-dialog>header{padding:16px 20px 12px;border-bottom:1px solid #394454;flex:none}
+.harmony-dialog h2{margin:0;color:#edf1f5}
+.harmony-dialog h3{margin:0 0 10px;font-size:13px;font-weight:600;color:#edf1f5}
+.harmony-body{padding:16px 20px;overflow:auto;min-height:0;scrollbar-color:#465363 #1d2530}
+.harmony-workbench{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:24px;align-items:start}
+.harmony-shapes,.harmony-formula{min-width:0;display:flex;flex-direction:column;gap:10px}
+.harmony-formula h3,.harmony-shapes h3{margin-bottom:0}
+.harmony-dialog .harmony-diagram>svg{display:block;max-height:250px}
+.harmony-diagram-caption{display:block;margin-top:6px}
+.harmony-candidates{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.harmony-candidate{padding:6px;min-width:0;text-align:left;font-size:11px}
+.harmony-candidate>span:first-child{display:block;margin-bottom:5px}
+.harmony-candidate[aria-pressed="true"]{border-color:#b5df73;background:#273522;color:#d7efb8}
+.harmony-candidate .harmony-diagram-caption{display:none}
+.harmony-dialog .harmony-candidate .harmony-diagram>svg{max-height:108px}
+.harmony-dialog details{border-top:1px solid #394454}
+.harmony-dialog details fieldset,.harmony-dialog details label{margin-bottom:0}
+.harmony-dialog summary{margin:10px 0;font-size:12px}
+.harmony-dialog .technique-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+.harmony-dialog .check{white-space:normal}
+.harmony-dialog label{color:#b7c2ce}
+.harmony-dialog .muted{color:#b7c2ce}
+.harmony-diagram .muted{color:#97a6b6}
+.harmony-actions{display:flex;align-items:center;gap:8px;padding:12px 20px;border-top:1px solid #394454;flex:none;background:#1d2530}
+.harmony-actions>fieldset{display:flex;flex-direction:row;flex:1;gap:8px}
+.harmony-actions .primary{margin-left:auto;min-width:112px}
+.harmony-actions>button{min-width:80px}
+@media(max-width:700px){.harmony-workbench{grid-template-columns:minmax(0,1fr);gap:18px}.harmony-dialog .harmony-diagram>svg{max-height:210px}.harmony-actions,.harmony-dialog>header{padding:12px 16px}.harmony-body{padding:12px 16px}}
+.harmony-formula{grid-column:2;grid-row:1}
+.harmony-shapes{grid-column:1;grid-row:1}
+@media(max-width:700px){.harmony-formula{grid-column:1;grid-row:2}.harmony-shapes{grid-row:1}}

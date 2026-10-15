@@ -19,7 +19,7 @@ export function ChordDiagramPreview({chord,staff,highlightRoot,onToggle}:ChordDi
     const candidate={...chord,frets:chord.frets.map((value,i)=>i===index?fret:value)},pitch=soundingChordPitches(candidate,staff)[index];
     return `String ${index+1} ${fret===0?'open':`fret ${fret}`}: ${pitch===null?'unavailable':harmonyPitchName(pitch)}${highlightRoot&&pitch!==null&&pitch%12===root?', root':''}`;
   };
-  return <figure style={{margin:0}}><svg role="group" aria-label="Chord diagram preview" viewBox={`0 0 ${width} ${height}`} style={{width:'100%',background:'#fffdf8',borderRadius:6,color:'#161c24'}}>
+  return <span className="harmony-diagram" style={{display:'block',margin:0}}><svg role="group" aria-label="Chord diagram preview" viewBox={`0 0 ${width} ${height}`} style={{width:'100%',background:'#fffdf8',borderRadius:6,color:'#161c24'}}>
     <text x={8} y={16} fill="currentColor" fontSize={11}>First fret {chord.firstFret}</text>
     {rows.map((fret,row)=><g key={fret}><line x1={32} x2={width-16} y1={55+row*30} y2={55+row*30} stroke="#97a6b6"/><text x={8} y={62+row*30} fill="currentColor" fontSize={11}>{fret}</text></g>)}
     {chord.frets.map((current,index)=>{
@@ -38,5 +38,5 @@ export function ChordDiagramPreview({chord,staff,highlightRoot,onToggle}:ChordDi
       </g>;
     })}
     {chord.barreFrets.map((fret,index)=>{const positions=chord.frets.flatMap((value,i)=>value>=fret?[i]:[]),row=rows.indexOf(fret);return row<0||positions.length<2?null:<line key={index} x1={40+positions[0]*40} x2={40+positions.at(-1)!*40} y1={70+row*30} y2={70+row*30} stroke="#465363" strokeWidth={4} opacity={.5}/>;})}
-  </svg><figcaption className="muted">Sounding pitches · capo {staff.capo} · sounding offset {staff.transpositionPitch}. Strings run high to low in diagram order.{!chord.showDiagram?' Diagram hidden in score.':''}</figcaption></figure>;
+  </svg><span className="harmony-diagram-caption muted">Sounding pitches · capo {staff.capo} · sounding offset {staff.transpositionPitch}. Strings run high to low in diagram order.{!chord.showDiagram?' Diagram hidden in score.':''}</span></span>;
 }

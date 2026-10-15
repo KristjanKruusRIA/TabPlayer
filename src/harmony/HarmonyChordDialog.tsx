@@ -6,6 +6,7 @@ import { chordTones,findChordShapes,formatChordName,recognizeChords } from './ch
 import { getHarmonyChord,setHarmonyChordSource } from './chord-source';
 import { createHarmonyLibraryEntry,recallHarmonyLibraryEntry } from './library';
 import { ChordDiagramPreview,soundingChordPitches } from './ChordDiagramPreview';
+import './harmony-dialog.css';
 
 const newRecipe=():ChordRecipe=>({root:{step:0,alteration:0},formula:'major',alterations:[],omissions:[],bass:null});
 const formulas:ReadonlyArray<readonly [ChordFormulaId,string]>=[['major','Major'],['minor','Minor'],['dim','Diminished'],['aug','Augmented'],['sus2','Suspended 2'],['sus4','Suspended 4'],['power','Power'],['6','Major 6'],['m6','Minor 6'],['7','Dominant 7'],['maj7','Major 7'],['m7','Minor 7'],['mMaj7','Minor major 7'],['m7b5','Half diminished'],['dim7','Diminished 7'],['9','Dominant 9'],['maj9','Major 9'],['m9','Minor 9'],['11','Dominant 11'],['m11','Minor 11'],['13','Dominant 13'],['7sus4','Suspended dominant 7']];
@@ -21,14 +22,19 @@ export function HarmonyChordDialog({score,target,selection,value,busy,library,on
   const [draft,setDraft]=useState(()=>initial(value,staff)),[recipe,setRecipe]=useState(()=>draft.recipe??newRecipe()),[barres,setBarres]=useState(()=>draft.barreFrets.join(', ')),[text,setText]=useState(beat.text??'');
   const [shapes,setShapes]=useState<HarmonyChord[]>([]),[fill,setFill]=useState(false),[error,setError]=useState(''),[pending,setPending]=useState(false),[libraryId,setLibraryId]=useState(''),[libraryLabel,setLibraryLabel]=useState(''),[status,setStatus]=useState('');
   const preservedShape=useRef(JSON.stringify([draft.frets,draft.barreFrets]));
-  const nameInput=useRef<HTMLInputElement>(null),cancel=useRef<HTMLButtonElement>(null),contextKey=JSON.stringify([target,staff.tuning,staff.capo,staff.transpositionPitch]),valueKey=JSON.stringify(value);
+  const dialog=useRef<HTMLElement>(null),nameInput=useRef<HTMLInputElement>(null),cancel=useRef<HTMLButtonElement>(null),wasBusy=useRef(busy||pending),contextKey=JSON.stringify([target,staff.tuning,staff.capo,staff.transpositionPitch]),valueKey=JSON.stringify(value);
   const install=(next:HarmonyChord)=>{preservedShape.current=JSON.stringify([next.frets,next.barreFrets]);setDraft(structuredClone(next));setRecipe(next.recipe?structuredClone(next.recipe):newRecipe());setBarres(next.barreFrets.join(', '));setShapes([]);setError('');};
   useEffect(()=>{install(initial(value,staff));setText(beat.text??'');setFill(false);setStatus('');},[score,contextKey,valueKey]);
-  useEffect(()=>{const opener=document.activeElement;nameInput.current?.focus();return()=>{if(opener instanceof HTMLElement&&opener.isConnected)opener.focus();};},[]);
-  useEffect(()=>{if(busy||pending)cancel.current?.focus();},[busy,pending]);
+  useEffect(()=>{const opener=document.activeElement;(busy?dialog.current:nameInput.current)?.focus({preventScroll:true});return()=>{if(opener instanceof HTMLElement&&opener.isConnected)opener.focus({preventScroll:true});};},[]);
+  useEffect(()=>{const loading=busy||pending;if(loading&&!wasBusy.current)cancel.current?.focus({preventScroll:true});else if(!loading&&wasBusy.current&&document.activeElement===dialog.current)nameInput.current?.focus({preventScroll:true});wasBusy.current=loading;},[busy,pending]);
   function keyDown(event:KeyboardEvent<HTMLElement>){
     if(event.key==='Escape'){event.preventDefault();event.stopPropagation();onClose();return;}
-    if(event.key!=='Tab')return;const controls=Array.from(event.currentTarget.querySelectorAll<HTMLElement>('input:not(:disabled),select:not(:disabled),button:not(:disabled)')),first=controls[0],last=controls.at(-1);
+    if(event.key!=='Tab')return;const controls=Array.from(event.currentTarget.querySelectorAll<HTMLElement>('input,select,button,summary,[tabindex="0"]')).filter(control=>{
+      if(control.matches(':disabled')||control.closest('fieldset:disabled'))return false;
+      for(let parent=control.parentElement;parent&&parent!==event.currentTarget;parent=parent.parentElement)if(parent instanceof HTMLDetailsElement&&!parent.open&&control!==parent.querySelector('summary'))return false;
+      return true;
+    }),first=controls[0],last=controls.at(-1);
+    if(document.activeElement===event.currentTarget){event.preventDefault();(event.shiftKey?last:first)?.focus();return;}
     if(event.shiftKey&&document.activeElement===first){event.preventDefault();last?.focus();}else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first?.focus();}
   }
   function updateRecipe(next:ChordRecipe){
@@ -56,22 +62,25 @@ export function HarmonyChordDialog({score,target,selection,value,busy,library,on
   let matches:ReturnType<typeof recognizeChords>=[];try{matches=recognizeChords(pitches,recipe.root);}catch(cause){analysisError=message(cause);}
   const trackChords=score.tracks[target.track].staves.flatMap(source=>[...source.chords??[]].map(([id,chord])=>({id:JSON.stringify([source.index,id]),source,chord})));
   const accidentals=<>{[-2,-1,0,1,2].map(value=><option key={value} value={value}>{value===0?'Natural':value===-2?'Double flat':value===-1?'Flat':value===1?'Sharp':'Double sharp'}</option>)}</>;
-  return <div className="dialog-backdrop"><section role="dialog" aria-modal="true" aria-label="Harmony chord" className="chord-dialog" onKeyDown={keyDown}><h2>Harmony chord</h2><fieldset disabled={busy||pending}>
+  return <div className="dialog-backdrop"><section role="dialog" aria-modal="true" aria-label="Harmony chord" className="chord-dialog harmony-dialog" ref={dialog} tabIndex={-1} onKeyDown={keyDown}><header><h2>Harmony chord</h2>{busy&&<p role="status" className="muted">Loading chord library…</p>}</header><div className="harmony-body"><fieldset disabled={busy||pending}>
+    <div className="harmony-workbench"><div className="harmony-formula"><h3>Name and formula</h3>
     <label>Chord name<input ref={nameInput} value={draft.name} onChange={e=>{setDraft({...draft,name:e.target.value.replace(/^['‘’]/,''),nameMode:'manual',recipe:null});setError('');}}/></label>
     <label>Name mode<select value={draft.nameMode} onChange={e=>e.target.value==='theory'?updateRecipe(recipe):setDraft({...draft,nameMode:'manual',recipe:null})}><option value="theory">Theory</option><option value="manual">Manual</option></select></label>
     <p className="muted">Sounding chord analysis includes this staff's tuning, capo and sounding offset. A leading apostrophe selects a manual name.</p>
-    <details open><summary>Formula</summary><fieldset>
+
       <div className="pair"><label>Root letter<select value={recipe.root.step} onChange={e=>updateRecipe({...recipe,root:{...recipe.root,step:Number(e.target.value)}})}>{[...'CDEFGAB'].map((name,index)=><option key={name} value={index}>{name}</option>)}</select></label><label>Root accidental<select value={recipe.root.alteration} onChange={e=>updateRecipe({...recipe,root:{...recipe.root,alteration:Number(e.target.value)}})}>{accidentals}</select></label></div>
       <label>Formula<select value={recipe.formula} onChange={e=>updateRecipe({...recipe,formula:e.target.value as ChordFormulaId})}>{formulas.map(([id,name])=><option key={id} value={id}>{name}</option>)}</select></label>
-      <div className="technique-grid">{([5,9,11,13] as const).map(degree=><label key={degree}>Alter degree {degree}<select value={recipe.alterations.find(value=>value.degree===degree)?.shift??0} onChange={e=>updateRecipe({...recipe,alterations:[...recipe.alterations.filter(value=>value.degree!==degree),...Number(e.target.value)===0?[]:[{degree,shift:Number(e.target.value) as -1|1}]]})}><option value={0}>Unchanged</option><option value={-1}>Flat</option><option value={1}>Sharp</option></select></label>)}</div>
+      <details><summary>Alterations and omissions</summary><fieldset><div className="technique-grid">{([5,9,11,13] as const).map(degree=><label key={degree}>Alter degree {degree}<select value={recipe.alterations.find(value=>value.degree===degree)?.shift??0} onChange={e=>updateRecipe({...recipe,alterations:[...recipe.alterations.filter(value=>value.degree!==degree),...Number(e.target.value)===0?[]:[{degree,shift:Number(e.target.value) as -1|1}]]})}><option value={0}>Unchanged</option><option value={-1}>Flat</option><option value={1}>Sharp</option></select></label>)}</div>
       <div className="technique-grid">{([1,2,3,4,5,6,7,9,11,13] as ChordDegree[]).map(degree=><label className="check" key={degree}><input type="checkbox" checked={recipe.omissions.includes(degree)} onChange={e=>updateRecipe({...recipe,omissions:e.target.checked?[...recipe.omissions,degree]:recipe.omissions.filter(value=>value!==degree)})}/>Omit degree {degree}</label>)}</div>
+      </fieldset></details>
       <label className="check"><input type="checkbox" checked={recipe.bass!==null} onChange={e=>updateRecipe({...recipe,bass:e.target.checked?{step:0,alteration:0}:null})}/>Slash bass</label>
       {recipe.bass&&<div className="pair"><label>Bass letter<select value={recipe.bass.step} onChange={e=>updateRecipe({...recipe,bass:{...recipe.bass!,step:Number(e.target.value)}})}>{[...'CDEFGAB'].map((name,index)=><option key={name} value={index}>{name}</option>)}</select></label><label>Bass accidental<select value={recipe.bass.alteration} onChange={e=>updateRecipe({...recipe,bass:{...recipe.bass!,alteration:Number(e.target.value)}})}>{accidentals}</select></label></div>}
       <button type="button" onClick={()=>{try{const found=findChordShapes(staff,recipe,{maxFret:24,maxSpan:4,limit:12});setShapes(found);setError(found.length?'':'No shapes found in frets 0–24 with a four-fret span.');}catch(cause){setError(message(cause));}}}>Generate shapes</button>
-      {shapes.map((shape,index)=><button type="button" key={index} aria-label={`Use shape ${index+1}`} onClick={()=>{setDraft(structuredClone(shape));setBarres(shape.barreFrets.join(', '));setError('');}}>Shape {index+1}: {shape.frets.join(', ')}</button>)}
       {matches.length>0&&<div aria-label="Recognized chords"><p className="muted">Exact sounding pitch-class matches</p>{matches.map((match,index)=><button type="button" key={index} onClick={()=>updateRecipe(match.recipe)}>Use recognized {match.name}</button>)}</div>}
-    </fieldset></details>
-    <ChordDiagramPreview chord={draft} staff={staff} highlightRoot onToggle={busy||pending?null:updateFret}/>
+    </div><div className="harmony-shapes"><h3>Selected shape</h3>
+      <ChordDiagramPreview chord={draft} staff={staff} highlightRoot onToggle={busy||pending?null:updateFret}/>
+      {shapes.length>0?<div className="harmony-candidates" aria-label="Generated shapes">{shapes.map((shape,index)=><button className="harmony-candidate" type="button" key={index} aria-label={`Use shape ${index+1}`} aria-pressed={JSON.stringify([shape.frets,shape.barreFrets])===JSON.stringify([draft.frets,draft.barreFrets])} onClick={()=>{setDraft(structuredClone(shape));setBarres(shape.barreFrets.join(', '));setError('');}}><span>Shape {index+1}</span><ChordDiagramPreview chord={shape} staff={staff} highlightRoot onToggle={null}/></button>)}</div>:<p className="muted">Choose a formula and generate shapes to compare fingerings.</p>}
+    </div></div>
     <details><summary>Shape and display</summary><fieldset>
       <label>First fret<input type="number" min={0} max={127} value={draft.firstFret} onChange={e=>setDraft({...draft,firstFret:Number(e.target.value)})}/></label>
       {draft.frets.map((fret,index)=><fieldset key={index}><legend>String {index+1}</legend><div className="pair"><label>String {index+1} fret<input type="number" min={-1} max={127} value={fret} onChange={e=>updateFret(index,Number(e.target.value))}/></label><label>String {index+1} finger<select value={draft.fingers[index]} onChange={e=>setDraft({...draft,fingers:draft.fingers.map((value,i)=>i===index?Number(e.target.value):value)})}>{[[-2,'Unknown'],[-1,'None / dead'],[0,'Thumb'],[1,'1'],[2,'2'],[3,'3'],[4,'4']].map(([value,label])=><option key={value} value={value}>{label}</option>)}</select></label></div><div className="pair"><button type="button" onClick={()=>updateFret(index,-1)}>Mute string {index+1}</button><button type="button" onClick={()=>updateFret(index,0)}>Open string {index+1}</button></div></fieldset>)}
@@ -87,8 +96,7 @@ export function HarmonyChordDialog({score,target,selection,value,busy,library,on
       <button type="button" onClick={async()=>{try{const entry=createHarmonyLibraryEntry(crypto.randomUUID(),libraryLabel,prepared(),staff);setPending(true);await onLibraryPut(entry);setStatus('Saved to library.');setError('');}catch(cause){setError(message(cause));}finally{setPending(false);}}}>Save to library</button>
       <button type="button" disabled={!libraryId} onClick={async()=>{try{setPending(true);await onLibraryRemove(libraryId);setLibraryId('');setStatus('Removed from library.');setError('');}catch(cause){setError(message(cause));}finally{setPending(false);}}}>Delete library chord</button>
     </fieldset></details>
-    <label>Beat text<input value={text} onChange={e=>setText(e.target.value)}/></label><button type="button" onClick={()=>submit({type:'setBeatText',target:{...target},text})}>Apply beat text</button>
+    <details><summary>Beat text</summary><fieldset><label>Beat text<input value={text} onChange={e=>setText(e.target.value)}/></label><button type="button" onClick={()=>submit({type:'setBeatText',target:{...target},text})}>Apply beat text</button></fieldset></details>
     {(error||analysisError)&&<p role="alert">{error||analysisError}</p>}{status&&<p role="status">{status}</p>}
-    <div className="pair"><button type="button" className="primary" onClick={apply}>Apply chord</button><button type="button" onClick={()=>submit({type:'setHarmonyChord',target:{...target},chord:null,fillEmptyBeat:false})}>Remove chord</button></div>
-  </fieldset><button ref={cancel} type="button" onClick={onClose}>Cancel</button></section></div>;
+  </fieldset></div><footer className="harmony-actions"><fieldset disabled={busy||pending}><button type="button" onClick={()=>submit({type:'setHarmonyChord',target:{...target},chord:null,fillEmptyBeat:false})}>Remove chord</button><button type="button" className="primary" onClick={apply}>Apply chord</button></fieldset><button ref={cancel} type="button" onClick={onClose}>Cancel</button></footer></section></div>;
 }

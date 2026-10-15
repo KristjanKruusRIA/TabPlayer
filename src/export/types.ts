@@ -14,7 +14,8 @@ export type ExportOptions =
   | {format:'stems';selection:ExportSelection;audio:AudioExportOptions};
 export interface ExportProgress { id:string;frames:number;totalFrames:number;status:'running'|'complete'|'cancelled'|'failed';error?:string|null }
 export function validateSelection(trackCount:number,barCount:number,selection:ExportSelection,staffCounts:number[]=[]) {
-  if (!selection.tracks.length || new Set(selection.tracks).size!==selection.tracks.length || selection.tracks.some(n=>!Number.isInteger(n)||n<0||n>=trackCount)) throw new Error('Select existing tracks to export.');
+  if (!selection.tracks.length) throw new Error('Select at least one track to export.');
+  if (new Set(selection.tracks).size!==selection.tracks.length || selection.tracks.some(n=>!Number.isInteger(n)||n<0||n>=trackCount)) throw new Error('Select existing tracks to export.');
   const r=selection.range;
   if(r && (![r.first,r.last].every(Number.isInteger)||r.first<0||r.last<r.first||r.last>=barCount)) throw new Error('Use an inclusive range of existing measures.');
   for(const [track,staves] of Object.entries(selection.staves??{})){const index=Number(track);if(!selection.tracks.includes(index)||!Array.isArray(staves)||!staves.length||new Set(staves).size!==staves.length||staves.some(n=>!Number.isInteger(n)||n<0||n>=(staffCounts[index]??0)))throw new Error('Select existing staves for each exported track.');}

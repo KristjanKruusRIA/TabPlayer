@@ -64,6 +64,28 @@ it('manual keyboard override shows all simultaneous pitches across the selected 
   expect(screen.getByText('D#4',{selector:'.instrument-note'})).toBeInTheDocument();
 });
 
+it('starts compact and changes size without resetting mode, artwork, notes or score source', () => {
+  const score=scoreWith();stringNote(score,6,3);stringNote(score,1,5);const notes=finish(score),before=model.JsonConverter.scoreToJson(score);
+  const {container,rerender,unmount}=render(<InstrumentView score={score} track={0} staff={0} notes={notes}/>);
+  expect(screen.getByRole('button',{name:'Expand instrument view'})).toHaveAttribute('aria-expanded','false');
+  fireEvent.change(screen.getByLabelText('Instrument view mode'),{target:{value:'keys'}});
+  const keyboard=screen.getByRole('img',{name:'Keyboard'}),playing=container.querySelector('.instrument-playing')!.textContent;
+  fireEvent.click(screen.getByRole('button',{name:'Expand instrument view'}));
+  expect(screen.getByRole('button',{name:'Compact instrument view'})).toHaveAttribute('aria-expanded','true');
+  expect(screen.getByLabelText('Instrument view mode')).toHaveValue('keys');
+  expect(screen.getByRole('img',{name:'Keyboard'})).toBe(keyboard);
+  expect(container.querySelector('.instrument-playing')).toHaveTextContent(playing!);
+  for(const note of notes) expect(container.querySelector(`[data-key="${note.key}"][data-active="true"]`)).toBeInTheDocument();
+  rerender(<InstrumentView score={score} track={0} staff={0} notes={[]}/>);
+  expect(screen.getByText('No notes sounding')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button',{name:'Compact instrument view'}));
+  expect(screen.getByRole('img',{name:'Keyboard'})).toBe(keyboard);
+  expect(screen.getByLabelText('Instrument view mode')).toHaveValue('keys');
+  expect(model.JsonConverter.scoreToJson(score)).toBe(before);
+  unmount();render(<InstrumentView score={score} track={0} staff={0} notes={notes}/>);
+  expect(screen.getByRole('button',{name:'Expand instrument view'})).toHaveAttribute('aria-expanded','false');
+});
+
 it('keyboard range retains extreme simultaneous notes rather than clipping them', () => {
   const score=scoreWith([[]],0); const beat=score.tracks[0].staves[0].bars[0].voices[0].beats[0];
   for (const key of [0,61,127]) {const note=new model.Note();note.octave=Math.floor(key/12);note.tone=key%12;beat.addNote(note);}

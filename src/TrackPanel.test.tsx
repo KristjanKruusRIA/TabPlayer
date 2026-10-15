@@ -35,11 +35,35 @@ it('existing and new track tuning use note names and reject invalid drafts witho
   const input=screen.getByLabelText('Tuning (notes, high to low)');expect(input).toHaveValue('E4 B3 G3 D3 A2 E2');
   fireEvent.change(input,{target:{value:'E4 B3 G3 D3 A2 D2'}});fireEvent.click(screen.getByRole('button',{name:'Apply tuning'}));expect(onEdit).toHaveBeenLastCalledWith({type:'setTuning',track:0,tuning:[64,59,55,50,45,38]});onEdit.mockClear();
   fireEvent.change(input,{target:{value:'E4 B3 nope'}});fireEvent.click(screen.getByRole('button',{name:'Apply tuning'}));expect(onEdit).not.toHaveBeenCalled();expect(screen.getByRole('alert')).toHaveTextContent(/note.*octave|E4/i);
-  expect(screen.getByLabelText('New track tuning')).toHaveValue('G2 D2 A1 E1');fireEvent.change(screen.getByLabelText('New track tuning'),{target:{value:'G2 D2 A1 Eb1'}});fireEvent.click(screen.getByRole('button',{name:'Add track'}));expect(onEdit).toHaveBeenLastCalledWith({type:'addTrack',name:'Bass',program:33,tuning:[43,38,33,27]});
+  fireEvent.click(screen.getByText('Add instrument'));expect(screen.getByLabelText('New track tuning')).toHaveValue('G2 D2 A1 E1');fireEvent.change(screen.getByLabelText('New track tuning'),{target:{value:'G2 D2 A1 Eb1'}});fireEvent.click(screen.getByRole('button',{name:'Add track'}));expect(onEdit).toHaveBeenLastCalledWith({type:'addTrack',name:'Bass',program:33,tuning:[43,38,33,27]});
+});
+it('starts Add instrument collapsed and keeps invalid feedback with its own tuning draft',()=>{
+  const score=previewEdit(blankProject(),{type:'setRest',target:{track:0,staff:0,bar:0,voice:0,beat:0}}).score,onEdit=vi.fn();
+  render(<TrackPanel score={score} selected={0} busy={false} player={null} onSelect={()=>{}} onEdit={onEdit}/>);
+  const add=screen.getByText('Add instrument').closest('details')!;
+  expect(add).not.toHaveAttribute('open');
+  const current=screen.getByLabelText('Tuning (notes, high to low)'),draft=screen.getByLabelText('New track tuning');
+  fireEvent.change(current,{target:{value:'E4 wrong'}});fireEvent.click(screen.getByRole('button',{name:'Apply tuning'}));
+  expect(current).toHaveValue('E4 wrong');expect(current).toHaveFocus();expect(current).toHaveAttribute('aria-invalid','true');
+  const currentError=screen.getByRole('alert');expect(current).toHaveAttribute('aria-describedby',currentError.id);expect(current.parentElement!.nextElementSibling).toBe(currentError);expect(draft).not.toHaveAttribute('aria-invalid','true');
+  fireEvent.click(screen.getByText('Add instrument'));fireEvent.change(draft,{target:{value:'G2 bad'}});fireEvent.click(screen.getByRole('button',{name:'Add track'}));
+  expect(draft).toHaveValue('G2 bad');expect(draft).toHaveFocus();expect(draft).toHaveAttribute('aria-invalid','true');
+  const draftError=document.getElementById(draft.getAttribute('aria-describedby')!)!;expect(draft.parentElement!.nextElementSibling).toBe(draftError);expect(draftError).toHaveTextContent('bad');expect(currentError).toHaveTextContent('wrong');
+  fireEvent.change(draft,{target:{value:'G2 D2 A1 E1'}});expect(draft).not.toHaveAttribute('aria-invalid','true');expect(currentError).toBeInTheDocument();
+  draft.focus();fireEvent.click(screen.getByRole('button',{name:'Apply tuning'}));expect(current).toHaveFocus();expect(onEdit).not.toHaveBeenCalled();
 });
 it('tuning readback refreshes after same-index history replacement',()=>{
   const before=previewEdit(blankProject(),{type:'setTuning',track:0,tuning:[64,59,55,50,45,38]}).score,onEdit=vi.fn();const props={selected:0,busy:false,player:null,onSelect:()=>{},onEdit};const view=render(<TrackPanel {...props} score={before}/>);expect(screen.getByLabelText('Tuning (notes, high to low)')).toHaveValue('E4 B3 G3 D3 A2 D2');
   view.rerender(<TrackPanel {...props} score={previewEdit(blankProject(),{type:'setRest',target:{track:0,staff:0,bar:0,voice:0,beat:0}}).score}/>);expect(screen.getByLabelText('Tuning (notes, high to low)')).toHaveValue('E4 B3 G3 D3 A2 E2');
+});
+it('reveals the invalid field with its existing error again after focus moves away',()=>{
+  const score=previewEdit(blankProject(),{type:'setRest',target:{track:0,staff:0,bar:0,voice:0,beat:0}}).score;
+  render(<TrackPanel score={score} selected={0} busy={false} player={null} onSelect={()=>{}} onEdit={()=>{}}/>);
+  const input=screen.getByLabelText('Tuning (notes, high to low)'),apply=screen.getByRole('button',{name:'Apply tuning'});
+  fireEvent.change(input,{target:{value:'bad'}});fireEvent.click(apply);
+  const scroll=vi.fn();screen.getByRole('alert').parentElement!.scrollIntoView=scroll;
+  screen.getByRole('button',{name:'Track 1: Guitar'}).focus();fireEvent.click(apply);
+  expect(input).toHaveFocus();expect(scroll).toHaveBeenCalledWith({block:'nearest'});
 });
 it('presets keep manual notes independent from program choice and disable existing percussion tuning',()=>{
   const score=previewEdit(blankProject(),{type:'setRest',target:{track:0,staff:0,bar:0,voice:0,beat:0}}).score,onEdit=vi.fn(),props={score,selected:0,busy:false,player:null,onSelect:()=>{},onEdit};const view=render(<TrackPanel {...props}/>);

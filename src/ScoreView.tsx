@@ -6,6 +6,7 @@ import type { MusicSelection, VoiceAddress } from './editor/range-types';
 import { rangeFromBeats, resolveSelectionBeats, resolveSelectionNotes, selectionForBars, selectionForTrack } from './editor/range-selection';
 import { configureEngraving, type EngravingProjection } from './engraving/projection';
 import type { EngravingOverrides } from './engraving/types';
+import './ScoreView.css';
 
 const address=(beat:model.Beat):BeatTarget=>({track:beat.voice.bar.staff.track.index,staff:beat.voice.bar.staff.index,bar:beat.voice.bar.index,voice:beat.voice.index,beat:beat.index});
 const sameLane=(a:VoiceAddress,b:VoiceAddress)=>a.track===b.track&&a.staff===b.staff&&a.voice===b.voice;
@@ -14,18 +15,22 @@ type Marker={x:number;y:number;w:number;h:number};
 type Handles={start:Marker&{target:BeatTarget};end:Marker&{target:BeatTarget}};
 type Drag={anchor:BeatTarget;last:BeatTarget;lanes:VoiceAddress[];bars?:Extract<MusicSelection,{kind:'bars'}>};
 
-export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSelection=null,onEditorSelection,projection,visibleTracks,engraving}: {
+export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSelection=null,onEditorSelection,projection,visibleTracks,engraving,editTarget,editString,editNoteIndex}: {
   score:model.Score;track:number;zoom:number;profile:string;onSelect:(target:BeatTarget,string?:number,noteIndex?:number)=>void;
   playback:NativePlaybackController|null;
   editorSelection?:MusicSelection|null;onEditorSelection?:(selection:MusicSelection|null)=>void;
   projection?:EngravingProjection;visibleTracks?:number[];engraving?:EngravingOverrides;
+  editTarget?:BeatTarget;editString?:number;editNoteIndex?:number|null;
 }) {
   const wrapper=useRef<HTMLDivElement>(null),container=useRef<HTMLDivElement>(null),api=useRef<AlphaTabApi|null>(null);
   const tracks=visibleTracks??[track],renderedScore=projection?.score??score;
-  const current=useRef({score,track,onSelect,editorSelection,onEditorSelection,projection,tracks});current.current={score,track,onSelect,editorSelection,onEditorSelection,projection,tracks};
+  const current=useRef({score,track,onSelect,editorSelection,onEditorSelection,projection,tracks,editTarget,editString,editNoteIndex});current.current={score,track,onSelect,editorSelection,onEditorSelection,projection,tracks,editTarget,editString,editNoteIndex};
   const modifiers=useRef({shift:false,toggle:false,detail:0}),anchor=useRef<BeatTarget|null>(null),drag=useRef<Drag|null>(null);
   const [markers,setMarkers]=useState<Marker[]>([]),[handles,setHandles]=useState<Handles|null>(null);
-  const refresh=useRef(()=>{});
+  const [caret,setCaret]=useState<(Marker&{entry:boolean})|null>(null),caretElement=useRef<HTMLSpanElement>(null),revealCaret=useRef(false),rendering=useRef(false);
+  const refresh=useRef(()=>{}),refreshCaret=useRef(()=>{});
+  const editBeat=editTarget?score.tracks[editTarget.track]?.staves[editTarget.staff]?.bars[editTarget.bar]?.voices[editTarget.voice]?.beats[editTarget.beat]:undefined;
+  const editLocation=editBeat&&editTarget?`Editing ${score.tracks[editTarget.track].name || `track ${editTarget.track+1}`}, measure ${editTarget.bar+1}, beat ${editTarget.beat+1}, voice ${editTarget.voice+1}${editBeat.isEmpty?', empty':editBeat.isRest?', rest':''}${editNoteIndex!=null?`, note ${editNoteIndex+1}`:editString?`, string ${editString}`:''}`:'';
   const canonicalBeat=(beat:model.Beat)=>{
     const value=current.current,pair=value.projection?.beats.get(beat.id),source=value.projection?(pair?.rendered===beat?pair.source:null):beat;
     return source?.voice.bar.staff.track.score===value.score&&value.tracks.includes(source.voice.bar.staff.track.index)?source:null;
@@ -53,6 +58,18 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
     const view=api.current,root=wrapper.current;if(!view||!root)return {x:0,y:0};
     const canvas=view.uiFacade.getOffset(null,view.canvasElement),bounds=root.getBoundingClientRect();
     return {x:canvas.x-bounds.left-window.scrollX,y:canvas.y-bounds.top-window.scrollY};
+  };
+  refreshCaret.current=()=>{
+    const value=current.current,point=value.editTarget,view=api.current;
+    const source=point&&value.tracks.includes(point.track)?value.score.tracks[point.track]?.staves[point.staff]?.bars[point.bar]?.voices[point.voice]?.beats[point.beat]:null;
+    const beat=source?renderedBeat(source):null;
+    if(!view||!source||!beat||rendering.current){setCaret(null);return;}
+    const bounds=(view.boundsLookup?.findBeats(beat)??[]).filter(bound=>bound.beat===beat);
+    const sourceNote=value.editNoteIndex!=null?source.notes[value.editNoteIndex]:source.notes.find(note=>note.string===value.editString),note=sourceNote?renderedNote(sourceNote):null;
+    const noteBounds=note?bounds.flatMap(bound=>bound.notes??[]).find(bound=>bound.note===note)?.noteHeadBounds:null;
+    const box=noteBounds??bounds[0]?.realBounds;
+    if(!box||![box.x,box.y,box.w,box.h].every(Number.isFinite)||box.w<=0||box.h<=0){setCaret(null);return;}
+    const delta=offset();setCaret({x:delta.x+box.x-3,y:delta.y+box.y-3,w:box.w+6,h:box.h+6,entry:!noteBounds});
   };
   const placeHandles=(event:PlaybackHighlightChangeEventArgs)=>{
     if(!event.startBeat||!event.endBeat||!event.startBeatBounds||!event.endBeatBounds){setHandles(null);return;}
@@ -106,7 +123,7 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
       let notes:model.Note[]=[];try{if(current.current.editorSelection)notes=resolveSelectionNotes(current.current.score,current.current.editorSelection);}catch{ /* A replaced document can invalidate an old indexed selection. */ }
       const selected=notes.map(item=>({target:address(item.beat),noteIndex:item.index})),index=selected.findIndex(item=>sameBeat(item.target,point)&&item.noteIndex===source.index);
       if(index>=0)selected.splice(index,1);else selected.push({target:point,noteIndex:source.index});anchor.current=point;drag.current=null;publish(selected.length?{kind:'notes',notes:selected}:null);
-    }),view.beatMouseMove.on(move),view.beatMouseUp.on(()=>{drag.current=null;}),view.postRenderFinished.on(()=>refresh.current()),view.playbackRangeHighlightChanged.on(event=>{
+    }),view.beatMouseMove.on(move),view.beatMouseUp.on(()=>{drag.current=null;}),view.renderStarted.on(()=>{rendering.current=true;setCaret(null);}),view.postRenderFinished.on(()=>{rendering.current=false;refresh.current();refreshCaret.current();}),view.playbackRangeHighlightChanged.on(event=>{
       if(current.current.editorSelection&&current.current.editorSelection.kind!=='notes')placeHandles(event);
     })];
     const mouseMove=(event:MouseEvent)=>{
@@ -117,6 +134,9 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
   },[]);
   useEffect(()=>{anchor.current=null;drag.current=null;},[score,track,projection,visibleTracks]);
   useEffect(()=>{if(!editorSelection)anchor.current=null;refresh.current();},[editorSelection,score,track,zoom,profile,projection,visibleTracks]);
+  useEffect(()=>{revealCaret.current=true;},[score,editTarget?.track,editTarget?.staff,editTarget?.bar,editTarget?.voice,editTarget?.beat,editString,editNoteIndex]);
+  useEffect(()=>{refreshCaret.current();},[score,track,zoom,profile,projection,visibleTracks,editTarget?.track,editTarget?.staff,editTarget?.bar,editTarget?.voice,editTarget?.beat,editString,editNoteIndex]);
+  useEffect(()=>{if(caret&&revealCaret.current&&caretElement.current){caretElement.current.scrollIntoView?.({block:'nearest',inline:'nearest'});revealCaret.current=false;}},[caret]);
   useEffect(()=>{if(playback&&api.current)playback.attachView(api.current);},[playback]);
   useEffect(()=>{const view=api.current!;view.settings.display.scale=zoom/100;
     if(engraving)configureEngraving(view.settings,engraving);else view.settings.display.staveProfile=StaveProfile[profile as keyof typeof StaveProfile] as StaveProfile;
@@ -130,6 +150,8 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
   };
   return <div ref={wrapper} tabIndex={-1} style={{position:'relative'}} onMouseDownCapture={capture}>
     <div ref={container} aria-label="Music notation"/>
+    <span className="score-edit-announcement" role="status" aria-live="polite" aria-atomic="true">{editLocation}</span>
+    {caret&&<span ref={caretElement} role="img" aria-label="Edit target" className="score-edit-target" style={{left:caret.x,top:caret.y,width:caret.w,height:caret.h}}>{caret.entry&&<span className="score-edit-entry" aria-hidden="true">{editString?`String ${editString}`:'Entry'}</span>}</span>}
     {markers.map((marker,index)=><span key={index} role="img" aria-label={`Selected note ${index+1}`} style={{position:'absolute',left:marker.x,top:marker.y,width:marker.w,height:marker.h,boxSizing:'border-box',border:'2px solid #9aaf38',background:'rgba(185,205,105,.3)',borderRadius:3,pointerEvents:'none'}}/>)}
     {handles&&(['start','end'] as const).map(edge=><button key={edge} type="button" aria-label={`Resize selection ${edge}`} onMouseDown={event=>resize(edge,event)} style={{position:'absolute',left:handles[edge].x-6,top:handles[edge].y+handles[edge].h/2-12,width:12,height:24,padding:0,border:'2px solid #60712b',borderRadius:3,background:'#bccf6e',cursor:'ew-resize',zIndex:4}}/>)}
   </div>;

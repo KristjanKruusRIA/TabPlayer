@@ -6,7 +6,8 @@ import { App } from './App';
 import { DocumentController } from './controller';
 import { blankProject, type EditCommand, type Project, type AssetInfo } from './project';
 import type { NativeBridge } from './bridge';
-import type { BuiltDocument } from './engine';
+import {buildScore,exportGp,type BuiltDocument} from './engine';
+import {createHash} from 'node:crypto';
 import { defaultMix } from './document-settings';
 import { DEFAULT_PRACTICE } from './audio/practice-types';
 import type { PlaybackState } from './audio/types';
@@ -16,7 +17,7 @@ const engravingView=vi.hoisted(()=>vi.fn());
 const personalLibrary=vi.hoisted(()=>({read:vi.fn(async():Promise<HarmonyLibrary>=>({format:'TabPlayerHarmonyLibrary',version:1,entries:[]})),put:vi.fn(async(entry:HarmonyLibraryEntry):Promise<HarmonyLibrary>=>({format:'TabPlayerHarmonyLibrary',version:1,entries:[entry]})),remove:vi.fn(async():Promise<HarmonyLibrary>=>({format:'TabPlayerHarmonyLibrary',version:1,entries:[]}))}));
 vi.mock('./harmony/library',async original=>({...await original<typeof import('./harmony/library')>(),readHarmonyLibrary:personalLibrary.read,putHarmonyLibraryEntry:personalLibrary.put,removeHarmonyLibraryEntry:personalLibrary.remove}));
 
-const integration=vi.hoisted(()=>({loadDocument:vi.fn(),beforeScoreChange:vi.fn(),destroy:vi.fn(),stageBacking:vi.fn(),commits:vi.fn(),activeNotes:vi.fn((_trackId:string)=>[]),practiceSpeed:100,practiceFixed:false,setPractice:vi.fn(),exportOptions:vi.fn(),exportBusy:false,exportRun:vi.fn(async()=>true),exportCancel:vi.fn(async()=>{})}));
+const integration=vi.hoisted(()=>({loadDocument:vi.fn(),beforeScoreChange:vi.fn(),destroy:vi.fn(),stageBacking:vi.fn(),commits:vi.fn(),activeNotes:vi.fn((_trackId:string)=>[]),practiceSpeed:100,practiceFixed:false,setPractice:vi.fn(),play:vi.fn(),pause:vi.fn(),exportOptions:vi.fn(),exportBusy:false,exportRun:vi.fn(async()=>true),exportCancel:vi.fn(async()=>{})}));
 vi.mock('./audio/bridge',()=>({nativeAudioBridge:{stageBacking:integration.stageBacking}}));
 vi.mock('./export/useExportCoordinator',()=>({useExportCoordinator:(options:unknown)=>{integration.exportOptions(options);return {busy:integration.exportBusy,progress:undefined,run:integration.exportRun,cancel:integration.exportCancel};}}));
 vi.mock('./audio/NativePlaybackController',()=>({NativePlaybackController:class {
@@ -26,7 +27,7 @@ vi.mock('./audio/NativePlaybackController',()=>({NativePlaybackController:class 
   activeNotes=(trackId:string)=>integration.activeNotes(trackId);
   loadDocument=async(project:unknown,built:BuiltDocument,track:number,documentEpoch:number)=>{this.built=built;integration.loadDocument(project,built,track,documentEpoch);};
   beforeScoreChange=integration.beforeScoreChange;destroy=integration.destroy;
-  play=vi.fn();pause=vi.fn();stop=vi.fn();seekToMeasure=vi.fn();setSpeed=vi.fn();setLoop=vi.fn();clearLoop=vi.fn();setMetronome=vi.fn();
+  play=integration.play;pause=integration.pause;stop=vi.fn();seekToMeasure=vi.fn();setSpeed=vi.fn();setLoop=vi.fn();clearLoop=vi.fn();setMetronome=vi.fn();
   setPractice=integration.setPractice;exportPracticeRatio=()=>integration.practiceFixed?null:this.state.speed/100;
   devices=async()=>[];deviceId=()=>null;selectDevice=vi.fn();backingDurationMs=()=>undefined;
   mix=(track:{index:number})=>{const value=this.built?.settings.mixes[`base/${track.index}`];return value?{mute:value.mute,solo:value.solo,volume:value.gain,pan:value.pan}:undefined;};
@@ -61,6 +62,71 @@ async function setup(initial=blankProject(),openProject?:Project) {
 const change=(label:string,value:string)=>fireEvent.change(screen.getByLabelText(label),{target:{value}});
 const click=(name:string)=>fireEvent.click(screen.getByRole('button',{name}));
 const currentBeat=(controller:DocumentController,index=0)=>controller.getState().score.tracks[0].staves[0].bars[0].voices[0].beats[index];
+
+it('describes a new unsaved score accurately and passes canonical edit focus to the paper',async()=>{
+  await setup();expect(document.querySelector('.statusbar')).toHaveTextContent('New score');
+  expect(engravingView.mock.lastCall?.[0]).toMatchObject({editTarget:{track:0,staff:0,bar:0,voice:0,beat:0},editString:6,editNoteIndex:null});
+  fireEvent.keyDown(screen.getByRole('region',{name:'Score workspace'}),{key:'ArrowRight'});
+  expect(engravingView.mock.lastCall?.[0]).toMatchObject({editTarget:{track:0,staff:0,bar:0,voice:0,beat:1}});
+});
+
+it('places practice and page controls inside their inspector task landmarks',async()=>{
+  await setup();
+  expect(screen.getByLabelText('Tempo mode').closest('[aria-label="Practice tools"]')).not.toBeNull();
+  expect(screen.getByLabelText('Width (mm)').closest('[aria-label="Presentation tools"]')).not.toBeNull();
+});
+
+it('offers discoverable editing help that closes with Escape without changing music',async()=>{
+  const c=await setup(),before=c.getState().snapshot;
+  const opener=screen.getByText('Help',{selector:'summary'});fireEvent.click(opener);
+  const help=screen.getByRole('region',{name:'Keyboard and editing help'});
+  expect(help).toHaveTextContent('Ctrl/Cmd + S');expect(help).toHaveTextContent('Shift + Left/Right');
+  fireEvent.keyDown(help,{key:'Escape'});expect(opener.closest('details')).not.toHaveAttribute('open');
+  expect(opener).toHaveFocus();expect(c.getState().snapshot).toBe(before);
+});
+
+it('routes save history and playback shortcuts through existing actions outside fields and dialogs',async()=>{
+  const c=await setup(),save=vi.spyOn(c,'save').mockResolvedValue(true);
+  const workspace=screen.getByRole('region',{name:'Score workspace'});
+  fireEvent.keyDown(workspace,{key:'s',ctrlKey:true});await waitFor(()=>expect(save).toHaveBeenCalledWith(false));
+  fireEvent.keyDown(workspace,{key:'S',metaKey:true,shiftKey:true});await waitFor(()=>expect(save).toHaveBeenCalledWith(true));
+  click('Set note');await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(1));
+  fireEvent.keyDown(workspace,{key:'z',ctrlKey:true});await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(0));
+  fireEvent.keyDown(workspace,{key:'z',ctrlKey:true,shiftKey:true});await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(1));
+  fireEvent.keyDown(workspace,{key:' '});expect(integration.play).toHaveBeenCalledTimes(1);
+  save.mockClear();fireEvent.keyDown(screen.getByLabelText('Fret'),{key:'s',ctrlKey:true});
+  click('Export score');fireEvent.keyDown(screen.getByLabelText('Export format'),{key:'s',ctrlKey:true});
+  expect(save).not.toHaveBeenCalled();expect(integration.play).toHaveBeenCalledTimes(1);
+});
+
+it('reveals paste options through a collapsed Edit task without changing history',async()=>{
+  const c=await setup(),workspace=screen.getByRole('region',{name:'Score workspace'});click('Select bar');
+  fireEvent.keyDown(workspace,{key:'c',ctrlKey:true});await waitFor(()=>expect(screen.getByLabelText('Paste repetitions')).toBeInTheDocument());
+  const editTask=document.querySelector<HTMLDetailsElement>('.inspector-task[id$="-edit"]')!;editTask.open=false;
+  const clipboardSummary=screen.getByText('Musical clipboard',{selector:'summary'}),scroll=vi.fn();clipboardSummary.parentElement!.scrollIntoView=scroll;
+  const before=c.getState().snapshot;fireEvent.keyDown(workspace,{key:'v',ctrlKey:true,shiftKey:true});
+  expect(editTask.open).toBe(true);expect(clipboardSummary).toHaveFocus();expect(scroll).toHaveBeenCalledWith({block:'nearest'});expect(c.getState().snapshot).toBe(before);
+});
+
+it.each(['Add pitched track','Add percussion track'])('omits string caret context for %s',async action=>{
+  const c=await setup();click(action);await waitFor(()=>expect(c.getState().score.tracks).toHaveLength(2));
+  fireEvent.click(screen.getByRole('button',{name:/^Track 2:/}));
+  expect(engravingView.mock.lastCall?.[0]).toMatchObject({editTarget:{track:1,staff:0,bar:0,voice:0,beat:0},editNoteIndex:null});
+  expect(engravingView.mock.lastCall?.[0].editString).toBeUndefined();
+});
+
+it('starts Harmony at its heading during initial library loading and focuses name when ready',async()=>{
+  let finish!:(library:HarmonyLibrary)=>void;personalLibrary.read.mockReturnValueOnce(new Promise(resolve=>{finish=resolve;}));
+  await setup();click('Edit chord diagram');const dialog=screen.getByRole('dialog',{name:'Harmony chord'});
+  const initialFocus=document.activeElement;await act(async()=>finish({format:'TabPlayerHarmonyLibrary',version:1,entries:[]}));
+  await waitFor(()=>expect(within(dialog).getByLabelText('Chord name')).toBeEnabled());
+  expect(initialFocus).toBe(dialog);expect(within(dialog).getByLabelText('Chord name')).toHaveFocus();
+});
+
+it('distinguishes a clean imported score from a new or saved native project',async()=>{
+  const bytes=exportGp(buildScore(blankProject())),base={kind:'file' as const,filename:'Study.gp',bytesBase64:Buffer.from(bytes).toString('base64'),sha256:createHash('sha256').update(bytes).digest('hex')};
+  await setup({...blankProject(),base});expect(document.querySelector('.statusbar')).toHaveTextContent('Not saved');
+});
 
 it('opens the rich chord editor and keeps text edits from replacing its metadata',async()=>{
   const chord={name:'Legacy',nameMode:'manual' as const,recipe:null,firstFret:0,frets:[0,19,-1,2,30,0],fingers:[-2,1,-1,0,4,-2],barreFrets:[0,19,19],showName:false,showDiagram:false,showFingering:false};

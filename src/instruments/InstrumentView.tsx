@@ -41,13 +41,13 @@ function Fretboard({staff, notes, mode}: {staff: model.Staff; notes: readonly Pl
   }
   const maxFret = Math.max(24,...positions.map(p => Math.ceil(p.fret))), left = 64, neckLength=770, height=226;
   const neckHeight=Math.max(55,mode==='bass'?65+(staff.tuning.length-4)*10:65+(staff.tuning.length-6)*6),row=(neckHeight-26)/Math.max(1,staff.tuning.length-1);
-  const top=(height-(staff.tuning.length-1)*row)/2, body=left+neckLength-6, width=body+242;
+  const top=(height-(staff.tuning.length-1)*row)/2, body=left+neckLength-6, width=body+254;
   const boundary=(fret:number)=>left+neckLength*(1-2**(-fret/12))/(1-2**(-maxFret/12));
   const position=(fret:number)=>fret===0?left-17:(boundary(fret-1)+boundary(fret))/2;
   const wood=`url(#${id}-wood)`,metal=`url(#${id}-metal)`,cream=`url(#${id}-cream)`;
   return <>
     <p className="instrument-detail">Staff {staff.index+1} · {staff.tuning.length} strings · Capo {staff.capo}{staff.capo ? ' · fret numbers relative to capo' : ''} · Open {staff.tuning.map(pitch=>formatPitch(pitch+staff.capo-staff.transpositionPitch)).join(' ')}</p>
-    <div className="instrument-canvas instrument-fretboard"><svg role="img" aria-label={`${mode === 'bass' ? 'Bass' : 'Guitar'} fretboard`} viewBox={`0 0 ${width} ${height}`} style={{minWidth:640}}>
+    <div className="instrument-canvas instrument-fretboard"><svg role="img" aria-label={`${mode === 'bass' ? 'Bass' : 'Guitar'} fretboard`} viewBox={`0 0 ${width} ${height}`}>
       <title>{`${mode === 'bass' ? 'Bass' : 'Guitar'} fretboard`}</title>
       <defs>
         <linearGradient id={`${id}-wood`} x1="0" y1="0" x2="0" y2="1"><stop stopColor="#28130d"/><stop offset=".18" stopColor="#6a3822"/><stop offset=".52" stopColor="#824b31"/><stop offset=".83" stopColor="#512817"/><stop offset="1" stopColor="#25160f"/></linearGradient>
@@ -82,7 +82,7 @@ function Fretboard({staff, notes, mode}: {staff: model.Staff; notes: readonly Pl
   </>;
 }
 
-function Keyboard({track,notes}: {track: model.Track; notes: readonly PlanNote[]}) {
+function Keyboard({track,notes,compact}: {track: model.Track; notes: readonly PlanNote[]; compact:boolean}) {
   const id=useId();
   const sourceRange = useMemo(()=>{
     let low=128,high=-1;
@@ -97,7 +97,7 @@ function Keyboard({track,notes}: {track: model.Track; notes: readonly PlanNote[]
   for (let key=low;key<=high;key++) {
     if (blackKeys.has(key%12)) black.push({key,x:white.length*keyWidth-8}); else white.push({key,x:white.length*keyWidth});
   }
-  return <div className="instrument-canvas instrument-keyboard"><svg role="img" aria-label="Keyboard" viewBox={`0 0 ${white.length*keyWidth} 125`} style={{minWidth:white.length*keyWidth}}>
+  return <div className="instrument-canvas instrument-keyboard"><svg role="img" aria-label="Keyboard" viewBox={`0 0 ${white.length*keyWidth} 125`} style={{minWidth:white.length*keyWidth*(compact?80/125:1)}}>
     <title>{`Keyboard · sounding pitches ${formatPitch(low)} to ${formatPitch(high)}`}</title>
     <defs><linearGradient id={`${id}-ivory`} x1="0" y1="0" x2="0" y2="1"><stop stopColor="#bcbcb3"/><stop offset=".12" stopColor="#fffef7"/><stop offset=".85" stopColor="#f0eddf"/><stop offset="1" stopColor="#bfbcae"/></linearGradient><linearGradient id={`${id}-ebony`} x1="0" y1="0" x2=".7" y2="1"><stop stopColor="#111519"/><stop offset=".3" stopColor="#42494e"/><stop offset=".78" stopColor="#20262b"/><stop offset="1" stopColor="#090c0e"/></linearGradient></defs>
     <rect width={white.length*keyWidth} height="125" rx="4" fill="#090e12"/><path d={`M0 5H${white.length*keyWidth}`} stroke="#4d5459" strokeWidth="2"/>
@@ -162,12 +162,13 @@ function DrumKit({notes}: {notes: readonly PlanNote[]}) {
 
 export function InstrumentView({score,track:trackIndex,staff:staffIndex,notes}: InstrumentViewProps) {
   const [requestedMode,setMode] = useState<InstrumentMode>('auto'), track = score.tracks[trackIndex], staff = track.staves[staffIndex];
+  const [expanded,setExpanded] = useState(false);
   const automatic: Exclude<InstrumentMode,'auto'> = staff.isPercussion ? 'drums' : track.playbackInfo.program>=24 && track.playbackInfo.program<=31 ? 'guitar' : track.playbackInfo.program>=32 && track.playbackInfo.program<=39 ? 'bass' : 'keys';
   const mode = requestedMode==='auto' ? automatic : requestedMode, active = notes.filter(note=>note.source.target.track===trackIndex);
   const labels = [...new Set(active.map(note=>mode==='drums'?percussionName(note.key):formatPitch(note.key)))];
-  return <div className="instrument-view">
-    <div className="instrument-header"><h3>{track.name}<span> · {mode==='keys'?'Keys':mode[0].toUpperCase()+mode.slice(1)}</span></h3><label>Instrument view mode<select value={requestedMode} onChange={event=>setMode(event.target.value as InstrumentMode)}><option value="auto">Auto</option><option value="guitar">Guitar</option><option value="bass">Bass</option><option value="drums">Drums</option><option value="keys">Keys</option></select></label></div>
-    {mode==='guitar'||mode==='bass' ? <Fretboard staff={staff} notes={active} mode={mode}/> : mode==='drums' ? <DrumKit notes={active}/> : <Keyboard track={track} notes={active}/>}
+  return <div className="instrument-view" data-size={expanded?'expanded':'compact'}>
+    <div className="instrument-header"><h3>{track.name}<span> · {mode==='keys'?'Keys':mode[0].toUpperCase()+mode.slice(1)}</span></h3><div className="instrument-controls"><label>Instrument view mode<select value={requestedMode} onChange={event=>setMode(event.target.value as InstrumentMode)}><option value="auto">Auto</option><option value="guitar">Guitar</option><option value="bass">Bass</option><option value="drums">Drums</option><option value="keys">Keys</option></select></label><button type="button" aria-label={expanded?'Compact instrument view':'Expand instrument view'} aria-expanded={expanded} onClick={()=>setExpanded(value=>!value)}>{expanded?'Compact':'Expand'}</button></div></div>
+    {mode==='guitar'||mode==='bass' ? <Fretboard staff={staff} notes={active} mode={mode}/> : mode==='drums' ? <DrumKit notes={active}/> : <Keyboard track={track} notes={active} compact={!expanded}/>}
     <div className="instrument-playing" aria-label="Sounding notes">{labels.length ? labels.map(label=><span className="instrument-note" key={label}>{label}</span>) : <span className="instrument-empty">No notes sounding</span>}</div>
   </div>;
 }

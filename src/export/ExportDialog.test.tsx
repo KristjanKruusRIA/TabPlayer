@@ -4,9 +4,28 @@ import { cleanup,render,screen,fireEvent,within } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { model } from '@coderline/alphatab';
 import { ExportDialog } from './ExportDialog';
+import { validateSelection } from './types';
 afterEach(cleanup);
 function fixture(){const score=new model.Score();for(let i=0;i<3;i++)score.addMasterBar(new model.MasterBar());const track=new model.Track();track.name='Lead';score.addTrack(track);return score;}
 const layout={paper:'A4' as const,orientation:'portrait' as const,marginMm:15,scale:1,profile:'ScoreTab' as const};
+
+it('keeps staves within their track group and the measure range separate while exporting partial staves',()=>{
+  const score=fixture(),submit=vi.fn();score.tracks[0].addStaff(new model.Staff());score.tracks[0].addStaff(new model.Staff());
+  const bass=new model.Track();bass.name='Bass';bass.addStaff(new model.Staff());score.addTrack(bass);
+  render(<ExportDialog score={score} layout={layout} busy={false} currentSpeedAvailable={true} onExport={submit} onCancel={()=>{}}/>);
+  const tracks=screen.getByRole('group',{name:'Tracks to export'}),lead=within(tracks).getByRole('group',{name:'Lead track and staves'});
+  fireEvent.click(within(lead).getByLabelText('Lead staff 2'));fireEvent.click(within(tracks).getByLabelText('Bass'));
+  const measures=screen.getByRole('group',{name:'Measures to export'});expect(tracks).not.toContainElement(measures);
+  fireEvent.click(within(measures).getByLabelText('Measure range'));fireEvent.change(within(measures).getByLabelText('First measure'),{target:{value:'2'}});
+  fireEvent.click(screen.getByRole('button',{name:'Export'}));expect(submit).toHaveBeenCalledWith({format:'gp',selection:{tracks:[0],range:{first:1,last:2},staves:{0:[0]}}});
+});
+it('explains an empty export selection and recovers after selecting a track',()=>{
+  const submit=vi.fn();render(<ExportDialog score={fixture()} layout={layout} busy={false} currentSpeedAvailable={true} onExport={submit} onCancel={()=>{}}/>);
+  fireEvent.click(screen.getByLabelText('Lead'));fireEvent.click(screen.getByRole('button',{name:'Export'}));
+  expect(screen.getByRole('alert')).toHaveTextContent('Select at least one track to export.');expect(submit).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByLabelText('Lead'));fireEvent.click(screen.getByRole('button',{name:'Export'}));expect(submit).toHaveBeenCalledWith({format:'gp',selection:{tracks:[0],range:null}});
+  expect(()=>validateSelection(1,3,{tracks:[2],range:null})).toThrow('Select existing tracks to export.');
+});
 
 it('offers a custom page draft and explicit document notation without changing the supplied page',()=>{
   const page={widthMm:250,heightMm:350,marginsMm:{top:12,right:22,bottom:32,left:42},scale:.8,profile:'document' as const},submit=vi.fn();

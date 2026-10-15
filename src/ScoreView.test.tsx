@@ -7,12 +7,15 @@ import { ScoreView } from './ScoreView';
 import { music, target } from './editor/fixtures';
 import type { MusicSelection } from './editor/range-types';
 import {defaultEngraving,projectEngraving} from './engraving/projection';
+import { invoke } from '@tauri-apps/api/core';
+
+vi.mock('@tauri-apps/api/core',()=>({invoke:vi.fn(()=>{throw new Error('Edit target feedback must not invoke native IPC.');})}));
 
 const view=vi.hoisted(()=>({options:null as unknown,beat:null as ((beat:model.Beat)=>void)|null,note:null as ((note:model.Note)=>void)|null,destroy:vi.fn(),settings:vi.fn(),api:null as unknown}));
 vi.mock('@coderline/alphatab',async original=>({...await original<typeof import('@coderline/alphatab')>(),AlphaTabApi:class {
   settings=new Settings();constructor(_container:unknown,options:unknown){view.options=options;view.api=this;}
   beatMouseDown=event<model.Beat>(handler=>{view.beat=handler;});noteMouseDown=event<model.Note>(handler=>{view.note=handler;});
-  beatMouseMove=event<model.Beat>();beatMouseUp=event<model.Beat|null>();postRenderFinished=event<void>();playbackRangeHighlightChanged=event<PlaybackHighlightChangeEventArgs>();
+  beatMouseMove=event<model.Beat>();beatMouseUp=event<model.Beat|null>();renderStarted=event<boolean>();postRenderFinished=event<void>();playbackRangeHighlightChanged=event<PlaybackHighlightChangeEventArgs>();
   canvasElement={};uiFacade={getOffset:()=>({x:30,y:40,w:600,h:300})};
   boundsLookup={findBeat:beatBounds,findBeats:(beat:model.Beat)=>[beatBounds(beat)],getBeatAtPos:(_x:number,_y:number)=>null as model.Beat|null};
   highlighted:[model.Beat,model.Beat]|null=null;rangeEndpoints:[model.Beat,model.Beat]|null=null;playbackRange={startTick:1920,endTick:3840};
@@ -23,7 +26,7 @@ vi.mock('@coderline/alphatab',async original=>({...await original<typeof import(
 }}));
 function event<T>(installed?:(handler:(value:T)=>void)=>void){const handlers=new Set<(value:T)=>void>();return {handlers,on:(handler:(value:T)=>void)=>{handlers.add(handler);installed?.(handler);return()=>handlers.delete(handler);},off:(handler:(value:T)=>void)=>handlers.delete(handler),emit:(value:T)=>{for(const handler of handlers)handler(value);}};}
 function beatBounds(beat:model.Beat){const bounds=new rendering.BeatBounds();bounds.beat=beat;bounds.realBounds=new rendering.Bounds(beat.index*50,beat.voice.index*100,50,60);for(const [index,note] of beat.notes.entries()){const noteBounds=new rendering.NoteBounds();noteBounds.note=note;noteBounds.noteHeadBounds=new rendering.Bounds(beat.index*50+8,10+index*15,12,9);bounds.addNote(noteBounds);}return bounds;}
-type FakeView={beatMouseMove:ReturnType<typeof event<model.Beat>>;beatMouseUp:ReturnType<typeof event<model.Beat|null>>;postRenderFinished:ReturnType<typeof event<void>>;playbackRangeHighlightChanged:ReturnType<typeof event<PlaybackHighlightChangeEventArgs>>;highlighted:[model.Beat,model.Beat]|null;rangeEndpoints:[model.Beat,model.Beat]|null;boundsLookup:{getBeatAtPos:(x:number,y:number)=>model.Beat|null;findBeat:(beat:model.Beat)=>rendering.BeatBounds|null;findBeats:(beat:model.Beat)=>rendering.BeatBounds[]};playbackRange:{startTick:number;endTick:number}};
+type FakeView={beatMouseMove:ReturnType<typeof event<model.Beat>>;beatMouseUp:ReturnType<typeof event<model.Beat|null>>;renderStarted:ReturnType<typeof event<boolean>>;postRenderFinished:ReturnType<typeof event<void>>;playbackRangeHighlightChanged:ReturnType<typeof event<PlaybackHighlightChangeEventArgs>>;highlighted:[model.Beat,model.Beat]|null;rangeEndpoints:[model.Beat,model.Beat]|null;boundsLookup:{getBeatAtPos:(x:number,y:number)=>model.Beat|null;findBeat:(beat:model.Beat)=>rendering.BeatBounds|null;findBeats:(beat:model.Beat)=>rendering.BeatBounds[]};playbackRange:{startTick:number;endTick:number}};
 function setup(initial:MusicSelection|null=null,score=music()){
   const changes:(MusicSelection|null)[]=[],onSelect=vi.fn();
   function Harness(){const [selected,setSelected]=useState(initial);return <ScoreView score={score} track={0} zoom={100} profile="ScoreTab" playback={null} onSelect={onSelect} editorSelection={selected} onEditorSelection={next=>{changes.push(next);setSelected(next);}}/>;}
@@ -33,6 +36,76 @@ function setup(initial:MusicSelection|null=null,score=music()){
   return {...result,score,changes,onSelect,api,notation,beat,down};
 }
 afterEach(()=>{cleanup();vi.clearAllMocks();});
+it('moves the edit target across beats independently of selection and playback',()=>{
+  const score=music(),playback={attachView:vi.fn(),setRenderedScore:vi.fn(),replaceScore:vi.fn(),seek:vi.fn()},onSelect=vi.fn(),onEditorSelection=vi.fn();
+  const props={score,track:0,zoom:100,profile:'ScoreTab',playback:playback as never,onSelect,onEditorSelection,editTarget:target,editString:6};
+  const rendered=render(<ScoreView {...props}/>),api=view.api as FakeView;
+  expect(screen.getByLabelText('Edit target').style.left).toBe('35px');
+  expect(screen.getByRole('status').textContent).toMatch(/Guitar.*measure 1.*beat 1.*string 6/i);
+  rendered.rerender(<ScoreView {...props} editTarget={{...target,beat:2}}/>);
+  expect(screen.getByLabelText('Edit target').style.left).toBe('135px');
+  expect(screen.getByRole('status').textContent).toMatch(/beat 3/i);
+  expect(api.playbackRange).toEqual({startTick:1920,endTick:3840});expect(api.highlighted).toBeNull();
+  expect(playback.replaceScore).not.toHaveBeenCalled();expect(playback.seek).not.toHaveBeenCalled();expect(onSelect).not.toHaveBeenCalled();expect(onEditorSelection).not.toHaveBeenCalled();
+  expect(invoke).not.toHaveBeenCalled();
+});
+it('follows changed strings and indexed notes within the same beat',()=>{
+  const score=music(),beat=score.tracks[0].staves[0].bars[0].voices[0].beats[0],second=new model.Note();second.string=5;second.fret=2;beat.addNote(second);
+  const props={score,track:0,zoom:100,profile:'ScoreTab',playback:null,onSelect:vi.fn(),editTarget:target,editString:6};
+  const rendered=render(<ScoreView {...props}/>);expect(screen.getByLabelText('Edit target').style.top).toBe('47px');
+  rendered.rerender(<ScoreView {...props} editString={5}/>);expect(screen.getByLabelText('Edit target').style.top).toBe('62px');
+  expect(screen.getByRole('status').textContent).toMatch(/string 5/i);
+  rendered.rerender(<ScoreView {...props} editNoteIndex={1}/>);expect(screen.getByLabelText('Edit target').style.top).toBe('62px');
+  expect(screen.getByRole('status').textContent).toMatch(/note 2/i);
+  rendered.rerender(<ScoreView {...props} editNoteIndex={null} editString={4}/>);
+  expect(screen.getByLabelText('Edit target').style.left).toBe('27px');expect(screen.getByText('String 4')).toBeTruthy();
+});
+it('keeps rests and empty entry targets visible without requiring a note bound',()=>{
+  const score=music(),beats=score.tracks[0].staves[0].bars[0].voices[0].beats;beats[0].notes=[];beats[1].notes=[];beats[1].isEmpty=true;
+  const props={score,track:0,zoom:100,profile:'ScoreTab',playback:null,onSelect:vi.fn(),editTarget:target,editString:3};
+  const rendered=render(<ScoreView {...props}/>);expect(screen.getByLabelText('Edit target').style.width).toBe('56px');
+  expect(screen.getByRole('status').textContent).toMatch(/rest.*string 3/i);
+  rendered.rerender(<ScoreView {...props} editTarget={{...target,beat:1}}/>);expect(screen.getByLabelText('Edit target').style.left).toBe('77px');
+  expect(screen.getByRole('status').textContent).toMatch(/empty.*string 3/i);
+});
+it('uses only current projected bounds and refreshes edit geometry after zoom rendering',()=>{
+  const {score,projection,engraving}=twoTrackProjection(),props={score,track:0,zoom:100,profile:'Default',projection,engraving,visibleTracks:[0,1],playback:null,onSelect:vi.fn(),editTarget:{...target,track:1},editNoteIndex:0};
+  const rendered=render(<ScoreView {...props}/>),api=view.api as FakeView;
+  api.boundsLookup.findBeats=beat=>{if(beat.voice.bar.staff.track.score!==projection.score)return [];const bounds=beatBounds(beat);bounds.notes![0].noteHeadBounds.x=108;return [bounds];};
+  rendered.rerender(<ScoreView {...props} zoom={150}/>);act(()=>api.postRenderFinished.emit());expect(screen.getByLabelText('Edit target').style.left).toBe('135px');
+  const next=projectEngraving(score,['base/0','base/1'],engraving);rendered.rerender(<ScoreView {...props} projection={next}/>);
+  expect(screen.queryByLabelText('Edit target')).toBeNull();
+  api.boundsLookup.findBeats=beat=>beat.voice.bar.staff.track.score===next.score?[beatBounds(beat)]:[];act(()=>api.postRenderFinished.emit());expect(screen.getByLabelText('Edit target').style.left).toBe('35px');
+  rendered.rerender(<ScoreView {...props} projection={next} visibleTracks={[0]}/>);expect(screen.queryByLabelText('Edit target')).toBeNull();
+});
+it('hides the edit target when bounds are stale or missing and preserves callers without a target',()=>{
+  const score=music(),props={score,track:0,zoom:100,profile:'ScoreTab',playback:null,onSelect:vi.fn()};
+  const rendered=render(<ScoreView {...props}/>),api=view.api as FakeView;expect(screen.queryByLabelText('Edit target')).toBeNull();
+  rendered.rerender(<ScoreView {...props} editTarget={target}/>);expect(screen.getByLabelText('Edit target')).toBeTruthy();
+  api.boundsLookup.findBeats=()=>[beatBounds(music().tracks[0].staves[0].bars[0].voices[0].beats[0])];act(()=>api.postRenderFinished.emit());expect(screen.queryByLabelText('Edit target')).toBeNull();
+  api.boundsLookup.findBeats=()=>[];act(()=>api.postRenderFinished.emit());expect(screen.queryByLabelText('Edit target')).toBeNull();
+  rendered.rerender(<ScoreView {...props}/>);expect(screen.getByRole('status').textContent).toBe('');
+});
+it('reveals moved edit targets once and waits for bounds without continuous render scrolling',()=>{
+  const scroll=vi.fn();Object.defineProperty(HTMLElement.prototype,'scrollIntoView',{configurable:true,value:scroll});
+  try {
+    const score=music(),props={score,track:0,zoom:100,profile:'ScoreTab',playback:null,onSelect:vi.fn(),editTarget:target,editString:6};
+    const rendered=render(<ScoreView {...props}/>),api=view.api as FakeView;expect(scroll).toHaveBeenCalledTimes(1);
+    act(()=>api.postRenderFinished.emit());expect(scroll).toHaveBeenCalledTimes(1);
+    api.boundsLookup.findBeats=()=>[];rendered.rerender(<ScoreView {...props} editTarget={{...target,beat:1}}/>);expect(scroll).toHaveBeenCalledTimes(1);
+    api.boundsLookup.findBeats=beat=>[beatBounds(beat)];act(()=>api.postRenderFinished.emit());expect(scroll).toHaveBeenCalledTimes(2);
+    act(()=>api.postRenderFinished.emit());expect(scroll).toHaveBeenCalledTimes(2);
+    rendered.rerender(<ScoreView {...props} editTarget={{...target,beat:1}} editString={5}/>);expect(scroll).toHaveBeenCalledTimes(3);
+    expect(scroll).toHaveBeenLastCalledWith({block:'nearest',inline:'nearest'});
+  } finally {delete (HTMLElement.prototype as Partial<HTMLElement>).scrollIntoView;}
+});
+it('waits for a layout in progress before reusing edit bounds for a moved target',()=>{
+  const score=music(),props={score,track:0,zoom:100,profile:'ScoreTab',playback:null,onSelect:vi.fn(),editTarget:target,editString:6};
+  const rendered=render(<ScoreView {...props}/>),api=view.api as FakeView;expect(screen.getByLabelText('Edit target')).toBeTruthy();
+  act(()=>api.renderStarted.emit(true));expect(screen.queryByLabelText('Edit target')).toBeNull();
+  rendered.rerender(<ScoreView {...props} editTarget={{...target,beat:1}}/>);expect(screen.queryByLabelText('Edit target')).toBeNull();
+  act(()=>api.postRenderFinished.emit());expect(screen.getByLabelText('Edit target').style.left).toBe('85px');
+});
 it('uses public external media output and keeps viewport changes out of native plan loading',()=>{
   const score=music(),playback={attachView:vi.fn(),replaceScore:vi.fn(),setRenderedScore:vi.fn()},onSelect=vi.fn();const props={score,track:0,zoom:100,profile:'ScoreTab',onSelect,playback:playback as never};const rendered=render(<ScoreView {...props}/>);
   expect(view.options).toMatchObject({player:{playerMode:'EnabledExternalMedia',enableCursor:true}});expect((view.options as {player:object}).player).not.toHaveProperty('soundFont');expect(playback.attachView).toHaveBeenCalledTimes(1);

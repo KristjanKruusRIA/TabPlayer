@@ -1,0 +1,10 @@
+.document-tabs{display:flex;flex-shrink:0;gap:4px;min-width:0;overflow-x:auto;overflow-y:hidden;padding:6px 16px;background:#1d2530;border-bottom:1px solid #394454;scrollbar-width:thin;scrollbar-color:#465363 #1d2530}
+.document-tab-item{display:flex;align-items:center;flex:0 0 auto;max-width:260px;border:1px solid #465363;border-radius:6px;background:#161c24;color:#97a6b6}
+.document-tab-item[data-active="true"]{border-color:#b5df73;color:#edf1f5}
+.document-tab-item>button{display:flex;align-items:center;gap:8px;min-width:0;border:0;background:transparent;color:inherit;padding:7px 10px}
+.document-tab-item>button:focus-visible{outline:2px solid #b5df73;outline-offset:-2px}
+.document-tab-item>button:hover:enabled{color:#b5df73}
+.document-tab-item>.document-tab-close{flex-shrink:0;justify-content:center;width:30px;align-self:stretch;padding:7px}
+.document-tab-title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.document-tab-dirty{flex:0 0 6px;width:6px;height:6px;border-radius:50%;background:#b5df73}
+.document-tabs::selection{background:#b5df73;color:#161c24}

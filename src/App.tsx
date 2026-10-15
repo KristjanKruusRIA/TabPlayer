@@ -28,12 +28,15 @@ export function App({controller}: {controller: DocumentController}) {
   useEffect(()=>{controller.setBeforeChange(()=>player?.beforeScoreChange());return()=>controller.setBeforeChange(()=>{});},[controller,player]);
   const [selection,setSelection]=useState<BeatTarget>({track:0,staff:0,bar:0,voice:0,beat:0});
   const [selectedString,setString]=useState(6); const [fret,setFret]=useState(0);
+  const [selectedNoteIndex,setNoteIndex]=useState<number|null>(null);
   const [zoom,setZoom]=useState(100); const [profile,setProfile]=useState('ScoreTab');
   const [instrumentVisible,setInstrumentVisible]=useState(false);
   const digits=useRef({text:'',time:0});
   const target=repairSelection(state.score,selection);
   useEffect(()=>{if(player)void player.loadDocument(state.snapshot.project,state,target.track,state.documentEpoch);},[player,state.snapshot.project,state.score,state.settings,state.embeddedBacking,target.track,state.documentEpoch]);
   const location=describeSelection(state.score,target);
+  const indexed=location.staff.isPercussion||!location.staff.tuning.length;
+  const noteIndex=selectedNoteIndex!==null&&location.beat?.notes[selectedNoteIndex]?selectedNoteIndex:null;
   const string=Math.max(1,Math.min(selectedString,location.staff.tuning.length));
   useEffect(()=>{
     setFret(location.beat?.notes.find(n=>n.string===string)?.fret ?? 0);digits.current.text='';
@@ -53,9 +56,10 @@ export function App({controller}: {controller: DocumentController}) {
   const backingEdit=(command:EditCommand,candidate?:BackingCandidate)=>controller.edit(command,candidate);
   const selectedTrack=state.score.tracks[target.track],trackId=trackIdentity(selectedTrack);
   const originalBacking=state.embeddedBacking&&!state.snapshot.project.edits.some(edit=>edit.type==='setBacking');
-  const select=(next:BeatTarget,s=string)=>{
+  const select=(next:BeatTarget,s=string,index?:number)=>{
     if (!validSelectionIndices(next) || !Number.isInteger(s)) return;
     const fixed=repairSelection(state.score,next);setSelection(fixed);
+    setNoteIndex(index!==undefined&&Number.isInteger(index)&&index>=0?index:null);
     const beat=describeSelection(state.score,fixed).beat;
     const count=state.score.tracks[fixed.track].staves[fixed.staff].tuning.length;
     const chosen=Math.max(1,Math.min(s,count));setString(chosen);
@@ -70,12 +74,14 @@ export function App({controller}: {controller: DocumentController}) {
     } else if(event.key==='ArrowLeft') {
       if(next.beat>0) next.beat--;
       else if(next.bar>0) {next.bar--;next.beat=state.score.tracks[next.track].staves[next.staff].bars[next.bar].voices[next.voice].beats.length-1;}
-    } else if(event.key==='ArrowDown') {select(next,string-1);event.preventDefault();return;}
-    else if(event.key==='ArrowUp') {select(next,string+1);event.preventDefault();return;}
-    else if(/^\d$/.test(event.key)) {
+    } else if(event.key==='ArrowDown'||event.key==='ArrowUp') {
+      if(indexed)setNoteIndex(Math.max(0,Math.min((location.beat?.notes.length??1)-1,(noteIndex??0)+(event.key==='ArrowUp'?1:-1))));
+      else select(next,string+(event.key==='ArrowUp'?1:-1));event.preventDefault();return;
+    }
+    else if(/^\d$/.test(event.key)&&!indexed) {
       const now=Date.now();digits.current.text=(now-digits.current.time<1000?digits.current.text:'')+event.key;
       digits.current.text=digits.current.text.slice(-2);digits.current.time=now;setFret(Number(digits.current.text));event.preventDefault();return;
-    } else if(event.key==='Enter' && location.beat && !state.busy) {edit({type:'setNote',target,string,fret});event.preventDefault();return;}
+    } else if(event.key==='Enter' && location.beat && !state.busy&&!indexed) {edit({type:'setNote',target,string,fret});event.preventDefault();return;}
     else return;
     select(next);event.preventDefault();
   }
@@ -102,10 +108,10 @@ export function App({controller}: {controller: DocumentController}) {
           <button aria-pressed={instrumentVisible} onClick={()=>setInstrumentVisible(visible=>!visible)}>{instrumentVisible?'Hide instrument':'Show instrument'}</button>
         </div>
         <div className="paper-scroll"><div className="paper"><ScoreView score={state.score} track={target.track} zoom={zoom} profile={profile} onSelect={select} playback={player}/></div></div>
-        <div className="score-hint">Measure {target.bar+1} · Beat {target.beat+1} · String {string} · Fret {fret} — Click the score, then use arrow keys, digits and Enter.</div>
+        <div className="score-hint">Measure {target.bar+1} · Beat {target.beat+1} · {indexed?`${location.staff.isPercussion?'Percussion':'Pitched'} note ${noteIndex===null?'entry':noteIndex+1} — Click a note to edit it in the inspector.`:`String ${string} · Fret ${fret} — Click the score, then use arrow keys, digits and Enter.`}</div>
         {instrumentVisible&&<LiveInstrumentView score={state.score} track={target.track} staff={target.staff} player={player}/>}
       </section>
-      <EditorPanel score={state.score} target={target} string={string} fret={fret} busy={state.busy} onSelect={select} onString={s=>select(target,s)} onFret={setFret} onEdit={edit}/>
+      <EditorPanel score={state.score} target={target} string={string} fret={fret} noteIndex={noteIndex} onSelectNote={setNoteIndex} busy={state.busy} onSelect={select} onString={s=>select(target,s)} onFret={setFret} onEdit={edit}/>
     </div>
     {player && <Transport player={player} measures={state.score.masterBars.length} busy={state.busy}/>}
     {exportOpen&&<ExportDialog score={state.score} layout={state.settings.print} busy={exports.busy||state.busy||exportLaunching} progress={exports.progress} failure={exportError} onExport={runExport} onCancel={cancelExport}/>}

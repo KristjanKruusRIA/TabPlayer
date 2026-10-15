@@ -1,6 +1,6 @@
 import { model } from '@coderline/alphatab';
 import type { BeatTarget } from '../project';
-import type { NoteTarget, NoteTechniques, BeatTechniques, PitchCurve, LinkKind } from '../edit-types';
+import type { IndexedNoteTarget, NoteTarget, NoteTechniques, BeatTechniques, PitchCurve, LinkKind } from '../edit-types';
 import { beatAt, noteAt, enumValue, integer, durationValues, tremoloMarks } from './common';
 
 export function validateCurve(curve:PitchCurve,whammy=false) {
@@ -15,17 +15,25 @@ function nextOnString(note:model.Note) {
   }
   return null;
 }
+export function nextLinkedNote(note:model.Note) {
+  if(note.isStringed)return nextOnString(note);
+  const staff=note.beat.voice.bar.staff,voice=note.beat.voice.index;
+  for(let bar=note.beat.voice.bar.index;bar<staff.bars.length;bar++)for(let beat=bar===note.beat.voice.bar.index?note.beat.index+1:0;beat<(staff.bars[bar].voices[voice]?.beats.length??0);beat++){
+    const candidate=staff.bars[bar].voices[voice].beats[beat].notes.find(n=>!n.isDead&&n.isPercussion===note.isPercussion&&n.isPiano===note.isPiano&&n.realValue===note.realValue);if(candidate)return candidate;
+  }
+  return null;
+}
 function breakOutgoing(note:model.Note,kind:LinkKind) {
   if(kind==='tie'){if(note.tieDestination){note.tieDestination.tieOrigin=null;note.tieDestination.isTieDestination=false;note.tieDestination.bendOrigin=null;note.tieDestination.isContinuedBend=false;}note.tieDestination=null;}
   if(kind==='slur'){if(note.slurDestination){note.slurDestination.slurOrigin=null;note.slurDestination.isSlurDestination=false;}note.slurDestination=null;}
   if(kind==='hammerPull'){if(note.hammerPullDestination)note.hammerPullDestination.hammerPullOrigin=null;note.hammerPullDestination=null;note.isHammerPullOrigin=false;}
 }
-export function applyNoteLink(score:model.Score,from:NoteTarget,to:NoteTarget|null,kind:LinkKind) {
+export function applyNoteLink(score:model.Score,from:NoteTarget|IndexedNoteTarget,to:NoteTarget|IndexedNoteTarget|null,kind:LinkKind) {
   if(!['tie','hammerPull','slur'].includes(kind))throw new Error('Invalid note relationship.');
-  const origin=noteAt(score,from);if(!to){breakOutgoing(origin,kind);return;}
+  const origin=noteAt(score,from);if(kind==='hammerPull'&&!origin.isStringed)throw new Error('Hammer/pull requires a stringed note.');if(!to){breakOutgoing(origin,kind);return;}
   const destination=noteAt(score,to),a=from.target,b=to.target;
   if(a.track!==b.track||a.staff!==b.staff||a.voice!==b.voice||b.bar<a.bar||(b.bar===a.bar&&b.beat<=a.beat))throw new Error('Link notes forward in the same staff and voice.');
-  if(kind!=='slur'&&(from.string!==to.string||nextOnString(origin)!==destination))throw new Error('Link to the next pitched note on the same string.');
+  if(kind!=='slur'&&(origin.isStringed!==destination.isStringed||(origin.isStringed&&origin.string!==destination.string)||nextLinkedNote(origin)!==destination))throw new Error('Link to the next matching note on this string or staff.');
   if(kind==='tie'&&origin.realValue!==destination.realValue)throw new Error('Tied notes must have the same pitch.');
   breakOutgoing(origin,kind);
   const previous=kind==='tie'?destination.tieOrigin:kind==='slur'?destination.slurOrigin:destination.hammerPullOrigin;if(previous)breakOutgoing(previous,kind);
@@ -33,13 +41,15 @@ export function applyNoteLink(score:model.Score,from:NoteTarget,to:NoteTarget|nu
   if(kind==='slur'){origin.slurDestination=destination;destination.slurOrigin=origin;destination.isSlurDestination=true;}
   if(kind==='hammerPull'){origin.isHammerPullOrigin=true;origin.hammerPullDestination=destination;destination.hammerPullOrigin=origin;}
 }
-export function applyNoteTechniques(score:model.Score,target:NoteTarget,patch:NoteTechniques) {
+export function applyNoteTechniques(score:model.Score,target:NoteTarget|IndexedNoteTarget,patch:NoteTechniques) {
   const note=noteAt(score,target);
   const booleans={letRing:'isLetRing',palmMute:'isPalmMute',dead:'isDead',ghost:'isGhost',staccato:'isStaccato',leftHandTapped:'isLeftHandTapped'} as const;
   const enums={accent:['accentuated',model.AccentuationType],dynamics:['dynamics',model.DynamicValue],leftFinger:['leftHandFinger',model.Fingers],rightFinger:['rightHandFinger',model.Fingers],slideIn:['slideInType',model.SlideInType],slideOut:['slideOutType',model.SlideOutType],vibrato:['vibrato',model.VibratoType],ornament:['ornament',model.NoteOrnament]} as const;
   for(const key of Object.keys(patch))if(!(key in booleans)&&!(key in enums)&&!['bend','harmonic','trill'].includes(key))throw new Error('Unknown note technique.');
   for(const key of Object.keys(booleans) as (keyof typeof booleans)[])if(patch[key]!==undefined&&typeof patch[key]!=='boolean')throw new Error('Invalid note technique flag.');
   for(const key of Object.keys(enums) as (keyof typeof enums)[])if(patch[key]!==undefined)enumValue(patch[key]!,enums[key][1],key);
+  if(!note.isStringed&&(patch.letRing||patch.palmMute||patch.dead||patch.leftHandTapped||patch.slideIn||patch.slideOut||patch.bend||patch.harmonic))throw new Error('This technique requires a stringed guitar or bass note.');
+  if(note.isPercussion&&((patch.leftFinger!==undefined&&patch.leftFinger>=0)||(patch.rightFinger!==undefined&&patch.rightFinger>=0)||patch.vibrato||patch.ornament||patch.trill))throw new Error('This technique is unavailable for percussion notes.');
   const slide=patch.slideOut===model.SlideOutType.Shift||patch.slideOut===model.SlideOutType.Legato?nextOnString(note):null;
   if((patch.slideOut===1||patch.slideOut===2)&&!slide)throw new Error('A linked slide needs a next note on this string.');
   if(patch.bend)validateCurve(patch.bend);
@@ -56,6 +66,7 @@ export function applyBeatTechniques(score:model.Score,target:BeatTarget,patch:Be
   const beat=beatAt(score,target);for(const key of Object.keys(patch))if(!['pickStroke','brushType','brushDuration','whammy','tremolo'].includes(key))throw new Error('Unknown beat technique.');
   if(patch.pickStroke!==undefined)enumValue(patch.pickStroke,model.PickStroke,'pick stroke');if(patch.brushType!==undefined)enumValue(patch.brushType,model.BrushType,'brush type');
   if(patch.brushDuration!==undefined&&(!Number.isFinite(patch.brushDuration)||patch.brushDuration<0))throw new Error('Invalid brush duration.');
+  if((beat.voice.bar.staff.isPercussion||!beat.voice.bar.staff.tuning.length)&&(patch.pickStroke||patch.brushType||patch.brushDuration||patch.whammy))throw new Error('This technique requires a stringed guitar or bass staff.');
   if(patch.whammy)validateCurve(patch.whammy,true);
   if(patch.tremolo){enumValue(patch.tremolo.style,model.TremoloPickingStyle,'tremolo style');if(tremoloMarks(beat.duration,patch.tremolo.speed)===null)throw new Error('Choose a tremolo speed faster than the beat, within five tremolo marks.');}
   if(patch.pickStroke!==undefined)beat.pickStroke=patch.pickStroke;if(patch.brushType!==undefined){beat.brushType=patch.brushType;if(patch.brushType===0)beat.brushDuration=0;}if(patch.brushDuration!==undefined)beat.brushDuration=patch.brushDuration;

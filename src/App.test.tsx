@@ -26,8 +26,9 @@ vi.mock('./audio/NativePlaybackController',()=>({NativePlaybackController:class 
   setMute=(track:number,mute:boolean)=>this.setMix(track,{mute});setSolo=(track:number,solo:boolean)=>this.setMix(track,{solo});setTrackVolume=(track:number,gain:number)=>this.setMix(track,{gain});setPan=(track:number,pan:number)=>this.setMix(track,{pan});
 }}));
 
-vi.mock('./ScoreView',()=>({ScoreView:({onSelect}: {onSelect: (target: unknown, string: number)=>void}) =>
+vi.mock('./ScoreView',()=>({ScoreView:({onSelect,track}: {track:number;onSelect: (target: unknown, string: number,noteIndex?:number)=>void}) =>
   <><button onClick={()=>onSelect({track:0,staff:0,bar:0,voice:0,beat:1},5)}>Select rendered note</button>
+    <button onClick={()=>onSelect({track,staff:0,bar:0,voice:0,beat:0},-1,1)}>Select rendered chord note</button>
     {[
       {label:'fractional beat',field:'beat',value:0.5,string:6},
       {label:'negative staff',field:'staff',value:-1,string:6},
@@ -52,6 +53,27 @@ async function setup(initial=blankProject(),openProject?:Project) {
 const change=(label:string,value:string)=>fireEvent.change(screen.getByLabelText(label),{target:{value}});
 const click=(name:string)=>fireEvent.click(screen.getByRole('button',{name}));
 const currentBeat=(controller:DocumentController,index=0)=>controller.getState().score.tracks[0].staves[0].bars[0].voices[0].beats[index];
+
+it('creates piano chords, edits the clicked member and replays its history',async()=>{
+  const c=await setup();change('New notation track name','Piano');click('Add pitched track');
+  await waitFor(()=>expect(c.getState().score.tracks).toHaveLength(2));click('Track 2: Piano');
+  change('Written pitch','C4');click('Add pitched note');
+  const notes=()=>c.getState().score.tracks[1].staves[0].bars[0].voices[0].beats[0].notes;
+  await waitFor(()=>expect(notes().map(n=>n.realValue)).toEqual([60]));
+  change('Written pitch','E4');click('Add pitched note');await waitFor(()=>expect(notes().map(n=>n.realValue)).toEqual([60,64]));
+  click('Select rendered chord note');expect(screen.getByLabelText('Chord note')).toHaveValue('1');expect(screen.getByLabelText('Written pitch')).toHaveValue('E4');
+  change('Written pitch','F4');click('Update pitched note');await waitFor(()=>expect(notes().map(n=>n.realValue)).toEqual([60,65]));
+  click('Undo');await waitFor(()=>expect(notes().map(n=>n.realValue)).toEqual([60,64]));
+  click('Redo');await waitFor(()=>expect(notes().map(n=>n.realValue)).toEqual([60,65]));
+});
+
+it('edits song metadata and measure directions through the integrated inspector',async()=>{
+  const c=await setup();change('Album','New album');click('Apply song metadata');
+  await waitFor(()=>expect(c.getState().score.album).toBe('New album'));
+  expect(c.getState().snapshot.project.edits.at(-1)).toMatchObject({type:'setScoreMetadata',fields:{album:'New album'}});
+  fireEvent.click(screen.getByLabelText('Fine'));click('Apply directions');
+  await waitFor(()=>expect(c.getState().score.masterBars[0].directions?.has(0)).toBe(true));
+});
 
 it.each([25,50,100,200])('passes %i percent practice speed to export as a render ratio',async speed=>{
   integration.practiceSpeed=speed;await setup();

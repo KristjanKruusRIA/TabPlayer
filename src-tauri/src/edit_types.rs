@@ -11,6 +11,26 @@ pub struct NoteTarget {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct IndexedNoteTarget {
+    pub target: BeatTarget,
+    pub note_index: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ScoreMetadata {
+    pub sub_title: String,
+    pub album: String,
+    pub words: String,
+    pub music: String,
+    pub copyright: String,
+    pub tab: String,
+    pub notices: String,
+    pub instructions: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct PitchPoint {
     pub offset: f64,
     pub value: f64,
@@ -288,6 +308,36 @@ pub enum EditCommand {
         tuning: Vec<i32>,
         program: u8,
     },
+    AddPitchedTrack {
+        name: String,
+        program: u8,
+    },
+    AddPercussionTrack {
+        name: String,
+        program: u8,
+    },
+    AddPitchedNote {
+        target: BeatTarget,
+        pitch: u8,
+    },
+    SetPitchedNote {
+        target: BeatTarget,
+        note_index: u32,
+        pitch: u8,
+    },
+    AddPercussionNote {
+        target: BeatTarget,
+        articulation: u32,
+    },
+    SetPercussionNote {
+        target: BeatTarget,
+        note_index: u32,
+        articulation: u32,
+    },
+    RemoveNoteByIndex {
+        target: BeatTarget,
+        note_index: u32,
+    },
     RemoveTrack {
         track: u32,
     },
@@ -300,15 +350,38 @@ pub enum EditCommand {
         artist: String,
         tempo: f64,
     },
+    SetScoreMetadata {
+        fields: ScoreMetadata,
+    },
+    SetDirections {
+        bar: u32,
+        directions: Vec<i32>,
+    },
+    SetNoteSpelling {
+        target: BeatTarget,
+        note_index: u32,
+        accidental_mode: i32,
+    },
     SetNoteTechniques {
         target: BeatTarget,
         string: u32,
+        patch: NoteTechniques,
+    },
+    SetNoteTechniquesByIndex {
+        target: BeatTarget,
+        note_index: u32,
         patch: NoteTechniques,
     },
     SetNoteLink {
         from: NoteTarget,
         #[serde(deserialize_with = "required_nullable")]
         to: Option<NoteTarget>,
+        kind: LinkKind,
+    },
+    SetNoteLinkByIndex {
+        from: IndexedNoteTarget,
+        #[serde(deserialize_with = "required_nullable")]
+        to: Option<IndexedNoteTarget>,
         kind: LinkKind,
     },
     SetBeatTechniques {
@@ -478,7 +551,11 @@ impl EditCommand {
     }
     pub fn validate(&self) -> Result<(), String> {
         match self {
-            Self::SetNote { string, .. } | Self::RemoveNote { string, .. } if *string == 0 => {
+            Self::SetNote { string, .. }
+            | Self::RemoveNote { string, .. }
+            | Self::SetNoteTechniques { string, .. }
+                if *string == 0 =>
+            {
                 return Err("Select a guitar string.".into());
             }
             Self::SetDuration { duration, dots, .. } | Self::InsertBeat { duration, dots, .. } => {
@@ -504,13 +581,30 @@ impl EditCommand {
                 validate_tuning(tuning)?;
                 enum_range(*program as i32, 0, 127)?;
             }
-            Self::SetTrackInfo { program, .. } => enum_range(*program as i32, 0, 127)?,
+            Self::SetTrackInfo { program, .. }
+            | Self::AddPitchedTrack { program, .. }
+            | Self::AddPercussionTrack { program, .. } => enum_range(*program as i32, 0, 127)?,
+            Self::AddPitchedNote { pitch, .. } | Self::SetPitchedNote { pitch, .. } => {
+                enum_range(*pitch as i32, 0, 127)?;
+            }
+            Self::AddPercussionNote { articulation, .. }
+            | Self::SetPercussionNote { articulation, .. }
+                if *articulation > i32::MAX as u32 =>
+            {
+                return Err("Invalid percussion articulation.".into());
+            }
             Self::SetTuning { tuning, .. } => validate_tuning(tuning)?,
             Self::SetScoreInfo { tempo, .. } => validate_tempo(*tempo)?,
-            Self::SetNoteTechniques { string, patch, .. } => {
-                if *string == 0 {
-                    return Err("Select a guitar string.".into());
+            Self::SetDirections { directions, .. } => {
+                for direction in directions {
+                    enum_range(*direction, 0, 18)?;
                 }
+            }
+            Self::SetNoteSpelling {
+                accidental_mode, ..
+            } => enum_range(*accidental_mode, 0, 6)?,
+            Self::SetNoteTechniques { patch, .. }
+            | Self::SetNoteTechniquesByIndex { patch, .. } => {
                 for (value, min, max) in [
                     (patch.accent, 0, 3),
                     (patch.dynamics, 0, 25),
@@ -573,6 +667,16 @@ impl EditCommand {
                     {
                         return Err("Links need a later note in the same staff and voice.".into());
                     }
+                }
+            }
+            Self::SetNoteLinkByIndex {
+                from, to: Some(to), ..
+            } => {
+                if (to.target.track, to.target.staff, to.target.voice)
+                    != (from.target.track, from.target.staff, from.target.voice)
+                    || (to.target.bar, to.target.beat) <= (from.target.bar, from.target.beat)
+                {
+                    return Err("Links need a later note in the same staff and voice.".into());
                 }
             }
             Self::SetStaffSettings { settings, .. } | Self::AddStaff { settings, .. } => {
@@ -652,5 +756,273 @@ impl EditCommand {
             _ => {}
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::EditCommand;
+    use serde_json::{Value, json};
+
+    fn entry_commands() -> Vec<Value> {
+        let target = json!({"track": 0, "staff": 0, "bar": 0, "voice": 0, "beat": 0});
+        vec![
+            json!({"type": "setScoreMetadata", "fields": {
+                "subTitle": "", "album": "Album", "words": "Words", "music": "Music",
+                "copyright": "Copyright", "tab": "Tab", "notices": "Notices", "instructions": "Instructions"
+            }}),
+            json!({"type": "setDirections", "bar": 0, "directions": [0, 18, 0]}),
+            json!({"type": "setNoteSpelling", "target": target, "noteIndex": 0, "accidentalMode": 6}),
+            json!({"type": "addPitchedTrack", "name": "Piano", "program": 0}),
+            json!({"type": "addPercussionTrack", "name": "Drums", "program": 127}),
+            json!({"type": "addPitchedNote", "target": target, "pitch": 60}),
+            json!({"type": "setPitchedNote", "target": target, "noteIndex": 1, "pitch": 127}),
+            json!({"type": "addPercussionNote", "target": target, "articulation": 91}),
+            json!({"type": "setPercussionNote", "target": target, "noteIndex": 1, "articulation": 0}),
+            json!({"type": "removeNoteByIndex", "target": target, "noteIndex": 0}),
+            json!({"type": "setNoteTechniquesByIndex", "target": target, "noteIndex": 0, "patch": {"dynamics": 3}}),
+            json!({"type": "setNoteLinkByIndex", "from": {"target": target, "noteIndex": 0}, "to": null, "kind": "tie"}),
+        ]
+    }
+
+    fn accepted(value: &Value) -> EditCommand {
+        let command: EditCommand = serde_json::from_value(value.clone())
+            .unwrap_or_else(|error| panic!("Command must deserialize: {value}: {error}"));
+        command
+            .validate()
+            .unwrap_or_else(|error| panic!("Command must validate: {value}: {error}"));
+        command
+    }
+
+    fn rejected(value: &Value) {
+        assert!(
+            serde_json::from_value::<EditCommand>(value.clone())
+                .map(|command| command.validate().is_err())
+                .unwrap_or(true),
+            "Command must be rejected: {value}"
+        );
+    }
+
+    #[test]
+    fn entry_commands_roundtrip_with_exact_public_fields() {
+        for value in entry_commands() {
+            assert_eq!(serde_json::to_value(accepted(&value)).unwrap(), value);
+        }
+    }
+
+    #[test]
+    fn entry_commands_require_every_field_and_reject_unknown_fields() {
+        for value in entry_commands() {
+            accepted(&value);
+            let mut unknown = value.clone();
+            unknown["unexpected"] = json!(true);
+            rejected(&unknown);
+            for field in value
+                .as_object()
+                .unwrap()
+                .keys()
+                .filter(|field| *field != "type")
+            {
+                let mut missing = value.clone();
+                missing.as_object_mut().unwrap().remove(field);
+                rejected(&missing);
+            }
+        }
+    }
+
+    #[test]
+    fn metadata_requires_all_eight_strings_but_accepts_empty_strings() {
+        let mut value = entry_commands().remove(0);
+        accepted(&value);
+        for field in [
+            "subTitle",
+            "album",
+            "words",
+            "music",
+            "copyright",
+            "tab",
+            "notices",
+            "instructions",
+        ] {
+            let mut missing = value.clone();
+            missing["fields"].as_object_mut().unwrap().remove(field);
+            rejected(&missing);
+            for invalid in [json!(null), json!(1), json!(false)] {
+                let mut wrong_type = value.clone();
+                wrong_type["fields"][field] = invalid;
+                rejected(&wrong_type);
+            }
+            value["fields"][field] = json!("");
+        }
+        accepted(&value);
+        value["fields"]["title"] = json!("unexpected");
+        rejected(&value);
+    }
+
+    #[test]
+    fn directions_accept_all_public_values_and_reject_invalid_numbers() {
+        let mut value = entry_commands().remove(1);
+        accepted(&value);
+        for direction in 0..=18 {
+            value["directions"] = json!([direction]);
+            accepted(&value);
+        }
+        value["directions"] = json!([]);
+        accepted(&value);
+        for invalid in [json!(-1), json!(19), json!(0.5), json!(null)] {
+            value["directions"] = json!([invalid]);
+            rejected(&value);
+        }
+    }
+
+    #[test]
+    fn spelling_accepts_default_and_six_forced_modes() {
+        let mut value = entry_commands().remove(2);
+        accepted(&value);
+        for mode in 0..=6 {
+            value["accidentalMode"] = json!(mode);
+            accepted(&value);
+        }
+        for invalid in [json!(-1), json!(7), json!(1.5), json!(null)] {
+            value["accidentalMode"] = invalid;
+            rejected(&value);
+        }
+    }
+
+    #[test]
+    fn new_tracks_and_pitched_notes_require_midi_values() {
+        for mut value in entry_commands().into_iter().filter(|value| {
+            matches!(
+                value["type"].as_str().unwrap(),
+                "addPitchedTrack" | "addPercussionTrack" | "addPitchedNote" | "setPitchedNote"
+            )
+        }) {
+            accepted(&value);
+            let field = if value.get("program").is_some() {
+                "program"
+            } else {
+                "pitch"
+            };
+            for valid in [0, 127] {
+                value[field] = json!(valid);
+                accepted(&value);
+            }
+            for invalid in [json!(-1), json!(128), json!(256), json!(0.5), json!(null)] {
+                value[field] = invalid;
+                rejected(&value);
+            }
+        }
+    }
+
+    #[test]
+    fn percussion_articulation_accepts_nonnegative_public_integer_domain() {
+        for mut value in entry_commands()
+            .into_iter()
+            .filter(|value| value.get("articulation").is_some())
+        {
+            accepted(&value);
+            for valid in [0, 91, i32::MAX] {
+                value["articulation"] = json!(valid);
+                accepted(&value);
+            }
+            for invalid in [json!(-1), json!(2147483648_u64), json!(0.5), json!(null)] {
+                value["articulation"] = invalid;
+                rejected(&value);
+            }
+        }
+    }
+
+    #[test]
+    fn indexed_targets_require_nonnegative_integer_index_and_exact_shape() {
+        for mut value in entry_commands()
+            .into_iter()
+            .filter(|value| value.get("noteIndex").is_some())
+        {
+            accepted(&value);
+            value["noteIndex"] = json!(u32::MAX);
+            accepted(&value);
+            for invalid in [json!(-1), json!(4294967296_u64), json!(0.5), json!(null)] {
+                value["noteIndex"] = invalid;
+                rejected(&value);
+            }
+        }
+        let mut link = entry_commands().pop().unwrap();
+        accepted(&link);
+        for field in ["target", "noteIndex"] {
+            let mut missing = link.clone();
+            missing["from"].as_object_mut().unwrap().remove(field);
+            rejected(&missing);
+        }
+        link["from"]["string"] = json!(1);
+        rejected(&link);
+        let mut nested_target = entry_commands().remove(2);
+        nested_target["target"]["extra"] = json!(1);
+        rejected(&nested_target);
+    }
+
+    #[test]
+    fn indexed_techniques_enforce_existing_patch_domains_and_nullability() {
+        let mut value = entry_commands().remove(10);
+        accepted(&value);
+        for patch in [
+            json!({}),
+            json!({"bend": null, "harmonic": null, "trill": null}),
+            json!({"accent": 3, "dynamics": 25, "leftFinger": -2, "rightFinger": 4,
+                "slideIn": 2, "slideOut": 6, "vibrato": 2, "ornament": 4}),
+        ] {
+            value["patch"] = patch;
+            accepted(&value);
+        }
+        for patch in [
+            json!({"dynamics": 26}),
+            json!({"accent": -1}),
+            json!({"leftFinger": 5}),
+            json!({"rightFinger": -3}),
+            json!({"slideIn": 3}),
+            json!({"slideOut": 7}),
+            json!({"vibrato": 3}),
+            json!({"ornament": 5}),
+            json!({"ghost": null}),
+            json!({"extra": true}),
+            json!({"harmonic": {"type": 7, "value": 0}}),
+            json!({"trill": {"pitch": 128, "speed": 16}}),
+            json!({"bend": {"type": 1, "style": 0, "points": [{"offset": 0, "value": 0}]}}),
+        ] {
+            value["patch"] = patch;
+            rejected(&value);
+        }
+    }
+
+    #[test]
+    fn indexed_links_require_nullable_destination_and_later_same_voice_note() {
+        let mut value = entry_commands().pop().unwrap();
+        accepted(&value);
+        value["to"] = json!({"target": {"track": 0, "staff": 0, "bar": 0, "voice": 0, "beat": 1}, "noteIndex": 2});
+        for kind in ["tie", "hammerPull", "slur"] {
+            value["kind"] = json!(kind);
+            accepted(&value);
+        }
+        for field in ["track", "staff", "voice"] {
+            let mut other_voice = value.clone();
+            other_voice["to"]["target"][field] = json!(1);
+            rejected(&other_voice);
+        }
+        for field in ["target", "noteIndex"] {
+            let mut missing = value.clone();
+            missing["to"].as_object_mut().unwrap().remove(field);
+            rejected(&missing);
+        }
+        let mut unknown = value.clone();
+        unknown["to"]["string"] = json!(1);
+        rejected(&unknown);
+        value["to"]["target"]["beat"] = json!(0);
+        rejected(&value);
+        value["to"]["target"]["bar"] = json!(1);
+        accepted(&value);
+        value["from"]["target"]["bar"] = json!(2);
+        rejected(&value);
+        value["from"]["target"]["bar"] = json!(0);
+        value["kind"] = json!("legato");
+        rejected(&value);
     }
 }

@@ -1,0 +1,98 @@
+import { exporter, importer, model, Settings } from '@coderline/alphatab';
+import { strToU8,unzipSync,zipSync } from 'fflate';
+import { trackMixAutomations } from './automation';
+import { writePercussionReferences } from './percussion';
+import { patchGpifNoteArticulations,projectGpifTracks } from './xml';
+import { preparePitchedGpScore } from './pitched';
+
+const gpifPath='Content/score.gpif';
+const sourceEntries=new WeakMap<model.Score,Record<string,Uint8Array>>();
+function unzip(bytes:Uint8Array,settings:Settings){
+  return unzipSync(bytes,{filter:entry=>{
+    if(entry.originalSize>settings.importer.maxDecodingBufferSize||strToU8(entry.name).length>settings.importer.maxDecodingBufferSize)throw new Error('ZIP entry exceeds maxDecodingBufferSize.');
+    return true;
+  }});
+}
+function parseXml(xml:string){
+  const doc=new DOMParser().parseFromString(xml,'application/xml');
+  if(doc.querySelector('parsererror')||doc.documentElement.localName!=='GPIF')throw new Error('Invalid GPIF XML.');
+  return doc;
+}
+function orderedTracks(doc:Document){
+  const tracks=new Map([...doc.querySelectorAll('GPIF > Tracks > Track')].map(track=>[track.getAttribute('id'),track]));
+  return (doc.querySelector('GPIF > MasterTrack > Tracks')?.textContent??'').trim().split(/\s+/).map(id=>tracks.get(id));
+}
+const text=(node:Element,name:string)=>node.querySelector(`:scope > ${name}`)?.textContent??'';
+
+export function loadInterchangeScore(bytes:Uint8Array,settings:Settings):model.Score {
+  const score=importer.ScoreLoader.loadScoreFromBytes(bytes,settings);
+  if(bytes[0]!==0x50||bytes[1]!==0x4b)return score;
+  const entries=unzip(bytes,settings);if(!entries[gpifPath])return score;
+  const xml=new TextDecoder(settings.importer.encoding).decode(entries[gpifPath]),doc=parseXml(projectGpifTracks(xml)?.xml??xml);
+  orderedTracks(doc).forEach((node,index)=>{
+    const track=score.tracks[index];if(!node||!track)return;
+    const transpose=node.querySelector(':scope > Transpose');
+    if(transpose) {
+      const pitch=Number(text(transpose,'Octave'))*12+Number(text(transpose,'Chromatic'));
+      if(Number.isFinite(pitch))for(const staff of track.staves)staff.displayTranspositionPitch=pitch;
+    }
+    const strip=node.querySelector(':scope > RSE > ChannelStrip');if(!strip)return;
+    const parameters=text(strip,'Parameters').trim().split(/\s+/).map(Number);
+    if(Number.isFinite(parameters[11]))track.playbackInfo.balance=parameters[11]*16;
+    if(Number.isFinite(parameters[12]))track.playbackInfo.volume=parameters[12]*16;
+    for(const item of strip.querySelectorAll(':scope > Automations > Automation')){
+      const type=text(item,'Type');if(type!=='DSPParam_11'&&type!=='DSPParam_12')continue;
+      const bar=Number(text(item,'Bar')),ratioPosition=Number(text(item,'Position')),value=Number(text(item,'Value'));
+      if(!Number.isSafeInteger(bar)||bar<0||!Number.isFinite(ratioPosition)||ratioPosition<0||ratioPosition>1||!Number.isFinite(value)||value<0||value>1)throw new Error('Invalid GPIF channel-strip automation.');
+      const owner=track.staves[0]?.bars[bar]?.voices[0]?.beats[0];if(!owner)throw new Error('GPIF automation refers to missing music.');
+      owner.automations.push(Object.assign(new model.Automation(),{type:type==='DSPParam_11'?model.AutomationType.Balance:model.AutomationType.Volume,value:value*16,ratioPosition,isLinear:text(item,'Linear')==='true',isVisible:text(item,'Visible')!=='false',text:text(item,'Text')}));
+    }
+  });
+  sourceEntries.set(score,entries);return score;
+}
+export function exportGpInterchange(score:model.Score,settings:Settings):Uint8Array {
+  const source=score;score=preparePitchedGpScore(score,settings);copyGpInterchangeSource(source,score);
+  const raw=new exporter.Gp7Exporter().export(score,settings),changes=score.tracks.map(trackMixAutomations),needsXml=changes.some(stream=>stream.length>0)||score.tracks.some(track=>track.isPercussion);
+  const original=sourceEntries.get(score);
+  if(!needsXml&&!original)return raw;
+  const generated=unzip(raw,settings);
+  if(!needsXml)return zipSync({...generated,...original,[gpifPath]:generated[gpifPath]});
+  const xml=new TextDecoder().decode(generated[gpifPath]),projection=projectGpifTracks(xml),doc=parseXml(projection?.xml??xml);
+  const references=writePercussionReferences(score,doc,settings);
+  orderedTracks(doc).forEach((node,index)=>{
+    if(!node)return;
+    const strip=node.querySelector(':scope > RSE > ChannelStrip')!;
+    let automations=strip.querySelector(':scope > Automations');
+    if(!automations){automations=doc.createElement('Automations');strip.append(automations);}
+    for(const {bar,automation}of changes[index]){
+      const item=doc.createElement('Automation');
+      for(const [name,value]of [['Type',automation.type===model.AutomationType.Balance?'DSPParam_11':'DSPParam_12'],['Linear',String(automation.isLinear)],['Bar',String(bar)],['Position',String(automation.ratioPosition)],['Visible',String(automation.isVisible)],['Value',String(automation.value/16)],['Text',automation.text]]){
+        const field=doc.createElement(name);field.textContent=value;item.append(field);
+      }
+      automations.append(item);
+    }
+  });
+  const serializer=new XMLSerializer();
+  let outputXml=projection?xml.slice(0,projection.tracks.start)+serializer.serializeToString(doc.querySelector('GPIF > Tracks')!)+xml.slice(projection.tracks.end):serializer.serializeToString(doc);
+  if(references.size){
+    const patched=projection?patchGpifNoteArticulations(outputXml,references):undefined;
+    if(patched!==undefined)outputXml=patched;
+    else{
+      const full=projection?parseXml(outputXml):doc;
+      for(const note of full.querySelectorAll('GPIF > Notes > Note')){
+        const reference=references.get(Number(note.getAttribute('id')));
+        if(reference!==undefined)note.querySelector(':scope > InstrumentArticulation')!.textContent=String(reference);
+      }
+      outputXml=serializer.serializeToString(full);
+    }
+  }
+  const entries={...generated,...original,[gpifPath]:strToU8(outputXml)};
+  return zipSync(entries);
+}
+/** Carry source archive siblings and binary backing data omitted by model JSON. */
+export function copyGpInterchangeSource(source:model.Score,destination:model.Score):void {
+  const entries=sourceEntries.get(source);if(entries)sourceEntries.set(destination,entries);
+  if(source.backingTrack?.rawAudioFile&&!destination.backingTrack?.rawAudioFile) {
+    destination.backingTrack??=new model.BackingTrack();destination.backingTrack.rawAudioFile=source.backingTrack.rawAudioFile.slice();
+  }
+}

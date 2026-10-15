@@ -9,6 +9,8 @@ import { model, Settings } from '@coderline/alphatab';
 import { buildScore } from '../engine';
 import { blankProject } from '../project';
 import { exportMidi } from './midi';
+import { loadInterchangeScore } from '../interchange/gp';
+import { exportGp,previewEdit } from '../engine';
 // Independent Standard MIDI byte decoder; does not use alphaTab's reader or writer.
 function decode(bytes:Uint8Array) {
   const view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);let p=0;
@@ -32,6 +34,13 @@ function score() {
   s.tracks[0].staves[0].capo=2;s.masterBars[1].tempoAutomations=[model.Automation.buildTempoAutomation(false,0,90,2)];
   s.masterBars[1].isRepeatStart=true;s.masterBars[2].repeatCount=2;return model.JsonConverter.jsonToScore(model.JsonConverter.scoreToJson(s),new Settings());
 }
+it('writes track mix controls when only the lower staff of an imported GP is selected',()=>{
+  const score=previewEdit(blankProject(),{type:'addStaff',track:0,settings:{tuning:[],capo:0,transposition:0,displayTransposition:0,clef:4,showTab:false,showNotation:true}}).score;
+  score.tracks[0].staves[0].bars[0].voices[0].beats[0].automations.push(Object.assign(new model.Automation(),{type:model.AutomationType.Volume,value:4,ratioPosition:.75}));
+  const imported=loadInterchangeScore(exportGp(score),new Settings());
+  const parsed=decode(exportMidi(imported,{tracks:[0],staves:{0:[1]},range:null}));
+  expect(parsed.events.filter(event=>event.type===176&&event.data[0]===7&&event.data[1]===32).map(event=>event.tick)).toContain(2880);
+});
 function manyTracks(count:number,barCount=2){
   const s=new model.Score();for(let bar=0;bar<barCount;bar++)s.addMasterBar(new model.MasterBar());s.masterBars[0].tempoAutomations=[model.Automation.buildTempoAutomation(false,0,120,2)];
   s.masterBars[1].tempoAutomations=[model.Automation.buildTempoAutomation(false,0,90,2)];

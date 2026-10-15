@@ -1,6 +1,6 @@
 import { model } from '@coderline/alphatab';
 import type { BeatTarget } from '../project';
-import type { NoteTarget } from '../edit-types';
+import type { IndexedNoteTarget, NoteTarget } from '../edit-types';
 
 export const integer=(value:number,min=0,max=Number.MAX_SAFE_INTEGER)=>Number.isInteger(value)&&value>=min&&value<=max;
 export function enumValue(value:number,enumeration:object,label:string) {
@@ -20,8 +20,10 @@ export function locationAt(score:model.Score,target:BeatTarget) {
 export function beatAt(score:model.Score,target:BeatTarget) {
   const beat=locationAt(score,target).voice.beats[target.beat];if(!beat||beat.isEmpty)throw new Error('Select an existing beat.');return beat;
 }
-export function noteAt(score:model.Score,target:NoteTarget) {
-  const beat=beatAt(score,target.target),note=beat.notes.find(n=>n.string===target.string);
+export function noteAt(score:model.Score,target:NoteTarget|IndexedNoteTarget) {
+  const beat=beatAt(score,target.target);
+  if('noteIndex' in target){if(!integer(target.noteIndex,0,beat.notes.length-1))throw new Error('Select an existing note.');return beat.notes[target.noteIndex];}
+  const note=beat.notes.find(n=>n.string===target.string);
   if(!integer(target.string,1)||!note)throw new Error('Select an existing note on this string.');return note;
 }
 export const durationValues=[-4,-2,1,2,4,8,16,32,64,128,256] as const;

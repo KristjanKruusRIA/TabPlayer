@@ -37,8 +37,18 @@ async fn read_document(
         .dialog()
         .file()
         .add_filter(
-            "TabPlayer and Guitar Pro",
-            &["tabplayer", "gp", "gpx", "gp3", "gp4", "gp5"],
+            "TabPlayer and scores",
+            &[
+                "tabplayer",
+                "gp",
+                "gpx",
+                "gp3",
+                "gp4",
+                "gp5",
+                "xml",
+                "musicxml",
+                "mxl",
+            ],
         )
         .blocking_pick_file();
     let Some(selected) = selected else {

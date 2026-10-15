@@ -6,7 +6,7 @@ Date: 2026-10-15. Status: approved by the user's standing instruction to finish 
 
 TabPlayer remains a Rust/Tauri desktop application for Windows, macOS and Linux, using the approved slate/cream/lime editor layout and alphaTab 1.8.4 where its public API is sufficient. The target is the functional capabilities of the supplied Guitar Pro 8.1.5 installer. The official Guitar Pro 8 user guide supplies the requirement inventory; observations from native files and executable probes distinguish supported behavior from assumptions. This does not require copying proprietary code, graphics, samples, credentials, or commercial song catalogs.
 
-The released 0.2.0 implementation is the starting point, not evidence of full parity. The audit in `.analysis/parity/gp8-feature-audit.md` and its machine-readable counterpart tracks each requirement as implemented, partial, missing or unverified. Passing a parser, serialization or unit test alone does not establish a working user workflow or Guitar Pro compatibility. Unknown runtime behavior stays unverified.
+The released 0.2.0 implementation is the starting point, not evidence of full parity. The baseline audit in `docs/validation/2026-10-15-gp8-parity-baseline.md` and its machine-readable counterpart tracks each requirement as implemented, partial, missing or unverified. Passing a parser, serialization or unit test alone does not establish a working user workflow or Guitar Pro compatibility. Unknown runtime behavior stays unverified.
 
 Reference: https://static.guitar-pro.com/gp8/manual/Guitar-Pro-8-user-guide.pdf . Supporting official pages and their retrieval evidence are retained locally in `.analysis/parity/public-manual-pages.json`.
 
@@ -30,7 +30,7 @@ Each family needs its own bounded implementation plan as evidence resolves the c
 
 ### Song data and directions
 
-Add `setScoreMetadata` with a `fields` object containing eight required string fields: `subTitle`, `album`, `words`, `music`, `copyright`, `tab`, `notices`, `instructions`. Existing title/artist/tempo editing remains compatible. Add `setDirections {bar, directions:number[]}` for the 19 public `model.Direction` values. Replace the bar's direction set, normalize duplicates and reject invalid values. Add `setNoteSpelling {target, noteIndex, accidentalMode}` using the six public accidental modes. Preserve the sounding pitch. These operations must survive native history replay and supported GP roundtrip.
+Add `setScoreMetadata` with a `fields` object containing eight required string fields: `subTitle`, `album`, `words`, `music`, `copyright`, `tab`, `notices`, `instructions`. Existing title/artist/tempo editing remains compatible. Add `setDirections {bar, directions:number[]}` for the 19 public `model.Direction` values. Replace the bar's direction set, normalize duplicates and reject invalid values. Add `setNoteSpelling {target, noteIndex, accidentalMode}` using all seven public accidental modes (Default plus six forced modes). Preserve the sounding pitch. These operations must survive native history replay and supported GP roundtrip.
 
 The metadata, direction and spelling panels follow the existing selected beat and form patterns. The known pickup/D.C. playback difference remains open until corrected and tested; setting a direction alone does not close it.
 
@@ -56,6 +56,8 @@ Use public `fflate` 0.8.3 plus DOM XML APIs in an owned adapter, without patchin
 MIDI generation must schedule these events at their actual performed positions, including repeated bars, for live playback and SMF export. Remove only these automation objects from a detached generator model, preserving initial controller and fade/swell events. A linear flag roundtrip is insufficient evidence of audible continuous ramps. Master volume/pan remains a distinct requirement.
 
 Expose `.xml`, `.musicxml` and `.mxl` intake through existing public MusicXML importer and desktop filters. Keep independently reproduced importer defects (tempo offsets, natural harmonic, volume/pan directions) open until their semantics are fixed with fixtures. GP compatibility must use standard GPIF fields, never private extension fields presented as native parity.
+
+Desktop validation also reproduced loss of pitched staff sounding transposition on GP export. For a non-tab pitched staff, an owned detached export model may bake sounding transposition into note pitches, reset that transient sounding offset and retain display transposition. Both sounding and displayed pitches must remain identical, including ties, chords and supported trills. Native project history retains its original settings. This translates to native GPIF note pitches; it does not claim persistence of an alphaTab-specific internal setting. Stringed transposition/fret normalization remains a separate open compatibility requirement.
 
 ### Shared correctness
 

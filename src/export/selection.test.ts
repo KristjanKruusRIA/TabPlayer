@@ -6,12 +6,32 @@ import { music,noteAt } from '../editor/fixtures';
 import { selectScore,selectStaves } from './selection';
 import { mkdirSync,writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
+import { trackMixAutomations } from '../interchange/automation';
+import { loadInterchangeScore } from '../interchange/gp';
 function phraseScore(){
   const score=music(),origin=noteAt(score),destination=noteAt(score,2);
   destination.string=5;destination.fret=7;noteAt(score,1,3).string=5;noteAt(score,1,3).fret=4;score.finish(new Settings());
   origin.slurDestination=destination;destination.slurOrigin=origin;destination.isSlurDestination=true;return score;
 }
 const automation=(type:model.AutomationType,value:number,ratioPosition=0)=>Object.assign(new model.Automation(),{type,value,ratioPosition});
+it('inherits mix state by bar position when controller carriers occur in a different beat order',()=>{
+  const score=music(),beats=score.tracks[0].staves[0].bars[0].voices[0].beats;
+  beats[0].automations.push(automation(model.AutomationType.Volume,4,.75));
+  beats[2].automations.push(automation(model.AutomationType.Volume,8,.5));
+  const selected=selectScore(score,{tracks:[0],range:{first:1,last:3}});
+  expect(selected.tracks[0].playbackInfo.volume).toBe(4);
+});
+it('retains track-wide controllers when the exported staff differs from the imported carrier',()=>{
+  const score=previewEdit(blankProject(),{type:'addStaff',track:0,settings:{tuning:[],capo:0,transposition:0,displayTransposition:0,clef:4,showTab:false,showNotation:true}}).score;
+  score.tracks[0].staves[0].bars[0].voices[0].beats[0].automations.push(automation(model.AutomationType.Volume,4,.75));
+  const imported=loadInterchangeScore(exportGp(score),new Settings()),before=model.JsonConverter.scoreToJson(imported);
+  for(const selected of [selectStaves(imported,{tracks:[0],staves:{0:[1]},range:null}),selectScore(imported,{tracks:[0],staves:{0:[1]},range:null})]) {
+    expect(trackMixAutomations(selected.tracks[0]).map(({bar,automation:a})=>[bar,a.ratioPosition,a.value])).toEqual([[0,.75,4]]);
+    const gp=loadInterchangeScore(exportGp(selected),new Settings());
+    expect(trackMixAutomations(gp.tracks[0]).map(({bar,automation:a})=>[bar,a.ratioPosition,a.value])).toEqual([[0,.75,4]]);
+  }
+  expect(model.JsonConverter.scoreToJson(imported)).toBe(before);
+});
 it('selected GP snapshot keeps the chosen music and repairs relationships cut by range',()=>{
   let p=previewEdit(blankProject(),{type:'addTrack',name:'Bass',tuning:[43,38,33,28],program:33}).project;
   p=previewEdit(p,{type:'setNote',target:{track:1,staff:0,bar:1,voice:0,beat:0},string:1,fret:5}).project;

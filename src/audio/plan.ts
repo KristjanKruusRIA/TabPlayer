@@ -4,11 +4,13 @@ import { captureNoteLinks, restoreNoteLinks } from '../editor/links';
 import type { ProjectView } from '../project';
 import type { BackingSettings } from '../edit-types';
 import type { Articulation, MeasureOccurrence, PlanMidiEvent, PlanNote, PlanTempo, PlaybackPlan } from './types';
+import { scoreFromJson } from '../model-clone';
+import { gpControllerEvents, prepareGpMidiScore } from '../interchange/automation';
 
 const settings = new Settings();
 const beatsOf = (score: model.Score) => score.tracks.flatMap(t => t.staves.flatMap(s => s.bars.flatMap(b => b.voices.flatMap(v => v.beats))));
 function cloneWithLinks(score: model.Score) {
-  const copy = model.JsonConverter.jsonToScore(model.JsonConverter.scoreToJson(score), settings);
+  const copy = scoreFromJson(model.JsonConverter.scoreToJson(score), settings);
   restoreNoteLinks(copy, captureNoteLinks(score)); return copy;
 }
 
@@ -172,7 +174,7 @@ function sources(score: model.Score) {
   return all;
 }
 function laneScore(json: ReturnType<typeof model.JsonConverter.scoreToJson>, lane: Source[]) {
-  const score = model.JsonConverter.jsonToScore(json, settings), first = lane[0];
+  const score = scoreFromJson(json, settings), first = lane[0];
   const track = score.tracks[first.track], staff = track.staves[first.staff];
   // Finish before removing notes: retain original grace/tuplet rhythm and all
   // derived tie/let-ring/slide links. Do not refinish an isolated musical lane.
@@ -246,7 +248,7 @@ function pitchCurve(note: RawNote, destination: RawNote, events: PlanMidiEvent[]
 
 function buildWithIdentities(original: model.Score, generation: number, ids: string[], corrected?: (track: number, attack: number, length: number) => void): PlaybackPlan {
   if (!Number.isSafeInteger(generation) || generation < 0) throw new Error('Invalid playback generation.');
-  const score = prepareMidiScore(original);
+  const score = prepareGpMidiScore(prepareMidiScore(original),settings);
   if (ids.length !== score.tracks.length || new Set(ids).size !== ids.length || ids.some(id => typeof id !== 'string' || !id)) throw new Error('Invalid playback track identities.');
   const complete = generate(score), all = sources(score), nativeChannel = channelMapping(score, complete.events);
   resolvePrograms(score, complete.events);
@@ -324,6 +326,7 @@ function buildWithIdentities(original: model.Score, generation: number, ids: str
   }
   if (fullIndex !== complete.events.notes.length) throw new Error('The score has MIDI attacks without an unambiguous source-note lane.');
   const events: OrderedMidiEvent[] = converted(complete.events.events, ids, nativeChannel);
+  for(const event of gpControllerEvents(score,occurrences))events.push({type:'controller',trackId:ids[event.track],tick:event.tick,channel:nativeChannel(event.track,event.channel),controller:event.controller,value:event.value,order:Number.MAX_SAFE_INTEGER});
   for (const note of complete.events.notes) {
     const common = { trackId: ids[note.track], channel: nativeChannel(note.track, note.channel), key: note.key, velocity: note.velocity };
     events.push({ ...common, type: 'noteOn', tick: note.start, order: note.onOrder }, { ...common, type: 'noteOff', tick: note.end, order: note.offOrder });
@@ -346,7 +349,7 @@ export function deadBrushMidiDurations(score: model.Score): { track: number; att
 }
 
 export function buildPlaybackPlanFromJson(json: ReturnType<typeof model.JsonConverter.scoreToJson>, identities: string[], generation: number): PlaybackPlan {
-  return buildWithIdentities(model.JsonConverter.jsonToScore(json, settings), generation, identities);
+  return buildWithIdentities(scoreFromJson(json, settings), generation, identities);
 }
 
 export function validatePlaybackPlan(plan: PlaybackPlan) {

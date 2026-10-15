@@ -1,6 +1,10 @@
 import type { BeatTarget } from './project';
 
 export interface NoteTarget { target: BeatTarget; string: number }
+export interface IndexedNoteTarget { target: BeatTarget; noteIndex: number }
+export interface ScoreMetadata {
+  subTitle:string; album:string; words:string; music:string; copyright:string; tab:string; notices:string; instructions:string;
+}
 export type LinkKind = 'tie' | 'hammerPull' | 'slur';
 export interface PitchCurve { type: number; style: number; points: Array<{offset: number; value: number}> }
 export interface NoteTechniques {
@@ -53,6 +57,18 @@ export type EditCommand =
   | { type: 'removeTrack'; track: number }
   | { type: 'setTuning'; track: number; tuning: number[] }
   | { type: 'setScoreInfo'; title: string; artist: string; tempo: number }
+  | { type: 'setScoreMetadata'; fields: ScoreMetadata }
+  | { type: 'setDirections'; bar: number; directions: number[] }
+  | { type: 'setNoteSpelling'; target: BeatTarget; noteIndex: number; accidentalMode: number }
+  | { type: 'addPitchedTrack'; name: string; program: number }
+  | { type: 'addPercussionTrack'; name: string; program: number }
+  | { type: 'addPitchedNote'; target: BeatTarget; pitch: number }
+  | { type: 'setPitchedNote'; target: BeatTarget; noteIndex: number; pitch: number }
+  | { type: 'addPercussionNote'; target: BeatTarget; articulation: number }
+  | { type: 'setPercussionNote'; target: BeatTarget; noteIndex: number; articulation: number }
+  | { type: 'removeNoteByIndex'; target: BeatTarget; noteIndex: number }
+  | { type: 'setNoteTechniquesByIndex'; target: BeatTarget; noteIndex: number; patch: NoteTechniques }
+  | { type: 'setNoteLinkByIndex'; from: IndexedNoteTarget; to: IndexedNoteTarget|null; kind: LinkKind }
   | { type: 'setNoteTechniques'; target: BeatTarget; string: number; patch: NoteTechniques }
   | { type: 'setBeatTechniques'; target: BeatTarget; patch: BeatTechniques }
   | { type: 'setNoteLink'; from: NoteTarget; to: NoteTarget|null; kind: LinkKind }

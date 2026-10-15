@@ -15,7 +15,7 @@ afterEach(()=>{cleanup();vi.clearAllMocks();});
 it('uses public external media output and keeps viewport changes out of native plan loading',()=>{
   const score=music(),playback={attachView:vi.fn(),replaceScore:vi.fn()},onSelect=vi.fn();const props={score,track:0,zoom:100,profile:'ScoreTab',onSelect,playback:playback as never};const rendered=render(<ScoreView {...props}/>);
   expect(view.options).toMatchObject({player:{playerMode:'EnabledExternalMedia',enableCursor:true}});expect((view.options as {player:object}).player).not.toHaveProperty('soundFont');expect(playback.attachView).toHaveBeenCalledTimes(1);
-  view.note?.(score.tracks[0].staves[0].bars[0].voices[0].beats[0].notes[0]);expect(onSelect).toHaveBeenLastCalledWith(target,6);
+  view.note?.(score.tracks[0].staves[0].bars[0].voices[0].beats[0].notes[0]);expect(onSelect).toHaveBeenLastCalledWith(target,6,0);
   rendered.rerender(<ScoreView {...props} zoom={130}/>);expect(playback.replaceScore).toHaveBeenLastCalledWith(score,0);expect(playback.attachView).toHaveBeenCalledTimes(1);
   rendered.unmount();expect(view.destroy).toHaveBeenCalledTimes(1);
 });

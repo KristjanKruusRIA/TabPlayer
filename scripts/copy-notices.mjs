@@ -10,7 +10,7 @@ async function collect(directory,name,version,license) {
   for(const file of files)await copyFile(join(directory,file),new URL(file,destination));
   inventory.push({name,version,license,files});
 }
-for(const name of ['@coderline/alphatab','@tauri-apps/api','@tauri-apps/plugin-dialog','react','react-dom','scheduler']) {
+for(const name of ['@coderline/alphatab','@tauri-apps/api','@tauri-apps/plugin-dialog','react','react-dom','scheduler','fflate']) {
   const directory=new URL(`../node_modules/${name}/`,import.meta.url);const pkg=JSON.parse(await readFile(new URL('package.json',directory),'utf8'));
   await collect(fileURLToPath(directory),name,pkg.version,pkg.license);
 }

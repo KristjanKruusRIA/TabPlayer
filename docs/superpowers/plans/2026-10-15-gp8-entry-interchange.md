@@ -32,7 +32,7 @@
 
 **Interfaces:** each pure router accepts `(score:model.Score, edit:EditCommand):boolean`, returning false for commands it does not own. Names: `applySongEdit`, `applyDirectionEdit`, `applyPitchEdit`. Panels receive score/current target and an `onEdit(EditCommand)` callback, following existing panel conventions. Commands have exactly the fields in the spec.
 
-- [ ] Write/run failing tests for all eight metadata strings including empty values; invalid direction values; duplicate direction normalization; all six spelling modes with invariant sounding pitch.
+- [ ] Write/run failing tests for all eight metadata strings including empty values; invalid direction values; duplicate direction normalization; all seven spelling modes with invariant sounding pitch.
 - [ ] Implement pure routers and focused existing-style controls without shared-file edits.
 - [ ] Verify public GP roundtrip and DC/DS/Fine itineraries using authored fixtures; report pickup/D.C. defect separately.
 - [ ] Run module and panel tests, report exact public interfaces and evidence for root integration.
@@ -59,6 +59,8 @@
 - [ ] Implement standard-GPIF ZIP/XML adapter; non-GP-ZIP imports retain public loader behavior.
 - [ ] Write/run timing tests covering repeats, fractional positions, linear events and fade controller preservation; implement owned helper with no global CC7 deletion.
 - [ ] Run focused tests; report root integration sequence and remaining master/linear semantics gaps honestly.
+- [ ] Correct reproduced GP drum references using the native articulation table; prove standard/custom output pitches through repeated GP roundtrips without source mutation.
+- [ ] Add `preparePitchedGpScore(score,settings):model.Score` in `src/interchange/pitched.ts` with RED→GREEN tests for sounding/display pitch preservation, chords, ties, multi-staff offsets and supported trills. Root applies it before GP export and carries archive sibling provenance to the detached model. Keep stringed transposition compatibility open.
 
 ### Task 4: shared protocol and engine integration (root)
 

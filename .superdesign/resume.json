@@ -18,14 +18,14 @@
       },
       "drafts": {
         "441a4347-3b6b-42db-9274-8af38eea29ca": {
-          "title": "TabPlayer - Realistic Instrument Visualizer Refinement",
-          "currentVersion": 4,
+          "title": "TabPlayer - GP8 Feature Parity Update",
+          "currentVersion": 5,
           "visualDirection": "slate shell, cream notation, lime accents"
         }
       },
       "activeDraftId": "441a4347-3b6b-42db-9274-8af38eea29ca",
       "targetKind": "new-target",
-      "updatedAt": "2026-10-14T21:05:43.8298091Z",
+      "updatedAt": "2026-10-15T03:13:46.7787104Z",
       "referenceIds": [
         "903f1fd3-29ad-4d66-bb96-a84fad807408",
         "21a709b1-5b0c-4281-a1d5-f3d999425f5b"

@@ -1,5 +1,8 @@
 import { model,Settings } from '@coderline/alphatab';
 import { validateSelection,type ExportSelection } from './types';
+import { scoreFromJson } from '../model-clone';
+import { copyGpInterchangeSource } from '../interchange/gp';
+import { isGpMixAutomation,trackMixAutomations } from '../interchange/automation';
 /** A detached musical score for GP output. The original and its history are never edited. */
 export function selectScore(score:model.Score,selection:ExportSelection):model.Score {
   const copy=selectStaves(score,selection);
@@ -13,7 +16,8 @@ export function selectScore(score:model.Score,selection:ExportSelection):model.S
     for(const track of copy.tracks){
       const changes:{bar:number;tick:number;change:model.Automation}[]=[];
       for(const staff of track.staves)for(const bar of staff.bars.slice(0,first+1))for(const voice of bar.voices)for(const beat of voice.beats)for(const change of beat.automations){
-        if(bar.index<first||beat.playbackStart===0&&change.ratioPosition===0)changes.push({bar:bar.index,tick:beat.playbackStart,change});
+        const tick=isGpMixAutomation(change)?change.ratioPosition*bar.masterBar.calculateDuration(false):beat.playbackStart;
+        if(bar.index<first||tick===0&&change.ratioPosition===0)changes.push({bar:bar.index,tick,change});
       }
       changes.sort((a,b)=>a.bar-b.bar||a.tick-b.tick||a.change.ratioPosition-b.change.ratioPosition);
       for(const {change}of changes){
@@ -49,12 +53,21 @@ export function selectScore(score:model.Score,selection:ExportSelection):model.S
     if(note.hammerPullOrigin&&!notes.has(note.hammerPullOrigin))note.hammerPullOrigin=null;
     if(note.hammerPullDestination&&!notes.has(note.hammerPullDestination)){note.hammerPullDestination=null;note.isHammerPullOrigin=false;}
   }
-  return model.JsonConverter.jsonToScore(model.JsonConverter.scoreToJson(copy),new Settings());
+  const result=scoreFromJson(model.JsonConverter.scoreToJson(copy),new Settings());copyGpInterchangeSource(score,result);return result;
 }
 /** Retains original track indexing for public MIDI/playback plan generation. */
 export function selectStaves(score:model.Score,selection:ExportSelection):model.Score {
   validateSelection(score.tracks.length,score.masterBars.length,selection,score.tracks.map(t=>t.staves.length));
-  const copy=model.JsonConverter.jsonToScore(model.JsonConverter.scoreToJson(score),new Settings());
-  for(const [track,staves]of Object.entries(selection.staves??{}))copy.tracks[Number(track)].staves=staves.map(i=>copy.tracks[Number(track)].staves[i]);
-  return model.JsonConverter.jsonToScore(model.JsonConverter.scoreToJson(copy),new Settings());
+  const copy=scoreFromJson(model.JsonConverter.scoreToJson(score),new Settings());
+  for(const [index,staves]of Object.entries(selection.staves??{})) {
+    const track=copy.tracks[Number(index)],mix=trackMixAutomations(track);
+    track.staves=staves.map(i=>track.staves[i]);
+    for(const staff of track.staves)for(const bar of staff.bars)for(const voice of bar.voices)for(const beat of voice.beats)beat.automations=beat.automations.filter(change=>!isGpMixAutomation(change));
+    for(const {bar,automation}of mix) {
+      const voice=track.staves[0].bars[bar].voices[0];
+      if(!voice.beats.length){const carrier=new model.Beat();carrier.isEmpty=true;voice.addBeat(carrier);}
+      voice.beats[0].automations.push(Object.assign(new model.Automation(),automation));
+    }
+  }
+  const result=scoreFromJson(model.JsonConverter.scoreToJson(copy),new Settings());copyGpInterchangeSource(score,result);return result;
 }

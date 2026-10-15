@@ -2,14 +2,16 @@ import { model, Settings } from '@coderline/alphatab';
 import type { EditCommand, StaffSettings } from '../edit-types';
 import { enumValue, integer, staffAt, trackAt, validateCapacity } from './common';
 import { captureNoteLinks, detachNote, restoreNoteLinks } from './links';
+import { scoreFromJson } from '../model-clone';
 
 function validateStaff(staff:model.Staff|null,settings:StaffSettings) {
-  if(!Array.isArray(settings.tuning)||settings.tuning.some(p=>!integer(p,0,127))||(!settings.tuning.length&&!staff?.isPercussion))throw new Error('Use MIDI tuning pitches from 0 to 127.');
+  if(!Array.isArray(settings.tuning)||settings.tuning.some(p=>!integer(p,0,127))||(!settings.tuning.length&&settings.showTab&&!staff?.isPercussion))throw new Error('Use MIDI tuning pitches from 0 to 127.');
   if(staff&&staff.tuning.length!==settings.tuning.length)throw new Error('Retuning must keep the current string count.');
   if(!integer(settings.capo,0,127)||!integer(settings.transposition,-127,127)||!integer(settings.displayTransposition,-127,127))throw new Error('Invalid capo or transposition.');
   enumValue(settings.clef,model.Clef,'clef');if(typeof settings.showTab!=='boolean'||typeof settings.showNotation!=='boolean'||(!settings.showTab&&!settings.showNotation))throw new Error('Show tablature or standard notation.');
   for(const bar of staff?.bars??[])for(const voice of bar.voices)for(const beat of voice.beats)for(const note of beat.notes) {
-    if(!note.string)continue;const pitch=settings.tuning[settings.tuning.length-note.string]+note.fret+settings.capo-settings.transposition+note.harmonicPitch;
+    if(staff?.isPercussion)continue;
+    const pitch=note.string>0?settings.tuning[settings.tuning.length-note.string]+note.fret+settings.capo-settings.transposition+note.harmonicPitch:note.octave*12+note.tone-settings.transposition;
     if(!Number.isFinite(pitch)||pitch<0||pitch>127)throw new Error('Staff settings put a note outside the playable MIDI pitch range.');
   }
 }
@@ -48,7 +50,7 @@ export function applyStructureEdit(score:model.Score,command:EditCommand,_editIn
       const staff=staffAt(score,command.track,command.staff);const {sourceVoice,destinationVoice,startBar,endBar}=command;
       if(!integer(startBar)||!integer(endBar,startBar,staff.bars.length-1)||!integer(sourceVoice,0,3)||!integer(destinationVoice,0,3)||sourceVoice===destinationVoice||staff.bars.slice(startBar,endBar+1).some(b=>!b.voices[sourceVoice]||!b.voices[destinationVoice]))throw new Error('Choose different existing voices and an inclusive measure range.');
       for(const bar of staff.bars.slice(startBar,endBar+1))validateCapacity(bar.voices[sourceVoice]);
-      const cloned=model.JsonConverter.jsonToScore(model.JsonConverter.scoreToJson(score),new Settings());
+      const cloned=scoreFromJson(model.JsonConverter.scoreToJson(score),new Settings());
       const noteIds=new Map<number,number>(),copies:model.Voice[]=[];
       for(let bar=startBar;bar<=endBar;bar++) {
         const voice=cloned.tracks[command.track].staves[command.staff].bars[bar].voices[sourceVoice];voice.id=new model.Voice().id;voice.bar=staff.bars[bar];voice.index=destinationVoice;

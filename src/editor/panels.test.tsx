@@ -9,7 +9,17 @@ import { MeasurePanel } from './MeasurePanel';
 import { CurveEditor } from './CurveEditor';
 import { ChordDialog } from './ChordDialog';
 import { music, target } from './fixtures';
+import { previewEdit } from '../engine';
+import { blankProject } from '../project';
 afterEach(cleanup);
+it('applies pitched staff transposition without requiring a string tuning',()=>{
+  const score=previewEdit(blankProject(),{type:'addPitchedTrack',name:'Piano',program:0}).score,onEdit=vi.fn();
+  render(<StructurePanel score={score} target={{...target,track:1}} string={1} busy={false} onEdit={onEdit} onSelect={vi.fn()}/>);
+  fireEvent.change(screen.getByLabelText('Sounding transposition'),{target:{value:'12'}});fireEvent.click(screen.getByRole('button',{name:'Apply staff settings'}));
+  expect(onEdit).toHaveBeenLastCalledWith(expect.objectContaining({type:'setStaffSettings',track:1,settings:expect.objectContaining({tuning:[],transposition:12,showTab:false,showNotation:true})}));
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();expect(screen.getByLabelText('Staff tuning (notes, high to low)')).toBeDisabled();
+  expect(screen.getByLabelText('Capo')).toBeDisabled();expect(screen.getByLabelText('Show tablature')).toBeDisabled();
+});
 it('all technique families dispatch finite selected-string commands and refresh readback',()=>{
   const score=music(),onEdit=vi.fn(),props={score,target,string:6,busy:false,onEdit};const view=render(<TechniquePanel {...props}/>);
   fireEvent.click(screen.getByLabelText('Palm mute'));expect(onEdit).toHaveBeenLastCalledWith({type:'setNoteTechniques',target,string:6,patch:{palmMute:true}});

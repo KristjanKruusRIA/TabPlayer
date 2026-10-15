@@ -1,0 +1,7 @@
+<!-- Authored native GPIF shape, based on the public GP7/8 channel-strip evidence. -->
+<Automations>
+  <Automation><Type>DSPParam_12</Type><Linear>false</Linear><Bar>0</Bar><Position>0.333333</Position><Visible>false</Visible><Value>0.58</Value><Text>quiet &amp; warm</Text></Automation>
+  <Automation><Type>DSPParam_11</Type><Linear>true</Linear><Bar>1</Bar><Position>0.375</Position><Visible>true</Visible><Value>0.25</Value><Text>left → center</Text></Automation>
+  <Automation><Type>DSPParam_12</Type><Linear>false</Linear><Bar>1</Bar><Position>0.375</Position><Visible>true</Visible><Value>0.66</Value></Automation>
+  <Automation><Type>DSPParam_12</Type><Linear>false</Linear><Bar>1</Bar><Position>0.375</Position><Visible>false</Visible><Value>0.5</Value></Automation>
+</Automations>

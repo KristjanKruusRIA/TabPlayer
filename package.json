@@ -19,6 +19,7 @@
     "@coderline/alphatab": "1.8.4",
     "@tauri-apps/api": "2.11.1",
     "@tauri-apps/plugin-dialog": "2.7.3",
+    "fflate": "0.8.3",
     "react": "19.3.0",
     "react-dom": "19.3.0"
   },

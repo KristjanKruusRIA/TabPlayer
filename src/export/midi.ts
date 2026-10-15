@@ -2,6 +2,7 @@ import { midi,model,Settings, type io } from '@coderline/alphatab';
 import { validateSelection,type ExportSelection } from './types';
 import { selectStaves } from './selection';
 import { deadBrushMidiDurations,prepareMidiScore } from '../audio/plan';
+import { gpControllerEvents,prepareGpMidiScore } from '../interchange/automation';
 class TrackName extends midi.MidiEvent {
   constructor(track:number,readonly name:string){super(track,0,midi.MidiEventType.Meta);}
   writeTo(stream:io.IWriteable){const bytes=new TextEncoder().encode(this.name);stream.writeByte(255);stream.writeByte(3);midi.MidiFile.writeVariableInt(stream,bytes.length);stream.write(bytes,0,bytes.length);}
@@ -27,7 +28,7 @@ function shifted(event:midi.MidiEvent,tick:number,track:number):midi.MidiEvent {
 export function exportMidi(score:model.Score,selection:ExportSelection):Uint8Array {
   validateSelection(score.tracks.length,score.masterBars.length,selection,score.tracks.map(t=>t.staves.length));
   const source=new midi.MidiFile();source.format=midi.MidiFileFormat.MultiTrack;
-  const prepared=prepareMidiScore(selectStaves(score,selection));
+  const prepared=prepareGpMidiScore(prepareMidiScore(selectStaves(score,selection)),new Settings());
   // Keep source track identities for handler routing, but allocate SMF channels
   // globally: imported logical channels above 15 would otherwise wrap on write.
   prepared.tracks=selection.tracks.map(i=>prepared.tracks[i]);
@@ -38,6 +39,8 @@ export function exportMidi(score:model.Score,selection:ExportSelection):Uint8Arr
   for(const track of melodic)track.playbackInfo.secondaryChannel=channels[channel++]??track.playbackInfo.primaryChannel;
   const settings=new Settings(),handler=new ExportMidiHandler(source,true);const generator=new midi.MidiFileGenerator(prepared,settings,handler);
   generator.applyTranspositionPitches=true;generator.generate();
+  const performed=generator.tickLookup.masterBars.map(bar=>({bar:bar.masterBar.index,startTick:bar.start+source.tickShift,endTick:bar.end+source.tickShift}));
+  for(const event of gpControllerEvents(prepared,performed))source.addEvent(new midi.ControlChangeEvent(event.track,event.tick,event.channel,event.controller,event.value));
   const selected=new Set(selection.tracks);const remap=new Map(selection.tracks.map((n,i)=>[n,i+1]));
   const conductor=(e:midi.MidiEvent)=>e instanceof midi.TempoChangeEvent||e instanceof midi.TimeSignatureEvent;
   // 1.8.4's aggregate events getter recurses for multiple tracks.

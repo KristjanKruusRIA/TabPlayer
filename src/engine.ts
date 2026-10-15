@@ -1,4 +1,4 @@
-import { exporter, importer, model, Settings } from '@coderline/alphatab';
+import { model, Settings } from '@coderline/alphatab';
 import type { BeatTarget, EditCommand, Project, ProjectInput } from './project';
 import { isSettingsEdit } from './edit-types';
 import type { BackingSettings, ChannelMix, DocumentSettings } from './edit-types';
@@ -6,6 +6,9 @@ import { defaultDocumentSettings, defaultMix, applySettingsEdit } from './docume
 import { applyAdvancedEdit } from './editor/advanced';
 import { captureNoteLinks, restoreNoteLinks, detachNote } from './editor/links';
 import { validateBackingAnchors } from './audio/plan';
+import { scoreFromJson } from './model-clone';
+import { validateParityCommand } from './parity-commands';
+import { copyGpInterchangeSource, exportGpInterchange, loadInterchangeScore } from './interchange/gp';
 
 const settings = new Settings();
 const { Score, Track, Staff, Bar, Voice, Beat, Note, MasterBar, Automation, JsonConverter } = model;
@@ -35,7 +38,10 @@ export function validateProject(value: unknown): Project {
   for(const [id,asset] of Object.entries(p.assets)) {
     if(!/^[a-f0-9]{64}$/i.test(id) || !asset || Object.keys(asset).some(key=>!['filename','mediaType','byteLength'].includes(key)) || typeof asset.filename!=='string' || typeof asset.mediaType!=='string' || !integer(asset.byteLength)) throw new Error('Invalid project asset metadata.');
   }
-  for(const edit of p.edits) if(edit.type==='setBacking' && edit.backing && !p.assets[edit.backing.assetId]) throw new Error('Backing audio asset is missing.');
+  for(const edit of p.edits) {
+    validateParityCommand(edit);
+    if(edit.type==='setBacking' && edit.backing && !p.assets[edit.backing.assetId]) throw new Error('Backing audio asset is missing.');
+  }
   return structuredClone(p);
 }
 
@@ -46,7 +52,7 @@ function rest(duration: number, dots = 0) {
 
 function appendBar(staff: model.Staff, master: model.MasterBar) {
   const bar = new Bar();
-  bar.clef = staff.tuning.length && staff.tuning[0] < 55 ? model.Clef.F4 : model.Clef.G2;
+  bar.clef = staff.bars.at(-1)?.clef ?? (staff.isPercussion?model.Clef.Neutral:staff.tuning.length && staff.tuning[0] < 55 ? model.Clef.F4 : model.Clef.G2);
   const voice = new Voice();
   for (let i = 0; i < master.timeSignatureNumerator; i++) voice.addBeat(rest(master.timeSignatureDenominator));
   bar.addVoice(voice); staff.addBar(bar);
@@ -71,7 +77,7 @@ function addTrack(score: model.Score, name: string, tuning: number[], program: n
 function initialScore(project: Project): model.Score {
   if (project.base.kind === 'file') {
     const bytes = Uint8Array.from(atob(project.base.bytesBase64), c => c.charCodeAt(0));
-    return importer.ScoreLoader.loadScoreFromBytes(bytes, settings);
+    return loadInterchangeScore(bytes, settings);
   }
   const score = new Score(); score.title = project.base.title; score.artist = project.base.artist;
   for (let i = 0; i < project.base.measureCount; i++) score.addMasterBar(new MasterBar());
@@ -226,10 +232,10 @@ export function buildDocument(value: ProjectInput): BuiltDocument {
   for (const [index,edit] of project.edits.entries()) {
     if(isSettingsEdit(edit)) {applySettingsEdit(documentSettings,edit,score,identities);continue;}
     apply(score, edit,index);
-    if (edit.type==='addTrack') identities.push(`added/${index}/${JSON.stringify(edit)}`);
+    if (edit.type==='addTrack'||edit.type==='addPitchedTrack'||edit.type==='addPercussionTrack') identities.push(`added/${index}/${JSON.stringify(edit)}`);
     if (edit.type==='removeTrack') identities.splice(edit.track,1);
     if(edit.type==='removeMeasure') {removeBackingMeasure(documentSettings.backing,edit.bar);removeBackingMeasure(embeddedBackingSettings,edit.bar);}
-    if (['insertBeat','deleteBeat','appendMeasure','removeMeasure','addTrack','removeTrack','addStaff','removeStaff','addVoice','removeVoice','copyVoice'].includes(edit.type)) {
+    if (['insertBeat','deleteBeat','appendMeasure','removeMeasure','addTrack','addPitchedTrack','addPercussionTrack','removeTrack','addStaff','removeStaff','addVoice','removeVoice','copyVoice'].includes(edit.type)) {
       score = rebuild(score);
     }
   }
@@ -270,8 +276,9 @@ function rebuild(score: model.Score) {
     for (const beat of voice.beats) tripleDotTiming(beat);
   }
   const links=captureNoteLinks(score);
-  const result=JsonConverter.jsonToScore(JsonConverter.scoreToJson(score), settings);
+  const result=scoreFromJson(JsonConverter.scoreToJson(score), settings);
   restoreNoteLinks(result,links);
+  copyGpInterchangeSource(score,result);
   return result;
 }
 
@@ -288,4 +295,4 @@ export function previewEdit(project: ProjectInput, edit: EditCommand, current?:B
   return {project:next,...buildDocument(next)};
 }
 
-export function exportGp(score: model.Score): Uint8Array { return new exporter.Gp7Exporter().export(score, settings); }
+export function exportGp(score: model.Score): Uint8Array { return exportGpInterchange(score, settings); }

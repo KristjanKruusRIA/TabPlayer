@@ -433,6 +433,29 @@ impl ProjectSession {
             .bytes()
     }
 
+    pub(crate) fn capture_asset(&self, id: &str) -> Result<StoredAsset, ProjectError> {
+        self.project
+            .assets
+            .get(id)
+            .cloned()
+            .ok_or_else(|| "Backing asset is missing from this project.".into())
+    }
+
+    pub(crate) fn current_backing_asset(&self) -> Option<Option<&str>> {
+        for command in self
+            .project
+            .baseline_edits
+            .iter()
+            .chain(&self.project.edits[..self.cursor])
+            .rev()
+        {
+            if let EditCommand::SetBacking { backing } = command {
+                return Some(backing.as_ref().map(|value| value.asset_id.as_str()));
+            }
+        }
+        None
+    }
+
     pub fn fork_project(&self) -> Result<Project, ProjectError> {
         let mut project = self.stored_project();
         project.baseline_edits.append(&mut project.edits);

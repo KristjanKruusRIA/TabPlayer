@@ -663,6 +663,7 @@ pub fn run() {
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(export::jobs::ExportJobs::default())
+        .manage(backing_waveform::BackingWaveformService::default())
         .setup(|app| {
             let directory = session::session_directory(app.path().app_data_dir()?)?;
             let library_directory = directory.join("file-library-v1");
@@ -753,6 +754,7 @@ pub fn run() {
         audio_command,
         audio_devices,
         audio_status,
+        backing_waveform::backing_waveform,
         stage_backing,
         stage_embedded_backing,
         cancel_asset,
@@ -809,6 +811,7 @@ pub fn run() {
         audio_command,
         audio_devices,
         audio_status,
+        backing_waveform::backing_waveform,
         stage_backing,
         stage_embedded_backing,
         cancel_asset,

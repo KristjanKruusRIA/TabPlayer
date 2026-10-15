@@ -1,3 +1,4 @@
+use crate::backing_waveform::{WaveformSourceCapture, WaveformSourceIdentity};
 use crate::project::{DocumentCandidate, ProjectSnapshot};
 use serde::{Deserialize, Deserializer, Serialize, de::Error};
 
@@ -733,6 +734,38 @@ impl DocumentWorkspace {
 
     pub fn asset_bytes(&self, id: &str, asset_id: &str) -> Result<Vec<u8>, String> {
         self.entry(id)?.session.asset_bytes(asset_id)
+    }
+
+    pub(crate) fn capture_waveform_source(
+        &self,
+        owner: &AudioOwner,
+        document: &DocumentRevision,
+        source: &WaveformSourceIdentity,
+    ) -> Result<WaveformSourceCapture, String> {
+        self.check_admission()?;
+        if self.active_owner() != owner || owner.document_id != document.document_id {
+            return Err("Waveform owner is no longer active.".into());
+        }
+        let entry = self.check_revision(document)?;
+        match source {
+            WaveformSourceIdentity::Asset { asset_id }
+                if entry.session.current_backing_asset() == Some(Some(asset_id.as_str())) =>
+            {
+                Ok(WaveformSourceCapture::Asset(
+                    entry.session.capture_asset(asset_id)?,
+                ))
+            }
+            WaveformSourceIdentity::Embedded { source_key, .. }
+                if entry.session.current_backing_asset().is_none()
+                    && entry
+                        .session
+                        .imported_digest()
+                        .is_some_and(|digest| digest.eq_ignore_ascii_case(source_key)) =>
+            {
+                Ok(WaveformSourceCapture::Embedded)
+            }
+            _ => Err("Backing source changed; retry its current waveform.".into()),
+        }
     }
 }
 

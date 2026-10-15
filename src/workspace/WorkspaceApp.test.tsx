@@ -57,6 +57,15 @@ function fixture(){
 async function setup(){const f=fixture(),workspace=await WorkspaceController.create(f.bridge);render(<WorkspaceApp workspace={workspace}/>);return {...f,workspace};}
 const current=(workspace:WorkspaceController)=>workspace.getState().documents.find(entry=>entry.id===workspace.getState().active.documentId)!;
 const props=()=>mocks.props.at(-1)!;
+it('keeps one waveform bridge per activation through view and lease renders',async()=>{
+  const {workspace:w,first}=await setup();
+  const a=props().waveformBridge;
+  expect(a).toBeDefined();expect(a.owner).toEqual(w.getState().active);expect(Object.isFrozen(a)).toBe(true);
+  act(()=>props().onViewChange({...initialDocumentView(),zoom:125}));expect(props().waveformBridge).toBe(a);
+  let release!:()=>void;act(()=>{release=props().beginEditorOperation();});expect(props().waveformBridge).toBe(a);act(()=>release());
+  await act(async()=>{await w.newDocument();});const b=props().waveformBridge;expect(b).not.toBe(a);expect(b.owner).toEqual(w.getState().active);
+  await act(async()=>{await w.activate(first);});expect(props().waveformBridge).not.toBe(a);expect(props().waveformBridge.owner).toEqual(w.getState().active);
+});
 it('switching preserves independent views and histories and mounts one keyed active editor with bound bridges',async()=>{
   const {workspace:w,first}=await setup(),a=current(w);expect(screen.getAllByTestId('active-editor')).toHaveLength(1);expect(mocks.mounted).toBe(1);
   expect(props().controller).toBe(a.controller);expect(props().audioBridge).toBe(mocks.audio.get(w.getState().active.activationId));expect(props().exportBridge).toBe(mocks.exports.get(first));

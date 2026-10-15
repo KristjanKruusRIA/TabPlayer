@@ -68,7 +68,7 @@ body { overflow:hidden; }
 .workstation-inspector>.inspector { width:100%; min-height:100%; padding:8px; overflow:visible; border:0; }
 .workstation-dock { grid-area:dock; min-width:0; min-height:0; display:flex; flex-direction:column; background:var(--ws-panel); border-top:1px solid var(--ws-border); }
 .workstation-dock .dock-collapse { margin-left:auto; }
-.workstation-dock-content,.workstation-dock-tracks { flex:1; min-width:0; min-height:0; height:100%; overflow:hidden; }
+.workstation-dock-content,.workstation-dock-tracks,.workstation-dock-backing { flex:1; min-width:0; min-height:0; height:100%; overflow:hidden; }
 .workstation-dock .live-instrument-view { height:100%; border:0; overflow:auto; }
 .app-shell .statusbar { min-height:24px; padding:4px 8px; gap:8px 16px; background:var(--ws-bg); color:var(--ws-muted); border-color:var(--ws-border); }
 .app-shell .error { padding:6px 8px; background:var(--ws-error-surface); color:var(--ws-error); }

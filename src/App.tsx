@@ -11,6 +11,9 @@ import './styles.css';
 import { NativePlaybackController } from './audio/NativePlaybackController';
 import { SoundPanel } from './audio/SoundPanel';
 import { BackingPanel } from './audio/BackingPanel';
+import { BackingWaveform } from './audio/BackingWaveform';
+import { makeEmbeddedWaveformSource } from './audio/backing-waveform-bridge';
+import type { BackingWaveformProps,NativeBackingWaveformBridge,WaveformSourceInput } from './audio/backing-waveform-types';
 import type { BackingCandidate,NativeAudioBridge } from './audio/bridge';
 import type { ExportNativeBridge } from './export/bridge';
 import type { NativeBridge } from './bridge';
@@ -48,7 +51,7 @@ const noPlaybackSubscribe=()=>()=>{};
 const textEntry=(target:EventTarget)=>target instanceof HTMLElement&&(['INPUT','SELECT','TEXTAREA'].includes(target.tagName)||target.isContentEditable);
 
 export interface AppProps {
-  controller:DocumentController;audioBridge:NativeAudioBridge;exportBridge:ExportNativeBridge;
+  controller:DocumentController;audioBridge:NativeAudioBridge;waveformBridge:NativeBackingWaveformBridge;exportBridge:ExportNativeBridge;
   documentBridge:Pick<NativeBridge,'confirmExport'|'exportGp'>;
   documentView:DocumentViewState;onViewChange:(view:DocumentViewState)=>void;clipboard:ClipboardStore;
   workspaceBusy:boolean;workspaceError:string|null;beginEditorOperation:()=>()=>void;
@@ -57,7 +60,7 @@ export interface AppProps {
   sessionMenu?:ReactNode;libraryMenu?:ReactNode;onFileCommandCapture?:(element:HTMLElement)=>void;recoveryStatus?:ReactNode;playbackResumeEpoch?:number;
 }
 
-export function App({controller,audioBridge,exportBridge,documentBridge,documentView,onViewChange,clipboard,workspaceBusy,workspaceError,beginEditorOperation,onNew,onOpen,onClose,onCloseAll,documentTabs,sessionMenu,libraryMenu,onFileCommandCapture,recoveryStatus,playbackResumeEpoch=0}:AppProps) {
+export function App({controller,audioBridge,waveformBridge,exportBridge,documentBridge,documentView,onViewChange,clipboard,workspaceBusy,workspaceError,beginEditorOperation,onNew,onOpen,onClose,onCloseAll,documentTabs,sessionMenu,libraryMenu,onFileCommandCapture,recoveryStatus,playbackResumeEpoch=0}:AppProps) {
   const state=useSyncExternalStore(controller.subscribe,controller.getState);
   const controlsBusy=state.busy||workspaceBusy;
   const [player,setPlayer]=useState<NativePlaybackController|null>(null);
@@ -78,7 +81,7 @@ export function App({controller,audioBridge,exportBridge,documentBridge,document
   const [leftVisible,setLeftVisible]=useState(true),[inspectorVisible,setInspectorVisible]=useState(true),[dockVisible,setDockVisible]=useState(true);
   const [narrowPane,setNarrowPane]=useState<'track'|'sound'|'backing'|'inspector'>('inspector');
   const [viewport,setViewport]=useState(()=>({width:window.innerWidth,height:window.innerHeight}));
-  const [dockMode,setDockMode]=useState<'overview'|'mixer'>('overview'),[dockForced,setDockForced]=useState(false);
+  const [dockMode,setDockMode]=useState<'overview'|'mixer'|'backing'>('overview'),[dockForced,setDockForced]=useState(false),[waveformOpened,setWaveformOpened]=useState(false);
   const shell=useRef<HTMLDivElement>(null),workspace=useRef<HTMLDivElement>(null),scorePane=useRef<HTMLElement>(null),commandBar=useRef<HTMLElement>(null);
   const leftPane=useRef<HTMLElement>(null),inspectorPane=useRef<HTMLDivElement>(null),paneRail=useRef<HTMLElement>(null),viewMenu=useRef<HTMLDetailsElement>(null);
   const paneFocusIntent=useRef<{pane:'track'|'sound'|'backing'|'inspector';trigger:boolean}|null>(null),[paneFocusTick,setPaneFocusTick]=useState(0);
@@ -97,7 +100,7 @@ export function App({controller,audioBridge,exportBridge,documentBridge,document
   useLayoutEffect(()=>{if(!clipboardFocus)return;const section=clipboardSection.current?.querySelector('details');if(section){for(let parent=section.parentElement;parent;parent=parent.parentElement)if(parent instanceof HTMLDetailsElement)parent.open=true;section.open=true;section.querySelector('summary')?.focus();section.scrollIntoView?.({block:'nearest'});}},[clipboardFocus]);
   const showTask=(task:'track'|'sound'|'backing')=>{closeCommands();setLeftVisible(true);setLeftTask(task);setNarrowPane(task);requestPaneFocus(task);};
   const showInspector=()=>{closeCommands();setInspectorVisible(true);setNarrowPane('inspector');requestPaneFocus('inspector');};
-  const chooseDock=(mode:'overview'|'mixer'|'instrument')=>{setDockVisible(true);setDockForced(true);setInstrumentVisible(mode==='instrument');if(mode!=='instrument')setDockMode(mode);};
+  const chooseDock=(mode:'overview'|'mixer'|'instrument'|'backing')=>{setDockVisible(true);setDockForced(true);setInstrumentVisible(mode==='instrument');if(mode!=='instrument')setDockMode(mode);if(mode==='backing')setWaveformOpened(true);};
   const hideDock=()=>{setDockVisible(false);viewMenu.current?.querySelector('summary')?.focus();};
   const [harmonyOpen,setHarmonyOpen]=useState(false),[scaleOpen,setScaleOpen]=useState(false),[libraryLoading,setLibraryLoading]=useState(false),[libraryError,setLibraryError]=useState<string|null>(null);
   const [library,setLibrary]=useState<HarmonyLibrary>({format:'TabPlayerHarmonyLibrary',version:1,entries:[]});
@@ -182,6 +185,23 @@ export function App({controller,audioBridge,exportBridge,documentBridge,document
   const backingEdit=(command:EditCommand,candidate?:BackingCandidate)=>controller.edit(command,candidate);
   const selectedTrack=state.score.tracks[target.track],trackId=trackIdentity(selectedTrack);
   const originalBacking=state.embeddedBacking&&!projectCommands(state.snapshot.project).some(edit=>edit.type==='setBacking');
+  const baseKey=originalBacking&&state.snapshot.project.base.kind==='file'?state.snapshot.project.base.sha256:null;
+  const [embeddedSource,setEmbeddedSource]=useState<{bytes:Uint8Array;key:string;source:WaveformSourceInput|null;error:string|null}|null>(null),[embeddedRetry,setEmbeddedRetry]=useState(0);
+  useEffect(()=>{
+    if(!waveformOpened||!baseKey||!state.embeddedBacking)return;
+    let active=true;const bytes=state.embeddedBacking,key=baseKey;
+    setEmbeddedSource(null);
+    void makeEmbeddedWaveformSource(key,bytes).then(source=>{if(active)setEmbeddedSource({bytes,key,source,error:null});}).catch(error=>{if(active)setEmbeddedSource({bytes,key,source:null,error:error instanceof Error?error.message:String(error)});});
+    return()=>{active=false;};
+  },[waveformOpened,baseKey,state.embeddedBacking,embeddedRetry]);
+  const currentEmbedded=embeddedSource?.bytes===state.embeddedBacking&&embeddedSource?.key===baseKey?embeddedSource:null;
+  const waveformSource:WaveformSourceInput|null=state.settings.backing?{kind:'asset',assetId:state.settings.backing.assetId}:originalBacking?currentEmbedded?.source??null:null;
+  const waveformEnabled=dockVisible&&!dockCollapsed&&!instrumentVisible&&dockMode==='backing';
+  const backingTimeline=player?.backingTimeline()??null;
+  const backingSelection=useMemo(()=>player?.backingScoreSelection(target,musicSelection)??{points:[],spans:[]},[player,backingTimeline?.generation,backingTimeline?.tempos,backingTimeline?.occurrences,target.track,target.staff,target.bar,target.voice,target.beat,musicSelection]);
+  const waveformCurrent=(document:Parameters<BackingWaveformProps['isCurrent']>[0],settings:Parameters<BackingWaveformProps['isCurrent']>[1])=>{
+    const current=controller.getState();return current.documentId===document.documentId&&current.revision===document.revision&&JSON.stringify(current.settings.backing)===JSON.stringify(settings);
+  };
   const select=(next:BeatTarget,s=string,index?:number)=>{
     if (!validSelectionIndices(next) || !Number.isInteger(s)) return;
     const fixed=repairSelection(state.score,next);setSelection(fixed);
@@ -275,7 +295,7 @@ export function App({controller,audioBridge,exportBridge,documentBridge,document
         <div className="workstation-task" hidden={leftTask!=='track'}><TrackSettingsPanel score={state.score} selected={target.track} busy={controlsBusy} onEdit={edit}/></div>
         <div className="workstation-task" hidden={leftTask!=='sound'}>
         <SoundPanel trackId={trackId} sound={state.settings.sounds[trackId]} onEdit={command=>controller.edit(command)} playback={player} busy={controlsBusy}/>
-        </div><div className="workstation-task" hidden={leftTask!=='backing'}><BackingPanel settings={originalBacking?undefined:state.settings.backing} originalSettings={state.embeddedBackingSettings?{assetId:'embedded',...state.embeddedBackingSettings}:null} assets={state.snapshot.project.assets} embedded={state.embeddedBacking} playback={player} onEdit={backingEdit} stageBacking={audioBridge.stageBacking} stageEmbeddedBacking={audioBridge.stageEmbeddedBacking} beginOperation={beginEditorOperation} busy={controlsBusy}/></div>
+        </div><div className="workstation-task" hidden={leftTask!=='backing'}><BackingPanel settings={originalBacking?undefined:state.settings.backing} originalSettings={state.embeddedBackingSettings?{assetId:'embedded',...state.embeddedBackingSettings}:null} assets={state.snapshot.project.assets} embedded={state.embeddedBacking} playback={player} onEdit={backingEdit} stageBacking={audioBridge.stageBacking} stageEmbeddedBacking={audioBridge.stageEmbeddedBacking} beginOperation={beginEditorOperation} busy={controlsBusy} onShowWaveform={()=>chooseDock('backing')}/></div>
       </section>
       <section ref={scorePane} className="score-workspace" aria-label="Score workspace" tabIndex={0} onKeyDown={keys}>
         <div className="score-tools"><span>{state.score.masterBars.length} measures · {state.score.tracks.length} tracks</span>
@@ -294,10 +314,13 @@ export function App({controller,audioBridge,exportBridge,documentBridge,document
       </EditorPanel>
       </div>
       <section className="workstation-dock" aria-label="Bottom dock" hidden={!dockVisible}>
-        <nav aria-label="Dock views"><button aria-pressed={!instrumentVisible&&dockMode==='overview'} onClick={()=>chooseDock('overview')}>Overview</button><button aria-pressed={!instrumentVisible&&dockMode==='mixer'} onClick={()=>chooseDock('mixer')}>Mixer</button><button aria-pressed={instrumentVisible} onClick={()=>chooseDock('instrument')}>Instrument</button><button className="dock-collapse" aria-label={dockCollapsed?'Expand bottom dock':'Hide bottom dock'} onClick={()=>dockCollapsed?setDockForced(true):hideDock()}>{dockCollapsed?'Expand':'Hide'}</button></nav>
+        <nav aria-label="Dock views"><button aria-pressed={!instrumentVisible&&dockMode==='overview'} onClick={()=>chooseDock('overview')}>Overview</button><button aria-pressed={!instrumentVisible&&dockMode==='mixer'} onClick={()=>chooseDock('mixer')}>Mixer</button><button aria-pressed={instrumentVisible} onClick={()=>chooseDock('instrument')}>Instrument</button><button aria-pressed={!instrumentVisible&&dockMode==='backing'} onClick={()=>chooseDock('backing')}>Backing</button><button className="dock-collapse" aria-label={dockCollapsed?'Expand bottom dock':'Hide bottom dock'} onClick={()=>dockCollapsed?setDockForced(true):hideDock()}>{dockCollapsed?'Expand':'Hide'}</button></nav>
         <div className="workstation-dock-content" hidden={dockCollapsed}>
-          <div className="workstation-dock-tracks" hidden={instrumentVisible}><TrackPanel score={state.score} selected={target.track} busy={controlsBusy} player={player} view={dockMode} target={target} onExitOverview={()=>scorePane.current?.focus()} onSelectPosition={(track,bar)=>select({track,staff:0,bar,voice:0,beat:0})} onSelect={track=>select({track,staff:0,bar:target.bar,voice:0,beat:0},state.score.tracks[track].staves[0].tuning.length)}/></div>
+          <div className="workstation-dock-tracks" hidden={instrumentVisible||dockMode==='backing'}><TrackPanel score={state.score} selected={target.track} busy={controlsBusy} player={player} view={dockMode==='mixer'?'mixer':'overview'} target={target} onExitOverview={()=>scorePane.current?.focus()} onSelectPosition={(track,bar)=>select({track,staff:0,bar,voice:0,beat:0})} onSelect={track=>select({track,staff:0,bar:target.bar,voice:0,beat:0},state.score.tracks[track].staves[0].tuning.length)}/></div>
           {instrumentVisible&&<LiveInstrumentView score={state.score} track={target.track} staff={target.staff} player={player}/>}
+          <div className="workstation-dock-backing" hidden={instrumentVisible||dockMode!=='backing'}>
+            {originalBacking&&!currentEmbedded?.source?<div className="backing-waveform-state">{currentEmbedded?.error?<><p role="alert">{currentEmbedded.error}</p><button onClick={()=>setEmbeddedRetry(value=>value+1)}>Retry</button></>:<p role="status">Loading waveform…</p>}</div>:<BackingWaveform document={{documentId:state.documentId,revision:state.revision}} source={waveformSource} filename={state.settings.backing?state.snapshot.project.assets[state.settings.backing.assetId]?.filename??'Backing audio':state.snapshot.project.base.kind==='file'?state.snapshot.project.base.filename:'Backing audio'} bridge={waveformBridge} timeline={backingTimeline} selection={backingSelection} settings={state.settings.backing} effectiveBacking={audioSettings.backing} scoreTimeMs={playbackState?.ready&&!playbackState.error&&['playing','paused'].includes(playbackState.practice.phase)?playbackState.time:null} enabled={waveformEnabled} busy={controlsBusy} beginOperation={beginEditorOperation} isCurrent={waveformCurrent} onEdit={command=>controller.edit(command)}/>}
+          </div>
         </div>
       </section>
     </div>

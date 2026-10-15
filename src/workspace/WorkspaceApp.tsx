@@ -2,6 +2,7 @@ import { useCallback,useEffect,useLayoutEffect,useMemo,useRef,useSyncExternalSto
 import { App } from '../App';
 import { createDocumentBridge } from '../bridge';
 import { createDocumentAudioBridge } from '../audio/bridge';
+import { createDocumentBackingWaveformBridge } from '../audio/backing-waveform-bridge';
 import { createDocumentExportBridge } from '../export/bridge';
 import { DocumentTabs } from './DocumentTabs';
 import type { WorkspaceController } from './WorkspaceController';
@@ -27,6 +28,7 @@ export function WorkspaceApp({workspace,session,library}:{workspace:WorkspaceCon
   const focusIntent=useRef<{activationId:string;origin:Element|null}|null>(null);
   const libraryInvoker=useRef<HTMLElement|null>(null);
   const audio=useMemo(()=>createDocumentAudioBridge({documentId,activationId}),[documentId,activationId]);
+  const waveform=useMemo(()=>createDocumentBackingWaveformBridge({documentId,activationId}),[documentId,activationId]);
   const exports=useMemo(()=>createDocumentExportBridge(documentId),[documentId]);
   const documentBridge=useMemo(()=>createDocumentBridge(documentId),[documentId]);
   const onViewChange=useCallback((view:DocumentViewState)=>workspace.setView(documentId,view),[workspace,documentId]);
@@ -92,7 +94,7 @@ export function WorkspaceApp({workspace,session,library}:{workspace:WorkspaceCon
   </div>;
   return <div ref={panel} role="tabpanel" id={`document-panel-${encodeURIComponent(documentId)}`} aria-labelledby={`document-tab-${encodeURIComponent(documentId)}`}
     onKeyDownCapture={keys} onFocusCapture={event=>{tabFocus.current=event.target instanceof Element&&!!event.target.closest('[role="tablist"]');}}>
-    <App key={activationId} controller={active.controller} audioBridge={audio} exportBridge={exports} documentBridge={documentBridge}
+    <App key={activationId} controller={active.controller} audioBridge={audio} waveformBridge={waveform} exportBridge={exports} documentBridge={documentBridge}
       documentView={active.view} onViewChange={onViewChange} clipboard={workspace.clipboard} workspaceBusy={state.busy} workspaceError={state.error} playbackResumeEpoch={state.playbackResumeEpoch}
       beginEditorOperation={beginEditorOperation} onNew={onNew} onOpen={onOpen} onClose={onClose} onCloseAll={onCloseAll}
       sessionMenu={sessionMenu} libraryMenu={libraryMenu} onFileCommandCapture={captureLibraryInvoker} recoveryStatus={<>{recoveryStatus}{libraryState.error&&<p className="session-error" role="alert">{libraryState.error}</p>}</>}

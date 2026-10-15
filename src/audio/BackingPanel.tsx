@@ -6,7 +6,7 @@ import type {BackingCandidate} from './bridge';
 import type {NativePlaybackController} from './NativePlaybackController';
 const noSubscribe=()=>()=>{},noState=()=>null;
 
-export function BackingPanel({settings,assets,onEdit,stageBacking,stageEmbeddedBacking,beginOperation,busy=false,durationMs,playback,embedded,originalSettings}:{settings:BackingSettings|null|undefined;assets:Record<string,AssetInfo>;onEdit:(edit:EditCommand,candidate?:BackingCandidate)=>void|Promise<void>;stageBacking:()=>Promise<BackingCandidate|null>;stageEmbeddedBacking:(bytes:Uint8Array)=>Promise<BackingCandidate|null>;beginOperation:()=>()=>void;busy?:boolean;durationMs?:number;playback?:NativePlaybackController|null;embedded?:Uint8Array|null;originalSettings?:BackingSettings|null}) {
+export function BackingPanel({settings,assets,onEdit,stageBacking,stageEmbeddedBacking,beginOperation,busy=false,durationMs,playback,embedded,originalSettings,onShowWaveform}:{settings:BackingSettings|null|undefined;assets:Record<string,AssetInfo>;onEdit:(edit:EditCommand,candidate?:BackingCandidate)=>void|Promise<void>;stageBacking:()=>Promise<BackingCandidate|null>;stageEmbeddedBacking:(bytes:Uint8Array)=>Promise<BackingCandidate|null>;beginOperation:()=>()=>void;busy?:boolean;durationMs?:number;playback?:NativePlaybackController|null;embedded?:Uint8Array|null;originalSettings?:BackingSettings|null;onShowWaveform?:()=>void}) {
   useSyncExternalStore(playback?.subscribe??noSubscribe,playback?.getState??noState);
   const [error,setError]=useState<string|null>(null),[staging,setStaging]=useState(false),[duration,setDuration]=useState<number|undefined>(durationMs);
   const [bar,setBar]=useState(1),[occurrence,setOccurrence]=useState(1),[ratio,setRatio]=useState(0),[audioMs,setAudioMs]=useState(0);
@@ -14,7 +14,7 @@ export function BackingPanel({settings,assets,onEdit,stageBacking,stageEmbeddedB
   const importAudio=async(original=false)=>{let release:(()=>void)|undefined;setStaging(true);setError(null);try{const end=beginOperation();let released=false;release=()=>{if(!released){released=true;end();}};const candidate=original&&embedded?await stageEmbeddedBacking(embedded):await stageBacking();if(candidate){setDuration(candidate.durationMs);const prior=original?originalSettings:null;await onEdit({type:'setBacking',backing:{offsetMs:0,anchors:[],mix:defaultMix(),...prior,assetId:candidate.assetId}},candidate);}}catch(e){setError(String(e));}finally{release?.();setStaging(false);}};
   const actualDuration=durationMs??playback?.backingDurationMs()??duration;
   const anchor=(index:number,patch:Partial<SyncAnchor>)=>{if(settings)edit({...settings,anchors:settings.anchors.map((a,i)=>i===index?{...a,...patch}:a)});};
-  return <section className="backing-panel"><h3>Backing audio</h3><fieldset disabled={busy||staging}>
+  return <section className="backing-panel"><h3>Backing audio</h3>{onShowWaveform&&<button onClick={onShowWaveform}>Show waveform</button>}<fieldset disabled={busy||staging}>
     <p className="muted">{settings?assets[settings.assetId]?.filename.split(/[\\/]/).at(-1)||'Backing audio':settings===undefined?'Original embedded audio, if available':'Score only'}{actualDuration!==undefined&&` · ${(actualDuration/1000).toFixed(1)} s`}</p>
     <button onClick={()=>void importAudio()}>{settings?'Replace backing':'Import backing'}</button><button onClick={()=>edit(null)}>Remove backing</button>
     {embedded&&<button onClick={()=>void importAudio(true)}>Edit embedded backing</button>}

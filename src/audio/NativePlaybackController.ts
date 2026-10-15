@@ -11,6 +11,7 @@ import { DEFAULT_PRACTICE,type PracticeSettings,type PracticeStatus } from './pr
 import { practiceForBacking,validatePractice } from './practice';
 import { cursorPlaybackChoices,selectionPlaybackChoices,requireCursorChoice,requirePassageChoice } from './selection-playback';
 import type { CursorPlaybackChoice,PassagePlaybackChoice } from './selection-playback-types';
+import type { BackingScoreSelection,BackingTimeline } from './backing-waveform-types';
 
 let nextGeneration=0;
 function practiceKey(settings:PracticeSettings){const tempo=settings.tempo;return JSON.stringify([tempo.kind,tempo.kind==='relative'?[tempo.ratio]:tempo.kind==='fixed'?[tempo.bpm]:[tempo.start,tempo.end,tempo.step,tempo.repetitions],settings.metronome.enabled,settings.metronome.volume,settings.metronome.visual,settings.countIn.bars,settings.countIn.betweenLoops]);}
@@ -73,6 +74,25 @@ export class NativePlaybackController {
   cursorPlaybackChoices(target:BeatTarget):CursorPlaybackChoice[]{if(!this.selectionReady())return [];return cursorPlaybackChoices(this.built!.score,this.plan!,target);}
   selectionPlaybackChoices(selection:MusicSelection):PassagePlaybackChoice[]{if(!this.selectionReady())return [];return selectionPlaybackChoices(this.built!.score,this.plan!,selection);}
   playbackOccurrences():readonly Readonly<MeasureOccurrence>[]{return this.selectionReady()?this.plan!.occurrences:[];}
+  backingTimeline():BackingTimeline|null {
+    const plan=this.plan;if(this.destroyed||this.preparing||plan?.generation!==this.generation)return null;
+    return {generation:plan.generation,durationTick:plan.durationTick,tempos:plan.tempos,occurrences:plan.occurrences};
+  }
+  backingScoreSelection(target:BeatTarget,selection:MusicSelection|null):BackingScoreSelection {
+    const result:BackingScoreSelection={points:[],spans:[]};
+    if(!this.backingTimeline()||!this.built)return result;
+    const score=this.built.score,plan=this.plan!;
+    // Stale editor addresses can outlive a score change; each valid part still remains visible.
+    try {
+      result.points=cursorPlaybackChoices(score,plan,target).map(choice=>{
+        const occurrence=plan.occurrences[choice.occurrenceIndex],tick=choice.startTick;
+        const anchor=tick>=occurrence.startTick&&tick<=occurrence.endTick?{bar:occurrence.bar,occurrence:occurrence.occurrence,ratio:(tick-occurrence.startTick)/(occurrence.endTick-occurrence.startTick)}:null;
+        return {tick,anchor};
+      });
+    }catch{}
+    if(selection)try{result.spans=selectionPlaybackChoices(score,plan,selection).map(({startTick,endTick})=>({startTick,endTick}));}catch{}
+    return result;
+  }
   private startRange(startTick:number,endTick:number|null){this.noteMode='waiting';this.pendingNoteTick=undefined;this.update({});this.send({type:'playRange',generation:this.generation,startTick,endTick});}
   play(cursor?:BeatTarget,choice?:CursorPlaybackChoice){
     if(cursor){
@@ -163,7 +183,7 @@ export class NativePlaybackController {
       this.plan=plan;for(const note of plan.notes){let track=this.notesByTrack.get(note.trackId);if(!track){track=[];this.notesByTrack.set(note.trackId,track);}track.push(note);}
       await this.bridge.prepare(plan,audioSettings,this.embeddedSource===sourceKey?null:built.embeddedBacking,sourceKey,practice);if(generation!==this.generation||this.destroyed)return;this.embeddedSource=sourceKey;this.prepared=true;this.audioSettingsKey=audioSettingsKey;this.operationError=null;
       const status=await this.bridge.status();if(status)this.receive(status);
-    } catch(error){if(generation===this.generation){this.prepared=false;this.fail(error);}}finally{if(generation===this.generation)this.preparing=false;}
+    } catch(error){if(generation===this.generation){this.prepared=false;this.fail(error);}}finally{if(generation===this.generation){this.preparing=false;this.update({});}}
   }
   attachView(api:AlphaTabApi){
     this.cleanupView();this.view=api;this.viewPlaying=false;const controller=this;

@@ -800,6 +800,26 @@
       }
     },
     {
+      "id": "processing_positional_array",
+      "backing": {
+        "assetId": "processing-fixture",
+        "offsetMs": 0,
+        "anchors": [],
+        "mix": {"gain": 1, "pan": 0, "mute": false, "solo": false},
+        "processing": [0, 0, "none"]
+      }
+    },
+    {
+      "id": "processing_non_neutral_positional_array",
+      "backing": {
+        "assetId": "processing-fixture",
+        "offsetMs": 0,
+        "anchors": [],
+        "mix": {"gain": 1, "pan": 0, "mute": false, "solo": false},
+        "processing": [2, -25, "bassEnhance"]
+      }
+    },
+    {
       "id": "unknown_backing_neutral",
       "backing": {
         "assetId": "processing-fixture",

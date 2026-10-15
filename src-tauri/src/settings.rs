@@ -118,13 +118,50 @@ impl TryFrom<String> for BackingFilter {
     }
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct BackingProcessing {
     pub semitones: f64,
     pub cents: f64,
     pub filter: BackingFilter,
 }
+impl<'de> Deserialize<'de> for BackingProcessing {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct ProcessingVisitor;
+
+        impl<'de> serde::de::Visitor<'de> for ProcessingVisitor {
+            type Value = BackingProcessing;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("a backing processing object")
+            }
+
+            fn visit_map<M: serde::de::MapAccess<'de>>(
+                self,
+                map: M,
+            ) -> Result<Self::Value, M::Error> {
+                #[derive(Deserialize)]
+                #[serde(rename_all = "camelCase", deny_unknown_fields)]
+                struct Fields {
+                    semitones: f64,
+                    cents: f64,
+                    filter: BackingFilter,
+                }
+
+                let fields =
+                    Fields::deserialize(serde::de::value::MapAccessDeserializer::new(map))?;
+                Ok(BackingProcessing {
+                    semitones: fields.semitones,
+                    cents: fields.cents,
+                    filter: fields.filter,
+                })
+            }
+        }
+
+        deserializer.deserialize_map(ProcessingVisitor)
+    }
+}
+
 impl BackingProcessing {
     pub fn validate(&self) -> Result<(), String> {
         if !self.semitones.is_finite()

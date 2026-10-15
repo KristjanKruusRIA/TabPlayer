@@ -16,11 +16,18 @@ fn accepts_valid_processing_protocol() {
 
 #[test]
 fn rejects_invalid_processing_protocol() {
-    for case in fixtures()["invalid"].as_array().unwrap() {
-        let accepted = serde_json::from_value::<BackingSettings>(case["backing"].clone())
-            .is_ok_and(|settings| settings.validate().is_ok());
-        assert!(!accepted, "{}", case["id"]);
-    }
+    let fixture = fixtures();
+    let accepted: Vec<_> = fixture["invalid"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|case| {
+            serde_json::from_value::<BackingSettings>(case["backing"].clone())
+                .is_ok_and(|settings| settings.validate().is_ok())
+        })
+        .map(|case| case["id"].as_str().unwrap())
+        .collect();
+    assert!(accepted.is_empty(), "Accepted invalid cases: {accepted:?}");
 }
 
 #[test]

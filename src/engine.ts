@@ -6,7 +6,8 @@ import type { BackingSettings, ChannelMix, DocumentSettings } from './edit-types
 import { defaultDocumentSettings, defaultMix, applySettingsEdit } from './document-settings';
 import { applyAdvancedEdit } from './editor/advanced';
 import { captureNoteLinks, restoreNoteLinks, detachNote } from './editor/links';
-import { validateBackingAnchors } from './audio/plan';
+import { backingLocationsForScore,validateBackingAnchors } from './audio/plan';
+import { adjustReferenceSyncBounds,referenceSyncTiming } from './audio/reference-sync';
 import { scoreFromJson } from './model-clone';
 import { validateParityCommand } from './parity-commands';
 import { copyGpInterchangeSource, exportGpInterchange, loadInterchangeScore } from './interchange/gp';
@@ -231,31 +232,37 @@ export function buildDocument(value: ProjectInput): BuiltDocument {
   const identities=score.tracks.map((_,index)=>`base/${index}`);
   const documentSettings=defaultDocumentSettings();
   const embeddedBacking=score.backingTrack?.rawAudioFile?.slice() ?? null;
-  const embeddedBackingSettings=embeddedBacking?{
-    offsetMs:0,mix:defaultMix(),anchors:score.masterBars.flatMap((bar,index)=>(bar.syncPoints ?? []).flatMap(point=>point.syncPointValue?[{
+  const embeddedAnchors=score.masterBars.flatMap((bar,index)=>(bar.syncPoints ?? []).flatMap(point=>point.syncPointValue?[{
       bar:index,occurrence:point.syncPointValue.barOccurence,ratio:point.ratioPosition,audioMs:point.syncPointValue.millisecondOffset,
-    }]:[])),
+    }]:[]));
+  const embeddedOffset=Math.max(0,...embeddedAnchors.map(anchor=>-anchor.audioMs));
+  const embeddedBackingSettings=embeddedBacking?{
+    offsetMs:embeddedOffset,mix:defaultMix(),anchors:embeddedAnchors.map(anchor=>({...anchor,audioMs:anchor.audioMs+embeddedOffset})),
   }:undefined;
   score.tracks.forEach((track,index)=>{documentSettings.mixes[identities[index]]={...defaultMix(),mute:track.playbackInfo.isMute,solo:track.playbackInfo.isSolo};});
   const sourceMixes=structuredClone(documentSettings.mixes);
   for (const [index,edit] of projectCommands(project).entries()) {
     if(isSettingsEdit(edit)) {applySettingsEdit(documentSettings,edit,score,identities);continue;}
+    if(documentSettings.backing?.referenceSync)score=rebuild(score);
+    const previous=documentSettings.backing?.referenceSync?referenceSyncTiming(documentSettings.backing,backingLocationsForScore(score)):null;
     if(edit.type==='pasteMusic'){
       const prepared=preparePasteMusic(rebuild(score),edit);score=rebuild(prepared.score);
-      mapBackingMeasures(documentSettings.backing,prepared.barMap);mapBackingMeasures(embeddedBackingSettings,prepared.barMap);continue;
+      mapBackingMeasures(documentSettings.backing,prepared.barMap);mapBackingMeasures(embeddedBackingSettings,prepared.barMap);
+    }else if(edit.type==='transposeHarmony')score=prepareHarmonyTranspose(rebuild(score),edit,index);
+    else {
+      if(!previous&&['setOttava','setCrescendo','setFermata','setSimile','eraseSelection','transposeSelection','moveSelectionStrings','refingerSelection','setSelectionSustain','insertMeasures','removeMeasures'].includes(edit.type))score=rebuild(score);
+      const measureMap=edit.type==='insertMeasures'||edit.type==='removeMeasures'?planMeasureMap(score.masterBars.length,edit):null;
+      if(measureMap)mapLyricsMeasures(score,measureMap);
+      apply(score, edit,index);
+      if(measureMap){mapBackingMeasures(documentSettings.backing,measureMap);mapBackingMeasures(embeddedBackingSettings,measureMap);}
+      if (edit.type==='addTrack'||edit.type==='addPitchedTrack'||edit.type==='addPercussionTrack') identities.push(`added/${index}/${JSON.stringify(edit)}`);
+      if (edit.type==='removeTrack') identities.splice(edit.track,1);
+      if(edit.type==='removeMeasure') {removeBackingMeasure(documentSettings.backing,edit.bar);removeBackingMeasure(embeddedBackingSettings,edit.bar);}
+      if (!previous&&['insertBeat','deleteBeat','appendMeasure','removeMeasure','insertMeasures','removeMeasures','addTrack','addPitchedTrack','addPercussionTrack','removeTrack','addStaff','removeStaff','addVoice','removeVoice','copyVoice'].includes(edit.type)) {
+        score = rebuild(score);
+      }
     }
-    if(edit.type==='transposeHarmony'){score=prepareHarmonyTranspose(rebuild(score),edit,index);continue;}
-    if(['setOttava','setCrescendo','setFermata','setSimile','eraseSelection','transposeSelection','moveSelectionStrings','refingerSelection','setSelectionSustain','insertMeasures','removeMeasures'].includes(edit.type))score=rebuild(score);
-    const measureMap=edit.type==='insertMeasures'||edit.type==='removeMeasures'?planMeasureMap(score.masterBars.length,edit):null;
-    if(measureMap)mapLyricsMeasures(score,measureMap);
-    apply(score, edit,index);
-    if(measureMap){mapBackingMeasures(documentSettings.backing,measureMap);mapBackingMeasures(embeddedBackingSettings,measureMap);}
-    if (edit.type==='addTrack'||edit.type==='addPitchedTrack'||edit.type==='addPercussionTrack') identities.push(`added/${index}/${JSON.stringify(edit)}`);
-    if (edit.type==='removeTrack') identities.splice(edit.track,1);
-    if(edit.type==='removeMeasure') {removeBackingMeasure(documentSettings.backing,edit.bar);removeBackingMeasure(embeddedBackingSettings,edit.bar);}
-    if (['insertBeat','deleteBeat','appendMeasure','removeMeasure','insertMeasures','removeMeasures','addTrack','addPitchedTrack','addPercussionTrack','removeTrack','addStaff','removeStaff','addVoice','removeVoice','copyVoice'].includes(edit.type)) {
-      score = rebuild(score);
-    }
+    if(previous){score=rebuild(score);documentSettings.backing=adjustReferenceSyncBounds(documentSettings.backing!,previous,backingLocationsForScore(score));}
   }
   // Transient conversion rebuilds derived links and caches; native files store source bytes and commands.
   score=rebuild(score);prepareScoreTimers(score);score.tracks.forEach((track,index)=>trackIdentities.set(track,identities[index]));
@@ -266,7 +273,7 @@ export function buildDocument(value: ProjectInput): BuiltDocument {
 
 export function replayDocumentSettings(value:ProjectInput,current:BuiltDocument):BuiltDocument {
   const project=validateProject(value);const next=defaultDocumentSettings();
-  if(projectCommands(project).some(edit=>edit.type==='pasteMusic'))return {...buildDocument(project),score:current.score,embeddedBacking:current.embeddedBacking};
+  if(projectCommands(project).some(edit=>edit.type==='pasteMusic'||edit.type==='setBacking'&&edit.backing?.referenceSync))return {...buildDocument(project),score:current.score,embeddedBacking:current.embeddedBacking};
   const sourceBarCount=current.sourceBarCount??(project.base.kind==='blank'?project.base.measureCount:initialScore(project).masterBars.length);
   let barCount=sourceBarCount;
   next.mixes=structuredClone(current.sourceMixes ?? Object.fromEntries(current.score.tracks.map(track=>[trackIdentity(track),{...defaultMix(),mute:track.playbackInfo.isMute,solo:track.playbackInfo.isSolo}])));

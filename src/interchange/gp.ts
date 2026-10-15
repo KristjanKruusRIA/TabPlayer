@@ -100,7 +100,10 @@ export function exportGpInterchange(score:model.Score,settings:Settings):Uint8Ar
   const raw=new exporter.Gp7Exporter().export(score,settings),changes=score.tracks.map(trackMixAutomations),needsXml=harmony||lyrics||!!notation||changes.some(stream=>stream.length>0)||score.tracks.some(track=>track.isPercussion);
   const original=sourceEntries.get(score);
   const generated=unzip(raw,settings);
-  if(!needsXml)return zipSync(writeStylesheetTimeSignatures(score,{...generated,...original,[gpifPath]:generated[gpifPath]}));
+  const entries={...generated,...original,[gpifPath]:generated[gpifPath]};
+  const activeBacking='Content/Assets/backing-track';
+  if(generated[activeBacking])entries[activeBacking]=generated[activeBacking];
+  if(!needsXml)return zipSync(writeStylesheetTimeSignatures(score,entries));
   const xml=new TextDecoder().decode(generated[gpifPath]),projection=projectGpifTracks(xml,notation),doc=parseXml(projection?.xml??xml);
   const references=writePercussionReferences(score,doc,settings);
   writeGpifLyrics(score,doc);writeGpifNotation(score,doc);if(harmony)writeGpifHarmony(score,doc);
@@ -147,7 +150,7 @@ export function exportGpInterchange(score:model.Score,settings:Settings):Uint8Ar
       outputXml=serializer.serializeToString(full);
     }
   }
-  const entries={...generated,...original,[gpifPath]:strToU8(outputXml)};
+  entries[gpifPath]=strToU8(outputXml);
   return zipSync(writeStylesheetTimeSignatures(score,entries));
 }
 /** Carry source archive siblings and binary backing data omitted by model JSON. */

@@ -12,6 +12,7 @@ import { practiceForBacking,validatePractice } from './practice';
 import { cursorPlaybackChoices,selectionPlaybackChoices,requireCursorChoice,requirePassageChoice } from './selection-playback';
 import type { CursorPlaybackChoice,PassagePlaybackChoice } from './selection-playback-types';
 import type { BackingScoreSelection,BackingTimeline } from './backing-waveform-types';
+import {applyReferenceSyncPlan,referenceTimingKey} from './reference-sync';
 
 let nextGeneration=0;
 function practiceKey(settings:PracticeSettings){const tempo=settings.tempo;return JSON.stringify([tempo.kind,tempo.kind==='relative'?[tempo.ratio]:tempo.kind==='fixed'?[tempo.bpm]:[tempo.start,tempo.end,tempo.step,tempo.repetitions],settings.metronome.enabled,settings.metronome.volume,settings.metronome.visual,settings.countIn.bars,settings.countIn.betweenLoops]);}
@@ -22,7 +23,7 @@ export class NativePlaybackController {
   private state:PlaybackState={ready:false,playing:false,time:0,endTime:0,measure:0,speed:100,metronome:false,practice:idlePractice(DEFAULT_PRACTICE),practicePending:false,practiceNotice:null,range:null,loop:null,error:null};
   private listeners=new Set<()=>void>();private view:AlphaTabApi|null=null;private cleanupView:()=>void=()=>{};
   private unlisten:()=>void=()=>{};private subscription:Promise<void>;private destroyed=false;private suppressHandler=false;private viewPlaying=false;
-  private built:BuiltDocument|null=null;private plan:PlaybackPlan|null=null;private lastStatus:NativeAudioStatus|null=null;private operationError:string|null=null;private prepared=false;private preparing=false;private audioSettingsKey:string|null=null;private desiredAudioSettingsKey:string|null=null;private mixQueue:Promise<void>=Promise.resolve();private mixRequest=0;private embeddedSource:string|null=null;
+  private built:BuiltDocument|null=null;private plan:PlaybackPlan|null=null;private authoredPlan:PlaybackPlan|null=null;private planTimingKey:string|null=null;private lastStatus:NativeAudioStatus|null=null;private operationError:string|null=null;private prepared=false;private preparing=false;private audioSettingsKey:string|null=null;private desiredAudioSettingsKey:string|null=null;private mixQueue:Promise<void>=Promise.resolve();private mixRequest=0;private embeddedSource:string|null=null;
   private documentEpoch:number|undefined;private practice:PracticeSettings=structuredClone(DEFAULT_PRACTICE);private pendingPractice:PracticeSettings|null=null;private hasBacking=false;
   private playbackResumeEpoch=0;private floorReadyEpoch=0;private resumeRefresh:Promise<boolean>|null=null;private loadRequest=0;
   private notesByTrack=new Map<string,PlanNote[]>();private noteMode:'stopped'|'waiting'|'seeking'|'playing'|'paused'='stopped';private pendingNoteTick:number|undefined;
@@ -63,8 +64,8 @@ export class NativePlaybackController {
       try {
         const scorePlaying=status.playing&&status.practice.phase!=='countIn'&&status.practice.countInRemaining===0;
         if(scorePlaying!==this.viewPlaying){if(scorePlaying)api.play();else api.pause();this.viewPlaying=scorePlaying;}
-        // Native seconds are the score clock. Clear alphaTab's separate backing map.
-        output.updatePosition(status.seconds*1000);
+        // Notation retains authored tempos while native playback uses the reference clock.
+        output.updatePosition(this.planTimingKey!==null&&this.authoredPlan?this.millisecondsAtTick(status.tick,this.authoredPlan):status.seconds*1000);
       } finally {this.suppressHandler=prior;}
     }
   }
@@ -134,7 +135,7 @@ export class NativePlaybackController {
   setPan(index:number,value:number){this.editMix(index,{pan:Math.max(-1,Math.min(1,value))});}
   setMute(index:number,value:boolean){this.editMix(index,{mute:value});}setSolo(index:number,value:boolean){this.editMix(index,{solo:value});}
   resetMix(){for(const track of this.built?.score.tracks??[])this.editMix(track.index,defaultMix());}
-  beforeScoreChange(notifyNative=true){this.generation=++nextGeneration;this.plan=null;this.notesByTrack.clear();this.noteMode='stopped';this.pendingNoteTick=undefined;this.prepared=false;this.preparing=false;this.audioSettingsKey=null;this.desiredAudioSettingsKey=null;this.mixQueue=Promise.resolve();this.lastStatus=null;this.pendingPractice=null;this.operationError=null;if(notifyNative)this.send({type:'invalidate',generation:this.generation});const practice=idlePractice(this.practice);this.update({ready:false,playing:false,practice,practicePending:false,range:null,loop:null,speed:practice.effectiveRatio*100,metronome:this.practice.metronome.enabled,error:null});}
+  beforeScoreChange(notifyNative=true){this.generation=++nextGeneration;this.plan=null;this.authoredPlan=null;this.planTimingKey=null;this.notesByTrack.clear();this.noteMode='stopped';this.pendingNoteTick=undefined;this.prepared=false;this.preparing=false;this.audioSettingsKey=null;this.desiredAudioSettingsKey=null;this.mixQueue=Promise.resolve();this.lastStatus=null;this.pendingPractice=null;this.operationError=null;if(notifyNative)this.send({type:'invalidate',generation:this.generation});const practice=idlePractice(this.practice);this.update({ready:false,playing:false,practice,practicePending:false,range:null,loop:null,speed:practice.effectiveRatio*100,metronome:this.practice.metronome.enabled,error:null});}
   setRenderedScore(score:model.Score,tracks:number[]):void{if(this.destroyed)return;const prior=this.suppressHandler;this.suppressHandler=true;try{this.view?.renderScore(score,tracks);this.view?.player?.updateSyncPoints([]);}finally{this.suppressHandler=prior;this.viewPlaying=false;}}
   replaceScore(score:model.Score,track=0){this.setRenderedScore(score,[track]);}
   async loadDocument(project:ProjectView,built:BuiltDocument,_visibleTrack=0,documentEpoch=0,playbackResumeEpoch=0){
@@ -161,9 +162,10 @@ export class NativePlaybackController {
     const documentChanged=this.documentEpoch!==documentEpoch;this.documentEpoch=documentEpoch;if(documentChanged){this.practice=structuredClone(DEFAULT_PRACTICE);this.update({practiceNotice:null});}
     const audioSettings=effectiveAudioSettings(project,built);this.hasBacking=audioSettings.backing!==null;
     const audioSettingsKey=JSON.stringify([audioSettings.sounds,audioSettings.mixes,audioSettings.backing]);
+    const timingKey=referenceTimingKey(audioSettings.backing);
     const normalized=practiceForBacking(this.practice,this.hasBacking);
     if(normalized.notice){this.practice=normalized.settings;this.update({practiceNotice:normalized.notice});}
-    if(!documentChanged && !normalized.notice && this.built?.score===built.score && (this.preparing || this.plan&&this.prepared)){
+    if(!documentChanged && !normalized.notice && this.built?.score===built.score && timingKey===this.planTimingKey && (this.preparing || this.plan&&this.prepared)){
       this.built=built;if(audioSettingsKey===this.desiredAudioSettingsKey)return;
       if(!this.preparing){
         const generation=this.generation,request=++this.mixRequest;this.desiredAudioSettingsKey=audioSettingsKey;
@@ -176,13 +178,14 @@ export class NativePlaybackController {
       }
     }
     const practice=structuredClone(this.practice);
-    this.beforeScoreChange();const generation=this.generation;this.built=built;this.preparing=true;this.desiredAudioSettingsKey=audioSettingsKey;
+    this.beforeScoreChange();const generation=this.generation;this.built=built;this.preparing=true;this.planTimingKey=timingKey;this.desiredAudioSettingsKey=audioSettingsKey;
     try {
-      const plan=await (this.options.preparePlan?this.options.preparePlan(project,generation):preparePlanFromScore(built.score,generation));if(generation!==this.generation||this.destroyed)return;
+      const authored=await (this.options.preparePlan?this.options.preparePlan(project,generation):preparePlanFromScore(built.score,generation));if(generation!==this.generation||this.destroyed)return;
+      const plan=applyReferenceSyncPlan(authored,audioSettings.backing);
       const sourceKey=project.base.kind==='file'?project.base.sha256:'blank';
-      this.plan=plan;for(const note of plan.notes){let track=this.notesByTrack.get(note.trackId);if(!track){track=[];this.notesByTrack.set(note.trackId,track);}track.push(note);}
+      this.authoredPlan=authored;this.plan=plan;this.update({endTime:plan.playbackEndTick===undefined?plan.durationMs:this.millisecondsAtTick(plan.playbackEndTick,plan)});for(const note of plan.notes){let track=this.notesByTrack.get(note.trackId);if(!track){track=[];this.notesByTrack.set(note.trackId,track);}track.push(note);}
       await this.bridge.prepare(plan,audioSettings,this.embeddedSource===sourceKey?null:built.embeddedBacking,sourceKey,practice);if(generation!==this.generation||this.destroyed)return;this.embeddedSource=sourceKey;this.prepared=true;this.audioSettingsKey=audioSettingsKey;this.operationError=null;
-      const status=await this.bridge.status();if(status)this.receive(status);
+      const status=await this.bridge.status();if(generation!==this.generation||this.destroyed)return;if(status)this.receive(status);
     } catch(error){if(generation===this.generation){this.prepared=false;this.fail(error);}}finally{if(generation===this.generation){this.preparing=false;this.update({});}}
   }
   attachView(api:AlphaTabApi){
@@ -192,7 +195,7 @@ export class NativePlaybackController {
       const output=api.player?.output as synth.IExternalMediaSynthOutput|undefined;if(!output?.updatePosition)return;
       const prior=this.suppressHandler;this.suppressHandler=true;
       try {
-        output.handler={get backingTrackDuration(){return controller.plan?.durationMs??0;},get playbackRate(){return controller.state.speed/100;},set playbackRate(value){if(!controller.suppressHandler)controller.setSpeed(value*100);},masterVolume:1,
+        output.handler={get backingTrackDuration(){return controller.authoredPlan?.durationMs??0;},get playbackRate(){return controller.state.speed/100;},set playbackRate(value){if(!controller.suppressHandler)controller.setSpeed(value*100);},masterVolume:1,
           seekTo(time){if(!controller.suppressHandler)controller.seekToTick(controller.tickAtSeconds(time/1000));},
           play(){if(!controller.suppressHandler)controller.play();},pause(){if(!controller.suppressHandler)controller.pause();}};
         api.player?.updateSyncPoints([]);
@@ -200,6 +203,7 @@ export class NativePlaybackController {
     };
     api.playerReady.on(attach);attach();this.cleanupView=()=>{api.playerReady.off(attach);const output=api.player?.output as synth.IExternalMediaSynthOutput|undefined;if(output?.updatePosition)output.handler=undefined;};
   }
-  private tickAtSeconds(seconds:number){let tick=0,elapsed=0;const tempos=this.plan?.tempos??[];for(let i=0;i<tempos.length;i++){const t=tempos[i];const end=tempos[i+1]?.tick??this.plan!.durationTick;const duration=(end-t.tick)*60/(t.bpm*960);if(seconds<=elapsed+duration)return t.tick+(seconds-elapsed)*t.bpm*960/60;elapsed+=duration;tick=end;}return tick;}
+  private millisecondsAtTick(tick:number,plan:PlaybackPlan){let elapsed=0;for(let i=0;i<plan.tempos.length;i++){const tempo=plan.tempos[i],end=plan.tempos[i+1]?.tick??plan.durationTick;if(tick<=end)return elapsed+(tick-tempo.tick)*60000/(tempo.bpm*960);elapsed+=(end-tempo.tick)*60000/(tempo.bpm*960);}return elapsed;}
+  private tickAtSeconds(seconds:number){let tick=0,elapsed=0;const tempos=this.authoredPlan?.tempos??[];for(let i=0;i<tempos.length;i++){const t=tempos[i];const end=tempos[i+1]?.tick??this.authoredPlan!.durationTick;const duration=(end-t.tick)*60/(t.bpm*960);if(seconds<=elapsed+duration)return t.tick+(seconds-elapsed)*t.bpm*960/60;elapsed+=duration;tick=end;}return tick;}
   destroy(){this.stop();this.destroyed=true;this.unlisten();this.cleanupView();this.view=null;this.listeners.clear();}
 }

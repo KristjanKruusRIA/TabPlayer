@@ -1,14 +1,82 @@
 use super::{
     decode::DecodedAudio,
     plan::{PlaybackPlan, Timeline},
+    reference_sync::ReferenceSyncMap,
 };
-use crate::settings::SyncAnchor;
+use crate::settings::{BackingSettings, SyncAnchor};
 use std::sync::Arc;
 
 #[derive(Clone, Debug)]
 pub struct BackingMap {
     points: Vec<(f64, f64)>,
     offset: f64,
+    reference: Option<ReferenceSyncMap>,
+}
+
+#[cfg(test)]
+mod reference_tests {
+    use super::*;
+    #[test]
+    fn exact_source_frame_entry_and_exit_use_waveform_coordinates() {
+        let rate = 44_100;
+        let entry = 1000.0 * 44_112.0 / rate as f64;
+        let exit = 1000.0 * 88_224.0 / rate as f64;
+        let duration = exit - entry;
+        let plan:PlaybackPlan=serde_json::from_value(serde_json::json!({"generation":1,"ppq":960,"durationTick":3840,"durationMs":duration,"playbackEndTick":3840,"tracks":[{"id":"gm","program":0,"percussion":false}],"tempos":[{"tick":0,"bpm":240_000.0/duration}],"occurrences":[{"bar":0,"occurrence":0,"meterNumerator":4,"meterDenominator":4,"startTick":0,"endTick":3840,"startMs":0,"endMs":duration}],"notes":[],"midi":[]})).unwrap();
+        let settings:BackingSettings=serde_json::from_value(serde_json::json!({"assetId":"a","offsetMs":0,"anchors":[],"referenceSync":{"entryAudioMs":entry,"exitAudioMs":exit},"mix":{"gain":1,"pan":0,"mute":false,"solo":false}})).unwrap();
+        let voice = BackingVoice::new(
+            Arc::new(DecodedAudio {
+                sample_rate: rate,
+                channels: 2,
+                frames: Arc::new(vec![[0.2; 2]; 100_000]),
+            }),
+            BackingMap::from_settings(&settings, &plan).unwrap(),
+            rate,
+        )
+        .unwrap();
+        assert_eq!(voice.source_frame(44_111), [0.0; 2]);
+        assert_eq!(voice.source_frame(44_112), [0.2; 2]);
+        assert_eq!(voice.source_frame(88_223), [0.2; 2]);
+        assert_eq!(voice.source_frame(88_224), [0.0; 2]);
+        let mut frames = vec![[0.0; 2]; 100_000];
+        frames[44_112] = [0.7, 0.35];
+        frames[88_224] = [1.0; 2];
+        let mut impulse = BackingVoice::new(
+            Arc::new(DecodedAudio {
+                sample_rate: rate,
+                channels: 2,
+                frames: Arc::new(frames),
+            }),
+            BackingMap::from_settings(&settings, &plan).unwrap(),
+            rate,
+        )
+        .unwrap();
+        impulse.seek(0.0);
+        assert_eq!(
+            impulse.next_frame(0.0),
+            [0.7, 0.35],
+            "exact entry transient must survive installation seek"
+        );
+    }
+    #[test]
+    fn every_interpolation_neighbor_and_transient_read_obeys_fractional_frame_gate() {
+        let plan: PlaybackPlan = serde_json::from_value(serde_json::json!({"generation":1,"ppq":960,"durationTick":960,"durationMs":100,"playbackEndTick":960,"tracks":[{"id":"gm","program":0,"percussion":false}],"tempos":[{"tick":0,"bpm":600}],"occurrences":[{"bar":0,"occurrence":0,"meterNumerator":4,"meterDenominator":4,"startTick":0,"endTick":960,"startMs":0,"endMs":100}],"notes":[],"midi":[]})).unwrap();
+        let settings: BackingSettings = serde_json::from_value(serde_json::json!({"assetId":"a","offsetMs":0,"anchors":[],"referenceSync":{"entryAudioMs":100.0625,"exitAudioMs":200.0625},"mix":{"gain":1,"pan":0,"mute":false,"solo":false}})).unwrap();
+        let map = BackingMap::from_settings(&settings, &plan).unwrap();
+        let audio = Arc::new(DecodedAudio {
+            sample_rate: 8000,
+            channels: 2,
+            frames: Arc::new(vec![[0.2; 2]; 2400]),
+        });
+        let voice = BackingVoice::new(audio, map, 8000).unwrap();
+        assert_eq!(voice.source_frame(800), [0.0; 2]);
+        assert_eq!(voice.source_frame(801), [0.2; 2]);
+        assert_eq!(voice.source_frame(1600), [0.2; 2]);
+        assert_eq!(voice.source_frame(1601), [0.0; 2]);
+        assert_eq!(voice.sample(800.5), [0.1; 2]);
+        assert_eq!(voice.sample(1600.5), [0.1; 2]);
+        assert!(voice.transients.is_empty());
+    }
 }
 impl BackingMap {
     pub fn new(
@@ -49,7 +117,19 @@ impl BackingMap {
         Ok(Self {
             points,
             offset: offset_ms / 1000.0,
+            reference: None,
         })
+    }
+    pub fn from_settings(settings: &BackingSettings, plan: &PlaybackPlan) -> Result<Self, String> {
+        if settings.reference_sync.is_some() {
+            Ok(Self {
+                points: Vec::new(),
+                offset: 0.0,
+                reference: Some(ReferenceSyncMap::new(settings, plan)?),
+            })
+        } else {
+            Self::new(&settings.anchors, settings.offset_ms, plan)
+        }
     }
     fn interpolate(&self, value: f64, inverse: bool) -> f64 {
         if self.points.is_empty() {
@@ -73,10 +153,32 @@ impl BackingMap {
         a.1 + (value - a.0) * (b.1 - a.1) / (b.0 - a.0)
     }
     pub fn source_seconds(&self, score_seconds: f64) -> f64 {
+        if let Some(reference) = &self.reference {
+            return reference.source_seconds(score_seconds);
+        }
         self.interpolate(score_seconds, false) - self.offset
     }
     pub fn score_seconds(&self, source_seconds: f64) -> f64 {
+        if let Some(reference) = &self.reference {
+            return reference.score_seconds(source_seconds);
+        }
         self.interpolate(source_seconds + self.offset, true)
+    }
+    fn permits_source(&self, seconds: f64) -> bool {
+        self.reference.as_ref().is_none_or(|reference| {
+            seconds >= reference.entry_source_seconds() && seconds < reference.exit_source_seconds()
+        })
+    }
+    fn permits_frame(&self, frame: usize, rate: u32) -> bool {
+        self.reference
+            .as_ref()
+            .is_none_or(|reference| reference.contains_frame(frame, rate))
+    }
+    fn frame_score_seconds(&self, frame: usize, rate: u32) -> f64 {
+        self.reference.as_ref().map_or_else(
+            || self.score_seconds(frame as f64 / rate as f64),
+            |reference| reference.frame_score_seconds(frame, rate),
+        )
     }
 }
 const HOP: usize = 256;
@@ -109,29 +211,45 @@ impl BackingVoice {
         {
             return Err("Invalid decoded backing audio or output sample rate.".into());
         }
+        if let Some(reference) = &map.reference {
+            reference.validate_audio(&audio)?;
+        }
+        let frame = |index: usize| {
+            if map.permits_frame(index, audio.sample_rate) {
+                audio.frames[index]
+            } else {
+                [0.0; 2]
+            }
+        };
         // Isolated impulses bypass grain overlap so slowdown cannot smear their clock position.
         let mut transients = Vec::new();
         for i in 32..audio.frames.len().saturating_sub(32) {
-            let peak = audio.frames[i][0].abs().max(audio.frames[i][1].abs());
+            if !map.permits_frame(i, audio.sample_rate) {
+                continue;
+            }
+            let sample = frame(i);
+            let peak = sample[0].abs().max(sample[1].abs());
             if peak < 0.05
-                || audio.frames[i - 1]
+                || frame(i - 1)
                     .iter()
-                    .chain(audio.frames[i + 1].iter())
+                    .chain(frame(i + 1).iter())
                     .any(|x| x.abs() > peak * 0.2)
             {
                 continue;
             }
-            let rms = (audio.frames[i - 32..i + 32]
-                .iter()
-                .map(|x| x[0] * x[0] + x[1] * x[1])
+            let rms = ((i - 32..i + 32)
+                .map(|index| {
+                    let x = frame(index);
+                    x[0] * x[0] + x[1] * x[1]
+                })
                 .sum::<f32>()
                 / 128.0)
                 .sqrt();
             if peak > rms * 6.0 {
                 transients.push(Transient {
                     frame: i,
-                    score_seconds: map.score_seconds(i as f64 / audio.sample_rate as f64),
-                    sample: audio.frames[i],
+                    score_seconds: map.frame_score_seconds(i, audio.sample_rate),
+                    sample,
                 });
             }
         }
@@ -149,7 +267,12 @@ impl BackingVoice {
         })
     }
     fn source_frame(&self, index: i64) -> [f32; 2] {
-        if index < 0 || index as usize >= self.audio.frames.len() {
+        if index < 0
+            || index as usize >= self.audio.frames.len()
+            || !self
+                .map
+                .permits_frame(index as usize, self.audio.sample_rate)
+        {
             return [0.0; 2];
         }
         if self
@@ -238,10 +361,13 @@ impl BackingVoice {
         if !score_seconds.is_finite() {
             return [0.0; 2];
         }
+        let source = self.map.source_seconds(score_seconds);
+        if !self.map.permits_source(source) {
+            return [0.0; 2];
+        }
         if self.cursor == HOP {
             self.prepare_grain(score_seconds);
         }
-        let source = self.map.source_seconds(score_seconds);
         let mut x = if source < 0.0
             || source >= self.audio.frames.len() as f64 / self.audio.sample_rate as f64
         {
@@ -275,6 +401,9 @@ impl BackingVoice {
         self.previous_seconds = seconds - 1e-9;
     }
     pub fn end_seconds(&self) -> f64 {
+        if let Some(reference) = &self.map.reference {
+            return reference.score_seconds(reference.exit_source_seconds());
+        }
         self.map
             .score_seconds(self.audio.frames.len() as f64 / self.audio.sample_rate as f64)
     }

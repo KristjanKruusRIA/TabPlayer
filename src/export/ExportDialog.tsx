@@ -1,20 +1,30 @@
-import { useEffect,useRef,useState,type KeyboardEvent } from 'react';
+import { useEffect,useId,useMemo,useRef,useState,type KeyboardEvent } from 'react';
 import type { model } from '@coderline/alphatab';
 import { validateSelection,type AudioExportOptions,type ExportOptions,type ExportProgress,type ExportSelection,type PrintLayout } from './types';
 import type { PageLayout } from '../engraving/types';
 import { PageLayoutPanel } from '../engraving/PageLayoutPanel';
 import { validatePageLayout } from '../engraving/page';
 import './export-dialog.css';
-export function ExportDialog({score,layout,page,busy,progress,failure,currentSpeedAvailable,onExport,onCancel}:{score:model.Score;layout:PrintLayout;page?:PageLayout;busy:boolean;progress?:ExportProgress;failure?:string|null;currentSpeedAvailable:boolean;onExport:(options:ExportOptions)=>void;onCancel:()=>void;gpBackingIssue?:(selection:ExportSelection)=>string|null}) {
+export function ExportDialog({score,layout,page,busy,progress,failure,currentSpeedAvailable,gpBackingIssue,onExport,onCancel}:{score:model.Score;layout:PrintLayout;page?:PageLayout;busy:boolean;progress?:ExportProgress;failure?:string|null;currentSpeedAvailable:boolean;onExport:(options:ExportOptions)=>void;onCancel:()=>void;gpBackingIssue?:(selection:ExportSelection)=>string|null}) {
   const [format,setFormat]=useState<ExportOptions['format']>('gp');const [tracks,setTracks]=useState(score.tracks.map(t=>t.index));
   const [staves,setStaves]=useState<Record<number,number[]>>(Object.fromEntries(score.tracks.map(t=>[t.index,t.staves.map(s=>s.index)])));
   const [range,setRange]=useState(false),[first,setFirst]=useState('1'),[last,setLast]=useState(String(score.masterBars.length));
   const [print,setPrint]=useState({...layout});const [audio,setAudio]=useState<AudioExportOptions>({sampleRate:48000,bitDepth:16,speed:'saved',metronome:false,tailSeconds:2,backing:true,includeMix:true});
+  const [gpBacking,setGpBacking]=useState(true);
   const [error,setError]=useState('');
   const [customPage,setCustomPage]=useState(()=>page?structuredClone(page):null);
   const topology=`${score.masterBars.length}:${score.tracks.map(track=>track.staves.length).join(',')}`;
   const dialog=useRef<HTMLDivElement>(null),cancel=useRef<HTMLButtonElement>(null);
-  const visibleError=error||progress?.error||failure;
+  const errorId=useId();
+  function exportSelection():ExportSelection {
+    if(range&&(!first.trim()||!last.trim()||!Number.isInteger(Number(first))||!Number.isInteger(Number(last))))throw new Error('Enter whole measure numbers for the inclusive range.');
+    const partial=Object.fromEntries(tracks.filter(t=>staves[t]?.length!==score.tracks[t]?.staves.length).map(t=>[t,staves[t]]));
+    const selection={tracks,range:range?{first:Number(first)-1,last:Number(last)-1}:null,...(Object.keys(partial).length?{staves:partial}:{})};validateSelection(score.tracks.length,score.masterBars.length,selection,score.tracks.map(t=>t.staves.length));
+    return selection;
+  }
+  const selection=useMemo(()=>{try{return exportSelection();}catch{return null;}},[score,topology,tracks,staves,range,first,last]);
+  const backingIssue=useMemo(()=>format==='gp'&&gpBacking&&selection?gpBackingIssue?.(selection)??null:null,[format,gpBacking,selection,gpBackingIssue]);
+  const visibleError=backingIssue||error||progress?.error||failure;
   useEffect(()=>{
     const opener=document.activeElement;
     dialog.current?.querySelector<HTMLElement>('select:not(:disabled),button:not(:disabled)')?.focus();
@@ -37,13 +47,12 @@ export function ExportDialog({score,layout,page,busy,progress,failure,currentSpe
   }
   function submit(){
     try {
-      if(range&&(!first.trim()||!last.trim()||!Number.isInteger(Number(first))||!Number.isInteger(Number(last))))throw new Error('Enter whole measure numbers for the inclusive range.');
-      const partial=Object.fromEntries(tracks.filter(t=>staves[t].length!==score.tracks[t].staves.length).map(t=>[t,staves[t]]));
-      const selection={tracks,range:range?{first:Number(first)-1,last:Number(last)-1}:null,...(Object.keys(partial).length?{staves:partial}:{})};validateSelection(score.tracks.length,score.masterBars.length,selection,score.tracks.map(t=>t.staves.length));
+      const selection=exportSelection();
+      if(backingIssue)throw new Error(backingIssue);
       if(!Number.isFinite(audio.tailSeconds)||audio.tailSeconds<0||audio.tailSeconds>30)throw new Error('Effect tail must be between 0 and 30 seconds.');
       if((format==='pdf'||format==='print')&&!customPage&&(!Number.isFinite(print.marginMm)||print.marginMm<0||print.marginMm>50||!Number.isFinite(print.scale)||print.scale<.25||print.scale>3))throw new Error('Use margins from 0 to 50 mm and scale from 25% to 300%.');
       if((format==='pdf'||format==='print')&&customPage)validatePageLayout(customPage);
-      setError('');onExport(format==='pdf'||format==='print'?{format,selection,layout:print,...(customPage?{page:structuredClone(customPage)}:{})}:format==='wav'||format==='stems'?{format,selection,audio}:{format,selection});
+      setError('');onExport(format==='pdf'||format==='print'?{format,selection,layout:print,...(customPage?{page:structuredClone(customPage)}:{})}:format==='wav'||format==='stems'?{format,selection,audio}:format==='gp'?{format,selection,...(!gpBacking?{backing:false}:{})}:{format,selection});
     }catch(e){setError((e as Error).message);}
   }
   return <div className="dialog-backdrop"><div ref={dialog} onKeyDown={handleKeyDown} role="dialog" aria-modal="true" aria-label="Export score" className="export-dialog"><h2>Export score</h2>
@@ -57,6 +66,7 @@ export function ExportDialog({score,layout,page,busy,progress,failure,currentSpe
         <label className="export-check"><input type="checkbox" checked={range} onChange={e=>setRange(e.target.checked)}/>Measure range</label>
         {range?<div className="export-measures"><label>First measure<input type="number" min="1" max={score.masterBars.length} step="1" value={first} onChange={e=>setFirst(e.target.value)}/></label><label>Last measure<input type="number" min="1" max={score.masterBars.length} step="1" value={last} onChange={e=>setLast(e.target.value)}/></label></div>:<p className="muted">All measures</p>}
       </fieldset>
+      {format==='gp'&&<label className="export-check"><input type="checkbox" checked={gpBacking} aria-invalid={backingIssue?true:undefined} aria-describedby={backingIssue?errorId:undefined} onChange={e=>setGpBacking(e.target.checked)}/>Include backing audio</label>}
       {(format==='pdf'||format==='print')&&(customPage?<PageLayoutPanel value={customPage} busy={busy} onEdit={command=>setCustomPage(command.layout)}/>:<>
         <label>Paper<select value={print.paper} onChange={e=>setPrint({...print,paper:e.target.value as PrintLayout['paper']})}><option>A4</option><option>Letter</option></select></label>
         <label>Orientation<select value={print.orientation} onChange={e=>setPrint({...print,orientation:e.target.value as PrintLayout['orientation']})}><option value="portrait">Portrait</option><option value="landscape">Landscape</option></select></label>
@@ -78,7 +88,7 @@ export function ExportDialog({score,layout,page,busy,progress,failure,currentSpe
         {format==='stems'&&<label className="export-check"><input type="checkbox" checked={audio.includeMix} onChange={e=>setAudio({...audio,includeMix:e.target.checked})}/>Include limited mix</label>}
       </div></fieldset>}
     </fieldset>
-    {visibleError&&<p role="alert">{visibleError}</p>}{progress&&<><progress aria-label="Export progress" data-job-id={progress.id} max={Math.max(1,progress.totalFrames)} value={progress.frames}/><p role="status">{progress.status==='running'?'Exporting…':progress.status}</p></>}
-    <div className="export-actions"><button type="button" className="export-submit" disabled={busy} onClick={submit}>Export</button><button ref={cancel} type="button" onClick={onCancel}>{busy?'Cancel export':'Cancel'}</button></div>
+    {visibleError&&<p id={errorId} role="alert">{visibleError}</p>}{progress&&<><progress aria-label="Export progress" data-job-id={progress.id} max={Math.max(1,progress.totalFrames)} value={progress.frames}/><p role="status">{progress.status==='running'?'Exporting…':progress.status}</p></>}
+    <div className="export-actions"><button type="button" className="export-submit" disabled={busy||Boolean(backingIssue)} onClick={submit}>Export</button><button ref={cancel} type="button" onClick={onCancel}>{busy?'Cancel export':'Cancel'}</button></div>
   </div></div>;
 }

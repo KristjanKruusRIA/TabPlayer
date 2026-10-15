@@ -14,6 +14,60 @@ it('explains supported uniform common/cut interchange beside GP export options',
   expect(screen.getByText('Engraving settings affect the screen and PDF. GP export preserves source styling and supports uniform common/cut choices; mixed measure choices cannot be exported.')).toBeVisible();
 });
 
+it('includes GP backing by default without exposing audio format settings',()=>{
+  const submit=vi.fn();render(<ExportDialog score={fixture()} layout={layout} busy={false} currentSpeedAvailable={true} onExport={submit} onCancel={()=>{}}/>);
+  expect(screen.getByLabelText('Include backing audio')).toBeChecked();
+  for(const label of ['Sample rate','Bit depth','Speed','Metronome','Effect tail (seconds)'])expect(screen.queryByLabelText(label)).toBeNull();
+  fireEvent.click(screen.getByRole('button',{name:'Export'}));expect(submit).toHaveBeenCalledWith({format:'gp',selection:{tracks:[0],range:null}});
+  fireEvent.change(screen.getByLabelText('Export format'),{target:{value:'wav'}});
+  expect(screen.queryByLabelText('Include backing audio')).toBeNull();expect(screen.getByLabelText('Sample rate')).toBeVisible();
+});
+
+it('blocks an unsupported GP backing selection and permits explicit notation export',()=>{
+  const issue='This passage occurs more than once. Clear Include backing audio to export the notation.',submit=vi.fn();
+  render(<ExportDialog score={fixture()} layout={layout} busy={false} currentSpeedAvailable={true} gpBackingIssue={()=>issue} onExport={submit} onCancel={()=>{}}/>);
+  const backing=screen.getByLabelText('Include backing audio');
+  expect(screen.getByRole('alert')).toHaveTextContent(issue);expect(backing).toHaveAccessibleDescription(issue);expect(backing).toHaveAttribute('aria-invalid','true');
+  expect(screen.getByRole('button',{name:'Export'})).toBeDisabled();fireEvent.click(screen.getByRole('button',{name:'Export'}));expect(submit).not.toHaveBeenCalled();
+  fireEvent.click(backing);expect(screen.queryByRole('alert')).toBeNull();expect(backing).not.toHaveAttribute('aria-invalid','true');
+  fireEvent.click(screen.getByRole('button',{name:'Export'}));expect(submit).toHaveBeenCalledWith({format:'gp',selection:{tracks:[0],range:null},backing:false});
+});
+
+it('clears only the GP include issue when backing is omitted',()=>{
+  render(<ExportDialog score={fixture()} layout={layout} busy={false} currentSpeedAvailable={true} failure="The output disk is full." gpBackingIssue={()=>'Clear Include backing audio to export the notation.'} onExport={()=>{}} onCancel={()=>{}}/>);
+  fireEvent.click(screen.getByLabelText('Include backing audio'));expect(screen.getByRole('alert')).toHaveTextContent('The output disk is full.');
+  fireEvent.click(screen.getByLabelText('Lead'));fireEvent.click(screen.getByRole('button',{name:'Export'}));
+  expect(screen.getByRole('alert')).toHaveTextContent('Select at least one track to export.');
+  fireEvent.click(screen.getByLabelText('Include backing audio'));fireEvent.click(screen.getByLabelText('Include backing audio'));
+  expect(screen.getByRole('alert')).toHaveTextContent('Select at least one track to export.');
+});
+
+it('preflights only valid GP selections with backing included',()=>{
+  const preflight=vi.fn(()=>null);
+  render(<ExportDialog score={fixture()} layout={layout} busy={false} currentSpeedAvailable={true} gpBackingIssue={preflight} onExport={()=>{}} onCancel={()=>{}}/>);
+  expect(preflight).toHaveBeenLastCalledWith({tracks:[0],range:null});preflight.mockClear();
+  fireEvent.click(screen.getByLabelText('Lead'));expect(preflight).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByLabelText('Include backing audio'));fireEvent.click(screen.getByLabelText('Lead'));expect(preflight).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByLabelText('Include backing audio'));expect(preflight).toHaveBeenLastCalledWith({tracks:[0],range:null});preflight.mockClear();
+  fireEvent.click(screen.getByLabelText('Measure range'));fireEvent.change(screen.getByLabelText('First measure'),{target:{value:'2'}});
+  expect(preflight).toHaveBeenLastCalledWith({tracks:[0],range:{first:1,last:2}});preflight.mockClear();
+  fireEvent.change(screen.getByLabelText('First measure'),{target:{value:'1.5'}});expect(preflight).not.toHaveBeenCalled();
+  fireEvent.change(screen.getByLabelText('Export format'),{target:{value:'midi'}});fireEvent.change(screen.getByLabelText('First measure'),{target:{value:'1'}});expect(preflight).not.toHaveBeenCalled();
+});
+
+it('refreshes GP preflight for score and settings changes without repeating it for progress',()=>{
+  const score=fixture(),preflight=vi.fn(()=>null),submit=()=>{},cancel=()=>{};
+  const {rerender}=render(<ExportDialog score={score} layout={layout} busy={false} currentSpeedAvailable={true} gpBackingIssue={preflight} onExport={submit} onCancel={cancel}/>);
+  preflight.mockClear();
+  rerender(<ExportDialog score={score} layout={layout} busy={true} progress={{id:'job',frames:20,totalFrames:100,status:'running'}} currentSpeedAvailable={true} gpBackingIssue={preflight} onExport={submit} onCancel={cancel}/>);
+  expect(preflight).not.toHaveBeenCalled();
+  const changed=fixture();rerender(<ExportDialog score={changed} layout={layout} busy={false} currentSpeedAvailable={true} gpBackingIssue={preflight} onExport={submit} onCancel={cancel}/>);
+  expect(preflight).toHaveBeenLastCalledWith({tracks:[0],range:null});
+  const changedSettings=()=> 'The changed sync points cannot represent this selection. Clear Include backing audio to export the notation.';
+  rerender(<ExportDialog score={changed} layout={layout} busy={false} currentSpeedAvailable={true} gpBackingIssue={changedSettings} onExport={submit} onCancel={cancel}/>);
+  expect(screen.getByRole('alert')).toHaveTextContent('The changed sync points cannot represent this selection.');expect(screen.getByRole('button',{name:'Export'})).toBeDisabled();
+});
+
 it('keeps staves within their track group and the measure range separate while exporting partial staves',()=>{
   const score=fixture(),submit=vi.fn();score.tracks[0].addStaff(new model.Staff());score.tracks[0].addStaff(new model.Staff());
   const bass=new model.Track();bass.name='Bass';bass.addStaff(new model.Staff());score.addTrack(bass);

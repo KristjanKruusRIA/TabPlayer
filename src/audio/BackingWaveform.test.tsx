@@ -5,6 +5,8 @@ import '@testing-library/jest-dom/vitest';
 import {BackingWaveform} from './BackingWaveform';
 import type {BackingSettings} from '../edit-types';
 import type {BackingWaveform as WaveformData,BackingWaveformProps,BackingTimeline,WaveformSourceInput} from './backing-waveform-types';
+import {useReferenceSyncEdit} from './useReferenceSyncEdit';
+import {referenceSyncTiming} from './reference-sync';
 
 // Projection has an independently tested Task 3 producer. These deterministic seams
 // isolate view transactions from timing implementation while that producer runs.
@@ -193,4 +195,53 @@ it('zoomed ruler distinguishes each actual subsecond source tick',async()=>{
   const {view}=await ready();fireEvent.click(screen.getByRole('button',{name:'Zoom in'}));
   const labels=[...view.container.querySelectorAll('.backing-waveform-time')].map(element=>element.textContent);
   expect(labels).toContain('0:01.5');expect(labels).toContain('0:02.0');expect(new Set(labels).size).toBe(labels.length);
+});
+
+const referenceSettings:BackingSettings={...settings,anchors:[{bar:0,occurrence:1,ratio:0,audioMs:3120}],referenceSync:{entryAudioMs:1120,exitAudioMs:7120}};
+function ReferenceWaveform({p}:{p:BackingWaveformProps}) {
+  const edit=useReferenceSyncEdit({owner:p.bridge.owner,document:p.document,sourceKey:p.source?.kind==='asset'?p.source.assetId:null,settings:p.settings,timeline:p.timeline,durationMs:10000,visible:{number:true,waveform:p.enabled},busy:p.busy,beginOperation:p.beginOperation,isCurrent:p.isCurrent,onCommit:(backing)=>p.onEdit({type:'setBacking',backing})});
+  return <BackingWaveform {...p} reference={{edit,timing:p.settings&&p.timeline?referenceSyncTiming(p.settings,p.timeline.occurrences,10000):null}}/>;
+}
+async function readyReference(p=props({settings:referenceSettings,effectiveBacking:referenceSettings})) {const view=render(<ReferenceWaveform p={p}/>);await screen.findByRole('img');return {p,view};}
+
+it('shows distinct reference endpoints and derived tempos without allowing endpoint deletion or view-only edits',async()=>{
+  const {p,view}=await readyReference();const entry=screen.getByRole('slider',{name:'Entry bracket'}),exit=screen.getByRole('slider',{name:'Exit bracket'});
+  expect(entry).toHaveAttribute('aria-valuenow','1000');expect(exit).toHaveAttribute('aria-valuenow','7000');
+  expect(screen.getByText('120 BPM')).toBeVisible();expect(screen.getByText('60 BPM')).toBeVisible();expect(view.container.querySelectorAll('[data-waveform-channel]')).toHaveLength(2);
+  fireEvent.focus(entry);fireEvent.click(entry);expect(screen.getByText(/Entry.*Source 1,000 ms/)).toBeVisible();expect(screen.getByRole('button',{name:'Delete sync point'})).toBeDisabled();
+  fireEvent.keyDown(entry,{key:'Delete'});fireEvent.click(screen.getByRole('button',{name:'Zoom in'}));fireEvent.click(screen.getByRole('button',{name:'Fit'}));
+  expect(p.beginOperation).not.toHaveBeenCalled();expect(p.onEdit).not.toHaveBeenCalled();
+});
+
+it('reference keyboard uses the shared lease, keeps its own busy handle enabled, and commits only on the matching key-up',async()=>{
+  const release=vi.fn(),p=props({settings:referenceSettings,effectiveBacking:referenceSettings,beginOperation:vi.fn(()=>release)}),{view}=await readyReference(p);
+  const entry=screen.getByRole('slider',{name:'Entry bracket'});entry.focus();fireEvent.keyDown(entry,{key:'ArrowRight'});view.rerender(<ReferenceWaveform p={{...p,busy:true}}/>);
+  expect(entry).toHaveAttribute('aria-disabled','false');expect(screen.getByRole('slider',{name:'Exit bracket'})).toHaveAttribute('aria-disabled','true');expect(screen.getByRole('slider',{name:'Sync point 1, measure 1, occurrence 2'})).toHaveAttribute('aria-disabled','true');
+  fireEvent.keyDown(entry,{key:'ArrowRight',shiftKey:true});fireEvent.keyUp(entry,{key:'Shift'});expect(p.onEdit).not.toHaveBeenCalled();expect(entry).toHaveAttribute('aria-valuenow','1011');
+  fireEvent.keyUp(entry,{key:'ArrowRight'});await waitFor(()=>expect(release).toHaveBeenCalledOnce());expect(p.onEdit).toHaveBeenCalledExactlyOnceWith({type:'setBacking',backing:{...referenceSettings,referenceSync:{entryAudioMs:1131,exitAudioMs:7120}}});
+});
+
+it.each(['pointercancel','lostcapture','blur','escape','hide'] as const)('reference %s cancels shared preview without a score edit',async action=>{
+  const release=vi.fn(),p=props({settings:referenceSettings,effectiveBacking:referenceSettings,beginOperation:()=>release}),{view}=await readyReference(p),entry=screen.getByRole('slider',{name:'Entry bracket'});
+  dragStart(entry);fireEvent.pointerMove(entry,{pointerId:1,clientX:110});expect(entry).toHaveAttribute('aria-valuenow','1100');expect(screen.getByText('126.32 BPM')).toBeVisible();
+  if(action==='pointercancel')fireEvent.pointerCancel(entry,{pointerId:1});if(action==='lostcapture')fireEvent.lostPointerCapture(entry,{pointerId:1});if(action==='blur')fireEvent.blur(entry);if(action==='escape')fireEvent.keyDown(entry,{key:'Escape'});if(action==='hide')view.rerender(<ReferenceWaveform p={{...p,enabled:false}}/>);
+  fireEvent.pointerUp(entry,{pointerId:1,clientX:110});expect(p.onEdit).not.toHaveBeenCalled();expect(release).toHaveBeenCalledOnce();if(action==='hide')expect(screen.queryByRole('slider')).not.toBeInTheDocument();else expect(entry).toHaveAttribute('aria-valuenow','1000');
+});
+
+it('reference pointer-up commits once and exact source-edge brackets remain reachable',async()=>{
+  const p=props({settings:referenceSettings,effectiveBacking:referenceSettings});await readyReference(p);const exit=screen.getByRole('slider',{name:'Exit bracket'});
+  dragStart(exit);fireEvent.pointerMove(exit,{pointerId:1,clientX:110});fireEvent.pointerUp(exit,{pointerId:1,clientX:110});fireEvent.pointerUp(exit,{pointerId:1,clientX:110});
+  await waitFor(()=>expect(p.onEdit).toHaveBeenCalledOnce());expect(p.onEdit).toHaveBeenCalledWith({type:'setBacking',backing:{...referenceSettings,referenceSync:{entryAudioMs:1120,exitAudioMs:7220}}});
+  cleanup();const edge={...referenceSettings,referenceSync:{entryAudioMs:120,exitAudioMs:10120}};await readyReference(props({settings:edge,effectiveBacking:edge}));
+  expect(screen.getByRole('slider',{name:'Entry bracket'})).toHaveAttribute('data-edge','start');expect(screen.getByRole('slider',{name:'Exit bracket'})).toHaveAttribute('data-edge','end');
+});
+
+it('signed stored reference points expose physical source limits and preview only the grid while playback stays committed',async()=>{
+  const signed={...referenceSettings,offsetMs:-120,anchors:[{bar:0,occurrence:1,ratio:0,audioMs:-70}],referenceSync:{entryAudioMs:-120,exitAudioMs:9880}},p=props({settings:signed,effectiveBacking:signed,scoreTimeMs:1000});
+  const {view}=await readyReference(p),interior=screen.getByRole('slider',{name:'Sync point 1, measure 1, occurrence 2'});
+  expect(interior).toHaveAttribute('aria-valuemin','0');expect(interior).toHaveAttribute('aria-valuenow','50');
+  const playhead=screen.getByLabelText('Native playback position'),left=playhead.style.left,entry=screen.getByRole('slider',{name:'Entry bracket'});
+  dragStart(entry);fireEvent.pointerMove(entry,{pointerId:1,clientX:101});expect(entry).toHaveAttribute('aria-valuenow','10');expect(playhead.style.left).toBe(left);
+  expect(projection.grid).toHaveBeenLastCalledWith(timeline,expect.objectContaining({referenceSync:{entryAudioMs:-110,exitAudioMs:9880}}),0,10000);
+  expect(projection.clock).toHaveBeenLastCalledWith(timeline,signed,1000);expect(p.onEdit).not.toHaveBeenCalled();view.unmount();
 });

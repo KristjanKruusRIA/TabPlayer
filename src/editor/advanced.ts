@@ -13,7 +13,9 @@ import { applyBarGestureEdit } from './bar-gestures';
 import { applyRangeEdit } from './range-edits';
 import { applyMeasureEdit } from './measures';
 import { applyHarmonyEdit } from '../harmony/edits';
+import { applyTempoAutomations } from './tempo-automations';
 export function applyAdvancedEdit(score:model.Score,command:EditCommand,editIndex:number):boolean {
+  if(command.type==='replaceTempoAutomations'){applyTempoAutomations(score,command.points);return true;}
   if(command.type==='setBeatText'||command.type==='setHarmonyChord')return applyHarmonyEdit(score,command,editIndex);
   if(command.type==='eraseSelection'||command.type==='transposeSelection'||command.type==='moveSelectionStrings'||command.type==='refingerSelection'||command.type==='setSelectionSustain')return applyRangeEdit(score,command);
   if(command.type==='insertMeasures'||command.type==='removeMeasures')return applyMeasureEdit(score,command);

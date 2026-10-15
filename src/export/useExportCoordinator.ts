@@ -3,19 +3,21 @@ import { model,Settings } from '@coderline/alphatab';
 import { exportGp,trackIdentity } from '../engine';
 import type { NativeBridge } from '../bridge';
 import type { DocumentSettings } from '../document-settings';
-import { buildPlaybackPlanFromJson } from '../audio/plan';
+import { backingLocationsForScore,buildPlaybackPlanFromJson } from '../audio/plan';
+import { applyReferenceSyncPlan } from '../audio/reference-sync';
 import type { ExportNativeBridge } from './bridge';
-import { selectScore,selectStaves } from './selection';
+import { selectStaves } from './selection';
 import { exportMidi } from './midi';
 import { loadExportFonts,renderPdfPages } from './pdf';
 import { validateSelection,type ExportOptions,type ExportProgress } from './types';
 import { scoreFromJson } from '../model-clone';
 import { copyGpInterchangeSource } from '../interchange/gp';
+import { projectGpDocument } from '../interchange/backing-projection';
 import { captureNoteLinks,restoreNoteLinks } from '../editor/links';
 import { effectivePageLayout } from '../engraving/page';
 export type ExportSource={score:model.Score;settings:DocumentSettings;embeddedBacking?:Uint8Array|null;revision:number};
 type ExportOperation={finished:Promise<void>;cancelRequest:Promise<void>|null};
-export function useExportCoordinator({score,settings,currentSpeed,bridge,native,embeddedBacking=null,revision}:ExportSource&{currentSpeed:number|null;bridge:Pick<NativeBridge,'confirmExport'|'exportGp'>;native:ExportNativeBridge}) {
+export function useExportCoordinator({score,settings,currentSpeed,bridge,native,embeddedBacking=null,revision}:ExportSource&{currentSpeed:number|null;bridge:Pick<NativeBridge,'confirmExport'|'exportGp'|'readBackingAsset'>;native:ExportNativeBridge}) {
   const [busy,setBusy]=useState(false),[progress,setProgress]=useState<ExportProgress>();
   const pending=useRef(false),cancelled=useRef(false),job=useRef<string|null>(null),alive=useRef(true),generation=useRef(0);
   const operation=useRef<ExportOperation|null>(null);
@@ -44,11 +46,22 @@ export function useExportCoordinator({score,settings,currentSpeed,bridge,native,
     try{
       const copy=scoreFromJson(json,new Settings()),selection=frozenOptions.selection;
       restoreNoteLinks(copy,captureNoteLinks(score));copyGpInterchangeSource(score,copy);
-      if(frozenOptions.format==='gp'){if(!await bridge.confirmExport()||cancelled.current)return false;return await bridge.exportGp(exportGp(selectScore(copy,selection)),revision);}
+      if(frozenOptions.format==='gp'){
+        if(!await bridge.confirmExport()||cancelled.current||!alive.current)return false;
+        const include=frozenOptions.backing!==false,backing=frozenSettings.backing;
+        const bytes=include&&backing?(backing.assetId==='embedded'?embedded:await bridge.readBackingAsset(backing.assetId,revision)):null;
+        if(cancelled.current||!alive.current)return false;
+        return await bridge.exportGp(exportGp(projectGpDocument({score:copy,settings:frozenSettings,bytes,selection,backing:include})),revision);
+      }
       if(frozenOptions.format==='midi'){if(cancelled.current)return false;return await native.exportMidi(exportMidi(copy,selection),revision);}
       if(frozenOptions.format==='pdf'||frozenOptions.format==='print'){await loadExportFonts();if(cancelled.current)return false;const pages=renderPdfPages(copy,selection,frozenOptions.layout,{page:frozenOptions.page??effectivePageLayout({page:null,print:frozenOptions.layout}),engraving:frozenSettings.engraving,trackIds:ids});if(cancelled.current)return false;return await watch(await native.exportPdf(pages,frozenOptions.format==='print',revision),active);}
       const audio=frozenOptions.audio;
-      const plan=buildPlaybackPlanFromJson(model.JsonConverter.scoreToJson(selectStaves(copy,selection)),ids,++generation.current);
+      const selected=selectStaves(copy,selection);
+      if(frozenSettings.backing?.referenceSync&&Object.keys(selection.staves??{}).length){
+        const original=backingLocationsForScore(copy),route=backingLocationsForScore(selected);
+        if(original.length!==route.length||original.some((item,index)=>{const next=route[index];return item.bar!==next.bar||item.occurrence!==next.occurrence||item.startTick!==next.startTick||item.endTick!==next.endTick;}))throw new Error('The selected staves change reference playback timing. Choose staves with the original performed route.');
+      }
+      const plan=applyReferenceSyncPlan(buildPlaybackPlanFromJson(model.JsonConverter.scoreToJson(selected),ids,++generation.current),frozenSettings.backing);
       if(cancelled.current)return false;
       return await watch(await native.exportAudio({plan,settings:frozenSettings,embeddedBytes:embedded?Array.from(embedded):null,stems:frozenOptions.format==='stems',request:{tracks:selection.tracks.map(i=>({id:ids[i],name:copy.tracks[i].name,preset:frozenSettings.sounds[ids[i]]?.presetId??'gm',kind:'score'})),range:selection.range,format:{sampleRate:audio.sampleRate,bitDepth:audio.bitDepth},speed,metronome:audio.metronome,tailSeconds:audio.tailSeconds,includeBacking:audio.backing,includeMix:audio.includeMix}},revision),active);
     }finally{if(active.cancelRequest)await active.cancelRequest.catch(()=>{});pending.current=false;job.current=null;if(alive.current)setBusy(false);operation.current=null;finish();}

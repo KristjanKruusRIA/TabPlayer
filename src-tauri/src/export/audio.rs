@@ -58,6 +58,9 @@ impl RenderSchedule {
             return Err("Invalid audio export timing settings.".into());
         }
         let timeline = Timeline::new(plan)?;
+        let whole_seconds = plan
+            .playback_end_tick
+            .map_or(whole_seconds, |end| timeline.tick_to_seconds(end));
         let mut segments: Vec<Segment> = Vec::new();
         if let Some(range) = range {
             if range.first > range.last
@@ -266,7 +269,14 @@ impl AudioExportRender {
         if n == 0 {
             return Ok(0);
         }
-        let status = self.renderer.render_into(&mut output[..n]);
+        let status = if self.tail_started {
+            self.renderer.render_into(&mut output[..n])
+        } else {
+            self.renderer.render_until(
+                &mut output[..n],
+                self.schedule.segments[self.segment].end_tick,
+            )
+        };
         if status.frames != n {
             return Err("Native renderer returned an incomplete export block.".into());
         }
@@ -282,9 +292,16 @@ impl AudioExportRender {
             return Ok(0);
         }
         let mut views: Vec<_> = self.stem_buffers.iter_mut().map(|b| &mut b[..n]).collect();
-        let status = self
-            .renderer
-            .render_stems_and_mix_into(&mut views, &mut self.mix_buffer[..n]);
+        let ceiling = if self.tail_started {
+            f64::INFINITY
+        } else {
+            self.schedule.segments[self.segment].end_tick
+        };
+        let status = self.renderer.render_stems_and_mix_until(
+            &mut views,
+            &mut self.mix_buffer[..n],
+            ceiling,
+        );
         if status.frames != n {
             return Err("Native renderer returned an incomplete stem block.".into());
         }

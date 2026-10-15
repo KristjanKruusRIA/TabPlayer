@@ -43,4 +43,18 @@
 .backing-waveform-state { flex:1; min-height:0; overflow:auto; margin:0; padding:10px 12px; display:flex; align-items:center; gap:12px; color:var(--ws-muted); }
 .backing-waveform-state p { margin:0; }
 .backing-waveform-state [role=alert] { color:var(--ws-error); }
+.backing-waveform-mode { margin-left:auto; color:var(--ws-muted); font-size:11px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.backing-waveform-content.reference { min-height:56px; }
+.reference .backing-waveform-time { top:20px; }
+.reference .backing-waveform-grid,.reference .backing-waveform-selection-span,.reference .backing-waveform-selection-point { top:36px; }
+.reference .backing-waveform-peaks { top:36px; height:calc(100% - 36px); }
+.reference .backing-waveform-handle:not(.backing-waveform-endpoint),.reference .backing-waveform-original-anchor { top:34px; }
+.backing-waveform-excluded { position:absolute; top:36px; bottom:0; background:var(--ws-input); opacity:.65; pointer-events:none; z-index:1; }
+.backing-waveform-tempo { position:absolute; top:2px; padding-inline:26px; box-sizing:border-box; font-size:10px; text-align:center; color:var(--ws-text); overflow:hidden; white-space:nowrap; pointer-events:none; }
+.backing-waveform-endpoint { top:0; width:32px; }
+.backing-waveform-endpoint>span { width:30px; font-size:10px; background:var(--ws-input); color:var(--ws-accent); border-width:2px; line-height:14px; }
+.backing-waveform-endpoint::after { top:18px; width:2px; }
+.backing-waveform-endpoint.entry>span { border-radius:5px 2px 2px 5px; }
+.backing-waveform-endpoint.exit>span { border-radius:2px 5px 5px 2px; }
+.backing-waveform-endpoint[data-selected=true]>span { background:var(--ws-accent); color:var(--ws-accent-ink); }
 @media (max-width:1100px) { .backing-waveform-filename { max-width:24%; } .backing-waveform-footer { gap:4px; padding-inline:6px; } .backing-waveform-footer>button { padding-inline:4px; } }

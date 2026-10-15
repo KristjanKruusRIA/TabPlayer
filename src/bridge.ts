@@ -2,6 +2,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { confirm, message } from '@tauri-apps/plugin-dialog';
 import type { EditCommand } from './project';
 import type { DocumentId,DocumentSnapshot,NativeWorkspaceBridge } from './workspace/types';
+import {readExportBackingAsset} from './export/backing-asset-read';
 
 export interface NativeBridge {
   readonly documentId:DocumentId;
@@ -41,7 +42,7 @@ export function createDocumentBridge(documentId:DocumentId,observer?:DocumentSav
     return record;
   },
   exportGp: (bytes,revision) => desktopTest?invoke('desktop_test_io',{action:'export',documentId,revision,bytes:Array.from(bytes)}):invoke('export_gp',{document:{documentId,revision},bytes:Array.from(bytes)}),
-  readBackingAsset: async (_assetId,_revision):Promise<Uint8Array> => {throw new Error('Backing asset reads are not implemented.');},
+  readBackingAsset: (assetId,revision) => readExportBackingAsset({document:{documentId,revision},assetId}),
   askUnsaved: async (title,path) => {
     const result = await message(`Save changes to “${title}” before closing?${path?`\n${path}`:''}`,{title:'Unsaved score',kind:'warning',buttons:{yes:'Save',no:'Discard',cancel:'Cancel'}});
     return result === 'Yes' || result === 'Save' ? 'save' : result === 'No' || result === 'Discard' ? 'discard' : 'cancel';

@@ -701,8 +701,20 @@ impl Renderer {
         }
     }
     fn frame(&mut self, end_tick: f64) -> ([f32; 2], Option<PulsePosition>) {
+        let end_tick = self
+            .plan
+            .playback_end_tick
+            .map_or(end_tick, |end| end.min(end_tick));
         let tick = self.timeline.seconds_to_tick(self.seconds);
         self.scratch.fill([0.0; 2]);
+        if !self.tail
+            && self
+                .plan
+                .playback_end_tick
+                .is_some_and(|end| self.seconds >= self.timeline.tick_to_seconds(end))
+        {
+            return ([0.0; 2], None);
+        }
         if !self.tail {
             while self.next_note < self.plan.notes.len()
                 && self.plan.notes[self.next_note].start_tick <= tick + 1e-7
@@ -838,6 +850,11 @@ impl Renderer {
                         / (60.0 * self.rate as f64),
             ),
         };
+        if !self.tail {
+            if let Some(end) = self.plan.playback_end_tick {
+                self.seconds = self.seconds.min(self.timeline.tick_to_seconds(end));
+            }
+        }
         (sum.map(master_limit), pulse)
     }
     fn status(
@@ -848,7 +865,11 @@ impl Renderer {
     ) -> RenderStatus {
         RenderStatus {
             frames,
-            tick: self.timeline.seconds_to_tick(self.seconds),
+            tick: self
+                .plan
+                .playback_end_tick
+                .filter(|&end| !self.tail && self.seconds >= self.timeline.tick_to_seconds(end))
+                .unwrap_or_else(|| self.timeline.seconds_to_tick(self.seconds)),
             seconds: self.seconds,
             ended: self.tail || self.seconds + 1e-9 >= self.duration_seconds(),
             pulse_count,
@@ -901,6 +922,14 @@ impl Renderer {
         outputs: &mut [&mut [[f32; 2]]],
         mix: &mut [[f32; 2]],
     ) -> RenderStatus {
+        self.render_stems_and_mix_until(outputs, mix, f64::INFINITY)
+    }
+    pub fn render_stems_and_mix_until(
+        &mut self,
+        outputs: &mut [&mut [[f32; 2]]],
+        mix: &mut [[f32; 2]],
+        end_tick: f64,
+    ) -> RenderStatus {
         let frames = outputs
             .iter()
             .map(|o| o.len())
@@ -910,7 +939,7 @@ impl Renderer {
         let mut pulse_count: u32 = 0;
         let mut last_pulse = None;
         for frame in 0..frames {
-            let (value, pulse) = self.frame(f64::INFINITY);
+            let (value, pulse) = self.frame(end_tick);
             mix[frame] = value;
             if pulse.is_some() {
                 pulse_count = pulse_count.saturating_add(1);
@@ -1096,6 +1125,10 @@ impl Renderer {
         self.clock_frames = 0;
     }
     pub fn output_frames_until(&self, end_tick: f64) -> usize {
+        let end_tick = self
+            .plan
+            .playback_end_tick
+            .map_or(end_tick, |end| end.min(end_tick));
         let tick = self.timeline.seconds_to_tick(self.seconds);
         let frames = match self.tempo {
             RenderTempo::Relative { ratio } => {
@@ -1237,12 +1270,19 @@ impl Renderer {
             + usize::from(self.metronome.enabled)
     }
     pub fn duration_tick(&self) -> f64 {
-        self.timeline.seconds_to_tick(self.duration_seconds())
+        self.plan
+            .playback_end_tick
+            .unwrap_or_else(|| self.timeline.seconds_to_tick(self.duration_seconds()))
     }
     pub fn score_duration_tick(&self) -> f64 {
-        self.plan.duration_tick
+        self.plan
+            .playback_end_tick
+            .unwrap_or(self.plan.duration_tick)
     }
     pub fn duration_seconds(&self) -> f64 {
+        if let Some(end) = self.plan.playback_end_tick {
+            return self.timeline.tick_to_seconds(end);
+        }
         self.backing
             .as_ref()
             .map_or(self.plan.duration_ms / 1000.0, |b| {
@@ -1359,6 +1399,86 @@ mod selection_tests {
             rate,
         )
         .unwrap()
+    }
+
+    #[test]
+    fn reference_fractional_exit_stops_held_voices_without_tick_roundtrip_leak() {
+        for mode in 0..3 {
+            let mut renderer = held_renderer(48_000, 960.0, false, false);
+            let mut plan = (*renderer.plan).clone();
+            plan.playback_end_tick = Some(3840.0);
+            plan.tempos[0].bpm = 239.98153988154758;
+            plan.duration_tick = 7680.0;
+            plan.duration_ms = 2000.153846153846;
+            plan.occurrences[0].end_ms = 1000.076923076923;
+            plan.notes[0].end_tick = 7680.0;
+            renderer.timeline = Timeline::new(&plan).unwrap();
+            renderer.note_end_ticks[0] = 7680.0;
+            renderer.plan = Arc::new(plan);
+            renderer.seek_tick(3839.0);
+            let frames = renderer.output_frames_until(3840.0);
+            let mut output = [[0.0; 2]; 64];
+            match mode {
+                0 => {
+                    renderer.render_into(&mut output);
+                }
+                1 => {
+                    renderer.render_stems_into(&mut [&mut output]);
+                }
+                _ => {
+                    renderer.render_stems_and_mix_into(&mut [&mut output], &mut [[0.0; 2]; 64]);
+                }
+            }
+            assert!(output[..frames].iter().any(|x| x[0].abs() > 0.001));
+            assert!(
+                output[frames..].iter().all(|x| *x == [0.0; 2]),
+                "mode {mode}: held voice after fractional exit"
+            );
+            assert_eq!(renderer.duration_tick(), 3840.0);
+            assert_eq!(renderer.position().tick, 3840.0);
+        }
+    }
+
+    #[test]
+    fn reference_exit_is_exclusive_for_mix_and_every_stem_path() {
+        for rate in [44_100, 48_000] {
+            for mode in 0..3 {
+                let mut renderer = held_renderer(rate, 960.0, true, false);
+                let mut plan = (*renderer.plan).clone();
+                plan.playback_end_tick = Some(960.0);
+                plan.occurrences[0].end_tick = 960.0;
+                plan.occurrences[0].end_ms = 500.0;
+                plan.validate().unwrap();
+                renderer.plan = Arc::new(plan);
+                renderer.set_metronome_settings(MetronomeSettings {
+                    enabled: true,
+                    visual: true,
+                    volume: 0.4,
+                });
+                renderer.seek_tick(960.0 - 5e-8);
+                let mut output = [[1.0; 2]; 8];
+                let status = match mode {
+                    0 => renderer.render_into(&mut output),
+                    1 => renderer.render_stems_into(&mut [&mut output]),
+                    _ => renderer.render_stems_and_mix_into(&mut [&mut output], &mut [[0.0; 2]; 8]),
+                };
+                assert_eq!(renderer.next_note, 1);
+                assert_eq!(renderer.next_midi, 6);
+                assert_eq!(renderer.tracks[0].channels[0].program, 24);
+                assert_eq!(status.pulse_count, 0);
+                assert_eq!(status.tick, 960.0);
+                assert!(output[1..].iter().all(|x| *x == [0.0; 2]));
+                renderer.begin_tail();
+                let mut tail = vec![[0.0; 2]; rate as usize / 20];
+                renderer.render_into(&mut tail);
+                assert!(
+                    tail.iter().any(|x| x[0].abs() > 0.001),
+                    "score release tail vanished"
+                );
+                assert_eq!(renderer.next_note, 1);
+                assert_eq!(renderer.next_midi, 6);
+            }
+        }
     }
 
     #[test]

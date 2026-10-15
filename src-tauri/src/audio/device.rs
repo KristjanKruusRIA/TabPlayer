@@ -9,6 +9,7 @@ use super::{
         ClickVoice, CountInClock, CountInSnapshot, MetronomeSettings, PracticeTempo, PulsePosition,
         RenderTempo, progressive_ratio,
     },
+    reference_sync::ReferenceSyncMap,
     renderer::{PreparedMix, Renderer},
     resources::AudioResources,
     voices::{resource_requests, voice_id_for_track},
@@ -30,6 +31,26 @@ use std::{
     thread,
     time::Duration,
 };
+
+fn reference_timing_changed(
+    before: Option<&crate::settings::BackingSettings>,
+    after: Option<&crate::settings::BackingSettings>,
+) -> bool {
+    if !before.is_some_and(|b| b.reference_sync.is_some())
+        && !after.is_some_and(|b| b.reference_sync.is_some())
+    {
+        return false;
+    }
+    match (before, after) {
+        (Some(a), Some(b)) => {
+            a.asset_id != b.asset_id
+                || a.offset_ms != b.offset_ms
+                || a.anchors != b.anchors
+                || a.reference_sync != b.reference_sync
+        }
+        _ => true,
+    }
+}
 
 const CONTROL_CAPACITY: usize = 64;
 const BLOCK: usize = 512;
@@ -1661,6 +1682,24 @@ impl AudioService {
             .store(value.to_bits(), Ordering::Relaxed);
     }
     fn renderer(document: &PreparedDocument, rate: u32) -> Result<Box<Renderer>, String> {
+        let reference = document
+            .settings
+            .backing
+            .as_ref()
+            .filter(|backing| backing.reference_sync.is_some());
+        if reference.is_some() != document.plan.playback_end_tick.is_some() {
+            return Err(
+                "Reference playback requires matching source settings and an effective plan."
+                    .into(),
+            );
+        }
+        if let Some(settings) = reference {
+            let audio = document
+                .backing
+                .as_ref()
+                .ok_or("Reference playback requires decoded backing audio.")?;
+            ReferenceSyncMap::new(settings, &document.plan)?.validate_audio(audio)?;
+        }
         let mut renderer = Renderer::new(
             document.plan.clone(),
             document.resources.clone(),
@@ -1675,11 +1714,12 @@ impl AudioService {
                 .map_or((&[][..], 0.0, ChannelMix::default()), |b| {
                     (b.anchors.as_slice(), b.offset_ms, b.mix.clone())
                 });
-            renderer.install_backing(
-                audio.clone(),
-                BackingMap::new(anchors, offset, &document.plan)?,
-                mix,
-            )?;
+            let map = if let Some(settings) = &document.settings.backing {
+                BackingMap::from_settings(settings, &document.plan)?
+            } else {
+                BackingMap::new(anchors, offset, &document.plan)?
+            };
+            renderer.install_backing(audio.clone(), map, mix)?;
         }
         Ok(Box::new(renderer))
     }
@@ -1771,12 +1811,18 @@ impl AudioService {
         {
             return Err("Stale sound configuration.".into());
         }
+        if reference_timing_changed(old.settings.backing.as_ref(), settings.backing.as_ref()) {
+            return Err("Reference timing changes require a newly prepared playback plan.".into());
+        }
         let voice_changed = old.plan.tracks.iter().any(|track| {
             voice_id_for_track(track, &settings) != voice_id_for_track(track, &old.settings)
         });
         let map_changed = match (&old.settings.backing, &settings.backing) {
             (Some(a), Some(b)) => {
-                a.asset_id != b.asset_id || a.offset_ms != b.offset_ms || a.anchors != b.anchors
+                a.asset_id != b.asset_id
+                    || a.offset_ms != b.offset_ms
+                    || a.anchors != b.anchors
+                    || a.reference_sync != b.reference_sync
             }
             (None, None) => false,
             _ => true,
@@ -1846,7 +1892,12 @@ impl AudioService {
             return Err("Stale transport generation.".into());
         }
         command
-            .validate(document.plan.duration_tick)
+            .validate(
+                document
+                    .plan
+                    .playback_end_tick
+                    .unwrap_or(document.plan.duration_tick),
+            )
             .map_err(str::to_string)?;
         if matches!(command, TransportCommand::PlayRange { .. }) {
             let status = self.shared.read();
@@ -2075,6 +2126,132 @@ fn device_manager(requests: mpsc::Receiver<ManagerRequest>, shared: Arc<SharedSt
         }
     }
     drop(stream);
+}
+
+#[cfg(test)]
+mod reference_tests {
+    use super::*;
+    fn document() -> PreparedDocument {
+        let plan: PlaybackPlan = serde_json::from_value(serde_json::json!({"generation":1,"ppq":960,"durationTick":7680,"durationMs":4000,"playbackEndTick":3840,"tracks":[{"id":"gm","program":0,"percussion":false}],"tempos":[{"tick":0,"bpm":120}],"occurrences":[{"bar":0,"occurrence":0,"meterNumerator":4,"meterDenominator":4,"startTick":0,"endTick":3840,"startMs":0,"endMs":2000}],"notes":[],"midi":[]})).unwrap();
+        let settings: DocumentSettings = {
+            let mut settings = DocumentSettings::default();
+            settings.backing=Some(serde_json::from_value(serde_json::json!({"assetId":"a","offsetMs":0,"anchors":[],"referenceSync":{"entryAudioMs":1000,"exitAudioMs":3000},"mix":{"gain":1,"pan":0,"mute":false,"solo":false}})).unwrap());
+            settings
+        };
+        PreparedDocument {
+            plan: Arc::new(plan),
+            settings,
+            resources: Arc::new(
+                AudioResources::load_for_requests(
+                    &PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/audio"),
+                    &[],
+                )
+                .unwrap(),
+            ),
+            backing: Some(Arc::new(DecodedAudio {
+                sample_rate: 48_000,
+                channels: 2,
+                frames: Arc::new(vec![[0.0; 2]; 192_000]),
+            })),
+            practice: PracticeSettings::default(),
+        }
+    }
+    #[test]
+    fn reference_admission_requires_real_pcm_effective_clock_and_settings_authority() {
+        let original = document();
+        assert!(AudioService::renderer(&original, 48_000).is_ok());
+        let mut candidate = original.clone();
+        candidate.backing = None;
+        assert!(AudioService::renderer(&candidate, 48_000).is_err());
+        let mut candidate = original.clone();
+        candidate.settings.backing = None;
+        assert!(AudioService::renderer(&candidate, 48_000).is_err());
+        let mut candidate = original.clone();
+        candidate.settings.backing.as_mut().unwrap().reference_sync = None;
+        assert!(AudioService::renderer(&candidate, 48_000).is_err());
+        let mut candidate = original.clone();
+        candidate
+            .settings
+            .backing
+            .as_mut()
+            .unwrap()
+            .reference_sync
+            .as_mut()
+            .unwrap()
+            .exit_audio_ms = 4001.0;
+        assert!(AudioService::renderer(&candidate, 48_000).is_err());
+        let mut candidate = original;
+        Arc::make_mut(&mut candidate.plan).playback_end_tick = None;
+        assert!(AudioService::renderer(&candidate, 48_000).is_err());
+    }
+    #[test]
+    fn same_plan_mix_rejects_reference_timing_before_queue_or_document_publication() {
+        let original = document();
+        let shared = Arc::new(SharedStatus::new());
+        shared.desired.store(1, Ordering::Release);
+        let (producer, mut commands) = HeapRb::new(CONTROL_CAPACITY).split();
+        let (manager, _requests) = mpsc::channel();
+        // A control-only service: no app, manager thread, stream or device access.
+        let service = AudioService {
+            root: PathBuf::new(),
+            shared,
+            control: Mutex::new(ControlState {
+                producer: Some(producer),
+                document: Some(original.clone()),
+                rate: 48_000,
+                device: None,
+                next_barrier: 0,
+            }),
+            manager,
+        };
+        for change in 0..5 {
+            let mut candidate = original.settings.clone();
+            let backing = candidate.backing.as_mut().unwrap();
+            match change {
+                0 => backing.asset_id = "b".into(),
+                1 => backing.offset_ms = 1.0,
+                2 => backing.reference_sync.as_mut().unwrap().exit_audio_ms = 3001.0,
+                3 => backing.anchors.push(crate::settings::SyncAnchor {
+                    bar: 0,
+                    occurrence: 0,
+                    ratio: 0.5,
+                    audio_ms: 2000.0,
+                }),
+                _ => backing.reference_sync = None,
+            }
+            assert!(service.set_mix(candidate, 1).is_err());
+            assert!(commands.try_pop().is_none());
+            assert_eq!(
+                service
+                    .control
+                    .lock()
+                    .unwrap()
+                    .document
+                    .as_ref()
+                    .unwrap()
+                    .settings,
+                original.settings
+            );
+        }
+        let mut candidate = original.settings.clone();
+        candidate.backing.as_mut().unwrap().mix.gain = 0.25;
+        service.set_mix(candidate.clone(), 1).unwrap();
+        assert!(matches!(
+            commands.try_pop(),
+            Some(CallbackCommand::Mix { .. })
+        ));
+        assert_eq!(
+            service
+                .control
+                .lock()
+                .unwrap()
+                .document
+                .as_ref()
+                .unwrap()
+                .settings,
+            candidate
+        );
+    }
 }
 
 #[cfg(test)]

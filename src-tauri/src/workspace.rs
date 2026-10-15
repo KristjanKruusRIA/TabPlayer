@@ -80,6 +80,7 @@ use crate::{
     assets::StoredAsset,
     files,
     project::{BaseDocument, CandidateStore, EditCommand, Project, ProjectSession, StagedAsset},
+    recovery::{DocumentViewState, RecoveryDocument},
 };
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -95,6 +96,7 @@ struct DocumentEntry {
     saved_file_sha256: Option<String>,
     candidates: CandidateStore,
     asset_tokens: BTreeSet<String>,
+    view: DocumentViewState,
 }
 
 impl DocumentEntry {
@@ -117,6 +119,7 @@ impl DocumentEntry {
             saved_file_sha256: None,
             candidates: CandidateStore::default(),
             asset_tokens: BTreeSet::new(),
+            view: DocumentViewState::default(),
         })
     }
 
@@ -138,7 +141,7 @@ fn identity(namespace: &str) -> String {
     )
 }
 
-fn path_identity(path: &Path) -> Result<PathBuf, String> {
+pub(crate) fn path_identity(path: &Path) -> Result<PathBuf, String> {
     if let Ok(canonical) = std::fs::canonicalize(path) {
         return Ok(canonical);
     }
@@ -151,7 +154,7 @@ fn path_identity(path: &Path) -> Result<PathBuf, String> {
     Ok(parent.join(filename))
 }
 
-fn same_path(left: &Path, right: &Path) -> bool {
+pub(crate) fn same_path(left: &Path, right: &Path) -> bool {
     #[cfg(windows)]
     {
         left.as_os_str().eq_ignore_ascii_case(right.as_os_str())
@@ -167,9 +170,140 @@ pub struct DocumentWorkspace {
     active: AudioOwner,
     candidates: CandidateStore,
     candidate_digests: BTreeMap<String, String>,
+    checkpoint_revision: u64,
+    frozen: bool,
 }
 
 impl DocumentWorkspace {
+    pub fn recovery_documents(&self) -> Result<Vec<RecoveryDocument>, String> {
+        self.documents
+            .iter()
+            .map(|entry| {
+                if entry.session.path().is_some() && entry.saved_file_sha256.is_none() {
+                    return Err(
+                        "A saved recovery destination requires its captured file digest.".into(),
+                    );
+                }
+                Ok(RecoveryDocument {
+                    document_id: entry.id.clone(),
+                    revision: entry.revision,
+                    session: entry.session.checkpoint(),
+                    imported_path: entry.intake_path.clone(),
+                    saved_file_sha256: entry.saved_file_sha256.clone(),
+                    view: entry.view.clone(),
+                })
+            })
+            .collect()
+    }
+
+    pub fn set_view(&mut self, id: &str, view: DocumentViewState) -> Result<(), String> {
+        self.check_admission()?;
+        self.entry(id)?;
+        let view = normalized_view(view)?;
+        if self.entry(id)?.view != view {
+            let revision = self.next_checkpoint_revision()?;
+            self.entry_mut(id)?.view = view;
+            self.checkpoint_revision = revision;
+        }
+        Ok(())
+    }
+
+    // The caller builds this workspace off the live workspace/audio locks.
+    pub fn install_recovery(
+        &mut self,
+        documents: Vec<RecoveryDocument>,
+        active_id: Option<String>,
+    ) -> Result<WorkspaceSnapshot, String> {
+        self.check_admission()?;
+        let revision = self.next_checkpoint_revision()?;
+        let mut ids = BTreeSet::new();
+        let mut entries = Vec::with_capacity(documents.len());
+        for document in documents {
+            if document.document_id.is_empty() || !ids.insert(document.document_id.clone()) {
+                return Err("Recovery document identities must be nonempty and unique.".into());
+            }
+            if document.revision > MAX_DOCUMENT_REVISION {
+                return Err("Document revision exceeds the safe integer limit.".into());
+            }
+            if document.session.path.is_some() && document.saved_file_sha256.is_none() {
+                return Err(
+                    "A saved recovery destination requires its captured file digest.".into(),
+                );
+            }
+            if document.saved_file_sha256.as_ref().is_some_and(|digest| {
+                digest.len() != 64
+                    || !digest
+                        .bytes()
+                        .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+            }) {
+                return Err("Recovery digest must be a lowercase SHA-256 digest.".into());
+            }
+            entries.push(DocumentEntry {
+                id: document.document_id,
+                revision: document.revision,
+                session: ProjectSession::from_checkpoint(document.session)?,
+                intake_path: document.imported_path,
+                saved_file_sha256: document.saved_file_sha256,
+                candidates: CandidateStore::default(),
+                asset_tokens: BTreeSet::new(),
+                view: normalized_view(document.view)?,
+            });
+        }
+        if active_id.as_ref().is_some_and(|id| !ids.contains(id)) {
+            return Err("Recovery active document is not present.".into());
+        }
+        if entries.is_empty() {
+            let mut blank = DocumentEntry::new(Project::blank(), None)?;
+            self.probe_document_id(&mut blank);
+            entries.push(blank);
+        }
+        let active = AudioOwner {
+            document_id: active_id.unwrap_or_else(|| entries[0].id.clone()),
+            activation_id: identity("activation"),
+        };
+        self.documents = entries;
+        self.active = active;
+        self.candidates = CandidateStore::default();
+        self.candidate_digests.clear();
+        self.checkpoint_revision = revision;
+        Ok(self.snapshot())
+    }
+
+    pub fn checkpoint_revision(&self) -> u64 {
+        self.checkpoint_revision
+    }
+    pub fn freeze(&mut self) -> Result<(), String> {
+        self.check_admission()?;
+        self.frozen = true;
+        Ok(())
+    }
+    pub fn unfreeze(&mut self) {
+        self.frozen = false;
+    }
+    pub fn is_frozen(&self) -> bool {
+        self.frozen
+    }
+
+    fn check_admission(&self) -> Result<(), String> {
+        if self.frozen {
+            return Err("The workspace is completing a session transition.".into());
+        }
+        Ok(())
+    }
+
+    fn next_checkpoint_revision(&self) -> Result<u64, String> {
+        self.checkpoint_revision
+            .checked_add(1)
+            .filter(|revision| *revision <= MAX_DOCUMENT_REVISION)
+            .ok_or_else(|| "Workspace checkpoint revision exceeds the safe integer limit.".into())
+    }
+
+    fn probe_document_id(&self, document: &mut DocumentEntry) {
+        while self.documents.iter().any(|entry| entry.id == document.id) {
+            document.id = identity("document");
+        }
+    }
+
     pub fn new() -> Result<Self, String> {
         let document = DocumentEntry::new(Project::blank(), None)?;
         let active = AudioOwner {
@@ -181,6 +315,8 @@ impl DocumentWorkspace {
             active,
             candidates: CandidateStore::default(),
             candidate_digests: BTreeMap::new(),
+            checkpoint_revision: 0,
+            frozen: false,
         })
     }
 
@@ -199,6 +335,7 @@ impl DocumentWorkspace {
     }
 
     fn entry_mut(&mut self, id: &str) -> Result<&mut DocumentEntry, String> {
+        self.check_admission()?;
         self.documents
             .iter_mut()
             .find(|entry| entry.id == id)
@@ -213,12 +350,13 @@ impl DocumentWorkspace {
         Ok(entry)
     }
 
-    fn check_mutation(&self, address: &DocumentRevision) -> Result<(), String> {
+    fn check_mutation(&self, address: &DocumentRevision) -> Result<u64, String> {
+        self.check_admission()?;
         let entry = self.check_revision(address)?;
         if entry.revision == MAX_DOCUMENT_REVISION {
             return Err("Document revision exceeds the safe integer limit.".into());
         }
-        Ok(())
+        self.next_checkpoint_revision()
     }
 
     pub fn document(&self, id: &str) -> Result<DocumentSnapshot, String> {
@@ -249,6 +387,7 @@ impl DocumentWorkspace {
         project: Project,
         path: Option<PathBuf>,
     ) -> Result<DocumentCandidate, String> {
+        self.check_admission()?;
         self.candidates.stage_document(project, path)
     }
 
@@ -258,6 +397,7 @@ impl DocumentWorkspace {
         path: Option<PathBuf>,
         saved_file_sha256: Option<String>,
     ) -> Result<DocumentCandidate, String> {
+        self.check_admission()?;
         if path.is_some() && saved_file_sha256.is_none() {
             return Err("A native document requires its exact file digest.".into());
         }
@@ -274,11 +414,16 @@ impl DocumentWorkspace {
     }
 
     pub fn cancel_document(&mut self, token: &str) -> bool {
+        if self.frozen {
+            return false;
+        }
         self.candidate_digests.remove(token);
         self.candidates.cancel_document(token)
     }
 
     pub fn add_document(&mut self, token: &str) -> Result<WorkspaceSnapshot, String> {
+        self.check_admission()?;
+        let revision = self.next_checkpoint_revision()?;
         let (project, path) = self.candidates.take_document(token)?;
         let saved_file_sha256 = self.candidate_digests.remove(token);
         let intake = path.as_deref().or_else(|| match &project.base {
@@ -289,22 +434,27 @@ impl DocumentWorkspace {
             return self.activate_document(&existing);
         }
         let mut entry = DocumentEntry::new(project, path)?;
+        self.probe_document_id(&mut entry);
         entry.saved_file_sha256 = saved_file_sha256;
         self.active = AudioOwner {
             document_id: entry.id.clone(),
             activation_id: identity("activation"),
         };
         self.documents.push(entry);
+        self.checkpoint_revision = revision;
         Ok(self.snapshot())
     }
 
     pub fn activate_document(&mut self, id: &str) -> Result<WorkspaceSnapshot, String> {
+        self.check_admission()?;
         self.entry(id)?;
         if self.active.document_id != id {
+            let revision = self.next_checkpoint_revision()?;
             self.active = AudioOwner {
                 document_id: id.into(),
                 activation_id: identity("activation"),
             };
+            self.checkpoint_revision = revision;
         }
         Ok(self.snapshot())
     }
@@ -313,6 +463,7 @@ impl DocumentWorkspace {
         &mut self,
         documents: &[CloseDocument],
     ) -> Result<WorkspaceSnapshot, String> {
+        self.check_admission()?;
         if documents.is_empty() {
             return Err("Choose at least one document to close.".into());
         }
@@ -329,8 +480,11 @@ impl DocumentWorkspace {
                 return Err("Save or discard this document's changes before closing.".into());
             }
         }
+        let revision = self.next_checkpoint_revision()?;
         let replacement = if closing.len() == self.documents.len() {
-            Some(DocumentEntry::new(Project::blank(), None)?)
+            let mut blank = DocumentEntry::new(Project::blank(), None)?;
+            self.probe_document_id(&mut blank);
+            Some(blank)
         } else {
             None
         };
@@ -360,6 +514,7 @@ impl DocumentWorkspace {
                 activation_id: identity("activation"),
             };
         }
+        self.checkpoint_revision = revision;
         Ok(self.snapshot())
     }
 
@@ -369,7 +524,7 @@ impl DocumentWorkspace {
         command: EditCommand,
         asset_token: Option<&str>,
     ) -> Result<DocumentSnapshot, String> {
-        self.check_mutation(address)?;
+        let revision = self.check_mutation(address)?;
         let entry = self.entry_mut(&address.document_id)?;
         entry
             .candidates
@@ -378,23 +533,29 @@ impl DocumentWorkspace {
             entry.asset_tokens.remove(token);
         }
         entry.revision += 1;
-        Ok(entry.snapshot())
+        let snapshot = entry.snapshot();
+        self.checkpoint_revision = revision;
+        Ok(snapshot)
     }
 
     pub fn undo(&mut self, address: &DocumentRevision) -> Result<DocumentSnapshot, String> {
-        self.check_mutation(address)?;
+        let revision = self.check_mutation(address)?;
         let entry = self.entry_mut(&address.document_id)?;
         entry.session.undo()?;
         entry.revision += 1;
-        Ok(entry.snapshot())
+        let snapshot = entry.snapshot();
+        self.checkpoint_revision = revision;
+        Ok(snapshot)
     }
 
     pub fn redo(&mut self, address: &DocumentRevision) -> Result<DocumentSnapshot, String> {
-        self.check_mutation(address)?;
+        let revision = self.check_mutation(address)?;
         let entry = self.entry_mut(&address.document_id)?;
         entry.session.redo()?;
         entry.revision += 1;
-        Ok(entry.snapshot())
+        let snapshot = entry.snapshot();
+        self.checkpoint_revision = revision;
+        Ok(snapshot)
     }
 
     pub fn protect_destination(
@@ -426,14 +587,16 @@ impl DocumentWorkspace {
         address: &DocumentRevision,
         path: PathBuf,
     ) -> Result<DocumentSnapshot, String> {
-        self.check_mutation(address)?;
+        let revision = self.check_mutation(address)?;
         self.protect_destination(address, &path)?;
         let entry = self.entry_mut(&address.document_id)?;
         let digest = files::write_project_with_digest(&path, &entry.session.stored_project())?;
         entry.session.mark_saved(path);
         entry.saved_file_sha256 = Some(digest);
         entry.revision += 1;
-        Ok(entry.snapshot())
+        let snapshot = entry.snapshot();
+        self.checkpoint_revision = revision;
+        Ok(snapshot)
     }
 
     pub fn stage_asset(&mut self, id: &str, asset: StoredAsset) -> Result<StagedAsset, String> {
@@ -444,6 +607,7 @@ impl DocumentWorkspace {
     }
 
     pub fn cancel_asset(&mut self, id: &str, token: &str) -> Result<bool, String> {
+        self.check_admission()?;
         self.entry(id)?;
         if self
             .documents
@@ -459,5 +623,117 @@ impl DocumentWorkspace {
 
     pub fn asset_bytes(&self, id: &str, asset_id: &str) -> Result<Vec<u8>, String> {
         self.entry(id)?.session.asset_bytes(asset_id)
+    }
+}
+
+fn normalized_view(view: DocumentViewState) -> Result<DocumentViewState, String> {
+    serde_json::from_value(serde_json::to_value(view).map_err(|error| error.to_string())?)
+        .map_err(|error| error.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn checkpoint_limit_rejects_before_consuming_candidates_or_changing_live_state() {
+        let mut workspace = DocumentWorkspace::new().unwrap();
+        let id = workspace.active.document_id.clone();
+        let pending = workspace.stage_document(Project::blank(), None).unwrap();
+        let staged = workspace
+            .stage_asset(
+                &id,
+                StoredAsset::from_bytes(
+                    "authored.wav".into(),
+                    "audio/wav".into(),
+                    b"owned candidate",
+                ),
+            )
+            .unwrap();
+        let address = DocumentRevision {
+            document_id: id.clone(),
+            revision: 0,
+        };
+        let before = workspace.snapshot();
+        for limit in [MAX_DOCUMENT_REVISION, u64::MAX] {
+            workspace.checkpoint_revision = limit;
+            assert!(workspace.add_document(&pending.token).is_err());
+            assert!(
+                workspace
+                    .apply_edit(&address, EditCommand::AppendMeasure, Some(&staged.token))
+                    .is_err()
+            );
+            assert!(
+                workspace
+                    .set_view(
+                        &id,
+                        DocumentViewState {
+                            zoom: 25.0,
+                            ..DocumentViewState::default()
+                        }
+                    )
+                    .is_err()
+            );
+            assert!(
+                workspace
+                    .close_documents(&[CloseDocument {
+                        document_id: id.clone(),
+                        revision: 0,
+                        discard: false
+                    }])
+                    .is_err()
+            );
+            assert_eq!(workspace.snapshot(), before);
+            assert_eq!(workspace.checkpoint_revision(), limit);
+            workspace.activate_document(&id).unwrap();
+            workspace
+                .set_view(&id, DocumentViewState::default())
+                .unwrap();
+            assert_eq!(workspace.checkpoint_revision(), limit);
+        }
+        workspace.checkpoint_revision = MAX_DOCUMENT_REVISION - 1;
+        workspace
+            .apply_edit(&address, EditCommand::AppendMeasure, None)
+            .unwrap();
+        assert_eq!(workspace.checkpoint_revision(), MAX_DOCUMENT_REVISION);
+        let before = workspace.snapshot();
+        assert!(
+            workspace
+                .undo(&DocumentRevision {
+                    document_id: id.clone(),
+                    revision: 1
+                })
+                .is_err()
+        );
+        assert_eq!(workspace.snapshot(), before);
+        workspace.checkpoint_revision = 0;
+        assert!(workspace.cancel_asset(&id, &staged.token).unwrap());
+        workspace.add_document(&pending.token).unwrap();
+    }
+
+    #[test]
+    fn restored_document_revision_limit_rejects_before_mutation() {
+        let mut workspace = DocumentWorkspace::new().unwrap();
+        let mut documents = workspace.recovery_documents().unwrap();
+        let id = documents[0].document_id.clone();
+        documents[0].revision = MAX_DOCUMENT_REVISION;
+        workspace
+            .install_recovery(documents, Some(id.clone()))
+            .unwrap();
+        let before = workspace.snapshot();
+        let revision = workspace.checkpoint_revision();
+        let address = DocumentRevision {
+            document_id: id,
+            revision: MAX_DOCUMENT_REVISION,
+        };
+        assert!(
+            workspace
+                .apply_edit(&address, EditCommand::AppendMeasure, None)
+                .is_err()
+        );
+        assert!(workspace.undo(&address).is_err());
+        assert!(workspace.redo(&address).is_err());
+        assert_eq!(workspace.snapshot(), before);
+        assert_eq!(workspace.checkpoint_revision(), revision);
     }
 }

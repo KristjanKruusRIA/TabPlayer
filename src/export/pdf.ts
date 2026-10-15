@@ -1,6 +1,7 @@
 import { LayoutMode, model, rendering, Settings, SystemsLayoutMode } from '@coderline/alphatab';
 import { validateSelection, type ExportSelection, type PrintLayout, type SvgPage, type SvgSystem } from './types';
 import { selectStaves } from './selection';
+import { prepareScoreTimers } from '../editor/timers';
 const pxPerMm=96/25.4;
 const escaped=(s:string)=>s.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&apos;'}[c]!));
 function dimensions(layout:PrintLayout) {
@@ -36,6 +37,7 @@ export function renderPdfPages(score:model.Score,selection:ExportSelection,layou
   validateSelection(score.tracks.length,score.masterBars.length,selection,score.tracks.map(t=>t.staves.length));const d=dimensions(layout);
   // Export modifies only a transient clone; screen zoom and staff visibility stay session state.
   const copy=selectStaves(score,selection);
+  prepareScoreTimers(copy);
   copy.title='';
   for(const track of copy.tracks)for(const staff of track.staves){staff.showStandardNotation=layout.profile!=='Tab';staff.showTablature=layout.profile!=='Score';}
   const settings=new Settings();settings.core.engine='svg';settings.core.useWorkers=false;settings.core.enableLazyLoading=false;

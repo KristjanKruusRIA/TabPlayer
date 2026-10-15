@@ -17,7 +17,7 @@ The approved slate/cream/lime editor layout and inspector forms remain the visua
 - DTO indices are zero-based; measure labels are one-based. Validate complete payloads and destinations before mutation. Undo/redo uses deterministic history replay.
 - Standard GPIF fields must be demonstrated by public readers/writers or authored GP8 fixtures; no invented extension elements, IDs, or private properties.
 - Model retention, native replay, rendered notation, musical output, and target-runtime GP8 compatibility require separate evidence.
-- Lyrics are per selected track, with at most five source lines. Hidden-source GP encoding and mixed/embedded-comment syntax compatibility remain open until authored GP8 fixtures establish them.
+- Lyrics are per selected track, with at most five source lines. Native reader/writer/render evidence establishes dispatched=false as hidden source. Mixed/embedded-comment syntax and actual GP8 runtime acceptance remain open.
 
 ## Observed capabilities and losses
 
@@ -92,15 +92,15 @@ Follow existing details/summary and fieldset patterns. Show selected track name,
 
 ## Proven standard GPIF adapter and visibility boundary
 
-writeGpifLyrics replaces only managed Track/Lyrics nodes with exact raw Text and zero-based Offset. Use DOM text nodes for XML escaping of `&`, `<`, `]]>`, Unicode, and newlines. The public writer already emits visible per-beat Lyrics/Line arrays and blank verse slots. Root integrates this with its current single XML/ZIP rewrite, retaining unrelated source siblings and the first delivery's DSP/percussion patches.
+writeGpifLyrics replaces managed Track/Lyrics nodes and imported nonempty/hidden raw sources with exact raw Text and zero-based Offset. Visible unmanaged syllable assignments remain unchanged. Use DOM text nodes for XML escaping of `&`, `<`, `]]>`, Unicode, and newlines. Preserve carriage returns using standard character references. Root integrates this with its single XML/ZIP rewrite, retaining unrelated source siblings and the first delivery's DSP/percussion patches. Literal CDATA terminators require a detached export model and bounded Beat lyric serialization because the public writer emits malformed CDATA and its reader loses adjacent CDATA chunks.
 
-`dispatched="true"` is not established as a visibility flag. With no beat lyrics, the public reader redistributes raw track text regardless of that attribute. Hidden raw source cannot therefore be made interoperable by inventing `visible="false"`. This delivery uses only known native visibility plus proven visible GP fields. If managed hidden nonempty source would be discarded or exposed by export, report unsupported hidden-lyrics GP export through the existing error path; retain the native project. Do not silently drop text. Root can remove that limitation after an authored GP8 fixture establishes the actual standard representation.
+The supplied GPIO.dll reader at 0x1800f0d60 reads dispatched, the writer at 0x180115580 writes it while retaining raw verses, and renderer helper 0x1802129f0 returns that flag for its lyrics branch. This resolves the initial unknown: write dispatched=false for hidden source. Since alphaTab ignores the flag, the owned importer clears first-staff assignments while retaining exact raw source, and rebuilds keep hidden assignments clear. This execution-free evidence does not prove original GP8 runtime acceptance. Hashes, addresses and limits are recorded in the validation report and ignored native-gpif-semantics evidence.
 
 ## Acceptance and self-review
 
-Native acceptance requires exact raw text/offsets, stale cleanup, first-staff distribution, five slots, atomic validation, one-step history, rebuild/structure preservation, and save/reopen. Visible GP acceptance needs independent XML inspection, distributed-matrix reopening, unchanged source/archive siblings, visual score/PDF review, and authored GP8 open. Hidden-source GP visibility and mixed/embedded syntax remain separately open.
+Native acceptance requires exact raw text/offsets, stale cleanup, first-staff distribution, five slots, atomic validation, one-step history, rebuild/structure preservation, and save/reopen. Visible/hidden GP acceptance needs independent XML inspection, distributed-matrix reopening, unchanged source/archive siblings, visual score/PDF review, and authored GP8 open. Mixed/embedded syntax and original GP8 runtime acceptance remain separately open.
 
 - Source and renderer data are distinct; only managed native lyrics reflow.
 - Finite DTOs/cache/adapter/panel interfaces have explicit owners.
 - The linked plan covers parser, stale cleanup, provenance, structure, UI dispatch, native schemas, visible GP fidelity, and target-runtime checks.
-- No unknown visibility field or private extension is proposed.
+- Standard visibility uses the native-proven dispatched flag; no private extension is proposed.

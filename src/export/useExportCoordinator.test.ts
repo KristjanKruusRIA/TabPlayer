@@ -9,7 +9,21 @@ import { defaultDocumentSettings } from '../document-settings';
 import { music,noteAt } from '../editor/fixtures';
 import { useExportCoordinator } from './useExportCoordinator';
 import type { ExportNativeBridge,NativeAudioExportPayload } from './bridge';
+import { getTrackLyrics,applyLyricsEdit } from '../editor/lyrics';
+import { loadInterchangeScore } from '../interchange/gp';
 afterEach(()=>{cleanup();vi.restoreAllMocks();});
+it.each([true,false])('freezes exact raw and hidden lyrics through the export dialog: visible=%s',async visible=>{
+  const raw='[VERSE]\r\nHel-lo  world+today';
+  const score=buildScore({...blankProject(),edits:[{type:'setNote',target:{track:0,staff:0,bar:0,voice:0,beat:0},string:1,fret:0},{type:'setTrackLyrics',track:0,visible,lines:[{startBar:0,text:raw}]}]});
+  let allow!:(value:boolean)=>void,bytes:Uint8Array|undefined;
+  const bridge={confirmExport:()=>new Promise<boolean>(resolve=>{allow=resolve;}),exportGp:async(value:Uint8Array)=>{bytes=value;return true;}};
+  const api=native(),{result}=renderHook(()=>useExportCoordinator({score,settings:defaultDocumentSettings(),currentSpeed:1,bridge,native:api}));
+  let pending!:Promise<boolean>;act(()=>{pending=result.current.run({format:'gp',selection:{tracks:[0],range:null}});});
+  applyLyricsEdit(score,{type:'setTrackLyrics',track:0,visible:true,lines:[{startBar:0,text:'Later'}]});allow(true);
+  await act(async()=>{expect(await pending).toBe(true);});
+  expect(getTrackLyrics(loadInterchangeScore(bytes!,new Settings()),0)).toEqual({visible,lines:[{startBar:0,text:raw}],source:'raw'});
+  expect(getTrackLyrics(score,0).lines[0].text).toBe('Later');
+});
 function native():ExportNativeBridge{return {exportPdf:async()=>null,exportMidi:async()=>true,exportAudio:async()=>null,status:async()=>null,cancel:async()=>{}};}
 it('freezes GP music before awaiting confirmation and clears busy when destination cancels',async()=>{
   const score=buildScore(blankProject());score.title='Frozen title';let allow!:(v:boolean)=>void;let bytes:Uint8Array|undefined;

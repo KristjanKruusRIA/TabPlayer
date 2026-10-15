@@ -5,6 +5,10 @@ const shapes:Record<string,readonly string[]>={
   addPercussionNote:['target','articulation'],setPercussionNote:['target','noteIndex','articulation'],
   removeNoteByIndex:['target','noteIndex'],setNoteTechniquesByIndex:['target','noteIndex','patch'],
   setNoteLinkByIndex:['from','to','kind'],
+  setTrackLyrics:['track','visible','lines'],setBeatGestures:['target','patch'],setOttava:['from','to','ottava'],
+  setCrescendo:['from','to','crescendo','targetDynamics'],setFermata:['target','fermata'],
+  setBarGestures:['track','staff','bar','clefOttava'],setMasterBarGestures:['bar','commonTime','doubleBar','tripletFeel','beaming'],
+  setSimile:['track','staff','bar','kind'],
 };
 const metadata=['subTitle','album','words','music','copyright','tab','notices','instructions'];
 function object(value:unknown):Record<string,unknown> {
@@ -24,6 +28,26 @@ function target(value:unknown) {
 }
 function indexed(value:unknown) {
   const result=exact(value,['target','noteIndex']);integer(result.noteIndex);return target(result.target);
+}
+function flag(value:unknown) {if(typeof value!=='boolean')throw new Error('Invalid edit flag.');}
+function range(from:unknown,to:unknown) {
+  const a=target(from),b=target(to);
+  if(a.track!==b.track||a.staff!==b.staff||a.voice!==b.voice||Number(b.bar)<Number(a.bar)||(a.bar===b.bar&&Number(b.beat)<Number(a.beat)))throw new Error('Select a forward range in one voice.');
+}
+function gestureShape(value:unknown) {
+  const patch=object(value),flags=['tap','slap','pop','deadSlapped','slashed','showTimer'];
+  const enums:Record<string,number>={golpe:2,rasgueado:18,fade:3,vibrato:2,beamingMode:3};
+  if(!Object.keys(patch).length)throw new Error('Choose a beat gesture.');
+  for(const [key,field]of Object.entries(patch)) {
+    if(flags.includes(key))flag(field);
+    else if(Object.hasOwn(enums,key))integer(field,enums[key]);
+    else if(key==='stem') {if(!['auto','inverted','up','down'].includes(field as string))throw new Error('Invalid stem choice.');}
+    else if(key==='barre') {
+      if(field===null)continue;
+      const barre=exact(field,['fret','shape']);integer(barre.fret,127);integer(barre.shape,2);
+      if(barre.fret===0||barre.shape===0)throw new Error('Invalid barre.');
+    }else throw new Error('Unknown beat gesture.');
+  }
 }
 function techniqueShape(value:unknown) {
   const patch=object(value),flags=['letRing','palmMute','dead','ghost','staccato','leftHandTapped'];
@@ -49,7 +73,7 @@ export function validateParityCommand(value:unknown):void {
   if(typeof type!=='string'||!Object.hasOwn(shapes,type))return;
   const edit=exact(value,['type',...shapes[type]]);
   if('target'in edit)target(edit.target);
-  for(const key of ['noteIndex','bar'])if(key in edit)integer(edit[key]);
+  for(const key of ['noteIndex','bar','track','staff'])if(key in edit)integer(edit[key]);
   for(const key of ['pitch','program'])if(key in edit)integer(edit[key],127);
   if('articulation'in edit)integer(edit.articulation,0x7fffffff);
   if('name'in edit&&typeof edit.name!=='string')throw new Error('Invalid track name.');
@@ -60,6 +84,35 @@ export function validateParityCommand(value:unknown):void {
     if(!Array.isArray(edit.directions))throw new Error('Invalid directions.');edit.directions.forEach(value=>integer(value,18));
   }
   if(type==='setNoteSpelling')integer(edit.accidentalMode,6);
+  if(type==='setTrackLyrics') {
+    flag(edit.visible);
+    if(!Array.isArray(edit.lines)||edit.lines.length>5)throw new Error('Use at most five lyric lines.');
+    for(const line of edit.lines) {
+      const item=exact(line,['startBar','text']);integer(item.startBar);if(typeof item.text!=='string')throw new Error('Invalid lyrics.');
+    }
+  }
+  if(type==='setBeatGestures')gestureShape(edit.patch);
+  if(type==='setOttava'||type==='setCrescendo')range(edit.from,edit.to);
+  if(type==='setOttava')integer(edit.ottava,4);
+  if(type==='setCrescendo') {
+    integer(edit.crescendo,2);
+    if(edit.crescendo===0) {if(edit.targetDynamics!==null)throw new Error('Clearing a hairpin retains dynamics.');}
+    else integer(edit.targetDynamics,7);
+  }
+  if(type==='setFermata'&&edit.fermata!==null) {
+    const fermata=exact(edit.fermata,['type','length']);integer(fermata.type,2);
+    if(typeof fermata.length!=='number'||!Number.isFinite(fermata.length)||fermata.length<=0)throw new Error('Invalid fermata length.');
+  }
+  if(type==='setBarGestures')integer(edit.clefOttava,4);
+  if(type==='setMasterBarGestures') {
+    flag(edit.commonTime);flag(edit.doubleBar);integer(edit.tripletFeel,6);
+    if(edit.beaming!==null) {
+      const rule=exact(edit.beaming,['unit','groups']);
+      if(![8,16,32].includes(rule.unit as number)||!Array.isArray(rule.groups)||!rule.groups.length)throw new Error('Invalid beaming groups.');
+      for(const group of rule.groups)if(typeof group!=='number'||!Number.isSafeInteger(group)||group<=0)throw new Error('Invalid beaming group.');
+    }
+  }
+  if(type==='setSimile'&&!['none','single','double'].includes(edit.kind as string))throw new Error('Invalid simile.');
   if(type==='setNoteTechniquesByIndex')techniqueShape(edit.patch);
   if(type==='setNoteLinkByIndex') {
     const from=indexed(edit.from);

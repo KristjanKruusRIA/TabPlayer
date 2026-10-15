@@ -1,4 +1,6 @@
 import type { BeatTarget } from './project';
+import type { LyricsCommand } from './editor/lyrics-types';
+import type { GestureCommand, BarGestureCommand } from './editor/gestures-types';
 
 export interface NoteTarget { target: BeatTarget; string: number }
 export interface IndexedNoteTarget { target: BeatTarget; noteIndex: number }
@@ -44,7 +46,7 @@ export interface DocumentSettings {
   sounds: Record<string,TrackSound>; mixes: Record<string,ChannelMix>; backing: BackingSettings|null; print: PrintLayout;
 }
 
-export type EditCommand =
+export type EditCommand = LyricsCommand | GestureCommand | BarGestureCommand
   | { type: 'setNote'; target: BeatTarget; string: number; fret: number }
   | { type: 'removeNote'; target: BeatTarget; string: number }
   | { type: 'setRest'; target: BeatTarget }

@@ -19,3 +19,12 @@ it('patches only actual native note references and leaves quoted/comment/CDATA l
 it.each(['<!DOCTYPE GPIF [<!ENTITY name "Guitar">]><GPIF><MasterTrack/><Tracks/></GPIF>','<GPIF xmlns="urn:gpif"><MasterTrack/><Tracks/></GPIF>'])('uses the DOM fallback for unsupported declarations or namespaces',xml=>{
   expect(projectGpifTracks(xml)).toBeUndefined();expect(patchGpifNoteArticulations(xml,new Map([[1,2]]))).toBeUndefined();
 });
+it('projects only requested notation beats and master bars without parsing note payloads',()=>{
+  const xml=source.replace('<Notes>',`<MasterBars><MasterBar><Time>4/4</Time></MasterBar></MasterBars><Beats><Beat id="3"><XProperties/></Beat><Beat id="9"><Text><![CDATA[</Beat>]]></Text></Beat><Beat id="11"/></Beats><Notes>`);
+  const projection=projectGpifTracks(xml,{beatIds:new Set([9]),masterBars:true});
+  expect(projection?.xml).toContain('<MasterBars><MasterBar><Time>4/4</Time></MasterBar></MasterBars>');
+  expect(projection?.xml).toContain('<Beats><Beat id="9"><Text><![CDATA[</Beat>]]></Text></Beat></Beats>');
+  expect(projection?.xml).not.toContain('<Notes>');expect(projection?.xml).not.toContain('<Beat id="3">');
+  expect(projection?.masterBars&&xml.slice(projection.masterBars.start,projection.masterBars.end)).toBe('<MasterBars><MasterBar><Time>4/4</Time></MasterBar></MasterBars>');
+  expect(projection?.beats?.get(9)&&xml.slice(projection.beats.get(9)!.start,projection.beats.get(9)!.end)).toBe('<Beat id="9"><Text><![CDATA[</Beat>]]></Text></Beat>');
+});

@@ -266,6 +266,161 @@ pub enum LinkKind {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct LyricLine {
+    pub start_bar: u32,
+    pub text: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Barre {
+    pub fret: u32,
+    pub shape: i32,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", try_from = "String")]
+pub enum StemMode {
+    Auto,
+    Inverted,
+    Up,
+    Down,
+}
+
+impl TryFrom<String> for StemMode {
+    type Error = String;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        match value.as_str() {
+            "auto" => Ok(Self::Auto),
+            "inverted" => Ok(Self::Inverted),
+            "up" => Ok(Self::Up),
+            "down" => Ok(Self::Down),
+            _ => Err("Unsupported stem mode.".into()),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct GesturePatch {
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub tap: Option<bool>,
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub slap: Option<bool>,
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub pop: Option<bool>,
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub dead_slapped: Option<bool>,
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub golpe: Option<i32>,
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub rasgueado: Option<i32>,
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub fade: Option<i32>,
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub vibrato: Option<i32>,
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub slashed: Option<bool>,
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub show_timer: Option<bool>,
+    #[serde(
+        default,
+        deserialize_with = "present_nullable",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub barre: Option<Option<Barre>>,
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub stem: Option<StemMode>,
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub beaming_mode: Option<i32>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Fermata {
+    pub r#type: i32,
+    pub length: f64,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CustomBeaming {
+    pub unit: i32,
+    pub groups: Vec<u64>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", try_from = "String")]
+pub enum SimileKind {
+    None,
+    Single,
+    Double,
+}
+
+impl TryFrom<String> for SimileKind {
+    type Error = String;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        match value.as_str() {
+            "none" => Ok(Self::None),
+            "single" => Ok(Self::Single),
+            "double" => Ok(Self::Double),
+            _ => Err("Unsupported simile kind.".into()),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(
     tag = "type",
     rename_all = "camelCase",
@@ -353,6 +508,11 @@ pub enum EditCommand {
     SetScoreMetadata {
         fields: ScoreMetadata,
     },
+    SetTrackLyrics {
+        track: u32,
+        visible: bool,
+        lines: Vec<LyricLine>,
+    },
     SetDirections {
         bar: u32,
         directions: Vec<i32>,
@@ -387,6 +547,27 @@ pub enum EditCommand {
     SetBeatTechniques {
         target: BeatTarget,
         patch: BeatTechniques,
+    },
+    SetBeatGestures {
+        target: BeatTarget,
+        patch: GesturePatch,
+    },
+    SetOttava {
+        from: BeatTarget,
+        to: BeatTarget,
+        ottava: i32,
+    },
+    SetCrescendo {
+        from: BeatTarget,
+        to: BeatTarget,
+        crescendo: i32,
+        #[serde(deserialize_with = "required_nullable")]
+        target_dynamics: Option<i32>,
+    },
+    SetFermata {
+        target: BeatTarget,
+        #[serde(deserialize_with = "required_nullable")]
+        fermata: Option<Fermata>,
     },
     SetBeatRhythm {
         target: BeatTarget,
@@ -457,6 +638,26 @@ pub enum EditCommand {
         key_mode: i32,
         clef: i32,
     },
+    SetBarGestures {
+        track: u32,
+        staff: u32,
+        bar: u32,
+        clef_ottava: i32,
+    },
+    SetMasterBarGestures {
+        bar: u32,
+        common_time: bool,
+        double_bar: bool,
+        triplet_feel: i32,
+        #[serde(deserialize_with = "required_nullable")]
+        beaming: Option<CustomBeaming>,
+    },
+    SetSimile {
+        track: u32,
+        staff: u32,
+        bar: u32,
+        kind: SimileKind,
+    },
     SetBeatAnnotation {
         target: BeatTarget,
         text: String,
@@ -501,6 +702,14 @@ fn enum_range(value: i32, min: i32, max: i32) -> Result<(), String> {
 fn rhythm(duration: i32, dots: u8) -> Result<(), String> {
     if ![-4, -2, 1, 2, 4, 8, 16, 32, 64, 128, 256].contains(&duration) || dots > 3 {
         return Err("Choose a supported duration and at most three dots.".into());
+    }
+    Ok(())
+}
+fn beat_range(from: &BeatTarget, to: &BeatTarget) -> Result<(), String> {
+    if (to.track, to.staff, to.voice) != (from.track, from.staff, from.voice)
+        || (to.bar, to.beat) < (from.bar, from.beat)
+    {
+        return Err("Select an ordered range in the same staff and voice.".into());
     }
     Ok(())
 }
@@ -595,6 +804,9 @@ impl EditCommand {
             }
             Self::SetTuning { tuning, .. } => validate_tuning(tuning)?,
             Self::SetScoreInfo { tempo, .. } => validate_tempo(*tempo)?,
+            Self::SetTrackLyrics { lines, .. } if lines.len() > 5 => {
+                return Err("A track supports at most five lyric lines.".into());
+            }
             Self::SetDirections { directions, .. } => {
                 for direction in directions {
                     enum_range(*direction, 0, 18)?;
@@ -652,6 +864,57 @@ impl EditCommand {
                 if let Some(Some(tremolo)) = &patch.tremolo {
                     rhythm(tremolo.speed, 0)?;
                     enum_range(tremolo.style, 0, 1)?;
+                }
+            }
+            Self::SetBeatGestures { patch, .. } => {
+                if patch == &GesturePatch::default() {
+                    return Err("Choose at least one beat gesture.".into());
+                }
+                for (value, max) in [
+                    (patch.golpe, 2),
+                    (patch.rasgueado, 18),
+                    (patch.fade, 3),
+                    (patch.vibrato, 2),
+                    (patch.beaming_mode, 3),
+                ] {
+                    if let Some(value) = value {
+                        enum_range(value, 0, max)?;
+                    }
+                }
+                if let Some(Some(barre)) = &patch.barre {
+                    if !(1..=127).contains(&barre.fret) {
+                        return Err("A barre fret must be from 1 to 127.".into());
+                    }
+                    enum_range(barre.shape, 1, 2)?;
+                }
+            }
+            Self::SetOttava { from, to, ottava } => {
+                beat_range(from, to)?;
+                enum_range(*ottava, 0, 4)?;
+            }
+            Self::SetCrescendo {
+                from,
+                to,
+                crescendo,
+                target_dynamics,
+            } => {
+                beat_range(from, to)?;
+                enum_range(*crescendo, 0, 2)?;
+                match (crescendo, target_dynamics) {
+                    (0, None) => {}
+                    (1 | 2, Some(dynamics)) => enum_range(*dynamics, 0, 7)?,
+                    _ => {
+                        return Err("A hairpin needs a target dynamic; clearing needs null.".into());
+                    }
+                }
+            }
+            Self::SetFermata {
+                fermata: Some(fermata),
+                ..
+            } => {
+                enum_range(fermata.r#type, 0, 2)?;
+                if !fermata.length.is_finite() || fermata.length <= 0.0 {
+                    return Err("Fermata length must be a positive finite number.".into());
                 }
             }
             Self::SetNoteLink { from, to, kind } => {
@@ -732,6 +995,27 @@ impl EditCommand {
                 enum_range(*key_mode, 0, 1)?;
                 enum_range(*clef, 0, 4)?;
             }
+            Self::SetBarGestures { clef_ottava, .. } => enum_range(*clef_ottava, 0, 4)?,
+            Self::SetMasterBarGestures {
+                triplet_feel,
+                beaming,
+                ..
+            } => {
+                enum_range(*triplet_feel, 0, 6)?;
+                if let Some(beaming) = beaming {
+                    if ![8, 16, 32].contains(&beaming.unit)
+                        || beaming.groups.is_empty()
+                        || beaming
+                            .groups
+                            .iter()
+                            .any(|group| !(1..=9_007_199_254_740_991).contains(group))
+                    {
+                        return Err(
+                            "Beaming needs a supported unit and positive safe groups.".into()
+                        );
+                    }
+                }
+            }
             Self::SetBeatAnnotation {
                 chord: Some(chord), ..
             } if chord.frets.is_empty() || chord.frets.iter().any(|fret| *fret < -1) => {
@@ -763,6 +1047,365 @@ impl EditCommand {
 mod tests {
     use super::EditCommand;
     use serde_json::{Value, json};
+
+    fn lyrics_notation_commands() -> Vec<Value> {
+        let target = json!({"track": 0, "staff": 0, "bar": 0, "voice": 0, "beat": 0});
+        let end = json!({"track": 0, "staff": 0, "bar": 1, "voice": 0, "beat": 3});
+        vec![
+            json!({"type": "setTrackLyrics", "track": 0, "visible": true,
+                "lines": [{"startBar": 0, "text": "[VERSE] Hel-lo  world+today\n"}]}),
+            json!({"type": "setBeatGestures", "target": target, "patch": {"tap": false,
+                "slap": true, "pop": true, "deadSlapped": false, "golpe": 2,
+                "rasgueado": 18, "fade": 3, "vibrato": 2, "slashed": false,
+                "showTimer": true, "barre": {"fret": 127, "shape": 2},
+                "stem": "inverted", "beamingMode": 3}}),
+            json!({"type": "setOttava", "from": target, "to": end, "ottava": 4}),
+            json!({"type": "setCrescendo", "from": target, "to": end,
+                "crescendo": 1, "targetDynamics": 6}),
+            json!({"type": "setFermata", "target": target, "fermata": {"type": 2, "length": 1.5}}),
+            json!({"type": "setBarGestures", "track": 0, "staff": 0, "bar": 0, "clefOttava": 1}),
+            json!({"type": "setMasterBarGestures", "bar": 0, "commonTime": false,
+                "doubleBar": true, "tripletFeel": 6, "beaming": {"unit": 8, "groups": [2, 2, 3]}}),
+            json!({"type": "setSimile", "track": 0, "staff": 0, "bar": 2, "kind": "double"}),
+        ]
+    }
+
+    #[test]
+    fn lyrics_notation_commands_roundtrip_exact_payloads_and_explicit_clears() {
+        for value in lyrics_notation_commands() {
+            assert_eq!(serde_json::to_value(accepted(&value)).unwrap(), value);
+        }
+        let commands = lyrics_notation_commands();
+        for (index, field, clear) in [
+            (0, "lines", json!([])),
+            (1, "patch", json!({"barre": null})),
+            (3, "targetDynamics", json!(null)),
+            (4, "fermata", json!(null)),
+            (6, "beaming", json!(null)),
+        ] {
+            let mut value = commands[index].clone();
+            value[field] = clear;
+            if index == 3 {
+                value["crescendo"] = json!(0);
+            }
+            assert_eq!(serde_json::to_value(accepted(&value)).unwrap(), value);
+        }
+    }
+
+    #[test]
+    fn lyrics_notation_commands_require_all_envelope_fields_and_reject_unknowns() {
+        for value in lyrics_notation_commands() {
+            accepted(&value);
+            let mut unknown = value.clone();
+            unknown["unexpected"] = json!(true);
+            rejected(&unknown);
+            for field in value.as_object().unwrap().keys() {
+                let mut missing = value.clone();
+                missing.as_object_mut().unwrap().remove(field);
+                rejected(&missing);
+            }
+        }
+    }
+
+    #[test]
+    fn lyrics_notation_lyrics_preserve_five_slots_and_require_exact_line_shape() {
+        let mut value = lyrics_notation_commands().remove(0);
+        value["visible"] = json!(false);
+        value["lines"] = json!([
+            {"startBar": 0, "text": ""}, {"startBar": 1, "text": "a--b"},
+            {"startBar": 2, "text": "a\n\nb"}, {"startBar": 3, "text": "A&B <C>"},
+            {"startBar": 4294967295_u64, "text": "♪"}
+        ]);
+        assert_eq!(serde_json::to_value(accepted(&value)).unwrap(), value);
+        let mut six = value.clone();
+        six["lines"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"startBar": 0, "text": "six"}));
+        rejected(&six);
+        for line in [
+            json!({"startBar": 0}),
+            json!({"text": ""}),
+            json!({"startBar": 0, "text": "", "visible": true}),
+            json!({"startBar": 0, "text": null}),
+            json!({"startBar": 0, "text": 1}),
+            json!({"startBar": -1, "text": ""}),
+            json!({"startBar": 0.5, "text": ""}),
+            json!({"startBar": 4294967296_u64, "text": ""}),
+        ] {
+            value["lines"] = json!([line]);
+            rejected(&value);
+        }
+        value["lines"] = json!([]);
+        for invalid in [json!(null), json!(0), json!("false")] {
+            value["visible"] = invalid;
+            rejected(&value);
+        }
+    }
+
+    #[test]
+    fn lyrics_notation_targets_require_exact_uint32_indices() {
+        for value in lyrics_notation_commands() {
+            for field in ["track", "staff", "bar"] {
+                if value.get(field).is_some() {
+                    let mut maximum = value.clone();
+                    maximum[field] = json!(u32::MAX);
+                    accepted(&maximum);
+                    for invalid in [json!(-1), json!(0.5), json!(4294967296_u64), json!(null)] {
+                        let mut invalid_value = value.clone();
+                        invalid_value[field] = invalid;
+                        rejected(&invalid_value);
+                    }
+                }
+            }
+            for nested in ["target", "from", "to"] {
+                if value.get(nested).is_some() {
+                    let mut unknown = value.clone();
+                    unknown[nested]["unexpected"] = json!(0);
+                    rejected(&unknown);
+                    for field in ["track", "staff", "bar", "voice", "beat"] {
+                        let mut missing = value.clone();
+                        missing[nested].as_object_mut().unwrap().remove(field);
+                        rejected(&missing);
+                        for invalid in [json!(-1), json!(0.5), json!(4294967296_u64), json!(null)] {
+                            let mut invalid_value = value.clone();
+                            invalid_value[nested][field] = invalid;
+                            rejected(&invalid_value);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn lyrics_notation_gesture_patch_validates_every_optional_flag_and_enum() {
+        let mut value = lyrics_notation_commands().remove(1);
+        for field in ["tap", "slap", "pop", "deadSlapped", "slashed", "showTimer"] {
+            for valid in [true, false] {
+                value["patch"] = json!({field: valid});
+                accepted(&value);
+            }
+            for invalid in [json!(null), json!(0), json!("true")] {
+                value["patch"] = json!({field: invalid});
+                rejected(&value);
+            }
+        }
+        for (field, max) in [
+            ("golpe", 2),
+            ("rasgueado", 18),
+            ("fade", 3),
+            ("vibrato", 2),
+            ("beamingMode", 3),
+        ] {
+            for valid in 0..=max {
+                value["patch"] = json!({field: valid});
+                accepted(&value);
+            }
+            for invalid in [
+                json!(-1),
+                json!(max + 1),
+                json!(0.5),
+                json!(null),
+                json!(true),
+            ] {
+                value["patch"] = json!({field: invalid});
+                rejected(&value);
+            }
+        }
+        for patch in [json!({}), json!({"unexpected": true}), json!(null)] {
+            value["patch"] = patch;
+            rejected(&value);
+        }
+    }
+
+    #[test]
+    fn lyrics_notation_barre_distinguishes_omission_clear_and_exact_value() {
+        let mut value = lyrics_notation_commands().remove(1);
+        for patch in [
+            json!({"tap": false}),
+            json!({"barre": null}),
+            json!({"barre": {"fret": 1, "shape": 1}}),
+            json!({"barre": {"fret": 127, "shape": 2}}),
+        ] {
+            value["patch"] = patch;
+            assert_eq!(serde_json::to_value(accepted(&value)).unwrap(), value);
+        }
+        for barre in [
+            json!({}),
+            json!({"fret": 1}),
+            json!({"shape": 1}),
+            json!({"fret": 1, "shape": 1, "unexpected": false}),
+            json!({"fret": 0, "shape": 1}),
+            json!({"fret": 128, "shape": 1}),
+            json!({"fret": 0.5, "shape": 1}),
+            json!({"fret": 1, "shape": 0}),
+            json!({"fret": 1, "shape": 3}),
+            json!({"fret": 1, "shape": null}),
+        ] {
+            value["patch"] = json!({"barre": barre});
+            rejected(&value);
+        }
+    }
+
+    #[test]
+    fn lyrics_notation_stem_and_simile_accept_only_named_modes() {
+        let mut gesture = lyrics_notation_commands().remove(1);
+        for mode in ["auto", "inverted", "up", "down"] {
+            gesture["patch"] = json!({"stem": mode});
+            accepted(&gesture);
+        }
+        for invalid in [json!("left"), json!(0), json!(null), json!({"auto": null})] {
+            gesture["patch"] = json!({"stem": invalid});
+            rejected(&gesture);
+        }
+        let mut simile = lyrics_notation_commands().pop().unwrap();
+        for mode in ["none", "single", "double"] {
+            simile["kind"] = json!(mode);
+            accepted(&simile);
+        }
+        for invalid in [
+            json!("firstOfDouble"),
+            json!(0),
+            json!(null),
+            json!({"none": null}),
+        ] {
+            simile["kind"] = invalid;
+            rejected(&simile);
+        }
+    }
+
+    #[test]
+    fn lyrics_notation_ranges_require_ordered_same_staff_voice_endpoints() {
+        for mut value in lyrics_notation_commands()
+            .into_iter()
+            .filter(|value| value.get("from").is_some())
+        {
+            accepted(&value);
+            for field in ["track", "staff", "voice"] {
+                let mut other_voice = value.clone();
+                other_voice["to"][field] = json!(1);
+                rejected(&other_voice);
+            }
+            value["to"] = value["from"].clone();
+            accepted(&value);
+            value["from"]["beat"] = json!(1);
+            rejected(&value);
+            value["to"]["bar"] = json!(1);
+            accepted(&value);
+            value["from"]["bar"] = json!(2);
+            rejected(&value);
+        }
+    }
+
+    #[test]
+    fn lyrics_notation_crescendo_requires_target_for_nonzero_and_null_for_clear() {
+        let mut value = lyrics_notation_commands().remove(3);
+        for mode in [1, 2] {
+            value["crescendo"] = json!(mode);
+            for dynamic in 0..=7 {
+                value["targetDynamics"] = json!(dynamic);
+                accepted(&value);
+            }
+            for invalid in [json!(-1), json!(8), json!(0.5), json!(null)] {
+                value["targetDynamics"] = invalid;
+                rejected(&value);
+            }
+        }
+        value["crescendo"] = json!(0);
+        value["targetDynamics"] = json!(null);
+        accepted(&value);
+        value["targetDynamics"] = json!(0);
+        rejected(&value);
+        for invalid in [json!(-1), json!(3), json!(0.5), json!(null)] {
+            value["crescendo"] = invalid;
+            rejected(&value);
+        }
+    }
+
+    #[test]
+    fn lyrics_notation_fermata_requires_exact_shape_positive_length_and_valid_type() {
+        let mut value = lyrics_notation_commands().remove(4);
+        for kind in 0..=2 {
+            value["fermata"] = json!({"type": kind, "length": 0.01});
+            accepted(&value);
+        }
+        for invalid in [
+            json!({}),
+            json!({"type": 0}),
+            json!({"length": 1}),
+            json!({"type": 0, "length": 1, "unexpected": true}),
+            json!({"type": -1, "length": 1}),
+            json!({"type": 3, "length": 1}),
+            json!({"type": 0.5, "length": 1}),
+            json!({"type": 0, "length": 0}),
+            json!({"type": 0, "length": -1}),
+            json!({"type": 0, "length": null}),
+            json!({"type": 0, "length": "1"}),
+        ] {
+            value["fermata"] = invalid;
+            rejected(&value);
+        }
+    }
+
+    #[test]
+    fn lyrics_notation_beaming_requires_supported_unit_positive_safe_groups_and_exact_shape() {
+        let mut value = lyrics_notation_commands().remove(6);
+        for unit in [8, 16, 32] {
+            value["beaming"] = json!({"unit": unit, "groups": [1, 9_007_199_254_740_991_u64]});
+            accepted(&value);
+        }
+        for invalid in [
+            json!({}),
+            json!({"unit": 8}),
+            json!({"groups": [1]}),
+            json!({"unit": 8, "groups": [1], "unexpected": true}),
+            json!({"unit": 4, "groups": [1]}),
+            json!({"unit": 64, "groups": [1]}),
+            json!({"unit": 8.5, "groups": [1]}),
+            json!({"unit": 8, "groups": []}),
+            json!({"unit": 8, "groups": [0]}),
+            json!({"unit": 8, "groups": [-1]}),
+            json!({"unit": 8, "groups": [0.5]}),
+            json!({"unit": 8, "groups": [null]}),
+            json!({"unit": 8, "groups": [9_007_199_254_740_992_u64]}),
+        ] {
+            value["beaming"] = invalid;
+            rejected(&value);
+        }
+    }
+
+    #[test]
+    fn lyrics_notation_bar_and_ottava_controls_enforce_enum_and_boolean_domains() {
+        let commands = lyrics_notation_commands();
+        for (index, field, max) in [
+            (2, "ottava", 4),
+            (5, "clefOttava", 4),
+            (6, "tripletFeel", 6),
+        ] {
+            let mut value = commands[index].clone();
+            for valid in 0..=max {
+                value[field] = json!(valid);
+                accepted(&value);
+            }
+            for invalid in [json!(-1), json!(max + 1), json!(0.5), json!(null)] {
+                value[field] = invalid;
+                rejected(&value);
+            }
+        }
+        for field in ["commonTime", "doubleBar"] {
+            for valid in [false, true] {
+                let mut value = commands[6].clone();
+                value[field] = json!(valid);
+                accepted(&value);
+            }
+            for invalid in [json!(null), json!(0), json!("false")] {
+                let mut value = commands[6].clone();
+                value[field] = invalid;
+                rejected(&value);
+            }
+        }
+    }
 
     fn entry_commands() -> Vec<Value> {
         let target = json!({"track": 0, "staff": 0, "bar": 0, "voice": 0, "beat": 0});

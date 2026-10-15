@@ -1,5 +1,5 @@
 export interface XmlSpan {start:number;end:number}
-export interface GpifProjection {xml:string;tracks:XmlSpan}
+export interface GpifProjection {xml:string;tracks:XmlSpan;masterBars?:XmlSpan;beats?:Map<number,XmlSpan>}
 interface Tag extends XmlSpan {name:string;closing:boolean;empty:boolean;raw:string}
 
 /** Lexical offsets only; the public importer or DOM parser owns XML validation. */
@@ -28,23 +28,37 @@ function scan(xml:string,visit:(tag:Tag)=>void|false):boolean {
   return true;
 }
 
-export function projectGpifTracks(xml:string):GpifProjection|undefined {
-  let depth=0,masterStart=-1,tracksStart=-1,master:XmlSpan|undefined,tracks:XmlSpan|undefined;
+export function projectGpifTracks(xml:string,notation?:{beatIds:ReadonlySet<number>;masterBars:boolean}):GpifProjection|undefined {
+  let depth=0,masterStart=-1,tracksStart=-1,masterBarsStart=-1,master:XmlSpan|undefined,tracks:XmlSpan|undefined,masterBars:XmlSpan|undefined;
+  let inBeats=false,beatStart=-1,beatId:number|undefined;
+  const beats=new Map<number,XmlSpan>();
   const supported=scan(xml,tag=>{
     if(tag.closing){
       depth--;
       if(depth===1&&tag.name==='MasterTrack')master={start:masterStart,end:tag.end};
       if(depth===1&&tag.name==='Tracks')tracks={start:tracksStart,end:tag.end};
+      if(depth===1&&tag.name==='MasterBars'&&notation?.masterBars)masterBars={start:masterBarsStart,end:tag.end};
+      if(depth===2&&inBeats&&tag.name==='Beat'&&beatId!==undefined){beats.set(beatId,{start:beatStart,end:tag.end});beatId=undefined;}
+      if(depth===1&&tag.name==='Beats')inBeats=false;
     }else{
       if(depth===0&&tag.name!=='GPIF')return false;
       if(depth===1&&tag.name==='MasterTrack'){masterStart=tag.start;if(tag.empty)master=tag;}
       if(depth===1&&tag.name==='Tracks'){tracksStart=tag.start;if(tag.empty)tracks=tag;}
+      if(depth===1&&tag.name==='MasterBars'&&notation?.masterBars){masterBarsStart=tag.start;if(tag.empty)masterBars=tag;}
+      if(depth===1&&tag.name==='Beats')inBeats=!tag.empty;
+      if(depth===2&&inBeats&&tag.name==='Beat'){
+        beatId=undefined;
+        for(const attribute of tag.raw.matchAll(/([\w:.-]+)\s*=\s*(["'])(.*?)\2/gs))if(attribute[1]==='id'&&notation?.beatIds.has(Number(attribute[3])))beatId=Number(attribute[3]);
+        beatStart=tag.start;
+        if(tag.empty&&beatId!==undefined){beats.set(beatId,tag);beatId=undefined;}
+      }
       if(!tag.empty)depth++;
     }
-    if(master&&tracks)return false;
+    if(master&&tracks&&!notation)return false;
   });
   if(!supported||!master||!tracks)return undefined;
-  return {xml:`<GPIF>${xml.slice(master.start,master.end)}${xml.slice(tracks.start,tracks.end)}</GPIF>`,tracks};
+  const notationXml=(masterBars?xml.slice(masterBars.start,masterBars.end):'')+(beats.size?`<Beats>${[...beats.values()].map(span=>xml.slice(span.start,span.end)).join('')}</Beats>`:'');
+  return {xml:`<GPIF>${xml.slice(master.start,master.end)}${xml.slice(tracks.start,tracks.end)}${notationXml}</GPIF>`,tracks,masterBars,beats};
 }
 
 export function patchGpifNoteArticulations(xml:string,references:ReadonlyMap<number,number>):string|undefined {

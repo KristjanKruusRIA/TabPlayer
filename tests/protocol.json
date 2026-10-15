@@ -41,5 +41,13 @@
   {"type":"setPercussionNote","target":{"track":0,"staff":0,"bar":0,"voice":0,"beat":0},"noteIndex":0,"articulation":92},
   {"type":"removeNoteByIndex","target":{"track":0,"staff":0,"bar":0,"voice":0,"beat":0},"noteIndex":0},
   {"type":"setNoteTechniquesByIndex","target":{"track":0,"staff":0,"bar":0,"voice":0,"beat":0},"noteIndex":0,"patch":{"dynamics":3,"staccato":true}},
-  {"type":"setNoteLinkByIndex","from":{"target":{"track":0,"staff":0,"bar":0,"voice":0,"beat":0},"noteIndex":0},"to":null,"kind":"tie"}
+  {"type":"setNoteLinkByIndex","from":{"target":{"track":0,"staff":0,"bar":0,"voice":0,"beat":0},"noteIndex":0},"to":null,"kind":"tie"},
+  {"type":"setTrackLyrics","track":0,"visible":false,"lines":[{"startBar":0,"text":"[VERSE]\nHel-lo  world+today"}]},
+  {"type":"setBeatGestures","target":{"track":0,"staff":0,"bar":0,"voice":0,"beat":0},"patch":{"slap":true,"barre":{"fret":3,"shape":1},"stem":"inverted","rasgueado":18}},
+  {"type":"setOttava","from":{"track":0,"staff":0,"bar":0,"voice":0,"beat":0},"to":{"track":0,"staff":0,"bar":1,"voice":0,"beat":0},"ottava":4},
+  {"type":"setCrescendo","from":{"track":0,"staff":0,"bar":0,"voice":0,"beat":0},"to":{"track":0,"staff":0,"bar":1,"voice":0,"beat":0},"crescendo":1,"targetDynamics":7},
+  {"type":"setFermata","target":{"track":0,"staff":0,"bar":0,"voice":0,"beat":0},"fermata":{"type":2,"length":1.5}},
+  {"type":"setBarGestures","track":0,"staff":0,"bar":0,"clefOttava":1},
+  {"type":"setMasterBarGestures","bar":0,"commonTime":true,"doubleBar":false,"tripletFeel":6,"beaming":{"unit":8,"groups":[2,2,4]}},
+  {"type":"setSimile","track":0,"staff":0,"bar":1,"kind":"single"}
 ]

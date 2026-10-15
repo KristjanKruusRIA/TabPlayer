@@ -9,6 +9,9 @@ import { selectScore,selectStaves } from './selection';
 import { exportMidi } from './midi';
 import { loadExportFonts,renderPdfPages } from './pdf';
 import { validateSelection,type ExportOptions,type ExportProgress } from './types';
+import { scoreFromJson } from '../model-clone';
+import { copyGpInterchangeSource } from '../interchange/gp';
+import { captureNoteLinks,restoreNoteLinks } from '../editor/links';
 export function useExportCoordinator({score,settings,currentSpeed,bridge,native=nativeExportBridge,embeddedBacking=null}:{score:model.Score;settings:DocumentSettings;currentSpeed:number;bridge:Pick<NativeBridge,'confirmExport'|'exportGp'>;native?:ExportNativeBridge;embeddedBacking?:Uint8Array|null}) {
   const [busy,setBusy]=useState(false),[progress,setProgress]=useState<ExportProgress>();
   const pending=useRef(false),cancelled=useRef(false),job=useRef<string|null>(null),alive=useRef(true),generation=useRef(0);
@@ -27,7 +30,8 @@ export function useExportCoordinator({score,settings,currentSpeed,bridge,native=
     const json=model.JsonConverter.scoreToJson(score),ids=score.tracks.map(trackIdentity),frozenSettings=structuredClone(settings),embedded=embeddedBacking?.slice()??null;
     const frozenOptions=structuredClone(options),speed=currentSpeed;pending.current=true;cancelled.current=false;job.current=null;setBusy(true);setProgress(undefined);
     try{
-      const copy=model.JsonConverter.jsonToScore(json,new Settings()),selection=frozenOptions.selection;
+      const copy=scoreFromJson(json,new Settings()),selection=frozenOptions.selection;
+      restoreNoteLinks(copy,captureNoteLinks(score));copyGpInterchangeSource(score,copy);
       if(frozenOptions.format==='gp'){if(!await bridge.confirmExport()||cancelled.current)return false;return await bridge.exportGp(exportGp(selectScore(copy,selection)));}
       if(frozenOptions.format==='midi'){if(cancelled.current)return false;return await native.exportMidi(exportMidi(copy,selection));}
       if(frozenOptions.format==='pdf'||frozenOptions.format==='print'){await loadExportFonts();if(cancelled.current)return false;const pages=renderPdfPages(copy,selection,frozenOptions.layout);if(cancelled.current)return false;return await watch(await native.exportPdf(pages,frozenOptions.format==='print'));}

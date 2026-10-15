@@ -9,6 +9,8 @@ import { validateBackingAnchors } from './audio/plan';
 import { scoreFromJson } from './model-clone';
 import { validateParityCommand } from './parity-commands';
 import { copyGpInterchangeSource, exportGpInterchange, loadInterchangeScore } from './interchange/gp';
+import { reflowLyrics,removeLyricsMeasure } from './editor/lyrics';
+import { prepareScoreTimers } from './editor/timers';
 
 const settings = new Settings();
 const { Score, Track, Staff, Bar, Voice, Beat, Note, MasterBar, Automation, JsonConverter } = model;
@@ -175,6 +177,7 @@ function apply(score: model.Score, edit: EditCommand, editIndex=0) {
     }
     case 'removeMeasure': {
       if (!integer(edit.bar) || !score.masterBars[edit.bar] || score.masterBars.length === 1) throw new Error('Keep at least one measure.');
+      removeLyricsMeasure(score,edit.bar);
       const tempo = score.tempo; score.masterBars.splice(edit.bar,1);
       for(const track of score.tracks)track.lineBreaks=new Set([...(track.lineBreaks ?? [])].filter(index=>index!==edit.bar).map(index=>index>edit.bar?index-1:index));
       for (const track of score.tracks) for (const staff of track.staves) {
@@ -231,6 +234,7 @@ export function buildDocument(value: ProjectInput): BuiltDocument {
   const sourceMixes=structuredClone(documentSettings.mixes);
   for (const [index,edit] of project.edits.entries()) {
     if(isSettingsEdit(edit)) {applySettingsEdit(documentSettings,edit,score,identities);continue;}
+    if(['setOttava','setCrescendo','setFermata','setSimile'].includes(edit.type))score=rebuild(score);
     apply(score, edit,index);
     if (edit.type==='addTrack'||edit.type==='addPitchedTrack'||edit.type==='addPercussionTrack') identities.push(`added/${index}/${JSON.stringify(edit)}`);
     if (edit.type==='removeTrack') identities.splice(edit.track,1);
@@ -240,7 +244,7 @@ export function buildDocument(value: ProjectInput): BuiltDocument {
     }
   }
   // Transient conversion rebuilds derived links and caches; native files store source bytes and commands.
-  score=rebuild(score);score.tracks.forEach((track,index)=>trackIdentities.set(track,identities[index]));
+  score=rebuild(score);prepareScoreTimers(score);score.tracks.forEach((track,index)=>trackIdentities.set(track,identities[index]));
   const built={score,settings:documentSettings,embeddedBacking,embeddedBackingSettings,sourceMixes};
   validateBackingAnchors(score,effectiveAudioSettings(project,built).backing);return built;
 }
@@ -279,6 +283,7 @@ function rebuild(score: model.Score) {
   const result=scoreFromJson(JsonConverter.scoreToJson(score), settings);
   restoreNoteLinks(result,links);
   copyGpInterchangeSource(score,result);
+  reflowLyrics(result);
   return result;
 }
 

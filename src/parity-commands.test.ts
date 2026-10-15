@@ -4,7 +4,7 @@ import { validateProject } from './engine';
 import { blankProject } from './project';
 
 const validate=(edit:unknown)=>validateProject({...blankProject(),edits:[edit]});
-const entry=commands.slice(31);
+const entry=commands.slice(31,43);
 
 it('accepts the shared 12 parity command shapes without changing them',()=>{
   expect(entry).toHaveLength(12);

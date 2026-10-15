@@ -4,6 +4,11 @@ import { trackMixAutomations } from './automation';
 import { writePercussionReferences } from './percussion';
 import { patchGpifNoteArticulations,projectGpifTracks } from './xml';
 import { preparePitchedGpScore } from './pitched';
+import { copyLyricsSources,getLyricsSource } from '../editor/lyrics-source';
+import { readGpifLyrics,writeGpifLyrics } from './lyrics';
+import { writeGpifNotation } from './notation';
+import { scoreFromJson } from '../model-clone';
+import { captureNoteLinks,restoreNoteLinks } from '../editor/links';
 
 const gpifPath='Content/score.gpif';
 const sourceEntries=new WeakMap<model.Score,Record<string,Uint8Array>>();
@@ -29,6 +34,7 @@ export function loadInterchangeScore(bytes:Uint8Array,settings:Settings):model.S
   if(bytes[0]!==0x50||bytes[1]!==0x4b)return score;
   const entries=unzip(bytes,settings);if(!entries[gpifPath])return score;
   const xml=new TextDecoder(settings.importer.encoding).decode(entries[gpifPath]),doc=parseXml(projectGpifTracks(xml)?.xml??xml);
+  readGpifLyrics(score,doc);
   orderedTracks(doc).forEach((node,index)=>{
     const track=score.tracks[index];if(!node||!track)return;
     const transpose=node.querySelector(':scope > Transpose');
@@ -52,13 +58,31 @@ export function loadInterchangeScore(bytes:Uint8Array,settings:Settings):model.S
 }
 export function exportGpInterchange(score:model.Score,settings:Settings):Uint8Array {
   const source=score;score=preparePitchedGpScore(score,settings);copyGpInterchangeSource(source,score);
-  const raw=new exporter.Gp7Exporter().export(score,settings),changes=score.tracks.map(trackMixAutomations),needsXml=changes.some(stream=>stream.length>0)||score.tracks.some(track=>track.isPercussion);
+  const lyricBeatIds=new Set<number>();
+  const allBeats=(value:model.Score)=>value.tracks.flatMap(track=>track.staves.flatMap(staff=>staff.bars.flatMap(bar=>bar.voices.flatMap(voice=>voice.beats))));
+  if(allBeats(score).some(beat=>beat.lyrics?.some(text=>text.includes(']]>')))){
+    const copy=scoreFromJson(model.JsonConverter.scoreToJson(score),settings);
+    restoreNoteLinks(copy,captureNoteLinks(score));copyGpInterchangeSource(score,copy);score=copy;
+    // The public writer interpolates CDATA verbatim. Split its terminator on
+    // this detached export model so both Track and Beat lyrics remain valid XML.
+    for(const beat of allBeats(score))if(beat.lyrics?.some(text=>text.includes(']]>'))){lyricBeatIds.add(beat.id);beat.lyrics=beat.lyrics.map(text=>text.replaceAll(']]>',']]]]><![CDATA[>'));}
+  }
+  const beatIds=new Set([...lyricBeatIds,...allBeats(score).filter(beat=>beat.invertBeamDirection).map(beat=>beat.id)]);
+  const masterBars=score.masterBars.some(bar=>!!bar.fermata?.size),notation=beatIds.size||masterBars?{beatIds,masterBars}:undefined;
+  const lyrics=score.tracks.some(track=>{const source=getLyricsSource(track);return source&&(source.managed||!source.value.visible||source.value.lines.some(line=>line.text.length>0));});
+  const raw=new exporter.Gp7Exporter().export(score,settings),changes=score.tracks.map(trackMixAutomations),needsXml=lyrics||!!notation||changes.some(stream=>stream.length>0)||score.tracks.some(track=>track.isPercussion);
   const original=sourceEntries.get(score);
   if(!needsXml&&!original)return raw;
   const generated=unzip(raw,settings);
   if(!needsXml)return zipSync({...generated,...original,[gpifPath]:generated[gpifPath]});
-  const xml=new TextDecoder().decode(generated[gpifPath]),projection=projectGpifTracks(xml),doc=parseXml(projection?.xml??xml);
+  const xml=new TextDecoder().decode(generated[gpifPath]),projection=projectGpifTracks(xml,notation),doc=parseXml(projection?.xml??xml);
   const references=writePercussionReferences(score,doc,settings);
+  writeGpifLyrics(score,doc);writeGpifNotation(score,doc);
+  for(const node of doc.querySelectorAll('GPIF > Beats > Beat'))if(lyricBeatIds.has(Number(node.getAttribute('id')))){
+    // alphaTab's reader keeps only the final adjacent CDATA chunk. Plain XML
+    // text retains the combined literal syllable for both readers.
+    for(const line of node.querySelectorAll(':scope > Lyrics > Line'))line.textContent=line.textContent;
+  }
   orderedTracks(doc).forEach((node,index)=>{
     if(!node)return;
     const strip=node.querySelector(':scope > RSE > ChannelStrip')!;
@@ -73,7 +97,18 @@ export function exportGpInterchange(score:model.Score,settings:Settings):Uint8Ar
     }
   });
   const serializer=new XMLSerializer();
-  let outputXml=projection?xml.slice(0,projection.tracks.start)+serializer.serializeToString(doc.querySelector('GPIF > Tracks')!)+xml.slice(projection.tracks.end):serializer.serializeToString(doc);
+  // XML normalizes literal carriage returns on reimport; preserve raw lyric text.
+  const serialize=(node:Node)=>serializer.serializeToString(node).replace(/\r/g,'&#13;');
+  let outputXml:string;
+  if(projection){
+    const patches=[{...projection.tracks,value:serialize(doc.querySelector('GPIF > Tracks')!)}];
+    if(projection.masterBars)patches.push({...projection.masterBars,value:serialize(doc.querySelector('GPIF > MasterBars')!)});
+    for(const node of doc.querySelectorAll('GPIF > Beats > Beat')){
+      const span=projection.beats?.get(Number(node.getAttribute('id')));if(span)patches.push({...span,value:serialize(node)});
+    }
+    outputXml=xml;
+    for(const patch of patches.sort((a,b)=>b.start-a.start))outputXml=outputXml.slice(0,patch.start)+patch.value+outputXml.slice(patch.end);
+  }else outputXml=serialize(doc);
   if(references.size){
     const patched=projection?patchGpifNoteArticulations(outputXml,references):undefined;
     if(patched!==undefined)outputXml=patched;
@@ -91,6 +126,7 @@ export function exportGpInterchange(score:model.Score,settings:Settings):Uint8Ar
 }
 /** Carry source archive siblings and binary backing data omitted by model JSON. */
 export function copyGpInterchangeSource(source:model.Score,destination:model.Score):void {
+  copyLyricsSources(source,destination);
   const entries=sourceEntries.get(source);if(entries)sourceEntries.set(destination,entries);
   if(source.backingTrack?.rawAudioFile&&!destination.backingTrack?.rawAudioFile) {
     destination.backingTrack??=new model.BackingTrack();destination.backingTrack.rawAudioFile=source.backingTrack.rawAudioFile.slice();

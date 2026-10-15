@@ -535,3 +535,110 @@ fn effective_whole_and_selected_exports_share_wall_tail_with_or_without_backing(
         }
     }
 }
+
+#[test]
+fn reference_ranges_and_loops_keep_pcm_source_clock_across_tempo_change() {
+    use tabplayer_lib::audio::{device::PracticeSettings, practice::PracticeTempo};
+
+    let case = first_case();
+    let plan = Arc::new(fixture_plan(&case));
+    for rate in [44_100, 48_000] {
+        let mut pcm = vec![[0.0; 2]; rate as usize * 8];
+        for second in [2, 3, 4] {
+            pcm[rate as usize * second] = [0.7, 0.35];
+        }
+        for second in [1, 5, 6] {
+            pcm[rate as usize * second] = [0.35, 0.7];
+        }
+        for speed in [1.0, 0.5] {
+            for looping in [false, true] {
+                let mut renderer =
+                    Renderer::new(plan.clone(), resources(), DocumentSettings::default(), rate)
+                        .unwrap();
+                let backing = settings(&case["backing"]);
+                renderer
+                    .install_backing(
+                        audio(rate, pcm.clone()),
+                        BackingMap::from_settings(&backing, &plan).unwrap(),
+                        backing.mix,
+                    )
+                    .unwrap();
+                let mut transport = CallbackTransport::headless(rate);
+                transport.install_with_practice(
+                    Box::new(renderer),
+                    1,
+                    false,
+                    PracticeSettings {
+                        tempo: PracticeTempo::Relative { ratio: speed },
+                        ..Default::default()
+                    },
+                );
+                // Ticks 1920..5760 span effective seconds 1..4 across the 120->60
+                // step, so reference source seconds 2/3/4 play, but 5 is excluded.
+                let command = if looping {
+                    TransportCommand::SetLoop {
+                        generation: 1,
+                        start_tick: 1920.0,
+                        end_tick: 5760.0,
+                    }
+                } else {
+                    TransportCommand::PlayRange {
+                        generation: 1,
+                        start_tick: 1920.0,
+                        end_tick: Some(5760.0),
+                    }
+                };
+                transport.command(command).unwrap();
+                if looping {
+                    transport
+                        .command(TransportCommand::Play { generation: 1 })
+                        .unwrap();
+                }
+                let interval = (rate as f64 / speed) as usize;
+                let mut output = vec![[0.0; 2]; if looping { 6 } else { 3 } * interval + 512];
+                let mut offset = 0;
+                for size in [127, 511, 1024].into_iter().cycle() {
+                    let end = (offset + size).min(output.len());
+                    transport.render_into(&mut output[offset..end]);
+                    offset = end;
+                    if offset == output.len() {
+                        break;
+                    }
+                }
+                let attacks: Vec<_> = output
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, sample)| sample[0] > 0.2)
+                    .collect();
+                assert_eq!(
+                    attacks.len(),
+                    if looping { 7 } else { 3 },
+                    "rate {rate} speed {speed} looping {looping}"
+                );
+                for (index, (frame, sample)) in attacks.into_iter().enumerate() {
+                    assert!(
+                        frame.abs_diff(index * interval) <= 1,
+                        "attack {index} frame {frame} rate {rate} speed {speed} looping {looping}"
+                    );
+                    assert!(
+                        (sample[0] - 2.0 * sample[1]).abs() < 1e-6,
+                        "wrong source impulse at frame {frame} rate {rate} speed {speed} looping {looping}"
+                    );
+                }
+                let status = transport.status();
+                if looping {
+                    assert!(status.playing);
+                    assert_eq!(status.practice.completed_passes, 2);
+                    assert!(
+                        (status.tick - (1920.0 + 512.0 * speed * 1920.0 / rate as f64)).abs()
+                            < 1e-6
+                    );
+                } else {
+                    assert_eq!(status.practice.phase, PracticePhase::Ended);
+                    assert_eq!(status.tick, 5760.0);
+                    assert!(output[3 * interval..].iter().all(|x| *x == [0.0; 2]));
+                }
+            }
+        }
+    }
+}

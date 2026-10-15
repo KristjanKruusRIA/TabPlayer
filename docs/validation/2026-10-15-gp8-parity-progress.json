@@ -16,31 +16,47 @@
     }
   },
   "current_revision": {
-    "value": "1f85ce2ef90f2fa1940aa998490a5e7308de74fe",
-    "accepted_source_revision": "26a9ddb",
-    "documentation_revision": "1f85ce2ef90f2fa1940aa998490a5e7308de74fe",
-    "provenance": "Root integrator reports accepted source 26a9ddb plus docs 1f85ce2 pushed to feat/gp8-parity and remote ref verified at the exact value above; main remains 7fc41c773a1b016d7249ceb98ab7929fcca1ce8f. This source/report adoption ran no Git or network command and excludes in-flight Library/schema3 work.",
-    "previous_overlay_revision": "b73ae93682332c64029777cc4dfeaebfe2a77214",
+    "value": "764d926fbac039e844fbaa68e60969e2fcae2aaa",
+    "accepted_source_revision": "764d926fbac039e844fbaa68e60969e2fcae2aaa",
+    "documentation_revision": null,
+    "documentation_status": "Working-tree Library validation/overlay adoption after the accepted source checkpoint; root owns final documentation commit/push.",
+    "provenance": "Root integrator reports accepted Library source 764d926fbac039e844fbaa68e60969e2fcae2aaa pushed to feat/gp8-parity and the exact remote ref verified; released main remains 7fc41c773a1b016d7249ceb98ab7929fcca1ce8f. This six-row documentation adoption used the final versioned Library report, ran no Git/network or product runtime operation, and does not certify all-OS or shipping acceptance.",
+    "previous_accepted_checkpoint": "1f85ce2ef90f2fa1940aa998490a5e7308de74fe",
     "ci_checkpoint": {
-      "run_id": "38770187771",
-      "head_sha": "1f85ce2ef90f2fa1940aa998490a5e7308de74fe",
+      "run_id": "38787714198",
+      "head_sha": "764d926fbac039e844fbaa68e60969e2fcae2aaa",
       "status": "completed",
       "conclusion": "failure",
+      "prepare_audio_job_id": "116603918150",
       "prepare_audio_steps_reached": false,
+      "runner_recorded": false,
       "desktop_jobs": "skipped",
-      "job_log_request": "404",
+      "artifacts": [],
+      "job_log_request": "404 BlobNotFound",
       "failure_reason": "unknown",
       "observed_by": "root integrator; not independently polled by this audit",
       "cross_platform_ci_success_claim": false,
-      "earlier_w05": {
-        "run_id": "38738258294",
-        "head_sha": "64a1e8f7e416b93ca624a3c48196984424f4a28b",
-        "all_os_jobs": "success",
-        "scope": "historical W05 checkpoint only; not a current-head pass"
+      "previous_checkpoint": {
+        "run_id": "38770187771",
+        "head_sha": "1f85ce2ef90f2fa1940aa998490a5e7308de74fe",
+        "status": "completed",
+        "conclusion": "failure",
+        "prepare_audio_steps_reached": false,
+        "desktop_jobs": "skipped",
+        "job_log_request": "404",
+        "failure_reason": "unknown",
+        "observed_by": "root integrator; not independently polled by this audit",
+        "cross_platform_ci_success_claim": false,
+        "earlier_w05": {
+          "run_id": "38738258294",
+          "head_sha": "64a1e8f7e416b93ca624a3c48196984424f4a28b",
+          "all_os_jobs": "success",
+          "scope": "historical W05 checkpoint only; not a current-head pass"
+        }
       }
     }
   },
-  "source_method": "The original overlay read all 258 baseline rows and inspected seven dedicated versioned delivery reports plus scoped source/test definitions. This follow-up reviews the versioned selection-playback and stylesheet-interchange reports and exact P02/P03/N13 acceptance, updating adjacent stale prose only. Graph tools unavailable; narrow rg/source reads used. No fresh runtime validation by this audit. This scoped adoption inspects the accepted recovery/workstation validation and reviews for exactly W10/W11/D04/D05/P15, preserving all historical fields and other 253 rows. No fresh runtime, Git/network check or in-flight Library/schema3 source acceptance is claimed.",
+  "source_method": "The original overlay read all 258 baseline rows and inspected seven dedicated versioned delivery reports plus scoped source/test definitions. This follow-up reviews the versioned selection-playback and stylesheet-interchange reports and exact P02/P03/N13 acceptance, updating adjacent stale prose only. Graph tools unavailable; narrow rg/source reads used. No fresh runtime validation by this audit. The earlier five-row adoption inspected the accepted recovery/workstation validation and reviews for exactly W10/W11/D04/D05/P15, preserving all historical fields and other 253 rows. This later six-row adoption maps W06/W07/W08/W09/W12/W14 to the final versioned Library validation, including actual Windows Core/restart/Folders/reveal and honest OS-drop/other-platform limits. All 258 historical field sets and 252 other complete row assessments remain unchanged. No product tests/apps/builds, Git or network operation was run by this adoption; bounded document consistency was checked separately.",
   "assessment_definitions": {
     "evidence_reviewed": "Current source and/or versioned delivery evidence was mapped to this exact requirement; missing acceptance remains explicit.",
     "baseline_not_reaudited": "Historical status carried for coverage only; current_proven_status is null and no new implementation claim is made."
@@ -60,29 +76,29 @@
       "unverified": 8
     },
     "current_dispositions": {
-      "implemented": 72,
-      "partial": 92,
-      "missing": 86,
+      "implemented": 76,
+      "partial": 94,
+      "missing": 80,
       "unverified": 8
     },
-    "evidence_reviewed_total": 100,
+    "evidence_reviewed_total": 106,
     "evidence_reviewed": {
-      "implemented": 30,
-      "partial": 65,
+      "implemented": 34,
+      "partial": 67,
       "missing": 1,
       "unverified": 4
     },
-    "baseline_not_reaudited_total": 158,
+    "baseline_not_reaudited_total": 152,
     "baseline_not_reaudited": {
       "implemented": 42,
       "partial": 27,
-      "missing": 85,
+      "missing": 79,
       "unverified": 4
     },
-    "status_changed_total": 65,
+    "status_changed_total": 71,
     "transition_counts": {
-      "missing -> implemented": 16,
-      "missing -> partial": 44,
+      "missing -> implemented": 20,
+      "missing -> partial": 46,
       "partial -> implemented": 5
     }
   },
@@ -536,6 +552,66 @@
       "start_line": 44,
       "end_line": 44,
       "kind": "validation_report"
+    },
+    "library_scope": {
+      "path": "docs/validation/2026-10-15-gp8-file-library.md",
+      "start_line": 7,
+      "end_line": 9,
+      "kind": "validation_report"
+    },
+    "library_validation": {
+      "path": "docs/validation/2026-10-15-gp8-file-library.md",
+      "start_line": 13,
+      "end_line": 24,
+      "kind": "validation_report"
+    },
+    "library_templates_windows": {
+      "path": "docs/validation/2026-10-15-gp8-file-library.md",
+      "start_line": 28,
+      "end_line": 34,
+      "kind": "validation_report"
+    },
+    "library_recents_windows": {
+      "path": "docs/validation/2026-10-15-gp8-file-library.md",
+      "start_line": 30,
+      "end_line": 35,
+      "kind": "validation_report"
+    },
+    "library_examples_windows": {
+      "path": "docs/validation/2026-10-15-gp8-file-library.md",
+      "start_line": 28,
+      "end_line": 34,
+      "kind": "validation_report"
+    },
+    "library_folders_windows": {
+      "path": "docs/validation/2026-10-15-gp8-file-library.md",
+      "start_line": 37,
+      "end_line": 42,
+      "kind": "validation_report"
+    },
+    "library_visual": {
+      "path": "docs/validation/2026-10-15-gp8-file-library.md",
+      "start_line": 44,
+      "end_line": 46,
+      "kind": "validation_report"
+    },
+    "library_reveal_windows": {
+      "path": "docs/validation/2026-10-15-gp8-file-library.md",
+      "start_line": 48,
+      "end_line": 48,
+      "kind": "validation_report"
+    },
+    "library_drop_limits": {
+      "path": "docs/validation/2026-10-15-gp8-file-library.md",
+      "start_line": 52,
+      "end_line": 52,
+      "kind": "validation_report"
+    },
+    "library_platform_limits": {
+      "path": "docs/validation/2026-10-15-gp8-file-library.md",
+      "start_line": 54,
+      "end_line": 56,
+      "kind": "validation_report"
     }
   },
   "evidence_file_sha256": {
@@ -580,7 +656,8 @@
     "docs/validation/2026-10-15-gp8-recovery-session.md": "3deafca869845bb043f8ca536af10cbd2fa94ebfb2c624394b49fe3fb2d3e7c8",
     "docs/superpowers/specs/2026-10-15-tabplayer-reference-workstation-design.md": "74cdfff49d6cfa5c22dcbd04736a1423da2adcde2deef16050ddca449fb86248",
     "docs/validation/2026-10-15-tabplayer-reference-workstation.md": "e0e53e8adc1ccccdd0614488cf5ad42004991a9ed26ddb77e08f58a3a275a494",
-    "docs/validation/2026-10-14-tabplayer-expansion.md": "dc95c92f95005d9ec2345bc14367d1b2d9357fd4eaa44839de7279f4dc4bf1ac"
+    "docs/validation/2026-10-14-tabplayer-expansion.md": "dc95c92f95005d9ec2345bc14367d1b2d9357fd4eaa44839de7279f4dc4bf1ac",
+    "docs/validation/2026-10-15-gp8-file-library.md": "565765bd7a9ed396aa762265806e8fd3a336c034a4784437cf6d97ff8b5a700f"
   },
   "next_open_families": [
     {
@@ -601,10 +678,17 @@
     {
       "priority": 2,
       "family": "Document workflow and reliable recovery",
-      "work": "Recent files, templates and related local-library workflows remain open in the carried inventory. W10/W11 now have documented Windows recovery/session acceptance; unsupported destruction-exception execution and other-platform runtime limits remain separate. No other document-workflow row is re-assessed by this five-row adoption.",
+      "work": "W06/W07/W08/W09 meet their recorded narrow Windows template, recent, metadata-search and original-example acceptance. W12 actual OS-drop delivery/dirty-document decisions remain unproven; W14 has Windows observation but still requires macOS/Linux containing-folder receipts. Delayed browser-worker scheduling, shipping resources and other-platform runtime remain separate. W13 file associations and all other document-workflow assessments are unchanged. Earlier W10/W11 Windows recovery/session acceptance and unsupported destruction-exception limits remain in force.",
       "evidence": [
         "recovery_windows",
-        "recovery_limits"
+        "recovery_limits",
+        "library_templates_windows",
+        "library_recents_windows",
+        "library_folders_windows",
+        "library_examples_windows",
+        "library_reveal_windows",
+        "library_drop_limits",
+        "library_platform_limits"
       ]
     },
     {
@@ -697,19 +781,33 @@
         "workstation_navigation",
         "workstation_visual"
       ]
+    },
+    {
+      "issue": "Library source and Windows acceptance are bounded; six-row adoption only",
+      "detail": "W06/W07/W08/W09 now meet their exact recorded Windows acceptance. W12 remains partial because actual OS delivery/dirty-document decisions are unproven; W14 remains partial because its explicit each-supported-OS reveal acceptance lacks macOS/Linux receipts. All 252 other row objects, including W13, remain unchanged. Current source delivery and no-runner CI failure do not certify all-OS or extracted shipping-resource behavior.",
+      "evidence": [
+        "library_templates_windows",
+        "library_recents_windows",
+        "library_folders_windows",
+        "library_examples_windows",
+        "library_reveal_windows",
+        "library_drop_limits",
+        "library_platform_limits"
+      ]
     }
   ],
   "limitations": [
-    "This is a source/report audit only. No application, test, build, device, Git command or original Guitar Pro runtime was run for this overlay.",
-    "Accepted source26a9ddb plus docs1f85ce2 at exact remote-verified 1f85ce2ef90f2fa1940aa998490a5e7308de74fe are supplied by root; this audit did not independently resolve Git state. Earlier evidence-file hashes retain their original overlay snapshots; new recovery/workstation report hashes identify this documentation adoption. In-flight Library/schema3 work is excluded.",
+    "This is a source/report adoption only. No application, product test, build, device, Git command or original Guitar Pro runtime was run for this overlay; document/data consistency was checked separately.",
+    "Accepted Library source 764d926fbac039e844fbaa68e60969e2fcae2aaa and its exact push/remote verification are supplied by root; this audit did not independently resolve Git state. Earlier evidence-file hashes retain their original snapshots; the new Library validation hash identifies this six-row adoption. The final validation and overlay documentation are working-tree changes pending root commit, distinct from the accepted source checkpoint.",
     "All 258 historical requirement and acceptance strings, statuses, references, evidence keys and behavior/gaps are copied without modification from the pinned baseline JSON.",
     "Combined current dispositions include carried historical rows. Only evidence_reviewed rows have a non-null current_proven_status; even implemented means the row acceptance in the documented scope, not whole-product parity.",
     "Existing report suite counts and RED-to-GREEN statements are attributed to their versioned reports. Source reads and test-source reads do not constitute new executions.",
     "Actual Windows CPAL/WASAPI and rendered native PDF receipts are distinguished from model tests. They do not establish physical printers, original GP8 acceptance, macOS/Linux, newly shipped installers, human listening equivalence or arbitrary-score engraving freedom.",
     "Native history, alphaTab GP reimport and source hashes prove bounded preservation properties, not preservation of every target field. Known public reader/writer losses remain explicit.",
     "At the root-observed 2026-10-15 11:09 UTC checkpoint, CI38724478672 macOS frontend/native tests succeeded; packages and complete other-OS results remained pending. This is not a cross-platform CI success claim or physical-platform acceptance. Actual Windows Ctrl-click sparse/drag/end-handle resize acceptance subsequently passed, preserving source and the complete snapshot with a nonempty redo entry; no new PCM was captured. The subsequent independently reviewed actual-wrap oracle meets P03 under the documented reset policy; its logical 48 kHz controlled sample does not establish every effect combination, physical 44.1 kHz/fault behavior or GP8 waveform/historical-tail equivalence.",
-    "Root reports current CI38770187771 at exact 1f85ce2ef90f2fa1940aa998490a5e7308de74fe completed FAILURE before prepare-audio steps, desktop jobs skipped and job-log request 404; cause unknown. Earlier W05 CI38738258294 all-OS success is confined to 64a1e8f7e416b93ca624a3c48196984424f4a28b. No billing cause, current all-OS pass or physical-platform acceptance is inferred.",
-    "The actual injected destruction-exception attempt stopped at an immutable-host guard before native close/resume. Mounted/real-controller regressions and the normal 12-group run remain separate evidence; no successful destruction-failure execution is claimed."
+    "Root reports current CI 38787714198 at exact 764d926fbac039e844fbaa68e60969e2fcae2aaa completed FAILURE in four seconds with prepare-audio job 116603918150 recording no runner/steps, desktop skipped, no artifacts and job logs 404 BlobNotFound; cause unknown. Earlier CI 38770187771 at 1f85ce2 had the same uninformative no-step symptom. Earlier W05 CI 38738258294 all-OS success remains confined to 64a1e8f7e416b93ca624a3c48196984424f4a28b. No source-test failure, billing cause, current all-OS pass or physical-platform acceptance is inferred.",
+    "The actual injected destruction-exception attempt stopped at an immutable-host guard before native close/resume. Mounted/real-controller regressions and the normal 12-group run remain separate evidence; no successful destruction-failure execution is claimed.",
+    "Actual Windows Library Core/restart/Folders and observed Explorer reveal support only the cited narrow acceptance. W12 OS-drop delivery remains unproven after helper-only watchdogs; zero-motion input insertion is not delivery. Native late callback rejection is not an actual delayed browser-worker scheduling race. macOS/Linux reveal, extracted shipping resources and full physical-platform acceptance remain pending; W13 associations are unchanged."
   ],
   "features": [
     {
@@ -897,12 +995,18 @@
       "acceptance_required": "Create a custom multi-instrument template and start a separate document from it.",
       "runtime_rechecked": false,
       "historical_status": "missing",
-      "current_status": "missing",
-      "assessment": "baseline_not_reaudited",
-      "current_proven_status": null,
-      "current_behavior": "One fixed starter score; no template chooser or repository.",
-      "remaining_gap": "Not re-audited in this delivery-progress audit. The original baseline behavior, gap and acceptance remain authoritative historical context; this is not a new current proof.",
-      "current_evidence": [],
+      "current_status": "implemented",
+      "assessment": "evidence_reviewed",
+      "current_proven_status": "implemented",
+      "current_behavior": "Factory and durable personal templates open as separate clean documents with an immutable native baseline and fresh user history. Recorded Windows multitrack capture preserves source dirty/redo history, original/template bytes and native audio state; independent fork Save/reopen and first-edit Undo return to the exact template. All ten factory templates open canonically through the Library UI.",
+      "remaining_gap": "No remaining gap identified for the stated custom multi-instrument template/separate-document acceptance in the recorded Windows workflow. Other-OS runtime, extracted shipping-package resources and arbitrary-score fidelity remain separate; this is not complete vendor template-catalogue equivalence.",
+      "current_evidence": [
+        "library_scope",
+        "library_validation",
+        "library_templates_windows",
+        "library_visual",
+        "library_platform_limits"
+      ],
       "runtime_rechecked_by_this_audit": false
     },
     {
@@ -925,12 +1029,18 @@
       "acceptance_required": "Persist, reopen, pin/unpin and remove missing recent entries.",
       "runtime_rechecked": false,
       "historical_status": "missing",
-      "current_status": "missing",
-      "assessment": "baseline_not_reaudited",
-      "current_proven_status": null,
-      "current_behavior": "No recent-file history or pin state.",
-      "remaining_gap": "Not re-audited in this delivery-progress audit. The original baseline behavior, gap and acceptance remain authoritative historical context; this is not a new current proof.",
-      "current_evidence": [],
+      "current_status": "implemented",
+      "assessment": "evidence_reviewed",
+      "current_proven_status": "implemented",
+      "current_behavior": "Native successful-open/save receipts feed a durable recent catalog with pin/unpin, explicit missing-file error/Retry and removal. Recorded Windows reopen/pin/missing-removal behavior and two clean process restarts establish persistence while preserving the source document and its independent history.",
+      "remaining_gap": "No remaining gap identified for the stated persist/reopen/pin/unpin/remove-missing acceptance in the recorded Windows workflow. Other-OS runtime, universal filesystem-failure behavior and shipping lifecycle are not established by these receipts.",
+      "current_evidence": [
+        "library_scope",
+        "library_validation",
+        "library_recents_windows",
+        "library_visual",
+        "library_platform_limits"
+      ],
       "runtime_rechecked_by_this_audit": false
     },
     {
@@ -952,12 +1062,18 @@
       "acceptance_required": "Search a configured local folder by metadata and open a result.",
       "runtime_rechecked": false,
       "historical_status": "missing",
-      "current_status": "missing",
-      "assessment": "baseline_not_reaudited",
-      "current_proven_status": null,
-      "current_behavior": "Only native Open picker; no indexed local library.",
-      "remaining_gap": "Not re-audited in this delivery-progress audit. The original baseline behavior, gap and acceptance remain authoritative historical context; this is not a new current proof.",
-      "current_evidence": [],
+      "current_status": "implemented",
+      "assessment": "evidence_reviewed",
+      "current_proven_status": "implemented",
+      "current_behavior": "A configured native folder feeds a cancellable metadata index. Recorded Windows native folder selection and the real metadata worker search authored scores by title, artist, album and track name unrelated to filenames, open the correct result through normal intake, and retain the exact index across a clean restart without Refresh. Search preserves native project/owner/audio projections.",
+      "remaining_gap": "No remaining gap identified for the stated configured-folder metadata search/open acceptance in the recorded Windows workflow. Native late read/accept/finish rejection is established, but an actual delayed browser-worker scheduling race remains unproven. Other-OS runtime and shipping-package resources remain separate.",
+      "current_evidence": [
+        "library_scope",
+        "library_validation",
+        "library_folders_windows",
+        "library_visual",
+        "library_platform_limits"
+      ],
       "runtime_rechecked_by_this_audit": false
     },
     {
@@ -979,12 +1095,18 @@
       "acceptance_required": "Open independently authored redistributable examples from welcome UI.",
       "runtime_rechecked": false,
       "historical_status": "missing",
-      "current_status": "missing",
-      "assessment": "baseline_not_reaudited",
-      "current_proven_status": null,
-      "current_behavior": "No in-app example catalog; test fixtures are not product examples.",
-      "remaining_gap": "Not re-audited in this delivery-progress audit. The original baseline behavior, gap and acceptance remain authoritative historical context; this is not a new current proof.",
-      "current_evidence": [],
+      "current_status": "implemented",
+      "assessment": "evidence_reviewed",
+      "current_proven_status": "implemented",
+      "current_behavior": "Three independently authored CC0 offline examples have a versioned content/license manifest. All three open canonically through the actual Windows Welcome/Library UI from the prepared diagnostic resources, with notation and independent fresh history; no vendor score or private band input was used.",
+      "remaining_gap": "No remaining gap identified for the stated redistributable examples/Welcome-open acceptance in the recorded Windows workflow. Extracted shipping-package/installer resources and other-OS runtime remain pending. Original examples do not establish vendor-catalogue equivalence.",
+      "current_evidence": [
+        "library_scope",
+        "library_validation",
+        "library_examples_windows",
+        "library_visual",
+        "library_platform_limits"
+      ],
       "runtime_rechecked_by_this_audit": false
     },
     {
@@ -1079,12 +1201,17 @@
       "acceptance_required": "Drop supported score files and preserve dirty-document decisions.",
       "runtime_rechecked": false,
       "historical_status": "missing",
-      "current_status": "missing",
-      "assessment": "baseline_not_reaudited",
-      "current_proven_status": null,
-      "current_behavior": "No drop event or native drop-to-open flow.",
-      "remaining_gap": "Not re-audited in this delivery-progress audit. The original baseline behavior, gap and acceptance remain authoritative historical context; this is not a new current proof.",
-      "current_evidence": [],
+      "current_status": "partial",
+      "assessment": "evidence_reviewed",
+      "current_proven_status": "partial",
+      "current_behavior": "A real native window Drop handler captures OS-provided paths into bounded short-lived one-use tokens. Common native candidate intake and a single sequential workspace transition preserve prior successes and dirty documents with per-item errors and candidate retirement; tokens, expiry, overflow, lifecycle and frontend/native admission have reviewed source/unit coverage.",
+      "remaining_gap": "Actual supported-file OS-drop delivery and dirty-document decisions remain unproven. A parser-corrected OLE attempt and one bounded background-pulse experiment both stopped at a helper-only watchdog; input-stream insertion is not target delivery and no product drop failure is established. Actual mixed-item, modal/export/transition/shutdown and candidate-cleanup acceptance must remain separate from source/unit/native-boundary assertions.",
+      "current_evidence": [
+        "library_scope",
+        "library_validation",
+        "library_drop_limits",
+        "library_platform_limits"
+      ],
       "runtime_rechecked_by_this_audit": false
     },
     {
@@ -1134,12 +1261,17 @@
       "acceptance_required": "Reveal the current saved document directory on each supported OS.",
       "runtime_rechecked": false,
       "historical_status": "missing",
-      "current_status": "missing",
-      "assessment": "baseline_not_reaudited",
-      "current_proven_status": null,
-      "current_behavior": "No reveal-in-file-manager action.",
-      "remaining_gap": "Not re-audited in this delivery-progress audit. The original baseline behavior, gap and acceptance remain authoritative historical context; this is not a new current proof.",
-      "current_evidence": [],
+      "current_status": "partial",
+      "assessment": "evidence_reviewed",
+      "current_proven_status": "partial",
+      "current_behavior": "The saved-document containing-folder action resolves the current native document/revision and launches platform-specific Windows/macOS/Linux helpers with path/launcher assertions. Recorded Windows execution observes a newly visible Explorer window at the exact fixture parent with the original score selected, preserving native workspace/history/owner/audio state.",
+      "remaining_gap": "The exact acceptance requires observed containing-folder behavior on each supported OS. Windows is now observed; macOS/Linux actual desktop receipts remain pending. Source launcher tests and the Windows result do not establish those platform claims or shipping lifecycle.",
+      "current_evidence": [
+        "library_scope",
+        "library_validation",
+        "library_reveal_windows",
+        "library_platform_limits"
+      ],
       "runtime_rechecked_by_this_audit": false
     },
     {

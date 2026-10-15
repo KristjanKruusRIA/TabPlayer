@@ -1,6 +1,6 @@
 # Guitar Pro 8 document tabs — validation
 
-Observed 2026-10-15. **The bounded W05 implementation and Windows native acceptance pass.** The complete document-tabs workflow, corrected Unicode PDF export, physical A→B→A output and final native window close have separate receipts below. Independent final re-review closes the sole P2 lifecycle finding with no material residual finding. The feature branch was pushed and its remote SHA verified; cross-platform W05 CI remains separate.
+Observed 2026-10-15. **The bounded W05 implementation and Windows native acceptance pass.** The complete document-tabs workflow, corrected Unicode PDF export, physical A→B→A output and final native window close have separate receipts below. Independent final re-review closes the sole P2 lifecycle finding with no material residual finding. The feature branch was pushed and its remote SHA verified; the W05 cross-platform package CI also passed.
 
 ## Scope and source identity
 
@@ -63,5 +63,7 @@ Parity `task-8-window-close-fix-report.md` records mounted main/real React root/
 The final diagnostic executable SHA-256 is **`dcf69fbe39c03d4c99b88e10ea9a7ded5e6180430e641eb8983f134f5a78349a`**. SDD `task-8-desktop-build-window-close.log` records the Rust release rebuild completing in 38.11 s. Smoke **`document-window-close-native-1792068694838.json`** reports `passed:true`, PID 49772, zero page errors, production Windows **WM_CLOSE → dirty Cancel** preserving the exact workspace, followed by **WM_CLOSE → Discard** closing the page and exiting the owned process naturally. Parity `probe-tabs-window-close-native.mjs` and parity `task-8-window-close-native-green.log` retain the probe and 5.408 s result. No owned application remains. This actual close receipt complements the mounted tests' controlled deferred-success/failure lifecycle proof; it does not claim a real OS destruction failure was induced.
 
 ## Limits
+
+GitHub Actions [run38738258294](https://github.com/KristjanKruusRIA/TabPlayer/actions/runs/38738258294), at source `64a1e8f7e416b93ca624a3c48196984424f4a28b`, completed with all four jobs successful: prepared audio and Windows MSI/NSIS, macOS app/DMG and Ubuntu deb/AppImage workflows. Their frontend/native checks, shipping builds and actual packaged-resource verification steps passed. Root observed the final jobs API response on2026-10-15; compact job/step evidence is retained in parity `w05-ci38738258294-final.json`. This establishes the CI/package result for final W05 source separately from the earlier local full-suite receipts above. It does not certify physical device or installer behavior on those runners.
 
 The [historical cross-platform CI record](2026-10-15-gp8-selection-stylesheet-ci.md) applies to earlier remote `f6350fc`, not W05. The original 258-row inventory and overlay remain unchanged. This bounded validation does not establish complete GP8 parity, original Guitar Pro runtime equivalence, arbitrary Unicode/emoji support, W10/W11 recovery/session restore, physical macOS/Linux audio, native printing/installer lifecycle, signing or a new main release.

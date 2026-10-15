@@ -358,6 +358,19 @@ impl CandidateStore {
         self.documents.insert(token, (project, path));
         Ok(candidate)
     }
+    pub fn take_document(
+        &mut self,
+        token: &str,
+    ) -> Result<(Project, Option<PathBuf>), ProjectError> {
+        let (project, _) = self
+            .documents
+            .get(token)
+            .ok_or("Document candidate has expired.")?;
+        project.validate()?;
+        self.documents
+            .remove(token)
+            .ok_or_else(|| "Document candidate has expired.".into())
+    }
     pub fn commit_document(
         &mut self,
         token: &str,

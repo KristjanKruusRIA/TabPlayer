@@ -1,0 +1,38 @@
+{
+  "revisions": [
+    {"name":"initial","value":{"documentId":"document-test-1","revision":0},"valid":true},
+    {"name":"maximum safe","value":{"documentId":"document-test-1","revision":9007199254740991},"valid":true},
+    {"name":"unsafe integer","value":{"documentId":"document-test-1","revision":9007199254740992},"valid":false},
+    {"name":"negative","value":{"documentId":"document-test-1","revision":-1},"valid":false},
+    {"name":"fractional","value":{"documentId":"document-test-1","revision":1.5},"valid":false},
+    {"name":"boolean","value":{"documentId":"document-test-1","revision":true},"valid":false},
+    {"name":"string","value":{"documentId":"document-test-1","revision":"1"},"valid":false},
+    {"name":"null","value":{"documentId":"document-test-1","revision":null},"valid":false},
+    {"name":"missing revision","value":{"documentId":"document-test-1"},"valid":false},
+    {"name":"missing address","value":{"revision":0},"valid":false},
+    {"name":"null address","value":{"documentId":null,"revision":0},"valid":false},
+    {"name":"unknown","value":{"documentId":"document-test-1","revision":0,"active":true},"valid":false}
+  ],
+  "owners": [
+    {"name":"current owner","value":{"documentId":"document-test-1","activationId":"activation-test-1"},"valid":true},
+    {"name":"empty document","value":{"documentId":"","activationId":"activation-test-1"},"valid":false},
+    {"name":"empty activation","value":{"documentId":"document-test-1","activationId":""},"valid":false},
+    {"name":"missing document","value":{"activationId":"activation-test-1"},"valid":false},
+    {"name":"missing activation","value":{"documentId":"document-test-1"},"valid":false},
+    {"name":"null activation","value":{"documentId":"document-test-1","activationId":null},"valid":false},
+    {"name":"number activation","value":{"documentId":"document-test-1","activationId":1},"valid":false},
+    {"name":"unknown","value":{"documentId":"document-test-1","activationId":"activation-test-1","generation":1},"valid":false}
+  ],
+  "closes": [
+    {"name":"clean close","value":{"documentId":"document-test-1","revision":0,"discard":false},"valid":true},
+    {"name":"discard","value":{"documentId":"document-test-1","revision":9007199254740991,"discard":true},"valid":true},
+    {"name":"unsafe revision","value":{"documentId":"document-test-1","revision":9007199254740992,"discard":true},"valid":false},
+    {"name":"negative revision","value":{"documentId":"document-test-1","revision":-1,"discard":true},"valid":false},
+    {"name":"missing revision","value":{"documentId":"document-test-1","discard":true},"valid":false},
+    {"name":"missing discard","value":{"documentId":"document-test-1","revision":0},"valid":false},
+    {"name":"null discard","value":{"documentId":"document-test-1","revision":0,"discard":null},"valid":false},
+    {"name":"number discard","value":{"documentId":"document-test-1","revision":0,"discard":1},"valid":false},
+    {"name":"string discard","value":{"documentId":"document-test-1","revision":0,"discard":"true"},"valid":false},
+    {"name":"unknown","value":{"documentId":"document-test-1","revision":0,"discard":false,"path":"other.tabplayer"},"valid":false}
+  ]
+}

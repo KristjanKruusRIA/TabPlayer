@@ -25,6 +25,39 @@ fn asset() -> StoredAsset {
 }
 
 #[test]
+fn take_document_consumes_only_its_candidate() {
+    let mut candidates = CandidateStore::default();
+    let mut original = Project::from_file("source.gp".into(), b"immutable source");
+    let original_asset = asset();
+    let original_id = original_asset.id().unwrap();
+    original.assets.insert(original_id.clone(), original_asset);
+    original.edits.push(backing(&original_id));
+    let path = std::path::PathBuf::from("first.tabplayer");
+    let first = candidates
+        .stage_document(original.clone(), Some(path.clone()))
+        .unwrap();
+    let second = candidates.stage_document(Project::blank(), None).unwrap();
+    let staged = candidates.stage_asset(asset()).unwrap();
+
+    let taken = candidates.take_document(&first.token).unwrap();
+    assert_eq!(taken, (original, Some(path)));
+    assert!(candidates.take_document(&first.token).is_err());
+    assert!(!candidates.cancel_document(&first.token));
+    let mut session = ProjectSession::new(Project::blank(), None).unwrap();
+    candidates
+        .commit_edit(Some(&staged.token), backing(&staged.asset_id), &mut session)
+        .unwrap();
+    assert_eq!(
+        session.asset_bytes(&staged.asset_id).unwrap(),
+        b"encoded audio bytes"
+    );
+    let replaced = candidates
+        .commit_document(&second.token, &mut session)
+        .unwrap();
+    assert_eq!(replaced.project, Project::blank().view());
+}
+
+#[test]
 fn migrates_v1_without_music_change() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("legacy.tabplayer");

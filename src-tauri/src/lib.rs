@@ -9,6 +9,7 @@ pub mod harmony_library;
 pub mod project;
 mod runtime;
 pub mod settings;
+pub mod workspace;
 
 use project::{
     BaseDocument, CandidateStore, DocumentCandidate, EditCommand, Project, ProjectSession,

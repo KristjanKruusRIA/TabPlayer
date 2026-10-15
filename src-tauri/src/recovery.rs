@@ -1016,12 +1016,20 @@ impl RecoveryStore {
     /// Called only for an explicit startup resolution, before committing a new Running epoch.
     /// No original evidence is deleted here, including on a partial-copy failure.
     pub fn preserve_diagnostics(&mut self) -> Result<(), String> {
+        self.preserve_diagnostic_set(false)
+    }
+    /// Preserve a healthy preview too when explicit startup resolution omits candidates.
+    pub(crate) fn preserve_startup_evidence(&mut self) -> Result<(), String> {
+        self.preserve_diagnostic_set(true)
+    }
+    fn preserve_diagnostic_set(&mut self, include_healthy: bool) -> Result<(), String> {
         self.diagnostics_preserved = false;
         let manifest = self.manifest();
         let needs_copy = match &manifest {
             Ok(None) => false,
             Ok(Some(_)) => {
-                !matches!(self.load(),Ok(Some(LoadedRecovery { recovery: ValidatedRecovery { issues, .. }, .. })) if issues.is_empty())
+                include_healthy
+                    || !matches!(self.load(),Ok(Some(LoadedRecovery { recovery: ValidatedRecovery { issues, .. }, .. })) if issues.is_empty())
             }
             Err(_) => true,
         };
@@ -1322,6 +1330,24 @@ mod store_tests {
         store
             .commit(&empty(epoch, generation), SessionLifecycle::Running, retire)
             .unwrap()
+    }
+    #[test]
+    fn ordinary_diagnostics_skip_healthy_checkpoint_but_startup_evidence_preserves_it() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut store = RecoveryStore::acquire(directory.path().to_owned()).unwrap();
+        publish(&mut store, false);
+        let root = directory.path().join("recovery-v1");
+        let manifest = std::fs::read(root.join("manifest.json")).unwrap();
+        store.preserve_diagnostics().unwrap();
+        assert!(!root.join("diagnostic").exists());
+        assert!(!store.diagnostics_preserved);
+        store.preserve_startup_evidence().unwrap();
+        assert_eq!(
+            std::fs::read(root.join("diagnostic/manifest.json")).unwrap(),
+            manifest
+        );
+        assert!(root.join("diagnostic/checkpoint-1.json").exists());
+        assert!(store.diagnostics_preserved);
     }
     #[test]
     fn atomic_manifest_is_only_commit_point() {

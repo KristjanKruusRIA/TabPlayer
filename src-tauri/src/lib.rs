@@ -9,6 +9,7 @@ pub mod harmony_library;
 pub mod project;
 pub mod recovery;
 mod runtime;
+mod session;
 pub mod settings;
 pub mod workspace;
 
@@ -22,7 +23,7 @@ use runtime::{
 };
 use std::{
     path::{Path, PathBuf},
-    sync::Mutex,
+    sync::{Arc, Mutex},
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_dialog::DialogExt;
@@ -67,6 +68,9 @@ pub(crate) fn validate_export_origin(
     workspace: &DocumentWorkspace,
     document: &DocumentRevision,
 ) -> Result<(), String> {
+    if workspace.is_frozen() {
+        return Err("The workspace is completing a session transition.".into());
+    }
     let record = workspace.document(&document.document_id)?;
     if record.revision != document.revision {
         return Err("Document changed; retry with its current revision.".into());
@@ -128,13 +132,13 @@ async fn harmony_library_remove(
 #[tauri::command]
 fn project_snapshot(
     document_id: String,
-    state: State<'_, Mutex<DocumentWorkspace>>,
+    state: State<'_, Arc<Mutex<DocumentWorkspace>>>,
 ) -> Result<DocumentSnapshot, String> {
     state.lock().unwrap().document(&document_id)
 }
 
 #[tauri::command]
-fn workspace_snapshot(state: State<'_, Mutex<DocumentWorkspace>>) -> WorkspaceSnapshot {
+fn workspace_snapshot(state: State<'_, Arc<Mutex<DocumentWorkspace>>>) -> WorkspaceSnapshot {
     state.lock().unwrap().snapshot()
 }
 
@@ -163,7 +167,7 @@ async fn read_document(app: AppHandle) -> Result<Option<DocumentIntake>, String>
             return Ok(None);
         };
         let path = selected.into_path().map_err(|e| e.to_string())?;
-        read_candidate(path, &app.state::<Mutex<DocumentWorkspace>>()).map(Some)
+        read_candidate(path, &app.state::<Arc<Mutex<DocumentWorkspace>>>()).map(Some)
     })
     .await
     .map_err(|error| error.to_string())?
@@ -201,12 +205,16 @@ fn read_candidate(
 #[tauri::command]
 async fn workspace_add(token: String, app: AppHandle) -> Result<WorkspaceSnapshot, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        transition_workspace(
+        let result = transition_workspace(
             &app.state::<runtime::NativeAudio>(),
             &app.state::<export::jobs::ExportJobs>(),
-            &app.state::<Mutex<DocumentWorkspace>>(),
+            &app.state::<Arc<Mutex<DocumentWorkspace>>>(),
             |workspace| workspace.add_document(&token),
-        )
+        );
+        if result.is_ok() {
+            app.state::<session::SessionRuntime>().changed();
+        }
+        result
     })
     .await
     .map_err(|error| error.to_string())?
@@ -218,12 +226,16 @@ async fn workspace_activate(
     app: AppHandle,
 ) -> Result<WorkspaceSnapshot, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        transition_workspace(
+        let result = transition_workspace(
             &app.state::<runtime::NativeAudio>(),
             &app.state::<export::jobs::ExportJobs>(),
-            &app.state::<Mutex<DocumentWorkspace>>(),
+            &app.state::<Arc<Mutex<DocumentWorkspace>>>(),
             |workspace| workspace.activate_document(&document_id),
-        )
+        );
+        if result.is_ok() {
+            app.state::<session::SessionRuntime>().changed();
+        }
+        result
     })
     .await
     .map_err(|error| error.to_string())?
@@ -235,11 +247,10 @@ async fn workspace_close(
     app: AppHandle,
 ) -> Result<WorkspaceSnapshot, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        transition_workspace(
+        app.state::<session::SessionRuntime>().close(
+            documents,
             &app.state::<runtime::NativeAudio>(),
             &app.state::<export::jobs::ExportJobs>(),
-            &app.state::<Mutex<DocumentWorkspace>>(),
-            |workspace| workspace.close_documents(&documents),
         )
     })
     .await
@@ -247,11 +258,13 @@ async fn workspace_close(
 }
 
 #[tauri::command]
-fn new_document(state: State<'_, Mutex<DocumentWorkspace>>) -> Result<DocumentCandidate, String> {
+fn new_document(
+    state: State<'_, Arc<Mutex<DocumentWorkspace>>>,
+) -> Result<DocumentCandidate, String> {
     state.lock().unwrap().stage_document(Project::blank(), None)
 }
 #[tauri::command]
-fn cancel_document(token: String, state: State<'_, Mutex<DocumentWorkspace>>) -> bool {
+fn cancel_document(token: String, state: State<'_, Arc<Mutex<DocumentWorkspace>>>) -> bool {
     state.lock().unwrap().cancel_document(&token)
 }
 
@@ -260,26 +273,41 @@ fn apply_edit(
     document: DocumentRevision,
     command: EditCommand,
     asset_token: Option<String>,
-    state: State<'_, Mutex<DocumentWorkspace>>,
+    state: State<'_, Arc<Mutex<DocumentWorkspace>>>,
+    session: State<'_, session::SessionRuntime>,
 ) -> Result<DocumentSnapshot, String> {
-    state
+    let result = state
         .lock()
         .unwrap()
-        .apply_edit(&document, command, asset_token.as_deref())
+        .apply_edit(&document, command, asset_token.as_deref());
+    if result.is_ok() {
+        session.changed();
+    }
+    result
 }
 #[tauri::command]
 fn undo_edit(
     document: DocumentRevision,
-    state: State<'_, Mutex<DocumentWorkspace>>,
+    state: State<'_, Arc<Mutex<DocumentWorkspace>>>,
+    session: State<'_, session::SessionRuntime>,
 ) -> Result<DocumentSnapshot, String> {
-    state.lock().unwrap().undo(&document)
+    let result = state.lock().unwrap().undo(&document);
+    if result.is_ok() {
+        session.changed();
+    }
+    result
 }
 #[tauri::command]
 fn redo_edit(
     document: DocumentRevision,
-    state: State<'_, Mutex<DocumentWorkspace>>,
+    state: State<'_, Arc<Mutex<DocumentWorkspace>>>,
+    session: State<'_, session::SessionRuntime>,
 ) -> Result<DocumentSnapshot, String> {
-    state.lock().unwrap().redo(&document)
+    let result = state.lock().unwrap().redo(&document);
+    if result.is_ok() {
+        session.changed();
+    }
+    result
 }
 
 fn with_extension(mut path: PathBuf, extension: &str) -> PathBuf {
@@ -345,7 +373,7 @@ async fn save_project(
     app: AppHandle,
 ) -> Result<Option<DocumentSnapshot>, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let workspace = app.state::<Mutex<DocumentWorkspace>>();
+        let workspace = app.state::<Arc<Mutex<DocumentWorkspace>>>();
         let record = workspace.lock().unwrap().document(&document.document_id)?;
         if record.revision != document.revision {
             return Err("Document changed; retry with its current revision.".into());
@@ -368,11 +396,11 @@ async fn save_project(
         } else {
             existing.unwrap()
         };
-        workspace
-            .lock()
-            .unwrap()
-            .save_to_path(&document, path)
-            .map(Some)
+        let result = workspace.lock().unwrap().save_to_path(&document, path);
+        if result.is_ok() {
+            app.state::<session::SessionRuntime>().changed();
+        }
+        result.map(Some)
     })
     .await
     .map_err(|error| error.to_string())?
@@ -398,7 +426,7 @@ async fn export_gp(
         export_document_to_path(
             &app.state::<runtime::NativeAudio>(),
             &app.state::<export::jobs::ExportJobs>(),
-            &app.state::<Mutex<DocumentWorkspace>>(),
+            &app.state::<Arc<Mutex<DocumentWorkspace>>>(),
             &document,
             &path,
             &bytes,
@@ -491,7 +519,7 @@ fn desktop_test_io(
     document_id: Option<String>,
     revision: Option<u64>,
     app: AppHandle,
-    state: State<'_, Mutex<DocumentWorkspace>>,
+    state: State<'_, Arc<Mutex<DocumentWorkspace>>>,
 ) -> Result<serde_json::Value, String> {
     if std::env::var("TABPLAYER_DESKTOP_TEST").as_deref() != Ok("1") {
         return Err("Desktop test hooks are disabled.".into());
@@ -512,13 +540,12 @@ fn desktop_test_io(
                 document_id: document_id.ok_or("Test document address is missing.")?,
                 revision: revision.ok_or("Test document revision is missing.")?,
             };
-            serde_json::to_value(
-                state
-                    .lock()
-                    .unwrap()
-                    .save_to_path(&document, with_extension(path, "tabplayer"))?,
-            )
-            .map_err(|e| e.to_string())
+            let saved = state
+                .lock()
+                .unwrap()
+                .save_to_path(&document, with_extension(path, "tabplayer"))?;
+            app.state::<session::SessionRuntime>().changed();
+            serde_json::to_value(saved).map_err(|e| e.to_string())
         }
         "export" => {
             let document = DocumentRevision {
@@ -542,9 +569,18 @@ fn desktop_test_io(
 pub fn run() {
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .manage(Mutex::new(DocumentWorkspace::new().unwrap()))
         .manage(export::jobs::ExportJobs::default())
         .setup(|app| {
+            let directory = session::session_directory(app.path().app_data_dir()?)?;
+            let session_handle = app.handle().clone();
+            let session = session::SessionRuntime::open(
+                directory,
+                Arc::new(move |status| {
+                    let _ = session_handle.emit("recovery-status", status);
+                }),
+            )?;
+            app.manage(session.workspace());
+            app.manage(session);
             let handle = app.handle().clone();
             let root = app.path().resource_dir()?.join("audio");
             app.manage(runtime::NativeAudio::new(
@@ -559,6 +595,14 @@ pub fn run() {
     let builder = builder.invoke_handler(tauri::generate_handler![
         project_snapshot,
         workspace_snapshot,
+        session::session_startup,
+        session::session_resolve,
+        session::workspace_set_view,
+        session::session_preferences_set,
+        session::recovery_status,
+        session::recovery_retry,
+        session::session_shutdown,
+        session::session_resume,
         read_document,
         new_document,
         cancel_document,
@@ -591,6 +635,14 @@ pub fn run() {
     let builder = builder.invoke_handler(tauri::generate_handler![
         project_snapshot,
         workspace_snapshot,
+        session::session_startup,
+        session::session_resolve,
+        session::workspace_set_view,
+        session::session_preferences_set,
+        session::recovery_status,
+        session::recovery_retry,
+        session::session_shutdown,
+        session::session_resume,
         read_document,
         new_document,
         cancel_document,

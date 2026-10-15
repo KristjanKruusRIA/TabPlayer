@@ -174,6 +174,33 @@ pub struct DocumentWorkspace {
     frozen: bool,
 }
 
+pub(crate) struct PreparedClose {
+    closing: BTreeSet<String>,
+    replacement: Option<DocumentEntry>,
+    pub(crate) active: AudioOwner,
+    revision: u64,
+}
+impl PreparedClose {
+    pub(crate) fn recovery_documents(
+        &self,
+        workspace: &DocumentWorkspace,
+    ) -> Result<Vec<RecoveryDocument>, String> {
+        let mut documents = workspace.recovery_documents()?;
+        documents.retain(|document| !self.closing.contains(&document.document_id));
+        if let Some(entry) = &self.replacement {
+            documents.push(RecoveryDocument {
+                document_id: entry.id.clone(),
+                revision: entry.revision,
+                session: entry.session.checkpoint(),
+                imported_path: entry.intake_path.clone(),
+                saved_file_sha256: entry.saved_file_sha256.clone(),
+                view: entry.view.clone(),
+            });
+        }
+        Ok(documents)
+    }
+}
+
 impl DocumentWorkspace {
     pub fn recovery_documents(&self) -> Result<Vec<RecoveryDocument>, String> {
         self.documents
@@ -459,17 +486,17 @@ impl DocumentWorkspace {
         Ok(self.snapshot())
     }
 
-    pub fn close_documents(
-        &mut self,
+    pub(crate) fn prepare_close(
+        &self,
         documents: &[CloseDocument],
-    ) -> Result<WorkspaceSnapshot, String> {
+    ) -> Result<PreparedClose, String> {
         self.check_admission()?;
         if documents.is_empty() {
             return Err("Choose at least one document to close.".into());
         }
         let mut closing = BTreeSet::new();
         for document in documents {
-            if !closing.insert(document.document_id.as_str()) {
+            if !closing.insert(document.document_id.clone()) {
                 return Err("A document cannot be closed twice.".into());
             }
             let entry = self.check_revision(&DocumentRevision {
@@ -503,19 +530,38 @@ impl DocumentWorkspace {
         } else {
             None
         };
+        let active = next_active.map_or_else(
+            || self.active.clone(),
+            |document_id| AudioOwner {
+                document_id,
+                activation_id: identity("activation"),
+            },
+        );
+        Ok(PreparedClose {
+            closing,
+            replacement,
+            active,
+            revision,
+        })
+    }
+
+    pub(crate) fn commit_close(&mut self, prepared: PreparedClose) -> WorkspaceSnapshot {
         self.documents
-            .retain(|entry| !closing.contains(entry.id.as_str()));
-        if let Some(replacement) = replacement {
+            .retain(|entry| !prepared.closing.contains(&entry.id));
+        if let Some(replacement) = prepared.replacement {
             self.documents.push(replacement);
         }
-        if let Some(id) = next_active {
-            self.active = AudioOwner {
-                document_id: id,
-                activation_id: identity("activation"),
-            };
-        }
-        self.checkpoint_revision = revision;
-        Ok(self.snapshot())
+        self.active = prepared.active;
+        self.checkpoint_revision = prepared.revision;
+        self.snapshot()
+    }
+
+    pub fn close_documents(
+        &mut self,
+        documents: &[CloseDocument],
+    ) -> Result<WorkspaceSnapshot, String> {
+        let prepared = self.prepare_close(documents)?;
+        Ok(self.commit_close(prepared))
     }
 
     pub fn apply_edit(

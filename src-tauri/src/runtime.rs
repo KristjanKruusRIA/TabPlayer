@@ -76,7 +76,7 @@ impl NativeAudio {
             _ => Ok(None),
         }
     }
-    fn prepare(
+    pub(crate) fn prepare(
         &self,
         workspace: &Mutex<DocumentWorkspace>,
         owner: &AudioOwner,
@@ -90,8 +90,14 @@ impl NativeAudio {
         let backing = {
             let workspace = workspace.lock().map_err(|e| e.to_string())?;
             Self::check_owner(&workspace, owner)?;
+            if workspace.is_frozen() {
+                return Err("The workspace is completing a session transition.".into());
+            }
             Self::backing(&settings, &workspace, &owner.document_id)?
         };
+        if plan.generation == u64::MAX || self.service.status().desired_generation == u64::MAX {
+            return Err("Audio generation exhausted; restart TabPlayer before playback.".into());
+        }
         settings.validate()?;
         let original = embedded_bytes.or_else(|| {
             self.embedded
@@ -128,7 +134,7 @@ impl NativeAudio {
         }
         result
     }
-    fn set_mix(
+    pub(crate) fn set_mix(
         &self,
         workspace: &Mutex<DocumentWorkspace>,
         owner: &AudioOwner,
@@ -139,6 +145,9 @@ impl NativeAudio {
         let backing = {
             let workspace = workspace.lock().map_err(|e| e.to_string())?;
             Self::check_owner(&workspace, owner)?;
+            if workspace.is_frozen() {
+                return Err("The workspace is completing a session transition.".into());
+            }
             Self::backing(&settings, &workspace, &owner.document_id)?
         };
         settings.validate()?;
@@ -225,7 +234,7 @@ impl NativeAudio {
         })
     }
 
-    fn command(
+    pub(crate) fn command(
         &self,
         workspace: &Mutex<DocumentWorkspace>,
         owner: &AudioOwner,
@@ -242,6 +251,14 @@ impl NativeAudio {
         {
             let workspace = workspace.lock().map_err(|e| e.to_string())?;
             Self::check_owner(&workspace, owner)?;
+            if workspace.is_frozen()
+                && !matches!(
+                    command,
+                    TransportCommand::Pause { .. } | TransportCommand::Stop { .. }
+                )
+            {
+                return Err("The workspace is completing a session transition.".into());
+            }
         }
         self.service.command(command)
     }
@@ -259,7 +276,7 @@ pub async fn audio_prepare(
 ) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
         app.state::<NativeAudio>().prepare(
-            &app.state::<Mutex<DocumentWorkspace>>(),
+            &app.state::<Arc<Mutex<DocumentWorkspace>>>(),
             &owner,
             plan,
             settings,
@@ -280,7 +297,7 @@ pub async fn audio_set_mix(
 ) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
         app.state::<NativeAudio>().set_mix(
-            &app.state::<Mutex<DocumentWorkspace>>(),
+            &app.state::<Arc<Mutex<DocumentWorkspace>>>(),
             &owner,
             settings,
             generation,
@@ -297,7 +314,7 @@ pub async fn audio_command(
 ) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
         app.state::<NativeAudio>().command(
-            &app.state::<Mutex<DocumentWorkspace>>(),
+            &app.state::<Arc<Mutex<DocumentWorkspace>>>(),
             &owner,
             command,
         )
@@ -376,7 +393,7 @@ pub async fn stage_backing(
             bytes,
             filename,
             &document_id,
-            &app.state::<Mutex<DocumentWorkspace>>(),
+            &app.state::<Arc<Mutex<DocumentWorkspace>>>(),
         )
         .map(Some)
     })
@@ -394,7 +411,7 @@ pub async fn stage_embedded_backing(
             bytes,
             "Embedded backing.audio".into(),
             &document_id,
-            &app.state::<Mutex<DocumentWorkspace>>(),
+            &app.state::<Arc<Mutex<DocumentWorkspace>>>(),
         )
     })
     .await
@@ -404,7 +421,7 @@ pub async fn stage_embedded_backing(
 pub fn cancel_asset(
     document_id: String,
     token: String,
-    workspace: State<'_, Mutex<DocumentWorkspace>>,
+    workspace: State<'_, Arc<Mutex<DocumentWorkspace>>>,
 ) -> Result<bool, String> {
     workspace.lock().unwrap().cancel_asset(&document_id, &token)
 }
@@ -461,7 +478,7 @@ pub async fn export_midi(
         crate::export_document_to_path(
             &app.state::<NativeAudio>(),
             &app.state::<ExportJobs>(),
-            &app.state::<Mutex<DocumentWorkspace>>(),
+            &app.state::<Arc<Mutex<DocumentWorkspace>>>(),
             &document,
             &path,
             &bytes,
@@ -497,7 +514,7 @@ pub async fn export_pdf(
     let ExportCapture { job, projects, .. } = tauri::async_runtime::spawn_blocking(move || {
         launch_app.state::<NativeAudio>().launch_export(
             &launch_app.state::<ExportJobs>(),
-            &launch_app.state::<Mutex<DocumentWorkspace>>(),
+            &launch_app.state::<Arc<Mutex<DocumentWorkspace>>>(),
             &document,
             launch_destination.as_deref(),
             None,
@@ -569,7 +586,7 @@ pub async fn export_audio(
         let audio = launch_app.state::<NativeAudio>();
         let captured = audio.launch_export(
             &launch_app.state::<ExportJobs>(),
-            &launch_app.state::<Mutex<DocumentWorkspace>>(),
+            &launch_app.state::<Arc<Mutex<DocumentWorkspace>>>(),
             &document,
             Some(&launch_path),
             include_backing.then_some(&launch_settings),

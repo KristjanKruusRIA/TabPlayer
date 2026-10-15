@@ -24,18 +24,18 @@
 - Numeric own-busy, hidden pending commit, stale source and rejection: one command, no lease leak or stale error (Task4).
 - Included GP silently losing a nonneutral transform versus frozen WAV/stem processing: block include in both paths, allow explicit omit, preserve sources (Task5/6).
 
-### Task1: Freeze and implement strict shared processing contracts
+### Task 1: Freeze and implement strict shared processing contracts
 
 **Files:** root new tests/backing-processing-protocol.json. TS producer: src/edit-types.ts, src/document-settings.ts, new src/audio/backing-processing.ts and focused tests. Native producer: src-tauri/src/settings.rs, new src-tauri/tests/backing_processing_protocol.rs, and only mechanical processing:None additions at existing BackingSettings literals discovered under src-tauri/src and tests. No DSP edits yet.
 
 **Interfaces:** TS BackingFilter/BackingProcessing and optional BackingSettings.processing per spec; defaultBackingProcessing():BackingProcessing, backingProcessingKey(processing:BackingProcessing|null|undefined):string. Rust enum BackingFilter variants None(default), BassEnhance/BassAttenuation/MediumEnhance/MediumAttenuation/HighEnhance/HighAttenuation, camelCase serde. BackingProcessing {semitones:f64,cents:f64,filter:BackingFilter}, Default and validate()->Result<(),String>. BackingSettings.processing:Option<BackingProcessing> default/skipNone.
 
-- [ ] Root authors literal protocol with legacy missing/null, all7modes, limits/cancellation/decimal integer spellings, malformed keys/types/modes/fractions/out-of-range; preserve P16 fixtures. Independently inspect fixture expectations before distributing.
+- [x] Root authors literal protocol with legacy missing/null, all7modes, limits/cancellation/decimal integer spellings, malformed keys/types/modes/fractions/out-of-range; preserve P16 fixtures. Independently inspect fixture expectations before distributing.
 - [ ] Producers write protocol/direct nonfinite/neutral-normalization tests; run focused RED before implementation. TS valid legacy remains valid; Rust new processing objects initially reject under old strict serde. Helper keys distinguish individual pair but equate missing/null/explicit0/0/none.
 - [ ] Implement only strict types/defaults/validation/helpers and mechanical native literals. Keep old serialization missing fields and source data unchanged; BackingProcessing is one optional nested object, no schema migration/new IPC.
 - [ ] Run TS npx vitest run src/audio/backing-processing.test.ts src/document-settings.test.ts --maxWorkers=2 --testTimeout=15000 plus npm run typecheck; native cargo +1.88.0 test --locked --manifest-path src-tauri/Cargo.toml --test backing_processing_protocol plus existing reference_sync_protocol and focused settings/edit wire checks. Record exact commands/RED/GREEN/hashes; obtain fresh scoped contract review, release paths/Cargo. Root accepts scoped checkpoint before downstream GREEN.
 
-### Task2: Implement independently testable six-mode backing filter
+### Task 2: Implement independently testable six-mode backing filter
 
 **Files:** src-tauri/src/audio/dsp.rs only, including bounded backing_filter_tests unit module.
 
@@ -45,7 +45,7 @@
 - [ ] Implement low180Hz shelf, mid1000Hz peak Q0.7 and high4000Hz shelf +/-6dB, existing0.45rate clamp, independent channel state, direct none bypass. No normalization/limiter/tail plumbing yet.
 - [ ] Run cargo +1.88.0 test --locked --manifest-path src-tauri/Cargo.toml --lib backing_filter_tests and scoped fmt check. Supply RED/GREEN/report/hashes/fresh source review; release DSP/Cargo before Task3 native edits.
 
-### Task3: Integrate duration-preserving pitch, voice-owned filtering and native installs
+### Task 3: Integrate duration-preserving pitch, voice-owned filtering and native installs
 
 **Files:** src-tauri/src/audio/backing.rs, renderer.rs, device.rs; src-tauri/src/runtime.rs, focused runtime/native processing tests and new src-tauri/tests/backing_processing.rs. P16 reference_sync.rs original tests unchanged except additional new scoped cases if needed.
 
@@ -58,7 +58,7 @@
 - [ ] Thread frozen processing through native device and runtime/export renderer install. Test live-core versus backing-stem PCM and unchanged score stem/events, device-rate reconstruction, omitted backing timing, stale source/revision/generation and invalid native input.
 - [ ] Run cargo +1.88.0 test --locked --manifest-path src-tauri/Cargo.toml --test backing_processing, incumbent audio_backing/reference_sync and focused lib/runtime tests with exact filters after reviewing module names. Root may grant targeted tests; no whole suite yet. Demonstrate negative control sensitivity then restore. Fresh native review, report/hashes, release Rust/Cargo.
 
-### Task4: Add the generated Backing controls and semantic history key
+### Task 4: Add the generated Backing controls and semantic history key
 
 **Files:** new src/audio/BackingProcessingControls.tsx and test, BackingPanel.tsx/test, App.tsx/test only actual visibility prop, controller.ts/test key, NativePlaybackController processing-focused test; minimal incumbent stylesheet rules if needed. Consumes Task1 helpers; may run parallel with Tasks2/3 after Task1 acceptance.
 
@@ -69,7 +69,7 @@
 - [ ] Implement one small component/local refs/state, inherited styles/white focus, labelled paired fields/select/helper. Use full settings snapshot before await and existing operation lease. No general framework or new App layout/dock behavior.
 - [ ] Test settled processing edit invokes NativePlaybackController setMix at same generation/timing/source/notation; gain-only still works; no new tempo generation. Run focused Vitest for processing controls/panel/controller/playback, typecheck; exact commands/hashes/RED/GREEN, fresh source/a11y/lifecycle review, release paths.
 
-### Task5: Guard GP include without rewriting source audio
+### Task 5: Guard GP include without rewriting source audio
 
 **Files:** src/interchange/backing-projection.ts and focused backing-projection tests only. May parallel Tasks2–4 after Task1.
 
@@ -79,7 +79,7 @@
 - [ ] Implement one small audibly-neutral predicate/guard reused at both boundaries before current-audio read if possible under incumbent facade. Preserve full route/selection/current-byte validations and callback purity. No decoder/encoding/GPIF processing fields.
 - [ ] Run npx vitest run src/interchange/backing-projection.test.ts src/export/useExportCoordinator.test.ts src/export/useExportCoordinator.reference-sync.test.ts --maxWorkers=2 --testTimeout=15000 (verify exact incumbent test paths first); fresh scoped review/hashes/report, release.
 
-### Task6: Root coherent verification and bounded actual acceptance
+### Task 6: Root coherent verification and bounded actual acceptance
 
 **Files:** reviewed inert new tests/desktop/backing-processing-fixture.mjs and parity-backing-processing.mjs; docs/validation/2026-10-16-gp8-backing-processing.md and supported current P17/P18 overlay updates only.
 

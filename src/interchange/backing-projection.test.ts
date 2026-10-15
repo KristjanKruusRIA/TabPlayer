@@ -7,7 +7,7 @@ import {unequalPickupScore} from '../audio/pickup.performance.fixture';
 import {backingLocationsForScore,buildPlaybackPlan} from '../audio/plan';
 import {scoreTickToAudioMs} from '../audio/backing-timeline';
 import {defaultDocumentSettings,defaultMix} from '../document-settings';
-import type {BackingSettings} from '../edit-types';
+import type {BackingFilter,BackingSettings} from '../edit-types';
 import type {ExportSelection} from '../export/types';
 import {exportGpInterchange,loadInterchangeScore} from './gp';
 import {gpBackingSelectionIssue,projectGpDocument} from './backing-projection';
@@ -18,11 +18,36 @@ function score120(){const score=music();score.masterBars[0].tempoAutomations=[mo
 function project(score:model.Score,value:BackingSettings|null,selection=full,include=true,asset:Uint8Array|null=bytes){return projectGpDocument({score,settings:{...defaultDocumentSettings(),backing:value},selection,backing:include,bytes:asset});}
 const points=(score:model.Score)=>score.exportFlatSyncPoints().sort((a,b)=>a.millisecondOffset-b.millisecondOffset);
 const round=(score:model.Score)=>loadInterchangeScore(exportGpInterchange(score,settings),settings);
+const processingIssue='Backing pitch and filters cannot be stored in this Guitar Pro export. Clear Include backing audio to export notation.';
+const filters:BackingFilter[]=['none','bassEnhance','bassAttenuation','mediumEnhance','mediumAttenuation','highEnhance','highAttenuation'];
 function repeated(){const score=score120();score.masterBars[0].isRepeatStart=true;score.masterBars[1].repeatCount=2;score.rebuildRepeatGroups();score.finish(settings);return score;}
 function grace(){const score=score120(),voice=score.tracks[0].staves[0].bars[0].voices[0],beat=new model.Beat();beat.duration=model.Duration.Eighth;beat.graceType=model.GraceType.BeforeBeat;beat.isEmpty=false;const note=new model.Note();note.string=1;note.fret=0;beat.addNote(note);beat.voice=voice;voice.beats.unshift(beat);score.finish(settings);return score;}
 function physicalAt(score:model.Score,tick:number){const anchors=score.exportFlatSyncPoints().map(p=>({bar:p.barIndex,occurrence:p.barOccurence,ratio:p.barPosition,audioMs:p.millisecondOffset})),offsetMs=Math.max(0,...anchors.map(p=>-p.audioMs));return scoreTickToAudioMs(buildPlaybackPlan(score,1),{offsetMs,anchors:anchors.map(p=>({...p,audioMs:p.audioMs+offsetMs}))},tick);}
 
 describe('current document GP backing projection',()=>{
+  it.each(filters.flatMap(filter=>[false,true].map(direct=>({filter,direct}))))('guards included $filter processing (direct=$direct) for full and excerpt selections',({filter,direct})=>{
+    for(const selection of [full,{tracks:[0],range:{first:1,last:1}}])for(const [semitones,cents]of [[1,-50],[-1,50],[0,1],[0,0]]){
+      if(filter==='none'&&semitones===0&&cents===0)continue;
+      const score=score120(),value=backing({processing:{semitones,cents,filter}}),before=model.JsonConverter.scoreToJson(score),stored=structuredClone(value);
+      if(direct){expect(()=>project(score,value,selection)).toThrow(processingIssue);expect(()=>project(score,value,selection,true,null)).toThrow(processingIssue);}
+      else expect(gpBackingSelectionIssue(score,value,selection)).toBe(processingIssue);
+      expect(model.JsonConverter.scoreToJson(score)).toBe(before);expect(value).toEqual(stored);
+    }
+  });
+  it.each([[0,0],[-1,100],[1,-100]])('includes unchanged raw bytes for neutral pair %s/%s', (semitones,cents)=>{
+    for(const selection of [full,{tracks:[0],range:{first:1,last:1}}]){
+      const score=score120(),value=backing({processing:{semitones,cents,filter:'none'}}),stored=structuredClone(value),out=project(score,value,selection);
+      expect(gpBackingSelectionIssue(score,value,selection)).toBeNull();expect(out.backingTrack?.rawAudioFile).toEqual(bytes);expect(out.backingTrack?.rawAudioFile).not.toBe(bytes);
+      expect(round(out).backingTrack?.rawAudioFile).toEqual(bytes);expect(value).toEqual(stored);
+    }
+  });
+  it.each(filters)('explicit omission bypasses %s processing, unavailable bytes and invalid mapping without mutation',filter=>{
+    const score=repeated();score.backingTrack=new model.BackingTrack();score.backingTrack.rawAudioFile=new Uint8Array([1,2,3]);score.applyFlatSyncPoints([{barIndex:1,barOccurence:99,barPosition:.5,millisecondOffset:3000}]);
+    const value=backing({processing:{semitones:12,cents:100,filter},offsetMs:NaN,anchors:[{bar:999,occurrence:99,ratio:2,audioMs:-1}]}),stored=structuredClone(value),before=model.JsonConverter.scoreToJson(score);
+    const input={score,settings:{...defaultDocumentSettings(),backing:value},selection:{tracks:[0],range:{first:1,last:1}},backing:false,get bytes():Uint8Array|null{throw new Error('Omission must not read bytes.');}},out=projectGpDocument(input);
+    expect(out.masterBars).toHaveLength(1);expect(out.backingTrack).toBeUndefined();expect(out.exportFlatSyncPoints()).toEqual([]);expect(round(out).backingTrack).toBeUndefined();
+    expect(model.JsonConverter.scoreToJson(score)).toBe(before);expect(value).toEqual(stored);expect(score.backingTrack.rawAudioFile).toEqual(new Uint8Array([1,2,3]));
+  });
   it('detaches current bytes and replaces stale original sync without changing score, settings or assets',()=>{
     const score=score120();score.backingTrack=new model.BackingTrack();score.backingTrack.rawAudioFile=new Uint8Array([1,2,3]);score.applyFlatSyncPoints([{barIndex:0,barOccurence:9,barPosition:.5,millisecondOffset:999}]);
     const value=backing({offsetMs:-120,anchors:[{bar:0,occurrence:0,ratio:1/3,audioMs:2000}]}),before=model.JsonConverter.scoreToJson(score),stored=structuredClone(value),asset=bytes.slice();

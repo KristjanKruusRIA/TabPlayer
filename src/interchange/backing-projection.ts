@@ -13,6 +13,10 @@ import type {ReferenceLocation} from '../audio/reference-sync-types';
 export interface GpBackingProjectionInput {
   score:model.Score;settings:DocumentSettings;bytes:Uint8Array|null;selection:ExportSelection;backing:boolean;
 }
+function guardBackingProcessing(backing:BackingSettings):void {
+  const processing=backing.processing;
+  if(processing&&(processing.semitones+processing.cents/100!==0||processing.filter!=='none'))throw new Error('Backing pitch and filters cannot be stored in this Guitar Pro export. Clear Include backing audio to export notation.');
+}
 function clearBacking(score:model.Score):void {
   score.backingTrack=undefined;
   for(const bar of score.masterBars)bar.syncPoints=undefined;
@@ -76,6 +80,7 @@ function projection(score:model.Score,backing:BackingSettings,selection:ExportSe
 export function projectGpDocument(input:GpBackingProjectionInput):model.Score {
   const backing=input.settings.backing;
   if(!input.backing||!backing){const selected=selectScore(detached(input.score),input.selection);clearBacking(selected);return selected;}
+  guardBackingProcessing(backing);
   const asset=input.bytes??(backing.assetId==='embedded'?input.score.backingTrack?.rawAudioFile:null);
   if(!asset?.length)throw new Error('Current backing audio bytes are required for GP export.');
   const result=projection(input.score,backing,input.selection);
@@ -83,5 +88,5 @@ export function projectGpDocument(input:GpBackingProjectionInput):model.Score {
 }
 export function gpBackingSelectionIssue(score:model.Score,backing:BackingSettings|null,selection:ExportSelection):string|null {
   if(!backing)return null;
-  try{projection(score,backing,selection);return null;}catch(error){return error instanceof Error?error.message:String(error);}
+  try{guardBackingProcessing(backing);projection(score,backing,selection);return null;}catch(error){return error instanceof Error?error.message:String(error);}
 }

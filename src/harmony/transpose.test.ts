@@ -116,9 +116,9 @@ it('permits key-only changes on rests and rejects incomplete staff or voice rang
   const range:MusicSelection={kind:'range',range:{start:{bar:0,tick:0},end:{bar:1,tick:0},lanes:[{track:0,staff:0,voice:0}]}};
   expect(()=>prepareHarmonyTranspose(score,command(range,{kind:'semitones',semitones:2},true),2)).toThrow(/staff|voice|complete/i);range.range.lanes.push({track:0,staff:1,voice:0});expect(()=>prepareHarmonyTranspose(score,command(range,{kind:'semitones',semitones:2},true),2)).toThrow(/staff|voice|complete/i);
 });
-it('records the existing public transposed-trill alternate-pitch limitation separately from primary MIDI success',()=>{
+it('transposes written trill pitches while emitting the sounding base and alternate',()=>{
   const score=piano(),staff=score.tracks[0].staves[0],note=beat(score).notes[0];staff.transpositionPitch=12;note.trillValue=62;
-  const result=prepareHarmonyTranspose(score,command(selected(address()),{kind:'semitones',semitones:1}),2),notes=midiNotes(exportMidi(result,{tracks:[0],range:{first:0,last:0}}));expect(beat(result).notes[0].realValue).toBe(49);expect(beat(result).notes[0].trillValue).toBe(63);expect(notes[0][0]).toBe(49);expect(notes.some(event=>event[0]===63)).toBe(true);
+  const before=fingerprint(score),result=prepareHarmonyTranspose(score,command(selected(address()),{kind:'semitones',semitones:1}),2),notes=midiNotes(exportMidi(result,{tracks:[0],range:{first:0,last:0}}));expect(beat(result).notes[0].octave*12+beat(result).notes[0].tone).toBe(61);expect(beat(result).notes[0].realValue).toBe(49);expect(beat(result).notes[0].trillValue).toBe(63);expect(notes.map(event=>event[0])).toEqual([49,51,49,51,49,51,49,51,48,48,48]);expect(fingerprint(score)).toBe(before);
 });
 it('clears newly open fingers and nonpositive shifted barres while keeping the original definition exact',()=>{
   const score=music(),value:HarmonyChord={...definition(),name:'F',recipe:{root:{step:3,alteration:0},formula:'major',alterations:[],omissions:[],bass:null},frets:[1,1,2,3,3,1],fingers:[1,1,2,3,4,1],barreFrets:[1]};

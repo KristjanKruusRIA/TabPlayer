@@ -6,6 +6,7 @@ import type { BackingSettings } from '../edit-types';
 import type { Articulation, MeasureOccurrence, PlanMidiEvent, PlanNote, PlanTempo, PlaybackPlan } from './types';
 import { scoreFromJson } from '../model-clone';
 import { gpControllerEvents, prepareGpMidiScore } from '../interchange/automation';
+import { preparePitchedGpScore } from '../interchange/pitched';
 import { buildPerformedBeats } from './performed-beats';
 import type { ReferenceLocation } from './reference-sync-types';
 
@@ -20,6 +21,7 @@ function cloneWithLinks(score: model.Score) {
 // 1.8.4 multiplies negative whole-note enum values by the mark count instead of
 // dividing their whole-note multiplier. Normalize only the transient MIDI model.
 export function prepareMidiScore(score: model.Score): model.Score {
+  score = preparePitchedGpScore(score, settings);
   const original = beatsOf(score);
   if (!original.some(b => b.duration < 0 && b.tremoloPicking)) return score;
   const copy = cloneWithLinks(score), byId = new Map(original.map(b => [b.id, b]));

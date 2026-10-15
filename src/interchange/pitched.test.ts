@@ -128,11 +128,11 @@ describe('pitched GP transposition interchange',()=>{
     expect(notes(prepared).slice(2).map(note=>[note.string,note.fret,note.percussionArticulation])).toEqual([[6,3,-1],[6,3,-1],[-1,-1,91],[-1,-1,91]]);
     expect(model.JsonConverter.scoreToJson(source)).toBe(before);
   });
-  it.each([{transpose:12,sound:[48,62]},{transpose:-12,sound:[72,62]}])('preserves current absolute trill playback with sounding offset $transpose',({transpose,sound})=>{
+  it.each([{transpose:12,sound:[48,50],legacy:[48,62]},{transpose:-12,sound:[72,74],legacy:[72,62]}])('preserves the authored trill interval with sounding offset $transpose',({transpose,sound,legacy})=>{
     const source=piano(transpose,0,[60]),note=notes(source)[0];note.trillValue=62;note.trillSpeed=model.Duration.Sixteenth;
     const prepared=preparePitchedGpScore(source,settings),reopened=roundTrip(prepared);
-    // Public/native generation currently applies staff transposition only to the base note.
-    expect([...new Set(smfKeys(source))]).toEqual(sound);expect(smfKeys(source)).toHaveLength(16);
-    expect(smfKeys(prepared)).toEqual(smfKeys(source));expect(smfKeys(reopened)).toEqual(smfKeys(source));expect(notes(prepared)[0].trillValue).toBe(62);expect(note.trillValue).toBe(62);
+    // Legacy unprepared public generation applies staff transposition only to the base note.
+    expect([...new Set(smfKeys(source))]).toEqual(legacy);expect(smfKeys(source)).toHaveLength(16);
+    expect(smfKeys(prepared)).toEqual(Array.from({length:16},(_,i)=>sound[i%2]));expect(smfKeys(reopened)).toEqual(smfKeys(prepared));expect(notes(prepared)[0].trillValue).toBe(sound[1]);expect(note.trillValue).toBe(62);
   });
 });

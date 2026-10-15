@@ -7,6 +7,7 @@ import { blankProject } from '../project';
 import selectionProtocol from '../../tests/selection-playback-protocol.json';
 import type { PlaybackPlan } from './types';
 import {captureNoteLinks} from '../editor/links';
+import {preparePitchedGpScore} from '../interchange/pitched';
 
 it('performed_map_accepts_missing_empty_and_pre_measure_grace_but_rejects_null',()=>{
   const plan=structuredClone(selectionProtocol.plan) as PlaybackPlan;
@@ -490,6 +491,40 @@ it('picked_fingered_tapped_and_harmonic_articulations_are_explicit', () => {
   const picked=note(score,0,0),fingered=note(score,0,1),tapped=note(score,0,2),harmonic=note(score,0,3);
   picked.beat.pickStroke=model.PickStroke.Down;fingered.rightHandFinger=model.Fingers.IndexFinger;tapped.isLeftHandTapped=true;harmonic.harmonicType=model.HarmonicType.Natural;harmonic.harmonicValue=12;
   score.finish(settings);const plan=agree(score);expect(plan.notes.map(n=>n.articulation)).toEqual(['picked','fingered','tapped','harmonic']);
+});
+
+it('pitched_preparers_normalize_once_preserve_display_and_return_neutral_identity',()=>{
+  const neutral=authored(1);note(neutral,0,0);neutral.finish(settings);
+  expect(preparePitchedGpScore(neutral,settings)).toBe(neutral);expect(prepareMidiScore(neutral)).toBe(neutral);
+  for(const prepare of [(score:model.Score)=>preparePitchedGpScore(score,settings),prepareMidiScore]) {
+    const score=authored(1),staff=score.tracks[0].staves[0],n=note(score,0,0);staff.stringTuning.tunings=[];staff.transpositionPitch=12;staff.displayTranspositionPitch=7;
+    n.string=-1;n.fret=-1;n.octave=5;n.tone=0;n.trillValue=62;n.trillSpeed=model.Duration.Sixteenth;score.finish(settings);n.dynamics=3;
+    const json=model.JsonConverter.scoreToJson(score),links=captureNoteLinks(score),safe=prepare(score),normalized=safe.tracks[0].staves[0].bars[0].voices[0].beats[0].notes[0];
+    expect(normalized).toMatchObject({id:n.id,octave:4,tone:0,trillValue:50,dynamics:3});expect(safe.tracks[0].staves[0]).toMatchObject({transpositionPitch:0,displayTranspositionPitch:7});
+    expect(preparePitchedGpScore(safe,settings)).toBe(safe);expect(prepareMidiScore(safe)).toBe(safe);expect(captureNoteLinks(safe)).toEqual(links);
+    expect(model.JsonConverter.scoreToJson(score)).toBe(json);expect(captureNoteLinks(score)).toEqual(links);
+  }
+});
+
+it('pitched_and_negative_tremolo_preparation_composes_without_changing_duration_ids_or_links',()=>{
+  const score=authored(),staff=score.tracks[0].staves[0];staff.stringTuning.tunings=[];staff.transpositionPitch=12;staff.displayTranspositionPitch=7;score.masterBars[0].timeSignatureNumerator=8;
+  const a=note(score,0,0),b=note(score,1,0);a.beat.voice.beats.splice(1);a.beat.duration=model.Duration.DoubleWhole;
+  for(const n of [a,b]){n.string=-1;n.fret=-1;n.octave=5;n.tone=0;}
+  a.trillValue=62;a.trillSpeed=model.Duration.Sixteenth;a.beat.tremoloPicking=new model.TremoloPickingEffect();a.beat.tremoloPicking.marks=4;
+  score.finish(settings);a.tieDestination=b;b.tieOrigin=a;b.isTieDestination=true;a.dynamics=3;b.dynamics=6;
+  const json=model.JsonConverter.scoreToJson(score),links=captureNoteLinks(score);
+  for(const safe of [prepareMidiScore(score),prepareMidiScore(preparePitchedGpScore(score,settings))]) {
+    const first=safe.tracks[0].staves[0].bars[0].voices[0].beats[0],destination=safe.tracks[0].staves[0].bars[1].voices[0].beats[0].notes[0];
+    expect(first).toMatchObject({id:a.beat.id,duration:model.Duration.Whole,displayDuration:7680,playbackDuration:7680});
+    expect(first.notes[0]).toMatchObject({id:a.id,octave:4,tone:0,trillValue:50,dynamics:3});expect(destination).toMatchObject({id:b.id,octave:4,tone:0,dynamics:6});
+    expect(first.notes[0].tieDestination).toBe(destination);expect(destination.tieOrigin).toBe(first.notes[0]);expect(captureNoteLinks(safe)).toEqual(links);
+    expect(first.tremoloPicking!.getDurationAsTicks(first.duration)*first.playbackDuration/3840).toBe(480);
+    expect(safe.tracks[0].staves[0]).toMatchObject({transpositionPitch:0,displayTranspositionPitch:7});
+    expect(prepareMidiScore(safe)).toBe(safe);expect(preparePitchedGpScore(safe,settings)).toBe(safe);
+    const plan=buildPlaybackPlan(safe,7);expect(plan.notes.every(n=>n.key===48||n.key===50)).toBe(true);expect(plan.durationTick).toBe(11520);
+    expect(buildPlaybackPlan(score,7)).toEqual(plan);
+  }
+  expect(model.JsonConverter.scoreToJson(score)).toBe(json);expect(captureNoteLinks(score)).toEqual(links);expect(a.tieDestination).toBe(b);
 });
 
 it('negative_tremolo_hosts_normalize_public_fields_and_keep_rhythm_ids_links', () => {

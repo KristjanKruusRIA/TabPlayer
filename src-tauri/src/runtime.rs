@@ -41,6 +41,10 @@ mod protected_runtime_tests;
 #[path = "reference_export_tests.rs"]
 mod reference_export_tests;
 
+#[cfg(test)]
+#[path = "backing_processing_runtime_tests.rs"]
+mod backing_processing_runtime_tests;
+
 struct ExportCapture {
     job: JobHandle,
     backing: Option<Vec<u8>>,
@@ -737,7 +741,12 @@ pub async fn export_audio(
                     .backing
                     .as_ref()
                     .ok_or("Backing settings are missing.")?;
-                renderer.install_backing(audio, map, backing.mix.clone())?;
+                renderer.install_processed_backing(
+                    audio,
+                    map,
+                    backing.mix.clone(),
+                    backing.processing.clone().unwrap_or_default(),
+                )?;
             }
             let format = request.format;
             let mut render = AudioExportRender::new(renderer, &plan, request)?;

@@ -11,7 +11,7 @@ use super::{
         pitch_at, select_region, voice_id_for_note, voice_id_for_track,
     },
 };
-use crate::settings::{ChannelMix, DocumentSettings};
+use crate::settings::{BackingProcessing, ChannelMix, DocumentSettings};
 use rustysynth::{Synthesizer, SynthesizerSettings};
 use std::{
     collections::{HashMap, VecDeque},
@@ -1188,11 +1188,20 @@ impl Renderer {
         map: BackingMap,
         mix: ChannelMix,
     ) -> Result<(), String> {
+        self.install_processed_backing(audio, map, mix, BackingProcessing::default())
+    }
+    pub fn install_processed_backing(
+        &mut self,
+        audio: Arc<DecodedAudio>,
+        map: BackingMap,
+        mix: ChannelMix,
+        processing: BackingProcessing,
+    ) -> Result<(), String> {
         if matches!(self.tempo, RenderTempo::Fixed { .. }) {
             return Err("Fixed tempo is unavailable while a backing track is present.".into());
         }
         validate_mix(&mix)?;
-        let mut voice = BackingVoice::new(audio, map, self.rate)?;
+        let mut voice = BackingVoice::new_with_processing(audio, map, self.rate, processing)?;
         voice.seek(self.seconds);
         let any_solo = mix.solo || self.mix.channels.iter().any(|c| c.mix.solo);
         for channel in &mut self.mix.channels {
@@ -1251,6 +1260,9 @@ impl Renderer {
     }
     pub fn begin_tail(&mut self) {
         self.tail = true;
+        if let Some(backing) = &mut self.backing {
+            backing.reset_filter();
+        }
         let tick = self.timeline.seconds_to_tick(self.seconds);
         for slot in &self.active {
             if let Some(voice) = &mut self.slots[*slot] {

@@ -1719,7 +1719,13 @@ impl AudioService {
             } else {
                 BackingMap::new(anchors, offset, &document.plan)?
             };
-            renderer.install_backing(audio.clone(), map, mix)?;
+            let processing = document
+                .settings
+                .backing
+                .as_ref()
+                .and_then(|backing| backing.processing.clone())
+                .unwrap_or_default();
+            renderer.install_processed_backing(audio.clone(), map, mix, processing)?;
         }
         Ok(Box::new(renderer))
     }
@@ -1827,10 +1833,21 @@ impl AudioService {
             (None, None) => false,
             _ => true,
         };
+        let processing_changed = old
+            .settings
+            .backing
+            .as_ref()
+            .and_then(|backing| backing.processing.clone())
+            .unwrap_or_default()
+            != settings
+                .backing
+                .as_ref()
+                .and_then(|backing| backing.processing.clone())
+                .unwrap_or_default();
         let presence_changed = backing_bytes
             .as_ref()
             .is_some_and(|bytes| bytes.is_some() != old.backing.is_some());
-        if voice_changed || map_changed || presence_changed {
+        if voice_changed || map_changed || presence_changed || processing_changed {
             let resources = if voice_changed {
                 Arc::new(AudioResources::load_for_requests(
                     &self.root,
@@ -2154,6 +2171,170 @@ mod reference_tests {
                 frames: Arc::new(vec![[0.0; 2]; 192_000]),
             })),
             practice: PracticeSettings::default(),
+        }
+    }
+    #[test]
+    fn processing_mix_reuses_source_and_resources_and_queues_preserved_install() {
+        let mut original = document();
+        original.backing = Some(Arc::new(DecodedAudio {
+            sample_rate: 48_000,
+            channels: 2,
+            frames: Arc::new(
+                (0..192_000)
+                    .map(|n| {
+                        let x = (std::f64::consts::TAU * 440.0 * n as f64 / 48_000.0).sin() as f32
+                            * 0.05;
+                        [x, -x]
+                    })
+                    .collect(),
+            ),
+        }));
+        original.practice.tempo = PracticeTempo::Relative { ratio: 0.5 };
+        let mut transport = CallbackTransport::headless(48_000);
+        transport.install_with_practice(
+            AudioService::renderer(&original, 48_000).unwrap(),
+            1,
+            false,
+            original.practice,
+        );
+        transport
+            .command(TransportCommand::PlayRange {
+                generation: 1,
+                start_tick: 480.0,
+                end_tick: Some(3360.0),
+            })
+            .unwrap();
+        transport
+            .command(TransportCommand::SetLoop {
+                generation: 1,
+                start_tick: 480.0,
+                end_tick: 3360.0,
+            })
+            .unwrap();
+        transport.render_into(&mut [[0.0; 2]; 512]);
+        let before = transport.status();
+        let shared = Arc::new(SharedStatus::new());
+        shared.desired.store(1, Ordering::Release);
+        let (producer, mut commands) = HeapRb::new(CONTROL_CAPACITY).split();
+        let (manager, _requests) = mpsc::channel();
+        let service = AudioService {
+            root: PathBuf::new(),
+            shared,
+            control: Mutex::new(ControlState {
+                producer: Some(producer),
+                document: Some(original.clone()),
+                rate: 48_000,
+                device: None,
+                next_barrier: 0,
+            }),
+            manager,
+        };
+        let mut candidate = original.settings.clone();
+        candidate.backing.as_mut().unwrap().processing = Some(crate::settings::BackingProcessing {
+            semitones: 12.0,
+            cents: 0.0,
+            filter: crate::settings::BackingFilter::BassEnhance,
+        });
+        service.set_mix(candidate.clone(), 1).unwrap();
+        let Some(CallbackCommand::Install {
+            renderer,
+            generation,
+            preserve,
+            practice,
+        }) = commands.try_pop()
+        else {
+            panic!("processing must install a prepared renderer")
+        };
+        assert_eq!(generation, 1);
+        assert!(preserve);
+        transport.install_with_practice(renderer, generation, preserve, practice);
+        let after = transport.status();
+        assert_eq!(after.tick, before.tick);
+        assert_eq!(after.generation, before.generation);
+        assert_eq!(after.practice, before.practice);
+        assert_eq!(after.range, before.range);
+        assert_eq!(after.r#loop, before.r#loop);
+        let mut pcm = vec![[0.0; 2]; 48_000];
+        transport.render_into(&mut pcm);
+        let crossings: Vec<_> = pcm[4800..]
+            .windows(2)
+            .enumerate()
+            .filter_map(|(i, w)| {
+                (w[0][0] <= 0.0 && w[1][0] > 0.0)
+                    .then(|| i as f64 - w[0][0] as f64 / (w[1][0] - w[0][0]) as f64)
+            })
+            .collect();
+        let hz =
+            (crossings.len() - 1) as f64 * 48_000.0 / (crossings.last().unwrap() - crossings[0]);
+        assert!(
+            (hz - 880.0).abs() <= 2.64,
+            "installed processing frequency {hz}"
+        );
+        {
+            let state = service.control.lock().unwrap();
+            let next = state.document.as_ref().unwrap();
+            assert!(Arc::ptr_eq(
+                next.backing.as_ref().unwrap(),
+                original.backing.as_ref().unwrap()
+            ));
+            assert!(Arc::ptr_eq(&next.resources, &original.resources));
+            assert!(Arc::ptr_eq(&next.plan, &original.plan));
+            assert_eq!(next.practice, original.practice);
+        }
+        candidate.backing.as_mut().unwrap().mix.gain = 0.25;
+        service.set_mix(candidate.clone(), 1).unwrap();
+        assert!(matches!(
+            commands.try_pop(),
+            Some(CallbackCommand::Mix { generation: 1, .. })
+        ));
+        candidate
+            .backing
+            .as_mut()
+            .unwrap()
+            .processing
+            .as_mut()
+            .unwrap()
+            .cents = 0.5;
+        assert!(service.set_mix(candidate, 1).is_err());
+        assert!(commands.try_pop().is_none());
+    }
+    #[test]
+    fn processed_device_rate_reconstruction_uses_frozen_settings() {
+        let mut original = document();
+        original.backing = Some(Arc::new(DecodedAudio {
+            sample_rate: 48_000,
+            channels: 2,
+            frames: Arc::new(
+                (0..192_000)
+                    .map(|n| {
+                        let x = (std::f64::consts::TAU * 440.0 * n as f64 / 48_000.0).sin() as f32
+                            * 0.05;
+                        [x, x]
+                    })
+                    .collect(),
+            ),
+        }));
+        original.settings.backing.as_mut().unwrap().processing =
+            Some(crate::settings::BackingProcessing {
+                semitones: -12.0,
+                cents: 0.0,
+                filter: crate::settings::BackingFilter::HighAttenuation,
+            });
+        for rate in [44_100, 48_000] {
+            let mut renderer = AudioService::renderer(&original, rate).unwrap();
+            let mut pcm = vec![[0.0; 2]; rate as usize];
+            renderer.render_into(&mut pcm);
+            let crossings: Vec<_> = pcm[rate as usize / 4..]
+                .windows(2)
+                .enumerate()
+                .filter_map(|(i, w)| {
+                    (w[0][0] <= 0.0 && w[1][0] > 0.0)
+                        .then(|| i as f64 - w[0][0] as f64 / (w[1][0] - w[0][0]) as f64)
+                })
+                .collect();
+            let hz = (crossings.len() - 1) as f64 * rate as f64
+                / (crossings.last().unwrap() - crossings[0]);
+            assert!((hz - 220.0).abs() <= 1.0, "rate {rate}: {hz}");
         }
     }
     #[test]

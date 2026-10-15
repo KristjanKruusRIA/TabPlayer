@@ -1,9 +1,10 @@
 use super::{
     decode::DecodedAudio,
+    dsp::BackingFilterDsp,
     plan::{PlaybackPlan, Timeline},
     reference_sync::ReferenceSyncMap,
 };
-use crate::settings::{BackingSettings, SyncAnchor};
+use crate::settings::{BackingFilter, BackingProcessing, BackingSettings, SyncAnchor};
 use std::sync::Arc;
 
 #[derive(Clone, Debug)]
@@ -191,6 +192,8 @@ pub struct BackingVoice {
     audio: Arc<DecodedAudio>,
     map: BackingMap,
     step: f64,
+    filter: BackingFilterDsp,
+    processed: bool,
     output: [[f32; 2]; HOP],
     tail: [[f32; 2]; HOP],
     cursor: usize,
@@ -205,6 +208,15 @@ impl BackingVoice {
         map: BackingMap,
         sample_rate: u32,
     ) -> Result<Self, String> {
+        Self::new_with_processing(audio, map, sample_rate, BackingProcessing::default())
+    }
+    pub fn new_with_processing(
+        audio: Arc<DecodedAudio>,
+        map: BackingMap,
+        sample_rate: u32,
+        processing: BackingProcessing,
+    ) -> Result<Self, String> {
+        processing.validate()?;
         if audio.sample_rate == 0
             || audio.frames.is_empty()
             || !(8000..=192000).contains(&sample_rate)
@@ -253,8 +265,15 @@ impl BackingVoice {
                 });
             }
         }
+        let mut step = audio.sample_rate as f64 / sample_rate as f64;
+        let pitch = processing.semitones + processing.cents / 100.0;
+        if pitch != 0.0 {
+            step *= 2.0_f64.powf(pitch / 12.0);
+        }
         Ok(Self {
-            step: audio.sample_rate as f64 / sample_rate as f64,
+            step,
+            filter: BackingFilterDsp::new(processing.filter, sample_rate)?,
+            processed: pitch != 0.0 || processing.filter != BackingFilter::None,
             audio,
             map,
             output: [[0.0; 2]; HOP],
@@ -359,18 +378,20 @@ impl BackingVoice {
     }
     pub fn next_frame(&mut self, score_seconds: f64) -> [f32; 2] {
         if !score_seconds.is_finite() {
+            self.filter.reset();
             return [0.0; 2];
         }
         let source = self.map.source_seconds(score_seconds);
-        if !self.map.permits_source(source) {
+        if !source.is_finite() || !self.map.permits_source(source) {
+            self.filter.reset();
             return [0.0; 2];
         }
         if self.cursor == HOP {
             self.prepare_grain(score_seconds);
         }
-        let mut x = if source < 0.0
-            || source >= self.audio.frames.len() as f64 / self.audio.sample_rate as f64
-        {
+        let excluded = source < 0.0
+            || source >= self.audio.frames.len() as f64 / self.audio.sample_rate as f64;
+        let mut x = if excluded {
             [0.0; 2]
         } else {
             self.output[self.cursor]
@@ -388,9 +409,22 @@ impl BackingVoice {
         }
         self.previous_seconds = score_seconds;
         self.cursor += 1;
-        x.map(|v| if v.is_finite() { v } else { 0.0 })
+        if excluded || x.iter().any(|v| !v.is_finite()) {
+            self.filter.reset();
+            // Neutral callers retain the legacy cursor/transient and sanitization path.
+            return if self.processed {
+                [0.0; 2]
+            } else {
+                x.map(|v| if v.is_finite() { v } else { 0.0 })
+            };
+        }
+        self.filter.process(x)
+    }
+    pub(crate) fn reset_filter(&mut self) {
+        self.filter.reset();
     }
     pub fn seek(&mut self, seconds: f64) {
+        self.filter.reset();
         self.cursor = HOP;
         self.primed = false;
         self.output.fill([0.0; 2]);

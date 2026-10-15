@@ -9,6 +9,12 @@ pub struct PlaybackPlan {
     pub ppq: u32,
     pub duration_tick: f64,
     pub duration_ms: f64,
+    #[serde(
+        default,
+        deserialize_with = "present_playback_end_tick",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub playback_end_tick: Option<f64>,
     pub tracks: Vec<PlanTrack>,
     pub tempos: Vec<PlanTempo>,
     pub occurrences: Vec<MeasureOccurrence>,
@@ -20,6 +26,12 @@ pub struct PlaybackPlan {
     pub performed_beats: Option<Vec<PerformedBeat>>,
     pub notes: Vec<PlanNote>,
     pub midi: Vec<PlanMidiEvent>,
+}
+fn present_playback_end_tick<'de, D>(deserializer: D) -> Result<Option<f64>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    f64::deserialize(deserializer).map(Some)
 }
 fn present_performed_beats<'de, D>(deserializer: D) -> Result<Option<Vec<PerformedBeat>>, D::Error>
 where
@@ -249,6 +261,17 @@ impl PlaybackPlan {
             *count += 1;
             occurrences.insert((o.bar, o.occurrence));
             prior = o.end_tick;
+        }
+        if self.playback_end_tick.is_some_and(|end| {
+            !end.is_finite()
+                || end <= 0.0
+                || end > self.duration_tick
+                || self
+                    .occurrences
+                    .last()
+                    .is_none_or(|last| last.end_tick != end)
+        }) {
+            return Err(invalid());
         }
         if let Some(rows) = &self.performed_beats {
             let mut mapped = HashSet::new();

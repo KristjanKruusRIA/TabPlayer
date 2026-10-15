@@ -12,6 +12,7 @@ export interface NativeBridge {
   redo(revision:number): Promise<DocumentSnapshot>;
   saveProject(saveAs: boolean,revision:number): Promise<DocumentSnapshot | null>;
   exportGp(bytes: Uint8Array,revision:number): Promise<boolean>;
+  readBackingAsset(assetId:string,revision:number):Promise<Uint8Array>;
   askUnsaved(title:string,path:string|null): Promise<'save' | 'discard' | 'cancel'>;
   confirmExport(): Promise<boolean>;
 }
@@ -40,6 +41,7 @@ export function createDocumentBridge(documentId:DocumentId,observer?:DocumentSav
     return record;
   },
   exportGp: (bytes,revision) => desktopTest?invoke('desktop_test_io',{action:'export',documentId,revision,bytes:Array.from(bytes)}):invoke('export_gp',{document:{documentId,revision},bytes:Array.from(bytes)}),
+  readBackingAsset: async (_assetId,_revision):Promise<Uint8Array> => {throw new Error('Backing asset reads are not implemented.');},
   askUnsaved: async (title,path) => {
     const result = await message(`Save changes to “${title}” before closing?${path?`\n${path}`:''}`,{title:'Unsaved score',kind:'warning',buttons:{yes:'Save',no:'Discard',cancel:'Cancel'}});
     return result === 'Yes' || result === 'Save' ? 'save' : result === 'No' || result === 'Discard' ? 'discard' : 'cancel';

@@ -39,6 +39,7 @@ function fixture(){
     const update=(project:Project,dirty=true)=>{record={...record,revision:record.revision+1,snapshot:{...record.snapshot,project,dirty,canUndo:project.edits.length>0,canRedo:redo.get(documentId)!.length>0,redoEdit:redo.get(documentId)!.at(-1)??null}};records.set(documentId,record);return structuredClone(record);};
     const check=(revision:number)=>{if(!records.has(documentId)||revision!==record.revision)throw new Error('Invalid addressed revision');};
     const bridge:NativeBridge={documentId,snapshot:vi.fn(async()=>structuredClone(record)),cancelAsset:vi.fn(async()=>true),
+      readBackingAsset:async(_assetId:string,_revision:number):Promise<Uint8Array>=>{throw new Error('Backing asset reads are not implemented.');},
       applyEdit:vi.fn(async(command,revision)=>{check(revision);redo.set(documentId,[]);return update({...record.snapshot.project,edits:[...record.snapshot.project.edits,command]});}),
       undo:vi.fn(async revision=>{check(revision);const edits=[...record.snapshot.project.edits];redo.get(documentId)!.push(edits.pop()!);return update({...record.snapshot.project,edits});}),
       redo:vi.fn(async revision=>{check(revision);return update({...record.snapshot.project,edits:[...record.snapshot.project.edits,redo.get(documentId)!.pop()!]});}),

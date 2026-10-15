@@ -434,6 +434,7 @@ fn large_backing_capture_shares_payload_and_releases_workspace() {
                 &address,
                 EditCommand::SetBacking {
                     backing: Some(BackingSettings {
+                        reference_sync: None,
                         asset_id: staged.asset_id,
                         offset_ms: 0.0,
                         anchors: vec![],

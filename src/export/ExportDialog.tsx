@@ -1,11 +1,11 @@
 import { useEffect,useRef,useState,type KeyboardEvent } from 'react';
 import type { model } from '@coderline/alphatab';
-import { validateSelection,type AudioExportOptions,type ExportOptions,type ExportProgress,type PrintLayout } from './types';
+import { validateSelection,type AudioExportOptions,type ExportOptions,type ExportProgress,type ExportSelection,type PrintLayout } from './types';
 import type { PageLayout } from '../engraving/types';
 import { PageLayoutPanel } from '../engraving/PageLayoutPanel';
 import { validatePageLayout } from '../engraving/page';
 import './export-dialog.css';
-export function ExportDialog({score,layout,page,busy,progress,failure,currentSpeedAvailable,onExport,onCancel}:{score:model.Score;layout:PrintLayout;page?:PageLayout;busy:boolean;progress?:ExportProgress;failure?:string|null;currentSpeedAvailable:boolean;onExport:(options:ExportOptions)=>void;onCancel:()=>void}) {
+export function ExportDialog({score,layout,page,busy,progress,failure,currentSpeedAvailable,onExport,onCancel}:{score:model.Score;layout:PrintLayout;page?:PageLayout;busy:boolean;progress?:ExportProgress;failure?:string|null;currentSpeedAvailable:boolean;onExport:(options:ExportOptions)=>void;onCancel:()=>void;gpBackingIssue?:(selection:ExportSelection)=>string|null}) {
   const [format,setFormat]=useState<ExportOptions['format']>('gp');const [tracks,setTracks]=useState(score.tracks.map(t=>t.index));
   const [staves,setStaves]=useState<Record<number,number[]>>(Object.fromEntries(score.tracks.map(t=>[t.index,t.staves.map(s=>s.index)])));
   const [range,setRange]=useState(false),[first,setFirst]=useState('1'),[last,setLast]=useState(String(score.masterBars.length));

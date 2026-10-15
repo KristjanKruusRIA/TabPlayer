@@ -1,6 +1,8 @@
 import {validateEngraving} from './engraving/projection';
 import {validatePageLayout} from './engraving/page';
 import {validateHarmonyChord} from './harmony/chord-source';
+import {validateBackingSettings} from './document-settings';
+import {validateRatioTempoPoints} from './editor/tempo-types';
 
 const shapes:Record<string,readonly string[]>={
   setNote:['target','string','fret'],removeNote:['target','string'],setRest:['target'],setDuration:['target','duration','dots'],
@@ -14,6 +16,7 @@ const shapes:Record<string,readonly string[]>={
   setMeasureSettings:['bar','numerator','denominator','pickup','freeTime','repeatStart','repeatCount','endings','section','tempos'],
   setBarNotation:['track','staff','bar','keySignature','keyMode','clef'],setBeatAnnotation:['target','text','chord'],
   setTrackSound:['trackId','sound'],setTrackMix:['trackId','mix'],setBacking:['backing'],setPrintLayout:['layout'],
+  replaceTempoAutomations:['points'],
   setScoreMetadata:['fields'],setDirections:['bar','directions'],setNoteSpelling:['target','noteIndex','accidentalMode'],
   addPitchedTrack:['name','program'],addPercussionTrack:['name','program'],
   addPitchedNote:['target','pitch'],setPitchedNote:['target','noteIndex','pitch'],
@@ -157,6 +160,8 @@ export function validateParityCommand(value:unknown):void {
   const candidate=object(value),type=candidate.type;
   if(typeof type!=='string'||!Object.hasOwn(shapes,type))throw new Error('Unknown edit command in project.');
   const edit=exact(value,['type',...shapes[type]]);
+  if(type==='setBacking'&&edit.backing!==null)validateBackingSettings(edit.backing);
+  if(type==='replaceTempoAutomations')validateRatioTempoPoints(edit.points);
   if('target'in edit)target(edit.target);
   for(const key of ['noteIndex','bar','track','staff'])if(key in edit)integer(edit[key]);
   for(const key of ['pitch','program'])if(key in edit)integer(edit[key],127);

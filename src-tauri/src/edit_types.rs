@@ -602,6 +602,14 @@ pub struct TempoPoint {
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RatioTempoPoint {
+    pub bar: u32,
+    pub ratio: f64,
+    pub bpm: f64,
+    pub linear: bool,
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct StaffSettings {
     pub tuning: Vec<i32>,
     pub capo: u32,
@@ -1024,6 +1032,9 @@ pub enum EditCommand {
         section: String,
         tempos: Vec<TempoPoint>,
     },
+    ReplaceTempoAutomations {
+        points: Vec<RatioTempoPoint>,
+    },
     SetBarNotation {
         track: u32,
         staff: u32,
@@ -1176,6 +1187,23 @@ impl EditCommand {
     }
     pub fn validate(&self) -> Result<(), String> {
         match self {
+            Self::ReplaceTempoAutomations { points } => {
+                if points
+                    .first()
+                    .is_none_or(|point| point.bar != 0 || point.ratio != 0.0)
+                    || points.iter().any(|point| {
+                        !point.ratio.is_finite()
+                            || !(0.0..=1.0).contains(&point.ratio)
+                            || !point.bpm.is_finite()
+                            || point.bpm <= 0.0
+                    })
+                    || points
+                        .windows(2)
+                        .any(|pair| (pair[0].bar, pair[0].ratio) >= (pair[1].bar, pair[1].ratio))
+                {
+                    return Err("Tempo replacement needs ordered distinct ratio points starting at bar 0 ratio 0.".into());
+                }
+            }
             Self::SetHarmonyChord {
                 chord: Some(chord), ..
             } => chord.validate()?,

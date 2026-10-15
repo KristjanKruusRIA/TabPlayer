@@ -152,6 +152,7 @@ fn migration_retains_original_read_digest_until_successful_schema_three_save() {
 fn backing(id: &str) -> EditCommand {
     EditCommand::SetBacking {
         backing: Some(BackingSettings {
+            reference_sync: None,
             asset_id: id.into(),
             offset_ms: 17.0,
             anchors: vec![],

@@ -1,8 +1,8 @@
 import type { model } from '@coderline/alphatab';
-import type { DocumentSettings, FxSettings, SettingsEdit, ChannelMix, PrintLayout } from './edit-types';
+import type { DocumentSettings, FxSettings, SettingsEdit, ChannelMix, PrintLayout, BackingSettings } from './edit-types';
 import {defaultEngraving,validateEngravingTracks} from './engraving/projection';
 import {validatePageLayout} from './engraving/page';
-export type { DocumentSettings, FxSettings, TrackSound, ChannelMix, PrintLayout, SyncAnchor, BackingSettings } from './edit-types';
+export type { DocumentSettings, FxSettings, TrackSound, ChannelMix, PrintLayout, SyncAnchor, BackingSettings, ReferenceSyncBounds } from './edit-types';
 
 export const defaultMix = (): ChannelMix => ({gain:1,pan:0,mute:false,solo:false});
 export const defaultEffects = (): FxSettings => ({
@@ -19,6 +19,25 @@ export function validateMix(mix: ChannelMix) {
   if (!mix || !Number.isFinite(mix.gain) || mix.gain<0 || mix.gain>1 || !Number.isFinite(mix.pan) || Math.abs(mix.pan)>1 || typeof mix.mute!=='boolean' || typeof mix.solo!=='boolean') throw new Error('Invalid mixer settings.');
 }
 
+export function validateBackingSettings(value:unknown):asserts value is BackingSettings {
+  const exact=(candidate:unknown,keys:readonly string[]):candidate is Record<string,unknown>=>!!candidate&&typeof candidate==='object'&&!Array.isArray(candidate)&&Object.keys(candidate).length===keys.length&&keys.every(key=>Object.hasOwn(candidate,key));
+  if(!value||typeof value!=='object'||!exact(value,['assetId','offsetMs','anchors','mix',...Object.hasOwn(value,'referenceSync')?['referenceSync']:[]]))throw new Error('Invalid backing settings fields.');
+  if(typeof value.assetId!=='string'||!value.assetId.length||typeof value.offsetMs!=='number'||!Number.isFinite(value.offsetMs)||!Array.isArray(value.anchors)||!exact(value.mix,['gain','pan','mute','solo']))throw new Error('Invalid backing settings.');
+  validateMix(value.mix as unknown as ChannelMix);
+  const bounds=value.referenceSync;
+  let entry:number|null=null,exit:number|null=null;
+  if(bounds!==undefined&&bounds!==null) {
+    if(!exact(bounds,['entryAudioMs','exitAudioMs'])||typeof bounds.entryAudioMs!=='number'||typeof bounds.exitAudioMs!=='number'||!Number.isFinite(bounds.entryAudioMs)||!Number.isFinite(bounds.exitAudioMs))throw new Error('Invalid reference synchronization bounds.');
+    entry=bounds.entryAudioMs-value.offsetMs;exit=bounds.exitAudioMs-value.offsetMs;
+    if(!Number.isFinite(entry)||entry<0||!Number.isFinite(exit)||exit<=entry||!Number.isFinite(exit-entry))throw new Error('Invalid reference synchronization source bounds.');
+  }else if(Object.hasOwn(value,'referenceSync')&&bounds===undefined)throw new Error('Invalid reference synchronization bounds.');
+  for(const anchor of value.anchors) {
+    if(!exact(anchor,['bar','occurrence','ratio','audioMs'])||typeof anchor.bar!=='number'||!Number.isInteger(anchor.bar)||anchor.bar<0||anchor.bar>0xffffffff||typeof anchor.occurrence!=='number'||!Number.isInteger(anchor.occurrence)||anchor.occurrence<0||anchor.occurrence>0xffffffff||typeof anchor.ratio!=='number'||!Number.isFinite(anchor.ratio)||anchor.ratio<0||anchor.ratio>1||typeof anchor.audioMs!=='number'||!Number.isFinite(anchor.audioMs))throw new Error('Invalid backing synchronization anchor.');
+    const source=anchor.audioMs-value.offsetMs;
+    if(entry===null?anchor.audioMs<0:!Number.isFinite(source)||source<=entry||source>=exit!)throw new Error('Invalid backing synchronization source position.');
+  }
+}
+
 export function applySettingsEdit(settings: DocumentSettings, edit: SettingsEdit, score: model.Score, trackIds: readonly string[]) {
   switch (edit.type) {
     case 'setTrackMix':
@@ -32,9 +51,8 @@ export function applySettingsEdit(settings: DocumentSettings, edit: SettingsEdit
     case 'setBacking': {
       const backing=edit.backing;
       if(backing) {
-        validateMix(backing.mix);
-        if(!Number.isFinite(backing.offsetMs)) throw new Error('Invalid backing offset.');
-        for(const anchor of backing.anchors) if(!Number.isInteger(anchor.bar) || !score.masterBars[anchor.bar] || !Number.isInteger(anchor.occurrence) || anchor.occurrence<0 || !Number.isFinite(anchor.ratio) || anchor.ratio<0 || anchor.ratio>1 || !Number.isFinite(anchor.audioMs) || anchor.audioMs<0) throw new Error('Invalid backing synchronization anchor.');
+        validateBackingSettings(backing);
+        for(const anchor of backing.anchors) if(!score.masterBars[anchor.bar]) throw new Error('Invalid backing synchronization anchor.');
       }
       settings.backing=structuredClone(backing); break;
     }

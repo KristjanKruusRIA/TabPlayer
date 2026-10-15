@@ -2,6 +2,7 @@ import type {BackingSettings,EditCommand,SyncAnchor} from '../edit-types';
 import type {AudioOwner,DocumentRevision} from '../workspace/types';
 import type {PlaybackSpan} from './selection-playback-types';
 import type {MeasureOccurrence,PlanTempo} from './types';
+import type {ReferenceSyncControls} from './reference-sync-types';
 
 export const MAX_WAVEFORM_BUCKETS=8192;
 export const MAX_WAVEFORM_AUDIO_BYTES=512*1024*1024;
@@ -22,7 +23,8 @@ export interface BackingGridLine {key:string;bar:number;occurrence:number;ratio:
 export interface BackingWaveformProps {
   document:DocumentRevision;source:WaveformSourceInput|null;filename:string;bridge:NativeBackingWaveformBridge;
   timeline:BackingTimeline|null;selection:BackingScoreSelection;settings:BackingSettings|null;
-  effectiveBacking:Pick<BackingSettings,'offsetMs'|'anchors'>|null;scoreTimeMs:number|null;enabled:boolean;busy:boolean;
+  effectiveBacking:Pick<BackingSettings,'offsetMs'|'anchors'|'referenceSync'>|null;scoreTimeMs:number|null;enabled:boolean;busy:boolean;
+  reference?:Pick<ReferenceSyncControls,'timing'|'edit'>;
   beginOperation:()=>()=>void;isCurrent:(document:DocumentRevision,settings:BackingSettings)=>boolean;
   onEdit:(command:Extract<EditCommand,{type:'setBacking'}>)=>Promise<void>;
 }

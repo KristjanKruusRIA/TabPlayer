@@ -17,4 +17,4 @@ export type PlanMidiEvent =
   | (MidiLocation & { type: 'controller'; controller: number; value: number })
   | (MidiLocation & { type: 'bend'; value: number })
   | (MidiLocation & { type: 'noteBend'; key: number; value: number });
-export interface PlaybackPlan { generation: number; ppq: 960; durationTick: number; durationMs: number; tracks: PlanTrack[]; tempos: PlanTempo[]; occurrences: MeasureOccurrence[]; performedBeats?:PerformedBeat[]; notes: PlanNote[]; midi: PlanMidiEvent[] }
+export interface PlaybackPlan { generation: number; ppq: 960; durationTick: number; durationMs: number; playbackEndTick?: number; tracks: PlanTrack[]; tempos: PlanTempo[]; occurrences: MeasureOccurrence[]; performedBeats?:PerformedBeat[]; notes: PlanNote[]; midi: PlanMidiEvent[] }

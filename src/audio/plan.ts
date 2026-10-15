@@ -7,6 +7,7 @@ import type { Articulation, MeasureOccurrence, PlanMidiEvent, PlanNote, PlanTemp
 import { scoreFromJson } from '../model-clone';
 import { gpControllerEvents, prepareGpMidiScore } from '../interchange/automation';
 import { buildPerformedBeats } from './performed-beats';
+import type { ReferenceLocation } from './reference-sync-types';
 
 const settings = new Settings();
 const validMeter = (numerator:number,denominator:number) => Number.isSafeInteger(numerator) && numerator > 0 && numerator <= 0xffffffff && [1,2,4,8,16,32,64,128,256].includes(denominator);
@@ -87,33 +88,38 @@ function resolvePrograms(score: model.Score, events: Collector) {
   }
 }
 
-type PerformedLocation = Pick<MeasureOccurrence, 'bar' | 'occurrence' | 'startTick' | 'endTick'>;
-// Committed/candidate scores are immutable; settings edits retain their object
-// identity, while notation/history replacements construct a different score.
-const backingLocations = new WeakMap<model.Score, PerformedLocation[]>();
-export function validateBackingAnchors(score: model.Score, backing: Pick<BackingSettings, 'offsetMs' | 'anchors'> | null | undefined): void {
+export function backingLocationsForScore(score:model.Score):readonly ReferenceLocation[] {
+  let shift = 0;
+  const handler: midi.IMidiFileHandler = {
+    addTickShift(value) { shift = value; }, addTimeSignature() {}, addRest() {}, addNote() {}, addControlChange() {}, addProgramChange() {}, addTempo() {}, addBend() {}, addNoteBend() {}, finishTrack() {},
+  };
+  const generator = new midi.MidiFileGenerator(score, settings, handler); generator.generate();
+  const counts = new Map<number, number>();
+  return generator.tickLookup.masterBars.map(m => {
+    const bar = m.masterBar.index, occurrence = counts.get(bar) ?? 0; counts.set(bar, occurrence + 1);
+    return { bar, occurrence, startTick: m.start + shift, endTick: m.end + shift };
+  });
+}
+// Legacy settings validation can reuse committed immutable score geometry.
+// Reference replay uses the fresh resolver above after each musical edit.
+const backingLocations=new WeakMap<model.Score,readonly ReferenceLocation[]>();
+export function validateBackingAnchors(score: model.Score, backing: Pick<BackingSettings, 'offsetMs' | 'anchors' | 'referenceSync'> | null | undefined): void {
   if (!backing) return;
   if (!Number.isFinite(backing.offsetMs)) throw new Error('Invalid backing offset.');
-  if (!backing.anchors.length) return;
-  let locations = backingLocations.get(score);
-  if (!locations) {
-    let shift = 0;
-    const handler: midi.IMidiFileHandler = {
-      addTickShift(value) { shift = value; }, addTimeSignature() {}, addRest() {}, addNote() {}, addControlChange() {}, addProgramChange() {}, addTempo() {}, addBend() {}, addNoteBend() {}, finishTrack() {},
-    };
-    const generator = new midi.MidiFileGenerator(score, settings, handler); generator.generate();
-    const counts = new Map<number, number>();
-    locations = generator.tickLookup.masterBars.map(m => {
-      const bar = m.masterBar.index, occurrence = counts.get(bar) ?? 0; counts.set(bar, occurrence + 1);
-      return { bar, occurrence, startTick: m.start + shift, endTick: m.end + shift };
-    });
-    backingLocations.set(score, locations);
-  }
+  const bounds=backing.referenceSync;
+  if (!backing.anchors.length&&!bounds) return;
+  let locations=backing.referenceSync?undefined:backingLocations.get(score);
+  if(!locations){locations=backingLocationsForScore(score);if(!backing.referenceSync)backingLocations.set(score,locations);}
+  const entrySourceMs=bounds?bounds.entryAudioMs-backing.offsetMs:0,exitSourceMs=bounds?bounds.exitAudioMs-backing.offsetMs:0;
+  if(bounds&&(!locations.length||!Number.isFinite(bounds.entryAudioMs)||!Number.isFinite(bounds.exitAudioMs)||!Number.isFinite(entrySourceMs)||entrySourceMs<0||!Number.isFinite(exitSourceMs)||exitSourceMs<=entrySourceMs||!Number.isFinite(exitSourceMs-entrySourceMs)))throw new Error('Invalid reference synchronization bounds.');
   const points = backing.anchors.map(anchor => {
-    if (!Number.isSafeInteger(anchor.bar) || anchor.bar < 0 || !Number.isSafeInteger(anchor.occurrence) || anchor.occurrence < 0 || !Number.isFinite(anchor.ratio) || anchor.ratio < 0 || anchor.ratio > 1 || !Number.isFinite(anchor.audioMs) || anchor.audioMs < 0) throw new Error('Backing anchor has an invalid synchronization position.');
+    if (!Number.isSafeInteger(anchor.bar) || anchor.bar < 0 || anchor.bar > 0xffffffff || !Number.isSafeInteger(anchor.occurrence) || anchor.occurrence < 0 || anchor.occurrence > 0xffffffff || !Number.isFinite(anchor.ratio) || anchor.ratio < 0 || anchor.ratio > 1 || !Number.isFinite(anchor.audioMs) || (!bounds&&anchor.audioMs < 0)) throw new Error('Backing anchor has an invalid synchronization position.');
     const occurrence = locations.find(o => o.bar === anchor.bar && o.occurrence === anchor.occurrence);
     if (!occurrence) throw new Error('Backing anchor refers to missing score music.');
-    return { tick: occurrence.startTick + (occurrence.endTick - occurrence.startTick) * anchor.ratio, audioMs: anchor.audioMs };
+    const tick=occurrence.startTick + (occurrence.endTick - occurrence.startTick) * anchor.ratio;
+    const sourceMs=anchor.audioMs-backing.offsetMs;
+    if(bounds&&(tick<=locations[0].startTick||tick>=locations[locations.length-1].endTick||!Number.isFinite(sourceMs)||sourceMs<=entrySourceMs||sourceMs>=exitSourceMs))throw new Error('Reference anchors must lie inside the synchronization endpoints.');
+    return { tick, audioMs: bounds?sourceMs:anchor.audioMs };
   }).sort((a, b) => a.tick - b.tick);
   if (points.some((point, i) => i > 0 && (points[i - 1].tick >= point.tick || points[i - 1].audioMs >= point.audioMs))) throw new Error('Backing anchors must have distinct score positions and increasing audio times in playback order.');
 }
@@ -397,6 +403,7 @@ export function validatePlaybackPlan(plan: PlaybackPlan) {
     counts.set(o.bar, o.occurrence + 1); occurrences.add(`${o.bar}/${o.occurrence}`); previous = o.endTick;
     if (o.clickTicks !== undefined && (!o.clickTicks.length || o.clickTicks[0] !== o.startTick || o.clickTicks.some((tick, i) => !validTime(tick) || tick < o.startTick || tick >= o.endTick || i > 0 && tick <= o.clickTicks![i - 1]))) fail('metronome ticks');
   }
+  if(Object.hasOwn(plan,'playbackEndTick')&&(!Number.isFinite(plan.playbackEndTick)||plan.playbackEndTick!<=0||plan.playbackEndTick!>plan.durationTick||plan.playbackEndTick!==plan.occurrences.at(-1)?.endTick))fail('active end');
   if (Object.hasOwn(plan,'performedBeats')) {
     const exact=(value:unknown,keys:readonly string[]):value is Record<string,unknown>=>!!value&&typeof value==='object'&&!Array.isArray(value)&&Object.keys(value).length===keys.length&&keys.every(key=>Object.hasOwn(value,key));
     if (!Array.isArray(plan.performedBeats)) fail('performed beats');

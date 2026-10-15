@@ -35,6 +35,7 @@ fn wav() -> Vec<u8> {
 }
 fn backing(id: &str) -> BackingSettings {
     BackingSettings {
+        reference_sync: None,
         asset_id: id.into(),
         offset_ms: 120.0,
         anchors: vec![],

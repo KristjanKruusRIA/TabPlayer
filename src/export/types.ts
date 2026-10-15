@@ -6,7 +6,7 @@ export interface SvgPage { svg:string; widthMm:number; heightMm:number }
 export interface SvgSystem { svg:string; width:number; height:number }
 export interface AudioExportOptions { sampleRate:44100|48000;bitDepth:16|24;speed:'saved'|'current';metronome:boolean;tailSeconds:number;backing:boolean;includeMix:boolean }
 export type ExportOptions =
-  | {format:'gp';selection:ExportSelection}
+  | {format:'gp';selection:ExportSelection;backing?:boolean}
   | {format:'midi';selection:ExportSelection}
   | {format:'pdf';selection:ExportSelection;layout:PrintLayout;page?:PageLayout}
   | {format:'print';selection:ExportSelection;layout:PrintLayout;page?:PageLayout}

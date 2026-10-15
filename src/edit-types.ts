@@ -6,6 +6,7 @@ import type { MeasureCommand } from './editor/measures-types';
 import type { ClipboardCommand } from './editor/clipboard-types';
 import type { EngravingCommand,EngravingOverrides,PageLayout } from './engraving/types';
 import type { HarmonyCommand } from './editor/harmony-types';
+import type { ReplaceTempoAutomations } from './editor/tempo-types';
 
 export interface NoteTarget { target: BeatTarget; string: number }
 export interface IndexedNoteTarget { target: BeatTarget; noteIndex: number }
@@ -43,7 +44,8 @@ export interface FxSettings {
 }
 export interface TrackSound { voiceId: string|null; presetId: 'clean'|'crunch'|'lead'|'bass'|'gm'; effects: FxSettings }
 export interface SyncAnchor { bar: number; occurrence: number; ratio: number; audioMs: number }
-export interface BackingSettings { assetId: string; offsetMs: number; anchors: SyncAnchor[]; mix: ChannelMix }
+export interface ReferenceSyncBounds { entryAudioMs: number; exitAudioMs: number }
+export interface BackingSettings { assetId: string; offsetMs: number; anchors: SyncAnchor[]; mix: ChannelMix; referenceSync?: ReferenceSyncBounds|null }
 export interface PrintLayout {
   paper: 'A4'|'Letter'; orientation: 'portrait'|'landscape'; marginMm: number; scale: number; profile: 'ScoreTab'|'Score'|'Tab';
 }
@@ -52,7 +54,7 @@ export interface DocumentSettings {
   engraving:EngravingOverrides;page:PageLayout|null;
 }
 
-export type EditCommand = LyricsCommand | GestureCommand | BarGestureCommand | RangeCommand | MeasureCommand | ClipboardCommand | EngravingCommand | HarmonyCommand
+export type EditCommand = LyricsCommand | GestureCommand | BarGestureCommand | RangeCommand | MeasureCommand | ClipboardCommand | EngravingCommand | HarmonyCommand | ReplaceTempoAutomations
   | { type: 'setNote'; target: BeatTarget; string: number; fret: number }
   | { type: 'removeNote'; target: BeatTarget; string: number }
   | { type: 'setRest'; target: BeatTarget }

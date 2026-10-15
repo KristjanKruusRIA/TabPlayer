@@ -20,6 +20,7 @@ function makeBridge(project:Project=blankProject(),redoHistory:EditCommand[]=[])
   const snapshot=():DocumentSnapshot=>({documentId:'document-a',revision,snapshot:{...structuredClone(current),redoEdit:structuredClone(undone.at(-1) ?? null)}});
   const bridge: NativeBridge = {
     documentId:'document-a',snapshot: vi.fn(async () => snapshot()),cancelAsset:vi.fn(async()=>true),
+    readBackingAsset:async(_assetId:string,_revision:number):Promise<Uint8Array>=>{throw new Error('Backing asset reads are not implemented.');},
     applyEdit: vi.fn(async command => { undone=[];current={...current,project:{...current.project,edits:[...current.project.edits,command]},canUndo:true,canRedo:false,dirty:true}; revision++;return snapshot(); }),
     undo: async () => { const edits=current.project.edits.slice();undone.push(edits.pop()!);current={...current,project:{...current.project,edits},canUndo:edits.length>0,canRedo:true,dirty:edits.length>0};revision++;return snapshot(); },
     redo: async () => { const edits=[...current.project.edits,undone.pop()!];current={...current,project:{...current.project,edits},canUndo:true,canRedo:undone.length>0,dirty:true};revision++;return snapshot(); },

@@ -77,6 +77,7 @@ fn encode(value: &RecoveryEnvelope) -> (Vec<u8>, CheckpointRef) {
 fn backing(id: &str) -> EditCommand {
     EditCommand::SetBacking {
         backing: Some(BackingSettings {
+            reference_sync: None,
             asset_id: id.into(),
             offset_ms: 0.0,
             anchors: vec![],

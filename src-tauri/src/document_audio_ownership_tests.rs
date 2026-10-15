@@ -391,6 +391,7 @@ fn export_launch_rechecks_origin_revision_backing_and_holds_running_slot() {
         )
         .unwrap();
     let backing = BackingSettings {
+        reference_sync: None,
         asset_id: staged.asset_id.clone(),
         offset_ms: 0.0,
         anchors: vec![],

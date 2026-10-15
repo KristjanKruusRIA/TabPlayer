@@ -4,6 +4,7 @@ pub mod backing_waveform;
 pub mod edit_types;
 pub mod engraving;
 pub mod export;
+pub mod export_backing;
 pub mod file_library;
 pub mod files;
 pub mod harmony;
@@ -525,6 +526,7 @@ mod source_tests {
             .apply_edit_with_asset(
                 EditCommand::SetBacking {
                     backing: Some(BackingSettings {
+                        reference_sync: None,
                         asset_id: id.clone(),
                         offset_ms: 0.0,
                         anchors: vec![],

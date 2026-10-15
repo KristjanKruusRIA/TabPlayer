@@ -83,25 +83,58 @@ pub struct SyncAnchor {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ReferenceSyncBounds {
+    pub entry_audio_ms: f64,
+    pub exit_audio_ms: f64,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct BackingSettings {
     pub asset_id: String,
     pub offset_ms: f64,
     pub anchors: Vec<SyncAnchor>,
     pub mix: ChannelMix,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reference_sync: Option<ReferenceSyncBounds>,
 }
 impl BackingSettings {
     pub fn validate(&self) -> Result<(), String> {
         if self.asset_id.is_empty() || !self.offset_ms.is_finite() {
             return Err("Backing asset and finite offset are required.".into());
         }
+        let bounds = if let Some(bounds) = &self.reference_sync {
+            let entry = bounds.entry_audio_ms - self.offset_ms;
+            let exit = bounds.exit_audio_ms - self.offset_ms;
+            if !bounds.entry_audio_ms.is_finite()
+                || !bounds.exit_audio_ms.is_finite()
+                || !entry.is_finite()
+                || !exit.is_finite()
+                || entry < 0.0
+                || exit <= entry
+            {
+                return Err(
+                    "Reference bounds need nonnegative finite source entry before exit.".into(),
+                );
+            }
+            Some((entry, exit))
+        } else {
+            None
+        };
         for anchor in &self.anchors {
             if !anchor.ratio.is_finite()
                 || !(0.0..=1.0).contains(&anchor.ratio)
                 || !anchor.audio_ms.is_finite()
-                || anchor.audio_ms < 0.0
+                || if let Some((entry, exit)) = bounds {
+                    let source = anchor.audio_ms - self.offset_ms;
+                    !source.is_finite() || source <= entry || source >= exit
+                } else {
+                    anchor.audio_ms < 0.0
+                }
             {
                 return Err(
-                    "Backing anchors need a ratio 0–1 and nonnegative finite audio time.".into(),
+                    "Backing anchors need a ratio 0–1 and finite audio time inside active bounds."
+                        .into(),
                 );
             }
         }

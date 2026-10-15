@@ -1,7 +1,8 @@
 import type {BackingSettings} from '../edit-types';
 import type {BackingGridLine,BackingScoreSelection,BackingTimeline} from './backing-waveform-types';
+import {referenceSourceMs,referenceSyncTiming} from './reference-sync';
 
-type BackingMapSettings=Pick<BackingSettings,'offsetMs'|'anchors'>;
+type BackingMapSettings=Pick<BackingSettings,'offsetMs'|'anchors'|'referenceSync'>;
 function finite(value:number):number {
   if(!Number.isFinite(value))throw new Error('Backing timing must be finite.');
   return value;
@@ -9,7 +10,7 @@ function finite(value:number):number {
 function nonnegative(value:number):boolean {return Number.isFinite(value)&&value>=0;}
 function indexValue(value:number):boolean {return Number.isSafeInteger(value)&&value>=0;}
 
-function tempoTimeline(timeline:BackingTimeline):(tick:number)=>number {
+function tempoTimeline(timeline:BackingTimeline) {
   const invalid=()=>new Error('Invalid backing score timeline.');
   if(!nonnegative(timeline.durationTick)||timeline.tempos[0]?.tick!==0)throw invalid();
   let previousTick=-1,previousSeconds=0,previousRate=0;
@@ -39,11 +40,22 @@ function tempoTimeline(timeline:BackingTimeline):(tick:number)=>number {
     }
     counts.set(bar,occurrence.occurrence+1);previousEnd=endTick;
   }
-  return tickToMs;
+  const msToTick=(ms:number)=>{
+    const seconds=finite(ms)/1000;let low=0,high=segments.length;
+    while(low<high){const middle=(low+high)>>>1;if(segments[middle].seconds<=seconds)low=middle+1;else high=middle;}
+    const segment=segments[Math.max(0,low-1)];
+    return finite(segment.tick+(seconds-segment.seconds)/segment.rate);
+  };
+  return {tickToMs,msToTick};
 }
 
 function projection(timeline:BackingTimeline,backing:BackingMapSettings) {
-  const tickToMs=tempoTimeline(timeline);
+  const {tickToMs,msToTick}=tempoTimeline(timeline);
+  if(backing.referenceSync) {
+    // The reference resolver reads only these mapping fields, never asset or mix.
+    const timing=referenceSyncTiming(backing as BackingSettings,timeline.occurrences)!;
+    return {sourceAtMs:(ms:number)=>referenceSourceMs(timing,msToTick(ms)),sourceAtTick:(tick:number)=>referenceSourceMs(timing,Math.max(0,finite(tick)))};
+  }
   finite(backing.offsetMs);
   const points=backing.anchors.map(anchor=>{
     if(!indexValue(anchor.bar)||!indexValue(anchor.occurrence)||!nonnegative(anchor.ratio)||anchor.ratio>1||!nonnegative(anchor.audioMs))throw new Error('Invalid backing synchronization anchor.');
@@ -121,9 +133,11 @@ export function projectBackingSelection(timeline:BackingTimeline,backing:Backing
 }
 export function moveBackingAnchor(backing:BackingSettings,index:number,sourceMs:number,timeline:BackingTimeline,durationMs:number):BackingSettings {
   if(!indexValue(index)||index>=backing.anchors.length||!nonnegative(durationMs)||!nonnegative(sourceMs)||sourceMs>durationMs)throw new Error('Backing anchor must stay within the source audio.');
-  const audioMs=finite(sourceMs+backing.offsetMs);
-  if(audioMs<0)throw new Error('Backing synchronization audio time must be nonnegative.');
-  const candidate={...backing,mix:{...backing.mix},anchors:backing.anchors.map((anchor,anchorIndex)=>({...anchor,audioMs:anchorIndex===index?audioMs:anchor.audioMs}))};
+  const audioMs=sourceMs===backing.anchors[index].audioMs-backing.offsetMs?backing.anchors[index].audioMs:finite(sourceMs+backing.offsetMs);
+  if(!backing.referenceSync&&audioMs<0)throw new Error('Backing synchronization audio time must be nonnegative.');
+  const candidate=structuredClone(backing);candidate.anchors[index].audioMs=audioMs;
+  if(candidate.referenceSync&&Math.abs(finite(audioMs-backing.offsetMs)-sourceMs)>1e-7)throw new Error('Reference anchor cannot represent the requested source position.');
+  if(candidate.referenceSync)referenceSyncTiming(candidate,timeline.occurrences,durationMs);
   projection(timeline,candidate);
   return candidate;
 }

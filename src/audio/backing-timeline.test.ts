@@ -168,3 +168,40 @@ it('nonfinite_values_and_invalid_temporal_inputs_reject_without_mutation',()=>{
     const before=structuredClone(invalid);expect(()=>scoreTickToAudioMs(invalid,backing,0)).toThrow();expect(invalid).toEqual(before);
   }
 });
+
+it('reference preview projects mandatory brackets through ticks rather than authored tempo spans',()=>{
+  const timeline=freeze(structuredClone(timelines.tempoChange));
+  const input=freeze(settings({offsetMs:120,anchors:[{bar:1,occurrence:0,ratio:0,audioMs:3120}]}));
+  const reference=freeze({...input,referenceSync:{entryAudioMs:1120,exitAudioMs:7120}});
+  const before=structuredClone({timeline,reference});
+  expect(scoreTickToAudioMs(timeline,reference,4800)).toBeCloseTo(4000,7);
+  // The supplied authored timeline reaches tick1920 at1500ms, tick4800 at4500ms.
+  expect(scoreTimeToAudioMs(timeline,reference,4500)).toBeCloseTo(4000,7);
+  expect(projectBackingGrid(timeline,reference,3500,4500).map(({tick,audioMs})=>({tick,audioMs}))).toEqual([{tick:4800,audioMs:4000}]);
+  expectSelection(projectBackingSelection(timeline,reference,{points:[{tick:4800,anchor:null}],spans:[{startTick:3840,endTick:7680}]}),{points:[4000],spans:[{startMs:3000,endMs:7000}]});
+  const preview={...reference,referenceSync:{entryAudioMs:1120,exitAudioMs:11120}};
+  expect(scoreTickToAudioMs(timeline,preview,4800)).toBeCloseTo(5000,7);
+  expect({timeline,reference}).toEqual(before);
+});
+
+it('reference repeated selection uses each performed occurrence and clear interiors retains bounds',()=>{
+  const timeline=freeze(structuredClone(timelines.repeatRoute));
+  const reference={...settings({offsetMs:-120,anchors:[]}),referenceSync:{entryAudioMs:-120,exitAudioMs:7880}};
+  expectSelection(projectBackingSelection(timeline,reference,{points:[{tick:960,anchor:null},{tick:8640,anchor:null}],spans:[{startTick:7680,endTick:11520}]}),{points:[500,4500],spans:[{startMs:4000,endMs:6000}]});
+  expect(projectBackingGrid(timeline,reference,0,8000).filter(line=>line.kind==='bar').map(line=>line.audioMs)).toEqual([0,2000,4000,6000].map(ms=>expect.closeTo(ms,7)));
+});
+
+it('reference anchor movement accepts signed stored positions and validates against mandatory bounds',()=>{
+  const timeline=freeze(structuredClone(timelines.straight));
+  const reference=freeze({...settings({offsetMs:-120,anchors:[{bar:1,occurrence:0,ratio:0,audioMs:880}]}),referenceSync:{entryAudioMs:-120,exitAudioMs:1880}});
+  const moved=moveBackingAnchor(reference,0,50,timeline,2000);
+  expect(moved.anchors[0].audioMs).toBe(-70);
+  expect(moved.referenceSync).toEqual(reference.referenceSync);expect(moved.referenceSync).not.toBe(reference.referenceSync);
+  for(const sourceMs of [0,2000])expect(()=>moveBackingAnchor(reference,0,sourceMs,timeline,2000)).toThrow();
+});
+
+it('reference anchor edits reject an unrepresentable physical source request',()=>{
+  const timeline=freeze(structuredClone(timelines.straight));
+  const reference=freeze({...settings({offsetMs:1e16,anchors:[{bar:1,occurrence:0,ratio:0,audioMs:1e16+2}]}),referenceSync:{entryAudioMs:1e16,exitAudioMs:1e16+10}});
+  expect(()=>moveBackingAnchor(reference,0,3,timeline,10)).toThrow();
+});

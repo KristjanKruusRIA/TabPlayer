@@ -1,3 +1,4 @@
+import {waitForWorkspaceIdle,clickWorkstationButton} from './workstation-commands.mjs';
 import { readActiveDocument } from './document-context.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync,writeFileSync } from 'node:fs';
@@ -10,11 +11,11 @@ const raw='[VERSE]\nHel-lo  world+today';
 let id=launch({TABPLAYER_TEST_SAVE:saved,TABPLAYER_TEST_EXPORT:exported,TABPLAYER_TEST_OPEN:saved}),browser,page;
 const result={};
 try {
-  browser=await connect();page=browser.contexts()[0].pages()[0];await page.getByRole('button',{name:'New',exact:true}).waitFor();
+  browser=await connect();page=browser.contexts()[0].pages()[0];await waitForWorkspaceIdle(page);
   const errors=[];page.on('pageerror',error=>errors.push(error.message));
   const snapshot=()=>readActiveDocument(page);
-  const idle=async()=>{await page.waitForFunction(()=>!document.querySelector('nav button')?.disabled);assert.equal(await page.getByRole('alert').count(),0,await page.getByRole('alert').allTextContents());};
-  const button=async name=>{await page.getByRole('button',{name,exact:true}).click();await idle();};
+  const idle=async()=>{await waitForWorkspaceIdle(page);assert.equal(await page.getByRole('alert').count(),0,await page.getByRole('alert').allTextContents());};
+  const button=async name=>{await clickWorkstationButton(page,name,{waitForIdle:false});await idle();};
   const change=(label,value)=>page.getByLabel(label,{exact:true}).fill(String(value));
   const details=label=>page.locator('summary').filter({hasText:label}).first().evaluate(node=>{node.parentElement.open=true;});
   for(let beat=1;beat<=4;beat++){await change('Beat',beat);await change('Fret',beat);await button('Set note');}
@@ -42,7 +43,7 @@ try {
   assert.ok(hiddenXml.includes('[VERSE]'));result.dialogHiddenExport=true;
   const native=JSON.parse(readFileSync(saved,'utf8'));assert.equal(native.edits.at(-1).visible,false);result.commands=native.edits.length;
   assert.deepEqual(errors,[]);await browser.close();browser=null;stop(id);id=launch({TABPLAYER_TEST_OPEN:saved});
-  browser=await connect();page=browser.contexts()[0].pages()[0];await page.getByRole('button',{name:'Open',exact:true}).waitFor();await button('Open');
+  browser=await connect();page=browser.contexts()[0].pages()[0];await waitForWorkspaceIdle(page);await button('Open');
   await details('Lyrics');assert.equal(await page.getByLabel('Visible',{exact:true}).isChecked(),false);assert.equal(await page.getByRole('textbox',{name:/^Line 1 text/}).inputValue(),raw);
   assert.equal((await snapshot()).project.edits.length,native.edits.length);result.processRestartReopen=true;result.hiddenRawPreserved=true;
   writeFileSync(resolve('.analysis/parity/native-notation-result.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result));

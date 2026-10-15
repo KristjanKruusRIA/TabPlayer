@@ -1,3 +1,4 @@
+import {waitForWorkspaceIdle,clickWorkspaceCommand} from './workstation-commands.mjs';
 import { readActiveDocument,readDocumentRecord } from './document-context.mjs';
 import { spawn } from 'node:child_process';
 import { resolve } from 'node:path';
@@ -18,9 +19,9 @@ function completion(promise,label) {
 }
 try {
   browser=await connect();const page=browser.contexts()[0].pages()[0];
-  await page.getByRole('button',{name:'New',exact:true}).waitFor();
+  await waitForWorkspaceIdle(page);
   await page.getByLabel('Fret',{exact:true}).fill('7');await page.getByRole('button',{name:'Set note',exact:true}).click();
-  await page.waitForFunction(()=>!document.querySelector('nav[aria-label="File and history"] button')?.disabled);
+  await waitForWorkspaceIdle(page);
   const workspace=await page.evaluate(()=>window.__TAURI_INTERNALS__.invoke('workspace_snapshot'));
   const before=await readActiveDocument(page),origin=await readDocumentRecord(page,workspace.active.documentId);
   assert.equal(before.dirty,true);
@@ -37,9 +38,9 @@ try {
     assert.deepEqual(await page.evaluate(()=>window.__TAURI_INTERNALS__.invoke('workspace_snapshot')),workspace);
   }
   const cancelled=helper('tests/desktop/answer-unsaved-dialog.ps1',['-AppExecutable',executable,'-Decision','Cancel']);
-  const close=page.getByRole('button',{name:'Close score',exact:true}).click();void close.catch(()=>{});
+  const close=clickWorkspaceCommand(page,'Close score',{waitForIdle:false});void close.catch(()=>{});
   await cancelled;await completion(close,'Close score');
-  await page.waitForFunction(()=>!document.querySelector('nav[aria-label="File and history"] button')?.disabled);
+  await waitForWorkspaceIdle(page);
   assert.deepEqual(await readActiveDocument(page),before);
   assert.deepEqual(await readDocumentRecord(page,origin.documentId),origin);
   assert.deepEqual(await page.evaluate(()=>window.__TAURI_INTERNALS__.invoke('workspace_snapshot')),workspace);

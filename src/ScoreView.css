@@ -1,7 +1,7 @@
 .score-edit-target {
   position: absolute;
   box-sizing: border-box;
-  border: 2px solid #245cb2;
+  border: 2px solid var(--ws-edit,#245cb2);
   border-radius: 4px;
   pointer-events: none;
   z-index: 3;
@@ -13,8 +13,8 @@
   bottom: calc(100% + 3px);
   padding: 1px 4px;
   border-radius: 3px;
-  background: #245cb2;
-  color: #fffdf8;
+  background: var(--ws-edit,#245cb2);
+  color: var(--ws-paper,#fffdf5);
   white-space: nowrap;
   font-size: 10px;
   line-height: 1.4;

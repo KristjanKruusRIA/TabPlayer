@@ -1,3 +1,4 @@
+import {waitForWorkspaceIdle,clickWorkstationButton,revealPlaybackControls} from './workstation-commands.mjs';
 import { readActiveDocument } from './document-context.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
@@ -10,10 +11,10 @@ const metadata=await buildInstrumentFixture(),sourceHash=createHash('sha256').up
 assert.equal(sourceHash,metadata.sha256);const id=launch({TABPLAYER_TEST_OPEN:fixturePath});let browser,page,stage='startup';
 const blockedExternal=[],pageErrors=[],cases=[];
 try {
-  browser=await connect();page=browser.contexts()[0].pages()[0];await page.getByRole('button',{name:'New',exact:true}).waitFor();
+  browser=await connect();page=browser.contexts()[0].pages()[0];await waitForWorkspaceIdle(page);
   page.on('pageerror',error=>pageErrors.push({stage,message:error.message}));
   await page.context().route('**/*',route=>{const url=new URL(route.request().url());if(['tauri.localhost','ipc.localhost','localhost','127.0.0.1'].includes(url.hostname)||['data:','blob:'].includes(url.protocol))return route.continue();blockedExternal.push(url.origin);return route.abort();});
-  await page.reload();await page.getByRole('button',{name:'New',exact:true}).waitFor();
+  await page.reload();await waitForWorkspaceIdle(page);
   await page.evaluate(hash=>{
     window.__instrumentPlans={};const nativeFetch=window.fetch.bind(window);
     window.fetch=function(input,options){
@@ -31,7 +32,7 @@ try {
   const status=()=>page.evaluate(()=>window.__TAURI_INTERNALS__.invoke('audio_status'));
   const snapshot=()=>readActiveDocument(page);
   const waitStatus=async(predicate,timeout=10000)=>{const deadline=Date.now()+timeout;let last;while(Date.now()<deadline){last=await status();if(predicate(last))return last;await page.waitForTimeout(25);}throw new Error(`Native status timed out at ${stage}: ${JSON.stringify(last)}`);};
-  const button=async name=>{stage=name;await page.getByRole('button',{name,exact:true}).click();await page.waitForFunction(()=>!document.querySelector('nav button')?.disabled);};
+  const button=async name=>{stage=name;await clickWorkstationButton(page,name,{waitForIdle:false});await waitForWorkspaceIdle(page);};
   await button('Open');const opened=await waitStatus(s=>s.ready&&!s.error&&s.generation===s.desiredGeneration);await page.waitForFunction(()=>[...document.querySelectorAll('button')].some(button=>button.textContent==='Play'&&!button.disabled));
   const before=await snapshot();assert.equal(before.project.base.sha256,sourceHash);
   const plan=await page.evaluate(generation=>window.__instrumentPlans[generation],opened.generation);assert.ok(plan,'Observe the authored audio_prepare payload for the acknowledged generation.');
@@ -65,9 +66,9 @@ try {
   await button('Track 1: Guitar9');await mode.selectOption('keys');await assertView(metadata.tracks[0],await status(),'keys');await mode.selectOption('guitar');await assertView(metadata.tracks[0],await status(),'guitar');await mode.selectOption('auto');
   await button('Hide instrument');assert.equal(await view.count(),0);await button('Show instrument');await assertView(metadata.tracks[0],await status());
   await button('Stop');await waitStatus(s=>!s.playing&&s.tick===0);await view.getByText('No notes sounding',{exact:true}).waitFor();await page.waitForTimeout(100);assert.equal(await view.locator('.instrument-note').count(),0);
-  const silent=metadata.sharedSilentWindows[0];await page.getByLabel('Seek measure',{exact:true}).fill(String(plan.occurrences.find(occurrence=>occurrence.startTick===silent.startTick).bar+1));await button('Seek');await waitStatus(s=>Math.abs(s.tick-silent.startTick)<.01);await view.getByText('No notes sounding',{exact:true}).waitFor();
-  const last=plan.occurrences.at(-1);await page.getByLabel('Seek measure',{exact:true}).fill(String(last.bar+1));await button('Seek');const sought=await waitStatus(s=>Math.abs(s.tick-last.startTick)<.01);await assertView(metadata.tracks[0],sought);
-  await page.getByRole('combobox',{name:/^Speed/}).selectOption('50');await waitStatus(s=>s.speed===.5);await page.getByLabel('Loop start',{exact:true}).fill('1');await page.getByLabel('Loop end',{exact:true}).fill('2');await button('Loop');await page.getByLabel('Seek measure',{exact:true}).fill('2');await button('Seek');await waitStatus(s=>Math.abs(s.tick-plan.occurrences[1].startTick)<.01);await button('Play');await waitStatus(s=>s.playing&&s.tick>plan.occurrences[1].startTick+100&&s.speed===.5);
+  const silent=metadata.sharedSilentWindows[0];await revealPlaybackControls(page);await page.getByLabel('Seek measure',{exact:true}).fill(String(plan.occurrences.find(occurrence=>occurrence.startTick===silent.startTick).bar+1));await button('Seek');await waitStatus(s=>Math.abs(s.tick-silent.startTick)<.01);await view.getByText('No notes sounding',{exact:true}).waitFor();
+  const last=plan.occurrences.at(-1);await revealPlaybackControls(page);await page.getByLabel('Seek measure',{exact:true}).fill(String(last.bar+1));await button('Seek');const sought=await waitStatus(s=>Math.abs(s.tick-last.startTick)<.01);await assertView(metadata.tracks[0],sought);
+  await page.getByRole('combobox',{name:/^Speed/}).selectOption('50');await waitStatus(s=>s.speed===.5);await revealPlaybackControls(page);await page.getByLabel('Loop start',{exact:true}).fill('1');await page.getByLabel('Loop end',{exact:true}).fill('2');await button('Loop');await revealPlaybackControls(page);await page.getByLabel('Seek measure',{exact:true}).fill('2');await button('Seek');await waitStatus(s=>Math.abs(s.tick-plan.occurrences[1].startTick)<.01);await button('Play');await waitStatus(s=>s.playing&&s.tick>plan.occurrences[1].startTick+100&&s.speed===.5);
   const wrapped=await waitStatus(s=>s.playing&&s.tick>100&&s.tick<1000&&s.speed===.5,20000);await assertView(metadata.tracks[0],wrapped);await button('Stop');await waitStatus(s=>!s.playing&&s.tick===0);await button('Clear loop');await view.getByText('No notes sounding',{exact:true}).waitFor();
   assert.deepEqual((await snapshot()).project,before.project);assert.equal(createHash('sha256').update(readFileSync(fixturePath)).digest('hex'),sourceHash);assert.deepEqual(pageErrors,[]);
   writeFileSync(join(directory,'instruments-result.json'),JSON.stringify({authoredFixture:fixturePath,metadataPath,sourceHash,sourceAndProjectUnchanged:true,nativeGeneration:opened.generation,observedPlanNoteIds:true,actualNativePlayback:playing,selectedTracks:cases,pauseFrozen:true,stopClear:true,seekAndSilentIntervals:true,practiceSpeed:.5,inclusiveLoop:true,hideShow:true,autoAndManualModes:true,externalRequestsBlocked:true,blockedExternal:[...new Set(blockedExternal)]},null,2));

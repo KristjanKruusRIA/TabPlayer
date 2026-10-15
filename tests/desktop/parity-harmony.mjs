@@ -1,3 +1,4 @@
+import {waitForWorkspaceIdle,clickWorkstationButton} from './workstation-commands.mjs';
 import { readActiveDocument } from './document-context.mjs';
 import assert from 'node:assert/strict';
 import {readFileSync,writeFileSync} from 'node:fs';
@@ -9,20 +10,20 @@ const saved=resolve(directory,'gp8-harmony.tabplayer'),exported=resolve(director
 const label=`TabPlayer native harmony verification ${Date.now()}`,result={},created=[];
 let id=launch({TABPLAYER_TEST_SAVE:saved,TABPLAYER_TEST_EXPORT:exported}),browser,page;
 try{
-  browser=await connect();page=browser.contexts()[0].pages()[0];await page.getByRole('button',{name:'Open',exact:true}).waitFor();
+  browser=await connect();page=browser.contexts()[0].pages()[0];await waitForWorkspaceIdle(page);
   const errors=[];page.on('pageerror',error=>errors.push(error.message));
   const snapshot=()=>readActiveDocument(page);
   const library=()=>page.evaluate(()=>window.__TAURI_INTERNALS__.invoke('harmony_library_read'));
   const baselineLibrary=await library();
-  const idle=async()=>{await page.waitForFunction(()=>!document.querySelector('nav button')?.disabled);assert.deepEqual(await page.getByRole('alert').allTextContents(),[]);};
-  const button=async name=>{await page.getByRole('button',{name,exact:true}).click();await idle();};
+  const idle=async()=>{await waitForWorkspaceIdle(page);assert.deepEqual(await page.getByRole('alert').allTextContents(),[]);};
+  const button=async name=>{await clickWorkstationButton(page,name,{waitForIdle:false});await idle();};
   const details=name=>page.locator('summary').filter({hasText:new RegExp(`^${name}$`)}).first().evaluate(node=>{node.parentElement.open=true;});
   const fill=(name,value)=>page.getByLabel(name,{exact:true}).fill(String(value));
   const combo=name=>page.getByRole('combobox',{name:new RegExp(`^${name}(?:\\s|$)`)});
   const chord=()=>page.getByRole('dialog',{name:'Harmony chord',exact:true});
   const openChord=async()=>{await details('Beat text & chord');await button('Edit chord diagram');await chord().getByRole('button',{name:'Generate shapes',exact:true}).waitFor({state:'visible'});await page.waitForFunction(()=>!document.querySelector('[role="dialog"] fieldset')?.disabled);};
   const exportPitches=async()=>{await button('Export GP');const score=importer.ScoreLoader.loadScoreFromBytes(readFileSync(exported),new Settings()),file=new midi.MidiFile();new midi.MidiFileGenerator(score,new Settings(),new midi.AlphaSynthMidiFileHandler(file)).generate();return {score,pitches:file.tracks.flatMap(track=>track.events).filter(event=>event instanceof midi.NoteOnEvent).map(event=>event.noteKey)};};
-  const restart=async()=>{await browser.close();browser=null;stop(id);id=launch({TABPLAYER_TEST_OPEN:saved,TABPLAYER_TEST_SAVE:saved,TABPLAYER_TEST_EXPORT:exported});browser=await connect();page=browser.contexts()[0].pages()[0];await page.getByRole('button',{name:'Open',exact:true}).waitFor();await button('Open');};
+  const restart=async()=>{await browser.close();browser=null;stop(id);id=launch({TABPLAYER_TEST_OPEN:saved,TABPLAYER_TEST_SAVE:saved,TABPLAYER_TEST_EXPORT:exported});browser=await connect();page=browser.contexts()[0].pages()[0];await waitForWorkspaceIdle(page);await button('Open');};
 
   await openChord();await button('Generate shapes');await button('Use shape 1');
   await details('Chord library');await fill('Library label',label);const beforeLibrary=await snapshot();await button('Save to library');await page.getByRole('status').filter({hasText:'Saved to library.'}).waitFor();

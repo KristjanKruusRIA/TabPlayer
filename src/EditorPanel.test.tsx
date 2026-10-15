@@ -71,3 +71,30 @@ it('opens a task from keyboard navigation and keeps rhythm and selection callbac
   fireEvent.change(screen.getByLabelText('Tuplet numerator'),{target:{value:'3'}});fireEvent.change(screen.getByLabelText('Tuplet denominator'),{target:{value:'2'}});
   fireEvent.click(screen.getByRole('button',{name:'Apply rhythm'}));expect(input.onEdit).toHaveBeenCalledWith({type:'setBeatRhythm',target,duration:8,dots:0,tupletNumerator:3,tupletDenominator:2,graceType:0});
 });
+
+it('retains unapplied rhythm and text drafts when the parent hides and reveals the mounted inspector',()=>{
+  const input=props(),view=render(<div><EditorPanel {...input}/></div>);
+  fireEvent.change(screen.getByLabelText('Duration'),{target:{value:'16'}});
+  disclose('Beat text');fireEvent.change(screen.getByLabelText('Beat text'),{target:{value:'Let this ring'}});
+  expect(input.onEdit).not.toHaveBeenCalled();
+  view.rerender(<div hidden><EditorPanel {...input}/></div>);
+  expect(screen.getByLabelText('Editing location')).not.toBeVisible();
+  view.rerender(<div><EditorPanel {...input}/></div>);
+  expect(screen.getByLabelText('Editing location')).toBeVisible();
+  expect(screen.getByLabelText('Duration')).toHaveValue('16');expect(screen.getByLabelText('Beat text')).toHaveValue('Let this ring');
+  fireEvent.click(screen.getByRole('button',{name:'Apply rhythm'}));
+  expect(input.onEdit).toHaveBeenNthCalledWith(1,{type:'setBeatRhythm',target,duration:16,dots:0,tupletNumerator:1,tupletDenominator:1,graceType:0});
+  fireEvent.click(screen.getByRole('button',{name:'Apply beat text'}));
+  expect(input.onEdit).toHaveBeenNthCalledWith(2,{type:'setBeatText',target,text:'Let this ring'});
+});
+
+it('identifies the indexed note in the persistent location and keeps unsupported techniques reachable',()=>{
+  const input=props();input.score.tracks[0].staves[0].isPercussion=true;
+  const view=render(<EditorPanel {...input} noteIndex={0}/>);
+  expect(screen.getByLabelText('Editing location')).toHaveTextContent('Staff 1 · Voice 1 · Note 1');
+  disclose('Notes & techniques');expect(screen.getByLabelText('Palm mute')).toBeVisible();expect(screen.getByLabelText('Palm mute')).toBeDisabled();
+  fireEvent.click(screen.getByLabelText('Ghost note'));
+  expect(input.onEdit).toHaveBeenCalledWith({type:'setNoteTechniquesByIndex',target,noteIndex:0,patch:{ghost:true}});
+  view.rerender(<EditorPanel {...input} noteIndex={null}/>);
+  expect(screen.getByLabelText('Editing location')).toHaveTextContent('No note selected');
+});

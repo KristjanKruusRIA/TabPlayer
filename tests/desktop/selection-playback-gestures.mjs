@@ -1,3 +1,4 @@
+import {waitForWorkspaceIdle,clickWorkstationButton,revealPlaybackControls} from './workstation-commands.mjs';
 import { readActiveDocument } from './document-context.mjs';
 import assert from 'node:assert/strict';
 import {readFileSync,writeFileSync} from 'node:fs';
@@ -12,17 +13,17 @@ const output=name=>resolve(directory,`${prefix}-${name}`),errors=[],checks={};
 let id=null,browser=null,page=null;
 const snapshot=()=>readActiveDocument(page);
 const status=()=>page.evaluate(()=>window.__TAURI_INTERNALS__.invoke('audio_status'));
-const idle=()=>page.waitForFunction(()=>!document.querySelector('nav[aria-label="File and history"] button')?.disabled);
+const idle=()=>waitForWorkspaceIdle(page);
 const published=()=>page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
 const transport=value=>({generation:value.generation,tick:value.tick,playing:value.playing,range:value.range,loop:value.loop});
-async function button(name){await page.getByRole('button',{name,exact:true}).click();await idle();await published();}
+async function button(name){await clickWorkstationButton(page,name,{waitForIdle:false});await idle();await published();}
 async function waitStatus(predicate){const deadline=Date.now()+15000;let value;do{value=await status();if(predicate(value))return value;await page.waitForTimeout(20);}while(Date.now()<deadline);throw new Error(`Native gesture status timed out: ${JSON.stringify(value)}`);}
-async function disclosure(label){const summary=page.locator('summary').filter({hasText:new RegExp(`^${label}$`)}).first();if(!await summary.evaluate(node=>node.parentElement.open))await summary.click();await published();}
+async function disclosure(label){if(label==='Selected playback')await revealPlaybackControls(page);const summary=page.locator('summary').filter({hasText:new RegExp(`^${label}$`)}).first();if(!await summary.evaluate(node=>node.parentElement.open))await summary.click();await published();}
 async function center(locator){await locator.scrollIntoViewIfNeeded();await published();const box=await locator.boundingBox();assert.ok(box&&box.width>0&&box.height>0,'Actual rendered gesture target must have geometry');return {x:box.x+box.width/2,y:box.y+box.height/2};}
 async function location(beat){await page.getByLabel('Editing location',{exact:true}).filter({hasText:`Selection guitar · Measure 1 · Beat ${beat}`}).waitFor();await published();}
 async function count(notes,beats){await page.locator('.inspector').getByText(`${notes} ${notes===1?'note':'notes'} · ${beats} ${beats===1?'beat':'beats'}`,{exact:true}).waitFor();await published();}
 const frets=value=>page.locator('[aria-label="Music notation"] svg text').filter({hasText:new RegExp(`^${value}$`)});
-const occurrence=number=>page.getByRole('combobox',{name:'Selection occurrence',exact:true}).selectOption({label:`Measure 1, occurrence ${number} → measure 1, occurrence ${number}`});
+const occurrence=async number=>{await revealPlaybackControls(page);return page.getByRole('combobox',{name:'Selection occurrence',exact:true}).selectOption({label:`Measure 1, occurrence ${number} → measure 1, occurrence ${number}`});};
 async function unchanged(before,native){assert.deepEqual(await snapshot(),before,'Gesture/transport must preserve complete project history and redo');if(native)assert.deepEqual(transport(await status()),transport(native),'Selecting alone must preserve native clock, range, loop, generation and run intent');}
 async function stopPlayback(){await button('Stop');await waitStatus(value=>value.tick===0&&!value.playing&&value.range===null);}
 async function playPassage(start,end){
@@ -33,7 +34,7 @@ async function playPassage(start,end){
 
 try{
   id=launch({TABPLAYER_TEST_OPEN:fixture.fixtures.main.path});browser=await connect();page=browser.contexts()[0].pages()[0];page.on('pageerror',error=>errors.push(error.message));
-  await page.setViewportSize({width:1280,height:1100});await page.getByRole('button',{name:'Open',exact:true}).waitFor();await button('Open');await waitStatus(value=>value.ready&&!value.error);
+  await page.setViewportSize({width:1280,height:1100});await waitForWorkspaceIdle(page);await button('Open');await waitStatus(value=>value.ready&&!value.error);
   await page.locator('[aria-label="Music notation"] svg').first().waitFor();await disclosure('Selected playback');
   await page.getByRole('combobox',{name:'Displayed tracks',exact:true}).selectOption('all');await page.getByLabel('Zoom (%)',{exact:true}).fill('115');await published();
   // Make a real redo entry, then restore source music before acceptance.

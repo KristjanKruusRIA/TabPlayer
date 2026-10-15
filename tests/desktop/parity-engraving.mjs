@@ -1,3 +1,4 @@
+import {waitForWorkspaceIdle,clickWorkstationButton} from './workstation-commands.mjs';
 import { readActiveDocument } from './document-context.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
@@ -13,13 +14,13 @@ const saved=resolve(directory,'gp8-engraving.tabplayer'),exported=resolve(direct
 const hash=bytes=>createHash('sha256').update(bytes).digest('hex'),sourceHash=hash(readFileSync(fixturePath)),result={sourceHash};
 let id=launch({TABPLAYER_TEST_OPEN:fixturePath,TABPLAYER_TEST_SAVE:saved,TABPLAYER_TEST_EXPORT:exported}),browser,page;
 try{
-  browser=await connect();page=browser.contexts()[0].pages()[0];await page.getByRole('button',{name:'Open',exact:true}).waitFor();
+  browser=await connect();page=browser.contexts()[0].pages()[0];await waitForWorkspaceIdle(page);
   const errors=[];page.on('pageerror',error=>errors.push(error.message));
   const snapshot=()=>readActiveDocument(page);
   const status=()=>page.evaluate(()=>window.__TAURI_INTERNALS__.invoke('audio_status'));
   const waitStatus=async predicate=>{const deadline=Date.now()+15000;while(Date.now()<deadline){const value=await status();if(predicate(value))return value;await page.waitForTimeout(25);}throw new Error(`Audio status timeout: ${JSON.stringify(await status())}`);};
-  const idle=async()=>{await page.waitForFunction(()=>!document.querySelector('nav button')?.disabled);assert.deepEqual(await page.getByRole('alert').allTextContents(),[]);};
-  const button=async name=>{await page.getByRole('button',{name,exact:true}).click();await idle();};
+  const idle=async()=>{await waitForWorkspaceIdle(page);assert.deepEqual(await page.getByRole('alert').allTextContents(),[]);};
+  const button=async name=>{await clickWorkstationButton(page,name,{waitForIdle:false});await idle();};
   const details=async name=>{await page.locator('summary').filter({hasText:new RegExp(`^${name}$`)}).first().evaluate(node=>{node.parentElement.open=true;});};
   const fill=(name,value)=>page.getByLabel(name,{exact:true}).fill(String(value));
   const combo=name=>page.getByRole('combobox',{name:new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')}(?:\\s|$)`)});
@@ -30,7 +31,7 @@ try{
   await choose('Displayed tracks','all');await fill('Zoom (%)',127.5);assert.deepEqual((await snapshot()).project,baseline.project);
   await details('Visible tracks');await page.getByLabel('Show track 2: Grand Piano',{exact:true}).uncheck();await button('Track 2: Grand Piano');await page.getByRole('status').filter({hasText:'Grand Piano is hidden in score.'}).waitFor();
   await choose('Displayed tracks','all');await button('Track 1: Guitar6');assert.deepEqual((await snapshot()).project,baseline.project);
-  await details('Engraving');await details('Stylesheet');await details('Staff profiles');
+  await button('Presentation');await details('Engraving');await details('Stylesheet');await details('Staff profiles');
   await button('Play');const playing=await waitStatus(value=>value.playing&&value.tick>0),generation=playing.generation;assert.ok(Number.isInteger(generation)&&generation>0);
   await choose('Hide dynamics','true');await choose('Single track names','allSystems');await choose('Multiple track names','allSystems');await choose('Guitar6 notation profile','standardTab');await fill('System spacing (%)',125);await button('Apply engraving');
   const afterStyle=await status();assert.equal(afterStyle.generation,generation);assert.equal(afterStyle.playing,true);assert.ok(afterStyle.tick>=playing.tick);result.presentationKeepsNativeGeneration=generation;
@@ -39,7 +40,7 @@ try{
   const authored=await snapshot();assert.deepEqual(authored.project.edits.map(edit=>edit.type),['setEngraving','setPageLayout']);
   await button('Undo');assert.equal((await snapshot()).project.edits.length,1);await button('Redo');assert.deepEqual((await snapshot()).project,authored.project);
   await button('Show instrument');
-  for(const width of [960,1280,1600]){await page.setViewportSize({width,height:960});await page.waitForTimeout(150);assert.equal(await page.locator('.tracks').count(),1);assert.equal(await page.locator('.inspector').count(),1);await page.screenshot({path:resolve('.analysis/parity',`engraving-desktop-${width}.png`)});}
+  for(const width of [960,1280,1600]){await page.setViewportSize({width,height:960});await page.waitForTimeout(150);assert.equal(await page.locator('.workstation-left').count(),1);assert.equal(await page.locator('.inspector').count(),1);await page.screenshot({path:resolve('.analysis/parity',`engraving-desktop-${width}.png`)});}
   await button('Export GP');const finalGp=readFileSync(exported);assert.deepEqual(musical(finalGp),baselineMusic);
   const beforeArchive=unzipSync(baselineGp),afterArchive=unzipSync(finalGp);for(const [name,bytes]of Object.entries(beforeArchive))if(name!=='Content/score.gpif')assert.equal(hash(afterArchive[name]),hash(bytes),`Untouched GP sibling ${name}`);
   result.unchangedMidiEvents=baselineMusic.length;result.sourceArchiveSiblingsPreserved=true;
@@ -49,7 +50,7 @@ try{
     const bytes=readFileSync(pdf);assert.equal(bytes.subarray(0,5).toString(),'%PDF-');copyFileSync(pdf,resolve('.analysis/parity',`engraving-${variant}.pdf`));result[`${variant}PdfBytes`]=bytes.length;
   }
   await button('Save');const stored=await snapshot();assert.equal(stored.dirty,false);assert.deepEqual(errors,[]);
-  await browser.close();browser=null;stop(id);id=launch({TABPLAYER_TEST_OPEN:saved});browser=await connect();page=browser.contexts()[0].pages()[0];await page.getByRole('button',{name:'Open',exact:true}).waitFor();await button('Open');
+  await browser.close();browser=null;stop(id);id=launch({TABPLAYER_TEST_OPEN:saved});browser=await connect();page=browser.contexts()[0].pages()[0];await waitForWorkspaceIdle(page);await button('Open');
   assert.deepEqual((await snapshot()).project,stored.project);assert.equal(await combo('Displayed tracks').inputValue(),'selected');assert.equal(await page.getByLabel('Zoom (%)',{exact:true}).inputValue(),'100');result.nativeRestartHistoryAndSessionReset=true;
   assert.equal(hash(readFileSync(fixturePath)),sourceHash);writeFileSync(resolve('.analysis/parity/native-engraving-result.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result));
 }catch(error){if(page)await page.screenshot({path:resolve('.analysis/parity/native-engraving-failure.png')});throw error;}

@@ -1,3 +1,4 @@
+import {waitForWorkspaceIdle,clickWorkstationButton,clickWorkspaceCommand} from './workstation-commands.mjs';
 import assert from 'node:assert/strict';
 import {existsSync,readFileSync,realpathSync,writeFileSync} from 'node:fs';
 import {execFileSync,spawn} from 'node:child_process';
@@ -27,8 +28,8 @@ const workspace=()=>invoke('workspace_snapshot');
 const status=()=>invoke('audio_status');
 const address=record=>({documentId:record.documentId,revision:record.revision});
 const record=documentId=>readDocumentRecord(page,documentId);
-const idle=()=>page.waitForFunction(()=>document.querySelector('[role="tablist"]')?.getAttribute('aria-busy')==='false'&&!document.querySelector('nav[aria-label="File and history"] button')?.disabled,undefined,{timeout:15000});
-async function button(name){await page.getByRole('button',{name,exact:true}).click();await idle();}
+const idle=async()=>{await waitForWorkspaceIdle(page,{timeout:15000});await page.waitForFunction(()=>document.querySelector('[role="tablist"]')?.getAttribute('aria-busy')==='false',undefined,{timeout:15000});};
+async function button(name){await clickWorkstationButton(page,name,{waitForIdle:false});await idle();}
 async function waitStatus(predicate,timeout=15000){
   const deadline=Date.now()+timeout;let value;
   do{value=await status();if(value&&predicate(value))return value;await page.waitForTimeout(25);}while(Date.now()<deadline);
@@ -45,9 +46,9 @@ async function closeApp(){
 async function start(exportPath=output('exports'),savePath=output('ui-save.tabplayer')){
   await closeApp();id=launch({TABPLAYER_TEST_OPEN:fixture.documents.A.projectPath,TABPLAYER_TEST_SAVE:savePath,TABPLAYER_TEST_BACKING:fixture.documents.A.backingPath,TABPLAYER_TEST_EXPORT:exportPath});
   browser=await connect();page=browser.contexts()[0].pages()[0];page.on('pageerror',error=>errors.push(error.message));
-  await page.setViewportSize({width:1600,height:1100});await page.getByRole('button',{name:'Open',exact:true}).waitFor();await idle();
+  await page.setViewportSize({width:1600,height:1100});await waitForWorkspaceIdle(page);await idle();
 }
-async function reload(){await page.reload();await page.getByRole('button',{name:'Open',exact:true}).waitFor();await idle();await ready();}
+async function reload(){await page.reload();await waitForWorkspaceIdle(page);await idle();await ready();}
 async function add(path){
   const intake=await invoke('desktop_test_io',{action:'read',path});assert.equal(intake.kind,'candidate');
   const value=await invoke('workspace_add',{token:intake.candidate.token});return value.active.documentId;
@@ -69,7 +70,7 @@ function ownedProcess(pid,path){
 function answer(decision){ownedProcess(id,executable);const receipt=execFileSync('powershell.exe',['-NoProfile','-ExecutionPolicy','Bypass','-File','tests/desktop/answer-unsaved-dialog.ps1','-AppProcessId',String(id),'-AppExecutable',executable,'-Decision',decision],{encoding:'utf8',windowsHide:true,timeout:15000});return receipt.trim();}
 function cancelPicker(){ownedProcess(id,executable);return execFileSync('powershell.exe',['-NoProfile','-ExecutionPolicy','Bypass','-File','tests/desktop/cancel-dialog.ps1','-AppProcessId',String(id)],{encoding:'utf8',windowsHide:true,timeout:10000}).trim();}
 async function closeDecisions(label,decisions){
-  await page.getByRole('button',{name:label,exact:true}).click();
+  await clickWorkspaceCommand(page,label,{waitForIdle:false});
   const receipts=decisions.map(answer);await idle();return receipts;
 }
 function hashOutput(path){result.outputs[path]=sha256(readFileSync(path));}
@@ -132,7 +133,7 @@ async function staleOwner(){
 function emptySettings(){return {sounds:{},mixes:{},backing:null,print:{paper:'A4',orientation:'portrait',marginMm:15,scale:1,profile:'ScoreTab'},engraving:{stylesheet:{hideDynamics:null,brackets:'inherit',extendBarLines:null,systemSeparators:null,tuning:null,chords:'inherit',singleNames:'inherit',multiNames:'inherit',firstNames:'inherit',otherNames:'inherit',firstNameDirection:'inherit',otherNameDirection:'inherit',barNumbers:'inherit',multiRests:'inherit',hideEmptyStaves:null,hideEmptyFirstSystem:null,singleStaffBrackets:null},notation:{tabRhythm:'inherit',fingering:'inherit',smallGraceTab:null,extendBendArrows:null,extendLineEffects:null,parenthesizeTiedBends:null,showTiedBendNumbers:null,showDiveWhammyZeros:null},systemSpacing:null,profiles:[]},page:null};}
 
 async function exportFormat(format){
-  const before=await record(A);await page.getByRole('button',{name:'Export score',exact:true}).click();const dialog=page.getByRole('dialog',{name:'Export score'});await dialog.waitFor({state:'visible'});await dialog.getByRole('combobox',{name:/^Export format/}).selectOption(format);
+  const before=await record(A);await clickWorkspaceCommand(page,'Export score',{waitForIdle:false});const dialog=page.getByRole('dialog',{name:'Export score'});await dialog.waitFor({state:'visible'});await dialog.getByRole('combobox',{name:/^Export format/}).selectOption(format);
   if(format==='wav'||format==='stems'){await dialog.getByLabel('Effect tail (seconds)',{exact:true}).fill('0.1');await dialog.getByLabel('Measure range',{exact:true}).check();await dialog.getByLabel('First measure',{exact:true}).fill('1');await dialog.getByLabel('Last measure',{exact:true}).fill('2');}
   await dialog.getByRole('button',{name:'Export',exact:true}).click();const deadline=Date.now()+60000;
   while(await dialog.isVisible()){

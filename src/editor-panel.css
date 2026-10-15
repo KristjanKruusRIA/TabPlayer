@@ -1,15 +1,33 @@
-.inspector-heading{position:sticky;top:-16px;z-index:2;margin:-16px -16px 4px;padding:16px;background:#1d2530;border-bottom:1px solid #394454}
-.inspector-heading h2{margin-bottom:8px}
-.inspector-location{margin:0;color:#edf1f5;font-size:12px;line-height:1.5;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}
-.inspector-location span{display:block;color:#b0bdca;font-size:11px}
-.inspector-heading nav{display:flex;gap:4px;margin-top:12px}
-.inspector-heading nav button{flex:1;min-width:0;padding:6px 4px;font-size:11px}
-.inspector-task{padding:0 0 12px;border-bottom:1px solid #394454}
-.inspector-task>summary{padding:12px 0;margin:0;font-size:14px;font-weight:600;scroll-margin-top:136px}
+.inspector{width:100%;min-width:0;padding:8px;background:var(--ws-panel);color:var(--ws-text);border-color:var(--ws-border);scroll-padding-top:126px;scrollbar-color:var(--ws-border) var(--ws-panel)}
+.inspector-heading{position:sticky;top:-8px;z-index:2;margin:-8px -8px 0;padding:8px;background:var(--ws-panel);border-bottom:1px solid var(--ws-border)}
+.inspector-heading h2{margin:0 0 6px;color:var(--ws-text);font-size:14px;line-height:1.35;text-transform:none;letter-spacing:normal}
+.inspector-location{margin:0;color:var(--ws-text);font-size:12px;line-height:1.35;overflow-wrap:anywhere;font-variant-numeric:tabular-nums}
+.inspector-location span{display:block;margin-top:4px;color:var(--ws-muted);font-size:11px}
+.inspector-heading nav{display:flex;gap:4px;margin-top:8px}
+.inspector-heading nav button{flex:1;min-width:0;padding:4px;font-size:12px}
+.inspector .inspector-task{padding:0 0 8px;border-bottom:1px solid var(--ws-border)}
+.inspector-task>summary{padding:8px 0;margin:0;font-size:14px;font-weight:600;scroll-margin-top:126px}
+.inspector fieldset{gap:8px}
+.inspector details fieldset,.inspector details label{margin-bottom:8px}
 .inspector-task>fieldset{margin-bottom:0}
-.inspector-task details>summary{font-size:12px}
-.inspector-task .inspector-advanced>summary{margin:0;padding:4px 0;color:#b0bdca}
-.inspector-advanced[open]>summary{margin-bottom:8px}
-.inspector-musical-tools{margin:16px 0;display:flex;flex-direction:column;gap:8px}
-.inspector .inspector-musical-tools h3{margin:0;color:#edf1f5}
+.inspector details details{border-top:1px solid var(--ws-border)}
+.inspector details details>summary{min-height:28px;margin:0;padding:6px 0;color:var(--ws-text);font-size:12px;line-height:1.35;overflow-wrap:anywhere}
+.inspector .inspector-advanced>summary{color:var(--ws-muted)}
+.inspector-advanced[open]>summary{margin-bottom:4px}
+.inspector label{gap:4px;color:var(--ws-muted);font-size:12px;min-width:0}
+.inspector input,.inspector select,.inspector button{min-height:28px;border:1px solid var(--ws-border);border-radius:3px;background:var(--ws-input);color:var(--ws-text);padding:4px 6px;line-height:18px}
+.inspector input,.inspector select{font-variant-numeric:tabular-nums;caret-color:var(--ws-accent)}
+.inspector .pair{gap:6px}
+.inspector .check{white-space:normal}
+.inspector input[type=checkbox]{min-height:0;width:14px;height:14px;padding:0;accent-color:var(--ws-accent);flex-shrink:0}
+.inspector button:hover:enabled{border-color:var(--ws-accent)}
+.inspector button:disabled,.inspector input:disabled,.inspector select:disabled{opacity:1;color:var(--ws-muted);border-style:dashed;cursor:default}
+.inspector .primary{background:var(--ws-accent);border-color:var(--ws-accent);color:var(--ws-accent-ink)}
+.inspector :is(button,input,select,textarea,summary):focus-visible{outline:2px solid var(--ws-accent);outline-offset:2px}
+.inspector .muted{color:var(--ws-muted);font-size:11px;line-height:1.35}
+.inspector :is(p,label,button,summary){overflow-wrap:anywhere}
+.inspector :is([role=alert],.field-error){color:var(--ws-error)}
+.inspector-musical-tools{margin:12px 0 8px;display:flex;flex-direction:column;gap:6px}
+.inspector .inspector-musical-tools h3{margin:0;color:var(--ws-text);font-size:12px}
 .inspector-musical-tools button{font-size:12px}
+.inspector ::selection{color:var(--ws-accent-ink);background:var(--ws-accent)}

@@ -1,0 +1,39 @@
+.track-panel { min-width:0; min-height:0; height:100%; color:var(--ws-text); background:var(--ws-panel); }
+.track-panel .track-panel-view { min-width:0; min-height:0; height:100%; }
+.track-panel [hidden] { display:none; }
+.track-panel .track-mixer { display:flex; align-items:stretch; overflow:auto; overscroll-behavior:contain; scrollbar-color:var(--ws-border) var(--ws-input); }
+.track-panel .track-channel { flex:0 0 112px; min-width:112px; box-sizing:border-box; padding:6px; border-right:1px solid var(--ws-border); display:flex; flex-direction:column; gap:4px; }
+.track-panel .track-channel.selected { background:var(--ws-raised); box-shadow:inset 0 2px var(--ws-accent); }
+.track-panel .track-channel-heading { min-width:0; }
+.track-panel .track-channel-select { display:block; width:100%; min-width:0; height:28px; padding:2px 4px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--ws-text); background:var(--ws-input); border:1px solid var(--ws-border); border-radius:3px; text-align:left; font:inherit; }
+.track-panel .track-channel-select[aria-pressed="true"] { border-color:var(--ws-accent); }
+.track-panel .track-channel-status { display:block; color:var(--ws-muted); font-size:11px; line-height:15px; }
+.track-panel .track-channel-switches { display:flex; gap:6px; }
+.track-panel .track-channel-switches label { display:flex; flex-direction:row; align-items:center; gap:2px; min-height:28px; margin:0; font-size:12px; }
+.track-panel .track-channel-switches input { width:14px; height:14px; margin:0; accent-color:var(--ws-accent); }
+.track-panel .track-channel-range { display:grid; grid-template-columns:1fr auto; gap:0 4px; margin:0; color:var(--ws-muted); font-size:12px; line-height:16px; }
+.track-panel .track-channel-range output { color:var(--ws-text); font-variant-numeric:tabular-nums; }
+.track-panel .track-channel-range input { grid-column:1 / -1; width:100%; min-width:0; height:20px; margin:0; padding:0; accent-color:var(--ws-accent); }
+.track-panel button:disabled,.track-panel input:disabled { cursor:not-allowed; }
+.track-panel button:disabled { opacity:1; color:var(--ws-muted); border-style:dashed; }
+.track-panel :is(button,input):focus-visible { outline:2px solid var(--ws-accent); outline-offset:2px; }
+.track-settings { box-sizing:border-box; min-width:0; min-height:0; height:100%; padding:8px; overflow:auto; overscroll-behavior:contain; color:var(--ws-text); background:var(--ws-panel); font-size:13px; line-height:1.35; scrollbar-color:var(--ws-border) var(--ws-input); }
+.track-settings h2 { margin:0 0 8px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--ws-text); font-size:14px; line-height:20px; text-transform:none; letter-spacing:normal; }
+.track-settings h3 { margin:0 0 6px; font-size:13px; }
+.track-settings fieldset { min-width:0; margin:0; padding:0; border:0; display:grid; gap:6px; }
+.track-settings fieldset+fieldset { margin-top:12px; padding-top:8px; border-top:1px solid var(--ws-border); }
+.track-settings label { display:grid; min-width:0; gap:4px; margin:0; color:var(--ws-muted); font-size:12px; }
+.track-settings :is(input,select,button) { box-sizing:border-box; min-width:0; width:100%; min-height:28px; margin:0; padding:3px 6px; color:var(--ws-text); background:var(--ws-input); border:1px solid var(--ws-border); border-radius:3px; font:inherit; }
+.track-settings :is(input,select) { font-variant-numeric:tabular-nums; caret-color:var(--ws-accent); }
+.track-settings input::placeholder { color:var(--ws-muted); }
+.track-settings details { padding:6px 0; border-top:1px solid var(--ws-border); }
+.track-settings summary { margin:0; min-height:28px; line-height:28px; color:var(--ws-text); cursor:pointer; }
+.track-settings details[open] { display:grid; gap:6px; }
+.track-settings details[open]>label,.track-settings details[open]>.tuning-field { margin-bottom:6px; }
+.track-settings .pair { display:grid; grid-template-columns:1fr; gap:6px; }
+.track-settings .tuning-field { min-width:0; }
+.track-settings .tuning-error { display:block; margin-top:4px; color:var(--ws-error); font-size:12px; overflow-wrap:anywhere; }
+.track-settings :is(input,select,button):disabled { opacity:1; color:var(--ws-muted); border-style:dashed; cursor:not-allowed; }
+.track-settings button:hover:not(:disabled),.track-panel button:hover:not(:disabled) { background:var(--ws-raised); border-color:var(--ws-accent); }
+.track-settings :is(input,select,button,summary):focus-visible { outline:2px solid var(--ws-accent); outline-offset:2px; }
+.track-settings ::selection,.track-panel ::selection { color:var(--ws-accent-ink); background:var(--ws-accent); }

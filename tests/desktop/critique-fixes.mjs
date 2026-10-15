@@ -1,3 +1,4 @@
+import {waitForWorkspaceIdle,clickWorkstationButton,revealLeftTask} from './workstation-commands.mjs';
 import { readActiveDocument } from './document-context.mjs';
 import assert from 'node:assert/strict';
 import {mkdirSync,readFileSync,writeFileSync} from 'node:fs';
@@ -14,15 +15,15 @@ const save=()=>writeFileSync(resolve(output,'validation.json'),JSON.stringify(re
 try{
   pid=launch({TABPLAYER_TEST_OPEN:fixture});result.pid=pid;save();browser=await connect();page=browser.contexts()[0].pages()[0];page.setDefaultTimeout(10000);
   page.on('pageerror',error=>result.errors.push(error.message));
-  const idle=()=>page.waitForFunction(()=>!document.querySelector('.toolbar nav button')?.disabled);
-  const click=async name=>{await page.getByRole('button',{name,exact:true}).click();await idle();};
+  const idle=()=>waitForWorkspaceIdle(page);
+  const click=async name=>{await clickWorkstationButton(page,name,{waitForIdle:false});await idle();};
   const summary=async name=>{const node=page.locator('summary').filter({hasText:new RegExp(`^${name}$`)}).first();if(!(await node.evaluate(element=>element.parentElement.open)))await node.click();};
   const snapshot=async name=>{
     await page.waitForTimeout(150);const path=resolve(output,`${name}.png`);await page.screenshot({path});
     const layout=await page.evaluate(()=>({width:innerWidth,height:innerHeight,documentWidth:document.documentElement.scrollWidth,regions:Object.fromEntries(['.paper-scroll','.live-instrument-view','.instrument-view','.inspector','.score-tools'].map(selector=>{const element=document.querySelector(selector);return [selector,element?{height:element.clientHeight,width:element.clientWidth,scrollHeight:element.scrollHeight,scrollWidth:element.scrollWidth,overflowY:getComputedStyle(element).overflowY}:null];})),focus:{tag:document.activeElement?.tagName,text:document.activeElement?.textContent?.slice(0,80)}}));
     assert.ok(layout.documentWidth<=layout.width,`Document overflow at ${name}`);result.states.push({name,path,layout});save();
   };
-  await page.setViewportSize({width:1280,height:900});await page.getByRole('button',{name:'Open',exact:true}).waitFor();await idle();
+  await page.setViewportSize({width:1280,height:900});await waitForWorkspaceIdle(page);await idle();
   await page.waitForFunction(()=>document.querySelector('.statusbar')?.textContent?.startsWith('New score'));
   await snapshot('new-1280');
   const workspace=page.getByRole('region',{name:'Score workspace'}),editTask=page.locator('.inspector-task[id$="-edit"]');
@@ -53,7 +54,7 @@ try{
     if(await page.locator('.score-edit-entry').count())assert.doesNotMatch(await page.locator('.score-edit-entry').innerText(),/string/i);
   }
   await click('Track 1: Guitar6');await click('Hide instrument');
-  const tuning=page.getByLabel('Tuning (notes, high to low)',{exact:true});await tuning.fill('E4 WHAT');await click('Apply tuning');
+  await revealLeftTask(page,'Track');const tuning=page.getByLabel('Tuning (notes, high to low)',{exact:true});await tuning.fill('E4 WHAT');await click('Apply tuning');
   assert.equal(await tuning.getAttribute('aria-invalid'),'true');assert.ok(await tuning.evaluate(element=>element===document.activeElement));
   const tuningError=page.getByRole('alert').filter({hasText:'WHAT'});await tuningError.waitFor();const errorBox=await tuningError.boundingBox();assert.ok(errorBox&&errorBox.y>=0&&errorBox.y+errorBox.height<=900,'Tuning error must be visible');
   await snapshot('tuning-error-1280');await tuning.fill('E4 B3 G3 D3 A2 E2');

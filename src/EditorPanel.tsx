@@ -40,7 +40,7 @@ export function EditorPanel({score,target,string,fret,noteIndex,onSelectNote,bus
   const [title,setTitle]=useState(score.title);const [artist,setArtist]=useState(score.artist);const [tempo,setTempo]=useState(score.tempo);
   useEffect(()=>{setTitle(score.title);setArtist(score.artist);setTempo(score.tempo);},[score.title,score.artist,score.tempo]);
   return <aside className="inspector"><header className="inspector-heading"><h2>Inspector</h2>
-    <p className="inspector-location" aria-label="Editing location">{score.tracks[target.track].name||`Track ${target.track+1}`} · Measure {target.bar+1} · Beat {target.beat+1}<span>Staff {target.staff+1} · Voice {target.voice+1}{indexed?'':` · String ${string}`}</span></p>
+    <p className="inspector-location" aria-label="Editing location">{score.tracks[target.track].name||`Track ${target.track+1}`} · Measure {target.bar+1} · Beat {target.beat+1}<span>Staff {target.staff+1} · Voice {target.voice+1}{indexed?noteIndex===null?' · No note selected':` · Note ${noteIndex+1}`:` · String ${string}`}</span></p>
     <nav aria-label="Inspector tasks"><button aria-controls={`${id}-edit`} onClick={()=>openTask(editTask.current)}>Edit</button><button aria-controls={`${id}-practice`} onClick={()=>openTask(practiceTask.current)}>Practice</button><button aria-controls={`${id}-presentation`} onClick={()=>openTask(presentationTask.current)}>Presentation</button></nav>
   </header><section aria-label="Edit tools"><details className="inspector-task" id={`${id}-edit`} ref={editTask} open><summary>Edit</summary><fieldset disabled={busy}>
     <div className="pair"><IndexInput label="Measure" value={target.bar+1} min={1} max={score.masterBars.length} onValue={value=>onSelect({...target,bar:value-1,beat:0})}/>

@@ -1,4 +1,4 @@
-import { useEffect, useMemo,useRef, useState, useSyncExternalStore, type KeyboardEvent,type ReactNode } from 'react';
+import { useEffect,useLayoutEffect, useMemo,useRef, useState, useSyncExternalStore, type KeyboardEvent,type ReactNode } from 'react';
 import { DocumentController } from './controller';
 import { describeSelection, effectiveAudioSettings } from './engine';
 import type { BeatTarget, EditCommand } from './project';
@@ -41,6 +41,8 @@ import { getHarmonyChord } from './harmony/chord-source';
 import { readHarmonyLibrary,putHarmonyLibraryEntry,removeHarmonyLibraryEntry } from './harmony/library';
 import type { HarmonyLibrary } from './editor/harmony-types';
 import { HarmonyTransposePanel } from './harmony/HarmonyTransposePanel';
+import { TrackSettingsPanel } from './workstation/TrackSettingsPanel';
+import './workstation/workstation-shell.css';
 const noPlaybackSubscribe=()=>()=>{};
 const textEntry=(target:EventTarget)=>target instanceof HTMLElement&&(['INPUT','SELECT','TEXTAREA'].includes(target.tagName)||target.isContentEditable);
 
@@ -71,6 +73,31 @@ export function App({controller,audioBridge,exportBridge,documentBridge,document
   const [selectedNoteIndex,setNoteIndex]=useState<number|null>(documentView.selectedNoteIndex);
   const [zoom,setZoom]=useState(documentView.zoom),[trackView,setTrackView]=useState<TrackView>(documentView.trackView);
   const [instrumentVisible,setInstrumentVisible]=useState(documentView.instrumentVisible);
+  const [leftTask,setLeftTask]=useState<'track'|'sound'|'backing'>('track');
+  const [leftVisible,setLeftVisible]=useState(true),[inspectorVisible,setInspectorVisible]=useState(true),[dockVisible,setDockVisible]=useState(true);
+  const [narrowPane,setNarrowPane]=useState<'track'|'sound'|'backing'|'inspector'>('inspector');
+  const [viewport,setViewport]=useState(()=>({width:window.innerWidth,height:window.innerHeight}));
+  const [dockMode,setDockMode]=useState<'overview'|'mixer'>('overview'),[dockForced,setDockForced]=useState(false);
+  const shell=useRef<HTMLDivElement>(null),workspace=useRef<HTMLDivElement>(null),scorePane=useRef<HTMLElement>(null),commandBar=useRef<HTMLElement>(null);
+  const leftPane=useRef<HTMLElement>(null),inspectorPane=useRef<HTMLDivElement>(null),paneRail=useRef<HTMLElement>(null),viewMenu=useRef<HTMLDetailsElement>(null);
+  const paneFocusIntent=useRef<{pane:'track'|'sound'|'backing'|'inspector';trigger:boolean}|null>(null),[paneFocusTick,setPaneFocusTick]=useState(0);
+  const [workspaceHeight,setWorkspaceHeight]=useState(Infinity),[clipboardFocus,setClipboardFocus]=useState(0);
+  const narrow=viewport.width<1180,leftShown=leftVisible&&(!narrow||narrowPane!=='inspector'),inspectorShown=inspectorVisible&&(!narrow||narrowPane==='inspector');
+  const dockHeight=instrumentVisible?(viewport.height<800?160:184):(viewport.height<800?144:viewport.width>=1440?192:176);
+  const dockCollapsed=dockVisible&&!dockForced&&workspaceHeight-dockHeight<200;
+  const instrumentShown=instrumentVisible&&dockVisible&&!dockCollapsed;
+  const requestPaneFocus=(pane:'track'|'sound'|'backing'|'inspector',trigger=false)=>{paneFocusIntent.current={pane,trigger};setPaneFocusTick(value=>value+1);};
+  useEffect(()=>{const resize=()=>{if(window.innerWidth<1180){if(narrowPane==='inspector'&&leftPane.current?.contains(document.activeElement))requestPaneFocus(leftTask,true);else if(narrowPane!=='inspector'&&inspectorPane.current?.contains(document.activeElement))requestPaneFocus('inspector',true);}setViewport({width:window.innerWidth,height:window.innerHeight});};window.addEventListener('resize',resize);return()=>window.removeEventListener('resize',resize);},[narrowPane,leftTask]);
+  useLayoutEffect(()=>{if(!workspace.current||typeof ResizeObserver==='undefined')return;const observer=new ResizeObserver(entries=>{const height=entries[0]?.contentRect.height;if(height>0)setWorkspaceHeight(height);});observer.observe(workspace.current);return()=>observer.disconnect();},[]);
+  const closeCommands=(focus=false)=>{commandBar.current?.querySelectorAll<HTMLDetailsElement>('details[open]').forEach(details=>{details.open=false;if(focus)details.querySelector('summary')?.focus();});};
+  const commandToggle=(current:HTMLDetailsElement)=>{if(current.open)commandBar.current?.querySelectorAll<HTMLDetailsElement>('details[open]').forEach(other=>{if(other!==current)other.open=false;});};
+  useEffect(()=>{const outside=(event:PointerEvent)=>{if(event.target instanceof Node&&!commandBar.current?.contains(event.target))closeCommands(true);};document.addEventListener('pointerdown',outside);return()=>document.removeEventListener('pointerdown',outside);},[]);
+  useLayoutEffect(()=>{const intent=paneFocusIntent.current;if(!intent)return;paneFocusIntent.current=null;if(document.activeElement instanceof Element&&document.activeElement.closest('[role="dialog"]'))return;const pane=intent.pane==='inspector'?inspectorPane.current:leftPane.current;const activeTask=intent.pane==='inspector'?pane:pane?.querySelector<HTMLElement>('.workstation-task:not([hidden])');const destination=intent.trigger?paneRail.current?.querySelector<HTMLElement>(`[data-pane="${intent.pane}"]`):activeTask?.querySelector<HTMLElement>('summary,button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled)');destination?.focus();},[paneFocusTick,leftShown,inspectorShown,leftTask,narrowPane,viewport.width]);
+  useLayoutEffect(()=>{if(!clipboardFocus)return;const section=clipboardSection.current?.querySelector('details');if(section){for(let parent=section.parentElement;parent;parent=parent.parentElement)if(parent instanceof HTMLDetailsElement)parent.open=true;section.open=true;section.querySelector('summary')?.focus();section.scrollIntoView?.({block:'nearest'});}},[clipboardFocus]);
+  const showTask=(task:'track'|'sound'|'backing')=>{closeCommands();setLeftVisible(true);setLeftTask(task);setNarrowPane(task);requestPaneFocus(task);};
+  const showInspector=()=>{closeCommands();setInspectorVisible(true);setNarrowPane('inspector');requestPaneFocus('inspector');};
+  const chooseDock=(mode:'overview'|'mixer'|'instrument')=>{setDockVisible(true);setDockForced(true);setInstrumentVisible(mode==='instrument');if(mode!=='instrument')setDockMode(mode);};
+  const hideDock=()=>{setDockVisible(false);viewMenu.current?.querySelector('summary')?.focus();};
   const [harmonyOpen,setHarmonyOpen]=useState(false),[scaleOpen,setScaleOpen]=useState(false),[libraryLoading,setLibraryLoading]=useState(false),[libraryError,setLibraryError]=useState<string|null>(null);
   const [library,setLibrary]=useState<HarmonyLibrary>({format:'TabPlayerHarmonyLibrary',version:1,entries:[]});
   const libraryRevision=useRef(0);
@@ -128,7 +155,7 @@ export function App({controller,audioBridge,exportBridge,documentBridge,document
       edit({type:'pasteMusic',clip,options:options??{target:{...target},destinations:source!.tracks.map((track,index)=>({sourceTrack:index,track:target.track+index,staffMap:track.staves.map((_,staff)=>clip.kind==='phrase'?target.staff:staff)})),count:1,placement:clip.kind==='phrase'?'currentBar':'beforeBar',filters:{diagrams:true,texts:true,timers:true,trackAutomations:true,masterAutomations:multi,sections:multi}}});
     }catch(reason){setClipboardError(reason instanceof Error?reason.message:String(reason));}
   };
-  const showClipboard=()=>{const section=clipboardSection.current?.querySelector('details');if(section){for(let parent=section.parentElement;parent;parent=parent.parentElement)if(parent instanceof HTMLDetailsElement)parent.open=true;section.open=true;section.querySelector('summary')?.focus();section.scrollIntoView({block:'nearest'});}};
+  const showClipboard=()=>{showInspector();setClipboardFocus(value=>value+1);};
   const documentAction=(job:Promise<unknown>)=>change(job);
   const [exportOpen,setExportOpen]=useState(false),[exportError,setExportError]=useState<string|null>(null),[exportLaunching,setExportLaunching]=useState(false);const exportCancelled=useRef(false),exportRunning=useRef<Promise<void>|null>(null),modalRelease=useRef<(()=>void)|null>(null);
   useEffect(()=>()=>{modalRelease.current?.();},[]);
@@ -210,48 +237,69 @@ export function App({controller,audioBridge,exportBridge,documentBridge,document
     else if((event.ctrlKey||event.metaKey)&&key==='a'){editorSelection(selectionForTrack(state.score,target.track));event.preventDefault();}
     else if(event.key==='Escape'){editorSelection(null);event.preventDefault();}
   }
-  return <div className="app-shell" onKeyDown={selectionKeys}>
-    <header className="toolbar"><h1>TabPlayer</h1><nav aria-label="File and history">
-      {sessionMenu}
+  return <div ref={shell} className="app-shell" aria-busy={controlsBusy} data-narrow={narrow} onKeyDown={selectionKeys}>
+    <header ref={commandBar} className="toolbar" onKeyDown={event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();closeCommands(true);}}} onClickCapture={event=>{if(!(event.target instanceof Element))return;const disclosure=event.target.closest('summary')?.parentElement;if(disclosure instanceof HTMLDetailsElement)commandBar.current?.querySelectorAll<HTMLDetailsElement>('details[open]').forEach(other=>{if(other!==disclosure)other.open=false;});else if(event.target.closest('button'))closeCommands(true);}}><h1>TabPlayer</h1><nav aria-label="File and history">
+      <details className="command-menu" onToggle={event=>commandToggle(event.currentTarget)}><summary>File</summary><section aria-label="File commands">
       <button disabled={controlsBusy} onClick={()=>documentAction(onNew())}>New</button>
       <button disabled={controlsBusy} onClick={()=>documentAction(onOpen())}>Open</button>
       <button disabled={controlsBusy} onClick={()=>act(controller.save())}>Save</button>
       <button disabled={controlsBusy} onClick={()=>act(controller.save(true))}>Save As</button>
       <button disabled={controlsBusy} onClick={()=>documentAction(onClose())}>Close score</button>
       <button disabled={controlsBusy} onClick={()=>documentAction(onCloseAll())}>Close all scores</button>
+      <button disabled={controlsBusy||exports.busy} onClick={()=>openModal('export')}>Export score</button><button disabled={controlsBusy||exports.busy} onClick={directExport}>Export GP</button>
+      {sessionMenu}</section></details>
+      <details ref={viewMenu} className="command-menu" onToggle={event=>commandToggle(event.currentTarget)}><summary>View</summary><section aria-label="Workspace view">
+        <label className="check"><input type="checkbox" checked={leftVisible} onChange={event=>event.target.checked?showTask(leftTask):setLeftVisible(false)}/>Track panel</label>
+        <label className="check"><input type="checkbox" checked={inspectorVisible} onChange={event=>event.target.checked?showInspector():setInspectorVisible(false)}/>Inspector</label>
+        <label className="check"><input type="checkbox" checked={dockVisible} onChange={event=>setDockVisible(event.target.checked)}/>Bottom dock</label>
+      </section></details>
       <button disabled={controlsBusy || !state.snapshot.canUndo} onClick={()=>change(controller.undo())}>Undo</button>
       <button disabled={controlsBusy || !state.snapshot.canRedo} onClick={()=>change(controller.redo())}>Redo</button>
-    </nav><details className="keyboard-help" onKeyDown={event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();event.currentTarget.open=false;event.currentTarget.querySelector('summary')?.focus();}}}><summary>Help</summary><section role="region" aria-label="Keyboard and editing help">
+    </nav><details className="keyboard-help" onToggle={event=>commandToggle(event.currentTarget)} onKeyDown={event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();event.currentTarget.open=false;event.currentTarget.querySelector('summary')?.focus();}}}><summary>Help</summary><section role="region" aria-label="Keyboard and editing help">
       <h2>Keyboard & editing</h2><p>Use these shortcuts outside input fields and dialogs.</p>
       <dl><dt>Ctrl/Cmd + N / O</dt><dd>New score / Open score</dd><dt>Ctrl/Cmd + S</dt><dd>Save; add Shift for Save As</dd><dt>Ctrl/Cmd + W</dt><dd>Close the current score</dd><dt>Ctrl/Cmd + Tab</dt><dd>Next score; add Shift for the previous score</dd><dt>Ctrl/Cmd + Z</dt><dd>Undo; add Shift to redo. Ctrl/Cmd + Y also redoes.</dd><dt>Space</dt><dd>Play or pause</dd></dl>
       <h3>With the score focused</h3><dl><dt>Left / Right</dt><dd>Previous / next beat</dd><dt>Up / Down</dt><dd>Change string, or choose a pitched/percussion note</dd><dt>Digits, then Enter</dt><dd>Enter a fret and set the note on a fretted track</dd><dt>Shift + Left/Right</dt><dd>Extend the musical selection</dd><dt>Ctrl/Cmd + A</dt><dd>Select the current track</dd><dt>Ctrl/Cmd + C / X / V</dt><dd>Copy / Cut / Paste music. Add Shift to Copy/Cut for all selected tracks; Shift + Paste opens paste options.</dd><dt>Escape</dt><dd>Clear the musical selection</dd></dl>
       <p>The blue outline marks your edit target. Green follows playback or a selected passage. Use the inspector’s Edit, Practice and Presentation buttons to reach tools; changes apply only when you use their action buttons.</p>
     </section></details><span className="document-title">{state.score.title || 'Untitled'}{state.snapshot.dirty?' •':''}</span>
-    <button disabled={controlsBusy||exports.busy} onClick={()=>openModal('export')}>Export score</button><button disabled={controlsBusy||exports.busy} onClick={directExport}>Export GP</button></header>
+    </header>
     {documentTabs}
+    {player && <Transport player={player} measures={state.score.masterBars.length} busy={controlsBusy} cursor={target} selection={musicSelection}/>}
     {(clipboardError||workspaceError||state.error||(!exportOpen&&exportError)||pageState.error||harmonyOpen&&libraryError) && <div className="error" role="alert">{clipboardError||workspaceError||state.error||exportError||pageState.error||libraryError}</div>}
-    <div className="workspace">
-      <TrackPanel score={state.score} selected={target.track} busy={controlsBusy} player={player} onSelect={track=>select({track,staff:0,bar:target.bar,voice:0,beat:0},state.score.tracks[track].staves[0].tuning.length)} onEdit={edit}>
+    <div ref={workspace} className="workspace workstation-workspace" data-left={leftShown} data-inspector={inspectorShown} data-dock={dockVisible} data-dock-collapsed={dockCollapsed} style={{'--dock-height':`${dockHeight}px`} as React.CSSProperties}>
+      <nav ref={paneRail} className="workstation-rail" aria-label="Workspace panes">
+        <button data-pane="track" aria-pressed={leftShown&&leftTask==='track'} onClick={()=>showTask('track')}>Track</button><button data-pane="sound" aria-pressed={leftShown&&leftTask==='sound'} onClick={()=>showTask('sound')}>Sound</button><button data-pane="backing" aria-pressed={leftShown&&leftTask==='backing'} onClick={()=>showTask('backing')}>Backing</button><button data-pane="inspector" aria-pressed={inspectorShown} onClick={showInspector}>Inspector</button>
+      </nav>
+      <section ref={leftPane} className="workstation-left" aria-label="Track tools" hidden={!leftShown}>
+        <nav aria-label="Track tools"><button aria-pressed={leftTask==='track'} onClick={()=>showTask('track')}>Track</button><button aria-pressed={leftTask==='sound'} onClick={()=>showTask('sound')}>Sound</button><button aria-pressed={leftTask==='backing'} onClick={()=>showTask('backing')}>Backing</button></nav>
+        <div className="workstation-task" hidden={leftTask!=='track'}><TrackSettingsPanel score={state.score} selected={target.track} busy={controlsBusy} onEdit={edit}/></div>
+        <div className="workstation-task" hidden={leftTask!=='sound'}>
         <SoundPanel trackId={trackId} sound={state.settings.sounds[trackId]} onEdit={command=>controller.edit(command)} playback={player} busy={controlsBusy}/>
-        <BackingPanel settings={originalBacking?undefined:state.settings.backing} originalSettings={state.embeddedBackingSettings?{assetId:'embedded',...state.embeddedBackingSettings}:null} assets={state.snapshot.project.assets} embedded={state.embeddedBacking} playback={player} onEdit={backingEdit} stageBacking={audioBridge.stageBacking} stageEmbeddedBacking={audioBridge.stageEmbeddedBacking} beginOperation={beginEditorOperation} busy={controlsBusy}/>
-      </TrackPanel>
-      <section className="score-workspace" aria-label="Score workspace" tabIndex={0} onKeyDown={keys}>
+        </div><div className="workstation-task" hidden={leftTask!=='backing'}><BackingPanel settings={originalBacking?undefined:state.settings.backing} originalSettings={state.embeddedBackingSettings?{assetId:'embedded',...state.embeddedBackingSettings}:null} assets={state.snapshot.project.assets} embedded={state.embeddedBacking} playback={player} onEdit={backingEdit} stageBacking={audioBridge.stageBacking} stageEmbeddedBacking={audioBridge.stageEmbeddedBacking} beginOperation={beginEditorOperation} busy={controlsBusy}/></div>
+      </section>
+      <section ref={scorePane} className="score-workspace" aria-label="Score workspace" tabIndex={0} onKeyDown={keys}>
         <div className="score-tools"><span>{state.score.masterBars.length} measures · {state.score.tracks.length} tracks</span>
           <TrackDisplayControls ids={trackIds} names={state.score.tracks.map(track=>track.name)} selected={target.track} view={trackView} zoom={zoom} disabled={controlsBusy} onView={setTrackView} onZoom={setZoom}/>
-          <button aria-pressed={instrumentVisible} onClick={()=>setInstrumentVisible(visible=>!visible)}>{instrumentVisible?'Hide instrument':'Show instrument'}</button>
+          <button aria-pressed={instrumentShown} onClick={()=>instrumentShown?setInstrumentVisible(false):chooseDock('instrument')}>{instrumentShown?'Hide instrument':'Show instrument'}</button>
         </div>
         <div className="paper-scroll"><div className="paper"><ScoreView score={state.score} track={target.track} zoom={zoom} profile="Default" projection={projection} engraving={state.settings.engraving} visibleTracks={visibleTracks} onSelect={select} playback={player} editorSelection={musicSelection} onEditorSelection={editorSelection} editTarget={target} editString={indexed?undefined:string} editNoteIndex={noteIndex}/></div></div>
         <div className="score-hint">Measure {target.bar+1} · Beat {target.beat+1} · {indexed?`${location.staff.isPercussion?'Percussion':'Pitched'} note ${noteIndex===null?'entry':noteIndex+1} — Click a note to edit it in the inspector.`:`String ${string} · Fret ${fret} — Click the score, then use arrow keys, digits and Enter.`}</div>
-        {instrumentVisible&&<LiveInstrumentView score={state.score} track={target.track} staff={target.staff} player={player}/>}
       </section>
+      <div ref={inspectorPane} className="workstation-inspector" hidden={!inspectorShown}>
       <EditorPanel score={state.score} target={target} string={string} fret={fret} noteIndex={noteIndex} onSelectNote={setNoteIndex} busy={controlsBusy} onSelect={next=>{editorSelection(null);select(next);}} onString={s=>select(target,s)} onFret={setFret} onEdit={edit} musicSelection={musicSelection} onMusicSelection={editorSelection} onChord={()=>openModal('harmony')} onScales={()=>openModal('scale')}
         practiceTools={player&&playbackState&&<PracticePanel key={state.documentEpoch} settings={playbackState.practice.settings} busy={controlsBusy||playbackState.practicePending||!playbackState.ready} hasBacking={!!audioSettings.backing} onChange={settings=>player.setPractice(settings)}/>}
         presentationTools={<><EngravingPanel key={`engraving/${state.documentEpoch}`} score={state.score} trackIds={trackIds} value={state.settings.engraving} busy={controlsBusy} onEdit={edit}/><PageLayoutPanel key={`page/${state.documentEpoch}`} value={page} busy={controlsBusy} onEdit={edit}/></>}>
         <div ref={clipboardSection}><ClipboardPanel score={state.score} target={target} selection={musicSelection} clip={clip} busy={controlsBusy} onCopy={mode=>copyMusic(mode)} onCut={mode=>copyMusic(mode,true)} onPaste={pasteMusic}/></div>
         <HarmonyTransposePanel key={`harmony/${state.documentEpoch}`} score={state.score} selection={musicSelection} busy={controlsBusy} onEdit={edit}/>
       </EditorPanel>
+      </div>
+      <section className="workstation-dock" aria-label="Bottom dock" hidden={!dockVisible}>
+        <nav aria-label="Dock views"><button aria-pressed={!instrumentVisible&&dockMode==='overview'} onClick={()=>chooseDock('overview')}>Overview</button><button aria-pressed={!instrumentVisible&&dockMode==='mixer'} onClick={()=>chooseDock('mixer')}>Mixer</button><button aria-pressed={instrumentVisible} onClick={()=>chooseDock('instrument')}>Instrument</button><button className="dock-collapse" aria-label={dockCollapsed?'Expand bottom dock':'Hide bottom dock'} onClick={()=>dockCollapsed?setDockForced(true):hideDock()}>{dockCollapsed?'Expand':'Hide'}</button></nav>
+        <div className="workstation-dock-content" hidden={dockCollapsed}>
+          <div className="workstation-dock-tracks" hidden={instrumentVisible}><TrackPanel score={state.score} selected={target.track} busy={controlsBusy} player={player} view={dockMode} target={target} onExitOverview={()=>scorePane.current?.focus()} onSelectPosition={(track,bar)=>select({track,staff:0,bar,voice:0,beat:0})} onSelect={track=>select({track,staff:0,bar:target.bar,voice:0,beat:0},state.score.tracks[track].staves[0].tuning.length)}/></div>
+          {instrumentVisible&&<LiveInstrumentView score={state.score} track={target.track} staff={target.staff} player={player}/>}
+        </div>
+      </section>
     </div>
-    {player && <Transport player={player} measures={state.score.masterBars.length} busy={controlsBusy} cursor={target} selection={musicSelection}/>}
     {exportOpen&&<ExportDialog score={state.score} layout={state.settings.print} page={page} currentSpeedAvailable={practiceRatio!==null} busy={exports.busy||state.busy||exportLaunching} progress={exports.progress} failure={exportError} onExport={runExport} onCancel={cancelExport}/>}
     {harmonyOpen&&location.beat&&<HarmonyChordDialog score={state.score} target={target} selection={musicSelection} value={location.beat.chord?getHarmonyChord(location.beat.chord):null} busy={state.busy||libraryLoading} library={library} onEdit={edit} onClose={closeModal} onLibraryPut={async entry=>{const revision=++libraryRevision.current,value=await putHarmonyLibraryEntry(entry);if(revision===libraryRevision.current)setLibrary(value);}} onLibraryRemove={async id=>{const revision=++libraryRevision.current,value=await removeHarmonyLibraryEntry(id);if(revision===libraryRevision.current)setLibrary(value);}}/>}
     {scaleOpen&&<ScaleToolPanel score={state.score} staff={location.staff} selection={musicSelection} busy={state.busy} onClose={closeModal}/>}

@@ -53,9 +53,9 @@ export function WorkspaceApp({workspace,session}:{workspace:WorkspaceController;
   const backupState=session?.status.state;
   const backupTime=session?.status.capturedAtUnixMs===null||session?.status.capturedAtUnixMs===undefined?null:new Date(session.status.capturedAtUnixMs);
   const backupText=backupError?`Recovery backup failed: ${backupError}`:backupState==='failed'?'Recovery backup failed.':backupState==='writing'?'Updating recovery backup…':backupState==='pending'?'Recovery backup pending.':backupState==='ready'?'Recovery backup complete.':'Recovery backup has not been written yet.';
-  const sessionMenu=session&&<details className="keyboard-help session-options" onKeyDown={event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();event.currentTarget.open=false;event.currentTarget.querySelector('summary')?.focus();}}}><summary>File</summary><section aria-label="Session settings">
+  const sessionMenu=session&&<section className="session-options" aria-label="Session settings">
     <label className="check"><input type="checkbox" checked={session.preferences.restorePreviousSession} disabled={session.pending||state.busy} onChange={event=>session.onPreferencesChange(event.target.checked)}/>Restore previous session</label>
-  </section></details>;
+  </section>;
   const recoveryStatus=session&&<div className="recovery-feedback">
     <span className="recovery-status" role="status">{backupText}{backupTime&&Number.isFinite(backupTime.getTime())&&<> Last backup: <time dateTime={backupTime.toISOString()}>{backupTime.toLocaleTimeString()}</time>.</>}</span>
     {session.status.state==='ready'&&session.status.error&&<span className="recovery-status">{session.status.error}</span>}

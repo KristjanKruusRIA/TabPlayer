@@ -1,3 +1,4 @@
+import {waitForWorkspaceIdle,clickWorkstationButton,revealPlaybackControls} from './workstation-commands.mjs';
 import { readActiveDocument } from './document-context.mjs';
 import assert from 'node:assert/strict';
 import {existsSync,readFileSync,realpathSync,writeFileSync} from 'node:fs';
@@ -18,13 +19,13 @@ const errors=[],captures=new Set(),result={authored:true,fixture:fixture.metadat
 let id=null,browser=null,page=null,owner=null,saved=output('saved.tabplayer');
 const status=()=>page.evaluate(()=>window.__TAURI_INTERNALS__.invoke('audio_status'));
 const snapshot=()=>readActiveDocument(page);
-const idle=()=>page.waitForFunction(()=>!document.querySelector('nav[aria-label="File and history"] button')?.disabled);
+const idle=()=>waitForWorkspaceIdle(page);
 async function waitStatus(predicate,timeout=15000){
   const deadline=Date.now()+timeout;let value;
   do{value=await status();if(predicate(value))return value;await page.waitForTimeout(20);}while(Date.now()<deadline);
   throw new Error(`Native status timed out: ${JSON.stringify(value)}`);
 }
-async function button(name){await page.getByRole('button',{name,exact:true}).click();await idle();}
+async function button(name){await clickWorkstationButton(page,name,{waitForIdle:false});await idle();}
 async function noAlerts(){assert.deepEqual(await page.getByRole('alert').allTextContents(),[]);}
 async function disclosure(label){const summary=page.locator('summary').filter({hasText:new RegExp(`^${label}$`)}).first();if(!await summary.evaluate(node=>node.parentElement.open))await summary.click();}
 async function close(){
@@ -34,7 +35,7 @@ async function close(){
 async function open(path){
   await close();id=launch({TABPLAYER_TEST_OPEN:path,TABPLAYER_TEST_SAVE:saved,TABPLAYER_TEST_BACKING:fixture.backing.path});
   browser=await connect();page=browser.contexts()[0].pages()[0];page.on('pageerror',error=>errors.push(error.message));
-  await page.setViewportSize({width:1600,height:1100});await page.getByRole('button',{name:'Open',exact:true}).waitFor();await button('Open');
+  await page.setViewportSize({width:1600,height:1100});await waitForWorkspaceIdle(page);await button('Open');await revealPlaybackControls(page);
   owner=(await page.evaluate(()=>window.__TAURI_INTERNALS__.invoke('workspace_snapshot'))).active;
   await waitStatus(value=>value.ready&&!value.error);await page.locator('[aria-label="Music notation"] svg').first().waitFor();await disclosure('Selected playback');await noAlerts();
 }

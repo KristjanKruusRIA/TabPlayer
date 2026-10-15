@@ -1,9 +1,30 @@
-.export-dialog .export-check{display:flex;flex-direction:row;align-items:center;gap:8px;min-height:28px;color:#edf1f5}
-.export-dialog .export-check input[type=checkbox]{flex:0 0 auto;width:16px;height:16px;margin:0;padding:0;accent-color:#b5df73}
-.export-dialog .export-selection{gap:8px;margin-top:12px}
-.export-dialog .export-selection legend{padding:0 0 8px;font-size:12px;font-weight:600;color:#b9c5d1}
+.export-dialog{position:relative;inset:auto;transform:none;z-index:30;background:var(--ws-panel,#23272f);color:var(--ws-text,#edf0f5);border:1px solid var(--ws-border,#434b59);border-radius:4px;padding:0;width:min(580px,calc(100vw - 32px));max-height:calc(100dvh - 32px);overflow:auto;box-shadow:none;scrollbar-color:var(--ws-border,#434b59) var(--ws-panel,#23272f)}
+.export-dialog h2{margin:0;padding:16px 20px;border-bottom:1px solid var(--ws-border,#434b59);font-size:18px;font-weight:600;line-height:1.25;letter-spacing:normal;text-transform:none;color:var(--ws-text,#edf0f5)}
+.export-dialog>fieldset{padding:16px 20px;gap:16px}
+.export-dialog label{gap:5px;color:var(--ws-muted,#b5bfcc);font-size:12px;line-height:1.4;overflow-wrap:anywhere}
+.export-dialog input,.export-dialog select{min-height:28px;padding:4px 8px;border:1px solid var(--ws-border,#434b59);border-radius:3px;background:var(--ws-input,#1b1f26);color:var(--ws-text,#edf0f5);caret-color:var(--ws-accent,#79aaff)}
+.export-dialog .export-check{display:flex;flex-direction:row;align-items:center;gap:8px;min-height:24px;color:var(--ws-text,#edf0f5)}
+.export-dialog .export-check input[type=checkbox]{flex:0 0 auto;width:16px;height:16px;min-height:0;margin:0;padding:0;accent-color:var(--ws-accent,#79aaff)}
+.export-dialog .export-selection{gap:4px;margin:0}
+.export-dialog legend{padding:0 0 8px;font-size:12px;font-weight:600;color:var(--ws-text,#edf0f5)}
 .export-dialog .export-track{display:flex;flex-direction:column;gap:4px}
 .export-dialog .export-staves{display:flex;flex-direction:column;gap:4px;margin-left:24px}
-.export-dialog .export-staves .export-check{color:#b9c5d1}
+.export-dialog .export-staves .export-check{color:var(--ws-muted,#b5bfcc)}
 .export-dialog .export-measures{display:flex;gap:12px}
 .export-dialog .export-measures>label{flex:1;min-width:0}
+.export-dialog .export-audio{padding-top:14px;border-top:1px solid var(--ws-border,#434b59)}
+.export-dialog .export-audio legend{padding-top:14px}
+.export-dialog .export-audio-options{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px 16px;align-items:start}
+.export-dialog .export-audio-options>p{grid-column:1/-1}
+.export-dialog p{margin:0;font-size:12px;line-height:1.5;color:var(--ws-muted,#b5bfcc);overflow-wrap:anywhere}
+.export-dialog>[role=alert]{margin:0 20px 16px;padding:8px 10px;border:1px solid var(--ws-error,#ffd2c7);border-radius:3px;background:var(--ws-error-surface,#5b2c2b);color:var(--ws-error,#ffd2c7)}
+.export-dialog progress{display:block;width:calc(100% - 40px);margin:0 20px 8px;accent-color:var(--ws-accent,#79aaff)}
+.export-dialog>[role=status]{margin:0 20px 16px;font-variant-numeric:tabular-nums}
+.export-dialog .export-actions{display:flex;justify-content:flex-end;gap:8px;padding:14px 20px;border-top:1px solid var(--ws-border,#434b59)}
+.export-dialog button{min-height:28px;padding:4px 12px;border:1px solid var(--ws-border,#434b59);border-radius:3px;background:var(--ws-raised,#2c313b);color:var(--ws-text,#edf0f5);font-size:12px}
+.export-dialog .export-submit{background:var(--ws-accent,#79aaff);border-color:var(--ws-accent,#79aaff);color:var(--ws-accent-ink,#17243a);font-weight:600}
+.export-dialog button:hover:enabled{border-color:var(--ws-accent,#79aaff)}
+.export-dialog :is(button,input,select):focus-visible{outline:2px solid var(--ws-accent,#79aaff);outline-offset:2px}
+.export-dialog :is(button,input,select):disabled{opacity:1;background:var(--ws-raised,#2c313b);border-color:var(--ws-border,#434b59);color:var(--ws-muted,#b5bfcc);cursor:default}
+.export-dialog ::selection{background:var(--ws-accent,#79aaff);color:var(--ws-accent-ink,#17243a)}
+@media(max-width:600px){.export-dialog h2,.export-dialog>fieldset,.export-dialog .export-actions{padding-left:16px;padding-right:16px}.export-dialog .export-audio-options{grid-template-columns:minmax(0,1fr)}}

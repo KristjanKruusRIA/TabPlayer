@@ -1,3 +1,4 @@
+import {waitForWorkspaceIdle,clickWorkspaceCommand} from './workstation-commands.mjs';
 import { readDocumentRecord } from './document-context.mjs';
 import assert from 'node:assert/strict';
 import { readFile,mkdir,stat } from 'node:fs/promises';
@@ -11,11 +12,11 @@ for(const {format,current=false} of [{format:'midi'},{format:'pdf'},{format:'wav
   try {
     browser=await connect();const page=browser.contexts()[0].pages()[0];
     await page.getByLabel('Fret',{exact:true}).fill('7');await page.getByRole('button',{name:'Set note',exact:true}).click();
-    await page.waitForFunction(()=>!document.querySelector('nav button')?.disabled);
+    await waitForWorkspaceIdle(page);
     const {documentId}=(await page.evaluate(()=>window.__TAURI_INTERNALS__.invoke('workspace_snapshot'))).active;
     const origin=await readDocumentRecord(page,documentId),before=origin.snapshot;assert.equal(before.dirty,true);
     if(current)await page.getByRole('combobox',{name:/^Speed/}).selectOption('50');
-    await page.getByRole('button',{name:/^Export(?: score)?$/,exact:true}).click();
+    await clickWorkspaceCommand(page,'Export score',{waitForIdle:false});
     const dialog=page.getByRole('dialog',{name:'Export score'});await dialog.getByLabel('Export format').selectOption(format);
     if(format==='wav'||format==='stems'){await dialog.getByLabel('Bit depth').selectOption('24');await dialog.getByLabel('Effect tail (seconds)').fill('0.1');if(current)await dialog.getByRole('combobox',{name:/^Speed/}).selectOption('current');}
     await dialog.getByRole('button',{name:'Export',exact:true}).click();

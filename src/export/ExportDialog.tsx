@@ -66,7 +66,7 @@ export function ExportDialog({score,layout,page,busy,progress,failure,currentSpe
       </>)}
       {(format==='gp'||format==='pdf'||format==='print')&&<p>Engraving settings affect the screen and PDF. GP export preserves source styling and supports uniform common/cut choices; mixed measure choices cannot be exported.</p>}
       {format==='midi'&&<p>MIDI preserves generated notes and controls. Ordinary MIDI players share pitch bends on a channel, so simultaneous independent bends may differ.</p>}
-      {(format==='wav'||format==='stems')&&<>
+      {(format==='wav'||format==='stems')&&<fieldset className="export-audio"><legend>Audio</legend><div className="export-audio-options">
         <label>Sample rate<select value={audio.sampleRate} onChange={e=>setAudio({...audio,sampleRate:Number(e.target.value) as AudioExportOptions['sampleRate']})}><option value="44100">44.1 kHz</option><option value="48000">48 kHz</option></select></label>
         <label>Bit depth<select value={audio.bitDepth} onChange={e=>setAudio({...audio,bitDepth:Number(e.target.value) as AudioExportOptions['bitDepth']})}><option value="16">16 bit</option><option value="24">24 bit</option></select></label>
         <label>Speed<select value={audio.speed} onChange={e=>setAudio({...audio,speed:e.target.value as AudioExportOptions['speed']})}><option value="saved">100%</option><option value="current" disabled={!currentSpeedAvailable}>Current speed coefficient</option></select></label>
@@ -76,9 +76,9 @@ export function ExportDialog({score,layout,page,busy,progress,failure,currentSpe
         <label className="export-check"><input type="checkbox" checked={audio.backing} onChange={e=>setAudio({...audio,backing:e.target.checked})}/>Include backing</label>
         <label>Effect tail (seconds)<input type="number" min="0" max="30" step=".1" value={audio.tailSeconds} onChange={e=>setAudio({...audio,tailSeconds:Number(e.target.value)})}/></label>
         {format==='stems'&&<label className="export-check"><input type="checkbox" checked={audio.includeMix} onChange={e=>setAudio({...audio,includeMix:e.target.checked})}/>Include limited mix</label>}
-      </>}
+      </div></fieldset>}
     </fieldset>
     {visibleError&&<p role="alert">{visibleError}</p>}{progress&&<><progress aria-label="Export progress" data-job-id={progress.id} max={Math.max(1,progress.totalFrames)} value={progress.frames}/><p role="status">{progress.status==='running'?'Exporting…':progress.status}</p></>}
-    <button type="button" disabled={busy} onClick={submit}>Export</button><button ref={cancel} type="button" onClick={onCancel}>{busy?'Cancel export':'Cancel'}</button>
+    <div className="export-actions"><button type="button" className="export-submit" disabled={busy} onClick={submit}>Export</button><button ref={cancel} type="button" onClick={onCancel}>{busy?'Cancel export':'Cancel'}</button></div>
   </div></div>;
 }

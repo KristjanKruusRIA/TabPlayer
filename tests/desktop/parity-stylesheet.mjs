@@ -1,3 +1,4 @@
+import {waitForWorkspaceIdle,clickWorkstationButton} from './workstation-commands.mjs';
 import { readActiveDocument } from './document-context.mjs';
 import assert from 'node:assert/strict';
 import {existsSync,readFileSync,rmSync,writeFileSync} from 'node:fs';
@@ -14,9 +15,9 @@ const inherited='GP export cannot resolve inherited common/cut choices for every
 const errors=[];
 let id=null,browser=null,page=null,destination,saved,session=0;
 const snapshot=()=>readActiveDocument(page);
-const idle=()=>page.waitForFunction(()=>!document.querySelector('nav[aria-label="File and history"] button')?.disabled);
+const idle=()=>waitForWorkspaceIdle(page);
 const noAlerts=async()=>assert.deepEqual(await page.getByRole('alert').allTextContents(),[]);
-async function button(name){await page.getByRole('button',{name,exact:true}).click();await idle();}
+async function button(name){await clickWorkstationButton(page,name,{waitForIdle:false});await idle();}
 async function close(){
   const ownedBrowser=browser,ownedId=id;browser=null;page=null;
   try{if(ownedBrowser)await ownedBrowser.close();}
@@ -29,7 +30,7 @@ async function open(path,label){
   id=launch({TABPLAYER_TEST_OPEN:path,TABPLAYER_TEST_SAVE:saved,TABPLAYER_TEST_EXPORT:destination});
   browser=await connect();page=browser.contexts()[0].pages()[0];page.on('pageerror',error=>errors.push(error.message));
   await page.setViewportSize({width:1600,height:1000});
-  await page.getByRole('button',{name:'Open',exact:true}).waitFor();await button('Open');await noAlerts();
+  await waitForWorkspaceIdle(page);await button('Open');await noAlerts();
   await page.locator('[aria-label="Music notation"] svg').first().waitFor();
   const source=readFileSync(path),state=await snapshot();
   if(!path.endsWith('.tabplayer')){assert.equal(state.project.base.sha256,hash(source));assert.equal(state.project.base.bytesBase64,source.toString('base64'));assert.deepEqual(state.project.edits,[]);}

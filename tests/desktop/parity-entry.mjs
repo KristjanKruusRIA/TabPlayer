@@ -1,3 +1,4 @@
+import {waitForWorkspaceIdle,clickWorkstationButton,revealLeftTask,revealInspector} from './workstation-commands.mjs';
 import { readActiveDocument } from './document-context.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync,writeFileSync } from 'node:fs';
@@ -11,7 +12,7 @@ let browser,page;
 const result={};
 try {
   browser=await connect();page=browser.contexts()[0].pages()[0];
-  await page.getByRole('button',{name:'New',exact:true}).waitFor();
+  await waitForWorkspaceIdle(page);
   const errors=[];page.on('pageerror',error=>errors.push(error.message));
   await page.context().route('**/*',route=>{
     const url=new URL(route.request().url());
@@ -20,13 +21,13 @@ try {
   const snapshot=()=>readActiveDocument(page);
   const status=()=>page.evaluate(()=>window.__TAURI_INTERNALS__.invoke('audio_status'));
   const idle=async()=>{
-    await page.waitForFunction(()=>!document.querySelector('nav button')?.disabled);
+    await waitForWorkspaceIdle(page);
     assert.equal(await page.getByRole('alert').count(),0,await page.getByRole('alert').allTextContents());
   };
-  const button=async name=>{await page.getByRole('button',{name,exact:true}).click();await idle();};
+  const button=async name=>{await clickWorkstationButton(page,name,{waitForIdle:false});await idle();};
   const change=(label,value)=>page.getByLabel(label,{exact:true}).fill(String(value));
   const details=label=>page.locator('summary').filter({hasText:label}).first().evaluate(node=>{node.parentElement.open=true;});
-  await change('New notation track name','Piano');await button('Add pitched track');await button('Track 2: Piano');
+  await revealLeftTask(page,'Track');await change('New notation track name','Piano');await button('Add pitched track');await button('Track 2: Piano');await revealInspector(page);
   await change('Written pitch','C4');await button('Add pitched note');await change('Written pitch','E4');await button('Add pitched note');
   await page.getByRole('combobox',{name:/^Chord note/}).selectOption('1');await change('Written pitch','F4');await button('Update pitched note');
   assert.equal((await snapshot()).project.edits.at(-1).pitch,65);
@@ -35,7 +36,7 @@ try {
   await details('Notes & techniques');await page.getByRole('combobox',{name:/^Dynamics/}).selectOption('3');await idle();
   assert.equal((await snapshot()).project.edits.at(-1).patch.dynamics,3);
   await page.locator('.inspector').evaluate(node=>{node.scrollTop=0;});await page.screenshot({path:resolve('.analysis/parity/native-piano.png')});
-  await change('New notation track name','Kit');await button('Add percussion track');await button('Track 3: Kit');
+  await revealLeftTask(page,'Track');await change('New notation track name','Kit');await button('Add percussion track');await button('Track 3: Kit');await revealInspector(page);
   await page.getByRole('combobox',{name:/^Percussion articulation/}).selectOption('91');await button('Add percussion note');
   await page.getByRole('combobox',{name:/^Percussion articulation/}).selectOption('92');await button('Add percussion note');
   await details('Song metadata');await change('Album','Parity session');await button('Apply song metadata');
@@ -61,7 +62,7 @@ try {
   assert.deepEqual(music.notes.filter(note=>note.track===2).map(note=>note.pitch),[38,46]);
   result.gpRoundtrip=music;result.commands=native.edits.length;assert.deepEqual(errors,[]);
   await browser.close();browser=null;stop(id);id=launch({TABPLAYER_TEST_OPEN:saved});
-  browser=await connect();page=browser.contexts()[0].pages()[0];await page.getByRole('button',{name:'Open',exact:true}).waitFor();await button('Open');
+  browser=await connect();page=browser.contexts()[0].pages()[0];await waitForWorkspaceIdle(page);await button('Open');
   assert.equal((await snapshot()).project.edits.length,native.edits.length);result.processRestartReopen=true;
   // A real authored WAV also checks GP references after an edit/rebuild, not just ZIP bytes.
   const wave=new Uint8Array(44+48000*2),view=new DataView(wave.buffer),ascii=(offset,text)=>[...text].forEach((char,index)=>wave[offset+index]=char.charCodeAt(0));
@@ -75,7 +76,7 @@ try {
   },{bytes:[...bytes],wave:[...wave]});
   writeFileSync(backed,Uint8Array.from(backedBytes));const hash=createHash('sha256').update(readFileSync(backed)).digest('hex');
   await browser.close();browser=null;stop(id);id=launch({TABPLAYER_TEST_OPEN:backed,TABPLAYER_TEST_EXPORT:backedExport});
-  browser=await connect();page=browser.contexts()[0].pages()[0];await page.getByRole('button',{name:'Open',exact:true}).waitFor();await button('Open');
+  browser=await connect();page=browser.contexts()[0].pages()[0];await waitForWorkspaceIdle(page);await button('Open');
   await details('Song metadata');await change('Album','Backed study');await button('Apply song metadata');
   const readyDeadline=Date.now()+15000;let prepared;
   do{prepared=await status();if(prepared.ready&&Math.abs(prepared.backingDurationSeconds-1)<.001)break;await page.waitForTimeout(50);}while(Date.now()<readyDeadline);

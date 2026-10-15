@@ -1,22 +1,25 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import vm from 'node:vm';
-import {installBackingProcessingObserver} from './parity-backing-processing.mjs';
+import {EventEmitter} from 'node:events';
+import {installBackingProcessingObserver,observeTauriFallback,assertNoTauriFallback} from './parity-backing-processing.mjs';
 
 // Deliberately no app, IPC, filesystem writes or network: the serialized installer sees a fake window.
-function fixture({header='ok',mixHeader=header,mixResult=null,cloneError=false,fetchWritable=true,fallback=false}={}){
+function fixture({header='ok',mixHeader=header,mixResult=null,cloneError=false,fetchWritable=true,fallback=false,fallbackCommand=null,warn=()=>{}}={}){
   const calls=[],responses=[],status={ready:true,generation:7,playing:false};
+  let fellBack=false;
   const window={},api={convertFileSrc:(command,protocol)=>`http://${protocol}.localhost/${command}`};
   const transport=async(...request)=>{
     calls.push(request);const command=request[0].split('/').at(-1),result=command==='audio_status'?status:mixHeader==='error'?'native failure':mixResult,responseHeader=command==='audio_status'?header:mixHeader;
     const response=new Response(JSON.stringify(result),{headers:{'Content-Type':'application/json',...(responseHeader===null?{}:{'Tauri-Response':responseHeader})}});
     if(cloneError&&command!=='audio_status')response.clone=()=>{throw Error('clone diagnostic failure');};
+    if(command===fallbackCommand)throw Error('fake custom-protocol failure');
     responses.push(response);return response;
   };
   Object.defineProperty(window,'fetch',{value:transport,writable:fetchWritable});
   Object.defineProperty(api,'invoke',{value:async(command,args={})=>{
-    if(fallback)return status;
-    const response=await window.fetch(api.convertFileSrc(command,'ipc'),{method:'POST',body:JSON.stringify(args),headers:{'Content-Type':'application/json','Tauri-Invoke-Key':'never-copy-this-header'}});
+    if(fallback||fellBack)return status;
+    let response;try{response=await window.fetch(api.convertFileSrc(command,'ipc'),{method:'POST',body:JSON.stringify(args),headers:{'Content-Type':'application/json','Tauri-Invoke-Key':'never-copy-this-header'}});}catch(error){if(command!==fallbackCommand)throw error;warn('IPC custom protocol failed, Tauri will now use the postMessage interface instead private-error-detail');fellBack=true;return status;}
     const value=await response.json();if(response.headers.get('Tauri-Response')!=='ok')throw Error(String(value));return value;
   }});
   Object.defineProperty(window,'__TAURI_INTERNALS__',{value:api});
@@ -24,7 +27,18 @@ function fixture({header='ok',mixHeader=header,mixResult=null,cloneError=false,f
   return {window,api,calls,responses,status,transport,install:()=>vm.runInContext(`(${installBackingProcessingObserver.toString()})()`,context)};
 }
 
-if(process.env.TABPLAYER_OBSERVER_RED==='1'){
+async function lateFallbackCase(guard=assertNoTauriFallback){
+  const signals=[],page=new EventEmitter(),f=fixture({fallbackCommand:'unobserved_command',warn:text=>page.emit('console',{type:()=> 'warning',text:()=>text})});observeTauriFallback(page,signals,'last-phase');await f.install();await f.api.invoke('audio_set_mix',{generation:7});assert.equal(f.window.__processingEvidence.mix.at(-1).nativeAcknowledged,true);
+  // An unobserved command switches transports after the final acknowledged mix.
+  assert.deepEqual(await f.api.invoke('unobserved_command'),f.status);const afterFallback=f.calls.length;await f.api.invoke('audio_status');assert.equal(f.calls.length,afterFallback,'Fallback now bypasses fetch despite successful invoke');
+  let nextEdit=false;assert.throws(()=>{guard(signals);nextEdit=true;},/Unsupported Tauri postMessage fallback/);assert.equal(nextEdit,false);
+  let status='running';assert.throws(()=>{guard(signals);status='passed';},/Unsupported Tauri postMessage fallback/);assert.notEqual(status,'passed');
+  assert.deepEqual(signals,[{phase:'last-phase',kind:'tauri-ipc-postmessage-fallback'}]);assert.ok(!JSON.stringify(signals).includes('private-error-detail'));
+}
+
+if(process.env.TABPLAYER_OBSERVER_FALLBACK_RED==='1'){
+  test('old final acceptance after last-mix fallback must fail (expected RED)',()=>lateFallbackCase(()=>{}));
+}else if(process.env.TABPLAYER_OBSERVER_RED==='1'){
   test('old immutable-invoke replacement must observe actual native mix (expected RED)',async()=>{
     const f=fixture();
     // Original observer mechanism, evaluated without strict mode as in the retained failing WebView.
@@ -73,5 +87,14 @@ if(process.env.TABPLAYER_OBSERVER_RED==='1'){
   test('identity refusal and unsupported fallback fail capability before mutation',async()=>{
     const locked=fixture({fetchWritable:false});await assert.rejects(locked.install(),/identity mismatch|installation refused/);assert.equal(locked.calls.length,0);
     const fallback=fixture({fallback:true});await assert.rejects(fallback.install(),/transport probe failed/);assert.equal(fallback.calls.length,0);assert.equal(fallback.window.__processingEvidence.capable,false);
+  });
+  test('late fallback after successful probe and final mix prevents next edit and passed acceptance',()=>lateFallbackCase());
+  test('warning matching is narrow and fallback persists across phases and cleanup',async()=>{
+    const signals=[],first=new EventEmitter(),last=new EventEmitter();observeTauriFallback(first,signals,'first');observeTauriFallback(last,signals,'last');
+    const warning='IPC custom protocol failed, Tauri will now use the postMessage interface instead';
+    for(const [type,text]of [['warning','An unrelated warning'],['log',warning],['warning','IPC custom protocol succeeded'],['warning',`prefix ${warning}`]])first.emit('console',{type:()=>type,text:()=>text});assert.doesNotThrow(()=>assertNoTauriFallback(signals));
+    last.emit('console',{type:()=> 'warning',text:()=>warning});assert.throws(()=>assertNoTauriFallback(signals));
+    // No later mix or edit is required: final/cleanup guard reads the same persistent receipt array.
+    first.removeAllListeners();last.removeAllListeners();assert.throws(()=>assertNoTauriFallback(signals));assert.deepEqual(signals,[{phase:'last',kind:'tauri-ipc-postmessage-fallback'}]);
   });
 }

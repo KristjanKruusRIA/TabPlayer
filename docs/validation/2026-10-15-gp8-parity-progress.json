@@ -16,19 +16,31 @@
     }
   },
   "current_revision": {
-    "value": "b73ae93682332c64029777cc4dfeaebfe2a77214",
-    "provenance": "Product revision supplied by root integrator; tracking e2ec67b and test-only follow-up f6350fc3e1bb33e1e63c7d81524c87e0df61c8de also supplied by root. No Git command run by this audit.",
-    "previous_overlay_revision": "880c0a5",
+    "value": "1f85ce2ef90f2fa1940aa998490a5e7308de74fe",
+    "accepted_source_revision": "26a9ddb",
+    "documentation_revision": "1f85ce2ef90f2fa1940aa998490a5e7308de74fe",
+    "provenance": "Root integrator reports accepted source 26a9ddb plus docs 1f85ce2 pushed to feat/gp8-parity and remote ref verified at the exact value above; main remains 7fc41c773a1b016d7249ceb98ab7929fcca1ce8f. This source/report adoption ran no Git or network command and excludes in-flight Library/schema3 work.",
+    "previous_overlay_revision": "b73ae93682332c64029777cc4dfeaebfe2a77214",
     "ci_checkpoint": {
-      "run_id": "38724478672",
+      "run_id": "38770187771",
+      "head_sha": "1f85ce2ef90f2fa1940aa998490a5e7308de74fe",
+      "status": "completed",
+      "conclusion": "failure",
+      "prepare_audio_steps_reached": false,
+      "desktop_jobs": "skipped",
+      "job_log_request": "404",
+      "failure_reason": "unknown",
       "observed_by": "root integrator; not independently polled by this audit",
-      "observed_at_utc": "2026-10-15T11:09:00Z",
-      "macos_frontend_and_native_tests": "success",
-      "packages_and_complete_other_os_results": "pending at this checkpoint",
-      "cross_platform_ci_success_claim": false
+      "cross_platform_ci_success_claim": false,
+      "earlier_w05": {
+        "run_id": "38738258294",
+        "head_sha": "64a1e8f7e416b93ca624a3c48196984424f4a28b",
+        "all_os_jobs": "success",
+        "scope": "historical W05 checkpoint only; not a current-head pass"
+      }
     }
   },
-  "source_method": "The original overlay read all 258 baseline rows and inspected seven dedicated versioned delivery reports plus scoped source/test definitions. This follow-up reviews the versioned selection-playback and stylesheet-interchange reports and exact P02/P03/N13 acceptance, updating adjacent stale prose only. Graph tools unavailable; narrow rg/source reads used. No fresh runtime validation by this audit.",
+  "source_method": "The original overlay read all 258 baseline rows and inspected seven dedicated versioned delivery reports plus scoped source/test definitions. This follow-up reviews the versioned selection-playback and stylesheet-interchange reports and exact P02/P03/N13 acceptance, updating adjacent stale prose only. Graph tools unavailable; narrow rg/source reads used. No fresh runtime validation by this audit. This scoped adoption inspects the accepted recovery/workstation validation and reviews for exactly W10/W11/D04/D05/P15, preserving all historical fields and other 253 rows. No fresh runtime, Git/network check or in-flight Library/schema3 source acceptance is claimed.",
   "assessment_definitions": {
     "evidence_reviewed": "Current source and/or versioned delivery evidence was mapped to this exact requirement; missing acceptance remains explicit.",
     "baseline_not_reaudited": "Historical status carried for coverage only; current_proven_status is null and no new implementation claim is made."
@@ -48,29 +60,29 @@
       "unverified": 8
     },
     "current_dispositions": {
-      "implemented": 70,
-      "partial": 91,
-      "missing": 89,
+      "implemented": 72,
+      "partial": 92,
+      "missing": 86,
       "unverified": 8
     },
-    "evidence_reviewed_total": 95,
+    "evidence_reviewed_total": 100,
     "evidence_reviewed": {
-      "implemented": 28,
-      "partial": 63,
-      "missing": 0,
+      "implemented": 30,
+      "partial": 65,
+      "missing": 1,
       "unverified": 4
     },
-    "baseline_not_reaudited_total": 163,
+    "baseline_not_reaudited_total": 158,
     "baseline_not_reaudited": {
       "implemented": 42,
-      "partial": 28,
-      "missing": 89,
+      "partial": 27,
+      "missing": 85,
       "unverified": 4
     },
-    "status_changed_total": 62,
+    "status_changed_total": 65,
     "transition_counts": {
-      "missing -> implemented": 14,
-      "missing -> partial": 43,
+      "missing -> implemented": 16,
+      "missing -> partial": 44,
       "partial -> implemented": 5
     }
   },
@@ -440,6 +452,90 @@
       "start_line": 654,
       "end_line": 841,
       "kind": "test_source_not_rerun"
+    },
+    "recovery_scope": {
+      "path": "docs/validation/2026-10-15-gp8-recovery-session.md",
+      "start_line": 7,
+      "end_line": 21,
+      "kind": "validation_report"
+    },
+    "recovery_windows": {
+      "path": "docs/validation/2026-10-15-gp8-recovery-session.md",
+      "start_line": 25,
+      "end_line": 39,
+      "kind": "validation_report"
+    },
+    "recovery_production_cancellation": {
+      "path": "docs/validation/2026-10-15-gp8-recovery-session.md",
+      "start_line": 43,
+      "end_line": 49,
+      "kind": "validation_report"
+    },
+    "recovery_status_visual": {
+      "path": "docs/validation/2026-10-15-gp8-recovery-session.md",
+      "start_line": 51,
+      "end_line": 59,
+      "kind": "validation_report"
+    },
+    "recovery_size_cap": {
+      "path": "docs/validation/2026-10-15-gp8-recovery-session.md",
+      "start_line": 61,
+      "end_line": 84,
+      "kind": "validation_report"
+    },
+    "recovery_write_interruption": {
+      "path": "docs/validation/2026-10-15-gp8-recovery-session.md",
+      "start_line": 86,
+      "end_line": 92,
+      "kind": "validation_report"
+    },
+    "recovery_final_join": {
+      "path": "docs/validation/2026-10-15-gp8-recovery-session.md",
+      "start_line": 94,
+      "end_line": 106,
+      "kind": "validation_report"
+    },
+    "recovery_limits": {
+      "path": "docs/validation/2026-10-15-gp8-recovery-session.md",
+      "start_line": 108,
+      "end_line": 117,
+      "kind": "validation_report"
+    },
+    "workstation_scope_limits": {
+      "path": "docs/superpowers/specs/2026-10-15-tabplayer-reference-workstation-design.md",
+      "start_line": 35,
+      "end_line": 44,
+      "kind": "accepted_scope_limit"
+    },
+    "workstation_navigation": {
+      "path": "docs/validation/2026-10-15-tabplayer-reference-workstation.md",
+      "start_line": 45,
+      "end_line": 57,
+      "kind": "validation_report"
+    },
+    "workstation_long": {
+      "path": "docs/validation/2026-10-15-tabplayer-reference-workstation.md",
+      "start_line": 59,
+      "end_line": 71,
+      "kind": "validation_report"
+    },
+    "workstation_visual": {
+      "path": "docs/validation/2026-10-15-tabplayer-reference-workstation.md",
+      "start_line": 75,
+      "end_line": 100,
+      "kind": "validation_report"
+    },
+    "workstation_backing_check": {
+      "path": "docs/validation/2026-10-15-tabplayer-reference-workstation.md",
+      "start_line": 35,
+      "end_line": 43,
+      "kind": "validation_report"
+    },
+    "backing_existing_foundation": {
+      "path": "docs/validation/2026-10-14-tabplayer-expansion.md",
+      "start_line": 44,
+      "end_line": 44,
+      "kind": "validation_report"
     }
   },
   "evidence_file_sha256": {
@@ -480,7 +576,11 @@
     "src/harmony/transpose.ts": "58f4084b36951dc4cec789573a3b3e49005b67de5a79c611f0c0db3f031a1e96",
     "docs/validation/2026-10-15-gp8-selection-playback.md": "c8424e74d20f7681b58bb0b82de0e093c84608e4762aae5f680473c320622d81",
     "docs/validation/2026-10-15-gp8-stylesheet-interchange.md": "aa068aed53bef2603a6ad5c736ce57ff223e1683c9330725119b80d891bf8b9b",
-    "src-tauri/tests/audio_practice_transport.rs": "aafb40d4fbcce1a21077b1b4dab2647dfac20342f6a7d5fb21d6b880b605456f"
+    "src-tauri/tests/audio_practice_transport.rs": "aafb40d4fbcce1a21077b1b4dab2647dfac20342f6a7d5fb21d6b880b605456f",
+    "docs/validation/2026-10-15-gp8-recovery-session.md": "3deafca869845bb043f8ca536af10cbd2fa94ebfb2c624394b49fe3fb2d3e7c8",
+    "docs/superpowers/specs/2026-10-15-tabplayer-reference-workstation-design.md": "74cdfff49d6cfa5c22dcbd04736a1423da2adcde2deef16050ddca449fb86248",
+    "docs/validation/2026-10-15-tabplayer-reference-workstation.md": "e0e53e8adc1ccccdd0614488cf5ad42004991a9ed26ddb77e08f58a3a275a494",
+    "docs/validation/2026-10-14-tabplayer-expansion.md": "dc95c92f95005d9ec2345bc14367d1b2d9357fd4eaa44839de7279f4dc4bf1ac"
   },
   "next_open_families": [
     {
@@ -501,8 +601,11 @@
     {
       "priority": 2,
       "family": "Document workflow and reliable recovery",
-      "work": "Multiple documents, autosave/crash recovery, restored sessions, recent files and templates remain baseline missing. These are substantial complete workflows rather than polishing the delivered editor slices.",
-      "evidence": []
+      "work": "Recent files, templates and related local-library workflows remain open in the carried inventory. W10/W11 now have documented Windows recovery/session acceptance; unsupported destruction-exception execution and other-platform runtime limits remain separate. No other document-workflow row is re-assessed by this five-row adoption.",
+      "evidence": [
+        "recovery_windows",
+        "recovery_limits"
+      ]
     },
     {
       "priority": 3,
@@ -583,17 +686,30 @@
         "harmony",
         "harmony_limits"
       ]
+    },
+    {
+      "issue": "Recovery/workstation acceptance is scoped; P15 is a backing editor row",
+      "detail": "W10/W11 now meet their recorded Windows baseline acceptance, D04 navigation and D05 pane controls remain partial, and P15 waveform/visual drag-sync remains missing. The workstation validation P15 sound-chain typo is corrected; numeric anchors/import remain P13/P14 foundations. Later delivery and CI state do not extend the recorded executable or platform evidence.",
+      "evidence": [
+        "recovery_windows",
+        "recovery_limits",
+        "workstation_scope_limits",
+        "workstation_navigation",
+        "workstation_visual"
+      ]
     }
   ],
   "limitations": [
     "This is a source/report audit only. No application, test, build, device, Git command or original Guitar Pro runtime was run for this overlay.",
-    "Product b73ae93682332c64029777cc4dfeaebfe2a77214, tracking e2ec67b and test-only follow-up f6350fc are supplied by the root integrator; this audit does not independently resolve Git state. Earlier evidence-file hashes retain their original overlay snapshot; the added versioned selection/stylesheet reports have their own recorded hashes.",
+    "Accepted source26a9ddb plus docs1f85ce2 at exact remote-verified 1f85ce2ef90f2fa1940aa998490a5e7308de74fe are supplied by root; this audit did not independently resolve Git state. Earlier evidence-file hashes retain their original overlay snapshots; new recovery/workstation report hashes identify this documentation adoption. In-flight Library/schema3 work is excluded.",
     "All 258 historical requirement and acceptance strings, statuses, references, evidence keys and behavior/gaps are copied without modification from the pinned baseline JSON.",
     "Combined current dispositions include carried historical rows. Only evidence_reviewed rows have a non-null current_proven_status; even implemented means the row acceptance in the documented scope, not whole-product parity.",
     "Existing report suite counts and RED-to-GREEN statements are attributed to their versioned reports. Source reads and test-source reads do not constitute new executions.",
     "Actual Windows CPAL/WASAPI and rendered native PDF receipts are distinguished from model tests. They do not establish physical printers, original GP8 acceptance, macOS/Linux, newly shipped installers, human listening equivalence or arbitrary-score engraving freedom.",
     "Native history, alphaTab GP reimport and source hashes prove bounded preservation properties, not preservation of every target field. Known public reader/writer losses remain explicit.",
-    "At the root-observed 2026-10-15 11:09 UTC checkpoint, CI38724478672 macOS frontend/native tests succeeded; packages and complete other-OS results remained pending. This is not a cross-platform CI success claim or physical-platform acceptance. Actual Windows Ctrl-click sparse/drag/end-handle resize acceptance subsequently passed, preserving source and the complete snapshot with a nonempty redo entry; no new PCM was captured. The subsequent independently reviewed actual-wrap oracle meets P03 under the documented reset policy; its logical 48 kHz controlled sample does not establish every effect combination, physical 44.1 kHz/fault behavior or GP8 waveform/historical-tail equivalence."
+    "At the root-observed 2026-10-15 11:09 UTC checkpoint, CI38724478672 macOS frontend/native tests succeeded; packages and complete other-OS results remained pending. This is not a cross-platform CI success claim or physical-platform acceptance. Actual Windows Ctrl-click sparse/drag/end-handle resize acceptance subsequently passed, preserving source and the complete snapshot with a nonempty redo entry; no new PCM was captured. The subsequent independently reviewed actual-wrap oracle meets P03 under the documented reset policy; its logical 48 kHz controlled sample does not establish every effect combination, physical 44.1 kHz/fault behavior or GP8 waveform/historical-tail equivalence.",
+    "Root reports current CI38770187771 at exact 1f85ce2ef90f2fa1940aa998490a5e7308de74fe completed FAILURE before prepare-audio steps, desktop jobs skipped and job-log request 404; cause unknown. Earlier W05 CI38738258294 all-OS success is confined to 64a1e8f7e416b93ca624a3c48196984424f4a28b. No billing cause, current all-OS pass or physical-platform acceptance is inferred.",
+    "The actual injected destruction-exception attempt stopped at an immutable-host guard before native close/resume. Mounted/real-controller regressions and the normal 12-group run remain separate evidence; no successful destruction-failure execution is claimed."
   ],
   "features": [
     {
@@ -891,12 +1007,21 @@
       "acceptance_required": "Crash with unsaved edits and restore all documents from valid backups.",
       "runtime_rechecked": false,
       "historical_status": "missing",
-      "current_status": "missing",
-      "assessment": "baseline_not_reaudited",
-      "current_proven_status": null,
-      "current_behavior": "Explicit save history does not provide timed backup or restore after crash.",
-      "remaining_gap": "Not re-audited in this delivery-progress audit. The original baseline behavior, gap and acceptance remain authoritative historical context; this is not a new current proof.",
-      "current_evidence": [],
+      "current_status": "implemented",
+      "assessment": "evidence_reviewed",
+      "current_proven_status": "implemented",
+      "current_behavior": "Native timed recovery checkpoints retain all open documents, complete user history/cursor, independent saved branches, source/backing bytes and views. Recorded Windows process-crash acceptance restores three ordered untitled/imported/native documents with exact IDs/revisions/history/redo/views and a fresh stopped activation, including redo-only backing while originals are unavailable. A separately observed interrupted large write restores the previous acknowledged checkpoint; same-epoch corruption fallback, exclusive ownership and closed-document retirement also have passing evidence.",
+      "remaining_gap": "No remaining gap identified for the stated Windows crash/valid-backup acceptance. Actual injected JavaScript window-destruction exception execution was unsupported on this host; its guard stopped before native close/resume. That correction has mounted/real-controller/native-floor regression and joined-review evidence, not a successful destruction-failure run. Other-OS runtime, physical power loss, universal filesystem failures, original-GP8 equivalence and shipping/installer lifecycle remain separate unverified limits.",
+      "current_evidence": [
+        "recovery_scope",
+        "recovery_windows",
+        "recovery_production_cancellation",
+        "recovery_status_visual",
+        "recovery_size_cap",
+        "recovery_write_interruption",
+        "recovery_final_join",
+        "recovery_limits"
+      ],
       "runtime_rechecked_by_this_audit": false
     },
     {
@@ -919,12 +1044,19 @@
       "acceptance_required": "Restart and restore document tabs and location according to preference.",
       "runtime_rechecked": false,
       "historical_status": "missing",
-      "current_status": "missing",
-      "assessment": "baseline_not_reaudited",
-      "current_proven_status": null,
-      "current_behavior": "No persisted open-document/session list.",
-      "remaining_gap": "Not re-audited in this delivery-progress audit. The original baseline behavior, gap and acceptance remain authoritative historical context; this is not a new current proof.",
-      "current_evidence": [],
+      "current_status": "implemented",
+      "assessment": "evidence_reviewed",
+      "current_proven_status": "implemented",
+      "current_behavior": "Native clean-session persistence restores ordered tabs and document locations according to the persisted Restore previous session preference. Recorded Windows clean restart restores music and zoom 115; preference off commits empty Clean and starts blank. Save/Discard/Cancel preserve their documented branch semantics, and crash recovery remains an explicit choice independently of the clean-session preference.",
+      "remaining_gap": "No remaining gap identified for the stated Windows restart/tabs/location/preference acceptance. Actual destruction-exception execution remains unsupported as documented separately; mounted regressions are not relabeled as that runtime path. Other-OS runtime, physical power loss, universal filesystem failures, original-GP8 equivalence and shipping/installer lifecycle are not established by these receipts.",
+      "current_evidence": [
+        "recovery_scope",
+        "recovery_windows",
+        "recovery_production_cancellation",
+        "recovery_size_cap",
+        "recovery_final_join",
+        "recovery_limits"
+      ],
       "runtime_rechecked_by_this_audit": false
     },
     {
@@ -5783,11 +5915,15 @@
       "runtime_rechecked": false,
       "historical_status": "missing",
       "current_status": "missing",
-      "assessment": "baseline_not_reaudited",
-      "current_proven_status": null,
-      "current_behavior": "No waveform, zoom, bar grid, drag markers or matched score/audio selection.",
-      "remaining_gap": "Not re-audited in this delivery-progress audit. The original baseline behavior, gap and acceptance remain authoritative historical context; this is not a new current proof.",
-      "current_evidence": [],
+      "assessment": "evidence_reviewed",
+      "current_proven_status": "missing",
+      "current_behavior": "The existing real backing import/replace/remove, numeric offset/mix and occurrence-aware anchor controls remain reachable in the Backing pane. Those capabilities belong to P13/P14. The workstation batch adds no waveform/grid/audio-timeline or visual sync-marker movement workflow, and supplies no P15 visual-drag acceptance receipt.",
+      "remaining_gap": "The exact P15 acceptance remains open: waveform/timeline with zoom, matched score/audio positions and visually movable sync points showing bar/beat/audio relationships. A written-score overview, numeric anchors, sound-block disclosures and effect reorder limitations are not this feature.",
+      "current_evidence": [
+        "workstation_scope_limits",
+        "backing_existing_foundation",
+        "workstation_backing_check"
+      ],
       "runtime_rechecked_by_this_audit": false
     },
     {
@@ -6875,12 +7011,17 @@
       "acceptance_required": "Navigate/select/reorder over global track/bar grid with accurate playhead.",
       "runtime_rechecked": false,
       "historical_status": "missing",
-      "current_status": "missing",
-      "assessment": "baseline_not_reaudited",
-      "current_proven_status": null,
-      "current_behavior": "Track list lacks bar timeline, section blocks and range handles.",
-      "remaining_gap": "Not re-audited in this delivery-progress audit. The original baseline behavior, gap and acceptance remain authoritative historical context; this is not a new current proof.",
-      "current_evidence": [],
+      "current_status": "partial",
+      "assessment": "evidence_reviewed",
+      "current_proven_status": "partial",
+      "current_behavior": "A real written-measure track/bar/section overview supports pointer and local keyboard navigation with separate edit target/native playback state. Recorded Windows navigation while playing preserves document/history, audio owner/generation, range, loop and plan, without transport commands. The 32-track/2,000-measure run mounts 224 cells within its 316-cell viewport budget and records no grid child-list mutations during clock updates.",
+      "remaining_gap": "Global-grid reorder and drag/range-selection handles are absent; this is a written-measure navigation slice, not complete D04 acceptance or a repeat-expanded arrangement timeline. The straight 4/4 fixture does not establish every repeat-occurrence playhead case or other-OS runtime.",
+      "current_evidence": [
+        "workstation_scope_limits",
+        "workstation_navigation",
+        "workstation_long",
+        "workstation_visual"
+      ],
       "runtime_rechecked_by_this_audit": false
     },
     {
@@ -6903,11 +7044,15 @@
       "runtime_rechecked": false,
       "historical_status": "partial",
       "current_status": "partial",
-      "assessment": "baseline_not_reaudited",
-      "current_proven_status": null,
-      "current_behavior": "Only instrument panel toggle; main panels fixed.",
-      "remaining_gap": "Not re-audited in this delivery-progress audit. The original baseline behavior, gap and acceptance remain authoritative historical context; this is not a new current proof.",
-      "current_evidence": [],
+      "assessment": "evidence_reviewed",
+      "current_proven_status": "partial",
+      "current_behavior": "View controls show/hide task panes, Inspector and bottom dock; narrow windows switch one detail pane without discarding mounted tuning/edit drafts. Recorded 960×720/1280×900/1600×1000 views retain readable controls and contained pane/dock scrolling, and Ctrl+Shift+V reveals/focuses the hidden or replaced Inspector while preserving drafts and native playback state.",
+      "remaining_gap": "User-draggable panel splitters/resizing and persisted panel widths remain absent. Responsive switching, local instrument scrolling and show/hide do not satisfy the row resize requirement. Other-OS runtime is not established by the Windows viewport batch.",
+      "current_evidence": [
+        "workstation_scope_limits",
+        "workstation_navigation",
+        "workstation_visual"
+      ],
       "runtime_rechecked_by_this_audit": false
     },
     {

@@ -1,4 +1,5 @@
-import { useEffect,useLayoutEffect, useMemo,useRef, useState, useSyncExternalStore, type KeyboardEvent,type ReactNode } from 'react';
+import { useCallback,useEffect,useLayoutEffect, useMemo,useRef, useState, useSyncExternalStore, type KeyboardEvent,type ReactNode } from 'react';
+import {model,Settings} from '@coderline/alphatab';
 import { DocumentController } from './controller';
 import { describeSelection, effectiveAudioSettings } from './engine';
 import type { BeatTarget, EditCommand } from './project';
@@ -12,6 +13,14 @@ import { NativePlaybackController } from './audio/NativePlaybackController';
 import { SoundPanel } from './audio/SoundPanel';
 import { BackingPanel } from './audio/BackingPanel';
 import { BackingWaveform } from './audio/BackingWaveform';
+import { useReferenceSyncEdit } from './audio/useReferenceSyncEdit';
+import { disableReferenceSync,initializeReferenceSync,referenceSyncTiming } from './audio/reference-sync';
+import { scoreTemposFromSync,syncPointsFromScore } from './audio/tempo-conversion';
+import { backingLocationsForScore,buildPlaybackPlanFromJson } from './audio/plan';
+import { scoreFromJson } from './model-clone';
+import { captureNoteLinks,restoreNoteLinks } from './editor/links';
+import type { ReferenceSyncControls } from './audio/reference-sync-types';
+import { gpBackingSelectionIssue } from './interchange/backing-projection';
 import { makeEmbeddedWaveformSource } from './audio/backing-waveform-bridge';
 import type { BackingWaveformProps,NativeBackingWaveformBridge,WaveformSourceInput } from './audio/backing-waveform-types';
 import type { BackingCandidate,NativeAudioBridge } from './audio/bridge';
@@ -21,7 +30,7 @@ import type { DocumentViewState } from './workspace/types';
 import { trackIdentity } from './engine';
 import { ExportDialog } from './export/ExportDialog';
 import { useExportCoordinator } from './export/useExportCoordinator';
-import type { ExportOptions } from './export/types';
+import type { ExportOptions,ExportSelection } from './export/types';
 import { Transport } from './Transport';
 import { LiveInstrumentView } from './instruments/LiveInstrumentView';
 import type { MusicSelection } from './editor/range-types';
@@ -52,7 +61,7 @@ const textEntry=(target:EventTarget)=>target instanceof HTMLElement&&(['INPUT','
 
 export interface AppProps {
   controller:DocumentController;audioBridge:NativeAudioBridge;waveformBridge:NativeBackingWaveformBridge;exportBridge:ExportNativeBridge;
-  documentBridge:Pick<NativeBridge,'confirmExport'|'exportGp'>;
+  documentBridge:Pick<NativeBridge,'confirmExport'|'exportGp'|'readBackingAsset'>;
   documentView:DocumentViewState;onViewChange:(view:DocumentViewState)=>void;clipboard:ClipboardStore;
   workspaceBusy:boolean;workspaceError:string|null;beginEditorOperation:()=>()=>void;
   onNew:()=>Promise<boolean>;onOpen:()=>Promise<boolean>;onClose:()=>Promise<boolean>;onCloseAll:()=>Promise<boolean>;
@@ -67,6 +76,8 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   const playbackState=useSyncExternalStore(player?.subscribe??noPlaybackSubscribe,()=>player?.getState()??null);
   useEffect(()=>{const playback=new NativePlaybackController({bridge:audioBridge,onEdit:command=>controller.edit(command).then(()=>setSelection(old=>repairSelection(controller.getState().score,old)))});setPlayer(playback);return()=>playback.destroy();},[controller,audioBridge]);
   useEffect(()=>{controller.setBeforeChange(()=>player?.beforeScoreChange());return()=>controller.setBeforeChange(()=>{});},[controller,player]);
+  const referenceLifetime=useMemo(()=>({active:true}),[controller,waveformBridge]);
+  useEffect(()=>{referenceLifetime.active=true;const unbind=controller.setReferenceWaveformBridge(waveformBridge);return()=>{referenceLifetime.active=false;unbind();};},[controller,waveformBridge,referenceLifetime]);
   const [selection,setSelection]=useState<BeatTarget>(documentView.target);
   const [musicSelection,setMusicSelection]=useState<MusicSelection|null>(null),rangeAnchor=useRef<BeatTarget|null>(null);
   const [clipboardVersion,setClipboardVersion]=useState(0),[clipboardError,setClipboardError]=useState<string|null>(null);
@@ -170,7 +181,8 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     catch(error){setClipboardError(error instanceof Error?error.message:String(error));}
   };
   const directExport=()=>{act((async()=>{const release=beginEditorOperation();try{await controller.export();}finally{release();}})());};
-  const audioSettings=effectiveAudioSettings(state.snapshot.project,state),practiceRatio=player?player.exportPracticeRatio():1;
+  const audioSettings=useMemo(()=>effectiveAudioSettings(state.snapshot.project,state),[state.snapshot.project,state.settings,state.embeddedBacking,state.embeddedBackingSettings,state.sourceMixes]),practiceRatio=player?player.exportPracticeRatio():1;
+  const gpBackingIssue=useCallback((selection:ExportSelection)=>gpBackingSelectionIssue(state.score,audioSettings.backing,selection),[state.score,audioSettings.backing]);
   const exports=useExportCoordinator({score:state.score,settings:audioSettings,currentSpeed:practiceRatio,bridge:documentBridge,native:exportBridge,embeddedBacking:state.embeddedBacking,revision:state.revision});
   const runExport=(options:ExportOptions)=>{if(exportRunning.current)return;setExportError(null);setExportLaunching(true);exportCancelled.current=false;const running=(async()=>{
     if(options.format==='pdf'||options.format==='print'){
@@ -198,10 +210,59 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   const waveformSource:WaveformSourceInput|null=state.settings.backing?{kind:'asset',assetId:state.settings.backing.assetId}:originalBacking?currentEmbedded?.source??null:null;
   const waveformEnabled=dockVisible&&!dockCollapsed&&!instrumentVisible&&dockMode==='backing';
   const backingTimeline=player?.backingTimeline()??null;
+  const referenceVisible=leftShown&&leftTask==='backing',metadataVisible=referenceVisible||waveformEnabled;
+  const sourceAssetId=state.settings.backing&&state.snapshot.project.assets[state.settings.backing.assetId]?state.settings.backing.assetId:null;
+  const sourceOwner=useRef({controller,bridge:waveformBridge,assetId:sourceAssetId});sourceOwner.current={controller,bridge:waveformBridge,assetId:sourceAssetId};
+  const [sourceMetadata,setSourceMetadata]=useState<{bridge:NativeBackingWaveformBridge;assetId:string;durationMs:number|null;error:string|null}|null>(null),[sourceRetry,setSourceRetry]=useState(0);
+  const currentMetadata=sourceMetadata?.bridge===waveformBridge&&sourceMetadata.assetId===sourceAssetId?sourceMetadata:null;
+  const sourceDurationMs=currentMetadata?.durationMs??null;
+  useEffect(()=>{
+    if(!metadataVisible||!sourceAssetId||sourceDurationMs!==null)return;
+    let active=true;const document={documentId:state.documentId,revision:state.revision},assetId=sourceAssetId,owner=waveformBridge.owner;
+    const current=()=>{const now=controller.getState();return active&&referenceLifetime.active&&sourceOwner.current.controller===controller&&sourceOwner.current.bridge===waveformBridge&&sourceOwner.current.assetId===assetId&&now.documentId===document.documentId&&now.revision===document.revision&&now.settings.backing?.assetId===assetId;};
+    setSourceMetadata(null);
+    void waveformBridge.read(document,{kind:'asset',assetId},1).then(receipt=>{
+      if(!current())return;
+      if(owner.documentId!==document.documentId||receipt.owner.documentId!==owner.documentId||receipt.owner.activationId!==owner.activationId||receipt.document.documentId!==document.documentId||receipt.document.revision!==document.revision||receipt.source.kind!=='asset'||receipt.source.assetId!==assetId||!Number.isFinite(receipt.durationMs)||receipt.durationMs<=0)throw new Error('The backing timing source changed. Retry to load the current audio.');
+      setSourceMetadata({bridge:waveformBridge,assetId,durationMs:receipt.durationMs,error:null});
+    }).catch(error=>{if(current())setSourceMetadata({bridge:waveformBridge,assetId,durationMs:null,error:error instanceof Error?error.message:String(error)});});
+    return()=>{active=false;};
+  },[controller,waveformBridge,referenceLifetime,sourceAssetId,state.documentId,state.revision,metadataVisible,sourceRetry]);
   const backingSelection=useMemo(()=>player?.backingScoreSelection(target,musicSelection)??{points:[],spans:[]},[player,backingTimeline?.generation,backingTimeline?.tempos,backingTimeline?.occurrences,target.track,target.staff,target.bar,target.voice,target.beat,musicSelection]);
   const waveformCurrent=(document:Parameters<BackingWaveformProps['isCurrent']>[0],settings:Parameters<BackingWaveformProps['isCurrent']>[1])=>{
-    const current=controller.getState();return current.documentId===document.documentId&&current.revision===document.revision&&JSON.stringify(current.settings.backing)===JSON.stringify(settings);
+    const current=controller.getState();return referenceLifetime.active&&sourceOwner.current.controller===controller&&sourceOwner.current.bridge===waveformBridge&&waveformBridge.owner.documentId===document.documentId&&current.documentId===document.documentId&&current.revision===document.revision&&JSON.stringify(current.settings.backing)===JSON.stringify(settings);
   };
+  const referenceReady=sourceAssetId!==null&&sourceDurationMs!==null&&!!backingTimeline?.occurrences.length;
+  const referenceEdit=useReferenceSyncEdit({owner:waveformBridge.owner,document:{documentId:state.documentId,revision:state.revision},sourceKey:sourceAssetId,settings:state.settings.backing,timeline:backingTimeline,durationMs:sourceDurationMs,visible:{number:referenceVisible,waveform:waveformEnabled},busy:controlsBusy,beginOperation:beginEditorOperation,isCurrent:waveformCurrent,onCommit:async(backing,document)=>{
+    if(!state.settings.backing||!waveformCurrent(document,state.settings.backing)||backing.assetId!==sourceAssetId)throw new Error('The active reference source changed. Try the edit again.');
+    await controller.editAtRevision({type:'setBacking',backing},document);
+  }});
+  const referenceTiming=useMemo(()=>{
+    if(!referenceReady||!state.settings.backing)return null;
+    try{return referenceSyncTiming(referenceEdit.preview??state.settings.backing,backingTimeline!.occurrences,sourceDurationMs!);}catch{return null;}
+  },[referenceReady,state.settings.backing,referenceEdit.preview,backingTimeline?.occurrences,sourceDurationMs]);
+  const referenceAction=async(action:'score'|'reference'|'replace'|'add'|'write')=>{
+    const captured=controller.getState(),document={documentId:captured.documentId,revision:captured.revision},backing=captured.settings.backing;
+    if(controlsBusy||captured.busy||!referenceReady||!backing||captured.documentId!==state.documentId||captured.revision!==state.revision||backing.assetId!==sourceAssetId||!waveformCurrent(document,backing))throw new Error('Wait for backing timing to load before changing synchronization.');
+    const release=beginEditorOperation();
+    try{
+      const settings=structuredClone(backing),json=model.JsonConverter.scoreToJson(captured.score);let command:EditCommand;
+      if(action==='write'){
+        const score=scoreFromJson(json,new Settings());restoreNoteLinks(score,captureNoteLinks(captured.score));
+        const locations=backingLocationsForScore(score),timing=referenceSyncTiming(settings,locations,sourceDurationMs!);
+        if(!timing)throw new Error('Enable Score follows audio before writing score tempos.');
+        command={type:'replaceTempoAutomations',points:scoreTemposFromSync(score,timing,locations)};
+      }else if(action==='score')command={type:'setBacking',backing:disableReferenceSync(settings)};
+      else{
+        const authored=buildPlaybackPlanFromJson(json,captured.score.tracks.map(trackIdentity),backingTimeline!.generation);
+        command={type:'setBacking',backing:action==='reference'?initializeReferenceSync(settings,authored,sourceDurationMs!):syncPointsFromScore(authored,settings,action,sourceDurationMs!)};
+      }
+      if(!waveformCurrent(document,backing))throw new Error('The active reference source changed. Try the edit again.');
+      await controller.editAtRevision(command,document);
+    }finally{release();}
+  };
+  const reference:ReferenceSyncControls={ready:referenceReady,timing:referenceTiming,edit:referenceEdit,onModeChange:referenceAction,onFromScore:referenceAction,onWriteScore:()=>referenceAction('write')};
+  const sourceMetadataStatus=sourceAssetId&&sourceDurationMs===null?<div className="backing-waveform-state">{currentMetadata?.error?<><p role="alert">{currentMetadata.error}</p><button onClick={()=>setSourceRetry(value=>value+1)}>Retry</button></>:<p role="status">Loading backing timing…</p>}</div>:null;
   const select=(next:BeatTarget,s=string,index?:number)=>{
     if (!validSelectionIndices(next) || !Number.isInteger(s)) return;
     const fixed=repairSelection(state.score,next);setSelection(fixed);
@@ -295,7 +356,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
         <div className="workstation-task" hidden={leftTask!=='track'}><TrackSettingsPanel score={state.score} selected={target.track} busy={controlsBusy} onEdit={edit}/></div>
         <div className="workstation-task" hidden={leftTask!=='sound'}>
         <SoundPanel trackId={trackId} sound={state.settings.sounds[trackId]} onEdit={command=>controller.edit(command)} playback={player} busy={controlsBusy}/>
-        </div><div className="workstation-task" hidden={leftTask!=='backing'}><BackingPanel settings={originalBacking?undefined:state.settings.backing} originalSettings={state.embeddedBackingSettings?{assetId:'embedded',...state.embeddedBackingSettings}:null} assets={state.snapshot.project.assets} embedded={state.embeddedBacking} playback={player} onEdit={backingEdit} stageBacking={audioBridge.stageBacking} stageEmbeddedBacking={audioBridge.stageEmbeddedBacking} beginOperation={beginEditorOperation} busy={controlsBusy} onShowWaveform={()=>chooseDock('backing')}/></div>
+        </div><div className="workstation-task" hidden={leftTask!=='backing'}><BackingPanel settings={originalBacking?undefined:state.settings.backing} originalSettings={state.embeddedBackingSettings?{assetId:'embedded',...state.embeddedBackingSettings}:null} assets={state.snapshot.project.assets} embedded={state.embeddedBacking} playback={player} onEdit={backingEdit} stageBacking={audioBridge.stageBacking} stageEmbeddedBacking={audioBridge.stageEmbeddedBacking} beginOperation={beginEditorOperation} busy={controlsBusy} durationMs={sourceDurationMs??undefined} reference={reference} onShowWaveform={()=>chooseDock('backing')}/>{referenceVisible&&sourceMetadataStatus}</div>
       </section>
       <section ref={scorePane} className="score-workspace" aria-label="Score workspace" tabIndex={0} onKeyDown={keys}>
         <div className="score-tools"><span>{state.score.masterBars.length} measures · {state.score.tracks.length} tracks</span>
@@ -319,12 +380,13 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
           <div className="workstation-dock-tracks" hidden={instrumentVisible||dockMode==='backing'}><TrackPanel score={state.score} selected={target.track} busy={controlsBusy} player={player} view={dockMode==='mixer'?'mixer':'overview'} target={target} onExitOverview={()=>scorePane.current?.focus()} onSelectPosition={(track,bar)=>select({track,staff:0,bar,voice:0,beat:0})} onSelect={track=>select({track,staff:0,bar:target.bar,voice:0,beat:0},state.score.tracks[track].staves[0].tuning.length)}/></div>
           {instrumentVisible&&<LiveInstrumentView score={state.score} track={target.track} staff={target.staff} player={player}/>}
           <div className="workstation-dock-backing" hidden={instrumentVisible||dockMode!=='backing'}>
-            {originalBacking&&!currentEmbedded?.source?<div className="backing-waveform-state">{currentEmbedded?.error?<><p role="alert">{currentEmbedded.error}</p><button onClick={()=>setEmbeddedRetry(value=>value+1)}>Retry</button></>:<p role="status">Loading waveform…</p>}</div>:<BackingWaveform document={{documentId:state.documentId,revision:state.revision}} source={waveformSource} filename={state.settings.backing?state.snapshot.project.assets[state.settings.backing.assetId]?.filename??'Backing audio':state.snapshot.project.base.kind==='file'?state.snapshot.project.base.filename:'Backing audio'} bridge={waveformBridge} timeline={backingTimeline} selection={backingSelection} settings={state.settings.backing} effectiveBacking={audioSettings.backing} scoreTimeMs={playbackState?.ready&&!playbackState.error&&['playing','paused'].includes(playbackState.practice.phase)?playbackState.time:null} enabled={waveformEnabled} busy={controlsBusy} beginOperation={beginEditorOperation} isCurrent={waveformCurrent} onEdit={command=>controller.edit(command)}/>}
+            {waveformEnabled&&!referenceVisible&&sourceMetadataStatus}
+            {originalBacking&&!currentEmbedded?.source?<div className="backing-waveform-state">{currentEmbedded?.error?<><p role="alert">{currentEmbedded.error}</p><button onClick={()=>setEmbeddedRetry(value=>value+1)}>Retry</button></>:<p role="status">Loading waveform…</p>}</div>:<BackingWaveform document={{documentId:state.documentId,revision:state.revision}} source={waveformSource} filename={state.settings.backing?state.snapshot.project.assets[state.settings.backing.assetId]?.filename??'Backing audio':state.snapshot.project.base.kind==='file'?state.snapshot.project.base.filename:'Backing audio'} bridge={waveformBridge} timeline={backingTimeline} selection={backingSelection} settings={state.settings.backing} effectiveBacking={audioSettings.backing} reference={reference} scoreTimeMs={playbackState?.ready&&!playbackState.error&&!['countIn','ended'].includes(playbackState.practice.phase)?playbackState.time:null} enabled={waveformEnabled} busy={controlsBusy} beginOperation={beginEditorOperation} isCurrent={waveformCurrent} onEdit={command=>controller.edit(command)}/>}
           </div>
         </div>
       </section>
     </div>
-    {exportOpen&&<ExportDialog score={state.score} layout={state.settings.print} page={page} currentSpeedAvailable={practiceRatio!==null} busy={exports.busy||state.busy||exportLaunching} progress={exports.progress} failure={exportError} onExport={runExport} onCancel={cancelExport}/>}
+    {exportOpen&&<ExportDialog score={state.score} layout={state.settings.print} page={page} currentSpeedAvailable={practiceRatio!==null} busy={exports.busy||state.busy||exportLaunching} progress={exports.progress} failure={exportError} gpBackingIssue={gpBackingIssue} onExport={runExport} onCancel={cancelExport}/>}
     {harmonyOpen&&location.beat&&<HarmonyChordDialog score={state.score} target={target} selection={musicSelection} value={location.beat.chord?getHarmonyChord(location.beat.chord):null} busy={state.busy||libraryLoading} library={library} onEdit={edit} onClose={closeModal} onLibraryPut={async entry=>{const revision=++libraryRevision.current,value=await putHarmonyLibraryEntry(entry);if(revision===libraryRevision.current)setLibrary(value);}} onLibraryRemove={async id=>{const revision=++libraryRevision.current,value=await removeHarmonyLibraryEntry(id);if(revision===libraryRevision.current)setLibrary(value);}}/>}
     {scaleOpen&&<ScaleToolPanel score={state.score} staff={location.staff} selection={musicSelection} busy={state.busy} onClose={closeModal}/>}
     <footer className="statusbar">{state.busy?'Working…':state.snapshot.dirty?'Unsaved changes':state.snapshot.path?'Saved':state.snapshot.project.base.kind==='file'?'Not saved':'New score'}<span>{state.snapshot.path ?? 'Save a .tabplayer project to keep the original score and edits.'}</span>{recoveryStatus}</footer>

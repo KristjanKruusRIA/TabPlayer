@@ -78,7 +78,7 @@ export class DocumentController {
     try {
       const project=asset?{...this.state.snapshot.project,assets:{...this.state.snapshot.project.assets,[asset.assetId]:asset.info}}:this.state.snapshot.project;
       candidate=previewEdit(project,command,this.state);
-      if(command.type==='setBacking'&&backingState(command.backing)===backingState(this.state.settings.backing)){
+      if(command.type==='setBacking'&&backingState(command.backing)===backingState(effectiveAudioSettings(this.state.snapshot.project,this.state).backing)){
         if(asset)await this.bridge.cancelAsset(asset.token);return;
       }
       if(command.type==='replaceTempoAutomations'&&tempoState(candidate.score)===tempoState(this.state.score))return;

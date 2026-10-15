@@ -18,26 +18,28 @@ import {createHash} from 'node:crypto';
 import { defaultMix } from './document-settings';
 import { DEFAULT_PRACTICE } from './audio/practice-types';
 import type { PlaybackState } from './audio/types';
-import type { BackingWaveformProps,NativeBackingWaveformBridge,WaveformSourceInput } from './audio/backing-waveform-types';
+import type { BackingWaveform as WaveformReceipt,BackingWaveformProps,NativeBackingWaveformBridge,WaveformSourceInput } from './audio/backing-waveform-types';
 import {getHarmonyChord} from './harmony/chord-source';
 import type {HarmonyLibrary,HarmonyLibraryEntry} from './editor/harmony-types';
+import type {ReferenceSyncControls} from './audio/reference-sync-types';
 const engravingView=vi.hoisted(()=>vi.fn());
-const waveform=vi.hoisted(()=>({props:[] as BackingWaveformProps[],read:vi.fn(),embedded:vi.fn(async(sourceKey:string,_bytes:Uint8Array):Promise<WaveformSourceInput>=>({kind:'embedded',sourceKey:sourceKey.toLowerCase(),sha256:'e'.repeat(64),bytesBase64:'UklGRg=='}))}));
+const waveform=vi.hoisted(()=>({props:[] as BackingWaveformProps[],read:vi.fn(async(document:BackingWaveformProps['document'],source:WaveformSourceInput,buckets:number,owner:NativeBackingWaveformBridge['owner']):Promise<WaveformReceipt>=>({owner,document,source,durationMs:16000,sampleRate:1000,frameCount:16000,channels:1,bucketCount:buckets,peaks:Array.from({length:buckets},()=>({min:[0,0],max:[0,0]}))})),embedded:vi.fn(async(sourceKey:string,_bytes:Uint8Array):Promise<WaveformSourceInput>=>({kind:'embedded',sourceKey:sourceKey.toLowerCase(),sha256:'e'.repeat(64),bytesBase64:'UklGRg=='}))}));
 vi.mock('./audio/BackingWaveform',()=>({BackingWaveform:(props:BackingWaveformProps)=>{waveform.props.push(props);return <section aria-label="Backing waveform"><button onClick={()=>{}}>Waveform probe</button></section>;}}));
-vi.mock('./audio/backing-waveform-bridge',()=>({createDocumentBackingWaveformBridge:(owner:NativeBackingWaveformBridge['owner'])=>({owner:Object.freeze({...owner}),read:waveform.read}),makeEmbeddedWaveformSource:waveform.embedded}));
+vi.mock('./audio/backing-waveform-bridge',()=>({createDocumentBackingWaveformBridge:(owner:NativeBackingWaveformBridge['owner'])=>({owner:Object.freeze({...owner}),read:(document:BackingWaveformProps['document'],source:WaveformSourceInput,buckets:number)=>waveform.read(document,source,buckets,owner)}),makeEmbeddedWaveformSource:waveform.embedded}));
 const documentBridges=vi.hoisted(()=>new Map<string,NativeBridge>());
 vi.mock('./bridge',async original=>({...await original<typeof import('./bridge')>(),createDocumentBridge:(id:string)=>{const bridge=documentBridges.get(id);if(!bridge)throw new Error('Missing addressed document bridge');return bridge;}}));
 const personalLibrary=vi.hoisted(()=>({read:vi.fn(async():Promise<HarmonyLibrary>=>({format:'TabPlayerHarmonyLibrary',version:1,entries:[]})),put:vi.fn(async(entry:HarmonyLibraryEntry):Promise<HarmonyLibrary>=>({format:'TabPlayerHarmonyLibrary',version:1,entries:[entry]})),remove:vi.fn(async():Promise<HarmonyLibrary>=>({format:'TabPlayerHarmonyLibrary',version:1,entries:[]}))}));
 vi.mock('./harmony/library',async original=>({...await original<typeof import('./harmony/library')>(),readHarmonyLibrary:personalLibrary.read,putHarmonyLibraryEntry:personalLibrary.put,removeHarmonyLibraryEntry:personalLibrary.remove}));
 
-const integration=vi.hoisted(()=>({running:false,players:[] as {getState:()=>PlaybackState;generation:number;built:BuiltDocument|null}[],seekToMeasure:vi.fn(),setLoop:vi.fn(),clearLoop:vi.fn(),loadDocument:vi.fn(),beforeScoreChange:vi.fn(),destroy:vi.fn(),playerOptions:vi.fn(),stop:vi.fn(),stageBacking:vi.fn<NativeAudioBridge['stageBacking']>(),commits:vi.fn(),activeNotes:vi.fn((_trackId:string)=>[]),practiceSpeed:100,practiceFixed:false,setPractice:vi.fn(),play:vi.fn(),pause:vi.fn(),playFromCursor:vi.fn(),playSelection:vi.fn(),loopSelection:vi.fn(),exportOptions:vi.fn(),exportBusy:false,exportRun:vi.fn(async(_options:unknown,_source?:unknown)=>true),exportCancel:vi.fn(async()=>{})}));
+const integration=vi.hoisted(()=>({running:false,players:[] as {getState:()=>PlaybackState;publish:(patch:Partial<PlaybackState>)=>void;generation:number;built:BuiltDocument|null}[],seekToMeasure:vi.fn(),setLoop:vi.fn(),clearLoop:vi.fn(),loadDocument:vi.fn(),beforeScoreChange:vi.fn(),destroy:vi.fn(),playerOptions:vi.fn(),stop:vi.fn(),stageBacking:vi.fn<NativeAudioBridge['stageBacking']>(),commits:vi.fn(),activeNotes:vi.fn((_trackId:string)=>[]),practiceSpeed:100,practiceFixed:false,setPractice:vi.fn(),play:vi.fn(),pause:vi.fn(),playFromCursor:vi.fn(),playSelection:vi.fn(),loopSelection:vi.fn(),exportOptions:vi.fn(),exportBusy:false,exportRun:vi.fn(async(_options:unknown,_source?:unknown)=>true),exportCancel:vi.fn(async()=>{})}));
 vi.mock('./audio/bridge',()=>({createDocumentAudioBridge:vi.fn(()=>({prepare:vi.fn(async()=>{}),command:vi.fn(async()=>{}),setMix:vi.fn(async()=>{}),devices:vi.fn(async()=>[]),status:vi.fn(async()=>null),subscribe:vi.fn(async()=>()=>{}),stageBacking:integration.stageBacking,stageEmbeddedBacking:vi.fn(async()=>null)} satisfies NativeAudioBridge))}));
 vi.mock('./export/bridge',()=>({createDocumentExportBridge:vi.fn(()=>({exportPdf:vi.fn(async()=>null),exportMidi:vi.fn(async()=>false),exportAudio:vi.fn(async()=>null),status:vi.fn(async()=>null),cancel:vi.fn(async()=>{})} satisfies ExportNativeBridge))}));
 vi.mock('./export/useExportCoordinator',()=>({useExportCoordinator:(options:unknown)=>{integration.exportOptions(options);return {busy:integration.exportBusy,progress:undefined,run:integration.exportRun,cancel:integration.exportCancel};}}));
 vi.mock('./audio/NativePlaybackController',()=>({NativePlaybackController:class {
   built:BuiltDocument|null=null;state:PlaybackState={ready:true,playing:integration.running,time:integration.running?1234:0,endTime:4000,measure:integration.running?1:0,speed:integration.practiceSpeed,metronome:false,practice:{settings:{...structuredClone(DEFAULT_PRACTICE),tempo:integration.practiceFixed?{kind:'fixed',bpm:90}:{kind:'relative',ratio:integration.practiceSpeed/100}},phase:integration.running?'playing':'idle',countInRemaining:0,completedPasses:0,effectiveRatio:integration.practiceSpeed/100,currentBpm:120,pulse:null},practicePending:false,practiceNotice:null,range:null,loop:integration.running?{startTick:0,endTick:3840}:null,error:null};
   constructor(private options:{bridge:NativeAudioBridge;onEdit:(command:EditCommand)=>void|Promise<void>}){integration.playerOptions(options);integration.players.push(this);}
-  subscribe=()=>()=>{};getState=()=>this.state;
+  private listeners=new Set<()=>void>();subscribe=(listener:()=>void)=>{this.listeners.add(listener);return()=>this.listeners.delete(listener);};getState=()=>this.state;
+  publish=(patch:Partial<PlaybackState>)=>{this.state={...this.state,...patch};for(const listener of this.listeners)listener();};
   generation=7;cursorPlaybackChoices=(target:{bar:number;beat:number})=>target?[{generation:7,occurrenceIndex:target.bar,startTick:target.bar*3840+target.beat*960}]:[];
   selectionPlaybackChoices=()=>[{generation:7,startOccurrence:0,endOccurrence:0,startTick:0,endTick:960}];
   playbackOccurrences=()=>Array.from({length:this.built?.score.masterBars.length??4},(_,bar)=>({bar,occurrence:0,startTick:bar*3840,endTick:(bar+1)*3840,startMs:bar*2000,endMs:(bar+1)*2000,meterNumerator:4,meterDenominator:4,clickTicks:[]}));
@@ -264,6 +266,7 @@ it('keeps copied music and paste drafts across unrelated renders and New, with o
   const c=await setup();change('Fret','5');click('Set note');await waitFor(()=>expect(currentBeat(c).notes[0]?.fret).toBe(5));click('Select bar');
   const workspace=screen.getByRole('region',{name:'Score workspace'});fireEvent.keyDown(workspace,{key:'c',ctrlKey:true});
   await waitFor(()=>expect(screen.getByText('Complete bars inserted before measure 1')).toBeInTheDocument());
+  await waitFor(()=>{expect(screen.getByLabelText('Destination track for copied track 1')).toHaveValue('0');expect(screen.getByLabelText('Paste repetitions')).toBeEnabled();});
   const clipboard=screen.getByText('Musical clipboard').closest('details')!;clipboard.open=true;change('Paste repetitions','2');change('Fret','6');
   expect(screen.getByLabelText('Paste repetitions')).toHaveValue(2);expect(c.getState().snapshot.project.edits).toHaveLength(1);
   click('New');await waitFor(()=>expect(activeController()).not.toBe(c));expect(testWorkspace.getState().documents).toHaveLength(2);expect(screen.getByText('Complete bars inserted before measure 1')).toBeInTheDocument();
@@ -601,6 +604,106 @@ it.each([960,1280,1600])('Backing waveform reveals the existing dock at %ipx and
   fireEvent.click(paneButton('Track'));expect(tuning).toHaveValue('E4 B3 G3 D3 A2 D2');expect(c.getState()).toBe(before);expectSilentNavigation();
 });
 const waveformProps=()=>waveform.props.at(-1)!;
+const referenceAsset='f'.repeat(64);
+const referenceProject=(backing:Partial<NonNullable<BackingWaveformProps['settings']>>={},edits:EditCommand[]=[]):Project=>({...blankProject(),assets:{[referenceAsset]:{filename:'reference.wav',mediaType:'audio/wav',byteLength:52}},edits:[...edits,{type:'setBacking',backing:{assetId:referenceAsset,offsetMs:120,anchors:[],mix:defaultMix(),...backing}}]});
+const referenceMode=async()=>{fireEvent.click(paneButton('Backing'));await waitFor(()=>expect(screen.getByLabelText('Timing')).toBeEnabled());};
+function deferReferenceRead(){
+  let finish!:(durationMs:number)=>void;
+  waveform.read.mockImplementationOnce((document,source,_buckets,owner)=>new Promise(resolve=>{finish=durationMs=>resolve({owner,document,source,durationMs,sampleRate:1000,frameCount:durationMs,channels:1,bucketCount:1,peaks:[{min:[0,0],max:[0,0]}]});}));
+  return (durationMs=6000)=>finish(durationMs);
+}
+const repeatMeasure=(bar:number,repeatStart:boolean,repeatCount:number):EditCommand=>({type:'setMeasureSettings',bar,numerator:4,denominator:4,pickup:false,freeTime:false,repeatStart,repeatCount,endings:[],section:'',tempos:[]});
+it('reference controls wait for verified source metadata without opening the waveform or an output device',async()=>{
+  let finish!:(receipt:WaveformReceipt)=>void,args!:Parameters<typeof waveform.read>;
+  waveform.read.mockImplementationOnce((...input)=>{args=input;return new Promise(resolve=>{finish=resolve;});});
+  const c=await setup(referenceProject());expect(waveform.read).not.toHaveBeenCalled();fireEvent.click(paneButton('Backing'));
+  expect(screen.getByLabelText('Timing')).toBeDisabled();await waitFor(()=>expect(waveform.read).toHaveBeenCalledOnce());expect(args[2]).toBe(1);
+  await act(async()=>finish({owner:args[3],document:args[0],source:args[1],durationMs:6000,sampleRate:1000,frameCount:6000,channels:1,bucketCount:1,peaks:[{min:[0,0],max:[0,0]}]}));
+  expect(screen.getByLabelText('Timing')).toBeEnabled();expect(screen.getByText('reference.wav · 6.0 s')).toBeVisible();
+  change('Timing','reference');await waitFor(()=>expect(c.getState().settings.backing?.referenceSync).toEqual({entryAudioMs:120,exitAudioMs:6120}));
+  expect(integration.commits).toHaveBeenCalledTimes(1);expect(c.getState().score.tempo).toBe(120);
+  change('Timing','score');await waitFor(()=>expect(c.getState().settings.backing?.referenceSync).toBeUndefined());expect(integration.commits).toHaveBeenCalledTimes(2);expect(c.getState().score.tempo).toBe(120);click('Undo');await waitFor(()=>expect(c.getState().settings.backing?.referenceSync).toEqual({entryAudioMs:120,exitAudioMs:6120}));
+});
+it('reference numeric preview shares the waveform binding and commits one captured revision only on Enter',async()=>{
+  const c=await setup(referenceProject());await referenceMode();change('Timing','reference');await waitFor(()=>expect(c.getState().settings.backing?.referenceSync).toEqual({entryAudioMs:120,exitAudioMs:16120}));integration.commits.mockClear();const before=c.getState(),committed=waveformProps().settings;
+  const entry=screen.getByLabelText('Entry (ms)');fireEvent.focus(entry);fireEvent.change(entry,{target:{value:'1250.5'}});
+  expect(waveformProps().reference?.edit.preview?.referenceSync?.entryAudioMs).toBe(1370.5);expect(waveformProps().settings).toBe(committed);expect(c.getState().snapshot).toBe(before.snapshot);expect(integration.commits).not.toHaveBeenCalled();expect(document.querySelector('.app-shell')).toHaveAttribute('aria-busy','true');expect(entry).toBeEnabled();
+  fireEvent.keyDown(entry,{key:'Enter'});await waitFor(()=>expect(c.getState().settings.backing?.referenceSync?.entryAudioMs).toBe(1370.5));fireEvent.blur(entry);
+  expect(integration.commits).toHaveBeenCalledTimes(1);expect(c.getState().revision).toBe(before.revision+1);await waitFor(()=>expect(document.querySelector('.app-shell')).toHaveAttribute('aria-busy','false'));
+});
+it('reference waveform follows committed idle seek time and excludes count-in and ended time',async()=>{
+  const c=await setup(referenceProject({referenceSync:{entryAudioMs:1120,exitAudioMs:9120}}));await referenceMode();click('Show waveform');const player=integration.players[0],before=c.getState().snapshot,practice=player.getState().practice;
+  act(()=>player.publish({time:2500,practice:{...practice,phase:'idle'}}));expect(waveformProps().scoreTimeMs).toBe(2500);
+  const entry=screen.getByLabelText('Entry (ms)');fireEvent.change(entry,{target:{value:'1200'}});expect(waveformProps().reference?.edit.preview?.referenceSync?.entryAudioMs).toBe(1320);expect(waveformProps().scoreTimeMs).toBe(2500);expect(waveformProps().settings?.referenceSync?.entryAudioMs).toBe(1120);fireEvent.keyDown(entry,{key:'Escape'});
+  act(()=>player.publish({practice:{...practice,phase:'countIn'}}));expect(waveformProps().scoreTimeMs).toBeNull();act(()=>player.publish({practice:{...practice,phase:'ended'}}));expect(waveformProps().scoreTimeMs).toBeNull();expect(c.getState().snapshot).toBe(before);expect(integration.commits).not.toHaveBeenCalled();
+});
+it('reference From score uses authored fractional tempos and emits one backing command for replace and add',async()=>{
+  const tempos:EditCommand={type:'replaceTempoAutomations',points:[{bar:0,ratio:0,bpm:120,linear:false},{bar:0,ratio:.5,bpm:60,linear:false}]};
+  const c=await setup(referenceProject({referenceSync:{entryAudioMs:1120,exitAudioMs:10120}},[tempos]));await referenceMode();click('Replace sync points');
+  await waitFor(()=>expect(c.getState().settings.backing?.anchors).toEqual([{bar:0,occurrence:0,ratio:.5,audioMs:2120}]));expect(c.getState().settings.backing?.referenceSync).toEqual({entryAudioMs:1120,exitAudioMs:16120});expect(integration.commits).toHaveBeenCalledTimes(1);
+  click('Add sync points');await waitFor(()=>expect(c.getState().busy).toBe(false));expect(integration.commits).toHaveBeenCalledTimes(1);
+});
+it('reference Write score tempos replaces authored events with one atomic score command',async()=>{
+  const c=await setup(referenceProject({referenceSync:{entryAudioMs:1120,exitAudioMs:7120},anchors:[{bar:1,occurrence:0,ratio:0,audioMs:3120}]}));await referenceMode();const before=c.getState();click('Write score tempos');
+  await waitFor(()=>expect(c.getState().snapshot.project.edits).toHaveLength(before.snapshot.project.edits.length+1));expect(c.getState().snapshot.project.edits.at(-1)).toEqual({type:'replaceTempoAutomations',points:[{bar:0,ratio:0,bpm:120,linear:false},{bar:1,ratio:0,bpm:180,linear:false},{bar:2,ratio:0,bpm:180,linear:false},{bar:3,ratio:0,bpm:180,linear:false}]});expect(integration.commits).toHaveBeenCalledTimes(1);expect(c.getState().settings.backing).toEqual(before.settings.backing);
+});
+it.each(['revision','source','activation'] as const)('reference metadata discards a late result after %s changes',async kind=>{
+  const finishOld=deferReferenceRead(),finishNew=deferReferenceRead(),c=await setup(referenceProject());fireEvent.click(paneButton('Backing'));await waitFor(()=>expect(waveform.read).toHaveBeenCalledOnce());
+  if(kind==='activation'){
+    await act(async()=>{await testWorkspace.newDocument();await testWorkspace.activate(c.getState().documentId);});fireEvent.click(paneButton('Backing'));
+  }else await act(async()=>{await c.edit(kind==='source'?{type:'setBacking',backing:null}:{type:'setNote',target:{track:0,staff:0,bar:0,voice:0,beat:0},string:6,fret:3});});
+  if(kind==='source'){
+    await act(async()=>finishOld());expect(screen.getByLabelText('Timing')).toBeDisabled();expect(waveformProps().reference?.timing).toBeNull();
+    await act(async()=>{await c.edit({type:'setBacking',backing:{assetId:referenceAsset,offsetMs:120,anchors:[],mix:defaultMix()}});});
+  }
+  await waitFor(()=>expect(waveform.read).toHaveBeenCalledTimes(2));await act(async()=>finishOld(6000));expect(screen.getByLabelText('Timing')).toBeDisabled();
+  await act(async()=>finishNew(10000));expect(screen.getByLabelText('Timing')).toBeEnabled();expect(screen.getByText('reference.wav · 10.0 s')).toBeVisible();
+});
+it('reference metadata decode failure exposes Retry while the waveform owns the visible source',async()=>{
+  waveform.read.mockRejectedValueOnce(new Error('Backing decoder failed.'));
+  await setup(referenceProject());fireEvent.click(within(screen.getByRole('region',{name:'Bottom dock'})).getByRole('button',{name:'Backing'}));
+  await waitFor(()=>expect(screen.getByRole('alert')).toHaveTextContent('Backing decoder failed.'));fireEvent.click(screen.getByRole('button',{name:'Retry'}));await waitFor(()=>expect(waveformProps().reference?.timing).toBeNull());fireEvent.click(paneButton('Backing'));await waitFor(()=>expect(screen.getByLabelText('Timing')).toBeEnabled());expect(waveform.read).toHaveBeenCalledTimes(2);
+});
+it.each(['pane','narrow','dock'] as const)('reference endpoint preview cancels when its %s surface becomes hidden',async surface=>{
+  const c=await setup(referenceProject({referenceSync:{entryAudioMs:1120,exitAudioMs:9120}}));await referenceMode();const before=c.getState().snapshot;
+  if(surface==='dock'){
+    click('Show waveform');act(()=>{expect(waveformProps().reference?.edit.begin('entry','waveform')).toBe(true);waveformProps().reference!.edit.update(1200);});fireEvent.click(screen.getByRole('button',{name:'Hide bottom dock'}));
+  }else{
+    fireEvent.change(screen.getByLabelText('Entry (ms)'),{target:{value:'1200'}});
+    if(surface==='pane')fireEvent.click(paneButton('Track'));
+    else {Object.defineProperty(window,'innerWidth',{configurable:true,writable:true,value:960});fireEvent(window,new Event('resize'));fireEvent.click(paneButton('Inspector'));}
+  }
+  expect(waveformProps().reference?.edit.active).toBeNull();expect(waveformProps().reference?.edit.preview).toBeNull();expect(document.querySelector('.app-shell')).toHaveAttribute('aria-busy','false');expect(c.getState().snapshot).toBe(before);expect(integration.commits).not.toHaveBeenCalled();
+});
+it('reference numeric preview survives hiding the other waveform surface and rejects an intervening revision',async()=>{
+  const c=await setup(referenceProject({referenceSync:{entryAudioMs:1120,exitAudioMs:9120}}));await referenceMode();click('Show waveform');const entry=screen.getByLabelText('Entry (ms)');fireEvent.change(entry,{target:{value:'1200'}});fireEvent.click(screen.getByRole('button',{name:'Hide bottom dock'}));expect(waveformProps().reference?.edit.active).toEqual({endpoint:'entry',surface:'number'});
+  await act(async()=>{await c.edit({type:'setBacking',backing:{...c.getState().settings.backing!,mix:{...defaultMix(),gain:.5}}});});expect(waveformProps().reference?.edit.active).toBeNull();fireEvent.keyDown(entry,{key:'Enter'});expect(integration.commits).toHaveBeenCalledTimes(1);expect(c.getState().settings.backing?.referenceSync?.entryAudioMs).toBe(1120);expect(document.querySelector('.app-shell')).toHaveAttribute('aria-busy','false');
+});
+it('reference mode rejects an old source action while the replacement metadata is pending',async()=>{
+  const other='b'.repeat(64),project=referenceProject();project.assets[other]={filename:'replacement.wav',mediaType:'audio/wav',byteLength:52};const c=await setup(project);await referenceMode();const oldAction=(waveformProps().reference as ReferenceSyncControls).onModeChange,finish=deferReferenceRead();
+  await act(async()=>{await c.edit({type:'setBacking',backing:{assetId:other,offsetMs:120,anchors:[],mix:defaultMix()}});});expect(screen.getByLabelText('Timing')).toBeDisabled();const before=c.getState().snapshot;
+  await act(async()=>{await expect(oldAction('reference')).rejects.toThrow(/changed|load/);});expect(c.getState().snapshot).toBe(before);expect(integration.commits).toHaveBeenCalledTimes(1);await act(async()=>finish());
+});
+it.each(['resolve','reject'] as const)('reference pending Enter keeps its operation lease until native %s after hiding',async result=>{
+  const c=await setup(referenceProject({referenceSync:{entryAudioMs:1120,exitAudioMs:9120}}));await referenceMode();const bridge=documentBridges.get(c.getState().documentId)!,original=bridge.applyEdit;let finish!:()=>void;
+  const apply=vi.spyOn(bridge,'applyEdit').mockImplementationOnce((...args)=>new Promise((resolve,reject)=>{finish=()=>result==='resolve'?void original(...args).then(resolve,reject):reject(new Error('Reference commit failed.'));}));
+  const entry=screen.getByLabelText('Entry (ms)');fireEvent.change(entry,{target:{value:'1200'}});fireEvent.keyDown(entry,{key:'Enter'});await waitFor(()=>expect(apply).toHaveBeenCalledOnce());fireEvent.click(paneButton('Track'));expect(waveformProps().reference?.edit.active).toBeNull();expect(document.querySelector('.app-shell')).toHaveAttribute('aria-busy','true');
+  await act(async()=>finish());await waitFor(()=>expect(document.querySelector('.app-shell')).toHaveAttribute('aria-busy','false'));expect(waveformProps().reference?.edit.error).toBeNull();expect(integration.commits).toHaveBeenCalledTimes(result==='resolve'?1:0);
+});
+it('reference conversion rejects an intervening queued edit at the captured revision',async()=>{
+  const c=await setup(referenceProject({referenceSync:{entryAudioMs:1120,exitAudioMs:9120}}));await referenceMode();const actions=waveformProps().reference as ReferenceSyncControls,begin=vi.spyOn(testWorkspace,'beginEditorOperation');
+  const commit=c.editAtRevision.bind(c);vi.spyOn(c,'editAtRevision').mockImplementationOnce((command,expected)=>{void c.edit({type:'setBacking',backing:{...c.getState().settings.backing!,mix:{...defaultMix(),gain:.5}}});return commit(command,expected);});
+  await act(async()=>{await expect(actions.onModeChange('score')).rejects.toThrow(/revision changed/);});expect(integration.commits).toHaveBeenCalledTimes(1);expect(c.getState().settings.backing?.referenceSync).toEqual({entryAudioMs:1120,exitAudioMs:9120});expect(begin).toHaveBeenCalledOnce();expect(document.querySelector('.app-shell')).toHaveAttribute('aria-busy','false');
+});
+it('reference Write score tempos rejects incompatible repeated passes without changing history',async()=>{
+  const c=await setup(referenceProject({referenceSync:{entryAudioMs:1120,exitAudioMs:7120},anchors:[{bar:1,occurrence:0,ratio:0,audioMs:3120}]},[repeatMeasure(0,true,0),repeatMeasure(1,false,2)]));await referenceMode();const before=c.getState().snapshot;click('Write score tempos');
+  await waitFor(()=>expect(screen.getByRole('alert')).toHaveTextContent(/incompatible tempos/));expect(c.getState().snapshot).toBe(before);expect(integration.commits).not.toHaveBeenCalled();expect(document.querySelector('.app-shell')).toHaveAttribute('aria-busy','false');
+});
+it('reference GP preflight blocks an ambiguous backing selection and omission publishes selected notation',async()=>{
+  const c=await setup(referenceProject({},[repeatMeasure(0,true,0),repeatMeasure(1,false,2)])),before=c.getState().snapshot;click('Export score');const dialog=within(screen.getByRole('dialog',{name:'Export score'}));fireEvent.click(dialog.getByLabelText('Measure range'));fireEvent.change(dialog.getByLabelText('Last measure'),{target:{value:'1'}});
+  expect(dialog.getByRole('button',{name:'Export'})).toBeDisabled();expect(dialog.getByRole('alert')).toHaveTextContent(/more than once|unique|ambiguous/i);expect(dialog.getByLabelText('Include backing audio')).toHaveAttribute('aria-describedby');expect(waveform.read).not.toHaveBeenCalled();
+  fireEvent.click(dialog.getByLabelText('Include backing audio'));expect(dialog.getByRole('button',{name:'Export'})).toBeEnabled();fireEvent.click(dialog.getByRole('button',{name:'Export'}));await waitFor(()=>expect(integration.exportRun).toHaveBeenCalledWith({format:'gp',selection:{tracks:[0],range:{first:0,last:0}},backing:false},expect.objectContaining({revision:0})));expect(c.getState().snapshot).toBe(before);
+});
 it('joins exact asset, revision and live backing checks while its operation lease is busy',async()=>{
   const id='a'.repeat(64),backing={assetId:id,offsetMs:120,anchors:[],mix:defaultMix()};
   const c=await setup({...blankProject(),assets:{[id]:{filename:'authored.wav',mediaType:'audio/wav',byteLength:52}},edits:[{type:'setBacking',backing}]});

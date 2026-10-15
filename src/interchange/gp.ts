@@ -100,7 +100,7 @@ export function exportGpInterchange(score:model.Score,settings:Settings):Uint8Ar
   const raw=new exporter.Gp7Exporter().export(score,settings),changes=score.tracks.map(trackMixAutomations),needsXml=harmony||lyrics||!!notation||changes.some(stream=>stream.length>0)||score.tracks.some(track=>track.isPercussion);
   const original=sourceEntries.get(score);
   const generated=unzip(raw,settings);
-  const entries={...generated,...original,[gpifPath]:generated[gpifPath]};
+  const entries:Record<string,Uint8Array>={...generated,...original,[gpifPath]:generated[gpifPath]};
   const activeBacking='Content/Assets/backing-track';
   if(generated[activeBacking])entries[activeBacking]=generated[activeBacking];
   if(!needsXml)return zipSync(writeStylesheetTimeSignatures(score,entries));

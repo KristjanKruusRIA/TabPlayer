@@ -185,7 +185,7 @@ describe('reference synchronization historical score replay',()=>{
     const input=imported(source),built=buildDocument(input),effective=effectiveAudioSettings(input,built);
     expect(effective.backing?.offsetMs).toBe(250);expect(effective.backing?.anchors.map(anchor=>anchor.audioMs)).toEqual([0,2000]);
     expect(scoreTickToAudioMs(buildPlaybackPlan(built.score,0),effective.backing!,960)).toBe(250);
-    const projected=projectGpDocument({score:built.score,settings:effective,bytes:built.embeddedBacking,selection:{tracks:[0]},backing:true});
+    const projected=projectGpDocument({score:built.score,settings:effective,bytes:built.embeddedBacking,selection:{tracks:[0],range:null},backing:true});
     const reopenedInput=imported(projected),reopened=buildDocument(reopenedInput),restored=effectiveAudioSettings(reopenedInput,reopened).backing!;
     expect(restored.anchors[0].audioMs-restored.offsetMs).toBe(-250);
     expect(scoreTickToAudioMs(buildPlaybackPlan(reopened.score,0),restored,960)).toBe(250);

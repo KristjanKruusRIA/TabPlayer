@@ -736,6 +736,19 @@ impl DocumentWorkspace {
         self.entry(id)?.session.asset_bytes(asset_id)
     }
 
+    pub(crate) fn capture_export_backing(
+        &self,
+        document: &DocumentRevision,
+        asset_id: &str,
+    ) -> Result<StoredAsset, String> {
+        self.check_admission()?;
+        let entry = self.check_revision(document)?;
+        if entry.session.current_backing_asset() != Some(Some(asset_id)) {
+            return Err("Backing source changed; retry its current export.".into());
+        }
+        entry.session.capture_asset(asset_id)
+    }
+
     pub(crate) fn capture_waveform_source(
         &self,
         owner: &AudioOwner,

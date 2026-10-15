@@ -2,11 +2,12 @@ use crate::{
     assets::StoredAsset,
     audio::{
         backing::BackingMap,
-        decode::decode_audio,
+        decode::{DecodedAudio, decode_audio},
         device::{
             AudioDeviceInfo, AudioService, NativeAudioStatus, PracticeSettings, TransportCommand,
         },
         plan::PlaybackPlan,
+        reference_sync::ReferenceSyncMap,
         renderer::Renderer,
         resources::AudioResources,
         voices::resource_requests,
@@ -35,6 +36,10 @@ mod document_audio_ownership_tests;
 #[cfg(test)]
 #[path = "file_library/protected_runtime_tests.rs"]
 mod protected_runtime_tests;
+
+#[cfg(test)]
+#[path = "reference_export_tests.rs"]
+mod reference_export_tests;
 
 struct ExportCapture {
     job: JobHandle,
@@ -596,6 +601,50 @@ pub async fn export_pdf(
     });
     Ok(Some(id))
 }
+fn export_source_settings(include: bool, settings: &DocumentSettings) -> Option<&DocumentSettings> {
+    (include
+        || settings
+            .backing
+            .as_ref()
+            .is_some_and(|backing| backing.reference_sync.is_some()))
+    .then_some(settings)
+}
+
+fn prepare_export_backing(
+    plan: &PlaybackPlan,
+    settings: &DocumentSettings,
+    bytes: Option<Vec<u8>>,
+    include: bool,
+) -> Result<Option<(Arc<DecodedAudio>, BackingMap)>, String> {
+    let reference = settings
+        .backing
+        .as_ref()
+        .is_some_and(|backing| backing.reference_sync.is_some());
+    if reference != plan.playback_end_tick.is_some() {
+        return Err("Reference export timing requires matching source settings.".into());
+    }
+    if !include && !reference {
+        return Ok(None);
+    }
+    let Some(backing) = settings.backing.as_ref() else {
+        return Ok(None);
+    };
+    let bytes = match bytes {
+        Some(bytes) => bytes,
+        None if reference => return Err("Reference export source audio is missing.".into()),
+        None => return Ok(None),
+    };
+    let audio = Arc::new(decode_audio(&bytes, None)?);
+    if reference {
+        ReferenceSyncMap::new(backing, plan)?.validate_audio(&audio)?;
+    }
+    if !include {
+        return Ok(None);
+    }
+    let map = BackingMap::from_settings(backing, plan)?;
+    Ok(Some((audio, map)))
+}
+
 #[tauri::command]
 pub async fn export_audio(
     document: DocumentRevision,
@@ -634,7 +683,7 @@ pub async fn export_audio(
             &launch_app.state::<Arc<Mutex<DocumentWorkspace>>>(),
             &document,
             Some(&launch_path),
-            include_backing.then_some(&launch_settings),
+            export_source_settings(include_backing, &launch_settings),
             embedded_bytes,
             0,
         )?;
@@ -642,9 +691,6 @@ pub async fn export_audio(
     })
     .await
     .map_err(|e| e.to_string())??;
-    if !request.include_backing {
-        settings.backing = None;
-    }
     // Keep plan indices stable; only the selected tracks participate in its mixer.
     for track in &plan.tracks {
         if !request
@@ -660,6 +706,15 @@ pub async fn export_audio(
     let id = capture.job.id.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let result = (|| {
+            let backing_audio = prepare_export_backing(
+                &plan,
+                &settings,
+                capture.backing.take(),
+                request.include_backing,
+            )?;
+            if !request.include_backing {
+                settings.backing = None;
+            }
             let resources = Arc::new(AudioResources::load_for_requests(
                 &root,
                 &resource_requests(&plan, &settings),
@@ -677,17 +732,12 @@ pub async fn export_audio(
                 settings.clone(),
                 request.format.sample_rate,
             )?;
-            if let Some(bytes) = capture.backing.take() {
-                let audio = Arc::new(decode_audio(&bytes, None)?);
+            if let Some((audio, map)) = backing_audio {
                 let backing = settings
                     .backing
                     .as_ref()
                     .ok_or("Backing settings are missing.")?;
-                renderer.install_backing(
-                    audio,
-                    BackingMap::new(&backing.anchors, backing.offset_ms, &plan)?,
-                    backing.mix.clone(),
-                )?;
+                renderer.install_backing(audio, map, backing.mix.clone())?;
             }
             let format = request.format;
             let mut render = AudioExportRender::new(renderer, &plan, request)?;

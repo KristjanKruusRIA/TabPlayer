@@ -6,8 +6,10 @@ import {defaultMix} from './document-settings';
 import type {BackingSettings} from './edit-types';
 import type {DocumentSnapshot} from './workspace/types';
 import type {BackingWaveform,NativeBackingWaveformBridge} from './audio/backing-waveform-types';
-import {Settings} from '@coderline/alphatab';
+import {model,Settings} from '@coderline/alphatab';
 import {loadInterchangeScore} from './interchange/gp';
+import {buildScore,effectiveAudioSettings,exportGp} from './engine';
+import {createHash} from 'node:crypto';
 
 const assetId='a'.repeat(64);
 const legacy=():BackingSettings=>({assetId,offsetMs:0,anchors:[],mix:defaultMix()});
@@ -28,7 +30,7 @@ function harness(value=project()) {
 }
 function waveform(durationMs=4000) {
   const owner={documentId:'score-a',activationId:'activation-a'};
-  const bridge:NativeBackingWaveformBridge={owner,read:vi.fn(async(document,source)=>({owner:{...owner},document:{...document},source:{...source},durationMs,sampleRate:1000,frameCount:durationMs,channels:1,bucketCount:1,peaks:[{min:[0,0],max:[0,0]}]}))};
+  const bridge:NativeBackingWaveformBridge={owner,read:vi.fn<NativeBackingWaveformBridge['read']>(async(document,source):Promise<BackingWaveform>=>({owner:{...owner},document:{...document},source:{...source},durationMs,sampleRate:1000,frameCount:durationMs,channels:1,bucketCount:1,peaks:[{min:[0,0],max:[0,0]}]}))};
   return bridge;
 }
 function deferred<T>() {let resolve!:(value:T)=>void;const promise=new Promise<T>(done=>{resolve=done;});return {promise,resolve};}
@@ -56,7 +58,7 @@ it('reads current encoded asset metadata before committing and caches only the s
 it.each(['eof','decoder','foreign receipt'] as const)('rejects %s metadata atomically and preserves redo',async failure=>{
   const {bridge,create}=harness(),controller=await create(),reader=waveform(failure==='eof'?1000:4000),before=controller.getState();
   if(failure==='decoder')reader.read=vi.fn(async()=>{throw new Error('decoder unavailable');});
-  if(failure==='foreign receipt'){const original=reader.read;reader.read=vi.fn(async(...args)=>({...await original(...args),document:{documentId:'score-b',revision:0}}));}
+  if(failure==='foreign receipt'){const original=reader.read;reader.read=vi.fn<NativeBackingWaveformBridge['read']>(async(...args)=>({...await original(...args),document:{documentId:'score-b',revision:0}}));}
   controller.setReferenceWaveformBridge(reader);
   await expect(controller.edit(set(reference()))).rejects.toThrow();
   expect(bridge.applyEdit).not.toHaveBeenCalled();expect(controller.getState().snapshot).toBe(before.snapshot);
@@ -125,4 +127,15 @@ it.each([false,true])('normalizes omitted/null legacy timing without discarding 
   await controller.edit(set(next));expect(bridge.applyEdit).not.toHaveBeenCalled();
   expect(controller.getState().snapshot).toBe(before.snapshot);expect(controller.getState().score).toBe(before.score);
   expect(controller.getState().snapshot.canRedo).toBe(true);
+});
+it('commits explicit removal of original embedded audio even while persisted settings are null',async()=>{
+  const score=buildScore(blankProject());score.backingTrack=new model.BackingTrack();score.backingTrack.rawAudioFile=new Uint8Array([82,73,70,70,1,2,3]);
+  const bytes=exportGp(score),value=blankProject();
+  value.base={kind:'file',filename:'Embedded.gp',bytesBase64:Buffer.from(bytes).toString('base64'),sha256:createHash('sha256').update(bytes).digest('hex')};
+  const {bridge,create}=harness(value),controller=await create(),before=controller.getState();
+  expect(before.settings.backing).toBeNull();expect(effectiveAudioSettings(before.snapshot.project,before).backing?.assetId).toBe('embedded');
+  await controller.edit({type:'setBacking',backing:null});
+  expect(bridge.applyEdit).toHaveBeenCalledWith({type:'setBacking',backing:null},0,undefined);
+  const after=controller.getState();expect(effectiveAudioSettings(after.snapshot.project,after).backing).toBeNull();
+  expect(after.snapshot.project.edits).toEqual([{type:'setBacking',backing:null}]);expect(after.embeddedBacking).toBe(before.embeddedBacking);
 });

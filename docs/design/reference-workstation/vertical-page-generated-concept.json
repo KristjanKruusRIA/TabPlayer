@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "kind": "generated-ui-design-reference",
+  "view": "Vertical page",
+  "scope": "Generated visual arrangement reference only; no application implementation or runtime verification.",
+  "tool": "builtin image_gen.imagegen",
+  "intent": "edit",
+  "generated_original_path": "C:/Users/krist/.codex/generated_images/01a141dd-626c-7712-92c4-39f1033e2b0d/exec-09c2f3f5-df50-4ea5-8f42-13c065c5f38e.png",
+  "project_image_path": "docs/design/reference-workstation/vertical-page-concept.png",
+  "prompt": "Use case: ui-mockup.\nAsset type: actual generated raster visual design reference for TabPlayer Vertical page mode, not runtime verification.\nEdit target: the attached selected horizontal-screen v2 workstation reference.\nPreserve invariants: Keep ALL outer dark workstation shell, menus, document tabs, transport, left track sidebar, right inspector, bottom overview, and score toolbar placement and controls EXACTLY as the input image. Preserve cream #fffdf5 paper and BLACK music notation, restrained blue selected-note and playhead accents. Use only the incidental Windowline guitar score. Do not add features.\nChange ONLY central SCORE VIEWPORT arrangement plus Display mode select text and Fit page enabled state.\nToolbar exact changes: Display mode select says \"Vertical page\". \"Fit page\" is visibly ENABLED with the same quiet styling and readable label as enabled \"Fit width\".\nCentral score viewport: show distinct fixed-proportion PORTRAIT physical cream paper pages, centered in a charcoal gutter. Show the FIRST paper page COMPLETE inside the viewport, with its top, bottom and both sides clearly visible. Show the small TOP of the NEXT paper page BELOW the first, separated by a clear charcoal gap and thin physical paper borders. The pages stack VERTICALLY, not side by side.\nInside the first portrait page show several complete standard-notation staff plus paired guitar tablature systems with black notation; whole music systems stay inside the physical page borders with normal score margins. No system crosses a page gap. Use a vertical scrollbar. This is a physical paginated vertical score arrangement, distinct from endless paper and screen wrapping.\nText remains readable system sans and the outer utility layout remains flat and compact. The generated notation and incidental text are visual reference only, not behavioral requirements. Single full workstation view.",
+  "transparent_background": false,
+  "input_images": [
+    {
+      "role": "style base and outer-shell edit target",
+      "path": "C:/Users/krist/.codex/worktrees/tabplayer-rust/TabPlayer/docs/design/reference-workstation/horizontal-screen-concept-v2.png",
+      "sha256": "d708bdee776d04b6aa83958586e577c52352f758847d410bd553f523b355b05f"
+    }
+  ],
+  "inspection": {
+    "method": "Visual inspection of actual native generatedImage output",
+    "observed": "One complete cream portrait-oriented page centered between charcoal side gutters; three black notation-plus-tab systems inside the page; a gap followed by the next page top below; vertical scrollbar; toolbar shows Vertical page and a readable enabled Fit page.",
+    "deviations": [
+      "The generated page has a relatively broad portrait proportion, rather than a specific standard paper ratio. The next-page top visually extends behind the bottom dock header."
+    ],
+    "limitations": [
+      "A raster cannot verify page sizing, page-fit behavior, scrolling, or whole-system pagination logic.",
+      "Outer shell appears similar, but visual inspection does not establish pixel-exact preservation.",
+      "Incidental generated music and labels are not behavior requirements."
+    ]
+  },
+  "saved_at_utc": "2026-10-15T23:28:24.4058050Z",
+  "sha256": "82d9807d914fe57ca2eedfb0909760fbeb47745f84736b5ef189fb0eca29164c",
+  "geometry": {
+    "width": 1586,
+    "height": 992
+  }
+}

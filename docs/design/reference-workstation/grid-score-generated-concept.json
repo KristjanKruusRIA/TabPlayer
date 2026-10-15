@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "kind": "generated-ui-design-reference",
+  "view": "Grid",
+  "scope": "Generated visual arrangement reference only; no application implementation or runtime verification.",
+  "tool": "builtin image_gen.imagegen",
+  "intent": "edit",
+  "generated_original_path": "C:/Users/krist/.codex/generated_images/01a141dd-626c-7712-92c4-39f1033e2b0d/exec-66cdcdc1-e52b-47fa-a1a3-c254a47a47cf.png",
+  "project_image_path": "docs/design/reference-workstation/grid-score-concept.png",
+  "prompt": "Use case: ui-mockup.\nAsset type: actual generated raster visual design reference for TabPlayer Grid score mode, not runtime verification.\nEdit target: the attached selected horizontal-screen v2 workstation reference.\nPreserve invariants: Keep ALL outer dark workstation shell, menus, document tabs, transport, left track sidebar, right inspector, bottom overview, and score toolbar placement and controls EXACTLY as the input image. Preserve cream #fffdf5 paper and BLACK music notation, restrained blue selected-note and playhead accents. Use only the incidental Windowline guitar score. Do not add features.\nChange ONLY central SCORE VIEWPORT arrangement plus Display mode select text and Fit page enabled state.\nToolbar exact changes: Display mode select says \"Grid\". \"Fit page\" is visibly ENABLED, readable and styled like enabled \"Fit width\".\nCentral score viewport: distinct physical PORTRAIT cream pages in a TWO-COLUMN grid. Each page is substantially taller than wide, with fixed consistent portrait proportions, like A4 paper (width approximately 0.707 times height). Arrange page 1 at upper left, page 2 at upper right; visibly start the next row with top portions of page 3 and page 4 below. Use even charcoal gutter gaps horizontally and vertically, and thin physical paper borders. The complete first row of two portrait pages is visible, followed by a visible beginning of the second row.\nEach page contains several complete standard-notation staff plus paired guitar tablature systems, with black notation, normal score margins, and whole music systems entirely inside their own physical page. No systems span across the gap between pages.\nThis image depicts the two-column state of a responsive page grid: reading order left-to-right, then the next lower row. It does not prove actual responsive behavior. Keep a vertical scrollbar.\nText remains readable system sans; the outer utility layout stays flat and compact. Generated notes and incidental text are visual reference only, not behavioral requirements. Single full workstation view.",
+  "transparent_background": false,
+  "input_images": [
+    {
+      "role": "style base and outer-shell edit target",
+      "path": "C:/Users/krist/.codex/worktrees/tabplayer-rust/TabPlayer/docs/design/reference-workstation/horizontal-screen-concept-v2.png",
+      "sha256": "d708bdee776d04b6aa83958586e577c52352f758847d410bd553f523b355b05f"
+    }
+  ],
+  "inspection": {
+    "method": "Visual inspection of actual native generatedImage output",
+    "observed": "The output shows two page columns, complete first-row pages numbered 1 and 2, second-row tops numbered 3 and 4, charcoal gaps, black staff-plus-tab systems inside pages, vertical scrollbar, Grid selector and enabled Fit page.",
+    "deviations": [
+      "PAGE-GEOMETRY DEVIATION: Top-row pages are nearly square, approximately 470 by 490 pixels, rather than the clearly portrait/A4-like proportions requested."
+    ],
+    "limitations": [
+      "Treat page geometry as unresolved pending root inspection; do not claim the portrait-page requirement is satisfied.",
+      "A raster shows the two-column state only and cannot verify responsiveness, reading-order behavior, scrolling, or whole-system pagination.",
+      "Outer shell appears similar, but visual inspection does not establish pixel-exact preservation.",
+      "Incidental generated music and labels are not behavior requirements."
+    ]
+  },
+  "saved_at_utc": "2026-10-15T23:30:07.4252753Z",
+  "sha256": "52b6459a70a4577983d197f7a7c14454bd6481d35aef0c9889399b8c1bfd22cd",
+  "geometry": {
+    "width": 1586,
+    "height": 992
+  }
+}

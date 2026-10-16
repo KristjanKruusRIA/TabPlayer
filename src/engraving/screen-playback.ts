@@ -52,7 +52,7 @@ export function installScreenPlayback(api:AlphaTabApi,getContext:()=>ScreenPlayb
   onAttach(){},onDetach(){sourceBar=null;sourceBeat=null;hide();},
   placeBarCursor(container,bounds){
    gate=valid(bounds)?bounds:null;if(!gate)return;
-   if(bar!==bounds){beat=null;if(bar&&bar.barBounds.masterBarBounds.staffSystemBounds!==bounds.barBounds.masterBarBounds.staffSystemBounds)sourceBeat?.stopAnimation();}bar=bounds;sourceBar=container;
+   if(bar&&bar.barBounds.masterBarBounds.staffSystemBounds!==bounds.barBounds.masterBarBounds.staffSystemBounds){beat=null;sourceBeat?.stopAnimation();}bar=bounds;sourceBar=container;
    const rect=bounds.barBounds.masterBarBounds.visualBounds;container.setBounds(rect.x,rect.y,rect.w,rect.h);paint();
   },
   placeBeatCursor(container,bounds,x){

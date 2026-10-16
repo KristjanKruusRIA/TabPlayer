@@ -1,6 +1,10 @@
 // @vitest-environment jsdom
 // Headless external-media oracle: real API/facade/renderer; synthetic DOM metrics and font availability only.
 import {afterEach,expect,it,vi} from 'vitest';
+import {createElement} from 'react';
+import {act,cleanup,render} from '@testing-library/react';
+import {ScoreView} from '../ScoreView';
+import {readFileSync} from 'node:fs';
 import {AlphaTabApi,LayoutMode,PlayerMode,Settings,SystemsLayoutMode,synth} from '@coderline/alphatab';
 import {music} from '../editor/fixtures';
 import {arrangeScreenPages,paginateScreenScore,type ScreenRenderChunk} from './screen-pages';
@@ -8,7 +12,7 @@ import {installScreenPlayback,type ScreenPlaybackContext} from './screen-playbac
 
 // jsdom's sandbox global is not its Window instance; expose that browser identity before loading alphaTab.
 vi.hoisted(()=>{Object.defineProperty(Window,Symbol.hasInstance,{configurable:true,value:(value:unknown)=>value===globalThis||value===window});});
-afterEach(()=>{vi.restoreAllMocks();vi.unstubAllGlobals();document.body.replaceChildren();});
+afterEach(()=>{cleanup();vi.restoreAllMocks();vi.unstubAllGlobals();document.body.replaceChildren();});
 it('headless actual API dispatch preserves current opaque groups and queued cursor through page publication',async()=>{
  const forbidden=vi.fn(()=>{throw new Error('Audio/device/native creation is forbidden in this headless oracle');});
  vi.stubGlobal('AudioContext',forbidden);vi.stubGlobal('webkitAudioContext',forbidden);vi.stubGlobal('Audio',forbidden);
@@ -53,4 +57,30 @@ it('headless actual API dispatch preserves current opaque groups and queued curs
   expect(context.beatElement!.hidden).toBe(false);expect([...nextRoots.values()].flatMap(node=>[...node.querySelectorAll('.at-highlight')]).length).toBeGreaterThanOrEqual(2);
   expect(forbidden).not.toHaveBeenCalled();
  }finally{adapter.dispose();api.destroy();}
+});
+
+it.each(['manual','fitWidth'] as const)('headless real horizontal %s strip paints paper beyond its host width',async zoomMode=>{
+ const forbidden=vi.fn(()=>{throw new Error('Audio/device creation is forbidden');});
+ vi.stubGlobal('AudioContext',forbidden);vi.stubGlobal('webkitAudioContext',forbidden);vi.stubGlobal('Audio',forbidden);
+ vi.stubGlobal('ResizeObserver',class {observe(){}disconnect(){}unobserve(){}});
+ Object.defineProperty(document,'fonts',{configurable:true,value:{check:()=>true,load:async()=>[],ready:Promise.resolve()}});
+ vi.spyOn(HTMLElement.prototype,'offsetWidth','get').mockImplementation(function(this:HTMLElement){return parseFloat(this.style.width)||480;});
+ vi.spyOn(HTMLElement.prototype,'offsetHeight','get').mockReturnValue(600);
+ vi.spyOn(HTMLElement.prototype,'clientWidth','get').mockReturnValue(480);vi.spyOn(HTMLElement.prototype,'clientHeight','get').mockReturnValue(600);
+ vi.spyOn(HTMLCanvasElement.prototype,'getContext').mockReturnValue({font:'',measureText:(text:string)=>({width:text.length*8,actualBoundingBoxLeft:0,actualBoundingBoxRight:text.length*8,actualBoundingBoxAscent:10,actualBoundingBoxDescent:3})} as never);
+ vi.stubGlobal('requestAnimationFrame',()=>1);vi.stubGlobal('cancelAnimationFrame',()=>{});
+ const score=music();for(let i=0;i<36;i++){const extra=music();score.addMasterBar(extra.masterBars[0]);score.tracks[0].staves[0].addBar(extra.tracks[0].staves[0].bars[0]);}score.finish(new Settings());
+ const style=document.createElement('style');// jsdom does not resolve CSS custom properties; substitute only the production paper token fallback.
+ const paperCss=readFileSync('src/ScoreView.css','utf8').replaceAll('var(--ws-paper,#fffdf5)','#fffdf5');style.textContent=paperCss;document.head.append(style);
+ const status=vi.fn();let result:ReturnType<typeof render>|undefined;
+ try{
+  await act(async()=>{result=render(createElement('div',{className:'paper-scroll'},createElement(ScoreView,{score,track:0,zoom:100,profile:'ScoreTab',playback:null,onSelect:vi.fn(),display:{layout:'horizontalScreen',zoomMode},onDisplayStatus:status})));for(let i=0;i<30;i++)await Promise.resolve();});
+  const live=result!.container.querySelector<HTMLElement>('.score-live-paper')!,canvas=live.querySelector<HTMLElement>('.at-surface')!;
+  expect(live.style.width).toBe('480px');expect(parseFloat(canvas.style.width)).toBeGreaterThan(480);
+  expect(canvas.querySelectorAll('svg').length).toBeGreaterThan(0);
+  expect(status).toHaveBeenLastCalledWith({zoomPercent:zoomMode==='manual'?100:25,fitLimited:zoomMode==='fitWidth',pageError:null});
+  expect(getComputedStyle(canvas).backgroundColor).toBe(getComputedStyle(live).backgroundColor);
+  expect(getComputedStyle(canvas).backgroundColor).not.toBe('rgba(0, 0, 0, 0)');
+  expect(forbidden).not.toHaveBeenCalled();
+ }finally{result?.unmount();style.remove();}
 });

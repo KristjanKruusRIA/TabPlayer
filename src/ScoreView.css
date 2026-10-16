@@ -38,6 +38,7 @@
 .score-presentation { position: relative; min-height: 100%; outline: none; }
 .score-source-staging { position: absolute; inset: 0 auto auto 0; height: 0; overflow: hidden; visibility: hidden; pointer-events: none; contain: layout paint; }
 .score-live-paper { margin-inline: auto; min-height: 100%; background: var(--ws-paper,#fffdf5); color-scheme: light; }
+.score-presentation[data-layout="horizontalScreen"] .score-live-paper .at-surface { background: var(--ws-paper,#fffdf5); }
 .score-pages { position: relative; }
 .score-sheet { position: absolute; background: var(--ws-paper,#fffdf5); box-shadow: inset 0 0 0 1px #b8b2a5; color-scheme: light; }
 .score-svg-chunk { position: absolute; transform-origin: top left; }

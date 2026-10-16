@@ -54,3 +54,28 @@ it('does not oscillate when a scroll target is taller than the host viewport',()
  f.mount();f.api.customScrollHandler!.forceScrollTo(f.bounds);const top=host.scrollTop;f.api.customScrollHandler!.forceScrollTo(f.bounds);expect(host.scrollTop).toBe(top);
  host.scrollTop=top+15;f.api.customScrollHandler!.forceScrollTo(f.bounds);expect(host.scrollTop).toBe(top+15);
 });
+it.each([false,true])('keeps the mapped cursor visible during same-system handoff with deferred publication %s',pending=>{
+ const f=fixture(),handler=f.api.customCursorHandler!,element=f.context().beatElement!;let time=100;
+ vi.spyOn(performance,'now').mockImplementation(()=>time);
+ const positions:string[]=[];Object.defineProperty(element,'offsetWidth',{get(){positions.push(element.style.left);return 1;}});
+ if(!pending)f.mount();
+ handler.placeBarCursor(f.source as never,f.bounds);handler.placeBeatCursor(f.source as never,f.bounds,20);handler.transitionBeatCursor(f.source as never,f.bounds,20,100,1000,1);
+ const next=new rendering.BeatBounds();next.beat=f.bounds.beat.voice.beats[1];next.barBounds=f.bounds.barBounds;f.lookup.findBeats=beat=>beat===next.beat?[next]:[f.bounds];
+ time=350;handler.placeBarCursor(f.source as never,next);if(pending)f.mount();
+ expect(element.hidden).toBe(false);expect(positions.at(-1)).toBe('75px');expect(element.style.left).toBe('165px');expect(element.style.transition).toBe('left 750ms linear');
+ // The separately queued old transition cannot replace the current handoff interval.
+ handler.transitionBeatCursor(f.source as never,f.bounds,20,100,1000,1);expect(element.style.transition).toBe('left 750ms linear');
+ time=400;handler.transitionBeatCursor(f.source as never,next,44,124,1000,1);
+ expect(element.hidden).toBe(false);expect(positions.at(-1)).toBe('81px');expect(element.style.left).toBe('201px');expect(element.style.transition).toBe('left 1000ms linear');
+ f.adapter.renderStarted();expect(element.hidden).toBe(true);f.adapter.dispose();
+});
+it('cancels the retained mapped interval at a different system and page boundary',()=>{
+ const f=fixture(),handler=f.api.customCursorHandler!,element=f.context().beatElement!;f.mount();
+ handler.placeBarCursor(f.source as never,f.bounds);handler.placeBeatCursor(f.source as never,f.bounds,20);handler.transitionBeatCursor(f.source as never,f.bounds,20,100,1000,1);
+ const next=new rendering.BeatBounds(),bar=new rendering.BarBounds(),master=new rendering.MasterBarBounds(),system=new rendering.StaffSystemBounds();
+ next.beat=f.bounds.beat.voice.beats[1];next.barBounds=bar;bar.masterBarBounds=master;master.staffSystemBounds=system;master.visualBounds=new rendering.Bounds(10,230,200,100);f.lookup.findBeats=beat=>beat===next.beat?[next]:[f.bounds];
+ const physical=f.context().physical!;physical.pagination.blocks.push({...physical.pagination.blocks[0],system,page:1,sourceBounds:{x:0,y:200,w:220,h:140}});physical.arrangement.pages.push({index:1,x:0,y:624,width:450,height:600});
+ handler.placeBarCursor(f.source as never,next);expect(element.hidden).toBe(true);expect(f.source.stopAnimation).toHaveBeenCalledTimes(1);
+ handler.transitionBeatCursor(f.source as never,f.bounds,20,100,1000,1);expect(element.hidden).toBe(true);
+ handler.placeBeatCursor(f.source as never,next,30);expect(element.hidden).toBe(false);expect(element.style.top).toBe('684px');f.adapter.dispose();
+});

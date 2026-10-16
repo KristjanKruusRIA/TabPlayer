@@ -61,6 +61,13 @@ body { overflow:hidden; }
 .app-shell .score-tools>[aria-label='Score display'] { display:flex; flex:1 0 100%; flex-wrap:wrap; gap:4px 8px; }
 .app-shell .score-tools>[aria-label='Score display']>.pair { justify-content:flex-start; }
 .app-shell .score-tools select { width:116px; }
+.app-shell .score-tools .score-layout-select { width:152px; }
+.app-shell .score-tools .score-fit-controls { display:flex; flex:0 0 auto; align-items:center; gap:4px; }
+.app-shell .score-fit-controls>button { white-space:nowrap; }
+.app-shell .score-fit-controls>button[aria-pressed=true] { color:var(--ws-accent); background:var(--ws-raised); border-color:var(--ws-accent); }
+.app-shell .score-tools .score-actual-zoom { flex:0 0 auto; align-self:center; font-size:12px; font-variant-numeric:tabular-nums; }
+.app-shell .score-tools .score-fit-help { flex:1 0 100%; margin:0; color:var(--ws-muted); }
+.app-shell .score-tools .score-fit-help[role=alert] { color:var(--ws-error); }
 .app-shell .paper-scroll { min-height:0; min-width:0; padding:16px; overscroll-behavior:contain; scrollbar-color:var(--ws-border) var(--ws-paper-surround); }
 .app-shell .paper { padding:16px; background:var(--ws-paper); box-shadow:none; }
 .app-shell .score-hint { padding:4px 8px; font-size:11px; background:var(--ws-panel); color:var(--ws-muted); }

@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
 import { useState } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom/vitest';
 import { TrackDisplayControls } from './TrackDisplayControls';
 import type { TrackView } from './view';
+import type { ScoreDisplayPreferences } from './screen-view';
 afterEach(cleanup);
 
 const ids=['base/0','added/3','base/1'],names=['Guitar','Bass','Drums'];
@@ -89,4 +90,54 @@ it('busy controls disable all display inputs and dispatch nothing',async()=>{
   await user.click(screen.getByText('Visible tracks'));
   await user.click(screen.getByLabelText('Show track 1: Guitar'));
   expect(p.onView).not.toHaveBeenCalled();expect(p.onZoom).not.toHaveBeenCalled();
+});
+
+it('offers all six layouts and repairs page fit when switching to an endless layout',()=>{
+  const p=props(),onDisplay=vi.fn(),display:ScoreDisplayPreferences={layout:'grid',zoomMode:'fitPage'};
+  render(<TrackDisplayControls {...p} display={display} onDisplay={onDisplay}/>);
+  const mode=screen.getByLabelText('Display mode');
+  expect(within(mode).getAllByRole('option').map(option=>[option.getAttribute('value'),option.textContent])).toEqual([
+    ['verticalPage','Vertical page'],['horizontalPage','Horizontal page'],['grid','Grid'],['parchment','Parchment'],['verticalScreen','Vertical screen'],['horizontalScreen','Horizontal screen'],
+  ]);
+  fireEvent.change(mode,{target:{value:'verticalPage'}});expect(onDisplay).toHaveBeenLastCalledWith({layout:'verticalPage',zoomMode:'fitPage'});
+  for(const layout of ['parchment','verticalScreen','horizontalScreen']){
+    fireEvent.change(mode,{target:{value:layout}});expect(onDisplay).toHaveBeenLastCalledWith({layout,zoomMode:'fitWidth'});
+  }
+  expect(p.onView).not.toHaveBeenCalled();expect(p.onZoom).not.toHaveBeenCalled();
+});
+
+it('exposes fit policy pressed state and explains unavailable page fit',()=>{
+  const p=props(),onDisplay=vi.fn(),view=render(<TrackDisplayControls {...p} display={{layout:'verticalPage',zoomMode:'manual'}} onDisplay={onDisplay}/>);
+  const width=screen.getByRole('button',{name:'Fit width'}),page=screen.getByRole('button',{name:'Fit page'});
+  expect(width).toHaveAttribute('aria-pressed','false');expect(page).toBeEnabled();
+  fireEvent.click(width);expect(onDisplay).toHaveBeenLastCalledWith({layout:'verticalPage',zoomMode:'fitWidth'});
+  fireEvent.click(page);expect(onDisplay).toHaveBeenLastCalledWith({layout:'verticalPage',zoomMode:'fitPage'});
+  view.rerender(<TrackDisplayControls {...p} display={{layout:'verticalPage',zoomMode:'fitPage'}} onDisplay={onDisplay}/>);
+  expect(page).toHaveAttribute('aria-pressed','true');expect(width).toHaveAttribute('aria-pressed','false');
+  view.rerender(<TrackDisplayControls {...p} display={{layout:'parchment',zoomMode:'fitWidth'}} onDisplay={onDisplay}/>);
+  expect(width).toHaveAttribute('aria-pressed','true');expect(page).toBeDisabled();expect(page).toHaveAccessibleDescription('Fit page is available in page layouts.');
+  expect(screen.getByText('Fit page is available in page layouts.')).toBeVisible();
+  onDisplay.mockClear();fireEvent.click(page);expect(onDisplay).not.toHaveBeenCalled();
+});
+
+it('keeps manual fractional zoom separate from actual fit output and limit status',()=>{
+  const p=props(),onDisplay=vi.fn(),view=render(<TrackDisplayControls {...p} zoom={137.5} display={{layout:'horizontalScreen',zoomMode:'fitWidth'}} onDisplay={onDisplay} actualZoom={25} fitLimited/>);
+  const input=screen.getByLabelText('Zoom (%)');expect(input).toHaveValue(137.5);
+  expect(screen.getByLabelText('Actual zoom')).toHaveTextContent('25%');
+  expect(screen.getByText('Fit is limited to 25%. Scroll to view the full score.')).toHaveAttribute('role','status');
+  fireEvent.change(input,{target:{value:'142.75'}});expect(p.onZoom).toHaveBeenLastCalledWith(142.75);expect(onDisplay).not.toHaveBeenCalled();
+  fireEvent.blur(input);expect(input).toHaveValue(137.5);
+  view.rerender(<TrackDisplayControls {...p} zoom={137.5} display={{layout:'grid',zoomMode:'fitPage'}} onDisplay={onDisplay} actualZoom={300} fitLimited/>);
+  expect(screen.getByLabelText('Actual zoom')).toHaveTextContent('300%');expect(input).toHaveValue(137.5);
+  expect(screen.getByText('Fit is limited to 300%. Scroll to view the full score.')).toHaveAttribute('role','status');
+});
+
+it('disables unavailable page fit on a page error and guards busy layout and fit dispatch',()=>{
+  const p=props(),onDisplay=vi.fn(),view=render(<TrackDisplayControls {...p} display={{layout:'grid',zoomMode:'fitPage'}} onDisplay={onDisplay} pageError="A system exceeds this paper. Choose a larger page."/>);
+  expect(screen.getByRole('button',{name:'Fit page'})).toBeDisabled();expect(screen.getByRole('alert')).toHaveTextContent('A system exceeds this paper. Choose a larger page.');
+  view.rerender(<TrackDisplayControls {...p} disabled display={{layout:'grid',zoomMode:'fitPage'}} onDisplay={onDisplay}/>);
+  expect(screen.getByLabelText('Display mode')).toBeDisabled();
+  for(const name of ['Fit width','Fit page']){expect(screen.getByRole('button',{name})).toBeDisabled();fireEvent.click(screen.getByRole('button',{name}));}
+  fireEvent.change(screen.getByLabelText('Display mode'),{target:{value:'verticalPage'}});
+  expect(onDisplay).not.toHaveBeenCalled();expect(p.onView).not.toHaveBeenCalled();expect(p.onZoom).not.toHaveBeenCalled();
 });

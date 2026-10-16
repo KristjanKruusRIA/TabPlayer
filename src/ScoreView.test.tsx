@@ -16,7 +16,8 @@ vi.mock('@coderline/alphatab',async original=>({...await original<typeof import(
   settings=new Settings();constructor(_container:unknown,options:unknown){view.options=options;view.api=this;}
   beatMouseDown=event<model.Beat>(handler=>{view.beat=handler;});noteMouseDown=event<model.Note>(handler=>{view.note=handler;});
   beatMouseMove=event<model.Beat>();beatMouseUp=event<model.Beat|null>();renderStarted=event<boolean>();postRenderFinished=event<void>();playbackRangeHighlightChanged=event<PlaybackHighlightChangeEventArgs>();
-  canvasElement={};uiFacade={getOffset:()=>({x:30,y:40,w:600,h:300})};
+  canvasElement={};uiFacade={getOffset:()=>({x:30,y:40,w:600,h:300}),highlightElements(){},removeHighlights(){}};
+  renderer={width:0,partialRenderFinished:event<never>()};renderScore(){}render(){}
   boundsLookup={findBeat:beatBounds,findBeats:(beat:model.Beat)=>[beatBounds(beat)],getBeatAtPos:(_x:number,_y:number)=>null as model.Beat|null};
   highlighted:[model.Beat,model.Beat]|null=null;rangeEndpoints:[model.Beat,model.Beat]|null=null;playbackRange={startTick:1920,endTick:3840};
   highlightPlaybackRange(start:model.Beat,end:model.Beat){this.rangeEndpoints=[start,end];this.highlighted=[start,end];this.playbackRangeHighlightChanged.emit(start===end?{}:{startBeat:start,endBeat:end,startBeatBounds:beatBounds(start),endBeatBounds:beatBounds(end)});}
@@ -86,18 +87,15 @@ it('hides the edit target when bounds are stale or missing and preserves callers
   api.boundsLookup.findBeats=()=>[];act(()=>api.postRenderFinished.emit());expect(screen.queryByLabelText('Edit target')).toBeNull();
   rendered.rerender(<ScoreView {...props}/>);expect(screen.getByRole('status').textContent).toBe('');
 });
-it('reveals moved edit targets once and waits for bounds without continuous render scrolling',()=>{
-  const scroll=vi.fn();Object.defineProperty(HTMLElement.prototype,'scrollIntoView',{configurable:true,value:scroll});
-  try {
-    const score=music(),props={score,track:0,zoom:100,profile:'ScoreTab',playback:null,onSelect:vi.fn(),editTarget:target,editString:6};
-    const rendered=render(<ScoreView {...props}/>),api=view.api as FakeView;expect(scroll).toHaveBeenCalledTimes(1);
-    act(()=>api.postRenderFinished.emit());expect(scroll).toHaveBeenCalledTimes(1);
-    api.boundsLookup.findBeats=()=>[];rendered.rerender(<ScoreView {...props} editTarget={{...target,beat:1}}/>);expect(scroll).toHaveBeenCalledTimes(1);
-    api.boundsLookup.findBeats=beat=>[beatBounds(beat)];act(()=>api.postRenderFinished.emit());expect(scroll).toHaveBeenCalledTimes(2);
-    act(()=>api.postRenderFinished.emit());expect(scroll).toHaveBeenCalledTimes(2);
-    rendered.rerender(<ScoreView {...props} editTarget={{...target,beat:1}} editString={5}/>);expect(scroll).toHaveBeenCalledTimes(3);
-    expect(scroll).toHaveBeenLastCalledWith({block:'nearest',inline:'nearest'});
-  } finally {delete (HTMLElement.prototype as Partial<HTMLElement>).scrollIntoView;}
+it('reveals moved edit targets only in the score host and waits for current bounds',()=>{
+  const windowScroll=vi.spyOn(window,'scrollTo'),scroll=vi.spyOn(HTMLElement.prototype,'getBoundingClientRect').mockImplementation(function(this:HTMLElement){return {x:0,y:0,left:0,top:0,right:100,bottom:this.classList.contains('score-edit-target')?150:100,width:100,height:100,toJSON(){}};});
+  const score=music(),props={score,track:0,zoom:100,profile:'ScoreTab',playback:null,onSelect:vi.fn(),editTarget:target,editString:6};
+  const tree=(beat=0)=><div className="paper-scroll"><ScoreView {...props} editTarget={{...target,beat}}/></div>;
+  const rendered=render(tree()),api=view.api as FakeView,host=rendered.container.firstElementChild!;
+  expect(host.scrollTop).toBe(50);act(()=>api.postRenderFinished.emit());expect(host.scrollTop).toBe(50);
+  api.boundsLookup.findBeats=()=>[];rendered.rerender(tree(1));expect(host.scrollTop).toBe(50);
+  api.boundsLookup.findBeats=beat=>[beatBounds(beat)];act(()=>api.postRenderFinished.emit());expect(host.scrollTop).toBe(100);
+  act(()=>api.postRenderFinished.emit());expect(host.scrollTop).toBe(100);expect(windowScroll).not.toHaveBeenCalled();scroll.mockRestore();windowScroll.mockRestore();
 });
 it('waits for a layout in progress before reusing edit bounds for a moved target',()=>{
   const score=music(),props={score,track:0,zoom:100,profile:'ScoreTab',playback:null,onSelect:vi.fn(),editTarget:target,editString:6};
@@ -108,7 +106,7 @@ it('waits for a layout in progress before reusing edit bounds for a moved target
 });
 it('uses public external media output and keeps viewport changes out of native plan loading',()=>{
   const score=music(),playback={attachView:vi.fn(),replaceScore:vi.fn(),setRenderedScore:vi.fn()},onSelect=vi.fn();const props={score,track:0,zoom:100,profile:'ScoreTab',onSelect,playback:playback as never};const rendered=render(<ScoreView {...props}/>);
-  expect(view.options).toMatchObject({player:{playerMode:'EnabledExternalMedia',enableCursor:true}});expect((view.options as {player:object}).player).not.toHaveProperty('soundFont');expect(playback.attachView).toHaveBeenCalledTimes(1);
+  expect(view.options).toMatchObject({player:{playerMode:'EnabledExternalMedia',enableCursor:false}});expect((view.options as {player:object}).player).not.toHaveProperty('soundFont');expect(playback.attachView).toHaveBeenCalledTimes(1);
   view.note?.(score.tracks[0].staves[0].bars[0].voices[0].beats[0].notes[0]);expect(onSelect).toHaveBeenLastCalledWith(target,6,0);
   rendered.rerender(<ScoreView {...props} zoom={130}/>);expect(playback.setRenderedScore).toHaveBeenLastCalledWith(score,[0]);expect(playback.attachView).toHaveBeenCalledTimes(1);
   rendered.unmount();expect(view.destroy).toHaveBeenCalledTimes(1);
@@ -154,7 +152,7 @@ it('prevents the browser text drag from interrupting an editor range drag',()=>{
 });
 it('focuses notation after an inspector input so music keyboard shortcuts receive the next key',()=>{
   const {notation,down}=setup(),input=document.createElement('input');document.body.append(input);
-  try{input.focus();down(0);expect(document.activeElement===notation.parentElement).toBe(true);}finally{input.remove();}
+  try{input.focus();down(0);expect(document.activeElement===notation.closest('.score-presentation')).toBe(true);}finally{input.remove();}
 });
 it('toggles exactly one chord member with Ctrl/Cmd without widening through the beat event',()=>{
   const score=music(),beat=score.tracks[0].staves[0].bars[0].voices[0].beats[0],second=new model.Note();second.string=5;second.fret=2;beat.addNote(second);

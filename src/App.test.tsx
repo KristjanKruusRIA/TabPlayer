@@ -252,6 +252,40 @@ it('keeps track visibility and fractional zoom in session state and resets them 
   click('New');await waitFor(()=>expect(activeController()).not.toBe(c));expect(testWorkspace.getState().documents).toHaveLength(2);
   expect(screen.getByLabelText('Displayed tracks')).toHaveValue('selected');expect(screen.getByLabelText('Zoom (%)')).toHaveValue(100);
 });
+it('keeps untouched old score preferences omitted and derived status out of persisted view',async()=>{
+  const c=await setup(),before=c.getState(),setView=vi.spyOn(testWorkspace,'setView');
+  const rendered=engravingView.mock.lastCall![0],onDisplayStatus=rendered.onDisplayStatus;
+  expect(rendered).toMatchObject({display:{layout:'parchment',zoomMode:'manual'},page:expect.objectContaining({scale:expect.any(Number)})});
+  expect(testWorkspace.getState().documents[0].view).not.toHaveProperty('scoreDisplay');
+  act(()=>onDisplayStatus({zoomPercent:63.25,fitLimited:false,pageError:null}));
+  act(()=>onDisplayStatus({zoomPercent:63.25,fitLimited:false,pageError:null}));
+  expect(setView).not.toHaveBeenCalled();
+  expect(engravingView.mock.lastCall![0].display).toBe(rendered.display);expect(engravingView.mock.lastCall![0].onDisplayStatus).toBe(onDisplayStatus);
+  change('Displayed tracks','all');change('Zoom (%)','137.5');
+  expect(testWorkspace.getState().documents[0].view).not.toHaveProperty('scoreDisplay');
+  expect(c.getState()).toBe(before);expect(c.getState().snapshot.dirty).toBe(false);
+});
+it('persists layout and fit choices, retains manual percent and restores them across documents without edits',async()=>{
+  const c=await setup(),before=c.getState(),id=testWorkspace.getState().active.documentId;
+  const loads=integration.loadDocument.mock.calls.length,beforeChanges=integration.beforeScoreChange.mock.calls.length;
+  change('Zoom (%)','137.5');change('Display mode','grid');click('Fit page');
+  expect(testWorkspace.getState().documents[0].view).toMatchObject({zoom:137.5,scoreDisplay:{layout:'grid',zoomMode:'fitPage'}});
+  const setView=vi.spyOn(testWorkspace,'setView');
+  act(()=>engravingView.mock.lastCall![0].onDisplayStatus({zoomPercent:72.5,fitLimited:false,pageError:null}));
+  expect(screen.getByLabelText('Actual zoom')).toHaveTextContent('72.5%');expect(screen.getByLabelText('Zoom (%)')).toHaveValue(137.5);expect(setView).not.toHaveBeenCalled();
+  change('Display mode','verticalScreen');expect(screen.getByRole('button',{name:'Fit width'})).toHaveAttribute('aria-pressed','true');
+  expect(testWorkspace.getState().documents[0].view.scoreDisplay).toEqual({layout:'verticalScreen',zoomMode:'fitWidth'});
+  change('Zoom (%)','142.75');expect(testWorkspace.getState().documents[0].view).toMatchObject({zoom:142.75,scoreDisplay:{layout:'verticalScreen',zoomMode:'manual'}});
+  expect(screen.queryByLabelText('Actual zoom')).not.toBeInTheDocument();
+  change('Display mode','horizontalPage');click('Fit width');
+  expect(c.getState()).toBe(before);expect(c.getState().snapshot).toMatchObject({dirty:false,canUndo:false,canRedo:false});
+  expect(integration.loadDocument).toHaveBeenCalledTimes(loads);expect(integration.beforeScoreChange).toHaveBeenCalledTimes(beforeChanges);
+  click('New');await waitFor(()=>expect(activeController()).not.toBe(c));
+  expect(screen.getByLabelText('Display mode')).toHaveValue('parchment');expect(screen.getByLabelText('Zoom (%)')).toHaveValue(100);
+  await act(async()=>{await testWorkspace.activate(id);});
+  expect(screen.getByLabelText('Display mode')).toHaveValue('horizontalPage');expect(screen.getByLabelText('Zoom (%)')).toHaveValue(142.75);
+  expect(screen.getByRole('button',{name:'Fit width'})).toHaveAttribute('aria-pressed','true');expect(c.getState()).toBe(before);
+});
 it('applies engraving and custom page edits once while keeping canonical music through history',async()=>{
   const c=await setup(),original=c.getState().score;
   change('Hide dynamics','true');click('Apply engraving');await waitFor(()=>expect(c.getState().settings.engraving.stylesheet.hideDynamics).toBe(true));

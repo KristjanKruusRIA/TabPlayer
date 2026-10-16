@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {readFileSync,existsSync} from 'node:fs';
+import {readFileSync,existsSync,mkdtempSync,writeFileSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {resolve} from 'node:path';
+import {createHash} from 'node:crypto';
 import {JSDOM} from 'jsdom';
 
 const source=new URL('./parity-score-layouts.mjs',import.meta.url);
@@ -100,4 +103,74 @@ test('pointerRequiresPublicSystemBarInterval',()=>{
   Object.assign(globalThis,{window:dom.window,document:dom.window.document,getComputedStyle:dom.window.getComputedStyle.bind(dom.window),DOMParser:dom.window.DOMParser});
   try{assert.throws(()=>read({target:{track:0,staff:0,bar:0,voice:0,beat:0},noteIndex:0}),/system|interval/i);}
   finally{for(const [key,value]of Object.entries(previous)){if(value===undefined)delete globalThis[key];else globalThis[key]=value;}dom.window.close();}
+});
+
+
+test('initialCaptureReservationSurvivesFailureAndRepeatedEntry',()=>{
+  const available=contract('assertScoreLayoutInitialAvailable'),reserve=contract('reserveScoreLayoutInitialCapture'),bind=contract('assertScoreLayoutInitialBinding');
+  const root=mkdtempSync(resolve(tmpdir(),'score-layout-capture-contract-')),path=resolve(root,'score-layout-initial-runtime.json');
+  const result={scope:'initial',ownershipId:'owned-a',statePath:resolve(root,'state.json'),stateSha256:'a'.repeat(64),runDirectory:resolve(root,'run-a'),resultPath:resolve(root,'run-a/result.json'),admissionSha256:'b'.repeat(64),buildSourceSha256:'c'.repeat(64)};
+  // A failed capability/functional attempt never reaches reserve, so it leaves
+  // no consumed visual allowance and another pre-capture entry is permitted.
+  available(path);available(path);assert.equal(existsSync(path),false);
+  const receipt=reserve(path,result),bytes=readFileSync(path);assert.equal(receipt.path,path);assert.equal(receipt.sha256,createHash('sha256').update(bytes).digest('hex'));
+  // Model the first screenshot rejecting: no frame/result array update occurs.
+  assert.throws(()=>available(path),/initial.*(?:reserved|consumed)/i);
+  assert.throws(()=>reserve(path,{...result,ownershipId:'owned-b',runDirectory:resolve(root,'run-b')}));assert.deepEqual(readFileSync(path),bytes);
+  bind(path,result,result.resultPath);
+  for(const key of ['ownershipId','statePath','stateSha256','runDirectory','resultPath','admissionSha256','buildSourceSha256'])assert.throws(()=>bind(path,{...result,[key]:'foreign'},result.resultPath),/initial|identity/i);
+  assert.throws(()=>bind(path,result,resolve(root,'unrelated-result.json')),/initial|identity/i);
+  assert.equal(JSON.parse(readFileSync(path)).ownershipId,result.ownershipId);
+});
+
+test('rejectedProbeDisposesThroughActualDriverCloseBeforeTeardown',async()=>{
+  const DriverContext=contract('ScoreLayoutContext');const observer=await import('./score-layout-observer.mjs');
+  const directory=mkdtempSync(resolve(tmpdir(),'score-layout-probe-contract-')),executable=resolve(directory,'inert-executable.txt');writeFileSync(executable,'inert');
+  for(const cleanupFails of [false,true]){
+    const events=[],original=async()=>new Response(JSON.stringify({ready:false,playing:false,generation:0,desiredGeneration:0,tick:0,seconds:0,error:null}),{headers:{'Tauri-Response':'ok'}});
+    const prior=Object.getOwnPropertyDescriptor(globalThis,'window');const fake={fetch:original};fake.__TAURI_INTERNALS__={convertFileSrc:command=>`ipc://${command}`,invoke:async command=>{const response=await fake.fetch(`ipc://${command}`,{method:'POST',body:'{}'});return {...await response.json(),tick:1};}};
+    Object.defineProperty(globalThis,'window',{value:fake,configurable:true,writable:true});
+    const result={steps:[],cleanup:[],transportFallbacks:[],pageErrors:[]},deps={observer:{...observer,disposeScoreLayoutObservers:()=>{events.push('dispose');const disposed=observer.disposeScoreLayoutObservers();assert.equal(fake.fetch,original);return cleanupFails?{...disposed,restored:false}:disposed;}}};
+    const c=new DriverContext({}, {executable,executableSha256:createHash('sha256').update('inert').digest('hex')},result,deps);c.identity={...identity};c.page={evaluate:async fn=>fn(),off:()=>{}};c.browser={close:async()=>events.push('disconnect')};let live=true;c.inspect=()=>live?identity:null;c.ps=()=>{events.push('terminate');assert.equal(fake.fetch,original,'Restore must precede exact process teardown');live=false;return '';};
+    let primary;
+    try{try{await c.installObservers();assert.fail('Probe mismatch must fail');}catch(error){primary=error;}assert.match(primary.message,/probe failed/);assert.notEqual(fake.fetch,original);if(cleanupFails)await assert.rejects(()=>c.close({crash:true}));else await c.close({crash:true});assert.match(primary.message,/probe failed/);assert.deepEqual(events,['dispose','terminate','disconnect']);assert.equal(c.identity,null);assert.equal(c.observersInstalled,false);}
+    finally{if(prior)Object.defineProperty(globalThis,'window',prior);else delete globalThis.window;}
+  }
+});
+
+test('reactiveFitRejectsOldScaleAndGeometryAfterHostShrink',()=>{
+  const check=contract('assertScoreLayoutReactiveFit');
+  const dom={devicePixelRatio:1,host:{clientWidth:800,clientHeight:600,paddingLeft:0,paddingRight:0,paddingTop:0,paddingBottom:0,scrollWidth:800,scrollHeight:600}};
+  const input={layout:'verticalPage',policy:'fitWidth',natural:{width:1000,height:700},dom,actualPercent:80,manualPercent:'137.5',activePolicy:'fitWidth',target:{width:800,height:560}};
+  assert.equal(check(input),80);
+  const shrunken={...dom,host:{...dom.host,clientWidth:400,scrollWidth:400}};
+  assert.throws(()=>check({...input,dom:shrunken}),/Fit percent/);
+  assert.throws(()=>check({...input,dom:shrunken,actualPercent:40}),/target geometry/);
+  assert.equal(check({...input,dom:shrunken,actualPercent:40,target:{width:400,height:280}}),40);
+  assert.throws(()=>check({...input,manualPercent:'80'}),/manual/i);
+  assert.throws(()=>check({...input,activePolicy:'manual'}),/policy/i);
+  for(const layout of ['parchment','verticalScreen','horizontalScreen']){
+    const live={...input,layout,natural:{width:1000,height:700,contentWidth:1000,contentHeight:700},target:{width:800,height:600,contentWidth:800,contentHeight:560,svgWidth:800,svgHeight:560,publicScale:.8}};
+    assert.equal(check(live),80);assert.throws(()=>check({...live,target:{...live.target,publicScale:1}}),/stale public render scale/);
+    assert.throws(()=>check({...live,target:{...live.target,svgWidth:600}}),/target geometry/);
+    assert.throws(()=>check({...live,target:{...live.target,height:500}}),/clipped/);
+  }
+});
+function fakeFitContext(stale){
+  const state={width:1600,height:1000,left:true,right:true,dock:false,manual:100,policy:'manual',scale:1},events=[];
+  const size=()=>({width:state.width-(state.left?220:0)-(state.right?272:0),height:state.height-200-(state.dock?240:0)});
+  const percent=()=>{const available=size();return Math.max(25,Math.min(300,100*(state.policy==='fitPage'?Math.min(available.width/1000,available.height/1400):available.width/1000)));};
+  const update=label=>{events.push({kind:'resize',label,policy:state.policy});if(state.policy!=='manual'&&!stale)state.scale=percent()/100;};
+  const dom=()=>{const s=size();return {innerWidth:state.width,innerHeight:state.height,devicePixelRatio:1,host:{clientWidth:s.width,clientHeight:s.height,paddingLeft:0,paddingRight:0,paddingTop:0,paddingBottom:0,scrollWidth:Math.max(s.width,1000*state.scale),scrollHeight:Math.max(s.height,1400*state.scale)},pages:[{width:1000*state.scale,height:1400*state.scale}]};};
+  const c={events,state,fitBinding:async()=>({documentId:'d',revision:1,projectSha256:'a',trackView:{kind:'all'},profile:3}),currentView:async()=>({zoom:state.manual,scoreDisplay:{layout:'verticalPage',zoomMode:state.policy}}),step:(action,value)=>events.push({kind:'step',action,value}),action:async(name,work)=>{events.push({kind:'action',name});await work();},manual:async value=>{events.push({kind:'manual',value});state.manual=value;state.policy='manual';state.scale=value/100;},fit:async policy=>{events.push({kind:'fit',policy});state.policy=policy;state.scale=percent()/100;}};
+  c.page={setViewportSize:async value=>{Object.assign(state,value);update('viewport');},evaluate:async()=>dom(),getByLabel:()=>({inputValue:async()=>String(state.manual)}),getByRole:(role,{name}={})=>role==='checkbox'?{setChecked:async value=>{state[name==='Track panel'?'left':name==='Inspector'?'right':'dock']=value;update(name);}}:role==='status'?{filter:()=>({count:async()=>1})}:{getAttribute:async()=>String((name==='Fit page'?'fitPage':'fitWidth')===state.policy),isDisabled:async()=>false},locator:selector=>selector==='[aria-label="Actual zoom"]'?{innerText:async()=>`Actual zoom: ${state.scale*100}%`}:{filter:()=>({evaluate:async()=>false,click:async()=>{}})}};
+  c.deps={ui:{revealDock:async()=>{state.dock=true;update('dock');}}};return c;
+}
+test('initialAndConfirmationResizePathsAssertBeforeAnyManualRefit',async()=>{
+  const initial=contract('initialScoreLayoutFitChecks'),confirmation=contract('confirmationScoreLayoutFitChecks');
+  for(const [name,run,count]of [['initial',c=>initial(c,'verticalPage'),8],['confirmation',c=>confirmation(c,{layout:'verticalPage',width:1024,height:1000}),2]]){
+    const stale=fakeFitContext(true);await assert.rejects(()=>run(stale),/Fit percent|target geometry/,`${name} must catch stale resize fit`);
+    const lastFit=stale.events.findLastIndex(row=>row.kind==='fit'),after=stale.events.slice(lastFit+1);assert.ok(after.some(row=>row.kind==='resize'));assert.ok(!after.some(row=>row.kind==='manual'||row.kind==='fit'),'No repair before the failing resize assertion');
+    const current=fakeFitContext(false);await run(current);const start=current.events.findLastIndex(row=>row.kind==='fit'),tail=current.events.slice(start+1);assert.ok(!tail.some(row=>row.kind==='manual'||row.kind==='fit'));assert.equal(tail.filter(row=>row.kind==='step'&&row.action==='Independent full target fit geometry').length,count+1);
+  }
 });

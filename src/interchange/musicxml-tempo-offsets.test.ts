@@ -120,30 +120,29 @@ describe('MusicXML playback tempo offsets',()=>{
   });
 
   const unchanged:[string,string][]=[
-    ['absent playback flag',musicXml(4,{sound:null})],
-    ['explicit no playback flag',musicXml(4,{sound:'no'})],
     ['zero offset',musicXml(4,{offset:'0'})],
-    ['negative offset',musicXml(4,{offset:'-2'})],
     ['offset reaching the next measure',musicXml(4,{offset:'12'})],
+    ['offset before the measure',musicXml(4,{offset:'-6'})],
     ['nested sound offset',musicXml(4,{nested:true})],
-    ['metronome direction',musicXml(4).replace('<words>Slower</words>','<metronome><beat-unit>quarter</beat-unit><per-minute>60</per-minute></metronome>')],
-    ['second voice',musicXml(4,{extra:'<backup><duration>16</duration></backup><note><rest/><duration>16</duration><voice>2</voice></note>'})],
-    ['note in another voice',musicXml(4).replace('<step>F</step><octave>4</octave></pitch><duration>4</duration><voice>1</voice>','<step>F</step><octave>4</octave></pitch><duration>4</duration><voice>2</voice>')],
-    ['chord note',musicXml(4,{extra:'<note><chord/><pitch><step>A</step><octave>4</octave></pitch><duration>4</duration><voice>1</voice></note>'})],
-    ['grace note',musicXml(4,{extra:'<note><grace/><pitch><step>A</step><octave>4</octave></pitch><voice>1</voice></note>'})],
-    ['tuplet timing',musicXml(4).replace('<duration>4</duration><voice>1</voice><type>quarter</type></note>','<duration>4</duration><voice>1</voice><type>quarter</type><time-modification><actual-notes>3</actual-notes><normal-notes>2</normal-notes></time-modification></note>')],
+    ['cue note',musicXml(4).replace('<note><pitch><step>D','<note><cue/><pitch><step>D')],
+    ['chord rest',musicXml(4,{extra:'<note><chord/><rest/><duration>4</duration><voice>1</voice></note>'})],
+    ['backup before the first note',musicXml(4).replace('<note><pitch><step>C','<forward><duration>16</duration></forward><backup><duration>16</duration></backup><note><pitch><step>C')],
     ['incomplete bar',musicXml(4,{notes:['C','D','E','F']}).replace(/<note><pitch><step>F<\/step>.*?<\/note>/,'')],
+    ['implicit measure',musicXml(4).replace('<measure number="1">','<measure number="0" implicit="yes">')],
+    ['composite meter',musicXml(4).replace('<beats>4</beats>','<beats>2+2</beats>')],
     ['missing divisions',musicXml(4).replace('<divisions>4</divisions>','')],
-    ['two parts',musicXml(4).replace('</part></score-partwise>','</part><part id="P2"><measure number="1"><note><rest/><duration>16</duration></note></measure></part></score-partwise>')],
-    ['two staves',musicXml(4).replace('<clef>','<staves>2</staves><clef>')],
-    ['changed divisions',musicXml(4).replace('</measure></part>','</measure><measure number="2"><attributes><divisions>8</divisions></attributes><note><rest/><duration>32</duration></note></measure></part>')],
-    ['changed meter',musicXml(4).replace('</measure></part>','</measure><measure number="2"><attributes><time><beats>3</beats><beat-type>4</beat-type></time></attributes><note><rest/><duration>12</duration></note></measure></part>')],
-    ['repeat routing',musicXml(4,{measureTail:'<barline location="right"><repeat direction="backward"/></barline>'})],
-    ['jump routing',musicXml(4).replace('<sound tempo="120"/>','<sound tempo="120" segno="s1"/>')],
+    ['two parts without divisions in the second',musicXml(4).replace('</part></score-partwise>','</part><part id="P2"><measure number="1"><note><rest/><duration>16</duration></note></measure></part></score-partwise>')],
+    ['repeated note duration',musicXml(4).replace('<duration>4</duration><voice>1</voice>','<duration>4</duration><duration>8</duration><voice>1</voice>')],
+    ['two tempo sounds',musicXml(4).replace('<sound tempo="60">','<sound tempo="70"/><sound tempo="60">')],
+    ['unknown playback flag',musicXml(4,{sound:'maybe'})],
     ['timewise root',musicXml(4).replace(/score-partwise/g,'score-timewise')],
-    ['nested sound offset in another direction',musicXml(4,{extra:'<direction><direction-type><words>Later</words></direction-type><sound dynamics="80"><offset>2</offset></sound></direction>'})],
-    ['negative unflagged offset elsewhere',musicXml(4,{extra:'<direction><direction-type><words>Earlier</words></direction-type><offset>-2</offset></direction>'})],
-    ['cross-measure unflagged offset elsewhere',musicXml(4,{extra:'<direction><direction-type><words>Later</words></direction-type><offset>1</offset></direction>'})],
+    // alphaTab moves to the voice end when a note starts inside its own voice's music.
+    ['a note inside its own voice',musicXml(4).replace('<note><pitch><step>D','<backup><duration>2</duration></backup><note><pitch><step>D').replace('</measure>','<forward><duration>2</duration></forward></measure>')],
+    ['a note inside its own voice under a padded staff number',musicXml(4).replace('<note><pitch><step>D','<backup><duration>2</duration></backup><note><pitch><step>D').replace('<duration>4</duration><voice>1</voice><type>quarter</type></note><direction','<duration>4</duration><voice>1</voice><type>quarter</type><staff>01</staff></note><direction').replace('</measure>','<forward><duration>2</duration></forward></measure>')],
+    ['a grace note inside its own voice',musicXml(4).replace('<note><pitch><step>D','<backup><duration>2</duration></backup><note><grace/><pitch><step>A</step><octave>4</octave></pitch><voice>1</voice></note><forward><duration>2</duration></forward><note><pitch><step>D')],
+    ['a pedal sharing a tempo direction',musicXml(4).replace('<direction-type><words>Slower</words></direction-type>','<direction-type><words>Slower</words></direction-type><direction-type><pedal type="start"/></direction-type>')],
+    ['parts in different meters',musicXml(4).replace('</part></score-partwise>','</part><part id="P2"><measure number="1"><attributes><divisions>1</divisions><time><beats>3</beats><beat-type>4</beat-type></time></attributes><note><rest/><duration>3</duration></note></measure></part></score-partwise>').replace('</part-list>','<score-part id="P2"><part-name>Bass</part-name></score-part></part-list>')],
+    ['prefixed element',musicXml(4,{extra:'<x:note xmlns:x="urn:example"/>'})],
     ['non-decimal offset text',musicXml(4,{offset:'0x4'})],
     ['offset markup inside a comment',musicXml(4,{extra:'<!-- <offset sound="yes">4</offset> -->'})],
     // Comment and CDATA hide offsets from different parsers; the counts and texts still agree.
@@ -155,8 +154,43 @@ describe('MusicXML playback tempo offsets',()=>{
     const zipped=mxl(text,4);expect(prepareMusicXmlTempoOffsets(zipped,settings)).toBe(zipped);
   });
 
-  it('keeps legacy timing for an unconverted absent flag',()=>{
-    expect(timing(buildScore(project(strToU8(musicXml(4,{sound:null})),'xml'))).tick).toBe(964);
+  // Musical arithmetic: the slow tempo follows the first quarter (960) unless a
+  // playback offset moves it; an offset without sound="yes" stays at the cursor.
+  const placed:[string,string,number][]=[
+    ['absent playback flag',musicXml(4,{sound:null}),960],
+    ['explicit no playback flag',musicXml(4,{sound:'no'}),960],
+    ['unflagged negative offset',musicXml(4,{sound:null,offset:'-2'}),960],
+    ['unflagged cross-measure offset',musicXml(4,{sound:null,offset:'40'}),960],
+    ['negative playback offset',musicXml(4,{offset:'-2'}),480],
+    ['fractional playback offset',musicXml(4,{offset:'2.5'}),1560],
+    ['metronome direction',musicXml(4).replace('<words>Slower</words>','<metronome><beat-unit>quarter</beat-unit><per-minute>60</per-minute></metronome>'),1920],
+    ['metronome-only direction with an unflagged offset',musicXml(4,{sound:null}).replace('<words>Slower</words>','<metronome><beat-unit>quarter</beat-unit><per-minute>60</per-minute></metronome>').replace('<sound tempo="60"></sound>','').replace('<sound tempo="60"/>',''),960],
+    ['tempo sound with dynamics',musicXml(4).replace('<sound tempo="60">','<sound tempo="60" dynamics="80">'),1920],
+    ['second voice',musicXml(4,{extra:'<backup><duration>16</duration></backup><note><rest/><duration>16</duration><voice>2</voice></note>'}),1920],
+    ['chord note',musicXml(4,{extra:'<note><chord/><pitch><step>A</step><octave>4</octave></pitch><duration>4</duration><voice>1</voice></note>'}),1920],
+    ['grace note',musicXml(4).replace('<note><pitch><step>D','<note><grace/><pitch><step>A</step><octave>4</octave></pitch><voice>1</voice></note><note><pitch><step>D'),1920],
+    ['tuplet notation',musicXml(4).replace('<duration>4</duration><voice>1</voice><type>quarter</type></note>','<duration>4</duration><voice>1</voice><type>quarter</type><time-modification><actual-notes>3</actual-notes><normal-notes>2</normal-notes></time-modification></note>'),1920],
+    ['two staves',musicXml(4).replace('<clef>','<staves>2</staves><clef>'),1920],
+    ['two parts',musicXml(4).replace('</part></score-partwise>','</part><part id="P2"><measure number="1"><attributes><divisions>2</divisions></attributes><note><rest/><duration>8</duration></note></measure></part></score-partwise>').replace('</part-list>','<score-part id="P2"><part-name>Bass</part-name></score-part></part-list>'),1920],
+    ['changed divisions',musicXml(4).replace('</measure></part>','</measure><measure number="2"><attributes><divisions>8</divisions></attributes><note><rest/><duration>32</duration></note></measure></part>'),1920],
+    ['changed meter',musicXml(4).replace('</measure></part>','</measure><measure number="2"><attributes><time><beats>3</beats><beat-type>4</beat-type></time></attributes><note><rest/><duration>12</duration></note></measure></part>'),1920],
+    ['incomplete later measure',musicXml(4).replace('</measure></part>','</measure><measure number="2"><note><rest/><duration>4</duration></note></measure></part>'),1920],
+    ['repeat routing',musicXml(4,{measureTail:'<barline location="right"><repeat direction="backward"/></barline>'}),1920],
+    ['jump routing',musicXml(4).replace('<sound tempo="120"/>','<sound tempo="120" segno="s1"/>'),1920],
+    ['nested sound offset in a non-tempo direction',musicXml(4,{extra:'<direction><direction-type><words>Later</words></direction-type><sound dynamics="80"><offset>2</offset></sound></direction>'}),1920],
+    ['pedal offset elsewhere',musicXml(4,{extra:'<direction><direction-type><pedal type="start"/></direction-type><offset>2</offset></direction>'}),1920],
+    ['negative unflagged offset elsewhere',musicXml(4,{extra:'<direction><direction-type><words>Earlier</words></direction-type><offset>-2</offset></direction>'}),1920],
+  ];
+  it.each(placed)('places the slow tempo for %s',(_,text,tick)=>{
+    expect(new DOMParser().parseFromString(text,'application/xml').querySelector('parsererror')).toBeNull();
+    for(const bytes of [strToU8(text),mxl(text,4)])expect(timing(buildScore(project(bytes,'musicxml'))).tick).toBe(tick);
+  });
+
+  it('places a tempo offset in a 3/4 measure',()=>{
+    const text=musicXml(4,{notes:['C','D','E']}).replace('<beats>4</beats>','<beats>3</beats>');
+    const score=buildScore(project(strToU8(text),'musicxml'));
+    expect(score.masterBars[0].calculateDuration()).toBe(2880);
+    expect(slowTempo(score).ratioPosition*2880).toBe(1920);
   });
 
   it('inherits unchanged divisions and meter in later measures',()=>{

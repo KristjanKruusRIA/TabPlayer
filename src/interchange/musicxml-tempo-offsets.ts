@@ -2,70 +2,98 @@ import type { Settings } from '@coderline/alphatab';
 import { strToU8,unzipSync,zipSync } from 'fflate';
 
 // alphaTab 1.8.4 adds a direction <offset> (MusicXML divisions) to its
-// 960-per-quarter tick cursor. For one narrow, simple timing domain this builds
-// temporary loader bytes with qualifying playback tempo offsets in ticks.
+// 960-per-quarter tick cursor for sound tempos, metronome marks and pedals,
+// whatever its playback flag. For tempo directions this builds temporary
+// loader bytes in which such offsets are in ticks with sound="yes" and zero
+// otherwise, since the sound then takes effect at the current location.
 // The result is a compatibility shim: never store or export it.
 const ticksPerQuarter=960;
 const musicXmlMedia='application/vnd.recordare.musicxml+xml';
-const jumpAttributes=['segno','coda','tocoda','dacapo','dalsegno','fine','forward-repeat'];
-const measureChildren=new Set(['attributes','note','direction','barline','print']);
-const decimal=(value:string|null|undefined)=>{const text=(value??'').trim();return /^(\d+(\.\d+)?|\.\d+)$/.test(text)?Number(text):null;};
+const decimal=(value:string|null|undefined)=>{const text=(value??'').trim();return /^-?(\d+(\.\d+)?|\.\d+)$/.test(text)?Number(text):null;};
 const positiveInteger=(value:string|null|undefined)=>{const text=(value??'').trim();return /^\d+$/.test(text)&&Number(text)>0?Number(text):null;};
 const children=(node:Element,name?:string)=>[...node.children].filter(child=>!name||child.localName===name);
 const child=(node:Element,name:string)=>children(node,name)[0];
 
 function isUtf8(settings:Settings){return /^utf-?8$/i.test(settings.importer.encoding);}
 
-// Returns the new offset text per qualifying element, or null when the whole
-// score is outside the simple domain (the caller then keeps the input as is).
+// The measure length in ticks from simple numeric <time> elements, or null.
+function meterTicks(attributes:Element):number|null|undefined {
+  const times=children(attributes,'time');if(!times.length)return undefined;
+  const lengths=times.map(time=>{
+    const beats=children(time,'beats'),types=children(time,'beat-type');
+    if(child(time,'senza-misura')||beats.length!==1||types.length!==1)return null;
+    const count=positiveInteger(beats[0].textContent),type=positiveInteger(types[0].textContent);
+    return count===null||type===null?null:count*4*ticksPerQuarter/type;
+  });
+  return lengths.every(length=>length!==null&&length===lengths[0])?lengths[0]:null;
+}
+
+// Returns the new offset text per tempo direction offset alphaTab would misplace,
+// or null when the score is outside the domain (the caller keeps the input).
+// The cursor follows the rules alphaTab shares with the source; where they part
+// (cue notes, chord rests, an early backup, repeated values) nothing changes.
 function plan(doc:Document):Map<Element,string>|null {
   const root=doc.documentElement;
   if(doc.querySelector('parsererror')||root.localName!=='score-partwise')return null;
-  const parts=children(root,'part');if(parts.length!==1)return null;
-  const measures=children(parts[0]);if(!measures.length||measures.some(measure=>measure.localName!=='measure'))return null;
-  const changes=new Map<Element,string>();let divisions:number|null=null,meter:string|null=null;
-  for(const measure of measures){
-    if(measure.getAttribute('implicit')==='yes')return null;
-    let cursor=0;const pending:number[]=[];
-    for(const item of children(measure)){
-      if(!measureChildren.has(item.localName))return null;
-      if(item.localName==='attributes'){
-        if(child(item,'staves')&&positiveInteger(child(item,'staves')!.textContent)!==1)return null;
-        for(const node of children(item,'divisions')){const value=positiveInteger(node.textContent);if(value===null||(divisions!==null&&value!==divisions)||(divisions===null&&cursor>0))return null;divisions=value;}
-        for(const time of children(item,'time')){
-          const beats=children(time,'beats'),types=children(time,'beat-type');
-          if(child(time,'senza-misura')||beats.length!==1||types.length!==1)return null;
-          const value=`${beats[0].textContent?.trim()}/${types[0].textContent?.trim()}`;if(value!=='4/4'||(meter===null&&cursor>0))return null;meter=value;
+  if([root,...root.getElementsByTagName('*')].some(node=>node.prefix!==null||node.namespaceURI!==null))return null;
+  const changes=new Map<Element,string>(),meters:(number|null|undefined)[][]=[],moved=new Set<number>();
+  for(const part of children(root,'part')){
+    // undefined: no <time> yet; null: one that alphaTab may read differently.
+    let divisions:number|null=null,meter:number|null|undefined;const partMeters:(number|null|undefined)[]=[];meters.push(partMeters);
+    for(const [index,measure] of children(part).entries()){
+      if(measure.localName!=='measure')return null;
+      let cursor=0,end=0,started=false;const flagged:{offset:Element;target:number;text:string}[]=[],voices=new Map<string,number>();
+      const ticks=(node:Element)=>{
+        const durations=children(node,'duration');if(durations.length!==1||children(node,'voice').length>1||children(node,'staff').length>1)return null;
+        const duration=positiveInteger(durations[0].textContent);if(duration===null||divisions===null)return null;
+        const value=duration*ticksPerQuarter/divisions;return Number.isInteger(value)?value:null;
+      };
+      for(const item of children(measure)){
+        if(item.localName==='attributes'){
+          for(const node of children(item,'divisions')){divisions=positiveInteger(node.textContent);if(divisions===null)return null;}
+          const length=meterTicks(item);if(length!==undefined)meter=length;
+        } else if(item.localName==='note'){
+          if(child(item,'cue')||child(item,'chord')&&(child(item,'rest')||!started))return null;
+          started=true;
+          if(child(item,'chord'))continue;
+          // alphaTab moves its cursor to the voice end when a note starts inside
+          // music its voice already holds.
+          // Keyed as alphaTab parses them: numeric staff, and voice 1 for non-numbers.
+          const number=(name:string)=>{const value=Number.parseInt(child(item,name)?.textContent??'1',10);return Number.isNaN(value)?1:value;};
+          const voice=`${number('staff')}/${number('voice')}`;
+          if(cursor<(voices.get(voice)??0))return null;
+          if(child(item,'grace'))continue;
+          const value=ticks(item);if(value===null)return null;cursor+=value;voices.set(voice,cursor);
+        } else if(item.localName==='forward'||item.localName==='backup'){
+          const value=ticks(item);if(value===null||!started&&item.localName==='backup')return null;
+          cursor+=item.localName==='forward'?value:-value;if(cursor<0)return null;
+        } else if(item.localName==='direction'){
+          // alphaTab uses the offset only for a direction sound's positive tempo.
+          const sounds=children(item,'sound'),offsets=children(item,'offset'),types=children(item,'direction-type').flatMap(type=>children(type));
+          const tempo=sounds.some(sound=>(decimal(sound.getAttribute('tempo'))??0)>0)||types.some(type=>type.localName==='metronome');
+          if(!tempo||!offsets.length)continue;
+          // One offset would move a pedal's display and sustain too; which it means is not guessed.
+          if(types.some(type=>type.localName==='pedal'))return null;
+          if(sounds.length>1||offsets.length>1||sounds.some(sound=>child(sound,'offset')))return null; // nested override: precedence not guessed
+          const offset=offsets[0],flag=offset.getAttribute('sound'),value=decimal(offset.textContent);
+          if(value===null||(flag!==null&&flag!=='yes'&&flag!=='no'))return null;
+          if(value===0)continue;
+          if(flag!=='yes'){changes.set(offset,'0');continue;}
+          if(divisions===null)return null;
+          const shift=value*ticksPerQuarter/divisions;flagged.push({offset,target:cursor+shift,text:String(shift)});
         }
-      } else if(item.localName==='barline'){
-        if(child(item,'repeat')||child(item,'ending')||child(item,'segno')||child(item,'coda'))return null;
-      } else if(item.localName==='note'){
-        if(['chord','grace','cue','time-modification'].some(name=>child(item,name)))return null;
-        if([child(item,'voice'),child(item,'staff')].some(node=>node&&node.textContent?.trim()!=='1'))return null;
-        const duration=positiveInteger(child(item,'duration')?.textContent);if(duration===null||divisions===null||meter===null)return null;
-        cursor+=duration;
-      } else if(item.localName==='direction'){
-        const sounds=children(item,'sound'),offset=child(item,'offset'),types=children(item,'direction-type').flatMap(type=>children(type));
-        if(child(item,'staff')&&child(item,'staff')!.textContent?.trim()!=='1')return null;
-        if(child(item,'voice')&&child(item,'voice')!.textContent?.trim()!=='1')return null;
-        if(types.some(type=>type.localName==='segno'||type.localName==='coda'))return null;
-        if(sounds.some(sound=>jumpAttributes.some(name=>sound.hasAttribute(name))))return null;
-        if(sounds.some(sound=>child(sound,'offset')))return null; // nested override: precedence not guessed
-        if(!offset)continue;
-        const value=decimal(offset.textContent);
-        if(value===null)return null; // includes negative offsets, flagged or not
-        if(value===0)continue;
-        if(divisions===null||meter===null)return null;
-        pending.push(cursor+value);
-        if(offset.getAttribute('sound')!=='yes')continue; // absent means no: legacy behaviour
-        const tempo=sounds.length===1?Number(sounds[0].getAttribute('tempo')):NaN;
-        const qualifying=types.length>0&&types.every(type=>type.localName==='words')&&Number.isFinite(tempo)&&tempo>0&&sounds[0].attributes.length===1;
-        if(qualifying)changes.set(offset,String(value*ticksPerQuarter/divisions));
+        end=Math.max(end,cursor);
       }
+      partMeters[index]=meter;
+      if(!flagged.length)continue;
+      moved.add(index);
+      // A moved tempo must stay inside a complete, explicit measure.
+      if(measure.getAttribute('implicit')==='yes'||typeof meter!=='number'||end!==meter)return null;
+      for(const {offset,target,text} of flagged){if(target<0||target>=meter)return null;changes.set(offset,text);}
     }
-    if(divisions===null||meter===null||cursor!==4*divisions)return null;
-    if(pending.some(target=>target>=cursor))return null; // cross-measure offsets
   }
+  // alphaTab keeps one bar length per measure, so every part that sets one must agree.
+  for(const index of moved){const set=meters.map(partMeters=>partMeters[index]).filter(value=>value!==undefined);if(set.some(value=>value!==set[0]))return null;}
   return changes.size?changes:null;
 }
 

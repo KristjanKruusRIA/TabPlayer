@@ -12,6 +12,8 @@ const children=(node:Element,name?:string)=>[...node.children].filter(child=>!na
 const child=(node:Element,name:string)=>children(node,name)[0];
 
 type Point={part:number;bar:number;type:model.AutomationType;value:number;tick:number};
+// Per part, bar and zero-based staff: the sorted end ticks of the source voices.
+type Layout=Map<string,number[]>;
 type Mix={type:model.AutomationType;value:number}[];
 
 // The sound's volume/pan points; undefined when it carries none, null when it
@@ -35,7 +37,7 @@ function soundMix(sound:Element,instruments:Set<string>|null):Mix|null|undefined
   return result;
 }
 
-function plan(doc:Document,score:model.Score):Point[]|null {
+function plan(doc:Document,score:model.Score):{points:Point[];layout:Layout}|null {
   const root=doc.documentElement;
   if(doc.querySelector('parsererror')||root.localName!=='score-partwise')return null;
   // Prefixed or namespaced elements are read differently by alphaTab's parser.
@@ -44,7 +46,7 @@ function plan(doc:Document,score:model.Score):Point[]|null {
   if(!parts.length||parts.length!==scoreParts.length||parts.length!==score.tracks.length)return null;
   const ids=parts.map(part=>part.getAttribute('id'));
   if(new Set(ids).size!==ids.length||parts.some((part,index)=>ids[index]!==scoreParts[index].getAttribute('id')))return null;
-  const points:Point[]=[];let found=false;
+  const points:Point[]=[],layout:Layout=new Map();let found=false;
   for(const [index,part] of parts.entries()){
     const declared=children(scoreParts[index],'score-instrument'),midi=children(scoreParts[index],'midi-instrument');
     // A midi-instrument id names its score-instrument; without one, the part-list midi-instrument.
@@ -53,9 +55,11 @@ function plan(doc:Document,score:model.Score):Point[]|null {
     if(measures.length!==score.masterBars.length||measures.some(measure=>measure.localName!=='measure'))return null;
     let divisions:number|null=null;
     for(const [bar,measure] of measures.entries()){
-      const length=score.masterBars[bar].calculateDuration();let cursor=0,end=0,started=false;
+      const length=score.masterBars[bar].calculateDuration(),voices=new Map<string,number>();let cursor=0,end=0,started=false;
       const ticks=(node:Element)=>{
-        const duration=positiveInteger(child(node,'duration')?.textContent);if(duration===null||divisions===null)return null;
+        // alphaTab keeps the last or sums repeated durations, so only one is read.
+        const durations=children(node,'duration');if(durations.length!==1||children(node,'voice').length>1||children(node,'staff').length>1)return null;
+        const duration=positiveInteger(durations[0].textContent);if(duration===null||divisions===null)return null;
         const value=duration*ticksPerQuarter/divisions;return Number.isInteger(value)?value:null;
       };
       for(const item of children(measure)){
@@ -67,6 +71,8 @@ function plan(doc:Document,score:model.Score):Point[]|null {
           started=true;
           if(child(item,'chord')||child(item,'grace'))continue;
           const value=ticks(item);if(value===null)return null;cursor+=value;
+          const staff=positiveInteger(child(item,'staff')?.textContent??'1'),voice=child(item,'voice')?.textContent?.trim()||'1';if(staff===null)return null;
+          voices.set(`${staff-1}/${voice}`,cursor);
         } else if(item.localName==='forward'||item.localName==='backup'){
           // alphaTab ignores a backup before the measure's first note.
           const value=ticks(item);if(value===null||!started&&item.localName==='backup')return null;
@@ -84,9 +90,10 @@ function plan(doc:Document,score:model.Score):Point[]|null {
         end=Math.max(end,cursor);
       }
       if(end!==length)return null; // incomplete or overfull bars
+      for(const [key,value] of voices){const staff=`${index}/${bar}/${key.split('/')[0]}`;layout.set(staff,[...layout.get(staff)??[],value].sort((a,b)=>a-b));}
     }
   }
-  return found?points:null;
+  return found?{points,layout}:null;
 }
 
 // Part-level <volume>/<pan> is common, so only directions carrying them justify a parse.
@@ -95,21 +102,23 @@ function hasDirectionMix(xml:string){
   return false;
 }
 
-// Every model voice must fill its master bar. Otherwise alphaTab placed the music
-// differently from the source cursor (dropped or added time) and positions differ.
-function completeBars(score:model.Score){
-  return score.tracks.every(track=>track.staves.every(staff=>staff.bars.every(bar=>bar.voices.every(voice=>{
-    if(voice.isEmpty||!voice.beats.length)return true;
-    const last=voice.beats[voice.beats.length-1];
-    return last.playbackStart+last.playbackDuration===score.masterBars[bar.index].calculateDuration();
-  }))));
+// Every model voice must end where its source voice ends. Otherwise alphaTab placed
+// the music differently from the source cursor (dropped or added time).
+function sameVoices(score:model.Score,layout:Layout){
+  for(const key of layout.keys()){const [part,,staff]=key.split('/').map(Number);if(!score.tracks[part]?.staves[staff])return false;}
+  return score.tracks.every((track,part)=>track.staves.every(staff=>staff.bars.every(bar=>{
+    const ends=bar.voices.filter(voice=>!voice.isEmpty&&voice.beats.length).map(voice=>{const last=voice.beats[voice.beats.length-1];return last.playbackStart+last.playbackDuration;}).sort((a,b)=>a-b);
+    const source=layout.get(`${part}/${bar.index}/${staff.index}`)??[];
+    return ends.length===source.length&&ends.every((value,index)=>value===source[index]);
+  })));
 }
 
 export function applyMusicXmlDirectionMix(score:model.Score,bytes:Uint8Array,settings:Settings):model.Score {
   try {
     const source=readMusicXmlSource(bytes,settings);
     if(!source||!hasDirectionMix(source.xml))return score;
-    const points=plan(new DOMParser().parseFromString(source.xml,'application/xml'),score);if(!points||!completeBars(score))return score;
+    const planned=plan(new DOMParser().parseFromString(source.xml,'application/xml'),score);if(!planned||!sameVoices(score,planned.layout))return score;
+    const points=planned.points;
     const owners=points.map(point=>score.tracks[point.part].staves[0]?.bars[point.bar]?.voices[0]?.beats[0]);
     if(owners.some(owner=>!owner))return score;
     // Every point has an owner before any automation is added.

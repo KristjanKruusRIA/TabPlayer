@@ -94,6 +94,19 @@ describe('MusicXML direction volume and pan',()=>{
     expect(smfMix(exportMidi(score,{tracks:[0],range:null}))).toEqual([[0,7,96],[0,10,64],[1920,7,32]]);
   });
 
+  it('keeps points when voice 2 ends early behind a trailing forward',()=>{
+    const tail=`<backup><duration>4</duration></backup><note><pitch><step>C</step><octave>3</octave></pitch><duration>2</duration><voice>2</voice><type>half</type></note><forward><duration>2</duration><voice>2</voice></forward>`;
+    const score=loadInterchangeScore(strToU8(musicXml(1,{tail})),settings);
+    expect(score.tracks[0].staves[0].bars[0].voices.length).toBe(2);
+    expect(automations(score)).toEqual(expectedAutomations);
+  });
+
+  it('keeps points when another part has a shorter voice',()=>{
+    const other=`<score-part id="P2"><part-name>Bass</part-name></score-part>`,body=`<part id="P2"><measure number="1"><attributes><divisions>1</divisions><time><beats>4</beats><beat-type>4</beat-type></time><clef><sign>F</sign><line>4</line></clef></attributes><note><pitch><step>C</step><octave>3</octave></pitch><duration>4</duration><voice>1</voice><type>whole</type></note><backup><duration>4</duration></backup><note><pitch><step>G</step><octave>2</octave></pitch><duration>1</duration><voice>2</voice><type>quarter</type></note></measure></part>`;
+    const xml=musicXml(1).replace('</part-list>',`${other}</part-list>`).replace('</score-partwise>',`${body}</score-partwise>`);
+    expect(automations(loadInterchangeScore(strToU8(xml),settings))).toEqual(expectedAutomations);
+  });
+
   it('reproduces the stock loss as the negative control',()=>{
     const score=importer.ScoreLoader.loadScoreFromBytes(encode('xml',4),settings);
     expect(automations(score)).toEqual([]);
@@ -123,6 +136,8 @@ describe('MusicXML direction volume and pan',()=>{
     ['a chord on the first note',musicXml(1,{directions:[volume('55.5')]}).replace('<note><pitch><step>C','<note><chord/><pitch><step>C')],
     ['a backup before the first note',musicXml(1,{directions:[volume('55.5')]}).replace('<note><pitch><step>C','<forward><duration>4</duration><voice>1</voice></forward><backup><duration>4</duration></backup><note><pitch><step>C')],
     ['duplicate part ids',twoParts(musicXml(1,{directions:[volume('55.5')]}))],
+    // The DOM reads the first duration and alphaTab the last; the bar totals still agree.
+    ['repeated note durations',musicXml(1,{beats:3,directions:[volume('55.5')]}).replace('<duration>1</duration><voice>','<duration>1</duration><duration>2</duration><voice>').replace('<duration>1</duration><voice>','<duration>2</duration><duration>1</duration><voice>')],
     ['a pickup measure',musicXml(1,{beats:2,directions:[volume('55.5')]}).replace('<measure number="1">','<measure number="0" implicit="yes">')],
   ];
   it.each(variants)('keeps the stock import for %s',(_name,text)=>{

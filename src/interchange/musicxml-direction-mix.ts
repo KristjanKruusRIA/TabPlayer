@@ -37,6 +37,16 @@ function soundMix(sound:Element,instruments:Set<string>|null):Mix|null|undefined
   return result;
 }
 
+// A direction <offset> (divisions) moves its sound only with sound="yes";
+// otherwise the sound takes effect at the current location.
+function directionTick(direction:Element,cursor:number,divisions:number|null):number|null {
+  const offsets=children(direction,'offset');if(!offsets.length)return cursor;
+  const flag=offsets[0].getAttribute('sound'),value=decimal(offsets[0].textContent);
+  if(offsets.length>1||value===null||(flag!==null&&flag!=='yes'&&flag!=='no'))return null;
+  if(flag!=='yes')return cursor;
+  return divisions===null?null:cursor+value*ticksPerQuarter/divisions;
+}
+
 function plan(doc:Document,score:model.Score):{points:Point[];layout:Layout}|null {
   const root=doc.documentElement;
   if(doc.querySelector('parsererror')||root.localName!=='score-partwise')return null;
@@ -81,9 +91,11 @@ function plan(doc:Document,score:model.Score):{points:Point[];layout:Layout}|nul
           const sounds=children(item,'sound');
           for(const sound of sounds){
             const mix=soundMix(sound,instruments);if(mix===undefined)continue;
-            // Offsets, unknown instruments and out-of-range values are not guessed.
-            if(mix===null||sounds.length>1||child(item,'offset')||child(sound,'offset')||cursor>=length||score.masterBars[bar].isAnacrusis)return null;
-            for(const value of mix)points.push({part:index,bar,tick:cursor,...value});
+            // Sound-level offsets, unknown instruments and out-of-range values are not guessed.
+            if(mix===null||sounds.length>1||child(sound,'offset')||score.masterBars[bar].isAnacrusis)return null;
+            // Controller ticks are rounded, so a target must not round onto the bar end.
+            const tick=directionTick(item,cursor,divisions);if(tick===null||tick<0||Math.round(tick)>=length)return null;
+            for(const value of mix)points.push({part:index,bar,tick,...value});
             found=true;
           }
         }

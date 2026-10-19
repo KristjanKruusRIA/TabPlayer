@@ -87,6 +87,20 @@ describe('MusicXML direction volume and pan',()=>{
     });
   });
 
+  it.each([1,4])('places offset directions by their playback flag with divisions %i',d=>{
+    const offset=(value:number,flag='')=>`<offset${flag}>${value*d}</offset>`;
+    // Volume keeps the cursor (offset without playback), pan moves one quarter later.
+    const directions=[volume('55.5').replace('</direction-type>',`</direction-type>${offset(3)}`)+pan('-45').replace('</direction-type>',`</direction-type>${offset(1,' sound="yes"')}`),panAttribute('90').replace('</direction-type>',`</direction-type>${offset(1,' sound="yes"')}`)];
+    const score=loadInterchangeScore(strToU8(musicXml(d,{directions})),settings);
+    expect(automations(score)).toEqual(expectedAutomations);
+    expect(smfMix(exportMidi(score,{tracks:[0],range:null}))).toEqual([[0,7,96],[0,10,64],...expectedMix]);
+  });
+
+  it('applies a negative playback offset within the bar',()=>{
+    const score=loadInterchangeScore(strToU8(musicXml(1,{directions:['',volume('25').replace('</direction-type>','</direction-type><offset sound="yes">-1</offset>')]})),settings);
+    expect(automations(score)).toEqual([[model.AutomationType.Volume,4,.25,false]]);
+  });
+
   it('tracks the cursor through backup into a second voice',()=>{
     const tail=`<backup><duration>4</duration></backup><note><rest/><duration>2</duration><voice>2</voice><type>half</type></note>${volume('25')}<note><rest/><duration>2</duration><voice>2</voice><type>half</type></note>`;
     const score=loadInterchangeScore(strToU8(musicXml(1,{directions:[],tail})),settings);
@@ -119,7 +133,12 @@ describe('MusicXML direction volume and pan',()=>{
   const paired=(bad:string)=>musicXml(1,{directions:[volume('55.5'),bad]});
   const twoParts=(xml:string)=>xml.replace('</score-part>','</score-part><score-part id="P1"><part-name>Copy</part-name></score-part>').replace('</part></score-partwise>',`</part>${/<part id="P1">[\s\S]*<\/part>/.exec(xml)![0].replace(/<direction><direction-type><words>mix[\s\S]*?<\/direction>/g,'')}</score-partwise>`);
   const variants:[string,string][]=[
-    ['a direction offset',paired(volume('50').replace('</direction-type>',`</direction-type>${offset}`))],
+    ['a playback offset beyond the bar',paired(volume('50').replace('</direction-type>','</direction-type><offset sound="yes">2</offset>'))],
+    ['a playback offset before the bar',paired(volume('50').replace('</direction-type>','</direction-type><offset sound="yes">-3</offset>'))],
+    ['a playback offset rounding onto the bar end',musicXml(1,{directions:[volume('55.5'),'',volume('50').replace('</direction-type>','</direction-type><offset sound="yes">0.9999</offset>')]})],
+    ['a non-decimal offset',paired(volume('50').replace('</direction-type>','</direction-type><offset>soon</offset>'))],
+    ['an unknown offset flag',paired(volume('50').replace('</direction-type>',`</direction-type>${offset.replace('yes','maybe')}`))],
+    ['two direction offsets',paired(volume('50').replace('</direction-type>','</direction-type><offset>1</offset><offset>1</offset>'))],
     ['a sound offset',paired(volume('50').replace('</midi-instrument>','</midi-instrument><offset>1</offset>'))],
     ['two midi instruments',paired(volume('50').replace('</midi-instrument>','</midi-instrument><midi-instrument id="P1-I1"><volume>60</volume></midi-instrument>'))],
     ['two sounds in one direction',paired(volume('50').replace('</sound>','</sound><sound><midi-instrument id="P1-I1"><volume>60</volume></midi-instrument></sound>'))],

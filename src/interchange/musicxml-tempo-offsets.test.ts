@@ -141,6 +141,13 @@ describe('MusicXML playback tempo offsets',()=>{
     ['repeat routing',musicXml(4,{measureTail:'<barline location="right"><repeat direction="backward"/></barline>'})],
     ['jump routing',musicXml(4).replace('<sound tempo="120"/>','<sound tempo="120" segno="s1"/>')],
     ['timewise root',musicXml(4).replace(/score-partwise/g,'score-timewise')],
+    ['nested sound offset in another direction',musicXml(4,{extra:'<direction><direction-type><words>Later</words></direction-type><sound dynamics="80"><offset>2</offset></sound></direction>'})],
+    ['negative unflagged offset elsewhere',musicXml(4,{extra:'<direction><direction-type><words>Earlier</words></direction-type><offset>-2</offset></direction>'})],
+    ['cross-measure unflagged offset elsewhere',musicXml(4,{extra:'<direction><direction-type><words>Later</words></direction-type><offset>1</offset></direction>'})],
+    ['non-decimal offset text',musicXml(4,{offset:'0x4'})],
+    ['offset markup inside a comment',musicXml(4,{extra:'<!-- <offset sound="yes">4</offset> -->'})],
+    // Comment and CDATA hide offsets from different parsers; the counts and texts still agree.
+    ['comment and CDATA offsets that would misalign the splice',musicXml(4,{offset:'<![CDATA[4]]>'}).replace('</measure></part>','</measure><measure number="2"><direction><direction-type><words>Later</words></direction-type><offset>4</offset><sound tempo="90"/></direction><!-- <offset>4</offset> --><note><rest/><duration>16</duration></note></measure></part>')],
   ];
   it.each(unchanged)('returns the same input for %s',(_,text)=>{
     expect(new DOMParser().parseFromString(text,'application/xml').querySelector('parsererror')).toBeNull();
@@ -169,7 +176,26 @@ describe('MusicXML playback tempo offsets',()=>{
 
   it('accepts a first rootfile without a media type',()=>{
     const zipped=mxl(musicXml(4),4,'<container><rootfiles><rootfile full-path="scores/main.musicxml"/></rootfiles></container>');
-    expect(prepareMusicXmlTempoOffsets(zipped,settings)).not.toBe(zipped);
+    expect(timing(buildScore(project(zipped,'mxl'))).tick).toBe(1920);
+  });
+
+  it('changes only the offset text and keeps every other source character',()=>{
+    const original=musicXml(4,{title:'A&#x42;C &amp; D'}).replace('placement="above"','placement="above" id="a&#10;b"');
+    const prepared=strFromU8(prepareMusicXmlTempoOffsets(strToU8(original),settings));
+    expect(prepared).toBe(original.replace('<offset sound="yes">4</offset>','<offset sound="yes">960</offset>'));
+  });
+
+  it('returns the same MXL input for a duplicate root entry name',()=>{
+    const bytes=zipSync({'META-INF/container.xml':strToU8(container),'scores/main.musicxml':strToU8(musicXml(4,{title:'First'})),'scores/main.musicxmX':strToU8(musicXml(4,{title:'Second'}))});
+    const name=strToU8('scores/main.musicxmX');
+    for(let i=0;i<=bytes.length-name.length;i++)if(name.every((byte,j)=>bytes[i+j]===byte))bytes[i+name.length-1]=0x6c;
+    expect(prepareMusicXmlTempoOffsets(bytes,settings)).toBe(bytes);
+  });
+
+  it('returns the same MXL input when a sibling exceeds the decoding limit',()=>{
+    const limited=new Settings();limited.importer.maxDecodingBufferSize=100000;
+    const bytes=zipSync({'META-INF/container.xml':strToU8(container),'scores/main.musicxml':strToU8(musicXml(4)),'media/large.bin':new Uint8Array(200000)});
+    expect(prepareMusicXmlTempoOffsets(bytes,limited)).toBe(bytes);
   });
 
   it('returns the same input for binary, GP archives, oversized roots and malformed XML',()=>{

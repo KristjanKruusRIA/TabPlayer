@@ -9,6 +9,7 @@ const ticksPerQuarter=960;
 const musicXmlMedia='application/vnd.recordare.musicxml+xml';
 const jumpAttributes=['segno','coda','tocoda','dacapo','dalsegno','fine','forward-repeat'];
 const measureChildren=new Set(['attributes','note','direction','barline','print']);
+const decimal=(value:string|null|undefined)=>{const text=(value??'').trim();return /^(\d+(\.\d+)?|\.\d+)$/.test(text)?Number(text):null;};
 const positiveInteger=(value:string|null|undefined)=>{const text=(value??'').trim();return /^\d+$/.test(text)&&Number(text)>0?Number(text):null;};
 const children=(node:Element,name?:string)=>[...node.children].filter(child=>!name||child.localName===name);
 const child=(node:Element,name:string)=>children(node,name)[0];
@@ -25,7 +26,7 @@ function plan(doc:Document):Map<Element,string>|null {
   const changes=new Map<Element,string>();let divisions:number|null=null,meter:string|null=null;
   for(const measure of measures){
     if(measure.getAttribute('implicit')==='yes')return null;
-    let cursor=0;const pending:[Element,number][]=[];
+    let cursor=0;const pending:number[]=[];
     for(const item of children(measure)){
       if(!measureChildren.has(item.localName))return null;
       if(item.localName==='attributes'){
@@ -49,30 +50,45 @@ function plan(doc:Document):Map<Element,string>|null {
         if(child(item,'voice')&&child(item,'voice')!.textContent?.trim()!=='1')return null;
         if(types.some(type=>type.localName==='segno'||type.localName==='coda'))return null;
         if(sounds.some(sound=>jumpAttributes.some(name=>sound.hasAttribute(name))))return null;
-        if(!offset||offset.getAttribute('sound')!=='yes')continue; // absent means no: legacy behaviour
-        const value=Number(offset.textContent);
-        if(!Number.isFinite(value)||value<0)return null;
-        if(value===0)continue;
         if(sounds.some(sound=>child(sound,'offset')))return null; // nested override: precedence not guessed
+        if(!offset)continue;
+        const value=decimal(offset.textContent);
+        if(value===null)return null; // includes negative offsets, flagged or not
+        if(value===0)continue;
+        if(divisions===null||meter===null)return null;
+        pending.push(cursor+value);
+        if(offset.getAttribute('sound')!=='yes')continue; // absent means no: legacy behaviour
         const tempo=sounds.length===1?Number(sounds[0].getAttribute('tempo')):NaN;
         const qualifying=types.length>0&&types.every(type=>type.localName==='words')&&Number.isFinite(tempo)&&tempo>0&&sounds[0].attributes.length===1;
-        if(divisions===null||meter===null)return null;
-        pending.push([offset,cursor+value]);
         if(qualifying)changes.set(offset,String(value*ticksPerQuarter/divisions));
       }
     }
     if(divisions===null||meter===null||cursor!==4*divisions)return null;
-    if(pending.some(([,target])=>target>=cursor))return null; // cross-measure playback offsets
+    if(pending.some(target=>target>=cursor))return null; // cross-measure offsets
   }
   return changes.size?changes:null;
 }
 
+// The DOM decides what changes; only the offset text is replaced in the source
+// string, so every other character reaches the stock parser exactly as authored.
 function normalize(xml:string):string|null {
   if(!xml.includes('offset'))return null;
   const doc=new DOMParser().parseFromString(xml,'application/xml'),changes=plan(doc);
   if(!changes)return null;
-  for(const [offset,text] of changes)offset.textContent=text;
-  return new XMLSerializer().serializeToString(doc);
+  const elements=[...doc.getElementsByTagName('offset')],matches=[...xml.matchAll(/<offset(?=[\s>])[^>]*>([^<]*)<\/offset\s*>/g)];
+  if(matches.length!==elements.length||matches.some((match,index)=>match[1]!==elements[index].textContent))return null;
+  let result='',position=0;
+  matches.forEach((match,index)=>{
+    const text=changes.get(elements[index]);if(text===undefined)return;
+    const start=match.index!+match[0].indexOf('>')+1;
+    result+=xml.slice(position,start)+text;position=start+match[1].length;
+  });
+  result+=xml.slice(position);
+  // Comments and CDATA can hide offsets from one side only, so confirm on a fresh
+  // parse that every offset carries exactly its planned text.
+  const expected=elements.map(element=>changes.get(element)??element.textContent);
+  const actual=[...new DOMParser().parseFromString(result,'application/xml').getElementsByTagName('offset')].map(element=>element.textContent);
+  return actual.length===expected.length&&actual.every((text,index)=>text===expected[index])?result:null;
 }
 
 function decode(bytes:Uint8Array){
@@ -84,15 +100,17 @@ function declaredUtf8(xml:string){
 }
 
 function prepareArchive(bytes:Uint8Array,settings:Settings):Uint8Array {
-  const limit=settings.importer.maxDecodingBufferSize;let oversized=false;
+  const limit=settings.importer.maxDecodingBufferSize;let oversized=false,duplicate=false;const seen=new Set<string>();
   const read=(names:Set<string>)=>unzipSync(bytes,{filter:entry=>{
+    // fflate keeps the last of repeated names while the stock reader takes the first.
+    if(seen.has(entry.name))duplicate=true;seen.add(entry.name);
     if(!names.has(entry.name))return false;
     if(entry.originalSize>limit||strToU8(entry.name).length>limit){oversized=true;return false;}
     return true;
   }});
   // Only container metadata and the selected root are decompressed for inspection.
   const metadata=read(new Set(['META-INF/container.xml']))['META-INF/container.xml'];
-  if(!metadata||oversized)return bytes;
+  if(!metadata||oversized||duplicate)return bytes;
   const containerXml=decode(metadata);if(containerXml===null)return bytes;
   const container=new DOMParser().parseFromString(containerXml,'application/xml');
   if(container.querySelector('parsererror')||container.documentElement.localName!=='container')return bytes;
@@ -103,7 +121,7 @@ function prepareArchive(bytes:Uint8Array,settings:Settings):Uint8Array {
   const xml=decode(root);if(xml===null||!declaredUtf8(xml))return bytes;
   const normalized=normalize(xml);if(normalized===null)return bytes;
   const entries=unzipSync(bytes,{filter:entry=>{
-    if(entry.originalSize>limit||strToU8(entry.name).length>limit)oversized=true;
+    if(entry.originalSize>limit||strToU8(entry.name).length>limit){oversized=true;return false;}
     return true;
   }});
   if(oversized)return bytes;

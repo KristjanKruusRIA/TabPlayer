@@ -99,7 +99,19 @@ function declaredUtf8(xml:string){
   return encoding===undefined||/^utf-?8$/i.test(encoding);
 }
 
-function prepareArchive(bytes:Uint8Array,settings:Settings):Uint8Array {
+// Returns the MusicXML text the stock loader reads: plain UTF-8 XML, or an MXL
+// container's first rootfile (path set). Anything else gives null.
+export function readMusicXmlSource(bytes:Uint8Array,settings:Settings):{xml:string;path:string|null}|null {
+  if(!isUtf8(settings))return null;
+  if(bytes[0]===0x50&&bytes[1]===0x4b)return readArchiveRoot(bytes,settings);
+  const start=bytes[0]===0xef&&bytes[1]===0xbb&&bytes[2]===0xbf?3:0;
+  let first=start;while(first<bytes.length&&[9,10,13,32].includes(bytes[first]))first++;
+  if(bytes[first]!==0x3c)return null;
+  const xml=decode(bytes);
+  return xml===null||!declaredUtf8(xml)?null:{xml,path:null};
+}
+
+function readArchiveRoot(bytes:Uint8Array,settings:Settings):{xml:string;path:string}|null {
   const limit=settings.importer.maxDecodingBufferSize;let oversized=false,duplicate=false;const seen=new Set<string>();
   const read=(names:Set<string>)=>unzipSync(bytes,{filter:entry=>{
     // fflate keeps the last of repeated names while the stock reader takes the first.
@@ -110,35 +122,34 @@ function prepareArchive(bytes:Uint8Array,settings:Settings):Uint8Array {
   }});
   // Only container metadata and the selected root are decompressed for inspection.
   const metadata=read(new Set(['META-INF/container.xml']))['META-INF/container.xml'];
-  if(!metadata||oversized||duplicate)return bytes;
-  const containerXml=decode(metadata);if(containerXml===null)return bytes;
+  if(!metadata||oversized||duplicate)return null;
+  const containerXml=decode(metadata);if(containerXml===null)return null;
   const container=new DOMParser().parseFromString(containerXml,'application/xml');
-  if(container.querySelector('parsererror')||container.documentElement.localName!=='container')return bytes;
+  if(container.querySelector('parsererror')||container.documentElement.localName!=='container')return null;
   const rootfiles=child(container.documentElement,'rootfiles'),rootfile=rootfiles&&child(rootfiles,'rootfile');
   const path=rootfile?.getAttribute('full-path'),media=rootfile?.getAttribute('media-type');
-  if(!path||(media!==null&&media!==undefined&&media!==musicXmlMedia))return bytes;
-  const root=read(new Set([path]))[path];if(!root||oversized)return bytes;
-  const xml=decode(root);if(xml===null||!declaredUtf8(xml))return bytes;
-  const normalized=normalize(xml);if(normalized===null)return bytes;
+  if(!path||(media!==null&&media!==undefined&&media!==musicXmlMedia))return null;
+  const root=read(new Set([path]))[path];if(!root||oversized)return null;
+  const xml=decode(root);
+  return xml===null||!declaredUtf8(xml)?null:{xml,path};
+}
+
+function repack(bytes:Uint8Array,settings:Settings,path:string,xml:string):Uint8Array {
+  const limit=settings.importer.maxDecodingBufferSize;let oversized=false;
   const entries=unzipSync(bytes,{filter:entry=>{
     if(entry.originalSize>limit||strToU8(entry.name).length>limit){oversized=true;return false;}
     return true;
   }});
   if(oversized)return bytes;
-  entries[path]=strToU8(normalized);
+  entries[path]=strToU8(xml);
   return zipSync(entries);
 }
 
 export function prepareMusicXmlTempoOffsets(bytes:Uint8Array,settings:Settings):Uint8Array {
-  if(!isUtf8(settings))return bytes;
   try {
-    if(bytes[0]===0x50&&bytes[1]===0x4b)return prepareArchive(bytes,settings);
-    const start=bytes[0]===0xef&&bytes[1]===0xbb&&bytes[2]===0xbf?3:0;
-    let first=start;while(first<bytes.length&&[9,10,13,32].includes(bytes[first]))first++;
-    if(bytes[first]!==0x3c)return bytes;
-    const xml=decode(bytes);if(xml===null||!declaredUtf8(xml))return bytes;
-    const normalized=normalize(xml);
-    return normalized===null?bytes:strToU8(normalized);
+    const source=readMusicXmlSource(bytes,settings);if(!source)return bytes;
+    const normalized=normalize(source.xml);if(normalized===null)return bytes;
+    return source.path===null?strToU8(normalized):repack(bytes,settings,source.path,normalized);
   } catch {
     return bytes; // malformed input keeps the stock loader's error path
   }

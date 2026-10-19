@@ -13,6 +13,7 @@ import { scoreFromJson } from '../model-clone';
 import { captureNoteLinks,restoreNoteLinks } from '../editor/links';
 import { copyTimeSignatureSources } from '../editor/time-signature-source';
 import { readStylesheetTimeSignatures,writeStylesheetTimeSignatures } from './stylesheet';
+import { prepareMusicXmlTempoOffsets } from './musicxml-tempo-offsets';
 
 const gpifPath='Content/score.gpif';
 const sourceEntries=new WeakMap<model.Score,Record<string,Uint8Array>>();
@@ -53,7 +54,7 @@ function prepareHarmonyGpCarriers(score:model.Score,settings:Settings):model.Sco
 }
 
 export function loadInterchangeScore(bytes:Uint8Array,settings:Settings):model.Score {
-  const score=importer.ScoreLoader.loadScoreFromBytes(bytes,settings);
+  const score=importer.ScoreLoader.loadScoreFromBytes(prepareMusicXmlTempoOffsets(bytes,settings),settings);
   if(bytes[0]!==0x50||bytes[1]!==0x4b)return score;
   const entries=unzip(bytes,settings);if(!entries[gpifPath])return score;
   const xml=new TextDecoder(settings.importer.encoding).decode(entries[gpifPath]),doc=parseXml(projectGpifTracks(xml)?.xml??xml);

@@ -15,6 +15,7 @@ import { copyTimeSignatureSources } from '../editor/time-signature-source';
 import { readStylesheetTimeSignatures,writeStylesheetTimeSignatures } from './stylesheet';
 import { prepareMusicXmlTempoOffsets } from './musicxml-tempo-offsets';
 import { applyMusicXmlNaturalHarmonics } from './musicxml-natural-harmonics';
+import { applyMusicXmlDirectionMix } from './musicxml-direction-mix';
 
 const gpifPath='Content/score.gpif';
 const sourceEntries=new WeakMap<model.Score,Record<string,Uint8Array>>();
@@ -56,11 +57,12 @@ function prepareHarmonyGpCarriers(score:model.Score,settings:Settings):model.Sco
 
 export function loadInterchangeScore(bytes:Uint8Array,settings:Settings):model.Score {
   const score=importer.ScoreLoader.loadScoreFromBytes(prepareMusicXmlTempoOffsets(bytes,settings),settings);
-  if(bytes[0]!==0x50||bytes[1]!==0x4b)return applyMusicXmlNaturalHarmonics(score,bytes,settings);
+  const musicXml=()=>applyMusicXmlDirectionMix(applyMusicXmlNaturalHarmonics(score,bytes,settings),bytes,settings);
+  if(bytes[0]!==0x50||bytes[1]!==0x4b)return musicXml();
   const entries=unzip(bytes,settings);
   // The stock GP reader takes any member named score.gpif, so such archives
   // never load from a MusicXML member.
-  if(!entries[gpifPath])return Object.keys(entries).some(name=>name.split('/').pop()==='score.gpif')?score:applyMusicXmlNaturalHarmonics(score,bytes,settings);
+  if(!entries[gpifPath])return Object.keys(entries).some(name=>name.split('/').pop()==='score.gpif')?score:musicXml();
   const xml=new TextDecoder(settings.importer.encoding).decode(entries[gpifPath]),doc=parseXml(projectGpifTracks(xml)?.xml??xml);
   readGpifLyrics(score,doc);
   readGpifHarmony(score,doc);

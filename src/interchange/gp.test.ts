@@ -148,3 +148,14 @@ describe('native GP channel-strip interchange',()=>{
     expect(midiNotes(loadInterchangeScore(output!,settings))).toEqual([[0,82,9],[960,38,9]]);
   });
 });
+it('writes byte-identical GP archives regardless of the wall clock',()=>{
+  vi.useFakeTimers();
+  try{
+    const score=loadInterchangeScore(authored(),settings);
+    vi.setSystemTime(new Date(2026,0,1,12,0,0,999));const first=exportGpInterchange(score,settings);
+    vi.setSystemTime(new Date(2026,0,1,12,0,3));expect(exportGpInterchange(score,settings)).toEqual(first);
+    const lyric=music();lyric.tracks[0].staves[0].bars[0].voices[0].beats[0].lyrics=['probe'];lyric.finish(settings);
+    vi.setSystemTime(new Date(2026,0,1,12,0,0,999));const xmlFirst=exportGpInterchange(lyric,settings);
+    vi.setSystemTime(new Date(2026,0,1,12,0,3));expect(exportGpInterchange(lyric,settings)).toEqual(xmlFirst);
+  }finally{vi.useRealTimers();}
+});

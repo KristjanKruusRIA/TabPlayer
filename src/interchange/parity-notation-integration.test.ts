@@ -7,7 +7,7 @@ import { loadInterchangeScore } from './gp';
 import { getTrackLyrics } from '../editor/lyrics';
 
 const settings=new Settings(),target={track:0,staff:0,bar:0,voice:0,beat:0};
-const path='Content/score.gpif';
+const path='Content/score.gpif',zipOptions={mtime:new Date(1980,0,1)};
 const parse=(bytes:Uint8Array)=>new DOMParser().parseFromString(new TextDecoder().decode(unzipSync(bytes)[path]),'application/xml');
 const notes:EditCommand[]=Array.from({length:4},(_,beat)=>({type:'setNote',target:{...target,beat},string:1,fret:beat}));
 it('retains exact raw lyrics including XML characters and CRLF through real GP and project replay',()=>{
@@ -17,11 +17,11 @@ it('retains exact raw lyrics including XML characters and CRLF through real GP a
   expect(doc.querySelector('Tracks > Track > Lyrics > Line > Text')?.textContent).toBe(raw);
   expect(getTrackLyrics(loadInterchangeScore(bytes,settings),0)).toEqual({visible:true,lines:[{startBar:0,text:raw},{startBar:1,text:''}],source:'raw'});
   expect(model.JsonConverter.scoreToJson(score)).toBe(before);
-  const original=unzipSync(bytes);original['Content/Assets/probe.bin']=new Uint8Array([1,2,255]);const source=zipSync(original);
+  const original=unzipSync(bytes);original['Content/Assets/probe.bin']=new Uint8Array([1,2,255]);const source=zipSync(original,zipOptions);
   const file={...blankProject(),base:{kind:'file' as const,filename:'authored.gp',bytesBase64:Buffer.from(source).toString('base64'),sha256:'a'.repeat(64)},edits:[]};
   const rebuilt=previewEdit(file,{type:'appendMeasure'}).score,again=exportGp(rebuilt);
   expect(getTrackLyrics(rebuilt,0).lines[0].text).toBe(raw);expect(unzipSync(again)['Content/Assets/probe.bin']).toEqual(new Uint8Array([1,2,255]));
-  expect(source).toEqual(zipSync(original));
+  expect(source).toEqual(zipSync(original,zipOptions));
 });
 it('retains standard inverted stems and exact fermata offsets through the bounded GP wrapper',()=>{
   const score=buildScore({...blankProject(),edits:[...notes,{type:'setBeatGestures',target,patch:{stem:'inverted'}}]});

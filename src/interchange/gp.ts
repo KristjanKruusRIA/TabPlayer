@@ -88,6 +88,8 @@ export function loadInterchangeScore(bytes:Uint8Array,settings:Settings):model.S
   readStylesheetTimeSignatures(score,entries);
   sourceEntries.set(score,entries);return score;
 }
+// A fixed DOS timestamp keeps equal scores byte-identical across export calls.
+const archiveOptions={mtime:new Date(1980,0,1)};
 export function exportGpInterchange(score:model.Score,settings:Settings):Uint8Array {
   const source=score;score=preparePitchedGpScore(score,settings);copyGpInterchangeSource(source,score);
   score=prepareHarmonyGpCarriers(score,settings);
@@ -110,7 +112,7 @@ export function exportGpInterchange(score:model.Score,settings:Settings):Uint8Ar
   const entries:Record<string,Uint8Array>={...generated,...original,[gpifPath]:generated[gpifPath]};
   const activeBacking='Content/Assets/backing-track';
   if(generated[activeBacking])entries[activeBacking]=generated[activeBacking];
-  if(!needsXml)return zipSync(writeStylesheetTimeSignatures(score,entries));
+  if(!needsXml)return zipSync(writeStylesheetTimeSignatures(score,entries),archiveOptions);
   const xml=new TextDecoder().decode(generated[gpifPath]),projection=projectGpifTracks(xml,notation),doc=parseXml(projection?.xml??xml);
   const references=writePercussionReferences(score,doc,settings);
   writeGpifLyrics(score,doc);writeGpifNotation(score,doc);if(harmony)writeGpifHarmony(score,doc);
@@ -158,7 +160,7 @@ export function exportGpInterchange(score:model.Score,settings:Settings):Uint8Ar
     }
   }
   entries[gpifPath]=strToU8(outputXml);
-  return zipSync(writeStylesheetTimeSignatures(score,entries));
+  return zipSync(writeStylesheetTimeSignatures(score,entries),archiveOptions);
 }
 /** Carry source archive siblings and binary backing data omitted by model JSON. */
 export function copyGpInterchangeSource(source:model.Score,destination:model.Score):void {

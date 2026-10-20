@@ -1,5 +1,6 @@
 import type { Settings } from '@coderline/alphatab';
 import { strToU8,unzipSync,zipSync } from 'fflate';
+import { numberTransposedTies } from './musicxml-transposed-ties';
 
 // alphaTab 1.8.4 adds a direction <offset> (MusicXML divisions) to its
 // 960-per-quarter tick cursor for sound tempos, metronome marks and pedals,
@@ -184,6 +185,19 @@ export function prepareMusicXmlTempoOffsets(bytes:Uint8Array,settings:Settings):
     const source=readMusicXmlSource(bytes,settings);if(!source)return bytes;
     const normalized=normalize(source.xml);if(normalized===null)return bytes;
     return source.path===null?strToU8(normalized):repack(bytes,settings,source.path,normalized);
+  } catch {
+    return bytes; // malformed input keeps the stock loader's error path
+  }
+}
+
+// All temporary loader rewrites: tempo offsets in ticks, then numbered ties in
+// transposing parts. Either may apply alone; original bytes stay authoritative.
+export function prepareMusicXmlLoaderBytes(bytes:Uint8Array,settings:Settings):Uint8Array {
+  try {
+    const source=readMusicXmlSource(bytes,settings);if(!source)return bytes;
+    const tempo=normalize(source.xml),xml=tempo??source.xml,ties=numberTransposedTies(xml),result=ties??tempo;
+    if(result===null)return bytes;
+    return source.path===null?strToU8(result):repack(bytes,settings,source.path,result);
   } catch {
     return bytes; // malformed input keeps the stock loader's error path
   }

@@ -13,7 +13,7 @@ import { scoreFromJson } from '../model-clone';
 import { captureNoteLinks,restoreNoteLinks } from '../editor/links';
 import { copyTimeSignatureSources } from '../editor/time-signature-source';
 import { readStylesheetTimeSignatures,writeStylesheetTimeSignatures } from './stylesheet';
-import { prepareMusicXmlTempoOffsets } from './musicxml-tempo-offsets';
+import { prepareMusicXmlLoaderBytes } from './musicxml-tempo-offsets';
 import { applyMusicXmlNaturalHarmonics } from './musicxml-natural-harmonics';
 import { applyMusicXmlDirectionMix } from './musicxml-direction-mix';
 import { applyMusicXmlAlternateStaves } from './musicxml-alternate-staves';
@@ -57,7 +57,7 @@ function prepareHarmonyGpCarriers(score:model.Score,settings:Settings):model.Sco
 }
 
 export function loadInterchangeScore(bytes:Uint8Array,settings:Settings):model.Score {
-  const score=importer.ScoreLoader.loadScoreFromBytes(prepareMusicXmlTempoOffsets(bytes,settings),settings);
+  const score=importer.ScoreLoader.loadScoreFromBytes(prepareMusicXmlLoaderBytes(bytes,settings),settings);
   const musicXml=()=>applyMusicXmlAlternateStaves(applyMusicXmlDirectionMix(applyMusicXmlNaturalHarmonics(score,bytes,settings),bytes,settings),bytes,settings);
   if(bytes[0]!==0x50||bytes[1]!==0x4b)return musicXml();
   const entries=unzip(bytes,settings);

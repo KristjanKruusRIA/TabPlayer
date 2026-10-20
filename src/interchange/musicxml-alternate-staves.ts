@@ -19,7 +19,10 @@ function alternateParts(xml:string):Set<number> {
     const staves=attributes.flatMap(item=>children(item,'staves')).map(node=>node.textContent?.trim());
     const details=attributes.flatMap(item=>children(item,'staff-details'));
     const alternate=(number:string)=>details.some(node=>(node.getAttribute('number')??'1')===number&&children(node,'staff-type').some(type=>type.textContent?.trim()==='alternate'));
-    if(staves.length&&staves.every(value=>value==='2')&&alternate('2')&&!alternate('1'))result.add(index);
+    // alphaTab applies dynamics and open hairpins importer-wide, so the TAB copy's values
+    // are artifacts only while staff 2 writes none of its own.
+    const tabDynamics=children(part,'measure').flatMap(measure=>children(measure,'direction')).some(direction=>children(direction,'staff').some(node=>node.textContent?.trim()==='2')&&(direction.getElementsByTagName('dynamics').length>0||direction.getElementsByTagName('wedge').length>0));
+    if(staves.length&&staves.every(value=>value==='2')&&alternate('2')&&!alternate('1')&&!tabDynamics)result.add(index);
   });
   return result;
 }
@@ -28,9 +31,18 @@ const same=(left:Json,right:Json,ignored:Set<string>)=>{
   for(const key of new Set([...Object.keys(left),...Object.keys(right)]))if(!ignored.has(key)&&JSON.stringify(left[key]??null)!==JSON.stringify(right[key]??null))return false;
   return true;
 };
-const ignoredNote=new Set(['id','string','fret','octave','tone','istiedestination','tiedestinationnoteid','tieoriginnoteid','accidentalmode']);
-// alphaTab's initial instrument automation sits on the notation copy; the TAB copy must carry none.
-const ignoredBeat=new Set(['id','notes','automations']);
+// Note links point at each staff's own notes; they are compared through the pairing.
+const linkKeys=['tieoriginnoteid','tiedestinationnoteid','sluroriginnoteid','slurdestinationnoteid','hammerpulloriginnoteid','hammerpulldestinationnoteid','slideoriginnoteid','slidetargetnoteid'];
+// Dynamics are importer-global in alphaTab, so the TAB copy's value is an artifact
+// (parts whose staff 2 writes dynamics or hairpins are never folded).
+const ignoredNote=new Set(['id','string','fret','octave','tone','istiedestination','accidentalmode','dynamics',...linkKeys]);
+// Stems and beams are staff layout; the notation staff's are kept. alphaTab's initial
+// instrument automation sits on the notation copy; the TAB copy must carry none.
+const ignoredBeat=new Set(['id','notes','automations','preferredbeamdirection','beamingmode','invertbeamdirection','dynamics','crescendo',...['text','chordid','lyrics']]);
+// alphaTab attaches these to the next parsed beat only, usually the notation copy's.
+// Kept when the TAB copy has none of its own; a TAB-only value refuses the fold.
+const notationOnly=['text','chordid','lyrics'];
+const unset=(value:unknown)=>value===undefined||value===null||value===0||value===''||(Array.isArray(value)&&!value.length);
 const ignoredBar=new Set(['id','voices','clef','clefottava','keysignature','keysignaturetype','displayscale','displaywidth']);
 const filled=(bar:model.Bar)=>bar.voices.filter(voice=>!voice.isEmpty);
 
@@ -49,6 +61,7 @@ function pairs(track:model.Track,json:Json):[Json,Json][]|null {
       for(const [position,beat] of voice.beats.entries()){
         const twin=copy.beats[position],beatJson=(voiceJson.beats as Json[])[beat.index],twinJson=(copyJson.beats as Json[])[twin.index];
         if(!same(beatJson,twinJson,ignoredBeat)||twin.automations.length||beat.displayStart!==twin.displayStart||beat.notes.length!==twin.notes.length)return null;
+        if(notationOnly.some(key=>!unset(twinJson[key])&&JSON.stringify(twinJson[key])!==JSON.stringify(beatJson[key]??null)))return null;
         const notes=[...beat.notes].sort((a,b)=>a.realValue-b.realValue),copies=[...twin.notes].sort((a,b)=>a.realValue-b.realValue);
         for(const [n,note] of notes.entries()){
           const partner=copies[n],noteJson=(beatJson.notes as Json[])[note.index],partnerJson=(twinJson.notes as Json[])[partner.index];
@@ -57,6 +70,12 @@ function pairs(track:model.Track,json:Json):[Json,Json][]|null {
         }
       }
     }
+  }
+  // Every link on a TAB note must point at the partner of its notation note's target.
+  const partner=new Map(result.map(([note,copy])=>[copy.id,note.id]));
+  for(const [note,copy] of result)for(const key of linkKeys){
+    const target=copy[key],mapped=target===undefined||target===null?null:partner.get(target);
+    if(mapped===undefined||mapped!==(note[key]??null))return null;
   }
   return result;
 }

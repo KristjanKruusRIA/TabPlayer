@@ -17,6 +17,7 @@ import { prepareMusicXmlLoaderBytes } from './musicxml-tempo-offsets';
 import { applyMusicXmlNaturalHarmonics } from './musicxml-natural-harmonics';
 import { applyMusicXmlDirectionMix } from './musicxml-direction-mix';
 import { applyMusicXmlAlternateStaves } from './musicxml-alternate-staves';
+import { applyMusicXmlTiedBends } from './musicxml-tied-bends';
 
 const gpifPath='Content/score.gpif';
 const sourceEntries=new WeakMap<model.Score,Record<string,Uint8Array>>();
@@ -58,7 +59,7 @@ function prepareHarmonyGpCarriers(score:model.Score,settings:Settings):model.Sco
 
 export function loadInterchangeScore(bytes:Uint8Array,settings:Settings):model.Score {
   const score=importer.ScoreLoader.loadScoreFromBytes(prepareMusicXmlLoaderBytes(bytes,settings),settings);
-  const musicXml=()=>applyMusicXmlAlternateStaves(applyMusicXmlDirectionMix(applyMusicXmlNaturalHarmonics(score,bytes,settings),bytes,settings),bytes,settings);
+  const musicXml=()=>applyMusicXmlTiedBends(applyMusicXmlAlternateStaves(applyMusicXmlDirectionMix(applyMusicXmlNaturalHarmonics(score,bytes,settings),bytes,settings),bytes,settings),bytes,settings);
   if(bytes[0]!==0x50||bytes[1]!==0x4b)return musicXml();
   const entries=unzip(bytes,settings);
   // The stock GP reader takes any member named score.gpif, so such archives

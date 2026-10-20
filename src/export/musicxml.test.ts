@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { readFileSync } from 'node:fs';
 import { describe,expect,it } from 'vitest';
-import { model,Settings } from '@coderline/alphatab';
+import { midi,model,Settings } from '@coderline/alphatab';
 import { strFromU8,strToU8 } from 'fflate';
 import { loadInterchangeScore } from '../interchange/gp';
 import { setLyricsSource } from '../editor/lyrics-source';
@@ -212,10 +212,110 @@ describe('MusicXML export',()=>{
     expect(shapes(back)).toEqual(shapes(score));
   });
 
-  it('refuses bend styles and bends continued over a tie',()=>{
+  it('refuses bend styles',()=>{
     const styled=guitar(),note=styled.tracks[0].staves[0].bars[0].voices[0].beats[0].notes[0];
     note.addBendPoint(new model.BendPoint(0,0));note.addBendPoint(new model.BendPoint(60,4));note.bendStyle=model.BendStyle.Fast;
     expect(()=>exportMusicXml(styled,selectAll(styled))).toThrow(/note bendstyle|bend style/);
+  });
+
+  // The guitar's bar-1 chord ties into bar 2: bend its low E, then hold or release over the tie.
+  const continued=(destination:number[][])=>{
+    const score=guitar(),origin=score.tracks[0].staves[0].bars[0].voices[0].beats[3].notes.find(note=>note.string===1)!,tied=score.tracks[0].staves[0].bars[1].voices[0].beats[0].notes.find(note=>note.string===1)!;
+    origin.addBendPoint(new model.BendPoint(0,0));origin.addBendPoint(new model.BendPoint(60,4));
+    for(const [offset,value] of destination)tied.addBendPoint(new model.BendPoint(offset,value));
+    return score;
+  };
+  const lowE=(doc:Document)=>[...doc.querySelectorAll('note')].filter(note=>note.querySelector('string')?.textContent==='6'&&note.querySelector('tied'));
+  it.each([
+    ['a hold',[[0,4],[60,4]],[],[4]],
+    ['a release',[[0,4],[60,0]],[['-2','0','100','release']],[4,0]],
+  ] as [string,number[][],string[][],number[]][])('writes %s continued over a tie relative to the bent pitch',(_name,destination,written,values)=>{
+    const score=continued(destination),doc=parse(exportMusicXml(score,selectAll(score)));
+    const [start,stop]=lowE(doc);
+    expect(start.querySelectorAll('bend').length).toBe(1);
+    expect([...stop.querySelectorAll('bend')].map(bend=>[bend.querySelector('bend-alter')?.textContent??'',bend.getAttribute('first-beat')??'',bend.getAttribute('last-beat')??'',bend.querySelector('pre-bend,release')?.localName??''])).toEqual(written);
+    const back=loadInterchangeScore(exportMusicXml(score,selectAll(score)),settings);
+    const tied=back.tracks[0].staves[0].bars[1].voices[0].beats[0].notes.find(note=>note.string===1)!;
+    expect([tied.isTieDestination,bendValues(tied)]).toEqual([true,values]);
+  });
+
+  // The pitch-bend stream alphaTab plays, for comparing a source with its re-import.
+  const pitchBends=(score:model.Score)=>{
+    const file=new midi.MidiFile();new midi.MidiFileGenerator(score,new Settings(),new midi.AlphaSynthMidiFileHandler(file,true)).generate();
+    return file.tracks.flatMap(track=>track.events).filter(event=>event instanceof midi.PitchBendEvent).map(event=>[event.tick,(event as midi.PitchBendEvent).value]);
+  };
+  it('plays a bend held over a tie at the same pitch after re-import',()=>{
+    const score=continued([[0,4],[60,4]]);score.finish(settings);
+    expect(pitchBends(loadInterchangeScore(exportMusicXml(score,selectAll(score)),settings))).toEqual(pitchBends(score));
+  });
+
+  it('refuses a bend that continues into a tied note without its own bend',()=>{
+    const score=continued([]);
+    expect(()=>exportMusicXml(score,selectAll(score))).toThrow(/continues into a tied note without its own bend/);
+  });
+
+  it.each([
+    ['a bend cut from its unbent tied note',[[0,0],[60,4]],{first:0,last:0},/cuts a bend from its tied note/],
+    ['an unbent tied note cut from its bend',[[0,0],[60,4]],{first:1,last:1},/cuts a tied note from its bend/],
+    ['an unbent tied note cut from its pre-bend',[[0,4],[60,4]],{first:1,last:1},/cuts a tied note from its bend/],
+  ] as [string,number[][],{first:number;last:number},RegExp][])('refuses a range with %s',(_name,bend,range,error)=>{
+    const score=guitar(),origin=score.tracks[0].staves[0].bars[0].voices[0].beats[3].notes.find(note=>note.string===1)!;
+    for(const [offset,value] of bend)origin.addBendPoint(new model.BendPoint(offset,value));score.finish(settings);
+    expect(()=>exportMusicXml(score,{tracks:[0],range})).toThrow(error);
+  });
+
+  it('refuses a range that cuts an unbent tie chain from its bend',()=>{
+    const score=build({strings:[64,59,55,50,45,40],bars:[0,1,2].map(index=>({numerator:4,denominator:4,voices:[[{duration:model.Duration.Whole,notes:[{string:1,fret:0,tieDestination:index>0}]}]]}))});
+    const first=score.tracks[0].staves[0].bars[0].voices[0].beats[0].notes[0];
+    first.addBendPoint(new model.BendPoint(0,4));first.addBendPoint(new model.BendPoint(60,4));score.finish(settings);
+    expect(()=>exportMusicXml(score,{tracks:[0],range:{first:2,last:2}})).toThrow(/cuts a tied note from its bend/);
+  });
+
+  it('ignores cut bends on staves the excerpt leaves out',()=>{
+    const json=JSON.parse(String(model.JsonConverter.scoreToJson(guitar())));
+    json.tracks[0].staves.push(JSON.parse(JSON.stringify(json.tracks[0].staves[0])));
+    const score=model.JsonConverter.jsonToScore(JSON.stringify(json),settings);
+    const origin=score.tracks[0].staves[1].bars[0].voices[0].beats[3].notes.find(note=>note.string===1)!;
+    origin.addBendPoint(new model.BendPoint(0,0));origin.addBendPoint(new model.BendPoint(60,4));score.finish(settings);
+    expect(()=>exportMusicXml(score,{tracks:[0],range:{first:0,last:0},staves:{0:[1]}})).toThrow(/cuts a bend from its tied note/);
+    expect(()=>exportMusicXml(score,{tracks:[0],range:{first:0,last:0},staves:{0:[0]}})).not.toThrow();
+  });
+
+  it('keeps a range that cuts a pre-bend from its unbent tied note',()=>{
+    const score=guitar(),origin=score.tracks[0].staves[0].bars[0].voices[0].beats[3].notes.find(note=>note.string===1)!;
+    origin.addBendPoint(new model.BendPoint(0,4));origin.addBendPoint(new model.BendPoint(60,4));score.finish(settings);
+    expect(()=>exportMusicXml(score,{tracks:[0],range:{first:0,last:0}})).not.toThrow();
+  });
+
+  it('refuses a continued bend that does not start at the bent pitch',()=>{
+    const score=continued([[0,2],[60,0]]);
+    expect(()=>exportMusicXml(score,selectAll(score))).toThrow(/continued bend that does not start/);
+  });
+
+  it.each([
+    ['a partial release',[[0,4],[60,2]]],
+    ['a bend further up',[[0,4],[60,6]]],
+  ] as [string,number[][]][])('refuses %s continued over a tie until the import reads it back',(_name,destination)=>{
+    const score=continued(destination);
+    expect(()=>exportMusicXml(score,selectAll(score))).toThrow(/does not first release fully/);
+  });
+
+  it('refuses a continued release and re-bend that reads back without its dip',()=>{
+    const score=continued([[0,4],[15,4],[30,0],[45,0],[60,2]]);
+    expect(()=>exportMusicXml(score,selectAll(score))).toThrow(/exactly two changes/);
+  });
+
+  it.each([
+    ['a re-bend',[[0,0],[60,4]],[['2','']],[0,4]],
+    ['a re-bend and release',[[0,0],[30,4],[60,0]],[['2',''],['-2','release']],[0,4,0]],
+  ] as [string,number[][],string[][],number[]][])('writes %s from 0 continued over a released tie',(_name,destination,written,values)=>{
+    const score=guitar(),origin=score.tracks[0].staves[0].bars[0].voices[0].beats[3].notes.find(note=>note.string===1)!,tied=score.tracks[0].staves[0].bars[1].voices[0].beats[0].notes.find(note=>note.string===1)!;
+    origin.addBendPoint(new model.BendPoint(0,4));origin.addBendPoint(new model.BendPoint(60,0));
+    for(const [offset,value] of destination)tied.addBendPoint(new model.BendPoint(offset,value));
+    const doc=parse(exportMusicXml(score,selectAll(score)));
+    expect([...lowE(doc)[1].querySelectorAll('bend')].map(bend=>[bend.querySelector('bend-alter')?.textContent,bend.querySelector('pre-bend,release')?.localName??''])).toEqual(written);
+    const back=loadInterchangeScore(exportMusicXml(score,selectAll(score)),settings);
+    expect(bendValues(back.tracks[0].staves[0].bars[1].voices[0].beats[0].notes.find(note=>note.string===1)!)).toEqual(values);
   });
 
   it('round-trips the guitar part through the importer',()=>{

@@ -77,7 +77,7 @@ const written={
   // Stem direction is display; dynamics are written as directions.
   beat:new Set(['id','notes','isempty','duration','dots','tupletnumerator','tupletdenominator','automations','displaystart','playbackstart','displayduration','playbackduration','overridedisplayduration','preferredbeamdirection','dynamics']),
   // Bend points are written as <bend> elements (their type is derived from them).
-  note:new Set(['id','fret','string','octave','tone','istiedestination','tiedestinationnoteid','tieoriginnoteid','accidentalmode','dynamics','bendtype','bendpoints']),
+  note:new Set(['id','fret','string','octave','tone','istiedestination','tiedestinationnoteid','tieoriginnoteid','accidentalmode','dynamics','bendtype','bendpoints','iscontinuedbend']),
 };
 type Json=Record<string,unknown>;
 const toJson=(score:model.Score):Json=>{const value:unknown=model.JsonConverter.scoreToJson(score);return (typeof value==='string'?JSON.parse(value):value) as Json;};
@@ -128,7 +128,21 @@ function bends(note:model.Note){
   const points=[...note.bendPoints??[]].sort((a,b)=>a.offset-b.offset);
   if(!points.length)return '';
   const percent=(offset:number)=>number(offset*100/model.BendPoint.MaxPosition);
-  let result=points[0].value?element('bend',element('bend-alter',number(-points[0].value/2))+'<pre-bend/>'):'';
+  // A bend continued over a tie starts at the pitch its tie carries: changes are written
+  // relative to it (a hold writes nothing), never as a pre-bend.
+  // A curve tied into a note without its own bend plays stretched over the tie; MusicXML
+  // times each bend within its note, so that timing cannot be written.
+  if(note.tieDestination&&!note.tieDestination.hasBend&&points.some(point=>point.value!==points[0].value))unsupported('a bend that continues into a tied note without its own bend');
+  if(note.isContinuedBend){
+    const carried=[...note.tieOrigin?.bendPoints??[]].sort((a,b)=>a.offset-b.offset).pop()?.value;
+    if(carried!==points[0].value)unsupported('a continued bend that does not start at the bent pitch');
+    // alphaTab's import starts a tie destination's curve at 0 unless it opens with a release,
+    // so a bent continuation reads back at the right pitch only if it first releases fully.
+    if(points[0].value&&(points.find(point=>point.value!==points[0].value)?.value??0)!==0)unsupported('a continued bend that does not first release fully');
+    // Two changes import as four points, whose middle Note.finish drops on a bent continuation.
+    if(points[0].value&&points.filter((point,index)=>index&&point.value!==points[index-1].value).length===2)unsupported('a continued bend with exactly two changes');
+  }
+  let result=points[0].value&&!note.isContinuedBend?element('bend',element('bend-alter',number(-points[0].value/2))+'<pre-bend/>'):'';
   for(let index=1;index<points.length;index++){
     const from=points[index-1],to=points[index];if(to.value===from.value)continue;
     result+=element('bend',element('bend-alter',number((to.value-from.value)/2))+(to.value<from.value?'<release/>':''),` first-beat="${percent(from.offset)}" last-beat="${percent(to.offset)}"`);
@@ -258,7 +272,25 @@ function writePart(track:model.Track,score:model.Score,json:Json,scoreJson:Json,
   return measures;
 }
 
+// An excerpt drops ties that cross its edges. A bend tied into or out of an unbent note
+// then loses the pitch its tie carries, so such cuts are refused on the source score.
+function checkCutBends(score:model.Score,selection:ExportSelection){
+  const range=selection.range;if(!range)return;
+  const changes=(note:model.Note)=>(note.bendPoints??[]).some(point=>point.value!==note.bendPoints![0].value);
+  // The nearest bent note an unbent tie chain carries its pitch from.
+  const bentOrigin=(note:model.Note)=>{let origin=note.isTieDestination?note.tieOrigin:null;while(origin&&!origin.hasBend)origin=origin.isTieDestination?origin.tieOrigin:null;return origin;};
+  for(const index of selection.tracks)for(const [position,staff] of score.tracks[index].staves.entries()){
+    if(selection.staves?.[index]&&!selection.staves[index].includes(position))continue;
+    for(const bar of staff.bars.slice(range.first,range.last+1))for(const voice of bar.voices)for(const beat of voice.beats)for(const note of beat.notes){
+      const destination=note.tieDestination,origin=note.hasBend?null:bentOrigin(note);
+      if(destination&&destination.beat.voice.bar.index>range.last&&!destination.hasBend&&changes(note))unsupported('a range that cuts a bend from its tied note');
+      if(origin&&origin.beat.voice.bar.index<range.first)unsupported('a range that cuts a tied note from its bend');
+    }
+  }
+}
+
 export function exportMusicXml(score:model.Score,selection:ExportSelection):Uint8Array {
+  checkCutBends(score,selection);
   // Lyrics (including hidden ones) live in TabPlayer's own sources, outside the model data.
   if(selection.tracks.some(index=>getLyricsSource(score.tracks[index])?.value.lines.some(line=>line.text.trim())))unsupported('lyrics');
   const copy=selectScore(score,selection),json=toJson(copy);check('score',json);

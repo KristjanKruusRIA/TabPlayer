@@ -1,6 +1,7 @@
 import { model,Settings } from '@coderline/alphatab';
 import { strToU8 } from 'fflate';
 import { getLyricsSource } from '../editor/lyrics-source';
+import { trackMixAutomations } from '../interchange/automation';
 import { selectScore } from './selection';
 import type { ExportSelection } from './types';
 
@@ -30,11 +31,20 @@ function spelling(value:number,fifths:number):[string,number] {
   }
   return (fifths<0?flatSteps:sharpSteps)[value%12];
 }
-function pitch(value:number,fifths:number){
+// A forced accidental takes the enharmonic spelling with that offset, as alphaTab's
+// resolveSpelling does; <accidental> reads back as the same mode.
+const forced=new Map<model.NoteAccidentalMode,[number,string]>([[model.NoteAccidentalMode.ForceNatural,[0,'natural']],[model.NoteAccidentalMode.ForceSharp,[1,'sharp']],[model.NoteAccidentalMode.ForceFlat,[-1,'flat']],[model.NoteAccidentalMode.ForceDoubleSharp,[2,'double-sharp']],[model.NoteAccidentalMode.ForceDoubleFlat,[-2,'flat-flat']]]);
+function pitch(value:number,fifths:number,mode:model.NoteAccidentalMode=model.NoteAccidentalMode.Default){
   if(!Number.isInteger(value)||value<0||value>127)unsupported('a pitch outside octaves 0–9');
-  const [step,alter]=spelling(value,fifths),octave=Math.floor((value-alter)/12)-1;
+  let [step,alter]=spelling(value,fifths),accidental='';
+  if(mode!==model.NoteAccidentalMode.Default){
+    const rule=forced.get(mode)??unsupported('this accidental mode'),[offset,name]=rule;
+    const match=naturals.find(([,natural])=>((natural+offset)%12+12)%12===value%12)??unsupported('a forced accidental this pitch cannot take');
+    [step,alter,accidental]=[match[0],offset,element('accidental',name)];
+  }
+  const octave=Math.floor((value-alter)/12)-1;
   if(octave<0||octave>9)unsupported('a pitch outside octaves 0–9');
-  return element('pitch',element('step',step)+(alter?element('alter',alter):'')+element('octave',octave));
+  return {pitch:element('pitch',element('step',step)+(alter?element('alter',alter):'')+element('octave',octave)),accidental};
 }
 function tuningStep(value:number){
   if(!Number.isInteger(value)||value<12||value>127)unsupported('a tuning outside octaves 0–9');
@@ -54,19 +64,19 @@ function beatTicks(beat:model.Beat){
 // Fields this slice writes, or derived/layout fields; every other field must keep
 // the default of a pristine model object so nothing is silently lost.
 const written={
-  score:new Set(['title','artist','words','copyright','masterbars','tracks','stylesheet','defaultsystemslayout','systemslayout']),
-  // No dynamics are written: alphaTab's importer hides them for files without any,
-  // and note dynamics are checked per note.
-  stylesheet:new Set(['hidedynamics']),
-  master:new Set(['isrepeatstart','repeatcount','timesignaturenumerator','timesignaturedenominator','timesignaturecommon','tempoautomations','start','displayscale','displaywidth']),
+  // Presentation is not written: colours (style) and every stylesheet display choice.
+  score:new Set(['title','artist','words','copyright','masterbars','tracks','stylesheet','style','defaultsystemslayout','systemslayout']),
+  // Beaming rules are display grouping.
+  master:new Set(['isrepeatstart','repeatcount','timesignaturenumerator','timesignaturedenominator','timesignaturecommon','tempoautomations','start','displayscale','displaywidth','beamingrules']),
   track:new Set(['staves','playbackinfo','name','shortname','color','defaultsystemslayout','systemslayout','isvisibleonmultitrack']),
-  // Mute and solo are player state, not notation.
-  playback:new Set(['program','primarychannel','secondarychannel','volume','balance','ismute','issolo']),
+  // Mute and solo are player state and the port is MIDI routing, not notation.
+  playback:new Set(['program','primarychannel','secondarychannel','volume','balance','ismute','issolo','port']),
   staff:new Set(['bars','stringtuning','displaytranspositionpitch','showtablature','showstandardnotation','standardnotationlinecount']),
   bar:new Set(['id','clef','clefottava','voices','keysignature','keysignaturetype','displayscale','displaywidth']),
   voice:new Set(['id','beats']),
-  beat:new Set(['id','notes','isempty','duration','dots','tupletnumerator','tupletdenominator','automations','displaystart','playbackstart','displayduration','playbackduration','overridedisplayduration']),
-  note:new Set(['id','fret','string','octave','tone','istiedestination','tiedestinationnoteid','tieoriginnoteid']),
+  // Stem direction is display; dynamics are written as directions.
+  beat:new Set(['id','notes','isempty','duration','dots','tupletnumerator','tupletdenominator','automations','displaystart','playbackstart','displayduration','playbackduration','overridedisplayduration','preferredbeamdirection','dynamics']),
+  note:new Set(['id','fret','string','octave','tone','istiedestination','tiedestinationnoteid','tieoriginnoteid','accidentalmode','dynamics']),
 };
 type Json=Record<string,unknown>;
 const toJson=(score:model.Score):Json=>{const value:unknown=model.JsonConverter.scoreToJson(score);return (typeof value==='string'?JSON.parse(value):value) as Json;};
@@ -79,17 +89,14 @@ function defaults(){
   const beat=new model.Beat();voice.addBeat(beat);const note=new model.Note();note.octave=4;beat.addNote(note);
   score.finish(new Settings());
   const json=toJson(score),tracks=json.tracks as Json[],staves=tracks[0].staves as Json[],bars=staves[0].bars as Json[],voices=bars[0].voices as Json[],beats=voices[0].beats as Json[];
-  pristine={score:json,stylesheet:json.stylesheet as Json,master:(json.masterbars as Json[])[0],track:tracks[0],playback:tracks[0].playbackinfo as Json,staff:staves[0],bar:bars[0],voice:voices[0],beat:beats[0],note:(beats[0].notes as Json[])[0]};
+  pristine={score:json,master:(json.masterbars as Json[])[0],track:tracks[0],playback:tracks[0].playbackinfo as Json,staff:staves[0],bar:bars[0],voice:voices[0],beat:beats[0],note:(beats[0].notes as Json[])[0]};
   return pristine;
 }
-// An excerpt keeps the stylesheet's per-track maps and sets, emptied for unexported
-// tracks; alphaTab reads an empty one exactly like none.
-const normalized=(kind:string,key:string,value:unknown)=>JSON.stringify(kind==='stylesheet'&&key.startsWith('pertrack')&&value&&typeof value==='object'&&!Object.keys(value).length?null:value??null);
 function check(kind:keyof typeof written,value:Json){
   const base=defaults()[kind];
   for(const key of new Set([...Object.keys(base),...Object.keys(value)])){
     if(written[kind].has(key))continue;
-    if(normalized(kind,key,value[key])!==normalized(kind,key,base[key]))unsupported(`${kind} ${key}`);
+    if(JSON.stringify(value[key]??null)!==JSON.stringify(base[key]??null))unsupported(`${kind} ${key}`);
   }
 }
 
@@ -105,15 +112,27 @@ function time(master:model.MasterBar){
   return element('time',element('beats',master.timeSignatureNumerator)+element('beat-type',master.timeSignatureDenominator),symbol);
 }
 function tempoDirection(change:model.Automation,master:model.MasterBar){
-  if(change.text)unsupported('tempo text');
   if(change.isLinear)unsupported('gradual tempo changes');
   const tick=Number((change.ratioPosition*master.calculateDuration()).toFixed(6));
   if(!Number.isInteger(tick))unsupported('a tempo change between ticks');
-  return element('direction',element('direction-type',element('metronome',element('beat-unit','quarter')+element('per-minute',number(change.value)),change.isVisible?'':' print-object="no"'))
+  // A hidden tempo keeps its label hidden too.
+  return element('direction',(change.text&&change.isVisible?element('direction-type',element('words',escape(change.text))):'')+element('direction-type',element('metronome',element('beat-unit','quarter')+element('per-minute',number(change.value)),change.isVisible?'':' print-object="no"'))
     +(tick?element('offset',tick,' sound="yes"'):'')+`<sound tempo="${number(change.value)}"/>`,' placement="above"');
 }
 
-function writePart(track:model.Track,score:model.Score,json:Json,scoreJson:Json,first:boolean){
+// TabPlayer's track-mix scale is 0–16; MusicXML volume is a percentage and pan is in degrees.
+function mixDirection(change:model.Automation,master:model.MasterBar,instrument:string,staff:string){
+  if(change.isLinear)unsupported('gradual mix changes');
+  if(change.text)unsupported('mix text');
+  const tick=Number((change.ratioPosition*master.calculateDuration()).toFixed(6));
+  if(!Number.isInteger(tick))unsupported('a mix change between ticks');
+  const value=change.type===model.AutomationType.Volume?element('volume',number(change.value*100/16)):element('pan',number(change.value*180/16-90));
+  return element('direction',element('direction-type','<words/>')+(tick?element('offset',tick,' sound="yes"'):'')+staff+element('sound',element('midi-instrument',value,` id="${instrument}"`)));
+}
+
+function writePart(track:model.Track,score:model.Score,json:Json,scoreJson:Json,first:boolean,instrument:string,state:{dynamic:model.DynamicValue;started:boolean}){
+  state.started=false;
+  const mix=trackMixAutomations(track);
   check('track',json);check('playback',json.playbackinfo as Json);
   if(track.staves.length!==1)unsupported('more than one staff per track');
   const staff=track.staves[0],staffJson=(json.staves as Json[])[0];check('staff',staffJson);
@@ -151,6 +170,7 @@ function writePart(track:model.Track,score:model.Score,json:Json,scoreJson:Json,
       if(index===0&&!tempos.some(change=>change.ratioPosition===0))tempos.unshift(Object.assign(new model.Automation(),{type:model.AutomationType.Tempo,value:score.tempo,ratioPosition:0,isVisible:true}));
       content+=tempos.map(change=>tempoDirection(change,master)).join('');
     }
+    content+=mix.filter(point=>point.bar===index).map(point=>mixDirection(point.automation,master,instrument,layouts[0].staff?element('staff',layouts[0].staff):'')).join('');
     // Every voice is checked, including empty ones, which can still hold beat state.
     const voices:{notes:string;total:number}[][]=layouts.map(()=>[]);
     const staffOf=(layout:typeof layouts[number])=>layout.staff?element('staff',layout.staff):'';
@@ -163,11 +183,20 @@ function writePart(track:model.Track,score:model.Score,json:Json,scoreJson:Json,
         const beatJson=(voiceJson.beats as Json[])[beat.index];check('beat',beatJson);
         if(beat.graceType!==model.GraceType.None)unsupported('grace notes');
         const start=index===0&&voice.index===0&&beat.index===0;
-        if(beat.automations.some(change=>!(start&&change.type===model.AutomationType.Instrument&&change.value===track.playbackInfo.program)))unsupported('beat automations');
+        // Volume/Balance points are written as mix directions from the track's mix stream.
+        if(beat.automations.some(change=>change.type!==model.AutomationType.Volume&&change.type!==model.AutomationType.Balance&&!(start&&change.type===model.AutomationType.Instrument&&change.value===track.playbackInfo.program)))unsupported('beat automations');
         // An empty voice can still carry (for example invisible) notes alphaTab does not draw.
         if(voice.isEmpty){if(beat.notes.length)unsupported('notes in an empty voice');continue;}
         if(beat.isEmpty)unsupported('an empty beat inside a voice');
         const voiceNumber=(layout:typeof layouts[number])=>element('voice',voice.index+1+layout.voices);
+        if(beat.notes.some(note=>note.dynamics!==beat.dynamics))unsupported('note dynamics differing from their beat');
+        // alphaTab imports dynamics as one running state for the whole file (from F),
+        // but in MusicXML each part's dynamics are its own, so every part states its start.
+        const opening=!state.started;state.started=true;
+        if(beat.dynamics!==state.dynamic||(opening&&beat.dynamics!==model.DynamicValue.F)){
+          const name=(model.DynamicValue[beat.dynamics]??unsupported('this dynamic')).toLowerCase();
+          notes[0]+=element('direction',element('direction-type',element('dynamics',`<${name}/>`))+staffOf(layouts[0]),' placement="below"');state.dynamic=beat.dynamics;
+        }
         // alphaTab stretches a lone whole rest over any meter: a measure rest.
         if(voice.beats.length===1&&!beat.notes.length&&beat.duration===model.Duration.Whole&&!beat.dots&&!beat.hasTuplet&&beat.displayDuration===length){
           layouts.forEach((layout,at)=>{notes[at]+=element('note','<rest measure="yes"/>'+element('duration',length)+voiceNumber(layout)+staffOf(layout));});total=length;continue;
@@ -181,7 +210,7 @@ function writePart(track:model.Track,score:model.Score,json:Json,scoreJson:Json,
         const sorted=[...beat.notes].sort((a,b)=>a.realValue-b.realValue);
         for(const [noteIndex,note] of sorted.entries()){
           check('note',(beatJson.notes as Json[])[note.index]);
-          const written=pitch(note.calculateRealValue(false,false)-transpose,bar.keySignature);
+          const written=pitch(note.calculateRealValue(false,false)-transpose,bar.keySignature,note.accidentalMode);
           layouts.forEach((layout,at)=>{
             const open=ties[at],links:[string,number][]=[];
             if(note.isTieDestination){
@@ -194,7 +223,8 @@ function writePart(track:model.Track,score:model.Score,json:Json,scoreJson:Json,
             }
             const technical=layout.technical&&note.isStringed?element('technical',element('string',strings.length-note.string+1)+element('fret',note.fret)):'';
             const tied=links.map(([type,level])=>`<tied type="${type}" number="${level}"/>`).join('');
-            notes[at]+=element('note',(noteIndex?'<chord/>':'')+written+rhythm(layout).replace('</duration>',`</duration>${links.map(([type])=>`<tie type="${type}"/>`).join('')}`)
+            const timing=rhythm(layout).replace('</duration>',`</duration>${links.map(([type])=>`<tie type="${type}"/>`).join('')}`),cut=timing.search(/<time-modification>|<staff>/);
+            notes[at]+=element('note',(noteIndex?'<chord/>':'')+written.pitch+(cut<0?timing+written.accidental:timing.slice(0,cut)+written.accidental+timing.slice(cut))
               +(tied||technical?element('notations',tied+technical):''));
           });
         }
@@ -213,15 +243,17 @@ function writePart(track:model.Track,score:model.Score,json:Json,scoreJson:Json,
 export function exportMusicXml(score:model.Score,selection:ExportSelection):Uint8Array {
   // Lyrics (including hidden ones) live in TabPlayer's own sources, outside the model data.
   if(selection.tracks.some(index=>getLyricsSource(score.tracks[index])?.value.lines.some(line=>line.text.trim())))unsupported('lyrics');
-  const copy=selectScore(score,selection),json=toJson(copy);check('score',json);check('stylesheet',json.stylesheet as Json);
+  const copy=selectScore(score,selection),json=toJson(copy);check('score',json);
   if(copy.tracks.some(track=>track.staves.some(staff=>staff.transpositionPitch!==0)))unsupported('sounding transposition');
+  // alphaTab's import keeps one running dynamic across all parts in document order.
+  const state={dynamic:model.DynamicValue.F,started:false};
   const parts=copy.tracks.map((track,index)=>{
     const info=track.playbackInfo,id=`P${index+1}`;
     if(info.primaryChannel<0||info.primaryChannel>15)unsupported('MIDI channels above 16');
     return {
       list:element('score-part',element('part-name',escape(track.name))+(track.shortName?element('part-abbreviation',escape(track.shortName)):'')+element('score-instrument',element('instrument-name',escape(track.name)),` id="${id}-I1"`)
         +element('midi-instrument',element('midi-channel',info.primaryChannel+1)+element('midi-program',info.program+1)+element('volume',number(info.volume*100/16))+element('pan',number(info.balance*180/16-90)),` id="${id}-I1"`),` id="${id}"`),
-      body:element('part',writePart(track,copy,(json.tracks as Json[])[index],json,index===0),` id="${id}"`),
+      body:element('part',writePart(track,copy,(json.tracks as Json[])[index],json,index===0,`${id}-I1`,state),` id="${id}"`),
     };
   });
   const identification=[copy.artist?element('creator',escape(copy.artist),' type="composer"'):'',copy.words?element('creator',escape(copy.words),' type="lyricist"'):'',copy.copyright?element('rights',escape(copy.copyright)):''].join('');

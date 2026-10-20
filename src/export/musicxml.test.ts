@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { readFileSync } from 'node:fs';
 import { describe,expect,it } from 'vitest';
 import { model,Settings } from '@coderline/alphatab';
 import { strFromU8,strToU8 } from 'fflate';
@@ -142,6 +143,55 @@ describe('MusicXML export',()=>{
     expect(music(staff,true)).toEqual(music(score.tracks[0].staves[0],true));
   });
 
+  it('writes tempo text, dynamics changes, forced accidentals and mix points',()=>{
+    const score=piano(),voice=score.tracks[0].staves[0].bars[0].voices[0];
+    score.masterBars[0].tempoAutomations[0].text='Moderate';
+    // B♭4 forced sharp is A♯4; the F4 gets a courtesy natural and is played piano.
+    voice.beats[0].notes[0].accidentalMode=model.NoteAccidentalMode.ForceSharp;
+    voice.beats[1].notes[0].accidentalMode=model.NoteAccidentalMode.ForceNatural;
+    voice.beats[1].dynamics=model.DynamicValue.P;voice.beats[1].notes[0].dynamics=model.DynamicValue.P;
+    voice.beats[0].automations.push(Object.assign(new model.Automation(),{type:model.AutomationType.Volume,value:8,ratioPosition:.5}));
+    const doc=parse(exportMusicXml(score,selectAll(score)));
+    expect([...doc.querySelectorAll('direction')].map(node=>[...node.querySelectorAll('direction-type > *')].map(type=>type.localName==='dynamics'?type.firstElementChild?.localName:type.localName).join('+'))).toEqual(['words+metronome','words','p','f']);
+    expect(doc.querySelector('direction words')?.textContent).toBe('Moderate');
+    const mix=[...doc.querySelectorAll('direction')].find(node=>node.querySelector('midi-instrument'))!;
+    expect([mix.querySelector('offset')?.textContent,mix.querySelector('offset')?.getAttribute('sound'),mix.querySelector('midi-instrument')?.getAttribute('id'),mix.querySelector('volume')?.textContent]).toEqual(['1920','yes','P1-I1','50']);
+    expect([...doc.querySelectorAll('note')].map(note=>`${note.querySelector('step')?.textContent}${note.querySelector('alter')?.textContent??''}:${note.querySelector('accidental')?.textContent??''}`)).toEqual(['A1:sharp','F:natural','F:']);
+    const back=loadInterchangeScore(exportMusicXml(score,selectAll(score)),settings),beats=back.tracks[0].staves[0].bars[0].voices[0].beats;
+    expect(beats.map(beat=>[beat.dynamics,beat.notes[0].realValue,beat.notes[0].accidentalMode])).toEqual([[model.DynamicValue.F,70,model.NoteAccidentalMode.ForceSharp],[model.DynamicValue.P,65,model.NoteAccidentalMode.ForceNatural]]);
+    // alphaTab re-imports tempo <words> as beat text, not tempo text.
+    expect(back.tracks[0].staves[0].bars[0].voices[0].beats[0].text).toBe('Moderate');
+    expect(back.tracks[0].staves[0].bars[0].voices[0].beats[0].automations.filter(a=>a.type===model.AutomationType.Volume).map(a=>[a.value,a.ratioPosition])).toEqual([[8,.5]]);
+  });
+
+  it('writes the opening dynamic of every part',()=>{
+    const score=build({copies:2,bars:[{numerator:4,denominator:4,voices:[[{duration:half,notes:[{octave:5,tone:0}]},{duration:half,notes:[{octave:5,tone:2}]}]]}]});
+    for(const track of score.tracks)for(const beat of track.staves[0].bars[0].voices[0].beats){beat.dynamics=model.DynamicValue.P;beat.notes[0].dynamics=model.DynamicValue.P;}
+    const doc=parse(exportMusicXml(score,{tracks:[0,1],range:null}));
+    // Dynamics belong to their part in MusicXML: each part states its opening dynamic.
+    expect([...doc.querySelectorAll('part')].map(part=>part.querySelectorAll('dynamics').length)).toEqual([1,1]);
+    expect(loadInterchangeScore(exportMusicXml(score,{tracks:[0,1],range:null}),settings).tracks.map(track=>track.staves[0].bars[0].voices[0].beats.map(beat=>beat.dynamics))).toEqual([[model.DynamicValue.P,model.DynamicValue.P],[model.DynamicValue.P,model.DynamicValue.P]]);
+  });
+
+  // Real Guitar Pro files, as used by the compatibility suite.
+  const gp=(name:string)=>loadInterchangeScore(new Uint8Array(readFileSync(`${process.cwd()}/.analysis/compatibility/${name}`)),settings);
+  it.each(['guitarpro3-notes.gp3','guitarpro4-notes.gp4','guitarpro5-notes.gp5','guitarpro6-notes.gpx','guitarpro7-notes.gp','guitarpro8-beat-tempo-change.gp'])('exports and re-imports %s',name=>{
+    const score=gp(name),back=loadInterchangeScore(exportMusicXml(score,selectAll(score)),settings);
+    const music=(value:model.Score)=>value.tracks[0].staves[0].bars.map(bar=>bar.voices.filter(voice=>!voice.isEmpty).map(voice=>voice.beats.map(beat=>[beat.displayDuration,beat.dynamics,...beat.notes.map(note=>note.realValue).sort()])));
+    expect(music(back)).toEqual(music(score));
+    // GP files may repeat a tempo at one position; the importer keeps one. Tempo text
+    // is written as <words>, which alphaTab reads back as beat text.
+    const tempos=(value:model.Score)=>value.masterBars.map(bar=>[...new Set(bar.tempoAutomations.map(change=>`${change.value}@${change.ratioPosition}`))]);
+    expect(tempos(back)).toEqual(tempos(score));
+    const texts=score.masterBars.flatMap(bar=>bar.tempoAutomations.map(change=>change.text).filter(Boolean));
+    expect([...parse(exportMusicXml(score,selectAll(score))).querySelectorAll('direction words')].map(node=>node.textContent).filter(Boolean)).toEqual(texts);
+  });
+
+  it('still refuses Guitar Pro bends',()=>{
+    const score=gp('guitarpro7-bends.gp');
+    expect(()=>exportMusicXml(score,selectAll(score))).toThrow(/note bend/);
+  });
+
   it('round-trips the guitar part through the importer',()=>{
     const score=guitar(),back=loadInterchangeScore(exportMusicXml(score,selectAll(score)),settings);
     expect(content(back)).toEqual(content(score));
@@ -178,14 +228,15 @@ describe('MusicXML export',()=>{
     ['alternate endings',/master alternateendings/,(score:model.Score)=>{score.masterBars[1].alternateEndings=1;}],
     ['a section',/master section/,(score:model.Score)=>{score.masterBars[0].section=Object.assign(new model.Section(),{text:'Verse',marker:'A'});}],
     ['a sounding transposition',/sounding transposition|staff transpositionpitch/,(score:model.Score)=>{score.tracks[0].staves[0].transpositionPitch=2;}],
-    ['a volume automation',/beat automations/,(score:model.Score)=>{score.tracks[0].staves[0].bars[0].voices[0].beats[1].automations.push(Object.assign(new model.Automation(),{type:model.AutomationType.Volume,value:8}));}],
+    ['a later instrument change',/beat automations/,(score:model.Score)=>{score.tracks[0].staves[0].bars[0].voices[0].beats[1].automations.push(Object.assign(new model.Automation(),{type:model.AutomationType.Instrument,value:30}));}],
+    ['a gradual mix change',/gradual mix/,(score:model.Score)=>{score.tracks[0].staves[0].bars[0].voices[0].beats[1].automations.push(Object.assign(new model.Automation(),{type:model.AutomationType.Volume,value:8,isLinear:true}));}],
     ['a stringed staff shown only as standard notation',/stringed staff shown only as standard notation/,(score:model.Score)=>{score.tracks[0].staves[0].showStandardNotation=true;score.tracks[0].staves[0].showTablature=false;}],
-    ['a forced accidental',/note accidentalmode/,(score:model.Score)=>{score.tracks[0].staves[0].bars[0].voices[0].beats[0].notes[0].accidentalMode=model.NoteAccidentalMode.ForceFlat;}],
-    ['tempo text',/tempo text/,(score:model.Score)=>{score.masterBars[1].tempoAutomations[0].text='Slower';}],
+    ['a hidden accidental',/this accidental mode/,(score:model.Score)=>{score.tracks[0].staves[0].bars[0].voices[0].beats[0].notes[0].accidentalMode=model.NoteAccidentalMode.ForceNone;}],
+    ['a forced accidental the pitch cannot take',/forced accidental this pitch cannot take/,(score:model.Score)=>{score.tracks[0].staves[0].bars[0].voices[0].beats[2].notes[0].accidentalMode=model.NoteAccidentalMode.ForceSharp;}],
+    ['note dynamics differing from the beat',/note dynamics differing/,(score:model.Score)=>{score.tracks[0].staves[0].bars[0].voices[0].beats[0].notes[0].dynamics=model.DynamicValue.PP;}],
     ['a gradual tempo change',/gradual tempo/,(score:model.Score)=>{score.masterBars[1].tempoAutomations[0].isLinear=true;}],
     ['a MIDI bank',/playback bank/,(score:model.Score)=>{score.tracks[0].playbackInfo.bank=1;}],
     ['a MIDI channel above 16',/MIDI channels above 16/,(score:model.Score)=>{score.tracks[0].playbackInfo.primaryChannel=16;}],
-    ['a stylesheet setting',/stylesheet extendbarlines/,(score:model.Score)=>{score.stylesheet.extendBarLines=!score.stylesheet.extendBarLines;}],
     ['hidden lyrics',/lyrics/,(score:model.Score)=>{setLyricsSource(score.tracks[0],{visible:false,lines:[{startBar:0,text:'la la'}]},false);}],
     ['an unrepresentable tuning',/tuning outside octaves/,(score:model.Score)=>{score.tracks[0].staves[0].stringTuning.tunings=[64,59,55,50,45,-5];}],
     ['a control character in the title',/control characters/,(score:model.Score)=>{score.title='Bad\u0001title';}],
@@ -221,7 +272,8 @@ describe('MusicXML export',()=>{
     const score=build({copies:2,bars:[{numerator:4,denominator:4,voices:[[{duration:model.Duration.Whole,notes:[{octave:5,tone:0}]}]]}]});
     score.stylesheet.perTrackDisplayTuning=new Map([[1,false]]);score.stylesheet.perTrackMultiBarRest=new Set([1]);
     expect(()=>exportMusicXml(score,{tracks:[0],range:null})).not.toThrow();
-    expect(()=>exportMusicXml(score,{tracks:[1],range:null})).toThrow(/stylesheet pertrack/);
+    // Stylesheet display choices are presentation and are not written.
+    expect(()=>exportMusicXml(score,{tracks:[1],range:null})).not.toThrow();
   });
 
   it('refuses notes in an empty voice and empty beats inside a voice',()=>{
@@ -235,7 +287,7 @@ describe('MusicXML export',()=>{
     const score=build({bars:[{numerator:4,denominator:4,voices:[[{duration:model.Duration.Whole,empty:true}],[{duration:model.Duration.Whole,notes:[{octave:5,tone:0}]}]]}]});
     const doc=parse(exportMusicXml(score,selectAll(score)));
     expect(texts(doc,'note > voice')).toEqual(['2']);
-    score.tracks[0].staves[0].bars[0].voices[0].beats[0].automations.push(Object.assign(new model.Automation(),{type:model.AutomationType.Volume,value:8}));
+    score.tracks[0].staves[0].bars[0].voices[0].beats[0].automations.push(Object.assign(new model.Automation(),{type:model.AutomationType.Instrument,value:30}));
     expect(()=>exportMusicXml(score,selectAll(score))).toThrow(/beat automations/);
   });
 

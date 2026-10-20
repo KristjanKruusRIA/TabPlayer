@@ -109,6 +109,38 @@ describe('MusicXML export',()=>{
     expect([...doc.querySelectorAll('direction')].map(node=>[node.querySelector('metronome > per-minute')?.textContent,node.querySelector('sound')?.getAttribute('tempo'),node.querySelector('offset')?.textContent??null,node.querySelector('offset')?.getAttribute('sound')??null])).toEqual([['120','120',null,null],['90','90','960','yes']]);
   });
 
+  // alphaTab draws one stringed staff as notation and TAB; MusicXML needs two staves.
+  const notationAndTab=()=>{const score=guitar(),staff=score.tracks[0].staves[0];staff.showStandardNotation=true;for(const bar of staff.bars)bar.clefOttava=model.Ottavia._8vb;return score;};
+  it('writes a notation + TAB guitar as one part with two staves',()=>{
+    const doc=parse(exportMusicXml(notationAndTab(),selectAll(notationAndTab())));
+    expect(texts(doc,'attributes > staves')).toEqual(['2']);
+    expect([...doc.querySelectorAll('attributes > clef')].map(node=>`${node.getAttribute('number')}:${node.querySelector('sign')?.textContent}${node.querySelector('line')?.textContent}${node.querySelector('clef-octave-change')?.textContent??''}`)).toEqual(['1:G2-1','2:TAB5']);
+    expect([...doc.querySelectorAll('attributes > staff-details')].map(node=>`${node.getAttribute('number')}:${node.firstElementChild?.localName}=${node.querySelector('staff-type')?.textContent}:${node.querySelector('staff-lines')?.textContent}`)).toEqual(['2:staff-type=alternate:6']);
+    const notes=[...doc.querySelectorAll('note')];
+    expect(notes.length).toBe(26);
+    // Each measure: the staff-1 voice, a backup to the bar start, then the staff-2 copy.
+    expect(notes.map(note=>`${note.querySelector('staff')?.textContent}/${note.querySelector('voice')?.textContent}`)).toEqual([...Array(6).fill('1/1'),...Array(6).fill('2/5'),...Array(7).fill('1/1'),...Array(7).fill('2/5')]);
+    expect(texts(doc,'backup > duration')).toEqual(['3840','2880']);
+    expect(notes.filter(note=>note.querySelector('technical')).every(note=>note.querySelector('staff')?.textContent==='2')).toBe(true);
+    expect(notes.filter(note=>note.querySelector('technical')).length).toBe(12);
+    expect(notes.map(note=>[...note.querySelectorAll('tied')].map(tie=>`${tie.getAttribute('type')}${tie.getAttribute('number')}`).join()).filter(Boolean)).toEqual(['start1','start3','start5','start2','start4','start6','stop1','stop3','stop5','stop2','stop4','stop6']);
+  });
+
+  it('refuses a fifth voice on a notation + TAB staff',()=>{
+    const whole=(fret:number)=>[{duration:model.Duration.Whole,notes:[{string:1,fret}]}];
+    const score=build({strings:[64,59,55,50,45,40],bars:[{numerator:4,denominator:4,voices:[0,1,2,3,4].map(whole)}]});
+    score.tracks[0].staves[0].showStandardNotation=true;
+    expect(()=>exportMusicXml(score,selectAll(score))).toThrow(/more than four voices/);
+  });
+
+  it('round-trips a notation + TAB guitar into both staves',()=>{
+    const score=notationAndTab(),back=loadInterchangeScore(exportMusicXml(score,selectAll(score)),settings);
+    const music=(staff:model.Staff,stringed:boolean)=>staff.bars.map(bar=>bar.voices.filter(voice=>!voice.isEmpty).map(voice=>voice.beats.map(beat=>[beat.displayDuration,...beat.notes.map(note=>[note.realValue,stringed?`${note.string}/${note.fret}`:null,note.isTieDestination]).sort((a,b)=>Number(a[0])-Number(b[0]))])));
+    expect(back.tracks[0].staves.length).toBe(2);
+    expect(music(back.tracks[0].staves[0],false)).toEqual(music(score.tracks[0].staves[0],false));
+    expect(music(back.tracks[0].staves[1],true)).toEqual(music(score.tracks[0].staves[0],true));
+  });
+
   it('round-trips the guitar part through the importer',()=>{
     const score=guitar(),back=loadInterchangeScore(exportMusicXml(score,selectAll(score)),settings);
     expect(content(back)).toEqual(content(score));
@@ -146,7 +178,7 @@ describe('MusicXML export',()=>{
     ['a section',/master section/,(score:model.Score)=>{score.masterBars[0].section=Object.assign(new model.Section(),{text:'Verse',marker:'A'});}],
     ['a sounding transposition',/sounding transposition|staff transpositionpitch/,(score:model.Score)=>{score.tracks[0].staves[0].transpositionPitch=2;}],
     ['a volume automation',/beat automations/,(score:model.Score)=>{score.tracks[0].staves[0].bars[0].voices[0].beats[1].automations.push(Object.assign(new model.Automation(),{type:model.AutomationType.Volume,value:8}));}],
-    ['standard notation on a stringed staff',/stringed staff shown as standard notation/,(score:model.Score)=>{score.tracks[0].staves[0].showStandardNotation=true;}],
+    ['a stringed staff shown only as standard notation',/stringed staff shown only as standard notation/,(score:model.Score)=>{score.tracks[0].staves[0].showStandardNotation=true;score.tracks[0].staves[0].showTablature=false;}],
     ['a forced accidental',/note accidentalmode/,(score:model.Score)=>{score.tracks[0].staves[0].bars[0].voices[0].beats[0].notes[0].accidentalMode=model.NoteAccidentalMode.ForceFlat;}],
     ['tempo text',/tempo text/,(score:model.Score)=>{score.masterBars[1].tempoAutomations[0].text='Slower';}],
     ['a gradual tempo change',/gradual tempo/,(score:model.Score)=>{score.masterBars[1].tempoAutomations[0].isLinear=true;}],

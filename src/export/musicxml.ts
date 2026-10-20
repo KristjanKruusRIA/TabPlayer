@@ -93,12 +93,12 @@ function check(kind:keyof typeof written,value:Json){
   }
 }
 
-function clef(bar:model.Bar,tab:boolean){
-  if(tab)return element('clef',element('sign','TAB')+element('line',5));
+function clef(bar:model.Bar,tab:boolean,number=''){
+  if(tab)return element('clef',element('sign','TAB')+element('line',5),number);
   const signs:Partial<Record<model.Clef,[string,number]>>={[model.Clef.G2]:['G',2],[model.Clef.F4]:['F',4],[model.Clef.C3]:['C',3],[model.Clef.C4]:['C',4]};
   const sign=signs[bar.clef]??unsupported('this clef');
   const change=bar.clefOttava===model.Ottavia._8vb?-1:bar.clefOttava===model.Ottavia._8va?1:bar.clefOttava===model.Ottavia.Regular?0:unsupported('this clef ottava');
-  return element('clef',element('sign',sign[0])+element('line',sign[1])+(change?element('clef-octave-change',change):''));
+  return element('clef',element('sign',sign[0])+element('line',sign[1])+(change?element('clef-octave-change',change):''),number);
 }
 function time(master:model.MasterBar){
   const symbol=!master.timeSignatureCommon?'':master.timeSignatureNumerator===4&&master.timeSignatureDenominator===4?' symbol="common"':master.timeSignatureNumerator===2&&master.timeSignatureDenominator===2?' symbol="cut"':unsupported('a common-time symbol on this meter');
@@ -119,10 +119,15 @@ function writePart(track:model.Track,score:model.Score,json:Json,scoreJson:Json,
   const staff=track.staves[0],staffJson=(json.staves as Json[])[0];check('staff',staffJson);
   if(staff.isPercussion)unsupported('percussion staves');
   const strings=staff.stringTuning.tunings,stringed=strings.length>0,tab=stringed&&staff.showTablature&&!staff.showStandardNotation;
-  if(stringed&&!tab)unsupported('a stringed staff shown as standard notation');
+  // alphaTab draws one stringed staff as notation and TAB; MusicXML writes that as
+  // two staves (notation, then TAB with voices 5+), as Guitar Pro and MuseScore do.
+  const both=stringed&&staff.showTablature&&staff.showStandardNotation;
+  if(stringed&&!tab&&!both)unsupported('a stringed staff shown only as standard notation');
+  const layouts=both?[{staff:'1',voices:0,technical:false},{staff:'2',voices:4,technical:true}]:[{staff:'',voices:0,technical:true}];
   const transpose=staff.displayTranspositionPitch,octaveChange=Math.trunc(transpose/12),chromatic=transpose-12*octaveChange;
-  // Simultaneous ties (chords) need distinct <tied number> levels to pair unambiguously.
-  const ties=new Map<model.Note,number>();
+  // Overlapping ties need distinct <tied number> levels across the whole part,
+  // both staves included, to pair unambiguously.
+  const ties=layouts.map(()=>new Map<model.Note,number>());
   let measures='',previous:model.Bar|null=null;
   for(const [index,bar] of staff.bars.entries()){
     const master=bar.masterBar,barJson=(staffJson.bars as Json[])[index];check('bar',barJson);check('master',(scoreJson.masterbars as Json[])[master.index]);
@@ -132,8 +137,11 @@ function writePart(track:model.Track,score:model.Score,json:Json,scoreJson:Json,
     if(!previous||previous.keySignature!==bar.keySignature||previous.keySignatureType!==bar.keySignatureType)attributes.push(element('key',element('fifths',bar.keySignature)+element('mode',bar.keySignatureType===model.KeySignatureType.Minor?'minor':'major')));
     const previousMaster=previous?.masterBar;
     if(!previousMaster||previousMaster.timeSignatureNumerator!==master.timeSignatureNumerator||previousMaster.timeSignatureDenominator!==master.timeSignatureDenominator||previousMaster.timeSignatureCommon!==master.timeSignatureCommon)attributes.push(time(master));
-    if(!previous||previous.clef!==bar.clef||previous.clefOttava!==bar.clefOttava)attributes.push(clef(bar,tab));
-    if(!previous&&stringed)attributes.push(element('staff-details',element('staff-lines',strings.length)+strings.map((_,line)=>element('staff-tuning',tuningStep(strings[strings.length-1-line]),` line="${line+1}"`)).join('')));
+    if(!previous&&both)attributes.push(element('staves',2));
+    if(!previous||previous.clef!==bar.clef||previous.clefOttava!==bar.clefOttava)attributes.push(clef(bar,tab,both?' number="1"':''));
+    if(!previous&&both)attributes.push(clef(bar,true,' number="2"'));
+    // The TAB copy shows the same music: W3C's alternate staff type keeps it out of playback.
+    if(!previous&&stringed)attributes.push(element('staff-details',(both?element('staff-type','alternate'):'')+element('staff-lines',strings.length)+strings.map((_,line)=>element('staff-tuning',tuningStep(strings[strings.length-1-line]),` line="${line+1}"`)).join(''),both?' number="2"':''));
     if(!previous&&transpose)attributes.push(element('transpose',element('chromatic',chromatic)+(octaveChange?element('octave-change',octaveChange):'')));
     if(attributes.length)content+=element('attributes',attributes.join(''));
     if(master.isRepeatStart)content+=element('barline',element('bar-style','heavy-light')+'<repeat direction="forward"/>',' location="left"');
@@ -144,10 +152,13 @@ function writePart(track:model.Track,score:model.Score,json:Json,scoreJson:Json,
       content+=tempos.map(change=>tempoDirection(change,master)).join('');
     }
     // Every voice is checked, including empty ones, which can still hold beat state.
-    const voices:{notes:string;total:number}[]=[];
+    const voices:{notes:string;total:number}[][]=layouts.map(()=>[]);
+    const staffOf=(layout:typeof layouts[number])=>layout.staff?element('staff',layout.staff):'';
     for(const voice of bar.voices){
       const voiceJson=(barJson.voices as Json[])[voice.index];check('voice',voiceJson);
-      let notes='',total=0;
+      // Staff 2 numbers its copies 5–8, so staff 1 can hold four voices.
+      if(both&&voice.index>=4&&!voice.isEmpty)unsupported('more than four voices on a notation + TAB staff');
+      const notes=layouts.map(()=>'');let total=0;
       for(const beat of voice.beats){
         const beatJson=(voiceJson.beats as Json[])[beat.index];check('beat',beatJson);
         if(beat.graceType!==model.GraceType.None)unsupported('grace notes');
@@ -156,39 +167,43 @@ function writePart(track:model.Track,score:model.Score,json:Json,scoreJson:Json,
         // An empty voice can still carry (for example invisible) notes alphaTab does not draw.
         if(voice.isEmpty){if(beat.notes.length)unsupported('notes in an empty voice');continue;}
         if(beat.isEmpty)unsupported('an empty beat inside a voice');
-        const voiceNumber=element('voice',voice.index+1);
+        const voiceNumber=(layout:typeof layouts[number])=>element('voice',voice.index+1+layout.voices);
         // alphaTab stretches a lone whole rest over any meter: a measure rest.
         if(voice.beats.length===1&&!beat.notes.length&&beat.duration===model.Duration.Whole&&!beat.dots&&!beat.hasTuplet&&beat.displayDuration===length){
-          notes+=element('note','<rest measure="yes"/>'+element('duration',length)+voiceNumber);total=length;continue;
+          layouts.forEach((layout,at)=>{notes[at]+=element('note','<rest measure="yes"/>'+element('duration',length)+voiceNumber(layout)+staffOf(layout));});total=length;continue;
         }
         const ticks=beatTicks(beat);
         if(beat.displayStart!==total||beat.displayDuration!==ticks)unsupported('a beat whose length differs from its note value');
         total+=ticks;
-        const rhythm=element('duration',ticks)+voiceNumber+element('type',typeNames.get(beat.duration as number)!)+'<dot/>'.repeat(beat.dots)
-          +(beat.hasTuplet?element('time-modification',element('actual-notes',beat.tupletNumerator)+element('normal-notes',beat.tupletDenominator)):'');
-        if(!beat.notes.length){notes+=element('note','<rest/>'+rhythm);continue;}
+        const rhythm=(layout:typeof layouts[number])=>element('duration',ticks)+voiceNumber(layout)+element('type',typeNames.get(beat.duration as number)!)+'<dot/>'.repeat(beat.dots)
+          +(beat.hasTuplet?element('time-modification',element('actual-notes',beat.tupletNumerator)+element('normal-notes',beat.tupletDenominator)):'')+staffOf(layout);
+        if(!beat.notes.length){layouts.forEach((layout,at)=>{notes[at]+=element('note','<rest/>'+rhythm(layout));});continue;}
         const sorted=[...beat.notes].sort((a,b)=>a.realValue-b.realValue);
         for(const [noteIndex,note] of sorted.entries()){
           check('note',(beatJson.notes as Json[])[note.index]);
-          const sounding=note.calculateRealValue(false,false),links:[string,number][]=[];
-          if(note.isTieDestination){
-            const level=note.tieOrigin&&ties.get(note.tieOrigin);if(!level)unsupported('a tie without its origin');
-            ties.delete(note.tieOrigin!);links.push(['stop',level!]);
-          }
-          if(note.tieDestination){
-            const used=new Set(ties.values());let level=1;while(used.has(level))level++;
-            if(level>16)unsupported('more than 16 simultaneous ties');ties.set(note,level);links.push(['start',level]);
-          }
-          const technical=note.isStringed?element('technical',element('string',strings.length-note.string+1)+element('fret',note.fret)):'';
-          const tied=links.map(([type,level])=>`<tied type="${type}" number="${level}"/>`).join('');
-          notes+=element('note',(noteIndex?'<chord/>':'')+pitch(sounding-transpose,bar.keySignature)+rhythm.replace('</duration>',`</duration>${links.map(([type])=>`<tie type="${type}"/>`).join('')}`)
-            +(tied||technical?element('notations',tied+technical):''));
+          const written=pitch(note.calculateRealValue(false,false)-transpose,bar.keySignature);
+          layouts.forEach((layout,at)=>{
+            const open=ties[at],links:[string,number][]=[];
+            if(note.isTieDestination){
+              const level=note.tieOrigin&&open.get(note.tieOrigin);if(!level)unsupported('a tie without its origin');
+              open.delete(note.tieOrigin!);links.push(['stop',level!]);
+            }
+            if(note.tieDestination){
+              const used=new Set(ties.flatMap(levels=>[...levels.values()]));let level=1;while(used.has(level))level++;
+              if(level>16)unsupported('more than 16 simultaneous ties');open.set(note,level);links.push(['start',level]);
+            }
+            const technical=layout.technical&&note.isStringed?element('technical',element('string',strings.length-note.string+1)+element('fret',note.fret)):'';
+            const tied=links.map(([type,level])=>`<tied type="${type}" number="${level}"/>`).join('');
+            notes[at]+=element('note',(noteIndex?'<chord/>':'')+written+rhythm(layout).replace('</duration>',`</duration>${links.map(([type])=>`<tie type="${type}"/>`).join('')}`)
+              +(tied||technical?element('notations',tied+technical):''));
+          });
         }
       }
-      if(notes)voices.push({notes,total});
+      layouts.forEach((_,at)=>{if(notes[at])voices[at].push({notes:notes[at],total});});
     }
-    if(!voices.length)content+=element('note','<rest measure="yes"/>'+element('duration',length)+element('voice',1));
-    voices.forEach(({notes,total},at)=>{content+=notes+(at<voices.length-1?element('backup',element('duration',total)):'');});
+    // Staff 1's voices, then staff 2's; each backup returns to the bar start.
+    const entries=layouts.flatMap((layout,at)=>voices[at].length?voices[at]:[{notes:element('note','<rest measure="yes"/>'+element('duration',length)+element('voice',1+layout.voices)+staffOf(layout)),total:length}]);
+    entries.forEach(({notes,total},at)=>{content+=notes+(at<entries.length-1?element('backup',element('duration',total)):'');});
     if(master.repeatCount>0)content+=element('barline',element('bar-style','light-heavy')+`<repeat direction="backward"${master.repeatCount===2?'':` times="${master.repeatCount}"`}/>`,' location="right"');
     measures+=element('measure',content,` number="${index+1}"`);previous=bar;
   }

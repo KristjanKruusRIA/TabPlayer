@@ -133,12 +133,13 @@ describe('MusicXML export',()=>{
     expect(()=>exportMusicXml(score,selectAll(score))).toThrow(/more than four voices/);
   });
 
-  it('round-trips a notation + TAB guitar into both staves',()=>{
+  it('round-trips a notation + TAB guitar into one staff shown both ways',()=>{
     const score=notationAndTab(),back=loadInterchangeScore(exportMusicXml(score,selectAll(score)),settings);
     const music=(staff:model.Staff,stringed:boolean)=>staff.bars.map(bar=>bar.voices.filter(voice=>!voice.isEmpty).map(voice=>voice.beats.map(beat=>[beat.displayDuration,...beat.notes.map(note=>[note.realValue,stringed?`${note.string}/${note.fret}`:null,note.isTieDestination]).sort((a,b)=>Number(a[0])-Number(b[0]))])));
-    expect(back.tracks[0].staves.length).toBe(2);
-    expect(music(back.tracks[0].staves[0],false)).toEqual(music(score.tracks[0].staves[0],false));
-    expect(music(back.tracks[0].staves[1],true)).toEqual(music(score.tracks[0].staves[0],true));
+    // The import folds the alternate TAB staff back into alphaTab's single stringed staff.
+    const staff=back.tracks[0].staves[0];
+    expect(back.tracks[0].staves.length).toBe(1);expect([staff.showStandardNotation,staff.showTablature]).toEqual([true,true]);
+    expect(music(staff,true)).toEqual(music(score.tracks[0].staves[0],true));
   });
 
   it('round-trips the guitar part through the importer',()=>{

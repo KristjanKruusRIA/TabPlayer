@@ -101,6 +101,49 @@ describe('MusicXML direction volume and pan',()=>{
     expect(automations(score)).toEqual([[model.AutomationType.Volume,4,.25,false]]);
   });
 
+  // Stock alphaTab reads measure-level sounds but truncates to whole sixteenths
+  // (55.5% → 8, −50° → 3); the exact values are 8.88 and 3.5556.
+  const measureVolume=(value:string)=>`<sound><midi-instrument id="P1-I1"><volume>${value}</volume></midi-instrument></sound>`;
+  it('replaces truncated measure-level sound values with exact points',()=>{
+    const score=loadInterchangeScore(strToU8(musicXml(1,{directions:[measureVolume('55.5'),'<sound pan="-50"/>']})),settings);
+    expect(automations(score)).toEqual([[model.AutomationType.Volume,8.88,.25,false],[model.AutomationType.Balance,3.555556,.5,false]]);
+    expect(smfMix(exportMidi(score,{tracks:[0],range:null}))).toEqual([[0,7,96],[0,10,64],[960,7,71],[1920,10,28]]);
+  });
+
+  it('keeps one balance point when a sound has both pan forms',()=>{
+    const score=loadInterchangeScore(strToU8(musicXml(1,{directions:['<sound pan="90"><midi-instrument id="P1-I1"><pan>-45</pan></midi-instrument></sound>']})),settings);
+    expect(automations(score)).toEqual([[model.AutomationType.Balance,4,.25,false]]);
+  });
+
+  it('combines measure-level and direction-level points in source order',()=>{
+    const score=loadInterchangeScore(strToU8(musicXml(1,{directions:[measureVolume('55.5'),pan('-45'),panAttribute('90')]})),settings);
+    expect(automations(score)).toEqual(expectedAutomations);
+    expect(smfMix(exportMidi(score,{tracks:[0],range:null}))).toEqual([[0,7,96],[0,10,64],...expectedMix]);
+  });
+
+  it.each([
+    // A doubtful measure-level pan keeps the stock balance; the direction volume is still added.
+    ['at the bar end',musicXml(1,{directions:[volume('55.5')],tail:'<sound pan="40"/>'})],
+    ['with an offset',musicXml(1,{directions:[volume('55.5'),'<sound pan="40"><offset>1</offset></sound>']})],
+  ])('keeps stock measure-level points but adds direction points for a sound %s',(_name,text)=>{
+    const xml=strToU8(text),stockScore=importer.ScoreLoader.loadScoreFromBytes(xml,settings),score=loadInterchangeScore(xml,settings);
+    const byPosition=(points:unknown[][])=>[...points].sort((a,b)=>Number(a[2])-Number(b[2]));
+    expect(byPosition(automations(score))).toEqual(byPosition([...automations(stockScore),[model.AutomationType.Volume,8.88,.25,false]]));
+  });
+
+  it('adds no fallback direction point of a type a measure-level sound also sets',()=>{
+    // Volume 80 then 30 at the same tick; the doubtful pan 135 forces the fallback.
+    const text=musicXml(1,{directions:[measureVolume('80')+volume('30'),'<sound pan="135"/>']});
+    const xml=strToU8(text);
+    expect(model.JsonConverter.scoreToJson(loadInterchangeScore(xml,settings))).toEqual(model.JsonConverter.scoreToJson(importer.ScoreLoader.loadScoreFromBytes(xml,settings)));
+  });
+
+  it('finds a mix after many self-closing sounds without closing tags',()=>{
+    const dynamics='<direction><direction-type><dynamics><p/></dynamics></direction-type><sound dynamics="54"/></direction>';
+    const text=musicXml(1,{directions:[dynamics+volume('55.5')]}).replace('<work>',`<!--${'<sound dynamics="54"/>'.repeat(2000)}--><work>`);
+    expect(automations(loadInterchangeScore(strToU8(text),settings))).toEqual([[model.AutomationType.Volume,8.88,.25,false]]);
+  });
+
   it('tracks the cursor through backup into a second voice',()=>{
     const tail=`<backup><duration>4</duration></backup><note><rest/><duration>2</duration><voice>2</voice><type>half</type></note>${volume('25')}<note><rest/><duration>2</duration><voice>2</voice><type>half</type></note>`;
     const score=loadInterchangeScore(strToU8(musicXml(1,{directions:[],tail})),settings);

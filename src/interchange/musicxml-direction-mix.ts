@@ -2,16 +2,17 @@ import { model,type Settings } from '@coderline/alphatab';
 import { readMusicXmlSource } from './musicxml-tempo-offsets';
 
 // alphaTab 1.8.4 reads only tempo from a direction's <sound>, so direction-level
-// MIDI volume and pan are lost. This restores them as TabPlayer track-mix
-// points (0–16 scale, fractional) at the direction's musical position, reading
-// the original source. Any doubt leaves the stock import untouched.
+// MIDI volume and pan are lost, and it truncates measure-level ones to whole
+// sixteenths. This places both as exact TabPlayer track-mix points (0–16 scale,
+// fractional) at the sound's musical position, reading the original source.
+// Any doubt leaves the stock import untouched.
 const ticksPerQuarter=960;
 const positiveInteger=(value:string|null|undefined)=>{const text=(value??'').trim();return /^\d+$/.test(text)&&Number(text)>0?Number(text):null;};
 const decimal=(value:string|null|undefined)=>{const text=(value??'').trim();return /^-?(\d+(\.\d+)?|\.\d+)$/.test(text)?Number(text):null;};
 const children=(node:Element,name?:string)=>[...node.children].filter(child=>!name||child.localName===name);
 const child=(node:Element,name:string)=>children(node,name)[0];
 
-type Point={part:number;bar:number;type:model.AutomationType;value:number;tick:number};
+type Point={part:number;bar:number;type:model.AutomationType;value:number;tick:number;measure:boolean};
 // Per part, bar and zero-based staff: the sorted end ticks of the source voices.
 type Layout=Map<string,number[]>;
 type Mix={type:model.AutomationType;value:number}[];
@@ -47,7 +48,21 @@ function directionTick(direction:Element,cursor:number,divisions:number|null):nu
   return divisions===null?null:cursor+value*ticksPerQuarter/divisions;
 }
 
-function plan(doc:Document,score:model.Score):{points:Point[];layout:Layout}|null {
+// The mix types a sound names, whether or not its values are usable.
+function soundTypes(sound:Element){
+  const midi=children(sound,'midi-instrument'),types:model.AutomationType[]=[];
+  if(midi.some(item=>child(item,'volume')))types.push(model.AutomationType.Volume);
+  if(sound.hasAttribute('pan')||midi.some(item=>child(item,'pan')))types.push(model.AutomationType.Balance);
+  return types;
+}
+
+// alphaTab's own points for a measure-level sound: one per volume, pan element and pan attribute.
+function stockCount(sound:Element){
+  const midi=children(sound,'midi-instrument');
+  return (sound.hasAttribute('pan')?1:0)+midi.reduce((count,item)=>count+children(item,'volume').length+children(item,'pan').length,0);
+}
+
+function plan(doc:Document,score:model.Score):{points:Point[];layout:Layout;stock:number[];measureOk:boolean;measureTypes:Set<string>}|null {
   const root=doc.documentElement;
   if(doc.querySelector('parsererror')||root.localName!=='score-partwise')return null;
   // Prefixed or namespaced elements are read differently by alphaTab's parser.
@@ -56,7 +71,7 @@ function plan(doc:Document,score:model.Score):{points:Point[];layout:Layout}|nul
   if(!parts.length||parts.length!==scoreParts.length||parts.length!==score.tracks.length)return null;
   const ids=parts.map(part=>part.getAttribute('id'));
   if(new Set(ids).size!==ids.length||parts.some((part,index)=>ids[index]!==scoreParts[index].getAttribute('id')))return null;
-  const points:Point[]=[],layout:Layout=new Map();let found=false;
+  const points:Point[]=[],layout:Layout=new Map(),stock=parts.map(()=>0),measureTypes=new Set<string>();let found=false,measureOk=true;
   for(const [index,part] of parts.entries()){
     const declared=children(scoreParts[index],'score-instrument'),midi=children(scoreParts[index],'midi-instrument');
     // A midi-instrument id names its score-instrument; without one, the part-list midi-instrument.
@@ -87,6 +102,14 @@ function plan(doc:Document,score:model.Score):{points:Point[];layout:Layout}|nul
           // alphaTab ignores a backup before the measure's first note.
           const value=ticks(item);if(value===null||!started&&item.localName==='backup')return null;
           cursor+=item.localName==='forward'?value:-value;if(cursor<0)return null;
+        } else if(item.localName==='sound'){
+          const mix=soundMix(item,instruments);if(mix===undefined)continue;
+          // A doubtful measure-level sound keeps every stock measure-level point.
+          if(mix===null||child(item,'offset')||score.masterBars[bar].isAnacrusis||Math.round(cursor)>=length){
+            measureOk=false;for(const type of soundTypes(item))measureTypes.add(`${index}/${type}`);continue;
+          }
+          for(const value of mix){points.push({part:index,bar,tick:cursor,measure:true,...value});measureTypes.add(`${index}/${value.type}`);}
+          stock[index]+=stockCount(item);found=true;
         } else if(item.localName==='direction'){
           const sounds=children(item,'sound');
           for(const sound of sounds){
@@ -95,7 +118,7 @@ function plan(doc:Document,score:model.Score):{points:Point[];layout:Layout}|nul
             if(mix===null||sounds.length>1||child(sound,'offset')||score.masterBars[bar].isAnacrusis)return null;
             // Controller ticks are rounded, so a target must not round onto the bar end.
             const tick=directionTick(item,cursor,divisions);if(tick===null||tick<0||Math.round(tick)>=length)return null;
-            for(const value of mix)points.push({part:index,bar,tick,...value});
+            for(const value of mix)points.push({part:index,bar,tick,measure:false,...value});
             found=true;
           }
         }
@@ -105,14 +128,25 @@ function plan(doc:Document,score:model.Score):{points:Point[];layout:Layout}|nul
       for(const [key,value] of voices){const staff=`${index}/${bar}/${key.split('/')[0]}`;layout.set(staff,[...layout.get(staff)??[],value].sort((a,b)=>a-b));}
     }
   }
-  return found?{points,layout}:null;
+  return found?{points,layout,stock,measureOk,measureTypes}:null;
 }
 
-// Part-level <volume>/<pan> is common, so only directions carrying them justify a parse.
-function hasDirectionMix(xml:string){
-  for(const match of xml.matchAll(/<direction[\s>][\s\S]*?<\/direction\s*>/g))if(/<(volume|pan)[\s>]|\span\s*=/.test(match[0]))return true;
+// Part-level <volume>/<pan> is common, so only sounds carrying them justify a parse.
+// One pass over opening tags; self-closing ones (common for dynamics) end at once.
+function hasSoundMix(xml:string){
+  let closers=true;
+  for(const match of xml.matchAll(/<sound(?=[\s/>])[^>]*>/g)){
+    const tag=match[0];if(/\span\s*=/.test(tag))return true;
+    if(tag.endsWith('/>')||!closers)continue;
+    const start=match.index!+tag.length,end=xml.indexOf('</sound',start);
+    if(end<0){closers=false;continue;}
+    if(/<(volume|pan)[\s>]/.test(xml.slice(start,end)))return true;
+  }
   return false;
 }
+
+const isMix=(automation:model.Automation)=>automation.type===model.AutomationType.Volume||automation.type===model.AutomationType.Balance;
+const trackBeats=(track:model.Track)=>track.staves.flatMap(staff=>staff.bars.flatMap(bar=>bar.voices.flatMap(voice=>voice.beats)));
 
 // Every model voice must end where its source voice ends. Otherwise alphaTab placed
 // the music differently from the source cursor (dropped or added time).
@@ -128,12 +162,18 @@ function sameVoices(score:model.Score,layout:Layout){
 export function applyMusicXmlDirectionMix(score:model.Score,bytes:Uint8Array,settings:Settings):model.Score {
   try {
     const source=readMusicXmlSource(bytes,settings);
-    if(!source||!hasDirectionMix(source.xml))return score;
+    if(!source||!hasSoundMix(source.xml))return score;
     const planned=plan(new DOMParser().parseFromString(source.xml,'application/xml'),score);if(!planned||!sameVoices(score,planned.layout))return score;
-    const points=planned.points;
+    // Measure-level sounds replace alphaTab's truncated points only when every one is
+    // in the domain and accounts for exactly the stock points; otherwise those stay.
+    const exact=planned.measureOk&&score.tracks.every((track,part)=>trackBeats(track).reduce((count,beat)=>count+beat.automations.filter(isMix).length,0)===planned.stock[part]);
+    // Kept stock points could interleave with direction points of their type, so
+    // the fallback adds only types that no measure-level sound in the part sets.
+    const points=exact?planned.points:planned.points.filter(point=>!point.measure&&!planned.measureTypes.has(`${point.part}/${point.type}`));if(!points.length)return score;
     const owners=points.map(point=>score.tracks[point.part].staves[0]?.bars[point.bar]?.voices[0]?.beats[0]);
     if(owners.some(owner=>!owner))return score;
-    // Every point has an owner before any automation is added.
+    // Every point has an owner before any automation changes.
+    if(exact)for(const track of score.tracks)for(const beat of trackBeats(track))beat.automations=beat.automations.filter(automation=>!isMix(automation));
     points.forEach((point,index)=>owners[index]!.automations.push(Object.assign(new model.Automation(),{type:point.type,value:point.value,ratioPosition:point.tick/score.masterBars[point.bar].calculateDuration(),isLinear:false,isVisible:true,text:''})));
   } catch {
     // Unreadable sources keep the stock import.

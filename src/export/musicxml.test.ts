@@ -187,9 +187,35 @@ describe('MusicXML export',()=>{
     expect([...parse(exportMusicXml(score,selectAll(score))).querySelectorAll('direction words')].map(node=>node.textContent).filter(Boolean)).toEqual(texts);
   });
 
-  it('still refuses Guitar Pro bends',()=>{
-    const score=gp('guitarpro7-bends.gp');
-    expect(()=>exportMusicXml(score,selectAll(score))).toThrow(/note bend/);
+  // Bend curves as distinct quarter-tone values; alphaTab's import respaces offsets evenly.
+  const bendValues=(note:model.Note)=>note.bendPoints?.map(point=>point.value).filter((value,index,all)=>!index||value!==all[index-1])??[];
+  it.each([
+    // alphaTab's Note.finish drops a hold point from a 3-point bend: 0→4 over the note.
+    ['a bend',[[0,0],[30,4],[60,4]],[['2','0','100','']],[0,4]],
+    ['a bend and release',[[0,0],[15,4],[45,4],[60,0]],[['2','0','25',''],['-2','75','100','release']],[0,4,0]],
+    ['a pre-bend',[[0,4],[60,4]],[['-2',null,null,'pre-bend']],[4]],
+    ['a pre-bend and release',[[0,4],[30,4],[60,0]],[['-2',null,null,'pre-bend'],['-2','0','100','release']],[4,0]],
+    ['a half-step bend',[[0,0],[60,2]],[['1','0','100','']],[0,2]],
+  ] as [string,number[][],(string|null)[][],number[]][])('writes %s as MusicXML bends',(_name,points,bends,values)=>{
+    const score=guitar(),note=score.tracks[0].staves[0].bars[0].voices[0].beats[0].notes[0];
+    for(const [offset,value] of points)note.addBendPoint(new model.BendPoint(offset,value));
+    const doc=parse(exportMusicXml(score,selectAll(score)));
+    expect([...doc.querySelectorAll('note')][0].querySelectorAll('technical > bend').length).toBe(bends.length);
+    expect([...[...doc.querySelectorAll('note')][0].querySelectorAll('technical > bend')].map(bend=>[bend.querySelector('bend-alter')?.textContent??null,bend.getAttribute('first-beat'),bend.getAttribute('last-beat'),bend.querySelector('pre-bend,release')?.localName??''])).toEqual(bends);
+    const back=loadInterchangeScore(exportMusicXml(score,selectAll(score)),settings);
+    expect(bendValues(back.tracks[0].staves[0].bars[0].voices[0].beats[0].notes[0])).toEqual(values);
+  });
+
+  it('exports the Guitar Pro bend fixture with its bend shapes',()=>{
+    const score=gp('guitarpro7-bends.gp'),back=loadInterchangeScore(exportMusicXml(score,selectAll(score)),settings);
+    const shapes=(value:model.Score)=>value.tracks[0].staves[0].bars.flatMap(bar=>bar.voices[0].beats.flatMap(beat=>beat.notes.map(note=>[note.realValue,bendValues(note)])));
+    expect(shapes(back)).toEqual(shapes(score));
+  });
+
+  it('refuses bend styles and bends continued over a tie',()=>{
+    const styled=guitar(),note=styled.tracks[0].staves[0].bars[0].voices[0].beats[0].notes[0];
+    note.addBendPoint(new model.BendPoint(0,0));note.addBendPoint(new model.BendPoint(60,4));note.bendStyle=model.BendStyle.Fast;
+    expect(()=>exportMusicXml(styled,selectAll(styled))).toThrow(/note bendstyle|bend style/);
   });
 
   it('round-trips the guitar part through the importer',()=>{

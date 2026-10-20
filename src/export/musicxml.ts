@@ -76,7 +76,8 @@ const written={
   voice:new Set(['id','beats']),
   // Stem direction is display; dynamics are written as directions.
   beat:new Set(['id','notes','isempty','duration','dots','tupletnumerator','tupletdenominator','automations','displaystart','playbackstart','displayduration','playbackduration','overridedisplayduration','preferredbeamdirection','dynamics']),
-  note:new Set(['id','fret','string','octave','tone','istiedestination','tiedestinationnoteid','tieoriginnoteid','accidentalmode','dynamics']),
+  // Bend points are written as <bend> elements (their type is derived from them).
+  note:new Set(['id','fret','string','octave','tone','istiedestination','tiedestinationnoteid','tieoriginnoteid','accidentalmode','dynamics','bendtype','bendpoints']),
 };
 type Json=Record<string,unknown>;
 const toJson=(score:model.Score):Json=>{const value:unknown=model.JsonConverter.scoreToJson(score);return (typeof value==='string'?JSON.parse(value):value) as Json;};
@@ -118,6 +119,21 @@ function tempoDirection(change:model.Automation,master:model.MasterBar){
   // A hidden tempo keeps its label hidden too.
   return element('direction',(change.text&&change.isVisible?element('direction-type',element('words',escape(change.text))):'')+element('direction-type',element('metronome',element('beat-unit','quarter')+element('per-minute',number(change.value)),change.isVisible?'':' print-object="no"'))
     +(tick?element('offset',tick,' sound="yes"'):'')+`<sound tempo="${number(change.value)}"/>`,' placement="above"');
+}
+
+// A bend curve (offsets 0–60, values in quarter tones) as one <bend> per value change:
+// bend-alter in semitones relative to the previous value, negative for pre-bends and
+// releases, with first-beat/last-beat as percentages of the note's duration.
+function bends(note:model.Note){
+  const points=[...note.bendPoints??[]].sort((a,b)=>a.offset-b.offset);
+  if(!points.length)return '';
+  const percent=(offset:number)=>number(offset*100/model.BendPoint.MaxPosition);
+  let result=points[0].value?element('bend',element('bend-alter',number(-points[0].value/2))+'<pre-bend/>'):'';
+  for(let index=1;index<points.length;index++){
+    const from=points[index-1],to=points[index];if(to.value===from.value)continue;
+    result+=element('bend',element('bend-alter',number((to.value-from.value)/2))+(to.value<from.value?'<release/>':''),` first-beat="${percent(from.offset)}" last-beat="${percent(to.offset)}"`);
+  }
+  return result;
 }
 
 // TabPlayer's track-mix scale is 0–16; MusicXML volume is a percentage and pan is in degrees.
@@ -221,7 +237,9 @@ function writePart(track:model.Track,score:model.Score,json:Json,scoreJson:Json,
               const used=new Set(ties.flatMap(levels=>[...levels.values()]));let level=1;while(used.has(level))level++;
               if(level>16)unsupported('more than 16 simultaneous ties');open.set(note,level);links.push(['start',level]);
             }
-            const technical=layout.technical&&note.isStringed?element('technical',element('string',strings.length-note.string+1)+element('fret',note.fret)):'';
+            // Bends sound on every copy; string/fret belongs to the TAB copy.
+            const fingering=layout.technical&&note.isStringed?element('string',strings.length-note.string+1)+element('fret',note.fret):'',bent=bends(note);
+            const technical=fingering||bent?element('technical',bent+fingering):'';
             const tied=links.map(([type,level])=>`<tied type="${type}" number="${level}"/>`).join('');
             const timing=rhythm(layout).replace('</duration>',`</duration>${links.map(([type])=>`<tie type="${type}"/>`).join('')}`),cut=timing.search(/<time-modification>|<staff>/);
             notes[at]+=element('note',(noteIndex?'<chord/>':'')+written.pitch+(cut<0?timing+written.accidental:timing.slice(0,cut)+written.accidental+timing.slice(cut))

@@ -3,9 +3,10 @@ import { strToU8,unzipSync,zipSync } from 'fflate';
 
 // alphaTab 1.8.4 adds a direction <offset> (MusicXML divisions) to its
 // 960-per-quarter tick cursor for sound tempos, metronome marks and pedals,
-// whatever its playback flag. For tempo directions this builds temporary
-// loader bytes in which such offsets are in ticks with sound="yes" and zero
-// otherwise, since the sound then takes effect at the current location.
+// whatever its playback flag. This builds temporary loader bytes in which a
+// tempo offset is in ticks with sound="yes" and zero otherwise (the sound then
+// takes effect at the current location), and a pedal-only offset is always in
+// ticks: TabPlayer only draws pedals, and an offset always moves the drawing.
 // The result is a compatibility shim: never store or export it.
 const ticksPerQuarter=960;
 const musicXmlMedia='application/vnd.recordare.musicxml+xml';
@@ -28,7 +29,7 @@ function meterTicks(attributes:Element):number|null|undefined {
   return lengths.every(length=>length!==null&&length===lengths[0])?lengths[0]:null;
 }
 
-// Returns the new offset text per tempo direction offset alphaTab would misplace,
+// Returns the new offset text per tempo or pedal offset alphaTab would misplace,
 // or null when the score is outside the domain (the caller keeps the input).
 // The cursor follows the rules alphaTab shares with the source; where they part
 // (cue notes, chord rests, an early backup, repeated values) nothing changes.
@@ -42,7 +43,7 @@ function plan(doc:Document):Map<Element,string>|null {
     let divisions:number|null=null,meter:number|null|undefined;const partMeters:(number|null|undefined)[]=[];meters.push(partMeters);
     for(const [index,measure] of children(part).entries()){
       if(measure.localName!=='measure')return null;
-      let cursor=0,end=0,started=false;const flagged:{offset:Element;target:number;text:string}[]=[],voices=new Map<string,number>();
+      let cursor=0,end=0,started=false;const flagged:{offset:Element;target:number;text:string}[]=[],voices=new Map<string,number>(),pedals:{tick:number;moved:boolean}[]=[];
       const ticks=(node:Element)=>{
         const durations=children(node,'duration');if(durations.length!==1||children(node,'voice').length>1||children(node,'staff').length>1)return null;
         const duration=positiveInteger(durations[0].textContent);if(duration===null||divisions===null)return null;
@@ -68,23 +69,28 @@ function plan(doc:Document):Map<Element,string>|null {
           const value=ticks(item);if(value===null||!started&&item.localName==='backup')return null;
           cursor+=item.localName==='forward'?value:-value;if(cursor<0)return null;
         } else if(item.localName==='direction'){
-          // alphaTab uses the offset only for a direction sound's positive tempo.
+          // alphaTab uses the offset only for tempos, metronome marks and pedal markers.
           const sounds=children(item,'sound'),offsets=children(item,'offset'),types=children(item,'direction-type').flatMap(type=>children(type));
           const tempo=sounds.some(sound=>(decimal(sound.getAttribute('tempo'))??0)>0)||types.some(type=>type.localName==='metronome');
-          if(!tempo||!offsets.length)continue;
-          // One offset would move a pedal's display and sustain too; which it means is not guessed.
-          if(types.some(type=>type.localName==='pedal'))return null;
+          const pedal=types.some(type=>type.localName==='pedal'&&['start','stop','continue'].includes(type.getAttribute('type')??''));
+          if(!offsets.length){if(pedal)pedals.push({tick:cursor,moved:false});continue;}
+          if(!tempo&&!pedal)continue;
           if(sounds.length>1||offsets.length>1||sounds.some(sound=>child(sound,'offset')))return null; // nested override: precedence not guessed
           const offset=offsets[0],flag=offset.getAttribute('sound'),value=decimal(offset.textContent);
           if(value===null||(flag!==null&&flag!=='yes'&&flag!=='no'))return null;
-          if(value===0)continue;
-          if(flag!=='yes'){changes.set(offset,'0');continue;}
+          if(value===0){if(pedal)pedals.push({tick:cursor,moved:false});continue;}
+          // A shared tempo keeps its playback rule; a pedal on its own follows its drawing.
+          if(flag!=='yes'&&tempo){changes.set(offset,'0');if(pedal)pedals.push({tick:cursor,moved:false});continue;}
           if(divisions===null)return null;
           const shift=value*ticksPerQuarter/divisions;flagged.push({offset,target:cursor+shift,text:String(shift)});
+          if(pedal)pedals.push({tick:cursor+shift,moved:true});
         }
         end=Math.max(end,cursor);
       }
       partMeters[index]=meter;
+      // alphaTab drops a marker at or before the previous one, so a moved pedal must
+      // stay strictly between its neighbours.
+      if(pedals.some((marker,at)=>at>0&&(marker.moved||pedals[at-1].moved)&&marker.tick<=pedals[at-1].tick))return null;
       if(!flagged.length)continue;
       moved.add(index);
       // A moved tempo must stay inside a complete, explicit measure.

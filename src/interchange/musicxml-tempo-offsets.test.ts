@@ -140,7 +140,9 @@ describe('MusicXML playback tempo offsets',()=>{
     ['a note inside its own voice',musicXml(4).replace('<note><pitch><step>D','<backup><duration>2</duration></backup><note><pitch><step>D').replace('</measure>','<forward><duration>2</duration></forward></measure>')],
     ['a note inside its own voice under a padded staff number',musicXml(4).replace('<note><pitch><step>D','<backup><duration>2</duration></backup><note><pitch><step>D').replace('<duration>4</duration><voice>1</voice><type>quarter</type></note><direction','<duration>4</duration><voice>1</voice><type>quarter</type><staff>01</staff></note><direction').replace('</measure>','<forward><duration>2</duration></forward></measure>')],
     ['a grace note inside its own voice',musicXml(4).replace('<note><pitch><step>D','<backup><duration>2</duration></backup><note><grace/><pitch><step>A</step><octave>4</octave></pitch><voice>1</voice></note><forward><duration>2</duration></forward><note><pitch><step>D')],
-    ['a pedal sharing a tempo direction',musicXml(4).replace('<direction-type><words>Slower</words></direction-type>','<direction-type><words>Slower</words></direction-type><direction-type><pedal type="start"/></direction-type>')],
+    // A stop moved back onto the start at 960 would be dropped by alphaTab.
+    ['a pedal moved onto the previous pedal',musicXml(4).replace('<note><pitch><step>D','<direction><direction-type><pedal type="start"/></direction-type></direction><note><pitch><step>D').replace('<note><pitch><step>F','<direction><direction-type><pedal type="stop"/></direction-type><offset>-8</offset></direction><note><pitch><step>F')],
+    ['a playback pedal offset beyond the bar',musicXml(4).replace('<note><pitch><step>D','<direction><direction-type><pedal type="start"/></direction-type><offset sound="yes">12</offset></direction><note><pitch><step>D')],
     ['parts in different meters',musicXml(4).replace('</part></score-partwise>','</part><part id="P2"><measure number="1"><attributes><divisions>1</divisions><time><beats>3</beats><beat-type>4</beat-type></time></attributes><note><rest/><duration>3</duration></note></measure></part></score-partwise>').replace('</part-list>','<score-part id="P2"><part-name>Bass</part-name></score-part></part-list>')],
     ['prefixed element',musicXml(4,{extra:'<x:note xmlns:x="urn:example"/>'})],
     ['non-decimal offset text',musicXml(4,{offset:'0x4'})],
@@ -178,12 +180,42 @@ describe('MusicXML playback tempo offsets',()=>{
     ['repeat routing',musicXml(4,{measureTail:'<barline location="right"><repeat direction="backward"/></barline>'}),1920],
     ['jump routing',musicXml(4).replace('<sound tempo="120"/>','<sound tempo="120" segno="s1"/>'),1920],
     ['nested sound offset in a non-tempo direction',musicXml(4,{extra:'<direction><direction-type><words>Later</words></direction-type><sound dynamics="80"><offset>2</offset></sound></direction>'}),1920],
-    ['pedal offset elsewhere',musicXml(4,{extra:'<direction><direction-type><pedal type="start"/></direction-type><offset>2</offset></direction>'}),1920],
     ['negative unflagged offset elsewhere',musicXml(4,{extra:'<direction><direction-type><words>Earlier</words></direction-type><offset>-2</offset></direction>'}),1920],
   ];
   it.each(placed)('places the slow tempo for %s',(_,text,tick)=>{
     expect(new DOMParser().parseFromString(text,'application/xml').querySelector('parsererror')).toBeNull();
     for(const bytes of [strToU8(text),mxl(text,4)])expect(timing(buildScore(project(bytes,'musicxml'))).tick).toBe(tick);
+  });
+
+  // A pedal before the second quarter (960). TabPlayer only draws pedals, and an offset
+  // always moves the drawing: offset*960/divisions for any flag. alphaTab added raw divisions.
+  const pedals=(score:model.Score)=>score.tracks[0].staves[0].bars[0].sustainPedals.map(marker=>[marker.pedalType,marker.ratioPosition*3840]);
+  const pedal=(offset:string)=>`<direction><direction-type><pedal type="start"/></direction-type>${offset}</direction>`;
+  it.each([
+    ['an unflagged offset',pedal('<offset>2</offset>'),1440],
+    ['an explicit no offset',pedal('<offset sound="no">2</offset>'),1440],
+    ['a playback offset',pedal('<offset sound="yes">2</offset>'),1440],
+    ['a negative playback offset',pedal('<offset sound="yes">-2</offset>'),480],
+  ])('places a sustain pedal with %s',(_,direction,tick)=>{
+    const text=musicXml(4).replace('<note><pitch><step>D',`${direction}<note><pitch><step>D`);
+    for(const bytes of [strToU8(text),mxl(text,4)])expect(pedals(buildScore(project(bytes,'musicxml')))).toEqual([[model.SustainPedalMarkerType.Down,tick]]);
+  });
+
+  it('keeps a shared tempo direction on the playback rule',()=>{
+    const text=musicXml(4,{sound:null}).replace('<direction-type><words>Slower</words></direction-type>','<direction-type><words>Slower</words></direction-type><direction-type><pedal type="start"/></direction-type>');
+    const score=buildScore(project(strToU8(text),'musicxml'));
+    expect(timing(score).tick).toBe(960);expect(pedals(score)).toEqual([[model.SustainPedalMarkerType.Down,960]]);
+  });
+
+  it('ignores offsets of pedal types that make no marker',()=>{
+    const text=musicXml(4,{extra:'<direction><direction-type><pedal type="change"/></direction-type><offset sound="yes">40</offset></direction>'});
+    expect(timing(buildScore(project(strToU8(text),'musicxml'))).tick).toBe(1920);
+  });
+
+  it('moves a pedal and a tempo that share one direction together',()=>{
+    const text=musicXml(4).replace('<direction-type><words>Slower</words></direction-type>','<direction-type><words>Slower</words></direction-type><direction-type><pedal type="start"/></direction-type>');
+    const score=buildScore(project(strToU8(text),'musicxml'));
+    expect(timing(score).tick).toBe(1920);expect(pedals(score)).toEqual([[model.SustainPedalMarkerType.Down,1920]]);
   });
 
   it('places a tempo offset in a 3/4 measure',()=>{

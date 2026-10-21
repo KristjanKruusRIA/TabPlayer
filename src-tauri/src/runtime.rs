@@ -541,6 +541,29 @@ pub async fn export_midi(
     .map_err(|e| e.to_string())?
 }
 #[tauri::command]
+pub async fn export_musicxml(
+    document: DocumentRevision,
+    bytes: Vec<u8>,
+    app: AppHandle,
+) -> Result<bool, String> {
+    let Some(path) = export_destination(&app, "musicxml", false)? else {
+        return Ok(false);
+    };
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::export_document_to_path(
+            &app.state::<NativeAudio>(),
+            &app.state::<ExportJobs>(),
+            &app.state::<Arc<Mutex<DocumentWorkspace>>>(),
+            &document,
+            &path,
+            &bytes,
+        )?;
+        Ok(true)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+#[tauri::command]
 pub async fn export_pdf(
     document: DocumentRevision,
     pages: Vec<SvgPage>,

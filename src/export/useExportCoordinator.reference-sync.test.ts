@@ -12,7 +12,7 @@ afterEach(()=>{cleanup();vi.restoreAllMocks();});
 const bridge={confirmExport:async()=>true,exportGp:async()=>true,readBackingAsset:async()=>{throw new Error('Audio export uses native source capture.');}};
 function score120(){const score=music();score.masterBars=score.masterBars.slice(0,2);score.tracks[0].staves[0].bars=score.tracks[0].staves[0].bars.slice(0,2);score.masterBars[0].tempoAutomations=[model.Automation.buildTempoAutomation(false,0,120,2)];score.masterBars[1].tempoAutomations=[model.Automation.buildTempoAutomation(false,0,240,2)];score.finish(new Settings());return score;}
 function settings(){return {...defaultDocumentSettings(),backing:{assetId:'a'.repeat(64),offsetMs:120,anchors:[{bar:1,occurrence:0,ratio:0,audioMs:3120}],referenceSync:{entryAudioMs:1120,exitAudioMs:7120},mix:{gain:.7,pan:-.25,mute:false,solo:false}}};}
-function native():ExportNativeBridge{return {exportPdf:async()=>null,exportMidi:async()=>true,exportAudio:async()=> 'job',status:async()=>({id:'job',frames:1,totalFrames:1,status:'complete'}),cancel:async()=>{}};}
+function native():ExportNativeBridge{return {exportPdf:async()=>null,exportMidi:async()=>true,exportMusicXml:async()=>true,exportAudio:async()=> 'job',status:async()=>({id:'job',frames:1,totalFrames:1,status:'complete'}),cancel:async()=>{}};}
 
 it.each([
   {format:'wav',includeBacking:true,speed:'saved',ratio:.5,wantSpeed:1},

@@ -17,7 +17,7 @@ function guardBackingProcessing(backing:BackingSettings):void {
   const processing=backing.processing;
   if(processing&&(processing.semitones+processing.cents/100!==0||processing.filter!=='none'))throw new Error('Backing pitch and filters cannot be stored in this Guitar Pro export. Clear Include backing audio to export notation.');
 }
-function clearBacking(score:model.Score):void {
+export function clearBacking(score:model.Score):void {
   score.backingTrack=undefined;
   for(const bar of score.masterBars)bar.syncPoints=undefined;
 }

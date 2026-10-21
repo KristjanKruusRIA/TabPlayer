@@ -55,6 +55,15 @@ it('preflights only valid GP selections with backing included',()=>{
   fireEvent.change(screen.getByLabelText('Export format'),{target:{value:'midi'}});fireEvent.change(screen.getByLabelText('First measure'),{target:{value:'1'}});expect(preflight).not.toHaveBeenCalled();
 });
 
+it('submits MusicXML with the shared selection and explains what it keeps',()=>{
+  const submit=vi.fn();render(<ExportDialog score={fixture()} layout={layout} busy={false} currentSpeedAvailable={true} onExport={submit} onCancel={()=>{}}/>);
+  fireEvent.change(screen.getByLabelText('Export format'),{target:{value:'musicxml'}});
+  expect(screen.getByText(/MusicXML keeps notes, techniques, lyrics and tempo/)).toBeVisible();expect(screen.queryByLabelText('Include backing audio')).toBeNull();
+  fireEvent.click(screen.getByLabelText('Measure range'));fireEvent.change(screen.getByLabelText('First measure'),{target:{value:'2'}});
+  fireEvent.click(screen.getByRole('button',{name:'Export'}));
+  expect(submit).toHaveBeenCalledWith({format:'musicxml',selection:{tracks:[0],range:{first:1,last:2}}});
+});
+
 it('refreshes GP preflight for score and settings changes without repeating it for progress',()=>{
   const score=fixture(),preflight=vi.fn(()=>null),submit=()=>{},cancel=()=>{};
   const {rerender}=render(<ExportDialog score={score} layout={layout} busy={false} currentSpeedAvailable={true} gpBackingIssue={preflight} onExport={submit} onCancel={cancel}/>);

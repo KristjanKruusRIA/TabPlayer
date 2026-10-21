@@ -65,7 +65,7 @@ Startup creates one clean blank document. New/Open **add and activate** a tab; t
 | `cancel_asset` | `{documentId,token}` | `boolean` |
 | `stage_backing` | `{documentId}` | `BackingCandidate \| null` |
 | `stage_embedded_backing` | `{documentId,bytes:number[]}` | `BackingCandidate` |
-| `export_gp`, `export_midi` | `{document:DocumentRevision,bytes:number[]}` | existing boolean result |
+| `export_gp`, `export_midi`, `export_musicxml` | `{document:DocumentRevision,bytes:number[]}` | existing boolean result |
 | `export_pdf` | `{document:DocumentRevision,pages,print:boolean}` | existing job-ID/null result |
 | `export_audio` | `{document:DocumentRevision,...existingAudioExportPayload}` | existing job-ID/null result |
 | `export_status`, `cancel_export` | `{documentId,id}` | existing result |

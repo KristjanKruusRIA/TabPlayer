@@ -8,6 +8,7 @@ export interface AudioExportOptions { sampleRate:44100|48000;bitDepth:16|24;spee
 export type ExportOptions =
   | {format:'gp';selection:ExportSelection;backing?:boolean}
   | {format:'midi';selection:ExportSelection}
+  | {format:'musicxml';selection:ExportSelection}
   | {format:'pdf';selection:ExportSelection;layout:PrintLayout;page?:PageLayout}
   | {format:'print';selection:ExportSelection;layout:PrintLayout;page?:PageLayout}
   | {format:'wav';selection:ExportSelection;audio:AudioExportOptions}

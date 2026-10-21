@@ -8,6 +8,8 @@ import { applyReferenceSyncPlan } from '../audio/reference-sync';
 import type { ExportNativeBridge } from './bridge';
 import { selectStaves } from './selection';
 import { exportMidi } from './midi';
+import { exportMusicXml } from './musicxml';
+import { clearBacking } from '../interchange/backing-projection';
 import { loadExportFonts,renderPdfPages } from './pdf';
 import { validateSelection,type ExportOptions,type ExportProgress } from './types';
 import { scoreFromJson } from '../model-clone';
@@ -54,6 +56,8 @@ export function useExportCoordinator({score,settings,currentSpeed,bridge,native,
         return await bridge.exportGp(exportGp(projectGpDocument({score:copy,settings:frozenSettings,bytes,selection,backing:include})),revision);
       }
       if(frozenOptions.format==='midi'){if(cancelled.current)return false;return await native.exportMidi(exportMidi(copy,selection),revision);}
+      // Backing audio is left out; refusals throw here, before the native save dialog opens.
+      if(frozenOptions.format==='musicxml'){clearBacking(copy);const bytes=exportMusicXml(copy,selection);if(cancelled.current)return false;return await native.exportMusicXml(bytes,revision);}
       if(frozenOptions.format==='pdf'||frozenOptions.format==='print'){await loadExportFonts();if(cancelled.current)return false;const pages=renderPdfPages(copy,selection,frozenOptions.layout,{page:frozenOptions.page??effectivePageLayout({page:null,print:frozenOptions.layout}),engraving:frozenSettings.engraving,trackIds:ids});if(cancelled.current)return false;return await watch(await native.exportPdf(pages,frozenOptions.format==='print',revision),active);}
       const audio=frozenOptions.audio;
       const selected=selectStaves(copy,selection);

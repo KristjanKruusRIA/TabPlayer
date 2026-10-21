@@ -25,7 +25,7 @@ use project::{BaseDocument, DocumentCandidate, EditCommand, Project};
 use runtime::{
     audio_command, audio_devices, audio_prepare, audio_set_mix, audio_status, cancel_asset,
     cancel_export, export_audio, export_midi, export_musicxml, export_pdf, export_status,
-    stage_backing, stage_embedded_backing,
+    export_svg, stage_backing, stage_embedded_backing,
 };
 use std::{
     path::{Path, PathBuf},
@@ -95,15 +95,44 @@ pub(crate) fn export_document_to_path(
     path: &Path,
     bytes: &[u8],
 ) -> Result<(), String> {
+    export_document_files(audio, jobs, workspace, document, &[(path, bytes)])
+}
+
+/// Checks every destination before writing any. Several outputs must all be new files, so a
+/// failed later write can remove the earlier ones without losing anything the user had.
+pub(crate) fn export_document_files(
+    audio: &runtime::NativeAudio,
+    jobs: &export::jobs::ExportJobs,
+    workspace: &Mutex<DocumentWorkspace>,
+    document: &DocumentRevision,
+    outputs: &[(&Path, &[u8])],
+) -> Result<(), String> {
     let _access = audio.access.lock().map_err(|error| error.to_string())?;
     if jobs.has_running()? {
         return Err("Finish or cancel the current export first.".into());
     }
     let workspace = workspace.lock().map_err(|error| error.to_string())?;
     validate_export_origin(&workspace, document)?;
-    workspace.protect_destination(document, path)?;
-    audio.protect_destination(path)?;
-    files::write_bytes(path, bytes)
+    for (path, _) in outputs {
+        workspace.protect_destination(document, path)?;
+        audio.protect_destination(path)?;
+        // A save dialog confirms one name only; symlink_metadata also sees a dangling link.
+        if outputs.len() > 1 && std::fs::symlink_metadata(path).is_ok() {
+            return Err(format!(
+                "{} already exists. Choose another name.",
+                path.display()
+            ));
+        }
+    }
+    for (index, (path, bytes)) in outputs.iter().enumerate() {
+        if let Err(error) = files::write_bytes(path, bytes) {
+            for (written, _) in &outputs[..index] {
+                let _ = std::fs::remove_file(written);
+            }
+            return Err(error);
+        }
+    }
+    Ok(())
 }
 
 fn save_document_to_path(
@@ -763,6 +792,7 @@ pub fn run() {
         stage_embedded_backing,
         cancel_asset,
         export_pdf,
+        export_svg,
         export_midi,
         export_musicxml,
         export_audio,
@@ -822,6 +852,7 @@ pub fn run() {
         stage_embedded_backing,
         cancel_asset,
         export_pdf,
+        export_svg,
         export_midi,
         export_musicxml,
         export_audio,
@@ -851,4 +882,84 @@ pub fn run() {
     builder
         .run(tauri::generate_context!())
         .expect("Could not start TabPlayer");
+}
+
+#[cfg(test)]
+mod export_files_tests {
+    use super::*;
+    use std::sync::Arc;
+
+    fn fixture() -> (
+        runtime::NativeAudio,
+        export::jobs::ExportJobs,
+        Mutex<DocumentWorkspace>,
+        DocumentRevision,
+    ) {
+        let mut workspace = DocumentWorkspace::new().unwrap();
+        let candidate = workspace.stage_document(Project::blank(), None).unwrap();
+        let snapshot = workspace.add_document(&candidate.token).unwrap();
+        let document = workspace.document(&snapshot.active.document_id).unwrap();
+        let revision = DocumentRevision {
+            document_id: document.document_id.clone(),
+            revision: document.revision,
+        };
+        (
+            runtime::NativeAudio::new(PathBuf::new(), Arc::new(|_| {})),
+            export::jobs::ExportJobs::default(),
+            Mutex::new(workspace),
+            revision,
+        )
+    }
+
+    #[test]
+    fn several_outputs_refuse_any_existing_file_before_writing() {
+        let (audio, jobs, workspace, document) = fixture();
+        let directory = tempfile::tempdir().unwrap();
+        let (first, second) = (
+            directory.path().join("song-1.svg"),
+            directory.path().join("song-2.svg"),
+        );
+        std::fs::write(&second, b"user page").unwrap();
+        let error = export_document_files(
+            &audio,
+            &jobs,
+            &workspace,
+            &document,
+            &[(&first, b"one"), (&second, b"two")],
+        )
+        .unwrap_err();
+        assert!(error.contains("already exists"));
+        assert!(!first.exists());
+        assert_eq!(std::fs::read(&second).unwrap(), b"user page");
+    }
+
+    #[test]
+    fn a_failed_later_write_removes_the_earlier_new_files() {
+        let (audio, jobs, workspace, document) = fixture();
+        let directory = tempfile::tempdir().unwrap();
+        let first = directory.path().join("song-1.svg");
+        // A name longer than any file system allows passes every check but cannot be written.
+        let unwritable = directory.path().join(format!("{}.svg", "x".repeat(300)));
+        assert!(
+            export_document_files(
+                &audio,
+                &jobs,
+                &workspace,
+                &document,
+                &[(&first, b"one"), (&unwritable, b"two")]
+            )
+            .is_err()
+        );
+        assert!(!first.exists());
+    }
+
+    #[test]
+    fn a_single_output_still_replaces_the_confirmed_file() {
+        let (audio, jobs, workspace, document) = fixture();
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("song.svg");
+        std::fs::write(&path, b"old").unwrap();
+        export_document_to_path(&audio, &jobs, &workspace, &document, &path, b"new").unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"new");
+    }
 }

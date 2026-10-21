@@ -193,7 +193,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   const gpBackingIssue=useCallback((selection:ExportSelection)=>gpBackingSelectionIssue(state.score,audioSettings.backing,selection),[state.score,audioSettings.backing]);
   const exports=useExportCoordinator({score:state.score,settings:audioSettings,currentSpeed:practiceRatio,bridge:documentBridge,native:exportBridge,embeddedBacking:state.embeddedBacking,revision:state.revision});
   const runExport=(options:ExportOptions)=>{if(exportRunning.current)return;setExportError(null);setExportLaunching(true);exportCancelled.current=false;const running=(async()=>{
-    if(options.format==='pdf'||options.format==='print'){
+    if(options.format==='pdf'||options.format==='print'||options.format==='svg'){
       if(options.page){if(pageState.error||JSON.stringify(options.page)!==JSON.stringify(page))await controller.edit({type:'setPageLayout',layout:options.page});}
       else if(JSON.stringify(options.layout)!==JSON.stringify(state.settings.print))await controller.edit({type:'setPrintLayout',layout:options.layout});
     }

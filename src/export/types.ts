@@ -11,6 +11,7 @@ export type ExportOptions =
   | {format:'musicxml';selection:ExportSelection}
   | {format:'pdf';selection:ExportSelection;layout:PrintLayout;page?:PageLayout}
   | {format:'print';selection:ExportSelection;layout:PrintLayout;page?:PageLayout}
+  | {format:'svg';selection:ExportSelection;layout:PrintLayout;page?:PageLayout;transparent:boolean}
   | {format:'wav';selection:ExportSelection;audio:AudioExportOptions}
   | {format:'stems';selection:ExportSelection;audio:AudioExportOptions};
 export interface ExportProgress { id:string;frames:number;totalFrames:number;status:'running'|'complete'|'cancelled'|'failed';error?:string|null }

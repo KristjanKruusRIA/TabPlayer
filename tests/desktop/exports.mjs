@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { launch,stop,connect,directory } from './harness.mjs';
 await mkdir(directory,{recursive:true});
 const runId=Date.now();
-for(const {format,current=false} of [{format:'midi'},{format:'musicxml'},{format:'pdf'},{format:'wav'},{format:'stems'},{format:'wav',current:true},{format:'stems',current:true}]) {
+for(const {format,current=false} of [{format:'midi'},{format:'musicxml'},{format:'pdf'},{format:'svg'},{format:'wav'},{format:'stems'},{format:'wav',current:true},{format:'stems',current:true}]) {
   const destination=join(directory,`export-${runId}-${format}${current?'-current':''}${format==='midi'?'.mid':format==='stems'?'':`.${format}`}`);
   const id=launch({TABPLAYER_TEST_EXPORT:destination});let browser;
   try {
@@ -37,6 +37,7 @@ for(const {format,current=false} of [{format:'midi'},{format:'musicxml'},{format
     assert.deepEqual(await readDocumentRecord(page,documentId),origin,'Export must preserve document history, source bytes and dirty state.');
     if(format==='midi'){const bytes=await readFile(destination);assert.equal(bytes.subarray(0,4).toString(),'MThd');assert.equal(bytes.readUInt16BE(12),960);}
     if(format==='musicxml'){const text=await readFile(destination,'utf8');assert.ok(text.startsWith('<?xml'));assert.match(text,/<score-partwise/);}
+    if(format==='svg'){const text=await readFile(destination,'utf8');assert.ok(text.startsWith('<svg'));assert.ok(!text.includes('<text'));assert.ok(text.match(/<path /g).length>2,'SVG must contain outlined notation beyond the background');assert.match(text,/viewBox="0 0 /);assert.match(text,/fill="#ffffff"|fill="#fff"/);}
     if(format==='pdf'){assert.equal((await readFile(destination)).subarray(0,5).toString(),'%PDF-');}
     if(format==='wav'){const b=await readFile(destination);assert.equal(b.subarray(0,4).toString(),'RIFF');assert.equal(b.readUInt16LE(22),2);assert.equal(b.readUInt32LE(24),48000);assert.equal(b.readUInt16LE(34),24);assert.equal(b.readUInt32LE(40)+44,b.length);assert.ok(b.subarray(44).some(n=>n!==0));if(current)assert.equal(b.readUInt32LE(40)/(2*3),772800);}
     if(format==='stems'){const m=JSON.parse(await readFile(join(destination,'manifest.json'),'utf8'));assert.ok(m.frames>0);if(current)assert.equal(m.frames,772800);assert.ok(m.tracks.some(t=>t.kind==='mix'));for(const t of m.tracks){assert.equal(t.filename.includes('/'),false);assert.equal(t.filename.includes('\\'),false);const b=await readFile(join(destination,t.filename));assert.equal(b.readUInt32LE(40)/(2*3),m.frames);}}

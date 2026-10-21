@@ -564,6 +564,36 @@ pub async fn export_musicxml(
     .map_err(|e| e.to_string())?
 }
 #[tauri::command]
+pub async fn export_svg(
+    document: DocumentRevision,
+    pages: Vec<SvgPage>,
+    app: AppHandle,
+) -> Result<bool, String> {
+    let Some(path) = export_destination(&app, "svg", false)? else {
+        return Ok(false);
+    };
+    tauri::async_runtime::spawn_blocking(move || {
+        // Convert every page before writing, so a refusal leaves no partial set behind.
+        let files = crate::export::svg::convert_pages(&pages)?;
+        let paths = crate::export::svg::page_paths(&path, files.len());
+        let outputs: Vec<_> = paths
+            .iter()
+            .zip(&files)
+            .map(|(path, svg)| (path.as_path(), svg.as_bytes()))
+            .collect();
+        crate::export_document_files(
+            &app.state::<NativeAudio>(),
+            &app.state::<ExportJobs>(),
+            &app.state::<Arc<Mutex<DocumentWorkspace>>>(),
+            &document,
+            &outputs,
+        )?;
+        Ok(true)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+#[tauri::command]
 pub async fn export_pdf(
     document: DocumentRevision,
     pages: Vec<SvgPage>,

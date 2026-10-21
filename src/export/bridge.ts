@@ -12,6 +12,7 @@ export interface ExportNativeBridge {
   exportPdf(pages:SvgPage[],print:boolean,revision:number):Promise<string|null>;
   exportMidi(bytes:Uint8Array,revision:number):Promise<boolean>;
   exportMusicXml(bytes:Uint8Array,revision:number):Promise<boolean>;
+  exportSvg(pages:SvgPage[],revision:number):Promise<boolean>;
   exportAudio(payload:NativeAudioExportPayload,revision:number):Promise<string|null>;
   status(id:string):Promise<ExportProgress|null>;
   cancel(id:string):Promise<void>;
@@ -21,6 +22,7 @@ export function createDocumentExportBridge(documentId:DocumentId):ExportNativeBr
     exportPdf:(pages,print,revision)=>invoke('export_pdf',{document:{documentId,revision},pages,print}),
     exportMidi:(bytes,revision)=>invoke('export_midi',{document:{documentId,revision},bytes:Array.from(bytes)}),
     exportMusicXml:(bytes,revision)=>invoke('export_musicxml',{document:{documentId,revision},bytes:Array.from(bytes)}),
+    exportSvg:(pages,revision)=>invoke('export_svg',{document:{documentId,revision},pages}),
     exportAudio:(payload,revision)=>invoke('export_audio',{...payload,document:{documentId,revision}}),
     status:id=>invoke('export_status',{documentId,id}),
     cancel:id=>invoke('cancel_export',{documentId,id}),

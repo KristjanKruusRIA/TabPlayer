@@ -25,17 +25,8 @@ fn load_export_fonts(database: &mut usvg::fontdb::Database) {
     }
 }
 
-pub fn convert_pages(pages: &[SvgPage], cancel: &AtomicBool) -> Result<Vec<u8>, String> {
-    convert_pages_with_progress(pages, cancel, |_| {})
-}
-pub fn convert_pages_with_progress(
-    pages: &[SvgPage],
-    cancel: &AtomicBool,
-    mut progress: impl FnMut(u64),
-) -> Result<Vec<u8>, String> {
-    if pages.is_empty() || pages.len() > 2000 {
-        return Err("Choose between one and 2000 printable pages.".into());
-    }
+/// Bundled fonts only, with every external or embedded resource denied.
+pub(crate) fn export_options() -> usvg::Options<'static> {
     let mut options = usvg::Options {
         font_family: "Noto Sans".into(),
         image_href_resolver: usvg::ImageHrefResolver {
@@ -47,6 +38,52 @@ pub fn convert_pages_with_progress(
     load_export_fonts(options.fontdb_mut());
     options.fontdb_mut().set_sans_serif_family("Noto Sans");
     options.fontdb_mut().set_serif_family("Noto Sans");
+    options
+}
+/// Checks one rendered page and parses it with the export options.
+pub(crate) fn notation_tree(
+    page: &SvgPage,
+    options: &usvg::Options,
+    kind: &str,
+) -> Result<usvg::Tree, String> {
+    if !page.width_mm.is_finite()
+        || !page.height_mm.is_finite()
+        || page.width_mm < 20.0
+        || page.width_mm > 1000.0
+        || page.height_mm < 20.0
+        || page.height_mm > 1000.0
+        || page.svg.len() > 20_000_000
+    {
+        return Err(format!("Invalid {kind} page size or content."));
+    }
+    // Notation is entirely vector/text. Reject resource-bearing markup even though resolvers also deny it.
+    let lower = page.svg.to_ascii_lowercase();
+    if [
+        "<image",
+        "<script",
+        "<foreignobject",
+        "<!doctype",
+        "<!entity",
+    ]
+    .iter()
+    .any(|s| lower.contains(s))
+    {
+        return Err("External SVG resources are not supported in score exports.".into());
+    }
+    usvg::Tree::from_str(&page.svg, options).map_err(|e| format!("Invalid notation SVG: {e}"))
+}
+pub fn convert_pages(pages: &[SvgPage], cancel: &AtomicBool) -> Result<Vec<u8>, String> {
+    convert_pages_with_progress(pages, cancel, |_| {})
+}
+pub fn convert_pages_with_progress(
+    pages: &[SvgPage],
+    cancel: &AtomicBool,
+    mut progress: impl FnMut(u64),
+) -> Result<Vec<u8>, String> {
+    if pages.is_empty() || pages.len() > 2000 {
+        return Err("Choose between one and 2000 printable pages.".into());
+    }
+    let options = export_options();
     let mut alloc = Ref::new(1);
     let catalog = alloc.bump();
     let tree_id = alloc.bump();
@@ -60,32 +97,7 @@ pub fn convert_pages_with_progress(
         if cancel.load(Ordering::Acquire) {
             return Err("PDF export cancelled.".into());
         }
-        if !page.width_mm.is_finite()
-            || !page.height_mm.is_finite()
-            || page.width_mm < 20.0
-            || page.width_mm > 1000.0
-            || page.height_mm < 20.0
-            || page.height_mm > 1000.0
-            || page.svg.len() > 20_000_000
-        {
-            return Err("Invalid PDF page size or content.".into());
-        }
-        // Notation is entirely vector/text. Reject resource-bearing markup even though resolvers also deny it.
-        let lower = page.svg.to_ascii_lowercase();
-        if [
-            "<image",
-            "<script",
-            "<foreignobject",
-            "<!doctype",
-            "<!entity",
-        ]
-        .iter()
-        .any(|s| lower.contains(s))
-        {
-            return Err("External SVG resources are not supported in score exports.".into());
-        }
-        let tree = usvg::Tree::from_str(&page.svg, &options)
-            .map_err(|e| format!("Invalid notation SVG: {e}"))?;
+        let tree = notation_tree(page, &options, "PDF")?;
         let (chunk, svg_id) = svg2pdf::to_chunk(
             &tree,
             ConversionOptions {

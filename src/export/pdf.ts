@@ -31,6 +31,13 @@ export function paginateSystems(systems:SvgSystem[],title:string,layout:PrintLay
     return {widthMm:d.widthMm,heightMm:d.heightMm,svg:`<svg xmlns="http://www.w3.org/2000/svg" width="${d.widthMm}mm" height="${d.heightMm}mm" viewBox="0 0 ${d.width} ${d.height}"><style>.at{font-family:Bravura;font-size:34px}text{fill:#111}</style><text x="${d.margin}" y="${d.margin+22}" font-family="Noto Sans, Noto Sans CJK JP, Noto Emoji" font-size="${titleSize}">${escaped(title)}</text>${content}<text x="${d.width/2}" y="${d.height-d.margin}" text-anchor="middle" font-family="Noto Sans, Noto Sans CJK JP, Noto Emoji" font-size="11">${index+1} / ${groups.length}</text></svg>`};
   });
 }
+/** Puts an opaque white page behind a rendered page, the way the PDF shows it. */
+export function svgPageWithBackground(page:SvgPage):SvgPage {
+  const open=/^<svg\b[^>]*?(\/?)>/.exec(page.svg);
+  if(!open)throw new Error('A rendered page is not an SVG document.');
+  const background='<rect width="100%" height="100%" fill="#fff"/>';
+  return {...page,svg:open[1]?`${open[0].slice(0,-2)}>${background}</svg>`:`${open[0]}${background}${page.svg.slice(open[0].length)}`};
+}
 /** Load the bundled fonts before public SVG text measurement in the webview. */
 export async function loadExportFonts():Promise<void> {
   if(typeof document==='undefined')return;

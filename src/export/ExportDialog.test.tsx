@@ -64,6 +64,18 @@ it('submits MusicXML with the shared selection and explains what it keeps',()=>{
   expect(submit).toHaveBeenCalledWith({format:'musicxml',selection:{tracks:[0],range:{first:1,last:2}}});
 });
 
+it('submits SVG with the PDF page layout and an optional transparent background',()=>{
+  const submit=vi.fn();render(<ExportDialog score={fixture()} layout={layout} busy={false} currentSpeedAvailable={true} onExport={submit} onCancel={()=>{}}/>);
+  expect(screen.queryByLabelText('Transparent background')).toBeNull();
+  fireEvent.change(screen.getByLabelText('Export format'),{target:{value:'svg'}});
+  expect(screen.getByText(/SVG writes one file per page/)).toBeVisible();expect(screen.getByLabelText('Paper')).toBeVisible();
+  const transparent=screen.getByLabelText('Transparent background');expect(transparent).not.toBeChecked();
+  fireEvent.click(screen.getByRole('button',{name:'Export'}));
+  expect(submit).toHaveBeenLastCalledWith({format:'svg',selection:{tracks:[0],range:null},layout,transparent:false});
+  fireEvent.click(transparent);fireEvent.click(screen.getByRole('button',{name:'Export'}));
+  expect(submit).toHaveBeenLastCalledWith({format:'svg',selection:{tracks:[0],range:null},layout,transparent:true});
+});
+
 it('refreshes GP preflight for score and settings changes without repeating it for progress',()=>{
   const score=fixture(),preflight=vi.fn(()=>null),submit=()=>{},cancel=()=>{};
   const {rerender}=render(<ExportDialog score={score} layout={layout} busy={false} currentSpeedAvailable={true} gpBackingIssue={preflight} onExport={submit} onCancel={cancel}/>);

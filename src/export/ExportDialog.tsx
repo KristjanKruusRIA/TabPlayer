@@ -10,7 +10,7 @@ export function ExportDialog({score,layout,page,busy,progress,failure,currentSpe
   const [staves,setStaves]=useState<Record<number,number[]>>(Object.fromEntries(score.tracks.map(t=>[t.index,t.staves.map(s=>s.index)])));
   const [range,setRange]=useState(false),[first,setFirst]=useState('1'),[last,setLast]=useState(String(score.masterBars.length));
   const [print,setPrint]=useState({...layout});const [audio,setAudio]=useState<AudioExportOptions>({sampleRate:48000,bitDepth:16,speed:'saved',metronome:false,tailSeconds:2,backing:true,includeMix:true});
-  const [gpBacking,setGpBacking]=useState(true);
+  const [gpBacking,setGpBacking]=useState(true),[transparent,setTransparent]=useState(false);
   const [error,setError]=useState('');
   const [customPage,setCustomPage]=useState(()=>page?structuredClone(page):null);
   const topology=`${score.masterBars.length}:${score.tracks.map(track=>track.staves.length).join(',')}`;
@@ -50,14 +50,14 @@ export function ExportDialog({score,layout,page,busy,progress,failure,currentSpe
       const selection=exportSelection();
       if(backingIssue)throw new Error(backingIssue);
       if(!Number.isFinite(audio.tailSeconds)||audio.tailSeconds<0||audio.tailSeconds>30)throw new Error('Effect tail must be between 0 and 30 seconds.');
-      if((format==='pdf'||format==='print')&&!customPage&&(!Number.isFinite(print.marginMm)||print.marginMm<0||print.marginMm>50||!Number.isFinite(print.scale)||print.scale<.25||print.scale>3))throw new Error('Use margins from 0 to 50 mm and scale from 25% to 300%.');
-      if((format==='pdf'||format==='print')&&customPage)validatePageLayout(customPage);
-      setError('');onExport(format==='pdf'||format==='print'?{format,selection,layout:print,...(customPage?{page:structuredClone(customPage)}:{})}:format==='wav'||format==='stems'?{format,selection,audio}:format==='gp'?{format,selection,...(!gpBacking?{backing:false}:{})}:{format,selection});
+      if((format==='pdf'||format==='print'||format==='svg')&&!customPage&&(!Number.isFinite(print.marginMm)||print.marginMm<0||print.marginMm>50||!Number.isFinite(print.scale)||print.scale<.25||print.scale>3))throw new Error('Use margins from 0 to 50 mm and scale from 25% to 300%.');
+      if((format==='pdf'||format==='print'||format==='svg')&&customPage)validatePageLayout(customPage);
+      setError('');onExport(format==='svg'?{format,selection,layout:print,...(customPage?{page:structuredClone(customPage)}:{}),transparent}:format==='pdf'||format==='print'?{format,selection,layout:print,...(customPage?{page:structuredClone(customPage)}:{})}:format==='wav'||format==='stems'?{format,selection,audio}:format==='gp'?{format,selection,...(!gpBacking?{backing:false}:{})}:{format,selection});
     }catch(e){setError((e as Error).message);}
   }
   return <div className="dialog-backdrop"><div ref={dialog} onKeyDown={handleKeyDown} role="dialog" aria-modal="true" aria-label="Export score" className="export-dialog"><h2>Export score</h2>
     <fieldset disabled={busy}>
-      <label>Export format<select value={format} onChange={e=>setFormat(e.target.value as ExportOptions['format'])}><option value="gp">Guitar Pro</option><option value="pdf">PDF</option><option value="print">Print</option><option value="midi">MIDI</option><option value="musicxml">MusicXML</option><option value="wav">Mixed WAV</option><option value="stems">WAV stems</option></select></label>
+      <label>Export format<select value={format} onChange={e=>setFormat(e.target.value as ExportOptions['format'])}><option value="gp">Guitar Pro</option><option value="pdf">PDF</option><option value="print">Print</option><option value="svg">SVG</option><option value="midi">MIDI</option><option value="musicxml">MusicXML</option><option value="wav">Mixed WAV</option><option value="stems">WAV stems</option></select></label>
       <fieldset className="export-selection"><legend>Tracks to export</legend>{score.tracks.map(t=><div key={t.index} role="group" aria-label={`${t.name||`Track ${t.index+1}`} track and staves`} className="export-track">
         <label className="export-check"><input type="checkbox" checked={tracks.includes(t.index)} onChange={e=>setTracks(e.target.checked?[...tracks,t.index].sort((a,b)=>a-b):tracks.filter(n=>n!==t.index))}/>{t.name||`Track ${t.index+1}`}</label>
         {tracks.includes(t.index)&&t.staves.length>1&&<div className="export-staves">{t.staves.map(s=><label className="export-check" key={s.index}><input type="checkbox" checked={staves[t.index].includes(s.index)} onChange={e=>setStaves({...staves,[t.index]:e.target.checked?[...staves[t.index],s.index].sort((a,b)=>a-b):staves[t.index].filter(i=>i!==s.index)})}/>{t.name} staff {s.index+1}</label>)}</div>}
@@ -67,14 +67,15 @@ export function ExportDialog({score,layout,page,busy,progress,failure,currentSpe
         {range?<div className="export-measures"><label>First measure<input type="number" min="1" max={score.masterBars.length} step="1" value={first} onChange={e=>setFirst(e.target.value)}/></label><label>Last measure<input type="number" min="1" max={score.masterBars.length} step="1" value={last} onChange={e=>setLast(e.target.value)}/></label></div>:<p className="muted">All measures</p>}
       </fieldset>
       {format==='gp'&&<label className="export-check"><input type="checkbox" checked={gpBacking} aria-invalid={backingIssue?true:undefined} aria-describedby={backingIssue?errorId:undefined} onChange={e=>setGpBacking(e.target.checked)}/>Include backing audio</label>}
-      {(format==='pdf'||format==='print')&&(customPage?<PageLayoutPanel value={customPage} busy={busy} onEdit={command=>setCustomPage(command.layout)}/>:<>
+      {(format==='pdf'||format==='print'||format==='svg')&&(customPage?<PageLayoutPanel value={customPage} busy={busy} onEdit={command=>setCustomPage(command.layout)}/>:<>
         <label>Paper<select value={print.paper} onChange={e=>setPrint({...print,paper:e.target.value as PrintLayout['paper']})}><option>A4</option><option>Letter</option></select></label>
         <label>Orientation<select value={print.orientation} onChange={e=>setPrint({...print,orientation:e.target.value as PrintLayout['orientation']})}><option value="portrait">Portrait</option><option value="landscape">Landscape</option></select></label>
         <label>Margin (mm)<input type="number" min="0" max="50" value={print.marginMm} onChange={e=>setPrint({...print,marginMm:Number(e.target.value)})}/></label>
         <label>Print scale (%)<input type="number" min="25" max="300" value={print.scale*100} onChange={e=>setPrint({...print,scale:Number(e.target.value)/100})}/></label>
         <label>Staves<select value={print.profile} onChange={e=>setPrint({...print,profile:e.target.value as PrintLayout['profile']})}><option value="ScoreTab">Score and tab</option><option value="Score">Score</option><option value="Tab">Tab</option></select></label>
       </>)}
-      {(format==='gp'||format==='pdf'||format==='print')&&<p>Engraving settings affect the screen and PDF. GP export preserves source styling and supports uniform common/cut choices; mixed measure choices cannot be exported.</p>}
+      {(format==='gp'||format==='pdf'||format==='print'||format==='svg')&&<p>Engraving settings affect the screen and PDF. GP export preserves source styling and supports uniform common/cut choices; mixed measure choices cannot be exported.</p>}
+      {format==='svg'&&<><label className="export-check"><input type="checkbox" checked={transparent} onChange={e=>setTransparent(e.target.checked)}/>Transparent background</label><p>SVG writes one file per page. Notation and text are written as outlines, so the files need no fonts to view.</p></>}
       {format==='musicxml'&&<p>MusicXML keeps notes, techniques, lyrics and tempo. It leaves out fermata lengths, backing audio, mixer settings, and layout and styling. Anything else it cannot write, such as instrument changes or gradual volume changes, stops the export with a message.</p>}
       {format==='midi'&&<p>MIDI preserves generated notes and controls. Ordinary MIDI players share pitch bends on a channel, so simultaneous independent bends may differ.</p>}
       {(format==='wav'||format==='stems')&&<fieldset className="export-audio"><legend>Audio</legend><div className="export-audio-options">

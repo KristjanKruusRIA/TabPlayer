@@ -5,6 +5,7 @@ import { midi,model,Settings } from '@coderline/alphatab';
 import { strFromU8,strToU8 } from 'fflate';
 import { loadInterchangeScore } from '../interchange/gp';
 import { setLyricsSource } from '../editor/lyrics-source';
+import { applyLyricsEdit,getTrackLyrics } from '../editor/lyrics';
 import { exportMusicXml } from './musicxml';
 import { buildPlaybackPlan } from '../audio/plan';
 
@@ -350,6 +351,55 @@ describe('MusicXML export',()=>{
     expect(()=>exportMusicXml(score,selectAll(score))).toThrow(error);
   });
 
+  // Each beat's syllables on staff 0, voice 0, without trailing empty lines.
+  const syllables=(score:model.Score)=>score.tracks[0].staves[0].bars.flatMap(bar=>bar.voices[0].beats.map(beat=>{const lines=[...beat.lyrics??[]];while(lines.length&&!lines.at(-1))lines.pop();return lines;}));
+  const sung=(score:model.Score,lines:{startBar:number;text:string}[])=>{applyLyricsEdit(score,{type:'setTrackLyrics',track:0,visible:true,lines});return score;};
+  it.each([
+    ['hyphens and joined words',[{startBar:0,text:'Hel-lo world a+b'},{startBar:1,text:'la la'}]],
+    ['a second line that starts first',[{startBar:1,text:'x y'},{startBar:0,text:'a b c'}]],
+  ] as [string,{startBar:number;text:string}[]][])('round-trips lyrics with %s',(_name,lines)=>{
+    const score=sung(guitar(),lines),back=loadInterchangeScore(exportMusicXml(score,selectAll(score)),settings);
+    expect(syllables(back)).toEqual(syllables(score));
+    expect(getTrackLyrics(back,0).lines).toEqual(lines);
+  });
+
+  it('writes syllabic lyrics on the first note of each beat',()=>{
+    const score=sung(guitar(),[{startBar:0,text:'Hel-lo world a+b'}]),doc=parse(exportMusicXml(score,selectAll(score)));
+    expect([...doc.querySelectorAll('lyric')].map(lyric=>[lyric.getAttribute('number'),lyric.querySelector('syllabic')?.textContent,lyric.querySelector('text')?.textContent])).toEqual([['1','begin','Hel'],['1','end','lo'],['1','single','world'],['1','single','a b']]);
+    for(const lyric of doc.querySelectorAll('lyric'))expect(lyric.parentElement?.querySelector('chord')).toBeNull();
+  });
+
+  it('round-trips lyrics on a notation + TAB guitar',()=>{
+    const score=sung(notationAndTab(),[{startBar:0,text:'Hel-lo world'}]),back=loadInterchangeScore(exportMusicXml(score,selectAll(score)),settings);
+    expect(back.tracks[0].staves.length).toBe(1);
+    expect(syllables(back)).toEqual(syllables(score));
+  });
+
+  it('leaves lyrics out with a staff the excerpt does not export',()=>{
+    const json=JSON.parse(String(model.JsonConverter.scoreToJson(guitar())));
+    json.tracks[0].staves.push(JSON.parse(JSON.stringify(json.tracks[0].staves[0])));
+    const score=sung(model.JsonConverter.jsonToScore(JSON.stringify(json),settings),[{startBar:0,text:'Hel-lo world'}]);
+    expect(parse(exportMusicXml(score,{tracks:[0],range:null,staves:{0:[1]}})).querySelector('lyric')).toBeNull();
+  });
+
+  it.each([
+    ['a syllable with an edge space',/empty or has edge spaces/,(score:model.Score)=>sung(score,[{startBar:0,text:'Hel-lo wor-ld a+ b'}])],
+    ['a syllable ending in two hyphens',/ending in a hyphen/,(score:model.Score)=>{score.tracks[0].staves[0].bars[0].voices[0].beats[0].lyrics=['a--'];}],
+    ['a bare hyphen syllable',/empty or has edge spaces/,(score:model.Score)=>{score.tracks[0].staves[0].bars[0].voices[0].beats[0].lyrics=['-'];}],
+    ['lyrics longer than the notes',/more syllables than notes/,(score:model.Score)=>sung(score,[{startBar:0,text:'Hel-lo wor-ld-y a b c d'}])],
+    ['lyric comments',/lyric comments/,(score:model.Score)=>sung(score,[{startBar:0,text:'[verse] la la'}])],
+    ['lyrics on a rest',/lyrics on a rest/,(score:model.Score)=>{score.tracks[0].staves[0].bars[1].voices[0].beats[4].lyrics=['la'];}],
+    ['lyrics outside the first voice',/lyrics outside the first voice/,(score:model.Score)=>{
+      const voice=new model.Voice(),bar=score.tracks[0].staves[0].bars[0];bar.addVoice(voice);
+      const beat=new model.Beat();beat.duration=model.Duration.Whole;voice.addBeat(beat);const note=new model.Note();note.string=4;note.fret=2;beat.addNote(note);
+      for(const other of score.tracks[0].staves[0].bars.slice(1)){const empty=new model.Voice();other.addVoice(empty);const rest=new model.Beat();rest.isEmpty=true;empty.addBeat(rest);}
+      score.finish(settings);beat.lyrics=['la'];
+    }],
+  ] as [string,RegExp,(score:model.Score)=>void][])('refuses %s',(_name,error,change)=>{
+    const score=guitar();change(score);
+    expect(()=>exportMusicXml(score,selectAll(score))).toThrow(error);
+  });
+
   it('refuses a continued bend that does not start at the bent pitch',()=>{
     const score=continued([[0,2],[60,0]]);
     expect(()=>exportMusicXml(score,selectAll(score))).toThrow(/continued bend that does not start/);
@@ -425,7 +475,7 @@ describe('MusicXML export',()=>{
     ['a gradual tempo change',/gradual tempo/,(score:model.Score)=>{score.masterBars[1].tempoAutomations[0].isLinear=true;}],
     ['a MIDI bank',/playback bank/,(score:model.Score)=>{score.tracks[0].playbackInfo.bank=1;}],
     ['a MIDI channel above 16',/MIDI channels above 16/,(score:model.Score)=>{score.tracks[0].playbackInfo.primaryChannel=16;}],
-    ['hidden lyrics',/lyrics/,(score:model.Score)=>{setLyricsSource(score.tracks[0],{visible:false,lines:[{startBar:0,text:'la la'}]},false);}],
+    ['hidden lyrics',/hidden lyrics/,(score:model.Score)=>{setLyricsSource(score.tracks[0],{visible:false,lines:[{startBar:0,text:'la la'}]},false);}],
     ['an unrepresentable tuning',/tuning outside octaves/,(score:model.Score)=>{score.tracks[0].staves[0].stringTuning.tunings=[64,59,55,50,45,-5];}],
     ['a control character in the title',/control characters/,(score:model.Score)=>{score.title='Bad\u0001title';}],
   ])('fails closed for %s',(_name,message,change)=>{

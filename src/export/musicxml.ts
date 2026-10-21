@@ -1,6 +1,7 @@
 import { model,Settings } from '@coderline/alphatab';
 import { strToU8 } from 'fflate';
 import { getLyricsSource } from '../editor/lyrics-source';
+import { tokenizeLyrics } from '../editor/lyrics';
 import { trackMixAutomations } from '../interchange/automation';
 import { selectScore } from './selection';
 import type { ExportSelection } from './types';
@@ -75,7 +76,7 @@ const written={
   bar:new Set(['id','clef','clefottava','voices','keysignature','keysignaturetype','displayscale','displaywidth']),
   voice:new Set(['id','beats']),
   // Stem direction is display; dynamics are written as directions.
-  beat:new Set(['id','notes','isempty','duration','dots','tupletnumerator','tupletdenominator','automations','displaystart','playbackstart','displayduration','playbackduration','overridedisplayduration','preferredbeamdirection','dynamics','gracetype']),
+  beat:new Set(['id','notes','isempty','duration','dots','tupletnumerator','tupletdenominator','automations','displaystart','playbackstart','displayduration','playbackduration','overridedisplayduration','preferredbeamdirection','dynamics','gracetype','lyrics']),
   // Bend points are written as <bend> elements (their type is derived from them).
   note:new Set(['id','fret','string','octave','tone','istiedestination','tiedestinationnoteid','tieoriginnoteid','accidentalmode','dynamics','bendtype','bendpoints','iscontinuedbend']),
 };
@@ -160,9 +161,28 @@ function mixDirection(change:model.Automation,master:model.MasterBar,instrument:
   return element('direction',element('direction-type','<words/>')+(tick?element('offset',tick,' sound="yes"'):'')+staff+element('sound',element('midi-instrument',value,` id="${instrument}"`)));
 }
 
+// TabPlayer keeps a hyphenated syllable's trailing '-'; MusicXML states it as <syllabic>.
+// alphaTab numbers lyric lines by first appearance, so an unseen earlier line is
+// registered with an empty lyric before a later one.
+function lyricsOf(beat:model.Beat,state:{seen:Set<number>;open:boolean[]}){
+  const lines=beat.lyrics??[];let last=lines.length-1;while(last>=0&&!lines[last])last--;
+  let result='';
+  for(let line=0;line<=last;line++){
+    const text=lines[line]??'',number=` number="${line+1}"`;
+    if(!text){if(!state.seen.has(line)){state.seen.add(line);result+=element('lyric','<text/>',number);}continue;}
+    const joined=text.endsWith('-'),after=state.open[line]??false,body=joined?text.slice(0,-1):text;state.seen.add(line);state.open[line]=joined;
+    // alphaTab trims lyric text on import, so edge spaces and empty syllables would not read back.
+    if(!body.trim()||body!==body.trim())unsupported('a lyric syllable that is empty or has edge spaces');
+    // A second trailing hyphen would read back as the single one <syllabic> restores.
+    if(body.endsWith('-'))unsupported('a lyric syllable ending in a hyphen');
+    result+=element('lyric',element('syllabic',joined?(after?'middle':'begin'):(after?'end':'single'))+element('text',escape(body)),number);
+  }
+  return result;
+}
+
 function writePart(track:model.Track,score:model.Score,json:Json,scoreJson:Json,first:boolean,instrument:string,state:{dynamic:model.DynamicValue;started:boolean}){
   state.started=false;
-  const mix=trackMixAutomations(track);
+  const mix=trackMixAutomations(track),sung={seen:new Set<number>(),open:[] as boolean[]};
   check('track',json);check('playback',json.playbackinfo as Json);
   if(track.staves.length!==1)unsupported('more than one staff per track');
   const staff=track.staves[0],staffJson=(json.staves as Json[])[0];check('staff',staffJson);
@@ -211,6 +231,10 @@ function writePart(track:model.Track,score:model.Score,json:Json,scoreJson:Json,
       const notes=layouts.map(()=>'');let total=0;
       for(const beat of voice.beats){
         const beatJson=(voiceJson.beats as Json[])[beat.index];check('beat',beatJson);
+        if(beat.lyrics?.some(Boolean)){
+          if(voice.index!==0)unsupported('lyrics outside the first voice');
+          if(!beat.notes.length)unsupported('lyrics on a rest');
+        }
         // Beat.finish sizes OnBeat/BeforeBeat graces by group, so type and group round-trip them;
         // the importer ignores a grace's dots and tuplets, so those are refused.
         const grace=beat.graceType===model.GraceType.OnBeat?'<grace/>':beat.graceType===model.GraceType.BeforeBeat?'<grace slash="yes"/>':'';
@@ -248,7 +272,7 @@ function writePart(track:model.Track,score:model.Score,json:Json,scoreJson:Json,
         const rhythm=(layout:typeof layouts[number])=>(grace?'':element('duration',ticks))+voiceNumber(layout)+element('type',typeNames.get(beat.duration as number)!)+'<dot/>'.repeat(beat.dots)
           +(beat.hasTuplet?element('time-modification',element('actual-notes',beat.tupletNumerator)+element('normal-notes',beat.tupletDenominator)):'')+staffOf(layout);
         if(!beat.notes.length){layouts.forEach((layout,at)=>{notes[at]+=element('note','<rest/>'+rhythm(layout));});continue;}
-        const sorted=[...beat.notes].sort((a,b)=>a.realValue-b.realValue);
+        const sorted=[...beat.notes].sort((a,b)=>a.realValue-b.realValue),lyrics=lyricsOf(beat,sung);
         for(const [noteIndex,note] of sorted.entries()){
           check('note',(beatJson.notes as Json[])[note.index]);
           const written=pitch(note.calculateRealValue(false,false)-transpose,bar.keySignature,note.accidentalMode);
@@ -268,7 +292,7 @@ function writePart(track:model.Track,score:model.Score,json:Json,scoreJson:Json,
             const tied=links.map(([type,level])=>`<tied type="${type}" number="${level}"/>`).join('');
             const timing=rhythm(layout).replace('</duration>',`</duration>${links.map(([type])=>`<tie type="${type}"/>`).join('')}`),cut=timing.search(/<time-modification>|<staff>/);
             notes[at]+=element('note',grace+(noteIndex?'<chord/>':'')+written.pitch+(cut<0?timing+written.accidental:timing.slice(0,cut)+written.accidental+timing.slice(cut))
-              +(tied||technical?element('notations',tied+technical):''));
+              +(tied||technical?element('notations',tied+technical):'')+(at===0&&noteIndex===0?lyrics:''));
           });
         }
       }
@@ -303,7 +327,18 @@ function checkCutBends(score:model.Score,selection:ExportSelection){
 export function exportMusicXml(score:model.Score,selection:ExportSelection):Uint8Array {
   checkCutBends(score,selection);
   // Lyrics (including hidden ones) live in TabPlayer's own sources, outside the model data.
-  if(selection.tracks.some(index=>getLyricsSource(score.tracks[index])?.value.lines.some(line=>line.text.trim())))unsupported('lyrics');
+  for(const index of selection.tracks){
+    const source=getLyricsSource(score.tracks[index])?.value;if(!source)continue;
+    // Hidden lyrics have no syllables to write, and comments are not distributed.
+    if(!source.visible&&source.lines.some(line=>line.text.trim()))unsupported('hidden lyrics');
+    if(source.lines.some(line=>line.text.includes('[')))unsupported('lyric comments');
+    // Words past the last note are kept in the source but never distributed to a beat.
+    const bars=score.tracks[index].staves[0].bars;
+    for(const line of source.lines){
+      const words=tokenizeLyrics(line.text);let used=words.length;while(used&&!words[used-1])used--;
+      if(used>bars.slice(line.startBar).flatMap(bar=>bar.voices[0]?.beats??[]).filter(beat=>!beat.isEmpty&&!beat.isRest).length)unsupported('lyrics with more syllables than notes');
+    }
+  }
   const copy=selectScore(score,selection),json=toJson(copy);check('score',json);
   if(copy.tracks.some(track=>track.staves.some(staff=>staff.transpositionPitch!==0)))unsupported('sounding transposition');
   // alphaTab's import keeps one running dynamic across all parts in document order.

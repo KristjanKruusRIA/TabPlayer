@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "audit_date": "2026-10-15",
+  "audit_date": "2026-10-21",
   "audit_kind": "read_only_delivery_progress_overlay",
   "target": "Guitar Pro 8.1.5.31 desktop",
   "requirement_catalog_id": "gp8-desktop-parity-v1",
@@ -16,10 +16,10 @@
     }
   },
   "current_revision": {
-    "value": "a87bae29deb08e31a8974d6d2ed390e7b5adca0b",
-    "accepted_source_revision": "a87bae29deb08e31a8974d6d2ed390e7b5adca0b",
+    "value": "088b973cea94bde876859c7e6efadb4dd23da64a",
+    "accepted_source_revision": "088b973cea94bde876859c7e6efadb4dd23da64a",
     "documentation_revision": null,
-    "documentation_status": "Working-tree P17/P18 documentation proposal for the locally accepted source checkpoint: P17 implemented within declared local numeric scope; P18 partial for six frequency filters. Independent final document/adoption review, documentation commit and delivery/push remain pending with root.",
+    "documentation_status": "2026-10-21 update on feat/gp8-parity: F13 missing -> partial, W05 missing -> implemented, F03/F04/D01/D02 evidence refreshed. Earlier P17/P18 checkpoint text is kept in previous_checkpoint and provenance.",
     "provenance": "Root locally accepts P16 source 447d2a9240dc5727ff0679b5b0f84dd7107db603; delivery is pending and the source is not yet pushed at this checkpoint. The final versioned tempo report supports the bounded source/native/current Windows/GP-publication/visual scope. Proprietary GP bracket import/export and playback clipping remain unverified, and the report retains audible, platform and shipping limits. This documentation audit executes no runtime or Git/network operation. The unchanged CI checkpoint belongs to historical Library source only and supplies no P16/current-head CI proof. 2026-10-16 P17/P18 checkpoint: root locally accepts source a87bae29deb08e31a8974d6d2ed390e7b5adca0b for the declared local pitch/filter scope after the frozen 57-step functional workflow at be9e61aa2383974821e7ecf70899e7f755f74f53 and sole 17-step/four-frame targeted confirmation at a87bae29deb08e31a8974d6d2ed390e7b5adca0b. The final UI source has its own admitted diagnostic build; the coherent 2647/617 whole-suite evidence belongs to earlier product source 4a01c341eca58cb25f52c89175ba1fb8c14ee803, not a rerun at this later source. The immutable visual receipt retains inherited observer metadata; the final report binds its additive provenance corrigendum and distinguishes current source/executable/admission/resource/log identities. P17 is implemented within declared local numeric scope and P18 remains partial without vocal/center/channel separation. P16 remains reviewed partial; GP bracket import/export and playback clipping remain unverified. Physical audio, original-GP8, macOS/Linux and shipping acceptance remain separate. Independent final document/adoption review and local documentation delivery/push remain pending; no current-head CI result is supplied and the unchanged CI object remains historical Library evidence. This documentation audit executes no runtime/build, Git or network operation.",
     "previous_accepted_checkpoint": "447d2a9240dc5727ff0679b5b0f84dd7107db603",
     "ci_checkpoint": {
@@ -54,7 +54,8 @@
           "scope": "historical W05 checkpoint only; not a current-head pass"
         }
       }
-    }
+    },
+    "previous_checkpoint": "a87bae29deb08e31a8974d6d2ed390e7b5adca0b"
   },
   "source_method": "The original overlay read all 258 baseline rows and inspected seven dedicated versioned delivery reports plus scoped source/test definitions. This follow-up reviews the versioned selection-playback and stylesheet-interchange reports and exact P02/P03/N13 acceptance, updating adjacent stale prose only. Graph tools unavailable; narrow rg/source reads used. No fresh runtime validation by this audit. The earlier five-row adoption inspected the accepted recovery/workstation validation and reviews for exactly W10/W11/D04/D05/P15, preserving all historical fields and other 253 rows. This later six-row adoption maps W06/W07/W08/W09/W12/W14 to the final versioned Library validation, including actual Windows Core/restart/Folders/reveal and honest OS-drop/other-platform limits. All 258 historical field sets and 252 other complete row assessments remain unchanged. No product tests/apps/builds, Git or network operation was run by this adoption; bounded document consistency was checked separately. This later P15-only adoption maps the exact waveform/grid/timeline and visual sync-point acceptance to the final dedicated waveform validation, including two actual Windows runs and the accepted replacement readout/keyboard-focus capture. It preserves all 258 historical field sets, all 257 other complete feature assessments including P16, and every prior evidence entry/digest snapshot. The accepted waveform source is local pending root delivery; the unchanged CI checkpoint is historical Library evidence. This adoption executes only bounded documentation consistency checks, with no product test/app/build, Git or network operation. This P16-only documentation adoption reviews the final versioned tempo report and records P16 as evidence-reviewed partial for its bounded native/current Windows/GP-publication/visual scope. It preserves all 258 historical field sets, all 257 other complete feature objects and Markdown rows, and every prior evidence entry/digest snapshot; no runtime was executed by this documentation audit. Proprietary GP bracket import/export and playback clipping remain unverified; local source delivery is pending and CI remains historical only. 2026-10-16 P17/P18 documentation adoption maps the final processing report to P17 implemented within its declared local integer semitone/cents and preserved-duration scope and P18 partial for six local frequency filters, without vocal/center/channel separation. Root accepted the frozen full functional evidence and sole targeted visual confirmation at local source a87bae29deb08e31a8974d6d2ed390e7b5adca0b; these are attributed existing receipts, not new runtime by this documentation audit. All 258 historical field sets, 256 other complete feature objects/Markdown rows, 99 earlier evidence entries and 45 earlier digest snapshots are preserved. P16 stays reviewed partial; GP bracket import/export and playback clipping remain unverified. Physical audio, original-GP8, macOS/Linux and shipping remain open; source delivery is pending and CI stays historical only.",
   "assessment_definitions": {
@@ -76,29 +77,29 @@
       "unverified": 8
     },
     "current_dispositions": {
-      "implemented": 78,
-      "partial": 95,
-      "missing": 77,
+      "implemented": 79,
+      "partial": 96,
+      "missing": 75,
       "unverified": 8
     },
-    "evidence_reviewed_total": 109,
+    "evidence_reviewed_total": 111,
     "evidence_reviewed": {
-      "implemented": 36,
-      "partial": 69,
+      "implemented": 37,
+      "partial": 70,
       "missing": 0,
       "unverified": 4
     },
-    "baseline_not_reaudited_total": 149,
+    "baseline_not_reaudited_total": 147,
     "baseline_not_reaudited": {
       "implemented": 42,
       "partial": 26,
-      "missing": 77,
+      "missing": 75,
       "unverified": 4
     },
-    "status_changed_total": 74,
+    "status_changed_total": 76,
     "transition_counts": {
-      "missing -> implemented": 22,
-      "missing -> partial": 47,
+      "missing -> implemented": 23,
+      "missing -> partial": 48,
       "partial -> implemented": 5
     }
   },
@@ -744,6 +745,60 @@
       "start_line": 61,
       "end_line": 61,
       "kind": "validation_report"
+    },
+    "musicxml_import": {
+      "path": "docs/validation/2026-10-21-gp8-musicxml-interchange.md",
+      "start_line": 5,
+      "end_line": 16,
+      "kind": "validation_report"
+    },
+    "musicxml_export": {
+      "path": "docs/validation/2026-10-21-gp8-musicxml-interchange.md",
+      "start_line": 18,
+      "end_line": 41,
+      "kind": "validation_report"
+    },
+    "musicxml_evidence": {
+      "path": "docs/validation/2026-10-21-gp8-musicxml-interchange.md",
+      "start_line": 43,
+      "end_line": 50,
+      "kind": "validation_report"
+    },
+    "musicxml_limits": {
+      "path": "docs/validation/2026-10-21-gp8-musicxml-interchange.md",
+      "start_line": 52,
+      "end_line": 62,
+      "kind": "validation_report"
+    },
+    "layout_scope": {
+      "path": "docs/validation/2026-10-16-gp8-score-layout-integration.md",
+      "start_line": 5,
+      "end_line": 11,
+      "kind": "validation_report"
+    },
+    "layout_limits": {
+      "path": "docs/validation/2026-10-16-gp8-score-layout-integration.md",
+      "start_line": 54,
+      "end_line": 58,
+      "kind": "validation_report"
+    },
+    "document_tabs_scope": {
+      "path": "docs/validation/2026-10-15-gp8-document-tabs.md",
+      "start_line": 5,
+      "end_line": 11,
+      "kind": "validation_report"
+    },
+    "document_tabs_workflow": {
+      "path": "docs/validation/2026-10-15-gp8-document-tabs.md",
+      "start_line": 13,
+      "end_line": 25,
+      "kind": "validation_report"
+    },
+    "document_tabs_limits": {
+      "path": "docs/validation/2026-10-15-gp8-document-tabs.md",
+      "start_line": 65,
+      "end_line": 69,
+      "kind": "validation_report"
     }
   },
   "evidence_file_sha256": {
@@ -792,13 +847,16 @@
     "docs/validation/2026-10-15-gp8-file-library.md": "565765bd7a9ed396aa762265806e8fd3a336c034a4784437cf6d97ff8b5a700f",
     "docs/validation/2026-10-15-gp8-backing-waveform.md": "1d353f53d39c2155588efcdedc51572799b8d44501c951b9eff764fb19ee0b95",
     "docs/validation/2026-10-15-gp8-backing-tempo.md": "153adf4f9366b9d588cc1ca6dedf03f19b9441f18f1674394a3c972693862076",
-    "docs/validation/2026-10-16-gp8-backing-processing.md": "ef0abdcef8c6e52c8dfc5d0277105d01e8e74e6813d1625cd5993dcdb43ec1ad"
+    "docs/validation/2026-10-16-gp8-backing-processing.md": "ef0abdcef8c6e52c8dfc5d0277105d01e8e74e6813d1625cd5993dcdb43ec1ad",
+    "docs/validation/2026-10-21-gp8-musicxml-interchange.md": "5c029723a6db66bffe62cc722884cbbc82695e7e9ce9948ad05d082a45dbb31d",
+    "docs/validation/2026-10-16-gp8-score-layout-integration.md": "abae38675f2c7b254487a3c74f175bfb37ecf3b7565570f1c7275f60818c1bc1",
+    "docs/validation/2026-10-15-gp8-document-tabs.md": "c864e76ec4f69b577cc0698620a7bdaad30cb1151a03d776287e84c90d33b496"
   },
   "next_open_families": [
     {
       "priority": 1,
       "family": "Interchange and audible correctness boundaries",
-      "work": "Resolve explicit GP losses with authored independent fixtures: long links/slurs, transposed trills, curves, mixed per-measure common/cut representation, inherited defaults and complete score/view relationships; characterize empty chord-carrier timing. Uniform known common/cut stylesheet choices now import/export. Establish fermata units/holds and distinguish gesture sound routes.",
+      "work": "Resolve explicit GP losses with authored independent fixtures: long links/slurs, curves (the transposed pitched-trill defect is closed, 2026-10-16), mixed per-measure common/cut representation, inherited defaults and complete score/view relationships; characterize empty chord-carrier timing. Uniform known common/cut stylesheet choices now import/export. Establish fermata units/holds and distinguish gesture sound routes. MusicXML export (F13) is partial: multi-staff, percussion and other refused content remain.",
       "evidence": [
         "entry_limits",
         "notation_limits",
@@ -839,7 +897,7 @@
     {
       "priority": 4,
       "family": "Engraving/display completion",
-      "work": "Screen page/grid/horizontal modes, fit controls, metadata headers/footers, fonts/style libraries, graphical widths/beat placement, per-system/staff spacing and collision acceptance remain open. Render specialized Jianpu/slash/multirest fixtures before upgrading those rows.",
+      "work": "Screen page/grid/horizontal modes and fit controls are source-integrated with desktop acceptance open; metadata headers/footers, fonts/style libraries, graphical widths/beat placement, per-system/staff spacing and collision acceptance remain open. Render specialized Jianpu/slash/multirest fixtures before upgrading those rows.",
       "evidence": [
         "engraving_limits"
       ]
@@ -1140,12 +1198,16 @@
       "acceptance_required": "Open two dirty scores and switch/close/save independently.",
       "runtime_rechecked": false,
       "historical_status": "missing",
-      "current_status": "missing",
-      "assessment": "baseline_not_reaudited",
-      "current_proven_status": null,
-      "current_behavior": "One controller and document; no tabs/Close/Close All/switching state.",
-      "remaining_gap": "Not re-audited in this delivery-progress audit. The original baseline behavior, gap and acceptance remain authoritative historical context; this is not a new current proof.",
-      "current_evidence": [],
+      "current_status": "implemented",
+      "assessment": "evidence_reviewed",
+      "current_proven_status": "implemented",
+      "current_behavior": "Document tabs keep isolated native histories, views and addressed save/export per document, with a shared music clipboard, one active audio owner and transactional Close/Close All decisions. A recorded Windows desktop workflow (24 checks) opens two dirty scores and switches, saves, exports and closes them independently.",
+      "remaining_gap": "No original-GP8 tab UI comparison; macOS/Linux runtime and session restore of tabs are covered by other rows (W10/W11). The 24-check run used the executable from before the final window-close fix, which has its own native receipt.",
+      "current_evidence": [
+        "document_tabs_scope",
+        "document_tabs_workflow",
+        "document_tabs_limits"
+      ],
       "runtime_rechecked_by_this_audit": false
     },
     {
@@ -6485,12 +6547,15 @@
       "runtime_rechecked": false,
       "historical_status": "missing",
       "current_status": "partial",
-      "current_behavior": "Desktop XML/MusicXML/MXL intake is exposed and authored piano XML/MXL can be edited, saved/reopened with immutable source bytes.",
-      "remaining_gap": "The complete notation/instrument/voice import matrix is not accepted; documented MusicXML tempo-offset, natural-harmonic and volume/pan-direction losses remain. The compressed container path does not repair these semantic reader losses.",
+      "current_behavior": "Desktop XML/MusicXML/MXL intake is exposed with immutable source bytes. Owned import passes now restore tempo offsets and tempo words, measure/direction volume and pan, TAB natural harmonics, hammer-ons/pull-offs, pedal offsets, folded notation+TAB staves, transposed ties, tied/continued bends and lyric syllables, keeping the stock import on any doubt.",
+      "remaining_gap": "No complete notation/instrument/voice import matrix against public producer files and no original-GP8 MusicXML comparison. The repairs apply only to UTF-8 sources.",
       "current_evidence": [
         "entry",
         "entry_validation",
-        "entry_limits"
+        "entry_limits",
+        "musicxml_import",
+        "musicxml_evidence",
+        "musicxml_limits"
       ],
       "assessment": "evidence_reviewed",
       "current_proven_status": "partial",
@@ -6517,12 +6582,14 @@
       "runtime_rechecked": false,
       "historical_status": "missing",
       "current_status": "partial",
-      "current_behavior": "Desktop XML/MusicXML/MXL intake is exposed and authored piano XML/MXL can be edited, saved/reopened with immutable source bytes.",
-      "remaining_gap": "The complete notation/instrument/voice import matrix is not accepted; documented MusicXML tempo-offset, natural-harmonic and volume/pan-direction losses remain. The compressed container path does not repair these semantic reader losses.",
+      "current_behavior": "Compressed MusicXML selects the container root and runs the same owned import repairs as plain MusicXML, with original container bytes kept.",
+      "remaining_gap": "Same as F03: no complete import matrix against public producer files and no original-GP8 comparison.",
       "current_evidence": [
         "entry",
         "entry_validation",
-        "entry_limits"
+        "entry_limits",
+        "musicxml_import",
+        "musicxml_limits"
       ],
       "assessment": "evidence_reviewed",
       "current_proven_status": "partial",
@@ -6795,12 +6862,16 @@
       "acceptance_required": "Export multi-staff voices/lyrics/directions/techniques and decode independently.",
       "runtime_rechecked": false,
       "historical_status": "missing",
-      "current_status": "missing",
-      "assessment": "baseline_not_reaudited",
-      "current_proven_status": null,
-      "current_behavior": "No MusicXML exporter.",
-      "remaining_gap": "Not re-audited in this delivery-progress audit. The original baseline behavior, gap and acceptance remain authoritative historical context; this is not a new current proof.",
-      "current_evidence": [],
+      "current_status": "partial",
+      "assessment": "evidence_reviewed",
+      "current_proven_status": "partial",
+      "current_behavior": "The export dialog writes MusicXML 4.0 score-partwise for the selected tracks, staves and measures through a native save with MIDI-equivalent protections. Single-staff tracks and notation+TAB guitars (as two-staff parts) carry pitches, rhythms, ties, tuplets, clefs, keys, repeats, tempo, dynamics, volume/pan, lyrics, graces, bends, articulations, ornaments, vibrato, hammer-ons/pull-offs, shift slides, tremolo picking, pick strokes, taps and fermata types; unsupported content is refused before the save dialog. The Windows desktop-test export writes a score-partwise file through the native save.",
+      "remaining_gap": "Multi-staff tracks (e.g. piano grand staff), percussion, notation-only stringed staves, sounding transposition, more than four voices on a notation+TAB staff, wide vibrato, alternate endings, other slide types, instrument changes and gradual mix changes are refused. Output is decoded only by the alphaTab importer, with no schema validation or third-party reader.",
+      "current_evidence": [
+        "musicxml_export",
+        "musicxml_evidence",
+        "musicxml_limits"
+      ],
       "runtime_rechecked_by_this_audit": false
     },
     {
@@ -7248,11 +7319,13 @@
       "runtime_rechecked": false,
       "historical_status": "partial",
       "current_status": "partial",
-      "current_behavior": "The current vertical score renderer now supports per-track profiles, simultaneous visible tracks and detached presentation settings.",
-      "remaining_gap": "Physical screen-page, grid and horizontal modes remain open.",
+      "current_behavior": "The score toolbar offers Vertical page, Horizontal page, Grid, Parchment, Vertical screen and Horizontal screen, with per-document display preferences and mapped note/range interaction in source tests.",
+      "remaining_gap": "Desktop visual acceptance of the six modes (real fonts, pointer gestures, scrolling, cursor and restored per-document state) has not run.",
       "current_evidence": [
         "engraving",
-        "engraving_limits"
+        "engraving_limits",
+        "layout_scope",
+        "layout_limits"
       ],
       "assessment": "evidence_reviewed",
       "current_proven_status": "partial",
@@ -7279,12 +7352,14 @@
       "runtime_rechecked": false,
       "historical_status": "partial",
       "current_status": "partial",
-      "current_behavior": "Session-only fractional zoom from 25% to 300% is exposed and survives ordinary editing without document history/audio changes.",
-      "remaining_gap": "Fit-width and fit-page controls remain absent; dense forced systems can crowd at narrow widths/high zoom.",
+      "current_behavior": "Fractional zoom from 25% to 300% plus fit-width, and fit-page for physical page layouts only; the zoom policy is a per-document workspace view preference kept in recovery data, not in the score file.",
+      "remaining_gap": "Fit behaviour has source-level geometry tests only; desktop resize/legibility acceptance has not run, and dense forced systems can still crowd at narrow widths/high zoom.",
       "current_evidence": [
         "engraving",
         "engraving_validation",
-        "engraving_limits"
+        "engraving_limits",
+        "layout_scope",
+        "layout_limits"
       ],
       "assessment": "evidence_reviewed",
       "current_proven_status": "partial",
@@ -8955,5 +9030,6 @@
       "current_evidence": [],
       "runtime_rechecked_by_this_audit": false
     }
-  ]
+  ],
+  "evidence_file_sha256_note": "Digests of source files (for example src/App.tsx, src/engraving/page.ts) are snapshots taken at the revision where each row was assessed; they are not refreshed for later source changes. Validation-report digests added on 2026-10-21 match those reports at 088b973 plus this documentation change."
 }

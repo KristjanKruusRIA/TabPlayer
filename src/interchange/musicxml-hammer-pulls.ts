@@ -101,6 +101,21 @@ export function applyMusicXmlHammerPulls(score:model.Score,bytes:Uint8Array,sett
   }
 }
 
+// The import links each slide to the note its source stops. A replay finishes an
+// origin before a later bar's target is linked back, so it falls back to the next note
+// on the string (none on a notation copy); the stock import's links are put back.
+function keepSlides(stock:model.Score,replayed:model.Score):model.Score {
+  const all=(score:model.Score)=>score.tracks.flatMap(track=>track.staves.flatMap(staff=>staff.bars.flatMap(bar=>bar.voices.flatMap(voice=>voice.beats.flatMap(beat=>beat.notes)))));
+  const notes=new Map(all(replayed).map(note=>[note.id,note]));
+  for(const source of all(stock)){
+    const note=notes.get(source.id);if(!note)continue;
+    note.slideOutType=source.slideOutType;
+    note.slideTarget=source.slideTarget?notes.get(source.slideTarget.id)??null:null;
+    note.slideOrigin=source.slideOrigin?notes.get(source.slideOrigin.id)??null:null;
+  }
+  return replayed;
+}
+
 function restore(score:model.Score,sources:Map<model.Track,Measure[]>,origins:model.Note[],settings:Settings):model.Score {
   // Every started note must be found before any note changes.
   for(const [track,found] of sources)for(const [index,measure] of found.entries())for(const [id,run] of measure){
@@ -131,7 +146,7 @@ function restore(score:model.Score,sources:Map<model.Track,Measure[]>,origins:mo
       const begun=locate(origin,sources),ended=destination&&locate(destination,sources);
       if(!begun||!ended||begun.end!==ended)wrong.add(origin);
     }
-    if(!wrong.size)return replayed;
+    if(!wrong.size)return keepSlides(score,replayed);
     kept=new Set([...kept].filter(note=>!wrong.has(note)));
   }
   return score;

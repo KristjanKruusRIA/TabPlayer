@@ -79,7 +79,7 @@ const written={
   // Stem direction is display; dynamics are written as directions.
   beat:new Set(['id','notes','isempty','duration','dots','tupletnumerator','tupletdenominator','automations','displaystart','playbackstart','displayduration','playbackduration','overridedisplayduration','preferredbeamdirection','dynamics','gracetype','lyrics','pickstroke','tap']),
   // Bend points are written as <bend> elements (their type is derived from them).
-  note:new Set(['id','fret','string','octave','tone','istiedestination','tiedestinationnoteid','tieoriginnoteid','accidentalmode','dynamics','bendtype','bendpoints','iscontinuedbend','accentuated','isstaccato','vibrato','ornament','ishammerpullorigin','hammerpulloriginnoteid','hammerpulldestinationnoteid']),
+  note:new Set(['id','fret','string','octave','tone','istiedestination','tiedestinationnoteid','tieoriginnoteid','accidentalmode','dynamics','bendtype','bendpoints','iscontinuedbend','accentuated','isstaccato','vibrato','ornament','ishammerpullorigin','hammerpulloriginnoteid','hammerpulldestinationnoteid','slideouttype','slideoriginnoteid','slidetargetnoteid']),
 };
 type Json=Record<string,unknown>;
 const toJson=(score:model.Score):Json=>{const value:unknown=model.JsonConverter.scoreToJson(score);return (typeof value==='string'?JSON.parse(value):value) as Json;};
@@ -226,6 +226,30 @@ function legato(note:model.Note,open:Map<model.Note,number>,levels:Map<model.Not
   return result;
 }
 
+// alphaTab imports a numbered <slide> start/stop pair as a shift slide to that exact note;
+// MusicXML has no form it reads as a legato slide or a slide in or out.
+function slide(note:model.Note,open:Map<model.Note,number>,levels:Map<model.Note,number>[]){
+  if(note.slideOutType===model.SlideOutType.Legato)unsupported('a legato slide');
+  if(note.slideOutType!==model.SlideOutType.None&&note.slideOutType!==model.SlideOutType.Shift)unsupported('a slide out');
+  const link=(type:string,level:number)=>`<slide type="${type}" number="${level}" line-type="solid"/>`;
+  let result='';const origin=note.slideOrigin;
+  if(origin&&origin.slideOutType===model.SlideOutType.Shift&&origin.slideTarget===note){
+    const level=open.get(origin);if(!level)unsupported('a slide without its origin');
+    open.delete(origin);result+=link('stop',level!);
+  }
+  const target=note.slideOutType===model.SlideOutType.Shift?note.slideTarget:null;
+  if(target){
+    // The target keeps one origin, so a second slide into it would be written unclosed.
+    if(target.slideOrigin!==note)unsupported('two slides into one note');
+    // The import pairs in document order, which follows a voice but not across voices.
+    if(target.beat.voice.index!==note.beat.voice.index||target.beat.voice.bar.staff!==note.beat.voice.bar.staff)unsupported('a slide into another voice');
+    const used=new Set(levels.flatMap(spans=>[...spans.values()]));let level=1;while(used.has(level))level++;
+    if(level>16)unsupported('more than 16 simultaneous slides');
+    open.set(note,level);result+=link('start',level);
+  }
+  return result;
+}
+
 // alphaTab's MusicXML import links each hammer-on origin itself (see
 // musicxml-hammer-pulls.ts), so every selected link must be one that relinking from the
 // flags alone rebuilds. A link a range cuts is dropped, as ties are.
@@ -263,7 +287,7 @@ function writePart(track:model.Track,score:model.Score,json:Json,scoreJson:Json,
   const transpose=staff.displayTranspositionPitch,octaveChange=Math.trunc(transpose/12),chromatic=transpose-12*octaveChange;
   // Overlapping ties need distinct <tied number> levels across the whole part,
   // both staves included, to pair unambiguously.
-  const ties=layouts.map(()=>new Map<model.Note,number>()),legatos=layouts.map(()=>new Map<model.Note,number>());
+  const ties=layouts.map(()=>new Map<model.Note,number>()),legatos=layouts.map(()=>new Map<model.Note,number>()),slides=layouts.map(()=>new Map<model.Note,number>());
   let measures='',previous:model.Bar|null=null;
   for(const [index,bar] of staff.bars.entries()){
     const master=bar.masterBar,barJson=(staffJson.bars as Json[])[index];check('bar',barJson);check('master',(scoreJson.masterbars as Json[])[master.index]);
@@ -361,7 +385,7 @@ function writePart(track:model.Track,score:model.Score,json:Json,scoreJson:Json,
             if(note.vibrato!==model.VibratoType.None&&note.hasBend&&!bent)unsupported('vibrato on a bend held over a tie');
             const slurred=legato(note,legatos[at],legatos),technical=fingering||bent||mark.technical||slurred?element('technical',slurred+bent+mark.technical+fingering):'';
             const marked=(mark.ornaments?element('ornaments',mark.ornaments):'')+technical+(mark.articulations?element('articulations',mark.articulations):'');
-            const tied=links.map(([type,level])=>`<tied type="${type}" number="${level}"/>`).join('');
+            const tied=links.map(([type,level])=>`<tied type="${type}" number="${level}"/>`).join('')+slide(note,slides[at],slides);
             const timing=rhythm(layout).replace('</duration>',`</duration>${links.map(([type])=>`<tie type="${type}"/>`).join('')}`),cut=timing.search(/<time-modification>|<staff>/);
             notes[at]+=element('note',grace+(noteIndex?'<chord/>':'')+written.pitch+(cut<0?timing+written.accidental:timing.slice(0,cut)+written.accidental+timing.slice(cut))
               +(tied||marked?element('notations',tied+marked):'')+(at===0&&noteIndex===0?lyrics:''));
@@ -376,6 +400,8 @@ function writePart(track:model.Track,score:model.Score,json:Json,scoreJson:Json,
     if(master.repeatCount>0)content+=element('barline',element('bar-style','light-heavy')+`<repeat direction="backward"${master.repeatCount===2?'':` times="${master.repeatCount}"`}/>`,' location="right"');
     measures+=element('measure',content,` number="${index+1}"`);previous=bar;
   }
+  // Every span opened in the part must have been closed in it.
+  if([...legatos,...slides].some(open=>open.size))unsupported('a hammer-on, pull-off or slide left open');
   return measures;
 }
 

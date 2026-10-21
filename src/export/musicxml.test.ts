@@ -299,7 +299,7 @@ describe('MusicXML export',()=>{
   };
   const graces=(score:model.Score)=>score.tracks[0].staves[0].bars[0].voices[0].beats.map(beat=>[beat.graceType,beat.duration,beat.notes.map(note=>note.realValue).sort()]);
   // A hammer-on's destination sounds softer, so velocity is part of what is played.
-  const played=(score:model.Score)=>buildPlaybackPlan(score,1).notes.map(note=>[note.startTick,note.endTick,note.key,note.velocity]);
+  const played=(score:model.Score)=>buildPlaybackPlan(score,1).notes.map(note=>[note.startTick,note.endTick,note.key,note.velocity,note.articulation,note.pitch]);
   it.each([
     ['a before-beat grace',model.GraceType.BeforeBeat,{},'<grace slash="yes"/>',['eighth']],
     ['an on-beat grace',model.GraceType.OnBeat,{},'<grace/>',['eighth']],
@@ -516,6 +516,94 @@ describe('MusicXML export',()=>{
     const [first,second]=score.tracks[0].staves[0].bars,origin=first.voices[0].beats[1].notes[0],destination=second.voices[0].beats[1].notes[0];
     origin.isHammerPullOrigin=true;origin.hammerPullDestination=destination;destination.hammerPullOrigin=origin;
     expect(()=>exportMusicXml(score,selectAll(score))).toThrow(/hammer-on or pull-off the import cannot link back/);
+  });
+
+  // One string: 2 slides up to 5, 5 slides down to 3, which slides into the next bar.
+  const sliding=(both=false)=>{
+    const run=[2,5,5,3].map(fret=>({duration:quarter,notes:[{string:2,fret}]}));
+    const score=build({strings:[64,59,55,50,45,40],transpose:-12,bars:[{numerator:4,denominator:4,voices:[run]},{numerator:4,denominator:4,voices:[run]}]});
+    const staff=score.tracks[0].staves[0];
+    if(both){staff.showStandardNotation=true;for(const bar of staff.bars)bar.clefOttava=model.Ottavia._8vb;}
+    for(const at of [0,2,3])staff.bars[0].voices[0].beats[at].notes[0].slideOutType=model.SlideOutType.Shift;
+    score.finish(settings);return score;
+  };
+  const slideState=(score:model.Score)=>score.tracks[0].staves[0].bars.flatMap(bar=>bar.voices[0].beats.map(beat=>{
+    const note=beat.notes[0];return [note.slideOutType,note.slideTarget?.fret??null,note.slideOrigin?.fret??null];
+  }));
+  const slides=(note:Element)=>[...note.querySelectorAll('notations > slide')].map(node=>`${node.getAttribute('type')}:${node.getAttribute('number')}`);
+
+  it('writes shift slides and reads them back',()=>{
+    const score=sliding(),shift=model.SlideOutType.Shift,none=model.SlideOutType.None;
+    expect(slideState(score).slice(0,5)).toEqual([[shift,5,null],[none,null,2],[shift,3,null],[shift,2,5],[none,null,3]]);
+    const doc=parse(exportMusicXml(score,selectAll(score)));
+    expect([...doc.querySelectorAll('note')].map(slides)).toEqual([['start:1'],['stop:1'],['start:1'],['stop:1','start:1'],['stop:1'],[],[],[]]);
+    const back=loadInterchangeScore(exportMusicXml(score,selectAll(score)),settings);
+    expect(slideState(back)).toEqual(slideState(score));
+    expect(played(back)).toEqual(played(score));
+  });
+
+  it('keeps shift slides on a notation + TAB guitar',()=>{
+    const score=sliding(true),doc=parse(exportMusicXml(score,selectAll(score)));
+    expect(doc.querySelectorAll('notations > slide[type="start"]').length).toBe(6);
+    const back=loadInterchangeScore(exportMusicXml(score,selectAll(score)),settings);
+    expect(back.tracks[0].staves.length).toBe(1);
+    expect(slideState(back)).toEqual(slideState(score));
+    expect(played(back)).toEqual(played(score));
+  });
+
+  it('keeps a slide across a bar next to a hammer-on on a notation + TAB guitar',()=>{
+    // The hammer-on import replays the score, which must not drop the notation copy's slide.
+    const score=sliding(true);score.tracks[0].staves[0].bars[1].voices[0].beats[1].notes[0].isHammerPullOrigin=true;score.finish(settings);
+    const back=loadInterchangeScore(exportMusicXml(score,selectAll(score)),settings);
+    expect(back.tracks[0].staves.length).toBe(1);
+    expect(slideState(back)).toEqual(slideState(score));
+    expect(back.tracks[0].staves[0].bars[1].voices[0].beats[1].notes[0].isHammerPullOrigin).toBe(true);
+    expect(played(back)).toEqual(played(score));
+  });
+
+  it('numbers overlapping slides in a chord',()=>{
+    const pair=(fret:number)=>({duration:half,notes:[{string:2,fret},{string:3,fret}]});
+    const score=build({strings:[64,59,55,50,45,40],transpose:-12,bars:[{numerator:4,denominator:4,voices:[[pair(2),pair(5)]]}]});
+    for(const note of score.tracks[0].staves[0].bars[0].voices[0].beats[0].notes)note.slideOutType=model.SlideOutType.Shift;
+    score.finish(settings);
+    const doc=parse(exportMusicXml(score,selectAll(score)));
+    expect([...doc.querySelectorAll('note')].flatMap(slides)).toEqual(['start:1','start:2','stop:1','stop:2']);
+    const back=loadInterchangeScore(exportMusicXml(score,selectAll(score)),settings);
+    expect(back.tracks[0].staves[0].bars[0].voices[0].beats[0].notes.map(note=>note.slideTarget?.string)).toEqual(score.tracks[0].staves[0].bars[0].voices[0].beats[0].notes.map(note=>note.slideTarget?.string));
+    expect(played(back)).toEqual(played(score));
+  });
+
+  it.each([
+    ['a legato slide',/legato slide/,(note:model.Note)=>{note.slideOutType=model.SlideOutType.Legato;}],
+    ['a slide out',/a slide out/,(note:model.Note)=>{note.slideOutType=model.SlideOutType.OutDown;}],
+    ['a slide in',/slideintype/,(note:model.Note)=>{note.slideInType=model.SlideInType.IntoFromBelow;}],
+  ] as [string,RegExp,(note:model.Note)=>void][])('refuses %s',(_name,error,set)=>{
+    const score=marked(guitar(),set);
+    expect(()=>exportMusicXml(score,selectAll(score))).toThrow(error);
+  });
+
+  it('refuses two slides into one note',()=>{
+    const pair=(fret:number)=>({duration:half,notes:[{string:2,fret},{string:3,fret}]});
+    const score=build({strings:[64,59,55,50,45,40],transpose:-12,bars:[{numerator:4,denominator:4,voices:[[pair(2),{duration:half,notes:[{string:2,fret:7}]}]]}]});
+    const [first,second]=score.tracks[0].staves[0].bars[0].voices[0].beats,target=second.notes[0];
+    for(const note of first.notes){note.slideOutType=model.SlideOutType.Shift;note.slideTarget=target;}
+    target.slideOrigin=first.notes[1];
+    expect(()=>exportMusicXml(score,selectAll(score))).toThrow(/two slides into one note/);
+  });
+
+  it('refuses a slide into another voice',()=>{
+    const score=build({strings:[64,59,55,50,45,40],transpose:-12,bars:[{numerator:4,denominator:4,voices:[
+      [{duration:half,notes:[{string:2,fret:2}]},{duration:half,notes:[{string:2,fret:5}]}],
+      [{duration:half,notes:[{string:3,fret:0}]},{duration:half,notes:[{string:3,fret:2}]}],
+    ]}]});
+    const [upper,lower]=score.tracks[0].staves[0].bars[0].voices,origin=upper.beats[0].notes[0],target=lower.beats[1].notes[0];
+    origin.slideOutType=model.SlideOutType.Shift;origin.slideTarget=target;target.slideOrigin=origin;
+    expect(()=>exportMusicXml(score,selectAll(score))).toThrow(/slide into another voice/);
+  });
+
+  it('drops a slide whose target a range cuts off',()=>{
+    const score=sliding(),doc=parse(exportMusicXml(score,{tracks:[0],range:{first:0,last:0}}));
+    expect([...doc.querySelectorAll('note')].map(slides)).toEqual([['start:1'],['stop:1'],['start:1'],['stop:1']]);
   });
 
   it('drops a hammer-on whose destination a range cuts off, as it drops ties',()=>{

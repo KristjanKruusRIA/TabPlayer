@@ -634,16 +634,48 @@ describe('MusicXML export',()=>{
   });
 
   it.each([
-    ['a partial release',[[0,4],[60,2]]],
-    ['a bend further up',[[0,4],[60,6]]],
-  ] as [string,number[][]][])('refuses %s continued over a tie until the import reads it back',(_name,destination)=>{
-    const score=continued(destination);
-    expect(()=>exportMusicXml(score,selectAll(score))).toThrow(/does not first release fully/);
+    ['a partial release',[[0,4],[60,2]],[['-1','release']],[4,2]],
+    ['a bend further up',[[0,4],[60,6]],[['1','']],[4,6]],
+    ['three changes',[[0,4],[20,2],[40,4],[60,2]],[['-1','release'],['1',''],['-1','release']],[4,2,4,2]],
+  ] as [string,number[][],string[][],number[]][])('writes %s continued over a tie and reads it back',(_name,destination,written,values)=>{
+    const score=continued(destination),doc=parse(exportMusicXml(score,selectAll(score)));
+    expect([...lowE(doc)[1].querySelectorAll('bend')].map(bend=>[bend.querySelector('bend-alter')?.textContent,bend.querySelector('pre-bend,release')?.localName??''])).toEqual(written);
+    const back=loadInterchangeScore(exportMusicXml(score,selectAll(score)),settings);
+    expect(bendValues(back.tracks[0].staves[0].bars[1].voices[0].beats[0].notes.find(note=>note.string===1)!)).toEqual(values);
+    score.finish(settings);
+    if(destination.length===2)expect(pitchBends(back)).toEqual(pitchBends(score));
+  });
+
+  it('reads a pre-bend tied into a partial release back at the bent pitch',()=>{
+    const score=guitar(),origin=score.tracks[0].staves[0].bars[0].voices[0].beats[3].notes.find(note=>note.string===1)!,tied=score.tracks[0].staves[0].bars[1].voices[0].beats[0].notes.find(note=>note.string===1)!;
+    origin.addBendPoint(new model.BendPoint(0,4));origin.addBendPoint(new model.BendPoint(60,4));
+    tied.addBendPoint(new model.BendPoint(0,4));tied.addBendPoint(new model.BendPoint(60,2));
+    const back=loadInterchangeScore(exportMusicXml(score,selectAll(score)),settings);
+    expect(bendValues(back.tracks[0].staves[0].bars[1].voices[0].beats[0].notes.find(note=>note.string===1)!)).toEqual([4,2]);
+    score.finish(settings);
+    expect(pitchBends(back)).toEqual(pitchBends(score));
+  });
+
+  it('refuses a pre-bend on a note tied from an unbent one',()=>{
+    const score=guitar(),tied=score.tracks[0].staves[0].bars[1].voices[0].beats[0].notes.find(note=>note.string===1)!;
+    tied.addBendPoint(new model.BendPoint(0,4));tied.addBendPoint(new model.BendPoint(60,4));
+    expect(()=>exportMusicXml(score,selectAll(score))).toThrow(/pre-bend on a tied note/);
+  });
+
+  it('exports a re-imported three-change continuation again',()=>{
+    const score=continued([[0,4],[20,2],[40,4],[60,2]]),back=loadInterchangeScore(exportMusicXml(score,selectAll(score)),settings);
+    const again=loadInterchangeScore(exportMusicXml(back,selectAll(back)),settings);
+    expect(bendValues(again.tracks[0].staves[0].bars[1].voices[0].beats[0].notes.find(note=>note.string===1)!)).toEqual([4,2,4,2]);
+  });
+
+  it('refuses a continued bend whose changes are not evenly spaced',()=>{
+    const score=continued([[0,4],[15,4],[30,2],[60,2]]);
+    expect(()=>exportMusicXml(score,selectAll(score))).toThrow(/not evenly spaced/);
   });
 
   it('refuses a continued release and re-bend that reads back without its dip',()=>{
     const score=continued([[0,4],[15,4],[30,0],[45,0],[60,2]]);
-    expect(()=>exportMusicXml(score,selectAll(score))).toThrow(/exactly two changes/);
+    expect(()=>exportMusicXml(score,selectAll(score))).toThrow(/not evenly spaced|exactly two changes/);
   });
 
   it.each([

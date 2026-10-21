@@ -135,12 +135,19 @@ function bends(note:model.Note){
   // A curve tied into a note without its own bend plays stretched over the tie; MusicXML
   // times each bend within its note, so that timing cannot be written.
   if(note.tieDestination&&!note.tieDestination.hasBend&&points.some(point=>point.value!==points[0].value))unsupported('a bend that continues into a tied note without its own bend');
+  // The import reads a tied note's pre-bend as an absolute-valued source and stops
+  // correcting continued bends anywhere in the file.
+  if(points[0].value&&!note.isContinuedBend&&note.isTieDestination)unsupported('a pre-bend on a tied note');
   if(note.isContinuedBend){
     const carried=[...note.tieOrigin?.bendPoints??[]].sort((a,b)=>a.offset-b.offset).pop()?.value;
     if(carried!==points[0].value)unsupported('a continued bend that does not start at the bent pitch');
-    // alphaTab's import starts a tie destination's curve at 0 unless it opens with a release,
-    // so a bent continuation reads back at the right pitch only if it first releases fully.
-    if(points[0].value&&(points.find(point=>point.value!==points[0].value)?.value??0)!==0)unsupported('a continued bend that does not first release fully');
+    // alphaTab spaces a note's bends evenly over it and ignores first-beat and last-beat.
+    // The import writes each change as two points, so repeated points count once.
+    const corners=points.filter((point,index)=>!index||point.offset!==points[index-1].offset||point.value!==points[index-1].value);
+    if(corners[0].value&&corners.some(point=>point.value!==corners[0].value)){
+      const step=model.BendPoint.MaxPosition/(corners.length-1);
+      if(corners.some((point,index)=>point.offset!==index*step||(index&&point.value===corners[index-1].value)))unsupported('a continued bend whose changes are not evenly spaced');
+    }
     // Two changes import as four points, whose middle Note.finish drops on a bent continuation.
     if(points[0].value&&points.filter((point,index)=>index&&point.value!==points[index-1].value).length===2)unsupported('a continued bend with exactly two changes');
   }

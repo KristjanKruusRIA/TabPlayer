@@ -76,9 +76,9 @@ const written={
   bar:new Set(['id','clef','clefottava','voices','keysignature','keysignaturetype','displayscale','displaywidth']),
   voice:new Set(['id','beats']),
   // Stem direction is display; dynamics are written as directions.
-  beat:new Set(['id','notes','isempty','duration','dots','tupletnumerator','tupletdenominator','automations','displaystart','playbackstart','displayduration','playbackduration','overridedisplayduration','preferredbeamdirection','dynamics','gracetype','lyrics']),
+  beat:new Set(['id','notes','isempty','duration','dots','tupletnumerator','tupletdenominator','automations','displaystart','playbackstart','displayduration','playbackduration','overridedisplayduration','preferredbeamdirection','dynamics','gracetype','lyrics','pickstroke','tap']),
   // Bend points are written as <bend> elements (their type is derived from them).
-  note:new Set(['id','fret','string','octave','tone','istiedestination','tiedestinationnoteid','tieoriginnoteid','accidentalmode','dynamics','bendtype','bendpoints','iscontinuedbend']),
+  note:new Set(['id','fret','string','octave','tone','istiedestination','tiedestinationnoteid','tieoriginnoteid','accidentalmode','dynamics','bendtype','bendpoints','iscontinuedbend','accentuated','isstaccato','vibrato','ornament']),
 };
 type Json=Record<string,unknown>;
 const toJson=(score:model.Score):Json=>{const value:unknown=model.JsonConverter.scoreToJson(score);return (typeof value==='string'?JSON.parse(value):value) as Json;};
@@ -180,6 +180,31 @@ function lyricsOf(beat:model.Beat,state:{seen:Set<number>;open:boolean[]}){
   return result;
 }
 
+// Marks alphaTab's MusicXML import reads back one-to-one. Beat-level ones go on the
+// beat's first note; any wavy line without a trill imports as a slight vibrato.
+const accents=new Map([[model.AccentuationType.Normal,'<accent/>'],[model.AccentuationType.Heavy,'<strong-accent/>'],[model.AccentuationType.Tenuto,'<tenuto/>']]);
+const ornaments=new Map([[model.NoteOrnament.Turn,'<turn/>'],[model.NoteOrnament.InvertedTurn,'<inverted-turn/>'],[model.NoteOrnament.LowerMordent,'<mordent/>'],[model.NoteOrnament.UpperMordent,'<inverted-mordent/>']]);
+const strokes=new Map([[model.PickStroke.Up,'<up-bow/>'],[model.PickStroke.Down,'<down-bow/>']]);
+function marks(note:model.Note,first:boolean){
+  const accent=note.accentuated===model.AccentuationType.None?'':accents.get(note.accentuated)??unsupported('this accent');
+  const ornament=note.ornament===model.NoteOrnament.None?'':ornaments.get(note.ornament)??unsupported('this ornament');
+  if(note.vibrato!==model.VibratoType.None&&note.vibrato!==model.VibratoType.Slight)unsupported('a wide vibrato');
+  // alphaTab plays a bent note's tie destination with the origin's vibrato, while the
+  // import's held-tie pass gives that destination a hold, which mutes it.
+  if(note.vibrato!==model.VibratoType.None&&note.hasBend&&note.tieDestination&&!note.tieDestination.hasBend)unsupported('vibrato on a bend tied into an unbent note');
+  // Further down an unbent tie chain the source vibrates unbent, but the pass holds every link.
+  if(note.vibrato!==model.VibratoType.None&&!note.hasBend&&note.tieOrigin&&!note.tieOrigin.hasBend){
+    let origin:model.Note|null=note.tieOrigin;while(origin&&!origin.hasBend)origin=origin.isTieDestination?origin.tieOrigin:null;
+    if(origin)unsupported('vibrato in an unbent tie chain after a bend');
+  }
+  const beat=note.beat,stroke=beat.pickStroke===model.PickStroke.None?'':strokes.get(beat.pickStroke)??unsupported('this pick stroke');
+  return {
+    articulations:accent+(note.isStaccato?'<staccato/>':''),
+    ornaments:ornament+(note.vibrato===model.VibratoType.Slight?'<wavy-line type="start"/><wavy-line type="stop"/>':''),
+    technical:first?stroke+(beat.tap?'<tap/>':''):'',
+  };
+}
+
 function writePart(track:model.Track,score:model.Score,json:Json,scoreJson:Json,first:boolean,instrument:string,state:{dynamic:model.DynamicValue;started:boolean}){
   state.started=false;
   const mix=trackMixAutomations(track),sung={seen:new Set<number>(),open:[] as boolean[]};
@@ -249,6 +274,8 @@ function writePart(track:model.Track,score:model.Score,json:Json,scoreJson:Json,
         const start=index===0&&voice.index===0&&beat.index===0;
         // Volume/Balance points are written as mix directions from the track's mix stream.
         if(beat.automations.some(change=>change.type!==model.AutomationType.Volume&&change.type!==model.AutomationType.Balance&&!(start&&change.type===model.AutomationType.Instrument&&change.value===track.playbackInfo.program)))unsupported('beat automations');
+        // Pick strokes and taps are written on a note, so a rest has nowhere to carry them.
+        if(!beat.notes.length&&(beat.pickStroke!==model.PickStroke.None||beat.tap))unsupported('a pick stroke or tap on a rest');
         // An empty voice can still carry (for example invisible) notes alphaTab does not draw.
         if(voice.isEmpty){if(beat.notes.length)unsupported('notes in an empty voice');continue;}
         if(beat.isEmpty)unsupported('an empty beat inside a voice');
@@ -287,12 +314,15 @@ function writePart(track:model.Track,score:model.Score,json:Json,scoreJson:Json,
               if(level>16)unsupported('more than 16 simultaneous ties');open.set(note,level);links.push(['start',level]);
             }
             // Bends sound on every copy; string/fret belongs to the TAB copy.
-            const fingering=layout.technical&&note.isStringed?element('string',strings.length-note.string+1)+element('fret',note.fret):'',bent=bends(note);
-            const technical=fingering||bent?element('technical',bent+fingering):'';
+            const fingering=layout.technical&&note.isStringed?element('string',strings.length-note.string+1)+element('fret',note.fret):'',bent=bends(note),mark=marks(note,noteIndex===0);
+            // A held tie writes no bend, so on import its vibrato would sound unbent.
+            if(note.vibrato!==model.VibratoType.None&&note.hasBend&&!bent)unsupported('vibrato on a bend held over a tie');
+            const technical=fingering||bent||mark.technical?element('technical',bent+mark.technical+fingering):'';
+            const marked=(mark.ornaments?element('ornaments',mark.ornaments):'')+technical+(mark.articulations?element('articulations',mark.articulations):'');
             const tied=links.map(([type,level])=>`<tied type="${type}" number="${level}"/>`).join('');
             const timing=rhythm(layout).replace('</duration>',`</duration>${links.map(([type])=>`<tie type="${type}"/>`).join('')}`),cut=timing.search(/<time-modification>|<staff>/);
             notes[at]+=element('note',grace+(noteIndex?'<chord/>':'')+written.pitch+(cut<0?timing+written.accidental:timing.slice(0,cut)+written.accidental+timing.slice(cut))
-              +(tied||technical?element('notations',tied+technical):'')+(at===0&&noteIndex===0?lyrics:''));
+              +(tied||marked?element('notations',tied+marked):'')+(at===0&&noteIndex===0?lyrics:''));
           });
         }
       }

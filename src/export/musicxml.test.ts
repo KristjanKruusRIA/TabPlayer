@@ -400,6 +400,62 @@ describe('MusicXML export',()=>{
     expect(()=>exportMusicXml(score,selectAll(score))).toThrow(error);
   });
 
+  // A technique on the first beat's note (a beat-level one on its beat), its MusicXML path, and how to read it back.
+  type Technique=[string,(note:model.Note)=>void,string,(note:model.Note)=>unknown];
+  const techniques:Technique[]=[
+    ['an accent',note=>{note.accentuated=model.AccentuationType.Normal;},'articulations > accent',note=>note.accentuated],
+    ['a heavy accent',note=>{note.accentuated=model.AccentuationType.Heavy;},'articulations > strong-accent',note=>note.accentuated],
+    ['a tenuto',note=>{note.accentuated=model.AccentuationType.Tenuto;},'articulations > tenuto',note=>note.accentuated],
+    ['a staccato',note=>{note.isStaccato=true;},'articulations > staccato',note=>note.isStaccato],
+    ['a slight vibrato',note=>{note.vibrato=model.VibratoType.Slight;},'ornaments > wavy-line',note=>note.vibrato],
+    ['a turn',note=>{note.ornament=model.NoteOrnament.Turn;},'ornaments > turn',note=>note.ornament],
+    ['an inverted turn',note=>{note.ornament=model.NoteOrnament.InvertedTurn;},'ornaments > inverted-turn',note=>note.ornament],
+    ['a lower mordent',note=>{note.ornament=model.NoteOrnament.LowerMordent;},'ornaments > mordent',note=>note.ornament],
+    ['an upper mordent',note=>{note.ornament=model.NoteOrnament.UpperMordent;},'ornaments > inverted-mordent',note=>note.ornament],
+    ['an up pick stroke',note=>{note.beat.pickStroke=model.PickStroke.Up;},'technical > up-bow',note=>note.beat.pickStroke],
+    ['a down pick stroke',note=>{note.beat.pickStroke=model.PickStroke.Down;},'technical > down-bow',note=>note.beat.pickStroke],
+    ['a tap',note=>{note.beat.tap=true;},'technical > tap',note=>note.beat.tap],
+  ];
+  const marked=(score:model.Score,set:(note:model.Note)=>void)=>{set(score.tracks[0].staves[0].bars[0].voices[0].beats[0].notes[0]);score.finish(settings);return score;};
+  const firstNote=(score:model.Score)=>score.tracks[0].staves[0].bars[0].voices[0].beats[0].notes[0];
+  it.each(techniques)('writes %s and reads it back',(_name,set,path,read)=>{
+    const score=marked(guitar(),set),doc=parse(exportMusicXml(score,selectAll(score)));
+    expect(doc.querySelector('note')!.querySelectorAll(`notations > ${path}`).length).toBeGreaterThan(0);
+    expect([...doc.querySelectorAll('note')].slice(1).some(note=>note.querySelector(`notations > ${path}`))).toBe(false);
+    const back=loadInterchangeScore(exportMusicXml(score,selectAll(score)),settings);
+    expect(read(firstNote(back))).toEqual(read(firstNote(score)));
+    expect(played(back)).toEqual(played(score));
+  });
+
+  it.each(techniques)('keeps %s on a notation + TAB guitar',(_name,set,path,read)=>{
+    const score=marked(notationAndTab(),set),doc=parse(exportMusicXml(score,selectAll(score)));
+    expect([...doc.querySelectorAll("note")].filter(note=>note.querySelector(`notations > ${path}`)).length).toBe(2);
+    const back=loadInterchangeScore(exportMusicXml(score,selectAll(score)),settings);
+    expect(back.tracks[0].staves.length).toBe(1);
+    expect(read(firstNote(back))).toEqual(read(firstNote(score)));
+  });
+
+  it.each([
+    ['a pick stroke on a rest',/pick stroke or tap on a rest/,()=>{const score=guitar();score.tracks[0].staves[0].bars[1].voices[0].beats[4].pickStroke=model.PickStroke.Up;return score;}],
+    ['a tap on a rest',/pick stroke or tap on a rest/,()=>{const score=guitar();score.tracks[0].staves[0].bars[1].voices[0].beats[4].tap=true;return score;}],
+    ['vibrato on a bend held over a tie',/vibrato on a bend held over a tie/,()=>{const score=continued([[0,4],[60,4]]);score.tracks[0].staves[0].bars[1].voices[0].beats[0].notes.find(note=>note.string===1)!.vibrato=model.VibratoType.Slight;return score;}],
+    ['vibrato in an unbent tie chain after a bend',/vibrato in an unbent tie chain after a bend/,()=>{
+      const score=build({strings:[64,59,55,50,45,40],bars:[0,1,2].map(index=>({numerator:4,denominator:4,voices:[[{duration:model.Duration.Whole,notes:[{string:1,fret:0,tieDestination:index>0}]}]]}))});
+      const notes=score.tracks[0].staves[0].bars.map(bar=>bar.voices[0].beats[0].notes[0]);
+      notes[0].addBendPoint(new model.BendPoint(0,4));notes[0].addBendPoint(new model.BendPoint(60,4));notes[2].vibrato=model.VibratoType.Slight;score.finish(settings);return score;}],
+    ['vibrato on a bend tied into an unbent note',/vibrato on a bend tied into an unbent note/,()=>{
+      const score=guitar(),origin=score.tracks[0].staves[0].bars[0].voices[0].beats[3].notes.find(note=>note.string===1)!;
+      origin.addBendPoint(new model.BendPoint(0,4));origin.addBendPoint(new model.BendPoint(60,4));origin.vibrato=model.VibratoType.Slight;return score;}],
+  ] as [string,RegExp,()=>model.Score][])('refuses %s',(_name,error,make)=>{
+    const score=make();
+    expect(()=>exportMusicXml(score,selectAll(score))).toThrow(error);
+  });
+
+  it('refuses a wide vibrato',()=>{
+    const score=marked(guitar(),note=>{note.vibrato=model.VibratoType.Wide;});
+    expect(()=>exportMusicXml(score,selectAll(score))).toThrow(/wide vibrato/);
+  });
+
   it('refuses a continued bend that does not start at the bent pitch',()=>{
     const score=continued([[0,2],[60,0]]);
     expect(()=>exportMusicXml(score,selectAll(score))).toThrow(/continued bend that does not start/);
@@ -459,7 +515,7 @@ describe('MusicXML export',()=>{
   });
 
   it.each([
-    ['a note effect',/note vibrato/,(score:model.Score)=>{score.tracks[0].staves[0].bars[0].voices[0].beats[0].notes[0].vibrato=model.VibratoType.Slight;}],
+    ['a note effect',/note isghost/,(score:model.Score)=>{score.tracks[0].staves[0].bars[0].voices[0].beats[0].notes[0].isGhost=true;}],
     ['a beat effect',/beat text/,(score:model.Score)=>{score.tracks[0].staves[0].bars[0].voices[0].beats[0].text='Intro';}],
     ['a second staff',/more than one staff/,(score:model.Score)=>{score.tracks[0].ensureStaveCount(2);}],
     ['a percussion staff',/percussion|staff ispercussion/,(score:model.Score)=>{score.tracks[0].staves[0].isPercussion=true;}],

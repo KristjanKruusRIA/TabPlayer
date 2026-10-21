@@ -75,7 +75,7 @@ const written={
   bar:new Set(['id','clef','clefottava','voices','keysignature','keysignaturetype','displayscale','displaywidth']),
   voice:new Set(['id','beats']),
   // Stem direction is display; dynamics are written as directions.
-  beat:new Set(['id','notes','isempty','duration','dots','tupletnumerator','tupletdenominator','automations','displaystart','playbackstart','displayduration','playbackduration','overridedisplayduration','preferredbeamdirection','dynamics']),
+  beat:new Set(['id','notes','isempty','duration','dots','tupletnumerator','tupletdenominator','automations','displaystart','playbackstart','displayduration','playbackduration','overridedisplayduration','preferredbeamdirection','dynamics','gracetype']),
   // Bend points are written as <bend> elements (their type is derived from them).
   note:new Set(['id','fret','string','octave','tone','istiedestination','tiedestinationnoteid','tieoriginnoteid','accidentalmode','dynamics','bendtype','bendpoints','iscontinuedbend']),
 };
@@ -211,7 +211,17 @@ function writePart(track:model.Track,score:model.Score,json:Json,scoreJson:Json,
       const notes=layouts.map(()=>'');let total=0;
       for(const beat of voice.beats){
         const beatJson=(voiceJson.beats as Json[])[beat.index];check('beat',beatJson);
-        if(beat.graceType!==model.GraceType.None)unsupported('grace notes');
+        // Beat.finish sizes OnBeat/BeforeBeat graces by group, so type and group round-trip them;
+        // the importer ignores a grace's dots and tuplets, so those are refused.
+        const grace=beat.graceType===model.GraceType.OnBeat?'<grace/>':beat.graceType===model.GraceType.BeforeBeat?'<grace slash="yes"/>':'';
+        if(beat.graceType!==model.GraceType.None){
+          if(!grace)unsupported('a bend grace');
+          if(!voice.beats.slice(beat.index+1).some(next=>next.graceType===model.GraceType.None))unsupported('a grace note without a following beat');
+          if(!beat.notes.length)unsupported('a grace rest');
+          if(beat.notes.some(note=>note.isTieDestination||note.tieDestination))unsupported('a tied grace note');
+          if(beat.notes.some(note=>note.hasBend))unsupported('a bent grace note');
+          if(beat.dots||beat.hasTuplet)unsupported('a dotted or tuplet grace note');
+        }
         const start=index===0&&voice.index===0&&beat.index===0;
         // Volume/Balance points are written as mix directions from the track's mix stream.
         if(beat.automations.some(change=>change.type!==model.AutomationType.Volume&&change.type!==model.AutomationType.Balance&&!(start&&change.type===model.AutomationType.Instrument&&change.value===track.playbackInfo.program)))unsupported('beat automations');
@@ -231,10 +241,11 @@ function writePart(track:model.Track,score:model.Score,json:Json,scoreJson:Json,
         if(voice.beats.length===1&&!beat.notes.length&&beat.duration===model.Duration.Whole&&!beat.dots&&!beat.hasTuplet&&beat.displayDuration===length){
           layouts.forEach((layout,at)=>{notes[at]+=element('note','<rest measure="yes"/>'+element('duration',length)+voiceNumber(layout)+staffOf(layout));});total=length;continue;
         }
-        const ticks=beatTicks(beat);
+        const ticks=grace?0:beatTicks(beat);
         if(beat.displayStart!==total||beat.displayDuration!==ticks)unsupported('a beat whose length differs from its note value');
         total+=ticks;
-        const rhythm=(layout:typeof layouts[number])=>element('duration',ticks)+voiceNumber(layout)+element('type',typeNames.get(beat.duration as number)!)+'<dot/>'.repeat(beat.dots)
+        // A grace note has no <duration>.
+        const rhythm=(layout:typeof layouts[number])=>(grace?'':element('duration',ticks))+voiceNumber(layout)+element('type',typeNames.get(beat.duration as number)!)+'<dot/>'.repeat(beat.dots)
           +(beat.hasTuplet?element('time-modification',element('actual-notes',beat.tupletNumerator)+element('normal-notes',beat.tupletDenominator)):'')+staffOf(layout);
         if(!beat.notes.length){layouts.forEach((layout,at)=>{notes[at]+=element('note','<rest/>'+rhythm(layout));});continue;}
         const sorted=[...beat.notes].sort((a,b)=>a.realValue-b.realValue);
@@ -256,7 +267,7 @@ function writePart(track:model.Track,score:model.Score,json:Json,scoreJson:Json,
             const technical=fingering||bent?element('technical',bent+fingering):'';
             const tied=links.map(([type,level])=>`<tied type="${type}" number="${level}"/>`).join('');
             const timing=rhythm(layout).replace('</duration>',`</duration>${links.map(([type])=>`<tie type="${type}"/>`).join('')}`),cut=timing.search(/<time-modification>|<staff>/);
-            notes[at]+=element('note',(noteIndex?'<chord/>':'')+written.pitch+(cut<0?timing+written.accidental:timing.slice(0,cut)+written.accidental+timing.slice(cut))
+            notes[at]+=element('note',grace+(noteIndex?'<chord/>':'')+written.pitch+(cut<0?timing+written.accidental:timing.slice(0,cut)+written.accidental+timing.slice(cut))
               +(tied||technical?element('notations',tied+technical):''));
           });
         }

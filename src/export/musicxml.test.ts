@@ -6,10 +6,11 @@ import { strFromU8,strToU8 } from 'fflate';
 import { loadInterchangeScore } from '../interchange/gp';
 import { setLyricsSource } from '../editor/lyrics-source';
 import { exportMusicXml } from './musicxml';
+import { buildPlaybackPlan } from '../audio/plan';
 
 const settings=new Settings();
 type NoteSpec={string?:number;fret?:number;octave?:number;tone?:number;tieDestination?:boolean};
-type BeatSpec={duration:model.Duration;dots?:number;tuplet?:[number,number];notes?:NoteSpec[];empty?:boolean};
+type BeatSpec={duration:model.Duration;dots?:number;tuplet?:[number,number];notes?:NoteSpec[];empty?:boolean;grace?:model.GraceType};
 
 // Scores are authored through the model API, independent of any importer.
 function build(options:{copies?:number;strings?:number[];transpose?:number;bars:{numerator:number;denominator:number;key?:number;minor?:boolean;tempo?:[number,number][];voices:BeatSpec[][]}[]}){
@@ -30,7 +31,7 @@ function build(options:{copies?:number;strings?:number[];transpose?:number;bars:
     for(const beats of spec.voices){
       const voice=new model.Voice();bar.addVoice(voice);
       for(const beatSpec of beats){
-        const beat=new model.Beat();beat.duration=beatSpec.duration;beat.dots=beatSpec.dots??0;beat.isEmpty=!!beatSpec.empty;
+        const beat=new model.Beat();beat.duration=beatSpec.duration;beat.dots=beatSpec.dots??0;beat.isEmpty=!!beatSpec.empty;beat.graceType=beatSpec.grace??model.GraceType.None;
         if(beatSpec.tuplet){beat.tupletNumerator=beatSpec.tuplet[0];beat.tupletDenominator=beatSpec.tuplet[1];}
         voice.addBeat(beat);
         for(const noteSpec of beatSpec.notes??[]){
@@ -287,6 +288,68 @@ describe('MusicXML export',()=>{
     expect(()=>exportMusicXml(score,{tracks:[0],range:{first:0,last:0}})).not.toThrow();
   });
 
+  // A guitar bar with grace groups before beat 1 and beat 3.
+  const graced=(type:model.GraceType,{first=1,third=0,chord=false}:{first?:number;third?:number;chord?:boolean}={})=>{
+    const grace=(fret:number):BeatSpec=>({duration:eighth,grace:type,notes:[{string:2,fret},...chord?[{string:3,fret:fret+1}]:[]]});
+    const main=(fret:number):BeatSpec=>({duration:quarter,notes:[{string:2,fret}]});
+    return build({strings:[64,59,55,50,45,40],bars:[{numerator:4,denominator:4,voices:[[
+      ...Array.from({length:first},(_,at)=>grace(2+at)),main(5),main(7),...Array.from({length:third},(_,at)=>grace(4+at)),main(8),main(10),
+    ]]}]});
+  };
+  const graces=(score:model.Score)=>score.tracks[0].staves[0].bars[0].voices[0].beats.map(beat=>[beat.graceType,beat.duration,beat.notes.map(note=>note.realValue).sort()]);
+  const played=(score:model.Score)=>buildPlaybackPlan(score,1).notes.map(note=>[note.startTick,note.endTick,note.key]);
+  it.each([
+    ['a before-beat grace',model.GraceType.BeforeBeat,{},'<grace slash="yes"/>',['eighth']],
+    ['an on-beat grace',model.GraceType.OnBeat,{},'<grace/>',['eighth']],
+    ['two-grace groups',model.GraceType.BeforeBeat,{first:2,third:2},'<grace slash="yes"/>',['16th','16th','16th','16th']],
+    ['a three-grace group',model.GraceType.OnBeat,{first:3},'<grace/>',['32nd','32nd','32nd']],
+    ['a grace chord',model.GraceType.BeforeBeat,{chord:true},'<grace slash="yes"/>',['eighth','eighth']],
+  ] as [string,model.GraceType,{first?:number;third?:number;chord?:boolean},string,string[]][])('writes %s and reads it back with the same playback',(_name,type,shape,markup,types)=>{
+    const score=graced(type,shape),doc=parse(exportMusicXml(score,selectAll(score)));
+    const notes=[...doc.querySelectorAll('note')].filter(note=>note.querySelector('grace'));
+    expect(notes.map(note=>note.querySelector('type')?.textContent)).toEqual(types);
+    for(const note of notes){
+      // MusicXML's note content puts <grace> before <chord>.
+      expect(note.firstElementChild?.localName).toBe('grace');
+      expect(new XMLSerializer().serializeToString(note.querySelector('grace')!)).toBe(markup);
+      expect(note.querySelector('duration')).toBeNull();
+    }
+    const back=loadInterchangeScore(exportMusicXml(score,selectAll(score)),settings);
+    expect(graces(back)).toEqual(graces(score));
+    expect(played(back)).toEqual(played(score));
+  });
+
+  it('keeps mix changes when a before-beat grace takes time from the previous bar',()=>{
+    const main=(fret:number):BeatSpec=>({duration:quarter,notes:[{string:2,fret}]});
+    const score=build({strings:[64,59,55,50,45,40],bars:[
+      {numerator:4,denominator:4,voices:[[main(1),main(2),main(3),main(4)]]},
+      {numerator:4,denominator:4,voices:[[{duration:eighth,grace:model.GraceType.BeforeBeat,notes:[{string:2,fret:6}]},main(5),main(7),main(8),main(10)]]},
+    ]});
+    score.tracks[0].staves[0].bars[0].voices[0].beats[0].automations.push(Object.assign(new model.Automation(),{type:model.AutomationType.Volume,value:8,ratioPosition:.5}));score.finish(settings);
+    const back=loadInterchangeScore(exportMusicXml(score,selectAll(score)),settings);
+    expect(back.tracks[0].staves[0].bars[0].voices[0].beats[0].automations.filter(a=>a.type===model.AutomationType.Volume).map(a=>[a.value,a.ratioPosition])).toEqual([[8,.5]]);
+    expect(played(back)).toEqual(played(score));
+  });
+
+  it('round-trips graces on a notation + TAB guitar',()=>{
+    const score=graced(model.GraceType.BeforeBeat,{first:2,third:1}),staff=score.tracks[0].staves[0];
+    staff.showStandardNotation=true;for(const bar of staff.bars)bar.clefOttava=model.Ottavia._8vb;score.finish(settings);
+    const back=loadInterchangeScore(exportMusicXml(score,selectAll(score)),settings);
+    expect(back.tracks[0].staves.length).toBe(1);
+    expect(graces(back)).toEqual(graces(score));
+    expect(played(back)).toEqual(played(score));
+  });
+
+  it.each([
+    ['a bend grace',/bend grace/,(score:model.Score)=>{score.tracks[0].staves[0].bars[0].voices[0].beats[0].graceType=model.GraceType.BendGrace;score.finish(settings);}],
+    ['a grace with no main beat after it',/grace note without a following beat/,(score:model.Score)=>{const voice=score.tracks[0].staves[0].bars[0].voices[0];voice.beats[4].graceType=model.GraceType.BeforeBeat;score.finish(settings);}],
+    ['a tied grace',/tied grace note/,(score:model.Score)=>{const voice=score.tracks[0].staves[0].bars[0].voices[0];voice.beats[1].notes[0].fret=2;voice.beats[1].notes[0].isTieDestination=true;score.finish(settings);}],
+    ['a bent grace',/bent grace note/,(score:model.Score)=>{const note=score.tracks[0].staves[0].bars[0].voices[0].beats[0].notes[0];note.addBendPoint(new model.BendPoint(0,0));note.addBendPoint(new model.BendPoint(60,2));score.finish(settings);}],
+  ] as [string,RegExp,(score:model.Score)=>void][])('refuses %s',(_name,error,change)=>{
+    const score=graced(model.GraceType.BeforeBeat);change(score);
+    expect(()=>exportMusicXml(score,selectAll(score))).toThrow(error);
+  });
+
   it('refuses a continued bend that does not start at the bent pitch',()=>{
     const score=continued([[0,2],[60,0]]);
     expect(()=>exportMusicXml(score,selectAll(score))).toThrow(/continued bend that does not start/);
@@ -348,7 +411,6 @@ describe('MusicXML export',()=>{
   it.each([
     ['a note effect',/note vibrato/,(score:model.Score)=>{score.tracks[0].staves[0].bars[0].voices[0].beats[0].notes[0].vibrato=model.VibratoType.Slight;}],
     ['a beat effect',/beat text/,(score:model.Score)=>{score.tracks[0].staves[0].bars[0].voices[0].beats[0].text='Intro';}],
-    ['a grace beat',/beat gracetype|grace notes/,(score:model.Score)=>{score.tracks[0].staves[0].bars[0].voices[0].beats[0].graceType=model.GraceType.BeforeBeat;}],
     ['a second staff',/more than one staff/,(score:model.Score)=>{score.tracks[0].ensureStaveCount(2);}],
     ['a percussion staff',/percussion|staff ispercussion/,(score:model.Score)=>{score.tracks[0].staves[0].isPercussion=true;}],
     ['alternate endings',/master alternateendings/,(score:model.Score)=>{score.masterBars[1].alternateEndings=1;}],

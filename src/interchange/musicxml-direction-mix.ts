@@ -150,10 +150,11 @@ const trackBeats=(track:model.Track)=>track.staves.flatMap(staff=>staff.bars.fla
 
 // Every model voice must end where its source voice ends. Otherwise alphaTab placed
 // the music differently from the source cursor (dropped or added time).
+// Display time is the cursor: a before-beat grace takes playback time from the previous bar.
 function sameVoices(score:model.Score,layout:Layout){
   for(const key of layout.keys()){const [part,,staff]=key.split('/').map(Number);if(!score.tracks[part]?.staves[staff])return false;}
   return score.tracks.every((track,part)=>track.staves.every(staff=>staff.bars.every(bar=>{
-    const ends=bar.voices.filter(voice=>!voice.isEmpty&&voice.beats.length).map(voice=>{const last=voice.beats[voice.beats.length-1];return last.playbackStart+last.playbackDuration;}).sort((a,b)=>a-b);
+    const ends=bar.voices.filter(voice=>!voice.isEmpty&&voice.beats.length).map(voice=>{const last=voice.beats[voice.beats.length-1];return last.displayStart+last.displayDuration;}).sort((a,b)=>a-b);
     const source=layout.get(`${part}/${bar.index}/${staff.index}`)??[];
     return ends.length===source.length&&ends.every((value,index)=>value===source[index]);
   })));

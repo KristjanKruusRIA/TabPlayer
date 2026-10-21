@@ -416,6 +416,11 @@ describe('MusicXML export',()=>{
     ['an up pick stroke',note=>{note.beat.pickStroke=model.PickStroke.Up;},'technical > up-bow',note=>note.beat.pickStroke],
     ['a down pick stroke',note=>{note.beat.pickStroke=model.PickStroke.Down;},'technical > down-bow',note=>note.beat.pickStroke],
     ['a tap',note=>{note.beat.tap=true;},'technical > tap',note=>note.beat.tap],
+    ...([[3,model.TremoloPickingStyle.Default],[0,model.TremoloPickingStyle.Default],[5,model.TremoloPickingStyle.Default],[0,model.TremoloPickingStyle.BuzzRoll],[2,model.TremoloPickingStyle.BuzzRoll]] as const).map(([marks,style]):Technique=>[
+      `tremolo picking (${marks} marks, ${model.TremoloPickingStyle[style]})`,
+      note=>{note.beat.tremoloPicking=Object.assign(new model.TremoloPickingEffect(),{marks,style});},
+      'ornaments > tremolo',note=>[note.beat.tremoloPicking?.marks,note.beat.tremoloPicking?.style],
+    ]),
   ];
   const marked=(score:model.Score,set:(note:model.Note)=>void)=>{set(score.tracks[0].staves[0].bars[0].voices[0].beats[0].notes[0]);score.finish(settings);return score;};
   const firstNote=(score:model.Score)=>score.tracks[0].staves[0].bars[0].voices[0].beats[0].notes[0];
@@ -438,6 +443,7 @@ describe('MusicXML export',()=>{
 
   it.each([
     ['a pick stroke on a rest',/pick stroke or tap on a rest/,()=>{const score=guitar();score.tracks[0].staves[0].bars[1].voices[0].beats[4].pickStroke=model.PickStroke.Up;return score;}],
+    ['tremolo picking on a rest',/tremolo picking on a rest/,()=>{const score=guitar();score.tracks[0].staves[0].bars[1].voices[0].beats[4].tremoloPicking=Object.assign(new model.TremoloPickingEffect(),{marks:2});return score;}],
     ['a tap on a rest',/pick stroke or tap on a rest/,()=>{const score=guitar();score.tracks[0].staves[0].bars[1].voices[0].beats[4].tap=true;return score;}],
     ['vibrato on a bend held over a tie',/vibrato on a bend held over a tie/,()=>{const score=continued([[0,4],[60,4]]);score.tracks[0].staves[0].bars[1].voices[0].beats[0].notes.find(note=>note.string===1)!.vibrato=model.VibratoType.Slight;return score;}],
     ['vibrato in an unbent tie chain after a bend',/vibrato in an unbent tie chain after a bend/,()=>{

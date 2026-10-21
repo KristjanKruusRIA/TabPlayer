@@ -77,7 +77,7 @@ const written={
   bar:new Set(['id','clef','clefottava','voices','keysignature','keysignaturetype','displayscale','displaywidth']),
   voice:new Set(['id','beats']),
   // Stem direction is display; dynamics are written as directions.
-  beat:new Set(['id','notes','isempty','duration','dots','tupletnumerator','tupletdenominator','automations','displaystart','playbackstart','displayduration','playbackduration','overridedisplayduration','preferredbeamdirection','dynamics','gracetype','lyrics','pickstroke','tap']),
+  beat:new Set(['id','notes','isempty','duration','dots','tupletnumerator','tupletdenominator','automations','displaystart','playbackstart','displayduration','playbackduration','overridedisplayduration','preferredbeamdirection','dynamics','gracetype','lyrics','pickstroke','tap','tremolopicking']),
   // Bend points are written as <bend> elements (their type is derived from them).
   note:new Set(['id','fret','string','octave','tone','istiedestination','tiedestinationnoteid','tieoriginnoteid','accidentalmode','dynamics','bendtype','bendpoints','iscontinuedbend','accentuated','isstaccato','vibrato','ornament','ishammerpullorigin','hammerpulloriginnoteid','hammerpulldestinationnoteid','slideouttype','slideoriginnoteid','slidetargetnoteid']),
 };
@@ -199,9 +199,14 @@ function marks(note:model.Note,first:boolean){
     if(origin)unsupported('vibrato in an unbent tie chain after a bend');
   }
   const beat=note.beat,stroke=beat.pickStroke===model.PickStroke.None?'':strokes.get(beat.pickStroke)??unsupported('this pick stroke');
+  // alphaTab reads smufl="buzzRoll" (or unmeasured with 0 marks) as a buzz roll, keeping its
+  // marks; a buzz roll with marks stays measured so other readers keep the marks too.
+  const picking=beat.tremoloPicking;
+  if(picking&&(!Number.isInteger(picking.marks)||picking.marks<0||picking.marks>5||(picking.style!==model.TremoloPickingStyle.Default&&picking.style!==model.TremoloPickingStyle.BuzzRoll)))unsupported('this tremolo picking');
+  const tremolo=!first||!picking?'':picking.style===model.TremoloPickingStyle.BuzzRoll?`<tremolo type="${picking.marks?'single':'unmeasured'}" smufl="buzzRoll">${picking.marks}</tremolo>`:`<tremolo type="single">${picking.marks}</tremolo>`;
   return {
     articulations:accent+(note.isStaccato?'<staccato/>':''),
-    ornaments:ornament+(note.vibrato===model.VibratoType.Slight?'<wavy-line type="start"/><wavy-line type="stop"/>':''),
+    ornaments:ornament+(note.vibrato===model.VibratoType.Slight?'<wavy-line type="start"/><wavy-line type="stop"/>':'')+tremolo,
     technical:first?stroke+(beat.tap?'<tap/>':''):'',
   };
 }
@@ -342,6 +347,7 @@ function writePart(track:model.Track,score:model.Score,json:Json,scoreJson:Json,
         if(beat.automations.some(change=>change.type!==model.AutomationType.Volume&&change.type!==model.AutomationType.Balance&&!(start&&change.type===model.AutomationType.Instrument&&change.value===track.playbackInfo.program)))unsupported('beat automations');
         // Pick strokes and taps are written on a note, so a rest has nowhere to carry them.
         if(!beat.notes.length&&(beat.pickStroke!==model.PickStroke.None||beat.tap))unsupported('a pick stroke or tap on a rest');
+        if(!beat.notes.length&&beat.tremoloPicking)unsupported('tremolo picking on a rest');
         // An empty voice can still carry (for example invisible) notes alphaTab does not draw.
         if(voice.isEmpty){if(beat.notes.length)unsupported('notes in an empty voice');continue;}
         if(beat.isEmpty)unsupported('an empty beat inside a voice');

@@ -8,6 +8,7 @@ import { blankProject } from '../project';
 import { exportMidi } from '../export/midi';
 import { buildPlaybackPlan,buildPlaybackPlanFromJson } from '../audio/plan';
 import { loadInterchangeScore } from './gp';
+import { applyMusicXmlTempoWords } from './musicxml-tempo-words';
 import { applyMusicXmlNaturalHarmonics } from './musicxml-natural-harmonics';
 
 const settings=new Settings();
@@ -108,7 +109,7 @@ describe('MusicXML tablature natural harmonics',()=>{
     ['a staff without tablature tuning',musicXml().replace(/<clef>.*<\/staff-details>/,'<clef><sign>G</sign><line>2</line></clef>')],
   ];
   it.each(variants)('keeps the stock import for %s',(_name,xml)=>{
-    const original=loadInterchangeScore(strToU8(xml),settings),plain=importer.ScoreLoader.loadScoreFromBytes(strToU8(xml),settings);
+    const original=loadInterchangeScore(strToU8(xml),settings),plain=applyMusicXmlTempoWords(importer.ScoreLoader.loadScoreFromBytes(strToU8(xml),settings),strToU8(xml),settings);
     expect(model.JsonConverter.scoreToJson(original)).toEqual(model.JsonConverter.scoreToJson(plain));
     expect(original.tracks[0].staves[0].bars.flatMap(bar=>bar.voices.flatMap(voice=>voice.beats.flatMap(beat=>beat.notes))).every(note=>note.harmonicType===model.HarmonicType.None)).toBe(true);
   });

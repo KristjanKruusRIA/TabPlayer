@@ -8,6 +8,7 @@ import { blankProject } from '../project';
 import { exportMidi } from '../export/midi';
 import { buildPlaybackPlan,buildPlaybackPlanFromJson } from '../audio/plan';
 import { exportGpInterchange,loadInterchangeScore } from './gp';
+import { applyMusicXmlTempoWords } from './musicxml-tempo-words';
 import { applyMusicXmlDirectionMix } from './musicxml-direction-mix';
 
 const settings=new Settings();
@@ -135,7 +136,7 @@ describe('MusicXML direction volume and pan',()=>{
     // Volume 80 then 30 at the same tick; the doubtful pan 135 forces the fallback.
     const text=musicXml(1,{directions:[measureVolume('80')+volume('30'),'<sound pan="135"/>']});
     const xml=strToU8(text);
-    expect(model.JsonConverter.scoreToJson(loadInterchangeScore(xml,settings))).toEqual(model.JsonConverter.scoreToJson(importer.ScoreLoader.loadScoreFromBytes(xml,settings)));
+    expect(model.JsonConverter.scoreToJson(loadInterchangeScore(xml,settings))).toEqual(model.JsonConverter.scoreToJson(applyMusicXmlTempoWords(importer.ScoreLoader.loadScoreFromBytes(xml,settings),xml,settings)));
   });
 
   it('finds a mix after many self-closing sounds without closing tags',()=>{
@@ -204,7 +205,7 @@ describe('MusicXML direction volume and pan',()=>{
   ];
   it.each(variants)('keeps the stock import for %s',(_name,text)=>{
     const xml=strToU8(text);
-    expect(model.JsonConverter.scoreToJson(loadInterchangeScore(xml,settings))).toEqual(model.JsonConverter.scoreToJson(importer.ScoreLoader.loadScoreFromBytes(xml,settings)));
+    expect(model.JsonConverter.scoreToJson(loadInterchangeScore(xml,settings))).toEqual(model.JsonConverter.scoreToJson(applyMusicXmlTempoWords(importer.ScoreLoader.loadScoreFromBytes(xml,settings),xml,settings)));
   });
 
   it('does not parse documents whose only volume and pan are part defaults',()=>{

@@ -161,9 +161,19 @@ describe('MusicXML export',()=>{
     expect([...doc.querySelectorAll('note')].map(note=>`${note.querySelector('step')?.textContent}${note.querySelector('alter')?.textContent??''}:${note.querySelector('accidental')?.textContent??''}`)).toEqual(['A1:sharp','F:natural','F:']);
     const back=loadInterchangeScore(exportMusicXml(score,selectAll(score)),settings),beats=back.tracks[0].staves[0].bars[0].voices[0].beats;
     expect(beats.map(beat=>[beat.dynamics,beat.notes[0].realValue,beat.notes[0].accidentalMode])).toEqual([[model.DynamicValue.F,70,model.NoteAccidentalMode.ForceSharp],[model.DynamicValue.P,65,model.NoteAccidentalMode.ForceNatural]]);
-    // alphaTab re-imports tempo <words> as beat text, not tempo text.
-    expect(back.tracks[0].staves[0].bars[0].voices[0].beats[0].text).toBe('Moderate');
+    // Tempo <words> come back as tempo text, not as the next beat's text.
+    expect(back.tracks[0].staves[0].bars[0].voices[0].beats[0].text).toBeFalsy();
+    expect(back.masterBars[0].tempoAutomations.map(a=>a.text)).toEqual(['Moderate']);
     expect(back.tracks[0].staves[0].bars[0].voices[0].beats[0].automations.filter(a=>a.type===model.AutomationType.Volume).map(a=>[a.value,a.ratioPosition])).toEqual([[8,.5]]);
+  });
+
+  it('reads every tempo text of a bar back as tempo text',()=>{
+    const score=guitar(),[first,second]=score.masterBars;
+    first.tempoAutomations[0].text='Allegro';second.tempoAutomations[0].text='Meno mosso';
+    second.tempoAutomations.push(Object.assign(new model.Automation(),{type:model.AutomationType.Tempo,value:100,ratioPosition:2/3,isVisible:true,text:'a tempo'}));
+    const back=loadInterchangeScore(exportMusicXml(score,selectAll(score)),settings);
+    expect(back.masterBars.map(bar=>bar.tempoAutomations.map(a=>[a.value,a.text]))).toEqual([[[120,'Allegro']],[[90,'Meno mosso'],[100,'a tempo']]]);
+    expect(back.tracks[0].staves[0].bars.flatMap(bar=>bar.voices[0].beats.map(beat=>beat.text)).filter(Boolean)).toEqual([]);
   });
 
   it('writes the opening dynamic of every part',()=>{

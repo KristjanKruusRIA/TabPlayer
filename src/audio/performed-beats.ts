@@ -13,10 +13,12 @@ function fail(target: BeatTarget, reason: string): never {
 
 // Read the full reference generation's public linked slices; a carried highlight
 // is part of the same beat, and the cached first relative range loses repeats.
-export function buildPerformedBeats(score: model.Score, lookup: midi.MidiTickLookup, tickShift: number): PerformedBeat[] {
+// An over-full last bar plays past its end, so the plan passes its own duration as the bound.
+export function buildPerformedBeats(score: model.Score, lookup: midi.MidiTickLookup, tickShift: number, extent = 0): PerformedBeat[] {
   if (!Number.isFinite(tickShift) || tickShift < 0) throw new Error('Invalid performed-beat tick shift.');
+  if (!Number.isFinite(extent) || extent < 0) throw new Error('Invalid performed-beat extent.');
   const counts = new Map<number, number>();
-  const duration = lookup.masterBars.length ? lookup.masterBars[lookup.masterBars.length - 1].end + tickShift : 0;
+  const duration = Math.max(lookup.masterBars.length ? lookup.masterBars[lookup.masterBars.length - 1].end + tickShift : 0, extent);
   const grouped = new Map<string, { row: PerformedBeat; beat: model.Beat; parts: [number, number][] }>();
   for (const [index, master] of lookup.masterBars.entries()) {
     const bar = master.masterBar.index, occurrence = counts.get(bar) ?? 0; counts.set(bar, occurrence + 1);

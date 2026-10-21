@@ -602,3 +602,40 @@ it.each([['guitarpro7-bends.gp',['10:64','7:97']],['guitarpro8-beat-tempo-change
   // 12.08 and 12.72 on the 0–16 scale round to 97 and 102, not truncate.
   expect([...new Set(mix.map(event=>event.type==='controller'?`${event.controller}:${event.value}`:''))].sort()).toEqual(values);
 });
+
+// These fixtures' only bar is over-full: its beats play past the bar end, as on main.
+it.each([['guitarpro3-notes.gp3',28],['guitarpro4-notes.gp4',28],['guitarpro5-notes.gp5',28],['guitarpro6-notes.gpx',28],['guitarpro7-notes.gp',28]] as const)('plans the over-full last bar of %s',(name,count)=>{
+  const bytes=readFileSync(`${process.cwd()}/.analysis/compatibility/${name}`);
+  const score=buildScore({...blankProject(),base:{kind:'file',filename:name,bytesBase64:bytes.toString('base64'),sha256:createHash('sha256').update(bytes).digest('hex')}});
+  const plan=buildPlaybackPlan(score,1),last=Math.max(...plan.performedBeats!.map(row=>row.endTick));
+  expect(plan.notes).toHaveLength(count);
+  expect(last).toBeGreaterThan(plan.occurrences.at(-1)!.endTick);
+  expect(last).toBeLessThanOrEqual(plan.durationTick);
+});
+
+// An over-full last bar (six quarters in 4/4) plays past its end, as on main.
+function overfull(rest = false, repeat = false) {
+  const score=authored(1),voice=score.tracks[0].staves[0].bars[0].voices[0];
+  for(let i=0;i<2;i++){const beat=new model.Beat();beat.duration=model.Duration.Quarter;beat.isEmpty=false;voice.addBeat(beat);}
+  for(let beat=0;beat<(rest?5:6);beat++)note(score,0,beat,1,beat+1);
+  if(repeat){score.masterBars[0].isRepeatStart=true;score.masterBars[0].repeatCount=2;}
+  score.finish(settings);return score;
+}
+it.each([
+  ['notes',false,false,5760,5760],
+  ['a trailing rest',true,false,5760,4800],
+  ['a repeat',false,true,9600,9600],
+] as const)('plans an over-full last bar with %s to its last slice',(_name,rest,repeat,duration,lastNote)=>{
+  const plan=buildPlaybackPlan(overfull(rest,repeat),1);
+  expect(plan.durationTick).toBe(duration);
+  expect(Math.max(...plan.notes.map(n=>n.endTick))).toBe(lastNote);
+  expect(Math.max(...plan.performedBeats!.map(row=>row.endTick))).toBe(duration);
+});
+it('keeps a dead brush that ends after the last bar inside the plan',()=>{
+  const score=authored(1);
+  for(let string=1;string<=6;string++)note(score,0,3,string).isDead=true;
+  const beat=score.tracks[0].staves[0].bars[0].voices[0].beats[3];beat.brushType=model.BrushType.BrushDown;beat.brushDuration=960;score.finish(settings);
+  const plan=buildPlaybackPlan(score,1);
+  expect(plan.durationTick).toBe(3900);
+  expect(plan.durationTick).toBe(Math.max(...plan.notes.map(n=>n.endTick)));
+});

@@ -167,6 +167,9 @@ function converted(events: RawEvent[], identities: string[], nativeChannel: (tra
         if (event.controller === 38) state.range = state.coarse + event.value / 100;
       }
     }
+    // Guitar Pro mixes are fractional on the 0–16 scale and alphaTab scales them by 8
+    // unrounded; round volume and pan as gpControllerEvents does.
+    if (event.type === 'controller' && (event.controller === 7 || event.controller === 10)) return { ...data, trackId: identities[track], value: Math.max(0, Math.min(127, Math.round(event.value))) } as OrderedMidiEvent;
     if (event.type === 'bend' || event.type === 'noteBend') return { ...data, trackId: identities[track], value: (event.value - 8192) / 8192 * state.range } as OrderedMidiEvent;
     return { ...data, trackId: identities[track] } as OrderedMidiEvent;
   });

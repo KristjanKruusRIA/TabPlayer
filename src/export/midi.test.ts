@@ -149,3 +149,13 @@ describe('standard MIDI export',()=>{
     expect(JSON.stringify(model.JsonConverter.scoreToJson(s))).toBe(before);
   });
 });
+
+// The playback plan rounds fractional Guitar Pro mixes (12.08 → 97); the file must match.
+it('writes rounded Guitar Pro mix controllers',async()=>{
+  const {readFileSync}=await import('node:fs');
+  const score=loadInterchangeScore(readFileSync(`${process.cwd()}/.analysis/compatibility/guitarpro7-bends.gp`),new Settings());
+  for(const track of score.tracks)for(const staff of track.staves)for(const bar of staff.bars)for(const voice of bar.voices)for(const beat of voice.beats)
+    beat.automations=beat.automations.filter(automation=>automation.type!==model.AutomationType.Volume&&automation.type!==model.AutomationType.Balance);
+  const {events}=decode(exportMidi(score,{tracks:[0],range:null}));
+  expect([...new Set(events.filter(event=>event.type===176&&(event.data[0]===7||event.data[0]===10)).map(event=>event.data.join(':')))].sort()).toEqual(['10:64','7:97']);
+});

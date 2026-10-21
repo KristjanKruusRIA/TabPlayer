@@ -10,6 +10,11 @@ class TrackName extends midi.MidiEvent {
 class ExportMidiHandler extends midi.AlphaSynthMidiFileHandler {
   pairs:{on:midi.NoteOnEvent;off:midi.NoteOffEvent;attack:number}[]=[];
   private attacks=new Map<number,number>();
+  // Guitar Pro mixes are fractional on the 0–16 scale; alphaTab scales them by 8 unrounded
+  // and the writer truncates, so round volume and pan as the playback plan does.
+  override addControlChange(track:number,tick:number,channel:number,controller:number,value:number){
+    super.addControlChange(track,tick,channel,controller,controller===7||controller===10?Math.round(value):value);
+  }
   override addNote(track:number,start:number,length:number,key:number,velocity:number,channel:number){
     super.addNote(track,start,length,key,velocity,channel);
     const attack=this.attacks.get(track)??0;this.attacks.set(track,attack+1);

@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { expect, it, vi } from 'vitest';
 import { midi, model, Settings } from '@coderline/alphatab';
 import { createHash } from 'node:crypto';
@@ -590,4 +591,14 @@ it('worker_protocol_tags_requests_and_ignores_upstream_ready_messages', async ()
   }
   vi.stubGlobal('Worker',WorkerFixture);
   try{const plan=await preparePlan(blankProject(),21);expect(plan.generation).toBe(21);expect(terminated).toBe(true);}finally{vi.unstubAllGlobals();}
+});
+
+// Guitar Pro mixes are fractional on alphaTab's 0–16 scale; alphaTab's MIDI
+// generator scales them by 8 unrounded, so native controllers must round them.
+it.each([['guitarpro7-bends.gp',['10:64','7:97']],['guitarpro8-beat-tempo-change.gp',['10:64','7:102']]])('plans %s with rounded mix controllers',(name,values)=>{
+  const bytes=readFileSync(`${process.cwd()}/.analysis/compatibility/${name}`);
+  const score=buildScore({...blankProject(),base:{kind:'file',filename:name,bytesBase64:bytes.toString('base64'),sha256:createHash('sha256').update(bytes).digest('hex')}});
+  const mix=buildPlaybackPlan(score,1).midi.filter(event=>event.type==='controller'&&(event.controller===7||event.controller===10));
+  // 12.08 and 12.72 on the 0–16 scale round to 97 and 102, not truncate.
+  expect([...new Set(mix.map(event=>event.type==='controller'?`${event.controller}:${event.value}`:''))].sort()).toEqual(values);
 });

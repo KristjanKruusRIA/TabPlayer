@@ -1,4 +1,4 @@
-import {waitForWorkspaceIdle,clickWorkspaceCommand} from './workstation-commands.mjs';
+import {waitForWorkspaceIdle,clickWorkspaceCommand,clickWorkstationButton,revealInspector} from './workstation-commands.mjs';
 import { readDocumentRecord } from './document-context.mjs';
 import assert from 'node:assert/strict';
 import { readFile,mkdir,stat } from 'node:fs/promises';
@@ -11,6 +11,8 @@ for(const {format,current=false} of [{format:'midi'},{format:'musicxml'},{format
   const id=launch({TABPLAYER_TEST_EXPORT:destination});let browser;
   try {
     browser=await connect();const page=browser.contexts()[0].pages()[0];
+    const library=page.getByRole('dialog',{name:'Library',exact:true});await library.getByRole('heading',{name:'Welcome to TabPlayer',exact:true}).waitFor();await library.getByRole('button',{name:'Close',exact:true}).click();await library.waitFor({state:'hidden'});
+    await revealInspector(page);await clickWorkstationButton(page,'Edit',{waitForIdle:false});await waitForWorkspaceIdle(page);
     await page.getByLabel('Fret',{exact:true}).fill('7');await page.getByRole('button',{name:'Set note',exact:true}).click();
     await waitForWorkspaceIdle(page);
     const {documentId}=(await page.evaluate(()=>window.__TAURI_INTERNALS__.invoke('workspace_snapshot'))).active;

@@ -3,6 +3,7 @@ import { strToU8 } from 'fflate';
 import { getLyricsSource } from '../editor/lyrics-source';
 import { tokenizeLyrics } from '../editor/lyrics';
 import { trackMixAutomations } from '../interchange/automation';
+import { scoreFromJson } from '../model-clone';
 import { selectScore } from './selection';
 import type { ExportSelection } from './types';
 
@@ -78,7 +79,7 @@ const written={
   // Stem direction is display; dynamics are written as directions.
   beat:new Set(['id','notes','isempty','duration','dots','tupletnumerator','tupletdenominator','automations','displaystart','playbackstart','displayduration','playbackduration','overridedisplayduration','preferredbeamdirection','dynamics','gracetype','lyrics','pickstroke','tap']),
   // Bend points are written as <bend> elements (their type is derived from them).
-  note:new Set(['id','fret','string','octave','tone','istiedestination','tiedestinationnoteid','tieoriginnoteid','accidentalmode','dynamics','bendtype','bendpoints','iscontinuedbend','accentuated','isstaccato','vibrato','ornament']),
+  note:new Set(['id','fret','string','octave','tone','istiedestination','tiedestinationnoteid','tieoriginnoteid','accidentalmode','dynamics','bendtype','bendpoints','iscontinuedbend','accentuated','isstaccato','vibrato','ornament','ishammerpullorigin','hammerpulloriginnoteid','hammerpulldestinationnoteid']),
 };
 type Json=Record<string,unknown>;
 const toJson=(score:model.Score):Json=>{const value:unknown=model.JsonConverter.scoreToJson(score);return (typeof value==='string'?JSON.parse(value):value) as Json;};
@@ -205,6 +206,47 @@ function marks(note:model.Note,first:boolean){
   };
 }
 
+// A hammer-on or pull-off starts on its origin and stops on its destination; the pitch
+// direction names it. A note can stop one and start the next. Like ties, overlapping
+// spans take distinct number levels across the whole part.
+function legato(note:model.Note,open:Map<model.Note,number>,levels:Map<model.Note,number>[]){
+  const link=(origin:model.Note,destination:model.Note,type:string,level:number)=>{
+    const [name,text]=destination.realValue<origin.realValue?['pull-off','P']:['hammer-on','H'];return `<${name} type="${type}" number="${level}">${text}</${name}>`;
+  };
+  let result='';const origin=note.hammerPullOrigin;
+  if(origin&&origin.isHammerPullOrigin&&origin.hammerPullDestination===note){
+    const level=open.get(origin);if(!level)unsupported('a hammer-on or pull-off without its origin');
+    open.delete(origin);result+=link(origin,note,'stop',level!);
+  }
+  if(note.isHammerPullOrigin&&note.hammerPullDestination){
+    const used=new Set(levels.flatMap(spans=>[...spans.values()]));let level=1;while(used.has(level))level++;
+    if(level>16)unsupported('more than 16 simultaneous hammer-ons or pull-offs');
+    open.set(note,level);result+=link(note,note.hammerPullDestination,'start',level);
+  }
+  return result;
+}
+
+// alphaTab's MusicXML import links each hammer-on origin itself (see
+// musicxml-hammer-pulls.ts), so every selected link must be one that relinking from the
+// flags alone rebuilds. A link a range cuts is dropped, as ties are.
+function checkHammerPulls(score:model.Score,copy:model.Score){
+  const notes=(value:model.Score)=>value.tracks.flatMap(track=>track.staves.flatMap(staff=>staff.bars.flatMap(bar=>bar.voices.flatMap(voice=>voice.beats.flatMap(beat=>beat.notes)))));
+  const copied=notes(copy),linked=(note:model.Note|undefined)=>note?.isHammerPullOrigin?note.hammerPullDestination?.id??null:null;
+  // Playback softens a destination through its backlink, so that side is compared too.
+  const back=(note:model.Note|undefined)=>note?.hammerPullOrigin?.id??null;
+  if(!copied.some(note=>note.isHammerPullOrigin||note.hammerPullOrigin)&&!notes(score).some(note=>note.isHammerPullOrigin))return;
+  const json=toJson(copy);
+  for(const track of json.tracks as Json[])for(const staff of track.staves as Json[])for(const bar of staff.bars as Json[])for(const voice of bar.voices as Json[])for(const beat of voice.beats as Json[])for(const note of beat.notes as Json[]){delete note.hammerpulloriginnoteid;delete note.hammerpulldestinationnoteid;}
+  const rebuilt=new Map(notes(scoreFromJson(JSON.stringify(json),new Settings())).map(note=>[note.id,note]));
+  const source=new Map(notes(score).map(note=>[note.id,note])),kept=new Set(copied.map(note=>note.id));
+  for(const note of copied){
+    const wanted=linked(source.get(note.id));
+    const expected=wanted!==null&&kept.has(wanted)?wanted:null;
+    const origin=back(source.get(note.id)),from=origin!==null&&kept.has(origin)?origin:null;
+    if(linked(note)!==expected||linked(rebuilt.get(note.id))!==expected||back(note)!==from||back(rebuilt.get(note.id))!==from)unsupported('a hammer-on or pull-off the import cannot link back');
+  }
+}
+
 function writePart(track:model.Track,score:model.Score,json:Json,scoreJson:Json,first:boolean,instrument:string,state:{dynamic:model.DynamicValue;started:boolean}){
   state.started=false;
   const mix=trackMixAutomations(track),sung={seen:new Set<number>(),open:[] as boolean[]};
@@ -221,7 +263,7 @@ function writePart(track:model.Track,score:model.Score,json:Json,scoreJson:Json,
   const transpose=staff.displayTranspositionPitch,octaveChange=Math.trunc(transpose/12),chromatic=transpose-12*octaveChange;
   // Overlapping ties need distinct <tied number> levels across the whole part,
   // both staves included, to pair unambiguously.
-  const ties=layouts.map(()=>new Map<model.Note,number>());
+  const ties=layouts.map(()=>new Map<model.Note,number>()),legatos=layouts.map(()=>new Map<model.Note,number>());
   let measures='',previous:model.Bar|null=null;
   for(const [index,bar] of staff.bars.entries()){
     const master=bar.masterBar,barJson=(staffJson.bars as Json[])[index];check('bar',barJson);check('master',(scoreJson.masterbars as Json[])[master.index]);
@@ -317,7 +359,7 @@ function writePart(track:model.Track,score:model.Score,json:Json,scoreJson:Json,
             const fingering=layout.technical&&note.isStringed?element('string',strings.length-note.string+1)+element('fret',note.fret):'',bent=bends(note),mark=marks(note,noteIndex===0);
             // A held tie writes no bend, so on import its vibrato would sound unbent.
             if(note.vibrato!==model.VibratoType.None&&note.hasBend&&!bent)unsupported('vibrato on a bend held over a tie');
-            const technical=fingering||bent||mark.technical?element('technical',bent+mark.technical+fingering):'';
+            const slurred=legato(note,legatos[at],legatos),technical=fingering||bent||mark.technical||slurred?element('technical',slurred+bent+mark.technical+fingering):'';
             const marked=(mark.ornaments?element('ornaments',mark.ornaments):'')+technical+(mark.articulations?element('articulations',mark.articulations):'');
             const tied=links.map(([type,level])=>`<tied type="${type}" number="${level}"/>`).join('');
             const timing=rhythm(layout).replace('</duration>',`</duration>${links.map(([type])=>`<tie type="${type}"/>`).join('')}`),cut=timing.search(/<time-modification>|<staff>/);
@@ -369,7 +411,7 @@ export function exportMusicXml(score:model.Score,selection:ExportSelection):Uint
       if(used>bars.slice(line.startBar).flatMap(bar=>bar.voices[0]?.beats??[]).filter(beat=>!beat.isEmpty&&!beat.isRest).length)unsupported('lyrics with more syllables than notes');
     }
   }
-  const copy=selectScore(score,selection),json=toJson(copy);check('score',json);
+  const copy=selectScore(score,selection),json=toJson(copy);check('score',json);checkHammerPulls(score,copy);
   if(copy.tracks.some(track=>track.staves.some(staff=>staff.transpositionPitch!==0)))unsupported('sounding transposition');
   // alphaTab's import keeps one running dynamic across all parts in document order.
   const state={dynamic:model.DynamicValue.F,started:false};

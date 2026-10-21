@@ -298,7 +298,8 @@ describe('MusicXML export',()=>{
     ]]}]});
   };
   const graces=(score:model.Score)=>score.tracks[0].staves[0].bars[0].voices[0].beats.map(beat=>[beat.graceType,beat.duration,beat.notes.map(note=>note.realValue).sort()]);
-  const played=(score:model.Score)=>buildPlaybackPlan(score,1).notes.map(note=>[note.startTick,note.endTick,note.key]);
+  // A hammer-on's destination sounds softer, so velocity is part of what is played.
+  const played=(score:model.Score)=>buildPlaybackPlan(score,1).notes.map(note=>[note.startTick,note.endTick,note.key,note.velocity]);
   it.each([
     ['a before-beat grace',model.GraceType.BeforeBeat,{},'<grace slash="yes"/>',['eighth']],
     ['an on-beat grace',model.GraceType.OnBeat,{},'<grace/>',['eighth']],
@@ -454,6 +455,73 @@ describe('MusicXML export',()=>{
   it('refuses a wide vibrato',()=>{
     const score=marked(guitar(),note=>{note.vibrato=model.VibratoType.Wide;});
     expect(()=>exportMusicXml(score,selectAll(score))).toThrow(/wide vibrato/);
+  });
+
+  // One string: 0 hammers to 2, which pulls off to 0; the last note (3) is plain.
+  // The second bar repeats the run so a range can cut the first bar's last origin.
+  const legato=(both=false)=>{
+    const run=[0,2,0,3].map(fret=>({duration:quarter,notes:[{string:2,fret}]}));
+    const score=build({strings:[64,59,55,50,45,40],transpose:-12,bars:[{numerator:4,denominator:4,voices:[run]},{numerator:4,denominator:4,voices:[run]}]});
+    const staff=score.tracks[0].staves[0];
+    if(both){staff.showStandardNotation=true;for(const bar of staff.bars)bar.clefOttava=model.Ottavia._8vb;}
+    for(const bar of staff.bars)for(const at of [0,1])bar.voices[0].beats[at].notes[0].isHammerPullOrigin=true;
+    staff.bars[0].voices[0].beats[3].notes[0].isHammerPullOrigin=true;
+    score.finish(settings);return score;
+  };
+  const legatoState=(score:model.Score)=>score.tracks[0].staves[0].bars.flatMap(bar=>bar.voices[0].beats.map(beat=>{
+    const note=beat.notes[0];return [note.isHammerPullOrigin,note.hammerPullDestination?.fret??null,note.hammerPullOrigin?.fret??null];
+  }));
+  const kinds=(note:Element)=>[...note.querySelectorAll('technical > hammer-on, technical > pull-off')].map(node=>`${node.localName}:${node.getAttribute('type')}:${node.textContent}`);
+
+  it('writes hammer-ons and pull-offs and reads them back',()=>{
+    const score=legato();
+    expect(legatoState(score).slice(0,4)).toEqual([[true,2,null],[true,0,0],[false,null,2],[true,0,null]]);
+    const doc=parse(exportMusicXml(score,selectAll(score))),notes=[...doc.querySelectorAll('note')];
+    expect(notes.map(kinds)).toEqual([
+      ['hammer-on:start:H'],['hammer-on:stop:H','pull-off:start:P'],['pull-off:stop:P'],['pull-off:start:P'],
+      ['pull-off:stop:P','hammer-on:start:H'],['hammer-on:stop:H','pull-off:start:P'],['pull-off:stop:P'],[],
+    ]);
+    const back=loadInterchangeScore(exportMusicXml(score,selectAll(score)),settings);
+    expect(legatoState(back)).toEqual(legatoState(score));
+    expect(played(back)).toEqual(played(score));
+  });
+
+  it('keeps hammer-ons on a notation + TAB guitar',()=>{
+    const score=legato(true),doc=parse(exportMusicXml(score,selectAll(score)));
+    expect(doc.querySelectorAll('technical > hammer-on[type="start"]').length).toBe(4);
+    const back=loadInterchangeScore(exportMusicXml(score,selectAll(score)),settings);
+    expect(back.tracks[0].staves.length).toBe(1);
+    expect(legatoState(back)).toEqual(legatoState(score));
+    expect(played(back)).toEqual(played(score));
+  });
+
+  it('numbers overlapping hammer-ons in a chord',()=>{
+    const pair=(fret:number)=>({duration:half,notes:[{string:2,fret},{string:3,fret}]});
+    const score=build({strings:[64,59,55,50,45,40],transpose:-12,bars:[{numerator:4,denominator:4,voices:[[pair(0),pair(2)]]}]});
+    for(const note of score.tracks[0].staves[0].bars[0].voices[0].beats[0].notes)note.isHammerPullOrigin=true;
+    score.finish(settings);
+    const doc=parse(exportMusicXml(score,selectAll(score)));
+    expect([...doc.querySelectorAll('hammer-on')].map(node=>`${node.getAttribute('type')}:${node.getAttribute('number')}`)).toEqual(['start:1','start:2','stop:1','stop:2']);
+    const back=loadInterchangeScore(exportMusicXml(score,selectAll(score)),settings);
+    expect(back.tracks[0].staves[0].bars[0].voices[0].beats[0].notes.map(note=>note.isHammerPullOrigin)).toEqual([true,true]);
+    expect(played(back)).toEqual(played(score));
+  });
+
+  it('refuses a hammer-on the MusicXML import cannot link back',()=>{
+    // The editor can link past a rest into the next bar; alphaTab's own search stops at the rest.
+    const score=build({strings:[64,59,55,50,45,40],transpose:-12,bars:[
+      {numerator:2,denominator:4,voices:[[{duration:quarter,notes:[{string:2,fret:3}]},{duration:quarter,notes:[{string:2,fret:5}]}]]},
+      {numerator:2,denominator:4,voices:[[{duration:quarter},{duration:quarter,notes:[{string:2,fret:7}]}]]},
+    ]});
+    const [first,second]=score.tracks[0].staves[0].bars,origin=first.voices[0].beats[1].notes[0],destination=second.voices[0].beats[1].notes[0];
+    origin.isHammerPullOrigin=true;origin.hammerPullDestination=destination;destination.hammerPullOrigin=origin;
+    expect(()=>exportMusicXml(score,selectAll(score))).toThrow(/hammer-on or pull-off the import cannot link back/);
+  });
+
+  it('drops a hammer-on whose destination a range cuts off, as it drops ties',()=>{
+    const score=legato(),doc=parse(exportMusicXml(score,{tracks:[0],range:{first:0,last:0}})),notes=[...doc.querySelectorAll('note')];
+    expect(notes.map(kinds)).toEqual([['hammer-on:start:H'],['hammer-on:stop:H','pull-off:start:P'],['pull-off:stop:P'],[]]);
+    expect(legatoState(score)[3]).toEqual([true,0,null]);
   });
 
   it('refuses a continued bend that does not start at the bent pitch',()=>{

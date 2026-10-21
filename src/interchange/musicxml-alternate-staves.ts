@@ -32,10 +32,13 @@ const same=(left:Json,right:Json,ignored:Set<string>)=>{
   return true;
 };
 // Note links point at each staff's own notes; they are compared through the pairing.
-const linkKeys=['tieoriginnoteid','tiedestinationnoteid','sluroriginnoteid','slurdestinationnoteid','hammerpulloriginnoteid','hammerpulldestinationnoteid','slideoriginnoteid','slidetargetnoteid'];
+const linkKeys=['tieoriginnoteid','tiedestinationnoteid','sluroriginnoteid','slurdestinationnoteid','slideoriginnoteid','slidetargetnoteid'];
+// A hammer-on needs a string, which only the TAB copy has: its flag is taken on the
+// fold, and the replay links each origin again, which must reach the same partner.
+const hammerKeys=['ishammerpullorigin','hammerpulloriginnoteid','hammerpulldestinationnoteid'];
 // Dynamics are importer-global in alphaTab, so the TAB copy's value is an artifact
 // (parts whose staff 2 writes dynamics or hairpins are never folded).
-const ignoredNote=new Set(['id','string','fret','octave','tone','istiedestination','accidentalmode','dynamics',...linkKeys]);
+const ignoredNote=new Set(['id','string','fret','octave','tone','istiedestination','accidentalmode','dynamics',...linkKeys,...hammerKeys]);
 // Stems and beams are staff layout; the notation staff's are kept. alphaTab's initial
 // instrument automation sits on the notation copy; the TAB copy must carry none.
 const ignoredBeat=new Set(['id','notes','automations','preferredbeamdirection','beamingmode','invertbeamdirection','dynamics','crescendo',...['text','chordid','lyrics']]);
@@ -87,18 +90,38 @@ export function applyMusicXmlAlternateStaves(score:model.Score,bytes:Uint8Array,
     const source=readMusicXmlSource(bytes,settings);
     if(!source||!source.xml.includes('alternate'))return score;
     const parts=alternateParts(source.xml);if(!parts.size||parts.size>score.tracks.length)return score;
-    const value:unknown=model.JsonConverter.scoreToJson(score),json=(typeof value==='string'?JSON.parse(value):value) as Json,tracks=json.tracks as Json[];
-    let folded=false;
-    for(const index of parts){
-      const track=score.tracks[index],trackJson=tracks[index];if(!track)continue;
-      const matched=pairs(track,trackJson);if(!matched)continue;
-      const [notation,tab]=trackJson.staves as Json[];
-      for(const [note,partner] of matched){note.string=partner.string;note.fret=partner.fret;}
-      Object.assign(notation,{stringtuning:tab.stringtuning,capo:tab.capo,showtablature:true,showstandardnotation:true});
-      trackJson.staves=[notation];folded=true;
+    // A part whose folded hammer-ons would relink elsewhere stays unfolded; the others fold.
+    for(;;){
+      const attempt=fold(score,parts,settings);if(!attempt)return score;
+      if(!attempt.bad.size)return attempt.result;
+      for(const index of attempt.bad)parts.delete(index);
     }
-    return folded?scoreFromJson(JSON.stringify(json),settings):score;
   } catch {
     return score; // unreadable sources keep the stock import
   }
+}
+
+function fold(score:model.Score,parts:Set<number>,settings:Settings):{result:model.Score;bad:Set<number>}|null {
+  const value:unknown=model.JsonConverter.scoreToJson(score),json=(typeof value==='string'?JSON.parse(value):value) as Json,tracks=json.tracks as Json[];
+  let folded=false;const links=new Map<unknown,unknown>();
+  for(const index of parts){
+    const track=score.tracks[index],trackJson=tracks[index];if(!track)continue;
+    const matched=pairs(track,trackJson);if(!matched)continue;
+    const [notation,tab]=trackJson.staves as Json[];
+    const notationOf=new Map(matched.map(([note,partner])=>[partner.id,note.id]));
+    for(const [note,partner] of matched){
+      note.string=partner.string;note.fret=partner.fret;note.ishammerpullorigin=partner.ishammerpullorigin??false;
+      delete note.hammerpulloriginnoteid;delete note.hammerpulldestinationnoteid;
+      const target=partner.ishammerpullorigin?partner.hammerpulldestinationnoteid:undefined;
+      links.set(note.id,target===undefined||target===null?null:notationOf.get(target)??'unpaired');
+    }
+    Object.assign(notation,{stringtuning:tab.stringtuning,capo:tab.capo,showtablature:true,showstandardnotation:true});
+    trackJson.staves=[notation];folded=true;
+  }
+  if(!folded)return null;
+  const result=scoreFromJson(JSON.stringify(json),settings),bad=new Set<number>();
+  for(const track of result.tracks)for(const staff of track.staves)for(const bar of staff.bars)for(const voice of bar.voices)for(const beat of voice.beats)for(const note of beat.notes){
+    if(links.has(note.id)&&(note.isHammerPullOrigin?note.hammerPullDestination?.id??null:null)!==links.get(note.id))bad.add(track.index);
+  }
+  return {result,bad};
 }

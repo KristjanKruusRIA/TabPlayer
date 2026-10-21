@@ -69,7 +69,7 @@ const written={
   // Presentation is not written: colours (style) and every stylesheet display choice.
   score:new Set(['title','artist','words','copyright','masterbars','tracks','stylesheet','style','defaultsystemslayout','systemslayout']),
   // Beaming rules are display grouping.
-  master:new Set(['isrepeatstart','repeatcount','timesignaturenumerator','timesignaturedenominator','timesignaturecommon','tempoautomations','start','displayscale','displaywidth','beamingrules']),
+  master:new Set(['fermata','isrepeatstart','repeatcount','timesignaturenumerator','timesignaturedenominator','timesignaturecommon','tempoautomations','start','displayscale','displaywidth','beamingrules']),
   track:new Set(['staves','playbackinfo','name','shortname','color','defaultsystemslayout','systemslayout','isvisibleonmultitrack']),
   // Mute and solo are player state and the port is MIDI routing, not notation.
   playback:new Set(['program','primarychannel','secondarychannel','volume','balance','ismute','issolo','port']),
@@ -262,6 +262,18 @@ function slide(note:model.Note,open:Map<model.Note,number>,levels:Map<model.Note
   return result;
 }
 
+// MusicXML has no fermata length: alphaTab reads each mark's type onto its beat with length 0,
+// and Beat.finish files it in the master bar at that beat's start.
+const fermataShapes=new Map([[model.FermataType.Medium,'normal'],[model.FermataType.Short,'angled'],[model.FermataType.Long,'square']]);
+const fermataOf=(beat:model.Beat)=>!beat.fermata||beat.graceType!==model.GraceType.None?'':`<fermata type="upright">${fermataShapes.get(beat.fermata.type)??unsupported('this fermata')}</fermata>`;
+// A master-bar fermata reads back only from a written beat that starts where it stands.
+// The master bar is authoritative: the detached copy rebuilds every beat's fermata from it.
+function checkFermatas(copy:model.Score){
+  for(const master of copy.masterBars)for(const offset of master.fermata?.keys()??[]){
+    if(!copy.tracks.some(track=>track.staves.some(staff=>staff.bars[master.index]?.voices.some(voice=>!voice.isEmpty&&voice.beats.some(beat=>beat.graceType===model.GraceType.None&&beat.playbackStart===offset)))))unsupported('a fermata between beats');
+  }
+}
+
 // alphaTab's MusicXML import links each hammer-on origin itself (see
 // musicxml-hammer-pulls.ts), so every selected link must be one that relinking from the
 // flags alone rebuilds. A link a range cuts is dropped, as ties are.
@@ -369,7 +381,8 @@ function writePart(track:model.Track,score:model.Score,json:Json,scoreJson:Json,
         }
         // alphaTab stretches a lone whole rest over any meter: a measure rest.
         if(voice.beats.length===1&&!beat.notes.length&&beat.duration===model.Duration.Whole&&!beat.dots&&!beat.hasTuplet&&beat.displayDuration===length){
-          layouts.forEach((layout,at)=>{notes[at]+=element('note','<rest measure="yes"/>'+element('duration',length)+voiceNumber(layout)+staffOf(layout));});total=length;continue;
+          const held=fermataOf(beat);
+          layouts.forEach((layout,at)=>{notes[at]+=element('note','<rest measure="yes"/>'+element('duration',length)+voiceNumber(layout)+staffOf(layout)+(held?element('notations',held):''));});total=length;continue;
         }
         const ticks=grace?0:beatTicks(beat);
         if(beat.displayStart!==total||beat.displayDuration!==ticks)unsupported('a beat whose length differs from its note value');
@@ -377,7 +390,8 @@ function writePart(track:model.Track,score:model.Score,json:Json,scoreJson:Json,
         // A grace note has no <duration>.
         const rhythm=(layout:typeof layouts[number])=>(grace?'':element('duration',ticks))+voiceNumber(layout)+element('type',typeNames.get(beat.duration as number)!)+'<dot/>'.repeat(beat.dots)
           +(beat.hasTuplet?element('time-modification',element('actual-notes',beat.tupletNumerator)+element('normal-notes',beat.tupletDenominator)):'')+staffOf(layout);
-        if(!beat.notes.length){layouts.forEach((layout,at)=>{notes[at]+=element('note','<rest/>'+rhythm(layout));});continue;}
+        const held=fermataOf(beat);
+        if(!beat.notes.length){layouts.forEach((layout,at)=>{notes[at]+=element('note','<rest/>'+rhythm(layout)+(held?element('notations',held):''));});continue;}
         const sorted=[...beat.notes].sort((a,b)=>a.realValue-b.realValue),lyrics=lyricsOf(beat,sung);
         for(const [noteIndex,note] of sorted.entries()){
           check('note',(beatJson.notes as Json[])[note.index]);
@@ -397,7 +411,7 @@ function writePart(track:model.Track,score:model.Score,json:Json,scoreJson:Json,
             // A held tie writes no bend, so on import its vibrato would sound unbent.
             if(note.vibrato!==model.VibratoType.None&&note.hasBend&&!bent)unsupported('vibrato on a bend held over a tie');
             const slurred=legato(note,legatos[at],legatos),technical=fingering||bent||mark.technical||slurred?element('technical',slurred+bent+mark.technical+fingering):'';
-            const marked=(mark.ornaments?element('ornaments',mark.ornaments):'')+technical+(mark.articulations?element('articulations',mark.articulations):'');
+            const marked=(noteIndex===0?held:'')+(mark.ornaments?element('ornaments',mark.ornaments):'')+technical+(mark.articulations?element('articulations',mark.articulations):'');
             const tied=links.map(([type,level])=>`<tied type="${type}" number="${level}"/>`).join('')+slide(note,slides[at],slides);
             const timing=rhythm(layout).replace('</duration>',`</duration>${links.map(([type])=>`<tie type="${type}"/>`).join('')}`),cut=timing.search(/<time-modification>|<staff>/);
             notes[at]+=element('note',grace+(noteIndex?'<chord/>':'')+written.pitch+(cut<0?timing+written.accidental:timing.slice(0,cut)+written.accidental+timing.slice(cut))
@@ -450,7 +464,7 @@ export function exportMusicXml(score:model.Score,selection:ExportSelection):Uint
       if(used>bars.slice(line.startBar).flatMap(bar=>bar.voices[0]?.beats??[]).filter(beat=>!beat.isEmpty&&!beat.isRest).length)unsupported('lyrics with more syllables than notes');
     }
   }
-  const copy=selectScore(score,selection),json=toJson(copy);check('score',json);checkHammerPulls(score,copy);
+  const copy=selectScore(score,selection),json=toJson(copy);check('score',json);checkHammerPulls(score,copy);checkFermatas(copy);
   if(copy.tracks.some(track=>track.staves.some(staff=>staff.transpositionPitch!==0)))unsupported('sounding transposition');
   // alphaTab's import keeps one running dynamic across all parts in document order.
   const state={dynamic:model.DynamicValue.F,started:false};

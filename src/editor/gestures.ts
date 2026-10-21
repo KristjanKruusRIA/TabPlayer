@@ -64,7 +64,7 @@ export function applyGestureEdit(score:model.Score,command:GestureCommand):boole
     case 'setFermata':{
       exact(command,['type','target','fermata']);const beat=selected(score,command.target);
       if(beat.graceType!==model.GraceType.None)throw new Error('Select a regular beat or rest for the global fermata.');
-      if(command.fermata!==null){exact(command.fermata,['type','length']);if(!integer(command.fermata.type,0,2)||!Number.isFinite(command.fermata.length)||command.fermata.length<=0)throw new Error('Choose a valid fermata type and positive stored length.');}
+      if(command.fermata!==null){exact(command.fermata,['type','length']);if(!integer(command.fermata.type,0,2)||!Number.isFinite(command.fermata.length)||command.fermata.length<0)throw new Error('Choose a valid fermata type and a stored length of 0 or more.');}
       const offset=beat.playbackStart;if(!integer(offset))throw new Error('Invalid fermata position.');
       const master=beat.voice.bar.masterBar,aligned=score.tracks.flatMap(track=>track.staves.flatMap(staff=>staff.bars[master.index]?.voices.flatMap(voice=>voice.beats.filter(b=>b.playbackStart===offset||(offset===0&&b.index===0&&!master.fermata?.has(b.playbackStart))))??[]));
       const fermata=command.fermata===null?null:Object.assign(new model.Fermata(),command.fermata);

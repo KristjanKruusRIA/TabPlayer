@@ -38,7 +38,7 @@ export function GesturePanel({score,target,busy,onEdit}:GesturePanelProps) {
       <button onClick={()=>onEdit({type:'setCrescendo',from:target,to:end,crescendo,targetDynamics:crescendo===0?null:targetDynamics})}>Apply hairpin</button>
     </fieldset>
     <fieldset disabled={disabled||beat?.graceType!==model.GraceType.None}><h3>Global fermata</h3><p className="muted">Applies at this position across every track. Playback hold timing remains unavailable.</p><div className="pair"><label>Global fermata<select value={fermataType} onChange={e=>setFermataType(e.target.value)}><option value="none">None</option><option value="0">Short</option><option value="1">Medium</option><option value="2">Long</option></select></label><label>Stored length<input type="number" min={0} step="any" disabled={fermataType==='none'} value={fermataLength} onChange={e=>setFermataLength(e.target.value)}/></label></div>
-      <button disabled={fermataType!=='none'&&(!Number.isFinite(length)||length<=0)} onClick={()=>onEdit({type:'setFermata',target,fermata:fermataType==='none'?null:{type:Number(fermataType),length}})}>Apply global fermata</button>
+      <button disabled={fermataType!=='none'&&(!fermataLength.trim()||!Number.isFinite(length)||length<0)} onClick={()=>onEdit({type:'setFermata',target,fermata:fermataType==='none'?null:{type:Number(fermataType),length}})}>Apply global fermata</button>
     </fieldset>
   </details>;
 }

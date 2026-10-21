@@ -91,7 +91,7 @@ This is a concrete functional stepped-dynamics policy with standard GPIF Dynamic
 
 ## Fermata authority and bounded first delivery
 
-setFermata resolves the selected beat's current playbackStart and writes/removes one authoritative MasterBar.fermata entry. A rest is valid; an empty carrier/grace-only target is rejected. Type0..2; Length must be finite and positive. Resolve aligned beats across tracks/staves/voices before mutation, then update all derived Beat.fermata references together. Clearing only the map allows finish() to recreate the entry from a stale beat reference.
+setFermata resolves the selected beat's current playbackStart and writes/removes one authoritative MasterBar.fermata entry. A rest is valid; an empty carrier/grace-only target is rejected. Type0..2; Length must be finite and 0 or more (Guitar Pro stores 0; decision 2026-10-21). Resolve aligned beats across tracks/staves/voices before mutation, then update all derived Beat.fermata references together. Clearing only the map allows finish() to recreate the entry from a stale beat reference.
 
 Store the master-bar map in public-model JSON. The effect is global despite its selected-beat input. Replay evaluates the endpoint at the time of its command. Existing absolute-offset fermatas stay absolute after subsequent rhythm edits; do not shift them using guessed note identity.
 

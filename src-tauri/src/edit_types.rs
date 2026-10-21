@@ -1419,8 +1419,9 @@ impl EditCommand {
                 ..
             } => {
                 enum_range(fermata.r#type, 0, 2)?;
-                if !fermata.length.is_finite() || fermata.length <= 0.0 {
-                    return Err("Fermata length must be a positive finite number.".into());
+                // Guitar Pro stores fermatas of length 0.
+                if !fermata.length.is_finite() || fermata.length < 0.0 {
+                    return Err("Fermata length must be a finite number of 0 or more.".into());
                 }
             }
             Self::SetNoteLink { from, to, kind } => {
@@ -2401,11 +2402,13 @@ mod tests {
     }
 
     #[test]
-    fn lyrics_notation_fermata_requires_exact_shape_positive_length_and_valid_type() {
+    fn lyrics_notation_fermata_requires_exact_shape_non_negative_length_and_valid_type() {
         let mut value = lyrics_notation_commands().remove(4);
         for kind in 0..=2 {
-            value["fermata"] = json!({"type": kind, "length": 0.01});
-            accepted(&value);
+            for length in [0.0, 0.01] {
+                value["fermata"] = json!({"type": kind, "length": length});
+                accepted(&value);
+            }
         }
         for invalid in [
             json!({}),
@@ -2415,7 +2418,6 @@ mod tests {
             json!({"type": -1, "length": 1}),
             json!({"type": 3, "length": 1}),
             json!({"type": 0.5, "length": 1}),
-            json!({"type": 0, "length": 0}),
             json!({"type": 0, "length": -1}),
             json!({"type": 0, "length": null}),
             json!({"type": 0, "length": "1"}),

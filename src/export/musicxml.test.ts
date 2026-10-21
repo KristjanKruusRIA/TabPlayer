@@ -673,6 +673,41 @@ describe('MusicXML export',()=>{
     expect(()=>exportMusicXml(score,selectAll(score))).toThrow(/not evenly spaced/);
   });
 
+  // Two tracks: a note, a rest and a half note; fermatas keep their type, lengths come back 0.
+  const fermataState=(score:model.Score)=>score.masterBars.map(bar=>[...bar.fermata??[]].sort(([a],[b])=>a-b).map(([offset,fermata])=>[offset,fermata.type,fermata.length]));
+  const fermatas=(...placed:[number,model.FermataType][])=>{
+    const score=build({copies:2,bars:[{numerator:4,denominator:4,voices:[[{duration:quarter,notes:[{octave:4,tone:0}]},{duration:quarter},{duration:half,notes:[{octave:4,tone:4}]}]]}]});
+    for(const [offset,type] of placed)score.masterBars[0].addFermata(offset,Object.assign(new model.Fermata(),{type,length:1.5}));
+    score.finish(settings);return score;
+  };
+  it('writes fermatas on notes and rests and reads their type back',()=>{
+    const score=fermatas([0,model.FermataType.Medium],[960,model.FermataType.Short],[1920,model.FermataType.Long]),doc=parse(exportMusicXml(score,selectAll(score)));
+    expect([...doc.querySelectorAll('note > notations > fermata')].map(node=>[node.getAttribute('type'),node.textContent,!!node.closest('note')!.querySelector('rest')])).toEqual([0,1].flatMap(()=>[['upright','normal',false],['upright','angled',true],['upright','square',false]]));
+    const back=loadInterchangeScore(exportMusicXml(score,selectAll(score)),settings);
+    expect(fermataState(back)).toEqual([[[0,model.FermataType.Medium,0],[960,model.FermataType.Short,0],[1920,model.FermataType.Long,0]]]);
+    expect(back.tracks.map(track=>track.staves[0].bars[0].voices[0].beats.map(beat=>beat.fermata?.type??null))).toEqual([0,1].map(()=>[model.FermataType.Medium,model.FermataType.Short,model.FermataType.Long]));
+  });
+
+  it('writes a fermata on a measure rest',()=>{
+    const score=build({bars:[{numerator:4,denominator:4,voices:[[{duration:model.Duration.Whole}]]}]});
+    score.masterBars[0].addFermata(0,Object.assign(new model.Fermata(),{type:model.FermataType.Long,length:0}));score.finish(settings);
+    const back=loadInterchangeScore(exportMusicXml(score,selectAll(score)),settings);
+    expect(fermataState(back)).toEqual([[[0,model.FermataType.Long,0]]]);
+  });
+
+  it('keeps one fermata on a notation + TAB guitar',()=>{
+    const score=guitar(),staff=score.tracks[0].staves[0];staff.showStandardNotation=true;for(const bar of staff.bars)bar.clefOttava=model.Ottavia._8vb;
+    score.masterBars[0].addFermata(1920,Object.assign(new model.Fermata(),{type:model.FermataType.Medium,length:0}));score.finish(settings);
+    const back=loadInterchangeScore(exportMusicXml(score,selectAll(score)),settings);
+    expect(back.tracks[0].staves.length).toBe(1);
+    expect(fermataState(back)[0]).toEqual([[1920,model.FermataType.Medium,0]]);
+  });
+
+  it('refuses a fermata between beats',()=>{
+    const score=fermatas([480,model.FermataType.Medium]);
+    expect(()=>exportMusicXml(score,selectAll(score))).toThrow(/fermata between beats/);
+  });
+
   it('refuses a continued release and re-bend that reads back without its dip',()=>{
     const score=continued([[0,4],[15,4],[30,0],[45,0],[60,2]]);
     expect(()=>exportMusicXml(score,selectAll(score))).toThrow(/not evenly spaced|exactly two changes/);

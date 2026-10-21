@@ -84,9 +84,13 @@ it('fermata_is_global_and_clear_cannot_resurrect',()=>{
   for(const [offset,type,length]of [[0,0,.5],[87,1,1.25],[960,2,2]])master.addFermata(offset,Object.assign(new model.Fermata(),{type,length}));expect([...rebuild(score).masterBars[0].fermata!].map(([offset,f])=>[offset,f.type,f.length])).toEqual([[0,0,.5],[87,1,1.25],[960,2,2]]);
 });
 it('fermata_rejects_invalid_lengths_and_empty_or_grace_carriers_atomically',()=>{
-  const score=music();for(const fermata of [{type:3,length:1},{type:1,length:0},{type:1,length:-1},{type:1,length:NaN},{type:1,length:Infinity},{type:1,length:1,extra:1},{}]){const before=snapshot(score);expect(()=>edit(score,{type:'setFermata',target,fermata})).toThrow();expect(snapshot(score)).toBe(before);}
+  const score=music();for(const fermata of [{type:3,length:1},{type:1,length:-1},{type:1,length:NaN},{type:1,length:Infinity},{type:1,length:1,extra:1},{}]){const before=snapshot(score);expect(()=>edit(score,{type:'setFermata',target,fermata})).toThrow();expect(snapshot(score)).toBe(before);}
   beat(score).notes=[];score.finish(settings);edit(score,{type:'setFermata',target,fermata:{type:0,length:.5}});expect(beat(score).fermata?.length).toBe(.5);
   for(const empty of [true,false]){beat(score).isEmpty=empty;beat(score).graceType=empty?0:1;const before=snapshot(score);expect(()=>edit(score,{type:'setFermata',target,fermata:null})).toThrow();expect(snapshot(score)).toBe(before);}
+});
+it('fermata_accepts_the_zero_length_guitar_pro_stores',()=>{
+  const score=music();edit(score,{type:'setFermata',target,fermata:{type:1,length:0}});
+  expect(beat(score).fermata?.length).toBe(0);expect(score.masterBars[0].fermata?.get(0)?.length).toBe(0);
 });
 it('fermata_storage_does_not_claim_an_unsupported_playback_hold',()=>{
   const score=music(),control=smf(score).bytes;edit(score,{type:'setFermata',target:{...target,beat:1},fermata:{type:2,length:2}});expect(smf(rebuild(score)).bytes).toEqual(control);

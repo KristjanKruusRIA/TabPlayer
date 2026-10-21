@@ -175,6 +175,11 @@ it('does not invent a source program when copying later music but keeps selected
   expect(read(clip)).toEqual([]);
   original.automations.push(model.Automation.buildInstrumentAutomation(false,0,30));expect(read(makeMusicClip(source,selection,'singleTrack'))).toMatchObject([{type:model.AutomationType.Instrument,value:30}]);
 });
+it('copies a zero-length fermata, as Guitar Pro stores it',()=>{
+  const source=music();source.masterBars[0].addFermata(960,Object.assign(new model.Fermata(),{type:model.FermataType.Medium,length:0}));source.finish(new Settings());
+  const copy=scoreFromMusicClip(makeMusicClip(source,notes(1,3),'singleTrack'));
+  expect([...copy.masterBars[0].fermata!.entries()].map(([offset,value])=>[offset,value.length])).toEqual([[0,0]]);
+});
 it('partial phrases exclude global and pedal annotations outside selected attacks or in plain gaps',()=>{
   const source=music(),master=source.masterBars[0],bar=source.tracks[0].staves[0].bars[0];
   for(let index=0;index<4;index++){master.addFermata(index*960,Object.assign(new model.Fermata(),{type:model.FermataType.Short,length:index+1}));bar.sustainPedals.push(Object.assign(new model.SustainPedalMarker(),{ratioPosition:index/4,pedalType:model.SustainPedalMarkerType.Down}));}

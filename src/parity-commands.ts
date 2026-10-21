@@ -210,7 +210,7 @@ export function validateParityCommand(value:unknown):void {
   }
   if(type==='setFermata'&&edit.fermata!==null) {
     const fermata=exact(edit.fermata,['type','length']);integer(fermata.type,2);
-    if(typeof fermata.length!=='number'||!Number.isFinite(fermata.length)||fermata.length<=0)throw new Error('Invalid fermata length.');
+    if(typeof fermata.length!=='number'||!Number.isFinite(fermata.length)||fermata.length<0)throw new Error('Invalid fermata length.');
   }
   if(type==='setBarGestures')integer(edit.clefOttava,4);
   if(type==='setMasterBarGestures') {

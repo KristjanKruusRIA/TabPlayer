@@ -79,7 +79,7 @@ function validateModel(score:model.Score,clip:MusicClip) {
   context(score,clip.mode);
   for(const master of score.masterBars){if(!integer(master.timeSignatureNumerator,1,64)||![1,2,4,8,16,32,64].includes(master.timeSignatureDenominator))throw new Error('Invalid clipboard measure rhythm.');for(const automation of master.tempoAutomations)if(automation.type!==model.AutomationType.Tempo||!Number.isFinite(automation.value)||automation.value<=0||automation.ratioPosition<0||automation.ratioPosition>1)throw new Error('Invalid clipboard tempo automation.');
     if(master.fermata?.size){const nominal=master.calculateDuration(false),duration=master.isFreeTime?Math.max(0,...score.tracks.flatMap(track=>track.staves.flatMap(staff=>staff.bars[master.index].voices.map(voice=>voice.beats.reduce((sum,beat)=>sum+rhythmTicks(beat,nominal),0))))):nominal;
-      for(const [offset,fermata]of master.fermata){enumValue(fermata.type,model.FermataType,'clipboard fermata');if(!Number.isFinite(offset)||offset<0||offset>duration||!Number.isFinite(fermata.length)||fermata.length<=0)throw new Error('Invalid clipboard fermata length or offset.');}
+      for(const [offset,fermata]of master.fermata){enumValue(fermata.type,model.FermataType,'clipboard fermata');if(!Number.isFinite(offset)||offset<0||offset>duration||!Number.isFinite(fermata.length)||fermata.length<0)throw new Error('Invalid clipboard fermata length or offset.');}
     }
   }
   for(const track of score.tracks){if(!integer(track.playbackInfo.program,0,127)||!integer(track.playbackInfo.bank,0,16383))throw new Error('Invalid clipboard instrument context.');

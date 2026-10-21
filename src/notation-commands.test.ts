@@ -46,10 +46,12 @@ it('rejects invalid nested lyrics and gestures before replay',()=>{
     {type:'setCrescendo',from:target,to,crescendo:0,targetDynamics:4},
     {type:'setCrescendo',from:target,to,crescendo:1,targetDynamics:null},
     {type:'setCrescendo',from:target,to,crescendo:2,targetDynamics:8},
-    ...[{type:3,length:1},{type:0,length:0},{type:0,length:Infinity},{type:0,length:1,extra:0}].map(fermata=>({type:'setFermata',target,fermata})),
+    ...[{type:3,length:1},{type:0,length:-1},{type:0,length:Infinity},{type:0,length:1,extra:0}].map(fermata=>({type:'setFermata',target,fermata})),
     {...commands[5],clefOttava:5},{...commands[6],tripletFeel:7},{...commands[6],doubleBar:0},
     ...[{unit:4,groups:[2]},{unit:8,groups:[]},{unit:8,groups:[0]},{unit:8,groups:[.5]},{unit:8,groups:[Number.MAX_SAFE_INTEGER+1]},{unit:8,groups:[2],extra:0}].map(beaming=>({...commands[6],beaming})),
     {...commands[7],kind:'second'},{...commands[7],staff:-1},
   ];
   for(const edit of invalid)expect(()=>validate(edit),JSON.stringify(edit)).toThrow();
+  // Guitar Pro stores fermatas of length 0.
+  expect(validate({type:'setFermata',target,fermata:{type:0,length:0}})).toEqual([{type:'setFermata',target,fermata:{type:0,length:0}}]);
 });

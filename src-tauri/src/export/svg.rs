@@ -27,7 +27,7 @@ pub fn convert_pages(pages: &[SvgPage]) -> Result<Vec<String>, String> {
         .collect()
 }
 
-fn unresolved_text(group: &usvg::Group) -> bool {
+pub(crate) fn unresolved_text(group: &usvg::Group) -> bool {
     group.children().iter().any(|node| match node {
         usvg::Node::Text(text) => text
             .layouted()
@@ -52,17 +52,19 @@ fn with_page_box(svg: &str, page: &SvgPage) -> Result<String, String> {
     ))
 }
 
-/// One page keeps the chosen name; several pages are numbered after it, padded so they sort.
+/// One page keeps the chosen name; several pages are numbered after it with its extension, padded so they sort.
 pub fn page_paths(path: &Path, count: usize) -> Vec<PathBuf> {
     if count == 1 {
         return vec![path.to_path_buf()];
     }
     let stem = path.file_stem().unwrap_or_default();
+    let extension = path.extension().unwrap_or_default();
     let digits = count.to_string().len();
     (1..=count)
         .map(|number| {
             let mut name = OsString::from(stem);
-            name.push(format!("-{number:0digits$}.svg"));
+            name.push(format!("-{number:0digits$}."));
+            name.push(extension);
             path.with_file_name(name)
         })
         .collect()
@@ -150,5 +152,9 @@ mod tests {
         let padded = page_paths(path, 12);
         assert_eq!(padded[0], PathBuf::from("C:/scores/song-01.svg"));
         assert_eq!(padded[11], PathBuf::from("C:/scores/song-12.svg"));
+        assert_eq!(
+            page_paths(Path::new("C:/scores/song.png"), 2)[1],
+            PathBuf::from("C:/scores/song-2.png")
+        );
     }
 }

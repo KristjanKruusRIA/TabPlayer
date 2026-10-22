@@ -594,6 +594,37 @@ pub async fn export_svg(
     .map_err(|e| e.to_string())?
 }
 #[tauri::command]
+pub async fn export_png(
+    document: DocumentRevision,
+    pages: Vec<SvgPage>,
+    dpi: u32,
+    app: AppHandle,
+) -> Result<bool, String> {
+    let Some(path) = export_destination(&app, "png", false)? else {
+        return Ok(false);
+    };
+    tauri::async_runtime::spawn_blocking(move || {
+        // Render every page before writing, so a refusal leaves no partial set behind.
+        let files = crate::export::png::render_pages(&pages, dpi)?;
+        let paths = crate::export::svg::page_paths(&path, files.len());
+        let outputs: Vec<_> = paths
+            .iter()
+            .zip(&files)
+            .map(|(path, png)| (path.as_path(), png.as_slice()))
+            .collect();
+        crate::export_document_files(
+            &app.state::<NativeAudio>(),
+            &app.state::<ExportJobs>(),
+            &app.state::<Arc<Mutex<DocumentWorkspace>>>(),
+            &document,
+            &outputs,
+        )?;
+        Ok(true)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+#[tauri::command]
 pub async fn export_pdf(
     document: DocumentRevision,
     pages: Vec<SvgPage>,

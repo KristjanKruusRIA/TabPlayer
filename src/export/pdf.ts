@@ -31,6 +31,12 @@ export function paginateSystems(systems:SvgSystem[],title:string,layout:PrintLay
     return {widthMm:d.widthMm,heightMm:d.heightMm,svg:`<svg xmlns="http://www.w3.org/2000/svg" width="${d.widthMm}mm" height="${d.heightMm}mm" viewBox="0 0 ${d.width} ${d.height}"><style>.at{font-family:Bravura;font-size:34px}text{fill:#111}</style><text x="${d.margin}" y="${d.margin+22}" font-family="Noto Sans, Noto Sans CJK JP, Noto Emoji" font-size="${titleSize}">${escaped(title)}</text>${content}<text x="${d.width/2}" y="${d.height-d.margin}" text-anchor="middle" font-family="Noto Sans, Noto Sans CJK JP, Noto Emoji" font-size="11">${index+1} / ${groups.length}</text></svg>`};
   });
 }
+/** Mirrors the native PNG limits so an oversized export is refused before the save dialog opens. */
+export function assertPngSize(pages:SvgPage[],dpi:number){
+  const pixels=(mm:number)=>Math.round(mm/25.4*dpi),areas=pages.map(page=>pixels(page.widthMm)*pixels(page.heightMm));
+  if(areas.some(area=>area>64_000_000))throw new Error('This page is too large for that resolution. Choose a lower resolution.');
+  if(areas.reduce((sum,area)=>sum+area,0)>1_500_000_000)throw new Error('This export is too large for that resolution. Choose a lower resolution or fewer pages.');
+}
 /** Puts an opaque white page behind a rendered page, the way the PDF shows it. */
 export function svgPageWithBackground(page:SvgPage):SvgPage {
   const open=/^<svg\b[^>]*?(\/?)>/.exec(page.svg);

@@ -1,7 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import type { DocumentSettings } from '../document-settings';
 import type { PlaybackPlan } from '../audio/types';
-import type { ExportProgress,SvgPage } from './types';
+import type { ExportProgress,PngResolution,SvgPage } from './types';
 import type { DocumentId } from '../workspace/types';
 export interface NativeAudioExportRequest {
   tracks:{id:string;name:string;preset:string;kind:'score'}[];
@@ -13,6 +13,7 @@ export interface ExportNativeBridge {
   exportMidi(bytes:Uint8Array,revision:number):Promise<boolean>;
   exportMusicXml(bytes:Uint8Array,revision:number):Promise<boolean>;
   exportSvg(pages:SvgPage[],revision:number):Promise<boolean>;
+  exportPng(pages:SvgPage[],dpi:PngResolution,revision:number):Promise<boolean>;
   exportAudio(payload:NativeAudioExportPayload,revision:number):Promise<string|null>;
   status(id:string):Promise<ExportProgress|null>;
   cancel(id:string):Promise<void>;
@@ -23,6 +24,7 @@ export function createDocumentExportBridge(documentId:DocumentId):ExportNativeBr
     exportMidi:(bytes,revision)=>invoke('export_midi',{document:{documentId,revision},bytes:Array.from(bytes)}),
     exportMusicXml:(bytes,revision)=>invoke('export_musicxml',{document:{documentId,revision},bytes:Array.from(bytes)}),
     exportSvg:(pages,revision)=>invoke('export_svg',{document:{documentId,revision},pages}),
+    exportPng:(pages,dpi,revision)=>invoke('export_png',{document:{documentId,revision},pages,dpi}),
     exportAudio:(payload,revision)=>invoke('export_audio',{...payload,document:{documentId,revision}}),
     status:id=>invoke('export_status',{documentId,id}),
     cancel:id=>invoke('cancel_export',{documentId,id}),

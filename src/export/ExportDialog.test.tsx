@@ -76,6 +76,19 @@ it('submits SVG with the PDF page layout and an optional transparent background'
   expect(submit).toHaveBeenLastCalledWith({format:'svg',selection:{tracks:[0],range:null},layout,transparent:true});
 });
 
+it('submits PNG with the PDF page layout, a background choice and a resolution',()=>{
+  const submit=vi.fn();render(<ExportDialog score={fixture()} layout={layout} busy={false} currentSpeedAvailable={true} onExport={submit} onCancel={()=>{}}/>);
+  expect(screen.queryByLabelText('Resolution')).toBeNull();
+  fireEvent.change(screen.getByLabelText('Export format'),{target:{value:'png'}});
+  expect(screen.getByText(/PNG writes one image per page/)).toBeVisible();expect(screen.getByLabelText('Paper')).toBeVisible();
+  expect(screen.getByLabelText('Transparent background')).not.toBeChecked();expect(screen.getByLabelText('Resolution')).toHaveValue('300');
+  fireEvent.click(screen.getByRole('button',{name:'Export'}));
+  expect(submit).toHaveBeenLastCalledWith({format:'png',selection:{tracks:[0],range:null},layout,transparent:false,dpi:300});
+  fireEvent.click(screen.getByLabelText('Transparent background'));fireEvent.change(screen.getByLabelText('Resolution'),{target:{value:'150'}});
+  fireEvent.click(screen.getByRole('button',{name:'Export'}));
+  expect(submit).toHaveBeenLastCalledWith({format:'png',selection:{tracks:[0],range:null},layout,transparent:true,dpi:150});
+});
+
 it('refreshes GP preflight for score and settings changes without repeating it for progress',()=>{
   const score=fixture(),preflight=vi.fn(()=>null),submit=()=>{},cancel=()=>{};
   const {rerender}=render(<ExportDialog score={score} layout={layout} busy={false} currentSpeedAvailable={true} gpBackingIssue={preflight} onExport={submit} onCancel={cancel}/>);

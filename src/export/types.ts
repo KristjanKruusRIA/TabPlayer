@@ -3,6 +3,8 @@ import type { PageLayout } from '../engraving/types';
 export type { PrintLayout } from '../document-settings';
 export interface ExportSelection { tracks:number[]; range:{first:number;last:number}|null;staves?:Record<number,number[]> }
 export interface SvgPage { svg:string; widthMm:number; heightMm:number }
+export const PNG_RESOLUTIONS=[72,150,300,600] as const;
+export type PngResolution=typeof PNG_RESOLUTIONS[number];
 export interface SvgSystem { svg:string; width:number; height:number }
 export interface AudioExportOptions { sampleRate:44100|48000;bitDepth:16|24;speed:'saved'|'current';metronome:boolean;tailSeconds:number;backing:boolean;includeMix:boolean }
 export type ExportOptions =
@@ -12,6 +14,7 @@ export type ExportOptions =
   | {format:'pdf';selection:ExportSelection;layout:PrintLayout;page?:PageLayout}
   | {format:'print';selection:ExportSelection;layout:PrintLayout;page?:PageLayout}
   | {format:'svg';selection:ExportSelection;layout:PrintLayout;page?:PageLayout;transparent:boolean}
+  | {format:'png';selection:ExportSelection;layout:PrintLayout;page?:PageLayout;transparent:boolean;dpi:PngResolution}
   | {format:'wav';selection:ExportSelection;audio:AudioExportOptions}
   | {format:'stems';selection:ExportSelection;audio:AudioExportOptions};
 export interface ExportProgress { id:string;frames:number;totalFrames:number;status:'running'|'complete'|'cancelled'|'failed';error?:string|null }

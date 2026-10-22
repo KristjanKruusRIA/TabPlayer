@@ -3,10 +3,11 @@ import { readDocumentRecord } from './document-context.mjs';
 import assert from 'node:assert/strict';
 import { readFile,mkdir,stat } from 'node:fs/promises';
 import { join } from 'node:path';
+import { inflateSync } from 'node:zlib';
 import { launch,stop,connect,directory } from './harness.mjs';
 await mkdir(directory,{recursive:true});
 const runId=Date.now();
-for(const {format,current=false} of [{format:'midi'},{format:'musicxml'},{format:'pdf'},{format:'svg'},{format:'wav'},{format:'stems'},{format:'wav',current:true},{format:'stems',current:true}]) {
+for(const {format,current=false} of [{format:'midi'},{format:'musicxml'},{format:'pdf'},{format:'svg'},{format:'png'},{format:'wav'},{format:'stems'},{format:'wav',current:true},{format:'stems',current:true}]) {
   const destination=join(directory,`export-${runId}-${format}${current?'-current':''}${format==='midi'?'.mid':format==='stems'?'':`.${format}`}`);
   const id=launch({TABPLAYER_TEST_EXPORT:destination});let browser;
   try {
@@ -20,6 +21,7 @@ for(const {format,current=false} of [{format:'midi'},{format:'musicxml'},{format
     if(current)await page.getByRole('combobox',{name:/^Speed/}).selectOption('50');
     await clickWorkspaceCommand(page,'Export score',{waitForIdle:false});
     const dialog=page.getByRole('dialog',{name:'Export score'});await dialog.getByLabel('Export format').selectOption(format);
+    if(format==='png')await dialog.getByLabel('Resolution').selectOption('150');
     if(format==='wav'||format==='stems'){await dialog.getByLabel('Bit depth').selectOption('24');await dialog.getByLabel('Effect tail (seconds)').fill('0.1');if(current)await dialog.getByRole('combobox',{name:/^Speed/}).selectOption('current');}
     await dialog.getByRole('button',{name:'Export',exact:true}).click();
     const deadline=Date.now()+120000;let exists=false;
@@ -38,6 +40,15 @@ for(const {format,current=false} of [{format:'midi'},{format:'musicxml'},{format
     if(format==='midi'){const bytes=await readFile(destination);assert.equal(bytes.subarray(0,4).toString(),'MThd');assert.equal(bytes.readUInt16BE(12),960);}
     if(format==='musicxml'){const text=await readFile(destination,'utf8');assert.ok(text.startsWith('<?xml'));assert.match(text,/<score-partwise/);}
     if(format==='svg'){const text=await readFile(destination,'utf8');assert.ok(text.startsWith('<svg'));assert.ok(!text.includes('<text'));assert.ok(text.match(/<path /g).length>2,'SVG must contain outlined notation beyond the background');assert.match(text,/viewBox="0 0 /);assert.match(text,/fill="#ffffff"|fill="#fff"/);}
+    if(format==='png'){
+      const b=await readFile(destination);assert.equal(b.subarray(0,8).toString('hex'),'89504e470d0a1a0a');
+      const chunks=[];for(let at=8;at<b.length;){const length=b.readUInt32BE(at);chunks.push({type:b.subarray(at+4,at+8).toString(),data:b.subarray(at+8,at+8+length)});at+=12+length;}
+      const header=chunks.find(c=>c.type==='IHDR').data,width=header.readUInt32BE(0),height=header.readUInt32BE(4);assert.equal(header[8],8);assert.equal(header[9],6);
+      const dims=chunks.find(c=>c.type==='pHYs').data;assert.equal(dims.readUInt32BE(0),5906);assert.equal(dims[8],1);
+      assert.ok(width>1000&&height>1000,`Unexpected page size ${width}x${height} at 150 dpi`);
+      // The first pixel of the first row is stored unfiltered under every PNG filter: an opaque white page.
+      const pixels=inflateSync(Buffer.concat(chunks.filter(c=>c.type==='IDAT').map(c=>c.data)));assert.equal(pixels.length,height*(width*4+1));assert.deepEqual([...pixels.subarray(1,5)],[255,255,255,255]);
+    }
     if(format==='pdf'){assert.equal((await readFile(destination)).subarray(0,5).toString(),'%PDF-');}
     if(format==='wav'){const b=await readFile(destination);assert.equal(b.subarray(0,4).toString(),'RIFF');assert.equal(b.readUInt16LE(22),2);assert.equal(b.readUInt32LE(24),48000);assert.equal(b.readUInt16LE(34),24);assert.equal(b.readUInt32LE(40)+44,b.length);assert.ok(b.subarray(44).some(n=>n!==0));if(current)assert.equal(b.readUInt32LE(40)/(2*3),772800);}
     if(format==='stems'){const m=JSON.parse(await readFile(join(destination,'manifest.json'),'utf8'));assert.ok(m.frames>0);if(current)assert.equal(m.frames,772800);assert.ok(m.tracks.some(t=>t.kind==='mix'));for(const t of m.tracks){assert.equal(t.filename.includes('/'),false);assert.equal(t.filename.includes('\\'),false);const b=await readFile(join(destination,t.filename));assert.equal(b.readUInt32LE(40)/(2*3),m.frames);}}

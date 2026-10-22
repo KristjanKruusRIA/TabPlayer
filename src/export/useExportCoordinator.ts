@@ -10,7 +10,7 @@ import { selectStaves } from './selection';
 import { exportMidi } from './midi';
 import { exportMusicXml } from './musicxml';
 import { clearBacking } from '../interchange/backing-projection';
-import { loadExportFonts,renderPdfPages,svgPageWithBackground } from './pdf';
+import { assertPngSize,loadExportFonts,renderPdfPages,svgPageWithBackground } from './pdf';
 import { validateSelection,type ExportOptions,type ExportProgress } from './types';
 import { scoreFromJson } from '../model-clone';
 import { copyGpInterchangeSource } from '../interchange/gp';
@@ -58,7 +58,7 @@ export function useExportCoordinator({score,settings,currentSpeed,bridge,native,
       if(frozenOptions.format==='midi'){if(cancelled.current)return false;return await native.exportMidi(exportMidi(copy,selection),revision);}
       // Backing audio is left out; refusals throw here, before the native save dialog opens.
       if(frozenOptions.format==='musicxml'){clearBacking(copy);const bytes=exportMusicXml(copy,selection);if(cancelled.current)return false;return await native.exportMusicXml(bytes,revision);}
-      if(frozenOptions.format==='svg'){await loadExportFonts();if(cancelled.current)return false;const pages=renderPdfPages(copy,selection,frozenOptions.layout,{page:frozenOptions.page??effectivePageLayout({page:null,print:frozenOptions.layout}),engraving:frozenSettings.engraving,trackIds:ids});if(cancelled.current)return false;return await native.exportSvg(frozenOptions.transparent?pages:pages.map(svgPageWithBackground),revision);}
+      if(frozenOptions.format==='svg'||frozenOptions.format==='png'){await loadExportFonts();if(cancelled.current)return false;const rendered=renderPdfPages(copy,selection,frozenOptions.layout,{page:frozenOptions.page??effectivePageLayout({page:null,print:frozenOptions.layout}),engraving:frozenSettings.engraving,trackIds:ids});if(cancelled.current)return false;if(frozenOptions.format==='png')assertPngSize(rendered,frozenOptions.dpi);const pages=frozenOptions.transparent?rendered:rendered.map(svgPageWithBackground);return await (frozenOptions.format==='png'?native.exportPng(pages,frozenOptions.dpi,revision):native.exportSvg(pages,revision));}
       if(frozenOptions.format==='pdf'||frozenOptions.format==='print'){await loadExportFonts();if(cancelled.current)return false;const pages=renderPdfPages(copy,selection,frozenOptions.layout,{page:frozenOptions.page??effectivePageLayout({page:null,print:frozenOptions.layout}),engraving:frozenSettings.engraving,trackIds:ids});if(cancelled.current)return false;return await watch(await native.exportPdf(pages,frozenOptions.format==='print',revision),active);}
       const audio=frozenOptions.audio;
       const selected=selectStaves(copy,selection);

@@ -78,9 +78,9 @@ it('isolates owner command queues and preserves prompt invalidation plus global 
 
 it('freezes export origin and sends the captured revision with every export kind',async()=>{
   const {exports:api}=await bridges(),bridge=api.createDocumentExportBridge('document-a'),payload={stems:true} as NativeAudioExportPayload;
-  await bridge.exportPdf([],true,2);await bridge.exportMidi(new Uint8Array([4]),3);await bridge.exportMusicXml(new Uint8Array([60]),5);await bridge.exportSvg([{svg:'<svg/>',widthMm:210,heightMm:297}],6);await bridge.exportAudio(payload,4);await bridge.status('job-a');await bridge.cancel('job-a');
+  await bridge.exportPdf([],true,2);await bridge.exportMidi(new Uint8Array([4]),3);await bridge.exportMusicXml(new Uint8Array([60]),5);await bridge.exportSvg([{svg:'<svg/>',widthMm:210,heightMm:297}],6);await bridge.exportPng([{svg:'<svg/>',widthMm:210,heightMm:297}],150,8);await bridge.exportAudio(payload,4);await bridge.status('job-a');await bridge.cancel('job-a');
   expect(native.invoke.mock.calls).toEqual([
-    ['export_pdf',{document:{documentId:'document-a',revision:2},pages:[],print:true}],['export_midi',{document:{documentId:'document-a',revision:3},bytes:[4]}],['export_musicxml',{document:{documentId:'document-a',revision:5},bytes:[60]}],['export_svg',{document:{documentId:'document-a',revision:6},pages:[{svg:'<svg/>',widthMm:210,heightMm:297}]}],['export_audio',{document:{documentId:'document-a',revision:4},...payload}],['export_status',{documentId:'document-a',id:'job-a'}],['cancel_export',{documentId:'document-a',id:'job-a'}],
+    ['export_pdf',{document:{documentId:'document-a',revision:2},pages:[],print:true}],['export_midi',{document:{documentId:'document-a',revision:3},bytes:[4]}],['export_musicxml',{document:{documentId:'document-a',revision:5},bytes:[60]}],['export_svg',{document:{documentId:'document-a',revision:6},pages:[{svg:'<svg/>',widthMm:210,heightMm:297}]}],['export_png',{document:{documentId:'document-a',revision:8},pages:[{svg:'<svg/>',widthMm:210,heightMm:297}],dpi:150}],['export_audio',{document:{documentId:'document-a',revision:4},...payload}],['export_status',{documentId:'document-a',id:'job-a'}],['cancel_export',{documentId:'document-a',id:'job-a'}],
   ]);
   expect(api).not.toHaveProperty('nativeExportBridge');
 });

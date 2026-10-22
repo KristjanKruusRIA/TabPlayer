@@ -3837,6 +3837,8 @@ dependencies = [
  "hound",
  "midly",
  "pdf-writer",
+ "png 0.17.16",
+ "resvg",
  "ringbuf",
  "rustysynth",
  "serde",

@@ -95,7 +95,7 @@ it.each([true,false])('freezes exact raw and hidden lyrics through the export di
   expect(getTrackLyrics(loadInterchangeScore(bytes!,new Settings()),0)).toEqual({visible,lines:[{startBar:0,text:raw}],source:'raw'});
   expect(getTrackLyrics(score,0).lines[0].text).toBe('Later');
 });
-function native():ExportNativeBridge{return {exportPdf:async()=>null,exportMidi:async()=>true,exportMusicXml:async()=>true,exportSvg:async()=>true,exportAudio:async()=>null,status:async()=>null,cancel:async()=>{}};}
+function native():ExportNativeBridge{return {exportPdf:async()=>null,exportMidi:async()=>true,exportMusicXml:async()=>true,exportSvg:async()=>true,exportPng:async()=>true,exportAudio:async()=>null,status:async()=>null,cancel:async()=>{}};}
 it('rejects an unavailable current coefficient before launching or entering a native job',async()=>{
   const score=buildScore(blankProject()),api=native(),exportAudio=vi.fn(api.exportAudio);api.exportAudio=exportAudio;
   const bridge={readBackingAsset:async()=>{throw new Error('Unexpected backing read.');},confirmExport:async()=>true,exportGp:async()=>true};
@@ -164,21 +164,22 @@ it('waits for native cancellation acknowledgement and reports failed jobs as err
   api.status=async()=>({id:'job',frames:0,totalFrames:10,status:'failed',error:'Disk full'});await act(async()=>{await expect(result.current.run(options)).rejects.toThrow('Disk full');});expect(result.current.busy).toBe(false);
 });
 
-it.each(['gp','midi','musicxml','pdf','print','svg','wav','stems'] as const)('captures a coherent explicit source and revision for %s',async format=>{
+it.each(['gp','midi','musicxml','pdf','print','svg','png','wav','stems'] as const)('captures a coherent explicit source and revision for %s',async format=>{
   const old=music(),score=music();old.title='Old';score.title='Latest';
   const settings=defaultDocumentSettings();settings.mixes['base/0']={gain:.2,pan:0,mute:false,solo:false};
   const api=native(),gp=vi.fn(async(_bytes:Uint8Array,_revision:number)=>true),bridge={readBackingAsset:async()=>{throw new Error('Unexpected backing read.');},confirmExport:async()=>true,exportGp:gp};
-  api.exportMidi=vi.fn(async()=>true);api.exportMusicXml=vi.fn(async()=>true);api.exportSvg=vi.fn(async()=>true);api.exportPdf=vi.fn(async()=> 'job');api.exportAudio=vi.fn(async()=> 'job');
+  api.exportMidi=vi.fn(async()=>true);api.exportMusicXml=vi.fn(async()=>true);api.exportSvg=vi.fn(async()=>true);api.exportPng=vi.fn(async()=>true);api.exportPdf=vi.fn(async()=> 'job');api.exportAudio=vi.fn(async()=> 'job');
   api.status=async()=>({id:'job',frames:1,totalFrames:1,status:'complete'});
   vi.spyOn(pdf,'loadExportFonts').mockResolvedValue();const pages=vi.spyOn(pdf,'renderPdfPages').mockReturnValue([{widthMm:210,heightMm:297,svg:'<svg/>'}]);
   const {result}=renderHook(()=>useExportCoordinator({revision:1,score:old,settings:defaultDocumentSettings(),currentSpeed:1,bridge,native:api}));
   const source={score,settings,embeddedBacking:Uint8Array.of(5,6),revision:19};
-  const options:ExportOptions=format==='wav'||format==='stems'?{format,selection:{tracks:[0],range:null},audio:{sampleRate:48000 as const,bitDepth:16 as const,speed:'saved' as const,metronome:false,tailSeconds:0,backing:true,includeMix:false}}:format==='pdf'||format==='print'?{format,selection:{tracks:[0],range:null},layout:{paper:'A4' as const,orientation:'portrait' as const,marginMm:15,scale:1,profile:'Score' as const}}:format==='svg'?{format,selection:{tracks:[0],range:null},layout:{paper:'A4' as const,orientation:'portrait' as const,marginMm:15,scale:1,profile:'Score' as const},transparent:false}:{format,selection:{tracks:[0],range:null}};
+  const options:ExportOptions=format==='wav'||format==='stems'?{format,selection:{tracks:[0],range:null},audio:{sampleRate:48000 as const,bitDepth:16 as const,speed:'saved' as const,metronome:false,tailSeconds:0,backing:true,includeMix:false}}:format==='pdf'||format==='print'?{format,selection:{tracks:[0],range:null},layout:{paper:'A4' as const,orientation:'portrait' as const,marginMm:15,scale:1,profile:'Score' as const}}:format==='svg'?{format,selection:{tracks:[0],range:null},layout:{paper:'A4' as const,orientation:'portrait' as const,marginMm:15,scale:1,profile:'Score' as const},transparent:false}:format==='png'?{format,selection:{tracks:[0],range:null},layout:{paper:'A4' as const,orientation:'portrait' as const,marginMm:15,scale:1,profile:'Score' as const},transparent:false,dpi:300}:{format,selection:{tracks:[0],range:null}};
   await act(async()=>{expect(await result.current.run(options,source)).toBe(true);});
   if(format==='gp'){expect(gp).toHaveBeenCalledWith(expect.any(Uint8Array),19);expect(loadInterchangeScore(gp.mock.calls[0][0],new Settings()).title).toBe('Latest');}
   else if(format==='midi')expect(api.exportMidi).toHaveBeenCalledWith(expect.any(Uint8Array),19);
   else if(format==='musicxml'){const [bytes,revision]=vi.mocked(api.exportMusicXml).mock.calls[0];expect(ArrayBuffer.isView(bytes)).toBe(true);expect(revision).toBe(19);expect(loadInterchangeScore(bytes,new Settings()).title).toBe('Latest');}
   else if(format==='svg'){expect(api.exportSvg).toHaveBeenCalledWith(expect.any(Array),19);expect(pages.mock.calls[0][0].title).toBe('Latest');}
+  else if(format==='png'){expect(api.exportPng).toHaveBeenCalledWith(expect.any(Array),300,19);expect(pages.mock.calls[0][0].title).toBe('Latest');}
   else if(format==='pdf'||format==='print'){expect(api.exportPdf).toHaveBeenCalledWith(expect.any(Array),format==='print',19);expect(pages.mock.calls[0][0].title).toBe('Latest');}
   else expect(api.exportAudio).toHaveBeenCalledWith(expect.objectContaining({settings,embeddedBytes:[5,6],stems:format==='stems'}),19);
 });
@@ -198,6 +199,22 @@ it.each([false,true])('writes SVG pages with a white background unless transpare
   const [[pages,revision]]=save.mock.calls;expect(revision).toBe(7);expect(pages).toHaveLength(1);
   const background=/<rect [^>]*fill="#fff"/;if(transparent)expect(pages[0].svg).not.toMatch(background);else expect(pages[0].svg).toMatch(/^<svg[^>]*><rect width="100%" height="100%" fill="#fff"\/><style>/);
   expect(model.JsonConverter.scoreToJson(score)).toBe(before);
+});
+it.each([false,true])('rasterizes PNG pages at the chosen resolution with a white background unless transparent is %s',async transparent=>{
+  const score=music(),before=model.JsonConverter.scoreToJson(score),api=native(),save=vi.fn(async(_pages:SvgPage[],_dpi:number,_revision:number)=>true);api.exportPng=save;
+  vi.spyOn(pdf,'loadExportFonts').mockResolvedValue();vi.spyOn(pdf,'renderPdfPages').mockReturnValue([{widthMm:210,heightMm:297,svg:'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 794 1123"><style>.at{}</style><text>1</text></svg>'}]);
+  const {result}=renderHook(()=>useExportCoordinator({revision:7,score,settings:defaultDocumentSettings(),currentSpeed:1,bridge:{readBackingAsset:async()=>{throw new Error('Unexpected backing read.');},confirmExport:async()=>true,exportGp:async()=>true},native:api}));
+  await act(async()=>{expect(await result.current.run({format:'png',selection:{tracks:[0],range:null},layout:{paper:'A4',orientation:'portrait',marginMm:15,scale:1,profile:'Score'},transparent,dpi:150})).toBe(true);});
+  const [[pages,dpi,revision]]=save.mock.calls;expect(dpi).toBe(150);expect(revision).toBe(7);expect(pages).toHaveLength(1);
+  const background=/<rect [^>]*fill="#fff"/;if(transparent)expect(pages[0].svg).not.toMatch(background);else expect(pages[0].svg).toMatch(/^<svg[^>]*><rect width="100%" height="100%" fill="#fff"\/><style>/);
+  expect(model.JsonConverter.scoreToJson(score)).toBe(before);
+});
+it.each([[[{widthMm:1000,heightMm:1000}],'too large for that resolution. Choose a lower resolution.'],[Array.from({length:50},()=>({widthMm:210,heightMm:297})),'fewer pages']] as const)('refuses an oversized PNG export before opening the native save dialog',async(sizes,message)=>{
+  const api=native(),save=vi.fn(async()=>true);api.exportPng=save;
+  vi.spyOn(pdf,'loadExportFonts').mockResolvedValue();vi.spyOn(pdf,'renderPdfPages').mockReturnValue(sizes.map(size=>({...size,svg:'<svg/>'})));
+  const {result}=renderHook(()=>useExportCoordinator({revision:7,score:music(),settings:defaultDocumentSettings(),currentSpeed:1,bridge:{readBackingAsset:async()=>{throw new Error('Unexpected backing read.');},confirmExport:async()=>true,exportGp:async()=>true},native:api}));
+  await act(async()=>{await expect(result.current.run({format:'png',selection:{tracks:[0],range:null},layout:{paper:'A4',orientation:'portrait',marginMm:15,scale:1,profile:'Score'},transparent:false,dpi:600})).rejects.toThrow(message);});
+  expect(save).not.toHaveBeenCalled();expect(result.current.busy).toBe(false);
 });
 it('refuses unsupported MusicXML notation before opening the native save dialog',async()=>{
   const score=music();score.masterBars[0].tempoAutomations=[model.Automation.buildTempoAutomation(true,0,120,2)];

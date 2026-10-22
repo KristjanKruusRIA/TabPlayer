@@ -367,9 +367,11 @@ async fn workspace_close(
 
 #[tauri::command]
 fn new_document(
+    defaults: Option<project::NewScoreDefaults>,
     state: State<'_, Arc<Mutex<DocumentWorkspace>>>,
 ) -> Result<DocumentCandidate, String> {
-    state.lock().unwrap().stage_document(Project::blank(), None)
+    let project = Project::blank_with_defaults(&defaults.unwrap_or_default())?;
+    state.lock().unwrap().stage_document(project, None)
 }
 #[tauri::command]
 fn cancel_document(token: String, state: State<'_, Arc<Mutex<DocumentWorkspace>>>) -> bool {

@@ -643,6 +643,20 @@ fn clean_projection_preserves_saved_branch_imported_baseline_and_order() {
     })
     .unwrap();
     edit(&runtime, 5);
+    let defaults = crate::project::NewScoreDefaults {
+        tab: "Cy".into(),
+        ..Default::default()
+    };
+    let authored_blank = workspace
+        .lock()
+        .unwrap()
+        .stage_document(Project::blank_with_defaults(&defaults).unwrap(), None)
+        .unwrap();
+    crate::transition_workspace(&audio, &jobs, &workspace, |state| {
+        state.add_document(&authored_blank.token)
+    })
+    .unwrap();
+    edit(&runtime, 6);
     let before = workspace.lock().unwrap().recovery_documents().unwrap();
     let pending = closes(&runtime);
     let mut stale = pending.clone();

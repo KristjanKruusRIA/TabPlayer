@@ -3,6 +3,7 @@ import { confirm, message } from '@tauri-apps/plugin-dialog';
 import type { EditCommand } from './project';
 import type { DocumentId,DocumentSnapshot,NativeWorkspaceBridge } from './workspace/types';
 import {readExportBackingAsset} from './export/backing-asset-read';
+import { newScoreDefaults } from './workspace/author-defaults';
 
 export interface NativeBridge {
   readonly documentId:DocumentId;
@@ -22,7 +23,7 @@ const desktopTest=import.meta.env.VITE_DESKTOP_TEST==='1';
 export const nativeWorkspaceBridge:NativeWorkspaceBridge={
   snapshot:()=>invoke('workspace_snapshot'),
   readDocument: () => desktopTest?invoke('desktop_test_io',{action:'read'}):invoke('read_document'),
-  createBlankDocument: () => invoke('new_document'),
+  createBlankDocument: () => invoke('new_document',{defaults:newScoreDefaults()}),
   cancelDocument: token => invoke('cancel_document',{token}),
   addDocument:token=>invoke('workspace_add',{token}),
   activateDocument:documentId=>invoke('workspace_activate',{documentId}),

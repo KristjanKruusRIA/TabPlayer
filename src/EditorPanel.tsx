@@ -10,6 +10,8 @@ import { EnumInput } from './editor/controls';
 import { formatPitch } from './tuning';
 import { NonTabPanel } from './editor/NonTabPanel';
 import { SongPanel } from './editor/SongPanel';
+import { AuthorDefaultsPanel } from './editor/AuthorDefaultsPanel';
+import { newScoreDefaults,writeAuthorDefaults } from './workspace/author-defaults';
 import { DirectionsPanel } from './editor/DirectionsPanel';
 import { SpellingControl } from './editor/SpellingControl';
 import { LyricsPanel } from './editor/LyricsPanel';
@@ -77,5 +79,5 @@ export function EditorPanel({score,target,string,fret,noteIndex,onSelectNote,bus
     <label>Title<input value={title} onChange={e=>setTitle(e.target.value)}/></label><label>Artist<input value={artist} onChange={e=>setArtist(e.target.value)}/></label>
     <label>Initial tempo<input type="number" min={1} value={tempo} onChange={e=>setTempo(Number(e.target.value))}/></label>
     <button onClick={()=>onEdit({type:'setScoreInfo',title,artist,tempo})}>Apply score info</button>
-  </fieldset></details><SongPanel score={score} busy={busy} onEdit={onEdit}/></details></section></aside>;
+  </fieldset></details><SongPanel score={score} busy={busy} onEdit={onEdit}/><AuthorDefaultsPanel score={score} load={newScoreDefaults} onSave={writeAuthorDefaults}/></details></section></aside>;
 }

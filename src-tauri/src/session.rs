@@ -654,7 +654,13 @@ fn clean_projection(
         if dirty {
             if record.session.path.is_none()
                 && record.saved_file_sha256.is_none()
-                && record.session.project.baseline_edits.is_empty()
+                // New-score author defaults are the only baseline a discarded blank can carry.
+                && record
+                    .session
+                    .project
+                    .baseline_edits
+                    .iter()
+                    .all(|edit| matches!(edit, crate::project::EditCommand::SetScoreMetadata { .. }))
                 && matches!(record.session.project.base, BaseDocument::Blank { .. })
             {
                 continue;

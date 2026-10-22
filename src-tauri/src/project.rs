@@ -1,6 +1,6 @@
 use crate::assets::{AssetInfo, StoredAsset};
 pub use crate::edit_types::{EditCommand, NoteTarget};
-use crate::edit_types::{validate_tempo, validate_tuning};
+use crate::edit_types::{ScoreMetadata, validate_tempo, validate_tuning};
 use base64::{Engine, engine::general_purpose::STANDARD};
 use serde::{Deserialize, Deserializer, Serialize, de::Error};
 use sha2::{Digest, Sha256};
@@ -126,7 +126,60 @@ pub struct BeatTarget {
     pub beat: u32,
 }
 
+/// Author details a new score starts with, from the viewer's GP8-style "My info" preferences.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct NewScoreDefaults {
+    pub artist: String,
+    pub words: String,
+    pub music: String,
+    pub tab: String,
+    pub copyright: String,
+}
+
+/// The longest default the frontend offers, counted in UTF-16 units as the editor counts them.
+pub const NEW_SCORE_DEFAULT_LIMIT: usize = 1000;
+
 impl Project {
+    /// A blank score carrying author defaults. The metadata is a baseline edit, so it is not an undo step.
+    pub fn blank_with_defaults(defaults: &NewScoreDefaults) -> Result<Self, ProjectError> {
+        let fields = [
+            &defaults.artist,
+            &defaults.words,
+            &defaults.music,
+            &defaults.tab,
+            &defaults.copyright,
+        ];
+        if fields
+            .iter()
+            .any(|field| field.encode_utf16().count() > NEW_SCORE_DEFAULT_LIMIT)
+        {
+            return Err(format!(
+                "New score defaults must be at most {NEW_SCORE_DEFAULT_LIMIT} characters each."
+            ));
+        }
+        let mut project = Self::blank();
+        if let BaseDocument::Blank { artist, .. } = &mut project.base {
+            artist.clone_from(&defaults.artist);
+        }
+        if fields[1..].iter().any(|field| !field.is_empty()) {
+            project.baseline_edits.push(EditCommand::SetScoreMetadata {
+                fields: ScoreMetadata {
+                    sub_title: String::new(),
+                    album: String::new(),
+                    words: defaults.words.clone(),
+                    music: defaults.music.clone(),
+                    copyright: defaults.copyright.clone(),
+                    tab: defaults.tab.clone(),
+                    notices: String::new(),
+                    instructions: String::new(),
+                },
+            });
+        }
+        project.validate()?;
+        Ok(project)
+    }
+
     pub fn blank() -> Self {
         Self {
             format: "TabPlayer".into(),

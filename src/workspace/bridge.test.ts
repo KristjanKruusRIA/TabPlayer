@@ -35,7 +35,7 @@ it('keeps intake and close decisions on the explicit workspace bridge',async()=>
   const {document:api}=await bridges(),bridge=api.nativeWorkspaceBridge,documents=[{documentId:'document-a',revision:8,discard:true}];
   await bridge.snapshot();await bridge.readDocument();await bridge.createBlankDocument();await bridge.cancelDocument('candidate-a');await bridge.addDocument('candidate-a');await bridge.activateDocument('document-b');await bridge.closeDocuments(documents);
   expect(native.invoke.mock.calls).toEqual([
-    ['workspace_snapshot'],['read_document'],['new_document'],['cancel_document',{token:'candidate-a'}],['workspace_add',{token:'candidate-a'}],['workspace_activate',{documentId:'document-b'}],['workspace_close',{documents}],
+    ['workspace_snapshot'],['read_document'],['new_document',{defaults:{artist:'',words:'',music:'',tab:'',copyright:''}}],['cancel_document',{token:'candidate-a'}],['workspace_add',{token:'candidate-a'}],['workspace_activate',{documentId:'document-b'}],['workspace_close',{documents}],
   ]);
   native.message.mockResolvedValue('Cancel');expect(await api.createDocumentBridge('document-a').askUnsaved('Study','C:/scores/study.tabplayer')).toBe('cancel');
   expect(native.message.mock.calls[0][0]).toContain('Study');expect(native.message.mock.calls[0][0]).toContain('C:/scores/study.tabplayer');

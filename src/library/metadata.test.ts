@@ -14,13 +14,13 @@ const fields={subTitle:'',album:'Album',words:'',music:'',copyright:'',tab:'',no
 const metadataEdits:MetadataEdit[]=[
   {type:'setScoreInfo',title:'',artist:'Composer'}, {type:'setScoreMetadata',album:'Album'},
   {type:'addTrack',name:''}, {type:'addPitchedTrack',name:'Keys'}, {type:'addPercussionTrack',name:'Drums'},
-  {type:'setTrackInfo',track:0,name:''}, {type:'removeTrack',track:1},
+  {type:'setTrackInfo',track:0,name:''}, {type:'moveTrack',track:0,to:2}, {type:'removeTrack',track:1},
 ];
 const canonicalEdits:EditCommand[]=[
   {type:'setScoreInfo',title:'',artist:'Composer',tempo:120}, {type:'setScoreMetadata',fields},
   {type:'addTrack',name:'',tuning:[64,59,55,50,45,40],program:24}, {type:'addPitchedTrack',name:'Keys',program:0},
   {type:'addPercussionTrack',name:'Drums',program:0}, {type:'setTrackInfo',track:0,name:'',shortName:'',program:24},
-  {type:'removeTrack',track:1},
+  {type:'moveTrack',track:0,to:2}, {type:'removeTrack',track:1},
 ];
 
 afterEach(()=>vi.restoreAllMocks());
@@ -54,9 +54,10 @@ describe('metadata projection',()=>{
 
   it('preserves empty replacements and uses Instrument only for unnamed additions',()=>{
     const base={title:'Title',artist:'Artist',album:'Album',trackNames:['Guitar'],metadataTruncated:false};
-    expect(projectMetadata(base,[...metadataEdits,{type:'setScoreInfo',title:'',artist:''},{type:'setScoreMetadata',album:''}])).toEqual({title:'',artist:'',album:'',trackNames:['','Keys','Drums'],metadataTruncated:false});
+    expect(projectMetadata(base,[...metadataEdits,{type:'setScoreInfo',title:'',artist:''},{type:'setScoreMetadata',album:''}])).toEqual({title:'',artist:'',album:'',trackNames:['Instrument','','Drums'],metadataTruncated:false});
     expect(base.trackNames).toEqual(['Guitar']);
     expect(projectMetadata(base,[{type:'addTrack',name:''}]).trackNames).toEqual(['Guitar','Instrument']);
+    for(const move of [{track:0,to:0},{track:0,to:1},{track:1,to:0},{track:0,to:-1}])expect(()=>projectMetadata(base,[{type:'moveTrack',...move}])).toThrow(/track/i);
   });
 
   it.each([-1,.5,1,Number.NaN])('rejects invalid rename index %s',track=>{

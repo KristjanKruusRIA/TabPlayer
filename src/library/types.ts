@@ -19,7 +19,7 @@ export interface LibraryScan {jobId:string;rootId:string;configurationRevision:n
 export interface LibraryBatch {scan:LibraryScan;files:{fileId:string;filename:string}[];done:boolean}
 export type MetadataEdit={type:'setScoreInfo';title:string;artist:string}|{type:'setScoreMetadata';album:string}
   |{type:'setTrackInfo';track:number;name:string}
-  |{type:'addTrack'|'addPitchedTrack'|'addPercussionTrack';name:string}|{type:'removeTrack';track:number};
+  |{type:'addTrack'|'addPitchedTrack'|'addPercussionTrack';name:string}|{type:'removeTrack';track:number}|{type:'moveTrack';track:number;to:number};
 export interface MetadataInput {sha256:string;base:{kind:'blank';title:string;artist:string}|{kind:'file';bytesBase64:string};edits:MetadataEdit[]}
 export interface MetadataResult {sha256:string;metadata:LibraryMetadata|null;error:string|null}
 export interface FileLibraryChangedEvent {revision:number;warning:string|null}

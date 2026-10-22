@@ -67,6 +67,7 @@ export type EditCommand = LyricsCommand | GestureCommand | BarGestureCommand | R
   | { type: 'removeMeasure'; bar: number }
   | { type: 'addTrack'; name: string; tuning: number[]; program: number }
   | { type: 'removeTrack'; track: number }
+  | { type: 'moveTrack'; track: number; to: number }
   | { type: 'setTuning'; track: number; tuning: number[] }
   | { type: 'setScoreInfo'; title: string; artist: string; tempo: number }
   | { type: 'setScoreMetadata'; fields: ScoreMetadata }

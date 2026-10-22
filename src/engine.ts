@@ -10,7 +10,7 @@ import { backingLocationsForScore,validateBackingAnchors } from './audio/plan';
 import { adjustReferenceSyncBounds,referenceSyncTiming } from './audio/reference-sync';
 import { scoreFromJson } from './model-clone';
 import { validateParityCommand } from './parity-commands';
-import { copyGpInterchangeSource, exportGpInterchange, loadInterchangeScore } from './interchange/gp';
+import { copyGpInterchangeSource, exportGpInterchange, forgetTrackOrderedEntries, loadInterchangeScore } from './interchange/gp';
 import { reflowLyrics,removeLyricsMeasure } from './editor/lyrics';
 import { prepareScoreTimers } from './editor/timers';
 import { planMeasureMap,mapBackingMeasures } from './editor/measures';
@@ -72,6 +72,11 @@ function appendBar(staff: model.Staff, master: model.MasterBar) {
   bar.addVoice(voice); staff.addBar(bar);
   const count=staff.bars[bar.index-1]?.voices.length ?? 1;
   for(let i=1;i<count;i++){const extra=new Voice();const carrier=new Beat();carrier.isEmpty=true;extra.addBeat(carrier);bar.addVoice(extra);}
+}
+
+/** Old track indices in their order after moving `track` to `to`. */
+function movedOrder(count:number,track:number,to:number):number[] {
+  const order=Array.from({length:count},(_,index)=>index);order.splice(to,0,...order.splice(track,1));return order;
 }
 
 function addTrack(score: model.Score, name: string, tuning: number[], program: number) {
@@ -198,6 +203,13 @@ function apply(score: model.Score, edit: EditCommand, editIndex=0) {
       remapStylesheetTracks(score.stylesheet,score.tracks.map((_,index)=>index===edit.track?null:index>edit.track?index-1:index));
       score.tracks.splice(edit.track,1); break;
     }
+    case 'moveTrack': {
+      const count=score.tracks.length;trackAt(score,edit.track);
+      if(!integer(edit.to)||edit.to>=count||edit.to===edit.track)throw new Error('Choose a different track position.');
+      const order=movedOrder(count,edit.track,edit.to);
+      remapStylesheetTracks(score.stylesheet,order.map((_,index)=>order.indexOf(index)));
+      score.tracks.splice(edit.to,0,...score.tracks.splice(edit.track,1)); break;
+    }
     case 'setTuning': {
       tuningValid(edit.tuning); const track = trackAt(score,edit.track);
       if (track.isPercussion || track.staves.some(s => s.tuning.length !== edit.tuning.length)) throw new Error('Retuning must keep the current string count.');
@@ -257,8 +269,10 @@ export function buildDocument(value: ProjectInput): BuiltDocument {
       if(measureMap){mapBackingMeasures(documentSettings.backing,measureMap);mapBackingMeasures(embeddedBackingSettings,measureMap);}
       if (edit.type==='addTrack'||edit.type==='addPitchedTrack'||edit.type==='addPercussionTrack') identities.push(`added/${index}/${JSON.stringify(edit)}`);
       if (edit.type==='removeTrack') identities.splice(edit.track,1);
+      if (edit.type==='moveTrack') identities.splice(edit.to,0,...identities.splice(edit.track,1));
+      if (['addTrack','addPitchedTrack','addPercussionTrack','removeTrack','moveTrack'].includes(edit.type)) forgetTrackOrderedEntries(score);
       if(edit.type==='removeMeasure') {removeBackingMeasure(documentSettings.backing,edit.bar);removeBackingMeasure(embeddedBackingSettings,edit.bar);}
-      if (!previous&&['insertBeat','deleteBeat','appendMeasure','removeMeasure','insertMeasures','removeMeasures','addTrack','addPitchedTrack','addPercussionTrack','removeTrack','addStaff','removeStaff','addVoice','removeVoice','copyVoice'].includes(edit.type)) {
+      if (!previous&&['insertBeat','deleteBeat','appendMeasure','removeMeasure','insertMeasures','removeMeasures','addTrack','addPitchedTrack','addPercussionTrack','removeTrack','moveTrack','addStaff','removeStaff','addVoice','removeVoice','copyVoice'].includes(edit.type)) {
         score = rebuild(score);
       }
     }

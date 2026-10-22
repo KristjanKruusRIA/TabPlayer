@@ -482,6 +482,20 @@ impl<R: Read> Json<R> {
         }
     }
 
+    /// A non-negative integer index, or `None` for any other value (refused as missing later).
+    fn index(&mut self) -> Result<Option<u32>, String> {
+        self.whitespace()?;
+        if matches!(self.peek()?, Some(b'0'..=b'9' | b'-')) {
+            Ok(self
+                .number()?
+                .as_u64()
+                .and_then(|value| value.try_into().ok()))
+        } else {
+            self.skip(0)?;
+            Ok(None)
+        }
+    }
+
     fn candidate_text(&mut self) -> Result<Option<String>, String> {
         self.whitespace()?;
         if self.peek()? == Some(b'"') {
@@ -541,6 +555,7 @@ impl<R: Read> Json<R> {
         let mut name = None;
         let mut track = None;
         let mut album = None;
+        let mut to = None;
         self.object(|json, key| {
             if key.as_deref() == Some("type") {
                 seen(&mut fields, 0)?;
@@ -556,6 +571,7 @@ impl<R: Read> Json<R> {
                 Some("name") => Some(3),
                 Some("track") => Some(4),
                 Some("fields") => Some(5),
+                Some("to") => Some(6),
                 _ => None,
             };
             if let Some(index) = index {
@@ -574,15 +590,10 @@ impl<R: Read> Json<R> {
                     name = json.candidate_text()?;
                 }
                 Some("track") => {
-                    json.whitespace()?;
-                    if matches!(json.peek()?, Some(b'0'..=b'9' | b'-')) {
-                        track = json
-                            .number()?
-                            .as_u64()
-                            .and_then(|value| value.try_into().ok());
-                    } else {
-                        json.skip(0)?;
-                    }
+                    track = json.index()?;
+                }
+                Some("to") => {
+                    to = json.index()?;
                 }
                 Some("fields") => {
                     album = json.album()?;
@@ -601,6 +612,7 @@ impl<R: Read> Json<R> {
             Some("setTrackInfo") => (1 << 3) | (1 << 4),
             Some("addTrack" | "addPitchedTrack" | "addPercussionTrack") => 1 << 3,
             Some("removeTrack") => 1 << 4,
+            Some("moveTrack") => (1 << 4) | (1 << 6),
             _ => 0,
         };
         if duplicates & relevant_fields != 0 {
@@ -634,6 +646,10 @@ impl<R: Read> Json<R> {
                 "removeTrack" => Some(MetadataEdit::RemoveTrack {
                     track: track.ok_or_else(missing)?,
                 }),
+                "moveTrack" => Some(MetadataEdit::MoveTrack {
+                    track: track.ok_or_else(missing)?,
+                    to: to.ok_or_else(missing)?,
+                }),
                 _ => None,
             },
         )
@@ -650,6 +666,7 @@ fn relevant(kind: &str) -> bool {
             | "addPitchedTrack"
             | "addPercussionTrack"
             | "removeTrack"
+            | "moveTrack"
     )
 }
 

@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { createHash } from 'node:crypto';
 import { midi, model, Settings } from '@coderline/alphatab';
-import { buildScore, previewEdit, exportGp, validateProject, describeSelection } from './engine';
+import { buildScore, buildDocument, previewEdit, exportGp, validateProject, describeSelection, trackIdentity } from './engine';
+import { exporter } from '@coderline/alphatab';
+import { strToU8, unzipSync, zipSync } from 'fflate';
 
 const base = () => ({
   format: 'TabPlayer' as const, schemaVersion: 1 as const, engineVersion: '1.8.4' as const,
@@ -30,6 +32,74 @@ function linkedProject(kind:'tie'|'slide'|'slur'|'hammer') {
   if(kind==='hammer'){origin.isHammerPullOrigin=true;origin.hammerPullDestination=destination;destination.hammerPullOrigin=origin;}
   return imported(notes);
 }
+
+describe('moving tracks', () => {
+  const threeTracks = () => {
+    let project = previewEdit(base(), {type:'setNote', target, string:6, fret:3}).project;
+    project = previewEdit(project, {type:'addTrack', name:'Bass', tuning:[43,38,33,28], program:33}).project;
+    return previewEdit(project, {type:'addPitchedTrack', name:'Keys', program:0}).project;
+  };
+  it('moves a track with its music, channels and identity-keyed settings', () => {
+    const project = threeTracks(), before = buildDocument(project), ids = before.score.tracks.map(trackIdentity);
+    const channels = before.score.tracks.map(track => [track.playbackInfo.primaryChannel, track.playbackInfo.secondaryChannel]);
+    const mixed = previewEdit(project, {type:'setTrackMix', trackId:ids[0], mix:{gain:0.5, pan:0, mute:false, solo:false}}).project;
+    const moved = previewEdit(mixed, {type:'moveTrack', track:0, to:2});
+    expect(moved.score.tracks.map(track => track.name)).toEqual(['Bass','Keys','Guitar']);
+    expect(moved.score.tracks.map(track => track.index)).toEqual([0,1,2]);
+    expect(moved.score.tracks[2].staves[0].bars[0].voices[0].beats[0].notes[0].fret).toBe(3);
+    expect(moved.score.tracks.map(track => [track.playbackInfo.primaryChannel, track.playbackInfo.secondaryChannel])).toEqual([channels[1], channels[2], channels[0]]);
+    const document = buildDocument(moved.project);
+    expect(document.score.tracks.map(trackIdentity)).toEqual([ids[1], ids[2], ids[0]]);
+    expect(document.settings.mixes[ids[0]].gain).toBe(0.5);
+    // Later settings edits take the fast path on the moved score and still reach the moved track.
+    const fast = previewEdit(moved.project, {type:'setTrackMix', trackId:ids[0], mix:{gain:0.25, pan:0, mute:false, solo:false}}, document);
+    expect(fast.settings.mixes[ids[0]].gain).toBe(0.25);
+    expect(trackIdentity(fast.score.tracks[2])).toBe(ids[0]);
+    const back = previewEdit(moved.project, {type:'moveTrack', track:2, to:0});
+    expect(back.score.tracks.map(track => track.name)).toEqual(['Guitar','Bass','Keys']);
+    expect(buildDocument(back.project).score.tracks.map(trackIdentity)).toEqual(ids);
+  });
+  it('remaps per-track style with the track order', () => {
+    const score = buildScore(threeTracks());
+    score.stylesheet.perTrackMultiBarRest = new Set([0]);
+    const moved = previewEdit(imported(score), {type:'moveTrack', track:0, to:1});
+    expect([...moved.score.stylesheet.perTrackMultiBarRest ?? []]).toEqual([1]);
+  });
+  it('keeps lyrics and later index-based edits on the moved track through Undo', () => {
+    let project = previewEdit(threeTracks(), {type:'setTrackLyrics', track:0, visible:true, lines:[{text:'la la', startBar:0}]}).project;
+    const moved = previewEdit(project, {type:'moveTrack', track:0, to:1});
+    expect(moved.score.tracks[1].name).toBe('Guitar');
+    expect(moved.score.tracks[1].staves[0].bars[0].voices[0].beats[0].lyrics?.[0]).toBe('la');
+    project = previewEdit(moved.project, {type:'setNote', target:{...target, track:1, beat:1}, string:5, fret:2}).project;
+    expect(buildScore(project).tracks[1].staves[0].bars[0].voices[0].beats[1].notes[0].fret).toBe(2);
+    // Undo replays the shorter history from scratch.
+    const undone = buildScore({...project, edits:project.edits.slice(0,-1)});
+    expect(undone.tracks.map(track => track.name)).toEqual(moved.score.tracks.map(track => track.name));
+    expect(undone.tracks[1].staves[0].bars[0].voices[0].beats.map(beat => [beat.lyrics?.[0], beat.notes.map(note => note.fret)])).toEqual(moved.score.tracks[1].staves[0].bars[0].voices[0].beats.map(beat => [beat.lyrics?.[0], beat.notes.map(note => note.fret)]));
+  });
+  it('refuses a move to the same place or outside the tracks', () => {
+    const project = threeTracks();
+    for (const edit of [{track:0,to:0},{track:0,to:3},{track:3,to:0},{track:-1,to:0},{track:0,to:-1},{track:0,to:1.5}])
+      expect(() => previewEdit(project, {type:'moveTrack', ...edit})).toThrow();
+  });
+  it('drops track-ordered GP archive entries once the track order changes', () => {
+    const entries = unzipSync(exportGp(buildScore(threeTracks())));
+    entries['Content/ScoreViews/custom.gpsv'] = strToU8('view');
+    const bytes = zipSync(entries), project = {...base(), base:{kind:'file' as const, filename:'ordered.gp', bytesBase64:Buffer.from(bytes).toString('base64'), sha256:createHash('sha256').update(bytes).digest('hex')}};
+    const kept = unzipSync(exportGp(buildScore(project)));
+    expect(kept['Content/ScoreViews/custom.gpsv']).toBeDefined();
+    const moved = previewEdit(project, {type:'moveTrack', track:0, to:2}).score, out = unzipSync(exportGp(moved));
+    const generated = unzipSync(new exporter.Gp7Exporter().export(moved, new Settings()));
+    expect(out['Content/ScoreViews/custom.gpsv']).toBeUndefined();
+    expect(out['Content/PartConfiguration']).toEqual(generated['Content/PartConfiguration']);
+    expect(out['Content/PartConfiguration']).not.toEqual(entries['Content/PartConfiguration']);
+    expect(out['Content/LayoutConfiguration']).toEqual(generated['Content/LayoutConfiguration']);
+    // Adding or removing a track changes the order the same way; other edits keep the source entries.
+    for (const edit of [{type:'addTrack' as const, name:'More', tuning:[64,59,55,50,45,40], program:25}, {type:'removeTrack' as const, track:1}])
+      expect(unzipSync(exportGp(previewEdit(project, edit).score))['Content/ScoreViews/custom.gpsv']).toBeUndefined();
+    expect(unzipSync(exportGp(previewEdit(project, {type:'setNote', target, string:5, fret:1}).score))['Content/ScoreViews/custom.gpsv']).toBeDefined();
+  });
+});
 
 describe('score editing', () => {
   it.each(['removeNote','setRest','deleteBeat','removeMeasure'] as const)('repairs duplicate incoming ties after legacy %s',type=>{

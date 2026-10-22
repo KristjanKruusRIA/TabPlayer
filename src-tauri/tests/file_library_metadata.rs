@@ -38,6 +38,7 @@ fn metadata_projection_preserves_baseline_then_applied_order_and_hashes_source_b
         {"type":"setTrackInfo","track":0,"name":"Lead","shortName":"L","program":25},
         {"type":"addPitchedTrack","name":"Keys","program":0},
         {"type":"addPercussionTrack","name":"Drums","program":0},
+        {"type":"moveTrack","track":0,"to":2},
         {"type":"removeTrack","track":1},
         {"type":"setBeatText","target":{"track":0,"staff":0,"bar":0,"voice":0,"beat":0},"text":"Ignored"}
     ]);
@@ -55,6 +56,7 @@ fn metadata_projection_preserves_baseline_then_applied_order_and_hashes_source_b
             {"type":"setTrackInfo","track":0,"name":"Lead"},
             {"type":"addPitchedTrack","name":"Keys"},
             {"type":"addPercussionTrack","name":"Drums"},
+            {"type":"moveTrack","track":0,"to":2},
             {"type":"removeTrack","track":1}
         ])
     );
@@ -180,6 +182,9 @@ fn malformed_json_relevant_operations_and_corrupt_original_bytes_fail() {
     for edit in [
         json!({"type":"setScoreInfo","title":"Title"}),
         json!({"type":"removeTrack","track":-1}),
+        json!({"type":"moveTrack","track":0}),
+        json!({"type":"moveTrack","track":0,"to":-1}),
+        json!({"type":"moveTrack","track":0,"to":1.5}),
         json!({"type":"setTrackInfo","track":0,"name":false}),
         json!({"type":"setScoreMetadata","fields":{"album":null}}),
         json!({"type":4}),
@@ -210,6 +215,15 @@ fn malformed_json_relevant_operations_and_corrupt_original_bytes_fail() {
         "\"format\":\"TabPlayer\",\"format\":\"TabPlayer\"",
         1,
     );
+    fs::write(&path, source).unwrap();
+    assert!(MetadataInputReader::read(&path).is_err());
+    // A repeated move target is refused, as for every relevant field.
+    let mut value = project(3);
+    value["edits"] = json!([{"type":"moveTrack","track":0,"to":1}]);
+    let source =
+        serde_json::to_string(&value)
+            .unwrap()
+            .replacen("\"to\":1", "\"to\":1,\"to\":2", 1);
     fs::write(&path, source).unwrap();
     assert!(MetadataInputReader::read(&path).is_err());
 }

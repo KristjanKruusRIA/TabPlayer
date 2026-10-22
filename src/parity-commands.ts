@@ -7,7 +7,7 @@ import {validateRatioTempoPoints} from './editor/tempo-types';
 const shapes:Record<string,readonly string[]>={
   setNote:['target','string','fret'],removeNote:['target','string'],setRest:['target'],setDuration:['target','duration','dots'],
   insertBeat:['target','duration','dots'],deleteBeat:['target'],appendMeasure:[],removeMeasure:['bar'],
-  addTrack:['name','tuning','program'],removeTrack:['track'],setTuning:['track','tuning'],setScoreInfo:['title','artist','tempo'],
+  addTrack:['name','tuning','program'],removeTrack:['track'],moveTrack:['track','to'],setTuning:['track','tuning'],setScoreInfo:['title','artist','tempo'],
   setNoteTechniques:['target','string','patch'],setBeatTechniques:['target','patch'],setNoteLink:['from','to','kind'],
   setBeatRhythm:['target','duration','dots','tupletNumerator','tupletDenominator','graceType'],
   setTrackInfo:['track','name','shortName','program'],setStaffSettings:['track','staff','settings'],addStaff:['track','settings'],
@@ -168,6 +168,7 @@ export function validateParityCommand(value:unknown):void {
   if('articulation'in edit)integer(edit.articulation,0x7fffffff);
   if('name'in edit&&typeof edit.name!=='string')throw new Error('Invalid track name.');
   if('selection'in edit)musicSelection(edit.selection);
+  if(type==='moveTrack')integer(edit.to);
   if(type==='transposeSelection'&&(typeof edit.semitones!=='number'||!Number.isInteger(edit.semitones)||edit.semitones===0||Math.abs(edit.semitones)>127))throw new Error('Choose a nonzero semitone shift from -127 to 127.');
   if(type==='moveSelectionStrings'&&!['higher','lower'].includes(edit.direction as string))throw new Error('Invalid string direction.');
   if(type==='refingerSelection'){integer(edit.maxFret,127);if(edit.maxFret===0)throw new Error('Invalid maximum fret.');}

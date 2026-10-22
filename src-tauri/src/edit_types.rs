@@ -898,6 +898,10 @@ pub enum EditCommand {
     RemoveTrack {
         track: u32,
     },
+    MoveTrack {
+        track: u32,
+        to: u32,
+    },
     SetTuning {
         track: u32,
         tuning: Vec<i32>,
@@ -1187,6 +1191,9 @@ impl EditCommand {
     }
     pub fn validate(&self) -> Result<(), String> {
         match self {
+            Self::MoveTrack { track, to } if track == to => {
+                return Err("Choose a different track position.".into());
+            }
             Self::ReplaceTempoAutomations { points } => {
                 if points
                     .first()

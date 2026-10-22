@@ -303,6 +303,7 @@ pub enum MetadataEdit {
     AddPitchedTrack { name: String },
     AddPercussionTrack { name: String },
     RemoveTrack { track: u32 },
+    MoveTrack { track: u32, to: u32 },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

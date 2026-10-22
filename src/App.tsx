@@ -4,7 +4,7 @@ import { DocumentController } from './controller';
 import { describeSelection, effectiveAudioSettings } from './engine';
 import type { BeatTarget, EditCommand } from './project';
 import { projectCommands } from './project';
-import { repairMeasureSelection,repairSelection, validSelectionIndices } from './selection';
+import { followSelectedTrack,movedTrackIndex,repairMeasureSelection,repairSelection, validSelectionIndices } from './selection';
 import { ScoreView } from './ScoreView';
 import { EditorPanel } from './EditorPanel';
 import { TrackPanel } from './TrackPanel';
@@ -149,13 +149,13 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     setFret(location.beat?.notes.find(n=>n.string===string)?.fret ?? 0);digits.current.text='';
   },[state.score,target.track,target.staff,target.bar,target.voice,target.beat,string]);
   const act=(job: Promise<unknown>)=>{void job.catch(()=>{});};
-  const change=(job:Promise<unknown>)=>{setClipboardError(null);act(job.then(()=>{setSelection(old=>repairSelection(controller.getState().score,old));editorSelection(null);}));};
+  const change=(job:Promise<unknown>)=>{const before=state.score;setClipboardError(null);act(job.then(()=>{const score=controller.getState().score;setSelection(old=>repairSelection(score,followSelectedTrack(before,score,old)));editorSelection(null);}));};
   const edit=(command:EditCommand)=>{
     setClipboardError(null);
     const oldCount=state.score.masterBars.length;
     act(controller.edit(command).then(()=>{
       const score=controller.getState().score,map=command.type==='insertMeasures'||command.type==='removeMeasures'?planMeasureMap(oldCount,command):null;
-      setSelection(old=>map?repairMeasureSelection(score,old,map):repairSelection(score,old));
+      setSelection(old=>map?repairMeasureSelection(score,old,map):repairSelection(score,command.type==='moveTrack'?{...old,track:movedTrackIndex(old.track,command)}:old));
       if(command.type==='pasteMusic')setNoteIndex(null);
       if(!('selection'in command)||command.type==='eraseSelection')editorSelection(null);
     }));

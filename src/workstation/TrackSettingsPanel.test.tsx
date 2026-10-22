@@ -76,6 +76,12 @@ it('keeps full long track names accessible and selected/remove/notation command 
   render(<TrackSettingsPanel score={added.score} selected={1} busy={false} onEdit={onEdit}/>);
   expect(screen.getByRole('heading',{name})).toHaveAttribute('title',name);expect(screen.getByLabelText('Track name')).toHaveValue(name);
   fireEvent.click(screen.getByRole('button',{name:'Remove track'}));expect(onEdit).toHaveBeenLastCalledWith({type:'removeTrack',track:1});
+  // The last of two tracks can move up only.
+  expect(screen.getByRole('button',{name:'Move track down'})).toBeDisabled();
+  fireEvent.click(screen.getByRole('button',{name:'Move track up'}));expect(onEdit).toHaveBeenLastCalledWith({type:'moveTrack',track:1,to:0});
+  cleanup();render(<TrackSettingsPanel score={added.score} selected={0} busy={false} onEdit={onEdit}/>);
+  expect(screen.getByRole('button',{name:'Move track up'})).toBeDisabled();
+  fireEvent.click(screen.getByRole('button',{name:'Move track down'}));expect(onEdit).toHaveBeenLastCalledWith({type:'moveTrack',track:0,to:1});
   fireEvent.change(screen.getByLabelText('New notation track name'),{target:{value:'Piano'}});fireEvent.change(screen.getByLabelText('New notation track program'),{target:{value:'5'}});
   fireEvent.click(screen.getByRole('button',{name:'Add pitched track'}));expect(onEdit).toHaveBeenLastCalledWith({type:'addPitchedTrack',name:'Piano',program:5});
   fireEvent.click(screen.getByRole('button',{name:'Add percussion track'}));expect(onEdit).toHaveBeenLastCalledWith({type:'addPercussionTrack',name:'Piano',program:5});

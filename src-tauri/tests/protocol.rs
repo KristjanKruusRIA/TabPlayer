@@ -28,10 +28,24 @@ fn accepts_triple_dots_and_rejects_more() {
 }
 
 #[test]
+fn a_track_move_must_change_the_position() {
+    let same: EditCommand =
+        serde_json::from_value(serde_json::json!({"type":"moveTrack","track":1,"to":1})).unwrap();
+    assert!(same.validate().is_err());
+    for bad in [
+        serde_json::json!({"type":"moveTrack","track":1}),
+        serde_json::json!({"type":"moveTrack","track":1,"to":1.5}),
+        serde_json::json!({"type":"moveTrack","track":1,"to":-1}),
+    ] {
+        assert!(serde_json::from_value::<EditCommand>(bad).is_err());
+    }
+}
+
+#[test]
 fn every_frontend_command_round_trips_through_rust() {
     let examples: Vec<serde_json::Value> =
         serde_json::from_str(include_str!("../../tests/protocol.json")).unwrap();
-    assert_eq!(examples.len(), 68);
+    assert_eq!(examples.len(), 69);
     for mut example in examples {
         let command: EditCommand = serde_json::from_value(example.clone()).unwrap();
         assert!(command.validate().is_ok(), "invalid fixture {example}");

@@ -167,6 +167,14 @@ export function exportGpInterchange(score:model.Score,settings:Settings):Uint8Ar
   entries[gpifPath]=strToU8(outputXml);
   return zipSync(writeStylesheetTimeSignatures(score,entries),archiveOptions);
 }
+/** Source archive entries that describe tracks by position. Once tracks are added, removed or
+ * reordered they would describe the wrong tracks, so export uses alphaTab's regenerated copies. */
+const trackOrderedEntry=(path:string)=>path==='Content/PartConfiguration'||path==='Content/LayoutConfiguration'||path.startsWith('Content/ScoreViews/');
+export function forgetTrackOrderedEntries(score:model.Score):void {
+  const entries=sourceEntries.get(score);
+  if(entries)sourceEntries.set(score,Object.fromEntries(Object.entries(entries).filter(([path])=>!trackOrderedEntry(path))));
+}
+
 /** Carry source archive siblings and binary backing data omitted by model JSON. */
 export function copyGpInterchangeSource(source:model.Score,destination:model.Score):void {
   copyLyricsSources(source,destination);

@@ -9,6 +9,7 @@ import type { ExportNativeBridge } from './bridge';
 import { selectStaves } from './selection';
 import { exportMidi } from './midi';
 import { exportMusicXml } from './musicxml';
+import { exportAsciiTab } from './ascii-tab';
 import { clearBacking } from '../interchange/backing-projection';
 import { DEFAULT_FILE_NAME,expandFileName,fileKey,fileNameContext,savedFileNames,withSuffix } from './file-name';
 import { assertPngSize,loadExportFonts,renderPdfPages,svgPageWithBackground } from './pdf';
@@ -60,6 +61,8 @@ export function useExportCoordinator({score,settings,currentSpeed,bridge,native,
       if(frozenOptions.format==='midi'){if(cancelled.current)return false;return await native.exportMidi(exportMidi(copy,selection),revision,name);}
       // Backing audio is left out; refusals throw here, before the native save dialog opens.
       if(frozenOptions.format==='musicxml'){clearBacking(copy);const bytes=exportMusicXml(copy,selection);if(cancelled.current)return false;return await native.exportMusicXml(bytes,revision,name);}
+      // Refusals (no stringed track selected) throw before the save dialog opens.
+      if(frozenOptions.format==='ascii'){const bytes=exportAsciiTab(copy,selection);if(cancelled.current)return false;return await native.exportAsciiTab(bytes,revision,name);}
       if((frozenOptions.format==='pdf'||frozenOptions.format==='svg'||frozenOptions.format==='png')&&frozenOptions.perTrack){
         await loadExportFonts();if(cancelled.current)return false;
         const options=frozenOptions,now=new Date(),used=new Set<string>(),files:TrackPages[]=[];

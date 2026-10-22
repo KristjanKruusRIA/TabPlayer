@@ -6,7 +6,7 @@ import { PageLayoutPanel } from '../engraving/PageLayoutPanel';
 import { validatePageLayout } from '../engraving/page';
 import { DEFAULT_FILE_NAME,FILE_NAME_TOKENS,PER_TRACK_FILE_NAME,expandFileName,fileNameContext,withExtension } from './file-name';
 import './export-dialog.css';
-const EXTENSIONS:Record<ExportOptions['format'],string>={gp:'gp',pdf:'pdf',print:'',svg:'svg',png:'png',midi:'mid',musicxml:'musicxml',wav:'wav',stems:''};
+const EXTENSIONS:Record<ExportOptions['format'],string>={gp:'gp',pdf:'pdf',print:'',svg:'svg',png:'png',midi:'mid',musicxml:'musicxml',ascii:'txt',wav:'wav',stems:''};
 export function ExportDialog({score,layout,page,busy,progress,failure,currentSpeedAvailable,gpBackingIssue,onExport,onCancel}:{score:model.Score;layout:PrintLayout;page?:PageLayout;busy:boolean;progress?:ExportProgress;failure?:string|null;currentSpeedAvailable:boolean;onExport:(options:ExportOptions)=>void;onCancel:()=>void;gpBackingIssue?:(selection:ExportSelection)=>string|null}) {
   const [format,setFormat]=useState<ExportOptions['format']>('gp');const [tracks,setTracks]=useState(score.tracks.map(t=>t.index));
   const [staves,setStaves]=useState<Record<number,number[]>>(Object.fromEntries(score.tracks.map(t=>[t.index,t.staves.map(s=>s.index)])));
@@ -66,7 +66,7 @@ export function ExportDialog({score,layout,page,busy,progress,failure,currentSpe
   }
   return <div className="dialog-backdrop"><div ref={dialog} onKeyDown={handleKeyDown} role="dialog" aria-modal="true" aria-label="Export score" className="export-dialog"><h2>Export score</h2>
     <fieldset disabled={busy}>
-      <label>Export format<select value={format} onChange={e=>{const next=e.target.value as ExportOptions['format'];setFormat(next);if(next!=='pdf'&&next!=='svg'&&next!=='png'&&perTrack){setPerTrack(false);if(fileName===PER_TRACK_FILE_NAME)setFileName(DEFAULT_FILE_NAME);}}}><option value="gp">Guitar Pro</option><option value="pdf">PDF</option><option value="print">Print</option><option value="svg">SVG</option><option value="png">PNG</option><option value="midi">MIDI</option><option value="musicxml">MusicXML</option><option value="wav">Mixed WAV</option><option value="stems">WAV stems</option></select></label>
+      <label>Export format<select value={format} onChange={e=>{const next=e.target.value as ExportOptions['format'];setFormat(next);if(next!=='pdf'&&next!=='svg'&&next!=='png'&&perTrack){setPerTrack(false);if(fileName===PER_TRACK_FILE_NAME)setFileName(DEFAULT_FILE_NAME);}}}><option value="gp">Guitar Pro</option><option value="pdf">PDF</option><option value="print">Print</option><option value="svg">SVG</option><option value="png">PNG</option><option value="midi">MIDI</option><option value="musicxml">MusicXML</option><option value="ascii">ASCII tablature</option><option value="wav">Mixed WAV</option><option value="stems">WAV stems</option></select></label>
       {format!=='print'&&<div className="export-file-name"><label>File name<input value={fileName} spellCheck={false} onChange={e=>setFileName(e.target.value)}/></label>
         <p className="muted">{`Tokens: ${FILE_NAME_TOKENS}. Track tokens use the first selected track.`}</p>
         <p aria-live="polite">{`Saves as ${savedName}`}</p>{(format==='svg'||format==='png')&&<p className="muted">Several pages are saved with -1, -2 and so on before the extension.</p>}</div>}
@@ -92,6 +92,7 @@ export function ExportDialog({score,layout,page,busy,progress,failure,currentSpe
       {format==='svg'&&<p>SVG writes one file per page. Notation and text are written as outlines, so the files need no fonts to view.</p>}
       {format==='png'&&<><label>Resolution<select value={dpi} onChange={e=>setDpi(Number(e.target.value) as PngResolution)}>{PNG_RESOLUTIONS.map(value=><option key={value} value={value}>{value} dpi</option>)}</select></label><p>PNG writes one image per page at the chosen resolution.</p></>}
       {format==='musicxml'&&<p>MusicXML keeps notes, techniques, lyrics and tempo. It leaves out fermata lengths, backing audio, mixer settings, and layout and styling. Anything else it cannot write, such as instrument changes or gradual volume changes, stops the export with a message.</p>}
+      {format==='ascii'&&<p>ASCII tablature writes the fret numbers of stringed tracks as plain text, with common techniques, repeats, endings, sections and directions, and a legend of the marks used. Rhythm is shown only by spacing, simile bars are written out, and where voices share a string at one moment the first voice is kept. Percussion and staves without strings are left out.</p>}
       {format==='midi'&&<p>MIDI preserves generated notes and controls. Ordinary MIDI players share pitch bends on a channel, so simultaneous independent bends may differ.</p>}
       {(format==='wav'||format==='stems')&&<fieldset className="export-audio"><legend>Audio</legend><div className="export-audio-options">
         <label>Sample rate<select value={audio.sampleRate} onChange={e=>setAudio({...audio,sampleRate:Number(e.target.value) as AudioExportOptions['sampleRate']})}><option value="44100">44.1 kHz</option><option value="48000">48 kHz</option></select></label>

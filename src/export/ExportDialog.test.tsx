@@ -64,6 +64,16 @@ it('submits MusicXML with the shared selection and explains what it keeps',()=>{
   expect(submit).toHaveBeenCalledWith({format:'musicxml',selection:{tracks:[0],range:{first:1,last:2}}});
 });
 
+it('submits ASCII tablature as a text file and explains what it keeps',()=>{
+  const submit=vi.fn();render(<ExportDialog score={fixture()} layout={layout} busy={false} currentSpeedAvailable={true} onExport={submit} onCancel={()=>{}}/>);
+  fireEvent.change(screen.getByLabelText('Export format'),{target:{value:'ascii'}});
+  expect(screen.getByText(/ASCII tablature writes the fret numbers of stringed tracks/)).toBeVisible();
+  expect(screen.getByText(/^Saves as .*\.txt$/)).toBeVisible();
+  for(const label of ['Include backing audio','Paper','One file per track','Sample rate'])expect(screen.queryByLabelText(label)).toBeNull();
+  fireEvent.click(screen.getByRole('button',{name:'Export'}));
+  expect(submit).toHaveBeenCalledWith({format:'ascii',selection:{tracks:[0],range:null}});
+});
+
 it('submits SVG with the PDF page layout and an optional transparent background',()=>{
   const submit=vi.fn();render(<ExportDialog score={fixture()} layout={layout} busy={false} currentSpeedAvailable={true} onExport={submit} onCancel={()=>{}}/>);
   expect(screen.queryByLabelText('Transparent background')).toBeNull();

@@ -13,6 +13,7 @@ export type ExportOptions = (
   | {format:'gp';selection:ExportSelection;backing?:boolean}
   | {format:'midi';selection:ExportSelection}
   | {format:'musicxml';selection:ExportSelection}
+  | {format:'ascii';selection:ExportSelection}
   | {format:'pdf';selection:ExportSelection;layout:PrintLayout;page?:PageLayout;perTrack?:true}
   | {format:'print';selection:ExportSelection;layout:PrintLayout;page?:PageLayout}
   | {format:'svg';selection:ExportSelection;layout:PrintLayout;page?:PageLayout;transparent:boolean;perTrack?:true}

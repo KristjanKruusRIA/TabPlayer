@@ -576,6 +576,33 @@ pub async fn export_musicxml(
     .map_err(|e| e.to_string())?
 }
 #[tauri::command]
+pub async fn export_ascii_tab(
+    document: DocumentRevision,
+    bytes: Vec<u8>,
+    file_name: Option<String>,
+    app: AppHandle,
+) -> Result<bool, String> {
+    if std::str::from_utf8(&bytes).is_err() {
+        return Err("ASCII tablature must be UTF-8 text.".into());
+    }
+    let Some(path) = export_destination(&app, "txt", false, file_name.as_deref())? else {
+        return Ok(false);
+    };
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::export_document_to_path(
+            &app.state::<NativeAudio>(),
+            &app.state::<ExportJobs>(),
+            &app.state::<Arc<Mutex<DocumentWorkspace>>>(),
+            &document,
+            &path,
+            &bytes,
+        )?;
+        Ok(true)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+#[tauri::command]
 pub async fn export_svg(
     document: DocumentRevision,
     pages: Vec<SvgPage>,

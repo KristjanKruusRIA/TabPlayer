@@ -4,6 +4,7 @@ import type { PitchTarget } from './harmony-types';
 import { integer,noteAt } from './common';
 import { allNotes,captureNoteLinks,detachNote } from './links';
 import { planFingering } from './fingering';
+import { nextLinkedNote } from './techniques';
 import { resolveSelectionBeats,resolveSelectionNotes } from './range-selection';
 
 function fields(value:object,keys:string[]) {
@@ -134,14 +135,59 @@ function applyStrokePattern(beats:model.Beat[],technique:StrokeTechnique,pattern
     lane.forEach((beat,index)=>set(beat,pattern[index%pattern.length]));
   }
 }
+/** The nearest earlier note that would link forward to this one: same string for stringed notes, same pitch otherwise. */
+/** GP files reopen ties that reach back at most three bars (see measures.ts). */
+const tieReach=3;
+/** The note a tie into this one must come from: the nearest earlier note on its string (stringed) or of its
+ * pitch (other staves), at most three bars back and with no rest or missing voice in between. */
+function tieOriginFor(note:model.Note) {
+  const staff=note.beat.voice.bar.staff,voice=note.beat.voice.index,last=note.beat.voice.bar.index;
+  for(let bar=last;bar>=0&&last-bar<=tieReach;bar--){
+    const beats=staff.bars[bar].voices[voice]?.beats;if(!beats)return null;
+    for(let beat=bar===last?note.beat.index-1:beats.length-1;beat>=0;beat--){
+      const value=beats[beat];if(!value.notes.length)return null;
+      const candidate=value.notes.find(other=>note.isStringed?other.string===note.string:!other.isDead&&other.isPiano===note.isPiano&&other.realValue===note.realValue);
+      if(!candidate)continue;
+      // GP reopen copies the origin's fret and harmonic onto the destination, so they must already agree.
+      const mismatch=candidate.isDead||candidate.realValue!==note.realValue||note.isStringed&&(candidate.fret!==note.fret||candidate.harmonicType!==note.harmonicType||candidate.harmonicValue!==note.harmonicValue);
+      return mismatch?null:candidate;
+    }
+  }
+  return null;
+}
+function untie(note:model.Note) {
+  const origin=note.tieOrigin;if(origin?.tieDestination===note)origin.tieDestination=null;
+  note.tieOrigin=null;note.isTieDestination=false;note.bendOrigin=null;note.isContinuedBend=false;
+}
+/** Ties every selected note from its origin, or removes the ties into them, as one edit; dead notes are left alone. */
+function applySelectionTies(notes:model.Note[],tied:boolean) {
+  if(typeof tied!=='boolean')throw new Error('Choose whether to tie or untie the selection.');
+  if(!tied){
+    const into=notes.filter(note=>note.tieOrigin||note.isTieDestination);
+    if(!into.length)throw new Error('None of the selected notes are tied.');
+    into.forEach(untie);return;
+  }
+  if(notes.some(note=>note.isPercussion||note.beat.voice.bar.staff.isPercussion))throw new Error('Drum hits cannot be tied.');
+  const plan=notes.filter(note=>!note.isDead).map(note=>{
+    const origin=tieOriginFor(note);
+    if(!origin||nextLinkedNote(origin)!==note)throw new Error('Each selected note needs the same note on its string or staff, at most three bars earlier with no rest between, to tie from.');
+    return [origin,note] as const;
+  });
+  const changes=plan.filter(([origin,note])=>note.tieOrigin!==origin||origin.tieDestination!==note||!note.isTieDestination);
+  if(!changes.length)throw new Error(plan.length?'The selected notes are already tied.':'Select notes to tie.');
+  const planned=new Set(plan.map(([,note])=>note));
+  for(const [origin] of changes){const other=origin.tieDestination;if(other&&!planned.has(other)&&other.tieOrigin===origin)throw new Error('Tying here would cut an existing tie into a later note.');}
+  for(const [origin,note] of changes){untie(note);origin.tieDestination=note;note.tieOrigin=origin;note.isTieDestination=true;}
+}
 export function applyRangeEdit(score:model.Score,command:RangeCommand):boolean {
-  if(!['eraseSelection','transposeSelection','moveSelectionStrings','refingerSelection','setSelectionSustain','setSelectionStrokes'].includes(command.type))return false;
-  const keys={eraseSelection:[],transposeSelection:['semitones'],moveSelectionStrings:['direction'],refingerSelection:['maxFret'],setSelectionSustain:['strings','kind','enabled'],setSelectionStrokes:['technique','pattern']}[command.type];fields(command,['type','selection',...keys]);
+  if(!['eraseSelection','transposeSelection','moveSelectionStrings','refingerSelection','setSelectionSustain','setSelectionStrokes','setSelectionTies'].includes(command.type))return false;
+  const keys={eraseSelection:[],transposeSelection:['semitones'],moveSelectionStrings:['direction'],refingerSelection:['maxFret'],setSelectionSustain:['strings','kind','enabled'],setSelectionStrokes:['technique','pattern'],setSelectionTies:['tied']}[command.type];fields(command,['type','selection',...keys]);
   const beats=resolveSelectionBeats(score,command.selection),notes=resolveSelectionNotes(score,command.selection),selected=new Set(notes);
   if(command.type==='eraseSelection'){
     for(const note of notes){const beat=note.beat;detachNote(note);beat.removeNote(note);beat.notes.forEach((member,index)=>member.index=index);beat.isEmpty=false;}return true;
   }
   if(command.type==='setSelectionStrokes'){applyStrokePattern(beats,command.technique,command.pattern);return true;}
+  if(command.type==='setSelectionTies'){applySelectionTies(notes,command.tied);return true;}
   if(command.type==='setSelectionSustain'){
     if(!Array.isArray(command.strings)||!command.strings.length||new Set(command.strings).size!==command.strings.length||!['letRing','palmMute'].includes(command.kind)||typeof command.enabled!=='boolean')throw new Error('Choose unique strings and a sustain setting.');
     const selection=command.selection,staves=selection.kind==='range'?selection.range.lanes.map(lane=>score.tracks[lane.track].staves[lane.staff]):selection.kind==='bars'?selection.tracks.flatMap(track=>score.tracks[track].staves):notes.map(note=>note.beat.voice.bar.staff);

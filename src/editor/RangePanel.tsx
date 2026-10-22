@@ -75,6 +75,7 @@ export function RangePanel({score,target,selection,busy,onSelection,onEdit}:Rang
     <button disabled={!selection||selection.kind==='notes'||!!selectionError||scope==='custom'} onClick={broaden}>Apply selection scope</button>
     <fieldset disabled={!available}><legend>Selected notes</legend>
       <button onClick={()=>selection&&edit({type:'eraseSelection',selection})}>Erase selected notes</button>
+      <div className="editor-actions"><button disabled={!melodic} onClick={()=>selection&&edit({type:'setSelectionTies',selection,tied:true})}>Tie selected notes</button><button onClick={()=>selection&&edit({type:'setSelectionTies',selection,tied:false})}>Untie selected notes</button></div>
       <fieldset disabled={!melodic}><legend>Transpose</legend>
         <div className="editor-actions"><button onClick={()=>shift(-1)}>Down semitone</button><button onClick={()=>shift(1)}>Up semitone</button><button onClick={()=>shift(-12)}>Down octave</button><button onClick={()=>shift(12)}>Up octave</button></div>
         <label>Semitones<input type="number" min={-127} max={127} step={1} value={semitones} onChange={event=>setSemitones(event.target.value)}/></label><button onClick={()=>shift(semitones.trim()?Number(semitones):0)}>Transpose selection</button>

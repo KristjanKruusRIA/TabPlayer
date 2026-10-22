@@ -17,7 +17,7 @@ import { applyTempoAutomations } from './tempo-automations';
 export function applyAdvancedEdit(score:model.Score,command:EditCommand,editIndex:number):boolean {
   if(command.type==='replaceTempoAutomations'){applyTempoAutomations(score,command.points);return true;}
   if(command.type==='setBeatText'||command.type==='setHarmonyChord')return applyHarmonyEdit(score,command,editIndex);
-  if(command.type==='eraseSelection'||command.type==='transposeSelection'||command.type==='moveSelectionStrings'||command.type==='refingerSelection'||command.type==='setSelectionSustain'||command.type==='setSelectionStrokes')return applyRangeEdit(score,command);
+  if(command.type==='eraseSelection'||command.type==='transposeSelection'||command.type==='moveSelectionStrings'||command.type==='refingerSelection'||command.type==='setSelectionSustain'||command.type==='setSelectionStrokes'||command.type==='setSelectionTies')return applyRangeEdit(score,command);
   if(command.type==='insertMeasures'||command.type==='removeMeasures')return applyMeasureEdit(score,command);
   if(command.type==='setTrackLyrics')return applyLyricsEdit(score,command);
   if(command.type==='setBeatGestures'||command.type==='setOttava'||command.type==='setCrescendo'||command.type==='setFermata'||command.type==='setSustainPedal')return applyGestureEdit(score,command);

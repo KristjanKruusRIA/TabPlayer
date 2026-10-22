@@ -94,7 +94,7 @@ fn a_track_color_must_be_six_hex_digits() {
 fn every_frontend_command_round_trips_through_rust() {
     let examples: Vec<serde_json::Value> =
         serde_json::from_str(include_str!("../../tests/protocol.json")).unwrap();
-    assert_eq!(examples.len(), 73);
+    assert_eq!(examples.len(), 74);
     for mut example in examples {
         let command: EditCommand = serde_json::from_value(example.clone()).unwrap();
         assert!(command.validate().is_ok(), "invalid fixture {example}");

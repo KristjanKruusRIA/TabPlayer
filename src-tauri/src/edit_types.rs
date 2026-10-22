@@ -909,6 +909,10 @@ pub enum EditCommand {
         technique: StrokeTechnique,
         pattern: Vec<StrokeDirection>,
     },
+    SetSelectionTies {
+        selection: MusicSelection,
+        tied: bool,
+    },
     PasteMusic {
         clip: MusicClip,
         options: PasteOptions,
@@ -1303,7 +1307,8 @@ impl EditCommand {
             | Self::MoveSelectionStrings { selection, .. }
             | Self::RefingerSelection { selection, .. }
             | Self::SetSelectionSustain { selection, .. }
-            | Self::SetSelectionStrokes { selection, .. } => {
+            | Self::SetSelectionStrokes { selection, .. }
+            | Self::SetSelectionTies { selection, .. } => {
                 selection.validate()?;
                 match self {
                     Self::TransposeSelection { semitones, .. }
@@ -1951,6 +1956,9 @@ mod tests {
             json!({"type": "setSelectionStrokes", "selection": selection,
                 "technique": "brush", "pattern": ["down", "up", "none"]})
         }));
+        commands.extend(music_selections().into_iter().map(
+            |selection| json!({"type": "setSelectionTies", "selection": selection, "tied": true}),
+        ));
         commands
     }
 
@@ -2227,6 +2235,19 @@ mod tests {
         ] {
             let mut value = base.clone();
             value[field] = invalid;
+            rejected(&value);
+        }
+    }
+
+    #[test]
+    fn selection_ties_take_only_a_boolean_tied_flag() {
+        let base = json!({"type": "setSelectionTies",
+            "selection": {"kind": "bars", "tracks": [0], "firstBar": 1, "lastBar": 1},
+            "tied": true});
+        accepted(&base);
+        for invalid in [json!(1), json!("true"), json!(null), json!([true])] {
+            let mut value = base.clone();
+            value["tied"] = invalid;
             rejected(&value);
         }
     }

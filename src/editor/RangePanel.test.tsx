@@ -94,3 +94,13 @@ it('applies ordered pick, brush and arpeggio patterns to the selection',()=>{
   fireEvent.change(screen.getByLabelText('Stroke pattern'),{target:{value:'constructor toString'}});fireEvent.click(screen.getByRole('button',{name:'Apply stroke pattern'}));
   expect(commands).toHaveLength(3);expect(screen.getByRole('alert')).toHaveTextContent('Use 1 to 16 steps');
 });
+
+it('ties and unties every selected note across voices as one command',()=>{
+  const score=music(),commands:RangeCommand[]=[],bars:MusicSelection={kind:'bars',tracks:[0],firstBar:1,lastBar:1};
+  render(<RangePanel score={score} target={target} selection={bars} busy={false} onSelection={()=>{}} onEdit={edit=>{commands.push(edit);if(edit.type==='setSelectionTies'&&edit.tied&&commands.length>1)throw new Error('Each selected note needs an earlier note.');}}/>);
+  fireEvent.click(screen.getByRole('button',{name:'Tie selected notes'}));
+  fireEvent.click(screen.getByRole('button',{name:'Untie selected notes'}));
+  expect(commands).toEqual([{type:'setSelectionTies',selection:bars,tied:true},{type:'setSelectionTies',selection:bars,tied:false}]);
+  fireEvent.click(screen.getByRole('button',{name:'Tie selected notes'}));
+  expect(screen.getByRole('alert')).toHaveTextContent('Each selected note needs an earlier note.');
+});

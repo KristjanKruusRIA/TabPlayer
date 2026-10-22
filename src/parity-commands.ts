@@ -31,7 +31,7 @@ const shapes:Record<string,readonly string[]>={
   setSimile:['track','staff','bar','kind'],
   eraseSelection:['selection'],transposeSelection:['selection','semitones'],moveSelectionStrings:['selection','direction'],
   refingerSelection:['selection','maxFret'],setSelectionSustain:['selection','strings','kind','enabled'],
-  setSelectionStrokes:['selection','technique','pattern'],
+  setSelectionStrokes:['selection','technique','pattern'],setSelectionTies:['selection','tied'],
   insertMeasures:['beforeBar','count'],removeMeasures:['firstBar','lastBar'],
   pasteMusic:['clip','options'],
   setEngraving:['engraving'],setPageLayout:['layout'],
@@ -182,6 +182,7 @@ export function validateParityCommand(value:unknown):void {
     const strings=nonempty(edit.strings);for(const string of strings){integer(string);if(string===0)throw new Error('Invalid string.');}unique(strings);
   }
   if(type==='setSelectionStrokes')validateStrokePattern(edit.technique,edit.pattern);
+  if(type==='setSelectionTies')flag(edit.tied);
   if(type==='insertMeasures'){integer(edit.beforeBar);integer(edit.count,1000);if(edit.count===0)throw new Error('Insert at least one measure.');}
   if(type==='removeMeasures'){integer(edit.firstBar);integer(edit.lastBar);if(Number(edit.firstBar)>Number(edit.lastBar))throw new Error('Invalid measure range.');}
   if(type==='pasteMusic'){validateMusicClipEnvelope(edit.clip);pasteOptions(edit.options);}

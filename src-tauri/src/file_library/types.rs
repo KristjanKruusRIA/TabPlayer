@@ -304,6 +304,7 @@ pub enum MetadataEdit {
     AddPercussionTrack { name: String },
     RemoveTrack { track: u32 },
     MoveTrack { track: u32, to: u32 },
+    DuplicateTrack { track: u32 },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

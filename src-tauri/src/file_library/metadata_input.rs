@@ -613,6 +613,7 @@ impl<R: Read> Json<R> {
             Some("addTrack" | "addPitchedTrack" | "addPercussionTrack") => 1 << 3,
             Some("removeTrack") => 1 << 4,
             Some("moveTrack") => (1 << 4) | (1 << 6),
+            Some("duplicateTrack") => 1 << 4,
             _ => 0,
         };
         if duplicates & relevant_fields != 0 {
@@ -646,6 +647,9 @@ impl<R: Read> Json<R> {
                 "removeTrack" => Some(MetadataEdit::RemoveTrack {
                     track: track.ok_or_else(missing)?,
                 }),
+                "duplicateTrack" => Some(MetadataEdit::DuplicateTrack {
+                    track: track.ok_or_else(missing)?,
+                }),
                 "moveTrack" => Some(MetadataEdit::MoveTrack {
                     track: track.ok_or_else(missing)?,
                     to: to.ok_or_else(missing)?,
@@ -667,6 +671,7 @@ fn relevant(kind: &str) -> bool {
             | "addPercussionTrack"
             | "removeTrack"
             | "moveTrack"
+            | "duplicateTrack"
     )
 }
 

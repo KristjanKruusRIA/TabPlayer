@@ -902,6 +902,9 @@ pub enum EditCommand {
         track: u32,
         to: u32,
     },
+    DuplicateTrack {
+        track: u32,
+    },
     SetTuning {
         track: u32,
         tuning: Vec<i32>,

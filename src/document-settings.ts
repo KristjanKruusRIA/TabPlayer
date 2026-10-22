@@ -2,6 +2,14 @@ import type { model } from '@coderline/alphatab';
 import type { DocumentSettings, FxSettings, SettingsEdit, ChannelMix, PrintLayout, BackingSettings } from './edit-types';
 import {defaultEngraving,validateEngravingTracks} from './engraving/projection';
 import {validatePageLayout} from './engraving/page';
+
+/** A duplicated track starts with its source's sound, mix and engraving profile; later changes are separate. */
+export function copyTrackSettings(settings:DocumentSettings,source:string,copy:string):void {
+  if(settings.sounds[source])settings.sounds[copy]=structuredClone(settings.sounds[source]);
+  if(settings.mixes[source])settings.mixes[copy]=structuredClone(settings.mixes[source]);
+  const profile=settings.engraving.profiles.find(entry=>entry.trackId===source);
+  if(profile)settings.engraving={...settings.engraving,profiles:[...settings.engraving.profiles,{...profile,trackId:copy}]};
+}
 export type { DocumentSettings, FxSettings, TrackSound, ChannelMix, PrintLayout, SyncAnchor, BackingSettings, ReferenceSyncBounds } from './edit-types';
 
 export const defaultMix = (): ChannelMix => ({gain:1,pan:0,mute:false,solo:false});

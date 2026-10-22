@@ -7,7 +7,7 @@ import {validateRatioTempoPoints} from './editor/tempo-types';
 const shapes:Record<string,readonly string[]>={
   setNote:['target','string','fret'],removeNote:['target','string'],setRest:['target'],setDuration:['target','duration','dots'],
   insertBeat:['target','duration','dots'],deleteBeat:['target'],appendMeasure:[],removeMeasure:['bar'],
-  addTrack:['name','tuning','program'],removeTrack:['track'],moveTrack:['track','to'],setTuning:['track','tuning'],setScoreInfo:['title','artist','tempo'],
+  addTrack:['name','tuning','program'],removeTrack:['track'],moveTrack:['track','to'],duplicateTrack:['track'],setTuning:['track','tuning'],setScoreInfo:['title','artist','tempo'],
   setNoteTechniques:['target','string','patch'],setBeatTechniques:['target','patch'],setNoteLink:['from','to','kind'],
   setBeatRhythm:['target','duration','dots','tupletNumerator','tupletDenominator','graceType'],
   setTrackInfo:['track','name','shortName','program'],setStaffSettings:['track','staff','settings'],addStaff:['track','settings'],

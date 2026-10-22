@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { createHash } from 'node:crypto';
 import { midi, model, Settings } from '@coderline/alphatab';
-import { buildScore, buildDocument, previewEdit, exportGp, validateProject, describeSelection, trackIdentity } from './engine';
+import { buildScore, buildDocument, previewEdit, exportGp, validateProject, describeSelection, trackIdentity, replayDocumentSettings } from './engine';
+import { getLyricsSource } from './editor/lyrics-source';
 import { exporter } from '@coderline/alphatab';
 import { strToU8, unzipSync, zipSync } from 'fflate';
 
@@ -98,6 +99,79 @@ describe('moving tracks', () => {
     for (const edit of [{type:'addTrack' as const, name:'More', tuning:[64,59,55,50,45,40], program:25}, {type:'removeTrack' as const, track:1}])
       expect(unzipSync(exportGp(previewEdit(project, edit).score))['Content/ScoreViews/custom.gpsv']).toBeUndefined();
     expect(unzipSync(exportGp(previewEdit(project, {type:'setNote', target, string:5, fret:1}).score))['Content/ScoreViews/custom.gpsv']).toBeDefined();
+  });
+});
+
+describe('duplicating tracks', () => {
+  const ids = (score: model.Score) => score.tracks.flatMap(track => track.staves.flatMap(staff => staff.bars.flatMap(bar => [`bar${bar.id}`, ...bar.voices.flatMap(voice => [`voice${voice.id}`, ...voice.beats.flatMap(beat => [`beat${beat.id}`, ...beat.notes.map(note => `note${note.id}`)])])])));
+  const music = (track: model.Track) => track.staves.map(staff => staff.bars.map(bar => bar.voices.map(voice => voice.beats.map(beat => [beat.duration, beat.notes.map(note => [note.string, note.fret])]))));
+  it('inserts a copy after the source with its music, fresh IDs and its own channels', () => {
+    let project = previewEdit(base(), {type:'setNote', target, string:6, fret:3}).project;
+    project = previewEdit(project, {type:'addTrack', name:'Bass', tuning:[43,38,33,28], program:33}).project;
+    const before = buildScore(project), duplicated = previewEdit(project, {type:'duplicateTrack', track:0});
+    expect(duplicated.score.tracks.map(track => track.name)).toEqual(['Guitar','Guitar','Bass']);
+    expect(music(duplicated.score.tracks[1])).toEqual(music(before.tracks[0]));
+    expect(duplicated.score.tracks[1].staves[0].tuning).toEqual(before.tracks[0].staves[0].tuning);
+    expect(duplicated.score.tracks[1].playbackInfo.program).toBe(before.tracks[0].playbackInfo.program);
+    const all = ids(duplicated.score);expect(new Set(all).size).toBe(all.length);
+    const channels = duplicated.score.tracks.map(track => track.playbackInfo.primaryChannel);
+    expect(new Set(channels).size).toBe(3);
+    // The source keeps its own music untouched.
+    expect(music(duplicated.score.tracks[0])).toEqual(music(before.tracks[0]));
+    // Percussion keeps the drum channel.
+    const drums = previewEdit(previewEdit(base(), {type:'addPercussionTrack', name:'Drums', program:0}).project, {type:'duplicateTrack', track:1}).score;
+    expect(drums.tracks.slice(1).map(track => [track.isPercussion, track.playbackInfo.primaryChannel])).toEqual([[true,9],[true,9]]);
+  });
+  it('shares the source channels once every MIDI channel is taken, like a GP8 copy', () => {
+    let project = base() as Parameters<typeof buildScore>[0];
+    for (let added = 0; added < 7; added++) project = previewEdit(project, {type:'addTrack', name:`T${added}`, tuning:[64,59,55,50,45,40], program:25}).project;
+    const full = buildScore(project);
+    expect(() => previewEdit(project, {type:'addTrack', name:'More', tuning:[64,59,55,50,45,40], program:25})).toThrow(/channel/);
+    const copy = previewEdit(project, {type:'duplicateTrack', track:0}).score.tracks[1];
+    expect([copy.playbackInfo.primaryChannel, copy.playbackInfo.secondaryChannel]).toEqual([full.tracks[0].playbackInfo.primaryChannel, full.tracks[0].playbackInfo.secondaryChannel]);
+  });
+  it('copies the sound and engraving profile to the copy', () => {
+    const project = base(), sourceId = trackIdentity(buildScore(project).tracks[0]);
+    const document = buildDocument(previewEdit(previewEdit(project, {type:'setEngraving', engraving:{...buildDocument(project).settings.engraving, profiles:[{trackId:sourceId, profile:'tablature'}]}}).project, {type:'duplicateTrack', track:0}).project);
+    const copyId = trackIdentity(document.score.tracks[1]);
+    expect(document.settings.engraving.profiles).toEqual([{trackId:sourceId, profile:'tablature'},{trackId:copyId, profile:'tablature'}]);
+  });
+  it('copies links inside the track onto the copy only', () => {
+    const duplicated = previewEdit(linkedProject('tie'), {type:'duplicateTrack', track:0}).score;
+    const origin = (track: number) => duplicated.tracks[track].staves[0].bars[0].voices[0].beats[3].notes[0];
+    const destination = (track: number) => duplicated.tracks[track].staves[0].bars[1].voices[0].beats[0].notes[0];
+    expect(origin(0).tieDestination).toBe(destination(0));
+    expect(origin(1).tieDestination).toBe(destination(1));
+    expect(destination(1).tieOrigin).toBe(origin(1));
+  });
+  it('copies lyrics, per-track style and identity-keyed settings to a new identity', () => {
+    const lyrics = previewEdit(base(), {type:'setTrackLyrics', track:0, visible:true, lines:[{text:'la la', startBar:0}]}).project;
+    const source = buildScore(lyrics);source.stylesheet.perTrackMultiBarRest = new Set([0]);
+    const project = imported(source), sourceId = trackIdentity(buildScore(project).tracks[0]);
+    const mixed = previewEdit(project, {type:'setTrackMix', trackId:sourceId, mix:{gain:0.5, pan:0, mute:false, solo:false}}).project;
+    const duplicated = previewEdit(mixed, {type:'duplicateTrack', track:0});
+    expect(getLyricsSource(duplicated.score.tracks[1])?.value.lines).toEqual(getLyricsSource(duplicated.score.tracks[0])?.value.lines);
+    expect([...duplicated.score.stylesheet.perTrackMultiBarRest ?? []].sort()).toEqual([0,1]);
+    const document = buildDocument(duplicated.project), copyId = trackIdentity(document.score.tracks[1]);
+    expect(copyId).not.toBe(sourceId);
+    expect(document.settings.mixes[copyId].gain).toBe(0.5);
+    // Later changes to the source leave the copy's settings alone, also when settings are replayed for Undo.
+    const changed = previewEdit(duplicated.project, {type:'setTrackMix', trackId:sourceId, mix:{gain:0.25, pan:0, mute:false, solo:false}}, document);
+    expect([changed.settings.mixes[sourceId].gain, changed.settings.mixes[copyId].gain]).toEqual([0.25, 0.5]);
+    const replayed = replayDocumentSettings(changed.project, buildDocument(changed.project));
+    expect([replayed.settings.mixes[sourceId].gain, replayed.settings.mixes[copyId].gain]).toEqual([0.25, 0.5]);
+  });
+  it('exports both tracks to GP with unique GPIF IDs and refuses a missing track', () => {
+    const duplicated = previewEdit(previewEdit(base(), {type:'setNote', target, string:6, fret:3}).project, {type:'duplicateTrack', track:0}).score;
+    const reloaded = buildScore(imported(duplicated));
+    expect(reloaded.tracks.map(track => [track.name, track.staves[0].bars[0].voices[0].beats[0].notes[0]?.fret])).toEqual([['Guitar',3],['Guitar',3]]);
+    const gpif = new TextDecoder().decode(unzipSync(exportGp(duplicated))['Content/score.gpif']);
+    for (const element of ['Bar','Voice','Beat','Note']) {
+      const found = [...gpif.matchAll(new RegExp(`<${element} id="(\\d+)"`, 'g'))].map(match => match[1]);
+      expect(found.length).toBeGreaterThan(0);
+      expect(new Set(found).size).toBe(found.length);
+    }
+    for (const track of [1, -1, 0.5]) expect(() => previewEdit(base(), {type:'duplicateTrack', track})).toThrow();
   });
 });
 

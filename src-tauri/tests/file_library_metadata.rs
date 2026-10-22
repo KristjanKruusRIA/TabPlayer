@@ -39,6 +39,7 @@ fn metadata_projection_preserves_baseline_then_applied_order_and_hashes_source_b
         {"type":"addPitchedTrack","name":"Keys","program":0},
         {"type":"addPercussionTrack","name":"Drums","program":0},
         {"type":"moveTrack","track":0,"to":2},
+        {"type":"duplicateTrack","track":2},
         {"type":"removeTrack","track":1},
         {"type":"setBeatText","target":{"track":0,"staff":0,"bar":0,"voice":0,"beat":0},"text":"Ignored"}
     ]);
@@ -57,6 +58,7 @@ fn metadata_projection_preserves_baseline_then_applied_order_and_hashes_source_b
             {"type":"addPitchedTrack","name":"Keys"},
             {"type":"addPercussionTrack","name":"Drums"},
             {"type":"moveTrack","track":0,"to":2},
+            {"type":"duplicateTrack","track":2},
             {"type":"removeTrack","track":1}
         ])
     );
@@ -183,6 +185,8 @@ fn malformed_json_relevant_operations_and_corrupt_original_bytes_fail() {
         json!({"type":"setScoreInfo","title":"Title"}),
         json!({"type":"removeTrack","track":-1}),
         json!({"type":"moveTrack","track":0}),
+        json!({"type":"duplicateTrack"}),
+        json!({"type":"duplicateTrack","track":-1}),
         json!({"type":"moveTrack","track":0,"to":-1}),
         json!({"type":"moveTrack","track":0,"to":1.5}),
         json!({"type":"setTrackInfo","track":0,"name":false}),

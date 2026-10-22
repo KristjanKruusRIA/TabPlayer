@@ -53,6 +53,7 @@ fn tagged_sources_changes_and_metadata_edits_preserve_literal_wire_contracts() {
         json!({"type":"addPercussionTrack","name":"Drums"}),
         json!({"type":"removeTrack","track":1}),
         json!({"type":"moveTrack","track":0,"to":2}),
+        json!({"type":"duplicateTrack","track":2}),
     ] {
         roundtrip::<MetadataEdit>(value.clone());
         reject_extra::<MetadataEdit>(value);

@@ -3,7 +3,9 @@ import type { BeatTarget, EditCommand, Project, ProjectInput } from './project';
 import { projectCommands } from './project';
 import { isSettingsEdit } from './edit-types';
 import type { BackingSettings, ChannelMix, DocumentSettings } from './edit-types';
-import { defaultDocumentSettings, defaultMix, applySettingsEdit } from './document-settings';
+import { defaultDocumentSettings, defaultMix, applySettingsEdit, copyTrackSettings } from './document-settings';
+import { getLyricsSource, setLyricsSource } from './editor/lyrics-source';
+import { copyHarmonyChord } from './harmony/chord-source';
 import { applyAdvancedEdit } from './editor/advanced';
 import { captureNoteLinks, restoreNoteLinks, detachNote } from './editor/links';
 import { backingLocationsForScore,validateBackingAnchors } from './audio/plan';
@@ -16,7 +18,7 @@ import { prepareScoreTimers } from './editor/timers';
 import { planMeasureMap,mapBackingMeasures } from './editor/measures';
 import { mapLyricsMeasures } from './editor/lyrics-measures';
 import { preparePasteMusic } from './editor/clipboard-paste';
-import { remapStylesheetTracks,validateEngravingTracks } from './engraving/projection';
+import { duplicateStylesheetTrack,remapStylesheetTracks,validateEngravingTracks } from './engraving/projection';
 import { prepareHarmonyTranspose } from './harmony/transpose';
 import { copyMasterTimeSignatureSource } from './editor/time-signature-source';
 
@@ -72,6 +74,29 @@ function appendBar(staff: model.Staff, master: model.MasterBar) {
   bar.addVoice(voice); staff.addBar(bar);
   const count=staff.bars[bar.index-1]?.voices.length ?? 1;
   for(let i=1;i<count;i++){const extra=new Voice();const carrier=new Beat();carrier.isEmpty=true;extra.addBeat(carrier);bar.addVoice(extra);}
+}
+
+/** A detached copy of `source` with fresh bar, voice, beat and note IDs, its lyrics and chord
+ * sources, the links to restore between its notes, and free MIDI channels when any remain (percussion keeps the drum channel). */
+function duplicateTrack(score:model.Score,source:model.Track,index:number):{copy:model.Track;links:ReturnType<typeof captureNoteLinks>} {
+  const copy=scoreFromJson(model.JsonConverter.scoreToJson(score),settings).tracks[index],noteIds=new Map<number,number>();
+  for(const staff of copy.staves)for(const bar of staff.bars){
+    bar.id=new Bar().id;
+    for(const voice of bar.voices){voice.id=new Voice().id;for(const beat of voice.beats){beat.id=new Beat().id;for(const note of beat.notes){
+      const oldId=note.id,slide=note.slideOutType;detachNote(note);if(slide>=model.SlideOutType.OutUp)note.slideOutType=slide;note.id=new Note().id;noteIds.set(oldId,note.id);
+    }}}
+  }
+  // Only links with both ends in the source track are copied; they point between copied notes.
+  const links=captureNoteLinks(score).filter(link=>noteIds.has(link.from)&&noteIds.has(link.to)).map(link=>({...link,from:noteIds.get(link.from)!,to:noteIds.get(link.to)!}));
+  const lyrics=getLyricsSource(source);if(lyrics)setLyricsSource(copy,lyrics.value,lyrics.managed);
+  source.staves.forEach((staff,index)=>{for(const [key,chord] of staff.chords??[]){const target=copy.staves[index]?.chords?.get(key);if(target)copyHarmonyChord(chord,target);}});
+  if(!copy.isPercussion){
+    const used=new Set(score.tracks.flatMap(track=>[track.playbackInfo.primaryChannel,track.playbackInfo.secondaryChannel]));
+    const free=Array.from({length:16},(_,index)=>index).filter(index=>index!==9&&!used.has(index));
+    if(free.length){copy.playbackInfo.primaryChannel=free[0];copy.playbackInfo.secondaryChannel=free[1]??free[0];}
+  }
+  copy.score=score;
+  return {copy,links};
 }
 
 /** Old track indices in their order after moving `track` to `to`. */
@@ -203,6 +228,12 @@ function apply(score: model.Score, edit: EditCommand, editIndex=0) {
       remapStylesheetTracks(score.stylesheet,score.tracks.map((_,index)=>index===edit.track?null:index>edit.track?index-1:index));
       score.tracks.splice(edit.track,1); break;
     }
+    case 'duplicateTrack': {
+      const source=trackAt(score,edit.track);
+      const before=captureNoteLinks(score),{copy,links}=duplicateTrack(score,source,edit.track);
+      score.tracks.splice(edit.track+1,0,copy);restoreNoteLinks(score,[...before,...links]);
+      duplicateStylesheetTrack(score.stylesheet,edit.track); break;
+    }
     case 'moveTrack': {
       const count=score.tracks.length;trackAt(score,edit.track);
       if(!integer(edit.to)||edit.to>=count||edit.to===edit.track)throw new Error('Choose a different track position.');
@@ -270,9 +301,10 @@ export function buildDocument(value: ProjectInput): BuiltDocument {
       if (edit.type==='addTrack'||edit.type==='addPitchedTrack'||edit.type==='addPercussionTrack') identities.push(`added/${index}/${JSON.stringify(edit)}`);
       if (edit.type==='removeTrack') identities.splice(edit.track,1);
       if (edit.type==='moveTrack') identities.splice(edit.to,0,...identities.splice(edit.track,1));
-      if (['addTrack','addPitchedTrack','addPercussionTrack','removeTrack','moveTrack'].includes(edit.type)) forgetTrackOrderedEntries(score);
+      if (edit.type==='duplicateTrack') {identities.splice(edit.track+1,0,`added/${index}/${JSON.stringify(edit)}`);copyTrackSettings(documentSettings,identities[edit.track],identities[edit.track+1]);}
+      if (['addTrack','addPitchedTrack','addPercussionTrack','removeTrack','moveTrack','duplicateTrack'].includes(edit.type)) forgetTrackOrderedEntries(score);
       if(edit.type==='removeMeasure') {removeBackingMeasure(documentSettings.backing,edit.bar);removeBackingMeasure(embeddedBackingSettings,edit.bar);}
-      if (!previous&&['insertBeat','deleteBeat','appendMeasure','removeMeasure','insertMeasures','removeMeasures','addTrack','addPitchedTrack','addPercussionTrack','removeTrack','moveTrack','addStaff','removeStaff','addVoice','removeVoice','copyVoice'].includes(edit.type)) {
+      if (!previous&&['insertBeat','deleteBeat','appendMeasure','removeMeasure','insertMeasures','removeMeasures','addTrack','addPitchedTrack','addPercussionTrack','removeTrack','moveTrack','duplicateTrack','addStaff','removeStaff','addVoice','removeVoice','copyVoice'].includes(edit.type)) {
         score = rebuild(score);
       }
     }
@@ -287,7 +319,8 @@ export function buildDocument(value: ProjectInput): BuiltDocument {
 
 export function replayDocumentSettings(value:ProjectInput,current:BuiltDocument):BuiltDocument {
   const project=validateProject(value);const next=defaultDocumentSettings();
-  if(projectCommands(project).some(edit=>edit.type==='pasteMusic'||edit.type==='setBacking'&&edit.backing?.referenceSync))return {...buildDocument(project),score:current.score,embeddedBacking:current.embeddedBacking};
+  // A duplicated track's copied settings come from the full build, which tracks identities through track edits.
+  if(projectCommands(project).some(edit=>edit.type==='pasteMusic'||edit.type==='duplicateTrack'||edit.type==='setBacking'&&edit.backing?.referenceSync))return {...buildDocument(project),score:current.score,embeddedBacking:current.embeddedBacking};
   const sourceBarCount=current.sourceBarCount??(project.base.kind==='blank'?project.base.measureCount:initialScore(project).masterBars.length);
   let barCount=sourceBarCount;
   next.mixes=structuredClone(current.sourceMixes ?? Object.fromEntries(current.score.tracks.map(track=>[trackIdentity(track),{...defaultMix(),mute:track.playbackInfo.isMute,solo:track.playbackInfo.isSolo}])));

@@ -122,6 +122,9 @@ export function projectMetadata(base: LibraryMetadata, edits: readonly MetadataE
     case 'setScoreMetadata':result.album=text(edit.album);break;
     case 'setTrackInfo':result.trackNames[track(edit.track)]=text(edit.name);break;
     case 'addTrack':case 'addPitchedTrack':case 'addPercussionTrack':result.trackNames.push(text(edit.name)||'Instrument');break;
+    case 'duplicateTrack':{
+      const index=track(edit.track);result.trackNames.splice(index+1,0,result.trackNames[index]);break;
+    }
     case 'moveTrack':{
       const index=track(edit.track),to=track(edit.to);
       if(index===to)throw new Error('Invalid metadata track move.');

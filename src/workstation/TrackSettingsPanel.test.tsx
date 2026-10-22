@@ -82,6 +82,7 @@ it('keeps full long track names accessible and selected/remove/notation command 
   cleanup();render(<TrackSettingsPanel score={added.score} selected={0} busy={false} onEdit={onEdit}/>);
   expect(screen.getByRole('button',{name:'Move track up'})).toBeDisabled();
   fireEvent.click(screen.getByRole('button',{name:'Move track down'}));expect(onEdit).toHaveBeenLastCalledWith({type:'moveTrack',track:0,to:1});
+  fireEvent.click(screen.getByRole('button',{name:'Duplicate track'}));expect(onEdit).toHaveBeenLastCalledWith({type:'duplicateTrack',track:0});
   fireEvent.change(screen.getByLabelText('New notation track name'),{target:{value:'Piano'}});fireEvent.change(screen.getByLabelText('New notation track program'),{target:{value:'5'}});
   fireEvent.click(screen.getByRole('button',{name:'Add pitched track'}));expect(onEdit).toHaveBeenLastCalledWith({type:'addPitchedTrack',name:'Piano',program:5});
   fireEvent.click(screen.getByRole('button',{name:'Add percussion track'}));expect(onEdit).toHaveBeenLastCalledWith({type:'addPercussionTrack',name:'Piano',program:5});

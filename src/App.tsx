@@ -155,7 +155,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     const oldCount=state.score.masterBars.length;
     act(controller.edit(command).then(()=>{
       const score=controller.getState().score,map=command.type==='insertMeasures'||command.type==='removeMeasures'?planMeasureMap(oldCount,command):null;
-      setSelection(old=>map?repairMeasureSelection(score,old,map):repairSelection(score,command.type==='moveTrack'?{...old,track:movedTrackIndex(old.track,command)}:old));
+      setSelection(old=>map?repairMeasureSelection(score,old,map):repairSelection(score,command.type==='moveTrack'?{...old,track:movedTrackIndex(old.track,command)}:command.type==='duplicateTrack'?{...old,track:command.track+1}:old));
       if(command.type==='pasteMusic')setNoteIndex(null);
       if(!('selection'in command)||command.type==='eraseSelection')editorSelection(null);
     }));

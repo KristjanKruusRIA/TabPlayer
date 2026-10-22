@@ -80,6 +80,14 @@ export function configureEngraving(settings:Settings,value:EngravingOverrides):v
   for(const field of ['systemPaddingTop','systemPaddingBottom','lastSystemPaddingBottom'] as const)settings.display[field]=defaults.display[field]*(value.systemSpacing??1);
   settings.display.staveProfile=StaveProfile.Default;settings.display.systemsLayoutMode=SystemsLayoutMode.UseModelLayout;
 }
+/** Gives the track inserted after `source` a copy of its per-track style and shifts later tracks. */
+export function duplicateStylesheetTrack(stylesheet:model.Score['stylesheet'],source:number):void {
+  const shift=(index:number)=>index>source?index+1:index;
+  const copy=(map:Map<number,boolean>|null)=>map===null?null:new Map([...map].flatMap(([index,value])=>index===source?[[index,value],[index+1,value]] as const:[[shift(index),value] as const]));
+  const rests=stylesheet.perTrackMultiBarRest===null?null:new Set([...stylesheet.perTrackMultiBarRest].flatMap(index=>index===source?[index,index+1]:[shift(index)]));
+  stylesheet.perTrackDisplayTuning=copy(stylesheet.perTrackDisplayTuning);stylesheet.perTrackChordDiagramsOnTop=copy(stylesheet.perTrackChordDiagramsOnTop);stylesheet.perTrackMultiBarRest=rests;
+}
+
 export function remapStylesheetTracks(stylesheet:model.Score['stylesheet'],oldToNew:Array<number|null>):void {
   const seen=new Set<number>();if(!Array.isArray(oldToNew))throw new Error('Invalid stylesheet track mapping.');
   for(const target of oldToNew)if(target!==null){if(!Number.isInteger(target)||target<0||target>=oldToNew.length||seen.has(target))throw new Error('Invalid stylesheet track mapping.');seen.add(target);}

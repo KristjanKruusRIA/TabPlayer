@@ -524,3 +524,40 @@ it('dispatches distinct desired mixes serially and retries the latest failed con
   const engraving=defaultEngraving();engraving.stylesheet.hideDynamics=true;const styled=previewEdit(second.project,{type:'setEngraving',engraving},second);await player.loadDocument(styled.project,styled);
   expect(bridge.setMix).toHaveBeenCalledTimes(3);expect(vi.mocked(bridge.setMix).mock.calls.map(call=>call[0].mixes['base/0'].gain)).toEqual([.7,.4,.4]);expect(player.getState().error).toBeNull();player.destroy();
 });
+it('focuses a track for this session through the native mix without editing the document',async()=>{
+  const {player,bridge,onEdit}=fixture();const project=previewEdit(blankProject(),{type:'addTrack',name:'Bass',tuning:[43,38,33,28],program:33}).project;let built=buildDocument(project);
+  await player.loadDocument(project,built,0,1);const [guitar,bass]=built.score.tracks.map(trackIdentity),saved=structuredClone(built.settings.mixes);
+  await player.setFocus(bass,.5);
+  expect(vi.mocked(bridge.setMix).mock.calls.at(-1)?.[0].mixes).toEqual({[guitar]:{gain:.5,pan:0,mute:false,solo:false},[bass]:{gain:1,pan:0,mute:false,solo:false}});
+  expect(player.focus()).toEqual({track:bass,amount:.5});expect(onEdit).not.toHaveBeenCalled();expect(bridge.prepare).toHaveBeenCalledTimes(1);expect(built.settings.mixes).toEqual(saved);
+  expect(player.mix(built.score.tracks[0])?.volume??1).toBe(1);
+  // A saved mix edit keeps the focus applied on top of it.
+  built={...built,settings:{...built.settings,mixes:{[guitar]:{gain:.8,pan:0,mute:false,solo:false}}}};await player.loadDocument(project,built,0,1);
+  expect(vi.mocked(bridge.setMix).mock.calls.at(-1)?.[0].mixes[guitar].gain).toBeCloseTo(.4);
+  await player.setFocus(bass,0);expect(vi.mocked(bridge.setMix).mock.calls.at(-1)?.[0]).toEqual(built.settings);expect(player.focus()).toBeNull();
+  await player.setFocus(guitar,-.25);expect(player.focus()).toEqual({track:guitar,amount:-.25});
+  await expect(player.setFocus('base/9',.5)).rejects.toThrow('Select an existing track.');
+  await expect(player.setFocus(guitar,1.5)).rejects.toThrow('Focus must be between -100% and 100%.');
+  // Another document starts unfocused.
+  const fresh=blankProject();await player.loadDocument(fresh,buildDocument(fresh),0,2);expect(player.focus()).toBeNull();player.destroy();
+});
+it('applies focus and selection changes made during preparation once it finishes, without preparing again',async()=>{
+  const {player,bridge}=fixture();const project=previewEdit(blankProject(),{type:'addTrack',name:'Bass',tuning:[43,38,33,28],program:33}).project,built=buildDocument(project);
+  let release!:()=>void;bridge.prepare=vi.fn(()=>new Promise<void>(resolve=>{release=resolve;}));
+  const loading=player.loadDocument(project,built,0,1);await vi.waitFor(()=>expect(bridge.prepare).toHaveBeenCalledTimes(1));
+  const [guitar,bass]=built.score.tracks.map(trackIdentity),generation=player.generation;
+  await player.setFocus(guitar,.5);await player.setFocus(bass,.5);
+  // The host reloads on selection while the preparation is still running.
+  await player.loadDocument(project,built,1,1);expect(bridge.setMix).not.toHaveBeenCalled();
+  release();await loading;
+  await vi.waitFor(()=>expect(bridge.setMix).toHaveBeenCalledTimes(1));
+  expect(vi.mocked(bridge.setMix).mock.calls[0][0].mixes[guitar].gain).toBe(.5);
+  expect(bridge.prepare).toHaveBeenCalledTimes(1);expect(player.generation).toBe(generation);player.destroy();
+});
+it('ends focus when its track is removed, so undo does not revive it',async()=>{
+  const {player,bridge}=fixture();const added=previewEdit(blankProject(),{type:'addTrack',name:'Bass',tuning:[43,38,33,28],program:33}),built=buildDocument(added.project);
+  await player.loadDocument(added.project,built,0,1);const bass=trackIdentity(built.score.tracks[1]);await player.setFocus(bass,.5);
+  const removed=previewEdit(added.project,{type:'removeTrack',track:1});await player.loadDocument(removed.project,removed,0,1);expect(player.focus()).toBeNull();
+  await player.loadDocument(added.project,buildDocument(added.project),0,1);expect(player.focus()).toBeNull();
+  expect(Object.values(vi.mocked(bridge.prepare).mock.calls.at(-1)![1].mixes).every(mix=>mix.gain===1)).toBe(true);player.destroy();
+});

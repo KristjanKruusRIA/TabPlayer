@@ -3,7 +3,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import type { model } from '@coderline/alphatab';
-import { previewEdit } from './engine';
+import { previewEdit,trackIdentity } from './engine';
 import { blankProject } from './project';
 import { DEFAULT_PRACTICE } from './audio/practice-types';
 import type { PlaybackState } from './audio/types';
@@ -17,7 +17,7 @@ const base=()=>previewEdit(blankProject(),{type:'setRest',target}).score;
 function livePlayer(score:model.Score){
   let state:PlaybackState={ready:true,playing:true,time:0,endTime:1000,measure:0,speed:100,metronome:false,practice:{settings:structuredClone(DEFAULT_PRACTICE),phase:'playing',countInRemaining:0,completedPasses:0,effectiveRatio:1,currentBpm:120,pulse:null},practicePending:false,practiceNotice:null,range:null,loop:null,error:null};
   const listeners=new Set<()=>void>(),remove=vi.fn();let mix={mute:false,solo:true,volume:.7,pan:-.2};
-  const player={subscribe:vi.fn((fn:()=>void)=>{listeners.add(fn);return()=>{remove();listeners.delete(fn);};}),getState:()=>state,mix:vi.fn((_track:model.Track)=>mix),setMute:vi.fn(),setSolo:vi.fn(),setTrackVolume:vi.fn(),setPan:vi.fn()};
+  const player={subscribe:vi.fn((fn:()=>void)=>{listeners.add(fn);return()=>{remove();listeners.delete(fn);};}),getState:()=>state,mix:vi.fn((_track:model.Track)=>mix),setMute:vi.fn(),setSolo:vi.fn(),setTrackVolume:vi.fn(),setPan:vi.fn(),focus:()=>null,setFocus:vi.fn(async()=>{})};
   return {player,remove,emit:(patch:Partial<PlaybackState>={},mixPatch:Partial<typeof mix>={})=>{state={...state,...patch};mix={...mix,...mixPatch};act(()=>{for(const fn of listeners)fn();});},score};
 }
 function props(score=base()) {return {score,selected:0,busy:false,view:'mixer' as const,target,onExitOverview:vi.fn(),onSelect:vi.fn(),onSelectPosition:vi.fn(),player:null};}
@@ -31,7 +31,7 @@ it('shows each track color as a swatch beside its name',()=>{
 it('shows the current instrument mix after deletion and undo change its index',()=>{
   const added=previewEdit(blankProject(),{type:'addTrack',name:'Bass',tuning:[43,38,33,28],program:33});
   let score=added.score;const state={};
-  const player={subscribe:()=>()=>{},getState:()=>state,mix:(value:number|model.Track)=>{
+  const player={subscribe:()=>()=>{},getState:()=>state,focus:()=>null,mix:(value:number|model.Track)=>{
     const track=typeof value==='number'?score.tracks[value]:value;
     return {mute:track.name==='Bass',solo:false,volume:track.name==='Bass'?.5:1,pan:0};
   }};
@@ -92,4 +92,29 @@ it('disables all mix changes when busy or without a player while retaining chann
   view.rerender(<TrackPanel {...initial}/>);
   for(const label of ['Mute','Solo','Volume Guitar','Pan Guitar'])expect(screen.getByLabelText(label)).toBeDisabled();
   expect(screen.getByRole('button',{name:'Track 1: Guitar'})).toBeEnabled();
+});
+it('sweeps focus on the selected track by identity, follows the selection and resets',()=>{
+  const score=previewEdit(blankProject(),{type:'addTrack',name:'Bass',tuning:[43,38,33,28],program:33}).score,[guitar,bass]=score.tracks.map(trackIdentity);
+  let focus:{track:string;amount:number}|null=null;const listeners=new Set<()=>void>();let state={ready:true,error:null as string|null};
+  const player={subscribe:(fn:()=>void)=>{listeners.add(fn);return()=>listeners.delete(fn);},getState:()=>state,mix:()=>undefined,setMute:vi.fn(),setSolo:vi.fn(),setTrackVolume:vi.fn(),setPan:vi.fn(),focus:()=>focus,
+    setFocus:vi.fn(async(track:string,amount:number)=>{focus=amount?{track,amount}:null;state={...state};act(()=>{for(const fn of listeners)fn();});})};
+  const view=render(<TrackPanel {...props(score)} player={player as never}/>);
+  const slider=screen.getByRole('slider',{name:'Focus selected track'});expect(slider).toHaveValue('0');expect(screen.getByText('Off')).toBeVisible();expect(screen.getByRole('button',{name:'Reset focus'})).toBeDisabled();
+  fireEvent.change(slider,{target:{value:'60'}});expect(player.setFocus).toHaveBeenLastCalledWith(guitar,.6);expect(screen.getByText('Focus 60%')).toBeVisible();
+  view.rerender(<TrackPanel {...props(score)} selected={1} player={player as never}/>);expect(player.setFocus).toHaveBeenLastCalledWith(bass,.6);
+  fireEvent.change(slider,{target:{value:'-40'}});expect(player.setFocus).toHaveBeenLastCalledWith(bass,-.4);expect(screen.getByText('Unfocus 40%')).toBeVisible();
+  fireEvent.click(screen.getByRole('button',{name:'Reset focus'}));expect(player.setFocus).toHaveBeenLastCalledWith(bass,0);expect(slider).toHaveValue('0');
+  expect(player.setTrackVolume).not.toHaveBeenCalled();
+  // A focus held by another track (not yet moved) does not show as the selected track's.
+  focus={track:guitar,amount:.3};state={...state};act(()=>{for(const fn of listeners)fn();});expect(slider).toHaveValue('0');
+  // Focus waits for ready, error-free playback.
+  state={ready:false,error:null};act(()=>{for(const fn of listeners)fn();});expect(slider).toBeDisabled();
+  state={ready:true,error:'Device lost'};act(()=>{for(const fn of listeners)fn();});expect(slider).toBeDisabled();
+});
+it('explains that focusing a silent track lowers everything you hear',()=>{
+  const score=previewEdit(blankProject(),{type:'addTrack',name:'Bass',tuning:[43,38,33,28],program:33}).score,state={ready:true,error:null};
+  const player={subscribe:()=>()=>{},getState:()=>state,mix:(track:model.Track)=>({mute:false,solo:track.index===1,volume:1,pan:0}),setMute:vi.fn(),setSolo:vi.fn(),setTrackVolume:vi.fn(),setPan:vi.fn(),focus:()=>null,setFocus:vi.fn(async()=>{})};
+  const view=render(<TrackPanel {...props(score)} player={player as never}/>);
+  expect(screen.getByText('The selected track is silent, so focusing it lowers everything you hear.')).toBeVisible();
+  view.rerender(<TrackPanel {...props(score)} selected={1} player={player as never}/>);expect(screen.queryByText(/selected track is silent/)).toBeNull();
 });

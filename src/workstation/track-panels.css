@@ -38,3 +38,4 @@
 .track-settings button:hover:not(:disabled),.track-panel button:hover:not(:disabled) { background:var(--ws-raised); border-color:var(--ws-accent); }
 .track-settings :is(input,select,button,summary):focus-visible { outline:2px solid var(--ws-accent); outline-offset:2px; }
 .track-settings ::selection,.track-panel ::selection { color:var(--ws-accent-ink); background:var(--ws-accent); }
+.track-panel .track-focus-note { max-width:180px; margin:4px 0 0; color:var(--ws-muted); font-size:12px; line-height:16px; }

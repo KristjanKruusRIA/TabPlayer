@@ -28,16 +28,20 @@ export interface NativeAudioBridge {
   stageBacking():Promise<BackingCandidate|null>;
   stageEmbeddedBacking(bytes:Uint8Array):Promise<BackingCandidate|null>;
 }
+// Desktop-test builds record the settings of each preparation and mix native audio accepted, so
+// end-to-end tests can check gains and that nothing was prepared again.
+const desktopTest=import.meta.env.VITE_DESKTOP_TEST==='1';
+function recordForTest(key:'__tabplayerTestMixes'|'__tabplayerTestPrepares',settings:unknown){if(desktopTest)((window as unknown as Record<string,unknown[]|undefined>)[key]??=[]).push(structuredClone(settings));}
 export function createDocumentAudioBridge(context:AudioOwner):NativeAudioBridge {
   const owner={documentId:context.documentId,activationId:context.activationId};
   let commandQueue:Promise<void>=Promise.resolve();
   return {
-  prepare:async(plan,settings,embedded,sourceKey,practice)=>{await invoke('audio_prepare',{owner,plan,settings,embeddedBytes:embedded?Array.from(embedded):null,sourceKey:sourceKey??'blank',practice:practice??null});},
+  prepare:async(plan,settings,embedded,sourceKey,practice)=>{await invoke('audio_prepare',{owner,plan,settings,embeddedBytes:embedded?Array.from(embedded):null,sourceKey:sourceKey??'blank',practice:practice??null});recordForTest('__tabplayerTestPrepares',settings);},
   command:command=>{
     if(command.type==='invalidate')return invoke('audio_command',{owner,command});
     const next=commandQueue.then(()=>invoke<void>('audio_command',{owner,command}));commandQueue=next.catch(()=>{});return next;
   },
-  setMix:(settings,generation)=>invoke('audio_set_mix',{owner,settings,generation}),
+  setMix:async(settings,generation)=>{await invoke('audio_set_mix',{owner,settings,generation});recordForTest('__tabplayerTestMixes',settings);},
   devices:()=>invoke('audio_devices'),status:()=>invoke('audio_status'),
   subscribe:listener=>listen<NativeAudioStatus>('native-audio-status',event=>listener(event.payload)),
   stageBacking:()=>invoke('stage_backing',{documentId:owner.documentId}),

@@ -4,7 +4,7 @@ import type { GestureCommand,GesturePatch } from './gestures-types';
 import { beatAt,integer,locationAt } from './common';
 
 const flags=['tap','slap','pop','deadSlapped','slashed','showTimer'] as const;
-const enums={golpe:2,rasgueado:18,fade:3,vibrato:2,beamingMode:3} as const;
+const enums={golpe:2,rasgueado:18,fade:3,vibrato:2,beamingMode:3,wahPedal:2} as const;
 function exact(value:unknown,keys:readonly string[],required=keys):asserts value is Record<string,unknown> {
   if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).some(key=>!keys.includes(key))||required.some(key=>!Object.hasOwn(value,key)))throw new Error('Invalid gesture fields.');
 }
@@ -28,7 +28,7 @@ function applyPatch(beat:model.Beat,patch:GesturePatch) {
   if(Object.hasOwn(patch,'barre')&&patch.barre!==null){exact(patch.barre,['fret','shape']);if(!integer(patch.barre.fret,1,127)||!integer(patch.barre.shape,1,2))throw new Error('Choose a valid barre fret and shape.');}
   if(Object.hasOwn(patch,'stem')&&!['auto','inverted','up','down'].includes(patch.stem!))throw new Error('Invalid stem direction.');
   const staff=beat.voice.bar.staff;
-  if((staff.isPercussion||!staff.tuning.length)&&(patch.tap||patch.slap||patch.pop||patch.deadSlapped||patch.golpe||patch.rasgueado||patch.barre))throw new Error('This gesture requires a stringed guitar or bass staff.');
+  if((staff.isPercussion||!staff.tuning.length)&&(patch.tap||patch.slap||patch.pop||patch.deadSlapped||patch.golpe||patch.rasgueado||patch.barre||patch.wahPedal))throw new Error('This gesture requires a stringed guitar or bass staff.');
   if(patch.rasgueado&&new Set(beat.notes.filter(n=>n.isStringed).map(n=>n.string)).size<2)throw new Error('Rasgueado requires a chord on at least two strings.');
   for(const key of flags)if(Object.hasOwn(patch,key))Object.assign(beat,{[key]:patch[key]!});
   for(const key of Object.keys(enums) as (keyof typeof enums)[])if(Object.hasOwn(patch,key))Object.assign(beat,{[key]:patch[key]!});

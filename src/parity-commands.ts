@@ -125,7 +125,7 @@ function musicSelection(value:unknown) {
 }
 function gestureShape(value:unknown) {
   const patch=object(value),flags=['tap','slap','pop','deadSlapped','slashed','showTimer'];
-  const enums:Record<string,number>={golpe:2,rasgueado:18,fade:3,vibrato:2,beamingMode:3};
+  const enums:Record<string,number>={golpe:2,rasgueado:18,fade:3,vibrato:2,beamingMode:3,wahPedal:2};
   if(!Object.keys(patch).length)throw new Error('Choose a beat gesture.');
   for(const [key,field]of Object.entries(patch)) {
     if(flags.includes(key))flag(field);

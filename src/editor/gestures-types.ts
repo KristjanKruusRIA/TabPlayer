@@ -6,7 +6,7 @@ export type GesturePatch = {
   slashed?:boolean; showTimer?:boolean;
   barre?:{fret:number;shape:number}|null;
   stem?:'auto'|'inverted'|'up'|'down';
-  beamingMode?:number;
+  beamingMode?:number; wahPedal?:number;
 };
 export type GestureCommand =
   | {type:'setBeatGestures';target:BeatTarget;patch:GesturePatch}

@@ -752,6 +752,12 @@ pub struct GesturePatch {
         skip_serializing_if = "Option::is_none"
     )]
     pub beaming_mode: Option<i32>,
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub wah_pedal: Option<i32>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1396,6 +1402,7 @@ impl EditCommand {
                     (patch.fade, 3),
                     (patch.vibrato, 2),
                     (patch.beaming_mode, 3),
+                    (patch.wah_pedal, 2),
                 ] {
                     if let Some(value) = value {
                         enum_range(value, 0, max)?;
@@ -2157,7 +2164,7 @@ mod tests {
                 "slap": true, "pop": true, "deadSlapped": false, "golpe": 2,
                 "rasgueado": 18, "fade": 3, "vibrato": 2, "slashed": false,
                 "showTimer": true, "barre": {"fret": 127, "shape": 2},
-                "stem": "inverted", "beamingMode": 3}}),
+                "stem": "inverted", "beamingMode": 3, "wahPedal": 2}}),
             json!({"type": "setOttava", "from": target, "to": end, "ottava": 4}),
             json!({"type": "setCrescendo", "from": target, "to": end,
                 "crescendo": 1, "targetDynamics": 6}),
@@ -2296,6 +2303,7 @@ mod tests {
             ("fade", 3),
             ("vibrato", 2),
             ("beamingMode", 3),
+            ("wahPedal", 2),
         ] {
             for valid in 0..=max {
                 value["patch"] = json!({field: valid});

@@ -13,6 +13,14 @@ it('gesture_panel_dispatches_exact_named_choices',()=>{
   fireEvent.click(screen.getByLabelText('Slap'));fireEvent.change(screen.getByLabelText('Fade'),{target:{value:'3'}});expect(onEdit).not.toHaveBeenCalled();fireEvent.click(screen.getByRole('button',{name:'Apply beat gestures'}));
   expect(onEdit).toHaveBeenCalledExactlyOnceWith({type:'setBeatGestures',target,patch:{slap:true,fade:3}});
 });
+it('gesture_panel_dispatches_the_wah_pedal_choice',()=>{
+  const score=music();score.tracks[0].staves[0].bars[0].voices[0].beats[0].wahPedal=model.WahPedal.Open;
+  const onEdit=vi.fn();render(<GesturePanel score={score} target={target} busy={false} onEdit={onEdit}/>);
+  const wah=screen.getByLabelText('Wah pedal') as HTMLSelectElement;expect(wah.value).toBe('1');
+  expect(within(wah).getAllByRole('option').map(n=>n.textContent)).toEqual(['None','Open','Closed']);
+  fireEvent.change(wah,{target:{value:'2'}});fireEvent.click(screen.getByRole('button',{name:'Apply beat gestures'}));
+  expect(onEdit).toHaveBeenCalledExactlyOnceWith({type:'setBeatGestures',target,patch:{wahPedal:2}});
+});
 it('gesture_panel_preserves_imported_combined_stem_until_explicitly_edited',()=>{
   const score=music(),b=score.tracks[0].staves[0].bars[0].voices[0].beats[0];b.preferredBeamDirection=0;b.invertBeamDirection=true;
   const onEdit=vi.fn();render(<GesturePanel score={score} target={target} busy={false} onEdit={onEdit}/>);fireEvent.click(screen.getByLabelText('Slash notation'));fireEvent.click(screen.getByRole('button',{name:'Apply beat gestures'}));expect(onEdit.mock.calls[0][0]).toEqual({type:'setBeatGestures',target,patch:{slashed:true}});

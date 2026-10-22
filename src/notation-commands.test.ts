@@ -6,7 +6,7 @@ const target={track:0,staff:0,bar:0,voice:0,beat:0};
 const to={...target,bar:1};
 const commands=[
   {type:'setTrackLyrics',track:0,visible:false,lines:[{startBar:0,text:'[VERSE]\nHel-lo  world+today'}]},
-  {type:'setBeatGestures',target,patch:{slap:true,barre:{fret:3,shape:1},stem:'inverted',rasgueado:18}},
+  {type:'setBeatGestures',target,patch:{slap:true,barre:{fret:3,shape:1},stem:'inverted',rasgueado:18,wahPedal:2}},
   {type:'setOttava',from:target,to,ottava:4},
   {type:'setCrescendo',from:target,to,crescendo:1,targetDynamics:7},
   {type:'setFermata',target,fermata:{type:2,length:1.5}},
@@ -37,7 +37,7 @@ it('rejects invalid nested lyrics and gestures before replay',()=>{
     {...commands[0],visible:0},{...commands[0],track:4294967296},
     {...commands[0],lines:Array.from({length:6},()=>({startBar:0,text:''}))},
     ...[{startBar:-1,text:''},{startBar:.5,text:''},{startBar:0,text:null},{startBar:0,text:'',unknown:0},{text:''}].map(line=>({...commands[0],lines:[line]})),
-    ...[{}, {slap:null},{slap:1},{golpe:3},{rasgueado:19},{fade:4},{vibrato:-1},{beamingMode:4},{stem:'sideways'},
+    ...[{}, {slap:null},{slap:1},{golpe:3},{rasgueado:19},{fade:4},{vibrato:-1},{beamingMode:4},{wahPedal:3},{wahPedal:-1},{wahPedal:null},{stem:'sideways'},
       {unknown:true},{barre:{fret:0,shape:1}},{barre:{fret:3,shape:0}},{barre:{fret:3,shape:1,extra:0}},
     ].map(patch=>({type:'setBeatGestures',target,patch})),
     {type:'setOttava',from:target,to,ottava:5},

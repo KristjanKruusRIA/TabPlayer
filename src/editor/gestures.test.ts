@@ -1,5 +1,5 @@
 import { expect,it } from 'vitest';
-import { exporter,midi,model,Settings } from '@coderline/alphatab';
+import { exporter,importer,midi,model,Settings } from '@coderline/alphatab';
 import { strFromU8,unzipSync } from 'fflate';
 import { scoreFromJson } from '../model-clone';
 import { music,target } from './fixtures';
@@ -163,4 +163,17 @@ it('crescendo_preserves_dead_slap_notes_and_hairpin_without_assigning_them_targe
   const score=music(),voice=beat(score).voice;for(const b of voice.beats){b.dynamics=2;for(const n of b.notes)n.dynamics=2;}voice.beats[1].deadSlapped=true;voice.beats[3].deadSlapped=true;const ids=voice.beats.map(b=>b.notes.map(n=>n.id));
   edit(score,{type:'setCrescendo',from:target,to:{...target,beat:3},crescendo:1,targetDynamics:6});expect(voice.beats.map(b=>b.dynamics)).toEqual([2,2,6,2]);expect(voice.beats.map(b=>b.crescendo)).toEqual([1,1,1,1]);expect(voice.beats.map(b=>b.notes.map(n=>n.id))).toEqual(ids);expect(voice.beats.map(b=>b.deadSlapped)).toEqual([false,true,false,true]);
   const events=smf(rebuild(score)).notes.filter(n=>n[0]<3840);expect(events.filter(n=>n[0]===0||n[0]===1920).map(n=>n.slice(0,3))).toEqual([[0,67,47],[1920,67,111]]);expect(events.filter(n=>n[0]===960||n[0]===2880).map(n=>n[2])).toEqual([95,95,95,95,95,95,95,95,95,95,95,95]);
+});
+it('wah_pedal_gesture_sets_open_closed_and_none_and_round_trips_through_gp',()=>{
+  const score=music();patch(score,{wahPedal:1});expect(beat(score).wahPedal).toBe(model.WahPedal.Open);
+  patch(score,{wahPedal:2});expect(beat(score).wahPedal).toBe(model.WahPedal.Closed);
+  const gpif=strFromU8(unzipSync(new exporter.Gp7Exporter().export(score,settings))['Content/score.gpif']);
+  expect(gpif).toContain('<Wah>Closed</Wah>');
+  expect(rebuild(score).tracks[0].staves[0].bars[0].voices[0].beats[0].wahPedal).toBe(model.WahPedal.Closed);
+  patch(score,{wahPedal:1});const reloaded=importer.ScoreLoader.loadScoreFromBytes(new exporter.Gp7Exporter().export(score,settings),settings);
+  expect(reloaded.tracks[0].staves[0].bars[0].voices[0].beats[0].wahPedal).toBe(model.WahPedal.Open);
+  patch(score,{wahPedal:0});expect(beat(score).wahPedal).toBe(model.WahPedal.None);
+  // Like other guitar gestures, wah is refused on percussion and notation-only staves, which clipboard conversion can't carry.
+  const drums=music();drums.tracks[0].staves[0].isPercussion=true;const before=snapshot(drums);expect(()=>patch(drums,{wahPedal:1})).toThrow(/stringed/);expect(snapshot(drums)).toBe(before);
+  for(const wahPedal of [3,-1,1.5,'1']){const before=snapshot(score);expect(()=>patch(score,{wahPedal} as unknown as GesturePatch)).toThrow(/wahPedal/);expect(snapshot(score)).toBe(before);}
 });

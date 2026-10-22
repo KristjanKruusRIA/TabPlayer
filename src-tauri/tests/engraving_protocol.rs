@@ -478,3 +478,81 @@ fn engraving_native_history_retains_commands_undo_redo_and_rejects_invalid_edits
     let reopened = ProjectSession::new(serde_json::from_value(stored).unwrap(), None).unwrap();
     assert_eq!(reopened.snapshot().project, configured);
 }
+
+fn header_footer() -> Value {
+    let bands = |header: &str, footer: &str| {
+        json!({"header": {"left": header, "center": "", "right": ""},
+            "footer": {"left": "", "center": footer, "right": "100%% %PAGES%"}})
+    };
+    json!({"first": bands("%TITLE% – %ARTIST%", "%PAGE%"), "other": bands("", "%COPYRIGHT%")})
+}
+
+#[test]
+fn engraving_page_header_footer_is_optional_and_round_trips() {
+    let mut value = page_command();
+    let plain: PageLayout = serde_json::from_value(value["layout"].clone()).unwrap();
+    assert!(
+        serde_json::to_value(&plain)
+            .unwrap()
+            .get("headerFooter")
+            .is_none()
+    );
+    value["layout"]["headerFooter"] = header_footer();
+    accepted(&value);
+    let layout: PageLayout = serde_json::from_value(value["layout"].clone()).unwrap();
+    assert_eq!(serde_json::to_value(&layout).unwrap(), value["layout"]);
+    for field in [
+        "TITLE",
+        "SUBTITLE",
+        "ARTIST",
+        "ALBUM",
+        "WORDS",
+        "MUSIC",
+        "COPYRIGHT",
+        "TABBER",
+        "INSTRUCTIONS",
+        "NOTICES",
+        "PAGE",
+        "PAGES",
+    ] {
+        value["layout"]["headerFooter"]["other"]["header"]["right"] = json!(format!("%{field}%"));
+        accepted(&value);
+    }
+    value["layout"]["headerFooter"]["other"]["header"]["right"] = json!("é".repeat(200));
+    accepted(&value);
+}
+
+#[test]
+fn engraving_page_header_footer_rejects_invalid_text_and_shapes() {
+    for invalid in [
+        json!("%COMPOSER%"),
+        json!("%title%"),
+        json!("50% off"),
+        json!("a\nb"),
+        json!("é".repeat(201)),
+        json!("a\u{FFFE}b"),
+        json!("a\u{FFFF}"),
+        json!(null),
+        json!(1),
+    ] {
+        let mut value = page_command();
+        value["layout"]["headerFooter"] = header_footer();
+        value["layout"]["headerFooter"]["first"]["footer"]["left"] = invalid;
+        rejected(&value);
+    }
+    for path in ["", "/first", "/first/header"] {
+        let mut value = page_command();
+        value["layout"]["headerFooter"] = header_footer();
+        value["layout"]["headerFooter"].pointer_mut(path).unwrap()["unexpected"] = json!(true);
+        rejected(&value);
+    }
+    let mut value = page_command();
+    value["layout"]["headerFooter"] = header_footer();
+    value["layout"]["headerFooter"]["other"]["footer"]
+        .as_object_mut()
+        .unwrap()
+        .remove("right");
+    rejected(&value);
+    value["layout"]["headerFooter"] = json!(null);
+    rejected(&value);
+}

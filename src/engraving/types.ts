@@ -1,3 +1,5 @@
+import type { HeaderFooter } from './header-footer';
+
 export type InheritBool=boolean|null;
 export type NamePolicy='inherit'|'hidden'|'firstSystem'|'allSystems';
 export type TrackProfile='source'|'standard'|'tablature'|'standardTab'|'slash'|'numbered';
@@ -33,6 +35,8 @@ export interface PageLayout {
   widthMm:number;heightMm:number;
   marginsMm:{top:number;right:number;bottom:number;left:number};
   scale:number;profile:'document'|'ScoreTab'|'Score'|'Tab';
+  /** Absent means the established title header and page-number footer. */
+  headerFooter?:HeaderFooter;
 }
 
 export type EngravingCommand=

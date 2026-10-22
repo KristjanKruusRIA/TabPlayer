@@ -158,10 +158,102 @@ pub struct PageLayout {
     pub margins_mm: PageMargins,
     pub scale: f64,
     pub profile: PageProfile,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present_header_footer"
+    )]
+    pub header_footer: Option<HeaderFooter>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PageBand {
+    pub left: String,
+    pub center: String,
+    pub right: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PageBands {
+    pub header: PageBand,
+    pub footer: PageBand,
+}
+
+/// Header and footer text with %FIELD% placeholders, as the frontend fills them.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct HeaderFooter {
+    pub first: PageBands,
+    pub other: PageBands,
+}
+
+/// An absent field means the default header and footer; an explicit null is malformed.
+fn present_header_footer<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<HeaderFooter>, D::Error> {
+    HeaderFooter::deserialize(deserializer).map(Some)
+}
+
+const HEADER_FIELDS: [&str; 12] = [
+    "TITLE",
+    "SUBTITLE",
+    "ARTIST",
+    "ALBUM",
+    "WORDS",
+    "MUSIC",
+    "COPYRIGHT",
+    "TABBER",
+    "INSTRUCTIONS",
+    "NOTICES",
+    "PAGE",
+    "PAGES",
+];
+
+fn validate_header_text(text: &str) -> Result<(), String> {
+    if text.chars().count() > 200 {
+        return Err("Header and footer text must be at most 200 characters.".into());
+    }
+    if text.chars().any(|c| matches!(c, '\u{FFFE}' | '\u{FFFF}')) {
+        return Err("Header and footer text contains characters that cannot be printed.".into());
+    }
+    if text.chars().any(|c| c.is_control()) {
+        return Err("Header and footer text must be a single line.".into());
+    }
+    let mut rest = text;
+    while let Some(start) = rest.find('%') {
+        let after = &rest[start + 1..];
+        let Some(end) = after.find('%') else {
+            return Err("Use %% for a percent sign in headers and footers.".into());
+        };
+        let name = &after[..end];
+        if !name.is_empty() && !HEADER_FIELDS.contains(&name) {
+            return Err(format!("Unknown header or footer field %{name}%."));
+        }
+        rest = &after[end + 1..];
+    }
+    Ok(())
+}
+
+impl HeaderFooter {
+    pub fn validate(&self) -> Result<(), String> {
+        for bands in [&self.first, &self.other] {
+            for band in [&bands.header, &bands.footer] {
+                for text in [&band.left, &band.center, &band.right] {
+                    validate_header_text(text)?;
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 impl PageLayout {
     pub fn validate(&self) -> Result<(), String> {
+        if let Some(header_footer) = &self.header_footer {
+            header_footer.validate()?;
+        }
         if !self.width_mm.is_finite()
             || !(20.0..=1000.0).contains(&self.width_mm)
             || !self.height_mm.is_finite()

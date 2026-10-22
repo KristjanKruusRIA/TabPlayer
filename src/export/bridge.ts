@@ -22,13 +22,20 @@ export interface ExportNativeBridge {
   status(id:string):Promise<ExportProgress|null>;
   cancel(id:string):Promise<void>;
 }
+const desktopTest=import.meta.env.VITE_DESKTOP_TEST==='1';
+/** Desktop-test builds keep the rendered pages native export accepted, since exported text is outlined. */
+async function recordPages<T>(result:Promise<T>,pages:SvgPage[]):Promise<T> {
+  const value=await result;
+  if(desktopTest&&value)((window as unknown as {__tabplayerTestExportPages?:SvgPage[][]}).__tabplayerTestExportPages??=[]).push(structuredClone(pages));
+  return value;
+}
 export function createDocumentExportBridge(documentId:DocumentId):ExportNativeBridge {
   return {
-    exportPdf:(pages,print,revision,fileName)=>invoke('export_pdf',{document:{documentId,revision},pages,print,fileName}),
+    exportPdf:(pages,print,revision,fileName)=>recordPages(invoke<string|null>('export_pdf',{document:{documentId,revision},pages,print,fileName}),pages),
     exportMidi:(bytes,revision,fileName)=>invoke('export_midi',{document:{documentId,revision},bytes:Array.from(bytes),fileName}),
     exportMusicXml:(bytes,revision,fileName)=>invoke('export_musicxml',{document:{documentId,revision},bytes:Array.from(bytes),fileName}),
     exportAsciiTab:(bytes,revision,fileName)=>invoke('export_ascii_tab',{document:{documentId,revision},bytes:Array.from(bytes),fileName}),
-    exportSvg:(pages,revision,fileName)=>invoke('export_svg',{document:{documentId,revision},pages,fileName}),
+    exportSvg:(pages,revision,fileName)=>recordPages(invoke<boolean>('export_svg',{document:{documentId,revision},pages,fileName}),pages),
     exportPng:(pages,dpi,revision,fileName)=>invoke('export_png',{document:{documentId,revision},pages,dpi,fileName}),
     exportTrackFiles:(format,files,dpi,revision)=>invoke('export_track_files',{document:{documentId,revision},format,files,dpi}),
     exportAudio:(payload,revision,fileName)=>invoke('export_audio',{...payload,document:{documentId,revision},fileName}),

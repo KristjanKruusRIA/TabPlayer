@@ -6,6 +6,7 @@ import { configureEngraving,projectEngraving } from '../engraving/projection';
 import { pageGeometry,paginateEngravedSystems } from '../engraving/page';
 import type { EngravingOverrides,PageLayout } from '../engraving/types';
 import {pageTitleFontSize} from './page-title';
+import {headerFieldsOf} from '../engraving/header-footer';
 const pxPerMm=96/25.4;
 const escaped=(s:string)=>s.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&apos;'}[c]!));
 function dimensions(layout:PrintLayout) {
@@ -82,6 +83,6 @@ export function renderPdfPages(score:model.Score,selection:ExportSelection,layou
   renderer.partialRenderFinished.on(e=>{if(typeof e.renderResult==='string'&&e.height>0)systems.push({svg:e.renderResult,width:e.width,height:e.height});});
   try{renderer.renderScore(copy,selection.tracks);if(failure)throw failure;
     if(renderer.boundsLookup?.staffSystems.some(system=>system.bars.some(bar=>bar.visualBounds.x<-.5||bar.visualBounds.x+bar.visualBounds.w>d.usableWidth+1)))throw new Error('A notation system does not fit this page width. Reduce print scale, use landscape, or add a system break.');
-    if(!systems.length)throw new Error('Notation renderer produced no printable systems.');return frozen?paginateEngravedSystems(systems,score.title,frozen.page):paginateSystems(systems,score.title,layout);}
+    if(!systems.length)throw new Error('Notation renderer produced no printable systems.');return frozen?paginateEngravedSystems(systems,score.title,frozen.page,headerFieldsOf(score)):paginateSystems(systems,score.title,layout);}
   finally{renderer.destroy();}
 }

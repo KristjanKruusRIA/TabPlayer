@@ -23,7 +23,7 @@ vi.mock('./audio/NativePlaybackController',()=>({NativePlaybackController:class 
   subscribe=()=>()=>{};getState=()=>this.state;loadDocument=async()=>{};beforeScoreChange=()=>{};destroy=()=>{};
   generation=7;cursorPlaybackChoices=()=>[];selectionPlaybackChoices=()=>[];playbackOccurrences=()=>[];playFromCursor=()=>{};playSelection=()=>{};loopSelection=()=>{};
   backingTimeline=()=>null;backingScoreSelection=()=>({points:[],spans:[]});
-  setPractice=()=>{};exportPracticeRatio=()=>1;
+  setPractice=()=>{};exportPracticeRatio=()=>1;focus=()=>null;setFocus=async()=>{};
   devices=async()=>[];deviceId=()=>null;backingDurationMs=()=>undefined;mix=()=>undefined;
 }}));
 const originalViewportWidth=window.innerWidth;

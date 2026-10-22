@@ -23,6 +23,14 @@ describe('vector notation pagination',()=>{
     }
     expect(model.JsonConverter.scoreToJson(score)).toBe(before);
   });
+  it('fills custom header and footer fields from the exported score metadata',()=>{
+    const score=music();Object.assign(score,{title:'Song',artist:'Band',copyright:'© 2026',tab:'Tabber'});
+    const bands=(header:string,footer:string)=>({header:{left:header,center:'',right:''},footer:{left:'',center:'',right:footer}});
+    const page={widthMm:210,heightMm:297,marginsMm:{top:15,right:15,bottom:15,left:15},scale:1,profile:'document' as const,headerFooter:{first:bands('%TITLE% — %ARTIST%','%COPYRIGHT% · %PAGE%/%PAGES%'),other:bands('','tab %TABBER%')}};
+    const pages=renderPdfPages(score,{tracks:[0],range:null},layout,{page,engraving:defaultEngraving(),trackIds:['base/0']});
+    const texts=pages.map(page=>[...new DOMParser().parseFromString(page.svg,'image/svg+xml').querySelectorAll('svg > text')].map(text=>text.textContent));
+    expect(texts).toEqual(pages.map((_page,index)=>index?['tab Tabber']:['Song — Band',`© 2026 · 1/${pages.length}`]));
+  });
   it('loads and registers all bundled export font bytes before measurement',async()=>{
     const loaded:Array<{family:string;source:string}>=[],registered:string[]=[];
     class ExportFontFace {

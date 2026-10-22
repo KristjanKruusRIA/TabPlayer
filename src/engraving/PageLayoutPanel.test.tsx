@@ -97,3 +97,33 @@ it('accepts fractional scale boundaries and clears a corrected validation error'
   for(const scale of ['25','100.5','300']){fireEvent.change(screen.getByLabelText('Scale (%)'),{target:{value:scale}});fireEvent.click(screen.getByRole('button',{name:'Apply page layout'}));}
   expect(commands.map(command=>command.layout.scale)).toEqual([0.25,1.005,3]);expect(screen.queryByRole('alert')).not.toBeInTheDocument();
 });
+
+it('edits first-page and other-page header and footer fields, keeping the default shape unless they change',()=>{
+  const commands:PageCommand[]=[];
+  render(<PageLayoutPanel value={page()} busy={false} onEdit={command=>commands.push(command)}/>);
+  expect(screen.getByLabelText('First page header left')).toHaveValue('%TITLE%');expect(screen.getByLabelText('Other pages footer center')).toHaveValue('%PAGE% / %PAGES%');
+  expect(screen.getByText(/%ARTIST%/)).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button',{name:'Apply page layout'}));expect(commands.at(-1)!.layout).toEqual(page());
+  fireEvent.change(screen.getByLabelText('First page header right'),{target:{value:'%ARTIST%'}});
+  fireEvent.change(screen.getByLabelText('Other pages header left'),{target:{value:''}});
+  fireEvent.change(screen.getByLabelText('Other pages footer right'),{target:{value:'%TITLE% %PAGE%'}});
+  fireEvent.click(screen.getByRole('button',{name:'Apply page layout'}));
+  expect(commands.at(-1)!.layout).toEqual({...page(),headerFooter:{
+    first:{header:{left:'%TITLE%',center:'',right:'%ARTIST%'},footer:{left:'',center:'%PAGE% / %PAGES%',right:''}},
+    other:{header:{left:'',center:'',right:''},footer:{left:'',center:'%PAGE% / %PAGES%',right:'%TITLE% %PAGE%'}},
+  }});
+  fireEvent.click(screen.getByRole('button',{name:'Default header and footer'}));
+  expect(screen.getByLabelText('First page header right')).toHaveValue('');
+  fireEvent.click(screen.getByRole('button',{name:'Apply page layout'}));expect(commands.at(-1)!.layout).toEqual(page());
+});
+
+it('shows a saved header and footer and refuses unknown fields',()=>{
+  const value={...page(),headerFooter:{first:{header:{left:'%SUBTITLE%',center:'',right:''},footer:{left:'',center:'',right:''}},other:{header:{left:'',center:'',right:''},footer:{left:'%PAGE%',center:'',right:''}}}};
+  const commands:PageCommand[]=[];
+  render(<PageLayoutPanel value={value} busy={false} onEdit={command=>commands.push(command)}/>);
+  expect(screen.getByLabelText('First page header left')).toHaveValue('%SUBTITLE%');expect(screen.getByLabelText('Other pages footer left')).toHaveValue('%PAGE%');
+  fireEvent.change(screen.getByLabelText('Width (mm)'),{target:{value:'200'}});fireEvent.click(screen.getByRole('button',{name:'Apply page layout'}));
+  expect(commands.at(-1)!.layout).toEqual({...value,widthMm:200});
+  fireEvent.change(screen.getByLabelText('First page footer center'),{target:{value:'%COMPOSER%'}});fireEvent.click(screen.getByRole('button',{name:'Apply page layout'}));
+  expect(screen.getByRole('alert')).toHaveTextContent('First page footer center: unknown field %COMPOSER%.');expect(commands).toHaveLength(1);
+});

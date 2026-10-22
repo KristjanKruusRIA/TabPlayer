@@ -19,7 +19,7 @@
     "value": "088b973cea94bde876859c7e6efadb4dd23da64a",
     "accepted_source_revision": "088b973cea94bde876859c7e6efadb4dd23da64a",
     "documentation_revision": null,
-    "documentation_status": "2026-10-21 update on feat/gp8-parity: F13 missing -> partial, W05 missing -> implemented, F03/F04/D01/D02 evidence refreshed. Earlier P17/P18 checkpoint text is kept in previous_checkpoint and provenance. 2026-10-22: F17 SVG export missing -> implemented. 2026-10-22: F16 PNG export missing -> partial. 2026-10-22: D20 export file-name tokens missing -> partial. 2026-10-22: D20 one file per track added; D20 stays partial. 2026-10-22: S03 track reorder missing -> partial. 2026-10-22: S03 track duplicate added (still partial). 2026-10-22: S03 track color added (still partial). 2026-10-22: T28 wah gestures missing -> partial. 2026-10-22: T27 sustain pedal missing -> partial. 2026-10-22: F14 ASCII tablature export missing -> partial. 2026-10-22: A20 track focus missing -> partial. 2026-10-22: D10 header and footer fields missing -> partial. 2026-10-22: T05 picking and strumming patterns missing -> partial. 2026-10-22: N09 multi-voice selection ties missing -> partial.",
+    "documentation_status": "2026-10-21 update on feat/gp8-parity: F13 missing -> partial, W05 missing -> implemented, F03/F04/D01/D02 evidence refreshed. Earlier P17/P18 checkpoint text is kept in previous_checkpoint and provenance. 2026-10-22: F17 SVG export missing -> implemented. 2026-10-22: F16 PNG export missing -> partial. 2026-10-22: D20 export file-name tokens missing -> partial. 2026-10-22: D20 one file per track added; D20 stays partial. 2026-10-22: S03 track reorder missing -> partial. 2026-10-22: S03 track duplicate added (still partial). 2026-10-22: S03 track color added (still partial). 2026-10-22: T28 wah gestures missing -> partial. 2026-10-22: T27 sustain pedal missing -> partial. 2026-10-22: F14 ASCII tablature export missing -> partial. 2026-10-22: A20 track focus missing -> partial. 2026-10-22: D10 header and footer fields missing -> partial. 2026-10-22: T05 picking and strumming patterns missing -> partial. 2026-10-22: N09 multi-voice selection ties missing -> partial. 2026-10-22: L05 score error display missing -> partial.",
     "provenance": "Root locally accepts P16 source 447d2a9240dc5727ff0679b5b0f84dd7107db603; delivery is pending and the source is not yet pushed at this checkpoint. The final versioned tempo report supports the bounded source/native/current Windows/GP-publication/visual scope. Proprietary GP bracket import/export and playback clipping remain unverified, and the report retains audible, platform and shipping limits. This documentation audit executes no runtime or Git/network operation. The unchanged CI checkpoint belongs to historical Library source only and supplies no P16/current-head CI proof. 2026-10-16 P17/P18 checkpoint: root locally accepts source a87bae29deb08e31a8974d6d2ed390e7b5adca0b for the declared local pitch/filter scope after the frozen 57-step functional workflow at be9e61aa2383974821e7ecf70899e7f755f74f53 and sole 17-step/four-frame targeted confirmation at a87bae29deb08e31a8974d6d2ed390e7b5adca0b. The final UI source has its own admitted diagnostic build; the coherent 2647/617 whole-suite evidence belongs to earlier product source 4a01c341eca58cb25f52c89175ba1fb8c14ee803, not a rerun at this later source. The immutable visual receipt retains inherited observer metadata; the final report binds its additive provenance corrigendum and distinguishes current source/executable/admission/resource/log identities. P17 is implemented within declared local numeric scope and P18 remains partial without vocal/center/channel separation. P16 remains reviewed partial; GP bracket import/export and playback clipping remain unverified. Physical audio, original-GP8, macOS/Linux and shipping acceptance remain separate. Independent final document/adoption review and local documentation delivery/push remain pending; no current-head CI result is supplied and the unchanged CI object remains historical Library evidence. This documentation audit executes no runtime/build, Git or network operation.",
     "previous_accepted_checkpoint": "447d2a9240dc5727ff0679b5b0f84dd7107db603",
     "ci_checkpoint": {
@@ -78,28 +78,28 @@
     },
     "current_dispositions": {
       "implemented": 80,
-      "partial": 106,
-      "missing": 64,
+      "partial": 107,
+      "missing": 63,
       "unverified": 8
     },
-    "evidence_reviewed_total": 122,
+    "evidence_reviewed_total": 123,
     "evidence_reviewed": {
       "implemented": 38,
-      "partial": 80,
+      "partial": 81,
       "missing": 0,
       "unverified": 4
     },
-    "baseline_not_reaudited_total": 136,
+    "baseline_not_reaudited_total": 135,
     "baseline_not_reaudited": {
       "implemented": 42,
       "partial": 26,
-      "missing": 64,
+      "missing": 63,
       "unverified": 4
     },
-    "status_changed_total": 87,
+    "status_changed_total": 88,
     "transition_counts": {
       "missing -> implemented": 24,
-      "missing -> partial": 58,
+      "missing -> partial": 59,
       "partial -> implemented": 5
     }
   },
@@ -1051,6 +1051,24 @@
       "start_line": 64,
       "end_line": 69,
       "kind": "validation_report"
+    },
+    "errors_behavior": {
+      "path": "docs/validation/2026-10-22-gp8-score-errors.md",
+      "start_line": 5,
+      "end_line": 25,
+      "kind": "validation_report"
+    },
+    "errors_evidence": {
+      "path": "docs/validation/2026-10-22-gp8-score-errors.md",
+      "start_line": 27,
+      "end_line": 63,
+      "kind": "validation_report"
+    },
+    "errors_limits": {
+      "path": "docs/validation/2026-10-22-gp8-score-errors.md",
+      "start_line": 65,
+      "end_line": 71,
+      "kind": "validation_report"
     }
   },
   "evidence_file_sha256": {
@@ -1116,7 +1134,8 @@
     "docs/validation/2026-10-22-gp8-track-focus.md": "cfadebb5cb5608786fe92755ab6ad2155e211066add62fcb5bdbf46860a2bb86",
     "docs/validation/2026-10-22-gp8-header-footer.md": "1ccda0a351bf6ba46d279cf192d8fa03524a051e267ddc7372707f90b025ca57",
     "docs/validation/2026-10-22-gp8-stroke-patterns.md": "c07c60d2a2974d69b546c1b8d25aa824ee9d934d547816dbf568d26d1341b8be",
-    "docs/validation/2026-10-22-gp8-selection-ties.md": "d8f9efdb49dc37714fe848d70b965cab2b46c0e0fbb14209e0bb456734903e37"
+    "docs/validation/2026-10-22-gp8-selection-ties.md": "d8f9efdb49dc37714fe848d70b965cab2b46c0e0fbb14209e0bb456734903e37",
+    "docs/validation/2026-10-22-gp8-score-errors.md": "284239b5791e002449063994c3d5c1da036b5dc9672a429b5de06c1f7ac9163f"
   },
   "next_open_families": [
     {
@@ -8965,12 +8984,16 @@
       "acceptance_required": "Identify incomplete bars/voices in score and honor configured display.",
       "runtime_rechecked": false,
       "historical_status": "missing",
-      "current_status": "missing",
-      "assessment": "baseline_not_reaudited",
-      "current_proven_status": null,
-      "current_behavior": "Edit overflow validation exists; no underfull/error-style/playhead color preferences.",
-      "remaining_gap": "Not re-audited in this delivery-progress audit. The original baseline behavior, gap and acceptance remain authoritative historical context; this is not a new current proof.",
-      "current_evidence": [],
+      "current_status": "partial",
+      "assessment": "evidence_reviewed",
+      "current_proven_status": "partial",
+      "current_behavior": "An inspector Score errors section lists every voice whose rhythm is shorter or longer than its measure (measure, track and staff, voice, and the missing or extra length in quarter notes), ignoring grace notes, unused voices and a pickup measure. Each entry selects the measure; error measures are outlined in the rendered score, and a Mark errors in the score viewer preference turns the outline off.",
+      "remaining_gap": "No GP8 error colour or style choices, playhead-colour or navigation preferences; the marking preference lives in WebView storage rather than native preferences; no original-GP8 comparison.",
+      "current_evidence": [
+        "errors_behavior",
+        "errors_evidence",
+        "errors_limits"
+      ],
       "runtime_rechecked_by_this_audit": false
     },
     {

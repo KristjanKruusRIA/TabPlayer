@@ -10,25 +10,29 @@ import {pageGeometry} from './engraving/page';
 import {isPhysicalPageLayout,type ScoreDisplayPreferences} from './engraving/screen-view';
 import {arrangeScreenPages,hitTestScreenPages,mapScreenRect,paginateScreenScore,resolveScreenZoom,type ScreenPagination,type ScreenRenderChunk,type ScreenRect,type ScreenSystem} from './engraving/screen-pages';
 import {installScreenPlayback,type ScreenPlaybackContext} from './engraving/screen-playback';
+import { describeScoreError,type ScoreError } from './editor/score-errors';
 import './ScoreView.css';
 
 const address=(beat:model.Beat):BeatTarget=>({track:beat.voice.bar.staff.track.index,staff:beat.voice.bar.staff.index,bar:beat.voice.bar.index,voice:beat.voice.index,beat:beat.index});
 const sameLane=(a:VoiceAddress,b:VoiceAddress)=>a.track===b.track&&a.staff===b.staff&&a.voice===b.voice;
 const sameBeat=(a:BeatTarget,b:BeatTarget)=>sameLane(a,b)&&a.bar===b.bar&&a.beat===b.beat;
 type Marker={x:number;y:number;w:number;h:number};
+const noErrors:readonly ScoreError[]=[];
 type Handles={start:Marker&{target:BeatTarget};end:Marker&{target:BeatTarget}};
 type Drag={anchor:BeatTarget;last:BeatTarget;lanes:VoiceAddress[];bars?:Extract<MusicSelection,{kind:'bars'}>};
 
 const defaultDisplay:ScoreDisplayPreferences={layout:'parchment',zoomMode:'manual'};
 const defaultPage:PageLayout={widthMm:210,heightMm:297,marginsMm:{top:15,right:15,bottom:15,left:15},scale:1,profile:'document'};
 
-export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSelection=null,onEditorSelection,projection,visibleTracks,engraving,editTarget,editString,editNoteIndex,display=defaultDisplay,page:pageInput=defaultPage,onDisplayStatus}: {
+export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSelection=null,onEditorSelection,projection,visibleTracks,engraving,editTarget,editString,editNoteIndex,display=defaultDisplay,page:pageInput=defaultPage,onDisplayStatus,errors=noErrors}: {
   score:model.Score;track:number;zoom:number;profile:string;onSelect:(target:BeatTarget,string?:number,noteIndex?:number)=>void;
   playback:NativePlaybackController|null;
   editorSelection?:MusicSelection|null;onEditorSelection?:(selection:MusicSelection|null)=>void;
   projection?:EngravingProjection;visibleTracks?:number[];engraving?:EngravingOverrides;
   display?:ScoreDisplayPreferences;page?:PageLayout;onDisplayStatus?:(status:{zoomPercent:number;fitLimited:boolean;pageError:string|null})=>void;
   editTarget?:BeatTarget;editString?:number;editNoteIndex?:number|null;
+  /** Measures to mark as score errors; empty when the viewer turned marking off. */
+  errors?:readonly ScoreError[];
 }) {
   const wrapper=useRef<HTMLDivElement>(null),container=useRef<HTMLDivElement>(null),api=useRef<AlphaTabApi|null>(null);
   const tracks=visibleTracks??[track],renderedScore=projection?.score??score,trackKey=tracks.join(',');
@@ -65,11 +69,12 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
     return()=>{observer?.disconnect();window.removeEventListener('resize',measure);};
   },[]);
   useEffect(()=>{onDisplayStatus?.({zoomPercent:fit.percent,fitLimited:fit.limited,pageError});},[onDisplayStatus,fit.percent,fit.limited,pageError]);
-  const current=useRef({score,track,onSelect,editorSelection,onEditorSelection,projection,tracks,editTarget,editString,editNoteIndex});current.current={score,track,onSelect,editorSelection,onEditorSelection,projection,tracks,editTarget,editString,editNoteIndex};
+  const current=useRef({score,track,onSelect,editorSelection,onEditorSelection,projection,tracks,editTarget,editString,editNoteIndex,errors});current.current={score,track,onSelect,editorSelection,onEditorSelection,projection,tracks,editTarget,editString,editNoteIndex,errors};
   const modifiers=useRef({shift:false,toggle:false,detail:0}),anchor=useRef<BeatTarget|null>(null),drag=useRef<Drag|null>(null);
   const [markers,setMarkers]=useState<Marker[]>([]),[handles,setHandles]=useState<Handles|null>(null);
   const [caret,setCaret]=useState<(Marker&{entry:boolean})|null>(null),caretElement=useRef<HTMLSpanElement>(null),revealCaret=useRef(false),rendering=useRef(false);
-  const refresh=useRef(()=>{}),refreshCaret=useRef(()=>{});
+  const refresh=useRef(()=>{}),refreshCaret=useRef(()=>{}),refreshErrors=useRef(()=>{});
+  const [errorBlocks,setErrorBlocks]=useState<(Marker&{label:string})[]>([]);
   const editBeat=editTarget?score.tracks[editTarget.track]?.staves[editTarget.staff]?.bars[editTarget.bar]?.voices[editTarget.voice]?.beats[editTarget.beat]:undefined;
   const editLocation=editBeat&&editTarget?`Editing ${score.tracks[editTarget.track].name || `track ${editTarget.track+1}`}, measure ${editTarget.bar+1}, beat ${editTarget.beat+1}, voice ${editTarget.voice+1}${editBeat.isEmpty?', empty':editBeat.isRest?', rest':''}${editNoteIndex!=null?`, note ${editNoteIndex+1}`:editString?`, string ${editString}`:''}`:'';
   const canonicalBeat=(beat:model.Beat)=>{
@@ -118,6 +123,22 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
     const box=noteBounds??bounds[0]?.realBounds;
     if(!box||![box.x,box.y,box.w,box.h].every(Number.isFinite)||box.w<=0||box.h<=0){setCaret(null);return;}
     const rect=mapped(box,beatSystem(beat));setCaret(rect?{x:rect.x-3,y:rect.y-3,w:rect.w+6,h:rect.h+6,entry:!noteBounds}:null);
+  };
+  /** Shades each error measure of every shown track once, across its notation and tab lines, wherever the renderer placed it. */
+  refreshErrors.current=()=>{
+    const value=current.current,view=api.current;
+    if(!view||rendering.current||!value.errors.length){setErrorBlocks([]);return;}
+    const measures=new Map<string,ScoreError[]>();
+    for(const error of value.errors)if(value.tracks.includes(error.track)){const key=`${error.track}/${error.staff}/${error.bar}`;measures.set(key,[...measures.get(key)??[],error]);}
+    setErrorBlocks([...measures.values()].flatMap(group=>{
+      const {track,staff,bar:index,voice}=group[0],source=value.score.tracks[track]?.staves[staff]?.bars[index]?.voices[voice]?.beats[0],beat=source?renderedBeat(source):null;
+      const bounds=beat?(view.boundsLookup?.findBeats(beat)??[]).filter(bound=>bound.beat===beat&&bound.barBounds):[];
+      const system=bounds[0]?.barBounds.masterBarBounds?.staffSystemBounds,boxes=bounds.filter(bound=>bound.barBounds.masterBarBounds?.staffSystemBounds===system).map(bound=>bound.barBounds.realBounds);
+      if(!boxes.length)return [];
+      const left=Math.min(...boxes.map(box=>box.x)),top=Math.min(...boxes.map(box=>box.y));
+      const rect=mapped({x:left,y:top,w:Math.max(...boxes.map(box=>box.x+box.w))-left,h:Math.max(...boxes.map(box=>box.y+box.h))-top},system);
+      return rect&&[rect.x,rect.y,rect.w,rect.h].every(Number.isFinite)?[{...rect,label:`Score error: ${group.map(describeScoreError).join('; ')}`}]:[];
+    }));
   };
   const placeHandles=(event:PlaybackHighlightChangeEventArgs)=>{
     setRangeBlocks([]);
@@ -186,7 +207,7 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
     };
     pointerActions.current={downBeat,downNote,move};
     const subscriptions=[view.beatMouseDown.on(downBeat),view.noteMouseDown.on(downNote),view.beatMouseMove.on(move),view.beatMouseUp.on(()=>{drag.current=null;}),view.renderStarted.on(()=>{
-      collecting=true;chunks=[];generation=layoutCurrent.current;rendering.current=true;setCompleted(previous=>previous?.error?previous:null);setCaret(null);setMarkers([]);setHandles(null);setRangeBlocks([]);adapter.renderStarted();
+      collecting=true;chunks=[];generation=layoutCurrent.current;rendering.current=true;setCompleted(previous=>previous?.error?previous:null);setCaret(null);setMarkers([]);setHandles(null);setRangeBlocks([]);setErrorBlocks([]);adapter.renderStarted();
     }),view.renderer.partialRenderFinished.on(event=>{
       if(collecting&&typeof event.renderResult==='string')chunks.push({id:event.id,x:event.x,y:event.y,width:event.width,height:event.height,firstMasterBarIndex:event.firstMasterBarIndex,lastMasterBarIndex:event.lastMasterBarIndex,svg:event.renderResult});
     }),view.postRenderFinished.on(()=>{
@@ -198,7 +219,7 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
           setNatural({score:c.renderedScore,tracks:c.trackKey,layout:c.display.layout,width:c.available.width,engraving:c.engraving,profile:c.profile,value:width});
         }
       }
-      refresh.current();refreshCaret.current();
+      refresh.current();refreshCaret.current();refreshErrors.current();
     }),view.playbackRangeHighlightChanged.on(event=>{if(current.current.editorSelection&&current.current.editorSelection.kind!=='notes')placeHandles(event);})];
     const mouseMove=(event:MouseEvent)=>{
       if(!drag.current)return;const physical=presentation.current.physical;if(physical&&wrapper.current){const rect=wrapper.current.getBoundingClientRect(),hit=hitTestScreenPages(physical.pagination,physical.arrangement,{x:event.clientX-rect.left,y:event.clientY-rect.top},current.current.editTarget);if(hit)move(hit.beat);return;}if(layoutCurrent.current.sourcePhysical)return;const bounds=view.uiFacade.getOffset(null,view.canvasElement),beat=view.boundsLookup?.getBeatAtPos(event.clientX+window.scrollX-bounds.x,event.clientY+window.scrollY-bounds.y);if(beat)move(beat);
@@ -225,7 +246,8 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
     if(!old||old.score!==renderedScore||old.tracks!==trackKey){loaded.current={score:renderedScore,tracks:trackKey};if(playback)playback.setRenderedScore(renderedScore,tracks);else view.renderScore(renderedScore,tracks);}
     else view.render();
   },[renderedScore,trackKey,playback,sourceWidth,sourceScale,sourcePhysical,measureBase,screenLayout,display.layout==='verticalScreen',display.layout==='horizontalScreen',engraving,profile,page]);
-  useLayoutEffect(()=>{playbackPresentation.current?.presentationChanged();refresh.current();refreshCaret.current();},[pagination,arrangement,pageError]);
+  useLayoutEffect(()=>{playbackPresentation.current?.presentationChanged();refresh.current();refreshCaret.current();refreshErrors.current();},[pagination,arrangement,pageError]);
+  useEffect(()=>{refreshErrors.current();},[errors,score,track,zoom,profile,projection,visibleTracks]);
   const capture=(event:ReactMouseEvent<HTMLDivElement>)=>{if(event.button!==0)return;event.preventDefault();event.currentTarget.focus({preventScroll:true});modifiers.current={shift:event.shiftKey,toggle:event.ctrlKey||event.metaKey,detail:event.detail};drag.current=null;};
   const resize=(edge:'start'|'end',event:ReactMouseEvent)=>{
     event.preventDefault();event.stopPropagation();if(event.button!==0||!handles||!editorSelection||editorSelection.kind==='notes')return;
@@ -250,6 +272,7 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
     <span ref={barElement} hidden className="score-playback-bar" aria-hidden="true"/>
     <span ref={beatElement} hidden className="score-playback-beat" aria-hidden="true"/>
     {rangeBlocks.map((block,index)=><span key={index} className="score-range-block" style={{left:block.x,top:block.y,width:block.w,height:block.h}}/>)}
+    {errorBlocks.map((block,index)=><span key={index} role="img" aria-label={block.label} className="score-error-bar" style={{left:block.x,top:block.y,width:block.w,height:block.h}}/>)}
     <span className="score-edit-announcement" role="status" aria-live="polite" aria-atomic="true">{editLocation}</span>
     {caret&&<span ref={caretElement} role="img" aria-label="Edit target" className="score-edit-target" style={{left:caret.x,top:caret.y,width:caret.w,height:caret.h}}>{caret.entry&&<span className="score-edit-entry" aria-hidden="true">{editString?`String ${editString}`:'Entry'}</span>}</span>}
     {markers.map((marker,index)=><span key={index} role="img" aria-label={`Selected note ${index+1}`} style={{position:'absolute',left:marker.x,top:marker.y,width:marker.w,height:marker.h,boxSizing:'border-box',border:'2px solid #9aaf38',background:'rgba(185,205,105,.3)',borderRadius:3,pointerEvents:'none'}}/>)}

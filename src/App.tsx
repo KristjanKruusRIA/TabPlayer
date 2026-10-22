@@ -38,6 +38,8 @@ import { rangeFromBeats,selectionForTrack } from './editor/range-selection';
 import { planMeasureMap } from './editor/measures';
 import { ClipboardStore } from './editor/ClipboardStore';
 import { ClipboardPanel } from './editor/ClipboardPanel';
+import { ScoreErrorsPanel } from './editor/ScoreErrorsPanel';
+import { findScoreErrors,readScoreErrorDisplay,writeScoreErrorDisplay } from './editor/score-errors';
 import { musicClipSelection,scoreFromMusicClip } from './editor/clipboard-source';
 import type { ClipboardMode,PasteOptions } from './editor/clipboard-types';
 import { PracticePanel } from './audio/PracticePanel';
@@ -82,6 +84,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   const [selection,setSelection]=useState<BeatTarget>(documentView.target);
   const [musicSelection,setMusicSelection]=useState<MusicSelection|null>(null),rangeAnchor=useRef<BeatTarget|null>(null);
   const [clipboardVersion,setClipboardVersion]=useState(0),[clipboardError,setClipboardError]=useState<string|null>(null);
+  const [markErrors,setMarkErrors]=useState(readScoreErrorDisplay),scoreErrors=useMemo(()=>findScoreErrors(state.score),[state.score]);
   const clip=useMemo(()=>clipboard.get(),[clipboard,clipboardVersion]),clipboardSection=useRef<HTMLDivElement>(null);
   useEffect(()=>{setMusicSelection(null);rangeAnchor.current=null;},[state.documentEpoch]);
   const editorSelection=(value:MusicSelection|null)=>{rangeAnchor.current=null;setMusicSelection(value);};
@@ -371,7 +374,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
           <TrackDisplayControls ids={trackIds} names={state.score.tracks.map(track=>track.name)} selected={target.track} view={trackView} zoom={zoom} disabled={controlsBusy} onView={setTrackView} onZoom={manualZoom} display={display} onDisplay={setScoreDisplay} actualZoom={displayStatus?.zoomPercent} fitLimited={displayStatus?.fitLimited} pageError={displayStatus?.pageError}/>
           <button aria-pressed={instrumentShown} onClick={()=>instrumentShown?setInstrumentVisible(false):chooseDock('instrument')}>{instrumentShown?'Hide instrument':'Show instrument'}</button>
         </div>
-        <div className="paper-scroll"><div className="paper score-paper-host"><ScoreView score={state.score} track={target.track} zoom={zoom} display={display} page={page} onDisplayStatus={onDisplayStatus} profile="Default" projection={projection} engraving={state.settings.engraving} visibleTracks={visibleTracks} onSelect={select} playback={player} editorSelection={musicSelection} onEditorSelection={editorSelection} editTarget={target} editString={indexed?undefined:string} editNoteIndex={noteIndex}/></div></div>
+        <div className="paper-scroll"><div className="paper score-paper-host"><ScoreView score={state.score} track={target.track} zoom={zoom} display={display} page={page} onDisplayStatus={onDisplayStatus} profile="Default" projection={projection} engraving={state.settings.engraving} visibleTracks={visibleTracks} onSelect={select} playback={player} editorSelection={musicSelection} onEditorSelection={editorSelection} editTarget={target} editString={indexed?undefined:string} editNoteIndex={noteIndex} errors={markErrors?scoreErrors:undefined}/></div></div>
         <div className="score-hint">Measure {target.bar+1} · Beat {target.beat+1} · {indexed?`${location.staff.isPercussion?'Percussion':'Pitched'} note ${noteIndex===null?'entry':noteIndex+1} — Click a note to edit it in the inspector.`:`String ${string} · Fret ${fret} — Click the score, then use arrow keys, digits and Enter.`}</div>
       </section>
       <div ref={inspectorPane} className="workstation-inspector" hidden={!inspectorShown}>
@@ -379,6 +382,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
         practiceTools={player&&playbackState&&<PracticePanel key={state.documentEpoch} settings={playbackState.practice.settings} busy={controlsBusy||playbackState.practicePending||!playbackState.ready} hasBacking={!!audioSettings.backing} onChange={settings=>player.setPractice(settings)}/>}
         presentationTools={<><EngravingPanel key={`engraving/${state.documentEpoch}`} score={state.score} trackIds={trackIds} value={state.settings.engraving} busy={controlsBusy} onEdit={edit}/><PageLayoutPanel key={`page/${state.documentEpoch}`} value={page} busy={controlsBusy} onEdit={edit}/></>}>
         <div ref={clipboardSection}><ClipboardPanel score={state.score} target={target} selection={musicSelection} clip={clip} busy={controlsBusy} onCopy={mode=>copyMusic(mode)} onCut={mode=>copyMusic(mode,true)} onPaste={pasteMusic}/></div>
+        <ScoreErrorsPanel errors={scoreErrors} mark={markErrors} onMark={mark=>{setMarkErrors(mark);writeScoreErrorDisplay(mark);}} onSelect={next=>select(next)} shownTracks={visibleTracks}/>
         <HarmonyTransposePanel key={`harmony/${state.documentEpoch}`} score={state.score} selection={musicSelection} busy={controlsBusy} onEdit={edit}/>
       </EditorPanel>
       </div>

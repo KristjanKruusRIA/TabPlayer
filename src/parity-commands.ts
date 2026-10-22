@@ -1,4 +1,5 @@
 import {validateEngraving} from './engraving/projection';
+import {validateStrokePattern} from './editor/range-edits';
 import {validatePageLayout} from './engraving/page';
 import {validateHarmonyChord} from './harmony/chord-source';
 import {validateBackingSettings} from './document-settings';
@@ -30,6 +31,7 @@ const shapes:Record<string,readonly string[]>={
   setSimile:['track','staff','bar','kind'],
   eraseSelection:['selection'],transposeSelection:['selection','semitones'],moveSelectionStrings:['selection','direction'],
   refingerSelection:['selection','maxFret'],setSelectionSustain:['selection','strings','kind','enabled'],
+  setSelectionStrokes:['selection','technique','pattern'],
   insertMeasures:['beforeBar','count'],removeMeasures:['firstBar','lastBar'],
   pasteMusic:['clip','options'],
   setEngraving:['engraving'],setPageLayout:['layout'],
@@ -179,6 +181,7 @@ export function validateParityCommand(value:unknown):void {
     flag(edit.enabled);if(!['letRing','palmMute'].includes(edit.kind as string))throw new Error('Invalid sustain technique.');
     const strings=nonempty(edit.strings);for(const string of strings){integer(string);if(string===0)throw new Error('Invalid string.');}unique(strings);
   }
+  if(type==='setSelectionStrokes')validateStrokePattern(edit.technique,edit.pattern);
   if(type==='insertMeasures'){integer(edit.beforeBar);integer(edit.count,1000);if(edit.count===0)throw new Error('Insert at least one measure.');}
   if(type==='removeMeasures'){integer(edit.firstBar);integer(edit.lastBar);if(Number(edit.firstBar)>Number(edit.lastBar))throw new Error('Invalid measure range.');}
   if(type==='pasteMusic'){validateMusicClipEnvelope(edit.clip);pasteOptions(edit.options);}

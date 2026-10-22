@@ -1,9 +1,15 @@
 import { useEffect,useState } from 'react';
-import type { RangeCommand,RangePanelProps,VoiceAddress } from './range-types';
+import type { RangeCommand,RangePanelProps,StrokeDirection,StrokeTechnique,VoiceAddress } from './range-types';
 import { resolveSelectionBeats,resolveSelectionNotes,selectionForBars,selectionForTrack,validateMusicSelection } from './range-selection';
 
 function scopeLanes({score,target}:Pick<RangePanelProps,'score'|'target'>,bar:number,scope:string):VoiceAddress[] {
   return score.tracks.filter(track=>scope==='all'||track.index===target.track).flatMap(track=>track.staves.filter(staff=>(scope!=='lane'&&scope!=='staff')||staff.index===target.staff).flatMap(staff=>(staff.bars[bar]?.voices??[]).filter(voice=>scope!=='lane'||voice.index===target.voice).map(voice=>({track:track.index,staff:staff.index,voice:voice.index}))));
+}
+const strokeSteps=new Map<string,StrokeDirection>([['d','down'],['down','down'],['u','up'],['up','up'],['-','none'],['none','none']]);
+/** Reads "D U -" style patterns; words and commas are accepted too. */
+function parseStrokes(text:string):StrokeDirection[]|null {
+  const steps=text.trim().toLowerCase().split(/[\s,]+/).filter(Boolean).map(step=>strokeSteps.get(step));
+  return steps.length&&steps.length<=16&&steps.every(step=>step!==undefined)?steps as StrokeDirection[]:null;
 }
 function readScope({score,target,selection}:Pick<RangePanelProps,'score'|'target'|'selection'>) {
   if(!selection)return 'lane';
@@ -15,6 +21,7 @@ function readScope({score,target,selection}:Pick<RangePanelProps,'score'|'target
 }
 export function RangePanel({score,target,selection,busy,onSelection,onEdit}:RangePanelProps) {
   const [semitones,setSemitones]=useState('1'),[maxFret,setMaxFret]=useState('24'),[strings,setStrings]=useState<number[]>([]),[scope,setScope]=useState(()=>readScope({score,target,selection})),[error,setError]=useState('');
+  const [technique,setTechnique]=useState<StrokeTechnique>('pick'),[pattern,setPattern]=useState('D U');
   const staff=score.tracks[target.track]?.staves[target.staff];
   useEffect(()=>{setSemitones('1');setMaxFret('24');setStrings(staff?.tuning.map((_,index)=>index+1)??[]);setScope(readScope({score,target,selection}));setError('');},[score,selection,target.track,target.staff,target.bar,target.voice,target.beat]);
   let selectedBeats:ReturnType<typeof resolveSelectionBeats>=[],selectedNotes:ReturnType<typeof resolveSelectionNotes>=[],selectionError='';
@@ -34,6 +41,10 @@ export function RangePanel({score,target,selection,busy,onSelection,onEdit}:Rang
   const sustain=(kind:'letRing'|'palmMute',enabled:boolean)=>{
     if(!selection)return;if(!strings.length){setError('Choose at least one string.');return;}
     edit({type:'setSelectionSustain',selection,strings:[...strings].sort((a,b)=>a-b),kind,enabled});
+  };
+  const strokes=(steps:StrokeDirection[]|null)=>{
+    if(!selection)return;if(!steps){setError('Use 1 to 16 steps of D, U or -.');return;}
+    edit({type:'setSelectionStrokes',selection,technique,pattern:steps});
   };
   const broaden=()=>action(()=>{
     if(!selection)return;
@@ -73,6 +84,13 @@ export function RangePanel({score,target,selection,busy,onSelection,onEdit}:Rang
         <label>Maximum fret<input type="number" min={1} max={127} step={1} value={maxFret} onChange={event=>setMaxFret(event.target.value)}/></label><button onClick={fretAction}>Re-finger selection</button>
         <fieldset><legend>Sustain strings</legend>{staff?.tuning.map((_,index)=>{const string=index+1;return <label key={string}><input type="checkbox" checked={strings.includes(string)} onChange={event=>setStrings(event.target.checked?[...strings,string]:strings.filter(value=>value!==string))}/>String {string}</label>;})}</fieldset>
         <div className="editor-actions"><button onClick={()=>sustain('letRing',true)}>Enable let ring</button><button onClick={()=>sustain('letRing',false)}>Disable let ring</button><button onClick={()=>sustain('palmMute',true)}>Enable palm mute</button><button onClick={()=>sustain('palmMute',false)}>Disable palm mute</button></div>
+        <fieldset><legend>Picking and strumming</legend>
+          <label>Pattern technique<select value={technique} onChange={event=>setTechnique(event.target.value as StrokeTechnique)}><option value="pick">Pick stroke</option><option value="brush">Brush</option><option value="arpeggio">Arpeggio</option></select></label>
+          <div className="editor-actions"><button onClick={()=>setPattern('D U')}>Alternate picking</button><button onClick={()=>setPattern('D')}>All downstrokes</button></div>
+          <label>Stroke pattern<input value={pattern} aria-describedby="stroke-pattern-help" onChange={event=>setPattern(event.target.value)}/></label>
+          <p className="muted" id="stroke-pattern-help">Steps D (down), U (up) or - (none) repeat over each voice's notes in order; rests, grace notes and tied notes are skipped. MusicXML export keeps pick strokes but not brushes or arpeggios.</p>
+          <div className="editor-actions"><button onClick={()=>strokes(parseStrokes(pattern))}>Apply stroke pattern</button><button onClick={()=>strokes(['none'])}>Clear strokes</button></div>
+        </fieldset>
       </fieldset>
     </fieldset>
     {(selectionError||error)&&<p role="alert">{selectionError||error}</p>}

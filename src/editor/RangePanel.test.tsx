@@ -73,3 +73,24 @@ it('shows custom mixed scope without silently narrowing the selection',()=>{
   render(<RangePanel score={score} target={target} selection={{kind:'bars',tracks:[0,2],firstBar:0,lastBar:0}} busy={false} onSelection={value=>changes.push(value)} onEdit={()=>{}}/>);
   expect(screen.getByLabelText('Selection scope')).toHaveValue('custom');expect(screen.getByRole('button',{name:'Apply selection scope'})).toBeDisabled();expect(changes).toEqual([]);
 });
+it('applies ordered pick, brush and arpeggio patterns to the selection',()=>{
+  const score=music(),commands:RangeCommand[]=[],bars:MusicSelection={kind:'bars',tracks:[0],firstBar:0,lastBar:1};
+  render(<RangePanel score={score} target={target} selection={bars} busy={false} onSelection={()=>{}} onEdit={edit=>commands.push(edit)}/>);
+  expect(screen.getByLabelText('Stroke pattern')).toHaveValue('D U');
+  fireEvent.click(screen.getByRole('button',{name:'Apply stroke pattern'}));
+  fireEvent.click(screen.getByRole('button',{name:'All downstrokes'}));expect(screen.getByLabelText('Stroke pattern')).toHaveValue('D');
+  fireEvent.change(screen.getByLabelText('Pattern technique'),{target:{value:'brush'}});
+  fireEvent.change(screen.getByLabelText('Stroke pattern'),{target:{value:'d, d up -'}});fireEvent.click(screen.getByRole('button',{name:'Apply stroke pattern'}));
+  fireEvent.change(screen.getByLabelText('Pattern technique'),{target:{value:'arpeggio'}});fireEvent.click(screen.getByRole('button',{name:'Clear strokes'}));
+  fireEvent.click(screen.getByRole('button',{name:'Alternate picking'}));
+  fireEvent.change(screen.getByLabelText('Stroke pattern'),{target:{value:'D sideways'}});fireEvent.click(screen.getByRole('button',{name:'Apply stroke pattern'}));
+  expect(screen.getByRole('alert')).toHaveTextContent('Use 1 to 16 steps of D, U or -.');
+  expect(commands).toEqual([
+    {type:'setSelectionStrokes',selection:bars,technique:'pick',pattern:['down','up']},
+    {type:'setSelectionStrokes',selection:bars,technique:'brush',pattern:['down','down','up','none']},
+    {type:'setSelectionStrokes',selection:bars,technique:'arpeggio',pattern:['none']},
+  ]);
+  expect(screen.getByLabelText('Stroke pattern')).toHaveValue('D sideways');
+  fireEvent.change(screen.getByLabelText('Stroke pattern'),{target:{value:'constructor toString'}});fireEvent.click(screen.getByRole('button',{name:'Apply stroke pattern'}));
+  expect(commands).toHaveLength(3);expect(screen.getByRole('alert')).toHaveTextContent('Use 1 to 16 steps');
+});

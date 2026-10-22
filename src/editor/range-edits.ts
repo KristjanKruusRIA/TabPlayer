@@ -1,5 +1,5 @@
 import { model } from '@coderline/alphatab';
-import type { FingeringPlacement,RangeCommand } from './range-types';
+import type { FingeringPlacement,RangeCommand,StrokeDirection,StrokeTechnique } from './range-types';
 import type { PitchTarget } from './harmony-types';
 import { integer,noteAt } from './common';
 import { allNotes,captureNoteLinks,detachNote } from './links';
@@ -95,13 +95,53 @@ export function applyPitchTargets(score:model.Score,targets:PitchTarget[]):void 
     if(from.tieDestination===to)from.tieDestination=to.beat.notes.find(note=>note.tieOrigin===from)??null;
   }
 }
+const strokeValues={
+  pick:{down:model.PickStroke.Down,up:model.PickStroke.Up,none:model.PickStroke.None},
+  brush:{down:model.BrushType.BrushDown,up:model.BrushType.BrushUp,none:model.BrushType.None},
+  arpeggio:{down:model.BrushType.ArpeggioDown,up:model.BrushType.ArpeggioUp,none:model.BrushType.None},
+} as const;
+export function validateStrokePattern(technique:unknown,pattern:unknown):asserts pattern is StrokeDirection[] {
+  if(typeof technique!=='string'||!Object.hasOwn(strokeValues,technique))throw new Error('Choose pick stroke, brush or arpeggio technique.');
+  if(!Array.isArray(pattern)||!pattern.length||pattern.length>16||!pattern.every(step=>step==='down'||step==='up'||step==='none'))throw new Error('Choose a pattern of 1 to 16 down, up or none steps.');
+}
+/** Matches alphaTex's default spread: a quarter of the beat for brushes, the whole beat for arpeggios. */
+function defaultBrushDuration(beat:model.Beat,technique:'brush'|'arpeggio') {
+  beat.updateDurations();
+  const struck=beat.notes.filter(note=>!note.isTieDestination).length||1;
+  return Math.max(1,Math.round(beat.playbackDuration*(technique==='brush'?0.25:1)/struck));
+}
+/** Ordered patterns repeat over each voice lane's struck beats in time order. Rests, grace beats and beats
+ * holding only tied notes take no step and lose the chosen technique, so a pattern can be cleared everywhere. */
+function applyStrokePattern(beats:model.Beat[],technique:StrokeTechnique,pattern:StrokeDirection[]) {
+  validateStrokePattern(technique,pattern);
+  const lanes=new Map<string,model.Beat[]>(),skipped:model.Beat[]=[];
+  for(const beat of beats){
+    const staff=beat.voice.bar.staff;
+    if(beat.notes.length&&(staff.isPercussion||!staff.tuning.length))throw new Error('Pick and brush patterns need a stringed guitar or bass staff.');
+    if(!beat.notes.length||beat.graceType!==model.GraceType.None||beat.notes.every(note=>note.isTieDestination)){skipped.push(beat);continue;}
+    const key=`${staff.track.index}/${staff.index}/${beat.voice.index}`;(lanes.get(key)??lanes.set(key,[]).get(key)!).push(beat);
+  }
+  const set=(beat:model.Beat,step:StrokeDirection)=>{
+    if(technique==='pick'){beat.pickStroke=strokeValues.pick[step];return;}
+    const value=strokeValues[technique][step],kind=(Object.values(strokeValues[technique]) as model.BrushType[]).includes(beat.brushType)&&beat.brushType!==model.BrushType.None;
+    // A direction flip keeps a spread the user already set; a new brush or arpeggio gets an audible default.
+    beat.brushDuration=value===model.BrushType.None?0:kind&&beat.brushDuration>0?beat.brushDuration:defaultBrushDuration(beat,technique);
+    beat.brushType=value;
+  };
+  for(const beat of skipped)set(beat,'none');
+  for(const lane of lanes.values()){
+    lane.sort((a,b)=>a.voice.bar.index-b.voice.bar.index||a.index-b.index);
+    lane.forEach((beat,index)=>set(beat,pattern[index%pattern.length]));
+  }
+}
 export function applyRangeEdit(score:model.Score,command:RangeCommand):boolean {
-  if(!['eraseSelection','transposeSelection','moveSelectionStrings','refingerSelection','setSelectionSustain'].includes(command.type))return false;
-  const keys={eraseSelection:[],transposeSelection:['semitones'],moveSelectionStrings:['direction'],refingerSelection:['maxFret'],setSelectionSustain:['strings','kind','enabled']}[command.type];fields(command,['type','selection',...keys]);
+  if(!['eraseSelection','transposeSelection','moveSelectionStrings','refingerSelection','setSelectionSustain','setSelectionStrokes'].includes(command.type))return false;
+  const keys={eraseSelection:[],transposeSelection:['semitones'],moveSelectionStrings:['direction'],refingerSelection:['maxFret'],setSelectionSustain:['strings','kind','enabled'],setSelectionStrokes:['technique','pattern']}[command.type];fields(command,['type','selection',...keys]);
   const beats=resolveSelectionBeats(score,command.selection),notes=resolveSelectionNotes(score,command.selection),selected=new Set(notes);
   if(command.type==='eraseSelection'){
     for(const note of notes){const beat=note.beat;detachNote(note);beat.removeNote(note);beat.notes.forEach((member,index)=>member.index=index);beat.isEmpty=false;}return true;
   }
+  if(command.type==='setSelectionStrokes'){applyStrokePattern(beats,command.technique,command.pattern);return true;}
   if(command.type==='setSelectionSustain'){
     if(!Array.isArray(command.strings)||!command.strings.length||new Set(command.strings).size!==command.strings.length||!['letRing','palmMute'].includes(command.kind)||typeof command.enabled!=='boolean')throw new Error('Choose unique strings and a sustain setting.');
     const selection=command.selection,staves=selection.kind==='range'?selection.range.lanes.map(lane=>score.tracks[lane.track].staves[lane.staff]):selection.kind==='bars'?selection.tracks.flatMap(track=>score.tracks[track].staves):notes.map(note=>note.beat.voice.bar.staff);

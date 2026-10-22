@@ -14,7 +14,10 @@ export type RangeCommand =
   | {type:'transposeSelection';selection:MusicSelection;semitones:number}
   | {type:'moveSelectionStrings';selection:MusicSelection;direction:'higher'|'lower'}
   | {type:'refingerSelection';selection:MusicSelection;maxFret:number}
-  | {type:'setSelectionSustain';selection:MusicSelection;strings:number[];kind:'letRing'|'palmMute';enabled:boolean};
+  | {type:'setSelectionSustain';selection:MusicSelection;strings:number[];kind:'letRing'|'palmMute';enabled:boolean}
+  | {type:'setSelectionStrokes';selection:MusicSelection;technique:StrokeTechnique;pattern:StrokeDirection[]};
+export type StrokeTechnique='pick'|'brush'|'arpeggio';
+export type StrokeDirection='down'|'up'|'none';
 export interface FingeringRequest {note:model.Note;pitch:number;preferredString:number|null;fixedString:number|null}
 export interface FingeringPlacement {note:model.Note;string:number;fret:number}
 export interface RangePanelProps {

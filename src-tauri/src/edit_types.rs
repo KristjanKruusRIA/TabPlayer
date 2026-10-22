@@ -137,6 +137,48 @@ impl TryFrom<String> for StringMoveDirection {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", try_from = "String")]
+pub enum StrokeTechnique {
+    Pick,
+    Brush,
+    Arpeggio,
+}
+
+impl TryFrom<String> for StrokeTechnique {
+    type Error = String;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        match value.as_str() {
+            "pick" => Ok(Self::Pick),
+            "brush" => Ok(Self::Brush),
+            "arpeggio" => Ok(Self::Arpeggio),
+            _ => Err("Unsupported stroke technique.".into()),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", try_from = "String")]
+pub enum StrokeDirection {
+    Down,
+    Up,
+    None,
+}
+
+impl TryFrom<String> for StrokeDirection {
+    type Error = String;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        match value.as_str() {
+            "down" => Ok(Self::Down),
+            "up" => Ok(Self::Up),
+            "none" => Ok(Self::None),
+            _ => Err("Unsupported stroke direction.".into()),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", try_from = "String")]
 pub enum SustainKind {
     LetRing,
     PalmMute,
@@ -862,6 +904,11 @@ pub enum EditCommand {
         kind: SustainKind,
         enabled: bool,
     },
+    SetSelectionStrokes {
+        selection: MusicSelection,
+        technique: StrokeTechnique,
+        pattern: Vec<StrokeDirection>,
+    },
     PasteMusic {
         clip: MusicClip,
         options: PasteOptions,
@@ -1255,7 +1302,8 @@ impl EditCommand {
             | Self::TransposeSelection { selection, .. }
             | Self::MoveSelectionStrings { selection, .. }
             | Self::RefingerSelection { selection, .. }
-            | Self::SetSelectionSustain { selection, .. } => {
+            | Self::SetSelectionSustain { selection, .. }
+            | Self::SetSelectionStrokes { selection, .. } => {
                 selection.validate()?;
                 match self {
                     Self::TransposeSelection { semitones, .. }
@@ -1267,6 +1315,11 @@ impl EditCommand {
                     }
                     Self::RefingerSelection { max_fret, .. } if !(1..=127).contains(max_fret) => {
                         return Err("Maximum fret must be from 1 to 127.".into());
+                    }
+                    Self::SetSelectionStrokes { pattern, .. }
+                        if !(1..=16).contains(&pattern.len()) =>
+                    {
+                        return Err("Choose a pattern of 1 to 16 steps.".into());
                     }
                     Self::SetSelectionSustain { strings, .. } => {
                         let mut seen = HashSet::new();
@@ -1893,6 +1946,11 @@ mod tests {
             json!({"type": "insertMeasures", "beforeBar": 0, "count": 1}),
             json!({"type": "removeMeasures", "firstBar": 0, "lastBar": 0}),
         ]);
+        // Appended after the measure commands so index-based tests above keep their positions.
+        commands.extend(music_selections().into_iter().map(|selection| {
+            json!({"type": "setSelectionStrokes", "selection": selection,
+                "technique": "brush", "pattern": ["down", "up", "none"]})
+        }));
         commands
     }
 
@@ -2139,6 +2197,36 @@ mod tests {
         ] {
             let mut value = commands[4].clone();
             value["strings"] = strings;
+            rejected(&value);
+        }
+    }
+
+    #[test]
+    fn stroke_patterns_take_one_to_sixteen_known_steps_and_techniques() {
+        let base = json!({"type": "setSelectionStrokes",
+            "selection": {"kind": "bars", "tracks": [0], "firstBar": 0, "lastBar": 0},
+            "technique": "pick", "pattern": ["down"]});
+        for technique in ["pick", "brush", "arpeggio"] {
+            for length in [1, 16] {
+                let mut value = base.clone();
+                value["technique"] = json!(technique);
+                value["pattern"] = json!(vec!["up"; length]);
+                accepted(&value);
+            }
+        }
+        for (field, invalid) in [
+            ("pattern", json!([])),
+            ("pattern", json!(vec!["down"; 17])),
+            ("pattern", json!(["sideways"])),
+            ("pattern", json!([1])),
+            ("pattern", json!("down")),
+            ("pattern", json!(null)),
+            ("technique", json!("strum")),
+            ("technique", json!("Pick")),
+            ("technique", json!(null)),
+        ] {
+            let mut value = base.clone();
+            value[field] = invalid;
             rejected(&value);
         }
     }

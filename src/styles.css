@@ -37,3 +37,12 @@ input[aria-invalid="true"]{border-color:#e6a18e}
 .keyboard-help>section{position:fixed;z-index:15;top:54px;left:16px;width:min(420px,calc(100vw - 32px));max-height:calc(100dvh - 80px);overflow:auto;padding:20px;background:#1d2530;border:1px solid #465363;border-radius:8px;color:#edf1f5;box-shadow:0 6px 20px #0006;line-height:1.5}
 .keyboard-help h2{margin-bottom:12px;color:#edf1f5}.keyboard-help h3{font-size:13px;margin:20px 0 8px}
 .keyboard-help p{margin:8px 0}.keyboard-help dl{margin:0}.keyboard-help dt{margin-top:12px;font-weight:600;color:#c8ef91}.keyboard-help dd{margin:2px 0 0;color:#b0bdca}
+/* Command palette: anchored near the top like GP8's, with the active option outlined so it reads without color. */
+.command-palette-backdrop{align-items:flex-start;padding-top:12vh}
+.command-palette{background:#1d2530;border:1px solid #465363;border-radius:8px;padding:16px;width:min(560px,calc(100vw - 32px));max-height:70vh;display:flex;flex-direction:column;gap:8px}
+.command-palette h2{margin:0;font-size:1rem}
+.command-palette input{width:100%}
+.command-palette [role="listbox"]{list-style:none;margin:0;padding:0;overflow:auto}
+.command-palette [role="option"]{padding:6px 8px;border-radius:4px;cursor:pointer}
+.command-palette [role="option"].active{background:#2c3a4b;outline:2px solid #7aa7e0;outline-offset:-2px}
+.command-palette [role="option"][aria-disabled="true"]{cursor:default}

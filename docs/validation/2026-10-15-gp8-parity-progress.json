@@ -19,7 +19,7 @@
     "value": "088b973cea94bde876859c7e6efadb4dd23da64a",
     "accepted_source_revision": "088b973cea94bde876859c7e6efadb4dd23da64a",
     "documentation_revision": null,
-    "documentation_status": "2026-10-21 update on feat/gp8-parity: F13 missing -> partial, W05 missing -> implemented, F03/F04/D01/D02 evidence refreshed. Earlier P17/P18 checkpoint text is kept in previous_checkpoint and provenance. 2026-10-22: F17 SVG export missing -> implemented. 2026-10-22: F16 PNG export missing -> partial. 2026-10-22: D20 export file-name tokens missing -> partial. 2026-10-22: D20 one file per track added; D20 stays partial. 2026-10-22: S03 track reorder missing -> partial. 2026-10-22: S03 track duplicate added (still partial). 2026-10-22: S03 track color added (still partial). 2026-10-22: T28 wah gestures missing -> partial. 2026-10-22: T27 sustain pedal missing -> partial. 2026-10-22: F14 ASCII tablature export missing -> partial. 2026-10-22: A20 track focus missing -> partial. 2026-10-22: D10 header and footer fields missing -> partial. 2026-10-22: T05 picking and strumming patterns missing -> partial. 2026-10-22: N09 multi-voice selection ties missing -> partial. 2026-10-22: L05 score error display missing -> partial. 2026-10-22: L06 new score author defaults missing -> partial. 2026-10-22: L07 default view preferences missing -> partial.",
+    "documentation_status": "2026-10-21 update on feat/gp8-parity: F13 missing -> partial, W05 missing -> implemented, F03/F04/D01/D02 evidence refreshed. Earlier P17/P18 checkpoint text is kept in previous_checkpoint and provenance. 2026-10-22: F17 SVG export missing -> implemented. 2026-10-22: F16 PNG export missing -> partial. 2026-10-22: D20 export file-name tokens missing -> partial. 2026-10-22: D20 one file per track added; D20 stays partial. 2026-10-22: S03 track reorder missing -> partial. 2026-10-22: S03 track duplicate added (still partial). 2026-10-22: S03 track color added (still partial). 2026-10-22: T28 wah gestures missing -> partial. 2026-10-22: T27 sustain pedal missing -> partial. 2026-10-22: F14 ASCII tablature export missing -> partial. 2026-10-22: A20 track focus missing -> partial. 2026-10-22: D10 header and footer fields missing -> partial. 2026-10-22: T05 picking and strumming patterns missing -> partial. 2026-10-22: N09 multi-voice selection ties missing -> partial. 2026-10-22: L05 score error display missing -> partial. 2026-10-22: L06 new score author defaults missing -> partial. 2026-10-22: L07 default view preferences missing -> partial. 2026-10-22: W18 command palette missing -> partial.",
     "provenance": "Root locally accepts P16 source 447d2a9240dc5727ff0679b5b0f84dd7107db603; delivery is pending and the source is not yet pushed at this checkpoint. The final versioned tempo report supports the bounded source/native/current Windows/GP-publication/visual scope. Proprietary GP bracket import/export and playback clipping remain unverified, and the report retains audible, platform and shipping limits. This documentation audit executes no runtime or Git/network operation. The unchanged CI checkpoint belongs to historical Library source only and supplies no P16/current-head CI proof. 2026-10-16 P17/P18 checkpoint: root locally accepts source a87bae29deb08e31a8974d6d2ed390e7b5adca0b for the declared local pitch/filter scope after the frozen 57-step functional workflow at be9e61aa2383974821e7ecf70899e7f755f74f53 and sole 17-step/four-frame targeted confirmation at a87bae29deb08e31a8974d6d2ed390e7b5adca0b. The final UI source has its own admitted diagnostic build; the coherent 2647/617 whole-suite evidence belongs to earlier product source 4a01c341eca58cb25f52c89175ba1fb8c14ee803, not a rerun at this later source. The immutable visual receipt retains inherited observer metadata; the final report binds its additive provenance corrigendum and distinguishes current source/executable/admission/resource/log identities. P17 is implemented within declared local numeric scope and P18 remains partial without vocal/center/channel separation. P16 remains reviewed partial; GP bracket import/export and playback clipping remain unverified. Physical audio, original-GP8, macOS/Linux and shipping acceptance remain separate. Independent final document/adoption review and local documentation delivery/push remain pending; no current-head CI result is supplied and the unchanged CI object remains historical Library evidence. This documentation audit executes no runtime/build, Git or network operation.",
     "previous_accepted_checkpoint": "447d2a9240dc5727ff0679b5b0f84dd7107db603",
     "ci_checkpoint": {
@@ -78,28 +78,28 @@
     },
     "current_dispositions": {
       "implemented": 80,
-      "partial": 109,
-      "missing": 61,
+      "partial": 110,
+      "missing": 60,
       "unverified": 8
     },
-    "evidence_reviewed_total": 125,
+    "evidence_reviewed_total": 126,
     "evidence_reviewed": {
       "implemented": 38,
-      "partial": 83,
+      "partial": 84,
       "missing": 0,
       "unverified": 4
     },
-    "baseline_not_reaudited_total": 133,
+    "baseline_not_reaudited_total": 132,
     "baseline_not_reaudited": {
       "implemented": 42,
       "partial": 26,
-      "missing": 61,
+      "missing": 60,
       "unverified": 4
     },
-    "status_changed_total": 90,
+    "status_changed_total": 91,
     "transition_counts": {
       "missing -> implemented": 24,
-      "missing -> partial": 61,
+      "missing -> partial": 62,
       "partial -> implemented": 5
     }
   },
@@ -1105,6 +1105,24 @@
       "start_line": 60,
       "end_line": 67,
       "kind": "validation_report"
+    },
+    "palette_behavior": {
+      "path": "docs/validation/2026-10-22-gp8-command-palette.md",
+      "start_line": 5,
+      "end_line": 36,
+      "kind": "validation_report"
+    },
+    "palette_evidence": {
+      "path": "docs/validation/2026-10-22-gp8-command-palette.md",
+      "start_line": 38,
+      "end_line": 75,
+      "kind": "validation_report"
+    },
+    "palette_limits": {
+      "path": "docs/validation/2026-10-22-gp8-command-palette.md",
+      "start_line": 77,
+      "end_line": 84,
+      "kind": "validation_report"
     }
   },
   "evidence_file_sha256": {
@@ -1173,7 +1191,8 @@
     "docs/validation/2026-10-22-gp8-selection-ties.md": "d8f9efdb49dc37714fe848d70b965cab2b46c0e0fbb14209e0bb456734903e37",
     "docs/validation/2026-10-22-gp8-score-errors.md": "284239b5791e002449063994c3d5c1da036b5dc9672a429b5de06c1f7ac9163f",
     "docs/validation/2026-10-22-gp8-author-defaults.md": "be0531373041b4e3626d2c37378890a3c752ab1041deb157262ecf2f8a8aafce",
-    "docs/validation/2026-10-22-gp8-view-defaults.md": "ba10863dfd2cb6d7eca85712c05d14ec0fc77e6f7c1badd7ffc7e2db25f0950f"
+    "docs/validation/2026-10-22-gp8-view-defaults.md": "ba10863dfd2cb6d7eca85712c05d14ec0fc77e6f7c1badd7ffc7e2db25f0950f",
+    "docs/validation/2026-10-22-gp8-command-palette.md": "6d95ffefde66a88ecd421ef4e7d00e16105449fd31b57a0c24af2c940ae0fb88"
   },
   "next_open_families": [
     {
@@ -1936,12 +1955,16 @@
       "acceptance_required": "Find and execute commands with validated parameters and undo.",
       "runtime_rechecked": false,
       "historical_status": "missing",
-      "current_status": "missing",
-      "assessment": "baseline_not_reaudited",
-      "current_proven_status": null,
-      "current_behavior": "No searchable/typed command dispatcher UI.",
-      "remaining_gap": "Not re-audited in this delivery-progress audit. The original baseline behavior, gap and acceptance remain authoritative historical context; this is not a new current proof.",
-      "current_evidence": [],
+      "current_status": "partial",
+      "assessment": "evidence_reviewed",
+      "current_proven_status": "partial",
+      "current_behavior": "Ctrl/Cmd+Shift+P opens a command palette that matches typed words by prefix and takes one value: go to measure or track, set fret, duration or initial tempo, insert or delete a beat, make a rest, append or remove a measure, undo, redo, play, and the file commands. Invalid values are explained and cannot run; edits go through the undoable edit path.",
+      "remaining_gap": "Fixed command set; no time-signature, key, dynamics, articulation or effect commands; single-value commands only; tempo sets the initial tempo; no recently-used ordering; no original-GP8 comparison.",
+      "current_evidence": [
+        "palette_behavior",
+        "palette_evidence",
+        "palette_limits"
+      ],
       "runtime_rechecked_by_this_audit": false
     },
     {

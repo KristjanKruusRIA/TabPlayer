@@ -3,8 +3,10 @@ import { trackIdentity } from '../engine';
 import { repairSelection } from '../selection';
 import { repairScoreDisplay } from '../engraving/screen-view';
 import type { DocumentViewState } from './types';
+import { currentViewDefaults,defaultDocumentView } from './view-defaults';
+/** The first view of a score without one of its own, from the saved default view. */
 export function initialDocumentView():DocumentViewState {
-  return {target:{track:0,staff:0,bar:0,voice:0,beat:0},selectedString:6,selectedNoteIndex:null,zoom:100,trackView:{kind:'selected'},instrumentVisible:false};
+  return defaultDocumentView(currentViewDefaults());
 }
 export function repairDocumentView(score:model.Score,view:DocumentViewState):DocumentViewState {
   const target=repairSelection(score,view.target),staff=score.tracks[target.track].staves[target.staff];

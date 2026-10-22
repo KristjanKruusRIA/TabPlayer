@@ -118,3 +118,13 @@ it('Library event warnings stay visible while the catalog is closed without chan
   handlers.file_library_snapshot=()=>({version:1,revision:0,welcomeSeen:true,recents:[],roots:[],templates:[],examples:[],warning:null});await boot();await waitFor(()=>expect(boundary.invoke).toHaveBeenCalledWith('file_library_snapshot'));const before=boundary.props.at(-1)!.controller.getState(),event=boundary.listen.mock.calls.find(call=>call[0]==='file-library-changed')!;
   await act(async()=>event[1]({payload:{revision:1,warning:'History could not be written. Retry in Library.'}}));expect(screen.getByRole('alert')).toHaveTextContent('History could not be written. Retry in Library.');expect(screen.getByRole('status')).toHaveTextContent('Recovery backup complete.');expect(boundary.props.at(-1)!.controller.getState()).toBe(before);expect(boundary.audio).toHaveBeenCalledOnce();
 });
+
+it('a fresh startup blank opens in the saved default view even though native reports its standard view',async()=>{
+  localStorage.setItem('tabplayer.viewDefaults',JSON.stringify({layout:'verticalPage',zoomMode:'manual',zoom:140,tracks:'all'}));
+  try{
+    resolution={...resolution,views:{'new-blank':{target:{track:0,staff:0,bar:0,voice:0,beat:0},selectedString:6,selectedNoteIndex:null,zoom:100,trackView:{kind:'selected'},instrumentVisible:false}}};
+    await boot();await waitFor(()=>expect(screen.getByRole('main',{name:'Score editor'})).toBeInTheDocument());
+    expect(boundary.props.at(-1)!.documentView).toMatchObject({zoom:140,trackView:{kind:'all'},scoreDisplay:{layout:'verticalPage',zoomMode:'manual'}});
+    await waitFor(()=>expect(boundary.invoke).toHaveBeenCalledWith('workspace_set_view',expect.objectContaining({documentId:'new-blank'})));
+  }finally{localStorage.removeItem('tabplayer.viewDefaults');}
+});

@@ -6,6 +6,7 @@ import type { NativeSessionBridge } from './recovery-types';
 import type { SyncAnchor } from '../edit-types';
 import { WorkspaceController } from './WorkspaceController';
 import { initialDocumentView } from './view-state';
+import { forgetSessionViewDefaults,writeViewDefaults } from './view-defaults';
 
 const mocks=vi.hoisted(()=>({bridges:new Map<string,NativeBridge>()}));
 vi.mock('../bridge',()=>({createDocumentBridge:(id:string)=>{const bridge=mocks.bridges.get(id);if(!bridge)throw new Error('Missing addressed bridge');return bridge;}}));
@@ -266,4 +267,15 @@ it('busy or invalid drops are rejected before consuming a native token',async()=
   const {workspace:w,first}=await setup(),library={dropStage:vi.fn()};const release=w.beginEditorOperation(first);
   await expect(w.openDrop('token',1,library)).rejects.toThrow(/finish/i);expect(library.dropStage).not.toHaveBeenCalled();release();
   for(const count of [0,33,1.5,NaN])await expect(w.openDrop('token',count,library)).rejects.toThrow(/drop/i);expect(library.dropStage).not.toHaveBeenCalled();
+});
+
+it('a new score starts in the saved default view and reports it to the native session, while existing views stay',async()=>{
+  const {workspace:w,first}=await setup(),session=sessionFixture();w.setSessionBridge(session);w.setView(first,{...initialDocumentView(),zoom:125});
+  try{
+    writeViewDefaults({layout:'verticalPage',zoomMode:'fitPage',zoom:140,tracks:'all'},undefined);
+    await w.newDocument();const created=current(w);
+    expect(created.view).toMatchObject({zoom:140,trackView:{kind:'all'},scoreDisplay:{layout:'verticalPage',zoomMode:'fitPage'}});
+    await vi.waitFor(()=>expect(session.setView).toHaveBeenCalledWith(created.id,created.view));
+    expect(w.getState().documents.find(entry=>entry.id===first)!.view.zoom).toBe(125);
+  }finally{forgetSessionViewDefaults();}
 });

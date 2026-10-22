@@ -40,7 +40,10 @@ async function resolve(restore:boolean) {
     const result=await nativeSessionBridge.resolve(startupToken,restore?preview!.documents.map(document=>document.documentId):[]);
     const seen=new Set<string>();
     issues=[...(preview?.issues ?? []),...result.issues].filter(issue=>{const key=JSON.stringify(issue);if(seen.has(key))return false;seen.add(key);return true;});
-    workspace=await WorkspaceController.create(nativeWorkspaceBridge,{workspace:result.workspace,views:result.views});
+    // Only restored documents keep a native view; a fresh startup blank starts in the saved default view.
+    const restoredIds=new Set(restore?preview!.documents.map(document=>document.documentId):[]);
+    const views=Object.fromEntries(Object.entries(result.views).filter(([documentId])=>restoredIds.has(documentId)));
+    workspace=await WorkspaceController.create(nativeWorkspaceBridge,{workspace:result.workspace,views});
     workspace.setSessionBridge(nativeSessionBridge);
     try {await refreshStatus();}
     catch(error){status={...status,state:'failed',error:message(error)};}

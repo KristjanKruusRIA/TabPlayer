@@ -44,7 +44,10 @@ export class WorkspaceController {
       if(existing){documents.push(existing);continue;}
       const id=record.documentId;
       const controller=await DocumentController.create(createDocumentBridge(id,{saved:record=>this.notifyCommitted(record),failed:error=>this.libraryObserver?.failed(error)}),undefined,record,()=>this.transitioning||!this.subscriptions.has(id));
-      documents.push({id,controller,view:repairDocumentView(controller.getState().score,views[id] ?? initialDocumentView())});
+      const view=repairDocumentView(controller.getState().score,views[id] ?? initialDocumentView());
+      documents.push({id,controller,view});
+      // A view built from the saved defaults is new to the native session; App's mount report is dropped mid-transition.
+      if(!views[id])this.queueView(id,view);
       this.subscriptions.set(id,controller.subscribe(()=>{
         this.update({documents:this.state.documents.map(entry=>{
           if(entry.id!==id)return entry;

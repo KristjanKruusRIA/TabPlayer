@@ -12,7 +12,7 @@ export interface NativeBridge {
   undo(revision:number): Promise<DocumentSnapshot>;
   redo(revision:number): Promise<DocumentSnapshot>;
   saveProject(saveAs: boolean,revision:number): Promise<DocumentSnapshot | null>;
-  exportGp(bytes: Uint8Array,revision:number): Promise<boolean>;
+  exportGp(bytes: Uint8Array,revision:number,fileName?:string): Promise<boolean>;
   readBackingAsset(assetId:string,revision:number):Promise<Uint8Array>;
   askUnsaved(title:string,path:string|null): Promise<'save' | 'discard' | 'cancel'>;
   confirmExport(): Promise<boolean>;
@@ -41,7 +41,7 @@ export function createDocumentBridge(documentId:DocumentId,observer?:DocumentSav
     if(record?.documentId===documentId&&observer)void Promise.resolve().then(()=>observer.saved(record)).catch(error=>observer.failed(error));
     return record;
   },
-  exportGp: (bytes,revision) => desktopTest?invoke('desktop_test_io',{action:'export',documentId,revision,bytes:Array.from(bytes)}):invoke('export_gp',{document:{documentId,revision},bytes:Array.from(bytes)}),
+  exportGp: (bytes,revision,fileName) => desktopTest?invoke('desktop_test_io',{action:'export',documentId,revision,bytes:Array.from(bytes)}):invoke('export_gp',{document:{documentId,revision},bytes:Array.from(bytes),fileName:fileName??null}),
   readBackingAsset: (assetId,revision) => readExportBackingAsset({document:{documentId,revision},assetId}),
   askUnsaved: async (title,path) => {
     const result = await message(`Save changes to “${title}” before closing?${path?`\n${path}`:''}`,{title:'Unsaved score',kind:'warning',buttons:{yes:'Save',no:'Discard',cancel:'Cancel'}});

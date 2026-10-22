@@ -25,7 +25,7 @@ it.each([
   await act(async()=>{expect(await result.current.run({format,selection:{tracks:[0],range:{first:1,last:1}},audio:{sampleRate:48000,bitDepth:24,speed,metronome:false,tailSeconds:.25,backing:includeBacking,includeMix:true}})).toBe(true);});
   expect(payload!.plan.tempos).toEqual([{tick:0,bpm:120},{tick:3840,bpm:60}]);expect(payload!.plan.occurrences.map(item=>[item.startTick,item.endTick,item.startMs,item.endMs])).toEqual([[0,3840,0,2000],[3840,7680,2000,6000]]);
   expect(payload!.plan.playbackEndTick).toBe(7680);expect(payload!.plan.durationMs).toBe(6000);expect(payload!.request).toMatchObject({range:{first:1,last:1},speed:wantSpeed,includeBacking,tailSeconds:.25});expect(payload!.stems).toBe(format==='stems');
-  expect(payload!.settings).toEqual(saved);expect(payload!.settings).not.toBe(stored);expect(payload!.embeddedBytes).toEqual([1,2,3]);expect(api.exportAudio).toHaveBeenCalledWith(payload,19);expect(model.JsonConverter.scoreToJson(score)).toBe(before);expect(stored).toEqual(saved);
+  expect(payload!.settings).toEqual(saved);expect(payload!.settings).not.toBe(stored);expect(payload!.embeddedBytes).toEqual([1,2,3]);expect(api.exportAudio).toHaveBeenCalledWith(payload,19,expect.any(String));expect(model.JsonConverter.scoreToJson(score)).toBe(before);expect(stored).toEqual(saved);
 });
 it('freezes reference settings and embedded bytes while native audio capture is pending',async()=>{
   const score=score120(),stored=settings(),embedded=Uint8Array.of(1,2,3),api=native();let release!:(id:string)=>void,payload:NativeAudioExportPayload|undefined;

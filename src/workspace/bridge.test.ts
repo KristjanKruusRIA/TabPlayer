@@ -17,7 +17,7 @@ async function bridges(desktopTest=false){
 it('addresses every document mutation with the captured document and supplied revision',async()=>{
   const {document:api}=await bridges(),bridge=api.createDocumentBridge('document-a');
   const command={type:'setRest' as const,target:{track:0,staff:0,bar:0,voice:0,beat:0}};
-  await bridge.snapshot();await bridge.applyEdit(command,3,'asset-a');await bridge.undo(4);await bridge.redo(5);await bridge.saveProject(true,6);await bridge.exportGp(new Uint8Array([8,9]),7);await bridge.cancelAsset('asset-a');
+  await bridge.snapshot();await bridge.applyEdit(command,3,'asset-a');await bridge.undo(4);await bridge.redo(5);await bridge.saveProject(true,6);await bridge.exportGp(new Uint8Array([8,9]),7);await bridge.exportGp(new Uint8Array([1]),8,'Song');await bridge.cancelAsset('asset-a');
   expect(bridge.documentId).toBe('document-a');
   expect(native.invoke.mock.calls).toEqual([
     ['project_snapshot',{documentId:'document-a'}],
@@ -25,7 +25,7 @@ it('addresses every document mutation with the captured document and supplied re
     ['undo_edit',{document:{documentId:'document-a',revision:4}}],
     ['redo_edit',{document:{documentId:'document-a',revision:5}}],
     ['save_project',{document:{documentId:'document-a',revision:6},saveAs:true}],
-    ['export_gp',{document:{documentId:'document-a',revision:7},bytes:[8,9]}],
+    ['export_gp',{document:{documentId:'document-a',revision:7},bytes:[8,9],fileName:null}],['export_gp',{document:{documentId:'document-a',revision:8},bytes:[1],fileName:'Song'}],
     ['cancel_asset',{documentId:'document-a',token:'asset-a'}],
   ]);
   expect(api).not.toHaveProperty('nativeBridge');
@@ -78,9 +78,9 @@ it('isolates owner command queues and preserves prompt invalidation plus global 
 
 it('freezes export origin and sends the captured revision with every export kind',async()=>{
   const {exports:api}=await bridges(),bridge=api.createDocumentExportBridge('document-a'),payload={stems:true} as NativeAudioExportPayload;
-  await bridge.exportPdf([],true,2);await bridge.exportMidi(new Uint8Array([4]),3);await bridge.exportMusicXml(new Uint8Array([60]),5);await bridge.exportSvg([{svg:'<svg/>',widthMm:210,heightMm:297}],6);await bridge.exportPng([{svg:'<svg/>',widthMm:210,heightMm:297}],150,8);await bridge.exportAudio(payload,4);await bridge.status('job-a');await bridge.cancel('job-a');
+  await bridge.exportPdf([],true,2,null);await bridge.exportMidi(new Uint8Array([4]),3,'Song');await bridge.exportMusicXml(new Uint8Array([60]),5,'Song');await bridge.exportSvg([{svg:'<svg/>',widthMm:210,heightMm:297}],6,'Song');await bridge.exportPng([{svg:'<svg/>',widthMm:210,heightMm:297}],150,8,'Song');await bridge.exportAudio(payload,4,'Song');await bridge.status('job-a');await bridge.cancel('job-a');
   expect(native.invoke.mock.calls).toEqual([
-    ['export_pdf',{document:{documentId:'document-a',revision:2},pages:[],print:true}],['export_midi',{document:{documentId:'document-a',revision:3},bytes:[4]}],['export_musicxml',{document:{documentId:'document-a',revision:5},bytes:[60]}],['export_svg',{document:{documentId:'document-a',revision:6},pages:[{svg:'<svg/>',widthMm:210,heightMm:297}]}],['export_png',{document:{documentId:'document-a',revision:8},pages:[{svg:'<svg/>',widthMm:210,heightMm:297}],dpi:150}],['export_audio',{document:{documentId:'document-a',revision:4},...payload}],['export_status',{documentId:'document-a',id:'job-a'}],['cancel_export',{documentId:'document-a',id:'job-a'}],
+    ['export_pdf',{document:{documentId:'document-a',revision:2},pages:[],print:true,fileName:null}],['export_midi',{document:{documentId:'document-a',revision:3},bytes:[4],fileName:'Song'}],['export_musicxml',{document:{documentId:'document-a',revision:5},bytes:[60],fileName:'Song'}],['export_svg',{document:{documentId:'document-a',revision:6},pages:[{svg:'<svg/>',widthMm:210,heightMm:297}],fileName:'Song'}],['export_png',{document:{documentId:'document-a',revision:8},pages:[{svg:'<svg/>',widthMm:210,heightMm:297}],dpi:150,fileName:'Song'}],['export_audio',{document:{documentId:'document-a',revision:4},...payload,fileName:'Song'}],['export_status',{documentId:'document-a',id:'job-a'}],['cancel_export',{documentId:'document-a',id:'job-a'}],
   ]);
   expect(api).not.toHaveProperty('nativeExportBridge');
 });

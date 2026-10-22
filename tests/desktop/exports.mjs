@@ -1,15 +1,17 @@
 import {waitForWorkspaceIdle,clickWorkspaceCommand,clickWorkstationButton,revealInspector} from './workstation-commands.mjs';
 import { readDocumentRecord } from './document-context.mjs';
 import assert from 'node:assert/strict';
-import { readFile,mkdir,stat } from 'node:fs/promises';
-import { join } from 'node:path';
+import { readFile,readdir,mkdir,stat } from 'node:fs/promises';
+import { basename,join } from 'node:path';
 import { inflateSync } from 'node:zlib';
 import { launch,stop,connect,directory } from './harness.mjs';
 await mkdir(directory,{recursive:true});
 const runId=Date.now();
-for(const {format,current=false} of [{format:'midi'},{format:'musicxml'},{format:'pdf'},{format:'svg'},{format:'png'},{format:'wav'},{format:'stems'},{format:'wav',current:true},{format:'stems',current:true}]) {
-  const destination=join(directory,`export-${runId}-${format}${current?'-current':''}${format==='midi'?'.mid':format==='stems'?'':`.${format}`}`);
-  const id=launch({TABPLAYER_TEST_EXPORT:destination});let browser;
+for(const {format,current=false,named=false} of [{format:'pdf',named:true},{format:'midi'},{format:'musicxml'},{format:'pdf'},{format:'svg'},{format:'png'},{format:'wav'},{format:'stems'},{format:'wav',current:true},{format:'stems',current:true}]) {
+  let destination=join(directory,`export-${runId}-${format}${current?'-current':''}${format==='midi'?'.mid':format==='stems'?'':`.${format}`}`);
+  // A named export lets the dialog's file-name template choose the file inside a fresh folder.
+  const namedDirectory=join(directory,`export-${runId}-named`);if(named)await mkdir(namedDirectory,{recursive:true});
+  const id=launch(named?{TABPLAYER_TEST_EXPORT_DIR:namedDirectory}:{TABPLAYER_TEST_EXPORT:destination});let browser;
   try {
     browser=await connect();const page=browser.contexts()[0].pages()[0];
     const library=page.getByRole('dialog',{name:'Library',exact:true});await library.getByRole('heading',{name:'Welcome to TabPlayer',exact:true}).waitFor();await library.getByRole('button',{name:'Close',exact:true}).click();await library.waitFor({state:'hidden'});
@@ -22,6 +24,12 @@ for(const {format,current=false} of [{format:'midi'},{format:'musicxml'},{format
     await clickWorkspaceCommand(page,'Export score',{waitForIdle:false});
     const dialog=page.getByRole('dialog',{name:'Export score'});await dialog.getByLabel('Export format').selectOption(format);
     if(format==='png')await dialog.getByLabel('Resolution').selectOption('150');
+    if(named){
+      // The inner dot checks that the extension is appended, not substituted, exactly as previewed.
+      await dialog.getByLabel('File name',{exact:true}).fill('%T - %t. (%n of %N) %d');
+      const preview=(await dialog.getByText(/^Saves as /).innerText()).replace(/^Saves as /,'');
+      assert.match(preview,/^Untitled - .+\. \(1 of \d+\) \d{4}-\d{2}-\d{2}\.pdf$/);destination=join(namedDirectory,preview);
+    }
     if(format==='wav'||format==='stems'){await dialog.getByLabel('Bit depth').selectOption('24');await dialog.getByLabel('Effect tail (seconds)').fill('0.1');if(current)await dialog.getByRole('combobox',{name:/^Speed/}).selectOption('current');}
     await dialog.getByRole('button',{name:'Export',exact:true}).click();
     const deadline=Date.now()+120000;let exists=false;
@@ -53,6 +61,7 @@ for(const {format,current=false} of [{format:'midi'},{format:'musicxml'},{format
     if(format==='wav'){const b=await readFile(destination);assert.equal(b.subarray(0,4).toString(),'RIFF');assert.equal(b.readUInt16LE(22),2);assert.equal(b.readUInt32LE(24),48000);assert.equal(b.readUInt16LE(34),24);assert.equal(b.readUInt32LE(40)+44,b.length);assert.ok(b.subarray(44).some(n=>n!==0));if(current)assert.equal(b.readUInt32LE(40)/(2*3),772800);}
     if(format==='stems'){const m=JSON.parse(await readFile(join(destination,'manifest.json'),'utf8'));assert.ok(m.frames>0);if(current)assert.equal(m.frames,772800);assert.ok(m.tracks.some(t=>t.kind==='mix'));for(const t of m.tracks){assert.equal(t.filename.includes('/'),false);assert.equal(t.filename.includes('\\'),false);const b=await readFile(join(destination,t.filename));assert.equal(b.readUInt32LE(40)/(2*3),m.frames);}}
     await page.screenshot({path:join(directory,`exports-${format}.png`)});
-    console.log(`${format}${current?' at 50% practice speed':''}: native destination, valid output and immutable dirty snapshot passed.`);
+    if(named)assert.deepEqual(await readdir(namedDirectory),[basename(destination)],'The template must name the only exported file.');
+    console.log(`${format}${current?' at 50% practice speed':''}${named?' named from the file-name template':''}: native destination, valid output and immutable dirty snapshot passed.`);
   }finally{if(browser)await browser.close();stop(id);}
 }

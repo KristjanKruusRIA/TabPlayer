@@ -89,6 +89,25 @@ it('submits PNG with the PDF page layout, a background choice and a resolution',
   expect(submit).toHaveBeenLastCalledWith({format:'png',selection:{tracks:[0],range:null},layout,transparent:true,dpi:150});
 });
 
+it('names files from GP8 tokens with a live preview and sends only a changed template',()=>{
+  vi.useFakeTimers({now:new Date(2026,2,30,13,3)});
+  try{
+    const submit=vi.fn(),score=fixture();score.title='Anatole';
+    render(<ExportDialog score={score} layout={layout} busy={false} currentSpeedAvailable={true} onExport={submit} onCancel={()=>{}}/>);
+    const name=screen.getByLabelText('File name');expect(name).toHaveValue('%T');
+    expect(screen.getByText('Saves as Anatole.gp')).toBeVisible();expect(screen.getByText(/%T title, %t track name, %n track number, %N track count, %d date, %h time/)).toBeVisible();
+    fireEvent.click(screen.getByRole('button',{name:'Export'}));expect(submit).toHaveBeenLastCalledWith({format:'gp',selection:{tracks:[0],range:null}});
+    fireEvent.change(screen.getByLabelText('Export format'),{target:{value:'png'}});
+    fireEvent.change(name,{target:{value:'%T - %t (%n of %N) %d %h'}});
+    expect(screen.getByText('Saves as Anatole - Lead (1 of 1) 2026-03-30 13-03.png')).toBeVisible();
+    fireEvent.click(screen.getByRole('button',{name:'Export'}));
+    expect(submit).toHaveBeenLastCalledWith(expect.objectContaining({format:'png',fileName:'%T - %t (%n of %N) %d %h'}));
+    fireEvent.change(screen.getByLabelText('Export format'),{target:{value:'print'}});expect(screen.queryByLabelText('File name')).toBeNull();
+    fireEvent.click(screen.getByRole('button',{name:'Export'}));expect(submit.mock.lastCall?.[0]).not.toHaveProperty('fileName');
+    fireEvent.change(screen.getByLabelText('Export format'),{target:{value:'stems'}});expect(screen.getByText(/^Saves as Anatole - Lead \(1 of 1\) 2026-03-30 13-03$/)).toBeVisible();
+  }finally{vi.useRealTimers();}
+});
+
 it('refreshes GP preflight for score and settings changes without repeating it for progress',()=>{
   const score=fixture(),preflight=vi.fn(()=>null),submit=()=>{},cancel=()=>{};
   const {rerender}=render(<ExportDialog score={score} layout={layout} busy={false} currentSpeedAvailable={true} gpBackingIssue={preflight} onExport={submit} onCancel={cancel}/>);

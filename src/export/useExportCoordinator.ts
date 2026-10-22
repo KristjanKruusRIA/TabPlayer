@@ -10,6 +10,7 @@ import { selectStaves } from './selection';
 import { exportMidi } from './midi';
 import { exportMusicXml } from './musicxml';
 import { clearBacking } from '../interchange/backing-projection';
+import { DEFAULT_FILE_NAME,expandFileName,fileNameContext } from './file-name';
 import { assertPngSize,loadExportFonts,renderPdfPages,svgPageWithBackground } from './pdf';
 import { validateSelection,type ExportOptions,type ExportProgress } from './types';
 import { scoreFromJson } from '../model-clone';
@@ -48,18 +49,19 @@ export function useExportCoordinator({score,settings,currentSpeed,bridge,native,
     try{
       const copy=scoreFromJson(json,new Settings()),selection=frozenOptions.selection;
       restoreNoteLinks(copy,captureNoteLinks(score));copyGpInterchangeSource(score,copy);
+      const name=expandFileName(frozenOptions.fileName??DEFAULT_FILE_NAME,fileNameContext(copy,selection,new Date()));
       if(frozenOptions.format==='gp'){
         if(!await bridge.confirmExport()||cancelled.current||!alive.current)return false;
         const include=frozenOptions.backing!==false,backing=frozenSettings.backing;
         const bytes=include&&backing?(backing.assetId==='embedded'?embedded:await bridge.readBackingAsset(backing.assetId,revision)):null;
         if(cancelled.current||!alive.current)return false;
-        return await bridge.exportGp(exportGp(projectGpDocument({score:copy,settings:frozenSettings,bytes,selection,backing:include})),revision);
+        return await bridge.exportGp(exportGp(projectGpDocument({score:copy,settings:frozenSettings,bytes,selection,backing:include})),revision,name);
       }
-      if(frozenOptions.format==='midi'){if(cancelled.current)return false;return await native.exportMidi(exportMidi(copy,selection),revision);}
+      if(frozenOptions.format==='midi'){if(cancelled.current)return false;return await native.exportMidi(exportMidi(copy,selection),revision,name);}
       // Backing audio is left out; refusals throw here, before the native save dialog opens.
-      if(frozenOptions.format==='musicxml'){clearBacking(copy);const bytes=exportMusicXml(copy,selection);if(cancelled.current)return false;return await native.exportMusicXml(bytes,revision);}
-      if(frozenOptions.format==='svg'||frozenOptions.format==='png'){await loadExportFonts();if(cancelled.current)return false;const rendered=renderPdfPages(copy,selection,frozenOptions.layout,{page:frozenOptions.page??effectivePageLayout({page:null,print:frozenOptions.layout}),engraving:frozenSettings.engraving,trackIds:ids});if(cancelled.current)return false;if(frozenOptions.format==='png')assertPngSize(rendered,frozenOptions.dpi);const pages=frozenOptions.transparent?rendered:rendered.map(svgPageWithBackground);return await (frozenOptions.format==='png'?native.exportPng(pages,frozenOptions.dpi,revision):native.exportSvg(pages,revision));}
-      if(frozenOptions.format==='pdf'||frozenOptions.format==='print'){await loadExportFonts();if(cancelled.current)return false;const pages=renderPdfPages(copy,selection,frozenOptions.layout,{page:frozenOptions.page??effectivePageLayout({page:null,print:frozenOptions.layout}),engraving:frozenSettings.engraving,trackIds:ids});if(cancelled.current)return false;return await watch(await native.exportPdf(pages,frozenOptions.format==='print',revision),active);}
+      if(frozenOptions.format==='musicxml'){clearBacking(copy);const bytes=exportMusicXml(copy,selection);if(cancelled.current)return false;return await native.exportMusicXml(bytes,revision,name);}
+      if(frozenOptions.format==='svg'||frozenOptions.format==='png'){await loadExportFonts();if(cancelled.current)return false;const rendered=renderPdfPages(copy,selection,frozenOptions.layout,{page:frozenOptions.page??effectivePageLayout({page:null,print:frozenOptions.layout}),engraving:frozenSettings.engraving,trackIds:ids});if(cancelled.current)return false;if(frozenOptions.format==='png')assertPngSize(rendered,frozenOptions.dpi);const pages=frozenOptions.transparent?rendered:rendered.map(svgPageWithBackground);return await (frozenOptions.format==='png'?native.exportPng(pages,frozenOptions.dpi,revision,name):native.exportSvg(pages,revision,name));}
+      if(frozenOptions.format==='pdf'||frozenOptions.format==='print'){await loadExportFonts();if(cancelled.current)return false;const pages=renderPdfPages(copy,selection,frozenOptions.layout,{page:frozenOptions.page??effectivePageLayout({page:null,print:frozenOptions.layout}),engraving:frozenSettings.engraving,trackIds:ids});if(cancelled.current)return false;return await watch(await native.exportPdf(pages,frozenOptions.format==='print',revision,frozenOptions.format==='print'?null:name),active);}
       const audio=frozenOptions.audio;
       const selected=selectStaves(copy,selection);
       if(frozenSettings.backing?.referenceSync&&Object.keys(selection.staves??{}).length){
@@ -68,7 +70,7 @@ export function useExportCoordinator({score,settings,currentSpeed,bridge,native,
       }
       const plan=applyReferenceSyncPlan(buildPlaybackPlanFromJson(model.JsonConverter.scoreToJson(selected),ids,++generation.current),frozenSettings.backing);
       if(cancelled.current)return false;
-      return await watch(await native.exportAudio({plan,settings:frozenSettings,embeddedBytes:embedded?Array.from(embedded):null,stems:frozenOptions.format==='stems',request:{tracks:selection.tracks.map(i=>({id:ids[i],name:copy.tracks[i].name,preset:frozenSettings.sounds[ids[i]]?.presetId??'gm',kind:'score'})),range:selection.range,format:{sampleRate:audio.sampleRate,bitDepth:audio.bitDepth},speed,metronome:audio.metronome,tailSeconds:audio.tailSeconds,includeBacking:audio.backing,includeMix:audio.includeMix}},revision),active);
+      return await watch(await native.exportAudio({plan,settings:frozenSettings,embeddedBytes:embedded?Array.from(embedded):null,stems:frozenOptions.format==='stems',request:{tracks:selection.tracks.map(i=>({id:ids[i],name:copy.tracks[i].name,preset:frozenSettings.sounds[ids[i]]?.presetId??'gm',kind:'score'})),range:selection.range,format:{sampleRate:audio.sampleRate,bitDepth:audio.bitDepth},speed,metronome:audio.metronome,tailSeconds:audio.tailSeconds,includeBacking:audio.backing,includeMix:audio.includeMix}},revision,name),active);
     }finally{if(active.cancelRequest)await active.cancelRequest.catch(()=>{});pending.current=false;job.current=null;if(alive.current)setBusy(false);operation.current=null;finish();}
   }
   return {busy,progress,run,cancel};

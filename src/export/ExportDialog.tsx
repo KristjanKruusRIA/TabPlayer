@@ -4,7 +4,9 @@ import { PNG_RESOLUTIONS,validateSelection,type AudioExportOptions,type ExportOp
 import type { PageLayout } from '../engraving/types';
 import { PageLayoutPanel } from '../engraving/PageLayoutPanel';
 import { validatePageLayout } from '../engraving/page';
+import { DEFAULT_FILE_NAME,FILE_NAME_TOKENS,expandFileName,fileNameContext,withExtension } from './file-name';
 import './export-dialog.css';
+const EXTENSIONS:Record<ExportOptions['format'],string>={gp:'gp',pdf:'pdf',print:'',svg:'svg',png:'png',midi:'mid',musicxml:'musicxml',wav:'wav',stems:''};
 export function ExportDialog({score,layout,page,busy,progress,failure,currentSpeedAvailable,gpBackingIssue,onExport,onCancel}:{score:model.Score;layout:PrintLayout;page?:PageLayout;busy:boolean;progress?:ExportProgress;failure?:string|null;currentSpeedAvailable:boolean;onExport:(options:ExportOptions)=>void;onCancel:()=>void;gpBackingIssue?:(selection:ExportSelection)=>string|null}) {
   const [format,setFormat]=useState<ExportOptions['format']>('gp');const [tracks,setTracks]=useState(score.tracks.map(t=>t.index));
   const [staves,setStaves]=useState<Record<number,number[]>>(Object.fromEntries(score.tracks.map(t=>[t.index,t.staves.map(s=>s.index)])));
@@ -12,6 +14,10 @@ export function ExportDialog({score,layout,page,busy,progress,failure,currentSpe
   const [print,setPrint]=useState({...layout});const [audio,setAudio]=useState<AudioExportOptions>({sampleRate:48000,bitDepth:16,speed:'saved',metronome:false,tailSeconds:2,backing:true,includeMix:true});
   const [gpBacking,setGpBacking]=useState(true),[transparent,setTransparent]=useState(false),[dpi,setDpi]=useState<PngResolution>(300);
   const paged=format==='pdf'||format==='print'||format==='svg'||format==='png';
+  const [fileName,setFileName]=useState(DEFAULT_FILE_NAME),[now,setNow]=useState(()=>new Date());
+  // Keep %d and %h in the preview current while the dialog stays open.
+  useEffect(()=>{const timer=setInterval(()=>setNow(new Date()),15000);return()=>clearInterval(timer);},[]);
+  const savedName=withExtension(expandFileName(fileName,fileNameContext(score,{tracks:tracks.length?tracks:[0],range:null},now)),EXTENSIONS[format]);
   const [error,setError]=useState('');
   const [customPage,setCustomPage]=useState(()=>page?structuredClone(page):null);
   const topology=`${score.masterBars.length}:${score.tracks.map(track=>track.staves.length).join(',')}`;
@@ -53,12 +59,16 @@ export function ExportDialog({score,layout,page,busy,progress,failure,currentSpe
       if(!Number.isFinite(audio.tailSeconds)||audio.tailSeconds<0||audio.tailSeconds>30)throw new Error('Effect tail must be between 0 and 30 seconds.');
       if(paged&&!customPage&&(!Number.isFinite(print.marginMm)||print.marginMm<0||print.marginMm>50||!Number.isFinite(print.scale)||print.scale<.25||print.scale>3))throw new Error('Use margins from 0 to 50 mm and scale from 25% to 300%.');
       if(paged&&customPage)validatePageLayout(customPage);
-      setError('');onExport(format==='svg'?{format,selection,layout:print,...(customPage?{page:structuredClone(customPage)}:{}),transparent}:format==='png'?{format,selection,layout:print,...(customPage?{page:structuredClone(customPage)}:{}),transparent,dpi}:format==='pdf'||format==='print'?{format,selection,layout:print,...(customPage?{page:structuredClone(customPage)}:{})}:format==='wav'||format==='stems'?{format,selection,audio}:format==='gp'?{format,selection,...(!gpBacking?{backing:false}:{})}:{format,selection});
+      const named=format!=='print'&&fileName!==DEFAULT_FILE_NAME?{fileName}:{};
+      setError('');onExport({...(format==='svg'?{format,selection,layout:print,...(customPage?{page:structuredClone(customPage)}:{}),transparent}:format==='png'?{format,selection,layout:print,...(customPage?{page:structuredClone(customPage)}:{}),transparent,dpi}:format==='pdf'||format==='print'?{format,selection,layout:print,...(customPage?{page:structuredClone(customPage)}:{})}:format==='wav'||format==='stems'?{format,selection,audio}:format==='gp'?{format,selection,...(!gpBacking?{backing:false}:{})}:{format,selection}),...named} as ExportOptions);
     }catch(e){setError((e as Error).message);}
   }
   return <div className="dialog-backdrop"><div ref={dialog} onKeyDown={handleKeyDown} role="dialog" aria-modal="true" aria-label="Export score" className="export-dialog"><h2>Export score</h2>
     <fieldset disabled={busy}>
       <label>Export format<select value={format} onChange={e=>setFormat(e.target.value as ExportOptions['format'])}><option value="gp">Guitar Pro</option><option value="pdf">PDF</option><option value="print">Print</option><option value="svg">SVG</option><option value="png">PNG</option><option value="midi">MIDI</option><option value="musicxml">MusicXML</option><option value="wav">Mixed WAV</option><option value="stems">WAV stems</option></select></label>
+      {format!=='print'&&<div className="export-file-name"><label>File name<input value={fileName} spellCheck={false} onChange={e=>setFileName(e.target.value)}/></label>
+        <p className="muted">{`Tokens: ${FILE_NAME_TOKENS}. Track tokens use the first selected track.`}</p>
+        <p aria-live="polite">{`Saves as ${savedName}`}</p>{(format==='svg'||format==='png')&&<p className="muted">Several pages are saved with -1, -2 and so on before the extension.</p>}</div>}
       <fieldset className="export-selection"><legend>Tracks to export</legend>{score.tracks.map(t=><div key={t.index} role="group" aria-label={`${t.name||`Track ${t.index+1}`} track and staves`} className="export-track">
         <label className="export-check"><input type="checkbox" checked={tracks.includes(t.index)} onChange={e=>setTracks(e.target.checked?[...tracks,t.index].sort((a,b)=>a-b):tracks.filter(n=>n!==t.index))}/>{t.name||`Track ${t.index+1}`}</label>
         {tracks.includes(t.index)&&t.staves.length>1&&<div className="export-staves">{t.staves.map(s=><label className="export-check" key={s.index}><input type="checkbox" checked={staves[t.index].includes(s.index)} onChange={e=>setStaves({...staves,[t.index]:e.target.checked?[...staves[t.index],s.index].sort((a,b)=>a-b):staves[t.index].filter(i=>i!==s.index)})}/>{t.name} staff {s.index+1}</label>)}</div>}
@@ -78,7 +88,7 @@ export function ExportDialog({score,layout,page,busy,progress,failure,currentSpe
       {(format==='gp'||paged)&&<p>Engraving settings affect the screen and PDF. GP export preserves source styling and supports uniform common/cut choices; mixed measure choices cannot be exported.</p>}
       {(format==='svg'||format==='png')&&<label className="export-check"><input type="checkbox" checked={transparent} onChange={e=>setTransparent(e.target.checked)}/>Transparent background</label>}
       {format==='svg'&&<p>SVG writes one file per page. Notation and text are written as outlines, so the files need no fonts to view.</p>}
-      {format==='png'&&<><label>Resolution<select value={dpi} onChange={e=>setDpi(Number(e.target.value) as PngResolution)}>{PNG_RESOLUTIONS.map(value=><option key={value} value={value}>{value} dpi</option>)}</select></label><p>PNG writes one image per page at the chosen resolution. Several pages are numbered after the file name.</p></>}
+      {format==='png'&&<><label>Resolution<select value={dpi} onChange={e=>setDpi(Number(e.target.value) as PngResolution)}>{PNG_RESOLUTIONS.map(value=><option key={value} value={value}>{value} dpi</option>)}</select></label><p>PNG writes one image per page at the chosen resolution.</p></>}
       {format==='musicxml'&&<p>MusicXML keeps notes, techniques, lyrics and tempo. It leaves out fermata lengths, backing audio, mixer settings, and layout and styling. Anything else it cannot write, such as instrument changes or gradual volume changes, stops the export with a message.</p>}
       {format==='midi'&&<p>MIDI preserves generated notes and controls. Ordinary MIDI players share pitch bends on a channel, so simultaneous independent bends may differ.</p>}
       {(format==='wav'||format==='stems')&&<fieldset className="export-audio"><legend>Audio</legend><div className="export-audio-options">

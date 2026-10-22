@@ -22,7 +22,7 @@ it('exports current committed backing bytes and the original full route at the c
   const bridge={confirmExport:async()=>true,readBackingAsset:read,exportGp:publish};
   const api=native(),{result}=renderHook(()=>useExportCoordinator({revision:19,score,settings,currentSpeed:1,bridge,native:api}));
   await act(async()=>{expect(await result.current.run({format:'gp',selection:{tracks:[0],range:{first:1,last:1}}})).toBe(true);});
-  expect(read).toHaveBeenCalledWith('a'.repeat(64),19);expect(publish).toHaveBeenCalledWith(expect.any(Uint8Array),19);
+  expect(read).toHaveBeenCalledWith('a'.repeat(64),19);expect(publish).toHaveBeenCalledWith(expect.any(Uint8Array),19,expect.any(String));
   const reopened=loadInterchangeScore(bytes!,new Settings());expect(reopened.masterBars).toHaveLength(1);expect(reopened.backingTrack?.rawAudioFile).toEqual(Uint8Array.of(9,8,7));
   expect(reopened.exportFlatSyncPoints().map(point=>point.millisecondOffset)).toEqual([3000,7000]);expect(reopened.masterBars[0].tempoAutomations.map(point=>point.value)).toEqual([120]);
   expect(model.JsonConverter.scoreToJson(score)).toBe(before);expect(settings).toEqual(saved);
@@ -74,7 +74,7 @@ it('freezes custom page and engraving at launch and uses explicit export tracks'
   let pending!:Promise<boolean>;act(()=>{pending=result.current.run({format:'pdf',selection:{tracks:[0],range:null},layout,page:settings.page!});});
   settings.page.widthMm=300;settings.engraving.stylesheet.hideDynamics=false;release();await act(async()=>{await pending;});
   expect(renderPages).toHaveBeenCalledWith(expect.anything(),{tracks:[0],range:null},layout,{page:expect.objectContaining({widthMm:250}),engraving:expect.objectContaining({stylesheet:expect.objectContaining({hideDynamics:true})}),trackIds:['base/0']});
-  expect(exportPdf).toHaveBeenCalledWith([{widthMm:250,heightMm:350,svg:'<svg/>'}],false,7);
+  expect(exportPdf).toHaveBeenCalledWith([{widthMm:250,heightMm:350,svg:'<svg/>'}],false,7,expect.any(String));
 });
 it('honors explicit legacy export geometry when the caller omits a custom page',async()=>{
   const score=music(),settings=defaultDocumentSettings();vi.spyOn(pdf,'loadExportFonts').mockResolvedValue();
@@ -175,13 +175,13 @@ it.each(['gp','midi','musicxml','pdf','print','svg','png','wav','stems'] as cons
   const source={score,settings,embeddedBacking:Uint8Array.of(5,6),revision:19};
   const options:ExportOptions=format==='wav'||format==='stems'?{format,selection:{tracks:[0],range:null},audio:{sampleRate:48000 as const,bitDepth:16 as const,speed:'saved' as const,metronome:false,tailSeconds:0,backing:true,includeMix:false}}:format==='pdf'||format==='print'?{format,selection:{tracks:[0],range:null},layout:{paper:'A4' as const,orientation:'portrait' as const,marginMm:15,scale:1,profile:'Score' as const}}:format==='svg'?{format,selection:{tracks:[0],range:null},layout:{paper:'A4' as const,orientation:'portrait' as const,marginMm:15,scale:1,profile:'Score' as const},transparent:false}:format==='png'?{format,selection:{tracks:[0],range:null},layout:{paper:'A4' as const,orientation:'portrait' as const,marginMm:15,scale:1,profile:'Score' as const},transparent:false,dpi:300}:{format,selection:{tracks:[0],range:null}};
   await act(async()=>{expect(await result.current.run(options,source)).toBe(true);});
-  if(format==='gp'){expect(gp).toHaveBeenCalledWith(expect.any(Uint8Array),19);expect(loadInterchangeScore(gp.mock.calls[0][0],new Settings()).title).toBe('Latest');}
-  else if(format==='midi')expect(api.exportMidi).toHaveBeenCalledWith(expect.any(Uint8Array),19);
+  if(format==='gp'){expect(gp).toHaveBeenCalledWith(expect.any(Uint8Array),19,'Latest');expect(loadInterchangeScore(gp.mock.calls[0][0],new Settings()).title).toBe('Latest');}
+  else if(format==='midi')expect(api.exportMidi).toHaveBeenCalledWith(expect.any(Uint8Array),19,'Latest');
   else if(format==='musicxml'){const [bytes,revision]=vi.mocked(api.exportMusicXml).mock.calls[0];expect(ArrayBuffer.isView(bytes)).toBe(true);expect(revision).toBe(19);expect(loadInterchangeScore(bytes,new Settings()).title).toBe('Latest');}
-  else if(format==='svg'){expect(api.exportSvg).toHaveBeenCalledWith(expect.any(Array),19);expect(pages.mock.calls[0][0].title).toBe('Latest');}
-  else if(format==='png'){expect(api.exportPng).toHaveBeenCalledWith(expect.any(Array),300,19);expect(pages.mock.calls[0][0].title).toBe('Latest');}
-  else if(format==='pdf'||format==='print'){expect(api.exportPdf).toHaveBeenCalledWith(expect.any(Array),format==='print',19);expect(pages.mock.calls[0][0].title).toBe('Latest');}
-  else expect(api.exportAudio).toHaveBeenCalledWith(expect.objectContaining({settings,embeddedBytes:[5,6],stems:format==='stems'}),19);
+  else if(format==='svg'){expect(api.exportSvg).toHaveBeenCalledWith(expect.any(Array),19,'Latest');expect(pages.mock.calls[0][0].title).toBe('Latest');}
+  else if(format==='png'){expect(api.exportPng).toHaveBeenCalledWith(expect.any(Array),300,19,'Latest');expect(pages.mock.calls[0][0].title).toBe('Latest');}
+  else if(format==='pdf'||format==='print'){expect(api.exportPdf).toHaveBeenCalledWith(expect.any(Array),format==='print',19,format==='print'?null:'Latest');expect(pages.mock.calls[0][0].title).toBe('Latest');}
+  else expect(api.exportAudio).toHaveBeenCalledWith(expect.objectContaining({settings,embeddedBytes:[5,6],stems:format==='stems'}),19,'Latest');
 });
 it('leaves embedded backing audio out of MusicXML without touching the live score',async()=>{
   const score=music();score.backingTrack=new model.BackingTrack();score.backingTrack.rawAudioFile=Uint8Array.of(1,2,3);score.masterBars[0].syncPoints=[Object.assign(new model.Automation(),{type:model.AutomationType.SyncPoint,ratioPosition:0,syncPointValue:Object.assign(new model.SyncPointData(),{millisecondOffset:0})})];
@@ -215,6 +215,15 @@ it.each([[[{widthMm:1000,heightMm:1000}],'too large for that resolution. Choose 
   const {result}=renderHook(()=>useExportCoordinator({revision:7,score:music(),settings:defaultDocumentSettings(),currentSpeed:1,bridge:{readBackingAsset:async()=>{throw new Error('Unexpected backing read.');},confirmExport:async()=>true,exportGp:async()=>true},native:api}));
   await act(async()=>{await expect(result.current.run({format:'png',selection:{tracks:[0],range:null},layout:{paper:'A4',orientation:'portrait',marginMm:15,scale:1,profile:'Score'},transparent:false,dpi:600})).rejects.toThrow(message);});
   expect(save).not.toHaveBeenCalled();expect(result.current.busy).toBe(false);
+});
+it('expands the file-name template from the frozen copy and selection when the export runs',async()=>{
+  vi.useFakeTimers({now:new Date(2026,2,30,13,3),toFake:['Date']});
+  try{
+    const score=music();score.title='Anatole';score.tracks[0].name='Lead';const api=native(),save=vi.fn(async()=>true);api.exportMidi=save;
+    const {result}=renderHook(()=>useExportCoordinator({revision:7,score,settings:defaultDocumentSettings(),currentSpeed:1,bridge:{readBackingAsset:async()=>{throw new Error('Unexpected backing read.');},confirmExport:async()=>true,exportGp:async()=>true},native:api}));
+    await act(async()=>{expect(await result.current.run({format:'midi',selection:{tracks:[0],range:null},fileName:'%T/%t %n of %N %d %h'})).toBe(true);});
+    expect(save).toHaveBeenCalledWith(expect.any(Uint8Array),7,`Anatole-Lead 1 of ${score.tracks.length} 2026-03-30 13-03`);
+  }finally{vi.useRealTimers();}
 });
 it('refuses unsupported MusicXML notation before opening the native save dialog',async()=>{
   const score=music();score.masterBars[0].tempoAutomations=[model.Automation.buildTempoAutomation(true,0,120,2)];

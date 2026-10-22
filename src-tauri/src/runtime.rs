@@ -482,26 +482,36 @@ fn export_destination(
     app: &AppHandle,
     extension: &str,
     folder: bool,
+    file_name: Option<&str>,
 ) -> Result<Option<PathBuf>, String> {
+    let name = crate::suggested_name(
+        file_name,
+        if folder {
+            "TabPlayer-stems"
+        } else {
+            "TabPlayer-export"
+        },
+    );
     #[cfg(feature = "desktop-test")]
     if std::env::var("TABPLAYER_DESKTOP_TEST").as_deref() == Ok("1") {
-        let path = std::env::var_os("TABPLAYER_TEST_EXPORT")
-            .map(PathBuf::from)
-            .ok_or("Test export destination is missing.")?;
+        // A test folder stands in for the folder the user would pick, so the suggested name decides the file.
+        let path = match std::env::var_os("TABPLAYER_TEST_EXPORT_DIR") {
+            Some(directory) => PathBuf::from(directory).join(&name),
+            None => std::env::var_os("TABPLAYER_TEST_EXPORT")
+                .map(PathBuf::from)
+                .ok_or("Test export destination is missing.")?,
+        };
+        // Append the extension the way the save dialog path does, so dotted names survive.
         return Ok(Some(if folder {
             path
         } else {
-            path.with_extension(extension)
+            crate::with_extension(path, extension)
         }));
     }
     let selected = app
         .dialog()
         .file()
-        .set_file_name(if folder {
-            "TabPlayer-stems"
-        } else {
-            "TabPlayer-export"
-        })
+        .set_file_name(&name)
         .blocking_save_file();
     selected
         .map(|path| {
@@ -521,9 +531,10 @@ fn export_destination(
 pub async fn export_midi(
     document: DocumentRevision,
     bytes: Vec<u8>,
+    file_name: Option<String>,
     app: AppHandle,
 ) -> Result<bool, String> {
-    let Some(path) = export_destination(&app, "mid", false)? else {
+    let Some(path) = export_destination(&app, "mid", false, file_name.as_deref())? else {
         return Ok(false);
     };
     tauri::async_runtime::spawn_blocking(move || {
@@ -544,9 +555,10 @@ pub async fn export_midi(
 pub async fn export_musicxml(
     document: DocumentRevision,
     bytes: Vec<u8>,
+    file_name: Option<String>,
     app: AppHandle,
 ) -> Result<bool, String> {
-    let Some(path) = export_destination(&app, "musicxml", false)? else {
+    let Some(path) = export_destination(&app, "musicxml", false, file_name.as_deref())? else {
         return Ok(false);
     };
     tauri::async_runtime::spawn_blocking(move || {
@@ -567,9 +579,10 @@ pub async fn export_musicxml(
 pub async fn export_svg(
     document: DocumentRevision,
     pages: Vec<SvgPage>,
+    file_name: Option<String>,
     app: AppHandle,
 ) -> Result<bool, String> {
-    let Some(path) = export_destination(&app, "svg", false)? else {
+    let Some(path) = export_destination(&app, "svg", false, file_name.as_deref())? else {
         return Ok(false);
     };
     tauri::async_runtime::spawn_blocking(move || {
@@ -598,9 +611,10 @@ pub async fn export_png(
     document: DocumentRevision,
     pages: Vec<SvgPage>,
     dpi: u32,
+    file_name: Option<String>,
     app: AppHandle,
 ) -> Result<bool, String> {
-    let Some(path) = export_destination(&app, "png", false)? else {
+    let Some(path) = export_destination(&app, "png", false, file_name.as_deref())? else {
         return Ok(false);
     };
     tauri::async_runtime::spawn_blocking(move || {
@@ -629,12 +643,13 @@ pub async fn export_pdf(
     document: DocumentRevision,
     pages: Vec<SvgPage>,
     print: bool,
+    file_name: Option<String>,
     app: AppHandle,
 ) -> Result<Option<String>, String> {
     let destination = if print {
         None
     } else {
-        let Some(path) = export_destination(&app, "pdf", false)? else {
+        let Some(path) = export_destination(&app, "pdf", false, file_name.as_deref())? else {
             return Ok(None);
         };
         Some(path)
@@ -741,6 +756,7 @@ pub async fn export_audio(
     mut settings: DocumentSettings,
     embedded_bytes: Option<Vec<u8>>,
     stems: bool,
+    file_name: Option<String>,
     app: AppHandle,
 ) -> Result<Option<String>, String> {
     settings.validate()?;
@@ -753,7 +769,7 @@ pub async fn export_audio(
         request.tail_seconds,
         plan.duration_ms / 1000.0,
     )?;
-    let Some(path) = export_destination(&app, "wav", stems)? else {
+    let Some(path) = export_destination(&app, "wav", stems, file_name.as_deref())? else {
         return Ok(None);
     };
     let launch_app = app.clone();

@@ -7,7 +7,8 @@ export const PNG_RESOLUTIONS=[72,150,300,600] as const;
 export type PngResolution=typeof PNG_RESOLUTIONS[number];
 export interface SvgSystem { svg:string; width:number; height:number }
 export interface AudioExportOptions { sampleRate:44100|48000;bitDepth:16|24;speed:'saved'|'current';metronome:boolean;tailSeconds:number;backing:boolean;includeMix:boolean }
-export type ExportOptions =
+/** `fileName` is a GP8 token template, present only when it differs from the default. */
+export type ExportOptions = (
   | {format:'gp';selection:ExportSelection;backing?:boolean}
   | {format:'midi';selection:ExportSelection}
   | {format:'musicxml';selection:ExportSelection}
@@ -16,7 +17,8 @@ export type ExportOptions =
   | {format:'svg';selection:ExportSelection;layout:PrintLayout;page?:PageLayout;transparent:boolean}
   | {format:'png';selection:ExportSelection;layout:PrintLayout;page?:PageLayout;transparent:boolean;dpi:PngResolution}
   | {format:'wav';selection:ExportSelection;audio:AudioExportOptions}
-  | {format:'stems';selection:ExportSelection;audio:AudioExportOptions};
+  | {format:'stems';selection:ExportSelection;audio:AudioExportOptions}
+)&{fileName?:string};
 export interface ExportProgress { id:string;frames:number;totalFrames:number;status:'running'|'complete'|'cancelled'|'failed';error?:string|null }
 export function validateSelection(trackCount:number,barCount:number,selection:ExportSelection,staffCounts:number[]=[]) {
   if (!selection.tracks.length) throw new Error('Select at least one track to export.');

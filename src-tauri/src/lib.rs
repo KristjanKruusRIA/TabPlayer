@@ -375,6 +375,48 @@ fn redo_edit(
     result
 }
 
+/// The dialog's suggested name, validated again so a bad name can only fall back to the default.
+pub(crate) fn suggested_name(name: Option<&str>, fallback: &str) -> String {
+    let reserved = |stem: &str| {
+        let upper = stem.to_ascii_uppercase();
+        let number = |rest: &str| {
+            let mut chars = rest.chars();
+            matches!(chars.next(), Some('1'..='9' | '¹' | '²' | '³')) && chars.next().is_none()
+        };
+        ["CON", "PRN", "AUX", "NUL"].contains(&upper.as_str())
+            || upper.strip_prefix("COM").is_some_and(number)
+            || upper.strip_prefix("LPT").is_some_and(number)
+    };
+    // Invisible direction and format marks can disguise a file type, as in "Report\u{202E}fdp.wav".
+    let unsafe_char = |c: char| {
+        c.is_control()
+            || "<>:\"/\\|?*".contains(c)
+            || matches!(c, '\u{200B}'..='\u{200F}' | '\u{2028}'..='\u{202E}' | '\u{2060}'..='\u{206F}' | '\u{FEFF}')
+    };
+    match name {
+        // 200 UTF-8 bytes leaves room for an extension and page number within the usual 255-byte limit.
+        Some(name)
+            if !name.is_empty()
+                && name.len() <= 200
+                && !name.starts_with([' ', '.'])
+                && !name.ends_with([' ', '.'])
+                && !name.chars().any(unsafe_char)
+                && !reserved(name.split('.').next().unwrap_or(name)) =>
+        {
+            name.to_string()
+        }
+        _ => fallback.to_string(),
+    }
+}
+
+/// The GP save dialog's name, with `.gp` appended by the same rule as every other export.
+fn gp_dialog_name(file_name: Option<&str>) -> String {
+    let name = suggested_name(file_name, "TabPlayer-export");
+    with_extension(PathBuf::from(name), "gp")
+        .to_string_lossy()
+        .into_owned()
+}
+
 fn with_extension(mut path: PathBuf, extension: &str) -> PathBuf {
     if !path
         .extension()
@@ -481,6 +523,7 @@ async fn save_project(
 async fn export_gp(
     document: DocumentRevision,
     bytes: Vec<u8>,
+    file_name: Option<String>,
     app: AppHandle,
 ) -> Result<bool, String> {
     tauri::async_runtime::spawn_blocking(move || {
@@ -488,7 +531,7 @@ async fn export_gp(
             .dialog()
             .file()
             .add_filter("Guitar Pro score", &["gp"])
-            .set_file_name("TabPlayer-export.gp")
+            .set_file_name(gp_dialog_name(file_name.as_deref()))
             .blocking_save_file();
         let Some(selected) = selected else {
             return Ok(false);
@@ -963,5 +1006,73 @@ mod export_files_tests {
         std::fs::write(&path, b"old").unwrap();
         export_document_to_path(&audio, &jobs, &workspace, &document, &path, b"new").unwrap();
         assert_eq!(std::fs::read(&path).unwrap(), b"new");
+    }
+}
+
+#[cfg(test)]
+mod suggested_name_tests {
+    use super::suggested_name;
+
+    #[test]
+    fn keeps_a_safe_name_and_falls_back_for_anything_else() {
+        for name in [
+            "Anatole - Lead (1 of 5) 2026-03-30 13-03",
+            "100% Ä",
+            "con-test",
+            "COM0",
+            "LPT10",
+            "Gtr. 1",
+        ] {
+            assert_eq!(suggested_name(Some(name), "fallback"), name);
+        }
+        // The limit is 200 UTF-8 bytes: 100 two-byte letters fit, 51 four-byte emoji do not.
+        let (fits, long, wide) = ("é".repeat(100), "x".repeat(201), "🎸".repeat(51));
+        assert_eq!(suggested_name(Some(&fits), "fallback"), fits);
+        for name in [
+            "",
+            " lead",
+            "lead.",
+            ".hidden",
+            "a/b",
+            r"a\b",
+            "a:b",
+            "a*b",
+            "a?b",
+            "a\"b",
+            "a<b",
+            "a>b",
+            "a|b",
+            "a\u{7}b",
+            "a\u{85}b",
+            "Report\u{202E}fdp",
+            "a\u{200F}b",
+            "a\u{2028}b",
+            "a\u{FEFF}b",
+            "CON",
+            "nul.txt",
+            "Com1",
+            "lpt9",
+            "COM¹",
+            "lpt³.x",
+            &long,
+            &wide,
+        ] {
+            assert_eq!(
+                suggested_name(Some(name), "fallback"),
+                "fallback",
+                "{name:?}"
+            );
+        }
+        assert_eq!(suggested_name(None, "fallback"), "fallback");
+    }
+
+    #[test]
+    fn gp_dialog_name_appends_the_extension_only_when_missing() {
+        use super::gp_dialog_name;
+        assert_eq!(gp_dialog_name(Some("Riff")), "Riff.gp");
+        assert_eq!(gp_dialog_name(Some("Riff.GP")), "Riff.GP");
+        assert_eq!(gp_dialog_name(Some("Gtr. 1")), "Gtr. 1.gp");
+        assert_eq!(gp_dialog_name(Some("a/b")), "TabPlayer-export.gp");
+        assert_eq!(gp_dialog_name(None), "TabPlayer-export.gp");
     }
 }

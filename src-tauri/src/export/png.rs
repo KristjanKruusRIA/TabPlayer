@@ -9,29 +9,10 @@ const EXPORT_PIXELS: u64 = 1_500_000_000;
 
 /// Rasterizes each page at the chosen resolution and encodes it as RGBA PNG with its physical size.
 pub fn render_pages(pages: &[SvgPage], dpi: u32) -> Result<Vec<Vec<u8>>, String> {
-    if !(72..=600).contains(&dpi) {
-        return Err("Choose a resolution from 72 to 600 dpi.".into());
-    }
     if pages.is_empty() || pages.len() > 2000 {
         return Err("Choose between one and 2000 pages.".into());
     }
-    // Size every page before parsing or rendering any of them.
-    let sizes: Vec<_> = pages
-        .iter()
-        .map(|page| (pixels(page.width_mm, dpi), pixels(page.height_mm, dpi)))
-        .collect();
-    let area = |&(width, height): &(u32, u32)| u64::from(width) * u64::from(height);
-    if sizes.iter().any(|size| area(size) > PAGE_PIXELS) {
-        return Err(
-            "This page is too large for that resolution. Choose a lower resolution.".into(),
-        );
-    }
-    if sizes.iter().map(area).sum::<u64>() > EXPORT_PIXELS {
-        return Err(
-            "This export is too large for that resolution. Choose a lower resolution or fewer pages."
-                .into(),
-        );
-    }
+    let sizes = check_budget(pages, dpi)?;
     let options = export_options();
     pages
         .iter()
@@ -52,6 +33,34 @@ pub fn render_pages(pages: &[SvgPage], dpi: u32) -> Result<Vec<Vec<u8>>, String>
             encode(pixmap, dpi)
         })
         .collect()
+}
+
+/// Sizes every page before any is parsed or rendered, and refuses a resolution, page or export
+/// that is too large. Per-track exports pass every track's pages so the budget covers them all.
+pub(crate) fn check_budget<'a>(
+    pages: impl IntoIterator<Item = &'a SvgPage>,
+    dpi: u32,
+) -> Result<Vec<(u32, u32)>, String> {
+    if !(72..=600).contains(&dpi) {
+        return Err("Choose a resolution from 72 to 600 dpi.".into());
+    }
+    let sizes: Vec<_> = pages
+        .into_iter()
+        .map(|page| (pixels(page.width_mm, dpi), pixels(page.height_mm, dpi)))
+        .collect();
+    let area = |&(width, height): &(u32, u32)| u64::from(width) * u64::from(height);
+    if sizes.iter().any(|size| area(size) > PAGE_PIXELS) {
+        return Err(
+            "This page is too large for that resolution. Choose a lower resolution.".into(),
+        );
+    }
+    if sizes.iter().map(area).sum::<u64>() > EXPORT_PIXELS {
+        return Err(
+            "This export is too large for that resolution. Choose a lower resolution or fewer pages."
+                .into(),
+        );
+    }
+    Ok(sizes)
 }
 
 /// Saturating: NaN becomes 0 and is refused by `notation_tree`; infinity exceeds the page limit.
@@ -76,7 +85,7 @@ fn encode(pixmap: tiny_skia::Pixmap, dpi: u32) -> Result<Vec<u8>, String> {
     let mut encoder = png::Encoder::new(&mut bytes, width, height);
     encoder.set_color(png::ColorType::Rgba);
     encoder.set_depth(png::BitDepth::Eight);
-    encoder.set_srgb(png::SrgbRenderingIntent::Perceptual);
+    encoder.set_source_srgb(png::SrgbRenderingIntent::Perceptual);
     let per_metre = (f64::from(dpi) / 0.0254).round() as u32;
     encoder.set_pixel_dims(Some(png::PixelDimensions {
         xppu: per_metre,

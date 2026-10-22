@@ -10,9 +10,9 @@ import { selectStaves } from './selection';
 import { exportMidi } from './midi';
 import { exportMusicXml } from './musicxml';
 import { clearBacking } from '../interchange/backing-projection';
-import { DEFAULT_FILE_NAME,expandFileName,fileNameContext } from './file-name';
+import { DEFAULT_FILE_NAME,expandFileName,fileKey,fileNameContext,savedFileNames,withSuffix } from './file-name';
 import { assertPngSize,loadExportFonts,renderPdfPages,svgPageWithBackground } from './pdf';
-import { validateSelection,type ExportOptions,type ExportProgress } from './types';
+import { validateSelection,type ExportOptions,type ExportProgress,type ExportSelection,type TrackPages } from './types';
 import { scoreFromJson } from '../model-clone';
 import { copyGpInterchangeSource } from '../interchange/gp';
 import { projectGpDocument } from '../interchange/backing-projection';
@@ -60,6 +60,28 @@ export function useExportCoordinator({score,settings,currentSpeed,bridge,native,
       if(frozenOptions.format==='midi'){if(cancelled.current)return false;return await native.exportMidi(exportMidi(copy,selection),revision,name);}
       // Backing audio is left out; refusals throw here, before the native save dialog opens.
       if(frozenOptions.format==='musicxml'){clearBacking(copy);const bytes=exportMusicXml(copy,selection);if(cancelled.current)return false;return await native.exportMusicXml(bytes,revision,name);}
+      if((frozenOptions.format==='pdf'||frozenOptions.format==='svg'||frozenOptions.format==='png')&&frozenOptions.perTrack){
+        await loadExportFonts();if(cancelled.current)return false;
+        const options=frozenOptions,now=new Date(),used=new Set<string>(),files:TrackPages[]=[];
+        // A PDF is one file whatever its page count; SVG and PNG pages are numbered.
+        const saved=(name:string,pages:number)=>savedFileNames(name,options.format==='pdf'?1:pages,options.format);
+        const taken=(name:string,pages:number)=>saved(name,pages).some(file=>used.has(fileKey(file)));
+        // Each track is rendered alone and named from its own %t and %n; a name whose files would repeat gets the track number.
+        for(const track of [...selection.tracks].sort((a,b)=>a-b)){
+          await new Promise(resolve=>setTimeout(resolve,0));if(cancelled.current)return false;
+          const single:ExportSelection={tracks:[track],range:selection.range,...(selection.staves?.[track]?{staves:{[track]:selection.staves[track]}}:{})};
+          const rendered=renderPdfPages(copy,single,options.layout,{page:options.page??effectivePageLayout({page:null,print:options.layout}),engraving:frozenSettings.engraving,trackIds:ids});
+          const pages=options.format!=='pdf'&&!options.transparent?rendered.map(svgPageWithBackground):rendered;
+          const base=expandFileName(options.fileName??DEFAULT_FILE_NAME,fileNameContext(copy,single,now));
+          let name=base;
+          for(let attempt=1;taken(name,pages.length);attempt++)name=withSuffix(base,attempt===1?` (${track+1})`:` (${track+1}-${attempt})`);
+          for(const file of saved(name,pages.length))used.add(fileKey(file));
+          files.push({name,pages});
+        }
+        if(cancelled.current)return false;
+        if(options.format==='png')assertPngSize(files.flatMap(file=>file.pages),options.dpi);
+        return await native.exportTrackFiles(options.format,files,options.format==='png'?options.dpi:null,revision);
+      }
       if(frozenOptions.format==='svg'||frozenOptions.format==='png'){await loadExportFonts();if(cancelled.current)return false;const rendered=renderPdfPages(copy,selection,frozenOptions.layout,{page:frozenOptions.page??effectivePageLayout({page:null,print:frozenOptions.layout}),engraving:frozenSettings.engraving,trackIds:ids});if(cancelled.current)return false;if(frozenOptions.format==='png')assertPngSize(rendered,frozenOptions.dpi);const pages=frozenOptions.transparent?rendered:rendered.map(svgPageWithBackground);return await (frozenOptions.format==='png'?native.exportPng(pages,frozenOptions.dpi,revision,name):native.exportSvg(pages,revision,name));}
       if(frozenOptions.format==='pdf'||frozenOptions.format==='print'){await loadExportFonts();if(cancelled.current)return false;const pages=renderPdfPages(copy,selection,frozenOptions.layout,{page:frozenOptions.page??effectivePageLayout({page:null,print:frozenOptions.layout}),engraving:frozenSettings.engraving,trackIds:ids});if(cancelled.current)return false;return await watch(await native.exportPdf(pages,frozenOptions.format==='print',revision,frozenOptions.format==='print'?null:name),active);}
       const audio=frozenOptions.audio;

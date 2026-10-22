@@ -108,6 +108,32 @@ it('names files from GP8 tokens with a live preview and sends only a changed tem
   }finally{vi.useRealTimers();}
 });
 
+it('offers one file per track for page exports and sends it only when chosen',()=>{
+  const submit=vi.fn();render(<ExportDialog score={fixture()} layout={layout} busy={false} currentSpeedAvailable={true} onExport={submit} onCancel={()=>{}}/>);
+  expect(screen.queryByLabelText('One file per track')).toBeNull();
+  for(const format of ['pdf','svg','png']){
+    fireEvent.change(screen.getByLabelText('Export format'),{target:{value:format}});
+    const perTrack=screen.getByLabelText('One file per track');expect(perTrack).not.toBeChecked();
+    fireEvent.click(screen.getByRole('button',{name:'Export'}));expect(submit.mock.lastCall?.[0]).not.toHaveProperty('perTrack');
+    fireEvent.click(perTrack);expect(screen.getByText(/Each selected track is saved as its own file in the folder you choose/)).toBeVisible();
+    fireEvent.click(screen.getByRole('button',{name:'Export'}));expect(submit).toHaveBeenLastCalledWith(expect.objectContaining({format,perTrack:true}));
+    fireEvent.click(perTrack);
+  }
+  // The default name gains the track name for one file per track, and an edited name is kept.
+  fireEvent.change(screen.getByLabelText('Export format'),{target:{value:'pdf'}});
+  const name=screen.getByLabelText('File name') as HTMLInputElement;expect(name.value).toBe('%T');
+  fireEvent.click(screen.getByLabelText('One file per track'));expect(name.value).toBe('%T - %t');
+  fireEvent.click(screen.getByRole('button',{name:'Export'}));expect(submit).toHaveBeenLastCalledWith(expect.objectContaining({perTrack:true,fileName:'%T - %t'}));
+  fireEvent.click(screen.getByLabelText('One file per track'));expect(name.value).toBe('%T');
+  fireEvent.change(name,{target:{value:'%n'}});fireEvent.click(screen.getByLabelText('One file per track'));expect(name.value).toBe('%n');
+  fireEvent.click(screen.getByLabelText('One file per track'));
+  // Leaving the page formats drops one file per track and its default name.
+  fireEvent.change(name,{target:{value:'%T'}});fireEvent.click(screen.getByLabelText('One file per track'));expect(name.value).toBe('%T - %t');
+  fireEvent.change(screen.getByLabelText('Export format'),{target:{value:'midi'}});expect((screen.getByLabelText('File name') as HTMLInputElement).value).toBe('%T');
+  fireEvent.change(screen.getByLabelText('Export format'),{target:{value:'pdf'}});expect(screen.getByLabelText('One file per track')).not.toBeChecked();
+  for(const format of ['gp','print','midi','musicxml','wav','stems']){fireEvent.change(screen.getByLabelText('Export format'),{target:{value:format}});expect(screen.queryByLabelText('One file per track')).toBeNull();}
+});
+
 it('refreshes GP preflight for score and settings changes without repeating it for progress',()=>{
   const score=fixture(),preflight=vi.fn(()=>null),submit=()=>{},cancel=()=>{};
   const {rerender}=render(<ExportDialog score={score} layout={layout} busy={false} currentSpeedAvailable={true} gpBackingIssue={preflight} onExport={submit} onCancel={cancel}/>);

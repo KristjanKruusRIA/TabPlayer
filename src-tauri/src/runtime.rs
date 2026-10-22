@@ -600,6 +600,7 @@ pub async fn export_svg(
             &app.state::<Arc<Mutex<DocumentWorkspace>>>(),
             &document,
             &outputs,
+            false,
         )?;
         Ok(true)
     })
@@ -632,6 +633,51 @@ pub async fn export_png(
             &app.state::<Arc<Mutex<DocumentWorkspace>>>(),
             &document,
             &outputs,
+            false,
+        )?;
+        Ok(true)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+/// The folder for one file per track. Nothing in it was confirmed, so every file must be new.
+fn export_folder(app: &AppHandle) -> Result<Option<PathBuf>, String> {
+    #[cfg(feature = "desktop-test")]
+    if std::env::var("TABPLAYER_DESKTOP_TEST").as_deref() == Ok("1") {
+        return std::env::var_os("TABPLAYER_TEST_EXPORT_DIR")
+            .map(|folder| Some(PathBuf::from(folder)))
+            .ok_or_else(|| "Test export folder is missing.".to_string());
+    }
+    app.dialog()
+        .file()
+        .blocking_pick_folder()
+        .map(|folder| folder.into_path().map_err(|e| e.to_string()))
+        .transpose()
+}
+#[tauri::command]
+pub async fn export_track_files(
+    document: DocumentRevision,
+    format: String,
+    files: Vec<crate::export::tracks::TrackPages>,
+    dpi: Option<u32>,
+    app: AppHandle,
+) -> Result<bool, String> {
+    let Some(folder) = export_folder(&app)? else {
+        return Ok(false);
+    };
+    tauri::async_runtime::spawn_blocking(move || {
+        let outputs = crate::export::tracks::track_files(&folder, &format, &files, dpi)?;
+        let outputs: Vec<_> = outputs
+            .iter()
+            .map(|(path, bytes)| (path.as_path(), bytes.as_slice()))
+            .collect();
+        crate::export_document_files(
+            &app.state::<NativeAudio>(),
+            &app.state::<ExportJobs>(),
+            &app.state::<Arc<Mutex<DocumentWorkspace>>>(),
+            &document,
+            &outputs,
+            true,
         )?;
         Ok(true)
     })

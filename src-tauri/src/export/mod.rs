@@ -5,4 +5,5 @@ pub mod png;
 pub mod print;
 pub mod stems;
 pub mod svg;
+pub mod tracks;
 pub mod wav;

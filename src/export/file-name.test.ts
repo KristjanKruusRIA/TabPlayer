@@ -1,6 +1,6 @@
 import { describe,expect,it } from 'vitest';
 import { model } from '@coderline/alphatab';
-import { DEFAULT_FILE_NAME,expandFileName,fileNameContext,withExtension } from './file-name';
+import { DEFAULT_FILE_NAME,expandFileName,fileKey,fileNameContext,savedFileNames,withExtension,withSuffix } from './file-name';
 
 const now=new Date(2026,2,30,13,3,59);
 const context={title:'Anatole',trackName:'Lead Guitar',trackNumber:3,trackCount:5,now};
@@ -58,4 +58,16 @@ it('previews the saved name with the extension appended only when it is missing'
   expect(withExtension('Live.mid','mid')).toBe('Live.mid');
   expect(withExtension('Gtr. 1','pdf')).toBe('Gtr. 1.pdf');
   expect(withExtension('Stems','')).toBe('Stems');
+});
+
+it('keeps a suffix within the byte limit by shortening the name before it',()=>{
+  expect(withSuffix('Lead',' (3)')).toBe('Lead (3)');
+  const long=withSuffix('x'.repeat(200),' (12)');expect(long).toBe(`${'x'.repeat(195)} (12)`);expect(new TextEncoder().encode(long).length).toBe(200);
+});
+
+it('lists the files native saves for a name and compares them as file systems do',()=>{
+  expect(savedFileNames('Song',1,'svg')).toEqual(['Song.svg']);
+  expect(savedFileNames('Song.SVG',2,'svg')).toEqual(['Song-1.SVG','Song-2.SVG']);
+  expect(savedFileNames('Gtr. 1',10,'png').slice(0,2)).toEqual(['Gtr. 1-01.png','Gtr. 1-02.png']);
+  expect(fileKey('Caf\u00e9.PDF')).toBe(fileKey('Cafe\u0301.pdf'));
 });

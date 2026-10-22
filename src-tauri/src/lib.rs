@@ -25,7 +25,7 @@ use project::{BaseDocument, DocumentCandidate, EditCommand, Project};
 use runtime::{
     audio_command, audio_devices, audio_prepare, audio_set_mix, audio_status, cancel_asset,
     cancel_export, export_audio, export_midi, export_musicxml, export_pdf, export_png,
-    export_status, export_svg, stage_backing, stage_embedded_backing,
+    export_status, export_svg, export_track_files, stage_backing, stage_embedded_backing,
 };
 use std::{
     path::{Path, PathBuf},
@@ -95,7 +95,7 @@ pub(crate) fn export_document_to_path(
     path: &Path,
     bytes: &[u8],
 ) -> Result<(), String> {
-    export_document_files(audio, jobs, workspace, document, &[(path, bytes)])
+    export_document_files(audio, jobs, workspace, document, &[(path, bytes)], false)
 }
 
 /// Checks every destination before writing any. Several outputs must all be new files, so a
@@ -106,6 +106,7 @@ pub(crate) fn export_document_files(
     workspace: &Mutex<DocumentWorkspace>,
     document: &DocumentRevision,
     outputs: &[(&Path, &[u8])],
+    new_only: bool,
 ) -> Result<(), String> {
     let _access = audio.access.lock().map_err(|error| error.to_string())?;
     if jobs.has_running()? {
@@ -116,13 +117,10 @@ pub(crate) fn export_document_files(
     for (path, _) in outputs {
         workspace.protect_destination(document, path)?;
         audio.protect_destination(path)?;
-        // A save dialog confirms one name only; symlink_metadata also sees a dangling link.
-        if outputs.len() > 1 && std::fs::symlink_metadata(path).is_ok() {
-            return Err(format!(
-                "{} already exists. Choose another name.",
-                path.display()
-            ));
-        }
+    }
+    // A save dialog confirms one name only, and a picked folder confirms none.
+    if new_only || outputs.len() > 1 {
+        return write_new_files(outputs);
     }
     for (index, (path, bytes)) in outputs.iter().enumerate() {
         if let Err(error) = files::write_bytes(path, bytes) {
@@ -133,6 +131,50 @@ pub(crate) fn export_document_files(
         }
     }
     Ok(())
+}
+
+/// Creates every file before writing any, so the filesystem itself refuses an existing file, a
+/// dangling link or two names it treats as one (case, Unicode form, short names). Only files
+/// created here are removed when anything fails.
+fn write_new_files(outputs: &[(&Path, &[u8])]) -> Result<(), String> {
+    use std::io::Write;
+    let mut created = Vec::new();
+    let cleanup = |created: &[(&Path, std::fs::File)]| {
+        for (path, _) in created {
+            let _ = std::fs::remove_file(path);
+        }
+    };
+    for (path, _) in outputs {
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(path)
+        {
+            Ok(file) => created.push((*path, file)),
+            Err(error) => {
+                cleanup(&created);
+                return Err(if error.kind() == std::io::ErrorKind::AlreadyExists {
+                    format!("{} already exists. Choose another name.", path.display())
+                } else {
+                    format!("Could not create {}: {error}", path.display())
+                });
+            }
+        }
+    }
+    let mut failure = None;
+    for ((path, file), (_, bytes)) in created.iter_mut().zip(outputs) {
+        if let Err(error) = file.write_all(bytes).and_then(|()| file.sync_all()) {
+            failure = Some(format!("Could not write {}: {error}", path.display()));
+            break;
+        }
+    }
+    match failure {
+        Some(message) => {
+            cleanup(&created);
+            Err(message)
+        }
+        None => Ok(()),
+    }
 }
 
 fn save_document_to_path(
@@ -837,6 +879,7 @@ pub fn run() {
         export_pdf,
         export_svg,
         export_png,
+        export_track_files,
         export_midi,
         export_musicxml,
         export_audio,
@@ -898,6 +941,7 @@ pub fn run() {
         export_pdf,
         export_svg,
         export_png,
+        export_track_files,
         export_midi,
         export_musicxml,
         export_audio,
@@ -971,6 +1015,7 @@ mod export_files_tests {
             &workspace,
             &document,
             &[(&first, b"one"), (&second, b"two")],
+            false,
         )
         .unwrap_err();
         assert!(error.contains("already exists"));
@@ -991,11 +1036,34 @@ mod export_files_tests {
                 &jobs,
                 &workspace,
                 &document,
-                &[(&first, b"one"), (&unwritable, b"two")]
+                &[(&first, b"one"), (&unwritable, b"two")],
+                false,
             )
             .is_err()
         );
         assert!(!first.exists());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn names_the_file_system_treats_as_one_never_replace_each_other() {
+        let (audio, jobs, workspace, document) = fixture();
+        let directory = tempfile::tempdir().unwrap();
+        let (lower, upper) = (
+            directory.path().join("lead.pdf"),
+            directory.path().join("LEAD.pdf"),
+        );
+        let error = export_document_files(
+            &audio,
+            &jobs,
+            &workspace,
+            &document,
+            &[(&lower, b"one"), (&upper, b"two")],
+            true,
+        )
+        .unwrap_err();
+        assert!(error.contains("already exists"));
+        assert!(!lower.exists());
     }
 
     #[test]
@@ -1006,6 +1074,13 @@ mod export_files_tests {
         std::fs::write(&path, b"old").unwrap();
         export_document_to_path(&audio, &jobs, &workspace, &document, &path, b"new").unwrap();
         assert_eq!(std::fs::read(&path).unwrap(), b"new");
+        // A file in a picked folder was never confirmed, so even one output must be new.
+        std::fs::write(&path, b"user").unwrap();
+        let error =
+            export_document_files(&audio, &jobs, &workspace, &document, &[(&path, b"x")], true)
+                .unwrap_err();
+        assert!(error.contains("already exists"));
+        assert_eq!(std::fs::read(&path).unwrap(), b"user");
     }
 }
 

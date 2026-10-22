@@ -19,7 +19,7 @@
     "value": "088b973cea94bde876859c7e6efadb4dd23da64a",
     "accepted_source_revision": "088b973cea94bde876859c7e6efadb4dd23da64a",
     "documentation_revision": null,
-    "documentation_status": "2026-10-21 update on feat/gp8-parity: F13 missing -> partial, W05 missing -> implemented, F03/F04/D01/D02 evidence refreshed. Earlier P17/P18 checkpoint text is kept in previous_checkpoint and provenance. 2026-10-22: F17 SVG export missing -> implemented. 2026-10-22: F16 PNG export missing -> partial. 2026-10-22: D20 export file-name tokens missing -> partial.",
+    "documentation_status": "2026-10-21 update on feat/gp8-parity: F13 missing -> partial, W05 missing -> implemented, F03/F04/D01/D02 evidence refreshed. Earlier P17/P18 checkpoint text is kept in previous_checkpoint and provenance. 2026-10-22: F17 SVG export missing -> implemented. 2026-10-22: F16 PNG export missing -> partial. 2026-10-22: D20 export file-name tokens missing -> partial. 2026-10-22: D20 one file per track added; D20 stays partial.",
     "provenance": "Root locally accepts P16 source 447d2a9240dc5727ff0679b5b0f84dd7107db603; delivery is pending and the source is not yet pushed at this checkpoint. The final versioned tempo report supports the bounded source/native/current Windows/GP-publication/visual scope. Proprietary GP bracket import/export and playback clipping remain unverified, and the report retains audible, platform and shipping limits. This documentation audit executes no runtime or Git/network operation. The unchanged CI checkpoint belongs to historical Library source only and supplies no P16/current-head CI proof. 2026-10-16 P17/P18 checkpoint: root locally accepts source a87bae29deb08e31a8974d6d2ed390e7b5adca0b for the declared local pitch/filter scope after the frozen 57-step functional workflow at be9e61aa2383974821e7ecf70899e7f755f74f53 and sole 17-step/four-frame targeted confirmation at a87bae29deb08e31a8974d6d2ed390e7b5adca0b. The final UI source has its own admitted diagnostic build; the coherent 2647/617 whole-suite evidence belongs to earlier product source 4a01c341eca58cb25f52c89175ba1fb8c14ee803, not a rerun at this later source. The immutable visual receipt retains inherited observer metadata; the final report binds its additive provenance corrigendum and distinguishes current source/executable/admission/resource/log identities. P17 is implemented within declared local numeric scope and P18 remains partial without vocal/center/channel separation. P16 remains reviewed partial; GP bracket import/export and playback clipping remain unverified. Physical audio, original-GP8, macOS/Linux and shipping acceptance remain separate. Independent final document/adoption review and local documentation delivery/push remain pending; no current-head CI result is supplied and the unchanged CI object remains historical Library evidence. This documentation audit executes no runtime/build, Git or network operation.",
     "previous_accepted_checkpoint": "447d2a9240dc5727ff0679b5b0f84dd7107db603",
     "ci_checkpoint": {
@@ -853,6 +853,24 @@
       "start_line": 48,
       "end_line": 52,
       "kind": "validation_report"
+    },
+    "pertrack_behavior": {
+      "path": "docs/validation/2026-10-22-gp8-export-per-track.md",
+      "start_line": 5,
+      "end_line": 25,
+      "kind": "validation_report"
+    },
+    "pertrack_evidence": {
+      "path": "docs/validation/2026-10-22-gp8-export-per-track.md",
+      "start_line": 27,
+      "end_line": 57,
+      "kind": "validation_report"
+    },
+    "pertrack_limits": {
+      "path": "docs/validation/2026-10-22-gp8-export-per-track.md",
+      "start_line": 59,
+      "end_line": 64,
+      "kind": "validation_report"
     }
   },
   "evidence_file_sha256": {
@@ -907,7 +925,8 @@
     "docs/validation/2026-10-15-gp8-document-tabs.md": "c864e76ec4f69b577cc0698620a7bdaad30cb1151a03d776287e84c90d33b496",
     "docs/validation/2026-10-22-gp8-svg-export.md": "b4a164176ce66edbab6b68475a8a63504bb455269608ffe1cb187cf8bd22ab52",
     "docs/validation/2026-10-22-gp8-png-export.md": "5dab58bd483e6a58f640b34e21363d7408e601840cc860d7183e818448f35de3",
-    "docs/validation/2026-10-22-gp8-export-file-names.md": "d7db07664fb24604b6c9469f96f811e821aa76e31f94c3b3b655b1412eaa0854"
+    "docs/validation/2026-10-22-gp8-export-file-names.md": "d7db07664fb24604b6c9469f96f811e821aa76e31f94c3b3b655b1412eaa0854",
+    "docs/validation/2026-10-22-gp8-export-per-track.md": "8cfa5c4bb0f1b2b9742bae5fcbb52a7f976e7cb6891812ad9b2e7e3eb25410ce"
   },
   "next_open_families": [
     {
@@ -7993,12 +8012,15 @@
       "current_status": "partial",
       "assessment": "evidence_reviewed",
       "current_proven_status": "partial",
-      "current_behavior": "Every file export has a GP8-style File name field (default %T) with the %T/%t/%n/%N/%d/%h tokens and a live preview of the saved name. The name is expanded at export time, sanitized on both sides (path, control and invisible direction characters, reserved names, 200 UTF-8 bytes) and pre-fills the native save dialog. A Windows desktop-test PDF lands at exactly the previewed name. Transparent backgrounds exist for SVG and PNG (F16/F17).",
-      "remaining_gap": "No one-file-per-track export: track tokens use the first selected track; no separate destination-folder or open-folder options; GP dialog naming is unit-tested only on desktop; no original-GP8 comparison.",
+      "current_behavior": "Every file export has a GP8-style File name field (default %T) with the %T/%t/%n/%N/%d/%h tokens and a live preview of the saved name. The name is expanded at export time, sanitized on both sides (path, control and invisible direction characters, reserved names, 200 UTF-8 bytes) and pre-fills the native save dialog. A Windows desktop-test PDF lands at exactly the previewed name. Transparent backgrounds exist for SVG and PNG (F16/F17). PDF, SVG and PNG can export one file per selected track into a picked folder, each named from the template with that track’s %t/%n (default %T - %t), deduplicated on the final file names and created only as new files; a Windows desktop-test run saves 1 Guitar9 … 4 Keys as PNG (transparent) and PDF.",
+      "remaining_gap": "No separate destination-folder, open-folder or overwrite options (re-exporting into the same folder is refused); no native progress/cancel for per-track exports; GP dialog naming is unit-tested only on desktop; no original-GP8 comparison.",
       "current_evidence": [
         "names_behavior",
         "names_evidence",
-        "names_limits"
+        "names_limits",
+        "pertrack_behavior",
+        "pertrack_evidence",
+        "pertrack_limits"
       ],
       "runtime_rechecked_by_this_audit": false
     },

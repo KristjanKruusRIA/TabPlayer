@@ -3,6 +3,7 @@ import type { PageLayout } from '../engraving/types';
 export type { PrintLayout } from '../document-settings';
 export interface ExportSelection { tracks:number[]; range:{first:number;last:number}|null;staves?:Record<number,number[]> }
 export interface SvgPage { svg:string; widthMm:number; heightMm:number }
+export interface TrackPages { name:string; pages:SvgPage[] }
 export const PNG_RESOLUTIONS=[72,150,300,600] as const;
 export type PngResolution=typeof PNG_RESOLUTIONS[number];
 export interface SvgSystem { svg:string; width:number; height:number }
@@ -12,10 +13,10 @@ export type ExportOptions = (
   | {format:'gp';selection:ExportSelection;backing?:boolean}
   | {format:'midi';selection:ExportSelection}
   | {format:'musicxml';selection:ExportSelection}
-  | {format:'pdf';selection:ExportSelection;layout:PrintLayout;page?:PageLayout}
+  | {format:'pdf';selection:ExportSelection;layout:PrintLayout;page?:PageLayout;perTrack?:true}
   | {format:'print';selection:ExportSelection;layout:PrintLayout;page?:PageLayout}
-  | {format:'svg';selection:ExportSelection;layout:PrintLayout;page?:PageLayout;transparent:boolean}
-  | {format:'png';selection:ExportSelection;layout:PrintLayout;page?:PageLayout;transparent:boolean;dpi:PngResolution}
+  | {format:'svg';selection:ExportSelection;layout:PrintLayout;page?:PageLayout;transparent:boolean;perTrack?:true}
+  | {format:'png';selection:ExportSelection;layout:PrintLayout;page?:PageLayout;transparent:boolean;dpi:PngResolution;perTrack?:true}
   | {format:'wav';selection:ExportSelection;audio:AudioExportOptions}
   | {format:'stems';selection:ExportSelection;audio:AudioExportOptions}
 )&{fileName?:string};

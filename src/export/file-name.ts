@@ -3,6 +3,8 @@ import type { ExportSelection } from './types';
 
 /** GP8 names an export after the score title unless the template is changed. */
 export const DEFAULT_FILE_NAME='%T';
+/** One file per track starts from the title and track name, so every file says which track it holds. */
+export const PER_TRACK_FILE_NAME='%T - %t';
 export const FILE_NAME_TOKENS='%T title, %t track name, %n track number, %N track count, %d date, %h time';
 export interface FileNameContext { title:string;trackName:string;trackNumber:number;trackCount:number;now:Date }
 
@@ -15,9 +17,9 @@ const UNSAFE=/[<>:"/\\|?*\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2
 /** 200 UTF-8 bytes leaves room for an extension and page number within the usual 255-byte limit. */
 const MAX_BYTES=200;
 const encoder=new TextEncoder();
-function clip(name:string){
+function clip(name:string,maxBytes=MAX_BYTES){
   let bytes=0,kept='';
-  for(const point of name){bytes+=encoder.encode(point).length;if(bytes>MAX_BYTES)break;kept+=point;}
+  for(const point of name){bytes+=encoder.encode(point).length;if(bytes>maxBytes)break;kept+=point;}
   return kept.replace(/[\s.]+$/,'');
 }
 
@@ -33,9 +35,27 @@ export function expandFileName(template:string,{title,trackName,trackNumber,trac
   return name||'TabPlayer-export';
 }
 
+/** Appends a suffix to a finished name, shortening the name so the suffix always fits. */
+export function withSuffix(name:string,suffix:string){
+  return `${clip(name,MAX_BYTES-encoder.encode(suffix).length)}${suffix}`;
+}
+
 /** The saved name: the extension is appended unless the name already ends with it, as the native side does. */
 export function withExtension(name:string,extension:string){
   return !extension||name.toLowerCase().endsWith(`.${extension}`)?name:`${name}.${extension}`;
+}
+
+/** The files native writes for a name: several pages are numbered `-1`, `-2` (zero-padded) before the extension. */
+export function savedFileNames(name:string,pages:number,extension:string){
+  const file=withExtension(name,extension);
+  if(pages<=1)return [file];
+  const dot=file.length-extension.length-1,digits=String(pages).length;
+  return Array.from({length:pages},(_,index)=>`${file.slice(0,dot)}-${String(index+1).padStart(digits,'0')}${file.slice(dot)}`);
+}
+
+/** Compares names as case-insensitive file systems would; the native side also lets the file system refuse aliases. */
+export function fileKey(name:string){
+  return name.normalize('NFC').toLowerCase();
 }
 
 /** Track tokens describe the first selected track; %N counts every track in the score. */

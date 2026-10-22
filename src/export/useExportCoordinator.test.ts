@@ -9,7 +9,7 @@ import { defaultDocumentSettings } from '../document-settings';
 import { music,noteAt } from '../editor/fixtures';
 import { useExportCoordinator } from './useExportCoordinator';
 import type { ExportNativeBridge,NativeAudioExportPayload } from './bridge';
-import type { ExportOptions,ExportProgress,SvgPage } from './types';
+import { validateSelection,type ExportOptions,type ExportProgress,type SvgPage } from './types';
 import { getTrackLyrics,applyLyricsEdit } from '../editor/lyrics';
 import { loadInterchangeScore } from '../interchange/gp';
 import * as pdf from './pdf';
@@ -95,7 +95,7 @@ it.each([true,false])('freezes exact raw and hidden lyrics through the export di
   expect(getTrackLyrics(loadInterchangeScore(bytes!,new Settings()),0)).toEqual({visible,lines:[{startBar:0,text:raw}],source:'raw'});
   expect(getTrackLyrics(score,0).lines[0].text).toBe('Later');
 });
-function native():ExportNativeBridge{return {exportPdf:async()=>null,exportMidi:async()=>true,exportMusicXml:async()=>true,exportSvg:async()=>true,exportPng:async()=>true,exportAudio:async()=>null,status:async()=>null,cancel:async()=>{}};}
+function native():ExportNativeBridge{return {exportPdf:async()=>null,exportMidi:async()=>true,exportMusicXml:async()=>true,exportSvg:async()=>true,exportPng:async()=>true,exportTrackFiles:async()=>true,exportAudio:async()=>null,status:async()=>null,cancel:async()=>{}};}
 it('rejects an unavailable current coefficient before launching or entering a native job',async()=>{
   const score=buildScore(blankProject()),api=native(),exportAudio=vi.fn(api.exportAudio);api.exportAudio=exportAudio;
   const bridge={readBackingAsset:async()=>{throw new Error('Unexpected backing read.');},confirmExport:async()=>true,exportGp:async()=>true};
@@ -275,4 +275,83 @@ it.each(['cancelled','complete','failed'] as const)('known job %s terminal waits
   await act(async()=>{await expect(result.current.run(options)).rejects.toThrow('An export is already running.');});
   await act(async()=>{ack();if(status==='failed')await expect(pending).rejects.toThrow('Disk full');else expect(await pending).toBe(status==='complete');await cancelling;});
   expect(runSettled).toBe(true);expect(cancelSettled).toBe(true);expect(result.current.busy).toBe(false);expect(api.cancel).toHaveBeenCalledTimes(1);
+});
+
+function tracks(names:string[]){
+  const score=new model.Score();score.title='Song';
+  for(const name of names){const track=new model.Track();track.name=name;const staff=new model.Staff();staff.stringTuning.tunings=[64,59,55,50,45,40];track.addStaff(staff);score.addTrack(track);}
+  for(let i=0;i<2;i++){score.addMasterBar(new model.MasterBar());for(const track of score.tracks){const bar=new model.Bar();bar.clef=model.Clef.G2;const voice=new model.Voice();const beat=new model.Beat();beat.duration=1;voice.addBeat(beat);bar.addVoice(voice);track.staves[0].addBar(bar);}}
+  score.finish(new Settings());return score;
+}
+const pageLayout={paper:'A4' as const,orientation:'portrait' as const,marginMm:15,scale:1,profile:'Score' as const};
+function perTrackHook(score:model.Score,api:ExportNativeBridge){return renderHook(()=>useExportCoordinator({revision:7,score,settings:defaultDocumentSettings(),currentSpeed:1,bridge:{readBackingAsset:async()=>{throw new Error('Unexpected backing read.');},confirmExport:async()=>true,exportGp:async()=>true},native:api}));}
+
+it('writes one named file per selected track with each track rendered alone',async()=>{
+  const score=tracks(['Lead','Bass','lead']),api=native(),save=vi.fn(async()=>true);api.exportTrackFiles=save;
+  vi.spyOn(pdf,'loadExportFonts').mockResolvedValue();const render=vi.spyOn(pdf,'renderPdfPages').mockImplementation((_score,selection)=>[{widthMm:210,heightMm:297,svg:`<svg>${selection.tracks.join()}</svg>`}]);
+  const {result}=perTrackHook(score,api);
+  await act(async()=>{expect(await result.current.run({format:'svg',selection:{tracks:[2,0,1],range:{first:0,last:1},staves:{0:[0],1:[0],2:[0]}},layout:pageLayout,transparent:true,perTrack:true,fileName:'%t'})).toBe(true);});
+  expect(render.mock.calls.map(call=>call[1])).toEqual([{tracks:[0],range:{first:0,last:1},staves:{0:[0]}},{tracks:[1],range:{first:0,last:1},staves:{1:[0]}},{tracks:[2],range:{first:0,last:1},staves:{2:[0]}}]);
+  // Names follow each track; a case-insensitive repeat gets its track number.
+  expect(save).toHaveBeenCalledWith('svg',[{name:'Lead',pages:[{widthMm:210,heightMm:297,svg:'<svg>0</svg>'}]},{name:'Bass',pages:[{widthMm:210,heightMm:297,svg:'<svg>1</svg>'}]},{name:'lead (3)',pages:[{widthMm:210,heightMm:297,svg:'<svg>2</svg>'}]}],null,7);
+});
+it('adds the page background and passes the resolution for per-track PNG, and sends PDF pages untouched',async()=>{
+  const score=tracks(['Lead','Bass']),api=native(),save=vi.fn(async()=>true);api.exportTrackFiles=save;const exportPdf=vi.fn(api.exportPdf);api.exportPdf=exportPdf;
+  vi.spyOn(pdf,'loadExportFonts').mockResolvedValue();vi.spyOn(pdf,'renderPdfPages').mockImplementation(()=>[{widthMm:210,heightMm:297,svg:'<svg></svg>'}]);
+  const {result}=perTrackHook(score,api);
+  await act(async()=>{await result.current.run({format:'png',selection:{tracks:[0,1],range:null},layout:pageLayout,transparent:false,dpi:150,perTrack:true});});
+  const [format,files,dpi,revision]=save.mock.calls[0] as unknown as [string,{name:string;pages:SvgPage[]}[],number,number];
+  expect([format,dpi,revision,files.map(file=>file.name)]).toEqual(['png',150,7,['Song','Song (2)']]);
+  expect(files.every(file=>file.pages[0].svg.includes('<rect width="100%" height="100%" fill="#fff"/>'))).toBe(true);
+  await act(async()=>{await result.current.run({format:'pdf',selection:{tracks:[0,1],range:null},layout:pageLayout,perTrack:true,fileName:'%n %t'});});
+  expect(save).toHaveBeenLastCalledWith('pdf',[{name:'1 Lead',pages:[{widthMm:210,heightMm:297,svg:'<svg></svg>'}]},{name:'2 Bass',pages:[{widthMm:210,heightMm:297,svg:'<svg></svg>'}]}],null,7);
+  expect(exportPdf).not.toHaveBeenCalled();
+});
+it('keeps a partial staff selection only for the track it belongs to',async()=>{
+  const score=tracks(['Lead','Bass']);score.tracks[0].addStaff(new model.Staff());
+  const api=native(),save=vi.fn(async()=>true);api.exportTrackFiles=save;
+  vi.spyOn(pdf,'loadExportFonts').mockResolvedValue();const render=vi.spyOn(pdf,'renderPdfPages').mockImplementation(()=>[{widthMm:210,heightMm:297,svg:'<svg/>'}]);
+  const {result}=perTrackHook(score,api);
+  await act(async()=>{expect(await result.current.run({format:'pdf',selection:{tracks:[0,1],range:null,staves:{0:[1]}},layout:pageLayout,perTrack:true})).toBe(true);});
+  const selections=render.mock.calls.map(call=>call[1]);
+  expect(selections).toEqual([{tracks:[0],range:null,staves:{0:[1]}},{tracks:[1],range:null}]);
+  for(const selection of selections)expect(()=>validateSelection(score.tracks.length,score.masterBars.length,selection,score.tracks.map(t=>t.staves.length))).not.toThrow();
+});
+it('numbers names until every saved file, extension and page number included, is unique',async()=>{
+  const api=native(),save=vi.fn(async()=>true);api.exportTrackFiles=save;
+  vi.spyOn(pdf,'loadExportFonts').mockResolvedValue();
+  const names=()=>(save.mock.lastCall as unknown as [string,{name:string}[]])[1].map(file=>file.name);
+  vi.spyOn(pdf,'renderPdfPages').mockImplementation(()=>[{widthMm:210,heightMm:297,svg:'<svg/>'}]);
+  let hook=perTrackHook(tracks(['A (3)','A','A']),api);
+  await act(async()=>{await hook.result.current.run({format:'svg',selection:{tracks:[0,1,2],range:null},layout:pageLayout,transparent:true,perTrack:true,fileName:'%t'});});
+  expect(names()).toEqual(['A (3)','A','A (3-2)']);
+  hook=perTrackHook(tracks(['Lead','Lead.svg']),api);
+  await act(async()=>{await hook.result.current.run({format:'svg',selection:{tracks:[0,1],range:null},layout:pageLayout,transparent:true,perTrack:true,fileName:'%t'});});
+  expect(names()).toEqual(['Lead','Lead.svg (2)']);
+  // Two pages of "Song" are saved as Song-1.svg and Song-2.svg, which a track named "Song-1" would repeat.
+  vi.spyOn(pdf,'renderPdfPages').mockImplementation((_score,selection)=>Array.from({length:selection.tracks[0]===0?2:1},()=>({widthMm:210,heightMm:297,svg:'<svg/>'})));
+  hook=perTrackHook(tracks(['Song','Song-1']),api);
+  await act(async()=>{await hook.result.current.run({format:'svg',selection:{tracks:[0,1],range:null},layout:pageLayout,transparent:true,perTrack:true,fileName:'%t'});});
+  expect(names()).toEqual(['Song','Song-1 (2)']);
+  // A PDF is one file whatever its page count, so repeated names clash even when the page counts differ.
+  hook=perTrackHook(tracks(['Guitar','Guitar']),api);
+  await act(async()=>{await hook.result.current.run({format:'pdf',selection:{tracks:[0,1],range:null},layout:pageLayout,perTrack:true,fileName:'%t'});});
+  expect(names()).toEqual(['Guitar','Guitar (2)']);
+});
+it('stops between tracks when cancelled, before anything is saved',async()=>{
+  const api=native(),save=vi.fn(async()=>true);api.exportTrackFiles=save;
+  vi.spyOn(pdf,'loadExportFonts').mockResolvedValue();
+  const {result}=perTrackHook(tracks(['Lead','Bass','Keys']),api);
+  const render=vi.spyOn(pdf,'renderPdfPages').mockImplementation(()=>{void result.current.cancel();return [{widthMm:210,heightMm:297,svg:'<svg/>'}];});
+  await act(async()=>{expect(await result.current.run({format:'pdf',selection:{tracks:[0,1,2],range:null},layout:pageLayout,perTrack:true})).toBe(false);});
+  expect(render).toHaveBeenCalledTimes(1);expect(save).not.toHaveBeenCalled();
+});
+it('applies the PNG pixel budget across every track before the save dialog',async()=>{
+  const score=tracks(['Lead','Bass','Keys']),api=native(),save=vi.fn(async()=>true);api.exportTrackFiles=save;
+  vi.spyOn(pdf,'loadExportFonts').mockResolvedValue();vi.spyOn(pdf,'renderPdfPages').mockImplementation(()=>Array.from({length:20},()=>({widthMm:210,heightMm:297,svg:'<svg/>'})));
+  const {result}=perTrackHook(score,api);
+  // One track's 20 A4 pages at 600 dpi fit the budget; three tracks together do not.
+  await act(async()=>{expect(await result.current.run({format:'png',selection:{tracks:[0],range:null},layout:pageLayout,transparent:true,dpi:600,perTrack:true})).toBe(true);});
+  await act(async()=>{await expect(result.current.run({format:'png',selection:{tracks:[0,1,2],range:null},layout:pageLayout,transparent:true,dpi:600,perTrack:true})).rejects.toThrow('fewer pages');});
+  expect(save).toHaveBeenCalledTimes(1);
 });

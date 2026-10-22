@@ -7,6 +7,7 @@
 .track-panel .track-channel-heading { min-width:0; }
 .track-panel .track-channel-select { display:block; width:100%; min-width:0; height:28px; padding:2px 4px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--ws-text); background:var(--ws-input); border:1px solid var(--ws-border); border-radius:3px; text-align:left; font:inherit; }
 .track-panel .track-channel-select[aria-pressed="true"] { border-color:var(--ws-accent); }
+.track-panel .track-color-swatch { display:inline-block; width:8px; height:8px; margin-right:4px; border-radius:2px; vertical-align:middle; box-shadow:0 0 0 1px var(--ws-border); forced-color-adjust:none; }
 .track-panel .track-channel-status { display:block; color:var(--ws-muted); font-size:11px; line-height:15px; }
 .track-panel .track-channel-switches { display:flex; gap:6px; }
 .track-panel .track-channel-switches label { display:flex; flex-direction:row; align-items:center; gap:2px; min-height:28px; margin:0; font-size:12px; }

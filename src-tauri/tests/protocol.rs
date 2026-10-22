@@ -42,10 +42,33 @@ fn a_track_move_must_change_the_position() {
 }
 
 #[test]
+fn a_track_color_must_be_six_hex_digits() {
+    let good: EditCommand = serde_json::from_value(
+        serde_json::json!({"type":"setTrackColor","track":0,"color":"#1a2B3c"}),
+    )
+    .unwrap();
+    assert!(good.validate().is_ok());
+    for color in [
+        "red", "#fff", "#12345", "#1234567", "#gg0000", " #112233", "#11223344", "x112233", "é12345",
+        "#ééé",
+    ] {
+        let bad: EditCommand = serde_json::from_value(
+            serde_json::json!({"type":"setTrackColor","track":0,"color":color}),
+        )
+        .unwrap();
+        assert!(bad.validate().is_err(), "{color}");
+    }
+    assert!(serde_json::from_value::<EditCommand>(
+        serde_json::json!({"type":"setTrackColor","track":0,"color":7})
+    )
+    .is_err());
+}
+
+#[test]
 fn every_frontend_command_round_trips_through_rust() {
     let examples: Vec<serde_json::Value> =
         serde_json::from_str(include_str!("../../tests/protocol.json")).unwrap();
-    assert_eq!(examples.len(), 70);
+    assert_eq!(examples.len(), 71);
     for mut example in examples {
         let command: EditCommand = serde_json::from_value(example.clone()).unwrap();
         assert!(command.validate().is_ok(), "invalid fixture {example}");

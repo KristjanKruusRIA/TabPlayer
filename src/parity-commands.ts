@@ -3,11 +3,12 @@ import {validatePageLayout} from './engraving/page';
 import {validateHarmonyChord} from './harmony/chord-source';
 import {validateBackingSettings} from './document-settings';
 import {validateRatioTempoPoints} from './editor/tempo-types';
+import {parseTrackColor} from './track-color';
 
 const shapes:Record<string,readonly string[]>={
   setNote:['target','string','fret'],removeNote:['target','string'],setRest:['target'],setDuration:['target','duration','dots'],
   insertBeat:['target','duration','dots'],deleteBeat:['target'],appendMeasure:[],removeMeasure:['bar'],
-  addTrack:['name','tuning','program'],removeTrack:['track'],moveTrack:['track','to'],duplicateTrack:['track'],setTuning:['track','tuning'],setScoreInfo:['title','artist','tempo'],
+  addTrack:['name','tuning','program'],removeTrack:['track'],moveTrack:['track','to'],duplicateTrack:['track'],setTrackColor:['track','color'],setTuning:['track','tuning'],setScoreInfo:['title','artist','tempo'],
   setNoteTechniques:['target','string','patch'],setBeatTechniques:['target','patch'],setNoteLink:['from','to','kind'],
   setBeatRhythm:['target','duration','dots','tupletNumerator','tupletDenominator','graceType'],
   setTrackInfo:['track','name','shortName','program'],setStaffSettings:['track','staff','settings'],addStaff:['track','settings'],
@@ -169,6 +170,7 @@ export function validateParityCommand(value:unknown):void {
   if('name'in edit&&typeof edit.name!=='string')throw new Error('Invalid track name.');
   if('selection'in edit)musicSelection(edit.selection);
   if(type==='moveTrack')integer(edit.to);
+  if(type==='setTrackColor')parseTrackColor(edit.color);
   if(type==='transposeSelection'&&(typeof edit.semitones!=='number'||!Number.isInteger(edit.semitones)||edit.semitones===0||Math.abs(edit.semitones)>127))throw new Error('Choose a nonzero semitone shift from -127 to 127.');
   if(type==='moveSelectionStrings'&&!['higher','lower'].includes(edit.direction as string))throw new Error('Invalid string direction.');
   if(type==='refingerSelection'){integer(edit.maxFret,127);if(edit.maxFret===0)throw new Error('Invalid maximum fret.');}

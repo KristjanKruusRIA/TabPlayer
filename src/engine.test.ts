@@ -102,6 +102,25 @@ describe('moving tracks', () => {
   });
 });
 
+describe('recoloring tracks', () => {
+  const rgb = (track: model.Track) => [track.color.r, track.color.g, track.color.b];
+  it('sets the track color and keeps it through GP export and duplicate, leaving the history before it unchanged', () => {
+    const project = previewEdit(base(), {type:'setNote', target, string:6, fret:3}).project;
+    const before = rgb(buildScore(project).tracks[0]);
+    const colored = previewEdit(project, {type:'setTrackColor', track:0, color:'#1a2B3c'});
+    expect(rgb(colored.score.tracks[0])).toEqual([0x1a,0x2b,0x3c]);
+    expect(colored.score.tracks[0].color.a).toBe(255);
+    expect(rgb(buildScore(imported(colored.score)).tracks[0])).toEqual([0x1a,0x2b,0x3c]);
+    expect(rgb(previewEdit(colored.project, {type:'duplicateTrack', track:0}).score.tracks[1])).toEqual([0x1a,0x2b,0x3c]);
+    expect(rgb(buildScore(project).tracks[0])).toEqual(before);
+  });
+  it('refuses colors that are not #rrggbb and missing tracks', () => {
+    for (const color of ['red', '#fff', '#12345', '#1234567', '#gg0000', ' #112233', '#11223344', 'x112233', '#112233\n', 7 as unknown as string])
+      expect(() => previewEdit(base(), {type:'setTrackColor', track:0, color})).toThrow(/color/i);
+    expect(() => previewEdit(base(), {type:'setTrackColor', track:1, color:'#112233'})).toThrow();
+  });
+});
+
 describe('duplicating tracks', () => {
   const ids = (score: model.Score) => score.tracks.flatMap(track => track.staves.flatMap(staff => staff.bars.flatMap(bar => [`bar${bar.id}`, ...bar.voices.flatMap(voice => [`voice${voice.id}`, ...voice.beats.flatMap(beat => [`beat${beat.id}`, ...beat.notes.map(note => `note${note.id}`)])])])));
   const music = (track: model.Track) => track.staves.map(staff => staff.bars.map(bar => bar.voices.map(voice => voice.beats.map(beat => [beat.duration, beat.notes.map(note => [note.string, note.fret])]))));

@@ -22,6 +22,12 @@ function livePlayer(score:model.Score){
 }
 function props(score=base()) {return {score,selected:0,busy:false,view:'mixer' as const,target,onExitOverview:vi.fn(),onSelect:vi.fn(),onSelectPosition:vi.fn(),player:null};}
 
+it('shows each track color as a swatch beside its name',()=>{
+  const score=previewEdit(blankProject(),{type:'setTrackColor',track:0,color:'#ff8800'}).score;
+  render(<TrackPanel {...props(score)}/>);
+  const swatch=screen.getByRole('button',{name:/^Track 1: /}).querySelector('.track-color-swatch') as HTMLElement;
+  expect(swatch).toHaveAttribute('aria-hidden','true');expect(swatch.style.backgroundColor).toBe('rgb(255, 136, 0)');
+});
 it('shows the current instrument mix after deletion and undo change its index',()=>{
   const added=previewEdit(blankProject(),{type:'addTrack',name:'Bass',tuning:[43,38,33,28],program:33});
   let score=added.score;const state={};

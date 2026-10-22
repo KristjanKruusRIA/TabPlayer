@@ -905,6 +905,10 @@ pub enum EditCommand {
     DuplicateTrack {
         track: u32,
     },
+    SetTrackColor {
+        track: u32,
+        color: String,
+    },
     SetTuning {
         track: u32,
         tuning: Vec<i32>,
@@ -1481,6 +1485,13 @@ impl EditCommand {
             Self::SetTrackLayout {
                 bars_per_system, ..
             } if *bars_per_system == 0 => return Err("A system needs at least one bar.".into()),
+            Self::SetTrackColor { color, .. }
+                if color.len() != 7
+                    || !color.starts_with('#')
+                    || !color[1..].bytes().all(|byte| byte.is_ascii_hexdigit()) =>
+            {
+                return Err("Choose a track color as #rrggbb.".into());
+            }
             Self::SetMeasureSettings {
                 numerator,
                 denominator,

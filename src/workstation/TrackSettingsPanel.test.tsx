@@ -7,6 +7,7 @@ import { blankProject } from '../project';
 import { tuningPresets } from '../tuning-presets';
 import { formatTuning } from '../tuning';
 import { TrackSettingsPanel } from './TrackSettingsPanel';
+import { trackColorHex } from '../track-color';
 afterEach(cleanup);
 it('all 128 programs are selectable and existing track settings dispatch exact payload',()=>{
   const score=previewEdit(blankProject(),{type:'setNote',target:{track:0,staff:0,bar:0,voice:0,beat:0},string:6,fret:3}).score,onEdit=vi.fn();
@@ -83,6 +84,11 @@ it('keeps full long track names accessible and selected/remove/notation command 
   expect(screen.getByRole('button',{name:'Move track up'})).toBeDisabled();
   fireEvent.click(screen.getByRole('button',{name:'Move track down'}));expect(onEdit).toHaveBeenLastCalledWith({type:'moveTrack',track:0,to:1});
   fireEvent.click(screen.getByRole('button',{name:'Duplicate track'}));expect(onEdit).toHaveBeenLastCalledWith({type:'duplicateTrack',track:0});
+  const color=screen.getByLabelText('Track color');expect(color).toHaveValue(trackColorHex(added.score.tracks[0].color));
+  fireEvent.change(color,{target:{value:'#ff8800'}});fireEvent.click(screen.getByRole('button',{name:'Apply track color'}));expect(onEdit).toHaveBeenLastCalledWith({type:'setTrackColor',track:0,color:'#ff8800'});
+  // Another track shows its own color, and an unchanged color can't be applied as an empty Undo step.
+  const recolored=previewEdit(added.project,{type:'setTrackColor',track:1,color:'#00ff00'}).score;cleanup();render(<TrackSettingsPanel score={recolored} selected={1} busy={false} onEdit={onEdit}/>);
+  expect(screen.getByLabelText('Track color')).toHaveValue('#00ff00');expect(screen.getByRole('button',{name:'Apply track color'})).toBeDisabled();
   fireEvent.change(screen.getByLabelText('New notation track name'),{target:{value:'Piano'}});fireEvent.change(screen.getByLabelText('New notation track program'),{target:{value:'5'}});
   fireEvent.click(screen.getByRole('button',{name:'Add pitched track'}));expect(onEdit).toHaveBeenLastCalledWith({type:'addPitchedTrack',name:'Piano',program:5});
   fireEvent.click(screen.getByRole('button',{name:'Add percussion track'}));expect(onEdit).toHaveBeenLastCalledWith({type:'addPercussionTrack',name:'Piano',program:5});

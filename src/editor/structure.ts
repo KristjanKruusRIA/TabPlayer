@@ -3,6 +3,7 @@ import type { EditCommand, StaffSettings } from '../edit-types';
 import { enumValue, integer, staffAt, trackAt, validateCapacity } from './common';
 import { captureNoteLinks, detachNote, restoreNoteLinks } from './links';
 import { scoreFromJson } from '../model-clone';
+import { parseTrackColor } from '../track-color';
 
 function validateStaff(staff:model.Staff|null,settings:StaffSettings) {
   if(!Array.isArray(settings.tuning)||settings.tuning.some(p=>!integer(p,0,127))||(!settings.tuning.length&&settings.showTab&&!staff?.isPercussion))throw new Error('Use MIDI tuning pitches from 0 to 127.');
@@ -29,6 +30,7 @@ export function applyStructureEdit(score:model.Score,command:EditCommand,_editIn
       for(const staff of track.staves)for(const voice of staff.bars[0]?.voices??[])for(const automation of voice.beats[0]?.automations??[])if(automation.type===model.AutomationType.Instrument&&automation.ratioPosition===0)automation.value=command.program;
       return true;
     }
+    case 'setTrackColor': {const track=trackAt(score,command.track);track.color=parseTrackColor(command.color);return true;}
     case 'setStaffSettings': {const staff=staffAt(score,command.track,command.staff);validateStaff(staff,command.settings);configure(staff,command.settings);return true;}
     case 'addStaff': {
       const track=trackAt(score,command.track);validateStaff(null,command.settings);const staff=new model.Staff();configure(staff,command.settings);track.addStaff(staff);

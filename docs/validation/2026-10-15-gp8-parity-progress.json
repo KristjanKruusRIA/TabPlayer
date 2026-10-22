@@ -19,7 +19,7 @@
     "value": "088b973cea94bde876859c7e6efadb4dd23da64a",
     "accepted_source_revision": "088b973cea94bde876859c7e6efadb4dd23da64a",
     "documentation_revision": null,
-    "documentation_status": "2026-10-21 update on feat/gp8-parity: F13 missing -> partial, W05 missing -> implemented, F03/F04/D01/D02 evidence refreshed. Earlier P17/P18 checkpoint text is kept in previous_checkpoint and provenance. 2026-10-22: F17 SVG export missing -> implemented. 2026-10-22: F16 PNG export missing -> partial. 2026-10-22: D20 export file-name tokens missing -> partial. 2026-10-22: D20 one file per track added; D20 stays partial. 2026-10-22: S03 track reorder missing -> partial. 2026-10-22: S03 track duplicate added (still partial).",
+    "documentation_status": "2026-10-21 update on feat/gp8-parity: F13 missing -> partial, W05 missing -> implemented, F03/F04/D01/D02 evidence refreshed. Earlier P17/P18 checkpoint text is kept in previous_checkpoint and provenance. 2026-10-22: F17 SVG export missing -> implemented. 2026-10-22: F16 PNG export missing -> partial. 2026-10-22: D20 export file-name tokens missing -> partial. 2026-10-22: D20 one file per track added; D20 stays partial. 2026-10-22: S03 track reorder missing -> partial. 2026-10-22: S03 track duplicate added (still partial). 2026-10-22: S03 track color added (still partial).",
     "provenance": "Root locally accepts P16 source 447d2a9240dc5727ff0679b5b0f84dd7107db603; delivery is pending and the source is not yet pushed at this checkpoint. The final versioned tempo report supports the bounded source/native/current Windows/GP-publication/visual scope. Proprietary GP bracket import/export and playback clipping remain unverified, and the report retains audible, platform and shipping limits. This documentation audit executes no runtime or Git/network operation. The unchanged CI checkpoint belongs to historical Library source only and supplies no P16/current-head CI proof. 2026-10-16 P17/P18 checkpoint: root locally accepts source a87bae29deb08e31a8974d6d2ed390e7b5adca0b for the declared local pitch/filter scope after the frozen 57-step functional workflow at be9e61aa2383974821e7ecf70899e7f755f74f53 and sole 17-step/four-frame targeted confirmation at a87bae29deb08e31a8974d6d2ed390e7b5adca0b. The final UI source has its own admitted diagnostic build; the coherent 2647/617 whole-suite evidence belongs to earlier product source 4a01c341eca58cb25f52c89175ba1fb8c14ee803, not a rerun at this later source. The immutable visual receipt retains inherited observer metadata; the final report binds its additive provenance corrigendum and distinguishes current source/executable/admission/resource/log identities. P17 is implemented within declared local numeric scope and P18 remains partial without vocal/center/channel separation. P16 remains reviewed partial; GP bracket import/export and playback clipping remain unverified. Physical audio, original-GP8, macOS/Linux and shipping acceptance remain separate. Independent final document/adoption review and local documentation delivery/push remain pending; no current-head CI result is supplied and the unchanged CI object remains historical Library evidence. This documentation audit executes no runtime/build, Git or network operation.",
     "previous_accepted_checkpoint": "447d2a9240dc5727ff0679b5b0f84dd7107db603",
     "ci_checkpoint": {
@@ -907,6 +907,24 @@
       "start_line": 46,
       "end_line": 51,
       "kind": "validation_report"
+    },
+    "color_behavior": {
+      "path": "docs/validation/2026-10-22-gp8-track-color.md",
+      "start_line": 5,
+      "end_line": 17,
+      "kind": "validation_report"
+    },
+    "color_evidence": {
+      "path": "docs/validation/2026-10-22-gp8-track-color.md",
+      "start_line": 19,
+      "end_line": 37,
+      "kind": "validation_report"
+    },
+    "color_limits": {
+      "path": "docs/validation/2026-10-22-gp8-track-color.md",
+      "start_line": 39,
+      "end_line": 44,
+      "kind": "validation_report"
     }
   },
   "evidence_file_sha256": {
@@ -964,7 +982,8 @@
     "docs/validation/2026-10-22-gp8-export-file-names.md": "d7db07664fb24604b6c9469f96f811e821aa76e31f94c3b3b655b1412eaa0854",
     "docs/validation/2026-10-22-gp8-export-per-track.md": "8cfa5c4bb0f1b2b9742bae5fcbb52a7f976e7cb6891812ad9b2e7e3eb25410ce",
     "docs/validation/2026-10-22-gp8-move-track.md": "b54253a3f6bcb08fdfc7c15e4e4f2b663dd4ec8bba14c91b50e9a18a1c241836",
-    "docs/validation/2026-10-22-gp8-duplicate-track.md": "bc61971a30d3cd616036740395aa30335456e9cf39d2def73e2e836dc0534b34"
+    "docs/validation/2026-10-22-gp8-duplicate-track.md": "bc61971a30d3cd616036740395aa30335456e9cf39d2def73e2e836dc0534b34",
+    "docs/validation/2026-10-22-gp8-track-color.md": "987ba7b6536ecc3927520143c1cfc328ea49a3436cd6842b91b0497154658b1a"
   },
   "next_open_families": [
     {
@@ -1918,15 +1937,18 @@
       "current_status": "partial",
       "assessment": "evidence_reviewed",
       "current_proven_status": "partial",
-      "current_behavior": "Tracks can be reordered with Move track up/down and duplicated with Duplicate track in track settings, recorded as the replayed moveTrack {track,to} and duplicateTrack {track} edits. A moved track keeps its music and identity-keyed settings; a duplicate is inserted after its source with the same music, lyrics, chords and per-track style, fresh bar/voice/beat/note IDs, copied in-track links, free MIDI channels (shared once none are free; percussion keeps the drum channel) and a new identity with copied sound, mix and engraving profile. GP export regenerates PartConfiguration and LayoutConfiguration after track-structure edits; library metadata and the Rust protocol accept both commands; selection follows the track. Windows desktop-test runs reorder and duplicate tracks in the four-track fixture and re-import the GP exports.",
-      "remaining_gap": "No track recolor; no drag reorder; custom GP score views and layout settings reset after track-structure edits; settings Undo after a duplicate uses the full rebuild; no original-GP8 comparison.",
+      "current_behavior": "Tracks can be reordered with Move track up/down, duplicated with Duplicate track and recolored with a Track color picker in track settings, recorded as the replayed moveTrack {track,to}, duplicateTrack {track} and setTrackColor {track,color:#rrggbb} edits. A moved track keeps its music and identity-keyed settings; a duplicate is inserted after its source with the same music, lyrics, chords, color and per-track style, fresh bar/voice/beat/note IDs, copied in-track links, free MIDI channels (shared once none are free; percussion keeps the drum channel) and a new identity with copied sound, mix and engraving profile. Track colors show as Mixer swatches and round-trip through GP export. GP export regenerates PartConfiguration and LayoutConfiguration after track-structure edits; library metadata and the Rust protocol accept the commands; selection follows the track. Windows desktop-test runs reorder, duplicate and recolor tracks in the four-track fixture and re-import the GP exports.",
+      "remaining_gap": "No drag reorder in the track list; new tracks use one default color instead of per-instrument colors and the score view is not tinted by track color; custom GP score views and layout settings reset after track-structure edits; settings Undo after a duplicate uses the full rebuild; no original-GP8 comparison.",
       "current_evidence": [
         "move_behavior",
         "move_evidence",
         "move_limits",
         "duplicate_behavior",
         "duplicate_evidence",
-        "duplicate_limits"
+        "duplicate_limits",
+        "color_behavior",
+        "color_evidence",
+        "color_limits"
       ],
       "runtime_rechecked_by_this_audit": false
     },

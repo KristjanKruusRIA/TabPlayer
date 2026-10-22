@@ -2,6 +2,7 @@ import { model } from '@coderline/alphatab';
 import type { BeatTarget } from '../project';
 import type { GestureCommand,GesturePatch } from './gestures-types';
 import { beatAt,integer,locationAt } from './common';
+import { applySustainPedal } from './sustain-pedal';
 
 const flags=['tap','slap','pop','deadSlapped','slashed','showTimer'] as const;
 const enums={golpe:2,rasgueado:18,fade:3,vibrato:2,beamingMode:3,wahPedal:2} as const;
@@ -39,6 +40,7 @@ function applyPatch(beat:model.Beat,patch:GesturePatch) {
 export function applyGestureEdit(score:model.Score,command:GestureCommand):boolean {
   switch(command.type){
     case 'setBeatGestures':exact(command,['type','target','patch']);applyPatch(selected(score,command.target),command.patch);return true;
+    case 'setSustainPedal':exact(command,['type','target','pedal']);applySustainPedal(selected(score,command.target),command.pedal);return true;
     case 'setOttava':{
       exact(command,['type','from','to','ottava']);if(!integer(command.ottava,0,4))throw new Error('Invalid ottava.');const beats=range(score,command.from,command.to);
       for(const beat of beats)beat.ottava=command.ottava;return true;

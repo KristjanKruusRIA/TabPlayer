@@ -20,7 +20,7 @@ export function applyAdvancedEdit(score:model.Score,command:EditCommand,editInde
   if(command.type==='eraseSelection'||command.type==='transposeSelection'||command.type==='moveSelectionStrings'||command.type==='refingerSelection'||command.type==='setSelectionSustain')return applyRangeEdit(score,command);
   if(command.type==='insertMeasures'||command.type==='removeMeasures')return applyMeasureEdit(score,command);
   if(command.type==='setTrackLyrics')return applyLyricsEdit(score,command);
-  if(command.type==='setBeatGestures'||command.type==='setOttava'||command.type==='setCrescendo'||command.type==='setFermata')return applyGestureEdit(score,command);
+  if(command.type==='setBeatGestures'||command.type==='setOttava'||command.type==='setCrescendo'||command.type==='setFermata'||command.type==='setSustainPedal')return applyGestureEdit(score,command);
   if(command.type==='setBarGestures'||command.type==='setMasterBarGestures'||command.type==='setSimile')return applyBarGestureEdit(score,command);
   if(command.type==='setNoteTechniques'){applyNoteTechniques(score,{target:command.target,string:command.string},command.patch);return true;}
   if(command.type==='setBeatTechniques'){applyBeatTechniques(score,command.target,command.patch);return true;}

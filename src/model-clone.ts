@@ -1,4 +1,5 @@
 import { model, type Settings } from '@coderline/alphatab';
+import { repairPedalPresses } from './editor/sustain-pedal';
 
 type NoteJson={id:number;dynamics:number};
 type BeatJson={notes:NoteJson[]};
@@ -15,5 +16,6 @@ export function scoreFromJson(json:ReturnType<typeof model.JsonConverter.scoreTo
   for(const track of score.tracks)for(const staff of track.staves)for(const bar of staff.bars)for(const voice of bar.voices)for(const beat of voice.beats)for(const note of beat.notes) {
     const value=dynamics.get(note.id);if(value!==undefined)note.dynamics=value;
   }
+  repairPedalPresses(score);
   return score;
 }

@@ -6,6 +6,7 @@ import { music,target } from './fixtures';
 import type { GestureCommand,GesturePatch } from './gestures-types';
 import { applyGestureEdit } from './gestures';
 import { applyNoteLink,applyNoteTechniques } from './techniques';
+import { sustainPedalAt } from './sustain-pedal';
 
 const settings=new Settings();
 const beat=(score:model.Score,bar=0,index=0,track=0)=>score.tracks[track].staves[0].bars[bar].voices[0].beats[index];
@@ -177,3 +178,24 @@ it('wah_pedal_gesture_sets_open_closed_and_none_and_round_trips_through_gp',()=>
   const drums=music();drums.tracks[0].staves[0].isPercussion=true;const before=snapshot(drums);expect(()=>patch(drums,{wahPedal:1})).toThrow(/stringed/);expect(snapshot(drums)).toBe(before);
   for(const wahPedal of [3,-1,1.5,'1']){const before=snapshot(score);expect(()=>patch(score,{wahPedal} as unknown as GesturePatch)).toThrow(/wahPedal/);expect(snapshot(score)).toBe(before);}
 });
+const pedals=(score:model.Score,bar:number)=>score.tracks[0].staves[0].bars[bar].sustainPedals.map(marker=>[marker.pedalType,marker.ratioPosition]);
+// Each edit is followed by the JSON rebuild the engine performs, which re-derives alphaTab's hold markers.
+const pedal=(score:model.Score,at:Partial<typeof target>,value:string)=>{edit(score,{type:'setSustainPedal',target:{...target,...at},pedal:value});return rebuild(score);};
+it('sustain_pedal_marks_press_and_release_at_beats_with_derived_holds_and_gp_round_trip',()=>{
+  const {Down,Hold,Up}=model.SustainPedalMarkerType;let score=music();
+  score=pedal(score,{},'down');expect(pedals(score,0)).toEqual([[Down,0]]);expect(pedals(score,1)).toEqual([[Hold,0]]);expect(pedals(score,3)).toEqual([[Hold,0]]);
+  score=pedal(score,{bar:1,beat:2},'up');expect(pedals(score,1)).toEqual([[Up,.5]]);expect(pedals(score,2)).toEqual([]);
+  expect(sustainPedalAt(score.tracks[0].staves[0].bars[1].voices[0].beats[2])).toBe('up');expect(sustainPedalAt(score.tracks[0].staves[0].bars[1].voices[0].beats[1])).toBe('none');
+  // Redundant presses and releases, clearing an unmarked beat and unknown values are refused without changes.
+  for(const [at,value] of [[{beat:1},'down'],[{bar:2},'up'],[{bar:2,beat:1},'none'],[{},'sideways'],[{},'up']] as const){
+    const before=snapshot(score);expect(()=>edit(score,{type:'setSustainPedal',target:{...target,...at},pedal:value})).toThrow(/pedal/i);expect(snapshot(score)).toBe(before);
+  }
+  const reloaded=importer.ScoreLoader.loadScoreFromBytes(new exporter.Gp7Exporter().export(score,settings),settings);
+  expect([0,1,2,3].map(bar=>pedals(reloaded,bar))).toEqual([0,1,2,3].map(bar=>pedals(score,bar)));
+  // A press before a later press extends that span; clearing a press removes its release too.
+  score=pedal(score,{bar:2,beat:1},'down');score=pedal(score,{bar:2,beat:0},'down');expect(pedals(score,2)).toEqual([[Down,0]]);expect(pedals(score,3)).toEqual([[Hold,0]]);
+  score=pedal(score,{bar:3,beat:3},'up');score=pedal(score,{bar:1,beat:2},'none');expect(pedals(score,1)).toEqual([[Hold,0]]);expect(pedals(score,2)).toEqual([[Hold,0]]);
+  score=pedal(score,{},'none');expect([0,1,2,3].map(bar=>pedals(score,bar))).toEqual([[],[],[],[]]);
+  const drums=music();drums.tracks[0].staves[0].isPercussion=true;expect(()=>edit(drums,{type:'setSustainPedal',target,pedal:'down'})).toThrow(/percussion/);
+});
+

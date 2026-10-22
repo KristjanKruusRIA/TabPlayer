@@ -69,5 +69,6 @@
   {"type":"pasteMusic","clip":{"format":"TabPlayerClip","version":2,"engineVersion":"1.8.4","mode":"singleTrack","kind":"phrase","scoreJson":"{}","links":[],"harmony":[]},"options":{"target":{"track":0,"staff":0,"bar":0,"voice":0,"beat":0},"destinations":[{"sourceTrack":0,"track":0,"staffMap":[0]}],"count":1,"placement":"currentBar","filters":{"diagrams":true,"texts":true,"timers":true,"trackAutomations":true,"masterAutomations":false,"sections":false}}},
   {"type":"moveTrack","track":0,"to":1},
   {"type":"duplicateTrack","track":0},
-  {"type":"setTrackColor","track":0,"color":"#ff8800"}
+  {"type":"setTrackColor","track":0,"color":"#ff8800"},
+  {"type":"setSustainPedal","target":{"track":0,"staff":0,"bar":0,"voice":0,"beat":0},"pedal":"down"}
 ]

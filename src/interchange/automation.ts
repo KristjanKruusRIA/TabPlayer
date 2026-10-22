@@ -1,9 +1,10 @@
 import { model,Settings } from '@coderline/alphatab';
 import { scoreFromJson } from '../model-clone';
 import { captureNoteLinks,restoreNoteLinks } from '../editor/links';
+import { trackPedalMarks } from '../editor/sustain-pedal';
 
 export interface PerformedBar {bar:number;startTick:number;endTick:number}
-export interface GpControllerEvent {track:number;tick:number;channel:number;controller:7|10;value:number}
+export interface GpControllerEvent {track:number;tick:number;channel:number;controller:7|10|64;value:number}
 type MixPoint={bar:number;automation:model.Automation};
 const preparedPoints=new WeakMap<model.Score,Map<number,MixPoint[]>>();
 
@@ -18,9 +19,10 @@ export function prepareGpMidiScore(score:model.Score,settings:Settings):model.Sc
 /** Exact breakpoints, rounded to the nearest MIDI tick/value. Linear ramps remain unsupported. */
 export function gpControllerEvents(score:model.Score,bars:readonly PerformedBar[]):GpControllerEvent[] {
   const result:GpControllerEvent[]=[],points=preparedPoints.get(score)??new Map(score.tracks.map(track=>[track.index,trackMixAutomations(track)]));
-  const append=(track:model.Track,tick:number,controller:7|10,value:number)=>{
+  const append=(track:model.Track,tick:number,controller:7|10|64,value:number)=>{
     for(const channel of new Set([track.playbackInfo.primaryChannel,track.playbackInfo.secondaryChannel]))result.push({track:track.index,tick:Math.round(tick),channel,controller,value:Math.max(0,Math.min(127,Math.round(value*8)))});
   };
+  const pedals=new Map(score.tracks.map(track=>[track,trackPedalMarks(track)]));
   for(let i=0;i<bars.length;i++){
     const occurrence=bars[i];
     for(const track of score.tracks){
@@ -33,6 +35,14 @@ export function gpControllerEvents(score:model.Score,bars:readonly PerformedBar[
         }
       }
       for(const {automation}of inBar)append(track,occurrence.startTick+(occurrence.endTick-occurrence.startTick)*automation.ratioPosition,automation.type===model.AutomationType.Volume?7:10,automation.value);
+      // Sustain pedal presses and releases; the first bar and every jump (including alternate endings,
+      // restated from score order as alphaTab prints them) restate the pedal unless a mark starts the bar.
+      const marks=pedals.get(track)!;
+      if(marks.length){
+        if((i===0||occurrence.bar!==bars[i-1].bar+1)&&!marks.some(mark=>mark.bar===occurrence.bar&&mark.ratio===0))
+          append(track,occurrence.startTick,64,marks.filter(mark=>mark.bar<occurrence.bar).at(-1)?.down?127:0);
+        for(const mark of marks)if(mark.bar===occurrence.bar)append(track,occurrence.startTick+(occurrence.endTick-occurrence.startTick)*mark.ratio,64,mark.down?127:0);
+      }
     }
   }
   return result.sort((a,b)=>a.tick-b.tick);

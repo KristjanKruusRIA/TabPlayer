@@ -4,6 +4,7 @@ import type { BeatTarget } from '../project';
 import type { GestureCommand,GesturePatch } from './gestures-types';
 import { EnumInput } from './controls';
 import { IndexInput } from './IndexInput';
+import { sustainPedalAt,type SustainPedal } from './sustain-pedal';
 
 export interface GesturePanelProps {score:model.Score;target:BeatTarget;busy:boolean;onEdit:(command:GestureCommand)=>void}
 type Draft=Omit<Required<GesturePatch>,'barre'|'stem'>&{barreFret:number;barreShape:number;stem:NonNullable<GesturePatch['stem']>|'preserve'};
@@ -14,6 +15,7 @@ export function GesturePanel({score,target,busy,onEdit}:GesturePanelProps) {
   const staff=score.tracks[target.track]?.staves[target.staff],beat=staff?.bars[target.bar]?.voices[target.voice]?.beats[target.beat],stringed=!!staff?.tuning.length&&!staff.isPercussion;
   const [draft,setDraft]=useState(()=>values(beat)),[endBar,setEndBar]=useState(target.bar+1),[endBeat,setEndBeat]=useState(target.beat+1),[ottava,setOttava]=useState<number>(beat?.ottava??2),[crescendo,setCrescendo]=useState<number>(beat?.crescendo??0),[targetDynamics,setTargetDynamics]=useState(6),[fermataType,setFermataType]=useState(beat?.fermata?String(beat.fermata.type):'none'),[fermataLength,setFermataLength]=useState(String(beat?.fermata?.length??1));
   useEffect(()=>{setDraft(values(beat));setEndBar(target.bar+1);setEndBeat(target.beat+1);setOttava(beat?.ottava??2);setCrescendo(beat?.crescendo??0);setTargetDynamics(6);setFermataType(beat?.fermata?String(beat.fermata.type):'none');setFermataLength(String(beat?.fermata?.length??1));},[score,beat,target.track,target.staff,target.bar,target.voice,target.beat]);
+  const marked=beat?sustainPedalAt(beat):'none',[pedal,setPedal]=useState<SustainPedal>(marked);useEffect(()=>setPedal(marked),[marked,beat]);
   const baseline=values(beat),patch:GesturePatch={};
   for(const key of ['tap','slap','pop','deadSlapped','slashed','showTimer','golpe','rasgueado','fade','vibrato','beamingMode','wahPedal'] as const)if(draft[key]!==baseline[key])Object.assign(patch,{[key]:draft[key]});
   if(draft.stem!==baseline.stem&&draft.stem!=='preserve')patch.stem=draft.stem;
@@ -40,6 +42,10 @@ export function GesturePanel({score,target,busy,onEdit}:GesturePanelProps) {
     </fieldset>
     <fieldset disabled={disabled||beat?.graceType!==model.GraceType.None}><h3>Global fermata</h3><p className="muted">Applies at this position across every track. Playback hold timing remains unavailable.</p><div className="pair"><label>Global fermata<select value={fermataType} onChange={e=>setFermataType(e.target.value)}><option value="none">None</option><option value="0">Short</option><option value="1">Medium</option><option value="2">Long</option></select></label><label>Stored length<input type="number" min={0} step="any" disabled={fermataType==='none'} value={fermataLength} onChange={e=>setFermataLength(e.target.value)}/></label></div>
       <button disabled={fermataType!=='none'&&(!fermataLength.trim()||!Number.isFinite(length)||length<0)} onClick={()=>onEdit({type:'setFermata',target,fermata:fermataType==='none'?null:{type:Number(fermataType),length}})}>Apply global fermata</button>
+    </fieldset>
+    <fieldset disabled={busy||!beat||beat.graceType!==model.GraceType.None}><h3>Sustain pedal</h3><p className="muted">Marks this staff's pedal at the selected beat; playback holds notes while it is pressed.</p>
+      <label>Sustain pedal<select value={pedal} onChange={e=>setPedal(e.target.value as SustainPedal)}><option value="none">No mark</option><option value="down">Press (Ped.)</option><option value="up">Release (*)</option></select></label>
+      <button disabled={pedal===marked} onClick={()=>onEdit({type:'setSustainPedal',target,pedal})}>Apply sustain pedal</button>
     </fieldset>
   </details>;
 }

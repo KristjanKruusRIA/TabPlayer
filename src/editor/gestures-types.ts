@@ -12,7 +12,8 @@ export type GestureCommand =
   | {type:'setBeatGestures';target:BeatTarget;patch:GesturePatch}
   | {type:'setOttava';from:BeatTarget;to:BeatTarget;ottava:number}
   | {type:'setCrescendo';from:BeatTarget;to:BeatTarget;crescendo:number;targetDynamics:number|null}
-  | {type:'setFermata';target:BeatTarget;fermata:{type:number;length:number}|null};
+  | {type:'setFermata';target:BeatTarget;fermata:{type:number;length:number}|null}
+  | {type:'setSustainPedal';target:BeatTarget;pedal:'down'|'up'|'none'};
 export type BarGestureCommand =
   | {type:'setBarGestures';track:number;staff:number;bar:number;clefOttava:number}
   | {type:'setMasterBarGestures';bar:number;commonTime:boolean;doubleBar:boolean;tripletFeel:number;beaming:{unit:number;groups:number[]}|null}

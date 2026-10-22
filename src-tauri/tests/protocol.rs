@@ -42,6 +42,32 @@ fn a_track_move_must_change_the_position() {
 }
 
 #[test]
+fn a_sustain_pedal_mark_is_down_up_or_none() {
+    let target = serde_json::json!({"track":0,"staff":0,"bar":0,"voice":0,"beat":0});
+    for pedal in ["down", "up", "none"] {
+        let good: EditCommand = serde_json::from_value(
+            serde_json::json!({"type":"setSustainPedal","target":target,"pedal":pedal}),
+        )
+        .unwrap();
+        assert!(good.validate().is_ok());
+    }
+    for pedal in ["sideways", "Down", ""] {
+        let bad: EditCommand = serde_json::from_value(
+            serde_json::json!({"type":"setSustainPedal","target":target,"pedal":pedal}),
+        )
+        .unwrap();
+        assert!(bad.validate().is_err(), "{pedal}");
+    }
+    for bad in [
+        serde_json::json!({"type":"setSustainPedal","target":target}),
+        serde_json::json!({"type":"setSustainPedal","target":target,"pedal":null}),
+        serde_json::json!({"type":"setSustainPedal","target":target,"pedal":"up","extra":0}),
+    ] {
+        assert!(serde_json::from_value::<EditCommand>(bad).is_err());
+    }
+}
+
+#[test]
 fn a_track_color_must_be_six_hex_digits() {
     let good: EditCommand = serde_json::from_value(
         serde_json::json!({"type":"setTrackColor","track":0,"color":"#1a2B3c"}),
@@ -68,7 +94,7 @@ fn a_track_color_must_be_six_hex_digits() {
 fn every_frontend_command_round_trips_through_rust() {
     let examples: Vec<serde_json::Value> =
         serde_json::from_str(include_str!("../../tests/protocol.json")).unwrap();
-    assert_eq!(examples.len(), 71);
+    assert_eq!(examples.len(), 72);
     for mut example in examples {
         let command: EditCommand = serde_json::from_value(example.clone()).unwrap();
         assert!(command.validate().is_ok(), "invalid fixture {example}");

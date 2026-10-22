@@ -988,6 +988,10 @@ pub enum EditCommand {
         #[serde(deserialize_with = "required_nullable")]
         fermata: Option<Fermata>,
     },
+    SetSustainPedal {
+        target: BeatTarget,
+        pedal: String,
+    },
     SetBeatRhythm {
         target: BeatTarget,
         duration: i32,
@@ -1492,6 +1496,11 @@ impl EditCommand {
             Self::SetTrackLayout {
                 bars_per_system, ..
             } if *bars_per_system == 0 => return Err("A system needs at least one bar.".into()),
+            Self::SetSustainPedal { pedal, .. }
+                if !matches!(pedal.as_str(), "down" | "up" | "none") =>
+            {
+                return Err("Choose a sustain pedal press, release or no mark.".into());
+            }
             Self::SetTrackColor { color, .. }
                 if color.len() != 7
                     || !color.starts_with('#')

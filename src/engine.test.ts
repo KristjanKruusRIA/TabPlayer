@@ -102,6 +102,33 @@ describe('moving tracks', () => {
   });
 });
 
+describe('sustain pedal marks', () => {
+  it('replays press and release through the engine and undoes them with the shorter history', () => {
+    const pressed = previewEdit(base(), {type:'setSustainPedal', target, pedal:'down'}).project;
+    const released = previewEdit(pressed, {type:'setSustainPedal', target:{...target, bar:1}, pedal:'up'});
+    const marks = (score: model.Score) => score.tracks[0].staves[0].bars.slice(0, 2).map(bar => bar.sustainPedals.map(marker => [marker.pedalType, marker.ratioPosition]));
+    expect(marks(released.score)).toEqual([[[model.SustainPedalMarkerType.Down, 0]], [[model.SustainPedalMarkerType.Up, 0]]]);
+    expect(marks(buildScore(pressed))).toEqual([[[model.SustainPedalMarkerType.Down, 0]], [[model.SustainPedalMarkerType.Hold, 0]]]);
+  });
+  it('places a pedal after a rhythm edit at the beat replay produces', () => {
+    let project = previewEdit(base(), {type:'setNote', target, string:6, fret:3}).project;
+    project = previewEdit(project, {type:'setDuration', target, duration:8, dots:0}).project;
+    const score = previewEdit(project, {type:'setSustainPedal', target:{...target, beat:1}, pedal:'down'}).score;
+    expect(score.tracks[0].staves[0].bars[0].sustainPedals.map(marker => [marker.pedalType, marker.ratioPosition])).toEqual([[model.SustainPedalMarkerType.Down, 0.125]]);
+  });
+  it('keeps a re-press after a release inside a held bar through rebuilds and GP export', () => {
+    let project = previewEdit(base(), {type:'setNote', target, string:6, fret:3}).project;
+    for (const [bar, beat, pedal] of [[0,0,'down'],[1,1,'up'],[1,2,'down']] as const) project = previewEdit(project, {type:'setSustainPedal', target:{...target, bar, beat}, pedal}).project;
+    const {Down, Up} = model.SustainPedalMarkerType, built = buildScore(project);
+    expect(built.tracks[0].staves[0].bars[1].sustainPedals.map(marker => [marker.pedalType, marker.ratioPosition])).toEqual([[Up, .25],[Down, .5]]);
+    const reloaded = buildScore(imported(built));
+    expect(reloaded.tracks[0].staves[0].bars[1].sustainPedals.map(marker => [marker.pedalType, marker.ratioPosition])).toEqual([[Up, .25],[Down, .5]]);
+    const gpif = new TextDecoder().decode(unzipSync(exportGp(built))['Content/score.gpif']);
+    expect([...gpif.matchAll(/<Type>SustainPedal<\/Type>/g)]).toHaveLength(3);
+  });
+
+});
+
 describe('recoloring tracks', () => {
   const rgb = (track: model.Track) => [track.color.r, track.color.g, track.color.b];
   it('sets the track color and keeps it through GP export and duplicate, leaving the history before it unchanged', () => {

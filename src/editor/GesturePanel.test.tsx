@@ -21,6 +21,15 @@ it('gesture_panel_dispatches_the_wah_pedal_choice',()=>{
   fireEvent.change(wah,{target:{value:'2'}});fireEvent.click(screen.getByRole('button',{name:'Apply beat gestures'}));
   expect(onEdit).toHaveBeenCalledExactlyOnceWith({type:'setBeatGestures',target,patch:{wahPedal:2}});
 });
+it('gesture_panel_dispatches_sustain_pedal_marks_for_the_selected_beat',()=>{
+  const score=music();score.tracks[0].staves[0].bars[0].sustainPedals.push(Object.assign(new model.SustainPedalMarker(),{pedalType:model.SustainPedalMarkerType.Down,ratioPosition:0}));
+  const onEdit=vi.fn();render(<GesturePanel score={score} target={target} busy={false} onEdit={onEdit}/>);
+  const pedal=screen.getByLabelText('Sustain pedal') as HTMLSelectElement;expect(pedal.value).toBe('down');
+  expect(within(pedal).getAllByRole('option').map(n=>n.textContent)).toEqual(['No mark','Press (Ped.)','Release (*)']);
+  expect((screen.getByRole('button',{name:'Apply sustain pedal'}) as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.change(pedal,{target:{value:'none'}});fireEvent.click(screen.getByRole('button',{name:'Apply sustain pedal'}));
+  expect(onEdit).toHaveBeenCalledExactlyOnceWith({type:'setSustainPedal',target,pedal:'none'});
+});
 it('gesture_panel_preserves_imported_combined_stem_until_explicitly_edited',()=>{
   const score=music(),b=score.tracks[0].staves[0].bars[0].voices[0].beats[0];b.preferredBeamDirection=0;b.invertBeamDirection=true;
   const onEdit=vi.fn();render(<GesturePanel score={score} target={target} busy={false} onEdit={onEdit}/>);fireEvent.click(screen.getByLabelText('Slash notation'));fireEvent.click(screen.getByRole('button',{name:'Apply beat gestures'}));expect(onEdit.mock.calls[0][0]).toEqual({type:'setBeatGestures',target,patch:{slashed:true}});

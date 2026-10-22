@@ -25,7 +25,7 @@ const shapes:Record<string,readonly string[]>={
   removeNoteByIndex:['target','noteIndex'],setNoteTechniquesByIndex:['target','noteIndex','patch'],
   setNoteLinkByIndex:['from','to','kind'],
   setTrackLyrics:['track','visible','lines'],setBeatGestures:['target','patch'],setOttava:['from','to','ottava'],
-  setCrescendo:['from','to','crescendo','targetDynamics'],setFermata:['target','fermata'],
+  setCrescendo:['from','to','crescendo','targetDynamics'],setFermata:['target','fermata'],setSustainPedal:['target','pedal'],
   setBarGestures:['track','staff','bar','clefOttava'],setMasterBarGestures:['bar','commonTime','doubleBar','tripletFeel','beaming'],
   setSimile:['track','staff','bar','kind'],
   eraseSelection:['selection'],transposeSelection:['selection','semitones'],moveSelectionStrings:['selection','direction'],
@@ -171,6 +171,7 @@ export function validateParityCommand(value:unknown):void {
   if('selection'in edit)musicSelection(edit.selection);
   if(type==='moveTrack')integer(edit.to);
   if(type==='setTrackColor')parseTrackColor(edit.color);
+  if(type==='setSustainPedal'&&!['down','up','none'].includes(edit.pedal as string))throw new Error('Invalid sustain pedal mark.');
   if(type==='transposeSelection'&&(typeof edit.semitones!=='number'||!Number.isInteger(edit.semitones)||edit.semitones===0||Math.abs(edit.semitones)>127))throw new Error('Choose a nonzero semitone shift from -127 to 127.');
   if(type==='moveSelectionStrings'&&!['higher','lower'].includes(edit.direction as string))throw new Error('Invalid string direction.');
   if(type==='refingerSelection'){integer(edit.maxFret,127);if(edit.maxFret===0)throw new Error('Invalid maximum fret.');}

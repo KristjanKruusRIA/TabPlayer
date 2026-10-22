@@ -64,3 +64,34 @@ describe('performed GP track controllers',()=>{
     expect(noteAt(score).beat.getAutomation(model.AutomationType.Volume)!.isLinear).toBe(true);
   });
 });
+describe('performed sustain pedal controllers',()=>{
+  it('merges the staves of a track into one pedal lane on its shared channels',()=>{
+    const score=channels(music()),track=score.tracks[0],second=new model.Staff();second.stringTuning.tunings=[64,59,55,50,45,40];track.addStaff(second);
+    for(const master of score.masterBars){const bar=new model.Bar();const voice=new model.Voice(),beat=new model.Beat();beat.isEmpty=true;voice.addBeat(beat);bar.addVoice(voice);second.addBar(bar);void master;}
+    const mark=(staff:model.Staff,bar:number,pedalType:model.SustainPedalMarkerType,ratioPosition:number)=>staff.bars[bar].sustainPedals.push(Object.assign(new model.SustainPedalMarker(),{pedalType,ratioPosition}));
+    const {Down,Up}=model.SustainPedalMarkerType;mark(track.staves[0],0,Down,0);mark(track.staves[0],2,Up,0);mark(second,1,Down,.5);mark(second,3,Up,.5);score.finish(settings);
+    const {file,bars:played}=generate(prepareGpMidiScore(score,settings));
+    const pedal=controllers(file.toBinary()).filter(event=>event.controller===64&&event.channel===2).map(event=>[event.tick,event.value]);
+    const at=(index:number,ratio:number)=>played[index].startTick+(played[index].endTick-played[index].startTick)*ratio;
+    expect(pedal).toEqual([[at(0,0),127],[at(3,.5),0]]);
+  });
+  it('presses and releases CC64 on both channels and restores the pedal state at repeat jumps',()=>{
+    const score=channels(music()),bars=score.tracks[0].staves[0].bars;
+    bars[0].sustainPedals.push(Object.assign(new model.SustainPedalMarker(),{pedalType:model.SustainPedalMarkerType.Down,ratioPosition:.5}));
+    bars[1].sustainPedals.push(Object.assign(new model.SustainPedalMarker(),{pedalType:model.SustainPedalMarkerType.Up,ratioPosition:.5}));
+    score.masterBars[0].isRepeatStart=true;score.masterBars[1].repeatCount=2;score.masterBars[2].isRepeatStart=true;score.masterBars[3].repeatCount=2;
+    bars[2].sustainPedals.push(Object.assign(new model.SustainPedalMarker(),{pedalType:model.SustainPedalMarkerType.Down,ratioPosition:0}));score.finish(settings);
+    const prepared=prepareGpMidiScore(score,settings),{file,bars:played}=generate(prepared);
+    const pedal=controllers(file.toBinary()).filter(event=>event.controller===64).map(event=>[event.tick,event.channel,event.value]);
+    const at=(index:number,ratio:number)=>played[index].startTick+(played[index].endTick-played[index].startTick)*ratio,both=(tick:number,value:number)=>[[tick,2,value],[tick,3,value]];
+    expect(played.map(bar=>bar.bar)).toEqual([0,1,0,1,2,3,2,3]);
+    expect(pedal).toEqual([
+      ...both(at(0,0),0),...both(at(0,.5),127),...both(at(1,.5),0),
+      ...both(at(2,0),0),...both(at(2,.5),127),...both(at(3,.5),0),
+      ...both(at(4,0),127),
+      // Jumping back into a held pedal presses it again.
+      ...both(at(6,0),127),
+    ]);
+  });
+});
+

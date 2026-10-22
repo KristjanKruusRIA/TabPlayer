@@ -13,10 +13,11 @@ const commands=[
   {type:'setBarGestures',track:0,staff:0,bar:0,clefOttava:1},
   {type:'setMasterBarGestures',bar:0,commonTime:true,doubleBar:false,tripletFeel:6,beaming:{unit:8,groups:[2,2,4]}},
   {type:'setSimile',track:0,staff:0,bar:1,kind:'single'},
+  {type:'setSustainPedal',target,pedal:'down'},
 ];
 const validate=(edit:unknown)=>validateProject({...blankProject(),edits:[edit]}).edits;
 
-it('accepts eight exact lyric and notation command envelopes',()=>{
+it('accepts nine exact lyric and notation command envelopes',()=>{
   for(const edit of commands)expect(validate(edit)).toEqual([edit]);
   for(const edit of [
     {...commands[0],lines:[]},{...commands[0],lines:Array.from({length:5},()=>({startBar:0,text:''}))},
@@ -40,6 +41,7 @@ it('rejects invalid nested lyrics and gestures before replay',()=>{
     ...[{}, {slap:null},{slap:1},{golpe:3},{rasgueado:19},{fade:4},{vibrato:-1},{beamingMode:4},{wahPedal:3},{wahPedal:-1},{wahPedal:null},{stem:'sideways'},
       {unknown:true},{barre:{fret:0,shape:1}},{barre:{fret:3,shape:0}},{barre:{fret:3,shape:1,extra:0}},
     ].map(patch=>({type:'setBeatGestures',target,patch})),
+    {type:'setSustainPedal',target,pedal:'sideways'},{type:'setSustainPedal',target,pedal:null},{type:'setSustainPedal',target:{...target,beat:-1},pedal:'up'},
     {type:'setOttava',from:target,to,ottava:5},
     {type:'setOttava',from:target,to:{...to,voice:1},ottava:2},
     {type:'setOttava',from:to,to:target,ottava:2},

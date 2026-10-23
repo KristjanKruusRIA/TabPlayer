@@ -561,3 +561,13 @@ it('ends focus when its track is removed, so undo does not revive it',async()=>{
   await player.loadDocument(added.project,buildDocument(added.project),0,1);expect(player.focus()).toBeNull();
   expect(Object.values(vi.mocked(bridge.prepare).mock.calls.at(-1)![1].mixes).every(mix=>mix.gain===1)).toBe(true);player.destroy();
 });
+it('schedules notes for instrument previews with the position only while a performance is under way',async()=>{
+  const {player,emit,plan}=await soundingFixture();
+  emit({tick:0});let scheduled=player.scheduledNotes('base/0');
+  expect(scheduled).toMatchObject({tick:null,counting:false,loop:null,range:null});expect(scheduled.notes.length).toBeGreaterThan(0);expect(scheduled.beats).toBe(plan.performedBeats);
+  player.play();emit({playing:true,tick:100,loop:{startTick:0,endTick:960}});expect(player.scheduledNotes('base/0')).toMatchObject({tick:100,counting:false,loop:{startTick:0,endTick:960}});
+  emit({playing:true,tick:0,practice:practiceStatus(defaults(),{phase:'countIn',countInRemaining:2})});expect(player.scheduledNotes('base/0')).toMatchObject({tick:0,counting:true});
+  emit({tick:200,practice:practiceStatus(defaults(),{phase:'ended'})});expect(player.scheduledNotes('base/0').tick).toBeNull();
+  player.stop();emit({tick:0});expect(player.scheduledNotes('base/0').tick).toBeNull();
+  player.beforeScoreChange();scheduled=player.scheduledNotes('base/0');expect(scheduled).toEqual({notes:[],beats:[],tick:null,counting:false,loop:null,range:null});player.destroy();
+});

@@ -10,6 +10,7 @@ import type { MeasureOccurrence,PlanNote, PlaybackPlan, PlaybackState } from './
 import { DEFAULT_PRACTICE,type PracticeSettings,type PracticeStatus } from './practice-types';
 import { practiceForBacking,validatePractice } from './practice';
 import { cursorPlaybackChoices,selectionPlaybackChoices,requireCursorChoice,requirePassageChoice } from './selection-playback';
+import type { ScheduledNotes } from '../instruments/focus';
 import type { CursorPlaybackChoice,PassagePlaybackChoice } from './selection-playback-types';
 import type { BackingScoreSelection,BackingTimeline } from './backing-waveform-types';
 import {applyReferenceSyncPlan,referenceTimingKey} from './reference-sync';
@@ -44,6 +45,14 @@ export class NativePlaybackController {
     const status=this.lastStatus;
     if(status?.practice.countInRemaining || status?.practice.phase==='countIn' || status?.practice.phase==='ended' || this.destroyed || !this.prepared || !this.state.ready || this.state.error || !status || status.generation!==this.generation || this.plan?.generation!==this.generation || (this.noteMode!=='playing' && this.noteMode!=='paused'))return [];
     return (this.notesByTrack.get(trackId)??[]).filter(note=>note.startTick<=status.tick && status.tick<note.endTick);
+  }
+  /** The track's planned notes and performed beats for previews of the selection or the next beat, with the playback position while a performance is under way. Never throws. */
+  scheduledNotes(trackId:string):ScheduledNotes{
+    const status=this.lastStatus,plan=this.plan;
+    if(this.destroyed || !this.prepared || !this.state.ready || this.state.error || !plan || plan.generation!==this.generation)return {notes:[],beats:[],tick:null,counting:false,loop:null,range:null};
+    const live=!!status && status.generation===this.generation && (this.noteMode==='playing' || this.noteMode==='paused') && status.practice.phase!=='ended' && status.tick<(plan.playbackEndTick??plan.durationTick);
+    const counting=live && (!!status!.practice.countInRemaining || status!.practice.phase==='countIn');
+    return {notes:this.notesByTrack.get(trackId)??[],beats:plan.performedBeats??[],tick:live?status!.tick:null,counting,loop:live?status!.loop:null,range:live?status!.range:null};
   }
   subscribe=(listener:()=>void)=>{this.listeners.add(listener);return()=>{this.listeners.delete(listener);};};
   private update(change:Partial<PlaybackState>){if(this.destroyed)return;this.state={...this.state,...change};for(const listener of this.listeners)listener();}

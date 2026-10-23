@@ -1,10 +1,16 @@
-import { useId, useMemo, useState } from 'react';
+import { useId, useMemo, useState, type ReactNode } from 'react';
 import type { model } from '@coderline/alphatab';
 import type { PlanNote } from '../audio/types';
 import { formatPitch } from '../tuning';
 import './instruments.css';
 
-export interface InstrumentViewProps { score: model.Score; track: number; staff: number; notes: readonly PlanNote[] }
+export interface InstrumentViewProps {
+  score: model.Score; track: number; staff: number; notes: readonly PlanNote[];
+  /** Names the list of shown notes; it describes sounding notes by default. */
+  caption?: string; empty?: string;
+  /** Extra controls placed before the view mode. */
+  controls?: ReactNode;
+}
 type InstrumentMode = 'auto' | 'guitar' | 'bass' | 'drums' | 'keys';
 type FretPosition = { note: PlanNote; string: number; fret: number };
 const blackKeys = new Set([1,3,6,8,10]);
@@ -160,15 +166,15 @@ function DrumKit({notes}: {notes: readonly PlanNote[]}) {
   </>;
 }
 
-export function InstrumentView({score,track:trackIndex,staff:staffIndex,notes}: InstrumentViewProps) {
+export function InstrumentView({score,track:trackIndex,staff:staffIndex,notes,caption='Sounding notes',empty='No notes sounding',controls}: InstrumentViewProps) {
   const [requestedMode,setMode] = useState<InstrumentMode>('auto'), track = score.tracks[trackIndex], staff = track.staves[staffIndex];
   const [expanded,setExpanded] = useState(false);
   const automatic: Exclude<InstrumentMode,'auto'> = staff.isPercussion ? 'drums' : track.playbackInfo.program>=24 && track.playbackInfo.program<=31 ? 'guitar' : track.playbackInfo.program>=32 && track.playbackInfo.program<=39 ? 'bass' : 'keys';
   const mode = requestedMode==='auto' ? automatic : requestedMode, active = notes.filter(note=>note.source.target.track===trackIndex);
   const labels = [...new Set(active.map(note=>mode==='drums'?percussionName(note.key):formatPitch(note.key)))];
   return <div className="instrument-view" data-size={expanded?'expanded':'compact'}>
-    <div className="instrument-header"><h3>{track.name}<span> · {mode==='keys'?'Keys':mode[0].toUpperCase()+mode.slice(1)}</span></h3><div className="instrument-controls"><label>Instrument view mode<select value={requestedMode} onChange={event=>setMode(event.target.value as InstrumentMode)}><option value="auto">Auto</option><option value="guitar">Guitar</option><option value="bass">Bass</option><option value="drums">Drums</option><option value="keys">Keys</option></select></label><button type="button" aria-label={expanded?'Compact instrument view':'Expand instrument view'} aria-expanded={expanded} onClick={()=>setExpanded(value=>!value)}>{expanded?'Compact':'Expand'}</button></div></div>
+    <div className="instrument-header"><h3>{track.name}<span> · {mode==='keys'?'Keys':mode[0].toUpperCase()+mode.slice(1)}</span></h3><div className="instrument-controls">{controls}<label>Instrument view mode<select value={requestedMode} onChange={event=>setMode(event.target.value as InstrumentMode)}><option value="auto">Auto</option><option value="guitar">Guitar</option><option value="bass">Bass</option><option value="drums">Drums</option><option value="keys">Keys</option></select></label><button type="button" aria-label={expanded?'Compact instrument view':'Expand instrument view'} aria-expanded={expanded} onClick={()=>setExpanded(value=>!value)}>{expanded?'Compact':'Expand'}</button></div></div>
     {mode==='guitar'||mode==='bass' ? <Fretboard staff={staff} notes={active} mode={mode}/> : mode==='drums' ? <DrumKit notes={active}/> : <Keyboard track={track} notes={active} compact={!expanded}/>}
-    <div className="instrument-playing" aria-label="Sounding notes">{labels.length ? labels.map(label=><span className="instrument-note" key={label}>{label}</span>) : <span className="instrument-empty">No notes sounding</span>}</div>
+    <div className="instrument-playing" role="group" aria-label={caption}>{labels.length ? labels.map(label=><span className="instrument-note" key={label}>{label}</span>) : <span className="instrument-empty">{empty}</span>}</div>
   </div>;
 }

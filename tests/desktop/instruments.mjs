@@ -14,7 +14,8 @@ try {
   browser=await connect();page=browser.contexts()[0].pages()[0];await waitForWorkspaceIdle(page);
   page.on('pageerror',error=>pageErrors.push({stage,message:error.message}));
   await page.context().route('**/*',route=>{const url=new URL(route.request().url());if(['tauri.localhost','ipc.localhost','localhost','127.0.0.1'].includes(url.hostname)||['data:','blob:'].includes(url.protocol))return route.continue();blockedExternal.push(url.origin);return route.abort();});
-  await page.reload();await waitForWorkspaceIdle(page);
+  // A reload now lands on session recovery, so the route guards the requests made from here on, not those of startup.
+  const library=page.getByRole('dialog',{name:'Library',exact:true});await library.getByRole('heading',{name:'Welcome to TabPlayer',exact:true}).waitFor();await library.getByRole('button',{name:'Close',exact:true}).click();await library.waitFor({state:'hidden'});
   await page.evaluate(hash=>{
     window.__instrumentPlans={};const nativeFetch=window.fetch.bind(window);
     window.fetch=function(input,options){
@@ -70,7 +71,7 @@ try {
   const last=plan.occurrences.at(-1);await revealPlaybackControls(page);await page.getByLabel('Seek measure',{exact:true}).fill(String(last.bar+1));await button('Seek');const sought=await waitStatus(s=>Math.abs(s.tick-last.startTick)<.01);await assertView(metadata.tracks[0],sought);
   await page.getByRole('combobox',{name:/^Speed/}).selectOption('50');await waitStatus(s=>s.speed===.5);await revealPlaybackControls(page);await page.getByLabel('Loop start',{exact:true}).fill('1');await page.getByLabel('Loop end',{exact:true}).fill('2');await button('Loop');await revealPlaybackControls(page);await page.getByLabel('Seek measure',{exact:true}).fill('2');await button('Seek');await waitStatus(s=>Math.abs(s.tick-plan.occurrences[1].startTick)<.01);await button('Play');await waitStatus(s=>s.playing&&s.tick>plan.occurrences[1].startTick+100&&s.speed===.5);
   const wrapped=await waitStatus(s=>s.playing&&s.tick>100&&s.tick<1000&&s.speed===.5,20000);await assertView(metadata.tracks[0],wrapped);await button('Stop');await waitStatus(s=>!s.playing&&s.tick===0);await button('Clear loop');await view.getByText('No notes sounding',{exact:true}).waitFor();
-  assert.deepEqual((await snapshot()).project,before.project);assert.equal(createHash('sha256').update(readFileSync(fixturePath)).digest('hex'),sourceHash);assert.deepEqual(pageErrors,[]);
+  assert.deepEqual((await snapshot()).project,before.project);assert.equal(createHash('sha256').update(readFileSync(fixturePath)).digest('hex'),sourceHash);assert.deepEqual(pageErrors,[]);assert.deepEqual(blockedExternal,[]);
   writeFileSync(join(directory,'instruments-result.json'),JSON.stringify({authoredFixture:fixturePath,metadataPath,sourceHash,sourceAndProjectUnchanged:true,nativeGeneration:opened.generation,observedPlanNoteIds:true,actualNativePlayback:playing,selectedTracks:cases,pauseFrozen:true,stopClear:true,seekAndSilentIntervals:true,practiceSpeed:.5,inclusiveLoop:true,hideShow:true,autoAndManualModes:true,externalRequestsBlocked:true,blockedExternal:[...new Set(blockedExternal)]},null,2));
   console.log('Native instrument views passed: Guitar9/Bass6/Drums/Keys, exact plan IDs and pitches, selected track, chords, Pause/Stop/seek/speed/loop, hide/show and immutable authored source.');
 } catch(error) {

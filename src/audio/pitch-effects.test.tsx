@@ -24,9 +24,9 @@ it('fills the pitch blocks into sounds saved before them',()=>{
   expect(settings.sounds['base/0'].effects.pitch).toEqual(defaultEffects().pitch);
 });
 
-it('places the octaver and pitch shift between the wah and the amp with their controls',()=>{
+it('places the octaver and pitch shift between the wah and the drive pedal with their controls',()=>{
   const onEdit=vi.fn();const {container}=render(<SoundPanel trackId="base/0" sound={soundPreset('gm')} onEdit={onEdit}/>);
-  expect([...container.querySelectorAll('.sound-block-name')].map(node=>node.textContent).slice(0,6)).toEqual(['Gate','Compressor','Wah','Octaver','Pitch shift','Amp']);
+  expect([...container.querySelectorAll('.sound-block-name')].map(node=>node.textContent).slice(0,7)).toEqual(['Gate','Compressor','Wah','Octaver','Pitch shift','Drive','Amp']);
   const last=()=>onEdit.mock.calls.at(-1)?.[0].sound.effects;
   fireEvent.click(screen.getByLabelText('Enable octaver'));expect(last().octaver.enabled).toBe(true);
   fireEvent.change(screen.getByLabelText('octaver Octave down'),{target:{value:'0.8'}});expect(last().octaver.octaveDown).toBe(.8);

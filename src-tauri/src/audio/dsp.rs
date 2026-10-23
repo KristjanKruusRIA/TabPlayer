@@ -57,6 +57,12 @@ block!(Pitch {
     semitones: f64 = 12.0,
     mix: f64 = 1.0
 });
+block!(Drive {
+    model: String = "overdrive".into(),
+    drive: f64 = 0.5,
+    tone: f64 = 0.5,
+    level_db: f64 = 0.0
+});
 block!(Flanger {
     rate_hz: f64 = 0.25,
     depth_ms: f64 = 2.0,
@@ -116,6 +122,8 @@ pub struct FxSettings {
     pub octaver: Octaver,
     #[serde(default, skip_serializing_if = "untouched")]
     pub pitch: Pitch,
+    #[serde(default, skip_serializing_if = "untouched")]
+    pub drive: Drive,
 }
 fn untouched<T: Default + PartialEq>(value: &T) -> bool {
     *value == T::default()
@@ -138,6 +146,62 @@ fn wah_target(wah: &Wah, envelope: f64) -> f64 {
         ((20.0 * envelope.max(1e-9).log10() - floor) / 36.0).clamp(0.0, 1.0)
     } else {
         wah.position
+    }
+}
+/// A loud pickup's peak, at which the drive pedal keeps its output level whatever its setting.
+const DRIVE_REFERENCE: f64 = 0.1;
+/// The fuzz offsets its input by this share of the playing level, so its clipping is lopsided at any level and
+/// adds even harmonics, as a fuzz's biased transistor does.
+const FUZZ_BIAS: f64 = 0.25;
+/// The drive pedal's gain before clipping and its clipping curve. Overdrive rounds off gently, distortion clips
+/// hard past a short knee, and fuzz clips its offset input with far more gain.
+fn drive_gain(drive: &Drive) -> f64 {
+    let squared = drive.drive * drive.drive;
+    match drive.model.as_str() {
+        "distortion" => 1.0 + 400.0 * squared,
+        "fuzz" => 1.0 + 2_000.0 * squared,
+        _ => 1.0 + 40.0 * squared,
+    }
+}
+/// `hard` picks distortion's knee; the other models round off with `tanh`.
+fn drive_curve(hard: bool, v: f64) -> f64 {
+    if hard {
+        // A cubic knee that reaches its ceiling with zero slope at 1.5.
+        let s = v.clamp(-1.5, 1.5);
+        s - 4.0 / 27.0 * s * s * s
+    } else {
+        v.tanh()
+    }
+}
+/// One drive setting resolved for the audio thread: its curve, gain before clipping, the gain that brings a
+/// reference-level sine back to its own level after clipping (measured over one period with the offset removed,
+/// as the pedal's DC blocker removes it), the fuzz's offset share, and the tone filter and output level.
+#[derive(Clone, Copy)]
+struct DriveShape {
+    hard: bool,
+    gain: f64,
+    normal: f64,
+    bias: f64,
+    tone: f64,
+    level: f64,
+}
+fn drive_shape(drive: &Drive, rate: f64) -> DriveShape {
+    let (hard, gain, bias) = (drive.model == "distortion", drive_gain(drive), if drive.model == "fuzz" { FUZZ_BIAS } else { 0.0 });
+    let (mut sum, mut squares) = (0.0, 0.0);
+    for n in 0..256 {
+        let y = drive_curve(hard, gain * DRIVE_REFERENCE * ((std::f64::consts::TAU * n as f64 / 256.0).sin() + bias));
+        sum += y;
+        squares += y * y;
+    }
+    let rms = (squares / 256.0 - (sum / 256.0).powi(2)).max(0.0).sqrt();
+    let tone_hz = 500.0 * (12_000.0f64 / 500.0).powf(drive.tone);
+    DriveShape {
+        hard,
+        gain,
+        normal: DRIVE_REFERENCE / std::f64::consts::SQRT_2 / rms.max(1e-12),
+        bias,
+        tone: 1.0 - (-std::f64::consts::TAU * tone_hz.min(rate * 0.45) / rate).exp(),
+        level: 10f64.powf(drive.level_db / 20.0),
     }
 }
 /// One pitch shifter's tap state: the shared phase, each tap's alignment offset and its last phase.
@@ -269,6 +333,9 @@ impl FxSettings {
             ("octaver direct", self.octaver.direct, 0.0, 1.0),
             ("pitch semitones", self.pitch.semitones, -24.0, 24.0),
             ("pitch mix", self.pitch.mix, 0.0, 1.0),
+            ("drive amount", self.drive.drive, 0.0, 1.0),
+            ("drive tone", self.drive.tone, 0.0, 1.0),
+            ("drive level", self.drive.level_db, -24.0, 12.0),
         ] {
             if !value.is_finite() || value < low || value > high {
                 return Err(format!("Invalid {name}: expected {low}..{high}."));
@@ -285,6 +352,9 @@ impl FxSettings {
         }
         if !["sine", "square"].contains(&self.tremolo.shape.as_str()) {
             return Err("Unknown tremolo shape.".into());
+        }
+        if !["overdrive", "distortion", "fuzz"].contains(&self.drive.model.as_str()) {
+            return Err("Unknown drive model.".into());
         }
         if !["clean", "crunch", "lead", "bass"].contains(&self.amp.model.as_str()) {
             return Err("Unknown amp model.".into());
@@ -488,6 +558,16 @@ pub struct TrackDsp {
     pitch_phase: Shifter,
     /// The shifters' window in frames.
     shift_window: f64,
+    /// Drive pedal state per channel: the previous input for oversampling, the anti-alias filters, the DC blocker
+    /// and the two-pole tone filter; the playing level for the fuzz's offset; the previous and current settings
+    /// resolved; and per-frame smoothing for the level's attack and release and the DC blocker.
+    drive_previous_input: [f64; 2],
+    drive_anti_alias: [[f64; 3]; 2],
+    drive_dc: [f64; 2],
+    drive_tone: [[f64; 2]; 2],
+    drive_envelope: f64,
+    drive_shapes: [DriveShape; 2],
+    drive_coefficients: [f64; 3],
     delay: DelayLine,
     reverb: [DelayLine; 4],
     reverb_damp: [[f32; 2]; 4],
@@ -510,6 +590,7 @@ impl TrackDsp {
         let rate = sample_rate as f64;
         let (previous_vibrato, previous_flanger_depth) = (settings.vibrato.clone(), settings.flanger.depth_ms);
         let wah_start = wah_target(&settings.wah, 0.0);
+        let drive_start = drive_shape(&settings.drive, rate);
         Ok(Self {
             previous: settings.clone(),
             settings,
@@ -546,6 +627,15 @@ impl TrackDsp {
             pitch: DelayLine::new((rate * (SHIFT_WINDOW + 2.0 * SHIFT_SEARCH + SHIFT_MATCH)) as usize + 8),
             pitch_phase: Shifter::default(),
             shift_window: (rate * SHIFT_WINDOW).floor(),
+            drive_previous_input: [0.0; 2],
+            drive_anti_alias: [[0.0; 3]; 2],
+            drive_dc: [0.0; 2],
+            drive_tone: [[0.0; 2]; 2],
+            drive_envelope: 0.0,
+            drive_shapes: [drive_start; 2],
+            // The fuzz's offset follows the playing level slowly enough that a note's attack does not thump, and
+            // the DC blocker settles what remains within about 16 ms at any rate.
+            drive_coefficients: [1.0 - (-1.0 / (rate * 0.02)).exp(), 1.0 - (-1.0 / (rate * 0.05)).exp(), 1.0 - (-std::f64::consts::TAU * 10.0 / rate).exp()],
             delay: DelayLine::new((rate * max_delay_seconds).ceil() as usize + 2),
             reverb: std::array::from_fn(|i| {
                 DelayLine::new((rate * [0.0297, 0.0371, 0.0411, 0.0437][i]) as usize + 23 * i)
@@ -558,6 +648,7 @@ impl TrackDsp {
     pub fn set_settings(&mut self, settings: FxSettings) -> Result<(), String> {
         settings.validate()?;
         self.previous = std::mem::replace(&mut self.settings, settings);
+        self.drive_shapes = [self.drive_shapes[1], drive_shape(&self.settings.drive, self.rate)];
         self.ramp_left = self.ramp_frames;
         Ok(())
     }
@@ -579,8 +670,11 @@ impl TrackDsp {
             old.settings.wah.enabled,
             old.settings.octaver.enabled,
             old.settings.pitch.enabled,
+            old.settings.drive.enabled,
         ];
         std::mem::swap(&mut self.previous, &mut old.settings);
+        // The previous settings are the old configuration's current ones, resolved as it resolved them.
+        self.drive_shapes[0] = old.drive_shapes[1];
         macro_rules! move_state {($($name:ident),*)=>{$(std::mem::swap(&mut self.$name,&mut old.$name);)*}}
         if running[0] {
             move_state!(gate_envelope);
@@ -626,6 +720,9 @@ impl TrackDsp {
         }
         if running[14] {
             move_state!(pitch, pitch_phase);
+        }
+        if running[15] {
+            move_state!(drive_previous_input, drive_anti_alias, drive_dc, drive_tone, drive_envelope);
         }
         self.ramp_left = self.ramp_frames;
     }
@@ -752,6 +849,46 @@ impl TrackDsp {
                 p.pitch.enabled,
                 f.pitch.enabled,
             );
+        }
+        if f.drive.enabled || p.drive.enabled && t < 1.0 {
+            // The playing level follows with a 20 ms attack and a 50 ms release, for the fuzz's offset.
+            let [attack, release, dc] = self.drive_coefficients;
+            let level = x[0].abs().max(x[1].abs()) as f64;
+            let k = if level > self.drive_envelope { attack } else { release };
+            self.drive_envelope = flush(self.drive_envelope + (level - self.drive_envelope) * k);
+            // While both sides of a ramp are on and clip differently, each clips with its own curve and gain and
+            // the two outputs crossfade; otherwise the side that is on clips alone.
+            let shapes = self.drive_shapes;
+            let both = t < 1.0 && p.drive.enabled && f.drive.enabled && (p.drive.model != f.drive.model || p.drive.drive != f.drive.drive);
+            let alone = if f.drive.enabled { 1 } else { 0 };
+            let filter = 1.0 - (-std::f64::consts::TAU * 0.22 / 4.0f64).exp();
+            let (tone, level) = (lerp(shapes[0].tone, shapes[1].tone), lerp(shapes[0].level, shapes[1].level));
+            let envelope = self.drive_envelope;
+            let wet = std::array::from_fn(|c| {
+                let v = x[c] as f64;
+                // Four times oversampled, as the amp is, so the clipping's upper harmonics do not fold back down.
+                let mut sum = 0.0;
+                for step in 1..=4 {
+                    let input = self.drive_previous_input[c] + (v - self.drive_previous_input[c]) * step as f64 / 4.0;
+                    let clip = |shape: DriveShape| drive_curve(shape.hard, shape.gain * (input + shape.bias * envelope)) * shape.normal;
+                    let mut sample = if both { lerp(clip(shapes[0]), clip(shapes[1])) } else { clip(shapes[alone]) };
+                    for state in &mut self.drive_anti_alias[c] {
+                        *state = flush(*state + filter * (sample - *state));
+                        sample = *state;
+                    }
+                    sum += sample;
+                }
+                self.drive_previous_input[c] = v;
+                let clipped = sum / 4.0;
+                self.drive_dc[c] = flush(self.drive_dc[c] + dc * (clipped - self.drive_dc[c]));
+                let mut out = clipped - self.drive_dc[c];
+                for state in &mut self.drive_tone[c] {
+                    *state = flush(*state + tone * (out - *state));
+                    out = *state;
+                }
+                (out * level) as f32
+            });
+            x = blend(x, wet, p.drive.enabled, f.drive.enabled);
         }
         if f.amp.enabled || p.amp.enabled && t < 1.0 {
             let drive = lerp(p.amp.drive, f.amp.drive);
@@ -1046,6 +1183,11 @@ impl TrackDsp {
         self.octaver_phase = [Shifter::default(); 2];
         self.pitch.reset();
         self.pitch_phase = Shifter::default();
+        self.drive_previous_input = [0.0; 2];
+        self.drive_anti_alias = [[0.0; 3]; 2];
+        self.drive_dc = [0.0; 2];
+        self.drive_tone = [[0.0; 2]; 2];
+        self.drive_envelope = 0.0;
     }
 }
 

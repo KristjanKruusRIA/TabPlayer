@@ -22,7 +22,7 @@ export const defaultEffects = (): FxSettings => ({
   vibrato:{enabled:false,rateHz:5,depthCents:20},phaser:{enabled:false,rateHz:.5,depth:.7,feedback:.3,stages:4,mix:.5},
   flanger:{enabled:false,rateHz:.25,depthMs:2,feedback:.5,mix:.5},tremolo:{enabled:false,rateHz:5,depth:.5,shape:'sine'},
   wah:{enabled:false,mode:'manual',position:.5,resonance:.5,sensitivity:.5,mix:1},
-  octaver:{enabled:false,octaveDown:.5,twoOctavesDown:0,direct:1},pitch:{enabled:false,semitones:12,mix:1},
+  octaver:{enabled:false,octaveDown:.5,twoOctavesDown:0,direct:1},pitch:{enabled:false,semitones:12,mix:1},drive:{enabled:false,model:'overdrive',drive:.5,tone:.5,levelDb:0},
 });
 /** Adds the effect blocks a sound saved before them lacks, switched off at their defaults. */
 export const completeSound = (sound: TrackSound): TrackSound => ({...sound,effects:{...defaultEffects(),...sound.effects}});
@@ -37,6 +37,7 @@ const effectRules:Record<keyof FxSettings,Record<string,FieldRule>>={
   chorus:{rateHz:range(.1,8),depthMs:range(0,20),mix:unit},
   wah:{mode:one('manual','auto'),position:unit,resonance:unit,sensitivity:unit,mix:unit},
   octaver:{octaveDown:unit,twoOctavesDown:unit,direct:unit},pitch:{semitones:range(-24,24),mix:unit},
+  drive:{model:one('overdrive','distortion','fuzz'),drive:unit,tone:unit,levelDb:range(-24,12)},
   flanger:{rateHz:range(.05,5),depthMs:range(0,10),feedback:range(-.9,.9),mix:unit},
   phaser:{rateHz:range(.05,5),depth:unit,feedback:range(0,.9),stages:one(2,4,6,8),mix:unit},
   tremolo:{rateHz:range(.1,20),depth:unit,shape:one('sine','square')},vibrato:{rateHz:range(1,14),depthCents:range(0,100)},

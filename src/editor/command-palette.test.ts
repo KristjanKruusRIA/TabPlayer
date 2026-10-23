@@ -10,7 +10,7 @@ const first=(query:string,patch?:Partial<PaletteContext>)=>searchCommands(query,
 
 it('lists every command for an empty query and narrows by word prefixes in any order',()=>{
   const all=searchCommands('',context()).map(match=>match.title);
-  expect(all).toEqual(expect.arrayContaining(['Go to measure','Go to track','Set fret','Set duration','Set initial tempo','Insert beat','Delete beat','Make rest','Append measure','Remove measure','Undo','Redo','Play or pause','New score','Open score','Save','Save As','Export score']));
+  expect(all).toEqual(expect.arrayContaining(['Go to measure','Go to track','Set fret','Set duration','Set initial tempo','Insert beat','Delete beat','Make rest','Append measure','Remove measure','Undo','Redo','Play or pause','New score','Open score','Import ASCII tab','Save','Save As','Export score']));
   expect(searchCommands('meas app',context()).map(match=>match.title)).toEqual(['Append measure']);
   expect(searchCommands('zzz',context())).toEqual([]);
   expect(searchCommands('measure 3',context()).map(match=>match.title)).toEqual(['Go to measure']);

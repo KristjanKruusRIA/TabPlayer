@@ -3,7 +3,7 @@ import type { EditCommand } from '../edit-types';
 import type { BeatTarget } from '../project';
 
 /** What a palette command does: an undoable edit, a selection move, or an application command. */
-export type PaletteAction={kind:'edit';command:EditCommand}|{kind:'select';target:BeatTarget}|{kind:'app';name:'undo'|'redo'|'play'|'new'|'open'|'save'|'saveAs'|'export'};
+export type PaletteAction={kind:'edit';command:EditCommand}|{kind:'select';target:BeatTarget}|{kind:'app';name:'undo'|'redo'|'play'|'new'|'open'|'importAscii'|'save'|'saveAs'|'export'};
 export interface PaletteContext {score:model.Score;target:BeatTarget;string:number;canUndo:boolean;canRedo:boolean}
 /** A command matching the typed text, with either a ready action or the reason it cannot run. */
 export interface PaletteMatch {id:string;title:string;hint:string;action?:PaletteAction;error?:string}
@@ -61,6 +61,7 @@ const commands:Command[]=[
   {id:'play',title:'Play or pause',words:'play pause stop playback',hint:'',run:()=>app('play')},
   {id:'new',title:'New score',words:'new score file',hint:'',run:()=>app('new')},
   {id:'open',title:'Open score',words:'open score file',hint:'',run:()=>app('open')},
+  {id:'importAscii',title:'Import ASCII tab',words:'import ascii text tab tablature file',hint:'',run:()=>app('importAscii')},
   {id:'save',title:'Save',words:'save file',hint:'',run:()=>app('save')},
   {id:'saveAs',title:'Save As',words:'save as file',hint:'',run:()=>app('saveAs')},
   {id:'export',title:'Export score',words:'export score file pdf midi audio',hint:'',run:()=>app('export')},

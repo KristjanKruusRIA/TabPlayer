@@ -81,6 +81,43 @@ fn read_candidate_using(
         .map(|candidate| DocumentIntake::Candidate { candidate })
 }
 
+const CONVERTED_NAME_LIMIT: usize = 200;
+
+/// Stages a score the frontend converted from another format, such as ASCII
+/// tablature, as a new untitled document. It is staged like a fork, so it has
+/// no intake path: it never matches an open file or becomes a recent file.
+pub fn stage_converted(
+    name: &str,
+    bytes: &[u8],
+    workspace: &Mutex<DocumentWorkspace>,
+) -> Result<DocumentIntake, String> {
+    let plain = name.len() > 3
+        && name.len() <= CONVERTED_NAME_LIMIT
+        && name.to_ascii_lowercase().ends_with(".gp")
+        && name.trim() == name
+        && !name.chars().any(|character| {
+            character.is_control()
+                || matches!(
+                    character,
+                    '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|'
+                )
+        });
+    if !plain {
+        return Err("The converted score needs a plain .gp file name.".into());
+    }
+    if bytes.len() as u64 > SCORE_LIMIT {
+        return Err("The converted score is larger than 64 MiB.".into());
+    }
+    if !bytes.starts_with(b"PK\x03\x04") {
+        return Err("The converted score is not a Guitar Pro file.".into());
+    }
+    let mut state = workspace.lock().map_err(|error| error.to_string())?;
+    check_admission(&state)?;
+    state
+        .stage_fork(Project::from_file(name.to_owned(), bytes))
+        .map(|candidate| DocumentIntake::Candidate { candidate })
+}
+
 fn check_admission(workspace: &DocumentWorkspace) -> Result<(), String> {
     if workspace.is_frozen() {
         Err("The workspace is completing a session transition.".into())
@@ -241,6 +278,76 @@ fn read_bounded(reader: &mut impl Read, length: u64) -> Result<Vec<u8>, String> 
 mod tests {
     use super::*;
     use std::io::{self, Cursor};
+
+    #[test]
+    fn converted_scores_stage_as_untitled_documents_with_no_intake_path() {
+        let workspace = Mutex::new(DocumentWorkspace::new().unwrap());
+        let bytes = b"PK\x03\x04converted";
+        let stage = || match stage_converted("riff.gp", bytes, &workspace).unwrap() {
+            DocumentIntake::Candidate { candidate } => candidate,
+            DocumentIntake::Existing { .. } => panic!("a converted score is always new"),
+        };
+        let first = stage();
+        assert_eq!(first.path, None);
+        let opened = workspace
+            .lock()
+            .unwrap()
+            .add_document(&first.token)
+            .unwrap();
+        assert_eq!(opened.documents.len(), 2);
+        // The same name again is another document, not the one already open.
+        let second = stage();
+        let opened = workspace
+            .lock()
+            .unwrap()
+            .add_document(&second.token)
+            .unwrap();
+        assert_eq!(opened.documents.len(), 3);
+        let active = opened.active.document_id.clone();
+        assert_eq!(
+            workspace.lock().unwrap().library_receipt(&active).unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn converted_scores_reject_unsafe_names_foreign_bytes_and_a_frozen_workspace() {
+        let workspace = Mutex::new(DocumentWorkspace::new().unwrap());
+        let gp = b"PK\x03\x04";
+        for name in [
+            "",
+            ".gp",
+            "riff.txt",
+            "../riff.gp",
+            "a\\b.gp",
+            "c:riff.gp",
+            " riff.gp",
+            "riff\n.gp",
+            &format!("{}.gp", "a".repeat(200)),
+        ] {
+            assert_eq!(
+                stage_converted(name, gp, &workspace).err().as_deref(),
+                Some("The converted score needs a plain .gp file name."),
+                "{name:?}"
+            );
+        }
+        assert_eq!(
+            stage_converted("riff.gp", b"<score/>", &workspace)
+                .err()
+                .as_deref(),
+            Some("The converted score is not a Guitar Pro file.")
+        );
+        let mut large = vec![0; SCORE_LIMIT as usize + 1];
+        large[..4].copy_from_slice(gp);
+        assert_eq!(
+            stage_converted("riff.gp", &large, &workspace)
+                .err()
+                .as_deref(),
+            Some("The converted score is larger than 64 MiB.")
+        );
+        workspace.lock().unwrap().freeze().unwrap();
+        assert!(stage_converted("riff.gp", gp, &workspace).is_err());
+    }
 
     #[test]
     fn bounded_read_accepts_the_exact_observed_size() {

@@ -100,6 +100,11 @@ export class WorkspaceController {
   openDocument():Promise<boolean> {return this.transition(async()=>{
     const intake=await this.bridge.readDocument();return intake?this.intake(intake):false;
   });}
+  /** Opens a converted score as a new untitled tab; it is never a library file, so no metadata is recorded. */
+  importConverted(name:string,bytes:Uint8Array):Promise<boolean> {return this.transition(async()=>{
+    if(!this.bridge.importConverted)throw new Error('Importing converted scores is unavailable.');
+    return this.intake(await this.bridge.importConverted(name,bytes),false);
+  });}
   openSource(source:LibrarySource,library:Pick<NativeFileLibraryBridge,'stage'>):Promise<boolean> {
     return this.transition(async()=>this.intake(await library.stage(source),source.kind==='recent'||source.kind==='indexed'));
   }

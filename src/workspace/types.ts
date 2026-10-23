@@ -18,6 +18,8 @@ export interface DocumentTab {id:DocumentId;title:string;path:string|null;dirty:
 export interface NativeWorkspaceBridge {
   snapshot():Promise<WorkspaceSnapshot>;
   readDocument():Promise<DocumentIntake|null>;
+  /** Stages a score converted in the frontend, such as imported ASCII tab, as a new untitled document. */
+  importConverted?(name:string,bytes:Uint8Array):Promise<DocumentIntake>;
   createBlankDocument():Promise<DocumentCandidate>;
   cancelDocument(token:string):Promise<boolean>;
   addDocument(token:string):Promise<WorkspaceSnapshot>;

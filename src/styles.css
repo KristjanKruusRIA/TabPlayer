@@ -38,6 +38,12 @@ input[aria-invalid="true"]{border-color:#e6a18e}
 .keyboard-help h2{margin-bottom:12px;color:#edf1f5}.keyboard-help h3{font-size:13px;margin:20px 0 8px}
 .keyboard-help p{margin:8px 0}.keyboard-help dl{margin:0}.keyboard-help dt{margin-top:12px;font-weight:600;color:#c8ef91}.keyboard-help dd{margin:2px 0 0;color:#b0bdca}
 /* Command palette: anchored near the top like GP8's, with the active option outlined so it reads without color. */
+.ascii-import{background:#1d2530;border:1px solid #465363;border-radius:8px;padding:16px;width:min(760px,calc(100vw - 32px));max-height:90vh;overflow:auto;display:flex;flex-direction:column;gap:8px}
+.ascii-import h2{margin:0;font-size:1rem}
+.ascii-import p{margin:0}
+.ascii-import label{display:flex;flex-direction:column;gap:4px}
+.ascii-import textarea{font-family:ui-monospace,Consolas,monospace;font-size:.85rem;min-height:14em;resize:vertical;white-space:pre;overflow:auto}
+.ascii-import .error{color:#ffb4a8}
 .command-palette-backdrop{align-items:flex-start;padding-top:12vh}
 .command-palette{background:#1d2530;border:1px solid #465363;border-radius:8px;padding:16px;width:min(560px,calc(100vw - 32px));max-height:70vh;display:flex;flex-direction:column;gap:8px}
 .command-palette h2{margin:0;font-size:1rem}

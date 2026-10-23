@@ -40,6 +40,7 @@ import { ClipboardStore } from './editor/ClipboardStore';
 import { ClipboardPanel } from './editor/ClipboardPanel';
 import { ScoreErrorsPanel } from './editor/ScoreErrorsPanel';
 import { CommandPalette } from './editor/CommandPalette';
+import { AsciiTabImportDialog } from './workspace/AsciiTabImportDialog';
 import type { PaletteAction } from './editor/command-palette';
 import { ViewDefaultsPanel } from './workspace/ViewDefaultsPanel';
 import { currentViewDefaults,writeViewDefaults } from './workspace/view-defaults';
@@ -71,12 +72,12 @@ export interface AppProps {
   documentBridge:Pick<NativeBridge,'confirmExport'|'exportGp'|'readBackingAsset'>;
   documentView:DocumentViewState;onViewChange:(view:DocumentViewState)=>void;clipboard:ClipboardStore;
   workspaceBusy:boolean;workspaceError:string|null;beginEditorOperation:()=>()=>void;
-  onNew:()=>Promise<boolean>;onOpen:()=>Promise<boolean>;onClose:()=>Promise<boolean>;onCloseAll:()=>Promise<boolean>;
+  onNew:()=>Promise<boolean>;onOpen:()=>Promise<boolean>;onImportConverted?:(name:string,bytes:Uint8Array)=>Promise<boolean>;onClose:()=>Promise<boolean>;onCloseAll:()=>Promise<boolean>;
   documentTabs:ReactNode;
   sessionMenu?:ReactNode;libraryMenu?:ReactNode;onFileCommandCapture?:(element:HTMLElement)=>void;recoveryStatus?:ReactNode;playbackResumeEpoch?:number;
 }
 
-export function App({controller,audioBridge,waveformBridge,exportBridge,documentBridge,documentView,onViewChange,clipboard,workspaceBusy,workspaceError,beginEditorOperation,onNew,onOpen,onClose,onCloseAll,documentTabs,sessionMenu,libraryMenu,onFileCommandCapture,recoveryStatus,playbackResumeEpoch=0}:AppProps) {
+export function App({controller,audioBridge,waveformBridge,exportBridge,documentBridge,documentView,onViewChange,clipboard,workspaceBusy,workspaceError,beginEditorOperation,onNew,onOpen,onImportConverted,onClose,onCloseAll,documentTabs,sessionMenu,libraryMenu,onFileCommandCapture,recoveryStatus,playbackResumeEpoch=0}:AppProps) {
   const state=useSyncExternalStore(controller.subscribe,controller.getState);
   const controlsBusy=state.busy||workspaceBusy;
   const [player,setPlayer]=useState<NativePlaybackController|null>(null);
@@ -188,6 +189,9 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   const showClipboard=()=>{showInspector();setClipboardFocus(value=>value+1);};
   const documentAction=(job:Promise<unknown>)=>change(job);
   const [paletteOpen,setPaletteOpen]=useState(false),paletteReturn=useRef<HTMLElement|null>(null);
+  const [asciiOpen,setAsciiOpen]=useState(false),asciiReturn=useRef<HTMLElement|null>(null);
+  const openAscii=()=>{asciiReturn.current=document.activeElement instanceof HTMLElement?document.activeElement:null;closeCommands(false);setAsciiOpen(true);};
+  const closeAscii=()=>{setAsciiOpen(false);const back=asciiReturn.current;asciiReturn.current=null;if(back?.isConnected)back.focus();if(document.activeElement!==back)scorePane.current?.focus();};
   const openPalette=()=>{paletteReturn.current=document.activeElement instanceof HTMLElement?document.activeElement:null;closeCommands(false);setPaletteOpen(true);};
   const closePalette=()=>{
     setPaletteOpen(false);const back=paletteReturn.current;paletteReturn.current=null;
@@ -203,6 +207,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     else if(action.name==='play')shell.current?.querySelector<HTMLButtonElement>('[aria-keyshortcuts="Space"]')?.click();
     else if(action.name==='new')documentAction(onNew());
     else if(action.name==='open')documentAction(onOpen());
+    else if(action.name==='importAscii'){if(onImportConverted)openAscii();}
     else if(action.name==='save'||action.name==='saveAs')act(controller.save(action.name==='saveAs'));
     else openModal('export');
   };
@@ -331,8 +336,8 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     select(next);event.preventDefault();
   }
   function selectionKeys(event:KeyboardEvent){
-    if((event.ctrlKey||event.metaKey)&&event.shiftKey&&!event.altKey&&event.key.toLowerCase()==='p'&&!exportOpen&&!harmonyOpen&&!scaleOpen&&!paletteOpen&&!(event.target instanceof Element&&event.target.closest('[role="dialog"]'))){event.preventDefault();if(!event.repeat)openPalette();return;}
-    if(textEntry(event.target)||exportOpen||harmonyOpen||scaleOpen||(event.target instanceof Element&&event.target.closest('[role="dialog"]')))return;
+    if((event.ctrlKey||event.metaKey)&&event.shiftKey&&!event.altKey&&event.key.toLowerCase()==='p'&&!exportOpen&&!harmonyOpen&&!scaleOpen&&!paletteOpen&&!asciiOpen&&!(event.target instanceof Element&&event.target.closest('[role="dialog"]'))){event.preventDefault();if(!event.repeat)openPalette();return;}
+    if(textEntry(event.target)||exportOpen||harmonyOpen||scaleOpen||paletteOpen||asciiOpen||(event.target instanceof Element&&event.target.closest('[role="dialog"]')))return;
     const key=event.key.toLowerCase();
     if((event.ctrlKey||event.metaKey)&&!event.altKey&&['n','o','s','z','y'].includes(key)){
       event.preventDefault();if(controlsBusy||event.repeat)return;
@@ -359,6 +364,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
       <details className="command-menu" onToggle={event=>commandToggle(event.currentTarget)}><summary>File</summary><section aria-label="File commands">
       <button disabled={controlsBusy} onClick={()=>documentAction(onNew())}>New</button>
       <button disabled={controlsBusy} onClick={()=>documentAction(onOpen())}>Open</button>
+      {onImportConverted&&<button disabled={controlsBusy} onClick={openAscii}>Import ASCII tab…</button>}
       <button disabled={controlsBusy} onClick={()=>act(controller.save())}>Save</button>
       <button disabled={controlsBusy} onClick={()=>act(controller.save(true))}>Save As</button>
       <button disabled={controlsBusy} onClick={()=>documentAction(onClose())}>Close score</button>
@@ -425,6 +431,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     </div>
     {exportOpen&&<ExportDialog score={state.score} layout={state.settings.print} page={page} currentSpeedAvailable={practiceRatio!==null} busy={exports.busy||state.busy||exportLaunching} progress={exports.progress} failure={exportError} gpBackingIssue={gpBackingIssue} onExport={runExport} onCancel={cancelExport}/>}
     {harmonyOpen&&location.beat&&<HarmonyChordDialog score={state.score} target={target} selection={musicSelection} value={location.beat.chord?getHarmonyChord(location.beat.chord):null} busy={state.busy||libraryLoading} library={library} onEdit={edit} onClose={closeModal} onLibraryPut={async entry=>{const revision=++libraryRevision.current,value=await putHarmonyLibraryEntry(entry);if(revision===libraryRevision.current)setLibrary(value);}} onLibraryRemove={async id=>{const revision=++libraryRevision.current,value=await removeHarmonyLibraryEntry(id);if(revision===libraryRevision.current)setLibrary(value);}}/>}
+    {asciiOpen&&onImportConverted&&<AsciiTabImportDialog busy={controlsBusy} onImport={(name,bytes)=>{const job=onImportConverted(name,bytes);documentAction(job);return job;}} onClose={closeAscii}/>}
     {paletteOpen&&<CommandPalette context={{score:state.score,target,string,canUndo:state.snapshot.canUndo,canRedo:state.snapshot.canRedo}} busy={controlsBusy} onRun={runPalette} onClose={closePalette}/>}
     {scaleOpen&&<ScaleToolPanel score={state.score} staff={location.staff} selection={musicSelection} busy={state.busy} onClose={closeModal}/>}
     <footer className="statusbar">{state.busy?'Working…':state.snapshot.dirty?'Unsaved changes':state.snapshot.path?'Saved':state.snapshot.project.base.kind==='file'?'Not saved':'New score'}<span>{state.snapshot.path ?? 'Save a .tabplayer project to keep the original score and edits.'}</span>{recoveryStatus}</footer>

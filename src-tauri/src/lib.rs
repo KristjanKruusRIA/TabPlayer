@@ -365,6 +365,21 @@ async fn workspace_close(
     .map_err(|error| error.to_string())?
 }
 
+/// Opens a score the frontend converted, such as imported ASCII tablature, as a new untitled document.
+#[tauri::command]
+async fn import_converted(
+    name: String,
+    bytes: Vec<u8>,
+    app: AppHandle,
+) -> Result<DocumentIntake, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        file_library::commands::admit_app(&app)?;
+        intake::stage_converted(&name, &bytes, &app.state::<Arc<Mutex<DocumentWorkspace>>>())
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
 #[tauri::command]
 fn new_document(
     defaults: Option<project::NewScoreDefaults>,
@@ -859,6 +874,7 @@ pub fn run() {
         session::session_shutdown,
         session::session_resume,
         read_document,
+        import_converted,
         new_document,
         cancel_document,
         workspace_add,
@@ -922,6 +938,7 @@ pub fn run() {
         session::session_shutdown,
         session::session_resume,
         read_document,
+        import_converted,
         new_document,
         cancel_document,
         workspace_add,

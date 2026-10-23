@@ -39,6 +39,7 @@ export function WorkspaceApp({workspace,session,library}:{workspace:WorkspaceCon
   },[workspace]);
   const onNew=useCallback(()=>perform(()=>workspace.newDocument()),[workspace,perform]);
   const onOpen=useCallback(()=>perform(()=>workspace.openDocument()),[workspace,perform]);
+  const onImportConverted=useCallback((name:string,bytes:Uint8Array)=>perform(()=>workspace.importConverted(name,bytes)),[workspace,perform]);
   const onClose=useCallback(()=>perform(()=>workspace.close(documentId)),[workspace,documentId,perform]);
   const onCloseAll=useCallback(()=>perform(()=>workspace.closeAll()),[workspace,perform]);
   useLayoutEffect(()=>{
@@ -96,7 +97,7 @@ export function WorkspaceApp({workspace,session,library}:{workspace:WorkspaceCon
     onKeyDownCapture={keys} onFocusCapture={event=>{tabFocus.current=event.target instanceof Element&&!!event.target.closest('[role="tablist"]');}}>
     <App key={activationId} controller={active.controller} audioBridge={audio} waveformBridge={waveform} exportBridge={exports} documentBridge={documentBridge}
       documentView={active.view} onViewChange={onViewChange} clipboard={workspace.clipboard} workspaceBusy={state.busy} workspaceError={state.error} playbackResumeEpoch={state.playbackResumeEpoch}
-      beginEditorOperation={beginEditorOperation} onNew={onNew} onOpen={onOpen} onClose={onClose} onCloseAll={onCloseAll}
+      beginEditorOperation={beginEditorOperation} onNew={onNew} onOpen={onOpen} onImportConverted={onImportConverted} onClose={onClose} onCloseAll={onCloseAll}
       sessionMenu={sessionMenu} libraryMenu={libraryMenu} onFileCommandCapture={captureLibraryInvoker} recoveryStatus={<>{recoveryStatus}{libraryState.error&&<p className="session-error" role="alert">{libraryState.error}</p>}</>}
       documentTabs={<DocumentTabs tabs={tabs} activeId={documentId} disabled={state.busy} onActivate={id=>run(perform(()=>workspace.activate(id)))} onClose={id=>run(perform(()=>workspace.close(id)))}/>}/>
     {library&&libraryState.open&&<LibraryDialog controller={library.controller} welcome={libraryState.welcome} onClose={()=>library.close()}/>}

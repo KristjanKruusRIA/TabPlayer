@@ -24,6 +24,7 @@ export const nativeWorkspaceBridge:NativeWorkspaceBridge={
   snapshot:()=>invoke('workspace_snapshot'),
   readDocument: () => desktopTest?invoke('desktop_test_io',{action:'read'}):invoke('read_document'),
   createBlankDocument: () => invoke('new_document',{defaults:newScoreDefaults()}),
+  importConverted:(name,bytes)=>invoke('import_converted',{name,bytes:Array.from(bytes)}),
   cancelDocument: token => invoke('cancel_document',{token}),
   addDocument:token=>invoke('workspace_add',{token}),
   activateDocument:documentId=>invoke('workspace_activate',{documentId}),

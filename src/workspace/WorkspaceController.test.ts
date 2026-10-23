@@ -279,3 +279,24 @@ it('a new score starts in the saved default view and reports it to the native se
     expect(w.getState().documents.find(entry=>entry.id===first)!.view.zoom).toBe(125);
   }finally{forgetSessionViewDefaults();}
 });
+
+it('imports a converted score as a new untitled tab and keeps the current tab on failure',async()=>{
+  const {workspace:w,bridge,stage,first}=await setup();
+  const {asciiTabFileName,parseAsciiTab}=await import('../interchange/ascii-tab');const {exportGpInterchange}=await import('../interchange/gp');const {Settings}=await import('@coderline/alphatab');
+  const bytes=exportGpInterchange(parseAsciiTab(['e|--------|','B|--------|','G|--------|','D|--------|','A|--------|','E|0---3---|'].join('\n')).score,new Settings());
+  bridge.importConverted=vi.fn(async(name:string,data:Uint8Array)=>({kind:'candidate' as const,candidate:stage({...blankProject(),base:{kind:'file',filename:name,bytesBase64:btoa(String.fromCharCode(...data)),sha256:'0'.repeat(64)}},'import-token')}));
+  const observer={committed:vi.fn(),failed:vi.fn()};w.setLibraryObserver(observer);
+  expect(await w.importConverted(asciiTabFileName('riff.txt'),bytes)).toBe(true);
+  // A converted score is not a library file, so it records no library metadata.
+  expect(observer.committed).not.toHaveBeenCalled();
+  expect(bridge.importConverted).toHaveBeenCalledWith('riff.gp',bytes);
+  expect(current(w).id).not.toBe(first);
+  expect(current(w).controller.getState().score.tracks[0].staves[0].bars[0].voices[0].beats.map(beat=>beat.notes[0]?.fret)).toEqual([0,3]);
+  const before=current(w).id,tabs=w.getState().documents.length;
+  vi.mocked(bridge.importConverted!).mockRejectedValueOnce(new Error('The converted score needs a plain .gp file name.'));
+  await expect(w.importConverted('bad.gp',bytes)).rejects.toThrow('The converted score needs a plain .gp file name.');
+  expect([current(w).id,w.getState().documents.length,w.getState().busy]).toEqual([before,tabs,false]);
+  delete bridge.importConverted;
+  await expect(w.importConverted('riff.gp',bytes)).rejects.toThrow('Importing converted scores is unavailable.');
+  expect(current(w).id).toBe(before);expect(w.getState().error).toBe('Importing converted scores is unavailable.');
+});

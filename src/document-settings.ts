@@ -18,14 +18,19 @@ export const defaultEffects = (): FxSettings => ({
   compressor:{enabled:false,thresholdDb:-18,ratio:4,attackMs:10,releaseMs:100,makeupDb:0},
   amp:{enabled:false,model:'clean',drive:.1,gainDb:0},cabinet:{enabled:false,model:'open'},
   eq:{enabled:false,lowDb:0,midDb:0,highDb:0,midHz:1000},chorus:{enabled:false,rateHz:1,depthMs:5,mix:.15},
-  delay:{enabled:false,quarterNotes:1,feedback:.25,mix:.15},reverb:{enabled:false,room:.5,damping:.5,mix:.12},
+  delay:{enabled:false,quarterNotes:1,feedback:.25,mix:.15},reverb:{enabled:false,model:'room',room:.5,damping:.5,mix:.12},
   vibrato:{enabled:false,rateHz:5,depthCents:20},phaser:{enabled:false,rateHz:.5,depth:.7,feedback:.3,stages:4,mix:.5},
   flanger:{enabled:false,rateHz:.25,depthMs:2,feedback:.5,mix:.5},tremolo:{enabled:false,rateHz:5,depth:.5,shape:'sine'},
   wah:{enabled:false,mode:'manual',position:.5,resonance:.5,sensitivity:.5,mix:1},
   octaver:{enabled:false,octaveDown:.5,twoOctavesDown:0,direct:1},pitch:{enabled:false,semitones:12,mix:1},drive:{enabled:false,model:'overdrive',drive:.5,tone:.5,levelDb:0},
 });
-/** Adds the effect blocks a sound saved before them lacks, switched off at their defaults. */
-export const completeSound = (sound: TrackSound): TrackSound => ({...sound,effects:{...defaultEffects(),...sound.effects}});
+/** Adds the effect blocks a sound saved before them lacks, switched off at their defaults, and reads a reverb saved
+ * before its models as the room. */
+export const completeSound = (sound: TrackSound): TrackSound => {
+  const effects={...defaultEffects(),...sound.effects},reverb=effects.reverb as Partial<FxSettings['reverb']>|undefined;
+  if(reverb&&typeof reverb==='object'&&!Array.isArray(reverb)&&reverb.model===undefined)effects.reverb={...reverb,model:'room'} as FxSettings['reverb'];
+  return {...sound,effects};
+};
 const range=(low:number,high:number)=>({low,high}),one=(...values:(string|number)[])=>({one:values}),unit=range(0,1);
 type FieldRule=ReturnType<typeof range>|ReturnType<typeof one>;
 /** Every effect field and its accepted values, as the native FxSettings::validate checks them. */
@@ -41,7 +46,7 @@ const effectRules:Record<keyof FxSettings,Record<string,FieldRule>>={
   flanger:{rateHz:range(.05,5),depthMs:range(0,10),feedback:range(-.9,.9),mix:unit},
   phaser:{rateHz:range(.05,5),depth:unit,feedback:range(0,.9),stages:one(2,4,6,8),mix:unit},
   tremolo:{rateHz:range(.1,20),depth:unit,shape:one('sine','square')},vibrato:{rateHz:range(1,14),depthCents:range(0,100)},
-  delay:{quarterNotes:one(.125,.25,.5,1,2,4),feedback:range(0,.9),mix:unit},reverb:{room:unit,damping:unit,mix:unit},
+  delay:{quarterNotes:one(.125,.25,.5,1,2,4),feedback:range(0,.9),mix:unit},reverb:{model:one('room','hall','plate','spring'),room:unit,damping:unit,mix:unit},
 };
 const fits=(value:unknown,rule:FieldRule)=>'one' in rule?rule.one.includes(value as string|number):typeof value==='number'&&Number.isFinite(value)&&value>=rule.low&&value<=rule.high;
 /** Why a sound cannot be applied, or null. It is checked as completed with any blocks it lacks, against the native rules. */

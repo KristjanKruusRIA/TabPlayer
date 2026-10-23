@@ -90,11 +90,28 @@ block!(Delay {
     feedback: f64 = 0.25,
     mix: f64 = 0.15
 });
-block!(Reverb {
-    room: f64 = 0.5,
-    damping: f64 = 0.5,
-    mix: f64 = 0.12
-});
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Reverb {
+    pub enabled: bool,
+    /// Room, hall, plate or spring. Sounds saved before the other models load as the room, which is not written.
+    #[serde(default = "room_model", skip_serializing_if = "is_room_model")]
+    pub model: String,
+    pub room: f64,
+    pub damping: f64,
+    pub mix: f64,
+}
+impl Default for Reverb {
+    fn default() -> Self {
+        Self { enabled: false, model: room_model(), room: 0.5, damping: 0.5, mix: 0.12 }
+    }
+}
+fn room_model() -> String {
+    "room".into()
+}
+fn is_room_model(model: &String) -> bool {
+    model == "room"
+}
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -203,6 +220,297 @@ fn drive_shape(drive: &Drive, rate: f64) -> DriveShape {
         tone: 1.0 - (-std::f64::consts::TAU * tone_hz.min(rate * 0.45) / rate).exp(),
         level: 10f64.powf(drive.level_db / 20.0),
     }
+}
+/// A reverb model built on a four-line feedback delay network: a pre-delay, four allpass diffusers, four delay
+/// lines mixed through a Hadamard matrix with a low-pass in each, and for the spring chains of stretched allpass
+/// filters on the input and in each line that delay low frequencies more than high ones on every trip, and a narrow
+/// output band.
+struct ReverbFamily {
+    predelay: f64,
+    diffusers: [f64; 4],
+    diffusion: f64,
+    lines: [f64; 4],
+    /// Decay time to -60 dB at room 0 and room 1, in seconds.
+    decay: [f64; 2],
+    /// How long `REVERB_BRIGHT_HZ` rings against the decay time, at damping 0 and damping 1.
+    bright: [f64; 2],
+    /// The spring's allpass coefficient, or 0.
+    chirp: f64,
+    /// The output's high-pass and low-pass cutoffs in Hz, or 0 for none.
+    band: [f64; 2],
+    /// A low-pass on the input in Hz, or 0 for none: a hall's air absorbs the highs before they reach the walls.
+    color: f64,
+    gain: f64,
+}
+const REVERB_FAMILIES: [ReverbFamily; 3] = [
+    ReverbFamily {
+        predelay: 0.02,
+        diffusers: [0.00477, 0.00359, 0.01273, 0.00931],
+        diffusion: 0.7,
+        lines: [0.0437, 0.0531, 0.0613, 0.0739],
+        decay: [1.2, 6.0],
+        bright: [0.7, 0.3],
+        chirp: 0.0,
+        band: [0.0, 0.0],
+        color: 5_000.0,
+        gain: 0.34,
+    },
+    ReverbFamily {
+        predelay: 0.0,
+        diffusers: [0.00141, 0.00213, 0.00371, 0.00529],
+        diffusion: 0.75,
+        lines: [0.0113, 0.0157, 0.0199, 0.0241],
+        decay: [0.8, 4.4],
+        bright: [1.0, 0.7],
+        chirp: 0.0,
+        band: [0.0, 0.0],
+        color: 0.0,
+        gain: 0.12,
+    },
+    ReverbFamily {
+        predelay: 0.0,
+        diffusers: [0.00071, 0.00113, 0.00163, 0.00197],
+        diffusion: 0.3,
+        lines: [0.0293, 0.0317, 0.0341, 0.0373],
+        decay: [0.8, 2.8],
+        bright: [0.7, 0.35],
+        chirp: -0.75,
+        band: [120.0, 3_500.0],
+        color: 0.0,
+        gain: 0.5,
+    },
+];
+/// Stretched allpass stages in each spring chain.
+const SPRING_STAGES: usize = 24;
+/// The stretched allpass filters' longest delay in frames, reached at 192 kHz.
+const SPRING_STRETCH: usize = 16;
+/// The frequency whose decay time the damping sets, below every supported rate's Nyquist frequency.
+const REVERB_BRIGHT_HZ: f64 = 3_000.0;
+const REVERB_MODELS: [&str; 4] = ["room", "hall", "plate", "spring"];
+fn reverb_frames(seconds: f64, rate: f64) -> usize {
+    ((seconds * rate).round() as usize).max(1)
+}
+/// The spring's stretch: a stretched allpass repeats its dispersion every rate / stretch, and at about 12 kHz the
+/// repeat falls where the output band has removed it, while the strongest dispersion stays below about 6 kHz.
+fn spring_stretch(rate: f64) -> usize {
+    ((rate / 12_000.0).round() as usize).clamp(1, SPRING_STRETCH)
+}
+/// A reverb family's loop lengths in frames at low frequencies: each line, plus for the spring its chain's delay.
+/// The chain delays high frequencies far less, so the spring's upper band decays somewhat faster than `bright` says.
+fn reverb_loops(family: &ReverbFamily, rate: f64) -> [f64; 4] {
+    let chirp = if family.chirp != 0.0 {
+        (SPRING_STAGES * spring_stretch(rate)) as f64 * (1.0 - family.chirp) / (1.0 + family.chirp)
+    } else {
+        0.0
+    };
+    family.lines.map(|seconds| reverb_frames(seconds, rate) as f64 + chirp)
+}
+/// The coefficient k of a one-pole low-pass y += k(x - y) whose gain at `w` radians per frame is `gain`.
+fn one_pole_for(gain: f64, w: f64) -> f64 {
+    if gain >= 1.0 - 1e-9 {
+        return 1.0;
+    }
+    // With q = 1 - k, k² = gain²(1 - 2q·cos w + q²) is a quadratic in q; its root below 1 is the stable one.
+    let (g2, c) = (gain * gain, w.cos());
+    let (a, b) = (1.0 - g2, 1.0 - g2 * c);
+    let q = (b - (b * b - a * a).max(0.0).sqrt()) / a;
+    (1.0 - q).clamp(1e-6, 1.0)
+}
+/// One reverb setting resolved for the audio thread: its model (0 for the room, otherwise a family index plus
+/// one), each line's feedback for the decay time, and each line's low-pass coefficient, set so that its loss at
+/// `REVERB_BRIGHT_HZ` gives that frequency its own, shorter decay time at any rate.
+#[derive(Clone, Copy)]
+struct ReverbShape {
+    model: usize,
+    feedback: [f64; 4],
+    cut: [f64; 4],
+}
+fn reverb_shape(reverb: &Reverb, rate: f64) -> ReverbShape {
+    let model = REVERB_MODELS.iter().position(|name| *name == reverb.model).unwrap_or(0);
+    if model == 0 {
+        return ReverbShape { model, feedback: [0.0; 4], cut: [0.0; 4] };
+    }
+    let family = &REVERB_FAMILIES[model - 1];
+    let decay = family.decay[0] + (family.decay[1] - family.decay[0]) * reverb.room;
+    let bright = family.bright[0] + (family.bright[1] - family.bright[0]) * reverb.damping;
+    let loops = reverb_loops(family, rate);
+    let gain = |frames: f64, time: f64| 10f64.powf(-3.0 * frames / (rate * time));
+    let w = std::f64::consts::TAU * REVERB_BRIGHT_HZ / rate;
+    ReverbShape {
+        model,
+        feedback: loops.map(|frames| gain(frames, decay)),
+        cut: loops.map(|frames| one_pole_for(gain(frames, decay * bright) / gain(frames, decay), w)),
+    }
+}
+/// A mono delay line read whole frames back.
+struct Ring {
+    frames: Vec<f64>,
+    cursor: usize,
+}
+impl Ring {
+    fn new(length: usize) -> Self {
+        Self { frames: vec![0.0; length + 1], cursor: 0 }
+    }
+    fn read(&self, back: usize) -> f64 {
+        let len = self.frames.len();
+        self.frames[(self.cursor + len - back.clamp(1, len - 1)) % len]
+    }
+    fn write(&mut self, x: f64) {
+        self.frames[self.cursor] = x;
+        self.cursor = (self.cursor + 1) % self.frames.len();
+    }
+    fn reset(&mut self) {
+        self.frames.fill(0.0);
+        self.cursor = 0;
+    }
+}
+/// The spring's five chains of stretched first-order allpass filters, y[n] = a·x[n] + x[n-K] - a·y[n-K]: one on
+/// the input and one in each line. Every filter keeps its last K inputs and outputs, all at one shared position.
+struct Chirp {
+    history: Vec<[f64; 2]>,
+    stretch: usize,
+    at: usize,
+}
+impl Chirp {
+    fn new(rate: f64) -> Self {
+        let stretch = spring_stretch(rate);
+        Self { history: vec![[0.0; 2]; 5 * SPRING_STAGES * stretch], stretch, at: 0 }
+    }
+    fn run(&mut self, chain: usize, a: f64, mut x: f64) -> f64 {
+        for stage in 0..SPRING_STAGES {
+            let slot = &mut self.history[(chain * SPRING_STAGES + stage) * self.stretch + self.at];
+            let y = flush(a * x + slot[0] - a * slot[1]);
+            *slot = [x, y];
+            x = y;
+        }
+        x
+    }
+    /// Moves every filter on one frame, after each chain has run once.
+    fn advance(&mut self) {
+        self.at = if self.at + 1 == self.stretch { 0 } else { self.at + 1 };
+    }
+    fn reset(&mut self) {
+        self.history.fill([0.0; 2]);
+        self.at = 0;
+    }
+}
+/// One reverb family's running state, and whether it ran on the previous frame.
+struct Tank {
+    family: usize,
+    predelay: usize,
+    pre: Ring,
+    diffuser_frames: [usize; 4],
+    diffusers: [Ring; 4],
+    line_frames: [usize; 4],
+    lines: [Ring; 4],
+    damp: [f64; 4],
+    chirp: Option<Chirp>,
+    color: f64,
+    color_state: f64,
+    band: [f64; 2],
+    band_state: [[f64; 3]; 2],
+    live: bool,
+}
+impl Tank {
+    fn new(family: usize, rate: f64) -> Self {
+        let shape = &REVERB_FAMILIES[family];
+        let frames = |seconds: f64| reverb_frames(seconds, rate);
+        Self {
+            family,
+            predelay: if shape.predelay > 0.0 { frames(shape.predelay) } else { 0 },
+            pre: Ring::new(frames(shape.predelay.max(0.001))),
+            diffuser_frames: shape.diffusers.map(frames),
+            diffusers: shape.diffusers.map(|seconds| Ring::new(frames(seconds))),
+            line_frames: shape.lines.map(frames),
+            lines: shape.lines.map(|seconds| Ring::new(frames(seconds))),
+            damp: [0.0; 4],
+            chirp: if shape.chirp != 0.0 { Some(Chirp::new(rate)) } else { None },
+            band: shape.band.map(|hz| if hz > 0.0 { 1.0 - (-std::f64::consts::TAU * hz.min(rate * 0.45) / rate).exp() } else { 0.0 }),
+            band_state: [[0.0; 3]; 2],
+            color: if shape.color > 0.0 { 1.0 - (-std::f64::consts::TAU * shape.color.min(rate * 0.45) / rate).exp() } else { 0.0 },
+            color_state: 0.0,
+            live: false,
+        }
+    }
+    fn reset(&mut self) {
+        self.pre.reset();
+        for ring in self.diffusers.iter_mut().chain(self.lines.iter_mut()) {
+            ring.reset();
+        }
+        self.damp = [0.0; 4];
+        if let Some(chirp) = &mut self.chirp {
+            chirp.reset();
+        }
+        self.band_state = [[0.0; 3]; 2];
+        self.color_state = 0.0;
+    }
+    fn run(&mut self, input: f64, feedback: [f64; 4], cut: [f64; 4]) -> [f64; 2] {
+        let family = &REVERB_FAMILIES[self.family];
+        let mut input = input;
+        if self.color > 0.0 {
+            self.color_state = flush(self.color_state + self.color * (input - self.color_state));
+            input = self.color_state;
+        }
+        if let Some(chirp) = &mut self.chirp {
+            input = chirp.run(4, family.chirp, input);
+        }
+        self.pre.write(input);
+        let mut v = if self.predelay > 0 { self.pre.read(self.predelay) } else { input };
+        for i in 0..4 {
+            let d = self.diffusers[i].read(self.diffuser_frames[i]);
+            let w = flush(v + family.diffusion * d);
+            self.diffusers[i].write(w);
+            v = d - family.diffusion * w;
+        }
+        let o: [f64; 4] = std::array::from_fn(|i| self.lines[i].read(self.line_frames[i]));
+        for i in 0..4 {
+            self.damp[i] = flush(self.damp[i] + cut[i] * (o[i] - self.damp[i]));
+        }
+        let s: [f64; 4] = std::array::from_fn(|i| self.damp[i] * feedback[i]);
+        let mixed = [s[0] + s[1] + s[2] + s[3], s[0] - s[1] + s[2] - s[3], s[0] + s[1] - s[2] - s[3], s[0] - s[1] - s[2] + s[3]];
+        for i in 0..4 {
+            let mut back = mixed[i] * 0.5;
+            if let Some(chirp) = &mut self.chirp {
+                back = chirp.run(i, family.chirp, back);
+            }
+            self.lines[i].write(flush(back + if i % 2 == 0 { v } else { -v }));
+        }
+        // The diffused input is heard at once as early reflections, then the lines' first returns follow.
+        if let Some(chirp) = &mut self.chirp {
+            chirp.advance();
+        }
+        let out = [o[0] - o[3] + 0.5 * v, o[1] - o[2] - 0.5 * v];
+        std::array::from_fn(|c| {
+            let mut y = out[c] * family.gain;
+            let [high, low] = self.band;
+            let state = &mut self.band_state[c];
+            if high > 0.0 {
+                state[0] = flush(state[0] + high * (y - state[0]));
+                y -= state[0];
+            }
+            if low > 0.0 {
+                state[1] = flush(state[1] + low * (y - state[1]));
+                state[2] = flush(state[2] + low * (state[1] - state[2]));
+                y = state[2];
+            }
+            y
+        })
+    }
+}
+/// The original room reverb: four damped combs fed with the input and crossing channels.
+fn room_reverb(lines: &mut [DelayLine; 4], damp: &mut [[f32; 2]; 4], x: [f32; 2], room: f64, damping: f64) -> [f32; 2] {
+    let mut wet = [0.0; 2];
+    let feedback = (0.55 + 0.37 * room) as f32;
+    let damping = (0.05 + 0.9 * damping) as f32;
+    for i in 0..4 {
+        let y = lines[i].read((lines[i].frames.len() - 1) as f64);
+        for (c, value) in wet.iter_mut().enumerate() {
+            damp[i][c] = y[c] * (1.0 - damping) + damp[i][c] * damping;
+            *value += y[c] * 0.25;
+        }
+        lines[i].write(std::array::from_fn(|c| x[c] + damp[i][1 - c] * feedback));
+    }
+    wet
 }
 /// One pitch shifter's tap state: the shared phase, each tap's alignment offset and its last phase.
 #[derive(Clone, Copy)]
@@ -352,6 +660,9 @@ impl FxSettings {
         }
         if !["sine", "square"].contains(&self.tremolo.shape.as_str()) {
             return Err("Unknown tremolo shape.".into());
+        }
+        if !REVERB_MODELS.contains(&self.reverb.model.as_str()) {
+            return Err("Unknown reverb model.".into());
         }
         if !["overdrive", "distortion", "fuzz"].contains(&self.drive.model.as_str()) {
             return Err("Unknown drive model.".into());
@@ -571,6 +882,11 @@ pub struct TrackDsp {
     delay: DelayLine,
     reverb: [DelayLine; 4],
     reverb_damp: [[f32; 2]; 4],
+    /// The hall, plate and spring, the previous and current settings resolved, and whether the room ran on the
+    /// previous frame. A model that starts running again starts silent.
+    reverb_tanks: Box<[Tank; 3]>,
+    reverb_shapes: [ReverbShape; 2],
+    reverb_live: bool,
     cached_eq: [f64; 4],
     cached_cabinet: [f64; 2],
 }
@@ -591,6 +907,7 @@ impl TrackDsp {
         let (previous_vibrato, previous_flanger_depth) = (settings.vibrato.clone(), settings.flanger.depth_ms);
         let wah_start = wah_target(&settings.wah, 0.0);
         let drive_start = drive_shape(&settings.drive, rate);
+        let reverb_start = reverb_shape(&settings.reverb, rate);
         Ok(Self {
             previous: settings.clone(),
             settings,
@@ -641,6 +958,9 @@ impl TrackDsp {
                 DelayLine::new((rate * [0.0297, 0.0371, 0.0411, 0.0437][i]) as usize + 23 * i)
             }),
             reverb_damp: [[0.0; 2]; 4],
+            reverb_tanks: Box::new(std::array::from_fn(|family| Tank::new(family, rate))),
+            reverb_shapes: [reverb_start; 2],
+            reverb_live: false,
             cached_eq: [f64::NAN; 4],
             cached_cabinet: [f64::NAN; 2],
         })
@@ -649,6 +969,7 @@ impl TrackDsp {
         settings.validate()?;
         self.previous = std::mem::replace(&mut self.settings, settings);
         self.drive_shapes = [self.drive_shapes[1], drive_shape(&self.settings.drive, self.rate)];
+        self.reverb_shapes = [self.reverb_shapes[1], reverb_shape(&self.settings.reverb, self.rate)];
         self.ramp_left = self.ramp_frames;
         Ok(())
     }
@@ -675,6 +996,7 @@ impl TrackDsp {
         std::mem::swap(&mut self.previous, &mut old.settings);
         // The previous settings are the old configuration's current ones, resolved as it resolved them.
         self.drive_shapes[0] = old.drive_shapes[1];
+        self.reverb_shapes[0] = old.reverb_shapes[1];
         macro_rules! move_state {($($name:ident),*)=>{$(std::mem::swap(&mut self.$name,&mut old.$name);)*}}
         if running[0] {
             move_state!(gate_envelope);
@@ -698,7 +1020,7 @@ impl TrackDsp {
             move_state!(delay);
         }
         if running[7] {
-            move_state!(reverb, reverb_damp);
+            move_state!(reverb, reverb_damp, reverb_tanks, reverb_live);
         }
         if running[8] {
             move_state!(vibrato, vibrato_phase, vibrato_swing);
@@ -1115,21 +1437,34 @@ impl TrackDsp {
                 f.delay.enabled,
             );
         }
-        if f.reverb.enabled || p.reverb.enabled && t < 1.0 {
-            let mut wet = [0.0; 2];
-            let feedback = (0.55 + 0.37 * lerp(p.reverb.room, f.reverb.room)) as f32;
-            let damping = (0.05 + 0.9 * lerp(p.reverb.damping, f.reverb.damping)) as f32;
-            for i in 0..4 {
-                let y = self.reverb[i].read((self.reverb[i].frames.len() - 1) as f64);
-                for (c, value) in wet.iter_mut().enumerate() {
-                    self.reverb_damp[i][c] =
-                        y[c] * (1.0 - damping) + self.reverb_damp[i][c] * damping;
-                    *value += y[c] * 0.25;
-                }
-                self.reverb[i].write(std::array::from_fn(|c| {
-                    x[c] + self.reverb_damp[i][1 - c] * feedback
-                }));
+        let running = f.reverb.enabled || p.reverb.enabled && t < 1.0;
+        let shapes = self.reverb_shapes;
+        // The models that run this frame: one with both sides' settings blended, or during a change of model
+        // each side that is on with its own settings, crossfaded.
+        let same = shapes[0].model == shapes[1].model;
+        let side_on = [p.reverb.enabled && t < 1.0, f.reverb.enabled];
+        let needed = |model: usize| running && if same { shapes[1].model == model } else { (0..2).any(|s| side_on[s] && shapes[s].model == model) };
+        if needed(0) && !self.reverb_live {
+            for line in &mut self.reverb {
+                line.reset();
             }
+            self.reverb_damp = [[0.0; 2]; 4];
+        }
+        self.reverb_live = needed(0);
+        for tank in self.reverb_tanks.iter_mut() {
+            let need = needed(tank.family + 1);
+            if need && !tank.live {
+                tank.reset();
+            }
+            tank.live = need;
+        }
+        if running && same {
+            let wet = if shapes[1].model == 0 {
+                room_reverb(&mut self.reverb, &mut self.reverb_damp, x, lerp(p.reverb.room, f.reverb.room), lerp(p.reverb.damping, f.reverb.damping))
+            } else {
+                let feedback = std::array::from_fn(|i| lerp(shapes[0].feedback[i], shapes[1].feedback[i]));
+                self.reverb_tanks[shapes[1].model - 1].run((x[0] as f64 + x[1] as f64) * 0.5, feedback, std::array::from_fn(|i| lerp(shapes[0].cut[i], shapes[1].cut[i]))).map(|v| v as f32)
+            };
             let mix = lerp(p.reverb.mix, f.reverb.mix) as f32;
             x = blend(
                 x,
@@ -1137,6 +1472,21 @@ impl TrackDsp {
                 p.reverb.enabled,
                 f.reverb.enabled,
             );
+        } else if running {
+            let sides = [(p.reverb.room, p.reverb.damping, p.reverb.mix), (f.reverb.room, f.reverb.damping, f.reverb.mix)];
+            let out: [[f32; 2]; 2] = std::array::from_fn(|s| {
+                if !side_on[s] {
+                    return x;
+                }
+                let wet = if shapes[s].model == 0 {
+                    room_reverb(&mut self.reverb, &mut self.reverb_damp, x, sides[s].0, sides[s].1)
+                } else {
+                    self.reverb_tanks[shapes[s].model - 1].run((x[0] as f64 + x[1] as f64) * 0.5, shapes[s].feedback, shapes[s].cut).map(|v| v as f32)
+                };
+                let mix = sides[s].2 as f32;
+                std::array::from_fn(|c| x[c] * (1.0 - mix) + wet[c] * mix)
+            });
+            x = std::array::from_fn(|c| lerp(out[0][c] as f64, out[1][c] as f64) as f32);
         }
         self.ramp_left = self.ramp_left.saturating_sub(1);
         x.map(|v| {
@@ -1165,6 +1515,9 @@ impl TrackDsp {
             line.reset();
         }
         self.reverb_damp = [[0.0; 2]; 4];
+        for tank in self.reverb_tanks.iter_mut() {
+            tank.reset();
+        }
         self.phase = 0.0;
         self.vibrato.reset();
         self.vibrato_phase = 0.0;

@@ -11,7 +11,10 @@ export interface InstrumentViewProps {
   /** Extra controls placed before the view mode. */
   controls?: ReactNode;
 }
-type InstrumentMode = 'auto' | 'guitar' | 'bass' | 'drums' | 'keys';
+type InstrumentMode = 'auto' | 'guitar' | 'bass' | 'drums' | 'keys' | 'both';
+const modeNames: Record<Exclude<InstrumentMode,'auto'>,string> = {guitar:'Guitar',bass:'Bass',drums:'Drums',keys:'Keys',both:'Neck + keys'};
+const handednessKey = 'tabplayer.instrument.leftHanded';
+function storedHandedness() { try { return localStorage.getItem(handednessKey) === 'left'; } catch { return false; } }
 type FretPosition = { note: PlanNote; string: number; fret: number };
 const blackKeys = new Set([1,3,6,8,10]);
 const percussionNames = [
@@ -31,7 +34,7 @@ const drumPieces = [
 ];
 const percussionName = (key: number) => percussionNames[key-35] ?? `Percussion ${formatPitch(key)} (${key})`;
 
-function Fretboard({staff, notes, mode}: {staff: model.Staff; notes: readonly PlanNote[]; mode: 'guitar' | 'bass'}) {
+function Fretboard({staff, notes, mode, leftHanded}: {staff: model.Staff; notes: readonly PlanNote[]; mode: 'guitar' | 'bass'; leftHanded: boolean}) {
   const id=useId();
   if (!staff.tuning.length) return <p className="instrument-empty">No string tuning on this staff. Choose Keys to view its pitches.</p>;
   const positions: FretPosition[] = [];
@@ -50,11 +53,12 @@ function Fretboard({staff, notes, mode}: {staff: model.Staff; notes: readonly Pl
   const top=(height-(staff.tuning.length-1)*row)/2, body=left+neckLength-6, width=body+254;
   const boundary=(fret:number)=>left+neckLength*(1-2**(-fret/12))/(1-2**(-maxFret/12));
   const position=(fret:number)=>fret===0?left-17:(boundary(fret-1)+boundary(fret))/2;
+  const name=`${mode === 'bass' ? 'Bass' : 'Guitar'} fretboard${leftHanded ? ', left-handed' : ''}`;
   const wood=`url(#${id}-wood)`,metal=`url(#${id}-metal)`,cream=`url(#${id}-cream)`;
   return <>
     <p className="instrument-detail">Staff {staff.index+1} · {staff.tuning.length} strings · Capo {staff.capo}{staff.capo ? ' · fret numbers relative to capo' : ''} · Open {staff.tuning.map(pitch=>formatPitch(pitch+staff.capo-staff.transpositionPitch)).join(' ')}</p>
-    <div className="instrument-canvas instrument-fretboard"><svg role="img" aria-label={`${mode === 'bass' ? 'Bass' : 'Guitar'} fretboard`} viewBox={`0 0 ${width} ${height}`}>
-      <title>{`${mode === 'bass' ? 'Bass' : 'Guitar'} fretboard`}</title>
+    <div className="instrument-canvas instrument-fretboard"><svg role="img" aria-label={name} viewBox={`0 0 ${width} ${height}`}>
+      <title>{name}</title>
       <defs>
         <linearGradient id={`${id}-wood`} x1="0" y1="0" x2="0" y2="1"><stop stopColor="#28130d"/><stop offset=".18" stopColor="#6a3822"/><stop offset=".52" stopColor="#824b31"/><stop offset=".83" stopColor="#512817"/><stop offset="1" stopColor="#25160f"/></linearGradient>
         <linearGradient id={`${id}-metal`} x1="0" y1="0" x2="1" y2="0"><stop stopColor="#52565a"/><stop offset=".3" stopColor="#e5e7e9"/><stop offset=".55" stopColor="#b6bec3"/><stop offset=".7" stopColor="#f7f8f6"/><stop offset="1" stopColor="#676c71"/></linearGradient>
@@ -63,6 +67,8 @@ function Fretboard({staff, notes, mode}: {staff: model.Staff; notes: readonly Pl
         <pattern id={`${id}-grain`} patternUnits="userSpaceOnUse" width="190" height="24"><path d="M0 2C48 7 120-2 190 4M0 9C55 1 116 19 190 11M0 16C84 8 109 25 190 16M0 23C74 29 105 12 190 22" fill="none" stroke="#1c0a03" strokeWidth=".7" opacity=".4"/><path d="M0 6C70 15 120 4 190 8M0 20C40 12 125 27 190 21" fill="none" stroke="#d5a875" strokeWidth=".6" opacity=".25"/></pattern>
         <pattern id={`${id}-tortoise`} patternUnits="userSpaceOnUse" width="19" height="23"><rect width="19" height="23" fill="#281510"/><path d="M1 4L8 1 11 8 6 11ZM8 15L15 10 19 17 13 22Z" fill="#853c21"/><path d="M3 14L7 12 9 19 4 21ZM11 2L18 4 16 9 12 7Z" fill="#b56636" opacity=".6"/></pattern>
       </defs>
+      {/* A left-handed neck mirrors the drawing; fret numbers are placed outside the mirror so they still read normally. */}
+      <g data-handedness={leftHanded?'left':'right'} transform={leftHanded?`matrix(-1 0 0 1 ${width} 0)`:undefined}>
       <ellipse cx={body+113} cy="209" rx="119" ry="12" fill="#000" opacity=".35"/>
       <g data-instrument-part="body" transform={`translate(${body},113)`}>
         <path d="M7-45C29-42 17-79 37-89C72-113 112-91 150-83C184-97 213-93 231-70C249-47 248-19 235 4C253 39 247 75 225 96C194 122 151 104 113 108C66 114 14 102-2 70C-20 42 31 22 43 2C57-24 31-24 7-45Z" fill={cream} stroke="#827c6f" strokeWidth="2"/>
@@ -73,7 +79,7 @@ function Fretboard({staff, notes, mode}: {staff: model.Staff; notes: readonly Pl
         <path d="M200 38L218 30Q230 40 224 51L207 57Z" fill={metal} stroke="#62676a"/><ellipse cx="216" cy="42" rx="4" ry="6" fill="#252b2b"/>
       </g>
       <g data-instrument-part="neck"><rect x={left} y={top-15} width={neckLength+34} height={neckHeight+4} rx="2" fill="#b69c73" stroke="#51412f"/><rect x={left} y={top-12} width={neckLength+34} height={neckHeight-2} fill={wood}/><rect x={left} y={top-12} width={neckLength+34} height={neckHeight-2} fill={`url(#${id}-grain)`}/><path d={`M${left} ${top-12}H${body+34}M${left} ${top+neckHeight-14}H${body+34}`} stroke="#ba8d68" strokeWidth="1" opacity=".6"/></g>
-      {Array.from({length:maxFret+1},(_,fret)=><g key={fret} data-fret-column={fret}><text className="fret-number" x={position(fret)} y={top-22} textAnchor="middle">{fret===0?'OPEN':fret}</text><line data-fret-boundary={fret} x1={boundary(fret)} x2={boundary(fret)} y1={top-12} y2={top+neckHeight-14} stroke={fret===0?'#e8dcc5':'#131711'} strokeWidth={fret===0?5:3}/>{fret>0?<rect x={boundary(fret)-1} y={top-12} width="2" height={neckHeight-2} fill={metal}/>:null}</g>)}
+      {Array.from({length:maxFret+1},(_,fret)=><g key={fret} data-fret-column={fret}><line data-fret-boundary={fret} x1={boundary(fret)} x2={boundary(fret)} y1={top-12} y2={top+neckHeight-14} stroke={fret===0?'#e8dcc5':'#131711'} strokeWidth={fret===0?5:3}/>{fret>0?<rect x={boundary(fret)-1} y={top-12} width="2" height={neckHeight-2} fill={metal}/>:null}</g>)}
       {[3,5,7,9,12,15,17,19,21,24].filter(fret=>fret<=maxFret).flatMap(fret=>(fret%12===0?[-neckHeight*.2,neckHeight*.2]:[0]).map((offset,index)=><circle key={`${fret}/${index}`} cx={position(fret)} cy={height/2+offset} r="3.5" fill="#e8e0c6" stroke="#b7ae95" strokeWidth=".7"/>))}
       <g data-instrument-part="bridge"><rect x={body+144} y={top-11} width="36" height={neckHeight-4} rx="3" fill={metal} stroke="#4a4a43"/>{staff.tuning.map((_,index)=><g key={index}><rect x={body+147} y={top+index*row-5} width="25" height="10" rx="2" fill={metal} stroke="#6a6c66"/><circle cx={body+176} cy={top+index*row} r="2" fill="#343933"/></g>)}</g>
       {[40,91].map((offset,pickup)=><g key={offset} data-instrument-part={pickup===0?'neck-pickup':'bridge-pickup'}><rect x={body+offset-9} y={top-11} width="19" height={neckHeight-4} rx="8" fill="#eee7d2" stroke="#7e7a6e"/>{staff.tuning.map((_,index)=><circle data-pickup-string={staff.tuning.length-index} key={index} cx={body+offset} cy={top+index*row} r="2.5" fill={metal} stroke="#5c5b56" strokeWidth=".7"/>)}</g>)}
@@ -84,20 +90,22 @@ function Fretboard({staff, notes, mode}: {staff: model.Staff; notes: readonly Pl
       {positions.map(({note,string,fret})=><g key={note.id} className="fret-note" data-note-id={note.id} data-string={string} data-fret={fret} data-key={note.key}>
         <circle className="fret-note-halo" cx={position(fret)} cy={top+(staff.tuning.length-string)*row} r="4.6"/><circle cx={position(fret)} cy={top+(staff.tuning.length-string)*row} r="3.2"/><title>{`${formatPitch(note.key)} · string ${string} · fret ${fret}`}</title>
       </g>)}
+      </g>
+      <g className="fret-numbers">{Array.from({length:maxFret+1},(_,fret)=><text key={fret} className="fret-number" data-fret-number={fret} x={leftHanded?width-position(fret):position(fret)} y={top-22} textAnchor="middle">{fret===0?'OPEN':fret}</text>)}</g>
     </svg></div>
   </>;
 }
 
-function Keyboard({track,notes,compact}: {track: model.Track; notes: readonly PlanNote[]; compact:boolean}) {
+function Keyboard({staves,notes,compact}: {staves: readonly model.Staff[]; notes: readonly PlanNote[]; compact:boolean}) {
   const id=useId();
   const sourceRange = useMemo(()=>{
     let low=128,high=-1;
-    for (const staff of track.staves) for (const bar of staff.bars) for (const voice of bar.voices) for (const beat of voice.beats) for (const note of beat.notes) {
+    for (const staff of staves) for (const bar of staff.bars) for (const voice of bar.voices) for (const beat of voice.beats) for (const note of beat.notes) {
       if (staff.isPercussion) continue;
       const key=note.realValue; low=Math.min(low,key); high=Math.max(high,key);
     }
     return high<low ? [48,83] : [low,high];
-  },[track]);
+  },[staves]);
   const active = new Set(notes.map(note=>note.key)), low = Math.max(0,Math.floor(Math.min(sourceRange[0],...active)/12)*12), high = Math.min(127,Math.max(low+35,Math.ceil((Math.max(sourceRange[1],...active)+1)/12)*12-1));
   const white: {key:number;x:number}[] = [], black: {key:number;x:number}[] = [], keyWidth = 28;
   for (let key=low;key<=high;key++) {
@@ -167,14 +175,19 @@ function DrumKit({notes}: {notes: readonly PlanNote[]}) {
 }
 
 export function InstrumentView({score,track:trackIndex,staff:staffIndex,notes,caption='Sounding notes',empty='No notes sounding',controls}: InstrumentViewProps) {
-  const [requestedMode,setMode] = useState<InstrumentMode>('auto'), track = score.tracks[trackIndex], staff = track.staves[staffIndex];
-  const [expanded,setExpanded] = useState(false);
+  const [requestedMode,setMode] = useState<InstrumentMode>('auto'), [neckChoice,setNeckChoice] = useState<'guitar'|'bass'|null>(null), track = score.tracks[trackIndex], staff = track.staves[staffIndex];
+  const [expanded,setExpanded] = useState(false), [leftHanded,setLeftHanded] = useState(storedHandedness);
+  const handedness = (left: boolean) => { setLeftHanded(left); try { localStorage.setItem(handednessKey, left ? 'left' : 'right'); } catch { /* the choice still applies to this view */ } };
   const automatic: Exclude<InstrumentMode,'auto'> = staff.isPercussion ? 'drums' : track.playbackInfo.program>=24 && track.playbackInfo.program<=31 ? 'guitar' : track.playbackInfo.program>=32 && track.playbackInfo.program<=39 ? 'bass' : 'keys';
-  const mode = requestedMode==='auto' ? automatic : requestedMode, active = notes.filter(note=>note.source.target.track===trackIndex);
+  // A percussion staff has no neck, so the combined view falls back to the drum kit.
+  const mode = requestedMode==='auto' || requestedMode==='both' && staff.isPercussion ? automatic : requestedMode, neck = neckChoice ?? (automatic==='bass' ? 'bass' : 'guitar');
+  // The combined view shows one staff on both instruments so they always agree.
+  const active = notes.filter(note=>note.source.target.track===trackIndex && (mode!=='both' || note.source.target.staff===staffIndex));
+  const staves = useMemo(()=>mode==='both' ? [staff] : track.staves,[mode,staff,track]);
   const labels = [...new Set(active.map(note=>mode==='drums'?percussionName(note.key):formatPitch(note.key)))];
   return <div className="instrument-view" data-size={expanded?'expanded':'compact'}>
-    <div className="instrument-header"><h3>{track.name}<span> · {mode==='keys'?'Keys':mode[0].toUpperCase()+mode.slice(1)}</span></h3><div className="instrument-controls">{controls}<label>Instrument view mode<select value={requestedMode} onChange={event=>setMode(event.target.value as InstrumentMode)}><option value="auto">Auto</option><option value="guitar">Guitar</option><option value="bass">Bass</option><option value="drums">Drums</option><option value="keys">Keys</option></select></label><button type="button" aria-label={expanded?'Compact instrument view':'Expand instrument view'} aria-expanded={expanded} onClick={()=>setExpanded(value=>!value)}>{expanded?'Compact':'Expand'}</button></div></div>
-    {mode==='guitar'||mode==='bass' ? <Fretboard staff={staff} notes={active} mode={mode}/> : mode==='drums' ? <DrumKit notes={active}/> : <Keyboard track={track} notes={active} compact={!expanded}/>}
+    <div className="instrument-header"><h3>{track.name}<span> · {modeNames[mode]}</span></h3><div className="instrument-controls">{controls}<label>Instrument view mode<select value={requestedMode==='both'&&staff.isPercussion?'auto':requestedMode} onChange={event=>{const value=event.target.value as InstrumentMode;setMode(value);if(value==='guitar'||value==='bass')setNeckChoice(value);}}><option value="auto">Auto</option><option value="guitar">Guitar</option><option value="bass">Bass</option><option value="drums">Drums</option><option value="keys">Keys</option><option value="both" disabled={staff.isPercussion}>Neck + keys</option></select></label>{mode==='guitar'||mode==='bass'||mode==='both' ? <label className="instrument-check"><input type="checkbox" checked={leftHanded} onChange={event=>handedness(event.target.checked)}/>Left-handed</label> : null}<button type="button" aria-label={expanded?'Compact instrument view':'Expand instrument view'} aria-expanded={expanded} onClick={()=>setExpanded(value=>!value)}>{expanded?'Compact':'Expand'}</button></div></div>
+    {mode==='both' ? <><Fretboard staff={staff} notes={active} mode={neck} leftHanded={leftHanded}/><Keyboard staves={staves} notes={active} compact={!expanded}/></> : mode==='guitar'||mode==='bass' ? <Fretboard staff={staff} notes={active} mode={mode} leftHanded={leftHanded}/> : mode==='drums' ? <DrumKit notes={active}/> : <Keyboard staves={staves} notes={active} compact={!expanded}/>}
     <div className="instrument-playing" role="group" aria-label={caption}>{labels.length ? labels.map(label=><span className="instrument-note" key={label}>{label}</span>) : <span className="instrument-empty">{empty}</span>}</div>
   </div>;
 }

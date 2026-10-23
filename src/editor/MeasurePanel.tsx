@@ -5,10 +5,11 @@ import { describeSelection } from '../engine';
 import type { EditorProps } from './TechniquePanel';
 import { EnumInput } from './controls';
 import { IndexInput } from './IndexInput';
+import { readMeasureSettings } from './measure-settings';
 
 export function MeasurePanel({score,target,busy,onEdit}:EditorProps) {
   const {bar,master}=describeSelection(score,target),reference=score.tracks[0].staves[0].bars[target.bar].voices[0];
-  const read=()=>({numerator:master.timeSignatureNumerator,denominator:master.timeSignatureDenominator,pickup:master.isAnacrusis,freeTime:master.isFreeTime,repeatStart:master.isRepeatStart,repeatCount:master.repeatCount,endings:Array.from({length:8},(_,i)=>i+1).filter(n=>master.alternateEndings&(1<<(n-1))),section:master.section?.text??'',tempos:master.tempoAutomations.map(a=>({beat:Math.max(0,reference.beats.findIndex(b=>Math.abs(b.playbackStart-a.ratioPosition*master.calculateDuration(false))<1)),bpm:a.value,linear:a.isLinear}))});
+  const read=()=>readMeasureSettings(score,target.bar);
   const [values,setValues]=useState(read),[key,setKey]=useState(Number(bar.keySignature)),[mode,setMode]=useState(Number(bar.keySignatureType)),[clef,setClef]=useState(Number(bar.clef));
   useEffect(()=>{setValues(read());setKey(bar.keySignature);setMode(bar.keySignatureType);setClef(bar.clef);},[score,bar,master]);
   const tempo=(index:number,patch:Partial<TempoPoint>)=>setValues({...values,tempos:values.tempos.map((p,i)=>i===index?{...p,...patch}:p)});

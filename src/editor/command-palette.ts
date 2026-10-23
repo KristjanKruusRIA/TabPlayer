@@ -1,19 +1,22 @@
 import type { model } from '@coderline/alphatab';
 import type { EditCommand } from '../edit-types';
 import type { BeatTarget } from '../project';
+import { readExpression } from './expressions';
 
 /** What a palette command does: an undoable edit, a selection move, or an application command. */
 export type PaletteAction={kind:'edit';command:EditCommand}|{kind:'select';target:BeatTarget}|{kind:'app';name:'undo'|'redo'|'play'|'new'|'open'|'importAscii'|'save'|'saveAs'|'export'|'help'|'about'};
 export interface PaletteContext {score:model.Score;target:BeatTarget;string:number;canUndo:boolean;canRedo:boolean}
 /** A command matching the typed text, with either a ready action or the reason it cannot run. */
-export interface PaletteMatch {id:string;title:string;hint:string;action?:PaletteAction;error?:string}
+export interface PaletteMatch {id:string;title:string;hint:string;keys?:string;action?:PaletteAction;error?:string}
 
 type Result={action:PaletteAction}|{error:string};
-interface Command {id:string;title:string;words:string;hint:string;
+interface Command {id:string;title:string;words:string;hint:string;keys?:string;
   /** Builds the action from the typed argument, which is empty when none was typed. */
   run:(argument:string,context:PaletteContext)=>Result}
 
 const durations=[1,2,4,8,16,32,64];
+/** The modifier the app's shortcuts use on this platform. */
+const mod=typeof navigator!=='undefined'&&/Mac|iPhone|iPad/.test(navigator.platform)?'Cmd':'Ctrl';
 const integer=(text:string,min:number,max:number)=>/^\d+$/.test(text)&&Number(text)>=min&&Number(text)<=max?Number(text):null;
 const beatAt=(context:PaletteContext)=>{const {track,staff,bar,voice,beat}=context.target,value=context.score.tracks[track]?.staves[staff]?.bars[bar]?.voices[voice]?.beats[beat];return value&&!value.isEmpty?value:null;};
 const edit=(command:EditCommand):Result=>({action:{kind:'edit',command}});
@@ -56,20 +59,24 @@ const commands:Command[]=[
   {id:'rest',title:'Make rest',words:'make set rest silence',hint:'',run:(_,context)=>needsBeat(context,()=>edit({type:'setRest',target:context.target}))},
   {id:'appendMeasure',title:'Append measure',words:'append add measure bar',hint:'',run:()=>edit({type:'appendMeasure'})},
   {id:'removeMeasure',title:'Remove measure',words:'remove delete measure bar',hint:'',run:(_,{score,target})=>score.masterBars.length>1?edit({type:'removeMeasure',bar:target.bar}):{error:'A score needs at least one measure.'}},
-  {id:'undo',title:'Undo',words:'undo',hint:'',run:(_,{canUndo})=>canUndo?app('undo'):{error:'Nothing to undo.'}},
-  {id:'redo',title:'Redo',words:'redo',hint:'',run:(_,{canRedo})=>canRedo?app('redo'):{error:'Nothing to redo.'}},
-  {id:'play',title:'Play or pause',words:'play pause stop playback',hint:'',run:()=>app('play')},
-  {id:'new',title:'New score',words:'new score file',hint:'',run:()=>app('new')},
-  {id:'open',title:'Open score',words:'open score file',hint:'',run:()=>app('open')},
+  {id:'undo',keys:`${mod}+Z`,title:'Undo',words:'undo',hint:'',run:(_,{canUndo})=>canUndo?app('undo'):{error:'Nothing to undo.'}},
+  {id:'redo',keys:`${mod}+Shift+Z`,title:'Redo',words:'redo',hint:'',run:(_,{canRedo})=>canRedo?app('redo'):{error:'Nothing to redo.'}},
+  {id:'play',keys:`Space`,title:'Play or pause',words:'play pause stop playback',hint:'',run:()=>app('play')},
+  {id:'new',keys:`${mod}+N`,title:'New score',words:'new score file',hint:'',run:()=>app('new')},
+  {id:'open',keys:`${mod}+O`,title:'Open score',words:'open score file',hint:'',run:()=>app('open')},
   {id:'importAscii',title:'Import ASCII tab',words:'import ascii text tab tablature file',hint:'',run:()=>app('importAscii')},
-  {id:'save',title:'Save',words:'save file',hint:'',run:()=>app('save')},
-  {id:'saveAs',title:'Save As',words:'save as file',hint:'',run:()=>app('saveAs')},
-  {id:'help',title:'Help topics',words:'help manual guide topics',hint:'',run:()=>app('help')},
+  {id:'save',keys:`${mod}+S`,title:'Save',words:'save file',hint:'',run:()=>app('save')},
+  {id:'saveAs',keys:`${mod}+Shift+S`,title:'Save As',words:'save as file',hint:'',run:()=>app('saveAs')},
+  {id:'help',keys:`F1`,title:'Help topics',words:'help manual guide topics',hint:'',run:()=>app('help')},
   {id:'about',title:'About and updates',words:'about version updates check',hint:'',run:()=>app('about')},
   {id:'export',title:'Export score',words:'export score file pdf midi audio',hint:'',run:()=>app('export')},
 ];
 
-/** Matches typed text against command words by prefix; one trailing number or fraction is the command's argument. */
+/**
+ * Matches typed text against command words by prefix; one trailing number or fraction is the command's argument.
+ * Text that reads as an expression, such as ff, 3/4 or Am7, comes first, except after commands whose title holds every
+ * typed word, so p still plays and f still sets a fret.
+ */
 export function searchCommands(query:string,context:PaletteContext):PaletteMatch[] {
   const tokens=query.trim().toLowerCase().replace(/\s*\/\s*/g,'/').split(/\s+/).filter(Boolean),argumentIndex=tokens.findIndex(token=>/^-?[\d./]+$/.test(token));
   const words=argumentIndex<0?tokens:tokens.slice(0,argumentIndex),argument=argumentIndex<0?'':tokens.slice(argumentIndex).join(' ');
@@ -80,8 +87,11 @@ export function searchCommands(query:string,context:PaletteContext):PaletteMatch
     // Separate numbers are refused rather than merged, so "measure 1 2" never means measure 12.
     const result:Result=argument.includes(' ')?{error:'Type a single value after the command.'}:command.run(argument,context);
     const titleHits=words.filter(word=>titleWords.some(candidate=>candidate.startsWith(word))).length;
-    return [{order,titleHits,match:{id:command.id,title:command.title,hint:command.hint,...('action' in result?{action:result.action}:{error:result.error})}}];
+    return [{order,titleHits,match:{id:command.id,title:command.title,hint:command.hint,...(command.keys?{keys:command.keys}:{}),...('action' in result?{action:result.action}:{error:result.error})}}];
   });
   // Commands whose title holds the typed words come before those matched only by an alias.
-  return ranked.sort((a,b)=>b.titleHits-a.titleHits||a.order-b.order).map(entry=>entry.match);
+  const sorted=ranked.sort((a,b)=>b.titleHits-a.titleHits||a.order-b.order),expression=readExpression(query,context);
+  if(!expression)return sorted.map(entry=>entry.match);
+  const lead=words.length?sorted.filter(entry=>entry.titleHits===words.length).length:0;
+  return [...sorted.slice(0,lead).map(entry=>entry.match),expression,...sorted.slice(lead).map(entry=>entry.match)];
 }

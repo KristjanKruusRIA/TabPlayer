@@ -23,8 +23,10 @@ export function applyNotationEdit(score:model.Score,command:EditCommand,editInde
       const tempos=command.tempos.map(point=>{if(!integer(point.beat,0,reference.beats.length-1)||point.beat<=previous||!Number.isFinite(point.bpm)||point.bpm<=0||typeof point.linear!=='boolean')throw new Error('Use ordered beat positions and positive tempo values.');previous=point.beat;
         const start=reference.beats.slice(0,point.beat).reduce((sum,b)=>sum+rhythmTicks(b,measureTicks),0);return model.Automation.buildTempoAutomation(point.linear,start/measureTicks,point.bpm,2);
       });
-      master.timeSignatureNumerator=command.numerator;master.timeSignatureDenominator=command.denominator;master.timeSignatureCommon=false;master.isAnacrusis=command.pickup;master.isFreeTime=command.freeTime;master.isRepeatStart=command.repeatStart;master.repeatCount=command.repeatCount;master.alternateEndings=command.endings.reduce((bits,n)=>bits|(1<<(n-1)),0);master.tempoAutomations=tempos;
-      if(command.section){master.section=new model.Section();master.section.text=command.section;master.section.marker=command.section;}else master.section=null;setTimeSignatureIntent(master,false);return true;
+      // Common time (C) and a section's own marker survive when the time and section text are unchanged.
+      const common=master.timeSignatureCommon&&master.timeSignatureNumerator===command.numerator&&master.timeSignatureDenominator===command.denominator;
+      master.timeSignatureNumerator=command.numerator;master.timeSignatureDenominator=command.denominator;master.timeSignatureCommon=common;master.isAnacrusis=command.pickup;master.isFreeTime=command.freeTime;master.isRepeatStart=command.repeatStart;master.repeatCount=command.repeatCount;master.alternateEndings=command.endings.reduce((bits,n)=>bits|(1<<(n-1)),0);master.tempoAutomations=tempos;
+      if(!command.section)master.section=null;else if(master.section?.text!==command.section){master.section=new model.Section();master.section.text=command.section;master.section.marker=command.section;}setTimeSignatureIntent(master,common);return true;
     }
     case 'setBarNotation': {
       const staff=staffAt(score,command.track,command.staff),bar=staff.bars[command.bar];if(!integer(command.bar)||!bar||!integer(command.keySignature,-7,7))throw new Error('Invalid key signature.');enumValue(command.keyMode,model.KeySignatureType,'key mode');enumValue(command.clef,model.Clef,'clef');

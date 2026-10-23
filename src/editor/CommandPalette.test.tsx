@@ -41,11 +41,21 @@ it('shows why a command cannot run and does nothing on Enter, click or while bus
   fireEvent.keyDown(input,{key:'Enter'});fireEvent.click(screen.getByRole('option'));
   expect(onRun).not.toHaveBeenCalled();expect(onClose).not.toHaveBeenCalled();
   fireEvent.change(input,{target:{value:'qqq'}});
-  expect(screen.getByRole('status')).toHaveTextContent('No command matches. Try measure, fret, tempo or undo.');
+  expect(screen.getByRole('status')).toHaveTextContent('No command or expression matches. Try measure 12, fret 5, ff, 3/4, Eb major, [Chorus] or Am7.');
   expect(screen.queryByRole('listbox')).toBeNull();
   fireEvent.keyDown(input,{key:'Tab'});expect(input).toHaveFocus();
   fireEvent.keyDown(input,{key:'Escape'});expect(onClose).toHaveBeenCalled();
   cleanup();
   const busy=setup(true);fireEvent.change(busy.input,{target:{value:'append'}});fireEvent.keyDown(busy.input,{key:'Enter'});
   expect(busy.onRun).not.toHaveBeenCalled();expect(screen.getByRole('status')).toHaveTextContent('Wait for the current operation to finish.');
+});
+
+it('lists shortcuts beside commands and runs a typed expression first',()=>{
+  const {onRun,input}=setup();
+  fireEvent.change(input,{target:{value:'undo'}});
+  expect(screen.getByRole('option')).toHaveTextContent('Undo Ctrl+Z');
+  fireEvent.change(input,{target:{value:'ff'}});
+  expect(screen.getAllByRole('option')[0]).toHaveTextContent('Dynamic ff on the note');
+  fireEvent.keyDown(input,{key:'Enter'});
+  expect(onRun).toHaveBeenCalledWith({kind:'edit',command:{type:'setNoteTechniquesByIndex',target,noteIndex:0,patch:{dynamics:6}}});
 });

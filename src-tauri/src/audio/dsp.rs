@@ -48,6 +48,15 @@ block!(Wah {
     sensitivity: f64 = 0.5,
     mix: f64 = 1.0
 });
+block!(Octaver {
+    octave_down: f64 = 0.5,
+    two_octaves_down: f64 = 0.0,
+    direct: f64 = 1.0
+});
+block!(Pitch {
+    semitones: f64 = 12.0,
+    mix: f64 = 1.0
+});
 block!(Flanger {
     rate_hz: f64 = 0.25,
     depth_ms: f64 = 2.0,
@@ -103,6 +112,10 @@ pub struct FxSettings {
     pub tremolo: Tremolo,
     #[serde(default, skip_serializing_if = "untouched")]
     pub wah: Wah,
+    #[serde(default, skip_serializing_if = "untouched")]
+    pub octaver: Octaver,
+    #[serde(default, skip_serializing_if = "untouched")]
+    pub pitch: Pitch,
 }
 fn untouched<T: Default + PartialEq>(value: &T) -> bool {
     *value == T::default()
@@ -126,6 +139,75 @@ fn wah_target(wah: &Wah, envelope: f64) -> f64 {
     } else {
         wah.position
     }
+}
+/// One pitch shifter's tap state: the shared phase, each tap's alignment offset and its last phase.
+#[derive(Clone, Copy)]
+struct Shifter {
+    phase: f64,
+    offsets: [f64; 2],
+    last: [f64; 2],
+}
+impl Default for Shifter {
+    fn default() -> Self {
+        Self {
+            phase: 0.0,
+            offsets: [0.0; 2],
+            last: [0.0, 0.5],
+        }
+    }
+}
+/// The shifter's window, alignment search and match lengths in seconds. The search spans a period of 40 Hz,
+/// a bass guitar's low E.
+const SHIFT_WINDOW: f64 = 0.04;
+const SHIFT_SEARCH: f64 = 0.025;
+const SHIFT_MATCH: f64 = 0.004;
+/// The alignment search first compares every `rate / 12 kHz` frames, so its cost does not grow with the rate.
+const SHIFT_SEARCH_RATE: f64 = 12_000.0;
+/// A polyphonic pitch shifter: two taps sweep through the delay line half a window apart, each faded in and
+/// out with a Hann window, so their sum reads the input at `ratio` times its speed with steady level. When a
+/// tap restarts its grain, silent at that moment, it starts where its waveform best continues the other tap's,
+/// so grains join in phase instead of smearing a steady tone into sidebands.
+fn shift(line: &DelayLine, state: &mut Shifter, ratio: f64, window: f64, rate: f64) -> [f32; 2] {
+    let mut out = [0.0f32; 2];
+    let phases = [state.phase, (state.phase + 0.5).fract()];
+    for tap in 0..2 {
+        let p = phases[tap];
+        if (p - state.last[tap]).abs() > 0.5 {
+            let other = 1 - tap;
+            let anchor = 2.0 + phases[other] * window + state.offsets[other];
+            state.offsets[tap] = best_match(line, anchor.round() as usize, (2.0 + p * window).round() as usize, rate) as f64;
+        }
+        state.last[tap] = p;
+        let weight = (std::f64::consts::PI * p).sin().powi(2) as f32;
+        let x = line.read(2.0 + p * window + state.offsets[tap]);
+        out = std::array::from_fn(|c| out[c] + x[c] * weight);
+    }
+    // Reading at `ratio` times real time means the delay grows by 1 - ratio frames a frame.
+    state.phase = (state.phase + (1.0 - ratio) / window).rem_euclid(1.0);
+    out
+}
+/// The extra delay, up to the search length, at which the line's recent waveform best matches that at `anchor`.
+/// A coarse pass compares every `stride` frames; a fine pass then checks the frames around the best one.
+fn best_match(line: &DelayLine, anchor: usize, start: usize, rate: f64) -> usize {
+    let stride = (rate / SHIFT_SEARCH_RATE).round().max(1.0) as usize;
+    let (search, length) = ((rate * SHIFT_SEARCH) as usize, (rate * SHIFT_MATCH) as usize);
+    let score = |offset: usize| {
+        let (mut dot, mut energy) = (0.0, 1e-12);
+        for j in (0..length).step_by(stride) {
+            let b = line.mono(start + offset + j);
+            dot += line.mono(anchor + j) * b;
+            energy += b * b;
+        }
+        dot / energy.sqrt()
+    };
+    let pick = |offsets: &mut dyn Iterator<Item = usize>| {
+        offsets.fold((0, f64::MIN), |best, offset| {
+            let value = score(offset);
+            if value > best.1 { (offset, value) } else { best }
+        }).0
+    };
+    let coarse = pick(&mut (0..=search).step_by(stride));
+    pick(&mut (coarse.saturating_sub(stride - 1)..=(coarse + stride - 1).min(search)))
 }
 /// Zeroes vanishing feedback values so silence does not leave slow denormal arithmetic running.
 fn flush(value: f64) -> f64 {
@@ -182,6 +264,11 @@ impl FxSettings {
             ("wah resonance", self.wah.resonance, 0.0, 1.0),
             ("wah sensitivity", self.wah.sensitivity, 0.0, 1.0),
             ("wah mix", self.wah.mix, 0.0, 1.0),
+            ("octaver octave down", self.octaver.octave_down, 0.0, 1.0),
+            ("octaver two octaves down", self.octaver.two_octaves_down, 0.0, 1.0),
+            ("octaver direct", self.octaver.direct, 0.0, 1.0),
+            ("pitch semitones", self.pitch.semitones, -24.0, 24.0),
+            ("pitch mix", self.pitch.mix, 0.0, 1.0),
         ] {
             if !value.is_finite() || value < low || value > high {
                 return Err(format!("Invalid {name}: expected {low}..{high}."));
@@ -343,6 +430,14 @@ impl DelayLine {
             self.frames[i][c] * (1.0 - f) + self.frames[(i + 1) % self.frames.len()][c] * f
         })
     }
+    /// The sum of both channels `offset` whole frames ago.
+    fn mono(&self, offset: usize) -> f64 {
+        let len = self.frames.len();
+        let back = offset.clamp(1, len - 1);
+        let index = if self.cursor >= back { self.cursor - back } else { self.cursor + len - back };
+        let frame = self.frames[index];
+        (frame[0] + frame[1]) as f64
+    }
     fn write(&mut self, x: [f32; 2]) {
         self.frames[self.cursor] = x;
         self.cursor = (self.cursor + 1) % self.frames.len();
@@ -386,6 +481,13 @@ pub struct TrackDsp {
     wah_position: f64,
     /// Per-frame smoothing for the envelope's attack and release and the pedal glide.
     wah_coefficients: [f64; 3],
+    /// Shifter input history and tap phases: the octaver's one-octave and two-octave shifters share a line.
+    octaver: DelayLine,
+    octaver_phase: [Shifter; 2],
+    pitch: DelayLine,
+    pitch_phase: Shifter,
+    /// The shifters' window in frames.
+    shift_window: f64,
     delay: DelayLine,
     reverb: [DelayLine; 4],
     reverb_damp: [[f32; 2]; 4],
@@ -438,6 +540,12 @@ impl TrackDsp {
             wah_envelope: 0.0,
             wah_position: wah_start,
             wah_coefficients: [0.002, 0.2, 0.015].map(|seconds: f64| 1.0 - (-1.0 / (rate * seconds)).exp()),
+            // A tap reads up to the window plus its alignment, and alignment matches a further stretch behind that.
+            octaver: DelayLine::new((rate * (SHIFT_WINDOW + 2.0 * SHIFT_SEARCH + SHIFT_MATCH)) as usize + 8),
+            octaver_phase: [Shifter::default(); 2],
+            pitch: DelayLine::new((rate * (SHIFT_WINDOW + 2.0 * SHIFT_SEARCH + SHIFT_MATCH)) as usize + 8),
+            pitch_phase: Shifter::default(),
+            shift_window: (rate * SHIFT_WINDOW).floor(),
             delay: DelayLine::new((rate * max_delay_seconds).ceil() as usize + 2),
             reverb: std::array::from_fn(|i| {
                 DelayLine::new((rate * [0.0297, 0.0371, 0.0411, 0.0437][i]) as usize + 23 * i)
@@ -469,6 +577,8 @@ impl TrackDsp {
             old.settings.flanger.enabled,
             old.settings.tremolo.enabled,
             old.settings.wah.enabled,
+            old.settings.octaver.enabled,
+            old.settings.pitch.enabled,
         ];
         std::mem::swap(&mut self.previous, &mut old.settings);
         macro_rules! move_state {($($name:ident),*)=>{$(std::mem::swap(&mut self.$name,&mut old.$name);)*}}
@@ -510,6 +620,12 @@ impl TrackDsp {
         }
         if running[12] {
             move_state!(wah, wah_envelope, wah_position);
+        }
+        if running[13] {
+            move_state!(octaver, octaver_phase);
+        }
+        if running[14] {
+            move_state!(pitch, pitch_phase);
         }
         self.ramp_left = self.ramp_frames;
     }
@@ -607,6 +723,34 @@ impl TrackDsp {
                 std::array::from_fn(|c| x[c] * (1.0 - mix) + wet[c] * mix),
                 p.wah.enabled,
                 f.wah.enabled,
+            );
+        }
+        if f.octaver.enabled || p.octaver.enabled && t < 1.0 {
+            self.octaver.write(x);
+            let one = shift(&self.octaver, &mut self.octaver_phase[0], 0.5, self.shift_window, self.rate);
+            let two = shift(&self.octaver, &mut self.octaver_phase[1], 0.25, self.shift_window, self.rate);
+            let levels = [
+                lerp(p.octaver.direct, f.octaver.direct) as f32,
+                lerp(p.octaver.octave_down, f.octaver.octave_down) as f32,
+                lerp(p.octaver.two_octaves_down, f.octaver.two_octaves_down) as f32,
+            ];
+            x = blend(
+                x,
+                std::array::from_fn(|c| x[c] * levels[0] + one[c] * levels[1] + two[c] * levels[2]),
+                p.octaver.enabled,
+                f.octaver.enabled,
+            );
+        }
+        if f.pitch.enabled || p.pitch.enabled && t < 1.0 {
+            self.pitch.write(x);
+            let ratio = 2f64.powf(lerp(p.pitch.semitones, f.pitch.semitones) / 12.0);
+            let wet = shift(&self.pitch, &mut self.pitch_phase, ratio, self.shift_window, self.rate);
+            let mix = lerp(p.pitch.mix, f.pitch.mix) as f32;
+            x = blend(
+                x,
+                std::array::from_fn(|c| x[c] * (1.0 - mix) + wet[c] * mix),
+                p.pitch.enabled,
+                f.pitch.enabled,
             );
         }
         if f.amp.enabled || p.amp.enabled && t < 1.0 {
@@ -898,6 +1042,10 @@ impl TrackDsp {
         self.wah = [[0.0; 2]; 2];
         self.wah_envelope = 0.0;
         self.wah_position = wah_target(&self.settings.wah, 0.0);
+        self.octaver.reset();
+        self.octaver_phase = [Shifter::default(); 2];
+        self.pitch.reset();
+        self.pitch_phase = Shifter::default();
     }
 }
 

@@ -23,7 +23,7 @@ it('fills the wah into sounds saved before it and refuses unknown modes',()=>{
 
 it('places the wah before the amp with its pedal, mode and level controls',()=>{
   const onEdit=vi.fn();const {container,rerender}=render(<SoundPanel trackId="base/0" sound={soundPreset('gm')} onEdit={onEdit}/>);
-  expect([...container.querySelectorAll('.sound-block-name')].map(node=>node.textContent).slice(0,4)).toEqual(['Gate','Compressor','Wah','Amp']);
+  expect([...container.querySelectorAll('.sound-block-name')].map(node=>node.textContent).slice(0,6)).toEqual(['Gate','Compressor','Wah','Octaver','Pitch shift','Amp']);
   const last=()=>onEdit.mock.calls.at(-1)?.[0].sound.effects.wah;
   fireEvent.click(screen.getByLabelText('Enable wah'));expect(last().enabled).toBe(true);
   // Sensitivity only applies to auto mode, and the pedal position only to manual mode.

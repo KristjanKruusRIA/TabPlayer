@@ -22,6 +22,7 @@ export const defaultEffects = (): FxSettings => ({
   vibrato:{enabled:false,rateHz:5,depthCents:20},phaser:{enabled:false,rateHz:.5,depth:.7,feedback:.3,stages:4,mix:.5},
   flanger:{enabled:false,rateHz:.25,depthMs:2,feedback:.5,mix:.5},tremolo:{enabled:false,rateHz:5,depth:.5,shape:'sine'},
   wah:{enabled:false,mode:'manual',position:.5,resonance:.5,sensitivity:.5,mix:1},
+  octaver:{enabled:false,octaveDown:.5,twoOctavesDown:0,direct:1},pitch:{enabled:false,semitones:12,mix:1},
 });
 /** Adds the effect blocks a sound saved before them lacks, switched off at their defaults. */
 export const completeSound = (sound: TrackSound): TrackSound => ({...sound,effects:{...defaultEffects(),...sound.effects}});
@@ -66,6 +67,8 @@ export function applySettingsEdit(settings: DocumentSettings, edit: SettingsEdit
       {
         const sound=completeSound(edit.sound);
         for(const block of Object.values(sound.effects)) for(const value of Object.values(block)) if(typeof value==='number' && !Number.isFinite(value)) throw new Error('Invalid effect parameter.');
+        const {wah,octaver,pitch}=sound.effects,unit=(...values:number[])=>values.every(value=>value>=0&&value<=1);
+        if(!unit(wah.position,wah.resonance,wah.sensitivity,wah.mix,octaver.octaveDown,octaver.twoOctavesDown,octaver.direct,pitch.mix) || pitch.semitones< -24 || pitch.semitones>24) throw new Error('Invalid effect parameter.');
         if(![2,4,6,8].includes(sound.effects.phaser.stages) || !['sine','square'].includes(sound.effects.tremolo.shape) || !['manual','auto'].includes(sound.effects.wah.mode)) throw new Error('Invalid effect parameter.');
         settings.sounds[edit.trackId]=structuredClone(sound); break;
       }

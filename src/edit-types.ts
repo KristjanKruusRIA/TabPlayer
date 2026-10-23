@@ -43,6 +43,10 @@ export interface FxSettings {
   reverb: {enabled:boolean;room:number;damping:number;mix:number};
 }
 export interface TrackSound { voiceId: string|null; presetId: 'clean'|'crunch'|'lead'|'bass'|'gm'; effects: FxSettings }
+  vibrato: {enabled:boolean;rateHz:number;depthCents:number};
+  phaser: {enabled:boolean;rateHz:number;depth:number;feedback:number;stages:2|4|6|8;mix:number};
+  flanger: {enabled:boolean;rateHz:number;depthMs:number;feedback:number;mix:number};
+  tremolo: {enabled:boolean;rateHz:number;depth:number;shape:'sine'|'square'};
 export interface SyncAnchor { bar: number; occurrence: number; ratio: number; audioMs: number }
 export interface ReferenceSyncBounds { entryAudioMs: number; exitAudioMs: number }
 export type BackingFilter = 'none'|'bassEnhance'|'bassAttenuation'|'mediumEnhance'|'mediumAttenuation'|'highEnhance'|'highAttenuation';

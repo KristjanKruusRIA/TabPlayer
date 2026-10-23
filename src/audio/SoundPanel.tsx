@@ -1,5 +1,5 @@
 import { useEffect, useState, useSyncExternalStore } from 'react';
-import { defaultEffects } from '../document-settings';
+import { completeSound, defaultEffects } from '../document-settings';
 import type { EditCommand, FxSettings, TrackSound } from '../edit-types';
 import type { NativePlaybackController } from './NativePlaybackController';
 import type { AudioDeviceInfo } from './bridge';
@@ -15,19 +15,24 @@ export function soundPreset(presetId:TrackSound['presetId'],voiceId:string|null=
 }
 type NumericControl={key:string;label:string;min:number;max:number;step:number};
 const noSubscribe=()=>()=>{},noState=()=>null;
-const blockNames:Record<keyof FxSettings,string>={gate:'Gate',compressor:'Compressor',amp:'Amp',cabinet:'Cabinet',eq:'EQ',chorus:'Chorus',delay:'Delay',reverb:'Reverb'};
+const blockNames:Record<keyof FxSettings,string>={gate:'Gate',compressor:'Compressor',amp:'Amp',cabinet:'Cabinet',eq:'EQ',vibrato:'Vibrato',phaser:'Phaser',flanger:'Flanger',chorus:'Chorus',tremolo:'Tremolo',delay:'Delay',reverb:'Reverb'};
 const parameters:Record<keyof FxSettings,NumericControl[]>={
   gate:[{key:'thresholdDb',label:'Threshold (dB)',min:-96,max:0,step:1},{key:'releaseMs',label:'Release (ms)',min:1,max:1000,step:1}],
   compressor:[{key:'thresholdDb',label:'Threshold (dB)',min:-60,max:0,step:1},{key:'ratio',label:'Ratio',min:1,max:20,step:.1},{key:'attackMs',label:'Attack (ms)',min:.1,max:200,step:.1},{key:'releaseMs',label:'Release (ms)',min:1,max:2000,step:1},{key:'makeupDb',label:'Makeup (dB)',min:0,max:24,step:.1}],
   amp:[{key:'drive',label:'Drive',min:0,max:1,step:.01},{key:'gainDb',label:'Gain (dB)',min:-24,max:24,step:.1}],cabinet:[],
   eq:[{key:'lowDb',label:'Low (dB)',min:-24,max:24,step:.1},{key:'midDb',label:'Mid (dB)',min:-24,max:24,step:.1},{key:'highDb',label:'High (dB)',min:-24,max:24,step:.1},{key:'midHz',label:'Mid frequency (Hz)',min:200,max:5000,step:10}],
+  // Listed in the native processing order.
+  vibrato:[{key:'rateHz',label:'Rate (Hz)',min:1,max:14,step:.1},{key:'depthCents',label:'Depth (cents)',min:0,max:100,step:1}],
+  phaser:[{key:'rateHz',label:'Rate (Hz)',min:.05,max:5,step:.05},{key:'depth',label:'Depth',min:0,max:1,step:.01},{key:'feedback',label:'Feedback',min:0,max:.9,step:.01},{key:'mix',label:'Mix',min:0,max:1,step:.01}],
+  flanger:[{key:'rateHz',label:'Rate (Hz)',min:.05,max:5,step:.05},{key:'depthMs',label:'Depth (ms)',min:0,max:10,step:.1},{key:'feedback',label:'Feedback',min:-.9,max:.9,step:.01},{key:'mix',label:'Mix',min:0,max:1,step:.01}],
   chorus:[{key:'rateHz',label:'Rate (Hz)',min:.1,max:8,step:.1},{key:'depthMs',label:'Depth (ms)',min:0,max:20,step:.1},{key:'mix',label:'Mix',min:0,max:1,step:.01}],
+  tremolo:[{key:'rateHz',label:'Rate (Hz)',min:.1,max:20,step:.1},{key:'depth',label:'Depth',min:0,max:1,step:.01}],
   delay:[{key:'feedback',label:'Feedback',min:0,max:.9,step:.01},{key:'mix',label:'Mix',min:0,max:1,step:.01}],
   reverb:[{key:'room',label:'Room',min:0,max:1,step:.01},{key:'damping',label:'Damping',min:0,max:1,step:.01},{key:'mix',label:'Mix',min:0,max:1,step:.01}],
 };
 export function SoundPanel({trackId,sound,onEdit,playback,busy=false}:{trackId:string;sound?:TrackSound;onEdit:(edit:EditCommand)=>void|Promise<void>;playback?:NativePlaybackController|null;busy?:boolean}) {
   const playbackState=useSyncExternalStore(playback?.subscribe??noSubscribe,playback?.getState??noState);
-  const current=sound??soundPreset('gm');const [devices,setDevices]=useState<AudioDeviceInfo[]>([]);const [error,setError]=useState<string|null>(null);
+  const current=completeSound(sound??soundPreset('gm'));const [devices,setDevices]=useState<AudioDeviceInfo[]>([]);const [error,setError]=useState<string|null>(null);
   useEffect(()=>{let alive=true;if(playback)void playback.devices().then(items=>{if(alive)setDevices(items);}).catch(e=>{if(alive)setError(String(e));});return()=>{alive=false;};},[playback]);
   const save=(next:TrackSound)=>{void Promise.resolve(onEdit({type:'setTrackSound',trackId,sound:next})).catch(e=>setError(String(e)));};
   const fx=(block:keyof FxSettings,key:string,value:unknown)=>{const next=structuredClone(current);Object.assign(next.effects[block],{[key]:value});save(next);};
@@ -40,6 +45,8 @@ export function SoundPanel({trackId,sound,onEdit,playback,busy=false}:{trackId:s
       <label className="check"><input aria-label={`Enable ${block}`} type="checkbox" checked={current.effects[block].enabled} onChange={e=>fx(block,'enabled',e.target.checked)}/>Enabled</label>
       {parameters[block].map(p=><label key={p.key}>{p.label}<input aria-label={`${block} ${p.label}`} type="number" min={p.min} max={p.max} step={p.step} value={Number((current.effects[block] as unknown as Record<string,unknown>)[p.key])} onChange={e=>{const value=Number(e.target.value);if(Number.isFinite(value)&&value>=p.min&&value<=p.max)fx(block,p.key,value);}}/></label>)}
       {block==='amp'&&<label>Amp model<select value={current.effects.amp.model} onChange={e=>fx('amp','model',e.target.value)}>{['clean','crunch','lead','bass'].map(model=><option key={model}>{model}</option>)}</select></label>}
+      {block==='phaser'&&<label>Phaser stages<select value={current.effects.phaser.stages} onChange={e=>fx('phaser','stages',Number(e.target.value))}>{[2,4,6,8].map(value=><option key={value} value={value}>{value}</option>)}</select></label>}
+      {block==='tremolo'&&<label>Tremolo shape<select value={current.effects.tremolo.shape} onChange={e=>fx('tremolo','shape',e.target.value)}><option value="sine">Sine</option><option value="square">Square</option></select></label>}
       {block==='cabinet'&&<label>Cabinet model<select value={current.effects.cabinet.model} onChange={e=>fx('cabinet','model',e.target.value)}>{['open','closed','bass'].map(model=><option key={model}>{model}</option>)}</select></label>}
       {block==='delay'&&<><label>Delay quarter notes<select value={current.effects.delay.quarterNotes} onChange={e=>fx('delay','quarterNotes',Number(e.target.value))}>{[.125,.25,.5,1,2,4].map(value=><option key={value} value={value}>{value}</option>)}</select></label><p className="muted">Delay times are limited to 16 seconds.</p></>}
     </fieldset></details>)}</div>

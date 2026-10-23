@@ -3,7 +3,7 @@ import type { BeatTarget, EditCommand, Project, ProjectInput } from './project';
 import { projectCommands } from './project';
 import { isSettingsEdit } from './edit-types';
 import type { BackingSettings, ChannelMix, DocumentSettings } from './edit-types';
-import { defaultDocumentSettings, defaultMix, applySettingsEdit, copyTrackSettings } from './document-settings';
+import { defaultDocumentSettings, defaultMix, applySettingsEdit, copyTrackSettings, completeSound } from './document-settings';
 import { getLyricsSource, setLyricsSource } from './editor/lyrics-source';
 import { copyHarmonyChord } from './harmony/chord-source';
 import { applyAdvancedEdit } from './editor/advanced';
@@ -328,7 +328,7 @@ export function replayDocumentSettings(value:ProjectInput,current:BuiltDocument)
   // refer to the measure layout at that point, before later deletions.
   for(const edit of projectCommands(project)) switch(edit.type) {
     case 'setTrackMix': next.mixes[edit.trackId]=structuredClone(edit.mix);break;
-    case 'setTrackSound': next.sounds[edit.trackId]=structuredClone(edit.sound);break;
+    case 'setTrackSound': next.sounds[edit.trackId]=completeSound(structuredClone(edit.sound));break;
     case 'setBacking': next.backing=structuredClone(edit.backing);break;
     case 'setPrintLayout': next.print=structuredClone(edit.layout);next.page=null;break;
     case 'setEngraving':next.engraving=structuredClone(edit.engraving);break;

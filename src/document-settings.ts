@@ -1,11 +1,11 @@
 import type { model } from '@coderline/alphatab';
-import type { DocumentSettings, FxSettings, SettingsEdit, ChannelMix, PrintLayout, BackingSettings } from './edit-types';
+import type { DocumentSettings, FxSettings, SettingsEdit, TrackSound, ChannelMix, PrintLayout, BackingSettings } from './edit-types';
 import {defaultEngraving,validateEngravingTracks} from './engraving/projection';
 import {validatePageLayout} from './engraving/page';
 
 /** A duplicated track starts with its source's sound, mix and engraving profile; later changes are separate. */
 export function copyTrackSettings(settings:DocumentSettings,source:string,copy:string):void {
-  if(settings.sounds[source])settings.sounds[copy]=structuredClone(settings.sounds[source]);
+  if(settings.sounds[source])settings.sounds[copy]=completeSound(structuredClone(settings.sounds[source]));
   if(settings.mixes[source])settings.mixes[copy]=structuredClone(settings.mixes[source]);
   const profile=settings.engraving.profiles.find(entry=>entry.trackId===source);
   if(profile)settings.engraving={...settings.engraving,profiles:[...settings.engraving.profiles,{...profile,trackId:copy}]};
@@ -19,7 +19,11 @@ export const defaultEffects = (): FxSettings => ({
   amp:{enabled:false,model:'clean',drive:.1,gainDb:0},cabinet:{enabled:false,model:'open'},
   eq:{enabled:false,lowDb:0,midDb:0,highDb:0,midHz:1000},chorus:{enabled:false,rateHz:1,depthMs:5,mix:.15},
   delay:{enabled:false,quarterNotes:1,feedback:.25,mix:.15},reverb:{enabled:false,room:.5,damping:.5,mix:.12},
+  vibrato:{enabled:false,rateHz:5,depthCents:20},phaser:{enabled:false,rateHz:.5,depth:.7,feedback:.3,stages:4,mix:.5},
+  flanger:{enabled:false,rateHz:.25,depthMs:2,feedback:.5,mix:.5},tremolo:{enabled:false,rateHz:5,depth:.5,shape:'sine'},
 });
+/** Adds the effect blocks a sound saved before them lacks, switched off at their defaults. */
+export const completeSound = (sound: TrackSound): TrackSound => ({...sound,effects:{...defaultEffects(),...sound.effects}});
 export const defaultPrintLayout = (): PrintLayout => ({paper:'A4',orientation:'portrait',marginMm:15,scale:1,profile:'ScoreTab'});
 export const defaultDocumentSettings = (): DocumentSettings => ({sounds:{},mixes:{},backing:null,print:defaultPrintLayout(),engraving:defaultEngraving(),page:null});
 
@@ -58,8 +62,12 @@ export function applySettingsEdit(settings: DocumentSettings, edit: SettingsEdit
     case 'setTrackSound':
       if (!trackIds.includes(edit.trackId)) throw new Error('Select an existing track.');
       if (!['gm','clean','crunch','lead','bass'].includes(edit.sound.presetId)) throw new Error('Invalid sound preset.');
-      for(const block of Object.values(edit.sound.effects)) for(const value of Object.values(block)) if(typeof value==='number' && !Number.isFinite(value)) throw new Error('Invalid effect parameter.');
-      settings.sounds[edit.trackId]=structuredClone(edit.sound); break;
+      {
+        const sound=completeSound(edit.sound);
+        for(const block of Object.values(sound.effects)) for(const value of Object.values(block)) if(typeof value==='number' && !Number.isFinite(value)) throw new Error('Invalid effect parameter.');
+        if(![2,4,6,8].includes(sound.effects.phaser.stages) || !['sine','square'].includes(sound.effects.tremolo.shape)) throw new Error('Invalid effect parameter.');
+        settings.sounds[edit.trackId]=structuredClone(sound); break;
+      }
     case 'setBacking': {
       const backing=edit.backing;
       if(backing) {

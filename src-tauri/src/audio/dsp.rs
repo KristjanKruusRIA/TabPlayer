@@ -41,6 +41,28 @@ block!(Chorus {
     depth_ms: f64 = 5.0,
     mix: f64 = 0.15
 });
+block!(Flanger {
+    rate_hz: f64 = 0.25,
+    depth_ms: f64 = 2.0,
+    feedback: f64 = 0.5,
+    mix: f64 = 0.5
+});
+block!(Phaser {
+    rate_hz: f64 = 0.5,
+    depth: f64 = 0.7,
+    feedback: f64 = 0.3,
+    stages: u32 = 4,
+    mix: f64 = 0.5
+});
+block!(Tremolo {
+    rate_hz: f64 = 5.0,
+    depth: f64 = 0.5,
+    shape: String = "sine".into()
+});
+block!(Vibrato {
+    rate_hz: f64 = 5.0,
+    depth_cents: f64 = 20.0
+});
 block!(Delay {
     quarter_notes: f64 = 1.0,
     feedback: f64 = 0.25,
@@ -63,6 +85,31 @@ pub struct FxSettings {
     pub chorus: Chorus,
     pub delay: Delay,
     pub reverb: Reverb,
+    // Later blocks are omitted while untouched, so sounds saved before them load and serialize unchanged.
+    #[serde(default, skip_serializing_if = "untouched")]
+    pub vibrato: Vibrato,
+    #[serde(default, skip_serializing_if = "untouched")]
+    pub phaser: Phaser,
+    #[serde(default, skip_serializing_if = "untouched")]
+    pub flanger: Flanger,
+    #[serde(default, skip_serializing_if = "untouched")]
+    pub tremolo: Tremolo,
+}
+fn untouched<T: Default + PartialEq>(value: &T) -> bool {
+    *value == T::default()
+}
+/// The vibrato delay swing in frames: a delay swinging by ±a seconds at ω rad/s bends pitch by 1 ± aω.
+fn vibrato_swing(vibrato: &Vibrato, rate: f64) -> f64 {
+    let cents = vibrato.depth_cents;
+    (2f64.powf(cents / 1200.0) - 2f64.powf(-cents / 1200.0)) / 2.0 / (std::f64::consts::TAU * vibrato.rate_hz) * rate
+}
+/// Moves a delay swing toward its target by at most 0.03 frames a frame, a pitch bend under half a semitone.
+fn slew(current: f64, target: f64) -> f64 {
+    current + (target - current).clamp(-0.03, 0.03)
+}
+/// Zeroes vanishing feedback values so silence does not leave slow denormal arithmetic running.
+fn flush(value: f64) -> f64 {
+    if value.abs() < 1e-20 { 0.0 } else { value }
 }
 
 impl FxSettings {
@@ -99,6 +146,18 @@ impl FxSettings {
             ("reverb room", self.reverb.room, 0.0, 1.0),
             ("reverb damping", self.reverb.damping, 0.0, 1.0),
             ("reverb mix", self.reverb.mix, 0.0, 1.0),
+            ("flanger rate", self.flanger.rate_hz, 0.05, 5.0),
+            ("flanger depth", self.flanger.depth_ms, 0.0, 10.0),
+            ("flanger feedback", self.flanger.feedback, -0.9, 0.9),
+            ("flanger mix", self.flanger.mix, 0.0, 1.0),
+            ("phaser rate", self.phaser.rate_hz, 0.05, 5.0),
+            ("phaser depth", self.phaser.depth, 0.0, 1.0),
+            ("phaser feedback", self.phaser.feedback, 0.0, 0.9),
+            ("phaser mix", self.phaser.mix, 0.0, 1.0),
+            ("tremolo rate", self.tremolo.rate_hz, 0.1, 20.0),
+            ("tremolo depth", self.tremolo.depth, 0.0, 1.0),
+            ("vibrato rate", self.vibrato.rate_hz, 1.0, 14.0),
+            ("vibrato depth", self.vibrato.depth_cents, 0.0, 100.0),
         ] {
             if !value.is_finite() || value < low || value > high {
                 return Err(format!("Invalid {name}: expected {low}..{high}."));
@@ -106,6 +165,12 @@ impl FxSettings {
         }
         if ![0.125, 0.25, 0.5, 1.0, 2.0, 4.0].contains(&self.delay.quarter_notes) {
             return Err("Invalid delay note duration.".into());
+        }
+        if ![2, 4, 6, 8].contains(&self.phaser.stages) {
+            return Err("Invalid phaser stages: expected 2, 4, 6 or 8.".into());
+        }
+        if !["sine", "square"].contains(&self.tremolo.shape.as_str()) {
+            return Err("Unknown tremolo shape.".into());
         }
         if !["clean", "crunch", "lead", "bass"].contains(&self.amp.model.as_str()) {
             return Err("Unknown amp model.".into());
@@ -276,6 +341,18 @@ pub struct TrackDsp {
     eq: [Biquad; 3],
     chorus: DelayLine,
     phase: f64,
+    vibrato: DelayLine,
+    vibrato_phase: f64,
+    /// The vibrato and flanger delay swings in frames, slewed so live edits never scrub the audio.
+    vibrato_swing: f64,
+    flanger_swing: f64,
+    /// First-order all-pass state (previous input, previous output) per channel and stage.
+    phaser: [[[f64; 2]; 8]; 2],
+    phaser_last: [f64; 2],
+    phaser_phase: f64,
+    flanger: DelayLine,
+    flanger_phase: f64,
+    tremolo_phase: f64,
     delay: DelayLine,
     reverb: [DelayLine; 4],
     reverb_damp: [[f32; 2]; 4],
@@ -296,6 +373,7 @@ impl TrackDsp {
             return Err("Invalid DSP sample rate or delay capacity.".into());
         }
         let rate = sample_rate as f64;
+        let (previous_vibrato, previous_flanger_depth) = (settings.vibrato.clone(), settings.flanger.depth_ms);
         Ok(Self {
             previous: settings.clone(),
             settings,
@@ -311,6 +389,17 @@ impl TrackDsp {
             eq: [Biquad::default(); 3],
             chorus: DelayLine::new((rate * 0.05) as usize + 2),
             phase: 0.0,
+            // The widest vibrato (100 cents at 1 Hz) swings the delay by about 18.4 ms.
+            vibrato: DelayLine::new((rate * 0.02) as usize + 8),
+            vibrato_phase: 0.0,
+            vibrato_swing: vibrato_swing(&previous_vibrato, rate),
+            flanger_swing: rate * previous_flanger_depth * 0.001,
+            phaser: [[[0.0; 2]; 8]; 2],
+            phaser_last: [0.0; 2],
+            phaser_phase: 0.0,
+            flanger: DelayLine::new((rate * 0.0105) as usize + 4),
+            flanger_phase: 0.0,
+            tremolo_phase: 0.0,
             delay: DelayLine::new((rate * max_delay_seconds).ceil() as usize + 2),
             reverb: std::array::from_fn(|i| {
                 DelayLine::new((rate * [0.0297, 0.0371, 0.0411, 0.0437][i]) as usize + 23 * i)
@@ -337,6 +426,10 @@ impl TrackDsp {
             old.settings.chorus.enabled,
             old.settings.delay.enabled,
             old.settings.reverb.enabled,
+            old.settings.vibrato.enabled,
+            old.settings.phaser.enabled,
+            old.settings.flanger.enabled,
+            old.settings.tremolo.enabled,
         ];
         std::mem::swap(&mut self.previous, &mut old.settings);
         macro_rules! move_state {($($name:ident),*)=>{$(std::mem::swap(&mut self.$name,&mut old.$name);)*}}
@@ -363,6 +456,18 @@ impl TrackDsp {
         }
         if running[7] {
             move_state!(reverb, reverb_damp);
+        }
+        if running[8] {
+            move_state!(vibrato, vibrato_phase, vibrato_swing);
+        }
+        if running[9] {
+            move_state!(phaser, phaser_last, phaser_phase);
+        }
+        if running[10] {
+            move_state!(flanger, flanger_phase, flanger_swing);
+        }
+        if running[11] {
+            move_state!(tremolo_phase);
         }
         self.ramp_left = self.ramp_frames;
     }
@@ -523,6 +628,74 @@ impl TrackDsp {
             }
             x = blend(x, wet, p.eq.enabled, f.eq.enabled);
         }
+        let tau = std::f64::consts::TAU;
+        if f.vibrato.enabled || p.vibrato.enabled && t < 1.0 {
+            let omega = tau * lerp(p.vibrato.rate_hz, f.vibrato.rate_hz);
+            self.vibrato_swing = slew(self.vibrato_swing, vibrato_swing(&f.vibrato, self.rate));
+            let offset = 2.0 + self.vibrato_swing * (1.0 - self.vibrato_phase.cos());
+            let wet = self.vibrato.read(offset);
+            self.vibrato.write(x);
+            self.vibrato_phase = (self.vibrato_phase + omega / self.rate) % tau;
+            x = blend(x, wet, p.vibrato.enabled, f.vibrato.enabled);
+        }
+        if f.phaser.enabled || p.phaser.enabled && t < 1.0 {
+            let depth = lerp(p.phaser.depth, f.phaser.depth);
+            let feedback = lerp(p.phaser.feedback, f.phaser.feedback);
+            let mix = lerp(p.phaser.mix, f.phaser.mix) as f32;
+            // All eight stages always run, so a new stage count crossfades between fresh taps instead of clicking.
+            let taps = [p.phaser.stages as usize - 1, f.phaser.stages as usize - 1];
+            let mut wet = [0.0f32; 2];
+            for c in 0..2 {
+                // The channels sweep a quarter cycle apart; the notches move between 200 Hz and 6.4 kHz.
+                let sweep = (1.0 - (self.phaser_phase + c as f64 * tau / 4.0).cos()) / 2.0;
+                let hz = (200.0 * 2f64.powf(5.0 * depth * sweep)).min(self.rate * 0.45);
+                let k = (std::f64::consts::PI * hz / self.rate).tan();
+                let a = (k - 1.0) / (k + 1.0);
+                let mut y = x[c] as f64 + feedback * self.phaser_last[c];
+                let mut tapped = [0.0; 2];
+                for (index, stage) in self.phaser[c].iter_mut().enumerate() {
+                    let out = flush(a * y + stage[0] - a * stage[1]);
+                    stage[0] = y;
+                    stage[1] = out;
+                    y = out;
+                    for (which, tap) in taps.iter().enumerate() {
+                        if index == *tap {
+                            tapped[which] = out;
+                        }
+                    }
+                }
+                let out = lerp(tapped[0], tapped[1]);
+                self.phaser_last[c] = flush(out);
+                // Feedback raises the in-phase gain to 1/(1-feedback); scaling keeps the wet level at the input's.
+                wet[c] = (out * (1.0 - feedback)) as f32;
+            }
+            self.phaser_phase = (self.phaser_phase + tau * lerp(p.phaser.rate_hz, f.phaser.rate_hz) / self.rate) % tau;
+            x = blend(
+                x,
+                std::array::from_fn(|c| x[c] * (1.0 - mix) + wet[c] * mix),
+                p.phaser.enabled,
+                f.phaser.enabled,
+            );
+        }
+        if f.flanger.enabled || p.flanger.enabled && t < 1.0 {
+            // The delay sweeps from 0.1 ms up to 0.1 ms plus the depth.
+            self.flanger_swing = slew(self.flanger_swing, self.rate * f.flanger.depth_ms * 0.001);
+            let offset = self.rate * 0.0001 + self.flanger_swing * (1.0 - self.flanger_phase.cos()) / 2.0;
+            let echo = self.flanger.read(offset);
+            let feedback = lerp(p.flanger.feedback, f.flanger.feedback) as f32;
+            self.flanger
+                .write(std::array::from_fn(|c| flush((x[c] + echo[c] * feedback) as f64) as f32));
+            // The comb peaks at 1/(1-|feedback|); scaling keeps the wet level at the input's.
+            let wet: [f32; 2] = echo.map(|v| v * (1.0 - feedback.abs()));
+            self.flanger_phase = (self.flanger_phase + tau * lerp(p.flanger.rate_hz, f.flanger.rate_hz) / self.rate) % tau;
+            let mix = lerp(p.flanger.mix, f.flanger.mix) as f32;
+            x = blend(
+                x,
+                std::array::from_fn(|c| x[c] * (1.0 - mix) + wet[c] * mix),
+                p.flanger.enabled,
+                f.flanger.enabled,
+            );
+        }
         if f.chorus.enabled || p.chorus.enabled && t < 1.0 {
             let depth = self.rate * lerp(p.chorus.depth_ms, f.chorus.depth_ms) * 0.001;
             let wet: [f32; 2] = std::array::from_fn(|c| {
@@ -541,6 +714,23 @@ impl TrackDsp {
                 p.chorus.enabled,
                 f.chorus.enabled,
             );
+        }
+        if f.tremolo.enabled || p.tremolo.enabled && t < 1.0 {
+            let wave = |shape: &str, phase: f64| {
+                if shape == "square" {
+                    // A steep but smooth square avoids clicks at its edges.
+                    (1.0 - (8.0 * phase.cos()).tanh() / 8f64.tanh()) / 2.0
+                } else {
+                    (1.0 - phase.cos()) / 2.0
+                }
+            };
+            let dip = lerp(
+                wave(&p.tremolo.shape, self.tremolo_phase),
+                wave(&f.tremolo.shape, self.tremolo_phase),
+            );
+            let gain = (1.0 - lerp(p.tremolo.depth, f.tremolo.depth) * dip) as f32;
+            self.tremolo_phase = (self.tremolo_phase + tau * lerp(p.tremolo.rate_hz, f.tremolo.rate_hz) / self.rate) % tau;
+            x = blend(x, x.map(|v| v * gain), p.tremolo.enabled, f.tremolo.enabled);
         }
         if f.delay.enabled || p.delay.enabled && t < 1.0 {
             let bpm = if bpm.is_finite() && bpm > 0.0 {
@@ -615,6 +805,16 @@ impl TrackDsp {
         }
         self.reverb_damp = [[0.0; 2]; 4];
         self.phase = 0.0;
+        self.vibrato.reset();
+        self.vibrato_phase = 0.0;
+        self.vibrato_swing = vibrato_swing(&self.settings.vibrato, self.rate);
+        self.flanger_swing = self.rate * self.settings.flanger.depth_ms * 0.001;
+        self.phaser = [[[0.0; 2]; 8]; 2];
+        self.phaser_last = [0.0; 2];
+        self.phaser_phase = 0.0;
+        self.flanger.reset();
+        self.flanger_phase = 0.0;
+        self.tremolo_phase = 0.0;
     }
 }
 

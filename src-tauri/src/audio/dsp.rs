@@ -41,6 +41,13 @@ block!(Chorus {
     depth_ms: f64 = 5.0,
     mix: f64 = 0.15
 });
+block!(Wah {
+    mode: String = "manual".into(),
+    position: f64 = 0.5,
+    resonance: f64 = 0.5,
+    sensitivity: f64 = 0.5,
+    mix: f64 = 1.0
+});
 block!(Flanger {
     rate_hz: f64 = 0.25,
     depth_ms: f64 = 2.0,
@@ -94,6 +101,8 @@ pub struct FxSettings {
     pub flanger: Flanger,
     #[serde(default, skip_serializing_if = "untouched")]
     pub tremolo: Tremolo,
+    #[serde(default, skip_serializing_if = "untouched")]
+    pub wah: Wah,
 }
 fn untouched<T: Default + PartialEq>(value: &T) -> bool {
     *value == T::default()
@@ -106,6 +115,17 @@ fn vibrato_swing(vibrato: &Vibrato, rate: f64) -> f64 {
 /// Moves a delay swing toward its target by at most 0.03 frames a frame, a pitch bend under half a semitone.
 fn slew(current: f64, target: f64) -> f64 {
     current + (target - current).clamp(-0.03, 0.03)
+}
+/// The wah's pedal position, from heel (0) to toe (1): the manual setting, or the playing level in auto mode.
+fn wah_target(wah: &Wah, envelope: f64) -> f64 {
+    if wah.mode == "auto" {
+        // A loud pickup peaks near -20 dBFS here. The heel sits at -30 dBFS at sensitivity 0 and at -70 dBFS at
+        // sensitivity 1, and 36 dB louder reaches the toe, so a loud note opens most of the way at the default.
+        let floor = -30.0 - 40.0 * wah.sensitivity;
+        ((20.0 * envelope.max(1e-9).log10() - floor) / 36.0).clamp(0.0, 1.0)
+    } else {
+        wah.position
+    }
 }
 /// Zeroes vanishing feedback values so silence does not leave slow denormal arithmetic running.
 fn flush(value: f64) -> f64 {
@@ -158,6 +178,10 @@ impl FxSettings {
             ("tremolo depth", self.tremolo.depth, 0.0, 1.0),
             ("vibrato rate", self.vibrato.rate_hz, 1.0, 14.0),
             ("vibrato depth", self.vibrato.depth_cents, 0.0, 100.0),
+            ("wah position", self.wah.position, 0.0, 1.0),
+            ("wah resonance", self.wah.resonance, 0.0, 1.0),
+            ("wah sensitivity", self.wah.sensitivity, 0.0, 1.0),
+            ("wah mix", self.wah.mix, 0.0, 1.0),
         ] {
             if !value.is_finite() || value < low || value > high {
                 return Err(format!("Invalid {name}: expected {low}..{high}."));
@@ -168,6 +192,9 @@ impl FxSettings {
         }
         if ![2, 4, 6, 8].contains(&self.phaser.stages) {
             return Err("Invalid phaser stages: expected 2, 4, 6 or 8.".into());
+        }
+        if !["manual", "auto"].contains(&self.wah.mode.as_str()) {
+            return Err("Unknown wah mode.".into());
         }
         if !["sine", "square"].contains(&self.tremolo.shape.as_str()) {
             return Err("Unknown tremolo shape.".into());
@@ -353,6 +380,12 @@ pub struct TrackDsp {
     flanger: DelayLine,
     flanger_phase: f64,
     tremolo_phase: f64,
+    /// State-variable filter integrator state per channel, the playing-level envelope and the gliding pedal position.
+    wah: [[f64; 2]; 2],
+    wah_envelope: f64,
+    wah_position: f64,
+    /// Per-frame smoothing for the envelope's attack and release and the pedal glide.
+    wah_coefficients: [f64; 3],
     delay: DelayLine,
     reverb: [DelayLine; 4],
     reverb_damp: [[f32; 2]; 4],
@@ -374,6 +407,7 @@ impl TrackDsp {
         }
         let rate = sample_rate as f64;
         let (previous_vibrato, previous_flanger_depth) = (settings.vibrato.clone(), settings.flanger.depth_ms);
+        let wah_start = wah_target(&settings.wah, 0.0);
         Ok(Self {
             previous: settings.clone(),
             settings,
@@ -400,6 +434,10 @@ impl TrackDsp {
             flanger: DelayLine::new((rate * 0.0105) as usize + 4),
             flanger_phase: 0.0,
             tremolo_phase: 0.0,
+            wah: [[0.0; 2]; 2],
+            wah_envelope: 0.0,
+            wah_position: wah_start,
+            wah_coefficients: [0.002, 0.2, 0.015].map(|seconds: f64| 1.0 - (-1.0 / (rate * seconds)).exp()),
             delay: DelayLine::new((rate * max_delay_seconds).ceil() as usize + 2),
             reverb: std::array::from_fn(|i| {
                 DelayLine::new((rate * [0.0297, 0.0371, 0.0411, 0.0437][i]) as usize + 23 * i)
@@ -430,6 +468,7 @@ impl TrackDsp {
             old.settings.phaser.enabled,
             old.settings.flanger.enabled,
             old.settings.tremolo.enabled,
+            old.settings.wah.enabled,
         ];
         std::mem::swap(&mut self.previous, &mut old.settings);
         macro_rules! move_state {($($name:ident),*)=>{$(std::mem::swap(&mut self.$name,&mut old.$name);)*}}
@@ -468,6 +507,9 @@ impl TrackDsp {
         }
         if running[11] {
             move_state!(tremolo_phase);
+        }
+        if running[12] {
+            move_state!(wah, wah_envelope, wah_position);
         }
         self.ramp_left = self.ramp_frames;
     }
@@ -527,6 +569,44 @@ impl TrackDsp {
                 x.map(|v| v * gain),
                 p.compressor.enabled,
                 f.compressor.enabled,
+            );
+        }
+        if f.wah.enabled && !p.wah.enabled && self.ramp_left == self.ramp_frames {
+            // Switching the wah on starts from rest, not from the level and pedal it had when it was switched off.
+            self.wah = [[0.0; 2]; 2];
+            self.wah_envelope = 0.0;
+            self.wah_position = wah_target(&f.wah, 0.0);
+        }
+        if f.wah.enabled || p.wah.enabled && t < 1.0 {
+            // The envelope follows the playing level with a 2 ms attack and a 200 ms release.
+            let level = x[0].abs().max(x[1].abs()) as f64;
+            let [attack, release, glide] = self.wah_coefficients;
+            let k = if level > self.wah_envelope { attack } else { release };
+            self.wah_envelope = flush(self.wah_envelope + (level - self.wah_envelope) * k);
+            let goal = lerp(wah_target(&p.wah, self.wah_envelope), wah_target(&f.wah, self.wah_envelope));
+            // The pedal glides with a 15 ms time constant, so edits and mode changes sweep instead of jumping.
+            self.wah_position += (goal - self.wah_position) * glide;
+            // A band-pass from 350 Hz at the heel to 2.2 kHz at the toe, passing its centre at unity.
+            let hz = 350.0 * (2_200.0f64 / 350.0).powf(self.wah_position);
+            let g = (std::f64::consts::PI * hz.min(self.rate * 0.45) / self.rate).tan();
+            let k = 1.0 / (2.0 + 8.0 * lerp(p.wah.resonance, f.wah.resonance));
+            let a1 = 1.0 / (1.0 + g * (g + k));
+            let a2 = g * a1;
+            let mix = lerp(p.wah.mix, f.wah.mix) as f32;
+            let wet: [f32; 2] = std::array::from_fn(|c| {
+                let [band, low] = &mut self.wah[c];
+                let v3 = x[c] as f64 - *low;
+                let v1 = a1 * *band + a2 * v3;
+                let v2 = *low + a2 * *band + g * a2 * v3;
+                *band = flush(2.0 * v1 - *band);
+                *low = flush(2.0 * v2 - *low);
+                (k * v1) as f32
+            });
+            x = blend(
+                x,
+                std::array::from_fn(|c| x[c] * (1.0 - mix) + wet[c] * mix),
+                p.wah.enabled,
+                f.wah.enabled,
             );
         }
         if f.amp.enabled || p.amp.enabled && t < 1.0 {
@@ -815,6 +895,9 @@ impl TrackDsp {
         self.flanger.reset();
         self.flanger_phase = 0.0;
         self.tremolo_phase = 0.0;
+        self.wah = [[0.0; 2]; 2];
+        self.wah_envelope = 0.0;
+        self.wah_position = wah_target(&self.settings.wah, 0.0);
     }
 }
 

@@ -45,6 +45,7 @@ export interface FxSettings {
   phaser: {enabled:boolean;rateHz:number;depth:number;feedback:number;stages:2|4|6|8;mix:number};
   flanger: {enabled:boolean;rateHz:number;depthMs:number;feedback:number;mix:number};
   tremolo: {enabled:boolean;rateHz:number;depth:number;shape:'sine'|'square'};
+  wah: {enabled:boolean;mode:'manual'|'auto';position:number;resonance:number;sensitivity:number;mix:number};
 }
 export interface TrackSound { voiceId: string|null; presetId: 'clean'|'crunch'|'lead'|'bass'|'gm'; effects: FxSettings }
 export interface SyncAnchor { bar: number; occurrence: number; ratio: number; audioMs: number }

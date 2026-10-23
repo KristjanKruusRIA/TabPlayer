@@ -85,11 +85,28 @@ block!(Vibrato {
     rate_hz: f64 = 5.0,
     depth_cents: f64 = 20.0
 });
-block!(Delay {
-    quarter_notes: f64 = 1.0,
-    feedback: f64 = 0.25,
-    mix: f64 = 0.15
-});
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Delay {
+    pub enabled: bool,
+    /// Digital, tape or analog. Sounds saved before the other models load as digital, which is not written.
+    #[serde(default = "digital_model", skip_serializing_if = "is_digital_model")]
+    pub model: String,
+    pub quarter_notes: f64,
+    pub feedback: f64,
+    pub mix: f64,
+}
+impl Default for Delay {
+    fn default() -> Self {
+        Self { enabled: false, model: digital_model(), quarter_notes: 1.0, feedback: 0.25, mix: 0.15 }
+    }
+}
+fn digital_model() -> String {
+    "digital".into()
+}
+fn is_digital_model(model: &String) -> bool {
+    model == "digital"
+}
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Reverb {
@@ -219,6 +236,34 @@ fn drive_shape(drive: &Drive, rate: f64) -> DriveShape {
         bias,
         tone: 1.0 - (-std::f64::consts::TAU * tone_hz.min(rate * 0.45) / rate).exp(),
         level: 10f64.powf(drive.level_db / 20.0),
+    }
+}
+const DELAY_MODELS: [&str; 3] = ["digital", "tape", "analog"];
+/// Echo durations in quarter notes: straight, dotted and triplet divisions.
+const DELAY_DIVISIONS: [f64; 10] = [0.125, 0.25, 1.0 / 3.0, 0.5, 2.0 / 3.0, 0.75, 1.0, 1.5, 2.0, 4.0];
+/// One delay setting resolved for the audio thread. Digital repeats are exact copies. Tape and analog repeats
+/// pass through a low-pass and a high-pass, round off in a soft clipper, and are read from a delay that wanders:
+/// tape's with slow wow and fast flutter, analog's with a gentle slow drift. Their filters act on every repeat, so
+/// each one is darker than the last.
+#[derive(Clone, Copy)]
+struct DelayShape {
+    colored: bool,
+    /// One-pole low-pass and high-pass coefficients.
+    low: f64,
+    high: f64,
+    /// The soft clipper's gain, which it divides out again so quiet repeats keep their level.
+    drive: f64,
+    /// The wow and flutter depths in frames, and their phase steps per frame.
+    depth: [f64; 2],
+    step: [f64; 2],
+}
+fn delay_shape(delay: &Delay, rate: f64) -> DelayShape {
+    let one_pole = |hz: f64| 1.0 - (-std::f64::consts::TAU * hz.min(rate * 0.45) / rate).exp();
+    let step = |hz: f64| std::f64::consts::TAU * hz / rate;
+    match delay.model.as_str() {
+        "tape" => DelayShape { colored: true, low: one_pole(4_500.0), high: one_pole(80.0), drive: 1.5, depth: [0.0012 * rate, 0.00008 * rate], step: [step(0.6), step(7.0)] },
+        "analog" => DelayShape { colored: true, low: one_pole(2_200.0), high: one_pole(60.0), drive: 1.2, depth: [0.00035 * rate, 0.0], step: [step(0.4), 0.0] },
+        _ => DelayShape { colored: false, low: 1.0, high: 0.0, drive: 1.0, depth: [0.0; 2], step: [0.0; 2] },
     }
 }
 /// A reverb model built on a four-line feedback delay network: a pre-delay, four allpass diffusers, four delay
@@ -649,7 +694,10 @@ impl FxSettings {
                 return Err(format!("Invalid {name}: expected {low}..{high}."));
             }
         }
-        if ![0.125, 0.25, 0.5, 1.0, 2.0, 4.0].contains(&self.delay.quarter_notes) {
+        if !DELAY_MODELS.contains(&self.delay.model.as_str()) {
+            return Err("Unknown delay model.".into());
+        }
+        if !DELAY_DIVISIONS.contains(&self.delay.quarter_notes) {
             return Err("Invalid delay note duration.".into());
         }
         if ![2, 4, 6, 8].contains(&self.phaser.stages) {
@@ -880,6 +928,11 @@ pub struct TrackDsp {
     drive_shapes: [DriveShape; 2],
     drive_coefficients: [f64; 3],
     delay: DelayLine,
+    /// Tape and analog delay state per channel: the repeats' low-pass and high-pass; the wow and flutter phases;
+    /// and the previous and current settings resolved.
+    delay_filters: [[f64; 2]; 2],
+    delay_phase: [f64; 2],
+    delay_shapes: [DelayShape; 2],
     reverb: [DelayLine; 4],
     reverb_damp: [[f32; 2]; 4],
     /// The hall, plate and spring, the previous and current settings resolved, and whether the room ran on the
@@ -908,6 +961,7 @@ impl TrackDsp {
         let wah_start = wah_target(&settings.wah, 0.0);
         let drive_start = drive_shape(&settings.drive, rate);
         let reverb_start = reverb_shape(&settings.reverb, rate);
+        let delay_start = delay_shape(&settings.delay, rate);
         Ok(Self {
             previous: settings.clone(),
             settings,
@@ -954,6 +1008,9 @@ impl TrackDsp {
             // the DC blocker settles what remains within about 16 ms at any rate.
             drive_coefficients: [1.0 - (-1.0 / (rate * 0.02)).exp(), 1.0 - (-1.0 / (rate * 0.05)).exp(), 1.0 - (-std::f64::consts::TAU * 10.0 / rate).exp()],
             delay: DelayLine::new((rate * max_delay_seconds).ceil() as usize + 2),
+            delay_filters: [[0.0; 2]; 2],
+            delay_phase: [0.0; 2],
+            delay_shapes: [delay_start; 2],
             reverb: std::array::from_fn(|i| {
                 DelayLine::new((rate * [0.0297, 0.0371, 0.0411, 0.0437][i]) as usize + 23 * i)
             }),
@@ -965,11 +1022,20 @@ impl TrackDsp {
             cached_cabinet: [f64::NAN; 2],
         })
     }
+    /// Tape and analog filters stand still while a digital delay plays, so a change from digital starts them silent
+    /// instead of from what they held before.
+    fn restart_delay_color(&mut self) {
+        if !self.delay_shapes[0].colored {
+            self.delay_filters = [[0.0; 2]; 2];
+        }
+    }
     pub fn set_settings(&mut self, settings: FxSettings) -> Result<(), String> {
         settings.validate()?;
         self.previous = std::mem::replace(&mut self.settings, settings);
         self.drive_shapes = [self.drive_shapes[1], drive_shape(&self.settings.drive, self.rate)];
         self.reverb_shapes = [self.reverb_shapes[1], reverb_shape(&self.settings.reverb, self.rate)];
+        self.delay_shapes = [self.delay_shapes[1], delay_shape(&self.settings.delay, self.rate)];
+        self.restart_delay_color();
         self.ramp_left = self.ramp_frames;
         Ok(())
     }
@@ -997,6 +1063,7 @@ impl TrackDsp {
         // The previous settings are the old configuration's current ones, resolved as it resolved them.
         self.drive_shapes[0] = old.drive_shapes[1];
         self.reverb_shapes[0] = old.reverb_shapes[1];
+        self.delay_shapes[0] = old.delay_shapes[1];
         macro_rules! move_state {($($name:ident),*)=>{$(std::mem::swap(&mut self.$name,&mut old.$name);)*}}
         if running[0] {
             move_state!(gate_envelope);
@@ -1017,7 +1084,8 @@ impl TrackDsp {
             move_state!(chorus, phase);
         }
         if running[6] {
-            move_state!(delay);
+            move_state!(delay, delay_filters, delay_phase);
+            self.restart_delay_color();
         }
         if running[7] {
             move_state!(reverb, reverb_damp, reverb_tanks, reverb_live);
@@ -1425,7 +1493,29 @@ impl TrackDsp {
             let offset = (self.rate * 60.0 / bpm
                 * lerp(p.delay.quarter_notes, f.delay.quarter_notes))
             .min((self.delay.frames.len() - 2) as f64);
-            let wet = self.delay.read(offset);
+            let shapes = self.delay_shapes;
+            // How much of the tape or analog sound plays: 0 for digital on both sides, so digital echoes stay
+            // exact, and crossfading during a change to or from digital.
+            let colored = lerp(if shapes[0].colored { 1.0 } else { 0.0 }, if shapes[1].colored { 1.0 } else { 0.0 });
+            let mut wet = self.delay.read(offset);
+            if colored > 0.0 {
+                // A digital side takes the other side's character, so only the amount crossfades.
+                let side = |s: usize| if shapes[s].colored { shapes[s] } else { shapes[1 - s] };
+                let (a, b) = (side(0), side(1));
+                let [low, high, drive] = [lerp(a.low, b.low), lerp(a.high, b.high), lerp(a.drive, b.drive)];
+                let wander = (0..2).map(|i| lerp(a.depth[i], b.depth[i]) * self.delay_phase[i].sin()).sum::<f64>();
+                for i in 0..2 {
+                    self.delay_phase[i] = (self.delay_phase[i] + lerp(a.step[i], b.step[i])) % std::f64::consts::TAU;
+                }
+                let moved = self.delay.read(offset + wander);
+                for c in 0..2 {
+                    let [lp, hp] = &mut self.delay_filters[c];
+                    *lp = flush(*lp + low * (moved[c] as f64 - *lp));
+                    *hp = flush(*hp + high * (*lp - *hp));
+                    let tone = (drive * (*lp - *hp)).tanh() / drive;
+                    wet[c] = (wet[c] as f64 + (tone - wet[c] as f64) * colored) as f32;
+                }
+            }
             let feedback = lerp(p.delay.feedback, f.delay.feedback) as f32;
             self.delay
                 .write(std::array::from_fn(|c| x[c] + wet[c] * feedback));
@@ -1511,6 +1601,8 @@ impl TrackDsp {
         }
         self.chorus.reset();
         self.delay.reset();
+        self.delay_filters = [[0.0; 2]; 2];
+        self.delay_phase = [0.0; 2];
         for line in &mut self.reverb {
             line.reset();
         }

@@ -39,7 +39,7 @@ export interface FxSettings {
   cabinet: {enabled:boolean;model:'open'|'closed'|'bass'};
   eq: {enabled:boolean;lowDb:number;midDb:number;highDb:number;midHz:number};
   chorus: {enabled:boolean;rateHz:number;depthMs:number;mix:number};
-  delay: {enabled:boolean;quarterNotes:number;feedback:number;mix:number};
+  delay: {enabled:boolean;model:'digital'|'tape'|'analog';quarterNotes:number;feedback:number;mix:number};
   reverb: {enabled:boolean;model:'room'|'hall'|'plate'|'spring';room:number;damping:number;mix:number};
   vibrato: {enabled:boolean;rateHz:number;depthCents:number};
   phaser: {enabled:boolean;rateHz:number;depth:number;feedback:number;stages:2|4|6|8;mix:number};

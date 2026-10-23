@@ -64,7 +64,7 @@ it('renames and deletes saved sounds after confirmation',()=>{
 });
 
 it('copies and pastes a whole sound and single pedals between tracks',()=>{
-  const lead=soundPreset('lead');lead.effects.delay={enabled:true,quarterNotes:.5,feedback:.6,mix:.4};
+  const lead=soundPreset('lead');lead.effects.delay={enabled:true,model:'tape',quarterNotes:.5,feedback:.6,mix:.4};
   const onEdit=vi.fn();const {rerender}=render(<SoundPanel trackId="base/0" sound={lead} onEdit={onEdit}/>);
   expect(screen.getByRole('button',{name:'Paste sound'})).toBeDisabled();
   expect(screen.getByRole('button',{name:'Paste pedal: Delay'})).toBeDisabled();

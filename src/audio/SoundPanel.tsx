@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { completeSound, defaultEffects } from '../document-settings';
+import { completeSound, defaultEffects, delayDivisions } from '../document-settings';
 import type { EditCommand, FxSettings, TrackSound } from '../edit-types';
 import type { NativePlaybackController } from './NativePlaybackController';
 import type { AudioDeviceInfo } from './bridge';
@@ -108,7 +108,7 @@ export function SoundPanel({trackId,sound,onEdit,playback,busy=false,shown=true}
       {block==='tremolo'&&<label>Tremolo shape<select aria-label="Tremolo shape" value={current.effects.tremolo.shape} onChange={e=>fx('tremolo','shape',e.target.value)}><option value="sine">Sine</option><option value="square">Square</option></select></label>}
       {block==='cabinet'&&<label>Cabinet model<select value={current.effects.cabinet.model} onChange={e=>fx('cabinet','model',e.target.value)}>{['open','closed','bass'].map(model=><option key={model}>{model}</option>)}</select></label>}
       <div className="sound-pedal-clipboard"><button aria-label={`Copy pedal: ${blockNames[block]}`} onClick={()=>{copyPedal(block,current.effects[block]);setStatus(`Copied the ${blockNames[block]} pedal.`);}}>Copy pedal</button><button aria-label={`Paste pedal: ${blockNames[block]}`} disabled={clipboard.pedal?.block!==block} onClick={pastePedal}>Paste pedal</button></div>
-      {block==='delay'&&<><label>Delay quarter notes<select value={current.effects.delay.quarterNotes} onChange={e=>fx('delay','quarterNotes',Number(e.target.value))}>{[.125,.25,.5,1,2,4].map(value=><option key={value} value={value}>{value}</option>)}</select></label><p className="muted">Delay times are limited to 16 seconds.</p></>}
+      {block==='delay'&&<><label>Delay model<select aria-label="Delay model" value={current.effects.delay.model} onChange={e=>fx('delay','model',e.target.value)}><option value="digital">Digital</option><option value="tape">Tape</option><option value="analog">Analog</option></select></label><label>Delay time<select aria-label="Delay time" value={current.effects.delay.quarterNotes} onChange={e=>fx('delay','quarterNotes',Number(e.target.value))}>{delayDivisions.map(([value,name])=><option key={value} value={value}>{name}</option>)}</select></label><p className="muted">Delay times are limited to 16 seconds.</p></>}
     </fieldset></details>)}</div>
     {playback&&<fieldset disabled={busy} className="sound-output"><label>Audio output<select value={playback.deviceId()??''} onChange={e=>playback.selectDevice(e.target.value||null)}><option value="">System default</option>{devices.map(device=><option key={device.id} value={device.id}>{device.name}</option>)}</select></label></fieldset>}
   {error&&<p role="alert">{error}</p>}{playbackState?.error&&playbackState.error!==error&&<p role="alert">{playbackState.error}</p>}</section>;

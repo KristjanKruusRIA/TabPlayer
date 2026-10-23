@@ -176,6 +176,9 @@ pub struct FxSettings {
     pub drive: Drive,
     #[serde(default, skip_serializing_if = "untouched")]
     pub microphone: Microphone,
+    /// Every block's name once, in the order the signal passes through them; empty for the default order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub order: Vec<String>,
 }
 fn untouched<T: Default + PartialEq>(value: &T) -> bool {
     *value == T::default()
@@ -268,6 +271,79 @@ fn drive_shape(drive: &Drive, rate: f64) -> DriveShape {
         bias,
         tone: 1.0 - (-std::f64::consts::TAU * tone_hz.min(rate * 0.45) / rate).exp(),
         level: 10f64.powf(drive.level_db / 20.0),
+    }
+}
+/// One block of the signal chain.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Stage {
+    Microphone,
+    Gate,
+    Compressor,
+    Wah,
+    Octaver,
+    Pitch,
+    Drive,
+    Amp,
+    Cabinet,
+    Eq,
+    Vibrato,
+    Phaser,
+    Flanger,
+    Chorus,
+    Tremolo,
+    Delay,
+    Reverb,
+}
+/// The blocks by name, in their default order.
+const STAGES: [(&str, Stage); 17] = [
+    ("microphone", Stage::Microphone),
+    ("gate", Stage::Gate),
+    ("compressor", Stage::Compressor),
+    ("wah", Stage::Wah),
+    ("octaver", Stage::Octaver),
+    ("pitch", Stage::Pitch),
+    ("drive", Stage::Drive),
+    ("amp", Stage::Amp),
+    ("cabinet", Stage::Cabinet),
+    ("eq", Stage::Eq),
+    ("vibrato", Stage::Vibrato),
+    ("phaser", Stage::Phaser),
+    ("flanger", Stage::Flanger),
+    ("chorus", Stage::Chorus),
+    ("tremolo", Stage::Tremolo),
+    ("delay", Stage::Delay),
+    ("reverb", Stage::Reverb),
+];
+/// The chain a validated order names, or the default chain for an empty one.
+fn chain_of(order: &[String]) -> [Stage; 17] {
+    std::array::from_fn(|i| {
+        order
+            .get(i)
+            .and_then(|name| STAGES.iter().find(|(known, _)| known == name))
+            .unwrap_or(&STAGES[i])
+            .1
+    })
+}
+/// Whether `fx` switches `stage` on.
+fn stage_on(fx: &FxSettings, stage: Stage) -> bool {
+    match stage {
+        Stage::Microphone => fx.microphone.enabled,
+        Stage::Gate => fx.gate.enabled,
+        Stage::Compressor => fx.compressor.enabled,
+        Stage::Wah => fx.wah.enabled,
+        Stage::Octaver => fx.octaver.enabled,
+        Stage::Pitch => fx.pitch.enabled,
+        Stage::Drive => fx.drive.enabled,
+        Stage::Amp => fx.amp.enabled,
+        Stage::Cabinet => fx.cabinet.enabled,
+        Stage::Eq => fx.eq.enabled,
+        Stage::Vibrato => fx.vibrato.enabled,
+        Stage::Phaser => fx.phaser.enabled,
+        Stage::Flanger => fx.flanger.enabled,
+        Stage::Chorus => fx.chorus.enabled,
+        Stage::Tremolo => fx.tremolo.enabled,
+        Stage::Delay => fx.delay.enabled,
+        Stage::Reverb => fx.reverb.enabled,
     }
 }
 /// Where the sound bank's microphone stands. Standard leaves the recording as it is.
@@ -891,6 +967,14 @@ impl FxSettings {
         if !REVERB_MODELS.contains(&self.reverb.model.as_str()) {
             return Err("Unknown reverb model.".into());
         }
+        if !self.order.is_empty()
+            && (self.order.len() != STAGES.len()
+                || STAGES
+                    .iter()
+                    .any(|(name, _)| self.order.iter().filter(|block| block == name).count() != 1))
+        {
+            return Err("Invalid effect order.".into());
+        }
         if !MICROPHONE_PLACEMENTS.contains(&self.microphone.placement.as_str()) {
             return Err("Unknown microphone placement.".into());
         }
@@ -1125,6 +1209,10 @@ pub struct TrackDsp {
     /// The microphone's previous and current settings resolved, each with its filters' state; the line of direct
     /// sound that a room's reflections repeat; and whether the block has been running.
     microphone_shapes: [MicrophoneShape; 2],
+    /// The chain playing, the chain the settings ask for, and the frames left of a reorder's fade out and back in.
+    chain: [Stage; 17],
+    chain_target: [Stage; 17],
+    reorder_left: u32,
     microphone_room: DelayLine,
     /// Frames since the line was cleared while sound played, so each reflection fades in once its delay has
     /// filled. A track starting from silence has nothing to fade from and starts full.
@@ -1162,6 +1250,7 @@ impl TrackDsp {
         let delay_start = delay_shape(&settings.delay, rate);
         let microphone_start = microphone_shape(&settings.microphone, rate);
         let microphone_on = settings.microphone.enabled;
+        let chain = chain_of(&settings.order);
         Ok(Self {
             previous: settings.clone(),
             settings,
@@ -1221,6 +1310,9 @@ impl TrackDsp {
             delay_phase: [0.0; 2],
             delay_shapes: [delay_start; 2],
             microphone_shapes: [microphone_start; 2],
+            chain,
+            chain_target: chain,
+            reorder_left: 0,
             microphone_room: DelayLine::new((rate * 0.03).ceil() as usize + 2),
             microphone_age: rate,
             microphone_live: microphone_on,
@@ -1234,6 +1326,32 @@ impl TrackDsp {
             cached_eq: [f64::NAN; 4],
             cached_cabinet: [f64::NAN; 2],
         })
+    }
+    /// Aims the chain at the settings' order. A different order fades out from where the chain is now; going back
+    /// to the playing order while it fades out fades it back in from the same level.
+    ///
+    /// `settled` says no settings change was still crossfading, so the blocks playing are just those the previous and
+    /// current settings switch on. A move among the others changes nothing heard, so it applies at once.
+    fn retarget_chain(&mut self, settled: bool) {
+        self.chain_target = chain_of(&self.settings.order);
+        let on =
+            |stage: &&Stage| stage_on(&self.settings, **stage) || stage_on(&self.previous, **stage);
+        if settled
+            && self.reorder_left == 0
+            && self
+                .chain
+                .iter()
+                .filter(on)
+                .eq(self.chain_target.iter().filter(on))
+        {
+            self.chain = self.chain_target;
+            return;
+        }
+        let wanted = self.chain_target != self.chain;
+        let fading_out = self.reorder_left > self.ramp_frames;
+        if wanted != fading_out {
+            self.reorder_left = 2 * self.ramp_frames - self.reorder_left;
+        }
     }
     /// The current microphone settings resolved, with their filters carrying on from the given state, so a
     /// change crossfades two paths that start alike.
@@ -1271,6 +1389,7 @@ impl TrackDsp {
             self.microphone_shapes[1],
             self.microphone_continued(&self.microphone_shapes[1]),
         ];
+        self.retarget_chain(self.ramp_left == 0);
         self.ramp_left = self.ramp_frames;
         Ok(())
     }
@@ -1301,6 +1420,13 @@ impl TrackDsp {
         self.reverb_shapes[0] = old.reverb_shapes[1];
         self.delay_shapes[0] = old.delay_shapes[1];
         self.microphone_shapes[0] = old.microphone_shapes[1];
+        // The chain carries on as the old configuration played it, then moves to this one's order.
+        self.chain = old.chain;
+        // A configuration at another rate fades over another length; this one carries on from the same level.
+        self.reorder_left = ((old.reorder_left as u64 * self.ramp_frames as u64)
+            / old.ramp_frames as u64)
+            .min(2 * self.ramp_frames as u64) as u32;
+        self.retarget_chain(old.ramp_left == 0);
         macro_rules! move_state {($($name:ident),*)=>{$(std::mem::swap(&mut self.$name,&mut old.$name);)*}}
         if running[0] {
             move_state!(gate_envelope);
@@ -1380,635 +1506,716 @@ impl TrackDsp {
         };
         let f = &self.settings;
         let p = &self.previous;
-        if f.microphone.enabled || p.microphone.enabled && t < 1.0 {
-            // The sound bank's recording comes first. A block starting again begins from silence.
-            if !self.microphone_live {
-                for shape in &mut self.microphone_shapes {
-                    shape.filters.iter_mut().for_each(Biquad::reset);
-                }
-                self.microphone_room.reset();
-                self.microphone_age = 0.0;
-                self.microphone_live = true;
-            }
-            let ramp = t < 1.0;
-            let mut tone = |s: usize| {
-                self.microphone_shapes[s]
-                    .filters
-                    .iter_mut()
-                    .fold(x, |v, filter| filter.process(v))
-            };
-            let direct = [if ramp { tone(0) } else { [0.0; 2] }, tone(1)];
-            let shapes = self.microphone_shapes;
-            // The room's reflections repeat its direct sound. The line keeps the placements' direct sound, crossfaded
-            // as the paths are, while any placement plays, so a change to or from the room reaches each reflection as
-            // a 10 ms crossfade when its delay has passed instead of a step.
-            let room = shapes[1].room || ramp && shapes[0].room;
-            let mut reflections = [0.0f32; 2];
-            if room {
-                // A line cleared when the block started holds silence before its first frames, so each reflection
-                // fades in over 10 ms from when its delay has filled.
-                let (age, fade) = (self.microphone_age, self.rate * 0.01);
-                for c in 0..2 {
-                    reflections[c] = ROOM_REFLECTIONS[c]
-                        .iter()
-                        .map(|&(seconds, gain)| {
-                            let delay = seconds * self.rate;
-                            self.microphone_room.read(delay)[0]
-                                * (gain * ((age - delay) / fade).clamp(0.0, 1.0)) as f32
-                        })
-                        .sum();
-                }
-            }
-            self.microphone_age = (self.microphone_age + 1.0).min(self.rate);
-            let written: [f32; 2] = if ramp {
-                std::array::from_fn(|c| direct[0][c] + (direct[1][c] - direct[0][c]) * t as f32)
-            } else {
-                direct[1]
-            };
-            self.microphone_room
-                .write([(written[0] + written[1]) * 0.5; 2]);
-            let path = |s: usize| -> [f32; 2] {
-                if shapes[s].room {
-                    std::array::from_fn(|c| direct[s][c] * ROOM_DIRECT as f32 + reflections[c])
-                } else {
-                    direct[s]
-                }
-            };
-            let mut wet = if ramp {
-                let [a, b] = [path(0), path(1)];
-                std::array::from_fn(|c| a[c] + (b[c] - a[c]) * t as f32)
-            } else {
-                path(1)
-            };
-            let mono = lerp(
-                if shapes[0].mono { 1.0 } else { 0.0 },
-                if shapes[1].mono { 1.0 } else { 0.0 },
-            ) as f32;
-            if mono > 0.0 {
-                let centre = (wet[0] + wet[1]) * 0.5;
-                wet = if mono >= 1.0 {
-                    [centre; 2]
-                } else {
-                    wet.map(|v| v + (centre - v) * mono)
-                };
-            }
-            x = if p.microphone.enabled && f.microphone.enabled {
-                wet
-            } else {
-                blend(x, wet, p.microphone.enabled, f.microphone.enabled)
-            };
-        } else {
-            self.microphone_live = false;
-        }
-        if f.gate.enabled || p.gate.enabled && t < 1.0 {
-            let peak = x[0].abs().max(x[1].abs()) as f64;
-            let target = if peak > 10f64.powf(lerp(p.gate.threshold_db, f.gate.threshold_db) / 20.0)
-            {
-                1.0
-            } else {
-                0.0
-            };
-            let k = if target > self.gate_envelope {
-                0.1
-            } else {
-                (-1.0 / (self.rate * lerp(p.gate.release_ms, f.gate.release_ms) * 0.001)).exp()
-            };
-            self.gate_envelope = target + (self.gate_envelope - target) * k;
-            x = blend(
-                x,
-                x.map(|v| v * self.gate_envelope as f32),
-                p.gate.enabled,
-                f.gate.enabled,
-            );
-        }
-        if f.compressor.enabled || p.compressor.enabled && t < 1.0 {
-            let level = x[0].abs().max(x[1].abs()) as f64;
-            let time = if level > self.compressor_envelope {
-                lerp(p.compressor.attack_ms, f.compressor.attack_ms)
-            } else {
-                lerp(p.compressor.release_ms, f.compressor.release_ms)
-            };
-            let k = (-1.0 / (self.rate * time * 0.001)).exp();
-            self.compressor_envelope = level + (self.compressor_envelope - level) * k;
-            let db = 20.0 * self.compressor_envelope.max(1e-9).log10();
-            let above = (db - lerp(p.compressor.threshold_db, f.compressor.threshold_db)).max(0.0);
-            let gain = 10f64.powf(
-                (lerp(p.compressor.makeup_db, f.compressor.makeup_db)
-                    - above * (1.0 - 1.0 / lerp(p.compressor.ratio, f.compressor.ratio)))
-                    / 20.0,
-            ) as f32;
-            x = blend(
-                x,
-                x.map(|v| v * gain),
-                p.compressor.enabled,
-                f.compressor.enabled,
-            );
-        }
-        if f.wah.enabled && !p.wah.enabled && self.ramp_left == self.ramp_frames {
-            // Switching the wah on starts from rest, not from the level and pedal it had when it was switched off.
-            self.wah = [[0.0; 2]; 2];
-            self.wah_envelope = 0.0;
-            self.wah_position = wah_target(&f.wah, 0.0);
-        }
-        if f.wah.enabled || p.wah.enabled && t < 1.0 {
-            // The envelope follows the playing level with a 2 ms attack and a 200 ms release.
-            let level = x[0].abs().max(x[1].abs()) as f64;
-            let [attack, release, glide] = self.wah_coefficients;
-            let k = if level > self.wah_envelope {
-                attack
-            } else {
-                release
-            };
-            self.wah_envelope = flush(self.wah_envelope + (level - self.wah_envelope) * k);
-            let goal = lerp(
-                wah_target(&p.wah, self.wah_envelope),
-                wah_target(&f.wah, self.wah_envelope),
-            );
-            // The pedal glides with a 15 ms time constant, so edits and mode changes sweep instead of jumping.
-            self.wah_position += (goal - self.wah_position) * glide;
-            // A band-pass from 350 Hz at the heel to 2.2 kHz at the toe, passing its centre at unity.
-            let hz = 350.0 * (2_200.0f64 / 350.0).powf(self.wah_position);
-            let g = (std::f64::consts::PI * hz.min(self.rate * 0.45) / self.rate).tan();
-            let k = 1.0 / (2.0 + 8.0 * lerp(p.wah.resonance, f.wah.resonance));
-            let a1 = 1.0 / (1.0 + g * (g + k));
-            let a2 = g * a1;
-            let mix = lerp(p.wah.mix, f.wah.mix) as f32;
-            let wet: [f32; 2] = std::array::from_fn(|c| {
-                let [band, low] = &mut self.wah[c];
-                let v3 = x[c] as f64 - *low;
-                let v1 = a1 * *band + a2 * v3;
-                let v2 = *low + a2 * *band + g * a2 * v3;
-                *band = flush(2.0 * v1 - *band);
-                *low = flush(2.0 * v2 - *low);
-                (k * v1) as f32
-            });
-            x = blend(
-                x,
-                std::array::from_fn(|c| x[c] * (1.0 - mix) + wet[c] * mix),
-                p.wah.enabled,
-                f.wah.enabled,
-            );
-        }
-        if f.octaver.enabled || p.octaver.enabled && t < 1.0 {
-            self.octaver.write(x);
-            let one = shift(
-                &self.octaver,
-                &mut self.octaver_phase[0],
-                0.5,
-                self.shift_window,
-                self.rate,
-            );
-            let two = shift(
-                &self.octaver,
-                &mut self.octaver_phase[1],
-                0.25,
-                self.shift_window,
-                self.rate,
-            );
-            let levels = [
-                lerp(p.octaver.direct, f.octaver.direct) as f32,
-                lerp(p.octaver.octave_down, f.octaver.octave_down) as f32,
-                lerp(p.octaver.two_octaves_down, f.octaver.two_octaves_down) as f32,
-            ];
-            x = blend(
-                x,
-                std::array::from_fn(|c| x[c] * levels[0] + one[c] * levels[1] + two[c] * levels[2]),
-                p.octaver.enabled,
-                f.octaver.enabled,
-            );
-        }
-        if f.pitch.enabled || p.pitch.enabled && t < 1.0 {
-            self.pitch.write(x);
-            let ratio = 2f64.powf(lerp(p.pitch.semitones, f.pitch.semitones) / 12.0);
-            let wet = shift(
-                &self.pitch,
-                &mut self.pitch_phase,
-                ratio,
-                self.shift_window,
-                self.rate,
-            );
-            let mix = lerp(p.pitch.mix, f.pitch.mix) as f32;
-            x = blend(
-                x,
-                std::array::from_fn(|c| x[c] * (1.0 - mix) + wet[c] * mix),
-                p.pitch.enabled,
-                f.pitch.enabled,
-            );
-        }
-        if f.drive.enabled || p.drive.enabled && t < 1.0 {
-            // The playing level follows with a 20 ms attack and a 50 ms release, for the fuzz's offset.
-            let [attack, release, dc] = self.drive_coefficients;
-            let level = x[0].abs().max(x[1].abs()) as f64;
-            let k = if level > self.drive_envelope {
-                attack
-            } else {
-                release
-            };
-            self.drive_envelope = flush(self.drive_envelope + (level - self.drive_envelope) * k);
-            // While both sides of a ramp are on and clip differently, each clips with its own curve and gain and
-            // the two outputs crossfade; otherwise the side that is on clips alone.
-            let shapes = self.drive_shapes;
-            let both = t < 1.0
-                && p.drive.enabled
-                && f.drive.enabled
-                && (p.drive.model != f.drive.model || p.drive.drive != f.drive.drive);
-            let alone = if f.drive.enabled { 1 } else { 0 };
-            let filter = 1.0 - (-std::f64::consts::TAU * 0.22 / 4.0f64).exp();
-            let (tone, level) = (
-                lerp(shapes[0].tone, shapes[1].tone),
-                lerp(shapes[0].level, shapes[1].level),
-            );
-            let envelope = self.drive_envelope;
-            let wet = std::array::from_fn(|c| {
-                let v = x[c] as f64;
-                // Four times oversampled, as the amp is, so the clipping's upper harmonics do not fold back down.
-                let mut sum = 0.0;
-                for step in 1..=4 {
-                    let input = self.drive_previous_input[c]
-                        + (v - self.drive_previous_input[c]) * step as f64 / 4.0;
-                    let clip = |shape: DriveShape| {
-                        drive_curve(shape.hard, shape.gain * (input + shape.bias * envelope))
-                            * shape.normal
-                    };
-                    let mut sample = if both {
-                        lerp(clip(shapes[0]), clip(shapes[1]))
-                    } else {
-                        clip(shapes[alone])
-                    };
-                    for state in &mut self.drive_anti_alias[c] {
-                        *state = flush(*state + filter * (sample - *state));
-                        sample = *state;
-                    }
-                    sum += sample;
-                }
-                self.drive_previous_input[c] = v;
-                let clipped = sum / 4.0;
-                self.drive_dc[c] = flush(self.drive_dc[c] + dc * (clipped - self.drive_dc[c]));
-                let mut out = clipped - self.drive_dc[c];
-                for state in &mut self.drive_tone[c] {
-                    *state = flush(*state + tone * (out - *state));
-                    out = *state;
-                }
-                (out * level) as f32
-            });
-            x = blend(x, wet, p.drive.enabled, f.drive.enabled);
-        }
-        if f.amp.enabled || p.amp.enabled && t < 1.0 {
-            let drive = lerp(p.amp.drive, f.amp.drive);
-            let gain = 10f64.powf(lerp(p.amp.gain_db, f.amp.gain_db) / 20.0);
-            let model = |s: &str| match s {
-                // Reference peak .10 corresponds to the measured loud pickup RMS .0704.
-                // Normalization keeps this level steady while quieter notes gain sustain.
-                "crunch" => {
-                    let pre = 1.0 + 220.0 * drive.powf(1.2);
-                    (pre, 0.10 / (0.10 * pre).tanh(), 0.08 * drive, 1.0)
-                }
-                "lead" => {
-                    let pre = 1.0 + 600.0 * drive.powf(1.1);
-                    (pre, 0.11 / (0.11 * pre).tanh(), 0.04 * drive, 1.0)
-                }
-                "bass" => {
-                    let pre = 1.0 + drive * 3.0;
-                    (pre, 1.0 / pre.sqrt(), 0.02 * drive, 0.0)
-                }
-                _ => {
-                    let pre = 1.0 + drive;
-                    (pre, 1.0 / pre.sqrt(), 0.02 * drive, 0.0)
-                }
-            };
-            let a = model(&p.amp.model);
-            let b = model(&f.amp.model);
-            let pre = lerp(a.0, b.0);
-            let post = lerp(a.1, b.1);
-            let bias = lerp(a.2, b.2);
-            let oversampled = lerp(a.3, b.3);
-            let zero = bias.tanh();
-            let filter = 1.0 - (-std::f64::consts::TAU * 0.22 / 4.0).exp();
-            let wet = std::array::from_fn(|c| {
-                let v = x[c] as f64;
-                let direct = if oversampled == 0.0 {
-                    (v * pre + bias).tanh() / pre.sqrt() - zero / pre.sqrt()
-                } else {
-                    ((v * pre + bias).tanh() - zero) * post
-                };
-                let mut colored = direct;
-                if oversampled > 0.0 {
-                    let mut sum = 0.0;
-                    for step in 1..=4 {
-                        let input = self.amp_previous_input[c]
-                            + (v - self.amp_previous_input[c]) * step as f64 / 4.0;
-                        let mut sample = ((input * pre + bias).tanh() - zero) * post;
-                        for state in &mut self.amp_anti_alias[c] {
-                            *state += filter * (sample - *state);
-                            sample = *state;
-                        }
-                        sum += sample;
-                    }
-                    colored += ((sum / 4.0) - direct) * oversampled;
-                }
-                self.amp_previous_input[c] = v;
-                self.amp_dc[c] += 0.0005 * (colored - self.amp_dc[c]);
-                ((colored - self.amp_dc[c]) * gain) as f32
-            });
-            x = blend(x, wet, p.amp.enabled, f.amp.enabled);
-        }
-        if f.cabinet.enabled || p.cabinet.enabled && t < 1.0 {
-            let cutoff = |s: &str| match s {
-                "closed" => [90.0, 4200.0],
-                "bass" => [35.0, 3500.0],
-                _ => [65.0, 5500.0],
-            };
-            let a = cutoff(&p.cabinet.model);
-            let b = cutoff(&f.cabinet.model);
-            let values = [lerp(a[0], b[0]), lerp(a[1], b[1])];
-            if values != self.cached_cabinet {
-                self.cabinet[0].pass(values[0], self.rate, true);
-                self.cabinet[1].pass(values[1], self.rate, false);
-                self.cabinet[2].pass(values[1], self.rate, false);
-                self.cached_cabinet = values;
-            }
-            let mut wet = x;
-            for b in &mut self.cabinet {
-                wet = b.process(wet);
-            }
-            x = blend(x, wet, p.cabinet.enabled, f.cabinet.enabled);
-        }
-        if f.eq.enabled || p.eq.enabled && t < 1.0 {
-            let values = [
-                lerp(p.eq.low_db, f.eq.low_db),
-                lerp(p.eq.mid_db, f.eq.mid_db),
-                lerp(p.eq.high_db, f.eq.high_db),
-                lerp(p.eq.mid_hz, f.eq.mid_hz),
-            ];
-            if values != self.cached_eq {
-                self.eq[0].shelf(180.0, values[0], self.rate, false);
-                self.eq[1].peak(values[3], values[1], self.rate);
-                self.eq[2].shelf(4000.0, values[2], self.rate, true);
-                self.cached_eq = values;
-            }
-            let mut wet = x;
-            for b in &mut self.eq {
-                wet = b.process(wet);
-            }
-            x = blend(x, wet, p.eq.enabled, f.eq.enabled);
-        }
         let tau = std::f64::consts::TAU;
-        if f.vibrato.enabled || p.vibrato.enabled && t < 1.0 {
-            let omega = tau * lerp(p.vibrato.rate_hz, f.vibrato.rate_hz);
-            self.vibrato_swing = slew(self.vibrato_swing, vibrato_swing(&f.vibrato, self.rate));
-            let offset = 2.0 + self.vibrato_swing * (1.0 - self.vibrato_phase.cos());
-            let wet = self.vibrato.read(offset);
-            self.vibrato.write(x);
-            self.vibrato_phase = (self.vibrato_phase + omega / self.rate) % tau;
-            x = blend(x, wet, p.vibrato.enabled, f.vibrato.enabled);
-        }
-        if f.phaser.enabled || p.phaser.enabled && t < 1.0 {
-            let depth = lerp(p.phaser.depth, f.phaser.depth);
-            let feedback = lerp(p.phaser.feedback, f.phaser.feedback);
-            let mix = lerp(p.phaser.mix, f.phaser.mix) as f32;
-            // All eight stages always run, so a new stage count crossfades between fresh taps instead of clicking.
-            let taps = [p.phaser.stages as usize - 1, f.phaser.stages as usize - 1];
-            let mut wet = [0.0f32; 2];
-            for c in 0..2 {
-                // The channels sweep a quarter cycle apart; the notches move between 200 Hz and 6.4 kHz.
-                let sweep = (1.0 - (self.phaser_phase + c as f64 * tau / 4.0).cos()) / 2.0;
-                let hz = (200.0 * 2f64.powf(5.0 * depth * sweep)).min(self.rate * 0.45);
-                let k = (std::f64::consts::PI * hz / self.rate).tan();
-                let a = (k - 1.0) / (k + 1.0);
-                let mut y = x[c] as f64 + feedback * self.phaser_last[c];
-                let mut tapped = [0.0; 2];
-                for (index, stage) in self.phaser[c].iter_mut().enumerate() {
-                    let out = flush(a * y + stage[0] - a * stage[1]);
-                    stage[0] = y;
-                    stage[1] = out;
-                    y = out;
-                    for (which, tap) in taps.iter().enumerate() {
-                        if index == *tap {
-                            tapped[which] = out;
-                        }
-                    }
-                }
-                let out = lerp(tapped[0], tapped[1]);
-                self.phaser_last[c] = flush(out);
-                // Feedback raises the in-phase gain to 1/(1-feedback); scaling keeps the wet level at the input's.
-                wet[c] = (out * (1.0 - feedback)) as f32;
+        // A reorder fades the chain out, swaps the order at silence and fades it back in.
+        let duck = if self.reorder_left > 0 {
+            if self.reorder_left == self.ramp_frames {
+                self.chain = self.chain_target;
             }
-            self.phaser_phase = (self.phaser_phase
-                + tau * lerp(p.phaser.rate_hz, f.phaser.rate_hz) / self.rate)
-                % tau;
-            x = blend(
-                x,
-                std::array::from_fn(|c| x[c] * (1.0 - mix) + wet[c] * mix),
-                p.phaser.enabled,
-                f.phaser.enabled,
-            );
-        }
-        if f.flanger.enabled || p.flanger.enabled && t < 1.0 {
-            // The delay sweeps from 0.1 ms up to 0.1 ms plus the depth.
-            self.flanger_swing = slew(self.flanger_swing, self.rate * f.flanger.depth_ms * 0.001);
-            let offset =
-                self.rate * 0.0001 + self.flanger_swing * (1.0 - self.flanger_phase.cos()) / 2.0;
-            let echo = self.flanger.read(offset);
-            let feedback = lerp(p.flanger.feedback, f.flanger.feedback) as f32;
-            self.flanger.write(std::array::from_fn(|c| {
-                flush((x[c] + echo[c] * feedback) as f64) as f32
-            }));
-            // The comb peaks at 1/(1-|feedback|); scaling keeps the wet level at the input's.
-            let wet: [f32; 2] = echo.map(|v| v * (1.0 - feedback.abs()));
-            self.flanger_phase = (self.flanger_phase
-                + tau * lerp(p.flanger.rate_hz, f.flanger.rate_hz) / self.rate)
-                % tau;
-            let mix = lerp(p.flanger.mix, f.flanger.mix) as f32;
-            x = blend(
-                x,
-                std::array::from_fn(|c| x[c] * (1.0 - mix) + wet[c] * mix),
-                p.flanger.enabled,
-                f.flanger.enabled,
-            );
-        }
-        if f.chorus.enabled || p.chorus.enabled && t < 1.0 {
-            let depth = self.rate * lerp(p.chorus.depth_ms, f.chorus.depth_ms) * 0.001;
-            let wet: [f32; 2] = std::array::from_fn(|c| {
-                self.chorus.read(
-                    self.rate * 0.012 + depth * (1.0 + (self.phase + c as f64 * 1.2).sin()) * 0.5,
-                )[c]
-            });
-            self.chorus.write(x);
-            self.phase = (self.phase
-                + std::f64::consts::TAU * lerp(p.chorus.rate_hz, f.chorus.rate_hz) / self.rate)
-                % std::f64::consts::TAU;
-            let mix = lerp(p.chorus.mix, f.chorus.mix) as f32;
-            x = blend(
-                x,
-                std::array::from_fn(|c| x[c] * (1.0 - mix) + wet[c] * mix),
-                p.chorus.enabled,
-                f.chorus.enabled,
-            );
-        }
-        if f.tremolo.enabled || p.tremolo.enabled && t < 1.0 {
-            let wave = |shape: &str, phase: f64| {
-                if shape == "square" {
-                    // A steep but smooth square avoids clicks at its edges.
-                    (1.0 - (8.0 * phase.cos()).tanh() / 8f64.tanh()) / 2.0
-                } else {
-                    (1.0 - phase.cos()) / 2.0
-                }
-            };
-            let dip = lerp(
-                wave(&p.tremolo.shape, self.tremolo_phase),
-                wave(&f.tremolo.shape, self.tremolo_phase),
-            );
-            let gain = (1.0 - lerp(p.tremolo.depth, f.tremolo.depth) * dip) as f32;
-            self.tremolo_phase = (self.tremolo_phase
-                + tau * lerp(p.tremolo.rate_hz, f.tremolo.rate_hz) / self.rate)
-                % tau;
-            x = blend(x, x.map(|v| v * gain), p.tremolo.enabled, f.tremolo.enabled);
-        }
-        if f.delay.enabled || p.delay.enabled && t < 1.0 {
-            let bpm = if bpm.is_finite() && bpm > 0.0 {
-                bpm
-            } else {
-                120.0
-            };
-            // Extremely slow tempos retain a bounded echo rather than rejecting the score.
-            let offset = (self.rate * 60.0 / bpm
-                * lerp(p.delay.quarter_notes, f.delay.quarter_notes))
-            .min((self.delay.frames.len() - 2) as f64);
-            let shapes = self.delay_shapes;
-            // How much of the tape or analog sound plays: 0 for digital on both sides, so digital echoes stay
-            // exact, and crossfading during a change to or from digital.
-            let colored = lerp(
-                if shapes[0].colored { 1.0 } else { 0.0 },
-                if shapes[1].colored { 1.0 } else { 0.0 },
-            );
-            let mut wet = self.delay.read(offset);
-            if colored > 0.0 {
-                // A digital side takes the other side's character, so only the amount crossfades.
-                let side = |s: usize| {
-                    if shapes[s].colored {
-                        shapes[s]
-                    } else {
-                        shapes[1 - s]
-                    }
-                };
-                let (a, b) = (side(0), side(1));
-                let [low, high, drive] = [
-                    lerp(a.low, b.low),
-                    lerp(a.high, b.high),
-                    lerp(a.drive, b.drive),
-                ];
-                let wander = (0..2)
-                    .map(|i| lerp(a.depth[i], b.depth[i]) * self.delay_phase[i].sin())
-                    .sum::<f64>();
-                for i in 0..2 {
-                    self.delay_phase[i] =
-                        (self.delay_phase[i] + lerp(a.step[i], b.step[i])) % std::f64::consts::TAU;
-                }
-                let moved = self.delay.read(offset + wander);
-                for c in 0..2 {
-                    let [lp, hp] = &mut self.delay_filters[c];
-                    *lp = flush(*lp + low * (moved[c] as f64 - *lp));
-                    *hp = flush(*hp + high * (*lp - *hp));
-                    let tone = (drive * (*lp - *hp)).tanh() / drive;
-                    wet[c] = (wet[c] as f64 + (tone - wet[c] as f64) * colored) as f32;
-                }
-            }
-            let feedback = lerp(p.delay.feedback, f.delay.feedback) as f32;
-            self.delay
-                .write(std::array::from_fn(|c| x[c] + wet[c] * feedback));
-            let mix = lerp(p.delay.mix, f.delay.mix) as f32;
-            x = blend(
-                x,
-                std::array::from_fn(|c| x[c] * (1.0 - mix) + wet[c] * mix),
-                p.delay.enabled,
-                f.delay.enabled,
-            );
-        }
-        let running = f.reverb.enabled || p.reverb.enabled && t < 1.0;
-        let shapes = self.reverb_shapes;
-        // The models that run this frame: one with both sides' settings blended, or during a change of model
-        // each side that is on with its own settings, crossfaded.
-        let same = shapes[0].model == shapes[1].model;
-        let side_on = [p.reverb.enabled && t < 1.0, f.reverb.enabled];
-        let needed = |model: usize| {
-            running
-                && if same {
-                    shapes[1].model == model
-                } else {
-                    (0..2).any(|s| side_on[s] && shapes[s].model == model)
-                }
+            let gain =
+                self.reorder_left.abs_diff(self.ramp_frames) as f32 / self.ramp_frames as f32;
+            self.reorder_left -= 1;
+            Some(gain)
+        } else {
+            None
         };
-        if needed(0) && !self.reverb_live {
-            for line in &mut self.reverb {
-                line.reset();
-            }
-            self.reverb_damp = [[0.0; 2]; 4];
-        }
-        self.reverb_live = needed(0);
-        for tank in self.reverb_tanks.iter_mut() {
-            let need = needed(tank.family + 1);
-            if need && !tank.live {
-                tank.reset();
-            }
-            tank.live = need;
-        }
-        if running && same {
-            let wet = if shapes[1].model == 0 {
-                room_reverb(
-                    &mut self.reverb,
-                    &mut self.reverb_damp,
-                    x,
-                    lerp(p.reverb.room, f.reverb.room),
-                    lerp(p.reverb.damping, f.reverb.damping),
-                )
-            } else {
-                let feedback =
-                    std::array::from_fn(|i| lerp(shapes[0].feedback[i], shapes[1].feedback[i]));
-                self.reverb_tanks[shapes[1].model - 1]
-                    .run(
-                        (x[0] as f64 + x[1] as f64) * 0.5,
-                        feedback,
-                        std::array::from_fn(|i| lerp(shapes[0].cut[i], shapes[1].cut[i])),
-                    )
-                    .map(|v| v as f32)
-            };
-            let mix = lerp(p.reverb.mix, f.reverb.mix) as f32;
-            x = blend(
-                x,
-                std::array::from_fn(|c| x[c] * (1.0 - mix) + wet[c] * mix),
-                p.reverb.enabled,
-                f.reverb.enabled,
-            );
-        } else if running {
-            let sides = [
-                (p.reverb.room, p.reverb.damping, p.reverb.mix),
-                (f.reverb.room, f.reverb.damping, f.reverb.mix),
-            ];
-            let out: [[f32; 2]; 2] = std::array::from_fn(|s| {
-                if !side_on[s] {
-                    return x;
+        for stage in self.chain {
+            match stage {
+                Stage::Microphone => {
+                    if f.microphone.enabled || p.microphone.enabled && t < 1.0 {
+                        // The sound bank's recording comes first. A block starting again begins from silence.
+                        if !self.microphone_live {
+                            for shape in &mut self.microphone_shapes {
+                                shape.filters.iter_mut().for_each(Biquad::reset);
+                            }
+                            self.microphone_room.reset();
+                            self.microphone_age = 0.0;
+                            self.microphone_live = true;
+                        }
+                        let ramp = t < 1.0;
+                        let mut tone = |s: usize| {
+                            self.microphone_shapes[s]
+                                .filters
+                                .iter_mut()
+                                .fold(x, |v, filter| filter.process(v))
+                        };
+                        let direct = [if ramp { tone(0) } else { [0.0; 2] }, tone(1)];
+                        let shapes = self.microphone_shapes;
+                        // The room's reflections repeat its direct sound. The line keeps the placements' direct sound, crossfaded
+                        // as the paths are, while any placement plays, so a change to or from the room reaches each reflection as
+                        // a 10 ms crossfade when its delay has passed instead of a step.
+                        let room = shapes[1].room || ramp && shapes[0].room;
+                        let mut reflections = [0.0f32; 2];
+                        if room {
+                            // A line cleared when the block started holds silence before its first frames, so each reflection
+                            // fades in over 10 ms from when its delay has filled.
+                            let (age, fade) = (self.microphone_age, self.rate * 0.01);
+                            for c in 0..2 {
+                                reflections[c] = ROOM_REFLECTIONS[c]
+                                    .iter()
+                                    .map(|&(seconds, gain)| {
+                                        let delay = seconds * self.rate;
+                                        self.microphone_room.read(delay)[0]
+                                            * (gain * ((age - delay) / fade).clamp(0.0, 1.0)) as f32
+                                    })
+                                    .sum();
+                            }
+                        }
+                        self.microphone_age = (self.microphone_age + 1.0).min(self.rate);
+                        let written: [f32; 2] = if ramp {
+                            std::array::from_fn(|c| {
+                                direct[0][c] + (direct[1][c] - direct[0][c]) * t as f32
+                            })
+                        } else {
+                            direct[1]
+                        };
+                        self.microphone_room
+                            .write([(written[0] + written[1]) * 0.5; 2]);
+                        let path = |s: usize| -> [f32; 2] {
+                            if shapes[s].room {
+                                std::array::from_fn(|c| {
+                                    direct[s][c] * ROOM_DIRECT as f32 + reflections[c]
+                                })
+                            } else {
+                                direct[s]
+                            }
+                        };
+                        let mut wet = if ramp {
+                            let [a, b] = [path(0), path(1)];
+                            std::array::from_fn(|c| a[c] + (b[c] - a[c]) * t as f32)
+                        } else {
+                            path(1)
+                        };
+                        let mono = lerp(
+                            if shapes[0].mono { 1.0 } else { 0.0 },
+                            if shapes[1].mono { 1.0 } else { 0.0 },
+                        ) as f32;
+                        if mono > 0.0 {
+                            let centre = (wet[0] + wet[1]) * 0.5;
+                            wet = if mono >= 1.0 {
+                                [centre; 2]
+                            } else {
+                                wet.map(|v| v + (centre - v) * mono)
+                            };
+                        }
+                        x = if p.microphone.enabled && f.microphone.enabled {
+                            wet
+                        } else {
+                            blend(x, wet, p.microphone.enabled, f.microphone.enabled)
+                        };
+                    } else {
+                        self.microphone_live = false;
+                    }
                 }
-                let wet = if shapes[s].model == 0 {
-                    room_reverb(
-                        &mut self.reverb,
-                        &mut self.reverb_damp,
-                        x,
-                        sides[s].0,
-                        sides[s].1,
-                    )
-                } else {
-                    self.reverb_tanks[shapes[s].model - 1]
-                        .run(
-                            (x[0] as f64 + x[1] as f64) * 0.5,
-                            shapes[s].feedback,
-                            shapes[s].cut,
-                        )
-                        .map(|v| v as f32)
-                };
-                let mix = sides[s].2 as f32;
-                std::array::from_fn(|c| x[c] * (1.0 - mix) + wet[c] * mix)
-            });
-            x = std::array::from_fn(|c| lerp(out[0][c] as f64, out[1][c] as f64) as f32);
+                Stage::Gate => {
+                    if f.gate.enabled || p.gate.enabled && t < 1.0 {
+                        let peak = x[0].abs().max(x[1].abs()) as f64;
+                        let target = if peak
+                            > 10f64.powf(lerp(p.gate.threshold_db, f.gate.threshold_db) / 20.0)
+                        {
+                            1.0
+                        } else {
+                            0.0
+                        };
+                        let k = if target > self.gate_envelope {
+                            0.1
+                        } else {
+                            (-1.0
+                                / (self.rate * lerp(p.gate.release_ms, f.gate.release_ms) * 0.001))
+                                .exp()
+                        };
+                        self.gate_envelope = target + (self.gate_envelope - target) * k;
+                        x = blend(
+                            x,
+                            x.map(|v| v * self.gate_envelope as f32),
+                            p.gate.enabled,
+                            f.gate.enabled,
+                        );
+                    }
+                }
+                Stage::Compressor => {
+                    if f.compressor.enabled || p.compressor.enabled && t < 1.0 {
+                        let level = x[0].abs().max(x[1].abs()) as f64;
+                        let time = if level > self.compressor_envelope {
+                            lerp(p.compressor.attack_ms, f.compressor.attack_ms)
+                        } else {
+                            lerp(p.compressor.release_ms, f.compressor.release_ms)
+                        };
+                        let k = (-1.0 / (self.rate * time * 0.001)).exp();
+                        self.compressor_envelope = level + (self.compressor_envelope - level) * k;
+                        let db = 20.0 * self.compressor_envelope.max(1e-9).log10();
+                        let above = (db
+                            - lerp(p.compressor.threshold_db, f.compressor.threshold_db))
+                        .max(0.0);
+                        let gain = 10f64.powf(
+                            (lerp(p.compressor.makeup_db, f.compressor.makeup_db)
+                                - above
+                                    * (1.0 - 1.0 / lerp(p.compressor.ratio, f.compressor.ratio)))
+                                / 20.0,
+                        ) as f32;
+                        x = blend(
+                            x,
+                            x.map(|v| v * gain),
+                            p.compressor.enabled,
+                            f.compressor.enabled,
+                        );
+                    }
+                }
+                Stage::Wah => {
+                    if f.wah.enabled && !p.wah.enabled && self.ramp_left == self.ramp_frames {
+                        // Switching the wah on starts from rest, not from the level and pedal it had when it was switched off.
+                        self.wah = [[0.0; 2]; 2];
+                        self.wah_envelope = 0.0;
+                        self.wah_position = wah_target(&f.wah, 0.0);
+                    }
+                    if f.wah.enabled || p.wah.enabled && t < 1.0 {
+                        // The envelope follows the playing level with a 2 ms attack and a 200 ms release.
+                        let level = x[0].abs().max(x[1].abs()) as f64;
+                        let [attack, release, glide] = self.wah_coefficients;
+                        let k = if level > self.wah_envelope {
+                            attack
+                        } else {
+                            release
+                        };
+                        self.wah_envelope =
+                            flush(self.wah_envelope + (level - self.wah_envelope) * k);
+                        let goal = lerp(
+                            wah_target(&p.wah, self.wah_envelope),
+                            wah_target(&f.wah, self.wah_envelope),
+                        );
+                        // The pedal glides with a 15 ms time constant, so edits and mode changes sweep instead of jumping.
+                        self.wah_position += (goal - self.wah_position) * glide;
+                        // A band-pass from 350 Hz at the heel to 2.2 kHz at the toe, passing its centre at unity.
+                        let hz = 350.0 * (2_200.0f64 / 350.0).powf(self.wah_position);
+                        let g = (std::f64::consts::PI * hz.min(self.rate * 0.45) / self.rate).tan();
+                        let k = 1.0 / (2.0 + 8.0 * lerp(p.wah.resonance, f.wah.resonance));
+                        let a1 = 1.0 / (1.0 + g * (g + k));
+                        let a2 = g * a1;
+                        let mix = lerp(p.wah.mix, f.wah.mix) as f32;
+                        let wet: [f32; 2] = std::array::from_fn(|c| {
+                            let [band, low] = &mut self.wah[c];
+                            let v3 = x[c] as f64 - *low;
+                            let v1 = a1 * *band + a2 * v3;
+                            let v2 = *low + a2 * *band + g * a2 * v3;
+                            *band = flush(2.0 * v1 - *band);
+                            *low = flush(2.0 * v2 - *low);
+                            (k * v1) as f32
+                        });
+                        x = blend(
+                            x,
+                            std::array::from_fn(|c| x[c] * (1.0 - mix) + wet[c] * mix),
+                            p.wah.enabled,
+                            f.wah.enabled,
+                        );
+                    }
+                }
+                Stage::Octaver => {
+                    if f.octaver.enabled || p.octaver.enabled && t < 1.0 {
+                        self.octaver.write(x);
+                        let one = shift(
+                            &self.octaver,
+                            &mut self.octaver_phase[0],
+                            0.5,
+                            self.shift_window,
+                            self.rate,
+                        );
+                        let two = shift(
+                            &self.octaver,
+                            &mut self.octaver_phase[1],
+                            0.25,
+                            self.shift_window,
+                            self.rate,
+                        );
+                        let levels = [
+                            lerp(p.octaver.direct, f.octaver.direct) as f32,
+                            lerp(p.octaver.octave_down, f.octaver.octave_down) as f32,
+                            lerp(p.octaver.two_octaves_down, f.octaver.two_octaves_down) as f32,
+                        ];
+                        x = blend(
+                            x,
+                            std::array::from_fn(|c| {
+                                x[c] * levels[0] + one[c] * levels[1] + two[c] * levels[2]
+                            }),
+                            p.octaver.enabled,
+                            f.octaver.enabled,
+                        );
+                    }
+                }
+                Stage::Pitch => {
+                    if f.pitch.enabled || p.pitch.enabled && t < 1.0 {
+                        self.pitch.write(x);
+                        let ratio = 2f64.powf(lerp(p.pitch.semitones, f.pitch.semitones) / 12.0);
+                        let wet = shift(
+                            &self.pitch,
+                            &mut self.pitch_phase,
+                            ratio,
+                            self.shift_window,
+                            self.rate,
+                        );
+                        let mix = lerp(p.pitch.mix, f.pitch.mix) as f32;
+                        x = blend(
+                            x,
+                            std::array::from_fn(|c| x[c] * (1.0 - mix) + wet[c] * mix),
+                            p.pitch.enabled,
+                            f.pitch.enabled,
+                        );
+                    }
+                }
+                Stage::Drive => {
+                    if f.drive.enabled || p.drive.enabled && t < 1.0 {
+                        // The playing level follows with a 20 ms attack and a 50 ms release, for the fuzz's offset.
+                        let [attack, release, dc] = self.drive_coefficients;
+                        let level = x[0].abs().max(x[1].abs()) as f64;
+                        let k = if level > self.drive_envelope {
+                            attack
+                        } else {
+                            release
+                        };
+                        self.drive_envelope =
+                            flush(self.drive_envelope + (level - self.drive_envelope) * k);
+                        // While both sides of a ramp are on and clip differently, each clips with its own curve and gain and
+                        // the two outputs crossfade; otherwise the side that is on clips alone.
+                        let shapes = self.drive_shapes;
+                        let both = t < 1.0
+                            && p.drive.enabled
+                            && f.drive.enabled
+                            && (p.drive.model != f.drive.model || p.drive.drive != f.drive.drive);
+                        let alone = if f.drive.enabled { 1 } else { 0 };
+                        let filter = 1.0 - (-std::f64::consts::TAU * 0.22 / 4.0f64).exp();
+                        let (tone, level) = (
+                            lerp(shapes[0].tone, shapes[1].tone),
+                            lerp(shapes[0].level, shapes[1].level),
+                        );
+                        let envelope = self.drive_envelope;
+                        let wet = std::array::from_fn(|c| {
+                            let v = x[c] as f64;
+                            // Four times oversampled, as the amp is, so the clipping's upper harmonics do not fold back down.
+                            let mut sum = 0.0;
+                            for step in 1..=4 {
+                                let input = self.drive_previous_input[c]
+                                    + (v - self.drive_previous_input[c]) * step as f64 / 4.0;
+                                let clip = |shape: DriveShape| {
+                                    drive_curve(
+                                        shape.hard,
+                                        shape.gain * (input + shape.bias * envelope),
+                                    ) * shape.normal
+                                };
+                                let mut sample = if both {
+                                    lerp(clip(shapes[0]), clip(shapes[1]))
+                                } else {
+                                    clip(shapes[alone])
+                                };
+                                for state in &mut self.drive_anti_alias[c] {
+                                    *state = flush(*state + filter * (sample - *state));
+                                    sample = *state;
+                                }
+                                sum += sample;
+                            }
+                            self.drive_previous_input[c] = v;
+                            let clipped = sum / 4.0;
+                            self.drive_dc[c] =
+                                flush(self.drive_dc[c] + dc * (clipped - self.drive_dc[c]));
+                            let mut out = clipped - self.drive_dc[c];
+                            for state in &mut self.drive_tone[c] {
+                                *state = flush(*state + tone * (out - *state));
+                                out = *state;
+                            }
+                            (out * level) as f32
+                        });
+                        x = blend(x, wet, p.drive.enabled, f.drive.enabled);
+                    }
+                }
+                Stage::Amp => {
+                    if f.amp.enabled || p.amp.enabled && t < 1.0 {
+                        let drive = lerp(p.amp.drive, f.amp.drive);
+                        let gain = 10f64.powf(lerp(p.amp.gain_db, f.amp.gain_db) / 20.0);
+                        let model = |s: &str| match s {
+                            // Reference peak .10 corresponds to the measured loud pickup RMS .0704.
+                            // Normalization keeps this level steady while quieter notes gain sustain.
+                            "crunch" => {
+                                let pre = 1.0 + 220.0 * drive.powf(1.2);
+                                (pre, 0.10 / (0.10 * pre).tanh(), 0.08 * drive, 1.0)
+                            }
+                            "lead" => {
+                                let pre = 1.0 + 600.0 * drive.powf(1.1);
+                                (pre, 0.11 / (0.11 * pre).tanh(), 0.04 * drive, 1.0)
+                            }
+                            "bass" => {
+                                let pre = 1.0 + drive * 3.0;
+                                (pre, 1.0 / pre.sqrt(), 0.02 * drive, 0.0)
+                            }
+                            _ => {
+                                let pre = 1.0 + drive;
+                                (pre, 1.0 / pre.sqrt(), 0.02 * drive, 0.0)
+                            }
+                        };
+                        let a = model(&p.amp.model);
+                        let b = model(&f.amp.model);
+                        let pre = lerp(a.0, b.0);
+                        let post = lerp(a.1, b.1);
+                        let bias = lerp(a.2, b.2);
+                        let oversampled = lerp(a.3, b.3);
+                        let zero = bias.tanh();
+                        let filter = 1.0 - (-std::f64::consts::TAU * 0.22 / 4.0).exp();
+                        let wet = std::array::from_fn(|c| {
+                            let v = x[c] as f64;
+                            let direct = if oversampled == 0.0 {
+                                (v * pre + bias).tanh() / pre.sqrt() - zero / pre.sqrt()
+                            } else {
+                                ((v * pre + bias).tanh() - zero) * post
+                            };
+                            let mut colored = direct;
+                            if oversampled > 0.0 {
+                                let mut sum = 0.0;
+                                for step in 1..=4 {
+                                    let input = self.amp_previous_input[c]
+                                        + (v - self.amp_previous_input[c]) * step as f64 / 4.0;
+                                    let mut sample = ((input * pre + bias).tanh() - zero) * post;
+                                    for state in &mut self.amp_anti_alias[c] {
+                                        *state += filter * (sample - *state);
+                                        sample = *state;
+                                    }
+                                    sum += sample;
+                                }
+                                colored += ((sum / 4.0) - direct) * oversampled;
+                            }
+                            self.amp_previous_input[c] = v;
+                            self.amp_dc[c] += 0.0005 * (colored - self.amp_dc[c]);
+                            ((colored - self.amp_dc[c]) * gain) as f32
+                        });
+                        x = blend(x, wet, p.amp.enabled, f.amp.enabled);
+                    }
+                }
+                Stage::Cabinet => {
+                    if f.cabinet.enabled || p.cabinet.enabled && t < 1.0 {
+                        let cutoff = |s: &str| match s {
+                            "closed" => [90.0, 4200.0],
+                            "bass" => [35.0, 3500.0],
+                            _ => [65.0, 5500.0],
+                        };
+                        let a = cutoff(&p.cabinet.model);
+                        let b = cutoff(&f.cabinet.model);
+                        let values = [lerp(a[0], b[0]), lerp(a[1], b[1])];
+                        if values != self.cached_cabinet {
+                            self.cabinet[0].pass(values[0], self.rate, true);
+                            self.cabinet[1].pass(values[1], self.rate, false);
+                            self.cabinet[2].pass(values[1], self.rate, false);
+                            self.cached_cabinet = values;
+                        }
+                        let mut wet = x;
+                        for b in &mut self.cabinet {
+                            wet = b.process(wet);
+                        }
+                        x = blend(x, wet, p.cabinet.enabled, f.cabinet.enabled);
+                    }
+                }
+                Stage::Eq => {
+                    if f.eq.enabled || p.eq.enabled && t < 1.0 {
+                        let values = [
+                            lerp(p.eq.low_db, f.eq.low_db),
+                            lerp(p.eq.mid_db, f.eq.mid_db),
+                            lerp(p.eq.high_db, f.eq.high_db),
+                            lerp(p.eq.mid_hz, f.eq.mid_hz),
+                        ];
+                        if values != self.cached_eq {
+                            self.eq[0].shelf(180.0, values[0], self.rate, false);
+                            self.eq[1].peak(values[3], values[1], self.rate);
+                            self.eq[2].shelf(4000.0, values[2], self.rate, true);
+                            self.cached_eq = values;
+                        }
+                        let mut wet = x;
+                        for b in &mut self.eq {
+                            wet = b.process(wet);
+                        }
+                        x = blend(x, wet, p.eq.enabled, f.eq.enabled);
+                    }
+                }
+                Stage::Vibrato => {
+                    if f.vibrato.enabled || p.vibrato.enabled && t < 1.0 {
+                        let omega = tau * lerp(p.vibrato.rate_hz, f.vibrato.rate_hz);
+                        self.vibrato_swing =
+                            slew(self.vibrato_swing, vibrato_swing(&f.vibrato, self.rate));
+                        let offset = 2.0 + self.vibrato_swing * (1.0 - self.vibrato_phase.cos());
+                        let wet = self.vibrato.read(offset);
+                        self.vibrato.write(x);
+                        self.vibrato_phase = (self.vibrato_phase + omega / self.rate) % tau;
+                        x = blend(x, wet, p.vibrato.enabled, f.vibrato.enabled);
+                    }
+                }
+                Stage::Phaser => {
+                    if f.phaser.enabled || p.phaser.enabled && t < 1.0 {
+                        let depth = lerp(p.phaser.depth, f.phaser.depth);
+                        let feedback = lerp(p.phaser.feedback, f.phaser.feedback);
+                        let mix = lerp(p.phaser.mix, f.phaser.mix) as f32;
+                        // All eight stages always run, so a new stage count crossfades between fresh taps instead of clicking.
+                        let taps = [p.phaser.stages as usize - 1, f.phaser.stages as usize - 1];
+                        let mut wet = [0.0f32; 2];
+                        for c in 0..2 {
+                            // The channels sweep a quarter cycle apart; the notches move between 200 Hz and 6.4 kHz.
+                            let sweep =
+                                (1.0 - (self.phaser_phase + c as f64 * tau / 4.0).cos()) / 2.0;
+                            let hz = (200.0 * 2f64.powf(5.0 * depth * sweep)).min(self.rate * 0.45);
+                            let k = (std::f64::consts::PI * hz / self.rate).tan();
+                            let a = (k - 1.0) / (k + 1.0);
+                            let mut y = x[c] as f64 + feedback * self.phaser_last[c];
+                            let mut tapped = [0.0; 2];
+                            for (index, stage) in self.phaser[c].iter_mut().enumerate() {
+                                let out = flush(a * y + stage[0] - a * stage[1]);
+                                stage[0] = y;
+                                stage[1] = out;
+                                y = out;
+                                for (which, tap) in taps.iter().enumerate() {
+                                    if index == *tap {
+                                        tapped[which] = out;
+                                    }
+                                }
+                            }
+                            let out = lerp(tapped[0], tapped[1]);
+                            self.phaser_last[c] = flush(out);
+                            // Feedback raises the in-phase gain to 1/(1-feedback); scaling keeps the wet level at the input's.
+                            wet[c] = (out * (1.0 - feedback)) as f32;
+                        }
+                        self.phaser_phase = (self.phaser_phase
+                            + tau * lerp(p.phaser.rate_hz, f.phaser.rate_hz) / self.rate)
+                            % tau;
+                        x = blend(
+                            x,
+                            std::array::from_fn(|c| x[c] * (1.0 - mix) + wet[c] * mix),
+                            p.phaser.enabled,
+                            f.phaser.enabled,
+                        );
+                    }
+                }
+                Stage::Flanger => {
+                    if f.flanger.enabled || p.flanger.enabled && t < 1.0 {
+                        // The delay sweeps from 0.1 ms up to 0.1 ms plus the depth.
+                        self.flanger_swing =
+                            slew(self.flanger_swing, self.rate * f.flanger.depth_ms * 0.001);
+                        let offset = self.rate * 0.0001
+                            + self.flanger_swing * (1.0 - self.flanger_phase.cos()) / 2.0;
+                        let echo = self.flanger.read(offset);
+                        let feedback = lerp(p.flanger.feedback, f.flanger.feedback) as f32;
+                        self.flanger.write(std::array::from_fn(|c| {
+                            flush((x[c] + echo[c] * feedback) as f64) as f32
+                        }));
+                        // The comb peaks at 1/(1-|feedback|); scaling keeps the wet level at the input's.
+                        let wet: [f32; 2] = echo.map(|v| v * (1.0 - feedback.abs()));
+                        self.flanger_phase = (self.flanger_phase
+                            + tau * lerp(p.flanger.rate_hz, f.flanger.rate_hz) / self.rate)
+                            % tau;
+                        let mix = lerp(p.flanger.mix, f.flanger.mix) as f32;
+                        x = blend(
+                            x,
+                            std::array::from_fn(|c| x[c] * (1.0 - mix) + wet[c] * mix),
+                            p.flanger.enabled,
+                            f.flanger.enabled,
+                        );
+                    }
+                }
+                Stage::Chorus => {
+                    if f.chorus.enabled || p.chorus.enabled && t < 1.0 {
+                        let depth = self.rate * lerp(p.chorus.depth_ms, f.chorus.depth_ms) * 0.001;
+                        let wet: [f32; 2] = std::array::from_fn(|c| {
+                            self.chorus.read(
+                                self.rate * 0.012
+                                    + depth * (1.0 + (self.phase + c as f64 * 1.2).sin()) * 0.5,
+                            )[c]
+                        });
+                        self.chorus.write(x);
+                        self.phase = (self.phase
+                            + std::f64::consts::TAU * lerp(p.chorus.rate_hz, f.chorus.rate_hz)
+                                / self.rate)
+                            % std::f64::consts::TAU;
+                        let mix = lerp(p.chorus.mix, f.chorus.mix) as f32;
+                        x = blend(
+                            x,
+                            std::array::from_fn(|c| x[c] * (1.0 - mix) + wet[c] * mix),
+                            p.chorus.enabled,
+                            f.chorus.enabled,
+                        );
+                    }
+                }
+                Stage::Tremolo => {
+                    if f.tremolo.enabled || p.tremolo.enabled && t < 1.0 {
+                        let wave = |shape: &str, phase: f64| {
+                            if shape == "square" {
+                                // A steep but smooth square avoids clicks at its edges.
+                                (1.0 - (8.0 * phase.cos()).tanh() / 8f64.tanh()) / 2.0
+                            } else {
+                                (1.0 - phase.cos()) / 2.0
+                            }
+                        };
+                        let dip = lerp(
+                            wave(&p.tremolo.shape, self.tremolo_phase),
+                            wave(&f.tremolo.shape, self.tremolo_phase),
+                        );
+                        let gain = (1.0 - lerp(p.tremolo.depth, f.tremolo.depth) * dip) as f32;
+                        self.tremolo_phase = (self.tremolo_phase
+                            + tau * lerp(p.tremolo.rate_hz, f.tremolo.rate_hz) / self.rate)
+                            % tau;
+                        x = blend(x, x.map(|v| v * gain), p.tremolo.enabled, f.tremolo.enabled);
+                    }
+                }
+                Stage::Delay => {
+                    if f.delay.enabled || p.delay.enabled && t < 1.0 {
+                        let bpm = if bpm.is_finite() && bpm > 0.0 {
+                            bpm
+                        } else {
+                            120.0
+                        };
+                        // Extremely slow tempos retain a bounded echo rather than rejecting the score.
+                        let offset = (self.rate * 60.0 / bpm
+                            * lerp(p.delay.quarter_notes, f.delay.quarter_notes))
+                        .min((self.delay.frames.len() - 2) as f64);
+                        let shapes = self.delay_shapes;
+                        // How much of the tape or analog sound plays: 0 for digital on both sides, so digital echoes stay
+                        // exact, and crossfading during a change to or from digital.
+                        let colored = lerp(
+                            if shapes[0].colored { 1.0 } else { 0.0 },
+                            if shapes[1].colored { 1.0 } else { 0.0 },
+                        );
+                        let mut wet = self.delay.read(offset);
+                        if colored > 0.0 {
+                            // A digital side takes the other side's character, so only the amount crossfades.
+                            let side = |s: usize| {
+                                if shapes[s].colored {
+                                    shapes[s]
+                                } else {
+                                    shapes[1 - s]
+                                }
+                            };
+                            let (a, b) = (side(0), side(1));
+                            let [low, high, drive] = [
+                                lerp(a.low, b.low),
+                                lerp(a.high, b.high),
+                                lerp(a.drive, b.drive),
+                            ];
+                            let wander = (0..2)
+                                .map(|i| lerp(a.depth[i], b.depth[i]) * self.delay_phase[i].sin())
+                                .sum::<f64>();
+                            for i in 0..2 {
+                                self.delay_phase[i] = (self.delay_phase[i]
+                                    + lerp(a.step[i], b.step[i]))
+                                    % std::f64::consts::TAU;
+                            }
+                            let moved = self.delay.read(offset + wander);
+                            for c in 0..2 {
+                                let [lp, hp] = &mut self.delay_filters[c];
+                                *lp = flush(*lp + low * (moved[c] as f64 - *lp));
+                                *hp = flush(*hp + high * (*lp - *hp));
+                                let tone = (drive * (*lp - *hp)).tanh() / drive;
+                                wet[c] = (wet[c] as f64 + (tone - wet[c] as f64) * colored) as f32;
+                            }
+                        }
+                        let feedback = lerp(p.delay.feedback, f.delay.feedback) as f32;
+                        self.delay
+                            .write(std::array::from_fn(|c| x[c] + wet[c] * feedback));
+                        let mix = lerp(p.delay.mix, f.delay.mix) as f32;
+                        x = blend(
+                            x,
+                            std::array::from_fn(|c| x[c] * (1.0 - mix) + wet[c] * mix),
+                            p.delay.enabled,
+                            f.delay.enabled,
+                        );
+                    }
+                }
+                Stage::Reverb => {
+                    let running = f.reverb.enabled || p.reverb.enabled && t < 1.0;
+                    let shapes = self.reverb_shapes;
+                    // The models that run this frame: one with both sides' settings blended, or during a change of model
+                    // each side that is on with its own settings, crossfaded.
+                    let same = shapes[0].model == shapes[1].model;
+                    let side_on = [p.reverb.enabled && t < 1.0, f.reverb.enabled];
+                    let needed = |model: usize| {
+                        running
+                            && if same {
+                                shapes[1].model == model
+                            } else {
+                                (0..2).any(|s| side_on[s] && shapes[s].model == model)
+                            }
+                    };
+                    if needed(0) && !self.reverb_live {
+                        for line in &mut self.reverb {
+                            line.reset();
+                        }
+                        self.reverb_damp = [[0.0; 2]; 4];
+                    }
+                    self.reverb_live = needed(0);
+                    for tank in self.reverb_tanks.iter_mut() {
+                        let need = needed(tank.family + 1);
+                        if need && !tank.live {
+                            tank.reset();
+                        }
+                        tank.live = need;
+                    }
+                    if running && same {
+                        let wet = if shapes[1].model == 0 {
+                            room_reverb(
+                                &mut self.reverb,
+                                &mut self.reverb_damp,
+                                x,
+                                lerp(p.reverb.room, f.reverb.room),
+                                lerp(p.reverb.damping, f.reverb.damping),
+                            )
+                        } else {
+                            let feedback = std::array::from_fn(|i| {
+                                lerp(shapes[0].feedback[i], shapes[1].feedback[i])
+                            });
+                            self.reverb_tanks[shapes[1].model - 1]
+                                .run(
+                                    (x[0] as f64 + x[1] as f64) * 0.5,
+                                    feedback,
+                                    std::array::from_fn(|i| {
+                                        lerp(shapes[0].cut[i], shapes[1].cut[i])
+                                    }),
+                                )
+                                .map(|v| v as f32)
+                        };
+                        let mix = lerp(p.reverb.mix, f.reverb.mix) as f32;
+                        x = blend(
+                            x,
+                            std::array::from_fn(|c| x[c] * (1.0 - mix) + wet[c] * mix),
+                            p.reverb.enabled,
+                            f.reverb.enabled,
+                        );
+                    } else if running {
+                        let sides = [
+                            (p.reverb.room, p.reverb.damping, p.reverb.mix),
+                            (f.reverb.room, f.reverb.damping, f.reverb.mix),
+                        ];
+                        let out: [[f32; 2]; 2] = std::array::from_fn(|s| {
+                            if !side_on[s] {
+                                return x;
+                            }
+                            let wet = if shapes[s].model == 0 {
+                                room_reverb(
+                                    &mut self.reverb,
+                                    &mut self.reverb_damp,
+                                    x,
+                                    sides[s].0,
+                                    sides[s].1,
+                                )
+                            } else {
+                                self.reverb_tanks[shapes[s].model - 1]
+                                    .run(
+                                        (x[0] as f64 + x[1] as f64) * 0.5,
+                                        shapes[s].feedback,
+                                        shapes[s].cut,
+                                    )
+                                    .map(|v| v as f32)
+                            };
+                            let mix = sides[s].2 as f32;
+                            std::array::from_fn(|c| x[c] * (1.0 - mix) + wet[c] * mix)
+                        });
+                        x = std::array::from_fn(|c| {
+                            lerp(out[0][c] as f64, out[1][c] as f64) as f32
+                        });
+                    }
+                }
+            }
+        }
+        if let Some(gain) = duck {
+            x = x.map(|v| v * gain);
         }
         self.ramp_left = self.ramp_left.saturating_sub(1);
         x.map(|v| {
@@ -2071,6 +2278,8 @@ impl TrackDsp {
         self.microphone_room.reset();
         self.microphone_age = self.rate;
         self.microphone_live = self.settings.microphone.enabled;
+        self.chain = self.chain_target;
+        self.reorder_left = 0;
     }
 }
 

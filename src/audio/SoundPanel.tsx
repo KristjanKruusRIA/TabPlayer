@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { completeSound, defaultEffects, delayDivisions } from '../document-settings';
-import type { EditCommand, FxSettings, TrackSound } from '../edit-types';
+import { chainOrder, completeSound, defaultEffects, delayDivisions, effectBlocks } from '../document-settings';
+import type { EditCommand, EffectBlock, TrackSound } from '../edit-types';
 import type { NativePlaybackController } from './NativePlaybackController';
 import type { AudioDeviceInfo } from './bridge';
 import { copyPedal, copySound, deleteSoundPreset, renameSoundPreset, saveSoundPreset, soundClipboard, soundLibrary, subscribeSoundClipboard, subscribeSoundLibrary } from './sound-library';
@@ -17,8 +17,8 @@ export function soundPreset(presetId:TrackSound['presetId'],voiceId:string|null=
 type NumericControl={key:string;label:string;min:number;max:number;step:number};
 const noSubscribe=()=>()=>{},noState=()=>null;
 const presetIds=['gm','clean','crunch','lead','bass'] as const,presetName=(id:string)=>id==='gm'?'Bypass':id[0].toUpperCase()+id.slice(1);
-const blockNames:Record<keyof FxSettings,string>={microphone:'Microphone',gate:'Gate',compressor:'Compressor',wah:'Wah',octaver:'Octaver',pitch:'Pitch shift',drive:'Drive',amp:'Amp',cabinet:'Cabinet',eq:'EQ',vibrato:'Vibrato',phaser:'Phaser',flanger:'Flanger',chorus:'Chorus',tremolo:'Tremolo',delay:'Delay',reverb:'Reverb'};
-const parameters:Record<keyof FxSettings,NumericControl[]>={
+const blockNames:Record<EffectBlock,string>={microphone:'Microphone',gate:'Gate',compressor:'Compressor',wah:'Wah',octaver:'Octaver',pitch:'Pitch shift',drive:'Drive',amp:'Amp',cabinet:'Cabinet',eq:'EQ',vibrato:'Vibrato',phaser:'Phaser',flanger:'Flanger',chorus:'Chorus',tremolo:'Tremolo',delay:'Delay',reverb:'Reverb'};
+const parameters:Record<EffectBlock,NumericControl[]>={
   // The sound bank's recording comes before the pedals.
   microphone:[],
   gate:[{key:'thresholdDb',label:'Threshold (dB)',min:-96,max:0,step:1},{key:'releaseMs',label:'Release (ms)',min:1,max:1000,step:1}],
@@ -53,7 +53,18 @@ export function SoundPanel({trackId,sound,onEdit,playback,busy=false,shown=true}
   const endPreview=()=>{previewRequest.current++;setPreviewChoice('');return previewer&&previewer.soundPreview()?.track===trackId?Promise.resolve(previewer.previewSound(trackId,null)).catch(e=>setError(String(e))):Promise.resolve();};
   /** Applies `next` as one undoable edit. A preview ends at once, so the edit is what plays and edits keep their order. */
   const save=(next:TrackSound)=>{if(previewChoice||activePreview){void endPreview();setStatus('Preview ended.');}return record(next);};
-  const fx=(block:keyof FxSettings,key:string,value:unknown)=>{const next=structuredClone(current);Object.assign(next.effects[block],{[key]:value});save(next);};
+  const fx=(block:EffectBlock,key:string,value:unknown)=>{const next=structuredClone(current);Object.assign(next.effects[block],{[key]:value});save(next);};
+  const order=chainOrder(current.effects);
+  /** Swaps `block` with its neighbour `step` places along the chain; the default order is saved as no order. */
+  const move=(block:EffectBlock,step:-1|1)=>{const next=structuredClone(current),names=[...order],at=names.indexOf(block);[names[at],names[at+step]]=[names[at+step],names[at]];if(names.every((name,index)=>name===effectBlocks[index]))delete next.effects.order;else next.effects.order=names;movedBlock.current={block,step,from:order.join()};void save(next).then(ok=>{if(ok)setStatus(`${blockNames[block]} is now ${at+step+1} of ${names.length} in the chain.`);});};
+  // A moved block's buttons move with it, which loses their focus; it returns to the same button once the new order shows,
+  // or to the other one when the block reached an end of the chain.
+  const movedBlock=useRef<{block:EffectBlock;step:-1|1;from:string}|null>(null),chainRef=useRef<HTMLDivElement>(null);
+  useEffect(()=>{
+    const pending=movedBlock.current;if(!pending||order.join()===pending.from)return;movedBlock.current=null;
+    const button=(step:number)=>chainRef.current?.querySelector<HTMLButtonElement>(`button[aria-label="Move ${blockNames[pending.block]} ${step<0?'earlier':'later'}"]`);
+    const target=[button(pending.step),button(-pending.step)].find(candidate=>candidate&&!candidate.disabled);if(target&&document.activeElement!==target)target.focus();
+  });
   const library=useSyncExternalStore(subscribeSoundLibrary,soundLibrary),clipboard=useSyncExternalStore(subscribeSoundClipboard,soundClipboard);
   const [chosen,setChosen]=useState(''),[name,setName]=useState(''),[status,setStatus]=useState(''),[confirming,setConfirming]=useState(false);
   const entry=library.find(item=>item.name===chosen),savedSelect=useRef<HTMLSelectElement>(null);
@@ -98,9 +109,10 @@ export function SoundPanel({trackId,sound,onEdit,playback,busy=false,shown=true}
       <label>Name<input aria-label="Saved sound name" value={name} maxLength={60} onChange={e=>setName(e.target.value)}/></label>
       <div className="sound-library-actions"><button disabled={!name.trim()} onClick={()=>{const result=saveSoundPreset(name,current);if(report(result,`${result.ok&&result.replaced?'Replaced':'Saved'} “${name.trim()}”.`)){setChosen(name.trim());setName('');}}}>Save sound</button><button disabled={!entry||!name.trim()} onClick={()=>{if(entry&&report(renameSoundPreset(entry.name,name),`Renamed “${entry.name}” to “${name.trim()}”.`)){setChosen(name.trim());setName('');}}}>Rename saved sound</button></div>
       <p role="status" className="muted">{status}</p>
-    </fieldset><p className="sound-chain-label muted">Fixed signal chain</p>
-    <div className="sound-chain">{(Object.keys(parameters) as (keyof FxSettings)[]).map(block=><details className="sound-block" key={block}><summary><span className="sound-block-name">{blockNames[block]}</span><span className="sound-block-state">{current.effects[block].enabled?'Enabled':'Bypassed'}</span></summary><fieldset disabled={busy}>
+    </fieldset><p className="sound-chain-label muted">Signal chain</p>
+    <div className="sound-chain" ref={chainRef}>{order.map((block,index)=><details className="sound-block" key={block}><summary><span className="sound-block-name">{blockNames[block]}</span><span className="sound-block-state">{current.effects[block].enabled?'Enabled':'Bypassed'}</span></summary><fieldset disabled={busy}>
       <label className="check"><input aria-label={`Enable ${block}`} type="checkbox" checked={current.effects[block].enabled} onChange={e=>fx(block,'enabled',e.target.checked)}/>Enabled</label>
+      <div className="sound-block-order"><button aria-label={`Move ${blockNames[block]} earlier`} disabled={index===0} onClick={()=>move(block,-1)}>Move earlier</button><button aria-label={`Move ${blockNames[block]} later`} disabled={index===order.length-1} onClick={()=>move(block,1)}>Move later</button></div>
       {parameters[block].map(p=><label key={p.key}>{p.label}<input aria-label={`${block} ${p.label}`} type="number" disabled={block==='wah'&&p.key===(current.effects.wah.mode==='auto'?'position':'sensitivity')} min={p.min} max={p.max} step={p.step} value={Number((current.effects[block] as unknown as Record<string,unknown>)[p.key])} onChange={e=>{const value=Number(e.target.value);if(Number.isFinite(value)&&value>=p.min&&value<=p.max)fx(block,p.key,value);}}/></label>)}
       {block==='microphone'&&<><label>Microphone placement<select aria-label="Microphone placement" value={current.effects.microphone.placement} onChange={e=>fx('microphone','placement',e.target.value)}><option value="standard">Standard</option><option value="close">Close</option><option value="edge">Edge</option><option value="room">Room</option></select></label><label>Microphone output<select aria-label="Microphone output" value={current.effects.microphone.output} onChange={e=>fx('microphone','output',e.target.value)}><option value="stereo">Stereo</option><option value="mono">Mono</option></select></label></>}
       {block==='drive'&&<label>Drive model<select aria-label="Drive model" value={current.effects.drive.model} onChange={e=>fx('drive','model',e.target.value)}><option value="overdrive">Overdrive</option><option value="distortion">Distortion</option><option value="fuzz">Fuzz</option></select></label>}

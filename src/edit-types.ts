@@ -50,7 +50,10 @@ export interface FxSettings {
   pitch: {enabled:boolean;semitones:number;mix:number};
   drive: {enabled:boolean;model:'overdrive'|'distortion'|'fuzz';drive:number;tone:number;levelDb:number};
   microphone: {enabled:boolean;placement:'standard'|'close'|'edge'|'room';output:'stereo'|'mono'};
+  /** Every block once, in the order the signal passes through them; absent for the default order. */
+  order?: EffectBlock[];
 }
+export type EffectBlock = Exclude<keyof FxSettings, 'order'>;
 export interface TrackSound { voiceId: string|null; presetId: 'clean'|'crunch'|'lead'|'bass'|'gm'; effects: FxSettings }
 export interface SyncAnchor { bar: number; occurrence: number; ratio: number; audioMs: number }
 export interface ReferenceSyncBounds { entryAudioMs: number; exitAudioMs: number }

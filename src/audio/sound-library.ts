@@ -1,5 +1,5 @@
 import { completeSound, defaultEffects, soundProblem } from '../document-settings';
-import type { FxSettings, TrackSound } from '../edit-types';
+import type { EffectBlock, FxSettings, TrackSound } from '../edit-types';
 
 /** A sound the user saved by name, reusable on any track of any score, like GP8's user presets. */
 export interface SoundPresetEntry {name:string;sound:TrackSound}
@@ -21,6 +21,8 @@ function repairSound(value:unknown):TrackSound|null {
   if(!isRecord(value)||!isRecord(value.effects))return null;
   const defaults=defaultEffects() as unknown as Record<string,Record<string,unknown>>,effects:Record<string,unknown>={...defaults};
   for(const [block,settings] of Object.entries(value.effects)){
+    // The order is kept as stored and checked with the rest of the sound.
+    if(block==='order'){effects.order=settings;continue;}
     if(!Object.hasOwn(defaults,block)||!isRecord(settings))return null;
     // Fields this version does not know are dropped; missing ones take their defaults.
     effects[block]=Object.fromEntries(Object.entries(defaults[block]).map(([field,fallback])=>[field,Object.hasOwn(settings,field)?settings[field]:fallback]));
@@ -101,7 +103,7 @@ export function deleteSoundPreset(name:string,storage:PreferenceStorage|undefine
 }
 
 /** The copied sound and pedal, shared by every track's Sound panel in this run. */
-export type CopiedPedal={[Block in keyof FxSettings]:{block:Block;settings:FxSettings[Block]}}[keyof FxSettings];
+export type CopiedPedal={[Block in EffectBlock]:{block:Block;settings:FxSettings[Block]}}[EffectBlock];
 let clipboard:{sound:TrackSound|null;pedal:CopiedPedal|null}={sound:null,pedal:null};
 const clipboardListeners=new Set<()=>void>();
 export const subscribeSoundClipboard=(listener:()=>void)=>{clipboardListeners.add(listener);return()=>{clipboardListeners.delete(listener);};};
@@ -109,7 +111,7 @@ export const soundClipboard=()=>clipboard;
 const setClipboard=(next:typeof clipboard)=>{clipboard=next;clipboardListeners.forEach(listener=>listener());};
 export const copySound=(sound:TrackSound)=>setClipboard({...clipboard,sound:structuredClone(completeSound(sound))});
 export const copiedSound=()=>clipboard.sound;
-export const copyPedal=<Block extends keyof FxSettings>(block:Block,settings:FxSettings[Block])=>setClipboard({...clipboard,pedal:{block,settings:structuredClone(settings)} as CopiedPedal});
+export const copyPedal=<Block extends EffectBlock>(block:Block,settings:FxSettings[Block])=>setClipboard({...clipboard,pedal:{block,settings:structuredClone(settings)} as CopiedPedal});
 export const copiedPedal=()=>clipboard.pedal;
 /** Test isolation only: empties the sound clipboard. */
 export const forgetSoundClipboard=()=>setClipboard({sound:null,pedal:null});

@@ -1,5 +1,5 @@
 import type { model } from '@coderline/alphatab';
-import type { DocumentSettings, FxSettings, SettingsEdit, TrackSound, ChannelMix, PrintLayout, BackingSettings } from './edit-types';
+import type { DocumentSettings, EffectBlock, FxSettings, SettingsEdit, TrackSound, ChannelMix, PrintLayout, BackingSettings } from './edit-types';
 import {defaultEngraving,validateEngravingTracks} from './engraving/projection';
 import {validatePageLayout} from './engraving/page';
 
@@ -24,6 +24,12 @@ export const defaultEffects = (): FxSettings => ({
   wah:{enabled:false,mode:'manual',position:.5,resonance:.5,sensitivity:.5,mix:1},
   octaver:{enabled:false,octaveDown:.5,twoOctavesDown:0,direct:1},pitch:{enabled:false,semitones:12,mix:1},drive:{enabled:false,model:'overdrive',drive:.5,tone:.5,levelDb:0},microphone:{enabled:false,placement:'standard',output:'stereo'},
 });
+/** The blocks in their default order, from the microphone to the reverb, as the native player runs them. */
+export const effectBlocks:readonly EffectBlock[]=['microphone','gate','compressor','wah','octaver','pitch','drive','amp','cabinet','eq','vibrato','phaser','flanger','chorus','tremolo','delay','reverb'];
+/** The order the signal passes through the blocks of `effects`. */
+export const chainOrder=(effects:FxSettings):EffectBlock[]=>effects.order?.length?[...effects.order]:[...effectBlocks];
+/** Whether `order` names every block once, or is empty for the default order. */
+const validOrder=(order:unknown)=>Array.isArray(order)&&(order.length===0||order.length===effectBlocks.length&&effectBlocks.every(block=>order.filter(name=>name===block).length===1));
 /** Adds the effect blocks a sound saved before them lacks, switched off at their defaults, and reads a reverb or
  * delay saved before its models as the original room reverb or digital delay. */
 export const completeSound = (sound: TrackSound): TrackSound => {
@@ -39,7 +45,7 @@ export const delayDivisions:readonly (readonly [number,string])[]=[[.125,'1/32']
 const range=(low:number,high:number)=>({low,high}),one=(...values:(string|number)[])=>({one:values}),unit=range(0,1);
 type FieldRule=ReturnType<typeof range>|ReturnType<typeof one>;
 /** Every effect field and its accepted values, as the native FxSettings::validate checks them. */
-const effectRules:Record<keyof FxSettings,Record<string,FieldRule>>={
+const effectRules:Record<EffectBlock,Record<string,FieldRule>>={
   gate:{thresholdDb:range(-96,0),releaseMs:range(1,1000)},
   compressor:{thresholdDb:range(-60,0),ratio:range(1,20),attackMs:range(.1,200),releaseMs:range(1,2000),makeupDb:range(0,24)},
   amp:{model:one('clean','crunch','lead','bass'),drive:unit,gainDb:range(-24,24)},cabinet:{model:one('open','closed','bass')},
@@ -61,7 +67,8 @@ export function soundProblem(sound: TrackSound): string|null {
   if (!['gm','clean','crunch','lead','bass'].includes(sound.presetId)) return 'Invalid sound preset.';
   if (sound.voiceId!==null && !['gm','green-guitar','black-guitar','darkblack-bass','babyblue-bass'].includes(sound.voiceId)) return 'Unknown instrument voice.';
   const {effects}=completeSound(sound);
-  if (!effects||typeof effects!=='object'||Object.keys(effects).some(block=>!Object.hasOwn(effectRules,block))) return 'Invalid effect parameter.';
+  if (!effects||typeof effects!=='object'||Object.keys(effects).some(block=>block!=='order'&&!Object.hasOwn(effectRules,block))) return 'Invalid effect parameter.';
+  if (Object.hasOwn(effects,'order')&&!validOrder(effects.order)) return 'Invalid effect order.';
   for (const [block,rules] of Object.entries(effectRules)) {
     const settings=(effects as unknown as Record<string,Record<string,unknown>>)[block];
     if (!settings||typeof settings!=='object'||typeof settings.enabled!=='boolean'||Object.keys(settings).length!==Object.keys(rules).length+1) return 'Invalid effect parameter.';

@@ -62,6 +62,11 @@ it('drops a file read that finishes after typing, and a cleared box forgets the 
   fireEvent.change(area,{target:{value:riff.replace('3-------3','5-------5')}});
   await new Promise(resolve=>setTimeout(resolve,20));
   expect(area).toHaveValue(riff.replace('3-------3','5-------5'));
+  // A refused file also supersedes one still loading, so its message stays and the text is kept.
+  fireEvent.change(input,{target:{files:[new File([riff],'slow.txt')]}});
+  fireEvent.change(input,{target:{files:[new File(['-'.repeat(300_000)],'big.txt')]}});
+  await new Promise(resolve=>setTimeout(resolve,20));
+  expect(area).toHaveValue(riff.replace('3-------3','5-------5'));expect(status()).toHaveTextContent('big.txt is larger than 256 KB');
   fireEvent.change(input,{target:{files:[new File([riff],'named.txt')]}});await waitFor(()=>expect(area).toHaveValue(riff));
   fireEvent.change(area,{target:{value:''}});fireEvent.change(area,{target:{value:riff}});
   await waitFor(()=>expect(importButton).toBeEnabled());fireEvent.click(importButton);

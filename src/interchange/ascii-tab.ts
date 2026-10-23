@@ -11,8 +11,12 @@ const lowestString:Record<number,number>={4:28,5:23,6:40,7:35,8:30};
 const standardTunings:Record<number,number[]>={4:[43,38,33,28],5:[43,38,33,28,23],6:[64,59,55,50,45,40],7:[64,59,55,50,45,40,35],8:[64,59,55,50,45,40,35,30]};
 const durations=[1,2,4,8,16,32];
 const settings=new Settings();
-/** Characters that belong in tab: dashes, frets, bar lines, technique signs and spacing. */
-const tabCharacters=/[-\d|hpbrxX/\\~()<>:. *]/;
+/** Characters that belong in tab: dashes, frets, bar lines, technique signs and letters, and spacing. */
+const tabCharacters=/[-\d|hpbrxX/\\~()<>:. *sStTvV^=,]/;
+/** What may follow the last bar line and still be tab rather than a note to the reader. */
+const tailCharacters=/^[-\d|hpbrxX/\\~()<>:.]*$/;
+/** A remark after the tab, such as "x2", "3x" or "(let ring)"; bounded so long lines are checked in linear time. */
+const remark=/\s{1,8}(?:[xX×]\s?\d{1,3}|\d{1,3}\s?[xX×]|\(?[A-Za-z][A-Za-z .,'!]{0,40}\)?)$/;
 
 const fail=(message:string):never=>{throw new Error(message);};
 
@@ -25,20 +29,32 @@ interface Note {string:number;fret:number;start:number;end:number;hammer?:boolea
  */
 function tabLine(line:string):TabLine|null {
   const match=/^\s*([A-Ga-g][#b]?)?\s*\|(.*)$/.exec(line.trimEnd());if(!match)return null;
-  let body=match[2];const last=body.lastIndexOf('|');
-  if(last>=0&&!/^[-\d|hpbrxX/\\~()<>:.]*-[-\d|hpbrxX/\\~()<>:.]*$/.test(body.slice(last+1).trim()))body=body.slice(0,last+1);
+  let body=match[2].replace(remark,'');const last=body.lastIndexOf('|');
+  if(last>=0){const tail=body.slice(last+1).trim();if(!tailCharacters.test(tail)||!tail.includes('-'))body=body.slice(0,last+1);}
   const marks=[...body].filter(char=>char!==' '),tab=marks.filter(char=>tabCharacters.test(char)).length;
   if(!marks.length||!/[-\d]/.test(body)||tab<marks.length*0.8)return null;
   return {name:match[1]??null,body,dashes:body.match(/-/g)?.length??0};
 }
 
-/** True when names run from the lowest string at the top, such as E A D G B e. */
-const lowFirst=(lines:TabLine[])=>/^[A-G]/.test(lines[0].name??'')&&/^[a-g]/.test(lines.at(-1)!.name??'');
+const pitchClass=(name:string)=>(pitchClasses[name[0].toLowerCase()]+(name[1]==='#'?1:name[1]==='b'?11:0))%12;
+
+/**
+ * True when names run from the lowest string at the top. E A D G B e says so by its case; when the case
+ * does not, the order in which neighbouring strings rise by thirds and fourths wins.
+ */
+function lowFirst(lines:TabLine[]):boolean {
+  if(lines.some(line=>!line.name))return false;
+  const upper=(line:TabLine)=>/^[A-G]/.test(line.name!);
+  if(upper(lines[0])!==upper(lines.at(-1)!))return upper(lines[0]);
+  const classes=lines.map(line=>pitchClass(line.name!));
+  const rising=(list:number[])=>list.slice(1).filter((value,index)=>[4,5].includes((value-list[index]+12)%12)).length;
+  return rising(classes)>rising([...classes].reverse());
+}
 
 function tuningFor(lines:TabLine[]):number[] {
   if(lines.some(line=>!line.name))return standardTunings[lines.length];
   const ordered=lowFirst(lines)?lines:[...lines].reverse();
-  const classes=ordered.map(line=>{const name=line.name!;return (pitchClasses[name[0].toLowerCase()]+(name[1]==='#'?1:name[1]==='b'?11:0))%12;});
+  const classes=ordered.map(line=>pitchClass(line.name!));
   // The lowest string takes the highest pitch at most a whole step above the usual one, so lowered
   // tunings such as A standard stay low; each higher string is the next pitch up with its name.
   const limit=lowestString[lines.length]+2,first=limit-((limit-classes[0])%12+12)%12;
@@ -51,6 +67,8 @@ function tuningFor(lines:TabLine[]):number[] {
 function readNotes(text:string,string:number,ignored:{count:number}):Note[] {
   const notes:Note[]=[];let index=0,lastEnd=-2;
   const number=(at:number)=>{const digits=/^\d{1,2}/.exec(text.slice(at,at+2))?.[0]??'';const value=Number(digits);return digits.length===2&&value>FRET_LIMIT?{value:Number(digits[0]),length:1}:{value,length:digits.length};};
+  // A bend or release target may be written in brackets, as in 7b(9)r(7).
+  const target=(at:number)=>{if(text[at]==='('){const inner=number(at+1);if(inner.length&&text[at+1+inner.length]===')')return {value:inner.value,length:inner.length+2};}return number(at);};
   while(index<text.length){
     const char=text[index];
     if(char==='-'||char===' '||char===':'||char==='|'||char==='.'||char==='*'){index++;continue;}
@@ -66,11 +84,11 @@ function readNotes(text:string,string:number,ignored:{count:number}):Note[] {
     }
     if(!note){ignored.count++;index++;continue;}
     // Signs written after a note describe that note, or link it to the next one.
-    if(text[index]==='b'){
-      index++;const target=number(index);index+=target.length;
+    if(text[index]==='b'||text[index]==='^'){
+      index++;const aim=target(index);index+=aim.length;
       // A bend aims above the fret; a lower target is not a bend this import can write.
-      if(!target.length)note.bend=4;else if(target.value>note.fret)note.bend=(target.value-note.fret)*2;else ignored.count++;
-      if(text[index]==='r'){index++;index+=number(index).length;if(note.bend)note.release=true;else ignored.count++;}
+      if(!aim.length)note.bend=4;else if(aim.value>note.fret)note.bend=(aim.value-note.fret)*2;else ignored.count++;
+      if(text[index]==='r'){index++;index+=target(index).length;if(note.bend)note.release=true;else ignored.count++;}
     }
     if(text[index]==='~'){note.vibrato=true;while(text[index]==='~')index++;}
     const link=text[index];
@@ -93,30 +111,29 @@ function clusters(notes:Note[]):{start:number;notes:Note[]}[] {
 }
 
 /**
- * Turns column spacing into rhythm. The step is the widest column count that every gap is close to a whole
- * multiple of. Padding after the last beat of up to one and a half steps makes that beat one step long; longer
- * padding is part of the beat, and padding under a quarter step rules the step out. Each step is then the
- * longest note value that fits every step into the bar; any rest of the bar is a rest.
- * Returns onset and end slots on a grid of 1/grid whole notes, and the bar length in slots.
+ * Turns column spacing into rhythm. The step is the widest column count that every gap between beats is close
+ * to a whole multiple of. A lead-in of up to one step is padding; a longer one is a rest. The grid is the note
+ * value whose bar length is nearest the bar's width in steps while holding every beat. Padding after the last
+ * beat of up to one and a half steps makes it one step long; longer padding lets it ring, at most to the bar's
+ * end. A lone note in the first half of a bar fills the bar. Returns onset and end slots on a grid of 1/grid
+ * whole notes, and the bar length in slots.
  */
 function rhythm(starts:number[],width:number,numerator:number,denominator:number):{slots:number[];end:number;total:number;grid:number} {
-  const last=starts.at(-1)!,trailing=width-last,firstGap=starts.length>1?starts[1]-starts[0]:trailing;
-  // A short lead-in is padding; a long one is a rest before the first beat.
-  const origin=starts[0]<=Math.max(2,firstGap/2)?starts[0]:0;
-  const points=origin<starts[0]?[origin,...starts]:starts;
-  const gaps=points.slice(1).map((point,index)=>point-points[index]);
-  const ending=(step:number)=>trailing<=step*1.5?last+step:width;
-  const fits=(step:number)=>trailing>=step/4&&[...gaps,ending(step)-last].every(gap=>Math.round(gap/step)>=1&&Math.abs(gap/step-Math.round(gap/step))<=0.25);
+  const last=starts.at(-1)!,trailing=width-last,gaps=starts.slice(1).map((start,index)=>start-starts[index]);
+  const lone=gaps.length===0&&starts[0]*2<width;
+  const fits=(step:number)=>gaps.every(gap=>Math.round(gap/step)>=1&&Math.abs(gap/step-Math.round(gap/step))<=0.25);
   let step=1;
-  for(let candidate=Math.max(1,gaps.length?Math.min(...gaps):trailing);candidate>1;candidate--)if(fits(candidate)){step=candidate;break;}
-  const positions=[...starts,ending(step)].map(point=>Math.round((point-origin)/step));
+  if(!gaps.length)step=Math.max(1,trailing);
+  else for(let candidate=Math.min(...gaps);candidate>1;candidate--)if(fits(candidate)){step=candidate;break;}
+  const origin=lone||(gaps.length&&starts[0]<=step)?starts[0]:0;
+  const positions=starts.map(point=>Math.round((point-origin)/step));
   for(let index=1;index<positions.length;index++)positions[index]=Math.max(positions[index],positions[index-1]+1);
-  const steps=positions.at(-1)!;
-  for(const grid of durations.filter(value=>Number.isInteger(numerator*value/denominator))){
-    const total=numerator*grid/denominator;
-    if(steps<=total)return {slots:positions.slice(0,-1),end:steps,total,grid};
-  }
-  return fail('A measure has more beats than fit as 32nd notes. Space the notes out or split the measure.');
+  const need=positions.at(-1)!+1,span=Math.max(need,Math.round((width-origin)/step));
+  const choice=durations.filter(value=>Number.isInteger(numerator*value/denominator)).map(grid=>({grid,total:numerator*grid/denominator}))
+    .filter(option=>option.total>=need).sort((a,b)=>Math.abs(a.total-span)-Math.abs(b.total-span)||a.total-b.total)[0];
+  if(!choice)return fail('A measure has more beats than fit as 32nd notes. Space the notes out or split the measure.');
+  const end=lone?choice.total:trailing<=step*1.5?need:Math.min(choice.total,span);
+  return {slots:positions,end,total:choice.total,grid:choice.grid};
 }
 
 /** Splits a span of grid slots into the longest written values, dotted where that fits. */
@@ -136,36 +153,60 @@ function header(lines:string[],name:string):string|undefined {
   return undefined;
 }
 
-/** Collects runs of tab lines; runs that cannot be a string block, such as a chord chart line, are skipped. */
-function readBlocks(lines:string[]):{blocks:TabLine[][];skipped:number} {
-  const runs:TabLine[][]=[];let current:TabLine[]=[];
-  for(const line of lines){const tab=tabLine(line);if(tab)current.push(tab);else if(current.length){runs.push(current);current=[];}}
-  if(current.length)runs.push(current);
+/**
+ * Collects runs of tab lines; runs that cannot be a string block, such as a chord chart line, are skipped.
+ * When most lines of a run are named strings, unnamed lines at its edges, such as a PM or chord line, are dropped.
+ */
+function readBlocks(lines:string[]):{blocks:TabLine[][];skipped:number;unnamed:number} {
+  const runs:TabLine[][]=[];let current:TabLine[]=[],unnamed=0;
+  const finish=()=>{
+    if(current.filter(line=>line.name).length*2>current.length){
+      let start=0,end=current.length;while(!current[start].name)start++;while(!current[end-1].name)end--;
+      unnamed+=current.length-(end-start);current=current.slice(start,end);
+    }
+    runs.push(current);current=[];
+  };
+  for(const line of lines){const tab=tabLine(line);if(tab)current.push(tab);else if(current.length)finish();}
+  if(current.length)finish();
   // A block needs at least one line that is clearly tab; the others may be dense licks with few dashes.
   const candidates=runs.filter(run=>run.some(line=>line.dashes>=4));
   if(!candidates.length)fail('No tab lines were found. Paste one line per string, such as e|--0--3--|.');
   const blocks=candidates.filter(run=>run.length>=4&&run.length<=8);
   if(!blocks.length)fail('Each tab block needs 4 to 8 string lines.');
   if(blocks.some(run=>run.length!==blocks[0].length))fail('Every tab block must have the same number of strings.');
-  return {blocks,skipped:runs.length-blocks.length};
+  return {blocks,skipped:runs.length-blocks.length,unnamed};
+}
+
+/**
+ * Splits each line of a block into measures at its own bar lines, so a line one column longer does not shift
+ * the others. When the lines disagree on the number of bars, all are split at the columns of the most common count.
+ */
+function measureParts(block:TabLine[]):{segments:string[][];byColumn:boolean} {
+  const own=block.map(line=>line.body.split('|'));
+  const bars=own.map(parts=>parts.length-(parts.at(-1)!.trim()?0:1));
+  if(bars.every(count=>count===bars[0]))return {segments:own,byColumn:false};
+  const tally=new Map<number,number>();for(const count of bars)tally.set(count,(tally.get(count)??0)+1);
+  const common=[...tally].sort((a,b)=>b[1]-a[1]||b[0]-a[0])[0][0],reference=block[bars.indexOf(common)].body;
+  const columns=[...reference].flatMap((char,index)=>char==='|'?[index]:[]);
+  return {segments:block.map(line=>[...columns,line.body.length].map((column,index)=>line.body.slice(index?columns[index-1]+1:0,column))),byColumn:true};
 }
 
 /** Converts ASCII tablature into an editable score: tuning from string names, rhythm from column spacing. */
 export function parseAsciiTab(text:string,fallbackTitle=''):AsciiTabImport {
   if(text.length>TEXT_LIMIT)fail('ASCII tab text is limited to 256 KB.');
-  const lines=text.split(/\r?\n/),{blocks,skipped}=readBlocks(lines),notes:string[]=[];
+  const lines=text.split(/\r?\n/),{blocks,skipped,unnamed}=readBlocks(lines),notes:string[]=[];
   if(skipped)notes.push(`${skipped} ${skipped===1?'line group that is not a string block was':'line groups that are not string blocks were'} skipped`);
+  if(unnamed)notes.push(`${unnamed} unnamed ${unnamed===1?'line beside the named strings was':'lines beside the named strings were'} skipped`);
   const strings=blocks[0].length,tuning=tuningFor(blocks[0]);
   const timeText=header(lines,'time'),time=/^(\d{1,2})\s*\/\s*(\d{1,2})(?!\d)/.exec(timeText??'4/4');
   let numerator=Number(time?.[1]),denominator=Number(time?.[2]);
   if(!time||numerator<1||numerator>32||![1,2,4,8,16,32].includes(denominator)){numerator=4;denominator=4;notes.push(`the time "${timeText}" was not understood, so 4/4 is used`);}
   const tempoText=header(lines,'tempo'),tempoMatch=/^\d+(\.\d+)?/.exec(tempoText??'120');let tempo=Number(tempoMatch?.[0]);
   if(!tempoMatch||tempo<1||tempo>999){tempo=120;notes.push(`the tempo "${tempoText}" was not understood, so 120 BPM is used`);}
-  const ignored={count:0},measures:{width:number;notes:Note[]}[]=[];
+  const ignored={count:0},measures:{width:number;notes:Note[]}[]=[];let byColumn=false;
   for(const block of blocks){
-    // Each line is split on its own bar lines, so a line one column longer does not shift the others.
-    const segments=block.map(line=>line.body.split('|'));
-    const count=Math.max(...segments.map(parts=>parts.length)),reversed=lowFirst(block);
+    const parts=measureParts(block),segments=parts.segments;byColumn||=parts.byColumn;
+    const count=Math.max(...segments.map(line=>line.length)),reversed=lowFirst(block);
     for(let index=0;index<count;index++){
       const parts=segments.map(line=>line[index]??'');
       // Doubled bar lines and the space before the first bar line hold nothing.
@@ -175,6 +216,7 @@ export function parseAsciiTab(text:string,fallbackTitle=''):AsciiTabImport {
       measures.push({width:Math.max(...parts.map(part=>part.length)),notes:found});
     }
   }
+  if(byColumn)notes.push('some lines have a different number of bar lines, so their notes were placed by column');
   if(!measures.length)fail('No measures were found between the bar lines.');
   if(measures.length>MEASURE_LIMIT)fail(`ASCII tab import is limited to ${MEASURE_LIMIT} measures.`);
   const title=header(lines,'title')??fallbackTitle,artist=header(lines,'artist')??'';

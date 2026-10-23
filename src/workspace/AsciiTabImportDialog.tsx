@@ -32,9 +32,10 @@ export function AsciiTabImportDialog({busy,onImport,onClose}:{busy:boolean;onImp
   };
   const load=(chosen:File|undefined)=>{
     if(!chosen)return;
-    setImportProblem(null);
+    // A newer choice, even a refused one, supersedes any file still loading.
+    const request=++reading.current;setImportProblem(null);
     if(chosen.size>FILE_LIMIT){setFileProblem(`${chosen.name} is larger than 256 KB, so it was not loaded.`);return;}
-    const request=++reading.current,reader=new FileReader();
+    const reader=new FileReader();
     reader.onload=()=>{if(request!==reading.current)return;setFileProblem(null);setSource(chosen.name);setText(String(reader.result??''));area.current?.focus();};
     reader.onerror=()=>{if(request===reading.current)setFileProblem(`${chosen.name} could not be read.`);};
     reader.readAsText(chosen);

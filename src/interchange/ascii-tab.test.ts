@@ -86,6 +86,69 @@ it('reads evenly spaced notes with any padding as even values',()=>{
   expect(beats(low('5h7-------------'),0)).toEqual([[8,0,'1:5'],[2,1,'1:7'],[8,0,'rest']]);
 });
 
+it('reads even spacing with any lead-in or padding as even values',()=>{
+  const low=(body:string)=>beats(parseAsciiTab(block(...Array(5).fill(`|${'-'.repeat(body.length)}|`),`|${body}|`)).score,0);
+  const even=(count:number,duration:number)=>Array(count).fill([duration,0,'1:0']);
+  expect(low('---0---0---0---0---')).toEqual(even(4,4));
+  expect(low('----0----0----0----0----')).toEqual(even(4,4));
+  expect(low('-0-0-0-0-0-0-0-0---')).toEqual(even(8,8));
+  expect(low('-0--0--0--0--0--0--0--0-----')).toEqual(even(8,8));
+  expect(low('-0--0--0--0------')).toEqual(even(4,4));
+  expect(low('---0---0---')).toEqual(even(2,2));
+  expect(low('-----0-----')).toEqual(even(1,1));
+  // A single note late in the bar keeps its rest.
+  expect(low('------------0---')).toEqual([[2,1,'rest'],[4,0,'1:0']]);
+});
+
+it('keeps strings that use technique letters, and drops unnamed lines beside named strings',()=>{
+  const rest=['B','G','D','A','E'].map(name=>`${name}|-----------------|`);
+  const dense=parseAsciiTab(block('e|-5s7-5s7-5s7-5s7-|',...rest));
+  expect([dense.summary.strings,dense.summary.tuning,dense.summary.ignored]).toEqual([6,[64,59,55,50,45,40],4]);
+  expect(beats(dense.score,0).filter(beat=>beat[2]!=='rest').length).toBe(8);
+  const six=['e','B','G','D','A','E'].map(name=>`${name}|0-------|`);
+  for(const extra of ['  |PM------------------|','|Am--------|C---------|']){
+    const result=parseAsciiTab(block(extra,...six));
+    expect([result.summary.strings,result.summary.tuning,result.summary.notes]).toEqual([6,[64,59,55,50,45,40],['1 unnamed line beside the named strings was skipped']]);
+  }
+});
+
+it('reads bracketed bend targets and caret bends',()=>{
+  const line=(body:string)=>parseAsciiTab(block(`e|${body}|`,...['B','G','D','A','E'].map(name=>`${name}|${'-'.repeat(body.length)}|`)));
+  for(const body of ['--7b(9)r(7)----','--7^9-----------']){
+    const {score,summary}=line(body);
+    const notes=score.tracks[0].staves[0].bars[0].voices[0].beats.flatMap(beat=>beat.notes);
+    expect([summary.ignored,notes.length,notes[0].fret,notes[0].hasBend,notes[0].isGhost]).toEqual([0,1,7,true,false]);
+  }
+});
+
+it('orders all-uppercase names by their intervals',()=>{
+  const bass=parseAsciiTab(block('E|-0-0-----|','A|-----3-3-|','D|---------|','G|---------|'));
+  expect(bass.summary.tuning).toEqual([43,38,33,28]);
+  expect(beats(bass.score,0).filter(beat=>beat[2]!=='rest').map(beat=>beat[2])).toEqual(['1:0','1:0','2:3','2:3']);
+  expect(parseAsciiTab(block(...['E','A','D','G','B','E'].map(name=>`${name}|0-------|`))).summary.tuning).toEqual([64,59,55,50,45,40]);
+  expect(parseAsciiTab(block(...['E','B','G','D','A','E'].map(name=>`${name}|0-------|`))).summary.tuning).toEqual([64,59,55,50,45,40]);
+});
+
+it('places notes by column when a line misses a bar line, and keeps tab before a trailing remark',()=>{
+  const {score,summary}=parseAsciiTab(block('e|-----|-----|-----|','B|--1--------|--3--|',...['G','D','A','E'].map(name=>`${name}|-----|-----|-----|`)));
+  expect(summary.measures).toBe(3);
+  expect(summary.notes).toEqual(['some lines have a different number of bar lines, so their notes were placed by column']);
+  expect(beats(score,2).filter(beat=>beat[2]!=='rest').map(beat=>beat[2])).toEqual(['5:3']);
+  const open=(top:string)=>parseAsciiTab(block(top,...['B','G','D','A','E'].map(name=>`${name}|-----|--------|`)));
+  const notes=(result:ReturnType<typeof parseAsciiTab>,bar:number)=>beats(result.score,bar).filter(beat=>beat[2]!=='rest').map(beat=>beat[2]);
+  const ring=open('e|--0--|--5--7-- (let ring)');
+  expect([notes(ring,0),notes(ring,1),ring.summary.ignored]).toEqual([['6:0'],['6:5','6:7'],0]);
+  const repeat=parseAsciiTab(block('e|--0--3--  x2',...['B','G','D','A','E'].map(name=>`${name}|--------`)));
+  expect([notes(repeat,0),repeat.summary.ignored]).toEqual([['6:0','6:3'],0]);
+});
+
+it('checks a long line after the last bar in linear time',()=>{
+  const tail='-'.repeat(40_000)+'q';
+  const started=performance.now();
+  expect(()=>parseAsciiTab(block(...Array(6).fill(`|0-------|${tail}`)))).not.toThrow();
+  expect(performance.now()-started).toBeLessThan(500);
+});
+
 it('keeps dense lines, lines of uneven length, and ignores notes written beside the tab',()=>{
   const {score,summary}=parseAsciiTab(block(
     '|Am--|C---|G---|F---|','',

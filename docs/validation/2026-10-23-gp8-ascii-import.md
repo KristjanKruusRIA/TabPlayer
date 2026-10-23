@@ -91,7 +91,19 @@ GP8 imports ASCII tablature text into an editable score. This slice adds an ASCI
   - file reads raced with typing;
   - the dialog could overflow the screen.
   
-  It also flagged missing tests for library metadata, native refusal and the size limit. The fixes were checked by the tests above, not by a second review.
+  It also flagged missing tests for library metadata, native refusal and the size limit.
+- **Second review:** a second adversarial review of those fixes found nine more problems, all fixed with regression tests:
+  - evenly spaced notes with a lead-in or long padding still got dotted values, 32nd rests or halved durations. The step now comes from the gaps between notes only, a lead-in of up to one step is padding, and the grid is the one nearest the bar's width that holds every beat;
+  - a dense line using `s` or other technique letters was dropped, importing a 5-string bass;
+  - a `PM` or chord line just above named strings became a seventh string. Unnamed lines at the edge of a named block are now skipped and reported;
+  - `7b(9)r(7)` became ghost notes, and `7^9` became two notes;
+  - all-uppercase names written lowest-first (`E A D G`) were reversed. The order is now chosen by intervals when the case does not settle it;
+  - a line missing one bar line shifted later notes into the wrong measure. Such blocks are now split by column, with a status note;
+  - a remark such as `x2` or `(let ring)` after an open-ended line became notes or hid the last measure;
+  - the check of text after the last bar line was quadratic (about 0.5 s for a 40,000-character tail). It is now linear;
+  - a refused large file did not cancel an earlier file that was still loading.
+
+  Verification after these fixes: full `vitest` 3,411 tests, with the load-sensitive `tuning-ui`, `WorkspaceApp`, `corpus` and `library/content` files passing alone; `tsc`; and the desktop `parity-ascii-import.mjs` and `parity-command-palette.mjs` on a rebuilt desktop-test app.
 
 ## Limits
 - F05 is partial:

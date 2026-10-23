@@ -19,7 +19,7 @@
     "value": "088b973cea94bde876859c7e6efadb4dd23da64a",
     "accepted_source_revision": "088b973cea94bde876859c7e6efadb4dd23da64a",
     "documentation_revision": null,
-    "documentation_status": "2026-10-21 update on feat/gp8-parity: F13 missing -> partial, W05 missing -> implemented, F03/F04/D01/D02 evidence refreshed. Earlier P17/P18 checkpoint text is kept in previous_checkpoint and provenance. 2026-10-22: F17 SVG export missing -> implemented. 2026-10-22: F16 PNG export missing -> partial. 2026-10-22: D20 export file-name tokens missing -> partial. 2026-10-22: D20 one file per track added; D20 stays partial. 2026-10-22: S03 track reorder missing -> partial. 2026-10-22: S03 track duplicate added (still partial). 2026-10-22: S03 track color added (still partial). 2026-10-22: T28 wah gestures missing -> partial. 2026-10-22: T27 sustain pedal missing -> partial. 2026-10-22: F14 ASCII tablature export missing -> partial. 2026-10-22: A20 track focus missing -> partial. 2026-10-22: D10 header and footer fields missing -> partial. 2026-10-22: T05 picking and strumming patterns missing -> partial. 2026-10-22: N09 multi-voice selection ties missing -> partial. 2026-10-22: L05 score error display missing -> partial. 2026-10-22: L06 new score author defaults missing -> partial. 2026-10-22: L07 default view preferences missing -> partial. 2026-10-22: W18 command palette missing -> partial. 2026-10-23: F05 ASCII tab import missing -> partial. 2026-10-23: W21 help and update status missing -> partial. 2026-10-23: W22 expression text and action list missing -> partial. 2026-10-23: U13 instrument view selected beat, bar and next-beat focus missing -> partial. 2026-10-23: U14 left-handed neck and neck + keys view missing -> partial. 2026-10-23: A10 flanger and phaser and A11 tremolo and vibrato missing -> partial. 2026-10-23: A13 wah and auto-wah missing -> partial. 2026-10-23: A12 octaver and pitch shift missing -> partial.",
+    "documentation_status": "2026-10-21 update on feat/gp8-parity: F13 missing -> partial, W05 missing -> implemented, F03/F04/D01/D02 evidence refreshed. Earlier P17/P18 checkpoint text is kept in previous_checkpoint and provenance. 2026-10-22: F17 SVG export missing -> implemented. 2026-10-22: F16 PNG export missing -> partial. 2026-10-22: D20 export file-name tokens missing -> partial. 2026-10-22: D20 one file per track added; D20 stays partial. 2026-10-22: S03 track reorder missing -> partial. 2026-10-22: S03 track duplicate added (still partial). 2026-10-22: S03 track color added (still partial). 2026-10-22: T28 wah gestures missing -> partial. 2026-10-22: T27 sustain pedal missing -> partial. 2026-10-22: F14 ASCII tablature export missing -> partial. 2026-10-22: A20 track focus missing -> partial. 2026-10-22: D10 header and footer fields missing -> partial. 2026-10-22: T05 picking and strumming patterns missing -> partial. 2026-10-22: N09 multi-voice selection ties missing -> partial. 2026-10-22: L05 score error display missing -> partial. 2026-10-22: L06 new score author defaults missing -> partial. 2026-10-22: L07 default view preferences missing -> partial. 2026-10-22: W18 command palette missing -> partial. 2026-10-23: F05 ASCII tab import missing -> partial. 2026-10-23: W21 help and update status missing -> partial. 2026-10-23: W22 expression text and action list missing -> partial. 2026-10-23: U13 instrument view selected beat, bar and next-beat focus missing -> partial. 2026-10-23: U14 left-handed neck and neck + keys view missing -> partial. 2026-10-23: A10 flanger and phaser and A11 tremolo and vibrato missing -> partial. 2026-10-23: A13 wah and auto-wah missing -> partial. 2026-10-23: A12 octaver and pitch shift missing -> partial. 2026-10-23: A05 user sound library missing -> implemented; A37 copy and paste of sounds and pedals missing -> partial.",
     "provenance": "Root locally accepts P16 source 447d2a9240dc5727ff0679b5b0f84dd7107db603; delivery is pending and the source is not yet pushed at this checkpoint. The final versioned tempo report supports the bounded source/native/current Windows/GP-publication/visual scope. Proprietary GP bracket import/export and playback clipping remain unverified, and the report retains audible, platform and shipping limits. This documentation audit executes no runtime or Git/network operation. The unchanged CI checkpoint belongs to historical Library source only and supplies no P16/current-head CI proof. 2026-10-16 P17/P18 checkpoint: root locally accepts source a87bae29deb08e31a8974d6d2ed390e7b5adca0b for the declared local pitch/filter scope after the frozen 57-step functional workflow at be9e61aa2383974821e7ecf70899e7f755f74f53 and sole 17-step/four-frame targeted confirmation at a87bae29deb08e31a8974d6d2ed390e7b5adca0b. The final UI source has its own admitted diagnostic build; the coherent 2647/617 whole-suite evidence belongs to earlier product source 4a01c341eca58cb25f52c89175ba1fb8c14ee803, not a rerun at this later source. The immutable visual receipt retains inherited observer metadata; the final report binds its additive provenance corrigendum and distinguishes current source/executable/admission/resource/log identities. P17 is implemented within declared local numeric scope and P18 remains partial without vocal/center/channel separation. P16 remains reviewed partial; GP bracket import/export and playback clipping remain unverified. Physical audio, original-GP8, macOS/Linux and shipping acceptance remain separate. Independent final document/adoption review and local documentation delivery/push remain pending; no current-head CI result is supplied and the unchanged CI object remains historical Library evidence. This documentation audit executes no runtime/build, Git or network operation.",
     "previous_accepted_checkpoint": "447d2a9240dc5727ff0679b5b0f84dd7107db603",
     "ci_checkpoint": {
@@ -77,29 +77,29 @@
       "unverified": 8
     },
     "current_dispositions": {
-      "implemented": 80,
-      "partial": 119,
-      "missing": 51,
+      "implemented": 81,
+      "partial": 120,
+      "missing": 49,
       "unverified": 8
     },
-    "evidence_reviewed_total": 135,
+    "evidence_reviewed_total": 137,
     "evidence_reviewed": {
-      "implemented": 38,
-      "partial": 93,
+      "implemented": 39,
+      "partial": 94,
       "missing": 0,
       "unverified": 4
     },
-    "baseline_not_reaudited_total": 123,
+    "baseline_not_reaudited_total": 121,
     "baseline_not_reaudited": {
       "implemented": 42,
       "partial": 26,
-      "missing": 51,
+      "missing": 49,
       "unverified": 4
     },
-    "status_changed_total": 100,
+    "status_changed_total": 102,
     "transition_counts": {
-      "missing -> implemented": 24,
-      "missing -> partial": 71,
+      "missing -> implemented": 25,
+      "missing -> partial": 72,
       "partial -> implemented": 5
     }
   },
@@ -1267,6 +1267,24 @@
       "start_line": 93,
       "end_line": 100,
       "kind": "validation_report"
+    },
+    "sound_library_behavior": {
+      "path": "docs/validation/2026-10-23-gp8-sound-library.md",
+      "start_line": 5,
+      "end_line": 26,
+      "kind": "validation_report"
+    },
+    "sound_library_evidence": {
+      "path": "docs/validation/2026-10-23-gp8-sound-library.md",
+      "start_line": 28,
+      "end_line": 75,
+      "kind": "validation_report"
+    },
+    "sound_library_limits": {
+      "path": "docs/validation/2026-10-23-gp8-sound-library.md",
+      "start_line": 77,
+      "end_line": 83,
+      "kind": "validation_report"
     }
   },
   "evidence_file_sha256": {
@@ -1344,7 +1362,8 @@
     "docs/validation/2026-10-23-gp8-instrument-handedness.md": "aaad812639fcf39ae18e4c83b6a06435f0c4e847c9bd28024725fb1fe212a7e3",
     "docs/validation/2026-10-23-gp8-modulation-effects.md": "b702125ad6ced0669fe626d0df405a84fd907dfe38bdc6a176a122b955c61dbc",
     "docs/validation/2026-10-23-gp8-wah.md": "c6658aa1ded16dd8ac8302e4ca12d10307e8f20be0c34fe0c2ecf24fc7b7b3d5",
-    "docs/validation/2026-10-23-gp8-pitch-effects.md": "b51b4267572d0cb1154e29a3b8c5276220b1329129e6da1b5629158bc4612bb8"
+    "docs/validation/2026-10-23-gp8-pitch-effects.md": "b51b4267572d0cb1154e29a3b8c5276220b1329129e6da1b5629158bc4612bb8",
+    "docs/validation/2026-10-23-gp8-sound-library.md": "5616fe4ab75ecb0c088de4cb0369185965f6078cb00b425693c02e50a90ebe12"
   },
   "next_open_families": [
     {
@@ -5570,12 +5589,16 @@
       "acceptance_required": "Save/reuse/rename/delete an independent preset across documents.",
       "runtime_rechecked": false,
       "historical_status": "missing",
-      "current_status": "missing",
-      "assessment": "baseline_not_reaudited",
-      "current_proven_status": null,
-      "current_behavior": "Document settings persist one configured sound, without reusable library.",
-      "remaining_gap": "Not re-audited in this delivery-progress audit. The original baseline behavior, gap and acceptance remain authoritative historical context; this is not a new current proof.",
-      "current_evidence": [],
+      "current_status": "implemented",
+      "assessment": "evidence_reviewed",
+      "current_proven_status": "implemented",
+      "current_behavior": "The Sound task’s My sounds library saves the track’s sound under a name (1–60 characters, case-insensitive replace), lists saved sounds by name, applies one to any track of any score as one undoable sound edit, renames, and deletes after an inline confirmation. It is stored per user in the app’s web storage, read afresh on every change so other windows’ sounds are kept, kept for the run when storage refuses writes, and repaired on reading, dropping sounds the native player would reject. Desktop runs over three launches confirm save, apply, persistence and a stored delete.",
+      "remaining_gap": "Stored in WebView storage rather than a portable settings file; no preset import or export; no comparison with GP8’s own preset manager.",
+      "current_evidence": [
+        "sound_library_behavior",
+        "sound_library_evidence",
+        "sound_library_limits"
+      ],
       "runtime_rechecked_by_this_audit": false
     },
     {
@@ -9621,12 +9644,16 @@
       "acceptance_required": "Duplicate and copy/paste sound/effect instances without coupling their parameters.",
       "runtime_rechecked": false,
       "historical_status": "missing",
-      "current_status": "missing",
-      "assessment": "baseline_not_reaudited",
-      "current_proven_status": null,
-      "current_behavior": "Fixed one-sound/one-block schema cannot duplicate a pedal or transfer a complete named sound.",
-      "remaining_gap": "Not re-audited in this delivery-progress audit. The original baseline behavior, gap and acceptance remain authoritative historical context; this is not a new current proof.",
-      "current_evidence": [],
+      "current_status": "partial",
+      "assessment": "evidence_reviewed",
+      "current_proven_status": "partial",
+      "current_behavior": "Copy sound and Paste sound copy a whole track sound (voice, preset and every pedal) to another track, and every pedal has Copy pedal and Paste pedal, enabled only on the same kind of pedal and changing only it. Copies are independent snapshots and each paste is one undoable sound edit; desktop runs confirm a pasted tremolo changes only the bass’s tremolo and Paste sound records the whole sound.",
+      "remaining_gap": "The fixed signal chain has one instance of each pedal, so a pedal cannot be duplicated as a second instance; the clipboard lasts until TabPlayer closes and is not the system clipboard.",
+      "current_evidence": [
+        "sound_library_behavior",
+        "sound_library_evidence",
+        "sound_library_limits"
+      ],
       "runtime_rechecked_by_this_audit": false
     }
   ],

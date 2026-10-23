@@ -7,7 +7,7 @@ const executable=resolve(directory,'tabplayer.exe');
 export function launch(environment={}) {
   const sessionDirectory=environment.TABPLAYER_TEST_SESSION_DIR ?? process.env.TABPLAYER_TEST_SESSION_DIR ?? mkdtempSync(resolve(directory,'session-'));
   return Number(execFileSync('powershell.exe',['-NoProfile','-Command','$app=Start-Process -FilePath $env:TABPLAYER_SMOKE_EXE -WindowStyle Hidden -PassThru; $app.Id'],{
-    encoding:'utf8',env:{...process.env,...environment,TABPLAYER_SMOKE_EXE:executable,TABPLAYER_DESKTOP_TEST:'1',TABPLAYER_TEST_SESSION_DIR:sessionDirectory,WEBVIEW2_USER_DATA_FOLDER:resolve(directory,`profile-${Date.now()}`),WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS:'--remote-debugging-port=9223'}
+    encoding:'utf8',env:{...process.env,...environment,TABPLAYER_SMOKE_EXE:executable,TABPLAYER_DESKTOP_TEST:'1',TABPLAYER_TEST_SESSION_DIR:sessionDirectory,WEBVIEW2_USER_DATA_FOLDER:environment.WEBVIEW2_USER_DATA_FOLDER??resolve(directory,`profile-${Date.now()}`),WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS:'--remote-debugging-port=9223'}
   }).trim());
 }
 export function stop(id) {

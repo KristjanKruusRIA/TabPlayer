@@ -26,6 +26,37 @@ export const defaultEffects = (): FxSettings => ({
 });
 /** Adds the effect blocks a sound saved before them lacks, switched off at their defaults. */
 export const completeSound = (sound: TrackSound): TrackSound => ({...sound,effects:{...defaultEffects(),...sound.effects}});
+const range=(low:number,high:number)=>({low,high}),one=(...values:(string|number)[])=>({one:values}),unit=range(0,1);
+type FieldRule=ReturnType<typeof range>|ReturnType<typeof one>;
+/** Every effect field and its accepted values, as the native FxSettings::validate checks them. */
+const effectRules:Record<keyof FxSettings,Record<string,FieldRule>>={
+  gate:{thresholdDb:range(-96,0),releaseMs:range(1,1000)},
+  compressor:{thresholdDb:range(-60,0),ratio:range(1,20),attackMs:range(.1,200),releaseMs:range(1,2000),makeupDb:range(0,24)},
+  amp:{model:one('clean','crunch','lead','bass'),drive:unit,gainDb:range(-24,24)},cabinet:{model:one('open','closed','bass')},
+  eq:{lowDb:range(-24,24),midDb:range(-24,24),highDb:range(-24,24),midHz:range(200,5000)},
+  chorus:{rateHz:range(.1,8),depthMs:range(0,20),mix:unit},
+  wah:{mode:one('manual','auto'),position:unit,resonance:unit,sensitivity:unit,mix:unit},
+  octaver:{octaveDown:unit,twoOctavesDown:unit,direct:unit},pitch:{semitones:range(-24,24),mix:unit},
+  flanger:{rateHz:range(.05,5),depthMs:range(0,10),feedback:range(-.9,.9),mix:unit},
+  phaser:{rateHz:range(.05,5),depth:unit,feedback:range(0,.9),stages:one(2,4,6,8),mix:unit},
+  tremolo:{rateHz:range(.1,20),depth:unit,shape:one('sine','square')},vibrato:{rateHz:range(1,14),depthCents:range(0,100)},
+  delay:{quarterNotes:one(.125,.25,.5,1,2,4),feedback:range(0,.9),mix:unit},reverb:{room:unit,damping:unit,mix:unit},
+};
+const fits=(value:unknown,rule:FieldRule)=>'one' in rule?rule.one.includes(value as string|number):typeof value==='number'&&Number.isFinite(value)&&value>=rule.low&&value<=rule.high;
+/** Why a sound cannot be applied, or null. It is checked as completed with any blocks it lacks, against the native rules. */
+export function soundProblem(sound: TrackSound): string|null {
+  if (!sound||typeof sound!=='object'||Object.keys(sound).sort().join()!=='effects,presetId,voiceId'||!sound.effects||typeof sound.effects!=='object') return 'Invalid sound.';
+  if (!['gm','clean','crunch','lead','bass'].includes(sound.presetId)) return 'Invalid sound preset.';
+  if (sound.voiceId!==null && !['gm','green-guitar','black-guitar','darkblack-bass','babyblue-bass'].includes(sound.voiceId)) return 'Unknown instrument voice.';
+  const {effects}=completeSound(sound);
+  if (!effects||typeof effects!=='object'||Object.keys(effects).some(block=>!Object.hasOwn(effectRules,block))) return 'Invalid effect parameter.';
+  for (const [block,rules] of Object.entries(effectRules)) {
+    const settings=(effects as unknown as Record<string,Record<string,unknown>>)[block];
+    if (!settings||typeof settings!=='object'||typeof settings.enabled!=='boolean'||Object.keys(settings).length!==Object.keys(rules).length+1) return 'Invalid effect parameter.';
+    for (const [field,rule] of Object.entries(rules)) if (!Object.hasOwn(settings,field)||!fits(settings[field],rule)) return 'Invalid effect parameter.';
+  }
+  return null;
+}
 export const defaultPrintLayout = (): PrintLayout => ({paper:'A4',orientation:'portrait',marginMm:15,scale:1,profile:'ScoreTab'});
 export const defaultDocumentSettings = (): DocumentSettings => ({sounds:{},mixes:{},backing:null,print:defaultPrintLayout(),engraving:defaultEngraving(),page:null});
 
@@ -63,14 +94,9 @@ export function applySettingsEdit(settings: DocumentSettings, edit: SettingsEdit
       validateMix(edit.mix); settings.mixes[edit.trackId]=structuredClone(edit.mix); break;
     case 'setTrackSound':
       if (!trackIds.includes(edit.trackId)) throw new Error('Select an existing track.');
-      if (!['gm','clean','crunch','lead','bass'].includes(edit.sound.presetId)) throw new Error('Invalid sound preset.');
       {
-        const sound=completeSound(edit.sound);
-        for(const block of Object.values(sound.effects)) for(const value of Object.values(block)) if(typeof value==='number' && !Number.isFinite(value)) throw new Error('Invalid effect parameter.');
-        const {wah,octaver,pitch}=sound.effects,unit=(...values:number[])=>values.every(value=>value>=0&&value<=1);
-        if(!unit(wah.position,wah.resonance,wah.sensitivity,wah.mix,octaver.octaveDown,octaver.twoOctavesDown,octaver.direct,pitch.mix) || pitch.semitones< -24 || pitch.semitones>24) throw new Error('Invalid effect parameter.');
-        if(![2,4,6,8].includes(sound.effects.phaser.stages) || !['sine','square'].includes(sound.effects.tremolo.shape) || !['manual','auto'].includes(sound.effects.wah.mode)) throw new Error('Invalid effect parameter.');
-        settings.sounds[edit.trackId]=structuredClone(sound); break;
+        const problem=soundProblem(edit.sound);if(problem)throw new Error(problem);
+        settings.sounds[edit.trackId]=structuredClone(completeSound(edit.sound)); break;
       }
     case 'setBacking': {
       const backing=edit.backing;

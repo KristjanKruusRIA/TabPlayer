@@ -16,6 +16,7 @@ export function soundPreset(presetId:TrackSound['presetId'],voiceId:string|null=
 }
 type NumericControl={key:string;label:string;min:number;max:number;step:number};
 const noSubscribe=()=>()=>{},noState=()=>null;
+const presetIds=['gm','clean','crunch','lead','bass'] as const,presetName=(id:string)=>id==='gm'?'Bypass':id[0].toUpperCase()+id.slice(1);
 const blockNames:Record<keyof FxSettings,string>={gate:'Gate',compressor:'Compressor',wah:'Wah',octaver:'Octaver',pitch:'Pitch shift',amp:'Amp',cabinet:'Cabinet',eq:'EQ',vibrato:'Vibrato',phaser:'Phaser',flanger:'Flanger',chorus:'Chorus',tremolo:'Tremolo',delay:'Delay',reverb:'Reverb'};
 const parameters:Record<keyof FxSettings,NumericControl[]>={
   gate:[{key:'thresholdDb',label:'Threshold (dB)',min:-96,max:0,step:1},{key:'releaseMs',label:'Release (ms)',min:1,max:1000,step:1}],
@@ -34,26 +35,57 @@ const parameters:Record<keyof FxSettings,NumericControl[]>={
   delay:[{key:'feedback',label:'Feedback',min:0,max:.9,step:.01},{key:'mix',label:'Mix',min:0,max:1,step:.01}],
   reverb:[{key:'room',label:'Room',min:0,max:1,step:.01},{key:'damping',label:'Damping',min:0,max:1,step:.01},{key:'mix',label:'Mix',min:0,max:1,step:.01}],
 };
-export function SoundPanel({trackId,sound,onEdit,playback,busy=false}:{trackId:string;sound?:TrackSound;onEdit:(edit:EditCommand)=>void|Promise<void>;playback?:NativePlaybackController|null;busy?:boolean}) {
+export function SoundPanel({trackId,sound,onEdit,playback,busy=false,shown=true}:{trackId:string;sound?:TrackSound;onEdit:(edit:EditCommand)=>void|Promise<void>;playback?:NativePlaybackController|null;busy?:boolean;shown?:boolean}) {
   const playbackState=useSyncExternalStore(playback?.subscribe??noSubscribe,playback?.getState??noState);
   const current=completeSound(sound??soundPreset('gm'));const [devices,setDevices]=useState<AudioDeviceInfo[]>([]);const [error,setError]=useState<string|null>(null);
   useEffect(()=>{let alive=true;if(playback)void playback.devices().then(items=>{if(alive)setDevices(items);}).catch(e=>{if(alive)setError(String(e));});return()=>{alive=false;};},[playback]);
-  /** Applies `next` as one undoable edit; resolves to whether it was accepted. */
-  const save=(next:TrackSound)=>Promise.resolve(onEdit({type:'setTrackSound',trackId,sound:next})).then(()=>true,e=>{setError(String(e));return false;});
+  /** Records `next` as one undoable edit; resolves to whether it was accepted. */
+  const record=(next:TrackSound)=>Promise.resolve(onEdit({type:'setTrackSound',trackId,sound:next})).then(()=>true,e=>{setError(String(e));return false;});
+  // Hosts may give a playback surface without sound previews.
+  const previewer=playback&&typeof playback.soundPreview==='function'?playback:null;
+  const [previewChoice,setPreviewChoice]=useState(''),[previewLabel,setPreviewLabel]=useState(''),previewRequest=useRef(0),previewSelect=useRef<HTMLSelectElement>(null);
+  // The controller may end a preview itself, with its track or document, so it decides what is shown.
+  const playing=previewer?.soundPreview(),activePreview=playing?.track===trackId?playing:null,showingPreview=!!previewChoice&&!!activePreview;
+  /** Ends this track's preview; a preview still being started is dropped. */
+  const endPreview=()=>{previewRequest.current++;setPreviewChoice('');return previewer&&previewer.soundPreview()?.track===trackId?Promise.resolve(previewer.previewSound(trackId,null)).catch(e=>setError(String(e))):Promise.resolve();};
+  /** Applies `next` as one undoable edit. A preview ends at once, so the edit is what plays and edits keep their order. */
+  const save=(next:TrackSound)=>{if(previewChoice||activePreview){void endPreview();setStatus('Preview ended.');}return record(next);};
   const fx=(block:keyof FxSettings,key:string,value:unknown)=>{const next=structuredClone(current);Object.assign(next.effects[block],{[key]:value});save(next);};
   const library=useSyncExternalStore(subscribeSoundLibrary,soundLibrary),clipboard=useSyncExternalStore(subscribeSoundClipboard,soundClipboard);
   const [chosen,setChosen]=useState(''),[name,setName]=useState(''),[status,setStatus]=useState(''),[confirming,setConfirming]=useState(false);
   const entry=library.find(item=>item.name===chosen),savedSelect=useRef<HTMLSelectElement>(null);
   // Messages and an open confirmation belong to the track they were shown for.
   const shownTrack=useRef(trackId);
-  useEffect(()=>{shownTrack.current=trackId;setStatus('');setConfirming(false);},[trackId]);
+  useEffect(()=>{shownTrack.current=trackId;setStatus('');setConfirming(false);setPreviewChoice('');},[trackId]);
+  // A preview lasts only while its track's panel is shown.
+  useEffect(()=>()=>{if(previewer?.soundPreview()?.track===trackId)void Promise.resolve(previewer.previewSound(trackId,null)).catch(()=>{});},[previewer,trackId]);
+  useEffect(()=>{if(!shown&&previewer?.soundPreview()?.track===trackId){previewRequest.current++;setPreviewChoice('');void Promise.resolve(previewer.previewSound(trackId,null)).catch(e=>setError(String(e)));}},[shown,previewer,trackId]);
+  // A preview the player ended itself leaves nothing to keep.
+  const previewGone=!!previewChoice&&!activePreview;
+  useEffect(()=>{if(previewGone)setPreviewChoice('');},[previewGone]);
+  const choosePreview=(value:string)=>{
+    if(!previewer)return;
+    if(!value){void endPreview().then(()=>setStatus('Back to this track’s sound.'));return;}
+    const split=value.indexOf(':'),kind=value.slice(0,split),id=value.slice(split+1),saved=library.find(item=>item.name===id);
+    const sound=kind==='preset'?soundPreset(id as TrackSound['presetId'],current.voiceId):saved?.sound,label=kind==='preset'?presetName(id):`“${id}”`;if(!sound)return;
+    const request=++previewRequest.current,track=trackId;setPreviewChoice('');
+    // A result that arrives after another choice, a cancel or a track change is dropped.
+    void Promise.resolve(previewer.previewSound(track,structuredClone(sound))).then(()=>{if(request!==previewRequest.current||shownTrack.current!==track||previewer.soundPreview()?.track!==track)return;setPreviewChoice(value);setPreviewLabel(label);setError(null);setStatus(`Previewing ${label}. Keep it or cancel to go back to this track’s sound.`);},e=>{if(request===previewRequest.current)setError(String(e));});
+  };
+  const cancelPreview=()=>{void endPreview().then(()=>setStatus('Back to this track’s sound.'));previewSelect.current?.focus();};
+  const keepPreview=()=>{const kept=previewer?.soundPreview();if(kept?.track!==trackId)return;const label=previewLabel;void record(kept.sound).then(ok=>{if(ok){void endPreview();setStatus(`Kept ${label}.`);}previewSelect.current?.focus();});previewSelect.current?.focus();};
+  const escapePreview=(event:React.KeyboardEvent)=>{if(event.key==='Escape'&&showingPreview){event.preventDefault();event.stopPropagation();cancelPreview();}};
+  const orphanPreview=showingPreview&&previewChoice.startsWith('saved:')&&!library.some(item=>`saved:${item.name}`===previewChoice);
   const closeConfirm=()=>{setConfirming(false);savedSelect.current?.focus();};
   const report=(result:ReturnType<typeof saveSoundPreset>,done:string)=>{if(!result.ok){setStatus(result.error);return false;}setStatus(result.stored===false?`${done} It is kept until TabPlayer closes, because the sound library could not be stored.`:done);return true;};
   const pastePedal=()=>{const pedal=clipboard.pedal;if(!pedal)return;const next=structuredClone(current);(next.effects as unknown as Record<string,unknown>)[pedal.block]=structuredClone(pedal.settings);save(next);};
   return <section className="sound-panel" aria-label="Track sound"><h3>Sound</h3><fieldset disabled={busy}>
     <label>Sound source<select value={current.voiceId??''} onChange={e=>save({...current,voiceId:e.target.value||null})}><option value="">Automatic instrument</option><option value="gm">General MIDI</option><option value="green-guitar">Green Guitar</option><option value="black-guitar">Black Guitar</option><option value="darkblack-bass">Darkblack Bass</option><option value="babyblue-bass">Babyblue Bass</option></select></label>
-    <label>Sound preset<select value={current.presetId} onChange={e=>save(soundPreset(e.target.value as TrackSound['presetId'],current.voiceId))}>{['gm','clean','crunch','lead','bass'].map(id=><option value={id} key={id}>{id==='gm'?'Bypass':id[0].toUpperCase()+id.slice(1)}</option>)}</select></label>
+    <label>Sound preset<select value={current.presetId} onChange={e=>save(soundPreset(e.target.value as TrackSound['presetId'],current.voiceId))}>{presetIds.map(id=><option value={id} key={id}>{presetName(id)}</option>)}</select></label>
     <button onClick={()=>save(soundPreset(current.presetId,current.voiceId))}>Restore preset</button>
+    {previewer&&<><label>Preview sound<select ref={previewSelect} aria-label="Preview sound" value={showingPreview?previewChoice:''} onKeyDown={escapePreview} onChange={e=>choosePreview(e.target.value)}>
+      <option value="">Choose a sound to preview</option>{orphanPreview&&<option value={previewChoice} disabled>{previewLabel} (no longer saved)</option>}<optgroup label="Factory presets">{presetIds.map(id=><option key={id} value={`preset:${id}`}>{presetName(id)}</option>)}</optgroup>{library.length>0&&<optgroup label="My sounds">{library.map(item=><option key={item.name} value={`saved:${item.name}`}>{item.name}</option>)}</optgroup>}</select></label>
+    {showingPreview&&<div className="sound-clipboard" role="group" aria-label="Sound preview" onKeyDown={escapePreview}><button onClick={keepPreview}>Keep previewed sound</button><button onClick={cancelPreview}>Cancel preview</button></div>}</>}
     <div className="sound-clipboard"><button onClick={()=>{copySound(current);setStatus('Copied this track’s sound.');}}>Copy sound</button><button disabled={!clipboard.sound} onClick={()=>{if(clipboard.sound)save(structuredClone(clipboard.sound));}}>Paste sound</button></div>
     </fieldset>
     <fieldset disabled={busy} className="sound-library"><legend>My sounds</legend>

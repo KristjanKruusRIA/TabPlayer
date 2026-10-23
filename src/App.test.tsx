@@ -47,7 +47,7 @@ vi.mock('./audio/NativePlaybackController',()=>({NativePlaybackController:class 
   backingScoreSelection=(target:{bar:number;beat:number})=>({points:[{tick:target.bar*3840+target.beat*960,anchor:{bar:target.bar,occurrence:0,ratio:target.beat/4}}],spans:[]});
   playFromCursor=integration.playFromCursor;playSelection=integration.playSelection;loopSelection=integration.loopSelection;
   activeNotes=(trackId:string)=>integration.activeNotes(trackId);
-  focus=()=>null;setFocus=async()=>{};
+  focus=()=>null;setFocus=async()=>{};soundPreview=()=>null;previewSound=async()=>{};
   loadDocument=async(project:unknown,built:BuiltDocument,track:number,documentEpoch:number)=>{this.built=built;integration.loadDocument(project,built,track,documentEpoch);};
   beforeScoreChange=integration.beforeScoreChange;destroy=integration.destroy;
   play=integration.play;pause=integration.pause;stop=integration.stop;seekToMeasure=integration.seekToMeasure;setSpeed=vi.fn();setLoop=integration.setLoop;clearLoop=integration.clearLoop;setMetronome=vi.fn();

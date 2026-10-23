@@ -1,7 +1,7 @@
 import type { AlphaTabApi, model, synth } from '@coderline/alphatab';
 import { effectiveAudioSettings, trackIdentity, type BuiltDocument } from '../engine';
-import { defaultMix } from '../document-settings';
-import type { ChannelMix, EditCommand } from '../edit-types';
+import { completeSound, defaultMix, soundProblem } from '../document-settings';
+import type { ChannelMix, EditCommand, TrackSound } from '../edit-types';
 import type { BeatTarget,ProjectView } from '../project';
 import type { MusicSelection } from '../editor/range-types';
 import type { NativeAudioBridge, NativeAudioStatus, TransportCommand } from './bridge';
@@ -26,7 +26,8 @@ export class NativePlaybackController {
   private listeners=new Set<()=>void>();private view:AlphaTabApi|null=null;private cleanupView:()=>void=()=>{};
   private unlisten:()=>void=()=>{};private subscription:Promise<void>;private destroyed=false;private suppressHandler=false;private viewPlaying=false;
   // Focus is session-only: it changes what native audio plays, never the saved mix or the project.
-  private trackFocus:TrackFocus|null=null;private mixPending=false;private loaded:{project:ProjectView;documentEpoch:number;playbackResumeEpoch:number}|null=null;
+  private requested:{project:ProjectView;built:BuiltDocument;documentEpoch:number;playbackResumeEpoch:number}|null=null;
+  private trackFocus:TrackFocus|null=null;private preview:{track:string;sound:TrackSound}|null=null;private mixPending=false;private loaded:{project:ProjectView;documentEpoch:number;playbackResumeEpoch:number}|null=null;
   private built:BuiltDocument|null=null;private plan:PlaybackPlan|null=null;private authoredPlan:PlaybackPlan|null=null;private planTimingKey:string|null=null;private lastStatus:NativeAudioStatus|null=null;private operationError:string|null=null;private prepared=false;private preparing=false;private audioSettingsKey:string|null=null;private desiredAudioSettingsKey:string|null=null;private mixQueue:Promise<void>=Promise.resolve();private mixRequest=0;private embeddedSource:string|null=null;
   private documentEpoch:number|undefined;private practice:PracticeSettings=structuredClone(DEFAULT_PRACTICE);private pendingPractice:PracticeSettings|null=null;private hasBacking=false;
   private playbackResumeEpoch=0;private floorReadyEpoch=0;private resumeRefresh:Promise<boolean>|null=null;private loadRequest=0;
@@ -153,13 +154,29 @@ export class NativePlaybackController {
     if(!this.built?.score.tracks.some(track=>trackIdentity(track)===trackId))throw new Error('Select an existing track.');
     if(!Number.isFinite(amount)||Math.abs(amount)>1)throw new Error('Focus must be between -100% and 100%.');
     this.trackFocus=amount===0?null:{track:trackId,amount};this.update({});
-    const loaded=this.loaded;if(loaded&&this.built)await this.loadDocument(loaded.project,this.built,0,loaded.documentEpoch,loaded.playbackResumeEpoch);
+    await this.reloadLatest();
   }
+  /** The sound being previewed on a track for this session, or null. */
+  soundPreview():{track:string;sound:TrackSound}|null{return this.preview?{track:this.preview.track,sound:structuredClone(this.preview.sound)}:null;}
+  /** Plays `sound` on a track (by identity) in place of its saved sound without editing the document; null ends the preview. */
+  async previewSound(trackId:string,sound:TrackSound|null){
+    if(sound){
+      if(!this.built?.score.tracks.some(track=>trackIdentity(track)===trackId))throw new Error('Select an existing track.');
+      const problem=soundProblem(sound);if(problem)throw new Error(problem);
+      this.preview={track:trackId,sound:structuredClone(completeSound(sound))};
+    } else if(this.preview?.track===trackId)this.preview=null;
+    else return;
+    this.update({});
+    await this.reloadLatest();
+  }
+  /** Loads the most recently requested document again, so a session change made while that load waits cannot bring back an older one. */
+  private async reloadLatest(){const latest=this.requested;if(latest&&this.loaded)await this.loadDocument(latest.project,latest.built,0,latest.documentEpoch,latest.playbackResumeEpoch);}
   resetMix(){for(const track of this.built?.score.tracks??[])this.editMix(track.index,defaultMix());}
   beforeScoreChange(notifyNative=true){this.generation=++nextGeneration;this.plan=null;this.authoredPlan=null;this.planTimingKey=null;this.notesByTrack.clear();this.noteMode='stopped';this.pendingNoteTick=undefined;this.prepared=false;this.preparing=false;this.audioSettingsKey=null;this.desiredAudioSettingsKey=null;this.mixPending=false;this.mixQueue=Promise.resolve();this.lastStatus=null;this.pendingPractice=null;this.operationError=null;if(notifyNative)this.send({type:'invalidate',generation:this.generation});const practice=idlePractice(this.practice);this.update({ready:false,playing:false,practice,practicePending:false,range:null,loop:null,speed:practice.effectiveRatio*100,metronome:this.practice.metronome.enabled,error:null});}
   setRenderedScore(score:model.Score,tracks:number[]):void{if(this.destroyed)return;const prior=this.suppressHandler;this.suppressHandler=true;try{this.view?.renderScore(score,tracks);this.view?.player?.updateSyncPoints([]);}finally{this.suppressHandler=prior;this.viewPlaying=false;}}
   replaceScore(score:model.Score,track=0){this.setRenderedScore(score,[track]);}
   async loadDocument(project:ProjectView,built:BuiltDocument,_visibleTrack=0,documentEpoch=0,playbackResumeEpoch=0){
+    if(!this.requested||playbackResumeEpoch>=this.requested.playbackResumeEpoch)this.requested={project,built,documentEpoch,playbackResumeEpoch};
     await this.subscription;if(this.destroyed)return;
     if(playbackResumeEpoch<this.playbackResumeEpoch)return;
     // Supersede loads waiting for the floor, without canceling an identical preparing plan.
@@ -183,8 +200,10 @@ export class NativePlaybackController {
     const documentChanged=this.documentEpoch!==documentEpoch;this.documentEpoch=documentEpoch;this.loaded={project,documentEpoch,playbackResumeEpoch};
     // Focus ends with its document or its track, so an undo that restores the track does not revive it.
     const focused=this.trackFocus;if(focused&&!built.score.tracks.some(track=>trackIdentity(track)===focused.track)){this.trackFocus=null;this.update({});}
-    if(documentChanged){this.trackFocus=null;this.practice=structuredClone(DEFAULT_PRACTICE);this.update({practiceNotice:null});}
-    const audioSettings=focusedSettings(effectiveAudioSettings(project,built),built.score.tracks.map(trackIdentity),this.trackFocus);this.hasBacking=audioSettings.backing!==null;
+    const previewed=this.preview;if(previewed&&!built.score.tracks.some(track=>trackIdentity(track)===previewed.track)){this.preview=null;this.update({});}
+    if(documentChanged){this.trackFocus=null;this.preview=null;this.practice=structuredClone(DEFAULT_PRACTICE);this.update({practiceNotice:null});}
+    const saved=effectiveAudioSettings(project,built),preview=this.preview;
+    const audioSettings=focusedSettings(preview?{...saved,sounds:{...saved.sounds,[preview.track]:preview.sound}}:saved,built.score.tracks.map(trackIdentity),this.trackFocus);this.hasBacking=audioSettings.backing!==null;
     const audioSettingsKey=JSON.stringify([audioSettings.sounds,audioSettings.mixes,audioSettings.backing]);
     const timingKey=referenceTimingKey(audioSettings.backing);
     const normalized=practiceForBacking(this.practice,this.hasBacking);
@@ -213,7 +232,7 @@ export class NativePlaybackController {
       await this.bridge.prepare(plan,audioSettings,this.embeddedSource===sourceKey?null:built.embeddedBacking,sourceKey,practice);if(generation!==this.generation||this.destroyed)return;this.embeddedSource=sourceKey;this.prepared=true;this.audioSettingsKey=audioSettingsKey;this.operationError=null;
       const status=await this.bridge.status();if(generation!==this.generation||this.destroyed)return;if(status)this.receive(status);
     } catch(error){if(generation===this.generation){this.prepared=false;this.fail(error);}}finally{if(generation===this.generation){this.preparing=false;this.update({});
-      const loaded=this.loaded;if(this.prepared&&this.mixPending&&loaded&&this.built){this.mixPending=false;void this.loadDocument(loaded.project,this.built,0,loaded.documentEpoch,loaded.playbackResumeEpoch).catch(error=>this.fail(error));}}}
+      if(this.prepared&&this.mixPending&&this.loaded&&this.built){this.mixPending=false;void this.reloadLatest().catch(error=>this.fail(error));}}}
   }
   attachView(api:AlphaTabApi){
     this.cleanupView();this.view=api;this.viewPlaying=false;const controller=this;

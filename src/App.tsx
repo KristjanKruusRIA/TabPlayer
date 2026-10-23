@@ -41,6 +41,8 @@ import { ClipboardPanel } from './editor/ClipboardPanel';
 import { ScoreErrorsPanel } from './editor/ScoreErrorsPanel';
 import { CommandPalette } from './editor/CommandPalette';
 import { AsciiTabImportDialog } from './workspace/AsciiTabImportDialog';
+import { HelpDialog } from './help/HelpDialog';
+import { topicFor,type HelpTopicId } from './help/help-topics';
 import type { PaletteAction } from './editor/command-palette';
 import { ViewDefaultsPanel } from './workspace/ViewDefaultsPanel';
 import { currentViewDefaults,writeViewDefaults } from './workspace/view-defaults';
@@ -190,6 +192,19 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   const documentAction=(job:Promise<unknown>)=>change(job);
   const [paletteOpen,setPaletteOpen]=useState(false),paletteReturn=useRef<HTMLElement|null>(null);
   const [asciiOpen,setAsciiOpen]=useState(false),asciiReturn=useRef<HTMLElement|null>(null);
+  const [helpTopic,setHelpTopic]=useState<HelpTopicId|null>(null),helpReturn=useRef<HTMLElement|null>(null);
+  /** Opens help on the topic for what had focus; help only reads, so open scores and edits are untouched. */
+  const openHelp=(topic?:HelpTopicId)=>{const focused=document.activeElement instanceof HTMLElement?document.activeElement:null;helpReturn.current=focused;closeCommands(false);setHelpTopic(topic??topicFor(focused));};
+  // F1 is heard on the window so it works with nothing focused; it never opens help over another dialog.
+  const helpKey=useRef<(event:globalThis.KeyboardEvent)=>void>(()=>{});
+  helpKey.current=event=>{
+    if(event.key!=='F1'||event.ctrlKey||event.metaKey||event.altKey||event.shiftKey)return;
+    event.preventDefault();
+    if(event.repeat||helpTopic!==null||exportOpen||harmonyOpen||scaleOpen||paletteOpen||asciiOpen||document.querySelector('[role="dialog"]'))return;
+    openHelp();
+  };
+  useEffect(()=>{const listener=(event:globalThis.KeyboardEvent)=>helpKey.current(event);window.addEventListener('keydown',listener);return ()=>window.removeEventListener('keydown',listener);},[]);
+  const closeHelp=()=>{setHelpTopic(null);const back=helpReturn.current;helpReturn.current=null;if(back?.isConnected)back.focus();if(document.activeElement!==back)scorePane.current?.focus();};
   const openAscii=()=>{asciiReturn.current=document.activeElement instanceof HTMLElement?document.activeElement:null;closeCommands(false);setAsciiOpen(true);};
   const closeAscii=()=>{setAsciiOpen(false);const back=asciiReturn.current;asciiReturn.current=null;if(back?.isConnected)back.focus();if(document.activeElement!==back)scorePane.current?.focus();};
   const openPalette=()=>{paletteReturn.current=document.activeElement instanceof HTMLElement?document.activeElement:null;closeCommands(false);setPaletteOpen(true);};
@@ -208,6 +223,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     else if(action.name==='new')documentAction(onNew());
     else if(action.name==='open')documentAction(onOpen());
     else if(action.name==='importAscii'){if(onImportConverted)openAscii();}
+    else if(action.name==='help'||action.name==='about')openHelp(action.name==='about'?'about':undefined);
     else if(action.name==='save'||action.name==='saveAs')act(controller.save(action.name==='saveAs'));
     else openModal('export');
   };
@@ -336,8 +352,8 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     select(next);event.preventDefault();
   }
   function selectionKeys(event:KeyboardEvent){
-    if((event.ctrlKey||event.metaKey)&&event.shiftKey&&!event.altKey&&event.key.toLowerCase()==='p'&&!exportOpen&&!harmonyOpen&&!scaleOpen&&!paletteOpen&&!asciiOpen&&!(event.target instanceof Element&&event.target.closest('[role="dialog"]'))){event.preventDefault();if(!event.repeat)openPalette();return;}
-    if(textEntry(event.target)||exportOpen||harmonyOpen||scaleOpen||paletteOpen||asciiOpen||(event.target instanceof Element&&event.target.closest('[role="dialog"]')))return;
+    if((event.ctrlKey||event.metaKey)&&event.shiftKey&&!event.altKey&&event.key.toLowerCase()==='p'&&!exportOpen&&!harmonyOpen&&!scaleOpen&&!paletteOpen&&!asciiOpen&&helpTopic===null&&!(event.target instanceof Element&&event.target.closest('[role="dialog"]'))){event.preventDefault();if(!event.repeat)openPalette();return;}
+    if(textEntry(event.target)||exportOpen||harmonyOpen||scaleOpen||paletteOpen||asciiOpen||helpTopic!==null||(event.target instanceof Element&&event.target.closest('[role="dialog"]')))return;
     const key=event.key.toLowerCase();
     if((event.ctrlKey||event.metaKey)&&!event.altKey&&['n','o','s','z','y'].includes(key)){
       event.preventDefault();if(controlsBusy||event.repeat)return;
@@ -379,7 +395,8 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
       <button disabled={controlsBusy || !state.snapshot.canUndo} onClick={()=>change(controller.undo())}>Undo</button>
       <button disabled={controlsBusy || !state.snapshot.canRedo} onClick={()=>change(controller.redo())}>Redo</button>
     </nav><details className="keyboard-help" onToggle={event=>commandToggle(event.currentTarget)} onKeyDown={event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();event.currentTarget.open=false;event.currentTarget.querySelector('summary')?.focus();}}}><summary>Help</summary><section role="region" aria-label="Keyboard and editing help">
-      <h2>Keyboard & editing</h2><p>Use these shortcuts outside input fields and dialogs.</p>
+      <div className="help-actions"><button type="button" onClick={()=>openHelp('start')}>Help topics (F1)</button><button type="button" onClick={()=>openHelp('about')}>About and updates</button></div>
+      <h2>Keyboard & editing</h2><p>Use these shortcuts outside input fields and dialogs. F1 opens help about the part of the window you are using.</p>
       <dl><dt>Ctrl/Cmd + N / O</dt><dd>New score / Open score</dd><dt>Ctrl/Cmd + S</dt><dd>Save; add Shift for Save As</dd><dt>Ctrl/Cmd + W</dt><dd>Close the current score</dd><dt>Ctrl/Cmd + Tab</dt><dd>Next score; add Shift for the previous score</dd><dt>Ctrl/Cmd + Z</dt><dd>Undo; add Shift to redo. Ctrl/Cmd + Y also redoes.</dd><dt>Space</dt><dd>Play or pause</dd><dt>Ctrl/Cmd + Shift + P</dt><dd>Command palette: type a command such as measure 12, fret 5 or tempo 96</dd></dl>
       <button type="button" onClick={openPalette}>Open command palette</button>
       <h3>With the score focused</h3><dl><dt>Left / Right</dt><dd>Previous / next beat</dd><dt>Up / Down</dt><dd>Change string, or choose a pitched/percussion note</dd><dt>Digits, then Enter</dt><dd>Enter a fret and set the note on a fretted track</dd><dt>Shift + Left/Right</dt><dd>Extend the musical selection</dd><dt>Ctrl/Cmd + A</dt><dd>Select the current track</dd><dt>Ctrl/Cmd + C / X / V</dt><dd>Copy / Cut / Paste music. Add Shift to Copy/Cut for all selected tracks; Shift + Paste opens paste options.</dd><dt>Escape</dt><dd>Clear the musical selection</dd></dl>
@@ -431,6 +448,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     </div>
     {exportOpen&&<ExportDialog score={state.score} layout={state.settings.print} page={page} currentSpeedAvailable={practiceRatio!==null} busy={exports.busy||state.busy||exportLaunching} progress={exports.progress} failure={exportError} gpBackingIssue={gpBackingIssue} onExport={runExport} onCancel={cancelExport}/>}
     {harmonyOpen&&location.beat&&<HarmonyChordDialog score={state.score} target={target} selection={musicSelection} value={location.beat.chord?getHarmonyChord(location.beat.chord):null} busy={state.busy||libraryLoading} library={library} onEdit={edit} onClose={closeModal} onLibraryPut={async entry=>{const revision=++libraryRevision.current,value=await putHarmonyLibraryEntry(entry);if(revision===libraryRevision.current)setLibrary(value);}} onLibraryRemove={async id=>{const revision=++libraryRevision.current,value=await removeHarmonyLibraryEntry(id);if(revision===libraryRevision.current)setLibrary(value);}}/>}
+    {helpTopic!==null&&<HelpDialog initial={helpTopic} onClose={closeHelp}/>}
     {asciiOpen&&onImportConverted&&<AsciiTabImportDialog busy={controlsBusy} onImport={(name,bytes)=>{const job=onImportConverted(name,bytes);documentAction(job);return job;}} onClose={closeAscii}/>}
     {paletteOpen&&<CommandPalette context={{score:state.score,target,string,canUndo:state.snapshot.canUndo,canRedo:state.snapshot.canRedo}} busy={controlsBusy} onRun={runPalette} onClose={closePalette}/>}
     {scaleOpen&&<ScaleToolPanel score={state.score} staff={location.staff} selection={musicSelection} busy={state.busy} onClose={closeModal}/>}

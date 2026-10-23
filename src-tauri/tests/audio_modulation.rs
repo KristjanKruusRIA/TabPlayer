@@ -19,16 +19,27 @@ fn window_levels(output: &[[f32; 2]], size: usize) -> Vec<f64> {
 fn modulation_blocks_keep_older_documents_and_wire_format() {
     let defaults = serde_json::to_value(FxSettings::default()).unwrap();
     for block in ["flanger", "phaser", "tremolo", "vibrato"] {
-        assert!(defaults.get(block).is_none(), "{block} must not be written while at its defaults");
+        assert!(
+            defaults.get(block).is_none(),
+            "{block} must not be written while at its defaults"
+        );
     }
     // A sound saved before these blocks existed still loads, with them off.
     let older: FxSettings = serde_json::from_value(defaults.clone()).unwrap();
-    assert!(!older.flanger.enabled && !older.phaser.enabled && !older.tremolo.enabled && !older.vibrato.enabled);
+    assert!(
+        !older.flanger.enabled
+            && !older.phaser.enabled
+            && !older.tremolo.enabled
+            && !older.vibrato.enabled
+    );
     let mut fx = FxSettings::default();
     fx.tremolo.enabled = true;
     fx.tremolo.shape = "square".into();
     let written = serde_json::to_value(&fx).unwrap();
-    assert_eq!(written["tremolo"], serde_json::json!({"enabled":true,"rateHz":5.0,"depth":0.5,"shape":"square"}));
+    assert_eq!(
+        written["tremolo"],
+        serde_json::json!({"enabled":true,"rateHz":5.0,"depth":0.5,"shape":"square"})
+    );
     assert_eq!(serde_json::from_value::<FxSettings>(written).unwrap(), fx);
     let mut unknown = serde_json::to_value(&fx).unwrap();
     unknown["tremolo"]["extra"] = serde_json::json!(1);
@@ -40,7 +51,10 @@ fn modulation_parameters_are_validated() {
     let cases: Vec<(&str, Box<dyn Fn(&mut FxSettings)>)> = vec![
         ("flanger rate", Box::new(|fx| fx.flanger.rate_hz = 6.0)),
         ("flanger depth", Box::new(|fx| fx.flanger.depth_ms = 11.0)),
-        ("flanger feedback", Box::new(|fx| fx.flanger.feedback = 0.95)),
+        (
+            "flanger feedback",
+            Box::new(|fx| fx.flanger.feedback = 0.95),
+        ),
         ("flanger mix", Box::new(|fx| fx.flanger.mix = f64::NAN)),
         ("phaser rate", Box::new(|fx| fx.phaser.rate_hz = 0.0)),
         ("phaser depth", Box::new(|fx| fx.phaser.depth = 1.5)),
@@ -49,7 +63,10 @@ fn modulation_parameters_are_validated() {
         ("tremolo depth", Box::new(|fx| fx.tremolo.depth = -0.1)),
         ("vibrato rate", Box::new(|fx| fx.vibrato.rate_hz = 15.0)),
         ("vibrato rate", Box::new(|fx| fx.vibrato.rate_hz = 0.5)),
-        ("vibrato depth", Box::new(|fx| fx.vibrato.depth_cents = 101.0)),
+        (
+            "vibrato depth",
+            Box::new(|fx| fx.vibrato.depth_cents = 101.0),
+        ),
     ];
     for (name, change) in cases {
         let mut fx = FxSettings::default();
@@ -94,17 +111,29 @@ fn tremolo_modulates_level_at_its_rate_and_depth() {
         let max = steady.iter().map(|x| x[0]).fold(f32::MIN, f32::max);
         let min = steady.iter().map(|x| x[0]).fold(f32::MAX, f32::min);
         assert!((max - 0.4).abs() < 0.002, "{shape} peak {max}");
-        assert!((min as f64 - 0.4 * low).abs() < 0.004, "{shape} trough {min}");
+        assert!(
+            (min as f64 - 0.4 * low).abs() < 0.004,
+            "{shape} trough {min}"
+        );
         // Four cycles a second: the level falls through its midpoint every 12,000 frames.
         let middle = 0.4 * (1.0 + low as f32) / 2.0;
-        let falls: Vec<usize> = (1..steady.len()).filter(|&i| steady[i - 1][0] >= middle && steady[i][0] < middle).collect();
+        let falls: Vec<usize> = (1..steady.len())
+            .filter(|&i| steady[i - 1][0] >= middle && steady[i][0] < middle)
+            .collect();
         let gaps: Vec<usize> = falls.windows(2).map(|w| w[1] - w[0]).collect();
-        assert!(gaps.len() >= 2 && gaps.iter().all(|&g| (g as i64 - 12_000).abs() < 2), "{shape} gaps {gaps:?}");
+        assert!(
+            gaps.len() >= 2 && gaps.iter().all(|&g| (g as i64 - 12_000).abs() < 2),
+            "{shape} gaps {gaps:?}"
+        );
         if shape == "square" {
             // A square wave dwells near its extremes, but its edges are smoothed rather than clicking.
-            let near = steady.iter().filter(|x| x[0] > 0.39 || x[0] < 0.21).count() as f64 / steady.len() as f64;
+            let near = steady.iter().filter(|x| x[0] > 0.39 || x[0] < 0.21).count() as f64
+                / steady.len() as f64;
             assert!(near > 0.7, "square dwell {near}");
-            let step = steady.windows(2).map(|w| (w[1][0] - w[0][0]).abs()).fold(0.0, f32::max);
+            let step = steady
+                .windows(2)
+                .map(|w| (w[1][0] - w[0][0]).abs())
+                .fold(0.0, f32::max);
             assert!(step < 0.01, "square step {step}");
         }
     }
@@ -130,7 +159,9 @@ fn vibrato_swings_pitch_by_its_depth_in_cents() {
     fx.vibrato.depth_cents = 50.0;
     let mut dsp = TrackDsp::new(fx, 48_000, 4.0).unwrap();
     // Settle for 4,800 frames, then measure exactly four 2 Hz cycles.
-    let output: Vec<_> = (0..100_800).map(|n| dsp.process([sine(n, 440.0, 0.3); 2], 120.0)).collect();
+    let output: Vec<_> = (0..100_800)
+        .map(|n| dsp.process([sine(n, 440.0, 0.3); 2], 120.0))
+        .collect();
     let frequencies = crossing_frequencies(&output[4_800..]);
     let max = frequencies.iter().cloned().fold(f64::MIN, f64::max);
     let min = frequencies.iter().cloned().fold(f64::MAX, f64::min);
@@ -142,7 +173,11 @@ fn vibrato_swings_pitch_by_its_depth_in_cents() {
     assert!((mean - 440.0).abs() < 0.5, "mean {mean}");
     // The level is unchanged: vibrato moves pitch, not volume.
     let levels = window_levels(&output[4_800..], 4_800);
-    assert!(levels.iter().all(|level| (level / (0.3 / std::f64::consts::SQRT_2) - 1.0).abs() < 0.02));
+    assert!(
+        levels
+            .iter()
+            .all(|level| (level / (0.3 / std::f64::consts::SQRT_2) - 1.0).abs() < 0.02)
+    );
 }
 
 #[test]
@@ -155,17 +190,29 @@ fn flanger_sweeps_a_short_delay_with_feedback() {
     fx.flanger.mix = 0.5;
     let mut dsp = TrackDsp::new(fx, 48_000, 4.0).unwrap();
     // An impulse every 4,800 frames: the echo after each one shows the delay at that moment.
-    let output: Vec<_> = (0..96_000).map(|n| dsp.process([if n % 4_800 == 0 { 1.0 } else { 0.0 }; 2], 120.0)).collect();
+    let output: Vec<_> = (0..96_000)
+        .map(|n| dsp.process([if n % 4_800 == 0 { 1.0 } else { 0.0 }; 2], 120.0))
+        .collect();
     let mut lags = Vec::new();
     for start in (0..96_000).step_by(4_800) {
         let window = &output[start + 1..start + 400];
-        let (lag, peak) = window.iter().enumerate().map(|(i, x)| (i + 1, x[0].abs())).fold((0, 0.0), |a, b| if b.1 > a.1 { b } else { a });
+        let (lag, peak) = window
+            .iter()
+            .enumerate()
+            .map(|(i, x)| (i + 1, x[0].abs()))
+            .fold((0, 0.0), |a, b| if b.1 > a.1 { b } else { a });
         // Mix 0.5 times the (1 - feedback) level scaling leaves a quarter-level echo, spread over two frames.
         assert!(peak > 0.1, "echo after impulse at {start}: {peak}");
         lags.push(lag);
         // The feedback repeats the echo at about twice the delay, at about half the level.
-        let second = output[start + 2 * lag - 3..start + 2 * lag + 4].iter().map(|x| x[0].abs()).fold(0.0, f32::max);
-        assert!(second > peak * 0.25 && second < peak * 0.75, "second echo {second} vs {peak}");
+        let second = output[start + 2 * lag - 3..start + 2 * lag + 4]
+            .iter()
+            .map(|x| x[0].abs())
+            .fold(0.0, f32::max);
+        assert!(
+            second > peak * 0.25 && second < peak * 0.75,
+            "second echo {second} vs {peak}"
+        );
     }
     let shortest = *lags.iter().min().unwrap() as f64;
     let longest = *lags.iter().max().unwrap() as f64;
@@ -184,14 +231,25 @@ fn phaser_sweeps_notches_through_a_steady_tone() {
     fx.phaser.stages = 4;
     fx.phaser.mix = 0.5;
     let mut dsp = TrackDsp::new(fx, 48_000, 4.0).unwrap();
-    let output: Vec<_> = (0..192_000).map(|n| dsp.process([sine(n, 1_000.0, 0.3); 2], 120.0)).collect();
+    let output: Vec<_> = (0..192_000)
+        .map(|n| dsp.process([sine(n, 1_000.0, 0.3); 2], 120.0))
+        .collect();
     let levels = window_levels(&output[9_600..], 480);
     let max = levels.iter().cloned().fold(f64::MIN, f64::max);
     let min = levels.iter().cloned().fold(f64::MAX, f64::min);
-    assert!(min < max * 0.3, "a notch passes through 1 kHz: {min} vs {max}");
-    assert!(max < 0.3, "the sweep does not boost beyond the input: {max}");
+    assert!(
+        min < max * 0.3,
+        "a notch passes through 1 kHz: {min} vs {max}"
+    );
+    assert!(
+        max < 0.3,
+        "the sweep does not boost beyond the input: {max}"
+    );
     // The two channels sweep in quadrature for width.
-    let difference: f64 = output[9_600..].iter().map(|x| (x[0] - x[1]).abs() as f64).sum();
+    let difference: f64 = output[9_600..]
+        .iter()
+        .map(|x| (x[0] - x[1]).abs() as f64)
+        .sum();
     assert!(difference > 100.0);
 }
 
@@ -235,9 +293,16 @@ fn phaser_stage_changes_and_high_feedback_stay_smooth_and_level() {
         }
         output.push(dsp.process([sine(n, 220.0, 0.5); 2], 120.0));
     }
-    let step = |range: std::ops::Range<usize>| range.map(|i| (output[i][0] - output[i - 1][0]).abs()).fold(0.0, f32::max);
+    let step = |range: std::ops::Range<usize>| {
+        range
+            .map(|i| (output[i][0] - output[i - 1][0]).abs())
+            .fold(0.0, f32::max)
+    };
     let steady = step(2_000..11_900);
-    assert!(step(11_900..12_600) < steady * 1.5 && step(23_900..24_600) < steady * 1.5, "steady {steady}");
+    assert!(
+        step(11_900..12_600) < steady * 1.5 && step(23_900..24_600) < steady * 1.5,
+        "steady {steady}"
+    );
     // Feedback 0.9 with eight stages and the flanger at ±0.9 do not lift a full-scale tone.
     for hz in [200.0, 1_000.0, 5_000.0] {
         let mut fx = FxSettings::default();
@@ -247,7 +312,9 @@ fn phaser_stage_changes_and_high_feedback_stay_smooth_and_level() {
         fx.phaser.depth = 0.0;
         fx.phaser.mix = 1.0;
         let mut dsp = TrackDsp::new(fx, 48_000, 4.0).unwrap();
-        let peak = (0..48_000).map(|n| dsp.process([sine(n, hz, 1.0); 2], 120.0)[0].abs()).fold(0.0, f32::max);
+        let peak = (0..48_000)
+            .map(|n| dsp.process([sine(n, hz, 1.0); 2], 120.0)[0].abs())
+            .fold(0.0, f32::max);
         assert!(peak < 1.05, "phaser at {hz} Hz peaks at {peak}");
         for feedback in [0.9, -0.9] {
             let mut fx = FxSettings::default();
@@ -255,7 +322,9 @@ fn phaser_stage_changes_and_high_feedback_stay_smooth_and_level() {
             fx.flanger.feedback = feedback;
             fx.flanger.mix = 1.0;
             let mut dsp = TrackDsp::new(fx, 48_000, 4.0).unwrap();
-            let peak = (0..48_000).map(|n| dsp.process([sine(n, hz, 1.0); 2], 120.0)[0].abs()).fold(0.0, f32::max);
+            let peak = (0..48_000)
+                .map(|n| dsp.process([sine(n, hz, 1.0); 2], 120.0)[0].abs())
+                .fold(0.0, f32::max);
             assert!(peak < 1.1, "flanger {feedback} at {hz} Hz peaks at {peak}");
         }
     }
@@ -285,9 +354,23 @@ fn vibrato_depth_holds_at_other_sample_rates() {
     fx.vibrato.depth_cents = 50.0;
     let rate = 44_100.0;
     let mut dsp = TrackDsp::new(fx, 44_100, 4.0).unwrap();
-    let output: Vec<_> = (0..92_610).map(|n| dsp.process([((std::f64::consts::TAU * 440.0 * n as f64 / rate).sin() * 0.3) as f32; 2], 120.0)).collect();
-    let frequencies: Vec<f64> = crossing_frequencies(&output[4_410..]).into_iter().map(|f| f * rate / RATE).collect();
+    let output: Vec<_> = (0..92_610)
+        .map(|n| {
+            dsp.process(
+                [((std::f64::consts::TAU * 440.0 * n as f64 / rate).sin() * 0.3) as f32; 2],
+                120.0,
+            )
+        })
+        .collect();
+    let frequencies: Vec<f64> = crossing_frequencies(&output[4_410..])
+        .into_iter()
+        .map(|f| f * rate / RATE)
+        .collect();
     let max = frequencies.iter().cloned().fold(f64::MIN, f64::max);
     let min = frequencies.iter().cloned().fold(f64::MAX, f64::min);
-    assert!((max - 440.0 * 2f64.powf(50.0 / 1200.0)).abs() < 1.5 && (min - 440.0 * 2f64.powf(-50.0 / 1200.0)).abs() < 1.5, "{min}..{max}");
+    assert!(
+        (max - 440.0 * 2f64.powf(50.0 / 1200.0)).abs() < 1.5
+            && (min - 440.0 * 2f64.powf(-50.0 / 1200.0)).abs() < 1.5,
+        "{min}..{max}"
+    );
 }

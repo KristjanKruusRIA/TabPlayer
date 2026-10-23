@@ -25,13 +25,21 @@ fn impulse(fx: &FxSettings, seconds: f64) -> [Vec<f64>; 2] {
 
 /// The reverberation time in seconds: the Schroeder decay's slope between -5 and -25 dB, extended to 60 dB.
 fn rt60(response: &[Vec<f64>; 2]) -> f64 {
-    let energy: Vec<f64> = response[0].iter().zip(&response[1]).map(|(l, r)| l * l + r * r).collect();
+    let energy: Vec<f64> = response[0]
+        .iter()
+        .zip(&response[1])
+        .map(|(l, r)| l * l + r * r)
+        .collect();
     let mut remaining = vec![0.0; energy.len() + 1];
     for n in (0..energy.len()).rev() {
         remaining[n] = remaining[n + 1] + energy[n];
     }
     let db = |n: usize| 10.0 * (remaining[n] / remaining[0]).log10();
-    let at = |level: f64| (0..energy.len()).find(|&n| db(n) <= level).expect("the response decays far enough");
+    let at = |level: f64| {
+        (0..energy.len())
+            .find(|&n| db(n) <= level)
+            .expect("the response decays far enough")
+    };
     (at(-25.0) - at(-5.0)) as f64 / RATE * 3.0
 }
 
@@ -40,7 +48,12 @@ fn band(samples: &[f64], hz: f64, q: f64) -> Vec<f64> {
     let w = std::f64::consts::TAU * hz / RATE;
     let alpha = w.sin() / (2.0 * q);
     let a0 = 1.0 + alpha;
-    let (b0, b2, a1, a2) = (alpha / a0, -alpha / a0, -2.0 * w.cos() / a0, (1.0 - alpha) / a0);
+    let (b0, b2, a1, a2) = (
+        alpha / a0,
+        -alpha / a0,
+        -2.0 * w.cos() / a0,
+        (1.0 - alpha) / a0,
+    );
     let (mut x1, mut x2, mut y1, mut y2) = (0.0, 0.0, 0.0, 0.0);
     samples
         .iter()
@@ -54,20 +67,35 @@ fn band(samples: &[f64], hz: f64, q: f64) -> Vec<f64> {
 
 /// When the response first reaches -40 dB of its peak, in seconds.
 fn onset(response: &[Vec<f64>; 2]) -> f64 {
-    let peak = response[0].iter().chain(&response[1]).fold(0.0f64, |most, v| most.max(v.abs()));
-    (0..response[0].len()).find(|&n| response[0][n].abs().max(response[1][n].abs()) > peak * 0.01).unwrap() as f64 / RATE
+    let peak = response[0]
+        .iter()
+        .chain(&response[1])
+        .fold(0.0f64, |most, v| most.max(v.abs()));
+    (0..response[0].len())
+        .find(|&n| response[0][n].abs().max(response[1][n].abs()) > peak * 0.01)
+        .unwrap() as f64
+        / RATE
 }
 
 #[test]
 fn reverb_models_keep_older_documents_and_wire_format() {
     let defaults = serde_json::to_value(FxSettings::default()).unwrap();
-    assert_eq!(defaults["reverb"], serde_json::json!({"enabled":false,"room":0.5,"damping":0.5,"mix":0.12}));
+    assert_eq!(
+        defaults["reverb"],
+        serde_json::json!({"enabled":false,"room":0.5,"damping":0.5,"mix":0.12})
+    );
     let older: FxSettings = serde_json::from_value(defaults).unwrap();
     assert_eq!(older.reverb.model, "room");
     let fx = reverb("spring", 0.3);
     let written = serde_json::to_value(&fx).unwrap();
-    assert_eq!(written["reverb"], serde_json::json!({"enabled":true,"model":"spring","room":0.3,"damping":0.5,"mix":1.0}));
-    assert_eq!(serde_json::from_value::<FxSettings>(written.clone()).unwrap(), fx);
+    assert_eq!(
+        written["reverb"],
+        serde_json::json!({"enabled":true,"model":"spring","room":0.3,"damping":0.5,"mix":1.0})
+    );
+    assert_eq!(
+        serde_json::from_value::<FxSettings>(written.clone()).unwrap(),
+        fx
+    );
     // Writing "room" explicitly reads back as the same settings, and is written without it.
     let mut explicit = serde_json::to_value(FxSettings::default()).unwrap();
     explicit["reverb"]["model"] = serde_json::json!("room");
@@ -78,7 +106,12 @@ fn reverb_models_keep_older_documents_and_wire_format() {
     assert!(serde_json::from_value::<FxSettings>(unknown).is_err());
     let mut bad = FxSettings::default();
     bad.reverb.model = "cathedral".into();
-    assert!(bad.validate().unwrap_err().to_lowercase().contains("reverb model"));
+    assert!(
+        bad.validate()
+            .unwrap_err()
+            .to_lowercase()
+            .contains("reverb model")
+    );
 }
 
 #[test]
@@ -88,8 +121,16 @@ fn the_room_model_sounds_exactly_as_before() {
     fx.reverb.model = "room".into();
     let [left, right] = impulse(&fx, 2.0);
     let energy: f64 = left.iter().chain(&right).map(|v| v * v).sum();
-    let weighted: f64 = left.iter().zip(&right).enumerate().map(|(n, (l, r))| (l - 0.5 * r) * ((n % 97) as f64 + 1.0)).sum();
-    assert_eq!((energy.to_bits(), weighted.to_bits()), (4603912823183977894, 4636448790716192526));
+    let weighted: f64 = left
+        .iter()
+        .zip(&right)
+        .enumerate()
+        .map(|(n, (l, r))| (l - 0.5 * r) * ((n % 97) as f64 + 1.0))
+        .sum();
+    assert_eq!(
+        (energy.to_bits(), weighted.to_bits()),
+        (4603912823183977894, 4636448790716192526)
+    );
 }
 
 /// A fingerprint of the output while `steps` are applied every 0.5 s with `set_settings` to a steady two-tone input.
@@ -120,54 +161,111 @@ fn the_room_model_ramps_and_fades_exactly_as_before() {
         fx
     };
     // Fingerprints taken with the original room reverb, before the other models were added.
-    assert_eq!(fingerprint(&[room(true, 0.2), room(true, 0.8), room(true, 0.5)]), (4657525331947609055, 4646004091387550720));
-    assert_eq!(fingerprint(&[room(false, 0.5), room(true, 0.5), room(false, 0.5)]), (4664097789892171088, 4638388893389924544));
+    assert_eq!(
+        fingerprint(&[room(true, 0.2), room(true, 0.8), room(true, 0.5)]),
+        (4657525331947609055, 4646004091387550720)
+    );
+    assert_eq!(
+        fingerprint(&[room(false, 0.5), room(true, 0.5), room(false, 0.5)]),
+        (4664097789892171088, 4638388893389924544)
+    );
 }
 
 #[test]
 fn each_model_has_its_own_decay() {
     let times: Vec<(String, Vec<f64>)> = ["room", "hall", "plate", "spring"]
         .iter()
-        .map(|&model| (model.to_string(), [0.1, 0.5, 0.9].iter().map(|&room| rt60(&impulse(&reverb(model, room), 12.0))).collect()))
+        .map(|&model| {
+            (
+                model.to_string(),
+                [0.1, 0.5, 0.9]
+                    .iter()
+                    .map(|&room| rt60(&impulse(&reverb(model, room), 12.0)))
+                    .collect(),
+            )
+        })
         .collect();
     for (model, values) in &times {
-        assert!(values[0] < values[1] && values[1] < values[2], "{model}: room lengthens the decay {values:?}");
+        assert!(
+            values[0] < values[1] && values[1] < values[2],
+            "{model}: room lengthens the decay {values:?}"
+        );
     }
     let middle = |name: &str| times.iter().find(|(model, _)| model == name).unwrap().1[1];
     // At the same setting a hall rings longest and a room shortest.
-    assert!(middle("room") < middle("spring") && middle("spring") < middle("plate") && middle("plate") < middle("hall"), "{times:?}");
+    assert!(
+        middle("room") < middle("spring")
+            && middle("spring") < middle("plate")
+            && middle("plate") < middle("hall"),
+        "{times:?}"
+    );
     assert!(middle("hall") > 2.5 && middle("room") < 1.2, "{times:?}");
 }
 
 #[test]
 fn each_model_has_its_own_color_and_onset() {
-    let responses: Vec<(&str, [Vec<f64>; 2])> = ["hall", "plate", "spring"].iter().map(|&model| (model, impulse(&reverb(model, 0.5), 2.0))).collect();
+    let responses: Vec<(&str, [Vec<f64>; 2])> = ["hall", "plate", "spring"]
+        .iter()
+        .map(|&model| (model, impulse(&reverb(model, 0.5), 2.0)))
+        .collect();
     let window = [(0.05 * RATE) as usize, (1.5 * RATE) as usize];
     // Tail energy in an octave around 6 kHz against an octave around 1 kHz, from 50 ms to 1.5 s.
     let bright = |index: usize| {
         let energy = |hz: f64| -> f64 {
-            responses[index].1.iter().map(|channel| band(channel, hz, 1.4)[window[0]..window[1]].iter().map(|v| v * v).sum::<f64>()).sum()
+            responses[index]
+                .1
+                .iter()
+                .map(|channel| {
+                    band(channel, hz, 1.4)[window[0]..window[1]]
+                        .iter()
+                        .map(|v| v * v)
+                        .sum::<f64>()
+                })
+                .sum()
         };
         10.0 * (energy(6_000.0) / energy(1_000.0)).log10()
     };
     let (hall, plate, spring) = (bright(0), bright(1), bright(2));
     // A plate is bright, a hall darker, and a spring's narrow band leaves least at the top.
-    assert!(plate > hall + 3.0 && hall > spring + 3.0, "hall {hall} plate {plate} spring {spring}");
+    assert!(
+        plate > hall + 3.0 && hall > spring + 3.0,
+        "hall {hall} plate {plate} spring {spring}"
+    );
     // A hall waits about 20 ms before its first reflections; a plate answers at once.
-    let starts: Vec<f64> = responses.iter().map(|(_, response)| onset(response)).collect();
+    let starts: Vec<f64> = responses
+        .iter()
+        .map(|(_, response)| onset(response))
+        .collect();
     assert!(starts[0] > 0.018 && starts[1] < 0.004, "onsets {starts:?}");
 }
 
 /// How far the response's low band (300 Hz) trails its high band (2.4 kHz), from their envelopes' best alignment.
 fn low_band_lag(response: &[Vec<f64>; 2]) -> f64 {
-    let mono: Vec<f64> = response[0].iter().zip(&response[1]).map(|(l, r)| l + r).collect();
+    let mono: Vec<f64> = response[0]
+        .iter()
+        .zip(&response[1])
+        .map(|(l, r)| l + r)
+        .collect();
     let envelope = |hz: f64| -> Vec<f64> {
         let mut level = 0.0;
-        band(&mono, hz, 2.0).iter().map(|x| { level += 0.02 * (x.abs() - level); level }).collect()
+        band(&mono, hz, 2.0)
+            .iter()
+            .map(|x| {
+                level += 0.02 * (x.abs() - level);
+                level
+            })
+            .collect()
     };
     let (low, high) = (envelope(300.0), envelope(2_400.0));
-    let correlate = |lag: usize| (0..mono.len() - lag).map(|n| high[n] * low[n + lag]).sum::<f64>();
-    (0..(0.04 * RATE) as usize).max_by(|&a, &b| correlate(a).total_cmp(&correlate(b))).unwrap() as f64 / RATE
+    let correlate = |lag: usize| {
+        (0..mono.len() - lag)
+            .map(|n| high[n] * low[n + lag])
+            .sum::<f64>()
+    };
+    (0..(0.04 * RATE) as usize)
+        .max_by(|&a, &b| correlate(a).total_cmp(&correlate(b)))
+        .unwrap() as f64
+        / RATE
 }
 
 #[test]
@@ -207,13 +305,19 @@ fn models_are_stereo_and_about_as_loud_as_the_room() {
     }
     for (model, db, correlation) in results {
         assert!(db.abs() < 6.0, "{model} is {db} dB from the room");
-        assert!(correlation < 0.7, "{model} channels correlate {correlation}");
+        assert!(
+            correlation < 0.7,
+            "{model} channels correlate {correlation}"
+        );
     }
 }
 
 /// The largest sample-to-sample step in each 10 ms change window and the largest once settled, for a sequence of
 /// settings applied by `next` every 0.3 s while a sine plays.
-fn change_steps(settings: &[FxSettings], mut next: impl FnMut(&mut TrackDsp, &FxSettings) -> TrackDsp) -> Vec<(f32, f32)> {
+fn change_steps(
+    settings: &[FxSettings],
+    mut next: impl FnMut(&mut TrackDsp, &FxSettings) -> TrackDsp,
+) -> Vec<(f32, f32)> {
     let sine = |n: usize| ((std::f64::consts::TAU * 220.0 * n as f64 / RATE).sin() * 0.3) as f32;
     let mut dsp = TrackDsp::new(settings[0].clone(), 48_000, 4.0).unwrap();
     let (mut last, mut n, mut segments) = (0.0f32, 0, Vec::new());
@@ -225,7 +329,11 @@ fn change_steps(settings: &[FxSettings], mut next: impl FnMut(&mut TrackDsp, &Fx
         for m in 0..14_400 {
             let y = dsp.process([sine(n); 2], 120.0)[0];
             let step = (y - last).abs();
-            if m < 480 { change = change.max(step) } else if m > 7_200 { settled = settled.max(step) }
+            if m < 480 {
+                change = change.max(step)
+            } else if m > 7_200 {
+                settled = settled.max(step)
+            }
             last = y;
             n += 1;
         }
@@ -238,11 +346,20 @@ fn change_steps(settings: &[FxSettings], mut next: impl FnMut(&mut TrackDsp, &Fx
 fn switching_models_does_not_click() {
     let mut half = reverb("plate", 0.9);
     half.reverb.mix = 0.5;
-    let settings = [reverb("room", 0.5), reverb("hall", 0.5), reverb("spring", 0.2), half, reverb("room", 0.9)];
+    let settings = [
+        reverb("room", 0.5),
+        reverb("hall", 0.5),
+        reverb("spring", 0.2),
+        half,
+        reverb("room", 0.9),
+    ];
     for path in ["set_settings", "transition_from"] {
         let segments = change_steps(&settings, |old, setting| {
             if path == "set_settings" {
-                let mut dsp = std::mem::replace(old, TrackDsp::new(FxSettings::default(), 48_000, 4.0).unwrap());
+                let mut dsp = std::mem::replace(
+                    old,
+                    TrackDsp::new(FxSettings::default(), 48_000, 4.0).unwrap(),
+                );
                 dsp.set_settings(setting.clone()).unwrap();
                 dsp
             } else {
@@ -253,7 +370,11 @@ fn switching_models_does_not_click() {
         });
         for index in 1..segments.len() {
             let bound = segments[index - 1].1.max(segments[index].1);
-            assert!(segments[index].0 <= bound * 1.25, "{path} change {index}: step {} vs settled {bound}", segments[index].0);
+            assert!(
+                segments[index].0 <= bound * 1.25,
+                "{path} change {index}: step {} vs settled {bound}",
+                segments[index].0
+            );
         }
     }
 }
@@ -278,7 +399,11 @@ fn a_model_left_earlier_does_not_bring_back_its_old_tail() {
         off.reverb.enabled = false;
         // Each model rings from an impulse and is left for another while it still rings; back in it, only silence
         // went in since, so silence comes out. Turning the reverb off and on again is the same.
-        for (first, second) in [(reverb("hall", 0.9), reverb("plate", 0.9)), (reverb("room", 0.9), reverb("spring", 0.9)), (reverb("hall", 0.9), off)] {
+        for (first, second) in [
+            (reverb("hall", 0.9), reverb("plate", 0.9)),
+            (reverb("room", 0.9), reverb("spring", 0.9)),
+            (reverb("hall", 0.9), off),
+        ] {
             dsp = switch(dsp, first.clone());
             for _ in 0..48_000 {
                 dsp.process([0.0; 2], 120.0);
@@ -292,8 +417,18 @@ fn a_model_left_earlier_does_not_bring_back_its_old_tail() {
                 dsp.process([0.0; 2], 120.0);
             }
             dsp = switch(dsp, first.clone());
-            let loudest = (0..9_600).map(|_| { let y = dsp.process([0.0; 2], 120.0); y[0].abs().max(y[1].abs()) }).fold(0.0f32, f32::max);
-            assert!(loudest < 1e-6, "{path}: the {} tail returned at {loudest} after {}", first.reverb.model, second.reverb.model);
+            let loudest = (0..9_600)
+                .map(|_| {
+                    let y = dsp.process([0.0; 2], 120.0);
+                    y[0].abs().max(y[1].abs())
+                })
+                .fold(0.0f32, f32::max);
+            assert!(
+                loudest < 1e-6,
+                "{path}: the {} tail returned at {loudest} after {}",
+                first.reverb.model,
+                second.reverb.model
+            );
         }
     }
 }
@@ -337,7 +472,13 @@ fn models_keep_their_decay_and_color_at_every_rate() {
                 y
             })
             .collect();
-        let tail_zero = { let mut last = [1.0f32; 2]; for _ in 0..rate as usize * 60 { last = dsp.process([0.0; 2], 120.0); } last == [0.0; 2] };
+        let tail_zero = {
+            let mut last = [1.0f32; 2];
+            for _ in 0..rate as usize * 60 {
+                last = dsp.process([0.0; 2], 120.0);
+            }
+            last == [0.0; 2]
+        };
         assert!(tail_zero, "{model} at {rate} Hz ends in silence");
         let w = std::f64::consts::TAU * 2_000.0 / rate as f64;
         let alpha = w.sin() / 2.8;
@@ -358,13 +499,20 @@ fn models_keep_their_decay_and_color_at_every_rate() {
                     .sum()
             })
             .collect();
-        let whole: Vec<f64> = samples.iter().map(|y| (y[0] * y[0] + y[1] * y[1]) as f64).collect();
+        let whole: Vec<f64> = samples
+            .iter()
+            .map(|y| (y[0] * y[0] + y[1] * y[1]) as f64)
+            .collect();
         let time = |response: &[f64]| {
             let mut remaining = vec![0.0; response.len() + 1];
             for n in (0..response.len()).rev() {
                 remaining[n] = remaining[n + 1] + response[n];
             }
-            let at = |level: f64| (0..response.len()).find(|&n| 10.0 * (remaining[n] / remaining[0]).log10() <= level).unwrap();
+            let at = |level: f64| {
+                (0..response.len())
+                    .find(|&n| 10.0 * (remaining[n] / remaining[0]).log10() <= level)
+                    .unwrap()
+            };
             (at(-25.0) - at(-5.0)) as f64 / rate as f64 * 3.0
         };
         (time(&whole), time(&band))
@@ -373,8 +521,14 @@ fn models_keep_their_decay_and_color_at_every_rate() {
         let reference = rt(model, 48_000);
         for rate in [8_000, 44_100, 96_000, 192_000] {
             let times = rt(model, rate);
-            assert!((times.0 / reference.0 - 1.0).abs() < 0.2, "{model} decays in {times:?} s at {rate} Hz against {reference:?} s at 48 kHz");
-            assert!((times.1 / reference.1 - 1.0).abs() < 0.2, "{model} decays in {times:?} s at {rate} Hz against {reference:?} s at 48 kHz");
+            assert!(
+                (times.0 / reference.0 - 1.0).abs() < 0.2,
+                "{model} decays in {times:?} s at {rate} Hz against {reference:?} s at 48 kHz"
+            );
+            assert!(
+                (times.1 / reference.1 - 1.0).abs() < 0.2,
+                "{model} decays in {times:?} s at {rate} Hz against {reference:?} s at 48 kHz"
+            );
         }
     }
 }

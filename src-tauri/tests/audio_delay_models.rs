@@ -15,7 +15,9 @@ fn delay(model: &str, quarter_notes: f64, feedback: f64) -> FxSettings {
 /// The left channel's response to `input` at 120 bpm.
 fn render(fx: &FxSettings, frames: usize, input: impl Fn(usize) -> f32) -> Vec<f64> {
     let mut dsp = TrackDsp::new(fx.clone(), 48_000, 16.0).unwrap();
-    (0..frames).map(|n| dsp.process([input(n); 2], 120.0)[0] as f64).collect()
+    (0..frames)
+        .map(|n| dsp.process([input(n); 2], 120.0)[0] as f64)
+        .collect()
 }
 
 /// A fingerprint of the output while `steps` are applied every second with `set_settings`, as the tempo drifts. The
@@ -29,7 +31,11 @@ fn fingerprint(steps: &[FxSettings]) -> (u64, u64) {
         }
         for _ in 0..48_000 {
             seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
-            let x = if n % 12_000 < 2_000 { ((seed >> 9) as f32 / (1u32 << 23) as f32 - 0.5) * 0.9 } else { 0.0 };
+            let x = if n % 12_000 < 2_000 {
+                ((seed >> 9) as f32 / (1u32 << 23) as f32 - 0.5) * 0.9
+            } else {
+                0.0
+            };
             let y = dsp.process([x, -0.5 * x], 100.0 + (n / 30_000) as f64);
             energy += (y[0] * y[0] + y[1] * y[1]) as f64;
             weighted += (y[0] as f64 - 0.5 * y[1] as f64) * ((n % 97) as f64 + 1.0);
@@ -54,8 +60,21 @@ fn click(n: usize) -> f32 {
 /// The first `count` repeats of a short noise burst: each repeat's RMS level, the share of its energy that a
 /// one-pole split puts above 1 kHz, and the time of its peak in seconds after the burst's own peak.
 fn repeats(fx: &FxSettings, seconds_apart: f64, count: usize) -> Vec<(f64, f64, f64)> {
-    let first = (0..96).fold((0, 0.0f32), |best, n| if click(n).abs() > best.1 { (n, click(n).abs()) } else { best }).0 as f64 / RATE;
-    let output = render(fx, (seconds_apart * RATE) as usize * (count + 1) + 4_800, click);
+    let first = (0..96)
+        .fold((0, 0.0f32), |best, n| {
+            if click(n).abs() > best.1 {
+                (n, click(n).abs())
+            } else {
+                best
+            }
+        })
+        .0 as f64
+        / RATE;
+    let output = render(
+        fx,
+        (seconds_apart * RATE) as usize * (count + 1) + 4_800,
+        click,
+    );
     (1..=count)
         .map(|k| {
             let centre = (k as f64 * seconds_apart * RATE) as usize;
@@ -69,8 +88,18 @@ fn repeats(fx: &FxSettings, seconds_apart: f64, count: usize) -> Vec<(f64, f64, 
                 low += state * state;
                 high += (v - state) * (v - state);
             }
-            let peak = window.iter().enumerate().fold((0, 0.0f64), |best, (i, v)| if v.abs() > best.1 { (i, v.abs()) } else { best }).0;
-            (level, high / (low + high), (centre - 1_200 + peak) as f64 / RATE - first)
+            let peak = window
+                .iter()
+                .enumerate()
+                .fold((0, 0.0f64), |best, (i, v)| {
+                    if v.abs() > best.1 { (i, v.abs()) } else { best }
+                })
+                .0;
+            (
+                level,
+                high / (low + high),
+                (centre - 1_200 + peak) as f64 / RATE - first,
+            )
         })
         .collect()
 }
@@ -78,21 +107,46 @@ fn repeats(fx: &FxSettings, seconds_apart: f64, count: usize) -> Vec<(f64, f64, 
 #[test]
 fn delay_models_keep_older_documents_and_wire_format() {
     let defaults = serde_json::to_value(FxSettings::default()).unwrap();
-    assert_eq!(defaults["delay"], serde_json::json!({"enabled":false,"quarterNotes":1.0,"feedback":0.25,"mix":0.15}));
+    assert_eq!(
+        defaults["delay"],
+        serde_json::json!({"enabled":false,"quarterNotes":1.0,"feedback":0.25,"mix":0.15})
+    );
     let older: FxSettings = serde_json::from_value(defaults).unwrap();
     assert_eq!(older.delay.model, "digital");
     let fx = delay("tape", 0.75, 0.4);
     let written = serde_json::to_value(&fx).unwrap();
-    assert_eq!(written["delay"], serde_json::json!({"enabled":true,"model":"tape","quarterNotes":0.75,"feedback":0.4,"mix":1.0}));
-    assert_eq!(serde_json::from_value::<FxSettings>(written.clone()).unwrap(), fx);
+    assert_eq!(
+        written["delay"],
+        serde_json::json!({"enabled":true,"model":"tape","quarterNotes":0.75,"feedback":0.4,"mix":1.0})
+    );
+    assert_eq!(
+        serde_json::from_value::<FxSettings>(written.clone()).unwrap(),
+        fx
+    );
     let mut unknown = written;
     unknown["delay"]["wow"] = serde_json::json!(1.0);
     assert!(serde_json::from_value::<FxSettings>(unknown).is_err());
     let mut bad = FxSettings::default();
     bad.delay.model = "lofi".into();
-    assert!(bad.validate().unwrap_err().to_lowercase().contains("delay model"));
+    assert!(
+        bad.validate()
+            .unwrap_err()
+            .to_lowercase()
+            .contains("delay model")
+    );
     // Dotted and triplet divisions are accepted, other durations are not.
-    for quarter_notes in [0.125, 0.25, 1.0 / 3.0, 0.5, 2.0 / 3.0, 0.75, 1.0, 1.5, 2.0, 4.0] {
+    for quarter_notes in [
+        0.125,
+        0.25,
+        1.0 / 3.0,
+        0.5,
+        2.0 / 3.0,
+        0.75,
+        1.0,
+        1.5,
+        2.0,
+        4.0,
+    ] {
         let mut fx = FxSettings::default();
         fx.delay.quarter_notes = quarter_notes;
         assert!(fx.validate().is_ok(), "{quarter_notes}");
@@ -111,20 +165,43 @@ fn the_digital_model_sounds_exactly_as_before() {
         fx
     };
     // Fingerprints taken with the original delay, before the other models were added.
-    assert_eq!(fingerprint(&[digital(true, 0.5, 0.3), digital(true, 1.0, 0.7), digital(true, 0.25, 0.5)]), (4651115380535040726, 4650204733413200236));
-    assert_eq!(fingerprint(&[digital(false, 0.5, 0.5), digital(true, 0.5, 0.5), digital(false, 0.5, 0.5)]), (4654723118341063786, 4651518463436592016));
+    assert_eq!(
+        fingerprint(&[
+            digital(true, 0.5, 0.3),
+            digital(true, 1.0, 0.7),
+            digital(true, 0.25, 0.5)
+        ]),
+        (4651115380535040726, 4650204733413200236)
+    );
+    assert_eq!(
+        fingerprint(&[
+            digital(false, 0.5, 0.5),
+            digital(true, 0.5, 0.5),
+            digital(false, 0.5, 0.5)
+        ]),
+        (4654723118341063786, 4651518463436592016)
+    );
 }
 
 #[test]
 fn repeats_follow_the_tempo_and_division() {
     // At 120 bpm a quarter note is 0.5 s.
     for model in ["digital", "tape", "analog"] {
-        for (quarter_notes, seconds) in [(0.75, 0.375), (1.0 / 3.0, 1.0 / 6.0), (1.5, 0.75), (2.0 / 3.0, 1.0 / 3.0)] {
+        for (quarter_notes, seconds) in [
+            (0.75, 0.375),
+            (1.0 / 3.0, 1.0 / 6.0),
+            (1.5, 0.75),
+            (2.0 / 3.0, 1.0 / 3.0),
+        ] {
             let found = repeats(&delay(model, quarter_notes, 0.5), seconds, 3);
             for (k, (_, _, at)) in found.iter().enumerate() {
                 let expected = (k + 1) as f64 * seconds;
                 let tolerance = if model == "digital" { 0.0005 } else { 0.003 };
-                assert!((at - expected).abs() < tolerance, "{model} {quarter_notes}: repeat {} at {at} s, expected {expected} s", k + 1);
+                assert!(
+                    (at - expected).abs() < tolerance,
+                    "{model} {quarter_notes}: repeat {} at {at} s, expected {expected} s",
+                    k + 1
+                );
             }
         }
     }
@@ -135,25 +212,45 @@ fn tape_and_analog_repeats_darken_and_fade_while_digital_ones_stay_exact() {
     let digital = repeats(&delay("digital", 0.5, 0.6), 0.25, 4);
     for k in 1..4 {
         // Each digital repeat is the previous one times the feedback.
-        assert!((digital[k].0 / digital[k - 1].0 - 0.6).abs() < 0.01, "digital {digital:?}");
-        assert!((digital[k].1 - digital[0].1).abs() < 0.01, "digital colour {digital:?}");
+        assert!(
+            (digital[k].0 / digital[k - 1].0 - 0.6).abs() < 0.01,
+            "digital {digital:?}"
+        );
+        assert!(
+            (digital[k].1 - digital[0].1).abs() < 0.01,
+            "digital colour {digital:?}"
+        );
     }
     for model in ["tape", "analog"] {
         let found = repeats(&delay(model, 0.5, 0.6), 0.25, 4);
         for k in 1..4 {
-            assert!(found[k].1 < found[k - 1].1, "{model} repeats darken {found:?}");
-            assert!(found[k].0 < digital[k].0, "{model} repeats fade faster than digital {found:?}");
+            assert!(
+                found[k].1 < found[k - 1].1,
+                "{model} repeats darken {found:?}"
+            );
+            assert!(
+                found[k].0 < digital[k].0,
+                "{model} repeats fade faster than digital {found:?}"
+            );
         }
     }
-    let (tape, analog) = (repeats(&delay("tape", 0.5, 0.6), 0.25, 3), repeats(&delay("analog", 0.5, 0.6), 0.25, 3));
-    assert!(analog[2].1 < tape[2].1, "analog is darker than tape: {analog:?} {tape:?}");
+    let (tape, analog) = (
+        repeats(&delay("tape", 0.5, 0.6), 0.25, 3),
+        repeats(&delay("analog", 0.5, 0.6), 0.25, 3),
+    );
+    assert!(
+        analog[2].1 < tape[2].1,
+        "analog is darker than tape: {analog:?} {tape:?}"
+    );
 }
 
 #[test]
 fn tape_wobbles_in_pitch_and_digital_does_not() {
     // The instantaneous frequency of a steady 1 kHz tone's first repeat, from zero crossings.
     let wobble = |model: &str| {
-        let output = render(&delay(model, 1.0, 0.0), (3.0 * RATE) as usize, |n| ((std::f64::consts::TAU * 1_000.0 * n as f64 / RATE).sin() * 0.3) as f32);
+        let output = render(&delay(model, 1.0, 0.0), (3.0 * RATE) as usize, |n| {
+            ((std::f64::consts::TAU * 1_000.0 * n as f64 / RATE).sin() * 0.3) as f32
+        });
         let crossings: Vec<f64> = (RATE as usize + 1..output.len())
             .filter(|&n| output[n - 1] < 0.0 && output[n] >= 0.0)
             .map(|n| n as f64 - 1.0 + output[n - 1] / (output[n - 1] - output[n]))
@@ -165,21 +262,36 @@ fn tape_wobbles_in_pitch_and_digital_does_not() {
     let (digital, tape, analog) = (wobble("digital"), wobble("tape"), wobble("analog"));
     assert!(digital < 0.5, "digital wobble {digital} cents");
     assert!(tape > 5.0 && tape < 40.0, "tape wobble {tape} cents");
-    assert!(analog > 1.0 && analog < tape, "analog wobble {analog} cents against tape {tape}");
+    assert!(
+        analog > 1.0 && analog < tape,
+        "analog wobble {analog} cents against tape {tape}"
+    );
 }
 
 #[test]
 fn tape_saturates_loud_repeats() {
     // At high feedback a loud tone whose period divides the delay builds up; tape's saturation holds the repeats
     // below digital's.
-    let peak = |model: &str| render(&delay(model, 0.25, 0.9), (3.0 * RATE) as usize, |n| ((std::f64::consts::TAU * 240.0 * n as f64 / RATE).sin() * 0.8) as f32).iter().fold(0.0f64, |most, v| most.max(v.abs()));
+    let peak = |model: &str| {
+        render(&delay(model, 0.25, 0.9), (3.0 * RATE) as usize, |n| {
+            ((std::f64::consts::TAU * 240.0 * n as f64 / RATE).sin() * 0.8) as f32
+        })
+        .iter()
+        .fold(0.0f64, |most, v| most.max(v.abs()))
+    };
     let (digital, tape) = (peak("digital"), peak("tape"));
-    assert!(tape < digital * 0.7, "tape peak {tape} against digital {digital}");
+    assert!(
+        tape < digital * 0.7,
+        "tape peak {tape} against digital {digital}"
+    );
 }
 
 /// The largest sample-to-sample step in each 10 ms change window and the largest once settled, for a sequence of
 /// settings applied by `next` every 0.5 s while a sine plays.
-fn change_steps(settings: &[FxSettings], mut next: impl FnMut(&mut TrackDsp, &FxSettings) -> TrackDsp) -> Vec<(f32, f32)> {
+fn change_steps(
+    settings: &[FxSettings],
+    mut next: impl FnMut(&mut TrackDsp, &FxSettings) -> TrackDsp,
+) -> Vec<(f32, f32)> {
     let sine = |n: usize| ((std::f64::consts::TAU * 220.0 * n as f64 / RATE).sin() * 0.3) as f32;
     let mut dsp = TrackDsp::new(settings[0].clone(), 48_000, 4.0).unwrap();
     let (mut last, mut n, mut segments) = (0.0f32, 0, Vec::new());
@@ -191,7 +303,11 @@ fn change_steps(settings: &[FxSettings], mut next: impl FnMut(&mut TrackDsp, &Fx
         for m in 0..24_000 {
             let y = dsp.process([sine(n); 2], 120.0);
             let step = (y[0] - last).abs();
-            if m < 480 { change = change.max(step) } else if m > 12_000 { settled = settled.max(step) }
+            if m < 480 {
+                change = change.max(step)
+            } else if m > 12_000 {
+                settled = settled.max(step)
+            }
             last = y[0];
             n += 1;
         }
@@ -204,11 +320,20 @@ fn change_steps(settings: &[FxSettings], mut next: impl FnMut(&mut TrackDsp, &Fx
 fn switching_models_does_not_click() {
     let mut half = delay("analog", 0.5, 0.5);
     half.delay.mix = 0.5;
-    let settings = [delay("digital", 0.5, 0.5), delay("tape", 0.5, 0.5), half, delay("digital", 0.5, 0.7), delay("analog", 0.5, 0.2)];
+    let settings = [
+        delay("digital", 0.5, 0.5),
+        delay("tape", 0.5, 0.5),
+        half,
+        delay("digital", 0.5, 0.7),
+        delay("analog", 0.5, 0.2),
+    ];
     for path in ["set_settings", "transition_from"] {
         let segments = change_steps(&settings, |old, setting| {
             if path == "set_settings" {
-                let mut dsp = std::mem::replace(old, TrackDsp::new(FxSettings::default(), 48_000, 4.0).unwrap());
+                let mut dsp = std::mem::replace(
+                    old,
+                    TrackDsp::new(FxSettings::default(), 48_000, 4.0).unwrap(),
+                );
                 dsp.set_settings(setting.clone()).unwrap();
                 dsp
             } else {
@@ -219,7 +344,11 @@ fn switching_models_does_not_click() {
         });
         for index in 1..segments.len() {
             let bound = segments[index - 1].1.max(segments[index].1);
-            assert!(segments[index].0 <= bound * 1.25, "{path} change {index}: step {} vs settled {bound}", segments[index].0);
+            assert!(
+                segments[index].0 <= bound * 1.25,
+                "{path} change {index}: step {} vs settled {bound}",
+                segments[index].0
+            );
         }
     }
 }
@@ -243,8 +372,13 @@ fn a_colored_delay_resumed_after_a_digital_one_starts_silent() {
             new.transition_from(&mut dsp);
             dsp = new;
         }
-        let loudest = (0..4_800).map(|_| dsp.process([0.0; 2], 120.0)[0].abs()).fold(0.0f32, f32::max);
-        assert_eq!(loudest, 0.0, "{path}: tape resumed from its old filter state");
+        let loudest = (0..4_800)
+            .map(|_| dsp.process([0.0; 2], 120.0)[0].abs())
+            .fold(0.0f32, f32::max);
+        assert_eq!(
+            loudest, 0.0,
+            "{path}: tape resumed from its old filter state"
+        );
     }
 }
 
@@ -262,7 +396,10 @@ fn every_model_ends_in_silence_and_bypasses_when_off() {
         // The digital delay is kept exactly as before, when its echoes were not flushed, so it fades to a residue far
         // below hearing rather than to zero.
         if model == "digital" {
-            assert!(last[0].abs() < 1e-20 && last[1].abs() < 1e-20, "{model} tail {last:?}");
+            assert!(
+                last[0].abs() < 1e-20 && last[1].abs() < 1e-20,
+                "{model} tail {last:?}"
+            );
         } else {
             assert_eq!(last, [0.0; 2], "{model} tail");
         }

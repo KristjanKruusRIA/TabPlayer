@@ -4,7 +4,8 @@ use tabplayer_lib::audio::dsp::{FxSettings, TrackDsp};
 fn gain(fx: &FxSettings, rate: u32, hz: f64, amplitude: f64) -> f64 {
     let mut dsp = TrackDsp::new(fx.clone(), rate, 4.0).unwrap();
     let frames = rate as usize;
-    let tone = |n: usize| ((std::f64::consts::TAU * hz * n as f64 / rate as f64).sin() * amplitude) as f32;
+    let tone =
+        |n: usize| ((std::f64::consts::TAU * hz * n as f64 / rate as f64).sin() * amplitude) as f32;
     let mut sum = 0.0;
     let mut reference = 0.0;
     for n in 0..frames {
@@ -47,7 +48,10 @@ fn sine(n: usize, hz: f64, amplitude: f64) -> f32 {
 #[test]
 fn wah_keeps_older_documents_and_wire_format() {
     let defaults = serde_json::to_value(FxSettings::default()).unwrap();
-    assert!(defaults.get("wah").is_none(), "wah must not be written while at its defaults");
+    assert!(
+        defaults.get("wah").is_none(),
+        "wah must not be written while at its defaults"
+    );
     let older: FxSettings = serde_json::from_value(defaults).unwrap();
     assert!(!older.wah.enabled);
     let fx = wah("auto", 0.25);
@@ -64,7 +68,10 @@ fn wah_parameters_are_validated() {
     let cases: Vec<(&str, Box<dyn Fn(&mut FxSettings)>)> = vec![
         ("wah position", Box::new(|fx| fx.wah.position = 1.5)),
         ("wah resonance", Box::new(|fx| fx.wah.resonance = -0.1)),
-        ("wah sensitivity", Box::new(|fx| fx.wah.sensitivity = f64::NAN)),
+        (
+            "wah sensitivity",
+            Box::new(|fx| fx.wah.sensitivity = f64::NAN),
+        ),
         ("wah mix", Box::new(|fx| fx.wah.mix = 1.1)),
         ("wah mode", Box::new(|fx| fx.wah.mode = "pedal".into())),
     ];
@@ -118,13 +125,19 @@ fn auto_wah_opens_with_playing_level_and_sensitivity() {
     // Loud playing pushes the filter toward the toe; soft playing leaves it near the heel.
     let loud_top = gain(&auto, 48_000, 2_100.0, 0.5);
     let soft_top = gain(&auto, 48_000, 2_100.0, 0.01);
-    assert!(loud_top > 0.6 && soft_top < 0.2, "loud {loud_top} soft {soft_top}");
+    assert!(
+        loud_top > 0.6 && soft_top < 0.2,
+        "loud {loud_top} soft {soft_top}"
+    );
     let loud_low = gain(&auto, 48_000, 400.0, 0.5);
     let soft_low = gain(&auto, 48_000, 400.0, 0.003);
     assert!(soft_low > loud_low * 2.0, "soft {soft_low} loud {loud_low}");
     // A -20 dBFS tone, a loud pickup, sits high in the sweep but short of the toe at the default sensitivity.
     let mid = centre(&auto, 48_000);
-    assert!((1_000.0..2_000.0).contains(&mid), "loud pickup centre {mid}");
+    assert!(
+        (1_000.0..2_000.0).contains(&mid),
+        "loud pickup centre {mid}"
+    );
     // Lower sensitivity needs louder playing for the same sweep.
     let mut dull = auto.clone();
     dull.wah.sensitivity = 0.0;
@@ -185,12 +198,19 @@ fn wah_edits_and_mode_changes_do_not_click_and_stay_level() {
         }
         output.push(dsp.process([sine(n, 900.0, 0.5); 2], 120.0));
     }
-    let step = |range: std::ops::Range<usize>| range.map(|i| (output[i][0] - output[i - 1][0]).abs()).fold(0.0, f32::max);
+    let step = |range: std::ops::Range<usize>| {
+        range
+            .map(|i| (output[i][0] - output[i - 1][0]).abs())
+            .fold(0.0, f32::max)
+    };
     // A full-level 900 Hz tone moves by at most about 0.06 a frame.
     let tone_step = (std::f64::consts::TAU * 900.0 / 48_000.0 * 0.5) as f32;
     for at in [12_000, 24_000, 36_000] {
         let largest = step(at - 10..at + 1_200);
-        assert!(largest < tone_step * 1.6, "step {largest} at {at} vs {tone_step}");
+        assert!(
+            largest < tone_step * 1.6,
+            "step {largest} at {at} vs {tone_step}"
+        );
     }
     // Full resonance at the centre does not lift a full-scale tone.
     for position in [0.0, 0.5, 1.0] {
@@ -198,7 +218,9 @@ fn wah_edits_and_mode_changes_do_not_click_and_stay_level() {
         fx.wah.resonance = 1.0;
         let mut dsp = TrackDsp::new(fx, 48_000, 4.0).unwrap();
         let hz = 350.0 * (2_200.0f64 / 350.0).powf(position);
-        let peak = (0..48_000).map(|n| dsp.process([sine(n, hz, 1.0); 2], 120.0)[0].abs()).fold(0.0, f32::max);
+        let peak = (0..48_000)
+            .map(|n| dsp.process([sine(n, hz, 1.0); 2], 120.0)[0].abs())
+            .fold(0.0, f32::max);
         assert!(peak < 1.1, "position {position} peaks at {peak}");
     }
     // Silence after a loud burst decays to exact zero.

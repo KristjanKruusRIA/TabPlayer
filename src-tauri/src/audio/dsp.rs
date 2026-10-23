@@ -102,7 +102,13 @@ pub struct Delay {
 }
 impl Default for Delay {
     fn default() -> Self {
-        Self { enabled: false, model: digital_model(), quarter_notes: 1.0, feedback: 0.25, mix: 0.15 }
+        Self {
+            enabled: false,
+            model: digital_model(),
+            quarter_notes: 1.0,
+            feedback: 0.25,
+            mix: 0.15,
+        }
     }
 }
 fn digital_model() -> String {
@@ -124,7 +130,13 @@ pub struct Reverb {
 }
 impl Default for Reverb {
     fn default() -> Self {
-        Self { enabled: false, model: room_model(), room: 0.5, damping: 0.5, mix: 0.12 }
+        Self {
+            enabled: false,
+            model: room_model(),
+            room: 0.5,
+            damping: 0.5,
+            mix: 0.12,
+        }
     }
 }
 fn room_model() -> String {
@@ -171,7 +183,10 @@ fn untouched<T: Default + PartialEq>(value: &T) -> bool {
 /// The vibrato delay swing in frames: a delay swinging by ±a seconds at ω rad/s bends pitch by 1 ± aω.
 fn vibrato_swing(vibrato: &Vibrato, rate: f64) -> f64 {
     let cents = vibrato.depth_cents;
-    (2f64.powf(cents / 1200.0) - 2f64.powf(-cents / 1200.0)) / 2.0 / (std::f64::consts::TAU * vibrato.rate_hz) * rate
+    (2f64.powf(cents / 1200.0) - 2f64.powf(-cents / 1200.0))
+        / 2.0
+        / (std::f64::consts::TAU * vibrato.rate_hz)
+        * rate
 }
 /// Moves a delay swing toward its target by at most 0.03 frames a frame, a pitch bend under half a semitone.
 fn slew(current: f64, target: f64) -> f64 {
@@ -226,10 +241,21 @@ struct DriveShape {
     level: f64,
 }
 fn drive_shape(drive: &Drive, rate: f64) -> DriveShape {
-    let (hard, gain, bias) = (drive.model == "distortion", drive_gain(drive), if drive.model == "fuzz" { FUZZ_BIAS } else { 0.0 });
+    let (hard, gain, bias) = (
+        drive.model == "distortion",
+        drive_gain(drive),
+        if drive.model == "fuzz" {
+            FUZZ_BIAS
+        } else {
+            0.0
+        },
+    );
     let (mut sum, mut squares) = (0.0, 0.0);
     for n in 0..256 {
-        let y = drive_curve(hard, gain * DRIVE_REFERENCE * ((std::f64::consts::TAU * n as f64 / 256.0).sin() + bias));
+        let y = drive_curve(
+            hard,
+            gain * DRIVE_REFERENCE * ((std::f64::consts::TAU * n as f64 / 256.0).sin() + bias),
+        );
         sum += y;
         squares += y * y;
     }
@@ -248,7 +274,10 @@ fn drive_shape(drive: &Drive, rate: f64) -> DriveShape {
 const MICROPHONE_PLACEMENTS: [&str; 4] = ["standard", "close", "edge", "room"];
 /// The room microphone's early reflections, as (seconds, gain), for the left and the right channel, and the level
 /// of the direct sound beside them. Each channel hears different walls, so a centred source spreads out.
-const ROOM_REFLECTIONS: [[(f64, f64); 2]; 2] = [[(0.0113, 0.35), (0.0239, 0.2)], [(0.0137, 0.35), (0.0191, 0.2)]];
+const ROOM_REFLECTIONS: [[(f64, f64); 2]; 2] = [
+    [(0.0113, 0.35), (0.0239, 0.2)],
+    [(0.0137, 0.35), (0.0191, 0.2)],
+];
 const ROOM_DIRECT: f64 = 0.8;
 /// One microphone setting resolved for the audio thread: its tone filters, and whether it adds a room's
 /// reflections and folds to mono.
@@ -277,11 +306,26 @@ fn microphone_shape(microphone: &Microphone, rate: f64) -> MicrophoneShape {
         }
         _ => {}
     }
-    MicrophoneShape { filters, room: microphone.placement == "room", mono: microphone.output == "mono" }
+    MicrophoneShape {
+        filters,
+        room: microphone.placement == "room",
+        mono: microphone.output == "mono",
+    }
 }
 const DELAY_MODELS: [&str; 3] = ["digital", "tape", "analog"];
 /// Echo durations in quarter notes: straight, dotted and triplet divisions.
-const DELAY_DIVISIONS: [f64; 10] = [0.125, 0.25, 1.0 / 3.0, 0.5, 2.0 / 3.0, 0.75, 1.0, 1.5, 2.0, 4.0];
+const DELAY_DIVISIONS: [f64; 10] = [
+    0.125,
+    0.25,
+    1.0 / 3.0,
+    0.5,
+    2.0 / 3.0,
+    0.75,
+    1.0,
+    1.5,
+    2.0,
+    4.0,
+];
 /// One delay setting resolved for the audio thread. Digital repeats are exact copies. Tape and analog repeats
 /// pass through a low-pass and a high-pass, round off in a soft clipper, and are read from a delay that wanders:
 /// tape's with slow wow and fast flutter, analog's with a gentle slow drift. Their filters act on every repeat, so
@@ -302,9 +346,30 @@ fn delay_shape(delay: &Delay, rate: f64) -> DelayShape {
     let one_pole = |hz: f64| 1.0 - (-std::f64::consts::TAU * hz.min(rate * 0.45) / rate).exp();
     let step = |hz: f64| std::f64::consts::TAU * hz / rate;
     match delay.model.as_str() {
-        "tape" => DelayShape { colored: true, low: one_pole(4_500.0), high: one_pole(80.0), drive: 1.5, depth: [0.0012 * rate, 0.00008 * rate], step: [step(0.6), step(7.0)] },
-        "analog" => DelayShape { colored: true, low: one_pole(2_200.0), high: one_pole(60.0), drive: 1.2, depth: [0.00035 * rate, 0.0], step: [step(0.4), 0.0] },
-        _ => DelayShape { colored: false, low: 1.0, high: 0.0, drive: 1.0, depth: [0.0; 2], step: [0.0; 2] },
+        "tape" => DelayShape {
+            colored: true,
+            low: one_pole(4_500.0),
+            high: one_pole(80.0),
+            drive: 1.5,
+            depth: [0.0012 * rate, 0.00008 * rate],
+            step: [step(0.6), step(7.0)],
+        },
+        "analog" => DelayShape {
+            colored: true,
+            low: one_pole(2_200.0),
+            high: one_pole(60.0),
+            drive: 1.2,
+            depth: [0.00035 * rate, 0.0],
+            step: [step(0.4), 0.0],
+        },
+        _ => DelayShape {
+            colored: false,
+            low: 1.0,
+            high: 0.0,
+            drive: 1.0,
+            depth: [0.0; 2],
+            step: [0.0; 2],
+        },
     }
 }
 /// A reverb model built on a four-line feedback delay network: a pre-delay, four allpass diffusers, four delay
@@ -389,7 +454,9 @@ fn reverb_loops(family: &ReverbFamily, rate: f64) -> [f64; 4] {
     } else {
         0.0
     };
-    family.lines.map(|seconds| reverb_frames(seconds, rate) as f64 + chirp)
+    family
+        .lines
+        .map(|seconds| reverb_frames(seconds, rate) as f64 + chirp)
 }
 /// The coefficient k of a one-pole low-pass y += k(x - y) whose gain at `w` radians per frame is `gain`.
 fn one_pole_for(gain: f64, w: f64) -> f64 {
@@ -412,9 +479,16 @@ struct ReverbShape {
     cut: [f64; 4],
 }
 fn reverb_shape(reverb: &Reverb, rate: f64) -> ReverbShape {
-    let model = REVERB_MODELS.iter().position(|name| *name == reverb.model).unwrap_or(0);
+    let model = REVERB_MODELS
+        .iter()
+        .position(|name| *name == reverb.model)
+        .unwrap_or(0);
     if model == 0 {
-        return ReverbShape { model, feedback: [0.0; 4], cut: [0.0; 4] };
+        return ReverbShape {
+            model,
+            feedback: [0.0; 4],
+            cut: [0.0; 4],
+        };
     }
     let family = &REVERB_FAMILIES[model - 1];
     let decay = family.decay[0] + (family.decay[1] - family.decay[0]) * reverb.room;
@@ -425,7 +499,8 @@ fn reverb_shape(reverb: &Reverb, rate: f64) -> ReverbShape {
     ReverbShape {
         model,
         feedback: loops.map(|frames| gain(frames, decay)),
-        cut: loops.map(|frames| one_pole_for(gain(frames, decay * bright) / gain(frames, decay), w)),
+        cut: loops
+            .map(|frames| one_pole_for(gain(frames, decay * bright) / gain(frames, decay), w)),
     }
 }
 /// A mono delay line read whole frames back.
@@ -435,7 +510,10 @@ struct Ring {
 }
 impl Ring {
     fn new(length: usize) -> Self {
-        Self { frames: vec![0.0; length + 1], cursor: 0 }
+        Self {
+            frames: vec![0.0; length + 1],
+            cursor: 0,
+        }
     }
     fn read(&self, back: usize) -> f64 {
         let len = self.frames.len();
@@ -460,7 +538,11 @@ struct Chirp {
 impl Chirp {
     fn new(rate: f64) -> Self {
         let stretch = spring_stretch(rate);
-        Self { history: vec![[0.0; 2]; 5 * SPRING_STAGES * stretch], stretch, at: 0 }
+        Self {
+            history: vec![[0.0; 2]; 5 * SPRING_STAGES * stretch],
+            stretch,
+            at: 0,
+        }
     }
     fn run(&mut self, chain: usize, a: f64, mut x: f64) -> f64 {
         for stage in 0..SPRING_STAGES {
@@ -473,7 +555,11 @@ impl Chirp {
     }
     /// Moves every filter on one frame, after each chain has run once.
     fn advance(&mut self) {
-        self.at = if self.at + 1 == self.stretch { 0 } else { self.at + 1 };
+        self.at = if self.at + 1 == self.stretch {
+            0
+        } else {
+            self.at + 1
+        };
     }
     fn reset(&mut self) {
         self.history.fill([0.0; 2]);
@@ -503,17 +589,35 @@ impl Tank {
         let frames = |seconds: f64| reverb_frames(seconds, rate);
         Self {
             family,
-            predelay: if shape.predelay > 0.0 { frames(shape.predelay) } else { 0 },
+            predelay: if shape.predelay > 0.0 {
+                frames(shape.predelay)
+            } else {
+                0
+            },
             pre: Ring::new(frames(shape.predelay.max(0.001))),
             diffuser_frames: shape.diffusers.map(frames),
             diffusers: shape.diffusers.map(|seconds| Ring::new(frames(seconds))),
             line_frames: shape.lines.map(frames),
             lines: shape.lines.map(|seconds| Ring::new(frames(seconds))),
             damp: [0.0; 4],
-            chirp: if shape.chirp != 0.0 { Some(Chirp::new(rate)) } else { None },
-            band: shape.band.map(|hz| if hz > 0.0 { 1.0 - (-std::f64::consts::TAU * hz.min(rate * 0.45) / rate).exp() } else { 0.0 }),
+            chirp: if shape.chirp != 0.0 {
+                Some(Chirp::new(rate))
+            } else {
+                None
+            },
+            band: shape.band.map(|hz| {
+                if hz > 0.0 {
+                    1.0 - (-std::f64::consts::TAU * hz.min(rate * 0.45) / rate).exp()
+                } else {
+                    0.0
+                }
+            }),
             band_state: [[0.0; 3]; 2],
-            color: if shape.color > 0.0 { 1.0 - (-std::f64::consts::TAU * shape.color.min(rate * 0.45) / rate).exp() } else { 0.0 },
+            color: if shape.color > 0.0 {
+                1.0 - (-std::f64::consts::TAU * shape.color.min(rate * 0.45) / rate).exp()
+            } else {
+                0.0
+            },
             color_state: 0.0,
             live: false,
         }
@@ -541,7 +645,11 @@ impl Tank {
             input = chirp.run(4, family.chirp, input);
         }
         self.pre.write(input);
-        let mut v = if self.predelay > 0 { self.pre.read(self.predelay) } else { input };
+        let mut v = if self.predelay > 0 {
+            self.pre.read(self.predelay)
+        } else {
+            input
+        };
         for i in 0..4 {
             let d = self.diffusers[i].read(self.diffuser_frames[i]);
             let w = flush(v + family.diffusion * d);
@@ -553,7 +661,12 @@ impl Tank {
             self.damp[i] = flush(self.damp[i] + cut[i] * (o[i] - self.damp[i]));
         }
         let s: [f64; 4] = std::array::from_fn(|i| self.damp[i] * feedback[i]);
-        let mixed = [s[0] + s[1] + s[2] + s[3], s[0] - s[1] + s[2] - s[3], s[0] + s[1] - s[2] - s[3], s[0] - s[1] - s[2] + s[3]];
+        let mixed = [
+            s[0] + s[1] + s[2] + s[3],
+            s[0] - s[1] + s[2] - s[3],
+            s[0] + s[1] - s[2] - s[3],
+            s[0] - s[1] - s[2] + s[3],
+        ];
         for i in 0..4 {
             let mut back = mixed[i] * 0.5;
             if let Some(chirp) = &mut self.chirp {
@@ -584,7 +697,13 @@ impl Tank {
     }
 }
 /// The original room reverb: four damped combs fed with the input and crossing channels.
-fn room_reverb(lines: &mut [DelayLine; 4], damp: &mut [[f32; 2]; 4], x: [f32; 2], room: f64, damping: f64) -> [f32; 2] {
+fn room_reverb(
+    lines: &mut [DelayLine; 4],
+    damp: &mut [[f32; 2]; 4],
+    x: [f32; 2],
+    room: f64,
+    damping: f64,
+) -> [f32; 2] {
     let mut wet = [0.0; 2];
     let feedback = (0.55 + 0.37 * room) as f32;
     let damping = (0.05 + 0.9 * damping) as f32;
@@ -633,7 +752,12 @@ fn shift(line: &DelayLine, state: &mut Shifter, ratio: f64, window: f64, rate: f
         if (p - state.last[tap]).abs() > 0.5 {
             let other = 1 - tap;
             let anchor = 2.0 + phases[other] * window + state.offsets[other];
-            state.offsets[tap] = best_match(line, anchor.round() as usize, (2.0 + p * window).round() as usize, rate) as f64;
+            state.offsets[tap] = best_match(
+                line,
+                anchor.round() as usize,
+                (2.0 + p * window).round() as usize,
+                rate,
+            ) as f64;
         }
         state.last[tap] = p;
         let weight = (std::f64::consts::PI * p).sin().powi(2) as f32;
@@ -648,7 +772,10 @@ fn shift(line: &DelayLine, state: &mut Shifter, ratio: f64, window: f64, rate: f
 /// A coarse pass compares every `stride` frames; a fine pass then checks the frames around the best one.
 fn best_match(line: &DelayLine, anchor: usize, start: usize, rate: f64) -> usize {
     let stride = (rate / SHIFT_SEARCH_RATE).round().max(1.0) as usize;
-    let (search, length) = ((rate * SHIFT_SEARCH) as usize, (rate * SHIFT_MATCH) as usize);
+    let (search, length) = (
+        (rate * SHIFT_SEARCH) as usize,
+        (rate * SHIFT_MATCH) as usize,
+    );
     let score = |offset: usize| {
         let (mut dot, mut energy) = (0.0, 1e-12);
         for j in (0..length).step_by(stride) {
@@ -659,10 +786,16 @@ fn best_match(line: &DelayLine, anchor: usize, start: usize, rate: f64) -> usize
         dot / energy.sqrt()
     };
     let pick = |offsets: &mut dyn Iterator<Item = usize>| {
-        offsets.fold((0, f64::MIN), |best, offset| {
-            let value = score(offset);
-            if value > best.1 { (offset, value) } else { best }
-        }).0
+        offsets
+            .fold((0, f64::MIN), |best, offset| {
+                let value = score(offset);
+                if value > best.1 {
+                    (offset, value)
+                } else {
+                    best
+                }
+            })
+            .0
     };
     let coarse = pick(&mut (0..=search).step_by(stride));
     pick(&mut (coarse.saturating_sub(stride - 1)..=(coarse + stride - 1).min(search)))
@@ -723,7 +856,12 @@ impl FxSettings {
             ("wah sensitivity", self.wah.sensitivity, 0.0, 1.0),
             ("wah mix", self.wah.mix, 0.0, 1.0),
             ("octaver octave down", self.octaver.octave_down, 0.0, 1.0),
-            ("octaver two octaves down", self.octaver.two_octaves_down, 0.0, 1.0),
+            (
+                "octaver two octaves down",
+                self.octaver.two_octaves_down,
+                0.0,
+                1.0,
+            ),
             ("octaver direct", self.octaver.direct, 0.0, 1.0),
             ("pitch semitones", self.pitch.semitones, -24.0, 24.0),
             ("pitch mix", self.pitch.mix, 0.0, 1.0),
@@ -910,7 +1048,11 @@ impl DelayLine {
     fn mono(&self, offset: usize) -> f64 {
         let len = self.frames.len();
         let back = offset.clamp(1, len - 1);
-        let index = if self.cursor >= back { self.cursor - back } else { self.cursor + len - back };
+        let index = if self.cursor >= back {
+            self.cursor - back
+        } else {
+            self.cursor + len - back
+        };
         let frame = self.frames[index];
         (frame[0] + frame[1]) as f64
     }
@@ -1012,7 +1154,8 @@ impl TrackDsp {
             return Err("Invalid DSP sample rate or delay capacity.".into());
         }
         let rate = sample_rate as f64;
-        let (previous_vibrato, previous_flanger_depth) = (settings.vibrato.clone(), settings.flanger.depth_ms);
+        let (previous_vibrato, previous_flanger_depth) =
+            (settings.vibrato.clone(), settings.flanger.depth_ms);
         let wah_start = wah_target(&settings.wah, 0.0);
         let drive_start = drive_shape(&settings.drive, rate);
         let reverb_start = reverb_shape(&settings.reverb, rate);
@@ -1048,11 +1191,16 @@ impl TrackDsp {
             wah: [[0.0; 2]; 2],
             wah_envelope: 0.0,
             wah_position: wah_start,
-            wah_coefficients: [0.002, 0.2, 0.015].map(|seconds: f64| 1.0 - (-1.0 / (rate * seconds)).exp()),
+            wah_coefficients: [0.002, 0.2, 0.015]
+                .map(|seconds: f64| 1.0 - (-1.0 / (rate * seconds)).exp()),
             // A tap reads up to the window plus its alignment, and alignment matches a further stretch behind that.
-            octaver: DelayLine::new((rate * (SHIFT_WINDOW + 2.0 * SHIFT_SEARCH + SHIFT_MATCH)) as usize + 8),
+            octaver: DelayLine::new(
+                (rate * (SHIFT_WINDOW + 2.0 * SHIFT_SEARCH + SHIFT_MATCH)) as usize + 8,
+            ),
             octaver_phase: [Shifter::default(); 2],
-            pitch: DelayLine::new((rate * (SHIFT_WINDOW + 2.0 * SHIFT_SEARCH + SHIFT_MATCH)) as usize + 8),
+            pitch: DelayLine::new(
+                (rate * (SHIFT_WINDOW + 2.0 * SHIFT_SEARCH + SHIFT_MATCH)) as usize + 8,
+            ),
             pitch_phase: Shifter::default(),
             shift_window: (rate * SHIFT_WINDOW).floor(),
             drive_previous_input: [0.0; 2],
@@ -1063,7 +1211,11 @@ impl TrackDsp {
             drive_shapes: [drive_start; 2],
             // The fuzz's offset follows the playing level slowly enough that a note's attack does not thump, and
             // the DC blocker settles what remains within about 16 ms at any rate.
-            drive_coefficients: [1.0 - (-1.0 / (rate * 0.02)).exp(), 1.0 - (-1.0 / (rate * 0.05)).exp(), 1.0 - (-std::f64::consts::TAU * 10.0 / rate).exp()],
+            drive_coefficients: [
+                1.0 - (-1.0 / (rate * 0.02)).exp(),
+                1.0 - (-1.0 / (rate * 0.05)).exp(),
+                1.0 - (-std::f64::consts::TAU * 10.0 / rate).exp(),
+            ],
             delay: DelayLine::new((rate * max_delay_seconds).ceil() as usize + 2),
             delay_filters: [[0.0; 2]; 2],
             delay_phase: [0.0; 2],
@@ -1102,11 +1254,23 @@ impl TrackDsp {
     pub fn set_settings(&mut self, settings: FxSettings) -> Result<(), String> {
         settings.validate()?;
         self.previous = std::mem::replace(&mut self.settings, settings);
-        self.drive_shapes = [self.drive_shapes[1], drive_shape(&self.settings.drive, self.rate)];
-        self.reverb_shapes = [self.reverb_shapes[1], reverb_shape(&self.settings.reverb, self.rate)];
-        self.delay_shapes = [self.delay_shapes[1], delay_shape(&self.settings.delay, self.rate)];
+        self.drive_shapes = [
+            self.drive_shapes[1],
+            drive_shape(&self.settings.drive, self.rate),
+        ];
+        self.reverb_shapes = [
+            self.reverb_shapes[1],
+            reverb_shape(&self.settings.reverb, self.rate),
+        ];
+        self.delay_shapes = [
+            self.delay_shapes[1],
+            delay_shape(&self.settings.delay, self.rate),
+        ];
         self.restart_delay_color();
-        self.microphone_shapes = [self.microphone_shapes[1], self.microphone_continued(&self.microphone_shapes[1])];
+        self.microphone_shapes = [
+            self.microphone_shapes[1],
+            self.microphone_continued(&self.microphone_shapes[1]),
+        ];
         self.ramp_left = self.ramp_frames;
         Ok(())
     }
@@ -1185,7 +1349,13 @@ impl TrackDsp {
             move_state!(pitch, pitch_phase);
         }
         if running[15] {
-            move_state!(drive_previous_input, drive_anti_alias, drive_dc, drive_tone, drive_envelope);
+            move_state!(
+                drive_previous_input,
+                drive_anti_alias,
+                drive_dc,
+                drive_tone,
+                drive_envelope
+            );
         }
         if running[16] {
             self.microphone_shapes[1] = self.microphone_continued(&old.microphone_shapes[1]);
@@ -1221,7 +1391,12 @@ impl TrackDsp {
                 self.microphone_live = true;
             }
             let ramp = t < 1.0;
-            let mut tone = |s: usize| self.microphone_shapes[s].filters.iter_mut().fold(x, |v, filter| filter.process(v));
+            let mut tone = |s: usize| {
+                self.microphone_shapes[s]
+                    .filters
+                    .iter_mut()
+                    .fold(x, |v, filter| filter.process(v))
+            };
             let direct = [if ramp { tone(0) } else { [0.0; 2] }, tone(1)];
             let shapes = self.microphone_shapes;
             // The room's reflections repeat its direct sound. The line keeps the placements' direct sound, crossfaded
@@ -1238,16 +1413,26 @@ impl TrackDsp {
                         .iter()
                         .map(|&(seconds, gain)| {
                             let delay = seconds * self.rate;
-                            self.microphone_room.read(delay)[0] * (gain * ((age - delay) / fade).clamp(0.0, 1.0)) as f32
+                            self.microphone_room.read(delay)[0]
+                                * (gain * ((age - delay) / fade).clamp(0.0, 1.0)) as f32
                         })
                         .sum();
                 }
             }
             self.microphone_age = (self.microphone_age + 1.0).min(self.rate);
-            let written: [f32; 2] = if ramp { std::array::from_fn(|c| direct[0][c] + (direct[1][c] - direct[0][c]) * t as f32) } else { direct[1] };
-            self.microphone_room.write([(written[0] + written[1]) * 0.5; 2]);
+            let written: [f32; 2] = if ramp {
+                std::array::from_fn(|c| direct[0][c] + (direct[1][c] - direct[0][c]) * t as f32)
+            } else {
+                direct[1]
+            };
+            self.microphone_room
+                .write([(written[0] + written[1]) * 0.5; 2]);
             let path = |s: usize| -> [f32; 2] {
-                if shapes[s].room { std::array::from_fn(|c| direct[s][c] * ROOM_DIRECT as f32 + reflections[c]) } else { direct[s] }
+                if shapes[s].room {
+                    std::array::from_fn(|c| direct[s][c] * ROOM_DIRECT as f32 + reflections[c])
+                } else {
+                    direct[s]
+                }
             };
             let mut wet = if ramp {
                 let [a, b] = [path(0), path(1)];
@@ -1255,12 +1440,23 @@ impl TrackDsp {
             } else {
                 path(1)
             };
-            let mono = lerp(if shapes[0].mono { 1.0 } else { 0.0 }, if shapes[1].mono { 1.0 } else { 0.0 }) as f32;
+            let mono = lerp(
+                if shapes[0].mono { 1.0 } else { 0.0 },
+                if shapes[1].mono { 1.0 } else { 0.0 },
+            ) as f32;
             if mono > 0.0 {
                 let centre = (wet[0] + wet[1]) * 0.5;
-                wet = if mono >= 1.0 { [centre; 2] } else { wet.map(|v| v + (centre - v) * mono) };
+                wet = if mono >= 1.0 {
+                    [centre; 2]
+                } else {
+                    wet.map(|v| v + (centre - v) * mono)
+                };
             }
-            x = if p.microphone.enabled && f.microphone.enabled { wet } else { blend(x, wet, p.microphone.enabled, f.microphone.enabled) };
+            x = if p.microphone.enabled && f.microphone.enabled {
+                wet
+            } else {
+                blend(x, wet, p.microphone.enabled, f.microphone.enabled)
+            };
         } else {
             self.microphone_live = false;
         }
@@ -1318,9 +1514,16 @@ impl TrackDsp {
             // The envelope follows the playing level with a 2 ms attack and a 200 ms release.
             let level = x[0].abs().max(x[1].abs()) as f64;
             let [attack, release, glide] = self.wah_coefficients;
-            let k = if level > self.wah_envelope { attack } else { release };
+            let k = if level > self.wah_envelope {
+                attack
+            } else {
+                release
+            };
             self.wah_envelope = flush(self.wah_envelope + (level - self.wah_envelope) * k);
-            let goal = lerp(wah_target(&p.wah, self.wah_envelope), wah_target(&f.wah, self.wah_envelope));
+            let goal = lerp(
+                wah_target(&p.wah, self.wah_envelope),
+                wah_target(&f.wah, self.wah_envelope),
+            );
             // The pedal glides with a 15 ms time constant, so edits and mode changes sweep instead of jumping.
             self.wah_position += (goal - self.wah_position) * glide;
             // A band-pass from 350 Hz at the heel to 2.2 kHz at the toe, passing its centre at unity.
@@ -1348,8 +1551,20 @@ impl TrackDsp {
         }
         if f.octaver.enabled || p.octaver.enabled && t < 1.0 {
             self.octaver.write(x);
-            let one = shift(&self.octaver, &mut self.octaver_phase[0], 0.5, self.shift_window, self.rate);
-            let two = shift(&self.octaver, &mut self.octaver_phase[1], 0.25, self.shift_window, self.rate);
+            let one = shift(
+                &self.octaver,
+                &mut self.octaver_phase[0],
+                0.5,
+                self.shift_window,
+                self.rate,
+            );
+            let two = shift(
+                &self.octaver,
+                &mut self.octaver_phase[1],
+                0.25,
+                self.shift_window,
+                self.rate,
+            );
             let levels = [
                 lerp(p.octaver.direct, f.octaver.direct) as f32,
                 lerp(p.octaver.octave_down, f.octaver.octave_down) as f32,
@@ -1365,7 +1580,13 @@ impl TrackDsp {
         if f.pitch.enabled || p.pitch.enabled && t < 1.0 {
             self.pitch.write(x);
             let ratio = 2f64.powf(lerp(p.pitch.semitones, f.pitch.semitones) / 12.0);
-            let wet = shift(&self.pitch, &mut self.pitch_phase, ratio, self.shift_window, self.rate);
+            let wet = shift(
+                &self.pitch,
+                &mut self.pitch_phase,
+                ratio,
+                self.shift_window,
+                self.rate,
+            );
             let mix = lerp(p.pitch.mix, f.pitch.mix) as f32;
             x = blend(
                 x,
@@ -1378,24 +1599,42 @@ impl TrackDsp {
             // The playing level follows with a 20 ms attack and a 50 ms release, for the fuzz's offset.
             let [attack, release, dc] = self.drive_coefficients;
             let level = x[0].abs().max(x[1].abs()) as f64;
-            let k = if level > self.drive_envelope { attack } else { release };
+            let k = if level > self.drive_envelope {
+                attack
+            } else {
+                release
+            };
             self.drive_envelope = flush(self.drive_envelope + (level - self.drive_envelope) * k);
             // While both sides of a ramp are on and clip differently, each clips with its own curve and gain and
             // the two outputs crossfade; otherwise the side that is on clips alone.
             let shapes = self.drive_shapes;
-            let both = t < 1.0 && p.drive.enabled && f.drive.enabled && (p.drive.model != f.drive.model || p.drive.drive != f.drive.drive);
+            let both = t < 1.0
+                && p.drive.enabled
+                && f.drive.enabled
+                && (p.drive.model != f.drive.model || p.drive.drive != f.drive.drive);
             let alone = if f.drive.enabled { 1 } else { 0 };
             let filter = 1.0 - (-std::f64::consts::TAU * 0.22 / 4.0f64).exp();
-            let (tone, level) = (lerp(shapes[0].tone, shapes[1].tone), lerp(shapes[0].level, shapes[1].level));
+            let (tone, level) = (
+                lerp(shapes[0].tone, shapes[1].tone),
+                lerp(shapes[0].level, shapes[1].level),
+            );
             let envelope = self.drive_envelope;
             let wet = std::array::from_fn(|c| {
                 let v = x[c] as f64;
                 // Four times oversampled, as the amp is, so the clipping's upper harmonics do not fold back down.
                 let mut sum = 0.0;
                 for step in 1..=4 {
-                    let input = self.drive_previous_input[c] + (v - self.drive_previous_input[c]) * step as f64 / 4.0;
-                    let clip = |shape: DriveShape| drive_curve(shape.hard, shape.gain * (input + shape.bias * envelope)) * shape.normal;
-                    let mut sample = if both { lerp(clip(shapes[0]), clip(shapes[1])) } else { clip(shapes[alone]) };
+                    let input = self.drive_previous_input[c]
+                        + (v - self.drive_previous_input[c]) * step as f64 / 4.0;
+                    let clip = |shape: DriveShape| {
+                        drive_curve(shape.hard, shape.gain * (input + shape.bias * envelope))
+                            * shape.normal
+                    };
+                    let mut sample = if both {
+                        lerp(clip(shapes[0]), clip(shapes[1]))
+                    } else {
+                        clip(shapes[alone])
+                    };
                     for state in &mut self.drive_anti_alias[c] {
                         *state = flush(*state + filter * (sample - *state));
                         sample = *state;
@@ -1554,7 +1793,9 @@ impl TrackDsp {
                 // Feedback raises the in-phase gain to 1/(1-feedback); scaling keeps the wet level at the input's.
                 wet[c] = (out * (1.0 - feedback)) as f32;
             }
-            self.phaser_phase = (self.phaser_phase + tau * lerp(p.phaser.rate_hz, f.phaser.rate_hz) / self.rate) % tau;
+            self.phaser_phase = (self.phaser_phase
+                + tau * lerp(p.phaser.rate_hz, f.phaser.rate_hz) / self.rate)
+                % tau;
             x = blend(
                 x,
                 std::array::from_fn(|c| x[c] * (1.0 - mix) + wet[c] * mix),
@@ -1565,14 +1806,18 @@ impl TrackDsp {
         if f.flanger.enabled || p.flanger.enabled && t < 1.0 {
             // The delay sweeps from 0.1 ms up to 0.1 ms plus the depth.
             self.flanger_swing = slew(self.flanger_swing, self.rate * f.flanger.depth_ms * 0.001);
-            let offset = self.rate * 0.0001 + self.flanger_swing * (1.0 - self.flanger_phase.cos()) / 2.0;
+            let offset =
+                self.rate * 0.0001 + self.flanger_swing * (1.0 - self.flanger_phase.cos()) / 2.0;
             let echo = self.flanger.read(offset);
             let feedback = lerp(p.flanger.feedback, f.flanger.feedback) as f32;
-            self.flanger
-                .write(std::array::from_fn(|c| flush((x[c] + echo[c] * feedback) as f64) as f32));
+            self.flanger.write(std::array::from_fn(|c| {
+                flush((x[c] + echo[c] * feedback) as f64) as f32
+            }));
             // The comb peaks at 1/(1-|feedback|); scaling keeps the wet level at the input's.
             let wet: [f32; 2] = echo.map(|v| v * (1.0 - feedback.abs()));
-            self.flanger_phase = (self.flanger_phase + tau * lerp(p.flanger.rate_hz, f.flanger.rate_hz) / self.rate) % tau;
+            self.flanger_phase = (self.flanger_phase
+                + tau * lerp(p.flanger.rate_hz, f.flanger.rate_hz) / self.rate)
+                % tau;
             let mix = lerp(p.flanger.mix, f.flanger.mix) as f32;
             x = blend(
                 x,
@@ -1614,7 +1859,9 @@ impl TrackDsp {
                 wave(&f.tremolo.shape, self.tremolo_phase),
             );
             let gain = (1.0 - lerp(p.tremolo.depth, f.tremolo.depth) * dip) as f32;
-            self.tremolo_phase = (self.tremolo_phase + tau * lerp(p.tremolo.rate_hz, f.tremolo.rate_hz) / self.rate) % tau;
+            self.tremolo_phase = (self.tremolo_phase
+                + tau * lerp(p.tremolo.rate_hz, f.tremolo.rate_hz) / self.rate)
+                % tau;
             x = blend(x, x.map(|v| v * gain), p.tremolo.enabled, f.tremolo.enabled);
         }
         if f.delay.enabled || p.delay.enabled && t < 1.0 {
@@ -1630,16 +1877,32 @@ impl TrackDsp {
             let shapes = self.delay_shapes;
             // How much of the tape or analog sound plays: 0 for digital on both sides, so digital echoes stay
             // exact, and crossfading during a change to or from digital.
-            let colored = lerp(if shapes[0].colored { 1.0 } else { 0.0 }, if shapes[1].colored { 1.0 } else { 0.0 });
+            let colored = lerp(
+                if shapes[0].colored { 1.0 } else { 0.0 },
+                if shapes[1].colored { 1.0 } else { 0.0 },
+            );
             let mut wet = self.delay.read(offset);
             if colored > 0.0 {
                 // A digital side takes the other side's character, so only the amount crossfades.
-                let side = |s: usize| if shapes[s].colored { shapes[s] } else { shapes[1 - s] };
+                let side = |s: usize| {
+                    if shapes[s].colored {
+                        shapes[s]
+                    } else {
+                        shapes[1 - s]
+                    }
+                };
                 let (a, b) = (side(0), side(1));
-                let [low, high, drive] = [lerp(a.low, b.low), lerp(a.high, b.high), lerp(a.drive, b.drive)];
-                let wander = (0..2).map(|i| lerp(a.depth[i], b.depth[i]) * self.delay_phase[i].sin()).sum::<f64>();
+                let [low, high, drive] = [
+                    lerp(a.low, b.low),
+                    lerp(a.high, b.high),
+                    lerp(a.drive, b.drive),
+                ];
+                let wander = (0..2)
+                    .map(|i| lerp(a.depth[i], b.depth[i]) * self.delay_phase[i].sin())
+                    .sum::<f64>();
                 for i in 0..2 {
-                    self.delay_phase[i] = (self.delay_phase[i] + lerp(a.step[i], b.step[i])) % std::f64::consts::TAU;
+                    self.delay_phase[i] =
+                        (self.delay_phase[i] + lerp(a.step[i], b.step[i])) % std::f64::consts::TAU;
                 }
                 let moved = self.delay.read(offset + wander);
                 for c in 0..2 {
@@ -1667,7 +1930,14 @@ impl TrackDsp {
         // each side that is on with its own settings, crossfaded.
         let same = shapes[0].model == shapes[1].model;
         let side_on = [p.reverb.enabled && t < 1.0, f.reverb.enabled];
-        let needed = |model: usize| running && if same { shapes[1].model == model } else { (0..2).any(|s| side_on[s] && shapes[s].model == model) };
+        let needed = |model: usize| {
+            running
+                && if same {
+                    shapes[1].model == model
+                } else {
+                    (0..2).any(|s| side_on[s] && shapes[s].model == model)
+                }
+        };
         if needed(0) && !self.reverb_live {
             for line in &mut self.reverb {
                 line.reset();
@@ -1684,10 +1954,23 @@ impl TrackDsp {
         }
         if running && same {
             let wet = if shapes[1].model == 0 {
-                room_reverb(&mut self.reverb, &mut self.reverb_damp, x, lerp(p.reverb.room, f.reverb.room), lerp(p.reverb.damping, f.reverb.damping))
+                room_reverb(
+                    &mut self.reverb,
+                    &mut self.reverb_damp,
+                    x,
+                    lerp(p.reverb.room, f.reverb.room),
+                    lerp(p.reverb.damping, f.reverb.damping),
+                )
             } else {
-                let feedback = std::array::from_fn(|i| lerp(shapes[0].feedback[i], shapes[1].feedback[i]));
-                self.reverb_tanks[shapes[1].model - 1].run((x[0] as f64 + x[1] as f64) * 0.5, feedback, std::array::from_fn(|i| lerp(shapes[0].cut[i], shapes[1].cut[i]))).map(|v| v as f32)
+                let feedback =
+                    std::array::from_fn(|i| lerp(shapes[0].feedback[i], shapes[1].feedback[i]));
+                self.reverb_tanks[shapes[1].model - 1]
+                    .run(
+                        (x[0] as f64 + x[1] as f64) * 0.5,
+                        feedback,
+                        std::array::from_fn(|i| lerp(shapes[0].cut[i], shapes[1].cut[i])),
+                    )
+                    .map(|v| v as f32)
             };
             let mix = lerp(p.reverb.mix, f.reverb.mix) as f32;
             x = blend(
@@ -1697,15 +1980,30 @@ impl TrackDsp {
                 f.reverb.enabled,
             );
         } else if running {
-            let sides = [(p.reverb.room, p.reverb.damping, p.reverb.mix), (f.reverb.room, f.reverb.damping, f.reverb.mix)];
+            let sides = [
+                (p.reverb.room, p.reverb.damping, p.reverb.mix),
+                (f.reverb.room, f.reverb.damping, f.reverb.mix),
+            ];
             let out: [[f32; 2]; 2] = std::array::from_fn(|s| {
                 if !side_on[s] {
                     return x;
                 }
                 let wet = if shapes[s].model == 0 {
-                    room_reverb(&mut self.reverb, &mut self.reverb_damp, x, sides[s].0, sides[s].1)
+                    room_reverb(
+                        &mut self.reverb,
+                        &mut self.reverb_damp,
+                        x,
+                        sides[s].0,
+                        sides[s].1,
+                    )
                 } else {
-                    self.reverb_tanks[shapes[s].model - 1].run((x[0] as f64 + x[1] as f64) * 0.5, shapes[s].feedback, shapes[s].cut).map(|v| v as f32)
+                    self.reverb_tanks[shapes[s].model - 1]
+                        .run(
+                            (x[0] as f64 + x[1] as f64) * 0.5,
+                            shapes[s].feedback,
+                            shapes[s].cut,
+                        )
+                        .map(|v| v as f32)
                 };
                 let mix = sides[s].2 as f32;
                 std::array::from_fn(|c| x[c] * (1.0 - mix) + wet[c] * mix)

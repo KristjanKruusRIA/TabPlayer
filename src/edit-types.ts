@@ -49,6 +49,7 @@ export interface FxSettings {
   octaver: {enabled:boolean;octaveDown:number;twoOctavesDown:number;direct:number};
   pitch: {enabled:boolean;semitones:number;mix:number};
   drive: {enabled:boolean;model:'overdrive'|'distortion'|'fuzz';drive:number;tone:number;levelDb:number};
+  microphone: {enabled:boolean;placement:'standard'|'close'|'edge'|'room';output:'stereo'|'mono'};
 }
 export interface TrackSound { voiceId: string|null; presetId: 'clean'|'crunch'|'lead'|'bass'|'gm'; effects: FxSettings }
 export interface SyncAnchor { bar: number; occurrence: number; ratio: number; audioMs: number }

@@ -21,7 +21,7 @@ it('fills the drive pedal into sounds saved before it',()=>{
 
 it('places the drive pedal between the pitch shift and the amp with its controls',()=>{
   const onEdit=vi.fn();const {container}=render(<SoundPanel trackId="base/0" sound={soundPreset('gm')} onEdit={onEdit}/>);
-  expect([...container.querySelectorAll('.sound-block-name')].map(node=>node.textContent).slice(4,7)).toEqual(['Pitch shift','Drive','Amp']);
+  expect([...container.querySelectorAll('.sound-block-name')].map(node=>node.textContent).slice(5,8)).toEqual(['Pitch shift','Drive','Amp']);
   const last=()=>onEdit.mock.calls.at(-1)?.[0].sound.effects;
   fireEvent.click(screen.getByLabelText('Enable drive'));expect(last().drive.enabled).toBe(true);
   const kind=screen.getByLabelText('Drive model');

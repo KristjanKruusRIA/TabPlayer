@@ -63,6 +63,10 @@ block!(Drive {
     tone: f64 = 0.5,
     level_db: f64 = 0.0
 });
+block!(Microphone {
+    placement: String = "standard".into(),
+    output: String = "stereo".into()
+});
 block!(Flanger {
     rate_hz: f64 = 0.25,
     depth_ms: f64 = 2.0,
@@ -158,6 +162,8 @@ pub struct FxSettings {
     pub pitch: Pitch,
     #[serde(default, skip_serializing_if = "untouched")]
     pub drive: Drive,
+    #[serde(default, skip_serializing_if = "untouched")]
+    pub microphone: Microphone,
 }
 fn untouched<T: Default + PartialEq>(value: &T) -> bool {
     *value == T::default()
@@ -237,6 +243,41 @@ fn drive_shape(drive: &Drive, rate: f64) -> DriveShape {
         tone: 1.0 - (-std::f64::consts::TAU * tone_hz.min(rate * 0.45) / rate).exp(),
         level: 10f64.powf(drive.level_db / 20.0),
     }
+}
+/// Where the sound bank's microphone stands. Standard leaves the recording as it is.
+const MICROPHONE_PLACEMENTS: [&str; 4] = ["standard", "close", "edge", "room"];
+/// The room microphone's early reflections, as (seconds, gain), for the left and the right channel, and the level
+/// of the direct sound beside them. Each channel hears different walls, so a centred source spreads out.
+const ROOM_REFLECTIONS: [[(f64, f64); 2]; 2] = [[(0.0113, 0.35), (0.0239, 0.2)], [(0.0137, 0.35), (0.0191, 0.2)]];
+const ROOM_DIRECT: f64 = 0.8;
+/// One microphone setting resolved for the audio thread: its tone filters, and whether it adds a room's
+/// reflections and folds to mono.
+#[derive(Clone, Copy)]
+struct MicrophoneShape {
+    filters: [Biquad; 3],
+    room: bool,
+    mono: bool,
+}
+/// Close: the proximity effect lifts the lows and the highs soften. Edge: off the axis, thinner lows and more
+/// presence. Room: at a distance, the lowest lows and the highs fade.
+fn microphone_shape(microphone: &Microphone, rate: f64) -> MicrophoneShape {
+    let mut filters = [Biquad::default(); 3];
+    match microphone.placement.as_str() {
+        "close" => {
+            filters[0].shelf(200.0, 6.0, rate, false);
+            filters[1].shelf(6_000.0, -3.0, rate, true);
+        }
+        "edge" => {
+            filters[0].shelf(250.0, -5.0, rate, false);
+            filters[1].peak(4_500.0, 6.0, rate);
+        }
+        "room" => {
+            filters[0].pass(80.0, rate, true);
+            filters[1].shelf(4_000.0, -6.0, rate, true);
+        }
+        _ => {}
+    }
+    MicrophoneShape { filters, room: microphone.placement == "room", mono: microphone.output == "mono" }
 }
 const DELAY_MODELS: [&str; 3] = ["digital", "tape", "analog"];
 /// Echo durations in quarter notes: straight, dotted and triplet divisions.
@@ -712,6 +753,12 @@ impl FxSettings {
         if !REVERB_MODELS.contains(&self.reverb.model.as_str()) {
             return Err("Unknown reverb model.".into());
         }
+        if !MICROPHONE_PLACEMENTS.contains(&self.microphone.placement.as_str()) {
+            return Err("Unknown microphone placement.".into());
+        }
+        if !["stereo", "mono"].contains(&self.microphone.output.as_str()) {
+            return Err("Unknown microphone output.".into());
+        }
         if !["overdrive", "distortion", "fuzz"].contains(&self.drive.model.as_str()) {
             return Err("Unknown drive model.".into());
         }
@@ -933,6 +980,14 @@ pub struct TrackDsp {
     delay_filters: [[f64; 2]; 2],
     delay_phase: [f64; 2],
     delay_shapes: [DelayShape; 2],
+    /// The microphone's previous and current settings resolved, each with its filters' state; the line of direct
+    /// sound that a room's reflections repeat; and whether the block has been running.
+    microphone_shapes: [MicrophoneShape; 2],
+    microphone_room: DelayLine,
+    /// Frames since the line was cleared while sound played, so each reflection fades in once its delay has
+    /// filled. A track starting from silence has nothing to fade from and starts full.
+    microphone_age: f64,
+    microphone_live: bool,
     reverb: [DelayLine; 4],
     reverb_damp: [[f32; 2]; 4],
     /// The hall, plate and spring, the previous and current settings resolved, and whether the room ran on the
@@ -962,6 +1017,8 @@ impl TrackDsp {
         let drive_start = drive_shape(&settings.drive, rate);
         let reverb_start = reverb_shape(&settings.reverb, rate);
         let delay_start = delay_shape(&settings.delay, rate);
+        let microphone_start = microphone_shape(&settings.microphone, rate);
+        let microphone_on = settings.microphone.enabled;
         Ok(Self {
             previous: settings.clone(),
             settings,
@@ -1011,6 +1068,10 @@ impl TrackDsp {
             delay_filters: [[0.0; 2]; 2],
             delay_phase: [0.0; 2],
             delay_shapes: [delay_start; 2],
+            microphone_shapes: [microphone_start; 2],
+            microphone_room: DelayLine::new((rate * 0.03).ceil() as usize + 2),
+            microphone_age: rate,
+            microphone_live: microphone_on,
             reverb: std::array::from_fn(|i| {
                 DelayLine::new((rate * [0.0297, 0.0371, 0.0411, 0.0437][i]) as usize + 23 * i)
             }),
@@ -1021,6 +1082,15 @@ impl TrackDsp {
             cached_eq: [f64::NAN; 4],
             cached_cabinet: [f64::NAN; 2],
         })
+    }
+    /// The current microphone settings resolved, with their filters carrying on from the given state, so a
+    /// change crossfades two paths that start alike.
+    fn microphone_continued(&self, from: &MicrophoneShape) -> MicrophoneShape {
+        let mut shape = microphone_shape(&self.settings.microphone, self.rate);
+        for (filter, old) in shape.filters.iter_mut().zip(&from.filters) {
+            filter.z = old.z;
+        }
+        shape
     }
     /// Tape and analog filters stand still while a digital delay plays, so a change from digital starts them silent
     /// instead of from what they held before.
@@ -1036,6 +1106,7 @@ impl TrackDsp {
         self.reverb_shapes = [self.reverb_shapes[1], reverb_shape(&self.settings.reverb, self.rate)];
         self.delay_shapes = [self.delay_shapes[1], delay_shape(&self.settings.delay, self.rate)];
         self.restart_delay_color();
+        self.microphone_shapes = [self.microphone_shapes[1], self.microphone_continued(&self.microphone_shapes[1])];
         self.ramp_left = self.ramp_frames;
         Ok(())
     }
@@ -1058,12 +1129,14 @@ impl TrackDsp {
             old.settings.octaver.enabled,
             old.settings.pitch.enabled,
             old.settings.drive.enabled,
+            old.settings.microphone.enabled,
         ];
         std::mem::swap(&mut self.previous, &mut old.settings);
         // The previous settings are the old configuration's current ones, resolved as it resolved them.
         self.drive_shapes[0] = old.drive_shapes[1];
         self.reverb_shapes[0] = old.reverb_shapes[1];
         self.delay_shapes[0] = old.delay_shapes[1];
+        self.microphone_shapes[0] = old.microphone_shapes[1];
         macro_rules! move_state {($($name:ident),*)=>{$(std::mem::swap(&mut self.$name,&mut old.$name);)*}}
         if running[0] {
             move_state!(gate_envelope);
@@ -1114,6 +1187,13 @@ impl TrackDsp {
         if running[15] {
             move_state!(drive_previous_input, drive_anti_alias, drive_dc, drive_tone, drive_envelope);
         }
+        if running[16] {
+            self.microphone_shapes[1] = self.microphone_continued(&old.microphone_shapes[1]);
+            move_state!(microphone_room, microphone_age, microphone_live);
+        } else {
+            // Switched on while the track plays: start from silence and fade the reflections in.
+            self.microphone_live = false;
+        }
         self.ramp_left = self.ramp_frames;
     }
     pub fn process(&mut self, input: [f32; 2], bpm: f64) -> [f32; 2] {
@@ -1130,6 +1210,60 @@ impl TrackDsp {
         };
         let f = &self.settings;
         let p = &self.previous;
+        if f.microphone.enabled || p.microphone.enabled && t < 1.0 {
+            // The sound bank's recording comes first. A block starting again begins from silence.
+            if !self.microphone_live {
+                for shape in &mut self.microphone_shapes {
+                    shape.filters.iter_mut().for_each(Biquad::reset);
+                }
+                self.microphone_room.reset();
+                self.microphone_age = 0.0;
+                self.microphone_live = true;
+            }
+            let ramp = t < 1.0;
+            let mut tone = |s: usize| self.microphone_shapes[s].filters.iter_mut().fold(x, |v, filter| filter.process(v));
+            let direct = [if ramp { tone(0) } else { [0.0; 2] }, tone(1)];
+            let shapes = self.microphone_shapes;
+            // The room's reflections repeat its direct sound. The line keeps the placements' direct sound, crossfaded
+            // as the paths are, while any placement plays, so a change to or from the room reaches each reflection as
+            // a 10 ms crossfade when its delay has passed instead of a step.
+            let room = shapes[1].room || ramp && shapes[0].room;
+            let mut reflections = [0.0f32; 2];
+            if room {
+                // A line cleared when the block started holds silence before its first frames, so each reflection
+                // fades in over 10 ms from when its delay has filled.
+                let (age, fade) = (self.microphone_age, self.rate * 0.01);
+                for c in 0..2 {
+                    reflections[c] = ROOM_REFLECTIONS[c]
+                        .iter()
+                        .map(|&(seconds, gain)| {
+                            let delay = seconds * self.rate;
+                            self.microphone_room.read(delay)[0] * (gain * ((age - delay) / fade).clamp(0.0, 1.0)) as f32
+                        })
+                        .sum();
+                }
+            }
+            self.microphone_age = (self.microphone_age + 1.0).min(self.rate);
+            let written: [f32; 2] = if ramp { std::array::from_fn(|c| direct[0][c] + (direct[1][c] - direct[0][c]) * t as f32) } else { direct[1] };
+            self.microphone_room.write([(written[0] + written[1]) * 0.5; 2]);
+            let path = |s: usize| -> [f32; 2] {
+                if shapes[s].room { std::array::from_fn(|c| direct[s][c] * ROOM_DIRECT as f32 + reflections[c]) } else { direct[s] }
+            };
+            let mut wet = if ramp {
+                let [a, b] = [path(0), path(1)];
+                std::array::from_fn(|c| a[c] + (b[c] - a[c]) * t as f32)
+            } else {
+                path(1)
+            };
+            let mono = lerp(if shapes[0].mono { 1.0 } else { 0.0 }, if shapes[1].mono { 1.0 } else { 0.0 }) as f32;
+            if mono > 0.0 {
+                let centre = (wet[0] + wet[1]) * 0.5;
+                wet = if mono >= 1.0 { [centre; 2] } else { wet.map(|v| v + (centre - v) * mono) };
+            }
+            x = if p.microphone.enabled && f.microphone.enabled { wet } else { blend(x, wet, p.microphone.enabled, f.microphone.enabled) };
+        } else {
+            self.microphone_live = false;
+        }
         if f.gate.enabled || p.gate.enabled && t < 1.0 {
             let peak = x[0].abs().max(x[1].abs()) as f64;
             let target = if peak > 10f64.powf(lerp(p.gate.threshold_db, f.gate.threshold_db) / 20.0)
@@ -1633,6 +1767,12 @@ impl TrackDsp {
         self.drive_dc = [0.0; 2];
         self.drive_tone = [[0.0; 2]; 2];
         self.drive_envelope = 0.0;
+        for shape in &mut self.microphone_shapes {
+            shape.filters.iter_mut().for_each(Biquad::reset);
+        }
+        self.microphone_room.reset();
+        self.microphone_age = self.rate;
+        self.microphone_live = self.settings.microphone.enabled;
     }
 }
 

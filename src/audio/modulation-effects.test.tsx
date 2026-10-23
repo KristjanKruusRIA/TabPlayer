@@ -47,14 +47,14 @@ it('refuses invalid shapes and stages',()=>{
 
 it('lists the modulation blocks in signal order with their controls',()=>{
   const onEdit=vi.fn();const {container}=render(<SoundPanel trackId="base/0" sound={soundPreset('gm')} onEdit={onEdit}/>);
-  expect([...container.querySelectorAll('.sound-block-name')].map(node=>node.textContent)).toEqual(['Gate','Compressor','Wah','Octaver','Pitch shift','Drive','Amp','Cabinet','EQ','Vibrato','Phaser','Flanger','Chorus','Tremolo','Delay','Reverb']);
+  expect([...container.querySelectorAll('.sound-block-name')].map(node=>node.textContent)).toEqual(['Microphone','Gate','Compressor','Wah','Octaver','Pitch shift','Drive','Amp','Cabinet','EQ','Vibrato','Phaser','Flanger','Chorus','Tremolo','Delay','Reverb']);
   for(const [label,value] of [['vibrato Depth (cents)','60'],['phaser Rate (Hz)','1.5'],['flanger Feedback','-0.4'],['tremolo Depth','0.8']] as const){
     fireEvent.change(screen.getByLabelText(label),{target:{value}});
   }
   const last=()=>onEdit.mock.calls.at(-1)?.[0].sound.effects;
   expect(last().tremolo.depth).toBe(.8);
   expect(onEdit.mock.calls.map(call=>call[0].sound.effects).find(fx=>fx.flanger.feedback===-.4)).toBeTruthy();
-  const tremolo=container.querySelectorAll('.sound-block')[13] as HTMLElement;
+  const tremolo=container.querySelectorAll('.sound-block')[14] as HTMLElement;
   fireEvent.change(within(tremolo).getByLabelText('Tremolo shape'),{target:{value:'square'}});expect(last().tremolo.shape).toBe('square');
   fireEvent.change(screen.getByLabelText('Phaser stages'),{target:{value:'8'}});expect(last().phaser.stages).toBe(8);
   expect(screen.getByLabelText('flanger Feedback')).toHaveAttribute('min','-0.9');

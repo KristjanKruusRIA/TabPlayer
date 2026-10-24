@@ -1,3 +1,4 @@
+use super::flac;
 use atomic_write_file::AtomicWriteFile;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -14,13 +15,14 @@ pub const NORMALIZE_CEILING_DB: f64 = -1.0;
 /// Normalization lifts the audio by at most this many dB, so a nearly silent export, such as a range holding only an
 /// effect tail, is not raised into audible noise.
 pub const NORMALIZE_MAX_GAIN_DB: f64 = 40.0;
-/// The audio file type: RIFF WAV, little-endian, or AIFF, big-endian.
+/// The audio file type: RIFF WAV, little-endian, AIFF, big-endian, or lossless FLAC.
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub enum AudioContainer {
     #[default]
     Wav,
     Aiff,
+    Flac,
 }
 impl AudioContainer {
     fn is_wav(&self) -> bool {
@@ -31,13 +33,16 @@ impl AudioContainer {
         match self {
             AudioContainer::Wav => "wav",
             AudioContainer::Aiff => "aiff",
+            AudioContainer::Flac => "flac",
         }
     }
-    /// The most sample bytes a file can hold: a RIFF size is unsigned, and an AIFF chunk size is signed.
+    /// The most sample bytes a file can hold: a RIFF size is unsigned, and an AIFF chunk size is signed. FLAC is
+    /// limited by its frame count instead.
     fn max_data_bytes(self) -> u64 {
         match self {
             AudioContainer::Wav => u32::MAX as u64 - 36,
             AudioContainer::Aiff => i32::MAX as u64 - 46,
+            AudioContainer::Flac => u64::MAX,
         }
     }
     /// The header's length; the samples follow it.
@@ -45,6 +50,7 @@ impl AudioContainer {
         match self {
             AudioContainer::Wav => 44,
             AudioContainer::Aiff => 54,
+            AudioContainer::Flac => flac::HEADER_BYTES as u64,
         }
     }
 }
@@ -68,7 +74,7 @@ impl AudioFormat {
     }
     pub fn validate(self) -> Result<(), String> {
         if ![44100, 48000].contains(&self.sample_rate) || ![16, 24].contains(&self.bit_depth) {
-            Err("Choose stereo 44.1/48 kHz, 16/24-bit PCM WAV or AIFF.".into())
+            Err("Choose stereo 44.1/48 kHz, 16/24-bit WAV, AIFF or FLAC.".into())
         } else {
             Ok(())
         }
@@ -89,6 +95,11 @@ pub struct PcmWriter<W: Write + Seek> {
     format: AudioFormat,
     frames: u64,
     random: u32,
+    /// FLAC only: samples of each channel waiting for a whole block, the blocks written, and the bytes they took.
+    pending: [Vec<i32>; 2],
+    blocks: u32,
+    written: u64,
+    frame_bytes: (u32, u32),
 }
 impl<W: Write + Seek> PcmWriter<W> {
     pub fn new(mut file: W, format: AudioFormat) -> Result<Self, String> {
@@ -100,6 +111,10 @@ impl<W: Write + Seek> PcmWriter<W> {
             format,
             frames: 0,
             random: 0x6a09e667,
+            pending: [Vec::new(), Vec::new()],
+            blocks: 0,
+            written: 0,
+            frame_bytes: (u32::MAX, 0),
         })
     }
     fn uniform(&mut self) -> f64 {
@@ -114,7 +129,9 @@ impl<W: Write + Seek> PcmWriter<W> {
         }
         let bytes_per_sample = (self.format.bit_depth / 8) as usize;
         let new_frames = self.frames + block.len() as u64;
-        if new_frames * 2 * bytes_per_sample as u64 > self.format.container.max_data_bytes() {
+        if new_frames * 2 * bytes_per_sample as u64 > self.format.container.max_data_bytes()
+            || self.format.container == AudioContainer::Flac && new_frames > flac::MAX_FRAMES
+        {
             return Err(match self.format.container {
                 AudioContainer::Wav => {
                     "WAV exceeds the standard RIFF size limit. Export a shorter range."
@@ -122,6 +139,7 @@ impl<W: Write + Seek> PcmWriter<W> {
                 AudioContainer::Aiff => {
                     "AIFF exceeds the standard size limit. Export a shorter range."
                 }
+                AudioContainer::Flac => "FLAC exceeds its size limit. Export a shorter range.",
             }
             .into());
         }
@@ -142,13 +160,68 @@ impl<W: Write + Seek> PcmWriter<W> {
                 AudioContainer::Aiff => {
                     bytes.extend_from_slice(&value.to_be_bytes()[4 - bytes_per_sample..])
                 }
+                AudioContainer::Flac => {
+                    let channel = self.pending[0].len() - self.pending[1].len();
+                    self.pending[channel].push(value)
+                }
             }
         }
         self.file.write_all(&bytes).map_err(|e| e.to_string())?;
         self.frames = new_frames;
+        if self.pending[0].len() >= flac::BLOCK_FRAMES {
+            self.write_flac_block()?;
+        }
+        Ok(())
+    }
+    /// Encodes and writes up to one FLAC block of the pending samples.
+    fn write_flac_block(&mut self) -> Result<(), String> {
+        let n = self.pending[0].len().min(flac::BLOCK_FRAMES);
+        let frame = flac::encode_frame(
+            self.blocks,
+            self.format.sample_rate,
+            self.format.bit_depth as u32,
+            &self.pending[0][..n],
+            &self.pending[1][..n],
+        )?;
+        self.file.write_all(&frame).map_err(|e| e.to_string())?;
+        for channel in &mut self.pending {
+            channel.drain(..n);
+        }
+        self.blocks += 1;
+        self.written += frame.len() as u64;
+        self.frame_bytes = (
+            self.frame_bytes.0.min(frame.len() as u32),
+            self.frame_bytes.1.max(frame.len() as u32),
+        );
         Ok(())
     }
     pub fn finish(mut self) -> Result<(W, u64), String> {
+        if self.format.container == AudioContainer::Flac {
+            while !self.pending[0].is_empty() {
+                self.write_flac_block()?;
+            }
+            let actual = self
+                .file
+                .seek(SeekFrom::End(0))
+                .map_err(|e| e.to_string())?;
+            if actual != flac::HEADER_BYTES as u64 + self.written
+                || self.blocks as u64 != self.frames.div_ceil(flac::BLOCK_FRAMES as u64)
+            {
+                return Err("Audio frame verification failed.".into());
+            }
+            let header = flac::stream_header(
+                self.format.sample_rate,
+                self.format.bit_depth as u32,
+                self.frames,
+                if self.blocks == 0 {
+                    0
+                } else {
+                    self.frame_bytes.0
+                },
+                self.frame_bytes.1,
+            );
+            return self.write_header(&header);
+        }
         let size = (self.frames * 2 * (self.format.bit_depth / 8) as u64) as u32;
         let actual = self
             .file
@@ -494,12 +567,18 @@ mod tests {
         (rate, frames, bits, samples)
     }
     #[test]
-    fn writes_aiff_with_the_same_samples_as_wav_at_each_rate_and_depth() {
+    fn writes_aiff_and_flac_with_the_same_samples_as_wav_at_each_rate_and_depth() {
         let d = tempfile::tempdir().unwrap();
+        // Two whole FLAC blocks and a short one, written in render blocks that do not divide them.
+        const N: usize = 9_000;
         for rate in [44100, 48000] {
             for depth in [16, 24] {
                 let mut outputs = Vec::new();
-                for container in [AudioContainer::Wav, AudioContainer::Aiff] {
+                for container in [
+                    AudioContainer::Wav,
+                    AudioContainer::Aiff,
+                    AudioContainer::Flac,
+                ] {
                     let path = d
                         .path()
                         .join(format!("{rate}-{depth}.{}", container.extension()));
@@ -512,7 +591,7 @@ mod tests {
                             container,
                         },
                         |block| {
-                            let count = (1025 - n).min(block.len());
+                            let count = (N - n).min(block.len());
                             for (i, sample) in block[..count].iter_mut().enumerate() {
                                 let t = (n + i) as f32;
                                 *sample = [(t * 0.031).sin() * 0.9, -(t * 0.017).cos() * 0.5];
@@ -524,21 +603,39 @@ mod tests {
                         |_| {},
                     )
                     .unwrap();
-                    assert_eq!(frames, 1025);
+                    assert_eq!(frames, N as u64);
                     outputs.push(std::fs::read(path).unwrap());
                 }
                 let mut reader = hound::WavReader::new(std::io::Cursor::new(&outputs[0])).unwrap();
                 let wav: Vec<i32> = reader.samples::<i32>().map(Result::unwrap).collect();
                 let (aiff_rate, frames, bits, aiff) = read_aiff(&outputs[1]);
-                assert_eq!((aiff_rate, frames, bits), (rate as f64, 1025, depth));
+                assert_eq!((aiff_rate, frames, bits), (rate as f64, N as u32, depth));
                 // The same dithered samples, in the other byte order.
                 assert_eq!(aiff, wav, "{rate} Hz {depth} bit");
-                assert_eq!(outputs[1].len(), 54 + 1025 * 2 * depth as usize / 8);
+                assert_eq!(outputs[1].len(), 54 + N * 2 * depth as usize / 8);
+                // FLAC decodes to exactly the same samples, and its stream information counts them.
+                let flac = &outputs[2];
+                let decoded = crate::audio::decode::decode_audio(flac, Some("flac")).unwrap();
+                assert_eq!((decoded.sample_rate, decoded.channels), (rate, 2));
+                let scale = (1i64 << (depth - 1)) as f64;
+                let samples: Vec<i32> = decoded
+                    .frames
+                    .iter()
+                    .flatten()
+                    .map(|v| (*v as f64 * scale).round() as i32)
+                    .collect();
+                assert_eq!(samples, wav, "FLAC at {rate} Hz {depth} bit");
+                assert_eq!(&flac[..4], b"fLaC");
+                let info = u64::from_be_bytes(flac[18..26].try_into().unwrap());
+                assert_eq!(info >> 44, rate as u64);
+                assert_eq!((info >> 36) & 0x1f, depth as u64 - 1);
+                assert_eq!(info & 0xf_ffff_ffff, N as u64);
+                assert!(flac.len() < outputs[0].len(), "FLAC is smaller than WAV");
             }
         }
     }
     #[test]
-    fn older_requests_read_as_wav_and_only_aiff_is_written() {
+    fn older_requests_read_as_wav_and_only_aiff_or_flac_is_written() {
         let older: AudioFormat =
             serde_json::from_str(r#"{"sampleRate":48000,"bitDepth":16}"#).unwrap();
         assert_eq!(older, AudioFormat::wav(48000, 16));
@@ -554,7 +651,15 @@ mod tests {
             serde_json::to_string(&aiff).unwrap(),
             r#"{"sampleRate":44100,"bitDepth":24,"container":"aiff"}"#
         );
-        for wrong in [r#""flac""#, r#""AIFF""#, "null", "1"] {
+        let flac: AudioFormat =
+            serde_json::from_str(r#"{"sampleRate":48000,"bitDepth":16,"container":"flac"}"#)
+                .unwrap();
+        assert_eq!(flac.container, AudioContainer::Flac);
+        assert_eq!(
+            serde_json::to_string(&flac).unwrap(),
+            r#"{"sampleRate":48000,"bitDepth":16,"container":"flac"}"#
+        );
+        for wrong in [r#""mp3""#, r#""FLAC""#, r#""AIFF""#, "null", "1"] {
             assert!(
                 serde_json::from_str::<AudioFormat>(&format!(
                     r#"{{"sampleRate":48000,"bitDepth":16,"container":{wrong}}}"#
@@ -571,6 +676,7 @@ mod tests {
         for (container, limit) in [
             (AudioContainer::Wav, u32::MAX as u64 - 36),
             (AudioContainer::Aiff, i32::MAX as u64 - 46),
+            (AudioContainer::Flac, flac::MAX_FRAMES * 4),
         ] {
             let format = AudioFormat {
                 container,
@@ -585,29 +691,31 @@ mod tests {
         }
     }
     #[test]
-    fn a_cancelled_aiff_leaves_the_prior_file() {
-        let d = tempfile::tempdir().unwrap();
-        let path = d.path().join("existing.aiff");
-        std::fs::write(&path, b"prior").unwrap();
-        let cancel = AtomicBool::new(false);
-        let format = AudioFormat {
-            container: AudioContainer::Aiff,
-            ..AudioFormat::wav(48000, 24)
-        };
-        let result = write_wav(
-            &path,
-            format,
-            |block| {
-                block.fill([0.2, 0.3]);
-                cancel.store(true, Ordering::Release);
-                Ok(block.len())
-            },
-            &cancel,
-            |_| {},
-        );
-        assert!(result.is_err());
-        assert_eq!(std::fs::read(&path).unwrap(), b"prior");
-        assert_eq!(std::fs::read_dir(d.path()).unwrap().count(), 1);
+    fn a_cancelled_aiff_or_flac_leaves_the_prior_file() {
+        for container in [AudioContainer::Aiff, AudioContainer::Flac] {
+            let d = tempfile::tempdir().unwrap();
+            let path = d.path().join(format!("existing.{}", container.extension()));
+            std::fs::write(&path, b"prior").unwrap();
+            let cancel = AtomicBool::new(false);
+            let format = AudioFormat {
+                container,
+                ..AudioFormat::wav(48000, 24)
+            };
+            let result = write_wav(
+                &path,
+                format,
+                |block| {
+                    block.fill([0.2, 0.3]);
+                    cancel.store(true, Ordering::Release);
+                    Ok(block.len())
+                },
+                &cancel,
+                |_| {},
+            );
+            assert!(result.is_err());
+            assert_eq!(std::fs::read(&path).unwrap(), b"prior");
+            assert_eq!(std::fs::read_dir(d.path()).unwrap().count(), 1);
+        }
     }
     /// Writes `frames` frames of `signal` normalized to `target` dB RMS as 24-bit 48 kHz WAV, and reads them back.
     fn normalized(

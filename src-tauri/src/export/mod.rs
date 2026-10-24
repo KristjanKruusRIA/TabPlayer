@@ -1,4 +1,5 @@
 pub mod audio;
+pub mod flac;
 pub mod jobs;
 pub mod pdf;
 pub mod png;

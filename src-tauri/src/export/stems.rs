@@ -422,4 +422,44 @@ mod tests {
         .unwrap();
         assert!(wav["format"].get("container").is_none());
     }
+    #[test]
+    fn writes_flac_stems_that_decode_to_each_track() {
+        let root = tempfile::tempdir().unwrap();
+        let dest = root.path().join("FLAC stems");
+        let mut spec = spec();
+        spec.format.container = AudioContainer::Flac;
+        let mut remaining = 5000;
+        let manifest = write_stems(
+            &dest,
+            &spec,
+            |outputs| {
+                let n = remaining.min(BLOCK_FRAMES);
+                outputs[0][..n].fill([0.25, 0.1]);
+                outputs[1][..n].fill([0.0, 0.0]);
+                remaining -= n;
+                Ok(n)
+            },
+            &AtomicBool::new(false),
+            |_| {},
+        )
+        .unwrap();
+        let written: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(dest.join("manifest.json")).unwrap()).unwrap();
+        assert_eq!(written["format"]["container"], "flac");
+        for (track, level) in manifest.tracks.iter().zip([[0.25, 0.1], [0.0, 0.0]]) {
+            assert!(track.filename.ends_with(".flac"), "{}", track.filename);
+            let bytes = std::fs::read(dest.join(&track.filename)).unwrap();
+            let decoded = crate::audio::decode::decode_audio(&bytes, Some("flac")).unwrap();
+            assert_eq!(decoded.frames.len(), 5000);
+            // Each stem holds its own track, within the dither.
+            for frame in decoded.frames.iter() {
+                for (value, expected) in frame.iter().zip(level) {
+                    assert!(
+                        (value - expected).abs() < 1e-5,
+                        "{value} against {expected}"
+                    );
+                }
+            }
+        }
+    }
 }

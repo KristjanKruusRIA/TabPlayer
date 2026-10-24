@@ -10,6 +10,16 @@ macro_rules! block {
         pub struct $name {pub enabled:bool,$(pub $field:$kind),*}
         impl Default for $name {fn default()->Self {Self {enabled:false,$($field:$value),*}}}
     };
+    // Fields added later default to 0 and are not written while 0, so blocks saved before them load and save unchanged.
+    ($name:ident { $($field:ident:$kind:ty=$value:expr),* $(,)? } later { $($later:ident),* $(,)? }) => {
+        #[derive(Clone,Debug,PartialEq,Serialize,Deserialize)]
+        #[serde(rename_all="camelCase",deny_unknown_fields)]
+        pub struct $name {pub enabled:bool,$(pub $field:$kind,)* $(#[serde(default,skip_serializing_if="is_zero")] pub $later:f64,)*}
+        impl Default for $name {fn default()->Self {Self {enabled:false,$($field:$value,)* $($later:0.0,)*}}}
+    };
+}
+fn is_zero(value: &f64) -> bool {
+    *value == 0.0
 }
 block!(Gate {
     threshold_db: f64 = -60.0,
@@ -40,6 +50,9 @@ block!(Chorus {
     rate_hz: f64 = 1.0,
     depth_ms: f64 = 5.0,
     mix: f64 = 0.15
+} later {
+    // Quarter notes per cycle when the rate follows the tempo; 0 for the free rate.
+    sync_quarter_notes
 });
 block!(Wah {
     mode: String = "manual".into(),
@@ -81,6 +94,9 @@ block!(Flanger {
     depth_ms: f64 = 2.0,
     feedback: f64 = 0.5,
     mix: f64 = 0.5
+} later {
+    // Quarter notes per cycle when the rate follows the tempo; 0 for the free rate.
+    sync_quarter_notes
 });
 block!(Phaser {
     rate_hz: f64 = 0.5,
@@ -88,15 +104,24 @@ block!(Phaser {
     feedback: f64 = 0.3,
     stages: u32 = 4,
     mix: f64 = 0.5
+} later {
+    // Quarter notes per cycle when the rate follows the tempo; 0 for the free rate.
+    sync_quarter_notes
 });
 block!(Tremolo {
     rate_hz: f64 = 5.0,
     depth: f64 = 0.5,
     shape: String = "sine".into()
+} later {
+    // Quarter notes per cycle when the rate follows the tempo; 0 for the free rate.
+    sync_quarter_notes
 });
 block!(Vibrato {
     rate_hz: f64 = 5.0,
     depth_cents: f64 = 20.0
+} later {
+    // Quarter notes per cycle when the rate follows the tempo; 0 for the free rate.
+    sync_quarter_notes
 });
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -194,13 +219,38 @@ pub struct FxSettings {
 fn untouched<T: Default + PartialEq>(value: &T) -> bool {
     *value == T::default()
 }
-/// The vibrato delay swing in frames: a delay swinging by ±a seconds at ω rad/s bends pitch by 1 ± aω.
-fn vibrato_swing(vibrato: &Vibrato, rate: f64) -> f64 {
-    let cents = vibrato.depth_cents;
+/// The vibrato delay swing in frames for a depth in cents at a rate in hertz: a delay swinging by ±a seconds at
+/// ω rad/s bends pitch by 1 ± aω.
+fn vibrato_swing(cents: f64, rate_hz: f64, rate: f64) -> f64 {
     (2f64.powf(cents / 1200.0) - 2f64.powf(-cents / 1200.0))
         / 2.0
-        / (std::f64::consts::TAU * vibrato.rate_hz)
+        / (std::f64::consts::TAU * rate_hz)
         * rate
+}
+/// Cycle lengths in quarter notes that a modulation rate can follow: the delay's divisions, then two and four whole
+/// notes for slow sweeps.
+const MODULATION_DIVISIONS: [f64; 12] = [
+    0.125,
+    0.25,
+    1.0 / 3.0,
+    0.5,
+    2.0 / 3.0,
+    0.75,
+    1.0,
+    1.5,
+    2.0,
+    4.0,
+    8.0,
+    16.0,
+];
+/// A modulation block's rate in hertz: the free rate, or one cycle per `sync` quarter notes at `bpm`, kept within
+/// the block's range.
+fn modulation_hz(rate_hz: f64, sync: f64, bpm: f64, low: f64, high: f64) -> f64 {
+    if sync == 0.0 {
+        rate_hz
+    } else {
+        (bpm / 60.0 / sync).clamp(low, high)
+    }
 }
 /// Moves a delay swing toward its target by at most 0.03 frames a frame, a pitch bend under half a semitone.
 fn slew(current: f64, target: f64) -> f64 {
@@ -988,6 +1038,17 @@ impl FxSettings {
         if !DELAY_MODELS.contains(&self.delay.model.as_str()) {
             return Err("Unknown delay model.".into());
         }
+        for (name, sync) in [
+            ("chorus", self.chorus.sync_quarter_notes),
+            ("flanger", self.flanger.sync_quarter_notes),
+            ("phaser", self.phaser.sync_quarter_notes),
+            ("tremolo", self.tremolo.sync_quarter_notes),
+            ("vibrato", self.vibrato.sync_quarter_notes),
+        ] {
+            if sync != 0.0 && !MODULATION_DIVISIONS.contains(&sync) {
+                return Err(format!("Invalid {name} tempo sync note duration."));
+            }
+        }
         if !DELAY_DIVISIONS.contains(&self.delay.quarter_notes) {
             return Err("Invalid delay note duration.".into());
         }
@@ -1233,6 +1294,9 @@ pub struct TrackDsp {
     vibrato_phase: f64,
     /// The vibrato and flanger delay swings in frames, slewed so live edits never scrub the audio.
     vibrato_swing: f64,
+    /// The vibrato's playing rate in hertz. It glides to a new rate no faster than the swing can follow, so the pitch
+    /// bend keeps its depth while the rate changes.
+    vibrato_hz: f64,
     flanger_swing: f64,
     /// First-order all-pass state (previous input, previous output) per channel and stage.
     phaser: [[[f64; 2]; 8]; 2],
@@ -1306,8 +1370,7 @@ impl TrackDsp {
             return Err("Invalid DSP sample rate or delay capacity.".into());
         }
         let rate = sample_rate as f64;
-        let (previous_vibrato, previous_flanger_depth) =
-            (settings.vibrato.clone(), settings.flanger.depth_ms);
+        let previous_flanger_depth = settings.flanger.depth_ms;
         let wah_start = wah_target(&settings.wah, 0.0);
         let drive_start = drive_shape(&settings.drive, rate);
         let reverb_start = reverb_shape(&settings.reverb, rate);
@@ -1336,7 +1399,9 @@ impl TrackDsp {
             // The widest vibrato (100 cents at 1 Hz) swings the delay by about 18.4 ms.
             vibrato: DelayLine::new((rate * 0.02) as usize + 8),
             vibrato_phase: 0.0,
-            vibrato_swing: vibrato_swing(&previous_vibrato, rate),
+            // Set to the settings' swing on the first frame the vibrato plays, when the tempo is known.
+            vibrato_swing: f64::NAN,
+            vibrato_hz: f64::NAN,
             flanger_swing: rate * previous_flanger_depth * 0.001,
             phaser: [[[0.0; 2]; 8]; 2],
             phaser_last: [0.0; 2],
@@ -1525,7 +1590,7 @@ impl TrackDsp {
             move_state!(reverb, reverb_damp, reverb_tanks, reverb_live);
         }
         if running[8] {
-            move_state!(vibrato, vibrato_phase, vibrato_swing);
+            move_state!(vibrato, vibrato_phase, vibrato_swing, vibrato_hz);
         }
         if running[9] {
             move_state!(phaser, phaser_last, phaser_phase);
@@ -1571,6 +1636,15 @@ impl TrackDsp {
             1.0 - self.ramp_left as f64 / self.ramp_frames as f64
         };
         let lerp = |a: f64, b: f64| a + (b - a) * t;
+        let tempo = if bpm.is_finite() && bpm > 0.0 {
+            bpm
+        } else {
+            120.0
+        };
+        // Each modulation block's rate before and after a settings change, free or following the tempo.
+        let hz = |rate_hz: f64, sync: f64, low: f64, high: f64| {
+            modulation_hz(rate_hz, sync, tempo, low, high)
+        };
         let blend = |dry: [f32; 2], wet: [f32; 2], a: bool, b: bool| {
             let amount = lerp(if a { 1.0 } else { 0.0 }, if b { 1.0 } else { 0.0 }) as f32;
             std::array::from_fn(|c| dry[c] + (wet[c] - dry[c]) * amount)
@@ -2051,14 +2125,42 @@ impl TrackDsp {
                 }
                 Stage::Vibrato => {
                     if f.vibrato.enabled || p.vibrato.enabled && t < 1.0 {
-                        let omega = tau * lerp(p.vibrato.rate_hz, f.vibrato.rate_hz);
-                        self.vibrato_swing =
-                            slew(self.vibrato_swing, vibrato_swing(&f.vibrato, self.rate));
+                        let (before, after) = (
+                            hz(p.vibrato.rate_hz, p.vibrato.sync_quarter_notes, 1.0, 14.0),
+                            hz(f.vibrato.rate_hz, f.vibrato.sync_quarter_notes, 1.0, 14.0),
+                        );
+                        let wanted = lerp(before, after);
+                        // The bend's depth is the swing times the rate, so the swing must follow a rate change. It may
+                        // move its target by 0.01 frames a frame: well within its slew, and a swing changing that fast
+                        // bends pitch by at most 2% on its own. A 1 to 14 Hz change then glides over about a second.
+                        let most = 1.0 + 0.01 / self.vibrato_swing;
+                        let settled = self.vibrato_hz.is_nan()
+                            || !(most < f64::INFINITY)
+                            || wanted <= self.vibrato_hz * most && wanted >= self.vibrato_hz / most;
+                        self.vibrato_hz = if settled {
+                            wanted
+                        } else {
+                            wanted.clamp(self.vibrato_hz / most, self.vibrato_hz * most)
+                        };
+                        let omega = tau * self.vibrato_hz;
+                        let target = vibrato_swing(
+                            f.vibrato.depth_cents,
+                            if settled { after } else { self.vibrato_hz },
+                            self.rate,
+                        );
+                        self.vibrato_swing = if self.vibrato_swing.is_nan() {
+                            target
+                        } else {
+                            slew(self.vibrato_swing, target)
+                        };
                         let offset = 2.0 + self.vibrato_swing * (1.0 - self.vibrato_phase.cos());
                         let wet = self.vibrato.read(offset);
                         self.vibrato.write(x);
                         self.vibrato_phase = (self.vibrato_phase + omega / self.rate) % tau;
                         x = blend(x, wet, p.vibrato.enabled, f.vibrato.enabled);
+                    } else {
+                        // Switched off, it starts afresh at its settings when switched on again, as a new configuration does.
+                        (self.vibrato_swing, self.vibrato_hz) = (f64::NAN, f64::NAN);
                     }
                 }
                 Stage::Phaser => {
@@ -2095,7 +2197,12 @@ impl TrackDsp {
                             wet[c] = (out * (1.0 - feedback)) as f32;
                         }
                         self.phaser_phase = (self.phaser_phase
-                            + tau * lerp(p.phaser.rate_hz, f.phaser.rate_hz) / self.rate)
+                            + tau
+                                * lerp(
+                                    hz(p.phaser.rate_hz, p.phaser.sync_quarter_notes, 0.05, 5.0),
+                                    hz(f.phaser.rate_hz, f.phaser.sync_quarter_notes, 0.05, 5.0),
+                                )
+                                / self.rate)
                             % tau;
                         x = blend(
                             x,
@@ -2120,7 +2227,12 @@ impl TrackDsp {
                         // The comb peaks at 1/(1-|feedback|); scaling keeps the wet level at the input's.
                         let wet: [f32; 2] = echo.map(|v| v * (1.0 - feedback.abs()));
                         self.flanger_phase = (self.flanger_phase
-                            + tau * lerp(p.flanger.rate_hz, f.flanger.rate_hz) / self.rate)
+                            + tau
+                                * lerp(
+                                    hz(p.flanger.rate_hz, p.flanger.sync_quarter_notes, 0.05, 5.0),
+                                    hz(f.flanger.rate_hz, f.flanger.sync_quarter_notes, 0.05, 5.0),
+                                )
+                                / self.rate)
                             % tau;
                         let mix = lerp(p.flanger.mix, f.flanger.mix) as f32;
                         x = blend(
@@ -2142,7 +2254,11 @@ impl TrackDsp {
                         });
                         self.chorus.write(x);
                         self.phase = (self.phase
-                            + std::f64::consts::TAU * lerp(p.chorus.rate_hz, f.chorus.rate_hz)
+                            + std::f64::consts::TAU
+                                * lerp(
+                                    hz(p.chorus.rate_hz, p.chorus.sync_quarter_notes, 0.1, 8.0),
+                                    hz(f.chorus.rate_hz, f.chorus.sync_quarter_notes, 0.1, 8.0),
+                                )
                                 / self.rate)
                             % std::f64::consts::TAU;
                         let mix = lerp(p.chorus.mix, f.chorus.mix) as f32;
@@ -2170,7 +2286,12 @@ impl TrackDsp {
                         );
                         let gain = (1.0 - lerp(p.tremolo.depth, f.tremolo.depth) * dip) as f32;
                         self.tremolo_phase = (self.tremolo_phase
-                            + tau * lerp(p.tremolo.rate_hz, f.tremolo.rate_hz) / self.rate)
+                            + tau
+                                * lerp(
+                                    hz(p.tremolo.rate_hz, p.tremolo.sync_quarter_notes, 0.1, 20.0),
+                                    hz(f.tremolo.rate_hz, f.tremolo.sync_quarter_notes, 0.1, 20.0),
+                                )
+                                / self.rate)
                             % tau;
                         x = blend(x, x.map(|v| v * gain), p.tremolo.enabled, f.tremolo.enabled);
                     }
@@ -2374,7 +2495,8 @@ impl TrackDsp {
         self.phase = 0.0;
         self.vibrato.reset();
         self.vibrato_phase = 0.0;
-        self.vibrato_swing = vibrato_swing(&self.settings.vibrato, self.rate);
+        self.vibrato_swing = f64::NAN;
+        self.vibrato_hz = f64::NAN;
         self.flanger_swing = self.rate * self.settings.flanger.depth_ms * 0.001;
         self.phaser = [[[0.0; 2]; 8]; 2];
         self.phaser_last = [0.0; 2];

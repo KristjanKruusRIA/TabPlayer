@@ -51,26 +51,35 @@ export const completeSound = (sound: TrackSound): TrackSound => {
 };
 /** Echo durations in quarter notes with their names: straight, dotted and triplet divisions. */
 export const delayDivisions:readonly (readonly [number,string])[]=[[.125,'1/32'],[.25,'1/16'],[1/3,'1/8 triplet'],[.5,'1/8'],[2/3,'1/4 triplet'],[.75,'Dotted 1/8'],[1,'1/4'],[1.5,'Dotted 1/4'],[2,'1/2'],[4,'Whole']];
+/** Cycle lengths in quarter notes a modulation block's rate can follow: the delay's divisions and two slower sweeps. */
+export const modulationDivisions:readonly (readonly [number,string])[]=[...delayDivisions,[8,'2 whole notes'],[16,'4 whole notes']];
+/** The modulation blocks whose rate can follow the tempo. */
+export const syncedBlocks:readonly EffectBlock[]=['vibrato','phaser','flanger','chorus','tremolo'];
 const range=(low:number,high:number)=>({low,high}),one=(...values:(string|number)[])=>({one:values}),unit=range(0,1);
 const list=(length:number,each:ReturnType<typeof range>)=>({length,each});
-type FieldRule=ReturnType<typeof range>|ReturnType<typeof one>|ReturnType<typeof list>;
+/** A field added after sounds could be saved: a sound may leave it out. */
+const later=(rule:ReturnType<typeof one>)=>({...rule,later:true});
+type FieldRule=ReturnType<typeof range>|ReturnType<typeof one>|ReturnType<typeof list>|ReturnType<typeof later>;
+const sync=later(one(0,...modulationDivisions.map(([value])=>value)));
 /** Every effect field and its accepted values, as the native FxSettings::validate checks them. */
 const effectRules:Record<EffectBlock,Record<string,FieldRule>>={
   gate:{thresholdDb:range(-96,0),releaseMs:range(1,1000)},
   compressor:{thresholdDb:range(-60,0),ratio:range(1,20),attackMs:range(.1,200),releaseMs:range(1,2000),makeupDb:range(0,24)},
   amp:{model:one('clean','crunch','lead','bass'),drive:unit,gainDb:range(-24,24)},cabinet:{model:one('open','closed','bass')},
   eq:{lowDb:range(-24,24),midDb:range(-24,24),highDb:range(-24,24),midHz:range(200,5000)},
-  chorus:{rateHz:range(.1,8),depthMs:range(0,20),mix:unit},
+  chorus:{rateHz:range(.1,8),depthMs:range(0,20),mix:unit,syncQuarterNotes:sync},
   wah:{mode:one('manual','auto'),position:unit,resonance:unit,sensitivity:unit,mix:unit},
   octaver:{octaveDown:unit,twoOctavesDown:unit,direct:unit},pitch:{semitones:range(-24,24),mix:unit},
   drive:{model:one('overdrive','distortion','fuzz'),drive:unit,tone:unit,levelDb:range(-24,12)},
   microphone:{placement:one('standard','close','edge','room'),output:one('stereo','mono')},
   graphicEq:{gainsDb:list(10,range(-12,12)),levelDb:range(-12,12)},
-  flanger:{rateHz:range(.05,5),depthMs:range(0,10),feedback:range(-.9,.9),mix:unit},
-  phaser:{rateHz:range(.05,5),depth:unit,feedback:range(0,.9),stages:one(2,4,6,8),mix:unit},
-  tremolo:{rateHz:range(.1,20),depth:unit,shape:one('sine','square')},vibrato:{rateHz:range(1,14),depthCents:range(0,100)},
+  flanger:{rateHz:range(.05,5),depthMs:range(0,10),feedback:range(-.9,.9),mix:unit,syncQuarterNotes:sync},
+  phaser:{rateHz:range(.05,5),depth:unit,feedback:range(0,.9),stages:one(2,4,6,8),mix:unit,syncQuarterNotes:sync},
+  tremolo:{rateHz:range(.1,20),depth:unit,shape:one('sine','square'),syncQuarterNotes:sync},vibrato:{rateHz:range(1,14),depthCents:range(0,100),syncQuarterNotes:sync},
   delay:{model:one('digital','tape','analog'),quarterNotes:one(...delayDivisions.map(([value])=>value)),feedback:range(0,.9),mix:unit},reverb:{model:one('room','hall','plate','spring'),room:unit,damping:unit,mix:unit},
 };
+/** The fields of each block that a sound may leave out. */
+export const laterFields=(block:EffectBlock)=>Object.entries(effectRules[block]).filter(([,rule])=>'later' in rule).map(([field])=>field);
 const fits=(value:unknown,rule:FieldRule):boolean=>'one' in rule?rule.one.includes(value as string|number):'each' in rule?Array.isArray(value)&&value.length===rule.length&&value.every(item=>fits(item,rule.each)):typeof value==='number'&&Number.isFinite(value)&&value>=rule.low&&value<=rule.high;
 /** Why a sound cannot be applied, or null. It is checked as completed with any blocks it lacks, against the native rules. */
 export function soundProblem(sound: TrackSound): string|null {
@@ -82,8 +91,8 @@ export function soundProblem(sound: TrackSound): string|null {
   if (Object.hasOwn(effects,'order')&&!validOrder(effects.order)) return 'Invalid effect order.';
   for (const [block,rules] of Object.entries(effectRules)) {
     const settings=(effects as unknown as Record<string,Record<string,unknown>>)[block];
-    if (!settings||typeof settings!=='object'||typeof settings.enabled!=='boolean'||Object.keys(settings).length!==Object.keys(rules).length+1) return 'Invalid effect parameter.';
-    for (const [field,rule] of Object.entries(rules)) if (!Object.hasOwn(settings,field)||!fits(settings[field],rule)) return 'Invalid effect parameter.';
+    if (!settings||typeof settings!=='object'||typeof settings.enabled!=='boolean'||Object.keys(settings).some(field=>field!=='enabled'&&!Object.hasOwn(rules,field))) return 'Invalid effect parameter.';
+    for (const [field,rule] of Object.entries(rules)) if (Object.hasOwn(settings,field)?!fits(settings[field],rule):!('later' in rule)) return 'Invalid effect parameter.';
   }
   return null;
 }

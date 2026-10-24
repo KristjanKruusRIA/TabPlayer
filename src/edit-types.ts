@@ -38,13 +38,14 @@ export interface FxSettings {
   amp: {enabled:boolean;model:'clean'|'crunch'|'lead'|'bass';drive:number;gainDb:number};
   cabinet: {enabled:boolean;model:'open'|'closed'|'bass'};
   eq: {enabled:boolean;lowDb:number;midDb:number;highDb:number;midHz:number};
-  chorus: {enabled:boolean;rateHz:number;depthMs:number;mix:number};
+  /** `syncQuarterNotes` on a modulation block: quarter notes per cycle when its rate follows the tempo; absent for the free rate. */
+  chorus: {enabled:boolean;rateHz:number;depthMs:number;mix:number;syncQuarterNotes?:number};
   delay: {enabled:boolean;model:'digital'|'tape'|'analog';quarterNotes:number;feedback:number;mix:number};
   reverb: {enabled:boolean;model:'room'|'hall'|'plate'|'spring';room:number;damping:number;mix:number};
-  vibrato: {enabled:boolean;rateHz:number;depthCents:number};
-  phaser: {enabled:boolean;rateHz:number;depth:number;feedback:number;stages:2|4|6|8;mix:number};
-  flanger: {enabled:boolean;rateHz:number;depthMs:number;feedback:number;mix:number};
-  tremolo: {enabled:boolean;rateHz:number;depth:number;shape:'sine'|'square'};
+  vibrato: {enabled:boolean;rateHz:number;depthCents:number;syncQuarterNotes?:number};
+  phaser: {enabled:boolean;rateHz:number;depth:number;feedback:number;stages:2|4|6|8;mix:number;syncQuarterNotes?:number};
+  flanger: {enabled:boolean;rateHz:number;depthMs:number;feedback:number;mix:number;syncQuarterNotes?:number};
+  tremolo: {enabled:boolean;rateHz:number;depth:number;shape:'sine'|'square';syncQuarterNotes?:number};
   wah: {enabled:boolean;mode:'manual'|'auto';position:number;resonance:number;sensitivity:number;mix:number};
   octaver: {enabled:boolean;octaveDown:number;twoOctavesDown:number;direct:number};
   pitch: {enabled:boolean;semitones:number;mix:number};

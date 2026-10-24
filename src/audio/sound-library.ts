@@ -1,4 +1,4 @@
-import { completeSound, defaultEffects, soundProblem } from '../document-settings';
+import { completeSound, defaultEffects, laterFields, soundProblem } from '../document-settings';
 import type { EffectBlock, FxSettings, TrackSound } from '../edit-types';
 
 /** A sound the user saved by name, reusable on any track of any score, like GP8's user presets. */
@@ -25,7 +25,7 @@ function repairSound(value:unknown):TrackSound|null {
     if(block==='order'){effects.order=settings;continue;}
     if(!Object.hasOwn(defaults,block)||!isRecord(settings))return null;
     // Fields this version does not know are dropped; missing ones take their defaults.
-    effects[block]=Object.fromEntries(Object.entries(defaults[block]).map(([field,fallback])=>[field,Object.hasOwn(settings,field)?settings[field]:fallback]));
+    effects[block]=Object.fromEntries([...Object.entries(defaults[block]).map(([field,fallback])=>[field,Object.hasOwn(settings,field)?settings[field]:fallback]),...laterFields(block as EffectBlock).filter(field=>Object.hasOwn(settings,field)).map(field=>[field,settings[field]])]);
   }
   const voiceId=typeof value.voiceId==='string'?value.voiceId:null;
   const sound=completeSound({voiceId,presetId:value.presetId as TrackSound['presetId'],effects:effects as unknown as FxSettings});

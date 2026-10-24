@@ -3,6 +3,7 @@ import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 import {act,cleanup,fireEvent,render,screen} from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import {SoundPanel,soundPreset} from './SoundPanel';
+import {factoryCategories} from './factory-sounds';
 import {deleteSoundPreset,forgetSessionSoundLibrary,saveSoundPreset} from './sound-library';
 import type {NativePlaybackController} from './NativePlaybackController';
 import type {TrackSound} from '../edit-types';
@@ -29,7 +30,7 @@ it('previews factory presets and saved sounds without recording an edit, and can
   const own=soundPreset('clean','green-guitar'),onEdit=vi.fn(),fake=playback();
   render(panel('base/0',own,onEdit,fake));
   const preview=screen.getByLabelText('Preview sound');
-  expect([...preview.querySelectorAll('optgroup')].map(group=>group.label)).toEqual(['Factory presets','My sounds']);
+  expect([...preview.querySelectorAll('optgroup')].map(group=>group.label)).toEqual(['Factory presets',...factoryCategories.map(category=>`${category} sounds`),'My sounds']);
   await act(async()=>{fireEvent.change(preview,{target:{value:'preset:lead'}});});
   // A factory preset keeps the track's instrument voice.
   expect(fake.previewSound).toHaveBeenLastCalledWith('base/0',soundPreset('lead','green-guitar'));

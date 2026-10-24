@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useEffect, useId, useRef, useState, useSyncExternalStore } from 'react';
 import { chainOrder, completeSound, defaultEffects, delayDivisions, effectBlocks, laterFields, modulationDivisions, syncedBlocks } from '../document-settings';
 import type { EditCommand, EffectBlock, TrackSound } from '../edit-types';
 import type { NativePlaybackController } from './NativePlaybackController';
 import type { AudioDeviceInfo } from './bridge';
+import { factoryCategories, factorySound, factorySounds } from './factory-sounds';
 import { copyPedal, copySound, deleteSoundPreset, renameSoundPreset, saveSoundPreset, soundClipboard, soundLibrary, subscribeSoundClipboard, subscribeSoundLibrary } from './sound-library';
 import './sound-panel.css';
 
@@ -76,9 +77,11 @@ export function SoundPanel({trackId,sound,onEdit,playback,busy=false,shown=true}
   const library=useSyncExternalStore(subscribeSoundLibrary,soundLibrary),clipboard=useSyncExternalStore(subscribeSoundClipboard,soundClipboard);
   const [chosen,setChosen]=useState(''),[name,setName]=useState(''),[status,setStatus]=useState(''),[confirming,setConfirming]=useState(false);
   const entry=library.find(item=>item.name===chosen),savedSelect=useRef<HTMLSelectElement>(null);
+  const [factoryChoice,setFactoryChoice]=useState(''),factory=factorySounds.find(item=>item.id===factoryChoice),factoryNote=useId();
+  const applyFactory=()=>{if(!factory)return;const applied=factory.name,appliedTo=trackId;void save(factorySound(factory.id,current.voiceId)!).then(ok=>{if(ok&&shownTrack.current===appliedTo)setStatus(`Applied “${applied}”.`);});};
   // Messages and an open confirmation belong to the track they were shown for.
   const shownTrack=useRef(trackId);
-  useEffect(()=>{shownTrack.current=trackId;setStatus('');setConfirming(false);setPreviewChoice('');},[trackId]);
+  useEffect(()=>{shownTrack.current=trackId;setStatus('');setConfirming(false);setPreviewChoice('');setFactoryChoice('');},[trackId]);
   // A preview lasts only while its track's panel is shown.
   useEffect(()=>()=>{if(previewer?.soundPreview()?.track===trackId)void Promise.resolve(previewer.previewSound(trackId,null)).catch(()=>{});},[previewer,trackId]);
   useEffect(()=>{if(!shown&&previewer?.soundPreview()?.track===trackId){previewRequest.current++;setPreviewChoice('');void Promise.resolve(previewer.previewSound(trackId,null)).catch(e=>setError(String(e)));}},[shown,previewer,trackId]);
@@ -89,7 +92,9 @@ export function SoundPanel({trackId,sound,onEdit,playback,busy=false,shown=true}
     if(!previewer)return;
     if(!value){void endPreview().then(()=>setStatus('Back to this track’s sound.'));return;}
     const split=value.indexOf(':'),kind=value.slice(0,split),id=value.slice(split+1),saved=library.find(item=>item.name===id);
-    const sound=kind==='preset'?soundPreset(id as TrackSound['presetId'],current.voiceId):saved?.sound,label=kind==='preset'?presetName(id):`“${id}”`;if(!sound)return;
+    const named=factorySounds.find(item=>item.id===id);
+    const sound=kind==='preset'?soundPreset(id as TrackSound['presetId'],current.voiceId):kind==='factory'?factorySound(id,current.voiceId):saved?.sound;
+    const label=kind==='preset'?presetName(id):`“${kind==='factory'?named?.name:id}”`;if(!sound)return;
     const request=++previewRequest.current,track=trackId;setPreviewChoice('');
     // A result that arrives after another choice, a cancel or a track change is dropped.
     void Promise.resolve(previewer.previewSound(track,structuredClone(sound))).then(()=>{if(request!==previewRequest.current||shownTrack.current!==track||previewer.soundPreview()?.track!==track)return;setPreviewChoice(value);setPreviewLabel(label);setError(null);setStatus(`Previewing ${label}. Keep it or cancel to go back to this track’s sound.`);},e=>{if(request===previewRequest.current)setError(String(e));});
@@ -105,8 +110,11 @@ export function SoundPanel({trackId,sound,onEdit,playback,busy=false,shown=true}
     <label>Sound source<select value={current.voiceId??''} onChange={e=>save({...current,voiceId:e.target.value||null})}><option value="">Automatic instrument</option><option value="gm">General MIDI</option><option value="green-guitar">Green Guitar</option><option value="black-guitar">Black Guitar</option><option value="darkblack-bass">Darkblack Bass</option><option value="babyblue-bass">Babyblue Bass</option></select></label>
     <label>Sound preset<select value={current.presetId} onChange={e=>save(soundPreset(e.target.value as TrackSound['presetId'],current.voiceId))}>{presetIds.map(id=><option value={id} key={id}>{presetName(id)}</option>)}</select></label>
     <button onClick={()=>save(soundPreset(current.presetId,current.voiceId))}>Restore preset</button>
+    <label>Factory sound<select aria-label="Factory sound" aria-describedby={factoryNote} value={factoryChoice} onChange={e=>setFactoryChoice(e.target.value)}><option value="">Choose a factory sound</option>{factoryCategories.map(category=><optgroup key={category} label={category}>{factorySounds.filter(item=>item.category===category).map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</optgroup>)}</select></label>
+    <p id={factoryNote} className="muted">{factory?`${factory.description} `:''}Factory sounds set the effects; the track keeps its instrument.</p>
+    <button disabled={!factory} onClick={applyFactory}>Apply factory sound</button>
     {previewer&&<><label>Preview sound<select ref={previewSelect} aria-label="Preview sound" value={showingPreview?previewChoice:''} onKeyDown={escapePreview} onChange={e=>choosePreview(e.target.value)}>
-      <option value="">Choose a sound to preview</option>{orphanPreview&&<option value={previewChoice} disabled>{previewLabel} (no longer saved)</option>}<optgroup label="Factory presets">{presetIds.map(id=><option key={id} value={`preset:${id}`}>{presetName(id)}</option>)}</optgroup>{library.length>0&&<optgroup label="My sounds">{library.map(item=><option key={item.name} value={`saved:${item.name}`}>{item.name}</option>)}</optgroup>}</select></label>
+      <option value="">Choose a sound to preview</option>{orphanPreview&&<option value={previewChoice} disabled>{previewLabel} (no longer saved)</option>}<optgroup label="Factory presets">{presetIds.map(id=><option key={id} value={`preset:${id}`}>{presetName(id)}</option>)}</optgroup>{factoryCategories.map(category=><optgroup key={category} label={`${category} sounds`}>{factorySounds.filter(item=>item.category===category).map(item=><option key={item.id} value={`factory:${item.id}`}>{item.name}</option>)}</optgroup>)}{library.length>0&&<optgroup label="My sounds">{library.map(item=><option key={item.name} value={`saved:${item.name}`}>{item.name}</option>)}</optgroup>}</select></label>
     {showingPreview&&<div className="sound-clipboard" role="group" aria-label="Sound preview" onKeyDown={escapePreview}><button onClick={keepPreview}>Keep previewed sound</button><button onClick={cancelPreview}>Cancel preview</button></div>}</>}
     <div className="sound-clipboard"><button onClick={()=>{copySound(current);setStatus('Copied this track’s sound.');}}>Copy sound</button><button disabled={!clipboard.sound} onClick={()=>{if(clipboard.sound)save(structuredClone(clipboard.sound));}}>Paste sound</button></div>
     </fieldset>

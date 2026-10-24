@@ -18,7 +18,7 @@ export function ExportDialog({score,layout,page,busy,progress,failure,currentSpe
   const [fileName,setFileName]=useState(DEFAULT_FILE_NAME),[now,setNow]=useState(()=>new Date());
   // Keep %d and %h in the preview current while the dialog stays open.
   useEffect(()=>{const timer=setInterval(()=>setNow(new Date()),15000);return()=>clearInterval(timer);},[]);
-  const savedName=withExtension(expandFileName(fileName,fileNameContext(score,{tracks:tracks.length?tracks:[0],range:null},now)),EXTENSIONS[format]);
+  const savedName=withExtension(expandFileName(fileName,fileNameContext(score,{tracks:tracks.length?tracks:[0],range:null},now)),format==='wav'&&audio.container?audio.container:EXTENSIONS[format]);
   const [error,setError]=useState('');
   const [customPage,setCustomPage]=useState(()=>page?structuredClone(page):null);
   const topology=`${score.masterBars.length}:${score.tracks.map(track=>track.staves.length).join(',')}`;
@@ -66,7 +66,7 @@ export function ExportDialog({score,layout,page,busy,progress,failure,currentSpe
   }
   return <div className="dialog-backdrop"><div ref={dialog} onKeyDown={handleKeyDown} role="dialog" aria-modal="true" aria-label="Export score" className="export-dialog"><h2>Export score</h2>
     <fieldset disabled={busy}>
-      <label>Export format<select value={format} onChange={e=>{const next=e.target.value as ExportOptions['format'];setFormat(next);if(next!=='pdf'&&next!=='svg'&&next!=='png'&&perTrack){setPerTrack(false);if(fileName===PER_TRACK_FILE_NAME)setFileName(DEFAULT_FILE_NAME);}}}><option value="gp">Guitar Pro</option><option value="pdf">PDF</option><option value="print">Print</option><option value="svg">SVG</option><option value="png">PNG</option><option value="midi">MIDI</option><option value="musicxml">MusicXML</option><option value="ascii">ASCII tablature</option><option value="wav">Mixed WAV</option><option value="stems">WAV stems</option></select></label>
+      <label>Export format<select value={format} onChange={e=>{const next=e.target.value as ExportOptions['format'];setFormat(next);if(next!=='pdf'&&next!=='svg'&&next!=='png'&&perTrack){setPerTrack(false);if(fileName===PER_TRACK_FILE_NAME)setFileName(DEFAULT_FILE_NAME);}}}><option value="gp">Guitar Pro</option><option value="pdf">PDF</option><option value="print">Print</option><option value="svg">SVG</option><option value="png">PNG</option><option value="midi">MIDI</option><option value="musicxml">MusicXML</option><option value="ascii">ASCII tablature</option><option value="wav">Mixed audio</option><option value="stems">Audio stems</option></select></label>
       {format!=='print'&&<div className="export-file-name"><label>File name<input value={fileName} spellCheck={false} onChange={e=>setFileName(e.target.value)}/></label>
         <p className="muted">{`Tokens: ${FILE_NAME_TOKENS}. Track tokens use the first selected track.`}</p>
         <p aria-live="polite">{`Saves as ${savedName}`}</p>{(format==='svg'||format==='png')&&<p className="muted">Several pages are saved with -1, -2 and so on before the extension.</p>}</div>}
@@ -95,6 +95,7 @@ export function ExportDialog({score,layout,page,busy,progress,failure,currentSpe
       {format==='ascii'&&<p>ASCII tablature writes the fret numbers of stringed tracks as plain text, with common techniques, repeats, endings, sections and directions, and a legend of the marks used. Rhythm is shown only by spacing, simile bars are written out, and where voices share a string at one moment the first voice is kept. Percussion and staves without strings are left out.</p>}
       {format==='midi'&&<p>MIDI preserves generated notes and controls. Ordinary MIDI players share pitch bends on a channel, so simultaneous independent bends may differ.</p>}
       {(format==='wav'||format==='stems')&&<fieldset className="export-audio"><legend>Audio</legend><div className="export-audio-options">
+        <label>File type<select value={audio.container??'wav'} onChange={e=>{const {container:_,...rest}=audio;setAudio(e.target.value==='aiff'?{...rest,container:'aiff'}:rest);}}><option value="wav">WAV</option><option value="aiff">AIFF</option></select></label>
         <label>Sample rate<select value={audio.sampleRate} onChange={e=>setAudio({...audio,sampleRate:Number(e.target.value) as AudioExportOptions['sampleRate']})}><option value="44100">44.1 kHz</option><option value="48000">48 kHz</option></select></label>
         <label>Bit depth<select value={audio.bitDepth} onChange={e=>setAudio({...audio,bitDepth:Number(e.target.value) as AudioExportOptions['bitDepth']})}><option value="16">16 bit</option><option value="24">24 bit</option></select></label>
         <label>Speed<select value={audio.speed} onChange={e=>setAudio({...audio,speed:e.target.value as AudioExportOptions['speed']})}><option value="saved">100%</option><option value="current" disabled={!currentSpeedAvailable}>Current speed coefficient</option></select></label>

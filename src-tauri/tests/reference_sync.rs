@@ -399,10 +399,7 @@ fn omitted_backing_mix_export_obeys_active_wall_duration_and_tail() {
                 kind: StemKind::Score,
             }],
             range: None,
-            format: AudioFormat {
-                sample_rate: 48_000,
-                bit_depth: 24,
-            },
+            format: AudioFormat::wav(48_000, 24),
             speed,
             metronome: false,
             tail_seconds: 0.5,
@@ -497,10 +494,7 @@ fn effective_whole_and_selected_exports_share_wall_tail_with_or_without_backing(
                             kind: StemKind::Score,
                         }],
                         range,
-                        format: AudioFormat {
-                            sample_rate: rate,
-                            bit_depth: 24,
-                        },
+                        format: AudioFormat::wav(rate, 24),
                         speed,
                         metronome: false,
                         tail_seconds: 0.5,

@@ -842,7 +842,13 @@ pub async fn export_audio(
         request.tail_seconds,
         plan.duration_ms / 1000.0,
     )?;
-    let Some(path) = export_destination(&app, "wav", stems, file_name.as_deref())? else {
+    let Some(path) = export_destination(
+        &app,
+        request.format.container.extension(),
+        stems,
+        file_name.as_deref(),
+    )?
+    else {
         return Ok(None);
     };
     let launch_app = app.clone();

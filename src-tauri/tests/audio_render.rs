@@ -1131,10 +1131,7 @@ fn metronome_offline_export_keeps_eighth_pulses_across_disjoint_repeat_ranges() 
                 kind: StemKind::Score,
             }],
             range: Some(MeasureRange { first: 1, last: 1 }),
-            format: AudioFormat {
-                sample_rate: rate,
-                bit_depth: 24,
-            },
+            format: AudioFormat::wav(rate, 24),
             speed: 2.0,
             metronome: true,
             tail_seconds: 0.03,

@@ -388,10 +388,7 @@ mod tests {
                 kind: StemKind::Score,
             }],
             range: None,
-            format: AudioFormat {
-                sample_rate: 48000,
-                bit_depth: 24,
-            },
+            format: AudioFormat::wav(48000, 24),
             speed: 1.0,
             metronome: false,
             tail_seconds: 0.1,

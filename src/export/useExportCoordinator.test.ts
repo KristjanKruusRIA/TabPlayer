@@ -368,3 +368,18 @@ it('applies the PNG pixel budget across every track before the save dialog',asyn
   await act(async()=>{await expect(result.current.run({format:'png',selection:{tracks:[0,1,2],range:null},layout:pageLayout,transparent:true,dpi:600,perTrack:true})).rejects.toThrow('fewer pages');});
   expect(save).toHaveBeenCalledTimes(1);
 });
+it('asks the native exporter for AIFF only when AIFF is chosen',async()=>{
+  const score=buildScore(blankProject()),api=native(),payloads:NativeAudioExportPayload[]=[];
+  api.exportAudio=async value=>{payloads.push(value);return 'saved';};api.status=async()=>({id:'saved',frames:1,totalFrames:1,status:'complete'});
+  const bridge={readBackingAsset:async()=>{throw new Error('Unexpected backing read.');},confirmExport:async()=>true,exportGp:async()=>true};
+  const {result}=renderHook(()=>useExportCoordinator({revision:7,score,settings:defaultDocumentSettings(),currentSpeed:1,bridge,native:api}));
+  const audio={sampleRate:44100 as const,bitDepth:24 as const,speed:'saved' as const,metronome:false,tailSeconds:0,backing:false,includeMix:false};
+  for(const format of ['wav','stems'] as const){
+    await act(async()=>{expect(await result.current.run({format,selection:{tracks:[0],range:null},audio:{...audio,container:'aiff'}})).toBe(true);});
+    await act(async()=>{expect(await result.current.run({format,selection:{tracks:[0],range:null},audio})).toBe(true);});
+  }
+  expect(payloads.map(payload=>[payload.stems,payload.request.format])).toEqual([
+    [false,{sampleRate:44100,bitDepth:24,container:'aiff'}],[false,{sampleRate:44100,bitDepth:24}],
+    [true,{sampleRate:44100,bitDepth:24,container:'aiff'}],[true,{sampleRate:44100,bitDepth:24}],
+  ]);
+});

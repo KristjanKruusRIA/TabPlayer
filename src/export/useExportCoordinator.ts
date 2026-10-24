@@ -95,7 +95,7 @@ export function useExportCoordinator({score,settings,currentSpeed,bridge,native,
       }
       const plan=applyReferenceSyncPlan(buildPlaybackPlanFromJson(model.JsonConverter.scoreToJson(selected),ids,++generation.current),frozenSettings.backing);
       if(cancelled.current)return false;
-      return await watch(await native.exportAudio({plan,settings:frozenSettings,embeddedBytes:embedded?Array.from(embedded):null,stems:frozenOptions.format==='stems',request:{tracks:selection.tracks.map(i=>({id:ids[i],name:copy.tracks[i].name,preset:frozenSettings.sounds[ids[i]]?.presetId??'gm',kind:'score'})),range:selection.range,format:{sampleRate:audio.sampleRate,bitDepth:audio.bitDepth},speed,metronome:audio.metronome,tailSeconds:audio.tailSeconds,includeBacking:audio.backing,includeMix:audio.includeMix}},revision,name),active);
+      return await watch(await native.exportAudio({plan,settings:frozenSettings,embeddedBytes:embedded?Array.from(embedded):null,stems:frozenOptions.format==='stems',request:{tracks:selection.tracks.map(i=>({id:ids[i],name:copy.tracks[i].name,preset:frozenSettings.sounds[ids[i]]?.presetId??'gm',kind:'score'})),range:selection.range,format:{sampleRate:audio.sampleRate,bitDepth:audio.bitDepth,...(audio.container?{container:audio.container}:{})},speed,metronome:audio.metronome,tailSeconds:audio.tailSeconds,includeBacking:audio.backing,includeMix:audio.includeMix}},revision,name),active);
     }finally{if(active.cancelRequest)await active.cancelRequest.catch(()=>{});pending.current=false;job.current=null;if(alive.current)setBusy(false);operation.current=null;finish();}
   }
   return {busy,progress,run,cancel};

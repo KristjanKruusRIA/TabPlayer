@@ -7,7 +7,7 @@ import {chainOrder,completeSound,defaultEffects,effectBlocks,soundProblem} from 
 import {readSoundLibrary,saveSoundPreset} from './sound-library';
 import type {EffectBlock,TrackSound} from '../edit-types';
 afterEach(()=>{cleanup();localStorage.clear();});
-const native=['microphone','gate','compressor','wah','octaver','pitch','drive','amp','cabinet','eq','vibrato','phaser','flanger','chorus','tremolo','delay','reverb'];
+const native=['microphone','gate','compressor','wah','octaver','pitch','drive','amp','cabinet','eq','graphicEq','vibrato','phaser','flanger','chorus','tremolo','delay','reverb'];
 /** The default order with `block` moved to just after `after`. */
 const moved=(block:string,after:string)=>{const names=native.filter(name=>name!==block);names.splice(names.indexOf(after)+1,0,block);return names as EffectBlock[];};
 const shownOrder=()=>[...document.querySelectorAll('.sound-block-name')].map(node=>node.textContent);
@@ -39,7 +39,7 @@ it('shows the blocks in the sound’s order and moves them one place at a time',
   const onEdit=vi.fn(),sound=soundPreset('gm');
   const {rerender}=render(<SoundPanel trackId="base/0" sound={sound} onEdit={onEdit}/>);
   expect(screen.getByText('Signal chain')).toBeInTheDocument();
-  expect(shownOrder()).toEqual(['Microphone','Gate','Compressor','Wah','Octaver','Pitch shift','Drive','Amp','Cabinet','EQ','Vibrato','Phaser','Flanger','Chorus','Tremolo','Delay','Reverb']);
+  expect(shownOrder()).toEqual(['Microphone','Gate','Compressor','Wah','Octaver','Pitch shift','Drive','Amp','Cabinet','EQ','Graphic EQ','Vibrato','Phaser','Flanger','Chorus','Tremolo','Delay','Reverb']);
   expect(screen.getByRole('button',{name:'Move Microphone earlier'})).toBeDisabled();
   expect(screen.getByRole('button',{name:'Move Reverb later'})).toBeDisabled();
   fireEvent.click(screen.getByRole('button',{name:'Move Drive later'}));
@@ -77,7 +77,7 @@ it('keeps keyboard focus on the moved block and says where it went',async()=>{
   const onEdit=vi.fn(),sound=soundPreset('gm');
   const {rerender}=render(<SoundPanel trackId="base/0" sound={sound} onEdit={onEdit}/>);
   const later=screen.getByRole('button',{name:'Move Drive later'});later.focus();fireEvent.click(later);
-  await screen.findByText('Drive is now 8 of 17 in the chain.');
+  await screen.findByText('Drive is now 8 of 18 in the chain.');
   rerender(<SoundPanel trackId="base/0" sound={onEdit.mock.calls.at(-1)?.[0].sound} onEdit={onEdit}/>);
   expect(screen.getByRole('button',{name:'Move Drive later'})).toHaveFocus();
   // At an end of the chain the pressed button is disabled, so focus goes to the other one.

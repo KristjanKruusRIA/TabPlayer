@@ -50,6 +50,7 @@ export interface FxSettings {
   pitch: {enabled:boolean;semitones:number;mix:number};
   drive: {enabled:boolean;model:'overdrive'|'distortion'|'fuzz';drive:number;tone:number;levelDb:number};
   microphone: {enabled:boolean;placement:'standard'|'close'|'edge'|'room';output:'stereo'|'mono'};
+  graphicEq: {enabled:boolean;gainsDb:number[];levelDb:number};
   /** Every block once, in the order the signal passes through them; absent for the default order. */
   order?: EffectBlock[];
 }

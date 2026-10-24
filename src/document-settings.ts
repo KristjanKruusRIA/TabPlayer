@@ -23,13 +23,22 @@ export const defaultEffects = (): FxSettings => ({
   flanger:{enabled:false,rateHz:.25,depthMs:2,feedback:.5,mix:.5},tremolo:{enabled:false,rateHz:5,depth:.5,shape:'sine'},
   wah:{enabled:false,mode:'manual',position:.5,resonance:.5,sensitivity:.5,mix:1},
   octaver:{enabled:false,octaveDown:.5,twoOctavesDown:0,direct:1},pitch:{enabled:false,semitones:12,mix:1},drive:{enabled:false,model:'overdrive',drive:.5,tone:.5,levelDb:0},microphone:{enabled:false,placement:'standard',output:'stereo'},
+  graphicEq:{enabled:false,gainsDb:[0,0,0,0,0,0,0,0,0,0],levelDb:0},
 });
 /** The blocks in their default order, from the microphone to the reverb, as the native player runs them. */
-export const effectBlocks:readonly EffectBlock[]=['microphone','gate','compressor','wah','octaver','pitch','drive','amp','cabinet','eq','vibrato','phaser','flanger','chorus','tremolo','delay','reverb'];
+export const effectBlocks:readonly EffectBlock[]=['microphone','gate','compressor','wah','octaver','pitch','drive','amp','cabinet','eq','graphicEq','vibrato','phaser','flanger','chorus','tremolo','delay','reverb'];
+/** Blocks added after orders could be saved. An order saved before one of them leaves it out, and it plays just after
+ * the block before it in the default order. */
+const laterBlocks:readonly EffectBlock[]=['graphicEq'];
 /** The order the signal passes through the blocks of `effects`. */
-export const chainOrder=(effects:FxSettings):EffectBlock[]=>effects.order?.length?[...effects.order]:[...effectBlocks];
-/** Whether `order` names every block once, or is empty for the default order. */
-const validOrder=(order:unknown)=>Array.isArray(order)&&(order.length===0||order.length===effectBlocks.length&&effectBlocks.every(block=>order.filter(name=>name===block).length===1));
+export const chainOrder=(effects:FxSettings):EffectBlock[]=>{
+  if(!effects.order?.length)return [...effectBlocks];
+  const chain=[...effects.order];
+  effectBlocks.forEach((block,index)=>{if(!chain.includes(block))chain.splice(index?chain.indexOf(effectBlocks[index-1])+1:0,0,block);});
+  return chain;
+};
+/** Whether `order` names every block once, leaving out only blocks added after it, or is empty for the default order. */
+const validOrder=(order:unknown)=>Array.isArray(order)&&(order.length===0||order.every(name=>effectBlocks.includes(name))&&effectBlocks.every(block=>{const count=order.filter(name=>name===block).length;return count===1||count===0&&laterBlocks.includes(block);}));
 /** Adds the effect blocks a sound saved before them lacks, switched off at their defaults, and reads a reverb or
  * delay saved before its models as the original room reverb or digital delay. */
 export const completeSound = (sound: TrackSound): TrackSound => {
@@ -43,7 +52,8 @@ export const completeSound = (sound: TrackSound): TrackSound => {
 /** Echo durations in quarter notes with their names: straight, dotted and triplet divisions. */
 export const delayDivisions:readonly (readonly [number,string])[]=[[.125,'1/32'],[.25,'1/16'],[1/3,'1/8 triplet'],[.5,'1/8'],[2/3,'1/4 triplet'],[.75,'Dotted 1/8'],[1,'1/4'],[1.5,'Dotted 1/4'],[2,'1/2'],[4,'Whole']];
 const range=(low:number,high:number)=>({low,high}),one=(...values:(string|number)[])=>({one:values}),unit=range(0,1);
-type FieldRule=ReturnType<typeof range>|ReturnType<typeof one>;
+const list=(length:number,each:ReturnType<typeof range>)=>({length,each});
+type FieldRule=ReturnType<typeof range>|ReturnType<typeof one>|ReturnType<typeof list>;
 /** Every effect field and its accepted values, as the native FxSettings::validate checks them. */
 const effectRules:Record<EffectBlock,Record<string,FieldRule>>={
   gate:{thresholdDb:range(-96,0),releaseMs:range(1,1000)},
@@ -55,12 +65,13 @@ const effectRules:Record<EffectBlock,Record<string,FieldRule>>={
   octaver:{octaveDown:unit,twoOctavesDown:unit,direct:unit},pitch:{semitones:range(-24,24),mix:unit},
   drive:{model:one('overdrive','distortion','fuzz'),drive:unit,tone:unit,levelDb:range(-24,12)},
   microphone:{placement:one('standard','close','edge','room'),output:one('stereo','mono')},
+  graphicEq:{gainsDb:list(10,range(-12,12)),levelDb:range(-12,12)},
   flanger:{rateHz:range(.05,5),depthMs:range(0,10),feedback:range(-.9,.9),mix:unit},
   phaser:{rateHz:range(.05,5),depth:unit,feedback:range(0,.9),stages:one(2,4,6,8),mix:unit},
   tremolo:{rateHz:range(.1,20),depth:unit,shape:one('sine','square')},vibrato:{rateHz:range(1,14),depthCents:range(0,100)},
   delay:{model:one('digital','tape','analog'),quarterNotes:one(...delayDivisions.map(([value])=>value)),feedback:range(0,.9),mix:unit},reverb:{model:one('room','hall','plate','spring'),room:unit,damping:unit,mix:unit},
 };
-const fits=(value:unknown,rule:FieldRule)=>'one' in rule?rule.one.includes(value as string|number):typeof value==='number'&&Number.isFinite(value)&&value>=rule.low&&value<=rule.high;
+const fits=(value:unknown,rule:FieldRule):boolean=>'one' in rule?rule.one.includes(value as string|number):'each' in rule?Array.isArray(value)&&value.length===rule.length&&value.every(item=>fits(item,rule.each)):typeof value==='number'&&Number.isFinite(value)&&value>=rule.low&&value<=rule.high;
 /** Why a sound cannot be applied, or null. It is checked as completed with any blocks it lacks, against the native rules. */
 export function soundProblem(sound: TrackSound): string|null {
   if (!sound||typeof sound!=='object'||Object.keys(sound).sort().join()!=='effects,presetId,voiceId'||!sound.effects||typeof sound.effects!=='object') return 'Invalid sound.';

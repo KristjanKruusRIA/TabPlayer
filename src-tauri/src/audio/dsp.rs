@@ -67,6 +67,15 @@ block!(Microphone {
     placement: String = "standard".into(),
     output: String = "stereo".into()
 });
+block!(GraphicEq {
+    gains_db: [f64; 10] = [0.0; 10],
+    level_db: f64 = 0.0
+});
+/// The graphic EQ's band centres in hertz, an octave apart, and their bandwidth of one octave.
+const GRAPHIC_EQ_BANDS: [f64; 10] = [
+    31.5, 63.0, 125.0, 250.0, 500.0, 1_000.0, 2_000.0, 4_000.0, 8_000.0, 16_000.0,
+];
+const GRAPHIC_EQ_Q: f64 = std::f64::consts::SQRT_2;
 block!(Flanger {
     rate_hz: f64 = 0.25,
     depth_ms: f64 = 2.0,
@@ -176,6 +185,8 @@ pub struct FxSettings {
     pub drive: Drive,
     #[serde(default, skip_serializing_if = "untouched")]
     pub microphone: Microphone,
+    #[serde(default, skip_serializing_if = "untouched")]
+    pub graphic_eq: GraphicEq,
     /// Every block's name once, in the order the signal passes through them; empty for the default order.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub order: Vec<String>,
@@ -286,6 +297,7 @@ enum Stage {
     Amp,
     Cabinet,
     Eq,
+    GraphicEq,
     Vibrato,
     Phaser,
     Flanger,
@@ -295,7 +307,7 @@ enum Stage {
     Reverb,
 }
 /// The blocks by name, in their default order.
-const STAGES: [(&str, Stage); 17] = [
+const STAGES: [(&str, Stage); 18] = [
     ("microphone", Stage::Microphone),
     ("gate", Stage::Gate),
     ("compressor", Stage::Compressor),
@@ -306,6 +318,7 @@ const STAGES: [(&str, Stage); 17] = [
     ("amp", Stage::Amp),
     ("cabinet", Stage::Cabinet),
     ("eq", Stage::Eq),
+    ("graphicEq", Stage::GraphicEq),
     ("vibrato", Stage::Vibrato),
     ("phaser", Stage::Phaser),
     ("flanger", Stage::Flanger),
@@ -315,14 +328,36 @@ const STAGES: [(&str, Stage); 17] = [
     ("reverb", Stage::Reverb),
 ];
 /// The chain a validated order names, or the default chain for an empty one.
-fn chain_of(order: &[String]) -> [Stage; 17] {
-    std::array::from_fn(|i| {
-        order
-            .get(i)
-            .and_then(|name| STAGES.iter().find(|(known, _)| known == name))
-            .unwrap_or(&STAGES[i])
-            .1
-    })
+/// Blocks added after orders could be saved. An order saved before one of them leaves it out, and it plays just
+/// after the block before it in the default order.
+const LATER_STAGES: [&str; 1] = ["graphicEq"];
+fn chain_of(order: &[String]) -> [Stage; 18] {
+    if order.is_empty() {
+        return STAGES.map(|(_, stage)| stage);
+    }
+    let mut chain = [Stage::Microphone; 18];
+    let mut len = 0;
+    for name in order {
+        if let Some((_, stage)) = STAGES.iter().find(|(known, _)| known == name) {
+            chain[len] = *stage;
+            len += 1;
+        }
+    }
+    for (index, (name, stage)) in STAGES.iter().enumerate() {
+        if len < chain.len() && !order.iter().any(|named| named == name) {
+            let at = match index {
+                0 => 0,
+                _ => chain[..len]
+                    .iter()
+                    .position(|playing| *playing == STAGES[index - 1].1)
+                    .map_or(len, |before| before + 1),
+            };
+            chain.copy_within(at..len, at + 1);
+            chain[at] = *stage;
+            len += 1;
+        }
+    }
+    chain
 }
 /// Whether `fx` switches `stage` on.
 fn stage_on(fx: &FxSettings, stage: Stage) -> bool {
@@ -337,6 +372,7 @@ fn stage_on(fx: &FxSettings, stage: Stage) -> bool {
         Stage::Amp => fx.amp.enabled,
         Stage::Cabinet => fx.cabinet.enabled,
         Stage::Eq => fx.eq.enabled,
+        Stage::GraphicEq => fx.graphic_eq.enabled,
         Stage::Vibrato => fx.vibrato.enabled,
         Stage::Phaser => fx.phaser.enabled,
         Stage::Flanger => fx.flanger.enabled,
@@ -967,13 +1003,26 @@ impl FxSettings {
         if !REVERB_MODELS.contains(&self.reverb.model.as_str()) {
             return Err("Unknown reverb model.".into());
         }
+        let named = |name: &str| self.order.iter().filter(|block| *block == name).count();
         if !self.order.is_empty()
-            && (self.order.len() != STAGES.len()
-                || STAGES
-                    .iter()
-                    .any(|(name, _)| self.order.iter().filter(|block| block == name).count() != 1))
+            && (self
+                .order
+                .iter()
+                .any(|block| !STAGES.iter().any(|(name, _)| name == block))
+                || STAGES.iter().any(|(name, _)| {
+                    named(name) > 1 || named(name) == 0 && !LATER_STAGES.contains(name)
+                }))
         {
             return Err("Invalid effect order.".into());
+        }
+        if self
+            .graphic_eq
+            .gains_db
+            .iter()
+            .chain([&self.graphic_eq.level_db])
+            .any(|db| !db.is_finite() || db.abs() > 12.0)
+        {
+            return Err("Invalid graphic EQ gain: expected -12..12 dB.".into());
         }
         if !MICROPHONE_PLACEMENTS.contains(&self.microphone.placement.as_str()) {
             return Err("Unknown microphone placement.".into());
@@ -1076,6 +1125,16 @@ impl Biquad {
             [1.0 + alpha / a, -2.0 * w.cos(), 1.0 - alpha / a],
         );
     }
+    /// A peak of `db` at `hz` with quality `q`.
+    fn peak_q(&mut self, hz: f64, db: f64, rate: f64, q: f64) {
+        let w = std::f64::consts::TAU * hz.min(rate * 0.45) / rate;
+        let a = 10f64.powf(db / 40.0);
+        let alpha = w.sin() / (2.0 * q);
+        self.set(
+            [1.0 + alpha * a, -2.0 * w.cos(), 1.0 - alpha * a],
+            [1.0 + alpha / a, -2.0 * w.cos(), 1.0 - alpha / a],
+        );
+    }
     fn shelf(&mut self, hz: f64, db: f64, rate: f64, high: bool) {
         let w = std::f64::consts::TAU * hz.min(rate * 0.45) / rate;
         let c = w.cos();
@@ -1163,6 +1222,11 @@ pub struct TrackDsp {
     amp_anti_alias: [[f64; 3]; 2],
     cabinet: [Biquad; 3],
     eq: [Biquad; 3],
+    /// The graphic EQ's band filters and the gains they were set for.
+    graphic_eq: [Biquad; 10],
+    cached_graphic_eq: [f64; 10],
+    /// The graphic EQ's level in dB and as a gain.
+    graphic_eq_level: (f64, f32),
     chorus: DelayLine,
     phase: f64,
     vibrato: DelayLine,
@@ -1210,8 +1274,8 @@ pub struct TrackDsp {
     /// sound that a room's reflections repeat; and whether the block has been running.
     microphone_shapes: [MicrophoneShape; 2],
     /// The chain playing, the chain the settings ask for, and the frames left of a reorder's fade out and back in.
-    chain: [Stage; 17],
-    chain_target: [Stage; 17],
+    chain: [Stage; 18],
+    chain_target: [Stage; 18],
     reorder_left: u32,
     microphone_room: DelayLine,
     /// Frames since the line was cleared while sound played, so each reflection fades in once its delay has
@@ -1264,6 +1328,9 @@ impl TrackDsp {
             amp_anti_alias: [[0.0; 3]; 2],
             cabinet: [Biquad::default(); 3],
             eq: [Biquad::default(); 3],
+            graphic_eq: [Biquad::default(); 10],
+            cached_graphic_eq: [f64::NAN; 10],
+            graphic_eq_level: (f64::NAN, 1.0),
             chorus: DelayLine::new((rate * 0.05) as usize + 2),
             phase: 0.0,
             // The widest vibrato (100 cents at 1 Hz) swings the delay by about 18.4 ms.
@@ -1413,6 +1480,7 @@ impl TrackDsp {
             old.settings.pitch.enabled,
             old.settings.drive.enabled,
             old.settings.microphone.enabled,
+            old.settings.graphic_eq.enabled,
         ];
         std::mem::swap(&mut self.previous, &mut old.settings);
         // The previous settings are the old configuration's current ones, resolved as it resolved them.
@@ -1442,6 +1510,9 @@ impl TrackDsp {
         }
         if running[4] {
             move_state!(eq, cached_eq);
+        }
+        if running[17] {
+            move_state!(graphic_eq, cached_graphic_eq, graphic_eq_level);
         }
         if running[5] {
             move_state!(chorus, phase);
@@ -1930,6 +2001,54 @@ impl TrackDsp {
                         x = blend(x, wet, p.eq.enabled, f.eq.enabled);
                     }
                 }
+                Stage::GraphicEq => {
+                    if f.graphic_eq.enabled
+                        && !p.graphic_eq.enabled
+                        && self.ramp_left == self.ramp_frames
+                    {
+                        // Switching the graphic EQ on starts its bands from rest.
+                        for b in &mut self.graphic_eq {
+                            b.reset();
+                        }
+                    }
+                    if f.graphic_eq.enabled || p.graphic_eq.enabled && t < 1.0 {
+                        // A band centred above what the rate can carry is left flat rather than moved down onto the
+                        // bands below it.
+                        let gains: [f64; 10] = std::array::from_fn(|band| {
+                            if GRAPHIC_EQ_BANDS[band] > self.rate * 0.45 {
+                                0.0
+                            } else {
+                                lerp(p.graphic_eq.gains_db[band], f.graphic_eq.gains_db[band])
+                            }
+                        });
+                        if gains != self.cached_graphic_eq {
+                            for (band, filter) in self.graphic_eq.iter_mut().enumerate() {
+                                filter.peak_q(
+                                    GRAPHIC_EQ_BANDS[band],
+                                    gains[band],
+                                    self.rate,
+                                    GRAPHIC_EQ_Q,
+                                );
+                            }
+                            self.cached_graphic_eq = gains;
+                        }
+                        let mut wet = x;
+                        for b in &mut self.graphic_eq {
+                            wet = b.process(wet);
+                        }
+                        let level_db = lerp(p.graphic_eq.level_db, f.graphic_eq.level_db);
+                        if level_db != self.graphic_eq_level.0 {
+                            self.graphic_eq_level = (level_db, 10f64.powf(level_db / 20.0) as f32);
+                        }
+                        let level = self.graphic_eq_level.1;
+                        x = blend(
+                            x,
+                            wet.map(|v| v * level),
+                            p.graphic_eq.enabled,
+                            f.graphic_eq.enabled,
+                        );
+                    }
+                }
                 Stage::Vibrato => {
                     if f.vibrato.enabled || p.vibrato.enabled && t < 1.0 {
                         let omega = tau * lerp(p.vibrato.rate_hz, f.vibrato.rate_hz);
@@ -2236,6 +2355,9 @@ impl TrackDsp {
             b.reset();
         }
         for b in &mut self.eq {
+            b.reset();
+        }
+        for b in &mut self.graphic_eq {
             b.reset();
         }
         self.chorus.reset();

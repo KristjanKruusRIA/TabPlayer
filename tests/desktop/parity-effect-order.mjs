@@ -74,9 +74,9 @@ try{
   const ratios=render=>{const levels=[1,2,3].map(k=>rms(render,0.75*k+0.01,0.75*k+0.25));return levels.slice(1).map((level,k)=>level/levels[k]);};
   const before=await exportWav('drive-then-delay'),again=await exportWav('drive-then-delay-again');
   assert.deepEqual([...before.samples[0]],[...again.samples[0]],'the same order exports the same samples');
-  // Drive sits seventh in the default chain; nine moves take it past every block up to the delay.
-  for(let move=0;move<9;move++){await panel.getByRole('button',{name:'Move Drive later',exact:true}).click();await settle();}
-  assert.deepEqual((await order()).slice(13),['Tremolo','Delay','Drive','Reverb']);
+  // Drive sits seventh in the default chain; ten moves take it past every block up to the delay.
+  for(let move=0;move<10;move++){await panel.getByRole('button',{name:'Move Drive later',exact:true}).click();await settle();}
+  assert.deepEqual((await order()).slice(14),['Tremolo','Delay','Drive','Reverb']);
   const after=await exportWav('delay-then-drive');
   const results={before:ratios(before),after:ratios(after),firstRepeat:{before:rms(before,0.76,1.0),after:rms(after,0.76,1.0)}};
   const text=JSON.stringify(results);
@@ -84,9 +84,9 @@ try{
   for(const ratio of results.after)assert.ok(ratio>0.8,`the drive after the delay squeezes the repeats up: ${text}`);
   // The panel recorded the order as a sound edit.
   const effects=(await readActiveDocument(page)).project.edits.filter(edit=>edit.type==='setTrackSound').at(-1).sound.effects;
-  assert.deepEqual(effects.order,['microphone','gate','compressor','wah','octaver','pitch','amp','cabinet','eq','vibrato','phaser','flanger','chorus','tremolo','delay','drive','reverb']);
+  assert.deepEqual(effects.order,['microphone','gate','compressor','wah','octaver','pitch','amp','cabinet','eq','graphicEq','vibrato','phaser','flanger','chorus','tremolo','delay','drive','reverb']);
   await button('Play');await waitStatus(s=>s.playing&&s.renderedFrames>4096&&s.outputPeak>.001&&!s.error);await button('Stop');
-  await button('Undo');assert.deepEqual((await order()).slice(13),['Tremolo','Drive','Delay','Reverb']);
+  await button('Undo');assert.deepEqual((await order()).slice(14),['Tremolo','Drive','Delay','Reverb']);
   assert.deepEqual(errors,[]);
   await writeFile(join(directory,'effect-order-result.json'),JSON.stringify(results,null,2));
   console.log('Effect order passed:',text);

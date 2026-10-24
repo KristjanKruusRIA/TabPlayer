@@ -16,8 +16,10 @@ export function soundPreset(presetId:TrackSound['presetId'],voiceId:string|null=
 }
 type NumericControl={key:string;label:string;min:number;max:number;step:number};
 const noSubscribe=()=>()=>{},noState=()=>null;
+/** The graphic EQ's bands, an octave apart, as their centres are named. */
+const graphicBands=['31','63','125','250','500','1k','2k','4k','8k','16k'];
 const presetIds=['gm','clean','crunch','lead','bass'] as const,presetName=(id:string)=>id==='gm'?'Bypass':id[0].toUpperCase()+id.slice(1);
-const blockNames:Record<EffectBlock,string>={microphone:'Microphone',gate:'Gate',compressor:'Compressor',wah:'Wah',octaver:'Octaver',pitch:'Pitch shift',drive:'Drive',amp:'Amp',cabinet:'Cabinet',eq:'EQ',vibrato:'Vibrato',phaser:'Phaser',flanger:'Flanger',chorus:'Chorus',tremolo:'Tremolo',delay:'Delay',reverb:'Reverb'};
+const blockNames:Record<EffectBlock,string>={microphone:'Microphone',gate:'Gate',compressor:'Compressor',wah:'Wah',octaver:'Octaver',pitch:'Pitch shift',drive:'Drive',amp:'Amp',cabinet:'Cabinet',eq:'EQ',graphicEq:'Graphic EQ',vibrato:'Vibrato',phaser:'Phaser',flanger:'Flanger',chorus:'Chorus',tremolo:'Tremolo',delay:'Delay',reverb:'Reverb'};
 const parameters:Record<EffectBlock,NumericControl[]>={
   // The sound bank's recording comes before the pedals.
   microphone:[],
@@ -29,6 +31,7 @@ const parameters:Record<EffectBlock,NumericControl[]>={
   drive:[{key:'drive',label:'Drive',min:0,max:1,step:.01},{key:'tone',label:'Tone',min:0,max:1,step:.01},{key:'levelDb',label:'Level (dB)',min:-24,max:12,step:.5}],
   amp:[{key:'drive',label:'Drive',min:0,max:1,step:.01},{key:'gainDb',label:'Gain (dB)',min:-24,max:24,step:.1}],cabinet:[],
   eq:[{key:'lowDb',label:'Low (dB)',min:-24,max:24,step:.1},{key:'midDb',label:'Mid (dB)',min:-24,max:24,step:.1},{key:'highDb',label:'High (dB)',min:-24,max:24,step:.1},{key:'midHz',label:'Mid frequency (Hz)',min:200,max:5000,step:10}],
+  graphicEq:[{key:'levelDb',label:'Level (dB)',min:-12,max:12,step:.5}],
   // Listed in the native processing order.
   vibrato:[{key:'rateHz',label:'Rate (Hz)',min:1,max:14,step:.1},{key:'depthCents',label:'Depth (cents)',min:0,max:100,step:1}],
   phaser:[{key:'rateHz',label:'Rate (Hz)',min:.05,max:5,step:.05},{key:'depth',label:'Depth',min:0,max:1,step:.01},{key:'feedback',label:'Feedback',min:0,max:.9,step:.01},{key:'mix',label:'Mix',min:0,max:1,step:.01}],
@@ -115,6 +118,7 @@ export function SoundPanel({trackId,sound,onEdit,playback,busy=false,shown=true}
       <div className="sound-block-order"><button aria-label={`Move ${blockNames[block]} earlier`} disabled={index===0} onClick={()=>move(block,-1)}>Move earlier</button><button aria-label={`Move ${blockNames[block]} later`} disabled={index===order.length-1} onClick={()=>move(block,1)}>Move later</button></div>
       {parameters[block].map(p=><label key={p.key}>{p.label}<input aria-label={`${block} ${p.label}`} type="number" disabled={block==='wah'&&p.key===(current.effects.wah.mode==='auto'?'position':'sensitivity')} min={p.min} max={p.max} step={p.step} value={Number((current.effects[block] as unknown as Record<string,unknown>)[p.key])} onChange={e=>{const value=Number(e.target.value);if(Number.isFinite(value)&&value>=p.min&&value<=p.max)fx(block,p.key,value);}}/></label>)}
       {block==='microphone'&&<><label>Microphone placement<select aria-label="Microphone placement" value={current.effects.microphone.placement} onChange={e=>fx('microphone','placement',e.target.value)}><option value="standard">Standard</option><option value="close">Close</option><option value="edge">Edge</option><option value="room">Room</option></select></label><label>Microphone output<select aria-label="Microphone output" value={current.effects.microphone.output} onChange={e=>fx('microphone','output',e.target.value)}><option value="stereo">Stereo</option><option value="mono">Mono</option></select></label></>}
+      {block==='graphicEq'&&<><div className="sound-graphic-eq" role="group" aria-label="Graphic EQ bands">{graphicBands.map((band,index)=><label key={band}>{band} Hz<input aria-label={`Graphic EQ ${band} Hz (dB)`} type="number" min={-12} max={12} step={.5} value={current.effects.graphicEq.gainsDb[index]} onChange={e=>{const value=Number(e.target.value);if(Number.isFinite(value)&&value>=-12&&value<=12)fx('graphicEq','gainsDb',current.effects.graphicEq.gainsDb.map((gain,other)=>other===index?value:gain));}}/></label>)}</div><button onClick={()=>fx('graphicEq','gainsDb',graphicBands.map(()=>0))}>Flatten graphic EQ</button></>}
       {block==='drive'&&<label>Drive model<select aria-label="Drive model" value={current.effects.drive.model} onChange={e=>fx('drive','model',e.target.value)}><option value="overdrive">Overdrive</option><option value="distortion">Distortion</option><option value="fuzz">Fuzz</option></select></label>}
       {block==='reverb'&&<label>Reverb model<select aria-label="Reverb model" value={current.effects.reverb.model} onChange={e=>fx('reverb','model',e.target.value)}><option value="room">Room</option><option value="hall">Hall</option><option value="plate">Plate</option><option value="spring">Spring</option></select></label>}
       {block==='amp'&&<label>Amp model<select value={current.effects.amp.model} onChange={e=>fx('amp','model',e.target.value)}>{['clean','crunch','lead','bass'].map(model=><option key={model}>{model}</option>)}</select></label>}

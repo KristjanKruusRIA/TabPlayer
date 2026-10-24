@@ -19,7 +19,7 @@
     "value": "088b973cea94bde876859c7e6efadb4dd23da64a",
     "accepted_source_revision": "088b973cea94bde876859c7e6efadb4dd23da64a",
     "documentation_revision": null,
-    "documentation_status": "2026-10-21 update on feat/gp8-parity: F13 missing -> partial, W05 missing -> implemented, F03/F04/D01/D02 evidence refreshed. Earlier P17/P18 checkpoint text is kept in previous_checkpoint and provenance. 2026-10-22: F17 SVG export missing -> implemented. 2026-10-22: F16 PNG export missing -> partial. 2026-10-22: D20 export file-name tokens missing -> partial. 2026-10-22: D20 one file per track added; D20 stays partial. 2026-10-22: S03 track reorder missing -> partial. 2026-10-22: S03 track duplicate added (still partial). 2026-10-22: S03 track color added (still partial). 2026-10-22: T28 wah gestures missing -> partial. 2026-10-22: T27 sustain pedal missing -> partial. 2026-10-22: F14 ASCII tablature export missing -> partial. 2026-10-22: A20 track focus missing -> partial. 2026-10-22: D10 header and footer fields missing -> partial. 2026-10-22: T05 picking and strumming patterns missing -> partial. 2026-10-22: N09 multi-voice selection ties missing -> partial. 2026-10-22: L05 score error display missing -> partial. 2026-10-22: L06 new score author defaults missing -> partial. 2026-10-22: L07 default view preferences missing -> partial. 2026-10-22: W18 command palette missing -> partial. 2026-10-23: F05 ASCII tab import missing -> partial. 2026-10-23: W21 help and update status missing -> partial. 2026-10-23: W22 expression text and action list missing -> partial. 2026-10-23: U13 instrument view selected beat, bar and next-beat focus missing -> partial. 2026-10-23: U14 left-handed neck and neck + keys view missing -> partial. 2026-10-23: A10 flanger and phaser and A11 tremolo and vibrato missing -> partial. 2026-10-23: A13 wah and auto-wah missing -> partial. 2026-10-23: A12 octaver and pitch shift missing -> partial. 2026-10-23: A05 user sound library missing -> implemented; A37 copy and paste of sounds and pedals missing -> partial. 2026-10-23: A33 sound preview during playback missing -> implemented. 2026-10-23: A07 drive families partial -> implemented. 2026-10-23: A15 reverb families partial -> implemented. 2026-10-23: A16 delay models and divisions partial -> implemented. 2026-10-24: A34 sound-bank microphone and mono/stereo missing -> implemented. 2026-10-24: A17 reorderable signal chain re-audited; stays partial.",
+    "documentation_status": "2026-10-21 update on feat/gp8-parity: F13 missing -> partial, W05 missing -> implemented, F03/F04/D01/D02 evidence refreshed. Earlier P17/P18 checkpoint text is kept in previous_checkpoint and provenance. 2026-10-22: F17 SVG export missing -> implemented. 2026-10-22: F16 PNG export missing -> partial. 2026-10-22: D20 export file-name tokens missing -> partial. 2026-10-22: D20 one file per track added; D20 stays partial. 2026-10-22: S03 track reorder missing -> partial. 2026-10-22: S03 track duplicate added (still partial). 2026-10-22: S03 track color added (still partial). 2026-10-22: T28 wah gestures missing -> partial. 2026-10-22: T27 sustain pedal missing -> partial. 2026-10-22: F14 ASCII tablature export missing -> partial. 2026-10-22: A20 track focus missing -> partial. 2026-10-22: D10 header and footer fields missing -> partial. 2026-10-22: T05 picking and strumming patterns missing -> partial. 2026-10-22: N09 multi-voice selection ties missing -> partial. 2026-10-22: L05 score error display missing -> partial. 2026-10-22: L06 new score author defaults missing -> partial. 2026-10-22: L07 default view preferences missing -> partial. 2026-10-22: W18 command palette missing -> partial. 2026-10-23: F05 ASCII tab import missing -> partial. 2026-10-23: W21 help and update status missing -> partial. 2026-10-23: W22 expression text and action list missing -> partial. 2026-10-23: U13 instrument view selected beat, bar and next-beat focus missing -> partial. 2026-10-23: U14 left-handed neck and neck + keys view missing -> partial. 2026-10-23: A10 flanger and phaser and A11 tremolo and vibrato missing -> partial. 2026-10-23: A13 wah and auto-wah missing -> partial. 2026-10-23: A12 octaver and pitch shift missing -> partial. 2026-10-23: A05 user sound library missing -> implemented; A37 copy and paste of sounds and pedals missing -> partial. 2026-10-23: A33 sound preview during playback missing -> implemented. 2026-10-23: A07 drive families partial -> implemented. 2026-10-23: A15 reverb families partial -> implemented. 2026-10-23: A16 delay models and divisions partial -> implemented. 2026-10-24: A34 sound-bank microphone and mono/stereo missing -> implemented. 2026-10-24: A17 reorderable signal chain re-audited; stays partial. 2026-10-24: A14 track graphic EQ re-audited; stays partial.",
     "provenance": "Root locally accepts P16 source 447d2a9240dc5727ff0679b5b0f84dd7107db603; delivery is pending and the source is not yet pushed at this checkpoint. The final versioned tempo report supports the bounded source/native/current Windows/GP-publication/visual scope. Proprietary GP bracket import/export and playback clipping remain unverified, and the report retains audible, platform and shipping limits. This documentation audit executes no runtime or Git/network operation. The unchanged CI checkpoint belongs to historical Library source only and supplies no P16/current-head CI proof. 2026-10-16 P17/P18 checkpoint: root locally accepts source a87bae29deb08e31a8974d6d2ed390e7b5adca0b for the declared local pitch/filter scope after the frozen 57-step functional workflow at be9e61aa2383974821e7ecf70899e7f755f74f53 and sole 17-step/four-frame targeted confirmation at a87bae29deb08e31a8974d6d2ed390e7b5adca0b. The final UI source has its own admitted diagnostic build; the coherent 2647/617 whole-suite evidence belongs to earlier product source 4a01c341eca58cb25f52c89175ba1fb8c14ee803, not a rerun at this later source. The immutable visual receipt retains inherited observer metadata; the final report binds its additive provenance corrigendum and distinguishes current source/executable/admission/resource/log identities. P17 is implemented within declared local numeric scope and P18 remains partial without vocal/center/channel separation. P16 remains reviewed partial; GP bracket import/export and playback clipping remain unverified. Physical audio, original-GP8, macOS/Linux and shipping acceptance remain separate. Independent final document/adoption review and local documentation delivery/push remain pending; no current-head CI result is supplied and the unchanged CI object remains historical Library evidence. This documentation audit executes no runtime/build, Git or network operation.",
     "previous_accepted_checkpoint": "447d2a9240dc5727ff0679b5b0f84dd7107db603",
     "ci_checkpoint": {
@@ -82,17 +82,17 @@
       "missing": 47,
       "unverified": 8
     },
-    "evidence_reviewed_total": 143,
+    "evidence_reviewed_total": 144,
     "evidence_reviewed": {
       "implemented": 44,
-      "partial": 95,
+      "partial": 96,
       "missing": 0,
       "unverified": 4
     },
-    "baseline_not_reaudited_total": 115,
+    "baseline_not_reaudited_total": 114,
     "baseline_not_reaudited": {
       "implemented": 42,
-      "partial": 22,
+      "partial": 21,
       "missing": 47,
       "unverified": 4
     },
@@ -1393,6 +1393,24 @@
       "start_line": 74,
       "end_line": 79,
       "kind": "validation_report"
+    },
+    "graphic_eq_behavior": {
+      "path": "docs/validation/2026-10-24-gp8-graphic-eq.md",
+      "start_line": 5,
+      "end_line": 18,
+      "kind": "validation_report"
+    },
+    "graphic_eq_evidence": {
+      "path": "docs/validation/2026-10-24-gp8-graphic-eq.md",
+      "start_line": 20,
+      "end_line": 88,
+      "kind": "validation_report"
+    },
+    "graphic_eq_limits": {
+      "path": "docs/validation/2026-10-24-gp8-graphic-eq.md",
+      "start_line": 90,
+      "end_line": 97,
+      "kind": "validation_report"
     }
   },
   "evidence_file_sha256": {
@@ -1477,7 +1495,8 @@
     "docs/validation/2026-10-23-gp8-reverb-models.md": "af26a526b8840e3a52d0f5addd07b7ec15c2cb5eff8cd4cbf686e3ec6555955d",
     "docs/validation/2026-10-23-gp8-delay-models.md": "8278aa25eda82d08bb3a54d05e2c110aea9e7a858c1365685b337311932b76c5",
     "docs/validation/2026-10-24-gp8-microphone.md": "c2f5a55fc89743029409e8c552c35901a9f2c311b58d9b73dfc7a24f5d6c3a34",
-    "docs/validation/2026-10-24-gp8-effect-order.md": "f940d1e43b5c8183761a489d44d69fc717752112811de6bfd96d48df57976f87"
+    "docs/validation/2026-10-24-gp8-effect-order.md": "f940d1e43b5c8183761a489d44d69fc717752112811de6bfd96d48df57976f87",
+    "docs/validation/2026-10-24-gp8-graphic-eq.md": "1f05e8613c66af0457e43eda34dcd3fff5d061c1aa670aaeb2c25db981613855"
   },
   "next_open_families": [
     {
@@ -5985,11 +6004,15 @@
       "runtime_rechecked": false,
       "historical_status": "partial",
       "current_status": "partial",
-      "assessment": "baseline_not_reaudited",
-      "current_proven_status": null,
-      "current_behavior": "Three-band track EQ only; graphic/expanded EQ and master routing absent.",
-      "remaining_gap": "Not re-audited in this delivery-progress audit. The original baseline behavior, gap and acceptance remain authoritative historical context; this is not a new current proof.",
-      "current_evidence": [],
+      "assessment": "evidence_reviewed",
+      "current_proven_status": "partial",
+      "current_behavior": "Besides the three-band EQ (low shelf, movable mid peak, high shelf), each track sound has a Graphic EQ block after it: ten one-octave bands at 31 Hz to 16 kHz, each ±12 dB, an output level of ±12 dB and Flatten, editable, reorderable, copyable and saved in sounds. Native sine sweeps show +12.00 dB at every band centre, about +2.5 dB an octave away and +0.5 dB two octaves away, widths matching a one-octave peak within 0.1 dB, a flat setting passing noise within 1e-6, exact level steps, click-free changes at 48 and 192 kHz on both edit paths, and bands above what low sample rates carry left flat; a Windows desktop WAV export shows the 1 kHz band +9.5 dB in its octave with the 125 Hz octave +0.2 dB, the 125 Hz band −7.0 dB on a low chord and a −6.00 dB level.",
+      "remaining_gap": "No master EQ or master routing (A18 is missing); fixed octave bands rather than GP8’s EQ pedal models, with no listening comparison with GP8; neighbouring bands overlap by up to about 1.5 dB and many lifted bands add headroom with no limiter; number fields rather than faders; sounds using the block cannot be opened by older builds.",
+      "current_evidence": [
+        "graphic_eq_behavior",
+        "graphic_eq_evidence",
+        "graphic_eq_limits"
+      ],
       "runtime_rechecked_by_this_audit": false
     },
     {

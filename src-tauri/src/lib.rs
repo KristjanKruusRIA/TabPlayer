@@ -24,9 +24,9 @@ use file_library::{commands::*, protected::ProtectedPaths, service::FileLibrary}
 use project::ProjectSession;
 use project::{BaseDocument, DocumentCandidate, EditCommand, Project};
 use runtime::{
-    audio_command, audio_devices, audio_prepare, audio_set_mix, audio_status, cancel_asset,
-    cancel_export, export_ascii_tab, export_audio, export_midi, export_musicxml, export_pdf,
-    export_png, export_status, export_svg, export_track_files, stage_backing,
+    audio_audition, audio_command, audio_devices, audio_prepare, audio_set_mix, audio_status,
+    cancel_asset, cancel_export, export_ascii_tab, export_audio, export_midi, export_musicxml,
+    export_pdf, export_png, export_status, export_svg, export_track_files, stage_backing,
     stage_embedded_backing,
 };
 use std::{
@@ -935,6 +935,7 @@ pub fn run() {
         export_gp,
         audio_prepare,
         audio_set_mix,
+        audio_audition,
         audio_command,
         audio_devices,
         audio_status,
@@ -1002,6 +1003,7 @@ pub fn run() {
         export_gp,
         audio_prepare,
         audio_set_mix,
+        audio_audition,
         audio_command,
         audio_devices,
         audio_status,

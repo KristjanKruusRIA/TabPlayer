@@ -19,3 +19,5 @@
 .saved-tunings-footer button:first-child{min-width:80px}
 .tuning-saved-button{display:block;margin-top:6px}
 @media(max-width:620px){.saved-tunings-body{grid-template-columns:minmax(0,1fr);padding:12px 16px}.saved-tunings-footer,.saved-tunings-dialog>header{padding:12px 16px}}
+.tuning-audition{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}
+.tuning-audition button{padding:2px 6px;font-size:.85em}

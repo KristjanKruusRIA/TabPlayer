@@ -5,6 +5,7 @@ import type { BeatTarget, EditCommand } from './project';
 import { IndexInput } from './editor/IndexInput';
 import { TechniquePanel } from './editor/TechniquePanel';
 import { StructurePanel } from './editor/StructurePanel';
+import type { TuningAudition } from './audio/audition';
 import { MeasurePanel } from './editor/MeasurePanel';
 import { EnumInput } from './editor/controls';
 import { formatPitch } from './tuning';
@@ -22,12 +23,12 @@ import { MeasureTransformPanel } from './editor/MeasureTransformPanel';
 import type { MusicSelection } from './editor/range-types';
 import './editor-panel.css';
 
-export function EditorPanel({score,target,string,fret,noteIndex,onSelectNote,busy,onSelect,onString,onFret,onEdit,musicSelection,onMusicSelection,onChord,onScales,children,practiceTools,presentationTools}: {
+export function EditorPanel({score,target,string,fret,noteIndex,onSelectNote,busy,onSelect,onString,onFret,onEdit,musicSelection,onMusicSelection,onChord,onScales,onAudition,children,practiceTools,presentationTools}: {
   score:model.Score;target:BeatTarget;string:number;fret:number;busy:boolean;
   noteIndex:number|null;onSelectNote:(index:number|null)=>void;
   onSelect:(target:BeatTarget)=>void;onString:(string:number)=>void;onFret:(fret:number)=>void;onEdit:(edit:EditCommand)=>void;
   musicSelection:MusicSelection|null;onMusicSelection:(selection:MusicSelection|null)=>void;
-  onChord:()=>void;onScales:()=>void;
+  onChord:()=>void;onScales:()=>void;onAudition?:TuningAudition;
   children?:ReactNode;
   practiceTools?:ReactNode;presentationTools?:ReactNode;
 }) {
@@ -70,7 +71,7 @@ export function EditorPanel({score,target,string,fret,noteIndex,onSelectNote,bus
   <RangePanel score={score} target={target} selection={musicSelection} busy={busy} onSelection={onMusicSelection} onEdit={onEdit}/>
   {children}
   <details><summary>Beat text</summary><fieldset disabled={busy||!beat}><label>Beat text<input value={text} onChange={e=>setText(e.target.value)}/></label><button onClick={()=>onEdit({type:'setBeatText',target,text})}>Apply beat text</button></fieldset></details>
-  <MeasurePanel score={score} target={target} string={string} busy={busy} onEdit={onEdit}/><DirectionsPanel score={score} target={target} busy={busy} onEdit={onEdit}/><StructurePanel score={score} target={target} string={string} busy={busy} onEdit={onEdit} onSelect={onSelect}/>
+  <MeasurePanel score={score} target={target} string={string} busy={busy} onEdit={onEdit}/><DirectionsPanel score={score} target={target} busy={busy} onEdit={onEdit}/><StructurePanel score={score} target={target} string={string} busy={busy} onEdit={onEdit} onSelect={onSelect} onAudition={onAudition}/>
   <BarGesturePanel score={score} track={target.track} staff={target.staff} bar={target.bar} busy={busy} onEdit={onEdit}/><LyricsPanel score={score} track={target.track} busy={busy} onEdit={onEdit}/>
   <MeasureTransformPanel score={score} bar={target.bar} busy={busy} onEdit={onEdit}/></details></section>
   <section aria-label="Practice tools"><details className="inspector-task" id={`${id}-practice`} ref={practiceTask}><summary>Practice</summary><fieldset disabled={busy}>{practiceTools??<p className="muted">Use the playback controls below the score to rehearse.</p>}</fieldset></details></section>

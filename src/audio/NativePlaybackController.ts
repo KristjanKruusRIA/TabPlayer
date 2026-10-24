@@ -1,10 +1,11 @@
 import type { AlphaTabApi, model, synth } from '@coderline/alphatab';
 import { effectiveAudioSettings, trackIdentity, type BuiltDocument } from '../engine';
-import { completeSound, defaultMix, soundProblem } from '../document-settings';
+import { completeSound, defaultEffects, defaultMix, soundProblem } from '../document-settings';
 import type { ChannelMix, EditCommand, TrackSound } from '../edit-types';
 import type { BeatTarget,ProjectView } from '../project';
 import type { MusicSelection } from '../editor/range-types';
-import type { NativeAudioBridge, NativeAudioStatus, TransportCommand } from './bridge';
+import type { AuditionNote, AuditionRequest, NativeAudioBridge, NativeAudioStatus, TransportCommand } from './bridge';
+import type { AuditionSource } from './audition';
 import { preparePlan,preparePlanFromScore } from './plan';
 import type { MeasureOccurrence,PlanNote, PlaybackPlan, PlaybackState } from './types';
 import { DEFAULT_PRACTICE,type PracticeSettings,type PracticeStatus } from './practice-types';
@@ -171,6 +172,26 @@ export class NativePlaybackController {
   }
   /** Loads the most recently requested document again, so a session change made while that load waits cannot bring back an older one. */
   private async reloadLatest(){const latest=this.requested;if(latest&&this.loaded)await this.loadDocument(latest.project,latest.built,0,latest.documentEpoch,latest.playbackResumeEpoch);}
+  /**
+   * Plays `notes` through a track's own sound without touching playback. The sound, mix and program are the ones prepare uses
+   * (including a sound being previewed); `latest` supplies a document newer than the one last loaded. It needs no prepared
+   * plan, never throws, and does nothing when the bridge cannot audition.
+   */
+  audition(source:AuditionSource,notes:AuditionNote[],durationMs:number,latest?:{project:ProjectView;built:BuiltDocument}):void {
+    try {
+      const audition=this.bridge.audition;if(this.destroyed||!audition||!notes.length)return;
+      let base:Omit<AuditionRequest,'notes'|'durationMs'>;
+      if('program' in source)base={voice:completeSound({voiceId:null,presetId:'gm',effects:defaultEffects()}),program:source.program,percussion:false,mix:defaultMix()};
+      else {
+        const document=latest??this.requested;if(!document)return;
+        const track=document.built.score.tracks.find(item=>trackIdentity(item)===source.trackId);if(!track)return;
+        const settings=effectiveAudioSettings(document.project,document.built),preview=this.preview;
+        const sound=preview?.track===source.trackId?preview.sound:settings.sounds[source.trackId]??{voiceId:null,presetId:'gm' as const,effects:defaultEffects()};
+        base={voice:completeSound(structuredClone(sound)),program:track.playbackInfo.program,percussion:track.isPercussion,mix:structuredClone(settings.mixes[source.trackId]??defaultMix())};
+      }
+      void Promise.resolve(audition.call(this.bridge,{...base,notes,durationMs})).catch(()=>{});
+    } catch {/* An audition is a courtesy; a failure never reaches the editor. */}
+  }
   resetMix(){for(const track of this.built?.score.tracks??[])this.editMix(track.index,defaultMix());}
   beforeScoreChange(notifyNative=true){this.generation=++nextGeneration;this.plan=null;this.authoredPlan=null;this.planTimingKey=null;this.notesByTrack.clear();this.noteMode='stopped';this.pendingNoteTick=undefined;this.prepared=false;this.preparing=false;this.audioSettingsKey=null;this.desiredAudioSettingsKey=null;this.mixPending=false;this.mixQueue=Promise.resolve();this.lastStatus=null;this.pendingPractice=null;this.operationError=null;if(notifyNative)this.send({type:'invalidate',generation:this.generation});const practice=idlePractice(this.practice);this.update({ready:false,playing:false,practice,practicePending:false,range:null,loop:null,speed:practice.effectiveRatio*100,metronome:this.practice.metronome.enabled,error:null});}
   setRenderedScore(score:model.Score,tracks:number[]):void{if(this.destroyed)return;const prior=this.suppressHandler;this.suppressHandler=true;try{this.view?.renderScore(score,tracks);this.view?.player?.updateSyncPoints([]);}finally{this.suppressHandler=prior;this.viewPlaying=false;}}

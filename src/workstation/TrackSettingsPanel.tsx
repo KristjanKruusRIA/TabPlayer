@@ -5,12 +5,14 @@ import type { StringCountKeep } from '../edit-types';
 import { midiPrograms } from '../midi-programs';
 import { formatTuning, parseTuning } from '../tuning';
 import { TuningInput } from '../TuningInput';
+import { trackIdentity } from '../engine';
+import type { TuningAudition } from '../audio/audition';
 import { NotationTrackControls } from '../editor/NonTabPanel';
 import { trackColorHex } from '../track-color';
 import './track-panels.css';
 
-export function TrackSettingsPanel({score,selected,busy,onEdit}: {
-  score:model.Score;selected:number;busy:boolean;onEdit:(command:EditCommand)=>void;
+export function TrackSettingsPanel({score,selected,busy,onEdit,onAudition}: {
+  score:model.Score;selected:number;busy:boolean;onEdit:(command:EditCommand)=>void;onAudition?:TuningAudition;
 }):React.JSX.Element {
   const current=score.tracks[selected];const pitches=formatTuning(current.staves[0].tuning);
   const savedName=current.staves[0].stringTuning.name;
@@ -29,7 +31,7 @@ export function TrackSettingsPanel({score,selected,busy,onEdit}: {
     <button disabled={selected===score.tracks.length-1} onClick={()=>onEdit({type:'moveTrack',track:selected,to:selected+1})}>Move track down</button>
     <button onClick={()=>onEdit({type:'duplicateTrack',track:selected})}>Duplicate track</button>
     <details><summary>Selected instrument</summary><label>Track name<input value={trackName} onChange={e=>setTrackName(e.target.value)}/></label><label>Track short name<input value={shortName} onChange={e=>setShortName(e.target.value)}/></label><label>Track MIDI instrument<select value={program} onChange={e=>setProgram(Number(e.target.value))}>{midiPrograms.map((name,index)=><option key={index} value={index}>{index+1}. {name}</option>)}</select></label><button onClick={()=>onEdit({type:'setTrackInfo',track:selected,name:trackName,shortName,program})}>Apply instrument settings</button><label>Track color<input type="color" value={color} onChange={e=>setColor(e.target.value)}/></label><button disabled={color===trackColorHex(current.color)} onClick={()=>onEdit({type:'setTrackColor',track:selected,color})}>Apply track color</button></details>
-    <TuningInput label="Tuning (notes, high to low)" presetLabel="Tuning preset" disabled={current.isPercussion||!current.staves[0].tuning.length} placeholder="E4 B3 G3 D3 A2 E2" value={tuning} tuningName={tuningName} onTuningNameChange={setTuningName} revision={current} error={tuningError} inputRef={tuningInput} onChange={notes=>{setTuning(notes);setTuningError(null);}}/>
+    <TuningInput label="Tuning (notes, high to low)" presetLabel="Tuning preset" disabled={current.isPercussion||!current.staves[0].tuning.length} placeholder="E4 B3 G3 D3 A2 E2" value={tuning} tuningName={tuningName} onTuningNameChange={setTuningName} revision={current} error={tuningError} inputRef={tuningInput} onAudition={onAudition&&((pitches,strum)=>onAudition({trackId:trackIdentity(current)},pitches,strum))} onChange={notes=>{setTuning(notes);setTuningError(null);}}/>
     {recount&&<fieldset className="string-count"><legend>{strings} to {typed} strings</legend>
       <label>Strings kept in place<select value={keep} aria-describedby="string-count-help" onChange={e=>setKeep(e.target.value as StringCountKeep)}><option value="high">High strings (change the low end)</option><option value="low">Low strings (change the high end)</option></select></label>
       <p className="muted" id="string-count-help">Notes keep their pitch. Notes on a removed or unplayable string move to a free string in the same beat; chord diagrams follow the kept strings.</p>
@@ -37,7 +39,7 @@ export function TrackSettingsPanel({score,selected,busy,onEdit}: {
     <button disabled={current.isPercussion||!current.staves[0].tuning.length} onClick={()=>applyTuning()}>{recount?'Change string count':'Apply tuning'}</button>
     <details><summary>Add instrument</summary><label>New track name<input value={name} onChange={e=>setName(e.target.value)}/></label>
       <label>MIDI instrument<select value={instrument} onChange={e=>setInstrument(Number(e.target.value))}>{midiPrograms.map((label,value)=><option key={value} value={value}>{value+1}. {label}</option>)}</select></label>
-      <TuningInput label="New track tuning" presetLabel="New track tuning preset" placeholder="G2 D2 A1 E1" value={newTuning} tuningName={newTuningName} onTuningNameChange={setNewTuningName} error={newTuningError} inputRef={newTuningInput} onChange={notes=>{setNewTuning(notes);setNewTuningError(null);}}/>
+      <TuningInput label="New track tuning" presetLabel="New track tuning preset" placeholder="G2 D2 A1 E1" value={newTuning} tuningName={newTuningName} onTuningNameChange={setNewTuningName} error={newTuningError} inputRef={newTuningInput} onAudition={onAudition&&((pitches,strum)=>onAudition({program:instrument},pitches,strum))} onChange={notes=>{setNewTuning(notes);setNewTuningError(null);}}/>
       <button onClick={()=>applyTuning(true)}>Add track</button>
     </details>
   </fieldset><NotationTrackControls busy={busy} onEdit={onEdit}/></aside>;

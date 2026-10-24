@@ -1,6 +1,7 @@
 //! Device ownership and bounded controls. Only the stream callback owns the renderer;
 //! resource work, stream creation, status events and retired allocations run elsewhere.
 use super::{
+    audition::{AuditionClip, AuditionConsumer, AuditionMixer, AuditionProducer, audition_channel},
     backing::BackingMap,
     decode::{DecodedAudio, decode_audio},
     plan::PlaybackPlan,
@@ -25,7 +26,7 @@ use std::{
     path::PathBuf,
     sync::{
         Arc, Mutex,
-        atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicU64, Ordering},
         mpsc,
     },
     thread,
@@ -118,6 +119,11 @@ pub struct NativeAudioStatus {
     pub practice: PracticeStatus,
     pub r#loop: Option<PracticeLoop>,
     pub range: Option<PlaybackSpan>,
+    /// Clips that began sounding in the callback since the process started.
+    pub audition_serial: u64,
+    /// Peak absolute sample of the latest clip's own samples, before summing with
+    /// playback, clamping or downmix.
+    pub audition_peak: f64,
 }
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(
@@ -454,6 +460,10 @@ struct SharedStatus {
     range_start: AtomicU64,
     range_end: AtomicU64,
     current_bpm: AtomicU64,
+    audition_serial: AtomicU64,
+    audition_peak: AtomicU64,
+    /// Sample rate of the open output stream; zero until one has been opened.
+    audition_rate: AtomicU32,
 }
 impl SharedStatus {
     fn new() -> Self {
@@ -497,6 +507,9 @@ impl SharedStatus {
             range_start: AtomicU64::new(0),
             range_end: AtomicU64::new(0),
             current_bpm: AtomicU64::new(0),
+            audition_serial: AtomicU64::new(0),
+            audition_peak: AtomicU64::new(0),
+            audition_rate: AtomicU32::new(0),
         }
     }
     fn read(&self) -> NativeAudioStatus {
@@ -555,6 +568,8 @@ impl SharedStatus {
             frames: self.frames.load(Ordering::Relaxed),
             peak: f64::from_bits(self.peak.load(Ordering::Relaxed)),
         };
+        // Acquire pairs with the Release increment, so a new serial never shows a stale peak.
+        let audition_serial = self.audition_serial.load(Ordering::Acquire);
         let status = NativeAudioStatus {
             range: snapshot.range,
             generation: snapshot.generation,
@@ -586,6 +601,8 @@ impl SharedStatus {
                 start_tick,
                 end_tick,
             }),
+            audition_serial,
+            audition_peak: f64::from_bits(self.audition_peak.load(Ordering::Relaxed)),
         };
         (status, snapshot)
     }
@@ -711,10 +728,25 @@ pub struct CallbackTransport {
     epoch: u64,
     frames: u64,
     peak: f64,
+    audition: AuditionMixer,
 }
 impl CallbackTransport {
     pub fn headless(rate: u32) -> Self {
         Self::new(rate, Arc::new(SharedStatus::new()))
+    }
+    /// A headless transport with its own audition queue, for tests.
+    pub fn headless_with_audition(rate: u32) -> (Self, AuditionProducer) {
+        let (producer, consumer) = audition_channel();
+        let mut transport = Self::headless(rate);
+        transport.audition.attach(consumer);
+        (transport, producer)
+    }
+    /// Hand finished audition clips to `retire` so they are freed off the audio thread.
+    pub fn retire_auditions(
+        &mut self,
+        retire: impl FnMut(Box<AuditionClip>) -> Option<Box<AuditionClip>>,
+    ) {
+        self.audition.retire(retire);
     }
     fn new(rate: u32, shared: Arc<SharedStatus>) -> Self {
         let epoch = shared.epoch.load(Ordering::Acquire);
@@ -742,6 +774,7 @@ impl CallbackTransport {
             epoch,
             frames: 0,
             peak: 0.0,
+            audition: AuditionMixer::new(rate),
         }
     }
     pub fn status(&self) -> NativeAudioStatus {
@@ -1306,6 +1339,16 @@ impl CallbackTransport {
                 .fold(0.0f64, |p, x| p.max(x.abs() as f64));
             self.peak = self.peak.max(peak);
         }
+        // Audition clips ride on top of normal playback and never touch its counters.
+        let report = self.audition.mix(output);
+        if let Some(peak) = report.peak {
+            self.shared
+                .audition_peak
+                .store(peak.to_bits(), Ordering::Relaxed);
+        }
+        if report.started {
+            self.shared.audition_serial.fetch_add(1, Ordering::Release);
+        }
         self.publish();
     }
     fn restore(&mut self, snapshot: RuntimeSnapshot) -> Result<(), String> {
@@ -1383,6 +1426,7 @@ enum CallbackCommand {
 enum Retired {
     Renderer(Box<Renderer>),
     Mix(PreparedMix),
+    Clip(Box<AuditionClip>),
 }
 struct OutputCallback {
     transport: CallbackTransport,
@@ -1463,6 +1507,16 @@ impl OutputCallback {
         for chunk in output.chunks_mut(BLOCK * channels) {
             let frames = chunk.len() / channels;
             self.transport.render_into(&mut self.scratch[..frames]);
+            let retired = &mut self.retired;
+            self.transport
+                .retire_auditions(|clip| match retired.try_push(Retired::Clip(clip)) {
+                    Ok(()) => None,
+                    Err(Retired::Clip(clip)) => Some(clip),
+                    Err(other) => {
+                        std::mem::forget(other);
+                        None
+                    }
+                });
             for (frame, source) in chunk.chunks_mut(channels).zip(&self.scratch[..frames]) {
                 for (channel, sample) in frame.iter_mut().enumerate() {
                     let value = if channels == 1 {
@@ -1507,10 +1561,19 @@ enum ManagerRequest {
     Open(OpenRequest),
     Shutdown,
 }
+/// The audition producer with the stream (epoch and rate) it feeds.
+struct AuditionSlot {
+    producer: AuditionProducer,
+    epoch: u64,
+    rate: u32,
+}
 pub struct AudioService {
     root: PathBuf,
     shared: Arc<SharedStatus>,
     control: Mutex<ControlState>,
+    /// Producer for the audition queue. Its own leaf lock, never held with `control`
+    /// by anything that waits, so an audition never queues behind a prepare.
+    audition: Mutex<Option<AuditionSlot>>,
     manager: mpsc::Sender<ManagerRequest>,
 }
 impl AudioService {
@@ -1545,8 +1608,46 @@ impl AudioService {
                 device: None,
                 next_barrier: 0,
             }),
+            audition: Mutex::new(None),
             manager,
         }
+    }
+    /// Sample rate to render an audition for, or None when no output stream has ever
+    /// opened or the device has failed. Reads atomics only.
+    pub fn audition_rate(&self) -> Option<u32> {
+        let rate = self.shared.audition_rate.load(Ordering::Acquire);
+        (rate != 0 && !self.shared.is_faulted()).then_some(rate)
+    }
+    /// Queue a finished clip for the callback. False when no stream exists or the queue is full.
+    /// Refuses clips the live stream could not sound: a replaced stream (epoch), a
+    /// faulted device, or a clip rendered for another sample rate.
+    ///
+    /// Not handled: during `SelectDevice`, while the old callback is suspended and
+    /// before `open_current` bumps the epoch, a clip is still accepted (true) and is
+    /// lost with the old stream.
+    pub fn submit_audition(&self, clip: Box<AuditionClip>) -> bool {
+        match self.audition.lock().unwrap().as_mut() {
+            Some(slot)
+                if slot.epoch == self.shared.epoch.load(Ordering::Acquire)
+                    && !self.shared.is_faulted()
+                    && clip.rate == slot.rate =>
+            {
+                slot.producer.try_push(clip).is_ok()
+            }
+            _ => false,
+        }
+    }
+    /// Test hook: attach an audition queue as if a stream at `rate` had opened.
+    #[cfg(test)]
+    pub(crate) fn attach_test_audition(&self, rate: u32) -> AuditionConsumer {
+        let (producer, consumer) = audition_channel();
+        *self.audition.lock().unwrap() = Some(AuditionSlot {
+            producer,
+            epoch: self.shared.epoch.load(Ordering::Acquire),
+            rate,
+        });
+        self.shared.audition_rate.store(rate, Ordering::Release);
+        consumer
     }
     pub fn status(&self) -> NativeAudioStatus {
         self.shared.read()
@@ -1986,6 +2087,9 @@ impl AudioService {
         let (epoch, snapshot) = self.shared.next_epoch_snapshot();
         let preserve_position = preserve && snapshot.generation == document.plan.generation;
         let mut transport = CallbackTransport::new(rate, self.shared.clone());
+        let (audition_producer, audition_consumer): (AuditionProducer, AuditionConsumer) =
+            audition_channel();
+        transport.audition.attach(audition_consumer);
         transport.duration = renderer.duration_seconds();
         transport.renderer = Some(renderer);
         transport.generation = document.plan.generation;
@@ -2027,6 +2131,12 @@ impl AudioService {
             .map_err(|_| "Audio device manager stopped.")??;
         *self.shared.device.lock().unwrap() = Some(actual_id);
         self.set_backing_duration(&document);
+        *self.audition.lock().unwrap() = Some(AuditionSlot {
+            producer: audition_producer,
+            epoch,
+            rate,
+        });
+        self.shared.audition_rate.store(rate, Ordering::Release);
         state.rate = rate;
         state.producer = Some(producer);
         state.document = Some(document);
@@ -2227,6 +2337,7 @@ mod reference_tests {
                 device: None,
                 next_barrier: 0,
             }),
+            audition: Mutex::new(None),
             manager,
         };
         let mut candidate = original.settings.clone();
@@ -2383,6 +2494,7 @@ mod reference_tests {
                 device: None,
                 next_barrier: 0,
             }),
+            audition: Mutex::new(None),
             manager,
         };
         for change in 0..5 {
@@ -3139,5 +3251,85 @@ mod tests {
             immediate.is_ok(),
             "Invalidation must interrupt preparation without waiting on its control mutex."
         );
+    }
+}
+
+#[cfg(test)]
+mod audition_callback_tests {
+    use super::*;
+
+    #[test]
+    fn submit_refuses_clips_the_live_stream_could_not_sound() {
+        let service = AudioService::new(PathBuf::new(), Arc::new(|_| {}));
+        let clip = |rate| {
+            Box::new(AuditionClip {
+                rate,
+                frames: vec![[0.1; 2]; 8],
+            })
+        };
+        assert!(!service.submit_audition(clip(48_000)), "no stream yet");
+        let mut consumer = service.attach_test_audition(48_000);
+        assert!(!service.submit_audition(clip(44_100)), "wrong rate");
+        assert!(service.submit_audition(clip(48_000)));
+        assert!(consumer.try_pop().is_some());
+        service.shared.mark_fault();
+        assert!(!service.submit_audition(clip(48_000)), "faulted device");
+        let _consumer = service.attach_test_audition(48_000);
+        service.shared.fault.store(0, Ordering::Release);
+        assert!(service.submit_audition(clip(48_000)));
+        // A newer stream epoch retires the old producer.
+        service.shared.next_epoch_snapshot();
+        assert!(!service.submit_audition(clip(48_000)), "replaced stream");
+    }
+
+    #[test]
+    fn output_callback_adds_a_clip_while_stopped_and_retires_it_off_thread() {
+        let shared = Arc::new(SharedStatus::new());
+        let mut transport = CallbackTransport::new(48_000, shared.clone());
+        let (mut producer, consumer) = audition_channel();
+        transport.audition.attach(consumer);
+        let (_controls_in, controls) = HeapRb::<CallbackCommand>::new(CONTROL_CAPACITY).split();
+        let (retired_in, mut retired_out) = HeapRb::<Retired>::new(CONTROL_CAPACITY).split();
+        let mut callback = OutputCallback {
+            transport,
+            controls,
+            retired: retired_in,
+            scratch: [[0.0; 2]; BLOCK],
+            epoch: shared.epoch.load(Ordering::Acquire),
+            suspended: false,
+        };
+        let clip = Box::new(AuditionClip {
+            rate: 48_000,
+            frames: vec![[0.5, -0.25]; 600],
+        });
+        assert!(producer.try_push(clip).is_ok());
+        let mut stereo = vec![0.0f32; 1024 * 2];
+        callback.render(&mut stereo, 2);
+        assert_eq!(&stereo[..2], &[0.5, -0.25]);
+        assert_eq!(&stereo[599 * 2..599 * 2 + 2], &[0.5, -0.25]);
+        assert_eq!(&stereo[600 * 2..600 * 2 + 2], &[0.0, 0.0]);
+        // Mono output downmixes the clip like normal playback.
+        assert!(
+            producer
+                .try_push(Box::new(AuditionClip {
+                    rate: 48_000,
+                    frames: vec![[0.5, -0.25]; 8],
+                }))
+                .is_ok()
+        );
+        let mut mono = vec![0.0f32; 16];
+        callback.render(&mut mono, 1);
+        assert_eq!(mono[0], 0.125);
+        let status = shared.snapshot().0;
+        assert_eq!(status.audition_serial, 2);
+        assert_eq!(status.audition_peak, 0.5);
+        assert!(!status.playing);
+        assert_eq!(status.rendered_frames, 0);
+        let mut retired = 0;
+        while let Some(item) = retired_out.try_pop() {
+            assert!(matches!(item, Retired::Clip(_)));
+            retired += 1;
+        }
+        assert_eq!(retired, 2);
     }
 }

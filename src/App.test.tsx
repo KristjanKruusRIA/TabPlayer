@@ -31,7 +31,7 @@ vi.mock('./bridge',async original=>({...await original<typeof import('./bridge')
 const personalLibrary=vi.hoisted(()=>({read:vi.fn(async():Promise<HarmonyLibrary>=>({format:'TabPlayerHarmonyLibrary',version:1,entries:[]})),put:vi.fn(async(entry:HarmonyLibraryEntry):Promise<HarmonyLibrary>=>({format:'TabPlayerHarmonyLibrary',version:1,entries:[entry]})),remove:vi.fn(async():Promise<HarmonyLibrary>=>({format:'TabPlayerHarmonyLibrary',version:1,entries:[]}))}));
 vi.mock('./harmony/library',async original=>({...await original<typeof import('./harmony/library')>(),readHarmonyLibrary:personalLibrary.read,putHarmonyLibraryEntry:personalLibrary.put,removeHarmonyLibraryEntry:personalLibrary.remove}));
 
-const integration=vi.hoisted(()=>({running:false,players:[] as {getState:()=>PlaybackState;publish:(patch:Partial<PlaybackState>)=>void;generation:number;built:BuiltDocument|null}[],seekToMeasure:vi.fn(),setLoop:vi.fn(),clearLoop:vi.fn(),loadDocument:vi.fn(),beforeScoreChange:vi.fn(),destroy:vi.fn(),playerOptions:vi.fn(),stop:vi.fn(),stageBacking:vi.fn<NativeAudioBridge['stageBacking']>(),commits:vi.fn(),activeNotes:vi.fn((_trackId:string)=>[]),practiceSpeed:100,practiceFixed:false,setPractice:vi.fn(),play:vi.fn(),pause:vi.fn(),playFromCursor:vi.fn(),playSelection:vi.fn(),loopSelection:vi.fn(),exportOptions:vi.fn(),exportBusy:false,exportRun:vi.fn(async(_options:unknown,_source?:unknown)=>true),exportCancel:vi.fn(async()=>{})}));
+const integration=vi.hoisted(()=>({running:false,players:[] as {getState:()=>PlaybackState;publish:(patch:Partial<PlaybackState>)=>void;generation:number;built:BuiltDocument|null}[],seekToMeasure:vi.fn(),setLoop:vi.fn(),clearLoop:vi.fn(),loadDocument:vi.fn(),beforeScoreChange:vi.fn(),destroy:vi.fn(),playerOptions:vi.fn(),stop:vi.fn(),stageBacking:vi.fn<NativeAudioBridge['stageBacking']>(),commits:vi.fn(),audition:vi.fn(),activeNotes:vi.fn((_trackId:string)=>[]),practiceSpeed:100,practiceFixed:false,setPractice:vi.fn(),play:vi.fn(),pause:vi.fn(),playFromCursor:vi.fn(),playSelection:vi.fn(),loopSelection:vi.fn(),exportOptions:vi.fn(),exportBusy:false,exportRun:vi.fn(async(_options:unknown,_source?:unknown)=>true),exportCancel:vi.fn(async()=>{})}));
 vi.mock('./audio/bridge',()=>({createDocumentAudioBridge:vi.fn(()=>({prepare:vi.fn(async()=>{}),command:vi.fn(async()=>{}),setMix:vi.fn(async()=>{}),devices:vi.fn(async()=>[]),status:vi.fn(async()=>null),subscribe:vi.fn(async()=>()=>{}),stageBacking:integration.stageBacking,stageEmbeddedBacking:vi.fn(async()=>null)} satisfies NativeAudioBridge))}));
 vi.mock('./export/bridge',()=>({createDocumentExportBridge:vi.fn(()=>({exportPdf:vi.fn(async()=>null),exportMidi:vi.fn(async()=>false),exportMusicXml:vi.fn(async()=>false),exportAsciiTab:vi.fn(async()=>false),exportSvg:vi.fn(async()=>false),exportPng:vi.fn(async()=>false),exportTrackFiles:vi.fn(async()=>false),exportAudio:vi.fn(async()=>null),status:vi.fn(async()=>null),cancel:vi.fn(async()=>{})} satisfies ExportNativeBridge))}));
 vi.mock('./export/useExportCoordinator',()=>({useExportCoordinator:(options:unknown)=>{integration.exportOptions(options);return {busy:integration.exportBusy,progress:undefined,run:integration.exportRun,cancel:integration.exportCancel};}}));
@@ -49,6 +49,7 @@ vi.mock('./audio/NativePlaybackController',()=>({NativePlaybackController:class 
   activeNotes=(trackId:string)=>integration.activeNotes(trackId);
   focus=()=>null;setFocus=async()=>{};soundPreview=()=>null;previewSound=async()=>{};
   loadDocument=async(project:unknown,built:BuiltDocument,track:number,documentEpoch:number)=>{this.built=built;integration.loadDocument(project,built,track,documentEpoch);};
+  audition=integration.audition;
   beforeScoreChange=integration.beforeScoreChange;destroy=integration.destroy;
   play=integration.play;pause=integration.pause;stop=integration.stop;seekToMeasure=integration.seekToMeasure;setSpeed=vi.fn();setLoop=integration.setLoop;clearLoop=integration.clearLoop;setMetronome=vi.fn();
   setPractice=integration.setPractice;exportPracticeRatio=()=>integration.practiceFixed?null:this.state.speed/100;
@@ -829,4 +830,38 @@ it.each(['View','dock button'] as const)('review instrument toggle shows the act
 });
 it('review instrument toggle expands an automatically collapsed retained instrument in one click',async()=>{
   const c=await setup(blankProject(),undefined,{workspaceHeight:300,instrumentVisible:true}),before=c.getState();expect(document.querySelector('.workstation-workspace')).toHaveAttribute('data-dock-collapsed','true');expect(screen.queryByRole('region',{name:'Instrument view'})).not.toBeInTheDocument();expect(testWorkspace.getState().documents[0].view.instrumentVisible).toBe(true);const show=screen.getByRole('button',{name:'Show instrument'});expect(show).toHaveAttribute('aria-pressed','false');fireEvent.click(show);expect(document.querySelector('.workstation-workspace')).toHaveAttribute('data-dock-collapsed','false');expect(screen.getByRole('region',{name:'Instrument view'})).toBeVisible();expect(screen.getByRole('button',{name:'Hide instrument'})).toHaveAttribute('aria-pressed','true');expect(c.getState()).toBe(before);expect(integration.playerOptions).toHaveBeenCalledOnce();expect(integration.destroy).not.toHaveBeenCalled();expectSilentNavigation();
+});
+
+const auditionKey='tabplayer.audition.whileEditing';
+it('plays an entered note through the addressed track at its sounding key, including capo and transposition',async()=>{
+  window.localStorage.removeItem(auditionKey);
+  const clef=buildScore(blankProject()).tracks[0].staves[0].bars[0].clef;
+  const c=await setup({...blankProject(),edits:[{type:'setStaffSettings',track:0,staff:0,settings:{tuning:[64,59,55,50,45,40],capo:2,transposition:3,displayTransposition:0,clef,showTab:true,showNotation:true}}]});
+  change('String','6');change('Fret','5');click('Set note');
+  await waitFor(()=>expect(integration.audition).toHaveBeenCalledTimes(1));
+  expect(integration.audition).toHaveBeenLastCalledWith({trackId:'base/0'},[{key:64+5+2-3,startMs:0,velocity:96}],800,expect.objectContaining({project:c.getState().snapshot.project,built:c.getState()}));
+});
+it('stays silent for rests, deletions, undo, redo and while playing',async()=>{
+  window.localStorage.removeItem(auditionKey);
+  const c=await setup();change('String','6');change('Fret','5');click('Set note');await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(1));expect(integration.audition).toHaveBeenCalledTimes(1);
+  click('Make rest');await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(0));
+  click('Undo');await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(1));
+  click('Redo');await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(0));
+  change('Fret','7');click('Set note');await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(1));expect(integration.audition).toHaveBeenCalledTimes(2);
+  click('Remove note');await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(0));click('Insert beat');click('Delete beat');
+  await new Promise(resolve=>setTimeout(resolve,20));expect(integration.audition).toHaveBeenCalledTimes(2);
+});
+it('does not audition an entered note while playback is running',async()=>{
+  window.localStorage.removeItem(auditionKey);integration.running=true;
+  const c=await setup();change('String','6');change('Fret','5');click('Set note');await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(1));
+  await new Promise(resolve=>setTimeout(resolve,20));expect(integration.audition).not.toHaveBeenCalled();
+});
+it('keeps Play notes while editing in the View menu, on by default and remembered',async()=>{
+  window.localStorage.removeItem(auditionKey);
+  const c=await setup(),toggle=()=>within(screen.getByRole('region',{name:'Workspace view'})).getByLabelText('Play notes while editing') as HTMLInputElement;
+  expect(toggle()).toBeChecked();fireEvent.click(toggle());expect(toggle()).not.toBeChecked();expect(window.localStorage.getItem(auditionKey)).toBe('off');
+  change('String','6');change('Fret','5');click('Set note');await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(1));
+  await new Promise(resolve=>setTimeout(resolve,20));expect(integration.audition).not.toHaveBeenCalled();
+  cleanup();await setup();expect(toggle()).not.toBeChecked();fireEvent.click(toggle());expect(window.localStorage.getItem(auditionKey)).toBe('on');
+  window.localStorage.removeItem(auditionKey);
 });

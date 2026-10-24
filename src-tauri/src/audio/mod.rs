@@ -1,3 +1,4 @@
+pub mod audition;
 pub mod backing;
 pub mod decode;
 pub mod device;

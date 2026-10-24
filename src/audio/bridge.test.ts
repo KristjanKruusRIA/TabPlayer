@@ -27,3 +27,14 @@ it('queues complete finite and nullable end playRange commands unchanged',async(
   await nativeAudioBridge.command(finite);await nativeAudioBridge.command(ordinary);
   expect(nativeInvoke.mock.calls).toEqual([['audio_command',{owner,command:finite}],['audio_command',{owner,command:ordinary}]]);
 });
+
+it('sends audition requests with the owner, bypassing the transport command queue',async()=>{
+  vi.resetModules();nativeInvoke.mockClear();
+  const {createDocumentAudioBridge}=await import('./bridge');const nativeAudioBridge=createDocumentAudioBridge(owner);let release!:()=>void;
+  nativeInvoke.mockImplementation((name:string,args:{command?:{type:string}})=>name==='audio_command'&&args.command?.type==='play'?new Promise<void>(resolve=>{release=resolve;}):Promise.resolve(name==='audio_audition'?{played:true}:undefined));
+  const request={voice:{voiceId:null,presetId:'clean' as const,effects:{} as never},program:24,percussion:false,mix:{gain:.8,pan:-.25,mute:true,solo:false},notes:[{key:40,startMs:0,velocity:96},{key:45,startMs:60,velocity:96}],durationMs:1500};
+  const playing=nativeAudioBridge.command({type:'play',generation:3});await Promise.resolve();
+  await expect(nativeAudioBridge.audition!(request)).resolves.toEqual({played:true});
+  expect(nativeInvoke.mock.calls).toEqual([['audio_command',{owner,command:{type:'play',generation:3}}],['audio_audition',{owner,request}]]);
+  release();await playing;
+});

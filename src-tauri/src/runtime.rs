@@ -1,6 +1,7 @@
 use crate::{
     assets::StoredAsset,
     audio::{
+        audition::{AuditionClip, AuditionRequest, AuditionResult, render_clip},
         backing::BackingMap,
         decode::{DecodedAudio, decode_audio},
         device::{
@@ -24,7 +25,11 @@ use crate::{
 };
 use std::{
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex, TryLockError,
+        atomic::{AtomicU64, Ordering},
+    },
+    time::Duration,
 };
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_dialog::DialogExt;
@@ -80,6 +85,8 @@ pub struct NativeAudio {
     pub service: AudioService,
     pub root: PathBuf,
     pub(crate) access: Mutex<()>,
+    audition_sequence: AtomicU64,
+    audition_render: Mutex<()>,
     embedded: Mutex<Option<(String, Vec<u8>)>>,
     current_backing: Mutex<Option<String>>,
     protected_paths: ProtectedPaths,
@@ -90,6 +97,8 @@ impl NativeAudio {
             service: AudioService::new(root.clone(), publish),
             root,
             access: Mutex::new(()),
+            audition_sequence: AtomicU64::new(0),
+            audition_render: Mutex::new(()),
             embedded: Mutex::new(None),
             current_backing: Mutex::new(None),
             protected_paths: ProtectedPaths::default(),
@@ -314,6 +323,84 @@ impl NativeAudio {
         }
         self.service.command(command)
     }
+
+    /// Play a short note or chord through the request's own sound. Only the workspace
+    /// lock is taken, like `Invalidate`: never `access` or the service `control` lock
+    /// that a prepare holds, and not tied to the plan generation, so an audition works
+    /// while a re-prepare is pending. A frozen workspace refuses with the same error
+    /// as the other audio work. The clip is rendered outside every lock and the owner
+    /// is checked again when it is queued.
+    ///
+    /// Requests are numbered once admitted (valid, owned, and with a stream to play
+    /// on) and rendered one at a time; a request that a newer one has overtaken stops
+    /// waiting and skips its render, and an overtaken render is dropped instead of
+    /// queued, so the latest request always wins and renders never pile up.
+    ///
+    /// Not handled (out of scope): a clip already sounding when the active document
+    /// changes plays out its few hundred milliseconds rather than being cancelled.
+    pub(crate) fn audition(
+        &self,
+        workspace: &Mutex<DocumentWorkspace>,
+        owner: &AudioOwner,
+        request: AuditionRequest,
+    ) -> Result<AuditionResult, String> {
+        self.audition_with(workspace, owner, request, |request, rate| {
+            render_clip(&self.root, request, rate)
+        })
+    }
+
+    fn check_audition_owner<'a>(
+        workspace: &'a Mutex<DocumentWorkspace>,
+        owner: &AudioOwner,
+    ) -> Result<std::sync::MutexGuard<'a, DocumentWorkspace>, String> {
+        let workspace = workspace.lock().map_err(|e| e.to_string())?;
+        Self::check_owner(&workspace, owner)?;
+        if workspace.is_frozen() {
+            return Err("The workspace is completing a session transition.".into());
+        }
+        Ok(workspace)
+    }
+
+    pub(crate) fn audition_with(
+        &self,
+        workspace: &Mutex<DocumentWorkspace>,
+        owner: &AudioOwner,
+        request: AuditionRequest,
+        render: impl FnOnce(&AuditionRequest, u32) -> Result<Box<AuditionClip>, String>,
+    ) -> Result<AuditionResult, String> {
+        request.validate()?;
+        drop(Self::check_audition_owner(workspace, owner)?);
+        let not_played = Ok(AuditionResult { played: false });
+        let Some(rate) = self.service.audition_rate() else {
+            return not_played;
+        };
+        // Only a request that could play overtakes the ones before it.
+        let sequence = self.audition_sequence.fetch_add(1, Ordering::SeqCst) + 1;
+        let superseded = || self.audition_sequence.load(Ordering::SeqCst) != sequence;
+        // An overtaken request gives up while it waits, so a stalled render holds
+        // at most one waiting thread. The lock guards no data, so poison is ignored.
+        let _rendering = loop {
+            if superseded() {
+                return not_played;
+            }
+            match self.audition_render.try_lock() {
+                Ok(guard) => break guard,
+                Err(TryLockError::Poisoned(poisoned)) => break poisoned.into_inner(),
+                Err(TryLockError::WouldBlock) => std::thread::sleep(Duration::from_millis(1)),
+            }
+        };
+        if superseded() {
+            return not_played;
+        }
+        let clip = render(&request, rate)?;
+        let workspace = Self::check_audition_owner(workspace, owner)?;
+        if superseded() {
+            return not_played;
+        }
+        let played = self.service.submit_audition(clip);
+        drop(workspace);
+        Ok(AuditionResult { played })
+    }
 }
 
 #[tauri::command]
@@ -369,6 +456,22 @@ pub async fn audio_command(
             &app.state::<Arc<Mutex<DocumentWorkspace>>>(),
             &owner,
             command,
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+#[tauri::command]
+pub async fn audio_audition(
+    owner: AudioOwner,
+    request: AuditionRequest,
+    app: AppHandle,
+) -> Result<AuditionResult, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        app.state::<NativeAudio>().audition(
+            &app.state::<Arc<Mutex<DocumentWorkspace>>>(),
+            &owner,
+            request,
         )
     })
     .await

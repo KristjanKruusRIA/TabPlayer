@@ -502,3 +502,171 @@ fn export_launch_rechecks_origin_revision_backing_and_holds_running_slot() {
     );
     assert!(!destination.exists());
 }
+
+fn audition_request() -> crate::audio::audition::AuditionRequest {
+    serde_json::from_value(serde_json::json!({
+        "voice": crate::settings::TrackSound::default(),
+        "program": 24,
+        "percussion": false,
+        "mix": {"gain": 1, "pan": 0, "mute": false, "solo": false},
+        "notes": [{"key": 40, "startMs": 0, "velocity": 100}],
+        "durationMs": 500,
+    }))
+    .unwrap()
+}
+
+#[test]
+fn audition_checks_only_the_owner_and_never_opens_a_device() {
+    let (audio, workspace, jobs) = fixture();
+    let first = workspace.lock().unwrap().active_owner().clone();
+    // No output stream has ever opened: nothing plays, nothing is opened, and a
+    // prepare in flight (the access lock) does not delay or fail the request.
+    let held = audio.access.lock().unwrap();
+    assert_eq!(
+        audio
+            .audition(&workspace, &first, audition_request())
+            .unwrap(),
+        crate::audio::audition::AuditionResult { played: false }
+    );
+    drop(held);
+    assert!(audio.service.audition_rate().is_none());
+    let desired = audio.service.status().desired_generation;
+    // The previous owner is stale once another document becomes active.
+    let second = add(&audio, &jobs, &workspace);
+    assert_eq!(
+        audio
+            .audition(&workspace, &first, audition_request())
+            .unwrap_err(),
+        "Audio owner is no longer active."
+    );
+    assert_eq!(
+        audio
+            .audition(
+                &workspace,
+                &AudioOwner {
+                    document_id: "missing".into(),
+                    activation_id: second.activation_id.clone(),
+                },
+                audition_request()
+            )
+            .unwrap_err(),
+        "Audio owner is no longer active."
+    );
+    assert!(
+        audio
+            .audition(&workspace, &second, audition_request())
+            .is_ok()
+    );
+    assert_eq!(audio.service.status().desired_generation, desired + 1);
+    // Invalid requests are refused whatever the owner.
+    let mut invalid = audition_request();
+    invalid.notes.clear();
+    assert!(audio.audition(&workspace, &second, invalid).is_err());
+}
+
+#[test]
+fn audition_renders_one_at_a_time_and_the_latest_request_wins() {
+    use crate::audio::audition::AuditionClip;
+    let (audio, workspace, _jobs) = fixture();
+    let owner = workspace.lock().unwrap().active_owner().clone();
+    let mut consumer = audio.service.attach_test_audition(48_000);
+    let clip = |frames: usize| {
+        Ok(Box::new(AuditionClip {
+            rate: 48_000,
+            frames: vec![[0.5; 2]; frames],
+        }))
+    };
+    let (started, started_rx) = mpsc::channel();
+    let (release, release_rx) = mpsc::channel::<()>();
+    // The oldest request starts rendering and stalls inside its render.
+    let first = {
+        let (audio, workspace, owner) = (audio.clone(), workspace.clone(), owner.clone());
+        thread::spawn(move || {
+            audio.audition_with(&workspace, &owner, audition_request(), |_, _| {
+                started.send(()).unwrap();
+                release_rx.recv().unwrap();
+                clip(100)
+            })
+        })
+    };
+    started_rx.recv().unwrap();
+    let wait_for = |sequence: u64| {
+        while audio
+            .audition_sequence
+            .load(std::sync::atomic::Ordering::SeqCst)
+            < sequence
+        {
+            thread::sleep(Duration::from_millis(1));
+        }
+    };
+    // Two newer requests arrive while it renders; the second overtakes the first.
+    let second = {
+        let (audio, workspace, owner) = (audio.clone(), workspace.clone(), owner.clone());
+        thread::spawn(move || {
+            audio.audition_with(&workspace, &owner, audition_request(), |_, _| clip(200))
+        })
+    };
+    wait_for(2);
+    let third = {
+        let (audio, workspace, owner) = (audio.clone(), workspace.clone(), owner.clone());
+        thread::spawn(move || {
+            audio.audition_with(&workspace, &owner, audition_request(), |_, _| clip(300))
+        })
+    };
+    wait_for(3);
+    // The overtaken middle request gives up without waiting for the stalled render.
+    assert!(!second.join().unwrap().unwrap().played);
+    // A refused request does not overtake the latest valid one.
+    let stale = AudioOwner {
+        document_id: "missing".into(),
+        activation_id: owner.activation_id.clone(),
+    };
+    assert!(
+        audio
+            .audition(&workspace, &stale, audition_request())
+            .is_err()
+    );
+    let mut invalid = audition_request();
+    invalid.notes.clear();
+    assert!(audio.audition(&workspace, &owner, invalid).is_err());
+    assert_eq!(
+        audio
+            .audition_sequence
+            .load(std::sync::atomic::Ordering::SeqCst),
+        3
+    );
+    release.send(()).unwrap();
+    // The stalled render finishes after being overtaken: dropped, never queued.
+    assert!(!first.join().unwrap().unwrap().played);
+    assert!(third.join().unwrap().unwrap().played);
+    use ringbuf::traits::Consumer;
+    assert_eq!(consumer.try_pop().unwrap().frames.len(), 300);
+    assert!(consumer.try_pop().is_none());
+}
+
+#[test]
+fn a_panicking_audition_render_does_not_block_later_auditions() {
+    use crate::audio::audition::AuditionClip;
+    let (audio, workspace, _jobs) = fixture();
+    let owner = workspace.lock().unwrap().active_owner().clone();
+    let _consumer = audio.service.attach_test_audition(48_000);
+    let panicked = {
+        let (audio, workspace, owner) = (audio.clone(), workspace.clone(), owner.clone());
+        thread::spawn(move || {
+            audio.audition_with(&workspace, &owner, audition_request(), |_, _| {
+                panic!("render failed")
+            })
+        })
+    };
+    assert!(panicked.join().is_err());
+    assert!(audio.audition_render.is_poisoned());
+    let played = audio
+        .audition_with(&workspace, &owner, audition_request(), |_, _| {
+            Ok(Box::new(AuditionClip {
+                rate: 48_000,
+                frames: vec![[0.5; 2]; 100],
+            }))
+        })
+        .unwrap();
+    assert!(played.played);
+}

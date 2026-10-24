@@ -851,6 +851,23 @@ fn clean_freeze_rejects_new_audio_work_but_keeps_owner_invalidate_pause_stop() {
             .unwrap_err()
             .contains("transition")
     );
+    // An audition is new audio work too: refused with the same transition error.
+    let audition: crate::audio::audition::AuditionRequest =
+        serde_json::from_value(serde_json::json!({
+            "voice": crate::settings::TrackSound::default(),
+            "program": 24,
+            "percussion": false,
+            "mix": {"gain": 1, "pan": 0, "mute": false, "solo": false},
+            "notes": [{"key": 40, "startMs": 0, "velocity": 100}],
+            "durationMs": 500,
+        }))
+        .unwrap();
+    assert!(
+        audio
+            .audition(&workspace, &owner, audition)
+            .unwrap_err()
+            .contains("transition")
+    );
     for command in [
         TransportCommand::Play { generation },
         TransportCommand::PlayRange {

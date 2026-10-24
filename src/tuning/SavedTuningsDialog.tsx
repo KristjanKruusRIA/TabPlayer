@@ -2,6 +2,7 @@ import { useEffect,useMemo,useRef,useState,type KeyboardEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { formatTuning,parseTuning } from '../tuning';
 import { tuningPresets } from '../tuning-presets';
+import { AuditionButtons } from './AuditionButtons';
 import { isXmlText,newTuningId,putTuningLibraryEntry,readTuningLibrary,removeTuningLibraryEntry,subscribeTuningLibrary,tuningNameError,type SavedTuning } from './library';
 import './saved-tunings-dialog.css';
 
@@ -15,7 +16,7 @@ const parsed=(text:string):{notes:number[]}|{error:string}=>{try{return {notes:p
 const same=(a:readonly number[],b:readonly number[])=>a.length===b.length&&a.every((pitch,index)=>pitch===b[index]);
 
 /** Mounted only while open; closing or unmounting discards every late library response. */
-export function SavedTuningsDialog({notes,name,onUse,onClose}:{notes:string;name:string;onUse:(notes:string,name:string)=>void;onClose:()=>void}) {
+export function SavedTuningsDialog({notes,name,onUse,onClose,onAudition}:{notes:string;name:string;onUse:(notes:string,name:string)=>void;onClose:()=>void;onAudition?:(pitches:number[],strum:boolean)=>void}) {
   const [entries,setEntries]=useState<SavedTuning[]>([]),[loaded,setLoaded]=useState(false),[readError,setReadError]=useState(''),[error,setError]=useState(''),[pending,setPending]=useState(false);
   const [selection,setSelection]=useState<Identity|null>(null),[detailNotes,setDetailNotes]=useState(notes),[detailName,setDetailName]=useState(name);
   // details counts selections and detail edits, so a library response that settles after the user moved on leaves them alone.
@@ -75,6 +76,7 @@ export function SavedTuningsDialog({notes,name,onUse,onClose}:{notes:string;name
         <p className="muted" id="saved-tuning-name-help">{trimmed&&nameProblem?nameProblem:'A name is needed to save. Using a tuning does not require one.'}</p>
         <label>Saved tuning pitches (notes, high to low)<input value={detailNotes} aria-invalid={'error' in result?true:undefined} aria-describedby="saved-tuning-pitch-help" onChange={e=>{details.current++;setDetailNotes(e.target.value);setDetailName('');setSelection(null);setError('');}}/></label>
         <p className={'error' in result?'saved-tuning-problem':'muted'} id="saved-tuning-pitch-help">{'error' in result?result.error:`${result.notes.length} strings. Built-in tunings cannot be changed; save a copy to keep your own.`}</p>
+        {onAudition&&'notes' in result&&<AuditionButtons pitches={result.notes} onAudition={onAudition}/>}
         <div className="saved-tunings-actions">
           <button type="button" disabled={!canSaveNew} aria-disabled={pending||undefined} onClick={saveNew}>Save as new</button>
           <button type="button" disabled={!canSaveChanges} aria-disabled={pending||undefined} onClick={saveChanges}>Save changes</button>

@@ -60,13 +60,38 @@ block!(Chorus {
     // Quarter notes per cycle when the rate follows the tempo; 0 for the free rate.
     sync_quarter_notes
 });
-block!(Wah {
-    mode: String = "manual".into(),
-    position: f64 = 0.5,
-    resonance: f64 = 0.5,
-    sensitivity: f64 = 0.5,
-    mix: f64 = 1.0
-});
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Wah {
+    pub enabled: bool,
+    /// Classic, vintage, wide or bass. Sounds saved before the other models load as the classic, which is not written.
+    #[serde(default = "classic_wah", skip_serializing_if = "is_classic_wah")]
+    pub model: String,
+    pub mode: String,
+    pub position: f64,
+    pub resonance: f64,
+    pub sensitivity: f64,
+    pub mix: f64,
+}
+impl Default for Wah {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            model: classic_wah(),
+            mode: "manual".into(),
+            position: 0.5,
+            resonance: 0.5,
+            sensitivity: 0.5,
+            mix: 1.0,
+        }
+    }
+}
+fn classic_wah() -> String {
+    "classic".into()
+}
+fn is_classic_wah(model: &String) -> bool {
+    model == "classic"
+}
 block!(Octaver {
     octave_down: f64 = 0.5,
     two_octaves_down: f64 = 0.0,
@@ -272,6 +297,19 @@ fn modulation_hz(rate_hz: f64, sync: f64, bpm: f64, low: f64, high: f64) -> f64 
 /// Moves a delay swing toward its target by at most 0.03 frames a frame, a pitch bend under half a semitone.
 fn slew(current: f64, target: f64) -> f64 {
     current + (target - current).clamp(-0.03, 0.03)
+}
+const WAH_MODELS: [&str; 4] = ["classic", "vintage", "wide", "bass"];
+/// A wah model's sweep from heel to toe in Hz, and its peak's damping as `1 / (base + span × resonance)`.
+fn wah_model(model: &str) -> (f64, f64, f64, f64) {
+    match model {
+        // A vintage pedal's narrower, vocal sweep with a sharper peak.
+        "vintage" => (450.0, 1_600.0, 3.0, 10.0),
+        // A modern pedal's wide sweep with a broader peak.
+        "wide" => (250.0, 3_500.0, 1.5, 6.0),
+        // A bass wah's low sweep.
+        "bass" => (120.0, 1_000.0, 2.0, 6.0),
+        _ => (350.0, 2_200.0, 2.0, 8.0),
+    }
 }
 /// The wah's pedal position, from heel (0) to toe (1): the manual setting, or the playing level in auto mode.
 fn wah_target(wah: &Wah, envelope: f64) -> f64 {
@@ -1078,6 +1116,9 @@ impl FxSettings {
         }
         if !["manual", "auto"].contains(&self.wah.mode.as_str()) {
             return Err("Unknown wah mode.".into());
+        }
+        if !WAH_MODELS.contains(&self.wah.model.as_str()) {
+            return Err("Unknown wah model.".into());
         }
         if !["sine", "square"].contains(&self.tremolo.shape.as_str()) {
             return Err("Unknown tremolo shape.".into());
@@ -1968,10 +2009,31 @@ impl TrackDsp {
                         );
                         // The pedal glides with a 15 ms time constant, so edits and mode changes sweep instead of jumping.
                         self.wah_position += (goal - self.wah_position) * glide;
-                        // A band-pass from 350 Hz at the heel to 2.2 kHz at the toe, passing its centre at unity.
-                        let hz = 350.0 * (2_200.0f64 / 350.0).powf(self.wah_position);
+                        // A band-pass across the model's sweep, 350 Hz at the heel to 2.2 kHz at the toe for the
+                        // classic, passing its centre at unity.
+                        let position = self.wah_position;
+                        let sweep = |wah: &Wah| {
+                            let (heel, toe, base, span) = wah_model(&wah.model);
+                            (heel * (toe / heel).powf(position), base, span)
+                        };
+                        let (to_hz, base, span) = sweep(&f.wah);
+                        let (hz, k) = if p.wah.model == f.wah.model || t >= 1.0 {
+                            (
+                                to_hz,
+                                1.0 / (base + span * lerp(p.wah.resonance, f.wah.resonance)),
+                            )
+                        } else {
+                            // Changing model moves the centre in octaves and the damping evenly over the crossfade.
+                            let (from_hz, from_base, from_span) = sweep(&p.wah);
+                            (
+                                from_hz * (to_hz / from_hz).powf(t),
+                                1.0 / lerp(
+                                    from_base + from_span * p.wah.resonance,
+                                    base + span * f.wah.resonance,
+                                ),
+                            )
+                        };
                         let g = (std::f64::consts::PI * hz.min(self.rate * 0.45) / self.rate).tan();
-                        let k = 1.0 / (2.0 + 8.0 * lerp(p.wah.resonance, f.wah.resonance));
                         let a1 = 1.0 / (1.0 + g * (g + k));
                         let a2 = g * a1;
                         let mix = lerp(p.wah.mix, f.wah.mix) as f32;

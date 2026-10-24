@@ -21,7 +21,7 @@ export const defaultEffects = (): FxSettings => ({
   delay:{enabled:false,model:'digital',quarterNotes:1,feedback:.25,mix:.15},reverb:{enabled:false,model:'room',room:.5,damping:.5,mix:.12},
   vibrato:{enabled:false,rateHz:5,depthCents:20},phaser:{enabled:false,rateHz:.5,depth:.7,feedback:.3,stages:4,mix:.5},
   flanger:{enabled:false,rateHz:.25,depthMs:2,feedback:.5,mix:.5},tremolo:{enabled:false,rateHz:5,depth:.5,shape:'sine'},
-  wah:{enabled:false,mode:'manual',position:.5,resonance:.5,sensitivity:.5,mix:1},
+  wah:{enabled:false,model:'classic',mode:'manual',position:.5,resonance:.5,sensitivity:.5,mix:1},
   octaver:{enabled:false,octaveDown:.5,twoOctavesDown:0,direct:1},pitch:{enabled:false,semitones:12,mix:1},drive:{enabled:false,model:'overdrive',drive:.5,tone:.5,levelDb:0},microphone:{enabled:false,placement:'standard',output:'stereo'},
   graphicEq:{enabled:false,gainsDb:[0,0,0,0,0,0,0,0,0,0],levelDb:0},
 });
@@ -40,10 +40,10 @@ export const chainOrder=(effects:FxSettings):EffectBlock[]=>{
 /** Whether `order` names every block once, leaving out only blocks added after it, or is empty for the default order. */
 const validOrder=(order:unknown)=>Array.isArray(order)&&(order.length===0||order.every(name=>effectBlocks.includes(name))&&effectBlocks.every(block=>{const count=order.filter(name=>name===block).length;return count===1||count===0&&laterBlocks.includes(block);}));
 /** Adds the effect blocks a pedalboard saved before them lacks, switched off at their defaults, and reads a reverb or
- * delay saved before its models as the original room reverb or digital delay. */
+ * delay or wah saved before its models as the original room reverb, digital delay or classic wah. */
 const completeEffects=(saved:FxSettings):FxSettings=>{
   const effects={...defaultEffects(),...saved} as unknown as Record<string,unknown>;
-  for(const [block,model] of [['reverb','room'],['delay','digital']]){
+  for(const [block,model] of [['reverb','room'],['delay','digital'],['wah','classic']]){
     const settings=effects[block] as {model?:unknown}|undefined;
     if(settings&&typeof settings==='object'&&!Array.isArray(settings)&&settings.model===undefined)effects[block]={...settings,model};
   }
@@ -75,7 +75,7 @@ const effectRules:Record<EffectBlock,Record<string,FieldRule>>={
   amp:{model:one('clean','crunch','lead','bass'),drive:unit,gainDb:range(-24,24),bassDb:tone,midDb:tone,trebleDb:tone,presenceDb:tone},cabinet:{model:one('open','closed','bass')},
   eq:{lowDb:range(-24,24),midDb:range(-24,24),highDb:range(-24,24),midHz:range(200,5000)},
   chorus:{rateHz:range(.1,8),depthMs:range(0,20),mix:unit,syncQuarterNotes:sync},
-  wah:{mode:one('manual','auto'),position:unit,resonance:unit,sensitivity:unit,mix:unit},
+  wah:{model:one('classic','vintage','wide','bass'),mode:one('manual','auto'),position:unit,resonance:unit,sensitivity:unit,mix:unit},
   octaver:{octaveDown:unit,twoOctavesDown:unit,direct:unit},pitch:{semitones:range(-24,24),mix:unit},
   drive:{model:one('overdrive','distortion','fuzz'),drive:unit,tone:unit,levelDb:range(-24,12)},
   microphone:{placement:one('standard','close','edge','room'),output:one('stereo','mono')},

@@ -9,7 +9,7 @@ import type {TrackSound} from '../edit-types';
 afterEach(cleanup);
 
 it('defaults match the native wah and are off',()=>{
-  expect(defaultEffects().wah).toEqual({enabled:false,mode:'manual',position:.5,resonance:.5,sensitivity:.5,mix:1});
+  expect(defaultEffects().wah).toEqual({enabled:false,model:'classic',mode:'manual',position:.5,resonance:.5,sensitivity:.5,mix:1});
 });
 
 it('fills the wah into sounds saved before it and refuses unknown modes',()=>{

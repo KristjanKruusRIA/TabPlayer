@@ -47,7 +47,7 @@ export interface FxSettings {
   phaser: {enabled:boolean;rateHz:number;depth:number;feedback:number;stages:2|4|6|8;mix:number;syncQuarterNotes?:number};
   flanger: {enabled:boolean;rateHz:number;depthMs:number;feedback:number;mix:number;syncQuarterNotes?:number};
   tremolo: {enabled:boolean;rateHz:number;depth:number;shape:'sine'|'square';syncQuarterNotes?:number};
-  wah: {enabled:boolean;mode:'manual'|'auto';position:number;resonance:number;sensitivity:number;mix:number};
+  wah: {enabled:boolean;model:'classic'|'vintage'|'wide'|'bass';mode:'manual'|'auto';position:number;resonance:number;sensitivity:number;mix:number};
   octaver: {enabled:boolean;octaveDown:number;twoOctavesDown:number;direct:number};
   pitch: {enabled:boolean;semitones:number;mix:number};
   drive: {enabled:boolean;model:'overdrive'|'distortion'|'fuzz';drive:number;tone:number;levelDb:number};

@@ -33,6 +33,7 @@ import { useExportCoordinator } from './export/useExportCoordinator';
 import type { ExportOptions,ExportSelection } from './export/types';
 import { Transport } from './Transport';
 import { LiveInstrumentView } from './instruments/LiveInstrumentView';
+import { followEntry, type EntryFollow } from './instruments/entry';
 import type { MusicSelection } from './editor/range-types';
 import { rangeFromBeats,selectionForTrack } from './editor/range-selection';
 import { planMeasureMap } from './editor/measures';
@@ -157,12 +158,15 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   const indexed=location.staff.isPercussion||!location.staff.tuning.length;
   const noteIndex=selectedNoteIndex!==null&&location.beat?.notes[selectedNoteIndex]?selectedNoteIndex:null;
   const string=Math.max(1,Math.min(selectedString,location.staff.tuning.length));
+  // A click in the instrument view leaves its clicked fret as the entry fret, even when that note was just removed.
+  const entryFret=useRef<{string:number;fret:number;score:model.Score}|null>(null);
   useEffect(()=>{
-    setFret(location.beat?.notes.find(n=>n.string===string)?.fret ?? 0);digits.current.text='';
+    const kept=entryFret.current;entryFret.current=null;
+    setFret(kept&&kept.score===state.score&&kept.string===string?kept.fret:location.beat?.notes.find(n=>n.string===string)?.fret ?? 0);digits.current.text='';
   },[state.score,target.track,target.staff,target.bar,target.voice,target.beat,string]);
   const act=(job: Promise<unknown>)=>{void job.catch(()=>{});};
   const change=(job:Promise<unknown>)=>{const before=state.score;setClipboardError(null);act(job.then(()=>{const score=controller.getState().score;setSelection(old=>repairSelection(score,followSelectedTrack(before,score,old)));editorSelection(null);}));};
-  const edit=(command:EditCommand)=>{
+  const edit=(command:EditCommand,after?:(score:model.Score)=>void)=>{
     setClipboardError(null);
     const oldCount=state.score.masterBars.length;
     const wasPlaying=player?.getState().playing??false;
@@ -170,11 +174,17 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
       const score=controller.getState().score,map=command.type==='insertMeasures'||command.type==='removeMeasures'?planMeasureMap(oldCount,command):null;
       setSelection(old=>map?repairMeasureSelection(score,old,map):repairSelection(score,command.type==='moveTrack'?{...old,track:movedTrackIndex(old.track,command)}:command.type==='duplicateTrack'?{...old,track:command.track+1}:old));
       if(command.type==='pasteMusic')setNoteIndex(null);
+      after?.(score);
       if(!('selection'in command)||command.type==='eraseSelection')editorSelection(null);
       // Hearing an entered note is a courtesy: only note-setting edits, and only while nothing is playing.
       if(auditionEditsNow.current&&player&&!wasPlaying&&!player.getState().playing){const heard=editAudition(score,command);if(heard){const current=controller.getState();player.audition({trackId:trackIdentity(score.tracks[heard.track])},heard.notes,heard.durationMs,{project:current.snapshot.project,built:current});}}
     }));
   };
+  const instrumentEdit=(command:EditCommand,follow:EntryFollow)=>edit(command,score=>{
+    const next=followEntry(score,target,follow);
+    if(next.string!==undefined){setString(next.string);setFret(next.fret??0);entryFret.current={string:next.string,fret:next.fret??0,score};}
+    if(next.noteIndex!==undefined)setNoteIndex(next.noteIndex);
+  });
   const auditionTuning:TuningAudition=(source,pitches,strum)=>{const heard=tuningAudition(pitches,strum);player?.audition(source,heard.notes,heard.durationMs);};
   const copyMusic=(mode:ClipboardMode,cut=false)=>{
     if(!musicSelection||controlsBusy)return;setClipboardError(null);
@@ -326,7 +336,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   const sourceMetadataStatus=sourceAssetId&&sourceDurationMs===null?<div className="backing-waveform-state">{currentMetadata?.error?<><p role="alert">{currentMetadata.error}</p><button onClick={()=>setSourceRetry(value=>value+1)}>Retry</button></>:<p role="status">Loading backing timing…</p>}</div>:null;
   const select=(next:BeatTarget,s=string,index?:number)=>{
     if (!validSelectionIndices(next) || !Number.isInteger(s)) return;
-    const fixed=repairSelection(state.score,next);setSelection(fixed);
+    entryFret.current=null;const fixed=repairSelection(state.score,next);setSelection(fixed);
     setNoteIndex(index!==undefined&&Number.isInteger(index)&&index>=0?index:null);
     const beat=describeSelection(state.score,fixed).beat;
     const count=state.score.tracks[fixed.track].staves[fixed.staff].tuning.length;
@@ -445,7 +455,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
         <nav aria-label="Dock views"><button aria-pressed={!instrumentVisible&&dockMode==='overview'} onClick={()=>chooseDock('overview')}>Overview</button><button aria-pressed={!instrumentVisible&&dockMode==='mixer'} onClick={()=>chooseDock('mixer')}>Mixer</button><button aria-pressed={instrumentVisible} onClick={()=>chooseDock('instrument')}>Instrument</button><button aria-pressed={!instrumentVisible&&dockMode==='backing'} onClick={()=>chooseDock('backing')}>Backing</button><button className="dock-collapse" aria-label={dockCollapsed?'Expand bottom dock':'Hide bottom dock'} onClick={()=>dockCollapsed?setDockForced(true):hideDock()}>{dockCollapsed?'Expand':'Hide'}</button></nav>
         <div className="workstation-dock-content" hidden={dockCollapsed}>
           <div className="workstation-dock-tracks" hidden={instrumentVisible||dockMode==='backing'}><TrackPanel score={state.score} selected={target.track} busy={controlsBusy} player={player} view={dockMode==='mixer'?'mixer':'overview'} target={target} onExitOverview={()=>scorePane.current?.focus()} onSelectPosition={(track,bar)=>select({track,staff:0,bar,voice:0,beat:0})} onSelect={track=>select({track,staff:0,bar:target.bar,voice:0,beat:0},state.score.tracks[track].staves[0].tuning.length)}/></div>
-          {instrumentVisible&&<LiveInstrumentView score={state.score} track={target.track} staff={target.staff} target={target} player={player}/>}
+          {instrumentVisible&&<LiveInstrumentView score={state.score} track={target.track} staff={target.staff} target={target} player={player} onEdit={instrumentEdit} busy={controlsBusy} string={string}/>}
           <div className="workstation-dock-backing" hidden={instrumentVisible||dockMode!=='backing'}>
             {waveformEnabled&&!referenceVisible&&sourceMetadataStatus}
             {originalBacking&&!currentEmbedded?.source?<div className="backing-waveform-state">{currentEmbedded?.error?<><p role="alert">{currentEmbedded.error}</p><button onClick={()=>setEmbeddedRetry(value=>value+1)}>Retry</button></>:<p role="status">Loading waveform…</p>}</div>:<BackingWaveform document={{documentId:state.documentId,revision:state.revision}} source={waveformSource} filename={state.settings.backing?state.snapshot.project.assets[state.settings.backing.assetId]?.filename??'Backing audio':state.snapshot.project.base.kind==='file'?state.snapshot.project.base.filename:'Backing audio'} bridge={waveformBridge} timeline={backingTimeline} selection={backingSelection} settings={state.settings.backing} effectiveBacking={audioSettings.backing} reference={reference} scoreTimeMs={playbackState?.ready&&!playbackState.error&&!['countIn','ended'].includes(playbackState.practice.phase)?playbackState.time:null} enabled={waveformEnabled} busy={controlsBusy} beginOperation={beginEditorOperation} isCurrent={waveformCurrent} onEdit={command=>controller.edit(command)}/>}

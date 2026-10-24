@@ -865,3 +865,48 @@ it('keeps Play notes while editing in the View menu, on by default and remembere
   cleanup();await setup();expect(toggle()).not.toBeChecked();fireEvent.click(toggle());expect(window.localStorage.getItem(auditionKey)).toBe('on');
   window.localStorage.removeItem(auditionKey);
 });
+
+const origin={track:0,staff:0,bar:0,voice:0,beat:0};
+const instrumentEditKey='tabplayer.instrument.editNotes';
+const seededProject=():Project=>({...blankProject(),edits:[{type:'setNote',target:origin,string:6,fret:5}]});
+async function editingInstrument(){
+  window.localStorage.removeItem(auditionKey);window.localStorage.removeItem(instrumentEditKey);
+  const c=await setup(seededProject(),undefined,{instrumentVisible:true});
+  expect(screen.getByRole('img',{name:'Guitar fretboard'})).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('checkbox',{name:'Click to edit notes'}));
+  expect(screen.getByRole('group',{name:'Guitar fretboard'})).toBeInTheDocument();
+  return c;
+}
+it('turns an instrument click into one native edit that undo and redo restore',async()=>{
+  const c=await editingInstrument();
+  expect(screen.getByLabelText('Show')).toBeDisabled();expect(window.localStorage.getItem(instrumentEditKey)).toBe('on');
+  fireEvent.click(screen.getByRole('button',{name:/^String 5, fret 2 /}));
+  await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(2));
+  expect(integration.commits).toHaveBeenCalledTimes(1);expect(c.getState().snapshot.project.edits.at(-1)).toEqual({type:'setNote',target:origin,string:5,fret:2});
+  // The clicked string and fret become the entry position.
+  await waitFor(()=>expect(screen.getByLabelText('Fret')).toHaveValue(2));
+  fireEvent.click(screen.getByRole('button',{name:/^Remove string 5, fret 2 /}));
+  await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(1));
+  expect(integration.commits).toHaveBeenCalledTimes(2);expect(c.getState().snapshot.project.edits.at(-1)).toEqual({type:'removeNote',target:origin,string:5});
+  await waitFor(()=>expect(screen.getByLabelText('Fret')).toHaveValue(2));
+  click('Undo');await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(2));
+  click('Undo');await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(1));
+  click('Redo');await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(2));
+  expect(integration.commits).toHaveBeenCalledTimes(2);
+});
+it('shows a refused instrument edit as an alert without adding history',async()=>{
+  const c=await editingInstrument(),before=c.getState().snapshot;
+  vi.spyOn(documentBridges.get(c.getState().documentId)!,'applyEdit').mockRejectedValueOnce(new Error('The edit was refused.'));
+  fireEvent.click(screen.getByRole('button',{name:/^String 4, fret 1 /}));
+  await waitFor(()=>expect(screen.getByRole('alert')).toHaveTextContent('refused'));
+  expect(c.getState().snapshot.project.edits).toEqual(before.project.edits);expect(currentBeat(c).notes).toHaveLength(1);expect(integration.commits).not.toHaveBeenCalled();
+});
+it('auditions a note written from the instrument view and stays silent for a removal',async()=>{
+  const c=await editingInstrument();
+  fireEvent.click(screen.getByRole('button',{name:/^String 5, fret 2 /}));
+  await waitFor(()=>expect(integration.audition).toHaveBeenCalledTimes(1));
+  expect(integration.audition).toHaveBeenLastCalledWith({trackId:'base/0'},[{key:59+2,startMs:0,velocity:96}],800,expect.anything());
+  fireEvent.click(screen.getByRole('button',{name:/^Remove string 5, fret 2 /}));
+  await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(1));
+  await new Promise(resolve=>setTimeout(resolve,20));expect(integration.audition).toHaveBeenCalledTimes(1);
+});

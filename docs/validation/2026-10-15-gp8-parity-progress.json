@@ -19,7 +19,7 @@
     "value": "088b973cea94bde876859c7e6efadb4dd23da64a",
     "accepted_source_revision": "088b973cea94bde876859c7e6efadb4dd23da64a",
     "documentation_revision": null,
-    "documentation_status": "2026-10-21 update on feat/gp8-parity: F13 missing -> partial, W05 missing -> implemented, F03/F04/D01/D02 evidence refreshed. Earlier P17/P18 checkpoint text is kept in previous_checkpoint and provenance. 2026-10-22: F17 SVG export missing -> implemented. 2026-10-22: F16 PNG export missing -> partial. 2026-10-22: D20 export file-name tokens missing -> partial. 2026-10-22: D20 one file per track added; D20 stays partial. 2026-10-22: S03 track reorder missing -> partial. 2026-10-22: S03 track duplicate added (still partial). 2026-10-22: S03 track color added (still partial). 2026-10-22: T28 wah gestures missing -> partial. 2026-10-22: T27 sustain pedal missing -> partial. 2026-10-22: F14 ASCII tablature export missing -> partial. 2026-10-22: A20 track focus missing -> partial. 2026-10-22: D10 header and footer fields missing -> partial. 2026-10-22: T05 picking and strumming patterns missing -> partial. 2026-10-22: N09 multi-voice selection ties missing -> partial. 2026-10-22: L05 score error display missing -> partial. 2026-10-22: L06 new score author defaults missing -> partial. 2026-10-22: L07 default view preferences missing -> partial. 2026-10-22: W18 command palette missing -> partial. 2026-10-23: F05 ASCII tab import missing -> partial. 2026-10-23: W21 help and update status missing -> partial. 2026-10-23: W22 expression text and action list missing -> partial. 2026-10-23: U13 instrument view selected beat, bar and next-beat focus missing -> partial. 2026-10-23: U14 left-handed neck and neck + keys view missing -> partial. 2026-10-23: A10 flanger and phaser and A11 tremolo and vibrato missing -> partial. 2026-10-23: A13 wah and auto-wah missing -> partial. 2026-10-23: A12 octaver and pitch shift missing -> partial. 2026-10-23: A05 user sound library missing -> implemented; A37 copy and paste of sounds and pedals missing -> partial. 2026-10-23: A33 sound preview during playback missing -> implemented. 2026-10-23: A07 drive families partial -> implemented. 2026-10-23: A15 reverb families partial -> implemented. 2026-10-23: A16 delay models and divisions partial -> implemented. 2026-10-24: A34 sound-bank microphone and mono/stereo missing -> implemented. 2026-10-24: A17 reorderable signal chain re-audited; stays partial. 2026-10-24: A14 track graphic EQ re-audited; stays partial. 2026-10-24: A10 and A11 modulation tempo sync re-audited; both stay partial. 2026-10-24: A06 amp and cabinet controls re-audited with a new tone stack; stays partial. 2026-10-24: A04 factory sound catalog re-audited; partial to implemented. 2026-10-24: A37 duplicate pedals re-audited; partial to implemented. 2026-10-24: A13 wah models re-audited; stays partial. 2026-10-24: F22 AIFF audio export re-audited; missing to implemented. 2026-10-24: F23 normalized audio export re-audited; missing to partial. 2026-10-24: F21 FLAC audio export re-audited; missing to implemented. 2026-10-24: S14 string count change re-audited; missing to implemented. 2026-10-24: S15 saved personal tunings re-audited; missing to implemented. 2026-10-24: S16 tuning audition and E17 edit audition re-audited; missing to implemented.",
+    "documentation_status": "2026-10-21 update on feat/gp8-parity: F13 missing -> partial, W05 missing -> implemented, F03/F04/D01/D02 evidence refreshed. Earlier P17/P18 checkpoint text is kept in previous_checkpoint and provenance. 2026-10-22: F17 SVG export missing -> implemented. 2026-10-22: F16 PNG export missing -> partial. 2026-10-22: D20 export file-name tokens missing -> partial. 2026-10-22: D20 one file per track added; D20 stays partial. 2026-10-22: S03 track reorder missing -> partial. 2026-10-22: S03 track duplicate added (still partial). 2026-10-22: S03 track color added (still partial). 2026-10-22: T28 wah gestures missing -> partial. 2026-10-22: T27 sustain pedal missing -> partial. 2026-10-22: F14 ASCII tablature export missing -> partial. 2026-10-22: A20 track focus missing -> partial. 2026-10-22: D10 header and footer fields missing -> partial. 2026-10-22: T05 picking and strumming patterns missing -> partial. 2026-10-22: N09 multi-voice selection ties missing -> partial. 2026-10-22: L05 score error display missing -> partial. 2026-10-22: L06 new score author defaults missing -> partial. 2026-10-22: L07 default view preferences missing -> partial. 2026-10-22: W18 command palette missing -> partial. 2026-10-23: F05 ASCII tab import missing -> partial. 2026-10-23: W21 help and update status missing -> partial. 2026-10-23: W22 expression text and action list missing -> partial. 2026-10-23: U13 instrument view selected beat, bar and next-beat focus missing -> partial. 2026-10-23: U14 left-handed neck and neck + keys view missing -> partial. 2026-10-23: A10 flanger and phaser and A11 tremolo and vibrato missing -> partial. 2026-10-23: A13 wah and auto-wah missing -> partial. 2026-10-23: A12 octaver and pitch shift missing -> partial. 2026-10-23: A05 user sound library missing -> implemented; A37 copy and paste of sounds and pedals missing -> partial. 2026-10-23: A33 sound preview during playback missing -> implemented. 2026-10-23: A07 drive families partial -> implemented. 2026-10-23: A15 reverb families partial -> implemented. 2026-10-23: A16 delay models and divisions partial -> implemented. 2026-10-24: A34 sound-bank microphone and mono/stereo missing -> implemented. 2026-10-24: A17 reorderable signal chain re-audited; stays partial. 2026-10-24: A14 track graphic EQ re-audited; stays partial. 2026-10-24: A10 and A11 modulation tempo sync re-audited; both stay partial. 2026-10-24: A06 amp and cabinet controls re-audited with a new tone stack; stays partial. 2026-10-24: A04 factory sound catalog re-audited; partial to implemented. 2026-10-24: A37 duplicate pedals re-audited; partial to implemented. 2026-10-24: A13 wah models re-audited; stays partial. 2026-10-24: F22 AIFF audio export re-audited; missing to implemented. 2026-10-24: F23 normalized audio export re-audited; missing to partial. 2026-10-24: F21 FLAC audio export re-audited; missing to implemented. 2026-10-24: S14 string count change re-audited; missing to implemented. 2026-10-24: S15 saved personal tunings re-audited; missing to implemented. 2026-10-24: S16 tuning audition and E17 edit audition re-audited; missing to implemented. 2026-10-24: U12 instrument view note entry re-audited; missing to implemented.",
     "provenance": "Root locally accepts P16 source 447d2a9240dc5727ff0679b5b0f84dd7107db603; delivery is pending and the source is not yet pushed at this checkpoint. The final versioned tempo report supports the bounded source/native/current Windows/GP-publication/visual scope. Proprietary GP bracket import/export and playback clipping remain unverified, and the report retains audible, platform and shipping limits. This documentation audit executes no runtime or Git/network operation. The unchanged CI checkpoint belongs to historical Library source only and supplies no P16/current-head CI proof. 2026-10-16 P17/P18 checkpoint: root locally accepts source a87bae29deb08e31a8974d6d2ed390e7b5adca0b for the declared local pitch/filter scope after the frozen 57-step functional workflow at be9e61aa2383974821e7ecf70899e7f755f74f53 and sole 17-step/four-frame targeted confirmation at a87bae29deb08e31a8974d6d2ed390e7b5adca0b. The final UI source has its own admitted diagnostic build; the coherent 2647/617 whole-suite evidence belongs to earlier product source 4a01c341eca58cb25f52c89175ba1fb8c14ee803, not a rerun at this later source. The immutable visual receipt retains inherited observer metadata; the final report binds its additive provenance corrigendum and distinguishes current source/executable/admission/resource/log identities. P17 is implemented within declared local numeric scope and P18 remains partial without vocal/center/channel separation. P16 remains reviewed partial; GP bracket import/export and playback clipping remain unverified. Physical audio, original-GP8, macOS/Linux and shipping acceptance remain separate. Independent final document/adoption review and local documentation delivery/push remain pending; no current-head CI result is supplied and the unchanged CI object remains historical Library evidence. This documentation audit executes no runtime/build, Git or network operation.",
     "previous_accepted_checkpoint": "447d2a9240dc5727ff0679b5b0f84dd7107db603",
     "ci_checkpoint": {
@@ -77,28 +77,28 @@
       "unverified": 8
     },
     "current_dispositions": {
-      "implemented": 94,
+      "implemented": 95,
       "partial": 116,
-      "missing": 40,
+      "missing": 39,
       "unverified": 8
     },
-    "evidence_reviewed_total": 153,
+    "evidence_reviewed_total": 154,
     "evidence_reviewed": {
-      "implemented": 52,
+      "implemented": 53,
       "partial": 97,
       "missing": 0,
       "unverified": 4
     },
-    "baseline_not_reaudited_total": 105,
+    "baseline_not_reaudited_total": 104,
     "baseline_not_reaudited": {
       "implemented": 42,
       "partial": 19,
-      "missing": 40,
+      "missing": 39,
       "unverified": 4
     },
-    "status_changed_total": 115,
+    "status_changed_total": 116,
     "transition_counts": {
-      "missing -> implemented": 34,
+      "missing -> implemented": 35,
       "missing -> partial": 72,
       "partial -> implemented": 9
     }
@@ -1609,6 +1609,24 @@
       "start_line": 74,
       "end_line": 80,
       "kind": "validation_report"
+    },
+    "instrument_entry_behavior": {
+      "path": "docs/validation/2026-10-24-gp8-instrument-entry.md",
+      "start_line": 5,
+      "end_line": 24,
+      "kind": "validation_report"
+    },
+    "instrument_entry_evidence": {
+      "path": "docs/validation/2026-10-24-gp8-instrument-entry.md",
+      "start_line": 26,
+      "end_line": 53,
+      "kind": "validation_report"
+    },
+    "instrument_entry_limits": {
+      "path": "docs/validation/2026-10-24-gp8-instrument-entry.md",
+      "start_line": 73,
+      "end_line": 78,
+      "kind": "validation_report"
     }
   },
   "evidence_file_sha256": {
@@ -1705,7 +1723,8 @@
     "docs/validation/2026-10-24-gp8-flac-export.md": "595182bde56909177ac7c8d29a3f668df5f1d7280ccfb86c4068fe78799963db",
     "docs/validation/2026-10-24-gp8-string-count.md": "6f112ccc9049407bc2744b57a2c6d94aaffe9b41ed49f7725bb084cb4b1b51e2",
     "docs/validation/2026-10-24-gp8-saved-tunings.md": "7dc6055804760810b9f4f5bb71078e1f1351dba40d52512851befac1884dbceb",
-    "docs/validation/2026-10-24-gp8-note-audition.md": "93df669829de3a0d1b607f0fb93bd77bfde4eedac876d89d948fb12b9b520034"
+    "docs/validation/2026-10-24-gp8-note-audition.md": "93df669829de3a0d1b607f0fb93bd77bfde4eedac876d89d948fb12b9b520034",
+    "docs/validation/2026-10-24-gp8-instrument-entry.md": "f7ce291bfbc188810e53397d4257d5731c4541fa0b8de751b0f0895fc3a483d5"
   },
   "next_open_families": [
     {
@@ -9316,12 +9335,16 @@
       "acceptance_required": "Write/delete fretted/keyboard/percussion notes directly with history.",
       "runtime_rechecked": false,
       "historical_status": "missing",
-      "current_status": "missing",
-      "assessment": "baseline_not_reaudited",
-      "current_proven_status": null,
-      "current_behavior": "Read-only props and SVG groups; no edit callback or clickable note targets.",
-      "remaining_gap": "Not re-audited in this delivery-progress audit. The original baseline behavior, gap and acceptance remain authoritative historical context; this is not a new current proof.",
-      "current_evidence": [],
+      "current_status": "implemented",
+      "assessment": "evidence_reviewed",
+      "current_proven_status": "implemented",
+      "current_behavior": "An opt-in Click to edit notes mode turns the instrument view into an entry surface for the selected beat: fretboard strings and frets, keyboard keys and drum pieces become named buttons that write or delete notes, each as one existing undoable edit with the usual refusals and edit audition. The keyboard writes pitched notes with transposition or picks the lowest free string and fret on fretted tracks; drum pieces use the track's table or the standard plain hit. A Windows desktop run entered, refretted and deleted fretted, pitched and drum notes with exact undo/redo and exported GP read-back.",
+      "remaining_gap": "Edits apply to the selected beat only (no beat insertion, duration change or auto-advance); empty placeholder bars cannot be written; one note per click with no chord stamping or dragging; a track's own drum table is searched in file order.",
+      "current_evidence": [
+        "instrument_entry_behavior",
+        "instrument_entry_evidence",
+        "instrument_entry_limits"
+      ],
       "runtime_rechecked_by_this_audit": false
     },
     {

@@ -1,6 +1,6 @@
 import { model, Settings } from '@coderline/alphatab';
 import type { EditCommand, StaffSettings, StringCountKeep } from '../edit-types';
-import { getHarmonyChord, setHarmonyChordSource } from '../harmony/chord-source';
+import { getHarmonyChord, setHarmonyChordSource, validateHarmonyChord } from '../harmony/chord-source';
 import { enumValue, integer, staffAt, trackAt, validateCapacity } from './common';
 import { allNotes, captureNoteLinks, detachNote, restoreNoteLinks } from './links';
 import { scoreFromJson } from '../model-clone';
@@ -32,70 +32,82 @@ function keptIndex(index:number,from:number,to:number,keep:StringCountKeep) {
   const mapped=keep==='high'?index:index+to-from;return mapped>=0&&mapped<to?mapped:null;
 }
 const maxRelocatedFret=24;
+type Place={string:number;fret:number};
+const linked=(note:model.Note)=>!!(note.harmonicType||note.tieOrigin||note.tieDestination||note.slideTarget||note.slideOrigin||note.hammerPullOrigin||note.hammerPullDestination||note.slurOrigin||note.slurDestination);
+/** Places one beat's notes on the new strings, or returns null. A note stays on its kept string when the refretted
+ * fret is playable: up to fret 24, or its own fret if already higher. Other notes take a free string at the same
+ * pitch, the lowest fret first; dead notes have no pitch and keep their fret. With `flexible`, notes on kept strings
+ * may also move so that every note fits; linked and harmonic notes never move. */
+function placeBeat(notes:model.Note[],kept:(note:model.Note)=>Place|null,choices:(note:model.Note)=>Place[],flexible:boolean,where:string):Map<model.Note,Place>|null {
+  const planned=new Map<model.Note,Place>(),options=new Map<model.Note,Place[]>();
+  for(const note of notes){
+    const place=kept(note),stays=place!==null&&place.fret>=0&&place.fret<=Math.max(maxRelocatedFret,note.fret)&&(!note.harmonicType||place.fret===note.fret);
+    if(stays&&(!flexible||linked(note))){planned.set(note,place);continue;}
+    if(linked(note))throw new Error(`The linked or harmonic note at ${where} would have to move to another string.`);
+    options.set(note,[...(stays?[place]:[]),...choices(note).filter(choice=>choice.string!==place?.string)]);
+  }
+  const used=new Set([...planned.values()].map(place=>place.string)),assigned=new Map<number,model.Note>();
+  const assign=(note:model.Note,visited:Set<number>):boolean=>{
+    for(const choice of options.get(note)!){
+      if(used.has(choice.string)||visited.has(choice.string))continue;visited.add(choice.string);
+      const previous=assigned.get(choice.string);
+      if(previous&&!assign(previous,visited))continue;
+      assigned.set(choice.string,note);planned.set(note,choice);return true;
+    }
+    return false;
+  };
+  for(const note of options.keys())if(!assign(note,new Set()))return null;
+  return planned;
+}
 /** Changes a track's string count. Notes keep their sounding pitch: on their kept string when the fret stays
- * playable, otherwise on a free string of the same beat; chord diagrams follow the kept strings. */
+ * playable, otherwise on a free string of the same beat; chord diagrams follow the kept strings. Everything is
+ * planned and checked before the score changes. */
 function setStringCount(track:model.Track,tuning:number[],keep:StringCountKeep) {
   validateStringCount(tuning,keep);
   const staves=track.staves;
   if(track.isPercussion||staves.some(staff=>staff.isPercussion||!staff.tuning.length))throw new Error('Only stringed guitar or bass tracks have strings to add or remove.');
   if(staves.some(staff=>staff.tuning.length===tuning.length))throw new Error('The string count is unchanged; use Apply tuning to retune.');
-  const moves:{note:model.Note;string:number;fret:number}[]=[];
+  const moves:({note:model.Note}&Place)[]=[],to=tuning.length,open=(string:number)=>tuning[to-string];
   for(const staff of staves){
-    const from=staff.tuning.length,to=tuning.length,open=(string:number)=>tuning[to-string];
+    const from=staff.tuning.length,pitch=(note:model.Note)=>staff.tuning[from-note.string]+note.fret;
+    const kept=(note:model.Note):Place|null=>{const index=keptIndex(from-note.string,from,to,keep);if(index===null)return null;const string=to-index;return {string,fret:note.isDead?note.fret:pitch(note)-open(string)};};
+    const choices=(note:model.Note)=>Array.from({length:to},(_,i)=>to-i).map(string=>({string,fret:note.isDead?Math.min(note.fret,maxRelocatedFret):pitch(note)-open(string)})).filter(choice=>choice.fret>=0&&choice.fret<=maxRelocatedFret).sort((a,b)=>a.fret-b.fret);
     for(const bar of staff.bars)for(const voice of bar.voices)for(const beat of voice.beats){
-      const planned=new Map<model.Note,{string:number;fret:number}>(),used=new Set<number>();
-      const notes=beat.notes.filter(note=>note.string>0);
-      for(const note of notes){
-        const index=keptIndex(from-note.string,from,to,keep);if(index===null)continue;
-        const string=to-index,fret=note.fret+staff.tuning[from-note.string]-open(string);
-        if(fret>=0&&fret<=127&&(!note.harmonicType||fret===note.fret)){planned.set(note,{string,fret});used.add(string);}
-      }
-      const displaced=new Map<model.Note,{string:number;fret:number}[]>();
-      for(const note of notes){
-        if(planned.has(note))continue;
-        const where=`bar ${bar.index+1}, beat ${beat.index+1}`;
-        if(note.harmonicType||note.tieOrigin||note.tieDestination||note.slideTarget||note.slideOrigin||note.hammerPullOrigin||note.hammerPullDestination||note.slurOrigin||note.slurDestination)throw new Error(`The linked or harmonic note at ${where} would have to move to another string.`);
-        const pitch=staff.tuning[from-note.string]+note.fret;
-        displaced.set(note,Array.from({length:to},(_,i)=>to-i).filter(string=>!used.has(string)).map(string=>({string,fret:pitch-open(string)})).filter(choice=>choice.fret>=0&&choice.fret<=maxRelocatedFret).sort((a,b)=>a.fret-b.fret));
-      }
-      // Augment a matching of movable notes only; retained placements stay fixed.
-      const assigned=new Map<number,model.Note>();
-      const assign=(note:model.Note,visited:Set<number>):boolean=>{
-        for(const choice of displaced.get(note)!){
-          if(visited.has(choice.string))continue;visited.add(choice.string);
-          const previous=assigned.get(choice.string);
-          if(previous&&!assign(previous,visited))continue;
-          assigned.set(choice.string,note);planned.set(note,choice);return true;
-        }
-        return false;
-      };
-      for(const note of displaced.keys())if(!assign(note,new Set()))throw new Error(`The note at bar ${bar.index+1}, beat ${beat.index+1} has no playable string in the new tuning.`);
+      const notes=beat.notes.filter(note=>note.string>0),where=`bar ${bar.index+1}, beat ${beat.index+1}`;
+      const planned=placeBeat(notes,kept,choices,false,where)??placeBeat(notes,kept,choices,true,where);
+      if(!planned)throw new Error(`A note at ${where} has no playable string in the new tuning.`);
       for(const [note,place] of planned)moves.push({note,...place});
     }
   }
+  // A tie, slide or hammer-on joins a note to the next note on its string. The change is refused only for a link that
+  // holds now and would not afterwards, so a link a file already held some other way is left as it was.
   const proposed=new Map(moves.map(move=>[move.note,move])),lookup=new Map(allNotes(track.score).map(note=>[note.id,note]));
-  const noteString=(note:model.Note)=>proposed.get(note)?.string??note.string;
-  for(const link of captureNoteLinks(track.score)){
-    if(link.kind==='slur')continue;
-    const from=lookup.get(link.from)!,to=lookup.get(link.to)!;
-    if(!proposed.has(from)&&!proposed.has(to))continue;
+  const holds=(from:model.Note,to:model.Note,stringOf:(note:model.Note)=>number)=>{
     const staff=from.beat.voice.bar.staff,voice=from.beat.voice.index;
     let next:model.Note|undefined;
     for(let bar=from.beat.voice.bar.index;bar<staff.bars.length&&!next;bar++)for(let beat=bar===from.beat.voice.bar.index?from.beat.index+1:0;beat<(staff.bars[bar].voices[voice]?.beats.length??0)&&!next;beat++)
-      next=staff.bars[bar].voices[voice].beats[beat].notes.find(note=>!note.isDead&&noteString(note)===noteString(from));
-    if(next!==to||noteString(from)!==noteString(to)||link.kind==='tie'&&from.realValue!==to.realValue)throw new Error('The edit would break a forward, next-note relationship on this string or staff.');
+      next=staff.bars[bar].voices[voice].beats[beat].notes.find(note=>!note.isDead&&stringOf(note)===stringOf(from));
+    return next===to&&stringOf(from)===stringOf(to);
+  };
+  for(const link of captureNoteLinks(track.score)){
+    if(link.kind==='slur')continue;
+    const from=lookup.get(link.from)!,to=lookup.get(link.to)!;
+    if(holds(from,to,note=>note.string)&&!holds(from,to,note=>proposed.get(note)?.string??note.string))
+      throw new Error(`The edit would break the next-note relationship from bar ${from.beat.voice.bar.index+1}, beat ${from.beat.index+1} on its string.`);
   }
-  for(const {note,string,fret} of moves){note.string=string;note.fret=fret;}
+  const chords:{chord:model.Chord;strings:number[];source:ReturnType<typeof getHarmonyChord>}[]=[];
   for(const staff of staves){
-    const from=staff.tuning.length,to=tuning.length;
+    const from=staff.tuning.length;
     for(const chord of staff.chords?.values()??[]){
       if(chord.strings.length!==from)continue;
       const value=getHarmonyChord(chord),remap=<T,>(values:T[],empty:T)=>Array.from({length:to},(_,index)=>{const old=keep==='high'?index:index-to+from;return old>=0&&old<from?values[old]:empty;});
-      chord.strings=remap(chord.strings,-1);
-      setHarmonyChordSource(chord,{...value,frets:[...chord.strings],fingers:remap(value.fingers,-2)});
+      const strings=remap(chord.strings,-1),source={...value,frets:[...strings],fingers:remap(value.fingers,-2)};
+      validateHarmonyChord(source);chords.push({chord,strings,source});
     }
-    staff.stringTuning.tunings=[...tuning];staff.stringTuning.name='';
   }
+  for(const {note,string,fret} of moves){note.string=string;note.fret=fret;}
+  for(const {chord,strings,source} of chords){chord.strings=strings;setHarmonyChordSource(chord,source);}
+  for(const staff of staves){staff.stringTuning.tunings=[...tuning];staff.stringTuning.name='';}
 }
 export function applyStructureEdit(score:model.Score,command:EditCommand,_editIndex:number):boolean {
   switch(command.type) {

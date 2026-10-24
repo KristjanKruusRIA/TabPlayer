@@ -118,7 +118,7 @@ export async function runStringCountAcceptance({buildPath}={}){
   const healthy=()=>{assert.deepEqual(result.pageErrors,[],'Page error');assert.deepEqual(result.fallbacks,[],'Tauri transport fallback');};
   const inspect=()=>{const actual=JSON.parse(ps(`${ownedScript}if($null -eq $p){'null'}else{@{pid=$p.Id;path=$p.Path;startTicks=$p.StartTime.ToUniversalTime().Ticks.ToString()}|ConvertTo-Json -Compress}`));if(actual)assertStringCountIdentity(identity,actual);return actual;};
   const owned=()=>{healthy();assert.ok(identity&&inspect(),'Owned process exited');assert.equal(hashFile(packet.executable),packet.executableSha256.toLowerCase(),'Executable bytes changed');};
-  const poll=async(read,predicate,label)=>{const until=performance.now()+30000;do{const value=await read();if(predicate(value))return value;await sleep(50);}while(performance.now()<until);throw Error(`Timed out: ${label}`);};
+  const poll=async(read,predicate,label)=>{const until=performance.now()+30000;let value;do{value=await read();if(predicate(value))return value;await sleep(50);}while(performance.now()<until);throw Error(`Timed out: ${label}: ${JSON.stringify(value)}`);};
   const listeners=()=>JSON.parse(ps(`${ownedScript}if($null -eq $p){throw 'Owned process exited'};$rows=@();foreach($port in @(Get-NetTCPConnection -State Listen -LocalPort 9223 -ErrorAction SilentlyContinue)){$chain=@();$cursor=[int]$port.OwningProcess;for($depth=0;$depth -lt 20 -and $cursor -gt 0;$depth++){$child=Get-CimInstance Win32_Process -Filter ('ProcessId = '+$cursor);if($null -eq $child){break};$chain+=@{pid=[int]$child.ProcessId;parent=[int]$child.ParentProcessId;commandLine=$child.CommandLine};if([int]$child.ProcessId -eq $p.Id){break};$cursor=[int]$child.ParentProcessId};$rows+=@{owner=[int]$port.OwningProcess;chain=$chain}};ConvertTo-Json -InputObject @($rows) -Depth 6 -Compress`));
   try{
     const fixture=await buildStringCountFixture();writeFileSync(inputPath,fixture.bytes,{flag:'wx'});writeFileSync(oraclePath,JSON.stringify(fixture.oracle,null,2),{flag:'wx'});result.inputs={inputPath,inputSha256:hashFile(inputPath),oraclePath,oracleSha256:hashFile(oraclePath)};
@@ -139,7 +139,7 @@ export async function runStringCountAcceptance({buildPath}={}){
     const button=async name=>{owned();await ui.clickWorkstationButton(page,name);await idle();};
     await page.locator('.app-shell').waitFor();observers=true;step('Install passive native observer',await page.evaluate(installStringCountObserver));
     const library=page.getByRole('dialog',{name:'Library',exact:true});await library.getByRole('heading',{name:'Welcome to TabPlayer',exact:true}).waitFor();owned();await library.getByRole('button',{name:'Close',exact:true}).click();await library.waitFor({state:'hidden'});await idle();
-    await button('Open');await page.locator('[aria-label="Music notation"] svg').first().waitFor();await native();
+    const previous=(await workspace()).active;await button('Open');await page.locator('[aria-label="Music notation"] svg').first().waitFor();await native();
     const initial=await record(),owner=(await workspace()).active;assert.equal(initial.snapshot.project.base.sha256,result.inputs.inputSha256);assert.deepEqual(initial.snapshot.project.edits,[]);assert.equal(initial.revision,0);assert.equal(initial.snapshot.canUndo,false);assert.equal(initial.snapshot.canRedo,false);assert.equal(initial.snapshot.dirty,false);
     const {importer,Settings}=await import('@coderline/alphatab');const load=bytes=>importer.ScoreLoader.loadScoreFromBytes(bytes,new Settings());
     const exportMusic=async(state,label)=>{
@@ -156,9 +156,18 @@ export async function runStringCountAcceptance({buildPath}={}){
     assert.match((await page.getByRole('alert').allTextContents()).join(' '),/no playable string/);assert.deepEqual(await record(),beforeRefusal,'Refusal must be atomic');assert.deepEqual(await native(),nativeBefore,'Refusal preserves native preparation');await exportMusic('seven','bass-refused');step('Low B0 removal refused atomically',{record:beforeRefusal});
     await change('G2 D2 A1 E1 B0','low');await checkRecord(4,[commandG,commandB]);await exportMusic('five','bass-five');
     await button('Undo');await checkRecord(5,[commandG],commandB);await exportMusic('seven','bass-undo');await button('Redo');await checkRecord(6,[commandG,commandB]);await exportMusic('five','bass-redo');
-    const evidence=await page.evaluate(()=>({calls:window.__stringCountAcceptance.calls,failures:window.__stringCountAcceptance.failures}));assert.deepEqual(evidence.failures,[]);assert.deepEqual(evidence.calls.map(row=>row.command),['apply_edit','undo_edit','redo_edit','apply_edit','undo_edit','redo_edit']);
-    for(const row of evidence.calls){assert.equal(row.settled,true);assert.equal(row.ok,true);assert.equal(row.result.documentId,initial.documentId);assert.ok(row.result.revision>row.args.document.revision);}
-    assert.deepEqual(evidence.calls.filter(row=>row.command==='apply_edit').map(row=>row.args.command),[commandG,commandB]);result.nativeCommands=evidence;step('All exact exports, paused readiness and acknowledged native edits passed',{exportCount:result.exports.length});healthy();
+    const evidence=await page.evaluate(()=>({calls:window.__stringCountAcceptance.calls,failures:window.__stringCountAcceptance.failures}));assert.deepEqual(evidence.failures,[]);// Audio commands are observed too. Every call settles. At most one fails: the audio owner from before Open, refused
+    // before the first edit once the opened document's owner has taken over. Every current-owner audio command
+    // succeeds, and each edit is followed by at least one.
+    for(const row of evidence.calls)assert.equal(row.settled,true);
+    const refused=evidence.calls.flatMap((row,index)=>row.ok?[]:[index]),firstEdit=evidence.calls.findIndex(row=>row.command==='apply_edit');assert.ok(refused.length<=1,'At most one refused native command');
+    for(const index of refused){const row=evidence.calls[index];assert.ok(index<firstEdit);assert.equal(row.command,'audio_command');assert.equal(row.result,'Audio owner is no longer active.');assert.deepEqual(row.args.owner,previous);assert.notDeepEqual(previous,owner);}
+    const current=row=>row.command==='audio_command'&&row.args.owner.documentId===owner.documentId&&row.args.owner.activationId===owner.activationId;
+    for(const row of evidence.calls.filter(current))assert.equal(row.ok,true);
+    evidence.calls.forEach((row,index)=>{if(row.command!=='audio_command'){const after=evidence.calls.slice(index+1),until=after.findIndex(next=>next.command!=='audio_command');assert.ok((until<0?after:after.slice(0,until)).some(current),'Audio re-prepares after '+row.command);}});
+    const edits=evidence.calls.filter(row=>row.command!=='audio_command');assert.deepEqual(edits.map(row=>row.command),['apply_edit','undo_edit','redo_edit','apply_edit','undo_edit','redo_edit']);
+    for(const row of edits){assert.equal(row.settled,true);assert.equal(row.ok,true);assert.equal(row.result.documentId,initial.documentId);assert.ok(row.result.revision>row.args.document.revision);}
+    assert.deepEqual(edits.filter(row=>row.command==='apply_edit').map(row=>row.args.command),[commandG,commandB]);result.nativeCommands=evidence;step('All exact exports, paused readiness and acknowledged native edits passed',{exportCount:result.exports.length});healthy();
   }catch(error){failure=error;result.error={message:String(error),stack:error.stack};}
   finally{
     const cleanup=async(name,action)=>{try{await action();result.cleanup.push({name,ok:true});}catch(error){failure??=error;result.cleanup.push({name,ok:false,error:String(error)});}};

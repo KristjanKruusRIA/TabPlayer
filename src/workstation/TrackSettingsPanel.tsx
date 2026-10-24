@@ -15,7 +15,7 @@ export function TrackSettingsPanel({score,selected,busy,onEdit}: {
   const current=score.tracks[selected];const pitches=formatTuning(current.staves[0].tuning);
   const [tuning,setTuning]=useState(pitches),[tuningError,setTuningError]=useState<string|null>(null);useEffect(()=>{setTuning(pitches);setTuningError(null);},[score,pitches,selected]);
   const [trackName,setTrackName]=useState(current.name),[shortName,setShortName]=useState(current.shortName),[program,setProgram]=useState(current.playbackInfo.program);
-  const [color,setColor]=useState(trackColorHex(current.color)),[keep,setKeep]=useState<StringCountKeep>('high');
+  const [color,setColor]=useState(trackColorHex(current.color)),[keep,setKeep]=useState<StringCountKeep>('high');useEffect(()=>setKeep('high'),[selected]);
   const strings=current.staves[0].tuning.length,typed=(()=>{try{return parseTuning(tuning).length;}catch{return null;}})(),recount=!!strings&&typed!==null&&typed!==strings;
   useEffect(()=>{setTrackName(current.name);setShortName(current.shortName);setProgram(current.playbackInfo.program);setColor(trackColorHex(current.color));},[score,current]);
   const [name,setName]=useState('Bass');const [instrument,setInstrument]=useState(33);const [newTuning,setNewTuning]=useState('G2 D2 A1 E1');

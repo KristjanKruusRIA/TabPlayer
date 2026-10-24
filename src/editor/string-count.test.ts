@@ -183,3 +183,45 @@ it('plans every staff before committing and preserves the source project when a 
   expect(()=>previewEdit(project,edit,current)).toThrow('no playable string');expect(()=>buildDocument({...project,edits:[edit]})).toThrow('no playable string');
   expect(JSON.stringify(project)).toBe(original);expect(json(current.score)).toBe(currentJson);
 });
+
+/** Bar 1, beat 1 of a standard-tuned score holding only the given string:fret notes. */
+function beatWith(values:[number,number][]) {
+  const score=music(),beat=score.tracks[0].staves[0].bars[0].voices[0].beats[0];for(const note of [...beat.notes])beat.removeNote(note);
+  for(const [string,fret] of values){const note=new model.Note();note.string=string;note.fret=fret;beat.addNote(note);}
+  score.finish(new Settings());return {score,beat};
+}
+const placed=(beat:model.Beat)=>beat.notes.map(note=>`${note.string}:${note.fret}`);
+
+it('moves a note off its kept string when that lets every note of the beat fit',()=>{
+  // Removing the low E: the A2 on it needs the A string, which its kept D3 neighbour can leave for the open D string.
+  const {score,beat}=beatWith([[1,5],[2,5]]),before=beat.notes.map(note=>note.realValue);
+  applyStructureEdit(score,command(standard.slice(0,5)),0);
+  expect(beat.notes.map(note=>note.realValue)).toEqual(before);
+  expect(placed(beat)).toEqual(['1:0','2:0']);
+});
+
+it('leaves a link the file already held off the next-note pattern when nothing it joins changes string',()=>{
+  // A hammer-on onto a tapped note on the next string up, as alphaTab reads from GP files.
+  const {score,beat}=beatWith([[3,5]]),next=score.tracks[0].staves[0].bars[0].voices[0].beats[1],tapped=new model.Note();
+  tapped.string=4;tapped.fret=7;next.addNote(tapped);score.finish(new Settings());
+  beat.notes[0].hammerPullDestination=tapped;beat.notes[0].isHammerPullOrigin=true;tapped.hammerPullOrigin=beat.notes[0];
+  applyStructureEdit(score,command(seven),0);
+  expect(placed(beat)).toEqual(['4:5']);expect(tapped.string).toBe(5);expect(beat.notes[0].hammerPullDestination).toBe(tapped);
+});
+
+it('holds kept notes to the playable frets that moved notes get',()=>{
+  // Retuned this low, the high E would sit at fret 34 on its kept string: there is no playable place, so it is refused.
+  const {score}=beatWith([[6,0]]),before=json(score);
+  expect(()=>applyStructureEdit(score,command([30,29,28,27,26,25,24]),0)).toThrow('no playable string');
+  expect(json(score)).toBe(before);
+  // A note already above fret 24 keeps its fret when its string keeps its pitch.
+  const high=beatWith([[6,30]]);applyStructureEdit(high.score,command(seven),0);
+  expect(placed(high.beat)).toEqual(['7:30']);
+});
+
+it('moves a dead note off a removed string by its fret, since it has no pitch',()=>{
+  const {score,beat}=beatWith([]);applyStructureEdit(score,command(seven),0);
+  const dead=new model.Note();dead.string=1;dead.fret=3;dead.isDead=true;beat.addNote(dead);score.finish(new Settings());
+  applyStructureEdit(score,command(standard),0);
+  expect(placed(beat)).toEqual(['6:3']);expect(dead.isDead).toBe(true);
+});

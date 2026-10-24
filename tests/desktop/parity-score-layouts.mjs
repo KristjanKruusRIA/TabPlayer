@@ -71,9 +71,10 @@ export function assertOwnedScoreLayoutProcess(expected,actual){
   assert.ok(actual&&actual.pid===expected.pid&&equalPath(actual.path,expected.path)&&actual.startTicks===expected.startTicks,'Captured process identity changed');
 }
 
+// WebView2 keeps its data in an EBWebView folder inside the profile it is given, so that folder counts as the owned profile.
 export function assertScoreLayoutListener(identity,profile,rows){
   assert.ok(Array.isArray(rows)&&rows.length>0,'Missing owned listener');const path=profile.replaceAll('\\','/').toLowerCase();
-  for(const row of rows){assert.ok(Array.isArray(row.chain)&&row.chain[0]?.pid===row.owner);assert.ok(row.chain.some(item=>item.pid===identity.pid),'Listener has foreign ancestry');assert.ok(row.chain.some(item=>{const command=String(item.commandLine).replaceAll('\\','/').toLowerCase(),offset=command.indexOf(path);return offset>=0&&/^["\s]*$/.test(command.slice(offset+path.length).split('--')[0])&&['"','=',' '].includes(command[offset-1]);}),'Listener lacks exact owned profile');}
+  for(const row of rows){assert.ok(Array.isArray(row.chain)&&row.chain[0]?.pid===row.owner);assert.ok(row.chain.some(item=>item.pid===identity.pid),'Listener has foreign ancestry');assert.ok(row.chain.some(item=>{const command=String(item.commandLine).replaceAll('\\','/').toLowerCase(),offset=command.indexOf(path);return offset>=0&&/^(\/ebwebview)?(["\s]|$)/.test(command.slice(offset+path.length))&&['"','=',' '].includes(command[offset-1]);}),'Listener lacks exact owned profile');}
 }
 
 export function assertScoreLayoutWindow(kind,before,after,calls,proof){

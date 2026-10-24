@@ -1137,6 +1137,7 @@ fn metronome_offline_export_keeps_eighth_pulses_across_disjoint_repeat_ranges() 
             tail_seconds: 0.03,
             include_backing: false,
             include_mix: true,
+            normalize_rms_db: None,
         };
         let renderer =
             Renderer::new(plan.clone(), resources.clone(), settings.clone(), rate).unwrap();

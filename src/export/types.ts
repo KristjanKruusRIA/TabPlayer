@@ -7,8 +7,9 @@ export interface TrackPages { name:string; pages:SvgPage[] }
 export const PNG_RESOLUTIONS=[72,150,300,600] as const;
 export type PngResolution=typeof PNG_RESOLUTIONS[number];
 export interface SvgSystem { svg:string; width:number; height:number }
-/** `container` is present only for AIFF; audio is written as WAV without it. */
-export interface AudioExportOptions { sampleRate:44100|48000;bitDepth:16|24;container?:'aiff';speed:'saved'|'current';metronome:boolean;tailSeconds:number;backing:boolean;includeMix:boolean }
+/** `container` is present only for AIFF; audio is written as WAV without it. `normalizeRmsDb` is present only when
+ * mixed audio is normalized to that RMS level. */
+export interface AudioExportOptions { sampleRate:44100|48000;bitDepth:16|24;container?:'aiff';normalizeRmsDb?:number;speed:'saved'|'current';metronome:boolean;tailSeconds:number;backing:boolean;includeMix:boolean }
 /** `fileName` is a GP8 token template, present only when it differs from the default. */
 export type ExportOptions = (
   | {format:'gp';selection:ExportSelection;backing?:boolean}

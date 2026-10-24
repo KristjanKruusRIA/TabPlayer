@@ -383,3 +383,15 @@ it('asks the native exporter for AIFF only when AIFF is chosen',async()=>{
     [true,{sampleRate:44100,bitDepth:24,container:'aiff'}],[true,{sampleRate:44100,bitDepth:24}],
   ]);
 });
+it('asks the native exporter to normalize mixed audio only',async()=>{
+  const score=buildScore(blankProject()),api=native(),payloads:NativeAudioExportPayload[]=[];
+  api.exportAudio=async value=>{payloads.push(value);return 'saved';};api.status=async()=>({id:'saved',frames:1,totalFrames:1,status:'complete'});
+  const bridge={readBackingAsset:async()=>{throw new Error('Unexpected backing read.');},confirmExport:async()=>true,exportGp:async()=>true};
+  const {result}=renderHook(()=>useExportCoordinator({revision:7,score,settings:defaultDocumentSettings(),currentSpeed:1,bridge,native:api}));
+  const audio={sampleRate:48000 as const,bitDepth:16 as const,speed:'saved' as const,metronome:false,tailSeconds:0,backing:false,includeMix:false};
+  await act(async()=>{expect(await result.current.run({format:'wav',selection:{tracks:[0],range:null},audio:{...audio,normalizeRmsDb:-14}})).toBe(true);});
+  await act(async()=>{expect(await result.current.run({format:'wav',selection:{tracks:[0],range:null},audio})).toBe(true);});
+  await act(async()=>{expect(await result.current.run({format:'stems',selection:{tracks:[0],range:null},audio:{...audio,normalizeRmsDb:-14}})).toBe(true);});
+  expect(payloads.map(payload=>payload.request.normalizeRmsDb)).toEqual([-14,undefined,undefined]);
+  expect(payloads.map(payload=>Object.hasOwn(payload.request,'normalizeRmsDb'))).toEqual([true,false,false]);
+});

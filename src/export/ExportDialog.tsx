@@ -12,6 +12,7 @@ export function ExportDialog({score,layout,page,busy,progress,failure,currentSpe
   const [staves,setStaves]=useState<Record<number,number[]>>(Object.fromEntries(score.tracks.map(t=>[t.index,t.staves.map(s=>s.index)])));
   const [range,setRange]=useState(false),[first,setFirst]=useState('1'),[last,setLast]=useState(String(score.masterBars.length));
   const [print,setPrint]=useState({...layout});const [audio,setAudio]=useState<AudioExportOptions>({sampleRate:48000,bitDepth:16,speed:'saved',metronome:false,tailSeconds:2,backing:true,includeMix:true});
+  const [normalize,setNormalize]=useState(false),[normalizeLevel,setNormalizeLevel]=useState(-16);
   const [gpBacking,setGpBacking]=useState(true),[transparent,setTransparent]=useState(false),[perTrack,setPerTrack]=useState(false),[dpi,setDpi]=useState<PngResolution>(300);
   const paged=format==='pdf'||format==='print'||format==='svg'||format==='png';
   const splittable=format==='pdf'||format==='svg'||format==='png';
@@ -58,10 +59,11 @@ export function ExportDialog({score,layout,page,busy,progress,failure,currentSpe
       const selection=exportSelection();
       if(backingIssue)throw new Error(backingIssue);
       if(!Number.isFinite(audio.tailSeconds)||audio.tailSeconds<0||audio.tailSeconds>30)throw new Error('Effect tail must be between 0 and 30 seconds.');
+      if(format==='wav'&&normalize&&!(Number.isFinite(normalizeLevel)&&normalizeLevel>=-30&&normalizeLevel<=-6))throw new Error('Choose a normalization level from -30 to -6 dB RMS.');
       if(paged&&!customPage&&(!Number.isFinite(print.marginMm)||print.marginMm<0||print.marginMm>50||!Number.isFinite(print.scale)||print.scale<.25||print.scale>3))throw new Error('Use margins from 0 to 50 mm and scale from 25% to 300%.');
       if(paged&&customPage)validatePageLayout(customPage);
       const named={...(format!=='print'&&fileName!==DEFAULT_FILE_NAME?{fileName}:{}),...(splittable&&perTrack?{perTrack:true}:{})};
-      setError('');onExport({...(format==='svg'?{format,selection,layout:print,...(customPage?{page:structuredClone(customPage)}:{}),transparent}:format==='png'?{format,selection,layout:print,...(customPage?{page:structuredClone(customPage)}:{}),transparent,dpi}:format==='pdf'||format==='print'?{format,selection,layout:print,...(customPage?{page:structuredClone(customPage)}:{})}:format==='wav'||format==='stems'?{format,selection,audio}:format==='gp'?{format,selection,...(!gpBacking?{backing:false}:{})}:{format,selection}),...named} as ExportOptions);
+      setError('');onExport({...(format==='svg'?{format,selection,layout:print,...(customPage?{page:structuredClone(customPage)}:{}),transparent}:format==='png'?{format,selection,layout:print,...(customPage?{page:structuredClone(customPage)}:{}),transparent,dpi}:format==='pdf'||format==='print'?{format,selection,layout:print,...(customPage?{page:structuredClone(customPage)}:{})}:format==='wav'?{format,selection,audio:normalize?{...audio,normalizeRmsDb:normalizeLevel}:audio}:format==='stems'?{format,selection,audio}:format==='gp'?{format,selection,...(!gpBacking?{backing:false}:{})}:{format,selection}),...named} as ExportOptions);
     }catch(e){setError((e as Error).message);}
   }
   return <div className="dialog-backdrop"><div ref={dialog} onKeyDown={handleKeyDown} role="dialog" aria-modal="true" aria-label="Export score" className="export-dialog"><h2>Export score</h2>
@@ -104,6 +106,9 @@ export function ExportDialog({score,layout,page,busy,progress,failure,currentSpe
         <label className="export-check"><input type="checkbox" checked={audio.metronome} onChange={e=>setAudio({...audio,metronome:e.target.checked})}/>Metronome</label>
         <label className="export-check"><input type="checkbox" checked={audio.backing} onChange={e=>setAudio({...audio,backing:e.target.checked})}/>Include backing</label>
         <label>Effect tail (seconds)<input type="number" min="0" max="30" step=".1" value={audio.tailSeconds} onChange={e=>setAudio({...audio,tailSeconds:Number(e.target.value)})}/></label>
+        {format==='wav'&&<><label className="export-check"><input type="checkbox" checked={normalize} onChange={e=>setNormalize(e.target.checked)}/>Normalize</label>
+        <label>Normalized level (dB RMS)<input type="number" min="-30" max="-6" step=".5" disabled={!normalize} value={normalizeLevel} onChange={e=>setNormalizeLevel(Number(e.target.value))}/></label>
+        <p>Normalizing sets the whole export to this average level. It turns it down further if a peak would pass −1 dBFS, and raises it by at most 40 dB.</p></>}
         {format==='stems'&&<label className="export-check"><input type="checkbox" checked={audio.includeMix} onChange={e=>setAudio({...audio,includeMix:e.target.checked})}/>Include limited mix</label>}
       </div></fieldset>}
     </fieldset>

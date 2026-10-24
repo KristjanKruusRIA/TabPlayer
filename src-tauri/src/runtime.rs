@@ -834,6 +834,14 @@ pub async fn export_audio(
 ) -> Result<Option<String>, String> {
     settings.validate()?;
     request.format.validate()?;
+    if let Some(level) = request.normalize_rms_db {
+        if stems {
+            return Err("Normalization applies to mixed audio only.".into());
+        }
+        if !crate::export::wav::NORMALIZE_RMS_DB.contains(&level) {
+            return Err("Choose a normalization level from -30 to -6 dB RMS.".into());
+        }
+    }
     crate::export::audio::RenderSchedule::new(
         &plan,
         request.range,
@@ -928,15 +936,27 @@ pub async fn export_audio(
                 )?;
             }
             let format = request.format;
+            let normalize = request.normalize_rms_db;
             let mut render = AudioExportRender::new(renderer, &plan, request)?;
             let job = &capture.job;
-            job.total_frames(render.total_frames());
+            // Normalizing renders the audio and then writes it, so its progress counts both passes.
+            job.total_frames(render.total_frames() * if normalize.is_some() { 2 } else { 1 });
             if stems {
                 capture.protect_stem_destination(&path)?;
                 crate::export::stems::write_stems(
                     &path,
                     &render.stem_spec(),
                     |output| render.render_stems(output),
+                    &job.cancel,
+                    |frames| job.progress(frames),
+                )?;
+            } else if let Some(level) = normalize {
+                capture.protect_destination(&path)?;
+                crate::export::wav::write_normalized_wav(
+                    &path,
+                    format,
+                    level,
+                    |output| render.render_mix(output),
                     &job.cancel,
                     |frames| job.progress(frames),
                 )?;

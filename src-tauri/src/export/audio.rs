@@ -24,6 +24,9 @@ pub struct AudioExportRequest {
     pub tail_seconds: f64,
     pub include_backing: bool,
     pub include_mix: bool,
+    /// The RMS level in dB relative to full scale that a mixed export is normalized to; absent for no normalization.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub normalize_rms_db: Option<f64>,
 }
 #[derive(Clone, Debug)]
 pub struct Segment {
@@ -394,6 +397,7 @@ mod tests {
             tail_seconds: 0.1,
             include_backing: false,
             include_mix: true,
+            normalize_rms_db: None,
         };
         let make = || {
             AudioExportRender::new(

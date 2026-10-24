@@ -1,11 +1,19 @@
 use atomic_write_file::AtomicWriteFile;
 use serde::{Deserialize, Serialize};
 use std::{
-    io::{Seek, SeekFrom, Write},
-    path::Path,
-    sync::atomic::{AtomicBool, Ordering},
+    fs::File,
+    io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write},
+    path::{Path, PathBuf},
+    sync::atomic::{AtomicBool, AtomicU64, Ordering},
 };
 pub const BLOCK_FRAMES: usize = 512;
+/// The RMS levels, in dB relative to full scale, that normalization can aim for.
+pub const NORMALIZE_RMS_DB: std::ops::RangeInclusive<f64> = -30.0..=-6.0;
+/// Normalization never lifts a sample above this peak, in dB relative to full scale.
+pub const NORMALIZE_CEILING_DB: f64 = -1.0;
+/// Normalization lifts the audio by at most this many dB, so a nearly silent export, such as a range holding only an
+/// effect tail, is not raised into audible noise.
+pub const NORMALIZE_MAX_GAIN_DB: f64 = 40.0;
 /// The audio file type: RIFF WAV, little-endian, or AIFF, big-endian.
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -190,6 +198,118 @@ impl<W: Write + Seek> PcmWriter<W> {
         self.file.flush().map_err(|e| e.to_string())?;
         Ok((self.file, self.frames))
     }
+}
+static SCRATCH: AtomicU64 = AtomicU64::new(0);
+/// A file removed when it goes out of scope.
+struct Scratch(PathBuf);
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+/// What normalization measured and applied.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Normalized {
+    pub frames: u64,
+    /// The rendered RMS level and sample peak over both channels, before the gain, in dB relative to full scale.
+    pub rms_db: f64,
+    pub peak_db: f64,
+    pub gain_db: f64,
+}
+/// Renders all of the audio into a scratch file beside `path`, then writes it as `write_wav` does with one gain that
+/// brings its RMS level over both channels to `target_rms_db`, lowered where needed so no sample peaks above
+/// `NORMALIZE_CEILING_DB` and limited to `NORMALIZE_MAX_GAIN_DB`. Silence is written unchanged. `progress` counts the frames of both passes.
+pub fn write_normalized_wav(
+    path: &Path,
+    format: AudioFormat,
+    target_rms_db: f64,
+    mut render: impl FnMut(&mut [[f32; 2]]) -> Result<usize, String>,
+    cancel: &AtomicBool,
+    mut progress: impl FnMut(u64),
+) -> Result<Normalized, String> {
+    format.validate()?;
+    if !NORMALIZE_RMS_DB.contains(&target_rms_db) {
+        return Err("Choose a normalization level from -30 to -6 dB RMS.".into());
+    }
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    let scratch = Scratch(parent.join(format!(
+        ".tabplayer-normalize-{}-{}",
+        std::process::id(),
+        SCRATCH.fetch_add(1, Ordering::Relaxed)
+    )));
+    let mut file = BufWriter::new(File::create_new(&scratch.0).map_err(|e| e.to_string())?);
+    let mut block = [[0.0; 2]; BLOCK_FRAMES];
+    let (mut frames, mut sum, mut peak) = (0u64, 0.0f64, 0.0f32);
+    loop {
+        if cancel.load(Ordering::Acquire) {
+            return Err("Audio export cancelled.".into());
+        }
+        let count = render(&mut block)?;
+        if count > block.len() {
+            return Err("Audio renderer returned an invalid frame count.".into());
+        }
+        if count == 0 {
+            break;
+        }
+        for sample in block[..count].iter().flatten() {
+            if !sample.is_finite() {
+                return Err("Audio renderer produced a non-finite sample.".into());
+            }
+            sum += (*sample as f64).powi(2);
+            peak = peak.max(sample.abs());
+            file.write_all(&sample.to_le_bytes())
+                .map_err(|e| e.to_string())?;
+        }
+        frames += count as u64;
+        progress(frames);
+    }
+    file.flush().map_err(|e| e.to_string())?;
+    drop(file);
+    let db = |value: f64| 20.0 * value.max(1e-12).log10();
+    let rms = if frames == 0 {
+        0.0
+    } else {
+        (sum / (2 * frames) as f64).sqrt()
+    };
+    let gain = if peak == 0.0 {
+        1.0
+    } else {
+        (10f64.powf(target_rms_db / 20.0) / rms)
+            .min(10f64.powf(NORMALIZE_CEILING_DB / 20.0) / peak as f64)
+            .min(10f64.powf(NORMALIZE_MAX_GAIN_DB / 20.0))
+    };
+    let mut reader = BufReader::new(File::open(&scratch.0).map_err(|e| e.to_string())?);
+    let mut bytes = vec![0; BLOCK_FRAMES * 8];
+    let mut remaining = frames;
+    let written = write_wav(
+        path,
+        format,
+        |output| {
+            let count = (remaining.min(output.len() as u64)) as usize;
+            reader
+                .read_exact(&mut bytes[..count * 8])
+                .map_err(|e| e.to_string())?;
+            for (frame, chunk) in output[..count].iter_mut().zip(bytes.chunks_exact(8)) {
+                for (c, value) in frame.iter_mut().enumerate() {
+                    let raw = f32::from_le_bytes(chunk[c * 4..c * 4 + 4].try_into().unwrap());
+                    *value = (raw as f64 * gain) as f32;
+                }
+            }
+            remaining -= count as u64;
+            Ok(count)
+        },
+        cancel,
+        |written| progress(frames + written),
+    )?;
+    Ok(Normalized {
+        frames: written,
+        rms_db: db(rms),
+        peak_db: db(peak as f64),
+        gain_db: db(gain),
+    })
 }
 pub fn write_wav(
     path: &Path,
@@ -488,5 +608,191 @@ mod tests {
         assert!(result.is_err());
         assert_eq!(std::fs::read(&path).unwrap(), b"prior");
         assert_eq!(std::fs::read_dir(d.path()).unwrap().count(), 1);
+    }
+    /// Writes `frames` frames of `signal` normalized to `target` dB RMS as 24-bit 48 kHz WAV, and reads them back.
+    fn normalized(
+        dir: &Path,
+        name: &str,
+        frames: usize,
+        target: f64,
+        signal: impl Fn(usize) -> [f32; 2],
+    ) -> (Normalized, Vec<f64>, Vec<u64>) {
+        let path = dir.join(name);
+        let mut n = 0;
+        let mut seen = Vec::new();
+        let result = write_normalized_wav(
+            &path,
+            AudioFormat::wav(48000, 24),
+            target,
+            |block| {
+                let count = (frames - n).min(block.len());
+                for (i, sample) in block[..count].iter_mut().enumerate() {
+                    *sample = signal(n + i);
+                }
+                n += count;
+                Ok(count)
+            },
+            &AtomicBool::new(false),
+            |done| seen.push(done),
+        )
+        .unwrap();
+        let mut reader = hound::WavReader::open(&path).unwrap();
+        let samples = reader
+            .samples::<i32>()
+            .map(|v| v.unwrap() as f64 / 8_388_608.0)
+            .collect();
+        (result, samples, seen)
+    }
+    fn rms_db(samples: &[f64]) -> f64 {
+        10.0 * (samples.iter().map(|v| v * v).sum::<f64>() / samples.len() as f64).log10()
+    }
+    fn peak_db(samples: &[f64]) -> f64 {
+        20.0 * samples.iter().fold(0.0f64, |a, v| a.max(v.abs())).log10()
+    }
+    #[test]
+    fn normalization_brings_the_rms_level_to_the_target() {
+        let d = tempfile::tempdir().unwrap();
+        // A quiet 440 Hz sine in both channels peaking at -27 dBFS, so about -30 dB RMS.
+        let amplitude = 10f64.powf(-27.0 / 20.0);
+        let tone = |n: usize| {
+            let v =
+                ((std::f64::consts::TAU * 440.0 * n as f64 / 48_000.0).sin() * amplitude) as f32;
+            [v, -v]
+        };
+        for target in [-20.0, -16.0, -12.0] {
+            let (result, samples, seen) = normalized(d.path(), "tone.wav", 96_000, target, tone);
+            assert_eq!(result.frames, 96_000);
+            assert!(
+                (result.rms_db - (-27.0 - 20.0 * 2f64.sqrt().log10())).abs() < 0.01,
+                "{result:?}"
+            );
+            assert!((result.peak_db + 27.0).abs() < 0.01, "{result:?}");
+            assert!(
+                (result.gain_db - (target - result.rms_db)).abs() < 1e-9,
+                "{result:?}"
+            );
+            assert!(
+                (rms_db(&samples) - target).abs() < 0.01,
+                "{target}: {}",
+                rms_db(&samples)
+            );
+            // Progress counts the render and then the write.
+            assert_eq!(*seen.last().unwrap(), 192_000);
+            assert!(seen.windows(2).all(|w| w[0] < w[1]));
+            assert!(seen.contains(&96_000));
+        }
+        // Only the WAV is left: the scratch file is gone.
+        assert_eq!(std::fs::read_dir(d.path()).unwrap().count(), 1);
+    }
+    #[test]
+    fn normalization_never_lifts_a_peak_above_minus_one_dbfs() {
+        let d = tempfile::tempdir().unwrap();
+        // A quiet tone with one loud click: reaching -12 dB RMS would push the click far past full scale.
+        let signal = |n: usize| {
+            let v = if n == 30_000 {
+                0.5
+            } else {
+                ((n as f32) * 0.05).sin() * 0.01
+            };
+            [v, v]
+        };
+        let (result, samples, _) = normalized(d.path(), "click.wav", 48_000, -12.0, signal);
+        assert!((result.peak_db - 20.0 * 0.5f64.log10()).abs() < 0.01);
+        assert!(
+            (result.gain_db - (-1.0 - result.peak_db)).abs() < 0.01,
+            "{result:?}"
+        );
+        assert!(
+            (peak_db(&samples) + 1.0).abs() < 0.01,
+            "peak {}",
+            peak_db(&samples)
+        );
+        assert!(
+            rms_db(&samples) < -12.0 - 6.0,
+            "the level stays well under the target"
+        );
+        // A loud signal is turned down to the target.
+        let (loud, samples, _) = normalized(d.path(), "loud.wav", 48_000, -20.0, |n| {
+            [((n as f32) * 0.05).sin() * 0.9; 2]
+        });
+        assert!(loud.gain_db < -15.0, "{loud:?}");
+        assert!((rms_db(&samples) + 20.0).abs() < 0.01);
+        // A residue at -120 dBFS is lifted by at most 40 dB rather than to the target.
+        let (faint, _, _) = normalized(d.path(), "faint.wav", 48_000, -16.0, |n| {
+            [((n as f32) * 0.05).sin() * 1e-6; 2]
+        });
+        assert!((faint.gain_db - 40.0).abs() < 1e-9, "{faint:?}");
+    }
+    #[test]
+    fn normalization_writes_silence_unchanged_and_refuses_other_levels() {
+        let d = tempfile::tempdir().unwrap();
+        let (result, samples, _) = normalized(d.path(), "silence.wav", 4_800, -16.0, |_| [0.0; 2]);
+        assert_eq!(result.gain_db, 0.0);
+        // Dither alone: within one 24-bit step of zero.
+        assert!(samples.iter().all(|v| v.abs() <= 1.0 / 8_388_608.0));
+        for target in [-30.5, -5.9, f64::NAN] {
+            let error = write_normalized_wav(
+                &d.path().join("refused.wav"),
+                AudioFormat::wav(48000, 16),
+                target,
+                |_| Ok(0),
+                &AtomicBool::new(false),
+                |_| {},
+            )
+            .unwrap_err();
+            assert!(error.contains("-30 to -6 dB RMS"), "{error}");
+        }
+        assert!(!d.path().join("refused.wav").exists());
+    }
+    #[test]
+    fn a_cancelled_or_failed_normalized_export_leaves_the_prior_file_and_no_scratch() {
+        let d = tempfile::tempdir().unwrap();
+        let path = d.path().join("existing.wav");
+        std::fs::write(&path, b"prior").unwrap();
+        // Cancelled while rendering, cancelled while writing, and a renderer failure.
+        for stop_after in [2usize, 5, 0] {
+            let cancel = AtomicBool::new(false);
+            let mut blocks = 0usize;
+            let mut written = 0u64;
+            let result = write_normalized_wav(
+                &path,
+                AudioFormat::wav(48000, 16),
+                -16.0,
+                |block| {
+                    if stop_after == 0 && blocks == 1 {
+                        return Err("renderer failed".into());
+                    }
+                    if blocks == 4 {
+                        return Ok(0);
+                    }
+                    blocks += 1;
+                    block.fill([0.1, 0.1]);
+                    if blocks == stop_after {
+                        cancel.store(true, Ordering::Release);
+                    }
+                    Ok(block.len())
+                },
+                &cancel,
+                |done| {
+                    written = done;
+                    if stop_after == 5 && done > 4 * BLOCK_FRAMES as u64 {
+                        cancel.store(true, Ordering::Release);
+                    }
+                },
+            );
+            assert!(result.is_err(), "{stop_after}");
+            assert_eq!(std::fs::read(&path).unwrap(), b"prior");
+            assert_eq!(
+                std::fs::read_dir(d.path()).unwrap().count(),
+                1,
+                "{stop_after}: only the earlier file is left"
+            );
+            if stop_after == 5 {
+                assert!(
+                    written > 4 * BLOCK_FRAMES as u64,
+                    "the write pass had started"
+                );
+            }
+        }
     }
 }

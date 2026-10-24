@@ -405,6 +405,7 @@ fn omitted_backing_mix_export_obeys_active_wall_duration_and_tail() {
             tail_seconds: 0.5,
             include_backing: false,
             include_mix: true,
+            normalize_rms_db: None,
         };
         let mut export = AudioExportRender::new(renderer, &plan, request).unwrap();
         let mut total = 0;
@@ -500,6 +501,7 @@ fn effective_whole_and_selected_exports_share_wall_tail_with_or_without_backing(
                         tail_seconds: 0.5,
                         include_backing: included,
                         include_mix: true,
+                        normalize_rms_db: None,
                     };
                     let mut export = AudioExportRender::new(renderer, &plan, request).unwrap();
                     let body = if range.is_some() { 4.0 } else { 6.0 };

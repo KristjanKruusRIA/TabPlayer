@@ -39,16 +39,22 @@ export const chainOrder=(effects:FxSettings):EffectBlock[]=>{
 };
 /** Whether `order` names every block once, leaving out only blocks added after it, or is empty for the default order. */
 const validOrder=(order:unknown)=>Array.isArray(order)&&(order.length===0||order.every(name=>effectBlocks.includes(name))&&effectBlocks.every(block=>{const count=order.filter(name=>name===block).length;return count===1||count===0&&laterBlocks.includes(block);}));
-/** Adds the effect blocks a sound saved before them lacks, switched off at their defaults, and reads a reverb or
+/** Adds the effect blocks a pedalboard saved before them lacks, switched off at their defaults, and reads a reverb or
  * delay saved before its models as the original room reverb or digital delay. */
-export const completeSound = (sound: TrackSound): TrackSound => {
-  const effects={...defaultEffects(),...sound.effects} as unknown as Record<string,unknown>;
+const completeEffects=(saved:FxSettings):FxSettings=>{
+  const effects={...defaultEffects(),...saved} as unknown as Record<string,unknown>;
   for(const [block,model] of [['reverb','room'],['delay','digital']]){
     const settings=effects[block] as {model?:unknown}|undefined;
     if(settings&&typeof settings==='object'&&!Array.isArray(settings)&&settings.model===undefined)effects[block]={...settings,model};
   }
-  return {...sound,effects:effects as unknown as FxSettings};
+  // The native player reads a null second pedalboard as none.
+  const second=effects.second as FxSettings|null|undefined;
+  if(second===null)delete effects.second;
+  else if(second&&typeof second==='object'&&!Array.isArray(second))effects.second=completeEffects(second);
+  return effects as unknown as FxSettings;
 };
+/** Completes a sound's pedalboards as `completeEffects` does. */
+export const completeSound = (sound: TrackSound): TrackSound => ({...sound,effects:completeEffects(sound.effects)});
 /** Echo durations in quarter notes with their names: straight, dotted and triplet divisions. */
 export const delayDivisions:readonly (readonly [number,string])[]=[[.125,'1/32'],[.25,'1/16'],[1/3,'1/8 triplet'],[.5,'1/8'],[2/3,'1/4 triplet'],[.75,'Dotted 1/8'],[1,'1/4'],[1.5,'Dotted 1/4'],[2,'1/2'],[4,'Whole']];
 /** Cycle lengths in quarter notes a modulation block's rate can follow: the delay's divisions and two slower sweeps. */
@@ -87,13 +93,21 @@ export function soundProblem(sound: TrackSound): string|null {
   if (!sound||typeof sound!=='object'||Object.keys(sound).sort().join()!=='effects,presetId,voiceId'||!sound.effects||typeof sound.effects!=='object') return 'Invalid sound.';
   if (!['gm','clean','crunch','lead','bass'].includes(sound.presetId)) return 'Invalid sound preset.';
   if (sound.voiceId!==null && !['gm','green-guitar','black-guitar','darkblack-bass','babyblue-bass'].includes(sound.voiceId)) return 'Unknown instrument voice.';
-  const {effects}=completeSound(sound);
-  if (!effects||typeof effects!=='object'||Object.keys(effects).some(block=>block!=='order'&&!Object.hasOwn(effectRules,block))) return 'Invalid effect parameter.';
+  return effectsProblem(completeSound(sound).effects,true);
+}
+/** Why a completed pedalboard cannot be played, or null. Only the track's own board may hold a second one. */
+function effectsProblem(effects:FxSettings,first:boolean):string|null {
+  if (!effects||typeof effects!=='object'||Array.isArray(effects)||Object.keys(effects).some(block=>block!=='order'&&block!=='second'&&!Object.hasOwn(effectRules,block))) return 'Invalid effect parameter.';
   if (Object.hasOwn(effects,'order')&&!validOrder(effects.order)) return 'Invalid effect order.';
   for (const [block,rules] of Object.entries(effectRules)) {
     const settings=(effects as unknown as Record<string,Record<string,unknown>>)[block];
     if (!settings||typeof settings!=='object'||typeof settings.enabled!=='boolean'||Object.keys(settings).some(field=>field!=='enabled'&&!Object.hasOwn(rules,field))) return 'Invalid effect parameter.';
     for (const [field,rule] of Object.entries(rules)) if (Object.hasOwn(settings,field)?!fits(settings[field],rule):!('later' in rule)) return 'Invalid effect parameter.';
+  }
+  if (Object.hasOwn(effects,'second')) {
+    const second=effects.second;
+    if (!first||!second||typeof second!=='object'||Array.isArray(second)||Object.hasOwn(second,'second')) return 'Invalid second pedalboard.';
+    return effectsProblem(second,false);
   }
   return null;
 }

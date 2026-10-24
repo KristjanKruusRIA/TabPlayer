@@ -55,8 +55,10 @@ export interface FxSettings {
   graphicEq: {enabled:boolean;gainsDb:number[];levelDb:number};
   /** Every block once, in the order the signal passes through them; absent for the default order. */
   order?: EffectBlock[];
+  /** A second pedalboard after this one, so any pedal can play twice with its own settings; it holds no board of its own. */
+  second?: FxSettings;
 }
-export type EffectBlock = Exclude<keyof FxSettings, 'order'>;
+export type EffectBlock = Exclude<keyof FxSettings, 'order'|'second'>;
 export interface TrackSound { voiceId: string|null; presetId: 'clean'|'crunch'|'lead'|'bass'|'gm'; effects: FxSettings }
 export interface SyncAnchor { bar: number; occurrence: number; ratio: number; audioMs: number }
 export interface ReferenceSyncBounds { entryAudioMs: number; exitAudioMs: number }

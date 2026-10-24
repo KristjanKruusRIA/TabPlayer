@@ -221,6 +221,10 @@ pub struct FxSettings {
     /// Every block's name once, in the order the signal passes through them; empty for the default order.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub order: Vec<String>,
+    /// A second pedalboard the signal passes through after this one, so any pedal can play twice with its own
+    /// settings. It holds no board of its own.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub second: Option<Box<FxSettings>>,
 }
 fn untouched<T: Default + PartialEq>(value: &T) -> bool {
     *value == T::default()
@@ -1117,6 +1121,12 @@ impl FxSettings {
         if !["open", "closed", "bass"].contains(&self.cabinet.model.as_str()) {
             return Err("Unknown cabinet model.".into());
         }
+        if let Some(second) = &self.second {
+            if second.second.is_some() {
+                return Err("Invalid second pedalboard.".into());
+            }
+            second.validate()?;
+        }
         Ok(())
     }
     pub fn preset(name: &str) -> Result<Self, String> {
@@ -1383,6 +1393,11 @@ pub struct TrackDsp {
     reverb_live: bool,
     cached_eq: [f64; 4],
     cached_cabinet: [f64; 2],
+    /// The second pedalboard, built only once a sound has one, and how much of its output is heard. It fades in and
+    /// out over the ramp; a removed board fades out and then stands still until the next configuration leaves it.
+    second: Option<Box<TrackDsp>>,
+    second_gain: f32,
+    max_delay_seconds: f64,
 }
 impl TrackDsp {
     pub fn new(
@@ -1407,7 +1422,19 @@ impl TrackDsp {
         let microphone_start = microphone_shape(&settings.microphone, rate);
         let microphone_on = settings.microphone.enabled;
         let chain = chain_of(&settings.order);
+        let second = match &settings.second {
+            Some(board) => Some(Box::new(TrackDsp::new(
+                (**board).clone(),
+                sample_rate,
+                max_delay_seconds,
+            )?)),
+            None => None,
+        };
+        let second_gain = if second.is_some() { 1.0 } else { 0.0 };
         Ok(Self {
+            second,
+            second_gain,
+            max_delay_seconds,
             previous: settings.clone(),
             settings,
             rate,
@@ -1535,6 +1562,28 @@ impl TrackDsp {
     }
     pub fn set_settings(&mut self, settings: FxSettings) -> Result<(), String> {
         settings.validate()?;
+        if let Some(board) = &settings.second {
+            match &mut self.second {
+                // A board that had faded out starts again from silence, at its new settings.
+                Some(second) if self.second_gain == 0.0 => {
+                    second.set_settings((**board).clone())?;
+                    second.previous = second.settings.clone();
+                    second.ramp_left = 0;
+                    second.reset();
+                    second.start_mid_play();
+                }
+                Some(second) => second.set_settings((**board).clone())?,
+                None => {
+                    let mut second = Box::new(TrackDsp::new(
+                        (**board).clone(),
+                        self.rate as u32,
+                        self.max_delay_seconds,
+                    )?);
+                    second.start_mid_play();
+                    self.second = Some(second);
+                }
+            }
+        }
         self.previous = std::mem::replace(&mut self.settings, settings);
         self.drive_shapes = [
             self.drive_shapes[1],
@@ -1666,8 +1715,58 @@ impl TrackDsp {
             self.microphone_live = false;
         }
         self.ramp_left = self.ramp_frames;
+        // The second board carries on, fades in from silence, or fades out before it is left behind. A board that
+        // has faded out holds what it last played, so one added again starts afresh. `previous` now holds the old
+        // configuration's settings.
+        match (&mut self.second, &mut old.second) {
+            (Some(second), Some(playing))
+                if old.second_gain > 0.0 || self.previous.second.is_some() =>
+            {
+                second.transition_from(playing);
+                self.second_gain = old.second_gain;
+            }
+            (Some(second), _) => {
+                second.start_mid_play();
+                self.second_gain = 0.0;
+            }
+            (None, playing @ Some(_)) if old.second_gain > 0.0 => {
+                self.second = playing.take();
+                self.second_gain = old.second_gain;
+            }
+            _ => {}
+        }
+    }
+    /// Readies a board that starts from silence while the track already sounds, as a block switched on mid-play
+    /// is: the room microphone's reflections fade in rather than arriving at full level.
+    fn start_mid_play(&mut self) {
+        self.microphone_live = false;
     }
     pub fn process(&mut self, input: [f32; 2], bpm: f64) -> [f32; 2] {
+        let y = self.process_board(input, bpm);
+        let Some(second) = &mut self.second else {
+            return y;
+        };
+        let target = if self.settings.second.is_some() {
+            1.0
+        } else {
+            0.0
+        };
+        if self.second_gain == target && target == 0.0 {
+            return y;
+        }
+        let step = 1.0 / self.ramp_frames as f32;
+        self.second_gain = if self.second_gain < target {
+            (self.second_gain + step).min(target)
+        } else {
+            (self.second_gain - step).max(target)
+        };
+        let wet = second.process(y, bpm);
+        if self.second_gain == 1.0 {
+            return wet;
+        }
+        std::array::from_fn(|c| y[c] + (wet[c] - y[c]) * self.second_gain)
+    }
+    fn process_board(&mut self, input: [f32; 2], bpm: f64) -> [f32; 2] {
         let mut x = input.map(|v| if v.is_finite() { v } else { 0.0 });
         let t = if self.ramp_left == 0 {
             1.0
@@ -2611,6 +2710,19 @@ impl TrackDsp {
         self.microphone_live = self.settings.microphone.enabled;
         self.chain = self.chain_target;
         self.reorder_left = 0;
+        // A board that is not playing is never heard again: one added again starts afresh.
+        if let Some(second) = self
+            .second
+            .as_mut()
+            .filter(|_| self.settings.second.is_some())
+        {
+            second.reset();
+        }
+        self.second_gain = if self.settings.second.is_some() {
+            1.0
+        } else {
+            0.0
+        };
     }
 }
 

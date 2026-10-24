@@ -16,17 +16,24 @@ function nameProblem(name:string):string|null {
   if(!name)return 'Name the sound.';
   return name.length>60?'Use a name of 60 characters or fewer.':null;
 }
-/** A stored sound, with any missing blocks or fields filled from the defaults, or null when it is unusable. */
-function repairSound(value:unknown):TrackSound|null {
-  if(!isRecord(value)||!isRecord(value.effects))return null;
+/** A stored pedalboard, with any missing blocks or fields filled from the defaults, or null when it is unusable. */
+function repairEffects(stored:Record<string,unknown>):Record<string,unknown>|null {
   const defaults=defaultEffects() as unknown as Record<string,Record<string,unknown>>,effects:Record<string,unknown>={...defaults};
-  for(const [block,settings] of Object.entries(value.effects)){
+  for(const [block,settings] of Object.entries(stored)){
     // The order is kept as stored and checked with the rest of the sound.
     if(block==='order'){effects.order=settings;continue;}
+    // A second pedalboard with nothing switched on is dropped, as the Sound task drops it.
+    if(block==='second'){if(settings===null)continue;const second=isRecord(settings)?repairEffects(settings):null;if(!second)return null;if(Object.values(second).some(item=>isRecord(item)&&item.enabled===true))effects.second=second;continue;}
     if(!Object.hasOwn(defaults,block)||!isRecord(settings))return null;
     // Fields this version does not know are dropped; missing ones take their defaults.
     effects[block]=Object.fromEntries([...Object.entries(defaults[block]).map(([field,fallback])=>[field,Object.hasOwn(settings,field)?settings[field]:fallback]),...laterFields(block as EffectBlock).filter(field=>Object.hasOwn(settings,field)).map(field=>[field,settings[field]])]);
   }
+  return effects;
+}
+/** A stored sound, with any missing blocks or fields filled from the defaults, or null when it is unusable. */
+function repairSound(value:unknown):TrackSound|null {
+  if(!isRecord(value)||!isRecord(value.effects))return null;
+  const effects=repairEffects(value.effects);if(!effects)return null;
   const voiceId=typeof value.voiceId==='string'?value.voiceId:null;
   const sound=completeSound({voiceId,presetId:value.presetId as TrackSound['presetId'],effects:effects as unknown as FxSettings});
   return soundProblem(sound)?null:sound;

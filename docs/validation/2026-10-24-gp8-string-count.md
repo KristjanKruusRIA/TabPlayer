@@ -94,4 +94,4 @@ GP8 can change how many strings an existing guitar or bass track has. TabPlayer 
 - **Fret limit:** notes are placed no higher than fret 24, unless a kept note was already higher, so a note that could be reached only higher is refused.
 - **Chord diagrams:** a kept string's diagram fret is not refretted when its pitch changes. A chord diagram written for another number of strings is left as it is.
 - **Linked notes stay put:** a change that would move a tied, slid, hammered, slurred or harmonic note is refused rather than re-linking the notes on the new string.
-- **Tuning name:** the tuning's name is cleared, because the old name no longer describes it.
+- **Tuning name:** since S15 ([saved tunings](2026-10-24-gp8-saved-tunings.md)), Track settings send the draft's name with the change. A command without a name replaces the old name with alphaTab's label for the new tuning when it knows one, and leaves it empty otherwise.

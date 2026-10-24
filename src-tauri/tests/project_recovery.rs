@@ -176,6 +176,7 @@ fn checkpoint_rejects_invalid_cursor_saved_refs_and_versions() {
                     name: "Invalid".into(),
                     tuning: vec![],
                     program: 0,
+                    tuning_name: None,
                 }]
             }
             "saved-asset" => {

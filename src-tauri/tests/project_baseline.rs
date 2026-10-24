@@ -198,6 +198,7 @@ fn source_session() -> (ProjectSession, [String; 4]) {
             name: "Bass".into(),
             tuning: vec![43, 38, 33, 28],
             program: 33,
+            tuning_name: None,
         },
         EditCommand::SetTrackSound {
             track_id: "added/0/addTrack".into(),
@@ -560,6 +561,7 @@ fn baseline_and_complete_user_history_validate_commands_and_asset_references() {
         name: "invalid".into(),
         tuning: vec![],
         program: 0,
+        tuning_name: None,
     };
     let mut baseline = valid.project.clone();
     baseline.baseline_edits.push(invalid_command.clone());

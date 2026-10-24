@@ -1,5 +1,5 @@
 import {validateEngraving} from './engraving/projection';
-import { validateStringCount } from './editor/structure';
+import { validateStringCount,validateTuningName } from './editor/structure';
 import {validateStrokePattern} from './editor/range-edits';
 import {validatePageLayout} from './engraving/page';
 import {validateHarmonyChord} from './harmony/chord-source';
@@ -7,6 +7,8 @@ import {validateBackingSettings} from './document-settings';
 import {validateRatioTempoPoints} from './editor/tempo-types';
 import {parseTrackColor} from './track-color';
 
+const tuningNamed=new Set(['addTrack','setTuning','setStringCount']);
+const staffSettingKeys=['tuning','capo','transposition','displayTransposition','clef','showTab','showNotation'];
 const shapes:Record<string,readonly string[]>={
   setNote:['target','string','fret'],removeNote:['target','string'],setRest:['target'],setDuration:['target','duration','dots'],
   insertBeat:['target','duration','dots'],deleteBeat:['target'],appendMeasure:[],removeMeasure:['bar'],
@@ -163,7 +165,14 @@ function techniqueShape(value:unknown) {
 export function validateParityCommand(value:unknown):void {
   const candidate=object(value),type=candidate.type;
   if(typeof type!=='string'||!Object.hasOwn(shapes,type))throw new Error('Unknown edit command in project.');
-  const edit=exact(value,['type',...shapes[type]]);
+  const named=tuningNamed.has(type)&&Object.hasOwn(candidate,'tuningName');
+  const edit=exact(value,['type',...shapes[type],...(named?['tuningName']:[])]);
+  if(named)validateTuningName(edit.tuningName===undefined?null:edit.tuningName);
+  if(type==='setStaffSettings'||type==='addStaff'){
+    const settings=object(edit.settings),hasName=Object.hasOwn(settings,'tuningName');
+    exact(settings,[...staffSettingKeys,...(hasName?['tuningName']:[])]);
+    if(hasName)validateTuningName(settings.tuningName===undefined?null:settings.tuningName);
+  }
   if(type==='setBacking'&&edit.backing!==null)validateBackingSettings(edit.backing);
   if(type==='replaceTempoAutomations')validateRatioTempoPoints(edit.points);
   if('target'in edit)target(edit.target);

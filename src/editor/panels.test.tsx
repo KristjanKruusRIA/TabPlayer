@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { model } from '@coderline/alphatab';
 import { TechniquePanel } from './TechniquePanel';
@@ -11,6 +11,7 @@ import { ChordDialog } from './ChordDialog';
 import { music, target } from './fixtures';
 import { previewEdit } from '../engine';
 import { blankProject } from '../project';
+vi.mock('@tauri-apps/api/core',()=>({invoke:vi.fn(async()=>({format:'tabplayer-tuning-library',version:1,entries:[]}))}));
 afterEach(cleanup);
 it('applies pitched staff transposition without requiring a string tuning',()=>{
   const score=previewEdit(blankProject(),{type:'addPitchedTrack',name:'Piano',program:0}).score,onEdit=vi.fn();
@@ -82,4 +83,20 @@ it('chord dialog has accessible focus and saves per-string positions',()=>{
 it('chord dialog traps keyboard focus and Escape closes',()=>{
   const onClose=vi.fn();render(<ChordDialog strings={6} value={null} onChange={vi.fn()} onClose={onClose}/>);const name=screen.getByLabelText('Chord name'),cancel=screen.getByRole('button',{name:'Cancel'});
   fireEvent.keyDown(name,{key:'Tab',shiftKey:true});expect(cancel).toHaveFocus();fireEvent.keyDown(cancel,{key:'Tab'});expect(name).toHaveFocus();fireEvent.keyDown(name,{key:'Escape'});expect(onClose).toHaveBeenCalled();
+});
+
+it('staff settings keep the staff tuning name through capo edits and send the draft name after tuning changes',()=>{
+  const score=music(),onEdit=vi.fn(),props={score,target,string:6,busy:false,onEdit,onSelect:vi.fn()};score.tracks[0].staves[0].stringTuning.name='Imported';
+  const view=render(<StructurePanel {...props}/>);
+  fireEvent.change(screen.getByLabelText('Capo'),{target:{value:'2'}});fireEvent.click(screen.getByRole('button',{name:'Apply staff settings'}));
+  expect(onEdit).toHaveBeenLastCalledWith(expect.objectContaining({type:'setStaffSettings',settings:expect.objectContaining({capo:2,tuning:[64,59,55,50,45,40],tuningName:'Imported'})}));
+  fireEvent.change(screen.getByLabelText('Staff tuning (notes, high to low)'),{target:{value:'E4 B3 G3 D3 A2 D2'}});fireEvent.click(screen.getByRole('button',{name:'Apply staff settings'}));
+  expect(onEdit).toHaveBeenLastCalledWith(expect.objectContaining({settings:expect.objectContaining({tuning:[64,59,55,50,45,38],tuningName:''})}));
+  fireEvent.click(screen.getByRole('button',{name:'Saved tunings for Staff tuning (notes, high to low)'}));
+  fireEvent.click(within(within(screen.getByRole('dialog')).getByRole('group',{name:'Guitar · 6 strings'})).getByRole('button',{name:/^Open D/}));fireEvent.click(screen.getByRole('button',{name:'Use tuning'}));
+  fireEvent.click(screen.getByRole('button',{name:'Apply staff settings'}));
+  expect(onEdit).toHaveBeenLastCalledWith(expect.objectContaining({settings:expect.objectContaining({tuning:[62,57,54,50,45,38],tuningName:'Open D'})}));
+  const next=music();next.tracks[0].staves[0].stringTuning.name='Fresh';
+  view.rerender(<StructurePanel {...props} score={next}/>);fireEvent.click(screen.getByRole('button',{name:'Apply staff settings'}));
+  expect(onEdit).toHaveBeenLastCalledWith(expect.objectContaining({settings:expect.objectContaining({tuning:[64,59,55,50,45,40],tuningName:'Fresh'})}));
 });

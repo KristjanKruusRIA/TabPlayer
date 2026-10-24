@@ -48,6 +48,7 @@ fn authored_project() -> Project {
             name: format!("Authored track {}", track + 1),
             tuning: vec![64, 59, 55, 50, 45, 40],
             program: 24,
+            tuning_name: None,
         });
     }
     for track in 0..4 {

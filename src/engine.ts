@@ -12,6 +12,7 @@ import { backingLocationsForScore,validateBackingAnchors } from './audio/plan';
 import { adjustReferenceSyncBounds,referenceSyncTiming } from './audio/reference-sync';
 import { scoreFromJson } from './model-clone';
 import { validateParityCommand } from './parity-commands';
+import { defaultTuningName, validateTuningName } from './editor/structure';
 import { copyGpInterchangeSource, exportGpInterchange, forgetTrackOrderedEntries, loadInterchangeScore } from './interchange/gp';
 import { reflowLyrics,removeLyricsMeasure } from './editor/lyrics';
 import { prepareScoreTimers } from './editor/timers';
@@ -104,8 +105,8 @@ function movedOrder(count:number,track:number,to:number):number[] {
   const order=Array.from({length:count},(_,index)=>index);order.splice(to,0,...order.splice(track,1));return order;
 }
 
-function addTrack(score: model.Score, name: string, tuning: number[], program: number) {
-  tuningValid(tuning);
+function addTrack(score: model.Score, name: string, tuning: number[], program: number, tuningName?: string) {
+  tuningValid(tuning);validateTuningName(tuningName);
   if (!integer(program) || program > 127) throw new Error('Invalid MIDI instrument.');
   const used = new Set(score.tracks.flatMap(t => [t.playbackInfo.primaryChannel, t.playbackInfo.secondaryChannel]));
   const free = Array.from({length:16}, (_,i) => i).filter(i => i !== 9 && !used.has(i));
@@ -113,7 +114,7 @@ function addTrack(score: model.Score, name: string, tuning: number[], program: n
   const track = new Track(); track.name = name || 'Instrument'; track.shortName = track.name;
   track.playbackInfo.program = program;
   track.playbackInfo.primaryChannel = free[0]; track.playbackInfo.secondaryChannel = free[1] ?? free[0];
-  const staff = new Staff(); staff.stringTuning.tunings = [...tuning]; staff.showTablature = true; staff.showStandardNotation = true;
+  const staff = new Staff(); staff.stringTuning.tunings = [...tuning]; staff.stringTuning.name = tuningName ?? defaultTuningName(tuning); staff.showTablature = true; staff.showStandardNotation = true;
   track.addStaff(staff); score.addTrack(track);
   for (const master of score.masterBars) appendBar(staff, master);
 }
@@ -221,7 +222,7 @@ function apply(score: model.Score, edit: EditCommand, editIndex=0) {
       if (edit.bar === 0 && !score.masterBars[0].tempoAutomations.length) score.masterBars[0].tempoAutomations = [Automation.buildTempoAutomation(false,0,tempo,2)];
       break;
     }
-    case 'addTrack': addTrack(score,edit.name,edit.tuning,edit.program); break;
+    case 'addTrack': addTrack(score,edit.name,edit.tuning,edit.program,edit.tuningName); break;
     case 'removeTrack': {
       const track=trackAt(score,edit.track); if (score.tracks.length === 1) throw new Error('Keep at least one track.');
       for(const staff of track.staves)for(const bar of staff.bars)for(const voice of bar.voices)for(const beat of voice.beats)for(const note of beat.notes)detachNote(note);
@@ -242,14 +243,14 @@ function apply(score: model.Score, edit: EditCommand, editIndex=0) {
       score.tracks.splice(edit.to,0,...score.tracks.splice(edit.track,1)); break;
     }
     case 'setTuning': {
-      tuningValid(edit.tuning); const track = trackAt(score,edit.track);
+      tuningValid(edit.tuning); validateTuningName(edit.tuningName); const track = trackAt(score,edit.track);
       if (track.isPercussion || track.staves.some(s => s.tuning.length !== edit.tuning.length)) throw new Error('Retuning must keep the current string count.');
       for (const staff of track.staves) for (const bar of staff.bars) for (const voice of bar.voices) for (const beat of voice.beats) for (const note of beat.notes) {
         if (!note.string) continue;
         const pitch=edit.tuning[edit.tuning.length-note.string]+note.fret+staff.capo-staff.transpositionPitch;
         if (pitch<0 || pitch>127) throw new Error('That tuning puts an existing note outside the MIDI pitch range.');
       }
-      for (const staff of track.staves) staff.stringTuning.tunings = [...edit.tuning]; break;
+      for (const staff of track.staves) { staff.stringTuning.tunings = [...edit.tuning]; if (edit.tuningName !== undefined) staff.stringTuning.name = edit.tuningName; else if (!staff.stringTuning.name) staff.stringTuning.name = defaultTuningName(edit.tuning); } break;
     }
     case 'setScoreInfo':
       if (!Number.isFinite(edit.tempo) || edit.tempo <= 0) throw new Error('Tempo must be positive.');

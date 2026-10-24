@@ -328,6 +328,7 @@ fn settings_replay_tracks_structural_identity() {
             name: "Bass".into(),
             tuning: vec![43, 38, 33, 28],
             program: 33,
+            tuning_name: None,
         })
         .unwrap();
     let mix = EditCommand::SetTrackMix {

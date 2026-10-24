@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { previewEdit } from '../engine';
 import { blankProject } from '../project';
@@ -8,6 +8,7 @@ import { tuningPresets } from '../tuning-presets';
 import { formatTuning } from '../tuning';
 import { TrackSettingsPanel } from './TrackSettingsPanel';
 import { trackColorHex } from '../track-color';
+vi.mock('@tauri-apps/api/core',()=>({invoke:vi.fn(async()=>({format:'tabplayer-tuning-library',version:1,entries:[]}))}));
 afterEach(cleanup);
 it('all 128 programs are selectable and existing track settings dispatch exact payload',()=>{
   const score=previewEdit(blankProject(),{type:'setNote',target:{track:0,staff:0,bar:0,voice:0,beat:0},string:6,fret:3}).score,onEdit=vi.fn();
@@ -19,9 +20,9 @@ it('all 128 programs are selectable and existing track settings dispatch exact p
 it('existing and new track tuning use note names and reject invalid drafts without an edit',()=>{
   const score=previewEdit(blankProject(),{type:'setNote',target:{track:0,staff:0,bar:0,voice:0,beat:0},string:6,fret:3}).score,onEdit=vi.fn();render(<TrackSettingsPanel score={score} selected={0} busy={false} onEdit={onEdit}/>);
   const input=screen.getByLabelText('Tuning (notes, high to low)');expect(input).toHaveValue('E4 B3 G3 D3 A2 E2');
-  fireEvent.change(input,{target:{value:'E4 B3 G3 D3 A2 D2'}});fireEvent.click(screen.getByRole('button',{name:'Apply tuning'}));expect(onEdit).toHaveBeenLastCalledWith({type:'setTuning',track:0,tuning:[64,59,55,50,45,38]});onEdit.mockClear();
+  fireEvent.change(input,{target:{value:'E4 B3 G3 D3 A2 D2'}});fireEvent.click(screen.getByRole('button',{name:'Apply tuning'}));expect(onEdit).toHaveBeenLastCalledWith({type:'setTuning',track:0,tuning:[64,59,55,50,45,38],tuningName:''});onEdit.mockClear();
   fireEvent.change(input,{target:{value:'E4 B3 nope'}});fireEvent.click(screen.getByRole('button',{name:'Apply tuning'}));expect(onEdit).not.toHaveBeenCalled();expect(screen.getByRole('alert')).toHaveTextContent(/note.*octave|E4/i);
-  fireEvent.click(screen.getByText('Add instrument'));expect(screen.getByLabelText('New track tuning')).toHaveValue('G2 D2 A1 E1');fireEvent.change(screen.getByLabelText('New track tuning'),{target:{value:'G2 D2 A1 Eb1'}});fireEvent.click(screen.getByRole('button',{name:'Add track'}));expect(onEdit).toHaveBeenLastCalledWith({type:'addTrack',name:'Bass',program:33,tuning:[43,38,33,27]});
+  fireEvent.click(screen.getByText('Add instrument'));expect(screen.getByLabelText('New track tuning')).toHaveValue('G2 D2 A1 E1');fireEvent.change(screen.getByLabelText('New track tuning'),{target:{value:'G2 D2 A1 Eb1'}});fireEvent.click(screen.getByRole('button',{name:'Add track'}));expect(onEdit).toHaveBeenLastCalledWith({type:'addTrack',name:'Bass',program:33,tuning:[43,38,33,27],tuningName:''});
 });
 it('starts Add instrument collapsed and keeps invalid feedback with its own tuning draft',()=>{
   const score=previewEdit(blankProject(),{type:'setRest',target:{track:0,staff:0,bar:0,voice:0,beat:0}}).score,onEdit=vi.fn();
@@ -119,13 +120,40 @@ it('changes the string count with an explicit kept side, and the engine keeps no
   fireEvent.change(screen.getByLabelText('Tuning (notes, high to low)'),{target:{value:'E4 B3 G3 D3 A2 E2 B1'}});
   expect(screen.getByRole('group',{name:'6 to 7 strings'})).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button',{name:'Change string count'}));
-  expect(onEdit).toHaveBeenLastCalledWith({type:'setStringCount',track:0,tuning:[64,59,55,50,45,40,35],keep:'high'});
+  expect(onEdit).toHaveBeenLastCalledWith({type:'setStringCount',track:0,tuning:[64,59,55,50,45,40,35],keep:'high',tuningName:''});
   fireEvent.change(screen.getByLabelText('Strings kept in place'),{target:{value:'low'}});
   fireEvent.change(screen.getByLabelText('Tuning (notes, high to low)'),{target:{value:'A4 E4 B3 G3 D3 A2 E2'}});
   fireEvent.click(screen.getByRole('button',{name:'Change string count'}));
-  expect(onEdit).toHaveBeenLastCalledWith({type:'setStringCount',track:0,tuning:[69,64,59,55,50,45,40],keep:'low'});
+  expect(onEdit).toHaveBeenLastCalledWith({type:'setStringCount',track:0,tuning:[69,64,59,55,50,45,40],keep:'low',tuningName:''});
   const before=project.score.tracks[0].staves[0].bars[0].voices[0].beats[0].notes[0].realValue;
-  const seven=previewEdit(project.project,{type:'setStringCount',track:0,tuning:[64,59,55,50,45,40,35],keep:'high'}),note=seven.score.tracks[0].staves[0].bars[0].voices[0].beats[0].notes[0];
+  const seven=previewEdit(project.project,{type:'setStringCount',track:0,tuning:[64,59,55,50,45,40,35],keep:'high',tuningName:''}),note=seven.score.tracks[0].staves[0].bars[0].voices[0].beats[0].notes[0];
   expect([seven.score.tracks[0].staves[0].tuning.length,note.string,note.fret,note.realValue]).toEqual([7,7,3,before]);
-  expect(seven.project.edits.at(-1)).toEqual({type:'setStringCount',track:0,tuning:[64,59,55,50,45,40,35],keep:'high'});
+  expect(seven.project.edits.at(-1)).toEqual({type:'setStringCount',track:0,tuning:[64,59,55,50,45,40,35],keep:'high',tuningName:''});
+});
+
+it('tuning names start from the staff, clear on pitch typing, and saved-tuning Use supplies them to Apply and Add track',()=>{
+  const score=previewEdit(blankProject(),{type:'setRest',target:{track:0,staff:0,bar:0,voice:0,beat:0}}).score,onEdit=vi.fn();score.tracks[0].staves[0].stringTuning.name='Imported';
+  render(<TrackSettingsPanel score={score} selected={0} busy={false} onEdit={onEdit}/>);
+  fireEvent.click(screen.getByRole('button',{name:'Apply tuning'}));expect(onEdit).toHaveBeenLastCalledWith({type:'setTuning',track:0,tuning:[64,59,55,50,45,40],tuningName:'Imported'});
+  const input=screen.getByLabelText('Tuning (notes, high to low)');
+  fireEvent.change(input,{target:{value:'E4 B3 G3 D3 A2 D2'}});fireEvent.click(screen.getByRole('button',{name:'Apply tuning'}));expect(onEdit).toHaveBeenLastCalledWith({type:'setTuning',track:0,tuning:[64,59,55,50,45,38],tuningName:''});
+  fireEvent.click(screen.getByRole('button',{name:'Saved tunings for Tuning (notes, high to low)'}));
+  fireEvent.click(within(within(screen.getByRole('dialog')).getByRole('group',{name:'Guitar · 6 strings'})).getByRole('button',{name:/^DADGAD/}));
+  fireEvent.click(screen.getByRole('button',{name:'Cancel'}));expect(input).toHaveValue('E4 B3 G3 D3 A2 D2');expect(onEdit).toHaveBeenCalledTimes(2);
+  fireEvent.click(screen.getByRole('button',{name:'Saved tunings for Tuning (notes, high to low)'}));
+  fireEvent.click(within(within(screen.getByRole('dialog')).getByRole('group',{name:'Guitar · 6 strings'})).getByRole('button',{name:/^DADGAD/}));fireEvent.click(screen.getByRole('button',{name:'Use tuning'}));
+  expect(input).toHaveValue('D4 A3 G3 D3 A2 D2');expect(onEdit).toHaveBeenCalledTimes(2);
+  fireEvent.click(screen.getByRole('button',{name:'Apply tuning'}));expect(onEdit).toHaveBeenLastCalledWith({type:'setTuning',track:0,tuning:[62,57,55,50,45,38],tuningName:'DADGAD'});
+  fireEvent.click(screen.getByText('Add instrument'));fireEvent.click(screen.getByRole('button',{name:'Add track'}));expect(onEdit).toHaveBeenLastCalledWith({type:'addTrack',name:'Bass',program:33,tuning:[43,38,33,28],tuningName:''});
+  fireEvent.click(screen.getByRole('button',{name:'Saved tunings for New track tuning'}));
+  fireEvent.change(screen.getByLabelText('Saved tuning name'),{target:{value:'Fretless'}});fireEvent.click(screen.getByRole('button',{name:'Use tuning'}));
+  fireEvent.click(screen.getByRole('button',{name:'Add track'}));expect(onEdit).toHaveBeenLastCalledWith({type:'addTrack',name:'Bass',program:33,tuning:[43,38,33,28],tuningName:'Fretless'});
+});
+it('a string-count change sends the draft tuning name and the draft resets when the score changes',()=>{
+  const fresh=(name:string)=>{const score=previewEdit(blankProject(),{type:'setRest',target:{track:0,staff:0,bar:0,voice:0,beat:0}}).score;score.tracks[0].staves[0].stringTuning.name=name;return score;},onEdit=vi.fn();
+  const view=render(<TrackSettingsPanel score={fresh('Imported')} selected={0} busy={false} onEdit={onEdit}/>);
+  fireEvent.change(screen.getByLabelText('Tuning (notes, high to low)'),{target:{value:'E4 B3 G3 D3 A2 E2 B1'}});fireEvent.click(screen.getByRole('button',{name:'Change string count'}));
+  expect(onEdit).toHaveBeenLastCalledWith({type:'setStringCount',track:0,tuning:[64,59,55,50,45,40,35],keep:'high',tuningName:''});
+  view.rerender(<TrackSettingsPanel score={fresh('Other')} selected={0} busy={false} onEdit={onEdit}/>);fireEvent.click(screen.getByRole('button',{name:'Apply tuning'}));
+  expect(onEdit).toHaveBeenLastCalledWith({type:'setTuning',track:0,tuning:[64,59,55,50,45,40],tuningName:'Other'});
 });

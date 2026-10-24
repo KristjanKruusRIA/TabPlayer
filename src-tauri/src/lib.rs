@@ -16,6 +16,7 @@ pub mod reveal;
 mod runtime;
 mod session;
 pub mod settings;
+pub mod tuning_library;
 pub mod workspace;
 
 use file_library::{commands::*, protected::ProtectedPaths, service::FileLibrary};
@@ -224,6 +225,52 @@ async fn harmony_library_remove(
 ) -> Result<harmony::HarmonyLibrary, String> {
     let directory = app.path().app_data_dir().map_err(|err| err.to_string())?;
     tauri::async_runtime::spawn_blocking(move || harmony_library::remove_entry(&directory, &id))
+        .await
+        .map_err(|err| err.to_string())?
+}
+
+/// Where the personal tuning library lives. A diagnostic desktop-test run must name its own absolute folder,
+/// so acceptance runs never read or write the user's real library.
+fn tuning_library_directory(app: &AppHandle) -> Result<PathBuf, String> {
+    #[cfg(feature = "desktop-test")]
+    if std::env::var("TABPLAYER_DESKTOP_TEST").as_deref() == Ok("1") {
+        let selected = std::env::var_os("TABPLAYER_TEST_APP_DATA_DIR")
+            .map(PathBuf::from)
+            .ok_or("Diagnostic startup requires TABPLAYER_TEST_APP_DATA_DIR.")?;
+        if !selected.is_absolute() {
+            return Err("TABPLAYER_TEST_APP_DATA_DIR must be absolute.".into());
+        }
+        return Ok(selected);
+    }
+    app.path().app_data_dir().map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+async fn tuning_library_read(app: AppHandle) -> Result<tuning_library::TuningLibrary, String> {
+    let directory = tuning_library_directory(&app)?;
+    tauri::async_runtime::spawn_blocking(move || tuning_library::read_library(&directory))
+        .await
+        .map_err(|err| err.to_string())?
+}
+
+#[tauri::command]
+async fn tuning_library_put(
+    app: AppHandle,
+    entry: tuning_library::SavedTuning,
+) -> Result<tuning_library::TuningLibrary, String> {
+    let directory = tuning_library_directory(&app)?;
+    tauri::async_runtime::spawn_blocking(move || tuning_library::put_entry(&directory, entry))
+        .await
+        .map_err(|err| err.to_string())?
+}
+
+#[tauri::command]
+async fn tuning_library_remove(
+    app: AppHandle,
+    id: String,
+) -> Result<tuning_library::TuningLibrary, String> {
+    let directory = tuning_library_directory(&app)?;
+    tauri::async_runtime::spawn_blocking(move || tuning_library::remove_entry(&directory, &id))
         .await
         .map_err(|err| err.to_string())?
 }
@@ -771,6 +818,7 @@ mod desktop_test_response_tests {
             name: "Bass".into(),
             tuning: vec![43, 38, 33, 28],
             program: 33,
+            tuning_name: None,
         });
         let command = r#"{"type":"addTrack","name":"Bass","tuning":[43,38,33,28],"program":33}"#;
         assert_eq!(
@@ -908,6 +956,9 @@ pub fn run() {
         harmony_library_read,
         harmony_library_put,
         harmony_library_remove,
+        tuning_library_read,
+        tuning_library_put,
+        tuning_library_remove,
         file_library_snapshot,
         file_library_retry,
         file_library_change,
@@ -972,6 +1023,9 @@ pub fn run() {
         harmony_library_read,
         harmony_library_put,
         harmony_library_remove,
+        tuning_library_read,
+        tuning_library_put,
+        tuning_library_remove,
         file_library_snapshot,
         file_library_retry,
         file_library_change,

@@ -6,7 +6,13 @@ import { allNotes, captureNoteLinks, detachNote, restoreNoteLinks } from './link
 import { scoreFromJson } from '../model-clone';
 import { parseTrackColor } from '../track-color';
 
+const xmlText=/^(?:[\t\n\r\u0020-\uD7FF\uE000-\uFFFD]|[\uD800-\uDBFF][\uDC00-\uDFFF])*$/;
+/** An omitted name is valid; a present one must be a string of XML 1.0 characters (empty allowed). */
+export function validateTuningName(name:unknown):asserts name is string|undefined {
+  if(name!==undefined&&(typeof name!=='string'||!xmlText.test(name)))throw new Error('A tuning name may contain only XML text characters.');
+}
 function validateStaff(staff:model.Staff|null,settings:StaffSettings) {
+  validateTuningName(settings.tuningName);
   if(!Array.isArray(settings.tuning)||settings.tuning.some(p=>!integer(p,0,127))||(!settings.tuning.length&&settings.showTab&&!staff?.isPercussion))throw new Error('Use MIDI tuning pitches from 0 to 127.');
   if(staff&&staff.tuning.length!==settings.tuning.length)throw new Error('Retuning must keep the current string count.');
   if(!integer(settings.capo,0,127)||!integer(settings.transposition,-127,127)||!integer(settings.displayTransposition,-127,127))throw new Error('Invalid capo or transposition.');
@@ -17,9 +23,13 @@ function validateStaff(staff:model.Staff|null,settings:StaffSettings) {
     if(!Number.isFinite(pitch)||pitch<0||pitch>127)throw new Error('Staff settings put a note outside the playable MIDI pitch range.');
   }
 }
+/** The name alphaTab gives an unnamed tuning it recognises; routes that omit a name keep it, as before S15. */
+export function defaultTuningName(tuning:readonly number[]):string {return model.Tuning.findTuning([...tuning])?.name??'';}
 function configure(staff:model.Staff,settings:StaffSettings) {
   staff.stringTuning.tunings=[...settings.tuning];staff.capo=settings.capo;staff.transpositionPitch=settings.transposition;staff.displayTranspositionPitch=settings.displayTransposition;staff.showTablature=settings.showTab;staff.showStandardNotation=settings.showNotation;
   for(const bar of staff.bars)bar.clef=settings.clef;
+  // An omitted name keeps the current one, and an empty one gets alphaTab's label as it did before S15.
+  if(settings.tuningName!==undefined)staff.stringTuning.name=settings.tuningName;else if(!staff.stringTuning.name)staff.stringTuning.name=defaultTuningName(settings.tuning);
 }
 function emptyVoice() {const voice=new model.Voice(),beat=new model.Beat();beat.isEmpty=true;voice.addBeat(beat);return voice;}
 function detachVoice(voice:model.Voice) {for(const beat of voice.beats)for(const note of beat.notes)detachNote(note);}
@@ -62,8 +72,8 @@ function placeBeat(notes:model.Note[],kept:(note:model.Note)=>Place|null,choices
 /** Changes a track's string count. Notes keep their sounding pitch: on their kept string when the fret stays
  * playable, otherwise on a free string of the same beat; chord diagrams follow the kept strings. Everything is
  * planned and checked before the score changes. */
-function setStringCount(track:model.Track,tuning:number[],keep:StringCountKeep) {
-  validateStringCount(tuning,keep);
+function setStringCount(track:model.Track,tuning:number[],keep:StringCountKeep,tuningName?:string) {
+  validateStringCount(tuning,keep);validateTuningName(tuningName);
   const staves=track.staves;
   if(track.isPercussion||staves.some(staff=>staff.isPercussion||!staff.tuning.length))throw new Error('Only stringed guitar or bass tracks have strings to add or remove.');
   if(staves.some(staff=>staff.tuning.length===tuning.length))throw new Error('The string count is unchanged; use Apply tuning to retune.');
@@ -107,7 +117,7 @@ function setStringCount(track:model.Track,tuning:number[],keep:StringCountKeep) 
   }
   for(const {note,string,fret} of moves){note.string=string;note.fret=fret;}
   for(const {chord,strings,source} of chords){chord.strings=strings;setHarmonyChordSource(chord,source);}
-  for(const staff of staves){staff.stringTuning.tunings=[...tuning];staff.stringTuning.name='';}
+  for(const staff of staves){staff.stringTuning.tunings=[...tuning];staff.stringTuning.name=tuningName??defaultTuningName(tuning);}
 }
 export function applyStructureEdit(score:model.Score,command:EditCommand,_editIndex:number):boolean {
   switch(command.type) {
@@ -117,7 +127,7 @@ export function applyStructureEdit(score:model.Score,command:EditCommand,_editIn
       for(const staff of track.staves)for(const voice of staff.bars[0]?.voices??[])for(const automation of voice.beats[0]?.automations??[])if(automation.type===model.AutomationType.Instrument&&automation.ratioPosition===0)automation.value=command.program;
       return true;
     }
-    case 'setStringCount': {setStringCount(trackAt(score,command.track),command.tuning,command.keep);return true;}
+    case 'setStringCount': {setStringCount(trackAt(score,command.track),command.tuning,command.keep,command.tuningName);return true;}
     case 'setTrackColor': {const track=trackAt(score,command.track);track.color=parseTrackColor(command.color);return true;}
     case 'setStaffSettings': {const staff=staffAt(score,command.track,command.staff);validateStaff(staff,command.settings);configure(staff,command.settings);return true;}
     case 'addStaff': {

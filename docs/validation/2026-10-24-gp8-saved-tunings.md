@@ -1,0 +1,114 @@
+# GP8 parity S15: saved personal tunings (2026-10-24)
+
+GP8 keeps a personal library of tunings and shows a tuning's name in the score. TabPlayer had 25 built-in presets and no way to save, name or manage its own. This slice follows Codex's spec (`docs/superpowers/specs/2026-10-22-gp8-saved-tunings-design.md`) and plan (`docs/superpowers/plans/2026-10-22-gp8-saved-tunings.md`). Claude implemented it with two agents, had it reviewed, and ran it on a Windows desktop build.
+
+## Behavior
+- **Where:** each tuning field, in Track settings and in the staff settings panel, has a "Saved tunings…" button. It opens one shared dialog:
+  - a list with a Personal section and the 25 built-ins, grouped by instrument and string count. Every row shows its name and full pitches with octaves, such as "D4 A3 F3 D3 A2 D2";
+  - details holding the selected tuning's name and pitches.
+- **Library actions:** the actions change only the library, never the score.
+  - **Save as new** saves the details as a new personal tuning with its own identity.
+  - **Save changes** renames the selected personal tuning; its pitches cannot change this way.
+  - **Delete** removes the selected personal tuning.
+  - Built-ins cannot be changed or deleted, but can be copied with Save as new.
+  - Two personal tunings may share pitches or names and stay independent.
+- **Use tuning** copies the details' pitches and name into the field's draft and closes the dialog. **Apply tuning** (or **Change string count**) then changes the score in one edit. **Cancel** leaves the draft unchanged.
+  - Typing pitches by hand clears the draft name, in the dialog as well as in the field.
+  - A name is needed to save but not to use.
+- **Storage:**
+  - The library is stored in `tuning-library.json` in the app's data folder, and survives restarts.
+  - A damaged or unrecognised file is reported and left byte-for-byte as it was. It is never reset.
+  - Personal names are 1–80 characters of XML text, with no leading or trailing whitespace.
+- **The document keeps its own name:**
+  - The applied name is a snapshot on the staff.
+  - It is shown in the score's tuning header, saved in projects and exported to GP.
+  - Renaming or deleting the library entry later does not change it.
+  - Undo and Redo restore pitches and name together.
+- **Edit commands:** `setTuning`, `setStringCount`, `addTrack`, and the staff settings of `setStaffSettings` and `addStaff`, take an optional `tuningName`.
+  - Omitted keeps each command's earlier behavior, so existing projects replay unchanged: retuning and staff settings keep the name, filling an empty one with alphaTab's label for a tuning it knows. A string count change, a new track or a new staff takes alphaTab's label for a tuning it knows, and no name otherwise.
+  - `""` clears the name; any other XML text sets it.
+- **GP export:** a name containing `]]>` is exported so it reads back exactly, including any carriage returns, without changing the live score.
+
+## Evidence
+- **Native:**
+  - `src-tauri/src/tuning_library.rs` has 6 tests covering:
+    - a missing file reads as empty and creates nothing;
+    - save, reopen, rename and delete;
+    - same pitches under different identities;
+    - case-insensitive identity, with order preserved;
+    - every invalid entry, name and file, each leaving a corrupt file's bytes unchanged;
+    - the library never touching project or session files.
+  - `src-tauri/src/edit_types.rs`: `tuning_commands_take_an_optional_document_tuning_name` checks the optional field on all five routes. It accepts omitted, `""`, Unicode with `]]>` and a 500-character name, and rejects `null`, numbers and non-XML characters.
+  - The full Rust suite passed: 765 tests.
+- **Editor:**
+  - `src/editor/saved-tunings.test.ts` checks:
+    - each route carrying pitches and name in one edit, through undo, redo and replay;
+    - failed changes carrying neither;
+    - omitted-field compatibility;
+    - clearing, including a cleared name staying empty through rebuilds when alphaTab knows the pitches;
+    - matching validation;
+    - the actual GP export and import of `Öine & <hääl> ]]>`, an empty name, a 500-character name, repeated `]]>` and a carriage return.
+  - `src/tuning/library.test.ts` covers the bridge: exact native calls, validation, copies, the ordered queue and its recovery, and notifications only after success.
+  - `src/tuning/SavedTuningsDialog.test.tsx` covers:
+    - built-ins are immutable;
+    - duplicate pitches stay separate;
+    - save, rename and delete never edit the document;
+    - Use and Cancel;
+    - typing pitches clears the identity;
+    - errors are shown;
+    - late responses are ignored;
+    - a save that settles after another row is chosen leaves that row alone;
+    - pending buttons keep focus.
+  - The callers' tests (`TrackSettingsPanel`, the staff panel, `TuningInput`, `tuning-ui`) check the commands sent. They also check that capo and clef edits keep the name.
+  - `tsc` was clean. The full `vitest` run passed apart from timeouts in five heavy UI files while a build ran alongside; those files passed when rerun on their own.
+- **Desktop:** `tests/desktop/parity-saved-tunings.mjs` ran on a Windows desktop-test build of the final source, made by `tests/desktop/string-count-build.mjs`, and passed. The app was launched twice against its own app-data folder, set with `TABPLAYER_TEST_APP_DATA_DIR`. The run checked:
+  - **First launch:**
+    - The dialog listed the built-ins with full pitch text and no personal tunings, and reading created no file.
+    - Two personal tunings, `Öine & <hääl> ]]>` and "Open D minor copy", were saved with the same pitches. The file held both, with distinct identities.
+    - The project, its history and its revision were unchanged.
+    - Cancel left the draft as it was.
+  - **Second launch:**
+    - Both tunings were listed.
+    - Renaming the second kept its identity, pitches and position.
+    - Use filled the draft without editing.
+    - Apply tuning made exactly one native edit carrying the pitches and the name, and the score's tuning header showed the name.
+  - **Export, undo, delete:**
+    - Exported GP files read back with the expected pitches and name after Apply, Undo (the fixture's own name and tuning) and Redo.
+    - Deleting the library entry left the project unchanged, and the next export still carried the name.
+  - **Other routes:**
+    - An invalid pitch was refused with an alert, and nothing changed.
+    - The built-in seven-string tuning, used from the dialog, went through Change string count as one `setStringCount` edit with its name.
+  - **Short window:** at 1000×420 the dialog body scrolled, and Cancel and Use tuning stayed on screen.
+  - **Throughout:** there were no page errors or IPC fallbacks, and the user's real `tuning-library.json` was unchanged.
+
+## Review
+- **Code review:** one Opus review covered both agents' work and found no High findings. It confirmed:
+  - storage locking, atomic writes and preservation of damaged files;
+  - Rust and editor validation agreeing;
+  - omitted fields keeping their old meaning, including for S14 string count changes;
+  - one edit per Apply, and failed edits leaving nothing behind;
+  - the GP export changing only a copy;
+  - the bridge's queue, and the dialog ignoring late responses after it closes.
+- **Findings and fixes:**
+  - **Medium, fixed:** an explicitly cleared name came back as alphaTab's own label (such as "Guitar Dropped D Tuning") whenever the pitches matched a tuning alphaTab knows. Rebuilding a score now keeps each staff's name.
+  - **Medium, fixed:** a save that finished after the user picked another row relabelled that row, so Use could send the wrong name. A late save now leaves a newer selection alone.
+  - **Low, fixed:**
+    - a carriage return in a name containing `]]>` became a line feed in GP;
+    - the editor and the native store trimmed names differently at U+0085 and U+FEFF;
+    - keyboard focus left the dialog while a save ran;
+    - the dialog stayed open when its track changed;
+    - a failed library read looked like an empty library after a row was chosen.
+  - **Low, kept:** Use trims leading and trailing spaces from the name.
+- **Second round:** the reviewer checked the fixes.
+  - **Medium, fixed:** keeping names through rebuilds would have left unnamed new tracks, staves and string-count changes without the label alphaTab used to give them, so old projects would have replayed differently. Commands without a name now take that label explicitly, as before S15. A third check found the same for an older retune or staff settings change of an unnamed staff, which now fills the empty name the same way and never replaces an existing one. The reviewer approved the fixes.
+  - **Low, fixed:** a carriage return in any tuning name, not only one containing `]]>`, is kept in GP. Labels are matched to staves by position, so names differing only in line endings stay distinct.
+  - **Low, fixed:** keyboard focus left the dialog after a delete. It now moves to the name field.
+  - **Low, kept as a limit:** a name cleared on pitches alphaTab knows reads back from GP with alphaTab's label.
+
+## Limits
+- **Imported and new names:** alphaTab names an unnamed tuning it recognises when a file is read. A new blank project's guitar therefore starts as "Guitar Standard Tuning", and new tracks, staves and string-count changes made without a name take that label. A name cleared on such a tuning stays cleared in TabPlayer, but a GP file saved that way reads back with alphaTab's label.
+- **Trimming:** a name that passes through the dialog is trimmed, so an imported name with leading or trailing spaces loses them if it is used from the dialog. Applying without opening the dialog keeps it.
+- **One window at a time:** another open window sees library changes the next time its dialog opens.
+- **GP read-back:** the desktop run read its exports with alphaTab's loader. The application's own import path was checked in the editor tests, not by reopening the export in the app.
+- **No instrument filtering:** personal tunings are plain pitch lists and are not grouped by instrument.
+- **Test-only folder:** in a desktop-test build the library requires `TABPLAYER_TEST_APP_DATA_DIR`. The harmony library still uses the real app-data folder in test builds, as it did before.

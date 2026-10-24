@@ -31,6 +31,8 @@ export interface TempoPoint { beat: number; bpm: number; linear: boolean }
 export interface StaffSettings {
   tuning: number[]; capo: number; transposition: number; displayTransposition: number; clef: number;
   showTab: boolean; showNotation: boolean;
+  /** Optional document tuning name; omitted keeps the staff's name, '' clears it. */
+  tuningName?: string;
 }
 export interface ChordDefinition { name: string; firstFret: number; frets: number[] }
 export interface ChannelMix { gain: number; pan: number; mute: boolean; solo: boolean }
@@ -84,13 +86,13 @@ export type EditCommand = LyricsCommand | GestureCommand | BarGestureCommand | R
   | { type: 'deleteBeat'; target: BeatTarget }
   | { type: 'appendMeasure' }
   | { type: 'removeMeasure'; bar: number }
-  | { type: 'addTrack'; name: string; tuning: number[]; program: number }
+  | { type: 'addTrack'; name: string; tuning: number[]; program: number; tuningName?: string }
   | { type: 'removeTrack'; track: number }
   | { type: 'moveTrack'; track: number; to: number }
   | { type: 'duplicateTrack'; track: number }
   | { type: 'setTrackColor'; track: number; color: string }
-  | { type: 'setTuning'; track: number; tuning: number[] }
-  | { type: 'setStringCount'; track: number; tuning: number[]; keep: StringCountKeep }
+  | { type: 'setTuning'; track: number; tuning: number[]; tuningName?: string }
+  | { type: 'setStringCount'; track: number; tuning: number[]; keep: StringCountKeep; tuningName?: string }
   | { type: 'setScoreInfo'; title: string; artist: string; tempo: number }
   | { type: 'setScoreMetadata'; fields: ScoreMetadata }
   | { type: 'setDirections'; bar: number; directions: number[] }

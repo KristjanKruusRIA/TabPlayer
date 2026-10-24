@@ -100,18 +100,23 @@ export function exportGpInterchange(score:model.Score,settings:Settings):Uint8Ar
   score=prepareHarmonyGpCarriers(score,settings);
   const lyricBeatIds=new Set<number>();
   const allBeats=(value:model.Score)=>value.tracks.flatMap(track=>track.staves.flatMap(staff=>staff.bars.flatMap(bar=>bar.voices.flatMap(voice=>voice.beats))));
-  if(allBeats(score).some(beat=>beat.lyrics?.some(text=>text.includes(']]>')))){
+  const allStaves=(value:model.Score)=>value.tracks.flatMap(track=>track.staves);
+  // Names the XML text cannot carry as written: a CDATA terminator, or a carriage return the parser turns into a line feed.
+  const tuningNames=score.tracks.map(track=>track.staves.map(staff=>staff.stringTuning.name)),rawTuning=tuningNames.flat().some(name=>name.includes(']]>')||name.includes('\r'));
+  const splitTuning=allStaves(score).some(staff=>staff.stringTuning.name.includes(']]>'));
+  if(splitTuning||allBeats(score).some(beat=>beat.lyrics?.some(text=>text.includes(']]>')))){
     const copy=scoreFromJson(model.JsonConverter.scoreToJson(score),settings);
     restoreNoteLinks(copy,captureNoteLinks(score));copyGpInterchangeSource(score,copy);score=copy;
     // The public writer interpolates CDATA verbatim. Split its terminator on
     // this detached export model so both Track and Beat lyrics remain valid XML.
+    for(const staff of allStaves(score))if(staff.stringTuning.name.includes(']]>'))staff.stringTuning.name=staff.stringTuning.name.replaceAll(']]>',']]]]><![CDATA[>');
     for(const beat of allBeats(score))if(beat.lyrics?.some(text=>text.includes(']]>'))){lyricBeatIds.add(beat.id);beat.lyrics=beat.lyrics.map(text=>text.replaceAll(']]>',']]]]><![CDATA[>'));}
   }
   const beatIds=new Set([...lyricBeatIds,...allBeats(score).filter(beat=>beat.invertBeamDirection).map(beat=>beat.id)]);
   const masterBars=score.masterBars.some(bar=>!!bar.fermata?.size),notation=beatIds.size||masterBars?{beatIds,masterBars}:undefined;
   const lyrics=score.tracks.some(track=>{const source=getLyricsSource(track);return source&&(source.managed||!source.value.visible||source.value.lines.some(line=>line.text.length>0));});
   const harmony=score.tracks.some(track=>track.staves.some(staff=>!!staff.chords?.size));
-  const raw=new exporter.Gp7Exporter().export(score,settings),changes=score.tracks.map(trackMixAutomations),needsXml=harmony||lyrics||!!notation||changes.some(stream=>stream.length>0)||score.tracks.some(track=>track.isPercussion);
+  const raw=new exporter.Gp7Exporter().export(score,settings),changes=score.tracks.map(trackMixAutomations),needsXml=harmony||lyrics||!!notation||changes.some(stream=>stream.length>0)||score.tracks.some(track=>track.isPercussion)||rawTuning;
   const original=sourceEntries.get(score);
   const generated=unzip(raw,settings);
   const entries:Record<string,Uint8Array>={...generated,...original,[gpifPath]:generated[gpifPath]};
@@ -126,6 +131,12 @@ export function exportGpInterchange(score:model.Score,settings:Settings):Uint8Ar
     // text retains the combined literal syllable for both readers.
     for(const line of node.querySelectorAll(':scope > Lyrics > Line'))line.textContent=line.textContent;
   }
+  if(rawTuning)orderedTracks(doc).forEach((node,index)=>node?.querySelectorAll(':scope > Staves > Staff').forEach((staff,at)=>{
+    // As with lyrics, alphaTab's reader keeps only the last adjacent CDATA chunk, and the parser has already turned
+    // carriage returns into line feeds, so these labels are rewritten as plain text from the model, matched by position.
+    const name=tuningNames[index]?.[at],label=staff.querySelector(':scope > Properties > Property[name="Tuning"] > Label');
+    if(label&&name!==undefined&&(name.includes(']]>')||name.includes('\r')))label.textContent=name;
+  }));
   orderedTracks(doc).forEach((node,index)=>{
     if(!node)return;
     const strip=node.querySelector(':scope > RSE > ChannelStrip')!;

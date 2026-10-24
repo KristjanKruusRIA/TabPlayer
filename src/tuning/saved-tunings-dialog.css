@@ -1,0 +1,21 @@
+.chord-dialog.saved-tunings-dialog{width:min(760px,94vw);max-height:90dvh;padding:0;overflow:hidden;display:flex;flex-direction:column}
+.saved-tunings-dialog>header{padding:14px 20px 10px;border-bottom:1px solid #394454;flex:none}
+.saved-tunings-dialog h2{margin:0;color:#edf1f5}
+.saved-tunings-dialog h3{margin:0 0 8px;font-size:13px;font-weight:600;color:#edf1f5}
+.saved-tunings-dialog h4{margin:10px 0 4px;font-size:11px;font-weight:600;color:#97a6b6;text-transform:uppercase;letter-spacing:.06em}
+.saved-tunings-body{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:20px;padding:14px 20px;overflow:auto;min-height:0;flex:1 1 auto;scrollbar-color:#465363 #1d2530}
+.saved-tunings-list,.saved-tunings-details{min-width:0;display:flex;flex-direction:column;gap:8px}
+.saved-tunings-list section+section{margin-top:10px}
+.saved-tunings-dialog ul{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:4px}
+.saved-tuning-row{display:flex;flex-direction:column;align-items:flex-start;gap:2px;width:100%;text-align:left;padding:6px 8px;background:#161c24}
+.saved-tuning-row-name{color:#edf1f5}
+.saved-tuning-row-pitches{color:#97a6b6;font-size:11px;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.saved-tuning-row[aria-pressed="true"]{border-color:#b5df73;background:#273522}
+.saved-tuning-row[aria-pressed="true"] .saved-tuning-row-pitches{color:#d7efb8}
+.saved-tunings-actions{display:flex;flex-wrap:wrap;gap:8px}
+.saved-tuning-problem{margin:0;color:#e6a18e;font-size:11px;line-height:1.5}
+.saved-tunings-footer{display:flex;justify-content:flex-end;gap:8px;padding:12px 20px;border-top:1px solid #394454;background:#1d2530;flex:none}
+.saved-tunings-footer .primary{min-width:112px}
+.saved-tunings-footer button:first-child{min-width:80px}
+.tuning-saved-button{display:block;margin-top:6px}
+@media(max-width:620px){.saved-tunings-body{grid-template-columns:minmax(0,1fr);padding:12px 16px}.saved-tunings-footer,.saved-tunings-dialog>header{padding:12px 16px}}

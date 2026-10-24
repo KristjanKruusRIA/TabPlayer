@@ -679,6 +679,13 @@ pub struct StaffSettings {
     pub clef: i32,
     pub show_tab: bool,
     pub show_notation: bool,
+    /// The tuning's name to snapshot on the staff: omitted keeps each command's earlier behavior, and empty clears it.
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub tuning_name: Option<String>,
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -940,6 +947,13 @@ pub enum EditCommand {
         name: String,
         tuning: Vec<i32>,
         program: u8,
+        /// The tuning's name to snapshot on the staff: omitted keeps each command's earlier behavior, and empty clears it.
+        #[serde(
+            default,
+            deserialize_with = "present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        tuning_name: Option<String>,
     },
     AddPitchedTrack {
         name: String,
@@ -988,11 +1002,25 @@ pub enum EditCommand {
     SetTuning {
         track: u32,
         tuning: Vec<i32>,
+        /// The tuning's name to snapshot on the staff: omitted keeps each command's earlier behavior, and empty clears it.
+        #[serde(
+            default,
+            deserialize_with = "present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        tuning_name: Option<String>,
     },
     SetStringCount {
         track: u32,
         tuning: Vec<i32>,
         keep: StringCountKeep,
+        /// The tuning's name to snapshot on the staff: omitted keeps each command's earlier behavior, and empty clears it.
+        #[serde(
+            default,
+            deserialize_with = "present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        tuning_name: Option<String>,
     },
     SetScoreInfo {
         title: String,
@@ -1204,6 +1232,21 @@ pub enum EditCommand {
     },
 }
 
+/// A tuning name a document can hold: any length of XML 1.0 text, including empty.
+pub fn validate_tuning_name(name: &Option<String>) -> Result<(), String> {
+    let valid = |c: char| {
+        matches!(c, '\t' | '\n' | '\r')
+            || ('\u{20}'..='\u{d7ff}').contains(&c)
+            || ('\u{e000}'..='\u{fffd}').contains(&c)
+            || c >= '\u{10000}'
+    };
+    match name {
+        Some(name) if !name.chars().all(valid) => {
+            Err("A tuning name may contain only XML text characters.".into())
+        }
+        _ => Ok(()),
+    }
+}
 pub fn validate_tuning(tuning: &[i32]) -> Result<(), String> {
     if tuning.is_empty() || tuning.iter().any(|pitch| !(0..=127).contains(pitch)) {
         return Err("Tuning must contain MIDI pitches from 0 to 127.".into());
@@ -1269,6 +1312,7 @@ impl StaffSettings {
         {
             return Err("Invalid staff settings.".into());
         }
+        validate_tuning_name(&self.tuning_name)?;
         enum_range(self.clef, 0, 4)
     }
 }
@@ -1397,9 +1441,13 @@ impl EditCommand {
                 }
             }
             Self::AddTrack {
-                tuning, program, ..
+                tuning,
+                program,
+                tuning_name,
+                ..
             } => {
                 validate_tuning(tuning)?;
+                validate_tuning_name(tuning_name)?;
                 enum_range(*program as i32, 0, 127)?;
             }
             Self::SetTrackInfo { program, .. }
@@ -1414,9 +1462,21 @@ impl EditCommand {
             {
                 return Err("Invalid percussion articulation.".into());
             }
-            Self::SetTuning { tuning, .. } => validate_tuning(tuning)?,
-            Self::SetStringCount { tuning, .. } => {
+            Self::SetTuning {
+                tuning,
+                tuning_name,
+                ..
+            } => {
                 validate_tuning(tuning)?;
+                validate_tuning_name(tuning_name)?;
+            }
+            Self::SetStringCount {
+                tuning,
+                tuning_name,
+                ..
+            } => {
+                validate_tuning(tuning)?;
+                validate_tuning_name(tuning_name)?;
                 if tuning.len() > 12 {
                     return Err("A track supports at most 12 strings.".into());
                 }
@@ -2299,6 +2359,39 @@ mod tests {
         let mut extra = base.clone();
         extra["extra"] = json!(0);
         rejected(&extra);
+    }
+
+    #[test]
+    fn tuning_commands_take_an_optional_document_tuning_name() {
+        let settings = json!({"tuning": [64, 59, 55, 50, 45, 40], "capo": 0, "transposition": 0,
+            "displayTransposition": 0, "clef": 4, "showTab": true, "showNotation": true});
+        for base in [
+            json!({"type": "setTuning", "track": 0, "tuning": [64, 59, 55, 50, 45, 38]}),
+            json!({"type": "setStringCount", "track": 0, "tuning": [64, 59, 55, 50, 45, 40, 35],
+                "keep": "high"}),
+            json!({"type": "addTrack", "name": "Bass", "tuning": [43, 38, 33, 28], "program": 33}),
+            json!({"type": "setStaffSettings", "track": 0, "staff": 0, "settings": settings}),
+            json!({"type": "addStaff", "track": 0, "settings": settings}),
+        ] {
+            // The name sits on the command, or on its staff settings.
+            let named = |name: Value| {
+                let mut value = base.clone();
+                match value.get_mut("settings") {
+                    Some(settings) => settings["tuningName"] = name,
+                    None => value["tuningName"] = name,
+                }
+                value
+            };
+            // Omitted is the earlier shape, and serializes back without the field.
+            assert_eq!(serde_json::to_value(accepted(&base)).unwrap(), base);
+            for name in ["", "Drop D", "Öine & <hääl> ]]>", &"x".repeat(500)] {
+                let value = named(json!(name));
+                assert_eq!(serde_json::to_value(accepted(&value)).unwrap(), value);
+            }
+            for invalid in [json!(null), json!(1), json!("bad\u{1}"), json!("\u{fffe}")] {
+                rejected(&named(invalid));
+            }
+        }
     }
 
     #[test]

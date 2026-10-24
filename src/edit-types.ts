@@ -35,7 +35,8 @@ export interface ChannelMix { gain: number; pan: number; mute: boolean; solo: bo
 export interface FxSettings {
   gate: {enabled:boolean;thresholdDb:number;releaseMs:number};
   compressor: {enabled:boolean;thresholdDb:number;ratio:number;attackMs:number;releaseMs:number;makeupDb:number};
-  amp: {enabled:boolean;model:'clean'|'crunch'|'lead'|'bass';drive:number;gainDb:number};
+  /** The tone stack fields are absent while flat (0 dB). */
+  amp: {enabled:boolean;model:'clean'|'crunch'|'lead'|'bass';drive:number;gainDb:number;bassDb?:number;midDb?:number;trebleDb?:number;presenceDb?:number};
   cabinet: {enabled:boolean;model:'open'|'closed'|'bass'};
   eq: {enabled:boolean;lowDb:number;midDb:number;highDb:number;midHz:number};
   /** `syncQuarterNotes` on a modulation block: quarter notes per cycle when its rate follows the tempo; absent for the free rate. */

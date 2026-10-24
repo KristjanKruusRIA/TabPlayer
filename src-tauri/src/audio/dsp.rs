@@ -36,6 +36,12 @@ block!(Amp {
     model: String = "clean".into(),
     drive: f64 = 0.1,
     gain_db: f64 = 0.0
+} later {
+    // The tone stack after the preamp, in dB: a bass shelf, a mid peak, a treble shelf and a presence peak.
+    bass_db,
+    mid_db,
+    treble_db,
+    presence_db
 });
 block!(Cabinet {
     model: String = "open".into()
@@ -226,6 +232,13 @@ fn vibrato_swing(cents: f64, rate_hz: f64, rate: f64) -> f64 {
         / 2.0
         / (std::f64::consts::TAU * rate_hz)
         * rate
+}
+/// The amp's tone stack: a low shelf at 100 Hz, a mid peak at 650 Hz, a high shelf at 2.5 kHz and a presence peak
+/// at 4.5 kHz.
+const AMP_TONE: [f64; 4] = [100.0, 650.0, 2500.0, 4500.0];
+/// The amp's tone stack gains in dB, in the order of `AMP_TONE`.
+fn amp_tone(amp: &Amp) -> [f64; 4] {
+    [amp.bass_db, amp.mid_db, amp.treble_db, amp.presence_db]
 }
 /// Cycle lengths in quarter notes that a modulation rate can follow: the delay's divisions, then two and four whole
 /// notes for slow sweeps.
@@ -989,6 +1002,10 @@ impl FxSettings {
             ("compressor makeup", self.compressor.makeup_db, 0.0, 24.0),
             ("amp drive", self.amp.drive, 0.0, 1.0),
             ("amp gain", self.amp.gain_db, -24.0, 24.0),
+            ("amp bass", self.amp.bass_db, -12.0, 12.0),
+            ("amp mid", self.amp.mid_db, -12.0, 12.0),
+            ("amp treble", self.amp.treble_db, -12.0, 12.0),
+            ("amp presence", self.amp.presence_db, -12.0, 12.0),
             ("EQ low", self.eq.low_db, -24.0, 24.0),
             ("EQ mid", self.eq.mid_db, -24.0, 24.0),
             ("EQ high", self.eq.high_db, -24.0, 24.0),
@@ -1226,6 +1243,10 @@ impl Biquad {
     fn reset(&mut self) {
         self.z = [[0.0; 2]; 2];
     }
+    /// Whether what the filter still holds of earlier input is below anything audible.
+    fn quiet(&self) -> bool {
+        self.z.iter().flatten().all(|z| z.abs() < 1e-7)
+    }
 }
 
 struct DelayLine {
@@ -1281,6 +1302,13 @@ pub struct TrackDsp {
     amp_dc: [f64; 2],
     amp_previous_input: [f64; 2],
     amp_anti_alias: [[f64; 3]; 2],
+    /// The tone stack's filters and the gains they were set for. They run whenever the amp does, so a flat stack that
+    /// is turned up starts from the signal already flowing through them.
+    amp_tone: [Biquad; 4],
+    cached_amp_tone: [f64; 4],
+    /// The tone stack's playing gains in dB, gliding to the settings at up to 0.01 dB a frame so that a large change
+    /// does not ring the filters.
+    amp_tone_db: [f64; 4],
     cabinet: [Biquad; 3],
     eq: [Biquad; 3],
     /// The graphic EQ's band filters and the gains they were set for.
@@ -1371,6 +1399,7 @@ impl TrackDsp {
         }
         let rate = sample_rate as f64;
         let previous_flanger_depth = settings.flanger.depth_ms;
+        let amp_tone_start = amp_tone(&settings.amp);
         let wah_start = wah_target(&settings.wah, 0.0);
         let drive_start = drive_shape(&settings.drive, rate);
         let reverb_start = reverb_shape(&settings.reverb, rate);
@@ -1389,6 +1418,9 @@ impl TrackDsp {
             amp_dc: [0.0; 2],
             amp_previous_input: [0.0; 2],
             amp_anti_alias: [[0.0; 3]; 2],
+            amp_tone: [Biquad::default(); 4],
+            cached_amp_tone: [f64::NAN; 4],
+            amp_tone_db: amp_tone_start,
             cabinet: [Biquad::default(); 3],
             eq: [Biquad::default(); 3],
             graphic_eq: [Biquad::default(); 10],
@@ -1568,7 +1600,14 @@ impl TrackDsp {
             move_state!(compressor_envelope);
         }
         if running[2] {
-            move_state!(amp_dc, amp_previous_input, amp_anti_alias);
+            move_state!(
+                amp_dc,
+                amp_previous_input,
+                amp_anti_alias,
+                amp_tone,
+                cached_amp_tone,
+                amp_tone_db
+            );
         }
         if running[3] {
             move_state!(cabinet, cached_cabinet);
@@ -2028,6 +2067,50 @@ impl TrackDsp {
                             self.amp_dc[c] += 0.0005 * (colored - self.amp_dc[c]);
                             ((colored - self.amp_dc[c]) * gain) as f32
                         });
+                        let wanted = amp_tone(&f.amp);
+                        if f.amp.enabled && !p.amp.enabled && self.ramp_left == self.ramp_frames {
+                            // Switching the amp on starts its tone stack at its settings, from rest.
+                            self.amp_tone_db = wanted;
+                            for b in &mut self.amp_tone {
+                                b.reset();
+                            }
+                        }
+                        // 0.48 dB a millisecond, so a full 24 dB swing takes 50 ms at any sample rate.
+                        let step = 480.0 / self.rate;
+                        for (playing, wanted) in self.amp_tone_db.iter_mut().zip(wanted) {
+                            *playing = if (wanted - *playing).abs() <= step {
+                                wanted
+                            } else {
+                                *playing + step * (wanted - *playing).signum()
+                            };
+                        }
+                        let tone = self.amp_tone_db;
+                        if tone[0] != self.cached_amp_tone[0] {
+                            self.amp_tone[0].shelf(AMP_TONE[0], tone[0], self.rate, false);
+                        }
+                        if tone[1] != self.cached_amp_tone[1] {
+                            self.amp_tone[1].peak(AMP_TONE[1], tone[1], self.rate);
+                        }
+                        if tone[2] != self.cached_amp_tone[2] {
+                            self.amp_tone[2].shelf(AMP_TONE[2], tone[2], self.rate, true);
+                        }
+                        if tone[3] != self.cached_amp_tone[3] {
+                            self.amp_tone[3].peak_q(AMP_TONE[3], tone[3], self.rate, 1.0);
+                        }
+                        self.cached_amp_tone = tone;
+                        let mut toned = wet;
+                        for b in &mut self.amp_tone {
+                            toned = b.process(toned);
+                        }
+                        // A flat stack passes the amp's output untouched, once the filters have let go of any
+                        // earlier boost or cut. Flat filters with no such remainder pass their input exactly.
+                        let flat = tone == [0.0; 4] && self.amp_tone.iter().all(Biquad::quiet);
+                        if flat {
+                            for b in &mut self.amp_tone {
+                                b.reset();
+                            }
+                        }
+                        let wet = if flat { wet } else { toned };
                         x = blend(x, wet, p.amp.enabled, f.amp.enabled);
                     }
                 }
@@ -2472,6 +2555,10 @@ impl TrackDsp {
         self.amp_dc = [0.0; 2];
         self.amp_previous_input = [0.0; 2];
         self.amp_anti_alias = [[0.0; 3]; 2];
+        for b in &mut self.amp_tone {
+            b.reset();
+        }
+        self.amp_tone_db = amp_tone(&self.settings.amp);
         for b in &mut self.cabinet {
             b.reset();
         }

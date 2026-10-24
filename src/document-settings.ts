@@ -58,14 +58,15 @@ export const syncedBlocks:readonly EffectBlock[]=['vibrato','phaser','flanger','
 const range=(low:number,high:number)=>({low,high}),one=(...values:(string|number)[])=>({one:values}),unit=range(0,1);
 const list=(length:number,each:ReturnType<typeof range>)=>({length,each});
 /** A field added after sounds could be saved: a sound may leave it out. */
-const later=(rule:ReturnType<typeof one>)=>({...rule,later:true});
+const later=<Rule extends ReturnType<typeof range>|ReturnType<typeof one>>(rule:Rule)=>({...rule,later:true});
 type FieldRule=ReturnType<typeof range>|ReturnType<typeof one>|ReturnType<typeof list>|ReturnType<typeof later>;
+const tone=later(range(-12,12));
 const sync=later(one(0,...modulationDivisions.map(([value])=>value)));
 /** Every effect field and its accepted values, as the native FxSettings::validate checks them. */
 const effectRules:Record<EffectBlock,Record<string,FieldRule>>={
   gate:{thresholdDb:range(-96,0),releaseMs:range(1,1000)},
   compressor:{thresholdDb:range(-60,0),ratio:range(1,20),attackMs:range(.1,200),releaseMs:range(1,2000),makeupDb:range(0,24)},
-  amp:{model:one('clean','crunch','lead','bass'),drive:unit,gainDb:range(-24,24)},cabinet:{model:one('open','closed','bass')},
+  amp:{model:one('clean','crunch','lead','bass'),drive:unit,gainDb:range(-24,24),bassDb:tone,midDb:tone,trebleDb:tone,presenceDb:tone},cabinet:{model:one('open','closed','bass')},
   eq:{lowDb:range(-24,24),midDb:range(-24,24),highDb:range(-24,24),midHz:range(200,5000)},
   chorus:{rateHz:range(.1,8),depthMs:range(0,20),mix:unit,syncQuarterNotes:sync},
   wah:{mode:one('manual','auto'),position:unit,resonance:unit,sensitivity:unit,mix:unit},

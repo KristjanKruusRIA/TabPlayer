@@ -1,4 +1,5 @@
 import {validateEngraving} from './engraving/projection';
+import { validateStringCount } from './editor/structure';
 import {validateStrokePattern} from './editor/range-edits';
 import {validatePageLayout} from './engraving/page';
 import {validateHarmonyChord} from './harmony/chord-source';
@@ -9,7 +10,7 @@ import {parseTrackColor} from './track-color';
 const shapes:Record<string,readonly string[]>={
   setNote:['target','string','fret'],removeNote:['target','string'],setRest:['target'],setDuration:['target','duration','dots'],
   insertBeat:['target','duration','dots'],deleteBeat:['target'],appendMeasure:[],removeMeasure:['bar'],
-  addTrack:['name','tuning','program'],removeTrack:['track'],moveTrack:['track','to'],duplicateTrack:['track'],setTrackColor:['track','color'],setTuning:['track','tuning'],setScoreInfo:['title','artist','tempo'],
+  addTrack:['name','tuning','program'],removeTrack:['track'],moveTrack:['track','to'],duplicateTrack:['track'],setTrackColor:['track','color'],setTuning:['track','tuning'],setStringCount:['track','tuning','keep'],setScoreInfo:['title','artist','tempo'],
   setNoteTechniques:['target','string','patch'],setBeatTechniques:['target','patch'],setNoteLink:['from','to','kind'],
   setBeatRhythm:['target','duration','dots','tupletNumerator','tupletDenominator','graceType'],
   setTrackInfo:['track','name','shortName','program'],setStaffSettings:['track','staff','settings'],addStaff:['track','settings'],
@@ -183,6 +184,7 @@ export function validateParityCommand(value:unknown):void {
   }
   if(type==='setSelectionStrokes')validateStrokePattern(edit.technique,edit.pattern);
   if(type==='setSelectionTies')flag(edit.tied);
+  if(type==='setStringCount')validateStringCount(edit.tuning,edit.keep);
   if(type==='insertMeasures'){integer(edit.beforeBar);integer(edit.count,1000);if(edit.count===0)throw new Error('Insert at least one measure.');}
   if(type==='removeMeasures'){integer(edit.firstBar);integer(edit.lastBar);if(Number(edit.firstBar)>Number(edit.lastBar))throw new Error('Invalid measure range.');}
   if(type==='pasteMusic'){validateMusicClipEnvelope(edit.clip);pasteOptions(edit.options);}

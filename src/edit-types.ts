@@ -13,6 +13,8 @@ export interface IndexedNoteTarget { target: BeatTarget; noteIndex: number }
 export interface ScoreMetadata {
   subTitle:string; album:string; words:string; music:string; copyright:string; tab:string; notices:string; instructions:string;
 }
+/** Which existing strings stay in place when a track gains or loses strings. */
+export type StringCountKeep = 'high' | 'low';
 export type LinkKind = 'tie' | 'hammerPull' | 'slur';
 export interface PitchCurve { type: number; style: number; points: Array<{offset: number; value: number}> }
 export interface NoteTechniques {
@@ -88,6 +90,7 @@ export type EditCommand = LyricsCommand | GestureCommand | BarGestureCommand | R
   | { type: 'duplicateTrack'; track: number }
   | { type: 'setTrackColor'; track: number; color: string }
   | { type: 'setTuning'; track: number; tuning: number[] }
+  | { type: 'setStringCount'; track: number; tuning: number[]; keep: StringCountKeep }
   | { type: 'setScoreInfo'; title: string; artist: string; tempo: number }
   | { type: 'setScoreMetadata'; fields: ScoreMetadata }
   | { type: 'setDirections'; bar: number; directions: number[] }

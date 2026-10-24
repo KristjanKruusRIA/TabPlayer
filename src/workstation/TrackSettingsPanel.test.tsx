@@ -112,3 +112,20 @@ it('disables removal for the sole track and all commits while busy',()=>{
   view.rerender(<TrackSettingsPanel score={score} selected={0} busy onEdit={()=>{}}/>);
   for(const name of ['Apply tuning','Apply instrument settings','Add track','Add pitched track','Add percussion track'])expect(screen.getByRole('button',{name})).toBeDisabled();
 });
+it('changes the string count with an explicit kept side, and the engine keeps note pitches',()=>{
+  const project=previewEdit(blankProject(),{type:'setNote',target:{track:0,staff:0,bar:0,voice:0,beat:0},string:6,fret:3}),onEdit=vi.fn();
+  render(<TrackSettingsPanel score={project.score} selected={0} busy={false} onEdit={onEdit}/>);
+  expect(screen.queryByLabelText('Strings kept in place')).toBeNull();
+  fireEvent.change(screen.getByLabelText('Tuning (notes, high to low)'),{target:{value:'E4 B3 G3 D3 A2 E2 B1'}});
+  expect(screen.getByRole('group',{name:'6 to 7 strings'})).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button',{name:'Change string count'}));
+  expect(onEdit).toHaveBeenLastCalledWith({type:'setStringCount',track:0,tuning:[64,59,55,50,45,40,35],keep:'high'});
+  fireEvent.change(screen.getByLabelText('Strings kept in place'),{target:{value:'low'}});
+  fireEvent.change(screen.getByLabelText('Tuning (notes, high to low)'),{target:{value:'A4 E4 B3 G3 D3 A2 E2'}});
+  fireEvent.click(screen.getByRole('button',{name:'Change string count'}));
+  expect(onEdit).toHaveBeenLastCalledWith({type:'setStringCount',track:0,tuning:[69,64,59,55,50,45,40],keep:'low'});
+  const before=project.score.tracks[0].staves[0].bars[0].voices[0].beats[0].notes[0].realValue;
+  const seven=previewEdit(project.project,{type:'setStringCount',track:0,tuning:[64,59,55,50,45,40,35],keep:'high'}),note=seven.score.tracks[0].staves[0].bars[0].voices[0].beats[0].notes[0];
+  expect([seven.score.tracks[0].staves[0].tuning.length,note.string,note.fret,note.realValue]).toEqual([7,7,3,before]);
+  expect(seven.project.edits.at(-1)).toEqual({type:'setStringCount',track:0,tuning:[64,59,55,50,45,40,35],keep:'high'});
+});

@@ -137,6 +137,25 @@ impl TryFrom<String> for StringMoveDirection {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", try_from = "String")]
+pub enum StringCountKeep {
+    High,
+    Low,
+}
+
+impl TryFrom<String> for StringCountKeep {
+    type Error = String;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        match value.as_str() {
+            "high" => Ok(Self::High),
+            "low" => Ok(Self::Low),
+            _ => Err("Keep the high or the low strings.".into()),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", try_from = "String")]
 pub enum StrokeTechnique {
     Pick,
     Brush,
@@ -970,6 +989,11 @@ pub enum EditCommand {
         track: u32,
         tuning: Vec<i32>,
     },
+    SetStringCount {
+        track: u32,
+        tuning: Vec<i32>,
+        keep: StringCountKeep,
+    },
     SetScoreInfo {
         title: String,
         artist: String,
@@ -1391,6 +1415,12 @@ impl EditCommand {
                 return Err("Invalid percussion articulation.".into());
             }
             Self::SetTuning { tuning, .. } => validate_tuning(tuning)?,
+            Self::SetStringCount { tuning, .. } => {
+                validate_tuning(tuning)?;
+                if tuning.len() > 12 {
+                    return Err("A track supports at most 12 strings.".into());
+                }
+            }
             Self::SetScoreInfo { tempo, .. } => validate_tempo(*tempo)?,
             Self::SetTrackLyrics { lines, .. } if lines.len() > 5 => {
                 return Err("A track supports at most five lyric lines.".into());
@@ -2237,6 +2267,38 @@ mod tests {
             value[field] = invalid;
             rejected(&value);
         }
+    }
+
+    #[test]
+    fn string_count_changes_take_one_to_twelve_pitches_and_a_kept_side() {
+        let base = json!({"type": "setStringCount", "track": 0,
+            "tuning": [64, 59, 55, 50, 45, 40, 35], "keep": "high"});
+        assert_eq!(serde_json::to_value(accepted(&base)).unwrap(), base);
+        for (field, valid) in [
+            ("keep", json!("low")),
+            ("tuning", json!([40])),
+            ("tuning", json!(vec![40; 12])),
+        ] {
+            let mut value = base.clone();
+            value[field] = valid;
+            accepted(&value);
+        }
+        for (field, invalid) in [
+            ("keep", json!("top")),
+            ("keep", json!(null)),
+            ("tuning", json!([])),
+            ("tuning", json!(vec![40; 13])),
+            ("tuning", json!([128])),
+            ("tuning", json!([-1])),
+            ("track", json!(-1)),
+        ] {
+            let mut value = base.clone();
+            value[field] = invalid;
+            rejected(&value);
+        }
+        let mut extra = base.clone();
+        extra["extra"] = json!(0);
+        rejected(&extra);
     }
 
     #[test]

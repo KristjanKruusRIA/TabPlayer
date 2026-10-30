@@ -122,3 +122,9 @@ it('draws_the_lowest_string_at_the_bottom_when_horizontal_and_at_the_left_when_v
   render(<ScaleDiagramView diagram={{name:'',strings:6,frets:5,firstFret:1,orientation:'vertical',showFretMarkers:false,marks}}/>);
   expect(position('String 1, fret 1: circle mark').x).toBeLessThan(position('String 6, fret 1: circle mark').x);
 });
+
+it('keeps one tab stop when the selected mark falls outside the fret window',()=>{
+  render(<ScaleDiagramView diagram={{name:'',strings:6,frets:5,firstFret:1,orientation:'horizontal',showFretMarkers:false,marks:[]}} selected={{string:3,fret:20}} onCell={()=>{}}/>);
+  const stops=Array.from(document.querySelectorAll('[data-cell]')).filter(item=>item.getAttribute('tabindex')==='0');
+  expect(stops).toHaveLength(1);expect(stops[0].getAttribute('data-cell')).toBe('6/0');
+});

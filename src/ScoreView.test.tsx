@@ -218,13 +218,33 @@ it('resets persistent public highlight endpoints and waits for current render bo
   rendered.rerender(<ScoreView {...props} score={next} editorSelection={null}/>);
   expect(api.rangeEndpoints?.[0]).toBe(api.rangeEndpoints?.[1]);expect(api.playbackRange).toEqual({startTick:1920,endTick:3840});
 });
-it('draws each scale diagram above its beat in the shown tracks and removes it when the beat is not rendered',()=>{
+it('draws a chip for each scale diagram above its beat, opens the diagram on hover or focus, and removes it when the beat is not rendered',()=>{
   const score=music(),beat=score.tracks[0].staves[0].bars[0].voices[0].beats[1];
   setScaleDiagram(beat,{name:'Shape',strings:6,frets:5,firstFret:1,orientation:'horizontal',showFretMarkers:true,marks:[newMark(1,3),newMark(6,0,'square')]});
   const props={score,track:0,zoom:100,profile:'ScoreTab',playback:null,onSelect:vi.fn(),editTarget:target};
   const rendered=render(<ScoreView {...props}/>),api=view.api as FakeView;act(()=>api.postRenderFinished.emit());
-  const diagram=screen.getByRole('group',{name:'Scale diagram Shape'});expect((diagram.closest('.score-scale-diagram') as HTMLElement).style.left).toBe('80px');
-  expect(screen.getByLabelText('String 6, open: square mark')).toBeTruthy();
-  api.boundsLookup.findBeats=()=>[];act(()=>api.postRenderFinished.emit());expect(screen.queryByRole('group',{name:'Scale diagram Shape'})).toBeNull();
+  const chip=screen.getByRole('button',{name:'Show scale diagram Shape'}),box=chip.closest('.score-scale-diagram') as HTMLElement;
+  expect(box.style.left).toBe('80px');expect(Number.parseFloat(box.style.top)).toBeGreaterThanOrEqual(0);
+  expect(screen.queryByRole('group',{name:'Scale diagram Shape'})).toBeNull();
+  fireEvent.mouseEnter(box);expect(screen.getByRole('group',{name:'Scale diagram Shape'})).toBeTruthy();expect(screen.getByLabelText('String 6, open: square mark')).toBeTruthy();
+  fireEvent.mouseLeave(box);expect(screen.queryByRole('group',{name:'Scale diagram Shape'})).toBeNull();
+  fireEvent.focus(chip);expect(screen.getByRole('group',{name:'Scale diagram Shape'})).toBeTruthy();fireEvent.blur(chip);expect(screen.queryByRole('group',{name:'Scale diagram Shape'})).toBeNull();
+  api.boundsLookup.findBeats=()=>[];act(()=>api.postRenderFinished.emit());expect(screen.queryByRole('button',{name:'Show scale diagram Shape'})).toBeNull();
+  rendered.unmount();
+});
+it('packs chips of adjacent beats so none covers another and keeps them above the first staff',()=>{
+  const score=music(),beats=score.tracks[0].staves[0].bars[0].voices[0].beats;
+  beats.slice(0,3).forEach((beat,index)=>setScaleDiagram(beat,{name:`Long diagram ${index}`,strings:6,frets:12,firstFret:1,orientation:'horizontal',showFretMarkers:true,marks:[newMark(1,3)]}));
+  const props={score,track:0,zoom:100,profile:'ScoreTab',playback:null,onSelect:vi.fn(),editTarget:target};
+  const rendered=render(<ScoreView {...props}/>),api=view.api as FakeView;act(()=>api.postRenderFinished.emit());
+  const boxes=screen.getAllByRole('button',{name:/Show scale diagram Long diagram/}).map(chip=>({box:chip.closest('.score-scale-diagram') as HTMLElement,width:Number.parseFloat(chip.style.width)}));
+  expect(boxes).toHaveLength(3);
+  for(let i=1;i<boxes.length;i++){
+    expect(boxes[i].box.style.top).toBe(boxes[i-1].box.style.top);
+    expect(Number.parseFloat(boxes[i].box.style.left)).toBeGreaterThanOrEqual(Number.parseFloat(boxes[i-1].box.style.left)+boxes[i-1].width);
+  }
+  // The first staff starts 40px down; every chip sits entirely above it and never above the top edge.
+  for(const {box} of boxes){const top=Number.parseFloat(box.style.top);expect(top).toBeGreaterThanOrEqual(0);expect(top+16).toBeLessThanOrEqual(40);}
+  act(()=>api.renderStarted.emit(false));expect(screen.queryAllByRole('button',{name:/Show scale diagram/})).toHaveLength(0);
   rendered.unmount();
 });

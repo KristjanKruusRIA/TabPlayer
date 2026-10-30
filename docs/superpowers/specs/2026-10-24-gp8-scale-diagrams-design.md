@@ -41,8 +41,8 @@ The Scale browser gains a **Scale diagram** section when opened from the app (it
 ## Rendering
 
 - `ScaleDiagramView` draws the diagram (strings, frets, nut or starting fret, fret markers, each mark's shape, colour and text), in both orientations. It is the editing surface in the Scale browser.
-- **In the score:** `ScoreView` draws a read-only `ScaleDiagramView` for each diagram of the shown tracks, at 45% of its natural size, anchored above the staff at the left edge of its beat from `boundsLookup.findBeats`, and re-places it after every render, zoom or layout change (beside the other overlays). It is hidden while a render is running or when the beat is not rendered. alphaTab reserves no space for it, so it can overlap notation above the staff.
-- **Limits:** the diagram is a screen overlay only. PDF, PNG, SVG and print output (rendered by alphaTab) do not contain it, and GP8 does not display it (see "What GP and alphaTab can carry").
+- **In the score:** `ScoreView` draws one compact chip (a button with the diagram's name) above the staff at the left edge of each diagram's beat, from `boundsLookup.findBeats`, and re-places it after every render, zoom or layout change. Hovering or focusing a chip opens the read-only `ScaleDiagramView` at 45% of its natural size below it, on top of its neighbours, so no mark is permanently hidden. Chips on one row are packed left to right with a 2px gap, so a later chip never covers an earlier one; a packed chip can sit slightly right of its beat. Chips are cleared when a render starts and hidden when the beat is not rendered. Each chip is 16px tall and sits in the 18px above its staff, clamped to the top edge.
+- **Limits:** the diagram is a screen overlay only. PDF, PNG, SVG and print output (rendered by alphaTab) omit diagrams, and GP8 will not draw them (see "What GP and alphaTab can carry"). alphaTab reserves no space, so a chip can touch notation above a staff when the gap is under 18px. There is no virtualisation: every diagram of the shown tracks gets an element, which a score with very many diagrams will feel.
 
 - The Scale browser shows the same view for the selected beat.
 

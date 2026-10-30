@@ -69,9 +69,11 @@ export async function runScaleDiagramAcceptance({buildPath}={}){
     const diagramSection=()=>scales().getByRole('region',{name:'Scale diagram',exact:true});
     const inScore=()=>page.locator('.score-scale-diagram');
     const centre=async locator=>{const box=await locator.boundingBox();assert.ok(box);return {x:box.x+box.width/2,y:box.y+box.height/2};};
-    // The score draws the diagram above the staff; string 9 is the highest string and string 5 lies below it.
+    // The score draws a chip above the staff that opens the diagram; string 9 is the highest string and string 5 lies below it.
     const assertDrawn=async label=>{
-      await inScore().waitFor();assert.equal(await inScore().count(),1,`${label}: one diagram in the score`);
+      await inScore().waitFor();assert.equal(await inScore().count(),1,`${label}: one diagram chip in the score`);
+      // The chip opens the diagram on hover or focus, so no mark is hidden by a neighbour.
+      await inScore().getByRole('button',{name:'Show scale diagram Open position',exact:true}).hover();
       await inScore().getByRole('group',{name:'Scale diagram Open position',exact:true}).waitFor();
       const high=await centre(inScore().getByLabel('String 9, open',{exact:false})),lower=await centre(inScore().getByLabel('String 5, fret 3',{exact:false}));
       assert.ok(high.y<lower.y,`${label}: the highest string is drawn above a lower string`);

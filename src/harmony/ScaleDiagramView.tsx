@@ -39,7 +39,8 @@ export function ScaleDiagramView({diagram,selected=null,onCell,onRemove}:ScaleDi
   };
   const size=scaleDiagramSize(diagram),frets=Array.from({length:diagram.frets},(_,i)=>diagram.firstFret+i),svg=useRef<SVGSVGElement>(null);
   const [current,setCurrent]=useState<{string:number;fret:number}|null>(null);
-  const stop=current&&current.string<=strings&&(current.fret===0||(current.fret>=diagram.firstFret&&current.fret<diagram.firstFret+diagram.frets))?current:selected&&selected.string<=strings?selected:{string:strings,fret:0};
+  const inside=(at:{string:number;fret:number}|null)=>!!at&&at.string>=1&&at.string<=strings&&(at.fret===0||(at.fret>=diagram.firstFret&&at.fret<diagram.firstFret+diagram.frets));
+  const stop=inside(current)?current!:inside(selected)?selected!:{string:strings,fret:0};
   function move(event:KeyboardEvent,string:number,fret:number) {
     // Arrows follow the picture: along the neck is left/right when horizontal and up/down when vertical.
     const step=(dAlong:number,dAcross:number)=>{

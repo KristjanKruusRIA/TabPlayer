@@ -14,8 +14,10 @@ import { describeScoreError,type ScoreError } from './editor/score-errors';
 import { listScaleDiagrams,type ScaleDiagram } from './harmony/scale-diagram';
 import { ScaleDiagramView,scaleDiagramSize } from './harmony/ScaleDiagramView';
 import './ScoreView.css';
-/** Scale diagrams are drawn this fraction of their natural size, above the staff, anchored at their beat. */
-const diagramScale=.45;
+/** A scale diagram is a compact chip above the staff at its beat; hovering or focusing it opens the diagram at this fraction of its natural size. */
+const diagramScale=.45,chipHeight=16,chipGap=2;
+const chipWidth=(diagram:ScaleDiagram)=>18+6*Math.min(14,(diagram.name||'Scale').length);
+const chipLabel=(diagram:ScaleDiagram)=>(diagram.name||'Scale').slice(0,14);
 
 const address=(beat:model.Beat):BeatTarget=>({track:beat.voice.bar.staff.track.index,staff:beat.voice.bar.staff.index,bar:beat.voice.bar.index,voice:beat.voice.index,beat:beat.index});
 const sameLane=(a:VoiceAddress,b:VoiceAddress)=>a.track===b.track&&a.staff===b.staff&&a.voice===b.voice;
@@ -79,7 +81,7 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
   const [caret,setCaret]=useState<(Marker&{entry:boolean})|null>(null),caretElement=useRef<HTMLSpanElement>(null),revealCaret=useRef(false),rendering=useRef(false);
   const refresh=useRef(()=>{}),refreshCaret=useRef(()=>{}),refreshErrors=useRef(()=>{});
   const [errorBlocks,setErrorBlocks]=useState<(Marker&{label:string})[]>([]);
-  const refreshDiagrams=useRef(()=>{}),[diagramBlocks,setDiagramBlocks]=useState<Array<{x:number;y:number;diagram:ScaleDiagram}>>([]);
+  const refreshDiagrams=useRef(()=>{}),[diagramBlocks,setDiagramBlocks]=useState<Array<{x:number;y:number;w:number;diagram:ScaleDiagram}>>([]),[openDiagram,setOpenDiagram]=useState<number|null>(null);
   const editBeat=editTarget?score.tracks[editTarget.track]?.staves[editTarget.staff]?.bars[editTarget.bar]?.voices[editTarget.voice]?.beats[editTarget.beat]:undefined;
   const editLocation=editBeat&&editTarget?`Editing ${score.tracks[editTarget.track].name || `track ${editTarget.track+1}`}, measure ${editTarget.bar+1}, beat ${editTarget.beat+1}, voice ${editTarget.voice+1}${editBeat.isEmpty?', empty':editBeat.isRest?', rest':''}${editNoteIndex!=null?`, note ${editNoteIndex+1}`:editString?`, string ${editString}`:''}`:'';
   const canonicalBeat=(beat:model.Beat)=>{
@@ -149,15 +151,19 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
   refreshDiagrams.current=()=>{
     const value=current.current,view=api.current;
     if(!view||rendering.current){setDiagramBlocks([]);return;}
-    setDiagramBlocks(listScaleDiagrams(value.score).flatMap(({target,diagram})=>{
+    const found=listScaleDiagrams(value.score).flatMap(({target,diagram})=>{
       if(!value.tracks.includes(target.track))return [];
       const source=value.score.tracks[target.track]?.staves[target.staff]?.bars[target.bar]?.voices[target.voice]?.beats[target.beat],beat=source?renderedBeat(source):null;
       const bound=beat?(view.boundsLookup?.findBeats(beat)??[]).find(item=>item.beat===beat):null;
       if(!beat||!bound)return [];
-      const size=scaleDiagramSize(diagram),height=size.height*diagramScale,box=bound.realBounds;
-      const rect=mapped({x:box.x,y:box.y,w:box.w,h:box.h},beatSystem(beat));
+      const box=bound.realBounds,rect=mapped({x:box.x,y:box.y,w:box.w,h:box.h},beatSystem(beat));
       if(!rect||![rect.x,rect.y].every(Number.isFinite))return [];
-      return [{x:Math.max(0,rect.x),y:Math.max(0,rect.y-height-2),diagram}];
+      return [{x:Math.max(0,rect.x),y:Math.max(0,rect.y-chipHeight-chipGap),w:chipWidth(diagram),diagram}];
+    });
+    // Chips on one row are packed left to right, so a later one never covers an earlier one.
+    const ends=new Map<number,number>();
+    setDiagramBlocks(found.sort((p,q)=>p.y-q.y||p.x-q.x).map(block=>{
+      const x=Math.max(block.x,(ends.get(block.y)??-Infinity)+chipGap);ends.set(block.y,x+block.w);return {...block,x};
     }));
   };
   const placeHandles=(event:PlaybackHighlightChangeEventArgs)=>{
@@ -227,7 +233,7 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
     };
     pointerActions.current={downBeat,downNote,move};
     const subscriptions=[view.beatMouseDown.on(downBeat),view.noteMouseDown.on(downNote),view.beatMouseMove.on(move),view.beatMouseUp.on(()=>{drag.current=null;}),view.renderStarted.on(()=>{
-      collecting=true;chunks=[];generation=layoutCurrent.current;rendering.current=true;setCompleted(previous=>previous?.error?previous:null);setCaret(null);setMarkers([]);setHandles(null);setRangeBlocks([]);setErrorBlocks([]);adapter.renderStarted();
+      collecting=true;chunks=[];generation=layoutCurrent.current;rendering.current=true;setCompleted(previous=>previous?.error?previous:null);setCaret(null);setMarkers([]);setHandles(null);setRangeBlocks([]);setErrorBlocks([]);setDiagramBlocks([]);setOpenDiagram(null);adapter.renderStarted();
     }),view.renderer.partialRenderFinished.on(event=>{
       if(collecting&&typeof event.renderResult==='string')chunks.push({id:event.id,x:event.x,y:event.y,width:event.width,height:event.height,firstMasterBarIndex:event.firstMasterBarIndex,lastMasterBarIndex:event.lastMasterBarIndex,svg:event.renderResult});
     }),view.postRenderFinished.on(()=>{
@@ -294,7 +300,10 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
     <span ref={beatElement} hidden className="score-playback-beat" aria-hidden="true"/>
     {rangeBlocks.map((block,index)=><span key={index} className="score-range-block" style={{left:block.x,top:block.y,width:block.w,height:block.h}}/>)}
     {errorBlocks.map((block,index)=><span key={index} role="img" aria-label={block.label} className="score-error-bar" style={{left:block.x,top:block.y,width:block.w,height:block.h}}/>)}
-    {diagramBlocks.map((block,index)=><div key={index} className="score-scale-diagram" style={{position:'absolute',left:block.x,top:block.y,width:scaleDiagramSize(block.diagram).width*diagramScale,pointerEvents:'none',border:'1px solid #97a6b6',borderRadius:4,overflow:'hidden'}}><ScaleDiagramView diagram={block.diagram}/></div>)}
+    {diagramBlocks.map((block,index)=><div key={index} className="score-scale-diagram" style={{position:'absolute',left:block.x,top:block.y,zIndex:openDiagram===index?6:2}} onMouseEnter={()=>setOpenDiagram(index)} onMouseLeave={()=>setOpenDiagram(open=>open===index?null:open)} onFocus={()=>setOpenDiagram(index)} onBlur={()=>setOpenDiagram(open=>open===index?null:open)}>
+      <button type="button" className="score-scale-diagram-chip" aria-label={`Show scale diagram ${block.diagram.name||'without a name'}`} aria-expanded={openDiagram===index} style={{height:chipHeight,width:block.w,padding:'0 4px',font:'600 10px sans-serif',border:'1px solid #97a6b6',borderRadius:4,background:'#fffdf8',color:'#161c24',overflow:'hidden',whiteSpace:'nowrap',textOverflow:'ellipsis',cursor:'pointer'}}>▦ {chipLabel(block.diagram)}</button>
+      {openDiagram===index&&<div style={{position:'absolute',left:0,top:chipHeight+chipGap,width:scaleDiagramSize(block.diagram).width*diagramScale,border:'1px solid #97a6b6',borderRadius:4,overflow:'hidden',background:'#fffdf8',pointerEvents:'none'}}><ScaleDiagramView diagram={block.diagram}/></div>}
+    </div>)}
     <span className="score-edit-announcement" role="status" aria-live="polite" aria-atomic="true">{editLocation}</span>
     {caret&&<span ref={caretElement} role="img" aria-label="Edit target" className="score-edit-target" style={{left:caret.x,top:caret.y,width:caret.w,height:caret.h}}>{caret.entry&&<span className="score-edit-entry" aria-hidden="true">{editString?`String ${editString}`:'Entry'}</span>}</span>}
     {markers.map((marker,index)=><span key={index} role="img" aria-label={`Selected note ${index+1}`} style={{position:'absolute',left:marker.x,top:marker.y,width:marker.w,height:marker.h,boxSizing:'border-box',border:'2px solid #9aaf38',background:'rgba(185,205,105,.3)',borderRadius:3,pointerEvents:'none'}}/>)}

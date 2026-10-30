@@ -40,12 +40,15 @@ export interface StaffSettings {
 }
 export interface ChordDefinition { name: string; firstFret: number; frets: number[] }
 export interface ChannelMix { gain: number; pan: number; mute: boolean; solo: boolean }
+/** A cabinet impulse response by the identity it has in a user's library (32 hex digits of the file's hash), with the name it was picked under and a level trim. Documents never hold the audio. */
+export interface CabinetIrRef { id:string;name:string;levelDb:number }
 export interface FxSettings {
   gate: {enabled:boolean;thresholdDb:number;releaseMs:number};
   compressor: {enabled:boolean;thresholdDb:number;ratio:number;attackMs:number;releaseMs:number;makeupDb:number};
   /** The tone stack fields are absent while flat (0 dB). */
   amp: {enabled:boolean;model:'clean'|'crunch'|'lead'|'metal'|'bass'|'bassDrive';drive:number;gainDb:number;bassDb?:number;midDb?:number;trebleDb?:number;presenceDb?:number};
-  cabinet: {enabled:boolean;model:'open'|'closed'|'combo'|'bass'|'bassStack'};
+  /** `ir` names a cabinet impulse response in the user's own library, which plays in place of `model` where the library has it. */
+  cabinet: {enabled:boolean;model:'open'|'closed'|'combo'|'bass'|'bassStack';ir?:CabinetIrRef};
   eq: {enabled:boolean;lowDb:number;midDb:number;highDb:number;midHz:number};
   /** `syncQuarterNotes` on a modulation block: quarter notes per cycle when its rate follows the tempo; absent for the free rate. */
   chorus: {enabled:boolean;rateHz:number;depthMs:number;mix:number;syncQuarterNotes?:number};

@@ -3,6 +3,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import userEvent from '@testing-library/user-event';
+import { readFileSync } from 'node:fs';
 import { useState } from 'react';
 import { Dialog } from './Dialog';
 import { Fader } from './Fader';
@@ -143,4 +144,14 @@ it('handles Escape and Tab at document level, recovers focus from body, and keep
   unmount();
   expect(background).not.toHaveAttribute('inert');
   background.remove();
+});
+
+it('defines the shared UI tokens and styles primary buttons and fields',()=>{
+  const css=readFileSync('src/ui/ui.css','utf8');
+  for(const token of ['--tp-danger','--tp-focus','--tp-r-sm','--tp-r-md','--tp-r-lg','--tp-shadow-float']){
+    expect(css).toContain(token);
+  }
+  expect(css).toMatch(/\.tp-button\b/);
+  expect(css).toMatch(/\.tp-field\b/);
+  expect(css).toMatch(/\.tp-button\.primary|\.tp-dialog \.tp-dialog-foot button\.primary/);
 });

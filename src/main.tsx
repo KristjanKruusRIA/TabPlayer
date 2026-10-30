@@ -57,12 +57,22 @@ async function resolve(restore:boolean,attach=false) {
     if(!destroyed)renderWorkspace();
   } catch(error) {
     pending=false;
+    // A reload during an in-flight resolve shows a prompt for a startup that has since completed; reattach instead of dead-ending.
+    if(!attach&&await reattachIfResumed())return;
     if(attach){root.render(<p className="startup-state" role="alert">Could not reattach to the current session: {message(error)} Reload to try again.</p>);return;}
     preview={...(preview ?? {token:'',reason:'unavailable',documents:[],views:{},activeDocumentId:null,issues:[],capturedAtUnixMs:null}),
       issues:[...(preview?.issues ?? []).filter(issue=>issue.documentId!==null||issue.message!==message(error)),{documentId:null,message:message(error)}]};
     if(preview.reason==='clean')preview={...preview,reason:'crash'};
     renderPreview();
   }
+}
+async function reattachIfResumed() {
+  try {
+    const current=await nativeSessionBridge.startup();
+    if(!current.resumed||current.preview)return false;
+    preferences=current.preferences;preview=null;startupToken=null;
+    await resolve(false,true);return true;
+  } catch {return false;}
 }
 async function refreshStatus() {
   const sequence=statusSequence,current=await nativeSessionBridge.status();

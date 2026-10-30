@@ -142,3 +142,17 @@ it('a failed attach reports the error instead of offering a Start new session th
   await boot();await waitFor(()=>expect(screen.getByRole('alert')).toHaveTextContent('Finish the current session transition first.'));
   expect(screen.queryByRole('button',{name:'Start new session'})).not.toBeInTheDocument();expect(resolveCalls()).toEqual([]);
 });
+it('a reload during an in-flight resolve reattaches once startup has completed instead of dead-ending',async()=>{
+  const documents=[record('second','Second')];startup.preview=preview();
+  handlers.session_resolve=()=>{startup={preferences:{version:1,restorePreviousSession:true},preview:null,resumed:true};throw new Error('Recovery startup has already been resolved.');};
+  handlers.session_attach=()=>({workspace:{documents,active:{documentId:'second',activationId:'live-owner'}},views:{second:initialDocumentView()},issues:[]});
+  await boot();fireEvent.click(screen.getByRole('button',{name:'Restore'}));
+  await waitFor(()=>expect(screen.getByRole('main',{name:'Score editor'})).toBeInTheDocument());
+  expect(resolveCalls()).toHaveLength(1);expect(boundary.invoke.mock.calls.filter(call=>call[0]==='session_attach')).toHaveLength(1);expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+});
+it('a failed resolve while the prompt is still genuine keeps the prompt and never attaches',async()=>{
+  startup.preview=preview();handlers.session_resolve=()=>{throw new Error('A session transition is already running.');};
+  await boot();fireEvent.click(screen.getByRole('button',{name:'Restore'}));
+  await waitFor(()=>expect(screen.getByRole('dialog')).toHaveTextContent('A session transition is already running.'));
+  expect(boundary.invoke.mock.calls.filter(call=>call[0]==='session_attach')).toHaveLength(0);
+});

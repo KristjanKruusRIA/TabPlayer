@@ -56,7 +56,11 @@ export async function runReloadRecoveryAcceptance({buildPath}={}){
   };
   // A reload must land on the workspace, never on the recovery dialog; both the dialog and the failing text are asserted absent.
   const reloaded=async how=>{
-    owned();if(how==='api')await page.reload();else await page.keyboard.press(how);
+    owned();
+    // A window marker and timeOrigin both die with the old document, so a key press that does not reload cannot pass.
+    const origin=await page.evaluate(()=>{window.__reloadMarker=true;return performance.timeOrigin;});
+    if(how==='api')await page.reload();else await page.keyboard.press(how);
+    await poll(()=>page.evaluate(origin=>({marker:window.__reloadMarker===true,origin:performance.timeOrigin}),origin).catch(()=>({marker:true,origin})),value=>!value.marker&&value.origin!==origin,`${how} reloaded the page`);
     await page.locator('.app-shell').waitFor();await closeWelcome();
     assert.equal(await page.getByRole('dialog',{name:/Recovery unavailable|Recover unsaved work/}).count(),0,'No recovery dialog after reload');
     assert.equal(await page.getByText('Recovery startup has already been resolved.').count(),0,'Startup was not re-resolved');

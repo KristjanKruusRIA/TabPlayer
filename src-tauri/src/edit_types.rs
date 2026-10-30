@@ -476,6 +476,26 @@ pub struct Trill {
     pub pitch: i32,
     pub speed: i32,
 }
+/// How one note sounds, apart from how it is written: its length in percent of the planned
+/// sounding length, a shift of its start in ticks, and a velocity added to its dynamics.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct NoteAudio {
+    pub length: i32,
+    pub offset: i32,
+    pub velocity: i32,
+}
+impl NoteAudio {
+    fn validate(&self) -> Result<(), String> {
+        if !(10..=400).contains(&self.length)
+            || !(-480..=480).contains(&self.offset)
+            || !(-64..=64).contains(&self.velocity)
+        {
+            return Err("Invalid note audio settings.".into());
+        }
+        Ok(())
+    }
+}
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Tremolo {
@@ -619,6 +639,12 @@ pub struct NoteTechniques {
         skip_serializing_if = "Option::is_none"
     )]
     pub trill: Option<Option<Trill>>,
+    #[serde(
+        default,
+        deserialize_with = "present_nullable",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub audio: Option<Option<NoteAudio>>,
 }
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -1588,6 +1614,9 @@ impl EditCommand {
                 if let Some(Some(trill)) = &patch.trill {
                     enum_range(trill.pitch, 0, 127)?;
                     rhythm(trill.speed, 0)?;
+                }
+                if let Some(Some(audio)) = &patch.audio {
+                    audio.validate()?;
                 }
             }
             Self::SetBeatTechniques { patch, .. } => {
@@ -3168,6 +3197,36 @@ mod tests {
             json!({"bend": {"type": 1, "style": 0, "points": [{"offset": 0, "value": 0}]}}),
         ] {
             value["patch"] = patch;
+            rejected(&value);
+        }
+    }
+
+    #[test]
+    fn note_audio_patch_is_exact_nullable_and_within_its_limits() {
+        let mut value = entry_commands().remove(10);
+        for audio in [
+            json!(null),
+            json!({"length": 100, "offset": 0, "velocity": 0}),
+            json!({"length": 10, "offset": -480, "velocity": -64}),
+            json!({"length": 400, "offset": 480, "velocity": 64}),
+        ] {
+            value["patch"] = json!({ "audio": audio });
+            accepted(&value);
+        }
+        for audio in [
+            json!({"length": 9, "offset": 0, "velocity": 0}),
+            json!({"length": 401, "offset": 0, "velocity": 0}),
+            json!({"length": 100, "offset": -481, "velocity": 0}),
+            json!({"length": 100, "offset": 481, "velocity": 0}),
+            json!({"length": 100, "offset": 0, "velocity": -65}),
+            json!({"length": 100, "offset": 0, "velocity": 65}),
+            json!({"length": 100.5, "offset": 0, "velocity": 0}),
+            json!({"length": 100, "offset": 0}),
+            json!({"length": 100, "offset": 0, "velocity": 0, "extra": 1}),
+            json!({"length": null, "offset": 0, "velocity": 0}),
+            json!("loud"),
+        ] {
+            value["patch"] = json!({ "audio": audio });
             rejected(&value);
         }
     }

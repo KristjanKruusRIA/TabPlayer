@@ -1,6 +1,7 @@
 import { model } from '@coderline/alphatab';
 import type { BeatTarget } from '../project';
 import type { IndexedNoteTarget, NoteTarget, NoteTechniques, BeatTechniques, PitchCurve, LinkKind } from '../edit-types';
+import { getNoteAudio, hasPitchEvents, isPlainNoteAudio, setNoteAudio, validateNoteAudio } from './note-audio';
 import { beatAt, noteAt, enumValue, integer, durationValues, tremoloMarks } from './common';
 
 export function validateCurve(curve:PitchCurve,whammy=false) {
@@ -45,13 +46,22 @@ export function applyNoteTechniques(score:model.Score,target:NoteTarget|IndexedN
   const note=noteAt(score,target);
   const booleans={letRing:'isLetRing',palmMute:'isPalmMute',dead:'isDead',ghost:'isGhost',staccato:'isStaccato',leftHandTapped:'isLeftHandTapped'} as const;
   const enums={accent:['accentuated',model.AccentuationType],dynamics:['dynamics',model.DynamicValue],leftFinger:['leftHandFinger',model.Fingers],rightFinger:['rightHandFinger',model.Fingers],slideIn:['slideInType',model.SlideInType],slideOut:['slideOutType',model.SlideOutType],vibrato:['vibrato',model.VibratoType],ornament:['ornament',model.NoteOrnament]} as const;
-  for(const key of Object.keys(patch))if(!(key in booleans)&&!(key in enums)&&!['bend','harmonic','trill'].includes(key))throw new Error('Unknown note technique.');
+  for(const key of Object.keys(patch))if(!(key in booleans)&&!(key in enums)&&!['bend','harmonic','trill','audio'].includes(key))throw new Error('Unknown note technique.');
   for(const key of Object.keys(booleans) as (keyof typeof booleans)[])if(patch[key]!==undefined&&typeof patch[key]!=='boolean')throw new Error('Invalid note technique flag.');
   for(const key of Object.keys(enums) as (keyof typeof enums)[])if(patch[key]!==undefined)enumValue(patch[key]!,enums[key][1],key);
   if(!note.isStringed&&(patch.letRing||patch.palmMute||patch.dead||patch.leftHandTapped||patch.slideIn||patch.slideOut||patch.bend||patch.harmonic))throw new Error('This technique requires a stringed guitar or bass note.');
   if(note.isPercussion&&((patch.leftFinger!==undefined&&patch.leftFinger>=0)||(patch.rightFinger!==undefined&&patch.rightFinger>=0)||patch.vibrato||patch.ornament||patch.trill))throw new Error('This technique is unavailable for percussion notes.');
   const slide=patch.slideOut===model.SlideOutType.Shift||patch.slideOut===model.SlideOutType.Legato?nextOnString(note):null;
   if((patch.slideOut===1||patch.slideOut===2)&&!slide)throw new Error('A linked slide needs a next note on this string.');
+  if(patch.audio){
+    validateNoteAudio(patch.audio);
+    if(!isPlainNoteAudio(patch.audio)){
+      if(note.isTieDestination)throw new Error('A tied note continues the note before it: set its audio on the first note of the tie.');
+      const kept=getNoteAudio(note);
+      // Start and length are only refused when they would change; a note that already has them can still be re-leveled.
+      if((patch.audio.offset!==(kept?.offset??0)||patch.audio.length!==(kept?.length??100))&&hasPitchEvents(note))throw new Error('A bent, whammy, sliding or vibrato note keeps its start and length; only its velocity can change.');
+    }
+  }
   if(patch.bend)validateCurve(patch.bend);
   if(patch.harmonic){enumValue(patch.harmonic.type,model.HarmonicType,'harmonic');if(!Number.isFinite(patch.harmonic.value)||patch.harmonic.value<0)throw new Error('Invalid harmonic value.');const test=new model.Note();test.beat=note.beat;test.string=note.string;test.fret=note.fret;test.harmonicType=patch.harmonic.type;test.harmonicValue=patch.harmonic.value;if(!Number.isFinite(test.realValue)||test.realValue<0||test.realValue>127)throw new Error('Harmonic is outside the playable MIDI pitch range.');}
   if(patch.trill&&(!integer(patch.trill.pitch,0,127)||!durationValues.includes(patch.trill.speed as never)))throw new Error('Invalid trill pitch or speed.');
@@ -60,6 +70,7 @@ export function applyNoteTechniques(score:model.Score,target:NoteTarget|IndexedN
   if(patch.slideOut!==undefined){if(note.slideTarget)note.slideTarget.slideOrigin=null;note.slideTarget=slide;if(slide){if(slide.slideOrigin)slide.slideOrigin.slideTarget=null;slide.slideOrigin=note;}}
   if(patch.bend!==undefined){note.bendPoints=null;note.maxBendPoint=null;note.bendOrigin=null;note.isContinuedBend=false;note.bendType=patch.bend?.type??0;note.bendStyle=patch.bend?.style??0;for(const p of patch.bend?.points??[])note.addBendPoint(new model.BendPoint(p.offset,p.value));}
   if(patch.harmonic!==undefined){note.harmonicType=patch.harmonic?.type??0;note.harmonicValue=patch.harmonic?.value??0;}
+  if(patch.audio!==undefined)setNoteAudio(note,patch.audio);
   if(patch.trill!==undefined){note.trillValue=patch.trill?.pitch??-1;note.trillSpeed=patch.trill?.speed??model.Duration.Sixteenth;}
 }
 export function applyBeatTechniques(score:model.Score,target:BeatTarget,patch:BeatTechniques) {

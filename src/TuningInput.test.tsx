@@ -181,3 +181,15 @@ it('7+ strings peg strip maintains single row layout',()=>{
   const strip=document.querySelector('.tp-tuning-peg-strip');
   expect(strip).toHaveStyle({'grid-template-columns':'repeat(7, minmax(0, 1fr))'});
 });
+
+it('fits 7+ strings in a compact peg strip layout without clipping', () => {
+  render(<TuningInput label="Notes" presetLabel="Preset" value="E4 B3 G3 D3 A2 E2 C#2" onChange={vi.fn()} tuningName="Drop C#" onTuningNameChange={vi.fn()}/>);
+  const pegs = document.querySelector('.tp-tuning-pegs');
+  const strip = document.querySelector('.tp-tuning-peg-strip');
+  expect(pegs).toHaveAttribute('data-compact', 'true');
+  expect(strip).toHaveAttribute('data-compact', 'true');
+  expect(strip).toHaveStyle({ gap: '2px' });
+  const cells = document.querySelectorAll('.tp-tuning-peg-cell');
+  expect(cells).toHaveLength(7);
+  expect(screen.getByText('C#2')).toHaveClass('tp-peg-pitch');
+});

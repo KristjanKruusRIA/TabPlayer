@@ -280,7 +280,12 @@ export function TuningInput({
           </span>
         )}
         {parsedPitches && parsedPitches.length > 0 && (
-          <div className="tp-tuning-pegs" role="group" aria-label={`${label} string pegs`}>
+          <div
+            className="tp-tuning-pegs"
+            data-compact={parsedPitches.length >= 7 ? 'true' : undefined}
+            role="group"
+            aria-label={`${label} string pegs`}
+          >
             <svg
               viewBox={`0 0 ${Math.max(160, parsedPitches.length * 36)} 32`}
               className="tp-tuning-headstock-svg"
@@ -326,7 +331,11 @@ export function TuningInput({
             </svg>
             <div
               className="tp-tuning-peg-strip"
-              style={{ gridTemplateColumns: `repeat(${parsedPitches.length}, minmax(0, 1fr))` }}
+              data-compact={parsedPitches.length >= 7 ? 'true' : undefined}
+              style={{
+                gridTemplateColumns: `repeat(${parsedPitches.length}, minmax(0, 1fr))`,
+                ...(parsedPitches.length >= 7 ? { gap: '2px' } : {}),
+              }}
             >
               {parsedPitches.map((pitch, index) => {
                 const deg = (pitch % 12) * 30;

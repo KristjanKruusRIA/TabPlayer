@@ -210,6 +210,15 @@ pub struct LibraryQuery {
     #[serde(deserialize_with = "required_nullable")]
     pub root_id: Option<String>,
     pub text: String,
+    /// Field filters over the indexed metadata. Each is a case-insensitive
+    /// substring match (all whitespace-separated words) and empty means unfiltered.
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub artist: String,
+    /// Matches indexed track names; the index holds no instrument or genre field.
+    #[serde(default)]
+    pub instrument: String,
     pub sort: LibrarySort,
     pub offset: u32,
     #[serde(deserialize_with = "page_limit")]

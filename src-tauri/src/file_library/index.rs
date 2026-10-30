@@ -51,7 +51,7 @@ struct RootIndex {
 }
 
 struct Committed {
-    index: RootIndex,
+    index: Arc<RootIndex>,
     encoded_bytes: usize,
 }
 
@@ -217,6 +217,123 @@ fn supported(path: &Path) -> bool {
                 "tabplayer" | "gp" | "gpx" | "gp3" | "gp4" | "gp5" | "xml" | "musicxml" | "mxl"
             )
         })
+}
+
+/// Letters folded to their base letter. Folding is diacritic-insensitive on
+/// purpose: it is dependency-free (std has no normalization), so precomposed
+/// Latin letters are tabled and combining marks are dropped, which makes NFC and
+/// NFD spellings equal ("Õ" typed either way, "Bjork" for "Björk").
+const BASE_LETTERS: &[(&str, &str)] = &[
+    ("àáâãäåāăąǎ", "a"),
+    ("çćĉċč", "c"),
+    ("ďđð", "d"),
+    ("èéêëēĕėęěȩ", "e"),
+    ("ĝğġģ", "g"),
+    ("ĥħ", "h"),
+    ("ìíîïĩīĭįıǐ", "i"),
+    ("ĵ", "j"),
+    ("ķ", "k"),
+    ("ĺļľŀł", "l"),
+    ("ñńņňŉ", "n"),
+    ("òóôõöøōŏőǒ", "o"),
+    ("ŕŗř", "r"),
+    ("śŝşšș", "s"),
+    ("ţťŧț", "t"),
+    ("ùúûüũūŭůűųǔ", "u"),
+    ("ŵ", "w"),
+    ("ýÿŷ", "y"),
+    ("źżž", "z"),
+    ("ß", "ss"),
+    ("æ", "ae"),
+    ("œ", "oe"),
+    ("þ", "th"),
+];
+
+fn is_combining(c: char) -> bool {
+    matches!(c as u32, 0x300..=0x36F | 0x1AB0..=0x1AFF | 0x1DC0..=0x1DFF | 0x20D0..=0x20FF | 0xFE20..=0xFE2F)
+}
+
+/// Case-folds for matching: compatibility width forms (fullwidth ASCII, as NFKC
+/// does), full Unicode lowercase, then base letters without combining marks.
+fn fold(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for c in value.chars() {
+        let c = match c as u32 {
+            0xFF01..=0xFF5E => char::from_u32(c as u32 - 0xFEE0).unwrap_or(c),
+            0x3000 => ' ',
+            _ => c,
+        };
+        for lower in c.to_lowercase() {
+            if is_combining(lower) {
+                continue;
+            }
+            match BASE_LETTERS.iter().find(|(set, _)| set.contains(lower)) {
+                Some((_, base)) => out.push_str(base),
+                None => out.push(lower),
+            }
+        }
+    }
+    out
+}
+
+fn fold_words(value: &str) -> Vec<String> {
+    fold(value).split_whitespace().map(str::to_owned).collect()
+}
+
+/// The query's field filters, folded once per search rather than per row.
+struct Filters {
+    title: Vec<String>,
+    artist: Vec<String>,
+    instrument: Vec<String>,
+}
+
+impl Filters {
+    fn new(query: &LibraryQuery) -> Self {
+        Self {
+            title: fold_words(&query.title),
+            artist: fold_words(&query.artist),
+            instrument: fold_words(&query.instrument),
+        }
+    }
+
+    /// Applies the title, artist and instrument filters to one indexed row.
+    /// Title is what the list displays: the indexed title, or the file name when
+    /// that is empty or absent. Artist and instrument need real indexed
+    /// metadata, so a row without it never matches them.
+    fn matches(&self, row: &LibraryResult) -> bool {
+        let hits = |words: &[String], value: &str| {
+            let value = fold(value);
+            words.iter().all(|word| value.contains(word.as_str()))
+        };
+        (self.title.is_empty() || hits(&self.title, &displayed_title(row)))
+            && (self.artist.is_empty()
+                || row
+                    .metadata
+                    .as_ref()
+                    .is_some_and(|metadata| hits(&self.artist, &metadata.artist)))
+            && (self.instrument.is_empty()
+                || row.metadata.as_ref().is_some_and(|metadata| {
+                    metadata
+                        .track_names
+                        .iter()
+                        .any(|name| hits(&self.instrument, name))
+                }))
+    }
+}
+
+fn file_name(row: &LibraryResult) -> String {
+    Path::new(&row.path)
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .into_owned()
+}
+
+fn displayed_title(row: &LibraryResult) -> String {
+    match &row.metadata {
+        Some(metadata) if !metadata.title.is_empty() => metadata.title.clone(),
+        _ => file_name(row),
+    }
 }
 
 fn truncate(value: &mut String, maximum: usize) -> bool {
@@ -563,7 +680,7 @@ impl LibraryIndex {
         state.committed.insert(
             index.root_id.clone(),
             Committed {
-                index,
+                index: Arc::new(index),
                 encoded_bytes,
             },
         );
@@ -638,7 +755,7 @@ impl LibraryIndex {
             }
         }
         Ok(Some(Committed {
-            index,
+            index: Arc::new(index),
             encoded_bytes: bytes.len(),
         }))
     }
@@ -1327,13 +1444,11 @@ impl LibraryIndex {
                     .collect::<Vec<_>>(),
             )
         };
-        let tokens: Vec<String> = query
-            .text
-            .split_whitespace()
-            .map(str::to_lowercase)
-            .collect();
-        let mut unique = BTreeMap::<String, (u64, LibraryResult)>::new();
-        for index in indexes {
+        let tokens = fold_words(&query.text);
+        let filters = Filters::new(query);
+        // Rows are borrowed from the shared indexes; only the returned page is cloned.
+        let mut unique = BTreeMap::<String, (u64, &LibraryResult, bool)>::new();
+        for index in &indexes {
             if query
                 .root_id
                 .as_ref()
@@ -1360,70 +1475,55 @@ impl LibraryIndex {
             if !available {
                 warnings.push("A configured folder is unavailable; its previous completed index remains visible.".into());
             }
-            for file in index.files {
-                let mut row = file.row;
-                if !available {
-                    row.status = LibraryResultStatus::Unavailable;
-                }
+            for file in &index.files {
+                let row = &file.row;
                 let path_key = key(Path::new(&row.path));
-                let replace = unique.get(&path_key).is_none_or(|(revision, previous)| {
+                let replace = unique.get(&path_key).is_none_or(|(revision, previous, _)| {
                     index.index_revision > *revision
                         || (index.index_revision == *revision && row.root_id < previous.root_id)
                 });
                 if replace {
-                    unique.insert(path_key, (index.index_revision, row));
+                    unique.insert(path_key, (index.index_revision, row, available));
                 }
             }
         }
-        let mut rows: Vec<LibraryResult> = unique
+        let mut rows: Vec<(String, &LibraryResult, bool)> = unique
             .into_values()
-            .map(|(_, row)| row)
-            .filter(|row| {
-                let mut fields = Path::new(&row.path)
-                    .file_name()
-                    .unwrap_or_default()
-                    .to_string_lossy()
-                    .to_lowercase();
+            .filter(|(_, row, _)| {
+                let mut fields = file_name(row);
                 if let Some(metadata) = &row.metadata {
                     for field in [&metadata.title, &metadata.artist, &metadata.album]
                         .into_iter()
                         .chain(metadata.track_names.iter())
                     {
                         fields.push('\n');
-                        fields.push_str(&field.to_lowercase());
+                        fields.push_str(field);
                     }
                 }
-                tokens.iter().all(|token| fields.contains(token))
+                let fields = if tokens.is_empty() {
+                    String::new()
+                } else {
+                    fold(&fields)
+                };
+                tokens.iter().all(|token| fields.contains(token.as_str())) && filters.matches(row)
+            })
+            .map(|(_, row, available)| {
+                let sort_key = match query.sort {
+                    LibrarySort::Title => displayed_title(row).to_lowercase(),
+                    LibrarySort::Artist => row
+                        .metadata
+                        .as_ref()
+                        .map(|metadata| metadata.artist.to_lowercase())
+                        .unwrap_or_default(),
+                    LibrarySort::Modified => String::new(),
+                };
+                (sort_key, row, available)
             })
             .collect();
-        rows.sort_by(|left, right| {
-            let title = |row: &LibraryResult| {
-                row.metadata
-                    .as_ref()
-                    .map(|metadata| metadata.title.to_lowercase())
-                    .unwrap_or_else(|| {
-                        Path::new(&row.path)
-                            .file_name()
-                            .unwrap_or_default()
-                            .to_string_lossy()
-                            .to_lowercase()
-                    })
-            };
+        rows.sort_by(|(left_key, left, _), (right_key, right, _)| {
             let primary = match query.sort {
-                LibrarySort::Title => title(left).cmp(&title(right)),
-                LibrarySort::Artist => left
-                    .metadata
-                    .as_ref()
-                    .map(|metadata| metadata.artist.to_lowercase())
-                    .unwrap_or_default()
-                    .cmp(
-                        &right
-                            .metadata
-                            .as_ref()
-                            .map(|metadata| metadata.artist.to_lowercase())
-                            .unwrap_or_default(),
-                    ),
                 LibrarySort::Modified => right.modified_unix_ms.cmp(&left.modified_unix_ms),
+                _ => left_key.cmp(right_key),
             };
             primary
                 .then_with(|| key(Path::new(&left.path)).cmp(&key(Path::new(&right.path))))
@@ -1439,6 +1539,13 @@ impl LibraryIndex {
                 .into_iter()
                 .skip(query.offset as usize)
                 .take(100)
+                .map(|(_, row, available)| {
+                    let mut row = row.clone();
+                    if !available {
+                        row.status = LibraryResultStatus::Unavailable;
+                    }
+                    row
+                })
                 .collect(),
             warning: if warnings.is_empty() {
                 None
@@ -1490,10 +1597,157 @@ mod tests {
         }
     }
 
+    fn row(title: &str, artist: &str, tracks: &[&str]) -> LibraryResult {
+        LibraryResult {
+            id: "id".into(),
+            root_id: "root".into(),
+            path: format!("scores/{title}.gp"),
+            metadata: Some(LibraryMetadata {
+                title: title.into(),
+                artist: artist.into(),
+                album: String::new(),
+                track_names: tracks.iter().map(|name| (*name).into()).collect(),
+                metadata_truncated: false,
+            }),
+            status: LibraryResultStatus::Indexed,
+            modified_unix_ms: None,
+        }
+    }
+
+    fn matching(
+        rows: &[LibraryResult],
+        title: &str,
+        artist: &str,
+        instrument: &str,
+    ) -> Vec<String> {
+        let mut query = title_query("");
+        query.title = title.into();
+        query.artist = artist.into();
+        query.instrument = instrument.into();
+        let filters = Filters::new(&query);
+        rows.iter()
+            .filter(|row| filters.matches(row))
+            .map(displayed_title)
+            .collect()
+    }
+
+    #[test]
+    fn field_filters_match_only_their_own_indexed_field() {
+        let rows = [
+            row(
+                "Amber Estuary",
+                "Nacre Ensemble",
+                &["Lantern Guitar", "Basin Bass"],
+            ),
+            row("Moon Orchard", "Cobalt Quartet", &["Arcade Guitar"]),
+        ];
+        assert_eq!(matching(&rows, "", "", "").len(), 2);
+        assert_eq!(matching(&rows, "", "cobalt", ""), ["Moon Orchard"]);
+        assert!(
+            matching(&rows, "cobalt", "", "").is_empty(),
+            "artist text is not a title"
+        );
+        assert_eq!(matching(&rows, "estuary amber", "", ""), ["Amber Estuary"]);
+        assert_eq!(matching(&rows, "", "", "GUITAR").len(), 2);
+        assert_eq!(matching(&rows, "", "", "bass"), ["Amber Estuary"]);
+        assert!(
+            matching(&rows, "", "", "lantern bass").is_empty(),
+            "words must hit one track"
+        );
+        assert!(matching(&rows, "", "ensemble", "arcade").is_empty());
+        assert_eq!(
+            matching(&rows, "orchard", "quartet", "guitar"),
+            ["Moon Orchard"]
+        );
+    }
+
+    #[test]
+    fn filters_never_match_a_row_without_indexed_metadata() {
+        let mut bare = row("x", "", &[]);
+        bare.metadata = None;
+        bare.path = "scores/untitled-draft.gp".into();
+        let rows = [bare];
+        assert_eq!(matching(&rows, "", "", "").len(), 1);
+        assert_eq!(
+            matching(&rows, "draft", "", "").len(),
+            1,
+            "title falls back to the file name"
+        );
+        assert!(matching(&rows, "", "any", "").is_empty());
+        assert!(matching(&rows, "", "", "guitar").is_empty());
+    }
+
+    #[test]
+    fn an_empty_indexed_title_filters_by_the_file_name_the_list_shows() {
+        let mut untitled = row("", "Nacre Ensemble", &["Guitar"]);
+        untitled.path = "scores/harbour-draft.gp".into();
+        let rows = [untitled];
+        assert_eq!(matching(&rows, "harbour", "", "").len(), 1);
+        assert!(matching(&rows, "orchard", "", "").is_empty());
+        let mut query = title_query("");
+        query.title = "harbour".into();
+        assert_eq!(displayed_title(&rows[0]), "harbour-draft.gp");
+        assert!(Filters::new(&query).matches(&rows[0]));
+    }
+
+    #[test]
+    fn matching_is_unicode_folded_and_diacritic_insensitive() {
+        let rows = [
+            row(
+                "O\u{303}htu \u{3000}Tormi",
+                "Bj\u{f6}rk",
+                &["Gro\u{df}e Trommel"],
+            ),
+            row("Plain", "Other", &["Bass"]),
+        ];
+        // NFD stored, NFC typed, and the reverse.
+        assert_eq!(matching(&rows, "\u{d5}htu", "", "").len(), 1);
+        assert_eq!(matching(&rows, "o\u{303}htu", "", "").len(), 1);
+        assert_eq!(matching(&rows, "ohtu", "", "").len(), 1);
+        assert_eq!(matching(&rows, "", "Bjork", "").len(), 1);
+        assert_eq!(matching(&rows, "", "BJ\u{d6}RK", "").len(), 1);
+        assert_eq!(matching(&rows, "", "", "GROSSE").len(), 1);
+        assert_eq!(matching(&rows, "", "", "gro\u{df}e").len(), 1);
+        // Fullwidth forms fold as NFKC does.
+        assert_eq!(
+            matching(&rows, "\u{ff30}\u{ff4c}\u{ff41}\u{ff49}\u{ff4e}", "", "").len(),
+            1
+        );
+        assert!(matching(&rows, "", "bjorn", "").is_empty());
+    }
+
+    #[test]
+    fn a_page_search_over_fifty_thousand_rows_stays_fast() {
+        let (_temp, index, root) = fixture();
+        complete_empty(&index, &root);
+        let metadata = LibraryMetadata {
+            title: "Harbour Study".into(),
+            artist: "Original Ensemble".into(),
+            album: "Study".into(),
+            track_names: vec!["Guitar".into(), "Bass".into()],
+            metadata_truncated: false,
+        };
+        let job = seeded(&index, &root, MAX_FILES, Some(metadata));
+        index.finish(&job, &root).unwrap();
+        let mut query = title_query("harbour");
+        query.artist = "ensemble".into();
+        query.instrument = "bass".into();
+        let started = Instant::now();
+        let page = index.search(&query).unwrap();
+        let elapsed = started.elapsed();
+        println!("search over {MAX_FILES} rows with all filters: {elapsed:?}");
+        assert_eq!(page.total as usize, MAX_FILES);
+        assert_eq!(page.rows.len(), 100);
+        assert!(elapsed < Duration::from_secs(2), "{elapsed:?}");
+    }
+
     fn title_query(text: &str) -> LibraryQuery {
         LibraryQuery {
             root_id: None,
             text: text.into(),
+            title: String::new(),
+            artist: String::new(),
+            instrument: String::new(),
             sort: LibrarySort::Title,
             offset: 0,
             limit: 100,

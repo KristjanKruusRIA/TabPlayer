@@ -123,3 +123,10 @@ The one-distance-code row also explains honest-read.gp on batch: fflate's output
 - The window's second parse, the MusicXML preparation and the app's overlays have no deadline.
 - `TABPLAYER_STALL_CASE` must be set for the real-Worker stall test to run, because `stall.gpx` is not committed.
 - The MusicXML files repeat one simple bar, so their timings describe that shape.
+
+## Limits added by the third review
+
+- The Open check also covers restore and reload. A document that misses the deadline during restore is left out of the session, and nothing in the UI brings back its evidence copy.
+- The deadline is not a memory bound: with it raised to 60 s, an allocating Worker killed the renderer at 21 to 25 s. No file reached that ceiling; honest admission peaked at 2.8 GiB.
+- A 63 MiB honest file is admitted, then fails in `buildDocument` with "Invalid string length".
+- Other overlays were not audited for slow patterns beyond `<offset`, `<sound` and `<tied`.

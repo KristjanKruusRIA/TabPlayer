@@ -272,3 +272,13 @@ describe('MusicXML playback tempo offsets',()=>{
     expect(()=>buildScore(project(strToU8('<score-partwise><offset sound="yes">'),'xml'))).toThrow();
   });
 });
+
+describe('a file written to stall the offset match',()=>{
+  it('stays linear on comment text full of unfinished offset tags',()=>{
+    const filler=`<!--${'<offset '.repeat(180000)}-->`;
+    const xml=musicXml(480).replace('</score-partwise>',`${filler}</score-partwise>`);
+    const started=performance.now();
+    expect(strFromU8(prepareMusicXmlTempoOffsets(strToU8(xml),settings))).not.toBe(xml);
+    expect(performance.now()-started).toBeLessThan(4000);
+  });
+});

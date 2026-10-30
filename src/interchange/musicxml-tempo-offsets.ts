@@ -111,7 +111,8 @@ function normalize(xml:string):string|null {
   if(!xml.includes('offset'))return null;
   const doc=new DOMParser().parseFromString(xml,'application/xml'),changes=plan(doc);
   if(!changes)return null;
-  const elements=[...doc.getElementsByTagName('offset')],matches=[...xml.matchAll(/<offset(?=[\s>])[^>]*>([^<]*)<\/offset\s*>/g)];
+  // The tag stops at the next `<`, so comment text full of `<offset ` costs linear time on the window, not quadratic.
+  const elements=[...doc.getElementsByTagName('offset')],matches=[...xml.matchAll(/<offset(?=[\s>])[^<>]*>([^<]*)<\/offset\s*>/g)];
   if(matches.length!==elements.length||matches.some((match,index)=>match[1]!==elements[index].textContent))return null;
   let result='',position=0;
   matches.forEach((match,index)=>{

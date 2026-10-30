@@ -23,21 +23,22 @@ export function collectAudible(into:AudibleAttack[],source:model.Note,note:PlanN
 
 const groupOf=(note:PlanNote)=>note.id.slice(0,note.id.lastIndexOf('/'));
 const laneOf=(note:PlanNote)=>`${note.source.target.track}/${note.source.target.staff}/${note.source.target.voice}`;
-interface Room {first:number;last:number;down:number;up:number}
+interface Room {first:number;last:number;lastLength:number;down:number;up:number}
 
 /**
  * How far each note of a voice may move without passing its neighbours. A note's attacks (a trill's, a tremolo's) move together, so a
  * note is one group from its first attack to its last. A group may move at most half the gap, less a tick, toward the nearest group
  * before or after it, so two groups that both move toward each other still keep their order. No group starts before zero, and the last
- * group of a voice keeps its last attack at least one tick inside the plan (`ceiling`).
+ * group of a voice keeps its last attack at least half its own length before the end of the plan (`ceiling`), so it is still heard.
  */
 function rooms(notes:PlanNote[],lanes:Set<string>,ceiling:number):Map<string,Room> {
   const result=new Map<string,Room>(),byLane=new Map<string,Room[]>();
   for(const note of notes) {
     const lane=laneOf(note);if(!lanes.has(lane))continue;
     const key=`${lane}|${groupOf(note)}`,room=result.get(key);
-    if(room){room.first=Math.min(room.first,note.startTick);room.last=Math.max(room.last,note.startTick);}
-    else{const created={first:note.startTick,last:note.startTick,down:0,up:0};result.set(key,created);const list=byLane.get(lane)??[];list.push(created);byLane.set(lane,list);}
+    const length=note.endTick-note.startTick;
+    if(room){room.first=Math.min(room.first,note.startTick);if(note.startTick>room.last){room.last=note.startTick;room.lastLength=length;}else if(note.startTick===room.last)room.lastLength=Math.max(room.lastLength,length);}
+    else{const created={first:note.startTick,last:note.startTick,lastLength:length,down:0,up:0};result.set(key,created);const list=byLane.get(lane)??[];list.push(created);byLane.set(lane,list);}
   }
   for(const list of byLane.values()) {
     list.sort((a,b)=>a.first-b.first);
@@ -48,7 +49,7 @@ function rooms(notes:PlanNote[],lanes:Set<string>,ceiling:number):Map<string,Roo
       for(let index=start;index<end;index++) {
         const room=list[index];
         room.down=reach===-Infinity?room.first:Math.min(room.first,Math.max(0,Math.floor((room.first-reach-1)/2)));
-        room.up=next===Infinity?Math.max(0,ceiling-1-room.last):Math.max(0,Math.floor((next-room.last-1)/2));
+        room.up=next===Infinity?Math.max(0,ceiling-room.last-Math.ceil(room.lastLength/2)):Math.max(0,Math.floor((next-room.last-1)/2));
       }
       for(let index=start;index<end;index++)reach=Math.max(reach,list[index].last);
     }

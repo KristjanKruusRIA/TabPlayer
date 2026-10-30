@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { TechniquePanel } from './TechniquePanel';
 import { music, noteAt, target } from './fixtures';
@@ -88,4 +88,14 @@ it('sends one edit for Enter followed by blur, and builds a second field on what
   fireEvent.change(field(/Start offset/), { target: { value: '20' } }); fireEvent.blur(field(/Start offset/));
   expect(onEdit).toHaveBeenCalledTimes(2);
   expect(onEdit).toHaveBeenLastCalledWith(patch({ length: 50, offset: 20, velocity: 0 }));
+});
+
+it('forgets what a refused edit sent, and shows a message', async () => {
+  const onEdit = vi.fn(async () => false);
+  render(<TechniquePanel score={music()} target={target} string={6} busy={false} onEdit={onEdit} />);
+  fireEvent.change(field(/Sounding length/), { target: { value: '50' } }); fireEvent.blur(field(/Sounding length/));
+  await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/not applied/));
+  expect(field(/Sounding length/).value).toBe('100');
+  fireEvent.change(field(/Start offset/), { target: { value: '20' } }); fireEvent.blur(field(/Start offset/));
+  expect(onEdit).toHaveBeenLastCalledWith(patch({ length: 100, offset: 20, velocity: 0 }));
 });

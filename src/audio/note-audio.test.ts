@@ -192,7 +192,7 @@ describe('MIDI export', () => {
   });
   describe('a late note at the end of the plan', () => {
     const cases: [string, number, model.Duration, number, number, number][] = [
-      ['eight eighths with the last offset +480', 8, model.Duration.Eighth, 480, 3839, 3840],
+      ['eight eighths with the last offset +480 (it keeps half its length before the end)', 8, model.Duration.Eighth, 480, 3600, 3840],
       ['four quarters with the last offset +480', 4, model.Duration.Quarter, 480, 3360, 3840],
       ['a whole note offset +240', 1, model.Duration.Whole, 240, 240, 3840],
     ];
@@ -210,6 +210,16 @@ describe('MIDI export', () => {
         expect([midi[count - 1].start, midi[count - 1].end]).toEqual([last.startTick, last.endTick]);
       });
     }
+    it('exports a note written in a range even when its offset carries it past the range end', () => {
+      const score = built(authored(2, 8, model.Duration.Eighth)), notes = Array.from({ length: 8 }, (_, i) => note(score, 0, i));
+      setNoteAudio(notes[7], audio({ offset: 480 }));
+      const plan = planOf(score), last = plan.notes[7];
+      expect(last.startTick).toBe(3840);
+      const first = readMidiFile(exportMidi(score, { tracks: [0], range: { first: 0, last: 0 } } as never)).parts[0].notes;
+      expect(first).toHaveLength(8);
+      expect([first[7].start, first[7].end]).toEqual([3839, 3840]);
+      expect(readMidiFile(exportMidi(score, { tracks: [0], range: null } as never)).parts[0].notes[7].start).toBe(3840);
+    });
     it('exports a shifted note at the edge of a range with the start and the clipped end the plan has', () => {
       const score = built(authored(2, 4, model.Duration.Quarter)), notes = [0, 1, 2, 3].map(i => note(score, 0, i)); note(score, 1, 0);
       setNoteAudio(notes[3], audio({ offset: 480, length: 200 }));
@@ -219,8 +229,8 @@ describe('MIDI export', () => {
       expect(midi).toHaveLength(4);
       expect([midi[3].start, midi[3].end]).toEqual([shifted.startTick, Math.min(shifted.endTick, 3840)]);
       const second = readMidiFile(exportMidi(score, { tracks: [0], range: { first: 1, last: 1 } } as never)).parts[0].notes;
-      expect(second).toHaveLength(2);
-      expect(second.map(n => [n.start, n.end]).sort((a, b) => a[1] - b[1])).toEqual([[0, 960], [0, shifted.endTick - 3840]]);
+      // A note belongs to the range it is written in, so its spill is not heard again in the next range.
+      expect(second.map(n => [n.start, n.end])).toEqual([[0, 960]]);
     });
   });
   it('writes a score without settings exactly as before', () => {

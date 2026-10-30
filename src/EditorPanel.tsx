@@ -58,6 +58,8 @@ export function EditorPanel({
   practiceTools,
   presentationTools,
   presentationViewTools,
+  contextScope: controlledScope,
+  onContextScopeChange,
 }: {
   score: model.Score;
   target: BeatTarget;
@@ -81,6 +83,8 @@ export function EditorPanel({
   practiceTools?: ReactNode;
   presentationTools?: ReactNode;
   presentationViewTools?: ReactNode;
+  contextScope?: InspectorContextScope;
+  onContextScopeChange?: (scope: InspectorContextScope) => void;
 }) {
   const busy = controlsBusy || locked;
   const id = useId();
@@ -88,7 +92,9 @@ export function EditorPanel({
   const practiceTask = useRef<HTMLDetailsElement>(null);
   const presentationTask = useRef<HTMLDetailsElement>(null);
   const editBodyRef = useRef<HTMLDivElement>(null);
-  const [contextScope, setContextScope] = useState<InspectorContextScope>('all');
+  const [internalScope, setInternalScope] = useState<InspectorContextScope>('all');
+  const contextScope = controlledScope ?? internalScope;
+  const setContextScope = onContextScopeChange ?? setInternalScope;
 
   const openTask = (section: HTMLDetailsElement | null) => {
     if (section) {
@@ -115,6 +121,7 @@ export function EditorPanel({
   };
 
   useEffect(() => {
+    if (controlledScope !== undefined) return;
     const onGlobalKeyDown = (event: globalThis.KeyboardEvent) => {
       if (
         (event.ctrlKey || event.metaKey) &&
@@ -135,7 +142,7 @@ export function EditorPanel({
     };
     window.addEventListener('keydown', onGlobalKeyDown);
     return () => window.removeEventListener('keydown', onGlobalKeyDown);
-  }, []);
+  }, [controlledScope, setContextScope]);
 
   const { staff, bar, voice, beat, master } = describeSelection(score, target);
   const indexed = staff.isPercussion || !staff.tuning.length;

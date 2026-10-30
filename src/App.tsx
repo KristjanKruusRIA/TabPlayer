@@ -6,7 +6,7 @@ import type { BeatTarget, EditCommand } from './project';
 import { FINALIZED_MESSAGE, isFinalized, projectCommands } from './project';
 import { followSelectedTrack,movedTrackIndex,repairMeasureSelection,repairSelection, validSelectionIndices } from './selection';
 import { ScoreView } from './ScoreView';
-import { EditorPanel } from './EditorPanel';
+import { EditorPanel, type InspectorContextScope } from './EditorPanel';
 import { TrackPanel } from './TrackPanel';
 import './styles.css';
 import { NativePlaybackController } from './audio/NativePlaybackController';
@@ -101,7 +101,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   useEffect(()=>{referenceLifetime.active=true;const unbind=controller.setReferenceWaveformBridge(waveformBridge);return()=>{referenceLifetime.active=false;unbind();};},[controller,waveformBridge,referenceLifetime]);
   const [selection,setSelection]=useState<BeatTarget>(documentView.target);
   const [musicSelection,setMusicSelection]=useState<MusicSelection|null>(null),rangeAnchor=useRef<BeatTarget|null>(null);
-  const [clipboardVersion,setClipboardVersion]=useState(0),[clipboardError,setClipboardError]=useState<string|null>(null);
+  const [clipboardVersion,setClipboardVersion]=useState(0),[clipboardError,setClipboardError]=useState<string|null>(null),[contextScope,setContextScope]=useState<InspectorContextScope>('all');
   const [inputPrefs,setInputPrefs]=useInputPreferences(),entryDuration=useRef<EntryDuration|null>(null),[inputNotice,setInputNotice]=useState<{text:string;at:string}|null>(null);
   const [auditionEdits,setAuditionEdits]=useState(readAuditionWhileEditing),auditionEditsNow=useRef(auditionEdits);auditionEditsNow.current=auditionEdits;
   const [markErrors,setMarkErrors]=useState(readScoreErrorDisplay),scoreErrors=useMemo(()=>findScoreErrors(state.score),[state.score]);
@@ -218,7 +218,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
       edit({type:'pasteMusic',clip,options:options??{target:{...target},destinations:source!.tracks.map((track,index)=>({sourceTrack:index,track:target.track+index,staffMap:track.staves.map((_,staff)=>clip.kind==='phrase'?target.staff:staff)})),count:1,placement:clip.kind==='phrase'?'currentBar':'beforeBar',filters:{diagrams:inputPrefs.pasteDiagrams,texts:true,timers:true,trackAutomations:true,masterAutomations:multi,sections:multi}}});
     }catch(reason){setClipboardError(reason instanceof Error?reason.message:String(reason));}
   };
-  const showClipboard=()=>{showInspector();setClipboardFocus(value=>value+1);};
+  const showClipboard=()=>{setContextScope('all');showInspector();setClipboardFocus(value=>value+1);};
   const documentAction=(job:Promise<unknown>)=>change(job);
   const [paletteOpen,setPaletteOpen]=useState(false),paletteReturn=useRef<HTMLElement|null>(null);
   const [asciiOpen,setAsciiOpen]=useState(false),asciiReturn=useRef<HTMLElement|null>(null),[midiOpen,setMidiOpen]=useState(false);
@@ -475,7 +475,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
         <div className="score-hint">Measure {target.bar+1} · Beat {target.beat+1} · {indexed?`${location.staff.isPercussion?'Percussion':'Pitched'} note ${noteIndex===null?'entry':noteIndex+1} — Click a note to edit it in the inspector.`:`String ${string} · Fret ${fret} — Click the score, then use arrow keys, digits and Enter.`}</div>
       </section>
       <div ref={inspectorPane} className="workstation-inspector" hidden={!inspectorShown}>
-      <EditorPanel score={state.score} target={target} string={string} fret={fret} noteIndex={noteIndex} onSelectNote={setNoteIndex} busy={controlsBusy} locked={editLocked} onSelect={next=>{editorSelection(null);select(next);}} onString={s=>select(target,s)} onFret={setFret} onEdit={edit} musicSelection={musicSelection} onMusicSelection={editorSelection} onChord={()=>openModal('harmony')} onScales={()=>openModal('scale')} onAudition={auditionTuning}
+      <EditorPanel contextScope={contextScope} onContextScopeChange={setContextScope} score={state.score} target={target} string={string} fret={fret} noteIndex={noteIndex} onSelectNote={setNoteIndex} busy={controlsBusy} locked={editLocked} onSelect={next=>{editorSelection(null);select(next);}} onString={s=>select(target,s)} onFret={setFret} onEdit={edit} musicSelection={musicSelection} onMusicSelection={editorSelection} onChord={()=>openModal('harmony')} onScales={()=>openModal('scale')} onAudition={auditionTuning}
         practiceTools={player&&playbackState&&<PracticePanel key={state.documentEpoch} settings={playbackState.practice.settings} busy={controlsBusy||playbackState.practicePending||!playbackState.ready} hasBacking={!!audioSettings.backing} onChange={settings=>player.setPractice(settings)}/>}
         presentationTools={<><EngravingPanel key={`engraving/${state.documentEpoch}`} score={state.score} trackIds={trackIds} value={state.settings.engraving} busy={controlsBusy} onEdit={edit}/><PageLayoutPanel key={`page/${state.documentEpoch}`} value={page} busy={controlsBusy} onEdit={edit}/></>} presentationViewTools={<ViewDefaultsPanel current={{zoom,trackView,scoreDisplay}} load={currentViewDefaults} onSave={writeViewDefaults}/>}>
         <NotationEntryPanel score={state.score} target={target} busy={controlsBusy} locked={editLocked} onEdit={instrumentEdit} latestScore={()=>controller.getState().score}/>

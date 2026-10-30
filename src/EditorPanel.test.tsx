@@ -253,6 +253,12 @@ it('contextual inspector shows active selection badges and filters panels by con
   fireEvent.click(contextCard.getByRole('button',{name:'Selection'}));
   expect(screen.getByLabelText('Clipboard draft')).toBeVisible();
   expect(screen.getByLabelText('Time numerator')).not.toBeVisible();
+
+  fireEvent.click(contextCard.getByRole('button',{name:'Beat'}));
+  expect(screen.getByLabelText('Beat text')).toHaveValue('Verse riff');
+
+  view.rerender(<EditorPanel {...input} musicSelection={{kind:'bars',tracks:[0],firstBar:0,lastBar:1}}><Draft label="Clipboard draft"/></EditorPanel>);
+  expect(contextCard.getByText('Range selection · Measures 1–2')).toBeVisible();
 });
 
 it('Shift+Ctrl+V reveals clipboard hidden by scope, formats double/quad rests correctly, and omits String on percussion', () => {

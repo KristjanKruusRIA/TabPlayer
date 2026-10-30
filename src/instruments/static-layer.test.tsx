@@ -96,7 +96,7 @@ it('keeps the piano-key class on every key in entry mode, so lit keys are drawn 
 
 it('keeps the kit\'s drawing when the struck pieces change',()=>{
   const {score,all}=music(true),{container,rerender}=render(<InstrumentView score={score} track={0} staff={0} notes={[all[0]]}/>);
-  const before=marks(container,'[data-drum-art]');expect(before).toHaveLength(10);
+  const before=marks(container,'[data-drum-art]');expect(before).toHaveLength(17);
   for(const lit of [[all[1]],[all[0],all[2]],[]]){
     rerender(<InstrumentView score={score} track={0} staff={0} notes={lit}/>);
     expect(container.querySelectorAll('[data-drum][data-active="true"]').length).toBeLessThanOrEqual(lit.length);

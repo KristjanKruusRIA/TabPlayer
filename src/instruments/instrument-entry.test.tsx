@@ -1,6 +1,9 @@
 // @vitest-environment jsdom
 import { afterEach, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { standardPercussionCatalog } from '../editor/percussion-catalog';
+import { drumPieces, instrumentHits, percussionInstruments } from './drum-kit';
+import { hasPercussionArt } from './percussion-art';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { model, Settings } from '@coderline/alphatab';
 import { formatPitch } from '../tuning';
@@ -116,15 +119,15 @@ it('prefers the articulation of a custom table when the track defines one for th
   fireEvent.click(button('Kick'));expect(onEdit).toHaveBeenLastCalledWith({type:'addPercussionNote',target,articulation:0},{note:{articulation:0}});
   fireEvent.click(button('Snare'));expect(onEdit).toHaveBeenLastCalledWith({type:'addPercussionNote',target,articulation:1},{note:{articulation:1}});
 });
-it('removes a note on a key outside the kit through its pad',()=>{
+it('removes a percussion note through its instrument',()=>{
   const {container,onEdit}=show(build({percussion:true,program:0,articulations:[56]}));
-  const pad=container.querySelector<HTMLElement>('.percussion-pad[data-percussion-key="56"]')!;expect(pad).toHaveAttribute('role','button');
+  const item=container.querySelector<HTMLElement>('[data-percussion="cowbell"]')!;expect(item).toHaveAttribute('role','button');
   fireEvent.click(button('Remove Cowbell'));expect(onEdit).toHaveBeenCalledWith({type:'removeNoteByIndex',target,noteIndex:0},{note:null});
 });
 
-it('never removes a pitched or fretted note through a pad of the drum view',()=>{
+it('never removes a pitched or fretted note through the percussion of the drum view',()=>{
   const {container,onEdit}=show(build({frets:[[6,0]]}));fireEvent.change(screen.getByLabelText('Instrument view mode'),{target:{value:'drums'}});
-  const pad=container.querySelector<HTMLElement>('.percussion-pad[data-percussion-key="64"]')!;expect(pad).toHaveAttribute('aria-disabled','true');
+  const pad=container.querySelector<HTMLElement>('[data-percussion="conga-low"]')!;expect(pad).toHaveAttribute('aria-disabled','true');
   fireEvent.click(pad);expect(onEdit).not.toHaveBeenCalled();
 });
 
@@ -172,4 +175,33 @@ it('moves between keys and between drum pieces with the arrow keys',()=>{
   const piece=(id:string)=>drums.container.querySelector<SVGElement>(`[data-drum="${id}"]`)!;
   expect(drums.container.querySelectorAll('[data-drum][tabindex="0"]')).toHaveLength(1);
   piece('splash').focus();fireEvent.keyDown(piece('splash'),{key:'ArrowRight'});expect(document.activeElement).toBe(piece('hi-hat'));
+});
+
+it('has hardware for every standard articulation, each on exactly one instrument',()=>{
+  const track=new model.Track(),owners=[...drumPieces,...percussionInstruments].flatMap(item=>instrumentHits(track,item).map(hit=>hit.id));
+  expect(new Set(owners).size).toBe(owners.length);expect(new Set(owners)).toEqual(new Set(standardPercussionCatalog.map(entry=>entry.id)));
+  for(const item of percussionInstruments)expect(hasPercussionArt(item.id)).toBe(true);
+  const sounding=[...drumPieces,...percussionInstruments].flatMap(item=>[...item.keys]);expect(new Set(sounding).size).toBe(sounding.length);
+});
+
+it('enters any hit of the chosen piece, and removes the hit the beat holds',()=>{
+  const {container,onEdit}=show(build({percussion:true,program:0,articulations:[91]}));
+  const snare=container.querySelector<SVGElement>('[data-drum="snare"]')!;fireEvent.focus(snare);
+  const hits=screen.getByRole('group',{name:'Snare hits'}),press=(name:string)=>fireEvent.click(within(hits).getByRole('button',{name}));
+  expect(within(hits).getByRole('button',{name:'rim shot'})).toHaveAttribute('aria-pressed','true');
+  press('side stick');expect(onEdit).toHaveBeenLastCalledWith({type:'addPercussionNote',target,articulation:37},{note:{articulation:37}});
+  press('rim shot');expect(onEdit).toHaveBeenLastCalledWith({type:'removeNoteByIndex',target,noteIndex:0},{note:null});
+  expect(button('Remove Snare')).toBe(snare);
+});
+
+it('refuses a named hit while busy and keeps it focusable',()=>{
+  const {container,onEdit}=show(build({percussion:true,program:0,articulations:[91]}),{busy:true});
+  fireEvent.focus(container.querySelector<SVGElement>('[data-drum="ride"]')!);
+  const bell=within(screen.getByRole('group',{name:'Ride hits'})).getByRole('button',{name:'bell'});
+  expect(bell).not.toHaveAttribute('disabled');expect(bell).toHaveAttribute('aria-disabled','true');fireEvent.click(bell);expect(onEdit).not.toHaveBeenCalled();
+});
+
+it('enters an instrument that shares its pitch with another as itself',()=>{
+  const {container,onEdit}=show(build({percussion:true,program:0}));
+  fireEvent.click(container.querySelector('[data-percussion="cowbell-low"]')!);expect(onEdit).toHaveBeenCalledWith({type:'addPercussionNote',target,articulation:99},{note:{articulation:99}});
 });

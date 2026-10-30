@@ -1,5 +1,6 @@
 import { memo, useId } from 'react';
 import { formatPitch } from '../tuning';
+import { kitOrder, type DrumPiece } from './drum-kit';
 
 /**
  * The instruments' hardware, drawn once. Each drawing here is a memoised component of plain, primitive props, so React never
@@ -149,54 +150,77 @@ function KeyboardArtBase({low,high}:{low:number;high:number}) {
 }
 export const KeyboardArt=memo(KeyboardArtBase);
 
-export interface DrumPiece {id:string;label:string;keys:number[];x:number;y:number;r:number}
-export const cymbalIds=['hi-hat','crash','ride','china','splash'];
-export const shellHeightOf=(piece:DrumPiece)=>piece.id==='floor-tom'?55:piece.id==='snare'?20:32;
-/** The kit: stands, shells in a pearl wrap with lugs and hoops, calf-white heads and lathed cymbals. */
+export const cymbalIds=['hi-hat','crash','crash-2','reverse','ride','ride-2','china','splash'];
+const shellHeights:Record<string,number>={'floor-tom':74,'high-floor-tom':64,'low-tom':50,'low-mid-tom':46,'hi-mid-tom':42,'high-tom':38,snare:27};
+export const shellHeightOf=(piece:DrumPiece)=>shellHeights[piece.id]??38;
+const isKick=(piece:DrumPiece)=>piece.id.startsWith('kick');
+/** How much of a round surface shows from a three-quarter view above the kit. */
+export const surfaceDepthOf=(piece:DrumPiece)=>piece.r*(cymbalIds.includes(piece.id)?.2:.3);
+/** Where each stand meets the floor, further up the picture for what stands further back, and where a boom arm leaves it. */
+const stands:Record<string,{x:number;foot:number;top:number}>={splash:{x:48,foot:250,top:58},crash:{x:128,foot:246,top:112},'crash-2':{x:252,foot:236,top:98},ride:{x:556,foot:238,top:118},china:{x:640,foot:232,top:104},'ride-2':{x:806,foot:258,top:126},'hi-hat':{x:84,foot:284,top:140}};
+const rackY=134,rack=`M226 ${rackY}H540M236 ${rackY}V242M530 ${rackY}V242M216 242H256M510 242H550`;
+const legs=(x:number,foot:number,spread=27)=>`M${x} ${foot-34}L${x-spread} ${foot-3}M${x} ${foot-34}L${x+spread} ${foot-1}M${x} ${foot-34}L${x+4} ${foot+5}`;
+/** The kit in three-quarter view: toms rack back from the kick, snare and hi-hat stand in front to one side, floor tom to the other. */
 function DrumsArtBase({pieces}:{pieces:readonly DrumPiece[]}) {
   const id=uid(useId());
+  const chrome=`url(#${id}-chrome)`;
+  const tube=(d:string,key:string,width=4.2)=><g key={key}><path d={d} fill="none" stroke="#1b2023" strokeWidth={width} strokeLinecap="round" strokeLinejoin="round"/><path d={d} fill="none" stroke="#aab2b4" strokeWidth={width*.36} strokeLinecap="round" strokeLinejoin="round"/></g>;
+  const shadow=(x:number,y:number,rx:number,ry:number,key:string)=><ellipse key={key} cx={x} cy={y} rx={rx} ry={ry} fill={`url(#${id}-floor)`}/>;
+  const pedal=(x:number,y:number,key:string)=><g key={key}><path d={`M${x-6} ${y-44}L${x+6} ${y-44}L${x+13} ${y+2}Q${x} ${y+7} ${x-13} ${y+2}Z`} fill={chrome} stroke="#2c3236" strokeWidth="1"/><path d={`M${x-4} ${y-40}L${x+4} ${y-40}L${x+9} ${y-1}L${x-9} ${y-1}Z`} fill="#20272b"/>{[-32,-25,-18,-11].map(step=><path key={step} d={`M${x-6} ${y+step}H${x+6}`} stroke="#79858a" strokeWidth="1"/>)}</g>;
   return <>
     <defs>
-      <linearGradient id={`${id}-shell`}><stop stopColor="#4e090d"/><stop offset=".18" stopColor="#b5202b"/><stop offset=".43" stopColor="#e34240"/><stop offset=".64" stopColor="#9a1621"/><stop offset="1" stopColor="#3d090d"/></linearGradient>
-      <pattern id={`${id}-wrap`} patternUnits="userSpaceOnUse" width="6" height="6" patternTransform="rotate(35)"><path d="M0 0H6" stroke="#fff" strokeWidth=".7" opacity=".1"/><path d="M0 3H6" stroke="#000" strokeWidth=".8" opacity=".14"/></pattern>
-      <radialGradient id={`${id}-head`} cx=".42" cy=".25" r=".8"><stop stopColor="#fffdf3"/><stop offset=".65" stopColor="#e0e0d6"/><stop offset="1" stopColor="#a8aca6"/></radialGradient>
-      <radialGradient id={`${id}-brass`} cx=".47" cy=".35" r=".62"><stop stopColor="#fff6cd"/><stop offset=".13" stopColor="#b49b5f"/><stop offset=".37" stopColor="#e0c37d"/><stop offset=".63" stopColor="#a78a45"/><stop offset=".82" stopColor="#e6cc8c"/><stop offset="1" stopColor="#76602d"/></radialGradient>
-      <linearGradient id={`${id}-chrome`}><stop stopColor="#545a5f"/><stop offset=".35" stopColor="#f4f5ef"/><stop offset=".55" stopColor="#8e999e"/><stop offset=".8" stopColor="#e0e5e4"/><stop offset="1" stopColor="#444c50"/></linearGradient>
-      <radialGradient id={`${id}-floor`}><stop stopColor="#000" stopOpacity=".5"/><stop offset="1" stopColor="#000" stopOpacity="0"/></radialGradient>
+      <radialGradient id={`${id}-studio`} cx=".5" cy=".62" r=".72"><stop stopColor="#59616a"/><stop offset=".55" stopColor="#343b43"/><stop offset="1" stopColor="#1b2128"/></radialGradient>
+      <linearGradient id={`${id}-shell`}><stop stopColor="#3d4347"/><stop offset=".14" stopColor="#8d9498"/><stop offset=".34" stopColor="#dfe3e3"/><stop offset=".46" stopColor="#f7f8f6"/><stop offset=".6" stopColor="#aab0b3"/><stop offset=".86" stopColor="#70777b"/><stop offset="1" stopColor="#32383b"/></linearGradient>
+      <pattern id={`${id}-wrap`} patternUnits="userSpaceOnUse" width="6" height="6"><circle cx="1.4" cy="1.8" r=".35" fill="#fff" opacity=".5"/><circle cx="4.4" cy="4.6" r=".3" fill="#1d2225" opacity=".28"/></pattern>
+      <radialGradient id={`${id}-head`} cx=".4" cy=".3" r=".85"><stop stopColor="#ffffff"/><stop offset=".55" stopColor="#f3f1e8"/><stop offset="1" stopColor="#bcbab0"/></radialGradient>
+      <radialGradient id={`${id}-brass`} cx=".5" cy=".5" r=".55"><stop stopColor="#fbe7ae"/><stop offset=".12" stopColor="#c99a48"/><stop offset=".3" stopColor="#ecc97c"/><stop offset=".52" stopColor="#bd8d3a"/><stop offset=".74" stopColor="#e9c474"/><stop offset=".93" stopColor="#a87a2e"/><stop offset="1" stopColor="#6a4b18"/></radialGradient>
+      <linearGradient id={`${id}-chrome`}><stop stopColor="#41474c"/><stop offset=".3" stopColor="#fafaf5"/><stop offset=".55" stopColor="#8e999e"/><stop offset=".8" stopColor="#eef0ee"/><stop offset="1" stopColor="#373e42"/></linearGradient>
+      <radialGradient id={`${id}-floor`}><stop stopColor="#000" stopOpacity=".6"/><stop offset=".65" stopColor="#000" stopOpacity=".3"/><stop offset="1" stopColor="#000" stopOpacity="0"/></radialGradient>
     </defs>
-    <ellipse cx="431" cy="217" rx="320" ry="20" fill={`url(#${id}-floor)`}/>
-    <g className="kit-stands">{pieces.filter(piece=>cymbalIds.includes(piece.id)).map(piece=><g key={piece.id}><path d={`M${piece.x} ${piece.y}V213M${piece.x} 186L${piece.x-25} 222M${piece.x} 186L${piece.x+27} 223M${piece.x} 186L${piece.x+3} 226`} fill="none" stroke="#48535a" strokeWidth="5"/><path d={`M${piece.x} ${piece.y}V213M${piece.x} 186L${piece.x-25} 222M${piece.x} 186L${piece.x+27} 223M${piece.x} 186L${piece.x+3} 226`} fill="none" stroke="#b7c0c3" strokeWidth="2"/><circle cx={piece.x} cy="167" r="3" fill="#e4e7e4"/></g>)}</g>
-    {[...pieces].sort((a,b)=>a.y-b.y).map(piece=>{
-      const cymbal=cymbalIds.includes(piece.id),r=piece.r,ry=r*.43,shellHeight=shellHeightOf(piece);
+    <rect x="0" y="0" width="860" height="300" rx="6" fill={`url(#${id}-studio)`}/>
+    <g className="kit-shadows">{shadow(362,256,190,24,'kicks')}{shadow(672,272,84,14,'floor')}{shadow(570,252,70,12,'high-floor')}{shadow(176,278,70,11,'snare')}{shadow(84,284,60,10,'hat')}{shadow(806,258,40,6,'ride-2')}{shadow(48,250,36,6,'splash')}</g>
+    <g className="kit-stands">
+      {pieces.filter(piece=>cymbalIds.includes(piece.id)).map(piece=>{const stand=stands[piece.id];return stand?tube(`M${stand.x} ${stand.foot-34}V${stand.top}L${piece.x} ${piece.y}${legs(stand.x,stand.foot)}`,piece.id):null;})}
+      {tube(rack,'rack',5.4)}
+      {pieces.filter(piece=>piece.id.endsWith('tom')&&!piece.id.includes('floor')||piece.id==='reverse').map(piece=>tube(`M${piece.x} ${rackY}V${piece.y+(piece.id==='reverse'?0:shellHeightOf(piece))}`,piece.id+'-arm'))}
+    </g>
+    {pedal(84,292,'hi-hat-pedal')}
+    {kitOrder(pieces).map(piece=>{
+      const cymbal=cymbalIds.includes(piece.id),r=piece.r,ry=surfaceDepthOf(piece),shellHeight=shellHeightOf(piece),foot=(y:number)=>y-piece.y,upright=`rotate(${-piece.tilt})`;
+      const lugs=piece.id==='snare'?[-.88,-.54,-.14,.3,.72]:[-.82,-.34,.2,.7],bottom=shellHeight+ry*1.33;
       return <g key={piece.id} data-drum-art={piece.id} transform={`translate(${piece.x},${piece.y})`}>
+        {piece.id==='snare'?tube(`M0 ${bottom}V${foot(258)}${legs(0,foot(288),30)}M${-r*.8} ${shellHeight}L0 ${bottom+5}L${r*.8} ${shellHeight}`,'snare-stand'):null}
+        {piece.id.endsWith('floor-tom')?(piece.id==='floor-tom'?[[-.92,282],[.92,276],[.08,292]]:[[-.92,258],[.92,254],[.08,264]]).map(([side,to])=>tube(`M${r*side} ${shellHeight*.3}L${r*side*1.08} ${foot(to)}`,`leg-${side}`,4.6)):null}
+        <g transform={`rotate(${piece.tilt})`}>
         {cymbal ? <>
-          <ellipse data-drum-surface="cymbal" cx="0" cy="0" rx={r} ry={ry} fill={`url(#${id}-brass)`} stroke="#948151" strokeWidth="1.5"/>
-          {[.3,.5,.7,.88].map(scale=><ellipse key={scale} cx="0" cy="0" rx={r*scale} ry={ry*scale} fill="none" stroke="#77642d" strokeWidth=".55" opacity=".4"/>)}
-          {Array.from({length:14},(_,i)=>{const a=i*Math.PI/14;return <path key={i} d={`M${Math.cos(a)*r*.18} ${Math.sin(a)*ry*.18}L${Math.cos(a)*r*.95} ${Math.sin(a)*ry*.95}M${-Math.cos(a)*r*.18} ${-Math.sin(a)*ry*.18}L${-Math.cos(a)*r*.95} ${-Math.sin(a)*ry*.95}`} stroke="#fff4c4" strokeWidth=".4" opacity=".14"/>;})}
-          <path d={`M${-r*.8} ${-ry*.27}Q0 ${-ry*1.1} ${r*.8} ${-ry*.15}`} fill="none" stroke="#fff4c4" strokeWidth="2" opacity=".35"/>
-          <ellipse cx="0" cy="-2" rx={r*.13} ry={ry*.3} fill="#dfc786" stroke="#8d773e"/><ellipse cx="0" cy="-5" rx="3.5" ry="2" fill="#28251c"/>
-          <text className="drum-label" x="0" y={ry+14} textAnchor="middle">{piece.label}</text>
-        </> : piece.id==='kick' ? <>
-          <ellipse cx="8" cy="4" rx={r+6} ry={r*.9} fill={`url(#${id}-shell)`} stroke="#747d80" strokeWidth="3"/><ellipse cx="8" cy="4" rx={r+6} ry={r*.9} fill={`url(#${id}-wrap)`}/>
-          <circle data-drum-surface="head" cx="0" cy="0" r={r} fill={`url(#${id}-head)`} stroke={`url(#${id}-chrome)`} strokeWidth="5"/>
-          <circle cx="0" cy="0" r={r-5} fill="none" stroke="#828e8c" strokeWidth="1.5"/><circle cx="0" cy="0" r={r*.62} fill="none" stroke="#b9bdb6" strokeWidth=".6" opacity=".7"/>
-          {Array.from({length:10},(_,index)=>{const angle=index*Math.PI/5;return <circle key={index} cx={Math.cos(angle)*(r-1)} cy={Math.sin(angle)*(r-1)} r="2.5" fill={`url(#${id}-chrome)`} stroke="#657174"/>;})}
-          <circle cx={r*.5} cy={r*.37} r="10" fill="#151a1d" stroke="#777e79"/>
-          <path d={`M${-r*.8} ${r*.5}l-15 29M${r*.8} ${r*.5}l16 29`} stroke="#b1babd" strokeWidth="4" fill="none"/>
-          <g data-drum-surface="pedal"><path d={`M-10 ${r+28}L-7 ${r-4}H8L12 ${r+28}Z`} fill={`url(#${id}-chrome)`} stroke="#576267" strokeWidth="1.5"/><path d={`M-6 ${r+25}L-4 ${r+1}H5L8 ${r+25}Z`} fill="#27343b"/>{[7,12,17,22].map(y=><path key={y} d={`M-3 ${r+y}H6`} stroke="#717d7f" strokeWidth="1.5"/>)}<path d={`M0 ${r}V${r-27}`} stroke="#c1c9c8" strokeWidth="3"/><circle cx="0" cy={r-30} r="5" fill="#e2dbbd"/></g>
+          {piece.id==='hi-hat'?<><path d={`M0 ${-ry-16}V4`} stroke="#d4dad9" strokeWidth="2"/><ellipse cx="0" cy="9" rx={r} ry={ry} fill={`url(#${id}-brass)`} stroke="#5e4416"/></>:null}
+          <ellipse data-drum-surface="cymbal" cx="0" cy="0" rx={r} ry={ry} fill={`url(#${id}-brass)`} stroke="#7a5a24" strokeWidth="1"/>
+          {[.34,.46,.58,.7,.82,.92].map(scale=><ellipse key={scale} cx="0" cy="0" rx={r*scale} ry={ry*scale} fill="none" stroke="#5e4416" strokeWidth=".45" opacity=".35"/>)}
+          <path d={`M${-r*.88} ${-ry*.25}Q${-r*.3} ${-ry*1.05} ${r*.34} ${-ry*.8}`} fill="none" stroke="#fff6d4" strokeWidth="2" opacity=".55" strokeLinecap="round"/>
+          {piece.id==='china'?<path d={`M${-r} 0Q0 ${-ry*1.8} ${r} 0`} fill="none" stroke="#f6dc98" strokeWidth="2" opacity=".75"/>:null}
+          <ellipse cx="0" cy={-ry*.14} rx={r*.17} ry={ry*.42} fill="#f0d186" stroke="#7a5a24" strokeWidth=".7"/><rect x="-2.4" y={-ry*.5-5} width="4.8" height="4" rx="1" fill="#1f2224"/><path d={`M-4 ${-ry*.5-5.5}H4`} stroke="#d4dad9" strokeWidth="1.4"/>
+          <text className="drum-label" x="0" y={ry+13} textAnchor="middle" transform={upright}>{piece.label}</text>
+        </> : isKick(piece) ? <>
+          <circle cx="15" cy="-9" r={r} fill={`url(#${id}-shell)`} stroke="#23292c" strokeWidth="1.2"/><circle cx="15" cy="-9" r={r} fill={`url(#${id}-wrap)`}/><circle cx="15" cy="-9" r={r-2} fill="none" stroke={chrome} strokeWidth="2.4"/>
+          {tube(`M${-r*.82} ${r*.56}L${-r-12} ${foot(254)}`,'spur-left')}{tube(`M${r*.82} ${r*.56}L${r+12} ${foot(254)}`,'spur-right')}
+          <circle data-drum-surface="head" cx="0" cy="0" r={r} fill={`url(#${id}-head)`}/>
+          <circle cx="0" cy="0" r={r} fill="none" stroke="#14181a" strokeWidth="5.5"/><circle cx="0" cy="0" r={r-3.4} fill="none" stroke={chrome} strokeWidth="1.3"/><circle cx="0" cy="0" r={r-11} fill="none" stroke="#aeab9e" strokeWidth=".8"/>
+          {Array.from({length:10},(_,index)=>{const angle=(index+.5)*Math.PI/5,x=Math.cos(angle),y=Math.sin(angle);return <g key={index}><path d={`M${x*(r+5)} ${y*(r+5)}L${x*(r-1)} ${y*(r-1)}`} stroke="#e4e8e6" strokeWidth="2.4"/><circle cx={x*(r-1)} cy={y*(r-1)} r="2.1" fill={chrome} stroke="#3e464a" strokeWidth=".6"/></g>;})}
+          <circle cx={r*.46} cy={r*.42} r="11" fill="#0d1012" stroke="#8b8f88" strokeWidth="1.4"/>
+          <g data-drum-surface="pedal">{tube(`M0 ${r-34}V${r-2}`,'beater',3)}<circle cx="0" cy={r-36} r="6.5" fill="#efe9d4" stroke="#8d8674"/>{pedal(0,foot(292),'kick-pedal')}</g>
           <text className="drum-label on-head" x="0" y="3" textAnchor="middle">{piece.label}</text>
         </> : <>
-          <path d={`M${-r*.75} ${shellHeight}l-8 ${224-piece.y-shellHeight}M${r*.75} ${shellHeight}l8 ${224-piece.y-shellHeight}`} stroke="#89979b" strokeWidth="3" fill="none"/>
-          <ellipse cx="0" cy={shellHeight} rx={r} ry={ry} fill={`url(#${id}-shell)`} stroke="#69777a" strokeWidth="3"/>
-          <path data-drum-surface="shell" d={`M${-r} 0V${shellHeight}C${-r} ${shellHeight+ry} ${r} ${shellHeight+ry} ${r} ${shellHeight}V0Z`} fill={`url(#${id}-shell)`}/>
-          <path d={`M${-r} 0V${shellHeight}C${-r} ${shellHeight+ry} ${r} ${shellHeight+ry} ${r} ${shellHeight}V0Z`} fill={`url(#${id}-wrap)`}/>
-          <path d={`M${-r} ${shellHeight}C${-r} ${shellHeight+ry} ${r} ${shellHeight+ry} ${r} ${shellHeight}`} fill="none" stroke="#adb8b9" strokeWidth="2.5"/>
-          {[-.82,-.45,0,.45,.82].map(fraction=>{const x=r*fraction,y=ry*Math.sqrt(1-fraction*fraction);return <g key={fraction}><path d={`M${x} ${y+1}v${shellHeight-3}`} stroke="#bec6c5" strokeWidth="2"/><rect x={x-2.5} y={y+shellHeight-8} width="5" height="7" rx="1" fill={`url(#${id}-chrome)`}/></g>;})}
-          {piece.id==='snare'?<path d={`M${-r+2} ${shellHeight-8}H${r-2}`} stroke="#c9d0cf" strokeWidth="1.4" strokeDasharray="1.5 1.5" opacity=".8"/>:null}
-          <ellipse data-drum-surface="head" cx="0" cy="0" rx={r} ry={ry} fill={`url(#${id}-head)`} stroke={`url(#${id}-chrome)`} strokeWidth="3"/>
-          <ellipse cx="0" cy="0" rx={r-4} ry={ry-2} fill="none" stroke="#86948f" strokeWidth=".8"/>
-          <text className="drum-label on-head" x="0" y="3" textAnchor="middle">{piece.label}</text>
+          <path data-drum-surface="shell" d={`M${-r} 0V${shellHeight}C${-r} ${bottom} ${r} ${bottom} ${r} ${shellHeight}V0Z`} fill={`url(#${id}-shell)`} stroke="#23292c"/>
+          <path d={`M${-r} 0V${shellHeight}C${-r} ${bottom} ${r} ${bottom} ${r} ${shellHeight}V0Z`} fill={`url(#${id}-wrap)`}/>
+          {piece.id==='snare'?<path d={`M${-r} ${shellHeight*.5}C${-r} ${shellHeight*.5+ry*1.33} ${r} ${shellHeight*.5+ry*1.33} ${r} ${shellHeight*.5}`} fill="none" stroke="#596166" strokeWidth=".8"/>:null}
+          {lugs.map(fraction=>{const x=r*fraction,y=ry*Math.sqrt(1-fraction*fraction),mid=y+shellHeight/2-6;return <g key={fraction}><path d={`M${x} ${y+1}V${y+shellHeight-1}`} stroke="#50585c" strokeWidth=".9"/><rect x={x-2.8} y={mid} width="5.6" height="12" rx="2.6" fill={chrome} stroke="#30373a" strokeWidth=".6"/></g>;})}
+          <path d={`M${-r} ${shellHeight-1}C${-r} ${bottom-1} ${r} ${bottom-1} ${r} ${shellHeight-1}`} fill="none" stroke={chrome} strokeWidth="3.4"/>
+          <ellipse cx="0" cy="1.5" rx={r} ry={ry} fill="none" stroke="#2a3033" strokeWidth="3.8"/>
+          <ellipse data-drum-surface="head" cx="0" cy="0" rx={r} ry={ry} fill={`url(#${id}-head)`} stroke={chrome} strokeWidth="3.2"/>
+          <ellipse cx="0" cy=".5" rx={r-3.5} ry={ry-1.6} fill="none" stroke="#b5b2a5" strokeWidth=".7"/>
+          <text className="drum-label on-head" x="0" y="3" textAnchor="middle" transform={upright}>{piece.label}</text>
         </>}
+        </g>
       </g>;
     })}
   </>;

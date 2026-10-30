@@ -167,6 +167,14 @@ mod sys {
         std::fs::remove_file(directory.join(name))
     }
 
+    pub fn create_folder_in(_folder: &File, directory: &Path, name: &str) -> io::Result<()> {
+        std::fs::create_dir(directory.join(name))
+    }
+
+    pub fn pin_in(_folder: &File, directory: &Path, name: &str) -> io::Result<File> {
+        pin_folder(&directory.join(name))
+    }
+
     /// Renames without replacing: an existing target fails with `AlreadyExists`. A scanner holding
     /// the file for a moment (sharing violation) is waited for briefly.
     pub fn rename_new_in(_folder: &File, directory: &Path, from: &str, to: &str) -> io::Result<()> {
@@ -197,9 +205,10 @@ mod sys {
     use super::*;
     use std::{
         ffi::CString,
+        fs::OpenOptions,
         os::{
             fd::{AsRawFd, FromRawFd},
-            unix::fs::MetadataExt,
+            unix::fs::{MetadataExt, OpenOptionsExt},
         },
     };
 
@@ -222,12 +231,50 @@ mod sys {
         if entry.file_type().is_symlink() || !entry.is_dir() {
             return Err(io::Error::other("a link or not a folder"));
         }
-        let file = File::open(path)?;
+        // A pipe swapped in after the check above would block a plain open until a writer came.
+        let file = OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NONBLOCK | libc::O_NOFOLLOW | libc::O_DIRECTORY)
+            .open(path)?;
+        blocking(&file)?;
         let opened = file.metadata()?;
         if !opened.is_dir() || opened.dev() != entry.dev() || opened.ino() != entry.ino() {
             return Err(io::Error::other("a link or not a folder"));
         }
         Ok(file)
+    }
+
+    /// Clears the `O_NONBLOCK` an open used, so the handle behaves as usual afterwards.
+    fn blocking(file: &File) -> io::Result<()> {
+        // SAFETY: the descriptor is open for the length of both calls, and neither touches memory.
+        let flags = unsafe { libc::fcntl(file.as_raw_fd(), libc::F_GETFL) };
+        if flags < 0
+            || unsafe { libc::fcntl(file.as_raw_fd(), libc::F_SETFL, flags & !libc::O_NONBLOCK) }
+                < 0
+        {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(())
+    }
+
+    /// Opens a folder inside the held folder, never following a link in its place.
+    pub fn pin_in(folder: &File, _directory: &Path, name: &str) -> io::Result<File> {
+        let file = open_at(
+            folder,
+            name,
+            libc::O_RDONLY | libc::O_NONBLOCK | libc::O_DIRECTORY,
+        )?;
+        blocking(&file)?;
+        Ok(file)
+    }
+
+    pub fn create_folder_in(folder: &File, _directory: &Path, name: &str) -> io::Result<()> {
+        let name = c_name(name)?;
+        // SAFETY: `name` is a valid C string for the call.
+        if unsafe { libc::mkdirat(folder.as_raw_fd(), name.as_ptr(), 0o777) } != 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(())
     }
 
     pub fn is_in_use(_error: &io::Error) -> bool {
@@ -329,6 +376,17 @@ pub fn ancestor_ids(path: &Path) -> Result<Vec<FileId>, String> {
 /// Opens the folder itself, refusing a link, and holds it in place while the handle lives (see `sys`).
 pub fn pin_folder(path: &Path) -> io::Result<File> {
     sys::pin_folder(path)
+}
+
+/// Pins the folder `name` inside the pinned `folder`, whose path is `directory`. Elsewhere than on
+/// Windows the handle is used and the path ignored, as for `create_in`.
+pub fn pin_in(folder: &File, directory: &Path, name: &str) -> io::Result<File> {
+    sys::pin_in(folder, directory, name)
+}
+
+/// Creates the folder `name` inside the pinned `folder`, on the same terms as `pin_in`.
+pub fn create_folder_in(folder: &File, directory: &Path, name: &str) -> io::Result<()> {
+    sys::create_folder_in(folder, directory, name)
 }
 
 /// Where an open file really is, as the system reports for the handle.
@@ -466,6 +524,51 @@ mod tests {
         std::os::unix::fs::symlink(&target, path.join("link.tmp")).unwrap();
         assert!(create_in(&pin, path, "link.tmp").is_err());
         assert_eq!(std::fs::read(&target).unwrap(), b"mine");
+    }
+
+    #[test]
+    fn a_folder_is_created_and_pinned_through_the_held_folder() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path();
+        let held = pin_folder(path).unwrap();
+        assert!(
+            pin_in(&held, path, "new").is_err_and(|error| error.kind() == io::ErrorKind::NotFound)
+        );
+        create_folder_in(&held, path, "new").unwrap();
+        assert!(create_folder_in(&held, path, "new").is_err());
+        let pinned = pin_in(&held, path, "new").unwrap();
+        assert_eq!(
+            handle_id(&pinned).unwrap(),
+            file_id(&path.join("new")).unwrap()
+        );
+        std::fs::write(path.join("file.txt"), "text").unwrap();
+        assert!(pin_in(&held, path, "file.txt").is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_pipe_in_place_of_a_folder_is_refused_without_blocking() {
+        use std::os::unix::ffi::OsStrExt;
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path();
+        let pipe = std::ffi::CString::new(path.join("pipe").as_os_str().as_bytes()).unwrap();
+        // SAFETY: `pipe` is a valid C string for the call.
+        assert_eq!(unsafe { libc::mkfifo(pipe.as_ptr(), 0o666) }, 0);
+        let held = pin_folder(path).unwrap();
+        assert!(pin_folder(&path.join("pipe")).is_err());
+        assert!(pin_in(&held, path, "pipe").is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_pinned_folder_keeps_no_non_blocking_flag() {
+        use std::os::fd::AsRawFd;
+        let directory = tempfile::tempdir().unwrap();
+        let held = pin_folder(directory.path()).unwrap();
+        // SAFETY: the descriptor is open for the call.
+        let flags = unsafe { libc::fcntl(held.as_raw_fd(), libc::F_GETFL) };
+        assert!(flags >= 0);
+        assert_eq!(flags & libc::O_NONBLOCK, 0);
     }
 
     #[test]

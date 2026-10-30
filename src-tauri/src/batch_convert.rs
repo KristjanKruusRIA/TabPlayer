@@ -8,8 +8,8 @@
 //! one. The conversion itself runs in the window, through the same import and export code as
 //! opening and exporting a score.
 use crate::fs_identity::{
-    ancestor_ids, create_in, file_id, final_path, handle_id, is_in_use, pin_folder, remove_in,
-    rename_new_in,
+    ancestor_ids, create_folder_in, create_in, file_id, final_path, handle_id, is_in_use,
+    pin_folder, pin_in, remove_in, rename_new_in,
 };
 use crate::intake::{read_stable, reparse};
 use serde::Serialize;
@@ -491,15 +491,20 @@ impl BatchSession {
             let Component::Normal(part) = part else {
                 return Err("The file's folder is not a plain path.".into());
             };
+            let name = part
+                .to_str()
+                .ok_or("The file's folder is not a plain path.")?;
+            let holder = directory.clone();
             directory.push(part);
-            device |= device_name(&part.to_string_lossy());
+            device |= device_name(name);
             protect(&directory)?;
-            let pinned = match pin_folder(&directory) {
+            let held = pins.last().expect("the destination is pinned");
+            let pinned = match pin_in(held, &holder, name) {
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                    fs::create_dir(&directory).map_err(|error| {
+                    create_folder_in(held, &holder, name).map_err(|error| {
                         format!("Could not create {}: {error}", display(&directory))
                     })?;
-                    pin_folder(&directory)
+                    pin_in(held, &holder, name)
                 }
                 other => other,
             };

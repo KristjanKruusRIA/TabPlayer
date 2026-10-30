@@ -2,7 +2,7 @@ import { useMemo, useState, useSyncExternalStore } from 'react';
 import type { model } from '@coderline/alphatab';
 import type { NativePlaybackController } from '../audio/NativePlaybackController';
 import { trackIdentity } from '../engine';
-import type { BeatTarget } from '../project';
+import { FINALIZED_MESSAGE, type BeatTarget } from '../project';
 import { focusNotes, type InstrumentFocus } from './focus';
 import type { EditCommand } from '../edit-types';
 import type { EntryFollow } from './entry';
@@ -18,14 +18,14 @@ const focuses:Record<InstrumentFocus,{label:string;caption:string;empty:string}>
   bar:{label:'Selected bar',caption:'Notes in the selected bar',empty:'No notes in the selected bar'},
   next:{label:'Next beat',caption:'Notes in the next beat',empty:'No later notes on this staff'},
 };
-export function LiveInstrumentView({score,track,staff,target=null,player,onEdit,busy=false,string}: {
+export function LiveInstrumentView({score,track,staff,target=null,player,onEdit,busy=false,locked=false,string}: {
   score:model.Score;track:number;staff:number;target?:BeatTarget|null;
   /** Sends an edit made from the view through the app's edit path; without it the view cannot edit. */
-  onEdit?:(command:EditCommand,follow:EntryFollow)=>void;busy?:boolean;string?:number;
+  onEdit?:(command:EditCommand,follow:EntryFollow)=>void;busy?:boolean;/** The document is finalized: entry mode is unavailable. */locked?:boolean;string?:number;
   player:(Pick<NativePlaybackController,'subscribe'|'getState'|'activeNotes'>&Partial<Pick<NativePlaybackController,'scheduledNotes'>>)|null;
 }) {
   const [focus,setFocus]=useState<InstrumentFocus>('playing'),[editing,setEditing]=useState(storedEditing);
-  const editMode=editing&&!!onEdit;
+  const editMode=editing&&!!onEdit&&!locked;
   const chooseEditing=(on:boolean)=>{setEditing(on);try{localStorage.setItem(editKey,on?'on':'off');}catch{/* the choice still applies to this view */}};
   const state=useSyncExternalStore(player?.subscribe??noSubscribe,player?.getState??noState);
   const id=trackIdentity(score.tracks[track]),active=player?.activeNotes(id)??[];
@@ -38,7 +38,7 @@ export function LiveInstrumentView({score,track,staff,target=null,player,onEdit,
   const empty=editMode||focus==='playing'?shown.empty:state?.error?'Playback is unavailable':!state?.ready||!scheduled?'Playback is not ready yet':shown.empty;
   return <section className="live-instrument-view" aria-label="Instrument view">
     <InstrumentView score={score} track={track} staff={staff} notes={notes} caption={shown.caption} empty={empty}
-      entry={editing&&onEdit?{target,busy,string,onEdit}:undefined}
-      controls={<>{onEdit?<label className="instrument-check"><input type="checkbox" checked={editing} onChange={event=>chooseEditing(event.target.checked)}/>Click to edit notes</label>:null}<label>Show<select value={focus} disabled={editMode} onChange={event=>setFocus(event.target.value as InstrumentFocus)}>{Object.entries(focuses).map(([value,{label}])=><option key={value} value={value}>{label}</option>)}</select></label></>}/>
+      entry={editing&&onEdit&&!locked?{target,busy,string,onEdit}:undefined}
+      controls={<>{onEdit?<label className="instrument-check"><input type="checkbox" checked={editing&&!locked} disabled={locked} title={locked?FINALIZED_MESSAGE:undefined} onChange={event=>chooseEditing(event.target.checked)}/>Click to edit notes</label>:null}<label>Show<select value={focus} disabled={editMode} onChange={event=>setFocus(event.target.value as InstrumentFocus)}>{Object.entries(focuses).map(([value,{label}])=><option key={value} value={value}>{label}</option>)}</select></label></>}/>
   </section>;
 }

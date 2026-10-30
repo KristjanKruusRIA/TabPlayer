@@ -1,6 +1,6 @@
 import type { model } from '@coderline/alphatab';
 import { buildDocument, effectiveAudioSettings,exportGp, previewEdit, replayDocumentSettings, type BuiltDocument } from './engine';
-import { type EditCommand, type ProjectSnapshot, type AssetCandidate } from './project';
+import { type EditCommand, type ProjectSnapshot, type AssetCandidate, type DocumentLock } from './project';
 import type { DocumentId,DocumentRevision,DocumentSnapshot } from './workspace/types';
 import { isSettingsEdit,type BackingSettings } from './edit-types';
 import type { NativeBridge } from './bridge';
@@ -144,6 +144,13 @@ export class DocumentController {
     const built=settingsOnly?replayDocumentSettings(project,this.state):buildDocument(project);
     const record=await this.bridge.redo(this.state.revision);this.verifyRecord(record);if(!settingsOnly)this.beforeChange();
     this.undone.pop();this.update({...record,...built});
+  }); }
+  /** Finalizes or unfinalizes the document. A lock change is not an edit, so history and the redo stack stay as they are. */
+  setLock(lock:DocumentLock|null) { return this.run(async()=>{
+    const current=this.state,wanted=lock?.kind??null;
+    if((current.snapshot.project.lock?.kind??null)===wanted)return;
+    const record=await this.bridge.setLock(lock,current.revision);this.verifyRecord(record);
+    this.update({...record});
   }); }
   save(saveAs = false) { return this.run(()=>this.saveNow(saveAs)); }
   export() { return this.run(async()=>{

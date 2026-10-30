@@ -6,7 +6,11 @@ export type BaseDocument =
   | { kind: 'file'; filename: string; bytesBase64: string; sha256: string };
 export interface AssetInfo { filename: string; mediaType: string; byteLength: number }
 export interface AssetCandidate { token:string; assetId:string; info:AssetInfo; durationMs?:number }
-export interface ProjectView { format: 'TabPlayer'; schemaVersion: 3; engineVersion: '1.8.4'; base: BaseDocument; baselineEdits: EditCommand[]; edits: EditCommand[]; assets: Record<string,AssetInfo> }
+/** A lock on a document. Only finalizing exists; password locks can add kinds later. */
+export type DocumentLock = { kind: 'finalized' };
+export const FINALIZED_MESSAGE = 'This document is finalized. Unfinalize it to make changes.';
+export interface ProjectView { format: 'TabPlayer'; schemaVersion: 3; engineVersion: '1.8.4'; base: BaseDocument; baselineEdits: EditCommand[]; edits: EditCommand[]; assets: Record<string,AssetInfo>; lock?: DocumentLock }
+export const isFinalized = (project: { lock?: DocumentLock | null } | null | undefined): boolean => project?.lock?.kind === 'finalized';
 export type Project = ProjectView;
 export type ProjectInput = ProjectView | Omit<ProjectView,'schemaVersion'|'assets'|'baselineEdits'> & {schemaVersion:1}
   | Omit<ProjectView,'schemaVersion'|'baselineEdits'> & {schemaVersion:2};

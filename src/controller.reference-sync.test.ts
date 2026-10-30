@@ -24,7 +24,7 @@ function harness(value=project()) {
   const record=():DocumentSnapshot=>({documentId:'score-a',revision,snapshot:{project:structuredClone(current),path:null,dirty:false,canUndo:current.edits.length>0,canRedo:true}});
   const bridge:NativeBridge={documentId:'score-a',snapshot:async()=>record(),cancelAsset:vi.fn(async()=>true),
     applyEdit:vi.fn(async command=>{current={...current,edits:[...current.edits,structuredClone(command)]};revision++;return record();}),
-    undo:async()=>record(),redo:async()=>record(),saveProject:async()=>null,exportGp:vi.fn(async()=>true),
+    undo:async()=>record(),redo:async()=>record(),setLock:vi.fn() as never,saveProject:async()=>null,exportGp:vi.fn(async()=>true),
     readBackingAsset:vi.fn(async()=>new Uint8Array()),askUnsaved:async()=> 'discard',confirmExport:async()=>true};
   return {bridge,create:()=>DocumentController.create(bridge)};
 }

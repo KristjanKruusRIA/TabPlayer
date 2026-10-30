@@ -482,6 +482,24 @@ fn redo_edit(
     result
 }
 
+#[tauri::command]
+fn document_set_lock(
+    document: DocumentRevision,
+    lock: Option<project::DocumentLock>,
+    state: State<'_, Arc<Mutex<DocumentWorkspace>>>,
+    session: State<'_, session::SessionRuntime>,
+) -> Result<DocumentSnapshot, String> {
+    let result = state.lock().unwrap().set_lock(&document, lock);
+    // A no-op returns the unchanged revision and needs no new checkpoint.
+    if result
+        .as_ref()
+        .is_ok_and(|snapshot| snapshot.revision != document.revision)
+    {
+        session.changed();
+    }
+    result
+}
+
 /// The dialog's suggested name, validated again so a bad name can only fall back to the default.
 pub(crate) fn suggested_name(name: Option<&str>, fallback: &str) -> String {
     let reserved = |stem: &str| {
@@ -930,6 +948,7 @@ pub fn run() {
         workspace_close,
         apply_edit,
         undo_edit,
+        document_set_lock,
         redo_edit,
         save_project,
         export_gp,
@@ -998,6 +1017,7 @@ pub fn run() {
         workspace_close,
         apply_edit,
         undo_edit,
+        document_set_lock,
         redo_edit,
         save_project,
         export_gp,

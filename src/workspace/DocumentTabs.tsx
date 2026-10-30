@@ -43,7 +43,7 @@ export function DocumentTabs({tabs,activeId,disabled,onActivate,onClose}:Documen
     {tabs.map((tab,index)=>{
       const title=tab.title.trim()?tab.title:'Untitled';
       const label=`Score ${index+1} of ${tabs.length}: ${title}`;
-      const id=encodeURIComponent(tab.id),description=`${tab.path??'Unsaved score'}${tab.dirty?'; Unsaved changes':''}`;
+      const id=encodeURIComponent(tab.id),description=`${tab.path??'Unsaved score'}${tab.dirty?'; Unsaved changes':''}${tab.locked?'; Finalized':''}`;
       return <div className="document-tab-item" role="presentation" key={tab.id} data-active={tab.id===activeId}>
         <button ref={node=>{if(node)buttons.current.set(tab.id,node);else buttons.current.delete(tab.id);}}
           id={`document-tab-${id}`} role="tab" type="button" aria-label={label}
@@ -51,7 +51,7 @@ export function DocumentTabs({tabs,activeId,disabled,onActivate,onClose}:Documen
           tabIndex={focusId===tab.id?0:-1} disabled={disabled} title={tab.path??'Unsaved score'}
           onFocus={event=>{setFocusedId(tab.id);event.currentTarget.scrollIntoView?.({block:'nearest',inline:'nearest'});}}
           onKeyDown={event=>navigate(event,index)} onClick={()=>{if(!disabled)onActivate(tab.id);}}>
-          <span className="document-tab-title">{title}</span>{tab.dirty&&<span className="document-tab-dirty" aria-hidden="true"/>}
+          <span className="document-tab-title">{title}</span>{tab.locked&&<svg className="document-tab-lock" role="img" aria-label="Finalized" viewBox="0 0 16 16" width="11" height="11"><path d="M4.5 7V5a3.5 3.5 0 0 1 7 0v2M3 7h10v7H3z" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round"/></svg>}{tab.dirty&&<span className="document-tab-dirty" aria-hidden="true"/>}
         </button>
         <button className="document-tab-close" type="button" aria-label={`Close ${label}`} disabled={disabled}
           onClick={()=>{if(!disabled)onClose(tab.id);}}>

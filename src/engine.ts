@@ -38,9 +38,11 @@ export function validateProject(value: unknown): Project {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid project.');
   const input = value as ProjectInput;
   if (input.format !== 'TabPlayer' || ![1,2,3].includes(input.schemaVersion)) throw new Error('Unsupported project version.');
-  const fields=['format','schemaVersion','engineVersion','base','edits',...(input.schemaVersion>=2?['assets']:[]),...(input.schemaVersion===3?['baselineEdits']:[])];
+  const hasLock=Object.hasOwn(input,'lock');
+  const fields=['format','schemaVersion','engineVersion','base','edits',...(input.schemaVersion>=2?['assets']:[]),...(input.schemaVersion===3?['baselineEdits']:[]),...(hasLock?['lock']:[])];
   if(Object.keys(input).length!==fields.length || fields.some(field=>!Object.hasOwn(input,field)))throw new Error('Invalid project fields.');
   const p:Project={...structuredClone(input),schemaVersion:3,assets:input.schemaVersion===1?{}:structuredClone(input.assets),baselineEdits:input.schemaVersion===3?structuredClone(input.baselineEdits):[]};
+  if(hasLock){const lock=(input as {lock?:unknown}).lock;if(!lock||typeof lock!=='object'||Array.isArray(lock)||Object.keys(lock).length!==1||(lock as {kind?:unknown}).kind!=='finalized')throw new Error('Invalid project lock.');}
   if (p.engineVersion !== '1.8.4') throw new Error('This project requires a different engine version.');
   if (!p.base || !['blank', 'file'].includes(p.base.kind) || !Array.isArray(p.edits) || !Array.isArray(p.baselineEdits)) throw new Error('Invalid project contents.');
   const baseFields=p.base.kind==='blank'?['kind','title','artist','tempo','tuning','measureCount']:['kind','filename','bytesBase64','sha256'];

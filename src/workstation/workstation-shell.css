@@ -107,3 +107,8 @@ body { overflow:hidden; }
   .transport-primary { font-size:12px; }
   .transport-primary .practice-tempo { max-width:130px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 }
+
+.finalized-banner { display:flex; align-items:center; gap:12px; padding:6px 14px; border-bottom:1px solid var(--ws-accent); background:color-mix(in srgb, var(--ws-accent) 14%, transparent); }
+.finalized-banner p { margin:0; }
+.export-layout-fields { border:0; margin:0; padding:0; display:contents; }
+.inspector-edit-locked { border:0; margin:0; padding:0; min-width:0; }

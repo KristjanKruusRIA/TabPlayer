@@ -23,6 +23,8 @@ export interface FingeringRequest {note:model.Note;pitch:number;preferredString:
 export interface FingeringPlacement {note:model.Note;string:number;fret:number}
 export interface RangePanelProps {
   score:model.Score;target:BeatTarget;selection:MusicSelection|null;busy:boolean;
+  /** The document is finalized: selecting still works, editing the selected notes does not. */
+  locked?:boolean;
   onSelection:(selection:MusicSelection|null)=>void;
   onEdit:(command:RangeCommand)=>void;
 }

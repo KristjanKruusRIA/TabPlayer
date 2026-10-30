@@ -15,6 +15,23 @@ use std::{
 
 pub type ProjectError = String;
 
+/// The message every refused change to a finalized document carries.
+pub const FINALIZED_MESSAGE: &str = "This document is finalized. Unfinalize it to make changes.";
+
+/// A lock field may be absent (unlocked) but never null: a null would read as unlocked and lose the lock on save.
+fn present_lock<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<DocumentLock>, D::Error> {
+    DocumentLock::deserialize(deserializer).map(Some)
+}
+
+/// A lock on a document. Only finalizing exists; later kinds (password locks) can be added here.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
+pub enum DocumentLock {
+    Finalized,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Project {
@@ -25,6 +42,8 @@ pub struct Project {
     pub baseline_edits: Vec<EditCommand>,
     pub edits: Vec<EditCommand>,
     pub assets: BTreeMap<String, StoredAsset>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lock: Option<DocumentLock>,
 }
 
 impl<'de> Deserialize<'de> for Project {
@@ -39,6 +58,8 @@ impl<'de> Deserialize<'de> for Project {
             baseline_edits: Vec<EditCommand>,
             edits: Vec<EditCommand>,
             assets: BTreeMap<String, StoredAsset>,
+            #[serde(default, deserialize_with = "present_lock")]
+            lock: Option<DocumentLock>,
         }
         let mut value = serde_json::Value::deserialize(deserializer)?;
         let fields = value
@@ -78,6 +99,7 @@ impl<'de> Deserialize<'de> for Project {
             baseline_edits: wire.baseline_edits,
             edits: wire.edits,
             assets: wire.assets,
+            lock: wire.lock,
         })
     }
 }
@@ -92,6 +114,12 @@ pub struct ProjectView {
     pub baseline_edits: Vec<EditCommand>,
     pub edits: Vec<EditCommand>,
     pub assets: BTreeMap<String, AssetInfo>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present_lock"
+    )]
+    pub lock: Option<DocumentLock>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -195,6 +223,7 @@ impl Project {
             baseline_edits: vec![],
             edits: vec![],
             assets: BTreeMap::new(),
+            lock: None,
         }
     }
 
@@ -273,6 +302,7 @@ impl Project {
                 .iter()
                 .map(|(id, asset)| (id.clone(), asset.info().expect("validated asset")))
                 .collect(),
+            lock: self.lock,
         }
     }
 }
@@ -292,6 +322,7 @@ pub struct ProjectSession {
     project: Project,
     cursor: usize,
     saved: Vec<EditCommand>,
+    saved_lock: Option<DocumentLock>,
     asset_info: BTreeMap<String, AssetInfo>,
     path: Option<PathBuf>,
 }
@@ -302,8 +333,21 @@ pub struct ProjectCheckpoint {
     pub project: Project,
     pub cursor: usize,
     pub saved: Vec<EditCommand>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present_lock"
+    )]
+    pub saved_lock: Option<DocumentLock>,
     #[serde(deserialize_with = "Option::<PathBuf>::deserialize")]
     pub path: Option<PathBuf>,
+}
+
+impl ProjectCheckpoint {
+    /// Unsaved changes: the edits up to the cursor or the lock differ from the last save.
+    pub fn is_dirty(&self) -> bool {
+        self.project.edits[..self.cursor] != self.saved || self.project.lock != self.saved_lock
+    }
 }
 
 impl ProjectSession {
@@ -312,6 +356,7 @@ impl ProjectSession {
             project: self.project.clone(),
             cursor: self.cursor,
             saved: self.saved.clone(),
+            saved_lock: self.saved_lock,
             path: self.path.clone(),
         }
     }
@@ -335,6 +380,7 @@ impl ProjectSession {
             project: value.project,
             cursor: value.cursor,
             saved: value.saved,
+            saved_lock: value.saved_lock,
             asset_info,
             path: value.path,
         })
@@ -343,6 +389,7 @@ impl ProjectSession {
     pub fn saved_checkpoint(&self) -> Result<ProjectCheckpoint, ProjectError> {
         let mut project = self.project.clone();
         project.edits = self.saved.clone();
+        project.lock = self.saved_lock;
         project.assets.retain(|id, _| {
             project
                 .baseline_edits
@@ -355,6 +402,7 @@ impl ProjectSession {
             project,
             cursor: self.saved.len(),
             saved: self.saved.clone(),
+            saved_lock: self.saved_lock,
             path: self.path.clone(),
         })
     }
@@ -365,6 +413,7 @@ impl ProjectSession {
         Ok(Self {
             cursor: project.edits.len(),
             saved: project.edits.clone(),
+            saved_lock: project.lock,
             asset_info,
             project,
             path,
@@ -380,10 +429,11 @@ impl ProjectSession {
             baseline_edits: self.project.baseline_edits.clone(),
             edits: self.project.edits.clone(),
             assets: self.asset_info.clone(),
+            lock: self.project.lock,
         };
         project.edits.truncate(self.cursor);
         ProjectSnapshot {
-            dirty: project.edits != self.saved,
+            dirty: project.edits != self.saved || self.project.lock != self.saved_lock,
             project,
             can_undo: self.cursor > 0,
             can_redo: self.cursor < self.project.edits.len(),
@@ -425,6 +475,8 @@ impl ProjectSession {
             self.asset_info.entry(id.clone()).or_insert(info);
             self.project.assets.entry(id).or_insert(asset);
         }
+        // A mixer edit on a finalized document clears the redo stack like any edit. List positions are
+        // persisted identity (added tracks are keyed by the edit's position), so they must never shift.
         self.project.edits.truncate(self.cursor);
         self.project.edits.push(command);
         self.cursor += 1;
@@ -447,7 +499,19 @@ impl ProjectSession {
         Ok(self.snapshot())
     }
 
+    pub fn lock(&self) -> Option<DocumentLock> {
+        self.project.lock
+    }
+
+    /// Sets or clears the lock. It is not an edit: it has no undo step. Returns whether it changed.
+    pub fn set_lock(&mut self, lock: Option<DocumentLock>) -> bool {
+        let changed = self.project.lock != lock;
+        self.project.lock = lock;
+        changed
+    }
+
     pub fn mark_saved(&mut self, path: PathBuf) {
+        self.saved_lock = self.project.lock;
         self.saved = self.project.edits[..self.cursor].to_vec();
         self.path = Some(path);
     }
@@ -475,6 +539,7 @@ impl ProjectSession {
             baseline_edits: self.project.baseline_edits.clone(),
             edits,
             assets,
+            lock: self.project.lock,
         }
     }
 
@@ -512,6 +577,7 @@ impl ProjectSession {
     pub fn fork_project(&self) -> Result<Project, ProjectError> {
         let mut project = self.stored_project();
         project.baseline_edits.append(&mut project.edits);
+        project.lock = None;
         Ok(project)
     }
 

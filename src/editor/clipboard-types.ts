@@ -18,5 +18,7 @@ export type ClipboardCommand={type:'pasteMusic';clip:MusicClip;options:PasteOpti
 export interface PreparedMusicPaste {score:model.Score;barMap:BarIndexMap}
 export interface ClipboardPanelProps {
   score:model.Score;target:BeatTarget;selection:MusicSelection|null;clip:MusicClip|null;busy:boolean;
+  /** The document is finalized: copying still works, cutting and pasting do not. */
+  locked?:boolean;
   onCopy:(mode:ClipboardMode)=>void;onCut:(mode:ClipboardMode)=>void;onPaste:(options:PasteOptions)=>void;
 }

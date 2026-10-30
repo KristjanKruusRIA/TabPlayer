@@ -29,7 +29,7 @@ function fixture(){
       applyEdit:vi.fn(async(command,revision)=>{check(revision);redo.set(documentId,[]);return update({...record.snapshot.project,edits:[...record.snapshot.project.edits,command]});}),
       undo:vi.fn(async revision=>{check(revision);const edits=[...record.snapshot.project.edits];redo.get(documentId)!.push(edits.pop()!);return update({...record.snapshot.project,edits});}),
       redo:vi.fn(async revision=>{check(revision);return update({...record.snapshot.project,edits:[...record.snapshot.project.edits,redo.get(documentId)!.pop()!]});}),
-      saveProject:vi.fn(async(_saveAs,revision)=>{check(revision);return update(record.snapshot.project,false);}),
+      setLock:vi.fn() as never,saveProject:vi.fn(async(_saveAs,revision)=>{check(revision);return update(record.snapshot.project,false);}),
       askUnsaved:vi.fn(async()=> 'discard' as const),exportGp:vi.fn(async()=>true),confirmExport:async()=>true};
     mocks.bridges.set(documentId,bridge);return documentId;
   };

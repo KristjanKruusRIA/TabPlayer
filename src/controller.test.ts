@@ -24,7 +24,7 @@ function makeBridge(project:Project=blankProject(),redoHistory:EditCommand[]=[])
     applyEdit: vi.fn(async command => { undone=[];current={...current,project:{...current.project,edits:[...current.project.edits,command]},canUndo:true,canRedo:false,dirty:true}; revision++;return snapshot(); }),
     undo: async () => { const edits=current.project.edits.slice();undone.push(edits.pop()!);current={...current,project:{...current.project,edits},canUndo:edits.length>0,canRedo:true,dirty:edits.length>0};revision++;return snapshot(); },
     redo: async () => { const edits=[...current.project.edits,undone.pop()!];current={...current,project:{...current.project,edits},canUndo:true,canRedo:undone.length>0,dirty:true};revision++;return snapshot(); },
-    saveProject: vi.fn(async () => null), exportGp: async () => false,
+    setLock:vi.fn() as never,saveProject: vi.fn(async () => null), exportGp: async () => false,
     askUnsaved: async () => 'discard', confirmExport: async () => true,
   };
   return bridge;

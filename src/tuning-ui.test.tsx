@@ -43,7 +43,7 @@ async function setup(initial=blankProject(),openProject:Project=blankProject()) 
     const bridge:NativeBridge={documentId,snapshot:async()=>record(),cancelAsset:vi.fn(async()=>true),
       readBackingAsset:async(_assetId:string,_revision:number):Promise<Uint8Array>=>{throw new Error('Backing asset reads are not implemented.');},
       applyEdit:async(command,expected,assetToken)=>{check(expected);if(assetToken&&command.type==='setBacking'&&command.backing)assets={...assets,[command.backing.assetId]:{filename:'backing.wav',mediaType:'audio/wav',byteLength:20}};edits=edits.slice(0,cursor);edits.push(command);cursor++;dirty=true;return update();},
-      undo:async expected=>{check(expected);cursor--;dirty=true;return update();},redo:async expected=>{check(expected);cursor++;dirty=true;return update();},saveProject:async()=>null,exportGp:vi.fn(async()=>false),askUnsaved:vi.fn(async()=> 'discard' as const),confirmExport:vi.fn(async()=>false)};
+      undo:async expected=>{check(expected);cursor--;dirty=true;return update();},redo:async expected=>{check(expected);cursor++;dirty=true;return update();},setLock:vi.fn() as never,saveProject:async()=>null,exportGp:vi.fn(async()=>false),askUnsaved:vi.fn(async()=> 'discard' as const),confirmExport:vi.fn(async()=>false)};
     records.set(documentId,record());documentBridges.set(documentId,bridge);return documentId;
   };
   const snapshot=():WorkspaceSnapshot=>({documents:[...records.values()],active:{...active}});

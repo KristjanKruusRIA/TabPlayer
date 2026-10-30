@@ -87,3 +87,10 @@ it.each([
   }
   expect(Array.from(document.querySelectorAll('.document-tab-title'),item=>item.textContent)).toEqual(titles);
 });
+
+it('marks a finalized tab with an accessible lock',()=>{
+  render(<DocumentTabs tabs={[{id:'locked',title:'Etude',path:'C:/scores/etude.tabplayer',dirty:false,locked:true},{id:'open',title:'Open',path:null,dirty:false}]} activeId="locked" disabled={false} onActivate={vi.fn()} onClose={vi.fn()}/>);
+  const [locked,open]=screen.getAllByRole('tab');
+  expect(locked.querySelector('svg[aria-label="Finalized"]')).not.toBeNull();expect(open.querySelector('svg[aria-label="Finalized"]')).toBeNull();
+  expect(locked).toHaveAccessibleDescription('C:/scores/etude.tabplayer; Finalized');
+});

@@ -11,7 +11,7 @@ import type { DocumentCandidate } from './project';
 import type { NativeAudioBridge } from './audio/bridge';
 import type { ExportNativeBridge } from './export/bridge';
 import { DocumentController } from './controller';
-import { blankProject, type EditCommand, type Project, type AssetInfo } from './project';
+import { FINALIZED_MESSAGE, blankProject, type EditCommand, type Project, type AssetInfo } from './project';
 import type { NativeBridge } from './bridge';
 import {buildScore,exportGp,effectiveAudioSettings,type BuiltDocument} from './engine';
 import {createHash} from 'node:crypto';
@@ -95,14 +95,15 @@ async function setup(initial=blankProject(),openProject?:Project,options:{width?
   documentBridges.clear();let next=0,activation=0,active={documentId:'',activationId:''};
   const records=new Map<string,DocumentSnapshot>(),staged=new Map<string,DocumentCandidate>();
   const add=(project:Project,path:string|null=null)=>{
-    const documentId=`app-document-${++next}`;let edits:EditCommand[]=[...project.edits],cursor=edits.length,revision=0,assets:Record<string,AssetInfo>={...project.assets},dirty=cursor>0;
-    const record=():DocumentSnapshot=>({documentId,revision,snapshot:{project:{...project,assets,edits:edits.slice(0,cursor)},canUndo:cursor>0,canRedo:cursor<edits.length,redoEdit:edits[cursor]??null,dirty,path}});
+    const documentId=`app-document-${++next}`;let lock=project.lock,edits:EditCommand[]=[...project.edits],cursor=edits.length,revision=0,assets:Record<string,AssetInfo>={...project.assets},dirty=cursor>0;
+    const record=():DocumentSnapshot=>({documentId,revision,snapshot:{project:{...project,assets,edits:edits.slice(0,cursor),...(lock?{lock}:{})},canUndo:cursor>0,canRedo:cursor<edits.length,redoEdit:edits[cursor]??null,dirty,path}});
     const update=()=>{revision++;const value=record();records.set(documentId,value);return value;};
     const check=(expected:number)=>{if(expected!==revision||!records.has(documentId))throw new Error('Invalid addressed revision');};
     const bridge:NativeBridge={documentId,snapshot:async()=>record(),cancelAsset:vi.fn(async()=>true),
       readBackingAsset:async(_assetId:string,_revision:number):Promise<Uint8Array>=>{throw new Error('Backing asset reads are not implemented.');},
-      applyEdit:async(command,expected,assetToken)=>{check(expected);integration.commits(command,assetToken);if(assetToken&&command.type==='setBacking'&&command.backing)assets={...assets,[command.backing.assetId]:{filename:'backing.wav',mediaType:'audio/wav',byteLength:20}};edits=edits.slice(0,cursor);edits.push(command);cursor++;dirty=true;return update();},
-      undo:async expected=>{check(expected);cursor--;dirty=true;return update();},redo:async expected=>{check(expected);cursor++;dirty=true;return update();},saveProject:async()=>null,exportGp:vi.fn(async()=>false),askUnsaved:vi.fn(async()=> 'discard' as const),confirmExport:vi.fn(async()=>false)};
+      setLock:async(next,expected)=>{check(expected);if((lock?.kind??null)===(next?.kind??null))return record();if(next)lock=next;else lock=undefined;dirty=true;return update();},
+      applyEdit:async(command,expected,assetToken)=>{check(expected);if(lock&&command.type!=='setTrackMix')throw new Error(FINALIZED_MESSAGE);integration.commits(command,assetToken);if(assetToken&&command.type==='setBacking'&&command.backing)assets={...assets,[command.backing.assetId]:{filename:'backing.wav',mediaType:'audio/wav',byteLength:20}};edits=edits.slice(0,cursor);edits.push(command);cursor++;dirty=true;return update();},
+      undo:async expected=>{check(expected);if(lock)throw new Error(FINALIZED_MESSAGE);cursor--;dirty=true;return update();},redo:async expected=>{check(expected);if(lock)throw new Error(FINALIZED_MESSAGE);cursor++;dirty=true;return update();},saveProject:async()=>null,exportGp:vi.fn(async()=>false),askUnsaved:vi.fn(async()=> 'discard' as const),confirmExport:vi.fn(async()=>false)};
     records.set(documentId,record());documentBridges.set(documentId,bridge);return documentId;
   };
   const snapshot=():WorkspaceSnapshot=>({documents:[...records.values()],active:{...active}});
@@ -909,4 +910,89 @@ it('auditions a note written from the instrument view and stays silent for a rem
   fireEvent.click(screen.getByRole('button',{name:/^Remove string 5, fret 2 /}));
   await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(1));
   await new Promise(resolve=>setTimeout(resolve,20));expect(integration.audition).toHaveBeenCalledTimes(1);
+});
+
+const menuButton=(name:string)=>screen.queryByRole('button',{name,hidden:true});
+it('offers Finalize for an open document and Unfinalize once it is finalized, without a history entry',async()=>{
+  const c=await setup();
+  expect(menuButton('Finalize document')).toBeInTheDocument();expect(menuButton('Unfinalize document')).not.toBeInTheDocument();
+  expect(screen.queryByText('Finalized: editing is locked.')).not.toBeInTheDocument();
+  click('Finalize document');
+  await waitFor(()=>expect(c.getState().snapshot.project.lock).toEqual({kind:'finalized'}));
+  expect(menuButton('Unfinalize document')).toBeInTheDocument();expect(menuButton('Finalize document')).not.toBeInTheDocument();
+  expect(screen.getByText('Finalized: editing is locked.')).toBeInTheDocument();
+  expect(c.getState().snapshot.project.edits).toHaveLength(0);expect(c.getState().snapshot.dirty).toBe(true);expect(integration.commits).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button',{name:'Unfinalize'}));
+  await waitFor(()=>expect(c.getState().snapshot.project.lock).toBeUndefined());
+  expect(screen.queryByText('Finalized: editing is locked.')).not.toBeInTheDocument();expect(menuButton('Finalize document')).toBeInTheDocument();
+});
+it('disables editing surfaces of a finalized document while transport, mixer, save and export stay usable',async()=>{
+  const c=await setup();
+  click('Append measure');await waitFor(()=>expect(c.getState().snapshot.project.edits).toHaveLength(1));
+  expect(screen.getByRole('button',{name:'Undo'})).toBeEnabled();
+  click('Finalize document');await waitFor(()=>expect(c.getState().snapshot.project.lock).toEqual({kind:'finalized'}));
+  const disabled=(name:string|RegExp)=>expect(functionalButton(name)).toBeDisabled();
+  expect(screen.getByRole('button',{name:'Undo'})).toBeDisabled();expect(screen.getByRole('button',{name:'Redo'})).toBeDisabled();
+  disabled('Append measure');disabled('Set note');disabled('Import backing');disabled('Paste music');disabled('Cut music');
+  // Keyboard shortcuts do not reach the native edit path.
+  const before=c.getState().snapshot.project.edits;
+  fireEvent.keyDown(screen.getByLabelText('Score workspace'),{key:'z',ctrlKey:true});
+  fireEvent.keyDown(screen.getByLabelText('Score workspace'),{key:'Enter'});
+  await new Promise(resolve=>setTimeout(resolve,20));
+  expect(c.getState().snapshot.project.edits).toEqual(before);expect(integration.commits).toHaveBeenCalledTimes(1);
+  // Transport, save, export and the mixer are untouched.
+  expect(document.querySelector('[aria-keyshortcuts="Space"]')).toBeEnabled();
+  expect(functionalButton('Save')).toBeEnabled();expect(functionalButton('Export score')).toBeEnabled();
+  expect(functionalButton('Copy music')).toBeDefined();
+  const mute=exposeFunctionalControl(screen.getByLabelText('Mute')) as HTMLInputElement;expect(mute).toBeEnabled();
+  fireEvent.click(mute);
+  await waitFor(()=>expect(c.getState().snapshot.project.edits.at(-1)).toEqual(expect.objectContaining({type:'setTrackMix'})));
+  expect(integration.commits).toHaveBeenCalledTimes(2);
+});
+it('disables the instrument view entry mode of a finalized document',async()=>{
+  const c=await editingInstrument();
+  expect(screen.getByLabelText('Click to edit notes')).toBeEnabled();
+  click('Finalize document');await waitFor(()=>expect(c.getState().snapshot.project.lock).toEqual({kind:'finalized'}));
+  expect(screen.getByLabelText('Click to edit notes')).toBeDisabled();
+  expect(screen.queryByRole('button',{name:/^String 4, fret 1 /})).not.toBeInTheDocument();
+});
+it('exports a finalized document with its current layout and sends no layout edit',async()=>{
+  const c=await setup();click('Finalize document');await waitFor(()=>expect(c.getState().snapshot.project.lock).toEqual({kind:'finalized'}));
+  click('Export score');change('Export format','pdf');
+  const dialog=within(screen.getByRole('dialog',{name:'Export score'}));
+  expect(dialog.getByLabelText('Width (mm)')).toBeDisabled();
+  click('Export');await waitFor(()=>expect(integration.exportRun).toHaveBeenCalled());
+  expect(integration.commits).not.toHaveBeenCalled();expect(c.getState().snapshot.project.edits).toHaveLength(0);
+});
+it('shows the usual alert when a finalized document refuses an edit that was already on its way',async()=>{
+  const c=await setup();click('Finalize document');await waitFor(()=>expect(c.getState().snapshot.project.lock).toEqual({kind:'finalized'}));
+  const before=c.getState().snapshot.project.edits;
+  await act(async()=>{await c.edit({type:'appendMeasure'}).catch(()=>{});});
+  await waitFor(()=>expect(screen.getByRole('alert')).toHaveTextContent(FINALIZED_MESSAGE));
+  expect(c.getState().snapshot.project.edits).toEqual(before);
+});
+it('keeps selection, scales, tuning audition and Copy music usable while finalized',async()=>{
+  const c=await setup();
+  click('Finalize document');await waitFor(()=>expect(c.getState().snapshot.project.lock).toEqual({kind:'finalized'}));
+  for(const name of ['Select bar','Select track','Select all','Browse scales'])expect(functionalButton(name)).toBeEnabled();
+  for(const label of ['Measure','Beat','Staff','Voice','String'])expect(exposeFunctionalControl(screen.getByLabelText(label))).toBeEnabled();
+  fireEvent.click(functionalButton('Select bar'));
+  await waitFor(()=>expect(functionalButton('Copy music')).toBeEnabled());
+  expect(functionalButton('Clear selection')).toBeEnabled();expect(functionalButton('Erase selected notes')).toBeDisabled();
+  expect(functionalButton('Remove track')).toBeDisabled();expect(functionalButton('Apply tuning')).toBeDisabled();
+  expect(functionalButton('Set note')).toBeDisabled();expect(functionalButton('Append measure')).toBeDisabled();
+  expect(integration.commits).not.toHaveBeenCalled();
+});
+it('treats a mixer move on a finalized document like any edit for redo',async()=>{
+  const c=await setup();
+  click('Append measure');await waitFor(()=>expect(c.getState().snapshot.project.edits).toHaveLength(1));
+  click('Undo');await waitFor(()=>expect(c.getState().snapshot.canRedo).toBe(true));
+  click('Finalize document');await waitFor(()=>expect(c.getState().snapshot.project.lock).toEqual({kind:'finalized'}));
+  expect(c.getState().snapshot.canRedo).toBe(true);
+  fireEvent.click(exposeFunctionalControl(screen.getByLabelText('Mute')));
+  await waitFor(()=>expect(c.getState().snapshot.project.edits.map(edit=>edit.type)).toEqual(['setTrackMix']));
+  expect(c.getState().snapshot.canRedo).toBe(false);expect(c.getState().snapshot.redoEdit ?? null).toBeNull();
+  click('Unfinalize document');await waitFor(()=>expect(c.getState().snapshot.project.lock).toBeUndefined());
+  expect(screen.getByRole('button',{name:'Redo'})).toBeDisabled();
+  expect(c.getState().snapshot.project.edits.map(edit=>edit.type)).toEqual(['setTrackMix']);
 });

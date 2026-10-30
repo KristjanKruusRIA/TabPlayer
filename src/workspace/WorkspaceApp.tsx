@@ -78,7 +78,7 @@ export function WorkspaceApp({workspace,session,library}:{workspace:WorkspaceCon
     if(key==='w')run(onClose());
     else {const index=state.documents.indexOf(active),next=(index+(event.shiftKey?-1:1)+state.documents.length)%state.documents.length;run(perform(()=>workspace.activate(state.documents[next].id)));}
   }
-  const tabs=state.documents.map(entry=>{const value=entry.controller.getState();return {id:entry.id,title:value.score.title,path:value.snapshot.path,dirty:value.snapshot.dirty};});
+  const tabs=state.documents.map(entry=>{const value=entry.controller.getState();return {id:entry.id,title:value.score.title,path:value.snapshot.path,dirty:value.snapshot.dirty,locked:value.snapshot.project.lock?.kind==='finalized'};});
   const backupError=state.recoveryError ?? (session?.status.state==='failed'?session.status.error:null);
   const backupState=session?.status.state;
   const backupTime=session?.status.capturedAtUnixMs===null||session?.status.capturedAtUnixMs===undefined?null:new Date(session.status.capturedAtUnixMs);

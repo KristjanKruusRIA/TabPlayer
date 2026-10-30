@@ -517,6 +517,11 @@ pub async fn stage_backing(
     document_id: String,
     app: AppHandle,
 ) -> Result<Option<serde_json::Value>, String> {
+    // A finalized document refuses backing import before any file picker opens.
+    app.state::<Arc<Mutex<DocumentWorkspace>>>()
+        .lock()
+        .unwrap()
+        .check_unlocked(&document_id)?;
     #[cfg(feature = "desktop-test")]
     let test_path = if std::env::var("TABPLAYER_DESKTOP_TEST").as_deref() == Ok("1") {
         std::env::var_os("TABPLAYER_TEST_BACKING").map(PathBuf::from)

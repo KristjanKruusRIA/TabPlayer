@@ -14,7 +14,7 @@ export interface DocumentViewState {
   zoom:number;trackView:TrackView;instrumentVisible:boolean;
   scoreDisplay?:ScoreDisplayPreferences;
 }
-export interface DocumentTab {id:DocumentId;title:string;path:string|null;dirty:boolean}
+export interface DocumentTab {id:DocumentId;title:string;path:string|null;dirty:boolean;locked?:boolean}
 export interface NativeWorkspaceBridge {
   snapshot():Promise<WorkspaceSnapshot>;
   readDocument():Promise<DocumentIntake|null>;

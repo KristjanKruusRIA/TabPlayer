@@ -628,7 +628,7 @@ fn clean_projection(
         if record.revision != close.revision {
             return Err("Document changed; retry with its current revision.".into());
         }
-        let dirty = record.session.project.edits[..record.session.cursor] != record.session.saved;
+        let dirty = record.session.is_dirty();
         if dirty && !close.discard {
             return Err("Save or discard this document's changes before closing.".into());
         }
@@ -650,7 +650,7 @@ fn clean_projection(
     }
     let mut projected = Vec::with_capacity(records.len());
     for mut record in records.drain(..) {
-        let dirty = record.session.project.edits[..record.session.cursor] != record.session.saved;
+        let dirty = record.session.is_dirty();
         if dirty {
             if record.session.path.is_none()
                 && record.saved_file_sha256.is_none()

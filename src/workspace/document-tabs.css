@@ -8,3 +8,5 @@
 .document-tab-title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .document-tab-dirty{flex:0 0 6px;width:6px;height:6px;border-radius:50%;background:#b5df73}
 .document-tabs::selection{background:#b5df73;color:#161c24}
+
+.document-tab-lock{flex:0 0 auto;margin-left:4px;opacity:.8}

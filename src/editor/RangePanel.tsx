@@ -19,7 +19,7 @@ function readScope({score,target,selection}:Pick<RangePanelProps,'score'|'target
   const key=(lane:VoiceAddress)=>`${lane.track}/${lane.staff}/${lane.voice}`;
   return ['lane','staff','track','all'].find(scope=>equal(selection.range.lanes.map(key),scopeLanes({score,target},selection.range.start.bar,scope).map(key)))??'custom';
 }
-export function RangePanel({score,target,selection,busy,onSelection,onEdit}:RangePanelProps) {
+export function RangePanel({score,target,selection,busy,locked=false,onSelection,onEdit}:RangePanelProps) {
   const [semitones,setSemitones]=useState('1'),[maxFret,setMaxFret]=useState('24'),[strings,setStrings]=useState<number[]>([]),[scope,setScope]=useState(()=>readScope({score,target,selection})),[error,setError]=useState('');
   const [technique,setTechnique]=useState<StrokeTechnique>('pick'),[pattern,setPattern]=useState('D U');
   const staff=score.tracks[target.track]?.staves[target.staff];
@@ -73,7 +73,7 @@ export function RangePanel({score,target,selection,busy,onSelection,onEdit}:Rang
       <option value="custom" disabled>Custom selection</option><option value="lane" disabled={selection?.kind==='bars'}>Current lane</option><option value="staff" disabled={selection?.kind==='bars'}>Current staff</option><option value="track">Current track</option><option value="all">All tracks</option>
     </select></label>
     <button disabled={!selection||selection.kind==='notes'||!!selectionError||scope==='custom'} onClick={broaden}>Apply selection scope</button>
-    <fieldset disabled={!available}><legend>Selected notes</legend>
+    <fieldset disabled={!available||locked}><legend>Selected notes</legend>
       <button onClick={()=>selection&&edit({type:'eraseSelection',selection})}>Erase selected notes</button>
       <div className="editor-actions"><button disabled={!melodic} onClick={()=>selection&&edit({type:'setSelectionTies',selection,tied:true})}>Tie selected notes</button><button onClick={()=>selection&&edit({type:'setSelectionTies',selection,tied:false})}>Untie selected notes</button></div>
       <fieldset disabled={!melodic}><legend>Transpose</legend>

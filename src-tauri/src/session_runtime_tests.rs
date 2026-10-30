@@ -1398,3 +1398,70 @@ fn status_callback_can_query_mutate_and_retry_without_recursive_delivery() {
         serde_json::to_value(runtime.status()).unwrap()
     );
 }
+
+#[test]
+fn clean_shutdown_keeps_only_the_saved_lock_after_restart() {
+    let directory = tempfile::tempdir().unwrap();
+    let runtime = open(directory.path());
+    let audio = audio();
+    let jobs = ExportJobs::default();
+    resolve(&runtime, &audio, &jobs);
+    edit(&runtime, 7);
+    let workspace = runtime.workspace();
+    let id = workspace.lock().unwrap().active_owner().document_id.clone();
+    let lock = Some(crate::project::DocumentLock::Finalized);
+    {
+        let mut state = workspace.lock().unwrap();
+        let address = address(&state, &id);
+        state
+            .save_to_path(&address, directory.path().join("kept.tabplayer"))
+            .unwrap();
+        let address = crate::workspace::DocumentRevision {
+            revision: state.document(&id).unwrap().revision,
+            ..address
+        };
+        state.set_lock(&address, lock).unwrap();
+        assert!(state.document(&id).unwrap().snapshot.dirty);
+    }
+    // Unsaved: the clean shutdown reduces the document to its saved, unlocked checkpoint.
+    runtime.shutdown(closes(&runtime), &audio, &jobs).unwrap();
+    drop(runtime);
+    let runtime = open(directory.path());
+    let preview = runtime.startup().preview.unwrap();
+    let recovered = preview
+        .documents
+        .iter()
+        .find(|record| record.document_id == id)
+        .unwrap();
+    assert_eq!(recovered.snapshot.project.lock, None);
+    assert!(!recovered.snapshot.dirty);
+    // Saved: the lock survives the reduction and the restart.
+    let audio = self::audio();
+    runtime
+        .resolve(Some(preview.token.clone()), vec![id.clone()], &audio, &jobs)
+        .unwrap();
+    let workspace = runtime.workspace();
+    {
+        let mut state = workspace.lock().unwrap();
+        let address = address(&state, &id);
+        state.set_lock(&address, lock).unwrap();
+        let address = crate::workspace::DocumentRevision {
+            revision: state.document(&id).unwrap().revision,
+            ..address
+        };
+        state
+            .save_to_path(&address, directory.path().join("kept.tabplayer"))
+            .unwrap();
+    }
+    runtime.shutdown(closes(&runtime), &audio, &jobs).unwrap();
+    drop(runtime);
+    let runtime = open(directory.path());
+    let preview = runtime.startup().preview.unwrap();
+    let recovered = preview
+        .documents
+        .iter()
+        .find(|record| record.document_id == id)
+        .unwrap();
+    assert_eq!(recovered.snapshot.project.lock, lock);
+    assert!(!recovered.snapshot.dirty);
+}

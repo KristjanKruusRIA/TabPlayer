@@ -59,3 +59,16 @@ it('lists shortcuts beside commands and runs a typed expression first',()=>{
   fireEvent.keyDown(input,{key:'Enter'});
   expect(onRun).toHaveBeenCalledWith({kind:'edit',command:{type:'setNoteTechniquesByIndex',target,noteIndex:0,patch:{dynamics:6}}});
 });
+
+it('refuses edit commands, undo and redo while the document is finalized but still navigates',()=>{
+  const onRun=vi.fn(),onClose=vi.fn();
+  render(<CommandPalette context={{...context,canRedo:true,locked:true}} busy={false} onRun={onRun} onClose={onClose}/>);
+  const input=screen.getByRole('combobox',{name:'Command'});
+  fireEvent.change(input,{target:{value:'fret 5'}});
+  expect(screen.getAllByRole('option')[0]).toHaveTextContent('This document is finalized. Unfinalize it to make changes.');
+  fireEvent.keyDown(input,{key:'Enter'});
+  fireEvent.change(input,{target:{value:'undo'}});fireEvent.keyDown(input,{key:'Enter'});
+  expect(onRun).not.toHaveBeenCalled();expect(onClose).not.toHaveBeenCalled();
+  fireEvent.change(input,{target:{value:'measure 3'}});fireEvent.keyDown(input,{key:'Enter'});
+  expect(onRun).toHaveBeenCalledWith({kind:'select',target:{...target,bar:2}});
+});

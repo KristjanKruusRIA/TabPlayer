@@ -80,7 +80,10 @@ pub struct CloseDocument {
 use crate::{
     assets::StoredAsset,
     files,
-    project::{BaseDocument, CandidateStore, EditCommand, Project, ProjectSession, StagedAsset},
+    project::{
+        BaseDocument, CandidateStore, DocumentLock, EditCommand, FINALIZED_MESSAGE, Project,
+        ProjectSession, StagedAsset,
+    },
     recovery::{DocumentViewState, RecoveryDocument},
 };
 use std::{
@@ -493,6 +496,7 @@ impl DocumentWorkspace {
     pub fn stage_fork(&mut self, mut project: Project) -> Result<DocumentCandidate, String> {
         self.check_admission()?;
         project.baseline_edits.append(&mut project.edits);
+        project.lock = None;
         let candidate = self.candidates.stage_document(project, None)?;
         self.fork_candidates.insert(candidate.token.clone());
         Ok(candidate)
@@ -637,6 +641,10 @@ impl DocumentWorkspace {
     ) -> Result<DocumentSnapshot, String> {
         let revision = self.check_mutation(address)?;
         let entry = self.entry_mut(&address.document_id)?;
+        // The mixer is how a player balances playback, so it stays usable on a finalized score.
+        if entry.session.lock().is_some() && !matches!(command, EditCommand::SetTrackMix { .. }) {
+            return Err(FINALIZED_MESSAGE.into());
+        }
         entry
             .candidates
             .commit_edit(asset_token, command, &mut entry.session)?;
@@ -652,6 +660,9 @@ impl DocumentWorkspace {
     pub fn undo(&mut self, address: &DocumentRevision) -> Result<DocumentSnapshot, String> {
         let revision = self.check_mutation(address)?;
         let entry = self.entry_mut(&address.document_id)?;
+        if entry.session.lock().is_some() {
+            return Err(FINALIZED_MESSAGE.into());
+        }
         entry.session.undo()?;
         entry.revision += 1;
         let snapshot = entry.snapshot();
@@ -662,6 +673,9 @@ impl DocumentWorkspace {
     pub fn redo(&mut self, address: &DocumentRevision) -> Result<DocumentSnapshot, String> {
         let revision = self.check_mutation(address)?;
         let entry = self.entry_mut(&address.document_id)?;
+        if entry.session.lock().is_some() {
+            return Err(FINALIZED_MESSAGE.into());
+        }
         entry.session.redo()?;
         entry.revision += 1;
         let snapshot = entry.snapshot();
@@ -710,8 +724,38 @@ impl DocumentWorkspace {
         Ok(snapshot)
     }
 
+    /// Refuses a document that is finalized. Callers check this before opening a file picker.
+    pub fn check_unlocked(&self, id: &str) -> Result<(), String> {
+        self.check_admission()?;
+        if self.entry(id)?.session.lock().is_some() {
+            return Err(FINALIZED_MESSAGE.into());
+        }
+        Ok(())
+    }
+
+    /// Finalizes or unfinalizes a document. The lock is not an edit, so history is untouched.
+    /// Setting the lock a document already has returns its current snapshot and bumps nothing.
+    pub fn set_lock(
+        &mut self,
+        address: &DocumentRevision,
+        lock: Option<DocumentLock>,
+    ) -> Result<DocumentSnapshot, String> {
+        let revision = self.check_mutation(address)?;
+        let entry = self.entry_mut(&address.document_id)?;
+        if !entry.session.set_lock(lock) {
+            return Ok(entry.snapshot());
+        }
+        entry.revision += 1;
+        let snapshot = entry.snapshot();
+        self.checkpoint_revision = revision;
+        Ok(snapshot)
+    }
+
     pub fn stage_asset(&mut self, id: &str, asset: StoredAsset) -> Result<StagedAsset, String> {
         let entry = self.entry_mut(id)?;
+        if entry.session.lock().is_some() {
+            return Err(FINALIZED_MESSAGE.into());
+        }
         let staged = entry.candidates.stage_asset(asset)?;
         entry.asset_tokens.insert(staged.token.clone());
         Ok(staged)

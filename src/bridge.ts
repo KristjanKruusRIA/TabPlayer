@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { confirm, message } from '@tauri-apps/plugin-dialog';
-import type { EditCommand } from './project';
+import type { DocumentLock, EditCommand } from './project';
 import type { DocumentId,DocumentSnapshot,NativeWorkspaceBridge } from './workspace/types';
 import {readExportBackingAsset} from './export/backing-asset-read';
 import { newScoreDefaults } from './workspace/author-defaults';
@@ -12,6 +12,8 @@ export interface NativeBridge {
   applyEdit(command: EditCommand, revision:number, assetToken?:string): Promise<DocumentSnapshot>;
   undo(revision:number): Promise<DocumentSnapshot>;
   redo(revision:number): Promise<DocumentSnapshot>;
+  /** Finalizes or unfinalizes the document. The lock is not an edit and has no history entry. */
+  setLock(lock:DocumentLock|null,revision:number): Promise<DocumentSnapshot>;
   saveProject(saveAs: boolean,revision:number): Promise<DocumentSnapshot | null>;
   exportGp(bytes: Uint8Array,revision:number,fileName?:string): Promise<boolean>;
   readBackingAsset(assetId:string,revision:number):Promise<Uint8Array>;
@@ -38,6 +40,7 @@ export function createDocumentBridge(documentId:DocumentId,observer?:DocumentSav
   cancelAsset: token => invoke('cancel_asset',{documentId,token}),
   applyEdit: (command,revision,assetToken) => invoke('apply_edit',{document:{documentId,revision},command,assetToken}),
   undo: revision => invoke('undo_edit',{document:{documentId,revision}}), redo: revision => invoke('redo_edit',{document:{documentId,revision}}),
+  setLock: (lock,revision) => invoke('document_set_lock',{document:{documentId,revision},lock}),
   saveProject: async (saveAs,revision) => {
     const record=await (desktopTest?invoke<DocumentSnapshot|null>('desktop_test_io',{action:'save',documentId,revision}):invoke<DocumentSnapshot|null>('save_project',{document:{documentId,revision},saveAs}));
     if(record?.documentId===documentId&&observer)void Promise.resolve().then(()=>observer.saved(record)).catch(error=>observer.failed(error));

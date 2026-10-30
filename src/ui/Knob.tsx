@@ -1,5 +1,5 @@
-import { useId, useRef, useState } from 'react';
-import { parseTyped, useRange } from './useRange';
+import { useId, useRef } from 'react';
+import { useRange, useTypedValue } from './useRange';
 import './ui.css';
 
 export interface ControlProps {
@@ -43,20 +43,14 @@ export function Knob({label,ariaLabel,value,min,max,step,defaultValue,unit,forma
   const gid=useId().replace(/[^a-zA-Z0-9]/g,'_');
   const range=useRange({value,min,max,step,defaultValue,disabled,onCommit,onInput,onInputEnd});
   const {shown,handlers}=range;
-  const dial=useRef<HTMLDivElement>(null),[editing,setEditing]=useState(false),[typed,setTyped]=useState(''),field=useRef<HTMLInputElement>(null),closing=useRef(false);
+  const dial=useRef<HTMLDivElement>(null);
   const t=(shown-min)/(max-min),angle=start+sweep*t,zero=bipolar?start+sweep*((0-min)/(max-min)):start;
   const text=formatValue(shown,{min,step,unit,format});
-  const beginTyping=()=>{if(disabled)return;closing.current=false;setTyped(formatValue(shown,{min,step}));setEditing(true);};
-  const finishTyping=(accept:boolean)=>{
-    if(closing.current)return;closing.current=true;
-    setEditing(false);
-    const number=accept?parseTyped(typed):null;
-    if(number!==null)range.commit(number);
-    dial.current?.focus({preventScroll:true});
-  };
+  const typing=useTypedValue({text:()=>formatValue(shown,{min,step}),commit:number=>range.commit(number),done:()=>dial.current?.focus({preventScroll:true})});
+  const {editing,typed,setTyped,finish:finishTyping}=typing,beginTyping=()=>{if(!disabled)typing.begin();};
   return <div className={`tp-knob ${className??''}`} data-tone={tone} data-disabled={disabled||undefined}>
     <div ref={el=>{dial.current=el;range.wheelRef.current=el;}} className="tp-knob-dial" role="slider" tabIndex={disabled?-1:0} aria-label={ariaLabel??label} aria-valuemin={min} aria-valuemax={max} aria-valuenow={shown} aria-valuetext={text} aria-disabled={disabled||undefined}
-      onPointerDown={handlers.onPointerDown} onPointerMove={handlers.onPointerMove} onPointerUp={handlers.onPointerUp} onPointerCancel={handlers.onPointerCancel} onDoubleClick={handlers.onDoubleClick} onBlur={range.flushWheel}
+      onPointerDown={handlers.onPointerDown} onPointerMove={handlers.onPointerMove} onPointerUp={handlers.onPointerUp} onPointerCancel={handlers.onPointerCancel} onDoubleClick={handlers.onDoubleClick} onLostPointerCapture={handlers.onLostPointerCapture} onBlur={handlers.onBlur}
       onKeyDown={event=>{if(handlers.key(event)){event.stopPropagation();return;}if(event.key==='Enter'&&!disabled){event.preventDefault();event.stopPropagation();beginTyping();}}}>
       <svg viewBox="0 0 64 64" aria-hidden="true" focusable="false">
         {tone==='amp'
@@ -84,7 +78,7 @@ export function Knob({label,ariaLabel,value,min,max,step,defaultValue,unit,forma
     </div>
     <span className="tp-knob-label">{label}</span>
     {editing
-      ?<input ref={el=>{field.current=el;el?.select();}} className="tp-knob-field" inputMode="decimal" autoFocus aria-label={`${ariaLabel??label} value`} value={typed} onChange={event=>setTyped(event.target.value)} onBlur={()=>finishTyping(true)}
+      ?<input ref={typing.input} className="tp-knob-field" inputMode="decimal" aria-label={`${ariaLabel??label} value`} value={typed} onChange={event=>setTyped(event.target.value)} onBlur={()=>finishTyping(true)}
           onKeyDown={event=>{event.stopPropagation();if(event.key==='Enter'){event.preventDefault();finishTyping(true);}else if(event.key==='Escape'){event.preventDefault();finishTyping(false);}}}/>
       :<span className="tp-knob-readout" onClick={beginTyping} title={disabled?undefined:'Click to type a value'}>{text}</span>}
   </div>;

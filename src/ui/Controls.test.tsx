@@ -24,6 +24,21 @@ it('is a vertical slider with the knob contract', ()=>{
   expect(onCommit).toHaveBeenCalledTimes(3);
 });
 
+it('takes a typed value like a knob does, from its readout or the Enter key', async()=>{
+  const user=userEvent.setup(),onCommit=vi.fn();
+  function Host(){const [value,setValue]=useState(3);return <Fader label="1k" ariaLabel="Graphic EQ 1k Hz (dB)" value={value} min={-12} max={12} step={.5} unit=" dB" bipolar onCommit={next=>{onCommit(next);setValue(next);}}/>;}
+  render(<Host/>);
+  await user.click(screen.getByText('+3.0 dB'));
+  const field=screen.getByRole('textbox',{name:'Graphic EQ 1k Hz (dB) value'}) as HTMLInputElement;
+  expect(field).toHaveFocus();expect(field.selectionEnd).toBe(field.value.length);
+  await user.keyboard('-4.5{Enter}');
+  expect(onCommit).toHaveBeenCalledExactlyOnceWith(-4.5);expect(screen.getByRole('slider')).toHaveAttribute('aria-valuenow','-4.5');expect(screen.getByRole('slider')).toHaveFocus();
+  screen.getByRole('slider').focus();await user.keyboard('{Enter}30{Enter}');
+  expect(onCommit).toHaveBeenLastCalledWith(12);
+  screen.getByRole('slider').focus();await user.keyboard('{Enter}1{Escape}');
+  expect(onCommit).toHaveBeenCalledTimes(2);
+});
+
 it('records one change for a drag along its track', ()=>{
   const onCommit=vi.fn();render(fader({onCommit}));
   const slider=screen.getByRole('slider');sized(slider);

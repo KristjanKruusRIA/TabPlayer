@@ -3,6 +3,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { useState } from 'react';
+import userEvent from '@testing-library/user-event';
 import { Knob } from './Knob';
 import { parseTyped, snapToStep } from './useRange';
 
@@ -131,6 +132,21 @@ it('returns to the host value when the host refuses a change', async()=>{
   const knob=screen.getByRole('slider');
   await act(async()=>{fireEvent.keyDown(knob,{key:'ArrowUp'});});
   expect(knob).toHaveAttribute('aria-valuenow','0');
+});
+
+// Typed entry, with real typing: every key re-renders the field, and a render must not select its text again.
+it('takes a typed value of several characters, selecting the old text once when the field opens', async()=>{
+  vi.useRealTimers();
+  const user=userEvent.setup(),onCommit=vi.fn();
+  function Host(){const [value,setValue]=useState(2);return <Knob label="Gain" ariaLabel="amp Gain (dB)" unit=" dB" min={-24} max={24} step={.1} value={value} onCommit={next=>{onCommit(next);setValue(next);}}/>;}
+  render(<Host/>);
+  await user.click(screen.getByText('+2.0 dB'));
+  const field=screen.getByRole('textbox') as HTMLInputElement;
+  expect(field).toHaveFocus();expect(field.selectionStart).toBe(0);expect(field.selectionEnd).toBe(field.value.length);
+  await user.keyboard('-6.5');
+  expect(field).toHaveValue('-6.5');
+  await user.keyboard('{Enter}');
+  expect(onCommit).toHaveBeenCalledExactlyOnceWith(-6.5);
 });
 
 it('reads typed numbers and snaps to whole steps', ()=>{

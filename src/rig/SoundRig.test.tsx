@@ -591,7 +591,7 @@ it('says what Automatic plays the track as, by the track\'s program, and changes
   mount(soundPreset('lead',null) as TrackSound);
   const group=screen.getByRole('radiogroup',{name:'Sound source'});
   expect(within(group).getByRole('radio',{name:'Automatic instrument, plays as Black Guitar'})).toBeChecked();
-  expect(group).toHaveTextContent('Auto · Black');
+  expect(group).toHaveTextContent('Auto→Black');
   const strip=screen.getByRole('radiogroup',{name:'Track'});
   await userEvent.click(within(strip).getByRole('radio',{name:'Bass'}));
   expect(within(group).getByRole('radio',{name:'Automatic instrument, plays as Babyblue Bass'})).toBeInTheDocument();

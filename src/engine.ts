@@ -6,6 +6,7 @@ import type { BackingSettings, ChannelMix, DocumentSettings } from './edit-types
 import { defaultDocumentSettings, defaultMix, applySettingsEdit, copyTrackSettings, completeSound } from './document-settings';
 import { getLyricsSource, setLyricsSource } from './editor/lyrics-source';
 import { copyHarmonyChord } from './harmony/chord-source';
+import { copyTrackScaleDiagrams } from './harmony/scale-diagram';
 import { applyAdvancedEdit } from './editor/advanced';
 import { captureNoteLinks, restoreNoteLinks, detachNote } from './editor/links';
 import { backingLocationsForScore,validateBackingAnchors } from './audio/plan';
@@ -93,6 +94,7 @@ function duplicateTrack(score:model.Score,source:model.Track,index:number):{copy
   const links=captureNoteLinks(score).filter(link=>noteIds.has(link.from)&&noteIds.has(link.to)).map(link=>({...link,from:noteIds.get(link.from)!,to:noteIds.get(link.to)!}));
   const lyrics=getLyricsSource(source);if(lyrics)setLyricsSource(copy,lyrics.value,lyrics.managed);
   source.staves.forEach((staff,index)=>{for(const [key,chord] of staff.chords??[]){const target=copy.staves[index]?.chords?.get(key);if(target)copyHarmonyChord(chord,target);}});
+  copyTrackScaleDiagrams(source,copy);
   if(!copy.isPercussion){
     const used=new Set(score.tracks.flatMap(track=>[track.playbackInfo.primaryChannel,track.playbackInfo.secondaryChannel]));
     const free=Array.from({length:16},(_,index)=>index).filter(index=>index!==9&&!used.has(index));

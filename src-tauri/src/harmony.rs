@@ -379,3 +379,75 @@ impl HarmonyLibrary {
         Ok(())
     }
 }
+
+named_enum!(ScaleMarkShape {
+    Circle = "circle", Square = "square", Diamond = "diamond", Triangle = "triangle", Cross = "cross"
+});
+named_enum!(ScaleOrientation { Horizontal = "horizontal", Vertical = "vertical" });
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ScaleMark {
+    pub string: u8,
+    pub fret: u8,
+    pub shape: ScaleMarkShape,
+    pub color: String,
+    pub text: String,
+    pub text_color: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ScaleDiagram {
+    pub name: String,
+    pub strings: u8,
+    pub frets: u8,
+    pub first_fret: u8,
+    pub orientation: ScaleOrientation,
+    pub show_fret_markers: bool,
+    pub marks: Vec<ScaleMark>,
+}
+
+/// Text an XML 1.0 document can hold: no control characters and no U+FFFE or U+FFFF.
+fn xml_text(value: &str) -> bool {
+    !value
+        .chars()
+        .any(|c| c.is_control() || c == '\u{fffe}' || c == '\u{ffff}')
+}
+
+fn hex_color(value: &str) -> bool {
+    value.len() == 7
+        && value.starts_with('#')
+        && value[1..].bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+impl ScaleDiagram {
+    pub fn validate(&self) -> Result<(), String> {
+        let last = i32::from(self.first_fret) + i32::from(self.frets) - 1;
+        if self.name.chars().count() > 64
+            || !xml_text(&self.name)
+            || !(3..=10).contains(&self.strings)
+            || !(4..=24).contains(&self.frets)
+            || self.first_fret < 1
+            || last > 127
+            || self.marks.len() > usize::from(self.strings) * (usize::from(self.frets) + 1)
+        {
+            return Err("Invalid scale diagram.".into());
+        }
+        let mut seen = HashSet::new();
+        for mark in &self.marks {
+            let in_window = (i32::from(self.first_fret)..=last).contains(&i32::from(mark.fret));
+            if !(1..=self.strings).contains(&mark.string)
+                || !(mark.fret == 0 || in_window)
+                || !seen.insert((mark.string, mark.fret))
+                || mark.text.chars().count() > 3
+                || !xml_text(&mark.text)
+                || !hex_color(&mark.color)
+                || !hex_color(&mark.text_color)
+            {
+                return Err("Invalid scale diagram mark.".into());
+            }
+        }
+        Ok(())
+    }
+}

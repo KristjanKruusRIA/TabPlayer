@@ -3,6 +3,7 @@ import { validateStringCount,validateTuningName } from './editor/structure';
 import {validateStrokePattern} from './editor/range-edits';
 import {validatePageLayout} from './engraving/page';
 import {validateHarmonyChord} from './harmony/chord-source';
+import {validateScaleDiagram} from './harmony/scale-diagram';
 import {validateBackingSettings} from './document-settings';
 import {validateRatioTempoPoints} from './editor/tempo-types';
 import {parseTrackColor} from './track-color';
@@ -38,7 +39,7 @@ const shapes:Record<string,readonly string[]>={
   insertMeasures:['beforeBar','count'],removeMeasures:['firstBar','lastBar'],
   pasteMusic:['clip','options'],
   setEngraving:['engraving'],setPageLayout:['layout'],
-  setBeatText:['target','text'],setHarmonyChord:['target','chord','fillEmptyBeat'],
+  setBeatText:['target','text'],setHarmonyChord:['target','chord','fillEmptyBeat'],setScaleDiagram:['target','diagram'],
   transposeHarmony:['selection','interval','includeKeySignatures','includeChords'],
 };
 const metadata=['subTitle','album','words','music','copyright','tab','notices','instructions'];
@@ -201,6 +202,7 @@ export function validateParityCommand(value:unknown):void {
   if(type==='setPageLayout')validatePageLayout(edit.layout);
   if(type==='setBeatText'&&typeof edit.text!=='string')throw new Error('Invalid beat text.');
   if(type==='setHarmonyChord'){flag(edit.fillEmptyBeat);if(edit.chord!==null)validateHarmonyChord(edit.chord);}
+  if(type==='setScaleDiagram'&&edit.diagram!==null)validateScaleDiagram(edit.diagram);
   if(type==='transposeHarmony'){
     flag(edit.includeKeySignatures);flag(edit.includeChords);
     if(harmonyInterval(edit.interval)&&(edit.includeKeySignatures||edit.includeChords))throw new Error('Diatonic transposition does not update chords or keys.');

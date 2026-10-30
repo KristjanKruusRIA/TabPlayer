@@ -6,6 +6,7 @@ import type { MeasureCommand } from './editor/measures-types';
 import type { ClipboardCommand } from './editor/clipboard-types';
 import type { EngravingCommand,EngravingOverrides,PageLayout } from './engraving/types';
 import type { HarmonyCommand } from './editor/harmony-types';
+import type { ScaleDiagramCommand } from './harmony/scale-diagram';
 import type { ReplaceTempoAutomations } from './editor/tempo-types';
 
 export interface NoteTarget { target: BeatTarget; string: number }
@@ -77,7 +78,7 @@ export interface DocumentSettings {
   engraving:EngravingOverrides;page:PageLayout|null;
 }
 
-export type EditCommand = LyricsCommand | GestureCommand | BarGestureCommand | RangeCommand | MeasureCommand | ClipboardCommand | EngravingCommand | HarmonyCommand | ReplaceTempoAutomations
+export type EditCommand = LyricsCommand | GestureCommand | BarGestureCommand | RangeCommand | MeasureCommand | ClipboardCommand | EngravingCommand | HarmonyCommand | ScaleDiagramCommand | ReplaceTempoAutomations
   | { type: 'setNote'; target: BeatTarget; string: number; fret: number }
   | { type: 'removeNote'; target: BeatTarget; string: number }
   | { type: 'setRest'; target: BeatTarget }

@@ -170,7 +170,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     setClipboardError(null);
     const oldCount=state.score.masterBars.length;
     const wasPlaying=player?.getState().playing??false;
-    const done=controller.edit(command).then(()=>{
+    const landed=controller.edit(command),done=landed.then(()=>{
       const score=controller.getState().score,map=command.type==='insertMeasures'||command.type==='removeMeasures'?planMeasureMap(oldCount,command):null;
       setSelection(old=>map?repairMeasureSelection(score,old,map):repairSelection(score,command.type==='moveTrack'?{...old,track:movedTrackIndex(old.track,command)}:command.type==='duplicateTrack'?{...old,track:command.track+1}:old));
       if(command.type==='pasteMusic')setNoteIndex(null);
@@ -179,7 +179,8 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
       // Hearing an entered note is a courtesy: only note-setting edits, and only while nothing is playing.
       if(auditionEditsNow.current&&player&&!wasPlaying&&!player.getState().playing){const heard=editAudition(score,command);if(heard){const current=controller.getState();player.audition({trackId:trackIdentity(score.tracks[heard.track])},heard.notes,heard.durationMs,{project:current.snapshot.project,built:current});}}
     });
-    act(done);return done.then(()=>true,()=>false);
+    // The outcome is the edit's own: a failing follow-up (selection, audition) does not make a landed edit a refusal.
+    act(done);return landed.then(()=>true,()=>false);
   };
   const instrumentEdit=(command:EditCommand,follow:EntryFollow)=>edit(command,score=>{
     const next=followEntry(score,target,follow);

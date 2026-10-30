@@ -151,6 +151,21 @@ it('force_and_the_name_are_disabled_while_a_library_action_runs',async()=>{
   await act(async()=>{release();});expect(screen.getByLabelText('Style name')).toBeEnabled();
 });
 
+it('a_failed_save_is_shown_beside_the_read_failure',async()=>{
+  mount(defaultEngraving(),[]);invoke.mockRejectedValueOnce('Invalid style library: damaged');await open();
+  await screen.findByText(/Could not read saved styles/);invoke.mockRejectedValueOnce('Disk is full');
+  fireEvent.change(screen.getByLabelText('Style name'),{target:{value:'Nope'}});fireEvent.click(screen.getByRole('button',{name:'Save current style'}));
+  expect(await screen.findByText('Disk is full')).toBeInTheDocument();expect(screen.getByText(/Could not read saved styles/)).toBeInTheDocument();expect(screen.getAllByRole('alert')).toHaveLength(2);
+});
+
+it('reverting_changes_re_enables_apply_whatever_the_profile_order',()=>{
+  const value=defaultEngraving();value.profiles=[{trackId:'b',profile:'slash'},{trackId:'a',profile:'standard'}];
+  render(<EngravingPanel score={music()} trackIds={['source/guitar']} value={value} busy={false} onEdit={()=>{}}/>);
+  const force=screen.getByRole('button',{name:'Force default style'});expect(force).toBeEnabled();
+  fireEvent.change(screen.getByLabelText('Hide dynamics'),{target:{value:'true'}});expect(force).toBeDisabled();
+  fireEvent.change(screen.getByLabelText('Hide dynamics'),{target:{value:'inherit'}});expect(force).toBeEnabled();
+});
+
 it('a_damaged_library_keeps_its_alert_and_is_not_called_empty_until_a_success_clears_it',async()=>{
   mount(defaultEngraving(),[]);invoke.mockRejectedValueOnce('Invalid style library: damaged');await open();
   expect(await screen.findByRole('alert')).toHaveTextContent('Could not read saved styles');

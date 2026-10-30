@@ -80,7 +80,8 @@ export function StylePresetsPanel({score,trackIds,value,unapplied,busy,onEdit}:S
       <button type="button" disabled={working||!chosen||!!nameProblem} onClick={replaceSelected}>Update saved style</button>
     </div>
     <button type="button" disabled={cannotApply} onClick={()=>{void applyStyle(defaultStyle(),'the default style');}}>Force default style</button>
-    {(readError||error)&&<p role="alert">{readError||error}</p>}
+    {readError&&<p role="alert">{readError}</p>}
+    {error&&<p role="alert">{error}</p>}
     <p role="status" className="muted">{status}</p>
   </details>;
 }

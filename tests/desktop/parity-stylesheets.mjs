@@ -126,7 +126,9 @@ export async function runStylesheetsAcceptance({buildPath}={}){
     const damaged=Buffer.from('{"format":"tabplayer-style-library","version":1,"entries":[{"broken":true}]}');writeFileSync(libraryPath,damaged);const damagedHash=hashFile(libraryPath);
     await launch('launch-3',firstPath);await openStyles();await page.getByRole('alert').filter({hasText:'Could not read saved styles'}).waitFor();assert.equal(await page.locator('option',{hasText:'No saved styles yet'}).count(),0,'A damaged library is not called empty');
     await page.getByLabel('Style name',{exact:true}).fill('Rejected');await page.getByRole('button',{name:'Save current style',exact:true}).click();
-    await page.getByRole('alert').filter({hasText:/Invalid style library|Invalid saved style/}).first().waitFor();
+    // The failed save has its own message, separate from the read failure shown above it.
+    await page.getByRole('alert').filter({hasNotText:'Could not read saved styles'}).filter({hasText:'Invalid style library'}).waitFor();
+    await page.getByRole('alert').filter({hasText:'Could not read saved styles'}).waitFor();
     assert.equal(hashFile(libraryPath),damagedHash,'Damaged library left untouched');assert.deepEqual((await record()).snapshot.project.edits,[],'Failed save never edits the document');await shot('damaged-library');
     step('A damaged library is reported and left byte for byte',{damagedHash});
     assert.equal(realHash(),realBefore,'Real user library untouched');healthy();

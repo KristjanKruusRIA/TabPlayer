@@ -180,7 +180,7 @@ pub struct DocumentWorkspace {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct NativeFileReceipt {
+pub struct NativeFileReceipt {
     pub document: DocumentRevision,
     pub path: PathBuf,
     pub digest: String,

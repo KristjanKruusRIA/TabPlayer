@@ -94,3 +94,9 @@ response adds a little to the median (0.9 against 0.5 ms for 6 tracks at 64 fram
 - A rate no track has asked for is not checked when a response is imported (48 kHz and the last rate asked for are).
 - An engine that rested drops the ringing of anything older than the response it rested with, if a longer response
   then takes over. That input was silent for the whole of the shorter response's length.
+
+## Final acceptance (2026-10-30)
+- **Review:** a fresh hot-path review approved 4354d10 across real-time safety, convolution correctness, determinism, untrusted input, project compatibility and licensing. Fuzzing covered 5.59M frames with a worst error of 4.7e-6 against direct convolution.
+- **Merged branch:** 886 Rust tests passed, `tsc` was clean, `src/App.test.tsx` passed 143 of 143, and the rest of the suite passed 4,021 with 1 skipped; `src/editor/corpus.test.ts` is excluded from that run.
+- **Desktop:** `tests/desktop/parity-cabinet-ir.mjs` passed on a Windows desktop-test build, including import refusal, exported audio through the response, level trim, a removed response falling back with a notice, and restoring a response by identity.
+- **More limits from the review:** a kernel join does its FFT work in one frame (up to 20% of a 64-frame callback per stereo track, so 8 tracks joining together can glitch once at small buffers); a wake with unequal channels copies whole rings in one frame; after a rest, a longer response can play the left channel's old tail on the right; with 13 or more distinct responses the kernel cache thrashes; another open panel can show an old list. No IR ships with the app, and macOS and Linux were not run.

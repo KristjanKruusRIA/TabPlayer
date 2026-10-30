@@ -44,8 +44,8 @@ export async function runBatchConvertAcceptance({buildPath}={}){
   const workspace=()=>invoke('workspace_snapshot'),record=async()=>invoke('project_snapshot',{documentId:(await workspace()).active.documentId});
   const dialog=()=>page.getByRole('dialog',{name:'Batch convert scores',exact:true});
   // The dialog shows the picked folder's real path, which can differ in form from the one passed in, so match the unique tail.
-  const shown=name=>new RegExp(`${basename(runDirectory)}[\\/]${name}$`,'i');
-  const rowsOf=async()=>Object.fromEntries(await dialog().getByRole('table',{name:'Conversion report'}).locator('tbody tr').evaluateAll(rows=>rows.map(row=>[row.querySelector('th').textContent,[row.cells[0].textContent,row.cells[1].textContent]])));
+  const shown=name=>new RegExp(`${basename(runDirectory)}[\\\\/]${name}$`,'i');
+  const rowsOf=async()=>Object.fromEntries(await dialog().getByRole('table',{name:'Conversion report'}).locator('tbody tr').evaluateAll(rows=>rows.map(row=>[row.querySelector('th').textContent,[row.cells[1].textContent,row.cells[2].textContent]])));
   try{
     ui=await import('./workstation-commands.mjs');const {importer,Settings}=await import('@coderline/alphatab');
     // The corpus: legacy files in nested folders, a type that is not chosen, a broken file and a stray text file.

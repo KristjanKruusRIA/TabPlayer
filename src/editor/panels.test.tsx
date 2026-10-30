@@ -487,6 +487,18 @@ it('disabled curve editor prevents Apply from firing onChange, and on a piano no
   fireEvent.click(applyWhammy);
   expect(onEdit).not.toHaveBeenCalled();
 });
+
+it('with busy=true a bend preset button has no disabled attribute and a click records nothing in real TechniquePanel', () => {
+  const onEdit = vi.fn();
+  render(<TechniquePanel score={music()} target={target} string={6} busy={true} onEdit={onEdit} />);
+  const presetBtn = screen.getByRole('button', { name: 'Bend preset: Bend & release' });
+  expect(presetBtn.closest('fieldset[disabled]')).toBeNull();
+  expect(presetBtn).not.toHaveAttribute('disabled');
+  expect(presetBtn).not.toBeDisabled();
+  expect(presetBtn).toHaveAttribute('aria-disabled', 'true');
+  fireEvent.click(presetBtn);
+  expect(onEdit).not.toHaveBeenCalled();
+});
 it('staff tuning uses named notes, validates drafts and refreshes from history',()=>{
   const score=music(),onEdit=vi.fn(),props={score,target,string:6,busy:false,onEdit,onSelect:vi.fn()};const view=render(<StructurePanel {...props}/>);const input=screen.getByLabelText('Staff tuning (notes, high to low)');expect(input).toHaveValue('E4 B3 G3 D3 A2 E2');
   fireEvent.change(input,{target:{value:'E4 B3 G3 D3 A2 Db2'}});fireEvent.click(screen.getByRole('button',{name:'Apply staff settings'}));expect(onEdit).toHaveBeenLastCalledWith(expect.objectContaining({type:'setStaffSettings',settings:expect.objectContaining({tuning:[64,59,55,50,45,37]})}));onEdit.mockClear();

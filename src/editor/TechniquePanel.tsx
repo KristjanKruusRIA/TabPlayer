@@ -39,7 +39,9 @@ export function TechniquePanel({score,target,string,noteIndex=0,busy,onEdit}:Edi
       <div className="pair"><EnumInput label="Harmonic type" disabled={!stringed} value={note?.harmonicType??0} enumeration={model.HarmonicType} onValue={type=>patch({harmonic:type?{type,value:note?.harmonicValue||12}:null})}/><label>Harmonic value<input disabled={!stringed} type="number" min={0} step={.5} value={note?.harmonicValue??0} onChange={e=>patch({harmonic:{type:note?.harmonicType||model.HarmonicType.Natural,value:Number(e.target.value)}})}/></label></div>
       <label className="check"><input type="checkbox" disabled={staff.isPercussion} checked={note?.isTrill??false} onChange={e=>patch({trill:e.target.checked?{pitch:Math.min(127,(note?.realValue??60)+2),speed:16}:null})}/>Trill</label>
       <div className="pair"><label>Trill pitch<input disabled={staff.isPercussion} type="number" min={0} max={127} value={note?.isTrill?note.trillValue:Math.min(127,(note?.realValue??60)+2)} onChange={e=>patch({trill:{pitch:Number(e.target.value),speed:note?.trillSpeed??16}})}/></label><label>Trill speed<select disabled={staff.isPercussion} value={note?.trillSpeed??16} onChange={e=>patch({trill:{pitch:note?.isTrill?note.trillValue:Math.min(127,(note?.realValue??60)+2),speed:Number(e.target.value)}})}>{durationValues.map(n=><option key={n} value={n}>{durationLabel(n)}</option>)}</select></label></div>
-      <CurveEditor label="Bend" value={bend} disabled={busy||!note||!stringed} onChange={bend=>patch({bend})}/>
+    </fieldset>
+    <CurveEditor label="Bend" value={bend} disabled={busy||!note||!stringed} onChange={bend=>patch({bend})}/>
+    <fieldset disabled={busy||!note}>
       <div className="pair"><button disabled={!next()} onClick={()=>link('tie',next())}>Tie to next note</button><button onClick={()=>link('tie',null)}>Break tie</button></div>
       <button disabled={!note?.tieOrigin} onClick={()=>breakIncoming('tie')}>Break incoming tie</button>
       <div className="pair"><button disabled={!stringed||!next()} onClick={()=>link('hammerPull',next())}>Hammer/pull to next</button><button disabled={!stringed} onClick={()=>link('hammerPull',null)}>Break hammer/pull</button></div>
@@ -50,7 +52,7 @@ export function TechniquePanel({score,target,string,noteIndex=0,busy,onEdit}:Edi
       <label>Brush duration (ticks)<input disabled={!stringed} type="number" min={0} value={beat?.brushDuration??0} onChange={e=>beatPatch({brushDuration:Number(e.target.value)})}/></label>
       <label className="check"><input type="checkbox" checked={beat?.isTremolo??false} disabled={!availableTremolo.length} onChange={e=>beatPatch({tremolo:e.target.checked?{speed:defaultTremolo,style:0}:null})}/>Tremolo picking</label>
       <div className="pair"><label>Tremolo speed<select disabled={!availableTremolo.length} value={tremoloSpeed(beat)??defaultTremolo??16} onChange={e=>beatPatch({tremolo:{speed:Number(e.target.value),style:beat?.tremoloPicking?.style??0}})}>{durationValues.map(n=><option key={n} value={n} disabled={!availableTremolo.includes(n)}>{durationLabel(n)}</option>)}</select></label><EnumInput label="Tremolo style" disabled={!availableTremolo.length} value={beat?.tremoloPicking?.style??0} enumeration={model.TremoloPickingStyle} onValue={style=>beatPatch({tremolo:{speed:tremoloSpeed(beat)??defaultTremolo,style}})}/></div>
-      <CurveEditor label="Whammy" value={whammy} whammy disabled={busy||!beat||!stringed} onChange={whammy=>beatPatch({whammy})}/>
     </fieldset>
+    <CurveEditor label="Whammy" value={whammy} whammy disabled={busy||!beat||!stringed} onChange={whammy=>beatPatch({whammy})}/>
   </details>;
 }

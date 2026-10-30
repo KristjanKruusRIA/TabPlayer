@@ -20,5 +20,7 @@ export interface ClipboardPanelProps {
   score:model.Score;target:BeatTarget;selection:MusicSelection|null;clip:MusicClip|null;busy:boolean;
   /** The document is finalized: copying still works, cutting and pasting do not. */
   locked?:boolean;
+  /** Whether a paste starts with chord and scale diagrams included (the input preference). */
+  diagramsDefault?:boolean;
   onCopy:(mode:ClipboardMode)=>void;onCut:(mode:ClipboardMode)=>void;onPaste:(options:PasteOptions)=>void;
 }

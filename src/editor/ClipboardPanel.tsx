@@ -6,7 +6,7 @@ interface ClipMetadata {kind:MusicClip['kind'];mode:ClipboardMode;bars:number;tr
 interface MappingDraft {track:string;staffMap:string[]}
 const index=(value:number)=>Number.isInteger(value)&&value>=0&&value<=0xffffffff;
 const numeric=(value:string)=>value.trim()?Number(value):NaN;
-const defaults=(multi:boolean):PasteFilters=>({diagrams:true,texts:true,timers:true,trackAutomations:true,masterAutomations:multi,sections:multi});
+const defaults=(multi:boolean,diagrams=true):PasteFilters=>({diagrams,texts:true,timers:true,trackAutomations:true,masterAutomations:multi,sections:multi});
 const filterLabels:[keyof PasteFilters,string][]=[['diagrams','Chord diagrams'],['texts','Beat texts'],['timers','Timers'],['trackAutomations','Track automations'],['masterAutomations','Master tempo automations'],['sections','Sections']];
 
 function metadata(clip:MusicClip|null):{value:ClipMetadata|null;error:string} {
@@ -17,16 +17,16 @@ function metadata(clip:MusicClip|null):{value:ClipMetadata|null;error:string} {
   }catch{return {value:null,error:'Clipboard content is invalid or unsupported.'};}
 }
 
-export function ClipboardPanel({score,target,selection,clip,busy,locked=false,onCopy,onCut,onPaste}:ClipboardPanelProps):React.JSX.Element {
+export function ClipboardPanel({score,target,selection,clip,busy,locked=false,diagramsDefault=true,onCopy,onCut,onPaste}:ClipboardPanelProps):React.JSX.Element {
   const payload=useMemo(()=>metadata(clip),[clip]),source=payload.value;
-  const [mode,setMode]=useState<ClipboardMode>('singleTrack'),[count,setCount]=useState('1'),[filters,setFilters]=useState(()=>defaults(source?.mode==='multiTrack')),[mappings,setMappings]=useState<MappingDraft[]>([]),[error,setError]=useState('');
+  const [mode,setMode]=useState<ClipboardMode>('singleTrack'),[count,setCount]=useState('1'),[filters,setFilters]=useState(()=>defaults(source?.mode==='multiTrack',diagramsDefault)),[mappings,setMappings]=useState<MappingDraft[]>([]),[error,setError]=useState('');
   useEffect(()=>{
-    setCount('1');setFilters(defaults(source?.mode==='multiTrack'));setError('');
+    setCount('1');setFilters(defaults(source?.mode==='multiTrack',diagramsDefault));setError('');
     setMappings(source?.tracks.map((track,sourceTrack)=>{
       const destination=target.track+sourceTrack,existing=score.tracks[destination];
       return {track:existing?String(destination):'',staffMap:track.voices.map((_,staff)=>{const destinationStaff=source.kind==='phrase'?target.staff:staff;return existing?.staves[destinationStaff]?String(destinationStaff):'';})};
     })??[]);
-  },[source,score,target.track,target.staff,target.bar,target.voice,target.beat]);
+  },[source,score,target.track,target.staff,target.bar,target.voice,target.beat,diagramsDefault]);
   const scope=useMemo(()=>{
     if(!selection)return {text:'Select music to copy or cut.',error:''};
     try {

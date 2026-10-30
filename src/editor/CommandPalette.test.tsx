@@ -72,3 +72,13 @@ it('refuses edit commands, undo and redo while the document is finalized but sti
   fireEvent.change(input,{target:{value:'measure 3'}});fireEvent.keyDown(input,{key:'Enter'});
   expect(onRun).toHaveBeenCalledWith({kind:'select',target:{...target,bar:2}});
 });
+
+it('keeps input focus when clicking the dialog title or padding, and anchors near top',()=>{
+  const {input}=setup();
+  expect(input).toHaveFocus();
+  const title=screen.getByRole('heading',{name:'Commands'});
+  fireEvent.mouseDown(title);
+  expect(input).toHaveFocus();
+  const dialog=screen.getByRole('dialog');
+  expect(dialog.parentElement).toHaveClass('command-palette-backdrop');
+});

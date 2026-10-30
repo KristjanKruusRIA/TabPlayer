@@ -130,6 +130,14 @@ describe('second review',()=>{
     const plain:StaffSettings={...banjo,capo:1};
     expect(()=>applyStructureEdit(score,{type:'setStaffSettings',track:0,staff:0,settings:plain} as never,0)).not.toThrow();
   });
+  it('replays a log whose stored trill sits above 127 through a later staff settings edit',()=>{
+    // A partial capo lifts a trill at pitch 125 on string 1 to 130; a later settings edit without a drone must still open.
+    const trilled=project(note(1,0),{type:'setNoteTechniques',target,string:1,patch:{trill:{pitch:125,speed:16}}} as unknown as EditCommand,
+      {type:'setStaffSettings',track:0,staff:0,settings:{...banjo,partialCapo:{fret:5,strings:[1]}}});
+    expect(staffOf(buildScore(trilled)).bars[0].voices[0].beats[0].notes[0].trillValue).toBe(130);
+    const later=buildScore({...trilled,edits:[...trilled.edits,{type:'setStaffSettings',track:0,staff:0,settings:{...banjo,capo:1}}]});
+    expect(staffOf(later).capo).toBe(1);
+  });
   it('lets a dead note on a missing fret stay while other notes of its beat are edited',()=>{
     const score=buildScore(project(note(1,3),note(2,0)));
     staffOf(score).bars[0].voices[0].beats[0].notes.find(item=>item.string===1)!.isDead=true;

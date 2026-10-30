@@ -5,7 +5,7 @@ import type { EditCommand } from '../edit-types';
 import type { BeatTarget } from '../project';
 import { formatPitch } from '../tuning';
 import { describePartialCapo, getPartialCapo, openStringKey } from '../editor/partial-capo';
-import { describeBanjoDrone, getBanjoDrone, neckFret, plainFret } from '../editor/banjo-drone';
+import { describeBanjoDrone, fretExists, getBanjoDrone, neckFret, plainFret } from '../editor/banjo-drone';
 import { busyHint, drumTarget, entryBeat, entryNotes, fretTarget, keyTarget, noBeatHint, padTarget, type EntryAction, type EntryContext, type EntryFollow, type EntryTarget } from './entry';
 import './instruments.css';
 
@@ -94,7 +94,7 @@ function Fretboard({staff, notes, mode, leftHanded, entry}: {staff: model.Staff;
     if (string < 1 || string > staff.tuning.length || (!source && !beat?.deadSlapped)) continue;
     // Trills and ornaments retain their source string; harmonics retain their
     // authored touch position rather than moving to a guessed sounding fret.
-    const fret = beat?.deadSlapped ? 0 : source!.harmonicType === 0 && !source!.isDead ? neckFret(staff, string, plainFret(staff, string, source!.fret) + note.key - source!.realValue) : source!.fret;
+    const fret = beat?.deadSlapped ? 0 : source!.harmonicType === 0 && (!source!.isDead || fretExists(staff, string, source!.fret)) ? neckFret(staff, string, plainFret(staff, string, source!.fret) + note.key - source!.realValue) : source!.fret;
     if (fret >= 0) positions.push({id: note.id, key: note.key, string, fret});
   }
   const maxFret = Math.max(24,...positions.map(p => Math.ceil(p.fret))), left = 64, neckLength=770, height=226;

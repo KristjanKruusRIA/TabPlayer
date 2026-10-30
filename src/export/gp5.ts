@@ -65,7 +65,7 @@ class Out {
 /** Text as Windows-1252 bytes; a character that codepage lacks becomes a question mark and is counted as left out. */
 function encode(text:string,report:Report):Uint8Array {
   const bytes:number[]=[];let lost=0;
-  for(const char of text){
+  for(const char of text.normalize('NFC').replace(/♯/g,'#').replace(/♭/g,'b')){
     const code=char.codePointAt(0)!,mapped=code<0x80||code>=0xA0&&code<=0xFF?code:CP1252.get(code);
     if(mapped===undefined){bytes.push(63);lost++;}else bytes.push(mapped);
   }
@@ -93,29 +93,34 @@ function soundingBar(bar:model.Bar):model.Bar {
 /**
  * The time signature a measure is written with. The format has no pickup (anacrusis) flag and starts the next measure after the
  * signature's length, so a pickup is written with a signature of its own length, which keeps every later note where it was.
- * Null when that length is not a whole number of notes of some value the format has.
+ * Null when that length is not a whole number of notes of some value the format has, or is nothing at all.
+ * The length comes from the whole score before any selection (the longest bar over every track), because that is what
+ * fixes where the next measure starts, and a pickup may be written only in tracks that are not exported.
  */
-function signature(bar:model.MasterBar):[number,number]|null {
-  const ticks=bar.isAnacrusis?bar.calculateDuration(true):0;
-  if(ticks<=0)return [bar.timeSignatureNumerator,bar.timeSignatureDenominator];
+/** Pickup lengths in ticks, by measure of the exported selection. */
+type Pickups=ReadonlyMap<number,number>;
+function signature(bar:model.MasterBar,pickups:Pickups):[number,number]|null {
+  const ticks=pickups.get(bar.index);
+  if(ticks===undefined)return [bar.timeSignatureNumerator,bar.timeSignatureDenominator];
+  if(ticks<=0)return null;
   for(const denominator of [bar.timeSignatureDenominator,1,2,4,8,16,32,64]){
     const unit=3840/denominator;
     if(Number.isInteger(unit)&&ticks%unit===0&&ticks/unit<=MAX_NUMERATOR)return [ticks/unit,denominator];
   }
   return null;
 }
-const isPickup=(bar:model.MasterBar)=>{const written=signature(bar);return bar.isAnacrusis&&written!==null&&(written[0]!==bar.timeSignatureNumerator||written[1]!==bar.timeSignatureDenominator);};
+const isPickup=(bar:model.MasterBar,pickups:Pickups)=>{const written=signature(bar,pickups);return pickups.has(bar.index)&&written!==null&&(written[0]!==bar.timeSignatureNumerator||written[1]!==bar.timeSignatureDenominator);};
 const spoken=(beat:model.Beat)=>beat.notes.length>0||!beat.isEmpty;
 const trackName=(track:model.Track)=>track.name||`Track ${track.index+1}`;
 
-function checkMusic(score:model.Score):void {
+function checkMusic(score:model.Score,pickups:Pickups):void {
   if(!score.tracks.length||!score.masterBars.length)refuse('There is no music to export as Guitar Pro 5.');
   if(score.masterBars.length>MAX_BARS)refuse(`Guitar Pro 5 holds at most ${MAX_BARS} measures and this export has ${score.masterBars.length}. Choose a measure range.`);
   const percussion=score.tracks.filter(track=>track.staves[0]?.isPercussion).length;
   if(percussion>PERCUSSION_SLOTS.length||score.tracks.length-percussion>PITCHED_SLOTS.length)refuse(`Guitar Pro 5 holds at most ${PITCHED_SLOTS.length} pitched and ${PERCUSSION_SLOTS.length} percussion tracks. Choose fewer tracks.`);
   for(const bar of score.masterBars){
-    const written=signature(bar);
-    if(!written){refuse(`Measure ${bar.index+1} is a pickup of a length Guitar Pro 5 cannot hold. Guitar Pro 5 has no pickup measures; remove the pickup mark or choose a measure range that starts after it.`);continue;}
+    const written=signature(bar,pickups);
+    if(!written){refuse(`Measure ${bar.index+1} is a pickup that is empty or of a length Guitar Pro 5 cannot hold. Guitar Pro 5 has no pickup measures; remove the pickup mark or choose a measure range that starts after it.`);continue;}
     const [numerator,denominator]=written;
     if(numerator<1||numerator>MAX_NUMERATOR||denominator<1||denominator>64||(denominator&(denominator-1))!==0)refuse(`Measure ${bar.index+1} has a time signature Guitar Pro 5 cannot hold.`);
   }
@@ -178,9 +183,11 @@ function openingTempo(score:model.Score):number {
   const first=score.masterBars[0].tempoAutomations.filter(change=>change.type===model.AutomationType.Tempo).sort((a,b)=>a.ratioPosition-b.ratioPosition)[0];
   return first?.value??120;
 }
+/** A tempo change with the text shown beside it. */
+interface Tempo { value:number; text:string }
 /** Tempo changes after the opening one, keyed `bar:beat` by the beat of the first track they start at (a simile bar plays its source's beats). */
-function tempoChanges(score:model.Score,report:Report):Map<string,number> {
-  const placed=new Map<string,number>(),lead=score.tracks[0].staves[0];
+function tempoChanges(score:model.Score,report:Report):Map<string,Tempo> {
+  const placed=new Map<string,Tempo>(),lead=score.tracks[0].staves[0];
   for(const bar of score.masterBars){
     const changes=bar.tempoAutomations.filter(change=>change.type===model.AutomationType.Tempo).sort((a,b)=>a.ratioPosition-b.ratioPosition);
     changes.forEach((change,order)=>{
@@ -190,7 +197,7 @@ function tempoChanges(score:model.Score,report:Report):Map<string,number> {
       const length=bar.calculateDuration(false),beat=soundingBar(lead.bars[bar.index]).voices[0]?.beats.find(candidate=>candidate.graceType===model.GraceType.None&&Math.abs(candidate.playbackStart/length-change.ratioPosition)<1e-4);
       const key=beat&&`${bar.index}:${beat.index}`;
       if(!beat||!spoken(beat))report.lose('Tempo changes that do not fall on a beat of the first track are left out');
-      else{if(placed.has(key!))report.lose('Two tempo changes on one beat keep the last');placed.set(key!,change.value);}
+      else{if(placed.has(key!))report.lose('Two tempo changes on one beat keep the last');placed.set(key!,{value:change.value,text:change.text??''});}
     });
   }
   return placed;
@@ -221,10 +228,10 @@ function writeDirections(out:Out,score:model.Score,report:Report):void {
 }
 /** A double barline is a flag of the measure in the file; the model may keep it on the measure or as the right barline of a staff's bar. */
 const doubleBar=(score:model.Score,bar:model.MasterBar)=>bar.isDoubleBar||score.tracks.some(track=>track.staves[0]?.bars[bar.index]?.barLineRight===model.BarLineStyle.LightLight);
-function writeMasterBars(out:Out,score:model.Score,report:Report):void {
+function writeMasterBars(out:Out,score:model.Score,report:Report,pickups:Pickups):void {
   let previous:[number,number]|null=null,previousKey:[number,number]=[0,0];
   for(const bar of score.masterBars){
-    const written=signature(bar)!,key:[number,number]=[bar.keySignature,bar.keySignatureType],numerator=!previous||written[0]!==previous[0],denominator=!previous||written[1]!==previous[1];
+    const written=signature(bar,pickups)!,key:[number,number]=[bar.keySignature,bar.keySignatureType],numerator=!previous||written[0]!==previous[0],denominator=!previous||written[1]!==previous[1];
     const repeatEnd=bar.isRepeatEnd,section=bar.section&&(bar.section.text||bar.section.marker)?bar.section:null,keyChange=!previous||key[0]!==previousKey[0]||key[1]!==previousKey[1];
     out.byte((numerator?1:0)|(denominator?2:0)|(bar.isRepeatStart?4:0)|(repeatEnd?8:0)|(bar.alternateEndings&MAX_ENDING?16:0)|(section?32:0)|(keyChange?64:0)|(doubleBar(score,bar)?128:0));
     if(numerator)out.byte(written[0]);
@@ -246,7 +253,7 @@ function writeMasterBars(out:Out,score:model.Score,report:Report):void {
     else{out.byte(0);if(bar.tripletFeel!==model.TripletFeel.NoTripletFeel)report.lose('Swing feels other than triplet eighths and sixteenths are left out');}
     out.byte(0);
     if(bar.isFreeTime)report.lose('Free-time measures become ordinary measures');
-    if(isPickup(bar))report.lose('A pickup measure is written as a measure with a time signature of its own length');
+    if(isPickup(bar,pickups))report.lose('A pickup measure is written as a measure with a time signature of its own length');
     if(bar.timeSignatureCommon)report.lose('Common-time and cut-time symbols become numbers');
     previous=written;previousKey=key;
   }
@@ -303,8 +310,8 @@ const dynamicOf=(beat:model.Beat,report:Report)=>{
 /** The MIDI key a percussion note plays: custom articulation tables map their index, standard ones are the key itself. */
 const percussionKey=(note:model.Note)=>{const table=note.beat.voice.bar.staff.track.percussionArticulations,id=note.percussionArticulation;return clamp(id<table.length&&id>=0?table[id].outputMidiNumber:id,0,127);};
 
-interface BeatContext { entry:Slot; staff:model.Staff; bar:number; voice:number; /** The bar written here is a repeat (simile) of an earlier one. */ repeated:boolean; target:model.Bar; tempos:Map<string,number>; report:Report }
-interface Mix { volume?:number; balance?:number; instrument?:number; tempo?:number }
+interface BeatContext { entry:Slot; staff:model.Staff; bar:number; voice:number; /** The bar written here is a repeat (simile) of an earlier one. */ repeated:boolean; target:model.Bar; tempos:Map<string,Tempo>; report:Report }
+interface Mix { volume?:number; balance?:number; instrument?:number; tempo?:number; tempoText?:string }
 function mixOf(beat:model.Beat,context:BeatContext):Mix|null {
   const mix:Mix={},{entry,tempos}=context,barLength=beat.voice.bar.masterBar.calculateDuration(false);
   for(const change of beat.automations){
@@ -320,13 +327,13 @@ function mixOf(beat:model.Beat,context:BeatContext):Mix|null {
   }
   // Tempo changes sit on the first voice of the first track; the key names a beat of that voice only.
   const tempo=entry.track.index===0&&context.voice===0?tempos.get(`${context.bar}:${beat.index}`):undefined;
-  if(tempo!==undefined)mix.tempo=tempoValue(tempo,context.report);
+  if(tempo!==undefined){mix.tempo=tempoValue(tempo.value,context.report);mix.tempoText=tempo.text;}
   return Object.keys(mix).length?mix:null;
 }
 function writeMix(out:Out,mix:Mix,report:Report):void {
   out.byte(mix.instrument??255);out.raw(new Array(16).fill(255));
   out.byte(mix.volume??255);out.byte(mix.balance??255);for(let i=0;i<4;i++)out.byte(255);
-  sizedString(out,'',report);out.int(mix.tempo??-1);
+  sizedString(out,mix.tempoText??'',report);out.int(mix.tempo??-1);
   if(mix.volume!==undefined)out.byte(0);
   if(mix.balance!==undefined)out.byte(0);
   if(mix.tempo!==undefined){out.byte(0);out.byte(0);}
@@ -380,6 +387,12 @@ function tiedFromPrevious(note:model.Note,context:BeatContext):boolean {
   }
   return true;
 }
+/**
+ * The file's grace length byte. alphaTab sets a grace beat's duration from the size of its group (one grace note is an 8th, two are
+ * 16ths, more are 32nds) and plays them as a 32nd, 64th and 128th. 3 is what Guitar Pro writes for the usual 32nd grace note and 1 for
+ * a 64th, which is the shortest the file stores. The meaning of these bytes comes from reading the format, not from Guitar Pro.
+ */
+function graceDuration(grace:model.Beat):number { return grace.duration>=model.Duration.Sixteenth?1:3; }
 function writeNote(out:Out,note:model.Note,context:BeatContext,graceNote:model.Note|null,grace:model.Beat|null,dynamic:number|null,swapped:boolean):void {
   const {report,staff}=context,beat=note.beat,percussion=staff.isPercussion;
   const bends=note.bendPoints?.length?note.bendPoints:null,slideOut=note.slideOutType,slide=(slideOut===model.SlideOutType.Shift?1:slideOut===model.SlideOutType.Legato?2:slideOut===model.SlideOutType.OutDown||slideOut===model.SlideOutType.PickSlideDown?4:slideOut===model.SlideOutType.OutUp||slideOut===model.SlideOutType.PickSlideUp?8:0)|(note.slideInType===model.SlideInType.IntoFromBelow?16:0)|(note.slideInType===model.SlideInType.IntoFromAbove?32:0);
@@ -402,8 +415,8 @@ function writeNote(out:Out,note:model.Note,context:BeatContext,graceNote:model.N
     for(const point of bends){out.int(point.offset);out.int(point.value*25);out.byte(0);}
   }
   if(graceNote){
-    out.byte(clamp(graceNote.fret,0,127));out.byte(DYNAMICS.get(grace!.dynamics)??NEAREST_DYNAMICS.get(grace!.dynamics)??FORTE);
-    out.byte(graceNote.isHammerPullOrigin?3:graceNote.slideOutType===model.SlideOutType.Legato?1:0);out.byte(3);
+    out.byte(percussion?percussionKey(graceNote):clamp(graceNote.fret,0,127));out.byte(DYNAMICS.get(grace!.dynamics)??NEAREST_DYNAMICS.get(grace!.dynamics)??FORTE);
+    out.byte(graceNote.isHammerPullOrigin?3:graceNote.slideOutType===model.SlideOutType.Legato?1:0);out.byte(graceDuration(grace!));
     out.byte((graceNote.isDead?1:0)|(grace!.graceType===model.GraceType.OnBeat?2:0));
   }
   if(tremolo)out.byte(clamp(beat.tremoloPicking?.marks??1,1,3));
@@ -439,6 +452,8 @@ function countLosses(beat:model.Beat,staff:model.Staff,report:Report):void {
   if(beat.barreShape!==model.BarreShape.None)report.lose('Barre marks on beats are left out');
   if(beat.whammyBarPoints?.length&&beat.whammyStyle!==model.BendStyle.Default)report.lose('Whammy bar styles other than the default are left out');
   if(beat.isTremolo&&(beat.tremoloPicking?.marks??1)>3)report.lose('Tremolo picking with more than three strokes is written with three');
+  if(beat.isTremolo&&beat.tremoloPicking?.style!==model.TremoloPickingStyle.Default)report.lose('Buzz-roll tremolo picking becomes ordinary tremolo picking');
+  if(beat.hasChord&&beat.chord&&!(beat.chord.showName&&beat.chord.showDiagram&&beat.chord.showFingering))report.lose('Chord diagrams with a hidden name, diagram or fingering are shown in full');
   for(const note of beat.notes){
     if(!note.isVisible)report.lose('Hidden notes are written as visible notes');
     if(note.bendPoints?.length&&note.bendStyle!==model.BendStyle.Default)report.lose('Bend styles other than the default are left out');
@@ -502,7 +517,8 @@ function writeVoice(out:Out,voice:model.Voice|undefined,index:number,base:BeatCo
   const context={...base,voice:index},quiet={...context,report:new Report()};
   // A voice with no notes still has to carry the mixer or tempo changes that sit on its empty beats.
   if(!voice?.beats.some(beat=>spoken(beat)||mixOf(beat,quiet))){
-    // A voice with nothing in it is one empty beat, as Guitar Pro writes it.
+    // A voice with nothing in it is one empty beat, as Guitar Pro writes it. Changes it cannot hold are still reported.
+    voice?.beats.forEach(beat=>mixOf(beat,context));
     out.int(1);out.byte(0x40);out.byte(0);out.byte(0);out.byte(0);out.short(0);return;
   }
   const main:{beat:model.Beat;graces:model.Beat[]}[]=[];let pending:model.Beat[]=[];
@@ -515,10 +531,11 @@ function writeVoice(out:Out,voice:model.Voice|undefined,index:number,base:BeatCo
   out.int(main.length);
   main.forEach((item,position)=>writeBeat(out,item.beat,position>0?main[position-1].beat:null,item.graces,context));
 }
-function writeBars(out:Out,score:model.Score,slots:Slot[],tempos:Map<string,number>,report:Report):void {
+function writeBars(out:Out,score:model.Score,slots:Slot[],tempos:Map<string,Tempo>,report:Report):void {
   for(let b=0;b<score.masterBars.length;b++)for(const entry of slots){
     const staff=entry.track.staves[0],bar=staff.bars[b],source=soundingBar(bar),context:BeatContext={entry,staff,bar:b,voice:0,repeated:source!==bar,target:bar,tempos,report};
     out.byte(0);
+    if(source!==bar)report.lose('Mixer changes on a measure repeated with a simile mark are left out',bar.voices.flatMap(voice=>voice.beats).filter(beat=>beat.automations.some(change=>change.type!==model.AutomationType.Tempo&&!change.syncPointValue)).length);
     report.lose('Voices after the second are left out',source.voices.slice(2).filter(voice=>voice.beats.some(spoken)).length);
     for(let v=0;v<2;v++)writeVoice(out,source.voices[v],v,context);
     report.lose('Sustain pedal marks are left out',bar.sustainPedals.length);
@@ -535,8 +552,8 @@ function writeBars(out:Out,score:model.Score,slots:Slot[],tempos:Map<string,numb
   }
 }
 
-function writeScore(score:model.Score,report:Report):Uint8Array {
-  checkMusic(score);
+function writeScore(score:model.Score,report:Report,pickups:Pickups):Uint8Array {
+  checkMusic(score,pickups);
   const out=new Out(),slots=allocate(score),tempos=tempoChanges(score,report);
   writeInfo(out,score,report);writeLyrics(out,score,report);
   out.int(100);out.zeros(15);
@@ -544,7 +561,7 @@ function writeScore(score:model.Score,report:Report):Uint8Array {
   sizedString(out,score.tempoLabel||'',report);out.int(tempoValue(openingTempo(score),report));out.byte(0);out.int(score.masterBars[0].keySignature);out.byte(0);
   writeChannels(out,slots);writeDirections(out,score,report);
   out.int(score.masterBars.length);out.int(score.tracks.length);
-  writeMasterBars(out,score,report);
+  writeMasterBars(out,score,report,pickups);
   for(const entry of slots)writeTrack(out,entry,score,report);
   writeBars(out,score,slots,tempos,report);
   return out.toBytes();
@@ -558,7 +575,10 @@ export function exportGp5(score:model.Score,selection:ExportSelection,options:{b
   const report=new Report(),detached=selectScore(score,selection);
   if(options.backing||score.backingTrack)report.lose('Backing audio and its synchronization are left out');
   for(const track of detached.tracks)for(const staff of track.staves)if(getBanjoDrone(staff))report.lose('Banjo drone staves are written as plain 5-string staves with the same pitches');
-  const bytes=withPlainDrone(detached,()=>writeScore(detached,report));
+  // A pickup's length is the longest bar over every track of the whole score, selected or not.
+  const first=selection.range?.first??0,pickups=new Map<number,number>();
+  detached.masterBars.forEach((_,index)=>{const whole=score.masterBars[first+index];if(whole?.isAnacrusis)pickups.set(index,whole.calculateDuration(true));});
+  const bytes=withPlainDrone(detached,()=>writeScore(detached,report,pickups));
   return {bytes,losses:report.list()};
 }
 /** The question asked before saving: what this file leaves out, and what no Guitar Pro 5 file keeps. */

@@ -532,6 +532,12 @@ describe('Guitar Pro 5 never claims nothing is left out when something is',()=>{
     'Track.staves':[score=>{const staff=new model.Staff();staff.stringTuning.tunings=[64,59,55,50,45,40];score.tracks[0].addStaff(staff);for(let i=0;i<2;i++){const bar=new model.Bar();bar.clef=model.Clef.G2;fill(bar,[q(6,1)]);staff.addBar(bar);}},/Staves after the first/],
     'Score.backingTrack':[()=>{},/Backing audio/,{backing:true}],
     'Voice.hidden lyrics':[score=>setLyricsSource(score.tracks[0],{visible:false,lines:[{startBar:0,text:'La la'}]},true),/Hidden lyrics/],
+    'Automation.isLinear':[score=>{score.masterBars[1].tempoAutomations.push(Object.assign(new model.Automation(),{type:model.AutomationType.Tempo,value:150,ratioPosition:.5,isLinear:true}));},/Gradual tempo/],
+    'TremoloPickingEffect.style':[score=>{first(score).tremoloPicking=Object.assign(new model.TremoloPickingEffect(),{marks:2,style:model.TremoloPickingStyle.BuzzRoll});},/Buzz-roll/],
+    'Chord.showName':[score=>{
+      const chord=Object.assign(new model.Chord(),{name:'Am',firstFret:1,strings:[0,1,2,2,0,-1],barreFrets:[],showName:false});
+      chord.staff=score.tracks[0].staves[0];score.tracks[0].staves[0].addChord('c1',chord);first(score).chordId='c1';
+    },/hidden name, diagram or fingering/],
     'Beat.graceType.BendGrace':[score=>{
       const voice=score.tracks[0].staves[0].bars[0].voices[0],grace=new model.Beat(),note=new model.Note();
       grace.isEmpty=false;grace.graceType=model.GraceType.BendGrace;grace.duration=D.ThirtySecond;note.string=6;note.fret=3;bend(note);grace.addNote(note);voice.addGraceBeat(grace);
@@ -580,6 +586,11 @@ describe('Guitar Pro 5 never claims nothing is left out when something is',()=>{
         ...Object.fromEntries('index score'.split(' ').map(key=>[key,derived])),
         ...Object.fromEntries('shortName defaultSystemsLayout systemsLayout lineBreaks style'.split(' ').map(key=>[key,styling])),
         ...Object.fromEntries('staves'.split(' ').map(key=>[key,lost]))}],
+      Automation:[new model.Automation(),{...Object.fromEntries('type value ratioPosition text'.split(' ').map(key=>[key,written])),
+        ...Object.fromEntries('isVisible'.split(' ').map(key=>[key,styling])),
+        ...Object.fromEntries('isLinear syncPointValue'.split(' ').map(key=>[key,lost]))}],
+      TremoloPickingEffect:[new model.TremoloPickingEffect(),{marks:written,style:lost}],
+      Chord:[new model.Chord(),{...Object.fromEntries('name firstFret strings barreFrets'.split(' ').map(key=>[key,written])),staff:derived,...Object.fromEntries('showName showDiagram showFingering'.split(' ').map(key=>[key,lost]))}],
       Score:[new model.Score(),{...Object.fromEntries('album artist copyright instructions music notices subTitle title words tab masterBars tracks'.split(' ').map(key=>[key,written])),
         ...Object.fromEntries('_currentRepeatGroup _openedRepeatGroups _properlyOpenedRepeatGroups'.split(' ').map(key=>[key,derived])),
         ...Object.fromEntries('defaultSystemsLayout systemsLayout stylesheet style'.split(' ').map(key=>[key,styling])),
@@ -588,7 +599,7 @@ describe('Guitar Pro 5 never claims nothing is left out when something is',()=>{
     for(const [name,[instance,known]] of Object.entries(classes)){
       const unknown=Object.keys(instance).filter(key=>!(key in known));
       expect(unknown,`${name} fields not yet classified for Guitar Pro 5 export`).toEqual([]);
-      const alias:Record<string,string>={'Beat.barreFret':'Beat.barreShape','Beat.timer':'Beat.showTimer','Note.isSlurDestination':'Note.slurDestination','Note.slurOrigin':'Note.slurDestination','MasterBar.fermata':'Beat.fermata'};
+      const alias:Record<string,string>={'Chord.showDiagram':'Chord.showName','Chord.showFingering':'Chord.showName','Automation.syncPointValue':'MasterBar.syncPoints','Beat.barreFret':'Beat.barreShape','Beat.timer':'Beat.showTimer','Note.isSlurDestination':'Note.slurDestination','Note.slurOrigin':'Note.slurDestination','MasterBar.fermata':'Beat.fermata'};
       const untested=Object.entries(known).filter(([,kind])=>kind===lost).map(([key])=>`${name}.${key}`).filter(field=>!(field in scenarios)&&!(alias[field] in scenarios));
       expect(untested,`${name} fields that are lost and have no scenario`).toEqual([]);
     }
@@ -620,5 +631,105 @@ describe('Guitar Pro 5 channels and neck',()=>{
     const plain=build([[q(1,3)]]),plainBytes=exportGp5(plain,everything(plain)).bytes;
     expect(Array.from(plainBytes).some((_,index)=>[1,0,0,0,1,0,0,0,2,0,0,0,24,0,0,0].every((value,offset)=>plainBytes[index+offset]===value))).toBe(true);
     expectSameMusic(score,readBack(bytes));
+  });
+});
+
+describe('Guitar Pro 5 pickups measured on the whole score',()=>{
+  /** One list of measures per track (a measure with no specs is an empty one), with the first measure marked as a pickup. */
+  function pickupScore(perTrack:Spec[][][],pickup=true):model.Score {
+    const score=new model.Score();
+    perTrack.forEach((measures,t)=>{
+      const track=new model.Track(),staff=new model.Staff();track.name=`Guitar ${t+1}`;track.playbackInfo.program=25;staff.stringTuning.tunings=[64,59,55,50,45,40];staff.displayTranspositionPitch=-12;track.addStaff(staff);score.addTrack(track);
+      measures.forEach((specs,index)=>{
+        if(t===0)score.addMasterBar(new model.MasterBar());
+        const bar=new model.Bar();bar.clef=model.Clef.G2;staff.addBar(bar);fill(bar,specs);
+      });
+    });
+    score.masterBars[0].isAnacrusis=pickup;score.finish(settings);return score;
+  }
+  const four=[q(6,3),q(6,5),q(6,7),q(6,8)];
+  const absolute=(score:model.Score,track:number)=>score.tracks[track].staves[0].bars.flatMap(bar=>bar.voices[0].beats.filter(beat=>beat.notes.length).map(beat=>[bar.masterBar.start+beat.playbackStart,beat.notes[0].realValue]));
+  it('keeps the bar starts of the whole score when only a track with an empty pickup bar is exported',()=>{
+    const score=pickupScore([[[q(1,0)],four,four],[[],four,four]]);
+    expect(score.masterBars.map(bar=>bar.start)).toEqual([0,960,4800]);
+    const result=exportGp5(score,{tracks:[1],range:null}),back=readBack(result.bytes);
+    expect(back.masterBars.map(bar=>bar.start)).toEqual([0,960,4800]);
+    expect(absolute(back,0)).toEqual(absolute(score,1));
+    expect(result.losses).toEqual(['A pickup measure is written as a measure with a time signature of its own length']);
+  });
+  it('uses the longest bar of any track, exported or not',()=>{
+    const score=pickupScore([[[q(1,0),q(1,2)],four,four],[[q(1,0)],four,four]]);
+    expect(score.masterBars.map(bar=>bar.start)).toEqual([0,1920,5760]);
+    const back=readBack(exportGp5(score,{tracks:[1],range:null}).bytes);
+    expect(back.masterBars.map(bar=>bar.start)).toEqual([0,1920,5760]);
+    expect(back.masterBars[0].timeSignatureNumerator).toBe(2);
+    expect(absolute(back,0)).toEqual(absolute(score,1));
+  });
+  it('keeps the bar starts when the exported measures begin after the pickup, and when they begin with it',()=>{
+    const score=pickupScore([[[q(1,0)],four,four],[[],four,four]]);
+    const later=readBack(exportGp5(score,{tracks:[1],range:{first:1,last:2}}).bytes);
+    expect(later.masterBars.map(bar=>bar.start)).toEqual([0,3840]);
+    const from=readBack(exportGp5(score,{tracks:[1],range:{first:0,last:1}}).bytes);
+    expect(from.masterBars.map(bar=>bar.start)).toEqual([0,960]);
+  });
+  it('refuses a pickup that has no music in any track',()=>{
+    const score=new model.Score();
+    for(let t=0;t<2;t++){const track=new model.Track(),staff=new model.Staff();staff.stringTuning.tunings=[64,59,55,50,45,40];track.addStaff(staff);score.addTrack(track);}
+    for(const measure of [0,1]){score.addMasterBar(new model.MasterBar());for(const track of score.tracks){const bar=new model.Bar();bar.clef=model.Clef.G2;track.staves[0].addBar(bar);if(measure===1)fill(bar,four);}}
+    score.masterBars[0].isAnacrusis=true;score.finish(settings);
+    expect(score.masterBars[0].calculateDuration(true)).toBe(0);
+    expect(previewGp5(score,{tracks:[0],range:null})).toEqual({refusal:expect.stringMatching(/pickup that is empty/)});
+  });
+});
+
+describe('Guitar Pro 5 second review fixes',()=>{
+  const has=(bytes:Uint8Array,pattern:number[])=>Array.from(bytes).some((_,index)=>pattern.every((value,offset)=>bytes[index+offset]===value));
+  const automation=(type:model.AutomationType,value:number,more:Partial<model.Automation>={})=>Object.assign(new model.Automation(),{type,value,ratioPosition:0,...more});
+  it('reports a sound bank change on a voice with no notes',()=>{
+    const score=build([[q(6,3),q(6,5)]],undefined,1,[[]]);
+    score.tracks[0].staves[0].bars[0].voices[1].beats[0].automations.push(automation(model.AutomationType.Bank,3));
+    expect(exportGp5(score,everything(score)).losses).toEqual(['Sound bank changes are left out']);
+  });
+  it('lists the mixer changes of a measure repeated with a simile mark, which the file cannot keep',()=>{
+    const score=build([[q(6,3),q(6,5),q(6,7),q(6,8)],[{d:D.Whole,n:[]}]]);
+    score.tracks[0].staves[0].bars[1].simileMark=model.SimileMark.Simple;
+    score.tracks[0].staves[0].bars[1].voices[0].beats[0].automations.push(automation(model.AutomationType.Volume,9));
+    score.finish(settings);
+    expect(exportGp5(score,everything(score)).losses).toEqual(['Mixer changes on a measure repeated with a simile mark are left out']);
+  });
+  it('writes a percussion grace note as its drum key, not a fret',()=>{
+    const score=build([[q(6,0,{grace:{fret:0}}),q(6,0),q(6,0),q(6,0)]]);
+    score.tracks[0].staves[0].isPercussion=true;score.tracks[0].staves[0].stringTuning.tunings=[];
+    const beats=beatOf(score,0,0).voice.beats,grace=beats.find(beat=>beat.graceType!==model.GraceType.None)!;
+    grace.notes[0].fret=-1;grace.notes[0].percussionArticulation=38;for(const beat of beats)if(beat!==grace)beat.notes[0].percussionArticulation=36;
+    const bytes=exportGp5(score,everything(score)).bytes;
+    // key, dynamic (forte), transition, length, flags
+    expect(has(bytes,[38,6,0,3,0])).toBe(true);
+    expect(has(bytes,[0,6,0,3,0])).toBe(false);
+  });
+  it('writes the length of a grace note from its group: one is the usual grace note, a run of two is shorter',()=>{
+    const bytesFor=(graces:number)=>{
+      const score=build([[q(6,5,{d:D.Whole,grace:{fret:3}})]]);
+      const voice=beatOf(score,0,0).voice;
+      for(let i=1;i<graces;i++){const grace=new model.Beat(),note=new model.Note();grace.isEmpty=false;grace.graceType=model.GraceType.BeforeBeat;note.string=6;note.fret=4;grace.addNote(note);voice.addGraceBeat(grace);}
+      score.finish(settings);
+      return exportGp5(score,everything(score)).bytes;
+    };
+    expect(has(bytesFor(1),[3,6,0,3,0])).toBe(true);
+    expect(has(bytesFor(2),[4,6,0,1,0])).toBe(true);
+    expect(has(bytesFor(2),[4,6,0,3,0])).toBe(false);
+  });
+  it('writes the text of a tempo change into the name field of its mixer table',()=>{
+    const score=build([[q(6,3),q(6,5),q(6,7),q(6,8)],[q(6,3),q(6,5),q(6,7),q(6,8)]]);
+    score.masterBars[1].tempoAutomations.push(automation(model.AutomationType.Tempo,150,{ratioPosition:.5,text:'Allegro'}));score.finish(settings);
+    const bytes=exportGp5(score,everything(score)).bytes;
+    // length+1 as an int, the length, then the characters.
+    expect(has(bytes,[8,0,0,0,7,...Array.from('Allegro').map(char=>char.charCodeAt(0))])).toBe(true);
+  });
+  it('normalises text to composed letters and writes the sharp and flat signs as # and b',()=>{
+    const score=build([[q(6,3)]]);score.title='Cafe\u0301 F\u266F B\u266D';
+    const {back,losses}=roundTrip(score);
+    expect(back.title).toBe('Café F# Bb');
+    expect(losses).toEqual([]);
   });
 });

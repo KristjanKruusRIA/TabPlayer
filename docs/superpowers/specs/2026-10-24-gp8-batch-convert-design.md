@@ -50,11 +50,16 @@ New file access: `src-tauri/src/batch_convert.rs`, four commands (`batch_pick_fo
 
 ## Archive total
 
-`unzip` (GP and MusicXML readers, shared with single-file Open) and the MusicXML repack first sum the sizes the central directory declares, with a filter that inflates nothing, and refuse an archive over 256 MiB, which no real score reaches. The per-entry cap alone let a crafted archive list many entries that each fit it, and alphaTab walks local headers while fflate follows the central directory, so a file could pass the probe and still block the window thread.
+One validator, `src/interchange/archive.ts`, runs in a Worker under the 15 s deadline before any parser sees the bytes, on batch and on single-file Open. It works from the real bytes: the entry count (4096), entries that are contiguous, fit in the file and agree between local headers and central directory, Zip64 fields that match the archive exactly, stored sizes that are equal, and output measured by inflating with fflate's streaming `Inflate`, which stops at the limit on bytes actually produced. An archive that disagrees with itself is refused, because alphaTab walks local headers while fflate follows the central directory. Batch allows 32 MiB per entry and 64 MiB in total. Open allows 128 MB per entry and 256 MB in total, so a score with a large backing track still opens. The window parsers call `assertArchiveAccepted`, so bytes that skipped a Worker are validated there before fflate or alphaTab reads them.
+
+The validator does not check CRCs, and it inflates with fflate where alphaTab uses its own decoder, so the two could still differ on a stream only one of them accepts.
 
 ## Recorded limits
 
-- The probe costs up to 15 s per file before it gives up, and a 32 MiB MusicXML file can still freeze the window for roughly 13 s once it passes the probe, because the conversion itself runs on the window thread.
+- The probe costs up to 15 s per file before it gives up. A file that passes it can still freeze the window, because reading, writing and reading back run on the window thread. Measured in headless Edge: 2.9 s and 1.3 GiB for 5 MiB of MusicXML, 5.9 s and 2.5 GiB for 12 MiB, 25.5 s and 3.8 GiB for 20 MiB (41,467 bars). At 26 and 31.5 MiB the file fails after about 7 s and up to 4.6 GiB, because the written `score.gpif` passes the 128 MB entry limit that writing and reading back are held to. The earlier 13 s figure was too low.
+- An Open of a truthful archive at the limit (240 MiB of zeros) took 1.8 s on the window and 796 MiB. That stream is the cheapest to inflate, so it is not an upper bound.
+- Open decodes the project's base64 on the window before the Worker sees the bytes: a 31 MB crafted file was refused after 1.3 s, with 844 MiB peak including the harness's own copy.
+- On Linux and macOS each write goes through a held directory descriptor (`openat`, `linkat`, `unlinkat`), but the folders themselves are still opened by path. This code has not been compiled or run on those systems.
 - Separation and protection compare identities by opening every ancestor, which costs a little per check and is slow on network shares.
 - A network share whose root is a folder inside the source is a known gap (reviewer item N11): separation walks the ancestors of each chosen path, and a path reached through such a share starts at the share root, so what lies above the root inside the source is not seen. It is recorded, not closed.
 - Another running copy of the application can be writing a temporary file when it is old enough to be swept (an hour); the sweep leaves anything newer alone.

@@ -93,15 +93,15 @@ export async function runScaleDiagramAcceptance({buildPath}={}){
     // From scratch: the 9-string staff gives a 9-string diagram; string 9 is the highest string. Mark it as the tonic and finger a fretted note.
     await scales().getByRole('button',{name:'Blank diagram',exact:true}).click();
     await scales().getByLabel('Diagram name',{exact:true}).fill('Open position');
-    await scales().getByLabel('Default shape',{exact:true}).selectOption('diamond');
+    await scales().getByRole('combobox',{name:'Default shape',exact:true}).selectOption('diamond');
     await scales().getByLabel('String 9, open',{exact:true}).click();
     await scales().getByLabel('Mark text',{exact:true}).fill('E');
     await scales().getByLabel('Mark color',{exact:true}).fill('#b5df73');
     await scales().getByLabel('Mark text color',{exact:true}).fill('#161c24');
-    await scales().getByLabel('Default shape',{exact:true}).selectOption('circle');
+    await scales().getByRole('combobox',{name:'Default shape',exact:true}).selectOption('circle');
     await scales().getByLabel('String 5, fret 3',{exact:true}).click();
     await scales().getByLabel('Mark text',{exact:true}).fill('1');
-    await scales().getByLabel('Mark shape',{exact:true}).selectOption('square');
+    await scales().getByRole('combobox',{name:'Mark shape',exact:true}).selectOption('square');
     await scales().getByLabel('String 5, fret 7',{exact:true}).click();
     await scales().getByLabel('Mark text',{exact:true}).fill('3');
     await scales().getByLabel('String 5, fret 7: circle mark "3"',{exact:true}).dblclick();

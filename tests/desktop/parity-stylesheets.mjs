@@ -103,7 +103,7 @@ export async function runStylesheetsAcceptance({buildPath}={}){
     const profiled=await record();assert.equal(profiled.snapshot.project.edits.length,1);const ownProfiles=profiled.snapshot.project.edits[0].engraving.profiles;
     assert.equal(ownProfiles.length,1);assert.equal(ownProfiles[0].profile,'numbered');await native();await exportCheck('before-apply');
     const drawnBefore=await rendered();await openStyles();
-    await page.getByLabel('Saved style',{exact:true}).selectOption(entry.id);
+    await page.getByRole('combobox',{name:'Saved style',exact:true}).selectOption(entry.id);
     await page.getByRole('button',{name:'Apply saved style',exact:true}).click();await idle();await native();
     const applied=await record();assert.equal(applied.snapshot.project.edits.length,2,'Applying is exactly one more edit');const command=applied.snapshot.project.edits[1];
     assert.equal(command.type,'setEngraving');assert.deepEqual({...command.engraving,profiles:[]},entry.engraving,'The saved style is applied as stored');assert.deepEqual(command.engraving.profiles,ownProfiles,'The target document keeps its own staff profile');

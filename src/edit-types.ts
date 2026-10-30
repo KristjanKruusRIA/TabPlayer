@@ -40,8 +40,8 @@ export interface FxSettings {
   gate: {enabled:boolean;thresholdDb:number;releaseMs:number};
   compressor: {enabled:boolean;thresholdDb:number;ratio:number;attackMs:number;releaseMs:number;makeupDb:number};
   /** The tone stack fields are absent while flat (0 dB). */
-  amp: {enabled:boolean;model:'clean'|'crunch'|'lead'|'bass';drive:number;gainDb:number;bassDb?:number;midDb?:number;trebleDb?:number;presenceDb?:number};
-  cabinet: {enabled:boolean;model:'open'|'closed'|'bass'};
+  amp: {enabled:boolean;model:'clean'|'crunch'|'lead'|'metal'|'bass'|'bassDrive';drive:number;gainDb:number;bassDb?:number;midDb?:number;trebleDb?:number;presenceDb?:number};
+  cabinet: {enabled:boolean;model:'open'|'closed'|'combo'|'bass'|'bassStack'};
   eq: {enabled:boolean;lowDb:number;midDb:number;highDb:number;midHz:number};
   /** `syncQuarterNotes` on a modulation block: quarter notes per cycle when its rate follows the tempo; absent for the free rate. */
   chorus: {enabled:boolean;rateHz:number;depthMs:number;mix:number;syncQuarterNotes?:number};

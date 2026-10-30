@@ -9,5 +9,6 @@ pub mod practice;
 pub mod reference_sync;
 pub mod renderer;
 pub mod resources;
+pub mod tone;
 pub mod voices;
 pub mod waveform;

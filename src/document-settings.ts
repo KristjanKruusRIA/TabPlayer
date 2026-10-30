@@ -72,7 +72,7 @@ const sync=later(one(0,...modulationDivisions.map(([value])=>value)));
 const effectRules:Record<EffectBlock,Record<string,FieldRule>>={
   gate:{thresholdDb:range(-96,0),releaseMs:range(1,1000)},
   compressor:{thresholdDb:range(-60,0),ratio:range(1,20),attackMs:range(.1,200),releaseMs:range(1,2000),makeupDb:range(0,24)},
-  amp:{model:one('clean','crunch','lead','bass'),drive:unit,gainDb:range(-24,24),bassDb:tone,midDb:tone,trebleDb:tone,presenceDb:tone},cabinet:{model:one('open','closed','bass')},
+  amp:{model:one('clean','crunch','lead','metal','bass','bassDrive'),drive:unit,gainDb:range(-24,24),bassDb:tone,midDb:tone,trebleDb:tone,presenceDb:tone},cabinet:{model:one('open','closed','combo','bass','bassStack')},
   eq:{lowDb:range(-24,24),midDb:range(-24,24),highDb:range(-24,24),midHz:range(200,5000)},
   chorus:{rateHz:range(.1,8),depthMs:range(0,20),mix:unit,syncQuarterNotes:sync},
   wah:{model:one('classic','vintage','wide','bass'),mode:one('manual','auto'),position:unit,resonance:unit,sensitivity:unit,mix:unit},

@@ -25,20 +25,20 @@ const definitions:readonly FactoryDefinition[]=[
   {id:'surf-tremolo',name:'Surf tremolo',category:'Clean guitar',presetId:'clean',description:'Pulsing tremolo through a drippy spring reverb.',effects:{
     amp:{model:'clean',drive:.25,gainDb:4,trebleDb:3},cabinet:{model:'open'},tremolo:{rateHz:6,depth:.6,shape:'sine'},reverb:{model:'spring',room:.6,damping:.3,mix:.35}}},
   {id:'blues-crunch',name:'Blues crunch',category:'Crunch',presetId:'crunch',description:'An overdrive pushing a crunchy amp, with a mid bump.',effects:{
-    drive:{model:'overdrive',drive:.4,tone:.45},amp:{model:'crunch',drive:.35,midDb:3},cabinet:{model:'open'},reverb:{model:'room',room:.4,mix:.15}}},
+    drive:{model:'overdrive',drive:.4,tone:.7},amp:{model:'crunch',drive:.25,gainDb:-2,midDb:2},cabinet:{model:'combo'},reverb:{model:'room',room:.4,mix:.15}}},
   {id:'classic-rock',name:'Classic rock rhythm',category:'Crunch',presetId:'crunch',description:'Full crunch for power chords and riffs.',effects:{
-    amp:{model:'crunch',drive:.6,bassDb:2,midDb:2,presenceDb:2},cabinet:{model:'closed'},reverb:{model:'room',room:.3,mix:.12}}},
+    amp:{model:'crunch',drive:.45,gainDb:-1,midDb:1},cabinet:{model:'closed'},reverb:{model:'room',room:.3,mix:.12}}},
   {id:'phaser-crunch',name:'Phased crunch',category:'Crunch',presetId:'crunch',description:'Light crunch with a slow phaser swirl.',effects:{
-    amp:{model:'crunch',drive:.4},cabinet:{model:'closed'},phaser:{rateHz:.4,depth:.7,feedback:.4,stages:4,mix:.5},reverb:{model:'room',mix:.12}}},
+    amp:{model:'crunch',drive:.3,gainDb:4},cabinet:{model:'closed'},phaser:{rateHz:.4,depth:.7,feedback:.4,stages:4,mix:.5},reverb:{model:'room',mix:.12}}},
   {id:'rock-lead',name:'Rock lead',category:'Lead and high gain',presetId:'lead',description:'Singing lead with an analog echo and a hall.',effects:{
-    drive:{model:'overdrive',drive:.3,levelDb:2},amp:{model:'lead',drive:.7,midDb:2},cabinet:{model:'closed'},
+    drive:{model:'overdrive',drive:.3,levelDb:2},amp:{model:'lead',drive:.45,gainDb:1,midDb:1},cabinet:{model:'closed'},
     delay:{model:'analog',quarterNotes:.75,feedback:.35,mix:.2},reverb:{model:'hall',room:.6,mix:.2}}},
   {id:'metal-rhythm',name:'Metal rhythm',category:'Lead and high gain',presetId:'lead',description:'Tight, gated high gain with scooped mids.',effects:{
-    gate:{thresholdDb:-50,releaseMs:60},drive:{model:'overdrive',drive:.2,tone:.6},amp:{model:'lead',drive:.9,gainDb:-3,bassDb:3,midDb:-4,trebleDb:2,presenceDb:3},cabinet:{model:'closed'}}},
+    gate:{thresholdDb:-50,releaseMs:60},drive:{model:'overdrive',drive:.2,tone:.6},amp:{model:'metal',drive:.55,gainDb:-2},cabinet:{model:'closed'}}},
   {id:'fuzz-lead',name:'Fuzz lead',category:'Lead and high gain',presetId:'crunch',description:'Thick fuzz with a tape echo.',effects:{
-    drive:{model:'fuzz',drive:.8,tone:.4},amp:{model:'crunch',drive:.3},cabinet:{model:'closed'},delay:{model:'tape',quarterNotes:.5,feedback:.4,mix:.25}}},
+    drive:{model:'fuzz',drive:.8,tone:.7},amp:{model:'crunch',drive:.2,gainDb:.5,bassDb:-3},cabinet:{model:'closed'},delay:{model:'tape',quarterNotes:.5,feedback:.4,mix:.25}}},
   {id:'octave-lead',name:'Octave-up lead',category:'Lead and high gain',presetId:'lead',description:'Lead doubled an octave up, with an echo.',effects:{
-    pitch:{semitones:12,mix:.4},amp:{model:'lead',drive:.6},cabinet:{model:'closed'},delay:{model:'digital',quarterNotes:.75,feedback:.3,mix:.2}}},
+    pitch:{semitones:12,mix:.4},amp:{model:'lead',drive:.4,gainDb:0},cabinet:{model:'closed'},delay:{model:'digital',quarterNotes:.75,feedback:.3,mix:.2}}},
   {id:'ambient-swell',name:'Ambient wash',category:'Ambient',presetId:'clean',description:'Long synced echoes and a huge hall for pads and swells.',effects:{
     compressor:{thresholdDb:-24,ratio:3,makeupDb:3},amp:{model:'clean',drive:.1,gainDb:6,trebleDb:-2},cabinet:{model:'open'},chorus:{rateHz:.3,depthMs:8,mix:.3,syncQuarterNotes:16},
     delay:{model:'digital',quarterNotes:1.5,feedback:.6,mix:.35},reverb:{model:'hall',room:.95,damping:.3,mix:.45}}},
@@ -52,6 +52,8 @@ const definitions:readonly FactoryDefinition[]=[
     compressor:{thresholdDb:-20,ratio:4,makeupDb:3},amp:{model:'bass',drive:.15,gainDb:-4.5,bassDb:3,trebleDb:-2},cabinet:{model:'bass'}}},
   {id:'slap-bass',name:'Slap bass',category:'Bass',presetId:'bass',description:'Hard compression with scooped mids and bright top.',effects:{
     compressor:{thresholdDb:-24,ratio:8,attackMs:2,releaseMs:60,makeupDb:5},graphicEq:{gainsDb:[0,4,2,0,-4,-3,2,4,5,2],levelDb:-2},amp:{model:'bass',drive:.1},cabinet:{model:'bass'}}},
+  {id:'driven-bass',name:'Driven bass',category:'Bass',presetId:'bass',description:'A growling upper band over clean, tight lows.',effects:{
+    compressor:{thresholdDb:-20,ratio:3,makeupDb:2},amp:{model:'bassDrive',drive:.4,gainDb:.5},cabinet:{model:'bassStack'}}},
   {id:'octave-bass',name:'Octave-down bass',category:'Bass',presetId:'bass',description:'An octave below doubling a driven bass.',effects:{
     octaver:{octaveDown:.7,twoOctavesDown:0,direct:.6},amp:{model:'bass',drive:.4,gainDb:-5},cabinet:{model:'bass'},eq:{highDb:-4}}},
 ];

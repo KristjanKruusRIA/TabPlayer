@@ -1,3 +1,4 @@
+use super::tone;
 use serde::{Deserialize, Serialize};
 
 /// Native track delay storage is bounded independently of score tempo and playback speed.
@@ -322,68 +323,20 @@ fn wah_target(wah: &Wah, envelope: f64) -> f64 {
         wah.position
     }
 }
-/// A loud pickup's peak, at which the drive pedal keeps its output level whatever its setting.
-const DRIVE_REFERENCE: f64 = 0.1;
-/// The fuzz offsets its input by this share of the playing level, so its clipping is lopsided at any level and
-/// adds even harmonics, as a fuzz's biased transistor does.
-const FUZZ_BIAS: f64 = 0.25;
-/// The drive pedal's gain before clipping and its clipping curve. Overdrive rounds off gently, distortion clips
-/// hard past a short knee, and fuzz clips its offset input with far more gain.
-fn drive_gain(drive: &Drive) -> f64 {
-    let squared = drive.drive * drive.drive;
-    match drive.model.as_str() {
-        "distortion" => 1.0 + 400.0 * squared,
-        "fuzz" => 1.0 + 2_000.0 * squared,
-        _ => 1.0 + 40.0 * squared,
-    }
-}
-/// `hard` picks distortion's knee; the other models round off with `tanh`.
-fn drive_curve(hard: bool, v: f64) -> f64 {
-    if hard {
-        // A cubic knee that reaches its ceiling with zero slope at 1.5.
-        let s = v.clamp(-1.5, 1.5);
-        s - 4.0 / 27.0 * s * s * s
-    } else {
-        v.tanh()
-    }
-}
-/// One drive setting resolved for the audio thread: its curve, gain before clipping, the gain that brings a
-/// reference-level sine back to its own level after clipping (measured over one period with the offset removed,
-/// as the pedal's DC blocker removes it), the fuzz's offset share, and the tone filter and output level.
+/// One drive setting resolved for the audio thread: the pedal's circuit, the share of the playing level its input is
+/// offset by, and the tone filter and output level.
 #[derive(Clone, Copy)]
 struct DriveShape {
-    hard: bool,
-    gain: f64,
-    normal: f64,
+    circuit: tone::Shape,
     bias: f64,
     tone: f64,
     level: f64,
 }
 fn drive_shape(drive: &Drive, rate: f64) -> DriveShape {
-    let (hard, gain, bias) = (
-        drive.model == "distortion",
-        drive_gain(drive),
-        if drive.model == "fuzz" {
-            FUZZ_BIAS
-        } else {
-            0.0
-        },
-    );
-    let (mut sum, mut squares) = (0.0, 0.0);
-    for n in 0..256 {
-        let y = drive_curve(
-            hard,
-            gain * DRIVE_REFERENCE * ((std::f64::consts::TAU * n as f64 / 256.0).sin() + bias),
-        );
-        sum += y;
-        squares += y * y;
-    }
-    let rms = (squares / 256.0 - (sum / 256.0).powi(2)).max(0.0).sqrt();
+    let (circuit, bias) = tone::drive_shape(&drive.model, drive.drive, rate);
     let tone_hz = 500.0 * (12_000.0f64 / 500.0).powf(drive.tone);
     DriveShape {
-        hard,
-        gain,
-        normal: DRIVE_REFERENCE / std::f64::consts::SQRT_2 / rms.max(1e-12),
+        circuit,
         bias,
         tone: 1.0 - (-std::f64::consts::TAU * tone_hz.min(rate * 0.45) / rate).exp(),
         level: 10f64.powf(drive.level_db / 20.0),
@@ -1156,10 +1109,13 @@ impl FxSettings {
         if !["overdrive", "distortion", "fuzz"].contains(&self.drive.model.as_str()) {
             return Err("Unknown drive model.".into());
         }
-        if !["clean", "crunch", "lead", "bass"].contains(&self.amp.model.as_str()) {
+        if !["clean", "crunch", "lead", "metal", "bass", "bassDrive"]
+            .contains(&self.amp.model.as_str())
+        {
             return Err("Unknown amp model.".into());
         }
-        if !["open", "closed", "bass"].contains(&self.cabinet.model.as_str()) {
+        if !["open", "closed", "combo", "bass", "bassStack"].contains(&self.cabinet.model.as_str())
+        {
             return Err("Unknown cabinet model.".into());
         }
         if let Some(second) = &self.second {
@@ -1351,8 +1307,11 @@ pub struct TrackDsp {
     gate_envelope: f64,
     compressor_envelope: f64,
     amp_dc: [f64; 2],
-    amp_previous_input: [f64; 2],
-    amp_anti_alias: [[f64; 3]; 2],
+    /// The driven amp models' circuit, and the previous and current settings resolved. A clean or bass amp has none,
+    /// and takes the path above.
+    amp_chain: tone::Chain,
+    amp_leaving: tone::Chain,
+    amp_shapes: [Option<tone::Shape>; 2],
     /// The tone stack's filters and the gains they were set for. They run whenever the amp does, so a flat stack that
     /// is turned up starts from the signal already flowing through them.
     amp_tone: [Biquad; 4],
@@ -1361,6 +1320,10 @@ pub struct TrackDsp {
     /// does not ring the filters.
     amp_tone_db: [f64; 4],
     cabinet: [Biquad; 3],
+    /// The designed cabinets, and which of them the previous and current settings name. An open or bass cabinet names
+    /// none, and takes the filters above.
+    cabinet_fir: tone::Cabinet,
+    cabinet_models: [Option<usize>; 2],
     eq: [Biquad; 3],
     /// The graphic EQ's band filters and the gains they were set for.
     graphic_eq: [Biquad; 10],
@@ -1397,16 +1360,15 @@ pub struct TrackDsp {
     pitch_phase: Shifter,
     /// The shifters' window in frames.
     shift_window: f64,
-    /// Drive pedal state per channel: the previous input for oversampling, the anti-alias filters, the DC blocker
-    /// and the two-pole tone filter; the playing level for the fuzz's offset; the previous and current settings
-    /// resolved; and per-frame smoothing for the level's attack and release and the DC blocker.
-    drive_previous_input: [f64; 2],
-    drive_anti_alias: [[f64; 3]; 2],
-    drive_dc: [f64; 2],
+    /// Drive pedal state: the circuit, and the one a change is leaving; the two-pole tone filter per channel; the
+    /// playing level for the fuzz's offset; the previous and current settings resolved; and per-frame smoothing for the
+    /// level's attack and release.
+    drive_chain: tone::Chain,
+    drive_leaving: tone::Chain,
     drive_tone: [[f64; 2]; 2],
     drive_envelope: f64,
     drive_shapes: [DriveShape; 2],
-    drive_coefficients: [f64; 3],
+    drive_coefficients: [f64; 2],
     delay: DelayLine,
     /// Tape and analog delay state per channel: the repeats' low-pass and high-pass; the wow and flutter phases;
     /// and the previous and current settings resolved.
@@ -1458,6 +1420,8 @@ impl TrackDsp {
         let amp_tone_start = amp_tone(&settings.amp);
         let wah_start = wah_target(&settings.wah, 0.0);
         let drive_start = drive_shape(&settings.drive, rate);
+        let amp_start = tone::amp_shape(&settings.amp.model, settings.amp.drive, rate);
+        let cabinet_start = tone::cabinet_index(&settings.cabinet.model);
         let reverb_start = reverb_shape(&settings.reverb, rate);
         let delay_start = delay_shape(&settings.delay, rate);
         let microphone_start = microphone_shape(&settings.microphone, rate);
@@ -1484,12 +1448,15 @@ impl TrackDsp {
             gate_envelope: 1.0,
             compressor_envelope: 0.0,
             amp_dc: [0.0; 2],
-            amp_previous_input: [0.0; 2],
-            amp_anti_alias: [[0.0; 3]; 2],
+            amp_chain: tone::Chain::new(rate),
+            amp_leaving: tone::Chain::new(rate),
+            amp_shapes: [amp_start; 2],
             amp_tone: [Biquad::default(); 4],
             cached_amp_tone: [f64::NAN; 4],
             amp_tone_db: amp_tone_start,
             cabinet: [Biquad::default(); 3],
+            cabinet_fir: tone::Cabinet::new(sample_rate),
+            cabinet_models: [cabinet_start; 2],
             eq: [Biquad::default(); 3],
             graphic_eq: [Biquad::default(); 10],
             cached_graphic_eq: [f64::NAN; 10],
@@ -1524,18 +1491,15 @@ impl TrackDsp {
             ),
             pitch_phase: Shifter::default(),
             shift_window: (rate * SHIFT_WINDOW).floor(),
-            drive_previous_input: [0.0; 2],
-            drive_anti_alias: [[0.0; 3]; 2],
-            drive_dc: [0.0; 2],
+            drive_chain: tone::Chain::new(rate),
+            drive_leaving: tone::Chain::new(rate),
             drive_tone: [[0.0; 2]; 2],
             drive_envelope: 0.0,
             drive_shapes: [drive_start; 2],
-            // The fuzz's offset follows the playing level slowly enough that a note's attack does not thump, and
-            // the DC blocker settles what remains within about 16 ms at any rate.
+            // The fuzz's offset follows the playing level slowly enough that a note's attack does not thump.
             drive_coefficients: [
                 1.0 - (-1.0 / (rate * 0.02)).exp(),
                 1.0 - (-1.0 / (rate * 0.05)).exp(),
-                1.0 - (-std::f64::consts::TAU * 10.0 / rate).exp(),
             ],
             delay: DelayLine::new((rate * max_delay_seconds).ceil() as usize + 2),
             delay_filters: [[0.0; 2]; 2],
@@ -1630,6 +1594,14 @@ impl TrackDsp {
             self.drive_shapes[1],
             drive_shape(&self.settings.drive, self.rate),
         ];
+        self.amp_shapes = [
+            self.amp_shapes[1],
+            tone::amp_shape(&self.settings.amp.model, self.settings.amp.drive, self.rate),
+        ];
+        self.cabinet_models = [
+            self.cabinet_models[1],
+            tone::cabinet_index(&self.settings.cabinet.model),
+        ];
         self.reverb_shapes = [
             self.reverb_shapes[1],
             reverb_shape(&self.settings.reverb, self.rate),
@@ -1672,6 +1644,8 @@ impl TrackDsp {
         std::mem::swap(&mut self.previous, &mut old.settings);
         // The previous settings are the old configuration's current ones, resolved as it resolved them.
         self.drive_shapes[0] = old.drive_shapes[1];
+        self.amp_shapes[0] = old.amp_shapes[1];
+        self.cabinet_models[0] = old.cabinet_models[1];
         self.reverb_shapes[0] = old.reverb_shapes[1];
         self.delay_shapes[0] = old.delay_shapes[1];
         self.microphone_shapes[0] = old.microphone_shapes[1];
@@ -1690,17 +1664,22 @@ impl TrackDsp {
             move_state!(compressor_envelope);
         }
         if running[2] {
-            move_state!(
-                amp_dc,
-                amp_previous_input,
-                amp_anti_alias,
-                amp_tone,
-                cached_amp_tone,
-                amp_tone_db
-            );
+            move_state!(amp_dc, amp_tone, cached_amp_tone, amp_tone_db);
         }
         if running[3] {
             move_state!(cabinet, cached_cabinet);
+        }
+        // These hold filters designed for one rate, so another rate's configuration starts them afresh.
+        if self.rate == old.rate {
+            if running[2] {
+                move_state!(amp_chain);
+            }
+            if running[3] {
+                move_state!(cabinet_fir);
+            }
+            if running[15] {
+                move_state!(drive_chain);
+            }
         }
         if running[4] {
             move_state!(eq, cached_eq);
@@ -1740,13 +1719,7 @@ impl TrackDsp {
             move_state!(pitch, pitch_phase);
         }
         if running[15] {
-            move_state!(
-                drive_previous_input,
-                drive_anti_alias,
-                drive_dc,
-                drive_tone,
-                drive_envelope
-            );
+            move_state!(drive_tone, drive_envelope);
         }
         if running[16] {
             self.microphone_shapes[1] = self.microphone_continued(&old.microphone_shapes[1]);
@@ -2109,7 +2082,7 @@ impl TrackDsp {
                 Stage::Drive => {
                     if f.drive.enabled || p.drive.enabled && t < 1.0 {
                         // The playing level follows with a 20 ms attack and a 50 ms release, for the fuzz's offset.
-                        let [attack, release, dc] = self.drive_coefficients;
+                        let [attack, release] = self.drive_coefficients;
                         let level = x[0].abs().max(x[1].abs()) as f64;
                         let k = if level > self.drive_envelope {
                             attack
@@ -2118,49 +2091,42 @@ impl TrackDsp {
                         };
                         self.drive_envelope =
                             flush(self.drive_envelope + (level - self.drive_envelope) * k);
-                        // While both sides of a ramp are on and clip differently, each clips with its own curve and gain and
-                        // the two outputs crossfade; otherwise the side that is on clips alone.
-                        let shapes = self.drive_shapes;
+                        if !self.drive_chain.live {
+                            self.drive_chain.reset();
+                            self.drive_chain.live = true;
+                        }
+                        // While both sides of a ramp are on, each plays and they crossfade; otherwise the side that is on
+                        // plays alone.
+                        let shapes = &self.drive_shapes;
                         let both = t < 1.0
                             && p.drive.enabled
                             && f.drive.enabled
                             && (p.drive.model != f.drive.model || p.drive.drive != f.drive.drive);
                         let alone = if f.drive.enabled { 1 } else { 0 };
-                        let filter = 1.0 - (-std::f64::consts::TAU * 0.22 / 4.0f64).exp();
+                        let envelope = self.drive_envelope;
+                        let clipped = if both {
+                            self.drive_chain.crossfade(
+                                &mut self.drive_leaving,
+                                &shapes[0].circuit,
+                                &shapes[1].circuit,
+                                t,
+                                self.ramp_left == self.ramp_frames,
+                                x,
+                                [shapes[0].bias * envelope, shapes[1].bias * envelope],
+                            )
+                        } else {
+                            self.drive_chain.process(
+                                &shapes[alone].circuit,
+                                x,
+                                shapes[alone].bias * envelope,
+                            )
+                        };
                         let (tone, level) = (
                             lerp(shapes[0].tone, shapes[1].tone),
                             lerp(shapes[0].level, shapes[1].level),
                         );
-                        let envelope = self.drive_envelope;
                         let wet = std::array::from_fn(|c| {
-                            let v = x[c] as f64;
-                            // Four times oversampled, as the amp is, so the clipping's upper harmonics do not fold back down.
-                            let mut sum = 0.0;
-                            for step in 1..=4 {
-                                let input = self.drive_previous_input[c]
-                                    + (v - self.drive_previous_input[c]) * step as f64 / 4.0;
-                                let clip = |shape: DriveShape| {
-                                    drive_curve(
-                                        shape.hard,
-                                        shape.gain * (input + shape.bias * envelope),
-                                    ) * shape.normal
-                                };
-                                let mut sample = if both {
-                                    lerp(clip(shapes[0]), clip(shapes[1]))
-                                } else {
-                                    clip(shapes[alone])
-                                };
-                                for state in &mut self.drive_anti_alias[c] {
-                                    *state = flush(*state + filter * (sample - *state));
-                                    sample = *state;
-                                }
-                                sum += sample;
-                            }
-                            self.drive_previous_input[c] = v;
-                            let clipped = sum / 4.0;
-                            self.drive_dc[c] =
-                                flush(self.drive_dc[c] + dc * (clipped - self.drive_dc[c]));
-                            let mut out = clipped - self.drive_dc[c];
+                            let mut out = clipped[c];
                             for state in &mut self.drive_tone[c] {
                                 *state = flush(*state + tone * (out - *state));
                                 out = *state;
@@ -2168,66 +2134,81 @@ impl TrackDsp {
                             (out * level) as f32
                         });
                         x = blend(x, wet, p.drive.enabled, f.drive.enabled);
+                    } else {
+                        self.drive_chain.live = false;
                     }
                 }
                 Stage::Amp => {
                     if f.amp.enabled || p.amp.enabled && t < 1.0 {
                         let drive = lerp(p.amp.drive, f.amp.drive);
                         let gain = 10f64.powf(lerp(p.amp.gain_db, f.amp.gain_db) / 20.0);
-                        let model = |s: &str| match s {
-                            // Reference peak .10 corresponds to the measured loud pickup RMS .0704.
-                            // Normalization keeps this level steady while quieter notes gain sustain.
-                            "crunch" => {
-                                let pre = 1.0 + 220.0 * drive.powf(1.2);
-                                (pre, 0.10 / (0.10 * pre).tanh(), 0.08 * drive, 1.0)
-                            }
-                            "lead" => {
-                                let pre = 1.0 + 600.0 * drive.powf(1.1);
-                                (pre, 0.11 / (0.11 * pre).tanh(), 0.04 * drive, 1.0)
-                            }
-                            "bass" => {
-                                let pre = 1.0 + drive * 3.0;
-                                (pre, 1.0 / pre.sqrt(), 0.02 * drive, 0.0)
-                            }
-                            _ => {
-                                let pre = 1.0 + drive;
-                                (pre, 1.0 / pre.sqrt(), 0.02 * drive, 0.0)
-                            }
-                        };
-                        let a = model(&p.amp.model);
-                        let b = model(&f.amp.model);
-                        let pre = lerp(a.0, b.0);
-                        let post = lerp(a.1, b.1);
-                        let bias = lerp(a.2, b.2);
-                        let oversampled = lerp(a.3, b.3);
-                        let zero = bias.tanh();
-                        let filter = 1.0 - (-std::f64::consts::TAU * 0.22 / 4.0).exp();
-                        let wet = std::array::from_fn(|c| {
-                            let v = x[c] as f64;
-                            let direct = if oversampled == 0.0 {
-                                (v * pre + bias).tanh() / pre.sqrt() - zero / pre.sqrt()
-                            } else {
-                                ((v * pre + bias).tanh() - zero) * post
+                        // A side that is off takes the other's circuit, so switching the amp only fades one sound in.
+                        let from = self.amp_shapes[if p.amp.enabled { 0 } else { 1 }].as_ref();
+                        let to = self.amp_shapes[if f.amp.enabled { 1 } else { 0 }].as_ref();
+                        let plain = to.is_none() || from.is_none() && t < 1.0;
+                        let wet = if plain {
+                            // A side on the driven circuit has no plain sound to ramp from, so this side's is held.
+                            let model = |s: &str| {
+                                let pre = 1.0 + drive * if s == "bass" { 3.0 } else { 1.0 };
+                                (pre, 0.02 * drive)
                             };
-                            let mut colored = direct;
-                            if oversampled > 0.0 {
-                                let mut sum = 0.0;
-                                for step in 1..=4 {
-                                    let input = self.amp_previous_input[c]
-                                        + (v - self.amp_previous_input[c]) * step as f64 / 4.0;
-                                    let mut sample = ((input * pre + bias).tanh() - zero) * post;
-                                    for state in &mut self.amp_anti_alias[c] {
-                                        *state += filter * (sample - *state);
-                                        sample = *state;
-                                    }
-                                    sum += sample;
-                                }
-                                colored += ((sum / 4.0) - direct) * oversampled;
+                            let a = model(if self.amp_shapes[0].is_some() {
+                                &f.amp.model
+                            } else {
+                                &p.amp.model
+                            });
+                            let b = model(if self.amp_shapes[1].is_some() {
+                                &p.amp.model
+                            } else {
+                                &f.amp.model
+                            });
+                            let pre = lerp(a.0, b.0);
+                            let bias = lerp(a.1, b.1);
+                            let zero = bias.tanh();
+                            std::array::from_fn(|c| {
+                                let v = x[c] as f64;
+                                let direct =
+                                    (v * pre + bias).tanh() / pre.sqrt() - zero / pre.sqrt();
+                                self.amp_dc[c] += 0.0005 * (direct - self.amp_dc[c]);
+                                ((direct - self.amp_dc[c]) * gain) as f32
+                            })
+                        } else {
+                            self.amp_dc = [0.0; 2];
+                            x
+                        };
+                        let wet = if let Some(circuit) = to.or(from.filter(|_| t < 1.0)) {
+                            if !self.amp_chain.live {
+                                self.amp_chain.reset();
+                                self.amp_chain.live = true;
                             }
-                            self.amp_previous_input[c] = v;
-                            self.amp_dc[c] += 0.0005 * (colored - self.amp_dc[c]);
-                            ((colored - self.amp_dc[c]) * gain) as f32
-                        });
+                            let y = match (from, to) {
+                                (Some(a), Some(b)) if t < 1.0 && a != b => {
+                                    self.amp_chain.crossfade(
+                                        &mut self.amp_leaving,
+                                        a,
+                                        b,
+                                        t,
+                                        self.ramp_left == self.ramp_frames,
+                                        x,
+                                        [0.0; 2],
+                                    )
+                                }
+                                _ => self.amp_chain.process(circuit, x, 0.0),
+                            }
+                            .map(|v| (v * gain) as f32);
+                            match (plain, to.is_some()) {
+                                (false, _) => y,
+                                (true, true) => {
+                                    std::array::from_fn(|c| wet[c] + (y[c] - wet[c]) * t as f32)
+                                }
+                                (true, false) => {
+                                    std::array::from_fn(|c| y[c] + (wet[c] - y[c]) * t as f32)
+                                }
+                            }
+                        } else {
+                            self.amp_chain.live = false;
+                            wet
+                        };
                         let wanted = amp_tone(&f.amp);
                         if f.amp.enabled && !p.amp.enabled && self.ramp_left == self.ramp_frames {
                             // Switching the amp on starts its tone stack at its settings, from rest.
@@ -2273,29 +2254,68 @@ impl TrackDsp {
                         }
                         let wet = if flat { wet } else { toned };
                         x = blend(x, wet, p.amp.enabled, f.amp.enabled);
+                    } else {
+                        self.amp_chain.live = false;
                     }
                 }
                 Stage::Cabinet => {
                     if f.cabinet.enabled || p.cabinet.enabled && t < 1.0 {
-                        let cutoff = |s: &str| match s {
-                            "closed" => [90.0, 4200.0],
-                            "bass" => [35.0, 3500.0],
-                            _ => [65.0, 5500.0],
-                        };
-                        let a = cutoff(&p.cabinet.model);
-                        let b = cutoff(&f.cabinet.model);
-                        let values = [lerp(a[0], b[0]), lerp(a[1], b[1])];
-                        if values != self.cached_cabinet {
-                            self.cabinet[0].pass(values[0], self.rate, true);
-                            self.cabinet[1].pass(values[1], self.rate, false);
-                            self.cabinet[2].pass(values[1], self.rate, false);
-                            self.cached_cabinet = values;
-                        }
+                        let [before, after] = self.cabinet_models;
+                        // A side that is off takes the other's cabinet, as the amp does.
+                        let from = if p.cabinet.enabled { before } else { after };
+                        let to = if f.cabinet.enabled { after } else { before };
+                        let filtered = to.is_none() || from.is_none() && t < 1.0;
                         let mut wet = x;
-                        for b in &mut self.cabinet {
-                            wet = b.process(wet);
+                        if filtered {
+                            let cutoff = |s: &str| match s {
+                                "bass" => [35.0, 3500.0],
+                                _ => [65.0, 5500.0],
+                            };
+                            // A side on a designed cabinet has no filters to ramp from, so this side's are held.
+                            let a = cutoff(if before.is_some() {
+                                &f.cabinet.model
+                            } else {
+                                &p.cabinet.model
+                            });
+                            let b = cutoff(if after.is_some() {
+                                &p.cabinet.model
+                            } else {
+                                &f.cabinet.model
+                            });
+                            let values = [lerp(a[0], b[0]), lerp(a[1], b[1])];
+                            if values != self.cached_cabinet {
+                                self.cabinet[0].pass(values[0], self.rate, true);
+                                self.cabinet[1].pass(values[1], self.rate, false);
+                                self.cabinet[2].pass(values[1], self.rate, false);
+                                self.cached_cabinet = values;
+                            }
+                            for b in &mut self.cabinet {
+                                wet = b.process(wet);
+                            }
+                        } else {
+                            self.cabinet.iter_mut().for_each(Biquad::reset);
+                        }
+                        if let Some(end) = to.or(from.filter(|_| t < 1.0)) {
+                            if !self.cabinet_fir.live {
+                                self.cabinet_fir.reset();
+                                self.cabinet_fir.live = true;
+                            }
+                            let y = self.cabinet_fir.process(from.unwrap_or(end), end, t, x);
+                            wet = match (filtered, to.is_some()) {
+                                (false, _) => y,
+                                (true, true) => {
+                                    std::array::from_fn(|c| wet[c] + (y[c] - wet[c]) * t as f32)
+                                }
+                                (true, false) => {
+                                    std::array::from_fn(|c| y[c] + (wet[c] - y[c]) * t as f32)
+                                }
+                            };
+                        } else {
+                            self.cabinet_fir.live = false;
                         }
                         x = blend(x, wet, p.cabinet.enabled, f.cabinet.enabled);
+                    } else {
+                        self.cabinet_fir.live = false;
                     }
                 }
                 Stage::Eq => {
@@ -2714,8 +2734,8 @@ impl TrackDsp {
         self.gate_envelope = 1.0;
         self.compressor_envelope = 0.0;
         self.amp_dc = [0.0; 2];
-        self.amp_previous_input = [0.0; 2];
-        self.amp_anti_alias = [[0.0; 3]; 2];
+        self.amp_chain.reset();
+        self.amp_chain.live = false;
         for b in &mut self.amp_tone {
             b.reset();
         }
@@ -2723,6 +2743,8 @@ impl TrackDsp {
         for b in &mut self.cabinet {
             b.reset();
         }
+        self.cabinet_fir.reset();
+        self.cabinet_fir.live = false;
         for b in &mut self.eq {
             b.reset();
         }
@@ -2759,9 +2781,8 @@ impl TrackDsp {
         self.octaver_phase = [Shifter::default(); 2];
         self.pitch.reset();
         self.pitch_phase = Shifter::default();
-        self.drive_previous_input = [0.0; 2];
-        self.drive_anti_alias = [[0.0; 3]; 2];
-        self.drive_dc = [0.0; 2];
+        self.drive_chain.reset();
+        self.drive_chain.live = false;
         self.drive_tone = [[0.0; 2]; 2];
         self.drive_envelope = 0.0;
         for shape in &mut self.microphone_shapes {

@@ -1,0 +1,142 @@
+/* The Mixer view: a focus monitor rail beside horizontally scrolling hardware channel strips.
+ * Uses only the shared `--tp-*` tokens from `src/ui/ui.css`. */
+.mixer-view {
+  display:flex; min-width:0; min-height:0; height:100%; overflow:hidden;
+  background:var(--tp-base); color:var(--tp-text); font-family:var(--tp-font-ui);
+}
+
+.mixer-view :is(button,input):focus-visible { outline:2px solid var(--tp-edit); outline-offset:2px; }
+.mixer-view .mixer-button {
+  min-height:28px; padding:3px 10px; border:1px solid var(--tp-line-strong); border-radius:var(--tp-radius-s);
+  background:var(--tp-raised); color:var(--tp-text); font:500 12px/18px var(--tp-font-ui); cursor:pointer;
+}
+.mixer-view .mixer-button:hover:enabled { border-color:var(--tp-text); background:var(--tp-raised); }
+.mixer-view .mixer-button:disabled { opacity:.45; border-style:solid; border-color:var(--tp-line-subtle); color:var(--tp-muted); cursor:default; }
+
+/* Session Focus rail */
+.mixer-focus {
+  flex:0 0 184px; display:flex; flex-direction:column; align-items:center; gap:12px;
+  padding:14px 12px; border-right:1px solid var(--tp-line-subtle); background:var(--tp-panel);
+  overflow-y:auto;
+}
+.mixer-focus-head {
+  display:flex; align-items:center; justify-content:space-between; gap:8px; width:100%;
+  padding-bottom:8px; border-bottom:1px solid var(--tp-line-subtle);
+}
+.mixer-focus-title { font-size:12px; font-weight:600; letter-spacing:.04em; text-transform:uppercase; color:var(--tp-text); }
+.mixer-badge {
+  padding:1px 6px; border:1px solid var(--tp-line-subtle); border-radius:var(--tp-radius-s);
+  background:var(--tp-input); color:var(--tp-muted); font-size:11px; line-height:16px; white-space:nowrap;
+}
+.mixer-focus-knob { --knob-size:56px; margin-top:4px; }
+.mixer-focus-note {
+  margin:0; padding:8px; border:1px solid var(--tp-warning); border-radius:var(--tp-radius-s);
+  background:color-mix(in srgb,var(--tp-warning) 12%,var(--tp-input));
+  color:var(--tp-warning); font-size:11px; line-height:1.4; text-align:center;
+}
+
+/* Horizontally scrolling channel strips */
+.mixer-strips {
+  flex:1; display:flex; align-items:stretch; gap:10px; min-width:0; min-height:0;
+  padding:14px; overflow-x:auto; overflow-y:hidden;
+  scrollbar-color:var(--tp-line-strong) var(--tp-base);
+}
+
+.mixer-strip {
+  flex:0 0 156px; width:156px; min-height:0;
+  display:flex; flex-direction:column; align-items:center; gap:10px;
+  padding:10px; border:1px solid var(--tp-line-subtle); border-radius:var(--tp-radius-m);
+  background:linear-gradient(180deg,color-mix(in srgb,var(--tp-raised) 50%,var(--tp-panel)),var(--tp-panel));
+  box-shadow:inset 0 1px 0 color-mix(in srgb,var(--tp-text) 5%,transparent);
+}
+.mixer-strip[data-selected] {
+  border-color:var(--tp-edit);
+  box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--tp-edit) 45%,transparent);
+}
+
+.mixer-strip-head {
+  display:flex; flex-direction:column; gap:4px; width:100%; min-width:0;
+}
+.mixer-view .mixer-strip-select {
+  display:flex; align-items:center; gap:6px; width:100%; min-width:0; min-height:28px;
+  padding:4px 8px; border:1px solid var(--tp-line-subtle); border-radius:var(--tp-radius-s);
+  background:var(--tp-input); color:var(--tp-text); font:600 12px/18px var(--tp-font-ui);
+  text-align:left; cursor:pointer;
+}
+.mixer-view .mixer-strip-select:hover:enabled { border-color:var(--tp-line-strong); background:var(--tp-raised); }
+.mixer-view .mixer-strip-select[aria-pressed=true] {
+  border-color:var(--tp-edit); background:color-mix(in srgb,var(--tp-edit) 16%,var(--tp-raised));
+}
+.mixer-strip-select .track-color-swatch {
+  flex:none; width:10px; height:10px; border-radius:2px; border:1px solid var(--tp-line-strong);
+}
+.mixer-strip-name {
+  min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.mixer-strip-status {
+  align-self:flex-start; padding:0 5px; border-radius:var(--tp-radius-s);
+  background:color-mix(in srgb,var(--tp-edit) 18%,var(--tp-input));
+  color:var(--tp-edit); font-size:10px; font-weight:600; line-height:16px; letter-spacing:.03em; text-transform:uppercase;
+}
+
+/* Current sound readout */
+.mixer-strip-sound {
+  display:flex; flex-direction:column; gap:1px; width:100%; min-width:0;
+  padding:5px 8px; border:1px solid var(--tp-line-subtle); border-radius:var(--tp-radius-s);
+  background:var(--tp-input);
+}
+.mixer-strip-voice {
+  font-size:11px; font-weight:500; line-height:15px; color:var(--tp-text);
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.mixer-strip-preset {
+  font-size:11px; line-height:15px; color:var(--tp-muted);
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+
+/* Mute & Solo switches */
+.mixer-strip-switches {
+  display:grid; grid-template-columns:1fr 1fr; gap:6px; width:100%;
+}
+.mixer-switch {
+  position:relative; display:inline-flex; align-items:center; justify-content:center;
+  min-height:26px; padding:2px 6px; border:1px solid var(--tp-line-strong); border-radius:var(--tp-radius-s);
+  background:var(--tp-raised); color:var(--tp-muted);
+  font:600 11px/16px var(--tp-font-ui); letter-spacing:.03em; text-transform:uppercase;
+  user-select:none; cursor:pointer;
+}
+.mixer-switch:hover:not([data-disabled]) { border-color:var(--tp-text); color:var(--tp-text); }
+.mixer-switch input[type=checkbox] {
+  position:absolute; inset:0; width:100%; height:100%; margin:0; opacity:0; cursor:inherit;
+}
+.mixer-switch:has(input:focus-visible) { outline:2px solid var(--tp-edit); outline-offset:1px; }
+.mixer-switch[data-kind=mute][data-active] {
+  border-color:var(--tp-warning);
+  background:color-mix(in srgb,var(--tp-warning) 22%,var(--tp-raised));
+  color:var(--tp-warning);
+}
+.mixer-switch[data-kind=solo][data-active] {
+  border-color:var(--tp-on);
+  background:var(--tp-on);
+  color:var(--tp-on-ink);
+}
+.mixer-switch[data-disabled] { opacity:.45; cursor:default; }
+
+/* Pan knob and vertical volume fader */
+.mixer-strip-pan { --knob-size:48px; }
+.mixer-strip-fader-well {
+  flex:1; display:flex; align-items:stretch; justify-content:center;
+  width:100%; min-height:120px; padding:6px 0 2px;
+  border-top:1px solid var(--tp-line-subtle);
+}
+.mixer-strip-fader { height:100%; min-height:110px; }
+
+@media (max-width:1100px),(max-height:700px) {
+  .mixer-focus { flex-basis:156px; padding:10px; gap:8px; }
+  .mixer-focus-knob { --knob-size:48px; }
+  .mixer-strips { padding:10px; gap:8px; }
+  .mixer-strip { flex-basis:140px; width:140px; padding:8px; gap:6px; }
+  .mixer-strip-pan { --knob-size:44px; }
+  .mixer-strip-fader-well { min-height:96px; padding-top:4px; }
+  .mixer-strip-fader { min-height:90px; }
+}

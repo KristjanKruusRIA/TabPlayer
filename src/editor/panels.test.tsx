@@ -11,6 +11,7 @@ import { music, target } from './fixtures';
 import { buildScore, previewEdit } from '../engine';
 import { blankProject } from '../project';
 import { exportAsciiTab } from '../export/ascii-tab';
+import type { PitchCurve } from '../edit-types';
 vi.mock('@tauri-apps/api/core',()=>({invoke:vi.fn(async()=>({format:'tabplayer-tuning-library',version:1,entries:[]}))}));
 afterEach(cleanup);
 it('applies pitched staff transposition without requiring a string tuning',()=>{
@@ -123,19 +124,89 @@ it('bend presets render accurately in real ASCII export (5br, pb mark)',()=>{
   let project=blankProject();
   project=previewEdit(project,{type:'setNote',target,string:1,fret:5}).project;
 
-  // Bend & release preset produces '5br' in ASCII export
-  project=previewEdit(project,{type:'setNoteTechniques',target,string:1,patch:{bend:{type:model.BendType.BendRelease,style:0,points:[{offset:0,value:0},{offset:30,value:4},{offset:60,value:0}]}}}).project;
-  let text=new TextDecoder().decode(exportAsciiTab(buildScore(project),{tracks:[0],range:null}));
+  let currentCurve: PitchCurve | null = null;
+  const view = render(
+    <CurveEditor
+      label="Bend"
+      value={currentCurve}
+      onChange={curve => {
+        currentCurve = curve;
+        if (curve) {
+          project = previewEdit(project, {
+            type: 'setNoteTechniques',
+            target,
+            string: 1,
+            patch: { bend: curve },
+          }).project;
+        }
+      }}
+    />
+  );
+
+  // 1. Bend & release preset produces '5br' in ASCII export
+  fireEvent.click(screen.getByRole('button', { name: 'Bend preset: Bend & release' }));
+  view.rerender(
+    <CurveEditor
+      label="Bend"
+      value={currentCurve}
+      onChange={curve => {
+        currentCurve = curve;
+        if (curve) {
+          project = previewEdit(project, {
+            type: 'setNoteTechniques',
+            target,
+            string: 1,
+            patch: { bend: curve },
+          }).project;
+        }
+      }}
+    />
+  );
+  let text = new TextDecoder().decode(exportAsciiTab(buildScore(project), { tracks: [0], range: null }));
   expect(text).toContain('5br');
 
-  // Pre-bend preset produces 'pb5' in ASCII export
-  project=previewEdit(project,{type:'setNoteTechniques',target,string:1,patch:{bend:{type:model.BendType.Prebend,style:0,points:[{offset:0,value:4},{offset:60,value:4}]}}}).project;
-  text=new TextDecoder().decode(exportAsciiTab(buildScore(project),{tracks:[0],range:null}));
+  // 2. Pre-bend preset produces 'pb5' in ASCII export
+  fireEvent.click(screen.getByRole('button', { name: 'Bend preset: Pre-bend' }));
+  view.rerender(
+    <CurveEditor
+      label="Bend"
+      value={currentCurve}
+      onChange={curve => {
+        currentCurve = curve;
+        if (curve) {
+          project = previewEdit(project, {
+            type: 'setNoteTechniques',
+            target,
+            string: 1,
+            patch: { bend: curve },
+          }).project;
+        }
+      }}
+    />
+  );
+  text = new TextDecoder().decode(exportAsciiTab(buildScore(project), { tracks: [0], range: null }));
   expect(text).toContain('pb5');
 
-  // Pre-bend & release preset produces 'pb5r' in ASCII export
-  project=previewEdit(project,{type:'setNoteTechniques',target,string:1,patch:{bend:{type:model.BendType.PrebendRelease,style:0,points:[{offset:0,value:4},{offset:60,value:0}]}}}).project;
-  text=new TextDecoder().decode(exportAsciiTab(buildScore(project),{tracks:[0],range:null}));
+  // 3. Pre-bend & release preset produces 'pb5r' in ASCII export
+  fireEvent.click(screen.getByRole('button', { name: 'Bend preset: Pre-bend & release' }));
+  view.rerender(
+    <CurveEditor
+      label="Bend"
+      value={currentCurve}
+      onChange={curve => {
+        currentCurve = curve;
+        if (curve) {
+          project = previewEdit(project, {
+            type: 'setNoteTechniques',
+            target,
+            string: 1,
+            patch: { bend: curve },
+          }).project;
+        }
+      }}
+    />
+  );
+  text = new TextDecoder().decode(exportAsciiTab(buildScore(project), { tracks: [0], range: null }));
   expect(text).toContain('pb5r');
 });
 

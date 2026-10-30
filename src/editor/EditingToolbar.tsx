@@ -1,4 +1,4 @@
-import { useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { model } from '@coderline/alphatab';
 import type { BeatTarget, EditCommand } from '../project';
 import type { IndexedNoteTarget, NoteTarget, NoteTechniques } from '../edit-types';
@@ -137,6 +137,8 @@ export function EditingToolbar({
   };
   const destination = note ? nextLinkedNote(note) : null;
   const nextTarget = destination ? address(destination) : null;
+  const canTie = Boolean(destination && note && destination.realValue === note.realValue);
+  const hasSlide = (note?.slideOutType ?? 0) !== 0 || (note?.slideInType ?? 0) !== 0;
 
   const patchNote = (patch: NoteTechniques) => {
     if (editDisabled || !note) return;
@@ -174,10 +176,25 @@ export function EditingToolbar({
   const activeDuration = beat?.duration ?? duration;
   const activeDots = beat?.dots ?? dots;
 
+  useEffect(() => {
+    if (!toolbarRef.current || busy) return;
+    const allButtons = Array.from(toolbarRef.current.querySelectorAll<HTMLButtonElement>('button.tp-glyph-btn'));
+    if (!allButtons.length) return;
+    const current = allButtons[focusIdx];
+    if (current?.disabled) {
+      const firstEnabled = allButtons.findIndex(b => !b.disabled);
+      if (firstEnabled >= 0) {
+        setFocusIdx(firstEnabled);
+      }
+    }
+  }, [score, target, string, fret, noteIndex, duration, dots, busy, locked, focusIdx]);
+
   const onToolbarKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (!['ArrowRight', 'ArrowLeft', 'Home', 'End'].includes(event.key)) return;
     const buttons = Array.from(
-      toolbarRef.current?.querySelectorAll<HTMLButtonElement>('button.tp-glyph-btn:not(:disabled)') ?? [],
+      toolbarRef.current?.querySelectorAll<HTMLButtonElement>(
+        'button.tp-glyph-btn:not(:disabled):not([aria-disabled="true"])',
+      ) ?? [],
     );
     if (!buttons.length) return;
     event.preventDefault();
@@ -207,6 +224,8 @@ export function EditingToolbar({
     badge?: string;
   }) => {
     const index = btnCounter++;
+    const isDisabled = opts.disabled && !busy;
+    const isAriaDisabled = opts.disabled || busy;
     return (
       <button
         key={opts.key}
@@ -214,10 +233,14 @@ export function EditingToolbar({
         className="tp-glyph-btn"
         aria-label={opts.label}
         aria-pressed={opts.pressed}
-        disabled={opts.disabled}
+        disabled={isDisabled}
+        aria-disabled={isAriaDisabled ? 'true' : undefined}
         tabIndex={index === focusIdx ? 0 : -1}
         onFocus={() => setFocusIdx(index)}
-        onClick={opts.onClick}
+        onClick={() => {
+          if (busy || opts.disabled) return;
+          opts.onClick();
+        }}
         title={opts.label}
       >
         {opts.children}
@@ -245,6 +268,7 @@ export function EditingToolbar({
             onClick: () => {
               onDurationChange(d);
               if (beat && !editDisabled) {
+                if (beat.duration === d) return;
                 onEdit({ type: 'setDuration', target, duration: d, dots: beat.dots ?? dots });
               }
             },
@@ -292,11 +316,13 @@ export function EditingToolbar({
           badge: 'R',
           onClick: () => {
             if (!beat || editDisabled) return;
-            if (beat.isRest && stringed) {
-              onEdit({ type: 'setNote', target, string, fret });
-            } else {
-              onEdit({ type: 'setRest', target });
+            if (beat.isRest) {
+              if (stringed) {
+                onEdit({ type: 'setNote', target, string, fret });
+              }
+              return;
             }
+            onEdit({ type: 'setRest', target });
           },
           children: <RestGlyph />,
         })}
@@ -304,7 +330,7 @@ export function EditingToolbar({
           key: 'tie',
           label: 'Toggle tie',
           pressed: Boolean(note?.isTieOrigin || note?.isTieDestination),
-          disabled: editDisabled || !note || (!note.isTieOrigin && !note.isTieDestination && !nextTarget),
+          disabled: editDisabled || !note || (!note.isTieOrigin && !note.isTieDestination && !canTie),
           badge: 'Tie',
           onClick: () => toggleLink('tie'),
           children: <TieGlyph />,
@@ -334,8 +360,8 @@ export function EditingToolbar({
         {glyphButton({
           key: 'slide',
           label: 'Toggle slide',
-          pressed: (note?.slideOutType ?? 0) !== 0 || (note?.slideInType ?? 0) !== 0,
-          disabled: editDisabled || !note || !stringed,
+          pressed: hasSlide,
+          disabled: editDisabled || !note || !stringed || (!hasSlide && !destination),
           badge: 'Sl',
           onClick: () => {
             const active = (note?.slideOutType ?? 0) !== 0 || (note?.slideInType ?? 0) !== 0;

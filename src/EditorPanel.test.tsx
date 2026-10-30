@@ -146,6 +146,84 @@ it('glyph editing toolbar dispatches one undoable edit per duration, dot, rest, 
   expect(first).toHaveFocus();
 });
 
+it('duration button at current duration and rest toggle on indexed-staff rest record nothing',()=>{
+  const input=props();
+  render(<EditorPanel {...input}/>);
+  const toolbar=within(screen.getByRole('toolbar',{name:'Editing toolbar'}));
+
+  // Beat 1 starts with Quarter note (4). Clicking Quarter note again records nothing (Finding 2)
+  fireEvent.click(toolbar.getByRole('button',{name:'Quarter note (1/4)'}));
+  expect(input.onEdit).not.toHaveBeenCalled();
+
+  // Test indexed staff rest toggle
+  input.score.tracks[0].staves[0].isPercussion=true;
+  input.score.tracks[0].staves[0].bars[0].voices[0].beats[0].isEmpty=false;
+  input.score.tracks[0].staves[0].bars[0].voices[0].beats[0].notes=[];
+  // beat 0 is now a rest on percussion/indexed staff
+  cleanup();
+  render(<EditorPanel {...input}/>);
+  const indexedToolbar=within(screen.getByRole('toolbar',{name:'Editing toolbar'}));
+  expect(indexedToolbar.getByRole('button',{name:'Toggle rest'})).toHaveAttribute('aria-pressed','true');
+  fireEvent.click(indexedToolbar.getByRole('button',{name:'Toggle rest'}));
+  // Must NOT dispatch setRest on an existing rest on an indexed staff (Finding 2)
+  expect(input.onEdit).not.toHaveBeenCalled();
+});
+
+it('toggle slide and tie mirror engine preconditions from techniques.ts',()=>{
+  const input=props();
+  // String 6 has notes on beat 0 and beat 1 in music() fixture.
+  // Beat 0: realValue 40 (fret 0 or whatever). Beat 1: change pitch so notes differ!
+  const note0=input.score.tracks[0].staves[0].bars[0].voices[0].beats[0].notes.find(n=>n.string===6)!;
+  const note1=input.score.tracks[0].staves[0].bars[0].voices[0].beats[1].notes.find(n=>n.string===6)!;
+  note0.fret=3;
+  note1.fret=5; // different pitch!
+
+  const view=render(<EditorPanel {...input} target={{...target,beat:0}} string={6}/>);
+  const toolbar=within(screen.getByRole('toolbar',{name:'Editing toolbar'}));
+
+  // Toggle tie requires EQUAL pitch according to techniques.ts:38 (Finding 9)
+  expect(toolbar.getByRole('button',{name:'Toggle tie'})).toBeDisabled();
+
+  // Make pitch equal: tie should become enabled
+  note1.fret=3;
+  view.rerender(<EditorPanel {...input} target={{...target,beat:0}} string={6}/>);
+  expect(toolbar.getByRole('button',{name:'Toggle tie'})).toBeEnabled();
+
+  // Toggle slide: clear subsequent notes on string 6 so beat 1 has NO next note on string 6!
+  // It must be disabled according to techniques.ts:55 (Finding 9)
+  for (let b = 2; b < 4; b++) {
+    const beat = input.score.tracks[0].staves[0].bars[0].voices[0].beats[b];
+    beat.notes = beat.notes.filter(n => n.string !== 6);
+  }
+  for (let bar = 1; bar < 4; bar++) {
+    for (const beat of input.score.tracks[0].staves[0].bars[bar].voices[0].beats) {
+      beat.notes = beat.notes.filter(n => n.string !== 6);
+    }
+  }
+  view.rerender(<EditorPanel {...input} target={{...target,beat:1}} string={6}/>);
+  expect(toolbar.getByRole('button',{name:'Toggle slide'})).toBeDisabled();
+});
+
+it('toolbar keyboard keeps one tab stop always and keeps focus through an edit',()=>{
+  const input=props();
+  const view=render(<EditorPanel {...input}/>);
+  const toolbar=screen.getByRole('toolbar',{name:'Editing toolbar'});
+
+  // Focus a button
+  const eighth=within(toolbar).getByRole('button',{name:'Eighth note (1/8)'});
+  eighth.focus();
+  expect(eighth).toHaveFocus();
+
+  // When busy becomes true during an edit, the button keeps focus (Finding 7)
+  view.rerender(<EditorPanel {...input} busy/>);
+  expect(eighth).toHaveFocus();
+  expect(eighth).toHaveAttribute('aria-disabled','true');
+
+  // Verify there is always at least one tab stop
+  const tabStops=toolbar.querySelectorAll<HTMLButtonElement>('button.tp-glyph-btn[tabindex="0"]');
+  expect(tabStops.length).toBeGreaterThanOrEqual(1);
+});
+
 it('contextual inspector shows active selection badges and filters panels by context while preserving drafts',()=>{
   const input=props();
   const note=input.score.tracks[0].staves[0].bars[0].voices[0].beats[0].notes[0];

@@ -75,10 +75,10 @@ export async function runPartialCapoAcceptance({buildPath}={}){
   const button=async name=>{owned();await ui.clickWorkstationButton(page,name,{waitForIdle:false});await idle();};
   const view=()=>page.getByRole('region',{name:'Instrument view',exact:true});
   const edits=async()=>(await record()).snapshot.project.edits;
-  /** The sounding key the native playback plan gives each string of the selected beat, read from the instrument view's marks. */
+  /** The sounding key the native playback plan gives each string of the selected beat, read from the instrument view's marks; a trill's alternations collapse to the first. */
   const keys=async()=>{
     await native();
-    const marks=await poll(()=>view().locator('.fret-note').evaluateAll(nodes=>nodes.map(node=>[Number(node.dataset.string),Number(node.dataset.key),Number(node.dataset.fret)])),value=>value.length===6,'six planned notes of the selected beat');
+    const marks=await poll(()=>view().locator('.fret-note').evaluateAll(nodes=>[...new Map(nodes.map(node=>[Number(node.dataset.string),Number(node.dataset.key),Number(node.dataset.fret)]).reverse().map(mark=>[mark[0],mark])).values()]),value=>value.length===6,'six planned notes of the selected beat');
     return marks.sort((a,b)=>a[0]-b[0]);
   };
   /** The open pitch each string row is titled with, lowest string first. */

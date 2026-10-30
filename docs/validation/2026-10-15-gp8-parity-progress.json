@@ -19,7 +19,7 @@
     "value": "088b973cea94bde876859c7e6efadb4dd23da64a",
     "accepted_source_revision": "088b973cea94bde876859c7e6efadb4dd23da64a",
     "documentation_revision": null,
-    "documentation_status": "2026-10-21 update on feat/gp8-parity: F13 missing -> partial, W05 missing -> implemented, F03/F04/D01/D02 evidence refreshed. Earlier P17/P18 checkpoint text is kept in previous_checkpoint and provenance. 2026-10-22: F17 SVG export missing -> implemented. 2026-10-22: F16 PNG export missing -> partial. 2026-10-22: D20 export file-name tokens missing -> partial. 2026-10-22: D20 one file per track added; D20 stays partial. 2026-10-22: S03 track reorder missing -> partial. 2026-10-22: S03 track duplicate added (still partial). 2026-10-22: S03 track color added (still partial). 2026-10-22: T28 wah gestures missing -> partial. 2026-10-22: T27 sustain pedal missing -> partial. 2026-10-22: F14 ASCII tablature export missing -> partial. 2026-10-22: A20 track focus missing -> partial. 2026-10-22: D10 header and footer fields missing -> partial. 2026-10-22: T05 picking and strumming patterns missing -> partial. 2026-10-22: N09 multi-voice selection ties missing -> partial. 2026-10-22: L05 score error display missing -> partial. 2026-10-22: L06 new score author defaults missing -> partial. 2026-10-22: L07 default view preferences missing -> partial. 2026-10-22: W18 command palette missing -> partial. 2026-10-23: F05 ASCII tab import missing -> partial. 2026-10-23: W21 help and update status missing -> partial. 2026-10-23: W22 expression text and action list missing -> partial. 2026-10-23: U13 instrument view selected beat, bar and next-beat focus missing -> partial. 2026-10-23: U14 left-handed neck and neck + keys view missing -> partial. 2026-10-23: A10 flanger and phaser and A11 tremolo and vibrato missing -> partial. 2026-10-23: A13 wah and auto-wah missing -> partial. 2026-10-23: A12 octaver and pitch shift missing -> partial. 2026-10-23: A05 user sound library missing -> implemented; A37 copy and paste of sounds and pedals missing -> partial. 2026-10-23: A33 sound preview during playback missing -> implemented. 2026-10-23: A07 drive families partial -> implemented. 2026-10-23: A15 reverb families partial -> implemented. 2026-10-23: A16 delay models and divisions partial -> implemented. 2026-10-24: A34 sound-bank microphone and mono/stereo missing -> implemented. 2026-10-24: A17 reorderable signal chain re-audited; stays partial. 2026-10-24: A14 track graphic EQ re-audited; stays partial. 2026-10-24: A10 and A11 modulation tempo sync re-audited; both stay partial. 2026-10-24: A06 amp and cabinet controls re-audited with a new tone stack; stays partial. 2026-10-24: A04 factory sound catalog re-audited; partial to implemented. 2026-10-24: A37 duplicate pedals re-audited; partial to implemented. 2026-10-24: A13 wah models re-audited; stays partial. 2026-10-24: F22 AIFF audio export re-audited; missing to implemented. 2026-10-24: F23 normalized audio export re-audited; missing to partial. 2026-10-24: F21 FLAC audio export re-audited; missing to implemented. 2026-10-24: S14 string count change re-audited; missing to implemented. 2026-10-24: S15 saved personal tunings re-audited; missing to implemented. 2026-10-24: S16 tuning audition and E17 edit audition re-audited; missing to implemented. 2026-10-24: U12 instrument view note entry re-audited; missing to implemented. 2026-10-30: W15 finalize and unfinalize re-audited; missing to implemented. 2026-10-30: D13 personal styles re-audited; missing to implemented. 2026-10-30: F02 MIDI import re-audited; missing to implemented. 2026-10-30: U05 scale diagram authoring re-audited; missing to partial.",
+    "documentation_status": "2026-10-21 update on feat/gp8-parity: F13 missing -> partial, W05 missing -> implemented, F03/F04/D01/D02 evidence refreshed. Earlier P17/P18 checkpoint text is kept in previous_checkpoint and provenance. 2026-10-22: F17 SVG export missing -> implemented. 2026-10-22: F16 PNG export missing -> partial. 2026-10-22: D20 export file-name tokens missing -> partial. 2026-10-22: D20 one file per track added; D20 stays partial. 2026-10-22: S03 track reorder missing -> partial. 2026-10-22: S03 track duplicate added (still partial). 2026-10-22: S03 track color added (still partial). 2026-10-22: T28 wah gestures missing -> partial. 2026-10-22: T27 sustain pedal missing -> partial. 2026-10-22: F14 ASCII tablature export missing -> partial. 2026-10-22: A20 track focus missing -> partial. 2026-10-22: D10 header and footer fields missing -> partial. 2026-10-22: T05 picking and strumming patterns missing -> partial. 2026-10-22: N09 multi-voice selection ties missing -> partial. 2026-10-22: L05 score error display missing -> partial. 2026-10-22: L06 new score author defaults missing -> partial. 2026-10-22: L07 default view preferences missing -> partial. 2026-10-22: W18 command palette missing -> partial. 2026-10-23: F05 ASCII tab import missing -> partial. 2026-10-23: W21 help and update status missing -> partial. 2026-10-23: W22 expression text and action list missing -> partial. 2026-10-23: U13 instrument view selected beat, bar and next-beat focus missing -> partial. 2026-10-23: U14 left-handed neck and neck + keys view missing -> partial. 2026-10-23: A10 flanger and phaser and A11 tremolo and vibrato missing -> partial. 2026-10-23: A13 wah and auto-wah missing -> partial. 2026-10-23: A12 octaver and pitch shift missing -> partial. 2026-10-23: A05 user sound library missing -> implemented; A37 copy and paste of sounds and pedals missing -> partial. 2026-10-23: A33 sound preview during playback missing -> implemented. 2026-10-23: A07 drive families partial -> implemented. 2026-10-23: A15 reverb families partial -> implemented. 2026-10-23: A16 delay models and divisions partial -> implemented. 2026-10-24: A34 sound-bank microphone and mono/stereo missing -> implemented. 2026-10-24: A17 reorderable signal chain re-audited; stays partial. 2026-10-24: A14 track graphic EQ re-audited; stays partial. 2026-10-24: A10 and A11 modulation tempo sync re-audited; both stay partial. 2026-10-24: A06 amp and cabinet controls re-audited with a new tone stack; stays partial. 2026-10-24: A04 factory sound catalog re-audited; partial to implemented. 2026-10-24: A37 duplicate pedals re-audited; partial to implemented. 2026-10-24: A13 wah models re-audited; stays partial. 2026-10-24: F22 AIFF audio export re-audited; missing to implemented. 2026-10-24: F23 normalized audio export re-audited; missing to partial. 2026-10-24: F21 FLAC audio export re-audited; missing to implemented. 2026-10-24: S14 string count change re-audited; missing to implemented. 2026-10-24: S15 saved personal tunings re-audited; missing to implemented. 2026-10-24: S16 tuning audition and E17 edit audition re-audited; missing to implemented. 2026-10-24: U12 instrument view note entry re-audited; missing to implemented. 2026-10-30: W15 finalize and unfinalize re-audited; missing to implemented. 2026-10-30: D13 personal styles re-audited; missing to implemented. 2026-10-30: F02 MIDI import re-audited; missing to implemented. 2026-10-30: U05 scale diagram authoring re-audited; missing to partial. 2026-10-30: L08 input preferences re-audited; missing to partial. 2026-10-30: E05 notation pitch entry re-audited; missing to partial. 2026-10-30: D12 typography and style presets re-audited; missing to partial. 2026-10-30: S18 partial capo re-audited; missing to partial.",
     "provenance": "Root locally accepts P16 source 447d2a9240dc5727ff0679b5b0f84dd7107db603; delivery is pending and the source is not yet pushed at this checkpoint. The final versioned tempo report supports the bounded source/native/current Windows/GP-publication/visual scope. Proprietary GP bracket import/export and playback clipping remain unverified, and the report retains audible, platform and shipping limits. This documentation audit executes no runtime or Git/network operation. The unchanged CI checkpoint belongs to historical Library source only and supplies no P16/current-head CI proof. 2026-10-16 P17/P18 checkpoint: root locally accepts source a87bae29deb08e31a8974d6d2ed390e7b5adca0b for the declared local pitch/filter scope after the frozen 57-step functional workflow at be9e61aa2383974821e7ecf70899e7f755f74f53 and sole 17-step/four-frame targeted confirmation at a87bae29deb08e31a8974d6d2ed390e7b5adca0b. The final UI source has its own admitted diagnostic build; the coherent 2647/617 whole-suite evidence belongs to earlier product source 4a01c341eca58cb25f52c89175ba1fb8c14ee803, not a rerun at this later source. The immutable visual receipt retains inherited observer metadata; the final report binds its additive provenance corrigendum and distinguishes current source/executable/admission/resource/log identities. P17 is implemented within declared local numeric scope and P18 remains partial without vocal/center/channel separation. P16 remains reviewed partial; GP bracket import/export and playback clipping remain unverified. Physical audio, original-GP8, macOS/Linux and shipping acceptance remain separate. Independent final document/adoption review and local documentation delivery/push remain pending; no current-head CI result is supplied and the unchanged CI object remains historical Library evidence. This documentation audit executes no runtime/build, Git or network operation.",
     "previous_accepted_checkpoint": "447d2a9240dc5727ff0679b5b0f84dd7107db603",
     "ci_checkpoint": {
@@ -78,28 +78,28 @@
     },
     "current_dispositions": {
       "implemented": 98,
-      "partial": 117,
-      "missing": 35,
+      "partial": 121,
+      "missing": 31,
       "unverified": 8
     },
-    "evidence_reviewed_total": 158,
+    "evidence_reviewed_total": 162,
     "evidence_reviewed": {
       "implemented": 56,
-      "partial": 98,
+      "partial": 102,
       "missing": 0,
       "unverified": 4
     },
-    "baseline_not_reaudited_total": 100,
+    "baseline_not_reaudited_total": 96,
     "baseline_not_reaudited": {
       "implemented": 42,
       "partial": 19,
-      "missing": 35,
+      "missing": 31,
       "unverified": 4
     },
-    "status_changed_total": 120,
+    "status_changed_total": 124,
     "transition_counts": {
       "missing -> implemented": 38,
-      "missing -> partial": 73,
+      "missing -> partial": 77,
       "partial -> implemented": 9
     }
   },
@@ -1699,6 +1699,78 @@
       "start_line": 39,
       "end_line": 47,
       "kind": "validation_report"
+    },
+    "input_preferences_behavior": {
+      "path": "docs/validation/2026-10-30-gp8-input-preferences.md",
+      "start_line": 5,
+      "end_line": 10,
+      "kind": "validation_report"
+    },
+    "input_preferences_evidence": {
+      "path": "docs/validation/2026-10-30-gp8-input-preferences.md",
+      "start_line": 12,
+      "end_line": 20,
+      "kind": "validation_report"
+    },
+    "input_preferences_limits": {
+      "path": "docs/validation/2026-10-30-gp8-input-preferences.md",
+      "start_line": 33,
+      "end_line": 37,
+      "kind": "validation_report"
+    },
+    "notation_entry_behavior": {
+      "path": "docs/validation/2026-10-30-gp8-notation-entry.md",
+      "start_line": 5,
+      "end_line": 13,
+      "kind": "validation_report"
+    },
+    "notation_entry_evidence": {
+      "path": "docs/validation/2026-10-30-gp8-notation-entry.md",
+      "start_line": 15,
+      "end_line": 23,
+      "kind": "validation_report"
+    },
+    "notation_entry_limits": {
+      "path": "docs/validation/2026-10-30-gp8-notation-entry.md",
+      "start_line": 35,
+      "end_line": 40,
+      "kind": "validation_report"
+    },
+    "style_typography_behavior": {
+      "path": "docs/validation/2026-10-30-gp8-style-typography.md",
+      "start_line": 5,
+      "end_line": 11,
+      "kind": "validation_report"
+    },
+    "style_typography_evidence": {
+      "path": "docs/validation/2026-10-30-gp8-style-typography.md",
+      "start_line": 13,
+      "end_line": 24,
+      "kind": "validation_report"
+    },
+    "style_typography_limits": {
+      "path": "docs/validation/2026-10-30-gp8-style-typography.md",
+      "start_line": 36,
+      "end_line": 44,
+      "kind": "validation_report"
+    },
+    "partial_capo_behavior": {
+      "path": "docs/validation/2026-10-30-gp8-partial-capo.md",
+      "start_line": 5,
+      "end_line": 12,
+      "kind": "validation_report"
+    },
+    "partial_capo_evidence": {
+      "path": "docs/validation/2026-10-30-gp8-partial-capo.md",
+      "start_line": 14,
+      "end_line": 21,
+      "kind": "validation_report"
+    },
+    "partial_capo_limits": {
+      "path": "docs/validation/2026-10-30-gp8-partial-capo.md",
+      "start_line": 30,
+      "end_line": 39,
+      "kind": "validation_report"
     }
   },
   "evidence_file_sha256": {
@@ -1800,7 +1872,11 @@
     "docs/validation/2026-10-30-gp8-finalize.md": "162a174d1e9063102060fa0c06194cb0ba071c80eb262711ab7951724f7f66f8",
     "docs/validation/2026-10-30-gp8-stylesheets.md": "3432679a774c2ff0c7d308993e35645dfa58be830b7bf6871be498bc03c378fb",
     "docs/validation/2026-10-30-gp8-midi-import.md": "fbd82936b8b78280f67bf78db3c9c78b07a618b6aa9aebdf2d26e43bebe85529",
-    "docs/validation/2026-10-30-gp8-scale-diagrams.md": "3166a26a8a9ace404a2fa17c63e850f993421f0ac67adf381a55611fe740c1e4"
+    "docs/validation/2026-10-30-gp8-scale-diagrams.md": "3166a26a8a9ace404a2fa17c63e850f993421f0ac67adf381a55611fe740c1e4",
+    "docs/validation/2026-10-30-gp8-input-preferences.md": "dae4529b0d38c4d20b2ad52b2ec94fb81bb3383900e794e33d20b11dd5d66c3e",
+    "docs/validation/2026-10-30-gp8-notation-entry.md": "c43085ab585357108054b27c8ccf3eaa57c8e22e3869a168ac34459c2aa2995b",
+    "docs/validation/2026-10-30-gp8-style-typography.md": "9d2ddf97b34f605f1aeccb526f9087f1615516ea2016f4c08b80257567a3abf3",
+    "docs/validation/2026-10-30-gp8-partial-capo.md": "2c14bf9fc2d144eaa6df4bcea0e868ab1f9c6d0a287d2aeef79eee0dc89891d0"
   },
   "next_open_families": [
     {
@@ -3247,12 +3323,16 @@
       "acceptance_required": "Combine capo and partial capo and compare affected strings independently.",
       "runtime_rechecked": false,
       "historical_status": "missing",
-      "current_status": "missing",
-      "assessment": "baseline_not_reaudited",
-      "current_proven_status": null,
-      "current_behavior": "No per-string capo model/control.",
-      "remaining_gap": "Not re-audited in this delivery-progress audit. The original baseline behavior, gap and acceptance remain authoritative historical context; this is not a new current proof.",
-      "current_evidence": [],
+      "current_status": "partial",
+      "assessment": "evidence_reviewed",
+      "current_proven_status": "partial",
+      "current_behavior": "A staff can hold one partial capo that combines with its capo per string in playback, notation, the instrument view and GP files. Older projects with history replay with a file's partial capo ignored.",
+      "remaining_gap": "GP flag order and GP8's tab numbering on covered strings are unconfirmed; one per staff; saved-chord context compares only the staff capo; whole-neck capo edits do not rebase trills.",
+      "current_evidence": [
+        "partial_capo_behavior",
+        "partial_capo_evidence",
+        "partial_capo_limits"
+      ],
       "runtime_rechecked_by_this_audit": false
     },
     {
@@ -3579,12 +3659,16 @@
       "acceptance_required": "Enter notes on staff lines/spaces with accidentals and octave keys.",
       "runtime_rechecked": false,
       "historical_status": "missing",
-      "current_status": "missing",
-      "assessment": "baseline_not_reaudited",
-      "current_proven_status": null,
-      "current_behavior": "Click selects existing notes; no staff-position pitch insertion.",
-      "remaining_gap": "Not re-audited in this delivery-progress audit. The original baseline behavior, gap and acceptance remain authoritative historical context; this is not a new current proof.",
-      "current_evidence": [],
+      "current_status": "partial",
+      "assessment": "evidence_reviewed",
+      "current_proven_status": "partial",
+      "current_behavior": "An inspector staff in the bar's clef enters notes by mouse and keyboard, with accidentals, octave keys and a cursor, at the pitch the staff displays, on pitched and fretted staves.",
+      "remaining_gap": "Entry is on an inspector staff, not the rendered score; no rhythm entry or automatic advance; no double accidentals; off-key spellings cost two undo steps.",
+      "current_evidence": [
+        "notation_entry_behavior",
+        "notation_entry_evidence",
+        "notation_entry_limits"
+      ],
       "runtime_rechecked_by_this_audit": false
     },
     {
@@ -8774,12 +8858,16 @@
       "acceptance_required": "Change supported style typography with no missing glyphs/overflow.",
       "runtime_rechecked": false,
       "historical_status": "missing",
-      "current_status": "missing",
-      "assessment": "baseline_not_reaudited",
-      "current_proven_status": null,
-      "current_behavior": "Bundled Bravura/Noto fixed; no classic/jazz/rock style/text controls.",
-      "remaining_gap": "Not re-audited in this delivery-progress audit. The original baseline behavior, gap and acceptance remain authoritative historical context; this is not a new current proof.",
-      "current_evidence": [],
+      "current_status": "partial",
+      "assessment": "evidence_reviewed",
+      "current_proven_status": "partial",
+      "current_behavior": "The Engraving panel sets one text family and text, title and tab number sizes, with Classic, Jazz and Rock presets, as one undoable setEngraving edit. Export uses the sizes and refuses text that would pass the paper edge.",
+      "remaining_gap": "Music font is fixed to Bravura; one family for all text; export keeps Noto; on screen, text at a system's end can run past the page.",
+      "current_evidence": [
+        "style_typography_behavior",
+        "style_typography_evidence",
+        "style_typography_limits"
+      ],
       "runtime_rechecked_by_this_audit": false
     },
     {
@@ -9870,12 +9958,16 @@
       "acceptance_required": "Verify input/preview/paste behavior under each documented choice.",
       "runtime_rechecked": false,
       "historical_status": "missing",
-      "current_status": "missing",
-      "assessment": "baseline_not_reaudited",
-      "current_proven_status": null,
-      "current_behavior": "No score-input preference controls.",
-      "remaining_gap": "Not re-audited in this delivery-progress audit. The original baseline behavior, gap and acceptance remain authoritative historical context; this is not a new current proof.",
-      "current_evidence": [],
+      "current_status": "partial",
+      "assessment": "evidence_reviewed",
+      "current_proven_status": "partial",
+      "current_behavior": "The View menu holds keypad durations, auto-duration, note preview and the diagram paste default. Keypad keys set duration as one undoable edit only when enabled, and choices survive a restart.",
+      "remaining_gap": "Plus/Minus Keys Behavior is not implemented; a paste carrying diagrams is not driven on the desktop; a webview reload strands the app on the recovery screen.",
+      "current_evidence": [
+        "input_preferences_behavior",
+        "input_preferences_evidence",
+        "input_preferences_limits"
+      ],
       "runtime_rechecked_by_this_audit": false
     },
     {

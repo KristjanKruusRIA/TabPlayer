@@ -3,9 +3,10 @@ import type { HarmonyChord,ScaleToolPanelProps } from '../editor/harmony-types';
 import { resolveSelectionNotes } from '../editor/range-selection';
 import { matchScales,scalePatterns,scalePitches } from './scales';
 import { harmonyPitchName,soundingChordPitches } from './ChordDiagramPreview';
+import { ScaleDiagramEditor } from './ScaleDiagramEditor';
 
 const roots=['C','C# / Db','D','D# / Eb','E','F','F# / Gb','G','G# / Ab','A','A# / Bb','B'];
-export function ScaleToolPanel({score,staff:currentStaff,selection,busy,onClose}:ScaleToolPanelProps) {
+export function ScaleToolPanel({score,staff:currentStaff,selection,busy,onClose,target,beat,onEdit}:ScaleToolPanelProps) {
   const [root,setRoot]=useState(0),[pattern,setPattern]=useState('major'),[search,setSearch]=useState(''),[tag,setTag]=useState(''),[custom,setCustom]=useState('0, 2, 4, 5, 7, 9, 11');
   const first=useRef<HTMLSelectElement>(null),close=useRef<HTMLButtonElement>(null);
   useEffect(()=>{const opener=document.activeElement;first.current?.focus();return()=>{if(opener instanceof HTMLElement&&opener.isConnected)opener.focus();};},[]);
@@ -44,5 +45,6 @@ export function ScaleToolPanel({score,staff:currentStaff,selection,busy,onClose}
       </svg>:<svg role="img" aria-label="Scale keyboard" viewBox="0 0 480 100" style={{width:'100%'}}><title>Scale tones from C4 through B5</title>{Array.from({length:24},(_,index)=>{const pitch=60+index,black=[1,3,6,8,10].includes(pitch%12),active=classes.has(pitch%12);return <g key={pitch}><rect x={index*20} y={0} width={19} height={black?65:95} fill={active?(pitch%12===root?'#b5df73':'#d0d4dc'):(black?'#161c24':'#fffdf8')} stroke="#465363"/>{active&&<text x={index*20+9} y={black?55:85} fill="#161c24" fontSize={7} textAnchor="middle">{harmonyPitchName(pitch).replace(/-?\d+$/,'')}</text>}</g>;})}</svg>}
     </>}
     <details><summary>Selected passage matches</summary>{matches.length===0?<p>Select melodic notes to match scales.</p>:<><p className="muted">Distinct selected classes; fewer extra scale tones rank first after matched classes.</p><ol>{matches.map(match=><li key={`${match.patternId}/${match.root}`}><button type="button" onClick={()=>{setRoot(match.root);setPattern(match.patternId);setSearch('');setTag('');}}>{roots[match.root].split(' / ')[0]} {scalePatterns.find(pattern=>pattern.id===match.patternId)!.name}: {match.matched} / {match.total} selected classes, {match.extra} extra tones</button></li>)}</ol></>}</details>
+    {onEdit&&<ScaleDiagramEditor score={score} staff={staff} beat={beat} target={target??null} selection={selection} busy={busy} scale={pitches.length&&!error?{root,classes,name:`${roots[root].split(' / ')[0]} ${active?.name??'custom scale'}`}:null} onEdit={onEdit}/>}
   </fieldset><button ref={close} type="button" onClick={onClose}>Close scales</button></section></div>;
 }

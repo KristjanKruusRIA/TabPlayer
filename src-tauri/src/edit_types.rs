@@ -1,5 +1,5 @@
 use crate::engraving::{EngravingOverrides, PageLayout};
-use crate::harmony::{HarmonyChord, HarmonyInterval};
+use crate::harmony::{HarmonyChord, HarmonyInterval, ScaleDiagram};
 use crate::project::BeatTarget;
 use crate::settings::{BackingSettings, ChannelMix, PrintLayout, TrackSound};
 use serde::{Deserialize, Serialize};
@@ -1203,6 +1203,11 @@ pub enum EditCommand {
         chord: Option<HarmonyChord>,
         fill_empty_beat: bool,
     },
+    SetScaleDiagram {
+        target: BeatTarget,
+        #[serde(deserialize_with = "required_nullable")]
+        diagram: Option<ScaleDiagram>,
+    },
     TransposeHarmony {
         selection: MusicSelection,
         interval: HarmonyInterval,
@@ -1350,6 +1355,10 @@ impl EditCommand {
             Self::SetHarmonyChord {
                 chord: Some(chord), ..
             } => chord.validate()?,
+            Self::SetScaleDiagram {
+                diagram: Some(diagram),
+                ..
+            } => diagram.validate()?,
             Self::TransposeHarmony {
                 selection,
                 interval,

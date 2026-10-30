@@ -2,6 +2,7 @@ import type { model } from '@coderline/alphatab';
 import type { BeatTarget } from '../project';
 import type { IndexedNoteTarget } from '../edit-types';
 import type { MusicSelection } from './range-types';
+import type { ScaleDiagramCommand } from '../harmony/scale-diagram';
 
 export interface SpelledPitchClass {step:number;alteration:number}
 export type ChordDegree=1|2|3|4|5|6|7|9|11|13;
@@ -37,7 +38,11 @@ export interface HarmonyChordDialogProps {
   onLibraryPut:(entry:HarmonyLibraryEntry)=>Promise<void>;
   onLibraryRemove:(id:string)=>Promise<void>;
 }
-export interface ScaleToolPanelProps {score:model.Score;staff?:model.Staff;selection:MusicSelection|null;busy:boolean;onClose:()=>void}
+export interface ScaleToolPanelProps {
+  score:model.Score;staff?:model.Staff;selection:MusicSelection|null;busy:boolean;onClose:()=>void;
+  /** With these, the browser also authors the scale diagram of the selected beat. */
+  target?:BeatTarget;beat?:model.Beat;onEdit?:(command:ScaleDiagramCommand)=>void;
+}
 export interface HarmonyTransposePanelProps {score:model.Score;selection:MusicSelection|null;busy:boolean;onEdit:(command:Extract<HarmonyCommand,{type:'transposeHarmony'}>)=>void}
 export interface ChordDiagramPreviewProps {
   chord:HarmonyChord;staff:model.Staff;highlightRoot:boolean;

@@ -1,5 +1,8 @@
 import { model } from '@coderline/alphatab';
 import { selectScore } from './selection';
+import { getPartialCapo } from '../editor/partial-capo';
+/** ", partial capo 5 on strings 1, 2" for a staff with one; string numbers count from the lowest string. */
+const partialLabel=(staff:model.Staff)=>{const partial=getPartialCapo(staff);return partial?`${staff.capo?',':''} partial capo ${partial.fret} on string${partial.strings.length>1?'s':''} ${partial.strings.join(', ')}`:'';};
 import type { ExportSelection } from './types';
 
 const NAMES=['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
@@ -129,7 +132,7 @@ export function exportAsciiTab(score:model.Score,selection:ExportSelection):Uint
       written++;
       const names=stringNames(staff.tuning),low=names.map(name=>name.trim()).reverse().join(' ');
       const name=flat(track.name)||`Track ${original+1}`,staffNumber=(selection.staves?.[original]?.[index]??index)+1;
-      lines.push('',`${name}${staffCount>1?` (staff ${staffNumber})`:''} [${low}]${staff.capo?` capo ${staff.capo}`:''}`);
+      lines.push('',`${name}${staffCount>1?` (staff ${staffNumber})`:''} [${low}]${staff.capo?` capo ${staff.capo}`:''}${partialLabel(staff)}`);
       const fresh=()=>({rows:names.map(label=>`${label}|`),labels:[] as {start:number;end:number;text:string;count:string}[]});
       let system=fresh();
       const flush=()=>{

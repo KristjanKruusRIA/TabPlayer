@@ -8,6 +8,7 @@ import type { EngravingCommand,EngravingOverrides,PageLayout } from './engraving
 import type { HarmonyCommand } from './editor/harmony-types';
 import type { ScaleDiagramCommand } from './harmony/scale-diagram';
 import type { ReplaceTempoAutomations } from './editor/tempo-types';
+import type { PartialCapo } from './editor/partial-capo';
 
 export interface NoteTarget { target: BeatTarget; string: number }
 export interface IndexedNoteTarget { target: BeatTarget; noteIndex: number }
@@ -34,6 +35,8 @@ export interface StaffSettings {
   showTab: boolean; showNotation: boolean;
   /** Optional document tuning name; omitted keeps the staff's name, '' clears it. */
   tuningName?: string;
+  /** Optional capo over some strings; omitted keeps the staff's, `{fret:0,strings:[]}` clears it. */
+  partialCapo?: PartialCapo;
 }
 export interface ChordDefinition { name: string; firstFret: number; frets: number[] }
 export interface ChannelMix { gain: number; pan: number; mute: boolean; solo: boolean }

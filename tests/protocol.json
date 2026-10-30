@@ -16,7 +16,7 @@
   {"type":"setBeatTechniques","target":{"track":0,"staff":0,"bar":0,"voice":0,"beat":0},"patch":{"pickStroke":2,"brushType":4,"brushDuration":120,"whammy":{"type":2,"style":1,"points":[{"offset":0,"value":0},{"offset":60,"value":-4}]},"tremolo":{"speed":32,"style":1}}},
   {"type":"setBeatRhythm","target":{"track":0,"staff":0,"bar":0,"voice":0,"beat":0},"duration":-4,"dots":3,"tupletNumerator":3,"tupletDenominator":2,"graceType":2},
   {"type":"setTrackInfo","track":0,"name":"Guitar","shortName":"Gtr","program":25},
-  {"type":"setStaffSettings","track":0,"staff":0,"settings":{"tuning":[64,59,55,50,45,40],"capo":2,"transposition":-12,"displayTransposition":12,"clef":4,"showTab":true,"showNotation":true}},
+  {"type":"setStaffSettings","track":0,"staff":0,"settings":{"tuning":[64,59,55,50,45,40],"capo":2,"transposition":-12,"displayTransposition":12,"clef":4,"showTab":true,"showNotation":true,"partialCapo":{"fret":5,"strings":[1,2,3]}}},
   {"type":"addStaff","track":0,"settings":{"tuning":[64,59,55,50,45,40],"capo":0,"transposition":0,"displayTransposition":0,"clef":4,"showTab":true,"showNotation":true}},
   {"type":"removeStaff","track":0,"staff":1},
   {"type":"addVoice","track":0,"staff":0},

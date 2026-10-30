@@ -5,6 +5,7 @@ import { integer,noteAt } from './common';
 import { allNotes,captureNoteLinks,detachNote } from './links';
 import { planFingering } from './fingering';
 import { nextLinkedNote } from './techniques';
+import { openStringKey } from './partial-capo';
 import { resolveSelectionBeats,resolveSelectionNotes } from './range-selection';
 
 function fields(value:object,keys:string[]) {
@@ -214,7 +215,7 @@ export function applyRangeEdit(score:model.Score,command:RangeCommand):boolean {
     }
   }else if(command.type==='moveSelectionStrings'){
     if(!['higher','lower'].includes(command.direction))throw new Error('Choose a string move direction.');
-    for(const note of notes){const staff=stringed(note),strings=staff.tuning.map((_,index)=>({string:index+1,open:model.Note.getStringTuning(staff,index+1)+staff.capo-staff.transpositionPitch})).sort((a,b)=>a.open-b.open||a.string-b.string);
+    for(const note of notes){const staff=stringed(note),strings=staff.tuning.map((_,index)=>({string:index+1,open:openStringKey(staff,index+1)})).sort((a,b)=>a.open-b.open||a.string-b.string);
       const current=strings.findIndex(value=>value.string===note.string),destination=strings[current+(command.direction==='higher'?1:-1)];
       if(!destination)throw new Error('There is no adjacent string in that direction.');
       if(strings.some(value=>value.string!==note.string&&value.open===strings[current].open)||strings.some(value=>value.string!==destination.string&&value.open===destination.open))throw new Error('Equal open pitches make the adjacent string ambiguous.');

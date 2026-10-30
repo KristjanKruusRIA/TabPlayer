@@ -5,6 +5,7 @@ import { enumValue, integer, staffAt, trackAt, validateCapacity } from './common
 import { allNotes, captureNoteLinks, detachNote, restoreNoteLinks } from './links';
 import { scoreFromJson } from '../model-clone';
 import { parseTrackColor } from '../track-color';
+import { getPartialCapo, setPartialCapo, validatePartialCapo } from './partial-capo';
 
 const xmlText=/^(?:[\t\n\r\u0020-\uD7FF\uE000-\uFFFD]|[\uD800-\uDBFF][\uDC00-\uDFFF])*$/;
 /** An omitted name is valid; a present one must be a string of XML 1.0 characters (empty allowed). */
@@ -17,9 +18,13 @@ function validateStaff(staff:model.Staff|null,settings:StaffSettings) {
   if(staff&&staff.tuning.length!==settings.tuning.length)throw new Error('Retuning must keep the current string count.');
   if(!integer(settings.capo,0,127)||!integer(settings.transposition,-127,127)||!integer(settings.displayTransposition,-127,127))throw new Error('Invalid capo or transposition.');
   enumValue(settings.clef,model.Clef,'clef');if(typeof settings.showTab!=='boolean'||typeof settings.showNotation!=='boolean'||(!settings.showTab&&!settings.showNotation))throw new Error('Show tablature or standard notation.');
+  // An omitted partial capo keeps the staff's own.
+  if(settings.partialCapo!==undefined)validatePartialCapo(settings.partialCapo,settings.tuning.length);
+  const partial=settings.partialCapo===undefined?staff?getPartialCapo(staff):null:settings.partialCapo;
   for(const bar of staff?.bars??[])for(const voice of bar.voices)for(const beat of voice.beats)for(const note of beat.notes) {
     if(staff?.isPercussion)continue;
-    const pitch=note.string>0?settings.tuning[settings.tuning.length-note.string]+note.fret+settings.capo-settings.transposition+note.harmonicPitch:note.octave*12+note.tone-settings.transposition;
+    const capo=partial?.strings.includes(note.string)?Math.max(settings.capo,partial.fret):settings.capo;
+    const pitch=note.string>0?settings.tuning[settings.tuning.length-note.string]+note.fret+capo-settings.transposition+note.harmonicPitch:note.octave*12+note.tone-settings.transposition;
     if(!Number.isFinite(pitch)||pitch<0||pitch>127)throw new Error('Staff settings put a note outside the playable MIDI pitch range.');
   }
 }
@@ -27,6 +32,7 @@ function validateStaff(staff:model.Staff|null,settings:StaffSettings) {
 export function defaultTuningName(tuning:readonly number[]):string {return model.Tuning.findTuning([...tuning])?.name??'';}
 function configure(staff:model.Staff,settings:StaffSettings) {
   staff.stringTuning.tunings=[...settings.tuning];staff.capo=settings.capo;staff.transpositionPitch=settings.transposition;staff.displayTranspositionPitch=settings.displayTransposition;staff.showTablature=settings.showTab;staff.showStandardNotation=settings.showNotation;
+  if(settings.partialCapo!==undefined)setPartialCapo(staff,settings.partialCapo);
   for(const bar of staff.bars)bar.clef=settings.clef;
   // An omitted name keeps the current one, and an empty one gets alphaTab's label as it did before S15.
   if(settings.tuningName!==undefined)staff.stringTuning.name=settings.tuningName;else if(!staff.stringTuning.name)staff.stringTuning.name=defaultTuningName(settings.tuning);
@@ -76,6 +82,7 @@ function setStringCount(track:model.Track,tuning:number[],keep:StringCountKeep,t
   validateStringCount(tuning,keep);validateTuningName(tuningName);
   const staves=track.staves;
   if(track.isPercussion||staves.some(staff=>staff.isPercussion||!staff.tuning.length))throw new Error('Only stringed guitar or bass tracks have strings to add or remove.');
+  if(staves.some(staff=>getPartialCapo(staff)))throw new Error('Remove the partial capo before changing the string count.');
   if(staves.some(staff=>staff.tuning.length===tuning.length))throw new Error('The string count is unchanged; use Apply tuning to retune.');
   const moves:({note:model.Note}&Place)[]=[],to=tuning.length,open=(string:number)=>tuning[to-string];
   for(const staff of staves){

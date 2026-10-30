@@ -7,6 +7,7 @@ import {validateScaleDiagram} from './harmony/scale-diagram';
 import {validateBackingSettings} from './document-settings';
 import {validateRatioTempoPoints} from './editor/tempo-types';
 import {parseTrackColor} from './track-color';
+import {validatePartialCapo} from './editor/partial-capo';
 
 const tuningNamed=new Set(['addTrack','setTuning','setStringCount']);
 const staffSettingKeys=['tuning','capo','transposition','displayTransposition','clef','showTab','showNotation'];
@@ -170,9 +171,10 @@ export function validateParityCommand(value:unknown):void {
   const edit=exact(value,['type',...shapes[type],...(named?['tuningName']:[])]);
   if(named)validateTuningName(edit.tuningName===undefined?null:edit.tuningName);
   if(type==='setStaffSettings'||type==='addStaff'){
-    const settings=object(edit.settings),hasName=Object.hasOwn(settings,'tuningName');
-    exact(settings,[...staffSettingKeys,...(hasName?['tuningName']:[])]);
+    const settings=object(edit.settings),hasName=Object.hasOwn(settings,'tuningName'),hasPartial=Object.hasOwn(settings,'partialCapo');
+    exact(settings,[...staffSettingKeys,...(hasName?['tuningName']:[]),...(hasPartial?['partialCapo']:[])]);
     if(hasName)validateTuningName(settings.tuningName===undefined?null:settings.tuningName);
+    if(hasPartial)validatePartialCapo(settings.partialCapo,Array.isArray(settings.tuning)?settings.tuning.length:0);
   }
   if(type==='setBacking'&&edit.backing!==null)validateBackingSettings(edit.backing);
   if(type==='replaceTempoAutomations')validateRatioTempoPoints(edit.points);

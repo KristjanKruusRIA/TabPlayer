@@ -14,6 +14,7 @@ import { adjustReferenceSyncBounds,referenceSyncTiming } from './audio/reference
 import { scoreFromJson } from './model-clone';
 import { validateParityCommand } from './parity-commands';
 import { defaultTuningName, validateTuningName } from './editor/structure';
+import { openStringKey, stringCapo } from './editor/partial-capo';
 import { copyGpInterchangeSource, exportGpInterchange, forgetTrackOrderedEntries, loadInterchangeScore } from './interchange/gp';
 import { reflowLyrics,removeLyricsMeasure } from './editor/lyrics';
 import { prepareScoreTimers } from './editor/timers';
@@ -199,7 +200,7 @@ function apply(score: model.Score, edit: EditCommand, editIndex=0) {
       if (staff.isPercussion || !integer(edit.string,1) || edit.string > staff.tuning.length) throw new Error('Select a string on a guitar or bass track.');
       const existing = beat.notes.find(n => n.string === edit.string);
       if (edit.type === 'removeNote') { if (existing) removeNote(existing); break; }
-      const pitch = staff.tuning[staff.tuning.length-edit.string] + edit.fret + staff.capo - staff.transpositionPitch;
+      const pitch = openStringKey(staff, edit.string) + edit.fret;
       if (!integer(edit.fret) || pitch < 0 || pitch > 127) throw new Error('That fret is outside the playable MIDI pitch range.');
       if (existing) {
         let first=existing;while(first.tieOrigin)first=first.tieOrigin;
@@ -251,7 +252,7 @@ function apply(score: model.Score, edit: EditCommand, editIndex=0) {
       if (track.isPercussion || track.staves.some(s => s.tuning.length !== edit.tuning.length)) throw new Error('Retuning must keep the current string count.');
       for (const staff of track.staves) for (const bar of staff.bars) for (const voice of bar.voices) for (const beat of voice.beats) for (const note of beat.notes) {
         if (!note.string) continue;
-        const pitch=edit.tuning[edit.tuning.length-note.string]+note.fret+staff.capo-staff.transpositionPitch;
+        const pitch=edit.tuning[edit.tuning.length-note.string]+note.fret+stringCapo(staff,note.string)-staff.transpositionPitch;
         if (pitch<0 || pitch>127) throw new Error('That tuning puts an existing note outside the MIDI pitch range.');
       }
       for (const staff of track.staves) { staff.stringTuning.tunings = [...edit.tuning]; if (edit.tuningName !== undefined) staff.stringTuning.name = edit.tuningName; else if (!staff.stringTuning.name) staff.stringTuning.name = defaultTuningName(edit.tuning); } break;

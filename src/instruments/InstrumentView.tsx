@@ -4,6 +4,7 @@ import type { PlanNote } from '../audio/types';
 import type { EditCommand } from '../edit-types';
 import type { BeatTarget } from '../project';
 import { formatPitch } from '../tuning';
+import { describePartialCapo, getPartialCapo, openStringKey } from '../editor/partial-capo';
 import { busyHint, drumTarget, entryBeat, entryNotes, fretTarget, keyTarget, noBeatHint, padTarget, type EntryAction, type EntryContext, type EntryFollow, type EntryTarget } from './entry';
 import './instruments.css';
 
@@ -103,7 +104,7 @@ function Fretboard({staff, notes, mode, leftHanded, entry}: {staff: model.Staff;
   const name=`${mode === 'bass' ? 'Bass' : 'Guitar'} fretboard${leftHanded ? ', left-handed' : ''}`;
   const wood=`url(#${id}-wood)`,metal=`url(#${id}-metal)`,cream=`url(#${id}-cream)`;
   return <>
-    <p className="instrument-detail">Staff {staff.index+1} · {staff.tuning.length} strings · Capo {staff.capo}{staff.capo ? ' · fret numbers relative to capo' : ''} · Open {staff.tuning.map(pitch=>formatPitch(pitch+staff.capo-staff.transpositionPitch)).join(' ')}</p>
+    <p className="instrument-detail">Staff {staff.index+1} · {staff.tuning.length} strings · Capo {staff.capo}{staff.capo ? ' · fret numbers relative to capo' : ''}{describePartialCapo(getPartialCapo(staff)) ? ` · ${describePartialCapo(getPartialCapo(staff))} · fret numbers on those strings relative to it` : ''} · Open {staff.tuning.map((_,index)=>formatPitch(openStringKey(staff,staff.tuning.length-index))).join(' ')}</p>
     <div className="instrument-canvas instrument-fretboard"><svg role={entry?'group':'img'} aria-label={name} viewBox={`0 0 ${width} ${height}`}>
       <title>{name}</title>
       <defs>
@@ -130,9 +131,9 @@ function Fretboard({staff, notes, mode, leftHanded, entry}: {staff: model.Staff;
       {[3,5,7,9,12,15,17,19,21,24].filter(fret=>fret<=maxFret).flatMap(fret=>(fret%12===0?[-neckHeight*.2,neckHeight*.2]:[0]).map((offset,index)=><circle key={`${fret}/${index}`} cx={position(fret)} cy={height/2+offset} r="3.5" fill="#e8e0c6" stroke="#b7ae95" strokeWidth=".7"/>))}
       <g data-instrument-part="bridge"><rect x={body+144} y={top-11} width="36" height={neckHeight-4} rx="3" fill={metal} stroke="#4a4a43"/>{staff.tuning.map((_,index)=><g key={index}><rect x={body+147} y={top+index*row-5} width="25" height="10" rx="2" fill={metal} stroke="#6a6c66"/><circle cx={body+176} cy={top+index*row} r="2" fill="#343933"/></g>)}</g>
       {[40,91].map((offset,pickup)=><g key={offset} data-instrument-part={pickup===0?'neck-pickup':'bridge-pickup'}><rect x={body+offset-9} y={top-11} width="19" height={neckHeight-4} rx="8" fill="#eee7d2" stroke="#7e7a6e"/>{staff.tuning.map((_,index)=><circle data-pickup-string={staff.tuning.length-index} key={index} cx={body+offset} cy={top+index*row} r="2.5" fill={metal} stroke="#5c5b56" strokeWidth=".7"/>)}</g>)}
-      {staff.tuning.map((pitch,index)=>{
+      {staff.tuning.map((_,index)=>{
         const string = staff.tuning.length-index, y = top+index*row;
-        return <g key={string} data-string-row={string}><title>{`String ${string} · ${formatPitch(pitch+staff.capo-staff.transpositionPitch)}`}</title><line x1={left-31} x2={body+176} y1={y+1.2} y2={y+1.2} stroke="#160e08" opacity=".65" strokeWidth={1+index*.17}/><rect x={left-31} y={y-(.7+index*.16)/2} width={body+207-left} height={.7+index*.16} fill={`url(#${id}-string)`}/></g>;
+        return <g key={string} data-string-row={string}><title>{`String ${string} · ${formatPitch(openStringKey(staff,string))}`}</title><line x1={left-31} x2={body+176} y1={y+1.2} y2={y+1.2} stroke="#160e08" opacity=".65" strokeWidth={1+index*.17}/><rect x={left-31} y={y-(.7+index*.16)/2} width={body+207-left} height={.7+index*.16} fill={`url(#${id}-string)`}/></g>;
       })}
       {positions.map(({id: noteId,key,string,fret})=><g key={noteId} className="fret-note" data-note-id={noteId} data-string={string} data-fret={fret} data-key={key}>
         <circle className="fret-note-halo" cx={position(fret)} cy={top+(staff.tuning.length-string)*row} r="4.6"/><circle cx={position(fret)} cy={top+(staff.tuning.length-string)*row} r="3.2"/><title>{`${formatPitch(key)} · string ${string} · fret ${fret}`}</title>

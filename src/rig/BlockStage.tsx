@@ -1,3 +1,4 @@
+import { useLayoutEffect, useRef } from 'react';
 import type { ReactNode } from 'react';
 import { defaultEffects, delayDivisions, modulationDivisions, syncedBlocks } from '../document-settings';
 import type { EffectBlock } from '../edit-types';
@@ -45,7 +46,7 @@ function Dropdown({label,visible,value,options,onChange,disabled}:{label:string;
 /** The footswitch: switches a block on or off. */
 function Footswitch({editing,board,block}:{editing:SoundEditing;board:Board;block:EffectBlock}) {
   const on=board.effects[block].enabled;
-  return <button type="button" role="switch" aria-checked={on} aria-label={board.name(`Enable ${block}`)} className="rig-switch" disabled={editing.busy} onClick={()=>editing.fx(board,block,'enabled',!on)}>
+  return <button type="button" role="switch" aria-checked={on} aria-label={board.name(`Enable ${block}`)} className="rig-switch" aria-disabled={editing.busy||undefined} onClick={()=>{if(!editing.busy)editing.fx(board,block,'enabled',!on);}}>
     <span className="rig-switch-lamp" aria-hidden="true"/><span className="rig-switch-text" aria-hidden="true">{on?'On':'Bypassed'}</span>
   </button>;
 }
@@ -129,18 +130,41 @@ function PedalStage({editing,board,block}:{editing:SoundEditing;board:Board;bloc
   </div>;
 }
 
+let stageFocusHandoff:{trackId:string;block:EffectBlock;role:string|null;className:string;label:string|null}|null=null;
+
 /** The selected block's controls: drawn as the gear it is, with its knobs, models and the actions every block shares. */
 export function BlockStage({editing,selected,cabinetResponse}:{editing:SoundEditing;selected:BlockRef;cabinetResponse?:ReactNode}) {
   const {block}=selected,board=selected.second&&editing.second?editing.second:editing.first;
   const {order,busy,clipboard,second}=editing,index=order.indexOf(block);
   const name=blockNames[block];
+  const stageRef=useRef<HTMLElement>(null);
+  const lastFocused=useRef<HTMLElement|null>(null);
+  useLayoutEffect(()=>{
+    if(stageFocusHandoff&&stageFocusHandoff.trackId===editing.trackId&&stageFocusHandoff.block===block){
+      const target=stageFocusHandoff;stageFocusHandoff=null;
+      if(target.label?.startsWith('Remove duplicate:')){
+        const btn=stageRef.current?.querySelector<HTMLElement>(`button[aria-label="Duplicate pedal: ${name}"]`);
+        btn?.focus();
+      }else if(target.role==='switch'||target.className.includes('rig-switch')){
+        stageRef.current?.querySelector<HTMLElement>('.rig-switch')?.focus();
+      }
+    }
+    return ()=>{
+      const active=lastFocused.current;
+      if(active){
+        stageFocusHandoff={trackId:editing.trackId,block,role:active.getAttribute('role'),className:active.className,label:active.getAttribute('aria-label')};
+      }
+    };
+  });
   let body:ReactNode;
   if(block==='amp')body=<AmpStage editing={editing} board={board}/>;
   else if(block==='cabinet'||block==='microphone')body=<CabinetStage editing={editing} board={board} block={block} cabinetResponse={cabinetResponse}/>;
   else if(block==='graphicEq')body=<GraphicEqStage editing={editing} board={board}/>;
   else body=<PedalStage editing={editing} board={board} block={block}/>;
   // A stage belongs to one track, board and block: another one is a new stage, so a drag begun on this one ends with it.
-  return <section key={`${editing.trackId}/${board.second?'second':'first'}/${block}`} className="rig-stage" role="tabpanel" aria-label={board.second?`Second pedalboard: ${name}`:name} data-block={block}>
+  return <section ref={stageRef} key={`${editing.trackId}/${board.second?'second':'first'}/${block}`} className="rig-stage" role="tabpanel" aria-label={board.second?`Second pedalboard: ${name}`:name} data-block={block}
+    onFocusCapture={e=>{lastFocused.current=e.target as HTMLElement;}}
+    onBlurCapture={e=>{if(!stageRef.current?.contains(e.relatedTarget as Node))lastFocused.current=null;}}>
     <header className="rig-stage-head">
       <h2>{board.second?'Second pedalboard · ':''}{name}</h2>
       {!board.second&&<span className="rig-stage-place">{index+1} of {order.length}</span>}

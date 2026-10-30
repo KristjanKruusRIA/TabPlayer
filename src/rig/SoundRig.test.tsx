@@ -348,13 +348,46 @@ it('disables every edit while busy but still lets the player look at any block',
   const {edits}=mount(soundPreset('lead'),{busy:true});
   await choose('gate');
   expect(screen.getByRole('tabpanel',{name:'Gate'})).toBeVisible();
-  expect(screen.getByRole('switch',{name:'Enable gate'})).toBeDisabled();
+  expect(screen.getByRole('switch',{name:'Enable gate'})).toHaveAttribute('aria-disabled','true');
+  expect(screen.getByRole('switch',{name:'Enable gate'})).not.toBeDisabled();
   expect(screen.getByRole('slider',{name:'gate Threshold (dB)'})).toHaveAttribute('aria-disabled','true');
   fireEvent.keyDown(screen.getByRole('slider',{name:'gate Threshold (dB)'}),{key:'ArrowUp'});
   for(const name of ['Restore preset','Copy pedal: Gate','Duplicate pedal: Gate'])expect(screen.getByRole('button',{name})).toBeDisabled();
-  for(const radio of within(screen.getByRole('radiogroup',{name:'Sound source'})).getAllByRole('radio'))expect(radio).toBeDisabled();expect(screen.getByRole('combobox',{name:'Audio output'})).toBeDisabled();
+  for(const radio of within(screen.getByRole('radiogroup',{name:'Sound source'})).getAllByRole('radio')){expect(radio).toHaveAttribute('aria-disabled','true');expect(radio).not.toBeDisabled();}expect(screen.getByRole('combobox',{name:'Audio output'})).toBeDisabled();
   tab('gate').focus();await userEvent.keyboard(' ');
   expect(edits).toHaveLength(0);
+});
+
+it('keeps focus on source options across consecutive arrow edits while busy, and on footswitch across Space', async()=>{
+  const user=userEvent.setup();
+  const edits:Extract<EditCommand,{type:'setTrackSound'}>[]=[];
+  function Host() {
+    const [sound,setSound]=useState(soundPreset('lead')),[busy,setBusy]=useState(false);
+    return <SoundRig trackId="guitar" sound={sound} tracks={[{id:'guitar',name:'Lead Guitar',program:29}]} onTrack={()=>{}} busy={busy}
+      onEdit={async command=>{
+        if(command.type==='setTrackSound'){
+          edits.push(command);
+          setBusy(true);
+          setSound(command.sound);
+          await Promise.resolve();
+          setBusy(false);
+        }
+      }}/>;
+  }
+  render(<Host/>);
+  const sources=within(screen.getByRole('radiogroup',{name:'Sound source'})).getAllByRole('radio');
+  sources[0].focus();expect(sources[0]).toHaveFocus();
+  await user.keyboard('{ArrowRight}');
+  expect(sources[1]).toHaveFocus();
+  await user.keyboard('{ArrowRight}');
+  expect(sources[2]).toHaveFocus();
+  await user.keyboard('{ArrowRight}');
+  expect(sources[3]).toHaveFocus();
+  expect(edits.map(e=>e.sound.voiceId)).toEqual(['green-guitar','black-guitar','darkblack-bass']);
+  const footswitch=screen.getByRole('switch',{name:/Enable amp/});
+  footswitch.focus();expect(footswitch).toHaveFocus();
+  await user.keyboard(' ');
+  expect(footswitch).toHaveFocus();
 });
 
 it('keeps a clear place for the cabinet response and the master panel, and nothing there until they exist', async()=>{
@@ -631,6 +664,27 @@ it('ends a drag without an edit when an undo removes the second pedalboard it wa
   expect(edits).toEqual([]);
 });
 
+it('keeps focus on surviving controls when removing a duplicate or turning off a second-board pedal', async()=>{
+  const user=userEvent.setup();
+  const first=soundPreset('lead','green-guitar'),withSecond=structuredClone(first);
+  withSecond.effects.second=structuredClone(first.effects);
+  withSecond.effects.second.drive.enabled=true;
+  mountHeld({guitar:withSecond,bass:soundPreset('bass')});
+  await user.click(screen.getByRole('tab',{name:'Second pedalboard: Drive, enabled'}));
+  const removeButton=screen.getByRole('button',{name:'Remove duplicate: Drive'});
+  removeButton.focus();expect(removeButton).toHaveFocus();
+  await user.click(removeButton);
+  const dupButton=screen.getByRole('button',{name:'Duplicate pedal: Drive'});
+  expect(dupButton).toHaveFocus();
+  await user.click(dupButton);
+  await user.click(screen.getByRole('tab',{name:'Second pedalboard: Drive, enabled'}));
+  const switchBtn=screen.getByRole('switch',{name:'Second pedalboard: Enable drive'});
+  switchBtn.focus();expect(switchBtn).toHaveFocus();
+  await user.keyboard(' ');
+  const firstSwitch=screen.getByRole('switch',{name:'Enable drive'});
+  expect(firstSwitch).toHaveFocus();
+});
+
 it('ends a drag without an edit when a block change replaces the knob it was on', async()=>{
   const user=userEvent.setup(),{edits,player}=mountHeld({guitar:soundPreset('lead','green-guitar'),bass:soundPreset('bass')});
   const gain=screen.getByRole('slider',{name:'amp Gain (dB)'});
@@ -701,6 +755,34 @@ it('previews a source with Hear without recording an edit, and keeps it or cance
   expect(screen.getByRole('button',{name:'Hear Babyblue Bass'})).toHaveAttribute('aria-pressed','true');
   await userEvent.click(screen.getByRole('button',{name:'Keep previewed sound'}));
   expect(edits).toHaveLength(1);expect(last().voiceId).toBe('babyblue-bass');
+});
+
+it('resets hovered source on track change and names the auditioned source in the visible label', async()=>{
+  const user=userEvent.setup();
+  const {player}=mountHeld({guitar:soundPreset('lead','green-guitar'),bass:soundPreset('bass','babyblue-bass')});
+  const group=screen.getByRole('radiogroup',{name:'Sound source'});
+  const hearButton=screen.getByRole('button',{name:'Hear Green Guitar'});
+  expect(hearButton).toHaveTextContent('Hear Green Guitar');
+  fireEvent.pointerEnter(within(group).getByRole('radio',{name:'Black Guitar'}).querySelector('.rig-source')!);
+  expect(screen.getByRole('button',{name:'Hear Black Guitar'})).toHaveTextContent('Hear Black Guitar');
+  const strip=screen.getByRole('radiogroup',{name:'Track'});
+  await user.click(within(strip).getByRole('radio',{name:'Bass'}));
+  const bassHear=screen.getByRole('button',{name:'Hear Babyblue Bass'});
+  expect(bassHear).toHaveTextContent('Hear Babyblue Bass');
+  await user.click(bassHear);
+  expect(player.previewSound).toHaveBeenLastCalledWith('bass',expect.objectContaining({voiceId:'babyblue-bass'}));
+});
+
+it('auditions the chosen source when moving across the row to the Hear button', async()=>{
+  const user=userEvent.setup();
+  const {player}=mount(soundPreset('lead','green-guitar'));
+  const group=screen.getByRole('radiogroup',{name:'Sound source'});
+  fireEvent.pointerEnter(within(group).getByRole('radio',{name:'General MIDI'}).querySelector('.rig-source')!);
+  fireEvent.pointerLeave(group);
+  const hearButton=screen.getByRole('button',{name:'Hear Green Guitar'});
+  expect(hearButton).toHaveTextContent('Hear Green Guitar');
+  await user.click(hearButton);
+  expect(player!.previewSound).toHaveBeenLastCalledWith('guitar',expect.objectContaining({voiceId:'green-guitar'}));
 });
 
 it('has no Hear for sources where the host cannot preview', ()=>{

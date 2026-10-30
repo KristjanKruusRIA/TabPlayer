@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { automaticVoice, voiceIds, voiceNames } from '../audio/sound-model';
 import type { VoiceId } from '../audio/sound-model';
 import type { SoundEditing } from '../audio/useSoundEditing';
@@ -11,12 +11,13 @@ type Choice='auto'|VoiceId;
 
 /** Where the sound comes from, as the instruments themselves: one drawing for each source the engine has, and Automatic, which
  * plays as whichever the track's own instrument calls for. It is a radio group, so the arrow keys move and choose; choosing
- * is the same one edit as before. Hear plays the track's sound through the source the pointer last rested on, or the chosen one. */
+ * is the same one edit as before. Hear auditions the source the label names. */
 export function SourcePicker({editing,track}:{editing:SoundEditing;track:RigTrack|undefined}) {
   const {current,busy,previewer,showingPreview,previewChoice}=editing;
   const resolved=automaticVoice(track?.program??0,track?.percussion??false);
   const chosen:Choice=current.voiceId===null?'auto':(current.voiceId as VoiceId);
   const [look,setLook]=useState<Choice|null>(null);
+  useEffect(()=>{setLook(null);},[track?.id]);
   const aimed:Choice=look??chosen,hearing=showingPreview&&previewChoice===`voice:${aimed}`;
   const nameOf=(choice:Choice)=>choice==='auto'?`Automatic instrument, plays as ${voiceNames[resolved]}`:voiceNames[choice];
   const options=(['auto',...voiceIds] as Choice[]).map(choice=>({
@@ -27,12 +28,12 @@ export function SourcePicker({editing,track}:{editing:SoundEditing;track:RigTrac
     </span>,
   }));
   return <div className="rig-source-picker">
-    <Segmented className="rig-sources" label="Sound source" value={chosen} disabled={busy} options={options} onChange={choice=>void editing.setVoice(choice==='auto'?null:choice)}/>
-    {previewer&&<button type="button" className="rig-hear rig-hear-source" aria-pressed={hearing} aria-label={`Hear ${nameOf(aimed)}`} disabled={busy} onClick={()=>editing.choosePreview(hearing?'':`voice:${aimed}`)}>Hear</button>}
+    <div onPointerLeave={()=>setLook(null)}><Segmented className="rig-sources" label="Sound source" value={chosen} disabled={busy} options={options} onChange={choice=>void editing.setVoice(choice==='auto'?null:choice)}/></div>
+    {previewer&&<button type="button" className="rig-hear rig-hear-source" aria-pressed={hearing} aria-label={`Hear ${nameOf(aimed)}`} disabled={busy} onClick={()=>editing.choosePreview(hearing?'':`voice:${aimed}`)}>Hear {nameOf(aimed)}</button>}
   </div>;
 }
 
-/** The score's tracks, each as a small drawing of its instrument and its name. A radio group, so the arrow keys move and choose. */
+/** The score's tracks, each as a small drawing of its instrument and its name. A radio group where arrow keys move to and select a track. */
 export function TrackStrip({tracks,trackId,onTrack}:{tracks:readonly RigTrack[];trackId:string;onTrack:(id:string)=>void}) {
   return <Segmented className="rig-tracks" label="Track" value={trackId} onChange={onTrack} options={tracks.map(track=>({
     value:track.id,ariaLabel:track.name,

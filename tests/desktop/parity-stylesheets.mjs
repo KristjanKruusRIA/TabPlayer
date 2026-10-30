@@ -73,7 +73,7 @@ export async function runStylesheetsAcceptance({buildPath}={}){
     baseline??=music;assert.equal(music,baseline,`${label}: the exported score, apart from its style, is unchanged`);assert.deepEqual(await record(),beforeRecord,'Export must not change project/history/revision');
     const saved=resolve(exportDirectory,`${String(result.exports.length+1).padStart(2,'0')}-${label}.gp`);renameSync(path,saved);result.exports.push({label,path:saved,sha256:sha256(bytes),musicSha256:sha256(Buffer.from(music))});await native();
   };
-  const rendered=async()=>sha256(Buffer.from(await page.locator('[aria-label="Music notation"] svg').first().evaluate(node=>node.outerHTML)));
+  const rendered=async()=>sha256(Buffer.from((await page.locator('[aria-label="Music notation"] svg').evaluateAll(nodes=>nodes.map(node=>node.outerHTML))).join('')));
   const profileEdit=profile=>choose('Guitar notation profile',profile);
   try{
     ui=await import('./workstation-commands.mjs');const {importer,exporter,model,Settings}=await import('@coderline/alphatab');load=bytes=>importer.ScoreLoader.loadScoreFromBytes(bytes,new Settings());jsonModel=model.JsonConverter;

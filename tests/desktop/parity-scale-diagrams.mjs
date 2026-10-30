@@ -43,7 +43,8 @@ export async function runScaleDiagramAcceptance({buildPath}={}){
   try{
     ui=await import('./workstation-commands.mjs');const {importer,Settings}=await import('@coderline/alphatab');load=bytes=>importer.ScoreLoader.loadScoreFromBytes(bytes,new Settings());
     await buildInstrumentFixture();writeFileSync(inputPath,readFileSync(fixturePath),{flag:'wx'});result.input={inputPath,sha256:hashFile(inputPath)};
-    const environmentFor=openPath=>({...stringCountEnvironment(process.env),TABPLAYER_DESKTOP_TEST:'1',TABPLAYER_TEST_SESSION_DIR:paths.session,TABPLAYER_TEST_APP_DATA_DIR:paths['app-data'],TABPLAYER_TEST_OPEN:openPath,TABPLAYER_TEST_EXPORT:exportBase,WEBVIEW2_USER_DATA_FOLDER:paths.profile,WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS:'--remote-debugging-port=9223',STRING_COUNT_EXE:packet.executable,STRING_COUNT_IDENTITY:identityPath});
+    let session=paths.session;
+    const environmentFor=openPath=>({...stringCountEnvironment(process.env),TABPLAYER_DESKTOP_TEST:'1',TABPLAYER_TEST_SESSION_DIR:session,TABPLAYER_TEST_APP_DATA_DIR:paths['app-data'],TABPLAYER_TEST_OPEN:openPath,TABPLAYER_TEST_EXPORT:exportBase,WEBVIEW2_USER_DATA_FOLDER:paths.profile,WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS:'--remote-debugging-port=9223',STRING_COUNT_EXE:packet.executable,STRING_COUNT_IDENTITY:identityPath});
     const script='$ErrorActionPreference="Stop";$p=Start-Process -FilePath $env:STRING_COUNT_EXE -WindowStyle Hidden -PassThru;$text=@{pid=$p.Id;path=$p.Path;startTicks=$p.StartTime.ToUniversalTime().Ticks.ToString()}|ConvertTo-Json -Compress;[IO.File]::WriteAllText($env:STRING_COUNT_IDENTITY,$text);$text';
     // Starts the owned build with a file to open, as TabPlayer itself opens it, and attaches to its diagnostic port.
     const launch=async openPath=>{
@@ -150,7 +151,7 @@ export async function runScaleDiagramAcceptance({buildPath}={}){
     assert.deepEqual(await record(),shifted,'Export never edits');step('Exported GP carries the diagram and every mark',{exportPath,sha256:hashFile(exportPath)});
 
     // Restart: TabPlayer opens the exported file through its own path, so the diagram is read back and drawn.
-    await shutdown();await launch(exportPath);
+    await shutdown();session=resolve(runDirectory,'reopen-session');mkdirSync(session);await launch(exportPath);
     assert.deepEqual((await record()).snapshot.project.edits,[],'The exported file opens as a fresh document');
     await assertDrawn('after reopening the exported file');
     await select(2,1);await browse();

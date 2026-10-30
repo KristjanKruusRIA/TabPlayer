@@ -10,6 +10,7 @@ import { selectStaves } from './selection';
 import { exportMidi } from './midi';
 import { exportMusicXml } from './musicxml';
 import { exportAsciiTab } from './ascii-tab';
+import { exportGp5,gp5Warning } from './gp5';
 import { clearBacking } from '../interchange/backing-projection';
 import { DEFAULT_FILE_NAME,expandFileName,fileKey,fileNameContext,savedFileNames,withSuffix } from './file-name';
 import { assertPngSize,loadExportFonts,renderPdfPages,svgPageWithBackground } from './pdf';
@@ -57,6 +58,12 @@ export function useExportCoordinator({score,settings,currentSpeed,bridge,native,
         const bytes=include&&backing?(backing.assetId==='embedded'?embedded:await bridge.readBackingAsset(backing.assetId,revision)):null;
         if(cancelled.current||!alive.current)return false;
         return await bridge.exportGp(exportGp(projectGpDocument({score:copy,settings:frozenSettings,bytes,selection,backing:include})),revision,name);
+      }
+      // What Guitar Pro 5 cannot hold is worked out first (a refusal throws before anything opens), then confirmed, then saved.
+      if(frozenOptions.format==='gp5'){
+        const result=exportGp5(copy,selection,{backing:!!frozenSettings.backing});
+        if(!await bridge.confirmExport(gp5Warning(result.losses))||cancelled.current||!alive.current)return false;
+        return await native.exportGp5(result.bytes,revision,name);
       }
       if(frozenOptions.format==='midi'){if(cancelled.current)return false;return await native.exportMidi(exportMidi(copy,selection),revision,name);}
       // Backing audio is left out; refusals throw here, before the native save dialog opens.

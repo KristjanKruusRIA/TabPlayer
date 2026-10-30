@@ -13,6 +13,7 @@ export interface AudioExportOptions { sampleRate:44100|48000;bitDepth:16|24;cont
 /** `fileName` is a GP8 token template, present only when it differs from the default. */
 export type ExportOptions = (
   | {format:'gp';selection:ExportSelection;backing?:boolean}
+  | {format:'gp5';selection:ExportSelection}
   | {format:'midi';selection:ExportSelection}
   | {format:'musicxml';selection:ExportSelection}
   | {format:'ascii';selection:ExportSelection}

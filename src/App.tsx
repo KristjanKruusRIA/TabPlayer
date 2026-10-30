@@ -490,7 +490,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
         </div>
       </section>
     </div>
-    {exportOpen&&<ExportDialog layoutLocked={editLocked} score={state.score} layout={state.settings.print} page={page} currentSpeedAvailable={practiceRatio!==null} busy={exports.busy||state.busy||exportLaunching} progress={exports.progress} failure={exportError} gpBackingIssue={gpBackingIssue} onExport={runExport} onCancel={cancelExport}/>}
+    {exportOpen&&<ExportDialog layoutLocked={editLocked} score={state.score} layout={state.settings.print} page={page} currentSpeedAvailable={practiceRatio!==null} busy={exports.busy||state.busy||exportLaunching} progress={exports.progress} failure={exportError} gpBackingIssue={gpBackingIssue} hasBacking={!!audioSettings.backing} onExport={runExport} onCancel={cancelExport}/>}
     {harmonyOpen&&location.beat&&<HarmonyChordDialog score={state.score} target={target} selection={musicSelection} value={location.beat.chord?getHarmonyChord(location.beat.chord):null} busy={state.busy||libraryLoading} library={library} onEdit={edit} onClose={closeModal} onLibraryPut={async entry=>{const revision=++libraryRevision.current,value=await putHarmonyLibraryEntry(entry);if(revision===libraryRevision.current)setLibrary(value);}} onLibraryRemove={async id=>{const revision=++libraryRevision.current,value=await removeHarmonyLibraryEntry(id);if(revision===libraryRevision.current)setLibrary(value);}}/>}
     {helpTopic!==null&&<HelpDialog initial={helpTopic} onClose={closeHelp}/>}
     {asciiOpen&&onImportConverted&&<AsciiTabImportDialog busy={controlsBusy} onImport={(name,bytes)=>{const job=onImportConverted(name,bytes);documentAction(job);return job;}} onClose={closeAscii}/>}

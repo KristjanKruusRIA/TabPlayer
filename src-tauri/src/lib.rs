@@ -26,9 +26,9 @@ use project::ProjectSession;
 use project::{BaseDocument, DocumentCandidate, EditCommand, Project};
 use runtime::{
     audio_audition, audio_command, audio_devices, audio_prepare, audio_set_mix, audio_status,
-    cancel_asset, cancel_export, export_ascii_tab, export_audio, export_midi, export_musicxml,
-    export_pdf, export_png, export_status, export_svg, export_track_files, stage_backing,
-    stage_embedded_backing,
+    cancel_asset, cancel_export, export_ascii_tab, export_audio, export_gp5, export_midi,
+    export_musicxml, export_pdf, export_png, export_status, export_svg, export_track_files,
+    stage_backing, stage_embedded_backing,
 };
 use std::{
     path::{Path, PathBuf},
@@ -995,6 +995,7 @@ pub fn run() {
         export_midi,
         export_musicxml,
         export_ascii_tab,
+        export_gp5,
         export_audio,
         export_status,
         cancel_export,
@@ -1069,6 +1070,7 @@ pub fn run() {
         export_midi,
         export_musicxml,
         export_ascii_tab,
+        export_gp5,
         export_audio,
         export_status,
         cancel_export,

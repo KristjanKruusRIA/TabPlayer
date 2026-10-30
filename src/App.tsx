@@ -42,6 +42,7 @@ import { ClipboardPanel } from './editor/ClipboardPanel';
 import { ScoreErrorsPanel } from './editor/ScoreErrorsPanel';
 import { CommandPalette } from './editor/CommandPalette';
 import { AsciiTabImportDialog } from './workspace/AsciiTabImportDialog';
+import { MidiImportDialog } from './workspace/MidiImportDialog';
 import { HelpDialog } from './help/HelpDialog';
 import { topicFor,type HelpTopicId } from './help/help-topics';
 import type { PaletteAction } from './editor/command-palette';
@@ -212,7 +213,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   const showClipboard=()=>{showInspector();setClipboardFocus(value=>value+1);};
   const documentAction=(job:Promise<unknown>)=>change(job);
   const [paletteOpen,setPaletteOpen]=useState(false),paletteReturn=useRef<HTMLElement|null>(null);
-  const [asciiOpen,setAsciiOpen]=useState(false),asciiReturn=useRef<HTMLElement|null>(null);
+  const [asciiOpen,setAsciiOpen]=useState(false),asciiReturn=useRef<HTMLElement|null>(null),[midiOpen,setMidiOpen]=useState(false);
   const [helpTopic,setHelpTopic]=useState<HelpTopicId|null>(null),helpReturn=useRef<HTMLElement|null>(null);
   /** Opens help on the topic for what had focus; help only reads, so open scores and edits are untouched. */
   const openHelp=(topic?:HelpTopicId)=>{const focused=document.activeElement instanceof HTMLElement?document.activeElement:null;helpReturn.current=focused;closeCommands(false);setHelpTopic(topic??topicFor(focused));};
@@ -227,6 +228,8 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   useEffect(()=>{const listener=(event:globalThis.KeyboardEvent)=>helpKey.current(event);window.addEventListener('keydown',listener);return ()=>window.removeEventListener('keydown',listener);},[]);
   const closeHelp=()=>{setHelpTopic(null);const back=helpReturn.current;helpReturn.current=null;if(back?.isConnected)back.focus();if(document.activeElement!==back)scorePane.current?.focus();};
   const openAscii=()=>{asciiReturn.current=document.activeElement instanceof HTMLElement?document.activeElement:null;closeCommands(false);setAsciiOpen(true);};
+  const openMidi=()=>{asciiReturn.current=document.activeElement instanceof HTMLElement?document.activeElement:null;closeCommands(false);setMidiOpen(true);};
+  const closeMidi=()=>{setMidiOpen(false);closeAscii();};
   const closeAscii=()=>{setAsciiOpen(false);const back=asciiReturn.current;asciiReturn.current=null;if(back?.isConnected)back.focus();if(document.activeElement!==back)scorePane.current?.focus();};
   const openPalette=()=>{paletteReturn.current=document.activeElement instanceof HTMLElement?document.activeElement:null;closeCommands(false);setPaletteOpen(true);};
   const closePalette=()=>{
@@ -374,8 +377,8 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     select(next);event.preventDefault();
   }
   function selectionKeys(event:KeyboardEvent){
-    if((event.ctrlKey||event.metaKey)&&event.shiftKey&&!event.altKey&&event.key.toLowerCase()==='p'&&!exportOpen&&!harmonyOpen&&!scaleOpen&&!paletteOpen&&!asciiOpen&&helpTopic===null&&!(event.target instanceof Element&&event.target.closest('[role="dialog"]'))){event.preventDefault();if(!event.repeat)openPalette();return;}
-    if(textEntry(event.target)||exportOpen||harmonyOpen||scaleOpen||paletteOpen||asciiOpen||helpTopic!==null||(event.target instanceof Element&&event.target.closest('[role="dialog"]')))return;
+    if((event.ctrlKey||event.metaKey)&&event.shiftKey&&!event.altKey&&event.key.toLowerCase()==='p'&&!exportOpen&&!harmonyOpen&&!scaleOpen&&!paletteOpen&&!asciiOpen&&!midiOpen&&helpTopic===null&&!(event.target instanceof Element&&event.target.closest('[role="dialog"]'))){event.preventDefault();if(!event.repeat)openPalette();return;}
+    if(textEntry(event.target)||exportOpen||harmonyOpen||scaleOpen||paletteOpen||asciiOpen||midiOpen||helpTopic!==null||(event.target instanceof Element&&event.target.closest('[role="dialog"]')))return;
     const key=event.key.toLowerCase();
     if((event.ctrlKey||event.metaKey)&&!event.altKey&&['n','o','s','z','y'].includes(key)){
       event.preventDefault();if(controlsBusy||event.repeat)return;
@@ -404,6 +407,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
       <button disabled={controlsBusy} onClick={()=>documentAction(onNew())}>New</button>
       <button disabled={controlsBusy} onClick={()=>documentAction(onOpen())}>Open</button>
       {onImportConverted&&<button disabled={controlsBusy} onClick={openAscii}>Import ASCII tab…</button>}
+      {onImportConverted&&<button disabled={controlsBusy} onClick={openMidi}>Import MIDI…</button>}
       <button disabled={controlsBusy} onClick={()=>act(controller.save())}>Save</button>
       <button disabled={controlsBusy} onClick={()=>act(controller.save(true))}>Save As</button>
       <button disabled={controlsBusy} onClick={()=>documentAction(onClose())}>Close score</button>
@@ -476,6 +480,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     {harmonyOpen&&location.beat&&<HarmonyChordDialog score={state.score} target={target} selection={musicSelection} value={location.beat.chord?getHarmonyChord(location.beat.chord):null} busy={state.busy||libraryLoading} library={library} onEdit={edit} onClose={closeModal} onLibraryPut={async entry=>{const revision=++libraryRevision.current,value=await putHarmonyLibraryEntry(entry);if(revision===libraryRevision.current)setLibrary(value);}} onLibraryRemove={async id=>{const revision=++libraryRevision.current,value=await removeHarmonyLibraryEntry(id);if(revision===libraryRevision.current)setLibrary(value);}}/>}
     {helpTopic!==null&&<HelpDialog initial={helpTopic} onClose={closeHelp}/>}
     {asciiOpen&&onImportConverted&&<AsciiTabImportDialog busy={controlsBusy} onImport={(name,bytes)=>{const job=onImportConverted(name,bytes);documentAction(job);return job;}} onClose={closeAscii}/>}
+    {midiOpen&&onImportConverted&&<MidiImportDialog busy={controlsBusy} onImport={(name,bytes)=>{const job=onImportConverted(name,bytes);documentAction(job);return job;}} onClose={closeMidi}/>}
     {paletteOpen&&<CommandPalette context={{score:state.score,target,string,canUndo:state.snapshot.canUndo,canRedo:state.snapshot.canRedo,locked:editLocked}} busy={controlsBusy} onRun={runPalette} onClose={closePalette}/>}
     {scaleOpen&&<ScaleToolPanel score={state.score} staff={location.staff} selection={musicSelection} busy={state.busy} onClose={closeModal}/>}
     <footer className="statusbar">{state.busy?'Working…':state.snapshot.dirty?'Unsaved changes':state.snapshot.path?'Saved':state.snapshot.project.base.kind==='file'?'Not saved':'New score'}<span>{state.snapshot.path ?? 'Save a .tabplayer project to keep the original score and edits.'}</span>{recoveryStatus}</footer>

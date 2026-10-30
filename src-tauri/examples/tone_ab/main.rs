@@ -5,6 +5,7 @@
 //!   cargo run --release --example tone_ab -- ir                 writes `<sound>-new-ir.wav`; needs `TONE_IR_PATH`
 //!   cargo run --release --example tone_ab -- clean <directory>  writes every clean sound's raw PCM, to compare bytes
 //!   cargo run --release --example tone_ab -- bench              times a heavy sound on one track
+//!   cargo run --release --example tone_ab -- ir-bench           the cost of loaded cabinet responses; synthesizes its own
 //!   cargo run --release --example tone_ab -- input              reports the levels the samples reach the chain at
 //!   cargo run --release --example tone_ab -- measure            the bench figures of each driven sound
 //!   cargo run --release --example tone_ab -- levels             every factory sound's loudness on the riff
@@ -751,6 +752,64 @@ fn dump_dry(folder: &str) {
         std::fs::write(format!("{folder}/{name}.f32"), bytes).unwrap();
     }
 }
+/// The cost of a loaded cabinet response against the built-in cabinet the sound has, in percent of one core, for eight
+/// tracks. The responses are synthesized here: a click and low-passed noise that dies away, of each length.
+fn ir_bench() {
+    use tabplayer_lib::audio::{cabinet_ir, dsp::CabinetIr};
+    let plan = plan(&GUITAR, 30);
+    let centred = render(&plan, FxSettings::default());
+    let panned: Vec<[f32; 2]> = centred.iter().map(|f| [f[0], f[1] * 0.7]).collect();
+    let library = cabinet_ir::install(std::env::temp_dir().join("tabplayer-ir-bench"));
+    let board = factory("metal-rhythm").unwrap();
+    let tracks = 8;
+    let load =
+        |board: &FxSettings, timed: &[[f32; 2]]| mix_load(board, tracks, &[], &[timed], true);
+    let (built_in_centred, built_in_panned) = (load(&board, &centred), load(&board, &panned));
+    println!(
+        "{tracks} tracks, metal-rhythm with its built-in {} cabinet: {built_in_centred:5.1}% centred, {built_in_panned:5.1}% panned",
+        board.cabinet.model
+    );
+    for seconds in [0.1, 0.2, 0.5, 1.0] {
+        let length = (RATE as f64 * seconds) as usize;
+        let mut state = 0x2545_f491u32;
+        let mut low = 0.0f32;
+        let samples: Vec<f32> = (0..length)
+            .map(|n| {
+                state ^= state << 13;
+                state ^= state >> 17;
+                state ^= state << 5;
+                low += 0.45 * ((state as f32 / u32::MAX as f32 * 2.0 - 1.0) - low);
+                low * (-(n as f32) / (0.2 * length as f32)).exp() * 0.25
+                    + if n == 0 { 0.6 } else { 0.0 }
+            })
+            .collect();
+        let mut bytes = Vec::new();
+        for v in &samples {
+            bytes.extend_from_slice(&((v * 8_388_607.0) as i32).to_le_bytes()[..3]);
+        }
+        let mut file = b"RIFF".to_vec();
+        file.extend_from_slice(&(36 + bytes.len() as u32).to_le_bytes());
+        file.extend_from_slice(b"WAVEfmt \x10\0\0\0\x01\0\x01\0");
+        file.extend_from_slice(&RATE.to_le_bytes());
+        file.extend_from_slice(&(RATE * 3).to_le_bytes());
+        file.extend_from_slice(b"\x03\0\x18\0data");
+        file.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
+        file.extend_from_slice(&bytes);
+        let entry = library.import_bytes(&file, "bench.wav").unwrap();
+        let mut with = board.clone();
+        with.cabinet.ir = Some(CabinetIr {
+            id: entry.id,
+            name: "bench".into(),
+            level_db: 0.0,
+        });
+        let (c, p) = (load(&with, &centred), load(&with, &panned));
+        println!(
+            "{tracks} tracks, response of {seconds:.1} s ({length} taps): {c:5.1}% centred ({:+5.1} per track), {p:5.1}% panned ({:+5.1} per track)",
+            (c - built_in_centred) / tracks as f64,
+            (p - built_in_panned) / tracks as f64
+        );
+    }
+}
 fn main() {
     let arguments: Vec<String> = std::env::args().skip(1).collect();
     match arguments.iter().map(String::as_str).collect::<Vec<_>>()[..] {
@@ -760,11 +819,12 @@ fn main() {
         ["dry", folder] => dump_dry(folder),
         ["bench"] => bench(),
         ["mix-bench"] => mix_bench(),
+        ["ir-bench"] => ir_bench(),
         ["input"] => input(),
         ["measure"] => measure_all(),
         ["levels"] => levels(),
         _ => eprintln!(
-            "usage: tone_ab render <tag> | ir | clean <folder> | dry <folder> | bench | mix-bench | input | measure | levels"
+            "usage: tone_ab render <tag> | ir | clean <folder> | dry <folder> | bench | mix-bench | ir-bench | input | measure | levels"
         ),
     }
 }

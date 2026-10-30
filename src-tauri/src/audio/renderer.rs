@@ -80,7 +80,7 @@ impl PreparedMix {
             .any(|t| settings.mixes.get(&t.id).is_some_and(|m| m.solo))
             || settings.backing.as_ref().is_some_and(|b| b.mix.solo);
         let mut channels = Vec::with_capacity(plan.tracks.len());
-        for track in &plan.tracks {
+        for (index, track) in plan.tracks.iter().enumerate() {
             let mix = settings.mixes.get(&track.id).cloned().unwrap_or_default();
             validate_mix(&mix)?;
             let fx = settings
@@ -88,7 +88,8 @@ impl PreparedMix {
                 .get(&track.id)
                 .map(|s| s.effects.clone())
                 .unwrap_or_else(FxSettings::default);
-            let dsp = TrackDsp::new(fx, sample_rate, MAX_TRACK_DELAY_SECONDS)?;
+            let mut dsp = TrackDsp::new(fx, sample_rate, MAX_TRACK_DELAY_SECONDS)?;
+            dsp.set_ir_index(index);
             channels.push(PreparedChannel {
                 dsp,
                 gain: Gain::new(&mix, !mix.mute && (!any_solo || mix.solo)),

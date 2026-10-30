@@ -1,5 +1,8 @@
+use super::cabinet_ir;
+use super::ir_convolver::{IrEngine, IrKernel};
 use super::tone;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 /// Native track delay storage is bounded independently of score tempo and playback speed.
 pub const MAX_TRACK_DELAY_SECONDS: f64 = 16.0;
@@ -44,9 +47,63 @@ block!(Amp {
     treble_db,
     presence_db
 });
-block!(Cabinet {
-    model: String = "open".into()
-});
+/// A cabinet impulse response the user loaded, named by the identity it has in their library. A document never holds
+/// the audio: where the library has no such response, the cabinet's model plays instead and the document is unchanged.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CabinetIr {
+    pub id: String,
+    /// What the response was called when it was picked, so a machine without it can say which one is missing.
+    pub name: String,
+    pub level_db: f64,
+}
+impl CabinetIr {
+    /// The longest name, in characters.
+    pub const MAX_NAME: usize = 64;
+    fn validate(&self) -> Result<(), String> {
+        let xml = |c: char| {
+            matches!(
+                c,
+                '\u{9}' | '\u{A}' | '\u{D}' | '\u{20}'..='\u{D7FF}' | '\u{E000}'..='\u{FFFD}' | '\u{10000}'..='\u{10FFFF}'
+            )
+        };
+        if !cabinet_ir::valid_id(&self.id) {
+            return Err("Invalid cabinet impulse response identity.".into());
+        }
+        // Names are validated, not normalized. JS and Rust trim differ only at U+0085 and U+FEFF.
+        if self.name.is_empty()
+            || self.name.trim() != self.name
+            || self.name.starts_with(['\u{feff}', '\u{85}'])
+            || self.name.ends_with(['\u{feff}', '\u{85}'])
+            || self.name.chars().count() > Self::MAX_NAME
+            || !self.name.chars().all(xml)
+        {
+            return Err("Invalid cabinet impulse response name.".into());
+        }
+        if !self.level_db.is_finite() || !(-12.0..=12.0).contains(&self.level_db) {
+            return Err("Invalid cabinet impulse response level: expected -12..12 dB.".into());
+        }
+        Ok(())
+    }
+}
+/// The cabinet block. `ir`, when the library holds it, plays in place of `model`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Cabinet {
+    pub enabled: bool,
+    pub model: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ir: Option<CabinetIr>,
+}
+impl Default for Cabinet {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            model: "open".into(),
+            ir: None,
+        }
+    }
+}
 block!(Eq {
     low_db: f64 = 0.0,
     mid_db: f64 = 0.0,
@@ -1123,6 +1180,9 @@ impl FxSettings {
         {
             return Err("Unknown cabinet model.".into());
         }
+        if let Some(ir) = &self.cabinet.ir {
+            ir.validate()?;
+        }
         if let Some(second) = &self.second {
             if second.second.is_some() {
                 return Err("Invalid second pedalboard.".into());
@@ -1303,6 +1363,51 @@ impl DelayLine {
     }
 }
 
+/// The impulse response a cabinet names and its level trim as a gain, if the user's library supplies it for `rate`. A
+/// missing, damaged or refused one is `None`, so the model plays: a document must always open and play. Call off the
+/// audio thread, because this may read a file.
+fn cabinet_ir_for(cabinet: &Cabinet, rate: u32) -> Option<(Arc<IrKernel>, f32)> {
+    let ir = cabinet.ir.as_ref()?;
+    let kernel = cabinet_ir::resolve(&ir.id, rate).filter(|kernel| kernel.rate() == rate)?;
+    Some((kernel, 10f64.powf(ir.level_db / 20.0) as f32))
+}
+/// One built-in cabinet by itself, as the cabinet stage plays it once settled: a designed one through the shared FIR,
+/// any other through its filters.
+fn builtin_cabinet(
+    filters: &mut [Biquad; 3],
+    cached: &mut [f64; 2],
+    fir: &mut tone::Cabinet,
+    rate: f64,
+    index: Option<usize>,
+    model: &str,
+    x: [f32; 2],
+) -> [f32; 2] {
+    match index {
+        None => {
+            fir.live = false;
+            let values = match model {
+                "bass" => [35.0, 3500.0],
+                _ => [65.0, 5500.0],
+            };
+            if values != *cached {
+                filters[0].pass(values[0], rate, true);
+                filters[1].pass(values[1], rate, false);
+                filters[2].pass(values[1], rate, false);
+                *cached = values;
+            }
+            filters.iter_mut().fold(x, |v, filter| filter.process(v))
+        }
+        Some(end) => {
+            filters.iter_mut().for_each(Biquad::reset);
+            if !fir.live {
+                fir.reset();
+                fir.live = true;
+            }
+            fir.process(end, end, 1.0, x)
+        }
+    }
+}
+
 pub struct TrackDsp {
     settings: FxSettings,
     previous: FxSettings,
@@ -1329,6 +1434,13 @@ pub struct TrackDsp {
     /// none, and takes the filters above.
     cabinet_fir: tone::Cabinet,
     cabinet_models: [Option<usize>; 2],
+    /// The impulse responses the previous and current settings name, resolved off the audio thread, each with its level
+    /// trim as a gain; and the convolution they share, built only once a cabinet is on with one. A response the library
+    /// cannot supply is `None`, and the cabinet plays its model.
+    cabinet_irs: [Option<(Arc<IrKernel>, f32)>; 2],
+    ir_engine: Option<Box<IrEngine>>,
+    /// Keeps this track's convolution apart in time from the other tracks' (see `set_ir_index`).
+    ir_key: u64,
     eq: [Biquad; 3],
     /// The graphic EQ's band filters and the gains they were set for.
     graphic_eq: [Biquad; 10],
@@ -1427,6 +1539,9 @@ impl TrackDsp {
         let drive_start = drive_shape(&settings.drive, rate);
         let amp_start = tone::amp_shape(&settings.amp.model, settings.amp.drive, rate);
         let cabinet_start = tone::cabinet_index(&settings.cabinet.model);
+        let ir_start = cabinet_ir_for(&settings.cabinet, sample_rate);
+        let ir_engine = (settings.cabinet.enabled && ir_start.is_some())
+            .then(|| Box::new(IrEngine::keyed(sample_rate, 0)));
         let reverb_start = reverb_shape(&settings.reverb, rate);
         let delay_start = delay_shape(&settings.delay, rate);
         let microphone_start = microphone_shape(&settings.microphone, rate);
@@ -1462,6 +1577,9 @@ impl TrackDsp {
             cabinet: [Biquad::default(); 3],
             cabinet_fir: tone::Cabinet::new(sample_rate),
             cabinet_models: [cabinet_start; 2],
+            cabinet_irs: [ir_start.clone(), ir_start],
+            ir_engine,
+            ir_key: 0,
             eq: [Biquad::default(); 3],
             graphic_eq: [Biquad::default(); 10],
             cached_graphic_eq: [f64::NAN; 10],
@@ -1590,6 +1708,7 @@ impl TrackDsp {
                         self.max_delay_seconds,
                     )?);
                     second.start_mid_play();
+                    second.set_ir_key(self.ir_key + 1);
                     self.second = Some(second);
                 }
             }
@@ -1607,6 +1726,11 @@ impl TrackDsp {
             self.cabinet_models[1],
             tone::cabinet_index(&self.settings.cabinet.model),
         ];
+        let ir = cabinet_ir_for(&self.settings.cabinet, self.rate as u32);
+        if self.settings.cabinet.enabled && ir.is_some() && self.ir_engine.is_none() {
+            self.ir_engine = Some(Box::new(IrEngine::keyed(self.rate as u32, self.ir_key)));
+        }
+        self.cabinet_irs = [self.cabinet_irs[1].clone(), ir];
         self.reverb_shapes = [
             self.reverb_shapes[1],
             reverb_shape(&self.settings.reverb, self.rate),
@@ -1651,6 +1775,8 @@ impl TrackDsp {
         self.drive_shapes[0] = old.drive_shapes[1];
         self.amp_shapes[0] = old.amp_shapes[1];
         self.cabinet_models[0] = old.cabinet_models[1];
+        // Swapped, so that what this configuration displaces is dropped with `old`, off the audio thread.
+        std::mem::swap(&mut self.cabinet_irs[0], &mut old.cabinet_irs[1]);
         self.reverb_shapes[0] = old.reverb_shapes[1];
         self.delay_shapes[0] = old.delay_shapes[1];
         self.microphone_shapes[0] = old.microphone_shapes[1];
@@ -1681,6 +1807,9 @@ impl TrackDsp {
             }
             if running[3] {
                 move_state!(cabinet_fir);
+                if old.ir_engine.is_some() {
+                    move_state!(ir_engine);
+                }
             }
             if running[15] {
                 move_state!(drive_chain);
@@ -1760,6 +1889,22 @@ impl TrackDsp {
     fn start_mid_play(&mut self) {
         self.microphone_live = false;
     }
+    /// Says which track of the mix this is. A convolution's heavy work comes once per block of its tiers; giving each
+    /// track its own place in the block keeps a mix of many tracks from doing all of it in one callback. The place
+    /// follows from the index alone, so a render and a playback of the same document agree to the bit. Call before the
+    /// track plays.
+    pub fn set_ir_index(&mut self, index: usize) {
+        self.set_ir_key(index as u64 * 2);
+    }
+    fn set_ir_key(&mut self, key: u64) {
+        self.ir_key = key;
+        if let Some(engine) = &mut self.ir_engine {
+            engine.rekey(key);
+        }
+        if let Some(second) = &mut self.second {
+            second.set_ir_key(key + 1);
+        }
+    }
     /// Whether a settings change is still crossfading. A configuration that took over now would cut the fade short. A
     /// second board's fade starts and ends with this one's, so this covers both.
     pub fn ramping(&self) -> bool {
@@ -1772,6 +1917,9 @@ impl TrackDsp {
         self.drive_chain.never_rest();
         self.drive_leaving.never_rest();
         self.cabinet_fir.never_rest();
+        if let Some(engine) = &mut self.ir_engine {
+            engine.never_rest();
+        }
         if let Some(second) = &mut self.second {
             second.never_rest();
         }
@@ -1783,7 +1931,10 @@ impl TrackDsp {
             self.drive_chain.at_rest(),
             self.cabinet_fir.at_rest(),
         ];
-        [0, 1].map(|index| stages.iter().all(|stage| stage[index]))
+        let convolution = self.ir_engine.as_ref().map(|engine| engine.at_rest());
+        [0, 1].map(|index| {
+            stages.iter().all(|stage| stage[index]) && convolution.is_none_or(|stage| stage[index])
+        })
     }
     pub fn process(&mut self, input: [f32; 2], bpm: f64) -> [f32; 2] {
         let y = self.process_board(input, bpm);
@@ -2289,7 +2440,90 @@ impl TrackDsp {
                     }
                 }
                 Stage::Cabinet => {
-                    if f.cabinet.enabled || p.cabinet.enabled && t < 1.0 {
+                    // The side each end of the crossfade plays, as below: a side that is off takes the other's.
+                    let ends = [
+                        if p.cabinet.enabled { 0 } else { 1 },
+                        if f.cabinet.enabled { 1 } else { 0 },
+                    ];
+                    let rate = self.rate as u32;
+                    let usable = [0, 1].map(|side| {
+                        self.ir_engine.is_some()
+                            && self.cabinet_irs[side]
+                                .as_ref()
+                                .is_some_and(|(kernel, _)| kernel.rate() == rate)
+                    });
+                    let crossfading = t < 1.0 && ends[0] != ends[1];
+                    let ir_played = usable[ends[1]] || crossfading && usable[ends[0]];
+                    if !(f.cabinet.enabled || p.cabinet.enabled && t < 1.0) {
+                        self.cabinet_fir.live = false;
+                        if let Some(engine) = self.ir_engine.as_mut() {
+                            engine.live = false;
+                        }
+                    } else if let (true, Some(engine)) = (ir_played, self.ir_engine.as_mut()) {
+                        // A response the user loaded plays in place of the built-in cabinet on its side. The other
+                        // side, if it has none, plays its own model by itself.
+                        if !engine.live {
+                            engine.reset();
+                            engine.live = true;
+                        }
+                        let loaded = |side: usize| {
+                            self.cabinet_irs[side]
+                                .as_ref()
+                                .filter(|_| usable[side])
+                                .map(|(kernel, gain)| (&**kernel, *gain))
+                        };
+                        let (leaving, arriving) =
+                            (loaded(ends[0]).filter(|_| crossfading), loaded(ends[1]));
+                        let mut built_in = 0usize;
+                        let mut plays = |side: usize| {
+                            built_in += 1;
+                            let name = if side == 0 {
+                                &p.cabinet.model
+                            } else {
+                                &f.cabinet.model
+                            };
+                            builtin_cabinet(
+                                &mut self.cabinet,
+                                &mut self.cached_cabinet,
+                                &mut self.cabinet_fir,
+                                self.rate,
+                                self.cabinet_models[side],
+                                name,
+                                x,
+                            )
+                        };
+                        let scaled = |y: [f32; 2], gain: f32| y.map(|v| v * gain);
+                        let (wet_from, wet_to) = match (leaving, arriving) {
+                            (Some((a, ga)), Some((b, gb))) => {
+                                let y = engine.process(x, a, Some(b));
+                                (Some(scaled(y[0], ga)), scaled(y[1], gb))
+                            }
+                            (None, Some((b, gb))) => {
+                                let y = engine.process(x, b, None);
+                                (crossfading.then(|| plays(ends[0])), scaled(y[0], gb))
+                            }
+                            (Some((a, ga)), None) => {
+                                let y = engine.process(x, a, None);
+                                (Some(scaled(y[0], ga)), plays(ends[1]))
+                            }
+                            // Only reached by a side that was usable a moment ago; the model plays.
+                            (None, None) => (None, plays(ends[1])),
+                        };
+                        if built_in == 0 {
+                            self.cabinet_fir.live = false;
+                            self.cabinet.iter_mut().for_each(Biquad::reset);
+                        }
+                        let wet = match wet_from {
+                            Some(from) if crossfading => {
+                                std::array::from_fn(|c| from[c] + (wet_to[c] - from[c]) * t as f32)
+                            }
+                            _ => wet_to,
+                        };
+                        x = blend(x, wet, p.cabinet.enabled, f.cabinet.enabled);
+                    } else if f.cabinet.enabled || p.cabinet.enabled && t < 1.0 {
+                        if let Some(engine) = self.ir_engine.as_mut() {
+                            engine.live = false;
+                        }
                         let [before, after] = self.cabinet_models;
                         // A side that is off takes the other's cabinet, as the amp does.
                         let from = if p.cabinet.enabled { before } else { after };
@@ -2776,6 +3010,10 @@ impl TrackDsp {
         }
         self.cabinet_fir.reset();
         self.cabinet_fir.live = false;
+        if let Some(engine) = &mut self.ir_engine {
+            engine.reset();
+            engine.live = false;
+        }
         for b in &mut self.eq {
             b.reset();
         }

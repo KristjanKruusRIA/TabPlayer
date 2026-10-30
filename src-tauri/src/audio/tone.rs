@@ -1066,7 +1066,7 @@ impl CabinetBank {
 /// The sum of the products of two equal slices, in eight lanes the compiler can vectorize. The lanes keep the order of
 /// the arithmetic fixed, so the result does not depend on how it is compiled.
 #[inline]
-fn dot(a: &[f32], b: &[f32]) -> f32 {
+pub(super) fn dot(a: &[f32], b: &[f32]) -> f32 {
     let mut lanes = [0.0f32; 8];
     let (x, y) = (a.chunks_exact(8), b.chunks_exact(8));
     let tail: f32 = x

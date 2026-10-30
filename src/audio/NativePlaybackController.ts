@@ -173,6 +173,8 @@ export class NativePlaybackController {
     this.update({});
     await this.reloadLatest();
   }
+  /** Sends the sounds to the native player again, so it resolves each cabinet response afresh. Importing or removing a response leaves the document as it was, so nothing else would: the player would go on with the cabinet it had, while an export resolves the library anew. */
+  async refreshSounds(){this.desiredAudioSettingsKey=null;await this.reloadLatest();}
   /** Loads the most recently requested document again, so a session change made while that load waits cannot bring back an older one. */
   private async reloadLatest(){const latest=this.requested;if(latest&&this.loaded)await this.loadDocument(latest.project,latest.built,0,latest.documentEpoch,latest.playbackResumeEpoch);}
   /**

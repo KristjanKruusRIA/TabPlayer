@@ -61,6 +61,51 @@ fn closes(runtime: &SessionRuntime) -> Vec<CloseDocument> {
 }
 
 #[test]
+fn reloaded_webview_attaches_to_the_live_session_without_resolving_startup() {
+    let directory = tempfile::tempdir().unwrap();
+    let runtime = open(directory.path());
+    let audio = audio();
+    let jobs = ExportJobs::default();
+    assert!(!runtime.startup().resumed);
+    assert!(runtime.attach().is_err());
+    let first = resolve(&runtime, &audio, &jobs);
+    edit(&runtime, 7);
+    let startup = runtime.startup();
+    assert!(startup.resumed);
+    assert!(startup.preview.is_none());
+    let attached = runtime.attach().unwrap();
+    assert_eq!(attached.workspace.documents.len(), 1);
+    assert_eq!(attached.workspace.active, first.workspace.active);
+    let id = attached.workspace.active.document_id.clone();
+    assert!(attached.views.contains_key(&id));
+    assert!(attached.workspace.documents[0].snapshot.dirty);
+    // Reloading again is harmless, and startup itself still resolves only once.
+    assert_eq!(runtime.attach().unwrap(), attached);
+    assert!(runtime.resolve(None, vec![], &audio, &jobs).is_err());
+}
+
+#[test]
+fn genuine_recovery_prompt_is_not_resumed_or_skipped_by_reload() {
+    let directory = tempfile::tempdir().unwrap();
+    let audio = audio();
+    let jobs = ExportJobs::default();
+    let runtime = open(directory.path());
+    resolve(&runtime, &audio, &jobs);
+    edit(&runtime, 5);
+    runtime.changed();
+    checkpoint(&runtime);
+    drop(runtime);
+    let recovered = open(directory.path());
+    let first = recovered.startup();
+    assert!(!first.resumed);
+    let preview = first.preview.clone().unwrap();
+    // A reload while the prompt is open sees the same prompt and cannot attach.
+    assert_eq!(recovered.startup().preview.unwrap().token, preview.token);
+    assert!(!recovered.startup().resumed);
+    assert!(recovered.attach().is_err());
+}
+
+#[test]
 fn startup_resolve_is_atomic_and_single_use() {
     let directory = tempfile::tempdir().unwrap();
     let runtime = open(directory.path());

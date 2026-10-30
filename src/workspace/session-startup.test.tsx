@@ -128,3 +128,17 @@ it('a fresh startup blank opens in the saved default view even though native rep
     await waitFor(()=>expect(boundary.invoke).toHaveBeenCalledWith('workspace_set_view',expect.objectContaining({documentId:'new-blank'})));
   }finally{localStorage.removeItem('tabplayer.viewDefaults');}
 });
+
+it('a reloaded webview attaches to the live session: no resolve, no recovery prompt, views and documents kept',async()=>{
+  const documents=[record('second','Second'),record('first','First')];const views=Object.fromEntries(documents.map(d=>[d.documentId,{...initialDocumentView(),zoom:150}]));
+  startup={preferences:{version:1,restorePreviousSession:true},preview:null,resumed:true};
+  handlers.session_attach=()=>({workspace:{documents,active:{documentId:'first',activationId:'live-owner'}},views,issues:[]});
+  await boot();await waitFor(()=>expect(screen.getByRole('main',{name:'Score editor'})).toBeInTheDocument());
+  expect(resolveCalls()).toEqual([]);expect(boundary.invoke.mock.calls.filter(call=>call[0]==='session_attach')).toHaveLength(1);
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();expect(screen.getAllByRole('tab').map(tab=>tab.textContent)).toEqual(['Second','First']);expect(boundary.props.at(-1)!.documentView.zoom).toBe(150);
+});
+it('a failed attach reports the error instead of offering a Start new session that cannot work',async()=>{
+  startup={preferences:{version:1,restorePreviousSession:true},preview:null,resumed:true};handlers.session_attach=()=>{throw new Error('Finish the current session transition first.');};
+  await boot();await waitFor(()=>expect(screen.getByRole('alert')).toHaveTextContent('Finish the current session transition first.'));
+  expect(screen.queryByRole('button',{name:'Start new session'})).not.toBeInTheDocument();expect(resolveCalls()).toEqual([]);
+});

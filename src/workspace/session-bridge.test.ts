@@ -34,6 +34,13 @@ it('resolves only the supplied token and ordered successful document IDs, includ
   expect(native.invoke.mock.calls[0][1].documentIds).toBe(documentIds);
 });
 
+it('attaches a reloaded webview through its own command, never session_resolve',async()=>{
+  const {nativeSessionBridge:bridge}=await import('./session-bridge');
+  native.invoke.mockResolvedValue({workspace:{documents:[],active:{documentId:'a',activationId:'b'}},views:{},issues:[]});
+  await bridge.attach();
+  expect(native.invoke.mock.calls).toEqual([['session_attach']]);
+});
+
 it('persists the complete addressed location and score display preference without activation or transport state',async()=>{
   const {nativeSessionBridge:bridge}=await import('./session-bridge');
   const view:DocumentViewState={target:{track:2,staff:1,bar:4,voice:0,beat:3},selectedString:4,selectedNoteIndex:1,zoom:137.5,trackView:{kind:'custom',trackIds:['track-b','track-a']},instrumentVisible:false,scoreDisplay:{layout:'grid',zoomMode:'fitPage'}};

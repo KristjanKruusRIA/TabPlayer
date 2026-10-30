@@ -11,13 +11,15 @@ export interface RecoveryPreview {
   views:Record<DocumentId,DocumentViewState>;activeDocumentId:DocumentId|null;
   issues:RecoveryIssue[];capturedAtUnixMs:number|null;
 }
-export interface SessionStartup {preferences:SessionPreferences;preview:RecoveryPreview|null}
+export interface SessionStartup {preferences:SessionPreferences;preview:RecoveryPreview|null;resumed?:boolean}
 export interface SessionResolution {
   workspace:WorkspaceSnapshot;views:Record<DocumentId,DocumentViewState>;issues:RecoveryIssue[];
 }
 export interface NativeSessionBridge {
   startup():Promise<SessionStartup>;
   resolve(token:string|null,documentIds:readonly DocumentId[]):Promise<SessionResolution>;
+  /** Re-reads the live session after a webview reload; never resolves startup. */
+  attach():Promise<SessionResolution>;
   setView(documentId:DocumentId,view:DocumentViewState):Promise<void>;
   setPreferences(restorePreviousSession:boolean):Promise<SessionPreferences>;
   status():Promise<RecoveryStatus>;

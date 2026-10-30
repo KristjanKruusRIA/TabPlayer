@@ -1,4 +1,5 @@
 import { midi,model,Settings, type io } from '@coderline/alphatab';
+import '../tremolo-guard';
 import { validateSelection,type ExportSelection } from './types';
 import { selectStaves } from './selection';
 import { deadBrushMidiDurations,noteAudioMidiAdjustments,prepareMidiScore } from '../audio/plan';

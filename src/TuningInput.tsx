@@ -70,11 +70,46 @@ export function TuningInput({
   const audible = onAudition ? parsedPitches : null;
   const selected = custom ? 'custom' : (findTuningPreset(value)?.id ?? 'custom');
 
-  const dragRef = useRef<{ index: number; startY: number; startPitch: number; latest: number[] } | null>(null);
+  const dragRef = useRef<{ index: number; startY: number; startPitch: number; initialPitches: number[]; latest: number[] } | null>(null);
+  const wheelRef = useRef<{ timer: ReturnType<typeof setTimeout> | null; pending: number[] | null }>({
+    timer: null,
+    pending: null,
+  });
+
+  useEffect(() => () => {
+    if (wheelRef.current.timer) clearTimeout(wheelRef.current.timer);
+  }, []);
+
+  const pegElements = useRef<Map<number, HTMLDivElement>>(new Map());
+  const prevWheelListeners = useRef<Map<number, (e: WheelEvent) => void>>(new Map());
+  const registerPeg = (index: number, el: HTMLDivElement | null) => {
+    const prev = pegElements.current.get(index);
+    if (prev) {
+      const l = prevWheelListeners.current.get(index);
+      if (l) prev.removeEventListener('wheel', l);
+      pegElements.current.delete(index);
+    }
+    if (el) {
+      pegElements.current.set(index, el);
+      const listener = (e: WheelEvent) => handlePegWheel(index, e);
+      prevWheelListeners.current.set(index, listener);
+      el.addEventListener('wheel', listener, { passive: false });
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      pegElements.current.forEach((el, index) => {
+        const l = prevWheelListeners.current.get(index);
+        if (l) el.removeEventListener('wheel', l);
+      });
+    };
+  }, []);
 
   const updateStringPitch = (index: number, nextPitch: number, commit: boolean) => {
     if (disabled || !parsedPitches) return;
     const clamped = Math.max(0, Math.min(127, Math.round(nextPitch)));
+    if (clamped === parsedPitches[index]) return;
     const next = parsedPitches.map((p, i) => (i === index ? clamped : p));
     setCustom(false);
     onChange(formatTuning(next));
@@ -83,17 +118,24 @@ export function TuningInput({
   };
 
   const handlePegPointerDown = (index: number, pitch: number, event: ReactPointerEvent<HTMLDivElement>) => {
-    if (disabled || !parsedPitches) return;
+    if (disabled || !parsedPitches || event.button !== 0) return;
     event.preventDefault();
     event.currentTarget.focus();
     event.currentTarget.setPointerCapture?.(event.pointerId);
-    dragRef.current = { index, startY: event.clientY, startPitch: pitch, latest: [...parsedPitches] };
+    dragRef.current = {
+      index,
+      startY: event.clientY,
+      startPitch: pitch,
+      initialPitches: [...parsedPitches],
+      latest: [...parsedPitches],
+    };
   };
 
   const handlePegPointerMove = (index: number, event: ReactPointerEvent<HTMLDivElement>) => {
     if (!dragRef.current || dragRef.current.index !== index || disabled || !parsedPitches) return;
     const deltaSemitones = Math.round((dragRef.current.startY - event.clientY) / 8);
     const nextPitch = Math.max(0, Math.min(127, dragRef.current.startPitch + deltaSemitones));
+    if (nextPitch === dragRef.current.latest[index]) return;
     const next = dragRef.current.latest.map((p, i) => (i === index ? nextPitch : p));
     dragRef.current.latest = next;
     setCustom(false);
@@ -103,12 +145,31 @@ export function TuningInput({
 
   const handlePegPointerUp = (index: number, event: ReactPointerEvent<HTMLDivElement>) => {
     if (!dragRef.current || dragRef.current.index !== index) return;
-    const committed = dragRef.current.latest;
+    const { initialPitches, latest } = dragRef.current;
     dragRef.current = null;
     if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
+      try {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      } catch {}
     }
-    onCommit?.(committed);
+    if (disabled) return;
+    const changed = latest.some((p, i) => p !== initialPitches[i]);
+    if (changed) {
+      onCommit?.(latest);
+    }
+  };
+
+  const handlePegPointerCancel = (index: number, event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!dragRef.current || dragRef.current.index !== index) return;
+    const initial = dragRef.current.initialPitches;
+    dragRef.current = null;
+    if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
+      try {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      } catch {}
+    }
+    setCustom(false);
+    onChange(formatTuning(initial));
   };
 
   const handlePegKeyDown = (index: number, pitch: number, event: ReactKeyboardEvent<HTMLDivElement>) => {
@@ -123,10 +184,28 @@ export function TuningInput({
     updateStringPitch(index, pitch + delta, true);
   };
 
-  const handlePegWheel = (index: number, pitch: number, event: ReactWheelEvent<HTMLDivElement>) => {
-    if (disabled || !parsedPitches || event.deltaY === 0) return;
+  const handlePegWheel = (index: number, event: ReactWheelEvent<HTMLDivElement> | WheelEvent) => {
+    if (disabled || !parsedPitches || !('deltaY' in event) || event.deltaY === 0) return;
+    const targetElement = (event.currentTarget ?? event.target) as HTMLElement | null;
+    if (document.activeElement !== targetElement) return;
     event.preventDefault();
-    updateStringPitch(index, pitch + (event.deltaY < 0 ? 1 : -1), true);
+    const currentBase = wheelRef.current.pending ?? parsedPitches;
+    const currentPitch = currentBase[index];
+    const delta = event.deltaY < 0 ? 1 : -1;
+    const nextPitch = Math.max(0, Math.min(127, currentPitch + delta));
+    if (nextPitch === currentPitch) return;
+    const next = currentBase.map((p, i) => (i === index ? nextPitch : p));
+    wheelRef.current.pending = next;
+    setCustom(false);
+    onChange(formatTuning(next));
+    onTuningNameChange('');
+    if (wheelRef.current.timer) clearTimeout(wheelRef.current.timer);
+    wheelRef.current.timer = setTimeout(() => {
+      const committed = wheelRef.current.pending;
+      wheelRef.current.pending = null;
+      wheelRef.current.timer = null;
+      if (committed) onCommit?.(committed);
+    }, 300);
   };
 
   return (
@@ -235,7 +314,10 @@ export function TuningInput({
                 );
               })}
             </svg>
-            <div className="tp-tuning-peg-strip">
+            <div
+              className="tp-tuning-peg-strip"
+              style={{ gridTemplateColumns: `repeat(${parsedPitches.length}, minmax(0, 1fr))` }}
+            >
               {parsedPitches.map((pitch, index) => {
                 const deg = (pitch % 12) * 30;
                 const noteText = formatPitch(pitch);
@@ -245,8 +327,9 @@ export function TuningInput({
                       S{index + 1}
                     </span>
                     <div
+                      ref={el => registerPeg(index, el)}
                       role="slider"
-                      tabIndex={disabled ? -1 : 0}
+                      tabIndex={0}
                       aria-disabled={disabled || undefined}
                       aria-label={`${label} string ${index + 1} peg`}
                       aria-valuemin={0}
@@ -257,8 +340,9 @@ export function TuningInput({
                       onPointerDown={e => handlePegPointerDown(index, pitch, e)}
                       onPointerMove={e => handlePegPointerMove(index, e)}
                       onPointerUp={e => handlePegPointerUp(index, e)}
+                      onPointerCancel={e => handlePegPointerCancel(index, e)}
+                      onLostPointerCapture={e => handlePegPointerCancel(index, e)}
                       onKeyDown={e => handlePegKeyDown(index, pitch, e)}
-                      onWheel={e => handlePegWheel(index, pitch, e)}
                     >
                       <svg viewBox="0 0 28 24" width="24" height="20" aria-hidden="true" className="tp-peg-svg">
                         <g transform={`rotate(${deg} 14 12)`}>

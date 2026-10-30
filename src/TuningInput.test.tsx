@@ -51,3 +51,82 @@ it('string pegs step semitones by button, keyboard, and drag and commit one undo
   expect(onCommit).toHaveBeenCalledTimes(3);
   expect(onCommit).toHaveBeenLastCalledWith([62,59,55,50,45,38]);
 });
+
+it('peg clicked with no movement commits nothing and preserves tuning name',()=>{
+  const onCommit=vi.fn();
+  render(<Draft onCommit={onCommit}/>);
+  const peg=screen.getByRole('slider',{name:'Notes string 1 peg'});
+  fireEvent.pointerDown(peg,{pointerId:1,clientY:100});
+  fireEvent.pointerUp(peg,{pointerId:1,clientY:100});
+  expect(onCommit).not.toHaveBeenCalled();
+});
+
+it('peg at limit by key or wheel records nothing',()=>{
+  const onCommit=vi.fn();
+  render(<Draft onCommit={onCommit}/>);
+  const peg=screen.getByRole('slider',{name:'Notes string 1 peg'});
+  // Peg starts at 64 (E4). Move to 127.
+  for(let i=0;i<65;i++){
+    fireEvent.keyDown(peg,{key:'PageUp'});
+  }
+  const countAtLimit=onCommit.mock.calls.length;
+  // Key at limit (127) records nothing (Finding 2)
+  fireEvent.keyDown(peg,{key:'ArrowUp'});
+  expect(onCommit).toHaveBeenCalledTimes(countAtLimit);
+});
+
+it('lost pointer cancels drag, restores value, and commits nothing',()=>{
+  const onCommit=vi.fn();
+  render(<Draft onCommit={onCommit}/>);
+  const peg=screen.getByRole('slider',{name:'Notes string 1 peg'});
+  fireEvent.pointerDown(peg,{pointerId:2,clientY:100});
+  fireEvent.pointerMove(peg,{pointerId:2,clientY:120});
+  expect(screen.getByLabelText('Notes')).not.toHaveValue('E4 B3 G3 D3 A2 E2');
+  fireEvent.pointerCancel(peg,{pointerId:2});
+  expect(screen.getByLabelText('Notes')).toHaveValue('E4 B3 G3 D3 A2 E2');
+  expect(onCommit).not.toHaveBeenCalled();
+});
+
+it('pegs are focusable when disabled and ignore busy interactions',()=>{
+  const onCommit=vi.fn();
+  const {rerender}=render(<TuningInput label="Notes" presetLabel="Preset" value="E4 B3 G3 D3 A2 E2" onChange={vi.fn()} tuningName="Standard" onTuningNameChange={vi.fn()} onCommit={onCommit} disabled/>);
+  const peg=screen.getByRole('slider',{name:'Notes string 1 peg'});
+  expect(peg).toHaveAttribute('tabindex','0');
+  expect(peg).toHaveAttribute('aria-disabled','true');
+  fireEvent.pointerDown(peg,{pointerId:1,clientY:100});
+  fireEvent.pointerMove(peg,{pointerId:1,clientY:120});
+  fireEvent.pointerUp(peg,{pointerId:1,clientY:120});
+  fireEvent.keyDown(peg,{key:'ArrowUp'});
+  expect(onCommit).not.toHaveBeenCalled();
+});
+
+it('wheel over an unfocused peg does not retune and focused wheel commits once after settling',()=>{
+  vi.useFakeTimers();
+  try{
+    const onCommit=vi.fn();
+    render(<Draft onCommit={onCommit}/>);
+    const peg=screen.getByRole('slider',{name:'Notes string 1 peg'});
+
+    // Unfocused wheel does nothing (Finding 5)
+    fireEvent.wheel(peg,{deltaY:-100});
+    expect(onCommit).not.toHaveBeenCalled();
+    expect(screen.getByLabelText('Notes')).toHaveValue('E4 B3 G3 D3 A2 E2');
+
+    // Focused wheel updates live and commits once after settling
+    peg.focus();
+    fireEvent.wheel(peg,{deltaY:-100});
+    fireEvent.wheel(peg,{deltaY:-100});
+    expect(onCommit).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(300);
+    expect(onCommit).toHaveBeenCalledTimes(1);
+    expect(onCommit).toHaveBeenLastCalledWith([66,59,55,50,45,40]);
+  }finally{
+    vi.useRealTimers();
+  }
+});
+
+it('7+ strings peg strip maintains single row layout',()=>{
+  render(<TuningInput label="Notes" presetLabel="Preset" value="E4 B3 G3 D3 A2 E2 B1" onChange={vi.fn()} tuningName="7-String" onTuningNameChange={vi.fn()}/>);
+  const strip=document.querySelector('.tp-tuning-peg-strip');
+  expect(strip).toHaveStyle({'grid-template-columns':'repeat(7, minmax(0, 1fr))'});
+});

@@ -192,6 +192,36 @@ it('voice staff and layout controls dispatch exact commands',()=>{
   fireEvent.click(screen.getByRole('button',{name:'Add voice'}));expect(onEdit).toHaveBeenLastCalledWith({type:'addVoice',track:0,staff:0});
   fireEvent.click(screen.getByRole('button',{name:'Add staff'}));expect(onEdit).toHaveBeenLastCalledWith(expect.objectContaining({type:'addStaff',track:0}));
 });
+it('peg step does not commit staged unapplied settings and focusing dial preserves tuning name',()=>{
+  const score=music(),onEdit=vi.fn();
+  score.tracks[0].staves[0].stringTuning.name='Drop D';
+  score.tracks[0].staves[0].stringTuning.tunings=[64,59,55,50,45,38];
+  render(<StructurePanel score={score} target={target} string={6} busy={false} onEdit={onEdit} onSelect={vi.fn()}/>);
+
+  // Focus / click dial with no movement does not erase Drop D (Finding 2)
+  const dial=screen.getByRole('slider',{name:'Staff tuning (notes, high to low) string 6 peg'});
+  fireEvent.pointerDown(dial,{pointerId:1,clientY:100});
+  fireEvent.pointerUp(dial,{pointerId:1,clientY:100});
+  expect(onEdit).not.toHaveBeenCalled();
+
+  // Change capo in form input without applying it (staged unapplied setting)
+  fireEvent.change(screen.getByLabelText('Capo'),{target:{value:'3'}});
+
+  // Turn peg 6 down (Finding 6)
+  fireEvent.keyDown(dial,{key:'ArrowDown'});
+  expect(onEdit).toHaveBeenCalledTimes(1);
+  // Must commit saved capo:0 from score, NOT staged capo:3!
+  expect(onEdit).toHaveBeenLastCalledWith({
+    type:'setStaffSettings',
+    track:0,
+    staff:0,
+    settings:expect.objectContaining({
+      capo:0,
+      tuning:[64,59,55,50,45,37],
+      tuningName:'',
+    }),
+  });
+});
 it('staff tuning uses named notes, validates drafts and refreshes from history',()=>{
   const score=music(),onEdit=vi.fn(),props={score,target,string:6,busy:false,onEdit,onSelect:vi.fn()};const view=render(<StructurePanel {...props}/>);const input=screen.getByLabelText('Staff tuning (notes, high to low)');expect(input).toHaveValue('E4 B3 G3 D3 A2 E2');
   fireEvent.change(input,{target:{value:'E4 B3 G3 D3 A2 Db2'}});fireEvent.click(screen.getByRole('button',{name:'Apply staff settings'}));expect(onEdit).toHaveBeenLastCalledWith(expect.objectContaining({type:'setStaffSettings',settings:expect.objectContaining({tuning:[64,59,55,50,45,37]})}));onEdit.mockClear();

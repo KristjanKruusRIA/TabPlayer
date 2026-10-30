@@ -157,3 +157,11 @@ it('a string-count change sends the draft tuning name and the draft resets when 
   view.rerender(<TrackSettingsPanel score={fresh('Other')} selected={0} busy={false} onEdit={onEdit}/>);fireEvent.click(screen.getByRole('button',{name:'Apply tuning'}));
   expect(onEdit).toHaveBeenLastCalledWith({type:'setTuning',track:0,tuning:[64,59,55,50,45,40],tuningName:'Other'});
 });
+it('focusing dial does not erase tuning name or dispatch edits when unshifted',()=>{
+  const score=previewEdit(blankProject(),{type:'setTuning',track:0,tuning:[64,59,55,50,45,38],tuningName:'Drop D'}).score,onEdit=vi.fn();
+  render(<TrackSettingsPanel score={score} selected={0} busy={false} onEdit={onEdit}/>);
+  const dial=screen.getByRole('slider',{name:'Tuning (notes, high to low) string 6 peg'});
+  fireEvent.pointerDown(dial,{pointerId:1,clientY:100});
+  fireEvent.pointerUp(dial,{pointerId:1,clientY:100});
+  expect(onEdit).not.toHaveBeenCalled();
+});

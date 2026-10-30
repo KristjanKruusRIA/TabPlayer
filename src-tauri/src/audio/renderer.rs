@@ -245,6 +245,9 @@ pub struct Renderer {
     next_note: usize,
     next_midi: usize,
     mix: PreparedMix,
+    /// The mix that arrived while this one was crossfading, waiting for that to end. Taking over mid-fade would drop
+    /// the sound the fade is leaving, which is a click.
+    parked_mix: Option<PreparedMix>,
     scratch: Vec<[f32; 2]>,
     backing: Option<BackingVoice>,
     configured_backing: bool,
@@ -527,6 +530,7 @@ impl Renderer {
             active: Vec::with_capacity(capacity),
             next_note: 0,
             next_midi: 0,
+            parked_mix: None,
             mix,
             scratch,
             backing: None,
@@ -1165,8 +1169,28 @@ impl Renderer {
     pub fn has_backing(&self) -> bool {
         self.configured_backing || self.backing.is_some()
     }
-    /// Callback callers retire the returned old configuration on a control thread.
-    pub fn replace_mix(&mut self, mut settings: PreparedMix) -> PreparedMix {
+    fn mix_ramping(&self) -> bool {
+        self.mix.channels.iter().any(|c| c.dsp.ramping())
+    }
+    /// Takes `settings` now, or parks it until the current crossfade ends, when `settle_mix` installs it. A newer mix
+    /// replaces a parked one, because only the latest settings still matter. Callback callers retire whatever comes
+    /// back on a control thread.
+    pub fn replace_mix(&mut self, settings: PreparedMix) -> Option<PreparedMix> {
+        if self.parked_mix.is_some() || self.mix_ramping() {
+            return self.parked_mix.replace(settings);
+        }
+        Some(self.install_mix(settings))
+    }
+    /// Installs a parked mix if the crossfade it waited for has ended. Call between blocks; callback callers retire what
+    /// comes back on a control thread, as for `replace_mix`.
+    pub fn settle_mix(&mut self) -> Option<PreparedMix> {
+        if self.parked_mix.is_none() || self.mix_ramping() {
+            return None;
+        }
+        let settings = self.parked_mix.take()?;
+        Some(self.install_mix(settings))
+    }
+    fn install_mix(&mut self, mut settings: PreparedMix) -> PreparedMix {
         if settings.rate != self.rate || settings.channels.len() != self.mix.channels.len() {
             return settings;
         }
@@ -1180,7 +1204,8 @@ impl Renderer {
         std::mem::replace(&mut self.mix, settings)
     }
     pub fn set_mix(&mut self, settings: PreparedMix) {
-        drop(self.replace_mix(settings));
+        self.parked_mix = None;
+        drop(self.install_mix(settings));
     }
     pub fn install_backing(
         &mut self,

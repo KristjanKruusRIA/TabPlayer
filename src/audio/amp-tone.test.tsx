@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import {afterEach,expect,it,vi} from 'vitest';
-import {cleanup,fireEvent,render,screen} from '@testing-library/react';
+import {cleanup,fireEvent,render,screen,within} from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import {SoundPanel,soundPreset} from './SoundPanel';
 import {defaultEffects,soundProblem} from '../document-settings';
@@ -45,6 +45,19 @@ it('edits each tone control on the amp, and a flat control saves nothing',()=>{
     expect(Object.hasOwn(flat.effects.amp,field)).toBe(false);
     rerender(<SoundPanel trackId="base/0" sound={soundPreset('crunch')} onEdit={onEdit}/>);
   }
+});
+
+it('offers every amp and cabinet the native player knows, and refuses any other name',()=>{
+  for(const model of ['clean','crunch','lead','metal','bass','bassDrive'])expect(soundProblem(shaped('model',model)),model).toBeNull();
+  for(const model of ['open','closed','combo','bass','bassStack'])expect(soundProblem(shaped('model',model,'cabinet')),model).toBeNull();
+  expect(soundProblem(shaped('model','nope'))).not.toBeNull();
+  expect(soundProblem(shaped('model','nope','cabinet'))).not.toBeNull();
+  const onEdit=vi.fn();
+  render(<SoundPanel trackId="base/0" sound={soundPreset('crunch')} onEdit={onEdit}/>);
+  expect(within(screen.getByLabelText('Amp model')).getByRole('option',{name:'bass drive'})).toHaveValue('bassDrive');
+  expect(within(screen.getByLabelText('Cabinet model')).getByRole('option',{name:'bass stack'})).toHaveValue('bassStack');
+  fireEvent.change(screen.getByLabelText('Amp model'),{target:{value:'metal'}});
+  expect(onEdit.mock.calls.at(-1)?.[0].sound.effects.amp.model).toBe('metal');
 });
 
 it('keeps the tone stack in saved sounds',()=>{

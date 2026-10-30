@@ -131,10 +131,11 @@ fn the_effect_order_keeps_older_documents_and_wire_format() {
 
 #[test]
 fn the_default_order_sounds_exactly_as_before() {
-    // Taken with every block running in the fixed chain, before blocks could be reordered.
+    // Taken with every block running in the fixed chain, before blocks could be reordered, and retaken when the drive
+    // pedals' circuits were replaced: a pedal is the one block here that changed.
     assert_eq!(
         fingerprint(everything(0), everything(1)),
-        (4614378454647723702, 4633490790882282112)
+        (4614647981792208811, 4638945785411500981)
     );
     // Naming the default order explicitly changes nothing.
     let explicit = |variant: u32| {
@@ -144,7 +145,7 @@ fn the_default_order_sounds_exactly_as_before() {
     };
     assert_eq!(
         fingerprint(explicit(0), explicit(1)),
-        (4614378454647723702, 4633490790882282112)
+        (4614647981792208811, 4638945785411500981)
     );
 }
 

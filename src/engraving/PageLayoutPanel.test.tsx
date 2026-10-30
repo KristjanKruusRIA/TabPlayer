@@ -27,7 +27,7 @@ it.each([['A3',297,420],['A4',210,297],['A5',148,210],['Letter',215.9,279.4],['L
   const commands:PageCommand[]=[];
   render(<PageLayoutPanel value={{...page(),scale:1.5,profile:'Tab'}} busy={false} onEdit={command=>commands.push(command)}/>);
   fireEvent.click(screen.getByRole('button',{name}));
-  expect(screen.getByLabelText('Width (mm)')).toHaveValue(widthMm);expect(screen.getByLabelText('Height (mm)')).toHaveValue(297===heightMm?297:heightMm);
+  expect(screen.getByLabelText('Width (mm)')).toHaveValue(widthMm);expect(screen.getByLabelText('Height (mm)')).toHaveValue(heightMm);
   expect(screen.getByLabelText('Left margin (mm)')).toHaveValue(16);expect(screen.getByLabelText('Scale (%)')).toHaveValue(150);
   expect(notationRadio('Tab')).toBeChecked();expect(commands).toEqual([]);
   fireEvent.click(screen.getByRole('button',{name:'Apply page layout'}));
@@ -127,4 +127,13 @@ it('shows a saved header and footer and refuses unknown fields',()=>{
   expect(commands.at(-1)!.layout).toEqual({...value,widthMm:200});
   fireEvent.change(screen.getByLabelText('First page footer center'),{target:{value:'%COMPOSER%'}});fireEvent.click(screen.getByRole('button',{name:'Apply page layout'}));
   expect(screen.getByRole('alert')).toHaveTextContent('First page footer center: unknown field %COMPOSER%.');expect(commands).toHaveLength(1);
+});
+
+it('falls back focus to summary when busy disables an active control',()=>{
+  const {rerender}=render(<PageLayoutPanel value={page()} busy={false} onEdit={()=>{}}/>);
+  const radio=notationRadio('Document notation');
+  radio.focus();
+  expect(radio).toHaveFocus();
+  rerender(<PageLayoutPanel value={page()} busy={true} onEdit={()=>{}}/>);
+  expect(screen.getByText('Page layout')).toHaveFocus();
 });

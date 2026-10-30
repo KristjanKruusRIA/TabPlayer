@@ -1,4 +1,4 @@
-import { useEffect,useId,useState } from 'react';
+import { useEffect,useId,useRef,useState } from 'react';
 import type { EngravingCommand,PageLayout } from './types';
 import { validatePageLayout } from './page';
 import { defaultHeaderFooter,scoreFieldNames,type HeaderFooter } from './header-footer';
@@ -14,8 +14,14 @@ const fieldList=[...scoreFieldNames,'PAGE','PAGES'].map(name=>`%${name}%`).join(
 
 export function PageLayoutPanel({value,busy,onEdit}:PageLayoutPanelProps) {
   const [draft,setDraft]=useState(()=>draftOf(value)),[error,setError]=useState(''),fieldHelp=useId();
+  const summaryRef=useRef<HTMLElement>(null),fieldsetRef=useRef<HTMLFieldSetElement>(null);
   const appliedKey=JSON.stringify([value.widthMm,value.heightMm,value.marginsMm.top,value.marginsMm.right,value.marginsMm.bottom,value.marginsMm.left,value.scale,value.profile,value.headerFooter??null]);
   useEffect(()=>{setDraft(draftOf(value));setError('');},[appliedKey]);
+  useEffect(()=>{
+    if(busy&&fieldsetRef.current?.contains(document.activeElement)){
+      summaryRef.current?.focus({preventScroll:true});
+    }
+  },[busy]);
   const setText=(page:keyof HeaderFooter,band:typeof bands[number],slot:typeof slots[number],text:string)=>{
     const headerFooter=structuredClone(draft.headerFooter);headerFooter[page][band][slot]=text;setDraft({...draft,headerFooter});
   };
@@ -26,7 +32,7 @@ export function PageLayoutPanel({value,busy,onEdit}:PageLayoutPanelProps) {
     if(JSON.stringify(draft.headerFooter)!==JSON.stringify(defaultHeaderFooter()))layout.headerFooter=structuredClone(draft.headerFooter);
     try{validatePageLayout(layout);setError('');onEdit({type:'setPageLayout',layout});}catch(reason){setError(reason instanceof Error?reason.message:String(reason));}
   };
-  return <details><summary>Page layout</summary><fieldset disabled={busy}>
+  return <details><summary ref={summaryRef} tabIndex={-1}>Page layout</summary><fieldset ref={fieldsetRef} disabled={busy}>
     <div className="actions">{presets.map(([name,width,height])=><button type="button" key={name} onClick={()=>setDraft({...draft,widthMm:String(width),heightMm:String(height)})}>{name}</button>)}</div>
     <div className="pair">
       <label>Width (mm)<input type="number" min={20} max={1000} step="any" value={draft.widthMm} onChange={e=>setDraft({...draft,widthMm:e.target.value})}/></label>

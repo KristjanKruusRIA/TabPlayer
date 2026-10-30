@@ -9,8 +9,10 @@ GP8's welcome page and library let you browse a catalog and filter it by artist,
 ## Behaviour
 
 - The Folders section gains three text fields beside Search, scope and Sort: **Title filter**, **Artist filter** and **Instrument filter**, and a **Clear filters** button (disabled while all are empty).
-- Each filter is a case-insensitive match. Its whitespace-separated words must all appear in the field, in any order.
-  - **Title** matches the indexed title; a score with no indexed metadata matches on its file name, as the list displays it.
+- Each filter is a folded match. Its whitespace-separated words must all appear in the field, in any order.
+  - Folding (also applied to the free-text search) is full Unicode lowercase, fullwidth ASCII and ideographic space to their plain forms (the part of NFKC that matters here), combining marks dropped, and precomposed Latin letters reduced to their base letter ("ß" to "ss", "æ" to "ae"). So NFC and NFD spellings match each other and "Bjork" finds "Björk".
+  - Decision: matching is **diacritic-insensitive**. std has no normalization and no dependency may be added, so the table covers Latin-1 and Latin Extended-A plus the common Latin Extended-B letters; other scripts match by lowercase only. This is deliberately looser than the Recent/Templates/Examples text search, which stays NFKC plus lowercase in the browser.
+  - **Title** matches what the list displays: the indexed title, or the file name when the score has no metadata or its title is empty.
   - **Artist** matches the indexed artist.
   - **Instrument** matches the indexed track names: at least one single track name must contain every word. The index stores track names, not instrument types, so this is the closest real field.
   - A score without indexed metadata (unreadable or not yet parsed) never matches an artist or instrument filter.
@@ -18,6 +20,10 @@ GP8's welcome page and library let you browse a catalog and filter it by artist,
 - Searching is the existing debounced native `file_library_search`. The query gains `title`, `artist` and `instrument` strings. The filtering runs in `LibraryIndex::search`, so totals and pages count only matching scores.
 - The "Showing previous results" line, shown after a failed request, names any active filter so the displayed rows are never mislabelled.
 - Opening a result is unchanged: it opens as a new tab and the open score, its edits and its playback are untouched. Searching and filtering never open anything.
+
+## Cost
+
+A search borrows rows from the shared per-folder indexes (`Arc`) instead of deep-cloning them, folds the filter words once, and clones only the returned page. A release test searches 50,000 indexed rows with text plus all three filters (every row matching): about 0.39 s on the development machine, asserted under 2 s.
 
 ## Wire and compatibility
 

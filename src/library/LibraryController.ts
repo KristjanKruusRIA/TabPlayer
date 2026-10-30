@@ -15,6 +15,7 @@ export class LibraryController {
   private refreshSequence=0;
   private querySequence=0;
   private indexRevision=-1;
+  private searchError:string|null=null;
   private scanSequence=0;
   private queryTimer:ReturnType<typeof setTimeout>|null=null;
   private job:ScanJob|null=null;
@@ -79,8 +80,8 @@ export class LibraryController {
   }
   private async search(sequence:number){
     const query:LibraryQuery={rootId:this.state.rootId,text:this.state.query,...this.state.filters,sort:this.state.sort,offset:this.state.offset,limit:100};
-    try {const page=await this.bridge.search(query);if(this.disposed||sequence!==this.querySequence||page.indexRevision<this.indexRevision)return;this.indexRevision=page.indexRevision;this.update({page,pageQuery:query,notice:page.warning});}
-    catch(error){if(sequence===this.querySequence)this.update({error:message(error)});}
+    try {const page=await this.bridge.search(query);if(this.disposed||sequence!==this.querySequence||page.indexRevision<this.indexRevision)return;this.indexRevision=page.indexRevision;const stale=this.state.error!==null&&this.state.error===this.searchError;this.searchError=null;this.update({page,pageQuery:query,notice:page.warning,...(stale?{error:null}:{})});}
+    catch(error){if(sequence===this.querySequence){this.searchError=message(error);this.update({error:this.searchError});}}
   }
   private current(job:ScanJob){return !this.disposed&&this.job===job&&!job.abort.signal.aborted&&this.state.snapshot?.roots.some(root=>root.id===job.rootId&&root.configurationRevision===job.configurationRevision);}
   private retire():Promise<void>|null{

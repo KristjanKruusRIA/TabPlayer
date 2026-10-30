@@ -37,11 +37,12 @@ export async function runLibraryBrowseAcceptance({buildPath}={}){
   const invoke=async(command,args={})=>{assert.ok(allowed.includes(command));owned();const value=await page.evaluate(([command,args])=>window.__TAURI_INTERNALS__.invoke(command,args),[command,args]);healthy();return value;};
   const workspace=()=>invoke('workspace_snapshot'),record=async id=>invoke('project_snapshot',{documentId:id??(await workspace()).active.documentId});
   const idle=async()=>{owned();await ui.waitForWorkspaceIdle(page);healthy();};
+  const button=async name=>{owned();await ui.clickWorkstationButton(page,name);await idle();};
   const search=(filters,text='')=>invoke('file_library_search',{query:{rootId:null,text,title:'',artist:'',instrument:'',...filters,sort:'title',offset:0,limit:100}});
   const dialog=()=>page.getByRole('dialog',{name:'Library',exact:true});
   const row=title=>dialog().getByRole('button',{name:`Select ${title}`,exact:true});
   const filter=async(label,value)=>{await dialog().getByLabel(label,{exact:true}).fill(value);};
-  const clear=async()=>{await dialog().getByRole('button',{name:'Clear filters',exact:true}).click();for(const label of ['Title filter','Artist filter','Instrument filter'])assert.equal(await dialog().getByLabel(label,{exact:true}).inputValue(),'');};
+  const clear=async()=>{const button=dialog().getByRole('button',{name:'Clear filters',exact:true});if(await button.isEnabled()){await button.click();assert.equal(await dialog().evaluate(node=>node.contains(document.activeElement)&&document.activeElement.closest('label')?.textContent.startsWith('Title filter')),true,'Clearing keeps focus in the filters');}for(const label of ['Title filter','Artist filter','Instrument filter'])assert.equal(await dialog().getByLabel(label,{exact:true}).inputValue(),'');};
   try{
     ui=await import('./workstation-commands.mjs');
     const fixture=await buildLibraryFixture(),state=writeLibraryFixture(fixture),first=state.metadata,second=state.otherMetadata;
@@ -60,9 +61,13 @@ export async function runLibraryBrowseAcceptance({buildPath}={}){
     await idle();await ui.clickWorkstationButton(page,'Open');await page.locator('[aria-label="Music notation"] svg').first().waitFor();await idle();
 
     // The score that is open before any browsing starts.
-    const start=await workspace(),openId=start.active.documentId,openBefore=await record(openId);
-    assert.equal(start.documents.length,1);assert.equal(openBefore.snapshot.project.base.title,first.title);assert.ok(samePath(openBefore.snapshot.path,state.sourcePath));assert.equal(openBefore.snapshot.dirty,false);
-    step('A score is open before browsing',{openId,title:first.title});
+    const start=await workspace(),openId=start.active.documentId,clean=await record(openId);
+    assert.equal(start.documents.length,1);assert.equal(clean.snapshot.project.base.title,first.title);assert.ok(samePath(clean.snapshot.path,state.sourcePath));assert.equal(clean.snapshot.dirty,false);
+    // Leave it with unsaved edits and undo history: opening a result must keep all of that.
+    await page.getByRole('combobox',{name:/^String/}).selectOption('5');await page.getByLabel('Fret',{exact:true}).fill('3');await button('Set note');
+    const openBefore=await poll(()=>record(openId),value=>value.snapshot.dirty,'Unsaved edit');
+    assert.equal(openBefore.snapshot.project.edits.length,clean.snapshot.project.edits.length+1);assert.equal(openBefore.snapshot.canUndo,true);
+    step('A dirty score with undo history is open before browsing',{openId,title:first.title});
 
     // Add the fixture folder through the real folder picker and index it.
     const library=async()=>{const file=page.locator('summary').filter({hasText:/^File$/});if(!await file.evaluate(node=>node.parentElement.open))await file.click();await page.getByRole('button',{name:'Library',exact:true}).click();await dialog().waitFor();};
@@ -87,9 +92,9 @@ export async function runLibraryBrowseAcceptance({buildPath}={}){
     await filter('Instrument filter',secondTrack);await expectOnly(second,first);
     native=await search({instrument:secondTrack});assert.equal(native.total,1);assert.deepEqual(native.rows[0].metadata,second);
     // Filters combine: the first score's artist with the second score's track matches nothing.
-    await filter('Artist filter',first.artist);await dialog().getByText(/^No scores match this search/).waitFor();assert.equal((await search({artist:first.artist,instrument:secondTrack})).total,0);
+    await filter('Artist filter',first.artist);await dialog().getByText(/^No scores match/).waitFor();assert.equal((await search({artist:first.artist,instrument:secondTrack})).total,0);
     // A field filter never matches another field: the artist is not a track name.
-    await clear();await filter('Instrument filter',second.artist);await dialog().getByText(/^No scores match this search/).waitFor();assert.equal((await search({instrument:second.artist})).total,0);
+    await clear();await filter('Instrument filter',second.artist);await dialog().getByText(/^No scores match/).waitFor();assert.equal((await search({instrument:second.artist})).total,0);
     await clear();await row(first.title).waitFor();await row(second.title).waitFor();
     // The index records no genre, so there is no genre filter and no row carries one.
     assert.equal(await dialog().getByLabel(/genre/i).count(),0,'No genre control');
@@ -98,18 +103,35 @@ export async function runLibraryBrowseAcceptance({buildPath}={}){
     assert.deepEqual(await workspace(),documentsBefore,'Searching never changes the open documents');
     step('Title, artist and instrument filters narrow the index, combine, and no genre filter exists',{});
 
-    // Opening a result adds a tab and leaves the open score alone.
-    await filter('Artist filter',second.artist);await expectOnly(second,first);
-    await row(second.title).click();await dialog().getByRole('button',{name:'Open',exact:true}).click();await dialog().waitFor({state:'hidden'});await idle();
-    const after=await poll(workspace,value=>value.documents.length===2,'Result opened as a second tab');
-    assert.notEqual(after.active.documentId,openId,'The result is the new active tab');
-    assert.ok(after.documents.some(entry=>entry.documentId===openId),'The original tab remains');
-    const added=await record();assert.equal(added.snapshot.project.base.title,second.title);assert.ok(samePath(added.snapshot.path,state.folderOther));
-    assert.deepEqual(await record(openId),openBefore,'The open score is untouched');
-    await page.locator(`[id=${JSON.stringify(`document-tab-${encodeURIComponent(openId)}`)}]`).click();await idle();
-    assert.equal((await workspace()).active.documentId,openId);assert.deepEqual(await record(),openBefore,'Switching back shows the same score');
+    // Opening a result adds a tab and leaves every open score alone, including its dirty flag and history.
+    const tab=id=>page.locator(`[id=${JSON.stringify(`document-tab-${encodeURIComponent(id)}`)}]`);
+    const openResult=async(found,filters)=>{
+      const known=(await workspace()).documents.map(entry=>entry.documentId);
+      if(!await dialog().isVisible()){await library();await dialog().getByRole('navigation',{name:'Library sections',exact:true}).getByRole('button',{name:'Folders',exact:true}).click();}
+      await clear();for(const [label,value] of filters)await filter(label,value);await row(found.title).waitFor();
+      await row(found.title).click();await dialog().getByRole('button',{name:'Open',exact:true}).click();await dialog().waitFor({state:'hidden'});await idle();
+      const after=await poll(workspace,value=>value.documents.length===known.length+1,'Result opened as one more tab');
+      assert.ok(known.every(id=>after.documents.some(entry=>entry.documentId===id)),'Every earlier tab remains');
+      assert.ok(!known.includes(after.active.documentId),'The result is the new active tab');
+      return after;
+    };
+    const second_=await openResult(second,[['Artist filter',second.artist]]);
+    const added=await record();assert.equal(added.snapshot.project.base.title,second.title);assert.ok(samePath(added.snapshot.path,state.folderOther));assert.equal(added.snapshot.dirty,false);
+    assert.deepEqual(await record(openId),openBefore,'The dirty score is untouched: edits, undo history and unsaved flag');
+    await tab(openId).click();await idle();
+    assert.equal((await workspace()).active.documentId,openId);assert.deepEqual(await record(),openBefore,'Switching back shows the same dirty score');
     await page.screenshot({path:resolve(paths.results,'02-two-tabs.png')});result.screenshots.push('02-two-tabs.png');
-    step('Opening a search result adds a tab and leaves the open score unchanged',{openId,addedId:added.snapshot.path});
+    step('Opening a result leaves a dirty score unchanged',{openId,addedId:second_.active.documentId});
+
+    // A finalized score keeps its lock and unsaved state too.
+    await button('Finalize document');
+    const finalized=await poll(()=>record(openId),value=>value.snapshot.project.lock,'Finalized');
+    assert.equal(finalized.snapshot.dirty,true);
+    const third=await openResult(first,[['Title filter',first.title.slice(0,5)]]);
+    assert.equal(third.documents.length,3);
+    assert.deepEqual(await record(openId),finalized,'The finalized score keeps its lock, edits and unsaved flag');
+    await tab(openId).click();await idle();assert.deepEqual(await record(),finalized,'Switching back shows the same finalized score');
+    step('Opening a result leaves a finalized score unchanged',{openId});
     healthy();
   }catch(error){failure=error;result.error={message:String(error),stack:error.stack};if(page)try{await page.screenshot({path:resolve(paths.results,'failure.png')});}catch{}}
   finally{

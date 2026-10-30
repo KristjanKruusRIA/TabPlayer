@@ -28,9 +28,10 @@ interface Room {first:number;last:number;down:number;up:number}
 /**
  * How far each note of a voice may move without passing its neighbours. A note's attacks (a trill's, a tremolo's) move together, so a
  * note is one group from its first attack to its last. A group may move at most half the gap, less a tick, toward the nearest group
- * before or after it, so two groups that both move toward each other still keep their order. No group starts before zero.
+ * before or after it, so two groups that both move toward each other still keep their order. No group starts before zero, and the last
+ * group of a voice keeps its last attack at least one tick inside the plan (`ceiling`).
  */
-function rooms(notes:PlanNote[],lanes:Set<string>):Map<string,Room> {
+function rooms(notes:PlanNote[],lanes:Set<string>,ceiling:number):Map<string,Room> {
   const result=new Map<string,Room>(),byLane=new Map<string,Room[]>();
   for(const note of notes) {
     const lane=laneOf(note);if(!lanes.has(lane))continue;
@@ -47,7 +48,7 @@ function rooms(notes:PlanNote[],lanes:Set<string>):Map<string,Room> {
       for(let index=start;index<end;index++) {
         const room=list[index];
         room.down=reach===-Infinity?room.first:Math.min(room.first,Math.max(0,Math.floor((room.first-reach-1)/2)));
-        room.up=next===Infinity?Infinity:Math.max(0,Math.floor((next-room.last-1)/2));
+        room.up=next===Infinity?Math.max(0,ceiling-1-room.last):Math.max(0,Math.floor((next-room.last-1)/2));
       }
       for(let index=start;index<end;index++)reach=Math.max(reach,list[index].last);
     }
@@ -62,13 +63,13 @@ function rooms(notes:PlanNote[],lanes:Set<string>):Map<string,Room> {
  * events are not attached to the note. A tied note's later notes make no attack of their own, so the whole tie moves and scales.
  */
 export function applyNoteAudio(attacks:AudibleAttack[],notes:PlanNote[],ceiling:number):void {
-  const space=rooms(notes,new Set(attacks.map(attack=>laneOf(attack.note))));
+  const space=rooms(notes,new Set(attacks.map(attack=>laneOf(attack.note))),ceiling);
   for(const {note,raw,source} of attacks) {
     const audio=getNoteAudio(source)!,room=space.get(`${laneOf(note)}|${groupOf(note)}`)!,fixed=hasPitchEvents(source);
     const shift=fixed?0:Math.max(-room.down,Math.min(room.up,audio.offset))||0;
     const from=note.startTick,length=note.endTick-from,start=from+shift;
     const scaled=fixed||audio.length===100?length:Math.max(1,Math.round(length*audio.length/100));
-    const end=scaled===length?start+length:Math.max(start+1,Math.min(start+scaled,ceiling));
+    const end=Math.max(start+1,Math.min(start+scaled,ceiling));
     const velocity=audio.velocity?Math.max(1,Math.min(127,Math.round(note.velocity+audio.velocity))):note.velocity;
     if(shift||end-start!==length||velocity!==note.velocity) {
       // The pitch curve keeps its shape over the new length.

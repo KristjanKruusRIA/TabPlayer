@@ -43,11 +43,11 @@ export function hasNoteAudio(score:model.Score):boolean {
 
 /**
  * Whether the note, or a note tied on to it, carries something that alphaTab turns into pitch-wheel events: a bend, a whammy bar,
- * a slide or vibrato. Those events are not attached to the note, so moving or stretching the note would leave them behind.
+ * a slide or vibrato (the note's or its beat's). Those events are not attached to the note, so moving or stretching the note would leave them behind.
  */
 export function hasPitchEvents(note:model.Note):boolean {
   for(let link:model.Note|null=note;link;link=link.tieDestination)
-    if(link.hasBend||link.beat.hasWhammyBar||link.slideInType!==model.SlideInType.None||link.slideOutType!==model.SlideOutType.None||link.vibrato!==model.VibratoType.None)return true;
+    if(link.hasBend||link.beat.hasWhammyBar||link.slideInType!==model.SlideInType.None||link.slideOutType!==model.SlideOutType.None||link.vibrato!==model.VibratoType.None||link.beat.vibrato!==model.VibratoType.None)return true;
   return false;
 }
 

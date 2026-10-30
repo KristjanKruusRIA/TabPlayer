@@ -37,7 +37,7 @@ it('commits a value on blur or Enter, never while typing, and sends the other tw
   expect(onEdit).toHaveBeenLastCalledWith(patch({ length: 50, offset: 0, velocity: 0 }));
   fireEvent.change(field(/Start offset/), { target: { value: '-30' } });
   fireEvent.keyDown(field(/Start offset/), { key: 'Enter' });
-  expect(onEdit).toHaveBeenLastCalledWith(patch({ length: 100, offset: -30, velocity: 0 }));
+  expect(onEdit).toHaveBeenLastCalledWith(patch({ length: 50, offset: -30, velocity: 0 }));
   expect(onEdit).toHaveBeenCalledTimes(2);
 });
 
@@ -76,4 +76,16 @@ it('is disabled while busy or locked, and explains a tie destination and a bent 
   render(<TechniquePanel score={bent} target={target} string={6} busy={false} onEdit={onEdit} />);
   expect(field(/Sounding length/)).toBeDisabled(); expect(field(/Start offset/)).toBeDisabled(); expect(field(/Velocity change/)).toBeEnabled();
   expect(screen.getByText(/keeps its start and length/)).toBeInTheDocument();
+});
+
+it('sends one edit for Enter followed by blur, and builds a second field on what the first sent', () => {
+  const onEdit = vi.fn();
+  render(<TechniquePanel score={music()} target={target} string={6} busy={false} onEdit={onEdit} />);
+  fireEvent.change(field(/Sounding length/), { target: { value: '50' } });
+  fireEvent.keyDown(field(/Sounding length/), { key: 'Enter' }); fireEvent.blur(field(/Sounding length/));
+  expect(onEdit).toHaveBeenCalledTimes(1);
+  // The score has not changed yet: the second field must not undo the first.
+  fireEvent.change(field(/Start offset/), { target: { value: '20' } }); fireEvent.blur(field(/Start offset/));
+  expect(onEdit).toHaveBeenCalledTimes(2);
+  expect(onEdit).toHaveBeenLastCalledWith(patch({ length: 50, offset: 20, velocity: 0 }));
 });

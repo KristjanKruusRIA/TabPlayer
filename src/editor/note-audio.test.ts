@@ -4,7 +4,7 @@ import { buildDocument, buildScore, exportGp, previewEdit } from '../engine';
 import { blankProject, type EditCommand, type Project } from '../project';
 import { validateParityCommand } from '../parity-commands';
 import { applyNoteTechniques } from './techniques';
-import { getNoteAudio, hasNoteAudio, plainNoteAudio, setNoteAudio, validateNoteAudio, type NoteAudio } from './note-audio';
+import { getNoteAudio, hasNoteAudio, hasPitchEvents, plainNoteAudio, setNoteAudio, validateNoteAudio, type NoteAudio } from './note-audio';
 import { makeMusicClip } from './clipboard-source';
 import { loadInterchangeScore } from '../interchange/gp';
 import { buildPlaybackPlan } from '../audio/plan';
@@ -131,5 +131,14 @@ describe('what carries the settings along', () => {
     const wire = JSON.parse(model.JsonConverter.scoreToJson(score));
     wire.tracks[0].staves[0].bars[0].voices[0].beats[0].notes[0].tabplayernoteaudio = { length: 9999, offset: 0, velocity: 0 };
     expect(getNoteAudio(noteAt(model.JsonConverter.jsonToScore(JSON.stringify(wire), new Settings())))).toBeNull();
+  });
+});
+
+describe('pitch events on the beat', () => {
+  it('treats a beat vibrato, which alphaTab turns into bend events, like a note vibrato', () => {
+    const score = music(), n = noteAt(score);
+    expect(hasPitchEvents(n)).toBe(false);
+    n.beat.vibrato = model.VibratoType.Slight;
+    expect(hasPitchEvents(n)).toBe(true);
   });
 });

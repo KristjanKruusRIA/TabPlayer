@@ -54,4 +54,5 @@ GP8 lets a note sound differently from how it is written (manual: Audio, Note se
 - Not stored in Guitar Pro files (see above) or MusicXML.
 - A note on a bent, whammy, sliding or vibrato line keeps its start and length (velocity only).
 - The room a voice leaves an offset is computed within one staff and voice; notes in other voices may cross.
+- A 400% note followed by a note on the same key overlaps it; a standard MIDI file cannot hold two overlapping notes on one key and channel, so a reader pairs the first note-on with the first note-off and reads the two back swapped. The plan and the audio export play the overlap correctly; the MIDI file is correct for every other case.
 - A quarter note is 960 ticks whatever the tempo, so an offset is a musical fraction, not a time; a tempo change changes its duration.

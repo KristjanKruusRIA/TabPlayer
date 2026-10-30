@@ -190,6 +190,39 @@ describe('MIDI export', () => {
     const second = plan.notes.find(n => n.source.target.beat === 1)!;
     expect([changed[1].start, changed[1].end, changed[1].velocity]).toEqual([second.startTick, second.endTick, second.velocity]);
   });
+  describe('a late note at the end of the plan', () => {
+    const cases: [string, number, model.Duration, number, number, number][] = [
+      ['eight eighths with the last offset +480', 8, model.Duration.Eighth, 480, 3839, 3840],
+      ['four quarters with the last offset +480', 4, model.Duration.Quarter, 480, 3360, 3840],
+      ['a whole note offset +240', 1, model.Duration.Whole, 240, 240, 3840],
+    ];
+    for (const [name, count, duration, offset, start, end] of cases) {
+      it(`keeps ${name} inside the plan, and the MIDI file agrees to the tick`, () => {
+        const score = built(authored(1, count, duration)), notes = Array.from({ length: count }, (_, i) => note(score, 0, i));
+        const base = planOf(score);
+        setNoteAudio(notes[count - 1], audio({ offset }));
+        const plan = planOf(score), last = plan.notes[count - 1];
+        expect([last.startTick, last.endTick]).toEqual([start, end]);
+        expect(plan.durationTick).toBe(base.durationTick);
+        validatePlaybackPlan(plan);
+        const midi = readMidiFile(exportMidi(score, { tracks: [0], range: null } as never)).parts[0].notes;
+        expect(midi).toHaveLength(count);
+        expect([midi[count - 1].start, midi[count - 1].end]).toEqual([last.startTick, last.endTick]);
+      });
+    }
+    it('exports a shifted note at the edge of a range with the start and the clipped end the plan has', () => {
+      const score = built(authored(2, 4, model.Duration.Quarter)), notes = [0, 1, 2, 3].map(i => note(score, 0, i)); note(score, 1, 0);
+      setNoteAudio(notes[3], audio({ offset: 480, length: 200 }));
+      const plan = planOf(score), shifted = plan.notes[3];
+      expect(shifted.startTick).toBeGreaterThan(2880); expect(shifted.startTick).toBeLessThan(3840);
+      const midi = readMidiFile(exportMidi(score, { tracks: [0], range: { first: 0, last: 0 } } as never)).parts[0].notes;
+      expect(midi).toHaveLength(4);
+      expect([midi[3].start, midi[3].end]).toEqual([shifted.startTick, Math.min(shifted.endTick, 3840)]);
+      const second = readMidiFile(exportMidi(score, { tracks: [0], range: { first: 1, last: 1 } } as never)).parts[0].notes;
+      expect(second).toHaveLength(2);
+      expect(second.map(n => [n.start, n.end]).sort((a, b) => a[1] - b[1])).toEqual([[0, 960], [0, shifted.endTick - 3840]]);
+    });
+  });
   it('writes a score without settings exactly as before', () => {
     let project = blankProject();
     project = previewEdit(project, { type: 'setNote', target: { track: 0, staff: 0, bar: 0, voice: 0, beat: 0 }, string: 1, fret: 3 }).project;

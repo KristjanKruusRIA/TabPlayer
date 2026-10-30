@@ -5,7 +5,6 @@ import { matchScales,scalePatterns,scalePitches } from './scales';
 import { harmonyPitchName,soundingChordPitches } from './ChordDiagramPreview';
 import { ScaleDiagramEditor } from './ScaleDiagramEditor';
 import { Dialog } from '../ui/Dialog';
-import { Segmented } from '../ui/Segmented';
 
 const roots=['C','C# / Db','D','D# / Eb','E','F','F# / Gb','G','G# / Ab','A','A# / Bb','B'];
 const tagOptions=[{value:'',label:'All tags'},...[...new Set(scalePatterns.flatMap(value=>value.tags))].map(value=>({value,label:value}))];
@@ -25,10 +24,7 @@ export function ScaleToolPanel({score,staff:currentStaff,selection,busy,onClose,
   return <Dialog title="Scale browser" onClose={onClose} className="scale-dialog" actions={<button ref={close} data-autofocus={busy||undefined} type="button" className="tp-button" onClick={onClose}>Close scales</button>}><fieldset disabled={busy}>
     <label>Scale root<select data-autofocus={!busy||undefined} value={root} onChange={e=>setRoot(Number(e.target.value))}>{roots.map((name,index)=><option key={name} value={index}>{name}</option>)}</select></label>
     <label>Search scales<input value={search} onChange={e=>setSearch(e.target.value)}/></label>
-    <div className="tp-field">
-      <span className="tp-field-label" aria-hidden="true">Scale tag</span>
-      <Segmented label="Scale tag" value={tag} options={tagOptions} onChange={setTag}/>
-    </div>
+    <label>Scale tag<select value={tag} onChange={e=>setTag(e.target.value)}>{tagOptions.map(option=><option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
     <label>Scale pattern<select value={active?.id??'custom'} onChange={e=>setPattern(e.target.value)}>{filtered.map(value=><option key={value.id} value={value.id}>{value.name}</option>)}<option value="custom">Custom intervals</option></select></label>
     {!filtered.length&&<p className="muted">No catalog scales match this search.</p>}
     {!active&&<label>Custom intervals<input value={custom} onChange={e=>setCustom(e.target.value)} placeholder="Sorted semitones including 0"/></label>}

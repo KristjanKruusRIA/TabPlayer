@@ -79,7 +79,7 @@ export async function runTrackInterpretationAcceptance({buildPath}={}){
   const exportWav=async name=>{
     await ui.clickWorkspaceCommand(page,'Export score',{waitForIdle:false});
     const dialog=page.getByRole('dialog',{name:'Export score'});await dialog.getByLabel('Export format').selectOption('wav');
-    await dialog.getByLabel('File type').selectOption('wav');await dialog.getByLabel('Sample rate').selectOption('44100');await dialog.getByLabel('Bit depth').selectOption('16');
+    await dialog.getByRole('radio',{name:'WAV'}).click();await dialog.getByRole('radio',{name:'44.1 kHz'}).click();await dialog.getByRole('radio',{name:'16 bit'}).click();
     await dialog.getByLabel('File name',{exact:true}).fill(name);await dialog.getByText(`Saves as ${name}.wav`,{exact:true}).waitFor();
     await dialog.getByRole('button',{name:'Export',exact:true}).click();
     const file=resolve(paths.export,`${name}.wav`),deadline=Date.now()+120000;

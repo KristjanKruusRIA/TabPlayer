@@ -807,3 +807,39 @@ fn a_change_from_the_model_to_a_response_crossfades_into_it() {
         );
     }
 }
+#[test]
+fn a_track_plays_the_response_right_wherever_it_sits_in_the_mix() {
+    // A mix gives each track its own place in the convolution's blocks, from its index alone. Where it sits changes
+    // the last places of the sum and nothing else, and the same place gives the same bits.
+    let (id, bytes) = import(&speaker(48_000, 0.6, 3, 4_000.0), 48_000);
+    let taps = taps(&bytes, 48_000);
+    let fx = names(FxSettings::default(), &id, 0.0);
+    let frames = 30_000;
+    let input: Vec<f32> = (0..frames).map(|n| riff(n, 48_000)).collect();
+    let render = |index: usize| -> Vec<f32> {
+        let mut dsp = TrackDsp::new(fx.clone(), 48_000, 1.0).unwrap();
+        dsp.set_ir_index(index);
+        input
+            .iter()
+            .map(|&x| dsp.process([x; 2], 120.0)[0])
+            .collect()
+    };
+    let mut renders = Vec::new();
+    for index in [0usize, 1, 2, 7, 15] {
+        let out = render(index);
+        let peak = out.iter().fold(0.0f32, |p, v| p.max(v.abs())) as f64;
+        assert!(peak > 0.05, "index {index}: heard");
+        let worst = (0..frames)
+            .map(|n| {
+                let want: f64 = (0..taps.len().min(n + 1))
+                    .map(|k| taps[k] as f64 * input[n - k] as f64)
+                    .sum();
+                (out[n] as f64 - want).abs()
+            })
+            .fold(0.0, f64::max);
+        assert!(worst < peak * 3e-4, "index {index}: error {worst}");
+        assert_eq!(out, render(index), "index {index} repeats exactly");
+        renders.push(out);
+    }
+    assert!(renders.windows(2).any(|pair| pair[0] != pair[1]));
+}

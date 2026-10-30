@@ -13,7 +13,11 @@ use sha2::{Digest, Sha256};
 use std::{
     io::Read,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex, PoisonError},
+    sync::{
+        Arc, Mutex, PoisonError,
+        atomic::{AtomicU32, Ordering},
+    },
+    time::SystemTime,
 };
 
 /// The largest file read.
@@ -34,6 +38,8 @@ const TAIL_FLOOR: f32 = 1e-4;
 const LEVEL_BAND: (f64, f64) = (400.0, 4_000.0);
 /// A response with less than this share of its peak gain across the level band is no guitar cabinet.
 const BAND_FLOOR: f64 = 3e-3;
+/// A tap below this is zero.
+const TAP_FLOOR: f32 = 1e-20;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -246,7 +252,8 @@ pub fn resample(input: &[f32], from: u32, to: u32) -> Vec<f32> {
     const ZEROS: f64 = 16.0;
     const BETA: f64 = 9.0;
     let ratio = to as f64 / from as f64;
-    let cutoff = 0.5 * if ratio < 1.0 { ratio * 0.97 } else { 1.0 };
+    // Just under the lower rate's Nyquist, in cycles per input sample.
+    let cutoff = 0.5 * ratio.min(1.0) * 0.97;
     let half = ZEROS / (2.0 * cutoff);
     let window: Vec<f64> = (0..=4096)
         .map(|i| {
@@ -312,6 +319,10 @@ fn band_gain(taps: &[f32], rate: u32) -> (f64, f64) {
 /// faded if longer than `MAX_SECONDS`, and scaled so its gain across the guitar's midrange is 1, as the built-in
 /// cabinets are drawn. Refuses a recording that is silent, or has nothing in that band.
 pub fn prepare_taps(wav: &Wav, rate: u32) -> Result<Vec<f32>, IrProblem> {
+    prepare(wav, rate).map(|(taps, _)| taps)
+}
+/// The taps, and whether the response was cut because it ran past `MAX_SECONDS` once its silent ends were dropped.
+fn prepare(wav: &Wav, rate: u32) -> Result<(Vec<f32>, bool), IrProblem> {
     let peak = wav.mono.iter().fold(0.0f32, |p, v| p.max(v.abs()));
     if peak < SILENT_PEAK {
         return Err(IrProblem::refused(
@@ -329,8 +340,9 @@ pub fn prepare_taps(wav: &Wav, rate: u32) -> Result<Vec<f32>, IrProblem> {
         .rposition(|v| v.abs() >= peak * TAIL_FLOOR)
         .unwrap_or(0);
     taps.truncate(last + 1);
-    taps.drain(..first);
+    taps.drain(..first.min(taps.len() - 1));
     let limit = max_taps(rate);
+    // Counted from the onset, not from the start of the file: a long lead-in is not part of the response.
     let cut = taps.len() > limit;
     taps.truncate(limit);
     // A cut ends over a tenth of a second; a response that ended by itself over a millisecond, to stop a click.
@@ -353,21 +365,28 @@ pub fn prepare_taps(wav: &Wav, rate: u32) -> Result<Vec<f32>, IrProblem> {
         ));
     }
     let scale = (1.0 / band) as f32;
-    taps.iter_mut().for_each(|v| *v *= scale);
+    // Values this small are no sound, and a convolution that met them as numbers would meet them again as products
+    // of tiny numbers, which are slow.
+    taps.iter_mut().for_each(|v| {
+        *v = if (*v * scale).abs() < TAP_FLOOR {
+            0.0
+        } else {
+            *v * scale
+        }
+    });
     if taps.iter().any(|v| !v.is_finite()) {
         return Err(IrProblem::refused("This recording could not be scaled."));
     }
-    Ok(taps)
+    if taps.iter().all(|v| *v == 0.0) {
+        return Err(IrProblem::refused(
+            "This recording is silent once it is scaled, so it cannot be a cabinet response.",
+        ));
+    }
+    Ok((taps, cut))
 }
-/// Whether the response was cut because it ran past `MAX_SECONDS`.
+/// Whether the response was cut because it ran past `MAX_SECONDS`. A recording that cannot be a response was not.
 pub fn was_cut(wav: &Wav, rate: u32) -> bool {
-    let peak = wav.mono.iter().fold(0.0f32, |p, v| p.max(v.abs()));
-    let last = wav
-        .mono
-        .iter()
-        .rposition(|v| v.abs() >= peak * TAIL_FLOOR)
-        .unwrap_or(0);
-    (last + 1) as f64 * rate as f64 / wav.rate as f64 > rate as f64 * MAX_SECONDS
+    prepare(wav, rate).is_ok_and(|(_, cut)| cut)
 }
 
 /// What the library keeps about a response, for the picker.
@@ -395,6 +414,8 @@ struct Sidecar {
     duration_ms: f64,
 }
 const SIDECAR_FORMAT: &str = "tabplayer-cabinet-ir";
+/// The most a description may hold.
+const SIDECAR_LIMIT: u64 = 4096;
 /// What a response's state is, for the sound panel's notice.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -415,13 +436,21 @@ pub fn valid_id(id: &str) -> bool {
 fn identity(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))[..32].to_string()
 }
+/// Whether a document's name for a response may hold `c`: what its rules accept, less the byte-order mark, which
+/// they refuse at either end and a name must not depend on where it falls.
+fn allowed_in_name(c: char) -> bool {
+    !c.is_control()
+        && c != '\u{FEFF}'
+        && matches!(c, '\u{20}'..='\u{D7FF}' | '\u{E000}'..='\u{FFFD}' | '\u{10000}'..='\u{10FFFF}')
+}
 /// A display name from a file name: no control characters or path, trimmed, at most 64 characters.
 pub fn display_name(file_name: &str) -> String {
     let stem = Path::new(file_name)
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or("");
-    let clean: String = stem.chars().filter(|c| !c.is_control()).collect();
+    // What a document accepts in a name: no control characters, no byte-order mark, no non-characters.
+    let clean: String = stem.chars().filter(|&c| allowed_in_name(c)).collect();
     let name: String = clean.trim().chars().take(64).collect();
     let name = name.trim().to_string();
     if name.is_empty() {
@@ -429,6 +458,16 @@ pub fn display_name(file_name: &str) -> String {
     } else {
         name
     }
+}
+/// Reads at most `limit` bytes of a small file, or nothing if it is longer or cannot be read.
+fn read_small(path: &Path, limit: u64) -> Option<Vec<u8>> {
+    let mut bytes = Vec::new();
+    std::fs::File::open(path)
+        .ok()?
+        .take(limit + 1)
+        .read_to_end(&mut bytes)
+        .ok()?;
+    (bytes.len() as u64 <= limit).then_some(bytes)
 }
 /// Reads a file whole, but not past `MAX_FILE_BYTES`.
 fn read_bounded(path: &Path) -> Result<Vec<u8>, IrProblem> {
@@ -466,18 +505,37 @@ fn read_bounded(path: &Path) -> Result<Vec<u8>, IrProblem> {
     Ok(bytes)
 }
 
-/// How many kernels the library keeps designed at once.
+/// How many kernels, and findings that a file cannot make one, the library keeps at once.
 const CACHE_SIZE: usize = 12;
+/// What a response file looked like when it was read: if it still does, what was made from it still holds.
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct Stamp {
+    bytes: u64,
+    modified: Option<SystemTime>,
+}
+impl Stamp {
+    fn of(path: &Path) -> Option<Self> {
+        let metadata = std::fs::metadata(path).ok().filter(|m| m.is_file())?;
+        Some(Self {
+            bytes: metadata.len(),
+            modified: metadata.modified().ok(),
+        })
+    }
+}
 struct Cached {
     id: String,
     rate: u32,
-    kernel: Arc<IrKernel>,
+    stamp: Stamp,
+    /// The kernel the file made, or why it cannot, so that a damaged file is read once and not at every prepare.
+    outcome: Result<Arc<IrKernel>, IrProblem>,
 }
 /// A folder of responses, one `<id>.wav` and `<id>.json` each, and the kernels designed from them.
 pub struct IrLibrary {
     directory: PathBuf,
     cache: Mutex<Vec<Cached>>,
     writes: Mutex<()>,
+    /// The rate the latest kernel was asked for at, which is the sound card's, or 0 before any.
+    device_rate: AtomicU32,
 }
 impl IrLibrary {
     pub fn new(directory: PathBuf) -> Self {
@@ -485,6 +543,7 @@ impl IrLibrary {
             directory,
             cache: Mutex::new(Vec::new()),
             writes: Mutex::new(()),
+            device_rate: AtomicU32::new(0),
         }
     }
     fn wav_path(&self, id: &str) -> PathBuf {
@@ -493,25 +552,40 @@ impl IrLibrary {
     fn meta_path(&self, id: &str) -> PathBuf {
         self.directory.join(format!("{id}.json"))
     }
+    /// What the description kept beside a response says, if it can be read and is one of ours.
+    fn sidecar(&self, id: &str) -> Option<Sidecar> {
+        read_small(&self.meta_path(id), SIDECAR_LIMIT)
+            .and_then(|b| serde_json::from_slice::<Sidecar>(&b).ok())
+            .filter(|s| s.format == SIDECAR_FORMAT && s.version == 1)
+    }
     fn cache(&self) -> std::sync::MutexGuard<'_, Vec<Cached>> {
         self.cache.lock().unwrap_or_else(PoisonError::into_inner)
     }
     /// Copies the file at `path` into the library.
     pub fn import_path(&self, path: &Path) -> Result<IrEntry, IrProblem> {
         let bytes = read_bounded(path)?;
-        let name = display_name(&path.to_string_lossy());
+        // The file's name, which `import_bytes` makes the display name of, once.
+        let name = path.file_name().map_or_else(
+            || path.to_string_lossy().into_owned(),
+            |name| name.to_string_lossy().into_owned(),
+        );
         self.import_bytes(&bytes, &name)
     }
     /// Copies `bytes`, a WAV file called `name`, into the library, unless it is not an acceptable response. Importing
-    /// a file that is already there changes nothing.
+    /// a file that is already there changes nothing, unless the copy there has been damaged or its description lost,
+    /// in which case it is put right.
     pub fn import_bytes(&self, bytes: &[u8], name: &str) -> Result<IrEntry, IrProblem> {
         if bytes.len() as u64 > MAX_FILE_BYTES {
             return Err(IrProblem::refused("This file is too large."));
         }
         let wav = parse_wav(bytes)?;
-        // The file must make a response at the usual rates, so a refusal comes now and not at the first note.
-        prepare_taps(&wav, 48_000)?;
-        let notice = was_cut(&wav, 48_000).then(|| {
+        // The file must make a response at the usual rate and at the rate the sound card plays at, so a refusal comes
+        // now and not at the first note.
+        let (_, cut) = prepare(&wav, 48_000)?;
+        if let Some(rate) = self.device_rate().filter(|&rate| rate != 48_000) {
+            prepare(&wav, rate).map_err(|p| at_rate(p, rate))?;
+        }
+        let notice = cut.then(|| {
             format!("Longer than {MAX_SECONDS:.0} second, so the end was faded out and cut.")
         });
         let id = identity(bytes);
@@ -522,23 +596,28 @@ impl IrLibrary {
                 "The library holds {MAX_ENTRIES} responses. Remove one first."
             )));
         }
-        let kept = existing.into_iter().find(|e| e.id == id);
+        let sidecar = self.sidecar(&id);
+        let intact = read_bounded(&self.wav_path(&id)).is_ok_and(|kept| identity(&kept) == id);
         let entry = IrEntry {
             id: id.clone(),
-            name: kept
-                .as_ref()
-                .map_or_else(|| display_name(name), |e| e.name.clone()),
+            name: sidecar.as_ref().map_or_else(
+                || display_name(name),
+                |s| display_name(&format!("{}.wav", s.name)),
+            ),
             sample_rate: wav.rate,
             channels: wav.channels,
             duration_ms: wav.mono.len() as f64 * 1000.0 / wav.rate as f64,
             bytes: bytes.len() as u64,
             notice,
         };
-        if kept.is_none() {
+        if !intact || sidecar.is_none() {
             std::fs::create_dir_all(&self.directory).map_err(|e| {
                 IrProblem::unreadable(format!("The library cannot be written: {e}"))
             })?;
-            crate::files::write_bytes(&self.wav_path(&id), bytes).map_err(IrProblem::unreadable)?;
+            if !intact {
+                crate::files::write_bytes(&self.wav_path(&id), bytes)
+                    .map_err(IrProblem::unreadable)?;
+            }
             let sidecar = serde_json::to_vec_pretty(&Sidecar {
                 format: SIDECAR_FORMAT.into(),
                 version: 1,
@@ -550,6 +629,8 @@ impl IrLibrary {
             .map_err(|e| IrProblem::unreadable(e.to_string()))?;
             crate::files::write_bytes(&self.meta_path(&id), &sidecar)
                 .map_err(IrProblem::unreadable)?;
+            // Whatever was learned about the old file no longer holds.
+            self.cache().retain(|c| c.id != id);
         }
         Ok(entry)
     }
@@ -566,12 +647,7 @@ impl IrLibrary {
                     return None;
                 }
                 let bytes = file.metadata().ok()?.len();
-                let sidecar = std::fs::read(self.meta_path(id))
-                    .ok()
-                    .filter(|b| b.len() < 4096)
-                    .and_then(|b| serde_json::from_slice::<Sidecar>(&b).ok())
-                    .filter(|s| s.format == SIDECAR_FORMAT && s.version == 1);
-                Some(match sidecar {
+                Some(match self.sidecar(id) {
                     Some(s) => IrEntry {
                         id: id.into(),
                         name: display_name(&format!("{}.wav", s.name)),
@@ -639,55 +715,113 @@ impl IrLibrary {
             ));
         }
         let bytes = read_bounded(&self.wav_path(id))?;
-        if identity(&bytes) != id {
+        Self::taps_of(&bytes, id, rate)
+    }
+    fn taps_of(bytes: &[u8], id: &str, rate: u32) -> Result<Vec<f32>, IrProblem> {
+        if identity(bytes) != id {
             return Err(IrProblem::unreadable(
                 "The file has changed since it was imported.",
             ));
         }
-        let wav = parse_wav(&bytes).map_err(|p| IrProblem::unreadable(p.message))?;
+        let wav = parse_wav(bytes).map_err(|p| IrProblem::unreadable(p.message))?;
         prepare_taps(&wav, rate).map_err(|p| IrProblem::unreadable(p.message))
     }
-    /// The kernel for `id` at `rate`, designed once. Call off the audio thread: this reads a file the first time.
+    /// The rate the sound card plays at, as far as the library has been asked for anything: the rate of the latest
+    /// kernel requested.
+    pub fn device_rate(&self) -> Option<u32> {
+        Some(self.device_rate.load(Ordering::Relaxed)).filter(|&rate| rate != 0)
+    }
+    /// The kernel for `id` at `rate`, designed once while the file is as it was. Call off the audio thread: this reads
+    /// a file the first time, and again if it has changed.
     pub fn kernel(&self, id: &str, rate: u32) -> Result<Arc<IrKernel>, IrProblem> {
-        if let Some(found) = self.cache().iter().find(|c| c.id == id && c.rate == rate) {
-            return Ok(found.kernel.clone());
+        self.device_rate.store(rate, Ordering::Relaxed);
+        if !valid_id(id) {
+            return Err(IrProblem::new(
+                ProblemKind::Missing,
+                "Not a cabinet response identity.",
+            ));
         }
-        let taps = self.taps(id, rate)?;
-        let kernel = Arc::new(IrKernel::new(&taps, rate).map_err(IrProblem::unreadable)?);
+        let path = self.wav_path(id);
+        // Taken before the file is read, so a change after it shows next time.
+        let Some(stamp) = Stamp::of(&path) else {
+            self.cache().retain(|c| c.id != id);
+            return Err(match read_bounded(&path) {
+                Err(problem) => problem,
+                Ok(_) => IrProblem::unreadable("The file cannot be read."),
+            });
+        };
+        if let Some(found) = self
+            .cache()
+            .iter()
+            .find(|c| c.id == id && c.rate == rate && c.stamp == stamp)
+        {
+            return found.outcome.clone();
+        }
+        let outcome = match read_bounded(&path) {
+            // A file that cannot be read now may be read in a moment; only what the bytes say is kept.
+            Err(problem) => return Err(problem),
+            Ok(bytes) => Self::taps_of(&bytes, id, rate).and_then(|taps| {
+                IrKernel::new(&taps, rate)
+                    .map(Arc::new)
+                    .map_err(IrProblem::unreadable)
+            }),
+        };
         let mut cache = self.cache();
-        if let Some(found) = cache.iter().find(|c| c.id == id && c.rate == rate) {
-            return Ok(found.kernel.clone());
+        if let Some(found) = cache
+            .iter()
+            .find(|c| c.id == id && c.rate == rate && c.stamp == stamp)
+        {
+            return found.outcome.clone();
         }
+        cache.retain(|c| !(c.id == id && c.rate == rate));
         if cache.len() >= CACHE_SIZE {
             cache.remove(0);
         }
         cache.push(Cached {
             id: id.into(),
             rate,
-            kernel: kernel.clone(),
+            stamp,
+            outcome: outcome.clone(),
         });
-        Ok(kernel)
+        outcome
     }
-    /// Whether each response can play, for the notice that says the built-in cabinet is playing instead.
+    /// Whether each response can play, for the notice that says the built-in cabinet is playing instead. It is asked
+    /// at the rate the sound card plays at, which is what decides whether a track plays it, and at 48 kHz until any
+    /// track has asked.
     pub fn status(&self, ids: &[String]) -> Vec<IrStatus> {
+        let rate = self.device_rate().unwrap_or(48_000);
         ids.iter()
-            .map(|id| match self.taps(id, 48_000) {
+            .map(|id| match self.kernel(id, rate) {
                 Ok(_) => IrStatus {
                     id: id.clone(),
                     state: "ready",
                     message: None,
                 },
-                Err(problem) => IrStatus {
-                    id: id.clone(),
-                    state: if problem.kind == ProblemKind::Missing {
-                        "missing"
+                Err(problem) => {
+                    let problem = if rate == 48_000 {
+                        problem
                     } else {
-                        "unreadable"
-                    },
-                    message: Some(problem.message),
-                },
+                        at_rate(problem, rate)
+                    };
+                    IrStatus {
+                        id: id.clone(),
+                        state: if problem.kind == ProblemKind::Missing {
+                            "missing"
+                        } else {
+                            "unreadable"
+                        },
+                        message: Some(problem.message),
+                    }
+                }
             })
             .collect()
+    }
+}
+/// A problem that arises only at some rate says which.
+fn at_rate(problem: IrProblem, rate: u32) -> IrProblem {
+    IrProblem {
+        message: format!("At {rate} Hz: {}", problem.message),
+        ..problem
     }
 }
 
@@ -729,13 +863,33 @@ fn test_selection() -> Option<Option<PathBuf>> {
     )
 }
 
+/// Where the user's responses are kept. A diagnostic desktop-test run keeps them in the folder it names, or failing
+/// that in a private temporary one, and never in the user's own library.
+pub fn library_directory(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    #[cfg(feature = "desktop-test")]
+    if std::env::var("TABPLAYER_DESKTOP_TEST").as_deref() == Ok("1") {
+        return Ok(match std::env::var_os("TABPLAYER_TEST_APP_DATA_DIR") {
+            Some(selected) if PathBuf::from(&selected).is_absolute() => {
+                PathBuf::from(selected).join("cabinet-irs")
+            }
+            Some(_) => return Err("TABPLAYER_TEST_APP_DATA_DIR must be absolute.".into()),
+            None => std::env::temp_dir()
+                .join(format!("tabplayer-test-cabinet-irs-{}", std::process::id())),
+        });
+    }
+    use tauri::Manager;
+    Ok(app
+        .path()
+        .app_data_dir()
+        .map_err(|err| err.to_string())?
+        .join("cabinet-irs"))
+}
+
 fn library_for(app: &tauri::AppHandle) -> Result<Arc<IrLibrary>, String> {
     if let Some(library) = library() {
         return Ok(library);
     }
-    Ok(install(
-        crate::tuning_library_directory(app)?.join("cabinet-irs"),
-    ))
+    Ok(install(library_directory(app)?))
 }
 
 #[tauri::command]

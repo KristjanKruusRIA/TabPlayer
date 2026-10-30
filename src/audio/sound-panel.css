@@ -29,3 +29,4 @@
 .sound-panel .sound-library>legend{padding:0;color:var(--ws-text);font-size:12px;font-weight:600}
 .sound-panel .sound-library-confirm{padding:6px;border:1px solid var(--ws-border);border-radius:3px;background:var(--ws-raised);font-size:12px}
 .sound-panel .sound-library [role=status]{min-height:1lh;margin:4px 0 0}
+.cabinet-notices,.export-cabinet-notices{display:flex;flex-direction:column;gap:4px;margin:6px 12px}.cabinet-notices .sound-ir-notice,.export-cabinet-notices .sound-ir-notice{margin:0;padding:6px 8px;border:1px solid var(--ws-border,currentColor);border-radius:3px;background:var(--ws-raised,transparent);font-size:12px;line-height:1.35;overflow-wrap:anywhere}

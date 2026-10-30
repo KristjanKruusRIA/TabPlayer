@@ -4,6 +4,9 @@
 //! is cut into partitions in three tiers of growing size, each convolved in the frequency domain once per block, so a
 //! long tail costs a few frequency-domain products a frame instead of one product per tap. A tier's partitions begin at
 //! least one of its own blocks after the present, so everything they need has already been heard when a block starts.
+//! The two larger tiers begin two blocks after the present, which leaves them a block to work in: the output of the
+//! block after next is worked out part way through the block now playing, each channel at its own point, and the
+//! transform of the block just heard is all that is left for its end. So no tier does all its work on one frame.
 //!
 //! Everything that allocates or computes a table is done off the audio thread, by `IrKernel::new` and `IrEngine::new`.
 //! `IrEngine::process` takes no lock, allocates nothing and reads no file. Every sum runs in a fixed order, so the same
@@ -19,6 +22,10 @@ const TIERS: usize = 3;
 const PLAN: [(usize, usize); TIERS] = [(128, 128), (512, 1024), (2048, 4096)];
 /// The longest response played, in seconds. Longer ones are cut with a fade when they are loaded.
 pub const MAX_SECONDS: f64 = 1.0;
+/// Input this small is a decaying tail's residue, not sound: a follower still falling after a note has ended passes
+/// through the subnormal numbers, where every product costs many times the usual, and a dozen tracks of them in the
+/// frequency-domain tiers miss the callback. Below this the input is zero, so the engine rests as soon as it can.
+const FLUSH: f32 = 1e-20;
 
 /// The most taps a response may have at `rate`.
 pub fn max_taps(rate: u32) -> usize {
@@ -32,6 +39,29 @@ fn tier_taps(len: usize, tier: usize) -> usize {
 }
 fn tier_parts(len: usize, tier: usize) -> usize {
     tier_taps(len, tier).div_ceil(PLAN[tier].0)
+}
+/// The frames of silence after which a response of `len` taps has left nothing but zeros in an engine: for each tier,
+/// the blocks before its first partition, its partitions, and three more: two to clear the block being filled, and one
+/// for the output worked out ahead.
+fn drain_frames(len: usize) -> usize {
+    (0..TIERS)
+        .map(|tier| {
+            let (block, start) = PLAN[tier];
+            (start / block + tier_parts(len, tier) + 3) * block
+        })
+        .max()
+        .unwrap_or(0)
+        + HEAD
+}
+/// Where in its block a tier of a track begins. It follows from the track's key alone, spread evenly by the golden
+/// ratio so that the tracks' transforms, and one track's three tiers, fall on different frames and not all in one
+/// callback. It is no function of time, so a render and a playback of the same document agree to the bit, and
+/// nothing in it depends on how the callback blocks fall.
+fn start_phase(key: u64, tier: usize) -> usize {
+    let spread = key
+        .wrapping_mul(0x9E37_79B9_7F4A_7C15)
+        .wrapping_add((tier as u64).wrapping_mul(0x5555_5555_5555_5555));
+    (((spread >> 32) * PLAN[tier].0 as u64) >> 32) as usize
 }
 
 /// A radix-2 transform on separate real and imaginary arrays, with its tables made once.
@@ -197,6 +227,8 @@ pub struct IrKernel {
     serial: u64,
     rate: u32,
     len: usize,
+    /// Frames of silence after which an engine that played only this holds nothing but zeros.
+    drain: usize,
     head: [f32; HEAD],
     tiers: [KernelTier; TIERS],
 }
@@ -237,6 +269,7 @@ impl IrKernel {
             serial: SERIALS.fetch_add(1, Ordering::Relaxed),
             rate,
             len: taps.len(),
+            drain: drain_frames(taps.len()),
             head,
             tiers,
         })
@@ -282,6 +315,8 @@ struct TierChannel {
     fdl_re: Vec<f32>,
     fdl_im: Vec<f32>,
     out: [Vec<f32>; 2],
+    /// Where a tier that works ahead keeps the output of the block after the one now playing.
+    next: [Vec<f32>; 2],
 }
 impl TierChannel {
     fn copy_from(&mut self, other: &Self) {
@@ -290,6 +325,7 @@ impl TierChannel {
         self.fdl_im.copy_from_slice(&other.fdl_im);
         for slot in 0..2 {
             self.out[slot].copy_from_slice(&other.out[slot]);
+            self.next[slot].copy_from_slice(&other.next[slot]);
         }
     }
     fn clear(&mut self) {
@@ -297,6 +333,7 @@ impl TierChannel {
         self.fdl_re.fill(0.0);
         self.fdl_im.fill(0.0);
         self.out.iter_mut().for_each(|out| out.fill(0.0));
+        self.next.iter_mut().for_each(|out| out.fill(0.0));
     }
 }
 struct Tier {
@@ -307,6 +344,13 @@ struct Tier {
     capacity: usize,
     /// Spectra kept: the offset plus the partitions.
     depth: usize,
+    /// Whether it works out a block's output a block ahead, which a tier can do if its first partition begins at least
+    /// two blocks on.
+    ahead: bool,
+    /// The frame of each channel's work on the output of the block after next, when it works ahead.
+    work_at: [usize; 2],
+    /// Where in its block the tier begins, which is how a track's transforms are kept apart from the others'.
+    start: usize,
     /// Frames into the block now playing.
     phase: usize,
     /// Where the newest spectrum sits in the ring.
@@ -320,7 +364,7 @@ struct Tier {
     time: Vec<f32>,
 }
 impl Tier {
-    fn new(index: usize, rate: u32) -> Self {
+    fn new(index: usize, rate: u32, key: u64) -> Self {
         let (block, start) = PLAN[index];
         let capacity = tier_parts(max_taps(rate), index);
         let offset = start / block;
@@ -331,13 +375,17 @@ impl Tier {
             fdl_re: vec![0.0; depth * bins],
             fdl_im: vec![0.0; depth * bins],
             out: [vec![0.0; block], vec![0.0; block]],
+            next: [vec![0.0; block], vec![0.0; block]],
         };
         Self {
             block,
             offset,
             capacity,
             depth,
-            phase: 0,
+            ahead: offset >= 2,
+            work_at: [block / 3, 2 * block / 3],
+            start: start_phase(key, index),
+            phase: start_phase(key, index),
             newest: 0,
             channels: [channel(), channel()],
             fft: RealFft::new(block),
@@ -349,23 +397,31 @@ impl Tier {
         }
     }
     fn clear(&mut self) {
-        self.phase = 0;
+        self.phase = self.start;
         self.newest = 0;
         self.channels.iter_mut().for_each(TierChannel::clear);
     }
-    /// The output block of `kernel`'s partitions for the block after the newest spectrum, into slot `slot` of
-    /// channel `c`.
-    fn compute(&mut self, c: usize, slot: usize, kernel: &KernelTier) {
+    /// The output block of `kernel`'s partitions into slot `slot` of channel `c`: for the block after the newest
+    /// spectrum, or, with `ahead`, for the one after that, which only a tier that works ahead can do.
+    fn compute(&mut self, c: usize, slot: usize, kernel: &KernelTier, ahead: bool) {
         let bins = self.block + 1;
         let channel = &mut self.channels[c];
+        let into = if ahead {
+            &mut channel.next[slot]
+        } else {
+            &mut channel.out[slot]
+        };
         if kernel.parts == 0 {
-            channel.out[slot].fill(0.0);
+            into.fill(0.0);
             return;
         }
+        // The spectrum a partition reads is as many blocks back as the tier's first partition begins on, less the one
+        // the block computed for lies ahead of the newest.
+        let back = self.offset - 1 - ahead as usize;
         self.acc_re.fill(0.0);
         self.acc_im.fill(0.0);
         for part in 0..kernel.parts.min(self.capacity) {
-            let at = (self.newest + self.depth - (self.offset - 1) - part) % self.depth;
+            let at = (self.newest + self.depth - back - part) % self.depth;
             accumulate(
                 &mut self.acc_re,
                 &mut self.acc_im,
@@ -382,7 +438,25 @@ impl Tier {
             &mut self.zr,
             &mut self.zi,
         );
-        channel.out[slot].copy_from_slice(&self.time[self.block..]);
+        let into = if ahead {
+            &mut channel.next[slot]
+        } else {
+            &mut channel.out[slot]
+        };
+        into.copy_from_slice(&self.time[self.block..]);
+    }
+    /// Part way through a block: a tier that works ahead works out the next block's output for the kernels held, for
+    /// the channel whose point this is.
+    fn work(&mut self, channels: usize, held: [Option<&IrKernel>; 2], tier: usize) {
+        for c in 0..channels {
+            if self.phase == self.work_at[c] {
+                for (slot, kernel) in held.into_iter().enumerate() {
+                    if let Some(kernel) = kernel {
+                        self.compute(c, slot, &kernel.tiers[tier], true);
+                    }
+                }
+            }
+        }
     }
     /// A block of input is complete: take its spectrum, then work out the next block's output for each kernel held.
     fn boundary(&mut self, channels: usize, held: [Option<&IrKernel>; 2], tier: usize) {
@@ -406,10 +480,19 @@ impl Tier {
             buffer.copy_within(self.block.., 0);
         }
         self.phase = 0;
+        if self.ahead {
+            // What was worked out a block ago is now the block playing.
+            for channel in &mut self.channels[..channels] {
+                for slot in 0..2 {
+                    std::mem::swap(&mut channel.out[slot], &mut channel.next[slot]);
+                }
+            }
+            return;
+        }
         for (slot, kernel) in held.into_iter().enumerate() {
             if let Some(kernel) = kernel {
                 for c in 0..channels {
-                    self.compute(c, slot, &kernel.tiers[tier]);
+                    self.compute(c, slot, &kernel.tiers[tier], false);
                 }
             }
         }
@@ -421,6 +504,8 @@ impl Tier {
 /// between responses cannot click.
 pub struct IrEngine {
     rate: u32,
+    /// What keeps this track's transforms apart from other tracks' (see `start_phase`).
+    key: u64,
     /// Each channel's latest `HEAD` inputs, twice over so they always lie in one run.
     history: [[f32; 2 * HEAD]; 2],
     at: usize,
@@ -431,8 +516,10 @@ pub struct IrEngine {
     twin: bool,
     /// Whether all it holds is zero, so silence going in comes out as silence without a run.
     resting: bool,
-    /// Frames of silence in a row. Past `drain`, everything it holds is zero.
+    /// Frames of silence in a row, which a fresh engine has had for ever. Past `drain`, everything the kernels played
+    /// hold is zero.
     silent: usize,
+    /// The longest drain of the kernels played since it last woke.
     drain: usize,
     /// Whether it may rest and rejoin its channels, which is off only to compare against running every frame.
     rests: bool,
@@ -442,29 +529,44 @@ pub struct IrEngine {
 impl IrEngine {
     /// Call off the audio thread: this allocates every buffer the longest response will need.
     pub fn new(rate: u32) -> Self {
-        let tiers: Vec<Tier> = (0..TIERS).map(|index| Tier::new(index, rate)).collect();
-        let drain = tiers
-            .iter()
-            .map(|tier| (tier.depth + 2) * tier.block)
-            .max()
-            .unwrap_or(0)
-            + HEAD;
+        Self::keyed(rate, 0)
+    }
+    /// An engine for the `key`th convolution of a render or a playback, such as a track's index, whose transforms do
+    /// not fall on the same frames as another key's.
+    pub fn keyed(rate: u32, key: u64) -> Self {
+        let tiers: Vec<Tier> = (0..TIERS)
+            .map(|index| Tier::new(index, rate, key))
+            .collect();
         Self {
             rate,
+            key,
             history: [[0.0; 2 * HEAD]; 2],
             at: 0,
             tiers,
             slots: [0; 2],
             twin: true,
             resting: true,
-            silent: 0,
-            drain,
+            silent: usize::MAX,
+            drain: 0,
             rests: true,
             live: false,
         }
     }
     pub fn rate(&self) -> u32 {
         self.rate
+    }
+    pub fn key(&self) -> u64 {
+        self.key
+    }
+    /// Moves where the tiers begin to those of `key`, if nothing has been played since the last reset.
+    pub fn rekey(&mut self, key: u64) {
+        if self.resting && self.silent == usize::MAX && key != self.key {
+            self.key = key;
+            for (index, tier) in self.tiers.iter_mut().enumerate() {
+                tier.start = start_phase(key, index);
+            }
+            self.reset();
+        }
     }
     pub fn reset(&mut self) {
         self.history = [[0.0; 2 * HEAD]; 2];
@@ -473,7 +575,8 @@ impl IrEngine {
         self.slots = [0; 2];
         self.twin = true;
         self.resting = true;
-        self.silent = 0;
+        self.silent = usize::MAX;
+        self.drain = 0;
     }
     /// Runs every frame from now on, as it would with no shortcuts, to compare the two.
     pub fn never_rest(&mut self) {
@@ -491,24 +594,43 @@ impl IrEngine {
         }
         self.twin = false;
     }
-    /// Works out `kernel`'s output for the block now playing, into `slot`, from the history held.
-    fn fill(&mut self, slot: usize, kernel: &IrKernel, channels: usize) {
+    /// Works out `kernel`'s output for the block now playing, into `slot`, from the history held. When `quiet` frames
+    /// of silence, at least as many as the kernel needs to drain, came before, the history holds nothing it would
+    /// reach and the output is zero without working it out.
+    fn fill(&mut self, slot: usize, kernel: &IrKernel, channels: usize, quiet: usize) {
         self.slots[slot] = kernel.serial;
+        let nothing = quiet >= kernel.drain;
         for (index, tier) in self.tiers.iter_mut().enumerate() {
             for c in 0..channels {
-                tier.compute(c, slot, &kernel.tiers[index]);
+                if nothing {
+                    tier.channels[c].out[slot].fill(0.0);
+                    tier.channels[c].next[slot].fill(0.0);
+                } else {
+                    tier.compute(c, slot, &kernel.tiers[index], false);
+                    if tier.ahead {
+                        tier.compute(c, slot, &kernel.tiers[index], true);
+                    }
+                }
             }
         }
     }
     /// A frame of silence while resting: every buffer holds zeros, so only the positions move on, which keeps the
-    /// blocks falling where they would if the frame had run.
+    /// blocks falling where they would if the frame had run. A block that would have been taken is zero, so it is
+    /// written as zeros over what the ring held from a block long past.
     fn idle(&mut self) {
+        self.silent = self.silent.saturating_add(1);
         self.at = if self.at == 0 { HEAD - 1 } else { self.at - 1 };
         for tier in &mut self.tiers {
             tier.phase += 1;
             if tier.phase == tier.block {
                 tier.phase = 0;
                 tier.newest = (tier.newest + 1) % tier.depth;
+                let bins = tier.block + 1;
+                let at = tier.newest * bins;
+                for channel in &mut tier.channels {
+                    channel.fdl_re[at..at + bins].fill(0.0);
+                    channel.fdl_im[at..at + bins].fill(0.0);
+                }
             }
         }
     }
@@ -520,31 +642,42 @@ impl IrEngine {
         a: &IrKernel,
         b: Option<&IrKernel>,
     ) -> [[f32; 2]; 2] {
+        let input = input.map(|v| if v.abs() < FLUSH { 0.0 } else { v });
         let silent = self.rests && input[0] == 0.0 && input[1] == 0.0;
         if silent && self.resting {
             self.idle();
             return [[0.0; 2]; 2];
         }
+        // Waking from rest, the history is all zero for as long as it has been silent.
+        let quiet = if self.resting { self.silent } else { 0 };
+        if self.resting {
+            self.drain = 0;
+        }
         self.resting = false;
-        self.silent = if silent { self.silent + 1 } else { 0 };
+        self.silent = if silent {
+            self.silent.saturating_add(1)
+        } else {
+            0
+        };
         if self.twin && input[0].to_bits() != input[1].to_bits() {
             self.untwin();
         }
         let channels = if self.twin { 1 } else { 2 };
         let b = b.filter(|k| k.serial != a.serial);
+        self.drain = self.drain.max(a.drain).max(b.map_or(0, |b| b.drain));
         // Each kernel keeps the slot it has, or takes one the other does not hold.
         let held =
             |slots: &[u64; 2], kernel: &IrKernel| slots.iter().position(|&s| s == kernel.serial);
         let (mut slot_a, mut slot_b) = (held(&self.slots, a), b.and_then(|b| held(&self.slots, b)));
         if slot_a.is_none() {
             let slot = (0..2).find(|&s| Some(s) != slot_b).unwrap_or(0);
-            self.fill(slot, a, channels);
+            self.fill(slot, a, channels, quiet);
             slot_a = Some(slot);
         }
         let slot_a = slot_a.unwrap_or(0);
         if let (Some(b), None) = (b, slot_b) {
             let slot = 1 - slot_a;
-            self.fill(slot, b, channels);
+            self.fill(slot, b, channels, quiet);
             slot_b = Some(slot);
         }
         if b.is_none() {
@@ -589,6 +722,8 @@ impl IrEngine {
             tier.phase += 1;
             if tier.phase == tier.block {
                 tier.boundary(channels, kernels, index);
+            } else if tier.ahead {
+                tier.work(channels, kernels, index);
             }
         }
         if self.rests && self.silent >= self.drain {
@@ -599,7 +734,6 @@ impl IrEngine {
         output
     }
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -764,5 +898,202 @@ mod tests {
         }
         assert!(resting.at_rest() == [true, true]);
         assert!(!running.at_rest()[0]);
+    }
+
+    #[test]
+    fn a_tail_that_decays_into_subnormal_numbers_is_silence_to_the_engine() {
+        // What a clean note leaves behind: a follower that falls by a fixed share each frame, through 1e-20 and the
+        // subnormal numbers, to zero about four seconds on. It must not keep the engine awake, or run as numbers.
+        let taps: Vec<f32> = noise(48_000, 41).iter().map(|v| v * 0.05).collect();
+        let kernel = IrKernel::new(&taps, 48_000).unwrap();
+        let burst = noise(2000, 3);
+        let mut engine = IrEngine::new(48_000);
+        let mut follower = 0.05f32;
+        let (mut subnormal, mut tail_time) = (0usize, std::time::Duration::ZERO);
+        let mut silent_at = None;
+        for n in 0..6 * 48_000 {
+            let x = if n < 2000 {
+                burst[n]
+            } else {
+                follower *= 0.9995;
+                follower
+            };
+            let late = x != 0.0 && x.abs() < f32::MIN_POSITIVE;
+            subnormal += late as usize;
+            let started = std::time::Instant::now();
+            let y = engine.process([x; 2], &kernel, None);
+            if late {
+                tail_time += started.elapsed();
+            }
+            assert!(y[0][0].is_finite());
+            if silent_at.is_none() && engine.at_rest()[0] {
+                silent_at = Some(n);
+            }
+        }
+        assert!(subnormal > 10_000, "{subnormal} subnormal frames");
+        // It rested long before the first subnormal number, about 3.6 s in, not after the last one.
+        assert!(silent_at.unwrap() < 3 * 48_000 + 24_000, "{silent_at:?}");
+        // The frames that were subnormal cost no more than the same number of frames of ordinary input.
+        let mut ordinary = IrEngine::new(48_000);
+        let hiss = noise(subnormal, 5);
+        let started = std::time::Instant::now();
+        for v in &hiss {
+            std::hint::black_box(ordinary.process([v * 1e-3; 2], &kernel, None));
+        }
+        assert!(
+            tail_time < started.elapsed(),
+            "tail {tail_time:?} against {:?}",
+            started.elapsed()
+        );
+    }
+    #[test]
+    fn tracks_keep_their_transforms_on_different_callbacks() {
+        for key in 0..64 {
+            for tier in 0..TIERS {
+                assert!(start_phase(key, tier) < PLAN[tier].0);
+            }
+        }
+        // The frame a tier's first block ends on, for six tracks and callbacks of 64 frames: the largest tier's land
+        // in six callbacks, and the middle tier's are spread over at least four.
+        for (tier, most) in [(1, 4), (2, 6)] {
+            let mut calls: Vec<usize> = (0..6u64)
+                .map(|key| (PLAN[tier].0 - 1 - start_phase(key, tier)) / 64)
+                .collect();
+            calls.sort_unstable();
+            calls.dedup();
+            assert!(calls.len() >= most, "tier {tier}: {calls:?}");
+        }
+    }
+    #[test]
+    fn every_key_convolves_like_a_direct_sum_and_the_same_key_gives_the_same_bits() {
+        let taps: Vec<f32> = noise(30_000, 61).iter().map(|v| v * 0.1).collect();
+        let kernel = IrKernel::new(&taps, 48_000).unwrap();
+        let input = noise(40_000, 12);
+        let want = direct(&taps, &input);
+        let mut first = vec![];
+        for key in [0u64, 1, 2, 5, 11, 63] {
+            let got = run(&mut IrEngine::keyed(48_000, key), &kernel, &input);
+            assert!(
+                worst(&got, &want) < 3e-4,
+                "key {key}: {}",
+                worst(&got, &want)
+            );
+            let again = run(&mut IrEngine::keyed(48_000, key), &kernel, &input);
+            assert_eq!(got, again, "key {key}");
+            first.push(got);
+        }
+        // The engines differ in when their blocks fall, so the sums differ in the last places: they are not copies.
+        assert!(first.windows(2).any(|pair| pair[0] != pair[1]));
+        // Moving a fresh engine to a key gives the engine made with it, and a reset keeps the key.
+        let mut moved = IrEngine::new(48_000);
+        moved.rekey(5);
+        assert_eq!(run(&mut moved, &kernel, &input), first[3]);
+        moved.reset();
+        assert_eq!(run(&mut moved, &kernel, &input), first[3]);
+        // An engine already playing does not move.
+        moved.rekey(7);
+        assert_eq!(moved.key(), 5);
+    }
+    #[test]
+    fn a_short_response_drains_sooner_and_a_longer_one_after_a_rest_is_right() {
+        let short: Vec<f32> = noise(300, 71).iter().map(|v| v * 0.1).collect();
+        let long: Vec<f32> = noise(20_000, 72).iter().map(|v| v * 0.05).collect();
+        let (ks, kl) = (
+            IrKernel::new(&short, 48_000).unwrap(),
+            IrKernel::new(&long, 48_000).unwrap(),
+        );
+        assert!(ks.drain < kl.drain);
+        let full = IrKernel::new(&noise(max_taps(48_000), 73), 48_000).unwrap();
+        assert!(kl.drain < full.drain);
+        // The same bits as an engine that never rests, through a burst, a rest and another burst, whatever the length.
+        for (taps, kernel) in [(&short, &ks), (&long, &kl)] {
+            let (mut resting, mut running) = (IrEngine::new(48_000), IrEngine::new(48_000));
+            running.never_rest();
+            let (first, second) = (noise(2000, 3), noise(3000, 4));
+            let mut rested_at = None;
+            for n in 0..(2000 + 60_000 + 3000 + 40_000) {
+                let x = match n {
+                    0..2000 => first[n],
+                    62_000..65_000 => second[n - 62_000],
+                    _ => 0.0,
+                };
+                let a = resting.process([x, x * 0.5], kernel, None);
+                let b = running.process([x, x * 0.5], kernel, None);
+                assert_eq!(a[0], b[0], "{} taps, frame {n}", taps.len());
+                if n < 62_000 && rested_at.is_none() && resting.at_rest()[0] {
+                    rested_at = Some(n);
+                }
+            }
+            // It rested as soon as this response's tail had gone, not when the longest possible one would have.
+            let rested_at = rested_at.expect("it rested");
+            assert!(rested_at <= 2000 + kernel.drain + 1, "{rested_at}");
+            assert!(resting.at_rest() == [true, true]);
+        }
+        // A longer response taking over a rested engine plays right: nothing of the earlier input is left to it.
+        let mut engine = IrEngine::new(48_000);
+        let (first, second) = (noise(1500, 8), noise(4000, 9));
+        let mut input = first.clone();
+        input.extend(vec![0.0; 40_000]);
+        input.extend(&second);
+        let got: Vec<f32> = input
+            .iter()
+            .enumerate()
+            .map(|(n, &x)| {
+                let kernel = if n < 20_000 { &ks } else { &kl };
+                engine.process([x; 2], kernel, None)[0][0]
+            })
+            .collect();
+        // While it rested the first response had long since drained and the second was not yet needed: silence.
+        let mut want = direct(&short, &input[..20_000]);
+        want.extend(vec![0.0; 41_500 - 20_000]);
+        want.extend(&direct(&long, &input)[41_500..]);
+        assert!(worst(&got, &want) < 2e-4, "{}", worst(&got, &want));
+    }
+    #[test]
+    fn joining_a_kernel_and_splitting_the_channels_at_any_frame_is_right() {
+        // The larger tiers work out a block's output ahead, part way through the block before: a kernel that joins, or
+        // channels that part, before or after that point must give the sum a direct convolution gives.
+        let a: Vec<f32> = noise(9000, 81).iter().map(|v| v * 0.1).collect();
+        let b: Vec<f32> = noise(6000, 82).iter().map(|v| v * 0.1).collect();
+        let (ka, kb) = (
+            IrKernel::new(&a, 48_000).unwrap(),
+            IrKernel::new(&b, 48_000).unwrap(),
+        );
+        let (left, right) = (noise(14_000, 6), noise(14_000, 7));
+        for (key, join, split) in [
+            (0u64, 4_100usize, 5_300usize),
+            (1, 4_300, 4_050),
+            (2, 4_650, 4_990),
+            (3, 5_000, 4_500),
+            (4, 5_200, 6_100),
+            (5, 6_150, 5_050),
+            (6, 6_700, 4_700),
+        ] {
+            let mut engine = IrEngine::keyed(48_000, key);
+            let (mut got_a, mut got_b, mut got_right) = (vec![], vec![], vec![]);
+            for n in 0..14_000 {
+                let r = if n < split { left[n] } else { right[n] };
+                let out = if n >= join {
+                    engine.process([left[n], r], &ka, Some(&kb))
+                } else {
+                    let y = engine.process([left[n], r], &ka, None);
+                    [y[0], y[0]]
+                };
+                got_a.push(out[0][0]);
+                got_b.push(out[1][0]);
+                got_right.push(out[0][1]);
+            }
+            let mixed: Vec<f32> = (0..14_000)
+                .map(|n| if n < split { left[n] } else { right[n] })
+                .collect();
+            let (want_a, want_b) = (direct(&a, &left), direct(&b, &left));
+            let want_right = direct(&a, &mixed);
+            let tag = format!("key {key}, join {join}, split {split}");
+            assert!(worst(&got_a, &want_a) < 3e-4, "{tag}: a left");
+            assert!(worst(&got_right, &want_right) < 3e-4, "{tag}: a right");
+            let after: Vec<f32> = got_b[join..].to_vec();
+            let want_after: Vec<f64> = want_b[join..].to_vec();
+            assert!(worst(&after, &want_after) < 3e-4, "{tag}: b left");
+        }
     }
 }

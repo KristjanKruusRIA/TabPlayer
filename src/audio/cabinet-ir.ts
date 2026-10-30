@@ -15,6 +15,12 @@ export const cabinetIrs={
   status:(ids:string[])=>invoke<CabinetIrStatus[]>('cabinet_ir_status',{ids}),
 };
 
+const LIBRARY_CHANGED='tabplayer-cabinet-library-changed';
+/** Says that the library gained or lost a response, so whatever shows what it can supply asks again. */
+export const announceCabinetLibrary=()=>{try{window.dispatchEvent(new Event(LIBRARY_CHANGED));}catch{/* No window, nothing is listening. */}};
+/** Calls `listener` whenever the library gains or loses a response; returns how to stop. */
+export const onCabinetLibrary=(listener:()=>void)=>{window.addEventListener(LIBRARY_CHANGED,listener);return()=>window.removeEventListener(LIBRARY_CHANGED,listener);};
+
 /** A response's length for the picker, such as `0.35 s`. */
 export const irDuration=(milliseconds:number)=>`${(milliseconds/1000).toFixed(2)} s`;
 /** The notice for a response the library cannot supply, saying which cabinet plays instead; null while it can. */

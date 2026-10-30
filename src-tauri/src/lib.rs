@@ -884,7 +884,11 @@ pub fn run() {
         .manage(backing_waveform::BackingWaveformService::default())
         .setup(|app| {
             // Every track resolves the user's cabinet responses from here, so it must be set before any plays.
-            audio::cabinet_ir::install(tuning_library_directory(app.handle())?.join("cabinet-irs"));
+            // A library that cannot be placed leaves the built-in cabinets playing, and is tried again when a command
+            // first asks for it. It never stops the app starting.
+            if let Ok(directory) = audio::cabinet_ir::library_directory(app.handle()) {
+                audio::cabinet_ir::install(directory);
+            }
             let directory = session::session_directory(app.path().app_data_dir()?)?;
             let library_directory = directory.join("file-library-v1");
             let bundled_directory = app.path().resource_dir()?.join("library");

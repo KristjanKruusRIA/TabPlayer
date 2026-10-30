@@ -311,6 +311,14 @@ fn a_response_is_made_at_each_usual_rate_from_any_source_rate() {
     }
 }
 
+/// Moves a file's modification time on, as any real change does, however fast the test wrote it.
+fn changed(path: &Path) {
+    let file = std::fs::File::options().write(true).open(path).unwrap();
+    let later = SystemTime::now() + std::time::Duration::from_secs(5);
+    let at = file.metadata().unwrap().modified().unwrap().max(later);
+    file.set_modified(at + std::time::Duration::from_secs(1))
+        .unwrap();
+}
 fn library() -> (tempfile::TempDir, IrLibrary) {
     let directory = tempfile::tempdir().unwrap();
     let library = IrLibrary::new(directory.path().join("cabinet-irs"));
@@ -413,11 +421,18 @@ fn a_damaged_or_changed_file_is_unreadable_and_never_an_error_for_the_chain() {
     let mut bytes = std::fs::read(&path).unwrap();
     bytes[100] ^= 0x55;
     std::fs::write(&path, &bytes).unwrap();
-    // The designed kernel is still cached, but a fresh rate must read the file again, and it no longer matches.
+    changed(&path);
+    // A fresh rate must read the file, and it no longer matches. So must the rate already designed: a kernel made
+    // from the file as it was is not played once the file is not.
     let problem = library.kernel(&entry.id, 96_000).err().unwrap();
     assert_eq!(problem.kind, ProblemKind::Unreadable);
+    assert_eq!(
+        library.kernel(&entry.id, 48_000).err().unwrap().kind,
+        ProblemKind::Unreadable
+    );
     assert_eq!(library.status(&[entry.id.clone()])[0].state, "unreadable");
     std::fs::write(&path, b"junk").unwrap();
+    changed(&path);
     assert_eq!(library.status(&[entry.id.clone()])[0].state, "unreadable");
     // A lost description is made again from the audio.
     std::fs::remove_file(library.meta_path(&entry.id)).unwrap();
@@ -448,4 +463,172 @@ fn names_are_made_safe() {
         64
     );
     assert_eq!(display_name("  spaced  .wav"), "spaced");
+}
+#[test]
+fn a_name_keeps_its_dots_and_a_file_imported_by_path_is_named_once() {
+    let (directory, library) = library();
+    assert_eq!(display_name("V30 SM57 0.5in cap.wav"), "V30 SM57 0.5in cap");
+    assert_eq!(display_name("Dr. Z 1.2.wav"), "Dr. Z 1.2");
+    let path = directory.path().join("V30 SM57 0.5in cap.wav");
+    std::fs::write(&path, wav_bytes(&cabinet(48_000, 0.3, 1), 1, 16, 48_000)).unwrap();
+    let entry = library.import_path(&path).unwrap();
+    assert_eq!(entry.name, "V30 SM57 0.5in cap");
+    assert_eq!(library.list()[0].name, "V30 SM57 0.5in cap");
+}
+#[test]
+fn a_name_holds_only_what_a_document_accepts() {
+    // The byte-order mark and the two non-characters are refused by a document's rules, anywhere in a name.
+    assert_eq!(
+        display_name("\u{FEFF}Mesa\u{FFFE} 4x12\u{FFFF}\u{FEFF}.wav"),
+        "Mesa 4x12"
+    );
+    assert_eq!(display_name("\u{FEFF}\u{FFFF}.wav"), "Cabinet IR");
+    for name in [
+        "a\u{FEFF}b.wav",
+        "\u{FEFF}.wav",
+        "tab\there.wav",
+        "日本語.wav",
+    ] {
+        let shown = display_name(name);
+        assert!(shown.chars().all(allowed_in_name), "{shown:?}");
+    }
+}
+#[test]
+fn a_damaged_copy_is_put_right_by_importing_the_file_again() {
+    let (_directory, library) = library();
+    let file = wav_bytes(&cabinet(48_000, 0.3, 1), 1, 16, 48_000);
+    let entry = library.import_bytes(&file, "A.wav").unwrap();
+    assert!(library.kernel(&entry.id, 48_000).is_ok());
+    let path = library.wav_path(&entry.id);
+    let mut damaged = file.clone();
+    damaged[100] ^= 0x55;
+    std::fs::write(&path, &damaged).unwrap();
+    changed(&path);
+    assert_eq!(library.status(&[entry.id.clone()])[0].state, "unreadable");
+    // The description is still there, so the library lists it; importing the original restores the audio.
+    assert_eq!(library.list().len(), 1);
+    let again = library.import_bytes(&file, "renamed.wav").unwrap();
+    assert_eq!(
+        (again.id.clone(), again.name.as_str()),
+        (entry.id.clone(), "A")
+    );
+    assert_eq!(std::fs::read(&path).unwrap(), file);
+    assert_eq!(library.status(&[entry.id.clone()])[0].state, "ready");
+    assert!(library.kernel(&entry.id, 48_000).is_ok());
+    // A lost description is written again, with the name of this import.
+    std::fs::remove_file(library.meta_path(&entry.id)).unwrap();
+    let again = library.import_bytes(&file, "Fresh name.wav").unwrap();
+    assert_eq!(again.name, "Fresh name");
+    assert_eq!(library.list()[0].name, "Fresh name");
+    // A copy that has been deleted is copied back.
+    std::fs::remove_file(&path).unwrap();
+    library.import_bytes(&file, "x.wav").unwrap();
+    assert_eq!(std::fs::read(&path).unwrap(), file);
+}
+#[test]
+fn a_cached_kernel_is_checked_against_the_file_and_a_damaged_file_is_read_once() {
+    let (_directory, library) = library();
+    let file = wav_bytes(&cabinet(48_000, 0.3, 1), 1, 16, 48_000);
+    let entry = library.import_bytes(&file, "A.wav").unwrap();
+    let first = library.kernel(&entry.id, 48_000).unwrap();
+    assert!(Arc::ptr_eq(
+        &first,
+        &library.kernel(&entry.id, 48_000).unwrap()
+    ));
+    let path = library.wav_path(&entry.id);
+    // Removed: no kernel is played from what was designed.
+    std::fs::remove_file(&path).unwrap();
+    assert_eq!(
+        library.kernel(&entry.id, 48_000).err().unwrap().kind,
+        ProblemKind::Missing
+    );
+    // Damaged: the finding is kept while the file stays as it is, so a prepare does not read it again.
+    let mut damaged = file.clone();
+    damaged[100] ^= 0x55;
+    std::fs::write(&path, &damaged).unwrap();
+    changed(&path);
+    assert!(library.kernel(&entry.id, 48_000).is_err());
+    assert_eq!(library.cache().len(), 1);
+    assert!(library.cache()[0].outcome.is_err());
+    // The original put back is read again, and works.
+    std::fs::write(&path, &file).unwrap();
+    std::fs::File::options()
+        .write(true)
+        .open(&path)
+        .unwrap()
+        .set_modified(SystemTime::now() + std::time::Duration::from_secs(9))
+        .unwrap();
+    assert!(library.kernel(&entry.id, 48_000).is_ok());
+    assert_eq!(library.cache().len(), 1);
+}
+#[test]
+fn status_is_asked_at_the_rate_the_sound_card_plays_at() {
+    let (_directory, library) = library();
+    let entry = library
+        .import_bytes(&wav_bytes(&cabinet(48_000, 0.3, 1), 1, 16, 48_000), "A.wav")
+        .unwrap();
+    assert_eq!(library.device_rate(), None);
+    assert_eq!(library.status(&[entry.id.clone()])[0].state, "ready");
+    library.kernel(&entry.id, 44_100).unwrap();
+    assert_eq!(library.device_rate(), Some(44_100));
+    assert_eq!(library.status(&[entry.id.clone()])[0].state, "ready");
+    // A problem that arises only at the sound card's rate says which rate.
+    let problem = at_rate(IrProblem::refused("Nothing."), 96_000);
+    assert_eq!(problem.message, "At 96000 Hz: Nothing.");
+    assert_eq!(problem.kind, ProblemKind::Refused);
+}
+#[test]
+fn a_cut_is_counted_from_the_onset_and_no_tap_is_subnormal() {
+    let rate = 48_000;
+    // A long lead-in of silence and a response of half a second: the response is not cut.
+    let mut padded = vec![0.0f32; 60_000];
+    padded.extend(cabinet(rate, 0.5, 3));
+    let wav = parse_wav(&wav_bytes(&padded, 1, 24, rate)).unwrap();
+    assert!(!was_cut(&wav, rate));
+    let taps = prepare_taps(&wav, rate).unwrap();
+    assert!(taps.len() < rate as usize / 2 + 100 && taps[0].abs() > 0.0);
+    // A response of 1.6 seconds, however it is padded, is.
+    let mut long = vec![0.0f32; 4_000];
+    long.extend(cabinet(rate, 1.6, 4));
+    assert!(was_cut(
+        &parse_wav(&wav_bytes(&long, 1, 24, rate)).unwrap(),
+        rate
+    ));
+    // Nothing is smaller than anything that could be heard.
+    assert!(taps.iter().all(|v| *v == 0.0 || v.abs() >= TAP_FLOOR));
+}
+#[test]
+fn the_resampler_stops_just_under_the_lower_rates_nyquist_going_up_as_well_as_down() {
+    let rate = 44_100u32;
+    let peak_of = |hz: f64| {
+        let tone: Vec<f32> = (0..rate)
+            .map(|n| (std::f64::consts::TAU * hz * n as f64 / rate as f64).sin() as f32)
+            .collect();
+        let out = resample(&tone, rate, 96_000);
+        out[2000..out.len() - 2000]
+            .iter()
+            .fold(0.0f32, |p, v| p.max(v.abs()))
+    };
+    // Half the level is at the cutoff, 97% of the source's Nyquist frequency of 22.05 kHz, 21.39 kHz; a source with
+    // the cutoff at its Nyquist frequency would pass it nearly whole.
+    let at_cutoff = peak_of(21_388.0);
+    assert!((0.35..0.65).contains(&at_cutoff), "{at_cutoff}");
+    assert!(peak_of(20_500.0) > at_cutoff && peak_of(22_000.0) < at_cutoff);
+    assert!((peak_of(10_000.0) - 1.0).abs() < 0.01);
+}
+#[test]
+fn a_description_is_read_with_a_bound() {
+    let (_directory, library) = library();
+    let entry = library
+        .import_bytes(&wav_bytes(&cabinet(48_000, 0.3, 1), 1, 16, 48_000), "A.wav")
+        .unwrap();
+    assert!(library.sidecar(&entry.id).is_some());
+    // A description longer than it can be is not read, and the response is described again from its audio.
+    let mut huge = std::fs::read(library.meta_path(&entry.id)).unwrap();
+    huge.resize(SIDECAR_LIMIT as usize + 1, b' ');
+    std::fs::write(library.meta_path(&entry.id), &huge).unwrap();
+    assert!(library.sidecar(&entry.id).is_none());
+    assert_eq!(library.list()[0].name, "Cabinet IR");
+    assert!(read_small(&library.wav_path(&entry.id), 10).is_none());
+    assert!(read_small(&library.directory.join("nothing"), 10).is_none());
 }

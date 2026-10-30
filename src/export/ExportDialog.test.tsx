@@ -5,6 +5,9 @@ import '@testing-library/jest-dom/vitest';
 import { model } from '@coderline/alphatab';
 import { ExportDialog } from './ExportDialog';
 import { validateSelection } from './types';
+import { soundPreset } from '../audio/SoundPanel';
+import { invoke } from '@tauri-apps/api/core';
+vi.mock('@tauri-apps/api/core',()=>({invoke:vi.fn(async(command:string,args?:{ids?:string[]})=>command==='cabinet_ir_status'?args!.ids!.map(id=>({id,state:'missing',message:null})):[])}));
 afterEach(cleanup);
 function fixture(){const score=new model.Score();for(let i=0;i<3;i++)score.addMasterBar(new model.MasterBar());const track=new model.Track();track.name='Lead';score.addTrack(track);return score;}
 const layout={paper:'A4' as const,orientation:'portrait' as const,marginMm:15,scale:1,profile:'ScoreTab' as const};
@@ -269,4 +272,15 @@ describe('export dialog',()=>{
     fireEvent.click(screen.getByRole('button',{name:'Export'}));expect(submit).toHaveBeenCalledWith({format:'wav',selection:{tracks:[0,1],range:null},audio:{sampleRate:44100,bitDepth:16,speed:'saved',metronome:false,tailSeconds:2,backing:true,includeMix:true}});
     rerender(<ExportDialog currentSpeedAvailable={true} score={fixture()} layout={layout} busy={false} onExport={submit} onCancel={()=>{}}/>);fireEvent.click(screen.getByRole('button',{name:'Export'}));expect(submit.mock.calls[1][0].selection.tracks).toEqual([0]);
   });
+});
+
+it('says in the audio export that a cabinet response is missing, and only there',async()=>{
+  const sound=soundPreset('crunch');sound.effects.cabinet.enabled=true;sound.effects.cabinet.ir={id:'d'.repeat(32),name:'Shared cab',levelDb:0};
+  const before=structuredClone(sound);
+  render(<ExportDialog score={fixture()} layout={layout} busy={false} currentSpeedAvailable={true} sounds={{'base/0':sound}} trackNames={{'base/0':'Lead'}} onExport={()=>{}} onCancel={()=>{}}/>);
+  expect(screen.queryByText(/Shared cab/)).toBeNull();
+  fireEvent.change(screen.getByLabelText('Export format'),{target:{value:'wav'}});
+  expect((await screen.findByText(/Shared cab/)).textContent).toMatch(/^Lead: The impulse response “Shared cab” is not in this computer's cabinet library/);
+  expect(sound).toEqual(before);
+  expect(vi.mocked(invoke)).toHaveBeenCalledWith('cabinet_ir_status',{ids:['d'.repeat(32)]});
 });

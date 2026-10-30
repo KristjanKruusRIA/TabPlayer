@@ -1439,6 +1439,8 @@ pub struct TrackDsp {
     /// cannot supply is `None`, and the cabinet plays its model.
     cabinet_irs: [Option<(Arc<IrKernel>, f32)>; 2],
     ir_engine: Option<Box<IrEngine>>,
+    /// Keeps this track's convolution apart in time from the other tracks' (see `set_ir_index`).
+    ir_key: u64,
     eq: [Biquad; 3],
     /// The graphic EQ's band filters and the gains they were set for.
     graphic_eq: [Biquad; 10],
@@ -1539,7 +1541,7 @@ impl TrackDsp {
         let cabinet_start = tone::cabinet_index(&settings.cabinet.model);
         let ir_start = cabinet_ir_for(&settings.cabinet, sample_rate);
         let ir_engine = (settings.cabinet.enabled && ir_start.is_some())
-            .then(|| Box::new(IrEngine::new(sample_rate)));
+            .then(|| Box::new(IrEngine::keyed(sample_rate, 0)));
         let reverb_start = reverb_shape(&settings.reverb, rate);
         let delay_start = delay_shape(&settings.delay, rate);
         let microphone_start = microphone_shape(&settings.microphone, rate);
@@ -1577,6 +1579,7 @@ impl TrackDsp {
             cabinet_models: [cabinet_start; 2],
             cabinet_irs: [ir_start.clone(), ir_start],
             ir_engine,
+            ir_key: 0,
             eq: [Biquad::default(); 3],
             graphic_eq: [Biquad::default(); 10],
             cached_graphic_eq: [f64::NAN; 10],
@@ -1705,6 +1708,7 @@ impl TrackDsp {
                         self.max_delay_seconds,
                     )?);
                     second.start_mid_play();
+                    second.set_ir_key(self.ir_key + 1);
                     self.second = Some(second);
                 }
             }
@@ -1724,7 +1728,7 @@ impl TrackDsp {
         ];
         let ir = cabinet_ir_for(&self.settings.cabinet, self.rate as u32);
         if self.settings.cabinet.enabled && ir.is_some() && self.ir_engine.is_none() {
-            self.ir_engine = Some(Box::new(IrEngine::new(self.rate as u32)));
+            self.ir_engine = Some(Box::new(IrEngine::keyed(self.rate as u32, self.ir_key)));
         }
         self.cabinet_irs = [self.cabinet_irs[1].clone(), ir];
         self.reverb_shapes = [
@@ -1884,6 +1888,22 @@ impl TrackDsp {
     /// is: the room microphone's reflections fade in rather than arriving at full level.
     fn start_mid_play(&mut self) {
         self.microphone_live = false;
+    }
+    /// Says which track of the mix this is. A convolution's heavy work comes once per block of its tiers; giving each
+    /// track its own place in the block keeps a mix of many tracks from doing all of it in one callback. The place
+    /// follows from the index alone, so a render and a playback of the same document agree to the bit. Call before the
+    /// track plays.
+    pub fn set_ir_index(&mut self, index: usize) {
+        self.set_ir_key(index as u64 * 2);
+    }
+    fn set_ir_key(&mut self, key: u64) {
+        self.ir_key = key;
+        if let Some(engine) = &mut self.ir_engine {
+            engine.rekey(key);
+        }
+        if let Some(second) = &mut self.second {
+            second.set_ir_key(key + 1);
+        }
     }
     /// Whether a settings change is still crossfading. A configuration that took over now would cut the fade short. A
     /// second board's fade starts and ends with this one's, so this covers both.
@@ -2436,6 +2456,9 @@ impl TrackDsp {
                     let ir_played = usable[ends[1]] || crossfading && usable[ends[0]];
                     if !(f.cabinet.enabled || p.cabinet.enabled && t < 1.0) {
                         self.cabinet_fir.live = false;
+                        if let Some(engine) = self.ir_engine.as_mut() {
+                            engine.live = false;
+                        }
                     } else if let (true, Some(engine)) = (ir_played, self.ir_engine.as_mut()) {
                         // A response the user loaded plays in place of the built-in cabinet on its side. The other
                         // side, if it has none, plays its own model by itself.

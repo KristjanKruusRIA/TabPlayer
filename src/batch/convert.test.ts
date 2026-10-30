@@ -4,7 +4,8 @@ import { describe,expect,it } from 'vitest';
 import { Settings } from '@coderline/alphatab';
 import { strToU8 } from 'fflate';
 import { loadInterchangeScore } from '../interchange/gp';
-import { convertScoreBytes,runBatch,summarize,type BatchBridge,type BatchScan } from './convert';
+import { convertScoreBytes,runBatch,summarize,TRUNCATED_NOTE,type BatchBridge,type BatchScan } from './convert';
+import type { Probe } from './probe';
 
 const xml=(title:string)=>strToU8(`<?xml version="1.0"?><score-partwise version="4.0"><work><work-title>${title}</work-title></work><part-list><score-part id="P1"><part-name>Piano</part-name></score-part></part-list><part id="P1"><measure number="1"><attributes><divisions>1</divisions><time><beats>4</beats><beat-type>4</beat-type></time><clef><sign>G</sign><line>2</line></clef></attributes><note><pitch><step>C</step><octave>4</octave></pitch><duration>4</duration><type>whole</type></note></measure></part></score-partwise>`);
 const folder=process.env.TABPLAYER_COMPATIBILITY_DIR??resolve('.analysis/compatibility');
@@ -25,7 +26,8 @@ function fakeBridge(files:Record<string,Uint8Array>,options:{failWrite?:string}=
   const scan:BatchScan={files:names.map((relative,index)=>({index,relative,bytes:files[relative].length})),skipped:[],truncated:false,totalBytes:0};
   return {bridge,scan,written,writes};
 }
-const run=(bridge:BatchBridge,scan:BatchScan,cancelled=()=>false)=>runBatch({bridge,scan,keepFolders:true,cancelled,onProgress:()=>{}});
+const pass:Probe=async()=>({ok:true,tracks:1,bars:1});
+const run=(bridge:BatchBridge,scan:BatchScan,cancelled=()=>false,probe:Probe=pass)=>runBatch({bridge,scan,keepFolders:true,cancelled,onProgress:()=>{},probe});
 
 describe('convertScoreBytes',()=>{
   it('writes MusicXML as a GP file that reads back as the same score',()=>{
@@ -66,7 +68,7 @@ describe('runBatch',()=>{
   it('stops on cancel, reports the files it did not reach and never writes them',async()=>{
     const {bridge,scan,writes}=fakeBridge({'a.xml':xml('A'),'b.xml':xml('B'),'c.xml':xml('C')});
     let done=0;
-    const rows=await runBatch({bridge,scan,keepFolders:true,cancelled:()=>done>=1,onProgress:count=>{done=Math.max(done,count+1);}});
+    const rows=await runBatch({bridge,scan,keepFolders:true,cancelled:()=>done>=1,probe:pass,onProgress:count=>{done=Math.max(done,count+1);}});
     expect(rows.map(row=>[row.relative,row.status])).toEqual([['a.xml','Converted'],['b.xml','Not converted'],['c.xml','Not converted']]);
     expect(writes).toEqual(['a.gp']);
     expect(summarize(rows,scan)).toBe('1 converted, 0 failed, 2 not converted.');
@@ -74,8 +76,18 @@ describe('runBatch',()=>{
   it('passes the folder option through and says when a limit left files out',async()=>{
     const {scan}=fakeBridge({'a.xml':xml('A')});
     const kept:boolean[]=[],bridge:BatchBridge={pickFolder:async()=>null,scan:async()=>scan,read:async()=>xml('A'),write:async(_i,_b,keep)=>{kept.push(keep);return {relative:'x.gp',renamed:true};}};
-    const rows=await runBatch({bridge,scan:{...scan,truncated:true},keepFolders:false,cancelled:()=>false,onProgress:()=>{}});
+    const rows=await runBatch({bridge,scan:{...scan,truncated:true},keepFolders:false,cancelled:()=>false,onProgress:()=>{},probe:pass});
     expect(kept).toEqual([false]);expect(rows[0].detail).toContain('Saved as x.gp because the name was taken.');
-    expect(summarize(rows,{...scan,truncated:true})).toContain('more matching files than the limit');
+    expect(summarize(rows,{...scan,truncated:true})).toContain(TRUNCATED_NOTE);
+    expect(TRUNCATED_NOTE).toContain('Choose a subfolder');expect(TRUNCATED_NOTE).not.toContain('again');
+  });
+  it('keeps a file the probe refuses off the window thread, reports it Failed and goes on',async()=>{
+    const {bridge,scan,written}=fakeBridge({'a.xml':xml('A'),'hang.gpx':xml('Hang'),'c.xml':xml('C')});
+    const asked:number[]=[];
+    const probe:Probe=async bytes=>{asked.push(bytes.length);return bytes.length===xml('Hang').length&&asked.length===2?{ok:false,error:'The file did not open within 15 seconds, so it was left out. It may be damaged.'}:{ok:true,tracks:1,bars:1};};
+    const rows=await run(bridge,scan,()=>false,probe);
+    expect(rows.map(row=>[row.relative,row.status])).toEqual([['a.xml','Converted'],['c.xml','Converted'],['hang.gpx','Failed']]);
+    expect(rows.find(row=>row.relative==='hang.gpx')!.detail).toContain('did not open within');
+    expect(Object.keys(written).sort()).toEqual(['a.gp','c.gp']);
   });
 });

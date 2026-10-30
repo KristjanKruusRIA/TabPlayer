@@ -1,5 +1,6 @@
 import { Settings } from '@coderline/alphatab';
 import { exportGpInterchange,loadInterchangeScore } from '../interchange/gp';
+import { probeScoreBytes,type Probe } from './probe';
 
 export type BatchKind='gp345'|'gpx'|'gp'|'musicxml';
 /** The file types the dialog offers. `on` marks the legacy formats chosen by default. */
@@ -23,6 +24,8 @@ export interface BatchBridge{
 export type BatchStatus='Converted'|'Failed'|'Skipped'|'Not converted';
 export interface BatchRow{relative:string;status:BatchStatus;detail:string}
 
+/** Said whenever a limit left files out: a rerun would redo the same first files, so the user must narrow the choice. */
+export const TRUNCATED_NOTE='The folder holds more than one run can convert, so some files are not listed. Choose a subfolder, or fewer file types, to convert the rest.';
 const message=(error:unknown)=>error instanceof Error?error.message:String(error);
 const plural=(count:number,word:string)=>`${count} ${word}${count===1?'':'s'}`;
 
@@ -43,13 +46,16 @@ const yieldToUi=()=>new Promise<void>(resolve=>setTimeout(resolve,0));
  * Converts the scanned files one at a time. A file that fails is reported and the next one follows.
  * `cancelled` is checked before each file, so a file under way always finishes; files not reached are reported.
  */
-export async function runBatch(options:{bridge:BatchBridge;scan:BatchScan;keepFolders:boolean;cancelled:()=>boolean;onProgress:(done:number,total:number)=>void}):Promise<BatchRow[]> {
-  const {bridge,scan,keepFolders,cancelled,onProgress}=options,rows:BatchRow[]=scan.skipped.map(skip=>({relative:skip.relative,status:'Skipped',detail:skip.reason}));
+export async function runBatch(options:{bridge:BatchBridge;scan:BatchScan;keepFolders:boolean;cancelled:()=>boolean;onProgress:(done:number,total:number)=>void;probe?:Probe}):Promise<BatchRow[]> {
+  const {bridge,scan,keepFolders,cancelled,onProgress,probe=probeScoreBytes}=options,rows:BatchRow[]=scan.skipped.map(skip=>({relative:skip.relative,status:'Skipped',detail:skip.reason}));
   for(const [position,file] of scan.files.entries()){
     if(cancelled()){rows.push(...scan.files.slice(position).map(rest=>({relative:rest.relative,status:'Not converted' as const,detail:'Cancelled before this file.'})));break;}
     onProgress(position,scan.files.length);await yieldToUi();
     try{
-      const converted=convertScoreBytes(await bridge.read(file.index)),written=await bridge.write(file.index,converted.bytes,keepFolders);
+      const original=await bridge.read(file.index),checked=await probe(original);
+      // The importer can spin or exhaust memory on a damaged file, so it only runs on this thread once a Worker has read the file.
+      if(!checked.ok)throw new Error(checked.error);
+      const converted=convertScoreBytes(original),written=await bridge.write(file.index,converted.bytes,keepFolders);
       rows.push({relative:file.relative,status:'Converted',detail:`${converted.detail}. Saved as ${written.relative}${written.renamed?' because the name was taken':''}.`});
     }catch(error){rows.push({relative:file.relative,status:'Failed',detail:message(error)});}
   }
@@ -62,5 +68,5 @@ export function summarize(rows:BatchRow[],scan:BatchScan):string {
   const parts=[`${count('Converted')} converted`,`${count('Failed')} failed`];
   if(count('Skipped'))parts.push(`${count('Skipped')} skipped`);
   if(count('Not converted'))parts.push(`${count('Not converted')} not converted`);
-  return `${parts.join(', ')}.${scan.truncated?' The folder holds more matching files than the limit allows, so run it again for the rest.':''}`;
+  return `${parts.join(', ')}.${scan.truncated?` ${TRUNCATED_NOTE}`:''}`;
 }

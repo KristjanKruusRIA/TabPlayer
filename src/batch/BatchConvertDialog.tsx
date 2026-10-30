@@ -1,5 +1,6 @@
 import { useEffect,useId,useRef,useState,type KeyboardEvent } from 'react';
-import { batchKinds,runBatch,summarize,type BatchBridge,type BatchKind,type BatchRow,type BatchScan } from './convert';
+import { batchKinds,runBatch,summarize,TRUNCATED_NOTE,type BatchBridge,type BatchKind,type BatchRow,type BatchScan } from './convert';
+import type { Probe } from './probe';
 import { nativeBatchBridge } from './bridge';
 import './batch-convert.css';
 
@@ -10,16 +11,16 @@ type Phase='idle'|'picking'|'scanning'|'running'|'done';
  * Converts a folder of older score files to the current GP format. Source and destination are picked natively,
  * originals are only read, and the open score is never touched. The report lists every file.
  */
-export function BatchConvertDialog({busy,bridge=nativeBatchBridge,onClose}:{busy:boolean;bridge?:BatchBridge;onClose:()=>void}) {
+export function BatchConvertDialog({busy,bridge=nativeBatchBridge,probe,onClose}:{busy:boolean;bridge?:BatchBridge;probe?:Probe;onClose:()=>void}) {
   const [source,setSource]=useState<string|null>(null),[destination,setDestination]=useState<string|null>(null);
   const [kinds,setKinds]=useState<Set<BatchKind>>(()=>new Set(batchKinds.filter(kind=>kind.on).map(kind=>kind.id)));
   const [keepFolders,setKeepFolders]=useState(true),[phase,setPhase]=useState<Phase>('idle'),[problem,setProblem]=useState<string|null>(null);
   const [progress,setProgress]=useState<[number,number]>([0,0]),[rows,setRows]=useState<BatchRow[]|null>(null),[summary,setSummary]=useState('');
-  const form=useRef<HTMLFormElement>(null),cancelButton=useRef<HTMLButtonElement>(null),cancelled=useRef(false),heading=useId(),hint=useId(),status=useId();
+  const form=useRef<HTMLFormElement>(null),cancelButton=useRef<HTMLButtonElement>(null),closeButton=useRef<HTMLButtonElement>(null),cancelled=useRef(false),heading=useId(),hint=useId(),status=useId();
   const working=phase!=='idle'&&phase!=='done',running=phase==='running'||phase==='scanning';
   useEffect(()=>{form.current?.querySelector<HTMLElement>('button')?.focus();return ()=>{cancelled.current=true;};},[]);
   // Focus stays inside the dialog while the button that started the run is disabled, so Escape still reaches it.
-  useEffect(()=>{if(running)cancelButton.current?.focus();else if(phase==='done')form.current?.querySelector<HTMLElement>('button.primary')?.focus();},[running,phase]);
+  useEffect(()=>{if(running)cancelButton.current?.focus();else if(phase==='done')closeButton.current?.focus();},[running,phase]);
   const pick=async(role:'source'|'destination')=>{
     setPhase('picking');setProblem(null);
     try{
@@ -35,15 +36,15 @@ export function BatchConvertDialog({busy,bridge=nativeBatchBridge,onClose}:{busy
     try{
       scan=await bridge.scan(batchKinds.filter(kind=>kinds.has(kind.id)).map(kind=>kind.id));
     }catch(error){setProblem(message(error));setPhase('idle');return;}
-    if(!scan.files.length&&!scan.skipped.length){setSummary('No matching files were found.');setPhase('done');return;}
+    if(!scan.files.length&&!scan.skipped.length){setSummary(`No matching files were found.${scan.truncated?` ${TRUNCATED_NOTE}`:''}`);setPhase('done');return;}
     setPhase('running');setProgress([0,scan.files.length]);
     try{
-      const result=await runBatch({bridge,scan,keepFolders,cancelled:()=>cancelled.current,onProgress:(done,total)=>setProgress([done,total])});
+      const result=await runBatch({bridge,scan,keepFolders,cancelled:()=>cancelled.current,probe,onProgress:(done,total)=>setProgress([done,total])});
       setRows(result);setSummary(summarize(result,scan));
     }catch(error){setProblem(message(error));}
     setPhase('done');
   };
-  const close=()=>{if(!running)onClose();};
+  const close=()=>{if(!working)onClose();};
   const trap=(event:KeyboardEvent)=>{
     const items=[...form.current?.querySelectorAll<HTMLElement>('input:not(:disabled),button:not(:disabled)')??[]];if(!items.length)return;
     const index=items.indexOf(document.activeElement as HTMLElement),next=event.shiftKey?(index<=0?items.length-1:index-1):(index<0||index===items.length-1?0:index+1);
@@ -68,7 +69,7 @@ export function BatchConvertDialog({busy,bridge=nativeBatchBridge,onClose}:{busy
       <div className="dialog-actions">
         <button type="submit" className="primary" disabled={!ready}>Convert</button>
         {running?<button ref={cancelButton} type="button" onClick={()=>{cancelled.current=true;}}>Cancel conversion</button>:null}
-        <button type="button" disabled={running} onClick={close}>Close</button>
+        <button ref={closeButton} type="button" disabled={working} onClick={close}>Close</button>
       </div>
     </form>
   </div>;

@@ -8,6 +8,7 @@ pub mod export;
 pub mod export_backing;
 pub mod file_library;
 pub mod files;
+pub mod fs_identity;
 pub mod harmony;
 pub mod harmony_library;
 pub mod intake;

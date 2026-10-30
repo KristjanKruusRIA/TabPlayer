@@ -1,3 +1,4 @@
+use crate::fs_identity::file_id;
 use crate::workspace::same_path;
 use std::{
     io::ErrorKind,
@@ -55,9 +56,45 @@ impl ProtectedPaths {
                         .into(),
                 );
             }
+            // Names differ for one folder (a share spelling of this machine, for one), so compare the folders themselves.
+            if [&destination, &entry]
+                .iter()
+                .try_fold(false, |found, resolved| {
+                    Ok::<_, String>(found || reaches(resolved, &root.path)?)
+                })?
+            {
+                return Err(
+                    "Choose a destination outside TabPlayer's protected library and recovery storage."
+                        .into(),
+                );
+            }
         }
         Ok(())
     }
+}
+
+/// Whether `path`, or a folder above it that exists, is the folder `root` names. Fails closed:
+/// a folder that exists but cannot be identified refuses the path.
+fn reaches(path: &Path, root: &Path) -> Result<bool, String> {
+    let root_id = match file_id(root) {
+        Ok(id) => id,
+        Err(_) if !root.exists() => return Ok(false),
+        Err(error) => return Err(error),
+    };
+    for ancestor in path.ancestors() {
+        let ancestor = if ancestor.as_os_str().is_empty() {
+            Path::new(".")
+        } else {
+            ancestor
+        };
+        match std::fs::symlink_metadata(ancestor) {
+            Ok(_) if file_id(ancestor)? == root_id => return Ok(true),
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.to_string()),
+        }
+    }
+    Ok(false)
 }
 
 fn within(path: &Path, root: &Path) -> bool {
@@ -284,5 +321,40 @@ mod tests {
                 .check(Path::new("anything/score.gp"))
                 .is_ok()
         );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn denies_a_loopback_share_spelling_of_a_protected_folder() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(directory.path())
+            .unwrap()
+            .join("library");
+        std::fs::create_dir(&root).unwrap();
+        let protected = ProtectedPaths::new(vec![root.clone()]).unwrap();
+        let plain = root
+            .to_string_lossy()
+            .trim_start_matches(r"\\?\")
+            .to_string();
+        let (drive, rest) = plain.split_at(2);
+        let mut tried = 0;
+        for host in ["localhost", "127.0.0.1"] {
+            let share = format!(r"\\{host}\{}${rest}", &drive[..1]);
+            if std::fs::metadata(&share).is_err() {
+                continue;
+            }
+            tried += 1;
+            assert!(
+                protected.check(&Path::new(&share).join("song.gp")).is_err(),
+                "{share}"
+            );
+            assert!(
+                protected
+                    .check(&Path::new(&share).join("new/deeper/song.gp"))
+                    .is_err(),
+                "{share}"
+            );
+        }
+        eprintln!("protected share spellings exercised: {tried}");
     }
 }

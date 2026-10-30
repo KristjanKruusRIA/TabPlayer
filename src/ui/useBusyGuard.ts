@@ -2,6 +2,8 @@ import type { KeyboardEvent, MouseEvent, PointerEvent } from 'react';
 
 export interface BusyGuardProps<T = HTMLElement> {
   busy?: boolean;
+  /** Unavailable for a reason other than busy; the control keeps `disabled` off the element, so it can hold focus. */
+  unavailable?: boolean;
   disabled?: boolean;
   onClick?: (event: MouseEvent<T>) => void;
   onKeyDown?: (event: KeyboardEvent<T>) => void;
@@ -15,6 +17,7 @@ export interface BusyGuardProps<T = HTMLElement> {
 export function busyGuard<T extends HTMLElement = HTMLButtonElement>({
   busy = false,
   disabled = false,
+  unavailable = false,
   onClick,
   onKeyDown,
   onKeyUp,
@@ -22,10 +25,10 @@ export function busyGuard<T extends HTMLElement = HTMLButtonElement>({
   className,
 }: BusyGuardProps<T>) {
   const isHtmlDisabled = !busy && disabled;
-  const isAriaDisabled = busy || (!isHtmlDisabled && disabled);
-  const isRefusing = busy || disabled;
+  const isAriaDisabled = busy || unavailable || (!isHtmlDisabled && disabled);
+  const isRefusing = busy || unavailable || disabled;
 
-  const classes = [className, (busy || disabled) ? 'is-disabled' : null].filter(Boolean).join(' ');
+  const classes = [className, (busy || unavailable || disabled) ? 'is-disabled' : null].filter(Boolean).join(' ');
 
   return {
     disabled: isHtmlDisabled || undefined,
@@ -68,8 +71,4 @@ export function busyGuard<T extends HTMLElement = HTMLButtonElement>({
       onPointerDown?.(event);
     },
   };
-}
-
-export function useBusyGuard<T extends HTMLElement = HTMLButtonElement>(options: BusyGuardProps<T>) {
-  return busyGuard(options);
 }

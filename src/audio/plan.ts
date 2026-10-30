@@ -18,10 +18,22 @@ function cloneWithLinks(score: model.Score) {
   restoreNoteLinks(copy, captureNoteLinks(score)); return copy;
 }
 
+// Public generation steps a tremolo by its beat's play time. Grace notes can take
+// all of a short beat's time (<= 0), leaving no step: a tied or slid note then
+// loops forever adding attacks. Such a beat plays no tremolo, as it already
+// plays none when its note is not tied.
+const tremoloHasNoTime = (beat: model.Beat) => !!beat.tremoloPicking && beat.tremoloPicking.marks > 0 && beat.playbackDuration <= 0;
+function withoutUntimedTremolo(score: model.Score): model.Score {
+  if (!beatsOf(score).some(tremoloHasNoTime)) return score;
+  const copy = cloneWithLinks(score), byId = new Map(beatsOf(score).map(b => [b.id, b]));
+  for (const beat of beatsOf(copy)) if (beat.tremoloPicking && tremoloHasNoTime(byId.get(beat.id)!)) beat.tremoloPicking.marks = 0;
+  return copy;
+}
+
 // 1.8.4 multiplies negative whole-note enum values by the mark count instead of
 // dividing their whole-note multiplier. Normalize only the transient MIDI model.
 export function prepareMidiScore(score: model.Score): model.Score {
-  score = preparePitchedGpScore(score, settings);
+  score = withoutUntimedTremolo(preparePitchedGpScore(score, settings));
   const original = beatsOf(score);
   if (!original.some(b => b.duration < 0 && b.tremoloPicking)) return score;
   const copy = cloneWithLinks(score), byId = new Map(original.map(b => [b.id, b]));
@@ -95,7 +107,7 @@ export function backingLocationsForScore(score:model.Score):readonly ReferenceLo
   const handler: midi.IMidiFileHandler = {
     addTickShift(value) { shift = value; }, addTimeSignature() {}, addRest() {}, addNote() {}, addControlChange() {}, addProgramChange() {}, addTempo() {}, addBend() {}, addNoteBend() {}, finishTrack() {},
   };
-  const generator = new midi.MidiFileGenerator(score, settings, handler); generator.generate();
+  const generator = new midi.MidiFileGenerator(withoutUntimedTremolo(score), settings, handler); generator.generate();
   const counts = new Map<number, number>();
   return generator.tickLookup.masterBars.map(m => {
     const bar = m.masterBar.index, occurrence = counts.get(bar) ?? 0; counts.set(bar, occurrence + 1);

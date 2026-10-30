@@ -2,10 +2,11 @@ import { useEffect,useState } from 'react';
 import { type model,Settings } from '@coderline/alphatab';
 import type { EngravingCommand,EngravingOverrides,InheritBool,TrackProfile } from './types';
 import { defaultEngraving,validateEngravingTracks } from './projection';
+import { StylePresetsPanel } from './StylePresetsPanel';
 
 export interface EngravingPanelProps {
   score:model.Score;trackIds:readonly string[];value:EngravingOverrides;busy:boolean;
-  onEdit:(command:Extract<EngravingCommand,{type:'setEngraving'}>)=>void;
+  onEdit:(command:Extract<EngravingCommand,{type:'setEngraving'}>)=>unknown;
 }
 type Options=ReadonlyArray<readonly [string,string]>;
 const boolOptions:Options=[['true','Yes'],['false','No']];
@@ -27,6 +28,11 @@ const yesNo=(value:boolean)=>value?'Yes':'No';
 function Choice({label,value,source,options,onChange}:{label:string;value:string;source:string;options:Options;onChange:(value:string)=>void}) {
   return <label>{label}<select value={value} onChange={e=>onChange(e.target.value)}><option value="inherit">Source/default ({source})</option>{options.map(([id,name])=><option key={id} value={id}>{name}</option>)}</select></label>;
 }
+/** Whether two engravings hold the same choices, ignoring the order of the staff profiles. */
+const sameEngraving=(a:EngravingOverrides,b:EngravingOverrides)=>{
+  const canon=(value:EngravingOverrides)=>JSON.stringify([value.stylesheet,value.notation,value.systemSpacing,value.profiles.map(entry=>[entry.trackId,entry.profile]).sort(([x],[y])=>x.localeCompare(y))]);
+  return canon(a)===canon(b);
+};
 const boolValue=(value:InheritBool)=>value===null?'inherit':String(value);
 const parseBool=(value:string):InheritBool=>value==='inherit'?null:value==='true';
 export function EngravingPanel({score,trackIds,value,busy,onEdit}:EngravingPanelProps) {
@@ -73,5 +79,7 @@ export function EngravingPanel({score,trackIds,value,busy,onEdit}:EngravingPanel
     <p>Blank uses default system spacing.</p>
     {error&&<p role="alert">{error}</p>}
     <button type="button" onClick={apply}>Apply engraving</button><button type="button" onClick={reset}>Reset to source/default</button>
-  </fieldset></details>;
+  </fieldset>
+  <StylePresetsPanel score={score} trackIds={trackIds} value={value} unapplied={!sameEngraving(draft,value)} busy={busy} onEdit={onEdit}/>
+  </details>;
 }

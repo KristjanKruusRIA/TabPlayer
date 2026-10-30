@@ -883,6 +883,8 @@ pub fn run() {
         .manage(export::jobs::ExportJobs::default())
         .manage(backing_waveform::BackingWaveformService::default())
         .setup(|app| {
+            // Every track resolves the user's cabinet responses from here, so it must be set before any plays.
+            audio::cabinet_ir::install(tuning_library_directory(app.handle())?.join("cabinet-irs"));
             let directory = session::session_directory(app.path().app_data_dir()?)?;
             let library_directory = directory.join("file-library-v1");
             let bundled_directory = app.path().resource_dir()?.join("library");
@@ -1000,6 +1002,10 @@ pub fn run() {
         style_library::style_library_read,
         style_library::style_library_put,
         style_library::style_library_remove,
+        audio::cabinet_ir::cabinet_ir_list,
+        audio::cabinet_ir::cabinet_ir_import,
+        audio::cabinet_ir::cabinet_ir_remove,
+        audio::cabinet_ir::cabinet_ir_status,
         file_library_snapshot,
         file_library_retry,
         file_library_change,
@@ -1073,6 +1079,10 @@ pub fn run() {
         style_library::style_library_read,
         style_library::style_library_put,
         style_library::style_library_remove,
+        audio::cabinet_ir::cabinet_ir_list,
+        audio::cabinet_ir::cabinet_ir_import,
+        audio::cabinet_ir::cabinet_ir_remove,
+        audio::cabinet_ir::cabinet_ir_status,
         file_library_snapshot,
         file_library_retry,
         file_library_change,

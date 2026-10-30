@@ -1,8 +1,10 @@
 pub mod audition;
 pub mod backing;
+pub mod cabinet_ir;
 pub mod decode;
 pub mod device;
 pub mod dsp;
+pub mod ir_convolver;
 pub mod plan;
 pub mod playback;
 pub mod practice;

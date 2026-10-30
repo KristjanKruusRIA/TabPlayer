@@ -1,3 +1,4 @@
+import { useRef, useState, type KeyboardEvent } from 'react';
 import { model } from '@coderline/alphatab';
 import { describePartialCapo, getPartialCapo } from '../editor/partial-capo';
 import type { ChordDiagramPreviewProps, HarmonyChord } from '../editor/harmony-types';
@@ -25,6 +26,7 @@ export function soundingChordPitches(chord: HarmonyChord, staff: model.Staff): A
 
 export function ChordDiagramPreview({ chord, staff, highlightRoot, onToggle }: ChordDiagramPreviewProps) {
   if (chord.frets.length === 0) return <p className="muted">Name-only chord; no strings.</p>;
+  const svgRef = useRef<SVGSVGElement>(null);
   const pitches = soundingChordPitches(chord, staff);
   const first = Math.max(1, chord.firstFret);
   const rows = [
@@ -33,6 +35,19 @@ export function ChordDiagramPreview({ chord, staff, highlightRoot, onToggle }: C
       ...chord.frets.filter(fret => fret > 0),
     ]),
   ].sort((a, b) => a - b);
+  const allFrets = [-1, 0, ...rows];
+  const [focusedString, setFocusedString] = useState(0);
+  const [focusedFret, setFocusedFret] = useState<number | null>(null);
+  const activeFret =
+    focusedFret ?? (allFrets.includes(chord.frets[focusedString]) ? chord.frets[focusedString] : allFrets[0]);
+
+  const navigate = (s: number, f: number) => {
+    setFocusedString(s);
+    setFocusedFret(f);
+    const target = svgRef.current?.querySelector<SVGElement>(`[data-string="${s}"][data-fret="${f}"]`);
+    target?.focus();
+  };
+
   const width = Math.max(160, chord.frets.length * 40 + 44);
   const nutY = 58;
   const rowStep = 30;
@@ -53,6 +68,7 @@ export function ChordDiagramPreview({ chord, staff, highlightRoot, onToggle }: C
   return (
     <span className="harmony-diagram">
       <svg
+        ref={svgRef}
         role="group"
         aria-label="Chord diagram preview"
         viewBox={`0 0 ${width} ${height}`}
@@ -116,13 +132,14 @@ export function ChordDiagramPreview({ chord, staff, highlightRoot, onToggle }: C
 
         {chord.frets.map((current, index) => {
           const x = firstX + index * 40;
-          const gauge = 1 + ((chord.frets.length - 1 - index) / Math.max(1, chord.frets.length - 1)) * 1.1;
+          const gauge = 1 + (index / Math.max(1, chord.frets.length - 1)) * 1.1;
           return (
             <g key={index}>
               <line x1={x} x2={x} y1={nutY} y2={bottomY} className="tp-chord-string" strokeWidth={gauge} />
-              {[-1, 0, ...rows].map(fret => {
+              {allFrets.map(fret => {
                 const selected = current === fret;
                 if (!selected && !onToggle) return null;
+                const isFocusedNode = index === focusedString && fret === activeFret;
                 const y = fret === -1 ? 28 : fret === 0 ? 44 : nutY + rows.indexOf(fret) * rowStep + rowStep / 2;
                 const pitch = selected && fret >= 0 ? pitches[index] : null;
                 const isRoot = Boolean(highlightRoot && pitch !== null && pitch % 12 === root);
@@ -131,16 +148,40 @@ export function ChordDiagramPreview({ chord, staff, highlightRoot, onToggle }: C
                   <g
                     key={fret}
                     role={onToggle ? 'button' : undefined}
-                    tabIndex={onToggle ? 0 : undefined}
+                    tabIndex={onToggle ? (isFocusedNode ? 0 : -1) : undefined}
+                    aria-pressed={onToggle ? (selected ? 'true' : 'false') : undefined}
                     aria-label={label(index, fret)}
+                    data-string={index}
+                    data-fret={fret}
                     className={`tp-chord-node${selected ? ' is-selected' : ''}${isRoot ? ' is-root' : ''}${fret === -1 ? ' is-mute' : ''}${fret === 0 ? ' is-open' : ''}`}
                     onClick={onToggle ? () => onToggle(index, fret) : undefined}
+                    onFocus={onToggle ? () => { setFocusedString(index); setFocusedFret(fret); } : undefined}
                     onKeyDown={
                       onToggle
-                        ? event => {
+                        ? (event: KeyboardEvent<SVGElement>) => {
                             if (event.key === 'Enter' || event.key === ' ') {
                               event.preventDefault();
                               onToggle(index, fret);
+                            } else if (event.key === 'ArrowLeft') {
+                              event.preventDefault();
+                              navigate(Math.max(0, index - 1), fret);
+                            } else if (event.key === 'ArrowRight') {
+                              event.preventDefault();
+                              navigate(Math.min(chord.frets.length - 1, index + 1), fret);
+                            } else if (event.key === 'ArrowUp') {
+                              event.preventDefault();
+                              const fretIdx = allFrets.indexOf(fret);
+                              navigate(index, allFrets[Math.max(0, fretIdx - 1)]);
+                            } else if (event.key === 'ArrowDown') {
+                              event.preventDefault();
+                              const fretIdx = allFrets.indexOf(fret);
+                              navigate(index, allFrets[Math.min(allFrets.length - 1, fretIdx + 1)]);
+                            } else if (event.key === 'Home') {
+                              event.preventDefault();
+                              navigate(0, fret);
+                            } else if (event.key === 'End') {
+                              event.preventDefault();
+                              navigate(chord.frets.length - 1, fret);
                             }
                           }
                         : undefined

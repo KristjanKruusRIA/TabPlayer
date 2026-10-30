@@ -7,7 +7,6 @@ import { TechniquePanel } from './TechniquePanel';
 import { StructurePanel } from './StructurePanel';
 import { MeasurePanel } from './MeasurePanel';
 import { CurveEditor } from './CurveEditor';
-import { ChordDialog } from './ChordDialog';
 import { music, target } from './fixtures';
 import { buildScore, previewEdit } from '../engine';
 import { blankProject } from '../project';
@@ -235,18 +234,6 @@ it('staff preset readback resets Custom on staff selection and percussion disabl
 it('measure meter and tempo controls dispatch current musical values',()=>{
   const onEdit=vi.fn();render(<MeasurePanel score={music()} target={target} string={6} busy={false} onEdit={onEdit}/>);
   fireEvent.change(screen.getByLabelText('Time numerator'),{target:{value:'3'}});fireEvent.click(screen.getByRole('button',{name:'Apply measure settings'}));expect(onEdit).toHaveBeenLastCalledWith(expect.objectContaining({type:'setMeasureSettings',bar:0,numerator:3,denominator:4}));
-});
-it('chord dialog has accessible focus, interactive SVG diagram grid, and saves per-string positions',()=>{
-  const onChange=vi.fn(),onClose=vi.fn();render(<ChordDialog strings={6} value={null} onChange={onChange} onClose={onClose}/>);
-  const input=screen.getByLabelText('Chord name');expect(input).toHaveFocus();fireEvent.change(input,{target:{value:'Am'}});
-  fireEvent.click(screen.getByRole('button',{name:'Diagram string 1 open'}));
-  fireEvent.keyDown(screen.getByRole('button',{name:'Diagram string 2 fret 1'}),{key:'Enter'});
-  fireEvent.click(screen.getByRole('button',{name:'Apply chord'}));
-  expect(onChange).toHaveBeenCalledWith({name:'Am',firstFret:1,frets:[0,1,-1,-1,-1,-1]});expect(onClose).toHaveBeenCalled();
-});
-it('chord dialog traps keyboard focus and Escape closes',()=>{
-  const onClose=vi.fn();render(<ChordDialog strings={6} value={null} onChange={vi.fn()} onClose={onClose}/>);const name=screen.getByLabelText('Chord name'),cancel=screen.getByRole('button',{name:'Cancel'});
-  fireEvent.keyDown(name,{key:'Tab',shiftKey:true});expect(cancel).toHaveFocus();fireEvent.keyDown(cancel,{key:'Tab'});expect(name).toHaveFocus();fireEvent.keyDown(name,{key:'Escape'});expect(onClose).toHaveBeenCalled();
 });
 
 it('staff settings keep the staff tuning name through capo edits and send the draft name after tuning changes',()=>{

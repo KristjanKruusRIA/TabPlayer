@@ -10,8 +10,9 @@ use tauri::AppHandle;
 
 const FILENAME: &str = "style-library.json";
 const FORMAT: &str = "tabplayer-style-library";
-/// Version 2 added `engraving.typography` (omitted while default). Version 1 files are read as version 2 and become
-/// version 2 files on the next write; reading never rewrites them.
+/// Version 2 added `engraving.typography` (omitted while default). Version 1 files are read as version 2. A write
+/// produces a version 2 file only while some stored style has typography, otherwise version 1, so older builds keep
+/// reading libraries that do not use it. Reading never rewrites a file.
 const VERSION: u32 = 2;
 static WRITES: Mutex<()> = Mutex::new(());
 
@@ -134,7 +135,16 @@ pub fn read_library(directory: &Path) -> Result<StyleLibrary, String> {
 
 fn write_library(directory: &Path, library: &StyleLibrary) -> Result<(), String> {
     library.validate()?;
-    let bytes = serde_json::to_vec_pretty(library).map_err(|error| error.to_string())?;
+    // A library with no typography is still a version 1 file, so older builds keep reading it.
+    let mut file = library.clone();
+    if file
+        .entries
+        .iter()
+        .all(|entry| entry.engraving.typography.is_default())
+    {
+        file.version = 1;
+    }
+    let bytes = serde_json::to_vec_pretty(&file).map_err(|error| error.to_string())?;
     std::fs::create_dir_all(directory).map_err(|error| error.to_string())?;
     write_bytes(&directory.join(FILENAME), &bytes)
 }
@@ -427,6 +437,13 @@ mod tests {
             wire["entries"][1]["engraving"]["typography"],
             json!({"family":"serif","textScale":1.25,"titleScale":null,"tabScale":1.5})
         );
+        remove_entry(dir, B).unwrap();
+        let wire: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(file(dir)).unwrap()).unwrap();
+        assert_eq!(
+            wire["version"], 1,
+            "no typography left, so an older build can read it"
+        );
     }
 
     #[test]
@@ -444,6 +461,13 @@ mod tests {
         assert_eq!(std::fs::read(file(dir)).unwrap(), old);
         assert_eq!(remove_entry(dir, B).unwrap().version, 2);
         assert_eq!(std::fs::read(file(dir)).unwrap(), old);
+        put_entry(dir, style(B, "Plain")).unwrap();
+        let wire: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(file(dir)).unwrap()).unwrap();
+        assert_eq!(
+            wire["version"], 1,
+            "plain styles keep an older build able to read the file"
+        );
         put_entry(dir, typed(B, "New")).unwrap();
         let wire: serde_json::Value =
             serde_json::from_slice(&std::fs::read(file(dir)).unwrap()).unwrap();

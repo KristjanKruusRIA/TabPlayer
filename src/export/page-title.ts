@@ -1,5 +1,5 @@
 /** Keep the complete title in its existing single-line header. Fonts load before export. */
-export function pageTitleFontSize(title:string,availableWidth:number):number {return fitFontSize(title,availableWidth,18);}
+export function pageTitleFontSize(title:string,availableWidth:number,scale=1):number {return fitFontSize(title,availableWidth,18*scale);}
 /** Shrinks single-line page text from its base size until it fits the available width. */
 export function fitFontSize(title:string,availableWidth:number,base:number):number {
   const measuredWidth=measurePageText(title,base);

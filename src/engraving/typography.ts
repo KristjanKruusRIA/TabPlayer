@@ -35,8 +35,8 @@ const titleElements=new Set<NotationElement>([NotationElement.ScoreTitle,Notatio
 const scaled=(size:number,scale:number|null)=>Math.round(size*(scale??1)*10)/10;
 /**
  * Rebuilds every text font from the renderer defaults, then applies `typography`. Always starting from the defaults
- * means a reused Settings never keeps a previous choice, and layout measures the final fonts, so enlarged text moves
- * the notation instead of overflowing it.
+ * means a reused Settings never keeps a previous choice. Layout measures the final fonts and spaces the notation to
+ * match; only export checks that text stays inside the page (see `assertTextFits`).
  */
 export function configureTypography(settings:Settings,typography:EngravingTypography):void {
   validateTypography(typography);
@@ -47,9 +47,6 @@ export function configureTypography(settings:Settings,typography:EngravingTypogr
     if(families)next.families=[...families];
     resources.elementFonts.set(element,next);
   }
-  for(const key of ['tablatureFont','graceFont'] as const){
-    const next=defaults[key].withSize(scaled(defaults[key].size,typography.tabScale));
-    if(families)next.families=[...families];
-    resources[key]=next;
-  }
+  // Fret and staff numbers keep the default family: the chosen family may have old-style digits that sit unevenly on the lines.
+  for(const key of ['tablatureFont','graceFont','numberedNotationFont','numberedNotationGraceFont'] as const)resources[key]=defaults[key].withSize(scaled(defaults[key].size,typography.tabScale));
 }

@@ -70,72 +70,129 @@ export async function runStyleTypographyAcceptance({buildPath}={}){
   const percent=async(label,value)=>{const field=page.getByLabel(label,{exact:true});await field.fill(String(value));await field.press('Enter');};
   const openPanels=async()=>{await button('Presentation');for(const name of ['Engraving','Typography','Notation style presets','Saved styles'])await details(name);};
   // Notes of the exported score: typography may change how the score is drawn, never what it holds.
-  const notesOf=bytes=>JSON.stringify(load(bytes).tracks.map(track=>track.staves.map(staff=>staff.bars.map(bar=>bar.voices.map(voice=>voice.beats.map(beat=>[beat.duration,beat.notes.map(note=>[note.string,note.fret,note.realValue])]))))));
+  const notesOf=bytes=>JSON.stringify(load(bytes).tracks.map(track=>track.staves.map(staff=>staff.bars.map(bar=>bar.voices.map(voice=>voice.beats.map(beat=>[beat.duration,beat.text??null,beat.notes.map(note=>[note.string,note.fret,note.realValue])]))))));
   let baseline=null;
   const exportCheck=async label=>{
     const beforeRecord=await record(),path=`${exportBase}.gp`;assert.equal(existsSync(path),false);await button('Export GP');const bytes=readFileSync(path),music=notesOf(bytes);
     baseline??=music;assert.equal(music,baseline,`${label}: the exported notes are unchanged`);assert.deepEqual(await record(),beforeRecord,'Export must not change project/history/revision');
     const saved=resolve(exportDirectory,`${String(result.exports.length+1).padStart(2,'0')}-${label}.gp`);renameSync(path,saved);result.exports.push({label,path:saved,sha256:sha256(bytes)});await native();
   };
-  const rendered=async()=>sha256(Buffer.from((await page.locator('[aria-label="Music notation"] svg').evaluateAll(nodes=>nodes.map(node=>node.outerHTML))).join('')));
-  // The text actually drawn: its families, its largest non-music size, and any text that spills outside its own page tile.
+  // PDF, PNG and SVG pages come from one render; each is exported through the real dialog. An SVG page is outlined
+  // paths, so its spill is measured by laying it out: nothing may leave its own page.
+  const svgSpill=text=>page.evaluate(svgText=>{
+    const host=document.createElement('div');host.style.cssText='position:absolute;left:-100000px;top:0';host.innerHTML=svgText;document.body.append(host);
+    try{const svg=host.querySelector('svg'),frame=svg.getBoundingClientRect();return {width:frame.width,height:frame.height,paths:svg.querySelectorAll('path').length,spill:[...svg.querySelectorAll('path')].filter(path=>{const box=path.getBoundingClientRect();return box.width>0&&(box.left<frame.left-2||box.right>frame.right+2||box.top<frame.top-2||box.bottom>frame.bottom+2);}).length};}finally{host.remove();}
+  },text);
+  const exportPages=async label=>{
+    const beforeRecord=await record(),found={};
+    for(const format of ['pdf','png','svg']){
+      const path=`${exportBase}.${format}`;assert.equal(existsSync(path),false);
+      await ui.clickWorkspaceCommand(page,'Export score',{waitForIdle:false});const dialog=page.getByRole('dialog',{name:'Export score'});
+      await dialog.getByLabel('Export format').selectOption(format);if(format==='png')await dialog.getByLabel('Resolution').selectOption('150');
+      await dialog.getByRole('button',{name:'Export',exact:true}).click();
+      const until=Date.now()+120000;while(!existsSync(path)){const failure=dialog.getByRole('alert');if(await failure.count())throw new Error(`${label} ${format}: ${await failure.innerText()}`);if(Date.now()>until)throw new Error(`${label} ${format}: no output`);await sleep(200);}
+      await dialog.waitFor({state:'hidden'});await idle();
+      const bytes=readFileSync(path);
+      if(format==='pdf')assert.equal(bytes.subarray(0,5).toString(),'%PDF-');
+      if(format==='png'){assert.equal(bytes.subarray(0,8).toString('hex'),'89504e470d0a1a0a');assert.ok(bytes.readUInt32BE(16)>1000&&bytes.readUInt32BE(20)>1000,'PNG page size');}
+      if(format==='svg'){const text=bytes.toString('utf8');assert.ok(text.startsWith('<svg'));const measured=await svgSpill(text);assert.ok(measured.paths>2&&measured.width>0,'SVG page has laid-out notation');assert.equal(measured.spill,0,`${label}: no SVG content leaves its page`);found.svgPage=[measured.width,measured.height];}
+      found[format]=sha256(bytes);renameSync(path,resolve(exportDirectory,`${String(result.exports.length+1).padStart(2,'0')}-${label}.${format}`));result.exports.push({label,format,sha256:found[format]});
+    }
+    assert.deepEqual(await record(),beforeRecord,'Exporting pages never edits the document');return found;
+  };
+  // The text actually drawn: families and sizes of annotations and of fret digits, and any text outside its own tile or page.
   const drawn=()=>page.locator('[aria-label="Music notation"] svg').evaluateAll(nodes=>{
-    const texts=nodes.flatMap(svg=>[...svg.querySelectorAll('text')].filter(text=>text.textContent.trim()).map(text=>({svg,text,style:getComputedStyle(text)})));
-    const words=texts.filter(({style})=>!/alphatab|bravura/i.test(style.fontFamily));
-    const spill=texts.filter(({svg,text})=>{const box=svg.getBoundingClientRect(),rect=text.getBoundingClientRect();return rect.width>0&&(rect.left<box.left-2||rect.right>box.right+2||rect.top<box.top-2||rect.bottom>box.bottom+2);}).map(({text})=>text.textContent);
-    return {families:[...new Set(words.map(({style})=>style.fontFamily))],largest:Math.max(0,...words.map(({style})=>parseFloat(style.fontSize))),count:words.length,spill};
+    const texts=nodes.flatMap(svg=>[...svg.querySelectorAll('text')].filter(text=>text.textContent.trim()).map(text=>({svg,text,style:getComputedStyle(text),content:text.textContent.trim()})));
+    const words=texts.filter(({style})=>!/alphatab|bravura/i.test(style.fontFamily)),digits=words.filter(({content})=>/^\d+$/.test(content)),labels=words.filter(({content})=>!/^\d+$/.test(content));
+    const size=list=>Math.max(0,...list.map(({style})=>parseFloat(style.fontSize)));
+    const spill=texts.filter(({svg,text})=>{const box=svg.getBoundingClientRect(),rect=text.getBoundingClientRect();return rect.width>0&&(rect.left<box.left-2||rect.right>box.right+2||rect.top<box.top-2||rect.bottom>box.bottom+2);}).map(({content})=>content);
+    const sheets=[...document.querySelectorAll('.score-sheet')],pageSpill=sheets.flatMap(sheet=>{const frame=sheet.getBoundingClientRect();return [...sheet.querySelectorAll('svg text')].filter(text=>text.textContent.trim()).filter(text=>{const rect=text.getBoundingClientRect();return rect.width>0&&(rect.left<frame.left-2||rect.right>frame.right+2||rect.top<frame.top-2||rect.bottom>frame.bottom+2);}).map(text=>text.textContent.trim());});
+    const annotation=labels.find(({content})=>content.includes('同じ楽譜')),chord=labels.find(({content})=>/maj7|m7|sus4/.test(content));
+    return {families:[...new Set(labels.map(({style})=>style.fontFamily))],largest:size(words),digitSize:size(digits),annotationSize:annotation?parseFloat(annotation.style.fontSize):0,chordSize:chord?parseFloat(chord.style.fontSize):0,
+      cjk:annotation?annotation.text.getBoundingClientRect().width:0,count:words.length,sheets:sheets.length,spill,pageSpill};
   });
+  const sans=/arial|sans-serif/i,serif=/georgia|serif/i,mono=/consolas|monospace/i;
+  const clean=value=>{assert.deepEqual(value.spill,[],'No text spills out of its tile');assert.deepEqual(value.pageSpill,[],'No text spills out of its page');};
   const edits=async()=>(await record()).snapshot.project.edits;
+  // A preset fills the form (no edit), then Apply is exactly one more edit holding the preset's choices.
+  const preset=async(name,typography,stylesheet,notation,family)=>{
+    const count=(await edits()).length;await page.getByRole('button',{name:`Load ${name} preset`,exact:true}).click();await idle();
+    assert.equal((await edits()).length,count,`${name}: loading never edits`);await button('Apply engraving');
+    const after=await record(),edit=after.snapshot.project.edits.at(-1);assert.equal(after.snapshot.project.edits.length,count+1,`${name}: one edit`);
+    assert.equal(edit.type,'setEngraving');assert.deepEqual(typography?edit.engraving.typography:Object.hasOwn(edit.engraving,'typography'),typography??false,`${name}: typography`);
+    for(const [key,value] of Object.entries(stylesheet))assert.equal(edit.engraving.stylesheet[key],value,`${name}: ${key}`);
+    for(const [key,value] of Object.entries(notation))assert.equal(edit.engraving.notation[key],value,`${name}: ${key}`);
+    const now=await poll(drawn,value=>value.families.length>0&&value.families.every(entry=>family.test(entry)),`${name}: text drawn in its family`);clean(now);await shot(`${name.toLowerCase()}-preset`);await exportCheck(name.toLowerCase());
+    return {edit,now};
+  };
+  const ratio=(now,before,key)=>Math.round(now[key]/before[key]*100)/100;
   try{
-    ui=await import('./workstation-commands.mjs');const {importer,model,Settings}=await import('@coderline/alphatab');load=bytes=>importer.ScoreLoader.loadScoreFromBytes(bytes,new Settings());jsonModel=model.JsonConverter;void jsonModel;
-    writeFileSync(inputPath,await buildSavedTuningsFixture(),{flag:'wx'});result.input={inputPath,sha256:hashFile(inputPath)};
+    ui=await import('./workstation-commands.mjs');const {importer,exporter,model,Settings}=await import('@coderline/alphatab');load=bytes=>importer.ScoreLoader.loadScoreFromBytes(bytes,new Settings());
+    // Several bars with chord names, beat text in CJK and a long Latin line, so glyphs and widths are really exercised.
+    const fixture=load(await buildSavedTuningsFixture()),staff=fixture.tracks[0].staves[0];
+    assert.ok(staff.bars.length>=2,'The fixture has several bars');
+    const words=['同じ楽譜 🎸','A long annotation that needs room','Öö ä ü','漢字かな交じり文'],names=['Cmaj7(♯11)/G','F♯m7♭5','Dsus4','Am7'];let annotated=0;
+    staff.bars.forEach((bar,b)=>bar.voices[0].beats.forEach((beat,i)=>{
+      if(i%2===0){beat.text=words[(b+i/2)%words.length];annotated++;}
+      if(i===0){const chord=new model.Chord();chord.name=names[b%names.length];chord.firstFret=1;chord.strings=staff.tuning.map(()=>-1);staff.addChord(`d12-${b}`,chord);beat.chordId=`d12-${b}`;}
+    }));
+    assert.ok(annotated>=3);
+    writeFileSync(inputPath,Buffer.from(new exporter.Gp7Exporter().export(fixture,new Settings())),{flag:'wx'});result.input={inputPath,sha256:hashFile(inputPath)};
     assert.equal(existsSync(libraryPath),false);
 
     // Launch 1: typography is one undoable edit that changes the drawing and nothing in the music.
     await launch('launch-1');let initial=await record();assert.deepEqual(initial.snapshot.project.edits,[]);
     await native();await exportCheck('before');
-    const plain=await drawn(),drawnBefore=await rendered();assert.ok(plain.count>0,'The score draws text');assert.deepEqual(plain.spill,[],'No text spills before the change');assert.ok(!plain.families.some(family=>/consolas|monospace/i.test(family)),'No monospace text before the change');
+    const plain=await drawn(),drawnBefore=await rendered();assert.ok(plain.count>0,'The score draws text');assert.ok(plain.annotationSize>0&&plain.chordSize>0&&plain.digitSize>0,'The fixture draws annotations, chord names and fret numbers');clean(plain);assert.ok(plain.cjk>0,'CJK text has a drawn width');
+    const plainPages=await exportPages('before');
     await openPanels();
     await choose('Text font','mono');await percent('Text size (%)',150);await percent('Title size (%)',150);await percent('Tab number size (%)',125);
     assert.deepEqual((await record()).snapshot.project.edits,[],'Typing and choosing never edit the document before Apply');
     await button('Apply engraving');
     const applied=await record();assert.deepEqual(applied.snapshot.project.edits.map(edit=>edit.type),['setEngraving']);assert.deepEqual(applied.snapshot.project.edits[0].engraving.typography,typed);
-    const large=await poll(drawn,value=>value.families.some(family=>/consolas|monospace/i.test(family)),'the score is drawn in the chosen font');
-    assert.ok(large.largest>plain.largest,'Text is drawn larger');assert.deepEqual(large.spill,[],'No text spills after the change');
+    const large=await poll(drawn,value=>value.families.length>0&&value.families.every(family=>mono.test(family)),'the score is drawn in the chosen font');
+    // As drawn, not as recorded: annotations at 150%, fret numbers at 125% (and still in the default family).
+    assert.equal(ratio(large,plain,'annotationSize'),1.5,'Annotations are drawn at the text size');assert.equal(ratio(large,plain,'chordSize'),1.5,'Chord names are drawn at the text size');assert.equal(ratio(large,plain,'digitSize'),1.25,'Fret numbers are drawn at the tab number size');
+    assert.ok(large.cjk>plain.cjk,'CJK text is drawn wider');clean(large);
     const drawnTyped=await rendered();assert.notEqual(drawnTyped,drawnBefore);await shot('typography-applied');await exportCheck('typography');
+    const typedPages=await exportPages('typography');for(const format of ['pdf','png','svg'])assert.notEqual(typedPages[format],plainPages[format],`${format}: export draws the new sizes`);
+    assert.deepEqual(typedPages.svgPage,plainPages.svgPage,'Typography never changes the page size');
     await button('Undo');assert.deepEqual((await record()).snapshot.project,initial.snapshot.project,'Undo restores the record');assert.equal(await poll(rendered,value=>value===drawnBefore,'undo restores the drawing'),drawnBefore);await exportCheck('typography-undo');
     await button('Redo');assert.deepEqual((await record()).snapshot.project,applied.snapshot.project,'Redo restores the record');assert.equal(await poll(rendered,value=>value===drawnTyped,'redo restores the drawing'),drawnTyped);
-    step('Typography is one undoable edit that changes the drawing without overflow and leaves the music unchanged',{typography:typed,plain,large});
+    step('Typography is one undoable edit; text and fret numbers are drawn at the chosen sizes with no overflow, and PDF, PNG and SVG are exported',{typography:typed,plain,large,plainPages,typedPages});
+
+    // Title size alone changes the exported page header and nothing else.
+    await choose('Text font','inherit');await percent('Text size (%)','');await percent('Tab number size (%)','');await percent('Title size (%)',200);await button('Apply engraving');
+    const titled=await exportPages('title-only');assert.notEqual(titled.svg,plainPages.svg,'Title size changes the exported page header');assert.deepEqual(titled.svgPage,plainPages.svgPage);
+    step('Title size scales the exported page header',{titled});
 
     // The smallest sizes must lay out too, without the music changing.
-    await percent('Text size (%)',50);await percent('Title size (%)',50);await percent('Tab number size (%)',75);await button('Apply engraving');
-    const small=await poll(drawn,value=>value.largest<plain.largest,'smaller text');assert.deepEqual(small.spill,[],'No text spills at the smallest sizes');await exportCheck('smallest');
-    assert.equal((await edits()).length,2);
+    await percent('Title size (%)',50);await percent('Text size (%)',50);await percent('Tab number size (%)',75);await button('Apply engraving');
+    const small=await poll(drawn,value=>value.largest<plain.largest,'smaller text');clean(small);await exportCheck('smallest');await exportPages('smallest');
 
-    // Presets fill the form and edit nothing until Apply; the applied preset is one more undoable edit.
-    const countBefore=(await edits()).length;await page.getByRole('button',{name:'Load Jazz preset',exact:true}).click();await idle();
-    assert.equal((await edits()).length,countBefore,'Loading a preset never edits the document');
-    await button('Apply engraving');
-    const jazz=await record(),jazzEdit=jazz.snapshot.project.edits.at(-1);assert.equal(jazz.snapshot.project.edits.length,countBefore+1);
-    assert.deepEqual(jazzEdit.engraving.typography,{family:'serif',textScale:1.15,titleScale:1.4,tabScale:null});assert.equal(jazzEdit.engraving.stylesheet.chords,'both');assert.equal(jazzEdit.engraving.stylesheet.barNumbers,'all');
-    const jazzDrawn=await poll(drawn,value=>value.families.every(family=>!/consolas|monospace/i.test(family)),'Jazz serif text');assert.deepEqual(jazzDrawn.spill,[]);await shot('jazz-preset');await exportCheck('jazz');
-    await button('Undo');assert.equal((await edits()).length,countBefore);await button('Redo');assert.deepEqual((await record()).snapshot.project,jazz.snapshot.project);
-    step('A notation preset fills the form, applies as one undoable edit and leaves the music unchanged',{jazzEdit});
+    // Each preset applies as one edit and is drawn in its family; Classic and Rock too, not only Jazz.
+    const classic=await preset('Classic',{family:'serif',textScale:null,titleScale:1.25,tabScale:null},{barNumbers:'firstSystem',brackets:'staves',chords:'top',multiRests:'on'},{tabRhythm:'hidden'},serif);
+    const jazz=await preset('Jazz',{family:'serif',textScale:1.15,titleScale:1.4,tabScale:null},{barNumbers:'all',chords:'both',multiRests:'on',hideEmptyStaves:true},{tabRhythm:'hidden'},serif);
+    const rock=await preset('Rock',{family:'sans',textScale:null,titleScale:null,tabScale:1.15},{barNumbers:'all',chords:'inline',multiRests:'off',brackets:'similar'},{tabRhythm:'beams',extendBendArrows:true,extendLineEffects:true},sans);
+    assert.equal(rock.edit.engraving.typography.tabScale,1.15);assert.ok(jazz.now.annotationSize>classic.now.annotationSize,'Jazz text is larger than Classic');
+    await exportPages('rock');
+    await button('Undo');await button('Redo');
+    step('Classic, Jazz and Rock each apply as one undoable edit, are drawn in their family and leave the music unchanged',{classic:classic.edit.engraving,jazz:jazz.edit.engraving,rock:rock.edit.engraving});
 
-    // A saved style carries its typography into the personal library (version 2).
-    await page.getByLabel('Style name',{exact:true}).fill('Jazz house');await page.getByRole('button',{name:'Save current style',exact:true}).click();
-    await poll(()=>existsSync(libraryPath),Boolean,'library file written');await page.getByRole('status').filter({hasText:'Saved Jazz house.'}).waitFor();
-    const library=json(libraryPath);assert.equal(library.version,2);assert.equal(library.entries.length,1);assert.deepEqual(library.entries[0].engraving.typography,jazzEdit.engraving.typography);assert.deepEqual(library.entries[0].engraving.profiles,[]);
-    assert.deepEqual(await record(),jazz,'Saving a style never edits the document');
+    // A saved style carries its typography into the personal library. Plain styles keep the file at version 1.
+    await page.getByLabel('Style name',{exact:true}).fill('Rock house');await page.getByRole('button',{name:'Save current style',exact:true}).click();
+    await poll(()=>existsSync(libraryPath),Boolean,'library file written');await page.getByRole('status').filter({hasText:'Saved Rock house.'}).waitFor();
+    const library=json(libraryPath);assert.equal(library.version,2);assert.equal(library.entries.length,1);assert.deepEqual(library.entries[0].engraving.typography,rock.edit.engraving.typography);assert.deepEqual(library.entries[0].engraving.profiles,[]);
+    const rockRecord=await record();
     // Force default style clears typography with the rest, as one undoable edit.
     await page.getByRole('button',{name:'Force default style',exact:true}).click();await idle();
-    const forced=await record();assert.equal(forced.snapshot.project.edits.length,jazz.snapshot.project.edits.length+1);assert.equal(Object.hasOwn(forced.snapshot.project.edits.at(-1).engraving,'typography'),false,'Default typography is not stored');
+    const forced=await record();assert.equal(forced.snapshot.project.edits.length,rockRecord.snapshot.project.edits.length+1);assert.equal(Object.hasOwn(forced.snapshot.project.edits.at(-1).engraving,'typography'),false,'Default typography is not stored');
     assert.equal(await poll(rendered,value=>value===drawnBefore,'the factory style draws the original score'),drawnBefore);await exportCheck('forced');
-    await button('Undo');assert.deepEqual((await record()).snapshot.project,jazz.snapshot.project);
+    await button('Undo');assert.deepEqual((await record()).snapshot.project,rockRecord.snapshot.project);
     step('A saved style carries typography and Force default style clears it',{entry:library.entries[0]});
     await stop();
 
-    // Launch 2: a version 1 library written before typography is read, listed, applied and upgraded on the next save.
+    // Launch 2: a version 1 library written before typography is read, listed and applied; saving a style without typography keeps it version 1.
     const oldEngraving={stylesheet:{...library.entries[0].engraving.stylesheet,barNumbers:'hidden'},notation:library.entries[0].engraving.notation,systemSpacing:null,profiles:[]};
     const oldLibrary=Buffer.from(JSON.stringify({format:'tabplayer-style-library',version:1,entries:[{id:oldStyleId,name:'Older style',engraving:oldEngraving}]}));writeFileSync(libraryPath,oldLibrary);const oldHash=hashFile(libraryPath);
     baseline=null;await launch('launch-2');initial=await record();assert.deepEqual(initial.snapshot.project.edits,[]);await openPanels();
@@ -144,8 +201,11 @@ export async function runStyleTypographyAcceptance({buildPath}={}){
     await page.getByRole('button',{name:'Apply saved style',exact:true}).click();await idle();
     const oldApplied=await record();assert.equal(oldApplied.snapshot.project.edits.length,1);assert.equal(oldApplied.snapshot.project.edits[0].engraving.stylesheet.barNumbers,'hidden');assert.equal(Object.hasOwn(oldApplied.snapshot.project.edits[0].engraving,'typography'),false);
     await page.getByLabel('Style name',{exact:true}).fill('Newer style');await page.getByRole('button',{name:'Save current style',exact:true}).click();await page.getByRole('status').filter({hasText:'Saved Newer style.'}).waitFor();
-    const upgraded=json(libraryPath);assert.equal(upgraded.version,2);assert.deepEqual(upgraded.entries.map(entry=>entry.name),['Older style','Newer style']);assert.deepEqual(upgraded.entries[0].engraving,oldEngraving,'The older style is kept as it was');
-    await shot('old-library-upgraded');step('A version 1 style library stays readable and is upgraded to version 2 on the next save',{oldHash,upgraded});
+    const kept=json(libraryPath);assert.equal(kept.version,1,'No style uses typography, so an older build can still read the file');assert.deepEqual(kept.entries.map(entry=>entry.name),['Older style','Newer style']);assert.deepEqual(kept.entries[0].engraving,oldEngraving,'The older style is kept as it was');
+    // Typography in the next saved style makes the file version 2, keeping the older styles.
+    await percent('Text size (%)',120);await button('Apply engraving');await page.getByLabel('Style name',{exact:true}).fill('Larger text');await page.getByRole('button',{name:'Save current style',exact:true}).click();await page.getByRole('status').filter({hasText:'Saved Larger text.'}).waitFor();
+    const upgraded=json(libraryPath);assert.equal(upgraded.version,2);assert.deepEqual(upgraded.entries.map(entry=>entry.name),['Older style','Newer style','Larger text']);assert.equal(upgraded.entries[2].engraving.typography.textScale,1.2);assert.deepEqual(upgraded.entries[0].engraving,oldEngraving);
+    await shot('old-library-upgraded');step('A version 1 style library stays readable, stays version 1 until a style uses typography, then becomes version 2',{oldHash,kept,upgraded});
     assert.equal(realHash(),realBefore,'Real user library untouched');healthy();
   }catch(error){failure=error;result.error={message:String(error),stack:error.stack};if(page)try{await page.screenshot({path:resolve(results,'failure.png')});}catch{}}
   finally{

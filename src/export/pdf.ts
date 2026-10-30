@@ -7,6 +7,8 @@ import { pageGeometry,paginateEngravedSystems } from '../engraving/page';
 import type { EngravingOverrides,PageLayout } from '../engraving/types';
 import {pageTitleFontSize} from './page-title';
 import {headerFieldsOf} from '../engraving/header-footer';
+import {isDefaultTypography,typographyOf} from '../engraving/typography';
+import {assertTextFits} from './text-bounds';
 const pxPerMm=96/25.4;
 const escaped=(s:string)=>s.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&apos;'}[c]!));
 function dimensions(layout:PrintLayout) {
@@ -76,13 +78,15 @@ export function renderPdfPages(score:model.Score,selection:ExportSelection,layou
   settings.display.systemsLayoutMode=SystemsLayoutMode.UseModelLayout;
   settings.display.startBar=(selection.range?.first??0)+1;settings.display.barCount=selection.range?selection.range.last-selection.range.first+1:-1;
   for(const font of settings.display.resources.elementFonts.values())font.families=['Noto Sans','Noto Sans CJK JP','Noto Emoji'];
-  settings.display.resources.tablatureFont.families=['Noto Sans','Noto Sans CJK JP','Noto Emoji'];
+  for(const key of ['tablatureFont','graceFont','numberedNotationFont','numberedNotationGraceFont'] as const)settings.display.resources[key].families=['Noto Sans','Noto Sans CJK JP','Noto Emoji'];
   const renderer=new rendering.ScoreRenderer(settings);renderer.width=d.usableWidth;
   const systems:SvgSystem[]=[];let failure:Error|undefined;
   renderer.error.on(e=>{failure=e;});
   renderer.partialRenderFinished.on(e=>{if(typeof e.renderResult==='string'&&e.height>0)systems.push({svg:e.renderResult,width:e.width,height:e.height});});
   try{renderer.renderScore(copy,selection.tracks);if(failure)throw failure;
     if(renderer.boundsLookup?.staffSystems.some(system=>system.bars.some(bar=>bar.visualBounds.x<-.5||bar.visualBounds.x+bar.visualBounds.w>d.usableWidth+1)))throw new Error('A notation system does not fit this page width. Reduce print scale, use landscape, or add a system break.');
-    if(!systems.length)throw new Error('Notation renderer produced no printable systems.');return frozen?paginateEngravedSystems(systems,score.title,frozen.page,headerFieldsOf(score)):paginateSystems(systems,score.title,layout);}
+    if(!systems.length)throw new Error('Notation renderer produced no printable systems.');
+    if(frozen&&!isDefaultTypography(typographyOf(frozen.engraving)))assertTextFits(systems,d.usableWidth);
+    return frozen?paginateEngravedSystems(systems,score.title,frozen.page,headerFieldsOf(score),typographyOf(frozen.engraving).titleScale??1):paginateSystems(systems,score.title,layout);}
   finally{renderer.destroy();}
 }

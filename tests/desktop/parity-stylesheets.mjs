@@ -90,7 +90,7 @@ export async function runStylesheetsAcceptance({buildPath}={}){
     const authored=await record();assert.deepEqual(authored.snapshot.project.edits.map(edit=>edit.type),['setEngraving']);assert.equal(authored.snapshot.project.edits[0].engraving.profiles.length,1,'The first document has a staff profile');
     await page.getByLabel('Style name',{exact:true}).fill(styleName);await page.getByRole('button',{name:'Save current style',exact:true}).click();
     await poll(()=>existsSync(libraryPath),Boolean,'library file written');await page.getByRole('status').filter({hasText:`Saved ${styleName}.`}).waitFor();
-    const library=json(libraryPath);assert.deepEqual(Object.keys(library).sort(),['entries','format','version']);assert.equal(library.format,'tabplayer-style-library');assert.equal(library.version,2);assert.equal(library.entries.length,1);
+    const library=json(libraryPath);assert.deepEqual(Object.keys(library).sort(),['entries','format','version']);assert.equal(library.format,'tabplayer-style-library');assert.equal(library.version,1);assert.equal(library.entries.length,1);
     const [entry]=library.entries;assert.equal(entry.name,styleName);assert.deepEqual(entry.engraving.profiles,[]);assert.equal(entry.engraving.stylesheet.hideDynamics,true);assert.equal(entry.engraving.stylesheet.barNumbers,'hidden');assert.equal(entry.engraving.systemSpacing,spacing/100);
     assert.deepEqual(await record(),authored,'Saving leaves the project, history and revision unchanged');assert.equal(realHash(),realBefore,'Real user library untouched');await shot('style-saved');
     step('Saved the document style to the personal library without editing the document',{entry});

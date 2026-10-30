@@ -12,7 +12,7 @@ export interface EngravingTypography {
   textScale:number|null;
   /** The score title block and copyright. */
   titleScale:number|null;
-  /** Fret numbers and grace-note fret numbers on tablature. */
+  /** Fret numbers, grace-note fret numbers and numbered-notation digits; these keep the default family. */
   tabScale:number|null;
 }
 

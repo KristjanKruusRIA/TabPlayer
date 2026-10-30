@@ -28,6 +28,7 @@ export function TypographyFields({value,onChange,onInvalid}:TypographyFieldsProp
     <PercentField label="Text size" value={value.textScale} range={TEXT_SCALE_RANGE} onCommit={textScale=>onChange({...value,textScale})} onInvalid={onInvalid}/>
     <PercentField label="Title size" value={value.titleScale} range={TEXT_SCALE_RANGE} onCommit={titleScale=>onChange({...value,titleScale})} onInvalid={onInvalid}/>
     <PercentField label="Tab number size" value={value.tabScale} range={TAB_SCALE_RANGE} onCommit={tabScale=>onChange({...value,tabScale})} onInvalid={onInvalid}/>
-    <p>Blank keeps the renderer size. Exported PDF and image pages always set text in the bundled Noto fonts, with the chosen sizes.</p>
+    <p>Blank keeps the renderer size. Tab number size also scales numbered-notation digits; fret and staff numbers keep the default font.</p>
+    <p>Exports set text in the bundled Noto fonts and ignore Text font; Text size and Tab number size apply, and Title size scales the page header line, shrunk to fit the page width. An export is refused, naming the text, if enlarged text would run past the page width. On screen the renderer draws the score title as one centred line, so a very long title at a large Title size can run past the page edge.</p>
   </>;
 }

@@ -40,11 +40,12 @@ it('configureTypography_scales_by_group_and_restarts_from_the_defaults',()=>{
   expect(resources.elementFonts.get(NotationElement.EffectText)!.size).toBe(18);
   expect(resources.elementFonts.get(NotationElement.BarNumber)!.size).toBe(16.5);
   expect(resources.tablatureFont.size).toBe(17.5);expect(resources.graceFont.size).toBe(15);
+  for(const key of ['numberedNotationFont','numberedNotationGraceFont'] as const)expect(resources[key].size,key).toBe(Math.round(defaults[key].size*12.5)/10);
   expect(resources.elementFonts.get(NotationElement.EffectText)!.families).toEqual(['Georgia','serif']);
   expect(new Settings().display.resources.elementFonts.get(NotationElement.EffectText)!.size).toBe(12);
   configureTypography(settings,defaultTypography());
   for(const [element,font] of defaults.elementFonts){const now=resources.elementFonts.get(element)!;expect([now.size,now.families,now.isBold,now.isItalic]).toEqual([font.size,font.families,font.isBold,font.isItalic]);}
-  expect([resources.tablatureFont.size,resources.tablatureFont.families]).toEqual([defaults.tablatureFont.size,defaults.tablatureFont.families]);
+  for(const key of ['tablatureFont','graceFont','numberedNotationFont','numberedNotationGraceFont'] as const)expect([resources[key].size,resources[key].families],key).toEqual([defaults[key].size,defaults[key].families]);
 });
 
 it('configureTypography_applies_each_family_to_every_text_font_and_keeps_styles',()=>{
@@ -52,7 +53,8 @@ it('configureTypography_applies_each_family_to_every_text_font_and_keeps_styles'
   for(const [family,expected] of [['sans',['Arial','sans-serif']],['serif',['Georgia','serif']],['mono',['Consolas','Courier New','monospace']]] as const){
     configureTypography(settings,typed({family}));
     for(const [element,font] of settings.display.resources.elementFonts){expect(font.families).toEqual(expected);const was=original.elementFonts.get(element)!;expect([font.size,font.isBold,font.isItalic]).toEqual([was.size,was.isBold,was.isItalic]);}
-    expect(settings.display.resources.tablatureFont.families).toEqual(expected);expect(settings.display.resources.graceFont.families).toEqual(expected);
+    // Fret and staff numbers keep their own family, so lining digits sit evenly on the tab lines.
+    for(const key of ['tablatureFont','graceFont','numberedNotationFont','numberedNotationGraceFont'] as const)expect(settings.display.resources[key].families,key).toEqual(original[key].families);
   }
   expect(()=>configureTypography(settings,typed({textScale:3}))).toThrow();
 });

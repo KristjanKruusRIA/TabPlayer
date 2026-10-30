@@ -7,6 +7,7 @@ import {
   blankScaleDiagram,defaultMarkColor,defaultTextColor,getScaleDiagram,markAt,newMark,resized,scaleDiagramFromPitchClasses,sameScaleDiagram,scaleDiagramFromSelection,scaleMarkShapes,
   validateScaleDiagram,withMark,withoutMark,type ScaleDiagram,type ScaleDiagramCommand,type ScaleMark,type ScaleMarkShape,
 } from './scale-diagram';
+import { Segmented } from '../ui/Segmented';
 
 export interface ScaleDiagramEditorProps {
   score:model.Score;staff?:model.Staff;beat?:model.Beat;target:BeatTarget|null;selection:MusicSelection|null;busy:boolean;
@@ -15,6 +16,11 @@ export interface ScaleDiagramEditorProps {
   onEdit:(command:ScaleDiagramCommand)=>void;
 }
 const same=sameScaleDiagram;
+const shapeOptions=scaleMarkShapes.map(value=>({value,label:value}));
+const orientationOptions:ReadonlyArray<{value:ScaleDiagram['orientation'];label:string}>=[
+  {value:'horizontal',label:'Horizontal'},
+  {value:'vertical',label:'Vertical'},
+];
 /** Commits a typed number on blur or Enter, so "10" is never read as "1" on the way. */
 function NumberField({label,value,min,max,change}:{label:string;value:number;min:number;max:number;change:(value:number)=>void}) {
   const [text,setText]=useState(String(value));
@@ -59,17 +65,26 @@ export function ScaleDiagramEditor({score,staff,beat,target,selection,busy,scale
       <NumberField label="Diagram strings" value={draft.strings} min={3} max={10} change={next=>edit(value=>resized(value,{strings:next}))}/>
       <NumberField label="Diagram frets" value={draft.frets} min={4} max={24} change={next=>edit(value=>resized(value,{frets:next}))}/>
       <NumberField label="Starting fret" value={draft.firstFret} min={1} max={128-draft.frets} change={next=>edit(value=>resized(value,{firstFret:next}))}/>
-      <label>Diagram orientation<select value={draft.orientation} onChange={event=>edit(value=>({...value,orientation:event.target.value as ScaleDiagram['orientation']}))}><option value="horizontal">Horizontal</option><option value="vertical">Vertical</option></select></label>
+      <div className="tp-field">
+        <span className="tp-field-label" aria-hidden="true">Diagram orientation</span>
+        <Segmented label="Diagram orientation" value={draft.orientation} options={orientationOptions} onChange={orientation=>edit(value=>({...value,orientation}))}/>
+      </div>
       <label><input type="checkbox" checked={draft.showFretMarkers} onChange={event=>edit(value=>({...value,showFretMarkers:event.target.checked}))}/> Show fret markers</label>
       <fieldset><legend>New marks</legend>
-        <label>Default shape<select value={shape} onChange={event=>setShape(event.target.value as ScaleMarkShape)}>{scaleMarkShapes.map(value=><option key={value} value={value}>{value}</option>)}</select></label>
+        <div className="tp-field">
+          <span className="tp-field-label" aria-hidden="true">Default shape</span>
+          <Segmented label="Default shape" value={shape} options={shapeOptions} onChange={setShape}/>
+        </div>
         <label>Default mark color<input type="color" value={color} onChange={event=>setColor(event.target.value)}/></label>
         <label>Default text color<input type="color" value={textColor} onChange={event=>setTextColor(event.target.value)}/></label>
       </fieldset>
       <p className="muted">Click a position to add a mark, click a mark to edit it, double-click or press Delete to remove it.</p>
       <ScaleDiagramView diagram={draft} selected={selected} onCell={cell} onRemove={(string,fret)=>{edit(value=>withoutMark(value,string,fret));setSelected(null);}}/>
       {mark?<fieldset><legend>{`Mark on string ${mark.string}, ${mark.fret===0?'open':`fret ${mark.fret}`}`}</legend>
-        <label>Mark shape<select value={mark.shape} onChange={event=>patch({shape:event.target.value as ScaleMarkShape})}>{scaleMarkShapes.map(value=><option key={value} value={value}>{value}</option>)}</select></label>
+        <div className="tp-field">
+          <span className="tp-field-label" aria-hidden="true">Mark shape</span>
+          <Segmented label="Mark shape" value={mark.shape} options={shapeOptions} onChange={nextShape=>patch({shape:nextShape})}/>
+        </div>
         <label>Mark color<input type="color" value={mark.color} onChange={event=>patch({color:event.target.value})}/></label>
         <label>Mark text<input value={mark.text} aria-describedby="scale-mark-text-hint" onChange={event=>patch({text:[...event.target.value].slice(0,3).join('')})}/></label>
         <span id="scale-mark-text-hint" className="muted">Up to 3 characters: a note name or a finger.</span>

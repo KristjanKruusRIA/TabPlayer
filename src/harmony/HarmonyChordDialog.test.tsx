@@ -21,8 +21,8 @@ it('unchanged_apply_preserves_legacy_first_fret_wide_shape_flags_fingers_and_bar
 });
 it('formula_root_alteration_omission_slash_bass_and_finger_controls_emit_one_exact_chord',()=>{
   const {input,commands}=props();render(<HarmonyChordDialog {...input}/>);
-  fireEvent.change(screen.getByLabelText('Root letter'),{target:{value:'1'}});fireEvent.change(screen.getByLabelText('Root accidental'),{target:{value:'-1'}});fireEvent.change(screen.getByLabelText('Formula'),{target:{value:'7'}});
-  fireEvent.change(screen.getByLabelText('Alter degree 9'),{target:{value:'-1'}});fireEvent.click(screen.getByLabelText('Omit degree 5'));fireEvent.click(screen.getByLabelText('Slash bass'));fireEvent.change(screen.getByLabelText('Bass letter'),{target:{value:'2'}});
+  fireEvent.change(screen.getByLabelText('Root letter'),{target:{value:'1'}});fireEvent.click(within(screen.getByRole('radiogroup',{name:'Root accidental'})).getByRole('radio',{name:'Flat'}));fireEvent.change(screen.getByLabelText('Formula'),{target:{value:'7'}});
+  fireEvent.click(within(screen.getByRole('radiogroup',{name:'Alter degree 9'})).getByRole('radio',{name:'Flat'}));fireEvent.click(screen.getByLabelText('Omit degree 5'));fireEvent.click(screen.getByLabelText('Slash bass'));fireEvent.change(screen.getByLabelText('Bass letter'),{target:{value:'2'}});
   fireEvent.change(screen.getByLabelText('String 1 finger'),{target:{value:'0'}});fireEvent.click(screen.getByLabelText('Show fingering'));expect(commands).toEqual([]);
   expect(screen.getByLabelText('Chord name')).toHaveValue('Db7(b9,no5)/E');fireEvent.click(screen.getByRole('button',{name:'Apply chord'}));
   expect(commands).toEqual([{type:'setHarmonyChord',target,chord:{name:'Db7(b9,no5)/E',nameMode:'theory',recipe:{root:{step:1,alteration:-1},formula:'7',alterations:[{degree:9,shift:-1}],omissions:[5],bass:{step:2,alteration:0}},firstFret:1,frets:[-1,-1,-1,-1,-1,-1],fingers:[0,-2,-2,-2,-2,-2],barreFrets:[],showName:true,showDiagram:true,showFingering:false},fillEmptyBeat:false}]);
@@ -31,7 +31,7 @@ it('generated_alternative_selection_and_manual_fret_edits_keep_the_score_indepen
   const {input,commands}=props();input.score.tracks[0].staves[0].stringTuning.tunings=[64,60,67];const before=model.JsonConverter.scoreToJson(input.score);render(<HarmonyChordDialog {...input}/>);
   fireEvent.click(screen.getByRole('button',{name:'Generate shapes'}));fireEvent.click(screen.getByRole('button',{name:'Use shape 2'}));
   expect(screen.getByLabelText('String 1 fret')).toHaveValue(0);expect(screen.getByLabelText('String 2 fret')).toHaveValue(0);expect(screen.getByLabelText('String 3 fret')).toHaveValue(12);
-  fireEvent.change(screen.getByLabelText('String 3 fret'),{target:{value:'1'}});expect(screen.getByLabelText('Name mode')).toHaveValue('manual');
+  fireEvent.change(screen.getByLabelText('String 3 fret'),{target:{value:'1'}});expect(within(screen.getByRole('radiogroup',{name:'Name mode'})).getByRole('radio',{name:'Manual'})).toBeChecked();
   fireEvent.change(screen.getByLabelText('Chord name'),{target:{value:'’my custom chord'}});fireEvent.change(screen.getByLabelText('Barre frets'),{target:{value:'1'}});fireEvent.click(screen.getByRole('button',{name:'Open string 3'}));
   fireEvent.change(screen.getByLabelText('String 1 fret'),{target:{value:'1'}});fireEvent.change(screen.getByLabelText('String 2 fret'),{target:{value:'1'}});
   expect(screen.getByLabelText('String 3 finger')).toHaveValue('-2');fireEvent.click(screen.getByRole('button',{name:'Apply chord'}));
@@ -43,7 +43,7 @@ it('text_only_edit_and_empty_beat_fill_are_separate_explicit_commands',()=>{
 });
 it('source_context_changes_downgrade_stale_theory_without_relabeling_and_zero_strings_apply',()=>{
   const {input,commands}=props({...legacy,name:'C',nameMode:'theory',recipe:{root:{step:0,alteration:0},formula:'major',alterations:[],omissions:[],bass:null},firstFret:1,frets:[0,0,0],fingers:[-2,-2,-2]});input.score.tracks[0].staves[0].stringTuning.tunings=[64,60,67];
-  const view=render(<HarmonyChordDialog {...input}/>);expect(screen.getByLabelText('Name mode')).toHaveValue('theory');input.score.tracks[0].staves[0].capo=1;view.rerender(<HarmonyChordDialog {...input} value={structuredClone(input.value)}/>);expect(screen.getByLabelText('Name mode')).toHaveValue('manual');expect(screen.getByLabelText('Chord name')).toHaveValue('C');
+  const view=render(<HarmonyChordDialog {...input}/>);expect(within(screen.getByRole('radiogroup',{name:'Name mode'})).getByRole('radio',{name:'Theory'})).toBeChecked();input.score.tracks[0].staves[0].capo=1;view.rerender(<HarmonyChordDialog {...input} value={structuredClone(input.value)}/>);expect(within(screen.getByRole('radiogroup',{name:'Name mode'})).getByRole('radio',{name:'Manual'})).toBeChecked();expect(screen.getByLabelText('Chord name')).toHaveValue('C');
   view.unmount();input.score.tracks[0].staves[0].stringTuning.tunings=[];const empty={...legacy,name:'N.C.',frets:[],fingers:[]};render(<HarmonyChordDialog {...input} value={empty}/>);fireEvent.click(screen.getByRole('button',{name:'Apply chord'}));expect(commands).toEqual([{type:'setHarmonyChord',target,chord:empty,fillEmptyBeat:false}]);
 });
 it('library_save_recall_and_remove_use_callbacks_without_editing_the_score',async()=>{
@@ -53,7 +53,7 @@ it('library_save_recall_and_remove_use_callbacks_without_editing_the_score',asyn
   fireEvent.click(screen.getByRole('button',{name:'Delete library chord'}));await waitFor(()=>expect(removed).toEqual([entry.id]));expect(commands).toEqual([]);expect(model.JsonConverter.scoreToJson(input.score)).toBe(before);
 });
 it('modal_traps_focus_restores_opener_and_keeps_close_available_when_busy',()=>{
-  const {input,closed}=props(),opener=document.createElement('button');document.body.append(opener);opener.focus();const view=render(<HarmonyChordDialog {...input}/>),name=screen.getByLabelText('Chord name'),cancel=screen.getByRole('button',{name:'Cancel'});expect(name).toHaveFocus();fireEvent.keyDown(name,{key:'Tab',shiftKey:true});expect(cancel).toHaveFocus();fireEvent.keyDown(cancel,{key:'Tab'});expect(name).toHaveFocus();
+  const {input,closed}=props(),opener=document.createElement('button');document.body.append(opener);opener.focus();const view=render(<HarmonyChordDialog {...input}/>),name=screen.getByLabelText('Chord name'),close=screen.getByRole('button',{name:'Close'}),cancel=screen.getByRole('button',{name:'Cancel'});expect(name).toHaveFocus();close.focus();fireEvent.keyDown(close,{key:'Tab',shiftKey:true});expect(cancel).toHaveFocus();fireEvent.keyDown(cancel,{key:'Tab'});expect(close).toHaveFocus();
   view.rerender(<HarmonyChordDialog {...input} busy/>);expect(name).toBeDisabled();expect(cancel).toHaveFocus();expect(within(screen.getByRole('dialog')).getByRole('button',{name:'Apply chord'})).toBeDisabled();fireEvent.keyDown(cancel,{key:'Escape'});expect(closed).toEqual(['closed']);view.unmount();expect(opener).toHaveFocus();opener.remove();
 });
 it('library_theory_recall_regenerates_for_the_current_staff_and_incompatible_manual_recall_rejects',()=>{
@@ -95,7 +95,7 @@ it('initial_library_loading_keeps_focus_at_the_top_then_focuses_the_chord_name',
   const {input}=props(),opener=document.createElement('button');document.body.append(opener);opener.focus();
   const view=render(<HarmonyChordDialog {...input} busy/>),dialog=screen.getByRole('dialog'),cancel=screen.getByRole('button',{name:'Cancel'});
   expect(dialog).toHaveFocus();expect(cancel).not.toHaveFocus();
-  fireEvent.keyDown(dialog,{key:'Tab'});expect(cancel).toHaveFocus();
+  fireEvent.keyDown(dialog,{key:'Tab',shiftKey:true});expect(cancel).toHaveFocus();
   dialog.focus();view.rerender(<HarmonyChordDialog {...input}/>);expect(screen.getByLabelText('Chord name')).toHaveFocus();
   view.unmount();expect(opener).toHaveFocus();opener.remove();
 });

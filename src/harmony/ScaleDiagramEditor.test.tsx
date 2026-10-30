@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach,expect,it } from 'vitest';
-import { cleanup,fireEvent,render,screen } from '@testing-library/react';
+import { cleanup,fireEvent,render,screen,within } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { model } from '@coderline/alphatab';
 import { music,noteAt,target } from '../editor/fixtures';
@@ -19,11 +19,11 @@ it('authors_a_marked_and_fingered_diagram_from_scratch_and_sends_one_command',()
   expect(screen.getByText('This beat has no scale diagram.')).toBeInTheDocument();expect(screen.queryByRole('button',{name:'Apply diagram to beat'})).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('button',{name:'Blank diagram'}));
   fireEvent.change(screen.getByLabelText('Diagram name'),{target:{value:'Position 1'}});fireEvent.change(screen.getByLabelText('Starting fret'),{target:{value:'5'}});fireEvent.blur(screen.getByLabelText('Starting fret'));
-  fireEvent.change(screen.getByLabelText('Default shape'),{target:{value:'diamond'}});
+  fireEvent.click(within(screen.getByRole('radiogroup',{name:'Default shape'})).getByRole('radio',{name:'diamond'}));
   fireEvent.click(screen.getByLabelText('String 6, fret 5'));
   fireEvent.change(screen.getByLabelText('Mark text'),{target:{value:'A12'}});expect((screen.getByLabelText('Mark text') as HTMLInputElement).value).toBe('A12');
   fireEvent.change(screen.getByLabelText('Mark text'),{target:{value:'abcdef'}});expect((screen.getByLabelText('Mark text') as HTMLInputElement).value).toBe('abc');
-  fireEvent.change(screen.getByLabelText('Mark text'),{target:{value:'1'}});fireEvent.change(screen.getByLabelText('Mark shape'),{target:{value:'square'}});
+  fireEvent.change(screen.getByLabelText('Mark text'),{target:{value:'1'}});fireEvent.click(within(screen.getByRole('radiogroup',{name:'Mark shape'})).getByRole('radio',{name:'square'}));
   fireEvent.click(screen.getByLabelText('String 6, fret 8'));fireEvent.click(screen.getByLabelText('String 1, open'));
   fireEvent.click(screen.getByRole('button',{name:'Apply diagram to beat'}));
   expect(commands).toHaveLength(1);

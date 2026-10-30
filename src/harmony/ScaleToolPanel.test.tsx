@@ -11,7 +11,7 @@ it('browses_sixteen_patterns_twelve_roots_notes_intervals_tags_and_custom_scales
   expect(within(screen.getByLabelText('Scale root')).getAllByRole('option')).toHaveLength(12);expect(within(screen.getByLabelText('Scale pattern')).getAllByRole('option')).toHaveLength(17);
   expect(screen.getByLabelText('Scale notes')).toHaveTextContent('C4 D4 E4 F4 G4 A4 B4 C5');expect(screen.getByLabelText('Adjacent semitones')).toHaveTextContent('2 2 1 2 2 2 1');
   fireEvent.change(screen.getByLabelText('Search scales'),{target:{value:'aeolian'}});expect(within(screen.getByLabelText('Scale pattern')).getByRole('option',{name:'Natural minor / Aeolian'})).toBeInTheDocument();
-  fireEvent.change(screen.getByLabelText('Search scales'),{target:{value:''}});fireEvent.change(screen.getByLabelText('Scale tag'),{target:{value:'pentatonic'}});expect(within(screen.getByLabelText('Scale pattern')).getAllByRole('option')).toHaveLength(3);
+  fireEvent.change(screen.getByLabelText('Search scales'),{target:{value:''}});fireEvent.click(within(screen.getByRole('radiogroup',{name:'Scale tag'})).getByRole('radio',{name:'pentatonic'}));expect(within(screen.getByLabelText('Scale pattern')).getAllByRole('option')).toHaveLength(3);
   fireEvent.change(screen.getByLabelText('Scale pattern'),{target:{value:'custom'}});fireEvent.change(screen.getByLabelText('Custom intervals'),{target:{value:'0, 3, 7'}});fireEvent.change(screen.getByLabelText('Scale root'),{target:{value:'2'}});
   expect(screen.getByLabelText('Scale notes')).toHaveTextContent('D4 F4 A4 D5');expect(screen.getByLabelText('Adjacent semitones')).toHaveTextContent('3 4 5');fireEvent.change(screen.getByLabelText('Custom intervals'),{target:{value:'0, 3, 3'}});expect(screen.getByRole('alert')).toHaveTextContent('unique');
   expect(screen.queryByRole('button',{name:/audition|insert/i})).not.toBeInTheDocument();expect(model.JsonConverter.scoreToJson(score)).toBe(before);
@@ -25,7 +25,7 @@ it('selection_matches_count_distinct_sounding_classes_and_exclude_dead_and_percu
 });
 it('scale_modal_restores_focus_traps_tabs_and_keeps_close_available_while_busy',()=>{
   const score=music();score.tracks[0].staves[0].stringTuning.tunings=[];const opener=document.createElement('button');document.body.append(opener);opener.focus();const closed:string[]=[],props={score,selection:null,busy:false,onClose:()=>closed.push('closed')},view=render(<ScaleToolPanel {...props}/>);
-  expect(screen.getByLabelText('Scale keyboard')).toBeInTheDocument();const root=screen.getByLabelText('Scale root'),close=screen.getByRole('button',{name:'Close scales'});expect(root).toHaveFocus();fireEvent.keyDown(root,{key:'Tab',shiftKey:true});expect(close).toHaveFocus();fireEvent.keyDown(close,{key:'Tab'});expect(root).toHaveFocus();
+  expect(screen.getByLabelText('Scale keyboard')).toBeInTheDocument();const root=screen.getByLabelText('Scale root'),headClose=screen.getByRole('button',{name:'Close'}),close=screen.getByRole('button',{name:'Close scales'});expect(root).toHaveFocus();headClose.focus();fireEvent.keyDown(headClose,{key:'Tab',shiftKey:true});expect(close).toHaveFocus();fireEvent.keyDown(close,{key:'Tab'});expect(headClose).toHaveFocus();
   view.rerender(<ScaleToolPanel {...props} busy/>);expect(root).toBeDisabled();expect(close).toHaveFocus();fireEvent.keyDown(close,{key:'Escape'});expect(closed).toEqual(['closed']);view.unmount();expect(opener).toHaveFocus();opener.remove();
 });
 it('out_of_range_sounding_selection_is_reported_without_crashing_the_browser',()=>{

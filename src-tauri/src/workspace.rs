@@ -458,7 +458,7 @@ impl DocumentWorkspace {
         Ok(self.entry(id)?.saved_file_sha256.as_deref())
     }
 
-    pub(crate) fn library_receipt(&self, id: &str) -> Result<Option<NativeFileReceipt>, String> {
+    pub fn library_receipt(&self, id: &str) -> Result<Option<NativeFileReceipt>, String> {
         self.check_admission()?;
         let entry = self.entry(id)?;
         let target = if let Some(path) = entry.session.path() {

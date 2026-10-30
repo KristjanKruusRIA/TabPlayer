@@ -11,7 +11,9 @@ import { setPartialCapo } from '../editor/partial-capo';
 /** alphaTab's own GP3-5 reader, run to the end of the data: it must use every byte and need none more. */
 function readBack(bytes:Uint8Array):model.Score {
   const reader=Environment.buildImporters()[0] as unknown as {init(data:unknown,settings:unknown):void;readScore():model.Score;data:{position:number;length:number}};
-  reader.init(io.ByteBuffer.fromBuffer(bytes),new Settings());
+  // Guitar Pro 5 text is in the Windows Western codepage.
+  const decoding=new Settings();decoding.importer.encoding='windows-1252';
+  reader.init(io.ByteBuffer.fromBuffer(bytes),decoding);
   const score=reader.readScore();
   expect(reader.data.position).toBe(reader.data.length);
   return score;
@@ -31,7 +33,7 @@ const mainBeats=(voice:model.Voice|undefined)=>(voice?.beats??[]).filter(beat=>b
 /** Everything about the music a reader can compare: rhythm, pitches and the techniques the format holds. */
 function rhythm(score:model.Score) {
   return score.tracks.map(track=>track.staves[0].bars.map(bar=>[0,1].map(v=>mainBeats(sounding(bar).voices[v]).map(beat=>({
-    rest:beat.isRest,duration:beat.duration,dots:beat.dots,tuplet:beat.hasTuplet?`${beat.tupletNumerator}:${beat.tupletDenominator}`:'',start:beat.playbackStart,length:beat.playbackDuration,
+    rest:beat.isRest,duration:beat.duration,dots:beat.dots,tuplet:beat.hasTuplet?`${beat.tupletNumerator}:${beat.tupletDenominator}`:'',start:beat.playbackStart,absolute:bar.masterBar.start+beat.playbackStart,length:beat.playbackDuration,
     pitches:beat.notes.map(note=>note.realValue).sort((a,b)=>a-b),
   })))));
 }
@@ -52,7 +54,9 @@ function roundTrip(score:model.Score,selection=everything(score)) {
 }
 /** Rhythm and pitch of what was exported, from the source, for the selected tracks and measures. */
 function expectSameMusic(source:model.Score,back:model.Score,tracks=source.tracks.map((_,index)=>index),first=0,last=source.masterBars.length-1) {
-  const slice=(value:ReturnType<typeof rhythm>)=>tracks.map(track=>value[track].slice(first,last+1));
+  // Absolute ticks count from the start of the exported measures, so a pickup or a mis-sized measure shifts everything after it.
+  const origin=source.masterBars[first].start;
+  const slice=(value:ReturnType<typeof rhythm>)=>tracks.map(track=>value[track].slice(first,last+1).map(bar=>bar.map(voice=>voice.map(beat=>({...beat,absolute:beat.absolute-origin})))));
   expect(back.tracks.length).toBe(tracks.length);
   expect(rhythm(back)).toEqual(slice(rhythm(source)));
 }
@@ -78,7 +82,7 @@ function build(bars:Spec[][],tuning=[64,59,55,50,45,40],tracks=1,second?:Spec[][
   const score=new model.Score();
   for(let t=0;t<tracks;t++){
     const track=new model.Track(),staff=new model.Staff();
-    track.name=tracks>1?`Guitar ${t+1}`:'Guitar';track.playbackInfo.program=25+t;staff.stringTuning.tunings=tuning;track.addStaff(staff);score.addTrack(track);
+    track.name=tracks>1?`Guitar ${t+1}`:'Guitar';track.playbackInfo.program=25+t;staff.stringTuning.tunings=tuning;staff.displayTranspositionPitch=-12;track.addStaff(staff);score.addTrack(track);
   }
   bars.forEach((specs,index)=>{
     score.addMasterBar(new model.MasterBar());
@@ -120,12 +124,15 @@ describe('Guitar Pro 5 writer',()=>{
     expect(back.tempo).toBe(score.tempo);
     expect(back.tracks[0].staves[0].tuning).toEqual([64,59,55,50,45,40]);
   });
-  it('writes text as UTF-8 and cuts fields the format limits at a character boundary, saying so',()=>{
-    const score=build([[{n:[[6,3]]}]]);score.title='Étude – 練習';score.tracks[0].name='Ü'.repeat(30);
-    const {back,losses}=roundTrip(score);
-    expect(back.title).toBe('Étude – 練習');
-    expect(back.tracks[0].name).toBe('Ü'.repeat(20));
-    expect(losses).toEqual(['Text longer than Guitar Pro 5 allows is shortened']);
+  it('writes text in the Windows Western codepage, reports what that cannot hold, and cuts fields at their size',()=>{
+    const score=build([[{n:[[6,3]]}]]);score.title='Für Elise – “Étude” €5';score.artist='練習';score.tracks[0].name='Ü'.repeat(45);
+    const {bytes,back,losses}=roundTrip(score);
+    expect(back.title).toBe('Für Elise – “Étude” €5');
+    // The file holds one byte for ü, as Guitar Pro 5 does; read as UTF-8 it is not a letter.
+    expect(Array.from(bytes).includes(0xfc)).toBe(true);
+    expect(back.tracks[0].name).toBe('Ü'.repeat(40));
+    expect(back.artist).toBe('??');
+    expect(losses).toEqual(['Characters outside Western European text, which Guitar Pro 5 cannot store, become question marks (2)','Text longer than Guitar Pro 5 allows is shortened']);
   });
   it('keeps the tempo, a tempo change on a beat, repeats, endings, sections, keys, time signatures and swing',()=>{
     const four=[{n:[[6,3]] as [number,number][]},{n:[[6,5]] as [number,number][]},{n:[[6,7]] as [number,number][]},{n:[[6,8]] as [number,number][]}];
@@ -374,5 +381,244 @@ describe('Guitar Pro 5 accidentals',()=>{
     expect(exportGp5(score,everything(score)).losses).toEqual([]);
     const tuned=build([[q(6,2)]]);noteOf(tuned,0,0).accidentalMode=model.NoteAccidentalMode.ForceNatural;
     expect(exportGp5(tuned,everything(tuned)).losses).toEqual(['Accidental spellings other than sharp and flat are left out']);
+  });
+});
+
+describe('Guitar Pro 5 timing and placement',()=>{
+  const four=()=>[q(6,3),q(6,5),q(6,7),q(6,8)];
+  it('writes a pickup measure with a signature of its own length, so every later note keeps its absolute tick',()=>{
+    const score=build([[q(1,0)],four(),four()]);
+    score.masterBars[0].isAnacrusis=true;score.finish(settings);
+    expect(score.masterBars[1].start).toBe(960);
+    const {back,losses}=roundTrip(score);
+    expectSameMusic(score,back);
+    expect(back.masterBars.map(bar=>[bar.start,bar.timeSignatureNumerator,bar.timeSignatureDenominator])).toEqual([[0,1,4],[960,4,4],[4800,4,4]]);
+    expect(losses).toEqual(['A pickup measure is written as a measure with a time signature of its own length']);
+  });
+  it('refuses a pickup whose length no signature can say, before anything is saved',()=>{
+    const score=build([[q(1,0,{tuplet:[3,2]})],four()]);
+    score.masterBars[0].isAnacrusis=true;score.finish(settings);
+    expect(previewGp5(score,everything(score))).toEqual({refusal:expect.stringMatching(/pickup/)});
+  });
+  it('refuses signatures with a numerator above 127 or a denominator that is not a power of two',()=>{
+    const wide=build([[q(6,1)]]);wide.masterBars[0].timeSignatureNumerator=200;wide.finish(settings);
+    expect(previewGp5(wide,everything(wide))).toEqual({refusal:expect.stringMatching(/time signature/)});
+    const odd=build([[q(6,1)]]);odd.masterBars[0].timeSignatureDenominator=3;odd.finish(settings);
+    expect(previewGp5(odd,everything(odd))).toEqual({refusal:expect.stringMatching(/time signature/)});
+  });
+  it('writes a tempo change once, on the first voice, and not again on the second voice of its measure',()=>{
+    const eighths=[1,2,3,4,5,6,7,8].map(fret=>({d:D.Eighth,n:[[1,fret]] as [number,number][]}));
+    const withTempo=(second?:Spec[][])=>{
+      const score=build([four(),four()],undefined,1,second);
+      score.masterBars[1].tempoAutomations.push(Object.assign(new model.Automation(),{type:model.AutomationType.Tempo,value:200,ratioPosition:.5}));score.finish(settings);
+      return score;
+    };
+    // The tempo is a 32-bit 200 in the mixer table of its beat; count them in the file.
+    const count=(bytes:Uint8Array)=>Array.from(bytes).filter((value,index)=>value===200&&bytes[index+1]===0&&bytes[index+2]===0&&bytes[index+3]===0&&bytes[index-1]!==200).length;
+    const plain=withTempo(),twoVoices=withTempo([[{d:D.Whole,n:[[1,0]]}],eighths]);
+    const {back,losses,bytes}=roundTrip(twoVoices);
+    expect(losses).toEqual([]);
+    expect(back.masterBars[1].tempoAutomations.map(change=>[change.value,change.ratioPosition])).toEqual([[200,.5]]);
+    expect(count(bytes)).toBe(count(exportGp5(plain,everything(plain)).bytes));
+  });
+  it('keeps a mixer change on a voice that has no notes, and reports a sound bank change it cannot hold',()=>{
+    const score=build([four()],undefined,1,[[]]);
+    const empty=score.tracks[0].staves[0].bars[0].voices[1].beats[0];
+    empty.automations.push(Object.assign(new model.Automation(),{type:model.AutomationType.Volume,value:9,ratioPosition:0}));
+    const {back,losses}=roundTrip(score);
+    expect(losses).toEqual([]);
+    expect(back.tracks[0].staves[0].bars[0].voices[1].beats[0].automations.map(change=>[change.type,change.value])).toEqual([[model.AutomationType.Volume,9]]);
+    noteOf(score).beat.automations.push(Object.assign(new model.Automation(),{type:model.AutomationType.Bank,value:3,ratioPosition:0}));
+    expect(exportGp5(score,everything(score)).losses).toEqual(['Sound bank changes are left out']);
+  });
+});
+
+describe('Guitar Pro 5 dynamics, grace notes, whammy and ties',()=>{
+  const DV=model.DynamicValue;
+  const nearest:Record<string,number>={PPPP:DV.PPP,PPPPP:DV.PPP,PPPPPP:DV.PPP,N:DV.PPP,FFFF:DV.FFF,FFFFF:DV.FFF,FFFFFF:DV.FFF,SF:DV.FFF,SFZ:DV.FFF,SFFZ:DV.FFF,FZ:DV.FFF,RF:DV.FFF,RFZ:DV.FFF,SFP:DV.FF,SFPP:DV.FF,SFZP:DV.FF,FP:DV.F,PF:DV.MF};
+  const names=Object.keys(DV).filter(name=>Number.isNaN(Number(name)));
+  it('maps every dynamic value to the nearest of ppp to fff and says so for the ones it changes',()=>{
+    const basic=['PPP','PP','P','MP','MF','F','FF','FFF'];
+    expect(names.filter(name=>!basic.includes(name)).sort()).toEqual(Object.keys(nearest).sort());
+    for(const name of names){
+      const value=DV[name as keyof typeof DV];
+      const score=build([[q(6,1)]]);beatOf(score,0,0).dynamics=value;
+      const {back,losses}=roundTrip(score);
+      expect(beatOf(back,0,0).dynamics,name).toBe(basic.includes(name)?value:nearest[name]);
+      expect(losses,name).toEqual(basic.includes(name)?[]:['Dynamics outside ppp to fff are changed to the nearest']);
+    }
+  });
+  it('keeps a grace chord, one grace note on each string the main chord plays',()=>{
+    const score=build([[{n:[[6,5],[5,7]],grace:{fret:3,string:6}},q(6,7),q(6,8),q(6,10)]]);
+    const grace=beatOf(score,0,0).voice.beats.find(beat=>beat.graceType!==model.GraceType.None)!;
+    const second=new model.Note();second.string=5;second.fret=4;grace.addNote(second);
+    const {back,losses}=roundTrip(score);
+    expect(losses).toEqual([]);
+    const written=back.tracks[0].staves[0].bars[0].voices[0].beats.filter(beat=>beat.graceType!==model.GraceType.None).flatMap(beat=>beat.notes.map(note=>[note.string,note.fret]));
+    expect(written.sort()).toEqual([[5,4],[6,3]]);
+  });
+  it('reports a bend grace note instead of dropping it',()=>{
+    const score=build([[q(6,5),q(6,7),q(6,8),q(6,10)]]);
+    const voice=score.tracks[0].staves[0].bars[0].voices[0],grace=new model.Beat(),note=new model.Note();
+    grace.isEmpty=false;grace.graceType=model.GraceType.BendGrace;grace.duration=D.ThirtySecond;note.string=6;note.fret=5;note.bendType=model.BendType.Bend;note.addBendPoint(new model.BendPoint(0,0));note.addBendPoint(new model.BendPoint(60,4));grace.addNote(note);voice.addGraceBeat(grace);
+    expect(exportGp5(score,everything(score)).losses).toEqual(['Bend grace notes are left out']);
+  });
+  it('writes a whammy bar with the dip or dive type byte of the format',()=>{
+    const typeByte=(type:model.WhammyType)=>{
+      const score=build([[q(6,5),q(6,7)]]),beat=beatOf(score,0,0);
+      beat.whammyBarType=type;beat.whammyBarPoints=[new model.BendPoint(0,0),new model.BendPoint(30,-4),new model.BendPoint(60,0)];
+      const bytes=exportGp5(score,everything(score)).bytes;
+      // The type byte sits right before the int holding the highest point (4 steps, 100 in the file) and the count of 3 points.
+      for(let i=1;i<bytes.length-8;i++)if(bytes[i+1]===100&&bytes[i+2]===0&&bytes[i+3]===0&&bytes[i+4]===0&&bytes[i+5]===3&&bytes[i+6]===0&&bytes[i+7]===0&&bytes[i+8]===0)return bytes[i];
+      return -1;
+    };
+    expect(typeByte(model.WhammyType.Dip)).toBe(6);
+    expect(typeByte(model.WhammyType.Dive)).toBe(7);
+  });
+  it('rewrites a tie into a repeated measure as a new note unless the measure before ends on that note',()=>{
+    const score=build([[q(5,5),q(5,7),q(5,5),q(5,7)],[q(5,7),q(5,5),q(5,7),q(5,5)],[q(6,0),q(6,0),q(6,0),q(6,0)]]);
+    noteOf(score,1,0).isTieDestination=true;noteOf(score,1,0).tieOrigin=noteOf(score,0,3);noteOf(score,0,3).tieDestination=noteOf(score,1,0);
+    score.tracks[0].staves[0].bars[2].simileMark=model.SimileMark.Simple;score.finish(settings);
+    const {back,losses}=roundTrip(score);
+    expect(losses).toEqual(['Notes tied into a repeated measure are written as new notes']);
+    expect(noteOf(back,2,0).isTieDestination).toBe(false);
+    expect(noteOf(back,2,0).fret).toBe(7);
+    expect(noteOf(back,1,0).isTieDestination).toBe(true);
+  });
+});
+
+/**
+ * Everything the model keeps that a Guitar Pro 5 file does not, one scenario each. The export dialog says "nothing is left out"
+ * when the list is empty, so every kind of loss must put a line in the list, and a field alphaTab adds must be classified here.
+ */
+describe('Guitar Pro 5 never claims nothing is left out when something is',()=>{
+  type Change=(score:model.Score)=>void;
+  const bars=()=>[[q(6,3),q(6,5),q(6,7),q(6,8)],[q(6,3),q(6,5),q(6,7),q(6,8)]];
+  const first=(score:model.Score,bar=0,index=0)=>beatOf(score,bar,index);
+  const bend=(note:model.Note)=>{note.bendType=model.BendType.Bend;note.addBendPoint(new model.BendPoint(0,0));note.addBendPoint(new model.BendPoint(60,4));};
+  const scenarios:Record<string,[Change,RegExp,{backing?:boolean;bars?:Spec[][]}?]>={
+    'Beat.fermata':[score=>score.masterBars[0].addFermata(0,Object.assign(new model.Fermata(),{type:model.FermataType.Medium,length:1})),/Fermatas/],
+    'Beat.slashed':[score=>{first(score).slashed=true;},/Slashed/],
+    'Beat.deadSlapped':[score=>{first(score).deadSlapped=true;},/dead-slap/],
+    'Beat.golpe':[score=>{first(score).golpe=model.GolpeType.Thumb;},/Golpe/],
+    'Beat.crescendo':[score=>{first(score).crescendo=model.CrescendoType.Crescendo;},/Crescendo/],
+    'Beat.wahPedal':[score=>{first(score).wahPedal=model.WahPedal.Open;},/Wah/],
+    'Beat.showTimer':[score=>{first(score).showTimer=true;first(score).timer=12;},/Timers/],
+    'Beat.barreShape':[score=>{first(score).barreShape=model.BarreShape.Full;first(score).barreFret=3;},/Barre marks/],
+    'Beat.whammyStyle':[score=>{first(score).whammyBarPoints=[new model.BendPoint(0,0),new model.BendPoint(60,-4)];first(score).whammyStyle=model.BendStyle.Gradual;},/Whammy bar styles/],
+    'Beat.tremoloPicking':[score=>{first(score).tremoloPicking=Object.assign(new model.TremoloPickingEffect(),{marks:5});},/Tremolo picking with more than three/],
+    'Note.isVisible':[score=>{noteOf(score).isVisible=false;},/Hidden notes/],
+    'Note.bendStyle':[score=>{const note=noteOf(score);bend(note);note.bendStyle=model.BendStyle.Gradual;},/Bend styles/],
+    'Note.isLeftHandTapped':[score=>{noteOf(score).isLeftHandTapped=true;},/Left-hand tap/],
+    'Note.ornament':[score=>{noteOf(score).ornament=model.NoteOrnament.Turn;},/Turns and mordents/],
+    'Note.accentuated':[score=>{noteOf(score).accentuated=model.AccentuationType.Tenuto;},/Tenuto/],
+    'Note.accidentalMode':[score=>{noteOf(score,0,1).accidentalMode=model.NoteAccidentalMode.ForceDoubleSharp;},/Accidental spellings/],
+    'Note.slurDestination':[score=>{const [from,to]=[noteOf(score,0,0),noteOf(score,0,1)];from.slurDestination=to;to.slurOrigin=from;},/Slurs/],
+    'Bar.clefOttava':[score=>{score.tracks[0].staves[0].bars[0].clefOttava=model.Ottavia._8va;},/Clef octave/],
+    'Bar.barLineRight':[score=>{score.tracks[0].staves[0].bars[0].barLineRight=model.BarLineStyle.Dotted;},/Barline styles/],
+    'Bar.barLineLeft':[score=>{score.tracks[0].staves[0].bars[1].barLineLeft=model.BarLineStyle.Heavy;},/Barline styles/],
+    'Bar.sustainPedals':[score=>{score.tracks[0].staves[0].bars[0].sustainPedals.push(new model.SustainPedalMarker());},/Sustain pedal/],
+    'MasterBar.alternateEndings':[score=>{score.masterBars[1].alternateEndings=256;},/Endings above the eighth/],
+    'MasterBar.repeatCount':[score=>{score.masterBars[1].repeatCount=200;},/Repeat counts above 127/],
+    'MasterBar.timeSignatureCommon':[score=>{score.masterBars[0].timeSignatureCommon=true;},/Common-time/],
+    'MasterBar.isFreeTime':[score=>{score.masterBars[0].isFreeTime=true;},/Free-time/],
+    'MasterBar.tripletFeel':[score=>{score.masterBars[0].tripletFeel=model.TripletFeel.Dotted16th;},/Swing feels/],
+    'MasterBar.section':[score=>{score.masterBars[0].section=Object.assign(new model.Section(),{marker:'A',text:'Intro'});},/letter of a section marker/],
+    'MasterBar.syncPoints':[()=>{},/Backing audio/,{backing:true}],
+    'MasterBar.isAnacrusis':[score=>{score.masterBars[0].isAnacrusis=true;},/pickup measure is written/,{bars:[[q(6,3)],bars()[0]]}],
+    'Staff.showSlash':[score=>{score.tracks[0].staves[0].showSlash=true;},/Slash and numbered/],
+    'Staff.showNumbered':[score=>{score.tracks[0].staves[0].showNumbered=true;},/Slash and numbered/],
+    'Staff.displayTranspositionPitch':[score=>{score.tracks[0].staves[0].displayTranspositionPitch=12;},/Display transposition/],
+    'Track.staves':[score=>{const staff=new model.Staff();staff.stringTuning.tunings=[64,59,55,50,45,40];score.tracks[0].addStaff(staff);for(let i=0;i<2;i++){const bar=new model.Bar();bar.clef=model.Clef.G2;fill(bar,[q(6,1)]);staff.addBar(bar);}},/Staves after the first/],
+    'Score.backingTrack':[()=>{},/Backing audio/,{backing:true}],
+    'Voice.hidden lyrics':[score=>setLyricsSource(score.tracks[0],{visible:false,lines:[{startBar:0,text:'La la'}]},true),/Hidden lyrics/],
+    'Beat.graceType.BendGrace':[score=>{
+      const voice=score.tracks[0].staves[0].bars[0].voices[0],grace=new model.Beat(),note=new model.Note();
+      grace.isEmpty=false;grace.graceType=model.GraceType.BendGrace;grace.duration=D.ThirtySecond;note.string=6;note.fret=3;bend(note);grace.addNote(note);voice.addGraceBeat(grace);
+    },/Bend grace/],
+  };
+  it.each(Object.entries(scenarios))('lists %s as left out or changed',(_name,[change,pattern,options])=>{
+    const score=build(options?.bars??bars());change(score);score.finish(settings);
+    const result=previewGp5(score,everything(score),options&&{backing:options.backing});
+    expect(result).toHaveProperty('losses');
+    expect((result as {losses:string[]}).losses.join('|')).toMatch(pattern);
+  });
+  it('lists a jump whose target the selection cut off',()=>{
+    const score=build([[q(6,1)],[q(6,2)],[q(6,3)]]);
+    score.masterBars[0].addDirection(model.Direction.TargetSegno);score.masterBars[2].addDirection(model.Direction.JumpDalSegno);
+    expect(exportGp5(score,everything(score)).losses).toEqual([]);
+    expect(exportGp5(score,{tracks:[0],range:{first:1,last:2}}).losses).toEqual(['A jump whose target is not in the selection is kept, but has nowhere to go']);
+  });
+  it('has a plain score report nothing, so the claim of nothing left out is true only then',()=>{
+    const score=build(bars());
+    expect(previewGp5(score,everything(score))).toEqual({losses:[]});
+  });
+  it('classifies every field of the model, so a field a later alphaTab adds is noticed',()=>{
+    const written='written to the file',derived='worked out from other fields',styling='page layout or styling, which the file does not hold and the dialog always says so',lost='listed in the scenarios above';
+    const classes:Record<string,[object,Record<string,string>]>={
+      Beat:[new model.Beat(),{...Object.fromEntries('notes isEmpty ottava duration dots fade lyrics pop slap tap text brushType brushDuration tupletDenominator tupletNumerator whammyBarType whammyBarPoints vibrato chordId graceType pickStroke tremoloPicking dynamics preferredBeamDirection beamingMode rasgueado automations'.split(' ').map(key=>[key,written])),
+        ...Object.fromEntries('id index previousBeat nextBeat voice noteStringLookup noteValueLookup isLegatoOrigin minNote maxNote maxStringNote minStringNote isLetRing isPalmMute tupletGroup isContinuedWhammy maxWhammyPoint minWhammyPoint graceGroup graceIndex displayStart playbackStart displayDuration playbackDuration overrideDisplayDuration isEffectSlurOrigin effectSlurOrigin effectSlurDestination'.split(' ').map(key=>[key,derived])),
+        ...Object.fromEntries('invertBeamDirection style'.split(' ').map(key=>[key,styling])),
+        ...Object.fromEntries('whammyStyle fermata slashed deadSlapped golpe crescendo wahPedal barreFret barreShape showTimer timer'.split(' ').map(key=>[key,lost]))}],
+      Note:[new model.Note(),{...Object.fromEntries('bendType bendPoints fret string percussionArticulation isHammerPullOrigin harmonicType harmonicValue isGhost isLetRing isPalmMute isDead isStaccato slideInType slideOutType slideTarget vibrato tieOrigin tieDestination isTieDestination leftHandFinger rightHandFinger trillValue trillSpeed durationPercent dynamics'.split(' ').map(key=>[key,written])),
+        ...Object.fromEntries('id index maxBendPoint bendOrigin isContinuedBend octave tone hammerPullOrigin hammerPullDestination slideOrigin letRingDestination palmMuteDestination beat isEffectSlurOrigin hasEffectSlur effectSlurOrigin effectSlurDestination effectSlur _noteIdBag'.split(' ').map(key=>[key,derived])),
+        ...Object.fromEntries('showStringNumber style'.split(' ').map(key=>[key,styling])),
+        ...Object.fromEntries('accentuated bendStyle isVisible isLeftHandTapped isSlurDestination slurOrigin slurDestination accidentalMode ornament'.split(' ').map(key=>[key,lost]))}],
+      Bar:[new model.Bar(),{...Object.fromEntries('clef voices simileMark keySignature keySignatureType'.split(' ').map(key=>[key,written])),
+        ...Object.fromEntries('id index nextBar previousBar staff _filledVoices _isEmpty _isRestOnly shortestDuration'.split(' ').map(key=>[key,derived])),
+        ...Object.fromEntries('displayScale displayWidth barNumberDisplay style'.split(' ').map(key=>[key,styling])),
+        ...Object.fromEntries('clefOttava sustainPedals barLineLeft barLineRight'.split(' ').map(key=>[key,lost]))}],
+      MasterBar:[new model.MasterBar(),{...Object.fromEntries('isDoubleBar isRepeatStart timeSignatureNumerator timeSignatureDenominator section tempoAutomations directions'.split(' ').map(key=>[key,written])),
+        ...Object.fromEntries('nextMasterBar previousMasterBar index repeatGroup score start'.split(' ').map(key=>[key,derived])),
+        ...Object.fromEntries('beamingRules actualBeamingRules displayScale displayWidth'.split(' ').map(key=>[key,styling])),
+        ...Object.fromEntries('alternateEndings repeatCount timeSignatureCommon isFreeTime tripletFeel syncPoints fermata isAnacrusis'.split(' ').map(key=>[key,lost]))}],
+      Staff:[new model.Staff(),{...Object.fromEntries('chords capo transpositionPitch stringTuning showTablature showStandardNotation isPercussion'.split(' ').map(key=>[key,written])),
+        ...Object.fromEntries('index track bars _filledVoices'.split(' ').map(key=>[key,derived])),
+        ...Object.fromEntries('standardNotationLineCount'.split(' ').map(key=>[key,styling])),
+        ...Object.fromEntries('displayTranspositionPitch showSlash showNumbered'.split(' ').map(key=>[key,lost]))}],
+      Track:[new model.Track(),{...Object.fromEntries('playbackInfo color name isVisibleOnMultiTrack percussionArticulations'.split(' ').map(key=>[key,written])),
+        ...Object.fromEntries('index score'.split(' ').map(key=>[key,derived])),
+        ...Object.fromEntries('shortName defaultSystemsLayout systemsLayout lineBreaks style'.split(' ').map(key=>[key,styling])),
+        ...Object.fromEntries('staves'.split(' ').map(key=>[key,lost]))}],
+      Score:[new model.Score(),{...Object.fromEntries('album artist copyright instructions music notices subTitle title words tab masterBars tracks'.split(' ').map(key=>[key,written])),
+        ...Object.fromEntries('_currentRepeatGroup _openedRepeatGroups _properlyOpenedRepeatGroups'.split(' ').map(key=>[key,derived])),
+        ...Object.fromEntries('defaultSystemsLayout systemsLayout stylesheet style'.split(' ').map(key=>[key,styling])),
+        ...Object.fromEntries('backingTrack'.split(' ').map(key=>[key,lost]))}],
+    };
+    for(const [name,[instance,known]] of Object.entries(classes)){
+      const unknown=Object.keys(instance).filter(key=>!(key in known));
+      expect(unknown,`${name} fields not yet classified for Guitar Pro 5 export`).toEqual([]);
+      const alias:Record<string,string>={'Beat.barreFret':'Beat.barreShape','Beat.timer':'Beat.showTimer','Note.isSlurDestination':'Note.slurDestination','Note.slurOrigin':'Note.slurDestination','MasterBar.fermata':'Beat.fermata'};
+      const untested=Object.entries(known).filter(([,kind])=>kind===lost).map(([key])=>`${name}.${key}`).filter(field=>!(field in scenarios)&&!(alias[field] in scenarios));
+      expect(untested,`${name} fields that are lost and have no scenario`).toEqual([]);
+    }
+  });
+});
+
+describe('Guitar Pro 5 channels and neck',()=>{
+  it('gives every track its own channel and effect channel, and percussion an effect channel no pitched track uses',()=>{
+    const score=build([[q(6,3)]],undefined,3);
+    const drums=score.tracks[2];drums.staves[0].isPercussion=true;drums.staves[0].stringTuning.tunings=[];noteOf(score,0,0,0,2).percussionArticulation=36;
+    score.tracks[0].playbackInfo.volume=9;
+    const {back,bytes}=roundTrip(score);
+    const channels=back.tracks.slice(0,2).flatMap(track=>[track.playbackInfo.primaryChannel,track.playbackInfo.secondaryChannel]);
+    expect(new Set(channels).size).toBe(channels.length);
+    // The percussion track is channel 10 (index 9) with channel 9 for its effects; the pitched tracks never take channel 9 or 10.
+    const has=(pattern:number[])=>Array.from(bytes).some((_,index)=>pattern.every((value,offset)=>bytes[index+offset]===value));
+    expect(has([1,0,0,0,10,0,0,0,9,0,0,0])).toBe(true);
+    expect(has([1,0,0,0,9,0,0,0])).toBe(false);
+  });
+  it('raises the fret count of a track above the usual 24 when its music goes higher',()=>{
+    const score=build([[q(1,30),q(1,3)]]);
+    const bytes=exportGp5(score,everything(score)).bytes;
+    // port 1, channel 1, effect channel 2, then the fret count.
+    const fretCount=(want:number)=>{
+      const pattern=[1,0,0,0,1,0,0,0,2,0,0,0,want,0,0,0];
+      return Array.from(bytes).some((_,index)=>pattern.every((value,offset)=>bytes[index+offset]===value));
+    };
+    expect(fretCount(30)).toBe(true);
+    const plain=build([[q(1,3)]]),plainBytes=exportGp5(plain,everything(plain)).bytes;
+    expect(Array.from(plainBytes).some((_,index)=>[1,0,0,0,1,0,0,0,2,0,0,0,24,0,0,0].every((value,offset)=>plainBytes[index+offset]===value))).toBe(true);
+    expectSameMusic(score,readBack(bytes));
   });
 });

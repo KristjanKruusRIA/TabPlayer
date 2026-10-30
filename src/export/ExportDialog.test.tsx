@@ -66,6 +66,22 @@ it('submits Guitar Pro 5 and lists what this selection leaves out before saving'
   expect(submit).toHaveBeenCalledWith({format:'gp5',selection:{tracks:[0],range:null}});
 });
 
+it('says nothing is left out of a Guitar Pro 5 file only when that is true, and lists the loss otherwise',()=>{
+  const plain=music();
+  const {unmount}=render(<ExportDialog score={plain} layout={layout} busy={false} currentSpeedAvailable={true} onExport={()=>{}} onCancel={()=>{}}/>);
+  fireEvent.change(screen.getByLabelText('Export format'),{target:{value:'gp5'}});
+  const claim=/Nothing in this selection is left out beyond layout/;
+  const before=screen.queryByText(claim)!==null,hadList=screen.queryByText('Left out or changed in this selection:')!==null;
+  unmount();
+  const marked=music();marked.masterBars[0].timeSignatureCommon=true;marked.tracks[0].staves[0].showSlash=true;
+  render(<ExportDialog score={marked} layout={layout} busy={false} currentSpeedAvailable={true} onExport={()=>{}} onCancel={()=>{}}/>);
+  fireEvent.change(screen.getByLabelText('Export format'),{target:{value:'gp5'}});
+  expect([before,hadList]).toEqual([true,false]);
+  expect(screen.queryByText(claim)).toBeNull();
+  expect(screen.getByText('Common-time and cut-time symbols become numbers')).toBeVisible();
+  expect(screen.getByText('Slash and numbered-notation staves are left out')).toBeVisible();
+});
+
 it('submits MusicXML with the shared selection and explains what it keeps',()=>{
   const submit=vi.fn();render(<ExportDialog score={fixture()} layout={layout} busy={false} currentSpeedAvailable={true} onExport={submit} onCancel={()=>{}}/>);
   fireEvent.change(screen.getByLabelText('Export format'),{target:{value:'musicxml'}});

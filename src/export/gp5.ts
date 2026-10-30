@@ -15,20 +15,35 @@ export interface Gp5Export { bytes:Uint8Array; losses:string[] }
 export class Gp5Refusal extends Error {}
 const refuse=(message:string):never=>{throw new Gp5Refusal(message);};
 
-const MAX_BARS=1000,MAX_BEATS=100,BASS_CLEF_BELOW=35;
+const MAX_BARS=1000,MAX_BEATS=100,BASS_CLEF_BELOW=35,MAX_NUMERATOR=127,MAX_REPEATS=127,MAX_ENDING=255;
 // The 64-entry channel table: a track takes a slot and the one after it for effects; slot 9 of each port of 16 is percussion.
+// Pitched tracks take pairs (0,1) to (14,15) except 8, which is left for the percussion slot's effect channel.
 const PITCHED_SLOTS=[0,2,4,6,10,12,14].flatMap(offset=>[0,16,32,48].map(port=>port+offset)).sort((a,b)=>a-b),PERCUSSION_SLOTS=[9,25,41,57];
-const encoder=new TextEncoder();
+// Guitar Pro 5 stores text in the Windows Western codepage (1252), not UTF-8.
+const CP1252=new Map([[0x20AC,0x80],[0x201A,0x82],[0x0192,0x83],[0x201E,0x84],[0x2026,0x85],[0x2020,0x86],[0x2021,0x87],[0x02C6,0x88],[0x2030,0x89],[0x0160,0x8A],[0x2039,0x8B],[0x0152,0x8C],[0x017D,0x8E],[0x2018,0x91],[0x2019,0x92],[0x201C,0x93],[0x201D,0x94],[0x2022,0x95],[0x2013,0x96],[0x2014,0x97],[0x02DC,0x98],[0x2122,0x99],[0x0161,0x9A],[0x203A,0x9B],[0x0153,0x9C],[0x017E,0x9E],[0x0178,0x9F]]);
 // The order the file lists them in.
 const DIRECTIONS=[model.Direction.TargetCoda,model.Direction.TargetDoubleCoda,model.Direction.TargetSegno,model.Direction.TargetSegnoSegno,model.Direction.TargetFine,
   model.Direction.JumpDaCapo,model.Direction.JumpDaCapoAlCoda,model.Direction.JumpDaCapoAlDoubleCoda,model.Direction.JumpDaCapoAlFine,
   model.Direction.JumpDalSegno,model.Direction.JumpDalSegnoAlCoda,model.Direction.JumpDalSegnoAlDoubleCoda,model.Direction.JumpDalSegnoAlFine,
   model.Direction.JumpDalSegnoSegno,model.Direction.JumpDalSegnoSegnoAlCoda,model.Direction.JumpDalSegnoSegnoAlDoubleCoda,model.Direction.JumpDalSegnoSegnoAlFine,
   model.Direction.JumpDaCoda,model.Direction.JumpDaDoubleCoda];
+const Dir=model.Direction;
+// What each jump goes to, and then on to.
+const JUMP_TARGETS=new Map<model.Direction,model.Direction[]>([
+  [Dir.JumpDaCapoAlCoda,[Dir.TargetCoda]],[Dir.JumpDaCapoAlDoubleCoda,[Dir.TargetDoubleCoda]],[Dir.JumpDaCapoAlFine,[Dir.TargetFine]],
+  [Dir.JumpDalSegno,[Dir.TargetSegno]],[Dir.JumpDalSegnoAlCoda,[Dir.TargetSegno,Dir.TargetCoda]],[Dir.JumpDalSegnoAlDoubleCoda,[Dir.TargetSegno,Dir.TargetDoubleCoda]],[Dir.JumpDalSegnoAlFine,[Dir.TargetSegno,Dir.TargetFine]],
+  [Dir.JumpDalSegnoSegno,[Dir.TargetSegnoSegno]],[Dir.JumpDalSegnoSegnoAlCoda,[Dir.TargetSegnoSegno,Dir.TargetCoda]],[Dir.JumpDalSegnoSegnoAlDoubleCoda,[Dir.TargetSegnoSegno,Dir.TargetDoubleCoda]],[Dir.JumpDalSegnoSegnoAlFine,[Dir.TargetSegnoSegno,Dir.TargetFine]],
+  [Dir.JumpDaCoda,[Dir.TargetCoda]],[Dir.JumpDaDoubleCoda,[Dir.TargetDoubleCoda]],
+]);
 // Tuplet count to the normal count it replaces, for the counts the file stores.
 const TUPLETS=new Map([[3,2],[5,4],[6,4],[7,4],[9,8],[10,8],[11,8],[12,8],[13,8]]);
 const DURATIONS=new Map([[model.Duration.Whole,-2],[model.Duration.Half,-1],[model.Duration.Quarter,0],[model.Duration.Eighth,1],[model.Duration.Sixteenth,2],[model.Duration.ThirtySecond,3],[model.Duration.SixtyFourth,4]]);
 const DYNAMICS=new Map([[model.DynamicValue.PPP,1],[model.DynamicValue.PP,2],[model.DynamicValue.P,3],[model.DynamicValue.MP,4],[model.DynamicValue.MF,5],[model.DynamicValue.F,6],[model.DynamicValue.FF,7],[model.DynamicValue.FFF,8]]);
+// Dynamics the file lacks, as the nearest of its eight: extra p and f are the end ones, accents (sforzando and the like) strike at the top.
+const DV=model.DynamicValue;
+const NEAREST_DYNAMICS=new Map<model.DynamicValue,number>([[DV.PPPP,1],[DV.PPPPP,1],[DV.PPPPPP,1],[DV.N,1],[DV.FFFF,8],[DV.FFFFF,8],[DV.FFFFFF,8],[DV.SF,8],[DV.SFZ,8],[DV.SFFZ,8],[DV.FZ,8],[DV.RF,8],[DV.RFZ,8],[DV.SFP,7],[DV.SFPP,7],[DV.SFZP,7],[DV.FP,6],[DV.PF,5]]);
+// The bend effect's type byte for a whammy bar: a dip, or a dive for every other shape (the points carry the rest).
+const WHAMMY_DIP=6,WHAMMY_DIVE=7;
 const FORTE=6,BEAM_UP=0,BEAM_DOWN=1;// alphaTab keeps its BeamDirection enum private
 
 /** Counts what is left out, one line per kind. */
@@ -47,17 +62,26 @@ class Out {
   zeros(count:number):void { for(let i=0;i<count;i++)this.data.push(0); }
   toBytes():Uint8Array { return Uint8Array.from(this.data); }
 }
-/** UTF-8 cut at a character boundary to at most `max` bytes. */
+/** Text as Windows-1252 bytes; a character that codepage lacks becomes a question mark and is counted as left out. */
+function encode(text:string,report:Report):Uint8Array {
+  const bytes:number[]=[];let lost=0;
+  for(const char of text){
+    const code=char.codePointAt(0)!,mapped=code<0x80||code>=0xA0&&code<=0xFF?code:CP1252.get(code);
+    if(mapped===undefined){bytes.push(63);lost++;}else bytes.push(mapped);
+  }
+  report.lose('Characters outside Western European text, which Guitar Pro 5 cannot store, become question marks',lost);
+  return Uint8Array.from(bytes);
+}
+/** The encoded text cut to at most `max` bytes (one byte a character). */
 function fit(text:string,max:number,report:Report):Uint8Array {
-  const bytes=encoder.encode(text);if(bytes.length<=max)return bytes;
-  let end=max;while(end>0&&(bytes[end]&0xc0)===0x80)end--;
-  report.lose('Text longer than Guitar Pro 5 allows is shortened');return bytes.slice(0,end);
+  const bytes=encode(text,report);if(bytes.length<=max)return bytes;
+  report.lose('Text longer than Guitar Pro 5 allows is shortened');return bytes.slice(0,max);
 }
 /** A length byte, then a field of exactly `field` bytes. */
 function fixedString(out:Out,text:string,field:number,report:Report):void { const bytes=fit(text,field,report);out.byte(bytes.length);out.raw(bytes);out.zeros(field-bytes.length); }
 /** An int holding length+1, a byte holding length, then the characters. */
 function sizedString(out:Out,text:string,report:Report):void { const bytes=fit(text,255,report);out.int(bytes.length+1);out.byte(bytes.length);out.raw(bytes); }
-function longString(out:Out,text:string):void { const bytes=encoder.encode(text);out.int(bytes.length);out.raw(bytes); }
+function longString(out:Out,text:string,report:Report):void { const bytes=encode(text,report);out.int(bytes.length);out.raw(bytes); }
 const clamp=(value:number,min:number,max:number)=>Math.max(min,Math.min(max,value));
 
 /** The bar whose notes sound here: a simile (%) bar repeats the bar or two bars before it, which the file cannot say. */
@@ -66,6 +90,21 @@ function soundingBar(bar:model.Bar):model.Bar {
   let source:model.Bar|null=bar;for(let i=0;i<back&&source;i++)source=source.previousBar;
   return source&&source!==bar?soundingBar(source):bar;
 }
+/**
+ * The time signature a measure is written with. The format has no pickup (anacrusis) flag and starts the next measure after the
+ * signature's length, so a pickup is written with a signature of its own length, which keeps every later note where it was.
+ * Null when that length is not a whole number of notes of some value the format has.
+ */
+function signature(bar:model.MasterBar):[number,number]|null {
+  const ticks=bar.isAnacrusis?bar.calculateDuration(true):0;
+  if(ticks<=0)return [bar.timeSignatureNumerator,bar.timeSignatureDenominator];
+  for(const denominator of [bar.timeSignatureDenominator,1,2,4,8,16,32,64]){
+    const unit=3840/denominator;
+    if(Number.isInteger(unit)&&ticks%unit===0&&ticks/unit<=MAX_NUMERATOR)return [ticks/unit,denominator];
+  }
+  return null;
+}
+const isPickup=(bar:model.MasterBar)=>{const written=signature(bar);return bar.isAnacrusis&&written!==null&&(written[0]!==bar.timeSignatureNumerator||written[1]!==bar.timeSignatureDenominator);};
 const spoken=(beat:model.Beat)=>beat.notes.length>0||!beat.isEmpty;
 const trackName=(track:model.Track)=>track.name||`Track ${track.index+1}`;
 
@@ -74,7 +113,12 @@ function checkMusic(score:model.Score):void {
   if(score.masterBars.length>MAX_BARS)refuse(`Guitar Pro 5 holds at most ${MAX_BARS} measures and this export has ${score.masterBars.length}. Choose a measure range.`);
   const percussion=score.tracks.filter(track=>track.staves[0]?.isPercussion).length;
   if(percussion>PERCUSSION_SLOTS.length||score.tracks.length-percussion>PITCHED_SLOTS.length)refuse(`Guitar Pro 5 holds at most ${PITCHED_SLOTS.length} pitched and ${PERCUSSION_SLOTS.length} percussion tracks. Choose fewer tracks.`);
-  for(const bar of score.masterBars)if(bar.timeSignatureNumerator<1||bar.timeSignatureNumerator>255||bar.timeSignatureDenominator<1||bar.timeSignatureDenominator>64)refuse(`Measure ${bar.index+1} has a time signature Guitar Pro 5 cannot hold.`);
+  for(const bar of score.masterBars){
+    const written=signature(bar);
+    if(!written){refuse(`Measure ${bar.index+1} is a pickup of a length Guitar Pro 5 cannot hold. Guitar Pro 5 has no pickup measures; remove the pickup mark or choose a measure range that starts after it.`);continue;}
+    const [numerator,denominator]=written;
+    if(numerator<1||numerator>MAX_NUMERATOR||denominator<1||denominator>64||(denominator&(denominator-1))!==0)refuse(`Measure ${bar.index+1} has a time signature Guitar Pro 5 cannot hold.`);
+  }
   for(const track of score.tracks){
     const name=trackName(track),staff=track.staves[0];
     if(!staff)refuse(`${name} has no staff to export as Guitar Pro 5.`);
@@ -112,15 +156,17 @@ function writeInfo(out:Out,score:model.Score,report:Report):void {
   out.int(notices.length);for(const line of notices)sizedString(out,line,report);
 }
 function writeLyrics(out:Out,score:model.Score,report:Report):void {
-  const found=score.tracks.map(track=>{
+  const written=score.tracks.map(track=>{
     const source=getLyricsSource(track)?.value??reconstructTrackLyrics(track);
-    return source.visible?source.lines.filter(line=>line.text.trim().length>0):[];
+    return {visible:source.visible,lines:source.lines.filter(line=>line.text.trim().length>0)};
   });
+  report.lose('Hidden lyrics are left out',written.filter(item=>!item.visible&&item.lines.length>0).length);
+  const found=written.map(item=>item.visible?item.lines:[]);
   const owner=found.findIndex(lines=>lines.length>0),lines=owner>=0?found[owner]:[];
   report.lose('Lyrics of tracks after the first with lyrics are left out',found.filter((list,index)=>index>owner&&list.length>0).length);
   report.lose('Lyrics lines after the fifth are left out',Math.max(0,lines.length-5));
   out.int(owner>=0?owner+1:0);
-  for(let i=0;i<5;i++){out.int(lines[i]?lines[i].startBar+1:1);longString(out,lines[i]?.text??'');}
+  for(let i=0;i<5;i++){out.int(lines[i]?lines[i].startBar+1:1);longString(out,lines[i]?.text??'',report);}
 }
 function writePageSetup(out:Out,report:Report):void {
   for(const value of [210,297,10,10,15,10,100])out.int(value);
@@ -167,51 +213,78 @@ function writeDirections(out:Out,score:model.Score,report:Report):void {
     if(slot<0||where.has(slot))report.lose('A direction used again in another measure is kept in the first only');
     else where.set(slot,bar.index+1);
   }
+  // A jump needs its targets in the file; with one cut off by the selection the jump is written but cannot play as it did.
+  const present=new Set([...where.keys()].map(slot=>DIRECTIONS[slot]));
+  for(const bar of score.masterBars)for(const direction of bar.directions??[])if((JUMP_TARGETS.get(direction)??[]).some(target=>!present.has(target)))report.lose('A jump whose target is not in the selection is kept, but has nowhere to go');
   DIRECTIONS.forEach((_,slot)=>out.short(where.get(slot)??-1));
   out.int(0);
 }
+/** A double barline is a flag of the measure in the file; the model may keep it on the measure or as the right barline of a staff's bar. */
+const doubleBar=(score:model.Score,bar:model.MasterBar)=>bar.isDoubleBar||score.tracks.some(track=>track.staves[0]?.bars[bar.index]?.barLineRight===model.BarLineStyle.LightLight);
 function writeMasterBars(out:Out,score:model.Score,report:Report):void {
-  let previous:model.MasterBar|null=null,previousKey:[number,number]=[0,0];
+  let previous:[number,number]|null=null,previousKey:[number,number]=[0,0];
   for(const bar of score.masterBars){
-    const key:[number,number]=[bar.keySignature,bar.keySignatureType],numerator=!previous||bar.timeSignatureNumerator!==previous.timeSignatureNumerator,denominator=!previous||bar.timeSignatureDenominator!==previous.timeSignatureDenominator;
+    const written=signature(bar)!,key:[number,number]=[bar.keySignature,bar.keySignatureType],numerator=!previous||written[0]!==previous[0],denominator=!previous||written[1]!==previous[1];
     const repeatEnd=bar.isRepeatEnd,section=bar.section&&(bar.section.text||bar.section.marker)?bar.section:null,keyChange=!previous||key[0]!==previousKey[0]||key[1]!==previousKey[1];
-    out.byte((numerator?1:0)|(denominator?2:0)|(bar.isRepeatStart?4:0)|(repeatEnd?8:0)|(bar.alternateEndings?16:0)|(section?32:0)|(keyChange?64:0)|(bar.isDoubleBar?128:0));
-    if(numerator)out.byte(bar.timeSignatureNumerator);
-    if(denominator)out.byte(bar.timeSignatureDenominator);
-    if(repeatEnd)out.byte(clamp(bar.repeatCount,1,255));
-    if(section){sizedString(out,section.text||section.marker,report);out.raw([255,0,0,0]);}
+    out.byte((numerator?1:0)|(denominator?2:0)|(bar.isRepeatStart?4:0)|(repeatEnd?8:0)|(bar.alternateEndings&MAX_ENDING?16:0)|(section?32:0)|(keyChange?64:0)|(doubleBar(score,bar)?128:0));
+    if(numerator)out.byte(written[0]);
+    if(denominator)out.byte(written[1]);
+    if(repeatEnd){
+      if(bar.repeatCount>MAX_REPEATS)report.lose('Repeat counts above 127 are written as 127');
+      out.byte(clamp(bar.repeatCount,1,MAX_REPEATS));
+    }
+    if(section){
+      if(section.text&&section.marker&&section.text!==section.marker)report.lose('The letter of a section marker is left out when the section also has a name');
+      sizedString(out,section.text||section.marker,report);out.raw([255,0,0,0]);
+    }
     if(keyChange){out.byte(bar.keySignature);out.byte(bar.keySignatureType);}
-    if(numerator||denominator)out.raw(beamGroups(bar.timeSignatureNumerator,bar.timeSignatureDenominator));
-    out.byte(bar.alternateEndings&255);
+    if(numerator||denominator)out.raw(beamGroups(written[0],written[1]));
+    if(bar.alternateEndings>MAX_ENDING)report.lose('Endings above the eighth are left out');
+    out.byte(bar.alternateEndings&MAX_ENDING);
     if(bar.tripletFeel===model.TripletFeel.Triplet8th)out.byte(1);
     else if(bar.tripletFeel===model.TripletFeel.Triplet16th)out.byte(2);
     else{out.byte(0);if(bar.tripletFeel!==model.TripletFeel.NoTripletFeel)report.lose('Swing feels other than triplet eighths and sixteenths are left out');}
     out.byte(0);
     if(bar.isFreeTime)report.lose('Free-time measures become ordinary measures');
-    previous=bar;previousKey=key;
+    if(isPickup(bar))report.lose('A pickup measure is written as a measure with a time signature of its own length');
+    if(bar.timeSignatureCommon)report.lose('Common-time and cut-time symbols become numbers');
+    previous=written;previousKey=key;
   }
 }
 
 interface Slot { track:model.Track; slot:number; effect:number; dynamic:number }
+/** The channel beside a track's own that carries its effects: the next one, or the one before a percussion channel. */
+const effectSlot=(slot:number,percussion:boolean)=>percussion?slot-1:slot+1;
 function allocate(score:model.Score):Slot[] {
-  const pitched=[...PITCHED_SLOTS],percussion=[...PERCUSSION_SLOTS];
-  return score.tracks.map(track=>{const slot=(track.staves[0].isPercussion?percussion:pitched).shift()!;return {track,slot,effect:slot+1,dynamic:FORTE};});
+  const pitched=[...PITCHED_SLOTS],percussionSlots=[...PERCUSSION_SLOTS];
+  return score.tracks.map(track=>{const percussion=track.staves[0].isPercussion,slot=(percussion?percussionSlots:pitched).shift()!;return {track,slot,effect:effectSlot(slot,percussion),dynamic:FORTE};});
 }
 function writeChannels(out:Out,slots:Slot[]):void {
-  const used=new Map(slots.map(entry=>[entry.slot,entry.track.playbackInfo]));
+  // A track's effect channel starts out the same as its own.
+  const used=new Map(slots.flatMap(entry=>[[entry.slot,entry.track.playbackInfo],[entry.effect,entry.track.playbackInfo]] as const));
   for(let index=0;index<64;index++){
     const info=used.get(index),percussion=index%16===9;
     out.int(info?clamp(info.program,0,127):percussion?0:25);out.byte(info?clamp(Math.round(info.volume),0,16):13);out.byte(info?clamp(Math.round(info.balance),0,16):8);out.zeros(6);
   }
 }
+/** The format stores how many frets a track's neck has; the usual 24, or more when the music uses higher frets. */
+function highestFret(staff:model.Staff):number {
+  let high=0;
+  for(const bar of staff.bars)for(const voice of bar.voices)for(const beat of voice.beats)for(const note of beat.notes)if(!note.isDead&&note.fret>high)high=note.fret;
+  return high;
+}
 function writeTrack(out:Out,entry:Slot,score:model.Score,report:Report):void {
   const {track}=entry,staff=track.staves[0],percussion=staff.isPercussion,info=track.playbackInfo;
   report.lose('Staves after the first of a track are left out',track.staves.length-1);
+  if(staff.showSlash||staff.showNumbered)report.lose('Slash and numbered-notation staves are left out');
+  // The reader shows guitar and bass an octave above their sound, as Guitar Pro does, whether or not a score said so; any other display octave is lost.
+  const standard=info.program>=24&&info.program<=39||info.program===105||info.program===43?-12:0;
+  if(staff.displayTranspositionPitch!==standard&&staff.displayTranspositionPitch!==0)report.lose('Display transposition is left out');
   out.byte((percussion?1:0)|(track.isVisibleOnMultiTrack?8:0)|(info.isSolo?16:0)|(info.isMute?32:0)|(score.stylesheet.perTrackDisplayTuning?.get(track.index)?128:0));
   fixedString(out,track.name,40,report);
   const strings=percussion?6:staff.tuning.length;
   out.int(strings);for(let i=0;i<7;i++)out.int(i<strings?(percussion?0:staff.tuning[i]):-1);
-  out.int(Math.floor(entry.slot/16)+1);out.int(entry.slot+1);out.int(entry.effect+1);out.int(24);out.int(percussion?0:staff.capo);
+  out.int(Math.floor(entry.slot/16)+1);out.int(entry.slot+1);out.int(entry.effect+1);out.int(Math.max(24,highestFret(staff)));out.int(percussion?0:staff.capo);
   out.raw([track.color.r,track.color.g,track.color.b,0]);
   out.short(0x140|(staff.showTablature?1:0)|(staff.showStandardNotation?2:0));
   out.byte(0);out.byte(clamp(info.bank,0,127));out.byte(0);
@@ -223,13 +296,14 @@ function writeTrack(out:Out,entry:Slot,score:model.Score,report:Report):void {
 
 const dynamicOf=(beat:model.Beat,report:Report)=>{
   const value=DYNAMICS.get(beat.dynamics);
-  if(value===undefined){report.lose('Dynamics outside ppp to fff are changed to the nearest');return beat.dynamics===model.DynamicValue.FFFF?8:1;}
-  return value;
+  if(value!==undefined)return value;
+  report.lose('Dynamics outside ppp to fff are changed to the nearest');
+  return NEAREST_DYNAMICS.get(beat.dynamics)??FORTE;
 };
 /** The MIDI key a percussion note plays: custom articulation tables map their index, standard ones are the key itself. */
 const percussionKey=(note:model.Note)=>{const table=note.beat.voice.bar.staff.track.percussionArticulations,id=note.percussionArticulation;return clamp(id<table.length&&id>=0?table[id].outputMidiNumber:id,0,127);};
 
-interface BeatContext { entry:Slot; staff:model.Staff; bar:number; tempos:Map<string,number>; report:Report }
+interface BeatContext { entry:Slot; staff:model.Staff; bar:number; voice:number; /** The bar written here is a repeat (simile) of an earlier one. */ repeated:boolean; target:model.Bar; tempos:Map<string,number>; report:Report }
 interface Mix { volume?:number; balance?:number; instrument?:number; tempo?:number }
 function mixOf(beat:model.Beat,context:BeatContext):Mix|null {
   const mix:Mix={},{entry,tempos}=context,barLength=beat.voice.bar.masterBar.calculateDuration(false);
@@ -237,10 +311,15 @@ function mixOf(beat:model.Beat,context:BeatContext):Mix|null {
     if(change.type===model.AutomationType.Volume)mix.volume=clamp(Math.round(change.value),0,16);
     else if(change.type===model.AutomationType.Balance)mix.balance=clamp(Math.round(change.value),0,16);
     else if(change.type===model.AutomationType.Instrument&&!(beat.voice.bar.index===0&&beat.index===0&&change.value===entry.track.playbackInfo.program))mix.instrument=clamp(Math.round(change.value),0,127);
-    else continue;
+    else{
+      // A sync point shares the bank change's type value; only a bank change has no sync data.
+      if(change.type===model.AutomationType.Bank&&!change.syncPointValue)context.report.lose('Sound bank changes are left out');
+      continue;
+    }
     if(Math.abs(change.ratioPosition-beat.playbackStart/barLength)>1e-3)context.report.lose('Mixer changes placed inside a beat move to the start of that beat');
   }
-  const tempo=entry.track.index===0?tempos.get(`${context.bar}:${beat.index}`):undefined;
+  // Tempo changes sit on the first voice of the first track; the key names a beat of that voice only.
+  const tempo=entry.track.index===0&&context.voice===0?tempos.get(`${context.bar}:${beat.index}`):undefined;
   if(tempo!==undefined)mix.tempo=tempoValue(tempo,context.report);
   return Object.keys(mix).length?mix:null;
 }
@@ -273,7 +352,7 @@ function writeBeatEffects(out:Out,beat:model.Beat,report:Report):boolean {
   if(slap)out.byte(slap);
   if(whammy){
     const points=beat.whammyBarPoints!;
-    out.byte(beat.whammyBarType===model.WhammyType.Dip?1:2);out.int(Math.max(...points.map(point=>Math.abs(point.value)))*25);out.int(points.length);
+    out.byte(beat.whammyBarType===model.WhammyType.Dip?WHAMMY_DIP:WHAMMY_DIVE);out.int(Math.max(...points.map(point=>Math.abs(point.value)))*25);out.int(points.length);
     for(const point of points){out.int(point.offset);out.int(point.value*25);out.byte(0);}
   }
   if(brush){const level=strokeLevel(beat.brushDuration);out.byte(up?level:0);out.byte(up?0:level);}
@@ -289,16 +368,28 @@ function bendKind(type:model.BendType):number {
     default:return 1;
   }
 }
-function writeNote(out:Out,note:model.Note,context:BeatContext,grace:model.Beat|null,dynamic:number|null,swapped:boolean):void {
+/** Whether a note is written as tied to the one before. A measure repeated by a simile mark does not sit after the measure its source did, so its tie only holds when the measure before it ends on that note. */
+function tiedFromPrevious(note:model.Note,context:BeatContext):boolean {
+  if(!note.isTieDestination)return false;
+  const origin=note.tieOrigin;
+  if(!origin)return true;
+  if(origin.beat.graceType===model.GraceType.BendGrace)return false;
+  if(context.repeated&&origin.beat.voice.bar!==note.beat.voice.bar){
+    const before=context.target.previousBar,last=(before?soundingBar(before).voices.flatMap(voice=>voice.beats):[]).filter(beat=>beat.graceType===model.GraceType.None).flatMap(beat=>beat.notes).filter(other=>other.string===note.string).pop();
+    if(!last||last.fret!==origin.fret){context.report.lose('Notes tied into a repeated measure are written as new notes');return false;}
+  }
+  return true;
+}
+function writeNote(out:Out,note:model.Note,context:BeatContext,graceNote:model.Note|null,grace:model.Beat|null,dynamic:number|null,swapped:boolean):void {
   const {report,staff}=context,beat=note.beat,percussion=staff.isPercussion;
   const bends=note.bendPoints?.length?note.bendPoints:null,slideOut=note.slideOutType,slide=(slideOut===model.SlideOutType.Shift?1:slideOut===model.SlideOutType.Legato?2:slideOut===model.SlideOutType.OutDown||slideOut===model.SlideOutType.PickSlideDown?4:slideOut===model.SlideOutType.OutUp||slideOut===model.SlideOutType.PickSlideUp?8:0)|(note.slideInType===model.SlideInType.IntoFromBelow?16:0)|(note.slideInType===model.SlideInType.IntoFromAbove?32:0);
   if(slideOut===model.SlideOutType.PickSlideDown||slideOut===model.SlideOutType.PickSlideUp)report.lose('Pick slides become out slides');
-  const harmonic=note.harmonicType,trill=note.isTrill,tremolo=beat.isTremolo,graceNote=grace?.notes[0]??null;
+  const harmonic=note.harmonicType,trill=note.isTrill,tremolo=beat.isTremolo,tied=tiedFromPrevious(note,context);
   const effects1=(bends?1:0)|(note.isHammerPullOrigin?2:0)|(note.isLetRing?8:0)|(graceNote?16:0),effects2=(note.isStaccato?1:0)|(note.isPalmMute?2:0)|(tremolo?4:0)|(slide?8:0)|(harmonic!==model.HarmonicType.None?16:0)|(trill?32:0)|(note.vibrato!==model.VibratoType.None?64:0);
   const fingers=note.leftHandFinger>=0||note.rightHandFinger>=0,timed=note.durationPercent!==1&&Number.isFinite(note.durationPercent);
   const heavy=note.accentuated===model.AccentuationType.Heavy,normal=note.accentuated===model.AccentuationType.Normal;
   out.byte((timed?1:0)|(heavy?2:0)|(note.isGhost?4:0)|(effects1||effects2?8:0)|(dynamic!==null?16:0)|32|(normal?64:0)|(fingers?128:0));
-  out.byte(note.isDead?3:note.isTieDestination?2:1);
+  out.byte(note.isDead?3:tied?2:1);
   if(dynamic!==null)out.byte(dynamic);
   out.byte(percussion?percussionKey(note):note.isTieDestination&&note.tieOrigin?note.tieOrigin.fret:note.fret);
   if(fingers){out.byte(note.leftHandFinger>=0?note.leftHandFinger:255);out.byte(note.rightHandFinger>=0?note.rightHandFinger:255);}
@@ -311,7 +402,7 @@ function writeNote(out:Out,note:model.Note,context:BeatContext,grace:model.Beat|
     for(const point of bends){out.int(point.offset);out.int(point.value*25);out.byte(0);}
   }
   if(graceNote){
-    out.byte(clamp(graceNote.fret,0,127));out.byte(DYNAMICS.get(grace!.dynamics)??FORTE);
+    out.byte(clamp(graceNote.fret,0,127));out.byte(DYNAMICS.get(grace!.dynamics)??NEAREST_DYNAMICS.get(grace!.dynamics)??FORTE);
     out.byte(graceNote.isHammerPullOrigin?3:graceNote.slideOutType===model.SlideOutType.Legato?1:0);out.byte(3);
     out.byte((graceNote.isDead?1:0)|(grace!.graceType===model.GraceType.OnBeat?2:0));
   }
@@ -344,7 +435,13 @@ function countLosses(beat:model.Beat,staff:model.Staff,report:Report):void {
   if(beat.rasgueado!==model.Rasgueado.None&&beat.rasgueado!==model.Rasgueado.Ii)report.lose('Rasgueado patterns other than ii become ii');
   if(beat.brushType===model.BrushType.ArpeggioUp||beat.brushType===model.BrushType.ArpeggioDown)report.lose('Arpeggio strokes become brush strokes');
   if(beat.hasChord&&!beat.chord?.name)report.lose('Chord diagrams without a name are left out');
+  if(beat.showTimer)report.lose('Timers are left out');
+  if(beat.barreShape!==model.BarreShape.None)report.lose('Barre marks on beats are left out');
+  if(beat.whammyBarPoints?.length&&beat.whammyStyle!==model.BendStyle.Default)report.lose('Whammy bar styles other than the default are left out');
+  if(beat.isTremolo&&(beat.tremoloPicking?.marks??1)>3)report.lose('Tremolo picking with more than three strokes is written with three');
   for(const note of beat.notes){
+    if(!note.isVisible)report.lose('Hidden notes are written as visible notes');
+    if(note.bendPoints?.length&&note.bendStyle!==model.BendStyle.Default)report.lose('Bend styles other than the default are left out');
     if(note.accentuated===model.AccentuationType.Tenuto)report.lose('Tenuto marks are left out');
     if(note.ornament!==model.NoteOrnament.None)report.lose('Turns and mordents are left out');
     if(note.isLeftHandTapped)report.lose('Left-hand tap marks are left out');
@@ -386,27 +483,31 @@ function writeBeat(out:Out,beat:model.Beat,previous:model.Beat|null,graces:model
     lanes.set(lane,note);
   });
   out.byte([...lanes.keys()].reduce((flags,lane)=>flags|(1<<(6-lane)),0));
-  let graceUsed=!grace;
+  // Each grace note goes with the main note on its string (a grace chord is one per string).
+  const unplaced=new Set(grace?.notes??[]);
   const dynamic=lanes.size?dynamicOf(beat,report):FORTE,write=lanes.size>0&&!(dynamic===FORTE&&entry.dynamic===FORTE);
   for(const lane of [...lanes.keys()].sort((a,b)=>a-b)){
-    const note=lanes.get(lane)!,attach=grace&&!graceUsed&&grace.notes[0]?.string===note.string?grace:null;
-    if(attach)graceUsed=true;
-    writeNote(out,note,context,attach,write?dynamic:null,swaps(note));
+    const note=lanes.get(lane)!,attach=grace?.notes.find(candidate=>unplaced.has(candidate)&&candidate.string===note.string)??null;
+    if(attach)unplaced.delete(attach);
+    writeNote(out,note,context,attach,grace,write?dynamic:null,swaps(note));
   }
   if(lanes.size)entry.dynamic=dynamic;
-  if(grace&&!graceUsed)report.lose('Grace notes whose string the main note does not play are left out');
+  report.lose('Grace notes whose string the main note does not play are left out',unplaced.size);
   const split=previous?.beamingMode===model.BeatBeamingMode.ForceSplitToNext,merge=previous?.beamingMode===model.BeatBeamingMode.ForceMergeWithNext,secondary=previous?.beamingMode===model.BeatBeamingMode.ForceSplitOnSecondaryToNext;
   const ottava=beat.ottava===model.Ottavia._8va?0x10:beat.ottava===model.Ottavia._8vb?0x20:beat.ottava===model.Ottavia._15ma?0x40:beat.ottava===model.Ottavia._15mb?0x100:0;
   out.short((split?1:0)|(beat.preferredBeamDirection===BEAM_DOWN?2:0)|(merge?4:0)|(beat.preferredBeamDirection===BEAM_UP?8:0)|ottava|(secondary?0x800:0));
   if(secondary)out.byte(1);
 }
-function writeVoice(out:Out,voice:model.Voice|undefined,context:BeatContext):void {
-  if(!voice?.beats.some(spoken)){
+function writeVoice(out:Out,voice:model.Voice|undefined,index:number,base:BeatContext):void {
+  const context={...base,voice:index},quiet={...context,report:new Report()};
+  // A voice with no notes still has to carry the mixer or tempo changes that sit on its empty beats.
+  if(!voice?.beats.some(beat=>spoken(beat)||mixOf(beat,quiet))){
     // A voice with nothing in it is one empty beat, as Guitar Pro writes it.
     out.int(1);out.byte(0x40);out.byte(0);out.byte(0);out.byte(0);out.short(0);return;
   }
   const main:{beat:model.Beat;graces:model.Beat[]}[]=[];let pending:model.Beat[]=[];
   for(const beat of voice.beats){
+    if(beat.graceType===model.GraceType.BendGrace){context.report.lose('Bend grace notes are left out');continue;}
     if(beat.graceType!==model.GraceType.None){pending.push(beat);continue;}
     main.push({beat,graces:pending});pending=[];
   }
@@ -416,11 +517,14 @@ function writeVoice(out:Out,voice:model.Voice|undefined,context:BeatContext):voi
 }
 function writeBars(out:Out,score:model.Score,slots:Slot[],tempos:Map<string,number>,report:Report):void {
   for(let b=0;b<score.masterBars.length;b++)for(const entry of slots){
-    const staff=entry.track.staves[0],bar=staff.bars[b],source=soundingBar(bar),context:BeatContext={entry,staff,bar:b,tempos,report};
+    const staff=entry.track.staves[0],bar=staff.bars[b],source=soundingBar(bar),context:BeatContext={entry,staff,bar:b,voice:0,repeated:source!==bar,target:bar,tempos,report};
     out.byte(0);
     report.lose('Voices after the second are left out',source.voices.slice(2).filter(voice=>voice.beats.some(spoken)).length);
-    for(let v=0;v<2;v++)writeVoice(out,source.voices[v],context);
+    for(let v=0;v<2;v++)writeVoice(out,source.voices[v],v,context);
     report.lose('Sustain pedal marks are left out',bar.sustainPedals.length);
+    if(bar.clefOttava!==model.Ottavia.Regular)report.lose('Clef octave marks are left out');
+    const plain=(style:model.BarLineStyle)=>style===model.BarLineStyle.Automatic||style===model.BarLineStyle.Regular;
+    if(!plain(bar.barLineLeft)||!plain(bar.barLineRight)&&!(bar.barLineRight===model.BarLineStyle.LightLight&&doubleBar(score,bar.masterBar)))report.lose('Barline styles other than single and double are left out');
     const key=score.tracks[0].staves[0].bars[b];
     if(bar.keySignature!==key.keySignature||bar.keySignatureType!==key.keySignatureType)report.lose('Key signatures that differ between tracks use the first track\'s');
     if(!staff.isPercussion){

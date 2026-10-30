@@ -109,7 +109,8 @@ try{
   log=await edits();assert.equal(log.length,4);
   assert.deepEqual([log.at(-1).master.limiter.enabled,log.at(-1).master.limiter.ceilingDb],[true,ceilingDb]);
   const limited=await exportWav(),limitedPeak=peakOf(limited),ceiling=10**(ceilingDb/20);
-  assert.ok(limitedPeak<=ceiling+1/2**(limited.bits-1),`limited peak ${limitedPeak} is at or under the ceiling ${ceiling}`);
+  // The file's triangular dither moves a sample by up to one step before it rounds, so a held ceiling reads up to 1.5 steps over.
+  assert.ok(limitedPeak<=ceiling+1.5/2**(limited.bits-1),`limited peak ${limitedPeak} is at or under the ceiling ${ceiling}`);
   assert.ok(limitedPeak<plainPeak*.95,`the limiter lowered the peak (${plainPeak.toFixed(3)} to ${limitedPeak.toFixed(3)})`);
   assert.ok(limitedPeak>ceiling*.9,`and held it near the ceiling, not far below it (${limitedPeak.toFixed(3)})`);
 

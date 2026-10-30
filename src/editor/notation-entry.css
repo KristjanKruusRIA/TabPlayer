@@ -10,3 +10,4 @@
 .notation-entry-target{fill:transparent;cursor:pointer}
 .notation-entry-staff:not([aria-disabled="true"]) .notation-entry-target:hover{fill:var(--accent,#2563eb);fill-opacity:.25}
 .notation-entry-target[aria-disabled="true"]{cursor:not-allowed}
+.notation-entry-target[data-cursor="true"]{fill:var(--accent,#2563eb);fill-opacity:.3}

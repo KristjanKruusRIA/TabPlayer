@@ -1001,7 +1001,7 @@ it('enters a note from the notation staff as one undoable edit and refuses it on
   const c=await setup();
   const staff=screen.getByRole('group',{name:'Pitch entry staff'});
   fireEvent.click(within(staff).getByRole('button',{name:'G4'}));
-  await waitFor(()=>expect(currentBeat(c).notes.map(n=>[n.string,n.fret])).toEqual([[4,0]]));
+  await waitFor(()=>expect(currentBeat(c).notes.map(n=>[n.string,n.fret])).toEqual([[6,3]]));
   expect(c.getState().snapshot.project.edits.map(edit=>edit.type)).toEqual(['setNote']);
   click('Undo');await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(0));
   click('Redo');await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(1));

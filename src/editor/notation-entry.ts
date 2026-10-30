@@ -10,8 +10,24 @@ export const accidentalLabels: Record<EntryAccidental, string> = { key: 'Key sig
 
 const letters = ['C', 'D', 'E', 'F', 'G', 'A', 'B'], letterSemitone = [0, 2, 4, 5, 7, 9, 11];
 const sharpOrder = [3, 0, 4, 1, 5, 2, 6], flatOrder = [6, 2, 5, 1, 4, 0, 3];
-/** Guitar and bass music is written an octave above where it sounds. */
-const frettedShift = 12;
+
+/** What alphaTab adds to a note value for an ottava mark (see `Note.displayValueWithoutBend`). */
+export function ottavaAdd(ottava: model.Ottavia): number {
+  switch (ottava) {
+    case model.Ottavia._15ma: return -24;
+    case model.Ottavia._8va: return -12;
+    case model.Ottavia._8vb: return 12;
+    case model.Ottavia._15mb: return 24;
+    default: return 0;
+  }
+}
+/**
+ * alphaTab draws a note at `real + ottava(beat) + ottava(clef) - displayTranspositionPitch`, where real is the sounding
+ * key the app works in. The offset is what turns a sounding key into the written pitch on this staff.
+ */
+export function displayOffset(staff: model.Staff, bar: model.Bar, beat: model.Beat | null): number {
+  return ottavaAdd(bar.clefOttava) + (beat ? ottavaAdd(beat.ottava) : 0) - staff.displayTranspositionPitch;
+}
 
 /** Diatonic index (octave * 7 + letter, C = 0) of the bottom staff line for each clef. */
 export function bottomLine(clef: model.Clef): number {
@@ -63,17 +79,53 @@ export function keyLetter(key: string): number {
   return key.length === 1 ? letters.indexOf(key.toUpperCase()) : -1;
 }
 
-/** The enharmonic spelling that makes `pitch` read as its entered letter, or Default when automatic spelling already does. */
-export function spellingFor(entered: EntryPitch, keySignature: number): model.NoteAccidentalMode {
-  if (entered.alteration === 0) return model.NoteAccidentalMode.Default;
-  const flatKey = keySignature < 0, pc = entered.pitch % 12;
-  const sharpNames = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'], flatNames = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B'];
-  const automatic = (flatKey ? flatNames : sharpNames)[pc], wanted = `${letters[entered.letter]}${entered.alteration > 0 ? '#' : 'b'}`;
-  if (automatic === wanted) return model.NoteAccidentalMode.Default;
-  return entered.alteration > 0 ? model.NoteAccidentalMode.ForceSharp : model.NoteAccidentalMode.ForceFlat;
+/** A spelled pitch class: a letter and its alteration. */
+export interface Spelling { letter: number; alteration: number }
+const spellingOf = (pitchClass: number, alteration: number): Spelling | null => {
+  const letter = letterSemitone.findIndex(semitone => (((semitone + alteration) % 12) + 12) % 12 === pitchClass);
+  return letter < 0 ? null : { letter, alteration };
+};
+/** The spelling alphaTab gives a pitch class with the Default mode: the one the key signature spells, else a sharp or flat. */
+export function automaticSpelling(keySignature: number, pitchClass: number): Spelling {
+  for (let letter = 0; letter < 7; letter++) {
+    const alteration = keyAlteration(keySignature, letter);
+    if ((letterSemitone[letter] + alteration + 12) % 12 === pitchClass) return { letter, alteration };
+  }
+  const flat = keySignature < 0;
+  return [0, flat ? -1 : 1].map(alteration => spellingOf(pitchClass, alteration)).find(Boolean) ?? { letter: 0, alteration: 0 };
+}
+const modeAlteration = (mode: model.NoteAccidentalMode): number => {
+  switch (mode) {
+    case model.NoteAccidentalMode.ForceSharp: return 1;
+    case model.NoteAccidentalMode.ForceDoubleSharp: return 2;
+    case model.NoteAccidentalMode.ForceFlat: return -1;
+    case model.NoteAccidentalMode.ForceDoubleFlat: return -2;
+    case model.NoteAccidentalMode.ForceNatural: case model.NoteAccidentalMode.ForceNone: return 0;
+    default: return NaN;
+  }
+};
+/** How alphaTab spells a displayed note value in this key with this mode: the letter and octave it is drawn on. */
+export function drawnSpelling(keySignature: number, value: number, mode: model.NoteAccidentalMode): { letter: number; octave: number } {
+  const pitchClass = ((value % 12) + 12) % 12, wanted = modeAlteration(mode);
+  let spelling: Spelling = automaticSpelling(keySignature, pitchClass);
+  if (!Number.isNaN(wanted)) {
+    const exact = spellingOf(pitchClass, wanted);
+    if (exact) spelling = exact;
+  }
+  return { letter: spelling.letter, octave: Math.floor((value - letterSemitone[spelling.letter] - spelling.alteration) / 12) - 1 };
 }
 
-export interface NotationEntryContext { staff: model.Staff; beat: model.Beat | null; target: BeatTarget; keySignature: number }
+/**
+ * The spelling mode that makes the entered letter read as entered, or Default when alphaTab's automatic spelling
+ * already does. Automatic spelling prefers the key signature, so a natural can need ForceNatural: F is drawn E sharp in F sharp major.
+ */
+export function spellingFor(entered: EntryPitch, keySignature: number): model.NoteAccidentalMode {
+  const automatic = automaticSpelling(keySignature, entered.pitch % 12);
+  if (automatic.letter === entered.letter && automatic.alteration === entered.alteration) return model.NoteAccidentalMode.Default;
+  return entered.alteration > 0 ? model.NoteAccidentalMode.ForceSharp : entered.alteration < 0 ? model.NoteAccidentalMode.ForceFlat : model.NoteAccidentalMode.ForceNatural;
+}
+
+export interface NotationEntryContext { staff: model.Staff; bar: model.Bar; beat: model.Beat | null; target: BeatTarget; keySignature: number }
 export interface NotationEntryResult {
   /** What the control reads and announces. */
   name: string;
@@ -95,9 +147,14 @@ export function entryClef(bar: model.Bar): model.Clef {
   return bar.clef === model.Clef.Neutral ? model.Clef.G2 : bar.clef;
 }
 
-/** Written pitch to the pitch the instrument view works in: the sounding key. */
-export function soundingKey(staff: model.Staff, written: number): number {
-  return staff.tuning.length ? written - frettedShift : written - staff.transpositionPitch;
+/** The sounding key (what alphaTab calls the real value) of a written pitch: the inverse of how the staff draws notes. */
+export function soundingKey(staff: model.Staff, bar: model.Bar, beat: model.Beat | null, written: number): number {
+  return written - displayOffset(staff, bar, beat);
+}
+
+/** The written pitch a note of the beat is drawn at. */
+export function writtenPitch(staff: model.Staff, bar: model.Bar, beat: model.Beat, key: number): number {
+  return key + displayOffset(staff, bar, beat);
 }
 
 /**
@@ -108,7 +165,7 @@ export function enterPitch(ctx: NotationEntryContext, entered: EntryPitch): Nota
   const block = entryBlock(ctx.staff, ctx.beat);
   if (block || !ctx.beat) return { name: entered.name, action: null, spelling: null, removes: false };
   const context: EntryContext = { target: ctx.target, staff: ctx.staff, notes: entryNotes(ctx.staff, ctx.beat) };
-  const key = soundingKey(ctx.staff, entered.pitch), target = keyTarget(context, key);
+  const key = soundingKey(ctx.staff, ctx.bar, ctx.beat, entered.pitch), target = keyTarget(context, key);
   if (!target.action) return { name: target.name.startsWith('No free string') ? `No free string can play ${entered.name}` : target.name, action: null, spelling: null, removes: false };
   const command = target.action.command, removes = command.type === 'removeNote' || command.type === 'removeNoteByIndex';
   const follow = command.type === 'setNote' ? { string: command.string, fret: command.fret } : target.action.follow;

@@ -2,11 +2,11 @@ import { expect,it } from 'vitest';
 import { model } from '@coderline/alphatab';
 import { buildScore } from '../engine';
 import { blankProject,type EditCommand } from '../project';
-import { bottomLine,enterPitch,enteredNoteIndex,entryBlock,entryClef,entryPitch,keyAlteration,keyLetter,pitchStep,soundingKey,spellingFor,stepPitch } from './notation-entry';
+import { automaticSpelling,bottomLine,displayOffset,drawnSpelling,enterPitch,enteredNoteIndex,entryBlock,entryClef,entryPitch,keyAlteration,keyLetter,pitchStep,soundingKey,spellingFor,stepPitch,writtenPitch } from './notation-entry';
 
 const target={track:0,staff:0,bar:0,voice:0,beat:0};
 const build=(edits:EditCommand[])=>buildScore({...blankProject(),edits});
-const context=(score:model.Score,track=0,keySignature=0)=>{const staff=score.tracks[track].staves[0];return {staff,beat:staff.bars[0].voices[0].beats[0],target:{...target,track},keySignature};};
+const context=(score:model.Score,track=0,keySignature=0)=>{const staff=score.tracks[track].staves[0];return {staff,bar:staff.bars[0],beat:staff.bars[0].voices[0].beats[0],target:{...target,track},keySignature};};
 
 it('places the clefs on the right staff steps',()=>{
   const names=(clef:model.Clef)=>[0,2,4,6,8,-2,10].map(step=>stepPitch(clef,step,'natural',0)!.name);
@@ -31,10 +31,25 @@ it('maps keys and steps',()=>{
 });
 it('spells a note only when automatic spelling would read it differently',()=>{
   const spell=(letter:number,octave:number,accidental:'key'|'natural'|'sharp'|'flat',key=0)=>spellingFor(entryPitch(letter,octave,accidental,key)!,key);
-  expect(spell(3,4,'sharp')).toBe(model.NoteAccidentalMode.Default);expect(spell(6,4,'flat')).toBe(model.NoteAccidentalMode.ForceFlat);
-  expect(spell(6,4,'flat',-2)).toBe(model.NoteAccidentalMode.Default);expect(spell(3,4,'sharp',-2)).toBe(model.NoteAccidentalMode.ForceSharp);
-  expect(spell(2,4,'sharp')).toBe(model.NoteAccidentalMode.ForceSharp);expect(spell(0,4,'natural')).toBe(model.NoteAccidentalMode.Default);
-  expect(spell(3,4,'key',1)).toBe(model.NoteAccidentalMode.Default);
+  const {Default,ForceFlat,ForceSharp}=model.NoteAccidentalMode;
+  expect(spell(3,4,'sharp')).toBe(Default);expect(spell(6,4,'flat')).toBe(ForceFlat);
+  expect(spell(6,4,'flat',-2)).toBe(Default);expect(spell(3,4,'sharp',-2)).toBe(ForceSharp);
+  expect(spell(2,4,'sharp')).toBe(ForceSharp);expect(spell(0,4,'natural')).toBe(Default);
+  expect(spell(3,4,'key',1)).toBe(Default);
+});
+it('forces a natural that the key signature would respell, as alphaTab does',()=>{
+  const {Default,ForceNatural}=model.NoteAccidentalMode,natural=(letter:number,key:number)=>spellingFor(entryPitch(letter,4,'natural',key)!,key);
+  // F# major draws F as E#, C# major draws C as B#, Gb major draws B as Cb, Cb major draws E as Fb.
+  expect(automaticSpelling(6,5)).toEqual({letter:2,alteration:1});
+  expect(natural(3,6)).toBe(ForceNatural);expect(natural(0,7)).toBe(ForceNatural);expect(natural(6,-6)).toBe(ForceNatural);expect(natural(2,-7)).toBe(ForceNatural);
+  // A natural the key signature leaves alone stays automatic.
+  expect(natural(3,0)).toBe(Default);expect(natural(0,2)).toBe(Default);expect(natural(1,1)).toBe(Default);expect(natural(2,6)).toBe(Default);
+});
+it('reads the letter alphaTab draws for a note value, spelling mode and key',()=>{
+  const {Default,ForceFlat,ForceSharp}=model.NoteAccidentalMode;
+  expect(drawnSpelling(0,70,Default)).toEqual({letter:5,octave:4});expect(drawnSpelling(0,70,ForceFlat)).toEqual({letter:6,octave:4});
+  expect(drawnSpelling(0,60,ForceSharp)).toEqual({letter:6,octave:3});expect(drawnSpelling(0,59,ForceFlat)).toEqual({letter:0,octave:4});
+  expect(drawnSpelling(-2,70,Default)).toEqual({letter:6,octave:4});
 });
 it('enters a pitched note at its written pitch and toggles it off again',()=>{
   const score=build([{type:'addPitchedTrack',name:'Piano',program:0}]),ctx=context(score,1);
@@ -44,22 +59,46 @@ it('enters a pitched note at its written pitch and toggles it off again',()=>{
   expect(enterPitch(context(placed,1),c5)).toMatchObject({name:'Remove C5',removes:true,action:{command:{type:'removeNoteByIndex',noteIndex:0}}});
   expect(enteredNoteIndex(context(placed,1).beat,result.action!.command)).toBe(0);
 });
-it('applies the staff transposition: the written pitch is entered, the sounding key is looked up',()=>{
-  const score=build([{type:'addPitchedTrack',name:'Clarinet',program:71}]);score.tracks[1].staves[0].transpositionPitch=-2;
-  const ctx=context(score,1);expect(soundingKey(ctx.staff,72)).toBe(74);
-  expect(enterPitch(ctx,entryPitch(0,5,'natural',0)!).action!.command).toMatchObject({type:'addPitchedNote',pitch:72});
+/** Enters a written pitch with the staff settings `setup` applies, replays the command, and returns what alphaTab draws. */
+function drawnAfter(edits:EditCommand[],track:number,setup:(score:model.Score)=>void,written:number){
+  const score=build(edits);setup(score);
+  const letter=[0,2,4,5,7,9,11].indexOf(written%12),entered={...entryPitch(letter<0?0:letter,Math.floor(written/12)-1,'natural',0)!,pitch:written};
+  const command=enterPitch(context(score,track),entered).action!.command,after=build([...edits,command]);setup(after);
+  return {command,notes:after.tracks[track].staves[0].bars[0].voices[0].beats[0].notes};
+}
+const clarinet:EditCommand[]=[{type:'addPitchedTrack',name:'Clarinet',program:71}];
+it('stores the pitch alphaTab draws at the clicked position, whatever the transposition, display transposition or ottava',()=>{
+  // alphaTab draws real - display transposition + ottava, where real is the stored pitch minus the transposition.
+  const transposed=drawnAfter(clarinet,1,score=>{score.tracks[1].staves[0].transpositionPitch=-2;},72);
+  expect(transposed.command).toMatchObject({type:'addPitchedNote',pitch:70});expect(transposed.notes[0].displayValue).toBe(72);
+  const display=drawnAfter(clarinet,1,score=>{score.tracks[1].staves[0].displayTranspositionPitch=-12;},72);
+  expect(display.command).toMatchObject({pitch:60});expect(display.notes[0].displayValue).toBe(72);
+  const clef=drawnAfter(clarinet,1,score=>{score.tracks[1].staves[0].bars[0].clefOttava=model.Ottavia._8vb;},72);
+  expect(clef.command).toMatchObject({pitch:60});expect(clef.notes[0].displayValue).toBe(72);
+  const all=drawnAfter(clarinet,1,score=>{const staff=score.tracks[1].staves[0];staff.transpositionPitch=-2;staff.displayTranspositionPitch=3;staff.bars[0].clefOttava=model.Ottavia._8va;},72);
+  expect(all.command).toMatchObject({pitch:85});expect(all.notes[0].displayValue).toBe(72);
 });
-it('enters a fretted note on the lowest free fret, an octave above where it sounds',()=>{
-  const score=build([]),ctx=context(score),staff=ctx.staff;
-  // Written E4 sounds E3; that is fret 2 of the third string (D3), string 1 being the lowest.
-  const e4=entryPitch(2,4,'natural',0)!,result=enterPitch(ctx,e4);
-  expect(soundingKey(staff,e4.pitch)).toBe(52);
+it('stores a fretted pitch at what the staff displays: blank guitars draw sounding pitch, imported ones an octave up',()=>{
+  const blank=drawnAfter([],0,()=>{},64);
+  expect(blank.notes[0].displayValue).toBe(64);expect(blank.command).toMatchObject({type:'setNote',string:6,fret:0});
+  const imported=drawnAfter([],0,score=>{score.tracks[0].staves[0].displayTranspositionPitch=-12;},64);
+  expect(imported.notes[0].displayValue).toBe(64);expect(imported.command).toMatchObject({type:'setNote',string:3,fret:2});
+  const bass=drawnAfter([],0,score=>{score.tracks[0].staves[0].bars[0].clef=model.Clef.F4;score.tracks[0].staves[0].bars[0].clefOttava=model.Ottavia._8vb;},52);
+  expect(bass.notes[0].displayValue).toBe(52);expect(bass.command).toMatchObject({string:1,fret:0});
+  const score=build([]),staff=score.tracks[0].staves[0];staff.displayTranspositionPitch=-12;
+  expect(displayOffset(staff,staff.bars[0],null)).toBe(12);expect(soundingKey(staff,staff.bars[0],null,76)).toBe(64);
+  expect(writtenPitch(staff,staff.bars[0],staff.bars[0].voices[0].beats[0],64)).toBe(76);
+});
+it('enters a fretted note on the lowest free fret and refuses an unplayable pitch',()=>{
+  const score=build([]),ctx=context(score);ctx.staff.displayTranspositionPitch=-12;
+  // Written E4 sounds E3, fret 2 of the third string (D3), string 1 being the lowest.
+  const result=enterPitch(ctx,entryPitch(2,4,'natural',0)!);
   expect(result.action!.command).toMatchObject({type:'setNote',string:3,fret:2});expect(result.action!.follow).toEqual({string:3,fret:2});
-  const high=enterPitch(ctx,entryPitch(2,8,'natural',0)!);
-  expect(high.action).toBeNull();expect(high.name).toBe('No free string can play E8');
+  const high=enterPitch(ctx,entryPitch(2,9,'natural',0)!);
+  expect(high.action).toBeNull();expect(high.name).toBe('No free string can play E9');
 });
 it('removes a present fretted note instead of writing it again',()=>{
-  const score=build([{type:'setNote',target,string:3,fret:2}]),ctx=context(score);
+  const score=build([{type:'setNote',target,string:3,fret:2}]),ctx=context(score);ctx.staff.displayTranspositionPitch=-12;
   expect(enterPitch(ctx,entryPitch(2,4,'natural',0)!)).toMatchObject({name:'Remove E4',removes:true,action:{command:{type:'removeNote',string:3}}});
 });
 it('refuses percussion and a missing beat',()=>{

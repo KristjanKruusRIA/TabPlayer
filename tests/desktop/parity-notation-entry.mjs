@@ -34,7 +34,7 @@ export async function runNotationEntryAcceptance({buildPath}={}){
   const owned=()=>{healthy();assert.ok(identity&&inspect(),'Owned process exited');};
   const poll=async(read,predicate,label)=>{const until=performance.now()+30000;let value;do{value=await read();if(predicate(value))return value;await sleep(50);}while(performance.now()<until);throw Error(`Timed out: ${label}: ${JSON.stringify(value)}`);};
   const listeners=()=>JSON.parse(ps(`${ownedScript}if($null -eq $p){throw 'Owned process exited'};$rows=@();foreach($port in @(Get-NetTCPConnection -State Listen -LocalPort 9223 -ErrorAction SilentlyContinue)){$chain=@();$cursor=[int]$port.OwningProcess;for($depth=0;$depth -lt 20 -and $cursor -gt 0;$depth++){$child=Get-CimInstance Win32_Process -Filter ('ProcessId = '+$cursor);if($null -eq $child){break};$chain+=@{pid=[int]$child.ProcessId;parent=[int]$child.ParentProcessId;commandLine=$child.CommandLine};if([int]$child.ProcessId -eq $p.Id){break};$cursor=[int]$child.ParentProcessId};$rows+=@{owner=[int]$port.OwningProcess;chain=$chain}};ConvertTo-Json -InputObject @($rows) -Depth 6 -Compress`));
-  let ui,load;
+  let ui,load,Ottavia,prepared;
   const invoke=async(command,args={})=>{assert.ok(['workspace_snapshot','project_snapshot','audio_status'].includes(command));owned();const value=await page.evaluate(([command,args])=>window.__TAURI_INTERNALS__.invoke(command,args),[command,args]);healthy();return value;};
   const workspace=()=>invoke('workspace_snapshot'),record=async()=>invoke('project_snapshot',{documentId:(await workspace()).active.documentId});
   const native=()=>poll(()=>invoke('audio_status'),value=>{assert.equal(value.error,null);return value.ready&&value.generation===value.desiredGeneration;},'paused current native preparation');
@@ -60,8 +60,11 @@ export async function runNotationEntryAcceptance({buildPath}={}){
   };
   const press=async keys=>{await staff().focus();for(const key of keys)await page.keyboard.press(key);};
   try{
-    ui=await import('./workstation-commands.mjs');const {importer,Settings}=await import('@coderline/alphatab');load=bytes=>importer.ScoreLoader.loadScoreFromBytes(bytes,new Settings());
-    await buildInstrumentFixture();writeFileSync(inputPath,readFileSync(fixturePath),{flag:'wx'});result.input={inputPath,sha256:hashFile(inputPath)};
+    ui=await import('./workstation-commands.mjs');const {importer,exporter,model,Settings}=await import('@coderline/alphatab');load=bytes=>importer.ScoreLoader.loadScoreFromBytes(bytes,new Settings());Ottavia=model.Ottavia;
+    await buildInstrumentFixture();
+    // The guitar staff gets a Guitar Pro style display transposition, so the file covers both it and the others' zero.
+    const fixtureScore=load(readFileSync(fixturePath));fixtureScore.tracks[0].staves[0].displayTranspositionPitch=-12;
+    const inputBytes=new exporter.Gp7Exporter().export(fixtureScore,new Settings());writeFileSync(inputPath,inputBytes,{flag:'wx'});prepared=load(inputBytes);result.input={inputPath,sha256:hashFile(inputPath)};
     assertStringCountBuild(packet);assertStringCountPortFree(portRows());
     const environment={...stringCountEnvironment(process.env),TABPLAYER_DESKTOP_TEST:'1',TABPLAYER_TEST_SESSION_DIR:paths.session,TABPLAYER_TEST_APP_DATA_DIR:paths['app-data'],TABPLAYER_TEST_OPEN:inputPath,TABPLAYER_TEST_EXPORT:exportBase,WEBVIEW2_USER_DATA_FOLDER:paths.profile,WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS:'--remote-debugging-port=9223',STRING_COUNT_EXE:packet.executable,STRING_COUNT_IDENTITY:identityPath};
     const script='$ErrorActionPreference="Stop";$p=Start-Process -FilePath $env:STRING_COUNT_EXE -WindowStyle Hidden -PassThru;$text=@{pid=$p.Id;path=$p.Path;startTicks=$p.StartTime.ToUniversalTime().Ticks.ToString()}|ConvertTo-Json -Compress;[IO.File]::WriteAllText($env:STRING_COUNT_IDENTITY,$text);$text';
@@ -79,25 +82,43 @@ export async function runNotationEntryAcceptance({buildPath}={}){
     await staff().waitFor();await choose('Sharp').click();await choose('Octave up').click();await choose('Octave down').click();await choose('Key signature').click();
     assert.deepEqual(await record(),initial,'Choosing an accidental or octave never edits');
 
-    // Fretted (Guitar9, key of C): the written pitch sounds an octave lower, and the lowest fret on a free string is used.
-    const g={track:0,...at};
-    await probe('staff click adds',()=>entry('D5').click(),[{type:'setNote',target:g,string:7,fret:7}]);
-    await probe('sharp then click',async()=>{await choose('Sharp').click();await entry('F#5').click();},[{type:'setNote',target:g,string:7,fret:11}]);
+    // Expectations come from the prepared file's own staff settings, using the rule alphaTab draws by:
+    // written = sounding + clef ottava shift - displayTranspositionPitch. So sounding = written - offset.
+    const ottava={[Ottavia._15ma]:-24,[Ottavia._8va]:-12,[Ottavia._8vb]:12,[Ottavia._15mb]:24};
+    const offsetOf=trackIndex=>{const staff=prepared.tracks[trackIndex].staves[0];return (ottava[staff.bars[0].clefOttava]??0)-staff.displayTranspositionPitch;};
+    // The lowest fret from 0 to 24 on a free string, the way the app's keyboard entry chooses.
+    const lowestFret=(trackIndex,written,occupied)=>{const tuning=prepared.tracks[trackIndex].staves[0].tuning,key=written-offsetOf(trackIndex);let best=null;
+      for(let string=1;string<=tuning.length;string++){if(occupied.includes(string))continue;const fret=key-tuning[tuning.length-string];if(fret>=0&&fret<=24&&(!best||fret<best.fret))best={string,fret};}
+      assert.ok(best,'The fixture pitch is playable');return best;};
+    const guitar=prepared.tracks[0].staves[0];assert.equal(guitar.displayTranspositionPitch,-12,'The guitar staff has a display transposition');
+
+    // Fretted (Guitar9, display transposition -12): the written pitch is drawn an octave above the sounding pitch.
+    const g={track:0,...at},occupied=[9,8,1];
+    await probe('staff click adds',()=>entry('D5').click(),[{type:'setNote',target:g,...lowestFret(0,74,occupied)}]);
+    await probe('sharp then click',async()=>{await choose('Sharp').click();await entry('F#5').click();},[{type:'setNote',target:g,...lowestFret(0,78,occupied)}]);
     assert.equal(await choose('Key signature').getAttribute('aria-pressed'),'true','The accidental lasts for one note');
-    await probe('flat then click spells the flat',async()=>{await choose('Flat').click();await entry('Bb4').click();},[{type:'setNote',target:g,string:7,fret:3},{type:'setNoteSpelling',target:g,accidentalMode:5}],true);
+    const flat=lowestFret(0,70,occupied);
+    await probe('flat then click spells the flat',async()=>{await choose('Flat').click();await entry('Bb4').click();},[{type:'setNote',target:g,...flat},{type:'setNoteSpelling',target:g,accidentalMode:5}],true);
     await probe('click removes a present note',()=>entry('Remove E5').click(),[{type:'removeNote',target:g,string:9}],true);
     await page.screenshot({path:resolve(paths.results,'01-fretted-staff.png')});result.screenshots.push('01-fretted-staff.png');
     step('Staff clicks add, flat-spell and remove fretted notes, each undoable',{edits:result.edits});
 
+    // Bass clef staff (Bass6): the same rule with the bass clef.
+    await ui.selectWorkspaceTrack(page,'Track 2: Bass6');await staff().waitFor();
+    const b={track:1,...at},bass=lowestFret(1,45,[6,4,1]);
+    await probe('bass clef click adds',()=>entry('A2').click(),[{type:'setNote',target:b,...bass}],true);
+
     // Pitched (Keys, written pitch): mouse, then keyboard letters, accidentals and octave keys.
     await ui.selectWorkspaceTrack(page,'Track 4: Keys');await staff().waitFor();
     const k={track:3,...at};
+    assert.equal(offsetOf(3),0,'The keys staff draws stored pitches as they are');
     await probe('pitched click adds',()=>entry('D4').click(),[{type:'addPitchedNote',target:k,pitch:62}],true);
     await probe('pitched click removes',()=>entry('Remove E4').click(),[{type:'removeNoteByIndex',target:k,noteIndex:1}],true);
     await probe('keyboard sharp then letter',()=>press(['#','f']),[{type:'addPitchedNote',target:k,pitch:66}],true);
-    await probe('keyboard octave up then letter',()=>press(['ArrowUp','a']),[{type:'addPitchedNote',target:k,pitch:81}],true);
+    await probe('keyboard octave up then letter',()=>press(['PageUp','a']),[{type:'addPitchedNote',target:k,pitch:81}],true);
+    await probe('keyboard cursor then Enter',()=>press(['ArrowDown','Enter']),[{type:'addPitchedNote',target:k,pitch:79}],true);
     await page.screenshot({path:resolve(paths.results,'02-pitched-staff.png')});result.screenshots.push('02-pitched-staff.png');
-    step('Mouse and keyboard enter pitched notes with accidentals and octave keys',{edits:result.edits});
+    step('Mouse and keyboard enter pitched notes with accidentals, octave keys and the cursor',{edits:result.edits});
 
     // Percussion has no pitch entry.
     await ui.selectWorkspaceTrack(page,'Track 3: Drums');await staff().waitFor();
@@ -105,13 +126,21 @@ export async function runNotationEntryAcceptance({buildPath}={}){
     assert.equal((await edits()).length,kept,'No pitch entry on a percussion staff');
     await page.getByText('Use the drum kit in the instrument view',{exact:false}).first().waitFor();step('Percussion staves refuse pitch entry',{});
 
-    // The saved score carries every kept change.
-    const final=await record();assert.equal(final.snapshot.project.edits.length,7);
+    // The saved score carries every kept change, drawn where it was entered, with the flat spelling.
+    const final=await record();assert.equal(final.snapshot.project.edits.length,9);
     const exportPath=`${exportBase}.gp`;assert.equal(existsSync(exportPath),false);await button('Export GP');
     const score=load(readFileSync(exportPath)),beat=track=>score.tracks[track].staves[0].bars[0].voices[0].beats[0].notes;
-    assert.deepEqual(beat(0).map(note=>[note.string,note.fret]).sort((a,b)=>a[0]-b[0]),[[1,0],[7,3],[8,1]]);
-    assert.deepEqual(beat(3).map(note=>note.realValue).sort((a,b)=>a-b),[60,62,66,67,81]);
-    assert.deepEqual(await record(),final,'Export never edits');step('Exported GP reads back every entered and removed note',{exportPath,sha256:hashFile(exportPath)});
+    assert.deepEqual(beat(0).map(note=>[note.string,note.fret]).sort((a,b)=>a[0]-b[0]),[[1,0],[flat.string,flat.fret],[8,1]].sort((a,b)=>a[0]-b[0]));
+    const flatNote=beat(0).find(note=>note.string===flat.string);assert.equal(flatNote.displayValue,70,'Bb4 is drawn at the clicked pitch');assert.equal(flatNote.accidentalMode,5,'The flat spelling is saved');
+    assert.equal(beat(1).find(note=>note.string===bass.string&&note.fret===bass.fret).displayValue,45,'The bass note is drawn at the clicked pitch');
+    assert.deepEqual(beat(3).map(note=>note.displayValue).sort((a,b)=>a-b),[60,62,66,67,79,81],'Keys notes are drawn at the clicked pitches');
+    assert.deepEqual(await record(),final,'Export never edits');step('Exported GP reads back every entered and removed note with its display value and spelling',{exportPath,sha256:hashFile(exportPath)});
+
+    // A new blank document draws guitars at sounding pitch (display transposition 0), so E4 is the open first string.
+    await button('New');await staff().waitFor();
+    const blank={track:0,...at};
+    await probe('blank guitar click',()=>entry('E4').click(),[{type:'setNote',target:blank,string:6,fret:0}]);
+    step('A blank-project guitar enters at the pitch its staff displays',{});
     healthy();
   }catch(error){failure=error;result.error={message:String(error),stack:error.stack};if(page)try{await page.screenshot({path:resolve(paths.results,'failure.png')});}catch{}}
   finally{

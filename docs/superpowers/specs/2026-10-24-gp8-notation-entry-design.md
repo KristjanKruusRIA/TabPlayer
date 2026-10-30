@@ -18,20 +18,24 @@ The panel **Standard notation entry** sits in the inspector's Edit tools.
 - **Keyboard,** with the staff focused:
   - A to G enters that letter in the current octave with the chosen accidental;
   - `#` or `+` chooses sharp, `-` flat, `N` natural, `K` key signature;
-  - Up and Down change the octave.
-  - Keys with Ctrl, Cmd or Alt are ignored. Because the keys go to the focused staff, they never reach the score's own shortcuts.
+  - Up and Down move a cursor along the staff (the staff announces it with `aria-activedescendant`), and Enter or Space writes at the cursor. Letters and clicks move the cursor too.
+  - Page Up and Page Down change the octave.
+  - Held keys do not repeat an entry; a key that arrives while an entry is still being made is reported in the status line.
+  - Keys with Ctrl, Cmd or Alt are ignored, and so is every key while the staff is disabled. Because the keys go to the focused staff, they never reach the score's own shortcuts.
 - **Status line:** says what was entered or removed, or why nothing happened ("No free string can play E8"). It also carries the disabled hints.
 
 ## Pitch rules
 
 All rules act on the selected beat and send at most one command, then at most one spelling command.
 
-- **Pitched staff** (no strings): the entered pitch is the written pitch (C4 = 60, as the rest of the app names it), sent as `addPitchedNote{pitch}`. If the beat already has a note of that written pitch, the entry removes it with `removeNoteByIndex`.
-- **Fretted staff:** guitar and bass music is written an octave above where it sounds, so the sounding key is the written pitch minus 12. The key is then entered exactly as the instrument view's keyboard does (`keyTarget`): `setNote` on the free string giving the lowest fret from 0 to 24, `removeNote` when a note of that sounding pitch is present, and a refusal naming the pitch when no free string can play it. The string and fret become the entry string and fret, so digit entry continues from there. The staff's display transposition is not applied.
+- **What the staff draws:** alphaTab draws a note at `real + ottava(beat) + ottava(clef) - displayTranspositionPitch`, where `real` is the sounding key (`fret + string tuning + capo - transposition`, or `octave * 12 + tone - transposition` for a pitched note) and an ottava adds -24, -12, +12 or +24 for 15ma, 8va, 8vb and 15mb. The entry staff inverts this, so a clicked position is stored so that the score shows it at that position: `sounding = written - ottava(beat) - ottava(clef) + displayTranspositionPitch`. A blank-project guitar has display transposition 0 and draws sounding pitch; imported guitars usually have -12 and draw an octave above it. Tests check the result against alphaTab's own `displayValue`.
+- **Pitched staff** (no strings): the stored pitch is the sounding key plus the staff transposition, sent as `addPitchedNote{pitch}`. If the beat already has a note at that pitch, the entry removes it with `removeNoteByIndex`.
+- **Fretted staff:** the sounding key is entered exactly as the instrument view's keyboard does (`keyTarget`): `setNote` on the free string giving the lowest fret from 0 to 24, `removeNote` when a note of that sounding pitch is present, and a refusal naming the pitch when no free string can play it. The string and fret become the entry string and fret, so digit entry continues from there.
 - **Percussion staves** refuse entry with a hint pointing to the drum kit in the instrument view.
 - **Spelling:** a pitch has one value, but `C#4` and `Db4` differ on the page. After a note lands, the panel sets its enharmonic spelling with the existing `setNoteSpelling` only when the note's current mode differs from what its letter needs:
-  - Default when automatic spelling already reads the entered letter (a sharp in a key without flats, a flat in a key with flats, any natural);
-  - ForceSharp or ForceFlat otherwise (a flat in the key of C, E sharp, C flat).
+  - Default when alphaTab's automatic spelling already reads the entered letter. Automatic spelling prefers the key signature, then a sharp or a flat by the key's kind;
+  - ForceNatural, ForceSharp or ForceFlat otherwise: a flat in the key of C, E sharp, C flat, and a natural the key would respell (F in F sharp major reads E sharp, C in C sharp major B sharp, B in G flat major C flat, E in C flat major F flat).
+  - Notes already on the beat are drawn at the letter their own spelling mode gives.
   - The spelling edit is made after the first edit has been accepted, and is therefore its own undo step. If it fails, the status says the note was entered with its spelling unchanged.
 - **Audition:** the existing edit audition plays the entered note; a removal is silent.
 
@@ -43,7 +47,7 @@ The staff, accidentals and octave buttons are disabled, with the hint in the sta
 - no beat is selected, or the selected beat is the empty placeholder of an empty bar ("Select a beat in the score to enter notes");
 - the staff is percussion.
 
-Selecting and viewing stay usable. A refused edit (`edit()` returns false) reports nothing as entered and leaves the accidental and octave as they were.
+Selecting and viewing stay usable. A refused edit (`edit()` returns false) says so in the status line, points to the alert, and leaves the accidental and octave as they were. An entry whose note cannot be found afterwards is not reported as entered.
 
 ## Acceptance
 

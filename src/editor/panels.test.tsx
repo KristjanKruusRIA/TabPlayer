@@ -460,6 +460,33 @@ it('busy StructurePanel disables capo and prevents dispatch on Apply staff setti
   fireEvent.click(addVoiceBtn);
   expect(onEdit).not.toHaveBeenCalled();
 });
+
+it('disabled curve editor prevents Apply from firing onChange, and on a piano note Apply Bend and Apply Whammy record no edit', () => {
+  const onChange = vi.fn();
+  const curve: PitchCurve = { type: 1, style: 0, points: [{ offset: 0, value: 0 }, { offset: 60, value: 4 }] };
+  render(<CurveEditor label="Bend" value={curve} disabled={true} onChange={onChange} />);
+  const applyBtn = screen.getByRole('button', { name: 'Apply Bend curve' });
+  expect(applyBtn).toBeDisabled();
+  fireEvent.click(applyBtn);
+  expect(onChange).not.toHaveBeenCalled();
+
+  cleanup();
+
+  let project = blankProject();
+  project = previewEdit(project, { type: 'addPitchedTrack', name: 'Piano', program: 0 }).project;
+  project = previewEdit(project, { type: 'addPitchedNote', target: { track: 1, staff: 0, bar: 0, voice: 0, beat: 0 }, pitch: 60 }).project;
+  const score = buildScore(project);
+  const onEdit = vi.fn();
+  render(<TechniquePanel score={score} target={{ track: 1, staff: 0, bar: 0, voice: 0, beat: 0 }} string={1} noteIndex={0} busy={false} onEdit={onEdit} />);
+
+  const applyBend = screen.getByRole('button', { name: 'Apply Bend curve' });
+  const applyWhammy = screen.getByRole('button', { name: 'Apply Whammy curve' });
+  expect(applyBend).toBeDisabled();
+  expect(applyWhammy).toBeDisabled();
+  fireEvent.click(applyBend);
+  fireEvent.click(applyWhammy);
+  expect(onEdit).not.toHaveBeenCalled();
+});
 it('staff tuning uses named notes, validates drafts and refreshes from history',()=>{
   const score=music(),onEdit=vi.fn(),props={score,target,string:6,busy:false,onEdit,onSelect:vi.fn()};const view=render(<StructurePanel {...props}/>);const input=screen.getByLabelText('Staff tuning (notes, high to low)');expect(input).toHaveValue('E4 B3 G3 D3 A2 E2');
   fireEvent.change(input,{target:{value:'E4 B3 G3 D3 A2 Db2'}});fireEvent.click(screen.getByRole('button',{name:'Apply staff settings'}));expect(onEdit).toHaveBeenLastCalledWith(expect.objectContaining({type:'setStaffSettings',settings:expect.objectContaining({tuning:[64,59,55,50,45,37]})}));onEdit.mockClear();

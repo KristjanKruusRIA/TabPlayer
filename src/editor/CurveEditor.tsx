@@ -340,6 +340,10 @@ export function CurveEditor({
   };
 
   const handlePointBlur = () => {
+    if (disabled) {
+      pendingKeyCommitRef.current = null;
+      return;
+    }
     if (pendingKeyCommitRef.current) {
       const { initial, latest } = pendingKeyCommitRef.current;
       pendingKeyCommitRef.current = null;
@@ -403,7 +407,7 @@ export function CurveEditor({
   return (
     <details className="curve-editor">
       <summary>{label} curve</summary>
-      <fieldset disabled={false} aria-disabled={disabled ? 'true' : undefined}>
+      <fieldset disabled={disabled}>
         <label className="check">
           <input
             type="checkbox"
@@ -425,9 +429,10 @@ export function CurveEditor({
           />
           Enable {label}
         </label>
+      </fieldset>
 
-        <div className="tp-curve-presets" role="group" aria-label={`${label} presets`}>
-          {presets.map(preset => {
+      <div className="tp-curve-presets" role="group" aria-label={`${label} presets`}>
+        {presets.map(preset => {
             const isCurrent =
               curve !== null &&
               curve.points.length === preset.points.length &&
@@ -463,20 +468,22 @@ export function CurveEditor({
 
         {curve && (
           <>
-            <div className="pair">
-              <EnumInput
-                label={`${label} type`}
-                value={curve.type}
-                enumeration={whammy ? model.WhammyType : model.BendType}
-                onValue={type => setCurve({ ...curve, type })}
-              />
-              <EnumInput
-                label={`${label} style`}
-                value={curve.style}
-                enumeration={model.BendStyle}
-                onValue={style => setCurve({ ...curve, style })}
-              />
-            </div>
+            <fieldset disabled={disabled}>
+              <div className="pair">
+                <EnumInput
+                  label={`${label} type`}
+                  value={curve.type}
+                  enumeration={whammy ? model.WhammyType : model.BendType}
+                  onValue={type => setCurve({ ...curve, type })}
+                />
+                <EnumInput
+                  label={`${label} style`}
+                  value={curve.style}
+                  enumeration={model.BendStyle}
+                  onValue={style => setCurve({ ...curve, style })}
+                />
+              </div>
+            </fieldset>
 
             <svg
               ref={svgRef}
@@ -561,12 +568,13 @@ export function CurveEditor({
                   <g
                     key={index}
                     role="slider"
-                    tabIndex={disabled ? -1 : 0}
+                    tabIndex={0}
                     aria-label={`${label} graph point ${index + 1}`}
                     aria-valuemin={minPitch}
                     aria-valuemax={maxPitch}
                     aria-valuenow={p.value}
                     aria-valuetext={`offset ${p.offset}, ${formatQuarterTones(p.value)}`}
+                    aria-disabled={disabled ? 'true' : undefined}
                     className="tp-curve-handle"
                     onPointerDown={e => handlePointPointerDown(index, e)}
                     onPointerMove={e => handlePointPointerMove(index, e)}
@@ -584,64 +592,75 @@ export function CurveEditor({
               })}
             </svg>
 
-            <p className="muted">
-              Drag points or click the graph to shape pitch. Position 0–60; pitch in quarter tones
-              {whammy ? ', including negative values' : ''}.
-            </p>
-            {curve.points.map((p, index) => (
-              <div className="curve-point" key={index}>
-                <label>
-                  Position
-                  <input
-                    aria-label={`${label} point ${index + 1} position`}
-                    type="number"
-                    min={0}
-                    max={60}
-                    value={p.offset}
+            <fieldset disabled={disabled}>
+              <p className="muted">
+                Drag points or click the graph to shape pitch. Position 0–60; pitch in quarter tones
+                {whammy ? ', including negative values' : ''}.
+              </p>
+              {curve.points.map((p, index) => (
+                <div className="curve-point" key={index}>
+                  <label>
+                    Position
+                    <input
+                      aria-label={`${label} point ${index + 1} position`}
+                      type="number"
+                      min={0}
+                      max={60}
+                      value={p.offset}
+                      disabled={index === 0 || index === curve.points.length - 1}
+                      onChange={e => point(index, 'offset', Number(e.target.value))}
+                    />
+                  </label>
+                  <label>
+                    Pitch
+                    <input
+                      aria-label={`${label} point ${index + 1} value`}
+                      type="number"
+                      min={whammy ? undefined : 0}
+                      step={1}
+                      value={p.value}
+                      onChange={e => point(index, 'value', Number(e.target.value))}
+                    />
+                  </label>
+                  <button
+                    aria-label={`Remove ${label} point ${index + 1}`}
                     disabled={index === 0 || index === curve.points.length - 1}
-                    onChange={e => point(index, 'offset', Number(e.target.value))}
-                  />
-                </label>
-                <label>
-                  Pitch
-                  <input
-                    aria-label={`${label} point ${index + 1} value`}
-                    type="number"
-                    min={whammy ? undefined : 0}
-                    step={1}
-                    value={p.value}
-                    onChange={e => point(index, 'value', Number(e.target.value))}
-                  />
-                </label>
-                <button
-                  aria-label={`Remove ${label} point ${index + 1}`}
-                  disabled={index === 0 || index === curve.points.length - 1}
-                  onClick={() => setCurve({ ...curve, points: curve.points.filter((_, i) => i !== index) })}
-                >
-                  ×
-                </button>
-              </div>
-            ))}
-            <button
-              onClick={() => {
-                const last = curve.points.length - 1;
-                const offset = (curve.points[last - 1].offset + 60) / 2;
-                setCurve({
-                  ...curve,
-                  points: [
-                    ...curve.points.slice(0, -1),
-                    { offset, value: curve.points[last - 1].value },
-                    curve.points[last],
-                  ],
-                });
-              }}
-            >
-              Add {label} point
-            </button>
+                    onClick={() => setCurve({ ...curve, points: curve.points.filter((_, i) => i !== index) })}
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+              <button
+                onClick={() => {
+                  const last = curve.points.length - 1;
+                  const offset = (curve.points[last - 1].offset + 60) / 2;
+                  setCurve({
+                    ...curve,
+                    points: [
+                      ...curve.points.slice(0, -1),
+                      { offset, value: curve.points[last - 1].value },
+                      curve.points[last],
+                    ],
+                  });
+                }}
+              >
+                Add {label} point
+              </button>
+            </fieldset>
           </>
         )}
-        <button onClick={() => onChange(curve)}>Apply {label} curve</button>
-      </fieldset>
-    </details>
+        <fieldset disabled={disabled}>
+          <button
+            disabled={disabled}
+            onClick={() => {
+              if (disabled) return;
+              onChange(curve);
+            }}
+          >
+            Apply {label} curve
+          </button>
+        </fieldset>
+      </details>
   );
 }

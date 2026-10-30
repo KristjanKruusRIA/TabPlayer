@@ -44,7 +44,7 @@ export function readNotes(bytes){
     const variable=()=>{let value=0,byte;do{byte=bytes[at++];value=value*128+(byte&127);}while(byte&128);return value;};
     while(at<end){
       tick+=variable();let type=bytes[at];if(type&128){at++;if(type<240)status=type;}else type=status;
-      if(type===255){at++;at+=variable();}else if(type===240||type===247)at+=variable();
+      if(type===255||type===240||type===247){if(type===255)at++;const length=variable();at+=length;}
       else{const kind=type&240,size=kind===192||kind===208?1:2,key=bytes[at],value=size===2?bytes[at+1]:0;at+=size;if(kind===144&&value>0)on.push([tick,key,value]);else if(kind===128||kind===144)off.push([tick,key]);}
     }
   }

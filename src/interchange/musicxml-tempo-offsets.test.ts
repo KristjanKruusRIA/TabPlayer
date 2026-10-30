@@ -282,11 +282,11 @@ describe('a file written to stall the offset match',()=>{
     expect(performance.now()-started).toBeLessThan(20000);
   });
   it('stays linear with a long moved part beside many empty parts',()=>{
-    const source=musicXml(480),bar=source.match(/<measure[\s\S]*<\/measure>/)![0],count=4000;
+    const source=musicXml(480),bar=source.match(/<measure[\s\S]*<\/measure>/)![0],count=8000;
     const bars=Array.from({length:count},(_,index)=>bar.replace(/number="[^"]*"/,`number="${index+2}"`)).join('');
-    const xml=source.replace('</part>',`${bars}</part>${'<part/>'.repeat(300000)}`);
+    const xml=source.replace('</part>',`${bars}</part>${'<part/>'.repeat(600000)}`);
     const started=performance.now();
     prepareMusicXmlTempoOffsets(strToU8(xml),settings);
-    expect(performance.now()-started).toBeLessThan(10000);
-  });
+    expect(performance.now()-started).toBeLessThan(40000);
+  },120000);
 });

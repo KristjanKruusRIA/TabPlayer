@@ -3,6 +3,7 @@ import type { EngravingOverrides } from './types';
 import { scoreFromJson } from '../model-clone';
 import { captureNoteLinks,restoreNoteLinks } from '../editor/links';
 import { copyGpInterchangeSource } from '../interchange/gp';
+import { configureTypography,typographyOf,validateTypography } from './typography';
 
 export interface EngravingProjection {
   score:model.Score;
@@ -31,11 +32,12 @@ function object(value:unknown,keys:string[]):Record<string,unknown> {
 const validBool=(value:unknown)=>value===null||typeof value==='boolean';
 function choice(value:unknown,choices:string[]):void {if(typeof value!=='string'||!choices.includes(value))throw new Error('Invalid engraving choice.');}
 export function validateEngraving(value:unknown):asserts value is EngravingOverrides {
-  const defaults=defaultEngraving(),root=object(value,Object.keys(defaults)),style=object(root.stylesheet,Object.keys(defaults.stylesheet)),notation=object(root.notation,Object.keys(defaults.notation));
+  const defaults=defaultEngraving(),hasTypography=!!value&&typeof value==='object'&&Object.hasOwn(value,'typography'),root=object(value,hasTypography?[...Object.keys(defaults),'typography']:Object.keys(defaults)),style=object(root.stylesheet,Object.keys(defaults.stylesheet)),notation=object(root.notation,Object.keys(defaults.notation));
   for(const [section,keys]of [[style,Object.keys(styleBooleans)],[notation,[...Object.keys(notationBooleans),...Object.keys(elementKeys)]]] as const)for(const key of keys)if(!validBool(section[key]))throw new Error('Invalid engraving boolean.');
   for(const [section,mappings]of [[style,styleEnums],[notation,notationEnums]] as const)for(const [key,mapping]of Object.entries(mappings))choice(section[key],['inherit',...Object.keys(mapping.values)]);
   choice(style.chords,['inherit','hidden','top','inline','both']);choice(style.multiRests,['inherit','off','on']);
   if(root.systemSpacing!==null&&(typeof root.systemSpacing!=='number'||!Number.isFinite(root.systemSpacing)||root.systemSpacing<.25||root.systemSpacing>4))throw new Error('System spacing must be between 25% and 400%.');
+  if(hasTypography)validateTypography(root.typography);
   if(!Array.isArray(root.profiles))throw new Error('Invalid engraving profiles.');
   const ids=new Set<string>();for(const entry of root.profiles){const profile=object(entry,['trackId','profile']);if(typeof profile.trackId!=='string'||!profile.trackId.trim()||ids.has(profile.trackId))throw new Error('Engraving track IDs must be nonempty and unique.');ids.add(profile.trackId);choice(profile.profile,['source','standard','tablature','standardTab','slash','numbered']);}
 }
@@ -78,6 +80,7 @@ export function configureEngraving(settings:Settings,value:EngravingOverrides):v
   for(const [key,mapping]of Object.entries(notationEnums)){const override=value.notation[key as keyof typeof notationEnums];Object.assign(settings.notation,{[mapping.field]:override==='inherit'?defaults.notation[mapping.field]:(mapping.values as Record<string,number>)[override]});}
   for(const [key,element]of Object.entries(elementKeys)){const override=value.notation[key as keyof typeof elementKeys];if(override!==null)settings.notation.elements.set(element,override);else if(defaults.notation.elements.has(element))settings.notation.elements.set(element,defaults.notation.elements.get(element)!);else settings.notation.elements.delete(element);}
   for(const field of ['systemPaddingTop','systemPaddingBottom','lastSystemPaddingBottom'] as const)settings.display[field]=defaults.display[field]*(value.systemSpacing??1);
+  configureTypography(settings,typographyOf(value));
   settings.display.staveProfile=StaveProfile.Default;settings.display.systemsLayoutMode=SystemsLayoutMode.UseModelLayout;
 }
 /** Gives the track inserted after `source` a copy of its per-track style and shifts later tracks. */

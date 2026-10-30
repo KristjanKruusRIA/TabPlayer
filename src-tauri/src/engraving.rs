@@ -52,6 +52,9 @@ named_enum!(TabRhythmMode {
 named_enum!(FingeringMode {
     Inherit = "inherit", Score = "score", Piano = "piano", Above = "above", AbovePiano = "abovePiano"
 });
+named_enum!(TextFamily {
+    Inherit = "inherit", Sans = "sans", Serif = "serif", Mono = "mono"
+});
 named_enum!(PageProfile {
     Document = "document", ScoreTab = "ScoreTab", Score = "Score", Tab = "Tab"
 });
@@ -104,6 +107,38 @@ pub struct EngravingNotation {
     pub show_dive_whammy_zeros: Option<bool>,
 }
 
+/// Text font family and size scales. `None` and `Inherit` keep the renderer defaults.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct EngravingTypography {
+    pub family: TextFamily,
+    #[serde(deserialize_with = "required_nullable")]
+    pub text_scale: Option<f64>,
+    #[serde(deserialize_with = "required_nullable")]
+    pub title_scale: Option<f64>,
+    #[serde(deserialize_with = "required_nullable")]
+    pub tab_scale: Option<f64>,
+}
+
+impl EngravingTypography {
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+
+    pub fn validate(&self) -> Result<(), String> {
+        let fits = |value: Option<f64>, low: f64, high: f64| {
+            value.is_none_or(|value| value.is_finite() && (low..=high).contains(&value))
+        };
+        if !fits(self.text_scale, 0.5, 2.0)
+            || !fits(self.title_scale, 0.5, 2.0)
+            || !fits(self.tab_scale, 0.75, 1.5)
+        {
+            return Err("Typography scales must be null or within their supported range.".into());
+        }
+        Ok(())
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct TrackProfileOverride {
@@ -119,6 +154,9 @@ pub struct EngravingOverrides {
     #[serde(deserialize_with = "required_nullable")]
     pub system_spacing: Option<f64>,
     pub profiles: Vec<TrackProfileOverride>,
+    /// Absent (and omitted again when default) in documents saved before typography existed.
+    #[serde(default, skip_serializing_if = "EngravingTypography::is_default")]
+    pub typography: EngravingTypography,
 }
 
 impl EngravingOverrides {
@@ -129,6 +167,7 @@ impl EngravingOverrides {
         {
             return Err("System spacing must be null or a finite factor from 0.25 to 4.".into());
         }
+        self.typography.validate()?;
         let mut ids = HashSet::new();
         if self
             .profiles

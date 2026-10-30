@@ -3,6 +3,9 @@ import { type model,Settings } from '@coderline/alphatab';
 import type { EngravingCommand,EngravingOverrides,InheritBool,TrackProfile } from './types';
 import { defaultEngraving,validateEngravingTracks } from './projection';
 import { StylePresetsPanel } from './StylePresetsPanel';
+import { TypographyFields } from './TypographyFields';
+import { notationPresets,presetApplied } from './notation-presets';
+import { typographyOf,withTypography } from './typography';
 
 export interface EngravingPanelProps {
   score:model.Score;trackIds:readonly string[];value:EngravingOverrides;busy:boolean;
@@ -30,7 +33,7 @@ function Choice({label,value,source,options,onChange}:{label:string;value:string
 }
 /** Whether two engravings hold the same choices, ignoring the order of the staff profiles. */
 const sameEngraving=(a:EngravingOverrides,b:EngravingOverrides)=>{
-  const canon=(value:EngravingOverrides)=>JSON.stringify([value.stylesheet,value.notation,value.systemSpacing,value.profiles.map(entry=>[entry.trackId,entry.profile]).sort(([x],[y])=>x.localeCompare(y))]);
+  const canon=(value:EngravingOverrides)=>JSON.stringify([value.stylesheet,value.notation,value.systemSpacing,value.profiles.map(entry=>[entry.trackId,entry.profile]).sort(([x],[y])=>x.localeCompare(y)),typographyOf(value)]);
   return canon(a)===canon(b);
 };
 const boolValue=(value:InheritBool)=>value===null?'inherit':String(value);
@@ -39,14 +42,14 @@ export function EngravingPanel({score,trackIds,value,busy,onEdit}:EngravingPanel
   const [draft,setDraft]=useState(()=>structuredClone(value)),[error,setError]=useState<string|null>(null),trackKey=JSON.stringify(trackIds);
   const acceptedKey=JSON.stringify([
     Object.entries(value.stylesheet).sort(([a],[b])=>a.localeCompare(b)),Object.entries(value.notation).sort(([a],[b])=>a.localeCompare(b)),value.systemSpacing,
-    value.profiles.map(entry=>[entry.trackId,entry.profile]).sort(([a],[b])=>a.localeCompare(b)),
+    value.profiles.map(entry=>[entry.trackId,entry.profile]).sort(([a],[b])=>a.localeCompare(b)),typographyOf(value),
   ]);
   useEffect(()=>{setDraft(structuredClone(value));setError(null);},[score,acceptedKey,trackKey]);
   const defaults=new Settings(),style=score.stylesheet;
   const updateStyle=(key:keyof EngravingOverrides['stylesheet'],next:unknown)=>{setDraft({...draft,stylesheet:{...draft.stylesheet,[key]:next}});setError(null);};
   const updateNotation=(key:keyof EngravingOverrides['notation'],next:unknown)=>{setDraft({...draft,notation:{...draft.notation,[key]:next}});setError(null);};
   const apply=()=>{
-    const engraving={...structuredClone(draft),profiles:trackIds.flatMap(id=>draft.profiles.filter(entry=>entry.trackId===id).map(entry=>({...entry})))};
+    const engraving=withTypography({...structuredClone(draft),profiles:trackIds.flatMap(id=>draft.profiles.filter(entry=>entry.trackId===id).map(entry=>({...entry})))},typographyOf(draft));
     try{validateEngravingTracks(score,trackIds,engraving);onEdit({type:'setEngraving',engraving});setError(null);}catch(cause){setError(cause instanceof Error?cause.message:String(cause));}
   };
   const reset=()=>{const engraving=defaultEngraving();setDraft(engraving);try{onEdit({type:'setEngraving',engraving});setError(null);}catch(cause){setError(cause instanceof Error?cause.message:String(cause));}};
@@ -74,6 +77,13 @@ export function EngravingPanel({score,trackIds,value,busy,onEdit}:EngravingPanel
       <Choice label="Fingering" value={draft.notation.fingering} source={fingeringOptions[defaults.notation.fingeringMode]?.[1]??'Score'} options={fingeringOptions} onChange={next=>updateNotation('fingering',next)}/>
       {notationBooleans.map(([key,label,field])=><Choice key={key} label={label} value={boolValue(draft.notation[key])} source={yesNo(defaults.notation[field])} options={boolOptions} onChange={next=>updateNotation(key,parseBool(next))}/>)}
       {notationElements.map(([key,label,element])=><Choice key={key} label={label} value={boolValue(draft.notation[key])} source={yesNo(defaults.notation.isNotationElementVisible(element))} options={boolOptions} onChange={next=>updateNotation(key,parseBool(next))}/>)}
+    </details>
+    <details><summary>Typography</summary>
+      <TypographyFields value={typographyOf(draft)} onChange={next=>{setDraft(withTypography(draft,next));setError(null);}} onInvalid={setError}/>
+    </details>
+    <details><summary>Notation style presets</summary>
+      <p>Presets fill the form; nothing changes until Apply engraving. System spacing and staff profiles are kept.</p>
+      {notationPresets.map(preset=><div key={preset.id}><button type="button" onClick={()=>{setDraft(presetApplied(preset,draft));setError(null);}}>Load {preset.name} preset</button> {preset.description}</div>)}
     </details>
     <label>System spacing (%)<input type="number" min={25} max={400} step="any" placeholder="Source/default (100%)" value={draft.systemSpacing===null?'':draft.systemSpacing*100} onChange={e=>{setDraft({...draft,systemSpacing:e.target.value===''?null:Number(e.target.value)/100});setError(null);}}/></label>
     <p>Blank uses default system spacing.</p>

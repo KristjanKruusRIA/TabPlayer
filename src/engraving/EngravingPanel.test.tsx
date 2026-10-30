@@ -66,3 +66,54 @@ it('equivalent_accepted_values_and_parent_renders_preserve_unsubmitted_drafts',(
   fireEvent.change(screen.getByLabelText('System spacing (%)'),{target:{value:'200'}});view.rerender(<EngravingPanel {...props} value={structuredClone(changed)} trackIds={['replacement']}/>);
   expect(screen.getByLabelText('System spacing (%)')).toHaveValue(125);expect(commands).toEqual([]);
 });
+
+it('typography_fields_commit_on_blur_or_enter_and_apply_as_one_command',()=>{
+  const score=music(),commands:Edit[]=[];
+  render(<EngravingPanel score={score} trackIds={['source/guitar']} value={defaultEngraving()} busy={false} onEdit={edit=>commands.push(edit)}/>);
+  expect(screen.getByText(/Music font: Bravura/)).toBeInTheDocument();
+  fireEvent.change(screen.getByRole('combobox',{name:'Text font'}),{target:{value:'serif'}});
+  const text=screen.getByLabelText('Text size (%)'),title=screen.getByLabelText('Title size (%)'),tab=screen.getByLabelText('Tab number size (%)');
+  // Typing alone changes nothing: half a number must not rewrite the setting.
+  fireEvent.change(text,{target:{value:'1'}});expect(text).toHaveValue(1);fireEvent.change(text,{target:{value:'125'}});fireEvent.blur(text);
+  fireEvent.change(title,{target:{value:'140'}});fireEvent.keyDown(title,{key:'Enter'});
+  fireEvent.change(tab,{target:{value:'110'}});fireEvent.blur(tab);
+  expect(commands).toEqual([]);
+  fireEvent.click(screen.getByRole('button',{name:'Apply engraving'}));
+  expect(commands).toEqual([{type:'setEngraving',engraving:{...sourceDefaults,typography:{family:'serif',textScale:1.25,titleScale:1.4,tabScale:1.1}}}]);
+});
+
+it('out_of_range_typography_is_reported_and_leaves_the_draft_unchanged',()=>{
+  const commands:Edit[]=[];
+  render(<EngravingPanel score={music()} trackIds={['source/guitar']} value={defaultEngraving()} busy={false} onEdit={edit=>commands.push(edit)}/>);
+  const text=screen.getByLabelText('Text size (%)'),tab=screen.getByLabelText('Tab number size (%)');
+  fireEvent.change(text,{target:{value:'250'}});fireEvent.blur(text);expect(screen.getByRole('alert')).toHaveTextContent('Text size must be between 50% and 200%.');expect(text).toHaveValue(null);
+  fireEvent.change(tab,{target:{value:'70'}});fireEvent.blur(tab);expect(screen.getByRole('alert')).toHaveTextContent('Tab number size must be between 75% and 150%.');
+  fireEvent.click(screen.getByRole('button',{name:'Apply engraving'}));expect(commands).toEqual([{type:'setEngraving',engraving:sourceDefaults}]);
+});
+
+it('default_typography_is_never_sent_and_an_applied_one_fills_the_form',()=>{
+  const commands:Edit[]=[],value=defaultEngraving();value.typography={family:'mono',textScale:null,titleScale:2,tabScale:null};
+  render(<EngravingPanel score={music()} trackIds={['source/guitar']} value={value} busy={false} onEdit={edit=>commands.push(edit)}/>);
+  expect(screen.getByRole('combobox',{name:'Text font'})).toHaveValue('mono');expect(screen.getByLabelText('Title size (%)')).toHaveValue(200);
+  fireEvent.change(screen.getByRole('combobox',{name:'Text font'}),{target:{value:'inherit'}});
+  const title=screen.getByLabelText('Title size (%)');fireEvent.change(title,{target:{value:''}});fireEvent.blur(title);
+  fireEvent.click(screen.getByRole('button',{name:'Apply engraving'}));
+  expect(commands).toEqual([{type:'setEngraving',engraving:sourceDefaults}]);expect('typography' in commands[0].engraving).toBe(false);
+});
+
+it('loading_a_preset_fills_the_form_without_editing_and_keeps_spacing_and_profiles',()=>{
+  const commands:Edit[]=[],value=defaultEngraving();value.systemSpacing=1.5;value.profiles=[{trackId:'source/guitar',profile:'slash'}];
+  render(<EngravingPanel score={music()} trackIds={['source/guitar']} value={value} busy={false} onEdit={edit=>commands.push(edit)}/>);
+  fireEvent.click(screen.getByRole('button',{name:'Load Rock preset'}));
+  expect(commands).toEqual([]);expect(screen.getByLabelText('Tab rhythm')).toHaveValue('beams');expect(screen.getByRole('combobox',{name:'Text font'})).toHaveValue('sans');
+  expect(screen.getByLabelText('Tab number size (%)')).toHaveValue(115);expect(screen.getByLabelText('System spacing (%)')).toHaveValue(150);expect(screen.getByLabelText('Guitar notation profile')).toHaveValue('slash');
+  fireEvent.click(screen.getByRole('button',{name:'Load Jazz preset'}));expect(screen.getByLabelText('Tab rhythm')).toHaveValue('hidden');expect(screen.getByLabelText('Tab number size (%)')).toHaveValue(null);expect(screen.getByLabelText('Chord diagrams')).toHaveValue('both');
+  fireEvent.click(screen.getByRole('button',{name:'Apply engraving'}));
+  expect(commands).toHaveLength(1);expect(commands[0].engraving.typography).toEqual({family:'serif',textScale:1.15,titleScale:1.4,tabScale:null});
+  expect([commands[0].engraving.systemSpacing,commands[0].engraving.profiles]).toEqual([1.5,[{trackId:'source/guitar',profile:'slash'}]]);
+});
+
+it('typography_and_presets_are_disabled_while_busy',()=>{
+  render(<EngravingPanel score={music()} trackIds={['source/guitar']} value={defaultEngraving()} busy onEdit={()=>undefined}/>);
+  for(const control of [screen.getByRole('combobox',{name:'Text font'}),screen.getByLabelText('Text size (%)'),screen.getByRole('button',{name:'Load Classic preset'})])expect(control).toBeDisabled();
+});

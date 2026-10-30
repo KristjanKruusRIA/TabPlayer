@@ -66,5 +66,5 @@ Silence after a loud burst is measured too (`master_cost` prints the quickest an
 - Export-time normalization (`write_normalized_wav`) runs after the chain and never lifts a sample above its own peak ceiling.
 - The balance control is a gain on one side, not a pan law.
 - The count-in click and audition clips are mixed by the device after the renderer, outside the master chain and its limiter. Limiting them would need a second limiter instance on the device (the renderer's holds state that the playback frame already advances, and its ceiling follows the master's changes), and the neutral master has to stay bit for bit; they are bounded by their own volume and the click's level, and are not part of the exported mix.
-- The export's effect tail (2 s by default, 0 to 30 s) is a hard cut: a long Hall or Room tail still ringing at the end stops abruptly. An end fade applied only on export would make the export differ from playback, which must match bit for bit, so none is added; lengthen the tail to let it ring out.
+- The export's effect tail (2 s by default, 0 to 30 s) is a hard cut: a long Hall or Room tail still ringing at the end stops abruptly. Playback renders no tail at all: it seeks to the end and stops. No fade is added to the export; lengthen the tail to let it ring out.
 - No listening review has been done.

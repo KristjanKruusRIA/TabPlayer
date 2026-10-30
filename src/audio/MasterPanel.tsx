@@ -27,7 +27,7 @@ function Slider({ label, value, min, max, step, format, disabled, commit }: {
 }
 
 /** The master strip of the mixer: overall level and balance, then the compressor, EQ, reverb and limiter that every
- * track, the backing and the click pass through. Like the track faders it works on a finalized document, since it is
+ * track and the backing pass through. The playback click joins at the limiter and the count-in click stays outside. Like the track faders it works on a finalized document, since it is
  * how a player balances playback. */
 export function MasterPanel({ master, disabled, onChange }: {
   master: MasterSettings | undefined; disabled: boolean; onChange: Commit;

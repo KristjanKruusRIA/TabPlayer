@@ -104,7 +104,7 @@ it('frames a dialog: named, focused, closed by Escape, and focus returns', async
   expect(onClose).toHaveBeenCalledTimes(1);expect(screen.queryByRole('dialog')).toBeNull();expect(opener).toHaveFocus();
 });
 
-it('keeps Tab inside the dialog and closes from its button or the backdrop', async()=>{
+it('keeps Tab inside the dialog and closes from its button, and backdrop dismiss is opt-in', async()=>{
   const user=userEvent.setup(),onClose=vi.fn();
   render(<Dialog title="Frame" onClose={onClose} actions={<button>Done</button>}><input aria-label="Name"/></Dialog>);
   const dialog=screen.getByRole('dialog');
@@ -115,6 +115,32 @@ it('keeps Tab inside the dialog and closes from its button or the backdrop', asy
   await user.tab();expect(items[0]).toHaveFocus();
   await user.tab({shift:true});expect(items[2]).toHaveFocus();
   await user.click(items[0]);expect(onClose).toHaveBeenCalledTimes(1);
-  fireEvent.mouseDown(dialog.parentElement!);expect(onClose).toHaveBeenCalledTimes(2);
-  fireEvent.mouseDown(dialog);expect(onClose).toHaveBeenCalledTimes(2);
+  fireEvent.mouseDown(dialog.parentElement!);expect(onClose).toHaveBeenCalledTimes(1);
+  fireEvent.mouseDown(dialog);expect(onClose).toHaveBeenCalledTimes(1);
+});
+
+it('handles Escape and Tab at document level, recovers focus from body, and keeps background inert', async()=>{
+  const onClose=vi.fn();
+  const background=document.createElement('button');
+  background.textContent='Background button';
+  document.body.appendChild(background);
+
+  const { unmount }=render(<Dialog title="Modal" onClose={onClose} actions={<button id="act">Action</button>}><input aria-label="Field"/></Dialog>);
+  expect(background).toHaveAttribute('inert');
+
+  // When focus falls to body (e.g. after a clicked button is disabled), document key handler recovers
+  (document.activeElement as HTMLElement)?.blur();
+  expect(document.activeElement).toBe(document.body);
+  fireEvent.keyDown(document.body,{key:'Tab'});
+  expect(screen.getByRole('dialog').contains(document.activeElement)).toBe(true);
+
+  // Escape at document level closes the dialog even when focus is on body
+  (document.activeElement as HTMLElement)?.blur();
+  expect(document.activeElement).toBe(document.body);
+  fireEvent.keyDown(document.body,{key:'Escape'});
+  expect(onClose).toHaveBeenCalledTimes(1);
+
+  unmount();
+  expect(background).not.toHaveAttribute('inert');
+  background.remove();
 });

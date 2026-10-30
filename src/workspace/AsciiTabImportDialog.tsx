@@ -49,18 +49,18 @@ export function AsciiTabImportDialog({busy,onImport,onClose}:{busy:boolean;onImp
     catch(error){setImportProblem(`The score could not be opened: ${message(error)}`);}
     finally{setImporting(false);}
   };
-  return <Dialog title="Import ASCII tab" onClose={()=>{if(!importing)onClose();}} className="ascii-import">
-    <form className="ascii-import-form" aria-describedby={hint} aria-busy={importing} onSubmit={event=>{event.preventDefault();void submit();}}>
+  const actions=<>
+    <button type="button" className="tp-button" disabled={importing} onClick={()=>file.current?.click()}>Choose text file…</button>
+    <button type="button" className="tp-button primary" disabled={!result||!!parseProblem||busy||importing} onClick={submit}>Import</button>
+    <button type="button" className="tp-button" disabled={importing} onClick={onClose}>Cancel</button>
+  </>;
+  return <Dialog title="Import ASCII tab" onClose={onClose} ariaDescribedBy={hint} busy={importing} closeDisabled={importing} className="ascii-import" onSubmit={event=>{event.preventDefault();void submit();}} actions={actions}>
+    <div className="ascii-import-form">
       <p id={hint} className="muted">Paste tablature with one line per string, or choose a text file. String names set the tuning, and the spacing between notes sets the rhythm, so check the rhythm after importing.</p>
       <label>ASCII tab<textarea ref={area} data-autofocus value={text} rows={14} spellCheck={false} wrap="off" aria-describedby={status} aria-invalid={!!problem} readOnly={importing}
         onChange={event=>edit(event.target.value)}/></label>
       <input ref={file} type="file" accept=".txt,.tab,.text,text/plain" hidden onChange={event=>{load(event.target.files?.[0]);event.target.value='';}}/>
       <p id={status} role="status" className={problem?'error':'muted'}>{problem??(importing?'Opening the score…':result?summary:text.trim()?'Reading the tab…':'Nothing to import yet.')}</p>
-      <div className="dialog-actions tp-dialog-foot">
-        <button type="button" className="tp-button" disabled={importing} onClick={()=>file.current?.click()}>Choose text file…</button>
-        <button type="submit" className="tp-button primary" disabled={!result||!!parseProblem||busy||importing}>Import</button>
-        <button type="button" className="tp-button" disabled={importing} onClick={onClose}>Cancel</button>
-      </div>
-    </form>
+    </div>
   </Dialog>;
 }

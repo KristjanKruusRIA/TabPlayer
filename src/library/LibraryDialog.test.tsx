@@ -32,3 +32,33 @@ it('filters the folder index by title, artist and instrument, clears them, and o
   fireEvent.click(screen.getByRole('button',{name:'Clear filters'}));await act(async()=>vi.advanceTimersByTimeAsync(150));expect(bridge.search).toHaveBeenLastCalledWith({rootId:null,text:'',title:'',artist:'',instrument:'',sort:'modified',offset:0,limit:100});expect(screen.getByLabelText('Artist filter')).toHaveValue('');expect(callbacks.openSource).not.toHaveBeenCalled();});
 
 it('suggests clearing filters when they leave no results, and keeps focus in the filters after Clear',async()=>{vi.useFakeTimers();const {bridge}=await setup();fireEvent.click(screen.getByRole('button',{name:'Folders'}));await act(async()=>vi.advanceTimersByTimeAsync(150));vi.mocked(bridge.search).mockResolvedValue({indexRevision:2,total:0,rows:[],warning:null});fireEvent.change(screen.getByLabelText('Artist filter'),{target:{value:'Nobody'}});await act(async()=>vi.advanceTimersByTimeAsync(150));expect(screen.getByText(/No scores match these filters\. Clear the filters/)).toBeVisible();fireEvent.click(screen.getByRole('button',{name:'Clear filters'}));expect(screen.getByLabelText('Title filter')).toHaveFocus();expect(screen.getByRole('button',{name:'Clear filters'})).toBeDisabled();});
+
+it('preserves native modal behaviour: focus recovers from body when busy disables control, Escape and Tab still work, and background is inert',async()=>{
+  const background=document.createElement('button');
+  background.textContent='Background';
+  document.body.appendChild(background);
+
+  const {bridge,close}=await setup();
+  expect(background).toHaveAttribute('inert');
+
+  const pendingChange=deferred<LibrarySnapshot>();
+  vi.mocked(bridge.change).mockReturnValueOnce(pendingChange.promise);
+
+  const pin=screen.getByRole('button',{name:'Pin Harbour'});
+  fireEvent.click(pin);
+
+  // During the change, Pin is disabled by busy, so focus falls to body in the browser
+  expect(pin).toBeDisabled();
+  (document.activeElement as HTMLElement)?.blur();
+  expect(document.activeElement).toBe(document.body);
+
+  // Tab and Escape must not die; Tab wraps inside the dialog
+  fireEvent.keyDown(document.body,{key:'Tab'});
+  expect(screen.getByRole('dialog').contains(document.activeElement)).toBe(true);
+
+  // Escape closes the dialog even when focus reached body
+  fireEvent.keyDown(document.body,{key:'Escape'});
+  expect(close).toHaveBeenCalledOnce();
+
+  background.remove();
+});

@@ -252,12 +252,19 @@ describe('export dialog',()=>{
     fireEvent.keyDown(cancelButton,{key:'Tab'});expect(closeButton).toHaveFocus();
     rerender(<ExportDialog currentSpeedAvailable={true} score={score} layout={layout} busy={true} onExport={()=>{}} onCancel={cancel}/>);
     const busyCancel=screen.getByRole('button',{name:'Cancel export'});expect(busyCancel).toHaveFocus();
-    fireEvent.keyDown(busyCancel,{key:'Tab'});expect(closeButton).toHaveFocus();fireEvent.keyDown(busyCancel,{key:'Escape'});expect(cancel).toHaveBeenCalledTimes(1);
+    const busyCloseButton=screen.getByRole('button',{name:'Cancel'});
+    expect(busyCloseButton).toHaveClass('tp-dialog-close');
+    expect(screen.queryByRole('button',{name:'Close'})).toBeNull();
+    fireEvent.keyDown(busyCancel,{key:'Tab'});expect(busyCloseButton).toHaveFocus();fireEvent.keyDown(busyCancel,{key:'Escape'});expect(cancel).toHaveBeenCalledTimes(1);
     unmount();expect(opener).toHaveFocus();opener.remove();
   });
-  it('uses the shared hit-testable dialog backdrop to contain pointer input',()=>{
-    render(<ExportDialog currentSpeedAvailable={true} score={fixture()} layout={layout} busy={false} onExport={()=>{}} onCancel={()=>{}}/>);
-    expect(screen.getByRole('dialog').parentElement).toHaveClass('tp-dialog-backdrop');
+  it('uses the shared hit-testable dialog backdrop to contain pointer input without dismissing on backdrop mousedown',()=>{
+    const cancel=vi.fn();
+    render(<ExportDialog currentSpeedAvailable={true} score={fixture()} layout={layout} busy={false} onExport={()=>{}} onCancel={cancel}/>);
+    const backdrop=screen.getByRole('dialog').parentElement!;
+    expect(backdrop).toHaveClass('tp-dialog-backdrop');
+    fireEvent.mouseDown(backdrop);
+    expect(cancel).not.toHaveBeenCalled();
   });
   it('reconciles track staff and measure selections when the score topology changes',()=>{
     const submit=vi.fn();const {rerender}=render(<ExportDialog currentSpeedAvailable={true} score={fixture()} layout={layout} busy={false} onExport={submit} onCancel={()=>{}}/>);

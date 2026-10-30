@@ -36,7 +36,7 @@ export class DocumentController {
 
   private constructor(private bridge: NativeBridge, record:DocumentSnapshot, private beforeChange: () => void, private isWorkspaceTransitioning:()=>boolean) {
     this.verifyRecord(record);
-    this.state={...record,...buildDocument(record.snapshot.project),documentEpoch:0,busy:false,error:null};
+    this.state={...record,...buildDocument(record.snapshot.project,record.snapshot.canRedo),documentEpoch:0,busy:false,error:null};
   }
   static async create(bridge: NativeBridge, beforeChange: () => void = () => {},initial?:DocumentSnapshot,isWorkspaceTransitioning:()=>boolean=()=>false) {
     return new DocumentController(bridge,initial ?? await bridge.snapshot(),beforeChange,isWorkspaceTransitioning);
@@ -77,7 +77,7 @@ export class DocumentController {
   }
   private needsPartialCapoMark() {
     const project=this.state.snapshot.project;
-    return !!this.bridge.markPartialCapo&&project.base.kind==='file'&&appliesFilePartialCapo(project)&&project.partialCapo!==true&&this.state.score.tracks.some(track=>track.staves.some(staff=>getPartialCapo(staff)));
+    return !!this.bridge.markPartialCapo&&project.base.kind==='file'&&!this.state.snapshot.canRedo&&appliesFilePartialCapo(project)&&project.partialCapo!==true&&this.state.score.tracks.some(track=>track.staves.some(staff=>getPartialCapo(staff)));
   }
   private async editNow(command:EditCommand,asset?:AssetCandidate) {
     let candidate:ReturnType<typeof previewEdit>;let record:DocumentSnapshot;
@@ -142,7 +142,7 @@ export class DocumentController {
   undo() { return this.run(async()=>{
     const project=this.state.snapshot.project,removed=project.edits.at(-1);if(!removed)return;
     const settingsOnly=isSettingsEdit(removed),previous={...project,edits:project.edits.slice(0,-1)};
-    const built=settingsOnly?replayDocumentSettings(previous,this.state):buildDocument(previous);
+    const built=settingsOnly?replayDocumentSettings(previous,this.state):buildDocument(previous,true);
     const record=await this.bridge.undo(this.state.revision);this.verifyRecord(record);if(!settingsOnly)this.beforeChange();
     this.undone.push(removed);this.update({...record,...built});
   }); }

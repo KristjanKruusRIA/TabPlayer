@@ -14,8 +14,8 @@ export interface ProjectView { format: 'TabPlayer'; schemaVersion: 3; engineVers
   partialCapo?: true }
 export const isFinalized = (project: { lock?: DocumentLock | null } | null | undefined): boolean => project?.lock?.kind === 'finalized';
 export type Project = ProjectView;
-/** Whether the partial capo a GP file holds applies to this project. An old log never saw it, so it replays without; a project with no edits has nothing to replay, and the first edit marks it. */
-export const appliesFilePartialCapo=(project:{partialCapo?:true;baselineEdits?:readonly unknown[];edits:readonly unknown[]})=>project.partialCapo===true||!project.baselineEdits?.length&&!project.edits.length;
+/** Whether the partial capo a GP file holds applies to this project. An old log never saw it, so it replays without. A project with no history has nothing to replay, and its first edit marks it; history includes a redo tail (`canRedo`), which the cursor-truncated edit list does not show. */
+export const appliesFilePartialCapo=(project:{partialCapo?:true;baselineEdits?:readonly unknown[];edits:readonly unknown[]},canRedo=false)=>project.partialCapo===true||!project.baselineEdits?.length&&!project.edits.length&&!canRedo;
 export type ProjectInput = ProjectView | Omit<ProjectView,'schemaVersion'|'assets'|'baselineEdits'> & {schemaVersion:1}
   | Omit<ProjectView,'schemaVersion'|'baselineEdits'> & {schemaVersion:2};
 export const projectCommands=(project:ProjectInput):EditCommand[]=>[...('baselineEdits' in project?project.baselineEdits:[]),...project.edits];

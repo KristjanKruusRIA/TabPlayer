@@ -759,7 +759,7 @@ impl DocumentWorkspace {
     ) -> Result<DocumentSnapshot, String> {
         let revision = self.check_mutation(address)?;
         let entry = self.entry_mut(&address.document_id)?;
-        if !entry.session.mark_partial_capo() {
+        if !entry.session.mark_partial_capo()? {
             return Ok(entry.snapshot());
         }
         entry.revision += 1;

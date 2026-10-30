@@ -99,6 +99,7 @@ export async function runPartialCapoAcceptance({buildPath}={}){
     await page.locator('.app-shell').waitFor();const library=page.getByRole('dialog',{name:'Library',exact:true});await library.getByRole('heading',{name:'Welcome to TabPlayer',exact:true}).waitFor();await library.getByRole('button',{name:'Close',exact:true}).click();await library.waitFor({state:'hidden'});
     await idle();await button('Open');await page.locator('[aria-label="Music notation"] svg').first().waitFor();await native();
     const initial=await record();assert.deepEqual(initial.snapshot.project.edits,[]);
+    assert.equal(initial.snapshot.project.partialCapo,undefined,'An unedited project carries no marker');
 
     // The file's own capo (2) and partial capo (fret 5, strings 1-3): the plan sounds each string by its own rule.
     await button('Show instrument');await view().getByRole('img',{name:'Guitar fretboard',exact:true}).waitFor();
@@ -125,6 +126,7 @@ export async function runPartialCapoAcceptance({buildPath}={}){
     const after=await poll(record,value=>value.snapshot.project.edits.length===1,'one staff settings edit');
     assert.deepEqual(after.snapshot.project.edits[0].settings.partialCapo,{fret:7,strings:[4,5]},'The command carries the partial capo');
     assert.equal(after.snapshot.project.edits[0].settings.capo,2);
+    assert.equal(after.snapshot.project.partialCapo,true,'The first edit of a file with a partial capo marks the project, so it keeps applying');
     const changed=await keys(),expectedChanged=combinedKeys(2,7,[4,5]);
     assert.deepEqual(changed.map(mark=>mark[1]),expectedChanged,'Strings 4 and 5 sound by fret 7; the other strings by the capo alone');
     assert.deepEqual(changed.map(mark=>mark[1]).slice(0,3),combinedKeys(2,0,[]).slice(0,3),'Strings 1-3 are back to the capo alone');
@@ -134,7 +136,7 @@ export async function runPartialCapoAcceptance({buildPath}={}){
     step('A changed partial capo moves only the strings it covers, in one edit',{keys:changed});
 
     // Undo and redo restore the project and the sound exactly.
-    await button('Undo');assert.deepEqual((await record()).snapshot.project,initial.snapshot.project,'Undo restores the project');
+    await button('Undo');assert.deepEqual((await record()).snapshot.project,{...initial.snapshot.project,partialCapo:true},'Undo restores the project; the marker, which is not an edit, stays');
     assert.deepEqual((await keys()).map(mark=>mark[1]),expectedOpen,'Undo restores the pitches');
     await button('Redo');assert.deepEqual((await record()).snapshot.project,after.snapshot.project,'Redo restores the edit');
     assert.deepEqual((await keys()).map(mark=>mark[1]),expectedChanged,'Redo restores the pitches');

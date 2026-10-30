@@ -93,25 +93,34 @@ describe('a project that has no edits, or is marked',()=>{
   });
 });
 
+/** A native stand-in with the real cursor, redo tail, saved edit list and the same refusals as `ProjectSession::mark_partial_capo`. */
+async function controllerFor(base:Project['base'],saved:EditCommand[]=[]) {
+  const { DocumentController } = await import('../controller');
+  let project:Project={...blankProject(),base,edits:[...saved]},cursor=saved.length,revision=0;
+  const record=()=>({documentId:'document-a',revision,snapshot:{project:structuredClone({...project,edits:project.edits.slice(0,cursor)}),canUndo:cursor>0,canRedo:cursor<project.edits.length,redoEdit:project.edits[cursor]??null,dirty:false,path:null}});
+  const markPartialCapo=vi.fn(async(expected:number)=>{
+    expect(expected).toBe(revision);if(project.partialCapo)return record();
+    if(project.base.kind!=='file'||cursor!==0||project.edits.length||project.baselineEdits.length||saved.length)throw new Error('refused');
+    project={...project,partialCapo:true};revision++;return record();
+  });
+  const applyEdit=vi.fn(async(command:EditCommand,expected:number)=>{expect(expected).toBe(revision);project={...project,edits:[...project.edits.slice(0,cursor),command]};cursor++;revision++;return record();});
+  const undo=vi.fn(async(expected:number)=>{expect(expected).toBe(revision);cursor--;revision++;return record();});
+  const redo=vi.fn(async(expected:number)=>{expect(expected).toBe(revision);cursor++;revision++;return record();});
+  const bridge={documentId:'document-a',snapshot:async()=>record(),markPartialCapo,applyEdit,undo,redo} as never;
+  const controller=await DocumentController.create(bridge);
+  return {controller,markPartialCapo,applyEdit,project:()=>project,cursor:()=>cursor,keys:()=>dump(controller.getState().score)};
+}
+const staffOf=(controller:Awaited<ReturnType<typeof controllerFor>>['controller'])=>controller.getState().score.tracks[0].staves[0];
+
 describe('the first edit of a file with a partial capo',()=>{
-  /** A native stand-in that keeps the marker and edit log the way the document workspace does. */
-  async function controllerFor(base:Project['base'],edits:EditCommand[]=[]) {
-    const { DocumentController } = await import('../controller');
-    let project:Project={...blankProject(),base,edits},revision=0;
-    const record=()=>({documentId:'document-a',revision,snapshot:{project:structuredClone(project),canUndo:project.edits.length>0,canRedo:false,dirty:false,path:null}});
-    const markPartialCapo=vi.fn(async(expected:number)=>{expect(expected).toBe(revision);if(!project.partialCapo){project={...project,partialCapo:true};revision++;}return record();});
-    const applyEdit=vi.fn(async(command:EditCommand,expected:number)=>{expect(expected).toBe(revision);project={...project,edits:[...project.edits,command]};revision++;return record();});
-    const bridge={documentId:'document-a',snapshot:async()=>record(),markPartialCapo,applyEdit,undo:vi.fn(),redo:vi.fn()} as never;
-    return {controller:await DocumentController.create(bridge),markPartialCapo,applyEdit,project:()=>project};
-  }
   it('marks the project before the first edit, once, and not for a file without a partial capo',async()=>{
     const held=await controllerFor(baseFile(true));
     expect(held.controller.getState().snapshot.project.partialCapo).toBeUndefined();
     await held.controller.edit(note(2,2,3));
     expect(held.markPartialCapo).toHaveBeenCalledTimes(1);expect(held.markPartialCapo.mock.invocationCallOrder[0]).toBeLessThan(held.applyEdit.mock.invocationCallOrder[0]);
     expect(held.project().partialCapo).toBe(true);
-    expect(getPartialCapo(held.controller.getState().score.tracks[0].staves[0])).toEqual(partial);
-    expect(held.controller.getState().score.tracks[0].staves[0].bars[2].voices[0].beats[0].notes[0].realValue).toBe(45+2+3);
+    expect(getPartialCapo(staffOf(held.controller))).toEqual(partial);
+    expect(staffOf(held.controller).bars[2].voices[0].beats[0].notes[0].realValue).toBe(45+2+3);
     await held.controller.edit(note(2,3,3));expect(held.markPartialCapo).toHaveBeenCalledTimes(1);
     const plain=await controllerFor(baseFile(false));await plain.controller.edit(note(2,2,3));expect(plain.markPartialCapo).not.toHaveBeenCalled();
     const blank=await controllerFor(blankProject().base);await blank.controller.edit(note(0,2,3));expect(blank.markPartialCapo).not.toHaveBeenCalled();
@@ -120,6 +129,47 @@ describe('the first edit of a file with a partial capo',()=>{
     const old=await controllerFor(baseFile(true),[note(2,1,1)]);
     await old.controller.edit(note(2,2,3));
     expect(old.markPartialCapo).not.toHaveBeenCalled();expect(old.project().partialCapo).toBeUndefined();
-    expect(getPartialCapo(old.controller.getState().score.tracks[0].staves[0])).toBeNull();
+    expect(getPartialCapo(staffOf(old.controller))).toBeNull();
+  });
+  it('keeps a legacy log reading the same through undo to zero, redo, and a new edit after the undo',async()=>{
+    const e1=note(1,2,3),e2=note(1,3,3),log=[e1],held=baseFile(true),plain=baseFile(false);
+    const reference=(edits:EditCommand[])=>dump(buildScore(withBase(plain,edits)));
+    const old=await controllerFor(held,log);
+    expect(old.keys()).toEqual(reference([e1]));
+    await old.controller.undo();
+    // Undone to zero with a redo tail: not edit-free, so the capo is still not applied.
+    expect(old.controller.getState().snapshot.canRedo).toBe(true);expect(old.controller.getState().snapshot.project.edits).toEqual([]);
+    expect(getPartialCapo(staffOf(old.controller))).toBeNull();expect(old.keys()).toEqual(reference([]));
+    await old.controller.redo();
+    expect(getPartialCapo(staffOf(old.controller))).toBeNull();expect(old.keys()).toEqual(reference([e1]));
+    // The key of e1 does not move between undo and redo.
+    const key=(controller:typeof old.controller)=>controller.getState().score.tracks[0].staves[0].bars[1].voices[0].beats[0].notes.find(item=>item.string===2)!.realValue;
+    expect(key(old.controller)).toBe(45+3);
+    await old.controller.undo();await old.controller.edit(e2);
+    expect(old.markPartialCapo).not.toHaveBeenCalled();expect(old.project().partialCapo).toBeUndefined();
+    expect(old.keys()).toEqual(reference([e2]));
+    // And a real reopen of the saved list ignores the capo too.
+    expect(dump(buildScore(validateProject(JSON.parse(JSON.stringify({...withBase(held,[e1])})))))).toEqual(reference([e1]));
+  });
+  it('is not edit-free while a redo tail exists, in the build and in the marking',async()=>{
+    const held=baseFile(true);
+    const project=withBase(held,[]);
+    expect(appliesFilePartialCapo(project)).toBe(true);expect(appliesFilePartialCapo(project,true)).toBe(false);
+    expect(getPartialCapo(buildScore(project).tracks[0].staves[0])).toEqual(partial);
+    expect(getPartialCapo(buildDocument(project,true).score.tracks[0].staves[0])).toBeNull();
+    // A marked project applies it whatever the history.
+    expect(appliesFilePartialCapo({...project,partialCapo:true},true)).toBe(true);
+    // A file project undone to zero from its own marked edit keeps its capo through redo.
+    const marked=await controllerFor(held);
+    await marked.controller.edit(note(2,2,3));
+    const before=marked.keys();
+    await marked.controller.undo();expect(getPartialCapo(staffOf(marked.controller))).toEqual(partial);
+    await marked.controller.redo();expect(marked.keys()).toEqual(before);
+    // A refused edit after the mark leaves the project marked and empty: still the same reading.
+    const refused=await controllerFor(held);
+    refused.applyEdit.mockRejectedValueOnce(new Error('refused'));
+    await expect(refused.controller.edit(note(2,2,3))).rejects.toThrow();
+    expect(refused.project().partialCapo).toBe(true);expect(refused.project().edits).toEqual([]);
+    expect(getPartialCapo(staffOf(refused.controller))).toEqual(partial);
   });
 });

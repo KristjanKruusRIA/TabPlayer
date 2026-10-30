@@ -125,10 +125,10 @@ function addTrack(score: model.Score, name: string, tuning: number[], program: n
   for (const master of score.masterBars) appendBar(staff, master);
 }
 
-function initialScore(project: Project): model.Score {
+function initialScore(project: Project, canRedo: boolean): model.Score {
   if (project.base.kind === 'file') {
     const bytes = Uint8Array.from(atob(project.base.bytesBase64), c => c.charCodeAt(0));
-    return loadInterchangeScore(bytes, settings, appliesFilePartialCapo(project));
+    return loadInterchangeScore(bytes, settings, appliesFilePartialCapo(project, canRedo));
   }
   const score = new Score(); score.title = project.base.title; score.artist = project.base.artist;
   for (let i = 0; i < project.base.measureCount; i++) score.addMasterBar(new MasterBar());
@@ -276,8 +276,9 @@ function removeBackingMeasure(backing:Pick<BackingSettings,'anchors'>|null|undef
   if(backing) backing.anchors=backing.anchors.filter(a=>a.bar!==bar).map(a=>({...a,bar:a.bar>bar?a.bar-1:a.bar}));
 }
 
-export function buildDocument(value: ProjectInput): BuiltDocument {
-  const project = validateProject(value); let score = initialScore(project);
+/** `canRedo`: the document has undone edits, so it is not edit-free even when its list is empty. */
+export function buildDocument(value: ProjectInput, canRedo = false): BuiltDocument {
+  const project = validateProject(value); let score = initialScore(project, canRedo);
   const sourceBarCount=score.masterBars.length;
   const identities=score.tracks.map((_,index)=>`base/${index}`);
   const documentSettings=defaultDocumentSettings();
@@ -328,7 +329,7 @@ export function replayDocumentSettings(value:ProjectInput,current:BuiltDocument)
   const project=validateProject(value);const next=defaultDocumentSettings();
   // A duplicated track's copied settings come from the full build, which tracks identities through track edits.
   if(projectCommands(project).some(edit=>edit.type==='pasteMusic'||edit.type==='duplicateTrack'||edit.type==='setBacking'&&edit.backing?.referenceSync))return {...buildDocument(project),score:current.score,embeddedBacking:current.embeddedBacking};
-  const sourceBarCount=current.sourceBarCount??(project.base.kind==='blank'?project.base.measureCount:initialScore(project).masterBars.length);
+  const sourceBarCount=current.sourceBarCount??(project.base.kind==='blank'?project.base.measureCount:initialScore(project,false).masterBars.length);
   let barCount=sourceBarCount;
   next.mixes=structuredClone(current.sourceMixes ?? Object.fromEntries(current.score.tracks.map(track=>[trackIdentity(track),{...defaultMix(),mute:track.playbackInfo.isMute,solo:track.playbackInfo.isSolo}])));
   // Applied history already passed candidate validation. Its earlier backing anchors

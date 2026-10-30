@@ -397,3 +397,66 @@ fn skipped_strings_still_require_complete_valid_json_and_utf8() {
         assert!(MetadataInputReader::read(&path).is_err(), "{suffix:?}");
     }
 }
+
+fn file_project(version: u32) -> Value {
+    let bytes = b"original score bytes";
+    let mut value = project(version);
+    value["base"] = json!({"kind":"file","filename":"original.gp","bytesBase64":STANDARD.encode(bytes),"sha256":format!("{:x}",Sha256::digest(bytes))});
+    value
+}
+
+#[test]
+fn a_saved_project_may_carry_the_partial_capo_marker_and_a_lock() {
+    let directory = tempfile::tempdir().unwrap();
+    let plain = read_value(directory.path(), &file_project(3)).unwrap();
+    for (name, field, value) in [
+        ("marker", "partialCapo", json!(true)),
+        ("lock", "lock", json!({"kind":"finalized"})),
+    ] {
+        let mut marked = file_project(3);
+        marked[field] = value;
+        marked["edits"] = json!([{"type":"setStaffSettings","track":0,"staff":0,"settings":{"tuning":[64,59,55,50,45,40],"capo":0,"transposition":0,"displayTransposition":0,"clef":4,"showTab":true,"showNotation":true,"partialCapo":{"fret":2,"strings":[2,3]}}}]);
+        let actual = read_value(directory.path(), &marked)
+            .unwrap_or_else(|error| panic!("{name} must be accepted: {error}"));
+        assert_eq!(actual["base"], plain["base"]);
+        assert!(actual["edits"].as_array().unwrap().is_empty());
+    }
+    let mut both = file_project(3);
+    both["lock"] = json!({"kind":"finalized"});
+    both["partialCapo"] = json!(true);
+    read_value(directory.path(), &both).unwrap();
+}
+
+#[test]
+fn the_marker_and_lock_are_checked_as_strictly_as_the_project_reader_does() {
+    let directory = tempfile::tempdir().unwrap();
+    for (field, value) in [
+        ("partialCapo", json!(false)),
+        ("partialCapo", json!("yes")),
+        ("partialCapo", json!(1)),
+        ("partialCapo", json!(null)),
+        ("lock", json!({"kind":"password"})),
+        ("lock", json!({"kind":"finalized","hash":"x"})),
+        ("lock", json!({})),
+        ("lock", json!(null)),
+        ("lock", json!("finalized")),
+    ] {
+        let mut bad = file_project(3);
+        bad[field] = value.clone();
+        assert!(
+            read_value(directory.path(), &bad).is_err(),
+            "{field} {value} must be refused"
+        );
+    }
+    // The marker belongs to a score read from a file, and neither field repeats.
+    let mut blank = project(3);
+    blank["partialCapo"] = json!(true);
+    assert!(read_value(directory.path(), &blank).is_err());
+    let path = directory.path().join("repeat.tabplayer");
+    let text = serde_json::to_string(&file_project(3)).unwrap();
+    for repeat in [r#""partialCapo":true"#, r#""lock":{"kind":"finalized"}"#] {
+        let repeated = format!("{},{repeat},{repeat}}}", &text[..text.len() - 1]);
+        fs::write(&path, repeated).unwrap();
+        assert!(MetadataInputReader::read(&path).is_err());
+    }
+}

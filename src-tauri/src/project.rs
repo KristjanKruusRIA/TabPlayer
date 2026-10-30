@@ -69,7 +69,7 @@ impl<'de> Deserialize<'de> for Project {
             #[serde(default, deserialize_with = "present_lock")]
             lock: Option<DocumentLock>,
             #[serde(default)]
-            partial_capo: bool,
+            partial_capo: Option<bool>,
         }
         let mut value = serde_json::Value::deserialize(deserializer)?;
         let fields = value
@@ -101,6 +101,12 @@ impl<'de> Deserialize<'de> for Project {
             }
         }
         let wire: CanonicalProject = serde_json::from_value(value).map_err(D::Error::custom)?;
+        // The marker is written only as true; a false would read as unmarked and be lost on save.
+        if wire.partial_capo == Some(false) {
+            return Err(D::Error::custom(
+                "The partial capo marker is only ever true.",
+            ));
+        }
         Ok(Self {
             format: wire.format,
             schema_version: wire.schema_version,
@@ -110,7 +116,7 @@ impl<'de> Deserialize<'de> for Project {
             edits: wire.edits,
             assets: wire.assets,
             lock: wire.lock,
-            partial_capo: wire.partial_capo,
+            partial_capo: wire.partial_capo.unwrap_or(false),
         })
     }
 }
@@ -261,6 +267,9 @@ impl Project {
                 "This project requires alphaTab {}. This app uses 1.8.4.",
                 self.engine_version
             ));
+        }
+        if self.partial_capo && !matches!(self.base, BaseDocument::File { .. }) {
+            return Err("Only a score read from a file can hold a partial capo marker.".into());
         }
         match &self.base {
             BaseDocument::Blank {
@@ -527,11 +536,26 @@ impl ProjectSession {
     }
 
     /// Records that the file's capo over some strings applies to this project. It is not an edit and not a change to save,
-    /// and it never goes back: a project must not change meaning between saves. Returns whether it changed.
-    pub fn mark_partial_capo(&mut self) -> bool {
-        let changed = !self.project.partial_capo;
+    /// and it never goes back: a project must not change meaning between saves. It is refused once there is any history
+    /// (edits, a redo tail, baseline edits or a saved edit list) or for a score that is not read from a file, because the
+    /// project could then replay differently from how it was saved. Returns whether it changed.
+    pub fn mark_partial_capo(&mut self) -> Result<bool, ProjectError> {
+        if self.project.partial_capo {
+            return Ok(false);
+        }
+        if !matches!(self.project.base, BaseDocument::File { .. })
+            || self.cursor != 0
+            || !self.project.edits.is_empty()
+            || !self.project.baseline_edits.is_empty()
+            || !self.saved.is_empty()
+        {
+            return Err(
+                "Partial capo can be recorded only before a score read from a file has any edits."
+                    .into(),
+            );
+        }
         self.project.partial_capo = true;
-        changed
+        Ok(true)
     }
 
     pub fn mark_saved(&mut self, path: PathBuf) {

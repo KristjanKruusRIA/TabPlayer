@@ -105,7 +105,7 @@ async function retry() {
   const emptyClean=preview?.reason==='clean'&&preview.documents.length===0;
   if(preview) {
     const valid=preview.documents.filter(document=>{
-      try {buildDocument(document.snapshot.project);return true;}
+      try {buildDocument(document.snapshot.project,document.snapshot.canRedo);return true;}
       catch(error){preview!.issues=[...preview!.issues,{documentId:document.documentId,message:`A recovered score could not be opened: ${message(error)}`}];return false;}
     });
     preview={...preview,documents:valid};

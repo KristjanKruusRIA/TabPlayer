@@ -17,7 +17,7 @@ Security review rejected several rounds, then approved f6249f1. Five scan tests 
 
 ## Limits
 
-- The Unix code path has not been compiled or run locally; only CI proves it.
+- The Unix code path has never been compiled or run. CI could not start on this branch because of a GitHub billing block, and the user chose to continue without it (2026-10-31).
 - Overlays run on the window outside the deadline. Their loops were fixed as found, not audited, so a crafted local file may hold the window for an unmeasured time.
 - A score that takes the Worker over 15 s no longer opens, and Open now parses twice.
 - The deadline is not a memory bound. CRCs are not checked.

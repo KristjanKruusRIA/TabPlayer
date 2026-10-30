@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { EditCommand } from '../edit-types';
-import type { BeatTarget } from '../project';
+import { previewEdit } from '../engine';
+import type { BeatTarget,Project } from '../project';
 
 /** Viewer-level score-input choices, kept in this window's storage. Hearing entered notes is a separate, older preference (audition.ts). */
 export interface InputPreferences {
@@ -40,20 +41,22 @@ export function useInputPreferences():[InputPreferences,(change:Partial<InputPre
   return [preferences,change=>setPreferences(old=>{const next={...old,...change};writeInputPreferences(next);return next;})];
 }
 
-/** What a keypad key means under the preferences. Null when the key is not claimed, so it types as before. Modified keys are never claimed. */
-export function numpadKey(event:{code:string;ctrlKey:boolean;metaKey:boolean;altKey:boolean;shiftKey:boolean},preferences:InputPreferences):NumpadKey|null {
+/** What a keypad key means under the preferences. Null when the key is not claimed, so it types as before. Modified keys and NumLock-off keys are never claimed. */
+export function numpadKey(event:{key:string;code:string;ctrlKey:boolean;metaKey:boolean;altKey:boolean;shiftKey:boolean},preferences:InputPreferences):NumpadKey|null {
   if(!preferences.numpadDurations||event.ctrlKey||event.metaKey||event.altKey||event.shiftKey)return null;
-  if(event.code==='NumpadDecimal')return {dot:true};
+  // With NumLock off the keypad reports its navigation keys (End, ArrowDown...) under the same code: those keep navigating.
+  if(event.code==='NumpadDecimal')return event.key==='.'||event.key===','?{dot:true}:null;
   const match=/^Numpad([1-7])$/.exec(event.code);
-  return match?{duration:NUMPAD_DURATIONS[Number(match[1])-1]}:null;
+  return match&&event.key===match[1]?{duration:NUMPAD_DURATIONS[Number(match[1])-1]}:null;
 }
 const entryOf=(beat:EntryBeat):EntryDuration=>({duration:beat.duration,dots:beat.dots});
 const plain=(beat:EntryBeat)=>!(beat.tupletNumerator&&beat.tupletNumerator>1);
 
-/** The one edit a keypad key makes on the selected beat, and the entry duration it leaves. Null for a beat whose rhythm is not a plain one. */
+/** The one edit a keypad key makes on the selected beat, and the entry duration it leaves. Null for a beat whose rhythm is not a plain one, or already has that rhythm. */
 export function numpadDurationEdit(key:NumpadKey,target:BeatTarget,beat:EntryBeat):{command:EditCommand;entry:EntryDuration}|null {
   if(beat.isEmpty||!plain(beat))return null;
   const entry='dot' in key?{duration:beat.duration,dots:beat.dots>0?0:1}:{duration:key.duration,dots:beat.dots};
+  if(entry.duration===beat.duration&&entry.dots===beat.dots)return null;
   return {command:{type:'setDuration',target,...entry},entry};
 }
 
@@ -66,6 +69,17 @@ export function autoDurationEdit(preferences:InputPreferences,target:BeatTarget,
   if(beat.duration===entry.duration&&beat.dots===entry.dots)return null;
   return {type:'setDuration',target,duration:entry.duration,dots:entry.dots};
 }
+/** Why auto-duration did not apply to a rest that differs from the entry duration, or null when it did, is off, or has nothing to apply. */
+export function autoDurationSkip(preferences:InputPreferences,beat:EntryBeat|null|undefined,entry:EntryDuration|null):string|null {
+  if(!preferences.autoDuration||!entry||!beat||beat.notes.length>0||(beat.duration===entry.duration&&beat.dots===entry.dots))return null;
+  if(beat.isEmpty)return 'Auto-duration skipped: this is the placeholder of an empty bar.';
+  return plain(beat)?null:'Auto-duration skipped: this beat is a tuplet.';
+}
+/** Whether the commands apply one after the other to the project, so a pair is never half done. Any refusal is false. */
+export function applyInOrder(project:Project,commands:EditCommand[]):boolean {
+  try{let built=previewEdit(project,commands[0]);for(const command of commands.slice(1))built=previewEdit(built.project,command,built);return true;}catch{return false;}
+}
+export const AUTO_DURATION_UNFIT='Auto-duration skipped: that duration does not fit this bar, so the note keeps the rest duration.';
 /** The entry duration after writing onto a beat directly: that beat's own rhythm. Unchanged for a placeholder. */
 export const entryAfterWrite=(beat:EntryBeat|null|undefined,entry:EntryDuration|null):EntryDuration|null=>beat&&!beat.isEmpty&&plain(beat)?entryOf(beat):entry;
 

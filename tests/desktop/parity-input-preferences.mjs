@@ -40,18 +40,6 @@ export async function runInputPreferencesAcceptance({buildPath}={}){
   const native=()=>poll(()=>invoke('audio_status'),value=>{assert.equal(value.error,null);return value.ready&&value.generation===value.desiredGeneration;},'paused current native preparation');
   const idle=async()=>{owned();await ui.waitForWorkspaceIdle(page);healthy();};
   const button=async name=>{owned();await ui.clickWorkstationButton(page,name);await idle();};
-  const view=()=>page.getByRole('region',{name:'Instrument view',exact:true});
-  const edits=async()=>(await record()).snapshot.project.edits;
-  // One click is exactly one native edit with this command; Undo restores the record before it and Redo the one after.
-  const click=async(label,name,expected)=>{
-    const before=await record(),count=before.snapshot.project.edits.length;
-    await view().getByRole('button',{name,exact:true}).click();await idle();
-    const after=await poll(record,value=>value.snapshot.project.edits.length===count+1,`${label}: one edit`);
-    assert.deepEqual(after.snapshot.project.edits.at(-1),expected,`${label}: command`);
-    await button('Undo');assert.deepEqual((await record()).snapshot.project,before.snapshot.project,`${label}: undo restores`);
-    await button('Redo');assert.deepEqual((await record()).snapshot.project,after.snapshot.project,`${label}: redo restores`);
-    result.edits.push({label,command:expected});return after;
-  };
   try{
     ui=await import('./workstation-commands.mjs');const {importer,Settings}=await import('@coderline/alphatab');load=bytes=>importer.ScoreLoader.loadScoreFromBytes(bytes,new Settings());
     await buildInstrumentFixture();writeFileSync(inputPath,readFileSync(fixturePath),{flag:'wx'});result.input={inputPath,sha256:hashFile(inputPath)};
@@ -68,7 +56,7 @@ export async function runInputPreferencesAcceptance({buildPath}={}){
     await idle();await button('Open');await page.locator('[aria-label="Music notation"] svg').first().waitFor();await native();
     const initial=await record();assert.deepEqual(initial.snapshot.project.edits,[]);
 
-    // Keypad durations are opt-in: with the preference off a keypad key makes no edit.
+
     const workspace$=()=>page.getByRole('region',{name:'Score workspace',exact:true});
     const prefs=()=>page.evaluate(()=>JSON.parse(localStorage.getItem('tabplayer.input.preferences')??'null'));
     const viewMenu=async()=>{
@@ -76,53 +64,100 @@ export async function runInputPreferencesAcceptance({buildPath}={}){
       if(!await region.isVisible())await page.locator('summary',{hasText:/^View$/}).click();
       await region.waitFor({state:'visible'});return region;
     };
-    await workspace$().focus();await page.keyboard.press('Numpad2');await idle();
+    const labels={preview:'Play notes while editing',auto:'Auto-duration: a note written on a rest takes the last duration',keypad:'Keypad sets duration (1-7, . for dot)',diagrams:'Paste includes chord diagrams'};
+    const box=async name=>(await viewMenu()).getByRole('checkbox',{name:labels[name],exact:true});
+    // Real key events carry the key a keyboard sends: Playwright's keyboard.press('Numpad2') reports ArrowDown, the NumLock-off shape.
+    const press=(key,code)=>workspace$().dispatchEvent('keydown',{key,code,bubbles:true,cancelable:true});
+    const field=async name=>{await ui.revealInspector(page);return page.getByLabel(name,{exact:true});};
+    const fret=async()=>(await field('Fret')).inputValue();
+
+    // With the preference off a keypad key types a fret and makes no edit.
+    assert.notEqual(await fret(),'2');
+    await press('2','Numpad2');await poll(fret,value=>value==='2','keypad 2 types fret 2');
     assert.deepEqual(await record(),initial,'Keypad is inert while the preference is off');
-    step('Keypad keys make no edit by default',{});
+    step('Keypad keys type frets and make no edit by default',{});
 
     // The View menu holds every score-input choice and remembers them.
-    let menu=await viewMenu();
-    for(const name of ['Play notes while editing','Auto-duration: a note written on a rest takes the last duration','Keypad sets duration (1-7, . for dot)','Paste includes chord diagrams'])await menu.getByRole('checkbox',{name,exact:true}).waitFor();
-    assert.equal(await menu.getByRole('checkbox',{name:'Paste includes chord diagrams',exact:true}).isChecked(),true,'Diagram paste defaults on');
-    assert.equal(await menu.getByRole('checkbox',{name:'Keypad sets duration (1-7, . for dot)',exact:true}).isChecked(),false,'Keypad defaults off');
-    await menu.getByRole('checkbox',{name:'Keypad sets duration (1-7, . for dot)',exact:true}).check();
-    await menu.getByRole('checkbox',{name:'Auto-duration: a note written on a rest takes the last duration',exact:true}).check();
-    await menu.getByRole('checkbox',{name:'Paste includes chord diagrams',exact:true}).uncheck();
+    for(const name of Object.keys(labels))await (await box(name)).waitFor();
+    assert.equal(await (await box('diagrams')).isChecked(),true,'Diagram paste defaults on');
+    assert.equal(await (await box('keypad')).isChecked(),false,'Keypad defaults off');
+    assert.equal(await (await box('auto')).isChecked(),false,'Auto-duration defaults off');
+    await (await box('keypad')).check();await (await box('auto')).check();await (await box('diagrams')).uncheck();
     assert.deepEqual(await prefs(),{autoDuration:true,numpadDurations:true,pasteDiagrams:false});
-    assert.deepEqual(await record(),initial,'Preferences never edit the score');step('Preferences are saved in the window',{prefs:await prefs()});
+    assert.deepEqual(await record(),initial,'Preferences never edit the score');
+
+    // Read path: after a reload the stored choices come back into the menu and the clipboard panel.
+    await page.reload();await page.locator('.app-shell').waitFor();
+    const welcome=page.getByRole('dialog',{name:'Library',exact:true});if(await welcome.isVisible().catch(()=>false)){await welcome.getByRole('button',{name:'Close',exact:true}).click();await welcome.waitFor({state:'hidden'});}
+    await idle();
+    if(!await workspace$().isVisible().catch(()=>false)){await button('Open');await native();}
+    await workspace$().waitFor();assert.deepEqual((await record()).snapshot.project.edits,[]);
+    assert.equal(await (await box('keypad')).isChecked(),true);assert.equal(await (await box('auto')).isChecked(),true);assert.equal(await (await box('diagrams')).isChecked(),false);
+    await ui.revealInspector(page);
+    const filter=page.getByLabel('Chord diagrams',{exact:true});
+    if(!await filter.isVisible())await page.locator('summary',{hasText:'Musical clipboard'}).click();
+    assert.equal(await filter.isChecked(),false,'Clipboard diagram filter starts from the preference');
+    await (await box('diagrams')).check();assert.equal(await filter.isChecked(),true,'Turning the preference on moves the filter');
+    await (await box('diagrams')).uncheck();assert.equal(await filter.isChecked(),false);
+    assert.deepEqual(await prefs(),{autoDuration:true,numpadDurations:true,pasteDiagrams:false});
+    step('Preferences are saved, reloaded and drive the clipboard filter',{prefs:await prefs()});
+
+    // NumLock off: the keypad reports navigation keys, which keep navigating and never edit.
+    const stringBefore=await (await field('String')).inputValue();
+    await press('ArrowDown','Numpad2');await poll(async()=>(await field('String')).inputValue(),value=>value!==stringBefore,'ArrowDown moved the string');
+    assert.deepEqual(await record(),initial);
+    // A keypad duration that changes nothing (keypad 1 on a whole note) adds no edit.
+    await press('1','Numpad1');await idle();assert.deepEqual(await record(),initial,'No-op keypad key makes no edit');
+    step('NumLock-off keys navigate and no-op durations make no edit',{});
+
+    // Auto-duration: a note on a rest, then a note on a differing rest takes the remembered duration first.
+    const edits=async()=>(await record()).snapshot.project.edits;
+    const tap=async(code,times=1)=>{await workspace$().focus();for(let i=0;i<times;i++)await page.keyboard.press(code);await idle();};
+    await tap('ArrowRight',3);// bar 2 beat 3, a quarter rest
+    await tap('Enter');
+    const afterFirst=await poll(edits,value=>value.length===1,'first note');
+    assert.equal(afterFirst[0].type,'setNote');assert.deepEqual(afterFirst[0].target,{track:0,bar:1,voice:0,beat:2,staff:0});
+    await tap('ArrowRight',2);// bar 3 beat 2, a half rest
+    await tap('Enter');
+    const afterSecond=await poll(edits,value=>value.length===3,'duration then note');
+    assert.deepEqual(afterSecond[1],{type:'setDuration',target:{track:0,bar:2,voice:0,beat:1,staff:0},duration:4,dots:0});
+    assert.equal(afterSecond[2].type,'setNote');assert.deepEqual(afterSecond[2].target,afterSecond[1].target);
+    step('Auto-duration sets the remembered duration before writing on a differing rest',{edits:afterSecond.slice(1)});
+    await tap('ArrowLeft',5);
 
     // Keypad 2 is a half note, keypad . dots it: each key is exactly one undoable edit on the selected beat.
     const first={track:0,...at};
-    const keypad=async(label,code,expected)=>{
+    const keypad=async(label,key,code,expected)=>{
       const before=await record(),count=before.snapshot.project.edits.length;
-      await workspace$().focus();await page.keyboard.press(code);await idle();
+      await press(key,code);await idle();
       const after=await poll(record,value=>value.snapshot.project.edits.length===count+1,`${label}: one edit`);
       assert.deepEqual(after.snapshot.project.edits.at(-1),expected,`${label}: command`);
       await button('Undo');assert.deepEqual((await record()).snapshot.project,before.snapshot.project,`${label}: undo restores`);
       await button('Redo');assert.deepEqual((await record()).snapshot.project,after.snapshot.project,`${label}: redo restores`);
       result.edits.push({label,command:expected});return after;
     };
-    await keypad('keypad 2','Numpad2',{type:'setDuration',target:first,duration:2,dots:0});
-    await keypad('keypad dot','NumpadDecimal',{type:'setDuration',target:first,duration:2,dots:1});
+    await keypad('keypad 2','2','Numpad2',{type:'setDuration',target:first,duration:2,dots:0});
+    await keypad('keypad dot','.','NumpadDecimal',{type:'setDuration',target:first,duration:2,dots:1});
     step('Keypad keys set duration and dot as single edits',{edits:result.edits});
 
     // Preview stays an independent choice.
-    menu=await viewMenu();const preview=menu.getByRole('checkbox',{name:'Play notes while editing',exact:true});
+    const preview=await box('preview');
     const heard=await preview.isChecked();await preview.setChecked(!heard);
     assert.equal(await page.evaluate(()=>localStorage.getItem('tabplayer.audition.whileEditing')),heard?'off':'on');
-    await preview.setChecked(heard);step('Preview toggle is saved separately',{});
+    await (await box('preview')).setChecked(heard);step('Preview toggle is saved separately',{});
 
-    // The saved score carries the dotted half.
-    const final=await record();assert.equal(final.snapshot.project.edits.length,2);
+    // The saved score carries every change.
+    const final=await record();assert.equal(final.snapshot.project.edits.length,5);
     const exportPath=`${exportBase}.gp`;assert.equal(existsSync(exportPath),false);await button('Export GP');
-    const score=load(readFileSync(exportPath)),exported=score.tracks[0].staves[0].bars[0].voices[0].beats[0];
-    assert.equal(exported.duration,2);assert.equal(exported.dots,1);
-    assert.deepEqual(await record(),final,'Export never edits');step('Exported GP reads back the dotted half',{exportPath,sha256:hashFile(exportPath)});
+    const score=load(readFileSync(exportPath)),bars=score.tracks[0].staves[0].bars,beatAt=(bar,index)=>bars[bar].voices[0].beats[index];
+    assert.equal(beatAt(0,0).duration,2);assert.equal(beatAt(0,0).dots,1);
+    assert.equal(beatAt(1,2).notes.length,1);assert.equal(beatAt(2,1).duration,4);assert.equal(beatAt(2,1).notes.length,1);
+    assert.deepEqual(await record(),final,'Export never edits');step('Exported GP reads back the dotted half and both written notes',{exportPath,sha256:hashFile(exportPath)});
 
-    // Turning the keypad preference off restores typing: the key makes no further edit.
-    menu=await viewMenu();await menu.getByRole('checkbox',{name:'Keypad sets duration (1-7, . for dot)',exact:true}).uncheck();
-    await workspace$().focus();await page.keyboard.press('Numpad3');await idle();
-    assert.deepEqual(await record(),final);step('Keypad preference off again makes no edit',{});
+    // Keypad off again: the key types a fret and edits nothing.
+    await (await box('keypad')).uncheck();
+    await press('3','Numpad3');await poll(fret,value=>value==='3','keypad 3 types fret 3');
+    assert.deepEqual(await record(),final);step('Keypad preference off again types frets',{});
     healthy();
   }catch(error){failure=error;result.error={message:String(error),stack:error.stack};if(page)try{await page.screenshot({path:resolve(paths.results,'failure.png')});}catch{}}
   finally{

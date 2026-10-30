@@ -868,7 +868,8 @@ it('keeps Play notes while editing in the View menu, on by default and remembere
 });
 
 const inputKey='tabplayer.input.preferences';
-const keypad=(code:string)=>fireEvent.keyDown(screen.getByRole('region',{name:'Score workspace'}),{key:code.replace('Numpad',''),code});
+const keypad=(code:string,key=code==='NumpadDecimal'?'.':code.replace('Numpad',''))=>fireEvent.keyDown(screen.getByRole('region',{name:'Score workspace'}),{key,code});
+const keypadOn=JSON.stringify({autoDuration:true,numpadDurations:true,pasteDiagrams:true});
 it('keeps the keypad typing frets until the Keypad sets duration preference is on',async()=>{
   window.localStorage.removeItem(inputKey);
   const c=await setup();keypad('Numpad5');
@@ -896,6 +897,38 @@ it('auto-duration gives a written rest the last keypad duration, and the prefere
   fireEvent.keyDown(screen.getByRole('region',{name:'Score workspace'}),{key:'ArrowRight'});
   fireEvent.keyDown(screen.getByRole('region',{name:'Score workspace'}),{key:'Enter'});
   await waitFor(()=>expect(currentBeat(c,1).notes).toHaveLength(1));expect(currentBeat(c,1).duration).toBe(8);
+  window.localStorage.removeItem(inputKey);
+});
+
+it('leaves NumLock-off keypad keys to navigation and ignores a keypad duration that changes nothing',async()=>{
+  window.localStorage.setItem(inputKey,keypadOn);
+  const c=await setup();keypad('Numpad2','ArrowDown');
+  expect(screen.getByLabelText('String')).toHaveValue('5');expect(c.getState().snapshot.project.edits).toEqual([]);
+  keypad('Numpad3');await new Promise(resolve=>setTimeout(resolve,20));
+  expect(c.getState().snapshot.project.edits).toEqual([]);expect(c.getState().snapshot.canUndo).toBe(false);
+  window.localStorage.removeItem(inputKey);
+});
+it('does not remember a refused keypad duration as the entry duration',async()=>{
+  window.localStorage.setItem(inputKey,keypadOn);
+  const c=await setup(),workspace=screen.getByRole('region',{name:'Score workspace'});
+  keypad('Numpad1');await new Promise(resolve=>setTimeout(resolve,50));
+  expect(c.getState().snapshot.project.edits).toEqual([]);
+  fireEvent.keyDown(workspace,{key:'ArrowRight'});fireEvent.keyDown(workspace,{key:'Enter'});
+  await waitFor(()=>expect(currentBeat(c,1).notes).toHaveLength(1));
+  expect(c.getState().snapshot.project.edits.map(edit=>edit.type)).toEqual(['setNote']);expect(currentBeat(c,1).duration).toBe(4);
+  window.localStorage.removeItem(inputKey);
+});
+it('does not remember a refused note as the entry duration, and never leaves a rhythm change without its note',async()=>{
+  window.localStorage.setItem(inputKey,keypadOn);
+  const c=await setup(),workspace=screen.getByRole('region',{name:'Score workspace'});
+  keypad('Numpad4');await waitFor(()=>expect(currentBeat(c).duration).toBe(8));
+  fireEvent.keyDown(workspace,{key:'ArrowRight'});
+  fireEvent.keyDown(workspace,{key:'9'});fireEvent.keyDown(workspace,{key:'9'});expect(screen.getByLabelText('Fret')).toHaveValue(99);
+  fireEvent.keyDown(workspace,{key:'Enter'});await new Promise(resolve=>setTimeout(resolve,50));
+  expect(c.getState().snapshot.project.edits.map(edit=>edit.type)).toEqual(['setDuration']);expect(currentBeat(c,1).duration).toBe(4);
+  change('Fret','5');fireEvent.keyDown(workspace,{key:'Enter'});
+  await waitFor(()=>expect(currentBeat(c,1).notes).toHaveLength(1));
+  expect(c.getState().snapshot.project.edits.map(edit=>edit.type)).toEqual(['setDuration','setDuration','setNote']);expect(currentBeat(c,1).duration).toBe(8);
   window.localStorage.removeItem(inputKey);
 });
 

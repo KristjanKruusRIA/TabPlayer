@@ -44,7 +44,7 @@ it('the_paste_diagrams_preference_sets_only_the_starting_diagram_filter',()=>{
   expect(screen.getByLabelText('Chord diagrams')).not.toBeChecked();expect(screen.getByLabelText('Beat texts')).toBeChecked();
   paste();expect(options[0].filters).toEqual({...filters,diagrams:false});
   fireEvent.click(screen.getByLabelText('Chord diagrams'));paste();expect(options[1].filters.diagrams).toBe(true);
-  view.rerender(<ClipboardPanel {...props} diagramsDefault/>);expect(screen.getByLabelText('Chord diagrams')).toBeChecked();
+  change('Paste repetitions','3');view.rerender(<ClipboardPanel {...props} diagramsDefault/>);expect(screen.getByLabelText('Chord diagrams')).toBeChecked();expect(screen.getByLabelText('Paste repetitions')).toHaveValue(3);
 });
 it('multitrack_defaults_and_explicit_unique_track_staff_mappings_are_exact',()=>{
   const source=destination(2,2),clip=makeMusicClip(source,{kind:'bars',tracks:[0,1],firstBar:0,lastBar:0},'multiTrack'),options:PasteOptions[]=[];

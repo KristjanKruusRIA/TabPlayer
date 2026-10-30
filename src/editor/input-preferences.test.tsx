@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
 import { fireEvent,render,screen } from '@testing-library/react';
 import { describe,expect,it } from 'vitest';
-import { DEFAULT_INPUT_PREFERENCES,InputPreferencesPanel,autoDurationEdit,entryAfterWrite,numpadDurationEdit,numpadKey,readInputPreferences,writeInputPreferences,type EntryBeat,type InputPreferences } from './input-preferences';
+import { blankProject } from '../project';
+import { AUTO_DURATION_UNFIT,DEFAULT_INPUT_PREFERENCES,InputPreferencesPanel,applyInOrder,autoDurationEdit,autoDurationSkip,entryAfterWrite,numpadDurationEdit,numpadKey,readInputPreferences,writeInputPreferences,type EntryBeat,type InputPreferences } from './input-preferences';
 
 const target={track:0,staff:0,bar:1,voice:0,beat:2};
-const key=(code:string,extra={})=>({code,ctrlKey:false,metaKey:false,altKey:false,shiftKey:false,...extra});
+const key=(code:string,extra={},value=code.replace(/^Numpad(\d)$/,'$1').replace('NumpadDecimal','.'))=>({key:value,code,ctrlKey:false,metaKey:false,altKey:false,shiftKey:false,...extra});
 const on:InputPreferences={autoDuration:true,numpadDurations:true,pasteDiagrams:true};
 const beat=(extra:Partial<EntryBeat>={}):EntryBeat=>({duration:4,dots:0,isEmpty:false,notes:[],...extra});
 const store=(initial?:string)=>{const values=new Map<string,string>();if(initial!==undefined)values.set('tabplayer.input.preferences',initial);return {values,getItem:(name:string)=>values.get(name)??null,setItem:(name:string,value:string)=>{values.set(name,value);}};};
@@ -28,6 +29,10 @@ describe('keypad durations',()=>{
     expect(numpadKey(key('Numpad3'),DEFAULT_INPUT_PREFERENCES)).toBeNull();
     expect(numpadKey(key('NumpadDecimal'),on)).toEqual({dot:true});
   });
+  it('leaves NumLock-off keypad keys to navigation',()=>{
+    for(const [code,value] of [['Numpad1','End'],['Numpad2','ArrowDown'],['Numpad4','ArrowLeft'],['Numpad6','ArrowRight'],['Numpad7','Home'],['NumpadDecimal','Delete']])expect(numpadKey(key(code,{},value),on)).toBeNull();
+    expect(numpadKey(key('NumpadDecimal',{},','),on)).toEqual({dot:true});
+  });
   it('leaves other keys and modified keys alone',()=>{
     for(const code of ['Digit3','Numpad0','Numpad8','Numpad9','NumpadAdd','Enter'])expect(numpadKey(key(code),on)).toBeNull();
     for(const extra of [{ctrlKey:true},{metaKey:true},{altKey:true},{shiftKey:true}])expect(numpadKey(key('Numpad3',extra),on)).toBeNull();
@@ -36,6 +41,11 @@ describe('keypad durations',()=>{
     expect(numpadDurationEdit({duration:8},target,beat({dots:1}))).toEqual({command:{type:'setDuration',target,duration:8,dots:1},entry:{duration:8,dots:1}});
     expect(numpadDurationEdit({dot:true},target,beat({duration:16}))).toEqual({command:{type:'setDuration',target,duration:16,dots:1},entry:{duration:16,dots:1}});
     expect(numpadDurationEdit({dot:true},target,beat({dots:1}))?.command).toEqual({type:'setDuration',target,duration:4,dots:0});
+  });
+  it('makes no edit when the rhythm would not change',()=>{
+    expect(numpadDurationEdit({duration:4},target,beat())).toBeNull();
+    expect(numpadDurationEdit({duration:4},target,beat({dots:1}))).toBeNull();
+    expect(numpadDurationEdit({duration:8},target,beat({duration:8,dots:0}))).toBeNull();
   });
   it('refuses placeholders and tuplets',()=>{
     expect(numpadDurationEdit({duration:8},target,beat({isEmpty:true}))).toBeNull();
@@ -62,6 +72,25 @@ describe('auto-duration',()=>{
     expect(entryAfterWrite(beat({duration:16,dots:1}),null)).toEqual({duration:16,dots:1});
     expect(entryAfterWrite(beat({isEmpty:true}),{duration:8,dots:0})).toEqual({duration:8,dots:0});
     expect(entryAfterWrite(null,null)).toBeNull();
+  });
+});
+
+describe('auto-duration safety',()=>{
+  const entry={duration:8,dots:0},first={track:0,staff:0,bar:0,voice:0,beat:0};
+  it('names why it skipped a placeholder or tuplet rest',()=>{
+    expect(autoDurationSkip(on,beat({isEmpty:true}),entry)).toMatch(/placeholder/);
+    expect(autoDurationSkip(on,beat({tupletNumerator:3}),entry)).toMatch(/tuplet/);
+    expect(autoDurationSkip(on,beat(),entry)).toBeNull();
+    expect(autoDurationSkip(on,beat({isEmpty:true,duration:8}),entry)).toBeNull();
+    expect(autoDurationSkip({...on,autoDuration:false},beat({isEmpty:true}),entry)).toBeNull();
+    expect(AUTO_DURATION_UNFIT).toMatch(/does not fit/);
+  });
+  it('applyInOrder accepts a valid pair and refuses a pair whose note is out of range, so nothing is half done',()=>{
+    const project=blankProject(),rhythm={type:'setDuration' as const,target:first,duration:8,dots:0};
+    expect(applyInOrder(project,[rhythm,{type:'setNote',target:first,string:6,fret:5}])).toBe(true);
+    expect(applyInOrder(project,[rhythm,{type:'setNote',target:first,string:6,fret:99}])).toBe(false);
+    expect(applyInOrder(project,[{type:'setNote',target:first,string:6,fret:99}])).toBe(false);
+    expect(applyInOrder(project,[{...rhythm,duration:1},{type:'setNote',target:first,string:6,fret:5}])).toBe(false);
   });
 });
 

@@ -38,7 +38,7 @@ import type { MusicSelection } from './editor/range-types';
 import { rangeFromBeats,selectionForTrack } from './editor/range-selection';
 import { planMeasureMap } from './editor/measures';
 import { ClipboardStore } from './editor/ClipboardStore';
-import { InputPreferencesPanel,autoDurationEdit,entryAfterWrite,numpadDurationEdit,numpadKey,useInputPreferences,type EntryDuration } from './editor/input-preferences';
+import { AUTO_DURATION_UNFIT,InputPreferencesPanel,applyInOrder,autoDurationEdit,autoDurationSkip,entryAfterWrite,numpadDurationEdit,numpadKey,useInputPreferences,type EntryDuration } from './editor/input-preferences';
 import { ClipboardPanel } from './editor/ClipboardPanel';
 import { ScoreErrorsPanel } from './editor/ScoreErrorsPanel';
 import { CommandPalette } from './editor/CommandPalette';
@@ -98,7 +98,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   const [selection,setSelection]=useState<BeatTarget>(documentView.target);
   const [musicSelection,setMusicSelection]=useState<MusicSelection|null>(null),rangeAnchor=useRef<BeatTarget|null>(null);
   const [clipboardVersion,setClipboardVersion]=useState(0),[clipboardError,setClipboardError]=useState<string|null>(null);
-  const [inputPrefs,setInputPrefs]=useInputPreferences(),entryDuration=useRef<EntryDuration|null>(null);
+  const [inputPrefs,setInputPrefs]=useInputPreferences(),entryDuration=useRef<EntryDuration|null>(null),[inputNotice,setInputNotice]=useState<{text:string;at:string}|null>(null);
   const [auditionEdits,setAuditionEdits]=useState(readAuditionWhileEditing),auditionEditsNow=useRef(auditionEdits);auditionEditsNow.current=auditionEdits;
   const [markErrors,setMarkErrors]=useState(readScoreErrorDisplay),scoreErrors=useMemo(()=>findScoreErrors(state.score),[state.score]);
   const clip=useMemo(()=>clipboard.get(),[clipboard,clipboardVersion]),clipboardSection=useRef<HTMLDivElement>(null);
@@ -357,7 +357,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   function keys(event:KeyboardEvent) {
     if (textEntry(event.target)||(event.target as HTMLElement).tagName==='BUTTON') return;
     const keypad=numpadKey(event,inputPrefs);
-    if(keypad){event.preventDefault();const change=location.beat&&!editBusy?numpadDurationEdit(keypad,target,location.beat):null;if(change){entryDuration.current=change.entry;edit(change.command);}return;}
+    if(keypad){event.preventDefault();const change=location.beat&&!editBusy?numpadDurationEdit(keypad,target,location.beat):null;if(change)void edit(change.command).then(accepted=>{if(accepted)entryDuration.current=change.entry;});return;}
     let next={...target};
     if(event.key==='ArrowRight') {
       if(next.beat<location.voice.beats.length-1) next.beat++;
@@ -373,8 +373,12 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
       const now=Date.now();digits.current.text=(now-digits.current.time<1000?digits.current.text:'')+event.key;
       digits.current.text=digits.current.text.slice(-2);digits.current.time=now;setFret(Number(digits.current.text));event.preventDefault();return;
     } else if(event.key==='Enter' && location.beat && !editBusy&&!indexed) {
-      const lead=autoDurationEdit(inputPrefs,target,location.beat,entryDuration.current),write=()=>edit({type:'setNote',target,string,fret});
-      if(lead)void edit(lead).then(done=>done&&write());else{entryDuration.current=entryAfterWrite(location.beat,entryDuration.current);write();}
+      const beat=location.beat,lead=autoDurationEdit(inputPrefs,target,beat,entryDuration.current),note:EditCommand={type:'setNote',target,string,fret},project=state.snapshot.project;
+      // The pair is checked before either edit, so a refused note never leaves a changed rhythm behind; an unfit duration falls back to a plain write.
+      const pair=lead!==null&&applyInOrder(project,[lead,note]),why=pair?null:lead&&applyInOrder(project,[note])?AUTO_DURATION_UNFIT:autoDurationSkip(inputPrefs,beat,entryDuration.current);
+      setInputNotice(why?{text:why,at:JSON.stringify(target)}:null);
+      if(pair)void edit(lead!).then(done=>done&&edit(note));
+      else void edit(note).then(accepted=>{if(accepted)entryDuration.current=entryAfterWrite(beat,entryDuration.current);});
       event.preventDefault();return;}
     else return;
     if(event.shiftKey&&(event.key==='ArrowLeft'||event.key==='ArrowRight')){
@@ -460,6 +464,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
           <button aria-pressed={instrumentShown} onClick={()=>instrumentShown?setInstrumentVisible(false):chooseDock('instrument')}>{instrumentShown?'Hide instrument':'Show instrument'}</button>
         </div>
         <div className="paper-scroll"><div className="paper score-paper-host"><ScoreView score={state.score} track={target.track} zoom={zoom} display={display} page={page} onDisplayStatus={onDisplayStatus} profile="Default" projection={projection} engraving={state.settings.engraving} visibleTracks={visibleTracks} onSelect={select} playback={player} editorSelection={musicSelection} onEditorSelection={editorSelection} editTarget={target} editString={indexed?undefined:string} editNoteIndex={noteIndex} errors={markErrors?scoreErrors:undefined}/></div></div>
+        {inputNotice&&inputNotice.at===JSON.stringify(target)&&<div className="score-hint" role="status">{inputNotice.text}</div>}
         <div className="score-hint">Measure {target.bar+1} · Beat {target.beat+1} · {indexed?`${location.staff.isPercussion?'Percussion':'Pitched'} note ${noteIndex===null?'entry':noteIndex+1} — Click a note to edit it in the inspector.`:`String ${string} · Fret ${fret} — Click the score, then use arrow keys, digits and Enter.`}</div>
       </section>
       <div ref={inspectorPane} className="workstation-inspector" hidden={!inspectorShown}>

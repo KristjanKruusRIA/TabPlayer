@@ -26,7 +26,9 @@ export function ClipboardPanel({score,target,selection,clip,busy,locked=false,di
       const destination=target.track+sourceTrack,existing=score.tracks[destination];
       return {track:existing?String(destination):'',staffMap:track.voices.map((_,staff)=>{const destinationStaff=source.kind==='phrase'?target.staff:staff;return existing?.staves[destinationStaff]?String(destinationStaff):'';})};
     })??[]);
-  },[source,score,target.track,target.staff,target.bar,target.voice,target.beat,diagramsDefault]);
+  },[source,score,target.track,target.staff,target.bar,target.voice,target.beat]);
+  // Changing the preference only moves the diagram filter; the repeat count and mappings being typed stay.
+  useEffect(()=>{setFilters(old=>old.diagrams===diagramsDefault?old:{...old,diagrams:diagramsDefault});},[diagramsDefault]);
   const scope=useMemo(()=>{
     if(!selection)return {text:'Select music to copy or cut.',error:''};
     try {

@@ -15,7 +15,9 @@ it('ends a drag without an edit when pointer capture is lost before the release'
   const slider=screen.getByRole('slider');begin(slider);
   expect(slider).toHaveAttribute('aria-valuenow','3');
   fireEvent.lostPointerCapture(slider,{pointerId:1});
-  expect(slider).toHaveAttribute('aria-valuenow','0');expect(onInputEnd).toHaveBeenCalledExactlyOnceWith(false);expect(onInput).toHaveBeenLastCalledWith(0);
+  expect(slider).toHaveAttribute('aria-valuenow','0');expect(onInputEnd).toHaveBeenCalledExactlyOnceWith(false);
+  // Ending it does not send the old value as one more update: the end is the signal to go back.
+  expect(onInput).toHaveBeenCalledTimes(1);
   // The button coming up afterwards, or the pointer moving over it, does nothing.
   fireEvent.pointerUp(slider,{clientY:252,pointerId:1,pointerType:'mouse'});fireEvent.pointerMove(slider,{clientY:100,pointerId:1,pointerType:'mouse',buttons:0});
   expect(onCommit).not.toHaveBeenCalled();expect(slider).toHaveAttribute('aria-valuenow','0');

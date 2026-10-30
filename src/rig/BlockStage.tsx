@@ -139,7 +139,8 @@ export function BlockStage({editing,selected,cabinetResponse}:{editing:SoundEdit
   else if(block==='cabinet'||block==='microphone')body=<CabinetStage editing={editing} board={board} block={block} cabinetResponse={cabinetResponse}/>;
   else if(block==='graphicEq')body=<GraphicEqStage editing={editing} board={board}/>;
   else body=<PedalStage editing={editing} board={board} block={block}/>;
-  return <section className="rig-stage" role="tabpanel" aria-label={board.second?`Second pedalboard: ${name}`:name} data-block={block}>
+  // A stage belongs to one track, board and block: another one is a new stage, so a drag begun on this one ends with it.
+  return <section key={`${editing.trackId}/${board.second?'second':'first'}/${block}`} className="rig-stage" role="tabpanel" aria-label={board.second?`Second pedalboard: ${name}`:name} data-block={block}>
     <header className="rig-stage-head">
       <h2>{board.second?'Second pedalboard · ':''}{name}</h2>
       {!board.second&&<span className="rig-stage-place">{index+1} of {order.length}</span>}

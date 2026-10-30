@@ -576,6 +576,84 @@ it('does not try to play a drag when the host cannot preview, and still records 
   expect(edits).toHaveLength(1);
 });
 
+// A drag belongs to the track, board and block it began on.
+/** Like `mount`, but the player can hold its previews in flight, and the host can set the sound as an undo would. */
+function mountHeld(sounds:Record<string,TrackSound>,hold=false) {
+  const edits:Extract<EditCommand,{type:'setTrackSound'}>[]=[],held:(()=>void)[]=[];
+  let preview:{track:string;sound:TrackSound}|null=null;const listeners=new Set<()=>void>();
+  const player={
+    subscribe:(listener:()=>void)=>{listeners.add(listener);return()=>listeners.delete(listener);},getState:()=>null,devices:vi.fn(async()=>[]),deviceId:()=>null,selectDevice:vi.fn(),soundPreview:()=>preview,
+    previewSound:vi.fn(async(track:string,sound:TrackSound|null)=>{preview=sound?{track,sound:structuredClone(sound)}:(preview?.track===track?null:preview);listeners.forEach(listener=>listener());if(hold&&sound)await new Promise<void>(resolve=>held.push(resolve));}),
+    release:()=>held.splice(0).forEach(resolve=>resolve()),
+  };
+  let setAll=(_:(old:Record<string,TrackSound>)=>Record<string,TrackSound>)=>{},goTo=(_:string)=>{};
+  function Host() {
+    const [all,set]=useState(sounds),[track,setTrack]=useState('guitar');setAll=set;goTo=setTrack;
+    return <SoundRig trackId={track} sound={all[track]} playback={player as unknown as NativePlaybackController} tracks={[{id:'guitar',name:'Lead Guitar',program:29},{id:'bass',name:'Bass',program:33}]} onTrack={setTrack}
+      onEdit={async command=>{if(command.type==='setTrackSound'){edits.push(command);set(old=>({...old,[command.trackId]:command.sound}));}}}/>;
+  }
+  render(<Host/>);
+  return {edits,player,goTo:(id:string)=>act(()=>goTo(id)),setSounds:(next:(old:Record<string,TrackSound>)=>Record<string,TrackSound>)=>act(()=>setAll(next))};
+}
+const press=(user:ReturnType<typeof userEvent.setup>,target:HTMLElement,y=300)=>user.pointer([{keys:'[MouseLeft>]',target,coords:{clientY:y}},{target,coords:{clientY:y-40}}]);
+
+it('ends a drag without an edit when the track changes under it, and the new track\'s sound is untouched', async()=>{
+  const user=userEvent.setup(),{edits,player,goTo}=mountHeld({guitar:soundPreset('lead','green-guitar'),bass:soundPreset('bass','babyblue-bass')});
+  const gain=screen.getByRole('slider',{name:'amp Gain (dB)'});
+  await press(user,gain);
+  expect(player.soundPreview()?.track).toBe('guitar');
+  // The track changes with the pointer still held and focus still on the knob, as an undo does.
+  await goTo('bass');
+  await wait(20);
+  expect(player.soundPreview()).toBeNull();
+  // Releasing now, on whatever the pointer is over, records nothing anywhere.
+  const bassGain=screen.getByRole('slider',{name:'amp Gain (dB)'});
+  await user.pointer([{keys:'[/MouseLeft]',target:bassGain}]);await wait(20);
+  expect(edits).toEqual([]);expect(bassGain).toHaveAttribute('aria-valuenow','0');
+});
+
+it('ends a drag without an edit when an undo removes the second pedalboard it was on', async()=>{
+  const user=userEvent.setup(),first=soundPreset('lead','green-guitar'),withSecond=structuredClone(first);withSecond.effects.second=structuredClone(first.effects);withSecond.effects.second.drive.enabled=true;
+  const {edits,player,setSounds}=mountHeld({guitar:withSecond,bass:soundPreset('bass')});
+  await user.click(screen.getByRole('tab',{name:'Second pedalboard: Drive, enabled'}));
+  const drive=screen.getByRole('slider',{name:'Second pedalboard: drive Drive'});
+  await press(user,drive);
+  expect(player.soundPreview()?.sound.effects.second?.drive.drive).toBeGreaterThan(.5);
+  // An undo puts the sound back without the second board.
+  await setSounds(old=>({...old,guitar:first}));await wait(20);
+  expect(player.soundPreview()).toBeNull();
+  // With the board gone, the first board's drive is shown, and the release lands on it harmlessly.
+  expect(screen.getByRole('tabpanel',{name:'Drive'})).toBeInTheDocument();
+  await user.pointer([{keys:'[/MouseLeft]',target:screen.getByRole('slider',{name:'drive Drive'})}]);await wait(20);
+  expect(edits).toEqual([]);
+});
+
+it('ends a drag without an edit when a block change replaces the knob it was on', async()=>{
+  const user=userEvent.setup(),{edits,player}=mountHeld({guitar:soundPreset('lead','green-guitar'),bass:soundPreset('bass')});
+  const gain=screen.getByRole('slider',{name:'amp Gain (dB)'});
+  await press(user,gain);
+  expect(player.soundPreview()).not.toBeNull();
+  await user.click(screen.getByRole('tab',{name:/^Drive, /}));await wait(20);
+  expect(player.soundPreview()).toBeNull();
+  await user.pointer([{keys:'[/MouseLeft]',target:screen.getByRole('slider',{name:'drive Drive'})}]);await wait(20);
+  expect(edits).toEqual([]);
+});
+
+it('never sends one track\'s sound to another track when a request is still in flight at a track change', async()=>{
+  const user=userEvent.setup(),{player}=mountHeld({guitar:soundPreset('lead','green-guitar'),bass:soundPreset('bass','babyblue-bass')},true);
+  await press(user,screen.getByRole('slider',{name:'amp Gain (dB)'}));
+  // The guitar's request is still out when the track changes and a gesture starts on the bass.
+  await user.click(within(screen.getByRole('radiogroup',{name:'Track'})).getByRole('radio',{name:'Bass'}));
+  await press(user,screen.getByRole('slider',{name:'amp Gain (dB)'}),280);
+  for(let i=0;i<4;i++){await act(async()=>{player.release();await Promise.resolve();});await wait(90);}
+  const sent=player.previewSound.mock.calls.filter(call=>call[1]).map(call=>[call[0],(call[1] as TrackSound).presetId]);
+  // Each request carries the sound of the track it is for.
+  expect(sent.length).toBeGreaterThan(0);
+  for(const [track,preset] of sent)expect([track,preset]).toEqual(track==='guitar'?['guitar','lead']:['bass','bass']);
+  await user.pointer([{keys:'[/MouseLeft]'}]);for(let i=0;i<3;i++){await act(async()=>{player.release();await Promise.resolve();});await wait(30);}
+  expect(player.soundPreview()?.track==='guitar').toBe(false);
+});
+
 // The instrument picker.
 it('draws every source the engine has, and Automatic, as a radio group named Sound source', ()=>{
   mount(soundPreset('lead','green-guitar'));

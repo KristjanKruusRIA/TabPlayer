@@ -52,31 +52,37 @@ export function useSoundEditing({trackId,sound,onEdit,playback,busy=false,shown=
   // Hearing a drag. The sound being dragged plays through the preview path, which the player applies as a mix change on the
   // running plan (no re-preparation, 10 ms crossfade, newest settings win), at most once every `liveEveryMs`. Nothing is
   // recorded until the drag ends.
-  const live=useRef<{active:boolean;pending:TrackSound|null;sending:boolean;timer:ReturnType<typeof setTimeout>|null;lastSent:number}>({active:false,pending:null,sending:false,timer:null,lastSent:0});
+  // Each request names the track it is for, so what is still in flight when the track changes cannot reach another one.
+  const live=useRef<{active:boolean;track:string|null;pending:{track:string;sound:TrackSound}|null;sending:boolean;timer:ReturnType<typeof setTimeout>|null;lastSent:number}>({active:false,track:null,pending:null,sending:false,timer:null,lastSent:0});
+  const liveApi=useRef({send:()=>{},schedule:()=>{},end:()=>Promise.resolve() as Promise<void>});
   const sendLive=()=>{
     const state=live.current;state.timer=null;
     if(!state.active||state.sending||!state.pending||!previewer)return;
-    const sound=state.pending;state.pending=null;state.sending=true;state.lastSent=Date.now();
-    void Promise.resolve(previewer.previewSound(trackId,sound)).catch(e=>setError(String(e))).finally(()=>{state.sending=false;if(state.active&&state.pending)scheduleLive();});
+    const {track,sound}=state.pending;state.pending=null;state.sending=true;state.lastSent=Date.now();
+    void Promise.resolve(previewer.previewSound(track,sound)).catch(e=>setError(String(e))).finally(()=>{state.sending=false;if(state.active&&state.pending)liveApi.current.schedule();});
   };
   const scheduleLive=()=>{
     const state=live.current;if(state.timer||state.sending)return;
     const wait=Math.max(0,liveEveryMs-(Date.now()-state.lastSent));
-    if(wait===0)sendLive();else state.timer=setTimeout(sendLive,wait);
+    if(wait===0)liveApi.current.send();else state.timer=setTimeout(()=>liveApi.current.send(),wait);
   };
   /** Plays `next` in place of the track's sound while a control is being dragged. */
   const hear=(next:TrackSound)=>{
     if(!previewer||busy||showingPreview)return;
-    const state=live.current;state.active=true;state.pending=structuredClone(next);scheduleLive();
+    const state=live.current;
+    // A drag that began on another track ends first; its sound is never played on this one.
+    if(state.active&&state.track!==trackId){state.pending=null;void liveApi.current.end();}
+    state.active=true;state.track=trackId;state.pending={track:trackId,sound:structuredClone(next)};scheduleLive();
   };
-  /** Stops hearing a drag and goes back to the saved sound. Resolves once the player has. */
+  /** Stops hearing a drag and goes back to the saved sound of the track it was for. Resolves once the player has. */
   const endLive=()=>{
     const state=live.current;if(!state.active)return Promise.resolve();
-    state.active=false;state.pending=null;if(state.timer){clearTimeout(state.timer);state.timer=null;}
-    const settle=()=>previewer&&!previewChoice&&previewer.soundPreview()?.track===trackId?Promise.resolve(previewer.previewSound(trackId,null)).catch(e=>setError(String(e))):Promise.resolve();
+    const track=state.track;state.active=false;state.pending=null;if(state.timer){clearTimeout(state.timer);state.timer=null;}
+    const settle=()=>previewer&&track!==null&&!previewChoice&&previewer.soundPreview()?.track===track?Promise.resolve(previewer.previewSound(track,null)).catch(e=>setError(String(e))):Promise.resolve();
     // A request still in flight finishes first, so the old sound cannot come back after the end.
     return state.sending?new Promise<void>(resolve=>{const wait=()=>{if(state.sending)setTimeout(wait,5);else resolve(settle());};wait();}).then(()=>undefined):settle().then(()=>undefined);
   };
+  liveApi.current={send:sendLive,schedule:scheduleLive,end:endLive};
   /** Plays one field of `block` at `value` for as long as a control is dragged. */
   const hearField=(board:Board,block:EffectBlock,key:string,value:unknown)=>hear(board.build(effects=>setField(effects,block,key,value)));
   /** Puts a copy of `block` from the track's pedalboard on the second one, switched on; the second board starts with every pedal off. */
@@ -108,7 +114,7 @@ export function useSoundEditing({trackId,sound,onEdit,playback,busy=false,shown=
   // Messages and an open confirmation belong to the track they were shown for.
   const shownTrack=useRef(trackId);
   // A drag being heard ends with its track, and with the view.
-  useEffect(()=>()=>{const state=live.current;state.active=false;state.pending=null;if(state.timer){clearTimeout(state.timer);state.timer=null;}},[trackId]);
+  useEffect(()=>()=>{void liveApi.current.end();},[trackId]);
   useEffect(()=>{shownTrack.current=trackId;setStatus('');setConfirming(false);setPreviewChoice('');setFactoryChoice('');},[trackId]);
   // A preview lasts only while its track's panel is shown.
   useEffect(()=>()=>{if(previewer?.soundPreview()?.track===trackId)void Promise.resolve(previewer.previewSound(trackId,null)).catch(()=>{});},[previewer,trackId]);
@@ -148,7 +154,7 @@ export function useSoundEditing({trackId,sound,onEdit,playback,busy=false,shown=
   const selectOutput=(id:string)=>playback?.selectDevice(id||null);
   return {
     playbackState,current,devices,error,setError,status,setStatus,busy,playback:playback??null,record,save,
-    first,second,fx,hearField,hear,endLive,duplicate,syncOf,sync,order,place,move,movedBlock,pastePedal,copyPedalOf,copyCurrentSound,pasteSound,clipboard,library,
+    trackId,first,second,fx,hearField,hear,endLive,duplicate,syncOf,sync,order,place,move,movedBlock,pastePedal,copyPedalOf,copyCurrentSound,pasteSound,clipboard,library,
     chosen,setChosen,name,setName,entry,confirming,setConfirming,savedSelect,closeConfirm,saveNamed,renameChosen,deleteChosen,applySaved,
     factoryChoice,setFactoryChoice,factory,factoryNote,applyFactory,applyFactoryId,
     previewer,previewChoice,previewLabel,showingPreview,previewSelect,previewReturn,choosePreview,cancelPreview,keepPreview,escapePreview,orphanPreview,

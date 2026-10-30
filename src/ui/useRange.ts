@@ -75,7 +75,7 @@ export function useRange(options:RangeOptions) {
   const finish=(next:number|null)=>{const sent=next===null?false:commit(next);if(next===null){setDraft(null);lastDraft.current=null;}latest.current.onInputEnd?.(sent);};
   const clearWheel=()=>{const state=wheel.current;if(state.timer)clearTimeout(state.timer);state.timer=null;state.pending=null;};
   /** Puts the control back and ends the gesture without recording it. */
-  const cancelGesture=()=>{drag.current=null;lastDraft.current=null;setDraft(null);clearWheel();latest.current.onInput?.(latest.current.value);latest.current.onInputEnd?.(false);};
+  const cancelGesture=()=>{drag.current=null;lastDraft.current=null;setDraft(null);clearWheel();latest.current.onInputEnd?.(false);};
   const active=()=>drag.current!==null||wheel.current.pending!==null;
   const flushWheel=()=>{const state=wheel.current;if(state.timer)clearTimeout(state.timer);state.timer=null;if(state.pending!==null){const pending=state.pending;state.pending=null;finish(pending);}};
   const preview=(next:number)=>{const target=snap(next);lastDraft.current=target;setDraft(target);latest.current.onInput?.(target);return target;};

@@ -403,6 +403,34 @@ it('persists selected track sound and mixer without replacing the score identity
   fireEvent.click(exposeFunctionalControl(screen.getByLabelText('Mute')));await waitFor(()=>expect(c.getState().settings.mixes['base/0'].mute).toBe(true));expect(c.getState().score).toBe(score);
   expect(integration.beforeScoreChange).not.toHaveBeenCalled();expect(integration.loadDocument).toHaveBeenLastCalledWith(c.getState().snapshot.project,expect.objectContaining({score,settings:c.getState().settings}),0,0);
 });
+it('shows the Sound rig over the whole workspace while the transport stays, and edits through the same undoable history',async()=>{
+  const c=await setup(),score=c.getState().score,before=c.getState().snapshot.project.edits.length;
+  const view=screen.getByRole('radiogroup',{name:'View'});expect(within(view).getByRole('radio',{name:'Score'})).toBeChecked();
+  expect(screen.queryByRole('region',{name:'Sound rig'})).not.toBeInTheDocument();
+  fireEvent.click(within(view).getByRole('radio',{name:'Sound'}));
+  const rig=await screen.findByRole('region',{name:'Sound rig'});
+  // The transport is still there to play and loop while the sound changes, and the inspector's panel gives way to the rig.
+  expect(document.querySelector('[aria-keyshortcuts="Space"]')).toBeInTheDocument();
+  expect(screen.getAllByLabelText('Sound source')).toHaveLength(1);expect(rig).toContainElement(screen.getByLabelText('Sound source'));
+  expect(within(rig).getAllByRole('tab')).toHaveLength(18);
+  // One knob drag is one edit in the document's history, and undo takes it back.
+  fireEvent.click(within(rig).getByRole('tab',{name:'Drive, bypassed'}));
+  const drive=within(rig).getByRole('slider',{name:'drive Drive'});
+  fireEvent.pointerDown(drive,{clientY:300,pointerId:1});for(const y of [290,270,240])fireEvent.pointerMove(drive,{clientY:y,pointerId:1});fireEvent.pointerUp(drive,{clientY:240,pointerId:1});
+  await waitFor(()=>expect(c.getState().settings.sounds['base/0'].effects.drive.drive).toBe(.88));
+  expect(c.getState().snapshot.project.edits).toHaveLength(before+1);expect(c.getState().score).toBe(score);
+  fireEvent.click(within(rig).getByRole('switch',{name:'Enable drive'}));
+  await waitFor(()=>expect(c.getState().settings.sounds['base/0'].effects.drive.enabled).toBe(true));
+  expect(c.getState().snapshot.project.edits).toHaveLength(before+2);
+  fireEvent.click(screen.getByRole('button',{name:'Undo'}));
+  await waitFor(()=>expect(c.getState().settings.sounds['base/0'].effects.drive.enabled).toBe(false));
+  expect(c.getState().settings.sounds['base/0'].effects.drive.drive).toBe(.88);
+  // Back to the score: the rig is gone and the inspector's Sound panel is back, unchanged.
+  fireEvent.click(within(view).getByRole('radio',{name:'Score'}));
+  expect(screen.queryByRole('region',{name:'Sound rig'})).not.toBeInTheDocument();
+  expect(screen.getByLabelText('Sound source')).toBeInTheDocument();
+  expect(c.getState().settings.sounds['base/0'].effects.drive.drive).toBe(.88);
+});
 it('loads documents into native playback and opening does not reset saved mix',async()=>{
   const c=await setup();await waitFor(()=>expect(integration.loadDocument).toHaveBeenCalled());fireEvent.click(exposeFunctionalControl(screen.getByLabelText('Mute')));await waitFor(()=>expect(c.getState().settings.mixes['base/0'].mute).toBe(true));
   const oldHistory=c.getState();click('New');await waitFor(()=>expect(activeController()).not.toBe(c));const fresh=activeController();expect(fresh.getState().snapshot.project.edits).toHaveLength(0);expect(c.getState()).toBe(oldHistory);expect(screen.getByLabelText('Mute')).not.toBeChecked();expect(integration.loadDocument).toHaveBeenLastCalledWith(fresh.getState().snapshot.project,expect.objectContaining({score:fresh.getState().score}),0,0);

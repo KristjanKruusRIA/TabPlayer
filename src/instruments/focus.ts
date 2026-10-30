@@ -28,11 +28,19 @@ function firstPass(notes: readonly PlanNote[]) {
   const occurrence = Math.min(...notes.map(note => note.occurrence));
   return notes.filter(note => note.occurrence === occurrence);
 }
-/** The notes that start at the first onset at or after `from` and before `until`. */
+/**
+ * The notes of the first onset at or after `from` and before `until`. A chord is one onset even when a brush spreads
+ * its notes in time: its notes count from the earliest first attack of their beat.
+ */
 function onset(notes: readonly PlanNote[], from: number, until: number) {
+  const beatOf = (note: PlanNote) => `${note.source.target.track}/${note.source.target.staff}/${note.source.target.bar}/${note.source.target.voice}/${note.source.target.beat}/${note.occurrence}/${note.playedBar ?? ''}`;
+  const first = (note: PlanNote) => note.id.endsWith('/0');
+  const starts = new Map<string, number>();
+  for (const note of notes) if (first(note)) starts.set(beatOf(note), Math.min(starts.get(beatOf(note)) ?? Infinity, note.startTick));
+  const start = (note: PlanNote) => first(note) ? starts.get(beatOf(note))! : note.startTick;
   let next = Infinity;
-  for (const note of notes) if (note.startTick >= from && note.startTick < until && note.startTick < next) next = note.startTick;
-  return notes.filter(note => note.startTick === next);
+  for (const note of notes) { const at = start(note); if (at >= from && at < until && at < next) next = at; }
+  return notes.filter(note => start(note) === next);
 }
 
 /** Picks the notes the instrument view shows for the chosen focus. */

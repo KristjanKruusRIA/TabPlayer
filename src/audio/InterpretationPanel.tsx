@@ -30,6 +30,6 @@ export function InterpretationPanel({ trackId, mix, stringed, busy = false, onEd
       </select></label>)}
     <label className="check"><input type="checkbox" checked={current.letRing === true} onChange={e => change({ letRing: e.target.checked ? true : undefined })} />Automatic let ring</label>
   </fieldset>
-  <p className="hint">Heard in playback and audio export; the written score is unchanged. Written palm mutes, pick strokes, finger marks and other techniques always win over the style.</p>
+  <p className="hint">Heard in playback and audio export; the written score is unchanged. Written palm mutes, pick strokes, finger marks and other techniques always win over the style. Changing a setting prepares playback again, which stops it and clears any loop or range.</p>
   {error && <p role="alert">{error}</p>}</section>;
 }

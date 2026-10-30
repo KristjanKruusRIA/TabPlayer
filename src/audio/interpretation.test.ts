@@ -7,6 +7,7 @@ import type { TrackInterpretation } from '../edit-types';
 import { NativePlaybackController } from './NativePlaybackController';
 import type { NativeAudioBridge } from './bridge';
 import { buildPlaybackPlanFromJson } from './plan';
+import { focusNotes } from '../instruments/focus';
 import { canonicalInterpretation, interpretationsOf, strongOffsets, validateInterpretation } from './interpretation';
 import type { PlaybackPlan } from './types';
 
@@ -196,4 +197,68 @@ it('stores the interpretation with the track mix, replays it, copies it with a d
   const copied = previewEdit(styled.project, { type: 'duplicateTrack', track: 0 }, styled);
   expect(Object.values(copied.settings.mixes).filter(m => m.interpretation?.style === 'fingers')).toHaveLength(2);
   player.destroy(); project = styled.project; expect(project.edits.at(-1)).toMatchObject({ type: 'setTrackMix' });
+});
+
+const accents = (written: model.Score) => { const plain = planOf(written), strong = planOf(written, { accent: 'strong' }); return byBeat(strong).map((n, i) => n.velocity - byBeat(plain)[i].velocity); };
+
+it('accents the main note of a beat, not its grace note, and counts from the written position', () => {
+  const score = authored(1), voice = score.tracks[0].staves[0].bars[0].voices[0];
+  voice.beats.length = 0;
+  const beat = (grace: boolean, fret?: number) => {
+    const b = new model.Beat(); b.duration = grace ? model.Duration.Sixteenth : model.Duration.Quarter; b.isEmpty = false;
+    if (grace) b.graceType = model.GraceType.OnBeat;
+    voice.addBeat(b);
+    if (fret !== undefined) { const n = new model.Note(); n.string = grace ? 1 : 2; n.fret = fret; b.addNote(n); }
+  };
+  beat(true, 5); beat(false, 3); beat(false); beat(true, 5); beat(false, 3); beat(false);
+  const result = accents(score);
+  expect(result.filter(v => v !== 0)).toEqual([22, 11]);
+  expect(result.length).toBe(4);
+});
+
+it('right-aligns a pickup bar and accents only the first attack of a trill', () => {
+  const pickup = authored(2); pickup.masterBars[0].isAnacrusis = true;
+  pickup.tracks[0].staves[0].bars[0].voices[0].beats.splice(2, 2);
+  note(pickup, 0, 0, 2, 3); note(pickup, 0, 1, 3, 3); note(pickup, 1, 0, 2, 3);
+  expect(accents(pickup)).toEqual([11, 0, 22]);
+  const trill = authored(1), whole = trill.tracks[0].staves[0].bars[0].voices[0]; whole.beats.splice(1, 3); whole.beats[0].duration = model.Duration.Whole;
+  const n = note(trill, 0, 0, 2, 3); n.trillValue = 5; n.trillSpeed = model.Duration.Sixteenth;
+  const all = accents(trill); expect(all.length).toBeGreaterThan(4); expect(all.filter(v => v !== 0)).toEqual([22]);
+});
+
+it('finds strong beats after tuplet rounding without accenting its neighbours', () => {
+  const score = authored(1), voice = score.tracks[0].staves[0].bars[0].voices[0];
+  voice.beats.length = 0;
+  for (let i = 0; i < 16; i++) { const beat = new model.Beat(); beat.duration = i < 14 ? model.Duration.Sixteenth : model.Duration.Quarter; if (i < 14) { beat.tupletNumerator = 7; beat.tupletDenominator = 4; } beat.isEmpty = false; voice.addBeat(beat); note(score, 0, i, 2 + i % 4, 3); }
+  const result = accents(score);
+  expect(result.filter(v => v !== 0)).toEqual([22, 11]);
+  expect(result[0]).toBe(22);
+});
+
+it('changes the newest mix, not the one last loaded, when the mixer moves a fader', async () => {
+  const project = blankProject(), built = buildDocument(project), onEdit = vi.fn();
+  const bridge = { prepare: vi.fn(async () => {}), command: vi.fn(async () => {}), setMix: vi.fn(async () => {}), devices: vi.fn(async () => []), status: vi.fn(async () => null), subscribe: vi.fn(async () => () => {}), stageBacking: vi.fn(async () => null), stageEmbeddedBacking: vi.fn(async () => null) } as NativeAudioBridge;
+  const newest = { gain: 1, pan: 0, mute: false, solo: false, interpretation: { brush: 'up' } as TrackInterpretation };
+  const player = new NativePlaybackController({ bridge, onEdit, latestMix: id => id === 'base/0' ? newest : undefined });
+  await player.loadDocument(project, built);
+  player.setTrackVolume(0, .4);
+  expect(onEdit).toHaveBeenLastCalledWith({ type: 'setTrackMix', trackId: 'base/0', mix: { ...newest, gain: .4 } });
+  player.destroy();
+});
+
+it('shows a brushed chord as one onset in the next-notes instrument view', () => {
+  const score = authored(1); for (const s of [6, 5, 4]) note(score, 0, 0, s, 2); note(score, 0, 1, 2, 3);
+  const plan = planOf(score, { brush: 'down' });
+  const input = (tick: number | null) => ({ active: [], notes: plan.notes, beats: plan.performedBeats ?? [], tick, counting: false, loop: null, range: null, target: { track: 0, staff: 0, bar: 0, voice: 0, beat: 1 } });
+  expect(plan.notes.filter(n => n.startTick < 960).map(n => n.startTick).sort()).toEqual([0, 30, 60]);
+  // Before the chord, and while its brush is still spreading, the next onset is the second beat, not the rest of the chord.
+  expect(focusNotes('next', input(-1)).map(n => n.source.target.beat)).toEqual([0, 0, 0]);
+  expect(focusNotes('next', input(10)).map(n => n.source.target.beat)).toEqual([1]);
+});
+
+it('leaves a written slap and a written pick stroke alone', () => {
+  const bass = authored(1, 33, [43, 38, 33, 28]); note(bass, 0, 0, 3, 2).beat.slap = true;
+  expect(planOf(bass, { style: 'pick' }).notes[0].articulation).toBe('fingered');
+  const chord = authored(1); for (const s of [6, 5, 4]) note(chord, 0, 0, s, 2); chord.tracks[0].staves[0].bars[0].voices[0].beats[0].pickStroke = model.PickStroke.Down;
+  expect(JSON.stringify(planOf(chord, { brush: 'down' }))).toBe(JSON.stringify(planOf(chord)));
 });

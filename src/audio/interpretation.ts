@@ -45,6 +45,8 @@ export const accentBoost = { light: 10, strong: 22 } as const;
 export const midBarShare = 0.5;
 /** Palm mutes fade quicker the heavier they are. */
 export const heavyMuteVelocity = 0.8;
+/** Ticks a beat may sit from a strong position and still count: tuplet rounding drifts a few ticks, the closest written subdivision is 15 away. */
+export const accentTolerance = 7;
 /** A brush spreads a chord by up to this many ticks (a 64th-note triplet's worth) between strings. */
 export const brushSpacing = 30;
 
@@ -62,8 +64,10 @@ export interface Attack {
   /** The note's own times and velocity, written back after the pass because they feed the plan's MIDI events. */
   raw: { start: number; end: number; velocity: number };
   staff: number;
-  /** Ticks from the start of the bar to the beat. */
+  /** Ticks from the start of the bar to the beat as written (a grace note does not move its main note), counted so that a pickup bar ends where a full one does. */
   offset: number;
+  /** Whether the attack may take an accent: the first attack of a beat that is not a grace note. */
+  accentable: boolean;
   meter: readonly [number, number];
   occurrenceEnd: number;
   /** Identifies the beat that the attack belongs to, for brushing it as one chord. */
@@ -79,8 +83,8 @@ export function interpretAttacks(attacks: Attack[], profiles: Record<string, Tra
     const profile = profiles[attack.note.trackId], note = attack.note;
     if (note.articulation === 'muted' && profile.palmMute === 'light') note.articulation = 'staccato';
     else if (note.articulation === 'muted' && profile.palmMute === 'heavy') note.velocity = Math.max(1, Math.round(note.velocity * heavyMuteVelocity));
-    if (profile.accent && note.articulation !== 'dead' && note.articulation !== 'ghost') {
-      const marks = strongOffsets(...attack.meter), near = (tick: number) => Math.abs(attack.offset - tick) <= 1;
+    if (profile.accent && attack.accentable && note.articulation !== 'dead' && note.articulation !== 'ghost') {
+      const marks = strongOffsets(...attack.meter), near = (tick: number) => Math.abs(attack.offset - tick) <= accentTolerance;
       const share = near(marks.downbeat) ? 1 : marks.middle.some(near) ? midBarShare : 0;
       if (share) note.velocity = Math.min(127, note.velocity + Math.round(accentBoost[profile.accent] * share));
     }
@@ -113,14 +117,16 @@ export function interpretAttacks(attacks: Attack[], profiles: Record<string, Tra
   }
   for (const line of strings.values()) {
     line.sort((a, b) => a.note.startTick - b.note.startTick);
-    line.forEach((attack, index) => {
-      const note = attack.note;
-      if (ringless.has(note.articulation)) return;
-      const next = line.slice(index + 1).find(other => other.note.startTick > note.startTick);
+    // The next later pluck of each attack, found from the end in one pass.
+    let nextPluck = Infinity;
+    for (let index = line.length - 1; index >= 0; index--) {
+      const note = line[index].note, later = line[index + 1]?.note;
+      if (later && later.startTick > note.startTick) nextPluck = later.startTick;
+      if (ringless.has(note.articulation)) continue;
       // A string rings until it is plucked again, or until the bar it is in ends.
-      const until = Math.min(next ? next.note.startTick : Infinity, attack.occurrenceEnd);
+      const until = Math.min(nextPluck, line[index].occurrenceEnd);
       if (until > note.endTick) note.endTick = until;
-    });
+    }
   }
   for (const attack of attacks) {
     attack.raw.start = attack.note.startTick; attack.raw.end = attack.note.endTick; attack.raw.velocity = attack.note.velocity;

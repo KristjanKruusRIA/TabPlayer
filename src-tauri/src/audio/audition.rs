@@ -120,11 +120,18 @@ fn build(request: &AuditionRequest) -> (PlaybackPlan, DocumentSettings, f64) {
         program: request.program,
         percussion: request.percussion,
     };
-    // Matches src/audio/plan.ts: bass programs play fingered, everything else picked.
-    let articulation = if (32..=39).contains(&request.program) {
-        Articulation::Fingered
-    } else {
-        Articulation::Picked
+    // Matches src/audio/plan.ts for an unmarked note: the track's playing style when it has one, otherwise
+    // bass programs play fingered and everything else picked.
+    let style = request
+        .mix
+        .interpretation
+        .as_ref()
+        .and_then(|interpretation| interpretation.style);
+    let articulation = match style {
+        Some(crate::settings::PlayingStyle::Pick) => Articulation::Picked,
+        Some(crate::settings::PlayingStyle::Fingers) => Articulation::Fingered,
+        None if (32..=39).contains(&request.program) => Articulation::Fingered,
+        None => Articulation::Picked,
     };
     let mut plan_notes = Vec::with_capacity(notes.len());
     let mut midi = Vec::with_capacity(notes.len() * 2);

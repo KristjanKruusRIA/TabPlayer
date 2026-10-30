@@ -187,6 +187,7 @@ fn track_interpretation_rides_the_track_mix_and_rejects_anything_non_canonical()
         serde_json::json!({"letRing":false}),
         serde_json::json!({"brush":"down","extra":1}),
         serde_json::json!({"palmMute":null}),
+        serde_json::json!({"style":"pick","brush":null}),
     ] {
         let accepted = serde_json::from_value::<EditCommand>(mix(bad.clone()))
             .map(|command| command.validate().is_ok())

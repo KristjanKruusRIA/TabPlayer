@@ -367,12 +367,14 @@ function buildWithIdentities(original: model.Score, generation: number, ids: str
           ...(source.bar !== occurrence.bar ? { playedBar: occurrence.bar } : {}),
           occurrence: occurrence.occurrence, startTick: actual.start, endTick: actual.end, key: actual.key, velocity: actual.velocity,
           channel: nativeChannel(source.track, actual.channel), program: actual.program ?? score.tracks[source.track].playbackInfo.program,
-          articulation: source.note.beat.deadSlapped ? 'dead' : articulation(source.note, actual.program ?? score.tracks[source.track].playbackInfo.program, !!from, styled ? profile.style : undefined), legatoFrom: from?.id ?? null, pitch: pitchCurve({ ...isolated, channel: nativeChannel(source.track, isolated.channel) }, actual, lane.bends),
+          articulation: source.note.beat.deadSlapped ? 'dead' : articulation(source.note, actual.program ?? score.tracks[source.track].playbackInfo.program, !!from, styled && !source.note.beat.slap && !source.note.beat.pop ? profile.style : undefined), legatoFrom: from?.id ?? null, pitch: pitchCurve({ ...isolated, channel: nativeChannel(source.track, isolated.channel) }, actual, lane.bends),
         };
         if (styled) {
           const beat = source.note.beat, masterBar = beat.voice.bar.masterBar;
-          interpreted.push({ note, raw: actual, staff: source.staff, offset: beat.playbackStart, meter: [masterBar.timeSignatureNumerator, masterBar.timeSignatureDenominator], occurrenceEnd: occurrence.endTick, beat: `${source.staff}/${source.voice}/${source.bar}/${source.beat}`,
-            brushable: generated.length === 1 && beat.brushType === model.BrushType.None && !beat.hasRasgueado && !beat.deadSlapped && note.pitch.length === 1 });
+          // Strong beats are counted from the written start; a pickup bar is right-aligned, ending where a full bar does.
+          const pickup = masterBar.isAnacrusis ? Math.max(0, masterBar.timeSignatureNumerator * 3840 / masterBar.timeSignatureDenominator - (occurrence.endTick - occurrence.startTick)) : 0;
+          interpreted.push({ note, raw: actual, staff: source.staff, offset: beat.displayStart + pickup, accentable: attack === 0 && beat.graceType === model.GraceType.None, meter: [masterBar.timeSignatureNumerator, masterBar.timeSignatureDenominator], occurrenceEnd: occurrence.endTick, beat: `${source.staff}/${source.voice}/${source.bar}/${source.beat}`,
+            brushable: generated.length === 1 && beat.brushType === model.BrushType.None && !beat.hasRasgueado && !beat.deadSlapped && beat.pickStroke === model.PickStroke.None && note.pitch.length === 1 });
         }
         notes.push(note); const chain = played.get(source.note) ?? []; chain.push(note); played.set(source.note, chain);
       }

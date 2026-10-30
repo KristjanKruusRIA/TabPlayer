@@ -14,7 +14,7 @@ Each is optional, absent at its default, and applies to **stringed** notes only 
 |---|---|---|
 | Playing style | automatic, `pick`, `fingers` | Replaces only the *default* articulation: `picked` or `fingered` for unmarked notes. |
 | Palm mute intensity | normal, `light`, `heavy` | Palm-muted notes: `light` plays the looser, brighter `staccato` voice instead of `muted`; `heavy` keeps `muted` at 80% velocity. |
-| Strong-beat accent | off, `light`, `strong` | Adds 10 / 22 velocity to notes on the bar's downbeat, and half of that on the middle strong beat (beat 3 of 4/4; each dotted-quarter group of 6/8, 9/8, 12/8). Ghost and dead notes are not accented. |
+| Strong-beat accent | off, `light`, `strong` | Adds 10 / 22 velocity to notes on the bar's downbeat, and half of that on the middle strong beat (beat 3 of 4/4; each dotted-quarter group of 6/8, 9/8, 12/8). Beats are counted from their written start, within 7 ticks (tuplet rounding), so a grace note neither takes the accent nor moves it; a pickup bar is right-aligned; only the first attack of a trill or tremolo is accented. Ghost and dead notes are not accented. |
 | Automatic let ring | off, on | Every plucked note rings until the same string is plucked again or its bar occurrence ends. Palm-muted, dead, ghost and staccato notes do not ring. |
 | Automatic brush | off, `down`, `up` | A chord of two or more notes is spread 30 ticks apart (less for short notes, never past half the shortest note): `down` from the lowest pitch, `up` from the highest. |
 
@@ -22,8 +22,8 @@ Each is optional, absent at its default, and applies to **stringed** notes only 
 
 A written mark always wins over the track's setting:
 
-- Style: dead, palm-muted, ghost, staccato, tapped, harmonic and legato notes keep their articulation; a written pick stroke stays `picked` and a written right-hand finger stays `fingered`, whatever the style.
-- Brush: a beat with a written brush, a rasgueado, a dead-slap, a bend, or a trill/tremolo is left alone.
+- Style: dead, palm-muted, ghost, staccato, tapped, harmonic and legato notes keep their articulation; a written pick stroke stays `picked` and a written right-hand finger stays `fingered`, whatever the style; a written slap or pop plays as before.
+- Brush: a beat with a written brush, a pick stroke, a rasgueado, a dead-slap, a bend, or a trill/tremolo is left alone.
 - Let ring: only extends a note; a note already ringing longer (written let ring, ties) is unchanged.
 
 ### Not offered, and why
@@ -59,6 +59,12 @@ An **Interpretation** section under the Sound pane for stringed tracks: Playing 
   - eight settings give eight distinct plans, the score JSON is unchanged, and clearing restores the plan;
   - strict validation in TypeScript and Rust; the controller re-plans on a change but not on a gain change; a duplicated track copies the settings.
 - **Desktop** (`tests/desktop/parity-track-interpretation.mjs`): each setting is one undoable `setTrackMix` edit; the WAV export of each setting differs from the default and from the others; let ring sustains, a heavy mute is softer, a strong accent is louder; clearing returns the default export byte for byte; only mix edits were made.
+
+## Limits
+
+- Changing a setting prepares a new plan, so playback stops and any loop or range is cleared (the panel says so). Keeping them across a re-plan would need the native player to swap plans in place.
+- Audition (the tone heard while editing) follows the playing style, through the mix it is sent with; it does not apply accent, palm mute intensity, let ring or brush, which shape a whole passage.
+- The instrument view's "next" focus treats a brushed chord as one onset, counted from the earliest first attack of its beat.
 
 ## Scope
 

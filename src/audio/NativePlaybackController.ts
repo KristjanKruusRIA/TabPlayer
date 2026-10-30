@@ -22,7 +22,8 @@ let nextGeneration=0;
 function practiceKey(settings:PracticeSettings){const tempo=settings.tempo;return JSON.stringify([tempo.kind,tempo.kind==='relative'?[tempo.ratio]:tempo.kind==='fixed'?[tempo.bpm]:[tempo.start,tempo.end,tempo.step,tempo.repetitions],settings.metronome.enabled,settings.metronome.volume,settings.metronome.visual,settings.countIn.bars,settings.countIn.betweenLoops]);}
 function idlePractice(settings:PracticeSettings):PracticeStatus {return {settings:structuredClone(settings),phase:'idle',countInRemaining:0,completedPasses:0,effectiveRatio:settings.tempo.kind==='relative'?settings.tempo.ratio:settings.tempo.kind==='progressive'?settings.tempo.start:1,currentBpm:0,pulse:null};}
 
-type Options={bridge:NativeAudioBridge;onEdit:(edit:EditCommand)=>void|Promise<void>;preparePlan?:typeof preparePlan};
+/** `latestMix` reads a track's mix from the newest document, which can be ahead of the one last loaded here. */
+type Options={bridge:NativeAudioBridge;onEdit:(edit:EditCommand)=>void|Promise<void>;preparePlan?:typeof preparePlan;latestMix?:(trackId:string)=>ChannelMix|undefined};
 export class NativePlaybackController {
   private state:PlaybackState={ready:false,playing:false,time:0,endTime:0,measure:0,speed:100,metronome:false,practice:idlePractice(DEFAULT_PRACTICE),practicePending:false,practiceNotice:null,range:null,loop:null,error:null};
   private listeners=new Set<()=>void>();private view:AlphaTabApi|null=null;private cleanupView:()=>void=()=>{};
@@ -145,7 +146,7 @@ export class NativePlaybackController {
   deviceId(){return this.lastStatus?.deviceId??null;}
   backingDurationMs(){const seconds=this.lastStatus?.backingDurationSeconds;return seconds==null?undefined:seconds*1000;}
   mix(track:model.Track){const mix=this.built?.settings.mixes[trackIdentity(track)];return mix?{mute:mix.mute,solo:mix.solo,volume:mix.gain,pan:mix.pan}:undefined;}
-  private editMix(index:number,patch:Partial<ChannelMix>){const track=this.built?.score.tracks[index];if(!track)throw new Error('Select an existing track.');const id=trackIdentity(track);const mix={...(this.built!.settings.mixes[id]??defaultMix()),...patch};void Promise.resolve(this.options.onEdit({type:'setTrackMix',trackId:id,mix})).catch(error=>this.fail(error));}
+  private editMix(index:number,patch:Partial<ChannelMix>){const track=this.built?.score.tracks[index];if(!track)throw new Error('Select an existing track.');const id=trackIdentity(track);const mix={...(this.options.latestMix?.(id)??this.built!.settings.mixes[id]??defaultMix()),...patch};void Promise.resolve(this.options.onEdit({type:'setTrackMix',trackId:id,mix})).catch(error=>this.fail(error));}
   setTrackVolume(index:number,value:number){this.editMix(index,{gain:Math.max(0,Math.min(1,value))});}
   setPan(index:number,value:number){this.editMix(index,{pan:Math.max(-1,Math.min(1,value))});}
   setMute(index:number,value:boolean){this.editMix(index,{mute:value});}setSolo(index:number,value:boolean){this.editMix(index,{solo:value});}

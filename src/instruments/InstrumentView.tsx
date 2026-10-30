@@ -5,6 +5,7 @@ import type { EditCommand } from '../edit-types';
 import type { BeatTarget } from '../project';
 import { formatPitch } from '../tuning';
 import { describePartialCapo, getPartialCapo, openStringKey } from '../editor/partial-capo';
+import { describeBanjoDrone, fretExists, getBanjoDrone, neckFret, plainFret } from '../editor/banjo-drone';
 import { busyHint, drumTarget, entryBeat, entryNotes, fretTarget, keyTarget, noBeatHint, padTarget, type EntryAction, type EntryContext, type EntryFollow, type EntryTarget } from './entry';
 import './instruments.css';
 
@@ -93,7 +94,7 @@ function Fretboard({staff, notes, mode, leftHanded, entry}: {staff: model.Staff;
     if (string < 1 || string > staff.tuning.length || (!source && !beat?.deadSlapped)) continue;
     // Trills and ornaments retain their source string; harmonics retain their
     // authored touch position rather than moving to a guessed sounding fret.
-    const fret = beat?.deadSlapped ? 0 : source!.fret + (source!.harmonicType === 0 ? note.key - source!.realValue : 0);
+    const fret = beat?.deadSlapped ? 0 : source!.harmonicType === 0 && (!source!.isDead || fretExists(staff, string, source!.fret)) ? neckFret(staff, string, plainFret(staff, string, source!.fret) + note.key - source!.realValue) : source!.fret;
     if (fret >= 0) positions.push({id: note.id, key: note.key, string, fret});
   }
   const maxFret = Math.max(24,...positions.map(p => Math.ceil(p.fret))), left = 64, neckLength=770, height=226;
@@ -104,7 +105,7 @@ function Fretboard({staff, notes, mode, leftHanded, entry}: {staff: model.Staff;
   const name=`${mode === 'bass' ? 'Bass' : 'Guitar'} fretboard${leftHanded ? ', left-handed' : ''}`;
   const wood=`url(#${id}-wood)`,metal=`url(#${id}-metal)`,cream=`url(#${id}-cream)`;
   return <>
-    <p className="instrument-detail">Staff {staff.index+1} · {staff.tuning.length} strings · Capo {staff.capo}{staff.capo ? ' · fret numbers relative to capo' : ''}{describePartialCapo(getPartialCapo(staff)) ? ` · ${describePartialCapo(getPartialCapo(staff))} · fret numbers on those strings relative to it` : ''} · Open {staff.tuning.map((_,index)=>formatPitch(openStringKey(staff,staff.tuning.length-index))).join(' ')}</p>
+    <p className="instrument-detail">Staff {staff.index+1} · {staff.tuning.length} strings · Capo {staff.capo}{staff.capo ? ' · fret numbers relative to capo' : ''}{describePartialCapo(getPartialCapo(staff)) ? ` · ${describePartialCapo(getPartialCapo(staff))} · fret numbers on those strings relative to it` : ''}{getBanjoDrone(staff) ? ` · ${describeBanjoDrone(getBanjoDrone(staff))} · string 1 fret numbers follow the neck` : ''} · Open {staff.tuning.map((_,index)=>formatPitch(openStringKey(staff,staff.tuning.length-index))).join(' ')}</p>
     <div className="instrument-canvas instrument-fretboard"><svg role={entry?'group':'img'} aria-label={name} viewBox={`0 0 ${width} ${height}`}>
       <title>{name}</title>
       <defs>

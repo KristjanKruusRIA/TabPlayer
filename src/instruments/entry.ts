@@ -3,6 +3,7 @@ import type { EditCommand } from '../edit-types';
 import { percussionChoices, resolvePercussionArticulation } from '../editor/percussion-catalog';
 import type { BeatTarget } from '../project';
 import { formatPitch } from '../tuning';
+import { fretExists, fretKey, getBanjoDrone, droneString } from '../editor/banjo-drone';
 import { openStringKey } from '../editor/partial-capo';
 
 /** What the app should select once an instrument-view edit has landed. */
@@ -27,7 +28,7 @@ export function entryBeat(score: model.Score, target: BeatTarget | null): model.
 
 const openKey = openStringKey;
 /** The sounding key of a fretted note. */
-export const frettedKey = (staff: model.Staff, string: number, fret: number) => openKey(staff, string) + fret;
+export const frettedKey = (staff: model.Staff, string: number, fret: number) => fretKey(staff, string, fret);
 
 /** The written notes of a beat with their sounding keys; notes this staff cannot show are left out. */
 export function entryNotes(staff: model.Staff, beat: model.Beat): EntryNote[] {
@@ -49,6 +50,7 @@ export function entryNotes(staff: model.Staff, beat: model.Beat): EntryNote[] {
 
 export function fretTarget(ctx: EntryContext, string: number, fret: number): EntryTarget {
   const { staff, target } = ctx, label = `${string}, fret ${fret} (${formatPitch(frettedKey(staff, string, fret))})`;
+  if (!fretExists(staff, string, fret)) return { name: `String ${string}, fret ${fret} does not exist on the banjo drone string`, action: null };
   if (ctx.notes.some(note => note.string === string && note.fret === fret)) return { name: `Remove string ${label}`, action: { command: { type: 'removeNote', target, string }, follow: { string, fret } } };
   return { name: `String ${label}`, action: { command: { type: 'setNote', target, string, fret }, follow: { string, fret } } };
 }
@@ -62,7 +64,7 @@ export function keyTarget(ctx: EntryContext, key: number): EntryTarget {
     let best: { string: number; fret: number } | null = null;
     for (let string = 1; string <= staff.tuning.length; string++) {
       if (ctx.notes.some(note => note.string === string)) continue;
-      const fret = key - openKey(staff, string);
+      const plain = key - openKey(staff, string), fret = string === droneString && plain > 0 ? plain + getBanjoDrone(staff) : plain;
       if (fret >= 0 && fret <= maxEntryFret && (!best || fret < best.fret)) best = { string, fret };
     }
     if (!best) return { name: `No free string can play ${name}`, action: null };

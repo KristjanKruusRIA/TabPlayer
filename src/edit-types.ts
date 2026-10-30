@@ -37,6 +37,8 @@ export interface StaffSettings {
   tuningName?: string;
   /** Optional capo over some strings; omitted keeps the staff's, `{fret:0,strings:[]}` clears it. */
   partialCapo?: PartialCapo;
+  /** Optional banjo drone on a 5-string staff: the neck fret its short string starts at (1-12); omitted keeps the staff's, 0 clears it. */
+  droneFret?: number;
 }
 export interface ChordDefinition { name: string; firstFret: number; frets: number[] }
 export interface ChannelMix { gain: number; pan: number; mute: boolean; solo: boolean }

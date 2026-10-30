@@ -2,7 +2,7 @@ import type { model } from '@coderline/alphatab';
 import type { EditCommand } from '../edit-types';
 import { resolvePercussionArticulation } from '../editor/percussion-catalog';
 import type { AuditionNote } from './bridge';
-import { openStringKey } from '../editor/partial-capo';
+import { fretKey } from '../editor/banjo-drone';
 
 /** Which sound an audition uses: a track's own (by identity), or the automatic sound for a program (a track not yet added). */
 export type AuditionSource={trackId:string}|{program:number};
@@ -27,7 +27,7 @@ export function editAudition(score:model.Score,command:EditCommand):{track:numbe
   const track=score.tracks[command.target.track],staff=track?.staves[command.target.staff];
   if(!track||!staff)return null;
   let key:number|undefined,percussion=false;
-  if(command.type==='setNote')key=openStringKey(staff,command.string)+command.fret;
+  if(command.type==='setNote')key=fretKey(staff,command.string,command.fret);
   else if(command.type==='addPitchedNote'||command.type==='setPitchedNote')key=command.pitch-staff.transpositionPitch;
   else {percussion=true;key=resolvePercussionArticulation(track,command.articulation)?.outputMidiNumber;}
   if(key===undefined||!Number.isInteger(key)||key<0||key>127)return null;

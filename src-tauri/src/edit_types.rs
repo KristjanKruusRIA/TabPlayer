@@ -693,6 +693,13 @@ pub struct StaffSettings {
         skip_serializing_if = "Option::is_none"
     )]
     pub partial_capo: Option<PartialCapo>,
+    /// The neck fret a 5-string banjo's short drone string starts at: omitted keeps the staff's, and 0 clears it.
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub drone_fret: Option<u32>,
 }
 /// A capo over some strings only. Strings count from 1 for the lowest-pitched string, as notes do.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1354,6 +1361,20 @@ impl StaffSettings {
         validate_tuning_name(&self.tuning_name)?;
         if let Some(partial) = &self.partial_capo {
             partial.validate(self.tuning.len())?;
+        }
+        if let Some(drone) = self.drone_fret {
+            if drone > 12 || (drone > 0 && self.tuning.len() != 5) {
+                return Err(
+                    "Choose a banjo drone fret from 1 to 12 on a 5-string staff, or 0 for none."
+                        .into(),
+                );
+            }
+            // String 1 is the last tuning entry and must sound above string 2.
+            if drone > 0 && self.tuning[4] <= self.tuning[3] {
+                return Err(
+                    "The banjo drone is string 1, which must be tuned higher than string 2.".into(),
+                );
+            }
         }
         enum_range(self.clef, 0, 4)
     }
@@ -2481,6 +2502,50 @@ mod tests {
             ] {
                 rejected(&with(invalid));
             }
+        }
+    }
+
+    #[test]
+    fn staff_settings_take_an_optional_banjo_drone() {
+        let settings = json!({"tuning": [62, 59, 55, 50, 67], "capo": 0, "transposition": 0,
+            "displayTransposition": 0, "clef": 4, "showTab": true, "showNotation": true});
+        for base in [
+            json!({"type": "setStaffSettings", "track": 0, "staff": 0, "settings": settings}),
+            json!({"type": "addStaff", "track": 0, "settings": settings}),
+        ] {
+            let with = |drone: Value| {
+                let mut value = base.clone();
+                value["settings"]["droneFret"] = drone;
+                value
+            };
+            // Omitted keeps the staff's own, and serializes back without the field.
+            assert_eq!(serde_json::to_value(accepted(&base)).unwrap(), base);
+            for drone in [json!(5), json!(1), json!(12), json!(0)] {
+                let value = with(drone);
+                assert_eq!(serde_json::to_value(accepted(&value)).unwrap(), value);
+            }
+            for invalid in [
+                json!(null),
+                json!(13),
+                json!(-1),
+                json!(5.5),
+                json!("5"),
+                json!({"fret": 5}),
+            ] {
+                rejected(&with(invalid));
+            }
+            // Only a 5-string staff can carry one.
+            let mut six = with(json!(5));
+            six["settings"]["tuning"] = json!([64, 59, 55, 50, 45, 40]);
+            rejected(&six);
+            six["settings"]["droneFret"] = json!(0);
+            accepted(&six);
+            // String 1 (the last entry) must sound above string 2.
+            let mut low = with(json!(5));
+            low["settings"]["tuning"] = json!([67, 62, 59, 55, 50]);
+            rejected(&low);
+            low["settings"]["droneFret"] = json!(0);
+            accepted(&low);
         }
     }
 

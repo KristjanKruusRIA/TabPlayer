@@ -5,6 +5,7 @@ import { tokenizeLyrics } from '../editor/lyrics';
 import { trackMixAutomations } from '../interchange/automation';
 import { scoreFromJson } from '../model-clone';
 import { selectScore } from './selection';
+import { withPlainDrone } from '../editor/banjo-drone';
 import type { ExportSelection } from './types';
 
 // An owned MusicXML 4.0 score-partwise writer. Durations use 960 divisions per
@@ -449,7 +450,7 @@ function checkCutBends(score:model.Score,selection:ExportSelection){
   }
 }
 
-export function exportMusicXml(score:model.Score,selection:ExportSelection):Uint8Array {
+function exportMusicXmlPlain(score:model.Score,selection:ExportSelection):Uint8Array {
   checkCutBends(score,selection);
   // Lyrics (including hidden ones) live in TabPlayer's own sources, outside the model data.
   for(const index of selection.tracks){
@@ -483,3 +484,6 @@ export function exportMusicXml(score:model.Score,selection:ExportSelection):Uint
       +element('part-list',parts.map(part=>part.list).join(''))+parts.map(part=>part.body).join(''),' version="4.0"');
   return strToU8(xml);
 }
+
+/** A banjo drone is written as GP does: frets on the short string counted from its own start, so the pitches are the same. */
+export function exportMusicXml(score:model.Score,selection:ExportSelection):Uint8Array {return withPlainDrone(score,()=>exportMusicXmlPlain(score,selection));}

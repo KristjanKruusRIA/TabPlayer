@@ -1,4 +1,5 @@
 import { model } from '@coderline/alphatab';
+import { fretExists } from '../editor/banjo-drone';
 import type { ChordDegree,ChordFormulaId,ChordMatch,ChordRecipe,ChordShapeSearch,HarmonyChord,SpelledPitchClass } from '../editor/harmony-types';
 
 const integer=(value:number,min:number,max:number)=>Number.isInteger(value)&&value>=min&&value<=max;
@@ -81,7 +82,7 @@ export function findChordShapes(staff:model.Staff,recipe:ChordRecipe,search:Chor
   // A detached hierarchy lets public getters apply the staff's exact sounding context.
   const bar=new model.Bar(),voice=new model.Voice(),beat=new model.Beat(),note=new model.Note();bar.staff=staff;voice.bar=bar;beat.voice=voice;note.beat=beat;
   const pitches=staff.tuning.map((_,index)=>{
-    note.string=strings-index;return Array.from({length:maxFret+1},(_,fret)=>{note.fret=fret;const pitch=note.realValue;return integer(note.realValueWithoutHarmonic,0,127)&&integer(pitch,0,127)?pitch:-1;});
+    note.string=strings-index;return Array.from({length:maxFret+1},(_,fret)=>{note.fret=fret;const pitch=note.realValue;return fretExists(staff,note.string,fret)&&integer(note.realValueWithoutHarmonic,0,127)&&integer(pitch,0,127)?pitch:-1;});
   });
   const found=new Map<string,ShapeState>();
   for(let first=1;first<=maxFret;first++){

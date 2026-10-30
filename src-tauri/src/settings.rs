@@ -10,6 +10,9 @@ pub struct ChannelMix {
     pub pan: f32,
     pub mute: bool,
     pub solo: bool,
+    /// How the track's stringed notes are performed. The playback plan applies it; absent is the default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub interpretation: Option<TrackInterpretation>,
 }
 impl Default for ChannelMix {
     fn default() -> Self {
@@ -18,6 +21,7 @@ impl Default for ChannelMix {
             pan: 0.0,
             mute: false,
             solo: false,
+            interpretation: None,
         }
     }
 }
@@ -29,6 +33,64 @@ impl ChannelMix {
             || !(-1.0..=1.0).contains(&self.pan)
         {
             return Err("Mix gain must be 0–1 and pan -1–1.".into());
+        }
+        if let Some(interpretation) = &self.interpretation {
+            interpretation.validate()?;
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PlayingStyle {
+    Pick,
+    Fingers,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PalmMuteIntensity {
+    Light,
+    Heavy,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum StrongBeatAccent {
+    Light,
+    Strong,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum AutomaticBrush {
+    Down,
+    Up,
+}
+/// Track interpretation. Every field is absent at its default, and at least one is present.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TrackInterpretation {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub style: Option<PlayingStyle>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub palm_mute: Option<PalmMuteIntensity>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub accent: Option<StrongBeatAccent>,
+    /// Only `true` is stored.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub let_ring: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub brush: Option<AutomaticBrush>,
+}
+impl TrackInterpretation {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.style.is_none()
+            && self.palm_mute.is_none()
+            && self.accent.is_none()
+            && self.let_ring.is_none()
+            && self.brush.is_none()
+            || self.let_ring == Some(false)
+        {
+            return Err("Invalid track interpretation.".into());
         }
         Ok(())
     }
@@ -239,6 +301,9 @@ impl BackingSettings {
         }
         if let Some(processing) = &self.processing {
             processing.validate()?;
+        }
+        if self.mix.interpretation.is_some() {
+            return Err("A backing track has no interpretation.".into());
         }
         self.mix.validate()
     }

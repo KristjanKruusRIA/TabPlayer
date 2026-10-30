@@ -11,6 +11,7 @@ import { TrackPanel } from './TrackPanel';
 import './styles.css';
 import { NativePlaybackController } from './audio/NativePlaybackController';
 import { SoundPanel } from './audio/SoundPanel';
+import { InterpretationPanel } from './audio/InterpretationPanel';
 import { BackingPanel } from './audio/BackingPanel';
 import { BackingWaveform } from './audio/BackingWaveform';
 import { useReferenceSyncEdit } from './audio/useReferenceSyncEdit';
@@ -457,6 +458,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
         <div className="workstation-task" hidden={leftTask!=='track'}><TrackSettingsPanel score={state.score} selected={target.track} busy={controlsBusy} locked={editLocked} onEdit={edit} onAudition={auditionTuning}/></div>
         <div className="workstation-task" hidden={leftTask!=='sound'}>
         <SoundPanel trackId={trackId} sound={state.settings.sounds[trackId]} onEdit={command=>controller.edit(command)} playback={player} busy={editBusy} shown={leftShown&&leftTask==='sound'}/>
+        <InterpretationPanel trackId={trackId} mix={state.settings.mixes[trackId]} stringed={selectedTrack.staves.some(staff=>staff.isStringed)} busy={controlsBusy} onEdit={command=>controller.edit(command)}/>
         </div><div className="workstation-task" hidden={leftTask!=='backing'}><BackingPanel visible={referenceVisible} settings={originalBacking?undefined:state.settings.backing} originalSettings={state.embeddedBackingSettings?{assetId:'embedded',...state.embeddedBackingSettings}:null} assets={state.snapshot.project.assets} embedded={state.embeddedBacking} playback={player} onEdit={backingEdit} stageBacking={audioBridge.stageBacking} stageEmbeddedBacking={audioBridge.stageEmbeddedBacking} beginOperation={beginEditorOperation} busy={editBusy} durationMs={sourceDurationMs??undefined} reference={reference} onShowWaveform={()=>chooseDock('backing')}/>{referenceVisible&&sourceMetadataStatus}</div>
       </section>
       <section ref={scorePane} className="score-workspace" aria-label="Score workspace" tabIndex={0} onKeyDown={keys}>

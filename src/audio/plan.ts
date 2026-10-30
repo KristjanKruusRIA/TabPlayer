@@ -2,13 +2,14 @@ import { midi, model, Settings } from '@coderline/alphatab';
 import { buildScore, trackIdentity } from '../engine';
 import { captureNoteLinks, restoreNoteLinks } from '../editor/links';
 import type { ProjectView } from '../project';
-import type { BackingSettings } from '../edit-types';
+import type { BackingSettings, TrackInterpretation } from '../edit-types';
 import type { Articulation, MeasureOccurrence, PlanMidiEvent, PlanNote, PlanTempo, PlaybackPlan } from './types';
 import { scoreFromJson } from '../model-clone';
 import { gpControllerEvents, prepareGpMidiScore } from '../interchange/automation';
 import { preparePitchedGpScore } from '../interchange/pitched';
 import { buildPerformedBeats } from './performed-beats';
 import type { ReferenceLocation } from './reference-sync-types';
+import { interpretAttacks, type Attack } from './interpretation';
 
 const settings = new Settings();
 const validMeter = (numerator:number,denominator:number) => Number.isSafeInteger(numerator) && numerator > 0 && numerator <= 0xffffffff && [1,2,4,8,16,32,64,128,256].includes(denominator);
@@ -232,7 +233,7 @@ function playbackBar(bar: model.Bar): model.Bar {
     default: return bar;
   }
 }
-function articulation(note: model.Note, program: number, legato: boolean): Articulation {
+function articulation(note: model.Note, program: number, legato: boolean, style?: TrackInterpretation['style']): Articulation {
   if (note.isDead) return 'dead';
   if (note.isPalmMute) return 'muted';
   if (note.isGhost) return 'ghost';
@@ -241,7 +242,9 @@ function articulation(note: model.Note, program: number, legato: boolean): Artic
   if (note.harmonicType !== model.HarmonicType.None) return 'harmonic';
   if (legato) return 'legato';
   if (note.beat.pickStroke !== model.PickStroke.None) return 'picked';
-  return note.rightHandFinger >= 0 || program >= 32 && program <= 39 ? 'fingered' : 'picked';
+  // A written right-hand finger outranks the track's playing style, as a written pick stroke does above.
+  if (note.rightHandFinger >= 0) return 'fingered';
+  return style ? style === 'fingers' ? 'fingered' : 'picked' : program >= 32 && program <= 39 ? 'fingered' : 'picked';
 }
 function pitchCurve(note: RawNote, destination: RawNote, events: PlanMidiEvent[]) {
   const relevant = events.filter(e => e.channel === note.channel && (e.type === 'bend' || e.type === 'noteBend' && e.key === note.key) && e.tick <= note.end);
@@ -259,7 +262,8 @@ function pitchCurve(note: RawNote, destination: RawNote, events: PlanMidiEvent[]
   return [...values].filter(([tick]) => tick >= destination.start && tick <= destination.end).sort(([a], [b]) => a - b).map(([tick, semitones]) => ({ tick, semitones }));
 }
 
-function buildWithIdentities(original: model.Score, generation: number, ids: string[], corrected?: (track: number, attack: number, length: number) => void): PlaybackPlan {
+/** `interpretations` is by track identity; a track missing from it, or any track when it is absent, plays as written. */
+function buildWithIdentities(original: model.Score, generation: number, ids: string[], corrected?: (track: number, attack: number, length: number) => void, interpretations?: Record<string, TrackInterpretation>): PlaybackPlan {
   if (!Number.isSafeInteger(generation) || generation < 0) throw new Error('Invalid playback generation.');
   if (original.masterBars.some(bar=>!validMeter(bar.timeSignatureNumerator,bar.timeSignatureDenominator))) throw new Error('Invalid score meter.');
   const score = prepareGpMidiScore(prepareMidiScore(original),settings);
@@ -319,7 +323,7 @@ function buildWithIdentities(original: model.Score, generation: number, ids: str
     for (const note of generated.events.notes) { const group = attacks.get(note.provenance!) ?? []; group.push(note); attacks.set(note.provenance!, group); }
     laneData.set(id, { events: generated.events, markers: isolated.markers, attacks, bends: converted(generated.events.events, ids, nativeChannel).filter(event=>event.type==='bend'||event.type==='noteBend') });
   }
-  const notes: PlanNote[] = [], played = new Map<model.Note, PlanNote[]>();
+  const notes: PlanNote[] = [], played = new Map<model.Note, PlanNote[]>(), interpreted: Attack[] = [];
   const byNote = new Map(all.map(source => [source.note, source]));
   let fullIndex = 0;
   for (const occurrence of occurrences) {
@@ -356,19 +360,26 @@ function buildWithIdentities(original: model.Score, generation: number, ids: str
         while (origin?.tieOrigin) origin = origin.tieOrigin;
         const from = origin && !source.note.beat.deadSlapped ? [...(played.get(origin) ?? [])].reverse().find(n => n.startTick < actual.start && n.source.target.track === source.track && n.source.target.staff === source.staff && n.source.target.voice === source.voice && n.source.string === Math.max(0, source.note.string)) : undefined;
         const string = source.note.beat.deadSlapped ? score.tracks[source.track].staves[source.staff].tuning.length - attack : Math.max(0, source.note.string);
+        const profile = interpretations?.[ids[source.track]], styled = profile && source.note.isStringed;
         const note: PlanNote = {
           id: `${ids[source.track]}/${source.staff}/${source.bar}/${source.voice}/${source.beat}/${source.index}/${occurrence.bar}/${occurrence.occurrence}/${attack}`,
           trackId: ids[source.track], source: { target: { track: source.track, staff: source.staff, bar: source.bar, voice: source.voice, beat: source.beat }, string },
           ...(source.bar !== occurrence.bar ? { playedBar: occurrence.bar } : {}),
           occurrence: occurrence.occurrence, startTick: actual.start, endTick: actual.end, key: actual.key, velocity: actual.velocity,
           channel: nativeChannel(source.track, actual.channel), program: actual.program ?? score.tracks[source.track].playbackInfo.program,
-          articulation: source.note.beat.deadSlapped ? 'dead' : articulation(source.note, actual.program ?? score.tracks[source.track].playbackInfo.program, !!from), legatoFrom: from?.id ?? null, pitch: pitchCurve({ ...isolated, channel: nativeChannel(source.track, isolated.channel) }, actual, lane.bends),
+          articulation: source.note.beat.deadSlapped ? 'dead' : articulation(source.note, actual.program ?? score.tracks[source.track].playbackInfo.program, !!from, styled ? profile.style : undefined), legatoFrom: from?.id ?? null, pitch: pitchCurve({ ...isolated, channel: nativeChannel(source.track, isolated.channel) }, actual, lane.bends),
         };
+        if (styled) {
+          const beat = source.note.beat, masterBar = beat.voice.bar.masterBar;
+          interpreted.push({ note, raw: actual, staff: source.staff, offset: beat.playbackStart, meter: [masterBar.timeSignatureNumerator, masterBar.timeSignatureDenominator], occurrenceEnd: occurrence.endTick, beat: `${source.staff}/${source.voice}/${source.bar}/${source.beat}`,
+            brushable: generated.length === 1 && beat.brushType === model.BrushType.None && !beat.hasRasgueado && !beat.deadSlapped && note.pitch.length === 1 });
+        }
         notes.push(note); const chain = played.get(source.note) ?? []; chain.push(note); played.set(source.note, chain);
       }
     }
   }
   if (fullIndex !== complete.events.notes.length) throw new Error('The score has MIDI attacks without an unambiguous source-note lane.');
+  if (interpreted.length) interpretAttacks(interpreted, interpretations!);
   const events: OrderedMidiEvent[] = converted(complete.events.events, ids, nativeChannel);
   for(const event of gpControllerEvents(score,occurrences))events.push({type:'controller',trackId:ids[event.track],tick:event.tick,channel:nativeChannel(event.track,event.channel),controller:event.controller,value:event.value,order:Number.MAX_SAFE_INTEGER});
   for (const note of complete.events.notes) {
@@ -392,8 +403,8 @@ export function deadBrushMidiDurations(score: model.Score): { track: number; att
   return corrections;
 }
 
-export function buildPlaybackPlanFromJson(json: ReturnType<typeof model.JsonConverter.scoreToJson>, identities: string[], generation: number): PlaybackPlan {
-  return buildWithIdentities(scoreFromJson(json, settings), generation, identities);
+export function buildPlaybackPlanFromJson(json: ReturnType<typeof model.JsonConverter.scoreToJson>, identities: string[], generation: number, interpretations?: Record<string, TrackInterpretation>): PlaybackPlan {
+  return buildWithIdentities(scoreFromJson(json, settings), generation, identities, undefined, interpretations);
 }
 
 export function validatePlaybackPlan(plan: PlaybackPlan) {
@@ -456,18 +467,18 @@ export function validatePlaybackPlan(plan: PlaybackPlan) {
 
 // Worker inputs contain only transient public model data and stable track IDs.
 // Audio asset payloads remain outside this boundary.
-export async function preparePlan(project: ProjectView, generation: number): Promise<PlaybackPlan> {
-  return preparePlanFromScore(buildScore(project),generation);
+export async function preparePlan(project: ProjectView, generation: number, interpretations?: Record<string, TrackInterpretation>): Promise<PlaybackPlan> {
+  return preparePlanFromScore(buildScore(project),generation,interpretations);
 }
 
-export async function preparePlanFromScore(score:model.Score,generation:number):Promise<PlaybackPlan> {
-  if (typeof Worker === 'undefined') return buildPlaybackPlan(score, generation);
+export async function preparePlanFromScore(score:model.Score,generation:number,interpretations?:Record<string,TrackInterpretation>):Promise<PlaybackPlan> {
+  if (typeof Worker === 'undefined') return buildWithIdentities(score, generation, score.tracks.map(trackIdentity), undefined, interpretations);
   const worker = new Worker(new URL('./plan.worker.ts', import.meta.url), { type: 'module' });
   try {
     return await new Promise<PlaybackPlan>((resolve, reject) => {
       worker.onmessage = event => { const reply = event.data as { cmd?: string; plan?: PlaybackPlan; error?: string }; if (reply.cmd !== 'tabplayer.plan.result') return; if (reply.plan?.generation === generation) resolve(reply.plan); else reject(new Error(reply.error ?? 'Playback plan generation changed.')); };
       worker.onerror = event => reject(new Error(event.message || 'Playback preparation failed.'));
-      worker.postMessage({ cmd: 'tabplayer.plan.prepare', json: model.JsonConverter.scoreToJson(score), identities: score.tracks.map(trackIdentity), generation });
+      worker.postMessage({ cmd: 'tabplayer.plan.prepare', json: model.JsonConverter.scoreToJson(score), identities: score.tracks.map(trackIdentity), generation, ...interpretations ? { interpretations } : {} });
     });
   } finally { worker.terminate(); }
 }

@@ -164,3 +164,33 @@ fn accepts_new_signed_rhythm_and_nullable_technique_patches() {
     assert!(parsed.is_ok(), "new command must deserialize: {parsed:?}");
     assert_eq!(serde_json::to_value(parsed.unwrap()).unwrap(), patch);
 }
+
+#[test]
+fn track_interpretation_rides_the_track_mix_and_rejects_anything_non_canonical() {
+    let mix = |interpretation: serde_json::Value| serde_json::json!({"type":"setTrackMix","trackId":"base-0","mix":{"gain":1,"pan":0,"mute":false,"solo":false,"interpretation":interpretation}});
+    let ok = serde_json::from_value::<EditCommand>(mix(
+        serde_json::json!({"style":"pick","brush":"up"}),
+    ))
+    .unwrap();
+    assert!(ok.validate().is_ok());
+    // A mix with no interpretation encodes without the key, so defaults stay byte-identical.
+    let plain = serde_json::json!({"type":"setTrackMix","trackId":"base-0","mix":{"gain":1,"pan":0,"mute":false,"solo":false}});
+    let parsed = serde_json::from_value::<EditCommand>(plain.clone()).unwrap();
+    let (mut encoded, mut expected) = (serde_json::to_value(parsed).unwrap(), plain);
+    normalize_numbers(&mut encoded);
+    normalize_numbers(&mut expected);
+    assert_eq!(encoded, expected);
+    for bad in [
+        serde_json::json!({}),
+        serde_json::json!({"style":"slap"}),
+        serde_json::json!({"style":"picking"}),
+        serde_json::json!({"letRing":false}),
+        serde_json::json!({"brush":"down","extra":1}),
+        serde_json::json!({"palmMute":null}),
+    ] {
+        let accepted = serde_json::from_value::<EditCommand>(mix(bad.clone()))
+            .map(|command| command.validate().is_ok())
+            .unwrap_or(false);
+        assert!(!accepted, "accepted {bad}");
+    }
+}

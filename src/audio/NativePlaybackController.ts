@@ -7,6 +7,7 @@ import type { MusicSelection } from '../editor/range-types';
 import type { AuditionNote, AuditionRequest, NativeAudioBridge, NativeAudioStatus, TransportCommand } from './bridge';
 import type { AuditionSource } from './audition';
 import { preparePlan,preparePlanFromScore } from './plan';
+import { interpretationsOf } from './interpretation';
 import type { MeasureOccurrence,PlanNote, PlaybackPlan, PlaybackState } from './types';
 import { DEFAULT_PRACTICE,type PracticeSettings,type PracticeStatus } from './practice-types';
 import { practiceForBacking,validatePractice } from './practice';
@@ -29,7 +30,7 @@ export class NativePlaybackController {
   // Focus is session-only: it changes what native audio plays, never the saved mix or the project.
   private requested:{project:ProjectView;built:BuiltDocument;documentEpoch:number;playbackResumeEpoch:number}|null=null;
   private trackFocus:TrackFocus|null=null;private preview:{track:string;sound:TrackSound}|null=null;private mixPending=false;private loaded:{project:ProjectView;documentEpoch:number;playbackResumeEpoch:number}|null=null;
-  private built:BuiltDocument|null=null;private plan:PlaybackPlan|null=null;private authoredPlan:PlaybackPlan|null=null;private planTimingKey:string|null=null;private lastStatus:NativeAudioStatus|null=null;private operationError:string|null=null;private prepared=false;private preparing=false;private audioSettingsKey:string|null=null;private desiredAudioSettingsKey:string|null=null;private mixQueue:Promise<void>=Promise.resolve();private mixRequest=0;private embeddedSource:string|null=null;
+  private built:BuiltDocument|null=null;private plan:PlaybackPlan|null=null;private authoredPlan:PlaybackPlan|null=null;private planTimingKey:string|null=null;private planInterpretationKey='';private lastStatus:NativeAudioStatus|null=null;private operationError:string|null=null;private prepared=false;private preparing=false;private audioSettingsKey:string|null=null;private desiredAudioSettingsKey:string|null=null;private mixQueue:Promise<void>=Promise.resolve();private mixRequest=0;private embeddedSource:string|null=null;
   private documentEpoch:number|undefined;private practice:PracticeSettings=structuredClone(DEFAULT_PRACTICE);private pendingPractice:PracticeSettings|null=null;private hasBacking=false;
   private playbackResumeEpoch=0;private floorReadyEpoch=0;private resumeRefresh:Promise<boolean>|null=null;private loadRequest=0;
   private notesByTrack=new Map<string,PlanNote[]>();private noteMode:'stopped'|'waiting'|'seeking'|'playing'|'paused'='stopped';private pendingNoteTick:number|undefined;
@@ -226,10 +227,12 @@ export class NativePlaybackController {
     const saved=effectiveAudioSettings(project,built),preview=this.preview;
     const audioSettings=focusedSettings(preview?{...saved,sounds:{...saved.sounds,[preview.track]:preview.sound}}:saved,built.score.tracks.map(trackIdentity),this.trackFocus);this.hasBacking=audioSettings.backing!==null;
     const audioSettingsKey=JSON.stringify([audioSettings.sounds,audioSettings.mixes,audioSettings.backing]);
-    const timingKey=referenceTimingKey(audioSettings.backing);
+    // The saved interpretations shape the plan itself, so a change re-plans like a change of reference timing.
+    const interpretations=interpretationsOf(saved.mixes),interpreted=Object.keys(interpretations).length>0;
+    const timingKey=referenceTimingKey(audioSettings.backing),interpretationKey=interpreted?JSON.stringify(interpretations):'';
     const normalized=practiceForBacking(this.practice,this.hasBacking);
     if(normalized.notice){this.practice=normalized.settings;this.update({practiceNotice:normalized.notice});}
-    if(!documentChanged && !normalized.notice && this.built?.score===built.score && timingKey===this.planTimingKey && (this.preparing || this.plan&&this.prepared)){
+    if(!documentChanged && !normalized.notice && this.built?.score===built.score && timingKey===this.planTimingKey && interpretationKey===this.planInterpretationKey && (this.preparing || this.plan&&this.prepared)){
       this.built=built;if(audioSettingsKey===this.desiredAudioSettingsKey)return;
       // A mix or focus change during preparation is sent once it finishes, rather than restarting it.
       if(this.preparing){this.mixPending=true;return;}
@@ -244,9 +247,9 @@ export class NativePlaybackController {
       }
     }
     const practice=structuredClone(this.practice);
-    this.beforeScoreChange();const generation=this.generation;this.built=built;this.preparing=true;this.planTimingKey=timingKey;this.desiredAudioSettingsKey=audioSettingsKey;
+    this.beforeScoreChange();const generation=this.generation;this.built=built;this.preparing=true;this.planTimingKey=timingKey;this.planInterpretationKey=interpretationKey;this.desiredAudioSettingsKey=audioSettingsKey;
     try {
-      const authored=await (this.options.preparePlan?this.options.preparePlan(project,generation):preparePlanFromScore(built.score,generation));if(generation!==this.generation||this.destroyed)return;
+      const authored=await (this.options.preparePlan?(interpreted?this.options.preparePlan(project,generation,interpretations):this.options.preparePlan(project,generation)):(interpreted?preparePlanFromScore(built.score,generation,interpretations):preparePlanFromScore(built.score,generation)));if(generation!==this.generation||this.destroyed)return;
       const plan=applyReferenceSyncPlan(authored,audioSettings.backing);
       const sourceKey=project.base.kind==='file'?project.base.sha256:'blank';
       this.authoredPlan=authored;this.plan=plan;this.update({endTime:plan.playbackEndTick===undefined?plan.durationMs:this.millisecondsAtTick(plan.playbackEndTick,plan)});for(const note of plan.notes){let track=this.notesByTrack.get(note.trackId);if(!track){track=[];this.notesByTrack.set(note.trackId,track);}track.push(note);}

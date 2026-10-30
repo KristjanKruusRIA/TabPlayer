@@ -5,7 +5,7 @@ import type { EffectBlock } from '../edit-types';
 import { ampModels, blockNames, cabinetModels, graphicBands, modelName, parameters } from '../audio/sound-model';
 import type { NumericControl } from '../audio/sound-model';
 import type { Board, SoundEditing } from '../audio/useSoundEditing';
-import { Fader, Knob, Segmented } from '../ui';
+import { Fader, Knob, Segmented, busyGuard } from '../ui';
 import { AmpArt, BlockFace, CabinetArt, MicArt, micSpots } from './art';
 import { ampLooks, blockLook, knobSpots } from './blocks';
 import type { BlockRef } from './blocks';
@@ -41,7 +41,7 @@ function Choice<T extends string|number>({label,value,options,onChange,disabled}
   return <div className="rig-field"><span className="rig-field-name" aria-hidden="true">{label.replace(/^Second pedalboard: /,'')}</span><Segmented label={label} value={value} options={options.map(([v,text])=>({value:v,label:text}))} onChange={onChange} disabled={disabled}/></div>;
 }
 function Dropdown({label,visible,value,options,onChange,disabled}:{label:string;visible:string;value:number;options:readonly (readonly [number,string])[];onChange:(value:number)=>void;disabled:boolean}) {
-  return <label className="rig-field"><span className="rig-field-name">{visible}</span><select className="rig-select" aria-label={label} value={value} disabled={disabled} onChange={event=>onChange(Number(event.target.value))}>{options.map(([v,text])=><option key={v} value={v}>{text}</option>)}</select></label>;
+  return <label className="rig-field"><span className="rig-field-name">{visible}</span><select className="rig-select" aria-label={label} value={value} aria-disabled={disabled||undefined} onChange={event=>{if(disabled){event.target.value=String(value);return;}onChange(Number(event.target.value));}} onKeyDown={event=>{if(disabled)event.preventDefault();}} onPointerDown={event=>{if(disabled)event.preventDefault();}} onMouseDown={event=>{if(disabled)event.preventDefault();}}>{options.map(([v,text])=><option key={v} value={v}>{text}</option>)}</select></label>;
 }
 /** The footswitch: switches a block on or off. */
 function Footswitch({editing,board,block}:{editing:SoundEditing;board:Board;block:EffectBlock}) {
@@ -112,7 +112,7 @@ function GraphicEqStage({editing,board}:{editing:SoundEditing;board:Board}) {
     </div>
     <div className="rig-geq-side">
       <BlockKnobs editing={editing} board={board} block="graphicEq" tone="pedal"/>
-      <button type="button" className="rig-button" aria-label={board.name('Flatten graphic EQ')} disabled={busy} onClick={()=>fx(board,'graphicEq','gainsDb',graphicBands.map(()=>0))}>Flatten graphic EQ</button>
+      <button type="button" aria-label={board.name('Flatten graphic EQ')} {...busyGuard({busy,className:'rig-button',onClick:()=>fx(board,'graphicEq','gainsDb',graphicBands.map(()=>0))})}>Flatten graphic EQ</button>
     </div>
   </div>;
 }
@@ -124,7 +124,7 @@ function PedalStage({editing,board,block}:{editing:SoundEditing;board:Board;bloc
       <BlockFace block={block} on={on} detail knobs={count}/>
       <div className="rig-pedal-knobs"><BlockKnobs editing={editing} board={board} block={block} tone="pedal" spots={knobSpots[Math.min(5,count)]}/></div>
       {/* A pointer shortcut for the switch in the stage's head, so it is left out of the tab order and the accessibility tree. */}
-      <button type="button" aria-hidden="true" className="rig-footswitch" data-wah={wah||undefined} tabIndex={-1} disabled={editing.busy} onClick={()=>editing.fx(board,block,'enabled',!on)}/>
+      <button type="button" aria-hidden="true" data-wah={wah||undefined} tabIndex={-1} {...busyGuard({busy:editing.busy,className:'rig-footswitch',onClick:()=>editing.fx(board,block,'enabled',!on)})}/>
     </div></div>
     <div className="rig-pedal-side"><BlockOptions editing={editing} board={board} block={block}/></div>
   </div>;
@@ -171,14 +171,14 @@ export function BlockStage({editing,selected,cabinetResponse}:{editing:SoundEdit
       {block==='amp'&&<Choice label={board.name('Amp model')} value={board.effects.amp.model} disabled={busy} onChange={value=>editing.fx(board,'amp','model',value)} options={ampModels.map(item=>[item,capital(modelName(item))] as const)}/>}
       <div className="rig-stage-actions">
         <Footswitch editing={editing} board={board} block={block}/>
-        <button type="button" className="rig-button" aria-label={board.name(`Copy pedal: ${name}`)} disabled={busy} onClick={()=>editing.copyPedalOf(board,block)}><span className="rig-long">Copy pedal</span><span className="rig-short" aria-hidden="true">Copy</span></button>
-        <button type="button" className="rig-button" aria-label={board.name(`Paste pedal: ${name}`)} disabled={busy||clipboard.pedal?.block!==block} onClick={()=>editing.pastePedal(board)}><span className="rig-long">Paste pedal</span><span className="rig-short" aria-hidden="true">Paste</span></button>
+        <button type="button" aria-label={board.name(`Copy pedal: ${name}`)} {...busyGuard({busy,className:'rig-button',onClick:()=>editing.copyPedalOf(board,block)})}><span className="rig-long">Copy pedal</span><span className="rig-short" aria-hidden="true">Copy</span></button>
+        <button type="button" aria-label={board.name(`Paste pedal: ${name}`)} {...busyGuard({busy,disabled:clipboard.pedal?.block!==block,className:'rig-button',onClick:()=>editing.pastePedal(board)})}><span className="rig-long">Paste pedal</span><span className="rig-short" aria-hidden="true">Paste</span></button>
         {board.second
-          ?<button type="button" className="rig-button" aria-label={`Remove duplicate: ${name}`} disabled={busy} onClick={()=>editing.fx(board,block,'enabled',false)}><span className="rig-long">Remove duplicate</span><span className="rig-short" aria-hidden="true">Remove</span></button>
-          :<button type="button" className="rig-button" aria-label={`Duplicate pedal: ${name}`} disabled={busy||!!second?.effects[block].enabled} onClick={()=>editing.duplicate(block)}><span className="rig-long">Duplicate pedal</span><span className="rig-short" aria-hidden="true">Duplicate</span></button>}
+          ?<button type="button" aria-label={`Remove duplicate: ${name}`} {...busyGuard({busy,className:'rig-button',onClick:()=>editing.fx(board,block,'enabled',false)})}><span className="rig-long">Remove duplicate</span><span className="rig-short" aria-hidden="true">Remove</span></button>
+          :<button type="button" aria-label={`Duplicate pedal: ${name}`} {...busyGuard({busy,disabled:!!second?.effects[block].enabled,className:'rig-button',onClick:()=>editing.duplicate(block)})}><span className="rig-long">Duplicate pedal</span><span className="rig-short" aria-hidden="true">Duplicate</span></button>}
         {!board.second&&<>
-          <button type="button" className="rig-button" aria-label={`Move ${name} earlier`} disabled={busy||index===0} onClick={()=>editing.move(block,-1)}><span className="rig-long">Move earlier</span><span className="rig-short" aria-hidden="true">Earlier</span></button>
-          <button type="button" className="rig-button" aria-label={`Move ${name} later`} disabled={busy||index===order.length-1} onClick={()=>editing.move(block,1)}><span className="rig-long">Move later</span><span className="rig-short" aria-hidden="true">Later</span></button>
+          <button type="button" aria-label={`Move ${name} earlier`} {...busyGuard({busy,disabled:index===0,className:'rig-button',onClick:()=>editing.move(block,-1)})}><span className="rig-long">Move earlier</span><span className="rig-short" aria-hidden="true">Earlier</span></button>
+          <button type="button" aria-label={`Move ${name} later`} {...busyGuard({busy,disabled:index===order.length-1,className:'rig-button',onClick:()=>editing.move(block,1)})}><span className="rig-long">Move later</span><span className="rig-short" aria-hidden="true">Later</span></button>
         </>}
       </div>
     </header>

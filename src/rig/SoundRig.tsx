@@ -4,7 +4,7 @@ import type { EditCommand, TrackSound } from '../edit-types';
 import type { NativePlaybackController } from '../audio/NativePlaybackController';
 import { presetIds, presetName } from '../audio/sound-model';
 import { useSoundEditing } from '../audio/useSoundEditing';
-import { Segmented } from '../ui';
+import { Segmented, busyGuard } from '../ui';
 import { BlockStage } from './BlockStage';
 import { SignalChain } from './SignalChain';
 import { SoundBrowser } from './SoundBrowser';
@@ -33,6 +33,7 @@ export function SoundRig({trackId,sound,onEdit,playback,busy=false,tracks,onTrac
   const [chosen,setChosen]=useState<BlockRef>({block:'amp',second:false}),[browserOpen,setBrowserOpen]=useState(false);
   // A second pedalboard with that pedal off is gone, so the first board's block is shown instead.
   const selected:BlockRef=chosen.second&&!(second&&second.effects[chosen.block].enabled)?{block:chosen.block,second:false}:chosen;
+  useEffect(()=>{if(chosen.second&&!(second&&second.effects[chosen.block].enabled)){setChosen({block:chosen.block,second:false});}},[chosen,second]);
   const root=useRef<HTMLElement>(null);
   useEffect(()=>{previewReturn.current=()=>root.current?.querySelector<HTMLElement>('[data-row-main][tabindex="0"]')?.focus();return()=>{previewReturn.current=null;};},[previewReturn]);
   return <section ref={root} className="sound-view" aria-label="Sound rig" data-browser-open={browserOpen||undefined} onKeyDown={editing.escapePreview}>
@@ -53,9 +54,9 @@ export function SoundRig({trackId,sound,onEdit,playback,busy=false,tracks,onTrac
     </div>
     <div className="rig-messages">
       <div className="rig-sound-actions">
-        <button type="button" className="rig-button" disabled={busy} onClick={()=>void editing.restorePreset()}>Restore preset</button>
+        <button type="button" {...busyGuard({busy,className:'rig-button',onClick:()=>void editing.restorePreset()})}>Restore preset</button>
         <button type="button" className="rig-button" onClick={editing.copyCurrentSound}>Copy sound</button>
-        <button type="button" className="rig-button" disabled={busy||!editing.clipboard.sound} onClick={editing.pasteSound}>Paste sound</button>
+        <button type="button" {...busyGuard({busy,disabled:!editing.clipboard.sound,className:'rig-button',onClick:editing.pasteSound})}>Paste sound</button>
       </div>
       {showingPreview&&<div className="rig-preview" role="group" aria-label="Sound preview">
         <span className="rig-preview-name">Previewing {previewLabel}</span>
@@ -63,7 +64,7 @@ export function SoundRig({trackId,sound,onEdit,playback,busy=false,tracks,onTrac
         <button type="button" className="rig-button" onClick={editing.cancelPreview}>Cancel preview</button>
       </div>}
       <p className="rig-status" role="status">{status}</p>
-      {playback&&<label className="rig-inline"><span className="rig-field-name">Audio output</span><select className="rig-select" aria-label="Audio output" disabled={busy} value={playback.deviceId()??''} onChange={event=>editing.selectOutput(event.target.value)}>
+      {playback&&<label className="rig-inline"><span className="rig-field-name">Audio output</span><select className="rig-select" aria-label="Audio output" aria-disabled={busy||undefined} value={playback.deviceId()??''} onChange={event=>{if(busy){event.target.value=playback.deviceId()??'';return;}editing.selectOutput(event.target.value);}} onKeyDown={event=>{if(busy)event.preventDefault();}} onPointerDown={event=>{if(busy)event.preventDefault();}} onMouseDown={event=>{if(busy)event.preventDefault();}}>
         <option value="">System default</option>{editing.devices.map(device=><option key={device.id} value={device.id}>{device.name}</option>)}</select></label>}
     </div>
     {error&&<p role="alert" className="rig-alert">{error}</p>}{playbackState?.error&&playbackState.error!==error&&<p role="alert" className="rig-alert">{playbackState.error}</p>}

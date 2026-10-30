@@ -5,13 +5,13 @@
 // checks. Build with tests/desktop/string-count-build.mjs, then:
 // node tests/desktop/parity-style-typography.mjs --run --build=<absolute build.json>
 import assert from 'node:assert/strict';
-import {existsSync,mkdirSync,mkdtempSync,readFileSync,realpathSync,renameSync,writeFileSync} from 'node:fs';
-import {dirname,resolve} from 'node:path';
+import {createHash} from 'node:crypto';
+import {existsSync,mkdirSync,mkdtempSync,readFileSync,readdirSync,realpathSync,renameSync,writeFileSync} from 'node:fs';
+import {basename,dirname,resolve} from 'node:path';
 import {fileURLToPath,pathToFileURL} from 'node:url';
-import {sha256} from './score-layout-fixture.mjs';
+import {buildScoreLayoutFixture,sha256} from './score-layout-fixture.mjs';
 import {assertScoreLayoutListener} from './parity-score-layouts.mjs';
 import {assertStringCountBuild,assertStringCountIdentity,assertStringCountPortFree,stringCountEnvironment,validateStringCountArguments} from './parity-string-count.mjs';
-import {buildSavedTuningsFixture} from './parity-saved-tunings.mjs';
 
 const repository=resolve(dirname(fileURLToPath(import.meta.url)),'../..');
 const samePath=(a,b)=>a.replaceAll('\\','/').toLowerCase()===b.replaceAll('\\','/').toLowerCase();
@@ -64,6 +64,8 @@ export async function runStyleTypographyAcceptance({buildPath}={}){
   const native=()=>poll(()=>invoke('audio_status'),value=>{assert.equal(value.playing,false);assert.equal(value.error,null);return value.ready&&value.generation===value.desiredGeneration;},'paused current native preparation');
   const idle=async()=>{owned();await ui.waitForWorkspaceIdle(page);healthy();};
   const button=async name=>{owned();await ui.clickWorkstationButton(page,name);await idle();};
+  // What the score draws, by family and size: tile SVGs are virtualised, so their bytes vary with scrolling.
+  const rendered=async()=>{const {families,largest,digitSize,annotationSize,chordSize}=await drawn();return JSON.stringify({families:[...families].sort(),largest,digitSize,annotationSize,chordSize});};
   const shot=async name=>{const path=resolve(results,`${String(result.screenshots.length+1).padStart(2,'0')}-${name}.png`);await page.screenshot({path});result.screenshots.push(path);};
   const details=async name=>{await page.locator('summary').filter({hasText:new RegExp(`^${name}$`)}).first().evaluate(node=>{node.parentElement.open=true;});};
   const choose=(name,value)=>page.getByRole('combobox',{name:new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')}(?:\\s|$)`)}).selectOption(value);
@@ -86,27 +88,32 @@ export async function runStyleTypographyAcceptance({buildPath}={}){
   const exportPages=async label=>{
     const beforeRecord=await record(),found={};
     for(const format of ['pdf','png','svg']){
-      const path=`${exportBase}.${format}`;assert.equal(existsSync(path),false);
+      // Several pages are written as -1, -2 and so on; a single page has the plain name.
+      const pagesOf=()=>readdirSync(exportDirectory).filter(name=>name===`typography.${format}`||new RegExp(`^typography-\\d+\\.${format}$`).test(name)).sort((a,b)=>a.localeCompare(b,undefined,{numeric:true})).map(name=>resolve(exportDirectory,name));assert.deepEqual(pagesOf(),[]);
       await ui.clickWorkspaceCommand(page,'Export score',{waitForIdle:false});const dialog=page.getByRole('dialog',{name:'Export score'});
       await dialog.getByLabel('Export format').selectOption(format);if(format==='png')await dialog.getByLabel('Resolution').selectOption('150');
       await dialog.getByRole('button',{name:'Export',exact:true}).click();
-      const until=Date.now()+120000;while(!existsSync(path)){const failure=dialog.getByRole('alert');if(await failure.count())throw new Error(`${label} ${format}: ${await failure.innerText()}`);if(Date.now()>until)throw new Error(`${label} ${format}: no output`);await sleep(200);}
-      await dialog.waitFor({state:'hidden'});await idle();
-      const bytes=readFileSync(path);
-      if(format==='pdf')assert.equal(bytes.subarray(0,5).toString(),'%PDF-');
-      if(format==='png'){assert.equal(bytes.subarray(0,8).toString('hex'),'89504e470d0a1a0a');assert.ok(bytes.readUInt32BE(16)>1000&&bytes.readUInt32BE(20)>1000,'PNG page size');}
-      if(format==='svg'){const text=bytes.toString('utf8');assert.ok(text.startsWith('<svg'));const measured=await svgSpill(text);assert.ok(measured.paths>2&&measured.width>0,'SVG page has laid-out notation');assert.equal(measured.spill,0,`${label}: no SVG content leaves its page`);found.svgPage=[measured.width,measured.height];}
-      found[format]=sha256(bytes);renameSync(path,resolve(exportDirectory,`${String(result.exports.length+1).padStart(2,'0')}-${label}.${format}`));result.exports.push({label,format,sha256:found[format]});
+      const until=Date.now()+120000;while(await dialog.isVisible()||!pagesOf().length){const failure=dialog.getByRole('alert');if(await failure.count())throw new Error(`${label} ${format}: ${await failure.innerText()}`);if(Date.now()>until)throw new Error(`${label} ${format}: no output`);await sleep(200);}
+      await idle();const paths=pagesOf();assert.ok(paths.length>0,`${label} ${format}: no output`);const digest=createHash('sha256'),pageSizes=[];
+      for(const path of paths){
+        const bytes=readFileSync(path);digest.update(bytes);
+        if(format==='pdf')assert.equal(bytes.subarray(0,5).toString(),'%PDF-');
+        if(format==='png'){assert.equal(bytes.subarray(0,8).toString('hex'),'89504e470d0a1a0a');assert.ok(bytes.readUInt32BE(16)>1000&&bytes.readUInt32BE(20)>1000,'PNG page size');}
+        if(format==='svg'){const text=bytes.toString('utf8');assert.ok(text.startsWith('<svg'));const measured=await svgSpill(text);assert.ok(measured.paths>2&&measured.width>0,'SVG page has laid-out notation');assert.equal(measured.spill,0,`${label}: no SVG content leaves its page`);pageSizes.push([measured.width,measured.height]);}
+        renameSync(path,resolve(exportDirectory,`${String(result.exports.length+1).padStart(2,'0')}-${label}-${pageSizes.length}-${basename(path)}`));result.exports.push({label,format,path:basename(path)});
+      }
+      if(format==='svg')found.svgPage=pageSizes[0];found[format]=digest.digest('hex');found[`${format}Pages`]=paths.length;
     }
     assert.deepEqual(await record(),beforeRecord,'Exporting pages never edits the document');return found;
   };
-  // The text actually drawn: families and sizes of annotations and of fret digits, and any text outside its own tile or page.
+  // The text actually drawn: families and sizes of annotations and of fret digits, and any text past its tile or page edge.
+  // Sideways only: a text element's line box overhangs the stacked tiles vertically even at the default size.
   const drawn=()=>page.locator('[aria-label="Music notation"] svg').evaluateAll(nodes=>{
     const texts=nodes.flatMap(svg=>[...svg.querySelectorAll('text')].filter(text=>text.textContent.trim()).map(text=>({svg,text,style:getComputedStyle(text),content:text.textContent.trim()})));
     const words=texts.filter(({style})=>!/alphatab|bravura/i.test(style.fontFamily)),digits=words.filter(({content})=>/^\d+$/.test(content)),labels=words.filter(({content})=>!/^\d+$/.test(content));
     const size=list=>Math.max(0,...list.map(({style})=>parseFloat(style.fontSize)));
-    const spill=texts.filter(({svg,text})=>{const box=svg.getBoundingClientRect(),rect=text.getBoundingClientRect();return rect.width>0&&(rect.left<box.left-2||rect.right>box.right+2||rect.top<box.top-2||rect.bottom>box.bottom+2);}).map(({content})=>content);
-    const sheets=[...document.querySelectorAll('.score-sheet')],pageSpill=sheets.flatMap(sheet=>{const frame=sheet.getBoundingClientRect();return [...sheet.querySelectorAll('svg text')].filter(text=>text.textContent.trim()).filter(text=>{const rect=text.getBoundingClientRect();return rect.width>0&&(rect.left<frame.left-2||rect.right>frame.right+2||rect.top<frame.top-2||rect.bottom>frame.bottom+2);}).map(text=>text.textContent.trim());});
+    const spill=texts.filter(({svg,text})=>{const box=svg.getBoundingClientRect(),rect=text.getBoundingClientRect();return rect.width>0&&(rect.left<box.left-2||rect.right>box.right+2);}).map(({content})=>content);
+    const sheets=[...document.querySelectorAll('.score-sheet')],pageSpill=sheets.flatMap(sheet=>{const frame=sheet.getBoundingClientRect();return [...sheet.querySelectorAll('svg text')].filter(text=>text.textContent.trim()).filter(text=>{const rect=text.getBoundingClientRect();return rect.width>0&&(rect.left<frame.left-2||rect.right>frame.right+2);}).map(text=>text.textContent.trim());});
     const annotation=labels.find(({content})=>content.includes('同じ楽譜')),chord=labels.find(({content})=>/maj7|m7|sus4/.test(content));
     return {families:[...new Set(labels.map(({style})=>style.fontFamily))],largest:size(words),digitSize:size(digits),annotationSize:annotation?parseFloat(annotation.style.fontSize):0,chordSize:chord?parseFloat(chord.style.fontSize):0,
       cjk:annotation?annotation.text.getBoundingClientRect().width:0,count:words.length,sheets:sheets.length,spill,pageSpill};
@@ -129,11 +136,11 @@ export async function runStyleTypographyAcceptance({buildPath}={}){
   try{
     ui=await import('./workstation-commands.mjs');const {importer,exporter,model,Settings}=await import('@coderline/alphatab');load=bytes=>importer.ScoreLoader.loadScoreFromBytes(bytes,new Settings());
     // Several bars with chord names, beat text in CJK and a long Latin line, so glyphs and widths are really exercised.
-    const fixture=load(await buildSavedTuningsFixture()),staff=fixture.tracks[0].staves[0];
+    const fixture=load(buildScoreLayoutFixture().gpBytes),staff=fixture.tracks[0].staves[0];
     assert.ok(staff.bars.length>=2,'The fixture has several bars');
-    const words=['同じ楽譜 🎸','A long annotation that needs room','Öö ä ü','漢字かな交じり文'],names=['Cmaj7(♯11)/G','F♯m7♭5','Dsus4','Am7'];let annotated=0;
+    const words=['同じ楽譜 🎸','Longer beat text','Öö ä ü','漢字かな交じり文'],names=['Cmaj7(♯11)/G','F♯m7♭5','Dsus4','Am7'];let annotated=0;for(const track of fixture.tracks)for(const part of track.staves)for(const bar of part.bars)for(const voice of bar.voices)for(const beat of voice.beats)beat.text=null;
     staff.bars.forEach((bar,b)=>bar.voices[0].beats.forEach((beat,i)=>{
-      if(i%2===0){beat.text=words[(b+i/2)%words.length];annotated++;}
+      if(i===0){beat.text=words[b%words.length];annotated++;}
       if(i===0){const chord=new model.Chord();chord.name=names[b%names.length];chord.firstFret=1;chord.strings=staff.tuning.map(()=>-1);staff.addChord(`d12-${b}`,chord);beat.chordId=`d12-${b}`;}
     }));
     assert.ok(annotated>=3);

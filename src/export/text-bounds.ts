@@ -3,9 +3,9 @@ import type { SvgSystem } from './types';
 /** A drawn text's horizontal extent, in system pixels from the system's left edge. */
 export interface TextBox { text:string;left:number;right:number }
 
-/** The texts that start left of the system or end beyond `width`, which the page margins would clip. */
-export function overflowingText(boxes:readonly TextBox[],width:number,tolerance=1):string[] {
-  return boxes.filter(box=>box.left<-tolerance||box.right>width+tolerance).map(box=>box.text);
+/** The texts that pass the paper edge: a system sits inside `margin` on each side and is not clipped to its own width. */
+export function overflowingText(boxes:readonly TextBox[],width:number,margin=0,tolerance=1):string[] {
+  return boxes.filter(box=>box.left<-margin-tolerance||box.right>width+margin+tolerance).map(box=>box.text);
 }
 
 /**
@@ -30,9 +30,9 @@ export function measureSystemText(system:SvgSystem):TextBox[] {
  * Refuses an export whose text would be clipped. The exporter only checks that bars fit, but enlarged annotations,
  * chord names and track names can run past the last bar. Refusing names the text and the settings that cause it.
  */
-export function assertTextFits(systems:readonly SvgSystem[],width:number,measure:(system:SvgSystem)=>TextBox[]=measureSystemText):void {
+export function assertTextFits(systems:readonly SvgSystem[],width:number,margin=0,measure:(system:SvgSystem)=>TextBox[]=measureSystemText):void {
   for(const system of systems){
-    const [first]=overflowingText(measure(system),width);
+    const [first]=overflowingText(measure(system),width,margin);
     if(first!==undefined)throw new Error(`The text "${first.length>30?`${first.slice(0,29)}…`:first}" does not fit the page width. Reduce Text size or Tab number size, or the print scale, or use a wider page.`);
   }
 }

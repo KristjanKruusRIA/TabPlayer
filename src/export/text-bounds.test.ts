@@ -37,11 +37,16 @@ it('overflowingText_reports_text_that_starts_left_of_or_ends_beyond_the_width',(
   expect(overflowingText(boxes,700)).toEqual(['right','left']);expect(overflowingText([],700)).toEqual([]);
 });
 
+it('overflowingText_allows_the_page_margin_because_only_the_paper_edge_clips',()=>{
+  const boxes=[{text:'Gtr',left:-12,right:4},{text:'end',left:690,right:712}];
+  expect(overflowingText(boxes,700,20)).toEqual([]);expect(overflowingText(boxes,700,10)).toEqual(['Gtr','end']);
+});
+
 it('assertTextFits_names_the_first_offending_text_and_the_settings_to_change',()=>{
   const systems=[{svg:'<svg/>',width:700,height:50}];
-  expect(()=>assertTextFits(systems,700,()=>[{text:'ok',left:0,right:50}])).not.toThrow();
-  expect(()=>assertTextFits(systems,700,()=>[{text:'Cmaj7(♯11)/G',left:650,right:760}])).toThrow(/"Cmaj7\(♯11\)\/G" does not fit the page width.*Reduce Text size/);
-  expect(()=>assertTextFits(systems,700,()=>[{text:'x'.repeat(40),left:0,right:900}])).toThrow(/"x{29}…"/);
+  expect(()=>assertTextFits(systems,700,0,()=>[{text:'ok',left:0,right:50}])).not.toThrow();
+  expect(()=>assertTextFits(systems,700,0,()=>[{text:'Cmaj7(♯11)/G',left:650,right:760}])).toThrow(/"Cmaj7\(♯11\)\/G" does not fit the page width.*Reduce Text size/);
+  expect(()=>assertTextFits(systems,700,0,()=>[{text:'x'.repeat(40),left:0,right:900}])).toThrow(/"x{29}…"/);
 });
 
 it('measureSystemText_reads_text_extents_in_system_pixels_and_skips_empty_text',()=>{

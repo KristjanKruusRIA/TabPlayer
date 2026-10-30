@@ -40,11 +40,10 @@ export async function runInputPreferencesAcceptance({buildPath}={}){
   const native=()=>poll(()=>invoke('audio_status'),value=>{assert.equal(value.error,null);return value.ready&&value.generation===value.desiredGeneration;},'paused current native preparation');
   const idle=async()=>{owned();await ui.waitForWorkspaceIdle(page);healthy();};
   const button=async name=>{owned();await ui.clickWorkstationButton(page,name);await idle();};
-  try{
-    ui=await import('./workstation-commands.mjs');const {importer,Settings}=await import('@coderline/alphatab');load=bytes=>importer.ScoreLoader.loadScoreFromBytes(bytes,new Settings());
-    await buildInstrumentFixture();writeFileSync(inputPath,readFileSync(fixturePath),{flag:'wx'});result.input={inputPath,sha256:hashFile(inputPath)};
+  const stop=async()=>{await browser.close();browser=null;page=null;if(inspect())ps(`${ownedScript}if($null -ne $p){Stop-Process -Id $p.Id;if(-not $p.WaitForExit(5000)){throw 'Owned process did not exit'}}`);assert.equal(inspect(),null);identity=null;await poll(portRows,rows=>rows.length===0,'diagnostic port released');};
+  const launch=async session=>{
     assertStringCountBuild(packet);assertStringCountPortFree(portRows());
-    const environment={...stringCountEnvironment(process.env),TABPLAYER_DESKTOP_TEST:'1',TABPLAYER_TEST_SESSION_DIR:paths.session,TABPLAYER_TEST_APP_DATA_DIR:paths['app-data'],TABPLAYER_TEST_OPEN:inputPath,TABPLAYER_TEST_EXPORT:exportBase,WEBVIEW2_USER_DATA_FOLDER:paths.profile,WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS:'--remote-debugging-port=9223',STRING_COUNT_EXE:packet.executable,STRING_COUNT_IDENTITY:identityPath};
+    const environment={...stringCountEnvironment(process.env),TABPLAYER_DESKTOP_TEST:'1',TABPLAYER_TEST_SESSION_DIR:session,TABPLAYER_TEST_APP_DATA_DIR:paths['app-data'],TABPLAYER_TEST_OPEN:inputPath,TABPLAYER_TEST_EXPORT:exportBase,WEBVIEW2_USER_DATA_FOLDER:paths.profile,WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS:'--remote-debugging-port=9223',STRING_COUNT_EXE:packet.executable,STRING_COUNT_IDENTITY:identityPath};
     const script='$ErrorActionPreference="Stop";$p=Start-Process -FilePath $env:STRING_COUNT_EXE -WindowStyle Hidden -PassThru;$text=@{pid=$p.Id;path=$p.Path;startTicks=$p.StartTime.ToUniversalTime().Ticks.ToString()}|ConvertTo-Json -Compress;[IO.File]::WriteAllText($env:STRING_COUNT_IDENTITY,$text);$text';
     identity=JSON.parse(execFileSync('powershell.exe',['-NoProfile','-Command',script],{encoding:'utf8',windowsHide:true,timeout:20000,env:environment}).trim());
     assertStringCountIdentity(identity,json(identityPath));assert.ok(samePath(identity.path,packet.executable));owned();
@@ -52,9 +51,14 @@ export async function runInputPreferencesAcceptance({buildPath}={}){
     const {chromium}=await import('playwright');browser=await chromium.connectOverCDP('http://127.0.0.1:9223');owned();assertScoreLayoutListener(identity,paths.profile,listeners());
     page=browser.contexts()[0].pages()[0];page.setDefaultTimeout(30000);
     page.on('pageerror',error=>result.pageErrors.push(error.message));page.on('console',message=>{if(message.type()==='warning'&&message.text().startsWith('IPC custom protocol failed, Tauri will now use the postMessage interface instead'))result.fallbacks.push(message.text());});
-    await page.locator('.app-shell').waitFor();const library=page.getByRole('dialog',{name:'Library',exact:true});await library.getByRole('heading',{name:'Welcome to TabPlayer',exact:true}).waitFor();await library.getByRole('button',{name:'Close',exact:true}).click();await library.waitFor({state:'hidden'});
+    await page.locator('.app-shell').waitFor();const library=page.getByRole('dialog',{name:'Library',exact:true});if(await library.getByRole('heading',{name:'Welcome to TabPlayer',exact:true}).waitFor({timeout:5000}).then(()=>true,()=>false)){await library.getByRole('button',{name:'Close',exact:true}).click();await library.waitFor({state:'hidden'});}
     await idle();await button('Open');await page.locator('[aria-label="Music notation"] svg').first().waitFor();await native();
-    const initial=await record();assert.deepEqual(initial.snapshot.project.edits,[]);
+  };
+  try{
+    ui=await import('./workstation-commands.mjs');const {importer,Settings}=await import('@coderline/alphatab');load=bytes=>importer.ScoreLoader.loadScoreFromBytes(bytes,new Settings());
+    await buildInstrumentFixture();writeFileSync(inputPath,readFileSync(fixturePath),{flag:'wx'});result.input={inputPath,sha256:hashFile(inputPath)};
+    await launch(paths.session);
+    let initial=await record();assert.deepEqual(initial.snapshot.project.edits,[]);
 
 
     const workspace$=()=>page.getByRole('region',{name:'Score workspace',exact:true});
@@ -87,15 +91,15 @@ export async function runInputPreferencesAcceptance({buildPath}={}){
     assert.deepEqual(await record(),initial,'Preferences never edit the score');
 
     // Read path: after a reload the stored choices come back into the menu and the clipboard panel.
-    await page.reload();await page.locator('.app-shell').waitFor();
-    const welcome=page.getByRole('dialog',{name:'Library',exact:true});if(await welcome.isVisible().catch(()=>false)){await welcome.getByRole('button',{name:'Close',exact:true}).click();await welcome.waitFor({state:'hidden'});}
-    await idle();
-    if(!await workspace$().isVisible().catch(()=>false)){await button('Open');await native();}
-    await workspace$().waitFor();assert.deepEqual((await record()).snapshot.project.edits,[]);
+    // A restart with a fresh session and the same profile: localStorage is what must survive.
+    await sleep(3000);await stop();const again=resolve(runDirectory,'session-2');mkdirSync(again);await launch(again);
+    await workspace$().waitFor();initial=await record();assert.deepEqual(initial.snapshot.project.edits,[]);
     assert.equal(await (await box('keypad')).isChecked(),true);assert.equal(await (await box('auto')).isChecked(),true);assert.equal(await (await box('diagrams')).isChecked(),false);
     await ui.revealInspector(page);
-    const filter=page.getByLabel('Chord diagrams',{exact:true});
-    if(!await filter.isVisible())await page.locator('summary',{hasText:'Musical clipboard'}).click();
+    // Paste options appear once something is copied; copying never edits.
+    const open=name=>page.locator('summary').filter({hasText:name}).first().evaluate(node=>{node.parentElement.open=true;});
+    await open('Music selection');await button('Select bar');await workspace$().focus();await page.keyboard.press('Control+c');await idle();await open('Musical clipboard');
+    const filter=page.getByLabel('Chord diagrams',{exact:true});await filter.waitFor();
     assert.equal(await filter.isChecked(),false,'Clipboard diagram filter starts from the preference');
     await (await box('diagrams')).check();assert.equal(await filter.isChecked(),true,'Turning the preference on moves the filter');
     await (await box('diagrams')).uncheck();assert.equal(await filter.isChecked(),false);
@@ -103,8 +107,8 @@ export async function runInputPreferencesAcceptance({buildPath}={}){
     step('Preferences are saved, reloaded and drive the clipboard filter',{prefs:await prefs()});
 
     // NumLock off: the keypad reports navigation keys, which keep navigating and never edit.
-    const stringBefore=await (await field('String')).inputValue();
-    await press('ArrowDown','Numpad2');await poll(async()=>(await field('String')).inputValue(),value=>value!==stringBefore,'ArrowDown moved the string');
+    const stringSelect=async()=>{await ui.revealInspector(page);return page.getByRole('combobox',{name:/^String/}).first();};const stringBefore=await (await stringSelect()).inputValue();
+    await press('ArrowDown','Numpad2');await poll(async()=>(await stringSelect()).inputValue(),value=>value!==stringBefore,'ArrowDown moved the string');
     assert.deepEqual(await record(),initial);
     // A keypad duration that changes nothing (keypad 1 on a whole note) adds no edit.
     await press('1','Numpad1');await idle();assert.deepEqual(await record(),initial,'No-op keypad key makes no edit');

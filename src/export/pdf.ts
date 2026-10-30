@@ -86,7 +86,7 @@ export function renderPdfPages(score:model.Score,selection:ExportSelection,layou
   try{renderer.renderScore(copy,selection.tracks);if(failure)throw failure;
     if(renderer.boundsLookup?.staffSystems.some(system=>system.bars.some(bar=>bar.visualBounds.x<-.5||bar.visualBounds.x+bar.visualBounds.w>d.usableWidth+1)))throw new Error('A notation system does not fit this page width. Reduce print scale, use landscape, or add a system break.');
     if(!systems.length)throw new Error('Notation renderer produced no printable systems.');
-    if(frozen&&!isDefaultTypography(typographyOf(frozen.engraving)))assertTextFits(systems,d.usableWidth);
+    if(frozen&&!isDefaultTypography(typographyOf(frozen.engraving))){const {left,right}=pageGeometry(frozen.page);assertTextFits(systems,d.usableWidth,Math.min(left,right));}
     return frozen?paginateEngravedSystems(systems,score.title,frozen.page,headerFieldsOf(score),typographyOf(frozen.engraving).titleScale??1):paginateSystems(systems,score.title,layout);}
   finally{renderer.destroy();}
 }

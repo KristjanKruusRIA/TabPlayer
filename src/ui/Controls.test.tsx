@@ -99,9 +99,24 @@ it('skips a disabled option and chooses on click', async()=>{
   await user.click(radios[3]);expect(radios[3]).toBeChecked();
 });
 
-it('disables the whole group', ()=>{
-  render(<Segmented label="Output" value="stereo" onChange={()=>{}} disabled options={[{value:'stereo',label:'Stereo'},{value:'mono',label:'Mono'}]}/>);
-  for(const radio of screen.getAllByRole('radio'))expect(radio).toBeDisabled();
+it('disables the whole group while keeping the chosen option focusable', ()=>{
+  const {rerender}=render(<Segmented label="Output" value="stereo" onChange={()=>{}} options={[{value:'stereo',label:'Stereo'},{value:'mono',label:'Mono'}]}/>);
+  const radios=screen.getAllByRole('radio');
+  radios[0].focus();expect(radios[0]).toHaveFocus();
+  rerender(<Segmented label="Output" value="stereo" onChange={()=>{}} disabled options={[{value:'stereo',label:'Stereo'},{value:'mono',label:'Mono'}]}/>);
+  for(const radio of radios){expect(radio).toHaveAttribute('aria-disabled','true');expect(radio).not.toBeDisabled();}
+  expect(radios[0].tabIndex).toBe(0);expect(radios[0]).toHaveFocus();
+});
+
+it('does not report a change when Home or End lands on the option already chosen', async()=>{
+  const user=userEvent.setup(),onChange=vi.fn();
+  const {rerender}=render(<Segmented label="Source" value="gm" onChange={onChange} options={[{value:'auto',label:'Auto'},{value:'gm',label:'GM'}]}/>);
+  const radios=screen.getAllByRole('radio');
+  radios[1].focus();await user.keyboard('{End}');
+  expect(onChange).not.toHaveBeenCalled();
+  rerender(<Segmented label="Source" value="auto" onChange={onChange} options={[{value:'auto',label:'Auto'},{value:'gm',label:'GM'}]}/>);
+  radios[0].focus();await user.keyboard('{Home}');
+  expect(onChange).not.toHaveBeenCalled();
 });
 
 it('frames a dialog: named, focused, closed by Escape, and focus returns', async()=>{

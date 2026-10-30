@@ -26,7 +26,7 @@ export function Fader({label,ariaLabel,value,min,max,step,defaultValue,unit,form
   };
   return <div className={`tp-fader ${className??''}`} data-disabled={disabled||undefined}>
     {typing.editing
-      ?<input ref={typing.input} className="tp-fader-field" inputMode="decimal" aria-label={`${ariaLabel??label} value`} value={typing.typed} onChange={event=>typing.setTyped(event.target.value)} onBlur={()=>typing.finish(true)}
+      ?<input ref={typing.input} className="tp-fader-field" inputMode="decimal" aria-label={`${ariaLabel??label} value`} value={typing.typed} onChange={event=>typing.setTyped(event.target.value)} onBlur={()=>typing.finish(true,false)}
           onKeyDown={event=>{event.stopPropagation();if(event.key==='Enter'){event.preventDefault();typing.finish(true);}else if(event.key==='Escape'){event.preventDefault();typing.finish(false);}}}/>
       :<span className="tp-fader-readout" onClick={()=>{if(!disabled)typing.begin();}} title={disabled?undefined:'Click to type a value'}>{text}</span>}
     <div ref={el=>{track.current=el;range.wheelRef.current=el;}} className="tp-fader-track" role="slider" aria-orientation="vertical" tabIndex={disabled?-1:0} aria-label={ariaLabel??label} aria-valuemin={min} aria-valuemax={max} aria-valuenow={shown} aria-valuetext={text} aria-disabled={disabled||undefined}

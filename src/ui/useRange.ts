@@ -34,10 +34,10 @@ export function useTypedValue({text,commit,done}:{text:()=>string;commit:(value:
   // Selected when it opens, not on every render: typing replaces the selection once and then adds to what is typed.
   useEffect(()=>{if(editing){input.current?.focus();input.current?.select();}},[editing]);
   const begin=()=>{closing.current=false;setTyped(text());setEditing(true);};
-  const finish=(accept:boolean)=>{
+  const finish=(accept:boolean,returnFocus=true)=>{
     if(closing.current)return;closing.current=true;setEditing(false);
     const number=accept?parseTyped(typed):null;if(number!==null)commit(number);
-    done();
+    if(returnFocus)done();
   };
   return {editing,typed,setTyped,begin,finish,input};
 }

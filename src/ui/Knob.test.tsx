@@ -149,6 +149,18 @@ it('takes a typed value of several characters, selecting the old text once when 
   expect(onCommit).toHaveBeenCalledExactlyOnceWith(-6.5);
 });
 
+it('does not steal focus back to the dial when a typed field blurs', async()=>{
+  vi.useRealTimers();
+  const user=userEvent.setup(),onCommit=vi.fn();
+  render(<><Knob label="Gain" ariaLabel="amp Gain (dB)" value={2} min={-24} max={24} step={.5} onCommit={onCommit}/><button>Search sounds</button></>);
+  await user.click(screen.getByText('+2.0'));
+  expect(screen.getByRole('textbox')).toHaveFocus();
+  await user.keyboard('5');
+  await user.click(screen.getByRole('button',{name:'Search sounds'}));
+  expect(screen.getByRole('button',{name:'Search sounds'})).toHaveFocus();
+  expect(onCommit).toHaveBeenCalledWith(5);
+});
+
 it('reads typed numbers and snaps to whole steps', ()=>{
   expect(parseTyped('+3.5 dB')).toBe(3.5);expect(parseTyped('−2')).toBe(-2);expect(parseTyped('1,5')).toBe(1.5);expect(parseTyped('x')).toBeNull();
   expect(snapToStep(2.26,-24,24,.5)).toBe(2.5);expect(snapToStep(.3,0,1,.01)).toBe(.3);expect(snapToStep(99,0,10,1)).toBe(10);expect(snapToStep(1/3,0,1,.01)).toBe(.33);

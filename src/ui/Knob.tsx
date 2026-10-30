@@ -78,7 +78,7 @@ export function Knob({label,ariaLabel,value,min,max,step,defaultValue,unit,forma
     </div>
     <span className="tp-knob-label">{label}</span>
     {editing
-      ?<input ref={typing.input} className="tp-knob-field" inputMode="decimal" aria-label={`${ariaLabel??label} value`} value={typed} onChange={event=>setTyped(event.target.value)} onBlur={()=>finishTyping(true)}
+      ?<input ref={typing.input} className="tp-knob-field" inputMode="decimal" aria-label={`${ariaLabel??label} value`} value={typed} onChange={event=>setTyped(event.target.value)} onBlur={()=>finishTyping(true,false)}
           onKeyDown={event=>{event.stopPropagation();if(event.key==='Enter'){event.preventDefault();finishTyping(true);}else if(event.key==='Escape'){event.preventDefault();finishTyping(false);}}}/>
       :<span className="tp-knob-readout" onClick={beginTyping} title={disabled?undefined:'Click to type a value'}>{text}</span>}
   </div>;

@@ -15,6 +15,9 @@ use crate::settings::MasterSettings;
 const RAMP_SECONDS: f64 = 0.01;
 /// The pedalboard's delay storage. The master has no delay block, so this only has to be allowed.
 const BOARD_DELAY_SECONDS: f64 = 0.05;
+/// The largest sample the effects are given, the same bound the pedalboard puts on what it returns. The clamp is only in
+/// the path while an effect runs, so a master with none still hands its input back untouched.
+const BOARD_INPUT_LIMIT: f32 = 64.0;
 /// A switched-off limiter's ceiling, far above any sample a mix can hold.
 const OFF_CEILING: f64 = 1.0e6;
 /// How quickly a switched-off limiter lets go of the gain it holds, so it is soon out of the signal.
@@ -43,10 +46,11 @@ impl Level {
             remaining: 0,
         }
     }
-    /// Whether it passes its input as it is.
+    /// Whether it passes its input as it is. A glide still counting down is not: it has to keep running to finish, even
+    /// if it happens to be passing through exactly unity, or `ramping` would never end.
     #[inline]
     fn unity(&self) -> bool {
-        self.current == Self::UNITY && self.target == Self::UNITY
+        self.remaining == 0 && self.current == Self::UNITY && self.target == Self::UNITY
     }
     #[inline]
     fn process(&mut self, x: [f32; 2]) -> [f32; 2] {
@@ -153,8 +157,12 @@ impl MasterBus {
         };
         settings.validate()?;
         let hz = rate as f64;
+        let mut board = Box::new(TrackDsp::new(settings.board(), rate, BOARD_DELAY_SECONDS)?);
+        // Silence after a loud passage must not leave the effects' decaying state in the subnormal range, which costs
+        // many times the normal time per frame on the audio thread.
+        board.flush_quiet_state();
         Ok(Self {
-            board: Box::new(TrackDsp::new(settings.board(), rate, BOARD_DELAY_SECONDS)?),
+            board,
             board_on: settings.compressor.enabled || settings.eq.enabled || settings.reverb.enabled,
             level: Level::new(settings),
             limiter: Limiter::new(settings, hz),
@@ -196,6 +204,9 @@ impl MasterBus {
     pub fn bus(&mut self, x: [f32; 2], bpm: f64) -> [f32; 2] {
         let mut y = x;
         if self.board_on || self.board.ramping() {
+            // A finite sample far beyond any mix would overflow the effects' feedback and leave them holding NaN until
+            // a seek, so what goes in is held to the range the board's own output is.
+            y = y.map(|v| v.clamp(-BOARD_INPUT_LIMIT, BOARD_INPUT_LIMIT));
             y = self.board.process(y, bpm);
         }
         if !self.level.unity() {

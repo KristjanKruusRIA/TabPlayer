@@ -871,13 +871,16 @@ impl Tank {
         })
     }
 }
-/// The original room reverb: four damped combs fed with the input and crossing channels.
+/// The original room reverb: four damped combs fed with the input and crossing channels. With `flush_quiet` the
+/// comb state is zeroed once it falls below `flush`'s threshold, so a tail dying away in silence never reaches the
+/// subnormal range; the master asks for that, a track's reverb does not and runs exactly as it always has.
 fn room_reverb(
     lines: &mut [DelayLine; 4],
     damp: &mut [[f32; 2]; 4],
     x: [f32; 2],
     room: f64,
     damping: f64,
+    flush_quiet: bool,
 ) -> [f32; 2] {
     let mut wet = [0.0; 2];
     let feedback = (0.55 + 0.37 * room) as f32;
@@ -886,9 +889,19 @@ fn room_reverb(
         let y = lines[i].read((lines[i].frames.len() - 1) as f64);
         for (c, value) in wet.iter_mut().enumerate() {
             damp[i][c] = y[c] * (1.0 - damping) + damp[i][c] * damping;
+            if flush_quiet {
+                damp[i][c] = flush(damp[i][c] as f64) as f32;
+            }
             *value += y[c] * 0.25;
         }
-        lines[i].write(std::array::from_fn(|c| x[c] + damp[i][1 - c] * feedback));
+        lines[i].write(std::array::from_fn(|c| {
+            let v = x[c] + damp[i][1 - c] * feedback;
+            if flush_quiet {
+                flush(v as f64) as f32
+            } else {
+                v
+            }
+        }));
     }
     wet
 }
@@ -1252,6 +1265,15 @@ impl Biquad {
             y as f32
         })
     }
+    /// `process`, then zeroes any state that has fallen below `flush`'s threshold, so a filter ringing out in silence
+    /// never reaches the subnormal range.
+    fn process_flushing(&mut self, x: [f32; 2]) -> [f32; 2] {
+        let y = self.process(x);
+        for z in self.z.iter_mut().flatten() {
+            *z = flush(*z);
+        }
+        y
+    }
     fn reset(&mut self) {
         self.z = [[0.0; 2]; 2];
     }
@@ -1311,6 +1333,9 @@ pub struct TrackDsp {
     ramp_frames: u32,
     gate_envelope: f64,
     compressor_envelope: f64,
+    /// Zero compressor, EQ and room-reverb state as it falls below `flush`'s threshold. Only the master's board sets
+    /// it (`flush_quiet_state`); a track's board keeps its exact arithmetic.
+    flush_quiet: bool,
     amp_dc: [f64; 2],
     /// The driven amp models' circuit, and the previous and current settings resolved. A clean or bass amp has none,
     /// and takes the path above.
@@ -1452,6 +1477,7 @@ impl TrackDsp {
             ramp_frames: (rate * 0.01) as u32,
             gate_envelope: 1.0,
             compressor_envelope: 0.0,
+            flush_quiet: false,
             amp_dc: [0.0; 2],
             amp_chain: tone::Chain::new(rate),
             amp_leaving: tone::Chain::new(rate),
@@ -1760,6 +1786,12 @@ impl TrackDsp {
     fn start_mid_play(&mut self) {
         self.microphone_live = false;
     }
+    /// Makes the compressor, EQ and room reverb zero their state as it falls below `flush`'s threshold, so silence
+    /// after a loud passage never leaves them running subnormal arithmetic. It changes nothing a listener can hear
+    /// (the threshold is -400 dB), but it does change bits, so a track's board does not take it.
+    pub fn flush_quiet_state(&mut self) {
+        self.flush_quiet = true;
+    }
     /// Whether a settings change is still crossfading. A configuration that took over now would cut the fade short. A
     /// second board's fade starts and ends with this one's, so this covers both.
     pub fn ramping(&self) -> bool {
@@ -1970,6 +2002,9 @@ impl TrackDsp {
                         };
                         let k = (-1.0 / (self.rate * time * 0.001)).exp();
                         self.compressor_envelope = level + (self.compressor_envelope - level) * k;
+                        if self.flush_quiet {
+                            self.compressor_envelope = flush(self.compressor_envelope);
+                        }
                         let db = 20.0 * self.compressor_envelope.max(1e-9).log10();
                         let above = (db
                             - lerp(p.compressor.threshold_db, f.compressor.threshold_db))
@@ -2364,7 +2399,11 @@ impl TrackDsp {
                         }
                         let mut wet = x;
                         for b in &mut self.eq {
-                            wet = b.process(wet);
+                            wet = if self.flush_quiet {
+                                b.process_flushing(wet)
+                            } else {
+                                b.process(wet)
+                            };
                         }
                         x = blend(x, wet, p.eq.enabled, f.eq.enabled);
                     }
@@ -2690,6 +2729,7 @@ impl TrackDsp {
                                 x,
                                 lerp(p.reverb.room, f.reverb.room),
                                 lerp(p.reverb.damping, f.reverb.damping),
+                                self.flush_quiet,
                             )
                         } else {
                             let feedback = std::array::from_fn(|i| {
@@ -2728,6 +2768,7 @@ impl TrackDsp {
                                     x,
                                     sides[s].0,
                                     sides[s].1,
+                                    self.flush_quiet,
                                 )
                             } else {
                                 self.reverb_tanks[shapes[s].model - 1]

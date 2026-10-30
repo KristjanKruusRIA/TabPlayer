@@ -62,28 +62,38 @@ try{
     await new Promise(r=>setTimeout(r,300));return wav(await readFile(join(folder,expected)));
   };
   const master=()=>page.getByRole('region',{name:'Master',exact:true});
+  /** Waits until the edit log holds `count` edits, then for the workspace to be idle. The idle flag clears before an
+   * edit's round trip starts, so idle on its own can be seen before the edit has begun and the next control would
+   * commit from the old settings. */
+  const settled=async count=>{
+    const deadline=Date.now()+20000;let seen;
+    while(Date.now()<deadline){seen=(await edits()).length;if(seen===count)break;await page.waitForTimeout(50);}
+    assert.equal(seen,count,`the edit log reached ${count} edits`);await waitForWorkspaceIdle(page);
+  };
   /** Sets a master slider as a drag does: it follows the draft, then commits once when the gesture ends. */
   const slide=async(label,value)=>{
-    await revealDock(page,'Mixer');
+    await revealDock(page,'Mixer');const wanted=(await edits()).length+1;
     await master().getByRole('slider',{name:label,exact:true}).evaluate((node,value)=>{
       node.focus();Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(node,String(value));
       node.dispatchEvent(new Event('input',{bubbles:true}));node.blur();
     },value);
-    await waitForWorkspaceIdle(page);
+    await settled(wanted);
   };
   const open=async name=>{await revealDock(page,'Mixer');const summary=master().locator('summary').filter({hasText:new RegExp(`^${name}`)});if(await summary.locator('xpath=..').getAttribute('open')===null)await summary.click();};
 
   // 1. Untouched: the strip says so, and the export is the unmastered mix.
   await revealDock(page,'Mixer');await master().waitFor();
-  assert.equal(await master().getByText('Untouched',{exact:true}).count(),1,'The master starts untouched');
+  await master().getByText('Untouched',{exact:true}).waitFor();
   const plain=await exportWav(),plainPeak=peakOf(plain);
   assert.ok(plainPeak>.02,`the chord is audible (peak ${plainPeak.toFixed(3)})`);
+  // The limiter's lowest ceiling is -12 dB, so the fixture has to peak above about -11 dB for it to have work to do.
+  assert.ok(toDb(plainPeak)>-11,`the fixture chord peaks at ${toDb(plainPeak).toFixed(2)} dB, too quiet to test the limiter (needs above -11 dB)`);
   assert.deepEqual(await edits(),[],'Exporting never edits');
 
   // 2. The overall level is one edit, and it scales the export by exactly its gain.
   await slide('Master level',-6);
   let log=await edits();assert.equal(log.length,1);assert.equal(log[0].type,'setMaster');assert.equal(log[0].master.gainDb,-6);
-  assert.equal(await master().getByText('Changed',{exact:true}).count(),1);
+  await master().getByText('Changed',{exact:true}).waitFor();
   const quiet=await exportWav(),quietPeak=peakOf(quiet);
   assert.ok(Math.abs(toDb(quietPeak)-(toDb(plainPeak)-6))<.3,`-6 dB level: peak ${toDb(plainPeak).toFixed(2)} dB became ${toDb(quietPeak).toFixed(2)} dB`);
   await slide('Master level',0);
@@ -92,7 +102,9 @@ try{
   // 3. The limiter keeps every exported sample under its ceiling, 3 dB below where the mix peaks (but not below -12).
   const ceilingDb=Math.max(-12,Math.floor((toDb(plainPeak)-3)*2)/2);
   assert.ok(toDb(plainPeak)>ceilingDb+1,`the unmastered peak ${toDb(plainPeak).toFixed(2)} dB is above the ceiling ${ceilingDb} dB, so the limiter has work to do`);
-  await open('Limiter');await master().getByRole('checkbox',{name:'Limiter on',exact:true}).check();await waitForWorkspaceIdle(page);
+  // The switch is controlled, so a click, not check(); the summary reads "(on)" once the edit has come back.
+  await open('Limiter');await master().getByRole('checkbox',{name:'Limiter on',exact:true}).click();
+  await master().locator('summary').filter({hasText:'Limiter (on)'}).waitFor();await settled(3);
   await slide('Master limiter ceiling',ceilingDb);
   log=await edits();assert.equal(log.length,4);
   assert.deepEqual([log.at(-1).master.limiter.enabled,log.at(-1).master.limiter.ceilingDb],[true,ceilingDb]);
@@ -124,7 +136,7 @@ try{
   await revealDock(page,'Mixer');await master().getByRole('button',{name:'Reset master',exact:true}).click();await waitForWorkspaceIdle(page);
   log=await edits();assert.equal(log.length,before+1);
   assert.deepEqual([log.at(-1).master.gainDb,log.at(-1).master.limiter.enabled],[0,false]);
-  assert.equal(await master().getByText('Untouched',{exact:true}).count(),1);
+  await master().getByText('Untouched',{exact:true}).waitFor();
   assert.deepEqual(errors,[]);
   console.log(`master effects: level -6 dB scaled the export from ${toDb(plainPeak).toFixed(2)} to ${toDb(quietPeak).toFixed(2)} dB; limiter at ${ceilingDb} dB held it to ${toDb(limitedPeak).toFixed(2)} dB; undo restored ${plain.samples.length} samples exactly; level changed while playing; reset is one edit.`);
 }finally{try{if(browser)await browser.close();}finally{stop(id);}}

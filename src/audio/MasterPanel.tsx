@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { defaultMaster, masterIsNeutral } from '../document-settings';
 import type { MasterSettings } from '../edit-types';
 import './master-panel.css';
@@ -34,11 +34,34 @@ export function MasterPanel({ master, disabled, onChange }: {
 }): React.JSX.Element {
   const current = master ?? defaultMaster();
   const neutral = masterIsNeutral(master);
-  const change = (patch: Partial<MasterSettings>) => onChange({ ...current, ...patch });
+  // A change is built on the master as it stands now, not as it was drawn: a second control touched while the first
+  // one's edit is still on its way would otherwise be built from the old master and put the first back. `latest`
+  // holds the master with every change sent so far; it follows the prop again once nothing is in flight.
+  const latest = useRef(current);
+  const inFlight = useRef(0);
+  const shown = useRef(current);
+  shown.current = current;
+  useEffect(() => { if (inFlight.current === 0) latest.current = current; });
+  const send = (next: MasterSettings): Promise<unknown> => {
+    latest.current = next;
+    let result: Promise<unknown> | void;
+    try { result = onChange(next); } catch { result = undefined; }
+    if (!result || typeof (result as Promise<unknown>).then !== 'function') {
+      // Settled at once; the prop is the truth again when it next renders.
+      latest.current = shown.current;
+      return Promise.resolve();
+    }
+    inFlight.current += 1;
+    return Promise.resolve(result).then(() => {}, () => {
+      // Refused: the player has said why. What was shown stays.
+      if (inFlight.current === 1) latest.current = shown.current;
+    }).finally(() => { inFlight.current -= 1; });
+  };
+  const change = (patch: Partial<MasterSettings>) => send({ ...latest.current, ...patch });
   const block = <K extends 'compressor' | 'eq' | 'reverb' | 'limiter'>(name: K, patch: Partial<MasterSettings[K]>) =>
-    change({ [name]: { ...current[name], ...patch } } as Partial<MasterSettings>);
+    change({ [name]: { ...latest.current[name], ...patch } } as Partial<MasterSettings>);
   const on = (name: 'compressor' | 'eq' | 'reverb' | 'limiter', title: string) =>
-    <label className="master-switch"><input type="checkbox" checked={current[name].enabled} disabled={disabled} onChange={event => block(name, { enabled: event.target.checked } as never)} />{title} on</label>;
+    <label className="master-switch"><input type="checkbox" checked={current[name].enabled} disabled={disabled} onChange={event => { void block(name, { enabled: event.target.checked } as never); }} />{title} on</label>;
   const db = (value: number) => `${signed(value, 1)} dB`;
   const plain = (value: number) => value.toFixed(2);
   const balance = (value: number) => value === 0 ? 'Centre' : `${value < 0 ? 'Left' : 'Right'} ${Math.round(Math.abs(value) * 100)}%`;
@@ -66,7 +89,7 @@ export function MasterPanel({ master, disabled, onChange }: {
     <details>
       <summary>Reverb{current.reverb.enabled ? ' (on)' : ''}</summary>
       {on('reverb', 'Reverb')}
-      <label className="master-select">Master reverb model<select aria-label="Master reverb model" value={current.reverb.model} disabled={disabled} onChange={event => block('reverb', { model: event.target.value as MasterSettings['reverb']['model'] })}>
+      <label className="master-select">Master reverb model<select aria-label="Master reverb model" value={current.reverb.model} disabled={disabled} onChange={event => { void block('reverb', { model: event.target.value as MasterSettings['reverb']['model'] }); }}>
         <option value="room">Room</option><option value="hall">Hall</option><option value="plate">Plate</option><option value="spring">Spring</option>
       </select></label>
       <Slider label="Master reverb send" value={current.reverb.mix} min={0} max={1} step={.01} format={plain} disabled={disabled} commit={value => block('reverb', { mix: value })} />
@@ -79,6 +102,6 @@ export function MasterPanel({ master, disabled, onChange }: {
       <Slider label="Master limiter ceiling" value={current.limiter.ceilingDb} min={-12} max={0} step={.5} format={db} disabled={disabled} commit={value => block('limiter', { ceilingDb: value })} />
       <Slider label="Master limiter release" value={current.limiter.releaseMs} min={10} max={1000} step={10} format={value => `${value.toFixed(0)} ms`} disabled={disabled} commit={value => block('limiter', { releaseMs: value })} />
     </details>
-    <button type="button" disabled={disabled || !master || JSON.stringify(master) === JSON.stringify(defaultMaster())} onClick={() => onChange(defaultMaster())}>Reset master</button>
+    <button type="button" disabled={disabled || !master || JSON.stringify(master) === JSON.stringify(defaultMaster())} onClick={() => { void send(defaultMaster()); }}>Reset master</button>
   </section>;
 }

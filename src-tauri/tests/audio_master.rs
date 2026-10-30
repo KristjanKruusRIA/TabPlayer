@@ -851,6 +851,138 @@ fn a_master_is_stored_as_the_camel_case_object_the_editor_writes() {
     );
 }
 
+/// A loud burst and then `seconds` of silence through a bus, timed in half-second windows: nanoseconds per frame in
+/// each window of the silence. The burst leaves the effects ringing, and as that dies away it must not pass through
+/// the subnormal range, where each frame costs many times what it did.
+fn silence_window_costs(settings: &MasterSettings, rate: u32, seconds: usize) -> Vec<f64> {
+    let mut bus = MasterBus::new(Some(settings), rate).unwrap();
+    let mut sink = 0.0f32;
+    for n in 0..rate as usize / 2 {
+        let noise = ((n * 7919) % 2003) as f32 / 1001.5 - 1.0;
+        let y = run(&mut bus, [0.8 * noise, 0.7 * noise]);
+        sink += y[0];
+    }
+    let window = rate as usize / 2;
+    let costs = (0..seconds * 2)
+        .map(|_| {
+            let start = std::time::Instant::now();
+            for _ in 0..window {
+                let y = run(&mut bus, [0.0; 2]);
+                sink += y[0] + y[1];
+            }
+            start.elapsed().as_secs_f64() * 1e9 / window as f64
+        })
+        .collect();
+    std::hint::black_box(sink);
+    costs
+}
+/// The settings that ring longest and lowest: a long room reverb with little damping and a deep EQ.
+fn ringing_master() -> MasterSettings {
+    master(|m| {
+        m.compressor.enabled = true;
+        m.eq.enabled = true;
+        m.eq.low_db = -6.0;
+        m.eq.mid_db = -3.0;
+        m.eq.high_db = -6.0;
+        m.reverb.enabled = true;
+        m.reverb.model = "room".into();
+        m.reverb.room = 0.5;
+        m.reverb.damping = 0.2;
+        m.reverb.mix = 0.5;
+        m.limiter.enabled = true;
+    })
+}
+
+#[test]
+fn silence_after_a_burst_does_not_slow_the_master_down() {
+    let rate = 48_000;
+    // Each window's best of two runs, so a load spike has to hit the same window twice to count.
+    let runs = [
+        silence_window_costs(&ringing_master(), rate, 20),
+        silence_window_costs(&ringing_master(), rate, 20),
+    ];
+    let windows: Vec<f64> = (0..runs[0].len())
+        .map(|w| runs[0][w].min(runs[1][w]))
+        .collect();
+    // The first second and a half is the tail still ringing at ordinary levels; the last three seconds are where
+    // subnormal state would show, as the tail's last decades die away. Medians, so a stray slow window is not
+    // mistaken for a trend.
+    let median = |part: &[f64]| {
+        let mut sorted = part.to_vec();
+        sorted.sort_by(f64::total_cmp);
+        sorted[sorted.len() / 2]
+    };
+    let early = median(&windows[..3]);
+    let late = median(&windows[windows.len() - 6..]);
+    assert!(
+        late < early * 1.4,
+        "silence slowed the master from {early:.0} to {late:.0} ns/frame: {windows:.0?}"
+    );
+}
+
+#[test]
+fn a_tail_dying_away_in_silence_never_passes_through_the_subnormal_range() {
+    // The deterministic side of the timing test above: a subnormal sample out means subnormal state inside.
+    for rate in RATES {
+        let mut bus = MasterBus::new(Some(&ringing_master()), rate).unwrap();
+        for n in 0..rate as usize / 2 {
+            let noise = ((n * 7919) % 2003) as f32 / 1001.5 - 1.0;
+            run(&mut bus, [0.8 * noise, 0.7 * noise]);
+        }
+        for n in 0..rate as usize * 20 {
+            let y = run(&mut bus, [0.0; 2]);
+            assert!(
+                y.iter().all(|v| !v.is_subnormal()),
+                "frame {n} of the silence came out as {y:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_level_glide_that_lands_on_exactly_unity_still_finishes() {
+    for rate in RATES {
+        // 1e-6 dB is one step above unity in f32, so the glide down to a neutral master passes through exactly 1.0
+        // before its frames have run out.
+        let mut old = MasterBus::new(Some(&master(|m| m.gain_db = 1e-6)), rate).unwrap();
+        let mut new = MasterBus::new(Some(&MasterSettings::default()), rate).unwrap();
+        new.transition_from(&mut old);
+        assert!(new.ramping());
+        let mut last = [0.0; 2];
+        for _ in 0..rate as usize / 20 {
+            last = new.bus([0.5, -0.25], 120.0);
+        }
+        assert!(!new.ramping(), "the glide never ended at {rate} Hz");
+        assert_eq!(last, [0.5, -0.25]);
+    }
+}
+
+#[test]
+fn a_huge_finite_sample_does_not_leave_the_effects_holding_nan() {
+    for rate in RATES {
+        for huge in [1.0e37f32, 3.0e38, f32::MAX] {
+            let mut bus = MasterBus::new(Some(&ringing_master()), rate).unwrap();
+            for n in 0..64 {
+                let sign = if n % 2 == 0 { 1.0 } else { -1.0 };
+                let y = run(&mut bus, [huge * sign, huge]);
+                assert!(y.iter().all(|v| v.is_finite()), "{huge} came out as {y:?}");
+            }
+            let mut energy = 0.0f64;
+            for _ in 0..rate as usize {
+                let y = run(&mut bus, [0.0; 2]);
+                assert!(y.iter().all(|v| v.is_finite()), "{huge} left {y:?}");
+                energy += (y[0] as f64).powi(2) + (y[1] as f64).powi(2);
+            }
+            assert!(energy.is_finite());
+            // And an ordinary mix afterwards still sounds, rather than being swallowed by a latched state.
+            let y = (0..4_800).fold(0.0f32, |p, n| {
+                p.max(run(&mut bus, tone(n, rate, 220.0, 0.3))[0].abs())
+            });
+            assert!(y > 0.01 && y.is_finite());
+        }
+    }
+}
+
 /// Run with `cargo test --release --test audio_master master_cost -- --ignored --nocapture`.
 #[test]
 #[ignore]
@@ -908,6 +1040,28 @@ fn master_cost() {
             "{name:>20}: {:6.1} ns/frame, {:5.2}% of one core at {rate} Hz",
             per_frame * 1e9,
             per_frame * rate as f64 * 100.0
+        );
+    }
+    // Silence after a burst, where decaying state could go subnormal: the quickest and slowest half-second.
+    for (name, settings) in [
+        ("ringing master", ringing_master()),
+        (
+            "everything",
+            master(|m| {
+                m.gain_db = -3.0;
+                m.limiter.enabled = true;
+                m.eq.enabled = true;
+                m.compressor.enabled = true;
+                m.reverb.enabled = true;
+            }),
+        ),
+    ] {
+        let windows = silence_window_costs(&settings, rate, 20);
+        let quickest = windows.iter().cloned().fold(f64::INFINITY, f64::min);
+        let slowest = windows.iter().cloned().fold(0.0, f64::max);
+        println!(
+            "{:>20}: silence after a burst {quickest:6.1} to {slowest:6.1} ns/frame",
+            name
         );
     }
     let start = std::time::Instant::now();

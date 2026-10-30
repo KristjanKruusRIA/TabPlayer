@@ -91,6 +91,38 @@ it('drops the draft when the edit is refused, so the slider goes back to the sav
   expect(slider('Master level')).toHaveValue('0');
 });
 
+it('builds a second control touched during the first round trip on top of the first, not on the old master',async()=>{
+  const release:Array<()=>void>=[];
+  const onChange=vi.fn(()=>new Promise<void>(resolve=>{release.push(resolve);}));
+  const view=render(<MasterPanel master={undefined} disabled={false} onChange={onChange}/>);
+  open('Limiter');
+  fireEvent.click(screen.getByLabelText('Limiter on'));
+  expect(onChange).toHaveBeenLastCalledWith({...defaultMaster(),limiter:{...defaultMaster().limiter,enabled:true}});
+  // The first edit has not come back, so the prop still holds the old master.
+  fireEvent.change(slider('Master level'),{target:{value:'-6'}});fireEvent.pointerUp(slider('Master level'));
+  expect(onChange).toHaveBeenLastCalledWith({...defaultMaster(),gainDb:-6,limiter:{...defaultMaster().limiter,enabled:true}});
+  await act(async()=>{release.forEach(done=>done());await Promise.resolve();});
+  // Settled and saved: the next change is built from what the prop says.
+  const saved:MasterSettings={...defaultMaster(),gainDb:-6,limiter:{...defaultMaster().limiter,enabled:true}};
+  view.rerender(<MasterPanel master={saved} disabled={false} onChange={onChange}/>);
+  fireEvent.change(slider('Master balance'),{target:{value:'0.5'}});fireEvent.pointerUp(slider('Master balance'));
+  expect(onChange).toHaveBeenLastCalledWith({...saved,balance:.5});
+});
+
+it('takes the refusal of a switch, model or reset itself rather than leaving it unhandled',async()=>{
+  // A thenable, so what is done with a refusal can be seen: the panel has to attach a handler for it.
+  const handlers:boolean[]=[];
+  const onChange=vi.fn(()=>({then:(_done:unknown,refused:unknown)=>{handlers.push(typeof refused==='function');}}) as unknown as Promise<void>);
+  render(<MasterPanel master={{...defaultMaster(),gainDb:3}} disabled={false} onChange={onChange}/>);
+  open('Reverb');
+  fireEvent.click(screen.getByLabelText('Reverb on'));
+  fireEvent.change(screen.getByRole('combobox',{name:'Master reverb model'}),{target:{value:'plate'}});
+  fireEvent.click(screen.getByRole('button',{name:'Reset master'}));
+  expect(onChange).toHaveBeenCalledTimes(3);
+  await act(async()=>{await Promise.resolve();await Promise.resolve();});
+  expect(handlers).toEqual([true,true,true]);
+});
+
 function mixer(master:MasterSettings|undefined,extra:object={}) {
   const score=previewEdit(blankProject(),{type:'setRest',target:{track:0,staff:0,bar:0,voice:0,beat:0}}).score as model.Score;
   const state={},player={subscribe:()=>()=>{},getState:()=>state,focus:()=>null,mix:()=>({mute:false,solo:false,volume:1,pan:0}),master:()=>master,setMaster:vi.fn(async()=>{}),...extra};

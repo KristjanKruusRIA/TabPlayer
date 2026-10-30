@@ -14,12 +14,14 @@ No dependency is added. The compressor, EQ and reverb are the existing pedalboar
 
 In the renderer's per-frame mix, the tracks and the backing are summed, then pass through:
 
-1. the master pedalboard: compressor, EQ, reverb (the reverb mix control is the send level);
+1. the master pedalboard: compressor, EQ, reverb. The reverb's mix control, labelled "send" in the Mixer, is the pedalboard's wet/dry crossfade, not a true send: raising it turns the dry mix down as it brings the reverb up, where a send would leave the dry at full level;
 2. the overall level (-24..+12 dB) and balance (-1..1; it turns one side down and leaves the other, so centre is exactly unity);
 3. the metronome click is added after those, so it is neither coloured nor turned with the music;
-4. the master limiter on the sum of everything that sounds, the click included.
+4. the master limiter on the renderer's sum of the music and the click, so everything the renderer produces is limited. What the device adds after the renderer is outside the chain and unlimited: the count-in click and audition clips (see Scope and limits).
 
-The limiter has an instant attack and no lookahead (so no added delay), a ceiling from -12 to 0 dB and a release from 10 to 1000 ms. Its clamp makes the ceiling exact: no output sample, mid-change or not, exceeds the ceiling in force. A change to the limiter crossfades the old and new limiter over 10 ms; during that blend the output is under the higher of the two ceilings, and under the new one once it ends.
+The limiter has an instant attack and no lookahead (so no added delay), a ceiling from -12 to 0 dB and a release from 10 to 1000 ms. Its clamp makes the ceiling exact for a settled limiter: every sample it emits is within the ceiling, and a non-finite input becomes silence. A change to the limiter crossfades the old and new limiter over 10 ms; the output during that blend is a weighted sum of the two limiters' outputs, so it is under the higher of the two ceilings, not the new one, until the blend ends. The renderer's existing soft clip (`master_limit`, above 0.9) still runs after the limiter, so a ceiling above -0.9 dB is softened further and never raised.
+
+The stem exports (`render_stems_into` and the stems of the mixed export) are the per-track and backing signals before the master: the effects, level, balance and limiter apply to the mixed output only.
 
 Defaults: everything off, level 0 dB, balance centre. The numbers behind a switched-off block are where it starts when switched on (a gentler compressor than a track's: -12 dB, 2:1, 30/200 ms; a hall reverb at mix 0.1; limiter -1 dB, 100 ms).
 
@@ -30,6 +32,8 @@ A master that was never edited, or whose blocks are all off with level 0 and bal
 ### Changing it while it plays
 
 `MasterBus` is resolved off the audio thread (`PreparedMix` builds it with the rest of the mix). Installing a new one calls `transition_from`: the board crossfades itself, the level glides over 10 ms, and the limiter carries its held gain across. `process` allocates nothing and takes no lock (`the_master_stays_off_the_heap`). A seek resets the effect tails and the limiter gain.
+
+The master guards itself against two states that would otherwise be costly or permanent. Its board zeroes compressor, EQ and room-reverb state once it falls below 1e-20 (`flush_quiet_state`, set by `MasterBus::new` only), because silence after a loud passage lets decaying feedback state fall through the subnormal range, where each frame costs several times the normal time on the audio thread; a track's board keeps its exact arithmetic, so track output and the golden tests are unchanged, and the threshold is 400 dB below full scale. Per-stage flushing is used rather than the FTZ/DAZ processor flags, which would have to be set on both the callback and the export threads. And the board's input is held to 64 (as its output already is), because a finite sample near the top of the f32 range, such as a corrupt float backing file could hold, would overflow the reverb's feedback and leave it at NaN until a seek. The hold is only in the path while an effect runs, so a neutral master still hands its input back untouched.
 
 ### Storage
 
@@ -43,7 +47,9 @@ A "Master" strip at the right end of the Mixer (`MasterPanel`): overall level an
 
 ## Cost
 
-Measured by `master_cost` on 20 s of 48 kHz stereo, release build, per frame and as a share of one core at 48 kHz: untouched 2.1 ns (0.01%), level and balance 2.0 ns, limiter 5.8 ns (0.03%), EQ 37.5 ns (0.18%), compressor 56.5 ns (0.27%), hall reverb 57.0 ns (0.27%), everything on 94.9 ns (0.46%). Building a bus takes 168 microseconds, off the audio thread.
+Measured by `master_cost` on 20 s of 48 kHz stereo, release build, per frame and as a share of one core at 48 kHz: level and balance 1.5 ns, limiter 5.6 ns (0.03%), EQ 35.1 ns (0.17%), compressor 55.3 ns (0.27%), hall reverb 47.3 ns (0.23%), everything on 93.3 ns (0.45%). Building a bus takes 135 microseconds, off the audio thread.
+
+Silence after a loud burst is measured too (`master_cost` prints the quickest and slowest half-second of 20 s of silence): a long room reverb with the EQ cut, compressor and limiter on stays at 109 to 118 ns/frame, and everything on at 88 to 99 ns/frame. Before the master's board flushed its quiet state, the same silence rose from about 0.1 to about 1.7 microseconds per frame once the reverb's tail reached the subnormal range (about 29% of the frame budget with everything on); that was found in review. `silence_after_a_burst_does_not_slow_the_master_down` times it and `a_tail_dying_away_in_silence_never_passes_through_the_subnormal_range` checks it deterministically; both fail without the flush.
 
 ## Acceptance
 
@@ -59,4 +65,6 @@ Measured by `master_cost` on 20 s of 48 kHz stereo, release build, per frame and
 - The limiter bounds sample peaks, not inter-sample peaks; a later DAC or lossy encode may exceed the ceiling slightly.
 - Export-time normalization (`write_normalized_wav`) runs after the chain and never lifts a sample above its own peak ceiling.
 - The balance control is a gain on one side, not a pan law.
+- The count-in click and audition clips are mixed by the device after the renderer, outside the master chain and its limiter. Limiting them would need a second limiter instance on the device (the renderer's holds state that the playback frame already advances, and its ceiling follows the master's changes), and the neutral master has to stay bit for bit; they are bounded by their own volume and the click's level, and are not part of the exported mix.
+- The export's effect tail (2 s by default, 0 to 30 s) is a hard cut: a long Hall or Room tail still ringing at the end stops abruptly. An end fade applied only on export would make the export differ from playback, which must match bit for bit, so none is added; lengthen the tail to let it ring out.
 - No listening review has been done.

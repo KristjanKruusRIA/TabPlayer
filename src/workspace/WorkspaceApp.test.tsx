@@ -113,7 +113,7 @@ function fileButton(name:string){
 
 function closeSession(f:ReturnType<typeof fixture>):NativeSessionBridge {
   let lifecycle:'running'|'clean'='running';
-  const session:NativeSessionBridge={startup:vi.fn(async()=>({preferences:{version:1 as const,restorePreviousSession:true},preview:null})),
+  const session:NativeSessionBridge={attach:vi.fn(async()=>{throw new Error("Startup belongs to bootstrap");}),startup:vi.fn(async()=>({preferences:{version:1 as const,restorePreviousSession:true},preview:null})),
     resolve:vi.fn(async()=>({workspace:f.snapshot(),views:{},issues:[]})),setView:vi.fn(async()=>{}),
     setPreferences:vi.fn(async (restorePreviousSession:boolean)=>({version:1 as const,restorePreviousSession})),
     status:vi.fn(async()=>({state:'ready' as const,capturedAtUnixMs:1792050000000,generation:1,error:null})),

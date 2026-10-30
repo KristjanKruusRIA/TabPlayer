@@ -318,6 +318,8 @@ pub struct RecoveryPreview {
 pub struct SessionStartup {
     pub preferences: SessionPreferences,
     pub preview: Option<RecoveryPreview>,
+    /// True once startup has been resolved: a reloaded webview must attach to the live session.
+    pub resumed: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]

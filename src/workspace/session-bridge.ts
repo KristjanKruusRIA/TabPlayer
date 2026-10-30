@@ -4,6 +4,7 @@ import type {NativeSessionBridge} from './recovery-types';
 export const nativeSessionBridge:NativeSessionBridge={
   startup:()=>invoke('session_startup'),
   resolve:(token,documentIds)=>invoke('session_resolve',{token,documentIds}),
+  attach:()=>invoke('session_attach'),
   setView:(documentId,view)=>invoke('workspace_set_view',{documentId,view}),
   setPreferences:restorePreviousSession=>invoke('session_preferences_set',{restorePreviousSession}),
   status:()=>invoke('recovery_status'),

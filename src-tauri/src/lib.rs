@@ -629,9 +629,15 @@ async fn save_project(
         }
         let existing = record.snapshot.path.map(PathBuf::from);
         let path = if save_as || existing.is_none() {
+            // The picker must be modal to the window: otherwise a webview reload can attach at this revision
+            // and the save then commits a newer one underneath it.
+            let window = app
+                .get_webview_window("main")
+                .ok_or("The main window is unavailable for the save dialog.")?;
             let selected = app
                 .dialog()
                 .file()
+                .set_parent(&window)
                 .add_filter("TabPlayer project", &["tabplayer"])
                 .set_file_name("Untitled.tabplayer")
                 .blocking_save_file();
@@ -950,6 +956,7 @@ pub fn run() {
         workspace_snapshot,
         session::session_startup,
         session::session_resolve,
+        session::session_attach,
         session::workspace_set_view,
         session::session_preferences_set,
         session::recovery_status,
@@ -1023,6 +1030,7 @@ pub fn run() {
         workspace_snapshot,
         session::session_startup,
         session::session_resolve,
+        session::session_attach,
         session::workspace_set_view,
         session::session_preferences_set,
         session::recovery_status,

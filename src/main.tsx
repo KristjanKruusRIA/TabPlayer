@@ -33,22 +33,23 @@ function renderWorkspace() {
 function renderPreview() {
   root.render(<>{preview?<RecoveryPrompt preview={preview} busy={pending} onRestore={()=>{void resolve(true);}} onDiscard={()=>{void resolve(false);}} onStartNew={()=>{void resolve(false);}}/>:<p className="startup-state" role="status">Opening TabPlayer…</p>}{sessionError&&<p className="startup-state" role="alert">{sessionError}</p>}</>);
 }
-async function resolve(restore:boolean) {
+async function resolve(restore:boolean,attach=false) {
   if(pending)return;
   pending=true;renderPreview();
   try {
-    const result=await nativeSessionBridge.resolve(startupToken,restore?preview!.documents.map(document=>document.documentId):[]);
+    // A reloaded webview re-reads the live native session; it must not resolve startup a second time.
+    const result=attach?await nativeSessionBridge.attach():await nativeSessionBridge.resolve(startupToken,restore?preview!.documents.map(document=>document.documentId):[]);
     const seen=new Set<string>();
     issues=[...(preview?.issues ?? []),...result.issues].filter(issue=>{const key=JSON.stringify(issue);if(seen.has(key))return false;seen.add(key);return true;});
     // Only restored documents keep a native view; a fresh startup blank starts in the saved default view.
     const restoredIds=new Set(restore?preview!.documents.map(document=>document.documentId):[]);
-    const views=Object.fromEntries(Object.entries(result.views).filter(([documentId])=>restoredIds.has(documentId)));
+    const views=attach?result.views:Object.fromEntries(Object.entries(result.views).filter(([documentId])=>restoredIds.has(documentId)));
     workspace=await WorkspaceController.create(nativeWorkspaceBridge,{workspace:result.workspace,views});
     workspace.setSessionBridge(nativeSessionBridge);
     try {await refreshStatus();}
     catch(error){status={...status,state:'failed',error:message(error)};}
     pending=false;renderWorkspace();
-    const restoredWorkingDocument=restore&&!!preview?.documents.some(document=>result.workspace.documents.some(record=>record.documentId===document.documentId));
+    const restoredWorkingDocument=attach||restore&&!!preview?.documents.some(document=>result.workspace.documents.some(record=>record.documentId===document.documentId));
     try {
       const created=await WorkspaceLibrary.create(workspace,nativeFileLibraryBridge,createMetadataRunner(),{restoredWorkingDocument,blocked:()=>pending?'Wait for the current session operation to finish.':closing||resumeFailure!==null?'Wait until the workspace is ready before using the Library.':null});
       if(destroyed)created.dispose();else library=created;
@@ -56,11 +57,22 @@ async function resolve(restore:boolean) {
     if(!destroyed)renderWorkspace();
   } catch(error) {
     pending=false;
+    // A reload during an in-flight resolve shows a prompt for a startup that has since completed; reattach instead of dead-ending.
+    if(!attach&&await reattachIfResumed())return;
+    if(attach){root.render(<p className="startup-state" role="alert">Could not reattach to the current session: {message(error)} Reload to try again.</p>);return;}
     preview={...(preview ?? {token:'',reason:'unavailable',documents:[],views:{},activeDocumentId:null,issues:[],capturedAtUnixMs:null}),
-      issues:[...(preview?.issues ?? []),{documentId:null,message:message(error)}]};
+      issues:[...(preview?.issues ?? []).filter(issue=>issue.documentId!==null||issue.message!==message(error)),{documentId:null,message:message(error)}]};
     if(preview.reason==='clean')preview={...preview,reason:'crash'};
     renderPreview();
   }
+}
+async function reattachIfResumed() {
+  try {
+    const current=await nativeSessionBridge.startup();
+    if(!current.resumed||current.preview)return false;
+    preferences=current.preferences;preview=null;startupToken=null;
+    await resolve(false,true);return true;
+  } catch {return false;}
 }
 async function refreshStatus() {
   const sequence=statusSequence,current=await nativeSessionBridge.status();
@@ -102,6 +114,7 @@ async function retry() {
     }));
   }catch(error){sessionError=`Library events unavailable: ${message(error)}`;}
   const startup=await nativeSessionBridge.startup();preferences=startup.preferences;preview=startup.preview?{...startup.preview,issues:[...startup.preview.issues]}:null;startupToken=preview?.token ?? null;
+  if(startup.resumed&&!preview){await resolve(false,true);return;}
   const emptyClean=preview?.reason==='clean'&&preview.documents.length===0;
   if(preview) {
     const valid=preview.documents.filter(document=>{

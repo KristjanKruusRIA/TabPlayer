@@ -203,9 +203,11 @@ fn preview_exposes_normal_snapshots_without_native_checkpoint() {
             restore_previous_session: true,
         },
         preview: Some(preview),
+        resumed: false,
     };
     let value = serde_json::to_value(startup).unwrap();
     assert_eq!(value["preview"]["reason"], "crash");
+    assert_eq!(value["resumed"], false);
     assert!(value["preview"]["documents"][0].get("snapshot").is_some());
     assert!(value["preview"]["documents"][0].get("session").is_none());
     assert!(value["preview"]["documents"][0].get("cursor").is_none());

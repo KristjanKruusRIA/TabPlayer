@@ -181,6 +181,7 @@ impl SessionRuntime {
         let response = SessionStartup {
             preferences: preferences.clone(),
             preview,
+            resumed: false,
         };
         let mut workspace = DocumentWorkspace::new()?;
         workspace.freeze()?;
@@ -233,7 +234,26 @@ impl SessionRuntime {
             .unwrap_or(SessionStartup {
                 preferences: state.preferences.clone(),
                 preview: None,
+                resumed: state.phase != Phase::Startup,
             })
+    }
+    /// A reloaded webview re-reads the live session. It never resolves startup, so one-shot recovery stays intact.
+    pub(crate) fn attach(&self) -> Result<SessionResolution, String> {
+        let _operation = self
+            .inner
+            .operation
+            .try_lock()
+            .map_err(|_| "A session transition is already running.")?;
+        if self.inner.state.lock().unwrap().phase != Phase::Running {
+            return Err("Finish the current session transition first.".into());
+        }
+        let workspace = self.inner.workspace.lock().unwrap();
+        let documents = workspace.recovery_documents()?;
+        Ok(SessionResolution {
+            workspace: workspace.snapshot(),
+            views: views(&documents),
+            issues: Vec::new(),
+        })
     }
     pub(crate) fn status(&self) -> RecoveryStatus {
         self.inner.state.lock().unwrap().status.clone()
@@ -884,6 +904,12 @@ pub(crate) async fn session_resolve(
     })
     .await
     .map_err(|e| e.to_string())?
+}
+#[tauri::command]
+pub(crate) fn session_attach(
+    session: TauriState<'_, SessionRuntime>,
+) -> Result<SessionResolution, String> {
+    session.attach()
 }
 #[tauri::command]
 pub(crate) fn workspace_set_view(

@@ -148,7 +148,7 @@ it('repairs per-document view after edits without storing drafts or creating ext
 });
 
 function sessionFixture():NativeSessionBridge {
-  return {startup:vi.fn(async()=>({preferences:{version:1 as const,restorePreviousSession:true},preview:null})),
+  return {attach:vi.fn(async()=>{throw new Error("Startup belongs to bootstrap");}),startup:vi.fn(async()=>({preferences:{version:1 as const,restorePreviousSession:true},preview:null})),
     resolve:vi.fn(async()=>{throw new Error('Startup belongs to bootstrap');}),setView:vi.fn(async()=>{}),
     setPreferences:vi.fn(async(restorePreviousSession:boolean)=>({version:1 as const,restorePreviousSession})),
     status:vi.fn(async()=>({state:'idle' as const,capturedAtUnixMs:null,generation:null,error:null})),

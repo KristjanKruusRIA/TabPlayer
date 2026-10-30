@@ -130,3 +130,4 @@ The one-distance-code row also explains honest-read.gp on batch: fflate's output
 - The deadline is not a memory bound: with it raised to 60 s, an allocating Worker killed the renderer at 21 to 25 s. No file reached that ceiling; honest admission peaked at 2.8 GiB.
 - A 63 MiB honest file is admitted, then fails in `buildDocument` with "Invalid string length".
 - Slow patterns were fixed in the offset match, `hasSoundMix`, the bar-length check and the ASCII header. Workers lack `DOMParser`, so the overlays run on the window, outside the deadline, and each needs its own bound. `xml.ts:51,76` was reasoned about, not measured.
+- Overlay loops have been fixed as found, not audited exhaustively. A crafted local file may still hold the window for seconds after the Worker check; the known heavy linear shape held it for 15.9 s at 31 MiB on batch.

@@ -203,8 +203,8 @@ it('names the imported score file from the source file',()=>{
 
 it('reads a header in linear time and treats an empty one as absent',()=>{
   const started=performance.now();
-  const {score}=parseAsciiTab(block(`Title:${' a'.repeat(100000)}`,'Artist:   ','e|--0--3--|','B|--0--3--|','G|--0--3--|','D|--0--3--|','A|--0--3--|','E|--0--3--|'));
-  expect(performance.now()-started).toBeLessThan(20000);
+  const {score}=parseAsciiTab(block(`Title: a${' '.repeat(200000)}b`,'Artist:   ','e|--0--3--|','B|--0--3--|','G|--0--3--|','D|--0--3--|','A|--0--3--|','E|--0--3--|'));
+  expect(performance.now()-started).toBeLessThan(3000);
   expect(score.title.length).toBeGreaterThan(1000);
   expect(score.artist).toBe('');
 });

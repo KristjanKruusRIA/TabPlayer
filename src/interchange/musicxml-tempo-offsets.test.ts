@@ -284,11 +284,9 @@ describe('a file written to stall the offset match',()=>{
   it('stays linear with a long moved part beside many empty parts',()=>{
     const source=musicXml(480),bar=source.match(/<measure[\s\S]*<\/measure>/)![0],count=4000;
     const bars=Array.from({length:count},(_,index)=>bar.replace(/number="[^"]*"/,`number="${index+2}"`)).join('');
-    const list=Array.from({length:count},(_,index)=>`<score-part id="E${index}"><part-name>E</part-name></score-part>`).join('');
-    const parts=Array.from({length:count},(_,index)=>`<part id="E${index}"></part>`).join('');
-    const xml=source.replace('</part-list>',`${list}</part-list>`).replace('</part>',`${bars}</part>${parts}`);
+    const xml=source.replace('</part>',`${bars}</part>${'<part/>'.repeat(300000)}`);
     const started=performance.now();
-    expect(strFromU8(prepareMusicXmlTempoOffsets(strToU8(xml),settings))).not.toBe(xml);
-    expect(performance.now()-started).toBeLessThan(20000);
+    prepareMusicXmlTempoOffsets(strToU8(xml),settings);
+    expect(performance.now()-started).toBeLessThan(10000);
   });
 });

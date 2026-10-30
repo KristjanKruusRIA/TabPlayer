@@ -125,7 +125,13 @@ function plan(doc:Document,score:model.Score):{points:Point[];layout:Layout;stoc
         end=Math.max(end,cursor);
       }
       if(end!==length)return null; // incomplete or overfull bars
-      for(const [key,value] of voices){const staff=`${index}/${bar}/${key.split('/')[0]}`;layout.set(staff,[...layout.get(staff)??[],value].sort((a,b)=>a-b));}
+      // Each staff's list is sorted once, so a bar of many voices stays near linear.
+      const ends=new Map<string,number[]>();
+      for(const [key,value] of voices){
+        const staff=`${index}/${bar}/${key.split('/')[0]}`,list=ends.get(staff);
+        if(list)list.push(value);else ends.set(staff,[...layout.get(staff)??[],value]);
+      }
+      for(const [staff,list] of ends)layout.set(staff,list.sort((a,b)=>a-b));
     }
   }
   return found?{points,layout,stock,measureOk,measureTypes}:null;

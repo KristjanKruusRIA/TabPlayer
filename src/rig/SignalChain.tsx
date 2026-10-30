@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { chainOrder } from '../document-settings';
 import type { EffectBlock } from '../edit-types';
-import { blockNames } from '../audio/sound-model';
+import { blockNames, parameters } from '../audio/sound-model';
 import type { Board, SoundEditing } from '../audio/useSoundEditing';
 import { BlockIcon } from './art';
 import { blockLook, sameRef } from './blocks';
@@ -77,11 +77,11 @@ export function SignalChain({editing,selected,onSelect,disabled}:{editing:SoundE
           else if(event.key===' '&&!event.ctrlKey&&!event.metaKey){event.preventDefault();event.stopPropagation();toggle(entry);}
         }}
         onKeyUp={event=>{if(event.key===' ')event.preventDefault();}}>
-        <BlockIcon kind={look.kind} color={look.color} on={on}/>
+        <BlockIcon block={block} on={on} knobs={parameters[block].length}/>
         <span className="rig-chain-name" aria-hidden="true"><span className="rig-name-full">{blockNames[block]}</span><span className="rig-name-short">{look.short}</span></span>
       </button>
       {/* The footswitch is a pointer shortcut for Space on the tab and the switch on the stage, so it is left out of the tab order and the accessibility tree. */}
-      {(look.kind==='pedal'||look.kind==='eq')&&<span className="rig-chain-switch" aria-hidden="true" onClick={()=>toggle(entry)}/>}
+      {(look.kind==='pedal'||look.kind==='eq'||look.kind==='wah')&&<span className="rig-chain-switch" aria-hidden="true" onClick={()=>toggle(entry)}/>}
     </div>;
   };
   const firstEntries=entries.filter(entry=>!entry.ref.second),secondEntries=entries.filter(entry=>entry.ref.second);

@@ -32,23 +32,18 @@
 @container (max-width:1099px) { .sound-view .rig-browser-toggle { display:inline-block; } }
 
 /* Signal chain */
-.sound-view .rig-chain { --icon-h:42px; display:flex; align-items:flex-start; gap:6px; padding:8px 12px 6px; background:var(--tp-base); border-bottom:1px solid var(--tp-line-subtle); overflow-x:auto; scrollbar-width:thin; scrollbar-color:var(--tp-line-strong) transparent; }
+.sound-view .rig-chain { --icon-h:46px; display:flex; align-items:flex-start; gap:6px; padding:8px 12px 6px; background:var(--tp-base); border-bottom:1px solid var(--tp-line-subtle); overflow-x:auto; scrollbar-width:thin; scrollbar-color:var(--tp-line-strong) transparent; }
 .sound-view .rig-chain-end { flex:none; margin-top:18px; font:500 10px/12px var(--tp-font-mono); letter-spacing:.06em; text-transform:uppercase; color:var(--tp-muted); }
 .sound-view .rig-chain-track { position:relative; display:flex; flex:1; gap:2px; min-width:max-content; }
-.sound-view .rig-chain-wire { position:absolute; left:0; right:0; top:27px; height:2px; background:var(--tp-line-strong); }
 .sound-view .rig-chain-then { align-self:center; margin:0 4px; font:500 10px/12px var(--tp-font-mono); letter-spacing:.06em; text-transform:uppercase; color:var(--tp-muted); white-space:nowrap; z-index:1; background:var(--tp-base); padding:0 2px; }
 .sound-view .rig-chain-item { position:relative; flex:1 1 0; min-width:44px; max-width:76px; }
 .sound-view .rig-chain-item[data-dragging] { z-index:3; opacity:.9; }
 .sound-view .rig-chain-item[data-drop] { box-shadow:-2px 0 0 var(--tp-edit); }
 .sound-view .rig-chain-tab { position:relative; display:flex; flex-direction:column; align-items:center; gap:1px; width:100%; min-height:0; padding:2px 0 3px; border:1px solid transparent; border-radius:var(--tp-radius-s); background:transparent; color:var(--tp-muted); cursor:pointer; touch-action:none; }
 .sound-view .rig-chain-tab:hover:enabled { background:var(--tp-panel); border-color:transparent; }
-.sound-view .rig-chain-item[data-selected] .rig-chain-tab { border-color:var(--tp-edit); background:var(--tp-raised); }
-.sound-view .rig-chain-item[data-on=true] .rig-chain-tab { color:var(--tp-text); }
-.sound-view .rig-icon { display:block; width:36px; height:var(--icon-h); }
 .sound-view .rig-chain-name { font:600 9.5px/12px var(--tp-font-ui); letter-spacing:.03em; text-transform:uppercase; white-space:nowrap; }
 .sound-view .rig-name-full { display:none; }
-@container (min-width:1180px) { .sound-view .rig-name-full { display:inline; } .sound-view .rig-name-short { display:none; } .sound-view .rig-chain { --icon-h:47px; } .sound-view .rig-icon { width:40px; height:47px; } .sound-view .rig-chain-wire { top:30px; } .sound-view .rig-chain-end { margin-top:21px; } }
-.sound-view .rig-chain-switch { position:absolute; left:50%; top:calc(3px + var(--icon-h) * .73); width:14px; height:calc(var(--icon-h) * .22); transform:translateX(-50%); border-radius:50%; cursor:pointer; z-index:2; }
+@container (min-width:1180px) { .sound-view .rig-name-full { display:inline; } .sound-view .rig-name-short { display:none; } .sound-view .rig-chain { --icon-h:66px; } .sound-view .rig-chain-end { margin-top:30px; } }
 
 /* Body */
 .sound-view .rig-body { position:relative; display:flex; flex:1; min-height:0; }
@@ -87,31 +82,12 @@
 .sound-view .rig-stage-place { font:400 11px/16px var(--tp-font-mono); color:var(--tp-muted); }
 .sound-view .rig-stage-actions { display:flex; flex-wrap:wrap; align-items:center; gap:6px; margin-left:auto; }
 .sound-view :is(.rig-amp-stage,.rig-cab-stage,.rig-pedal-stage,.rig-geq-stage) { display:flex; flex:1; min-height:0; min-width:0; gap:12px; }
-.sound-view .rig-amp-stage { flex-direction:column; }
-.sound-view .rig-amp-stage>.rig-field { align-self:center; }
 .sound-view .rig-art-slot { flex:1 1 0; min-height:0; min-width:0; container-type:size; display:grid; place-items:center; }
-.sound-view .rig-pedal-side:empty { display:none; }
 .sound-view :is(.rig-pedal-stage,.rig-cab-stage) { justify-content:center; }
-.sound-view :is(.rig-pedal-side,.rig-cab-side) { display:flex; flex-direction:column; gap:10px; flex:0 1 250px; min-width:170px; align-self:center; }
 
 /* Amp */
-.sound-view .rig-amp { position:relative; width:min(100cqw,calc(100cqh * 2.1333)); aspect-ratio:640 / 300; container-type:inline-size; }
-.sound-view .rig-amp-art { position:absolute; inset:0; width:100%; height:100%; }
-.sound-view .rig-amp[data-on=false] .rig-amp-art { filter:saturate(.35) brightness(.7); }
-.sound-view .rig-amp-model { font:700 14px var(--tp-font-ui); letter-spacing:.22em; fill:var(--tp-amp-ink); }
-.sound-view .rig-amp-knobs { position:absolute; left:4%; right:4%; top:63%; bottom:6%; display:grid; grid-template-columns:repeat(6,1fr); align-items:center; justify-items:center; --knob-size:clamp(28px,8.4cqw,56px); }
 
 /* Pedal */
-.sound-view .rig-pedal { position:relative; width:min(100cqw,calc(100cqh * 1.0667),440px); aspect-ratio:320 / 300; container-type:inline-size; }
-.sound-view .rig-pedal[data-on=false] { --pedal:var(--tp-raised) !important; }
-.sound-view .rig-pedal-art { position:absolute; inset:0; width:100%; height:100%; }
-.sound-view .rig-pedal-name { font:700 13px var(--tp-font-ui); letter-spacing:.14em; fill:var(--tp-text); }
-.sound-view .rig-pedal-knobs { position:absolute; left:7%; right:7%; top:10%; height:52%; display:grid; grid-template-columns:repeat(var(--columns,3),1fr); align-content:space-evenly; justify-items:center; --knob-size:clamp(28px,13cqw,56px); }
-.sound-view .rig-pedal .tp-knob-label,.sound-view .rig-pedal .tp-knob-readout { font-size:clamp(8px,3.4cqw,11px); line-height:1.3; min-height:0; }
-.sound-view .rig-pedal[data-on=false] .tp-knob { --knob-arc:var(--tp-muted); }
-.sound-view .rig-pedal .tp-knob-label { color:var(--tp-text); }
-.sound-view .rig-footswitch { position:absolute; left:50%; top:86%; width:16%; aspect-ratio:1; min-height:0; padding:0; transform:translate(-50%,-50%); border:0; border-radius:50%; background:transparent; cursor:pointer; }
-.sound-view .rig-footswitch:hover:enabled { background:rgb(255 255 255 / .06); border:0; }
 
 /* Cabinet and microphone */
 .sound-view .rig-cab { position:relative; width:min(100cqw,100cqh,520px); aspect-ratio:1; }
@@ -145,7 +121,6 @@
   .sound-view :is(.rig-pedal-stage,.rig-cab-stage) { gap:8px; }
   .sound-view .rig-pedal-side:empty { display:none; }
 .sound-view :is(.rig-pedal-stage,.rig-cab-stage) { justify-content:center; }
-.sound-view :is(.rig-pedal-side,.rig-cab-side) { flex-basis:210px; }
 }
 @media (max-height:700px) {
   .sound-view .rig-head { padding:4px 12px; gap:4px 10px; }
@@ -156,11 +131,79 @@
 
 .sound-view .rig-inline .rig-field-name { white-space:nowrap; }
 .sound-view .rig-inline { display:flex; flex-direction:row; align-items:center; gap:6px; margin-left:auto; }
-.sound-view .rig-amp-stage>.rig-field .rig-field-name { display:none; }
-.sound-view .rig-amp .tp-knob-label { font-size:clamp(8px,1.7cqw,11px); }
-.sound-view .rig-amp .tp-knob-readout { font-size:clamp(8px,1.7cqw,11px); line-height:1.3; min-height:0; }
 @container (max-width:1099px) {
-  .sound-view .rig-chain { --icon-h:36px; }
+  .sound-view .rig-chain { --icon-h:46px; }
   .sound-view .rig-head .tp-segmented .tp-seg-option { padding:2px 7px; }
   .sound-view .rig-head .rig-select { max-width:130px; }
+}
+
+/* v2: material and faces */
+.sound-view .rig-main { background:radial-gradient(ellipse 80% 70% at 50% 62%, #3b2a1b 0%, #231a12 45%, #14110d 100%); }
+.sound-view .rig-chain { background:linear-gradient(#17130f,#100e0b); }
+.sound-view .rig-chain-end { margin-top:calc(var(--icon-h) * .4); }
+.sound-view .rig-chain-track { padding-top:2px; }
+.sound-view .rig-face { display:block; height:var(--icon-h); width:calc(var(--icon-h) * .8333); filter:drop-shadow(0 2px 2px rgb(0 0 0 / .6)); }
+.sound-view .rig-face[data-on=false] .rig-face-body { filter:brightness(.55) saturate(.78); }
+.sound-view .rig-face-name { font:700 5.4px var(--tp-font-ui); letter-spacing:.12em; fill:var(--tp-text); }
+.sound-view .rig-chain-wire { position:absolute; left:0; right:0; top:calc(3px + var(--icon-h) * .42); height:3px; border-radius:2px; background:#2e2822; box-shadow:0 1px 0 rgb(0 0 0 / .6); }
+/* The cable carries the signal from In to Out: bright where it passes through a pedal that is on, faint through one that is bypassed. */
+.sound-view .rig-chain-item::before,.sound-view .rig-chain-item::after { content:''; position:absolute; top:calc(3px + var(--icon-h) * .42); height:3px; width:calc(50% + 1px); background:var(--tp-on); opacity:.3; border-radius:2px; }
+.sound-view .rig-chain-item::before { left:-1px; } .sound-view .rig-chain-item::after { right:-1px; }
+.sound-view .rig-chain-item[data-on=true]::before,.sound-view .rig-chain-item[data-on=true]::after { opacity:1; box-shadow:0 0 6px color-mix(in srgb,var(--tp-on) 70%,transparent); }
+.sound-view .rig-chain-tab { z-index:1; }
+.sound-view .rig-chain-item[data-selected] .rig-chain-tab { border-color:var(--tp-on); background:rgb(184 228 95 / .07); box-shadow:0 0 0 1px var(--tp-on), 0 0 12px rgb(184 228 95 / .25); }
+.sound-view .rig-chain-item[data-on=true] .rig-chain-tab { color:var(--tp-text); }
+.sound-view .rig-chain-item[data-drop] { box-shadow:-2px 0 0 var(--tp-on); }
+.sound-view .rig-chain-switch { position:absolute; left:50%; top:calc(3px + var(--icon-h) * .72); width:calc(var(--icon-h) * .24); height:calc(var(--icon-h) * .22); transform:translateX(-50%); border-radius:50%; cursor:pointer; z-index:2; }
+.sound-view .rig-chain-name { position:relative; z-index:1; }
+
+/* Amp */
+.sound-view .rig-amp-stage { flex-direction:column; }
+.sound-view .rig-amp-stage>.rig-field { align-self:center; }
+.sound-view .rig-amp { position:relative; width:min(100cqw,calc(100cqh * 2),1000px); aspect-ratio:640 / 320; container-type:inline-size; }
+.sound-view .rig-amp-art { position:absolute; inset:0; width:100%; height:100%; overflow:visible; }
+.sound-view .rig-amp[data-on=false] .rig-amp-body { filter:brightness(.7) saturate(.6); }
+.sound-view .rig-amp-model { font:700 15px var(--tp-font-ui); letter-spacing:.28em; }
+.sound-view .rig-amp-knobs { position:absolute; left:5%; right:5%; top:61.5%; bottom:8%; display:grid; grid-template-columns:repeat(6,1fr); align-items:start; justify-items:center; --knob-size:clamp(26px,7.8cqw,76px); }
+.sound-view .rig-amp .tp-knob { filter:none; }
+.sound-view .rig-amp .tp-knob-label { font-size:clamp(8px,1.7cqw,12px); font-weight:700; }
+.sound-view .rig-amp .tp-knob-readout { font-size:clamp(8px,1.7cqw,12px); line-height:1.3; min-height:0; }
+
+/* Pedal: a large version of the chain's face, with the real knobs laid over it */
+.sound-view .rig-pedal { position:relative; width:min(100cqw,calc(100cqh * .8333),430px); aspect-ratio:100 / 120; container-type:inline-size; }
+.sound-view .rig-pedal .rig-face { position:absolute; inset:0; width:100%; height:100%; filter:drop-shadow(0 8px 10px rgb(0 0 0 / .65)); }
+.sound-view .rig-pedal-knobs { position:absolute; inset:0; --knob-size:clamp(28px,19cqw,76px); }
+.sound-view .rig-spot-knob { position:absolute; transform:translate(-50%,-50%); display:block; }
+.sound-view .rig-pedal[data-on=false] .tp-knob { --knob-arc:var(--tp-muted); }
+.sound-view .rig-pedal .tp-knob-label,.sound-view .rig-pedal .tp-knob-readout { font-size:clamp(8px,3.4cqw,12px); line-height:1.25; min-height:0; color:var(--tp-text); text-shadow:0 1px 1px rgb(0 0 0 / .7); }
+.sound-view .rig-footswitch { position:absolute; left:50%; top:86.7%; width:22%; aspect-ratio:1; min-height:0; padding:0; transform:translate(-50%,-50%); border:0; border-radius:50%; background:transparent; cursor:pointer; }
+.sound-view .rig-footswitch[data-wah] { top:88%; width:54%; height:16%; aspect-ratio:auto; border-radius:6px; }
+.sound-view .rig-footswitch:hover:enabled { background:rgb(255 255 255 / .07); border:0; }
+
+/* Cabinet and microphone */
+.sound-view :is(.rig-cab-stage) { align-items:flex-start; }
+.sound-view .rig-cab-stage>.rig-art-slot { align-self:stretch; }
+.sound-view :is(.rig-pedal-side,.rig-cab-side) { display:flex; flex-direction:column; gap:10px; flex:0 1 250px; min-width:170px; align-self:center; }
+.sound-view .rig-cab-side { align-self:flex-start; padding-top:2px; }
+.sound-view .rig-cab { position:relative; width:min(100cqw,100cqh,540px); aspect-ratio:1; }
+.sound-view .rig-mic { position:absolute; width:24%; aspect-ratio:96 / 118; transform:translate(calc(-20.8% + 14px),calc(-11.9% + 14px)); pointer-events:none; z-index:1; }
+.sound-view .rig-mic-art { display:block; width:100%; height:100%; overflow:visible; }
+.sound-view .rig-cab .rig-spots { z-index:2; }
+
+/* Graphic EQ: the same enamel as its face */
+.sound-view .rig-geq { background:linear-gradient(color-mix(in srgb,#4F6667 80%,white),#4F6667 40%,color-mix(in srgb,#4F6667 70%,black)); border-color:rgb(0 0 0 / .6); box-shadow:inset 0 0 0 1px rgb(255 255 255 / .14), 0 8px 16px rgb(0 0 0 / .5); }
+.sound-view .rig-geq .tp-fader-label,.sound-view .rig-geq .tp-fader-readout { color:var(--tp-text); }
+.sound-view .rig-geq .tp-fader-rail { background:#0c0f10; }
+.sound-view .rig-geq .tp-fader-thumb { background:linear-gradient(#f4f0e6,#a8a399); box-shadow:inset 0 0 0 1px rgb(0 0 0 / .6), 0 2px 3px rgb(0 0 0 / .5); }
+.sound-view .rig-pedal .tp-knob-label { white-space:nowrap; max-width:none; }
+.sound-view :is(.rig-pedal-stage,.rig-cab-stage)>.rig-art-slot { flex:0 1 540px; }
+.sound-view .rig-stage-head h2 { text-shadow:0 1px 2px rgb(0 0 0 / .6); }
+
+.sound-view .rig-stage-head .rig-field-name { display:none; }
+.sound-view .rig-stage-head>.rig-field { margin-left:8px; }
+.sound-view .rig-short { display:none; }
+@container (max-width:1099px) {
+  .sound-view .rig-long { display:none; } .sound-view .rig-short { display:inline; }
+  .sound-view .rig-stage-actions .rig-button { padding:3px 8px; }
+  .sound-view .rig-stage-head h2 { font-size:14px; }
 }

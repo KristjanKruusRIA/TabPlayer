@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useId, useRef, useState } from 'react';
 import { parseTyped, useRange } from './useRange';
 import './ui.css';
 
@@ -20,6 +20,8 @@ export interface KnobProps extends ControlProps {
   tone?:'pedal'|'amp';
   /** Draws the value arc from the middle of the range, for controls that are flat at the centre. */
   bipolar?:boolean;className?:string;
+  /** Tick marks around the dial with labels at some of them, for hardware faceplates. `t` runs from 0 at the minimum to 1 at the maximum. */
+  scale?:{ticks:number;labels:readonly {t:number;text:string}[]};
 }
 const decimalsOf=(step:number)=>{const text=String(step);return text.includes('.')?text.length-text.indexOf('.')-1:0;};
 /** The readout text for `value`: signed when the range crosses zero. */
@@ -37,7 +39,8 @@ const arc=(from:number,to:number,radius:number)=>{
 
 /** A rotary control drawn in SVG. Drag it vertically, use the arrow keys or the wheel while it has focus, double-click to
  * reset it, or click its readout to type a value. */
-export function Knob({label,ariaLabel,value,min,max,step,defaultValue,unit,format,disabled=false,onCommit,onInput,onInputEnd,tone='pedal',bipolar=false,className}:KnobProps) {
+export function Knob({label,ariaLabel,value,min,max,step,defaultValue,unit,format,disabled=false,onCommit,onInput,onInputEnd,tone='pedal',bipolar=false,className,scale}:KnobProps) {
+  const gid=useId().replace(/[^a-zA-Z0-9]/g,'_');
   const range=useRange({value,min,max,step,defaultValue,disabled,onCommit,onInput,onInputEnd});
   const {shown,handlers}=range;
   const dial=useRef<HTMLDivElement>(null),[editing,setEditing]=useState(false),[typed,setTyped]=useState(''),field=useRef<HTMLInputElement>(null),closing=useRef(false);
@@ -56,11 +59,27 @@ export function Knob({label,ariaLabel,value,min,max,step,defaultValue,unit,forma
       onPointerDown={handlers.onPointerDown} onPointerMove={handlers.onPointerMove} onPointerUp={handlers.onPointerUp} onPointerCancel={handlers.onPointerCancel} onDoubleClick={handlers.onDoubleClick} onBlur={range.flushWheel}
       onKeyDown={event=>{if(handlers.key(event)){event.stopPropagation();return;}if(event.key==='Enter'&&!disabled){event.preventDefault();event.stopPropagation();beginTyping();}}}>
       <svg viewBox="0 0 64 64" aria-hidden="true" focusable="false">
-        <path className="tp-knob-track" d={arc(start,start+sweep,27)}/>
-        <path className="tp-knob-arc" d={arc(zero,angle,27)}/>
-        <circle className="tp-knob-body" cx="32" cy="32" r="20"/>
-        <circle className="tp-knob-cap" cx="32" cy="32" r="14"/>
-        <line className="tp-knob-pointer" x1="32" y1="14.5" x2="32" y2="24" transform={`rotate(${angle} 32 32)`}/>
+        {tone==='amp'
+          ?<>
+            <defs>
+              <radialGradient id={`${gid}c`} cx=".36" cy=".3" r=".85"><stop offset="0" stopColor="#f6e3b0"/><stop offset=".45" stopColor="#b58638"/><stop offset="1" stopColor="#4d3210"/></radialGradient>
+              <radialGradient id={`${gid}b`} cx=".4" cy=".34" r=".9"><stop offset="0" stopColor="#4a3a24"/><stop offset="1" stopColor="#0d0804"/></radialGradient>
+              <filter id={`${gid}s`} x="-30%" y="-30%" width="160%" height="170%"><feDropShadow dx="0" dy="1.6" stdDeviation="1.4" floodColor="#000" floodOpacity=".65"/></filter>
+            </defs>
+            {scale&&Array.from({length:scale.ticks+1},(_,i)=>{const a=start+sweep*i/scale.ticks,[x1,y1]=point(a,25.5),[x2,y2]=point(a,i%5===0?30.5:28.5);return <line key={i} className="tp-knob-tick" x1={x1} y1={y1} x2={x2} y2={y2}/>;})}
+            {scale?.labels.map(label=>{const [x,y]=point(start+sweep*label.t,36.5);return <text key={label.text+label.t} className="tp-knob-num" x={x} y={y} textAnchor="middle" dominantBaseline="central">{label.text}</text>;})}
+            <g filter={`url(#${gid}s)`}><circle cx="32" cy="32" r="21" fill={`url(#${gid}b)`} stroke="#050302" strokeWidth="1"/>
+              <circle className="tp-knob-knurl" cx="32" cy="32" r="19.6"/>
+              <circle cx="32" cy="32" r="15.5" fill={`url(#${gid}c)`} stroke="rgb(0 0 0 / .55)" strokeWidth=".8"/><circle cx="32" cy="32" r="11" fill="none" stroke="rgb(0 0 0 / .22)" strokeWidth=".8"/></g>
+            <line className="tp-knob-pointer" x1="32" y1="19" x2="32" y2="27.5" transform={`rotate(${angle} 32 32)`}/>
+          </>
+          :<>
+            <path className="tp-knob-track" d={arc(start,start+sweep,27)}/>
+            <path className="tp-knob-arc" d={arc(zero,angle,27)}/>
+            <circle className="tp-knob-body" cx="32" cy="32" r="20"/>
+            <circle className="tp-knob-cap" cx="32" cy="32" r="14"/>
+            <line className="tp-knob-pointer" x1="32" y1="14.5" x2="32" y2="24" transform={`rotate(${angle} 32 32)`}/>
+          </>}
       </svg>
     </div>
     <span className="tp-knob-label">{label}</span>

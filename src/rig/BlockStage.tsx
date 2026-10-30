@@ -5,8 +5,8 @@ import { ampModels, blockNames, cabinetModels, graphicBands, modelName, paramete
 import type { NumericControl } from '../audio/sound-model';
 import type { Board, SoundEditing } from '../audio/useSoundEditing';
 import { Fader, Knob, Segmented } from '../ui';
-import { AmpArt, CabinetArt, PedalArt, micSpots } from './art';
-import { blockLook } from './blocks';
+import { AmpArt, BlockFace, CabinetArt, MicArt, micSpots } from './art';
+import { ampLooks, blockLook, knobSpots } from './blocks';
 import type { BlockRef } from './blocks';
 
 const defaults=defaultEffects() as unknown as Record<string,Record<string,unknown>>;
@@ -18,14 +18,22 @@ function nameAndUnit(label:string) {
 }
 const settingsOf=(board:Board,block:EffectBlock)=>board.effects[block] as unknown as Record<string,unknown>;
 
-/** The knobs for the numeric fields of a block, with the same accessible names the inspector's fields have. */
-function BlockKnobs({editing,board,block,tone}:{editing:SoundEditing;board:Board;block:EffectBlock;tone:'pedal'|'amp'}) {
+/** The scale printed around an amp knob: 0 to 10 for a 0 to 1 field, or real units for a decibel field. */
+function ampScale(p:NumericControl) {
+  if(p.max===1&&p.min===0)return {ticks:10,labels:[{t:0,text:'0'},{t:.5,text:'5'},{t:1,text:'10'}]};
+  const signed=(value:number)=>value>0?`+${value}`:value<0?`\u2212${Math.abs(value)}`:'0';
+  return {ticks:p.max-p.min>=24?12:p.max-p.min,labels:[{t:0,text:signed(p.min)},{t:(0-p.min)/(p.max-p.min),text:'0'},{t:1,text:signed(p.max)}]};
+}
+/** The knobs for the numeric fields of a block, with the same accessible names the inspector's fields have. `spots` lays them out over a face. */
+function BlockKnobs({editing,board,block,tone,spots}:{editing:SoundEditing;board:Board;block:EffectBlock;tone:'pedal'|'amp';spots?:readonly (readonly [number,number])[]}) {
   const settings=settingsOf(board,block),{fx,syncOf,busy}=editing;
-  return <>{parameters[block].map((p:NumericControl)=>{
+  return <>{parameters[block].map((p:NumericControl,index)=>{
     const {short,unit}=nameAndUnit(p.label);
     // Switched off by the mode or by following the tempo, as the inspector's fields are.
     const off=block==='wah'&&p.key===(board.effects.wah.mode==='auto'?'position':'sensitivity')||p.key==='rateHz'&&syncOf(board,block)!==0;
-    return <Knob key={p.key} tone={tone} label={short} ariaLabel={board.name(`${block} ${p.label}`)} unit={unit} min={p.min} max={p.max} step={p.step} value={Number(settings[p.key]??0)} defaultValue={Number(defaults[block][p.key]??0)} disabled={busy||off} onCommit={value=>fx(board,block,p.key,value)} onInput={value=>editing.hearField(board,block,p.key,value)} onInputEnd={committed=>{if(!committed)void editing.endLive();}}/>;
+    const knob=<Knob key={p.key} tone={tone} scale={tone==='amp'?ampScale(p):undefined} label={short} ariaLabel={board.name(`${block} ${p.label}`)} unit={unit} min={p.min} max={p.max} step={p.step} value={Number(settings[p.key]??0)} defaultValue={Number(defaults[block][p.key]??0)} disabled={busy||off} onCommit={value=>fx(board,block,p.key,value)} onInput={value=>editing.hearField(board,block,p.key,value)} onInputEnd={committed=>{if(!committed)void editing.endLive();}}/>;
+    const spot=spots?.[index];
+    return spot?<span key={p.key} className="rig-spot-knob" style={{left:`${spot[0]}%`,top:`${spot[1]/1.2}%`}}>{knob}</span>:knob;
   })}</>;
 }
 function Choice<T extends string|number>({label,value,options,onChange,disabled}:{label:string;value:T;options:readonly (readonly [T,string])[];onChange:(value:T)=>void;disabled:boolean}) {
@@ -64,11 +72,10 @@ function BlockOptions({editing,board,block}:{editing:SoundEditing;board:Board;bl
 }
 
 function AmpStage({editing,board}:{editing:SoundEditing;board:Board}) {
-  const model=board.effects.amp.model;
+  const model=board.effects.amp.model,look=ampLooks[model]??ampLooks.crunch;
   return <div className="rig-amp-stage">
-    <Choice label={board.name('Amp model')} value={model} disabled={editing.busy} onChange={value=>editing.fx(board,'amp','model',value)} options={ampModels.map(item=>[item,capital(modelName(item))] as const)}/>
-    <div className="rig-art-slot"><div className="rig-amp" data-on={board.effects.amp.enabled}>
-      <AmpArt model={modelName(model)}/>
+    <div className="rig-art-slot"><div className="rig-amp" data-on={board.effects.amp.enabled} style={{'--knob-ink':look.ink} as React.CSSProperties}>
+      <AmpArt look={look} on={board.effects.amp.enabled}/>
       <div className="rig-amp-knobs"><BlockKnobs editing={editing} board={board} block="amp" tone="amp"/></div>
     </div></div>
   </div>;
@@ -82,6 +89,7 @@ function CabinetStage({editing,board,block,cabinetResponse}:{editing:SoundEditin
   return <div className="rig-cab-stage">
     <div className="rig-art-slot"><div className="rig-cab" data-off={off||undefined}>
       <CabinetArt/>
+      <span className="rig-mic" aria-hidden="true" style={{left:`${micSpots[mic.placement].x}%`,top:`${micSpots[mic.placement].y}%`}}><MicArt/></span>
       <Segmented className="rig-spots" label={board.name('Microphone placement')} value={mic.placement} options={placements} disabled={busy} onChange={value=>fx(board,'microphone','placement',value)}/>
     </div></div>
     <div className="rig-cab-side">
@@ -109,13 +117,13 @@ function GraphicEqStage({editing,board}:{editing:SoundEditing;board:Board}) {
 }
 
 function PedalStage({editing,board,block}:{editing:SoundEditing;board:Board;block:EffectBlock}) {
-  const on=board.effects[block].enabled,look=blockLook[block],count=parameters[block].length;
+  const on=board.effects[block].enabled,look=blockLook[block],count=parameters[block].length,wah=look.kind==='wah';
   return <div className="rig-pedal-stage">
-    <div className="rig-art-slot"><div className="rig-pedal" data-on={on} style={{'--pedal':look.color,'--columns':Math.min(3,Math.max(1,count))} as React.CSSProperties}>
-      <PedalArt name={blockNames[block]} on={on}/>
-      <div className="rig-pedal-knobs"><BlockKnobs editing={editing} board={board} block={block} tone="pedal"/></div>
+    <div className="rig-art-slot"><div className="rig-pedal" data-on={on} style={{'--pedal':look.color} as React.CSSProperties}>
+      <BlockFace block={block} on={on} detail knobs={count}/>
+      <div className="rig-pedal-knobs"><BlockKnobs editing={editing} board={board} block={block} tone="pedal" spots={knobSpots[Math.min(5,count)]}/></div>
       {/* A pointer shortcut for the switch in the stage's head, so it is left out of the tab order and the accessibility tree. */}
-      <button type="button" aria-hidden="true" className="rig-footswitch" tabIndex={-1} disabled={editing.busy} onClick={()=>editing.fx(board,block,'enabled',!on)}/>
+      <button type="button" aria-hidden="true" className="rig-footswitch" data-wah={wah||undefined} tabIndex={-1} disabled={editing.busy} onClick={()=>editing.fx(board,block,'enabled',!on)}/>
     </div></div>
     <div className="rig-pedal-side"><BlockOptions editing={editing} board={board} block={block}/></div>
   </div>;
@@ -135,16 +143,17 @@ export function BlockStage({editing,selected,cabinetResponse}:{editing:SoundEdit
     <header className="rig-stage-head">
       <h2>{board.second?'Second pedalboard · ':''}{name}</h2>
       {!board.second&&<span className="rig-stage-place">{index+1} of {order.length}</span>}
+      {block==='amp'&&<Choice label={board.name('Amp model')} value={board.effects.amp.model} disabled={busy} onChange={value=>editing.fx(board,'amp','model',value)} options={ampModels.map(item=>[item,capital(modelName(item))] as const)}/>}
       <div className="rig-stage-actions">
         <Footswitch editing={editing} board={board} block={block}/>
-        <button type="button" className="rig-button" aria-label={board.name(`Copy pedal: ${name}`)} disabled={busy} onClick={()=>editing.copyPedalOf(board,block)}>Copy pedal</button>
-        <button type="button" className="rig-button" aria-label={board.name(`Paste pedal: ${name}`)} disabled={busy||clipboard.pedal?.block!==block} onClick={()=>editing.pastePedal(board)}>Paste pedal</button>
+        <button type="button" className="rig-button" aria-label={board.name(`Copy pedal: ${name}`)} disabled={busy} onClick={()=>editing.copyPedalOf(board,block)}><span className="rig-long">Copy pedal</span><span className="rig-short" aria-hidden="true">Copy</span></button>
+        <button type="button" className="rig-button" aria-label={board.name(`Paste pedal: ${name}`)} disabled={busy||clipboard.pedal?.block!==block} onClick={()=>editing.pastePedal(board)}><span className="rig-long">Paste pedal</span><span className="rig-short" aria-hidden="true">Paste</span></button>
         {board.second
-          ?<button type="button" className="rig-button" aria-label={`Remove duplicate: ${name}`} disabled={busy} onClick={()=>editing.fx(board,block,'enabled',false)}>Remove duplicate</button>
-          :<button type="button" className="rig-button" aria-label={`Duplicate pedal: ${name}`} disabled={busy||!!second?.effects[block].enabled} onClick={()=>editing.duplicate(block)}>Duplicate pedal</button>}
+          ?<button type="button" className="rig-button" aria-label={`Remove duplicate: ${name}`} disabled={busy} onClick={()=>editing.fx(board,block,'enabled',false)}><span className="rig-long">Remove duplicate</span><span className="rig-short" aria-hidden="true">Remove</span></button>
+          :<button type="button" className="rig-button" aria-label={`Duplicate pedal: ${name}`} disabled={busy||!!second?.effects[block].enabled} onClick={()=>editing.duplicate(block)}><span className="rig-long">Duplicate pedal</span><span className="rig-short" aria-hidden="true">Duplicate</span></button>}
         {!board.second&&<>
-          <button type="button" className="rig-button" aria-label={`Move ${name} earlier`} disabled={busy||index===0} onClick={()=>editing.move(block,-1)}>Move earlier</button>
-          <button type="button" className="rig-button" aria-label={`Move ${name} later`} disabled={busy||index===order.length-1} onClick={()=>editing.move(block,1)}>Move later</button>
+          <button type="button" className="rig-button" aria-label={`Move ${name} earlier`} disabled={busy||index===0} onClick={()=>editing.move(block,-1)}><span className="rig-long">Move earlier</span><span className="rig-short" aria-hidden="true">Earlier</span></button>
+          <button type="button" className="rig-button" aria-label={`Move ${name} later`} disabled={busy||index===order.length-1} onClick={()=>editing.move(block,1)}><span className="rig-long">Move later</span><span className="rig-short" aria-hidden="true">Later</span></button>
         </>}
       </div>
     </header>

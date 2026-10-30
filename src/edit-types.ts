@@ -41,7 +41,9 @@ export interface StaffSettings {
   droneFret?: number;
 }
 export interface ChordDefinition { name: string; firstFret: number; frets: number[] }
-export interface ChannelMix { gain: number; pan: number; mute: boolean; solo: boolean }
+/** How a track's stringed notes are performed; each field is absent at its default (automatic style, normal palm mutes, no accent, no automatic let ring or brush). */
+export interface TrackInterpretation { style?: 'pick'|'fingers'; palmMute?: 'light'|'heavy'; accent?: 'light'|'strong'; letRing?: true; brush?: 'down'|'up' }
+export interface ChannelMix { gain: number; pan: number; mute: boolean; solo: boolean; interpretation?: TrackInterpretation }
 export interface FxSettings {
   gate: {enabled:boolean;thresholdDb:number;releaseMs:number};
   compressor: {enabled:boolean;thresholdDb:number;ratio:number;attackMs:number;releaseMs:number;makeupDb:number};

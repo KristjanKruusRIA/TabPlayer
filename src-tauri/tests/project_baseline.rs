@@ -224,6 +224,7 @@ fn source_session() -> (ProjectSession, [String; 4]) {
                 pan: -0.2,
                 mute: false,
                 solo: true,
+                interpretation: None,
             },
         })
         .unwrap();

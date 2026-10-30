@@ -11,6 +11,7 @@ import { TrackPanel } from './TrackPanel';
 import './styles.css';
 import { NativePlaybackController } from './audio/NativePlaybackController';
 import { SoundPanel } from './audio/SoundPanel';
+import { InterpretationPanel } from './audio/InterpretationPanel';
 import { BackingPanel } from './audio/BackingPanel';
 import { BackingWaveform } from './audio/BackingWaveform';
 import { useReferenceSyncEdit } from './audio/useReferenceSyncEdit';
@@ -92,7 +93,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   const editLocked=isFinalized(state.snapshot.project),editBusy=controlsBusy||editLocked;
   const [player,setPlayer]=useState<NativePlaybackController|null>(null);
   const playbackState=useSyncExternalStore(player?.subscribe??noPlaybackSubscribe,()=>player?.getState()??null);
-  useEffect(()=>{const playback=new NativePlaybackController({bridge:audioBridge,onEdit:command=>controller.edit(command).then(()=>setSelection(old=>repairSelection(controller.getState().score,old)))});setPlayer(playback);return()=>playback.destroy();},[controller,audioBridge]);
+  useEffect(()=>{const playback=new NativePlaybackController({bridge:audioBridge,latestMix:id=>controller.getState().settings.mixes[id],onEdit:command=>controller.edit(command).then(()=>setSelection(old=>repairSelection(controller.getState().score,old)))});setPlayer(playback);return()=>playback.destroy();},[controller,audioBridge]);
   useEffect(()=>{controller.setBeforeChange(()=>player?.beforeScoreChange());return()=>controller.setBeforeChange(()=>{});},[controller,player]);
   const referenceLifetime=useMemo(()=>({active:true}),[controller,waveformBridge]);
   useEffect(()=>{referenceLifetime.active=true;const unbind=controller.setReferenceWaveformBridge(waveformBridge);return()=>{referenceLifetime.active=false;unbind();};},[controller,waveformBridge,referenceLifetime]);
@@ -457,6 +458,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
         <div className="workstation-task" hidden={leftTask!=='track'}><TrackSettingsPanel score={state.score} selected={target.track} busy={controlsBusy} locked={editLocked} onEdit={edit} onAudition={auditionTuning}/></div>
         <div className="workstation-task" hidden={leftTask!=='sound'}>
         <SoundPanel trackId={trackId} sound={state.settings.sounds[trackId]} onEdit={command=>controller.edit(command)} playback={player} busy={editBusy} shown={leftShown&&leftTask==='sound'}/>
+        <InterpretationPanel trackId={trackId} mix={state.settings.mixes[trackId]} stringed={selectedTrack.staves.some(staff=>staff.isStringed)} busy={controlsBusy} onEdit={command=>controller.edit(command)}/>
         </div><div className="workstation-task" hidden={leftTask!=='backing'}><BackingPanel visible={referenceVisible} settings={originalBacking?undefined:state.settings.backing} originalSettings={state.embeddedBackingSettings?{assetId:'embedded',...state.embeddedBackingSettings}:null} assets={state.snapshot.project.assets} embedded={state.embeddedBacking} playback={player} onEdit={backingEdit} stageBacking={audioBridge.stageBacking} stageEmbeddedBacking={audioBridge.stageEmbeddedBacking} beginOperation={beginEditorOperation} busy={editBusy} durationMs={sourceDurationMs??undefined} reference={reference} onShowWaveform={()=>chooseDock('backing')}/>{referenceVisible&&sourceMetadataStatus}</div>
       </section>
       <section ref={scorePane} className="score-workspace" aria-label="Score workspace" tabIndex={0} onKeyDown={keys}>

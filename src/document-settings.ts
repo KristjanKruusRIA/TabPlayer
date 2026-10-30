@@ -1,5 +1,5 @@
 import type { model } from '@coderline/alphatab';
-import type { DocumentSettings, EffectBlock, FxSettings, SettingsEdit, TrackSound, ChannelMix, PrintLayout, BackingSettings } from './edit-types';
+import type { DocumentSettings, EffectBlock, FxSettings, MasterSettings, SettingsEdit, TrackSound, ChannelMix, PrintLayout, BackingSettings } from './edit-types';
 import {defaultEngraving,validateEngravingTracks} from './engraving/projection';
 import {validatePageLayout} from './engraving/page';
 
@@ -10,7 +10,7 @@ export function copyTrackSettings(settings:DocumentSettings,source:string,copy:s
   const profile=settings.engraving.profiles.find(entry=>entry.trackId===source);
   if(profile)settings.engraving={...settings.engraving,profiles:[...settings.engraving.profiles,{...profile,trackId:copy}]};
 }
-export type { DocumentSettings, FxSettings, TrackSound, ChannelMix, PrintLayout, SyncAnchor, BackingSettings, ReferenceSyncBounds } from './edit-types';
+export type { DocumentSettings, FxSettings, TrackSound, ChannelMix, PrintLayout, SyncAnchor, BackingSettings, ReferenceSyncBounds, MasterSettings, MasterLimiter } from './edit-types';
 
 export const defaultMix = (): ChannelMix => ({gain:1,pan:0,mute:false,solo:false});
 export const defaultEffects = (): FxSettings => ({
@@ -111,6 +111,43 @@ function effectsProblem(effects:FxSettings,first:boolean):string|null {
   }
   return null;
 }
+/** The master as a new document plays it: everything off, level and balance centred. The numbers behind the switched-off
+ * blocks are where each starts when it is switched on: a gentler compressor than a track's, and a hall for the reverb. */
+export const defaultMaster = (): MasterSettings => ({
+  gainDb:0,balance:0,
+  compressor:{enabled:false,thresholdDb:-12,ratio:2,attackMs:30,releaseMs:200,makeupDb:0},
+  eq:{enabled:false,lowDb:0,midDb:0,highDb:0,midHz:1000},
+  reverb:{enabled:false,model:'hall',room:.6,damping:.5,mix:.1},
+  limiter:{enabled:false,ceilingDb:-1,releaseMs:100},
+});
+/** Whether the master changes nothing it is given. The numbers behind a switched-off block do not count. */
+export const masterIsNeutral=(master:MasterSettings|undefined|null):boolean=>!master||master.gainDb===0&&master.balance===0&&!master.compressor.enabled&&!master.eq.enabled&&!master.reverb.enabled&&!master.limiter.enabled;
+/** A master with the reverb model that a room reverb is saved without put back: the native player writes it that way, as it does for every pedalboard. */
+export const completeMaster=(master:MasterSettings):MasterSettings=>{
+  const reverb=(master as {reverb?:unknown}|null)?.reverb as {model?:unknown}|undefined;
+  if(!master||typeof master!=='object'||!reverb||typeof reverb!=='object'||Array.isArray(reverb)||reverb.model!==undefined)return master;
+  return {...master,reverb:{...master.reverb,model:'room'}};
+};
+const masterRules={
+  compressor:effectRules.compressor,eq:effectRules.eq,reverb:effectRules.reverb,
+  limiter:{ceilingDb:range(-12,0),releaseMs:range(10,1000)} as Record<string,FieldRule>,
+};
+/** Why a master cannot be applied, or null. It is checked as completed, against the native rules, which accept nothing more. */
+export function masterProblem(value:unknown):string|null {
+  const invalid='Invalid master settings.';
+  if(!value||typeof value!=='object'||Array.isArray(value))return invalid;
+  const master=completeMaster(value as MasterSettings) as unknown as Record<string,unknown>;
+  const keys=['gainDb','balance','compressor','eq','reverb','limiter'];
+  if(Object.keys(master).length!==keys.length||keys.some(key=>!Object.hasOwn(master,key)))return invalid;
+  if(!fits(master.gainDb,range(-24,12))||!fits(master.balance,range(-1,1)))return invalid;
+  for(const [block,rules] of Object.entries(masterRules)) {
+    const settings=master[block] as Record<string,unknown>|null;
+    if(!settings||typeof settings!=='object'||Array.isArray(settings)||typeof settings.enabled!=='boolean')return invalid;
+    // The same fields and no others: a block holds `enabled` and its rules' fields, the native structs being closed.
+    if(Object.keys(settings).length!==Object.keys(rules).length+1||Object.entries(rules).some(([field,rule])=>!Object.hasOwn(settings,field)||!fits(settings[field],rule)))return invalid;
+  }
+  return null;
+}
 export const defaultPrintLayout = (): PrintLayout => ({paper:'A4',orientation:'portrait',marginMm:15,scale:1,profile:'ScoreTab'});
 export const defaultDocumentSettings = (): DocumentSettings => ({sounds:{},mixes:{},backing:null,print:defaultPrintLayout(),engraving:defaultEngraving(),page:null});
 
@@ -167,5 +204,6 @@ export function applySettingsEdit(settings: DocumentSettings, edit: SettingsEdit
     }
     case 'setEngraving':validateEngravingTracks(score,trackIds,edit.engraving);settings.engraving=structuredClone(edit.engraving);break;
     case 'setPageLayout':validatePageLayout(edit.layout);settings.page=structuredClone(edit.layout);break;
+    case 'setMaster': {const problem=masterProblem(edit.master);if(problem)throw new Error(problem);settings.master=structuredClone(completeMaster(edit.master));break;}
   }
 }

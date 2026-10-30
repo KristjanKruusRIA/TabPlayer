@@ -1,7 +1,7 @@
 use crate::engraving::{EngravingOverrides, PageLayout};
 use crate::harmony::{HarmonyChord, HarmonyInterval, ScaleDiagram};
 use crate::project::BeatTarget;
-use crate::settings::{BackingSettings, ChannelMix, PrintLayout, TrackSound};
+use crate::settings::{BackingSettings, ChannelMix, MasterSettings, PrintLayout, TrackSound};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
@@ -1276,6 +1276,9 @@ pub enum EditCommand {
     SetPageLayout {
         layout: PageLayout,
     },
+    SetMaster {
+        master: MasterSettings,
+    },
 }
 
 /// A tuning name a document can hold: any length of XML 1.0 text, including empty.
@@ -1798,6 +1801,7 @@ impl EditCommand {
             Self::SetPrintLayout { layout } => layout.validate()?,
             Self::SetEngraving { engraving } => engraving.validate()?,
             Self::SetPageLayout { layout } => layout.validate()?,
+            Self::SetMaster { master } => master.validate()?,
             _ => {}
         }
         Ok(())

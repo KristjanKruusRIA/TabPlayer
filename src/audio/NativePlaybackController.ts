@@ -1,7 +1,7 @@
 import type { AlphaTabApi, model, synth } from '@coderline/alphatab';
 import { effectiveAudioSettings, trackIdentity, type BuiltDocument } from '../engine';
-import { completeSound, defaultEffects, defaultMix, soundProblem } from '../document-settings';
-import type { ChannelMix, EditCommand, TrackSound } from '../edit-types';
+import { completeSound, defaultEffects, defaultMix, masterProblem, soundProblem } from '../document-settings';
+import type { ChannelMix, EditCommand, MasterSettings, TrackSound } from '../edit-types';
 import type { BeatTarget,ProjectView } from '../project';
 import type { MusicSelection } from '../editor/range-types';
 import type { AuditionNote, AuditionRequest, NativeAudioBridge, NativeAudioStatus, TransportCommand } from './bridge';
@@ -147,6 +147,14 @@ export class NativePlaybackController {
   private editMix(index:number,patch:Partial<ChannelMix>){const track=this.built?.score.tracks[index];if(!track)throw new Error('Select an existing track.');const id=trackIdentity(track);const mix={...(this.built!.settings.mixes[id]??defaultMix()),...patch};void Promise.resolve(this.options.onEdit({type:'setTrackMix',trackId:id,mix})).catch(error=>this.fail(error));}
   setTrackVolume(index:number,value:number){this.editMix(index,{gain:Math.max(0,Math.min(1,value))});}
   setPan(index:number,value:number){this.editMix(index,{pan:Math.max(-1,Math.min(1,value))});}
+  /** The song's master chain as saved, or undefined while it has never been edited. */
+  master():MasterSettings|undefined{const master=this.built?.settings.master;return master?structuredClone(master):undefined;}
+  /** Saves the master chain as an undoable edit. It settles once the edit has been accepted or refused. */
+  setMaster(master:MasterSettings):Promise<void>{
+    const problem=masterProblem(master);
+    if(problem){const error=new Error(problem);this.fail(error);return Promise.reject(error);}
+    return Promise.resolve(this.options.onEdit({type:'setMaster',master:structuredClone(master)})).then(()=>undefined,error=>{this.fail(error);throw error;});
+  }
   setMute(index:number,value:boolean){this.editMix(index,{mute:value});}setSolo(index:number,value:boolean){this.editMix(index,{solo:value});}
   /** The focused track (by identity) and amount, from -1 (unfocused) to 1 (focused), or null when off. */
   focus():TrackFocus|null{return this.trackFocus?{...this.trackFocus}:null;}
@@ -225,7 +233,7 @@ export class NativePlaybackController {
     if(documentChanged){this.trackFocus=null;this.preview=null;this.practice=structuredClone(DEFAULT_PRACTICE);this.update({practiceNotice:null});}
     const saved=effectiveAudioSettings(project,built),preview=this.preview;
     const audioSettings=focusedSettings(preview?{...saved,sounds:{...saved.sounds,[preview.track]:preview.sound}}:saved,built.score.tracks.map(trackIdentity),this.trackFocus);this.hasBacking=audioSettings.backing!==null;
-    const audioSettingsKey=JSON.stringify([audioSettings.sounds,audioSettings.mixes,audioSettings.backing]);
+    const audioSettingsKey=JSON.stringify([audioSettings.sounds,audioSettings.mixes,audioSettings.backing,audioSettings.master??null]);
     const timingKey=referenceTimingKey(audioSettings.backing);
     const normalized=practiceForBacking(this.practice,this.hasBacking);
     if(normalized.notice){this.practice=normalized.settings;this.update({practiceNotice:normalized.notice});}

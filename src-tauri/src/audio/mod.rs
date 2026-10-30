@@ -3,6 +3,7 @@ pub mod backing;
 pub mod decode;
 pub mod device;
 pub mod dsp;
+pub mod master;
 pub mod plan;
 pub mod playback;
 pub mod practice;

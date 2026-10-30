@@ -3,6 +3,7 @@ use super::{
     backing::{BackingMap, BackingVoice},
     decode::DecodedAudio,
     dsp::{FxSettings, MAX_TRACK_DELAY_SECONDS, TrackDsp},
+    master::MasterBus,
     plan::{Articulation, PlanMidiEvent, PlaybackPlan, Timeline},
     practice::{ClickVoice, MetronomeSettings, PulsePosition, RenderTempo},
     resources::{AudioResources, Region},
@@ -53,6 +54,7 @@ struct PreparedChannel {
 pub struct PreparedMix {
     channels: Vec<PreparedChannel>,
     backing: Gain,
+    master: MasterBus,
     rate: u32,
 }
 fn validate_mix(mix: &ChannelMix) -> Result<(), String> {
@@ -104,6 +106,7 @@ impl PreparedMix {
         Ok(Self {
             channels,
             backing: Gain::new(&backing, !backing.mute && (!any_solo || backing.solo)),
+            master: MasterBus::new(settings.master.as_ref(), sample_rate)?,
             rate: sample_rate,
         })
     }
@@ -837,12 +840,23 @@ impl Renderer {
                 self.scratch[backing_index + usize::from(self.backing.is_some())] = [click; 2];
             }
         }
+        // The tracks and backing go through the master's effects and level. The metronome is added after them, so
+        // the click is neither coloured nor turned with the music, and the limiter sees all of it. Adding the click
+        // last keeps the sum in the order it always had.
+        let program = self.plan.tracks.len() + usize::from(self.backing.is_some());
         let mut sum = [0.0; 2];
-        for sample in self.scratch.iter().take(self.stem_count()) {
+        for sample in self.scratch.iter().take(program) {
             for c in 0..2 {
                 sum[c] += sample[c];
             }
         }
+        sum = self.mix.master.bus(sum, bpm);
+        for sample in self.scratch.iter().take(self.stem_count()).skip(program) {
+            for c in 0..2 {
+                sum[c] += sample[c];
+            }
+        }
+        sum = self.mix.master.limit(sum);
         self.clock_frames += 1;
         self.seconds = match self.tempo {
             RenderTempo::Relative { ratio } => {
@@ -971,6 +985,7 @@ impl Renderer {
         for channel in &mut self.mix.channels {
             channel.dsp.reset();
         }
+        self.mix.master.reset();
         self.next_note = self.plan.notes.partition_point(|n| n.start_tick < tick);
         self.next_midi = self.plan.midi.partition_point(|m| m.tick() < tick);
         for (track_index, track) in self.tracks.iter_mut().enumerate() {
@@ -1170,7 +1185,7 @@ impl Renderer {
         self.configured_backing || self.backing.is_some()
     }
     fn mix_ramping(&self) -> bool {
-        self.mix.channels.iter().any(|c| c.dsp.ramping())
+        self.mix.channels.iter().any(|c| c.dsp.ramping()) || self.mix.master.ramping()
     }
     /// Takes `settings` now, or parks it until the current crossfade ends, when `settle_mix` installs it. A newer mix
     /// replaces a parked one, because only the latest settings still matter. Callback callers retire whatever comes
@@ -1201,6 +1216,7 @@ impl Renderer {
         }
         settings.backing.current = self.mix.backing.current;
         settings.backing.remaining = (self.rate as f64 * 0.01) as u32;
+        settings.master.transition_from(&mut self.mix.master);
         std::mem::replace(&mut self.mix, settings)
     }
     pub fn set_mix(&mut self, settings: PreparedMix) {

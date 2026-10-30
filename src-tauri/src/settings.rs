@@ -1,4 +1,4 @@
-use crate::audio::dsp::FxSettings;
+use crate::audio::dsp::{Compressor, Eq, FxSettings, Reverb};
 use crate::engraving::{EngravingOverrides, PageLayout};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -280,6 +280,96 @@ impl PrintLayout {
     }
 }
 
+/// The master limiter: a ceiling that no sample of the final mix passes, with an instant attack.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct MasterLimiter {
+    pub enabled: bool,
+    pub ceiling_db: f64,
+    pub release_ms: f64,
+}
+impl Default for MasterLimiter {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            ceiling_db: -1.0,
+            release_ms: 100.0,
+        }
+    }
+}
+
+/// The song-level chain after the mix: compressor, EQ and reverb on the tracks and backing, then the overall level and
+/// balance, then the limiter on everything that sounds, the metronome included. Absent or at its defaults, the mix is
+/// untouched.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct MasterSettings {
+    pub gain_db: f64,
+    pub balance: f64,
+    pub compressor: Compressor,
+    pub eq: Eq,
+    pub reverb: Reverb,
+    pub limiter: MasterLimiter,
+}
+impl Default for MasterSettings {
+    fn default() -> Self {
+        Self {
+            gain_db: 0.0,
+            balance: 0.0,
+            // Gentler than a track's compressor, as a bus wants.
+            compressor: Compressor {
+                threshold_db: -12.0,
+                ratio: 2.0,
+                attack_ms: 30.0,
+                release_ms: 200.0,
+                ..Compressor::default()
+            },
+            eq: Eq::default(),
+            reverb: Reverb {
+                model: "hall".into(),
+                room: 0.6,
+                damping: 0.5,
+                mix: 0.1,
+                ..Reverb::default()
+            },
+            limiter: MasterLimiter::default(),
+        }
+    }
+}
+impl MasterSettings {
+    /// The three blocks as a pedalboard, which is what plays them.
+    pub fn board(&self) -> FxSettings {
+        FxSettings {
+            compressor: self.compressor.clone(),
+            eq: self.eq.clone(),
+            reverb: self.reverb.clone(),
+            ..FxSettings::default()
+        }
+    }
+    /// Whether the chain changes nothing it is given. The numbers behind a switched-off block do not count.
+    pub fn is_neutral(&self) -> bool {
+        self.gain_db == 0.0
+            && self.balance == 0.0
+            && !self.compressor.enabled
+            && !self.eq.enabled
+            && !self.reverb.enabled
+            && !self.limiter.enabled
+    }
+    pub fn validate(&self) -> Result<(), String> {
+        for (name, value, low, high) in [
+            ("master level", self.gain_db, -24.0, 12.0),
+            ("master balance", self.balance, -1.0, 1.0),
+            ("limiter ceiling", self.limiter.ceiling_db, -12.0, 0.0),
+            ("limiter release", self.limiter.release_ms, 10.0, 1000.0),
+        ] {
+            if !value.is_finite() || value < low || value > high {
+                return Err(format!("Invalid {name}: expected {low}..{high}."));
+            }
+        }
+        self.board().validate()
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct DocumentSettings {
@@ -292,6 +382,9 @@ pub struct DocumentSettings {
     pub engraving: EngravingOverrides,
     #[serde(default)]
     pub page: Option<PageLayout>,
+    /// Absent until the master is first edited.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub master: Option<MasterSettings>,
 }
 impl DocumentSettings {
     pub fn validate(&self) -> Result<(), String> {
@@ -314,6 +407,9 @@ impl DocumentSettings {
         self.engraving.validate()?;
         if let Some(page) = &self.page {
             page.validate()?;
+        }
+        if let Some(master) = &self.master {
+            master.validate()?;
         }
         Ok(())
     }

@@ -17,7 +17,7 @@ const BEND_PRESETS: readonly CurvePreset[] = [
   {
     id: 'bend',
     name: 'Bend',
-    type: 1,
+    type: model.BendType.Custom,
     points: [
       { offset: 0, value: 0 },
       { offset: 60, value: 4 },
@@ -27,7 +27,7 @@ const BEND_PRESETS: readonly CurvePreset[] = [
   {
     id: 'bend-release',
     name: 'Bend & release',
-    type: 2,
+    type: model.BendType.BendRelease,
     points: [
       { offset: 0, value: 0 },
       { offset: 30, value: 4 },
@@ -38,7 +38,7 @@ const BEND_PRESETS: readonly CurvePreset[] = [
   {
     id: 'prebend',
     name: 'Pre-bend',
-    type: 4,
+    type: model.BendType.Prebend,
     points: [
       { offset: 0, value: 4 },
       { offset: 60, value: 4 },
@@ -48,7 +48,7 @@ const BEND_PRESETS: readonly CurvePreset[] = [
   {
     id: 'prebend-release',
     name: 'Pre-bend & release',
-    type: 5,
+    type: model.BendType.PrebendRelease,
     points: [
       { offset: 0, value: 4 },
       { offset: 60, value: 0 },
@@ -61,7 +61,7 @@ const WHAMMY_PRESETS: readonly CurvePreset[] = [
   {
     id: 'dip',
     name: 'Dip',
-    type: 3,
+    type: model.WhammyType.Dip,
     points: [
       { offset: 0, value: 0 },
       { offset: 30, value: -4 },
@@ -72,7 +72,7 @@ const WHAMMY_PRESETS: readonly CurvePreset[] = [
   {
     id: 'dive',
     name: 'Dive',
-    type: 2,
+    type: model.WhammyType.Dive,
     points: [
       { offset: 0, value: 0 },
       { offset: 60, value: -8 },
@@ -82,7 +82,7 @@ const WHAMMY_PRESETS: readonly CurvePreset[] = [
   {
     id: 'scoop',
     name: 'Scoop',
-    type: 5,
+    type: model.WhammyType.Predive,
     points: [
       { offset: 0, value: -4 },
       { offset: 60, value: 0 },
@@ -92,7 +92,7 @@ const WHAMMY_PRESETS: readonly CurvePreset[] = [
   {
     id: 'hold',
     name: 'Hold',
-    type: 4,
+    type: model.WhammyType.Hold,
     points: [
       { offset: 0, value: -4 },
       { offset: 60, value: -4 },
@@ -100,6 +100,29 @@ const WHAMMY_PRESETS: readonly CurvePreset[] = [
     svgPath: 'M2 11 L16 11',
   },
 ];
+
+function areCurvesEqual(a: PitchCurve | null, b: PitchCurve | null): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  if (a.type !== b.type || a.style !== b.style || a.points.length !== b.points.length) return false;
+  return a.points.every((p, i) => p.offset === b.points[i].offset && p.value === b.points[i].value);
+}
+
+function matchingPresetType(points: PitchPoint[], whammy: boolean): number | null {
+  const presets = whammy ? WHAMMY_PRESETS : BEND_PRESETS;
+  const match = presets.find(
+    preset =>
+      preset.points.length === points.length &&
+      preset.points.every((p, i) => p.offset === points[i].offset && p.value === points[i].value),
+  );
+  return match ? match.type : null;
+}
+
+function resolveCurveType(points: PitchPoint[], whammy: boolean): number {
+  const matched = matchingPresetType(points, whammy);
+  if (matched !== null) return matched;
+  return whammy ? model.WhammyType.Custom : model.BendType.Custom;
+}
 
 const PLOT_LEFT = 32;
 const PLOT_RIGHT = 224;
@@ -134,19 +157,21 @@ export function CurveEditor({
 }) {
   const [curve, setCurve] = useState<PitchCurve | null>(value);
   const svgRef = useRef<SVGSVGElement>(null);
-  const dragRef = useRef<{ index: number; latest: PitchCurve } | null>(null);
+  const dragRef = useRef<{ index: number; initial: PitchCurve; latest: PitchCurve } | null>(null);
+  const pendingKeyCommitRef = useRef<{ initial: PitchCurve; latest: PitchCurve } | null>(null);
 
   useEffect(() => setCurve(value), [value]);
 
   const point = (index: number, key: 'offset' | 'value', nextVal: number) =>
-    setCurve(current =>
-      current
-        ? {
-            ...current,
-            points: current.points.map((p, i) => (i === index ? { ...p, [key]: nextVal } : p)),
-          }
-        : null,
-    );
+    setCurve(current => {
+      if (!current) return null;
+      const nextPoints = current.points.map((p, i) => (i === index ? { ...p, [key]: nextVal } : p));
+      return {
+        ...current,
+        points: nextPoints,
+        type: resolveCurveType(nextPoints, whammy),
+      };
+    });
 
   const presets = whammy ? WHAMMY_PRESETS : BEND_PRESETS;
   const maxAbs = Math.max(
@@ -163,11 +188,27 @@ export function CurveEditor({
   const fromPointer = (clientX: number, clientY: number): { offset: number; value: number } => {
     const svg = svgRef.current;
     if (!svg) return { offset: 30, value: 0 };
-    const rect = svg.getBoundingClientRect();
-    const width = rect.width || 240;
-    const height = rect.height || 124;
-    const svgX = ((clientX - rect.left) / width) * 240;
-    const svgY = ((clientY - rect.top) / height) * 124;
+    let svgX: number;
+    let svgY: number;
+    const ctm = svg.getScreenCTM?.();
+    if (ctm && svg.createSVGPoint) {
+      const pt = svg.createSVGPoint();
+      pt.x = clientX;
+      pt.y = clientY;
+      const transformed = pt.matrixTransform(ctm.inverse());
+      svgX = transformed.x;
+      svgY = transformed.y;
+    } else if (ctm) {
+      const inv = ctm.inverse();
+      svgX = clientX * inv.a + clientY * inv.c + inv.e;
+      svgY = clientX * inv.b + clientY * inv.d + inv.f;
+    } else {
+      const rect = svg.getBoundingClientRect();
+      const width = rect.width || 240;
+      const height = rect.height || 124;
+      svgX = ((clientX - rect.left) / width) * 240;
+      svgY = ((clientY - rect.top) / height) * 124;
+    }
     const rawOffset = Math.round(((svgX - PLOT_LEFT) / PLOT_WIDTH) * 60);
     const offset = Math.max(0, Math.min(60, rawOffset));
     const ratio = 1 - (svgY - PLOT_TOP) / PLOT_HEIGHT;
@@ -182,36 +223,58 @@ export function CurveEditor({
     const maxOffset = index === 0 ? 0 : index === last ? 60 : current.points[index + 1].offset - 1;
     const clampedOffset = Math.max(minOffset, Math.min(maxOffset, Math.round(nextOffset)));
     const clampedValue = Math.max(minPitch, Math.min(maxPitch, Math.round(nextValue)));
+    const nextPoints = current.points.map((p, i) => (i === index ? { offset: clampedOffset, value: clampedValue } : p));
     return {
       ...current,
-      points: current.points.map((p, i) => (i === index ? { offset: clampedOffset, value: clampedValue } : p)),
+      points: nextPoints,
+      type: resolveCurveType(nextPoints, whammy),
     };
   };
 
   const handlePointPointerDown = (index: number, event: ReactPointerEvent<SVGGElement>) => {
-    if (disabled || !curve) return;
+    if (disabled || !curve || event.button !== 0) return;
     event.stopPropagation();
     event.currentTarget.setPointerCapture?.(event.pointerId);
-    dragRef.current = { index, latest: curve };
+    dragRef.current = { index, initial: curve, latest: curve };
   };
 
   const handlePointPointerMove = (index: number, event: ReactPointerEvent<SVGGElement>) => {
     if (!dragRef.current || dragRef.current.index !== index || !curve || disabled) return;
     const coords = fromPointer(event.clientX, event.clientY);
     const updated = updatePointGesture(dragRef.current.latest, index, coords.offset, coords.value);
-    dragRef.current = { index, latest: updated };
+    dragRef.current = { ...dragRef.current, latest: updated };
     setCurve(updated);
   };
 
   const handlePointPointerUp = (index: number, event: ReactPointerEvent<SVGGElement>) => {
+    if (disabled) {
+      dragRef.current = null;
+      return;
+    }
     if (!dragRef.current || dragRef.current.index !== index) return;
-    const committed = dragRef.current.latest;
+    const { initial, latest } = dragRef.current;
     dragRef.current = null;
     if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
+      try {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      } catch {}
     }
-    setCurve(committed);
-    onChange(committed);
+    setCurve(latest);
+    if (!areCurvesEqual(latest, initial)) {
+      onChange(latest);
+    }
+  };
+
+  const handlePointPointerCancel = (index: number, event: ReactPointerEvent<SVGGElement>) => {
+    if (!dragRef.current || dragRef.current.index !== index) return;
+    const initial = dragRef.current.initial;
+    dragRef.current = null;
+    if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
+      try {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      } catch {}
+    }
+    setCurve(initial);
   };
 
   const handlePointKeyDown = (index: number, event: ReactKeyboardEvent<SVGGElement>) => {
@@ -219,9 +282,24 @@ export function CurveEditor({
     const currentPoint = curve.points[index];
     if (!currentPoint) return;
     const isInterior = index > 0 && index < curve.points.length - 1;
+    if (event.key === 'Escape') {
+      if (pendingKeyCommitRef.current) {
+        event.preventDefault();
+        const initial = pendingKeyCommitRef.current.initial;
+        pendingKeyCommitRef.current = null;
+        setCurve(initial);
+      }
+      return;
+    }
     if ((event.key === 'Delete' || event.key === 'Backspace') && isInterior) {
       event.preventDefault();
-      const next = { ...curve, points: curve.points.filter((_, i) => i !== index) };
+      pendingKeyCommitRef.current = null;
+      const nextPoints = curve.points.filter((_, i) => i !== index);
+      const next: PitchCurve = {
+        ...curve,
+        points: nextPoints,
+        type: resolveCurveType(nextPoints, whammy),
+      };
       setCurve(next);
       onChange(next);
       return;
@@ -238,28 +316,73 @@ export function CurveEditor({
 
     event.preventDefault();
     const updated = updatePointGesture(curve, index, nextOffset, nextValue);
+    if (areCurvesEqual(updated, curve)) return;
+
+    if (!pendingKeyCommitRef.current) {
+      pendingKeyCommitRef.current = { initial: curve, latest: updated };
+    } else {
+      pendingKeyCommitRef.current.latest = updated;
+    }
     setCurve(updated);
-    onChange(updated);
+  };
+
+  const handlePointKeyUp = (index: number, event: ReactKeyboardEvent<SVGGElement>) => {
+    if (disabled) {
+      pendingKeyCommitRef.current = null;
+      return;
+    }
+    if (pendingKeyCommitRef.current) {
+      const { initial, latest } = pendingKeyCommitRef.current;
+      pendingKeyCommitRef.current = null;
+      if (!areCurvesEqual(latest, initial)) {
+        onChange(latest);
+      }
+    }
+  };
+
+  const handlePointBlur = () => {
+    if (pendingKeyCommitRef.current) {
+      const { initial, latest } = pendingKeyCommitRef.current;
+      pendingKeyCommitRef.current = null;
+      if (!areCurvesEqual(latest, initial)) {
+        onChange(latest);
+      }
+    }
   };
 
   const handleSurfaceClick = (event: ReactPointerEvent<SVGRectElement>) => {
-    if (disabled || !curve) return;
+    if (disabled || !curve || event.button !== 0) return;
     const coords = fromPointer(event.clientX, event.clientY);
     const clampedOffset = Math.max(1, Math.min(59, coords.offset));
     const existingIdx = curve.points.findIndex(p => p.offset === clampedOffset);
+    if (existingIdx >= 0 && curve.points[existingIdx].value === coords.value) {
+      return;
+    }
     let nextPoints: PitchPoint[];
     if (existingIdx >= 0) {
       nextPoints = curve.points.map((p, i) => (i === existingIdx ? { ...p, value: coords.value } : p));
     } else {
       nextPoints = [...curve.points, { offset: clampedOffset, value: coords.value }].sort((a, b) => a.offset - b.offset);
     }
-    const nextCurve: PitchCurve = { ...curve, points: nextPoints };
+    const nextCurve: PitchCurve = {
+      ...curve,
+      points: nextPoints,
+      type: resolveCurveType(nextPoints, whammy),
+    };
     setCurve(nextCurve);
     onChange(nextCurve);
   };
 
   const applyPreset = (preset: CurvePreset) => {
     if (disabled) return;
+    if (
+      curve !== null &&
+      curve.type === preset.type &&
+      curve.points.length === preset.points.length &&
+      curve.points.every((p, i) => p.offset === preset.points[i].offset && p.value === preset.points[i].value)
+    ) {
+      return;
+    }
     const nextCurve: PitchCurve = {
       type: preset.type,
       style: curve?.style ?? 0,
@@ -357,7 +480,7 @@ export function CurveEditor({
             <svg
               ref={svgRef}
               viewBox="0 0 240 124"
-              role="img"
+              role="group"
               aria-label={`${label} pitch curve preview`}
               className="tp-curve-graph"
             >
@@ -385,7 +508,7 @@ export function CurveEditor({
                       strokeDasharray={offset % 30 === 0 ? undefined : '2 2'}
                     />
                     <text x={x} y={118} textAnchor="middle" className="tp-curve-axis-label">
-                      {offset === 0 ? '0' : offset === 15 ? '¼' : offset === 30 ? '½' : offset === 45 ? '¾' : '60'}
+                      {offset === 0 ? '0' : offset === 15 ? '¼' : offset === 30 ? '½' : offset === 45 ? '¾' : '1'}
                     </text>
                   </g>
                 );
@@ -447,7 +570,11 @@ export function CurveEditor({
                     onPointerDown={e => handlePointPointerDown(index, e)}
                     onPointerMove={e => handlePointPointerMove(index, e)}
                     onPointerUp={e => handlePointPointerUp(index, e)}
+                    onPointerCancel={e => handlePointPointerCancel(index, e)}
+                    onLostPointerCapture={e => handlePointPointerCancel(index, e)}
                     onKeyDown={e => handlePointKeyDown(index, e)}
+                    onKeyUp={e => handlePointKeyUp(index, e)}
+                    onBlur={handlePointBlur}
                   >
                     <circle cx={cx} cy={cy} r={8} className="tp-curve-handle-hit" />
                     <circle cx={cx} cy={cy} r={4.5} className="tp-curve-handle-dot" />

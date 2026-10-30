@@ -9,8 +9,9 @@ import { MeasurePanel } from './MeasurePanel';
 import { CurveEditor } from './CurveEditor';
 import { ChordDialog } from './ChordDialog';
 import { music, target } from './fixtures';
-import { previewEdit } from '../engine';
+import { buildScore, previewEdit } from '../engine';
 import { blankProject } from '../project';
+import { exportAsciiTab } from '../export/ascii-tab';
 vi.mock('@tauri-apps/api/core',()=>({invoke:vi.fn(async()=>({format:'tabplayer-tuning-library',version:1,entries:[]}))}));
 afterEach(cleanup);
 it('applies pitched staff transposition without requiring a string tuning',()=>{
@@ -62,16 +63,31 @@ it('interactive bend graph presets, drag gestures, and keyboard handles commit o
   render(<CurveEditor label="Bend" value={null} onChange={onChange}/>);
   fireEvent.click(screen.getByRole('button',{name:'Bend preset: Bend & release'}));
   expect(onChange).toHaveBeenCalledTimes(1);
-  expect(onChange).toHaveBeenLastCalledWith({type:2,style:0,points:[{offset:0,value:0},{offset:30,value:4},{offset:60,value:0}]});
+  expect(onChange).toHaveBeenLastCalledWith({type:model.BendType.BendRelease,style:0,points:[{offset:0,value:0},{offset:30,value:4},{offset:60,value:0}]});
+
+  // Re-clicking the active preset records nothing (Finding 2)
+  fireEvent.click(screen.getByRole('button',{name:'Bend preset: Bend & release'}));
+  expect(onChange).toHaveBeenCalledTimes(1);
 
   const middleHandle=screen.getByRole('slider',{name:'Bend graph point 2'});
-  fireEvent.keyDown(middleHandle,{key:'ArrowUp',shiftKey:true});
-  expect(onChange).toHaveBeenCalledTimes(2);
-  expect(onChange).toHaveBeenLastCalledWith({type:2,style:0,points:[{offset:0,value:0},{offset:30,value:6},{offset:60,value:0}]});
 
-  fireEvent.keyDown(middleHandle,{key:'ArrowRight',shiftKey:true});
+  // Curve handle clicked without moving records nothing (Finding 2)
+  fireEvent.pointerDown(middleHandle,{pointerId:1,clientX:120,clientY:40});
+  fireEvent.pointerUp(middleHandle,{pointerId:1,clientX:120,clientY:40});
+  expect(onChange).toHaveBeenCalledTimes(1);
+
+  // Moving handle resets type to Custom (Finding 1) and commits on keyup (LOW)
+  fireEvent.keyDown(middleHandle,{key:'ArrowUp',shiftKey:true});
+  fireEvent.keyUp(middleHandle,{key:'ArrowUp',shiftKey:true});
+  expect(onChange).toHaveBeenCalledTimes(2);
+  expect(onChange).toHaveBeenLastCalledWith({type:model.BendType.Custom,style:0,points:[{offset:0,value:0},{offset:30,value:6},{offset:60,value:0}]});
+
+  // Held keys repeat keydown without extra commits; keyup commits once (LOW)
+  fireEvent.keyDown(middleHandle,{key:'ArrowRight',shiftKey:true,repeat:false});
+  fireEvent.keyDown(middleHandle,{key:'ArrowRight',shiftKey:true,repeat:true});
+  fireEvent.keyUp(middleHandle,{key:'ArrowRight',shiftKey:true});
   expect(onChange).toHaveBeenCalledTimes(3);
-  expect(onChange).toHaveBeenLastCalledWith({type:2,style:0,points:[{offset:0,value:0},{offset:35,value:6},{offset:60,value:0}]});
+  expect(onChange).toHaveBeenLastCalledWith({type:model.BendType.Custom,style:0,points:[{offset:0,value:0},{offset:40,value:6},{offset:60,value:0}]});
 
   // Pointer drag updates live during move and commits only once on pointerUp.
   fireEvent.pointerDown(middleHandle,{pointerId:1,clientX:120,clientY:40});
@@ -81,9 +97,95 @@ it('interactive bend graph presets, drag gestures, and keyboard handles commit o
   fireEvent.pointerUp(middleHandle,{pointerId:1,clientX:140,clientY:20});
   expect(onChange).toHaveBeenCalledTimes(4);
 
+  // Lost pointer (pointercancel / lostpointercapture) restores value and commits nothing (Finding 3)
+  const countBeforeCancel = onChange.mock.calls.length;
+  fireEvent.pointerDown(middleHandle,{pointerId:2,clientX:140,clientY:20});
+  fireEvent.pointerMove(middleHandle,{pointerId:2,clientX:150,clientY:10});
+  fireEvent.pointerCancel(middleHandle,{pointerId:2});
+  expect(onChange).toHaveBeenCalledTimes(countBeforeCancel);
+
+  // Arrow at limit records nothing (Finding 2)
+  const maxHandle=middleHandle;
+  // Push value to max pitch limit (12)
+  for(let i=0;i<10;i++){
+    fireEvent.keyDown(maxHandle,{key:'ArrowUp',shiftKey:true});
+    fireEvent.keyUp(maxHandle,{key:'ArrowUp',shiftKey:true});
+  }
+  const callsAtLimit = onChange.mock.calls.length;
+  fireEvent.keyDown(maxHandle,{key:'ArrowUp',shiftKey:true});
+  fireEvent.keyUp(maxHandle,{key:'ArrowUp',shiftKey:true});
+  expect(onChange).toHaveBeenCalledTimes(callsAtLimit);
+
   fireEvent.keyDown(middleHandle,{key:'Delete'});
-  expect(onChange).toHaveBeenCalledTimes(5);
-  expect(onChange).toHaveBeenLastCalledWith({type:2,style:0,points:[{offset:0,value:0},{offset:60,value:0}]});
+  expect(onChange).toHaveBeenLastCalledWith({type:model.BendType.Custom,style:0,points:[{offset:0,value:0},{offset:60,value:0}]});
+});
+
+it('bend presets render accurately in real ASCII export (5br, pb mark)',()=>{
+  let project=blankProject();
+  project=previewEdit(project,{type:'setNote',target,string:1,fret:5}).project;
+
+  // Bend & release preset produces '5br' in ASCII export
+  project=previewEdit(project,{type:'setNoteTechniques',target,string:1,patch:{bend:{type:model.BendType.BendRelease,style:0,points:[{offset:0,value:0},{offset:30,value:4},{offset:60,value:0}]}}}).project;
+  let text=new TextDecoder().decode(exportAsciiTab(buildScore(project),{tracks:[0],range:null}));
+  expect(text).toContain('5br');
+
+  // Pre-bend preset produces 'pb5' in ASCII export
+  project=previewEdit(project,{type:'setNoteTechniques',target,string:1,patch:{bend:{type:model.BendType.Prebend,style:0,points:[{offset:0,value:4},{offset:60,value:4}]}}}).project;
+  text=new TextDecoder().decode(exportAsciiTab(buildScore(project),{tracks:[0],range:null}));
+  expect(text).toContain('pb5');
+
+  // Pre-bend & release preset produces 'pb5r' in ASCII export
+  project=previewEdit(project,{type:'setNoteTechniques',target,string:1,patch:{bend:{type:model.BendType.PrebendRelease,style:0,points:[{offset:0,value:4},{offset:60,value:0}]}}}).project;
+  text=new TextDecoder().decode(exportAsciiTab(buildScore(project),{tracks:[0],range:null}));
+  expect(text).toContain('pb5r');
+});
+
+it('curve editor respects getScreenCTM, role=group, surface clicks, and single unit x-axis',()=>{
+  const onChange=vi.fn();
+  const initialCurve={type:model.BendType.Custom,style:0,points:[{offset:0,value:0},{offset:30,value:4},{offset:60,value:0}]};
+  const view=render(<CurveEditor label="Bend" value={initialCurve} onChange={onChange}/>);
+
+  // Finding 12: role=group allows slider handles to be recognized by screen readers
+  const group=screen.getByRole('group',{name:'Bend pitch curve preview'});
+  expect(group).toBeInTheDocument();
+
+  // LOW: X axis reads 0 1/4 1/2 3/4 1 (one unit, not 60)
+  expect(within(group).getAllByText('1')).toHaveLength(2);
+  expect(within(group).queryByText('60')).not.toBeInTheDocument();
+
+  const surface=screen.getByTestId('bend-graph-surface');
+
+  // Surface right-click records nothing (LOW)
+  fireEvent.pointerDown(surface,{button:2,clientX:100,clientY:50});
+  expect(onChange).not.toHaveBeenCalled();
+
+  // Surface click on same existing value records nothing (Finding 2)
+  // middle point is at offset 30, value 4.
+  // PLOT_LEFT is 32, PLOT_WIDTH is 192 -> offset 30 is at x = 32 + (30/60)*192 = 128
+  // PLOT_BOTTOM is 104, PLOT_TOP is 12, PLOT_HEIGHT is 92. maxPitch is 12, minPitch is 0.
+  // value 4 is ratio 4/12 = 1/3 -> y = 104 - (1/3)*92 = 73.33 -> round is 4
+  fireEvent.pointerDown(surface,{button:0,clientX:128,clientY:73});
+  expect(onChange).not.toHaveBeenCalled();
+
+  // Finding 10: getScreenCTM handles letterboxed SVG coordinates
+  const svg=group as unknown as SVGSVGElement;
+  svg.getScreenCTM=vi.fn(()=>({
+    a:2,b:0,c:0,d:2,e:10,f:20,
+    inverse:()=>({a:0.5,b:0,c:0,d:0.5,e:-5,f:-10} as DOMMatrix),
+  } as unknown as DOMMatrix));
+  // clientX: 266 -> svgX = 266 * 0.5 - 5 = 128 -> offset 30
+  // clientY: 100 -> svgY = 100 * 0.5 - 10 = 40 -> y 40 gives value > 4
+  fireEvent.pointerDown(surface,{button:0,clientX:266,clientY:100});
+  expect(onChange).toHaveBeenCalledTimes(1);
+  expect(onChange.mock.calls[0][0].points.find((p:{offset:number;value:number})=>p.offset===30)?.value).toBeGreaterThan(4);
+
+  // Curve pointer-up skips disabled (LOW)
+  onChange.mockClear();
+  view.rerender(<CurveEditor label="Bend" value={initialCurve} disabled onChange={onChange}/>);
+  const handle=screen.getAllByRole('slider')[1];
+  fireEvent.pointerDown(handle,{pointerId:1,clientX:128,clientY:73});
+  fireEvent.pointerUp(handle,{pointerId:1,clientX:140,clientY:20});
+  expect(onChange).not.toHaveBeenCalled();
 });
 it('voice staff and layout controls dispatch exact commands',()=>{
   const onEdit=vi.fn();render(<StructurePanel score={music()} target={target} string={6} busy={false} onEdit={onEdit} onSelect={vi.fn()}/>);

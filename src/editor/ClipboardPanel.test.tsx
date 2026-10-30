@@ -38,6 +38,14 @@ it('phrase_and_bar_defaults_emit_detached_options_and_never_display_raw_music',(
   expect(options[0].target).not.toBe(target);change('Paste repetitions','3');expect(options[0].count).toBe(1);
   view.rerender(<ClipboardPanel {...props} target={{...target,bar:1}} clip={barClip()}/>);expect(screen.getByText(/Complete bars.*before measure 2/i)).toBeInTheDocument();paste();expect(options[1]).toEqual({target:{track:0,staff:0,bar:1,voice:0,beat:0},destinations:[{sourceTrack:0,track:0,staffMap:[0]}],count:1,placement:'beforeBar',filters});
 });
+it('the_paste_diagrams_preference_sets_only_the_starting_diagram_filter',()=>{
+  const score=music(),clip=makeMusicClip(music(),{kind:'notes',notes:[{target,noteIndex:0}]},'singleTrack'),options:PasteOptions[]=[],props={score,target,selection:bars,clip,busy:false,onCopy:()=>{},onCut:()=>{},onPaste:(value:PasteOptions)=>options.push(value)};
+  const view=render(<ClipboardPanel {...props} diagramsDefault={false}/>);
+  expect(screen.getByLabelText('Chord diagrams')).not.toBeChecked();expect(screen.getByLabelText('Beat texts')).toBeChecked();
+  paste();expect(options[0].filters).toEqual({...filters,diagrams:false});
+  fireEvent.click(screen.getByLabelText('Chord diagrams'));paste();expect(options[1].filters.diagrams).toBe(true);
+  change('Paste repetitions','3');view.rerender(<ClipboardPanel {...props} diagramsDefault/>);expect(screen.getByLabelText('Chord diagrams')).toBeChecked();expect(screen.getByLabelText('Paste repetitions')).toHaveValue(3);
+});
 it('multitrack_defaults_and_explicit_unique_track_staff_mappings_are_exact',()=>{
   const source=destination(2,2),clip=makeMusicClip(source,{kind:'bars',tracks:[0,1],firstBar:0,lastBar:0},'multiTrack'),options:PasteOptions[]=[];
   render(<ClipboardPanel score={destination()} target={target} selection={bars} clip={clip} busy={false} onCopy={()=>{}} onCut={()=>{}} onPaste={value=>options.push(value)}/>);

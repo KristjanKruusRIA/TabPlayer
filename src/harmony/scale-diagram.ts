@@ -6,7 +6,7 @@ import { resolveSelectionNotes } from '../editor/range-selection';
 
 export type ScaleMarkShape='circle'|'square'|'diamond'|'triangle'|'cross';
 export interface ScaleMark {string:number;fret:number;shape:ScaleMarkShape;color:string;text:string;textColor:string}
-/** A fretboard window with marks. `string` counts from 1 for the highest-pitched string, as notes do; fret 0 is an open string. */
+/** A fretboard window with marks. `string` counts from 1 for the lowest-pitched string, as notes do (the highest string is `strings`); fret 0 is an open string. */
 export interface ScaleDiagram {
   name:string;strings:number;frets:number;firstFret:number;orientation:'horizontal'|'vertical';showFretMarkers:boolean;marks:ScaleMark[];
 }
@@ -15,51 +15,60 @@ export const scaleMarkShapes:readonly ScaleMarkShape[]=['circle','square','diamo
 export const defaultMarkColor='#2f6fed',defaultRootColor='#b5df73',defaultTextColor='#ffffff',darkTextColor='#161c24';
 
 const integer=(value:unknown,min:number,max:number):value is number=>typeof value==='number'&&Number.isInteger(value)&&value>=min&&value<=max;
+/** Text an XML 1.0 document can hold: no control characters, no U+FFFE or U+FFFF, no unpaired surrogate. */
+const unsafeText=/[\u0000-\u001f\u007f-\u009f\ufffe\uffff]|[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/;
 const color=(value:unknown)=>typeof value==='string'&&/^#[0-9a-fA-F]{6}$/.test(value);
 const exact=(value:unknown,keys:string[])=>value!==null&&typeof value==='object'&&!Array.isArray(value)&&Object.keys(value).length===keys.length&&keys.every(key=>Object.hasOwn(value,key));
 /** The same rules as the native `ScaleDiagram::validate`. */
 export function validateScaleDiagram(input:unknown):asserts input is ScaleDiagram {
   const value=input as ScaleDiagram;
-  if(!exact(value,['name','strings','frets','firstFret','orientation','showFretMarkers','marks'])||typeof value.name!=='string'||[...value.name].length>64||!integer(value.strings,3,10)||!integer(value.frets,4,24)||!integer(value.firstFret,1,127)||value.firstFret+value.frets-1>127||!['horizontal','vertical'].includes(value.orientation)||typeof value.showFretMarkers!=='boolean'||!Array.isArray(value.marks)||value.marks.length>value.strings*(value.frets+1))throw new Error('Invalid scale diagram.');
+  if(!exact(value,['name','strings','frets','firstFret','orientation','showFretMarkers','marks'])||typeof value.name!=='string'||[...value.name].length>64||unsafeText.test(value.name)||!integer(value.strings,3,10)||!integer(value.frets,4,24)||!integer(value.firstFret,1,127)||value.firstFret+value.frets-1>127||!['horizontal','vertical'].includes(value.orientation)||typeof value.showFretMarkers!=='boolean'||!Array.isArray(value.marks)||value.marks.length>value.strings*(value.frets+1))throw new Error('Invalid scale diagram.');
   const last=value.firstFret+value.frets-1,seen=new Set<string>();
   for(const mark of value.marks){
-    if(!exact(mark,['string','fret','shape','color','text','textColor'])||!integer(mark.string,1,value.strings)||!integer(mark.fret,0,127)||(mark.fret!==0&&(mark.fret<value.firstFret||mark.fret>last))||!scaleMarkShapes.includes(mark.shape)||typeof mark.text!=='string'||[...mark.text].length>3||!color(mark.color)||!color(mark.textColor)||seen.has(`${mark.string}/${mark.fret}`))throw new Error('Invalid scale diagram mark.');
+    if(!exact(mark,['string','fret','shape','color','text','textColor'])||!integer(mark.string,1,value.strings)||!integer(mark.fret,0,127)||(mark.fret!==0&&(mark.fret<value.firstFret||mark.fret>last))||!scaleMarkShapes.includes(mark.shape)||typeof mark.text!=='string'||[...mark.text].length>3||unsafeText.test(mark.text)||!color(mark.color)||!color(mark.textColor)||seen.has(`${mark.string}/${mark.fret}`))throw new Error('Invalid scale diagram mark.');
     seen.add(`${mark.string}/${mark.fret}`);
   }
 }
 
 const sources=new WeakMap<model.Beat,ScaleDiagram>();
-const owners=new WeakMap<model.Score,Set<model.Beat>>();
-const scoreOf=(beat:model.Beat)=>beat.voice.bar.staff.track.score;
 /** A snapshot of the diagram on a beat, or null. */
 export function getScaleDiagram(beat:model.Beat|undefined|null):ScaleDiagram|null {
   const value=beat?sources.get(beat):undefined;return value?structuredClone(value):null;
 }
 export function setScaleDiagram(beat:model.Beat,diagram:ScaleDiagram|null):void {
-  const score=scoreOf(beat);
-  if(diagram===null){sources.delete(beat);owners.get(score)?.delete(beat);return;}
+  if(diagram===null){sources.delete(beat);return;}
   validateScaleDiagram(diagram);sources.set(beat,structuredClone(diagram));
-  const set=owners.get(score)??new Set<model.Beat>();owners.set(score,set);set.add(beat);
+}
+/** Visits every beat by its real array position: the `.index` fields go stale while an edit rearranges a score in place. */
+function eachBeat(score:model.Score,visit:(beat:model.Beat,target:BeatTarget)=>void):void {
+  score.tracks.forEach((track,t)=>track.staves.forEach((staff,s)=>staff.bars.forEach((bar,b)=>bar.voices.forEach((voice,v)=>voice.beats.forEach((beat,i)=>visit(beat,{track:t,staff:s,bar:b,voice:v,beat:i}))))));
 }
 /** All diagrams, with the position of their beat, in score order. */
 export function listScaleDiagrams(score:model.Score):Array<{target:BeatTarget;diagram:ScaleDiagram}> {
   const found:Array<{target:BeatTarget;diagram:ScaleDiagram}>=[];
-  for(const beat of owners.get(score)??[]){
-    const voice=beat.voice,bar=voice.bar,staff=bar.staff;
-    if(voice.beats[beat.index]!==beat||bar.voices[voice.index]!==voice||staff.bars[bar.index]!==bar)continue;
-    found.push({target:{track:staff.track.index,staff:staff.index,bar:bar.index,voice:voice.index,beat:beat.index},diagram:structuredClone(sources.get(beat)!)});
-  }
-  const key=(t:BeatTarget)=>[t.track,t.staff,t.bar,t.voice,t.beat];
-  return found.sort((a,b)=>{const x=key(a.target),y=key(b.target);for(let i=0;i<x.length;i++)if(x[i]!==y[i])return x[i]-y[i];return 0;});
+  eachBeat(score,(beat,target)=>{const diagram=sources.get(beat);if(diagram)found.push({target,diagram:structuredClone(diagram)});});
+  return found;
 }
 /** Call after any full clone that keeps the score's structure, as for chord sources. */
 export function copyScaleDiagrams(source:model.Score,destination:model.Score):void {
   if(source===destination)return;
-  const found=listScaleDiagrams(source);owners.delete(destination);
+  const found=listScaleDiagrams(source);eachBeat(destination,beat=>{sources.delete(beat);});
   for(const {target,diagram}of found){
     const beat=destination.tracks[target.track]?.staves[target.staff]?.bars[target.bar]?.voices[target.voice]?.beats[target.beat];
     if(beat)setScaleDiagram(beat,diagram);
   }
+}
+/** Copies the diagrams of one track onto its structurally identical duplicate. */
+export function copyTrackScaleDiagrams(source:model.Track,destination:model.Track):void {
+  source.staves.forEach((staff,s)=>staff.bars.forEach((bar,b)=>bar.voices.forEach((voice,v)=>voice.beats.forEach((beat,i)=>{
+    const diagram=sources.get(beat),copy=destination.staves[s]?.bars[b]?.voices[v]?.beats[i];
+    if(copy){if(diagram)sources.set(copy,structuredClone(diagram));else sources.delete(copy);}
+  }))));
+}
+/** Same content, whatever the order of the marks. */
+export function sameScaleDiagram(a:ScaleDiagram|null,b:ScaleDiagram|null):boolean {
+  const normal=(value:ScaleDiagram|null)=>value&&JSON.stringify({...value,marks:[...value.marks].sort((x,y)=>x.string-y.string||x.fret-y.fret)});
+  return normal(a)===normal(b);
 }
 
 /** Replay of `setScaleDiagram`. A diagram marks a written beat of a pitched, stringed or keyboard staff, never a drum staff. */

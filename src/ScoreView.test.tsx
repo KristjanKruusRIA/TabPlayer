@@ -8,6 +8,7 @@ import { music, target } from './editor/fixtures';
 import type { MusicSelection } from './editor/range-types';
 import {defaultEngraving,projectEngraving} from './engraving/projection';
 import { invoke } from '@tauri-apps/api/core';
+import { newMark,setScaleDiagram } from './harmony/scale-diagram';
 
 vi.mock('@tauri-apps/api/core',()=>({invoke:vi.fn(()=>{throw new Error('Edit target feedback must not invoke native IPC.');})}));
 
@@ -216,4 +217,14 @@ it('resets persistent public highlight endpoints and waits for current render bo
   expect(api.rangeEndpoints).toEqual([next.tracks[0].staves[0].bars[0].voices[0].beats[0],next.tracks[0].staves[0].bars[0].voices[0].beats[2]]);
   rendered.rerender(<ScoreView {...props} score={next} editorSelection={null}/>);
   expect(api.rangeEndpoints?.[0]).toBe(api.rangeEndpoints?.[1]);expect(api.playbackRange).toEqual({startTick:1920,endTick:3840});
+});
+it('draws each scale diagram above its beat in the shown tracks and removes it when the beat is not rendered',()=>{
+  const score=music(),beat=score.tracks[0].staves[0].bars[0].voices[0].beats[1];
+  setScaleDiagram(beat,{name:'Shape',strings:6,frets:5,firstFret:1,orientation:'horizontal',showFretMarkers:true,marks:[newMark(1,3),newMark(6,0,'square')]});
+  const props={score,track:0,zoom:100,profile:'ScoreTab',playback:null,onSelect:vi.fn(),editTarget:target};
+  const rendered=render(<ScoreView {...props}/>),api=view.api as FakeView;act(()=>api.postRenderFinished.emit());
+  const diagram=screen.getByRole('group',{name:'Scale diagram Shape'});expect((diagram.closest('.score-scale-diagram') as HTMLElement).style.left).toBe('80px');
+  expect(screen.getByLabelText('String 6, open: square mark')).toBeTruthy();
+  api.boundsLookup.findBeats=()=>[];act(()=>api.postRenderFinished.emit());expect(screen.queryByRole('group',{name:'Scale diagram Shape'})).toBeNull();
+  rendered.unmount();
 });

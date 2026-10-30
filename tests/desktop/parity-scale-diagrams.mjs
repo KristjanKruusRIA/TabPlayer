@@ -40,94 +40,126 @@ export async function runScaleDiagramAcceptance({buildPath}={}){
   const native=()=>poll(()=>invoke('audio_status'),value=>{assert.equal(value.error,null);return value.ready&&value.generation===value.desiredGeneration;},'paused current native preparation');
   const idle=async()=>{owned();await ui.waitForWorkspaceIdle(page);healthy();};
   const button=async name=>{owned();await ui.clickWorkstationButton(page,name);await idle();};
-  const view=()=>page.getByRole('region',{name:'Instrument view',exact:true});
-  const edits=async()=>(await record()).snapshot.project.edits;
-  // One click is exactly one native edit with this command; Undo restores the record before it and Redo the one after.
-  const click=async(label,name,expected)=>{
-    const before=await record(),count=before.snapshot.project.edits.length;
-    await view().getByRole('button',{name,exact:true}).click();await idle();
-    const after=await poll(record,value=>value.snapshot.project.edits.length===count+1,`${label}: one edit`);
-    assert.deepEqual(after.snapshot.project.edits.at(-1),expected,`${label}: command`);
-    await button('Undo');assert.deepEqual((await record()).snapshot.project,before.snapshot.project,`${label}: undo restores`);
-    await button('Redo');assert.deepEqual((await record()).snapshot.project,after.snapshot.project,`${label}: redo restores`);
-    result.edits.push({label,command:expected});return after;
-  };
   try{
     ui=await import('./workstation-commands.mjs');const {importer,Settings}=await import('@coderline/alphatab');load=bytes=>importer.ScoreLoader.loadScoreFromBytes(bytes,new Settings());
     await buildInstrumentFixture();writeFileSync(inputPath,readFileSync(fixturePath),{flag:'wx'});result.input={inputPath,sha256:hashFile(inputPath)};
-    assertStringCountBuild(packet);assertStringCountPortFree(portRows());
-    const environment={...stringCountEnvironment(process.env),TABPLAYER_DESKTOP_TEST:'1',TABPLAYER_TEST_SESSION_DIR:paths.session,TABPLAYER_TEST_APP_DATA_DIR:paths['app-data'],TABPLAYER_TEST_OPEN:inputPath,TABPLAYER_TEST_EXPORT:exportBase,WEBVIEW2_USER_DATA_FOLDER:paths.profile,WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS:'--remote-debugging-port=9223',STRING_COUNT_EXE:packet.executable,STRING_COUNT_IDENTITY:identityPath};
+    const environmentFor=openPath=>({...stringCountEnvironment(process.env),TABPLAYER_DESKTOP_TEST:'1',TABPLAYER_TEST_SESSION_DIR:paths.session,TABPLAYER_TEST_APP_DATA_DIR:paths['app-data'],TABPLAYER_TEST_OPEN:openPath,TABPLAYER_TEST_EXPORT:exportBase,WEBVIEW2_USER_DATA_FOLDER:paths.profile,WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS:'--remote-debugging-port=9223',STRING_COUNT_EXE:packet.executable,STRING_COUNT_IDENTITY:identityPath});
     const script='$ErrorActionPreference="Stop";$p=Start-Process -FilePath $env:STRING_COUNT_EXE -WindowStyle Hidden -PassThru;$text=@{pid=$p.Id;path=$p.Path;startTicks=$p.StartTime.ToUniversalTime().Ticks.ToString()}|ConvertTo-Json -Compress;[IO.File]::WriteAllText($env:STRING_COUNT_IDENTITY,$text);$text';
-    identity=JSON.parse(execFileSync('powershell.exe',['-NoProfile','-Command',script],{encoding:'utf8',windowsHide:true,timeout:20000,env:environment}).trim());
-    assertStringCountIdentity(identity,json(identityPath));assert.ok(samePath(identity.path,packet.executable));owned();
-    const before=await poll(listeners,rows=>rows.length>0,'owned CDP listener');assertScoreLayoutListener(identity,paths.profile,before);
-    const {chromium}=await import('playwright');browser=await chromium.connectOverCDP('http://127.0.0.1:9223');owned();assertScoreLayoutListener(identity,paths.profile,listeners());
-    page=browser.contexts()[0].pages()[0];page.setDefaultTimeout(30000);
-    page.on('pageerror',error=>result.pageErrors.push(error.message));page.on('console',message=>{if(message.type()==='warning'&&message.text().startsWith('IPC custom protocol failed, Tauri will now use the postMessage interface instead'))result.fallbacks.push(message.text());});
-    await page.locator('.app-shell').waitFor();const library=page.getByRole('dialog',{name:'Library',exact:true});await library.getByRole('heading',{name:'Welcome to TabPlayer',exact:true}).waitFor();await library.getByRole('button',{name:'Close',exact:true}).click();await library.waitFor({state:'hidden'});
-    await idle();await button('Open');await page.locator('[aria-label="Music notation"] svg').first().waitFor();await native();
+    // Starts the owned build with a file to open, as TabPlayer itself opens it, and attaches to its diagnostic port.
+    const launch=async openPath=>{
+      assertStringCountBuild(packet);assertStringCountPortFree(portRows());
+      identity=JSON.parse(execFileSync('powershell.exe',['-NoProfile','-Command',script],{encoding:'utf8',windowsHide:true,timeout:20000,env:environmentFor(openPath)}).trim());
+      assertStringCountIdentity(identity,json(identityPath));assert.ok(samePath(identity.path,packet.executable));owned();
+      const rows=await poll(listeners,found=>found.length>0,'owned CDP listener');assertScoreLayoutListener(identity,paths.profile,rows);
+      const {chromium}=await import('playwright');browser=await chromium.connectOverCDP('http://127.0.0.1:9223');owned();assertScoreLayoutListener(identity,paths.profile,listeners());
+      page=browser.contexts()[0].pages()[0];page.setDefaultTimeout(30000);
+      page.on('pageerror',error=>result.pageErrors.push(error.message));page.on('console',message=>{if(message.type()==='warning'&&message.text().startsWith('IPC custom protocol failed, Tauri will now use the postMessage interface instead'))result.fallbacks.push(message.text());});
+      await page.locator('.app-shell').waitFor();const library=page.getByRole('dialog',{name:'Library',exact:true});
+      if(await library.waitFor({state:'visible',timeout:5000}).then(()=>true,()=>false)){await library.getByRole('button',{name:'Close',exact:true}).click();await library.waitFor({state:'hidden'});}
+      await idle();await button('Open');await page.locator('[aria-label="Music notation"] svg').first().waitFor();await native();
+    };
+    const shutdown=async()=>{
+      if(browser){await browser.close();browser=null;}
+      if(identity&&inspect())ps(`${ownedScript}if($null -ne $p){Stop-Process -Id $p.Id;if(-not $p.WaitForExit(5000)){throw 'Owned process did not exit'}}`);
+      identity=null;await poll(portRows,rows=>rows.length===0,'diagnostic port released');
+    };
+    // The 1-based Measure and Beat fields choose the beat that the Scale browser edits.
+    const select=async(measure,beat)=>{await ui.revealInspector(page);await page.getByLabel('Measure',{exact:true}).fill(String(measure));await page.getByLabel('Beat',{exact:true}).fill(String(beat));await idle();};
+    const scales=()=>page.getByRole('dialog',{name:'Scale browser',exact:true});
+    const diagramSection=()=>scales().getByRole('region',{name:'Scale diagram',exact:true});
+    const inScore=()=>page.locator('.score-scale-diagram');
+    const centre=async locator=>{const box=await locator.boundingBox();assert.ok(box);return {x:box.x+box.width/2,y:box.y+box.height/2};};
+    // The score draws the diagram above the staff; string 9 is the highest string and string 5 lies below it.
+    const assertDrawn=async label=>{
+      await inScore().waitFor();assert.equal(await inScore().count(),1,`${label}: one diagram in the score`);
+      await inScore().getByRole('group',{name:'Scale diagram Open position',exact:true}).waitFor();
+      const high=await centre(inScore().getByLabel('String 9, open',{exact:false})),lower=await centre(inScore().getByLabel('String 5, fret 3',{exact:false}));
+      assert.ok(high.y<lower.y,`${label}: the highest string is drawn above a lower string`);
+    };
+    const t={track:0,staff:0,bar:1,voice:0,beat:1};
+    await launch(inputPath);
     const initial=await record();assert.deepEqual(initial.snapshot.project.edits,[]);
 
-    // The Scale browser is a modal over the selected beat; it edits nothing until a diagram is applied.
-    const scales=page.getByRole('dialog',{name:'Scale browser',exact:true}),section=()=>scales.getByRole('region',{name:'Scale diagram',exact:true});
-    await button('Browse scales');await scales.waitFor();
-    assert.equal(await scales.getByRole('button',{name:'Apply diagram to beat',exact:true}).count(),0,'No apply before a diagram exists');
+    // The Scale browser is a modal over the selected beat (bar 2, beat 2: the chord); it edits nothing until a diagram is applied.
+    await select(2,2);await button('Browse scales');await scales().waitFor();
+    assert.equal(await scales().getByRole('button',{name:'Apply diagram to beat',exact:true}).count(),0,'No apply before a diagram exists');
     assert.deepEqual(await record(),initial,'Opening the browser never edits');
 
-    // From scratch: the 9-string staff gives a 9-string diagram; mark the open low string as the tonic and finger a fretted note.
-    const t={track:0,staff:0,bar:0,voice:0,beat:0};
-    await scales.getByRole('button',{name:'Blank diagram',exact:true}).click();
-    await scales.getByLabel('Diagram name',{exact:true}).fill('Open position');
-    await scales.getByLabel('Default shape',{exact:true}).selectOption('diamond');
-    await scales.getByLabel('String 9, open',{exact:true}).click();
-    await scales.getByLabel('Mark text',{exact:true}).fill('E');
-    await scales.getByLabel('Mark color',{exact:true}).fill('#b5df73');
-    await scales.getByLabel('Mark text color',{exact:true}).fill('#161c24');
-    await scales.getByLabel('Default shape',{exact:true}).selectOption('circle');
-    await scales.getByLabel('String 5, fret 3',{exact:true}).click();
-    await scales.getByLabel('Mark text',{exact:true}).fill('1');
-    await scales.getByLabel('Mark shape',{exact:true}).selectOption('square');
-    await scales.getByLabel('String 5, fret 7',{exact:true}).click();
-    await scales.getByLabel('Mark text',{exact:true}).fill('3');
-    await scales.getByLabel('String 5, fret 7: circle mark "3"',{exact:true}).dblclick();
-    assert.equal(await scales.getByLabel(/String 5, fret 7: /).count(),0,'Double-click removes a mark');
+    // From scratch: the 9-string staff gives a 9-string diagram; string 9 is the highest string. Mark it as the tonic and finger a fretted note.
+    await scales().getByRole('button',{name:'Blank diagram',exact:true}).click();
+    await scales().getByLabel('Diagram name',{exact:true}).fill('Open position');
+    await scales().getByLabel('Default shape',{exact:true}).selectOption('diamond');
+    await scales().getByLabel('String 9, open',{exact:true}).click();
+    await scales().getByLabel('Mark text',{exact:true}).fill('E');
+    await scales().getByLabel('Mark color',{exact:true}).fill('#b5df73');
+    await scales().getByLabel('Mark text color',{exact:true}).fill('#161c24');
+    await scales().getByLabel('Default shape',{exact:true}).selectOption('circle');
+    await scales().getByLabel('String 5, fret 3',{exact:true}).click();
+    await scales().getByLabel('Mark text',{exact:true}).fill('1');
+    await scales().getByLabel('Mark shape',{exact:true}).selectOption('square');
+    await scales().getByLabel('String 5, fret 7',{exact:true}).click();
+    await scales().getByLabel('Mark text',{exact:true}).fill('3');
+    await scales().getByLabel('String 5, fret 7: circle mark "3"',{exact:true}).dblclick();
+    assert.equal(await scales().getByLabel(/String 5, fret 7: /).count(),0,'Double-click removes a mark');
     assert.deepEqual(await record(),initial,'Drafting never edits');
+    // In the dialog the highest string is the top row, as in the score.
+    const topRow=await centre(scales().getByLabel('String 9, open',{exact:false})),lowerRow=await centre(scales().getByLabel('String 5, fret 3',{exact:false}));
+    assert.ok(topRow.y<lowerRow.y,'The highest string is the top row');
     await page.screenshot({path:resolve(paths.results,'01-draft.png')});result.screenshots.push('01-draft.png');
     const expected={type:'setScaleDiagram',target:t,diagram:{
       name:'Open position',strings:9,frets:12,firstFret:1,orientation:'horizontal',showFretMarkers:true,
       marks:[{string:9,fret:0,shape:'diamond',color:'#b5df73',text:'E',textColor:'#161c24'},{string:5,fret:3,shape:'square',color:'#2f6fed',text:'1',textColor:'#ffffff'}],
     }};
     const prior=await record(),count=prior.snapshot.project.edits.length;
-    await scales.getByRole('button',{name:'Apply diagram to beat',exact:true}).click();await idle();
+    await scales().getByRole('button',{name:'Apply diagram to beat',exact:true}).click();await idle();
     const added=await poll(record,value=>value.snapshot.project.edits.length===count+1,'one scale diagram edit');
     assert.deepEqual(added.snapshot.project.edits.at(-1),expected,'The applied command carries every mark');
     result.edits.push({label:'apply scale diagram',command:expected});
-    await section().getByText(/with 2 marks\./).waitFor();
+    await diagramSection().getByText(/with 2 marks\./).waitFor();
+    await scales().getByRole('button',{name:'Close scales',exact:true}).click();await scales().waitFor({state:'hidden'});
+    await assertDrawn('after apply');
     await page.screenshot({path:resolve(paths.results,'02-applied.png')});result.screenshots.push('02-applied.png');
-    step('A marked and fingered diagram is one native edit',{command:expected});
+    step('A marked and fingered diagram is one native edit and is drawn in the score',{command:expected});
 
-    // History: undo removes the diagram and redo restores it, exactly.
-    await scales.getByRole('button',{name:'Close scales',exact:true}).click();await scales.waitFor({state:'hidden'});
-    await button('Undo');assert.deepEqual((await record()).snapshot.project,prior.snapshot.project,'Undo restores');
-    await button('Redo');assert.deepEqual((await record()).snapshot.project,added.snapshot.project,'Redo restores');
-    step('Undo and redo restore the project exactly',{});
+    // History: undo removes the diagram from the score and redo restores it, exactly.
+    await button('Undo');assert.deepEqual((await record()).snapshot.project,prior.snapshot.project,'Undo restores');await inScore().waitFor({state:'detached'});
+    await button('Redo');assert.deepEqual((await record()).snapshot.project,added.snapshot.project,'Redo restores');await assertDrawn('after redo');
+    step('Undo and redo restore the project and the drawing exactly',{});
 
-    // The exported GP file carries the diagram and every mark, and still loads as a normal GP file.
+    // A beat shift: deleting the rest before the chord moves the chord to beat 1, and the diagram goes with it.
+    await select(2,1);await button('Delete beat');
+    const shifted=await poll(record,value=>value.snapshot.project.edits.length===count+2,'one delete beat edit');
+    assert.equal(shifted.snapshot.project.edits.at(-1).type,'deleteBeat');
+    await assertDrawn('after the beat shift');
+    await select(2,1);await button('Browse scales');await scales().waitFor();await diagramSection().getByText(/This beat has a diagram named “Open position” with 2 marks\./).waitFor();
+    await scales().getByRole('button',{name:'Close scales',exact:true}).click();await scales().waitFor({state:'hidden'});
+    step('A diagram follows its beat when an earlier beat is deleted',{});
+
+    // The exported GP file carries the diagram and every mark, on the shifted beat, and still loads as a normal GP file.
     const exportPath=`${exportBase}.gp`;assert.equal(existsSync(exportPath),false);await button('Export GP');
-    const {unzipSync,strFromU8}=await import('fflate'),bytes=readFileSync(exportPath),gpif=strFromU8(unzipSync(new Uint8Array(bytes))['Content/score.gpif']);
-    const doc=gpif;
+    const {unzipSync,strFromU8}=await import('fflate'),bytes=readFileSync(exportPath),doc=strFromU8(unzipSync(new Uint8Array(bytes))['Content/score.gpif']);
     assert.match(doc,/<Property name="TabPlayerScaleDiagrams">/);
     assert.equal((doc.match(/<Mark /g)??[]).length,2,'Both marks are exported');
-    for(const fragment of ['name="TabPlayerScaleDiagrams"','strings="9"','frets="12"','orientation="horizontal"','shape="diamond"','color="#b5df73"','shape="square"','color="#2f6fed"','<Text>E</Text>','<Text>1</Text>','<Name>Open position</Name>'])assert.ok(doc.includes(fragment),`GPIF carries ${fragment}`);
-    const score=load(bytes);assert.equal(score.tracks.length,4,'The exported file still loads');
-    assert.deepEqual(await record(),added,'Export never edits');step('Exported GP carries the diagram and every mark',{exportPath,sha256:hashFile(exportPath)});
+    for(const fragment of ['strings="9"','frets="12"','orientation="horizontal"','shape="diamond"','color="#b5df73"','shape="square"','color="#2f6fed"','<Text>E</Text>','<Text>1</Text>','<Name>Open position</Name>','<Item bar="1" voice="0" beat="0"'])assert.ok(doc.includes(fragment),`GPIF carries ${fragment}`);
+    assert.equal(load(bytes).tracks.length,4,'The exported file still loads');
+    assert.deepEqual(await record(),shifted,'Export never edits');step('Exported GP carries the diagram and every mark',{exportPath,sha256:hashFile(exportPath)});
+
+    // Restart: TabPlayer opens the exported file through its own path, so the diagram is read back and drawn.
+    await shutdown();await launch(exportPath);
+    assert.deepEqual((await record()).snapshot.project.edits,[],'The exported file opens as a fresh document');
+    await assertDrawn('after reopening the exported file');
+    await select(2,1);await button('Browse scales');await scales().waitFor();
+    await diagramSection().getByText(/This beat has a diagram named “Open position” with 2 marks\./).waitFor();
+    await scales().getByLabel('String 9, open: diamond mark "E"',{exact:true}).waitFor();await scales().getByLabel('String 5, fret 3: square mark "1"',{exact:true}).waitFor();
+    await page.screenshot({path:resolve(paths.results,'03-reopened.png')});result.screenshots.push('03-reopened.png');
+    step('A restart and reopening the exported GP restores every mark and draws it',{});
 
     // Deleting removes the diagram again as one edit.
-    await button('Browse scales');await scales.waitFor();
-    await scales.getByRole('button',{name:'Delete diagram from beat',exact:true}).click();await idle();
-    const removed=await poll(record,value=>value.snapshot.project.edits.length===count+2,'one delete edit');
-    assert.deepEqual(removed.snapshot.project.edits.at(-1),{type:'setScaleDiagram',target:t,diagram:null});
-    await scales.getByRole('button',{name:'Close scales',exact:true}).click();step('Delete clears the diagram as one edit',{});
+    const reopened=await record(),reopenedCount=reopened.snapshot.project.edits.length;
+    await scales().getByRole('button',{name:'Delete diagram from beat',exact:true}).click();await idle();
+    const removed=await poll(record,value=>value.snapshot.project.edits.length===reopenedCount+1,'one delete edit');
+    assert.deepEqual(removed.snapshot.project.edits.at(-1),{type:'setScaleDiagram',target:{...t,beat:0},diagram:null});
+    await scales().getByRole('button',{name:'Close scales',exact:true}).click();await inScore().waitFor({state:'detached'});step('Delete clears the diagram as one edit',{});
     healthy();
   }catch(error){failure=error;result.error={message:String(error),stack:error.stack};if(page)try{await page.screenshot({path:resolve(paths.results,'failure.png')});}catch{}}
   finally{

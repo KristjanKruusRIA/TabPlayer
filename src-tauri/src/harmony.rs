@@ -408,6 +408,13 @@ pub struct ScaleDiagram {
     pub marks: Vec<ScaleMark>,
 }
 
+/// Text an XML 1.0 document can hold: no control characters and no U+FFFE or U+FFFF.
+fn xml_text(value: &str) -> bool {
+    !value
+        .chars()
+        .any(|c| c.is_control() || c == '\u{fffe}' || c == '\u{ffff}')
+}
+
 fn hex_color(value: &str) -> bool {
     value.len() == 7
         && value.starts_with('#')
@@ -418,6 +425,7 @@ impl ScaleDiagram {
     pub fn validate(&self) -> Result<(), String> {
         let last = i32::from(self.first_fret) + i32::from(self.frets) - 1;
         if self.name.chars().count() > 64
+            || !xml_text(&self.name)
             || !(3..=10).contains(&self.strings)
             || !(4..=24).contains(&self.frets)
             || self.first_fret < 1
@@ -433,6 +441,7 @@ impl ScaleDiagram {
                 || !(mark.fret == 0 || in_window)
                 || !seen.insert((mark.string, mark.fret))
                 || mark.text.chars().count() > 3
+                || !xml_text(&mark.text)
                 || !hex_color(&mark.color)
                 || !hex_color(&mark.text_color)
             {

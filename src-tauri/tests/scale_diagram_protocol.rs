@@ -47,6 +47,16 @@ fn a_scale_diagram_refuses_invalid_geometry_and_marks() {
         bad[field] = value;
         cases.push(bad);
     }
+    for bad in [
+        "\u{1}", "\u{b}", "a\nb", "\u{7f}", "\u{85}", "\u{fffe}", "\u{ffff}",
+    ] {
+        let mut name = diagram(vec![]);
+        name["name"] = json!(bad);
+        cases.push(name);
+        let mut text = mark(1, 5);
+        text["text"] = json!(bad);
+        cases.push(diagram(vec![text]));
+    }
     for (field, value) in [
         ("text", json!("abcd")),
         ("color", json!("red")),

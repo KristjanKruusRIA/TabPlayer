@@ -37,7 +37,7 @@ export function readGpifScaleDiagrams(score:model.Score,doc:Document):void {
     [...node.querySelectorAll(':scope > Staves > Staff')].forEach((staffNode,staffIndex)=>{
       const scope=staffNode.querySelector(':scope > Properties'),holder=scope&&property(scope);if(!holder)return;
       for(const item of holder.querySelectorAll(':scope > Items > Item')){
-        const beat=track.staves[staffIndex]?.bars[whole(item.getAttribute('bar'))]?.voices[whole(item.getAttribute('voice'))]?.beats[whole(item.getAttribute('beat'))],diagramNode=item.querySelector(':scope > Diagram');
+        try{const beat=track.staves[staffIndex]?.bars[whole(item.getAttribute('bar'))]?.voices[whole(item.getAttribute('voice'))]?.beats[whole(item.getAttribute('beat'))],diagramNode=item.querySelector(':scope > Diagram');
         if(!beat||!diagramNode)throw new Error('Invalid GPIF scale diagram.');
         const diagram={
           name:diagramNode.querySelector(':scope > Name')?.textContent??'',strings:whole(diagramNode.getAttribute('strings')),frets:whole(diagramNode.getAttribute('frets')),firstFret:whole(diagramNode.getAttribute('firstFret')),
@@ -47,7 +47,7 @@ export function readGpifScaleDiagrams(score:model.Score,doc:Document):void {
             color:mark.getAttribute('color')??'',text:mark.querySelector(':scope > Text')?.textContent??'',textColor:mark.getAttribute('textColor')??'',
           })),
         };
-        validateScaleDiagram(diagram);setScaleDiagram(beat,diagram);
+        validateScaleDiagram(diagram);setScaleDiagram(beat,diagram);}catch(cause){console.warn(`Skipped a malformed scale diagram in the GP file: ${cause instanceof Error?cause.message:String(cause)}`);}
       }
     });
   });

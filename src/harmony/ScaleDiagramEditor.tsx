@@ -4,7 +4,7 @@ import type { BeatTarget } from '../project';
 import type { MusicSelection } from '../editor/range-types';
 import { ScaleDiagramView } from './ScaleDiagramView';
 import {
-  blankScaleDiagram,defaultMarkColor,defaultTextColor,getScaleDiagram,markAt,newMark,resized,scaleDiagramFromPitchClasses,scaleDiagramFromSelection,scaleMarkShapes,
+  blankScaleDiagram,defaultMarkColor,defaultTextColor,getScaleDiagram,markAt,newMark,resized,scaleDiagramFromPitchClasses,sameScaleDiagram,scaleDiagramFromSelection,scaleMarkShapes,
   validateScaleDiagram,withMark,withoutMark,type ScaleDiagram,type ScaleDiagramCommand,type ScaleMark,type ScaleMarkShape,
 } from './scale-diagram';
 
@@ -14,7 +14,14 @@ export interface ScaleDiagramEditorProps {
   scale:{root:number;classes:ReadonlySet<number>;name:string}|null;
   onEdit:(command:ScaleDiagramCommand)=>void;
 }
-const same=(a:ScaleDiagram|null,b:ScaleDiagram|null)=>JSON.stringify(a)===JSON.stringify(b);
+const same=sameScaleDiagram;
+/** Commits a typed number on blur or Enter, so "10" is never read as "1" on the way. */
+function NumberField({label,value,min,max,change}:{label:string;value:number;min:number;max:number;change:(value:number)=>void}) {
+  const [text,setText]=useState(String(value));
+  useEffect(()=>setText(String(value)),[value]);
+  const commit=()=>{const next=Number(text);if(text.trim()!==''&&Number.isInteger(next)){const clamped=Math.min(max,Math.max(min,next));setText(String(clamped));if(clamped!==value)change(clamped);}else setText(String(value));};
+  return <label>{label}<input type="number" min={min} max={max} value={text} onChange={event=>setText(event.target.value)} onBlur={commit} onKeyDown={event=>{if(event.key==='Enter'){event.preventDefault();commit();}}}/></label>;
+}
 const message=(cause:unknown)=>cause instanceof Error?cause.message:String(cause);
 
 /** Authors the scale diagram on the selected beat: blank, from the selected notes, or from the scale chosen above. */
@@ -37,7 +44,6 @@ export function ScaleDiagramEditor({score,staff,beat,target,selection,busy,scale
     if(!markAt(draft,string,fret))edit(value=>withMark(value,newMark(string,fret,shape,color,'',textColor)));
     setSelected({string,fret});
   }
-  const number=(label:string,value:number,min:number,max:number,change:(value:number)=>void)=><label>{label}<input type="number" min={min} max={max} value={value} onChange={event=>{const next=Number(event.target.value);if(Number.isInteger(next))change(Math.min(max,Math.max(min,next)));}}/></label>;
   return <section aria-label="Scale diagram" className="scale-diagram-editor">
     <h3>Scale diagram</h3>
     {!usable&&<p className="muted">Select a written beat on a stringed or keyboard staff to give it a scale diagram.</p>}
@@ -50,9 +56,9 @@ export function ScaleDiagramEditor({score,staff,beat,target,selection,busy,scale
     {error&&<p role="alert">{error}</p>}
     {draft&&<>
       <label>Diagram name<input value={draft.name} maxLength={64} onChange={event=>edit(value=>({...value,name:event.target.value}))}/></label>
-      {number('Diagram strings',draft.strings,3,10,next=>edit(value=>resized(value,{strings:next})))}
-      {number('Diagram frets',draft.frets,4,24,next=>edit(value=>resized(value,{frets:next})))}
-      {number('Starting fret',draft.firstFret,1,128-draft.frets,next=>edit(value=>resized(value,{firstFret:next})))}
+      <NumberField label="Diagram strings" value={draft.strings} min={3} max={10} change={next=>edit(value=>resized(value,{strings:next}))}/>
+      <NumberField label="Diagram frets" value={draft.frets} min={4} max={24} change={next=>edit(value=>resized(value,{frets:next}))}/>
+      <NumberField label="Starting fret" value={draft.firstFret} min={1} max={128-draft.frets} change={next=>edit(value=>resized(value,{firstFret:next}))}/>
       <label>Diagram orientation<select value={draft.orientation} onChange={event=>edit(value=>({...value,orientation:event.target.value as ScaleDiagram['orientation']}))}><option value="horizontal">Horizontal</option><option value="vertical">Vertical</option></select></label>
       <label><input type="checkbox" checked={draft.showFretMarkers} onChange={event=>edit(value=>({...value,showFretMarkers:event.target.checked}))}/> Show fret markers</label>
       <fieldset><legend>New marks</legend>

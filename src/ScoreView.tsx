@@ -11,7 +11,11 @@ import {isPhysicalPageLayout,type ScoreDisplayPreferences} from './engraving/scr
 import {arrangeScreenPages,hitTestScreenPages,mapScreenRect,paginateScreenScore,resolveScreenZoom,type ScreenPagination,type ScreenRenderChunk,type ScreenRect,type ScreenSystem} from './engraving/screen-pages';
 import {installScreenPlayback,type ScreenPlaybackContext} from './engraving/screen-playback';
 import { describeScoreError,type ScoreError } from './editor/score-errors';
+import { listScaleDiagrams,type ScaleDiagram } from './harmony/scale-diagram';
+import { ScaleDiagramView,scaleDiagramSize } from './harmony/ScaleDiagramView';
 import './ScoreView.css';
+/** Scale diagrams are drawn this fraction of their natural size, above the staff, anchored at their beat. */
+const diagramScale=.45;
 
 const address=(beat:model.Beat):BeatTarget=>({track:beat.voice.bar.staff.track.index,staff:beat.voice.bar.staff.index,bar:beat.voice.bar.index,voice:beat.voice.index,beat:beat.index});
 const sameLane=(a:VoiceAddress,b:VoiceAddress)=>a.track===b.track&&a.staff===b.staff&&a.voice===b.voice;
@@ -75,6 +79,7 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
   const [caret,setCaret]=useState<(Marker&{entry:boolean})|null>(null),caretElement=useRef<HTMLSpanElement>(null),revealCaret=useRef(false),rendering=useRef(false);
   const refresh=useRef(()=>{}),refreshCaret=useRef(()=>{}),refreshErrors=useRef(()=>{});
   const [errorBlocks,setErrorBlocks]=useState<(Marker&{label:string})[]>([]);
+  const refreshDiagrams=useRef(()=>{}),[diagramBlocks,setDiagramBlocks]=useState<Array<{x:number;y:number;diagram:ScaleDiagram}>>([]);
   const editBeat=editTarget?score.tracks[editTarget.track]?.staves[editTarget.staff]?.bars[editTarget.bar]?.voices[editTarget.voice]?.beats[editTarget.beat]:undefined;
   const editLocation=editBeat&&editTarget?`Editing ${score.tracks[editTarget.track].name || `track ${editTarget.track+1}`}, measure ${editTarget.bar+1}, beat ${editTarget.beat+1}, voice ${editTarget.voice+1}${editBeat.isEmpty?', empty':editBeat.isRest?', rest':''}${editNoteIndex!=null?`, note ${editNoteIndex+1}`:editString?`, string ${editString}`:''}`:'';
   const canonicalBeat=(beat:model.Beat)=>{
@@ -138,6 +143,21 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
       const left=Math.min(...boxes.map(box=>box.x)),top=Math.min(...boxes.map(box=>box.y));
       const rect=mapped({x:left,y:top,w:Math.max(...boxes.map(box=>box.x+box.w))-left,h:Math.max(...boxes.map(box=>box.y+box.h))-top},system);
       return rect&&[rect.x,rect.y,rect.w,rect.h].every(Number.isFinite)?[{...rect,label:`Score error: ${group.map(describeScoreError).join('; ')}`}]:[];
+    }));
+  };
+  /** Anchors each shown track's scale diagrams above the staff at their beat, wherever the renderer placed it. */
+  refreshDiagrams.current=()=>{
+    const value=current.current,view=api.current;
+    if(!view||rendering.current){setDiagramBlocks([]);return;}
+    setDiagramBlocks(listScaleDiagrams(value.score).flatMap(({target,diagram})=>{
+      if(!value.tracks.includes(target.track))return [];
+      const source=value.score.tracks[target.track]?.staves[target.staff]?.bars[target.bar]?.voices[target.voice]?.beats[target.beat],beat=source?renderedBeat(source):null;
+      const bound=beat?(view.boundsLookup?.findBeats(beat)??[]).find(item=>item.beat===beat):null;
+      if(!beat||!bound)return [];
+      const size=scaleDiagramSize(diagram),height=size.height*diagramScale,box=bound.realBounds;
+      const rect=mapped({x:box.x,y:box.y,w:box.w,h:box.h},beatSystem(beat));
+      if(!rect||![rect.x,rect.y].every(Number.isFinite))return [];
+      return [{x:Math.max(0,rect.x),y:Math.max(0,rect.y-height-2),diagram}];
     }));
   };
   const placeHandles=(event:PlaybackHighlightChangeEventArgs)=>{
@@ -219,7 +239,7 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
           setNatural({score:c.renderedScore,tracks:c.trackKey,layout:c.display.layout,width:c.available.width,engraving:c.engraving,profile:c.profile,value:width});
         }
       }
-      refresh.current();refreshCaret.current();refreshErrors.current();
+      refresh.current();refreshCaret.current();refreshErrors.current();refreshDiagrams.current();
     }),view.playbackRangeHighlightChanged.on(event=>{if(current.current.editorSelection&&current.current.editorSelection.kind!=='notes')placeHandles(event);})];
     const mouseMove=(event:MouseEvent)=>{
       if(!drag.current)return;const physical=presentation.current.physical;if(physical&&wrapper.current){const rect=wrapper.current.getBoundingClientRect(),hit=hitTestScreenPages(physical.pagination,physical.arrangement,{x:event.clientX-rect.left,y:event.clientY-rect.top},current.current.editTarget);if(hit)move(hit.beat);return;}if(layoutCurrent.current.sourcePhysical)return;const bounds=view.uiFacade.getOffset(null,view.canvasElement),beat=view.boundsLookup?.getBeatAtPos(event.clientX+window.scrollX-bounds.x,event.clientY+window.scrollY-bounds.y);if(beat)move(beat);
@@ -246,8 +266,9 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
     if(!old||old.score!==renderedScore||old.tracks!==trackKey){loaded.current={score:renderedScore,tracks:trackKey};if(playback)playback.setRenderedScore(renderedScore,tracks);else view.renderScore(renderedScore,tracks);}
     else view.render();
   },[renderedScore,trackKey,playback,sourceWidth,sourceScale,sourcePhysical,measureBase,screenLayout,display.layout==='verticalScreen',display.layout==='horizontalScreen',engraving,profile,page]);
-  useLayoutEffect(()=>{playbackPresentation.current?.presentationChanged();refresh.current();refreshCaret.current();refreshErrors.current();},[pagination,arrangement,pageError]);
+  useLayoutEffect(()=>{playbackPresentation.current?.presentationChanged();refresh.current();refreshCaret.current();refreshErrors.current();refreshDiagrams.current();},[pagination,arrangement,pageError]);
   useEffect(()=>{refreshErrors.current();},[errors,score,track,zoom,profile,projection,visibleTracks]);
+  useEffect(()=>{refreshDiagrams.current();},[score,track,zoom,profile,projection,visibleTracks]);
   const capture=(event:ReactMouseEvent<HTMLDivElement>)=>{if(event.button!==0)return;event.preventDefault();event.currentTarget.focus({preventScroll:true});modifiers.current={shift:event.shiftKey,toggle:event.ctrlKey||event.metaKey,detail:event.detail};drag.current=null;};
   const resize=(edge:'start'|'end',event:ReactMouseEvent)=>{
     event.preventDefault();event.stopPropagation();if(event.button!==0||!handles||!editorSelection||editorSelection.kind==='notes')return;
@@ -273,6 +294,7 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
     <span ref={beatElement} hidden className="score-playback-beat" aria-hidden="true"/>
     {rangeBlocks.map((block,index)=><span key={index} className="score-range-block" style={{left:block.x,top:block.y,width:block.w,height:block.h}}/>)}
     {errorBlocks.map((block,index)=><span key={index} role="img" aria-label={block.label} className="score-error-bar" style={{left:block.x,top:block.y,width:block.w,height:block.h}}/>)}
+    {diagramBlocks.map((block,index)=><div key={index} className="score-scale-diagram" style={{position:'absolute',left:block.x,top:block.y,width:scaleDiagramSize(block.diagram).width*diagramScale,pointerEvents:'none',border:'1px solid #97a6b6',borderRadius:4,overflow:'hidden'}}><ScaleDiagramView diagram={block.diagram}/></div>)}
     <span className="score-edit-announcement" role="status" aria-live="polite" aria-atomic="true">{editLocation}</span>
     {caret&&<span ref={caretElement} role="img" aria-label="Edit target" className="score-edit-target" style={{left:caret.x,top:caret.y,width:caret.w,height:caret.h}}>{caret.entry&&<span className="score-edit-entry" aria-hidden="true">{editString?`String ${editString}`:'Entry'}</span>}</span>}
     {markers.map((marker,index)=><span key={index} role="img" aria-label={`Selected note ${index+1}`} style={{position:'absolute',left:marker.x,top:marker.y,width:marker.w,height:marker.h,boxSizing:'border-box',border:'2px solid #9aaf38',background:'rgba(185,205,105,.3)',borderRadius:3,pointerEvents:'none'}}/>)}

@@ -72,3 +72,17 @@ it('refuses edit commands, undo and redo while the document is finalized but sti
   fireEvent.change(input,{target:{value:'measure 3'}});fireEvent.keyDown(input,{key:'Enter'});
   expect(onRun).toHaveBeenCalledWith({kind:'select',target:{...target,bar:2}});
 });
+
+it('refuses score-editing palette commands while the score is hidden but allows non-score commands',()=>{
+  const onRun=vi.fn(),onClose=vi.fn();
+  render(<CommandPalette context={{...context,scoreHidden:true}} busy={false} onRun={onRun} onClose={onClose}/>);
+  const input=screen.getByRole('combobox',{name:'Command'});
+  fireEvent.change(input,{target:{value:'append measure'}});
+  expect(screen.getAllByRole('option')[0]).toHaveTextContent('Score editing is unavailable while the score is hidden.');
+  expect(screen.getAllByRole('option')[0]).toHaveAttribute('aria-disabled','true');
+  fireEvent.keyDown(input,{key:'Enter'});
+  expect(onRun).not.toHaveBeenCalled();
+  fireEvent.change(input,{target:{value:'play'}});
+  fireEvent.keyDown(input,{key:'Enter'});
+  expect(onRun).toHaveBeenCalledWith({kind:'app',name:'play'});
+});

@@ -1,4 +1,5 @@
 import { Settings } from '@coderline/alphatab';
+import { READ_ENTRY_LIMIT } from '../interchange/archive';
 import { exportGpInterchange,loadInterchangeScore } from '../interchange/gp';
 import { probeScoreBytes,type Probe } from './probe';
 
@@ -31,11 +32,16 @@ export const TRUNCATED_NOTE='The folder holds more than one run can convert, so 
 const message=(error:unknown)=>error instanceof Error?error.message:String(error);
 const plural=(count:number,word:string)=>`${count} ${word}${count===1?'':'s'}`;
 
+/** The window parses under the cap the probe read with, so a file cannot pass one and overrun the other. */
+const readSettings=()=>{const settings=new Settings();settings.importer.maxDecodingBufferSize=READ_ENTRY_LIMIT;return settings;};
+
 /** Reads a legacy or MusicXML score and writes it in the current GP format, through the same code as opening and exporting. */
 export function convertScoreBytes(bytes:Uint8Array):{bytes:Uint8Array;detail:string} {
-  const settings=new Settings(),score=loadInterchangeScore(bytes,settings);
+  const settings=readSettings(),score=loadInterchangeScore(bytes,settings);
   if(!score.tracks.length||!score.masterBars.length)throw new Error('The file holds no music.');
-  const output=exportGpInterchange(score,settings);
+  // Writing and reading back are held to what Open accepts, not the input's cap: a dense score of a few MiB writes a
+  // larger uncompressed score.gpif and is not a damaged file.
+  const output=exportGpInterchange(score,new Settings());
   // A file is reported converted only when the result reads back with the same shape.
   const check=loadInterchangeScore(output,new Settings());
   if(check.tracks.length!==score.tracks.length||check.masterBars.length!==score.masterBars.length)throw new Error('The converted file did not read back as the same score.');

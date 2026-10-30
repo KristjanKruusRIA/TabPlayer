@@ -2,7 +2,7 @@ import { existsSync,readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe,expect,it } from 'vitest';
 import { Settings } from '@coderline/alphatab';
-import { strToU8 } from 'fflate';
+import { strToU8,zipSync } from 'fflate';
 import { loadInterchangeScore } from '../interchange/gp';
 import { convertScoreBytes,runBatch,summarize,TRUNCATED_NOTE,type BatchBridge,type BatchScan } from './convert';
 import type { Probe } from './probe';
@@ -92,3 +92,28 @@ describe('runBatch',()=>{
     expect(Object.keys(written).sort()).toEqual(['a.gp','c.gp']);
   });
 });
+
+describe('the window reads under the cap the probe read with',()=>{
+  // One entry between the two caps: the importer's default would take it, and the probe's cap does not.
+  const oversized=()=>zipSync({'META-INF/container.xml':strToU8('<container/>'),'large.bin':new Uint8Array(33*1024*1024)},{level:1});
+  it('refuses an entry over the batch cap on the window thread too',()=>{
+    expect(()=>convertScoreBytes(oversized())).toThrow(/ZIP entry exceeds 32 MiB/);
+    expect(()=>loadInterchangeScore(oversized(),new Settings())).not.toThrow(/ZIP/);
+  });
+  it('fails a file the validator refuses and goes on, even when a probe let it through',async()=>{
+    const crafted=oversized();
+    const {bridge,scan,writes}=fakeBridge({'crafted.gp':crafted,'good.xml':xml('Good')});
+    const rows=await run(bridge,scan);
+    expect(rows.map(row=>[row.relative,row.status])).toEqual([['crafted.gp','Failed'],['good.xml','Converted']]);
+    expect(rows[0].detail).toMatch(/ZIP entry exceeds/);expect(writes).toEqual(['good.gp']);
+  });
+});
+
+it('converts a dense score whose written score.gpif is larger than the input cap',()=>{
+  const note='<note><pitch><step>C</step><octave>4</octave></pitch><duration>1</duration><voice>1</voice><type>quarter</type></note>'.repeat(4);
+  const measure=(number:number)=>`<measure number="${number}">${number===1?'<attributes><divisions>1</divisions><time><beats>4</beats><beat-type>4</beat-type></time><clef><sign>G</sign><line>2</line></clef></attributes>':''}${note}</measure>`;
+  const measures:string[]=[];for(let number=1;measures.length*500<12*1024*1024;number++)measures.push(measure(number));
+  const dense=strToU8(`<?xml version="1.0"?><score-partwise version="3.1"><part-list><score-part id="P1"><part-name>G</part-name></score-part></part-list><part id="P1">${measures.join('')}</part></score-partwise>`);
+  const {detail,bytes}=convertScoreBytes(dense);
+  expect(detail).toBe(`1 track, ${measures.length} bars`);expect(bytes.length).toBeGreaterThan(0);
+},60000);

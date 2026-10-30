@@ -2,7 +2,7 @@ import { existsSync,readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { Worker as NodeWorker } from 'node:worker_threads';
-import { strToU8 } from 'fflate';
+import { strToU8,zipSync } from 'fflate';
 import { describe,expect,it,vi } from 'vitest';
 import { PROBE_MAX_BYTES,PROBE_REQUEST,PROBE_RESULT,probeScoreBytes,type ProbeWorker } from './probe';
 
@@ -98,7 +98,8 @@ describe('probeScoreBytes with the real worker module',()=>{
   it('keeps the message names in step with probe.ts',()=>{
     const source=readFileSync(resolve('src/batch/probe.worker.ts'),'utf8');
     expect(source).toContain(`'${PROBE_REQUEST}'`);expect(source).toContain(`'${PROBE_RESULT}'`);
-    expect(source).toContain(`${PROBE_MAX_BYTES/(1024*1024)}*1024*1024`);
+    expect(source).toContain('settings.importer.maxDecodingBufferSize=READ_ENTRY_LIMIT');
+    expect(source.indexOf('validateArchive(request.bytes')).toBeLessThan(source.indexOf('loadScoreFromBytes'));
   });
   it('is the case that failed every file: a message without a cmd makes alphaTab throw in the Worker',async()=>{
     const worker=realWorker();
@@ -118,8 +119,15 @@ describe('probeScoreBytes with the real worker module',()=>{
     const result=await probeScoreBytes(strToU8('not a score'),{createWorker:realWorker});
     expect(result.ok).toBe(false);expect(!result.ok&&result.error.length).toBeGreaterThan(0);
   },20000);
+  it('refuses a lying archive in the Worker, with the validator ahead of the importer',async()=>{
+    const crafted=zipSync({'Content/score.gpif':strToU8('<GPIF/>')},{level:0}),view=new DataView(crafted.buffer,crafted.byteOffset,crafted.byteLength);
+    // The stored entry now declares one byte in its local header only.
+    view.setUint32(22,1,true);
+    const result=await probeScoreBytes(crafted,{createWorker:realWorker});
+    expect(result).toEqual({ok:false,error:'ZIP local/central declaration mismatch.'});
+  },20000);
   it.skipIf(!existsSync(resolve(compatibility,'guitarpro5-notes.gp5')))('opens each public legacy file through the worker',async()=>{
-    for(const name of ['guitarpro3-notes.gp3','guitarpro4-notes.gp4','guitarpro5-notes.gp5','guitarpro6-notes.gpx','guitarpro7-notes.gp']){
+    for(const name of ['guitarpro3-notes.gp3','guitarpro4-notes.gp4','guitarpro5-notes.gp5','guitarpro6-notes.gpx','guitarpro7-notes.gp','guitarpro7-bends.gp','guitarpro8-beat-tempo-change.gp']){
       const result=await probeScoreBytes(new Uint8Array(readFileSync(resolve(compatibility,name))),{createWorker:realWorker});
       expect(result,name).toMatchObject({ok:true});
     }

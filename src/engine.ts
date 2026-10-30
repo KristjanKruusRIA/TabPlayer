@@ -15,6 +15,7 @@ import { scoreFromJson } from './model-clone';
 import { validateParityCommand } from './parity-commands';
 import { defaultTuningName, validateTuningName } from './editor/structure';
 import { openStringKey, stringCapo } from './editor/partial-capo';
+import { adoptAdmittedBase } from './interchange/archive-gate';
 import { copyGpInterchangeSource, exportGpInterchange, forgetTrackOrderedEntries, loadInterchangeScore } from './interchange/gp';
 import { reflowLyrics,removeLyricsMeasure } from './editor/lyrics';
 import { prepareScoreTimers } from './editor/timers';
@@ -128,6 +129,7 @@ function addTrack(score: model.Score, name: string, tuning: number[], program: n
 function initialScore(project: Project, canRedo: boolean): model.Score {
   if (project.base.kind === 'file') {
     const bytes = Uint8Array.from(atob(project.base.bytesBase64), c => c.charCodeAt(0));
+    adoptAdmittedBase(project.base.sha256, bytes);
     return loadInterchangeScore(bytes, settings, appliesFilePartialCapo(project, canRedo));
   }
   const score = new Score(); score.title = project.base.title; score.artist = project.base.artist;

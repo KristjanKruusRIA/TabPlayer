@@ -1,6 +1,6 @@
 import { exporter, importer, model, Settings } from '@coderline/alphatab';
 import { strToU8,unzipSync,zipSync } from 'fflate';
-import { assertArchiveSize } from './zip-limits';
+import { assertArchiveAccepted } from './archive-gate';
 import { trackMixAutomations } from './automation';
 import { writePercussionReferences } from './percussion';
 import { patchGpifNoteArticulations,projectGpifTracks } from './xml';
@@ -30,7 +30,7 @@ import { applyMusicXmlTempoWords } from './musicxml-tempo-words';
 const gpifPath='Content/score.gpif';
 const sourceEntries=new WeakMap<model.Score,Record<string,Uint8Array>>();
 function unzip(bytes:Uint8Array,settings:Settings){
-  assertArchiveSize(bytes);
+  assertArchiveAccepted(bytes,settings.importer.maxDecodingBufferSize);
   return unzipSync(bytes,{filter:entry=>{
     if(entry.originalSize>settings.importer.maxDecodingBufferSize||strToU8(entry.name).length>settings.importer.maxDecodingBufferSize)throw new Error('ZIP entry exceeds maxDecodingBufferSize.');
     return true;
@@ -68,6 +68,8 @@ function prepareHarmonyGpCarriers(score:model.Score,settings:Settings):model.Sco
 
 /** `partialCapo` false leaves a partial capo the file holds unapplied, as projects logged before the feature replay it. */
 export function loadInterchangeScore(bytes:Uint8Array,settings:Settings,partialCapo=true):model.Score {
+  // Before the stock reader, which would otherwise inflate a refused archive first.
+  assertArchiveAccepted(bytes,settings.importer.maxDecodingBufferSize);
   const score=importer.ScoreLoader.loadScoreFromBytes(prepareMusicXmlLoaderBytes(bytes,settings),settings);
   const musicXml=()=>applyMusicXmlTempoWords(applyMusicXmlLyricSyllables(applyMusicXmlTiedBends(applyMusicXmlAlternateStaves(applyMusicXmlDirectionMix(applyMusicXmlHammerPulls(applyMusicXmlNaturalHarmonics(score,bytes,settings),bytes,settings),bytes,settings),bytes,settings),bytes,settings),bytes,settings),bytes,settings);
   if(bytes[0]!==0x50||bytes[1]!==0x4b)return musicXml();

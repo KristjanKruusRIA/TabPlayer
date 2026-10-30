@@ -2,6 +2,7 @@ import { createDocumentBridge } from '../bridge';
 import { DocumentController } from '../controller';
 import { ClipboardStore } from '../editor/ClipboardStore';
 import { buildDocument,type BuiltDocument } from '../engine';
+import { admitDocumentBase } from '../interchange/archive-gate';
 import type { DocumentCandidate } from '../project';
 import type { LibrarySource,NativeFileLibraryBridge } from '../library/types';
 import type { AudioOwner,CloseDocument,DocumentId,DocumentIntake,DocumentRevision,DocumentViewState,NativeWorkspaceBridge,WorkspaceSnapshot } from './types';
@@ -77,6 +78,7 @@ export class WorkspaceController {
   private async add(candidate:DocumentCandidate) {
     let committed=false;
     try {
+      await admitDocumentBase(candidate.project);
       buildDocument(candidate.project);
       const snapshot=await this.bridge.addDocument(candidate.token);committed=true;
       await this.synchronize(snapshot);return true;

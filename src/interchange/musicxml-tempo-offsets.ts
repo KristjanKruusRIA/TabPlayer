@@ -1,6 +1,6 @@
 import type { Settings } from '@coderline/alphatab';
 import { strToU8,unzipSync,zipSync } from 'fflate';
-import { assertArchiveSize } from './zip-limits';
+import { assertArchiveAccepted } from './archive-gate';
 import { numberTransposedTies } from './musicxml-transposed-ties';
 
 // alphaTab 1.8.4 adds a direction <offset> (MusicXML divisions) to its
@@ -149,7 +149,7 @@ export function readMusicXmlSource(bytes:Uint8Array,settings:Settings):{xml:stri
 
 function readArchiveRoot(bytes:Uint8Array,settings:Settings):{xml:string;path:string}|null {
   const limit=settings.importer.maxDecodingBufferSize;let oversized=false,duplicate=false;const seen=new Set<string>();
-  assertArchiveSize(bytes);
+  assertArchiveAccepted(bytes,limit);
   const read=(names:Set<string>)=>unzipSync(bytes,{filter:entry=>{
     // fflate keeps the last of repeated names while the stock reader takes the first.
     if(seen.has(entry.name))duplicate=true;seen.add(entry.name);
@@ -173,7 +173,7 @@ function readArchiveRoot(bytes:Uint8Array,settings:Settings):{xml:string;path:st
 
 function repack(bytes:Uint8Array,settings:Settings,path:string,xml:string):Uint8Array {
   const limit=settings.importer.maxDecodingBufferSize;let oversized=false;
-  assertArchiveSize(bytes);
+  assertArchiveAccepted(bytes,limit);
   const entries=unzipSync(bytes,{filter:entry=>{
     if(entry.originalSize>limit||strToU8(entry.name).length>limit){oversized=true;return false;}
     return true;

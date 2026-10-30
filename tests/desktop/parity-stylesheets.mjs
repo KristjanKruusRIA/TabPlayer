@@ -17,7 +17,6 @@ const json=path=>JSON.parse(readFileSync(path,'utf8'));
 const sleep=ms=>new Promise(accept=>setTimeout(accept,ms));
 const hashFile=path=>sha256(readFileSync(path));
 const styleName='House style',spacing=125;
-const notes=[[1,0],[2,1],[3,2],[6,3]];
 
 export async function runStylesheetsAcceptance({buildPath}={}){
   validateStringCountArguments(['--run',`--build=${buildPath??''}`]);assert.equal(process.platform,'win32');assert.ok(samePath(realpathSync(process.cwd()),realpathSync(repository)),'Use authoritative worktree');
@@ -40,7 +39,7 @@ export async function runStylesheetsAcceptance({buildPath}={}){
   const poll=async(read,predicate,label)=>{const until=performance.now()+30000;let value;do{value=await read();if(predicate(value))return value;await sleep(50);}while(performance.now()<until);throw Error(`Timed out: ${label}: ${JSON.stringify(value)}`);};
   const listeners=()=>JSON.parse(ps(`${ownedScript}if($null -eq $p){throw 'Owned process exited'};$rows=@();foreach($port in @(Get-NetTCPConnection -State Listen -LocalPort 9223 -ErrorAction SilentlyContinue)){$chain=@();$cursor=[int]$port.OwningProcess;for($depth=0;$depth -lt 20 -and $cursor -gt 0;$depth++){$child=Get-CimInstance Win32_Process -Filter ('ProcessId = '+$cursor);if($null -eq $child){break};$chain+=@{pid=[int]$child.ProcessId;parent=[int]$child.ParentProcessId;commandLine=$child.CommandLine};if([int]$child.ProcessId -eq $p.Id){break};$cursor=[int]$child.ParentProcessId};$rows+=@{owner=[int]$port.OwningProcess;chain=$chain}};ConvertTo-Json -InputObject @($rows) -Depth 6 -Compress`));
   const stop=async()=>{if(browser){await browser.close();browser=null;page=null;}if(identity){if(inspect())ps(`${ownedScript}if($null -ne $p){Stop-Process -Id $p.Id;if(-not $p.WaitForExit(5000)){throw 'Owned process did not exit'}}`);assert.equal(inspect(),null);identity=null;}await poll(portRows,rows=>rows.length===0,'diagnostic port released');};
-  let ui,load;
+  let ui,load,jsonModel;
   const launch=async(label,inputPath)=>{
     assertStringCountBuild(packet);assertStringCountPortFree(portRows());
     const own=resolve(runDirectory,label),paths=Object.fromEntries(['session','profile'].map(name=>[name,resolve(own,name)]));for(const path of Object.values(paths))mkdirSync(path,{recursive:true});
@@ -65,23 +64,30 @@ export async function runStylesheetsAcceptance({buildPath}={}){
   const shot=async name=>{const path=resolve(results,`${String(result.screenshots.length+1).padStart(2,'0')}-${name}.png`);await page.screenshot({path});result.screenshots.push(path);};
   const details=async name=>{await page.locator('summary').filter({hasText:new RegExp(`^${name}$`)}).first().evaluate(node=>{node.parentElement.open=true;});};
   const choose=(name,value)=>page.getByRole('combobox',{name:new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')}(?:\\s|$)`)}).selectOption(value);
-  const openStyles=async()=>{await button('Presentation');await details('Engraving');await details('Saved styles');};
-  const notesOf=bytes=>{const score=load(bytes);return score.tracks[0].staves[0].bars[0].voices[0].beats.flatMap(beat=>beat.notes).map(note=>[note.string,note.fret]);};
+  const openStyles=async()=>{await button('Presentation');for(const name of ['Engraving','Stylesheet','Staff profiles','Saved styles'])await details(name);};
+  // The whole score as exported, minus only the style: a style may change how the score is drawn, never what it holds.
+  const musicOf=bytes=>{const raw=jsonModel.scoreToJson(load(bytes)),value=typeof raw==='string'?JSON.parse(raw):JSON.parse(JSON.stringify(raw));delete value.stylesheet;return JSON.stringify(value);};
+  let baseline=null;
   const exportCheck=async label=>{
-    const beforeRecord=await record(),path=`${exportBase}.gp`;assert.equal(existsSync(path),false);await button('Export GP');const bytes=readFileSync(path);
-    assert.deepEqual(notesOf(bytes),notes,`${label}: music unchanged`);assert.deepEqual(await record(),beforeRecord,'Export must not change project/history/revision');
-    const saved=resolve(exportDirectory,`${String(result.exports.length+1).padStart(2,'0')}-${label}.gp`);renameSync(path,saved);result.exports.push({label,path:saved,sha256:sha256(bytes)});await native();
+    const beforeRecord=await record(),path=`${exportBase}.gp`;assert.equal(existsSync(path),false);await button('Export GP');const bytes=readFileSync(path),music=musicOf(bytes);
+    baseline??=music;assert.equal(music,baseline,`${label}: the exported score, apart from its style, is unchanged`);assert.deepEqual(await record(),beforeRecord,'Export must not change project/history/revision');
+    const saved=resolve(exportDirectory,`${String(result.exports.length+1).padStart(2,'0')}-${label}.gp`);renameSync(path,saved);result.exports.push({label,path:saved,sha256:sha256(bytes),musicSha256:sha256(Buffer.from(music))});await native();
   };
+  const rendered=async()=>sha256(Buffer.from(await page.locator('[aria-label="Music notation"] svg').first().evaluate(node=>node.outerHTML)));
+  const profileEdit=profile=>choose('Guitar notation profile',profile);
   try{
-    ui=await import('./workstation-commands.mjs');const {importer,Settings}=await import('@coderline/alphatab');load=bytes=>importer.ScoreLoader.loadScoreFromBytes(bytes,new Settings());
-    const fixture=await buildSavedTuningsFixture();writeFileSync(firstPath,fixture,{flag:'wx'});writeFileSync(secondPath,fixture,{flag:'wx'});result.input={firstPath,secondPath,sha256:hashFile(firstPath)};
+    ui=await import('./workstation-commands.mjs');const {importer,exporter,model,Settings}=await import('@coderline/alphatab');load=bytes=>importer.ScoreLoader.loadScoreFromBytes(bytes,new Settings());jsonModel=model.JsonConverter;
+    // Two different documents: the second has another title and another first note.
+    const fixture=await buildSavedTuningsFixture(),second=load(fixture);second.title='Second stylesheet document';second.tracks[0].staves[0].bars[0].voices[0].beats[0].notes[0].fret=5;
+    writeFileSync(firstPath,fixture,{flag:'wx'});writeFileSync(secondPath,Buffer.from(new exporter.Gp7Exporter().export(second,new Settings())),{flag:'wx'});result.input={firstPath,secondPath,sha256:hashFile(firstPath),secondSha256:hashFile(secondPath)};
+    assert.notEqual(musicOf(readFileSync(firstPath)),musicOf(readFileSync(secondPath)),'The documents differ');
     assert.equal(existsSync(libraryPath),false);
 
-    // Launch 1: author a style in the first document and save it. Saving never edits the document.
+    // Launch 1: author a style in the first document, which has its own staff profile, and save it. Saving never edits the document.
     await launch('launch-1',firstPath);let initial=await record();assert.deepEqual(initial.snapshot.project.edits,[]);
-    await openStyles();assert.equal(existsSync(libraryPath),false,'Reading must not create the library');
-    await choose('Hide dynamics','true');await choose('Bar numbers','hidden');await page.getByLabel('System spacing (%)',{exact:true}).fill(String(spacing));await button('Apply engraving');
-    const authored=await record();assert.deepEqual(authored.snapshot.project.edits.map(edit=>edit.type),['setEngraving']);
+    await openStyles();await page.locator('option',{hasText:'No saved styles yet'}).waitFor({state:'attached'});assert.equal(existsSync(libraryPath),false,'Reading must not create the library');
+    await profileEdit('slash');await choose('Hide dynamics','true');await choose('Bar numbers','hidden');await page.getByLabel('System spacing (%)',{exact:true}).fill(String(spacing));await button('Apply engraving');
+    const authored=await record();assert.deepEqual(authored.snapshot.project.edits.map(edit=>edit.type),['setEngraving']);assert.equal(authored.snapshot.project.edits[0].engraving.profiles.length,1,'The first document has a staff profile');
     await page.getByLabel('Style name',{exact:true}).fill(styleName);await page.getByRole('button',{name:'Save current style',exact:true}).click();
     await poll(()=>existsSync(libraryPath),Boolean,'library file written');await page.getByRole('status').filter({hasText:`Saved ${styleName}.`}).waitFor();
     const library=json(libraryPath);assert.deepEqual(Object.keys(library).sort(),['entries','format','version']);assert.equal(library.format,'tabplayer-style-library');assert.equal(library.version,1);assert.equal(library.entries.length,1);
@@ -91,19 +97,26 @@ export async function runStylesheetsAcceptance({buildPath}={}){
     await stop();
 
     // Launch 2: another document, after a restart. Apply is one edit; undo and redo restore the record; the music is unchanged.
-    await launch('launch-2',secondPath);initial=await record();assert.deepEqual(initial.snapshot.project.edits,[]);await exportCheck('before-apply');
-    await openStyles();await page.getByLabel('Saved style',{exact:true}).selectOption(entry.id);
+    baseline=null;await launch('launch-2',secondPath);initial=await record();assert.deepEqual(initial.snapshot.project.edits,[]);
+    // The second document gets its own, different staff profile first; the style must leave it alone.
+    await openStyles();await profileEdit('numbered');await button('Apply engraving');
+    const profiled=await record();assert.equal(profiled.snapshot.project.edits.length,1);const ownProfiles=profiled.snapshot.project.edits[0].engraving.profiles;
+    assert.equal(ownProfiles.length,1);assert.equal(ownProfiles[0].profile,'numbered');await native();await exportCheck('before-apply');
+    const drawnBefore=await rendered();
+    await page.getByLabel('Saved style',{exact:true}).selectOption(entry.id);
     await page.getByRole('button',{name:'Apply saved style',exact:true}).click();await idle();await native();
-    const applied=await record();assert.equal(applied.snapshot.project.edits.length,1);const [command]=applied.snapshot.project.edits;
-    assert.equal(command.type,'setEngraving');assert.deepEqual(command.engraving,entry.engraving,'The saved style is applied as stored');assert.equal(applied.snapshot.canUndo,true);
+    const applied=await record();assert.equal(applied.snapshot.project.edits.length,2,'Applying is exactly one more edit');const command=applied.snapshot.project.edits[1];
+    assert.equal(command.type,'setEngraving');assert.deepEqual({...command.engraving,profiles:[]},entry.engraving,'The saved style is applied as stored');assert.deepEqual(command.engraving.profiles,ownProfiles,'The target document keeps its own staff profile');
+    await page.getByRole('status').filter({hasText:`Applied ${styleName}.`}).waitFor();assert.equal(applied.snapshot.canUndo,true);
+    const drawnApplied=await poll(rendered,value=>value!==drawnBefore,'the score is drawn differently once the style is applied');
     await shot('style-applied');await exportCheck('applied');
-    await button('Undo');assert.deepEqual((await record()).snapshot.project,initial.snapshot.project,'Undo restores the record');await exportCheck('undo');
-    await button('Redo');assert.deepEqual((await record()).snapshot.project,applied.snapshot.project,'Redo restores the record');await exportCheck('redo');
-    step('Applied the saved style to another document as one undoable edit; the music is unchanged',{command});
+    await button('Undo');assert.deepEqual((await record()).snapshot.project,profiled.snapshot.project,'Undo restores the record');assert.equal(await poll(rendered,value=>value===drawnBefore,'undo restores the drawing'),drawnBefore);await exportCheck('undo');
+    await button('Redo');assert.deepEqual((await record()).snapshot.project,applied.snapshot.project,'Redo restores the record');assert.equal(await poll(rendered,value=>value===drawnApplied,'redo restores the drawing'),drawnApplied);await exportCheck('redo');
+    step('Applied the saved style to another document as one undoable edit; it kept its own profile and the music is unchanged',{command,ownProfiles,drawnBefore,drawnApplied});
 
     // Force default style returns the engraving to the defaults in one edit, and undo restores the style.
-    await openStyles();await page.getByRole('button',{name:'Force default style',exact:true}).click();await idle();
-    const forced=await record();assert.equal(forced.snapshot.project.edits.length,2);assert.equal(forced.snapshot.project.edits[1].engraving.stylesheet.hideDynamics,null);assert.equal(forced.snapshot.project.edits[1].engraving.systemSpacing,null);
+    await page.getByRole('button',{name:'Force default style',exact:true}).click();await idle();
+    const forced=await record();assert.equal(forced.snapshot.project.edits.length,3);assert.equal(forced.snapshot.project.edits[2].engraving.stylesheet.hideDynamics,null);assert.equal(forced.snapshot.project.edits[2].engraving.systemSpacing,null);assert.deepEqual(forced.snapshot.project.edits[2].engraving.profiles,ownProfiles);
     await button('Undo');assert.deepEqual((await record()).snapshot.project,applied.snapshot.project);await exportCheck('forced-undo');
     step('Force default style was one undoable edit',{});
     assert.deepEqual(json(libraryPath),library,'Applying never changes the library');
@@ -111,7 +124,7 @@ export async function runStylesheetsAcceptance({buildPath}={}){
 
     // Launch 3: a damaged library is reported and left byte for byte.
     const damaged=Buffer.from('{"format":"tabplayer-style-library","version":1,"entries":[{"broken":true}]}');writeFileSync(libraryPath,damaged);const damagedHash=hashFile(libraryPath);
-    await launch('launch-3',firstPath);await openStyles();await page.getByRole('alert').filter({hasText:'Could not read saved styles'}).waitFor();
+    await launch('launch-3',firstPath);await openStyles();await page.getByRole('alert').filter({hasText:'Could not read saved styles'}).waitFor();assert.equal(await page.locator('option',{hasText:'No saved styles yet'}).count(),0,'A damaged library is not called empty');
     await page.getByLabel('Style name',{exact:true}).fill('Rejected');await page.getByRole('button',{name:'Save current style',exact:true}).click();
     await page.getByRole('alert').filter({hasText:/Invalid style library|Invalid saved style/}).first().waitFor();
     assert.equal(hashFile(libraryPath),damagedHash,'Damaged library left untouched');assert.deepEqual((await record()).snapshot.project.edits,[],'Failed save never edits the document');await shot('damaged-library');

@@ -6,7 +6,7 @@ import { StylePresetsPanel } from './StylePresetsPanel';
 
 export interface EngravingPanelProps {
   score:model.Score;trackIds:readonly string[];value:EngravingOverrides;busy:boolean;
-  onEdit:(command:Extract<EngravingCommand,{type:'setEngraving'}>)=>void;
+  onEdit:(command:Extract<EngravingCommand,{type:'setEngraving'}>)=>unknown;
 }
 type Options=ReadonlyArray<readonly [string,string]>;
 const boolOptions:Options=[['true','Yes'],['false','No']];
@@ -70,10 +70,11 @@ export function EngravingPanel({score,trackIds,value,busy,onEdit}:EngravingPanel
       {notationBooleans.map(([key,label,field])=><Choice key={key} label={label} value={boolValue(draft.notation[key])} source={yesNo(defaults.notation[field])} options={boolOptions} onChange={next=>updateNotation(key,parseBool(next))}/>)}
       {notationElements.map(([key,label,element])=><Choice key={key} label={label} value={boolValue(draft.notation[key])} source={yesNo(defaults.notation.isNotationElementVisible(element))} options={boolOptions} onChange={next=>updateNotation(key,parseBool(next))}/>)}
     </details>
-    <StylePresetsPanel score={score} trackIds={trackIds} value={value} onEdit={onEdit}/>
     <label>System spacing (%)<input type="number" min={25} max={400} step="any" placeholder="Source/default (100%)" value={draft.systemSpacing===null?'':draft.systemSpacing*100} onChange={e=>{setDraft({...draft,systemSpacing:e.target.value===''?null:Number(e.target.value)/100});setError(null);}}/></label>
     <p>Blank uses default system spacing.</p>
     {error&&<p role="alert">{error}</p>}
     <button type="button" onClick={apply}>Apply engraving</button><button type="button" onClick={reset}>Reset to source/default</button>
-  </fieldset></details>;
+  </fieldset>
+  <StylePresetsPanel score={score} trackIds={trackIds} value={value} unapplied={JSON.stringify(draft)!==JSON.stringify(value)} busy={busy} onEdit={onEdit}/>
+  </details>;
 }

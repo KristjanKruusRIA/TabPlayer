@@ -48,6 +48,13 @@ A **Saved styles** disclosure inside the Engraving panel (`StylePresetsPanel.tsx
   - a damaged library is reported and its bytes are unchanged after a failed save;
   - the real user library is untouched.
 
+## Later changes
+
+- Applying reports "Applied" only after the edit is accepted: `App.tsx` `edit()` returns a promise of whether it succeeded, and a refusal shows an alert instead.
+- Apply and Force default style are blocked while the form holds unapplied changes (applying would discard them), while the document cannot be edited (`documentBlocked` in `StylePresetsPanel`), and while a library action runs. Save, Update and Delete never depend on the document's busy state.
+- A failed read keeps its alert until a later operation succeeds, and the list says the styles could not be read rather than that there are none.
+- **Format limit:** the library stores `EngravingOverrides` strictly (unknown fields are refused). Adding a field to `EngravingOverrides` therefore requires a library version bump (and a migration of version 1 files), or every saved style becomes unreadable.
+
 ## Scope
 
 - No new edit command and no change to `tests/protocol.json`.

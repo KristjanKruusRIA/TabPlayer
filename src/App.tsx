@@ -170,7 +170,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     setClipboardError(null);
     const oldCount=state.score.masterBars.length;
     const wasPlaying=player?.getState().playing??false;
-    act(controller.edit(command).then(()=>{
+    const done=controller.edit(command).then(()=>{
       const score=controller.getState().score,map=command.type==='insertMeasures'||command.type==='removeMeasures'?planMeasureMap(oldCount,command):null;
       setSelection(old=>map?repairMeasureSelection(score,old,map):repairSelection(score,command.type==='moveTrack'?{...old,track:movedTrackIndex(old.track,command)}:command.type==='duplicateTrack'?{...old,track:command.track+1}:old));
       if(command.type==='pasteMusic')setNoteIndex(null);
@@ -178,7 +178,8 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
       if(!('selection'in command)||command.type==='eraseSelection')editorSelection(null);
       // Hearing an entered note is a courtesy: only note-setting edits, and only while nothing is playing.
       if(auditionEditsNow.current&&player&&!wasPlaying&&!player.getState().playing){const heard=editAudition(score,command);if(heard){const current=controller.getState();player.audition({trackId:trackIdentity(score.tracks[heard.track])},heard.notes,heard.durationMs,{project:current.snapshot.project,built:current});}}
-    }));
+    });
+    act(done);return done.then(()=>true,()=>false);
   };
   const instrumentEdit=(command:EditCommand,follow:EntryFollow)=>edit(command,score=>{
     const next=followEntry(score,target,follow);

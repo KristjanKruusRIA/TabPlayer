@@ -35,7 +35,7 @@ export function SoundRig({trackId,sound,onEdit,playback,busy=false,tracks,onTrac
   const selected:BlockRef=chosen.second&&!(second&&second.effects[chosen.block].enabled)?{block:chosen.block,second:false}:chosen;
   useEffect(()=>{if(chosen.second&&!(second&&second.effects[chosen.block].enabled)){setChosen({block:chosen.block,second:false});}},[chosen,second]);
   const root=useRef<HTMLElement>(null);
-  useEffect(()=>{previewReturn.current=()=>root.current?.querySelector<HTMLElement>('[data-row-main][tabindex="0"]')?.focus();return()=>{previewReturn.current=null;};},[previewReturn]);
+  useEffect(()=>{previewReturn.current=()=>root.current?.querySelector<HTMLElement>('.rig-sources [role=radio][aria-checked=true]')?.focus();return()=>{previewReturn.current=null;};},[previewReturn]);
   return <section ref={root} className="sound-view" aria-label="Sound rig" data-browser-open={browserOpen||undefined} onKeyDown={editing.escapePreview}>
     <header className="rig-head">
       <TrackStrip tracks={tracks} trackId={trackId} onTrack={onTrack}/>
@@ -58,12 +58,13 @@ export function SoundRig({trackId,sound,onEdit,playback,busy=false,tracks,onTrac
         <button type="button" className="rig-button" onClick={editing.copyCurrentSound}>Copy sound</button>
         <button type="button" {...busyGuard({busy,disabled:!editing.clipboard.sound,className:'rig-button',onClick:editing.pasteSound})}>Paste sound</button>
       </div>
-      {showingPreview&&<div className="rig-preview" role="group" aria-label="Sound preview">
-        <span className="rig-preview-name">Previewing {previewLabel}</span>
-        <button type="button" className="rig-button" data-primary onClick={editing.keepPreview}>Keep previewed sound</button>
+      {/* Always laid out, so a preview starting or ending moves nothing; hidden and inert while none runs. */}
+      <div className="rig-preview" role="group" aria-label="Sound preview" inert={!showingPreview} style={{visibility:showingPreview?'visible':'hidden'}}>
+        <span className="rig-preview-name" title={showingPreview?`Previewing ${previewLabel}`:undefined}>{showingPreview&&`Previewing ${previewLabel}`}</span>
+        <button type="button" data-primary {...busyGuard({busy,className:'rig-button',onClick:editing.keepPreview})}>Keep previewed sound</button>
         <button type="button" className="rig-button" onClick={editing.cancelPreview}>Cancel preview</button>
-      </div>}
-      <p className="rig-status" role="status">{status}</p>
+      </div>
+      <p className="rig-status" role="status" title={status||undefined}>{status}</p>
       {playback&&<label className="rig-inline"><span className="rig-field-name">Audio output</span><select className="rig-select" aria-label="Audio output" aria-disabled={busy||undefined} value={playback.deviceId()??''} onChange={event=>{if(busy){event.target.value=playback.deviceId()??'';return;}editing.selectOutput(event.target.value);}} onKeyDown={event=>{if(busy)event.preventDefault();}} onPointerDown={event=>{if(busy)event.preventDefault();}} onMouseDown={event=>{if(busy)event.preventDefault();}}>
         <option value="">System default</option>{editing.devices.map(device=><option key={device.id} value={device.id}>{device.name}</option>)}</select></label>}
     </div>

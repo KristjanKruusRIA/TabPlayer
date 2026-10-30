@@ -67,7 +67,7 @@
 .sound-view .rig-row-note { font:400 11px/14px var(--tp-font-ui); color:var(--tp-muted); max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .sound-view .rig-hear { min-height:24px; padding:1px 8px; border:1px solid var(--tp-line-strong); border-radius:var(--tp-radius-s); background:transparent; color:var(--tp-text); font:500 11px/16px var(--tp-font-ui); }
 .sound-view .rig-hear:hover:enabled:not([aria-disabled=true]) { background:var(--tp-raised); border-color:var(--tp-text); color:var(--tp-text); }
-.sound-view .rig-hear[aria-pressed=true] { background:var(--tp-on); border-color:var(--tp-on); color:var(--tp-on-ink); font-weight:600; }
+.sound-view .rig-hear[aria-pressed=true] { background:var(--tp-on); border-color:var(--tp-on); color:var(--tp-on-ink); }
 .sound-view .rig-hear[aria-pressed=true]:hover:enabled { background:color-mix(in srgb,var(--tp-on) 85%,white); border-color:var(--tp-on); color:var(--tp-on-ink); }
 .sound-view .rig-row-actions { grid-column:1/-1; display:flex; gap:12px; padding:0 6px 4px; }
 .sound-view .rig-link { min-height:22px; padding:0; border:0; background:none; color:var(--tp-muted); font:500 11px/16px var(--tp-font-ui); text-decoration:underline; text-underline-offset:2px; }
@@ -111,8 +111,10 @@
 
 /* Foot: status and preview */
 .sound-view .rig-messages { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:6px 12px; min-height:36px; padding:4px 12px; border-top:1px solid var(--tp-line-subtle); background:var(--tp-panel); }
-.sound-view .rig-status { margin:0; flex:1 1 200px; font-size:12px; line-height:18px; color:var(--tp-muted); overflow-wrap:anywhere; }
-.sound-view .rig-preview { display:flex; flex-wrap:wrap; align-items:center; gap:6px 8px; }
+.sound-view .rig-status { margin:0; flex:1 1 200px; min-width:0; height:18px; font-size:12px; line-height:18px; color:var(--tp-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+/* Always laid out at one height and width; hidden and inert while no preview runs, so starting one moves nothing. */
+.sound-view .rig-preview { display:flex; flex-wrap:nowrap; align-items:center; gap:6px 8px; height:28px; flex:none; }
+.sound-view .rig-preview-name { display:inline-block; width:22ch; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .sound-view .rig-preview-name { font:500 12px/18px var(--tp-font-ui); color:var(--tp-on); }
 .sound-view .rig-alert { margin:0; padding:6px 12px; border-top:1px solid var(--tp-error); background:color-mix(in srgb,var(--tp-error) 12%,var(--tp-base)); color:var(--tp-error); font-size:12px; line-height:1.35; overflow-wrap:anywhere; }
 
@@ -211,9 +213,15 @@
 }
 
 /* Instrument picker: the sources and the tracks, drawn */
-.sound-view .rig-head { flex-wrap:nowrap; align-items:center; gap:10px; padding:5px 12px; background:linear-gradient(#1d1a16,#17140f); }
-.sound-view .rig-source-picker { display:flex; align-items:center; gap:6px; min-width:0; }
-.sound-view .rig-sources,.sound-view .rig-tracks { flex-wrap:nowrap; gap:1px; padding:2px; background:rgb(0 0 0 / .28); border-color:var(--tp-line-subtle); }
+.sound-view .rig-head { flex-wrap:wrap; align-items:center; gap:6px 10px; padding:5px 12px; background:linear-gradient(#1d1a16,#17140f); }
+.sound-view .rig-head>* { min-width:0; }
+/* The radios and their Hear buttons share one grid (radio i in column 2i+1, its button in 2i+2): the group is as wide as both together, and
+ * if the row cannot hold it beside the presets the presets wrap below. Nothing is positioned out of flow. */
+.sound-view .rig-source-picker { display:grid; grid-template-columns:repeat(6,auto auto); align-items:center; max-width:100%; }
+.sound-view .rig-source-picker>* { grid-row:1; grid-column:1/-1; display:grid; grid-template-columns:subgrid; }
+.sound-view .rig-hears { pointer-events:none; align-items:center; z-index:1; }
+.sound-view .rig-hears>button { pointer-events:auto; justify-self:start; margin-left:1px; }
+.sound-view .rig-sources,.sound-view .rig-tracks { flex-wrap:nowrap; gap:0; padding:2px; background:rgb(0 0 0 / .28); border-color:var(--tp-line-subtle); }
 .sound-view .rig-tracks { max-width:210px; overflow-x:auto; scrollbar-width:thin; scrollbar-color:var(--tp-line-strong) transparent; }
 .sound-view :is(.rig-sources,.rig-tracks) .tp-seg-option { min-height:0; padding:2px 3px 1px; border:1px solid transparent; border-radius:var(--tp-radius-s); background:transparent; flex:none; }
 .sound-view :is(.rig-sources,.rig-tracks) .tp-seg-option:hover:not(:disabled):not([aria-disabled=true]) { background:rgb(255 255 255 / .05); }
@@ -222,15 +230,16 @@
 .sound-view .rig-source-art { display:block; width:58px; height:27px; }
 .sound-view .rig-source[data-auto] .rig-source-art { opacity:.72; }
 .sound-view .rig-source-name { font:600 9.5px/12px var(--tp-font-ui); letter-spacing:.03em; text-transform:uppercase; white-space:nowrap; color:var(--tp-muted); }
-.sound-view .rig-source-to { color:var(--tp-text); }
+.sound-view .rig-source-to { display:inline-flex; flex-direction:column; color:var(--tp-text); }
+/* A slot as wide as the longest name, so Auto→GM and Auto→Darkblack are the same width and nothing beside them moves. */
+.sound-view .rig-source-to::after { content:'→Darkblack'; height:0; overflow:hidden; visibility:hidden; }
 .sound-view .tp-seg-option[aria-checked=true] .rig-source-name { color:var(--tp-text); }
 .sound-view .rig-track { display:flex; flex-direction:column; align-items:center; gap:0; }
 .sound-view .rig-track-glyph { display:block; width:36px; height:17px; }
 .sound-view .rig-track-name { max-width:64px; overflow:hidden; text-overflow:ellipsis; font:600 9.5px/12px var(--tp-font-ui); letter-spacing:.03em; white-space:nowrap; color:var(--tp-muted); }
 .sound-view .tp-seg-option[aria-checked=true] .rig-track-name { color:var(--tp-text); }
-.sound-view .rig-sources .tp-seg-item { display:inline-flex; align-items:center; gap:2px; flex:none; }
 .sound-view .rig-hear-source { min-height:20px; padding:1px 5px; border:1px solid var(--tp-line-strong); border-radius:var(--tp-radius-s); background:transparent; color:var(--tp-muted); font:500 10px/14px var(--tp-font-ui); white-space:nowrap; flex:none; align-self:center; }
-.sound-view .rig-presets { flex:none; }
+.sound-view .rig-presets { flex:0 1 auto; min-width:0; flex-wrap:wrap; }
 .sound-view .rig-presets .tp-seg-option { padding:2px 7px; }
 .sound-view .rig-sound-actions { display:flex; gap:6px; flex:none; }
 @container (min-width:1180px) {

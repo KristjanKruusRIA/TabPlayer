@@ -128,7 +128,8 @@ export async function runNoteAudioAcceptance({buildPath}={}){
     step('The baseline exports exist and the document is untouched',{baseMidi,baseWave:{onset:baseWave.onset,peak:baseWave.peak}});
 
     // The inspector: the first note's three fields, each committed on Enter or blur, each one setNoteTechniques edit.
-    await ui.revealInspector(page);await reveal(page.locator('summary').filter({hasText:'Notes & techniques'}).first());
+    await ui.revealInspector(page);await page.getByRole('combobox',{name:/^String/}).first().selectOption('1');await idle();
+    await reveal(page.locator('summary').filter({hasText:'Notes & techniques'}).first());
     await page.getByText('Note controls apply to string 1.',{exact:false}).waitFor();
     const length=field('Sounding length'),offset=field('Start offset'),velocity=field('Velocity change');
     assert.deepEqual([await length.inputValue(),await offset.inputValue(),await velocity.inputValue()],['100','0','0'],'A note starts at the plain values');

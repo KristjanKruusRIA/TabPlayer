@@ -437,6 +437,29 @@ it('invalid banjo drone shows reason and reverts peg on step in StructurePanel',
   expect(screen.getByText('Fix the banjo drone before tuning strings.')).toBeInTheDocument();
   expect(screen.getByLabelText('Staff tuning (notes, high to low)')).toHaveValue('E4 B3 G3 D3 A2 E2');
 });
+
+it('busy StructurePanel disables capo and prevents dispatch on Apply staff settings, Add staff, and Add voice', () => {
+  const score = music();
+  const onEdit = vi.fn();
+  render(<StructurePanel score={score} target={target} string={6} busy={true} onEdit={onEdit} onSelect={vi.fn()} />);
+
+  expect(screen.getByLabelText('Capo')).toBeDisabled();
+
+  const applyBtn = screen.getByRole('button', { name: 'Apply staff settings' });
+  expect(applyBtn).toBeDisabled();
+  fireEvent.click(applyBtn);
+  expect(onEdit).not.toHaveBeenCalled();
+
+  const addStaffBtn = screen.getByRole('button', { name: 'Add staff' });
+  expect(addStaffBtn).toBeDisabled();
+  fireEvent.click(addStaffBtn);
+  expect(onEdit).not.toHaveBeenCalled();
+
+  const addVoiceBtn = screen.getByRole('button', { name: 'Add voice' });
+  expect(addVoiceBtn).toBeDisabled();
+  fireEvent.click(addVoiceBtn);
+  expect(onEdit).not.toHaveBeenCalled();
+});
 it('staff tuning uses named notes, validates drafts and refreshes from history',()=>{
   const score=music(),onEdit=vi.fn(),props={score,target,string:6,busy:false,onEdit,onSelect:vi.fn()};const view=render(<StructurePanel {...props}/>);const input=screen.getByLabelText('Staff tuning (notes, high to low)');expect(input).toHaveValue('E4 B3 G3 D3 A2 E2');
   fireEvent.change(input,{target:{value:'E4 B3 G3 D3 A2 Db2'}});fireEvent.click(screen.getByRole('button',{name:'Apply staff settings'}));expect(onEdit).toHaveBeenLastCalledWith(expect.objectContaining({type:'setStaffSettings',settings:expect.objectContaining({tuning:[64,59,55,50,45,37]})}));onEdit.mockClear();

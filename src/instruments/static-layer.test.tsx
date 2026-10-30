@@ -61,6 +61,15 @@ it('lets the number of strings and their tuning drive the drawing',()=>{
   // Four strings: the lowest two are wound.
   expect([1,2,3,4].map(string=>container.querySelector(`[data-string-row="${string}"] line[stroke-dasharray]`)===null)).toEqual([false,false,true,true]);
 });
+it('draws all strings as wound on a bass neck',()=>{
+  const {score}=music(false,33);
+  score.tracks[0].staves[0].stringTuning.tunings=[43,38,33,28];
+  const {container}=render(<InstrumentView score={score} track={0} staff={0} notes={[]}/>);
+  expect(container.querySelectorAll('[data-string-row]')).toHaveLength(4);
+  const wound=(string:number)=>container.querySelector(`[data-string-row="${string}"] line[stroke-dasharray]`);
+  expect([1,2,3,4].map(string=>wound(string)!==null)).toEqual([true,true,true,true]);
+
+});
 
 it('keeps the keys\' drawing when the lit keys change, and lights only the notes sounding',()=>{
   const {score,all}=music(false,0),{container,rerender}=render(<InstrumentView score={score} track={0} staff={0} notes={[all[0]]}/>);

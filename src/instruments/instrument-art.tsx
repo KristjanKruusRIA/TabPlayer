@@ -23,12 +23,12 @@ export function neckGeometry(strings:number,mode:'guitar'|'bass',maxFret:number)
   return {left,neckLength,height,neckHeight,row,top,body,width,boundary,position};
 }
 
-interface FretboardArtProps {strings:number;/** Open pitches, string 1 first, as the names under the strings. */openKeys:string;mode:'guitar'|'bass';leftHanded:boolean;maxFret:number}
+interface FretboardArtProps {strings:number;/** Open pitches, highest string number first, as the names under the strings. */openKeys:string;mode:'guitar'|'bass';leftHanded:boolean;maxFret:number}
 function FretboardArtBase({strings,openKeys,mode,leftHanded,maxFret}:FretboardArtProps) {
   const id=uid(useId()),{left,neckLength,height,neckHeight,row,top,body,width,boundary,position}=neckGeometry(strings,mode,maxFret);
   const names=openKeys.split(',');
   const wood=`url(#${id}-wood)`,metal=`url(#${id}-metal)`,cream=`url(#${id}-cream)`,pearl=`url(#${id}-pearl)`;
-  const y0=top-12,y1=top+neckHeight-14,wound=Math.ceil(strings/2);
+  const y0=top-12,y1=top+neckHeight-14,wound=mode==='bass'?0:Math.ceil(strings/2);
   return <>
     <defs>
       <linearGradient id={`${id}-wood`} x1="0" y1="0" x2="0" y2="1"><stop stopColor="#1f0f09"/><stop offset=".16" stopColor="#5b2f1d"/><stop offset=".5" stopColor="#7a442c"/><stop offset=".84" stopColor="#4a2415"/><stop offset="1" stopColor="#1c110b"/></linearGradient>
@@ -65,7 +65,7 @@ function FretboardArtBase({strings,openKeys,mode,leftHanded,maxFret}:FretboardAr
       <g data-instrument-part="bridge"><rect x={body+144} y={top-11} width="36" height={neckHeight-4} rx="3" fill={metal} stroke="#4a4a43"/>{Array.from({length:strings},(_,index)=><g key={index}><rect x={body+147} y={top+index*row-5} width="25" height="10" rx="2" fill={metal} stroke="#6a6c66"/><circle cx={body+176} cy={top+index*row} r="2" fill="#343933"/></g>)}</g>
       {[40,91].map((offset,pickup)=><g key={offset} data-instrument-part={pickup===0?'neck-pickup':'bridge-pickup'}><rect x={body+offset-9} y={top-11} width="19" height={neckHeight-4} rx="8" fill="#eee7d2" stroke="#7e7a6e"/>{Array.from({length:strings},(_,index)=><circle data-pickup-string={strings-index} key={index} cx={body+offset} cy={top+index*row} r="2.5" fill={metal} stroke="#5c5b56" strokeWidth=".7"/>)}</g>)}
       {Array.from({length:strings},(_,index)=>{
-        const string=strings-index,y=top+index*row,thickness=.7+index*.16,isWound=index>=wound;
+        const string=strings-index,y=top+index*row,thickness=.7+index*.16,isWound=mode==='bass'||index>=wound;
         return <g key={string} data-string-row={string}><title>{`String ${string} · ${names[index]??''}`}</title>
           <line x1={left-31} x2={body+176} y1={y+1.4} y2={y+1.4} stroke="#160e08" opacity=".6" strokeWidth={1+index*.17}/>
           <rect x={left-31} y={y-thickness/2} width={body+207-left} height={thickness} fill={`url(#${id}-${isWound?'wound':'string'})`}/>

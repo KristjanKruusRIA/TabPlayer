@@ -1,4 +1,4 @@
-import { useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
+import { useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
 import type { model } from '@coderline/alphatab';
 import type { PlanNote } from '../audio/types';
 import type { EditCommand } from '../edit-types';
@@ -82,7 +82,7 @@ const drumPieces = [
 const percussionName = (key: number) => percussionNames[key-35] ?? `Percussion ${formatPitch(key)} (${key})`;
 
 function Fretboard({staff, notes, mode, leftHanded, entry}: {staff: model.Staff; notes: readonly ShownNote[]; mode: 'guitar' | 'bass'; leftHanded: boolean; entry?: EntryState}) {
-  const id=useId(), rove=useRoving();
+  const rove=useRoving();
   if (!staff.tuning.length) return <p className="instrument-empty">No string tuning on this staff. Choose Keys to view its pitches.</p>;
   const order = entry ? staff.tuning.flatMap((_,index)=>Array.from({length:Math.max(24,...entry.ctx.notes.map(note=>Math.ceil(note.fret)))+1},(_,fret)=>`${staff.tuning.length-index}/${fret}`)) : [];
   const start = `${entry?.string && entry.string >= 1 && entry.string <= staff.tuning.length ? entry.string : staff.tuning.length}/0`, roving = rove(order, start);
@@ -133,7 +133,7 @@ function Fretboard({staff, notes, mode, leftHanded, entry}: {staff: model.Staff;
 }
 
 function Keyboard({staves,notes,compact,entry}: {staves: readonly model.Staff[]; notes: readonly ShownNote[]; compact:boolean; entry?: EntryState}) {
-  const id=useId(), rove=useRoving();
+  const rove=useRoving();
   const sourceRange = useMemo(()=>{
     let low=128,high=-1;
     for (const staff of staves) for (const bar of staff.bars) for (const voice of bar.voices) for (const beat of voice.beats) for (const note of beat.notes) {
@@ -161,7 +161,7 @@ function Keyboard({staves,notes,compact,entry}: {staves: readonly model.Staff[];
 }
 
 function DrumKit({notes, entry}: {notes: readonly ShownNote[]; entry?: EntryState}) {
-  const id=useId(), rove=useRoving();
+  const rove=useRoving();
   const keys = new Set(notes.map(note=>note.key)), kitKeys = new Set(drumPieces.flatMap(piece=>piece.keys)), auxiliary = [...keys].filter(key=>!kitKeys.has(key));
   const kit = [...drumPieces].sort((a,b)=>a.x-b.x), order = entry ? [...kit.map(piece=>piece.id),...auxiliary.map(key=>`pad/${key}`)] : [], roving = rove(order, order[0] ?? '');
   const move = (name: string, from: string) => stepKeys(order, name, from, ['ArrowRight','ArrowDown'], ['ArrowLeft','ArrowUp']);

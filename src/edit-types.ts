@@ -9,6 +9,7 @@ import type { HarmonyCommand } from './editor/harmony-types';
 import type { ScaleDiagramCommand } from './harmony/scale-diagram';
 import type { ReplaceTempoAutomations } from './editor/tempo-types';
 import type { PartialCapo } from './editor/partial-capo';
+import type { NoteAudio } from './editor/note-audio';
 
 export interface NoteTarget { target: BeatTarget; string: number }
 export interface IndexedNoteTarget { target: BeatTarget; noteIndex: number }
@@ -24,6 +25,8 @@ export interface NoteTechniques {
   accent?: number; dynamics?: number; leftFinger?: number; rightFinger?: number; slideIn?: number; slideOut?: number;
   vibrato?: number; ornament?: number; bend?: PitchCurve|null; harmonic?: {type:number;value:number}|null;
   trill?: {pitch:number;speed:number}|null;
+  /** How the note sounds, not how it is written; null or the plain values (100 percent, 0, 0) clear it. */
+  audio?: NoteAudio|null;
 }
 export interface BeatTechniques {
   pickStroke?: number; brushType?: number; brushDuration?: number; whammy?: PitchCurve|null;

@@ -123,6 +123,22 @@ it('brushes a written chord from the low strings up or the high strings down, an
   expect(JSON.stringify(planOf(written, { brush: 'down' }))).toBe(JSON.stringify(planOf(written)));
 });
 
+it('brushes a chord whose note is played again straight after it, and leaves a real bend unbrushed', () => {
+  const chord = () => { const score = authored(1); note(score, 0, 0, 6, 3); note(score, 0, 0, 5, 2); note(score, 0, 0, 4, 0); note(score, 0, 1, 5, 2); return score; };
+  const plain = planOf(chord()), repeated = plain.notes.find(n => n.pitch.length > 1)!;
+  expect(repeated.pitch.at(-1)!.tick).toBe(repeated.endTick);
+  const down = planOf(chord(), { brush: 'down' }), first = down.notes.filter(n => n.startTick < 960).sort((a, b) => a.key - b.key);
+  expect(first.map(n => n.startTick)).toEqual([0, 30, 60]);
+  for (const n of down.notes) {
+    expect(n.pitch[0].tick).toBe(n.startTick);
+    expect(n.pitch.at(-1)!.tick).toBeLessThanOrEqual(n.endTick);
+    expect(n.pitch.every((point, index) => index === 0 || point.tick > n.pitch[index - 1].tick)).toBe(true);
+  }
+  const bent = chord(); const held = bent.tracks[0].staves[0].bars[0].voices[0].beats[0].notes[1];
+  held.addBendPoint(new model.BendPoint(0, 0)); held.addBendPoint(new model.BendPoint(60, 4));
+  expect(JSON.stringify(planOf(bent, { brush: 'down' }))).toBe(JSON.stringify(planOf(bent)));
+});
+
 it('lets strings ring to the next pluck on the same string or the end of the bar, and not past a mute', () => {
   const score = authored(2); note(score, 0, 0, 2, 3); note(score, 0, 2, 2, 5); note(score, 0, 1, 3, 3); note(score, 0, 3, 4, 3).isPalmMute = true; note(score, 1, 0, 2, 3);
   const normal = planOf(score), ringing = planOf(score, { letRing: true });

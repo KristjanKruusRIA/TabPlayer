@@ -72,7 +72,7 @@ export interface Attack {
   occurrenceEnd: number;
   /** Identifies the beat that the attack belongs to, for brushing it as one chord. */
   beat: string;
-  /** Whether a brush may delay this attack: no written brush or rasgueado, one attack for the note, no bend. */
+  /** Whether a brush may delay this attack: no written brush or rasgueado, one attack for the note, a flat pitch curve. */
   brushable: boolean;
 }
 
@@ -104,9 +104,10 @@ export function interpretAttacks(attacks: Attack[], profiles: Record<string, Tra
     const spacing = Math.min(brushSpacing, Math.floor(shortest / (2 * chord.length)));
     if (spacing < 1) continue;
     ordered.forEach((attack, index) => {
-      const delay = index * spacing;
-      attack.note.startTick += delay;
-      for (const point of attack.note.pitch) point.tick += delay;
+      const note = attack.note;
+      note.startTick += index * spacing;
+      // A brushable curve is flat, so it only has to start with the note; a point left at the note's end stays there.
+      note.pitch = [{ ...note.pitch[0], tick: note.startTick }, ...note.pitch.filter(point => point.tick > note.startTick)];
     });
   }
   const strings = new Map<string, Attack[]>();

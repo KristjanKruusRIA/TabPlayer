@@ -8,6 +8,8 @@ import { scoreFromJson } from '../model-clone';
 import { gpControllerEvents, prepareGpMidiScore } from '../interchange/automation';
 import { preparePitchedGpScore } from '../interchange/pitched';
 import { buildPerformedBeats } from './performed-beats';
+import { applyNoteAudio, collectAudible, collectNoteAudio, type AudibleAttack, type AudioAdjustment } from './note-audio-plan';
+import { hasNoteAudio } from '../editor/note-audio';
 import type { ReferenceLocation } from './reference-sync-types';
 import { interpretAttacks, type Attack } from './interpretation';
 
@@ -315,6 +317,7 @@ function buildWithIdentities(original: model.Score, generation: number, ids: str
     return value;
   };
   const laneData = new Map<string, { events: Collector; bends: PlanMidiEvent[]; markers: Map<string, number>; attacks: Map<string, RawNote[]> }>();
+  const audible: AudibleAttack[] = [];
   for (const [id, lane] of lanes) {
     const isolated = laneScore(jsonForTrack(lane[0].track), lane), generated = generate(isolated.score);
     generated.events.notes = generated.events.notes.filter(n => n.rawKey < 500);
@@ -385,9 +388,10 @@ function buildWithIdentities(original: model.Score, generation: number, ids: str
           // Strong beats are counted from the written start; a pickup bar is right-aligned by its written length, ending where a full bar does.
           const pickup = profile.accent ? pickupShift(occurrence.bar) : 0;
           interpreted.push({ note, raw: actual, staff: source.staff, offset: beat.displayStart + pickup, accentable: attack === 0 && beat.graceType === model.GraceType.None, meter: [masterBar.timeSignatureNumerator, masterBar.timeSignatureDenominator], occurrenceEnd: occurrence.endTick, beat: `${source.staff}/${source.voice}/${source.bar}/${source.beat}`,
-            brushable: generated.length === 1 && beat.brushType === model.BrushType.None && !beat.hasRasgueado && !beat.deadSlapped && beat.pickStroke === model.PickStroke.None && note.pitch.length === 1 });
+            brushable: generated.length === 1 && beat.brushType === model.BrushType.None && !beat.hasRasgueado && !beat.deadSlapped && beat.pickStroke === model.PickStroke.None && note.pitch.every(point => point.semitones === note.pitch[0].semitones) });
         }
         notes.push(note); const chain = played.get(source.note) ?? []; chain.push(note); played.set(source.note, chain);
+        collectAudible(audible, source.note, note, actual);
       }
     }
   }
@@ -395,6 +399,7 @@ function buildWithIdentities(original: model.Score, generation: number, ids: str
   if (interpreted.length) interpretAttacks(interpreted, interpretations!);
   const events: OrderedMidiEvent[] = converted(complete.events.events, ids, nativeChannel);
   for(const event of gpControllerEvents(score,occurrences))events.push({type:'controller',trackId:ids[event.track],tick:event.tick,channel:nativeChannel(event.track,event.channel),controller:event.controller,value:event.value,order:Number.MAX_SAFE_INTEGER});
+  if (audible.length) applyNoteAudio(audible, notes, Math.max(sliceExtent, complete.events.end, ...complete.events.notes.map(n => n.end)));
   for (const note of complete.events.notes) {
     const common = { trackId: ids[note.track], channel: nativeChannel(note.track, note.channel), key: note.key, velocity: note.velocity };
     events.push({ ...common, type: 'noteOn', tick: note.start, order: note.onOrder }, { ...common, type: 'noteOff', tick: note.end, order: note.offOrder });
@@ -406,6 +411,11 @@ function buildWithIdentities(original: model.Score, generation: number, ids: str
 
 export function buildPlaybackPlan(score: model.Score, generation: number): PlaybackPlan {
   return buildWithIdentities(score, generation, score.tracks.map(trackIdentity));
+}
+
+// What a score's per-note audio settings do to each attack, for a MIDI export that generates its own attacks.
+export function noteAudioMidiAdjustments(score: model.Score): AudioAdjustment[] {
+  return hasNoteAudio(score) ? collectNoteAudio(() => buildWithIdentities(score, 0, score.tracks.map(trackIdentity))).adjustments : [];
 }
 
 // Export adapters use zero-based public addNote ordinals per track, preserving

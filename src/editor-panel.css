@@ -18,6 +18,11 @@
 .inspector input,.inspector select,.inspector button{min-height:28px;border:1px solid var(--ws-border);border-radius:3px;background:var(--ws-input);color:var(--ws-text);padding:4px 6px;line-height:18px}
 .inspector input,.inspector select{font-variant-numeric:tabular-nums;caret-color:var(--ws-accent)}
 .inspector .pair{gap:6px}
+.inspector .note-audio{display:flex;flex-direction:column;gap:6px;min-width:0;margin:8px 0}
+.inspector .note-audio h3{margin:0;color:var(--ws-text);font-size:12px}
+.inspector .note-audio .pair{flex-direction:column}
+.inspector .note-audio label{margin-bottom:0}
+.inspector .note-audio p{margin:0}
 .inspector .check{white-space:normal}
 .inspector input[type=checkbox]{min-height:0;width:14px;height:14px;padding:0;accent-color:var(--ws-accent);flex-shrink:0}
 .inspector button:hover:enabled{border-color:var(--ws-accent)}

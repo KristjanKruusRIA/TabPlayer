@@ -9,6 +9,7 @@ import {validateRatioTempoPoints} from './editor/tempo-types';
 import {parseTrackColor} from './track-color';
 import {validatePartialCapo} from './editor/partial-capo';
 import {validateBanjoDrone} from './editor/banjo-drone';
+import {validateNoteAudio} from './editor/note-audio';
 
 const tuningNamed=new Set(['addTrack','setTuning','setStringCount']);
 const staffSettingKeys=['tuning','capo','transposition','displayTransposition','clef','showTab','showNotation'];
@@ -152,6 +153,7 @@ function techniqueShape(value:unknown) {
   for(const [key,field]of Object.entries(patch)) {
     if(flags.includes(key)){if(typeof field!=='boolean')throw new Error('Invalid technique flag.');}
     else if(enums.includes(key)){if(typeof field!=='number'||!Number.isInteger(field))throw new Error('Invalid technique value.');}
+    else if(key==='audio'){if(field!==null)validateNoteAudio(field);}
     else if(['bend','harmonic','trill'].includes(key)) {
       if(field===null)continue;
       const item=exact(field,key==='bend'?['type','style','points']:key==='harmonic'?['type','value']:['pitch','speed']);

@@ -99,13 +99,18 @@ it('skips a disabled option and chooses on click', async()=>{
   await user.click(radios[3]);expect(radios[3]).toBeChecked();
 });
 
-it('disables the whole group while keeping the chosen option focusable', ()=>{
-  const {rerender}=render(<Segmented label="Output" value="stereo" onChange={()=>{}} options={[{value:'stereo',label:'Stereo'},{value:'mono',label:'Mono'}]}/>);
+it('disables the whole group while keeping the chosen option focusable and refusing presses', async()=>{
+  const onChange=vi.fn();
+  const {rerender}=render(<Segmented label="Output" value="stereo" onChange={onChange} options={[{value:'stereo',label:'Stereo'},{value:'mono',label:'Mono'}]}/>);
   const radios=screen.getAllByRole('radio');
   radios[0].focus();expect(radios[0]).toHaveFocus();
-  rerender(<Segmented label="Output" value="stereo" onChange={()=>{}} disabled options={[{value:'stereo',label:'Stereo'},{value:'mono',label:'Mono'}]}/>);
+  rerender(<Segmented label="Output" value="stereo" onChange={onChange} disabled options={[{value:'stereo',label:'Stereo'},{value:'mono',label:'Mono'}]}/>);
   for(const radio of radios){expect(radio).toHaveAttribute('aria-disabled','true');expect(radio).not.toBeDisabled();}
   expect(radios[0].tabIndex).toBe(0);expect(radios[0]).toHaveFocus();
+  await userEvent.click(radios[1]);
+  expect(onChange).not.toHaveBeenCalled();
+  await userEvent.keyboard('{ArrowRight}');
+  expect(onChange).not.toHaveBeenCalled();
 });
 
 it('does not report a change when Home or End lands on the option already chosen', async()=>{

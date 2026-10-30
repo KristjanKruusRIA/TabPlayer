@@ -116,8 +116,9 @@ async function physical(name){
 async function screenshotBatch(){
   for(const width of [960,1280,1600]){
     await page.setViewportSize({width,height:1100});await page.evaluate(async()=>{await document.fonts.ready;await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));});
-    const geometry=await page.evaluate(()=>{const bounds=selector=>{const rect=document.querySelector(selector)?.getBoundingClientRect();return rect?{x:rect.x,y:rect.y,width:rect.width,height:rect.height}:null;};const tabs=document.querySelector('[role="tablist"]');return {tracks:bounds('.tracks'),score:bounds('.score-workspace'),inspector:bounds('.inspector'),tabs:{client:tabs.clientWidth,scroll:tabs.scrollWidth},bodyWidth:document.body.scrollWidth,viewport:innerWidth,instrument:!!document.querySelector('.instrument-view')};});
-    assert.ok(geometry.tracks.x<geometry.score.x&&geometry.score.x<geometry.inspector.x);assert.ok(geometry.instrument);assert.ok(geometry.bodyWidth<=width+1,'Tab overflow must remain inside its horizontal strip');
+    const geometry=await page.evaluate(()=>{const bounds=selector=>{const rect=document.querySelector(selector)?.getBoundingClientRect();return rect?{x:rect.x,y:rect.y,width:rect.width,height:rect.height}:null;};const tabs=document.querySelector('[role="tablist"]');return {leading:bounds(innerWidth<1180?'.workstation-rail':'.workstation-left'),score:bounds('.score-workspace'),inspector:bounds('.inspector'),tabs:{client:tabs.clientWidth,scroll:tabs.scrollWidth},bodyWidth:document.body.scrollWidth,viewport:innerWidth,instrument:!!document.querySelector('.instrument-view')};});
+    // The track tools sit left of the score and the inspector right of it; below 1180px the track tools collapse into the left pane rail.
+    assert.ok(geometry.leading&&geometry.score&&geometry.inspector&&geometry.leading.width>0&&geometry.inspector.width>0);assert.ok(geometry.leading.x<geometry.score.x&&geometry.score.x<geometry.inspector.x);assert.ok(geometry.instrument);assert.ok(geometry.bodyWidth<=width+1,'Tab overflow must remain inside its horizontal strip');
     const path=output(`tabs-${width}.png`);await page.screenshot({path});result.screenshots.push({path,width,sha256:sha256(readFileSync(path)),geometry});
   }
   assert.ok(result.screenshots[0].geometry.tabs.scroll>result.screenshots[0].geometry.tabs.client,'Long duplicate titles exercise overflow');
@@ -141,7 +142,8 @@ async function exportFormat(format){
   await dialog.getByRole('button',{name:'Export',exact:true}).click();const deadline=Date.now()+60000;
   while(await dialog.isVisible()){
     assert.ok(Date.now()<deadline,`${format} export exceeded 60 seconds`);const alerts=dialog.getByRole('alert');if(await alerts.count())throw new Error(await alerts.innerText());
-    const progress=dialog.getByRole('progressbar',{name:'Export progress'});if(await progress.count()){const jobId=await progress.getAttribute('data-job-id');if(jobId){const progressValue=await invoke('export_status',{documentId:A,id:jobId});assert.notEqual(progressValue?.status,'failed',progressValue?.error);}}
+    // One atomic page read: the dialog closes the moment the export finishes, so a locator would wait out its timeout on a vanished bar.
+    {const jobId=await page.evaluate(()=>document.querySelector('[role="dialog"][aria-label="Export score"] progress[aria-label="Export progress"]')?.getAttribute('data-job-id')??null);if(jobId){const progressValue=await invoke('export_status',{documentId:A,id:jobId});assert.notEqual(progressValue?.status,'failed',progressValue?.error);}}
     await page.waitForTimeout(50);
   }
   await idle();
@@ -182,7 +184,8 @@ try{
   // A through keyboard handlers; paste through B's current mounted editor.
   await location(2,1);const score=page.getByRole('region',{name:'Score workspace'});await score.focus();await page.keyboard.press('Shift+ArrowRight');await page.keyboard.press('Control+c');await idle();await activate(B);await button('Track 2: Silent second guitar');await location(4,1);const beforePaste=await record(B);await page.getByRole('region',{name:'Score workspace'}).focus();await page.keyboard.press('Control+v');await idle();const pasted=await record(B);assert.equal(pasted.snapshot.project.edits.at(-1).type,'pasteMusic');assert.equal(pasted.snapshot.project.edits.at(-1).options.target.track,1);assert.ok(pasted.snapshot.project.edits.length>beforePaste.snapshot.project.edits.length);assert.deepEqual(await page.getByRole('alert').allTextContents(),[]);const untouchedA=await record(A);await button('Undo');assert.deepEqual((await record(B)).snapshot.project,beforePaste.snapshot.project);assert.deepEqual(await record(A),untouchedA);await button('Redo');result.checks.crossDocumentClipboard=true;
   const overflowIds=[];for(const path of fixture.overflowPaths)overflowIds.push(await add(path));await reload();
-  await activate(A);await view('A');await button('Show instrument');if(visualCaptureRequested){await screenshotBatch();result.visualCapture.completed=true;}
+  // Instrument visibility is saved with each document's view, so A (which showed it above) comes back from the reload with it still shown.
+  await activate(A);await view('A');await page.getByRole('button',{name:'Hide instrument',exact:true}).waitFor();assert.equal(await page.getByRole('button',{name:'Hide instrument',exact:true}).getAttribute('aria-pressed'),'true');if(visualCaptureRequested){await screenshotBatch();result.visualCapture.completed=true;}
   // Keyboard roving focus alone must not activate. Enter and Ctrl+Tab activate
   // through normal UI paths and keep a single associated tabpanel.
   await tab(A).focus();await page.keyboard.press('ArrowRight');assert.equal((await workspace()).active.documentId,A);await page.keyboard.press('Enter');await idle();assert.equal((await workspace()).active.documentId,B);await page.keyboard.press('Control+Shift+Tab');await idle();assert.equal((await workspace()).active.documentId,A);assert.equal(await page.getByRole('tabpanel').count(),1);assert.equal(await tab(A).getAttribute('aria-controls'),await page.getByRole('tabpanel').getAttribute('id'));result.checks.keyboardAndPanel=true;

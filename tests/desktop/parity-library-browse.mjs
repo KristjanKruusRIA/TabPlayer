@@ -12,7 +12,9 @@ import {assertStringCountBuild,assertStringCountIdentity,assertStringCountPortFr
 import {buildLibraryFixture,writeLibraryFixture} from './library-fixture.mjs';
 
 const repository=resolve(dirname(fileURLToPath(import.meta.url)),'../..');
-const samePath=(a,b)=>a.replaceAll('\\','/').toLowerCase()===b.replaceAll('\\','/').toLowerCase();
+// The catalog stores canonical Windows paths with the verbatim \\?\ prefix; it names the same folder as the plain path.
+const plain=path=>path.replace(/^\\\\\?\\/,'').replaceAll('\\','/').toLowerCase();
+const samePath=(a,b)=>plain(a)===plain(b);
 const json=path=>JSON.parse(readFileSync(path,'utf8'));
 const sleep=ms=>new Promise(accept=>setTimeout(accept,ms));
 const allowed=['workspace_snapshot','project_snapshot','file_library_snapshot','file_library_search'];
@@ -62,7 +64,9 @@ export async function runLibraryBrowseAcceptance({buildPath}={}){
 
     // The score that is open before any browsing starts.
     const start=await workspace(),openId=start.active.documentId,clean=await record(openId);
-    assert.equal(start.documents.length,1);assert.equal(clean.snapshot.project.base.title,first.title);assert.ok(samePath(clean.snapshot.path,state.sourcePath));assert.equal(clean.snapshot.dirty,false);
+    // Every launch starts with one untouched blank document, and Open adds the score as a second tab beside it.
+    assert.equal(start.documents.length,2);const blank=await record(start.documents.find(entry=>entry.documentId!==openId).documentId);assert.equal(blank.snapshot.project.base.kind,'blank');assert.equal(blank.snapshot.dirty,false);assert.deepEqual(blank.snapshot.project.edits,[]);
+    assert.equal(clean.snapshot.project.base.title,first.title);assert.ok(samePath(clean.snapshot.path,state.sourcePath));assert.equal(clean.snapshot.dirty,false);
     // Leave it with unsaved edits and undo history: opening a result must keep all of that.
     await page.getByRole('combobox',{name:/^String/}).selectOption('5');await page.getByLabel('Fret',{exact:true}).fill('3');await button('Set note');
     const openBefore=await poll(()=>record(openId),value=>value.snapshot.dirty,'Unsaved edit');
@@ -128,7 +132,7 @@ export async function runLibraryBrowseAcceptance({buildPath}={}){
     const finalized=await poll(()=>record(openId),value=>value.snapshot.project.lock,'Finalized');
     assert.equal(finalized.snapshot.dirty,true);
     const third=await openResult(first,[['Title filter',first.title.slice(0,5)]]);
-    assert.equal(third.documents.length,3);
+    assert.equal(third.documents.length,start.documents.length+2);
     assert.deepEqual(await record(openId),finalized,'The finalized score keeps its lock, edits and unsaved flag');
     await tab(openId).click();await idle();assert.deepEqual(await record(),finalized,'Switching back shows the same finalized score');
     step('Opening a result leaves a finalized score unchanged',{openId});

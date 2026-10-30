@@ -90,7 +90,13 @@ export async function runReloadRecoveryAcceptance({buildPath}={}){
 
     // The reattached webview is a full editor: a further edit applies once and undoes cleanly.
     await ui.revealInspector(page);await page.getByLabel('Fret',{exact:true}).fill('5');await button('Set note');
-    assert.equal((await record()).snapshot.project.edits.length,2);await button('Undo');assert.deepEqual(await record(),edited);
+    assert.equal((await record()).snapshot.project.edits.length,2);await button('Undo');
+    // Undo is a history step, so it differs from `edited` in exactly three fields: the revision counter moved on by the further edit and its undo
+    // (+2), and the undone edit is now the redo entry. Everything else, project edits and the unsaved flag included, must match `edited`.
+    const undone=await record();
+    assert.equal(undone.revision,edited.revision+2,'Revision advances once for the edit and once for its undo');
+    assert.equal(undone.snapshot.canRedo,true);assert.deepEqual(undone.snapshot.redoEdit,{type:'setNote',target:{track:0,staff:0,bar:0,voice:0,beat:0},string:6,fret:5},'The undone edit is the redo entry');
+    assert.deepEqual(undone,{...edited,revision:undone.revision,snapshot:{...edited.snapshot,canRedo:true,redoEdit:undone.snapshot.redoEdit}},'Undo restores the edited document');
     step('Editing continues after reload',{});
 
     // A real crash is unchanged: kill the process outright and the next launch on the same session folder still prompts,

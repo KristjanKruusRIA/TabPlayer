@@ -34,6 +34,10 @@ public sealed class TabPlayerOwnedFolderPicker : IDisposable {
     [DllImport("user32.dll")] static extern bool IsChild(IntPtr parent,IntPtr child);
     [DllImport("user32.dll")] static extern IntPtr GetAncestor(IntPtr window,uint flags);
     [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr window);
+    [DllImport("user32.dll")] static extern bool BringWindowToTop(IntPtr window);
+    [DllImport("user32.dll")] static extern bool AttachThreadInput(uint thread,uint other,bool attach);
+    [DllImport("kernel32.dll")] static extern uint GetCurrentThreadId();
     [DllImport("user32.dll",EntryPoint="SendMessageTimeoutW",CharSet=CharSet.Unicode,SetLastError=true)] static extern IntPtr SetText(IntPtr window,uint message,IntPtr w,string text,uint flags,uint timeout,out UIntPtr result);
     [DllImport("user32.dll",EntryPoint="SendMessageTimeoutW",CharSet=CharSet.Unicode,SetLastError=true)] static extern IntPtr ReadText(IntPtr window,uint message,IntPtr capacity,StringBuilder text,uint flags,uint timeout,out UIntPtr result);
     [DllImport("user32.dll",EntryPoint="SendMessageTimeoutW",SetLastError=true)] static extern IntPtr Send(IntPtr window,uint message,IntPtr w,IntPtr l,uint flags,uint timeout,out UIntPtr result);
@@ -71,6 +75,20 @@ public sealed class TabPlayerOwnedFolderPicker : IDisposable {
         EnumWindows((window,parameter)=>{if(IsOwnedDialog(window))found.Add(window);return true;},IntPtr.Zero);
         return found.ToArray();
     }
+    // A dialog opened by a hidden or background app does not receive the foreground from Windows' foreground lock. Ask for it once
+    // the sole owned dialog is identified; VerifyDialog below still requires that it really is the foreground window.
+    void Raise(IntPtr dialog) {
+        var clock=Stopwatch.StartNew();
+        while(clock.ElapsedMilliseconds<3000) {
+            VerifyProcess();var dialogs=Dialogs();
+            if(dialogs.Length!=1 || dialogs[0]!=dialog) return;
+            if(GetAncestor(GetForegroundWindow(),2)==dialog) return;
+            uint ignored;uint current=GetCurrentThreadId();uint holder=GetWindowThreadProcessId(GetForegroundWindow(),out ignored);
+            bool attached=holder!=0 && holder!=current && AttachThreadInput(current,holder,true);
+            try {BringWindowToTop(dialog);SetForegroundWindow(dialog);} finally {if(attached)AttachThreadInput(current,holder,false);}
+            Thread.Sleep(100);
+        }
+    }
     void VerifyDialog(IntPtr dialog) {
         VerifyProcess();var dialogs=Dialogs();
         if(dialogs.Length!=1 || dialogs[0]!=dialog || !IsWindowEnabled(dialog) || GetAncestor(GetForegroundWindow(),2)!=dialog) throw new InvalidOperationException("The sole visible owned folder dialog must remain enabled and foreground.");
@@ -95,7 +113,7 @@ public sealed class TabPlayerOwnedFolderPicker : IDisposable {
                     if(dialogs.Length==1){dialog=dialogs[0];break;}Thread.Sleep(50);
                 }
                 if(dialog==IntPtr.Zero)throw new TimeoutException("No owned native folder picker appeared within ten seconds.");
-                VerifyDialog(dialog);
+                Raise(dialog);VerifyDialog(dialog);
                 // Standard common-item Folder edit (edt1) and English Select Folder/IDOK only.
                 // Unsupported UI trees fail closed; there is no keyboard/address-bar fallback.
                 var edit=Control(dialog,1152,"Edit");var button=Control(dialog,1,"Button");

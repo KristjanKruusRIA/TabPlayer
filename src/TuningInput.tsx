@@ -70,7 +70,7 @@ export function TuningInput({
   const audible = onAudition ? parsedPitches : null;
   const selected = custom ? 'custom' : (findTuningPreset(value)?.id ?? 'custom');
 
-  const dragRef = useRef<{ index: number; startY: number; startPitch: number; initialPitches: number[]; latest: number[] } | null>(null);
+  const dragRef = useRef<{ index: number; startY: number; startPitch: number; initialPitches: number[]; latest: number[]; initialTuningName: string } | null>(null);
   const wheelRef = useRef<{ timer: ReturnType<typeof setTimeout> | null; pending: number[] | null }>({
     timer: null,
     pending: null,
@@ -128,6 +128,7 @@ export function TuningInput({
       startPitch: pitch,
       initialPitches: [...parsedPitches],
       latest: [...parsedPitches],
+      initialTuningName: tuningName,
     };
   };
 
@@ -138,30 +139,38 @@ export function TuningInput({
     if (nextPitch === dragRef.current.latest[index]) return;
     const next = dragRef.current.latest.map((p, i) => (i === index ? nextPitch : p));
     dragRef.current.latest = next;
+    const isInitial = next.every((p, i) => p === dragRef.current!.initialPitches[i]);
     setCustom(false);
     onChange(formatTuning(next));
-    onTuningNameChange('');
+    onTuningNameChange(isInitial ? dragRef.current.initialTuningName : '');
   };
 
   const handlePegPointerUp = (index: number, event: ReactPointerEvent<HTMLDivElement>) => {
     if (!dragRef.current || dragRef.current.index !== index) return;
-    const { initialPitches, latest } = dragRef.current;
+    const { initialPitches, initialTuningName, latest } = dragRef.current;
     dragRef.current = null;
     if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
       try {
         event.currentTarget.releasePointerCapture(event.pointerId);
       } catch {}
     }
-    if (disabled) return;
+    if (disabled) {
+      setCustom(false);
+      onChange(formatTuning(initialPitches));
+      onTuningNameChange(initialTuningName);
+      return;
+    }
     const changed = latest.some((p, i) => p !== initialPitches[i]);
     if (changed) {
       onCommit?.(latest);
+    } else {
+      onTuningNameChange(initialTuningName);
     }
   };
 
   const handlePegPointerCancel = (index: number, event: ReactPointerEvent<HTMLDivElement>) => {
     if (!dragRef.current || dragRef.current.index !== index) return;
-    const initial = dragRef.current.initialPitches;
+    const { initialPitches, initialTuningName } = dragRef.current;
     dragRef.current = null;
     if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
       try {
@@ -169,7 +178,8 @@ export function TuningInput({
       } catch {}
     }
     setCustom(false);
-    onChange(formatTuning(initial));
+    onChange(formatTuning(initialPitches));
+    onTuningNameChange(initialTuningName);
   };
 
   const handlePegKeyDown = (index: number, pitch: number, event: ReactKeyboardEvent<HTMLDivElement>) => {

@@ -282,6 +282,38 @@ it('peg step does not commit staged unapplied settings and focusing dial preserv
     }),
   });
 });
+
+it('lost pointer or dragging out and back preserves tuning name in StructurePanel', () => {
+  const score = music();
+  score.tracks[0].staves[0].stringTuning.name = 'Standard';
+  const onEdit = vi.fn();
+  render(<StructurePanel score={score} target={target} string={6} busy={false} onEdit={onEdit} onSelect={vi.fn()} />);
+
+  const dial = screen.getByRole('slider', { name: 'Staff tuning (notes, high to low) string 6 peg' });
+
+  // 1. Lost pointer during drag
+  fireEvent.pointerDown(dial, { pointerId: 1, clientY: 100, button: 0 });
+  fireEvent.pointerMove(dial, { pointerId: 1, clientY: 80 });
+  fireEvent.pointerCancel(dial, { pointerId: 1 });
+  fireEvent.click(screen.getByRole('button', { name: 'Apply staff settings' }));
+  expect(onEdit).toHaveBeenLastCalledWith(expect.objectContaining({
+    type: 'setStaffSettings',
+    settings: expect.objectContaining({ tuningName: 'Standard' }),
+  }));
+
+  onEdit.mockClear();
+
+  // 2. Dragging out and back
+  fireEvent.pointerDown(dial, { pointerId: 2, clientY: 100, button: 0 });
+  fireEvent.pointerMove(dial, { pointerId: 2, clientY: 80 });
+  fireEvent.pointerMove(dial, { pointerId: 2, clientY: 100 });
+  fireEvent.pointerUp(dial, { pointerId: 2, clientY: 100 });
+  fireEvent.click(screen.getByRole('button', { name: 'Apply staff settings' }));
+  expect(onEdit).toHaveBeenLastCalledWith(expect.objectContaining({
+    type: 'setStaffSettings',
+    settings: expect.objectContaining({ tuningName: 'Standard' }),
+  }));
+});
 it('staff tuning uses named notes, validates drafts and refreshes from history',()=>{
   const score=music(),onEdit=vi.fn(),props={score,target,string:6,busy:false,onEdit,onSelect:vi.fn()};const view=render(<StructurePanel {...props}/>);const input=screen.getByLabelText('Staff tuning (notes, high to low)');expect(input).toHaveValue('E4 B3 G3 D3 A2 E2');
   fireEvent.change(input,{target:{value:'E4 B3 G3 D3 A2 Db2'}});fireEvent.click(screen.getByRole('button',{name:'Apply staff settings'}));expect(onEdit).toHaveBeenLastCalledWith(expect.objectContaining({type:'setStaffSettings',settings:expect.objectContaining({tuning:[64,59,55,50,45,37]})}));onEdit.mockClear();

@@ -246,10 +246,6 @@ export function CurveEditor({
   };
 
   const handlePointPointerUp = (index: number, event: ReactPointerEvent<SVGGElement>) => {
-    if (disabled) {
-      dragRef.current = null;
-      return;
-    }
     if (!dragRef.current || dragRef.current.index !== index) return;
     const { initial, latest } = dragRef.current;
     dragRef.current = null;
@@ -257,6 +253,10 @@ export function CurveEditor({
       try {
         event.currentTarget.releasePointerCapture(event.pointerId);
       } catch {}
+    }
+    if (disabled) {
+      setCurve(initial);
+      return;
     }
     setCurve(latest);
     if (!areCurvesEqual(latest, initial)) {

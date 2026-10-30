@@ -100,6 +100,35 @@ it('pegs are focusable when disabled and ignore busy interactions',()=>{
   expect(onCommit).not.toHaveBeenCalled();
 });
 
+it('busy starting mid-drag drops commit and restores draft tuning and name', () => {
+  const onCommit = vi.fn();
+  const onChange = vi.fn();
+  const onTuningNameChange = vi.fn();
+  const props = {
+    label: 'Notes',
+    presetLabel: 'Preset',
+    value: 'E4 B3 G3 D3 A2 E2',
+    onChange,
+    tuningName: 'Standard',
+    onTuningNameChange,
+    onCommit,
+  };
+  const { rerender } = render(<TuningInput {...props} />);
+  const peg = screen.getByRole('slider', { name: 'Notes string 1 peg' });
+
+  // Start drag while active
+  fireEvent.pointerDown(peg, { pointerId: 1, clientY: 100, button: 0 });
+  fireEvent.pointerMove(peg, { pointerId: 1, clientY: 80 });
+
+  // Disabled / busy starts mid-drag
+  rerender(<TuningInput {...props} disabled />);
+  fireEvent.pointerUp(peg, { pointerId: 1, clientY: 80 });
+
+  expect(onCommit).not.toHaveBeenCalled();
+  expect(onChange).toHaveBeenLastCalledWith('E4 B3 G3 D3 A2 E2');
+  expect(onTuningNameChange).toHaveBeenLastCalledWith('Standard');
+});
+
 it('wheel over an unfocused peg does not retune and focused wheel commits once after settling',()=>{
   vi.useFakeTimers();
   try{

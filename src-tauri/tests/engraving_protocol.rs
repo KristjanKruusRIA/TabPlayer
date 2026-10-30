@@ -260,6 +260,64 @@ fn engraving_profile_ids_are_nonempty_distinct_and_not_score_resolved_natively()
     rejected(&value);
 }
 
+fn typography(family: &str, text: Value, title: Value, tab: Value) -> Value {
+    json!({"family": family, "textScale": text, "titleScale": title, "tabScale": tab})
+}
+
+#[test]
+fn engraving_typography_is_optional_and_round_trips_only_when_set() {
+    // Documents and commands from before typography existed stay valid and serialize unchanged.
+    let plain = engraving_command();
+    assert!(plain["engraving"].get("typography").is_none());
+    assert_eq!(serde_json::to_value(accepted(&plain)).unwrap(), plain);
+    let mut set = engraving_command();
+    set["engraving"]["typography"] = typography("serif", json!(1.5), json!(null), json!(0.75));
+    assert_eq!(serde_json::to_value(accepted(&set)).unwrap(), set);
+    // An explicit default is accepted and is written back without the field.
+    let mut explicit = engraving_command();
+    explicit["engraving"]["typography"] =
+        typography("inherit", json!(null), json!(null), json!(null));
+    assert_eq!(serde_json::to_value(accepted(&explicit)).unwrap(), plain);
+    for (field, value) in [
+        ("textScale", 0.5),
+        ("textScale", 2.0),
+        ("titleScale", 0.5),
+        ("titleScale", 2.0),
+        ("tabScale", 0.75),
+        ("tabScale", 1.5),
+    ] {
+        let mut ok = engraving_command();
+        ok["engraving"]["typography"] = typography("sans", json!(null), json!(null), json!(null));
+        ok["engraving"]["typography"][field] = json!(value);
+        accepted(&ok);
+    }
+    for (field, invalid) in [
+        ("textScale", json!(0.49)),
+        ("textScale", json!(2.01)),
+        ("textScale", json!("1")),
+        ("titleScale", json!(0.0)),
+        ("titleScale", json!(-1)),
+        ("titleScale", json!(2.01)),
+        ("tabScale", json!(0.74)),
+        ("tabScale", json!(1.51)),
+        ("tabScale", json!({})),
+        ("family", json!("comic")),
+        ("family", json!(null)),
+    ] {
+        let mut bad = engraving_command();
+        bad["engraving"]["typography"] = typography("sans", json!(null), json!(null), json!(null));
+        bad["engraving"]["typography"][field] = invalid;
+        rejected(&bad);
+    }
+    let mut extra = engraving_command();
+    extra["engraving"]["typography"] = typography("sans", json!(null), json!(null), json!(null));
+    extra["engraving"]["typography"]["extra"] = json!(1);
+    rejected(&extra);
+    let mut missing = engraving_command();
+    missing["engraving"]["typography"] = json!({"family": "sans"});
+    rejected(&missing);
+}
+
 #[test]
 fn engraving_system_spacing_requires_null_or_a_bounded_factor() {
     for valid in [json!(null), json!(0.25), json!(4.0)] {

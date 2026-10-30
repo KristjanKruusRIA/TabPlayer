@@ -4,6 +4,18 @@ export type InheritBool=boolean|null;
 export type NamePolicy='inherit'|'hidden'|'firstSystem'|'allSystems';
 export type TrackProfile='source'|'standard'|'tablature'|'standardTab'|'slash'|'numbered';
 
+export type TextFamily='inherit'|'sans'|'serif'|'mono';
+/** Text face and size scales (1 = the renderer's size, null = unchanged). Music symbols always use the bundled Bravura. */
+export interface EngravingTypography {
+  family:TextFamily;
+  /** Staff text, chord names, track names, bar numbers and other annotations. */
+  textScale:number|null;
+  /** The score title block and copyright. */
+  titleScale:number|null;
+  /** Fret numbers, grace-note fret numbers and numbered-notation digits; these keep the default family. */
+  tabScale:number|null;
+}
+
 export interface EngravingOverrides {
   stylesheet:{
     hideDynamics:InheritBool;
@@ -29,6 +41,8 @@ export interface EngravingOverrides {
   };
   systemSpacing:number|null;
   profiles:Array<{trackId:string;profile:TrackProfile}>;
+  /** Absent means the default typography; documents saved before typography existed have no such field. */
+  typography?:EngravingTypography;
 }
 
 export interface PageLayout {

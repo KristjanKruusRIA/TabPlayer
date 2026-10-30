@@ -79,8 +79,9 @@ function band(texts:PageBand,fields:HeaderFields,page:number,pages:number,d:Page
   return leftLine+centered+rightLine;
 }
 
-export function paginateEngravedSystems(systems:SvgSystem[],title:string,layout:PageLayout,fields?:HeaderFields):SvgPage[] {
-  const d=pageGeometry(layout),titleSize=pageTitleFontSize(title,d.usableWidth),groups:SvgSystem[][]=[[]];let height=0;
+/** `titleScale` enlarges the header line (base 18px) and still shrinks it to fit the page width; the footer keeps its size. */
+export function paginateEngravedSystems(systems:SvgSystem[],title:string,layout:PageLayout,fields?:HeaderFields,titleScale=1):SvgPage[] {
+  const d=pageGeometry(layout),titleSize=pageTitleFontSize(title,d.usableWidth,titleScale),headerBase=18*titleScale,headerY=d.top+Math.min(31,Math.max(22,headerBase*.8)),groups:SvgSystem[][]=[[]];let height=0;
   for(const system of systems) {
     // alphaTab may round the reported system width by one pixel, as in legacy export.
     if(!finite(system.height)||system.height<=0||system.height>d.usableHeight||!finite(system.width)||system.width<=0||system.width>d.usableWidth+1)throw new Error('A notation system does not fit this page. Reduce print scale, use landscape, or export fewer staves.');
@@ -92,7 +93,7 @@ export function paginateEngravedSystems(systems:SvgSystem[],title:string,layout:
     let y=d.top+40;
     const content=group.map(system=>{const at=y;y+=system.height;return `<g transform="translate(${d.left} ${at})">${system.svg.replace(/<svg\b[^>]*>/,'').replace(/<\/svg>\s*$/,'')}</g>`;}).join('');
     const bands=custom&&(index?custom.other:custom.first);
-    const header=bands?band(bands.header,values,index+1,groups.length,d,d.top+22,18):`<text x="${d.left}" y="${d.top+22}" ${font} font-size="${titleSize}">${escaped(title)}</text>`;
+    const header=bands?band(bands.header,values,index+1,groups.length,d,headerY,headerBase):`<text x="${d.left}" y="${headerY}" ${font} font-size="${titleSize}">${escaped(title)}</text>`;
     const footer=bands?band(bands.footer,values,index+1,groups.length,d,d.height-d.bottom,11):`<text x="${d.width/2}" y="${d.height-d.bottom}" text-anchor="middle" ${font} font-size="11">${index+1} / ${groups.length}</text>`;
     return {widthMm:d.widthMm,heightMm:d.heightMm,svg:`<svg xmlns="http://www.w3.org/2000/svg" width="${d.widthMm}mm" height="${d.heightMm}mm" viewBox="0 0 ${d.width} ${d.height}"><style>.at{font-family:Bravura;font-size:34px}text{fill:#111}</style>${header}${content}${footer}</svg>`};
   });

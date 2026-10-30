@@ -10,6 +10,10 @@ use tauri::AppHandle;
 
 const FILENAME: &str = "style-library.json";
 const FORMAT: &str = "tabplayer-style-library";
+/// Version 2 added `engraving.typography` (omitted while default). Version 1 files are read as version 2. A write
+/// produces a version 2 file only while some stored style has typography, otherwise version 1, so older builds keep
+/// reading libraries that do not use it. Reading never rewrites a file.
+const VERSION: u32 = 2;
 static WRITES: Mutex<()> = Mutex::new(());
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -78,13 +82,13 @@ impl StyleLibrary {
     fn empty() -> Self {
         Self {
             format: FORMAT.into(),
-            version: 1,
+            version: VERSION,
             entries: vec![],
         }
     }
 
     pub fn validate(&self) -> Result<(), String> {
-        if self.format != FORMAT || self.version != 1 {
+        if self.format != FORMAT || self.version != VERSION {
             return Err("Unsupported style library format or version.".into());
         }
         for (index, entry) in self.entries.iter().enumerate() {
@@ -100,21 +104,47 @@ impl StyleLibrary {
     }
 }
 
+/// Reads either file version as the current one. A version 1 entry predates typography, so it must not carry it.
+fn parse_library(bytes: &[u8]) -> Result<StyleLibrary, String> {
+    let mut value: serde_json::Value =
+        serde_json::from_slice(bytes).map_err(|error| format!("Invalid style library: {error}"))?;
+    if value.get("version").and_then(|version| version.as_u64()) == Some(1) {
+        let carries_typography = value["entries"].as_array().is_some_and(|entries| {
+            entries
+                .iter()
+                .any(|entry| entry["engraving"].get("typography").is_some())
+        });
+        if carries_typography {
+            return Err("Invalid style library: version 1 styles cannot hold typography.".into());
+        }
+        value["version"] = VERSION.into();
+    }
+    serde_json::from_value(value).map_err(|error| format!("Invalid style library: {error}"))
+}
+
 pub fn read_library(directory: &Path) -> Result<StyleLibrary, String> {
     let bytes = match std::fs::read(directory.join(FILENAME)) {
         Ok(bytes) => bytes,
         Err(error) if error.kind() == ErrorKind::NotFound => return Ok(StyleLibrary::empty()),
         Err(error) => return Err(error.to_string()),
     };
-    let library: StyleLibrary = serde_json::from_slice(&bytes)
-        .map_err(|error| format!("Invalid style library: {error}"))?;
+    let library = parse_library(&bytes)?;
     library.validate()?;
     Ok(library)
 }
 
 fn write_library(directory: &Path, library: &StyleLibrary) -> Result<(), String> {
     library.validate()?;
-    let bytes = serde_json::to_vec_pretty(library).map_err(|error| error.to_string())?;
+    // A library with no typography is still a version 1 file, so older builds keep reading it.
+    let mut file = library.clone();
+    if file
+        .entries
+        .iter()
+        .all(|entry| entry.engraving.typography.is_default())
+    {
+        file.version = 1;
+    }
+    let bytes = serde_json::to_vec_pretty(&file).map_err(|error| error.to_string())?;
     std::fs::create_dir_all(directory).map_err(|error| error.to_string())?;
     write_bytes(&directory.join(FILENAME), &bytes)
 }
@@ -182,7 +212,9 @@ pub async fn style_library_remove(app: AppHandle, id: String) -> Result<StyleLib
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::engraving::{BarNumberMode, TrackProfile, TrackProfileOverride};
+    use crate::engraving::{
+        BarNumberMode, EngravingTypography, TextFamily, TrackProfile, TrackProfileOverride,
+    };
     use crate::project::{Project, ProjectSession};
     use serde_json::json;
     use tempfile::tempdir;
@@ -217,7 +249,7 @@ mod tests {
         assert!(!app_data.exists());
         assert_eq!(
             serde_json::to_value(&library).unwrap(),
-            json!({"format":"tabplayer-style-library","version":1,"entries":[]})
+            json!({"format":"tabplayer-style-library","version":2,"entries":[]})
         );
     }
 
@@ -308,7 +340,7 @@ mod tests {
         let good = serde_json::to_value(style(A, "Ok")).unwrap();
         let envelope = |entries: serde_json::Value| {
             serde_json::to_vec(
-                &json!({"format":"tabplayer-style-library","version":1,"entries":entries}),
+                &json!({"format":"tabplayer-style-library","version":2,"entries":entries}),
             )
             .unwrap()
         };
@@ -343,9 +375,26 @@ mod tests {
             envelope(
                 json!([good, {"id": A.to_uppercase(), "name": "Dup", "engraving": good["engraving"]}]),
             ),
-            top(json!({"format":"tabplayer-style-library","version":2,"entries":[]})),
-            top(json!({"format":"tabplayer-tuning-library","version":1,"entries":[]})),
-            top(json!({"format":"tabplayer-style-library","version":1})),
+            top(json!({"format":"tabplayer-style-library","version":3,"entries":[]})),
+            top(json!({"format":"tabplayer-style-library","version":0,"entries":[]})),
+            top(json!({"format":"tabplayer-tuning-library","version":2,"entries":[]})),
+            top(json!({"format":"tabplayer-style-library","version":2})),
+            with(&|v| v["engraving"]["typography"] = json!({"family":"serif"})),
+            with(&|v| {
+                v["engraving"]["typography"] =
+                    json!({"family":"comic","textScale":null,"titleScale":null,"tabScale":null})
+            }),
+            with(&|v| {
+                v["engraving"]["typography"] =
+                    json!({"family":"inherit","textScale":3,"titleScale":null,"tabScale":null})
+            }),
+            with(&|v| {
+                v["engraving"]["typography"] =
+                    json!({"family":"inherit","textScale":null,"titleScale":null,"tabScale":0.5})
+            }),
+            with(
+                &|v| v["engraving"]["typography"] = json!({"family":"inherit","textScale":null,"titleScale":null,"tabScale":null,"extra":1}),
+            ),
         ];
         for bytes in corrupt {
             std::fs::write(file(dir), &bytes).unwrap();
@@ -357,6 +406,91 @@ mod tests {
             assert_eq!(std::fs::read(file(dir)).unwrap(), bytes, "{shown}");
             assert_eq!(std::fs::read_dir(dir).unwrap().count(), 1);
         }
+    }
+
+    fn typed(id: &str, name: &str) -> SavedStyle {
+        let mut entry = style(id, name);
+        entry.engraving.typography = EngravingTypography {
+            family: TextFamily::Serif,
+            text_scale: Some(1.25),
+            title_scale: None,
+            tab_scale: Some(1.5),
+        };
+        entry
+    }
+
+    #[test]
+    fn typography_is_saved_and_default_typography_stays_off_the_wire() {
+        let root = tempdir().unwrap();
+        let dir = root.path();
+        put_entry(dir, style(A, "Plain")).unwrap();
+        put_entry(dir, typed(B, "Serif")).unwrap();
+        assert_eq!(
+            read_library(dir).unwrap().entries,
+            vec![style(A, "Plain"), typed(B, "Serif")]
+        );
+        let wire: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(file(dir)).unwrap()).unwrap();
+        assert_eq!(wire["version"], 2);
+        assert!(wire["entries"][0]["engraving"].get("typography").is_none());
+        assert_eq!(
+            wire["entries"][1]["engraving"]["typography"],
+            json!({"family":"serif","textScale":1.25,"titleScale":null,"tabScale":1.5})
+        );
+        remove_entry(dir, B).unwrap();
+        let wire: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(file(dir)).unwrap()).unwrap();
+        assert_eq!(
+            wire["version"], 1,
+            "no typography left, so an older build can read it"
+        );
+    }
+
+    #[test]
+    fn version_one_files_are_read_and_upgraded_on_write_only() {
+        let root = tempdir().unwrap();
+        let dir = root.path();
+        let old = serde_json::to_vec(&json!({
+            "format":"tabplayer-style-library","version":1,
+            "entries":[serde_json::to_value(style(A, "Old")).unwrap()]
+        }))
+        .unwrap();
+        std::fs::write(file(dir), &old).unwrap();
+        let read = read_library(dir).unwrap();
+        assert_eq!((read.version, read.entries), (2, vec![style(A, "Old")]));
+        assert_eq!(std::fs::read(file(dir)).unwrap(), old);
+        assert_eq!(remove_entry(dir, B).unwrap().version, 2);
+        assert_eq!(std::fs::read(file(dir)).unwrap(), old);
+        put_entry(dir, style(B, "Plain")).unwrap();
+        let wire: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(file(dir)).unwrap()).unwrap();
+        assert_eq!(
+            wire["version"], 1,
+            "plain styles keep an older build able to read the file"
+        );
+        put_entry(dir, typed(B, "New")).unwrap();
+        let wire: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(file(dir)).unwrap()).unwrap();
+        assert_eq!(wire["version"], 2);
+        assert_eq!(
+            read_library(dir).unwrap().entries,
+            vec![style(A, "Old"), typed(B, "New")]
+        );
+    }
+
+    #[test]
+    fn version_one_entries_cannot_carry_typography() {
+        let root = tempdir().unwrap();
+        let dir = root.path();
+        let bytes = serde_json::to_vec(&json!({
+            "format":"tabplayer-style-library","version":1,
+            "entries":[serde_json::to_value(typed(A, "Odd")).unwrap()]
+        }))
+        .unwrap();
+        std::fs::write(file(dir), &bytes).unwrap();
+        assert!(read_library(dir).is_err());
+        assert!(put_entry(dir, style(B, "New")).is_err());
+        assert_eq!(std::fs::read(file(dir)).unwrap(), bytes);
     }
 
     #[test]

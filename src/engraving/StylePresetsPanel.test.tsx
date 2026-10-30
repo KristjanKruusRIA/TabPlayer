@@ -16,7 +16,7 @@ vi.mock('@tauri-apps/api/core',()=>({invoke}));
 type Edit=Extract<EngravingCommand,{type:'setEngraving'}>;
 const idA='ca4af764-86e2-4ddd-9c26-a1be3368bdf7';
 let store:SavedStyle[]=[];
-const reply=()=>({format:'tabplayer-style-library',version:1,entries:structuredClone(store)});
+const reply=()=>({format:'tabplayer-style-library',version:2,entries:structuredClone(store)});
 const styled=(patch:(value:EngravingOverrides)=>void)=>{const value=defaultEngraving();patch(value);return value;};
 beforeEach(()=>{
   store=[];invoke.mockReset();
@@ -72,6 +72,27 @@ it('an_already_matching_style_and_an_unusable_one_send_no_edit',async()=>{
   fireEvent.change(await screen.findByLabelText('Saved style'),{target:{value:idA}});fireEvent.click(screen.getByRole('button',{name:'Apply saved style'}));
   expect(commands).toEqual([]);expect(screen.getByRole('status')).toHaveTextContent('already matches');
   fireEvent.click(screen.getByRole('button',{name:'Force default style'}));expect(commands).toEqual([]);
+});
+
+it('a_saved_style_carries_its_typography_and_force_default_clears_it',async()=>{
+  const commands:Edit[]=[],typography={family:'serif' as const,textScale:1.25,titleScale:null,tabScale:1.5};
+  const view=mount(styled(value=>{value.typography=typography;}),commands);await open();
+  fireEvent.change(screen.getByLabelText('Style name'),{target:{value:'Serif'}});fireEvent.click(screen.getByRole('button',{name:'Save current style'}));
+  await waitFor(()=>expect(store).toHaveLength(1));expect(store[0].engraving.typography).toEqual(typography);
+  // A plain document takes the typography; a document that has other typography takes the saved one, not a merge.
+  const target=styled(value=>{value.typography={family:'mono',textScale:null,titleScale:2,tabScale:null};});
+  view.rerender(<StylePresetsPanel score={music()} trackIds={['source/guitar']} value={target} unapplied={false} busy={false} onEdit={edit=>{commands.push(edit);}}/>);
+  fireEvent.click(screen.getByRole('button',{name:'Apply saved style'}));
+  expect(commands).toEqual([{type:'setEngraving',engraving:{...defaultEngraving(),typography}}]);
+  fireEvent.click(screen.getByRole('button',{name:'Force default style'}));
+  expect(commands[1]).toEqual({type:'setEngraving',engraving:defaultEngraving()});expect('typography' in commands[1].engraving).toBe(false);
+});
+
+it('a_style_without_typography_clears_the_documents_typography',async()=>{
+  const commands:Edit[]=[];store=[{id:idA,name:'Plain',engraving:defaultEngraving()}];
+  mount(styled(value=>{value.typography={family:'sans',textScale:1.5,titleScale:null,tabScale:null};}),commands);await open();
+  fireEvent.change(await screen.findByLabelText('Saved style'),{target:{value:idA}});fireEvent.click(screen.getByRole('button',{name:'Apply saved style'}));
+  expect(commands).toEqual([{type:'setEngraving',engraving:defaultEngraving()}]);
 });
 
 it('force_default_style_is_one_edit_that_keeps_profiles',()=>{

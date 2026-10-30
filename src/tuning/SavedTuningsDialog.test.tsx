@@ -170,6 +170,7 @@ it('keeps a failed read visible after a row is selected and blocks saving over i
 
 it('uses saved-tunings-dialog without chord-dialog to prevent 340px collapse',async()=>{
   setup();
+  await act(async()=>{});
   const dialog=screen.getByRole('dialog');
   expect(dialog).toHaveClass('saved-tunings-dialog');
   expect(dialog).not.toHaveClass('chord-dialog');

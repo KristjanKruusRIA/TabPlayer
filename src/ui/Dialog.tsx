@@ -67,8 +67,8 @@ export function Dialog({title,onClose,children,actions,className,backdropClassNa
       }
     };
     const recoverFocus=()=>{
-      if(!panel.current)return;
-      if(document.activeElement===document.body||(document.activeElement&&!panel.current.contains(document.activeElement))){
+      if(!panel.current||panel.current.closest('[inert]'))return;
+      if(document.activeElement===document.body){
         const target=panel.current.querySelector<HTMLElement>('[data-autofocus]')??panel.current.querySelector<HTMLElement>(focusable);
         (target??panel.current)?.focus({preventScroll:true});
       }

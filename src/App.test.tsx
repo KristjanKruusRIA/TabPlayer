@@ -184,6 +184,27 @@ it('reveals paste options through a collapsed Edit task without changing history
   expect(editTask.open).toBe(true);expect(clipboardSummary).toHaveFocus();expect(scroll).toHaveBeenCalledWith({block:'nearest'});expect(c.getState().snapshot).toBe(before);
 });
 
+it('leaves the score alone from the Sound view: no cut, paste, select-all or palette, while undo and play still work',async()=>{
+  const c=await setup(),workspace=screen.getByRole('region',{name:'Score workspace'});
+  click('Set note');await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(1));
+  click('Select bar');fireEvent.keyDown(workspace,{key:'c',ctrlKey:true});
+  const edits=()=>c.getState().snapshot.project.edits.length,view=screen.getByRole('radiogroup',{name:'View'});
+  fireEvent.click(within(view).getByRole('radio',{name:'Sound'}));
+  const rig=await screen.findByRole('region',{name:'Sound rig'}),at=edits(),selection=c.getState().snapshot;
+  for(const init of [{key:'x',ctrlKey:true},{key:'v',ctrlKey:true},{key:'v',ctrlKey:true,shiftKey:true},{key:'a',ctrlKey:true},{key:'Escape'},{key:'x',metaKey:true},{key:'v',metaKey:true}])fireEvent.keyDown(within(rig).getByRole('tab',{name:/^Amp, /}),init);
+  fireEvent.keyDown(rig,{key:'p',ctrlKey:true,shiftKey:true});
+  await new Promise(resolve=>setTimeout(resolve,30));
+  expect(edits()).toBe(at);expect(c.getState().snapshot).toBe(selection);
+  expect(screen.queryByRole('dialog',{name:/command/i})).not.toBeInTheDocument();
+  // Undo is a document command, so it still works from here, and Space still plays.
+  fireEvent.keyDown(rig,{key:'z',ctrlKey:true});await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(0));
+  // Back in the score the same keys act on it again.
+  fireEvent.click(within(view).getByRole('radio',{name:'Score'}));
+  click('Select bar');fireEvent.keyDown(workspace,{key:'x',ctrlKey:true});
+  // The undo left one edit fewer; a cut in the score is a new edit again.
+  await waitFor(()=>expect(edits()).toBe(at));
+});
+
 it.each(['Add pitched track','Add percussion track'])('omits string caret context for %s',async action=>{
   const c=await setup();click(action);await waitFor(()=>expect(c.getState().score.tracks).toHaveLength(2));
   fireEvent.click(functionalButton(/^Track 2:/));

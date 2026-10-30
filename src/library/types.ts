@@ -12,7 +12,8 @@ export interface BundledLibrary {templates:LibraryContent[];examples:LibraryCont
 export type LibraryChange={kind:'pin';id:string;pinned:boolean}|{kind:'removeRecent';id:string}
   |{kind:'removeRoot';id:string}|{kind:'renameTemplate';id:string;name:string}
   |{kind:'removeTemplate';id:string}|{kind:'welcomeSeen'};
-export interface LibraryQuery {rootId:string|null;text:string;sort:'title'|'artist'|'modified';offset:number;limit:100}
+export interface LibraryFilters {title:string;artist:string;instrument:string}
+export interface LibraryQuery extends LibraryFilters {rootId:string|null;text:string;sort:'title'|'artist'|'modified';offset:number;limit:100}
 export interface LibraryResult {id:string;rootId:string;path:string;metadata:LibraryMetadata|null;status:'indexed'|'metadataUnavailable'|'unavailable';modifiedUnixMs:number|null}
 export interface LibraryPage {indexRevision:number;total:number;rows:LibraryResult[];warning:string|null}
 export interface LibraryScan {jobId:string;rootId:string;configurationRevision:number;phase:'enumerating'|'reading'|'parsing'|'ready'|'failed'|'cancelled';discovered:number;processed:number;skipped:number;issues:string[]}

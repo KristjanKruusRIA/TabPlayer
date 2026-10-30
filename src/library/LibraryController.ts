@@ -1,12 +1,12 @@
-import type { LibraryChange,LibraryPage,LibraryQuery,LibraryScan,LibrarySection,LibrarySnapshot,LibrarySource,MetadataInput,NativeFileLibraryBridge } from './types';
+import type { LibraryChange,LibraryFilters,LibraryPage,LibraryQuery,LibraryScan,LibrarySection,LibrarySnapshot,LibrarySource,MetadataInput,NativeFileLibraryBridge } from './types';
 import type { MetadataRunner } from './metadata-runner';
 export type LibraryRunner=MetadataRunner;
 export interface LibraryCallbacks {openSource(source:LibrarySource):Promise<boolean>;saveTemplate(name:string,expectedRevision:number):Promise<LibrarySnapshot>}
-export interface LibraryUiState {snapshot:LibrarySnapshot|null;section:LibrarySection;query:string;page:LibraryPage|null;pageQuery:LibraryQuery|null;selectedId:string|null;scan:LibraryScan|null;scanning:boolean;pending:null|'open'|'template'|'change'|'pickRoot'|'refresh';error:string|null;notice:string|null;rootId:string|null;offset:number;sort:LibraryQuery['sort']}
+export interface LibraryUiState {snapshot:LibrarySnapshot|null;section:LibrarySection;query:string;page:LibraryPage|null;pageQuery:LibraryQuery|null;selectedId:string|null;scan:LibraryScan|null;scanning:boolean;pending:null|'open'|'template'|'change'|'pickRoot'|'refresh';error:string|null;notice:string|null;rootId:string|null;filters:LibraryFilters;offset:number;sort:LibraryQuery['sort']}
 interface ScanJob {rootId:string;configurationRevision:number;abort:AbortController;begin:Promise<LibraryScan>;cancel:Promise<void>|null}
 const message=(error:unknown)=>error instanceof Error?error.message:String(error);
 export class LibraryController {
-  private state:LibraryUiState={snapshot:null,section:'recent',query:'',page:null,pageQuery:null,selectedId:null,scan:null,scanning:false,pending:null,error:null,notice:null,rootId:null,offset:0,sort:'title'};
+  private state:LibraryUiState={snapshot:null,section:'recent',query:'',page:null,pageQuery:null,selectedId:null,scan:null,scanning:false,pending:null,error:null,notice:null,rootId:null,filters:{title:'',artist:'',instrument:''},offset:0,sort:'title'};
   private listeners=new Set<()=>void>();
   private drafts:Record<LibrarySection,string>={recent:'',templates:'',folders:'',examples:''};
   private disposed=false;
@@ -38,9 +38,9 @@ export class LibraryController {
   private end(sequence:number){if(sequence===this.pendingSequence)this.update({pending:null});}
   private leased(){return this.state.pending==='open'||this.state.pending==='template';}
   section(section:LibrarySection):void{if(this.disposed||this.leased())return;this.drafts[this.state.section]=this.state.query;this.update({section,query:this.drafts[section],selectedId:null,offset:0});this.scheduleSearch();}
-  query(text:string,options:{rootId?:string|null;offset?:number;sort?:LibraryQuery['sort']}={}):void{
+  query(text:string,options:{rootId?:string|null;offset?:number;sort?:LibraryQuery['sort'];filters?:Partial<LibraryFilters>}={}):void{
     if(this.disposed)return;this.drafts[this.state.section]=text;
-    this.update({query:text,rootId:options.rootId===undefined?this.state.rootId:options.rootId,sort:options.sort??this.state.sort,offset:options.offset??0,selectedId:null});this.scheduleSearch();
+    this.update({query:text,rootId:options.rootId===undefined?this.state.rootId:options.rootId,filters:{...this.state.filters,...options.filters},sort:options.sort??this.state.sort,offset:options.offset??0,selectedId:null});this.scheduleSearch();
   }
   select(id:string|null):void{if(!this.leased())this.update({selectedId:id});}
   private source():LibrarySource|undefined{
@@ -78,7 +78,7 @@ export class LibraryController {
     this.queryTimer=setTimeout(()=>{this.queryTimer=null;void this.search(sequence);},150);
   }
   private async search(sequence:number){
-    const query:LibraryQuery={rootId:this.state.rootId,text:this.state.query,sort:this.state.sort,offset:this.state.offset,limit:100};
+    const query:LibraryQuery={rootId:this.state.rootId,text:this.state.query,...this.state.filters,sort:this.state.sort,offset:this.state.offset,limit:100};
     try {const page=await this.bridge.search(query);if(this.disposed||sequence!==this.querySequence||page.indexRevision<this.indexRevision)return;this.indexRevision=page.indexRevision;this.update({page,pageQuery:query,notice:page.warning});}
     catch(error){if(sequence===this.querySequence)this.update({error:message(error)});}
   }

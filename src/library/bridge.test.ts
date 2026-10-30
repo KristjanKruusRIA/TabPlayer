@@ -29,7 +29,7 @@ it('stages only descriptor identities and native drop tokens and reveals an exac
 });
 
 it('keeps scan jobs, file hashes, query scope and rejection identity on the fixed wire',async()=>{
-  const receipt={accepted:true},result={sha256:'a'.repeat(64),metadata,error:null},query={rootId:'root-b',text:'TabPlayer bass',sort:'artist' as const,offset:100,limit:100 as const};
+  const receipt={accepted:true},result={sha256:'a'.repeat(64),metadata,error:null},query={rootId:'root-b',text:'TabPlayer bass',title:'',artist:'',instrument:'',sort:'artist' as const,offset:100,limit:100 as const};
   native.invoke.mockResolvedValue(receipt);
   expect(await bridge.scanBegin('root-b')).toBe(receipt);expect(await bridge.scanNext('job-b')).toBe(receipt);
   expect(await bridge.scanRead('job-b','file-c')).toBe(receipt);expect(await bridge.scanAccept('job-b','file-c',result)).toBe(receipt);

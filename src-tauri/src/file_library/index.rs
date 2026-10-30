@@ -219,6 +219,42 @@ fn supported(path: &Path) -> bool {
         })
 }
 
+fn words_in(filter: &str, value: &str) -> bool {
+    let value = value.to_lowercase();
+    filter
+        .split_whitespace()
+        .all(|word| value.contains(&word.to_lowercase()))
+}
+
+/// Applies the title, artist and instrument filters to one indexed row. Title
+/// falls back to the file name, as the result list displays it; artist and
+/// instrument need real indexed metadata, so a row without it never matches.
+fn matches_filters(row: &LibraryResult, query: &LibraryQuery) -> bool {
+    let title = row.metadata.as_ref().map_or_else(
+        || {
+            Path::new(&row.path)
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned()
+        },
+        |metadata| metadata.title.clone(),
+    );
+    words_in(&query.title, &title)
+        && (query.artist.trim().is_empty()
+            || row
+                .metadata
+                .as_ref()
+                .is_some_and(|metadata| words_in(&query.artist, &metadata.artist)))
+        && (query.instrument.trim().is_empty()
+            || row.metadata.as_ref().is_some_and(|metadata| {
+                metadata
+                    .track_names
+                    .iter()
+                    .any(|name| words_in(&query.instrument, name))
+            }))
+}
+
 fn truncate(value: &mut String, maximum: usize) -> bool {
     if value.len() <= maximum {
         return false;
@@ -1393,7 +1429,7 @@ impl LibraryIndex {
                         fields.push_str(&field.to_lowercase());
                     }
                 }
-                tokens.iter().all(|token| fields.contains(token))
+                tokens.iter().all(|token| fields.contains(token)) && matches_filters(row, query)
             })
             .collect();
         rows.sort_by(|left, right| {
@@ -1490,10 +1526,87 @@ mod tests {
         }
     }
 
+    fn row(title: &str, artist: &str, tracks: &[&str]) -> LibraryResult {
+        LibraryResult {
+            id: "id".into(),
+            root_id: "root".into(),
+            path: format!("scores/{title}.gp"),
+            metadata: Some(LibraryMetadata {
+                title: title.into(),
+                artist: artist.into(),
+                album: String::new(),
+                track_names: tracks.iter().map(|name| (*name).into()).collect(),
+                metadata_truncated: false,
+            }),
+            status: LibraryResultStatus::Indexed,
+            modified_unix_ms: None,
+        }
+    }
+
+    #[test]
+    fn field_filters_match_only_their_own_indexed_field() {
+        let rows = [
+            row(
+                "Amber Estuary",
+                "Nacre Ensemble",
+                &["Lantern Guitar", "Basin Bass"],
+            ),
+            row("Moon Orchard", "Cobalt Quartet", &["Arcade Guitar"]),
+        ];
+        let matching = |title: &str, artist: &str, instrument: &str| {
+            let mut query = title_query("");
+            query.title = title.into();
+            query.artist = artist.into();
+            query.instrument = instrument.into();
+            rows.iter()
+                .filter(|row| matches_filters(row, &query))
+                .map(|row| row.metadata.as_ref().unwrap().title.clone())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(matching("", "", "").len(), 2);
+        assert_eq!(matching("", "cobalt", ""), ["Moon Orchard"]);
+        assert!(
+            matching("cobalt", "", "").is_empty(),
+            "artist text is not a title"
+        );
+        assert_eq!(matching("estuary amber", "", ""), ["Amber Estuary"]);
+        assert_eq!(matching("", "", "GUITAR").len(), 2);
+        assert_eq!(matching("", "", "bass"), ["Amber Estuary"]);
+        assert!(
+            matching("", "", "lantern bass").is_empty(),
+            "words must hit one track"
+        );
+        assert!(matching("", "ensemble", "arcade").is_empty());
+        assert_eq!(matching("orchard", "quartet", "guitar"), ["Moon Orchard"]);
+    }
+
+    #[test]
+    fn filters_never_match_a_row_without_indexed_metadata() {
+        let mut bare = row("x", "", &[]);
+        bare.metadata = None;
+        bare.path = "scores/untitled-draft.gp".into();
+        let mut query = title_query("");
+        assert!(matches_filters(&bare, &query));
+        query.title = "draft".into();
+        assert!(
+            matches_filters(&bare, &query),
+            "title falls back to the file name"
+        );
+        query.title.clear();
+        query.artist = "any".into();
+        assert!(!matches_filters(&bare, &query));
+        query.artist.clear();
+        query.instrument = "guitar".into();
+        assert!(!matches_filters(&bare, &query));
+    }
+
     fn title_query(text: &str) -> LibraryQuery {
         LibraryQuery {
             root_id: None,
             text: text.into(),
+            title: String::new(),
+            artist: String::new(),
+            instrument: String::new(),
             sort: LibrarySort::Title,
             offset: 0,
             limit: 100,

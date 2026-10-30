@@ -98,8 +98,9 @@ describe('probeScoreBytes with the real worker module',()=>{
   it('keeps the message names in step with probe.ts',()=>{
     const source=readFileSync(resolve('src/batch/probe.worker.ts'),'utf8');
     expect(source).toContain(`'${PROBE_REQUEST}'`);expect(source).toContain(`'${PROBE_RESULT}'`);
-    expect(source).toContain('settings.importer.maxDecodingBufferSize=READ_ENTRY_LIMIT');
-    expect(source.indexOf('validateArchive(request.bytes')).toBeLessThan(source.indexOf('loadScoreFromBytes'));
+    expect(source).toContain('readInWorker(request.bytes,READ_ENTRY_LIMIT)');
+    const reader=readFileSync(resolve('src/interchange/worker-read.ts'),'utf8');
+    expect(reader.indexOf('validateArchive(bytes')).toBeGreaterThan(-1);expect(reader.indexOf('validateArchive(bytes')).toBeLessThan(reader.indexOf('loadScoreFromBytes'));
   });
   it('is the case that failed every file: a message without a cmd makes alphaTab throw in the Worker',async()=>{
     const worker=realWorker();

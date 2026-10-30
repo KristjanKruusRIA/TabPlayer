@@ -154,12 +154,14 @@ function inflatedSize(bytes:Uint8Array,start:number,stop:number,declared:number)
 }
 
 /**
- * The one check an archive passes before any parser sees it. Bytes that are not a ZIP pass untouched, and `entryLimit`
+ * The one check a file passes before any parser sees it. Bytes that are not a ZIP or a compressed GPX pass untouched, and `entryLimit`
  * must be the `maxDecodingBufferSize` the parsers will run with. Everything else is decided from the bytes themselves:
  * the headers must agree, the entries must fit the file without overlapping, and every entry is inflated, with the
  * limits applied to what it really produces. Throws an `Error` saying why an archive was refused.
  */
 export function validateArchive(bytes:Uint8Array,entryLimit:number):void {
+  // alphaTab's GPX reader inflates to the size the file declares, under no limit of its own.
+  if(bytes.length>=8&&bytes[0]===0x42&&bytes[1]===0x43&&bytes[2]===0x46&&bytes[3]===0x5a)require(new DataView(bytes.buffer,bytes.byteOffset,8).getInt32(4,true)<=entryLimit,`GPX data exceeds ${mib(entryLimit)}.`);
   if(!isArchive(bytes))return;
   try{
     const view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength);

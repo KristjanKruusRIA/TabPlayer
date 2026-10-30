@@ -270,3 +270,11 @@ describe.skipIf(!existsSync(resolve(folder,fixtures[0])))('the real fixtures',()
     refuses(bytes,/mismatch/);
   });
 });
+
+describe('compressed GPX',()=>{
+  const header=(size:number)=>{const bytes=new Uint8Array(16);bytes.set([0x42,0x43,0x46,0x5a]);new DataView(bytes.buffer).setInt32(4,size,true);return bytes;};
+  it('refuses a declared size past the limit, which the stock reader would inflate to',()=>{
+    expect(()=>validateArchive(header(READ_ENTRY_LIMIT+1),READ_ENTRY_LIMIT)).toThrow('GPX data exceeds 32 MiB.');
+    expect(()=>validateArchive(header(READ_ENTRY_LIMIT),READ_ENTRY_LIMIT)).not.toThrow();
+  });
+});

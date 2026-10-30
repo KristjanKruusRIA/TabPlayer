@@ -59,7 +59,7 @@ describe('admitDocumentBase',()=>{
     const bytes=sound(),create=vi.fn(()=>stand_in(pass));
     await admitDocumentBase(project(bytes,'a'.repeat(64)),{createWorker:create});
     await admitDocumentBase(project(bytes,'a'.repeat(64)),{createWorker:create});
-    expect(create).toHaveBeenCalledTimes(1);
+    expect(create).toHaveBeenCalledTimes(2);
     const again=bytes.slice();adoptAdmittedBase('a'.repeat(64),again);assertArchiveAccepted(again,OPEN_ENTRY_LIMIT);
     expect(validateArchive).not.toHaveBeenCalled();
   });
@@ -69,11 +69,32 @@ describe('admitDocumentBase',()=>{
     const again=bytes.slice();adoptAdmittedBase('b'.repeat(64),again);assertArchiveAccepted(again,OPEN_ENTRY_LIMIT);
     expect(validateArchive).toHaveBeenCalledTimes(1);
   });
-  it('starts no Worker for a blank document or a file that is not an archive',async()=>{
+  it('starts no Worker for a blank document',async()=>{
     const create=vi.fn(()=>stand_in(pass));
     await admitDocumentBase({base:{kind:'blank'}},{createWorker:create});
-    await admitDocumentBase(project(strToU8('<score-partwise/>'),'c'.repeat(64)),{createWorker:create});
-    await admitDocumentBase(project(new Uint8Array([24,70,73,67]),'d'.repeat(64)),{createWorker:create});
+    expect(create).not.toHaveBeenCalled();
+  });
+  it.each([['MusicXML',strToU8('<score-partwise/>')],['a binary score',new Uint8Array([24,70,73,67])]])('sends %s to the stock reader in a Worker',async(_name,bytes)=>{
+    const seen:{read?:boolean}[]=[];
+    await admitDocumentBase(project(bytes,bytes.length.toString(16).padStart(64,'0')),{createWorker:()=>stand_in(data=>{seen.push(data as {read?:boolean});return pass();})});
+    expect(seen.map(data=>data.read)).toEqual([true]);
+  });
+  it('validates an archive first, then has the stock reader read it',async()=>{
+    const seen:{read?:boolean}[]=[];
+    await admitDocumentBase(project(sound(),'f'.repeat(64)),{createWorker:()=>stand_in(data=>{seen.push(data as {read?:boolean});return pass();})});
+    expect(seen.map(data=>data.read)).toEqual([false,true]);
+  });
+  it('cuts off a file that keeps the reader busy, ends the Worker and admits nothing',async()=>{
+    const worker=stand_in(()=>undefined),bytes=new Uint8Array([0x42,0x43,0x46,0x53,1,2,3,4]);
+    await expect(admitDocumentBase(project(bytes,'1'.repeat(64)),{deadlineMs:30,createWorker:()=>worker})).rejects.toThrow('The file did not open within 0 seconds. It may be damaged.');
+    expect(worker.terminate).toHaveBeenCalled();
+    vi.stubGlobal('Worker',class {});
+    try{expect(()=>adoptAdmittedBase('1'.repeat(64),bytes)).toThrow('This file has not passed the file check.');}
+    finally{vi.unstubAllGlobals();}
+  });
+  it('refuses a base larger than any score native reads, before decoding it',async()=>{
+    const create=vi.fn(()=>stand_in(pass));
+    await expect(admitDocumentBase({base:{kind:'file',bytesBase64:'A'.repeat(90*1024*1024),sha256:'2'.repeat(64)}},{createWorker:create})).rejects.toThrow('The file is larger than 64 MiB.');
     expect(create).not.toHaveBeenCalled();
   });
 });

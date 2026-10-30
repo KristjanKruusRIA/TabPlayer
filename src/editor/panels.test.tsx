@@ -326,6 +326,46 @@ it('bend preset buttons preserve focus through an edit when disabled becomes tru
   expect(presetBtn).toHaveFocus();
   expect(presetBtn).toHaveAttribute('aria-disabled', 'true');
 });
+
+it('invalid partial capo or drone shows reason and reverts peg on step in StructurePanel', () => {
+  const score = music();
+  const onEdit = vi.fn();
+  render(<StructurePanel score={score} target={target} string={6} busy={false} onEdit={onEdit} onSelect={vi.fn()} />);
+
+  // Check a string in partial capo without a fret to make partial capo invalid
+  const stringCheck = screen.getByRole('checkbox', { name: /String 6/ });
+  fireEvent.click(stringCheck);
+
+  // Click peg 6 down
+  const downBtn = screen.getByRole('button', { name: 'Tune Staff tuning (notes, high to low) string 6 down' });
+  fireEvent.click(downBtn);
+
+  // Must NOT dispatch edit, must show reason in alert, and must revert tuning input
+  expect(onEdit).not.toHaveBeenCalled();
+  expect(screen.getByText('Fix the partial capo before tuning strings.')).toBeInTheDocument();
+  expect(screen.getByLabelText('Staff tuning (notes, high to low)')).toHaveValue('E4 B3 G3 D3 A2 E2');
+});
+
+it('invalid banjo drone shows reason and reverts peg on step in StructurePanel', () => {
+  const score = music();
+  const onEdit = vi.fn();
+  render(<StructurePanel score={score} target={target} string={6} busy={false} onEdit={onEdit} onSelect={vi.fn()} />);
+
+  // Turn on banjo drone and type invalid fret 40
+  fireEvent.click(screen.getByRole('checkbox', { name: /Short drone string/ }));
+  const fretInput = screen.getByLabelText('Drone string starts at fret');
+  fireEvent.change(fretInput, { target: { value: '40' } });
+  fireEvent.blur(fretInput);
+
+  // Click peg 6 down
+  const downBtn = screen.getByRole('button', { name: 'Tune Staff tuning (notes, high to low) string 6 down' });
+  fireEvent.click(downBtn);
+
+  // Must NOT dispatch edit, must show reason in alert, and must revert tuning input
+  expect(onEdit).not.toHaveBeenCalled();
+  expect(screen.getByText('Fix the banjo drone before tuning strings.')).toBeInTheDocument();
+  expect(screen.getByLabelText('Staff tuning (notes, high to low)')).toHaveValue('E4 B3 G3 D3 A2 E2');
+});
 it('staff tuning uses named notes, validates drafts and refreshes from history',()=>{
   const score=music(),onEdit=vi.fn(),props={score,target,string:6,busy:false,onEdit,onSelect:vi.fn()};const view=render(<StructurePanel {...props}/>);const input=screen.getByLabelText('Staff tuning (notes, high to low)');expect(input).toHaveValue('E4 B3 G3 D3 A2 E2');
   fireEvent.change(input,{target:{value:'E4 B3 G3 D3 A2 Db2'}});fireEvent.click(screen.getByRole('button',{name:'Apply staff settings'}));expect(onEdit).toHaveBeenLastCalledWith(expect.objectContaining({type:'setStaffSettings',settings:expect.objectContaining({tuning:[64,59,55,50,45,37]})}));onEdit.mockClear();

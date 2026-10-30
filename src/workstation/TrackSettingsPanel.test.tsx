@@ -165,3 +165,26 @@ it('focusing dial does not erase tuning name or dispatch edits when unshifted',(
   fireEvent.pointerUp(dial,{pointerId:1,clientY:100});
   expect(onEdit).not.toHaveBeenCalled();
 });
+
+it('peg step does not commit unapplied draft text and sends only tuning change', () => {
+  const score = previewEdit(blankProject(), { type: 'setRest', target: { track: 0, staff: 0, bar: 0, voice: 0, beat: 0 } }).score;
+  const onEdit = vi.fn();
+  render(<TrackSettingsPanel score={score} selected={0} busy={false} onEdit={onEdit} />);
+
+  // Type 7 notes into the text box (unapplied draft text)
+  const input = screen.getByLabelText('Tuning (notes, high to low)');
+  fireEvent.change(input, { target: { value: 'E4 B3 G3 D3 A2 E2 B1' } });
+
+  // Click peg 6 step down
+  const downBtn = screen.getByRole('button', { name: 'Tune Tuning (notes, high to low) string 6 down' });
+  fireEvent.click(downBtn);
+
+  // Must NOT send setStringCount! Must send setTuning with 6 strings!
+  expect(onEdit).toHaveBeenCalledTimes(1);
+  expect(onEdit).toHaveBeenLastCalledWith({
+    type: 'setTuning',
+    track: 0,
+    tuning: [64, 59, 55, 50, 45, 39],
+    tuningName: '',
+  });
+});

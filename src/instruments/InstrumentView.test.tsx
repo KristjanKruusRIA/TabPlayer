@@ -129,8 +129,8 @@ it('renders a guitar body and pickup poles for every string with physical fret s
 
 it('renders acoustic drum shells, heads, cymbals and the kick pedal', () => {
   const score=scoreWith([[]],0,true);finish(score);const {container}=render(<InstrumentView score={score} track={0} staff={0} notes={[]}/>);
-  expect(container.querySelector('[data-drum="snare"] [data-drum-surface="head"]')).toBeInTheDocument();expect(container.querySelector('[data-drum="floor-tom"] [data-drum-surface="shell"]')).toBeInTheDocument();
-  expect(container.querySelector('[data-drum="ride"] [data-drum-surface="cymbal"]')).toBeInTheDocument();expect(container.querySelector('[data-drum="kick"] [data-drum-surface="pedal"]')).toBeInTheDocument();
+  expect(container.querySelector('[data-drum-art="snare"] [data-drum-surface="head"]')).toBeInTheDocument();expect(container.querySelector('[data-drum-art="floor-tom"] [data-drum-surface="shell"]')).toBeInTheDocument();
+  expect(container.querySelector('[data-drum-art="ride"] [data-drum-surface="cymbal"]')).toBeInTheDocument();expect(container.querySelector('[data-drum-art="kick"] [data-drum-surface="pedal"]')).toBeInTheDocument();
 });
 
 it('keeps descriptive SVG titles intact when rendering instrument artwork', () => {

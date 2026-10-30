@@ -403,7 +403,7 @@ export function CurveEditor({
   return (
     <details className="curve-editor">
       <summary>{label} curve</summary>
-      <fieldset disabled={disabled}>
+      <fieldset disabled={false} aria-disabled={disabled ? 'true' : undefined}>
         <label className="check">
           <input
             type="checkbox"
@@ -439,8 +439,11 @@ export function CurveEditor({
                 className="tp-curve-preset-btn"
                 aria-label={`${label} preset: ${preset.name}`}
                 aria-pressed={isCurrent}
-                disabled={disabled}
-                onClick={() => applyPreset(preset)}
+                aria-disabled={disabled ? 'true' : undefined}
+                onClick={() => {
+                  if (disabled) return;
+                  applyPreset(preset);
+                }}
               >
                 <svg viewBox="0 0 18 16" width="16" height="14" aria-hidden="true">
                   <path

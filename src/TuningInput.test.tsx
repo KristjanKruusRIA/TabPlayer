@@ -129,6 +129,28 @@ it('busy starting mid-drag drops commit and restores draft tuning and name', () 
   expect(onTuningNameChange).toHaveBeenLastCalledWith('Standard');
 });
 
+it('peg +/- buttons preserve focus through an edit when busy becomes true', () => {
+  const onCommit = vi.fn();
+  const props = {
+    label: 'Notes',
+    presetLabel: 'Preset',
+    value: 'E4 B3 G3 D3 A2 E2',
+    onChange: vi.fn(),
+    tuningName: 'Standard',
+    onTuningNameChange: vi.fn(),
+    onCommit,
+  };
+  const { rerender } = render(<TuningInput {...props} />);
+  const upBtn = screen.getByRole('button', { name: 'Tune Notes string 1 up' });
+  upBtn.focus();
+  expect(upBtn).toHaveFocus();
+
+  // During edit busy becomes true
+  rerender(<TuningInput {...props} disabled />);
+  expect(upBtn).toHaveFocus();
+  expect(upBtn).toHaveAttribute('aria-disabled', 'true');
+});
+
 it('wheel over an unfocused peg does not retune and focused wheel commits once after settling',()=>{
   vi.useFakeTimers();
   try{

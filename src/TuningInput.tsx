@@ -366,18 +366,26 @@ export function TuningInput({
                       <button
                         type="button"
                         className="tp-peg-step"
-                        disabled={disabled || pitch <= 0}
+                        disabled={pitch <= 0 && !disabled}
+                        aria-disabled={disabled || pitch <= 0 ? 'true' : undefined}
                         aria-label={`Tune ${label} string ${index + 1} down`}
-                        onClick={() => updateStringPitch(index, pitch - 1, true)}
+                        onClick={() => {
+                          if (disabled || pitch <= 0) return;
+                          updateStringPitch(index, pitch - 1, true);
+                        }}
                       >
                         −
                       </button>
                       <button
                         type="button"
                         className="tp-peg-step"
-                        disabled={disabled || pitch >= 127}
+                        disabled={pitch >= 127 && !disabled}
+                        aria-disabled={disabled || pitch >= 127 ? 'true' : undefined}
                         aria-label={`Tune ${label} string ${index + 1} up`}
-                        onClick={() => updateStringPitch(index, pitch + 1, true)}
+                        onClick={() => {
+                          if (disabled || pitch >= 127) return;
+                          updateStringPitch(index, pitch + 1, true);
+                        }}
                       >
                         +
                       </button>

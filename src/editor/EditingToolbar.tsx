@@ -312,7 +312,7 @@ export function EditingToolbar({
           key: 'rest',
           label: 'Toggle rest',
           pressed: Boolean(beat?.isRest),
-          disabled: editDisabled || !beat,
+          disabled: editDisabled || !beat || (Boolean(beat?.isRest) && !stringed),
           badge: 'R',
           onClick: () => {
             if (!beat || editDisabled) return;

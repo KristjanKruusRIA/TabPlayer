@@ -165,6 +165,7 @@ it('duration button at current duration and rest toggle on indexed-staff rest re
   render(<EditorPanel {...input}/>);
   const indexedToolbar=within(screen.getByRole('toolbar',{name:'Editing toolbar'}));
   expect(indexedToolbar.getByRole('button',{name:'Toggle rest'})).toHaveAttribute('aria-pressed','true');
+  expect(indexedToolbar.getByRole('button',{name:'Toggle rest'})).toBeDisabled();
   fireEvent.click(indexedToolbar.getByRole('button',{name:'Toggle rest'}));
   // Must NOT dispatch setRest on an existing rest on an indexed staff (Finding 2)
   expect(input.onEdit).not.toHaveBeenCalled();

@@ -314,6 +314,18 @@ it('lost pointer or dragging out and back preserves tuning name in StructurePane
     settings: expect.objectContaining({ tuningName: 'Standard' }),
   }));
 });
+
+it('bend preset buttons preserve focus through an edit when disabled becomes true', () => {
+  const initialCurve = { type: model.BendType.Bend, style: 0, points: [{ offset: 0, value: 0 }, { offset: 60, value: 4 }] };
+  const { rerender } = render(<CurveEditor label="Bend" value={initialCurve} onChange={vi.fn()} />);
+  const presetBtn = screen.getByRole('button', { name: 'Bend preset: Bend & release' });
+  presetBtn.focus();
+  expect(presetBtn).toHaveFocus();
+
+  rerender(<CurveEditor label="Bend" value={initialCurve} disabled onChange={vi.fn()} />);
+  expect(presetBtn).toHaveFocus();
+  expect(presetBtn).toHaveAttribute('aria-disabled', 'true');
+});
 it('staff tuning uses named notes, validates drafts and refreshes from history',()=>{
   const score=music(),onEdit=vi.fn(),props={score,target,string:6,busy:false,onEdit,onSelect:vi.fn()};const view=render(<StructurePanel {...props}/>);const input=screen.getByLabelText('Staff tuning (notes, high to low)');expect(input).toHaveValue('E4 B3 G3 D3 A2 E2');
   fireEvent.change(input,{target:{value:'E4 B3 G3 D3 A2 Db2'}});fireEvent.click(screen.getByRole('button',{name:'Apply staff settings'}));expect(onEdit).toHaveBeenLastCalledWith(expect.objectContaining({type:'setStaffSettings',settings:expect.objectContaining({tuning:[64,59,55,50,45,37]})}));onEdit.mockClear();

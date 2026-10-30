@@ -25,7 +25,7 @@ export function TrackSettingsPanel({score,selected,busy,locked=false,onEdit,onAu
   const [newTuningName,setNewTuningName]=useState('');
   const [newTuningError,setNewTuningError]=useState<string|null>(null),tuningInput=useRef<HTMLInputElement>(null),newTuningInput=useRef<HTMLInputElement>(null);
   const applyTuning=(add=false)=>{if(locked)return;const setError=add?setNewTuningError:setTuningError;try{const notes=parseTuning(add?newTuning:tuning);setError(null);onEdit(add?{type:'addTrack',name,tuning:notes,program:instrument,tuningName:newTuningName}:notes.length!==strings?{type:'setStringCount',track:selected,tuning:notes,keep,tuningName}:{type:'setTuning',track:selected,tuning:notes,tuningName});}catch(error){setError(error instanceof Error?error.message:String(error));const input=(add?newTuningInput:tuningInput).current;input?.focus();input?.closest('.tuning-field')?.scrollIntoView?.({block:'nearest'});}};
-  return <aside className="track-settings" aria-label="Track settings"><h2 title={current.name}>{current.name || `Track ${selected+1}`}</h2><fieldset disabled={busy}>
+  return <aside className="track-settings" aria-label="Track settings"><h2 title={current.name}>{current.name || `Track ${selected+1}`}</h2><fieldset disabled={false} aria-disabled={busy ? 'true' : undefined}>
     <button disabled={locked||score.tracks.length===1} onClick={()=>onEdit({type:'removeTrack',track:selected})}>Remove track</button>
     <button disabled={locked||selected===0} onClick={()=>onEdit({type:'moveTrack',track:selected,to:selected-1})}>Move track up</button>
     <button disabled={locked||selected===score.tracks.length-1} onClick={()=>onEdit({type:'moveTrack',track:selected,to:selected+1})}>Move track down</button>

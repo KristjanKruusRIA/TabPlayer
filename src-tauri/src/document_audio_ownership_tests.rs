@@ -8,14 +8,17 @@ fn fixture() -> (
     Arc<ExportJobs>,
 ) {
     (
-        Arc::new(NativeAudio::new(PathBuf::new(), Arc::new(|_| {}))),
+        Arc::new(NativeAudio::new(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/audio"),
+            Arc::new(|_| {}),
+        )),
         Arc::new(Mutex::new(DocumentWorkspace::new().unwrap())),
         Arc::new(ExportJobs::default()),
     )
 }
 
 fn plan(generation: u64) -> PlaybackPlan {
-    serde_json::from_value(serde_json::json!({"generation":generation,"ppq":960,"durationTick":3840,"durationMs":2000,"tracks":[],"tempos":[{"tick":0,"bpm":120}],"occurrences":[{"bar":0,"occurrence":0,"meterNumerator":4,"meterDenominator":4,"startTick":0,"endTick":3840,"startMs":0,"endMs":2000}],"notes":[],"midi":[]})).unwrap()
+    serde_json::from_value(serde_json::json!({"generation":generation,"ppq":960,"durationTick":3840,"durationMs":2000,"tracks":[{"id":"gm","program":0,"percussion":false}],"tempos":[{"tick":0,"bpm":120}],"occurrences":[{"bar":0,"occurrence":0,"meterNumerator":4,"meterDenominator":4,"startTick":0,"endTick":3840,"startMs":0,"endMs":2000}],"notes":[],"midi":[]})).unwrap()
 }
 
 fn add(audio: &NativeAudio, jobs: &ExportJobs, workspace: &Mutex<DocumentWorkspace>) -> AudioOwner {
@@ -672,6 +675,24 @@ fn a_panicking_audition_render_does_not_block_later_auditions() {
 }
 
 /// Every change of a knob in the Sound rig reaches `audio_set_mix`. With the same backing as before, nothing about the
+fn valid_wav(pcm_bytes: u32) -> Vec<u8> {
+    let mut wav = Vec::with_capacity(pcm_bytes as usize + 44);
+    wav.extend_from_slice(b"RIFF");
+    wav.extend_from_slice(&(pcm_bytes + 36).to_le_bytes());
+    wav.extend_from_slice(b"WAVEfmt ");
+    wav.extend_from_slice(&16_u32.to_le_bytes());
+    wav.extend_from_slice(&1_u16.to_le_bytes());
+    wav.extend_from_slice(&2_u16.to_le_bytes());
+    wav.extend_from_slice(&48_000_u32.to_le_bytes());
+    wav.extend_from_slice(&192_000_u32.to_le_bytes());
+    wav.extend_from_slice(&4_u16.to_le_bytes());
+    wav.extend_from_slice(&16_u16.to_le_bytes());
+    wav.extend_from_slice(b"data");
+    wav.extend_from_slice(&pcm_bytes.to_le_bytes());
+    wav.resize(pcm_bytes as usize + 44, 0);
+    wav
+}
+
 /// backing is needed, so its asset must not be decoded (a long recording is tens of megabytes of base64) under the workspace lock.
 #[test]
 fn set_mix_with_an_unchanged_backing_does_not_decode_the_asset() {
@@ -688,7 +709,7 @@ fn set_mix_with_an_unchanged_backing_does_not_decode_the_asset() {
         revision: 0,
     };
     // 32 MB of backing, as a long recording would be.
-    let big = vec![7u8; 32 * 1024 * 1024];
+    let big = valid_wav(32 * 1024 * 1024 - 44);
     let staged = workspace
         .lock()
         .unwrap()
@@ -726,14 +747,38 @@ fn set_mix_with_an_unchanged_backing_does_not_decode_the_asset() {
         .unwrap();
     let mut settings = DocumentSettings::default();
     settings.backing = Some(backing);
-    // The player already has this backing loaded.
-    *audio.current_backing.lock().unwrap() = Some(staged.asset_id.clone());
+    audio
+        .command(
+            &workspace,
+            &owner,
+            TransportCommand::Invalidate { generation: 1 },
+        )
+        .unwrap();
+    audio
+        .prepare(
+            &workspace,
+            &owner,
+            plan(1),
+            settings.clone(),
+            None,
+            "source".into(),
+            None,
+        )
+        .unwrap();
+    assert_eq!(
+        *audio.current_backing.lock().unwrap(),
+        Some(staged.asset_id.clone())
+    );
+    assert!(audio.service.status().backing_duration_seconds.is_some());
     let decodes = || DECODES.with(|count| count.get());
     let before = decodes();
     let started = std::time::Instant::now();
-    for generation in 1..=20 {
-        // Whether the player accepts the mix is not the point; the asset must not be read to find out.
-        let _ = audio.set_mix(&workspace, &owner, settings.clone(), generation);
+    for i in 1..=20 {
+        let mut tweak = settings.clone();
+        if let Some(b) = &mut tweak.backing {
+            b.mix.gain = 0.5 + (i as f32) * 0.01;
+        }
+        audio.set_mix(&workspace, &owner, tweak, 1).unwrap();
     }
     let unchanged = started.elapsed();
     println!(
@@ -741,12 +786,120 @@ fn set_mix_with_an_unchanged_backing_does_not_decode_the_asset() {
         decodes() - before
     );
     assert_eq!(decodes(), before, "an unchanged backing is not decoded");
-    // A changed backing still reads it, once, to load it.
-    *audio.current_backing.lock().unwrap() = None;
-    let _ = audio.set_mix(&workspace, &owner, settings, 100);
+
+    // Remove backing installs: drops backing and player status duration becomes None.
+    let mut without_backing = settings.clone();
+    without_backing.backing = None;
+    let decodes_before_remove = decodes();
+    audio
+        .set_mix(&workspace, &owner, without_backing.clone(), 1)
+        .unwrap();
+    assert_eq!(
+        *audio.current_backing.lock().unwrap(),
+        None,
+        "remove clears current_backing"
+    );
+    assert_eq!(
+        audio.service.status().backing_duration_seconds,
+        None,
+        "remove drops backing audio from player status"
+    );
     assert_eq!(
         decodes(),
-        before + 1,
-        "a changed backing is read to be loaded"
+        decodes_before_remove,
+        "removing backing does not decode"
+    );
+
+    // Add-back backing installs: decodes once and reinstalls backing.
+    let decodes_before_add_back = decodes();
+    audio
+        .set_mix(&workspace, &owner, settings.clone(), 1)
+        .unwrap();
+    assert_eq!(
+        *audio.current_backing.lock().unwrap(),
+        Some(staged.asset_id.clone()),
+        "add-back restores current_backing"
+    );
+    assert!(
+        audio.service.status().backing_duration_seconds.is_some(),
+        "add-back restores backing duration"
+    );
+    assert_eq!(
+        decodes(),
+        decodes_before_add_back + 1,
+        "add-back decodes the backing once"
+    );
+
+    // Replace backing installs: stage a second valid WAV and set_mix with it.
+    let second_wav = valid_wav(48_000 * 10 * 4);
+    let staged2 = workspace
+        .lock()
+        .unwrap()
+        .stage_asset(
+            &owner.document_id,
+            StoredAsset::from_bytes(
+                directory
+                    .path()
+                    .join("second.wav")
+                    .to_string_lossy()
+                    .into_owned(),
+                "audio/wav".into(),
+                &second_wav,
+            ),
+        )
+        .unwrap();
+    let backing2 = BackingSettings {
+        processing: None,
+        reference_sync: None,
+        asset_id: staged2.asset_id.clone(),
+        offset_ms: 0.0,
+        anchors: vec![],
+        mix: ChannelMix::default(),
+    };
+    workspace
+        .lock()
+        .unwrap()
+        .apply_edit(
+            &DocumentRevision {
+                document_id: owner.document_id.clone(),
+                revision: 1,
+            },
+            EditCommand::SetBacking {
+                backing: Some(backing2.clone()),
+            },
+            Some(&staged2.token),
+        )
+        .unwrap();
+    let mut settings2 = DocumentSettings::default();
+    settings2.backing = Some(backing2);
+    let decodes_before_replace = decodes();
+    audio
+        .set_mix(&workspace, &owner, settings2.clone(), 1)
+        .unwrap();
+    assert_eq!(
+        *audio.current_backing.lock().unwrap(),
+        Some(staged2.asset_id.clone()),
+        "replace installs new current_backing"
+    );
+    let duration2 = audio.service.status().backing_duration_seconds;
+    assert!(duration2.is_some(), "replace installs new backing duration");
+    assert_eq!(
+        decodes(),
+        decodes_before_replace + 1,
+        "replace decodes the new asset once"
+    );
+
+    // Errors keep the old audio: stale generation returns error and keeps old backing and duration.
+    let stale_err = audio.set_mix(&workspace, &owner, settings.clone(), 999);
+    assert!(stale_err.is_err(), "stale generation returns error");
+    assert_eq!(
+        *audio.current_backing.lock().unwrap(),
+        Some(staged2.asset_id.clone()),
+        "stale error retains old backing"
+    );
+    assert_eq!(
+        audio.service.status().backing_duration_seconds,
+        duration2,
+        "stale error retains old audio duration"
     );
 }

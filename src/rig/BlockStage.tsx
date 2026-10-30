@@ -25,7 +25,7 @@ function BlockKnobs({editing,board,block,tone}:{editing:SoundEditing;board:Board
     const {short,unit}=nameAndUnit(p.label);
     // Switched off by the mode or by following the tempo, as the inspector's fields are.
     const off=block==='wah'&&p.key===(board.effects.wah.mode==='auto'?'position':'sensitivity')||p.key==='rateHz'&&syncOf(board,block)!==0;
-    return <Knob key={p.key} tone={tone} label={short} ariaLabel={board.name(`${block} ${p.label}`)} unit={unit} min={p.min} max={p.max} step={p.step} value={Number(settings[p.key]??0)} defaultValue={Number(defaults[block][p.key]??0)} disabled={busy||off} onCommit={value=>fx(board,block,p.key,value)}/>;
+    return <Knob key={p.key} tone={tone} label={short} ariaLabel={board.name(`${block} ${p.label}`)} unit={unit} min={p.min} max={p.max} step={p.step} value={Number(settings[p.key]??0)} defaultValue={Number(defaults[block][p.key]??0)} disabled={busy||off} onCommit={value=>fx(board,block,p.key,value)} onInput={value=>editing.hearField(board,block,p.key,value)} onInputEnd={committed=>{if(!committed)void editing.endLive();}}/>;
   })}</>;
 }
 function Choice<T extends string|number>({label,value,options,onChange,disabled}:{label:string;value:T;options:readonly (readonly [T,string])[];onChange:(value:T)=>void;disabled:boolean}) {
@@ -99,7 +99,7 @@ function GraphicEqStage({editing,board}:{editing:SoundEditing;board:Board}) {
   const gains=board.effects.graphicEq.gainsDb,{fx,busy}=editing;
   return <div className="rig-geq-stage">
     <div className="rig-geq" role="group" aria-label={board.name('Graphic EQ bands')}>
-      {graphicBands.map((band,index)=><Fader key={band} label={band} ariaLabel={board.name(`Graphic EQ ${band} Hz (dB)`)} unit="" bipolar min={-12} max={12} step={.5} defaultValue={0} value={gains[index]} disabled={busy} onCommit={value=>fx(board,'graphicEq','gainsDb',gains.map((gain,other)=>other===index?value:gain))}/>)}
+      {graphicBands.map((band,index)=><Fader key={band} label={band} ariaLabel={board.name(`Graphic EQ ${band} Hz (dB)`)} unit="" bipolar min={-12} max={12} step={.5} defaultValue={0} value={gains[index]} disabled={busy} onCommit={value=>fx(board,'graphicEq','gainsDb',gains.map((gain,other)=>other===index?value:gain))} onInput={value=>editing.hearField(board,'graphicEq','gainsDb',gains.map((gain,other)=>other===index?value:gain))} onInputEnd={committed=>{if(!committed)void editing.endLive();}}/>)}
     </div>
     <div className="rig-geq-side">
       <BlockKnobs editing={editing} board={board} block="graphicEq" tone="pedal"/>

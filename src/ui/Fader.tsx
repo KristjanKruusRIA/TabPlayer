@@ -10,10 +10,10 @@ export interface FaderProps extends ControlProps {
 }
 const thumb=14;
 /** A vertical slider with the same contract as Knob: drag, arrows, the wheel while focused, double-click to reset. */
-export function Fader({label,ariaLabel,value,min,max,step,defaultValue,unit,format,disabled=false,onCommit,onInput,bipolar=false,className}:FaderProps) {
+export function Fader({label,ariaLabel,value,min,max,step,defaultValue,unit,format,disabled=false,onCommit,onInput,onInputEnd,bipolar=false,className}:FaderProps) {
   const track=useRef<HTMLDivElement>(null);
   const trackHeight=()=>Math.max(1,(track.current?.getBoundingClientRect().height||120)-thumb);
-  const range=useRange({value,min,max,step,defaultValue,disabled,onCommit,onInput,travel:trackHeight});
+  const range=useRange({value,min,max,step,defaultValue,disabled,onCommit,onInput,onInputEnd,travel:trackHeight});
   const {shown,handlers}=range;
   const t=(shown-min)/(max-min),text=formatValue(shown,{min,step,unit,format});
   const down=(event:React.PointerEvent<HTMLDivElement>)=>{

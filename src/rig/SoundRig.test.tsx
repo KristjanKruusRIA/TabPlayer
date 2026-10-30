@@ -498,3 +498,76 @@ it('does not take Space or the arrows from a text field', async()=>{
   await user.type(screen.getByRole('searchbox',{name:'Search sounds'}),'a b');
   expect(screen.getByRole('searchbox')).toHaveValue('a b');expect(edits).toHaveLength(0);
 });
+
+// Hearing a drag.
+const wait=(ms:number)=>act(async()=>{await new Promise(resolve=>setTimeout(resolve,ms));});
+it('plays the sound being dragged, at a limited rate, and records one edit when the drag ends', async()=>{
+  const {edits,player,last}=mount(soundPreset('lead','green-guitar'));
+  const gain=screen.getByRole('slider',{name:'amp Gain (dB)'}),previewed=()=>player!.previewSound.mock.calls.filter(call=>call[1]!==null);
+  fireEvent.pointerDown(gain,{clientY:300,pointerId:1});
+  fireEvent.pointerMove(gain,{clientY:290,pointerId:1});
+  await act(async()=>{});
+  // The first move is heard at once, on the track, as a copy of the whole sound with only that field changed.
+  expect(previewed()).toHaveLength(1);
+  const expected=structuredClone(soundPreset('lead','green-guitar'));expected.effects.amp.gainDb=3;
+  expect(player!.previewSound).toHaveBeenLastCalledWith('guitar',expected);
+  // A burst of moves does not send one request each.
+  for(const y of [285,280,275,270,265,260,255,250])fireEvent.pointerMove(gain,{clientY:y,pointerId:1});
+  expect(previewed().length).toBeLessThanOrEqual(2);
+  await wait(120);
+  // The newest value is what ends up playing.
+  expect((previewed().at(-1)![1] as TrackSound).effects.amp.gainDb).toBe(15);
+  expect(edits).toHaveLength(0);expect(screen.queryByRole('group',{name:'Sound preview'})).toBeNull();
+  fireEvent.pointerUp(gain,{clientY:250,pointerId:1});
+  await act(async()=>{});
+  expect(edits).toHaveLength(1);expect(last().effects.amp.gainDb).toBe(15);
+  // The preview ends after the edit is recorded, and never goes back to the old sound in between.
+  const calls=player!.previewSound.mock.calls.map(call=>call[1]===null?null:(call[1] as TrackSound).effects.amp.gainDb);
+  expect(calls.at(-1)).toBeNull();expect(calls.filter(value=>value===0)).toHaveLength(0);
+  expect(player!.soundPreview()).toBeNull();
+});
+
+it('puts the sound back and records nothing when Escape ends a drag', async()=>{
+  const {edits,player}=mount(soundPreset('lead','green-guitar'));
+  const gain=screen.getByRole('slider',{name:'amp Gain (dB)'});
+  fireEvent.pointerDown(gain,{clientY:300,pointerId:1});fireEvent.pointerMove(gain,{clientY:260,pointerId:1});
+  await act(async()=>{});expect(player!.soundPreview()).not.toBeNull();
+  fireEvent.keyDown(gain,{key:'Escape'});
+  await wait(10);
+  expect(player!.soundPreview()).toBeNull();expect(player!.previewSound).toHaveBeenLastCalledWith('guitar',null);
+  expect(gain).toHaveAttribute('aria-valuenow','0');
+  fireEvent.pointerUp(gain,{clientY:260,pointerId:1});await act(async()=>{});
+  expect(edits).toHaveLength(0);
+});
+
+it('ends a heard drag that finishes where it began, and when the view goes away', async()=>{
+  const first=mount(soundPreset('lead','green-guitar')),gain=screen.getByRole('slider',{name:'amp Gain (dB)'});
+  fireEvent.pointerDown(gain,{clientY:300,pointerId:1});fireEvent.pointerMove(gain,{clientY:260,pointerId:1});await act(async()=>{});
+  fireEvent.pointerMove(gain,{clientY:300,pointerId:1});fireEvent.pointerUp(gain,{clientY:300,pointerId:1});await wait(100);
+  expect(first.edits).toHaveLength(0);expect(first.player!.soundPreview()).toBeNull();
+  first.view.unmount();
+  const second=mount(soundPreset('lead','green-guitar')),other=screen.getByRole('slider',{name:'amp Gain (dB)'});
+  fireEvent.pointerDown(other,{clientY:300,pointerId:1});fireEvent.pointerMove(other,{clientY:260,pointerId:1});await act(async()=>{});
+  expect(second.player!.soundPreview()).not.toBeNull();
+  second.view.unmount();await act(async()=>{});
+  expect(second.player!.soundPreview()).toBeNull();
+});
+
+it('hears a graphic EQ fader drag the same way', async()=>{
+  const {edits,player}=mount(soundPreset('clean'));
+  await choose('graphicEq');
+  const band=screen.getByRole('slider',{name:'Graphic EQ 1k Hz (dB)'});
+  band.getBoundingClientRect=()=>({top:0,left:0,right:36,bottom:134,height:134,width:36,x:0,y:0,toJSON:()=>({})});
+  const thumb=band.querySelector('.tp-fader-thumb')!;
+  fireEvent.pointerDown(thumb,{clientY:67,pointerId:1});fireEvent.pointerMove(thumb,{clientY:37,pointerId:1});await act(async()=>{});
+  expect((player!.soundPreview()!.sound).effects.graphicEq.gainsDb[5]).toBe(6);expect(edits).toHaveLength(0);
+  fireEvent.pointerUp(thumb,{clientY:37,pointerId:1});await act(async()=>{});await wait(10);
+  expect(edits).toHaveLength(1);expect(player!.soundPreview()).toBeNull();
+});
+
+it('does not try to play a drag when the host cannot preview, and still records it', ()=>{
+  const {edits}=mount(soundPreset('lead'),{player:null});
+  const gain=screen.getByRole('slider',{name:'amp Gain (dB)'});
+  fireEvent.pointerDown(gain,{clientY:300,pointerId:1});fireEvent.pointerMove(gain,{clientY:260,pointerId:1});fireEvent.pointerUp(gain,{clientY:260,pointerId:1});
+  expect(edits).toHaveLength(1);
+});

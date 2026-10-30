@@ -12,11 +12,14 @@ const noSubscribe=()=>()=>{},noState=()=>null;
 
 /** A pedalboard's effects and how to change them: the track's own, or the second one after it. A second board
  * left with no pedal switched on is removed. */
-export interface Board {effects:FxSettings;second:boolean;name:(label:string)=>string;write:(change:(effects:FxSettings)=>void)=>Promise<boolean>}
+export interface Board {effects:FxSettings;second:boolean;name:(label:string)=>string;write:(change:(effects:FxSettings)=>void)=>Promise<boolean>;
+  /** The whole sound as it would be after `change`, without recording or playing anything. */
+  build:(change:(effects:FxSettings)=>void)=>TrackSound}
 export interface SoundEditingInput {trackId:string;sound?:TrackSound;onEdit:(edit:EditCommand)=>void|Promise<void>;playback?:NativePlaybackController|null;busy?:boolean;shown?:boolean}
 
 /** Everything the Sound task does to a track's sound: each change is one undoable `setTrackSound` edit, a preview
  * never records one, and the same logic serves the inspector panel and the full-area rig. */
+const liveEveryMs=70;
 export function useSoundEditing({trackId,sound,onEdit,playback,busy=false,shown=true}:SoundEditingInput) {
   const playbackState=useSyncExternalStore(playback?.subscribe??noSubscribe,playback?.getState??noState);
   const current=completeSound(sound??soundPreset('gm'));const [devices,setDevices]=useState<AudioDeviceInfo[]>([]);const [error,setError]=useState<string|null>(null);
@@ -31,12 +34,50 @@ export function useSoundEditing({trackId,sound,onEdit,playback,busy=false,shown=
   /** Ends this track's preview; a preview still being started is dropped. */
   const endPreview=()=>{previewRequest.current++;setPreviewChoice('');return previewer&&previewer.soundPreview()?.track===trackId?Promise.resolve(previewer.previewSound(trackId,null)).catch(e=>setError(String(e))):Promise.resolve();};
   /** Applies `next` as one undoable edit. A preview ends at once, so the edit is what plays and edits keep their order. */
-  const save=(next:TrackSound)=>{if(previewChoice||activePreview){void endPreview();setStatus('Preview ended.');}return record(next);};
-  const first:Board={effects:current.effects,second:false,name:label=>label,write:change=>{const next=structuredClone(current);change(next.effects);return save(next);}};
-  const second:Board|null=current.effects.second?{effects:current.effects.second,second:true,name:label=>`Second pedalboard: ${label}`,write:change=>{
-    const next=structuredClone(current),board=next.effects.second!;change(board);if(effectBlocks.every(block=>!board[block].enabled))delete next.effects.second;return save(next);}}:null;
-  /** Sets one field of `block` on `board`. A field added after sounds could be saved is left out while 0, as the native player writes it. */
-  const fx=(board:Board,block:EffectBlock,key:string,value:unknown)=>board.write(effects=>{if(value===0&&laterFields(block).includes(key))delete (effects[block] as unknown as Record<string,unknown>)[key];else Object.assign(effects[block],{[key]:value});});
+  const save=(next:TrackSound)=>{
+    // A drag being heard ends once its edit is recorded, so the sound never steps back to the old one in between.
+    const heard=live.current.active;
+    if(!heard&&(previewChoice||activePreview)){void endPreview();setStatus('Preview ended.');}
+    return record(next).then(ok=>{if(heard)void endLive();return ok;});
+  };
+  const first:Board={effects:current.effects,second:false,name:label=>label,
+    build:change=>{const next=structuredClone(current);change(next.effects);return next;},write:change=>save(first.build(change))};
+  const second:Board|null=current.effects.second?{effects:current.effects.second,second:true,name:label=>`Second pedalboard: ${label}`,
+    build:change=>{const next=structuredClone(current),board=next.effects.second!;change(board);if(effectBlocks.every(block=>!board[block].enabled))delete next.effects.second;return next;},
+    write:change=>save(second!.build(change))}:null;
+  /** Sets one field of `block`. A field added after sounds could be saved is left out while 0, as the native player writes it. */
+  const setField=(effects:FxSettings,block:EffectBlock,key:string,value:unknown)=>{if(value===0&&laterFields(block).includes(key))delete (effects[block] as unknown as Record<string,unknown>)[key];else Object.assign(effects[block],{[key]:value});};
+  const fx=(board:Board,block:EffectBlock,key:string,value:unknown)=>board.write(effects=>setField(effects,block,key,value));
+  // Hearing a drag. The sound being dragged plays through the preview path, which the player applies as a mix change on the
+  // running plan (no re-preparation, 10 ms crossfade, newest settings win), at most once every `liveEveryMs`. Nothing is
+  // recorded until the drag ends.
+  const live=useRef<{active:boolean;pending:TrackSound|null;sending:boolean;timer:ReturnType<typeof setTimeout>|null;lastSent:number}>({active:false,pending:null,sending:false,timer:null,lastSent:0});
+  const sendLive=()=>{
+    const state=live.current;state.timer=null;
+    if(!state.active||state.sending||!state.pending||!previewer)return;
+    const sound=state.pending;state.pending=null;state.sending=true;state.lastSent=Date.now();
+    void Promise.resolve(previewer.previewSound(trackId,sound)).catch(e=>setError(String(e))).finally(()=>{state.sending=false;if(state.active&&state.pending)scheduleLive();});
+  };
+  const scheduleLive=()=>{
+    const state=live.current;if(state.timer||state.sending)return;
+    const wait=Math.max(0,liveEveryMs-(Date.now()-state.lastSent));
+    if(wait===0)sendLive();else state.timer=setTimeout(sendLive,wait);
+  };
+  /** Plays `next` in place of the track's sound while a control is being dragged. */
+  const hear=(next:TrackSound)=>{
+    if(!previewer||busy||showingPreview)return;
+    const state=live.current;state.active=true;state.pending=structuredClone(next);scheduleLive();
+  };
+  /** Stops hearing a drag and goes back to the saved sound. Resolves once the player has. */
+  const endLive=()=>{
+    const state=live.current;if(!state.active)return Promise.resolve();
+    state.active=false;state.pending=null;if(state.timer){clearTimeout(state.timer);state.timer=null;}
+    const settle=()=>previewer&&!previewChoice&&previewer.soundPreview()?.track===trackId?Promise.resolve(previewer.previewSound(trackId,null)).catch(e=>setError(String(e))):Promise.resolve();
+    // A request still in flight finishes first, so the old sound cannot come back after the end.
+    return state.sending?new Promise<void>(resolve=>{const wait=()=>{if(state.sending)setTimeout(wait,5);else resolve(settle());};wait();}).then(()=>undefined):settle().then(()=>undefined);
+  };
+  /** Plays one field of `block` at `value` for as long as a control is dragged. */
+  const hearField=(board:Board,block:EffectBlock,key:string,value:unknown)=>hear(board.build(effects=>setField(effects,block,key,value)));
   /** Puts a copy of `block` from the track's pedalboard on the second one, switched on; the second board starts with every pedal off. */
   const duplicate=(block:EffectBlock)=>{const next=structuredClone(current),board=next.effects.second??=defaultEffects();(board as unknown as Record<string,unknown>)[block]={...structuredClone(current.effects[block]),enabled:true};void save(next).then(ok=>{if(ok)setStatus(`Duplicated the ${blockNames[block]} pedal onto the second pedalboard.`);});};
   /** Quarter notes per cycle when `block`'s rate follows the tempo, or 0 for its free rate. */
@@ -65,6 +106,8 @@ export function useSoundEditing({trackId,sound,onEdit,playback,busy=false,shown=
   const applySaved=(savedName:string)=>{const item=library.find(candidate=>candidate.name===savedName);if(!item)return;const applied=item.name,appliedTo=trackId;void save(structuredClone(item.sound)).then(ok=>{if(ok&&shownTrack.current===appliedTo)setStatus(`Applied “${applied}”.`);});};
   // Messages and an open confirmation belong to the track they were shown for.
   const shownTrack=useRef(trackId);
+  // A drag being heard ends with its track, and with the view.
+  useEffect(()=>()=>{const state=live.current;state.active=false;state.pending=null;if(state.timer){clearTimeout(state.timer);state.timer=null;}},[trackId]);
   useEffect(()=>{shownTrack.current=trackId;setStatus('');setConfirming(false);setPreviewChoice('');setFactoryChoice('');},[trackId]);
   // A preview lasts only while its track's panel is shown.
   useEffect(()=>()=>{if(previewer?.soundPreview()?.track===trackId)void Promise.resolve(previewer.previewSound(trackId,null)).catch(()=>{});},[previewer,trackId]);
@@ -103,7 +146,7 @@ export function useSoundEditing({trackId,sound,onEdit,playback,busy=false,shown=
   const selectOutput=(id:string)=>playback?.selectDevice(id||null);
   return {
     playbackState,current,devices,error,setError,status,setStatus,busy,playback:playback??null,record,save,
-    first,second,fx,duplicate,syncOf,sync,order,place,move,movedBlock,pastePedal,copyPedalOf,copyCurrentSound,pasteSound,clipboard,library,
+    first,second,fx,hearField,hear,endLive,duplicate,syncOf,sync,order,place,move,movedBlock,pastePedal,copyPedalOf,copyCurrentSound,pasteSound,clipboard,library,
     chosen,setChosen,name,setName,entry,confirming,setConfirming,savedSelect,closeConfirm,saveNamed,renameChosen,deleteChosen,applySaved,
     factoryChoice,setFactoryChoice,factory,factoryNote,applyFactory,applyFactoryId,
     previewer,previewChoice,previewLabel,showingPreview,previewSelect,previewReturn,choosePreview,cancelPreview,keepPreview,escapePreview,orphanPreview,

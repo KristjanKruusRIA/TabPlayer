@@ -9,6 +9,8 @@ export interface RangeOptions {
   onCommit:(value:number)=>void|Promise<unknown>;
   /** Called with each value while a gesture is under way, for readouts that follow it. Never record an edit from here. */
   onInput?:(value:number)=>void;
+  /** Called when a gesture that called `onInput` is over: `committed` is true when `onCommit` was called for it, false when it was cancelled or ended where it began. */
+  onInputEnd?:(committed:boolean)=>void;
   /** Pointer travel, in pixels, that covers the whole range. */
   travel?:()=>number;
 }
@@ -40,15 +42,19 @@ export function useRange(options:RangeOptions) {
   const lastDraft=useRef<number|null>(null);
   const snap=(candidate:number)=>snapToStep(candidate,min,max,step);
 
-  const commit=(next:number)=>{
+  const commit=(next:number):boolean=>{
     const target=snap(next);setDraft(null);lastDraft.current=null;
-    if(target===latest.current.value){setHeld(null);return;}
+    if(target===latest.current.value){setHeld(null);return false;}
     setHeld({sent:target,from:latest.current.value});
     const result=latest.current.onCommit(target);
     if(result&&typeof (result as Promise<unknown>).then==='function')void Promise.resolve(result).then(()=>setHeld(null),()=>setHeld(null));
     else setHeld(null);
+    return true;
   };
-  const flushWheel=()=>{const state=wheel.current;if(state.timer)clearTimeout(state.timer);state.timer=null;if(state.pending!==null){const pending=state.pending;state.pending=null;commit(pending);}};
+  /** Ends a gesture: commits `next`, or just reports the end when there is nothing to record. */
+  const finish=(next:number)=>{const sent=commit(next);latest.current.onInputEnd?.(sent);};
+  const cancelGesture=()=>{drag.current=null;lastDraft.current=null;setDraft(null);const state=wheel.current;if(state.timer)clearTimeout(state.timer);state.timer=null;state.pending=null;latest.current.onInput?.(latest.current.value);latest.current.onInputEnd?.(false);};
+  const flushWheel=()=>{const state=wheel.current;if(state.timer)clearTimeout(state.timer);state.timer=null;if(state.pending!==null){const pending=state.pending;state.pending=null;finish(pending);}};
   useEffect(()=>()=>{const state=wheel.current;if(state.timer)clearTimeout(state.timer);},[]);
 
   const preview=(next:number)=>{const target=snap(next);lastDraft.current=target;setDraft(target);latest.current.onInput?.(target);return target;};
@@ -70,14 +76,16 @@ export function useRange(options:RangeOptions) {
     onPointerUp(event:React.PointerEvent<HTMLElement>){
       const state=drag.current;if(!state||state.pointer!==event.pointerId)return;
       drag.current=null;try{event.currentTarget.releasePointerCapture?.(event.pointerId);}catch{ /* Already released. */ }
-      commit(lastDraft.current??shownRef.current);
+      finish(lastDraft.current??shownRef.current);
     },
     onPointerCancel(event:React.PointerEvent<HTMLElement>){
-      if(drag.current?.pointer!==event.pointerId)return;drag.current=null;lastDraft.current=null;setDraft(null);latest.current.onInput?.(latest.current.value);
+      if(drag.current?.pointer!==event.pointerId)return;cancelGesture();
     },
     onDoubleClick(){if(disabled||defaultValue===undefined)return;flushWheel();commit(defaultValue);},
     /** Arrow keys step, Page keys take ten steps, Home and End go to the ends. Returns whether the key was used. */
     key(event:React.KeyboardEvent):boolean{
+      // Escape during a drag or a wheel run puts the control back and ends the gesture without recording it.
+      if(event.key==='Escape'&&(drag.current||wheel.current.pending!==null)){event.preventDefault();cancelGesture();return true;}
       if(disabled||event.altKey||event.ctrlKey||event.metaKey)return false;
       const big=event.shiftKey?10:1;let next:number;
       switch(event.key){

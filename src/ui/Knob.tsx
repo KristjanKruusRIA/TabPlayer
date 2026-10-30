@@ -12,6 +12,8 @@ export interface ControlProps {
   onCommit:(value:number)=>void|Promise<unknown>;
   /** Follows a gesture as it goes, for display only. */
   onInput?:(value:number)=>void;
+  /** The end of a gesture that called `onInput`; see `useRange`. */
+  onInputEnd?:(committed:boolean)=>void;
 }
 export interface KnobProps extends ControlProps {
   /** `amp` is the dark knob on a tungsten faceplate; `pedal` the pale one on a dark face. */
@@ -35,8 +37,8 @@ const arc=(from:number,to:number,radius:number)=>{
 
 /** A rotary control drawn in SVG. Drag it vertically, use the arrow keys or the wheel while it has focus, double-click to
  * reset it, or click its readout to type a value. */
-export function Knob({label,ariaLabel,value,min,max,step,defaultValue,unit,format,disabled=false,onCommit,onInput,tone='pedal',bipolar=false,className}:KnobProps) {
-  const range=useRange({value,min,max,step,defaultValue,disabled,onCommit,onInput});
+export function Knob({label,ariaLabel,value,min,max,step,defaultValue,unit,format,disabled=false,onCommit,onInput,onInputEnd,tone='pedal',bipolar=false,className}:KnobProps) {
+  const range=useRange({value,min,max,step,defaultValue,disabled,onCommit,onInput,onInputEnd});
   const {shown,handlers}=range;
   const dial=useRef<HTMLDivElement>(null),[editing,setEditing]=useState(false),[typed,setTyped]=useState(''),field=useRef<HTMLInputElement>(null),closing=useRef(false);
   const t=(shown-min)/(max-min),angle=start+sweep*t,zero=bipolar?start+sweep*((0-min)/(max-min)):start;

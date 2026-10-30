@@ -177,7 +177,7 @@ export async function runNoteAudioAcceptance({buildPath}={}){
     const editedGp=await exportAs({format:'gp',name:'edited',extension:'gp'});
     const notesOf=path=>{const score=load(readFileSync(path)),beats=score.tracks[0].staves[0].bars[0].voices[0].beats;return beats.map(beat=>[beat.duration,beat.dots,beat.notes.map(note=>[note.string,note.fret])]);};
     assert.deepEqual(notesOf(editedGp),notesOf(baseGp),'Written position is unchanged');
-    assert.doesNotMatch(strFromU8(unzipSync(readFileSync(editedGp))['Content/score.gpif']),/audio|offset/i,'Guitar Pro has no field for these, so none is written');
+    const gpif=path=>strFromU8(unzipSync(readFileSync(path))['Content/score.gpif']);assert.equal(gpif(editedGp),gpif(baseGp),'Guitar Pro has no field for these, so the written score is the baseline byte for byte');
     assert.deepEqual((await record()).snapshot.project,edited.snapshot.project,'Export never edits');
     step('The written notes and rhythm are unchanged',{notes:notesOf(editedGp)});
 

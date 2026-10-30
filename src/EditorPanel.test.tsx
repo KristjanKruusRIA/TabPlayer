@@ -4,6 +4,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import '@testing-library/jest-dom/vitest';
+import { model } from '@coderline/alphatab';
 import { EditorPanel } from './EditorPanel';
 import { music, target } from './editor/fixtures';
 
@@ -252,10 +253,46 @@ it('contextual inspector shows active selection badges and filters panels by con
   fireEvent.click(contextCard.getByRole('button',{name:'Selection'}));
   expect(screen.getByLabelText('Clipboard draft')).toBeVisible();
   expect(screen.getByLabelText('Time numerator')).not.toBeVisible();
+});
 
-  fireEvent.click(contextCard.getByRole('button',{name:'Beat'}));
-  expect(screen.getByLabelText('Beat text')).toHaveValue('Verse riff');
+it('Shift+Ctrl+V reveals clipboard hidden by scope, formats double/quad rests correctly, and omits String on percussion', () => {
+  const input = props();
+  const view = render(<EditorPanel {...input}><Draft label="Clipboard draft" /></EditorPanel>);
+  const contextCard = within(screen.getByRole('region', { name: 'Selection context' }));
 
-  view.rerender(<EditorPanel {...input} musicSelection={{kind:'bars',tracks:[0],firstBar:0,lastBar:1}}><Draft label="Clipboard draft"/></EditorPanel>);
-  expect(contextCard.getByText('Range selection · Measures 1–2')).toBeVisible();
+  // Switch to note scope -> clipboard draft is hidden
+  fireEvent.click(contextCard.getByRole('button', { name: 'Note' }));
+  expect(screen.getByLabelText('Clipboard draft')).not.toBeVisible();
+
+  // Shift+Ctrl+V pressed on window -> reveals clipboard (Finding 8)
+  fireEvent.keyDown(window, { key: 'v', ctrlKey: true, shiftKey: true });
+  expect(screen.getByLabelText('Clipboard draft')).toBeVisible();
+
+  // Test double whole and quadruple whole rest formatting (LOW finding)
+  const beat = input.score.tracks[0].staves[0].bars[0].voices[0].beats[0];
+  beat.notes = [];
+  beat.duration = -2;
+  view.rerender(<EditorPanel {...input} />);
+  expect(screen.getByText(/Rest beat · Double whole/)).toBeInTheDocument();
+
+  beat.duration = -4;
+  view.rerender(<EditorPanel {...input} />);
+  expect(screen.getByText(/Rest beat · Quadruple whole/)).toBeInTheDocument();
+
+  // Test percussion track omits "String N" when slot is empty (LOW finding)
+  input.score.tracks[0].staves[0].isPercussion = true;
+  input.score.tracks[0].staves[0].stringTuning.tunings = [];
+  const testNote = new model.Note();
+  testNote.fret = 0;
+  beat.notes = [testNote];
+  view.rerender(<EditorPanel {...input} noteIndex={null} />);
+  expect(screen.getByText(/Empty note slot/)).toBeInTheDocument();
+  expect(screen.queryByText(/Empty string slot/)).not.toBeInTheDocument();
+
+  // Test beat scope reveals pick stroke and whammy in TechniquePanel (LOW finding)
+  input.score.tracks[0].staves[0].isPercussion = false;
+  input.score.tracks[0].staves[0].stringTuning.tunings = [64, 59, 55, 50, 45, 40];
+  fireEvent.click(contextCard.getByRole('button', { name: 'Beat' }));
+  expect(screen.getByLabelText('Pick stroke')).toBeVisible();
+  expect(screen.getByText('Whammy curve')).toBeVisible();
 });

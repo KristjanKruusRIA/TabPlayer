@@ -21,6 +21,7 @@ import { BarGesturePanel } from './editor/BarGesturePanel';
 import { RangePanel } from './editor/RangePanel';
 import { MeasureTransformPanel } from './editor/MeasureTransformPanel';
 import { EditingToolbar } from './editor/EditingToolbar';
+import { durationLabel } from './editor/common';
 import type { MusicSelection } from './editor/range-types';
 import './editor-panel.css';
 
@@ -113,6 +114,29 @@ export function EditorPanel({
     else if (scope === 'selection') openSummaryByText('Music selection');
   };
 
+  useEffect(() => {
+    const onGlobalKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (
+        (event.ctrlKey || event.metaKey) &&
+        event.shiftKey &&
+        !event.altKey &&
+        event.key.toLowerCase() === 'v'
+      ) {
+        if (
+          event.target instanceof HTMLElement &&
+          (['INPUT', 'SELECT', 'TEXTAREA'].includes(event.target.tagName) ||
+            event.target.isContentEditable ||
+            Boolean(event.target.closest('[role="dialog"]')))
+        ) {
+          return;
+        }
+        setContextScope('all');
+      }
+    };
+    window.addEventListener('keydown', onGlobalKeyDown);
+    return () => window.removeEventListener('keydown', onGlobalKeyDown);
+  }, []);
+
   const { staff, bar, voice, beat, master } = describeSelection(score, target);
   const indexed = staff.isPercussion || !staff.tuning.length;
   const note = indexed
@@ -177,8 +201,10 @@ export function EditorPanel({
         ? `Selected note · Note ${(noteIndex ?? 0) + 1}${staff.isPercussion ? '' : ` (${formatPitch(note.realValue)})`}`
         : `Selected note · String ${string} Fret ${note.fret} (${formatPitch(note.realValue)})`
       : beat?.isRest
-        ? `Rest beat · 1/${beat.duration}${beat.dots ? '.'.repeat(beat.dots) : ''}`
-        : `Empty string slot · String ${string} (Beat 1/${beat?.duration ?? duration})`;
+        ? `Rest beat · ${durationLabel(beat.duration)}${beat.dots ? '.'.repeat(beat.dots) : ''}`
+        : indexed
+          ? `Empty note slot (Beat ${durationLabel(beat?.duration ?? duration)})`
+          : `Empty string slot · String ${string} (Beat ${durationLabel(beat?.duration ?? duration)})`;
 
   const showSection = (scopes: readonly InspectorContextScope[]) =>
     contextScope === 'all' || scopes.includes(contextScope);
@@ -471,6 +497,8 @@ export function EditorPanel({
                 busy={busy}
                 onEdit={onEdit}
               />
+            </div>
+            <div hidden={!showSection(['note', 'beat'])}>
               <TechniquePanel score={score} target={target} string={string} noteIndex={noteIndex} busy={busy} onEdit={onEdit} />
             </div>
             <div hidden={!showSection(['beat'])}>

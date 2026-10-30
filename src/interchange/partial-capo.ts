@@ -32,6 +32,12 @@ export function readGpifPartialCapo(score:model.Score,doc:Document):void {
         for(const bar of staff.bars)for(const voice of bar.voices)for(const beat of voice.beats)for(const note of beat.notes){
           if(note.trillValue>=0&&note.string>0)note.trillValue+=stringCapo(staff,note.string)-staff.capo;
         }
+        // alphaTab ranked each beat's notes by pitch while loading, before the partial capo was known.
+        for(const bar of staff.bars)for(const voice of bar.voices)for(const beat of voice.beats){
+          const visible=beat.notes.filter(note=>note.isVisible),lookup=(beat as unknown as {noteValueLookup:Map<number,model.Note>}).noteValueLookup;
+          if(visible.length){beat.minNote=visible.reduce((low,note)=>note.realValue<low.realValue?note:low);beat.maxNote=visible.reduce((high,note)=>note.realValue>high.realValue?note:high);}
+          lookup.clear();for(const note of beat.notes)lookup.set(note.realValue,note);
+        }
       }catch(cause){setPartialCapo(staff,null);console.warn(`Skipped a malformed partial capo in the GP file: ${cause instanceof Error?cause.message:String(cause)}`);}
     });
   });

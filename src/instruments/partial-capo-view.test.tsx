@@ -63,11 +63,11 @@ it('leaves the command unchanged for a staff with no partial capo until one is c
   const onEdit=panel(build(false));
   expect(applied(onEdit)).not.toHaveProperty('partialCapo');
   fireEvent.change(screen.getByLabelText('Partial capo fret'),{target:{value:'7'}});
-  // Typing alone commits nothing, and a fret without strings is the same as none.
+  // Typing alone commits nothing; a fret without strings is a draft that holds Apply back.
   expect(applied(onEdit)).not.toHaveProperty('partialCapo');
   fireEvent.blur(screen.getByLabelText('Partial capo fret'));
-  expect(screen.getByText('Choose the strings the partial capo covers.')).toBeInTheDocument();
-  expect(applied(onEdit).partialCapo).toEqual({fret:0,strings:[]});
+  expect(screen.getByRole('alert')).toHaveTextContent('Choose the strings the partial capo covers.');
+  expect(screen.getByRole('button',{name:'Apply staff settings'})).toBeDisabled();
   fireEvent.click(screen.getByRole('checkbox',{name:/String 6/}));fireEvent.click(screen.getByRole('checkbox',{name:/String 5/}));
   expect(applied(onEdit).partialCapo).toEqual({fret:7,strings:[5,6]});
 });
@@ -76,6 +76,7 @@ it('commits the fret with Enter, and clearing it clears the partial capo',()=>{
   const fret=screen.getByLabelText('Partial capo fret');
   fireEvent.change(fret,{target:{value:'9'}});expect(applied(onEdit)).not.toHaveProperty('partialCapo');
   fireEvent.keyDown(fret,{key:'Enter'});expect(applied(onEdit).partialCapo).toEqual({fret:9,strings:[1,2,3]});
+  for(const string of [1,2,3])fireEvent.click(screen.getByRole('checkbox',{name:new RegExp(`^String ${string} `)}));
   fireEvent.change(fret,{target:{value:''}});fireEvent.blur(fret);expect(applied(onEdit).partialCapo).toEqual({fret:0,strings:[]});
 });
 it('says when the capo already covers the partial capo, and offers no strings on a staff without any',()=>{
@@ -86,4 +87,39 @@ it('says when the capo already covers the partial capo, and offers no strings on
 it('is locked with the rest of the staff settings',()=>{
   const onEdit=vi.fn();render(<StructurePanel score={build()} target={target} string={6} busy={false} locked onEdit={onEdit} onSelect={vi.fn()}/>);
   fireEvent.click(screen.getByRole('button',{name:'Apply staff settings'}));expect(onEdit).not.toHaveBeenCalled();
+});
+
+it('sends nothing when the fret is only tabbed through on an untouched staff',()=>{
+  const onEdit=panel(build());const fret=screen.getByLabelText('Partial capo fret');
+  fireEvent.focus(fret);fireEvent.blur(fret);
+  expect(applied(onEdit)).not.toHaveProperty('partialCapo');
+});
+it('keeps the last valid partial capo and blocks Apply while the fret on screen is out of range',()=>{
+  const onEdit=panel(build());const fret=screen.getByLabelText('Partial capo fret');
+  fireEvent.change(fret,{target:{value:'9'}});fireEvent.blur(fret);expect(applied(onEdit).partialCapo).toEqual({fret:9,strings:[1,2,3]});
+  const calls=onEdit.mock.calls.length;
+  fireEvent.change(fret,{target:{value:'200'}});fireEvent.blur(fret);
+  expect(screen.getByRole('alert')).toHaveTextContent('1 to 127');
+  const apply=screen.getByRole('button',{name:'Apply staff settings'});expect(apply).toBeDisabled();fireEvent.click(apply);
+  expect(screen.getByRole('button',{name:'Add staff'})).toBeDisabled();expect(onEdit.mock.calls.length).toBe(calls);
+  fireEvent.change(fret,{target:{value:'11'}});fireEvent.blur(fret);expect(applied(onEdit).partialCapo).toEqual({fret:11,strings:[1,2,3]});
+});
+it('resets the controls with the settings when another bar is selected',()=>{
+  const score=build(),staff=score.tracks[0].staves[0];
+  score.addMasterBar(new model.MasterBar());const bar=new model.Bar(),voice=new model.Voice(),beat=new model.Beat();beat.isEmpty=true;voice.addBeat(beat);bar.addVoice(voice);staff.addBar(bar);score.finish(new Settings());
+  const props={score,string:6,busy:false,onEdit:vi.fn(),onSelect:vi.fn()},view=render(<StructurePanel {...props} target={target}/>);
+  fireEvent.change(screen.getByLabelText('Partial capo fret'),{target:{value:'9'}});fireEvent.blur(screen.getByLabelText('Partial capo fret'));
+  expect(screen.getByLabelText('Partial capo fret')).toHaveValue(9);
+  view.rerender(<StructurePanel {...props} target={{...target,bar:1}}/>);
+  expect(screen.getByLabelText('Partial capo fret')).toHaveValue(5);
+  fireEvent.click(screen.getByRole('button',{name:'Apply staff settings'}));expect(props.onEdit.mock.calls.at(-1)![0].settings).not.toHaveProperty('partialCapo');
+});
+
+it('names the partial capo and sounds the covered strings of a chord diagram by it',async()=>{
+  const {ChordDiagramPreview}=await import('../harmony/ChordDiagramPreview');
+  const staff=new model.Staff();staff.stringTuning.tunings=[64,40];staff.capo=2;setPartialCapo(staff,{fret:5,strings:[1]});
+  const chord={name:'Two',nameMode:'manual' as const,recipe:null,firstFret:0,frets:[0,0],fingers:[-2,-2],barreFrets:[],showName:true,showDiagram:true,showFingering:true};
+  render(<ChordDiagramPreview chord={chord} staff={staff} highlightRoot={false} onToggle={null}/>);
+  expect(screen.getByText(/capo 2 · partial capo 5 on string 1 · sounding offset/)).toBeInTheDocument();
+  expect(screen.getByLabelText(`String 2 open: ${formatPitch(40+5)}`)).toBeInTheDocument();expect(screen.getByLabelText(`String 1 open: ${formatPitch(64+2)}`)).toBeInTheDocument();
 });

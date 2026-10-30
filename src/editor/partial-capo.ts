@@ -34,6 +34,30 @@ export function openStringKey(staff:model.Staff,string:number,partial?:PartialCa
 export function describePartialCapo(value:PartialCapo|null|undefined):string {
   return value&&value.fret>0&&value.strings.length?`Partial capo ${value.fret} on string${value.strings.length>1?'s':''} ${value.strings.join(', ')}`:'';
 }
+/** Maps a partial capo to a new string count; strings that no longer exist drop out. Strings count from the lowest, so keeping the high strings shifts the numbers. */
+export function remapPartialCapo(value:PartialCapo|null,from:number,to:number,keep:'high'|'low'):PartialCapo|null {
+  if(!value)return null;
+  const strings=value.strings.map(string=>keep==='high'?string+to-from:string).filter(string=>string>=1&&string<=to);
+  return strings.length?{fret:value.fret,strings}:null;
+}
+/** How far the partial capo alone lifts a string above the staff capo. */
+export const partialLift=(staff:model.Staff,string:number,partial:PartialCapo|null|undefined=sources.get(staff))=>stringCapo(staff,string,partial)-staff.capo;
+/** A trill stores an absolute pitch; when the partial capo's lift changes, rebase the trills it covers so their fret interval stays. The staff capo's own change is left as it always was. */
+export function rebaseTrills(staff:model.Staff,oldCapo:number,before:PartialCapo|null,after:PartialCapo|null):void {
+  const lift=(capo:number,partial:PartialCapo|null,string:number)=>partial?.strings.includes(string)?Math.max(capo,partial.fret)-capo:0;
+  for(const bar of staff.bars)for(const voice of bar.voices)for(const beat of voice.beats)for(const note of beat.notes)
+    if(note.trillValue>=0&&note.string>0)note.trillValue+=lift(staff.capo,after,note.string)-lift(oldCapo,before,note.string);
+}
+/** Runs `action` with trill pitches as the GP file stores them: relative to the staff capo alone, as alphaTab writes them raw. */
+export function withPlainTrills<T>(score:model.Score,action:()=>T):T {
+  const changed:Array<[model.Note,number]>=[];
+  for(const track of score.tracks)for(const staff of track.staves)if(sources.has(staff))for(const bar of staff.bars)for(const voice of bar.voices)for(const beat of voice.beats)for(const note of beat.notes){
+    const lift=note.trillValue>=0&&note.string>0?partialLift(staff,note.string):0;
+    if(lift){changed.push([note,note.trillValue]);note.trillValue-=lift;}
+  }
+  try{return action();}finally{for(const [note,value] of changed)note.trillValue=value;}
+}
+
 const extensionKey='tabplayerpartialcapo';
 type Wire={fret:number;strings:number[]};
 const field=(source:unknown,key:string):unknown=>source instanceof Map?source.get(key):source!==null&&typeof source==='object'?(source as Record<string,unknown>)[key]:undefined;

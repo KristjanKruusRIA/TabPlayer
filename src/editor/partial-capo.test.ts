@@ -12,6 +12,7 @@ import { exportMidi } from '../export/midi';
 import { exportAsciiTab } from '../export/ascii-tab';
 import { scoreFromJson } from '../model-clone';
 import { validateParityCommand } from '../parity-commands';
+import { applyStructureEdit } from './structure';
 import { getPartialCapo, openStringKey, setPartialCapo, stringCapo, validatePartialCapo } from './partial-capo';
 
 const target={track:0,staff:0,bar:0,voice:0,beat:0};
@@ -81,12 +82,11 @@ describe('pitch from string and fret',()=>{
     const cleared=buildScore(project({type:'setStaffSettings',track:0,staff:0,settings:combined},{type:'setStaffSettings',track:0,staff:0,settings:{...combined,partialCapo:{fret:0,strings:[]}}}));
     expect(getPartialCapo(cleared.tracks[0].staves[0])).toBeNull();
   });
-  it('refuses settings a note cannot sound under, a partial capo over missing strings, and a changed string count',()=>{
+  it('refuses settings a note cannot sound under, and a partial capo over missing strings',()=>{
     const high:EditCommand={type:'setNote',target,string:1,fret:100};
     expect(()=>buildScore(project({type:'setStaffSettings',track:0,staff:0,settings:{...base,partialCapo:{fret:20,strings:[1]}}},high))).toThrow(/playable MIDI pitch range/);
     expect(()=>buildScore(project({type:'setNote',target,string:1,fret:80},{type:'setStaffSettings',track:0,staff:0,settings:{...base,partialCapo:{fret:60,strings:[1]}}}))).toThrow(/outside the playable MIDI pitch range/);
     expect(()=>buildScore(project({type:'setStaffSettings',track:0,staff:0,settings:{...base,partialCapo:{fret:5,strings:[7]}}}))).toThrow(/partial capo/i);
-    expect(()=>previewEdit(project({type:'setStaffSettings',track:0,staff:0,settings:combined}),{type:'setStringCount',track:0,tuning:[64,59,55,50,45,40,35],keep:'high'})).toThrow(/partial capo/i);
   });
   it('checks a typed fret against the pitch range of its own string',()=>{
     const edits:EditCommand[]=[{type:'setStaffSettings',track:0,staff:0,settings:{...base,partialCapo:{fret:60,strings:[6]}}}];
@@ -167,3 +167,42 @@ describe('the command envelope',()=>{
   });
 });
 
+describe('replay, trills and the string count',()=>{
+  const trilled=(settings:StaffSettings)=>{
+    const score=scored(settings),note=score.tracks[0].staves[0].bars[0].voices[0].beats[0].notes[0];note.trillValue=note.stringTuning+2;return {score,note};
+  };
+  it('keeps a trill interval stable over every GP export and reopen',()=>{
+    const {score}=trilled(combined);let current=score;
+    const trillFret=(value:model.Score)=>value.tracks[0].staves[0].bars[0].voices[0].beats[0].notes[0].trillFret;
+    for(let trip=0;trip<3;trip++){current=loadInterchangeScore(exportGp(current),new Settings());expect(trillFret(current)).toBe(2);}
+    expect(score.tracks[0].staves[0].bars[0].voices[0].beats[0].notes[0].trillValue).toBe(45+2);
+  });
+  it('rebases the trills a changed partial capo covers, and leaves a staff without one as it was',()=>{
+    const {score}=trilled(base),note=score.tracks[0].staves[0].bars[0].voices[0].beats[0].notes[0];
+    applyStructureEdit(score,{type:'setStaffSettings',track:0,staff:0,settings:{...base,partialCapo:{fret:5,strings:[1,2,3]}}},0);
+    expect(note.trillFret).toBe(2);expect(note.trillValue).toBe(40+5+2);
+    applyStructureEdit(score,{type:'setStaffSettings',track:0,staff:0,settings:{...base,partialCapo:{fret:8,strings:[1]}}},1);
+    expect(note.trillFret).toBe(2);
+    applyStructureEdit(score,{type:'setStaffSettings',track:0,staff:0,settings:{...base,partialCapo:{fret:0,strings:[]}}},2);
+    expect(note.trillFret).toBe(2);expect(note.trillValue).toBe(40+2);
+    // No partial capo, no change: a whole-neck capo edit moves the stored pitch as it always did.
+    applyStructureEdit(score,{type:'setStaffSettings',track:0,staff:0,settings:{...base,capo:3}},3);expect(note.trillValue).toBe(42);
+  });
+  it('replays an old log whose GP base carries a partial capo, including a string count change',()=>{
+    const bytes=exportGp(scored(combined)),base64=Buffer.from(bytes).toString('base64');
+    const old=(...edits:EditCommand[])=>({...blankProject(),base:{kind:'file' as const,filename:'old.gp',bytesBase64:base64,sha256:'0'.repeat(64)},edits});
+    const before=written(buildScore(old()));
+    const score=buildScore(old({type:'setStringCount',track:0,tuning:[64,59,55,50,45,40,35],keep:'high'}));
+    const staff=score.tracks[0].staves[0];
+    expect(written(score).sort((a,b)=>a-b)).toEqual([...before].sort((a,b)=>a-b));
+    // Keeping the high strings shifts the numbers by one.
+    expect(getPartialCapo(staff)).toEqual({fret:5,strings:[2,3,4]});
+    const low=buildScore(old({type:'setStringCount',track:0,tuning:[64,59,55,50,45,40,35],keep:'low'}));
+    expect(getPartialCapo(low.tracks[0].staves[0])).toEqual({fret:5,strings:[1,2,3]});
+  });
+  it('ranks the notes of a loaded beat by the partial capo, as a rebuilt score does',()=>{
+    const score=scored({...base,partialCapo:{fret:30,strings:[1]}}),bytes=exportGp(score);
+    const beat=loadInterchangeScore(bytes,new Settings()).tracks[0].staves[0].bars[0].voices[0].beats[0];
+    expect(beat.maxNote?.string).toBe(1);expect(beat.minNote?.string).toBe(2);expect(beat.getNoteWithRealValue(40+30+3)?.string).toBe(1);
+  });
+});

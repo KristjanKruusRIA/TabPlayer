@@ -9,6 +9,7 @@ import { readGpifLyrics,writeGpifLyrics } from './lyrics';
 import { writeGpifNotation } from './notation';
 import { readGpifHarmony,writeGpifHarmony } from './harmony';
 import { readGpifScaleDiagrams,writeGpifScaleDiagrams } from './scale-diagram';
+import { withPlainTrills } from '../editor/partial-capo';
 import { hasPartialCapo,readGpifPartialCapo,writeGpifPartialCapo } from './partial-capo';
 import { copyHarmonySources } from '../harmony/chord-source';
 import { copyScaleDiagrams,listScaleDiagrams } from '../harmony/scale-diagram';
@@ -123,7 +124,7 @@ export function exportGpInterchange(score:model.Score,settings:Settings):Uint8Ar
   const harmony=score.tracks.some(track=>track.staves.some(staff=>!!staff.chords?.size));
   const scales=listScaleDiagrams(score).length>0;
   const partialCapo=hasPartialCapo(score);
-  const raw=new exporter.Gp7Exporter().export(score,settings),changes=score.tracks.map(trackMixAutomations),needsXml=harmony||scales||lyrics||!!notation||changes.some(stream=>stream.length>0)||score.tracks.some(track=>track.isPercussion)||rawTuning||partialCapo;
+  const raw=withPlainTrills(score,()=>new exporter.Gp7Exporter().export(score,settings)),changes=score.tracks.map(trackMixAutomations),needsXml=harmony||scales||lyrics||!!notation||changes.some(stream=>stream.length>0)||score.tracks.some(track=>track.isPercussion)||rawTuning||partialCapo;
   const original=sourceEntries.get(score);
   const generated=unzip(raw,settings);
   const entries:Record<string,Uint8Array>={...generated,...original,[gpifPath]:generated[gpifPath]};

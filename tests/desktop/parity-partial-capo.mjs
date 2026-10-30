@@ -32,6 +32,8 @@ export async function buildPartialCapoFixture(){
     const bar=new model.Bar();bar.id=barIndex;bar.clef=model.Clef.G2;staff.addBar(bar);const voice=new model.Voice();voice.id=barIndex;bar.addVoice(voice);
     const beat=new model.Beat();beat.id=barIndex;beat.duration=model.Duration.Whole;beat.isEmpty=false;voice.addBeat(beat);
     for(const string of [1,2,3,4,5,6]){const note=new model.Note();note.id=noteId++;note.string=string;note.fret=3;beat.addNote(note);}
+    // A trill on string 1, stored as GP stores it: an absolute pitch counted from the staff capo alone (40 + 2 + 4).
+    if(barIndex===0)beat.notes[0].trillValue=46;
   }
   score.finish(settings);
   const entries=unzipSync(new exporter.Gp7Exporter().export(score,settings)),xml=strFromU8(entries['Content/score.gpif']);
@@ -151,8 +153,16 @@ export async function runPartialCapoAcceptance({buildPath}={}){
     // The exported GP holds the capo and the new partial capo, and its notes keep their frets.
     await button('Undo');
     const exportPath=`${exportBase}.gp`;assert.equal(existsSync(exportPath),false);await button('Export GP');
-    const written=readCapoProperties(readFileSync(exportPath));
+    const exported=readFileSync(exportPath),written=readCapoProperties(exported);
     assert.deepEqual(written,{capo:2,partialFret:7,flags:'000110'},'Capo 2 and a partial capo of fret 7 over strings 4 and 5, flags lowest string first');
+    // Read the exported file back with an independent reader (alphaTab, which ignores the partial capo) and apply the written rules
+    // by hand: the pitches must be the ones the app sounded, and the trill must be stored untouched, not drifted by the capo.
+    const {importer,Settings}=await import('@coderline/alphatab'),reopened=importer.ScoreLoader.loadScoreFromBytes(new Uint8Array(exported),new Settings());
+    const staff=reopened.tracks[0].staves[0],covered=[...written.flags].flatMap((flag,at)=>flag==='1'?[at+1]:[]);
+    const reread=staff.bars[0].voices[0].beats[0].notes.map(note=>[note.string,note.realValue+(covered.includes(note.string)?Math.max(staff.capo,written.partialFret)-staff.capo:0)]).sort((a,b)=>a[0]-b[0]);
+    assert.deepEqual(reread.map(entry=>entry[1]),expectedChanged,'The reopened file sounds the pitches the app played');
+    const trill=staff.bars[0].voices[0].beats[0].notes.find(note=>note.string===1);
+    assert.equal(trill.trillValue,46,'The trill is written as it was read: relative to the staff capo alone, with no drift');
     assert.deepEqual((await record()).snapshot.project,after.snapshot.project,'Export never edits');
     step('The exported GP holds the capo and the partial capo',{exportPath,sha256:hashFile(exportPath),written});
     healthy();

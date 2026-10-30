@@ -10,7 +10,6 @@ import { mapLyricsMeasures } from './lyrics-measures';
 import { integer,rhythmTicks } from './common';
 import { copyHarmonyChord } from '../harmony/chord-source';
 import type { ClipboardCommand,MusicClip,PasteDestination,PasteFilters,PreparedMusicPaste } from './clipboard-types';
-import { getPartialCapo } from './partial-capo';
 import type { BarIndexMap } from './measures-types';
 
 const settings=new Settings();
@@ -43,7 +42,7 @@ function targetAndMappings(score:model.Score,source:model.Score,command:Clipboar
   if(command.clip.kind==='phrase'&&(destinations[0].track!==target.track||destinations[0].staffMap[0]!==target.staff))throw new Error('Map a phrase to the selected destination staff and voice.');
   if(command.clip.version===2&&filters.diagrams)for(const record of command.clip.harmony){
     const mapping=destinations.find(mapping=>mapping.sourceTrack===record.track)!,from=source.tracks[record.track].staves[record.staff],to=score.tracks[mapping.track].staves[mapping.staffMap[record.staff]];
-    if(from.capo!==to.capo||JSON.stringify(getPartialCapo(from))!==JSON.stringify(getPartialCapo(to))||from.transpositionPitch!==to.transpositionPitch||from.tuning.length!==to.tuning.length||from.tuning.some((pitch,index)=>pitch!==to.tuning[index])||record.chord.frets.some(fret=>fret>=0)&&(to.isPercussion||!to.tuning.length))throw new Error('Rich clipboard diagrams require matching tuning, string count, capo, partial capo and sounding transposition. Uncheck diagrams to convert notes.');
+    if(from.capo!==to.capo||from.transpositionPitch!==to.transpositionPitch||from.tuning.length!==to.tuning.length||from.tuning.some((pitch,index)=>pitch!==to.tuning[index])||record.chord.frets.some(fret=>fret>=0)&&(to.isPercussion||!to.tuning.length))throw new Error('Rich clipboard diagrams require matching tuning, string count, capo and sounding transposition. Uncheck diagrams to convert notes.');
   }
   return destinations;
 }

@@ -31,12 +31,12 @@
 .tuning-error{display:block;color:var(--tp-danger);font-size:12px;line-height:1.5;margin-top:4px}
 input[aria-invalid="true"]{border-color:var(--tp-danger)}
 .keyboard-help{position:relative;flex-shrink:0}
-.keyboard-help>summary{margin:0;padding:7px 10px;border:1px solid var(--tp-line-strong);border-radius:var(--tp-r-md);font-size:13px;list-style:none}
-.keyboard-help>summary:hover,.keyboard-help[open]>summary{border-color:var(--tp-focus)}
+.keyboard-help>summary{margin:0;padding:7px 10px;border:1px solid #465363;border-radius:6px;font-size:13px;list-style:none}
+.keyboard-help>summary:hover,.keyboard-help[open]>summary{border-color:#b5df73}
 .keyboard-help>summary::-webkit-details-marker{display:none}
-.keyboard-help>section{position:fixed;z-index:15;top:54px;left:16px;width:min(420px,calc(100vw - 32px));max-height:calc(100dvh - 80px);overflow:auto;padding:20px;background:var(--tp-panel);border:1px solid var(--tp-line-strong);border-radius:var(--tp-r-lg);color:var(--tp-text);box-shadow:var(--tp-shadow-float);line-height:1.5}
-.keyboard-help h2{margin-bottom:12px;color:var(--tp-text)}.keyboard-help h3{font-size:13px;margin:20px 0 8px}
-.keyboard-help p{margin:8px 0}.keyboard-help dl{margin:0}.keyboard-help dt{margin-top:12px;font-weight:600;color:var(--tp-on)}.keyboard-help dd{margin:2px 0 0;color:var(--tp-muted)}
+.keyboard-help>section{position:fixed;z-index:15;top:54px;left:16px;width:min(420px,calc(100vw - 32px));max-height:calc(100dvh - 80px);overflow:auto;padding:20px;background:#1d2530;border:1px solid #465363;border-radius:8px;color:#edf1f5;box-shadow:0 6px 20px #0006;line-height:1.5}
+.keyboard-help h2{margin-bottom:12px;color:#edf1f5}.keyboard-help h3{font-size:13px;margin:20px 0 8px}
+.keyboard-help p{margin:8px 0}.keyboard-help dl{margin:0}.keyboard-help dt{margin-top:12px;font-weight:600;color:#c8ef91}.keyboard-help dd{margin:2px 0 0;color:#b0bdca}
 /* Help viewer: topics beside the chosen topic; the header stays in view while the dialog scrolls. */
 .tp-dialog.help-dialog{width:min(760px,calc(100vw - 32px));max-height:85vh}
 .help-layout{display:grid;grid-template-columns:minmax(150px,1fr) 3fr;gap:16px}

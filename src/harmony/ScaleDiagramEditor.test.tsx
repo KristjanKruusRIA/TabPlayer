@@ -128,3 +128,11 @@ it('keeps one tab stop when the selected mark falls outside the fret window',()=
   const stops=Array.from(document.querySelectorAll('[data-cell]')).filter(item=>item.getAttribute('tabindex')==='0');
   expect(stops).toHaveLength(1);expect(stops[0].getAttribute('data-cell')).toBe('6/0');
 });
+
+it('preserves ScoreView paper overlay colours and active mark stroke',()=>{
+  const { container }=render(<ScaleDiagramView diagram={{name:'',strings:6,frets:5,firstFret:1,orientation:'horizontal',showFretMarkers:false,marks:[newMark(1,1)]}} selected={{string:1,fret:1}} onCell={()=>{}}/>);
+  const svg=container.querySelector('svg')!;
+  expect(svg.style.background).toBe('rgb(255, 253, 248)');
+  const activeRect=container.querySelector('rect[stroke-dasharray="3 2"]')!;
+  expect(activeRect.getAttribute('stroke')).toBe('#161c24');
+});

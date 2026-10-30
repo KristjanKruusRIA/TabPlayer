@@ -670,3 +670,83 @@ fn a_panicking_audition_render_does_not_block_later_auditions() {
         .unwrap();
     assert!(played.played);
 }
+
+/// Every change of a knob in the Sound rig reaches `audio_set_mix`. With the same backing as before, nothing about the
+/// backing is needed, so its asset must not be decoded (a long recording is tens of megabytes of base64) under the workspace lock.
+#[test]
+fn set_mix_with_an_unchanged_backing_does_not_decode_the_asset() {
+    use crate::{
+        assets::DECODES,
+        project::EditCommand,
+        settings::{BackingSettings, ChannelMix},
+    };
+    let (audio, workspace, _jobs) = fixture();
+    let directory = tempfile::tempdir().unwrap();
+    let owner = workspace.lock().unwrap().active_owner().clone();
+    let original = DocumentRevision {
+        document_id: owner.document_id.clone(),
+        revision: 0,
+    };
+    // 32 MB of backing, as a long recording would be.
+    let big = vec![7u8; 32 * 1024 * 1024];
+    let staged = workspace
+        .lock()
+        .unwrap()
+        .stage_asset(
+            &owner.document_id,
+            StoredAsset::from_bytes(
+                directory
+                    .path()
+                    .join("long.wav")
+                    .to_string_lossy()
+                    .into_owned(),
+                "audio/wav".into(),
+                &big,
+            ),
+        )
+        .unwrap();
+    let backing = BackingSettings {
+        processing: None,
+        reference_sync: None,
+        asset_id: staged.asset_id.clone(),
+        offset_ms: 0.0,
+        anchors: vec![],
+        mix: ChannelMix::default(),
+    };
+    workspace
+        .lock()
+        .unwrap()
+        .apply_edit(
+            &original,
+            EditCommand::SetBacking {
+                backing: Some(backing.clone()),
+            },
+            Some(&staged.token),
+        )
+        .unwrap();
+    let mut settings = DocumentSettings::default();
+    settings.backing = Some(backing);
+    // The player already has this backing loaded.
+    *audio.current_backing.lock().unwrap() = Some(staged.asset_id.clone());
+    let decodes = || DECODES.with(|count| count.get());
+    let before = decodes();
+    let started = std::time::Instant::now();
+    for generation in 1..=20 {
+        // Whether the player accepts the mix is not the point; the asset must not be read to find out.
+        let _ = audio.set_mix(&workspace, &owner, settings.clone(), generation);
+    }
+    let unchanged = started.elapsed();
+    println!(
+        "20 set_mix calls with an unchanged 32 MB backing: {unchanged:?}, {} asset decodes",
+        decodes() - before
+    );
+    assert_eq!(decodes(), before, "an unchanged backing is not decoded");
+    // A changed backing still reads it, once, to load it.
+    *audio.current_backing.lock().unwrap() = None;
+    let _ = audio.set_mix(&workspace, &owner, settings, 100);
+    assert_eq!(
+        decodes(),
+        before + 1,
+        "a changed backing is read to be loaded"
+    );
+}

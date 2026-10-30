@@ -199,16 +199,23 @@ impl NativeAudio {
         generation: u64,
     ) -> Result<(), String> {
         let _access = self.access.lock().map_err(|e| e.to_string())?;
+        let backing_id = settings.backing.as_ref().map(|b| b.asset_id.clone());
+        // The asset is decoded only when the backing is changing: a mix change with the same backing never uses its bytes, and
+        // decoding a long recording on every change of a knob would hold the workspace lock for no result.
+        let backing_changes = *self.current_backing.lock().unwrap() != backing_id;
         let backing = {
             let workspace = workspace.lock().map_err(|e| e.to_string())?;
             Self::check_owner(&workspace, owner)?;
             if workspace.is_frozen() {
                 return Err("The workspace is completing a session transition.".into());
             }
-            Self::backing(&settings, &workspace, &owner.document_id)?
+            if backing_changes {
+                Self::backing(&settings, &workspace, &owner.document_id)?
+            } else {
+                None
+            }
         };
         settings.validate()?;
-        let backing_id = settings.backing.as_ref().map(|b| b.asset_id.clone());
         let mut current_backing = self.current_backing.lock().unwrap();
         if *current_backing == backing_id {
             self.service.set_mix(settings, generation)?;

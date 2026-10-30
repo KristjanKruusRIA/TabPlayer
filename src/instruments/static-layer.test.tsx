@@ -74,6 +74,16 @@ it('keeps the keys\' drawing when the lit keys change, and lights only the notes
   expect(container.querySelector('[data-key="60"] title')!.textContent).toBe('C4');
 });
 
+it('keeps the piano-key class on every key in entry mode, so lit keys are drawn by their own styles',()=>{
+  const {score}=music(false,0),{container}=render(<InstrumentView score={score} track={0} staff={0} notes={[]} entry={{target:{track:0,staff:0,bar:0,voice:0,beat:0},busy:false,onEdit:()=>{}}}/>);
+  const keys=[...container.querySelectorAll('g[data-key]')];
+  expect(keys.length).toBeGreaterThan(30);
+  for(const key of keys){expect(key).toHaveClass('piano-key');expect(key).toHaveClass('entry-target');}
+  // The key the beat holds is lit, and its mark sits inside a group the lit styles reach.
+  const lit=container.querySelector('g[data-key][data-active="true"]');
+  expect(lit).not.toBeNull();expect(lit).toHaveClass('active');expect(lit!.querySelector('.key-hit')).not.toBeNull();
+});
+
 it('keeps the kit\'s drawing when the struck pieces change',()=>{
   const {score,all}=music(true),{container,rerender}=render(<InstrumentView score={score} track={0} staff={0} notes={[all[0]]}/>);
   const before=marks(container,'[data-drum-art]');expect(before).toHaveLength(10);

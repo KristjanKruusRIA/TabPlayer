@@ -15,12 +15,39 @@ export interface NeckGeometry {
 }
 /** Where everything on the neck goes, from how many strings it has and how far it runs. Both layers use it, so they always agree. */
 export function neckGeometry(strings:number,mode:'guitar'|'bass',maxFret:number):NeckGeometry {
-  const left=64,neckLength=770,height=226;
+  const left=136,neckLength=770,height=226;
   const neckHeight=Math.max(55,mode==='bass'?65+(strings-4)*10:65+(strings-6)*6),row=(neckHeight-26)/Math.max(1,strings-1);
-  const top=(height-(strings-1)*row)/2,body=left+neckLength-6,width=body+254;
+  const top=(height-(strings-1)*row)/2,body=left+neckLength-6,width=body+306;
   const boundary=(fret:number)=>left+neckLength*(1-2**(-fret/12))/(1-2**(-maxFret/12));
   const position=(fret:number)=>fret===0?left-17:(boundary(fret-1)+boundary(fret))/2;
   return {left,neckLength,height,neckHeight,row,top,body,width,boundary,position};
+}
+
+/**
+ * The bodies, in their own frame: x runs from the end of the fretboard towards the strap button, negative y is the bass side, and
+ * the frame is flipped when drawn because the strings run highest first from the top. So the long horn sits beside the low strings
+ * and the controls beside the high ones, where they are on the real thing. The cutaways stop clear of the last fret numbers.
+ */
+const bodyShapes={
+  guitar:{
+    outline:'M24-30C12-44 12-54 6-60C-8-66-26-70-40-78C-52-84-56-98-44-104C-30-112 30-96 66-84C92-76 116-74 140-84C176-100 240-108 272-84C296-62 300-30 292 0C300 40 296 74 268 94C236 110 176 104 140 88C116 78 92 78 66 90C34 104 8 110-12 106C-30 102-36 88-26 78C-12 68 6 58 14 44C18 38 22 34 26 30Z',
+    guard:'M18-44C40-56 70-54 92-48C120-42 150-42 176-44C198-46 204-34 202-20L202 40C206 60 190 78 166 84C130 92 96 82 70 80C46 76 30 66 24 44Z',
+    screws:[[22,-40],[92,-46],[196,-36],[198,40],[166,80],[70,76],[30,56]],
+  },
+  bass:{
+    outline:'M24-32C14-44 10-60 0-66C-26-74-52-78-76-84C-92-90-100-100-90-108C-78-116-20-106 62-82C92-72 120-72 146-84C180-100 236-106 268-82C292-62 298-24 290 6C286 40 286 70 258 92C226 110 170 106 136 90C112 80 88 78 64 90C36 102 20 106 6 104C-8 102-16 90-8 78C2 66 12 52 16 42C20 36 24 34 26 32Z',
+    guard:'M18-44C44-58 72-58 96-50C126-42 150-44 190-42L204-30L204 34C206 52 190 62 150 62C110 66 84 72 66 80C44 86 28 68 24 44Z',
+    screws:[[22,-40],[96,-46],[196,-34],[198,30],[150,58],[66,74],[30,56]],
+  },
+};
+/** A pickup: one cover, or two offset halves split across the strings, with a pole under every string. */
+function Pickup({x,part,split,strings,top,row,neckHeight,metal}:{x:number;part:string;split:boolean;strings:number;top:number;row:number;neckHeight:number;metal:string}) {
+  const middle=top+(strings-1)*row/2,half=Math.ceil(strings/2),cover='#17191a';
+  const pole=(index:number)=>split?x+(index<half?-7:7):x;
+  return <g data-instrument-part={part}>
+    {split?<><rect x={x-16} y={top-11} width="18" height={middle-top+11} rx="4" fill={cover} stroke="#6b6256"/><rect x={x-2} y={middle} width="18" height={neckHeight/2-5} rx="4" fill={cover} stroke="#6b6256"/></>:<rect x={x-9} y={top-11} width="19" height={neckHeight-4} rx="8" fill={cover} stroke="#6b6256"/>}
+    {Array.from({length:strings},(_,index)=><circle data-pickup-string={strings-index} key={index} cx={pole(index)} cy={top+index*row} r="2.5" fill={metal} stroke="#5c5b56" strokeWidth=".7"/>)}
+  </g>;
 }
 
 interface FretboardArtProps {strings:number;/** Open pitches, highest string number first, as the names under the strings. */openKeys:string;mode:'guitar'|'bass';leftHanded:boolean;maxFret:number}
@@ -28,7 +55,11 @@ function FretboardArtBase({strings,openKeys,mode,leftHanded,maxFret}:FretboardAr
   const id=uid(useId()),{left,neckLength,height,neckHeight,row,top,body,width,boundary,position}=neckGeometry(strings,mode,maxFret);
   const names=openKeys.split(',');
   const wood=`url(#${id}-wood)`,metal=`url(#${id}-metal)`,cream=`url(#${id}-cream)`,pearl=`url(#${id}-pearl)`;
-  const y0=top-12,y1=top+neckHeight-14,wound=mode==='bass'?0:Math.ceil(strings/2);
+  const y0=top-12,y1=top+neckHeight-14,wound=mode==='bass'?0:Math.ceil(strings/2),bass=mode==='bass',shape=bodyShapes[mode];
+  const saddle=body+210,stringEnd=saddle+30,nut=left-3,lift=bass?1.3:1;
+  // Tuners stand in line along the low-string edge: the lowest string's post is nearest the nut and the highest the furthest out.
+  const postX=(index:number)=>left-38-(strings-1-index)*(bass?84:82)/Math.max(1,strings-1),postY=y1+1;
+  const headstock=`M${nut} ${y0}C${nut-30} ${y0+2} ${nut-52} ${y0+6*lift} ${nut-70} ${y0+2}C${nut-92} ${y0-4*lift} ${nut-112} ${y0-8*lift} ${nut-120} ${y0-4*lift}C${nut-128} ${y0+2} ${nut-132} ${y1-10} ${nut-128} ${y1+4}C${nut-126} ${y1+11} ${nut-120} ${y1+12} ${nut-112} ${y1+12}L${nut-14} ${y1+6}C${nut-6} ${y1+4} ${nut-4} ${y1} ${nut} ${y1}Z`;
   return <>
     <defs>
       <linearGradient id={`${id}-wood`} x1="0" y1="0" x2="0" y2="1"><stop stopColor="#1f0f09"/><stop offset=".16" stopColor="#5b2f1d"/><stop offset=".5" stopColor="#7a442c"/><stop offset=".84" stopColor="#4a2415"/><stop offset="1" stopColor="#1c110b"/></linearGradient>
@@ -42,34 +73,43 @@ function FretboardArtBase({strings,openKeys,mode,leftHanded,maxFret}:FretboardAr
       <pattern id={`${id}-grain`} patternUnits="userSpaceOnUse" width="190" height="24"><path d="M0 2C48 7 120-2 190 4M0 9C55 1 116 19 190 11M0 16C84 8 109 25 190 16M0 23C74 29 105 12 190 22" fill="none" stroke="#1c0a03" strokeWidth=".7" opacity=".4"/><path d="M0 6C70 15 120 4 190 8M0 20C40 12 125 27 190 21" fill="none" stroke="#d5a875" strokeWidth=".6" opacity=".25"/><path d="M0 12C60 10 140 15 190 12M0 4C80 6 130 1 190 3" fill="none" stroke="#000" strokeWidth=".4" opacity=".25"/></pattern>
       <pattern id={`${id}-maplegrain`} patternUnits="userSpaceOnUse" width="120" height="12"><path d="M0 3C30 5 70 1 120 4M0 9C40 7 80 11 120 8" fill="none" stroke="#7a4f27" strokeWidth=".6" opacity=".45"/></pattern>
       <pattern id={`${id}-tortoise`} patternUnits="userSpaceOnUse" width="19" height="23"><rect width="19" height="23" fill="#281510"/><path d="M1 4L8 1 11 8 6 11ZM8 15L15 10 19 17 13 22Z" fill="#853c21"/><path d="M3 14L7 12 9 19 4 21ZM11 2L18 4 16 9 12 7Z" fill="#b56636" opacity=".6"/></pattern>
+      <radialGradient id={`${id}-burst`} gradientUnits="userSpaceOnUse" cx="150" cy="0" r="186"><stop stopColor="#f4bf4e"/><stop offset=".44" stopColor="#dc8b25"/><stop offset=".68" stopColor="#92401a"/><stop offset=".88" stopColor="#471a0b"/><stop offset="1" stopColor="#210c06"/></radialGradient>
+      <pattern id={`${id}-bodygrain`} patternUnits="userSpaceOnUse" width="240" height="30"><path d="M0 6C60 12 150 0 240 7M0 20C80 13 170 29 240 21" fill="none" stroke="#3a1606" strokeWidth=".8" opacity=".22"/></pattern>
+      <clipPath id={`${id}-outline`}><path d={shape.outline}/></clipPath>
     </defs>
     <g data-mirror={leftHanded?'left':'right'} transform={leftHanded?`matrix(-1 0 0 1 ${width} 0)`:undefined}>
-      <ellipse cx={body+113} cy="209" rx="119" ry="12" fill="#000" opacity=".35"/>
-      <g data-instrument-part="body" transform={`translate(${body},113)`}>
-        <path d="M7-45C29-42 17-79 37-89C72-113 112-91 150-83C184-97 213-93 231-70C249-47 248-19 235 4C253 39 247 75 225 96C194 122 151 104 113 108C66 114 14 102-2 70C-20 42 31 22 43 2C57-24 31-24 7-45Z" fill={cream} stroke="#827c6f" strokeWidth="2"/>
-        <path d="M11-44C31-45 22-76 40-86M26 93C76 114 135 98 172 106C200 110 220 95 230 79" fill="none" stroke="#fffbed" strokeWidth="2.5" opacity=".65"/>
-        <path d="M17-43C39-40 38-16 55-12L167-24C190-4 194 20 184 46L154 78L58 83C24 75 35 47 55 29C78 9 43-10 17-43Z" fill={`url(#${id}-tortoise)`} stroke="#d0c9b7" strokeWidth="2"/>
-        {[[-0,-40],[174,-12],[183,40],[147,78],[56,76]].map(([x,y],index)=><g key={index}><circle cx={x} cy={y} r="2.3" fill={metal}/><path d={`M${x-1.5} ${y}h3`} stroke="#53504a" strokeWidth=".6"/></g>)}
-        {[0,1].map(index=><g key={index} transform={`translate(${173+index*21},${58-index*24})`}><circle r="10" fill={cream} stroke="#857f72"/><circle r="6" fill="#eee8d7" stroke="#d4cbb8"/><path d="M0-8V-4" stroke="#5d625f" strokeWidth="1.3"/></g>)}
-        <path d="M200 38L218 30Q230 40 224 51L207 57Z" fill={metal} stroke="#62676a"/><ellipse cx="216" cy="42" rx="4" ry="6" fill="#252b2b"/>
+      <ellipse cx={body+128} cy="220" rx="150" ry="5" fill="#000" opacity=".3"/>
+      <g data-instrument-part="body" transform={`translate(${body},113) scale(1,-1)`}>
+        <path d={shape.outline} fill={bass?cream:`url(#${id}-burst)`} stroke={bass?'#857f72':'#caa574'} strokeWidth="1.6"/>
+        {bass?null:<path d={shape.outline} fill={`url(#${id}-bodygrain)`}/>}
+        <g clipPath={`url(#${id}-outline)`}><path d={shape.outline} fill="none" stroke={bass?'#fffbed':'#ffdca0'} strokeWidth="9" opacity=".2"/><path d={bass?'M-84-103C-20-98 16-92 62-75C92-65 120-65 146-77C180-93 236-99 262-76':'M-40-100C-6-97 34-87 66-77C92-69 116-67 140-77C176-93 240-101 266-77'} fill="none" stroke="#fff" strokeWidth="2.5" opacity=".3"/></g>
+        <path d={shape.guard} fill={bass?`url(#${id}-tortoise)`:`url(#${id}-pearl)`} stroke={bass?'#d0c9b7':'#3a2a1c'} strokeWidth="1.6"/>
+        {shape.screws.map(([x,y],index)=><g key={index}><circle cx={x} cy={y} r="2.2" fill={metal}/><path d={`M${x-1.5} ${y}h3`} stroke="#53504a" strokeWidth=".6"/></g>)}
+        {bass?<g transform="rotate(-8 214 66)"><rect x="168" y="52" width="92" height="30" rx="13" fill={metal} stroke="#5f6468"/>{[188,216].map(x=><g key={x} transform={`translate(${x},67)`}><circle r="10" fill="#17191a" stroke="#000"/><circle r="6" fill="#2c3032"/><path d="M0-8V-3" stroke="#e8e8e2" strokeWidth="1.3"/></g>)}<circle cx="242" cy="67" r="6" fill="#222627" stroke="#7b8084"/></g>:<>
+          {[[196,54],[164,64],[132,68]].map(([x,y])=><g key={x} transform={`translate(${x},${y})`}><circle r="9.5" fill="#efe9d8" stroke="#8d8674"/><circle r="5.5" fill="#fbf7ea" stroke="#c9c1ad"/><path d="M0-8V-3" stroke="#5d625f" strokeWidth="1.3"/></g>)}
+          <rect x="88" y="52" width="24" height="7" rx="2" fill="#2a2d2e" transform="rotate(-14 100 56)"/><rect x="97" y="49" width="6" height="13" rx="2" fill="#efe9d8" stroke="#8d8674" strokeWidth=".7" transform="rotate(-14 100 56)"/>
+          <ellipse cx="244" cy="74" rx="7" ry="10" fill={metal} stroke="#5f6468" transform="rotate(32 244 74)"/><ellipse cx="244" cy="74" rx="3" ry="4.5" fill="#222627" transform="rotate(32 244 74)"/>
+        </>}
+        <circle cx={bass?-93:-49} cy={bass?-101:-97} r="2.6" fill={metal} stroke="#5f6468" strokeWidth=".6"/><circle cx={bass?292:294} cy="0" r="3" fill={metal} stroke="#5f6468" strokeWidth=".6"/>
       </g>
       <g data-instrument-part="headstock">
-        <path d={`M3 ${y0-5}Q3 ${y0-9} 8 ${y0-8}L${left-3} ${y0}V${y1}L8 ${y1+8}Q3 ${y1+9} 3 ${y1+5}Z`} fill={`url(#${id}-maple)`} stroke="#51412f" strokeWidth="1.2"/>
-        <path d={`M3 ${y0-5}Q3 ${y0-9} 8 ${y0-8}L${left-3} ${y0}V${y1}L8 ${y1+8}Q3 ${y1+9} 3 ${y1+5}Z`} fill={`url(#${id}-maplegrain)`}/>
-        {Array.from({length:strings},(_,index)=>{const y=top+index*row;return <g key={index}><circle cx={left-31} cy={y} r="4" fill={metal} stroke="#4a4a43" strokeWidth=".8"/><circle cx={left-31} cy={y} r="1.5" fill="#2b2f2d"/></g>;})}
+        <path d={headstock} fill={`url(#${id}-maple)`} stroke="#51412f" strokeWidth="1.2"/>
+        <path d={headstock} fill={`url(#${id}-maplegrain)`}/>
+        {Array.from({length:strings},(_,index)=>{const x=postX(index),reach=bass?19:15,button=bass?8:5;return <g key={index} data-tuner={strings-index}><rect x={x-1.8} y={postY} width="3.6" height={reach-button+6} fill={metal} stroke="#4a4a43" strokeWidth=".5"/>{bass?<path d={`M${x-button} ${postY+reach}c0-6 ${button*2}-6 ${button*2} 0c3 4 3 8 0 10c-4 2-${button*2-8}-1-${button} -1c-3 1-${button*2-8} 3-${button} 1c-3-2-3-6 0-10Z`} fill={metal} stroke="#4a4a43" strokeWidth=".6"/>:<ellipse cx={x} cy={postY+reach} rx={button} ry="6.5" fill={metal} stroke="#4a4a43" strokeWidth=".6"/>}<circle cx={x} cy={postY} r={bass?4.6:3.6} fill={metal} stroke="#4a4a43" strokeWidth=".8"/><circle cx={x} cy={postY} r="1.4" fill="#2b2f2d"/></g>;})}
       </g>
       <g data-instrument-part="neck"><rect x={left} y={top-15} width={neckLength+34} height={neckHeight+4} rx="2" fill="#b69c73" stroke="#51412f"/><rect x={left} y={top-12} width={neckLength+34} height={neckHeight-2} fill={wood}/><rect x={left} y={top-12} width={neckLength+34} height={neckHeight-2} fill={`url(#${id}-grain)`}/><path d={`M${left} ${top-12}H${body+34}M${left} ${top+neckHeight-14}H${body+34}`} stroke="#ba8d68" strokeWidth="1" opacity=".6"/><path d={`M${left} ${top-10}H${body+34}`} stroke="#fff" strokeWidth="1" opacity=".08"/></g>
       <g data-instrument-part="nut"><rect x={left-4} y={top-13} width="7" height={neckHeight} rx="1.4" fill={`url(#${id}-nut)`} stroke="#6d6552" strokeWidth=".8"/>{Array.from({length:strings},(_,index)=><path key={index} d={`M${left-3} ${top+index*row}h5`} stroke="#3a3326" strokeWidth=".9"/>)}</g>
       {Array.from({length:maxFret+1},(_,fret)=><g key={fret} data-fret-column={fret}><line data-fret-boundary={fret} x1={boundary(fret)} x2={boundary(fret)} y1={top-12} y2={top+neckHeight-14} stroke={fret===0?'#e8dcc5':'#131711'} strokeWidth={fret===0?5:3}/>{fret>0?<><rect x={boundary(fret)-1} y={top-12} width="2" height={neckHeight-2} fill={metal}/><path d={`M${boundary(fret)-.4} ${top-12}V${top+neckHeight-14}`} stroke="#fff" strokeWidth=".5" opacity=".7"/></>:null}</g>)}
       {[3,5,7,9,12,15,17,19,21,24].filter(fret=>fret<=maxFret).flatMap(fret=>(fret%12===0?[-neckHeight*.2,neckHeight*.2]:[0]).map((offset,index)=><g key={`${fret}/${index}`}><circle cx={position(fret)+.8} cy={height/2+offset+1} r="3.9" fill="#000" opacity=".35"/><circle cx={position(fret)} cy={height/2+offset} r="3.7" fill={pearl} stroke="#a79e86" strokeWidth=".7"/></g>))}
-      <g data-instrument-part="bridge"><rect x={body+144} y={top-11} width="36" height={neckHeight-4} rx="3" fill={metal} stroke="#4a4a43"/>{Array.from({length:strings},(_,index)=><g key={index}><rect x={body+147} y={top+index*row-5} width="25" height="10" rx="2" fill={metal} stroke="#6a6c66"/><circle cx={body+176} cy={top+index*row} r="2" fill="#343933"/></g>)}</g>
-      {[40,91].map((offset,pickup)=><g key={offset} data-instrument-part={pickup===0?'neck-pickup':'bridge-pickup'}><rect x={body+offset-9} y={top-11} width="19" height={neckHeight-4} rx="8" fill="#eee7d2" stroke="#7e7a6e"/>{Array.from({length:strings},(_,index)=><circle data-pickup-string={strings-index} key={index} cx={body+offset} cy={top+index*row} r="2.5" fill={metal} stroke="#5c5b56" strokeWidth=".7"/>)}</g>)}
+      <g data-instrument-part="bridge"><rect x={saddle-5} y={top-15} width="46" height={neckHeight+4} rx="3" fill={metal} stroke="#4a4a43"/>{Array.from({length:strings},(_,index)=><g key={index}><rect x={saddle-2} y={top+index*row-Math.min(5,row/2-.5)} width="25" height={Math.min(10,row-1)} rx="2" fill={metal} stroke="#6a6c66"/><circle cx={stringEnd} cy={top+index*row} r="2" fill="#343933"/></g>)}</g>
+      {bass?<><Pickup x={body+96} part="neck-pickup" split strings={strings} top={top} row={row} neckHeight={neckHeight} metal={metal}/><Pickup x={body+170} part="bridge-pickup" split={false} strings={strings} top={top} row={row} neckHeight={neckHeight} metal={metal}/></>:[[62,'neck-pickup'],[118,'middle-pickup'],[174,'bridge-pickup']].map(([offset,part])=><Pickup key={part} x={body+Number(offset)} part={String(part)} split={false} strings={strings} top={top} row={row} neckHeight={neckHeight} metal={metal}/>)}
       {Array.from({length:strings},(_,index)=>{
         const string=strings-index,y=top+index*row,thickness=.7+index*.16,isWound=mode==='bass'||index>=wound;
         return <g key={string} data-string-row={string}><title>{`String ${string} · ${names[index]??''}`}</title>
-          <line x1={left-31} x2={body+176} y1={y+1.4} y2={y+1.4} stroke="#160e08" opacity=".6" strokeWidth={1+index*.17}/>
-          <rect x={left-31} y={y-thickness/2} width={body+207-left} height={thickness} fill={`url(#${id}-${isWound?'wound':'string'})`}/>
-          {isWound?<line x1={left-31} x2={body+176} y1={y} y2={y} stroke="#2b2110" strokeWidth={Math.max(.5,thickness*.85)} strokeDasharray={`.5 ${(.9+index*.04).toFixed(2)}`} opacity=".75"/>:null}
+          <path d={`M${postX(index)} ${postY}L${left-31} ${y}`} fill="none" stroke={isWound?'#c9b27a':'#d9d6cc'} strokeWidth={thickness}/>
+          <line x1={left-31} x2={stringEnd} y1={y+1.4} y2={y+1.4} stroke="#160e08" opacity=".6" strokeWidth={1+index*.17}/>
+          <rect x={left-31} y={y-thickness/2} width={stringEnd+31-left} height={thickness} fill={`url(#${id}-${isWound?'wound':'string'})`}/>
+          {isWound?<line x1={left-31} x2={stringEnd} y1={y} y2={y} stroke="#2b2110" strokeWidth={Math.max(.5,thickness*.85)} strokeDasharray={`.5 ${(.9+index*.04).toFixed(2)}`} opacity=".75"/>:null}
         </g>;
       })}
     </g>

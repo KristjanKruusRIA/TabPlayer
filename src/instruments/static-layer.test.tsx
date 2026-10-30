@@ -1,3 +1,4 @@
+import { FretboardArt } from './instrument-art';
 // @vitest-environment jsdom
 import { afterEach, expect, it } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
@@ -110,4 +111,12 @@ it('uses no SVG filter in any instrument drawing, so a highlight repaints nothin
     expect(container.querySelectorAll('filter, [filter], feTurbulence, feGaussianBlur')).toHaveLength(0);
     cleanup();
   }
+});
+
+it('gives each neck a tuner per string, and only the guitar a middle pickup',()=>{
+  const draw=(strings:number,mode:'guitar'|'bass')=>render(<svg><FretboardArt strings={strings} openKeys="" mode={mode} leftHanded={false} maxFret={24}/></svg>).container;
+  const guitar=draw(6,'guitar'),bass=draw(4,'bass');
+  expect(guitar.querySelectorAll('[data-tuner]')).toHaveLength(6);expect(guitar.querySelector('[data-instrument-part="middle-pickup"]')).toBeInTheDocument();
+  expect(bass.querySelectorAll('[data-tuner]')).toHaveLength(4);expect(bass.querySelector('[data-instrument-part="middle-pickup"]')).toBeNull();
+  expect(bass.querySelectorAll('[data-instrument-part="neck-pickup"] [data-pickup-string]')).toHaveLength(4);
 });

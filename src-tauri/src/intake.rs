@@ -126,7 +126,7 @@ fn check_admission(workspace: &DocumentWorkspace) -> Result<(), String> {
     }
 }
 
-fn reparse(metadata: &Metadata) -> bool {
+pub(crate) fn reparse(metadata: &Metadata) -> bool {
     #[cfg(windows)]
     {
         use std::os::windows::fs::MetadataExt;
@@ -156,7 +156,7 @@ fn reject_links(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn component_prefix(path: &Path, root: &Path) -> bool {
+pub(crate) fn component_prefix(path: &Path, root: &Path) -> bool {
     let mut components = path.components();
     root.components().all(|component| {
         components.next().is_some_and(|next| {
@@ -213,7 +213,7 @@ fn stamp(metadata: Metadata) -> Result<(u64, SystemTime), String> {
     ))
 }
 
-fn read_stable(
+pub(crate) fn read_stable(
     path: &Path,
     scope: Option<&Path>,
     limit: u64,

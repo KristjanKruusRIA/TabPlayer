@@ -1,4 +1,5 @@
 import type { model } from '@coderline/alphatab';
+import { admitDocumentBase } from './interchange/archive-gate';
 import { buildDocument, effectiveAudioSettings,exportGp, previewEdit, replayDocumentSettings, type BuiltDocument } from './engine';
 import { appliesFilePartialCapo, type EditCommand, type ProjectSnapshot, type AssetCandidate, type DocumentLock } from './project';
 import { getPartialCapo } from './editor/partial-capo';
@@ -39,7 +40,9 @@ export class DocumentController {
     this.state={...record,...buildDocument(record.snapshot.project,record.snapshot.canRedo),documentEpoch:0,busy:false,error:null};
   }
   static async create(bridge: NativeBridge, beforeChange: () => void = () => {},initial?:DocumentSnapshot,isWorkspaceTransitioning:()=>boolean=()=>false) {
-    return new DocumentController(bridge,initial ?? await bridge.snapshot(),beforeChange,isWorkspaceTransitioning);
+    const record=initial ?? await bridge.snapshot();
+    await admitDocumentBase(record.snapshot.project);
+    return new DocumentController(bridge,record,beforeChange,isWorkspaceTransitioning);
   }
   private verifyRecord(record:DocumentSnapshot) {
     if(record.documentId!==this.bridge.documentId) throw new Error('The native response belongs to a different document.');

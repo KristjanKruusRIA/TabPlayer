@@ -1,3 +1,4 @@
+use crate::fs_identity::{FileId, file_id_io};
 use crate::workspace::same_path;
 use std::{
     io::ErrorKind,
@@ -55,9 +56,77 @@ impl ProtectedPaths {
                         .into(),
                 );
             }
+            // Names differ for one folder (a share spelling of this machine, for one), so compare the folders themselves.
+            if [&destination, &entry]
+                .iter()
+                .try_fold(false, |found, resolved| {
+                    Ok::<_, String>(found || reaches(resolved, &root.path)?)
+                })?
+            {
+                return Err(
+                    "Choose a destination outside TabPlayer's protected library and recovery storage."
+                        .into(),
+                );
+            }
         }
         Ok(())
     }
+}
+
+/// A folder with no usable identity (a file system that reports index 0 or -1) cannot be matched by
+/// identity, and one this user may not read cannot be the protected root, which TabPlayer made and
+/// can read. Neither is an answer about the path, so the name checks above decide for those folders.
+fn no_identity(error: &std::io::Error) -> bool {
+    matches!(
+        error.kind(),
+        ErrorKind::PermissionDenied | ErrorKind::Unsupported
+    )
+}
+
+/// Whether `path`, or a folder above it that exists, is the folder `root` names. Any failure to
+/// identify a folder that exists, other than `no_identity`, refuses the path.
+fn reaches(path: &Path, root: &Path) -> Result<bool, String> {
+    reaches_by(path, root, &file_id_io)
+}
+
+fn reaches_by(
+    path: &Path,
+    root: &Path,
+    identify: &dyn Fn(&Path) -> std::io::Result<FileId>,
+) -> Result<bool, String> {
+    let root_id = match identify(root) {
+        Ok(id) => id,
+        Err(error) if no_identity(&error) => return Ok(false),
+        Err(_) if !root.exists() => return Ok(false),
+        Err(error) => return Err(format!("Could not identify {}: {error}", root.display())),
+    };
+    for ancestor in path.ancestors() {
+        let ancestor = if ancestor.as_os_str().is_empty() {
+            Path::new(".")
+        } else {
+            ancestor
+        };
+        match std::fs::symlink_metadata(ancestor) {
+            Ok(_) => match identify(ancestor) {
+                Ok(id) if id == root_id => return Ok(true),
+                Ok(_) => {}
+                Err(error) if no_identity(&error) => {}
+                Err(error) => {
+                    return Err(format!(
+                        "Could not identify {}: {error}",
+                        ancestor.display()
+                    ));
+                }
+            },
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    ErrorKind::NotFound | ErrorKind::PermissionDenied
+                ) => {}
+            Err(error) => return Err(error.to_string()),
+        }
+    }
+    Ok(false)
 }
 
 fn within(path: &Path, root: &Path) -> bool {
@@ -277,6 +346,64 @@ mod tests {
         );
     }
 
+    /// As a file system that reports index 0 or -1 answers: the folder exists and has no identity.
+    fn no_usable_identity() -> std::io::Error {
+        std::io::Error::new(ErrorKind::Unsupported, "no usable file identity")
+    }
+
+    #[test]
+    fn a_folder_with_no_usable_identity_is_no_match_and_does_not_refuse_the_path() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().join("library");
+        let target = directory.path().join("music");
+        std::fs::create_dir(&root).unwrap();
+        std::fs::create_dir(&target).unwrap();
+        let root_id = crate::fs_identity::file_id_io(&root).unwrap();
+        let identify = |path: &Path| {
+            if path == root {
+                Ok(root_id)
+            } else {
+                Err(no_usable_identity())
+            }
+        };
+        assert_eq!(
+            reaches_by(&target.join("song.gp"), &root, &identify),
+            Ok(false)
+        );
+        // The root itself still matches by identity, and on such a volume the name checks still apply.
+        assert_eq!(
+            reaches_by(&root.join("song.gp"), &root, &identify),
+            Ok(true)
+        );
+        let unusable = |_: &Path| Err(no_usable_identity());
+        assert_eq!(
+            reaches_by(&target.join("song.gp"), &root, &unusable),
+            Ok(false)
+        );
+        assert!(
+            ProtectedPaths::new(vec![root.clone()])
+                .unwrap()
+                .check(&root.join("song.gp"))
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn any_other_failure_to_identify_a_folder_that_exists_still_refuses() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().join("library");
+        std::fs::create_dir(&root).unwrap();
+        let root_id = crate::fs_identity::file_id_io(&root).unwrap();
+        let broken = |path: &Path| {
+            if path == root {
+                Ok(root_id)
+            } else {
+                Err(std::io::Error::other("the disk went away"))
+            }
+        };
+        assert!(reaches_by(directory.path(), &root, &broken).is_err());
+    }
+
     #[test]
     fn empty_default_keeps_existing_callers_unrestricted() {
         assert!(
@@ -284,5 +411,98 @@ mod tests {
                 .check(Path::new("anything/score.gp"))
                 .is_ok()
         );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn denies_a_loopback_share_spelling_of_a_protected_folder() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(directory.path())
+            .unwrap()
+            .join("library");
+        std::fs::create_dir(&root).unwrap();
+        let protected = ProtectedPaths::new(vec![root.clone()]).unwrap();
+        let plain = root
+            .to_string_lossy()
+            .trim_start_matches(r"\\?\")
+            .to_string();
+        let (drive, rest) = plain.split_at(2);
+        let mut tried = 0;
+        for host in ["localhost", "127.0.0.1"] {
+            let share = format!(r"\\{host}\{}${rest}", &drive[..1]);
+            if std::fs::metadata(&share).is_err() {
+                continue;
+            }
+            tried += 1;
+            assert!(
+                protected.check(&Path::new(&share).join("song.gp")).is_err(),
+                "{share}"
+            );
+            assert!(
+                protected
+                    .check(&Path::new(&share).join("new/deeper/song.gp"))
+                    .is_err(),
+                "{share}"
+            );
+        }
+        eprintln!("protected share spellings exercised: {tried}");
+    }
+}
+
+#[cfg(all(test, windows))]
+mod unreadable_ancestor_tests {
+    use super::*;
+    use std::process::Command;
+
+    fn who() -> String {
+        let out = Command::new("whoami").output().unwrap();
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    }
+
+    /// Denies list and attribute reads of one folder to this user, as an ACL on a synced or shared folder can.
+    #[test]
+    fn a_folder_above_the_target_with_unreadable_attributes_does_not_refuse_it() {
+        let directory = tempfile::tempdir().unwrap();
+        let base = std::fs::canonicalize(directory.path()).unwrap();
+        let root = base.join("library");
+        std::fs::create_dir(&root).unwrap();
+        let locked = base.join("g").join("p");
+        std::fs::create_dir_all(locked.join("c")).unwrap();
+        let protected = ProtectedPaths::new(vec![root.clone()]).unwrap();
+        let (me, target) = (who(), locked.join("c").join("song.gp"));
+        // Attribute reads of a folder are implied by listing rights on its parent, so both are denied.
+        let parent = locked.parent().unwrap().to_path_buf();
+        let deny = |folder: &Path, rights: &str| {
+            Command::new("icacls")
+                .arg(folder)
+                .args(["/deny", &format!("{me}:({rights})")])
+                .output()
+                .map(|out| out.status.success())
+                .unwrap_or(false)
+        };
+        let restore = |folder: &Path| {
+            let _ = Command::new("icacls")
+                .arg(folder)
+                .args(["/remove:d", &me])
+                .output();
+        };
+        if !(deny(&parent, "RD") && deny(&locked, "RD,RA,REA")) {
+            restore(&parent);
+            restore(&locked);
+            eprintln!("icacls unavailable; skipped");
+            return;
+        }
+        let blocked = file_id_io(&locked).err().map(|error| error.kind());
+        let outcome = (
+            protected.check(&target),
+            protected.check(&root.join("x.gp")),
+        );
+        restore(&locked);
+        restore(&parent);
+        // Setup proof: the identity of the locked folder really was unreadable.
+        assert_eq!(blocked, Some(ErrorKind::PermissionDenied), "{blocked:?}");
+        assert!(outcome.0.is_ok(), "{:?}", outcome.0);
+        // Nothing that was protected becomes writable.
+        assert!(outcome.1.is_err());
     }
 }

@@ -300,3 +300,35 @@ it('imports a converted score as a new untitled tab and keeps the current tab on
   await expect(w.importConverted('riff.gp',bytes)).rejects.toThrow('Importing converted scores is unavailable.');
   expect(current(w).id).toBe(before);expect(w.getState().error).toBe('Importing converted scores is unavailable.');
 });
+
+it('a refused archive stops an Open before the document is built or added, and the candidate is cancelled',async()=>{
+  const {workspace:w,bridge,stage}=await setup();
+  const bytesBase64=btoa('PK\x03\x04 not an archive');
+  const project={...blankProject(),base:{kind:'file',filename:'crafted.gp',bytesBase64,sha256:'e'.repeat(64)}} as Project;
+  vi.mocked(bridge.readDocument).mockResolvedValueOnce({kind:'candidate',candidate:stage(project,'crafted')});
+  const realWorker=(globalThis as {Worker?:unknown}).Worker,posted:unknown[]=[];
+  class Refusing{onmessage:((event:{data:unknown})=>void)|null=null;onerror=null;onmessageerror=null;terminate=vi.fn();
+    postMessage(message:unknown){posted.push(message);queueMicrotask(()=>this.onmessage?.({data:{cmd:'tabplayer.archive.check.result',ok:false,error:'ZIP refused in the Worker.'}}));}}
+  (globalThis as {Worker?:unknown}).Worker=Refusing;
+  try{await expect(w.openDocument()).rejects.toThrow('ZIP refused in the Worker.');}
+  finally{(globalThis as {Worker?:unknown}).Worker=realWorker;}
+  expect(posted).toHaveLength(1);expect(bridge.addDocument).not.toHaveBeenCalledWith('crafted');expect(bridge.cancelDocument).toHaveBeenCalledWith('crafted');
+});
+
+it('a cut-off Open leaves the workspace as it was and says so plainly',async()=>{
+  const {workspace:w,bridge,stage}=await setup();
+  const before=w.getState().documents.map(entry=>entry.id);
+  const project={...blankProject(),base:{kind:'file',filename:'stall.gpx',bytesBase64:btoa('BCFZ stalls'),sha256:'d'.repeat(64)}} as Project;
+  vi.mocked(bridge.readDocument).mockResolvedValueOnce({kind:'candidate',candidate:stage(project,'stalled')});
+  const realWorker=(globalThis as {Worker?:unknown}).Worker;
+  class Silent{onmessage=null;onerror=null;onmessageerror=null;terminate=vi.fn();postMessage(){}}
+  (globalThis as {Worker?:unknown}).Worker=Silent;
+  vi.useFakeTimers();
+  try{
+    const opening=w.openDocument(),seen=expect(opening).rejects.toThrow('The file did not open within 15 seconds. It may be damaged.');
+    await vi.advanceTimersByTimeAsync(15000);await seen;
+  }finally{vi.useRealTimers();(globalThis as {Worker?:unknown}).Worker=realWorker;}
+  expect(w.getState().documents.map(entry=>entry.id)).toEqual(before);
+  expect(w.getState().error).toBe('The file did not open within 15 seconds. It may be damaged.');
+  expect(bridge.addDocument).not.toHaveBeenCalledWith('stalled');expect(bridge.cancelDocument).toHaveBeenCalledWith('stalled');
+});

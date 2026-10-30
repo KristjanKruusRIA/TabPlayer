@@ -44,6 +44,14 @@ pub struct Project {
     pub assets: BTreeMap<String, StoredAsset>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub lock: Option<DocumentLock>,
+    /// Set the first time a score read from a file is edited: from then on the capo over some strings that the file
+    /// holds applies. Absent on every other project, so those serialize as they always did.
+    #[serde(skip_serializing_if = "is_false")]
+    pub partial_capo: bool,
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 impl<'de> Deserialize<'de> for Project {
@@ -60,6 +68,8 @@ impl<'de> Deserialize<'de> for Project {
             assets: BTreeMap<String, StoredAsset>,
             #[serde(default, deserialize_with = "present_lock")]
             lock: Option<DocumentLock>,
+            #[serde(default)]
+            partial_capo: bool,
         }
         let mut value = serde_json::Value::deserialize(deserializer)?;
         let fields = value
@@ -100,6 +110,7 @@ impl<'de> Deserialize<'de> for Project {
             edits: wire.edits,
             assets: wire.assets,
             lock: wire.lock,
+            partial_capo: wire.partial_capo,
         })
     }
 }
@@ -120,6 +131,8 @@ pub struct ProjectView {
         deserialize_with = "present_lock"
     )]
     pub lock: Option<DocumentLock>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub partial_capo: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -224,6 +237,7 @@ impl Project {
             edits: vec![],
             assets: BTreeMap::new(),
             lock: None,
+            partial_capo: false,
         }
     }
 
@@ -303,6 +317,7 @@ impl Project {
                 .map(|(id, asset)| (id.clone(), asset.info().expect("validated asset")))
                 .collect(),
             lock: self.lock,
+            partial_capo: self.partial_capo,
         }
     }
 }
@@ -430,6 +445,7 @@ impl ProjectSession {
             edits: self.project.edits.clone(),
             assets: self.asset_info.clone(),
             lock: self.project.lock,
+            partial_capo: self.project.partial_capo,
         };
         project.edits.truncate(self.cursor);
         ProjectSnapshot {
@@ -510,6 +526,14 @@ impl ProjectSession {
         changed
     }
 
+    /// Records that the file's capo over some strings applies to this project. It is not an edit and not a change to save,
+    /// and it never goes back: a project must not change meaning between saves. Returns whether it changed.
+    pub fn mark_partial_capo(&mut self) -> bool {
+        let changed = !self.project.partial_capo;
+        self.project.partial_capo = true;
+        changed
+    }
+
     pub fn mark_saved(&mut self, path: PathBuf) {
         self.saved_lock = self.project.lock;
         self.saved = self.project.edits[..self.cursor].to_vec();
@@ -540,6 +564,7 @@ impl ProjectSession {
             edits,
             assets,
             lock: self.project.lock,
+            partial_capo: self.project.partial_capo,
         }
     }
 

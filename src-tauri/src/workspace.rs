@@ -751,6 +751,23 @@ impl DocumentWorkspace {
         Ok(snapshot)
     }
 
+    /// Marks a score read from a file as made with partial-capo support. Not an edit: history and the saved state are
+    /// untouched, and marking a marked document returns its current snapshot and bumps nothing.
+    pub fn mark_partial_capo(
+        &mut self,
+        address: &DocumentRevision,
+    ) -> Result<DocumentSnapshot, String> {
+        let revision = self.check_mutation(address)?;
+        let entry = self.entry_mut(&address.document_id)?;
+        if !entry.session.mark_partial_capo() {
+            return Ok(entry.snapshot());
+        }
+        entry.revision += 1;
+        let snapshot = entry.snapshot();
+        self.checkpoint_revision = revision;
+        Ok(snapshot)
+    }
+
     pub fn stage_asset(&mut self, id: &str, asset: StoredAsset) -> Result<StagedAsset, String> {
         let entry = self.entry_mut(id)?;
         if entry.session.lock().is_some() {

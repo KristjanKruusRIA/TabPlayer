@@ -1,6 +1,6 @@
 use tabplayer_lib::{
     files::{read_project, write_project},
-    project::{BaseDocument, Project},
+    project::{BaseDocument, Project, ProjectSession},
 };
 
 #[test]
@@ -84,4 +84,75 @@ fn a_sharing_lock_preserves_the_previous_file_when_commit_fails() {
     assert!(write_project(&path, &changed).is_err());
     drop(lock);
     assert_eq!(std::fs::read(&path).unwrap(), before);
+}
+
+fn file_project() -> Project {
+    let mut project = Project::blank();
+    project.base = BaseDocument::File {
+        filename: "song.gp".into(),
+        bytes_base64: "aGVsbG8=".into(),
+        sha256: "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824".into(),
+    };
+    project
+}
+
+#[test]
+fn the_partial_capo_marker_is_written_only_once_set_and_survives_save_and_reopen() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("song.tabplayer");
+    // A project without the marker serializes with no trace of it.
+    let plain = file_project();
+    assert!(
+        !serde_json::to_string(&plain)
+            .unwrap()
+            .contains("partialCapo")
+    );
+    assert!(
+        !serde_json::to_string(&plain.view())
+            .unwrap()
+            .contains("partialCapo")
+    );
+    assert!(
+        !serde_json::to_string(&Project::blank())
+            .unwrap()
+            .contains("partialCapo")
+    );
+    // An older save without the field reads as unmarked.
+    assert!(
+        !serde_json::from_str::<Project>(&serde_json::to_string(&plain).unwrap())
+            .unwrap()
+            .partial_capo
+    );
+
+    let mut session = ProjectSession::new(plain, None).unwrap();
+    assert!(session.mark_partial_capo());
+    assert!(!session.mark_partial_capo());
+    // Marking is not an edit and not an unsaved change.
+    let snapshot = session.snapshot();
+    assert!(snapshot.project.partial_capo && !snapshot.dirty && !snapshot.can_undo);
+    let stored = session.stored_project();
+    assert!(stored.partial_capo);
+    assert!(
+        serde_json::to_string(&stored)
+            .unwrap()
+            .contains("\"partialCapo\":true")
+    );
+    write_project(&path, &stored).unwrap();
+    assert!(read_project(&path).unwrap().partial_capo);
+    // Recovery keeps it.
+    let restored = ProjectSession::from_checkpoint(session.checkpoint()).unwrap();
+    assert!(restored.snapshot().project.partial_capo);
+}
+
+#[test]
+fn the_marker_must_be_true_when_present() {
+    let mut value = serde_json::to_value(file_project()).unwrap();
+    value["partialCapo"] = serde_json::json!(true);
+    assert!(
+        serde_json::from_value::<Project>(value.clone())
+            .unwrap()
+            .partial_capo
+    );
+    value["partialCapo"] = serde_json::json!("yes");
+    assert!(serde_json::from_value::<Project>(value).is_err());
 }

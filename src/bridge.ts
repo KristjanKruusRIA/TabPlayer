@@ -14,6 +14,8 @@ export interface NativeBridge {
   redo(revision:number): Promise<DocumentSnapshot>;
   /** Finalizes or unfinalizes the document. The lock is not an edit and has no history entry. */
   setLock(lock:DocumentLock|null,revision:number): Promise<DocumentSnapshot>;
+  /** Marks a score read from a file as one whose partial capo applies; not an edit. Absent bridges leave the project unmarked. */
+  markPartialCapo?(revision:number): Promise<DocumentSnapshot>;
   saveProject(saveAs: boolean,revision:number): Promise<DocumentSnapshot | null>;
   exportGp(bytes: Uint8Array,revision:number,fileName?:string): Promise<boolean>;
   readBackingAsset(assetId:string,revision:number):Promise<Uint8Array>;
@@ -41,6 +43,7 @@ export function createDocumentBridge(documentId:DocumentId,observer?:DocumentSav
   applyEdit: (command,revision,assetToken) => invoke('apply_edit',{document:{documentId,revision},command,assetToken}),
   undo: revision => invoke('undo_edit',{document:{documentId,revision}}), redo: revision => invoke('redo_edit',{document:{documentId,revision}}),
   setLock: (lock,revision) => invoke('document_set_lock',{document:{documentId,revision},lock}),
+  markPartialCapo: revision => invoke('document_mark_partial_capo',{document:{documentId,revision}}),
   saveProject: async (saveAs,revision) => {
     const record=await (desktopTest?invoke<DocumentSnapshot|null>('desktop_test_io',{action:'save',documentId,revision}):invoke<DocumentSnapshot|null>('save_project',{document:{documentId,revision},saveAs}));
     if(record?.documentId===documentId&&observer)void Promise.resolve().then(()=>observer.saved(record)).catch(error=>observer.failed(error));

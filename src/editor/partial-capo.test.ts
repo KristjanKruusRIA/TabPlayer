@@ -188,9 +188,9 @@ describe('replay, trills and the string count',()=>{
     // No partial capo, no change: a whole-neck capo edit moves the stored pitch as it always did.
     applyStructureEdit(score,{type:'setStaffSettings',track:0,staff:0,settings:{...base,capo:3}},3);expect(note.trillValue).toBe(42);
   });
-  it('replays an old log whose GP base carries a partial capo, including a string count change',()=>{
+  it('remaps the partial capo of a marked file project over a string count change',()=>{
     const bytes=exportGp(scored(combined)),base64=Buffer.from(bytes).toString('base64');
-    const old=(...edits:EditCommand[])=>({...blankProject(),base:{kind:'file' as const,filename:'old.gp',bytesBase64:base64,sha256:'0'.repeat(64)},edits});
+    const old=(...edits:EditCommand[])=>({...blankProject(),base:{kind:'file' as const,filename:'old.gp',bytesBase64:base64,sha256:'0'.repeat(64)},partialCapo:true as const,edits});
     const before=written(buildScore(old()));
     const score=buildScore(old({type:'setStringCount',track:0,tuning:[64,59,55,50,45,40,35],keep:'high'}));
     const staff=score.tracks[0].staves[0];

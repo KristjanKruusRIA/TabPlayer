@@ -14,7 +14,7 @@ function orderedTracks(doc:Document):(Element|undefined)[] {
 const property=(staff:Element,name:string)=>[...staff.querySelectorAll(':scope > Properties > Property')].find(item=>item.getAttribute('name')===name);
 
 /** Reads the partial capo of every staff. A malformed one is skipped with a warning and never refuses the file. */
-export function readGpifPartialCapo(score:model.Score,doc:Document):void {
+export function readGpifPartialCapo(score:model.Score,doc:Document,apply=true):void {
   orderedTracks(doc).forEach((node,index)=>{
     const track=score.tracks[index];if(!node||!track)return;
     const staves=[...node.querySelectorAll(':scope > Staves > Staff')];
@@ -22,6 +22,7 @@ export function readGpifPartialCapo(score:model.Score,doc:Document):void {
       const element=staves[staffIndex];if(!element)return;
       const fretText=property(element,fretProperty)?.querySelector(':scope > Fret')?.textContent?.trim(),flags=property(element,flagsProperty)?.querySelector(':scope > Bitset')?.textContent?.trim();
       if(!fretText||!flags||!flags.includes('1'))return;
+      if(!apply){console.warn('This score holds a partial capo that is not applied: the project was edited before partial capo support.');return;}
       try{
         const value:PartialCapo={fret:/^\d+$/.test(fretText)?Number(fretText):NaN,strings:[...flags].flatMap((flag,at)=>flag==='1'?[at+1]:[])};
         if(!/^[01]+$/.test(flags)||flags.length!==staff.tuning.length)throw new Error('The string flags do not match the staff.');

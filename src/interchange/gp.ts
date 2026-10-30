@@ -64,7 +64,8 @@ function prepareHarmonyGpCarriers(score:model.Score,settings:Settings):model.Sco
   return copy;
 }
 
-export function loadInterchangeScore(bytes:Uint8Array,settings:Settings):model.Score {
+/** `partialCapo` false leaves a partial capo the file holds unapplied, as projects logged before the feature replay it. */
+export function loadInterchangeScore(bytes:Uint8Array,settings:Settings,partialCapo=true):model.Score {
   const score=importer.ScoreLoader.loadScoreFromBytes(prepareMusicXmlLoaderBytes(bytes,settings),settings);
   const musicXml=()=>applyMusicXmlTempoWords(applyMusicXmlLyricSyllables(applyMusicXmlTiedBends(applyMusicXmlAlternateStaves(applyMusicXmlDirectionMix(applyMusicXmlHammerPulls(applyMusicXmlNaturalHarmonics(score,bytes,settings),bytes,settings),bytes,settings),bytes,settings),bytes,settings),bytes,settings),bytes,settings);
   if(bytes[0]!==0x50||bytes[1]!==0x4b)return musicXml();
@@ -76,7 +77,7 @@ export function loadInterchangeScore(bytes:Uint8Array,settings:Settings):model.S
   readGpifLyrics(score,doc);
   readGpifHarmony(score,doc);
   readGpifScaleDiagrams(score,doc);
-  readGpifPartialCapo(score,doc);
+  readGpifPartialCapo(score,doc,partialCapo);
   orderedTracks(doc).forEach((node,index)=>{
     const track=score.tracks[index];if(!node||!track)return;
     const transpose=node.querySelector(':scope > Transpose');

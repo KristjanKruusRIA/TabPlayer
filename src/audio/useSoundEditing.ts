@@ -12,7 +12,7 @@ const noSubscribe=()=>()=>{},noState=()=>null;
 
 /** A pedalboard's effects and how to change them: the track's own, or the second one after it. A second board
  * left with no pedal switched on is removed. */
-export interface Board {effects:FxSettings;second:boolean;name:(label:string)=>string;write:(change:(effects:FxSettings)=>void)=>void}
+export interface Board {effects:FxSettings;second:boolean;name:(label:string)=>string;write:(change:(effects:FxSettings)=>void)=>Promise<boolean>}
 export interface SoundEditingInput {trackId:string;sound?:TrackSound;onEdit:(edit:EditCommand)=>void|Promise<void>;playback?:NativePlaybackController|null;busy?:boolean;shown?:boolean}
 
 /** Everything the Sound task does to a track's sound: each change is one undoable `setTrackSound` edit, a preview
@@ -32,9 +32,9 @@ export function useSoundEditing({trackId,sound,onEdit,playback,busy=false,shown=
   const endPreview=()=>{previewRequest.current++;setPreviewChoice('');return previewer&&previewer.soundPreview()?.track===trackId?Promise.resolve(previewer.previewSound(trackId,null)).catch(e=>setError(String(e))):Promise.resolve();};
   /** Applies `next` as one undoable edit. A preview ends at once, so the edit is what plays and edits keep their order. */
   const save=(next:TrackSound)=>{if(previewChoice||activePreview){void endPreview();setStatus('Preview ended.');}return record(next);};
-  const first:Board={effects:current.effects,second:false,name:label=>label,write:change=>{const next=structuredClone(current);change(next.effects);void save(next);}};
+  const first:Board={effects:current.effects,second:false,name:label=>label,write:change=>{const next=structuredClone(current);change(next.effects);return save(next);}};
   const second:Board|null=current.effects.second?{effects:current.effects.second,second:true,name:label=>`Second pedalboard: ${label}`,write:change=>{
-    const next=structuredClone(current),board=next.effects.second!;change(board);if(effectBlocks.every(block=>!board[block].enabled))delete next.effects.second;void save(next);}}:null;
+    const next=structuredClone(current),board=next.effects.second!;change(board);if(effectBlocks.every(block=>!board[block].enabled))delete next.effects.second;return save(next);}}:null;
   /** Sets one field of `block` on `board`. A field added after sounds could be saved is left out while 0, as the native player writes it. */
   const fx=(board:Board,block:EffectBlock,key:string,value:unknown)=>board.write(effects=>{if(value===0&&laterFields(block).includes(key))delete (effects[block] as unknown as Record<string,unknown>)[key];else Object.assign(effects[block],{[key]:value});});
   /** Puts a copy of `block` from the track's pedalboard on the second one, switched on; the second board starts with every pedal off. */

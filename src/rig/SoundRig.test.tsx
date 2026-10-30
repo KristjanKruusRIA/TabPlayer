@@ -1,0 +1,500 @@
+// @vitest-environment jsdom
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import '@testing-library/jest-dom/vitest';
+import userEvent from '@testing-library/user-event';
+import { useState } from 'react';
+import type { EditCommand, TrackSound } from '../edit-types';
+import { effectBlocks } from '../document-settings';
+import { blockNames, soundPreset } from '../audio/sound-model';
+import { factoryCategories, factorySound, factorySounds } from '../audio/factory-sounds';
+import { forgetSessionSoundLibrary, saveSoundPreset, copyPedal, copySound } from '../audio/sound-library';
+import type { NativePlaybackController } from '../audio/NativePlaybackController';
+import { SoundRig } from './SoundRig';
+
+beforeEach(()=>localStorage.clear());
+afterEach(()=>{cleanup();forgetSessionSoundLibrary();localStorage.clear();});
+
+/** A stand-in for the native playback controller's preview and device surface. */
+function playback() {
+  let preview:{track:string;sound:TrackSound}|null=null;const listeners=new Set<()=>void>();let state:{error?:string}|null=null;
+  const fake={
+    subscribe:(listener:()=>void)=>{listeners.add(listener);return()=>listeners.delete(listener);},getState:()=>state,
+    devices:vi.fn(async()=>[{id:'speakers',name:'Studio speakers',isDefault:false}]),deviceId:()=>null,selectDevice:vi.fn(),
+    soundPreview:()=>preview,
+    fail:(message:string)=>{state={error:message};listeners.forEach(listener=>listener());},
+    previewSound:vi.fn(async(track:string,sound:TrackSound|null)=>{preview=sound?{track,sound:structuredClone(sound)}:null;listeners.forEach(listener=>listener());}),
+  };
+  return fake;
+}
+type Fake=ReturnType<typeof playback>;
+interface Options {busy?:boolean;player?:Fake|null;edit?:(command:EditCommand)=>void|Promise<void>;cabinetResponse?:React.ReactNode;master?:React.ReactNode}
+/** The rig over a sound it keeps, as the app does, recording every edit it is asked for. */
+function mount(initial:TrackSound=soundPreset('lead','green-guitar'),{busy=false,player=playback(),edit,cabinetResponse,master}:Options={}) {
+  const edits:EditCommand[]=[];
+  function Host() {
+    const [sound,setSound]=useState(initial),[track,setTrack]=useState('guitar');
+    return <SoundRig trackId={track} sound={sound} busy={busy} playback={player as unknown as NativePlaybackController|null} cabinetResponse={cabinetResponse} master={master}
+      tracks={[{id:'guitar',name:'Lead Guitar'},{id:'bass',name:'Bass'}]} onTrack={setTrack}
+      onEdit={async command=>{edits.push(command);await edit?.(command);if(command.type==='setTrackSound')setSound(command.sound);}}/>;
+  }
+  const view=render(<Host/>);
+  return {edits,player,view,last:()=>(edits.at(-1) as Extract<EditCommand,{type:'setTrackSound'}>).sound};
+}
+const tab=(block:keyof typeof blockNames)=>screen.getByRole('tab',{name:new RegExp(`^${blockNames[block]}, `)});
+const choose=async(block:keyof typeof blockNames)=>{await userEvent.click(tab(block));};
+const drag=(element:HTMLElement,from:number,to:number)=>{
+  fireEvent.pointerDown(element,{clientY:from,pointerId:1});
+  for(const y of [from-(from-to)*.25,from-(from-to)*.5,to])fireEvent.pointerMove(element,{clientY:y,pointerId:1});
+  fireEvent.pointerUp(element,{clientY:to,pointerId:1});
+};
+
+it('shows all eighteen blocks as a horizontal chain, with the amp chosen and its state in each name', ()=>{
+  mount();
+  const chain=screen.getByRole('tablist',{name:'Signal chain'});
+  const tabs=within(chain).getAllByRole('tab');
+  expect(tabs).toHaveLength(18);
+  expect(tabs.map(item=>item.getAttribute('aria-label')?.split(',')[0])).toEqual(effectBlocks.map(block=>blockNames[block]));
+  expect(tab('amp')).toHaveAttribute('aria-selected','true');expect(tab('amp')).toHaveAccessibleName('Amp, enabled');
+  expect(tab('gate')).toHaveAccessibleName('Gate, bypassed');
+  expect(screen.getByRole('tabpanel',{name:'Amp'})).toBeInTheDocument();
+});
+
+it('shows each block\'s own stage when it is chosen', async()=>{
+  mount();
+  for(const block of effectBlocks){await choose(block);expect(screen.getByRole('tabpanel',{name:blockNames[block]})).toBeVisible();expect(tab(block)).toHaveAttribute('aria-selected','true');}
+});
+
+it('is a single tab stop whose arrow keys move between blocks without choosing them', async()=>{
+  const user=userEvent.setup();mount();
+  const tabs=screen.getAllByRole('tab');
+  expect(tabs.filter(item=>item.tabIndex===0)).toEqual([tab('amp')]);
+  tab('amp').focus();
+  await user.keyboard('{ArrowRight}');expect(tab('cabinet')).toHaveFocus();expect(tab('amp')).toHaveAttribute('aria-selected','true');
+  await user.keyboard('{Enter}');expect(tab('cabinet')).toHaveAttribute('aria-selected','true');
+  await user.keyboard('{Home}');expect(tab('microphone')).toHaveFocus();
+  await user.keyboard('{End}');expect(tab('reverb')).toHaveFocus();
+  await user.keyboard('{ArrowLeft}');expect(tab('delay')).toHaveFocus();
+});
+
+it('switches a block on or off with Space, as one edit, without choosing it', async()=>{
+  const user=userEvent.setup(),{edits,last}=mount();
+  tab('gate').focus();await user.keyboard(' ');
+  expect(edits).toHaveLength(1);expect(last().effects.gate.enabled).toBe(true);
+  expect(tab('amp')).toHaveAttribute('aria-selected','true');
+  await user.keyboard(' ');expect(last().effects.gate.enabled).toBe(false);expect(edits).toHaveLength(2);
+});
+
+it('keeps the chain footswitch out of the accessibility tree and switches with a click', ()=>{
+  const {edits,last,view}=mount();
+  const switches=view.container.querySelectorAll('.rig-chain-switch');
+  expect(switches.length).toBeGreaterThan(0);for(const item of switches)expect(item).toHaveAttribute('aria-hidden','true');
+  fireEvent.click(tab('drive').parentElement!.querySelector('.rig-chain-switch')!);
+  expect(edits).toHaveLength(1);expect(last().effects.drive.enabled).toBe(true);
+});
+
+it('moves a block along the chain with Alt and the arrow keys, as one edit, and keeps focus on it', async()=>{
+  const user=userEvent.setup(),{edits,last}=mount();
+  tab('amp').focus();
+  await user.keyboard('{Alt>}{ArrowLeft}{/Alt}');
+  expect(edits).toHaveLength(1);
+  const names=last().effects.order!;expect(names.indexOf('amp')).toBe(effectBlocks.indexOf('amp')-1);expect(names.indexOf('drive')).toBe(effectBlocks.indexOf('amp'));
+  expect(screen.getByRole('status')).toHaveTextContent('Amp is now 7 of 18 in the chain.');
+  expect(tab('amp')).toHaveFocus();
+  await user.keyboard('{Alt>}{ArrowRight}{/Alt}');
+  expect(edits).toHaveLength(2);expect(last().effects.order).toBeUndefined();
+});
+
+it('moves a block by dragging it, as one edit', ()=>{
+  const {edits,last,view}=mount();
+  const items=[...view.container.querySelectorAll<HTMLElement>('.rig-chain-tab')];
+  // Lay the tabs out 50 px apart for the hit test.
+  items.forEach((item,index)=>{item.getBoundingClientRect=()=>({left:index*50,right:index*50+48,width:48,top:0,bottom:60,height:60,x:index*50,y:0,toJSON:()=>({})});});
+  const amp=tab('amp');
+  fireEvent.pointerDown(amp,{clientX:7*50+20,pointerId:1,button:0});
+  fireEvent.pointerMove(amp,{clientX:7*50+20-3,pointerId:1});
+  expect(edits).toHaveLength(0);
+  fireEvent.pointerMove(amp,{clientX:2*50+30,pointerId:1});fireEvent.pointerMove(amp,{clientX:2*50+30,pointerId:1});
+  fireEvent.pointerUp(amp,{clientX:2*50+30,pointerId:1});
+  expect(edits).toHaveLength(1);expect(last().effects.order!.indexOf('amp')).toBe(2);
+  // The click that ends a drag does not choose the block again.
+  fireEvent.click(amp);
+});
+
+it('moves blocks earlier and later with its buttons, which stop at the ends', async()=>{
+  const user=userEvent.setup(),{edits,last}=mount();
+  await choose('microphone');
+  expect(screen.getByRole('button',{name:'Move Microphone earlier'})).toBeDisabled();
+  await user.click(screen.getByRole('button',{name:'Move Microphone later'}));
+  expect(last().effects.order!.slice(0,2)).toEqual(['gate','microphone']);expect(edits).toHaveLength(1);
+  await choose('reverb');expect(screen.getByRole('button',{name:'Move Reverb later'})).toBeDisabled();
+});
+
+it('records one undoable edit for a whole knob drag', async()=>{
+  const {edits,last}=mount();
+  const gain=screen.getByRole('slider',{name:'amp Gain (dB)'});
+  fireEvent.pointerDown(gain,{clientY:300,pointerId:1});
+  for(const y of [290,270,250,240])fireEvent.pointerMove(gain,{clientY:y,pointerId:1});
+  expect(edits).toHaveLength(0);
+  fireEvent.pointerUp(gain,{clientY:240,pointerId:1});
+  expect(edits).toHaveLength(1);
+  expect(last().effects.amp.gainDb).toBe(18);// 60 px of 160 across 48 dB
+  expect(edits[0]).toMatchObject({type:'setTrackSound',trackId:'guitar'});
+  // Everything else about the sound is untouched.
+  const expected=structuredClone(soundPreset('lead','green-guitar'));expected.effects.amp.gainDb=18;expect(last()).toEqual(expected);
+});
+
+it('changes every amp field and the model through the faceplate, keeping the same accessible names', async()=>{
+  const {last,edits}=mount();
+  const fields:[string,string,number,(sound:TrackSound)=>number|undefined][]=[
+    ['amp Drive','ArrowUp',.76,sound=>sound.effects.amp.drive],['amp Gain (dB)','ArrowUp',.1,sound=>sound.effects.amp.gainDb],['amp Bass (dB)','ArrowUp',.5,sound=>sound.effects.amp.bassDb],
+    ['amp Mid (dB)','ArrowDown',-.5,sound=>sound.effects.amp.midDb],['amp Treble (dB)','ArrowUp',.5,sound=>sound.effects.amp.trebleDb],['amp Presence (dB)','ArrowDown',-.5,sound=>sound.effects.amp.presenceDb]];
+  for(const [name,key,expected,read] of fields){fireEvent.keyDown(screen.getByRole('slider',{name}),{key});expect(read(last())).toBeCloseTo(expected,5);}
+  expect(edits).toHaveLength(6);
+  const group=screen.getByRole('radiogroup',{name:'Amp model'});
+  expect(within(group).getAllByRole('radio').map(radio=>radio.textContent)).toEqual(['Clean','Crunch','Lead','Metal','Bass','Bass drive']);
+  await userEvent.click(within(group).getByRole('radio',{name:'Bass drive'}));
+  expect(last().effects.amp.model).toBe('bassDrive');
+});
+
+it('leaves a tone-stack field out of the saved sound while it is flat, as the inspector does', ()=>{
+  const sound=soundPreset('lead');sound.effects.amp.bassDb=3;
+  const {last}=mount(sound);
+  fireEvent.keyDown(screen.getByRole('slider',{name:'amp Bass (dB)'}),{key:'Home'});
+  fireEvent.doubleClick(screen.getByRole('slider',{name:'amp Bass (dB)'}));
+  expect(last().effects.amp.bassDb).toBeUndefined();
+});
+
+it('switches the chosen block on and off with a named switch', async()=>{
+  const {last}=mount();
+  await choose('gate');
+  const gate=screen.getByRole('switch',{name:'Enable gate'});
+  expect(gate).toHaveAttribute('aria-checked','false');
+  await userEvent.click(gate);expect(last().effects.gate.enabled).toBe(true);expect(gate).toHaveAttribute('aria-checked','true');
+});
+
+it('gives each pedal knobs for every field and the right limits', async()=>{
+  mount();
+  await choose('compressor');
+  for(const name of ['compressor Threshold (dB)','compressor Ratio','compressor Attack (ms)','compressor Release (ms)','compressor Makeup (dB)'])expect(screen.getByRole('slider',{name})).toBeInTheDocument();
+  const ratio=screen.getByRole('slider',{name:'compressor Ratio'});
+  expect(ratio).toHaveAttribute('aria-valuemin','1');expect(ratio).toHaveAttribute('aria-valuemax','20');expect(ratio).toHaveAttribute('aria-valuetext','4.0');
+  expect(screen.getByRole('slider',{name:'compressor Threshold (dB)'})).toHaveAttribute('aria-valuetext','−18 dB');
+});
+
+it('sets a pedal\'s models with radio groups', async()=>{
+  const {last}=mount();
+  await choose('drive');await userEvent.click(within(screen.getByRole('radiogroup',{name:'Drive model'})).getByRole('radio',{name:'Fuzz'}));expect(last().effects.drive.model).toBe('fuzz');
+  await choose('reverb');await userEvent.click(within(screen.getByRole('radiogroup',{name:'Reverb model'})).getByRole('radio',{name:'Spring'}));expect(last().effects.reverb.model).toBe('spring');
+  await choose('delay');
+  await userEvent.click(within(screen.getByRole('radiogroup',{name:'Delay model'})).getByRole('radio',{name:'Tape'}));expect(last().effects.delay.model).toBe('tape');
+  fireEvent.change(screen.getByRole('combobox',{name:'Delay time'}),{target:{value:'1.5'}});expect(last().effects.delay.quarterNotes).toBe(1.5);
+  expect(screen.getByText('Delay times are limited to 16 seconds.')).toBeInTheDocument();
+  await choose('tremolo');await userEvent.click(within(screen.getByRole('radiogroup',{name:'Tremolo shape'})).getByRole('radio',{name:'Square'}));expect(last().effects.tremolo.shape).toBe('square');
+  await choose('phaser');await userEvent.click(within(screen.getByRole('radiogroup',{name:'Phaser stages'})).getByRole('radio',{name:'8'}));expect(last().effects.phaser.stages).toBe(8);
+});
+
+it('offers the wah\'s four models and two modes, and switches off the knob the mode does not use', async()=>{
+  const {last}=mount();
+  await choose('wah');
+  expect(within(screen.getByRole('radiogroup',{name:'Wah model'})).getAllByRole('radio').map(radio=>radio.textContent)).toEqual(['Classic','Vintage (vocal)','Wide range','Bass']);
+  expect(screen.getByRole('slider',{name:'wah Sensitivity'})).toHaveAttribute('aria-disabled','true');
+  expect(screen.getByRole('slider',{name:'wah Pedal position'})).not.toHaveAttribute('aria-disabled');
+  await userEvent.click(within(screen.getByRole('radiogroup',{name:'Wah mode'})).getByRole('radio',{name:'Auto (follows playing)'}));
+  expect(last().effects.wah.mode).toBe('auto');
+  expect(screen.getByRole('slider',{name:'wah Pedal position'})).toHaveAttribute('aria-disabled','true');
+  expect(screen.getByRole('slider',{name:'wah Sensitivity'})).not.toHaveAttribute('aria-disabled');
+});
+
+it('syncs a modulation pedal\'s rate to the tempo and switches off its free rate', async()=>{
+  const {last}=mount();
+  await choose('chorus');
+  const rate=screen.getByRole('slider',{name:'chorus Rate (Hz)'});expect(rate).not.toHaveAttribute('aria-disabled');
+  await act(async()=>{fireEvent.change(screen.getByRole('combobox',{name:'Chorus tempo sync'}),{target:{value:'1'}});});
+  expect(last().effects.chorus.syncQuarterNotes).toBe(1);expect(rate).toHaveAttribute('aria-disabled','true');
+  await act(async()=>{fireEvent.change(screen.getByRole('combobox',{name:'Chorus tempo sync'}),{target:{value:'0'}});});
+  expect(last().effects.chorus).not.toHaveProperty('syncQuarterNotes');expect(rate).not.toHaveAttribute('aria-disabled');
+});
+
+it('draws the microphone\'s four placements as spots over the cabinet and changes the placement', async()=>{
+  const {last}=mount();
+  await choose('cabinet');
+  const spots=screen.getByRole('radiogroup',{name:'Microphone placement'});
+  expect(within(spots).getAllByRole('radio').map(radio=>radio.textContent)).toEqual(['Close','Standard','Edge','Room']);
+  expect(within(spots).getByRole('radio',{name:'Standard'})).toBeChecked();
+  await userEvent.click(within(spots).getByRole('radio',{name:'Edge'}));
+  expect(last().effects.microphone.placement).toBe('edge');expect(within(spots).getByRole('radio',{name:'Edge'})).toBeChecked();
+  await userEvent.click(within(screen.getByRole('radiogroup',{name:'Microphone output'})).getByRole('radio',{name:'Mono'}));expect(last().effects.microphone.output).toBe('mono');
+  await userEvent.click(within(screen.getByRole('radiogroup',{name:'Cabinet model'})).getByRole('radio',{name:'Bass stack'}));expect(last().effects.cabinet.model).toBe('bassStack');
+  expect(within(screen.getByRole('radiogroup',{name:'Cabinet model'})).getAllByRole('radio')).toHaveLength(5);
+  await userEvent.click(screen.getByRole('switch',{name:'Enable microphone'}));expect(last().effects.microphone.enabled).toBe(true);
+  expect(screen.getByRole('switch',{name:'Enable cabinet'})).toBeInTheDocument();
+});
+
+it('moves between the four placements with the arrow keys', async()=>{
+  const {last}=mount();
+  await choose('microphone');
+  expect(screen.getByRole('tabpanel',{name:'Microphone'})).toBeInTheDocument();
+  within(screen.getByRole('radiogroup',{name:'Microphone placement'})).getByRole('radio',{name:'Standard'}).focus();
+  await userEvent.keyboard('{ArrowRight}');expect(last().effects.microphone.placement).toBe('edge');
+  expect(screen.queryByRole('switch',{name:'Enable cabinet'})).toBeNull();
+});
+
+it('has ten faders for the graphic EQ and flattens them in one edit', async()=>{
+  const sound=soundPreset('clean');sound.effects.graphicEq.enabled=true;sound.effects.graphicEq.gainsDb=[1,2,3,4,5,6,-1,-2,-3,-4];
+  const {last,edits}=mount(sound);
+  await choose('graphicEq');
+  const group=screen.getByRole('group',{name:'Graphic EQ bands'});
+  expect(within(group).getAllByRole('slider')).toHaveLength(10);
+  const band=within(group).getByRole('slider',{name:'Graphic EQ 1k Hz (dB)'});
+  expect(band).toHaveAttribute('aria-valuenow','6');expect(band).toHaveAttribute('aria-valuemin','-12');expect(band).toHaveAttribute('aria-valuemax','12');
+  fireEvent.keyDown(band,{key:'ArrowUp'});
+  expect(last().effects.graphicEq.gainsDb).toEqual([1,2,3,4,5,6.5,-1,-2,-3,-4].map((gain,index)=>index===5?6.5:gain));expect(edits).toHaveLength(1);
+  fireEvent.keyDown(within(group).getByRole('slider',{name:'Graphic EQ 31 Hz (dB)'}),{key:'End'});expect(last().effects.graphicEq.gainsDb[0]).toBe(12);
+  await userEvent.click(screen.getByRole('button',{name:'Flatten graphic EQ'}));
+  expect(last().effects.graphicEq.gainsDb).toEqual(new Array(10).fill(0));expect(edits).toHaveLength(3);
+  fireEvent.keyDown(screen.getByRole('slider',{name:'graphicEq Level (dB)'}),{key:'ArrowUp'});expect(last().effects.graphicEq.levelDb).toBe(.5);
+});
+
+it('records one edit for a fader drag', async()=>{
+  const sound=soundPreset('clean');
+  const {edits,last}=mount(sound);
+  await choose('graphicEq');
+  const band=screen.getByRole('slider',{name:'Graphic EQ 250 Hz (dB)'});
+  band.getBoundingClientRect=()=>({top:0,left:0,right:36,bottom:134,height:134,width:36,x:0,y:0,toJSON:()=>({})});
+  const thumb=band.querySelector('.tp-fader-thumb')!;
+  fireEvent.pointerDown(thumb,{clientY:67,pointerId:1});fireEvent.pointerMove(thumb,{clientY:50,pointerId:1});fireEvent.pointerMove(thumb,{clientY:37,pointerId:1});
+  expect(edits).toHaveLength(0);fireEvent.pointerUp(thumb,{clientY:37,pointerId:1});
+  expect(edits).toHaveLength(1);expect(last().effects.graphicEq.gainsDb[3]).toBe(6);
+});
+
+it('duplicates a pedal onto a second pedalboard, shows it after the chain and removes it again', async()=>{
+  const {last}=mount();
+  await choose('drive');
+  await userEvent.click(screen.getByRole('button',{name:'Duplicate pedal: Drive'}));
+  expect(last().effects.second!.drive).toEqual({...soundPreset('lead').effects.drive,enabled:true});
+  expect(screen.getByRole('status')).toHaveTextContent('Duplicated the Drive pedal onto the second pedalboard.');
+  expect(screen.getByRole('button',{name:'Duplicate pedal: Drive'})).toBeDisabled();
+  const second=screen.getByRole('tab',{name:'Second pedalboard: Drive, enabled'});
+  await userEvent.click(second);
+  expect(screen.getByRole('tabpanel',{name:'Second pedalboard: Drive'})).toBeInTheDocument();
+  // Its controls edit the second board only.
+  fireEvent.keyDown(screen.getByRole('slider',{name:'Second pedalboard: drive Drive'}),{key:'ArrowUp'});
+  expect(last().effects.second!.drive.drive).toBe(.51);expect(last().effects.drive.drive).toBe(.5);
+  await userEvent.click(within(screen.getByRole('radiogroup',{name:'Second pedalboard: Drive model'})).getByRole('radio',{name:'Fuzz'}));
+  expect(last().effects.second!.drive.model).toBe('fuzz');expect(last().effects.drive.model).toBe('overdrive');
+  expect(screen.queryByRole('button',{name:/^Move Drive/})).toBeNull();
+  await userEvent.click(screen.getByRole('button',{name:'Remove duplicate: Drive'}));
+  expect(last().effects.second).toBeUndefined();
+  // With the board gone, the first board's pedal is shown.
+  expect(screen.getByRole('tabpanel',{name:'Drive'})).toBeInTheDocument();expect(screen.queryByRole('tab',{name:/Second pedalboard/})).toBeNull();
+});
+
+it('copies a pedal and pastes it on the same kind of pedal, and copies and pastes a whole sound', async()=>{
+  const {last}=mount(soundPreset('lead','green-guitar'));
+  await choose('amp');
+  const paste=screen.getByRole('button',{name:'Paste pedal: Amp'});expect(paste).toBeDisabled();
+  const source=soundPreset('crunch');source.effects.amp.drive=.9;
+  copyPedal('amp',source.effects.amp);
+  await userEvent.click(screen.getByRole('button',{name:'Copy pedal: Amp'}));
+  expect(screen.getByRole('status')).toHaveTextContent('Copied the Amp pedal.');
+  copyPedal('amp',source.effects.amp);
+  await userEvent.click(screen.getByRole('button',{name:'Paste pedal: Amp'}));
+  expect(last().effects.amp.drive).toBe(.9);
+  await choose('gate');expect(screen.getByRole('button',{name:'Paste pedal: Gate'})).toBeDisabled();
+  expect(screen.getByRole('button',{name:'Paste sound'})).toBeDisabled();
+  await userEvent.click(screen.getByRole('button',{name:'Copy sound'}));
+  expect(screen.getByRole('status')).toHaveTextContent('Copied this track’s sound.');
+  copySound(soundPreset('bass'));
+  await userEvent.click(screen.getByRole('button',{name:'Paste sound'}));
+  expect(last().presetId).toBe('bass');
+});
+
+it('sets the sound source, applies presets and restores the preset, each as one edit', async()=>{
+  const {last,edits}=mount(soundPreset('lead','green-guitar'));
+  fireEvent.change(screen.getByRole('combobox',{name:'Sound source'}),{target:{value:'darkblack-bass'}});
+  expect(last().voiceId).toBe('darkblack-bass');expect(last().presetId).toBe('lead');
+  fireEvent.change(screen.getByRole('combobox',{name:'Sound source'}),{target:{value:''}});expect(last().voiceId).toBeNull();
+  const presets=screen.getByRole('radiogroup',{name:'Sound preset'});
+  expect(within(presets).getAllByRole('radio').map(radio=>radio.textContent)).toEqual(['Bypass','Clean','Crunch','Lead','Bass']);
+  await userEvent.click(within(presets).getByRole('radio',{name:'Crunch'}));
+  expect(last()).toEqual(soundPreset('crunch',null));
+  fireEvent.keyDown(screen.getByRole('slider',{name:'amp Drive'}),{key:'ArrowUp'});
+  await userEvent.click(screen.getByRole('button',{name:'Restore preset'}));
+  expect(last()).toEqual(soundPreset('crunch',null));expect(edits).toHaveLength(5);
+});
+
+it('lists the audio outputs and selects one', async()=>{
+  const {player}=mount();
+  const output=await screen.findByRole('option',{name:'Studio speakers'});expect(output).toBeInTheDocument();
+  fireEvent.change(screen.getByRole('combobox',{name:'Audio output'}),{target:{value:'speakers'}});
+  expect(player!.selectDevice).toHaveBeenCalledWith('speakers');
+  fireEvent.change(screen.getByRole('combobox',{name:'Audio output'}),{target:{value:''}});expect(player!.selectDevice).toHaveBeenLastCalledWith(null);
+});
+
+it('shows an edit that fails and a playback error as alerts, and keeps the control at the sound', async()=>{
+  const {player}=mount(soundPreset('lead'),{edit:async()=>{throw new Error('Preset could not be applied');}});
+  await userEvent.click(screen.getByRole('button',{name:'Restore preset'}));
+  expect(await screen.findByRole('alert')).toHaveTextContent('Preset could not be applied');
+  act(()=>player!.fail('Output is unavailable'));
+  expect(screen.getAllByRole('alert').map(alert=>alert.textContent)).toEqual(['Error: Preset could not be applied','Output is unavailable']);
+});
+
+it('disables every edit while busy but still lets the player look at any block', async()=>{
+  const {edits}=mount(soundPreset('lead'),{busy:true});
+  await choose('gate');
+  expect(screen.getByRole('tabpanel',{name:'Gate'})).toBeVisible();
+  expect(screen.getByRole('switch',{name:'Enable gate'})).toBeDisabled();
+  expect(screen.getByRole('slider',{name:'gate Threshold (dB)'})).toHaveAttribute('aria-disabled','true');
+  fireEvent.keyDown(screen.getByRole('slider',{name:'gate Threshold (dB)'}),{key:'ArrowUp'});
+  for(const name of ['Restore preset','Copy pedal: Gate','Duplicate pedal: Gate'])expect(screen.getByRole('button',{name})).toBeDisabled();
+  expect(screen.getByRole('combobox',{name:'Sound source'})).toBeDisabled();expect(screen.getByRole('combobox',{name:'Audio output'})).toBeDisabled();
+  tab('gate').focus();await userEvent.keyboard(' ');
+  expect(edits).toHaveLength(0);
+});
+
+it('keeps a clear place for the cabinet response and the master panel, and nothing there until they exist', async()=>{
+  const first=mount();await choose('cabinet');
+  expect(document.querySelector('[data-slot="cabinet-response"]')).toBeEmptyDOMElement();expect(document.querySelector('[data-slot="master"]')).toBeNull();
+  first.view.unmount();
+  mount(soundPreset('lead'),{cabinetResponse:<button>Load cabinet response</button>,master:<p>Master output</p>});await choose('cabinet');
+  expect(within(document.querySelector<HTMLElement>('[data-slot="cabinet-response"]')!).getByRole('button',{name:'Load cabinet response'})).toBeInTheDocument();
+  expect(within(document.querySelector<HTMLElement>('[data-slot="master"]')!).getByText('Master output')).toBeInTheDocument();
+});
+
+it('changes the track the rig edits', async()=>{
+  const {view}=mount();
+  fireEvent.change(screen.getByRole('combobox',{name:'Sound track'}),{target:{value:'bass'}});
+  expect(screen.getByRole('combobox',{name:'Sound track'})).toHaveValue('bass');
+  expect(view.container.querySelector('.sound-view')).toBeInTheDocument();
+});
+
+// The sound browser.
+it('lists factory sounds by category and the player\'s own, and filters them by search', async()=>{
+  saveSoundPreset('Practice tone',soundPreset('clean'));
+  mount();
+  const browser=screen.getByRole('complementary',{name:'Sound browser'});
+  for(const group of ['Factory presets',...factoryCategories,'My sounds'])expect(within(browser).getByRole('region',{name:group})).toBeInTheDocument();
+  for(const item of factorySounds)expect(within(browser).getByRole('button',{name:`Apply “${item.name}”`})).toBeInTheDocument();
+  expect(within(browser).getByRole('button',{name:'Apply “Practice tone”'})).toBeInTheDocument();
+  await userEvent.type(within(browser).getByRole('searchbox',{name:'Search sounds'}),'tremolo');
+  expect(within(browser).getByRole('button',{name:'Apply “Surf tremolo”'})).toBeInTheDocument();
+  expect(within(browser).queryByRole('button',{name:'Apply “Warm jazz clean”'})).toBeNull();
+  expect(within(browser).queryByRole('region',{name:'My sounds'})).toBeNull();
+  await userEvent.clear(within(browser).getByRole('searchbox'));await userEvent.type(within(browser).getByRole('searchbox'),'zzzz');
+  expect(within(browser).getByText('No sounds match.')).toBeInTheDocument();
+  await userEvent.clear(within(browser).getByRole('searchbox'));
+  await userEvent.click(within(within(browser).getByRole('radiogroup',{name:'Show sounds'})).getByRole('radio',{name:'My sounds'}));
+  expect(within(browser).getAllByRole('region').map(region=>region.getAttribute('aria-label'))).toEqual(['My sounds']);
+  await userEvent.click(within(within(browser).getByRole('radiogroup',{name:'Show sounds'})).getByRole('radio',{name:'Factory'}));
+  expect(within(browser).queryByRole('region',{name:'My sounds'})).toBeNull();expect(within(browser).getAllByRole('region').length).toBe(1+factoryCategories.length);
+});
+
+it('applies a factory sound, keeping the instrument, and a saved sound, as one edit each', async()=>{
+  saveSoundPreset('Practice tone',soundPreset('clean'));
+  const {last,edits}=mount(soundPreset('lead','green-guitar'));
+  const item=factorySounds[0];
+  expect(item).toBeDefined();
+  await userEvent.click(screen.getByRole('button',{name:`Apply “${item.name}”`}));
+  expect(last()).toEqual(factorySound(item.id,'green-guitar'));expect(edits).toHaveLength(1);
+  expect(await screen.findByText(`Applied “${item.name}”.`)).toBeInTheDocument();
+  await userEvent.click(screen.getByRole('button',{name:'Apply “Practice tone”'}));
+  expect(last()).toEqual(soundPreset('clean'));expect(screen.getByRole('status')).toHaveTextContent('Applied “Practice tone”.');
+  await userEvent.click(screen.getByRole('button',{name:'Apply “Crunch”'}));
+  // A saved sound is the whole sound, so it brought its own instrument; a factory preset keeps the one the track has.
+  expect(last()).toEqual(soundPreset('crunch',null));
+});
+
+it('walks the list with the arrow keys, applies with Enter and hears with Space', async()=>{
+  const user=userEvent.setup(),{edits,player}=mount();
+  const rows=()=>[...document.querySelectorAll<HTMLButtonElement>('[data-row-main]')];
+  expect(rows().filter(row=>row.tabIndex===0)).toHaveLength(1);
+  rows()[0].focus();
+  await user.keyboard('{ArrowDown}{ArrowDown}');expect(rows()[2]).toHaveFocus();
+  await user.keyboard('{ArrowUp}');expect(rows()[1]).toHaveFocus();
+  await user.keyboard('{End}');expect(rows().at(-1)).toHaveFocus();await user.keyboard('{Home}');expect(rows()[0]).toHaveFocus();
+  await user.keyboard(' ');
+  expect(player!.previewSound).toHaveBeenCalledWith('guitar',soundPreset('gm','green-guitar'));expect(edits).toHaveLength(0);
+  await user.keyboard('{Enter}');
+  expect(edits).toHaveLength(1);
+});
+
+it('previews with Hear without recording an edit, keeps or cancels, and ends on Escape', async()=>{
+  saveSoundPreset('Wobble',soundPreset('crunch'));
+  const own=soundPreset('clean','green-guitar'),{edits,player,last}=mount(own);
+  await userEvent.click(screen.getByRole('button',{name:'Hear “Lead”'}));
+  expect(player!.previewSound).toHaveBeenLastCalledWith('guitar',soundPreset('lead','green-guitar'));
+  const strip=await screen.findByRole('group',{name:'Sound preview'});
+  expect(strip).toHaveTextContent('Previewing Lead');expect(screen.getByRole('status')).toHaveTextContent('Previewing Lead. Keep it or cancel to go back to this track’s sound.');
+  expect(screen.getByRole('button',{name:'Hear “Lead”'})).toHaveAttribute('aria-pressed','true');
+  expect(edits).toHaveLength(0);
+  // Another sound replaces it.
+  await userEvent.click(screen.getByRole('button',{name:'Hear “Wobble”'}));
+  expect(player!.previewSound).toHaveBeenLastCalledWith('guitar',soundPreset('crunch'));
+  // Escape cancels and goes back to the track's sound.
+  await userEvent.keyboard('{Escape}');
+  expect(player!.previewSound).toHaveBeenLastCalledWith('guitar',null);
+  await waitForNoPreview();expect(screen.getByRole('status')).toHaveTextContent('Back to this track’s sound.');expect(edits).toHaveLength(0);
+  // Keep records the previewed sound as one edit.
+  await userEvent.click(screen.getByRole('button',{name:'Hear “Wobble”'}));
+  await userEvent.click(await screen.findByRole('button',{name:'Keep previewed sound'}));
+  expect(edits).toHaveLength(1);expect(last()).toEqual(soundPreset('crunch'));
+  await waitForNoPreview();expect(screen.getByRole('status')).toHaveTextContent('Kept “Wobble”.');
+  // Cancel goes back.
+  await userEvent.click(screen.getByRole('button',{name:'Hear “Bass”'}));
+  await userEvent.click(await screen.findByRole('button',{name:'Cancel preview'}));
+  await waitForNoPreview();expect(edits).toHaveLength(1);
+});
+async function waitForNoPreview() {await act(async()=>{await Promise.resolve();});expect(screen.queryByRole('group',{name:'Sound preview'})).toBeNull();}
+
+it('ends a preview when another edit is made, so the edit is what plays', async()=>{
+  const {edits,player}=mount(soundPreset('lead'));
+  await userEvent.click(screen.getByRole('button',{name:'Hear “Clean”'}));
+  await screen.findByRole('group',{name:'Sound preview'});
+  fireEvent.keyDown(screen.getByRole('slider',{name:'amp Drive'}),{key:'ArrowUp'});
+  expect(player!.previewSound).toHaveBeenLastCalledWith('guitar',null);expect(edits).toHaveLength(1);
+  expect(screen.getByRole('status')).toHaveTextContent('Preview ended.');
+});
+
+it('has no Hear buttons where the host cannot preview', ()=>{
+  mount(soundPreset('lead'),{player:null});
+  expect(screen.queryByRole('button',{name:/^Hear/})).toBeNull();expect(screen.queryByRole('combobox',{name:'Audio output'})).toBeNull();
+  expect(screen.getByRole('button',{name:'Apply “Clean”'})).toBeInTheDocument();
+});
+
+it('saves, renames and deletes saved sounds, with a confirmation before the delete', async()=>{
+  const user=userEvent.setup(),{edits}=mount(soundPreset('lead'));
+  const name=screen.getByRole('textbox',{name:'Saved sound name'}),save=screen.getByRole('button',{name:'Save sound'});
+  expect(save).toBeDisabled();expect(screen.queryByRole('button',{name:'Rename saved sound'})).toBeNull();
+  await user.type(name,'Practice tone');await user.click(save);
+  expect(screen.getByRole('status')).toHaveTextContent('Saved “Practice tone”.');expect(name).toHaveValue('');
+  expect(screen.getByRole('button',{name:'Apply “Practice tone”'})).toBeInTheDocument();
+  // Saving the same name replaces it.
+  await user.type(name,'practice tone');await user.click(save);expect(screen.getByRole('status')).toHaveTextContent('Replaced “practice tone”.');
+  // Rename.
+  await user.click(screen.getByRole('button',{name:/^Rename saved sound “/}));
+  expect(name).toHaveValue('practice tone');expect(name).toHaveFocus();
+  await user.clear(name);await user.type(name,'Warm');await user.click(screen.getByRole('button',{name:'Rename saved sound'}));
+  expect(screen.getByRole('status')).toHaveTextContent('Renamed “practice tone” to “Warm”.');
+  expect(screen.getByRole('button',{name:'Apply “Warm”'})).toBeInTheDocument();
+  // Delete asks first and Cancel keeps it.
+  await user.click(screen.getByRole('button',{name:'Delete saved sound “Warm”'}));
+  const dialog=screen.getByRole('dialog',{name:'Delete “Warm”?'});
+  expect(within(dialog).getByRole('button',{name:'Cancel'})).toHaveFocus();
+  await user.click(within(dialog).getByRole('button',{name:'Cancel'}));
+  expect(screen.queryByRole('dialog')).toBeNull();expect(screen.getByRole('button',{name:'Apply “Warm”'})).toBeInTheDocument();
+  // Escape closes it too, and Delete removes the sound.
+  await user.click(screen.getByRole('button',{name:'Delete saved sound “Warm”'}));await user.keyboard('{Escape}');expect(screen.queryByRole('dialog')).toBeNull();
+  await user.click(screen.getByRole('button',{name:'Delete saved sound “Warm”'}));
+  await user.click(within(screen.getByRole('dialog')).getByRole('button',{name:'Delete'}));
+  expect(screen.queryByRole('dialog')).toBeNull();expect(screen.queryByRole('button',{name:'Apply “Warm”'})).toBeNull();
+  expect(screen.getByRole('status')).toHaveTextContent('Deleted “Warm”.');
+  // The library is not the track's sound: none of this was an edit.
+  expect(edits).toHaveLength(0);
+});
+
+it('does not take Space or the arrows from a text field', async()=>{
+  const user=userEvent.setup(),{edits}=mount();
+  await user.type(screen.getByRole('searchbox',{name:'Search sounds'}),'a b');
+  expect(screen.getByRole('searchbox')).toHaveValue('a b');expect(edits).toHaveLength(0);
+});

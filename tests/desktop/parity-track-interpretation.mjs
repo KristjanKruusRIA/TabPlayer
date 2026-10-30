@@ -21,7 +21,7 @@ const mix={gain:1,pan:0,mute:false,solo:false};
 /** One steel guitar bar: a three-note chord, a palm-muted note, a note on the chord's string, and a rest. */
 async function buildFixture(path){
   const {exporter,model,Settings}=await import('@coderline/alphatab');
-  const settings=new Settings(),score=new model.Score();score.title='Interpretation';score.tempo=100;score.addMasterBar(new model.MasterBar());
+  const settings=new Settings(),score=new model.Score();score.title='Interpretation';const first=new model.MasterBar();first.tempoAutomations=[model.Automation.buildTempoAutomation(false,0,100,2)];score.addMasterBar(first);
   const track=new model.Track();track.name='Guitar';track.playbackInfo.program=25;track.playbackInfo.primaryChannel=0;track.playbackInfo.secondaryChannel=1;
   const staff=new model.Staff();staff.stringTuning.tunings=[64,59,55,50,45,40];track.addStaff(staff);score.addTrack(track);
   const bar=new model.Bar();staff.addBar(bar);const voice=new model.Voice();bar.addVoice(voice);

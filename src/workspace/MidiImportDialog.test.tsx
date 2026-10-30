@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach,expect,it,vi } from 'vitest';
-import { cleanup,fireEvent,render,screen,waitFor } from '@testing-library/react';
+import { cleanup,fireEvent,render,screen,waitFor,within } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { Settings } from '@coderline/alphatab';
 import { MidiImportDialog } from './MidiImportDialog';
@@ -20,8 +20,8 @@ const choose=(input:HTMLInputElement,bytes:Uint8Array,name='riff.mid')=>fireEven
 it('starts with nothing to import, focus on the file button and the default options',()=>{
   const {importButton}=setup();
   expect(screen.getByRole('button',{name:'Choose MIDI file…'})).toHaveFocus();expect(importButton).toBeDisabled();expect(status()).toHaveTextContent('Nothing to import yet.');
-  expect(screen.getByLabelText('Quantization')).toHaveValue('16');expect(screen.getByLabelText('Tuplets')).toHaveValue('triplets');
-  expect(screen.getByLabelText('Voices per track')).toHaveValue('2');expect(screen.getByLabelText('Guitar and bass as tablature')).toBeChecked();
+  expect(within(screen.getByRole('radiogroup',{name:'Quantization'})).getByRole('radio',{name:'16th note (1/16)'})).toBeChecked();expect(screen.getByLabelText('Tuplets')).toHaveValue('triplets');
+  expect(within(screen.getByRole('radiogroup',{name:'Voices per track'})).getByRole('radio',{name:'2'})).toBeChecked();expect(screen.getByLabelText('Guitar and bass as tablature')).toBeChecked();
 });
 
 it('summarises a chosen file, imports it as a GP score named after it and closes once it opens',async()=>{
@@ -47,9 +47,9 @@ it('applies the chosen options to the score it imports',async()=>{
 
 it('disables the tuplet kinds the chosen quantization cannot hold',()=>{
   setup();
-  fireEvent.change(screen.getByLabelText('Quantization'),{target:{value:'4'}});
+  fireEvent.click(within(screen.getByRole('radiogroup',{name:'Quantization'})).getByRole('radio',{name:'Quarter note (1/4)'}));
   expect(screen.getByRole('option',{name:'Triplets'})).toBeDisabled();
-  fireEvent.change(screen.getByLabelText('Quantization'),{target:{value:'8'}});
+  fireEvent.click(within(screen.getByRole('radiogroup',{name:'Quantization'})).getByRole('radio',{name:'Eighth note (1/8)'}));
   expect(screen.getByRole('option',{name:'Triplets'})).toBeEnabled();expect(screen.getByRole('option',{name:'Triplets and quintuplets'})).toBeDisabled();
 });
 
@@ -80,8 +80,8 @@ it('keeps the dialog and file when the score cannot be opened',async()=>{
 it('keeps Tab inside the dialog, closes with Escape and blocks Import while busy',async()=>{
   const {onClose,input,importButton}=setup(true);
   choose(input,midi);await waitFor(()=>expect(status()).toHaveTextContent('1 part'));expect(importButton).toBeDisabled();
-  const cancel=screen.getByRole('button',{name:'Cancel'}),pick=screen.getByRole('button',{name:'Choose MIDI file…'});cancel.focus();
-  fireEvent.keyDown(cancel,{key:'Tab'});expect(pick).toHaveFocus();
-  fireEvent.keyDown(pick,{key:'Tab',shiftKey:true});expect(cancel).toHaveFocus();
-  fireEvent.keyDown(pick,{key:'Escape'});expect(onClose).toHaveBeenCalled();
+  const close=screen.getByRole('button',{name:'Close'}),cancel=screen.getByRole('button',{name:'Cancel'});cancel.focus();
+  fireEvent.keyDown(cancel,{key:'Tab'});expect(close).toHaveFocus();
+  fireEvent.keyDown(close,{key:'Tab',shiftKey:true});expect(cancel).toHaveFocus();
+  fireEvent.keyDown(close,{key:'Escape'});expect(onClose).toHaveBeenCalled();
 });

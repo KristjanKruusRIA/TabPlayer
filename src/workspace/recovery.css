@@ -1,31 +1,31 @@
-.recovery-backdrop{padding:16px;background:var(--ws-bg,#171a20)}
-.recovery-dialog{background:var(--ws-panel,#23272f);color:var(--ws-text,#edf0f5);border:1px solid var(--ws-border,#434b59);border-radius:4px;padding:20px;width:min(560px,100%);max-height:calc(100dvh - 32px);overflow:auto;line-height:1.5;scrollbar-color:var(--ws-border,#434b59) var(--ws-panel,#23272f)}
+.recovery-backdrop{padding:16px;background:var(--tp-base)}
+.recovery-dialog{background:var(--tp-panel);color:var(--tp-text);border:1px solid var(--tp-line-strong);border-radius:var(--tp-r-lg);padding:20px;width:min(560px,100%);max-height:calc(100dvh - 32px);overflow:auto;line-height:1.5;scrollbar-color:var(--tp-line-strong) var(--tp-panel);box-shadow:var(--tp-shadow-float)}
 .recovery-dialog:focus{outline:none}
-.recovery-dialog h2{font-size:20px;font-weight:600;line-height:1.25;letter-spacing:normal;text-transform:none;color:var(--ws-text,#edf0f5);margin:0 0 10px}
+.recovery-dialog h2{font-size:20px;font-weight:600;line-height:1.25;letter-spacing:normal;text-transform:none;color:var(--tp-text);margin:0 0 10px}
 .recovery-dialog p{margin:8px 0}
-.recovery-dialog>p:not(.recovery-count){color:var(--ws-muted,#b5bfcc)}
-.recovery-dialog .recovery-time{margin:14px 0 0;padding:8px 10px;border:1px solid var(--ws-border,#434b59);border-radius:3px;font-size:12px;font-variant-numeric:tabular-nums}
-.recovery-dialog .recovery-count{margin:16px 0 8px;padding-top:14px;border-top:1px solid var(--ws-border,#434b59);font-size:13px;font-weight:600}
-.recovery-documents{max-height:30dvh;overflow:auto;overscroll-behavior:contain;border:1px solid var(--ws-border,#434b59);border-radius:3px;padding:0 12px;scrollbar-color:var(--ws-border,#434b59) var(--ws-panel,#23272f)}
-.recovery-documents:focus-visible{outline:2px solid var(--ws-accent,#79aaff);outline-offset:2px}
+.recovery-dialog>p:not(.recovery-count){color:var(--tp-muted)}
+.recovery-dialog .recovery-time{margin:14px 0 0;padding:8px 10px;border:1px solid var(--tp-line-subtle);border-radius:var(--tp-r-sm);font-size:12px;font-variant-numeric:tabular-nums}
+.recovery-dialog .recovery-count{margin:16px 0 8px;padding-top:14px;border-top:1px solid var(--tp-line-subtle);font-size:13px;font-weight:600}
+.recovery-documents{max-height:30dvh;overflow:auto;overscroll-behavior:contain;border:1px solid var(--tp-line-subtle);border-radius:var(--tp-r-sm);padding:0 12px;scrollbar-color:var(--tp-line-strong) var(--tp-panel)}
+.recovery-documents:focus-visible{outline:2px solid var(--tp-focus);outline-offset:2px}
 .recovery-documents ol{margin:0;padding-left:24px}
 .recovery-dialog li{overflow-wrap:anywhere;white-space:pre-wrap;padding:7px 4px}
-.recovery-documents li+li{border-top:1px solid var(--ws-border,#434b59)}
-.recovery-documents li::marker{color:var(--ws-muted,#b5bfcc);font-variant-numeric:tabular-nums}
-.recovery-issues{margin-top:16px;padding-top:14px;border-top:1px solid var(--ws-border,#434b59)}
-.recovery-issues h3{font-size:12px;font-weight:600;margin:0 0 6px;color:var(--ws-muted,#b5bfcc)}
-.recovery-issues ul{margin:0;padding-left:20px;color:var(--ws-muted,#b5bfcc);font-size:12px}
-.recovery-actions{display:flex;justify-content:flex-end;flex-wrap:wrap;gap:8px;margin-top:16px;padding-top:16px;border-top:1px solid var(--ws-border,#434b59)}
-.recovery-dialog button{min-height:28px;padding:4px 12px;border:1px solid var(--ws-border,#434b59);border-radius:3px;background:var(--ws-raised,#2c313b);color:var(--ws-text,#edf0f5);font-size:12px}
-.recovery-dialog button.primary{background:var(--ws-accent,#79aaff);border-color:var(--ws-accent,#79aaff);color:var(--ws-accent-ink,#17243a);font-weight:600}
-.recovery-dialog button:hover:enabled{border-color:var(--ws-accent,#79aaff)}
-.recovery-dialog button:focus-visible{outline:2px solid var(--ws-accent,#79aaff);outline-offset:2px}
-.recovery-dialog button:disabled{opacity:1;background:var(--ws-raised,#2c313b);border-color:var(--ws-border,#434b59);color:var(--ws-muted,#b5bfcc);cursor:default}
-.recovery-dialog [role=status]{color:var(--ws-muted,#b5bfcc);margin-top:16px}
-.recovery-dialog ::selection{background:var(--ws-accent,#79aaff);color:var(--ws-accent-ink,#17243a)}
-.startup-state{margin:0;padding:24px;color:var(--ws-text,#edf0f5);line-height:1.5}
+.recovery-documents li+li{border-top:1px solid var(--tp-line-subtle)}
+.recovery-documents li::marker{color:var(--tp-muted);font-variant-numeric:tabular-nums}
+.recovery-issues{margin-top:16px;padding-top:14px;border-top:1px solid var(--tp-line-subtle)}
+.recovery-issues h3{font-size:12px;font-weight:600;margin:0 0 6px;color:var(--tp-muted)}
+.recovery-issues ul{margin:0;padding-left:20px;color:var(--tp-muted);font-size:12px}
+.recovery-actions{display:flex;justify-content:flex-end;flex-wrap:wrap;gap:8px;margin-top:16px;padding-top:16px;border-top:1px solid var(--tp-line-subtle)}
+.recovery-dialog button{min-height:28px;padding:4px 12px;border:1px solid var(--tp-line-strong);border-radius:var(--tp-r-sm);background:var(--tp-raised);color:var(--tp-text);font-size:12px}
+.recovery-dialog button.primary{background:var(--tp-on);border-color:var(--tp-on);color:var(--tp-on-ink);font-weight:600}
+.recovery-dialog button:hover:enabled{border-color:var(--tp-focus)}
+.recovery-dialog button:focus-visible{outline:2px solid var(--tp-focus);outline-offset:2px}
+.recovery-dialog button:disabled{opacity:1;background:var(--tp-raised);border-color:var(--tp-line-subtle);color:var(--tp-muted);cursor:default}
+.recovery-dialog [role=status]{color:var(--tp-muted);margin-top:16px}
+.recovery-dialog ::selection{background:var(--tp-focus);color:var(--tp-on-ink)}
+.startup-state{margin:0;padding:24px;color:var(--tp-text);line-height:1.5}
 .session-options>section{width:280px}
-.session-options .check{color:var(--ws-text,#edf0f5);white-space:normal;line-height:1.5}
+.session-options .check{color:var(--tp-text);white-space:normal;line-height:1.5}
 .statusbar:has(.recovery-feedback){flex-wrap:wrap;gap:8px 24px}
 .recovery-feedback{display:flex;align-items:center;flex-wrap:wrap;gap:6px 10px;min-width:0}
 .statusbar .recovery-status,.statusbar .session-error{white-space:normal;overflow-wrap:anywhere}
@@ -33,4 +33,4 @@
 .recovery-notices{max-width:65ch}
 .recovery-notices summary{margin:0}
 .recovery-notices ul{margin:8px 0;padding-left:20px;max-height:120px;overflow:auto;line-height:1.5;overflow-wrap:anywhere}
-.statusbar .session-error{color:var(--ws-error,#ffd2c7)}
+.statusbar .session-error{color:var(--tp-danger)}

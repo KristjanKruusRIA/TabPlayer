@@ -76,8 +76,8 @@ it('drops a file read that finishes after typing, and a cleared box forgets the 
 it('keeps Tab inside the dialog, closes with Escape and blocks Import while busy',async()=>{
   const {onClose,area,importButton}=setup(true);
   fireEvent.change(area,{target:{value:riff}});await waitFor(()=>expect(status()).toHaveTextContent('1 measure'));expect(importButton).toBeDisabled();
-  const cancel=screen.getByRole('button',{name:'Cancel'});cancel.focus();
-  fireEvent.keyDown(cancel,{key:'Tab'});expect(area).toHaveFocus();
-  fireEvent.keyDown(area,{key:'Tab',shiftKey:true});expect(cancel).toHaveFocus();
+  const close=screen.getByRole('button',{name:'Close'}),cancel=screen.getByRole('button',{name:'Cancel'});cancel.focus();
+  fireEvent.keyDown(cancel,{key:'Tab'});expect(close).toHaveFocus();
+  fireEvent.keyDown(close,{key:'Tab',shiftKey:true});expect(cancel).toHaveFocus();
   fireEvent.keyDown(area,{key:'Escape'});expect(onClose).toHaveBeenCalled();
 });

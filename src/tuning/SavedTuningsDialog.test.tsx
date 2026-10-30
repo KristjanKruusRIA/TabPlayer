@@ -125,7 +125,7 @@ it('ignores late responses after close and after unmount',async()=>{
 });
 it('closes on Escape, labels the modal dialog and keeps Tab inside it',()=>{
   const {onClose}=setup();const dialog=screen.getByRole('dialog',{name:'Saved tunings'});expect(dialog).toHaveAttribute('aria-modal','true');expect(nameBox()).toHaveFocus();
-  const use=button('Use tuning'),first=document.querySelector<HTMLElement>('.saved-tuning-row')!;use.focus();fireEvent.keyDown(use,{key:'Tab'});expect(first).toHaveFocus();
+  const use=button('Use tuning'),first=button('Close');use.focus();fireEvent.keyDown(use,{key:'Tab'});expect(first).toHaveFocus();
   fireEvent.keyDown(first,{key:'Tab',shiftKey:true});expect(use).toHaveFocus();
   fireEvent.keyDown(dialog,{key:'Escape'});expect(onClose).toHaveBeenCalled();
 });

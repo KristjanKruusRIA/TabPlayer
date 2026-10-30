@@ -1,12 +1,26 @@
-import { useDeferredValue,useEffect,useId,useMemo,useRef,useState,type KeyboardEvent } from 'react';
+import { useDeferredValue,useEffect,useId,useMemo,useRef,useState } from 'react';
 import { Settings } from '@coderline/alphatab';
 import { exportGpInterchange } from '../interchange/gp';
 import { defaultMidiImportOptions,importMidi,midiImportFileName,type MidiImport,type MidiImportOptions,type MidiQuantization,type MidiTrackKind,type MidiTupletMode } from '../interchange/midi-import';
 import { MIDI_FILE_LIMIT,readMidiFile,type MidiSong } from '../interchange/midi-smf';
+import { Dialog } from '../ui/Dialog';
+import { Segmented } from '../ui/Segmented';
 import './midi-import.css';
 
 const message=(error:unknown)=>error instanceof Error?error.message:String(error);
-const quantizations:[MidiQuantization,string][]=[[4,'Quarter note (1/4)'],[8,'Eighth note (1/8)'],[16,'16th note (1/16)'],[32,'32nd note (1/32)'],[64,'64th note (1/64)']];
+const quantizationOptions=[
+  {value:'4',label:'Quarter note (1/4)'},
+  {value:'8',label:'Eighth note (1/8)'},
+  {value:'16',label:'16th note (1/16)'},
+  {value:'32',label:'32nd note (1/32)'},
+  {value:'64',label:'64th note (1/64)'},
+] as const;
+const voiceOptions=[
+  {value:'1',label:'1'},
+  {value:'2',label:'2'},
+  {value:'3',label:'3'},
+  {value:'4',label:'4'},
+] as const;
 const tupletModes:[MidiTupletMode,string][]=[['none','None'],['triplets','Triplets'],['triplets-quintuplets','Triplets and quintuplets']];
 const kinds:Record<MidiTrackKind,string>={guitar:'guitar tab',bass:'bass tab',keys:'notation',drums:'drums'};
 const plural=(count:number,word:string)=>`${count} ${word}${count===1?'':'s'}`;
@@ -19,8 +33,7 @@ const plural=(count:number,word:string)=>`${count} ${word}${count===1?'':'s'}`;
 export function MidiImportDialog({busy,onImport,onClose}:{busy:boolean;onImport:(name:string,bytes:Uint8Array)=>Promise<boolean>;onClose:()=>void}) {
   const [file,setFile]=useState<{name:string;bytes:Uint8Array}|null>(null),[fileProblem,setFileProblem]=useState<string|null>(null),[importProblem,setImportProblem]=useState<string|null>(null),[importing,setImporting]=useState(false);
   const [options,setOptions]=useState<MidiImportOptions>(defaultMidiImportOptions);
-  const form=useRef<HTMLFormElement>(null),submitButton=useRef<HTMLButtonElement>(null),picker=useRef<HTMLInputElement>(null),choose=useRef<HTMLButtonElement>(null),reading=useRef(0),heading=useId(),hint=useId(),status=useId();
-  useEffect(()=>{choose.current?.focus();},[]);
+  const form=useRef<HTMLFormElement>(null),submitButton=useRef<HTMLButtonElement>(null),picker=useRef<HTMLInputElement>(null),choose=useRef<HTMLButtonElement>(null),reading=useRef(0),hint=useId(),status=useId();
   // The buttons are disabled while opening, which drops focus; a failed open puts it back on Import.
   useEffect(()=>{if(!importing&&importProblem&&!form.current?.contains(document.activeElement))submitButton.current?.focus();},[importing,importProblem]);
   const song=useMemo<{value:MidiSong}|{error:string}|null>(()=>{
@@ -60,34 +73,33 @@ export function MidiImportDialog({busy,onImport,onClose}:{busy:boolean;onImport:
     catch(error){setImportProblem(`The score could not be opened: ${message(error)}`);}
     finally{setImporting(false);}
   };
-  const trap=(event:KeyboardEvent)=>{
-    const items=[...form.current?.querySelectorAll<HTMLElement>('select:not(:disabled),input[type="checkbox"]:not(:disabled),button:not(:disabled)')??[]];if(!items.length)return;
-    const index=items.indexOf(document.activeElement as HTMLElement),next=event.shiftKey?(index<=0?items.length-1:index-1):(index<0||index===items.length-1?0:index+1);
-    event.preventDefault();items[next].focus();
-  };
   const summary=imported?`${imported.summary.format===0?'Format 0':'Format 1'}, ${plural(imported.summary.tracks.length,'part')}, ${plural(imported.summary.measures,'measure')} at ${imported.summary.tempo} BPM.`:'';
-  return <div className="dialog-backdrop" onMouseDown={event=>{if(event.target===event.currentTarget&&!importing)onClose();}}>
-    <form ref={form} role="dialog" aria-modal="true" aria-labelledby={heading} aria-describedby={hint} aria-busy={importing} className="ascii-import midi-import" onSubmit={event=>{event.preventDefault();void submit();}}
-      onKeyDown={event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();if(!importing)onClose();}else if(event.key==='Tab')trap(event);}}>
-      <h2 id={heading}>Import MIDI</h2>
+  return <Dialog title="Import MIDI" onClose={()=>{if(!importing)onClose();}} className="ascii-import midi-import">
+    <form ref={form} className="ascii-import-form" aria-describedby={hint} aria-busy={importing} onSubmit={event=>{event.preventDefault();void submit();}}>
       <p id={hint} className="muted">Choose a Standard MIDI file (format 0 or 1). Each instrument part becomes a track with its program, tempo and time signatures. The quantization sets the shortest note value, so check the rhythm after importing.</p>
       <input ref={picker} type="file" accept=".mid,.midi,audio/midi,audio/x-midi" hidden aria-label="MIDI file" onChange={event=>{load(event.target.files?.[0]);event.target.value='';}}/>
-      <div className="midi-file"><button type="button" ref={choose} disabled={importing} onClick={()=>picker.current?.click()}>Choose MIDI file…</button><span>{file?file.name:'No file chosen'}</span></div>
-      <div className="midi-options">
-        <label>Quantization<select value={options.quantization} disabled={importing} onChange={event=>choice('quantization',Number(event.target.value) as MidiQuantization)}>{quantizations.map(([value,label])=><option key={value} value={value}>{label}</option>)}</select></label>
+      <div className="midi-file"><button type="button" ref={choose} data-autofocus disabled={importing} onClick={()=>picker.current?.click()}>Choose MIDI file…</button><span>{file?file.name:'No file chosen'}</span></div>
+      <fieldset className="midi-options" disabled={importing}>
+        <div className="tp-field midi-full-row">
+          <span className="tp-field-label" aria-hidden="true">Quantization</span>
+          <Segmented label="Quantization" value={String(options.quantization)} options={quantizationOptions} onChange={val=>choice('quantization',Number(val) as MidiQuantization)}/>
+        </div>
         <label>Tuplets<select value={options.tuplets} disabled={importing} onChange={event=>choice('tuplets',event.target.value as MidiTupletMode)}>{tupletModes.map(([value,label])=><option key={value} value={value} disabled={(value!=='none'&&options.quantization<8)||(value==='triplets-quintuplets'&&options.quantization<16)}>{label}</option>)}</select></label>
-        <label>Voices per track<select value={options.voices} disabled={importing} onChange={event=>choice('voices',Number(event.target.value) as MidiImportOptions['voices'])}>{[1,2,3,4].map(value=><option key={value} value={value}>{value}</option>)}</select></label>
+        <div className="tp-field">
+          <span className="tp-field-label" aria-hidden="true">Voices per track</span>
+          <Segmented label="Voices per track" value={String(options.voices)} options={voiceOptions} onChange={val=>choice('voices',Number(val) as MidiImportOptions['voices'])}/>
+        </div>
         <label className="check"><input type="checkbox" checked={options.tablature} disabled={importing} onChange={event=>choice('tablature',event.target.checked)}/>Guitar and bass as tablature</label>
-      </div>
+      </fieldset>
       <p id={status} role="status" className={problem?'error':'muted'}>{problem??(importing?'Opening the score…':settled!==options?'Updating…':imported?summary:'Nothing to import yet.')}</p>
       {imported&&!problem&&<>
         <ul className="midi-parts" aria-label="Parts">{imported.summary.tracks.map((part,index)=><li key={index}>{part.name}: {kinds[part.kind]}, {plural(part.notes,'note')}{part.voices>1?`, ${part.voices} voices`:''}</li>)}</ul>
         {imported.summary.notes.length>0&&<p className="muted">{imported.summary.notes.map(note=>`${note[0].toUpperCase()}${note.slice(1)}.`).join(' ')}</p>}
       </>}
-      <div className="dialog-actions">
-        <button type="submit" ref={submitButton} className="primary" disabled={!imported||busy||importing}>Import</button>
-        <button type="button" disabled={importing} onClick={onClose}>Cancel</button>
+      <div className="dialog-actions tp-dialog-foot">
+        <button type="submit" ref={submitButton} className="tp-button primary" disabled={!imported||busy||importing}>Import</button>
+        <button type="button" className="tp-button" disabled={importing} onClick={onClose}>Cancel</button>
       </div>
     </form>
-  </div>;
+  </Dialog>;
 }

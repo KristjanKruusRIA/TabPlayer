@@ -11,7 +11,9 @@ it('labels_custom_nonmonotonic_strings_in_the_supplied_sounding_context_and_high
   const chord:HarmonyChord={name:'G#',nameMode:'theory',recipe:{root:{step:4,alteration:1},formula:'major',alterations:[],omissions:[],bass:null},firstFret:0,frets:[0,2,-1],fingers:[-2,2,-1],barreFrets:[],showName:true,showDiagram:true,showFingering:true},before=[...staff.tuning],changes:number[][]=[];
   const view=render(<ChordDiagramPreview chord={chord} staff={staff} highlightRoot onToggle={(string,fret)=>changes.push([string,fret])}/>);
   expect(screen.getByLabelText('String 1 open: G#4, root')).toBeInTheDocument();expect(screen.getByLabelText('String 2 fret 2: D#3')).toBeInTheDocument();expect(screen.getByLabelText('String 3 muted')).toBeInTheDocument();
-  fireEvent.click(screen.getByRole('button',{name:'String 1 fret 3: B4'}));expect(changes).toEqual([[0,3]]);expect(staff.tuning).toEqual(before);expect([staff.capo,staff.transpositionPitch,staff.displayTranspositionPitch]).toEqual([2,1,24]);
+  fireEvent.click(screen.getByRole('button',{name:'String 1 fret 3: B4'}));expect(changes).toEqual([[0,3]]);
+  fireEvent.click(screen.getByRole('button',{name:'String 1 muted'}));expect(changes).toEqual([[0,3],[0,-1]]);
+  expect(staff.tuning).toEqual(before);expect([staff.capo,staff.transpositionPitch,staff.displayTranspositionPitch]).toEqual([2,1,24]);
   view.rerender(<ChordDiagramPreview chord={chord} staff={staff} highlightRoot={false} onToggle={null}/>);expect(screen.queryByLabelText('String 1 open: G#4, root')).not.toBeInTheDocument();expect(screen.getByLabelText('String 1 open: G#4')).toBeInTheDocument();expect(screen.queryByRole('button')).not.toBeInTheDocument();
 });
 it('shows_wide_legacy_frets_and_zero_string_diagrams_without_normalizing_them',()=>{

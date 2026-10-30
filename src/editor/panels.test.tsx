@@ -57,6 +57,34 @@ it('curve editor emits quarter-tone endpoints and supports keyboard inputs',()=>
   fireEvent.click(screen.getByLabelText('Enable Bend'));fireEvent.change(screen.getByLabelText('Bend point 2 value'),{target:{value:'4'}});fireEvent.click(screen.getByRole('button',{name:'Apply Bend curve'}));
   expect(onChange).toHaveBeenLastCalledWith({type:1,style:0,points:[{offset:0,value:0},{offset:60,value:4}]});
 });
+it('interactive bend graph presets, drag gestures, and keyboard handles commit one undoable edit per gesture',()=>{
+  const onChange=vi.fn();
+  render(<CurveEditor label="Bend" value={null} onChange={onChange}/>);
+  fireEvent.click(screen.getByRole('button',{name:'Bend preset: Bend & release'}));
+  expect(onChange).toHaveBeenCalledTimes(1);
+  expect(onChange).toHaveBeenLastCalledWith({type:2,style:0,points:[{offset:0,value:0},{offset:30,value:4},{offset:60,value:0}]});
+
+  const middleHandle=screen.getByRole('slider',{name:'Bend graph point 2'});
+  fireEvent.keyDown(middleHandle,{key:'ArrowUp',shiftKey:true});
+  expect(onChange).toHaveBeenCalledTimes(2);
+  expect(onChange).toHaveBeenLastCalledWith({type:2,style:0,points:[{offset:0,value:0},{offset:30,value:6},{offset:60,value:0}]});
+
+  fireEvent.keyDown(middleHandle,{key:'ArrowRight',shiftKey:true});
+  expect(onChange).toHaveBeenCalledTimes(3);
+  expect(onChange).toHaveBeenLastCalledWith({type:2,style:0,points:[{offset:0,value:0},{offset:35,value:6},{offset:60,value:0}]});
+
+  // Pointer drag updates live during move and commits only once on pointerUp.
+  fireEvent.pointerDown(middleHandle,{pointerId:1,clientX:120,clientY:40});
+  fireEvent.pointerMove(middleHandle,{pointerId:1,clientX:130,clientY:25});
+  fireEvent.pointerMove(middleHandle,{pointerId:1,clientX:140,clientY:20});
+  expect(onChange).toHaveBeenCalledTimes(3);
+  fireEvent.pointerUp(middleHandle,{pointerId:1,clientX:140,clientY:20});
+  expect(onChange).toHaveBeenCalledTimes(4);
+
+  fireEvent.keyDown(middleHandle,{key:'Delete'});
+  expect(onChange).toHaveBeenCalledTimes(5);
+  expect(onChange).toHaveBeenLastCalledWith({type:2,style:0,points:[{offset:0,value:0},{offset:60,value:0}]});
+});
 it('voice staff and layout controls dispatch exact commands',()=>{
   const onEdit=vi.fn();render(<StructurePanel score={music()} target={target} string={6} busy={false} onEdit={onEdit} onSelect={vi.fn()}/>);
   fireEvent.click(screen.getByRole('button',{name:'Add voice'}));expect(onEdit).toHaveBeenLastCalledWith({type:'addVoice',track:0,staff:0});
@@ -76,9 +104,13 @@ it('measure meter and tempo controls dispatch current musical values',()=>{
   const onEdit=vi.fn();render(<MeasurePanel score={music()} target={target} string={6} busy={false} onEdit={onEdit}/>);
   fireEvent.change(screen.getByLabelText('Time numerator'),{target:{value:'3'}});fireEvent.click(screen.getByRole('button',{name:'Apply measure settings'}));expect(onEdit).toHaveBeenLastCalledWith(expect.objectContaining({type:'setMeasureSettings',bar:0,numerator:3,denominator:4}));
 });
-it('chord dialog has accessible focus and saves per-string positions',()=>{
+it('chord dialog has accessible focus, interactive SVG diagram grid, and saves per-string positions',()=>{
   const onChange=vi.fn(),onClose=vi.fn();render(<ChordDialog strings={6} value={null} onChange={onChange} onClose={onClose}/>);
-  const input=screen.getByLabelText('Chord name');expect(input).toHaveFocus();fireEvent.change(input,{target:{value:'Am'}});fireEvent.click(screen.getByRole('button',{name:'Apply chord'}));expect(onChange).toHaveBeenCalledWith({name:'Am',firstFret:1,frets:[-1,-1,-1,-1,-1,-1]});expect(onClose).toHaveBeenCalled();
+  const input=screen.getByLabelText('Chord name');expect(input).toHaveFocus();fireEvent.change(input,{target:{value:'Am'}});
+  fireEvent.click(screen.getByRole('button',{name:'Diagram string 1 open'}));
+  fireEvent.keyDown(screen.getByRole('button',{name:'Diagram string 2 fret 1'}),{key:'Enter'});
+  fireEvent.click(screen.getByRole('button',{name:'Apply chord'}));
+  expect(onChange).toHaveBeenCalledWith({name:'Am',firstFret:1,frets:[0,1,-1,-1,-1,-1]});expect(onClose).toHaveBeenCalled();
 });
 it('chord dialog traps keyboard focus and Escape closes',()=>{
   const onClose=vi.fn();render(<ChordDialog strings={6} value={null} onChange={vi.fn()} onClose={onClose}/>);const name=screen.getByLabelText('Chord name'),cancel=screen.getByRole('button',{name:'Cancel'});

@@ -1,43 +1,187 @@
 import { model } from '@coderline/alphatab';
 import { describePartialCapo, getPartialCapo } from '../editor/partial-capo';
-import type { ChordDiagramPreviewProps,HarmonyChord } from '../editor/harmony-types';
+import type { ChordDiagramPreviewProps, HarmonyChord } from '../editor/harmony-types';
 
-const noteNames=['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
-export const harmonyPitchName=(pitch:number)=>`${noteNames[((pitch%12)+12)%12]}${Math.floor(pitch/12)-1}`;
-export function soundingChordPitches(chord:HarmonyChord,staff:model.Staff):Array<number|null> {
-  const bar=new model.Bar(),voice=new model.Voice(),beat=new model.Beat(),note=new model.Note();bar.staff=staff;voice.bar=bar;beat.voice=voice;note.beat=beat;
-  return chord.frets.map((fret,index)=>{
-    if(fret<0||staff.isPercussion||staff.tuning.length!==chord.frets.length)return null;
-    note.string=chord.frets.length-index;note.fret=fret;const pitch=note.realValue;return Number.isInteger(pitch)&&pitch>=0&&pitch<=127?pitch:null;
+const noteNames = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+export const harmonyPitchName = (pitch: number) => `${noteNames[((pitch % 12) + 12) % 12]}${Math.floor(pitch / 12) - 1}`;
+
+export function soundingChordPitches(chord: HarmonyChord, staff: model.Staff): Array<number | null> {
+  const bar = new model.Bar();
+  const voice = new model.Voice();
+  const beat = new model.Beat();
+  const note = new model.Note();
+  bar.staff = staff;
+  voice.bar = bar;
+  beat.voice = voice;
+  note.beat = beat;
+  return chord.frets.map((fret, index) => {
+    if (fret < 0 || staff.isPercussion || staff.tuning.length !== chord.frets.length) return null;
+    note.string = chord.frets.length - index;
+    note.fret = fret;
+    const pitch = note.realValue;
+    return Number.isInteger(pitch) && pitch >= 0 && pitch <= 127 ? pitch : null;
   });
 }
-export function ChordDiagramPreview({chord,staff,highlightRoot,onToggle}:ChordDiagramPreviewProps) {
-  if(chord.frets.length===0)return <p className="muted">Name-only chord; no strings.</p>;
-  const pitches=soundingChordPitches(chord,staff),first=Math.max(1,chord.firstFret),rows=[...new Set([...Array.from({length:Math.min(5,128-first)},(_,i)=>first+i),...chord.frets.filter(fret=>fret>0)])].sort((a,b)=>a-b);
-  const width=Math.max(140,chord.frets.length*40+40),height=rows.length*30+80,root=chord.recipe?(([0,2,4,5,7,9,11][chord.recipe.root.step]+chord.recipe.root.alteration+12)%12):null;
-  const label=(index:number,fret:number)=>{
-    if(fret<0)return `String ${index+1} muted`;
-    const candidate={...chord,frets:chord.frets.map((value,i)=>i===index?fret:value)},pitch=soundingChordPitches(candidate,staff)[index];
-    return `String ${index+1} ${fret===0?'open':`fret ${fret}`}: ${pitch===null?'unavailable':harmonyPitchName(pitch)}${highlightRoot&&pitch!==null&&pitch%12===root?', root':''}`;
+
+export function ChordDiagramPreview({ chord, staff, highlightRoot, onToggle }: ChordDiagramPreviewProps) {
+  if (chord.frets.length === 0) return <p className="muted">Name-only chord; no strings.</p>;
+  const pitches = soundingChordPitches(chord, staff);
+  const first = Math.max(1, chord.firstFret);
+  const rows = [
+    ...new Set([
+      ...Array.from({ length: Math.min(5, 128 - first) }, (_, i) => first + i),
+      ...chord.frets.filter(fret => fret > 0),
+    ]),
+  ].sort((a, b) => a - b);
+  const width = Math.max(160, chord.frets.length * 40 + 44);
+  const nutY = 58;
+  const rowStep = 30;
+  const bottomY = nutY + rows.length * rowStep;
+  const height = bottomY + 28;
+  const root = chord.recipe ? ([0, 2, 4, 5, 7, 9, 11][chord.recipe.root.step] + chord.recipe.root.alteration + 12) % 12 : null;
+
+  const label = (index: number, fret: number) => {
+    if (fret < 0) return `String ${index + 1} muted`;
+    const candidate = { ...chord, frets: chord.frets.map((value, i) => (i === index ? fret : value)) };
+    const pitch = soundingChordPitches(candidate, staff)[index];
+    return `String ${index + 1} ${fret === 0 ? 'open' : `fret ${fret}`}: ${pitch === null ? 'unavailable' : harmonyPitchName(pitch)}${highlightRoot && pitch !== null && pitch % 12 === root ? ', root' : ''}`;
   };
-  return <span className="harmony-diagram" style={{display:'block',margin:0}}><svg role="group" aria-label="Chord diagram preview" viewBox={`0 0 ${width} ${height}`} style={{width:'100%',background:'#fffdf8',borderRadius:6,color:'#161c24'}}>
-    <text x={8} y={16} fill="currentColor" fontSize={11}>First fret {chord.firstFret}</text>
-    {rows.map((fret,row)=><g key={fret}><line x1={32} x2={width-16} y1={55+row*30} y2={55+row*30} stroke="#97a6b6"/><text x={8} y={62+row*30} fill="currentColor" fontSize={11}>{fret}</text></g>)}
-    {chord.frets.map((current,index)=>{
-      const x=40+index*40;
-      return <g key={index}><line x1={x} x2={x} y1={40} y2={height-25} stroke="#465363"/>
-        {current<0&&<text x={x} y={36} textAnchor="middle" aria-label={label(index,-1)} fill="currentColor">×</text>}
-        {[0,...rows].map(fret=>{
-          const selected=current===fret,y=fret===0?29:70+rows.indexOf(fret)*30,pitch=selected?pitches[index]:null,isRoot=highlightRoot&&pitch!==null&&pitch%12===root;
-          if(!selected&&!onToggle)return null;
-          return <g key={fret} role={onToggle?'button':undefined} tabIndex={onToggle?0:undefined} aria-label={label(index,fret)} onClick={onToggle?()=>onToggle(index,fret):undefined} onKeyDown={onToggle?event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();onToggle(index,fret);}}:undefined} style={{cursor:onToggle?'pointer':undefined}}>
-            <circle cx={x} cy={y} r={12} fill={selected?(isRoot?'#b5df73':'#1d2530'):'transparent'} stroke={selected?'#465363':'transparent'}/>
-            {selected&&<text x={x} y={y+4} textAnchor="middle" fill={isRoot?'#161c24':'#fffdf8'} fontSize={10}>{chord.showFingering&&chord.fingers[index]>=0?(chord.fingers[index]===0?'T':chord.fingers[index]):fret===0?'O':'●'}</text>}
-          </g>;
+
+  const firstX = 42;
+  const lastX = 42 + (chord.frets.length - 1) * 40;
+
+  return (
+    <span className="harmony-diagram">
+      <svg
+        role="group"
+        aria-label="Chord diagram preview"
+        viewBox={`0 0 ${width} ${height}`}
+        className="tp-chord-diagram-svg"
+      >
+        <rect x="0" y="0" width={width} height={height} rx="6" className="tp-chord-bg" />
+        <text x={10} y={16} className="tp-chord-header-label">
+          First fret {chord.firstFret}
+        </text>
+        {chord.name && (
+          <text x={width - 10} y={16} textAnchor="end" className="tp-chord-title-label">
+            {chord.name}
+          </text>
+        )}
+
+        <rect
+          x={firstX}
+          y={nutY}
+          width={Math.max(0, lastX - firstX)}
+          height={Math.max(0, bottomY - nutY)}
+          className="tp-chord-fretboard"
+        />
+
+        <line
+          x1={firstX - 2}
+          x2={lastX + 2}
+          y1={nutY}
+          y2={nutY}
+          className={first <= 1 ? 'tp-chord-nut-bar' : 'tp-chord-fret-wire'}
+        />
+
+        {rows.map((fret, row) => {
+          const wireY = nutY + (row + 1) * rowStep;
+          const midY = nutY + row * rowStep + rowStep / 2;
+          return (
+            <g key={fret}>
+              <line x1={firstX} x2={lastX} y1={wireY} y2={wireY} className="tp-chord-fret-wire" />
+              <text x={12} y={midY + 4} className="tp-chord-fret-num">
+                {fret}
+              </text>
+            </g>
+          );
         })}
-        <text x={x} y={height-7} textAnchor="middle" fill="currentColor" fontSize={10}>{pitches[index]===null?'×':harmonyPitchName(pitches[index])}</text>
-      </g>;
-    })}
-    {chord.barreFrets.map((fret,index)=>{const positions=chord.frets.flatMap((value,i)=>value>=fret?[i]:[]),row=rows.indexOf(fret);return row<0||positions.length<2?null:<line key={index} x1={40+positions[0]*40} x2={40+positions.at(-1)!*40} y1={70+row*30} y2={70+row*30} stroke="#465363" strokeWidth={4} opacity={.5}/>;})}
-  </svg><span className="harmony-diagram-caption muted">Sounding pitches · capo {staff.capo}{describePartialCapo(getPartialCapo(staff))?` · ${describePartialCapo(getPartialCapo(staff)).toLowerCase()}`:''} · sounding offset {staff.transpositionPitch}. Strings run high to low in diagram order.{!chord.showDiagram?' Diagram hidden in score.':''}</span></span>;
+
+        {chord.barreFrets.map((fret, index) => {
+          const positions = chord.frets.flatMap((value, i) => (value >= fret ? [i] : []));
+          const row = rows.indexOf(fret);
+          if (row < 0 || positions.length < 2) return null;
+          const y = nutY + row * rowStep + rowStep / 2;
+          return (
+            <line
+              key={index}
+              x1={firstX + positions[0] * 40}
+              x2={firstX + positions.at(-1)! * 40}
+              y1={y}
+              y2={y}
+              className="tp-chord-barre"
+            />
+          );
+        })}
+
+        {chord.frets.map((current, index) => {
+          const x = firstX + index * 40;
+          const gauge = 1 + ((chord.frets.length - 1 - index) / Math.max(1, chord.frets.length - 1)) * 1.1;
+          return (
+            <g key={index}>
+              <line x1={x} x2={x} y1={nutY} y2={bottomY} className="tp-chord-string" strokeWidth={gauge} />
+              {[-1, 0, ...rows].map(fret => {
+                const selected = current === fret;
+                if (!selected && !onToggle) return null;
+                const y = fret === -1 ? 28 : fret === 0 ? 44 : nutY + rows.indexOf(fret) * rowStep + rowStep / 2;
+                const pitch = selected && fret >= 0 ? pitches[index] : null;
+                const isRoot = Boolean(highlightRoot && pitch !== null && pitch % 12 === root);
+                const r = fret <= 0 ? 8.5 : 11;
+                return (
+                  <g
+                    key={fret}
+                    role={onToggle ? 'button' : undefined}
+                    tabIndex={onToggle ? 0 : undefined}
+                    aria-label={label(index, fret)}
+                    className={`tp-chord-node${selected ? ' is-selected' : ''}${isRoot ? ' is-root' : ''}${fret === -1 ? ' is-mute' : ''}${fret === 0 ? ' is-open' : ''}`}
+                    onClick={onToggle ? () => onToggle(index, fret) : undefined}
+                    onKeyDown={
+                      onToggle
+                        ? event => {
+                            if (event.key === 'Enter' || event.key === ' ') {
+                              event.preventDefault();
+                              onToggle(index, fret);
+                            }
+                          }
+                        : undefined
+                    }
+                  >
+                    <circle cx={x} cy={y} r={r} className="tp-chord-node-circle" />
+                    {selected ? (
+                      <text x={x} y={y + 3.5} textAnchor="middle" className="tp-chord-node-glyph">
+                        {fret === -1
+                          ? '×'
+                          : chord.showFingering && chord.fingers[index] >= 0
+                            ? chord.fingers[index] === 0
+                              ? 'T'
+                              : chord.fingers[index]
+                            : fret === 0
+                              ? 'O'
+                              : '●'}
+                      </text>
+                    ) : (
+                      fret <= 0 && (
+                        <text x={x} y={y + 3} textAnchor="middle" className="tp-chord-node-hint" aria-hidden="true">
+                          {fret === -1 ? '×' : 'O'}
+                        </text>
+                      )
+                    )}
+                  </g>
+                );
+              })}
+              <text x={x} y={height - 8} textAnchor="middle" className="tp-chord-pitch-label">
+                {pitches[index] === null ? '×' : harmonyPitchName(pitches[index])}
+              </text>
+            </g>
+          );
+        })}
+      </svg>
+      <span className="harmony-diagram-caption muted">
+        Sounding pitches · capo {staff.capo}
+        {describePartialCapo(getPartialCapo(staff)) ? ` · ${describePartialCapo(getPartialCapo(staff)).toLowerCase()}` : ''} ·
+        sounding offset {staff.transpositionPitch}. Strings run high to low in diagram order.
+        {!chord.showDiagram ? ' Diagram hidden in score.' : ''}
+      </span>
+    </span>
+  );
 }

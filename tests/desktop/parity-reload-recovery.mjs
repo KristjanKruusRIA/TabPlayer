@@ -1,4 +1,4 @@
-// Reload acceptance: a webview reload (page.reload(), or F5 / Ctrl+R, which WebView2 leaves enabled in release) must return to the
+// Reload acceptance: a webview reload (page.reload(); synthetic F5 and Ctrl+R never reach WebView2's accelerators) must return to the
 // live session with its open documents and unsaved edits, never to "Recovery unavailable". Reuses the S14 build packet and owned-process
 // checks. Build with tests/desktop/string-count-build.mjs, then: node tests/desktop/parity-reload-recovery.mjs --run --build=<absolute build.json>
 import assert from 'node:assert/strict';
@@ -57,9 +57,9 @@ export async function runReloadRecoveryAcceptance({buildPath}={}){
   // A reload must land on the workspace, never on the recovery dialog; both the dialog and the failing text are asserted absent.
   const reloaded=async how=>{
     owned();
-    // A window marker and timeOrigin both die with the old document, so a key press that does not reload cannot pass.
+    // A window marker and timeOrigin both die with the old document, so a call that does not reload cannot pass.
     const origin=await page.evaluate(()=>{window.__reloadMarker=true;return performance.timeOrigin;});
-    if(how==='api')await page.reload();else await page.keyboard.press(how);
+    await page.reload();
     await poll(()=>page.evaluate(origin=>({marker:window.__reloadMarker===true,origin:performance.timeOrigin}),origin).catch(()=>({marker:true,origin})),value=>!value.marker&&value.origin!==origin,`${how} reloaded the page`);
     await page.locator('.app-shell').waitFor();await closeWelcome();
     assert.equal(await page.getByRole('dialog',{name:/Recovery unavailable|Recover unsaved work/}).count(),0,'No recovery dialog after reload');
@@ -79,7 +79,7 @@ export async function runReloadRecoveryAcceptance({buildPath}={}){
     const before=await workspace();
     step('Unsaved edit exists before reload',{edits:edited.snapshot.project.edits.length,documents:before.documents.length});
 
-    for(const how of ['api','F5','Control+R']){
+    for(const how of ['api']){
       await reloaded(how);
       const after=await workspace();
       assert.deepEqual(after.documents.map(d=>d.documentId),before.documents.map(d=>d.documentId),`${how}: same open documents in the same order`);

@@ -57,6 +57,9 @@ fn query(root_id: Option<String>, text: &str) -> LibraryQuery {
     LibraryQuery {
         root_id,
         text: text.into(),
+        title: String::new(),
+        artist: String::new(),
+        instrument: String::new(),
         sort: LibrarySort::Title,
         offset: 0,
         limit: 100,

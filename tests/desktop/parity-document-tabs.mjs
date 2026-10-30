@@ -46,7 +46,10 @@ async function closeApp(){
 async function start(exportPath=output('exports'),savePath=output('ui-save.tabplayer')){
   await closeApp();id=launch({TABPLAYER_TEST_OPEN:fixture.documents.A.projectPath,TABPLAYER_TEST_SAVE:savePath,TABPLAYER_TEST_BACKING:fixture.documents.A.backingPath,TABPLAYER_TEST_EXPORT:exportPath});
   browser=await connect();page=browser.contexts()[0].pages()[0];page.on('pageerror',error=>errors.push(error.message));
-  await page.setViewportSize({width:1600,height:1100});await waitForWorkspaceIdle(page);await idle();
+  await page.setViewportSize({width:1600,height:1100});
+  const library=page.getByRole('dialog',{name:'Library',exact:true});
+  if(await library.getByRole('heading',{name:'Welcome to TabPlayer',exact:true}).waitFor({timeout:5000}).then(()=>true,()=>false)){await library.getByRole('button',{name:'Close',exact:true}).click();await library.waitFor({state:'hidden'});}
+  await waitForWorkspaceIdle(page);await idle();
 }
 async function reload(){await page.reload();await waitForWorkspaceIdle(page);await idle();await ready();}
 async function add(path){

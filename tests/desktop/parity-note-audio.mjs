@@ -118,7 +118,7 @@ export async function runNoteAudioAcceptance({buildPath}={}){
     const baseMidi=readNotes(readFileSync(await exportAs({format:'midi',name:'baseline',extension:'mid'})));
     assert.equal(baseMidi.division,960);assert.equal(baseMidi.on.length,3,'Three notes and a rest');
     assert.deepEqual(baseMidi.on.map(note=>note[0]),[0,960,1920],'Notes on beats 1, 2 and 3');
-    assert.deepEqual(baseMidi.on.map(note=>note[1]),[69,62,57],'Frets 5, 3 and 2 on strings 1, 2 and 3');
+    assert.deepEqual(baseMidi.on.map(note=>note[1]),[45,48,52],'Frets 5, 3 and 2 on alphaTab strings 1, 2 and 3, counted from the lowest');
     const baseLength=baseMidi.off[0][0]-baseMidi.on[0][0];assert.ok(baseLength>=100,'The first note has a length to scale');
     const baseWave=readWave(readFileSync(await exportAs({format:'wav',name:'baseline',extension:'wav',audio:true})));
     assert.ok(baseWave.onset>=0&&baseWave.peak>300,'The baseline audio sounds');

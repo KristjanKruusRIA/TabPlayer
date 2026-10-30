@@ -2,6 +2,7 @@ import { useEffect,useState } from 'react';
 import { type model,Settings } from '@coderline/alphatab';
 import type { EngravingCommand,EngravingOverrides,InheritBool,TrackProfile } from './types';
 import { defaultEngraving,validateEngravingTracks } from './projection';
+import { StylePresetsPanel } from './StylePresetsPanel';
 
 export interface EngravingPanelProps {
   score:model.Score;trackIds:readonly string[];value:EngravingOverrides;busy:boolean;
@@ -69,6 +70,7 @@ export function EngravingPanel({score,trackIds,value,busy,onEdit}:EngravingPanel
       {notationBooleans.map(([key,label,field])=><Choice key={key} label={label} value={boolValue(draft.notation[key])} source={yesNo(defaults.notation[field])} options={boolOptions} onChange={next=>updateNotation(key,parseBool(next))}/>)}
       {notationElements.map(([key,label,element])=><Choice key={key} label={label} value={boolValue(draft.notation[key])} source={yesNo(defaults.notation.isNotationElementVisible(element))} options={boolOptions} onChange={next=>updateNotation(key,parseBool(next))}/>)}
     </details>
+    <StylePresetsPanel score={score} trackIds={trackIds} value={value} onEdit={onEdit}/>
     <label>System spacing (%)<input type="number" min={25} max={400} step="any" placeholder="Source/default (100%)" value={draft.systemSpacing===null?'':draft.systemSpacing*100} onChange={e=>{setDraft({...draft,systemSpacing:e.target.value===''?null:Number(e.target.value)/100});setError(null);}}/></label>
     <p>Blank uses default system spacing.</p>
     {error&&<p role="alert">{error}</p>}

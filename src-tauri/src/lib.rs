@@ -16,6 +16,7 @@ pub mod reveal;
 mod runtime;
 mod session;
 pub mod settings;
+pub mod style_library;
 pub mod tuning_library;
 pub mod workspace;
 
@@ -960,6 +961,9 @@ pub fn run() {
         tuning_library_read,
         tuning_library_put,
         tuning_library_remove,
+        style_library::style_library_read,
+        style_library::style_library_put,
+        style_library::style_library_remove,
         file_library_snapshot,
         file_library_retry,
         file_library_change,
@@ -1028,6 +1032,9 @@ pub fn run() {
         tuning_library_read,
         tuning_library_put,
         tuning_library_remove,
+        style_library::style_library_read,
+        style_library::style_library_put,
+        style_library::style_library_remove,
         file_library_snapshot,
         file_library_retry,
         file_library_change,

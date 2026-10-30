@@ -6,7 +6,7 @@ import { model } from '@coderline/alphatab';
 import { TechniquePanel } from './TechniquePanel';
 import { StructurePanel } from './StructurePanel';
 import { MeasurePanel } from './MeasurePanel';
-import { CurveEditor } from './CurveEditor';
+import { CurveEditor, BEND_PRESETS, WHAMMY_PRESETS } from './CurveEditor';
 import { music, target } from './fixtures';
 import { buildScore, previewEdit } from '../engine';
 import { blankProject } from '../project';
@@ -185,6 +185,67 @@ it('curve editor respects getScreenCTM, role=group, surface clicks, and single u
   fireEvent.pointerDown(handle,{pointerId:1,clientX:128,clientY:73});
   fireEvent.pointerUp(handle,{pointerId:1,clientX:140,clientY:20});
   expect(onChange).not.toHaveBeenCalled();
+});
+
+it('every bend and whammy preset matches alphaTab classification through real engine', () => {
+  for (const preset of BEND_PRESETS) {
+    let project = blankProject();
+    project = previewEdit(project, { type: 'setNote', target, string: 1, fret: 5 }).project;
+    project = previewEdit(project, {
+      type: 'setNoteTechniques',
+      target,
+      string: 1,
+      patch: { bend: { type: preset.type, style: 0, points: preset.points.map(p => ({ ...p })) } },
+    }).project;
+    const score = buildScore(project);
+    const note = score.tracks[0].staves[0].bars[0].voices[0].beats[0].notes[0];
+    expect(note.bendType, `Bend preset ${preset.name} stored type should match engine resolution`).toBe(preset.type);
+  }
+
+  for (const preset of WHAMMY_PRESETS) {
+    let project = blankProject();
+    project = previewEdit(project, { type: 'setNote', target, string: 1, fret: 5 }).project;
+    project = previewEdit(project, {
+      type: 'setBeatTechniques',
+      target,
+      patch: { whammy: { type: preset.type, style: 0, points: preset.points.map(p => ({ ...p })) } },
+    }).project;
+    const score = buildScore(project);
+    const beat = score.tracks[0].staves[0].bars[0].voices[0].beats[0];
+    expect(beat.whammyBarType, `Whammy preset ${preset.name} stored type should match engine resolution`).toBe(preset.type);
+  }
+});
+
+it('bend preset re-click and arrow down-up record nothing through previewEdit', () => {
+  let project = blankProject();
+  project = previewEdit(project, { type: 'setNote', target, string: 1, fret: 5 }).project;
+  const bendPreset = BEND_PRESETS.find(p => p.id === 'bend')!;
+  project = previewEdit(project, {
+    type: 'setNoteTechniques',
+    target,
+    string: 1,
+    patch: { bend: { type: bendPreset.type, style: 0, points: bendPreset.points.map(p => ({ ...p })) } },
+  }).project;
+  const note = buildScore(project).tracks[0].staves[0].bars[0].voices[0].beats[0].notes[0];
+  const readCurve = {
+    type: note.bendType,
+    style: note.bendStyle,
+    points: note.bendPoints?.map(p => ({ offset: p.offset, value: p.value })) ?? [],
+  };
+
+  const onEdit = vi.fn();
+  render(<CurveEditor label="Bend" value={readCurve} onChange={onEdit} />);
+
+  // Re-clicking Bend preset records nothing
+  fireEvent.click(screen.getByRole('button', { name: `Bend preset: ${bendPreset.name}` }));
+  expect(onEdit).not.toHaveBeenCalled();
+
+  // ArrowDown then ArrowUp on handle 2 returns to identical points and records nothing
+  const handle = screen.getByRole('slider', { name: 'Bend graph point 2' });
+  fireEvent.keyDown(handle, { key: 'ArrowDown', shiftKey: true });
+  fireEvent.keyDown(handle, { key: 'ArrowUp', shiftKey: true });
+  fireEvent.keyUp(handle, { key: 'ArrowUp', shiftKey: true });
+  expect(onEdit).not.toHaveBeenCalled();
 });
 it('voice staff and layout controls dispatch exact commands',()=>{
   const onEdit=vi.fn();render(<StructurePanel score={music()} target={target} string={6} busy={false} onEdit={onEdit} onSelect={vi.fn()}/>);

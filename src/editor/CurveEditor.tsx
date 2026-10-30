@@ -13,11 +13,11 @@ type CurvePreset = {
   svgPath: string;
 };
 
-const BEND_PRESETS: readonly CurvePreset[] = [
+export const BEND_PRESETS: readonly CurvePreset[] = [
   {
     id: 'bend',
     name: 'Bend',
-    type: model.BendType.Custom,
+    type: model.BendType.Bend,
     points: [
       { offset: 0, value: 0 },
       { offset: 60, value: 4 },
@@ -57,7 +57,7 @@ const BEND_PRESETS: readonly CurvePreset[] = [
   },
 ];
 
-const WHAMMY_PRESETS: readonly CurvePreset[] = [
+export const WHAMMY_PRESETS: readonly CurvePreset[] = [
   {
     id: 'dip',
     name: 'Dip',
@@ -80,9 +80,9 @@ const WHAMMY_PRESETS: readonly CurvePreset[] = [
     svgPath: 'M2 3 Q10 4 16 13',
   },
   {
-    id: 'scoop',
-    name: 'Scoop',
-    type: model.WhammyType.Predive,
+    id: 'predive-dive',
+    name: 'Predive dive',
+    type: model.WhammyType.PrediveDive,
     points: [
       { offset: 0, value: -4 },
       { offset: 60, value: 0 },
@@ -90,9 +90,9 @@ const WHAMMY_PRESETS: readonly CurvePreset[] = [
     svgPath: 'M2 13 L16 4',
   },
   {
-    id: 'hold',
-    name: 'Hold',
-    type: model.WhammyType.Hold,
+    id: 'predive',
+    name: 'Predive',
+    type: model.WhammyType.Predive,
     points: [
       { offset: 0, value: -4 },
       { offset: 60, value: -4 },
@@ -104,7 +104,7 @@ const WHAMMY_PRESETS: readonly CurvePreset[] = [
 function areCurvesEqual(a: PitchCurve | null, b: PitchCurve | null): boolean {
   if (a === b) return true;
   if (!a || !b) return false;
-  if (a.type !== b.type || a.style !== b.style || a.points.length !== b.points.length) return false;
+  if (a.style !== b.style || a.points.length !== b.points.length) return false;
   return a.points.every((p, i) => p.offset === b.points[i].offset && p.value === b.points[i].value);
 }
 
@@ -169,7 +169,6 @@ export function CurveEditor({
       return {
         ...current,
         points: nextPoints,
-        type: resolveCurveType(nextPoints, whammy),
       };
     });
 
@@ -377,7 +376,6 @@ export function CurveEditor({
     if (disabled) return;
     if (
       curve !== null &&
-      curve.type === preset.type &&
       curve.points.length === preset.points.length &&
       curve.points.every((p, i) => p.offset === preset.points[i].offset && p.value === preset.points[i].value)
     ) {

@@ -7,13 +7,13 @@
 //! compared by file identity, not by name, so network and loopback spellings of one folder count as
 //! one. The conversion itself runs in the window, through the same import and export code as
 //! opening and exporting a score.
-use crate::fs_identity::{ancestor_ids, file_id, final_path, rename_new};
+use crate::fs_identity::{ancestor_ids, file_id, final_path, handle_id, pin_folder, rename_new};
 use crate::intake::{read_stable, reparse};
 use serde::Serialize;
 use std::{
     collections::HashSet,
     ffi::OsStr,
-    fs,
+    fs::{self, File},
     io::Write,
     path::{Component, Path, PathBuf},
     sync::{
@@ -78,6 +78,8 @@ pub struct BatchWritten {
     pub relative: String,
     /// The name was taken, so a numbered copy was written instead.
     pub renamed: bool,
+    /// Something to tell the user about the name, such as one other programs may not open.
+    pub note: Option<String>,
 }
 
 pub struct BatchSession {
@@ -107,8 +109,12 @@ impl Default for BatchSession {
 #[derive(Default)]
 pub struct BatchState(pub Mutex<BatchSession>);
 
+/// The path as people write it: `\\?\C:\x` as `C:\x` and `\\?\UNC\server\share` as `\\server\share`.
 fn display(path: &Path) -> String {
     let text = path.to_string_lossy();
+    if let Some(share) = text.strip_prefix(r"\\?\UNC\") {
+        return format!(r"\\{share}");
+    }
     text.strip_prefix(r"\\?\").unwrap_or(&text).to_string()
 }
 
@@ -153,7 +159,8 @@ fn slashes(path: &Path) -> String {
         .join("/")
 }
 
-/// Why a name from a listing cannot be used as a single plain file or folder name here.
+/// Why a name from a listing cannot be used as a single plain file or folder name here. A colon and a
+/// trailing dot or space are only a problem where the file system gives them a meaning (Windows).
 fn name_problem(name: &OsStr) -> Option<&'static str> {
     let Some(name) = name.to_str() else {
         return Some("The name is not valid text.");
@@ -161,7 +168,7 @@ fn name_problem(name: &OsStr) -> Option<&'static str> {
     if name.is_empty()
         || name == "."
         || name == ".."
-        || name.contains(['/', '\\', ':'])
+        || name.contains(['/', '\\'])
         || name.chars().any(char::is_control)
         || Path::new(name)
             .components()
@@ -169,22 +176,44 @@ fn name_problem(name: &OsStr) -> Option<&'static str> {
     {
         return Some("The name is not a plain file name.");
     }
-    if name.ends_with(['.', ' ']) {
-        return Some("Names ending in a dot or a space are not supported.");
+    if cfg!(windows) {
+        if name.contains(':') {
+            return Some("The name contains a colon.");
+        }
+        if name.ends_with(['.', ' ']) {
+            return Some("Names ending in a dot or a space are not supported.");
+        }
     }
+    None
+}
+
+/// Windows programs read these names, with any extension, as a device. Paths in the extended form reach
+/// no device, so such a file can be made and read here, but other tools may not open it.
+fn device_name(name: &str) -> bool {
     let stem = name.split('.').next().unwrap_or(name).trim_end();
     let upper = stem.to_ascii_uppercase();
     let number = |rest: &str| {
         let mut chars = rest.chars();
         matches!(chars.next(), Some('0'..='9' | '¹' | '²' | '³')) && chars.next().is_none()
     };
-    if ["CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"].contains(&upper.as_str())
+    ["CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"].contains(&upper.as_str())
         || upper.strip_prefix("COM").is_some_and(number)
         || upper.strip_prefix("LPT").is_some_and(number)
+}
+
+/// A link that leads to a folder, or is one (a junction).
+fn folder_like(metadata: &fs::Metadata, path: &Path) -> bool {
+    #[cfg(windows)]
     {
-        return Some("The name is reserved by Windows for a device.");
+        use std::os::windows::fs::MetadataExt;
+        let _ = path;
+        metadata.file_attributes() & 0x10 != 0
     }
-    None
+    #[cfg(not(windows))]
+    {
+        let _ = metadata;
+        fs::metadata(path).is_ok_and(|target| target.is_dir())
+    }
 }
 
 fn skip(scan: &mut BatchScan, relative: &Path, reason: impl Into<String>) {
@@ -206,6 +235,7 @@ impl BatchSession {
         }
         self.files.clear();
         self.claimed.clear();
+        self.written.clear();
         let shown = display(&source);
         self.source = Some(source);
         Ok(shown)
@@ -233,6 +263,13 @@ impl BatchSession {
         Ok(shown)
     }
 
+    /// Forgets the folders and the scan, as when the dialog closes.
+    pub fn reset(&mut self) {
+        let max_visited = self.max_visited;
+        *self = Self::default();
+        self.max_visited = max_visited;
+    }
+
     /// Lists the files of the chosen types under the source, in a stable order, within the limits.
     pub fn scan(&mut self, kinds: &[String]) -> Result<BatchScan, String> {
         let source = self.source.clone().ok_or("Choose a source folder first.")?;
@@ -248,10 +285,11 @@ impl BatchSession {
         if wanted.is_empty() {
             return Err("Choose at least one file type.".into());
         }
+        // Indices start again with each scan; the bytes written count towards the limit until the
+        // folders change or the dialog is closed.
         self.files.clear();
         self.claimed.clear();
         self.written.clear();
-        self.written_bytes = 0;
         let mut scan = BatchScan {
             files: Vec::new(),
             skipped: Vec::new(),
@@ -301,11 +339,28 @@ impl BatchSession {
             let mut folders = Vec::new();
             for name in entries {
                 let child = relative.join(&name);
-                let Ok(metadata) = fs::symlink_metadata(source.join(&child)) else {
-                    continue;
+                let metadata = match fs::symlink_metadata(source.join(&child)) {
+                    Ok(metadata) => metadata,
+                    Err(error) => {
+                        skip(
+                            &mut scan,
+                            &child,
+                            format!("Could not be inspected: {error}"),
+                        );
+                        continue;
+                    }
                 };
+                let score_file = Path::new(&name)
+                    .extension()
+                    .and_then(|extension| extension.to_str())
+                    .is_some_and(|extension| {
+                        wanted.contains(extension.to_ascii_lowercase().as_str())
+                    });
                 if reparse(&metadata) {
-                    skip(&mut scan, &child, "Links are not followed.");
+                    // Only links that could have been scores or folders are worth a row.
+                    if score_file || folder_like(&metadata, &source.join(&child)) {
+                        skip(&mut scan, &child, "Links are not followed.");
+                    }
                 } else if metadata.is_dir() {
                     if let Some(problem) = name_problem(&name) {
                         skip(&mut scan, &child, problem);
@@ -318,14 +373,7 @@ impl BatchSession {
                     } else {
                         folders.push((child, depth + 1));
                     }
-                } else if metadata.is_file()
-                    && Path::new(&name)
-                        .extension()
-                        .and_then(|extension| extension.to_str())
-                        .is_some_and(|extension| {
-                            wanted.contains(extension.to_ascii_lowercase().as_str())
-                        })
-                {
+                } else if metadata.is_file() && score_file {
                     if let Some(problem) = name_problem(&name) {
                         skip(&mut scan, &child, problem);
                     } else if metadata.len() > MAX_FILE_BYTES {
@@ -376,6 +424,13 @@ impl BatchSession {
     /// replaced: a taken name gets a numbered copy. The bytes go to a temporary name first and are
     /// renamed without replacing, so an interrupted run leaves no truncated `.gp`. `protect` can
     /// refuse a place the application keeps for itself, and runs before anything is created.
+    ///
+    /// Every folder from the destination down is opened as itself (never through a link) and held
+    /// open for the whole call, so on Windows none can be renamed, deleted or replaced by a link
+    /// meanwhile, and the temporary file stays open through the rename. Where the file really landed
+    /// is then checked by identity, before and after the rename, and a file that landed outside the
+    /// destination, or inside the source, is deleted. Elsewhere folders cannot be held, so there the
+    /// same check detects and undoes a swap instead of preventing it.
     pub fn write(
         &mut self,
         index: usize,
@@ -407,6 +462,12 @@ impl BatchSession {
         if current != destination {
             return Err("The destination folder changed. Choose it again.".into());
         }
+        let source_id = file_id(&source)?;
+        let mut pins = vec![
+            pin_folder(&current)
+                .map_err(|error| format!("{} cannot be used: {error}", display(&current)))?,
+        ];
+        let current_id = handle_id(&pins[0])?;
         separate(&source, &current)?;
         let stem = relative
             .file_stem()
@@ -418,38 +479,66 @@ impl BatchSession {
         } else {
             PathBuf::new()
         };
-        // One folder at a time: each is refused if the application keeps it, and if it is a link,
-        // before it is created or entered, so no link can lead a new folder anywhere else.
+        // One folder at a time: each is refused if the application keeps it before it is created or
+        // entered, and is opened as itself, so a link in its place is refused, not followed.
         let mut directory = current.clone();
+        let mut device = false;
         for part in parent.components() {
             let Component::Normal(part) = part else {
                 return Err("The file's folder is not a plain path.".into());
             };
             directory.push(part);
+            device |= device_name(&part.to_string_lossy());
             protect(&directory)?;
-            let plain = |directory: &Path| match fs::symlink_metadata(directory) {
-                Ok(metadata) if reparse(&metadata) || !metadata.is_dir() => Err(format!(
-                    "{} is a link or not a folder, so nothing was written there.",
-                    display(directory)
-                )),
-                Ok(_) => Ok(true),
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
-                Err(error) => Err(format!("Could not check {}: {error}", display(directory))),
-            };
-            if !plain(&directory)? {
-                fs::create_dir(&directory).map_err(|error| {
-                    format!("Could not create {}: {error}", display(&directory))
-                })?;
-                if !plain(&directory)? {
-                    return Err(format!("{} could not be created.", display(&directory)));
+            let pinned = match pin_folder(&directory) {
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    fs::create_dir(&directory).map_err(|error| {
+                        format!("Could not create {}: {error}", display(&directory))
+                    })?;
+                    pin_folder(&directory)
                 }
+                other => other,
+            };
+            pins.push(pinned.map_err(|error| {
+                format!(
+                    "{} is a link or cannot be opened, so nothing was written there: {error}",
+                    display(&directory)
+                )
+            })?);
+        }
+        let directory_id = handle_id(pins.last().expect("the destination is pinned"))?;
+        {
+            let chain = ancestor_ids(&directory)?;
+            if chain.first() != Some(&directory_id) || !chain.contains(&current_id) {
+                return Err("The destination folder contains a link that leaves it.".into());
             }
         }
-        let directory_id = file_id(&directory)?;
-        if !ancestor_ids(&directory)?.contains(&file_id(&current)?) {
-            return Err("The destination folder contains a link that leaves it.".into());
-        }
         separate(&source, &directory)?;
+        sweep_stale(&directory);
+
+        // Where a file the system says is in `directory` really is: in the chosen folder, below the
+        // destination and never in or below the source.
+        let check_home = |file: &File, hint: &Path| -> (Option<PathBuf>, Result<(), String>) {
+            let located = match final_path(file, hint) {
+                Ok(located) => located,
+                Err(error) => return (None, Err(error)),
+            };
+            let verdict = located
+                .parent()
+                .ok_or_else(|| "The created file has no folder.".to_string())
+                .and_then(ancestor_ids)
+                .and_then(|chain| {
+                    if chain.first() == Some(&directory_id)
+                        && chain.contains(&current_id)
+                        && !chain.contains(&source_id)
+                    {
+                        Ok(())
+                    } else {
+                        Err("The new file landed outside the destination.".to_string())
+                    }
+                });
+            (Some(located), verdict)
+        };
 
         let temporary = directory.join(format!(
             ".tabplayer-batch-{}-{}.tmp",
@@ -457,6 +546,8 @@ impl BatchSession {
             TEMPORARY.fetch_add(1, Ordering::Relaxed)
         ));
         protect(&temporary)?;
+        // Declared before the file so it runs after the file is closed.
+        let mut leftover = Leftover(Some(temporary.clone()));
         let mut file = fs::OpenOptions::new()
             .write(true)
             .create_new(true)
@@ -467,31 +558,17 @@ impl BatchSession {
                     display(&directory)
                 )
             })?;
-        // Where the system says the new file is must be the folder checked above.
-        let landed = final_path(&file, &temporary).and_then(|located| {
-            let home = located.parent().ok_or("The created file has no folder.")?;
-            if file_id(home)? == directory_id {
-                Ok(())
-            } else {
-                Err("The new file landed outside the destination.".to_string())
-            }
-        });
-        if let Err(error) = landed {
-            let outside = final_path(&file, &temporary).ok();
+        let (located, verdict) = check_home(&file, &temporary);
+        if let Err(error) = verdict {
             drop(file);
-            let _ = fs::remove_file(outside.as_deref().unwrap_or(&temporary));
-            let _ = fs::remove_file(&temporary);
+            if let Some(located) = located {
+                remove_file_patiently(&located);
+            }
             return Err(error);
         }
-        let discard = |temporary: &Path| {
-            let _ = fs::remove_file(temporary);
-        };
         if let Err(error) = file.write_all(bytes).and_then(|()| file.sync_all()) {
-            drop(file);
-            discard(&temporary);
             return Err(format!("Could not write {}: {error}", display(&temporary)));
         }
-        drop(file);
         for copy in 1..=MAX_COPIES {
             let name = if copy == 1 {
                 format!("{stem}.gp")
@@ -503,34 +580,92 @@ impl BatchSession {
             if self.claimed.contains(&key) {
                 continue;
             }
-            if let Err(error) = protect(&path) {
-                discard(&temporary);
-                return Err(error);
-            }
+            protect(&path)?;
             match rename_new(&temporary, &path) {
                 Ok(()) => {
+                    leftover.0 = None;
+                    // The held handle follows the file, so this is where the rename really put it.
+                    let (located, verdict) = check_home(&file, &path);
+                    if let Err(error) = verdict {
+                        drop(file);
+                        if let Some(located) = located {
+                            remove_file_patiently(&located);
+                        }
+                        remove_file_patiently(&path);
+                        return Err(error);
+                    }
                     self.claimed.insert(key);
                     self.written.insert(index);
                     self.written_bytes += bytes.len() as u64;
+                    device |= device_name(&name);
                     return Ok(BatchWritten {
                         relative: slashes(
                             path.strip_prefix(&current)
                                 .map_err(|error| error.to_string())?,
                         ),
                         renamed: copy > 1,
+                        note: device.then(|| DEVICE_NOTE.to_string()),
                     });
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
-                Err(error) => {
-                    discard(&temporary);
-                    return Err(format!("Could not create {}: {error}", display(&path)));
-                }
+                Err(error) => return Err(format!("Could not create {}: {error}", display(&path))),
             }
         }
-        discard(&temporary);
         Err(format!(
             "{stem}.gp and its numbered copies up to ({MAX_COPIES}) already exist."
         ))
+    }
+}
+
+const DEVICE_NOTE: &str = "Windows programs read this name as a device and may not open it. Rename it with a tool that uses extended paths.";
+const STALE_TEMPORARY: std::time::Duration = std::time::Duration::from_secs(60 * 60);
+
+/// Removes the temporary file when a write ends without it being renamed into place.
+struct Leftover(Option<PathBuf>);
+impl Drop for Leftover {
+    fn drop(&mut self) {
+        if let Some(path) = self.0.take() {
+            remove_file_patiently(&path);
+        }
+    }
+}
+
+/// Removes a file, waiting briefly for a scanner or indexer that has it open.
+fn remove_file_patiently(path: &Path) {
+    for attempt in 0..6 {
+        match fs::remove_file(path) {
+            Ok(()) => return,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return,
+            Err(_) if attempt < 5 => std::thread::sleep(std::time::Duration::from_millis(25)),
+            Err(_) => return,
+        }
+    }
+}
+
+/// Removes temporary files an interrupted earlier run left in a folder about to be written to. Only
+/// files untouched for an hour go, so another running copy's file in progress is left alone.
+fn sweep_stale(directory: &Path) {
+    let Ok(listing) = fs::read_dir(directory) else {
+        return;
+    };
+    for entry in listing.flatten() {
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else {
+            continue;
+        };
+        if !(name.starts_with(".tabplayer-batch-") && name.ends_with(".tmp")) {
+            continue;
+        }
+        let stale = entry
+            .metadata()
+            .ok()
+            .filter(|metadata| metadata.is_file())
+            .and_then(|metadata| metadata.modified().ok())
+            .and_then(|modified| modified.elapsed().ok())
+            .is_some_and(|age| age >= STALE_TEMPORARY);
+        if stale {
+            remove_file_patiently(&entry.path());
+        }
     }
 }
 
@@ -588,6 +723,17 @@ pub async fn batch_pick_folder(role: String, app: AppHandle) -> Result<Option<St
     .map_err(|error| error.to_string())?
 }
 
+/// Forgets the chosen folders and the scan, so a closed dialog leaves nothing the window could reuse.
+#[tauri::command]
+pub fn batch_reset(app: AppHandle) -> Result<(), String> {
+    app.state::<BatchState>()
+        .0
+        .lock()
+        .map_err(|error| error.to_string())?
+        .reset();
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn batch_scan(kinds: Vec<String>, app: AppHandle) -> Result<BatchScan, String> {
     tauri::async_runtime::spawn_blocking(move || {
@@ -612,13 +758,28 @@ pub async fn batch_read(index: usize, app: AppHandle) -> Result<tauri::ipc::Resp
     .map_err(|error| error.to_string())?
 }
 
+/// The converted bytes arrive as the raw request body, with the scan index and the folder option in
+/// headers, so no number array is built for a large file.
 #[tauri::command]
 pub async fn batch_write(
-    index: usize,
-    bytes: Vec<u8>,
-    keep_folders: bool,
+    request: tauri::ipc::Request<'_>,
     app: AppHandle,
 ) -> Result<BatchWritten, String> {
+    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
+        return Err("The converted score must be sent as raw bytes.".into());
+    };
+    let bytes = bytes.clone();
+    let header = |name: &str| {
+        request
+            .headers()
+            .get(name)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_owned)
+    };
+    let index = header("x-batch-index")
+        .and_then(|value| value.parse::<usize>().ok())
+        .ok_or("The file index is missing.")?;
+    let keep_folders = header("x-batch-keep-folders").as_deref() == Some("1");
     tauri::async_runtime::spawn_blocking(move || {
         crate::file_library::commands::admit_app(&app)?;
         let state = app.state::<BatchState>();
@@ -849,7 +1010,8 @@ mod tests {
             nested,
             BatchWritten {
                 relative: "rock/live/d.gp".into(),
-                renamed: false
+                renamed: false,
+                note: None
             }
         );
         assert_eq!(fs::read(destination.join("rock/live/d.gp")).unwrap(), gp());
@@ -1024,25 +1186,19 @@ mod tests {
     }
 
     #[test]
-    fn names_are_single_plain_components_and_devices_are_refused() {
-        for bad in [
-            "NUL.gp",
-            "nul",
-            "con.gp5",
-            "COM1.gpx",
-            "lpt9.gp3",
-            "LPT¹.gp",
-            "trail.",
-            "space ",
-            "a:b.gp",
-            "a\\b.gp",
-            "a/b.gp",
-            "..",
-            "",
-            "x\u{7}.gp",
-        ] {
+    fn names_are_single_plain_components() {
+        for bad in ["..", "", ".", "a\\b.gp", "a/b.gp", "x\u{7}.gp"] {
             assert!(name_problem(OsStr::new(bad)).is_some(), "{bad:?}");
         }
+        // Only Windows gives a colon or a trailing dot or space a meaning.
+        for windows_only in ["trail.", "space ", "a:b.gp", "Metallica: One.gp5"] {
+            assert_eq!(
+                name_problem(OsStr::new(windows_only)).is_some(),
+                cfg!(windows),
+                "{windows_only:?}"
+            );
+        }
+        // Device names are legal in the extended path form, so they are not skipped.
         for good in [
             "a.gp3",
             "Nulled.gp",
@@ -1050,29 +1206,176 @@ mod tests {
             "my song (2).gp5",
             "ä.gpx",
             ".gp5",
+            "Con.gp5",
+            "NUL.gp",
+            "Aux. Pt 2.gp5",
+            "Aux",
         ] {
             assert_eq!(name_problem(OsStr::new(good)), None, "{good:?}");
+        }
+        for device in [
+            "NUL.gp",
+            "nul",
+            "con.gp5",
+            "COM1.gpx",
+            "lpt9.gp3",
+            "LPT\u{b9}.gp",
+            "Aux. Pt 2.gp5",
+            "Aux",
+        ] {
+            assert!(device_name(device), "{device:?}");
+        }
+        for plain in ["Nulled.gp", "COM10.gp", "a.gp3", "Console.gp"] {
+            assert!(!device_name(plain), "{plain:?}");
         }
     }
 
     #[cfg(windows)]
     #[test]
-    fn device_names_and_trailing_dots_are_skipped_not_converted() {
+    fn device_named_files_and_folders_convert_with_a_note_not_a_skip() {
         let (_root, source, destination) = tree();
         // These can only be made through the extended-length form, which is how they get into a folder.
         let canonical = fs::canonicalize(&source).unwrap();
         fs::write(canonical.join("NUL.gp"), "x").unwrap();
-        fs::write(canonical.join("trail."), "x").unwrap();
+        fs::create_dir(canonical.join("Aux")).unwrap();
+        fs::write(canonical.join("Aux").join("song.gp5"), "x").unwrap();
         let mut batch = ready(&source, &destination);
         let scan = batch.scan(&kinds(&["gp345", "gp"])).unwrap();
-        assert!(scan.files.iter().all(|file| file.relative != "NUL.gp"));
-        assert!(
-            scan.skipped
+        let index = |name: &str| {
+            scan.files
                 .iter()
-                .any(|skip| skip.relative == "NUL.gp" && skip.reason.contains("reserved"))
-        );
+                .find(|file| file.relative == name)
+                .unwrap()
+                .index
+        };
+        assert!(scan.skipped.is_empty(), "{:?}", scan.skipped);
+        let file = batch.write(index("NUL.gp"), &gp(), true, &open()).unwrap();
+        assert_eq!(file.relative, "NUL.gp");
+        assert!(file.note.as_deref().unwrap().contains("device"));
+        let nested = batch
+            .write(index("Aux/song.gp5"), &gp(), true, &open())
+            .unwrap();
+        assert_eq!(nested.relative, "Aux/song.gp");
+        assert!(nested.note.is_some());
+        let plain = batch.write(index("a.gp3"), &gp(), true, &open()).unwrap();
+        assert_eq!(plain.note, None);
+        let destination = fs::canonicalize(&destination).unwrap();
+        fs::remove_file(destination.join("NUL.gp")).unwrap();
+        fs::remove_dir_all(destination.join("Aux")).unwrap();
         fs::remove_file(canonical.join("NUL.gp")).unwrap();
-        fs::remove_file(canonical.join("trail.")).unwrap();
+        fs::remove_dir_all(canonical.join("Aux")).unwrap();
+    }
+
+    #[test]
+    fn links_are_reported_only_for_scores_and_folders() {
+        let (_root, source, destination) = tree();
+        let mut batch = ready(&source, &destination);
+        let scan = batch.scan(&kinds(&["gp345"])).unwrap();
+        assert!(scan.skipped.is_empty());
+        #[cfg(windows)]
+        {
+            let elsewhere = _root.path().join("elsewhere");
+            fs::create_dir(&elsewhere).unwrap();
+            junction(&source.join("linked"), &elsewhere);
+            let scan = batch.scan(&kinds(&["gp345"])).unwrap();
+            assert_eq!(scan.skipped.len(), 1);
+            assert_eq!(scan.skipped[0].relative, "linked");
+        }
+    }
+
+    #[test]
+    fn a_failed_root_listing_has_a_readable_row() {
+        let (_root, source, destination) = tree();
+        let mut batch = ready(&source, &destination);
+        fs::remove_dir_all(&source).unwrap();
+        let scan = batch.scan(&kinds(&["gp345"])).unwrap();
+        assert_eq!(scan.skipped.len(), 1);
+        assert_eq!(scan.skipped[0].relative, ROOT_LABEL);
+        assert!(scan.skipped[0].reason.contains("could not be read"));
+    }
+
+    #[test]
+    fn share_paths_display_the_way_people_write_them() {
+        assert_eq!(display(Path::new(r"\\?\C:\a\b")), r"C:\a\b");
+        assert_eq!(
+            display(Path::new(r"\\?\UNC\host\share\a")),
+            r"\\host\share\a"
+        );
+        assert_eq!(display(Path::new(r"C:\a")), r"C:\a");
+    }
+
+    #[test]
+    fn bytes_written_count_across_scans_until_the_folders_change() {
+        let (_root, source, destination) = tree();
+        let mut batch = ready(&source, &destination);
+        batch.scan(&kinds(&["gp345"])).unwrap();
+        batch.write(0, &gp(), true, &open()).unwrap();
+        let first = batch.written_bytes;
+        assert_eq!(first, gp().len() as u64);
+        // A rescan renumbers the files but does not forget what was written.
+        batch.scan(&kinds(&["gp345"])).unwrap();
+        assert_eq!(batch.written_bytes, first);
+        batch.write(0, &gp(), true, &open()).unwrap();
+        assert_eq!(batch.written_bytes, first * 2);
+        batch.reset();
+        assert_eq!(batch.written_bytes, 0);
+        assert!(batch.write(0, &gp(), true, &open()).is_err());
+        let mut again = ready(&source, &destination);
+        again.written_bytes = 7;
+        again.set_destination(&destination, &open()).unwrap();
+        assert_eq!(again.written_bytes, 0);
+    }
+
+    #[test]
+    fn stale_temporary_files_are_swept_and_fresh_ones_kept() {
+        let (_root, source, destination) = tree();
+        let old = destination.join(".tabplayer-batch-1-1.tmp");
+        let fresh = destination.join(".tabplayer-batch-1-2.tmp");
+        let other = destination.join("keep.tmp");
+        for path in [&old, &fresh, &other] {
+            fs::write(path, "x").unwrap();
+        }
+        let long_ago = std::time::SystemTime::now() - std::time::Duration::from_secs(3 * 3600);
+        fs::File::options()
+            .write(true)
+            .open(&old)
+            .unwrap()
+            .set_modified(long_ago)
+            .unwrap();
+        let mut batch = ready(&source, &destination);
+        batch.scan(&kinds(&["gp345"])).unwrap();
+        batch.write(0, &gp(), true, &open()).unwrap();
+        assert!(!old.exists() && fresh.exists() && other.exists());
+    }
+
+    #[test]
+    fn a_failed_write_leaves_no_temporary_file() {
+        let (_root, source, destination) = tree();
+        let mut batch = ready(&source, &destination);
+        batch.scan(&kinds(&["gp345"])).unwrap();
+        for copy in 1..=MAX_COPIES {
+            let name = if copy == 1 {
+                "a.gp".to_string()
+            } else {
+                format!("a ({copy}).gp")
+            };
+            fs::write(destination.join(name), "x").unwrap();
+        }
+        assert!(batch.write(0, &gp(), false, &open()).is_err());
+        // A refusal while renaming (protect says no for the final name) also cleans up.
+        let refused = batch.write(1, &gp(), false, &|path| {
+            if path.extension().is_some_and(|extension| extension == "gp") {
+                Err("Protected.".into())
+            } else {
+                Ok(())
+            }
+        });
+        assert_eq!(refused.unwrap_err(), "Protected.");
+        assert!(
+            listing(&destination)
+                .iter()
+                .all(|name| !name.ends_with(".tmp"))
+        );
     }
 
     #[cfg(windows)]

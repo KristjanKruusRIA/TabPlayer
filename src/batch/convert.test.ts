@@ -16,6 +16,7 @@ function fakeBridge(files:Record<string,Uint8Array>,options:{failWrite?:string}=
   const names=Object.keys(files),written:Record<string,Uint8Array>={},writes:string[]=[];
   const bridge:BatchBridge={
     pickFolder:async()=>'folder',
+    reset:async()=>{},
     scan:async()=>{throw new Error('not used');},
     read:async index=>files[names[index]].slice(),
     write:async(index,bytes)=>{
@@ -75,9 +76,9 @@ describe('runBatch',()=>{
   });
   it('passes the folder option through and says when a limit left files out',async()=>{
     const {scan}=fakeBridge({'a.xml':xml('A')});
-    const kept:boolean[]=[],bridge:BatchBridge={pickFolder:async()=>null,scan:async()=>scan,read:async()=>xml('A'),write:async(_i,_b,keep)=>{kept.push(keep);return {relative:'x.gp',renamed:true};}};
+    const kept:boolean[]=[],bridge:BatchBridge={reset:async()=>{},pickFolder:async()=>null,scan:async()=>scan,read:async()=>xml('A'),write:async(_i,_b,keep)=>{kept.push(keep);return {relative:'x.gp',renamed:true,note:'Windows programs read this name as a device.'};}};
     const rows=await runBatch({bridge,scan:{...scan,truncated:true},keepFolders:false,cancelled:()=>false,onProgress:()=>{},probe:pass});
-    expect(kept).toEqual([false]);expect(rows[0].detail).toContain('Saved as x.gp because the name was taken.');
+    expect(kept).toEqual([false]);expect(rows[0].detail).toContain('Saved as x.gp because the name was taken.');expect(rows[0].detail).toContain('read this name as a device');
     expect(summarize(rows,{...scan,truncated:true})).toContain(TRUNCATED_NOTE);
     expect(TRUNCATED_NOTE).toContain('Choose a subfolder');expect(TRUNCATED_NOTE).not.toContain('again');
   });

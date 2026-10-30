@@ -6,6 +6,9 @@
  */
 export const PROBE_DEADLINE_MS=15000;
 export const PROBE_MAX_BYTES=32*1024*1024;
+/** Message names shared with probe.worker.ts. alphaTab listens in every Worker and reads `cmd`, so a message without one makes it throw. */
+export const PROBE_REQUEST='tabplayer.batch.probe';
+export const PROBE_RESULT='tabplayer.batch.probe.result';
 
 export type ProbeResult={ok:true;tracks:number;bars:number}|{ok:false;error:string};
 export interface ProbeWorker{
@@ -43,15 +46,17 @@ export const probeScoreBytes:Probe=(bytes,options={})=>{
     try{
       worker=createWorker();
       worker.onmessage=event=>{
-        const data=event.data as Partial<ProbeResult>|null;
-        if(data&&data.ok===true&&Number.isSafeInteger((data as {tracks?:number}).tracks)&&Number.isSafeInteger((data as {bars?:number}).bars))finish(data as ProbeResult);
+        const data=event.data as (Partial<ProbeResult>&{cmd?:string})|null;
+        // Anything else a Worker posts, such as alphaTab's own traffic, is not an answer.
+        if(!data||data.cmd!==PROBE_RESULT)return;
+        if(data&&data.ok===true&&Number.isSafeInteger((data as {tracks?:number}).tracks)&&Number.isSafeInteger((data as {bars?:number}).bars))finish({ok:true,tracks:(data as {tracks:number}).tracks,bars:(data as {bars:number}).bars});
         else if(data&&data.ok===false&&typeof data.error==='string')finish({ok:false,error:data.error});
         else finish({ok:false,error:'The file check returned an invalid answer.'});
       };
       worker.onerror=event=>{event.preventDefault?.();finish({ok:false,error:event.message?`The file check failed: ${event.message}`:'The file check failed.'});};
       worker.onmessageerror=()=>finish({ok:false,error:'The file check answer could not be read.'});
       // The Worker gets its own copy, so the caller keeps the bytes it will parse.
-      const copy=bytes.slice();worker.postMessage({bytes:copy},[copy.buffer]);
+      const copy=bytes.slice();worker.postMessage({cmd:PROBE_REQUEST,bytes:copy},[copy.buffer]);
     }catch(error){finish({ok:false,error:`The file check could not start: ${error instanceof Error?error.message:String(error)}`});}
   });
 };

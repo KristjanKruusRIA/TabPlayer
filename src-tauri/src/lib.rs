@@ -1,7 +1,7 @@
 pub mod assets;
 pub mod audio;
-pub mod batch_convert;
 pub mod backing_waveform;
+pub mod batch_convert;
 pub mod edit_types;
 pub mod engraving;
 pub mod export;
@@ -1022,7 +1022,8 @@ pub fn run() {
         batch_convert::batch_pick_folder,
         batch_convert::batch_scan,
         batch_convert::batch_read,
-        batch_convert::batch_write
+        batch_convert::batch_write,
+        batch_convert::batch_reset
     ]);
     #[cfg(feature = "desktop-test")]
     let builder = builder.invoke_handler(tauri::generate_handler![
@@ -1100,6 +1101,7 @@ pub fn run() {
         batch_convert::batch_scan,
         batch_convert::batch_read,
         batch_convert::batch_write,
+        batch_convert::batch_reset,
         desktop_test_io
     ]);
     builder

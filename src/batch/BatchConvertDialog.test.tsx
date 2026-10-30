@@ -17,6 +17,7 @@ function setup(overrides:Partial<BatchBridge>={},busy=false) {
     scan:vi.fn(async()=>scan),
     read:vi.fn(async index=>index===0?xml:strToU8('garbage')),
     write:vi.fn(async(index)=>({relative:index===0?'old/a.gp':'b.gp',renamed:false})),
+    reset:vi.fn(async()=>{}),
     ...overrides,
   };
   const onClose=vi.fn();render(<BatchConvertDialog busy={busy} bridge={bridge} probe={probe} onClose={onClose}/>);
@@ -108,4 +109,25 @@ it('moves focus off Convert once a run is done',async()=>{
   const {convert}=setup();await choose();fireEvent.click(convert());
   await screen.findByRole('table',{name:'Conversion report'});
   await waitFor(()=>expect(screen.getByRole('button',{name:'Close'})).toHaveFocus());
+});
+
+it('forgets the folders on the native side when it closes',async()=>{
+  const {bridge}=setup();
+  expect(bridge.reset).not.toHaveBeenCalled();
+  cleanup();
+  expect(bridge.reset).toHaveBeenCalledTimes(1);
+});
+
+it('ends a file check under way when Cancel is used, and reports the file as not converted rather than failed',async()=>{
+  let seen:AbortSignal|undefined;
+  const slow:Probe=(_bytes,options)=>new Promise(resolve=>{seen=options?.signal;options?.signal?.addEventListener('abort',()=>resolve({ok:false,error:'The check was cancelled.'}));});
+  const bridge:BatchBridge={reset:vi.fn(async()=>{}),pickFolder:vi.fn(async role=>role==='source'?'C:\\old scores':'C:\\converted'),scan:vi.fn(async()=>scan),read:vi.fn(async()=>xml),write:vi.fn(async()=>({relative:'x.gp',renamed:false}))};
+  render(<BatchConvertDialog busy={false} bridge={bridge} probe={slow} onClose={vi.fn()}/>);
+  await choose();fireEvent.click(screen.getByRole('button',{name:'Convert'}));
+  fireEvent.click(await screen.findByRole('button',{name:'Cancel conversion'}));
+  const report=await screen.findByRole('table',{name:'Conversion report'});
+  expect(seen?.aborted).toBe(true);
+  expect(within(report).getAllByText('Not converted')).toHaveLength(2);
+  expect(within(report).queryByText('Failed')).not.toBeInTheDocument();
+  expect(bridge.write).not.toHaveBeenCalled();
 });

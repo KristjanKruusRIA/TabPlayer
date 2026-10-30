@@ -1,4 +1,4 @@
-use crate::fs_identity::file_id;
+use crate::fs_identity::{file_id, file_id_io};
 use crate::workspace::same_path;
 use std::{
     io::ErrorKind,
@@ -73,8 +73,10 @@ impl ProtectedPaths {
     }
 }
 
-/// Whether `path`, or a folder above it that exists, is the folder `root` names. Fails closed:
-/// a folder that exists but cannot be identified refuses the path.
+/// Whether `path`, or a folder above it that exists, is the folder `root` names. A folder above
+/// the path whose attributes this user may not read (access denied) cannot be the protected root,
+/// which TabPlayer made and can read, so it is passed over; the name checks above still apply to it.
+/// Any other failure to identify a folder that exists refuses the path.
 fn reaches(path: &Path, root: &Path) -> Result<bool, String> {
     let root_id = match file_id(root) {
         Ok(id) => id,
@@ -88,9 +90,22 @@ fn reaches(path: &Path, root: &Path) -> Result<bool, String> {
             ancestor
         };
         match std::fs::symlink_metadata(ancestor) {
-            Ok(_) if file_id(ancestor)? == root_id => return Ok(true),
-            Ok(_) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Ok(_) => match file_id_io(ancestor) {
+                Ok(id) if id == root_id => return Ok(true),
+                Ok(_) => {}
+                Err(error) if error.kind() == ErrorKind::PermissionDenied => {}
+                Err(error) => {
+                    return Err(format!(
+                        "Could not identify {}: {error}",
+                        ancestor.display()
+                    ));
+                }
+            },
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    ErrorKind::NotFound | ErrorKind::PermissionDenied
+                ) => {}
             Err(error) => return Err(error.to_string()),
         }
     }
@@ -356,5 +371,63 @@ mod tests {
             );
         }
         eprintln!("protected share spellings exercised: {tried}");
+    }
+}
+
+#[cfg(all(test, windows))]
+mod unreadable_ancestor_tests {
+    use super::*;
+    use std::process::Command;
+
+    fn who() -> String {
+        let out = Command::new("whoami").output().unwrap();
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    }
+
+    /// Denies list and attribute reads of one folder to this user, as an ACL on a synced or shared folder can.
+    #[test]
+    fn a_folder_above_the_target_with_unreadable_attributes_does_not_refuse_it() {
+        let directory = tempfile::tempdir().unwrap();
+        let base = std::fs::canonicalize(directory.path()).unwrap();
+        let root = base.join("library");
+        std::fs::create_dir(&root).unwrap();
+        let locked = base.join("g").join("p");
+        std::fs::create_dir_all(locked.join("c")).unwrap();
+        let protected = ProtectedPaths::new(vec![root.clone()]).unwrap();
+        let (me, target) = (who(), locked.join("c").join("song.gp"));
+        // Attribute reads of a folder are implied by listing rights on its parent, so both are denied.
+        let parent = locked.parent().unwrap().to_path_buf();
+        let deny = |folder: &Path, rights: &str| {
+            Command::new("icacls")
+                .arg(folder)
+                .args(["/deny", &format!("{me}:({rights})")])
+                .output()
+                .map(|out| out.status.success())
+                .unwrap_or(false)
+        };
+        let restore = |folder: &Path| {
+            let _ = Command::new("icacls")
+                .arg(folder)
+                .args(["/remove:d", &me])
+                .output();
+        };
+        if !(deny(&parent, "RD") && deny(&locked, "RD,RA,REA")) {
+            restore(&parent);
+            restore(&locked);
+            eprintln!("icacls unavailable; skipped");
+            return;
+        }
+        let blocked = file_id_io(&locked).err().map(|error| error.kind());
+        let outcome = (
+            protected.check(&target),
+            protected.check(&root.join("x.gp")),
+        );
+        restore(&locked);
+        restore(&parent);
+        // Setup proof: the identity of the locked folder really was unreadable.
+        assert_eq!(blocked, Some(ErrorKind::PermissionDenied), "{blocked:?}");
+        assert!(outcome.0.is_ok(), "{:?}", outcome.0);
+        // Nothing that was protected becomes writable.
+        assert!(outcome.1.is_err());
     }
 }

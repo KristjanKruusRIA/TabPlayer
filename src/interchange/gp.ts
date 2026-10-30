@@ -1,5 +1,6 @@
 import { exporter, importer, model, Settings } from '@coderline/alphatab';
 import { strToU8,unzipSync,zipSync } from 'fflate';
+import { assertArchiveSize } from './zip-limits';
 import { trackMixAutomations } from './automation';
 import { writePercussionReferences } from './percussion';
 import { patchGpifNoteArticulations,projectGpifTracks } from './xml';
@@ -29,6 +30,7 @@ import { applyMusicXmlTempoWords } from './musicxml-tempo-words';
 const gpifPath='Content/score.gpif';
 const sourceEntries=new WeakMap<model.Score,Record<string,Uint8Array>>();
 function unzip(bytes:Uint8Array,settings:Settings){
+  assertArchiveSize(bytes);
   return unzipSync(bytes,{filter:entry=>{
     if(entry.originalSize>settings.importer.maxDecodingBufferSize||strToU8(entry.name).length>settings.importer.maxDecodingBufferSize)throw new Error('ZIP entry exceeds maxDecodingBufferSize.');
     return true;

@@ -16,9 +16,11 @@ export function BatchConvertDialog({busy,bridge=nativeBatchBridge,probe,onClose}
   const [kinds,setKinds]=useState<Set<BatchKind>>(()=>new Set(batchKinds.filter(kind=>kind.on).map(kind=>kind.id)));
   const [keepFolders,setKeepFolders]=useState(true),[phase,setPhase]=useState<Phase>('idle'),[problem,setProblem]=useState<string|null>(null);
   const [progress,setProgress]=useState<[number,number]>([0,0]),[rows,setRows]=useState<BatchRow[]|null>(null),[summary,setSummary]=useState('');
-  const form=useRef<HTMLFormElement>(null),cancelButton=useRef<HTMLButtonElement>(null),closeButton=useRef<HTMLButtonElement>(null),cancelled=useRef(false),heading=useId(),hint=useId(),status=useId();
+  const form=useRef<HTMLFormElement>(null),cancelButton=useRef<HTMLButtonElement>(null),closeButton=useRef<HTMLButtonElement>(null),cancelled=useRef(false),run=useRef<AbortController|null>(null),heading=useId(),hint=useId(),status=useId();
   const working=phase!=='idle'&&phase!=='done',running=phase==='running'||phase==='scanning';
-  useEffect(()=>{form.current?.querySelector<HTMLElement>('button')?.focus();return ()=>{cancelled.current=true;};},[]);
+  // Cancel also ends a file check under way. Closing forgets the folders on the native side.
+  const stop=()=>{cancelled.current=true;run.current?.abort();};
+  useEffect(()=>{form.current?.querySelector<HTMLElement>('button')?.focus();return ()=>{cancelled.current=true;run.current?.abort();void bridge.reset().catch(()=>{});};},[]);
   // Focus stays inside the dialog while the button that started the run is disabled, so Escape still reaches it.
   useEffect(()=>{if(running)cancelButton.current?.focus();else if(phase==='done')closeButton.current?.focus();},[running,phase]);
   const pick=async(role:'source'|'destination')=>{
@@ -31,7 +33,7 @@ export function BatchConvertDialog({busy,bridge=nativeBatchBridge,probe,onClose}
   };
   const toggle=(kind:BatchKind,on:boolean)=>setKinds(current=>{const next=new Set(current);if(on)next.add(kind);else next.delete(kind);return next;});
   const convert=async()=>{
-    cancelled.current=false;setProblem(null);setRows(null);setSummary('');setPhase('scanning');
+    cancelled.current=false;run.current=new AbortController();setProblem(null);setRows(null);setSummary('');setPhase('scanning');
     let scan:BatchScan;
     try{
       scan=await bridge.scan(batchKinds.filter(kind=>kinds.has(kind.id)).map(kind=>kind.id));
@@ -39,7 +41,7 @@ export function BatchConvertDialog({busy,bridge=nativeBatchBridge,probe,onClose}
     if(!scan.files.length&&!scan.skipped.length){setSummary(`No matching files were found.${scan.truncated?` ${TRUNCATED_NOTE}`:''}`);setPhase('done');return;}
     setPhase('running');setProgress([0,scan.files.length]);
     try{
-      const result=await runBatch({bridge,scan,keepFolders,cancelled:()=>cancelled.current,probe,onProgress:(done,total)=>setProgress([done,total])});
+      const result=await runBatch({bridge,scan,keepFolders,cancelled:()=>cancelled.current,signal:run.current?.signal,probe,onProgress:(done,total)=>setProgress([done,total])});
       setRows(result);setSummary(summarize(result,scan));
     }catch(error){setProblem(message(error));}
     setPhase('done');
@@ -54,7 +56,7 @@ export function BatchConvertDialog({busy,bridge=nativeBatchBridge,probe,onClose}
   const text=problem??(phase==='scanning'?'Looking for scores…':phase==='running'?`Converting ${Math.min(progress[0]+1,progress[1])} of ${progress[1]}…`:summary||(source&&destination?'Ready to convert.':'Choose a source and a destination folder.'));
   return <div className="dialog-backdrop" onMouseDown={event=>{if(event.target===event.currentTarget)close();}}>
     <form ref={form} role="dialog" aria-modal="true" aria-labelledby={heading} aria-describedby={hint} aria-busy={working} className="batch-convert" onSubmit={event=>{event.preventDefault();if(ready)void convert();}}
-      onKeyDown={event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();if(running)cancelled.current=true;else close();}else if(event.key==='Tab')trap(event);}}>
+      onKeyDown={event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();if(running)stop();else close();}else if(event.key==='Tab')trap(event);}}>
       <h2 id={heading}>Batch convert scores</h2>
       <p id={hint} className="muted">Converts every score of the chosen types in a folder and its subfolders to the current Guitar Pro format. The originals are only read, and each result is saved as a new file. The score you have open is not changed.</p>
       <div className="batch-folder"><button type="button" disabled={working} onClick={()=>void pick('source')}>Choose source folder…</button><span aria-label="Source folder">{source??'No folder chosen'}</span></div>
@@ -68,7 +70,7 @@ export function BatchConvertDialog({busy,bridge=nativeBatchBridge,probe,onClose}
         <tbody>{rows.map((row,index)=><tr key={index} data-status={row.status}><th scope="row">{row.relative}</th><td>{row.status}</td><td>{row.detail}</td></tr>)}</tbody></table></div>}
       <div className="dialog-actions">
         <button type="submit" className="primary" disabled={!ready}>Convert</button>
-        {running?<button ref={cancelButton} type="button" onClick={()=>{cancelled.current=true;}}>Cancel conversion</button>:null}
+        {running?<button ref={cancelButton} type="button" onClick={stop}>Cancel conversion</button>:null}
         <button ref={closeButton} type="button" disabled={working} onClick={close}>Close</button>
       </div>
     </form>

@@ -385,7 +385,7 @@ function buildWithIdentities(original: model.Score, generation: number, ids: str
           // Strong beats are counted from the written start; a pickup bar is right-aligned by its written length, ending where a full bar does.
           const pickup = profile.accent ? pickupShift(occurrence.bar) : 0;
           interpreted.push({ note, raw: actual, staff: source.staff, offset: beat.displayStart + pickup, accentable: attack === 0 && beat.graceType === model.GraceType.None, meter: [masterBar.timeSignatureNumerator, masterBar.timeSignatureDenominator], occurrenceEnd: occurrence.endTick, beat: `${source.staff}/${source.voice}/${source.bar}/${source.beat}`,
-            brushable: generated.length === 1 && beat.brushType === model.BrushType.None && !beat.hasRasgueado && !beat.deadSlapped && beat.pickStroke === model.PickStroke.None && note.pitch.length === 1 });
+            brushable: generated.length === 1 && beat.brushType === model.BrushType.None && !beat.hasRasgueado && !beat.deadSlapped && beat.pickStroke === model.PickStroke.None && note.pitch.every(point => point.semitones === note.pitch[0].semitones) });
         }
         notes.push(note); const chain = played.get(source.note) ?? []; chain.push(note); played.set(source.note, chain);
       }

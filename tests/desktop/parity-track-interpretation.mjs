@@ -66,7 +66,7 @@ export async function runTrackInterpretationAcceptance({buildPath}={}){
   /** One change is exactly one native setTrackMix edit; Undo restores the record before it and Redo the one after. */
   const choose=async(label,control,expectedInterpretation,{checkbox=false}={})=>{
     const before=await record(),count=before.snapshot.project.edits.length;
-    if(checkbox)await panel().getByRole('checkbox',{name:control,exact:true}).check();else await panel().getByRole('combobox',{name:control}).selectOption(label);
+    if(checkbox)await panel().getByRole('checkbox',{name:control,exact:true}).click();else await panel().getByRole('combobox',{name:control}).selectOption(label);
     await idle();
     const after=await poll(record,value=>value.snapshot.project.edits.length===count+1,`${control}: one edit`);
     const expected={type:'setTrackMix',trackId,mix:expectedInterpretation?{...mix,interpretation:expectedInterpretation}:mix};
@@ -144,7 +144,7 @@ export async function runTrackInterpretationAcceptance({buildPath}={}){
 
     // Settings combine: a style and a palm mute intensity together differ from either alone. (The written marks that
     // outrank a style are covered note by note by the plan unit tests.)
-    await panel().getByRole('checkbox',{name:'Automatic let ring',exact:true}).uncheck();await idle();
+    await panel().getByRole('checkbox',{name:'Automatic let ring',exact:true}).click();await idle();
     await panel().getByRole('combobox',{name:'Playing style'}).selectOption('fingers');await idle();
     await panel().getByRole('combobox',{name:'Palm mute intensity'}).selectOption('light');await idle();
     const combined=await exportWav('style-and-light-mute');

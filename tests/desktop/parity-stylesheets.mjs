@@ -102,7 +102,7 @@ export async function runStylesheetsAcceptance({buildPath}={}){
     await openStyles();await profileEdit('numbered');await button('Apply engraving');
     const profiled=await record();assert.equal(profiled.snapshot.project.edits.length,1);const ownProfiles=profiled.snapshot.project.edits[0].engraving.profiles;
     assert.equal(ownProfiles.length,1);assert.equal(ownProfiles[0].profile,'numbered');await native();await exportCheck('before-apply');
-    const drawnBefore=await rendered();
+    const drawnBefore=await rendered();await openStyles();
     await page.getByLabel('Saved style',{exact:true}).selectOption(entry.id);
     await page.getByRole('button',{name:'Apply saved style',exact:true}).click();await idle();await native();
     const applied=await record();assert.equal(applied.snapshot.project.edits.length,2,'Applying is exactly one more edit');const command=applied.snapshot.project.edits[1];

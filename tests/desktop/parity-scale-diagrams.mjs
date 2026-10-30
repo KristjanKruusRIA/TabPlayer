@@ -64,6 +64,9 @@ export async function runScaleDiagramAcceptance({buildPath}={}){
       identity=null;await poll(portRows,rows=>rows.length===0,'diagnostic port released');
     };
     // The 1-based Measure and Beat fields choose the beat that the Scale browser edits.
+    // The app reports busy for as long as the modal is open, so nothing inside it may wait for the shell to go idle.
+    const browse=async()=>{owned();await ui.clickWorkstationButton(page,'Browse scales',{waitForIdle:false});await scales().waitFor();};
+    const inModal=async name=>{const before=await record();await scales().getByRole('button',{name,exact:true}).click();await poll(record,current=>current.revision!==before.revision,name);};
     const select=async(measure,beat)=>{await ui.revealInspector(page);await page.getByLabel('Measure',{exact:true}).fill(String(measure));await page.getByLabel('Beat',{exact:true}).fill(String(beat));await idle();};
     const scales=()=>page.getByRole('dialog',{name:'Scale browser',exact:true});
     const diagramSection=()=>scales().getByRole('region',{name:'Scale diagram',exact:true});
@@ -83,7 +86,7 @@ export async function runScaleDiagramAcceptance({buildPath}={}){
     const initial=await record();assert.deepEqual(initial.snapshot.project.edits,[]);
 
     // The Scale browser is a modal over the selected beat (bar 2, beat 2: the chord); it edits nothing until a diagram is applied.
-    await select(2,2);await button('Browse scales');await scales().waitFor();
+    await select(2,2);await browse();
     assert.equal(await scales().getByRole('button',{name:'Apply diagram to beat',exact:true}).count(),0,'No apply before a diagram exists');
     assert.deepEqual(await record(),initial,'Opening the browser never edits');
 
@@ -113,7 +116,7 @@ export async function runScaleDiagramAcceptance({buildPath}={}){
       marks:[{string:9,fret:0,shape:'diamond',color:'#b5df73',text:'E',textColor:'#161c24'},{string:5,fret:3,shape:'square',color:'#2f6fed',text:'1',textColor:'#ffffff'}],
     }};
     const prior=await record(),count=prior.snapshot.project.edits.length;
-    await scales().getByRole('button',{name:'Apply diagram to beat',exact:true}).click();await idle();
+    await inModal('Apply diagram to beat');
     const added=await poll(record,value=>value.snapshot.project.edits.length===count+1,'one scale diagram edit');
     assert.deepEqual(added.snapshot.project.edits.at(-1),expected,'The applied command carries every mark');
     result.edits.push({label:'apply scale diagram',command:expected});
@@ -133,7 +136,7 @@ export async function runScaleDiagramAcceptance({buildPath}={}){
     const shifted=await poll(record,value=>value.snapshot.project.edits.length===count+2,'one delete beat edit');
     assert.equal(shifted.snapshot.project.edits.at(-1).type,'deleteBeat');
     await assertDrawn('after the beat shift');
-    await select(2,1);await button('Browse scales');await scales().waitFor();await diagramSection().getByText(/This beat has a diagram named “Open position” with 2 marks\./).waitFor();
+    await select(2,1);await browse();await diagramSection().getByText(/This beat has a diagram named “Open position” with 2 marks\./).waitFor();
     await scales().getByRole('button',{name:'Close scales',exact:true}).click();await scales().waitFor({state:'hidden'});
     step('A diagram follows its beat when an earlier beat is deleted',{});
 
@@ -150,7 +153,7 @@ export async function runScaleDiagramAcceptance({buildPath}={}){
     await shutdown();await launch(exportPath);
     assert.deepEqual((await record()).snapshot.project.edits,[],'The exported file opens as a fresh document');
     await assertDrawn('after reopening the exported file');
-    await select(2,1);await button('Browse scales');await scales().waitFor();
+    await select(2,1);await browse();
     await diagramSection().getByText(/This beat has a diagram named “Open position” with 2 marks\./).waitFor();
     await scales().getByLabel('String 9, open: diamond mark "E"',{exact:true}).waitFor();await scales().getByLabel('String 5, fret 3: square mark "1"',{exact:true}).waitFor();
     await page.screenshot({path:resolve(paths.results,'03-reopened.png')});result.screenshots.push('03-reopened.png');
@@ -158,7 +161,7 @@ export async function runScaleDiagramAcceptance({buildPath}={}){
 
     // Deleting removes the diagram again as one edit.
     const reopened=await record(),reopenedCount=reopened.snapshot.project.edits.length;
-    await scales().getByRole('button',{name:'Delete diagram from beat',exact:true}).click();await idle();
+    await inModal('Delete diagram from beat');
     const removed=await poll(record,value=>value.snapshot.project.edits.length===reopenedCount+1,'one delete edit');
     assert.deepEqual(removed.snapshot.project.edits.at(-1),{type:'setScaleDiagram',target:{...t,beat:0},diagram:null});
     await scales().getByRole('button',{name:'Close scales',exact:true}).click();await inScore().waitFor({state:'detached'});step('Delete clears the diagram as one edit',{});

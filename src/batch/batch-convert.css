@@ -1,0 +1,15 @@
+.batch-convert{background:#1d2530;border:1px solid #465363;border-radius:8px;padding:16px;width:min(820px,calc(100vw - 32px));max-height:90vh;overflow:auto;display:flex;flex-direction:column;gap:10px}
+.batch-convert h2{margin:0;font-size:1rem}
+.batch-convert p{margin:0}
+.batch-convert .error{color:#ffb4a8;background:none;padding:0}
+.batch-convert legend{color:#97a6b6;font-size:12px;margin-bottom:6px;padding:0}
+.batch-folder{display:flex;align-items:center;gap:10px;min-width:0}
+.batch-folder>button{flex-shrink:0}
+.batch-folder>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#97a6b6;font-size:12px}
+.batch-report{max-height:40vh;overflow:auto;border:1px solid #394454;border-radius:6px}
+.batch-report table{width:100%;border-collapse:collapse;font-size:12px}
+.batch-report th,.batch-report td{padding:5px 8px;text-align:left;vertical-align:top;border-bottom:1px solid #394454}
+.batch-report thead th{position:sticky;top:0;background:#161c24;color:#97a6b6}
+.batch-report tbody th{font-weight:400;word-break:break-all}
+.batch-report tr[data-status="Failed"] td:nth-child(2){color:#ffb4a8}
+.batch-report tr[data-status="Converted"] td:nth-child(2){color:#b5df73}

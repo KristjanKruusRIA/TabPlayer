@@ -35,6 +35,7 @@ export const helpTopics:readonly HelpTopic[]=[
     'TabPlayer opens Guitar Pro (.gp, .gpx, .gp3–.gp5) and MusicXML files and saves its own .tabplayer projects. Each score opens in its own tab.',
     'File → Import ASCII tab… reads pasted or loaded text tablature into a new untitled score.',
     'File → Import MIDI… reads a Standard MIDI file (format 0 or 1) into a new untitled score; choose the quantization, tuplets, voices and tablature first.',
+    'File → Batch convert… turns a folder of older scores (and its subfolders) into new .gp files in a separate destination folder. The originals are never changed, and the report lists every file.',
     'File → Export score writes PDF, images, MIDI, MusicXML, ASCII tab or audio; Export GP writes a Guitar Pro file.',
     'Unsaved changes are kept in recovery and you are asked before a changed score is closed.',
   ]},

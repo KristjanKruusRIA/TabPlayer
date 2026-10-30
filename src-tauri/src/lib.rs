@@ -1,5 +1,6 @@
 pub mod assets;
 pub mod audio;
+pub mod batch_convert;
 pub mod backing_waveform;
 pub mod edit_types;
 pub mod engraving;
@@ -881,6 +882,7 @@ pub fn run() {
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(export::jobs::ExportJobs::default())
+        .manage(batch_convert::BatchState::default())
         .manage(backing_waveform::BackingWaveformService::default())
         .setup(|app| {
             let directory = session::session_directory(app.path().app_data_dir()?)?;
@@ -1015,7 +1017,11 @@ pub fn run() {
         file_library_scan_cancel,
         file_library_search,
         file_library_reveal,
-        workspace_drop_stage
+        workspace_drop_stage,
+        batch_convert::batch_pick_folder,
+        batch_convert::batch_scan,
+        batch_convert::batch_read,
+        batch_convert::batch_write
     ]);
     #[cfg(feature = "desktop-test")]
     let builder = builder.invoke_handler(tauri::generate_handler![
@@ -1089,6 +1095,10 @@ pub fn run() {
         file_library_search,
         file_library_reveal,
         workspace_drop_stage,
+        batch_convert::batch_pick_folder,
+        batch_convert::batch_scan,
+        batch_convert::batch_read,
+        batch_convert::batch_write,
         desktop_test_io
     ]);
     builder

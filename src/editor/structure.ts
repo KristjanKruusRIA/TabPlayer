@@ -28,7 +28,7 @@ function validateStaff(staff:model.Staff|null,settings:StaffSettings) {
   for(const bar of staff?.bars??[])for(const voice of bar.voices)for(const beat of voice.beats)for(const note of beat.notes) {
     if(staff?.isPercussion)continue;
     if(note.string===droneString&&!note.isDead&&!fretExists(staff!,note.string,note.fret,drone))throw new Error(`The banjo drone string has no frets 1 to ${drone}: bar ${bar.index+1} has fret ${note.fret} on it.`);
-    if(note.string===droneString&&note.trillValue>=0){const moved=note.trillValue+droneShift(staff!,note.string,note.fret,drone)-droneShift(staff!,note.string,note.fret);if(moved<0||moved>127)throw new Error('Staff settings put a trill outside the playable MIDI pitch range.');}
+    if(note.string===droneString&&note.trillValue>=0){const shift=droneShift(staff!,note.string,note.fret,drone)-droneShift(staff!,note.string,note.fret),moved=note.trillValue+shift;if(shift&&(moved<0||moved>127))throw new Error('Staff settings put a trill outside the playable MIDI pitch range.');}
     const capo=partial?.strings.includes(note.string)?Math.max(settings.capo,partial.fret):settings.capo;
     const pitch=note.string>0?settings.tuning[settings.tuning.length-note.string]+note.fret+capo+droneShift(staff!,note.string,note.fret,drone)-settings.transposition+note.harmonicPitch:note.octave*12+note.tone-settings.transposition;
     if(!Number.isFinite(pitch)||pitch<0||pitch>127)throw new Error('Staff settings put a note outside the playable MIDI pitch range.');

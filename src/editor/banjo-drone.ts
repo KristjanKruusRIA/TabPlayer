@@ -44,6 +44,14 @@ export function assertDroneFrets(score:model.Score):void {
       if(note.string===droneString&&!note.isDead&&!fretExists(staff,note.string,note.fret,drone))throw new Error(`The banjo drone string has no frets 1 to ${drone}: bar ${bar.index+1} has fret ${note.fret} on it.`);
   }
 }
+/** Edit time only, never replay: a harmony diagram being set on a drone staff must not use a fret the drone string lacks. */
+export function assertDiagramFrets(score:model.Score,edit:{type:string;target?:{track:number;staff:number};chord?:{frets:number[]}|null}):void {
+  if(edit.type!=='setHarmonyChord'||!edit.chord||!edit.target)return;
+  const staff=score.tracks[edit.target.track]?.staves[edit.target.staff],drone=staff?getBanjoDrone(staff):0;
+  if(!staff||!drone||edit.chord.frets.length!==staff.tuning.length)return;
+  const fret=edit.chord.frets[edit.chord.frets.length-droneString];
+  if(!fretExists(staff,droneString,fret,drone))throw new Error(`The diagram uses fret ${fret} on the banjo drone string, which has no frets 1 to ${drone}.`);
+}
 /** A trill stores an absolute pitch. When the drone changes, rebase the trills on the drone string so their fret interval stays. */
 export function rebaseDroneTrills(staff:model.Staff,before:number,after:number):void {
   for(const bar of staff.bars)for(const voice of bar.voices)for(const beat of voice.beats)for(const note of beat.notes)

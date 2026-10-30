@@ -4,12 +4,14 @@ import { model } from '@coderline/alphatab';
 import { strFromU8 } from 'fflate';
 import { blankProject } from '../project';
 import type { EditCommand, StaffSettings } from '../edit-types';
-import { buildScore } from '../engine';
+import { buildScore, previewEdit } from '../engine';
 import { exportMusicXml } from '../export/musicxml';
 import { makeMusicClip } from './clipboard-source';
 import { findChordShapes } from '../harmony/chords';
 import { fretExists, getBanjoDrone } from './banjo-drone';
 import { applyStructureEdit } from './structure';
+import { applyRangeEdit } from './range-edits';
+import { getHarmonyChord } from '../harmony/chord-source';
 
 const target={track:0,staff:0,bar:0,voice:0,beat:0};
 const tuning=[62,59,55,50,67];
@@ -118,5 +120,37 @@ describe('the lows',()=>{
   it('refuses a drone that would push a trill out of the pitch range, and keeps the interval otherwise',()=>{
     const low=buildScore(project(note(1,7)));staffOf(low).bars[0].voices[0].beats[0].notes[0].trillValue=3;
     expect(()=>applyStructureEdit(low,drone(5) as never,0)).toThrow(/trill/);expect(getBanjoDrone(staffOf(low))).toBe(0);
+  });
+});
+
+describe('second review',()=>{
+  const gMajor=(score:model.Score)=>findChordShapes(staffOf(score),{root:{step:4,alteration:0},formula:'major',alterations:[],omissions:[],bass:null} as never,{maxFret:12,maxSpan:4,limit:12})[0];
+  it('does not range-check a stored trill when no drone is involved, so a project with one still opens',()=>{
+    const score=buildScore(project(note(1,0)));staffOf(score).bars[0].voices[0].beats[0].notes[0].trillValue=130;
+    const plain:StaffSettings={...banjo,capo:1};
+    expect(()=>applyStructureEdit(score,{type:'setStaffSettings',track:0,staff:0,settings:plain} as never,0)).not.toThrow();
+  });
+  it('lets a dead note on a missing fret stay while other notes of its beat are edited',()=>{
+    const score=buildScore(project(note(1,3),note(2,0)));
+    staffOf(score).bars[0].voices[0].beats[0].notes.find(item=>item.string===1)!.isDead=true;
+    applyStructureEdit(score,drone(5) as never,0);
+    expect(()=>applyRangeEdit(score,{type:'transposeSelection',selection:sel(),semitones:2} as never)).not.toThrow();
+    expect(staffOf(score).bars[0].voices[0].beats[0].notes.find(item=>item.string===2)!.realValue).toBe(52);
+  });
+  it('transposes a chord diagram on a drone staff to frets near the original, converting the drone string',()=>{
+    const g=gMajor(buildScore(project(drone(5))));
+    const set={type:'setHarmonyChord',target,chord:g,fillEmptyBeat:false} as unknown as EditCommand;
+    const score=run(project(drone(5),note(2,0),set),{type:'transposeHarmony',selection:sel(),interval:{kind:'semitones',semitones:1},includeKeySignatures:false,includeChords:true} as unknown as EditCommand);
+    const beat=staffOf(score).bars[0].voices[0].beats[0],after=getHarmonyChord(staffOf(score).chords!.get(beat.chordId!)!);
+    expect(Math.max(...after.frets.slice(0,4))).toBeLessThanOrEqual(Math.max(...g.frets.slice(0,4))+1);expect(after.frets.at(-1)).toBeLessThanOrEqual(12);
+    expect(fretExists(staffOf(score),1,after.frets.at(-1)!)).toBe(true);
+  });
+  it('refuses a diagram on a missing drone fret when it is set, but replays one already in a log',()=>{
+    const base=gMajor(buildScore(project(drone(5))));
+    const bad={...base,nameMode:'manual',recipe:null,frets:[...base.frets.slice(0,4),3]};
+    const edit={type:'setHarmonyChord',target,chord:bad,fillEmptyBeat:false} as unknown as EditCommand;
+    const log=project(drone(5),note(2,0));
+    expect(()=>previewEdit(log,edit)).toThrow(/no frets 1 to 5/);
+    expect(()=>buildScore({...log,edits:[...log.edits,edit]})).not.toThrow();
   });
 });

@@ -3,7 +3,7 @@ import type { HarmonyChord,HarmonyCommand,HarmonyInterval,SpelledPitchClass } fr
 import type { MusicSelection } from '../editor/range-types';
 import { integer,rhythmTicks } from '../editor/common';
 import { captureNoteLinks,restoreNoteLinks } from '../editor/links';
-import { fretExists } from '../editor/banjo-drone';
+import { fretExists,neckFret,plainFret } from '../editor/banjo-drone';
 import { resolveSelectionBeats,resolveSelectionNotes } from '../editor/range-selection';
 import { applyPitchTargets } from '../editor/range-edits';
 import { scoreFromJson } from '../model-clone';
@@ -79,7 +79,7 @@ function transposedChord(staff:model.Staff,value:HarmonyChord,delta:number,lette
   const recipe=structuredClone(value.recipe!);recipe.root=shiftedSpelling(recipe.root,delta,letters,key<0);if(recipe.bass)recipe.bass=shiftedSpelling(recipe.bass,delta,letters,key<0);
   const renamed={...value,recipe,name:formatChordName(recipe)};
   if(value.frets.every(fret=>fret<0))return renamed;
-  const frets=value.frets.map(fret=>fret<0?-1:fret+delta),barreFrets=value.barreFrets.map(fret=>fret+delta).filter(fret=>fret>0),positive=frets.filter(fret=>fret>0),firstFret=positive.length?Math.min(...positive):1;
+  const frets=value.frets.map((fret,index)=>fret<0?-1:neckFret(staff,value.frets.length-index,plainFret(staff,value.frets.length-index,fret)+delta)),barreFrets=value.barreFrets.map(fret=>fret+delta).filter(fret=>fret>0),positive=frets.filter(fret=>fret>0),firstFret=positive.length?Math.min(...positive):1;
   const fingers=value.fingers.map((finger,index)=>frets[index]<=0&&frets[index]!==value.frets[index]?-2:finger);
   if(frets.every(fret=>integer(fret,-1,127))&&barreFrets.every(fret=>integer(fret,0,127))&&integer(firstFret,0,127)){
     const shifted={...renamed,frets,fingers,barreFrets,firstFret};if(frets.every((fret,index)=>fret<0||fretExists(staff,frets.length-index,fret))&&validDiagram(staff,shifted))return shifted;

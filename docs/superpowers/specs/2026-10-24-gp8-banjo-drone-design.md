@@ -26,7 +26,7 @@ GP8's track tuning offers a "banjo drone" for a 5-string banjo: the fifth string
 - **Controls.** The Staff panel gains "Banjo drone": a checkbox "Short drone string (string 1)" and a field "Drone string starts at fret" (default 5, enabled when checked). The fret commits on blur or Enter, the checkbox at once; "Apply staff settings" sends the command. An untouched staff sends no `droneFret`. An invalid fret keeps the last valid value, shows an alert and disables Apply staff settings and Add staff. The panel is disabled except on a 5-string stringed staff and resets when the selection moves; Apply is disabled when the document is finalized.
 - **Readouts.** The instrument view's detail line adds "Banjo drone from fret 5 · string 1 fret numbers follow the neck". Its fretboard targets on missing frets are disabled and named "String 1, fret 3 does not exist on the banjo drone string"; targets on string 1 are named with the drone's sounding pitch, and clicking a key chooses the neck fret. The ASCII tab heading adds ", banjo drone from fret 5".
 - **GP file.** Because no drone property is known, export writes the sound, not the drone: drone-string frets above the drone fret are written counted from the short string's own start (fret 7 is written as 2), the tuning is written unchanged, and the file reopens as a plain 5-string banjo with the same pitches. Reopening does not restore the drone, and the neck numbers are lost to GP. Repeated export and reopen is stable.
-- **Saved logs.** Nothing is read from a base file and no existing command changes meaning, so an edit log written before this feature replays exactly as before: the field is absent from old logs, the pitch hook adds 0 without a drone, and the after-edit check does nothing without one. A log that uses `droneFret` is a new-feature log and is not readable on an older build (its strict command reader rejects the unknown key).
+- **Saved logs.** Nothing is read from a base file and no existing command changes meaning, so an edit log written before this feature replays exactly as before: the field is absent from old logs, the pitch hook adds 0 without a drone, and the after-edit check does nothing without one. A log that uses `droneFret` is a new-feature log and is not readable on an older build (its strict command reader rejects the unknown key). A log written by the first commit of this slice (1336166, never released) that combined a drone with a tuning whose string 1 is not above string 2 no longer opens, because the drone now needs a high short string.
 
 ## Acceptance
 
@@ -60,3 +60,11 @@ GP8's track tuning offers a "banjo drone" for a 5-string banjo: the fifth string
 - A natural harmonic at neck fret 12 on the drone string sounds 74 in the app and 79 after a GP reopen, because GP gets the shortened fret.
 - Chord diagrams are not converted on GP export.
 - ASCII tab re-import reads fret 7 on the drone string as 74, since it knows no drone.
+- The tab still draws a trill alternation on the drone string with the plain fret alphaTab computes from the stored pitch (an open-string trill to A4 shows (2), not 7); the instrument view shows the neck fret. alphaTab owns that drawing and it is not patched here.
+
+## Review round 2: changes
+
+- The trill range check runs only when the drone changes that trill's pitch, so a stored trill above 127 on a staff without a drone still replays.
+- Dead notes are exempt from the missing-fret rules in fingering, the transpose and move checks, and the instrument view.
+- A transposed chord diagram converts the drone string through the neck mapping before any search fallback.
+- A harmony diagram on a missing drone fret is refused when it is set (`previewEdit`), never on replay.

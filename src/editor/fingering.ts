@@ -32,7 +32,7 @@ export function planFingering(staff:model.Staff,requests:FingeringRequest[],maxF
       const first=fixedString===null?0:note.fret,last=fixedString===null?maxFret:note.fret;
       for(let fret=first;fret<=last;fret++){
         candidate.fret=fret;
-        if(fretExists(staff,string,fret)&&integer(candidate.realValueWithoutHarmonic,0,127)&&candidate.realValue===pitch)choices.push({note,string,fret});
+        if((note.isDead||fretExists(staff,string,fret))&&integer(candidate.realValueWithoutHarmonic,0,127)&&candidate.realValue===pitch)choices.push({note,string,fret});
       }
     }
     if(choices.length===0)throw new Error('No playable fingering preserves the requested pitch.');

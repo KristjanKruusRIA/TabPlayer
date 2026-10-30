@@ -15,7 +15,7 @@ import { scoreFromJson } from './model-clone';
 import { validateParityCommand } from './parity-commands';
 import { defaultTuningName, validateTuningName } from './editor/structure';
 import { stringCapo } from './editor/partial-capo';
-import { assertDroneFrets, droneShift, droneTuningOk, fretExists, fretKey, getBanjoDrone } from './editor/banjo-drone';
+import { assertDiagramFrets, assertDroneFrets, droneShift, droneTuningOk, fretExists, fretKey, getBanjoDrone } from './editor/banjo-drone';
 import { copyGpInterchangeSource, exportGpInterchange, forgetTrackOrderedEntries, loadInterchangeScore } from './interchange/gp';
 import { reflowLyrics,removeLyricsMeasure } from './editor/lyrics';
 import { prepareScoreTimers } from './editor/timers';
@@ -388,7 +388,8 @@ export function previewEdit(project: ProjectInput, edit: EditCommand, current?:B
     const candidate={...current,project:next,settings:nextSettings};
     validateBackingAnchors(current.score,effectiveAudioSettings(next,candidate).backing);return candidate;
   }
-  return {project:next,...buildDocument(next)};
+  const built=buildDocument(next);assertDiagramFrets(built.score,edit);
+  return {project:next,...built};
 }
 
 export function exportGp(score: model.Score): Uint8Array { return exportGpInterchange(score, settings); }

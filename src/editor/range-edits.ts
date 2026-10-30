@@ -83,7 +83,7 @@ export function applyPitchTargets(score:model.Score,targets:PitchTarget[]):void 
     const groups:model.Note[][]=[];
     for(const note of beat.notes){const group=groups.find(group=>group[0].string===note.string&&group[0].fret===note.fret&&group[0].realValue===note.realValue&&(desired.get(group[0])??group[0].realValue)===(desired.get(note)??note.realValue));if(group)group.push(note);else groups.push([note]);}
     let placements=groups.map(group=>{const note=group[0];return {note,string:note.string,fret:note.fret+(desired.get(note)??note.realValue)-note.realValue};});
-    if(placements.some(placement=>!integer(placement.fret,0,127)||!fretExists(staff,placement.string,placement.fret)||candidate(placement.note,placement.string,placement.fret).realValue!==(desired.get(placement.note)??placement.note.realValue))||new Set(placements.map(placement=>placement.string)).size!==placements.length)
+    if(placements.some(placement=>!integer(placement.fret,0,127)||!(placement.note.isDead||fretExists(staff,placement.string,placement.fret))||candidate(placement.note,placement.string,placement.fret).realValue!==(desired.get(placement.note)??placement.note.realValue))||new Set(placements.map(placement=>placement.string)).size!==placements.length)
       placements=planFingering(staff,groups.map(group=>{const note=group[0];return {note,pitch:desired.get(note)??note.realValue,preferredString:note.string,fixedString:group.some(member=>!selected.has(member))?note.string:null};}),127);
     validatePlacements(placements);
     placements.forEach((placement,index)=>{for(const note of groups[index])if(selected.has(note))Object.assign(proposals.get(note)!,{string:placement.string,fret:placement.fret});});
@@ -210,7 +210,7 @@ export function applyRangeEdit(score:model.Score,command:RangeCommand):boolean {
     }
     for(const beat of beats){const moved=beat.notes.filter(note=>selected.has(note)&&note.isStringed);if(!moved.length)continue;const staff=stringed(moved[0]);for(const note of moved)stringed(note);
       let placements=beat.notes.map(note=>({note,string:note.string,fret:note.fret+(selected.has(note)?delta:0)}));
-      if(placements.some(placement=>!integer(placement.fret,0,127)||!fretExists(staff,placement.string,placement.fret)||candidate(placement.note,placement.string,placement.fret).realValue!==placement.note.realValue+(selected.has(placement.note)?delta:0))||new Set(placements.map(placement=>placement.string)).size!==placements.length)
+      if(placements.some(placement=>!integer(placement.fret,0,127)||!(placement.note.isDead||fretExists(staff,placement.string,placement.fret))||candidate(placement.note,placement.string,placement.fret).realValue!==placement.note.realValue+(selected.has(placement.note)?delta:0))||new Set(placements.map(placement=>placement.string)).size!==placements.length)
         placements=planFingering(staff,beat.notes.map(note=>({note,pitch:note.realValue+(selected.has(note)?delta:0),preferredString:note.string,fixedString:selected.has(note)?null:note.string})),127);
       validatePlacements(placements);for(const placement of placements)if(selected.has(placement.note))Object.assign(proposals.get(placement.note)!,{string:placement.string,fret:placement.fret});
     }
@@ -221,7 +221,7 @@ export function applyRangeEdit(score:model.Score,command:RangeCommand):boolean {
       if(!destination)throw new Error('There is no adjacent string in that direction.');
       if(strings.some(value=>value.string!==note.string&&value.open===strings[current].open)||strings.some(value=>value.string!==destination.string&&value.open===destination.open))throw new Error('Equal open pitches make the adjacent string ambiguous.');
       const fret=neckFret(staff,destination.string,plainFret(staff,note.string,note.fret)+strings[current].open-destination.open),test=candidate(note,destination.string,fret);
-      if(!integer(fret,0,127)||!fretExists(staff,destination.string,fret)||test.realValue!==note.realValue)throw new Error('The adjacent string cannot preserve this pitch and harmonic.');
+      if(!integer(fret,0,127)||!(note.isDead||fretExists(staff,destination.string,fret))||test.realValue!==note.realValue)throw new Error('The adjacent string cannot preserve this pitch and harmonic.');
       proposals.set(note,{string:destination.string,fret});
     }
     for(const beat of beats)validatePlacements(beat.notes.map(note=>({note,string:proposals.get(note)?.string??note.string,fret:proposals.get(note)?.fret??note.fret})));

@@ -1,4 +1,4 @@
-import { useEffect,useId,useMemo,useRef,useState,type KeyboardEvent } from 'react';
+import { useDeferredValue,useEffect,useId,useMemo,useRef,useState,type KeyboardEvent } from 'react';
 import { Settings } from '@coderline/alphatab';
 import { exportGpInterchange } from '../interchange/gp';
 import { defaultMidiImportOptions,importMidi,midiImportFileName,type MidiImport,type MidiImportOptions,type MidiQuantization,type MidiTrackKind,type MidiTupletMode } from '../interchange/midi-import';
@@ -19,19 +19,28 @@ const plural=(count:number,word:string)=>`${count} ${word}${count===1?'':'s'}`;
 export function MidiImportDialog({busy,onImport,onClose}:{busy:boolean;onImport:(name:string,bytes:Uint8Array)=>Promise<boolean>;onClose:()=>void}) {
   const [file,setFile]=useState<{name:string;bytes:Uint8Array}|null>(null),[fileProblem,setFileProblem]=useState<string|null>(null),[importProblem,setImportProblem]=useState<string|null>(null),[importing,setImporting]=useState(false);
   const [options,setOptions]=useState<MidiImportOptions>(defaultMidiImportOptions);
-  const form=useRef<HTMLFormElement>(null),picker=useRef<HTMLInputElement>(null),choose=useRef<HTMLButtonElement>(null),reading=useRef(0),heading=useId(),hint=useId(),status=useId();
+  const form=useRef<HTMLFormElement>(null),submitButton=useRef<HTMLButtonElement>(null),picker=useRef<HTMLInputElement>(null),choose=useRef<HTMLButtonElement>(null),reading=useRef(0),heading=useId(),hint=useId(),status=useId();
   useEffect(()=>{choose.current?.focus();},[]);
+  // The buttons are disabled while opening, which drops focus; a failed open puts it back on Import.
+  useEffect(()=>{if(!importing&&importProblem&&!form.current?.contains(document.activeElement))submitButton.current?.focus();},[importing,importProblem]);
   const song=useMemo<{value:MidiSong}|{error:string}|null>(()=>{
     if(!file)return null;
     try{return {value:readMidiFile(file.bytes)};}catch(error){return {error:message(error)};}
   },[file]);
+  // Converting a long file takes a moment, so it follows the option controls rather than blocking them.
+  const settled=useDeferredValue(options);
   const result=useMemo<{value:MidiImport}|{error:string}|null>(()=>{
     if(!file||!song||!('value' in song))return null;
-    try{return {value:importMidi(song.value,options,file.name.replace(/\.[^.]*$/,''))};}catch(error){return {error:message(error)};}
-  },[file,song,options]);
-  const imported=result&&'value' in result?result.value:null;
+    try{return {value:importMidi(song.value,settled,file.name.replace(/\.[^.]*$/,''))};}catch(error){return {error:message(error)};}
+  },[file,song,settled]);
+  const imported=settled===options&&result&&'value' in result?result.value:null;
   const problem=importProblem??fileProblem??(song&&'error' in song?song.error:null)??(result&&'error' in result?result.error:null);
-  const choice=<K extends keyof MidiImportOptions>(key:K,value:MidiImportOptions[K])=>{setImportProblem(null);setOptions(current=>({...current,[key]:value}));};
+  const choice=<K extends keyof MidiImportOptions>(key:K,value:MidiImportOptions[K])=>{setImportProblem(null);setOptions(current=>{
+    const next={...current,[key]:value};
+    // A tuplet kind the new grid cannot hold gives way to the nearest one it can.
+    if(next.quantization<8)next.tuplets='none';else if(next.quantization<16&&next.tuplets==='triplets-quintuplets')next.tuplets='triplets';
+    return next;
+  });};
   const load=(chosen:File|undefined)=>{
     if(!chosen)return;
     // A newer choice, even a refused one, supersedes any file still loading.
@@ -70,13 +79,13 @@ export function MidiImportDialog({busy,onImport,onClose}:{busy:boolean;onImport:
         <label>Voices per track<select value={options.voices} disabled={importing} onChange={event=>choice('voices',Number(event.target.value) as MidiImportOptions['voices'])}>{[1,2,3,4].map(value=><option key={value} value={value}>{value}</option>)}</select></label>
         <label className="check"><input type="checkbox" checked={options.tablature} disabled={importing} onChange={event=>choice('tablature',event.target.checked)}/>Guitar and bass as tablature</label>
       </div>
-      <p id={status} role="status" className={problem?'error':'muted'}>{problem??(importing?'Opening the score…':imported?summary:'Nothing to import yet.')}</p>
+      <p id={status} role="status" className={problem?'error':'muted'}>{problem??(importing?'Opening the score…':settled!==options?'Updating…':imported?summary:'Nothing to import yet.')}</p>
       {imported&&!problem&&<>
         <ul className="midi-parts" aria-label="Parts">{imported.summary.tracks.map((part,index)=><li key={index}>{part.name}: {kinds[part.kind]}, {plural(part.notes,'note')}{part.voices>1?`, ${part.voices} voices`:''}</li>)}</ul>
         {imported.summary.notes.length>0&&<p className="muted">{imported.summary.notes.map(note=>`${note[0].toUpperCase()}${note.slice(1)}.`).join(' ')}</p>}
       </>}
       <div className="dialog-actions">
-        <button type="submit" className="primary" disabled={!imported||busy||importing}>Import</button>
+        <button type="submit" ref={submitButton} className="primary" disabled={!imported||busy||importing}>Import</button>
         <button type="button" disabled={importing} onClick={onClose}>Cancel</button>
       </div>
     </form>

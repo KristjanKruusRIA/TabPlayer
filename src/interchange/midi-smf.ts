@@ -1,6 +1,7 @@
 /** What a Standard MIDI File holds that a score import needs, with all timing in the file's own ticks. */
 export interface MidiNote {key:number;velocity:number;channel:number;start:number;end:number}
-export interface MidiPart {index:number;name:string;notes:MidiNote[];programs:{tick:number;channel:number;program:number}[]}
+export interface MidiPart {index:number;name:string;notes:MidiNote[]}
+export interface MidiProgram {tick:number;channel:number;program:number}
 export interface MidiSong {
   format:0|1;
   /** Ticks per quarter note. */
@@ -9,12 +10,16 @@ export interface MidiSong {
   tempos:{tick:number;microsPerQuarter:number}[];
   meters:{tick:number;numerator:number;denominator:number}[];
   keys:{tick:number;sharps:number;minor:boolean}[];
+  /** Program changes from every track, in tick order; a channel's program may be set in any track. */
+  programs:MidiProgram[];
   /** Only the file's tracks that hold notes. */
   parts:MidiPart[];
   endTick:number;
 }
 
 export const MIDI_FILE_LIMIT=8*1024*1024;
+/** Notes a file may hold. Import and Guitar Pro export of larger files take too long or run out of memory. */
+export const MIDI_NOTE_LIMIT=60_000;
 const EVENT_LIMIT=2_000_000;
 const fail=(message:string):never=>{throw new Error(message);};
 const malformed=(detail:string)=>fail(`This is not a valid MIDI file: ${detail}.`);
@@ -23,7 +28,13 @@ interface Reader {bytes:Uint8Array;at:number}
 const u16=(bytes:Uint8Array,at:number)=>bytes[at]<<8|bytes[at+1];
 const u32=(bytes:Uint8Array,at:number)=>(bytes[at]*0x1000000)+(bytes[at+1]<<16|bytes[at+2]<<8|bytes[at+3]);
 const tag=(bytes:Uint8Array,at:number)=>String.fromCharCode(bytes[at],bytes[at+1],bytes[at+2],bytes[at+3]);
-const clean=(bytes:Uint8Array)=>new TextDecoder('utf-8').decode(bytes).replace(/\p{Cc}+/gu,' ').trim().slice(0,80);
+/** Removes every ]]> , which would end the CDATA section a name is written in. */
+export function stripCdataEnd(text:string):string {
+  let result=text;
+  while(result.includes(']]>'))result=result.replaceAll(']]>','');
+  return result;
+}
+const clean=(bytes:Uint8Array)=>stripCdataEnd(new TextDecoder('utf-8').decode(bytes).replace(/\p{Cc}+/gu,' ')).trim().slice(0,80);
 
 function variable(reader:Reader,end:number):number {
   let value=0;
@@ -35,7 +46,7 @@ function variable(reader:Reader,end:number):number {
   return malformed('an event time is longer than four bytes');
 }
 
-interface TrackRead {name:string;notes:MidiNote[];programs:MidiPart['programs'];tempos:MidiSong['tempos'];meters:MidiSong['meters'];keys:MidiSong['keys'];end:number;events:number}
+interface TrackRead {name:string;notes:MidiNote[];programs:MidiProgram[];tempos:MidiSong['tempos'];meters:MidiSong['meters'];keys:MidiSong['keys'];end:number;events:number}
 
 function readTrack(bytes:Uint8Array,from:number,to:number,budget:number):TrackRead {
   const reader:Reader={bytes,at:from},result:TrackRead={name:'',notes:[],programs:[],tempos:[],meters:[],keys:[],end:0,events:0};
@@ -109,7 +120,7 @@ export function readMidiFile(bytes:Uint8Array):MidiSong {
   if(tracks<1||(format===0&&tracks!==1))malformed(format===0?'a format 0 file must hold exactly one track':'it holds no tracks');
   if(division&0x8000)fail('This MIDI file uses SMPTE timing, which is not supported. Only tempo-based (ticks per quarter note) files can be imported.');
   if(division<1)malformed('the time division is zero');
-  const song:MidiSong={format:format as 0|1,division,title:'',tempos:[],meters:[],keys:[],parts:[],endTick:0};
+  const song:MidiSong={format:format as 0|1,division,title:'',tempos:[],meters:[],keys:[],programs:[],parts:[],endTick:0};
   let at=8+headerLength,read=0,budget=EVENT_LIMIT;const names:string[]=[];
   while(read<tracks){
     if(at+8>bytes.length)malformed(`${tracks-read} of ${tracks} tracks are missing`);
@@ -118,10 +129,10 @@ export function readMidiFile(bytes:Uint8Array):MidiSong {
     at=start+length;
     if(type!=='MTrk')continue;
     const track=readTrack(bytes,start,at,budget);budget-=track.events;
-    song.tempos.push(...track.tempos);song.meters.push(...track.meters);song.keys.push(...track.keys);
+    for(const value of track.tempos)song.tempos.push(value);for(const value of track.meters)song.meters.push(value);for(const value of track.keys)song.keys.push(value);for(const value of track.programs)song.programs.push(value);
     song.endTick=Math.max(song.endTick,track.end);for(const note of track.notes)song.endTick=Math.max(song.endTick,note.end);
     names.push(track.name);
-    if(track.notes.length)song.parts.push({index:read,name:track.name,notes:track.notes,programs:track.programs});
+    if(track.notes.length)song.parts.push({index:read,name:track.name,notes:track.notes});
     read++;
   }
   const byTick=<T extends {tick:number}>(list:T[])=>{
@@ -130,7 +141,10 @@ export function readMidiFile(bytes:Uint8Array):MidiSong {
     return sorted.filter((entry,index)=>sorted[index+1]?.value.tick!==entry.value.tick).map(entry=>entry.value);
   };
   song.tempos=byTick(song.tempos);song.meters=byTick(song.meters);song.keys=byTick(song.keys);
-  if(!song.parts.length)fail('This MIDI file has no notes to import.');
+  song.programs.sort((a,b)=>a.tick-b.tick);
+  const noteCount=song.parts.reduce((sum,part)=>sum+part.notes.length,0);
+  if(!noteCount)fail('This MIDI file has no notes to import.');
+  if(noteCount>MIDI_NOTE_LIMIT)fail(`This MIDI file has ${noteCount.toLocaleString('en-US')} notes. Import is limited to ${MIDI_NOTE_LIMIT.toLocaleString('en-US')} notes.`);
   // Format 1 keeps the title in its first, conductor track; format 0 in its only track.
   song.title=names[0]||'';
   return song;

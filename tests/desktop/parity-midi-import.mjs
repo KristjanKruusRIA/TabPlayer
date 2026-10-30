@@ -10,7 +10,7 @@ import { launch,connect,stop } from './harness.mjs';
 // (quantization, tuplets, voices per track, tablature) decide the rhythm of the score that opens.
 const vlq=value=>{const out=[value&0x7f];while((value>>=7)>0)out.unshift((value&0x7f)|0x80);return out;};
 const track=events=>{const body=events.flatMap(([delta,data])=>[...vlq(delta),...data,]);body.push(0,0xff,0x2f,0);return [0x4d,0x54,0x72,0x6b,body.length>>>24,body.length>>16&255,body.length>>8&255,body.length&255,...body];};
-const file=(division,tracks)=>Buffer.from([0x4d,0x54,0x68,0x64,0,0,0,6,0,1,0,tracks.length,division>>8,division&255,...tracks.flat()]);
+const file=(division,tracks,format=1)=>Buffer.from([0x4d,0x54,0x68,0x64,0,0,0,6,0,format,0,tracks.length,division>>8,division&255,...tracks.flat()]);
 const line=(notes,channel=0)=>{
   const events=notes.flatMap(([start,length,key])=>[[start,[0x90|channel,key,90]],[start+length,[0x80|channel,key,0]]]).sort((a,b)=>a[0]-b[0]||(a[1][0]&0xf0)-(b[1][0]&0xf0));
   let last=0;return events.map(([at,data])=>{const delta=at-last;last=at;return [delta,data];});
@@ -23,6 +23,8 @@ const guitar=track([[0,[0xc0,25]],...line([[0,160,64],[160,160,67],[320,160,71],
 const bass=track([[0,[0xc1,33]],...line([[0,1440,40],[480,480,47]],1)]);
 const drums=track(line([[0,10,36],[480,10,38],[960,10,36]],9));
 const demo=file(480,[conductor,guitar,bass,drums]);
+// Format 0, one bass channel: four sixteenths and a quarter. A 16th grid keeps the sixteenths; an 8th grid cannot.
+const sixteenths=file(480,[track([[0,[0xc0,33]],...line([[0,120,40],[120,120,43],[240,120,45],[360,120,47],[480,480,52]])])],0);
 const broken=demo.subarray(0,60);
 
 const id=launch({});let browser,page;
@@ -74,6 +76,7 @@ try{
   assert.deepEqual(guitarBeats.map(beat=>[beat.duration,beat.hasTuplet?`${beat.tupletNumerator}:${beat.tupletDenominator}`:null]),[[8,'3:2'],[8,'3:2'],[8,'3:2'],[4,null],[4,null]]);
   assert.deepEqual(score.tracks[0].staves[0].tuning,[64,59,55,50,45,40]);
   assert.equal(score.tracks[1].staves[0].bars[0].voices.length,2,'Overlapping bass notes use two voices.');
+  assert.deepEqual(score.tracks[1].staves[0].tuning,[43,38,33,28],'A bass program gets bass tuning.');
   // Drum notes name rows of the file's own articulation table: kick, snare, kick sound as MIDI 36, 38, 36.
   const drumKeys=score.tracks[2].staves[0].bars[0].voices[0].beats.filter(beat=>beat.notes.length).map(beat=>score.tracks[2].percussionArticulations[beat.notes[0].percussionArticulation].outputMidiNumber);
   assert.deepEqual(drumKeys,[36,38,36]);
@@ -102,6 +105,24 @@ try{
   assert.equal(plain.tracks.some(item=>item.staves[0].bars.some(bar=>bar.voices.some(voice=>voice.beats.some(beat=>beat.tupletNumerator>1)))),false);
   assert.equal(plain.tracks[1].staves[0].bars[0].voices.length,1);
   assert.deepEqual(plain.tracks[0].staves[0].tuning,[]);
+
+  // Format 0: the quantization option decides the written durations.
+  const durationsFor=async grid=>{
+    dialog=await openDialog();
+    await chooseFile(dialog,'Sixteenths.mid',sixteenths);
+    await dialog.getByRole('status').filter({hasText:/^Format 0, 1 part, 1 measure at 120 BPM\.$/}).waitFor();
+    await dialog.getByLabel('Quantization').selectOption(grid);
+    await dialog.getByRole('status').filter({hasText:/^Format 0, 1 part/}).waitFor();
+    await dialog.getByRole('button',{name:'Import',exact:true}).click();
+    await dialog.waitFor({state:'detached'});await waitForWorkspaceIdle(page);
+    const loaded=importer.ScoreLoader.loadScoreFromBytes(Buffer.from((await readActiveDocument(page)).project.base.bytesBase64,'base64'),new Settings());
+    assert.deepEqual(loaded.tracks[0].staves[0].tuning,[43,38,33,28]);
+    return loaded.tracks[0].staves[0].bars[0].voices[0].beats.map(beat=>beat.duration);
+  };
+  const fine=await durationsFor('16'),coarse=await durationsFor('8');
+  assert.deepEqual(fine.slice(0,5),[16,16,16,16,4],'A 16th grid keeps four sixteenths and a quarter.');
+  assert.equal(coarse.includes(16),false,'An 8th grid writes no sixteenths.');assert.notDeepEqual(coarse,fine);
+  assert.equal(await tabs(),before+4);
   assert.deepEqual(errors,[]);
   console.log('MIDI import: malformed files refused without changes; a format 1 file opened as an untitled, editable score with tempo, meter, programs, triplets, voices and drums; options changed the second import.');
 }catch(error){if(page)await page.screenshot({path:resolve('.analysis/parity/midi-import-failure.png')}).catch(()=>{});throw error;}

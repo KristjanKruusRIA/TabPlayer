@@ -1,7 +1,7 @@
 import { model,Settings } from '@coderline/alphatab';
 import { standardPercussionCatalog } from '../editor/percussion-catalog';
 import { midiPrograms } from '../midi-programs';
-import type { MidiSong } from './midi-smf';
+import { stripCdataEnd,type MidiSong } from './midi-smf';
 
 /** Smallest note value a note may start or stop on, as the denominator of a whole note. */
 export type MidiQuantization=4|8|16|32|64;
@@ -100,9 +100,15 @@ function spanStart(bars:Bar[],unit:number):number {
   return bar.start+Math.floor((unit-bar.start)/SPAN)*SPAN;
 }
 
+/** Snaps to the nearest grid point, never past the bar line that ends the unit's bar. */
 function snap(grid:Grid,unit:number):number {
+  const at=spanStart(grid.bars,unit),lattice=grid.lattices.get(at)??grid.straight,bar=grid.bars[barIndex(grid.bars,unit)];
+  return Math.min(at+Math.round((unit-at)/lattice.step)*lattice.step,bar.start+bar.length);
+}
+
+function snapDown(grid:Grid,unit:number):number {
   const at=spanStart(grid.bars,unit),lattice=grid.lattices.get(at)??grid.straight;
-  return at+Math.round((unit-at)/lattice.step)*lattice.step;
+  return at+Math.floor((unit-at)/lattice.step)*lattice.step;
 }
 
 /** Sorted by start; notes that start together and last as long join one chord, the rest go to free voices. */
@@ -198,7 +204,7 @@ function plan(song:MidiSong,notes:string[]):Source[] {
     const channels=[...new Set(part.notes.map(note=>note.channel))].sort((a,b)=>a-b);
     for(const channel of channels){
       const mine=part.notes.filter(note=>note.channel===channel),first=mine.reduce((least,note)=>Math.min(least,note.start),Infinity);
-      const changes=part.programs.filter(change=>change.channel===channel).sort((a,b)=>a.tick-b.tick);
+      const changes=song.programs.filter(change=>change.channel===channel);
       const before=changes.filter(change=>change.tick<=first).at(-1)??changes[0],program=before?.program??0;
       const percussion=channel===9,label=programName(program,percussion);
       const name=channels.length>1?(part.name?`${part.name} (${label})`:label):part.name||label;
@@ -227,7 +233,7 @@ export function importMidi(song:MidiSong,options:MidiImportOptions=defaultMidiIm
   const notes:string[]=[],bars=buildBars(song,notes),wholeTicks=song.division*4,toUnits=(tick:number)=>tick*WHOLE/wholeTicks;
   const total=bars.at(-1)!.start+bars.at(-1)!.length,stats:Stats={shortened:0,merged:0};
   const sources=plan(song,notes);
-  const score=new model.Score();score.title=song.title||fallbackTitle;score.artist='';
+  const score=new model.Score();score.title=stripCdataEnd(song.title||fallbackTitle);score.artist='';
   for(const bar of bars){const master=new model.MasterBar();master.timeSignatureNumerator=bar.numerator;master.timeSignatureDenominator=bar.denominator;score.addMasterBar(master);}
 
   // Tempo: bar-level automations at the bar-relative position of each change.
@@ -242,7 +248,7 @@ export function importMidi(song:MidiSong,options:MidiImportOptions=defaultMidiIm
     if(!lastTempo)firstTempo=bpm;
     lastTempo=bpm;
   }
-  const summary:MidiImportSummary['tracks']=[];let used=0,unplayable=0,dropped=0;
+  const summary:MidiImportSummary['tracks']=[];let unplayable=0,dropped=0;
   const channelsInUse=new Set<number>([9]);
   const nextChannel=()=>{let value=0;while(channelsInUse.has(value))value++;channelsInUse.add(value);return value;};
   for(const source of sources){
@@ -255,14 +261,16 @@ export function importMidi(song:MidiSong,options:MidiImportOptions=defaultMidiIm
     chooseLattices(grid,hits,options);
     const quantum=straight.step;
     hits=hits.map(hit=>{
-      const start=snap(grid,hit.start);let end=snap(grid,hit.end);
-      if(end<=start)end=start+(grid.lattices.get(spanStart(bars,start))?.step??quantum);
+      let start=snap(grid,hit.start),end=snap(grid,hit.end);
+      // A note starting so near the end that it rounds onto the last bar line starts on the last grid point before it.
+      if(start>=total)start=snapDown(grid,total-1);
+      if(end<=start){const bar=bars[barIndex(bars,start)];end=Math.min(start+(grid.lattices.get(spanStart(bars,start))?.step??quantum),bar.start+bar.length);}
       return {key:hit.key,start,end:Math.min(end,total)};
     }).filter(hit=>hit.end>hit.start);
     if(source.percussion){
       // A drum hit has no useful length: it lasts until the next hit, up to the end of its quarter note.
-      const onsets=[...new Set(hits.map(hit=>hit.start))].sort((a,b)=>a-b);
-      hits=hits.map(hit=>{const next=onsets.find(onset=>onset>hit.start);return {key:hit.key,start:hit.start,end:Math.min(spanStart(bars,hit.start)+SPAN,next??total,total)};});
+      const onsets=[...new Set(hits.map(hit=>hit.start))].sort((a,b)=>a-b),after=new Map(onsets.map((onset,index)=>[onset,onsets[index+1]]));
+      hits=hits.map(hit=>({key:hit.key,start:hit.start,end:Math.min(spanStart(bars,hit.start)+SPAN,after.get(hit.start)??total,total)}));
     }
     const merged=new Map<string,Hit>();for(const hit of hits){const id=`${hit.key}/${hit.start}`,other=merged.get(id);if(!other||hit.end>other.end)merged.set(id,hit);}
     hits=[...merged.values()];
@@ -314,7 +322,9 @@ export function importMidi(song:MidiSong,options:MidiImportOptions=defaultMidiIm
         while(pointers[voiceIndex]<timeline.length&&timeline[pointers[voiceIndex]].start<barEnd){
           const piece=timeline[pointers[voiceIndex]++],at=spanStart(bars,piece.start);
           const lattice=edges.has(at)&&piece.end<=at+SPAN?grid.lattices.get(at)!:null;
-          const parts=lattice?tupletParts((piece.end-piece.start)/lattice.step,options.quantization):straightParts(piece.end-piece.start);
+          const slots=lattice?(piece.end-piece.start)/lattice.step:0;
+          if(lattice&&!Number.isInteger(slots))fail('A rhythm in this file could not be placed on the tuplet grid.');
+          const parts=lattice?tupletParts(slots,options.quantization):straightParts(piece.end-piece.start);
           for(const [partIndex,part] of parts.entries()){
             const beat=new model.Beat();beat.duration=part.den as model.Duration;beat.dots=part.dots;
             if(lattice){beat.tupletNumerator=lattice.n;beat.tupletDenominator=lattice.m;}
@@ -332,7 +342,6 @@ export function importMidi(song:MidiSong,options:MidiImportOptions=defaultMidiIm
       }
       staff.addBar(staffBar);
     }
-    used+=hits.length;
     summary.push({name:source.name,kind,program:source.percussion?0:program,notes:hits.length,voices:voicesUsed});
   }
   if(!summary.length)fail('This MIDI file has no notes this import can read.');

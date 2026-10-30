@@ -10,16 +10,16 @@ GP8 opens a MIDI file through an import dialog: the file's tracks become score t
 
 - Works from bytes only and returns a `MidiSong`: ticks per quarter, the first track's name as title, merged tempo, time signature and key signature events, and the tracks that hold notes.
 - Reads format 0 and format 1, running status, meta and system exclusive events, and note-on with velocity 0 as note-off. Overlapping notes of one key and channel close in the order they opened. A note left open ends with its track.
-- Refuses, with a message and no partial result: files over 8 MB, RIFF-wrapped files, a bad header, format 2 ("independent sequences"), SMPTE timing, a zero division, a format 0 file without exactly one track, missing or cut-off tracks, an event cut off by its chunk, a data byte above 127, running status with no status byte, a time longer than four bytes, a system real-time byte, a wrong-sized tempo event, and a file with no notes. Unknown chunks are skipped. The event count is capped.
+- Refuses, with a message and no partial result: files over 8 MB, RIFF-wrapped files, a bad header, format 2 ("independent sequences"), SMPTE timing, a zero division, a format 0 file without exactly one track, missing or cut-off tracks, an event cut off by its chunk, a data byte above 127, running status with no status byte, a time longer than four bytes, a system real-time byte, a wrong-sized tempo event, and a file with no notes. Unknown chunks are skipped. The event count is capped, and a file with more than 60,000 notes is refused with that reason: import of 60,000 notes takes about 0.3 s, and the Guitar Pro export about 4 s, while a file near the 8 MB size limit (about 950,000 notes) ran the export out of memory. The options re-run the conversion on a deferred value so the controls stay responsive.
 - The importer is a pure function from bytes to a new score. A refused file never reaches the workspace, so the open score and its history are unchanged.
 
 ## Turning it into a score (`src/interchange/midi-import.ts`)
 
-- **Tracks.** Each (MIDI track, channel) pair with notes is one score track. Its name is the MIDI track name, or the program name when the name is empty or the track has several channels (then "Name (Program)"). Channel 10 is a percussion track. The program is the last program change at or before the first note, else the first change. Later program changes are counted and reported, not imported. At most 32 parts.
+- **Tracks.** Each (MIDI track, channel) pair with notes is one score track. Its name is the MIDI track name, or the program name when the name is empty or the track has several channels (then "Name (Program)"). Channel 10 is a percussion track. The program is the last program change at or before the first note, else the first change, taken from any track of the file for that channel. Later program changes are counted and reported, not imported. At most 32 parts.
 - **Bars.** Time signatures from the file set the bars. A signature that starts inside a bar takes effect at the next bar line, and the summary says so. Signatures outside 1–32 over 1–32 are skipped. At most 3000 bars.
 - **Tempo.** Tempo events become bar-level tempo automations at their position in the bar, rounded to whole BPM. Until the first event the tempo is 120 BPM, as in MIDI.
 - **Key signatures** carry on from the bar they start in.
-- **Quantization.** The option is the shortest note value: 1/4, 1/8, 1/16 (default), 1/32 or 1/64. Starts and stops snap to that grid. A note that would have no length gets one grid step.
+- **Quantization.** The option is the shortest note value: 1/4, 1/8, 1/16 (default), 1/32 or 1/64. Starts and stops snap to that grid. A note that would have no length gets one grid step, and points never snap past the bar line of their bar. A note whose start rounds onto the final bar line starts on the last grid point before it. Titles and names lose any `]]>`.
 - **Tuplets.** Option: none, triplets (default), or triplets and quintuplets. Each quarter-note span of a bar chooses between the straight grid and a tuplet grid (3:2 from 1/8, 5:4 from 1/16) by comparing how far its note starts and stops sit from each grid. A tuplet grid must beat the straight grid by a margin, so straight playing never turns into tuplets. A span is written as a tuplet only if some note starts or stops off the straight grid. Notes in a tuplet span are written as 3:2 or 5:4 beats of the grid value.
 - **Voices.** Option: 1 to 4 voices per track (default 2). Notes that start together and stop together form a chord. Other overlapping notes go to the lowest free voice. When every voice is busy a note starting with a chord joins it, otherwise the voice that frees soonest is cut short; both are reported. A voice that is silent in a bar is an empty voice there. Drums use one voice, and a hit lasts until the next hit or the end of its quarter note.
 - **Rhythm.** Gaps become rests. Lengths are split into the longest straight values (dotted where that fits) or tuplet slot values, and a note that continues across a bar line, a tuplet span or a value limit becomes tied notes.
@@ -47,6 +47,7 @@ GP8 opens a MIDI file through an import dialog: the file's tracks become score t
 
 ## Scope
 
+- Files over 60,000 notes or 8 MB are refused rather than imported in part.
 - No SMPTE, format 2 or RIFF files; no multi-file import; no remembered options.
 - No import of dynamics, controllers or later program changes.
 - No swing detection, and no tuplets other than triplets and quintuplets.

@@ -34,7 +34,7 @@ describe('readMidiFile',()=>{
     const song=readMidiFile(file(0,480,[track(events)]));
     expect(song).toMatchObject({format:0,division:480,title:'Riff',tempos:[{tick:0,microsPerQuarter:666667}],meters:[{tick:0,numerator:3,denominator:4}],keys:[{tick:0,sharps:-2,minor:false}]});
     expect(song.parts[0].notes.map(note=>[note.key,note.start,note.end])).toEqual([[60,0,480],[62,240,480],[64,480,480]]);
-    expect(song.parts[0].programs).toEqual([{tick:0,channel:0,program:25}]);
+    expect(song.programs).toEqual([{tick:0,channel:0,program:25}]);
   });
   it('keeps the conductor track of a format 1 file apart from note tracks and takes the title from it',()=>{
     const song=readMidiFile(file(1,96,[track([[0,text(3,'Song')],[0,tempo(100)]]),track([[0,text(3,'Lead')],...line([[0,96,60]])])]));
@@ -234,9 +234,9 @@ describe('importMidi robustness',()=>{
   const clockOf=(score:model.Score)=>score.tracks.flatMap(item=>item.staves.flatMap(staff=>staff.bars.flatMap((bar,index)=>bar.voices.filter(voice=>!voice.isEmpty).map(voice=>voice.beats.reduce((sum,beat)=>sum+beat.playbackDuration,0)-score.masterBars[index].calculateDuration()))));
   it('fills every bar exactly for random unquantized playing under every option',()=>{
     const next=random(7);
-    for(let round=0;round<24;round++){
-      const notes:[number,number,number][]=Array.from({length:40},()=>[Math.floor(next()*6000),1+Math.floor(next()*900),30+Math.floor(next()*50)]);
-      const bytes=file(1,480,[track([[0,meter(round%2?5:4,round%3?4:8)]]),track(line(notes,round%4===3?9:0))]);
+    for(let round=0;round<120;round++){
+      const notes:[number,number,number][]=Array.from({length:40},()=>[Math.floor(next()*3000),1+Math.floor(next()*(next()<0.5?60:900)),30+Math.floor(next()*50)]);
+      const bytes=file(1,480,[track([[0,meter(1+Math.floor(next()*13),([4,8,16,32] as const)[Math.floor(next()*4)])]]),track(line(notes,round%4===3?9:0))]);
       const choices:Partial<MidiImportOptions>={quantization:([4,8,16,32,64] as const)[round%5],tuplets:(['none','triplets','triplets-quintuplets'] as const)[round%3],voices:([1,2,3,4] as const)[round%4]};
       const {score}=run(bytes,choices);
       expect(clockOf(score).every(difference=>difference===0)).toBe(true);
@@ -251,6 +251,40 @@ describe('importMidi robustness',()=>{
       const copy=valid.slice();copy[Math.floor(next()*copy.length)]=Math.floor(next()*256);
       try{importMidi(readMidiFile(copy));}catch(error){expect(error).toBeInstanceOf(Error);}
     }
+  });
+});
+
+describe('importMidi review fixes',()=>{
+  const clockOf=(score:model.Score)=>score.tracks.flatMap(item=>item.staves.flatMap(staff=>staff.bars.flatMap((bar,index)=>bar.voices.filter(voice=>!voice.isEmpty).map(voice=>voice.beats.reduce((sum,beat)=>sum+beat.playbackDuration,0)-score.masterBars[index].calculateDuration()))));
+  it.each([[9,32,16],[13,32,16],[5,16,8],[7,16,8],[9,32,8],[13,32,32]] as const)('keeps notes that round past the line of a %i/%i bar inside it at 1/%i',(numerator,denominator,quantization)=>{
+    const triplets=[0,1,2,3,4,5].map(index=>[1080+index*53,53,60+index] as [number,number,number]);
+    const bytes=file(1,480,[track([[0,meter(numerator,denominator)]]),track(line([[1000,5,59],...triplets]))]);
+    for(const tuplets of ['none','triplets','triplets-quintuplets'] as const){
+      const {score}=run(bytes,{quantization,tuplets});expect(clockOf(score).every(difference=>difference===0)).toBe(true);
+    }
+  });
+  it.each([[4,1900,19],[8,1900,19],[16,1915,5]] as const)('keeps a last note that rounds onto the final bar line at 1/%i',(quantization,start,length)=>{
+    const {score}=run(file(1,480,[track(line([[0,480,60],[start,length,64]]))]),{quantization});
+    const last=beatsOf(score).filter(beat=>beat.notes.length).at(-1)!;
+    expect(last.notes[0].tone).toBe(4);expect(score.masterBars).toHaveLength(1);
+  });
+  it('takes a channel program from a track that holds no notes',()=>{
+    const {score}=run(file(1,480,[track([[0,[0xc0,25]]]),track(line([[0,480,60]]))]));
+    expect(score.tracks[0].playbackInfo.program).toBe(25);
+  });
+  it('removes ]]> from titles and names so the Guitar Pro file stays readable',()=>{
+    const {score}=run(file(1,480,[track([[0,text(3,'Song]]>')]]),track([[0,text(3,'Lead]]]>>x')],...line([[0,480,60]])])]));
+    expect(score.title).not.toContain(']]>');expect(score.tracks[0].name).not.toContain(']]>');
+    expect(loadInterchangeScore(exportGpInterchange(score,settings),settings).tracks[0].name).toBe('Lead]>x');
+    expect(importMidi(readMidiFile(file(1,480,[track(line([[0,480,60]]))])),defaultMidiImportOptions,'a]]>b').score.title).toBe('ab');
+  });
+  it('refuses a file with more notes than import can handle, with the reason',()=>{
+    const many=Array.from({length:60_001},(_,index)=>[index*2,1,60] as [number,number,number]);
+    expect(()=>readMidiFile(file(1,480,[track(line(many))]))).toThrow(/60,001 notes\. Import is limited to 60,000 notes\./);
+  });
+  it('survives a flood of tempo events',()=>{
+    const events:Ev[]=Array.from({length:150_000},(_,index)=>[1,tempo(60+index%100)] as Ev);
+    expect(readMidiFile(file(1,480,[track(events),track(line([[0,480,60]]))])).tempos.length).toBeGreaterThan(1000);
   });
 });
 

@@ -8,9 +8,9 @@ import { scoreFromJson } from '../model-clone';
 import { gpControllerEvents, prepareGpMidiScore } from '../interchange/automation';
 import { preparePitchedGpScore } from '../interchange/pitched';
 import { buildPerformedBeats } from './performed-beats';
-import type { ReferenceLocation } from './reference-sync-types';
 import { applyNoteAudio, collectAudible, collectNoteAudio, type AudibleAttack, type AudioAdjustment } from './note-audio-plan';
 import { hasNoteAudio } from '../editor/note-audio';
+import type { ReferenceLocation } from './reference-sync-types';
 
 const settings = new Settings();
 const validMeter = (numerator:number,denominator:number) => Number.isSafeInteger(numerator) && numerator > 0 && numerator <= 0xffffffff && [1,2,4,8,16,32,64,128,256].includes(denominator);
@@ -313,6 +313,7 @@ function buildWithIdentities(original: model.Score, generation: number, ids: str
     return value;
   };
   const laneData = new Map<string, { events: Collector; bends: PlanMidiEvent[]; markers: Map<string, number>; attacks: Map<string, RawNote[]> }>();
+  const audible: AudibleAttack[] = [];
   for (const [id, lane] of lanes) {
     const isolated = laneScore(jsonForTrack(lane[0].track), lane), generated = generate(isolated.score);
     generated.events.notes = generated.events.notes.filter(n => n.rawKey < 500);
@@ -324,7 +325,6 @@ function buildWithIdentities(original: model.Score, generation: number, ids: str
   const notes: PlanNote[] = [], played = new Map<model.Note, PlanNote[]>();
   const byNote = new Map(all.map(source => [source.note, source]));
   let fullIndex = 0;
-  const audible: AudibleAttack[] = [];
   for (const occurrence of occurrences) {
     const occurrenceSources = score.tracks.flatMap(t => t.staves.flatMap(staff => {
       const bar = staff.bars[occurrence.bar];

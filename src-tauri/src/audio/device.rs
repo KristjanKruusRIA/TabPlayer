@@ -1469,12 +1469,14 @@ impl OutputCallback {
                         if let Some(renderer) = &mut self.transport.renderer {
                             renderer.replace_mix(mix)
                         } else {
-                            mix
+                            Some(mix)
                         }
                     } else {
-                        mix
+                        Some(mix)
                     };
-                    let _ = self.retired.try_push(Retired::Mix(old));
+                    if let Some(old) = old {
+                        let _ = self.retired.try_push(Retired::Mix(old));
+                    }
                 }
                 CallbackCommand::Transport(command) => {
                     let _ = self.transport.command(command);
@@ -1506,6 +1508,17 @@ impl OutputCallback {
         }
         for chunk in output.chunks_mut(BLOCK * channels) {
             let frames = chunk.len() / channels;
+            // A mix parked during a crossfade takes over between blocks, once there is room to retire the one it replaces.
+            if !self.retired.is_full() {
+                if let Some(old) = self
+                    .transport
+                    .renderer
+                    .as_mut()
+                    .and_then(|r| r.settle_mix())
+                {
+                    let _ = self.retired.try_push(Retired::Mix(old));
+                }
+            }
             self.transport.render_into(&mut self.scratch[..frames]);
             let retired = &mut self.retired;
             self.transport
@@ -2856,6 +2869,62 @@ mod tests {
             serde_json::to_value(callback.transport.status()).unwrap(),
             before_mix
         );
+    }
+
+    #[test]
+    fn output_callback_parks_a_mix_during_a_crossfade_and_retires_every_one_off_thread() {
+        let service = unavailable_device_with_practice();
+        let document = service.control.lock().unwrap().document.clone().unwrap();
+        let mut transport = CallbackTransport::headless(48_000);
+        transport.install_with_practice(
+            AudioService::renderer(&document, 48_000).unwrap(),
+            1,
+            false,
+            document.practice,
+        );
+        transport
+            .command(TransportCommand::Play { generation: 1 })
+            .unwrap();
+        let (mut controls_in, controls) = HeapRb::<CallbackCommand>::new(CONTROL_CAPACITY).split();
+        let (retired_in, mut retired_out) = HeapRb::<Retired>::new(CONTROL_CAPACITY).split();
+        let mut callback = OutputCallback {
+            transport,
+            controls,
+            retired: retired_in,
+            scratch: [[0.0; 2]; BLOCK],
+            epoch: 0,
+            suspended: false,
+        };
+        let mut retired = |callback: &mut OutputCallback, frames: usize| {
+            callback.render(&mut vec![0.0f32; frames * 2], 2);
+            let mut count = 0;
+            while let Some(item) = retired_out.try_pop() {
+                assert!(matches!(item, Retired::Mix(_)));
+                count += 1;
+            }
+            count
+        };
+        let mut send = |mix| {
+            assert!(
+                controls_in
+                    .try_push(CallbackCommand::Mix { mix, generation: 1 })
+                    .is_ok()
+            );
+        };
+        let mix = || PreparedMix::prepare(&document.settings, &document.plan, 48_000).unwrap();
+        send(mix());
+        assert_eq!(retired(&mut callback, 64), 1, "taken at once");
+        send(mix());
+        assert_eq!(retired(&mut callback, 64), 0, "waits for the crossfade");
+        send(mix());
+        assert_eq!(retired(&mut callback, 64), 1, "the one waiting gives way");
+        // Blocks run one after another inside a callback, and the mix goes in between them.
+        assert_eq!(
+            retired(&mut callback, BLOCK * 2),
+            1,
+            "installed when it ends"
+        );
+        assert_eq!(retired(&mut callback, BLOCK * 2), 0, "nothing is left");
     }
 
     #[test]

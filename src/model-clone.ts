@@ -2,6 +2,8 @@ import { model, type Settings } from '@coderline/alphatab';
 import { repairPedalPresses } from './editor/sustain-pedal';
 // Installs the per-string capo hooks the JSON conversion below relies on.
 import './editor/partial-capo';
+import './editor/banjo-drone';
+import './editor/note-audio';
 
 type NoteJson={id:number;dynamics:number};
 type BeatJson={notes:NoteJson[]};

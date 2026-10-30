@@ -111,6 +111,9 @@ fn query() -> LibraryQuery {
     LibraryQuery {
         root_id: None,
         text: "Indexed".into(),
+        title: String::new(),
+        artist: String::new(),
+        instrument: String::new(),
         sort: LibrarySort::Title,
         offset: 0,
         limit: 100,

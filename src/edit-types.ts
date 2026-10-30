@@ -9,6 +9,7 @@ import type { HarmonyCommand } from './editor/harmony-types';
 import type { ScaleDiagramCommand } from './harmony/scale-diagram';
 import type { ReplaceTempoAutomations } from './editor/tempo-types';
 import type { PartialCapo } from './editor/partial-capo';
+import type { NoteAudio } from './editor/note-audio';
 
 export interface NoteTarget { target: BeatTarget; string: number }
 export interface IndexedNoteTarget { target: BeatTarget; noteIndex: number }
@@ -24,6 +25,8 @@ export interface NoteTechniques {
   accent?: number; dynamics?: number; leftFinger?: number; rightFinger?: number; slideIn?: number; slideOut?: number;
   vibrato?: number; ornament?: number; bend?: PitchCurve|null; harmonic?: {type:number;value:number}|null;
   trill?: {pitch:number;speed:number}|null;
+  /** How the note sounds, not how it is written; null or the plain values (100 percent, 0, 0) clear it. */
+  audio?: NoteAudio|null;
 }
 export interface BeatTechniques {
   pickStroke?: number; brushType?: number; brushDuration?: number; whammy?: PitchCurve|null;
@@ -37,15 +40,22 @@ export interface StaffSettings {
   tuningName?: string;
   /** Optional capo over some strings; omitted keeps the staff's, `{fret:0,strings:[]}` clears it. */
   partialCapo?: PartialCapo;
+  /** Optional banjo drone on a 5-string staff: the neck fret its short string starts at (1-12); omitted keeps the staff's, 0 clears it. */
+  droneFret?: number;
 }
 export interface ChordDefinition { name: string; firstFret: number; frets: number[] }
-export interface ChannelMix { gain: number; pan: number; mute: boolean; solo: boolean }
+/** How a track's stringed notes are performed; each field is absent at its default (automatic style, normal palm mutes, no accent, no automatic let ring or brush). */
+export interface TrackInterpretation { style?: 'pick'|'fingers'; palmMute?: 'light'|'heavy'; accent?: 'light'|'strong'; letRing?: true; brush?: 'down'|'up' }
+export interface ChannelMix { gain: number; pan: number; mute: boolean; solo: boolean; interpretation?: TrackInterpretation }
+/** A cabinet impulse response by the identity it has in a user's library (32 hex digits of the file's hash), with the name it was picked under and a level trim. Documents never hold the audio. */
+export interface CabinetIrRef { id:string;name:string;levelDb:number }
 export interface FxSettings {
   gate: {enabled:boolean;thresholdDb:number;releaseMs:number};
   compressor: {enabled:boolean;thresholdDb:number;ratio:number;attackMs:number;releaseMs:number;makeupDb:number};
   /** The tone stack fields are absent while flat (0 dB). */
-  amp: {enabled:boolean;model:'clean'|'crunch'|'lead'|'bass';drive:number;gainDb:number;bassDb?:number;midDb?:number;trebleDb?:number;presenceDb?:number};
-  cabinet: {enabled:boolean;model:'open'|'closed'|'bass'};
+  amp: {enabled:boolean;model:'clean'|'crunch'|'lead'|'metal'|'bass'|'bassDrive';drive:number;gainDb:number;bassDb?:number;midDb?:number;trebleDb?:number;presenceDb?:number};
+  /** `ir` names a cabinet impulse response in the user's own library, which plays in place of `model` where the library has it. */
+  cabinet: {enabled:boolean;model:'open'|'closed'|'combo'|'bass'|'bassStack';ir?:CabinetIrRef};
   eq: {enabled:boolean;lowDb:number;midDb:number;highDb:number;midHz:number};
   /** `syncQuarterNotes` on a modulation block: quarter notes per cycle when its rate follows the tempo; absent for the free rate. */
   chorus: {enabled:boolean;rateHz:number;depthMs:number;mix:number;syncQuarterNotes?:number};

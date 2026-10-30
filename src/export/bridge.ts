@@ -14,6 +14,7 @@ export interface ExportNativeBridge {
   exportMidi(bytes:Uint8Array,revision:number,fileName:string):Promise<boolean>;
   exportMusicXml(bytes:Uint8Array,revision:number,fileName:string):Promise<boolean>;
   exportAsciiTab(bytes:Uint8Array,revision:number,fileName:string):Promise<boolean>;
+  exportGp5(bytes:Uint8Array,revision:number,fileName:string):Promise<boolean>;
   exportSvg(pages:SvgPage[],revision:number,fileName:string):Promise<boolean>;
   exportPng(pages:SvgPage[],dpi:PngResolution,revision:number,fileName:string):Promise<boolean>;
   /** Writes one file per track (pdf, svg or png) into a folder the user picks. */
@@ -35,6 +36,7 @@ export function createDocumentExportBridge(documentId:DocumentId):ExportNativeBr
     exportMidi:(bytes,revision,fileName)=>invoke('export_midi',{document:{documentId,revision},bytes:Array.from(bytes),fileName}),
     exportMusicXml:(bytes,revision,fileName)=>invoke('export_musicxml',{document:{documentId,revision},bytes:Array.from(bytes),fileName}),
     exportAsciiTab:(bytes,revision,fileName)=>invoke('export_ascii_tab',{document:{documentId,revision},bytes:Array.from(bytes),fileName}),
+    exportGp5:(bytes,revision,fileName)=>invoke('export_gp5',{document:{documentId,revision},bytes:Array.from(bytes),fileName}),
     exportSvg:(pages,revision,fileName)=>recordPages(invoke<boolean>('export_svg',{document:{documentId,revision},pages,fileName}),pages),
     exportPng:(pages,dpi,revision,fileName)=>invoke('export_png',{document:{documentId,revision},pages,dpi,fileName}),
     exportTrackFiles:(format,files,dpi,revision)=>invoke('export_track_files',{document:{documentId,revision},format,files,dpi}),

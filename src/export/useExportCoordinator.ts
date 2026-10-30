@@ -4,12 +4,14 @@ import { exportGp,trackIdentity } from '../engine';
 import type { NativeBridge } from '../bridge';
 import type { DocumentSettings } from '../document-settings';
 import { backingLocationsForScore,buildPlaybackPlanFromJson } from '../audio/plan';
+import { interpretationsOf } from '../audio/interpretation';
 import { applyReferenceSyncPlan } from '../audio/reference-sync';
 import type { ExportNativeBridge } from './bridge';
 import { selectStaves } from './selection';
 import { exportMidi } from './midi';
 import { exportMusicXml } from './musicxml';
 import { exportAsciiTab } from './ascii-tab';
+import { exportGp5,gp5Warning } from './gp5';
 import { clearBacking } from '../interchange/backing-projection';
 import { DEFAULT_FILE_NAME,expandFileName,fileKey,fileNameContext,savedFileNames,withSuffix } from './file-name';
 import { assertPngSize,loadExportFonts,renderPdfPages,svgPageWithBackground } from './pdf';
@@ -58,6 +60,12 @@ export function useExportCoordinator({score,settings,currentSpeed,bridge,native,
         if(cancelled.current||!alive.current)return false;
         return await bridge.exportGp(exportGp(projectGpDocument({score:copy,settings:frozenSettings,bytes,selection,backing:include})),revision,name);
       }
+      // What Guitar Pro 5 cannot hold is worked out first (a refusal throws before anything opens), then confirmed, then saved.
+      if(frozenOptions.format==='gp5'){
+        const result=exportGp5(copy,selection,{backing:!!frozenSettings.backing});
+        if(!await bridge.confirmExport(gp5Warning(result.losses))||cancelled.current||!alive.current)return false;
+        return await native.exportGp5(result.bytes,revision,name);
+      }
       if(frozenOptions.format==='midi'){if(cancelled.current)return false;return await native.exportMidi(exportMidi(copy,selection),revision,name);}
       // Backing audio is left out; refusals throw here, before the native save dialog opens.
       if(frozenOptions.format==='musicxml'){clearBacking(copy);const bytes=exportMusicXml(copy,selection);if(cancelled.current)return false;return await native.exportMusicXml(bytes,revision,name);}
@@ -93,7 +101,7 @@ export function useExportCoordinator({score,settings,currentSpeed,bridge,native,
         const original=backingLocationsForScore(copy),route=backingLocationsForScore(selected);
         if(original.length!==route.length||original.some((item,index)=>{const next=route[index];return item.bar!==next.bar||item.occurrence!==next.occurrence||item.startTick!==next.startTick||item.endTick!==next.endTick;}))throw new Error('The selected staves change reference playback timing. Choose staves with the original performed route.');
       }
-      const plan=applyReferenceSyncPlan(buildPlaybackPlanFromJson(model.JsonConverter.scoreToJson(selected),ids,++generation.current),frozenSettings.backing);
+      const plan=applyReferenceSyncPlan(buildPlaybackPlanFromJson(model.JsonConverter.scoreToJson(selected),ids,++generation.current,interpretationsOf(frozenSettings.mixes)),frozenSettings.backing);
       if(cancelled.current)return false;
       return await watch(await native.exportAudio({plan,settings:frozenSettings,embeddedBytes:embedded?Array.from(embedded):null,stems:frozenOptions.format==='stems',request:{tracks:selection.tracks.map(i=>({id:ids[i],name:copy.tracks[i].name,preset:frozenSettings.sounds[ids[i]]?.presetId??'gm',kind:'score'})),range:selection.range,format:{sampleRate:audio.sampleRate,bitDepth:audio.bitDepth,...(audio.container?{container:audio.container}:{})},speed,metronome:audio.metronome,tailSeconds:audio.tailSeconds,includeBacking:audio.backing,includeMix:audio.includeMix,...(frozenOptions.format==='wav'&&audio.normalizeRmsDb!==undefined?{normalizeRmsDb:audio.normalizeRmsDb}:{})}},revision,name),active);
     }finally{if(active.cancelRequest)await active.cancelRequest.catch(()=>{});pending.current=false;job.current=null;if(alive.current)setBusy(false);operation.current=null;finish();}

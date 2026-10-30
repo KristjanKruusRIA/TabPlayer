@@ -28,9 +28,9 @@ use project::ProjectSession;
 use project::{BaseDocument, DocumentCandidate, EditCommand, Project};
 use runtime::{
     audio_audition, audio_command, audio_devices, audio_prepare, audio_set_mix, audio_status,
-    cancel_asset, cancel_export, export_ascii_tab, export_audio, export_midi, export_musicxml,
-    export_pdf, export_png, export_status, export_svg, export_track_files, stage_backing,
-    stage_embedded_backing,
+    cancel_asset, cancel_export, export_ascii_tab, export_audio, export_gp5, export_midi,
+    export_musicxml, export_pdf, export_png, export_status, export_svg, export_track_files,
+    stage_backing, stage_embedded_backing,
 };
 use std::{
     path::{Path, PathBuf},
@@ -631,9 +631,15 @@ async fn save_project(
         }
         let existing = record.snapshot.path.map(PathBuf::from);
         let path = if save_as || existing.is_none() {
+            // The picker must be modal to the window: otherwise a webview reload can attach at this revision
+            // and the save then commits a newer one underneath it.
+            let window = app
+                .get_webview_window("main")
+                .ok_or("The main window is unavailable for the save dialog.")?;
             let selected = app
                 .dialog()
                 .file()
+                .set_parent(&window)
                 .add_filter("TabPlayer project", &["tabplayer"])
                 .set_file_name("Untitled.tabplayer")
                 .blocking_save_file();
@@ -886,6 +892,12 @@ pub fn run() {
         .manage(batch_convert::BatchState::default())
         .manage(backing_waveform::BackingWaveformService::default())
         .setup(|app| {
+            // Every track resolves the user's cabinet responses from here, so it must be set before any plays.
+            // A library that cannot be placed leaves the built-in cabinets playing, and is tried again when a command
+            // first asks for it. It never stops the app starting.
+            if let Ok(directory) = audio::cabinet_ir::library_directory(app.handle()) {
+                audio::cabinet_ir::install(directory);
+            }
             let directory = session::session_directory(app.path().app_data_dir()?)?;
             let library_directory = directory.join("file-library-v1");
             let bundled_directory = app.path().resource_dir()?.join("library");
@@ -953,6 +965,7 @@ pub fn run() {
         workspace_snapshot,
         session::session_startup,
         session::session_resolve,
+        session::session_attach,
         session::workspace_set_view,
         session::session_preferences_set,
         session::recovery_status,
@@ -991,6 +1004,7 @@ pub fn run() {
         export_midi,
         export_musicxml,
         export_ascii_tab,
+        export_gp5,
         export_audio,
         export_status,
         cancel_export,
@@ -1003,6 +1017,10 @@ pub fn run() {
         style_library::style_library_read,
         style_library::style_library_put,
         style_library::style_library_remove,
+        audio::cabinet_ir::cabinet_ir_list,
+        audio::cabinet_ir::cabinet_ir_import,
+        audio::cabinet_ir::cabinet_ir_remove,
+        audio::cabinet_ir::cabinet_ir_status,
         file_library_snapshot,
         file_library_retry,
         file_library_change,
@@ -1031,6 +1049,7 @@ pub fn run() {
         workspace_snapshot,
         session::session_startup,
         session::session_resolve,
+        session::session_attach,
         session::workspace_set_view,
         session::session_preferences_set,
         session::recovery_status,
@@ -1069,6 +1088,7 @@ pub fn run() {
         export_midi,
         export_musicxml,
         export_ascii_tab,
+        export_gp5,
         export_audio,
         export_status,
         cancel_export,
@@ -1081,6 +1101,10 @@ pub fn run() {
         style_library::style_library_read,
         style_library::style_library_put,
         style_library::style_library_remove,
+        audio::cabinet_ir::cabinet_ir_list,
+        audio::cabinet_ir::cabinet_ir_import,
+        audio::cabinet_ir::cabinet_ir_remove,
+        audio::cabinet_ir::cabinet_ir_status,
         file_library_snapshot,
         file_library_retry,
         file_library_change,

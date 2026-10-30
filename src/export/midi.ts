@@ -1,7 +1,9 @@
 import { midi,model,Settings, type io } from '@coderline/alphatab';
+import '../tremolo-guard';
 import { validateSelection,type ExportSelection } from './types';
 import { selectStaves } from './selection';
-import { deadBrushMidiDurations,prepareMidiScore } from '../audio/plan';
+import { deadBrushMidiDurations,noteAudioMidiAdjustments,prepareMidiScore } from '../audio/plan';
+import { hasNoteAudio } from '../editor/note-audio';
 import { gpControllerEvents,prepareGpMidiScore } from '../interchange/automation';
 class TrackName extends midi.MidiEvent {
   constructor(track:number,readonly name:string){super(track,0,midi.MidiEventType.Meta);}
@@ -56,6 +58,15 @@ export function exportMidi(score:model.Score,selection:ExportSelection):Uint8Arr
     const durations=new Map(deadBrushMidiDurations(selectStaves(score,selection)).map(value=>[`${value.track}/${value.attack}`,value.length]));
     for(const pair of invalid){const length=durations.get(`${pair.on.track}/${pair.attack}`);if(!length)throw new Error('MIDI export could not recover a nonpositive note duration.');pair.off.tick=pair.on.tick+length;}
   }
+  // A note's own start, length and velocity settings, found by the same attack ordinals as the corrections above.
+  const audible=new Map((hasNoteAudio(score)?noteAudioMidiAdjustments(selectStaves(score,selection)):[]).map(value=>[`${value.track}/${value.attack}`,value]));
+  // Where the score writes each shifted note: a range keeps the notes written in it, wherever their settings move them.
+  const written=new Map<typeof noteSpans[number],{on:number;off:number}>();
+  if(audible.size)for(const pair of noteSpans){
+    const value=audible.get(`${pair.on.track}/${pair.attack}`);if(!value)continue;
+    written.set(pair,{on:pair.on.tick,off:pair.off.tick});
+    pair.on.tick+=value.shift;pair.off.tick=pair.on.tick+value.length;pair.on.noteVelocity=pair.off.noteVelocity=value.velocity;
+  }
   const output=new midi.MidiFile();output.division=source.division;output.format=midi.MidiFileFormat.MultiTrack;
   for(const track of selection.tracks)output.addEvent(new TrackName(remap.get(track)!,score.tracks[track].name));
   const bars=generator.tickLookup.masterBars.filter(b=>!selection.range||(b.masterBar.index>=selection.range.first&&b.masterBar.index<=selection.range.last));
@@ -75,7 +86,7 @@ export function exportMidi(score:model.Score,selection:ExportSelection):Uint8Arr
       const track=conductor(e)?0:remap.get(e.track)!;
       output.addEvent(shifted(e,e.tick-segment.start+offset,track));
     }
-    for(const {on,off} of noteSpans){if(on.tick>=segment.end||off.tick<=segment.start)continue;const track=remap.get(on.track)!;output.addEvent(shifted(on,Math.max(on.tick,segment.start)-segment.start+offset,track));output.addEvent(shifted(off,Math.min(off.tick,segment.end)-segment.start+offset,track));}
+    for(const pair of noteSpans){const {on,off}=pair,home=written.get(pair);if((home?.on??on.tick)>=segment.end||(home?.off??off.tick)<=segment.start)continue;const track=remap.get(on.track)!;const at=Math.min(Math.max(on.tick,segment.start),segment.end-1);output.addEvent(shifted(on,at-segment.start+offset,track));output.addEvent(shifted(off,Math.min(Math.max(off.tick,at+1),segment.end)-segment.start+offset,track));}
     offset+=segment.end-segment.start;
   }
   for(let track=0;track<=selection.tracks.length;track++)output.addEvent(new midi.EndOfTrackEvent(track,offset));

@@ -34,4 +34,4 @@ GP8 has input preferences for how notes are written. TabPlayer had none. This sl
 - **Why partial:** Plus/Minus Keys Behavior is not implemented.
 - **Diagram paste:** no fixture carries diagrams, so the driver checks the filter, not a paste with diagrams.
 - **Auto-duration:** it does not apply to placeholders in empty bars, tuplet beats, or a duration that does not fit.
-- **Reload:** a webview reload leaves the app on "Recovery unavailable", and Start new session does not leave that screen. This was not caused by this slice, and it is not fixed here.
+- **Reload:** a webview reload left the app on "Recovery unavailable". This was not caused by this slice. It is fixed separately: see `2026-10-30-gp8-reload-recovery.md`.

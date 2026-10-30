@@ -756,6 +756,7 @@ fn render_seek_and_prepared_mix_install_do_not_touch_heap() {
         },
     );
     let mix = PreparedMix::prepare(&settings, &plan, 48_000).unwrap();
+    let waiting = PreparedMix::prepare(&settings, &plan, 48_000).unwrap();
     let mut renderer = Renderer::new(plan, resources, settings, 48_000).unwrap();
     renderer.set_metronome_settings(tabplayer_lib::audio::practice::MetronomeSettings {
         enabled: true,
@@ -774,10 +775,15 @@ fn render_seek_and_prepared_mix_install_do_not_touch_heap() {
         .unwrap();
     let _ = renderer.output_frames_until(2880.0);
     let retired = renderer.replace_mix(mix);
+    // A mix that arrives during the crossfade waits for it, and takes over with no heap work either.
+    let parked = renderer.replace_mix(waiting);
+    renderer.render_into(&mut block);
+    let settled = renderer.settle_mix();
     renderer.render_into(&mut block);
     COUNT_HEAP.with(|f| f.set(false));
     let operations = HEAP_OPERATIONS.with(Cell::get);
-    drop(retired);
+    assert!(retired.is_some() && parked.is_none() && settled.is_some());
+    drop((retired, parked, settled));
     assert_eq!(
         operations, 0,
         "audio callback allocated or freed heap memory"

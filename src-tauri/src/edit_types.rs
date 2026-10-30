@@ -476,6 +476,26 @@ pub struct Trill {
     pub pitch: i32,
     pub speed: i32,
 }
+/// How one note sounds, apart from how it is written: its length in percent of the planned
+/// sounding length, a shift of its start in ticks, and a velocity added to its dynamics.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct NoteAudio {
+    pub length: i32,
+    pub offset: i32,
+    pub velocity: i32,
+}
+impl NoteAudio {
+    fn validate(&self) -> Result<(), String> {
+        if !(10..=400).contains(&self.length)
+            || !(-480..=480).contains(&self.offset)
+            || !(-64..=64).contains(&self.velocity)
+        {
+            return Err("Invalid note audio settings.".into());
+        }
+        Ok(())
+    }
+}
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Tremolo {
@@ -619,6 +639,12 @@ pub struct NoteTechniques {
         skip_serializing_if = "Option::is_none"
     )]
     pub trill: Option<Option<Trill>>,
+    #[serde(
+        default,
+        deserialize_with = "present_nullable",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub audio: Option<Option<NoteAudio>>,
 }
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -693,6 +719,13 @@ pub struct StaffSettings {
         skip_serializing_if = "Option::is_none"
     )]
     pub partial_capo: Option<PartialCapo>,
+    /// The neck fret a 5-string banjo's short drone string starts at: omitted keeps the staff's, and 0 clears it.
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub drone_fret: Option<u32>,
 }
 /// A capo over some strings only. Strings count from 1 for the lowest-pitched string, as notes do.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1355,6 +1388,20 @@ impl StaffSettings {
         if let Some(partial) = &self.partial_capo {
             partial.validate(self.tuning.len())?;
         }
+        if let Some(drone) = self.drone_fret {
+            if drone > 12 || (drone > 0 && self.tuning.len() != 5) {
+                return Err(
+                    "Choose a banjo drone fret from 1 to 12 on a 5-string staff, or 0 for none."
+                        .into(),
+                );
+            }
+            // String 1 is the last tuning entry and must sound above string 2.
+            if drone > 0 && self.tuning[4] <= self.tuning[3] {
+                return Err(
+                    "The banjo drone is string 1, which must be tuned higher than string 2.".into(),
+                );
+            }
+        }
         enum_range(self.clef, 0, 4)
     }
 }
@@ -1567,6 +1614,9 @@ impl EditCommand {
                 if let Some(Some(trill)) = &patch.trill {
                     enum_range(trill.pitch, 0, 127)?;
                     rhythm(trill.speed, 0)?;
+                }
+                if let Some(Some(audio)) = &patch.audio {
+                    audio.validate()?;
                 }
             }
             Self::SetBeatTechniques { patch, .. } => {
@@ -2485,6 +2535,50 @@ mod tests {
     }
 
     #[test]
+    fn staff_settings_take_an_optional_banjo_drone() {
+        let settings = json!({"tuning": [62, 59, 55, 50, 67], "capo": 0, "transposition": 0,
+            "displayTransposition": 0, "clef": 4, "showTab": true, "showNotation": true});
+        for base in [
+            json!({"type": "setStaffSettings", "track": 0, "staff": 0, "settings": settings}),
+            json!({"type": "addStaff", "track": 0, "settings": settings}),
+        ] {
+            let with = |drone: Value| {
+                let mut value = base.clone();
+                value["settings"]["droneFret"] = drone;
+                value
+            };
+            // Omitted keeps the staff's own, and serializes back without the field.
+            assert_eq!(serde_json::to_value(accepted(&base)).unwrap(), base);
+            for drone in [json!(5), json!(1), json!(12), json!(0)] {
+                let value = with(drone);
+                assert_eq!(serde_json::to_value(accepted(&value)).unwrap(), value);
+            }
+            for invalid in [
+                json!(null),
+                json!(13),
+                json!(-1),
+                json!(5.5),
+                json!("5"),
+                json!({"fret": 5}),
+            ] {
+                rejected(&with(invalid));
+            }
+            // Only a 5-string staff can carry one.
+            let mut six = with(json!(5));
+            six["settings"]["tuning"] = json!([64, 59, 55, 50, 45, 40]);
+            rejected(&six);
+            six["settings"]["droneFret"] = json!(0);
+            accepted(&six);
+            // String 1 (the last entry) must sound above string 2.
+            let mut low = with(json!(5));
+            low["settings"]["tuning"] = json!([67, 62, 59, 55, 50]);
+            rejected(&low);
+            low["settings"]["droneFret"] = json!(0);
+            accepted(&low);
+        }
+    }
+
+    #[test]
     fn selection_ties_take_only_a_boolean_tied_flag() {
         let base = json!({"type": "setSelectionTies",
             "selection": {"kind": "bars", "tracks": [0], "firstBar": 1, "lastBar": 1},
@@ -3103,6 +3197,36 @@ mod tests {
             json!({"bend": {"type": 1, "style": 0, "points": [{"offset": 0, "value": 0}]}}),
         ] {
             value["patch"] = patch;
+            rejected(&value);
+        }
+    }
+
+    #[test]
+    fn note_audio_patch_is_exact_nullable_and_within_its_limits() {
+        let mut value = entry_commands().remove(10);
+        for audio in [
+            json!(null),
+            json!({"length": 100, "offset": 0, "velocity": 0}),
+            json!({"length": 10, "offset": -480, "velocity": -64}),
+            json!({"length": 400, "offset": 480, "velocity": 64}),
+        ] {
+            value["patch"] = json!({ "audio": audio });
+            accepted(&value);
+        }
+        for audio in [
+            json!({"length": 9, "offset": 0, "velocity": 0}),
+            json!({"length": 401, "offset": 0, "velocity": 0}),
+            json!({"length": 100, "offset": -481, "velocity": 0}),
+            json!({"length": 100, "offset": 481, "velocity": 0}),
+            json!({"length": 100, "offset": 0, "velocity": -65}),
+            json!({"length": 100, "offset": 0, "velocity": 65}),
+            json!({"length": 100.5, "offset": 0, "velocity": 0}),
+            json!({"length": 100, "offset": 0}),
+            json!({"length": 100, "offset": 0, "velocity": 0, "extra": 1}),
+            json!({"length": null, "offset": 0, "velocity": 0}),
+            json!("loud"),
+        ] {
+            value["patch"] = json!({ "audio": audio });
             rejected(&value);
         }
     }

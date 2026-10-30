@@ -37,6 +37,7 @@ export const helpTopics:readonly HelpTopic[]=[
     'File → Import MIDI… reads a Standard MIDI file (format 0 or 1) into a new untitled score; choose the quantization, tuplets, voices and tablature first.',
     'File → Batch convert… turns a folder of older scores (and its subfolders) into new .gp files in a separate destination folder. The originals are never changed, and the report lists every file.',
     'File → Export score writes PDF, images, MIDI, MusicXML, ASCII tab or audio; Export GP writes a Guitar Pro file.',
+    'Export score → Guitar Pro 5 writes a .gp5 file for older programs. It lists what that format leaves out of your score, such as extra staves or tempo changes inside a beat, and asks before saving; Guitar Pro 6 (.gpx) export is not available.',
     'Unsaved changes are kept in recovery and you are asked before a changed score is closed.',
   ]},
   {id:'shortcuts',title:'Keyboard shortcuts',paragraphs:[

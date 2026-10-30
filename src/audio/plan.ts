@@ -326,6 +326,17 @@ function buildWithIdentities(original: model.Score, generation: number, ids: str
   const notes: PlanNote[] = [], played = new Map<model.Note, PlanNote[]>(), interpreted: Attack[] = [];
   const byNote = new Map(all.map(source => [source.note, source]));
   let fullIndex = 0;
+  // How far a pickup bar is right-aligned: the heard bar's meter less its written length in the longest part of any track or staff.
+  const pickups = new Map<number, number>();
+  const pickupShift = (bar: number) => {
+    let shift = pickups.get(bar);
+    if (shift === undefined) {
+      const heard = score.masterBars[bar];
+      shift = heard.isAnacrusis ? Math.max(0, heard.timeSignatureNumerator * 3840 / heard.timeSignatureDenominator - Math.max(0, ...score.tracks.flatMap(track => track.staves.flatMap(staff => staff.bars[bar]?.voices ?? [])).filter(voice => !voice.isEmpty).map(voice => { const last = voice.beats.at(-1); return last ? last.displayStart + last.displayDuration : 0; }))) : 0;
+      pickups.set(bar, shift);
+    }
+    return shift;
+  };
   for (const occurrence of occurrences) {
     const occurrenceSources = score.tracks.flatMap(t => t.staves.flatMap(staff => {
       const bar = staff.bars[occurrence.bar];
@@ -372,7 +383,7 @@ function buildWithIdentities(original: model.Score, generation: number, ids: str
         if (styled) {
           const beat = source.note.beat, masterBar = beat.voice.bar.masterBar;
           // Strong beats are counted from the written start; a pickup bar is right-aligned by its written length, ending where a full bar does.
-          const pickup = masterBar.isAnacrusis ? Math.max(0, masterBar.timeSignatureNumerator * 3840 / masterBar.timeSignatureDenominator - Math.max(0, ...beat.voice.bar.voices.map(voice => { const last = voice.beats.at(-1); return last ? last.displayStart + last.displayDuration : 0; }))) : 0;
+          const pickup = profile.accent ? pickupShift(occurrence.bar) : 0;
           interpreted.push({ note, raw: actual, staff: source.staff, offset: beat.displayStart + pickup, accentable: attack === 0 && beat.graceType === model.GraceType.None, meter: [masterBar.timeSignatureNumerator, masterBar.timeSignatureDenominator], occurrenceEnd: occurrence.endTick, beat: `${source.staff}/${source.voice}/${source.bar}/${source.beat}`,
             brushable: generated.length === 1 && beat.brushType === model.BrushType.None && !beat.hasRasgueado && !beat.deadSlapped && beat.pickStroke === model.PickStroke.None && note.pitch.length === 1 });
         }

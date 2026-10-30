@@ -238,6 +238,30 @@ it('right-aligns a pickup by its written length when its first note has a grace 
   expect(accents(score)).toEqual([0, 11, 0, 22]);
 });
 
+it('measures a pickup by its longest written part, ignoring empty placeholders, repeat-bar sources and shorter parts', () => {
+  // 12/16: the empty second voice's placeholder is not a quarter note of music.
+  const sixteenths = authored(2); const first = sixteenths.masterBars[0]; first.isAnacrusis = true; first.timeSignatureNumerator = 12; first.timeSignatureDenominator = 16;
+  const bar = sixteenths.tracks[0].staves[0].bars[0], voice = bar.voices[0]; voice.beats.splice(2, 2); voice.beats[1].duration = model.Duration.Eighth;
+  for (const each of sixteenths.tracks[0].staves[0].bars) { const spare = new model.Voice(); each.addVoice(spare); const placeholder = new model.Beat(); placeholder.isEmpty = true; placeholder.duration = model.Duration.Quarter; spare.addBeat(placeholder); }
+  note(sixteenths, 0, 0, 2, 3); note(sixteenths, 0, 1, 3, 3); note(sixteenths, 1, 0, 2, 3);
+  expect(accents(sixteenths)).toEqual([11, 0, 22]);
+  // A repeat bar replays the pickup, but is itself a full bar: the replay counts from its own downbeat.
+  const replay = authored(2); replay.masterBars[0].isAnacrusis = true; replay.tracks[0].staves[0].bars[0].voices[0].beats.splice(2, 2);
+  note(replay, 0, 0, 2, 3); note(replay, 0, 1, 3, 3);
+  replay.tracks[0].staves[0].bars[1].simileMark = model.SimileMark.Simple; replay.tracks[0].staves[0].bars[1].voices[0].beats.splice(1, 3); replay.tracks[0].staves[0].bars[1].voices[0].beats[0].isEmpty = true;
+  expect(accents(replay)).toEqual([11, 0, 22, 0]);
+  // Another track's longer part in the same bar sets the pickup's length.
+  const parts = authored(1); parts.masterBars[0].isAnacrusis = true; parts.tracks[0].staves[0].bars[0].voices[0].beats.splice(2, 2);
+  note(parts, 0, 0, 2, 3); note(parts, 0, 1, 3, 3);
+  const other = new model.Track(), staff = new model.Staff(); staff.stringTuning.tunings = [64, 59, 55, 50, 45, 40]; other.addStaff(staff); parts.addTrack(other);
+  const otherBar = new model.Bar(); staff.addBar(otherBar); const otherVoice = new model.Voice(); otherBar.addVoice(otherVoice);
+  for (let i = 0; i < 3; i++) { const b = new model.Beat(); b.duration = model.Duration.Quarter; b.isEmpty = false; otherVoice.addBeat(b); const n = new model.Note(); n.string = 2; n.fret = 3; b.addNote(n); }
+  parts.finish(settings);
+  const json = model.JsonConverter.scoreToJson(parts);
+  const velocities = (profile?: TrackInterpretation) => buildPlaybackPlanFromJson(json, ['t0', 't1'], 1, profile && { t0: profile }).notes.filter(n => n.trackId === 't0').sort((a, b) => a.startTick - b.startTick).map(n => n.velocity);
+  expect(velocities({ accent: 'strong' }).map((v, i) => v - velocities()[i])).toEqual([0, 11]);
+});
+
 it('works out chord starts once per plan, however often the next-notes view asks', () => {
   const score = authored(1); for (const s of [6, 5, 4]) note(score, 0, 0, s, 2); note(score, 0, 1, 2, 3);
   const plan = planOf(score, { brush: 'down' });

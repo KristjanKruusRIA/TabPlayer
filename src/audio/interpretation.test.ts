@@ -7,7 +7,7 @@ import type { TrackInterpretation } from '../edit-types';
 import { NativePlaybackController } from './NativePlaybackController';
 import type { NativeAudioBridge } from './bridge';
 import { buildPlaybackPlanFromJson } from './plan';
-import { focusNotes } from '../instruments/focus';
+import { focusNotes, onsetStarts } from '../instruments/focus';
 import { canonicalInterpretation, interpretationsOf, strongOffsets, validateInterpretation } from './interpretation';
 import type { PlaybackPlan } from './types';
 
@@ -224,6 +224,29 @@ it('right-aligns a pickup bar and accents only the first attack of a trill', () 
   const trill = authored(1), whole = trill.tracks[0].staves[0].bars[0].voices[0]; whole.beats.splice(1, 3); whole.beats[0].duration = model.Duration.Whole;
   const n = note(trill, 0, 0, 2, 3); n.trillValue = 5; n.trillSpeed = model.Duration.Sixteenth;
   const all = accents(trill); expect(all.length).toBeGreaterThan(4); expect(all.filter(v => v !== 0)).toEqual([22]);
+});
+
+it('right-aligns a pickup by its written length when its first note has a grace note', () => {
+  const score = authored(2); score.masterBars[0].isAnacrusis = true;
+  const voice = score.tracks[0].staves[0].bars[0].voices[0]; voice.beats.length = 0;
+  const beat = (grace: boolean, fret: number) => {
+    const b = new model.Beat(); b.duration = grace ? model.Duration.Sixteenth : model.Duration.Quarter; b.isEmpty = false;
+    if (grace) b.graceType = model.GraceType.BeforeBeat;
+    voice.addBeat(b); const n = new model.Note(); n.string = 2; n.fret = fret; b.addNote(n);
+  };
+  beat(true, 5); beat(false, 3); beat(false, 3); note(score, 1, 0, 2, 3);
+  expect(accents(score)).toEqual([0, 11, 0, 22]);
+});
+
+it('works out chord starts once per plan, however often the next-notes view asks', () => {
+  const score = authored(1); for (const s of [6, 5, 4]) note(score, 0, 0, s, 2); note(score, 0, 1, 2, 3);
+  const plan = planOf(score, { brush: 'down' });
+  const first = onsetStarts(plan.notes);
+  expect(onsetStarts(plan.notes)).toBe(first);
+  const input = { active: [], notes: plan.notes, beats: plan.performedBeats ?? [], tick: 10, counting: false, loop: null, range: null, target: { track: 0, staff: 0, bar: 0, voice: 0, beat: 1 } };
+  for (let i = 0; i < 3; i++) focusNotes('next', input);
+  expect(onsetStarts(plan.notes)).toBe(first);
+  expect(onsetStarts([...plan.notes])).not.toBe(first);
 });
 
 it('finds strong beats after tuplet rounding without accenting its neighbours', () => {

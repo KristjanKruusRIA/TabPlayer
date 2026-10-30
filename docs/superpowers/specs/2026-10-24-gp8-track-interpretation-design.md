@@ -64,6 +64,7 @@ An **Interpretation** section under the Sound pane for stringed tracks: Playing 
 
 - Changing a setting prepares a new plan, so playback stops and any loop or range is cleared (the panel says so). Keeping them across a re-plan would need the native player to swap plans in place.
 - Audition (the tone heard while editing) follows the playing style, through the mix it is sent with; it does not apply accent, palm mute intensity, let ring or brush, which shape a whole passage.
+- Strong beats are matched within 7 ticks of their position. Tuplet rounding accumulates along a long tuplet run, so very long runs (for example 13:8 sixteenths or 7:4 thirty-seconds) can drift past it and miss a strong beat; no fixed tolerance covers them without accenting neighbouring off-beats.
 - The instrument view's "next" focus treats a brushed chord as one onset, counted from the earliest first attack of its beat.
 
 ## Scope

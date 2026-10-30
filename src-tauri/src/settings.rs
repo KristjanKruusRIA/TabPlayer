@@ -11,7 +11,11 @@ pub struct ChannelMix {
     pub mute: bool,
     pub solo: bool,
     /// How the track's stringed notes are performed. The playback plan applies it; absent is the default.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
     pub interpretation: Option<TrackInterpretation>,
 }
 impl Default for ChannelMix {

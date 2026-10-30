@@ -371,8 +371,8 @@ function buildWithIdentities(original: model.Score, generation: number, ids: str
         };
         if (styled) {
           const beat = source.note.beat, masterBar = beat.voice.bar.masterBar;
-          // Strong beats are counted from the written start; a pickup bar is right-aligned, ending where a full bar does.
-          const pickup = masterBar.isAnacrusis ? Math.max(0, masterBar.timeSignatureNumerator * 3840 / masterBar.timeSignatureDenominator - (occurrence.endTick - occurrence.startTick)) : 0;
+          // Strong beats are counted from the written start; a pickup bar is right-aligned by its written length, ending where a full bar does.
+          const pickup = masterBar.isAnacrusis ? Math.max(0, masterBar.timeSignatureNumerator * 3840 / masterBar.timeSignatureDenominator - Math.max(0, ...beat.voice.bar.voices.map(voice => { const last = voice.beats.at(-1); return last ? last.displayStart + last.displayDuration : 0; }))) : 0;
           interpreted.push({ note, raw: actual, staff: source.staff, offset: beat.displayStart + pickup, accentable: attack === 0 && beat.graceType === model.GraceType.None, meter: [masterBar.timeSignatureNumerator, masterBar.timeSignatureDenominator], occurrenceEnd: occurrence.endTick, beat: `${source.staff}/${source.voice}/${source.bar}/${source.beat}`,
             brushable: generated.length === 1 && beat.brushType === model.BrushType.None && !beat.hasRasgueado && !beat.deadSlapped && beat.pickStroke === model.PickStroke.None && note.pitch.length === 1 });
         }

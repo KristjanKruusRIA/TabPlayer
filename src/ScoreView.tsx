@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { AlphaTabApi, LayoutMode, SystemsLayoutMode, type model, StaveProfile, type PlaybackHighlightChangeEventArgs } from '@coderline/alphatab';
+import './tremolo-guard';
 import type { BeatTarget } from './project';
 import type { NativePlaybackController } from './audio/NativePlaybackController';
 import type { MusicSelection, VoiceAddress } from './editor/range-types';

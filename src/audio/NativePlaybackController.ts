@@ -1,4 +1,5 @@
 import type { AlphaTabApi, model, synth } from '@coderline/alphatab';
+import '../tremolo-guard';
 import { effectiveAudioSettings, trackIdentity, type BuiltDocument } from '../engine';
 import { completeSound, defaultEffects, defaultMix, soundProblem } from '../document-settings';
 import type { ChannelMix, EditCommand, TrackSound } from '../edit-types';

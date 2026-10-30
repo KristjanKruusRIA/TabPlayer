@@ -1,4 +1,5 @@
 import { midi, model, Settings } from '@coderline/alphatab';
+import '../tremolo-guard';
 import { buildScore, trackIdentity } from '../engine';
 import { captureNoteLinks, restoreNoteLinks } from '../editor/links';
 import type { ProjectView } from '../project';
@@ -18,22 +19,10 @@ function cloneWithLinks(score: model.Score) {
   restoreNoteLinks(copy, captureNoteLinks(score)); return copy;
 }
 
-// Public generation steps a tremolo by its beat's play time. Grace notes can take
-// all of a short beat's time (<= 0), leaving no step: a tied or slid note then
-// loops forever adding attacks. Such a beat plays no tremolo, as it already
-// plays none when its note is not tied.
-const tremoloHasNoTime = (beat: model.Beat) => !!beat.tremoloPicking && beat.tremoloPicking.marks > 0 && beat.playbackDuration <= 0;
-function withoutUntimedTremolo(score: model.Score): model.Score {
-  if (!beatsOf(score).some(tremoloHasNoTime)) return score;
-  const copy = cloneWithLinks(score), byId = new Map(beatsOf(score).map(b => [b.id, b]));
-  for (const beat of beatsOf(copy)) if (beat.tremoloPicking && tremoloHasNoTime(byId.get(beat.id)!)) beat.tremoloPicking.marks = 0;
-  return copy;
-}
-
 // 1.8.4 multiplies negative whole-note enum values by the mark count instead of
 // dividing their whole-note multiplier. Normalize only the transient MIDI model.
 export function prepareMidiScore(score: model.Score): model.Score {
-  score = withoutUntimedTremolo(preparePitchedGpScore(score, settings));
+  score = preparePitchedGpScore(score, settings);
   const original = beatsOf(score);
   if (!original.some(b => b.duration < 0 && b.tremoloPicking)) return score;
   const copy = cloneWithLinks(score), byId = new Map(original.map(b => [b.id, b]));
@@ -78,8 +67,11 @@ class Collector implements midi.IMidiFileHandler {
     this.events.push({ type: 'program', track, tick: tick + this.shift, channel, program, order: this.order++ });
   }
   addTempo(tick: number, bpm: number) { this.tempos.push({ tick: tick + this.shift, bpm }); }
-  addBend(track: number, tick: number, channel: number, value: number) { this.events.push({ type: 'bend', track, tick: tick + this.shift, channel, value: Math.min(16384, Math.floor(value)), order: this.order++ }); }
-  addNoteBend(track: number, tick: number, channel: number, key: number, value: number) { this.events.push({ type: 'noteBend', track, tick: tick + this.shift, channel, key, value, order: this.order++ }); }
+  addBend(track: number, tick: number, channel: number, value: number) { this.events.push({ type: 'bend', track, tick: tick + this.shift, channel, value: Math.min(16384, Math.floor(value)), order: this.order++ }); this.own(); }
+  addNoteBend(track: number, tick: number, channel: number, key: number, value: number) { this.events.push({ type: 'noteBend', track, tick: tick + this.shift, channel, key, value, order: this.order++ }); this.own(); }
+  // The tick at which the beat that generated a bend began, by the bend's order.
+  starts = new Map<number, number>();
+  private own() { if (this.provenance) this.starts.set(this.order - 1, Number(this.provenance.slice(this.provenance.indexOf('/') + 1))); }
   finishTrack(_track: number, tick: number) { this.end = Math.max(this.end, tick + this.shift); }
 }
 function generate(score: model.Score) {
@@ -107,7 +99,7 @@ export function backingLocationsForScore(score:model.Score):readonly ReferenceLo
   const handler: midi.IMidiFileHandler = {
     addTickShift(value) { shift = value; }, addTimeSignature() {}, addRest() {}, addNote() {}, addControlChange() {}, addProgramChange() {}, addTempo() {}, addBend() {}, addNoteBend() {}, finishTrack() {},
   };
-  const generator = new midi.MidiFileGenerator(withoutUntimedTremolo(score), settings, handler); generator.generate();
+  const generator = new midi.MidiFileGenerator(score, settings, handler); generator.generate();
   const counts = new Map<number, number>();
   return generator.tickLookup.masterBars.map(m => {
     const bar = m.masterBar.index, occurrence = counts.get(bar) ?? 0; counts.set(bar, occurrence + 1);
@@ -322,7 +314,7 @@ function buildWithIdentities(original: model.Score, generation: number, ids: str
     }
     return value;
   };
-  const laneData = new Map<string, { events: Collector; starts: number[]; bends: PlanMidiEvent[]; markers: Map<string, number>; attacks: Map<string, RawNote[]> }>();
+  const laneData = new Map<string, { events: Collector; gaps: number[]; bends: PlanMidiEvent[]; markers: Map<string, number>; attacks: Map<string, RawNote[]> }>();
   for (const [id, lane] of lanes) {
     const isolated = laneScore(jsonForTrack(lane[0].track), lane), generated = generate(isolated.score);
     generated.events.notes = generated.events.notes.filter(n => n.rawKey < 500);
@@ -331,8 +323,18 @@ function buildWithIdentities(original: model.Score, generation: number, ids: str
     for (const note of generated.events.notes) { const group = attacks.get(note.provenance!) ?? []; group.push(note); attacks.set(note.provenance!, group); }
     // The public generator sizes a pickup bar from the staves present, so a lane
     // holding only a shorter pickup track starts every later bar earlier than the
-    // complete score does. Keep the lane's own bar starts to map across the gap.
-    laneData.set(id, { events: generated.events, starts: generated.lookup.masterBars.map(m => m.start), markers: isolated.markers, attacks, bends: converted(generated.events.events, ids, nativeChannel).filter(event=>event.type==='bend'||event.type==='noteBend') });
+    // complete score does. Map the lane's clock onto the complete score's, bar by
+    // bar, for its attacks and for the bends that continue across the gap.
+    const laneBars = generated.lookup.masterBars, completeBars = complete.lookup.masterBars;
+    if (laneBars.length !== completeBars.length) throw new Error('Public MIDI bars disagree between the complete score and a source-note lane.');
+    const gaps = completeBars.map((bar, index) => bar.start - laneBars[index].start), laneShift = generated.events.shift;
+    // A note keeps its own clock from where it starts, so a bend runs on from the bar
+    // it began in; the bends of a note that begins after the gap move with its bar.
+    // A tick on a bar boundary opens the later bar.
+    const gapAt = (tick: number) => { let low = 0, high = laneBars.length - 1; while (low < high) { const middle = (low + high + 1) >> 1; if (laneBars[middle].start + laneShift <= tick) low = middle; else high = middle - 1; } return gaps[low]; };
+    const bends = converted(generated.events.events, ids, nativeChannel).filter(event => event.type === 'bend' || event.type === 'noteBend')
+      .map(event => ({ ...event, tick: event.tick + gapAt(generated.events.starts.get(event.order) ?? event.tick) })).sort((a, b) => a.tick - b.tick);
+    laneData.set(id, { events: generated.events, gaps, markers: isolated.markers, attacks, bends });
   }
   const notes: PlanNote[] = [], played = new Map<model.Note, PlanNote[]>();
   const byNote = new Map(all.map(source => [source.note, source]));
@@ -345,7 +347,7 @@ function buildWithIdentities(original: model.Score, generation: number, ids: str
     for (const source of occurrenceSources) {
       const lane = laneData.get(source.lane)!;
       const marker = lane.markers.get(`${source.bar}/${source.beat}`);
-      const barGap = complete.lookup.masterBars[occurrenceIndex].start - (lane.starts[occurrenceIndex] ?? complete.lookup.masterBars[occurrenceIndex].start);
+      const barGap = lane.gaps[occurrenceIndex];
       const logicalTick = occurrence.startTick + source.note.beat.playbackStart - complete.events.shift + lane.events.shift - barGap;
       const generated = lane.attacks.get(`${marker}/${logicalTick}`) ?? [];
       // Within one lane there is one source note per beat, including any trill,
@@ -378,7 +380,7 @@ function buildWithIdentities(original: model.Score, generation: number, ids: str
           ...(source.bar !== occurrence.bar ? { playedBar: occurrence.bar } : {}),
           occurrence: occurrence.occurrence, startTick: actual.start, endTick: actual.end, key: actual.key, velocity: actual.velocity,
           channel: nativeChannel(source.track, actual.channel), program: actual.program ?? score.tracks[source.track].playbackInfo.program,
-          articulation: source.note.beat.deadSlapped ? 'dead' : articulation(source.note, actual.program ?? score.tracks[source.track].playbackInfo.program, !!from), legatoFrom: from?.id ?? null, pitch: pitchCurve({ ...isolated, channel: nativeChannel(source.track, isolated.channel) }, actual, lane.bends),
+          articulation: source.note.beat.deadSlapped ? 'dead' : articulation(source.note, actual.program ?? score.tracks[source.track].playbackInfo.program, !!from), legatoFrom: from?.id ?? null, pitch: pitchCurve({ ...isolated, channel: nativeChannel(source.track, isolated.channel), start: isolated.start + barGap, end: isolated.end + barGap }, actual, lane.bends),
         };
         notes.push(note); const chain = played.get(source.note) ?? []; chain.push(note); played.set(source.note, chain);
       }

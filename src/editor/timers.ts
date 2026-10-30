@@ -1,4 +1,5 @@
 import { midi, model, Settings } from '@coderline/alphatab';
+import '../tremolo-guard';
 import { scoreFromJson } from '../model-clone';
 
 const beats=(score:model.Score)=>score.tracks.flatMap(t=>t.staves.flatMap(s=>s.bars.flatMap(b=>b.voices.flatMap(v=>v.beats))));

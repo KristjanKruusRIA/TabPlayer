@@ -134,12 +134,15 @@ function plan(doc:Document,score:model.Score):{points:Point[];layout:Layout;stoc
 // Part-level <volume>/<pan> is common, so only sounds carrying them justify a parse.
 // One pass over opening tags; self-closing ones (common for dynamics) end at once.
 function hasSoundMix(xml:string){
-  let closers=true;
+  // Sounds that share a closer share a region, which is searched once, so many unclosed tags stay linear.
+  let closers=true,searched=-1;
   for(const match of xml.matchAll(/<sound(?=[\s/>])[^>]*>/g)){
     const tag=match[0];if(/\span\s*=/.test(tag))return true;
     if(tag.endsWith('/>')||!closers)continue;
-    const start=match.index!+tag.length,end=xml.indexOf('</sound',start);
+    const start=match.index!+tag.length;if(start<searched)continue;
+    const end=xml.indexOf('</sound',start);
     if(end<0){closers=false;continue;}
+    searched=end;
     if(/<(volume|pan)[\s>]/.test(xml.slice(start,end)))return true;
   }
   return false;

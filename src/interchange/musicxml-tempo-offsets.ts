@@ -101,7 +101,13 @@ function plan(doc:Document):Map<Element,string>|null {
     }
   }
   // alphaTab keeps one bar length per measure, so every part that sets one must agree.
-  for(const index of moved){const set=meters.map(partMeters=>partMeters[index]).filter(value=>value!==undefined);if(set.some(value=>value!==set[0]))return null;}
+  // One pass per part, so a long part beside many empty ones stays linear.
+  const agreed=new Map<number,unknown>();
+  for(const partMeters of meters)for(const [index,value] of partMeters.entries()){
+    if(value===undefined||!moved.has(index))continue;
+    if(agreed.has(index)&&agreed.get(index)!==value)return null;
+    agreed.set(index,value);
+  }
   return changes.size?changes:null;
 }
 

@@ -129,4 +129,4 @@ The one-distance-code row also explains honest-read.gp on batch: fflate's output
 - The Open check also covers restore and reload. A document that misses the deadline during restore is left out of the session, and nothing in the UI brings back its evidence copy.
 - The deadline is not a memory bound: with it raised to 60 s, an allocating Worker killed the renderer at 21 to 25 s. No file reached that ceiling; honest admission peaked at 2.8 GiB.
 - A 63 MiB honest file is admitted, then fails in `buildDocument` with "Invalid string length".
-- Other overlays were not audited for slow patterns beyond `<offset`, `<sound` and `<tied`.
+- Slow patterns were fixed in the offset match, `hasSoundMix`, the bar-length check and the ASCII header. Workers lack `DOMParser`, so the overlays run on the window, outside the deadline, and each needs its own bound. `xml.ts:51,76` was reasoned about, not measured.

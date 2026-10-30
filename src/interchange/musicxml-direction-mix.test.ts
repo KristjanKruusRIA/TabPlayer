@@ -225,3 +225,10 @@ describe('MusicXML direction volume and pan',()=>{
     }
   });
 });
+
+it('searches a region once when many sounds share one far closer',()=>{
+  const xml=`<score-partwise><!--${'<sound a="1">'.repeat(80000)}</sound>--></score-partwise>`;
+  const score=new model.Score(),started=performance.now();
+  expect(applyMusicXmlDirectionMix(score,strToU8(xml),new Settings())).toBe(score);
+  expect(performance.now()-started).toBeLessThan(20000);
+});

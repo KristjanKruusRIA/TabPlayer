@@ -148,8 +148,8 @@ function values(slots:number,grid:number):{duration:number;dots:number}[] {
 }
 
 function header(lines:string[],name:string):string|undefined {
-  const pattern=new RegExp(`^\\s*${name}\\s*[:=]\\s*(.+?)\\s*$`,'i');
-  for(const line of lines){const match=pattern.exec(line);if(match)return match[1];}
+  const pattern=new RegExp(`^\\s*${name}\\s*[:=](.*)$`,'i');
+  for(const line of lines){const value=pattern.exec(line)?.[1].trim();if(value)return value;}
   return undefined;
 }
 

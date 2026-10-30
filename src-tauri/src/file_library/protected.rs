@@ -1,4 +1,4 @@
-use crate::fs_identity::{file_id, file_id_io};
+use crate::fs_identity::{FileId, file_id_io};
 use crate::workspace::same_path;
 use std::{
     io::ErrorKind,
@@ -73,15 +73,32 @@ impl ProtectedPaths {
     }
 }
 
-/// Whether `path`, or a folder above it that exists, is the folder `root` names. A folder above
-/// the path whose attributes this user may not read (access denied) cannot be the protected root,
-/// which TabPlayer made and can read, so it is passed over; the name checks above still apply to it.
-/// Any other failure to identify a folder that exists refuses the path.
+/// A folder with no usable identity (a file system that reports index 0 or -1) cannot be matched by
+/// identity, and one this user may not read cannot be the protected root, which TabPlayer made and
+/// can read. Neither is an answer about the path, so the name checks above decide for those folders.
+fn no_identity(error: &std::io::Error) -> bool {
+    matches!(
+        error.kind(),
+        ErrorKind::PermissionDenied | ErrorKind::Unsupported
+    )
+}
+
+/// Whether `path`, or a folder above it that exists, is the folder `root` names. Any failure to
+/// identify a folder that exists, other than `no_identity`, refuses the path.
 fn reaches(path: &Path, root: &Path) -> Result<bool, String> {
-    let root_id = match file_id(root) {
+    reaches_by(path, root, &file_id_io)
+}
+
+fn reaches_by(
+    path: &Path,
+    root: &Path,
+    identify: &dyn Fn(&Path) -> std::io::Result<FileId>,
+) -> Result<bool, String> {
+    let root_id = match identify(root) {
         Ok(id) => id,
+        Err(error) if no_identity(&error) => return Ok(false),
         Err(_) if !root.exists() => return Ok(false),
-        Err(error) => return Err(error),
+        Err(error) => return Err(format!("Could not identify {}: {error}", root.display())),
     };
     for ancestor in path.ancestors() {
         let ancestor = if ancestor.as_os_str().is_empty() {
@@ -90,10 +107,10 @@ fn reaches(path: &Path, root: &Path) -> Result<bool, String> {
             ancestor
         };
         match std::fs::symlink_metadata(ancestor) {
-            Ok(_) => match file_id_io(ancestor) {
+            Ok(_) => match identify(ancestor) {
                 Ok(id) if id == root_id => return Ok(true),
                 Ok(_) => {}
-                Err(error) if error.kind() == ErrorKind::PermissionDenied => {}
+                Err(error) if no_identity(&error) => {}
                 Err(error) => {
                     return Err(format!(
                         "Could not identify {}: {error}",
@@ -327,6 +344,64 @@ mod tests {
                 .check(&directory.path().join("file-library-v1/score.gp"))
                 .is_err()
         );
+    }
+
+    /// As a file system that reports index 0 or -1 answers: the folder exists and has no identity.
+    fn no_usable_identity() -> std::io::Error {
+        std::io::Error::new(ErrorKind::Unsupported, "no usable file identity")
+    }
+
+    #[test]
+    fn a_folder_with_no_usable_identity_is_no_match_and_does_not_refuse_the_path() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().join("library");
+        let target = directory.path().join("music");
+        std::fs::create_dir(&root).unwrap();
+        std::fs::create_dir(&target).unwrap();
+        let root_id = crate::fs_identity::file_id_io(&root).unwrap();
+        let identify = |path: &Path| {
+            if path == root {
+                Ok(root_id)
+            } else {
+                Err(no_usable_identity())
+            }
+        };
+        assert_eq!(
+            reaches_by(&target.join("song.gp"), &root, &identify),
+            Ok(false)
+        );
+        // The root itself still matches by identity, and on such a volume the name checks still apply.
+        assert_eq!(
+            reaches_by(&root.join("song.gp"), &root, &identify),
+            Ok(true)
+        );
+        let unusable = |_: &Path| Err(no_usable_identity());
+        assert_eq!(
+            reaches_by(&target.join("song.gp"), &root, &unusable),
+            Ok(false)
+        );
+        assert!(
+            ProtectedPaths::new(vec![root.clone()])
+                .unwrap()
+                .check(&root.join("song.gp"))
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn any_other_failure_to_identify_a_folder_that_exists_still_refuses() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().join("library");
+        std::fs::create_dir(&root).unwrap();
+        let root_id = crate::fs_identity::file_id_io(&root).unwrap();
+        let broken = |path: &Path| {
+            if path == root {
+                Ok(root_id)
+            } else {
+                Err(std::io::Error::other("the disk went away"))
+            }
+        };
+        assert!(reaches_by(directory.path(), &root, &broken).is_err());
     }
 
     #[test]

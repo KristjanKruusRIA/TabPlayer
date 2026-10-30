@@ -16,9 +16,11 @@ pub struct FileId {
 
 impl FileId {
     /// A zero or all-ones index is what a file system returns when it has no real identity to give.
+    /// The error kind says so, so a caller can tell this from a folder it failed to reach.
     fn checked(volume: u64, index: u64) -> io::Result<Self> {
         if index == 0 || index == u64::MAX {
-            return Err(io::Error::other(
+            return Err(io::Error::new(
+                io::ErrorKind::Unsupported,
                 "The file system gave no usable file identity.",
             ));
         }
@@ -104,18 +106,33 @@ mod sys {
 
     /// Opens a folder itself, never what a link in its place would lead to, and keeps it from being
     /// renamed, deleted or replaced until the handle is dropped. Callers pin every folder of a chain.
+    /// A scanner that holds the folder for a moment (sharing violation) is waited for briefly.
     pub fn pin_folder(path: &Path) -> io::Result<File> {
-        let file = std::fs::OpenOptions::new()
-            .access_mode(LIST_AND_READ_ATTRIBUTES)
-            .share_mode(SHARE_READ_WRITE)
-            .custom_flags(BACKUP_SEMANTICS | OPEN_REPARSE_POINT)
-            .open(path)?;
+        let mut attempt = 0;
+        let file = loop {
+            let opened = std::fs::OpenOptions::new()
+                .access_mode(LIST_AND_READ_ATTRIBUTES)
+                .share_mode(SHARE_READ_WRITE)
+                .custom_flags(BACKUP_SEMANTICS | OPEN_REPARSE_POINT)
+                .open(path);
+            match opened {
+                Err(error) if is_in_use(&error) && attempt < 5 => {
+                    attempt += 1;
+                    std::thread::sleep(std::time::Duration::from_millis(25));
+                }
+                other => break other?,
+            }
+        };
         let metadata = file.metadata()?;
         // 0x400 is a reparse point: a link or junction, not the folder itself.
         if metadata.file_attributes() & 0x400 != 0 || !metadata.is_dir() {
             return Err(io::Error::other("a link or not a folder"));
         }
         Ok(file)
+    }
+
+    pub fn is_in_use(error: &io::Error) -> bool {
+        error.raw_os_error() == Some(SHARING_VIOLATION)
     }
 
     pub fn final_path(file: &File, _path: &Path) -> Result<PathBuf, String> {
@@ -138,16 +155,28 @@ mod sys {
         }
     }
 
+    /// The pinned chain keeps `directory` where it is, so its path is as good as its handle here.
+    pub fn create_in(_folder: &File, directory: &Path, name: &str) -> io::Result<File> {
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(directory.join(name))
+    }
+
+    pub fn remove_in(_folder: &File, directory: &Path, name: &str) -> io::Result<()> {
+        std::fs::remove_file(directory.join(name))
+    }
+
     /// Renames without replacing: an existing target fails with `AlreadyExists`. A scanner holding
     /// the file for a moment (sharing violation) is waited for briefly.
-    pub fn rename_new(from: &Path, to: &Path) -> io::Result<()> {
+    pub fn rename_new_in(_folder: &File, directory: &Path, from: &str, to: &str) -> io::Result<()> {
         let wide = |path: &Path| {
             path.as_os_str()
                 .encode_wide()
                 .chain(Some(0))
                 .collect::<Vec<u16>>()
         };
-        let (from, to) = (wide(from), wide(to));
+        let (from, to) = (wide(&directory.join(from)), wide(&directory.join(to)));
         let mut attempt = 0;
         loop {
             if unsafe { MoveFileExW(from.as_ptr(), to.as_ptr(), 0) } != 0 {
@@ -166,7 +195,13 @@ mod sys {
 #[cfg(not(windows))]
 mod sys {
     use super::*;
-    use std::os::unix::fs::MetadataExt;
+    use std::{
+        ffi::CString,
+        os::{
+            fd::{AsRawFd, FromRawFd},
+            unix::fs::MetadataExt,
+        },
+    };
 
     pub fn handle_id(file: &File) -> io::Result<FileId> {
         let metadata = file.metadata()?;
@@ -179,8 +214,9 @@ mod sys {
     }
 
     /// There is no way here to hold a folder in place, so this opens the folder, refuses a link, and
-    /// checks that the open handle is the entry that was inspected. A swap after that is caught by the
-    /// callers' check of where the new file landed, which removes it; it is not prevented.
+    /// checks that the open handle is the entry that was inspected. A swap after that is seen by the
+    /// callers' check of where the new file is. The file itself goes through this handle (see
+    /// `create_in`), so a swap can move it but never send it, or its removal, to another folder.
     pub fn pin_folder(path: &Path) -> io::Result<File> {
         let entry = std::fs::symlink_metadata(path)?;
         if entry.file_type().is_symlink() || !entry.is_dir() {
@@ -194,39 +230,77 @@ mod sys {
         Ok(file)
     }
 
+    pub fn is_in_use(_error: &io::Error) -> bool {
+        false
+    }
+
+    /// No system call here reports a file's path from its handle. The name the caller used is what
+    /// the check of the chain above it needs; nothing may be removed through this path, since a
+    /// folder swapped in meanwhile makes it another file (`remove_in` goes through the handle).
     pub fn final_path(_file: &File, path: &Path) -> Result<PathBuf, String> {
-        std::fs::canonicalize(path).map_err(|error| error.to_string())
+        Ok(path.to_path_buf())
+    }
+
+    fn c_name(name: &str) -> io::Result<CString> {
+        CString::new(name).map_err(|_| io::Error::from(io::ErrorKind::InvalidInput))
+    }
+
+    fn open_at(folder: &File, name: &str, flags: libc::c_int) -> io::Result<File> {
+        let name = c_name(name)?;
+        let mode: libc::c_uint = 0o666;
+        let flags = flags | libc::O_NOFOLLOW | libc::O_CLOEXEC;
+        // SAFETY: `name` is a valid C string for the call, and a descriptor it returns is owned by nothing else.
+        let descriptor = unsafe { libc::openat(folder.as_raw_fd(), name.as_ptr(), flags, mode) };
+        if descriptor < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        // SAFETY: as above.
+        Ok(unsafe { File::from_raw_fd(descriptor) })
+    }
+
+    /// Creates the file in the folder the handle is, wherever that folder has moved to.
+    pub fn create_in(folder: &File, _directory: &Path, name: &str) -> io::Result<File> {
+        open_at(folder, name, libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL)
+    }
+
+    pub fn remove_in(folder: &File, _directory: &Path, name: &str) -> io::Result<()> {
+        let name = c_name(name)?;
+        // SAFETY: `name` is a valid C string for the call.
+        if unsafe { libc::unlinkat(folder.as_raw_fd(), name.as_ptr(), 0) } != 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(())
     }
 
     /// Hard-links the file into place, which fails if the target exists, and removes the old name. On a
-    /// file system without hard links the target is reserved with `create_new` and filled by copying, so
+    /// file system without hard links the target is reserved with `create_in` and filled by copying, so
     /// nothing is replaced either way. A name that cannot be removed afterwards is the caller's to sweep.
-    pub fn rename_new(from: &Path, to: &Path) -> io::Result<()> {
-        match std::fs::hard_link(from, to) {
+    pub fn rename_new_in(folder: &File, directory: &Path, from: &str, to: &str) -> io::Result<()> {
+        let (source, target) = (c_name(from)?, c_name(to)?);
+        let handle = folder.as_raw_fd();
+        // SAFETY: both names are valid C strings for the call.
+        let linked = unsafe { libc::linkat(handle, source.as_ptr(), handle, target.as_ptr(), 0) };
+        if linked == 0 {
+            let _ = remove_in(folder, directory, from);
+            return Ok(());
+        }
+        let error = io::Error::last_os_error();
+        if error.kind() == io::ErrorKind::AlreadyExists {
+            return Err(error);
+        }
+        let mut written = create_in(folder, directory, to)?;
+        let copied = open_at(folder, from, libc::O_RDONLY)
+            .and_then(|mut reader| io::copy(&mut reader, &mut written))
+            .and_then(|_| written.sync_all());
+        match copied {
             Ok(()) => {
-                let _ = std::fs::remove_file(from);
+                let _ = remove_in(folder, directory, from);
                 Ok(())
             }
-            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => Err(error),
-            Err(_) => {
-                let mut target = std::fs::OpenOptions::new()
-                    .write(true)
-                    .create_new(true)
-                    .open(to)?;
-                let copied = File::open(from)
-                    .and_then(|mut source| io::copy(&mut source, &mut target))
-                    .and_then(|_| target.sync_all());
-                match copied {
-                    Ok(()) => {
-                        let _ = std::fs::remove_file(from);
-                        Ok(())
-                    }
-                    Err(error) => {
-                        drop(target);
-                        let _ = std::fs::remove_file(to);
-                        Err(error)
-                    }
-                }
+            Err(error) => {
+                drop(written);
+                let _ = remove_in(folder, directory, to);
+                Err(error)
             }
         }
     }
@@ -262,9 +336,26 @@ pub fn final_path(file: &File, path: &Path) -> Result<PathBuf, String> {
     sys::final_path(file, path)
 }
 
-/// Moves `from` to `to` and never replaces an existing `to`.
-pub fn rename_new(from: &Path, to: &Path) -> io::Result<()> {
-    sys::rename_new(from, to)
+/// Whether a file or folder could not be opened only because something else holds it open.
+pub fn is_in_use(error: &io::Error) -> bool {
+    sys::is_in_use(error)
+}
+
+/// Creates a new file in the pinned `folder`, whose path is `directory`. On Windows the pin holds the
+/// folder at that path. Elsewhere the handle is used and the path ignored, so a folder swapped in
+/// after the pin receives nothing.
+pub fn create_in(folder: &File, directory: &Path, name: &str) -> io::Result<File> {
+    sys::create_in(folder, directory, name)
+}
+
+/// Moves `from` to `to` inside the pinned `folder` and never replaces an existing `to`.
+pub fn rename_new_in(folder: &File, directory: &Path, from: &str, to: &str) -> io::Result<()> {
+    sys::rename_new_in(folder, directory, from, to)
+}
+
+/// Removes `name` from the pinned `folder`, by the same rules as `create_in`.
+pub fn remove_in(folder: &File, directory: &Path, name: &str) -> io::Result<()> {
+    sys::remove_in(folder, directory, name)
 }
 
 #[cfg(test)]
@@ -292,27 +383,89 @@ mod tests {
 
     #[test]
     fn a_zero_or_all_ones_index_is_not_an_identity() {
-        assert!(FileId::checked(1, 0).is_err());
-        assert!(FileId::checked(1, u64::MAX).is_err());
+        for index in [0, u64::MAX] {
+            let error = FileId::checked(1, index).unwrap_err();
+            assert_eq!(error.kind(), io::ErrorKind::Unsupported);
+        }
         assert!(FileId::checked(1, 7).is_ok());
     }
 
     #[test]
     fn rename_never_replaces_and_reports_the_clash() {
         let directory = tempfile::tempdir().unwrap();
-        let (from, to) = (
-            directory.path().join("from.tmp"),
-            directory.path().join("to.gp"),
-        );
-        std::fs::write(&from, "new").unwrap();
-        std::fs::write(&to, "mine").unwrap();
-        let error = rename_new(&from, &to).unwrap_err();
+        let (path, pin) = (directory.path(), pin_folder(directory.path()).unwrap());
+        let (from, to) = ("from.tmp", "to.gp");
+        std::fs::write(path.join(from), "new").unwrap();
+        std::fs::write(path.join(to), "mine").unwrap();
+        let error = rename_new_in(&pin, path, from, to).unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::AlreadyExists);
-        assert_eq!(std::fs::read(&to).unwrap(), b"mine");
-        std::fs::remove_file(&to).unwrap();
-        rename_new(&from, &to).unwrap();
-        assert_eq!(std::fs::read(&to).unwrap(), b"new");
-        assert!(!from.exists());
+        assert_eq!(std::fs::read(path.join(to)).unwrap(), b"mine");
+        std::fs::remove_file(path.join(to)).unwrap();
+        rename_new_in(&pin, path, from, to).unwrap();
+        assert_eq!(std::fs::read(path.join(to)).unwrap(), b"new");
+        assert!(!path.join(from).exists());
+    }
+
+    #[test]
+    fn create_refuses_a_taken_name_and_remove_takes_only_the_named_file() {
+        use std::io::Write;
+        let directory = tempfile::tempdir().unwrap();
+        let (path, pin) = (directory.path(), pin_folder(directory.path()).unwrap());
+        let mut file = create_in(&pin, path, "new.tmp").unwrap();
+        file.write_all(b"data").unwrap();
+        drop(file);
+        assert_eq!(
+            create_in(&pin, path, "new.tmp").unwrap_err().kind(),
+            io::ErrorKind::AlreadyExists
+        );
+        assert_eq!(std::fs::read(path.join("new.tmp")).unwrap(), b"data");
+        std::fs::write(path.join("other.gp"), "mine").unwrap();
+        remove_in(&pin, path, "new.tmp").unwrap();
+        assert!(!path.join("new.tmp").exists() && path.join("other.gp").exists());
+        assert_eq!(
+            remove_in(&pin, path, "new.tmp").unwrap_err().kind(),
+            io::ErrorKind::NotFound
+        );
+    }
+
+    /// The case the undo must survive: the folder moves after the pin, and a same-named file of
+    /// someone else's now sits at the old path.
+    #[cfg(unix)]
+    #[test]
+    fn a_pin_follows_its_folder_when_another_is_swapped_into_the_path() {
+        let directory = tempfile::tempdir().unwrap();
+        let (slot, moved) = (
+            directory.path().join("slot"),
+            directory.path().join("moved"),
+        );
+        std::fs::create_dir(&slot).unwrap();
+        let pin = pin_folder(&slot).unwrap();
+        drop(create_in(&pin, &slot, "song.gp").unwrap());
+        std::fs::rename(&slot, &moved).unwrap();
+        std::fs::create_dir(&slot).unwrap();
+        std::fs::write(slot.join("song.gp"), "theirs").unwrap();
+        // A new file and a removal both reach the moved folder, and the file at the path is untouched.
+        drop(create_in(&pin, &slot, "next.tmp").unwrap());
+        assert!(moved.join("next.tmp").exists() && !slot.join("next.tmp").exists());
+        remove_in(&pin, &slot, "song.gp").unwrap();
+        assert!(!moved.join("song.gp").exists());
+        assert_eq!(std::fs::read(slot.join("song.gp")).unwrap(), b"theirs");
+        // Nor does a rename leave the pinned folder.
+        rename_new_in(&pin, &slot, "next.tmp", "landed.gp").unwrap();
+        assert!(moved.join("landed.gp").exists() && !slot.join("landed.gp").exists());
+    }
+
+    /// A symbolic link in the name is not followed, whatever it points at.
+    #[cfg(unix)]
+    #[test]
+    fn creating_over_a_link_is_refused() {
+        let directory = tempfile::tempdir().unwrap();
+        let (path, pin) = (directory.path(), pin_folder(directory.path()).unwrap());
+        let target = path.join("target.gp");
+        std::fs::write(&target, "mine").unwrap();
+        std::os::unix::fs::symlink(&target, path.join("link.tmp")).unwrap();
+        assert!(create_in(&pin, path, "link.tmp").is_err());
+        assert_eq!(std::fs::read(&target).unwrap(), b"mine");
     }
 
     #[test]
@@ -339,6 +492,34 @@ mod tests {
         }
         drop(pins);
         std::fs::rename(&inner, directory.path().join("moved")).unwrap();
+    }
+
+    /// A folder a scanner has open without sharing delete is busy, not a link, and is waited for.
+    #[cfg(windows)]
+    #[test]
+    fn a_folder_held_for_a_moment_is_waited_for_and_a_held_one_is_reported_as_in_use() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let directory = tempfile::tempdir().unwrap();
+        let holder = || {
+            std::fs::OpenOptions::new()
+                .access_mode(0x0001_0000)
+                .share_mode(3)
+                .custom_flags(0x0200_0000)
+                .open(directory.path())
+                .unwrap()
+        };
+        let held = holder();
+        let error = pin_folder(directory.path()).unwrap_err();
+        assert!(is_in_use(&error), "{error:?}");
+        drop(held);
+        let held = holder();
+        std::thread::scope(|scope| {
+            scope.spawn(|| {
+                std::thread::sleep(std::time::Duration::from_millis(40));
+                drop(held);
+            });
+            assert!(pin_folder(directory.path()).is_ok());
+        });
     }
 
     #[cfg(windows)]

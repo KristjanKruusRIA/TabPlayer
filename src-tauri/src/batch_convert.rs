@@ -7,7 +7,10 @@
 //! compared by file identity, not by name, so network and loopback spellings of one folder count as
 //! one. The conversion itself runs in the window, through the same import and export code as
 //! opening and exporting a score.
-use crate::fs_identity::{ancestor_ids, file_id, final_path, handle_id, pin_folder, rename_new};
+use crate::fs_identity::{
+    ancestor_ids, create_in, file_id, final_path, handle_id, is_in_use, pin_folder, remove_in,
+    rename_new_in,
+};
 use crate::intake::{read_stable, reparse};
 use serde::Serialize;
 use std::{
@@ -160,7 +163,8 @@ fn slashes(path: &Path) -> String {
 }
 
 /// Why a name from a listing cannot be used as a single plain file or folder name here. A colon and a
-/// trailing dot or space are only a problem where the file system gives them a meaning (Windows).
+/// trailing dot or space are only a problem where the file system gives them a meaning (Windows). DEL
+/// and the C1 controls are legal in names everywhere, unlike the C0 controls Windows refuses.
 fn name_problem(name: &OsStr) -> Option<&'static str> {
     let Some(name) = name.to_str() else {
         return Some("The name is not valid text.");
@@ -169,7 +173,7 @@ fn name_problem(name: &OsStr) -> Option<&'static str> {
         || name == "."
         || name == ".."
         || name.contains(['/', '\\'])
-        || name.chars().any(char::is_control)
+        || name.chars().any(|character| character < ' ')
         || Path::new(name)
             .components()
             .any(|part| !matches!(part, Component::Normal(_)))
@@ -190,6 +194,9 @@ fn name_problem(name: &OsStr) -> Option<&'static str> {
 /// Windows programs read these names, with any extension, as a device. Paths in the extended form reach
 /// no device, so such a file can be made and read here, but other tools may not open it.
 fn device_name(name: &str) -> bool {
+    if !cfg!(windows) {
+        return false;
+    }
     let stem = name.split('.').next().unwrap_or(name).trim_end();
     let upper = stem.to_ascii_uppercase();
     let number = |rest: &str| {
@@ -429,8 +436,9 @@ impl BatchSession {
     /// open for the whole call, so on Windows none can be renamed, deleted or replaced by a link
     /// meanwhile, and the temporary file stays open through the rename. Where the file really landed
     /// is then checked by identity, before and after the rename, and a file that landed outside the
-    /// destination, or inside the source, is deleted. Elsewhere folders cannot be held, so there the
-    /// same check detects and undoes a swap instead of preventing it.
+    /// destination, or inside the source, is deleted. Elsewhere folders cannot be held, so the file is
+    /// created, renamed and removed through the handle of the folder it belongs in: a swap of the
+    /// folder is detected and undone, and the undo cannot reach a same-named file in the swapped-in one.
     pub fn write(
         &mut self,
         index: usize,
@@ -451,9 +459,7 @@ impl BatchSession {
         if self.written.contains(&index) {
             return Err("That file was already written in this run.".into());
         }
-        if !bytes.starts_with(b"PK\x03\x04") || bytes.len() > MAX_OUTPUT_BYTES {
-            return Err("The converted score is not a Guitar Pro file within 64 MiB.".into());
-        }
+        check_output(bytes)?;
         if self.written_bytes + bytes.len() as u64 > MAX_TOTAL_BYTES {
             return Err("The converted files reached the 512 MiB limit for one run.".into());
         }
@@ -463,10 +469,8 @@ impl BatchSession {
             return Err("The destination folder changed. Choose it again.".into());
         }
         let source_id = file_id(&source)?;
-        let mut pins = vec![
-            pin_folder(&current)
-                .map_err(|error| format!("{} cannot be used: {error}", display(&current)))?,
-        ];
+        let mut pins =
+            vec![pin_folder(&current).map_err(|error| unusable_folder(&current, &error))?];
         let current_id = handle_id(&pins[0])?;
         separate(&source, &current)?;
         let stem = relative
@@ -499,14 +503,10 @@ impl BatchSession {
                 }
                 other => other,
             };
-            pins.push(pinned.map_err(|error| {
-                format!(
-                    "{} is a link or cannot be opened, so nothing was written there: {error}",
-                    display(&directory)
-                )
-            })?);
+            pins.push(pinned.map_err(|error| unusable_folder(&directory, &error))?);
         }
-        let directory_id = handle_id(pins.last().expect("the destination is pinned"))?;
+        let pin = pins.last().expect("the destination is pinned");
+        let directory_id = handle_id(pin)?;
         {
             let chain = ancestor_ids(&directory)?;
             if chain.first() != Some(&directory_id) || !chain.contains(&current_id) {
@@ -514,7 +514,7 @@ impl BatchSession {
             }
         }
         separate(&source, &directory)?;
-        sweep_stale(&directory);
+        sweep_stale(pin, &directory, MAX_VISITED);
 
         // Where a file the system says is in `directory` really is: in the chosen folder, below the
         // destination and never in or below the source.
@@ -540,30 +540,30 @@ impl BatchSession {
             (Some(located), verdict)
         };
 
-        let temporary = directory.join(format!(
-            ".tabplayer-batch-{}-{}.tmp",
+        let temporary_name = format!(
+            "{TEMPORARY_PREFIX}{}-{}{TEMPORARY_SUFFIX}",
             std::process::id(),
             TEMPORARY.fetch_add(1, Ordering::Relaxed)
-        ));
+        );
+        let temporary = directory.join(&temporary_name);
         protect(&temporary)?;
         // Declared before the file so it runs after the file is closed.
-        let mut leftover = Leftover(Some(temporary.clone()));
-        let mut file = fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&temporary)
-            .map_err(|error| {
-                format!(
-                    "Could not create a file in {}: {error}",
-                    display(&directory)
-                )
-            })?;
+        let mut leftover = Leftover {
+            folder: pin,
+            directory: &directory,
+            name: Some(temporary_name.clone()),
+        };
+        let mut file = create_in(pin, &directory, &temporary_name).map_err(|error| {
+            format!(
+                "Could not create a file in {}: {error}",
+                display(&directory)
+            )
+        })?;
         let (located, verdict) = check_home(&file, &temporary);
         if let Err(error) = verdict {
             drop(file);
-            if let Some(located) = located {
-                remove_file_patiently(&located);
-            }
+            remove_landed(pin, &directory, &temporary_name, located.as_deref());
+            leftover.name = None;
             return Err(error);
         }
         if let Err(error) = file.write_all(bytes).and_then(|()| file.sync_all()) {
@@ -581,17 +581,14 @@ impl BatchSession {
                 continue;
             }
             protect(&path)?;
-            match rename_new(&temporary, &path) {
+            match rename_new_in(pin, &directory, &temporary_name, &name) {
                 Ok(()) => {
-                    leftover.0 = None;
+                    leftover.name = None;
                     // The held handle follows the file, so this is where the rename really put it.
                     let (located, verdict) = check_home(&file, &path);
                     if let Err(error) = verdict {
                         drop(file);
-                        if let Some(located) = located {
-                            remove_file_patiently(&located);
-                        }
-                        remove_file_patiently(&path);
+                        remove_landed(pin, &directory, &name, located.as_deref());
                         return Err(error);
                     }
                     self.claimed.insert(key);
@@ -619,21 +616,60 @@ impl BatchSession {
 
 const DEVICE_NOTE: &str = "Windows programs read this name as a device and may not open it. Rename it with a tool that uses extended paths.";
 const STALE_TEMPORARY: std::time::Duration = std::time::Duration::from_secs(60 * 60);
+const TEMPORARY_PREFIX: &str = ".tabplayer-batch-";
+const TEMPORARY_SUFFIX: &str = ".tmp";
+
+/// Why converted bytes cannot be written. Applied before the bytes are copied off the request.
+fn check_output(bytes: &[u8]) -> Result<(), String> {
+    if !bytes.starts_with(b"PK\x03\x04") || bytes.len() > MAX_OUTPUT_BYTES {
+        return Err("The converted score is not a Guitar Pro file within 64 MiB.".into());
+    }
+    Ok(())
+}
+
+/// Says why a folder on the way to the file cannot be pinned, without calling a busy folder a link.
+fn unusable_folder(path: &Path, error: &std::io::Error) -> String {
+    if is_in_use(error) {
+        format!(
+            "{} is in use by another program, so nothing was written there. Try again when it is free.",
+            display(path)
+        )
+    } else {
+        format!(
+            "{} is a link or cannot be opened, so nothing was written there: {error}",
+            display(path)
+        )
+    }
+}
+
+/// A name this module makes for a temporary file: the process id and a counter, both decimal.
+fn is_temporary(name: &str) -> bool {
+    let numbers = name
+        .strip_prefix(TEMPORARY_PREFIX)
+        .and_then(|rest| rest.strip_suffix(TEMPORARY_SUFFIX))
+        .and_then(|rest| rest.split_once('-'));
+    let decimal = |text: &str| !text.is_empty() && text.bytes().all(|byte| byte.is_ascii_digit());
+    numbers.is_some_and(|(process, counter)| decimal(process) && decimal(counter))
+}
 
 /// Removes the temporary file when a write ends without it being renamed into place.
-struct Leftover(Option<PathBuf>);
-impl Drop for Leftover {
+struct Leftover<'a> {
+    folder: &'a File,
+    directory: &'a Path,
+    name: Option<String>,
+}
+impl Drop for Leftover<'_> {
     fn drop(&mut self) {
-        if let Some(path) = self.0.take() {
-            remove_file_patiently(&path);
+        if let Some(name) = self.name.take() {
+            remove_patiently(self.folder, self.directory, &name);
         }
     }
 }
 
-/// Removes a file, waiting briefly for a scanner or indexer that has it open.
-fn remove_file_patiently(path: &Path) {
+/// Runs an attempt, waiting briefly for a scanner or indexer that has the file open.
+fn patiently(remove: impl Fn() -> std::io::Result<()>) {
     for attempt in 0..6 {
-        match fs::remove_file(path) {
+        match remove() {
             Ok(()) => return,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return,
             Err(_) if attempt < 5 => std::thread::sleep(std::time::Duration::from_millis(25)),
@@ -642,18 +678,38 @@ fn remove_file_patiently(path: &Path) {
     }
 }
 
+/// Removes a file from the pinned folder, never through a path a swapped folder could redirect.
+fn remove_patiently(folder: &File, directory: &Path, name: &str) {
+    patiently(|| remove_in(folder, directory, name));
+}
+
+/// Undoes a file that landed in the wrong place. On Windows the handle reported where it is, so that
+/// path goes first. Elsewhere the only path known is the one a swap redirects, so the pin alone is used.
+fn remove_landed(folder: &File, directory: &Path, name: &str, located: Option<&Path>) {
+    if cfg!(windows)
+        && let Some(located) = located
+    {
+        patiently(|| fs::remove_file(located));
+    }
+    remove_patiently(folder, directory, name);
+}
+
 /// Removes temporary files an interrupted earlier run left in a folder about to be written to. Only
-/// files untouched for an hour go, so another running copy's file in progress is left alone.
-fn sweep_stale(directory: &Path) {
+/// files untouched for an hour go, so another running copy's file in progress is left alone. A listing
+/// that fails once ends the sweep, and `limit` bounds a huge folder.
+fn sweep_stale(folder: &File, directory: &Path, limit: usize) {
     let Ok(listing) = fs::read_dir(directory) else {
         return;
     };
-    for entry in listing.flatten() {
+    for entry in listing.take(limit) {
+        let Ok(entry) = entry else {
+            return;
+        };
         let name = entry.file_name();
         let Some(name) = name.to_str() else {
             continue;
         };
-        if !(name.starts_with(".tabplayer-batch-") && name.ends_with(".tmp")) {
+        if !is_temporary(name) {
             continue;
         }
         let stale = entry
@@ -664,7 +720,7 @@ fn sweep_stale(directory: &Path) {
             .and_then(|modified| modified.elapsed().ok())
             .is_some_and(|age| age >= STALE_TEMPORARY);
         if stale {
-            remove_file_patiently(&entry.path());
+            remove_patiently(folder, directory, name);
         }
     }
 }
@@ -768,6 +824,7 @@ pub async fn batch_write(
     let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else {
         return Err("The converted score must be sent as raw bytes.".into());
     };
+    check_output(bytes)?;
     let bytes = bytes.clone();
     let header = |name: &str| {
         request
@@ -1223,10 +1280,117 @@ mod tests {
             "Aux. Pt 2.gp5",
             "Aux",
         ] {
-            assert!(device_name(device), "{device:?}");
+            assert_eq!(device_name(device), cfg!(windows), "{device:?}");
         }
         for plain in ["Nulled.gp", "COM10.gp", "a.gp3", "Console.gp"] {
             assert!(!device_name(plain), "{plain:?}");
+        }
+    }
+
+    #[test]
+    fn del_and_c1_are_legal_names_and_only_c0_is_not() {
+        for good in ["x\u{7f}.gp", "x\u{80}.gp", "x\u{85}.gp", "x\u{9f}.gp"] {
+            assert_eq!(name_problem(OsStr::new(good)), None, "{good:?}");
+        }
+        for bad in ["x\u{0}.gp", "x\u{1f}.gp", "x\n.gp"] {
+            assert!(name_problem(OsStr::new(bad)).is_some(), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn a_del_or_c1_named_score_is_scanned_and_written() {
+        let (_root, source, destination) = tree();
+        fs::write(source.join("del\u{7f}.gp3"), "three").unwrap();
+        fs::write(source.join("nel\u{85}.gp3"), "three").unwrap();
+        let mut batch = ready(&source, &destination);
+        let scan = batch.scan(&kinds(&["gp345"])).unwrap();
+        assert!(scan.skipped.is_empty(), "{:?}", scan.skipped);
+        let index = |name: &str| {
+            scan.files
+                .iter()
+                .find(|file| file.relative == name)
+                .unwrap()
+                .index
+        };
+        for name in ["del\u{7f}", "nel\u{85}"] {
+            let written = batch
+                .write(index(&format!("{name}.gp3")), &gp(), false, &open())
+                .unwrap();
+            assert_eq!(written.relative, format!("{name}.gp"));
+            assert!(destination.join(&written.relative).exists());
+        }
+    }
+
+    #[test]
+    fn only_names_this_module_makes_count_as_temporary() {
+        for ours in [".tabplayer-batch-1234-0.tmp", ".tabplayer-batch-1-99.tmp"] {
+            assert!(is_temporary(ours), "{ours:?}");
+        }
+        for theirs in [
+            ".tabplayer-batch-my band notes.tmp",
+            ".tabplayer-batch-.tmp",
+            ".tabplayer-batch--.tmp",
+            ".tabplayer-batch-1-.tmp",
+            ".tabplayer-batch--1.tmp",
+            ".tabplayer-batch-1-2-3.tmp",
+            ".tabplayer-batch-1-2.tmp.txt",
+            ".tabplayer-batch-１-２.tmp",
+            "tabplayer-batch-1-2.tmp",
+        ] {
+            assert!(!is_temporary(theirs), "{theirs:?}");
+        }
+    }
+
+    fn make_old(path: &Path) {
+        let old = std::time::SystemTime::now() - 2 * STALE_TEMPORARY;
+        File::options()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_modified(old)
+            .unwrap();
+    }
+
+    #[test]
+    fn the_sweep_takes_only_stale_files_of_ours_and_stops_at_its_limit() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path();
+        let name = |index: usize| format!(".tabplayer-batch-1-{index}.tmp");
+        for index in 0..3 {
+            fs::write(path.join(name(index)), "old").unwrap();
+            make_old(&path.join(name(index)));
+        }
+        let (fresh, notes) = (
+            ".tabplayer-batch-2-0.tmp",
+            ".tabplayer-batch-my band notes.tmp",
+        );
+        fs::write(path.join(fresh), "new").unwrap();
+        fs::write(path.join(notes), "mine").unwrap();
+        make_old(&path.join(notes));
+        let pin = pin_folder(path).unwrap();
+        sweep_stale(&pin, path, 0);
+        assert_eq!(fs::read_dir(path).unwrap().count(), 5);
+        sweep_stale(&pin, path, 1_000);
+        assert_eq!(listing(path), [fresh, notes]);
+    }
+
+    #[test]
+    fn output_is_refused_on_its_size_and_signature_before_it_is_copied() {
+        assert!(check_output(&gp()).is_ok());
+        assert!(check_output(b"not a zip").is_err());
+        let mut big = vec![0; MAX_OUTPUT_BYTES + 1];
+        big[..4].copy_from_slice(b"PK\x03\x04");
+        assert!(check_output(&big).unwrap_err().contains("64 MiB"));
+    }
+
+    #[test]
+    fn a_busy_folder_is_not_called_a_link() {
+        let folder = Path::new("out");
+        let other = unusable_folder(folder, &std::io::Error::other("a link or not a folder"));
+        assert!(other.contains("is a link"), "{other}");
+        if cfg!(windows) {
+            let busy = unusable_folder(folder, &std::io::Error::from_raw_os_error(32));
+            assert!(busy.contains("in use") && !busy.contains("link"), "{busy}");
         }
     }
 

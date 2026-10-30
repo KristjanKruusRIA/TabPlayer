@@ -39,6 +39,7 @@ import { rangeFromBeats,selectionForTrack } from './editor/range-selection';
 import { planMeasureMap } from './editor/measures';
 import { ClipboardStore } from './editor/ClipboardStore';
 import { ClipboardPanel } from './editor/ClipboardPanel';
+import { NotationEntryPanel } from './editor/NotationEntryPanel';
 import { ScoreErrorsPanel } from './editor/ScoreErrorsPanel';
 import { CommandPalette } from './editor/CommandPalette';
 import { AsciiTabImportDialog } from './workspace/AsciiTabImportDialog';
@@ -459,6 +460,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
       <EditorPanel score={state.score} target={target} string={string} fret={fret} noteIndex={noteIndex} onSelectNote={setNoteIndex} busy={controlsBusy} locked={editLocked} onSelect={next=>{editorSelection(null);select(next);}} onString={s=>select(target,s)} onFret={setFret} onEdit={edit} musicSelection={musicSelection} onMusicSelection={editorSelection} onChord={()=>openModal('harmony')} onScales={()=>openModal('scale')} onAudition={auditionTuning}
         practiceTools={player&&playbackState&&<PracticePanel key={state.documentEpoch} settings={playbackState.practice.settings} busy={controlsBusy||playbackState.practicePending||!playbackState.ready} hasBacking={!!audioSettings.backing} onChange={settings=>player.setPractice(settings)}/>}
         presentationTools={<><EngravingPanel key={`engraving/${state.documentEpoch}`} score={state.score} trackIds={trackIds} value={state.settings.engraving} busy={controlsBusy} onEdit={edit}/><PageLayoutPanel key={`page/${state.documentEpoch}`} value={page} busy={controlsBusy} onEdit={edit}/></>} presentationViewTools={<ViewDefaultsPanel current={{zoom,trackView,scoreDisplay}} load={currentViewDefaults} onSave={writeViewDefaults}/>}>
+        <NotationEntryPanel score={state.score} target={target} busy={controlsBusy} locked={editLocked} onEdit={instrumentEdit} latestScore={()=>controller.getState().score}/>
         <div ref={clipboardSection}><ClipboardPanel score={state.score} target={target} selection={musicSelection} clip={clip} busy={controlsBusy} locked={editLocked} onCopy={mode=>copyMusic(mode)} onCut={mode=>copyMusic(mode,true)} onPaste={pasteMusic}/></div>
         <ScoreErrorsPanel errors={scoreErrors} mark={markErrors} onMark={mark=>{setMarkErrors(mark);writeScoreErrorDisplay(mark);}} onSelect={next=>select(next)} shownTracks={visibleTracks}/>
         <HarmonyTransposePanel key={`harmony/${state.documentEpoch}`} score={state.score} selection={musicSelection} busy={editBusy} onEdit={edit}/>

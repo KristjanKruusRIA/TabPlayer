@@ -155,3 +155,12 @@ it('defines the shared UI tokens and styles primary buttons and fields',()=>{
   expect(css).toMatch(/\.tp-field\b/);
   expect(css).toMatch(/\.tp-button\.primary|\.tp-dialog \.tp-dialog-foot button\.primary/);
 });
+
+it('does not fire onChange when Home or End targets the already selected option', async()=>{
+  const onChange=vi.fn();
+  render(<Segmented label="Mode" value="first" onChange={onChange} options={[{value:'first',label:'First'},{value:'second',label:'Second'}]}/>);
+  const radios=screen.getAllByRole('radio');
+  radios[0].focus();
+  fireEvent.keyDown(radios[0],{key:'Home'});
+  expect(onChange).not.toHaveBeenCalled();
+});

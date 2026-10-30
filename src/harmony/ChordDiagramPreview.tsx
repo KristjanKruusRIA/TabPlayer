@@ -1,4 +1,5 @@
 import { model } from '@coderline/alphatab';
+import { describePartialCapo, getPartialCapo } from '../editor/partial-capo';
 import type { ChordDiagramPreviewProps,HarmonyChord } from '../editor/harmony-types';
 
 const noteNames=['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
@@ -38,5 +39,5 @@ export function ChordDiagramPreview({chord,staff,highlightRoot,onToggle}:ChordDi
       </g>;
     })}
     {chord.barreFrets.map((fret,index)=>{const positions=chord.frets.flatMap((value,i)=>value>=fret?[i]:[]),row=rows.indexOf(fret);return row<0||positions.length<2?null:<line key={index} x1={40+positions[0]*40} x2={40+positions.at(-1)!*40} y1={70+row*30} y2={70+row*30} stroke="#465363" strokeWidth={4} opacity={.5}/>;})}
-  </svg><span className="harmony-diagram-caption muted">Sounding pitches · capo {staff.capo} · sounding offset {staff.transpositionPitch}. Strings run high to low in diagram order.{!chord.showDiagram?' Diagram hidden in score.':''}</span></span>;
+  </svg><span className="harmony-diagram-caption muted">Sounding pitches · capo {staff.capo}{describePartialCapo(getPartialCapo(staff))?` · ${describePartialCapo(getPartialCapo(staff)).toLowerCase()}`:''} · sounding offset {staff.transpositionPitch}. Strings run high to low in diagram order.{!chord.showDiagram?' Diagram hidden in score.':''}</span></span>;
 }

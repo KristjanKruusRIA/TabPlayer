@@ -280,6 +280,34 @@ impl<R: Read> Json<R> {
         serde_json::from_slice(&token).map_err(|_| "Invalid JSON number in indexed project.".into())
     }
 
+    /// The only lock a project can hold: an object with just `kind`, set to `finalized`.
+    fn lock(&mut self) -> Result<(), String> {
+        let mut kind = false;
+        self.object(|json, key| {
+            if key.as_deref() != Some("kind") || kind || json.text(32)? != "finalized" {
+                return Err("Indexed project has an unsupported lock.".into());
+            }
+            kind = true;
+            Ok(())
+        })?;
+        if kind {
+            Ok(())
+        } else {
+            Err("Indexed project has an unsupported lock.".into())
+        }
+    }
+
+    /// A marker field is present only as `true`.
+    fn literal_true(&mut self) -> Result<(), String> {
+        self.whitespace()?;
+        for expected in b"true" {
+            if self.byte()? != *expected {
+                return Err("Indexed project marker must be true.".into());
+            }
+        }
+        Ok(())
+    }
+
     fn unsigned(&mut self) -> Result<u32, String> {
         self.number()?
             .as_u64()
@@ -374,6 +402,9 @@ impl<R: Read> Json<R> {
                 Some("edits") => 4,
                 Some("assets") => 5,
                 Some("baselineEdits") => 6,
+                // Written only when set, as in a saved project: finalized, or marked for a file's partial capo.
+                Some("lock") => 7,
+                Some("partialCapo") => 8,
                 _ => return Err("Indexed project contains an unknown field.".into()),
             };
             seen(&mut fields, index)?;
@@ -390,6 +421,8 @@ impl<R: Read> Json<R> {
                 4 => applied = json.edits(&mut budget)?,
                 5 => json.object(|json, _| json.skip(1))?,
                 6 => baseline = json.edits(&mut budget)?,
+                7 => json.lock()?,
+                8 => json.literal_true()?,
                 _ => unreachable!(),
             }
             Ok(())
@@ -400,11 +433,15 @@ impl<R: Read> Json<R> {
             3 => 0b1111111,
             _ => return Err("This is not a supported TabPlayer project version.".into()),
         };
-        if fields != expected {
+        if fields & 0b1111111 != expected {
             return Err("Indexed project has missing or incompatible schema fields.".into());
         }
+        let base = base.unwrap();
+        if fields & (1 << 8) != 0 && !matches!(base, MetadataBase::File { .. }) {
+            return Err("Indexed project has a partial capo marker without a file base.".into());
+        }
         baseline.extend(applied);
-        Ok((base.unwrap(), baseline))
+        Ok((base, baseline))
     }
 
     fn base(&mut self) -> Result<MetadataBase, String> {

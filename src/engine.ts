@@ -1,6 +1,6 @@
 import { model, Settings } from '@coderline/alphatab';
 import type { BeatTarget, EditCommand, Project, ProjectInput } from './project';
-import { projectCommands } from './project';
+import { appliesFilePartialCapo,projectCommands } from './project';
 import { isSettingsEdit } from './edit-types';
 import type { BackingSettings, ChannelMix, DocumentSettings } from './edit-types';
 import { defaultDocumentSettings, defaultMix, applySettingsEdit, copyTrackSettings, completeSound } from './document-settings';
@@ -14,6 +14,7 @@ import { adjustReferenceSyncBounds,referenceSyncTiming } from './audio/reference
 import { scoreFromJson } from './model-clone';
 import { validateParityCommand } from './parity-commands';
 import { defaultTuningName, validateTuningName } from './editor/structure';
+import { openStringKey, stringCapo } from './editor/partial-capo';
 import { copyGpInterchangeSource, exportGpInterchange, forgetTrackOrderedEntries, loadInterchangeScore } from './interchange/gp';
 import { reflowLyrics,removeLyricsMeasure } from './editor/lyrics';
 import { prepareScoreTimers } from './editor/timers';
@@ -39,11 +40,12 @@ export function validateProject(value: unknown): Project {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid project.');
   const input = value as ProjectInput;
   if (input.format !== 'TabPlayer' || ![1,2,3].includes(input.schemaVersion)) throw new Error('Unsupported project version.');
-  const hasLock=Object.hasOwn(input,'lock');
-  const fields=['format','schemaVersion','engineVersion','base','edits',...(input.schemaVersion>=2?['assets']:[]),...(input.schemaVersion===3?['baselineEdits']:[]),...(hasLock?['lock']:[])];
+  const hasLock=Object.hasOwn(input,'lock'),hasPartialCapo=Object.hasOwn(input,'partialCapo');
+  const fields=['format','schemaVersion','engineVersion','base','edits',...(input.schemaVersion>=2?['assets']:[]),...(input.schemaVersion===3?['baselineEdits']:[]),...(hasLock?['lock']:[]),...(hasPartialCapo?['partialCapo']:[])];
   if(Object.keys(input).length!==fields.length || fields.some(field=>!Object.hasOwn(input,field)))throw new Error('Invalid project fields.');
   const p:Project={...structuredClone(input),schemaVersion:3,assets:input.schemaVersion===1?{}:structuredClone(input.assets),baselineEdits:input.schemaVersion===3?structuredClone(input.baselineEdits):[]};
   if(hasLock){const lock=(input as {lock?:unknown}).lock;if(!lock||typeof lock!=='object'||Array.isArray(lock)||Object.keys(lock).length!==1||(lock as {kind?:unknown}).kind!=='finalized')throw new Error('Invalid project lock.');}
+  if(hasPartialCapo&&((input as {partialCapo?:unknown}).partialCapo!==true||input.base?.kind!=='file'))throw new Error('Invalid partial capo marker.');
   if (p.engineVersion !== '1.8.4') throw new Error('This project requires a different engine version.');
   if (!p.base || !['blank', 'file'].includes(p.base.kind) || !Array.isArray(p.edits) || !Array.isArray(p.baselineEdits)) throw new Error('Invalid project contents.');
   const baseFields=p.base.kind==='blank'?['kind','title','artist','tempo','tuning','measureCount']:['kind','filename','bytesBase64','sha256'];
@@ -123,10 +125,10 @@ function addTrack(score: model.Score, name: string, tuning: number[], program: n
   for (const master of score.masterBars) appendBar(staff, master);
 }
 
-function initialScore(project: Project): model.Score {
+function initialScore(project: Project, canRedo: boolean): model.Score {
   if (project.base.kind === 'file') {
     const bytes = Uint8Array.from(atob(project.base.bytesBase64), c => c.charCodeAt(0));
-    return loadInterchangeScore(bytes, settings);
+    return loadInterchangeScore(bytes, settings, appliesFilePartialCapo(project, canRedo));
   }
   const score = new Score(); score.title = project.base.title; score.artist = project.base.artist;
   for (let i = 0; i < project.base.measureCount; i++) score.addMasterBar(new MasterBar());
@@ -199,7 +201,7 @@ function apply(score: model.Score, edit: EditCommand, editIndex=0) {
       if (staff.isPercussion || !integer(edit.string,1) || edit.string > staff.tuning.length) throw new Error('Select a string on a guitar or bass track.');
       const existing = beat.notes.find(n => n.string === edit.string);
       if (edit.type === 'removeNote') { if (existing) removeNote(existing); break; }
-      const pitch = staff.tuning[staff.tuning.length-edit.string] + edit.fret + staff.capo - staff.transpositionPitch;
+      const pitch = openStringKey(staff, edit.string) + edit.fret;
       if (!integer(edit.fret) || pitch < 0 || pitch > 127) throw new Error('That fret is outside the playable MIDI pitch range.');
       if (existing) {
         let first=existing;while(first.tieOrigin)first=first.tieOrigin;
@@ -251,7 +253,7 @@ function apply(score: model.Score, edit: EditCommand, editIndex=0) {
       if (track.isPercussion || track.staves.some(s => s.tuning.length !== edit.tuning.length)) throw new Error('Retuning must keep the current string count.');
       for (const staff of track.staves) for (const bar of staff.bars) for (const voice of bar.voices) for (const beat of voice.beats) for (const note of beat.notes) {
         if (!note.string) continue;
-        const pitch=edit.tuning[edit.tuning.length-note.string]+note.fret+staff.capo-staff.transpositionPitch;
+        const pitch=edit.tuning[edit.tuning.length-note.string]+note.fret+stringCapo(staff,note.string)-staff.transpositionPitch;
         if (pitch<0 || pitch>127) throw new Error('That tuning puts an existing note outside the MIDI pitch range.');
       }
       for (const staff of track.staves) { staff.stringTuning.tunings = [...edit.tuning]; if (edit.tuningName !== undefined) staff.stringTuning.name = edit.tuningName; else if (!staff.stringTuning.name) staff.stringTuning.name = defaultTuningName(edit.tuning); } break;
@@ -274,8 +276,9 @@ function removeBackingMeasure(backing:Pick<BackingSettings,'anchors'>|null|undef
   if(backing) backing.anchors=backing.anchors.filter(a=>a.bar!==bar).map(a=>({...a,bar:a.bar>bar?a.bar-1:a.bar}));
 }
 
-export function buildDocument(value: ProjectInput): BuiltDocument {
-  const project = validateProject(value); let score = initialScore(project);
+/** `canRedo`: the document has undone edits, so it is not edit-free even when its list is empty. */
+export function buildDocument(value: ProjectInput, canRedo = false): BuiltDocument {
+  const project = validateProject(value); let score = initialScore(project, canRedo);
   const sourceBarCount=score.masterBars.length;
   const identities=score.tracks.map((_,index)=>`base/${index}`);
   const documentSettings=defaultDocumentSettings();
@@ -326,7 +329,7 @@ export function replayDocumentSettings(value:ProjectInput,current:BuiltDocument)
   const project=validateProject(value);const next=defaultDocumentSettings();
   // A duplicated track's copied settings come from the full build, which tracks identities through track edits.
   if(projectCommands(project).some(edit=>edit.type==='pasteMusic'||edit.type==='duplicateTrack'||edit.type==='setBacking'&&edit.backing?.referenceSync))return {...buildDocument(project),score:current.score,embeddedBacking:current.embeddedBacking};
-  const sourceBarCount=current.sourceBarCount??(project.base.kind==='blank'?project.base.measureCount:initialScore(project).masterBars.length);
+  const sourceBarCount=current.sourceBarCount??(project.base.kind==='blank'?project.base.measureCount:initialScore(project,false).masterBars.length);
   let barCount=sourceBarCount;
   next.mixes=structuredClone(current.sourceMixes ?? Object.fromEntries(current.score.tracks.map(track=>[trackIdentity(track),{...defaultMix(),mute:track.playbackInfo.isMute,solo:track.playbackInfo.isSolo}])));
   // Applied history already passed candidate validation. Its earlier backing anchors

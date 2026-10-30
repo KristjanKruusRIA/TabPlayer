@@ -686,6 +686,40 @@ pub struct StaffSettings {
         skip_serializing_if = "Option::is_none"
     )]
     pub tuning_name: Option<String>,
+    /// A capo over some strings: omitted keeps the staff's, and fret 0 with no strings clears it.
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub partial_capo: Option<PartialCapo>,
+}
+/// A capo over some strings only. Strings count from 1 for the lowest-pitched string, as notes do.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PartialCapo {
+    pub fret: u32,
+    pub strings: Vec<u32>,
+}
+impl PartialCapo {
+    /// Strings ascend without repeats among the staff's strings, and the fret is 0 exactly when none is covered.
+    pub fn validate(&self, string_count: usize) -> Result<(), String> {
+        if self.fret > 127
+            || self.strings.len() > string_count
+            || self
+                .strings
+                .iter()
+                .any(|string| *string < 1 || *string as usize > string_count)
+            || self.strings.windows(2).any(|pair| pair[0] >= pair[1])
+            || (self.fret == 0) != self.strings.is_empty()
+        {
+            return Err(
+                "Choose a partial capo fret from 1 to 127 over ascending existing strings, or none."
+                    .into(),
+            );
+        }
+        Ok(())
+    }
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -1318,6 +1352,9 @@ impl StaffSettings {
             return Err("Invalid staff settings.".into());
         }
         validate_tuning_name(&self.tuning_name)?;
+        if let Some(partial) = &self.partial_capo {
+            partial.validate(self.tuning.len())?;
+        }
         enum_range(self.clef, 0, 4)
     }
 }
@@ -2399,6 +2436,50 @@ mod tests {
             }
             for invalid in [json!(null), json!(1), json!("bad\u{1}"), json!("\u{fffe}")] {
                 rejected(&named(invalid));
+            }
+        }
+    }
+
+    #[test]
+    fn staff_settings_take_an_optional_partial_capo() {
+        let settings = json!({"tuning": [64, 59, 55, 50, 45, 40], "capo": 2, "transposition": 0,
+            "displayTransposition": 0, "clef": 4, "showTab": true, "showNotation": true});
+        for base in [
+            json!({"type": "setStaffSettings", "track": 0, "staff": 0, "settings": settings}),
+            json!({"type": "addStaff", "track": 0, "settings": settings}),
+        ] {
+            let with = |partial: Value| {
+                let mut value = base.clone();
+                value["settings"]["partialCapo"] = partial;
+                value
+            };
+            // Omitted keeps the staff's own, and serializes back without the field.
+            assert_eq!(serde_json::to_value(accepted(&base)).unwrap(), base);
+            for partial in [
+                json!({"fret": 5, "strings": [1, 2, 3]}),
+                json!({"fret": 127, "strings": [6]}),
+                json!({"fret": 3, "strings": [1, 2, 3, 4, 5, 6]}),
+                json!({"fret": 0, "strings": []}),
+            ] {
+                let value = with(partial);
+                assert_eq!(serde_json::to_value(accepted(&value)).unwrap(), value);
+            }
+            for invalid in [
+                json!(null),
+                json!(5),
+                json!({"fret": 5}),
+                json!({"fret": 5, "strings": [1], "extra": 0}),
+                json!({"fret": 5, "strings": []}),
+                json!({"fret": 0, "strings": [1]}),
+                json!({"fret": 128, "strings": [1]}),
+                json!({"fret": -1, "strings": [1]}),
+                json!({"fret": 5, "strings": [0]}),
+                json!({"fret": 5, "strings": [7]}),
+                json!({"fret": 5, "strings": [2, 1]}),
+                json!({"fret": 5, "strings": [1, 1]}),
+                json!({"fret": 5, "strings": [1.5]}),
+            ] {
+                rejected(&with(invalid));
             }
         }
     }

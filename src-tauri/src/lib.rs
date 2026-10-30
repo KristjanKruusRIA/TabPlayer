@@ -501,6 +501,22 @@ fn document_set_lock(
     result
 }
 
+#[tauri::command]
+fn document_mark_partial_capo(
+    document: DocumentRevision,
+    state: State<'_, Arc<Mutex<DocumentWorkspace>>>,
+    session: State<'_, session::SessionRuntime>,
+) -> Result<DocumentSnapshot, String> {
+    let result = state.lock().unwrap().mark_partial_capo(&document);
+    if result
+        .as_ref()
+        .is_ok_and(|snapshot| snapshot.revision != document.revision)
+    {
+        session.changed();
+    }
+    result
+}
+
 /// The dialog's suggested name, validated again so a bad name can only fall back to the default.
 pub(crate) fn suggested_name(name: Option<&str>, fallback: &str) -> String {
     let reserved = |stem: &str| {
@@ -950,6 +966,7 @@ pub fn run() {
         apply_edit,
         undo_edit,
         document_set_lock,
+        document_mark_partial_capo,
         redo_edit,
         save_project,
         export_gp,
@@ -1022,6 +1039,7 @@ pub fn run() {
         apply_edit,
         undo_edit,
         document_set_lock,
+        document_mark_partial_capo,
         redo_edit,
         save_project,
         export_gp,

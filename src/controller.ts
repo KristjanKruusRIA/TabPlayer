@@ -1,6 +1,7 @@
 import type { model } from '@coderline/alphatab';
 import { buildDocument, effectiveAudioSettings,exportGp, previewEdit, replayDocumentSettings, type BuiltDocument } from './engine';
-import { type EditCommand, type ProjectSnapshot, type AssetCandidate, type DocumentLock } from './project';
+import { appliesFilePartialCapo, type EditCommand, type ProjectSnapshot, type AssetCandidate, type DocumentLock } from './project';
+import { getPartialCapo } from './editor/partial-capo';
 import type { DocumentId,DocumentRevision,DocumentSnapshot } from './workspace/types';
 import { isSettingsEdit,type BackingSettings } from './edit-types';
 import type { NativeBridge } from './bridge';
@@ -35,7 +36,7 @@ export class DocumentController {
 
   private constructor(private bridge: NativeBridge, record:DocumentSnapshot, private beforeChange: () => void, private isWorkspaceTransitioning:()=>boolean) {
     this.verifyRecord(record);
-    this.state={...record,...buildDocument(record.snapshot.project),documentEpoch:0,busy:false,error:null};
+    this.state={...record,...buildDocument(record.snapshot.project,record.snapshot.canRedo),documentEpoch:0,busy:false,error:null};
   }
   static async create(bridge: NativeBridge, beforeChange: () => void = () => {},initial?:DocumentSnapshot,isWorkspaceTransitioning:()=>boolean=()=>false) {
     return new DocumentController(bridge,initial ?? await bridge.snapshot(),beforeChange,isWorkspaceTransitioning);
@@ -74,16 +75,24 @@ export class DocumentController {
     const choice=await this.bridge.askUnsaved(this.state.score.title || 'Untitled',this.state.snapshot.path);
     return choice==='discard' || (choice==='save' && await this.saveNow(false));
   }
+  private needsPartialCapoMark() {
+    const project=this.state.snapshot.project;
+    return !!this.bridge.markPartialCapo&&project.base.kind==='file'&&!this.state.snapshot.canRedo&&appliesFilePartialCapo(project)&&project.partialCapo!==true&&this.state.score.tracks.some(track=>track.staves.some(staff=>getPartialCapo(staff)));
+  }
   private async editNow(command:EditCommand,asset?:AssetCandidate) {
     let candidate:ReturnType<typeof previewEdit>;let record:DocumentSnapshot;
     try {
-      const project=asset?{...this.state.snapshot.project,assets:{...this.state.snapshot.project.assets,[asset.assetId]:asset.info}}:this.state.snapshot.project;
-      candidate=previewEdit(project,command,this.state);
+      // The first edit of a file that holds a partial capo fixes that it applies, before the edit that depends on it.
+      const mark=this.needsPartialCapoMark();
+      const current=mark?{...this.state.snapshot.project,partialCapo:true as const}:this.state.snapshot.project;
+      const project=asset?{...current,assets:{...current.assets,[asset.assetId]:asset.info}}:current;
+      candidate=previewEdit(project,command,mark?{...this.state,snapshot:{...this.state.snapshot,project:current}}:this.state);
       if(command.type==='setBacking'&&backingState(command.backing)===backingState(effectiveAudioSettings(this.state.snapshot.project,this.state).backing)){
         if(asset)await this.bridge.cancelAsset(asset.token);return;
       }
       if(command.type==='replaceTempoAutomations'&&tempoState(candidate.score)===tempoState(this.state.score))return;
       await this.admitReferenceTiming(candidate);
+      if(mark){const marked=await this.bridge.markPartialCapo!(this.state.revision);this.verifyRecord(marked);this.update({...marked});}
       record=await this.bridge.applyEdit(command,this.state.revision,asset?.token);
       this.verifyRecord(record);
     } catch(error) {
@@ -133,7 +142,7 @@ export class DocumentController {
   undo() { return this.run(async()=>{
     const project=this.state.snapshot.project,removed=project.edits.at(-1);if(!removed)return;
     const settingsOnly=isSettingsEdit(removed),previous={...project,edits:project.edits.slice(0,-1)};
-    const built=settingsOnly?replayDocumentSettings(previous,this.state):buildDocument(previous);
+    const built=settingsOnly?replayDocumentSettings(previous,this.state):buildDocument(previous,true);
     const record=await this.bridge.undo(this.state.revision);this.verifyRecord(record);if(!settingsOnly)this.beforeChange();
     this.undone.push(removed);this.update({...record,...built});
   }); }

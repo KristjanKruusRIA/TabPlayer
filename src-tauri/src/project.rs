@@ -44,6 +44,14 @@ pub struct Project {
     pub assets: BTreeMap<String, StoredAsset>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub lock: Option<DocumentLock>,
+    /// Set the first time a score read from a file is edited: from then on the capo over some strings that the file
+    /// holds applies. Absent on every other project, so those serialize as they always did.
+    #[serde(skip_serializing_if = "is_false")]
+    pub partial_capo: bool,
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 impl<'de> Deserialize<'de> for Project {
@@ -60,6 +68,8 @@ impl<'de> Deserialize<'de> for Project {
             assets: BTreeMap<String, StoredAsset>,
             #[serde(default, deserialize_with = "present_lock")]
             lock: Option<DocumentLock>,
+            #[serde(default)]
+            partial_capo: Option<bool>,
         }
         let mut value = serde_json::Value::deserialize(deserializer)?;
         let fields = value
@@ -91,6 +101,12 @@ impl<'de> Deserialize<'de> for Project {
             }
         }
         let wire: CanonicalProject = serde_json::from_value(value).map_err(D::Error::custom)?;
+        // The marker is written only as true; a false would read as unmarked and be lost on save.
+        if wire.partial_capo == Some(false) {
+            return Err(D::Error::custom(
+                "The partial capo marker is only ever true.",
+            ));
+        }
         Ok(Self {
             format: wire.format,
             schema_version: wire.schema_version,
@@ -100,6 +116,7 @@ impl<'de> Deserialize<'de> for Project {
             edits: wire.edits,
             assets: wire.assets,
             lock: wire.lock,
+            partial_capo: wire.partial_capo.unwrap_or(false),
         })
     }
 }
@@ -120,6 +137,8 @@ pub struct ProjectView {
         deserialize_with = "present_lock"
     )]
     pub lock: Option<DocumentLock>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub partial_capo: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -224,6 +243,7 @@ impl Project {
             edits: vec![],
             assets: BTreeMap::new(),
             lock: None,
+            partial_capo: false,
         }
     }
 
@@ -247,6 +267,9 @@ impl Project {
                 "This project requires alphaTab {}. This app uses 1.8.4.",
                 self.engine_version
             ));
+        }
+        if self.partial_capo && !matches!(self.base, BaseDocument::File { .. }) {
+            return Err("Only a score read from a file can hold a partial capo marker.".into());
         }
         match &self.base {
             BaseDocument::Blank {
@@ -303,6 +326,7 @@ impl Project {
                 .map(|(id, asset)| (id.clone(), asset.info().expect("validated asset")))
                 .collect(),
             lock: self.lock,
+            partial_capo: self.partial_capo,
         }
     }
 }
@@ -430,6 +454,7 @@ impl ProjectSession {
             edits: self.project.edits.clone(),
             assets: self.asset_info.clone(),
             lock: self.project.lock,
+            partial_capo: self.project.partial_capo,
         };
         project.edits.truncate(self.cursor);
         ProjectSnapshot {
@@ -510,6 +535,29 @@ impl ProjectSession {
         changed
     }
 
+    /// Records that the file's capo over some strings applies to this project. It is not an edit and not a change to save,
+    /// and it never goes back: a project must not change meaning between saves. It is refused once there is any history
+    /// (edits, a redo tail, baseline edits or a saved edit list) or for a score that is not read from a file, because the
+    /// project could then replay differently from how it was saved. Returns whether it changed.
+    pub fn mark_partial_capo(&mut self) -> Result<bool, ProjectError> {
+        if self.project.partial_capo {
+            return Ok(false);
+        }
+        if !matches!(self.project.base, BaseDocument::File { .. })
+            || self.cursor != 0
+            || !self.project.edits.is_empty()
+            || !self.project.baseline_edits.is_empty()
+            || !self.saved.is_empty()
+        {
+            return Err(
+                "Partial capo can be recorded only before a score read from a file has any edits."
+                    .into(),
+            );
+        }
+        self.project.partial_capo = true;
+        Ok(true)
+    }
+
     pub fn mark_saved(&mut self, path: PathBuf) {
         self.saved_lock = self.project.lock;
         self.saved = self.project.edits[..self.cursor].to_vec();
@@ -540,6 +588,7 @@ impl ProjectSession {
             edits,
             assets,
             lock: self.project.lock,
+            partial_capo: self.project.partial_capo,
         }
     }
 

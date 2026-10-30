@@ -9,6 +9,8 @@ import { readGpifLyrics,writeGpifLyrics } from './lyrics';
 import { writeGpifNotation } from './notation';
 import { readGpifHarmony,writeGpifHarmony } from './harmony';
 import { readGpifScaleDiagrams,writeGpifScaleDiagrams } from './scale-diagram';
+import { withPlainTrills } from '../editor/partial-capo';
+import { hasPartialCapo,readGpifPartialCapo,writeGpifPartialCapo } from './partial-capo';
 import { copyHarmonySources } from '../harmony/chord-source';
 import { copyScaleDiagrams,listScaleDiagrams } from '../harmony/scale-diagram';
 import { scoreFromJson } from '../model-clone';
@@ -62,7 +64,8 @@ function prepareHarmonyGpCarriers(score:model.Score,settings:Settings):model.Sco
   return copy;
 }
 
-export function loadInterchangeScore(bytes:Uint8Array,settings:Settings):model.Score {
+/** `partialCapo` false leaves a partial capo the file holds unapplied, as projects logged before the feature replay it. */
+export function loadInterchangeScore(bytes:Uint8Array,settings:Settings,partialCapo=true):model.Score {
   const score=importer.ScoreLoader.loadScoreFromBytes(prepareMusicXmlLoaderBytes(bytes,settings),settings);
   const musicXml=()=>applyMusicXmlTempoWords(applyMusicXmlLyricSyllables(applyMusicXmlTiedBends(applyMusicXmlAlternateStaves(applyMusicXmlDirectionMix(applyMusicXmlHammerPulls(applyMusicXmlNaturalHarmonics(score,bytes,settings),bytes,settings),bytes,settings),bytes,settings),bytes,settings),bytes,settings),bytes,settings);
   if(bytes[0]!==0x50||bytes[1]!==0x4b)return musicXml();
@@ -74,6 +77,7 @@ export function loadInterchangeScore(bytes:Uint8Array,settings:Settings):model.S
   readGpifLyrics(score,doc);
   readGpifHarmony(score,doc);
   readGpifScaleDiagrams(score,doc);
+  readGpifPartialCapo(score,doc,partialCapo);
   orderedTracks(doc).forEach((node,index)=>{
     const track=score.tracks[index];if(!node||!track)return;
     const transpose=node.querySelector(':scope > Transpose');
@@ -120,7 +124,8 @@ export function exportGpInterchange(score:model.Score,settings:Settings):Uint8Ar
   const lyrics=score.tracks.some(track=>{const source=getLyricsSource(track);return source&&(source.managed||!source.value.visible||source.value.lines.some(line=>line.text.length>0));});
   const harmony=score.tracks.some(track=>track.staves.some(staff=>!!staff.chords?.size));
   const scales=listScaleDiagrams(score).length>0;
-  const raw=new exporter.Gp7Exporter().export(score,settings),changes=score.tracks.map(trackMixAutomations),needsXml=harmony||scales||lyrics||!!notation||changes.some(stream=>stream.length>0)||score.tracks.some(track=>track.isPercussion)||rawTuning;
+  const partialCapo=hasPartialCapo(score);
+  const raw=withPlainTrills(score,()=>new exporter.Gp7Exporter().export(score,settings)),changes=score.tracks.map(trackMixAutomations),needsXml=harmony||scales||lyrics||!!notation||changes.some(stream=>stream.length>0)||score.tracks.some(track=>track.isPercussion)||rawTuning||partialCapo;
   const original=sourceEntries.get(score);
   const generated=unzip(raw,settings);
   const entries:Record<string,Uint8Array>={...generated,...original,[gpifPath]:generated[gpifPath]};
@@ -129,7 +134,7 @@ export function exportGpInterchange(score:model.Score,settings:Settings):Uint8Ar
   if(!needsXml)return zipSync(writeStylesheetTimeSignatures(score,entries),archiveOptions);
   const xml=new TextDecoder().decode(generated[gpifPath]),projection=projectGpifTracks(xml,notation),doc=parseXml(projection?.xml??xml);
   const references=writePercussionReferences(score,doc,settings);
-  writeGpifLyrics(score,doc);writeGpifNotation(score,doc);if(harmony)writeGpifHarmony(score,doc);if(scales)writeGpifScaleDiagrams(score,doc);
+  writeGpifLyrics(score,doc);writeGpifNotation(score,doc);if(harmony)writeGpifHarmony(score,doc);if(scales)writeGpifScaleDiagrams(score,doc);if(partialCapo)writeGpifPartialCapo(score,doc);
   for(const node of doc.querySelectorAll('GPIF > Beats > Beat'))if(lyricBeatIds.has(Number(node.getAttribute('id')))){
     // alphaTab's reader keeps only the final adjacent CDATA chunk. Plain XML
     // text retains the combined literal syllable for both readers.

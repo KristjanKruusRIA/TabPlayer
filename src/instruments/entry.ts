@@ -3,6 +3,7 @@ import type { EditCommand } from '../edit-types';
 import { percussionChoices, resolvePercussionArticulation } from '../editor/percussion-catalog';
 import type { BeatTarget } from '../project';
 import { formatPitch } from '../tuning';
+import { openStringKey } from '../editor/partial-capo';
 
 /** What the app should select once an instrument-view edit has landed. */
 export interface EntryFollow { string?: number; fret?: number; note?: { pitch: number } | { articulation: number } | null }
@@ -24,7 +25,7 @@ export function entryBeat(score: model.Score, target: BeatTarget | null): model.
   return beat && !beat.isEmpty ? beat : null;
 }
 
-const openKey = (staff: model.Staff, string: number) => staff.tuning[staff.tuning.length - string] + staff.capo - staff.transpositionPitch;
+const openKey = openStringKey;
 /** The sounding key of a fretted note. */
 export const frettedKey = (staff: model.Staff, string: number, fret: number) => openKey(staff, string) + fret;
 

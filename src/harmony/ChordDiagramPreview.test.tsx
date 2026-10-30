@@ -71,3 +71,47 @@ it('string gauge increases with index (string 1 thinnest), single tab stop with 
   fireEvent.keyDown(document.activeElement!, { key: 'Enter' });
   expect(onToggle).toHaveBeenCalledWith(1, -1);
 });
+
+it('maintains one tab stop when swapping from fret-9 shape to fret-1 shape', () => {
+  const staff = new model.Staff();
+  staff.stringTuning.tunings = [64, 59, 55, 50, 45, 40];
+  const chordFret9: HarmonyChord = {
+    name: 'A-shape high',
+    nameMode: 'theory',
+    recipe: null,
+    firstFret: 9,
+    frets: [-1, -1, 9, 9, 9, -1],
+    fingers: [-1, -1, 1, 1, 1, -1],
+    barreFrets: [],
+    showName: true,
+    showDiagram: true,
+    showFingering: true,
+  };
+  const onToggle = vi.fn();
+  const { container, rerender } = render(<ChordDiagramPreview chord={chordFret9} staff={staff} highlightRoot={false} onToggle={onToggle} />);
+
+  // Focus a node at fret 9 so focusedFret becomes 9
+  const nodeFret9 = container.querySelector<SVGElement>('[data-string="2"][data-fret="9"]');
+  expect(nodeFret9).not.toBeNull();
+  fireEvent.focus(nodeFret9!);
+  expect(container.querySelectorAll<SVGElement>('[role="button"][tabindex="0"]').length).toBe(1);
+
+  // Swap to fret-1 shape
+  const chordFret1: HarmonyChord = {
+    name: 'C',
+    nameMode: 'theory',
+    recipe: null,
+    firstFret: 1,
+    frets: [-1, 3, 2, 0, 1, 0],
+    fingers: [-1, 3, 2, 0, 1, 0],
+    barreFrets: [],
+    showName: true,
+    showDiagram: true,
+    showFingering: true,
+  };
+  rerender(<ChordDiagramPreview chord={chordFret1} staff={staff} highlightRoot={false} onToggle={onToggle} />);
+
+  // Must maintain 1 tab stop (stale focusedFret=9 previously caused 0 tab stops)
+  const newTabStops = container.querySelectorAll<SVGElement>('[role="button"][tabindex="0"]');
+  expect(newTabStops.length).toBe(1);
+});

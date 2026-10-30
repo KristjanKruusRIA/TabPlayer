@@ -25,8 +25,11 @@ export function soundingChordPitches(chord: HarmonyChord, staff: model.Staff): A
 }
 
 export function ChordDiagramPreview({ chord, staff, highlightRoot, onToggle }: ChordDiagramPreviewProps) {
-  if (chord.frets.length === 0) return <p className="muted">Name-only chord; no strings.</p>;
   const svgRef = useRef<SVGSVGElement>(null);
+  const [focusedString, setFocusedString] = useState(0);
+  const [focusedFret, setFocusedFret] = useState<number | null>(null);
+
+  if (chord.frets.length === 0) return <p className="muted">Name-only chord; no strings.</p>;
   const pitches = soundingChordPitches(chord, staff);
   const first = Math.max(1, chord.firstFret);
   const rows = [
@@ -36,10 +39,10 @@ export function ChordDiagramPreview({ chord, staff, highlightRoot, onToggle }: C
     ]),
   ].sort((a, b) => a - b);
   const allFrets = [-1, 0, ...rows];
-  const [focusedString, setFocusedString] = useState(0);
-  const [focusedFret, setFocusedFret] = useState<number | null>(null);
+  const validFocusedFret = focusedFret !== null && allFrets.includes(focusedFret) ? focusedFret : null;
+  const safeString = Math.max(0, Math.min(chord.frets.length - 1, focusedString));
   const activeFret =
-    focusedFret ?? (allFrets.includes(chord.frets[focusedString]) ? chord.frets[focusedString] : allFrets[0]);
+    validFocusedFret ?? (allFrets.includes(chord.frets[safeString]) ? chord.frets[safeString] : allFrets[0]);
 
   const navigate = (s: number, f: number) => {
     setFocusedString(s);
@@ -139,7 +142,7 @@ export function ChordDiagramPreview({ chord, staff, highlightRoot, onToggle }: C
               {allFrets.map(fret => {
                 const selected = current === fret;
                 if (!selected && !onToggle) return null;
-                const isFocusedNode = index === focusedString && fret === activeFret;
+                const isFocusedNode = index === safeString && fret === activeFret;
                 const y = fret === -1 ? 28 : fret === 0 ? 44 : nutY + rows.indexOf(fret) * rowStep + rowStep / 2;
                 const pitch = selected && fret >= 0 ? pitches[index] : null;
                 const isRoot = Boolean(highlightRoot && pitch !== null && pitch % 12 === root);

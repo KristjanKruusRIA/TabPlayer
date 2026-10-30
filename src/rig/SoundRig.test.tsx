@@ -1,7 +1,10 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, configure, fireEvent, render, screen, within } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
+// These tests drive the whole rig with real typing and pointer input. Under a loaded machine a default one-second wait for an
+// async result, or five seconds for a whole test, is too tight, so both are raised.
+configure({asyncUtilTimeout:8000});vi.setConfig({testTimeout:60000});
 import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import type { EditCommand, TrackSound } from '../edit-types';

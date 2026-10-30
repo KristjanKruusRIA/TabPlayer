@@ -333,7 +333,12 @@ struct DriveShape {
     level: f64,
 }
 fn drive_shape(drive: &Drive, rate: f64) -> DriveShape {
-    let (circuit, bias) = tone::drive_shape(&drive.model, drive.drive, rate);
+    // Calibrating a circuit means running it, and a pedal that is off never runs: a ramp reads only its tone and level.
+    let (circuit, bias) = if drive.enabled {
+        tone::drive_shape(&drive.model, drive.drive, rate)
+    } else {
+        (tone::flat_shape(rate), 0.0)
+    };
     let tone_hz = 500.0 * (12_000.0f64 / 500.0).powf(drive.tone);
     DriveShape {
         circuit,
@@ -1755,6 +1760,31 @@ impl TrackDsp {
     fn start_mid_play(&mut self) {
         self.microphone_live = false;
     }
+    /// Whether a settings change is still crossfading. A configuration that took over now would cut the fade short. A
+    /// second board's fade starts and ends with this one's, so this covers both.
+    pub fn ramping(&self) -> bool {
+        self.ramp_left > 0
+    }
+    /// Runs the driven stages on every frame, with neither of their shortcuts, to compare against them.
+    pub fn never_rest(&mut self) {
+        self.amp_chain.never_rest();
+        self.amp_leaving.never_rest();
+        self.drive_chain.never_rest();
+        self.drive_leaving.never_rest();
+        self.cabinet_fir.never_rest();
+        if let Some(second) = &mut self.second {
+            second.never_rest();
+        }
+    }
+    /// Whether the driven stages hold nothing, and whether they run one channel for both.
+    pub fn driven_at_rest(&self) -> [bool; 2] {
+        let stages = [
+            self.amp_chain.at_rest(),
+            self.drive_chain.at_rest(),
+            self.cabinet_fir.at_rest(),
+        ];
+        [0, 1].map(|index| stages.iter().all(|stage| stage[index]))
+    }
     pub fn process(&mut self, input: [f32; 2], bpm: f64) -> [f32; 2] {
         let y = self.process_board(input, bpm);
         let Some(second) = &mut self.second else {
@@ -2736,6 +2766,7 @@ impl TrackDsp {
         self.amp_dc = [0.0; 2];
         self.amp_chain.reset();
         self.amp_chain.live = false;
+        self.amp_leaving.reset();
         for b in &mut self.amp_tone {
             b.reset();
         }
@@ -2783,6 +2814,7 @@ impl TrackDsp {
         self.pitch_phase = Shifter::default();
         self.drive_chain.reset();
         self.drive_chain.live = false;
+        self.drive_leaving.reset();
         self.drive_tone = [[0.0; 2]; 2];
         self.drive_envelope = 0.0;
         for shape in &mut self.microphone_shapes {
@@ -2844,6 +2876,27 @@ impl BackingFilterDsp {
         }
     }
 }
+#[cfg(test)]
+mod drive_shape_tests {
+    use super::{FxSettings, drive_shape, tone};
+
+    #[test]
+    fn a_pedal_that_is_off_skips_its_calibration_and_keeps_its_tone_and_level() {
+        let rate = 48_000.0;
+        for model in ["overdrive", "distortion", "fuzz"] {
+            let mut drive = FxSettings::default().drive;
+            drive.model = model.into();
+            drive.enabled = true;
+            let on = drive_shape(&drive, rate);
+            drive.enabled = false;
+            let off = drive_shape(&drive, rate);
+            assert!(off.circuit == tone::flat_shape(rate), "{model} ran");
+            assert!(on.circuit != off.circuit, "{model} has no circuit");
+            assert_eq!((off.tone, off.level), (on.tone, on.level), "{model}");
+        }
+    }
+}
+
 #[cfg(test)]
 mod backing_filter_tests {
     use super::BackingFilterDsp;

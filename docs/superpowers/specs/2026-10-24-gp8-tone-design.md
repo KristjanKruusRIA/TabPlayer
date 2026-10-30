@@ -39,10 +39,16 @@ The model names stay and the circuits change.
 - Settings resolve into plain `Copy` shapes off the audio thread, and each shape is level-calibrated by running a 220 Hz sine through it. `process` allocates nothing and takes no lock.
 - A ramp between two circuits crossfades two running chains, because a circuit part way between two has no known level: a coefficient ramp from overdrive to fuzz swelled tenfold.
 - Mixed ramps crossfade the original path and the driven one.
+- A mix that arrives during a crossfade waits in one slot and installs between blocks when the crossfade ends, because taking over mid-fade drops the sound the fade is leaving. A newer arrival replaces the waiting one, and every displaced mix retires off the audio thread.
+- A seek clears both the running chains and the ones fading out.
 
 ### Cost
 
-Sample voices reach the chain as exact mono unless panned, so while both channels hold the same state one channel runs and is copied. A panned track pays the full stereo cost.
+Sample voices reach the chain as exact mono unless panned, so while both channels hold the same state one channel runs and is copied. A panned track pays the full stereo cost until both channels hold identical bits again, which is when its tail has died or at a seek.
+
+A silent track plays its tail to the end, then returns zero without running the amp, pedal or cabinet. This is bit-exact: zero input on all-zero state stays zero. A filter drops its state only when both halves have vanished, because zeroing one half of a near-double pole rings it up again, and an unused part of a circuit holds no state.
+
+Disabled pedals skip the calibration run.
 
 ### Factory sounds
 
@@ -60,6 +66,8 @@ Sample voices reach the chain as exact mono unless panned, so while both channel
 
 - `src-tauri/tests/audio_clean_sounds.rs` pins all 12 clean sounds against a golden at both rates. They also compare byte-identical against the pre-change build through the real voices.
 - `src-tauri/tests/audio_tone.rs` pins cabinet shape at both rates, low-chord intermodulation and high-note aliases against a replica of the single-stage path, level across gain and rate, model validation, smooth changes between every model by both edit paths, determinism, reset, a track panned mid-play, and zero heap operations through processing, install, crossfade and reset.
+- The same file holds pedal and cabinet shape, level, aliases and smooth changes at 96 and 192 kHz. Smooth changes also cover a second swap inside the ramp and a swap to the same model mid-fade, with 0.002 over the settled step everywhere and 0.035 for distortion to fuzz only.
+- A silent track and a track centred again are compared bit for bit with the shortcuts off, tail included.
 - One existing test changed: `the_default_order_sounds_exactly_as_before` in `audio_effect_order.rs` pins a bit-exact fingerprint with a drive pedal running, so it was retaken for the new pedal circuits. Every other existing test passes as it stood.
 - A/B renders of six sounds in `output/tone-ab/`: `-old`, `-new`, and `-new-ir` with the cabinet swapped for a reference IR, local only.
 
@@ -67,5 +75,18 @@ Sample voices reach the chain as exact mono unless panned, so while both channel
 
 - Only listening can judge this. The figures are a broad guide, not a match to any product.
 - A heavy track costs two to three times what it did, and a panned one about twice a centred one.
-- Changing a pedal in front of a saturated amp can give one sharper edge during the 10 ms ramp. It is an edge in the wave, not a jump, and `audio_tone.rs` bounds it.
+- A full mix can still overrun. There is no overload guard, and xruns are still ignored. Release `tone_ab mix-bench`, `metal-rhythm`, chain only without voices, in percent of one core:
+
+| Tracks | Centred | Panned | Panned, duplicate boards | A quarter sounding | All silent |
+|---|---:|---:|---:|---:|---:|
+| 8 | 29 | 53 | 110 | 10 | 3 |
+| 16 | 61 | 107 | 212 | 20 | 6 |
+
+- A muted track with sounding notes runs in full, because skipping it would change what is heard on unmute.
+- A track centred again keeps its stereo cost while it keeps sounding. Merging channels that are only nearly equal would not be bit-exact.
+- A silent track still pays for the rest of the board, about 0.4% of one core, because its LFO phases must keep advancing.
+- A swap between sounds far apart in gain steps more than the settled wave: metal 1.0 to crunch 0 steps 0.011 against 0.003. A chained swap of those two is held to the same changes played apart, plus the usual 0.002.
+- Changing a pedal from distortion to fuzz in front of a saturated amp can give one sharper edge during the 10 ms ramp. It is an edge in the wave, not a jump, and `audio_tone.rs` bounds it.
+- Parking lives in the renderer. Calling `transition_from` directly during a ramp still clicks.
+- At 192 kHz the cabinet FIR is capped at 1024 taps, or 5.3 ms. It stays within 1.5 dB of the 48 kHz curve.
 - The cabinets are fixed: no microphone or position choice.

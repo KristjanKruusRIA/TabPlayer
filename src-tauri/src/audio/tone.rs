@@ -89,6 +89,9 @@ impl<const N: usize> Halfband<N> {
         self.inputs = [0.0; N];
         self.outputs = [0.0; N];
     }
+    fn state(&self) -> impl Iterator<Item = f64> {
+        self.inputs.iter().chain(&self.outputs).copied()
+    }
 }
 /// The oversampling factor for a rate: four times at the usual rates, less where the rate is already high.
 fn oversampling(rate: f64) -> usize {
@@ -147,6 +150,13 @@ impl Oversampler {
         self.up.1.reset();
         self.down.0.reset();
         self.down.1.reset();
+    }
+    fn state(&self) -> impl Iterator<Item = f64> {
+        let [up, down] = [&self.up, &self.down];
+        up.0.state()
+            .chain(up.1.state())
+            .chain(down.0.state())
+            .chain(down.1.state())
     }
 }
 
@@ -219,8 +229,17 @@ impl Section {
     #[inline]
     fn run(&self, z: &mut [f64; 2], x: f64) -> f64 {
         let y = self.b[0] * x + z[0];
-        z[0] = flush(self.b[1] * x - self.a[0] * y + z[1]);
-        z[1] = flush(self.b[2] * x - self.a[1] * y);
+        let next = [
+            self.b[1] * x - self.a[0] * y + z[1],
+            self.b[2] * x - self.a[1] * y,
+        ];
+        // Vanishing state goes as a pair. Zeroing one half of a low filter's state leaves the other to ring back up, which
+        // with the next zeroing makes a faint oscillation that never ends.
+        *z = if flush(next[0]) == 0.0 && flush(next[1]) == 0.0 {
+            [0.0; 2]
+        } else {
+            next
+        };
         y
     }
 }
@@ -365,6 +384,11 @@ pub struct Chain {
     /// Whether both channels hold the same state, so that a frame with the same input on both needs only one run. Sample
     /// voices reach the chain as exact mono unless they are panned, which halves the usual cost.
     twin: bool,
+    /// Whether all it holds is zero. Silence going in then leaves every value where it is and comes out as silence, so
+    /// a track with nothing sounding need not run it.
+    resting: bool,
+    /// Whether it may rest and rejoin its channels, which is off only to compare against running every frame.
+    rests: bool,
     /// Whether it ran on the previous frame. A chain starting again starts silent.
     pub live: bool,
 }
@@ -382,6 +406,8 @@ impl Chain {
             channels: [channel; 2],
             dc: one_pole(6.0, rate),
             twin: true,
+            resting: true,
+            rests: true,
             live: false,
         }
     }
@@ -395,12 +421,34 @@ impl Chain {
             channel.dc = 0.0;
         }
         self.twin = true;
+        self.resting = true;
+    }
+    /// Runs every frame from now on, as it would with no shortcuts, to compare the two.
+    pub fn never_rest(&mut self) {
+        self.rests = false;
+    }
+    /// Whether all it holds is zero, and whether it is running one channel for both.
+    pub fn at_rest(&self) -> [bool; 2] {
+        [self.resting, self.twin]
     }
     /// One frame through `s`. `offset` shifts the input, for a fuzz's bias that follows the playing level.
     pub fn process(&mut self, s: &Shape, input: [f32; 2], offset: f64) -> [f64; 2] {
+        let same = input[0].to_bits() == input[1].to_bits();
+        let silent = self.rests && same && input[0].to_bits() == 0 && offset == 0.0;
+        if silent && self.resting {
+            return [0.0; 2];
+        }
+        self.resting = false;
+        // Channels that have reached the same state run as one again, as they do once a panned note's tail has died. The
+        // comparison usually ends at its first value, and costs far less than the run it saves.
+        if self.rests && !self.twin && same && self.channels[0].state().eq(self.channels[1].state())
+        {
+            self.twin = true;
+        }
         if self.twin {
-            if input[0] == input[1] {
+            if same {
                 let y = self.channels[0].run(s, input[0], offset, self.dc);
+                self.resting = silent && self.channels[0].state().all(|bits| bits == 0);
                 return [y, y];
             }
             self.channels[1] = self.channels[0];
@@ -432,10 +480,31 @@ impl Chain {
     }
 }
 impl ChannelState {
+    /// The bits of every value that changes as it runs. Those that settle last come first, so a comparison or a search
+    /// for one that is not zero usually ends at once.
+    fn state(&self) -> impl Iterator<Item = u64> {
+        [self.dc, self.supply]
+            .into_iter()
+            .chain(self.voicing.into_iter().flatten())
+            .chain(self.around)
+            .chain(
+                self.stages
+                    .iter()
+                    .flat_map(|s| [s.couple, s.lows, s.smooth]),
+            )
+            .chain(self.over.state())
+            .map(f64::to_bits)
+    }
     #[inline]
     fn run(&mut self, s: &Shape, input: f32, offset: f64, dc: f64) -> f64 {
-        // A stage this circuit does not use keeps no state, for the next circuit that does.
+        // What this circuit does not use keeps no state, for the next circuit that does.
         self.stages[s.count..].fill(StageState::default());
+        if s.around_gain == 0.0 {
+            self.around = [0.0; 2];
+        }
+        if s.power == 0.0 {
+            self.supply = 0.0;
+        }
         let mut block = [0.0; 4];
         self.over.raise(input as f64 * s.input, &mut block);
         for sample in &mut block[..self.over.ratio] {
@@ -533,7 +602,8 @@ fn resolved(tubes: &[Tube], pot: usize, taper: f64, rate: f64) -> ([StageShape; 
     }
     (stages, tubes.len())
 }
-fn flat_shape(rate: f64) -> Shape {
+/// A circuit that passes its input. It needs no calibration, so it stands in for a pedal that is off.
+pub fn flat_shape(rate: f64) -> Shape {
     Shape {
         input: 1.0,
         count: 0,
@@ -1022,6 +1092,14 @@ pub struct Cabinet {
     at: usize,
     /// Whether both channels hold the same state, as `Chain` keeps it.
     twin: bool,
+    /// Frames in a row that the two channels wrote the same bits, and that silence was written. `taps` of them have
+    /// replaced all the history, so comparing that needs no search through it.
+    matching: usize,
+    silent: usize,
+    /// Whether all it holds is zero, as `Chain` keeps it.
+    resting: bool,
+    /// Whether it may rest and rejoin its channels, which is off only to compare against running every frame.
+    rests: bool,
     /// Whether it ran on the previous frame. A cabinet starting again starts silent.
     pub live: bool,
 }
@@ -1036,6 +1114,10 @@ impl Cabinet {
             history,
             at: 0,
             twin: true,
+            matching: 0,
+            silent: 0,
+            resting: true,
+            rests: true,
             live: false,
         }
     }
@@ -1044,9 +1126,26 @@ impl Cabinet {
         self.boxes = [[[0.0; 2]; 3]; 2];
         self.at = 0;
         self.twin = true;
+        self.matching = 0;
+        self.silent = 0;
+        self.resting = true;
+    }
+    /// Runs every frame from now on, as it would with no shortcuts, to compare the two.
+    pub fn never_rest(&mut self) {
+        self.rests = false;
+    }
+    /// Whether all it holds is zero, and whether it is running one channel for both.
+    pub fn at_rest(&self) -> [bool; 2] {
+        [self.resting, self.twin]
     }
     /// One frame through the cabinet `to`, crossfading from `from` by `t`, or straight through `to` at `t` = 1.
     pub fn process(&mut self, from: usize, to: usize, t: f64, input: [f32; 2]) -> [f32; 2] {
+        let same = input[0].to_bits() == input[1].to_bits();
+        let silence = self.rests && same && input[0].to_bits() == 0;
+        if silence && self.resting {
+            return [0.0; 2];
+        }
+        self.resting = false;
         let bank = &*self.bank;
         let taps = bank.taps;
         let settled = from == to || t >= 1.0;
@@ -1075,16 +1174,36 @@ impl Cabinet {
                 x + (y - x) * t as f32
             }
         };
-        if self.twin {
-            if input[0] == input[1] {
-                let y = channel(0, input[0], &mut self.boxes[0], &mut self.history);
-                return [y, y];
+        let output = if self.twin && same {
+            let y = channel(0, input[0], &mut self.boxes[0], &mut self.history);
+            [y, y]
+        } else {
+            if self.twin {
+                self.boxes[1] = self.boxes[0];
+                self.history.copy_within(..2 * taps, 2 * taps);
+                self.twin = false;
+                self.matching = 0;
             }
-            self.boxes[1] = self.boxes[0];
-            self.history.copy_within(..2 * taps, 2 * taps);
-            self.twin = false;
-        }
-        std::array::from_fn(|c| channel(c, input[c], &mut self.boxes[c], &mut self.history))
+            let output = std::array::from_fn(|c| {
+                channel(c, input[c], &mut self.boxes[c], &mut self.history)
+            });
+            let matched = self.history[at].to_bits() == self.history[2 * taps + at].to_bits();
+            self.matching = if matched { self.matching + 1 } else { 0 };
+            let boxes = self
+                .boxes
+                .map(|channel| channel.map(|z| z.map(f64::to_bits)));
+            self.twin = self.rests && same && self.matching >= taps && boxes[0] == boxes[1];
+            output
+        };
+        self.silent = if silence && self.history[at].to_bits() == 0 {
+            self.silent + 1
+        } else {
+            0
+        };
+        self.resting = self.twin
+            && self.silent >= taps
+            && self.boxes[0].iter().flatten().all(|z| z.to_bits() == 0);
+        output
     }
 }
 #[cfg(test)]

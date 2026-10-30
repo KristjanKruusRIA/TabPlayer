@@ -3,9 +3,21 @@
 use std::{
     alloc::{GlobalAlloc, Layout, System},
     cell::Cell,
+    collections::HashMap,
     f64::consts::TAU,
+    io::Cursor,
+    sync::Arc,
 };
-use tabplayer_lib::audio::dsp::{FxSettings, TrackDsp};
+use tabplayer_lib::{
+    audio::{
+        decode::DecodedAudio,
+        dsp::{FxSettings, TrackDsp},
+        plan::PlaybackPlan,
+        renderer::{PreparedMix, Renderer},
+        resources::{AudioResources, Instrument, InstrumentManifest, Region},
+    },
+    settings::{DocumentSettings, TrackSound},
+};
 
 #[allow(dead_code)]
 #[path = "../examples/tone_ab/measure.rs"]
@@ -35,6 +47,7 @@ unsafe impl GlobalAlloc for CountAllocator {
 static ALLOCATOR: CountAllocator = CountAllocator;
 
 const RATES: [u32; 2] = [44_100, 48_000];
+const HIGH_RATES: [u32; 2] = [96_000, 192_000];
 
 fn amp(model: &str, drive: f64) -> FxSettings {
     let mut fx = FxSettings::default();
@@ -378,7 +391,16 @@ fn change(first: &FxSettings, next: &FxSettings, rate: u32, path: &str) -> [[f64
 /// `allowance` is how far an edge may pass the settled sounds' edges during the change. A jump is the height of the wave,
 /// near 0.2 here, where the settled edges are near 0.01.
 fn assert_smooth(first: &FxSettings, next: &FxSettings, what: &str, allowance: f64) {
-    for rate in RATES {
+    assert_smooth_at(&RATES, first, next, what, allowance);
+}
+fn assert_smooth_at(
+    rates: &[u32],
+    first: &FxSettings,
+    next: &FxSettings,
+    what: &str,
+    allowance: f64,
+) {
+    for &rate in rates {
         for path in ["set_settings", "transition_from"] {
             let [before, during, after] = change(first, next, rate, path);
             let step = before[0].max(after[0]);
@@ -429,37 +451,348 @@ fn changing_amp_model_is_smooth() {
 
 #[test]
 fn changing_cabinet_model_is_smooth() {
+    assert_cabinet_changes_smooth(&RATES);
+}
+
+fn assert_cabinet_changes_smooth(rates: &[u32]) {
     let models = ["open", "closed", "combo", "bass", "bassStack"];
     let driven = amp("lead", 0.7);
     for a in models {
         for b in models {
             if a != b {
                 let (from, to) = (cabinet(driven.clone(), a), cabinet(driven.clone(), b));
-                assert_smooth(&from, &to, &format!("cabinet {a} to {b}"), 0.002);
+                assert_smooth_at(rates, &from, &to, &format!("cabinet {a} to {b}"), 0.002);
             }
         }
         let on = cabinet(driven.clone(), a);
-        assert_smooth(&driven, &on, &format!("cabinet {a} on"), 0.002);
-        assert_smooth(&on, &driven, &format!("cabinet {a} off"), 0.002);
+        assert_smooth_at(rates, &driven, &on, &format!("cabinet {a} on"), 0.002);
+        assert_smooth_at(rates, &on, &driven, &format!("cabinet {a} off"), 0.002);
     }
 }
 
 #[test]
 fn changing_pedal_model_is_smooth() {
+    assert_pedal_changes_smooth(&RATES);
+}
+
+fn assert_pedal_changes_smooth(rates: &[u32]) {
     let models = ["overdrive", "distortion", "fuzz"];
     let base = amp("crunch", 0.4);
     for a in models {
         for b in models {
             if a != b {
                 let (from, to) = (pedal(base.clone(), a, 0.7), pedal(base.clone(), b, 0.7));
-                // A wave part way between two pedals is not centred as either is, so for a period its steep part can cross the
-                // saturated amp behind them where the amp's gain is highest: a sharper edge, not a jump.
-                assert_smooth(&from, &to, &format!("pedal {a} to {b}"), 0.05);
+                // A wave part way from the distortion to the fuzz is not centred as either is, so for a period its steep part
+                // crosses the saturated amp behind them where the amp's gain is highest: a sharper edge, not a jump.
+                let allowance = if (a, b) == ("distortion", "fuzz") {
+                    0.035
+                } else {
+                    0.002
+                };
+                assert_smooth_at(rates, &from, &to, &format!("pedal {a} to {b}"), allowance);
             }
         }
         let on = pedal(base.clone(), a, 0.7);
-        assert_smooth(&base, &on, &format!("pedal {a} on"), 0.05);
-        assert_smooth(&on, &base, &format!("pedal {a} off"), 0.05);
+        assert_smooth_at(rates, &base, &on, &format!("pedal {a} on"), 0.002);
+        assert_smooth_at(rates, &on, &base, &format!("pedal {a} off"), 0.002);
+    }
+}
+
+#[test]
+fn pedal_and_cabinet_changes_are_smooth_above_48_khz() {
+    assert_pedal_changes_smooth(&HIGH_RATES);
+    assert_cabinet_changes_smooth(&HIGH_RATES);
+}
+
+#[test]
+fn the_cabinets_keep_their_shape_above_48_khz() {
+    for model in ["closed", "combo", "bassStack"] {
+        for rate in HIGH_RATES {
+            for hz in [60.0, 110.0, 440.0, 2_500.0, 5_000.0, 8_000.0] {
+                let difference = response(model, rate, hz) - response(model, 48_000, hz);
+                assert!(
+                    difference.abs() < 1.5,
+                    "{model} at {hz} Hz and {rate} differs by {difference} dB"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn the_pedals_keep_their_level_and_their_aliases_down_above_48_khz() {
+    for model in ["overdrive", "distortion", "fuzz"] {
+        for drive in [0.2, 0.5, 0.8, 1.0] {
+            let fx = pedal(FxSettings::default(), model, drive);
+            let usual = db(level(chain(&fx, 48_000), 220.0, 48_000, 0.1));
+            for rate in HIGH_RATES {
+                let out = db(level(chain(&fx, rate), 220.0, rate, 0.1));
+                assert!(
+                    (out - usual).abs() < 1.0,
+                    "{model} {drive} at {rate}: {out} dB against {usual} dB"
+                );
+            }
+        }
+        let fx = cabinet(pedal(amp("crunch", 0.3), model, 0.8), "closed");
+        for rate in HIGH_RATES {
+            for hz in [1_318.51, 2_637.02] {
+                let alias = measure::alias_db(chain(&fx, rate), rate as f64, hz, 0.1);
+                assert!(alias < -55.0, "{model} at {hz} Hz and {rate}: {alias} dB");
+            }
+        }
+    }
+}
+
+type HeldNote = (Arc<PlaybackPlan>, Arc<AudioResources>);
+/// One track holding one steady 110 Hz note, to play through a real renderer.
+fn held_note() -> HeldNote {
+    let mut font = Cursor::new(
+        std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../node_modules/@coderline/alphatab/dist/soundfont/sonivox.sf2"
+        ))
+        .unwrap(),
+    );
+    let frames = (0..192_000)
+        .map(|n| [((TAU * 110.0 * n as f64 / 48_000.0).sin() * 0.3) as f32; 2])
+        .collect();
+    let resources = AudioResources {
+        manifest: InstrumentManifest {
+            schema_version: 1,
+            instruments: vec![Instrument {
+                id: "green-guitar".into(),
+                regions: vec![Region {
+                    sample_id: "sine".into(),
+                    root_key: 45,
+                    key_low: 0,
+                    key_high: 127,
+                    velocity_low: 0,
+                    velocity_high: 127,
+                    articulation: "picked".into(),
+                    variant: 1,
+                    sequence_length: 1,
+                    trigger: "attack".into(),
+                    pitch_keytrack: 100.0,
+                    velocity_gain_high: 127,
+                    release_seconds: 0.1,
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }],
+            ..Default::default()
+        },
+        samples: HashMap::from([(
+            "sine".into(),
+            Arc::new(DecodedAudio {
+                sample_rate: 48_000,
+                channels: 2,
+                frames: Arc::new(frames),
+            }),
+        )]),
+        sound_font: Arc::new(rustysynth::SoundFont::new(&mut font).unwrap()),
+    };
+    let plan = serde_json::from_value(serde_json::json!({
+        "generation":1,"ppq":960,"durationTick":3840,"durationMs":2000,
+        "tracks":[{"id":"a","program":24,"percussion":false}],
+        "tempos":[{"tick":0,"bpm":120}],
+        "occurrences":[{"bar":0,"occurrence":0,"meterNumerator":4,"meterDenominator":4,"startTick":0,"endTick":3840,"startMs":0,"endMs":2000}],
+        "notes":[{"id":"n","trackId":"a","source":{"target":{"track":0,"staff":0,"bar":0,"voice":0,"beat":0},"string":1},"occurrence":0,"startTick":0,"endTick":3840,"key":45,"velocity":100,"articulation":"picked","legatoFrom":null,"pitch":[{"tick":0,"semitones":0}]}],
+        "midi":[]
+    }))
+    .unwrap();
+    (Arc::new(plan), Arc::new(resources))
+}
+fn sounding(fx: &FxSettings) -> DocumentSettings {
+    let mut settings = DocumentSettings::default();
+    settings.sounds.insert(
+        "a".into(),
+        TrackSound {
+            voice_id: None,
+            preset_id: "lead".into(),
+            effects: fx.clone(),
+        },
+    );
+    settings
+}
+/// As `change`, with each of `sounds` after the first arriving `gap` frames after the last, handled as the audio callback
+/// handles them: a mix goes to `replace_mix` between blocks, and `settle_mix` runs ahead of every block.
+fn swaps(held: &HeldNote, sounds: &[FxSettings], gap: usize, rate: u32) -> [[f64; 2]; 3] {
+    const BLOCK: usize = 16;
+    let (plan, resources) = held;
+    let mut renderer =
+        Renderer::new(plan.clone(), resources.clone(), sounding(&sounds[0]), rate).unwrap();
+    let unit = rate as usize / 4;
+    let (mut last, mut most) = (0.0f64, [[0.0f64; 2]; 3]);
+    let mut play = |renderer: &mut Renderer, frames: usize, window: usize| {
+        for _ in 0..frames.div_ceil(BLOCK) {
+            drop(renderer.settle_mix());
+            let mut block = [[0.0f32; 2]; BLOCK];
+            renderer.render_into(&mut block);
+            for frame in block {
+                let y = frame[0] as f64;
+                assert!(y.is_finite());
+                if window != usize::MAX {
+                    most[window][0] = most[window][0].max((y - last).abs());
+                    most[window][1] = most[window][1].max(y.abs());
+                }
+                last = y;
+            }
+        }
+    };
+    play(&mut renderer, unit, usize::MAX);
+    play(&mut renderer, unit, 0);
+    for sound in &sounds[1..] {
+        let mix = PreparedMix::prepare(&sounding(sound), plan, rate).unwrap();
+        drop(renderer.replace_mix(mix));
+        play(&mut renderer, gap, 1);
+    }
+    play(&mut renderer, unit, 1);
+    play(&mut renderer, unit, usize::MAX);
+    play(&mut renderer, unit, 2);
+    most
+}
+/// Each sound arrives inside the crossfade the last one started, at several points along it. That must be as smooth as the
+/// same changes played apart, because the later one now waits for the earlier one to end.
+fn assert_swaps_smooth(held: &HeldNote, sounds: &[FxSettings], what: &str) {
+    for rate in RATES {
+        // Each sound played alone, which includes those only passed through.
+        let settled = sounds
+            .iter()
+            .map(|sound| swaps(held, std::slice::from_ref(sound), 0, rate)[0]);
+        let (step, peak) = settled.fold((0.0f64, 0.0f64), |(step, peak), sound| {
+            (step.max(sound[0]), peak.max(sound[1]))
+        });
+        let apart = sounds
+            .windows(2)
+            .map(|pair| swaps(held, pair, 0, rate)[1][0])
+            .fold(0.0f64, f64::max);
+        let allowed = (step * 1.5).max(apart) + 0.002;
+        for gap in [16, 48, 112, 208, 320, 416] {
+            let during = swaps(held, sounds, gap, rate)[1];
+            assert!(
+                during[0] <= allowed,
+                "{what} {gap} frames apart at {rate}: step {} against {step}, {apart} apart",
+                during[0]
+            );
+            assert!(
+                during[1] <= peak * 1.5 + 0.01,
+                "{what} {gap} frames apart at {rate}: peak {} against {peak}",
+                during[1]
+            );
+        }
+    }
+}
+
+#[test]
+fn a_sound_arriving_during_a_change_waits_for_it() {
+    let held = held_note();
+    let crunch = amp("crunch", 0.7);
+    let metal = amp("metal", 0.7);
+    assert_swaps_smooth(
+        &held,
+        &[crunch.clone(), metal.clone(), crunch.clone()],
+        "crunch to metal and back",
+    );
+    assert_swaps_smooth(
+        &held,
+        &[amp("metal", 1.0), amp("crunch", 0.0), amp("metal", 1.0)],
+        "full metal to bare crunch and back",
+    );
+    let mut quieter = crunch.clone();
+    quieter.amp.gain_db = -2.0;
+    assert_swaps_smooth(
+        &held,
+        &[metal.clone(), crunch.clone(), quieter],
+        "to the same model during the fade",
+    );
+    assert_swaps_smooth(
+        &held,
+        &[
+            crunch.clone(),
+            metal.clone(),
+            amp("lead", 0.7),
+            crunch.clone(),
+        ],
+        "a third sound replacing the one that waited",
+    );
+    assert_swaps_smooth(
+        &held,
+        &[
+            pedal(crunch.clone(), "overdrive", 0.7),
+            pedal(crunch.clone(), "fuzz", 0.2),
+            pedal(crunch.clone(), "overdrive", 0.7),
+        ],
+        "a pedal and back",
+    );
+}
+
+#[test]
+fn only_the_latest_waiting_sound_is_kept_and_the_rest_come_back_to_retire() {
+    let (plan, resources) = held_note();
+    let (crunch, metal) = (sounding(&amp("crunch", 0.7)), sounding(&amp("metal", 0.7)));
+    let prepare =
+        |settings: &DocumentSettings| PreparedMix::prepare(settings, &plan, 48_000).unwrap();
+    let mut renderer =
+        Renderer::new(plan.clone(), resources.clone(), crunch.clone(), 48_000).unwrap();
+    let mut block = [[0.0f32; 2]; 64];
+    renderer.render_into(&mut block);
+    assert!(renderer.settle_mix().is_none(), "nothing is waiting");
+    assert!(
+        renderer.replace_mix(prepare(&metal)).is_some(),
+        "taken at once, so the old one retires"
+    );
+    assert!(
+        renderer.replace_mix(prepare(&crunch)).is_none(),
+        "waits, so nothing retires"
+    );
+    assert!(
+        renderer.replace_mix(prepare(&metal)).is_some(),
+        "replaces the waiting one, which retires"
+    );
+    assert!(renderer.settle_mix().is_none(), "the fade has not ended");
+    // 10 ms at this rate.
+    for _ in 0..8 {
+        renderer.render_into(&mut block);
+    }
+    assert!(renderer.settle_mix().is_some(), "the fade has ended");
+    assert!(renderer.settle_mix().is_none(), "installed once");
+    // A sound arriving while the last is still waiting would be next, so it waits too rather than overtaking.
+    renderer.render_into(&mut block);
+    assert!(renderer.replace_mix(prepare(&crunch)).is_none());
+    assert!(renderer.settle_mix().is_none());
+}
+
+#[test]
+fn a_seek_during_a_change_leaves_nothing_of_the_old_sound() {
+    let base = amp("crunch", 0.4);
+    for rate in RATES {
+        for (first, next) in [
+            (amp("metal", 0.9), amp("crunch", 0.3)),
+            (
+                pedal(base.clone(), "fuzz", 0.8),
+                pedal(base.clone(), "overdrive", 0.3),
+            ),
+        ] {
+            let mut old = TrackDsp::new(first, rate, 1.0).unwrap();
+            for n in 0..rate as usize / 4 {
+                old.process([riff(n, rate); 2], 120.0);
+            }
+            let mut new = TrackDsp::new(next, rate, 1.0).unwrap();
+            new.transition_from(&mut old);
+            let frames = rate as usize / 400;
+            for n in 0..frames {
+                new.process([riff(rate as usize / 4 + n, rate); 2], 120.0);
+            }
+            assert!(new.ramping());
+            new.reset();
+            for n in 0..rate as usize / 50 {
+                assert_eq!(
+                    new.process([0.0; 2], 120.0),
+                    [0.0; 2],
+                    "frame {n} after a seek at {rate}"
+                );
+            }
+        }
     }
 }
 
@@ -544,6 +877,221 @@ fn a_track_panned_while_it_plays_runs_on_exactly() {
     }
 }
 
+/// Runs both boards, one resting and one running every frame, and requires the same bits from them on every frame.
+fn play_both(
+    resting: &mut TrackDsp,
+    running: &mut TrackDsp,
+    frames: usize,
+    input: impl Fn(usize) -> [f32; 2],
+    what: &str,
+) {
+    for n in 0..frames {
+        let x = input(n);
+        let (a, b) = (resting.process(x, 120.0), running.process(x, 120.0));
+        assert_eq!(
+            a.map(f32::to_bits),
+            b.map(f32::to_bits),
+            "{what}: frame {n}: {a:?} against {b:?}"
+        );
+    }
+}
+fn boards() -> Vec<FxSettings> {
+    let mut lively = cabinet(pedal(amp("lead", 0.7), "distortion", 0.7), "combo");
+    lively.delay.enabled = true;
+    lively.reverb.enabled = true;
+    lively.chorus.enabled = true;
+    let mut stacked = cabinet(pedal(amp("crunch", 0.5), "overdrive", 0.4), "closed");
+    stacked.amp.bass_db = -3.0;
+    stacked.amp.mid_db = 2.0;
+    stacked.amp.treble_db = 3.0;
+    stacked.amp.presence_db = -2.0;
+    let mut doubled = cabinet(amp("crunch", 0.6), "closed");
+    doubled.second = Some(Box::new(cabinet(
+        pedal(amp("metal", 0.5), "fuzz", 0.5),
+        "combo",
+    )));
+    vec![
+        cabinet(pedal(amp("metal", 0.8), "fuzz", 0.5), "closed"),
+        cabinet(pedal(amp("bassDrive", 0.6), "overdrive", 0.5), "bassStack"),
+        cabinet(amp("crunch", 0.6), "combo"),
+        pedal(FxSettings::default(), "fuzz", 0.9),
+        cabinet(FxSettings::default(), "closed"),
+        lively,
+        stacked,
+        doubled,
+    ]
+}
+
+#[test]
+fn a_silent_track_rests_after_its_tail_and_changes_nothing() {
+    for rate in [44_100, 48_000, 96_000] {
+        let note = rate as usize / 4;
+        // Past the fuzz's level follower, the slowest thing to reach zero.
+        let tail = rate as usize * 5 / 2;
+        let silence = |_: usize| [0.0f32; 2];
+        let centred = |n: usize| [riff(n, rate); 2];
+        let panned = |n: usize| [riff(n, rate), riff(n, rate) * 0.7];
+        for (index, fx) in boards().into_iter().enumerate() {
+            let what = |part: &str| format!("board {index} at {rate}, {part}");
+            let mut resting = TrackDsp::new(fx.clone(), rate, 1.0).unwrap();
+            let mut running = TrackDsp::new(fx.clone(), rate, 1.0).unwrap();
+            running.never_rest();
+            assert_eq!(resting.driven_at_rest(), [true, true], "starts at rest");
+            play_both(
+                &mut resting,
+                &mut running,
+                note,
+                silence,
+                &what("before it plays"),
+            );
+
+            play_both(&mut resting, &mut running, note, centred, &what("a note"));
+            assert_eq!(
+                resting.driven_at_rest(),
+                [false, true],
+                "{}",
+                what("a note")
+            );
+            // A frame's silence is not a rest: the note's tail plays out.
+            play_both(
+                &mut resting,
+                &mut running,
+                1,
+                silence,
+                &what("the tail's start"),
+            );
+            assert_eq!(
+                resting.driven_at_rest(),
+                [false, true],
+                "{}",
+                what("the tail")
+            );
+            play_both(&mut resting, &mut running, tail, silence, &what("the tail"));
+            assert_eq!(
+                resting.driven_at_rest(),
+                [true, true],
+                "{}",
+                what("the tail")
+            );
+
+            play_both(
+                &mut resting,
+                &mut running,
+                note,
+                panned,
+                &what("a panned note"),
+            );
+            assert_eq!(resting.driven_at_rest()[1], false, "{}", what("panned"));
+            play_both(&mut resting, &mut running, tail, silence, &what("its tail"));
+            assert_eq!(
+                resting.driven_at_rest(),
+                [true, true],
+                "{}",
+                what("its tail")
+            );
+
+            // Back from rest, and through a change that arrives in a short gap, then one that arrives at rest.
+            play_both(
+                &mut resting,
+                &mut running,
+                note,
+                centred,
+                &what("the next note"),
+            );
+            play_both(
+                &mut resting,
+                &mut running,
+                rate as usize / 100,
+                silence,
+                &what("a gap"),
+            );
+            let next = cabinet(pedal(amp("lead", 0.5), "distortion", 0.4), "combo");
+            let swap = |dsp: &mut TrackDsp, full: bool| {
+                let mut new = TrackDsp::new(next.clone(), rate, 1.0).unwrap();
+                if full {
+                    new.never_rest();
+                }
+                new.transition_from(dsp);
+                *dsp = new;
+            };
+            swap(&mut resting, false);
+            swap(&mut running, true);
+            play_both(
+                &mut resting,
+                &mut running,
+                note,
+                panned,
+                &what("after a change"),
+            );
+            play_both(
+                &mut resting,
+                &mut running,
+                tail,
+                silence,
+                &what("that tail"),
+            );
+            assert_eq!(
+                resting.driven_at_rest(),
+                [true, true],
+                "{}",
+                what("that tail")
+            );
+            swap(&mut resting, false);
+            swap(&mut running, true);
+            play_both(
+                &mut resting,
+                &mut running,
+                note,
+                silence,
+                &what("a change at rest"),
+            );
+            play_both(
+                &mut resting,
+                &mut running,
+                note,
+                centred,
+                &what("and a note"),
+            );
+        }
+    }
+}
+
+#[test]
+fn a_track_panned_and_centred_again_returns_to_one_channel_once_its_tail_dies() {
+    for fx in [
+        cabinet(pedal(amp("metal", 0.8), "fuzz", 0.5), "closed"),
+        cabinet(amp("crunch", 0.6), "combo"),
+    ] {
+        for rate in RATES {
+            let mut resting = TrackDsp::new(fx.clone(), rate, 1.0).unwrap();
+            let mut running = TrackDsp::new(fx.clone(), rate, 1.0).unwrap();
+            running.never_rest();
+            let second = rate as usize;
+            let panned = |n: usize| [riff(n, rate), riff(n, rate) * 0.7];
+            let centred = |n: usize| [riff(n, rate); 2];
+            let silence = |_: usize| [0.0f32; 2];
+            play_both(&mut resting, &mut running, second / 2, panned, "panned");
+            assert!(!resting.driven_at_rest()[1]);
+            // Centred but still sounding, the channels can stay a few units apart in their last bits, which is not the same
+            // state, so one run could not stand for both. That lasts until they meet exactly or the tail ends.
+            play_both(&mut resting, &mut running, second, centred, "centred");
+            play_both(&mut resting, &mut running, second * 3, silence, "its tail");
+            assert_eq!(resting.driven_at_rest(), [true, true], "the tail has died");
+            play_both(&mut resting, &mut running, second, centred, "centred again");
+            assert_eq!(resting.driven_at_rest(), [false, true], "one channel");
+            play_both(
+                &mut resting,
+                &mut running,
+                second / 2,
+                panned,
+                "panned again",
+            );
+            assert!(!resting.driven_at_rest()[1]);
+            play_both(&mut resting, &mut running, second / 2, centred, "and back");
+        }
+    }
+}
+
 #[test]
 fn the_driven_chain_stays_off_the_heap() {
     let boards = [
@@ -575,6 +1123,13 @@ fn the_driven_chain_stays_off_the_heap() {
                 let x = riff(n, rate);
                 let right = if n < rate as usize / 10 { x } else { x * 0.7 };
                 sum += prepared[index].process([x, right], 120.0)[0];
+            }
+            // On to rest, which rejoins the channels, and out of it again.
+            for _ in 0..rate as usize * 5 / 2 {
+                sum += prepared[index].process([0.0; 2], 120.0)[0];
+            }
+            for n in 0..rate as usize / 100 {
+                sum += prepared[index].process([riff(n, rate); 2], 120.0)[0];
             }
             prepared[index].reset();
         }

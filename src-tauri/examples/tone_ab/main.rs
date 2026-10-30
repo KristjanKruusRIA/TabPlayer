@@ -572,6 +572,93 @@ fn bench() {
         );
     }
 }
+/// Real-time load of a full mix on one core: every track running the heaviest driven sound at once, as the audio callback
+/// runs them in turn. `warm` readies each track, and each then plays its own part of `timed`. `rests` allows the shortcuts.
+fn mix_load(
+    board: &FxSettings,
+    tracks: usize,
+    warm: &[[f32; 2]],
+    timed: &[&[[f32; 2]]],
+    rests: bool,
+) -> f64 {
+    let frames = RATE as usize * 3;
+    let mut best = f64::INFINITY;
+    for _ in 0..3 {
+        let mut dsps: Vec<TrackDsp> = (0..tracks)
+            .map(|_| TrackDsp::new(board.clone(), RATE, 16.0).unwrap())
+            .collect();
+        for dsp in &mut dsps {
+            if !rests {
+                dsp.never_rest();
+            }
+            for frame in warm {
+                dsp.process(*frame, 120.0);
+            }
+        }
+        let mut guard = 0.0f32;
+        let started = Instant::now();
+        for frame in 0..frames {
+            for (index, dsp) in dsps.iter_mut().enumerate() {
+                let part = timed[index % timed.len()];
+                guard += dsp.process(part[frame % part.len()], 120.0)[0];
+            }
+        }
+        best = best.min(started.elapsed().as_secs_f64());
+        std::hint::black_box(guard);
+    }
+    100.0 * best / (frames as f64 / RATE as f64)
+}
+/// The figures for eight and sixteen tracks. Sounding tracks hold the riff's real gaps; a silent one has played and died away.
+fn mix_bench() {
+    let plan = plan(&GUITAR, 30);
+    let centred = render(&plan, FxSettings::default());
+    let panned: Vec<[f32; 2]> = centred.iter().map(|f| [f[0], f[1] * 0.7]).collect();
+    let note = &panned[..RATE as usize / 2];
+    let silence = vec![[0.0f32; 2]; RATE as usize * 3];
+    let drained: Vec<[f32; 2]> = note.iter().chain(&silence).copied().collect();
+    let board = factory("metal-rhythm").unwrap();
+    let mut duplicated = board.clone();
+    duplicated.second = Some(Box::new(board.clone()));
+    for tracks in [8, 16] {
+        let row = |name: &str, board: &FxSettings, warm: &[[f32; 2]], timed: &[&[[f32; 2]]]| {
+            println!(
+                "{tracks:>2} tracks, {name:<44} {:6.1}% of one core",
+                mix_load(board, tracks, warm, timed, true)
+            );
+        };
+        row("all sounding, centred", &board, &[], &[&centred]);
+        row("all sounding, panned", &board, &[], &[&panned]);
+        row(
+            "all sounding, panned, duplicate boards",
+            &duplicated,
+            &[],
+            &[&panned],
+        );
+        row(
+            "a quarter sounding, the rest silent",
+            &board,
+            &drained,
+            &[&centred, &silence, &silence, &silence],
+        );
+        row("all silent, tails finished", &board, &drained, &[&silence]);
+        println!(
+            "{tracks:>2} tracks, {:<44} {:6.1}% of one core",
+            "all silent, tails finished, shortcut off",
+            mix_load(&board, tracks, &drained, &[&silence], false)
+        );
+        row(
+            "all panned once, centred again",
+            &board,
+            &drained,
+            &[&centred],
+        );
+        println!(
+            "{tracks:>2} tracks, {:<44} {:6.1}% of one core",
+            "all panned once, centred again, shortcut off",
+            mix_load(&board, tracks, &drained, &[&centred], false)
+        );
+    }
+}
 /// The bench figures of each driven sound as the app plays it, with its time-based blocks and gate off, which would
 /// otherwise measure themselves.
 fn measure_all() {
@@ -672,11 +759,12 @@ fn main() {
         ["clean", folder] => dump_clean(folder),
         ["dry", folder] => dump_dry(folder),
         ["bench"] => bench(),
+        ["mix-bench"] => mix_bench(),
         ["input"] => input(),
         ["measure"] => measure_all(),
         ["levels"] => levels(),
         _ => eprintln!(
-            "usage: tone_ab render <tag> | ir | clean <folder> | dry <folder> | bench | input | measure | levels"
+            "usage: tone_ab render <tag> | ir | clean <folder> | dry <folder> | bench | mix-bench | input | measure | levels"
         ),
     }
 }

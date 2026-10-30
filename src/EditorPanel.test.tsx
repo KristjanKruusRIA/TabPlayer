@@ -98,3 +98,86 @@ it('identifies the indexed note in the persistent location and keeps unsupported
   view.rerender(<EditorPanel {...input} noteIndex={null}/>);
   expect(screen.getByLabelText('Editing location')).toHaveTextContent('No note selected');
 });
+
+it('glyph editing toolbar dispatches one undoable edit per duration, dot, rest, tie and technique click with roving keyboard navigation',()=>{
+  const input=props();
+  render(<EditorPanel {...input}/>);
+  const toolbar=within(screen.getByRole('toolbar',{name:'Editing toolbar'}));
+  expect(toolbar.getByRole('button',{name:'Quarter note (1/4)'})).toHaveAttribute('aria-pressed','true');
+
+  fireEvent.click(toolbar.getByRole('button',{name:'Eighth note (1/8)'}));
+  expect(input.onEdit).toHaveBeenLastCalledWith({type:'setDuration',target,duration:8,dots:0});
+  expect(screen.getByLabelText('Duration')).toHaveValue('8');
+
+  fireEvent.click(toolbar.getByRole('button',{name:'Dotted'}));
+  expect(input.onEdit).toHaveBeenLastCalledWith({type:'setDuration',target,duration:4,dots:1});
+
+  fireEvent.click(toolbar.getByRole('button',{name:'Toggle rest'}));
+  expect(input.onEdit).toHaveBeenLastCalledWith({type:'setRest',target});
+
+  fireEvent.click(toolbar.getByRole('button',{name:'Toggle tie'}));
+  expect(input.onEdit).toHaveBeenLastCalledWith({type:'setNoteLink',from:{target,string:6},to:{target:{...target,beat:1},string:6},kind:'tie'});
+
+  fireEvent.click(toolbar.getByRole('button',{name:'Toggle hammer/pull'}));
+  expect(input.onEdit).toHaveBeenLastCalledWith({type:'setNoteLink',from:{target,string:6},to:{target:{...target,beat:1},string:6},kind:'hammerPull'});
+
+  fireEvent.click(toolbar.getByRole('button',{name:'Toggle slide'}));
+  expect(input.onEdit).toHaveBeenLastCalledWith({type:'setNoteTechniques',target,string:6,patch:{slideOut:1}});
+
+  fireEvent.click(toolbar.getByRole('button',{name:'Toggle bend'}));
+  expect(input.onEdit).toHaveBeenLastCalledWith({type:'setNoteTechniques',target,string:6,patch:{bend:{type:1,style:0,points:[{offset:0,value:0},{offset:60,value:4}]}}});
+
+  fireEvent.click(toolbar.getByRole('button',{name:'Toggle vibrato'}));
+  expect(input.onEdit).toHaveBeenLastCalledWith({type:'setNoteTechniques',target,string:6,patch:{vibrato:1}});
+
+  fireEvent.click(toolbar.getByRole('button',{name:'Toggle palm mute'}));
+  expect(input.onEdit).toHaveBeenLastCalledWith({type:'setNoteTechniques',target,string:6,patch:{palmMute:true}});
+
+  fireEvent.click(toolbar.getByRole('button',{name:'Toggle harmonic'}));
+  expect(input.onEdit).toHaveBeenLastCalledWith({type:'setNoteTechniques',target,string:6,patch:{harmonic:{type:1,value:12}}});
+
+  const first=toolbar.getByRole('button',{name:'Whole note (1/1)'});
+  first.focus();
+  fireEvent.keyDown(first,{key:'ArrowRight'});
+  expect(toolbar.getByRole('button',{name:'Half note (1/2)'})).toHaveFocus();
+  fireEvent.keyDown(toolbar.getByRole('button',{name:'Half note (1/2)'}),{key:'End'});
+  expect(toolbar.getByRole('button',{name:'Toggle accent'})).toHaveFocus();
+  fireEvent.keyDown(toolbar.getByRole('button',{name:'Toggle accent'}),{key:'Home'});
+  expect(first).toHaveFocus();
+});
+
+it('contextual inspector shows active selection badges and filters panels by context while preserving drafts',()=>{
+  const input=props();
+  const note=input.score.tracks[0].staves[0].bars[0].voices[0].beats[0].notes[0];
+  note.isPalmMute=true;
+  note.bendType=1;
+  const view=render(<EditorPanel {...input}><Draft label="Clipboard draft"/></EditorPanel>);
+
+  const contextCard=within(screen.getByRole('region',{name:'Selection context'}));
+  expect(contextCard.getByText(/Selected note · String 6/)).toBeVisible();
+  expect(contextCard.getByLabelText('Active note techniques')).toHaveTextContent('Bend');
+  expect(contextCard.getByLabelText('Active note techniques')).toHaveTextContent('PM');
+
+  disclose('Beat text');
+  fireEvent.change(screen.getByLabelText('Beat text'),{target:{value:'Verse riff'}});
+
+  fireEvent.click(contextCard.getByRole('button',{name:'Note'}));
+  expect(screen.getByLabelText('Fret')).toBeVisible();
+  expect(screen.getByLabelText('Palm mute')).toBeVisible();
+  expect(screen.getByText('Measure & notation',{selector:'summary'})).not.toBeVisible();
+  expect(screen.getByText('Music selection',{selector:'summary'})).not.toBeVisible();
+
+  fireEvent.click(contextCard.getByRole('button',{name:'Measure'}));
+  expect(screen.getByLabelText('Time numerator')).toBeVisible();
+  expect(screen.getByLabelText('Fret')).not.toBeVisible();
+
+  fireEvent.click(contextCard.getByRole('button',{name:'Selection'}));
+  expect(screen.getByLabelText('Clipboard draft')).toBeVisible();
+  expect(screen.getByLabelText('Time numerator')).not.toBeVisible();
+
+  fireEvent.click(contextCard.getByRole('button',{name:'Beat'}));
+  expect(screen.getByLabelText('Beat text')).toHaveValue('Verse riff');
+
+  view.rerender(<EditorPanel {...input} musicSelection={{kind:'bars',tracks:[0],firstBar:0,lastBar:1}}><Draft label="Clipboard draft"/></EditorPanel>);
+  expect(contextCard.getByText('Range selection · Measures 1–2')).toBeVisible();
+});

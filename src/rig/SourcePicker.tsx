@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react';
 import { automaticVoice, voiceIds, voiceNames } from '../audio/sound-model';
 import type { VoiceId } from '../audio/sound-model';
 import type { SoundEditing } from '../audio/useSoundEditing';
 import { Segmented } from '../ui';
+import { busyGuard } from '../ui/useBusyGuard';
 import { SourceArt, TrackGlyph, trackKind } from './SourceArt';
 import type { RigTrack } from './SoundRig';
 
@@ -11,25 +11,26 @@ type Choice='auto'|VoiceId;
 
 /** Where the sound comes from, as the instruments themselves: one drawing for each source the engine has, and Automatic, which
  * plays as whichever the track's own instrument calls for. It is a radio group, so the arrow keys move and choose; choosing
- * is the same one edit as before. Hear auditions the source the label names. */
+ * is the same one edit as before. Each option has its own audition button to preview that source without an edit. */
 export function SourcePicker({editing,track}:{editing:SoundEditing;track:RigTrack|undefined}) {
   const {current,busy,previewer,showingPreview,previewChoice}=editing;
   const resolved=automaticVoice(track?.program??0,track?.percussion??false);
   const chosen:Choice=current.voiceId===null?'auto':(current.voiceId as VoiceId);
-  const [look,setLook]=useState<Choice|null>(null);
-  useEffect(()=>{setLook(null);},[track?.id]);
-  const aimed:Choice=look??chosen,hearing=showingPreview&&previewChoice===`voice:${aimed}`;
   const nameOf=(choice:Choice)=>choice==='auto'?`Automatic instrument, plays as ${voiceNames[resolved]}`:voiceNames[choice];
-  const options=(['auto',...voiceIds] as Choice[]).map(choice=>({
-    value:choice,ariaLabel:nameOf(choice),
-    label:<span className="rig-source" data-auto={choice==='auto'||undefined} title={nameOf(choice)} onPointerEnter={()=>setLook(choice)}>
-      <SourceArt source={choice==='auto'?resolved:choice} className="rig-source-art"/>
-      <span className="rig-source-name">{choice==='auto'?<>Auto<span className="rig-source-to">→{shortNames[resolved]}</span></>:<><span className="rig-name-short">{shortNames[choice]}</span><span className="rig-name-full">{voiceNames[choice]}</span></>}</span>
-    </span>,
-  }));
+  const options=(['auto',...voiceIds] as Choice[]).map(choice=>{
+    const hearing=showingPreview&&previewChoice===`voice:${choice}`;
+    const accessory=previewer?<button type="button" aria-pressed={hearing} aria-label={`Hear ${nameOf(choice)}`}
+      {...busyGuard({busy,className:'rig-hear rig-hear-source',onClick:()=>editing.choosePreview(hearing?'':`voice:${choice}`)})}>Hear</button>:undefined;
+    return {
+      value:choice,ariaLabel:nameOf(choice),accessory,
+      label:<span className="rig-source" data-auto={choice==='auto'||undefined} title={nameOf(choice)}>
+        <SourceArt source={choice==='auto'?resolved:choice} className="rig-source-art"/>
+        <span className="rig-source-name">{choice==='auto'?<>Auto<span className="rig-source-to">→{shortNames[resolved]}</span></>:<><span className="rig-name-short">{shortNames[choice]}</span><span className="rig-name-full">{voiceNames[choice]}</span></>}</span>
+      </span>,
+    };
+  });
   return <div className="rig-source-picker">
-    <div onPointerLeave={()=>setLook(null)}><Segmented className="rig-sources" label="Sound source" value={chosen} disabled={busy} options={options} onChange={choice=>void editing.setVoice(choice==='auto'?null:choice)}/></div>
-    {previewer&&<button type="button" className="rig-hear rig-hear-source" aria-pressed={hearing} aria-label={`Hear ${nameOf(aimed)}`} disabled={busy} onClick={()=>editing.choosePreview(hearing?'':`voice:${aimed}`)}>Hear {nameOf(aimed)}</button>}
+    <Segmented className="rig-sources" label="Sound source" value={chosen} disabled={busy} options={options} onChange={choice=>void editing.setVoice(choice==='auto'?null:choice)}/>
   </div>;
 }
 

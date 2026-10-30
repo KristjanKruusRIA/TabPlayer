@@ -322,7 +322,7 @@ it('routes music clipboard shortcuts while preserving text input shortcuts and p
 });
 it('passes fixed-mode export unavailability without claiming a constant practice coefficient',async()=>{
   integration.practiceFixed=true;await setup();await waitFor(()=>expect(integration.exportOptions).toHaveBeenLastCalledWith(expect.objectContaining({currentSpeed:null})));
-  click('Export score');change('Export format','wav');expect(screen.getByRole('option',{name:'Current speed coefficient'})).toBeDisabled();
+  click('Export score');change('Export format','wav');expect(screen.getByRole('radio',{name:'Current speed coefficient'})).toBeDisabled();
 });
 
 it('selects editable music with keyboard shortcuts without changing history or text editing',async()=>{

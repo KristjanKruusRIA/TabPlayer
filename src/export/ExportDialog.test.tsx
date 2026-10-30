@@ -8,6 +8,7 @@ import { validateSelection } from './types';
 afterEach(cleanup);
 function fixture(){const score=new model.Score();for(let i=0;i<3;i++)score.addMasterBar(new model.MasterBar());const track=new model.Track();track.name='Lead';score.addTrack(track);return score;}
 const layout={paper:'A4' as const,orientation:'portrait' as const,marginMm:15,scale:1,profile:'ScoreTab' as const};
+const radio=(group:string,name:string)=>within(screen.getByRole('radiogroup',{name:group})).getByRole('radio',{name});
 
 it('explains supported uniform common/cut interchange beside GP export options',()=>{
   render(<ExportDialog score={fixture()} layout={layout} busy={false} currentSpeedAvailable={true} onExport={()=>{}} onCancel={()=>{}}/>);
@@ -20,7 +21,7 @@ it('includes GP backing by default without exposing audio format settings',()=>{
   for(const label of ['Sample rate','Bit depth','Speed','Metronome','Effect tail (seconds)'])expect(screen.queryByLabelText(label)).toBeNull();
   fireEvent.click(screen.getByRole('button',{name:'Export'}));expect(submit).toHaveBeenCalledWith({format:'gp',selection:{tracks:[0],range:null}});
   fireEvent.change(screen.getByLabelText('Export format'),{target:{value:'wav'}});
-  expect(screen.queryByLabelText('Include backing audio')).toBeNull();expect(screen.getByLabelText('Sample rate')).toBeVisible();
+  expect(screen.queryByLabelText('Include backing audio')).toBeNull();expect(screen.getByRole('radiogroup',{name:'Sample rate'})).toBeVisible();
 });
 
 it('blocks an unsupported GP backing selection and permits explicit notation export',()=>{
@@ -78,7 +79,7 @@ it('submits SVG with the PDF page layout and an optional transparent background'
   const submit=vi.fn();render(<ExportDialog score={fixture()} layout={layout} busy={false} currentSpeedAvailable={true} onExport={submit} onCancel={()=>{}}/>);
   expect(screen.queryByLabelText('Transparent background')).toBeNull();
   fireEvent.change(screen.getByLabelText('Export format'),{target:{value:'svg'}});
-  expect(screen.getByText(/SVG writes one file per page/)).toBeVisible();expect(screen.getByLabelText('Paper')).toBeVisible();
+  expect(screen.getByText(/SVG writes one file per page/)).toBeVisible();expect(screen.getByRole('radiogroup',{name:'Paper'})).toBeVisible();
   const transparent=screen.getByLabelText('Transparent background');expect(transparent).not.toBeChecked();
   fireEvent.click(screen.getByRole('button',{name:'Export'}));
   expect(submit).toHaveBeenLastCalledWith({format:'svg',selection:{tracks:[0],range:null},layout,transparent:false});
@@ -90,11 +91,11 @@ it('submits PNG with the PDF page layout, a background choice and a resolution',
   const submit=vi.fn();render(<ExportDialog score={fixture()} layout={layout} busy={false} currentSpeedAvailable={true} onExport={submit} onCancel={()=>{}}/>);
   expect(screen.queryByLabelText('Resolution')).toBeNull();
   fireEvent.change(screen.getByLabelText('Export format'),{target:{value:'png'}});
-  expect(screen.getByText(/PNG writes one image per page/)).toBeVisible();expect(screen.getByLabelText('Paper')).toBeVisible();
-  expect(screen.getByLabelText('Transparent background')).not.toBeChecked();expect(screen.getByLabelText('Resolution')).toHaveValue('300');
+  expect(screen.getByText(/PNG writes one image per page/)).toBeVisible();expect(screen.getByRole('radiogroup',{name:'Paper'})).toBeVisible();
+  expect(screen.getByLabelText('Transparent background')).not.toBeChecked();expect(radio('Resolution','300 dpi')).toBeChecked();
   fireEvent.click(screen.getByRole('button',{name:'Export'}));
   expect(submit).toHaveBeenLastCalledWith({format:'png',selection:{tracks:[0],range:null},layout,transparent:false,dpi:300});
-  fireEvent.click(screen.getByLabelText('Transparent background'));fireEvent.change(screen.getByLabelText('Resolution'),{target:{value:'150'}});
+  fireEvent.click(screen.getByLabelText('Transparent background'));fireEvent.click(radio('Resolution','150 dpi'));
   fireEvent.click(screen.getByRole('button',{name:'Export'}));
   expect(submit).toHaveBeenLastCalledWith({format:'png',selection:{tracks:[0],range:null},layout,transparent:true,dpi:150});
 });
@@ -198,16 +199,15 @@ describe('export dialog',()=>{
     const submit=vi.fn(),score=fixture();
     const {rerender}=render(<ExportDialog score={score} layout={layout} busy={false} currentSpeedAvailable={true} onExport={submit} onCancel={()=>{}}/>);
     fireEvent.change(screen.getByLabelText('Export format'),{target:{value:'wav'}});
-    const speed=screen.getByLabelText('Speed');
-    fireEvent.change(speed,{target:{value:'current'}});expect(speed).toHaveValue('current');
-    expect(screen.getByRole('option',{name:'Current speed coefficient'})).toBeEnabled();
+    fireEvent.click(radio('Speed','Current speed coefficient'));expect(radio('Speed','Current speed coefficient')).toBeChecked();
+    expect(radio('Speed','Current speed coefficient')).toBeEnabled();
     rerender(<ExportDialog score={score} layout={layout} busy={false} currentSpeedAvailable={false} onExport={submit} onCancel={()=>{}}/>);
-    expect(screen.getByRole('option',{name:'Current speed coefficient'})).toBeDisabled();expect(speed).toHaveValue('saved');
+    expect(radio('Speed','Current speed coefficient')).toBeDisabled();expect(radio('Speed','100%')).toBeChecked();
     expect(screen.getByText(/fixed BPM.*saved speed/i)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button',{name:'Export'}));
     expect(submit.mock.calls[0][0].audio.speed).toBe('saved');
     rerender(<ExportDialog score={score} layout={layout} busy={false} currentSpeedAvailable={true} onExport={submit} onCancel={()=>{}}/>);
-    expect(speed).toHaveValue('saved');expect(screen.getByRole('option',{name:'Current speed coefficient'})).toBeEnabled();
+    expect(radio('Speed','100%')).toBeChecked();expect(radio('Speed','Current speed coefficient')).toBeEnabled();
   });
   it('validates inclusive measure drafts and sends explicit audio settings',()=>{
     const submit=vi.fn();render(<ExportDialog currentSpeedAvailable={true} score={fixture()} layout={layout} busy={false} onExport={submit} onCancel={()=>{}}/>);
@@ -215,13 +215,13 @@ describe('export dialog',()=>{
     fireEvent.click(screen.getByLabelText('Measure range'));fireEvent.change(screen.getByLabelText('First measure'),{target:{value:'1.5'}});
     fireEvent.click(screen.getByRole('button',{name:'Export'}));expect(submit).not.toHaveBeenCalled();expect(screen.getByRole('alert')).toHaveTextContent(/whole measure/i);
     fireEvent.change(screen.getByLabelText('First measure'),{target:{value:'2'}});fireEvent.change(screen.getByLabelText('Last measure'),{target:{value:'3'}});
-    fireEvent.change(screen.getByLabelText('Sample rate'),{target:{value:'44100'}});fireEvent.change(screen.getByLabelText('Bit depth'),{target:{value:'24'}});
+    fireEvent.click(radio('Sample rate','44.1 kHz'));fireEvent.click(radio('Bit depth','24 bit'));
     fireEvent.click(screen.getByLabelText('Metronome'));fireEvent.click(screen.getByRole('button',{name:'Export'}));
     expect(submit).toHaveBeenCalledWith({format:'wav',selection:{tracks:[0],range:{first:1,last:2}},audio:{sampleRate:44100,bitDepth:24,speed:'saved',metronome:true,tailSeconds:2,backing:true,includeMix:true}});
   });
   it('copies print settings and disables submissions while preserving cancellation',()=>{
     const cancel=vi.fn();const {rerender}=render(<ExportDialog currentSpeedAvailable={true} score={fixture()} layout={layout} busy={false} onExport={()=>{}} onCancel={cancel}/>);
-    fireEvent.change(screen.getByLabelText('Export format'),{target:{value:'pdf'}});expect(screen.getByLabelText('Paper')).toHaveValue('A4');
+    fireEvent.change(screen.getByLabelText('Export format'),{target:{value:'pdf'}});expect(radio('Paper','A4')).toBeChecked();
     rerender(<ExportDialog currentSpeedAvailable={true} score={fixture()} layout={layout} busy={true} progress={{id:'job',frames:20,totalFrames:100,status:'running'}} onExport={()=>{}} onCancel={cancel}/>);
     expect(screen.getByRole('button',{name:'Export'})).toBeDisabled();expect(screen.getByRole('progressbar')).toHaveAttribute('value','20');
     fireEvent.click(screen.getByRole('button',{name:'Cancel export'}));expect(cancel).toHaveBeenCalledTimes(1);expect(layout.marginMm).toBe(15);
@@ -229,12 +229,12 @@ describe('export dialog',()=>{
   it('shows a native export failure inside the modal and retries with the selected options',()=>{
     const submit=vi.fn();const score=fixture();const {rerender}=render(<ExportDialog currentSpeedAvailable={true} score={score} layout={layout} busy={false} onExport={submit} onCancel={()=>{}}/>);
     fireEvent.change(screen.getByLabelText('Export format'),{target:{value:'wav'}});
-    fireEvent.change(screen.getByLabelText('Sample rate'),{target:{value:'44100'}});
+    fireEvent.click(radio('Sample rate','44.1 kHz'));
     fireEvent.click(screen.getByRole('button',{name:'Export'}));
     rerender(<ExportDialog currentSpeedAvailable={true} score={score} layout={layout} busy={true} progress={{id:'job',frames:20,totalFrames:100,status:'running'}} onExport={submit} onCancel={()=>{}}/>);
     rerender(<ExportDialog currentSpeedAvailable={true} score={score} layout={layout} busy={false} progress={{id:'job',frames:20,totalFrames:100,status:'failed',error:'The output disk is full.'}} failure="Export failed" onExport={submit} onCancel={()=>{}}/>);
     const dialog=within(screen.getByRole('dialog'));expect(dialog.getByRole('alert')).toHaveTextContent('The output disk is full.');
-    expect(dialog.getByRole('button',{name:'Export'})).toBeEnabled();expect(dialog.getByLabelText('Sample rate')).toHaveValue('44100');
+    expect(dialog.getByRole('button',{name:'Export'})).toBeEnabled();expect(radio('Sample rate','44.1 kHz')).toBeChecked();
     fireEvent.click(dialog.getByRole('button',{name:'Export'}));expect(submit).toHaveBeenCalledTimes(2);
     expect(submit.mock.calls[1][0]).toEqual({format:'wav',selection:{tracks:[0],range:null},audio:{sampleRate:44100,bitDepth:16,speed:'saved',metronome:false,tailSeconds:2,backing:true,includeMix:true}});
   });
@@ -247,21 +247,21 @@ describe('export dialog',()=>{
   it('contains keyboard focus, cancels busy exports with Escape, and restores the opener',()=>{
     const opener=document.createElement('button');document.body.append(opener);opener.focus();
     const cancel=vi.fn();const score=fixture();const {rerender,unmount}=render(<ExportDialog currentSpeedAvailable={true} score={score} layout={layout} busy={false} onExport={()=>{}} onCancel={cancel}/>);
-    const format=screen.getByLabelText('Export format');const cancelButton=screen.getByRole('button',{name:'Cancel'});
-    expect(format).toHaveFocus();fireEvent.keyDown(format,{key:'Tab',shiftKey:true});expect(cancelButton).toHaveFocus();
-    fireEvent.keyDown(cancelButton,{key:'Tab'});expect(format).toHaveFocus();
+    const format=screen.getByLabelText('Export format'),closeButton=screen.getByRole('button',{name:'Close'}),cancelButton=screen.getByRole('button',{name:'Cancel'});
+    expect(format).toHaveFocus();closeButton.focus();fireEvent.keyDown(closeButton,{key:'Tab',shiftKey:true});expect(cancelButton).toHaveFocus();
+    fireEvent.keyDown(cancelButton,{key:'Tab'});expect(closeButton).toHaveFocus();
     rerender(<ExportDialog currentSpeedAvailable={true} score={score} layout={layout} busy={true} onExport={()=>{}} onCancel={cancel}/>);
     const busyCancel=screen.getByRole('button',{name:'Cancel export'});expect(busyCancel).toHaveFocus();
-    fireEvent.keyDown(busyCancel,{key:'Tab'});expect(busyCancel).toHaveFocus();fireEvent.keyDown(busyCancel,{key:'Escape'});expect(cancel).toHaveBeenCalledTimes(1);
+    fireEvent.keyDown(busyCancel,{key:'Tab'});expect(closeButton).toHaveFocus();fireEvent.keyDown(busyCancel,{key:'Escape'});expect(cancel).toHaveBeenCalledTimes(1);
     unmount();expect(opener).toHaveFocus();opener.remove();
   });
-  it('uses the existing hit-testable dialog backdrop to contain pointer input',()=>{
+  it('uses the shared hit-testable dialog backdrop to contain pointer input',()=>{
     render(<ExportDialog currentSpeedAvailable={true} score={fixture()} layout={layout} busy={false} onExport={()=>{}} onCancel={()=>{}}/>);
-    expect(screen.getByRole('dialog').parentElement).toHaveClass('dialog-backdrop');
+    expect(screen.getByRole('dialog').parentElement).toHaveClass('tp-dialog-backdrop');
   });
   it('reconciles track staff and measure selections when the score topology changes',()=>{
     const submit=vi.fn();const {rerender}=render(<ExportDialog currentSpeedAvailable={true} score={fixture()} layout={layout} busy={false} onExport={submit} onCancel={()=>{}}/>);
-    fireEvent.change(screen.getByLabelText('Export format'),{target:{value:'wav'}});fireEvent.change(screen.getByLabelText('Sample rate'),{target:{value:'44100'}});
+    fireEvent.change(screen.getByLabelText('Export format'),{target:{value:'wav'}});fireEvent.click(radio('Sample rate','44.1 kHz'));
     fireEvent.click(screen.getByLabelText('Measure range'));fireEvent.change(screen.getByLabelText('First measure'),{target:{value:'3'}});
     const changed=fixture();changed.masterBars.splice(1);const added=new model.Track();added.name='Bass';added.addStaff(new model.Staff());added.addStaff(new model.Staff());changed.addTrack(added);
     rerender(<ExportDialog currentSpeedAvailable={true} score={changed} layout={layout} busy={false} onExport={submit} onCancel={()=>{}}/>);

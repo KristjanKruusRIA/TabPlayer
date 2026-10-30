@@ -641,8 +641,13 @@ impl DocumentWorkspace {
     ) -> Result<DocumentSnapshot, String> {
         let revision = self.check_mutation(address)?;
         let entry = self.entry_mut(&address.document_id)?;
-        // The mixer is how a player balances playback, so it stays usable on a finalized score.
-        if entry.session.lock().is_some() && !matches!(command, EditCommand::SetTrackMix { .. }) {
+        // The mixer is how a player balances playback, so it stays usable on a finalized score, the master included.
+        if entry.session.lock().is_some()
+            && !matches!(
+                command,
+                EditCommand::SetTrackMix { .. } | EditCommand::SetMaster { .. }
+            )
+        {
             return Err(FINALIZED_MESSAGE.into());
         }
         entry

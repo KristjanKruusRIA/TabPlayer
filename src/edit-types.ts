@@ -86,9 +86,19 @@ export interface BackingSettings { assetId: string; offsetMs: number; anchors: S
 export interface PrintLayout {
   paper: 'A4'|'Letter'; orientation: 'portrait'|'landscape'; marginMm: number; scale: number; profile: 'ScoreTab'|'Score'|'Tab';
 }
+/** The master limiter: nothing it passes is above `ceilingDb`, and it has an instant attack. */
+export interface MasterLimiter { enabled:boolean; ceilingDb:number; releaseMs:number }
+/** The song-level chain after the mix: the compressor, EQ and reverb on the tracks and backing, the overall level and
+ * balance, and the limiter on everything that sounds. */
+export interface MasterSettings {
+  gainDb:number; balance:number;
+  compressor:FxSettings['compressor']; eq:FxSettings['eq']; reverb:FxSettings['reverb']; limiter:MasterLimiter;
+}
 export interface DocumentSettings {
   sounds: Record<string,TrackSound>; mixes: Record<string,ChannelMix>; backing: BackingSettings|null; print: PrintLayout;
   engraving:EngravingOverrides;page:PageLayout|null;
+  /** Absent until the master is first edited; a document without one plays as the defaults do. */
+  master?:MasterSettings;
 }
 
 export type EditCommand = LyricsCommand | GestureCommand | BarGestureCommand | RangeCommand | MeasureCommand | ClipboardCommand | EngravingCommand | HarmonyCommand | ScaleDiagramCommand | ReplaceTempoAutomations
@@ -138,8 +148,9 @@ export type EditCommand = LyricsCommand | GestureCommand | BarGestureCommand | R
   | { type: 'setTrackSound'; trackId: string; sound: TrackSound }
   | { type: 'setTrackMix'; trackId: string; mix: ChannelMix }
   | { type: 'setBacking'; backing: BackingSettings|null }
-  | { type: 'setPrintLayout'; layout: PrintLayout };
+  | { type: 'setPrintLayout'; layout: PrintLayout }
+  | { type: 'setMaster'; master: MasterSettings };
 
-export type SettingsEdit = Extract<EditCommand,{type:'setTrackSound'|'setTrackMix'|'setBacking'|'setPrintLayout'|'setEngraving'|'setPageLayout'}>;
+export type SettingsEdit = Extract<EditCommand,{type:'setTrackSound'|'setTrackMix'|'setBacking'|'setPrintLayout'|'setEngraving'|'setPageLayout'|'setMaster'}>;
 export const isSettingsEdit = (edit: EditCommand): edit is SettingsEdit =>
-  ['setTrackSound','setTrackMix','setBacking','setPrintLayout','setEngraving','setPageLayout'].includes(edit.type);
+  ['setTrackSound','setTrackMix','setBacking','setPrintLayout','setEngraving','setPageLayout','setMaster'].includes(edit.type);

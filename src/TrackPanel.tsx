@@ -6,13 +6,14 @@ import { projectScoreOverview } from './workstation/overview';
 import { ScoreOverview } from './workstation/ScoreOverview';
 import { trackColorHex } from './track-color';
 import { trackIdentity } from './engine';
+import { MasterPanel } from './audio/MasterPanel';
 import './workstation/track-panels.css';
 const noSubscribe=()=>()=>{};const noState=()=>null;
 
 export function TrackPanel({score,selected,busy,view,target,onExitOverview,onSelect,onSelectPosition,player}: {
   score:model.Score;selected:number;busy:boolean;view:'overview'|'mixer';target:BeatTarget;onExitOverview:()=>void;
   onSelect:(track:number)=>void;onSelectPosition:(track:number,bar:number)=>void;
-  player:Pick<NativePlaybackController,'subscribe'|'getState'|'mix'|'setMute'|'setSolo'|'setTrackVolume'|'setPan'|'focus'|'setFocus'>|null;
+  player:Pick<NativePlaybackController,'subscribe'|'getState'|'mix'|'setMute'|'setSolo'|'setTrackVolume'|'setPan'|'focus'|'setFocus'>&Partial<Pick<NativePlaybackController,'master'|'setMaster'>>|null;
 }):React.JSX.Element {
   const state=useSyncExternalStore(player?.subscribe ?? noSubscribe,player?.getState ?? noState);
   const overview=useMemo(()=>projectScoreOverview(score),[score]);
@@ -44,6 +45,7 @@ export function TrackPanel({score,selected,busy,view,target,onExitOverview,onSel
           <label className="track-channel-range">Pan <output>{pan.toFixed(2)}</output><input type="range" min={-1} max={1} step={.05} value={pan} disabled={busy||!player} aria-label={`Pan ${track.name}`} aria-valuetext={String(pan)} onChange={e=>player?.setPan(track.index,Number(e.target.value))}/></label>
         </section>;
       })}
+      <MasterPanel master={player?.master?.()} disabled={busy||!player?.setMaster} onChange={next=>player!.setMaster!(next)}/>
     </div>
   </section>;
 }

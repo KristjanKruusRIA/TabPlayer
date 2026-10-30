@@ -417,3 +417,47 @@ fn a_mixer_move_while_finalized_behaves_exactly_like_an_unlocked_one() {
         .unwrap();
     assert!(locked.redo(&current(&locked, &locked_id)).is_err());
 }
+
+#[test]
+fn the_master_stays_usable_while_finalized_and_is_saved_with_the_edits() {
+    let master = EditCommand::SetMaster {
+        master: tabplayer_lib::settings::MasterSettings {
+            gain_db: -2.0,
+            ..Default::default()
+        },
+    };
+    let (mut workspace, id) = open_one();
+    workspace
+        .set_lock(&current(&workspace, &id), finalized())
+        .unwrap();
+    let mixed = workspace
+        .apply_edit(&current(&workspace, &id), master.clone(), None)
+        .unwrap();
+    assert_eq!(mixed.snapshot.project.edits, vec![master.clone()]);
+    assert_eq!(mixed.snapshot.project.lock, finalized());
+    // Notes are still refused.
+    assert_eq!(
+        workspace
+            .apply_edit(&current(&workspace, &id), note(5), None)
+            .unwrap_err(),
+        FINALIZED
+    );
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("mastered.tabplayer");
+    workspace
+        .save_to_path(&current(&workspace, &id), path.clone())
+        .unwrap();
+    assert_eq!(read_project(&path).unwrap().edits, vec![master]);
+    // A master out of range is refused before it is stored.
+    let bad = EditCommand::SetMaster {
+        master: tabplayer_lib::settings::MasterSettings {
+            gain_db: 40.0,
+            ..Default::default()
+        },
+    };
+    assert!(
+        workspace
+            .apply_edit(&current(&workspace, &id), bad, None)
+            .is_err()
+    );
+}

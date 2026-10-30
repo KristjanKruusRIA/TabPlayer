@@ -3,7 +3,7 @@ import type { BeatTarget, EditCommand, Project, ProjectInput } from './project';
 import { appliesFilePartialCapo,projectCommands } from './project';
 import { isSettingsEdit } from './edit-types';
 import type { BackingSettings, ChannelMix, DocumentSettings } from './edit-types';
-import { defaultDocumentSettings, defaultMix, applySettingsEdit, copyTrackSettings, completeSound } from './document-settings';
+import { defaultDocumentSettings, defaultMix, applySettingsEdit, copyTrackSettings, completeSound, completeMaster } from './document-settings';
 import { getLyricsSource, setLyricsSource } from './editor/lyrics-source';
 import { copyHarmonyChord } from './harmony/chord-source';
 import { copyTrackScaleDiagrams } from './harmony/scale-diagram';
@@ -347,6 +347,7 @@ export function replayDocumentSettings(value:ProjectInput,current:BuiltDocument)
     case 'setPrintLayout': next.print=structuredClone(edit.layout);next.page=null;break;
     case 'setEngraving':next.engraving=structuredClone(edit.engraving);break;
     case 'setPageLayout':next.page=structuredClone(edit.layout);break;
+    case 'setMaster':next.master=structuredClone(completeMaster(edit.master));break;
     case 'appendMeasure': barCount++;break;
     case 'removeMeasure': removeBackingMeasure(next.backing,edit.bar);barCount--;break;
     case 'insertMeasures': case 'removeMeasures': {

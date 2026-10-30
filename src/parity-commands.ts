@@ -4,7 +4,7 @@ import {validateStrokePattern} from './editor/range-edits';
 import {validatePageLayout} from './engraving/page';
 import {validateHarmonyChord} from './harmony/chord-source';
 import {validateScaleDiagram} from './harmony/scale-diagram';
-import {validateBackingSettings} from './document-settings';
+import {masterProblem,validateBackingSettings} from './document-settings';
 import {validateRatioTempoPoints} from './editor/tempo-types';
 import {parseTrackColor} from './track-color';
 import {validatePartialCapo} from './editor/partial-capo';
@@ -41,7 +41,7 @@ const shapes:Record<string,readonly string[]>={
   setSelectionStrokes:['selection','technique','pattern'],setSelectionTies:['selection','tied'],
   insertMeasures:['beforeBar','count'],removeMeasures:['firstBar','lastBar'],
   pasteMusic:['clip','options'],
-  setEngraving:['engraving'],setPageLayout:['layout'],
+  setEngraving:['engraving'],setPageLayout:['layout'],setMaster:['master'],
   setBeatText:['target','text'],setHarmonyChord:['target','chord','fillEmptyBeat'],setScaleDiagram:['target','diagram'],
   transposeHarmony:['selection','interval','includeKeySignatures','includeChords'],
 };
@@ -206,6 +206,7 @@ export function validateParityCommand(value:unknown):void {
   if(type==='pasteMusic'){validateMusicClipEnvelope(edit.clip);pasteOptions(edit.options);}
   if(type==='setEngraving')validateEngraving(edit.engraving);
   if(type==='setPageLayout')validatePageLayout(edit.layout);
+  if(type==='setMaster'){const problem=masterProblem(edit.master);if(problem)throw new Error(problem);}
   if(type==='setBeatText'&&typeof edit.text!=='string')throw new Error('Invalid beat text.');
   if(type==='setHarmonyChord'){flag(edit.fillEmptyBeat);if(edit.chord!==null)validateHarmonyChord(edit.chord);}
   if(type==='setScaleDiagram'&&edit.diagram!==null)validateScaleDiagram(edit.diagram);

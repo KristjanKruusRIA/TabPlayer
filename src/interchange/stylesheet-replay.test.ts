@@ -162,7 +162,7 @@ it.each(invalidCases)('direct controller %s export clears busy/error and never c
 
 it.each(invalidCases)('export coordinator %s error is atomic and a later uniform excerpt succeeds',async(_name,make,message)=>{
   const score=buildScore(make()),exportGp=vi.fn(async()=>true),bridge={confirmExport:async()=>true,exportGp,readBackingAsset:async()=>{throw new Error('Unexpected backing read.');}};
-  const {result}=renderHook(()=>useExportCoordinator({revision:7,native:{exportPdf:async()=>null,exportMidi:async()=>true,exportMusicXml:async()=>true,exportAsciiTab:async()=>true,exportSvg:async()=>true,exportPng:async()=>true,exportTrackFiles:async()=>true,exportAudio:async()=>null,status:async()=>null,cancel:async()=>{}} satisfies ExportNativeBridge,score,settings:defaultDocumentSettings(),currentSpeed:1,bridge}));
+  const {result}=renderHook(()=>useExportCoordinator({revision:7,native:{exportPdf:async()=>null,exportMidi:async()=>true,exportMusicXml:async()=>true,exportAsciiTab:async()=>true,exportGp5:async()=>true,exportSvg:async()=>true,exportPng:async()=>true,exportTrackFiles:async()=>true,exportAudio:async()=>null,status:async()=>null,cancel:async()=>{}} satisfies ExportNativeBridge,score,settings:defaultDocumentSettings(),currentSpeed:1,bridge}));
   await act(async()=>{await expect(result.current.run({format:'gp',selection:{tracks:[0],range:null}})).rejects.toThrow(message);});
   expect(exportGp).not.toHaveBeenCalled();expect(result.current.busy).toBe(false);expect(result.current.progress).toBeUndefined();
   await act(async()=>{expect(await result.current.run({format:'gp',selection:{tracks:[0],range:{first:2,last:2}}})).toBe(true);});expect(exportGp).toHaveBeenCalledOnce();expect(result.current.busy).toBe(false);

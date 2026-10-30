@@ -5,6 +5,7 @@ import '@testing-library/jest-dom/vitest';
 import { model } from '@coderline/alphatab';
 import { ExportDialog } from './ExportDialog';
 import { validateSelection } from './types';
+import { music } from '../editor/fixtures';
 afterEach(cleanup);
 function fixture(){const score=new model.Score();for(let i=0;i<3;i++)score.addMasterBar(new model.MasterBar());const track=new model.Track();track.name='Lead';score.addTrack(track);return score;}
 const layout={paper:'A4' as const,orientation:'portrait' as const,marginMm:15,scale:1,profile:'ScoreTab' as const};
@@ -53,6 +54,32 @@ it('preflights only valid GP selections with backing included',()=>{
   expect(preflight).toHaveBeenLastCalledWith({tracks:[0],range:{first:1,last:2}});preflight.mockClear();
   fireEvent.change(screen.getByLabelText('First measure'),{target:{value:'1.5'}});expect(preflight).not.toHaveBeenCalled();
   fireEvent.change(screen.getByLabelText('Export format'),{target:{value:'midi'}});fireEvent.change(screen.getByLabelText('First measure'),{target:{value:'1'}});expect(preflight).not.toHaveBeenCalled();
+});
+
+it('submits Guitar Pro 5 and lists what this selection leaves out before saving',()=>{
+  const score=music();
+  const submit=vi.fn();render(<ExportDialog score={score} layout={layout} busy={false} currentSpeedAvailable={true} hasBacking onExport={submit} onCancel={()=>{}}/>);
+  fireEvent.change(screen.getByLabelText('Export format'),{target:{value:'gp5'}});
+  expect(screen.getByText(/Guitar Pro 6 \(\.gpx\) export is not available/)).toBeVisible();
+  expect(screen.getByText('Backing audio and its synchronization are left out')).toBeVisible();
+  fireEvent.click(screen.getByRole('button',{name:'Export'}));
+  expect(submit).toHaveBeenCalledWith({format:'gp5',selection:{tracks:[0],range:null}});
+});
+
+it('says nothing is left out of a Guitar Pro 5 file only when that is true, and lists the loss otherwise',()=>{
+  const plain=music();
+  const {unmount}=render(<ExportDialog score={plain} layout={layout} busy={false} currentSpeedAvailable={true} onExport={()=>{}} onCancel={()=>{}}/>);
+  fireEvent.change(screen.getByLabelText('Export format'),{target:{value:'gp5'}});
+  const claim=/Nothing in this selection is left out beyond layout/;
+  const before=screen.queryByText(claim)!==null,hadList=screen.queryByText('Left out or changed in this selection:')!==null;
+  unmount();
+  const marked=music();marked.masterBars[0].timeSignatureCommon=true;marked.tracks[0].staves[0].showSlash=true;
+  render(<ExportDialog score={marked} layout={layout} busy={false} currentSpeedAvailable={true} onExport={()=>{}} onCancel={()=>{}}/>);
+  fireEvent.change(screen.getByLabelText('Export format'),{target:{value:'gp5'}});
+  expect([before,hadList]).toEqual([true,false]);
+  expect(screen.queryByText(claim)).toBeNull();
+  expect(screen.getByText('Common-time and cut-time symbols become numbers')).toBeVisible();
+  expect(screen.getByText('Slash and numbered-notation staves are left out')).toBeVisible();
 });
 
 it('submits MusicXML with the shared selection and explains what it keeps',()=>{

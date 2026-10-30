@@ -84,8 +84,8 @@ export async function runBanjoDroneAcceptance({buildPath}={}){
     assert.equal(initial.snapshot.project.partialCapo,undefined,'An unedited project carries no marker');
 
     // No drone yet: the open drone string and string 2 at fret 2 sound as plain strings.
-    await button('Show instrument');await view().locator('svg[aria-label*="fretboard"]').waitFor();
-    await view().getByRole('combobox',{name:'Instrument view mode',exact:true}).selectOption('guitar');
+    await button('Show instrument');
+    await view().getByRole('combobox',{name:'Instrument view mode',exact:true}).selectOption('guitar');await view().locator('svg[aria-label*="fretboard"]').waitFor();
     await view().getByRole('combobox',{name:/^Show/}).selectOption('beat');
     const plain=await keys();assert.deepEqual(plain.map(mark=>mark[1]),[67,52],'Before the drone: open G4 and E3');
     assert.doesNotMatch(await view().locator('.instrument-detail').innerText(),/Banjo drone/);

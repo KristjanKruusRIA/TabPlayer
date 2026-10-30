@@ -116,7 +116,9 @@ fn cell(rate: u32, count: usize, fx: &FxSettings, block: usize) -> (f64, f64, f6
 }
 fn cells(id: &str) {
     let (built_in, loaded) = (heavy(), with_ir(id, heavy()));
-    println!("median / 99th percentile / worst callback in ms, then overruns, for three runs; least overruns of the three");
+    println!(
+        "median / 99th percentile / worst callback in ms, then overruns, for three runs; least overruns of the three"
+    );
     for &(rate, count, block) in &[
         (48_000u32, 6usize, 64usize),
         (48_000, 6, 128),
@@ -174,7 +176,9 @@ fn tail(name: &str, fx: &FxSettings, count: usize, block: usize, seconds: usize)
         }
         line += &format!(" {:.0}", sum / 10.0);
     }
-    println!("{name:20} {count:2} tracks block {block:4}: % of a core by second:{line}; worst callback {worst:.2} ms, budget {budget:.1}, overruns {over}");
+    println!(
+        "{name:20} {count:2} tracks block {block:4}: % of a core by second:{line}; worst callback {worst:.2} ms, budget {budget:.1}, overruns {over}"
+    );
 }
 /// The convolution alone, which is what a mix of many tracks does once per block of each tier: `count` engines, callbacks
 /// of `block` frames, with every track's transforms falling on the same frames or a place each. The best of five runs
@@ -249,12 +253,24 @@ fn main() {
                 })
                 .collect();
             let kernel = IrKernel::new(&taps, 48_000).unwrap();
-            println!("convolution alone, 48 kHz, a full second of response, stereo input: median / 99th / worst callback in ms and the worst as a share of the callback's time");
-            for &(count, block) in &[(6usize, 64usize), (8, 64), (6, 128), (8, 128), (8, 256), (12, 480)] {
+            println!(
+                "convolution alone, 48 kHz, a full second of response, stereo input: median / 99th / worst callback in ms and the worst as a share of the callback's time"
+            );
+            for &(count, block) in &[
+                (6usize, 64usize),
+                (8, 64),
+                (6, 128),
+                (8, 128),
+                (8, 256),
+                (12, 480),
+            ] {
                 for (name, apart) in [("together", false), ("apart", true)] {
                     let (m, p, x) = spikes(&kernel, count, block, apart);
                     let budget = block as f64 / 48_000.0 * 1e3;
-                    println!("{count:2} tracks block {block:4} {name:8}: {m:.3} / {p:.3} / {x:.3} ms, worst is {:.0}% of {budget:.2} ms", x / budget * 100.0);
+                    println!(
+                        "{count:2} tracks block {block:4} {name:8}: {m:.3} / {p:.3} / {x:.3} ms, worst is {:.0}% of {budget:.2} ms",
+                        x / budget * 100.0
+                    );
                 }
             }
         }

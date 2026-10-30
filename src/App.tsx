@@ -485,7 +485,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
       </EditorPanel>
       </div>
       {view==='sound'&&<SoundRig trackId={trackId} sound={state.settings.sounds[trackId]} onEdit={command=>controller.edit(command)} playback={player} busy={editBusy}
-        tracks={state.score.tracks.map((track,index)=>({id:trackIds[index],name:track.name||`Track ${index+1}`}))}
+        tracks={state.score.tracks.map((track,index)=>({id:trackIds[index],name:track.name||`Track ${index+1}`,program:track.playbackInfo.program,percussion:track.staves.some(staff=>staff.isPercussion)}))}
         onTrack={id=>{const index=trackIds.indexOf(id);if(index>=0)select({track:index,staff:0,bar:target.bar,voice:0,beat:0},state.score.tracks[index].staves[0].tuning.length);}}/>}
       <section className="workstation-dock" aria-label="Bottom dock" hidden={!dockVisible}>
         <nav aria-label="Dock views"><button aria-pressed={!instrumentVisible&&dockMode==='overview'} onClick={()=>chooseDock('overview')}>Overview</button><button aria-pressed={!instrumentVisible&&dockMode==='mixer'} onClick={()=>chooseDock('mixer')}>Mixer</button><button aria-pressed={instrumentVisible} onClick={()=>chooseDock('instrument')}>Instrument</button><button aria-pressed={!instrumentVisible&&dockMode==='backing'} onClick={()=>chooseDock('backing')}>Backing</button><button className="dock-collapse" aria-label={dockCollapsed?'Expand bottom dock':'Hide bottom dock'} onClick={()=>dockCollapsed?setDockForced(true):hideDock()}>{dockCollapsed?'Expand':'Hide'}</button></nav>

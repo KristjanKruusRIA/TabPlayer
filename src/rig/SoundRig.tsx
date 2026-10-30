@@ -8,10 +8,12 @@ import { Segmented } from '../ui';
 import { BlockStage } from './BlockStage';
 import { SignalChain } from './SignalChain';
 import { SoundBrowser } from './SoundBrowser';
+import { SourcePicker, TrackStrip } from './SourcePicker';
 import type { BlockRef } from './blocks';
 import './rig.css';
 
-export interface RigTrack {id:string;name:string}
+/** A track the rig can switch to: its name, and the General MIDI program and percussion flag that decide what Automatic plays it as. */
+export interface RigTrack {id:string;name:string;program?:number;percussion?:boolean}
 export interface SoundRigProps {
   trackId:string;sound?:TrackSound;onEdit:(edit:EditCommand)=>void|Promise<void>;playback?:NativePlaybackController|null;busy?:boolean;
   /** The score's tracks, to change which one the rig edits without leaving it. */
@@ -35,15 +37,10 @@ export function SoundRig({trackId,sound,onEdit,playback,busy=false,tracks,onTrac
   useEffect(()=>{previewReturn.current=()=>root.current?.querySelector<HTMLElement>('[data-row-main][tabindex="0"]')?.focus();return()=>{previewReturn.current=null;};},[previewReturn]);
   return <section ref={root} className="sound-view" aria-label="Sound rig" data-browser-open={browserOpen||undefined} onKeyDown={editing.escapePreview}>
     <header className="rig-head">
-      <label className="rig-field"><span className="rig-field-name">Track</span><select className="rig-select" aria-label="Sound track" value={trackId} onChange={event=>onTrack(event.target.value)}>{tracks.map(track=><option key={track.id} value={track.id}>{track.name}</option>)}</select></label>
-      <label className="rig-field"><span className="rig-field-name">Sound source</span><select className="rig-select" aria-label="Sound source" disabled={busy} value={current.voiceId??''} onChange={event=>void editing.setVoice(event.target.value||null)}>
-        <option value="">Automatic instrument</option><option value="gm">General MIDI</option><option value="green-guitar">Green Guitar</option><option value="black-guitar">Black Guitar</option><option value="darkblack-bass">Darkblack Bass</option><option value="babyblue-bass">Babyblue Bass</option></select></label>
-      <div className="rig-field"><span className="rig-field-name" aria-hidden="true">Sound preset</span>
-        <Segmented label="Sound preset" value={current.presetId} disabled={busy} onChange={id=>void editing.applyPreset(id)} options={presetIds.map(id=>({value:id,label:presetName(id)}))}/></div>
-      <button type="button" className="rig-button" disabled={busy} onClick={()=>void editing.restorePreset()}>Restore preset</button>
+      <TrackStrip tracks={tracks} trackId={trackId} onTrack={onTrack}/>
+      <SourcePicker editing={editing} track={tracks.find(item=>item.id===trackId)}/>
+      <Segmented className="rig-presets" label="Sound preset" value={current.presetId} disabled={busy} onChange={id=>void editing.applyPreset(id)} options={presetIds.map(id=>({value:id,label:presetName(id)}))}/>
       <span className="rig-head-gap"/>
-      <button type="button" className="rig-button" onClick={editing.copyCurrentSound}>Copy sound</button>
-      <button type="button" className="rig-button" disabled={busy||!editing.clipboard.sound} onClick={editing.pasteSound}>Paste sound</button>
       <button type="button" className="rig-button rig-browser-toggle" aria-pressed={browserOpen} aria-expanded={browserOpen} onClick={()=>setBrowserOpen(open=>!open)}>Sounds</button>
     </header>
     <SignalChain editing={editing} selected={selected} onSelect={setChosen} disabled={busy}/>
@@ -55,6 +52,11 @@ export function SoundRig({trackId,sound,onEdit,playback,busy=false,tracks,onTrac
       </div>
     </div>
     <div className="rig-messages">
+      <div className="rig-sound-actions">
+        <button type="button" className="rig-button" disabled={busy} onClick={()=>void editing.restorePreset()}>Restore preset</button>
+        <button type="button" className="rig-button" onClick={editing.copyCurrentSound}>Copy sound</button>
+        <button type="button" className="rig-button" disabled={busy||!editing.clipboard.sound} onClick={editing.pasteSound}>Paste sound</button>
+      </div>
       {showingPreview&&<div className="rig-preview" role="group" aria-label="Sound preview">
         <span className="rig-preview-name">Previewing {previewLabel}</span>
         <button type="button" className="rig-button" data-primary onClick={editing.keepPreview}>Keep previewed sound</button>

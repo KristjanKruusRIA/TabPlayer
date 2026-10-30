@@ -1,0 +1,41 @@
+import { useState } from 'react';
+import { automaticVoice, voiceIds, voiceNames } from '../audio/sound-model';
+import type { VoiceId } from '../audio/sound-model';
+import type { SoundEditing } from '../audio/useSoundEditing';
+import { Segmented } from '../ui';
+import { SourceArt, TrackGlyph, trackKind } from './SourceArt';
+import type { RigTrack } from './SoundRig';
+
+const shortNames:Record<VoiceId,string>={gm:'GM','green-guitar':'Green','black-guitar':'Black','darkblack-bass':'Darkblack','babyblue-bass':'Babyblue'};
+type Choice='auto'|VoiceId;
+
+/** Where the sound comes from, as the instruments themselves: one drawing for each source the engine has, and Automatic, which
+ * plays as whichever the track's own instrument calls for. It is a radio group, so the arrow keys move and choose; choosing
+ * is the same one edit as before. Hear plays the track's sound through the source the pointer last rested on, or the chosen one. */
+export function SourcePicker({editing,track}:{editing:SoundEditing;track:RigTrack|undefined}) {
+  const {current,busy,previewer,showingPreview,previewChoice}=editing;
+  const resolved=automaticVoice(track?.program??0,track?.percussion??false);
+  const chosen:Choice=current.voiceId===null?'auto':(current.voiceId as VoiceId);
+  const [look,setLook]=useState<Choice|null>(null);
+  const aimed:Choice=look??chosen,hearing=showingPreview&&previewChoice===`voice:${aimed}`;
+  const nameOf=(choice:Choice)=>choice==='auto'?`Automatic instrument, plays as ${voiceNames[resolved]}`:voiceNames[choice];
+  const options=(['auto',...voiceIds] as Choice[]).map(choice=>({
+    value:choice,ariaLabel:nameOf(choice),
+    label:<span className="rig-source" data-auto={choice==='auto'||undefined} title={nameOf(choice)} onPointerEnter={()=>setLook(choice)}>
+      <SourceArt source={choice==='auto'?resolved:choice} className="rig-source-art"/>
+      <span className="rig-source-name">{choice==='auto'?<>Auto<span className="rig-source-to">→{shortNames[resolved]}</span></>:<><span className="rig-name-short">{shortNames[choice]}</span><span className="rig-name-full">{voiceNames[choice]}</span></>}</span>
+    </span>,
+  }));
+  return <div className="rig-source-picker">
+    <Segmented className="rig-sources" label="Sound source" value={chosen} disabled={busy} options={options} onChange={choice=>void editing.setVoice(choice==='auto'?null:choice)}/>
+    {previewer&&<button type="button" className="rig-hear rig-hear-source" aria-pressed={hearing} aria-label={`Hear ${nameOf(aimed)}`} disabled={busy} onClick={()=>editing.choosePreview(hearing?'':`voice:${aimed}`)}>Hear</button>}
+  </div>;
+}
+
+/** The score's tracks, each as a small drawing of its instrument and its name. A radio group, so the arrow keys move and choose. */
+export function TrackStrip({tracks,trackId,onTrack}:{tracks:readonly RigTrack[];trackId:string;onTrack:(id:string)=>void}) {
+  return <Segmented className="rig-tracks" label="Track" value={trackId} onChange={onTrack} options={tracks.map(track=>({
+    value:track.id,ariaLabel:track.name,
+    label:<span className="rig-track" title={track.name}><TrackGlyph kind={trackKind(track.program??0,track.percussion??false)}/><span className="rig-track-name">{track.name}</span></span>,
+  }))}/>;
+}

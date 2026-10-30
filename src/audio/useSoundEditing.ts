@@ -6,7 +6,8 @@ import type { NativePlaybackController } from './NativePlaybackController';
 import type { AudioDeviceInfo } from './bridge';
 import { factorySound, factorySounds } from './factory-sounds';
 import { copyPedal, copySound, deleteSoundPreset, renameSoundPreset, saveSoundPreset, soundClipboard, soundLibrary, subscribeSoundClipboard, subscribeSoundLibrary } from './sound-library';
-import { blockNames, presetName, soundPreset } from './sound-model';
+import { blockNames, presetName, soundPreset, voiceNames } from './sound-model';
+import type { VoiceId } from './sound-model';
 
 const noSubscribe=()=>()=>{},noState=()=>null;
 
@@ -121,8 +122,9 @@ export function useSoundEditing({trackId,sound,onEdit,playback,busy=false,shown=
     if(!value){void endPreview().then(()=>setStatus('Back to this track’s sound.'));return;}
     const split=value.indexOf(':'),kind=value.slice(0,split),id=value.slice(split+1),saved=library.find(item=>item.name===id);
     const named=factorySounds.find(item=>item.id===id);
-    const heard=kind==='preset'?soundPreset(id as TrackSound['presetId'],current.voiceId):kind==='factory'?factorySound(id,current.voiceId):saved?.sound;
-    const label=kind==='preset'?presetName(id):`“${kind==='factory'?named?.name:id}”`;if(!heard)return;
+    // A source previews the track's own sound through that source: only the instrument changes.
+    const heard=kind==='voice'?{...structuredClone(current),voiceId:id==='auto'?null:id}:kind==='preset'?soundPreset(id as TrackSound['presetId'],current.voiceId):kind==='factory'?factorySound(id,current.voiceId):saved?.sound;
+    const label=kind==='voice'?(id==='auto'?'Automatic':voiceNames[id as VoiceId]??id):kind==='preset'?presetName(id):`“${kind==='factory'?named?.name:id}”`;if(!heard)return;
     const request=++previewRequest.current,track=trackId;setPreviewChoice('');
     // A result that arrives after another choice, a cancel or a track change is dropped.
     void Promise.resolve(previewer.previewSound(track,structuredClone(heard))).then(()=>{if(request!==previewRequest.current||shownTrack.current!==track||previewer.soundPreview()?.track!==track)return;setPreviewChoice(value);setPreviewLabel(label);setError(null);setStatus(`Previewing ${label}. Keep it or cancel to go back to this track’s sound.`);},e=>{if(request===previewRequest.current)setError(String(e));});

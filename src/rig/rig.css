@@ -207,3 +207,46 @@
   .sound-view .rig-stage-actions .rig-button { padding:3px 8px; }
   .sound-view .rig-stage-head h2 { font-size:14px; }
 }
+
+/* Instrument picker: the sources and the tracks, drawn */
+.sound-view .rig-head { flex-wrap:nowrap; align-items:center; gap:10px; padding:5px 12px; background:linear-gradient(#1d1a16,#17140f); }
+.sound-view .rig-source-picker { display:flex; align-items:center; gap:6px; min-width:0; }
+.sound-view .rig-sources,.sound-view .rig-tracks { flex-wrap:nowrap; gap:1px; padding:2px; background:rgb(0 0 0 / .28); border-color:var(--tp-line-subtle); }
+.sound-view .rig-tracks { max-width:210px; overflow-x:auto; scrollbar-width:thin; scrollbar-color:var(--tp-line-strong) transparent; }
+.sound-view :is(.rig-sources,.rig-tracks) .tp-seg-option { min-height:0; padding:2px 3px 1px; border:1px solid transparent; border-radius:var(--tp-radius-s); background:transparent; flex:none; }
+.sound-view :is(.rig-sources,.rig-tracks) .tp-seg-option:hover:not(:disabled) { background:rgb(255 255 255 / .05); }
+.sound-view :is(.rig-sources,.rig-tracks) .tp-seg-option[aria-checked=true] { border-color:var(--tp-on); background:rgb(184 228 95 / .08); box-shadow:0 0 0 1px var(--tp-on), 0 0 10px rgb(184 228 95 / .2); color:var(--tp-text); }
+.sound-view .rig-source { display:flex; flex-direction:column; align-items:center; gap:0; }
+.sound-view .rig-source-art { display:block; width:58px; height:27px; }
+.sound-view .rig-source[data-auto] .rig-source-art { opacity:.72; }
+.sound-view .rig-source-name { font:600 9.5px/12px var(--tp-font-ui); letter-spacing:.03em; text-transform:uppercase; white-space:nowrap; color:var(--tp-muted); }
+.sound-view .rig-source-to { color:var(--tp-text); }
+.sound-view .tp-seg-option[aria-checked=true] .rig-source-name { color:var(--tp-text); }
+.sound-view .rig-track { display:flex; flex-direction:column; align-items:center; gap:0; }
+.sound-view .rig-track-glyph { display:block; width:36px; height:17px; }
+.sound-view .rig-track-name { max-width:64px; overflow:hidden; text-overflow:ellipsis; font:600 9.5px/12px var(--tp-font-ui); letter-spacing:.03em; white-space:nowrap; color:var(--tp-muted); }
+.sound-view .tp-seg-option[aria-checked=true] .rig-track-name { color:var(--tp-text); }
+.sound-view .rig-hear-source { align-self:center; }
+.sound-view .rig-presets { flex:none; }
+.sound-view .rig-presets .tp-seg-option { padding:2px 7px; }
+.sound-view .rig-sound-actions { display:flex; gap:6px; flex:none; }
+@container (min-width:1180px) {
+  .sound-view .rig-head { padding:8px 12px; gap:16px; }
+  .sound-view .rig-source-art { width:96px; height:45px; }
+  .sound-view .rig-track-glyph { width:52px; height:25px; }
+  .sound-view .rig-track-name { max-width:90px; font-size:10.5px; }
+  .sound-view .rig-source-name { font-size:10.5px; }
+  .sound-view .rig-tracks { max-width:320px; }
+}
+@container (max-width:1099px) {
+  .sound-view .rig-sound-actions .rig-button { padding:3px 8px; }
+  .sound-view .rig-head { gap:8px; padding:5px 8px; }
+  .sound-view .rig-source-art { width:50px; height:23px; }
+  .sound-view .rig-source-name { font-size:8.5px; letter-spacing:0; }
+  .sound-view :is(.rig-sources,.rig-tracks) .tp-seg-option { padding:2px 2px 1px; }
+  .sound-view .rig-tracks { max-width:128px; }
+  .sound-view .rig-track-glyph { width:30px; height:14px; }
+  .sound-view .rig-track-name { max-width:44px; font-size:8.5px; letter-spacing:0; }
+  .sound-view .rig-presets .tp-seg-option { padding:2px 5px; font-size:11px; }
+  .sound-view .rig-hear-source { padding:1px 6px; }
+}

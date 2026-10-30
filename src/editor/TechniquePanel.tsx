@@ -8,6 +8,7 @@ import { CurveEditor } from './CurveEditor';
 import { IndexInput } from './IndexInput';
 import { durationLabel, durationValues, tremoloMarks, tremoloSpeed } from './common';
 import { nextLinkedNote } from './techniques';
+import { NoteAudioControls } from './NoteAudioControls';
 
 export type EditorProps={score:model.Score;target:BeatTarget;string:number;noteIndex?:number|null;busy:boolean;onEdit:(command:EditCommand)=>void};
 const pianoFingers={Unspecified:-2,None:-1,'1 (thumb)':0,'2 (index)':1,'3 (middle)':2,'4 (ring)':3,'5 (little)':4};
@@ -31,6 +32,7 @@ export function TechniquePanel({score,target,string,noteIndex=0,busy,onEdit}:Edi
       ['Let ring','letRing',note?.isLetRing],['Palm mute','palmMute',note?.isPalmMute],['Dead note','dead',note?.isDead],['Ghost note','ghost',note?.isGhost],['Staccato','staccato',note?.isStaccato],['Left-hand tapping','leftHandTapped',note?.isLeftHandTapped],
     ] as const).map(([label,key,value])=><label className="check" key={key}><input type="checkbox" disabled={!stringed&&['letRing','palmMute','dead','leftHandTapped'].includes(key)} checked={value??false} onChange={e=>patch({[key]:e.target.checked})}/>{label}</label>)}</div>
       <div className="pair"><EnumInput label="Accent" value={note?.accentuated??0} enumeration={model.AccentuationType} onValue={accent=>patch({accent})}/><EnumInput label="Dynamics" value={note?.dynamics??4} enumeration={model.DynamicValue} onValue={dynamics=>patch({dynamics})}/></div>
+      <NoteAudioControls note={note} score={score} onApply={audio=>patch({audio})}/>
       <div className="pair"><EnumInput label="Left-hand finger" disabled={staff.isPercussion} value={note?.leftHandFinger??-2} enumeration={indexed?pianoFingers:model.Fingers} onValue={leftFinger=>patch({leftFinger})}/><EnumInput label="Right-hand finger" disabled={staff.isPercussion} value={note?.rightHandFinger??-2} enumeration={indexed?pianoFingers:model.Fingers} onValue={rightFinger=>patch({rightFinger})}/></div>
       <div className="pair"><EnumInput label="Slide in" disabled={!stringed} value={note?.slideInType??0} enumeration={model.SlideInType} onValue={slideIn=>patch({slideIn})}/><EnumInput label="Slide out" disabled={!stringed} value={note?.slideOutType??0} enumeration={model.SlideOutType} onValue={slideOut=>patch({slideOut})}/></div>
       <div className="pair"><EnumInput label="Vibrato" disabled={staff.isPercussion} value={note?.vibrato??0} enumeration={model.VibratoType} onValue={vibrato=>patch({vibrato})}/><EnumInput label="Ornament" disabled={staff.isPercussion} value={note?.ornament??0} enumeration={model.NoteOrnament} onValue={ornament=>patch({ornament})}/></div>

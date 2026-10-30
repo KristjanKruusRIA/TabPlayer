@@ -9,6 +9,8 @@ import { gpControllerEvents, prepareGpMidiScore } from '../interchange/automatio
 import { preparePitchedGpScore } from '../interchange/pitched';
 import { buildPerformedBeats } from './performed-beats';
 import type { ReferenceLocation } from './reference-sync-types';
+import { applyNoteAudio, collectAudible, collectNoteAudio, type AudibleAttack, type AudioAdjustment } from './note-audio-plan';
+import { hasNoteAudio } from '../editor/note-audio';
 
 const settings = new Settings();
 const validMeter = (numerator:number,denominator:number) => Number.isSafeInteger(numerator) && numerator > 0 && numerator <= 0xffffffff && [1,2,4,8,16,32,64,128,256].includes(denominator);
@@ -322,6 +324,7 @@ function buildWithIdentities(original: model.Score, generation: number, ids: str
   const notes: PlanNote[] = [], played = new Map<model.Note, PlanNote[]>();
   const byNote = new Map(all.map(source => [source.note, source]));
   let fullIndex = 0;
+  const audible: AudibleAttack[] = [];
   for (const occurrence of occurrences) {
     const occurrenceSources = score.tracks.flatMap(t => t.staves.flatMap(staff => {
       const bar = staff.bars[occurrence.bar];
@@ -365,12 +368,14 @@ function buildWithIdentities(original: model.Score, generation: number, ids: str
           articulation: source.note.beat.deadSlapped ? 'dead' : articulation(source.note, actual.program ?? score.tracks[source.track].playbackInfo.program, !!from), legatoFrom: from?.id ?? null, pitch: pitchCurve({ ...isolated, channel: nativeChannel(source.track, isolated.channel) }, actual, lane.bends),
         };
         notes.push(note); const chain = played.get(source.note) ?? []; chain.push(note); played.set(source.note, chain);
+        collectAudible(audible, source.note, note, actual);
       }
     }
   }
   if (fullIndex !== complete.events.notes.length) throw new Error('The score has MIDI attacks without an unambiguous source-note lane.');
   const events: OrderedMidiEvent[] = converted(complete.events.events, ids, nativeChannel);
   for(const event of gpControllerEvents(score,occurrences))events.push({type:'controller',trackId:ids[event.track],tick:event.tick,channel:nativeChannel(event.track,event.channel),controller:event.controller,value:event.value,order:Number.MAX_SAFE_INTEGER});
+  if (audible.length) applyNoteAudio(audible, notes, Math.max(sliceExtent, complete.events.end, ...complete.events.notes.map(n => n.end)));
   for (const note of complete.events.notes) {
     const common = { trackId: ids[note.track], channel: nativeChannel(note.track, note.channel), key: note.key, velocity: note.velocity };
     events.push({ ...common, type: 'noteOn', tick: note.start, order: note.onOrder }, { ...common, type: 'noteOff', tick: note.end, order: note.offOrder });
@@ -382,6 +387,11 @@ function buildWithIdentities(original: model.Score, generation: number, ids: str
 
 export function buildPlaybackPlan(score: model.Score, generation: number): PlaybackPlan {
   return buildWithIdentities(score, generation, score.tracks.map(trackIdentity));
+}
+
+// What a score's per-note audio settings do to each attack, for a MIDI export that generates its own attacks.
+export function noteAudioMidiAdjustments(score: model.Score): AudioAdjustment[] {
+  return hasNoteAudio(score) ? collectNoteAudio(() => buildWithIdentities(score, 0, score.tracks.map(trackIdentity))).adjustments : [];
 }
 
 // Export adapters use zero-based public addNote ordinals per track, preserving

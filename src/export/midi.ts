@@ -1,7 +1,8 @@
 import { midi,model,Settings, type io } from '@coderline/alphatab';
 import { validateSelection,type ExportSelection } from './types';
 import { selectStaves } from './selection';
-import { deadBrushMidiDurations,prepareMidiScore } from '../audio/plan';
+import { deadBrushMidiDurations,noteAudioMidiAdjustments,prepareMidiScore } from '../audio/plan';
+import { hasNoteAudio } from '../editor/note-audio';
 import { gpControllerEvents,prepareGpMidiScore } from '../interchange/automation';
 class TrackName extends midi.MidiEvent {
   constructor(track:number,readonly name:string){super(track,0,midi.MidiEventType.Meta);}
@@ -55,6 +56,12 @@ export function exportMidi(score:model.Score,selection:ExportSelection):Uint8Arr
     // Use the same source-note proof and public unbrushed duration as playback.
     const durations=new Map(deadBrushMidiDurations(selectStaves(score,selection)).map(value=>[`${value.track}/${value.attack}`,value.length]));
     for(const pair of invalid){const length=durations.get(`${pair.on.track}/${pair.attack}`);if(!length)throw new Error('MIDI export could not recover a nonpositive note duration.');pair.off.tick=pair.on.tick+length;}
+  }
+  // A note's own start, length and velocity settings, found by the same attack ordinals as the corrections above.
+  const audible=new Map((hasNoteAudio(score)?noteAudioMidiAdjustments(selectStaves(score,selection)):[]).map(value=>[`${value.track}/${value.attack}`,value]));
+  if(audible.size)for(const pair of noteSpans){
+    const value=audible.get(`${pair.on.track}/${pair.attack}`);if(!value)continue;
+    pair.on.tick+=value.shift;pair.off.tick=pair.on.tick+value.length;pair.on.noteVelocity=pair.off.noteVelocity=value.velocity;
   }
   const output=new midi.MidiFile();output.division=source.division;output.format=midi.MidiFileFormat.MultiTrack;
   for(const track of selection.tracks)output.addEvent(new TrackName(remap.get(track)!,score.tracks[track].name));

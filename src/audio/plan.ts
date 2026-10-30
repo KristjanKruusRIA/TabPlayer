@@ -310,19 +310,22 @@ function buildWithIdentities(original: model.Score, generation: number, ids: str
     }
     return value;
   };
-  const laneData = new Map<string, { events: Collector; bends: PlanMidiEvent[]; markers: Map<string, number>; attacks: Map<string, RawNote[]> }>();
+  const laneData = new Map<string, { events: Collector; starts: number[]; bends: PlanMidiEvent[]; markers: Map<string, number>; attacks: Map<string, RawNote[]> }>();
   for (const [id, lane] of lanes) {
     const isolated = laneScore(jsonForTrack(lane[0].track), lane), generated = generate(isolated.score);
     generated.events.notes = generated.events.notes.filter(n => n.rawKey < 500);
     generated.events.events = generated.events.events.filter(e => e.type !== 'noteBend' || e.key! < 500);
     const attacks = new Map<string, RawNote[]>();
     for (const note of generated.events.notes) { const group = attacks.get(note.provenance!) ?? []; group.push(note); attacks.set(note.provenance!, group); }
-    laneData.set(id, { events: generated.events, markers: isolated.markers, attacks, bends: converted(generated.events.events, ids, nativeChannel).filter(event=>event.type==='bend'||event.type==='noteBend') });
+    // The public generator sizes a pickup bar from the staves present, so a lane
+    // holding only a shorter pickup track starts every later bar earlier than the
+    // complete score does. Keep the lane's own bar starts to map across the gap.
+    laneData.set(id, { events: generated.events, starts: generated.lookup.masterBars.map(m => m.start), markers: isolated.markers, attacks, bends: converted(generated.events.events, ids, nativeChannel).filter(event=>event.type==='bend'||event.type==='noteBend') });
   }
   const notes: PlanNote[] = [], played = new Map<model.Note, PlanNote[]>();
   const byNote = new Map(all.map(source => [source.note, source]));
   let fullIndex = 0;
-  for (const occurrence of occurrences) {
+  for (const [occurrenceIndex, occurrence] of occurrences.entries()) {
     const occurrenceSources = score.tracks.flatMap(t => t.staves.flatMap(staff => {
       const bar = staff.bars[occurrence.bar];
       return bar ? playbackBar(bar).voices.flatMap(v => v.beats.flatMap(b => (b.deadSlapped ? b.notes.slice(0, 1) : b.notes).map(n => byNote.get(n)!))) : [];
@@ -330,7 +333,8 @@ function buildWithIdentities(original: model.Score, generation: number, ids: str
     for (const source of occurrenceSources) {
       const lane = laneData.get(source.lane)!;
       const marker = lane.markers.get(`${source.bar}/${source.beat}`);
-      const logicalTick = occurrence.startTick + source.note.beat.playbackStart - complete.events.shift + lane.events.shift;
+      const barGap = complete.lookup.masterBars[occurrenceIndex].start - (lane.starts[occurrenceIndex] ?? complete.lookup.masterBars[occurrenceIndex].start);
+      const logicalTick = occurrence.startTick + source.note.beat.playbackStart - complete.events.shift + lane.events.shift - barGap;
       const generated = lane.attacks.get(`${marker}/${logicalTick}`) ?? [];
       // Within one lane there is one source note per beat, including any trill,
       // tremolo or rasgueado attacks. The full handler uses score source order.
@@ -338,7 +342,7 @@ function buildWithIdentities(original: model.Score, generation: number, ids: str
         const actual = complete.events.notes[fullIndex++];
         // A grace beat in a different track/voice shifts the complete clock;
         // a filtered lane has its own public initial-grace shift.
-        const shiftDifference = complete.events.shift - lane.events.shift;
+        const shiftDifference = complete.events.shift - lane.events.shift + barGap;
         const mismatch = !actual ? 'missing attack' : actual.track !== source.track ? 'track' : actual.key !== isolated.key ? 'key' : actual.velocity !== isolated.velocity ? 'velocity' : source.note.beat.brushType === model.BrushType.None && !source.note.beat.hasRasgueado && Math.abs(actual.start - isolated.start - shiftDifference) > 0.001 ? 'timing' : null;
         if (mismatch) throw new Error(`Public MIDI timing disagrees with the source-note playback lanes (${mismatch}; track ${source.track}, staff ${source.staff}, bar ${source.bar}, voice ${source.voice}, beat ${source.beat}).`);
         if (actual.end <= actual.start && source.note.isDead) {

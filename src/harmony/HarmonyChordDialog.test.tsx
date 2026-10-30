@@ -115,3 +115,11 @@ it('diagram_positions_remain_keyboard_editable_after_the_comparison_relayout',as
   expect(screen.getByLabelText('String 1 fret')).toHaveValue(1);expect(commands).toEqual([]);expect(model.JsonConverter.scoreToJson(input.score)).toBe(before);
   await user.keyboard('{Escape}');expect(closed).toEqual(['closed']);
 });
+
+it('uses harmony-dialog without chord-dialog so 900px width is not overridden',()=>{
+  const {input}=props();
+  render(<HarmonyChordDialog {...input}/>);
+  const dialog=screen.getByRole('dialog');
+  expect(dialog).toHaveClass('harmony-dialog');
+  expect(dialog).not.toHaveClass('chord-dialog');
+});

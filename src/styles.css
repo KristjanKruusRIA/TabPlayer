@@ -11,12 +11,11 @@
 .tp-dialog.chord-dialog{width:340px;max-height:90vh}
 .sound-panel,.backing-panel{border-top:1px solid #465363;padding-top:12px;margin-top:12px}
 .mixer{flex-wrap:wrap}.mixer .volume{min-width:calc(50% - 4px)}
-.tp-dialog.export-dialog{width:min(560px,92vw);max-height:90vh}
 .export-dialog progress{width:100%;margin-top:12px}
 .live-instrument-view{flex-shrink:0;border-top:1px solid #394454;background:#1d2530}
 .transport>fieldset{flex-wrap:wrap}
 .score-tools{flex-wrap:wrap;gap:8px}.score-tools>span{flex:1 1 120px}.score-tools>[aria-label="Score display"]{flex:1 1 240px}.score-tools>[aria-label="Score display"] input{width:76px}
-.tp-dialog.chord-dialog.harmony-dialog,.tp-dialog.chord-dialog.scale-dialog{width:min(800px,94vw)}
+.tp-dialog.scale-dialog{width:min(800px,94vw)}
 .editor-section label:has(>input[type=checkbox]){flex-direction:row;align-items:center}.editor-section input[type=checkbox]{width:auto}
 .score-workspace{isolation:isolate}
 .score-tools{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px 12px}

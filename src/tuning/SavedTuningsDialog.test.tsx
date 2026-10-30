@@ -167,3 +167,10 @@ it('keeps a failed read visible after a row is selected and blocks saving over i
   expect(screen.getByRole('alert')).toHaveTextContent('Could not read saved tunings');expect(screen.getByText('Personal tunings are unavailable.')).toBeInTheDocument();
   expect(button('Save as new')).toBeDisabled();
 });
+
+it('uses saved-tunings-dialog without chord-dialog to prevent 340px collapse',async()=>{
+  setup();
+  const dialog=screen.getByRole('dialog');
+  expect(dialog).toHaveClass('saved-tunings-dialog');
+  expect(dialog).not.toHaveClass('chord-dialog');
+});

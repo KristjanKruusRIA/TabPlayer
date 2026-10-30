@@ -31,8 +31,8 @@ function effective(value:HarmonyChord,staff:model.Staff):HarmonyChord {
 function initial(value:HarmonyChord|null,staff:model.Staff):HarmonyChord {
   return value?effective(value,staff):{name:'C',nameMode:'theory',recipe:newRecipe(),firstFret:1,frets:staff.tuning.map(()=>-1),fingers:staff.tuning.map(()=>-2),barreFrets:[],showName:true,showDiagram:true,showFingering:true};
 }
-function InitialBusyFocus({busy}:{busy:boolean}) {
-  useEffect(()=>{if(busy)document.querySelector<HTMLElement>('.harmony-dialog[role="dialog"]')?.focus({preventScroll:true});},[]);
+function InitialBusyFocus({busy,dialogRef}:{busy:boolean;dialogRef:React.RefObject<HTMLDivElement|null>}) {
+  useEffect(()=>{if(busy)dialogRef.current?.focus({preventScroll:true});},[busy,dialogRef]);
   return null;
 }
 export function HarmonyChordDialog({score,target,selection,value,busy,library,onEdit,onClose,onLibraryPut,onLibraryRemove}:HarmonyChordDialogProps) {
@@ -40,7 +40,7 @@ export function HarmonyChordDialog({score,target,selection,value,busy,library,on
   const [draft,setDraft]=useState(()=>initial(value,staff)),[recipe,setRecipe]=useState(()=>draft.recipe??newRecipe()),[barres,setBarres]=useState(()=>draft.barreFrets.join(', ')),[text,setText]=useState(beat.text??'');
   const [shapes,setShapes]=useState<HarmonyChord[]>([]),[fill,setFill]=useState(false),[error,setError]=useState(''),[pending,setPending]=useState(false),[libraryId,setLibraryId]=useState(''),[libraryLabel,setLibraryLabel]=useState(''),[status,setStatus]=useState('');
   const preservedShape=useRef(JSON.stringify([draft.frets,draft.barreFrets]));
-  const bodyRef=useRef<HTMLDivElement>(null),nameInput=useRef<HTMLInputElement>(null),cancel=useRef<HTMLButtonElement>(null),wasBusy=useRef(busy||pending),contextKey=JSON.stringify([target,staff.tuning,staff.capo,staff.transpositionPitch]),valueKey=JSON.stringify(value);
+  const dialogRef=useRef<HTMLDivElement>(null),bodyRef=useRef<HTMLDivElement>(null),nameInput=useRef<HTMLInputElement>(null),cancel=useRef<HTMLButtonElement>(null),wasBusy=useRef(busy||pending),contextKey=JSON.stringify([target,staff.tuning,staff.capo,staff.transpositionPitch]),valueKey=JSON.stringify(value);
   const install=(next:HarmonyChord)=>{preservedShape.current=JSON.stringify([next.frets,next.barreFrets]);setDraft(structuredClone(next));setRecipe(next.recipe?structuredClone(next.recipe):newRecipe());setBarres(next.barreFrets.join(', '));setShapes([]);setError('');};
   useEffect(()=>{install(initial(value,staff));setText(beat.text??'');setFill(false);setStatus('');},[score,contextKey,valueKey]);
   useEffect(()=>{
@@ -81,7 +81,7 @@ export function HarmonyChordDialog({score,target,selection,value,busy,library,on
     <button ref={cancel} type="button" className="tp-button" onClick={onClose}>Cancel</button>
   </>;
   return <>
-    <Dialog title="Harmony chord" onClose={onClose} className="chord-dialog harmony-dialog" actions={actions}>
+    <Dialog ref={dialogRef} title="Harmony chord" onClose={onClose} className="harmony-dialog" actions={actions}>
       {busy&&<p role="status" className="muted">Loading chord library…</p>}
       <div className="harmony-body" ref={bodyRef}><fieldset disabled={busy||pending}>
         <div className="harmony-workbench"><div className="harmony-formula"><h3>Name and formula</h3>
@@ -130,6 +130,6 @@ export function HarmonyChordDialog({score,target,selection,value,busy,library,on
         {(error||analysisError)&&<p role="alert">{error||analysisError}</p>}{status&&<p role="status">{status}</p>}
       </fieldset></div>
     </Dialog>
-    <InitialBusyFocus busy={busy}/>
+    <InitialBusyFocus busy={busy} dialogRef={dialogRef}/>
   </>;
 }

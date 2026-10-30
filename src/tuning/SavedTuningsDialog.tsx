@@ -56,7 +56,7 @@ export function SavedTuningsDialog({notes,name,onUse,onClose,onAudition}:{notes:
     <button type="button" className="tp-button" onClick={onClose}>Cancel</button>
     <button type="button" className="tp-button primary" disabled={!canUse} onClick={use}>Use tuning</button>
   </>;
-  return createPortal(<Dialog title="Saved tunings" onClose={onClose} className="chord-dialog saved-tunings-dialog" actions={actions}>
+  return createPortal(<Dialog title="Saved tunings" onClose={onClose} className="saved-tunings-dialog" actions={actions}>
     <div className="saved-tunings-body">
       <div className="saved-tunings-list">
         <section aria-labelledby="saved-tunings-personal"><h3 id="saved-tunings-personal">Personal</h3>

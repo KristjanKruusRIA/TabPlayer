@@ -1,6 +1,7 @@
 import { model } from '@coderline/alphatab';
 import { selectScore } from './selection';
 import { getPartialCapo } from '../editor/partial-capo';
+import { describeBanjoDrone, getBanjoDrone } from '../editor/banjo-drone';
 /** ", partial capo 5 on strings 1, 2" for a staff with one; string numbers count from the lowest string. */
 const partialLabel=(staff:model.Staff)=>{const partial=getPartialCapo(staff);return partial?`${staff.capo?',':''} partial capo ${partial.fret} on string${partial.strings.length>1?'s':''} ${partial.strings.join(', ')}`:'';};
 import type { ExportSelection } from './types';
@@ -132,7 +133,7 @@ export function exportAsciiTab(score:model.Score,selection:ExportSelection):Uint
       written++;
       const names=stringNames(staff.tuning),low=names.map(name=>name.trim()).reverse().join(' ');
       const name=flat(track.name)||`Track ${original+1}`,staffNumber=(selection.staves?.[original]?.[index]??index)+1;
-      lines.push('',`${name}${staffCount>1?` (staff ${staffNumber})`:''} [${low}]${staff.capo?` capo ${staff.capo}`:''}${partialLabel(staff)}`);
+      lines.push('',`${name}${staffCount>1?` (staff ${staffNumber})`:''} [${low}]${staff.capo?` capo ${staff.capo}`:''}${partialLabel(staff)}${getBanjoDrone(staff)?`, ${describeBanjoDrone(getBanjoDrone(staff)).toLowerCase()}`:''}`);
       const fresh=()=>({rows:names.map(label=>`${label}|`),labels:[] as {start:number;end:number;text:string;count:string}[]});
       let system=fresh();
       const flush=()=>{

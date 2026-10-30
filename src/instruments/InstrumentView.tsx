@@ -5,6 +5,7 @@ import type { EditCommand } from '../edit-types';
 import type { BeatTarget } from '../project';
 import { formatPitch } from '../tuning';
 import { describePartialCapo, getPartialCapo, openStringKey } from '../editor/partial-capo';
+import { describeBanjoDrone, getBanjoDrone } from '../editor/banjo-drone';
 import { busyHint, drumTarget, entryBeat, entryNotes, fretTarget, keyTarget, noBeatHint, padTarget, type EntryAction, type EntryContext, type EntryFollow, type EntryTarget } from './entry';
 import './instruments.css';
 
@@ -104,7 +105,7 @@ function Fretboard({staff, notes, mode, leftHanded, entry}: {staff: model.Staff;
   const name=`${mode === 'bass' ? 'Bass' : 'Guitar'} fretboard${leftHanded ? ', left-handed' : ''}`;
   const wood=`url(#${id}-wood)`,metal=`url(#${id}-metal)`,cream=`url(#${id}-cream)`;
   return <>
-    <p className="instrument-detail">Staff {staff.index+1} · {staff.tuning.length} strings · Capo {staff.capo}{staff.capo ? ' · fret numbers relative to capo' : ''}{describePartialCapo(getPartialCapo(staff)) ? ` · ${describePartialCapo(getPartialCapo(staff))} · fret numbers on those strings relative to it` : ''} · Open {staff.tuning.map((_,index)=>formatPitch(openStringKey(staff,staff.tuning.length-index))).join(' ')}</p>
+    <p className="instrument-detail">Staff {staff.index+1} · {staff.tuning.length} strings · Capo {staff.capo}{staff.capo ? ' · fret numbers relative to capo' : ''}{describePartialCapo(getPartialCapo(staff)) ? ` · ${describePartialCapo(getPartialCapo(staff))} · fret numbers on those strings relative to it` : ''}{getBanjoDrone(staff) ? ` · ${describeBanjoDrone(getBanjoDrone(staff))} · string 1 fret numbers follow the neck` : ''} · Open {staff.tuning.map((_,index)=>formatPitch(openStringKey(staff,staff.tuning.length-index))).join(' ')}</p>
     <div className="instrument-canvas instrument-fretboard"><svg role={entry?'group':'img'} aria-label={name} viewBox={`0 0 ${width} ${height}`}>
       <title>{name}</title>
       <defs>

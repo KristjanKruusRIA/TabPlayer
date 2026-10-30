@@ -5,6 +5,7 @@ import { enumValue, integer, staffAt, trackAt, validateCapacity } from './common
 import { allNotes, captureNoteLinks, detachNote, restoreNoteLinks } from './links';
 import { scoreFromJson } from '../model-clone';
 import { parseTrackColor } from '../track-color';
+import { droneShift, droneString, fretExists, getBanjoDrone, rebaseDroneTrills, setBanjoDrone, validateBanjoDrone } from './banjo-drone';
 import { getPartialCapo, partialLift, rebaseTrills, remapPartialCapo, setPartialCapo, validatePartialCapo } from './partial-capo';
 
 const xmlText=/^(?:[\t\n\r\u0020-\uD7FF\uE000-\uFFFD]|[\uD800-\uDBFF][\uDC00-\uDFFF])*$/;
@@ -21,10 +22,13 @@ function validateStaff(staff:model.Staff|null,settings:StaffSettings) {
   // An omitted partial capo keeps the staff's own.
   if(settings.partialCapo!==undefined)validatePartialCapo(settings.partialCapo,settings.tuning.length);
   const partial=settings.partialCapo===undefined?staff?getPartialCapo(staff):null:settings.partialCapo;
+  if(settings.droneFret!==undefined)validateBanjoDrone(settings.droneFret,settings.tuning.length);
+  const drone=settings.droneFret===undefined?staff?getBanjoDrone(staff):0:settings.droneFret;
   for(const bar of staff?.bars??[])for(const voice of bar.voices)for(const beat of voice.beats)for(const note of beat.notes) {
     if(staff?.isPercussion)continue;
+    if(note.string===droneString&&!fretExists(staff!,note.string,note.fret,drone))throw new Error(`The banjo drone string has no frets 1 to ${drone}: bar ${bar.index+1} has fret ${note.fret} on it.`);
     const capo=partial?.strings.includes(note.string)?Math.max(settings.capo,partial.fret):settings.capo;
-    const pitch=note.string>0?settings.tuning[settings.tuning.length-note.string]+note.fret+capo-settings.transposition+note.harmonicPitch:note.octave*12+note.tone-settings.transposition;
+    const pitch=note.string>0?settings.tuning[settings.tuning.length-note.string]+note.fret+capo+droneShift(staff!,note.string,note.fret,drone)-settings.transposition+note.harmonicPitch:note.octave*12+note.tone-settings.transposition;
     if(!Number.isFinite(pitch)||pitch<0||pitch>127)throw new Error('Staff settings put a note outside the playable MIDI pitch range.');
   }
 }
@@ -33,6 +37,7 @@ export function defaultTuningName(tuning:readonly number[]):string {return model
 function configure(staff:model.Staff,settings:StaffSettings) {
   const oldCapo=staff.capo;staff.stringTuning.tunings=[...settings.tuning];staff.capo=settings.capo;staff.transpositionPitch=settings.transposition;staff.displayTranspositionPitch=settings.displayTransposition;staff.showTablature=settings.showTab;staff.showStandardNotation=settings.showNotation;
   if(settings.partialCapo!==undefined){const before=getPartialCapo(staff);setPartialCapo(staff,settings.partialCapo);rebaseTrills(staff,oldCapo,before,getPartialCapo(staff));}
+  if(settings.droneFret!==undefined){const before=getBanjoDrone(staff);setBanjoDrone(staff,settings.droneFret);rebaseDroneTrills(staff,before,settings.droneFret);}
   for(const bar of staff.bars)bar.clef=settings.clef;
   // An omitted name keeps the current one, and an empty one gets alphaTab's label as it did before S15.
   if(settings.tuningName!==undefined)staff.stringTuning.name=settings.tuningName;else if(!staff.stringTuning.name)staff.stringTuning.name=defaultTuningName(settings.tuning);
@@ -82,6 +87,7 @@ function setStringCount(track:model.Track,tuning:number[],keep:StringCountKeep,t
   validateStringCount(tuning,keep);validateTuningName(tuningName);
   const staves=track.staves;
   if(track.isPercussion||staves.some(staff=>staff.isPercussion||!staff.tuning.length))throw new Error('Only stringed guitar or bass tracks have strings to add or remove.');
+  if(staves.some(staff=>getBanjoDrone(staff)>0))throw new Error('Remove the banjo drone in the staff settings before changing the string count.');
   if(staves.some(staff=>staff.tuning.length===tuning.length))throw new Error('The string count is unchanged; use Apply tuning to retune.');
   const moves:({note:model.Note}&Place)[]=[],to=tuning.length,remapped=new Map<model.Staff,ReturnType<typeof getPartialCapo>>();
   for(const staff of staves){

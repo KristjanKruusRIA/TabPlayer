@@ -174,7 +174,7 @@ export function validateParityCommand(value:unknown):void {
   if(type==='setStaffSettings'||type==='addStaff'){
     const settings=object(edit.settings),hasName=Object.hasOwn(settings,'tuningName'),hasPartial=Object.hasOwn(settings,'partialCapo'),hasDrone=Object.hasOwn(settings,'droneFret');
     exact(settings,[...staffSettingKeys,...(hasName?['tuningName']:[]),...(hasPartial?['partialCapo']:[]),...(hasDrone?['droneFret']:[])]);
-    if(hasDrone)validateBanjoDrone(settings.droneFret,Array.isArray(settings.tuning)?settings.tuning.length:0);
+    if(hasDrone)validateBanjoDrone(settings.droneFret,Array.isArray(settings.tuning)?settings.tuning.length:0,Array.isArray(settings.tuning)?settings.tuning as number[]:undefined);
     if(hasName)validateTuningName(settings.tuningName===undefined?null:settings.tuningName);
     if(hasPartial)validatePartialCapo(settings.partialCapo,Array.isArray(settings.tuning)?settings.tuning.length:0);
   }

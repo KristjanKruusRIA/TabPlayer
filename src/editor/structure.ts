@@ -5,7 +5,7 @@ import { enumValue, integer, staffAt, trackAt, validateCapacity } from './common
 import { allNotes, captureNoteLinks, detachNote, restoreNoteLinks } from './links';
 import { scoreFromJson } from '../model-clone';
 import { parseTrackColor } from '../track-color';
-import { droneShift, droneString, fretExists, getBanjoDrone, rebaseDroneTrills, setBanjoDrone, validateBanjoDrone } from './banjo-drone';
+import { droneShift, droneString, droneTuningOk, fretExists, getBanjoDrone, rebaseDroneTrills, setBanjoDrone, validateBanjoDrone } from './banjo-drone';
 import { getPartialCapo, partialLift, rebaseTrills, remapPartialCapo, setPartialCapo, validatePartialCapo } from './partial-capo';
 
 const xmlText=/^(?:[\t\n\r\u0020-\uD7FF\uE000-\uFFFD]|[\uD800-\uDBFF][\uDC00-\uDFFF])*$/;
@@ -22,11 +22,13 @@ function validateStaff(staff:model.Staff|null,settings:StaffSettings) {
   // An omitted partial capo keeps the staff's own.
   if(settings.partialCapo!==undefined)validatePartialCapo(settings.partialCapo,settings.tuning.length);
   const partial=settings.partialCapo===undefined?staff?getPartialCapo(staff):null:settings.partialCapo;
-  if(settings.droneFret!==undefined)validateBanjoDrone(settings.droneFret,settings.tuning.length);
+  if(settings.droneFret!==undefined)validateBanjoDrone(settings.droneFret,settings.tuning.length,settings.tuning);
   const drone=settings.droneFret===undefined?staff?getBanjoDrone(staff):0:settings.droneFret;
+  if(drone>0&&!droneTuningOk(settings.tuning))throw new Error("The banjo drone is string 1, which must be tuned higher than string 2.");
   for(const bar of staff?.bars??[])for(const voice of bar.voices)for(const beat of voice.beats)for(const note of beat.notes) {
     if(staff?.isPercussion)continue;
-    if(note.string===droneString&&!fretExists(staff!,note.string,note.fret,drone))throw new Error(`The banjo drone string has no frets 1 to ${drone}: bar ${bar.index+1} has fret ${note.fret} on it.`);
+    if(note.string===droneString&&!note.isDead&&!fretExists(staff!,note.string,note.fret,drone))throw new Error(`The banjo drone string has no frets 1 to ${drone}: bar ${bar.index+1} has fret ${note.fret} on it.`);
+    if(note.string===droneString&&note.trillValue>=0){const moved=note.trillValue+droneShift(staff!,note.string,note.fret,drone)-droneShift(staff!,note.string,note.fret);if(moved<0||moved>127)throw new Error('Staff settings put a trill outside the playable MIDI pitch range.');}
     const capo=partial?.strings.includes(note.string)?Math.max(settings.capo,partial.fret):settings.capo;
     const pitch=note.string>0?settings.tuning[settings.tuning.length-note.string]+note.fret+capo+droneShift(staff!,note.string,note.fret,drone)-settings.transposition+note.harmonicPitch:note.octave*12+note.tone-settings.transposition;
     if(!Number.isFinite(pitch)||pitch<0||pitch>127)throw new Error('Staff settings put a note outside the playable MIDI pitch range.');

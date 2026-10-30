@@ -11,9 +11,12 @@ export const droneString=1,standardDroneFret=5,maxDroneFret=12;
 
 const integer=(value:unknown,min:number,max:number):value is number=>typeof value==='number'&&Number.isInteger(value)&&value>=min&&value<=max;
 /** The same rules as the native `StaffSettings::validate` for `droneFret`: 0 for none, otherwise 1 to 12 on a 5-string staff. */
-export function validateBanjoDrone(value:unknown,stringCount:number):asserts value is number {
+export function validateBanjoDrone(value:unknown,stringCount:number,tuning?:readonly number[]):asserts value is number {
   if(!integer(value,0,maxDroneFret)||value>0&&stringCount!==5)throw new Error('Choose a banjo drone fret from 1 to 12 on a 5-string staff, or 0 for none.');
+  if(value>0&&tuning&&!droneTuningOk(tuning))throw new Error('The banjo drone is string 1, which must be tuned higher than string 2.');
 }
+/** The drone is the short, high string: string 1 (the last tuning entry) must sound above string 2. The native `StaffSettings::validate` applies the same rule. */
+export const droneTuningOk=(tuning:readonly number[]):boolean=>tuning.length===5&&tuning[4]>tuning[3];
 
 const sources=new WeakMap<model.Staff,number>();
 /** The neck fret a staff's drone string starts at, or 0 when it has none. */
@@ -22,6 +25,10 @@ export const getBanjoDrone=(staff:model.Staff):number=>sources.get(staff)??0;
 export function setBanjoDrone(staff:model.Staff,fret:number):void {if(fret>0)sources.set(staff,fret);else sources.delete(staff);}
 /** The change a fret number on the drone string makes to its pitch, relative to a plain string: 0 on every other string and at the open string. */
 export const droneShift=(staff:model.Staff,string:number,fret:number,drone=getBanjoDrone(staff)):number=>drone>0&&string===droneString&&fret>drone?-drone:0;
+/** A written fret as semitones above its open string, which the drone string's missing frets make different from the number: the inverse of `neckFret`. */
+export const plainFret=(staff:model.Staff,string:number,fret:number,drone=getBanjoDrone(staff)):number=>drone>0&&string===droneString&&fret>drone?fret-drone:fret;
+/** The fret number written for a pitch that lies `plain` semitones above the open string. */
+export const neckFret=(staff:model.Staff,string:number,plain:number,drone=getBanjoDrone(staff)):number=>drone>0&&string===droneString&&plain>0?plain+drone:plain;
 /** Whether a fret number exists on a string: frets 1 to the drone fret are missing from the drone string. */
 export const fretExists=(staff:model.Staff,string:number,fret:number,drone=getBanjoDrone(staff)):boolean=>!(drone>0&&string===droneString&&fret>=1&&fret<=drone);
 /** The sounding key of a fretted note, including the capo on its string and the drone string's short neck. */
@@ -34,7 +41,7 @@ export function assertDroneFrets(score:model.Score):void {
   for(const track of score.tracks)for(const staff of track.staves){
     const drone=getBanjoDrone(staff);if(!drone)continue;
     for(const bar of staff.bars)for(const voice of bar.voices)for(const beat of voice.beats)for(const note of beat.notes)
-      if(note.string===droneString&&!fretExists(staff,note.string,note.fret,drone))throw new Error(`The banjo drone string has no frets 1 to ${drone}: bar ${bar.index+1} has fret ${note.fret} on it.`);
+      if(note.string===droneString&&!note.isDead&&!fretExists(staff,note.string,note.fret,drone))throw new Error(`The banjo drone string has no frets 1 to ${drone}: bar ${bar.index+1} has fret ${note.fret} on it.`);
   }
 }
 /** A trill stores an absolute pitch. When the drone changes, rebase the trills on the drone string so their fret interval stays. */
@@ -94,7 +101,7 @@ function install():void {
       const tracks=field(value,'tracks');
       if(Array.isArray(tracks))this.tracks.forEach((track,t)=>track.staves.forEach((staff,s)=>{
         const wire=field(field(field(tracks[t],'staves'),String(s)),extensionKey);
-        try{validateBanjoDrone(wire,staff.tuning.length);setBanjoDrone(staff,wire);}catch{setBanjoDrone(staff,0);}
+        try{validateBanjoDrone(wire,staff.tuning.length,staff.tuning);setBanjoDrone(staff,wire);}catch{setBanjoDrone(staff,0);}
       }));
       return finish.apply(this,args);
     };

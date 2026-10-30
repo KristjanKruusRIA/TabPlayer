@@ -47,3 +47,16 @@ GP8's track tuning offers a "banjo drone" for a 5-string banjo: the fifth string
 - One drone per staff, always on string 1. Banjos with the short string elsewhere, or other short-string instruments, are not covered.
 - Not carried: reading a drone from a GP file, and any GP-side drone flag (unknown); chord-diagram paste and the harmony library's saved-chord context compare only the capo; natural harmonics on the drone string are not specially treated.
 - Range edits that would put a note on a missing drone fret are refused as a whole rather than steered around, except where they re-finger by pitch.
+
+## Review round 1: changes
+
+- **Missing frets are never candidates.** `planFingering` (refinger, transpose re-fingering, paste conversion), the transpose and pitch-target arithmetic checks, `moveSelectionStrings`, chord shape search and harmony-transposed diagrams all test `fretExists`. An open drone string can move up by any interval, and a move across the drone string converts fret and pitch both ways (`plainFret`/`neckFret`). The after-edit check remains as a backstop.
+- **MusicXML** export of a drone staff writes the same plain frets as GP (counted from the short string's own start) with the same pitches, and nothing internal.
+- **Tuning.** The drone needs string 1 (the last tuning entry) tuned above string 2, in TypeScript (settings, `setTuning`, JSON reload) and Rust; otherwise it is refused with a clear message.
+- **Dead notes** on a missing fret do not block setting the drone. A drone change that would move a trill outside 0-127 is refused. The instrument view shows a trill alternation on the drone string at its neck fret.
+
+## Limits to record
+
+- A natural harmonic at neck fret 12 on the drone string sounds 74 in the app and 79 after a GP reopen, because GP gets the shortened fret.
+- Chord diagrams are not converted on GP export.
+- ASCII tab re-import reads fret 7 on the drone string as 74, since it knows no drone.

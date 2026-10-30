@@ -1362,12 +1362,19 @@ impl StaffSettings {
         if let Some(partial) = &self.partial_capo {
             partial.validate(self.tuning.len())?;
         }
-        if let Some(drone) = self.drone_fret
-            && (drone > 12 || (drone > 0 && self.tuning.len() != 5))
-        {
-            return Err(
-                "Choose a banjo drone fret from 1 to 12 on a 5-string staff, or 0 for none.".into(),
-            );
+        if let Some(drone) = self.drone_fret {
+            if drone > 12 || (drone > 0 && self.tuning.len() != 5) {
+                return Err(
+                    "Choose a banjo drone fret from 1 to 12 on a 5-string staff, or 0 for none."
+                        .into(),
+                );
+            }
+            // String 1 is the last tuning entry and must sound above string 2.
+            if drone > 0 && self.tuning[4] <= self.tuning[3] {
+                return Err(
+                    "The banjo drone is string 1, which must be tuned higher than string 2.".into(),
+                );
+            }
         }
         enum_range(self.clef, 0, 4)
     }
@@ -2533,6 +2540,12 @@ mod tests {
             rejected(&six);
             six["settings"]["droneFret"] = json!(0);
             accepted(&six);
+            // String 1 (the last entry) must sound above string 2.
+            let mut low = with(json!(5));
+            low["settings"]["tuning"] = json!([67, 62, 59, 55, 50]);
+            rejected(&low);
+            low["settings"]["droneFret"] = json!(0);
+            accepted(&low);
         }
     }
 

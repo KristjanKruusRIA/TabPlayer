@@ -15,7 +15,7 @@ import { scoreFromJson } from './model-clone';
 import { validateParityCommand } from './parity-commands';
 import { defaultTuningName, validateTuningName } from './editor/structure';
 import { stringCapo } from './editor/partial-capo';
-import { assertDroneFrets, droneShift, fretExists, fretKey, getBanjoDrone } from './editor/banjo-drone';
+import { assertDroneFrets, droneShift, droneTuningOk, fretExists, fretKey, getBanjoDrone } from './editor/banjo-drone';
 import { copyGpInterchangeSource, exportGpInterchange, forgetTrackOrderedEntries, loadInterchangeScore } from './interchange/gp';
 import { reflowLyrics,removeLyricsMeasure } from './editor/lyrics';
 import { prepareScoreTimers } from './editor/timers';
@@ -253,6 +253,7 @@ function apply(score: model.Score, edit: EditCommand, editIndex=0) {
     case 'setTuning': {
       tuningValid(edit.tuning); validateTuningName(edit.tuningName); const track = trackAt(score,edit.track);
       if (track.isPercussion || track.staves.some(s => s.tuning.length !== edit.tuning.length)) throw new Error('Retuning must keep the current string count.');
+      if (track.staves.some(s => getBanjoDrone(s) > 0 && !droneTuningOk(edit.tuning))) throw new Error('The banjo drone is string 1, which must be tuned higher than string 2.');
       for (const staff of track.staves) for (const bar of staff.bars) for (const voice of bar.voices) for (const beat of voice.beats) for (const note of beat.notes) {
         if (!note.string) continue;
         const pitch=edit.tuning[edit.tuning.length-note.string]+note.fret+stringCapo(staff,note.string)+droneShift(staff,note.string,note.fret)-staff.transpositionPitch;

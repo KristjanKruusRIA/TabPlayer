@@ -1552,6 +1552,7 @@ fn title_it(runtime: &SessionRuntime, title: &str) {
                 title: title.into(),
                 artist: "Nobody".into(),
                 tempo: 120.0,
+                preserve_opening_mark: None,
             },
             None,
         )

@@ -55,3 +55,20 @@
 .score-bar-handle:hover, .score-bar-handle:focus-visible { background: #245cb259; outline: 2px solid var(--ws-edit,#245cb2); outline-offset: 1px; }
 .score-bar-handle.is-disabled { cursor: default; opacity: .5; }
 .score-bar-guide { position: absolute; top: 0; bottom: 0; width: 0; border-left: 2px dashed #245cb2; pointer-events: none; }
+/* Direct symbol editing: a menu or one-line editor that opens beside the clicked title, tempo, chord name or clef. */
+.score-symbol-popover { position: absolute; z-index: 1100; box-sizing: border-box; min-width: 200px; max-width: min(320px, calc(100vw - 32px)); padding: 6px; border: 1px solid var(--tp-line-strong,#57514A); border-radius: var(--tp-r-md,6px); background: var(--tp-panel,#1E1C19); color: var(--tp-text,#F1ECE3); box-shadow: var(--tp-shadow-float,0 6px 20px rgb(0 0 0 / .6)); font-size: 13px; line-height: 1.35; }
+.score-symbol-popover [role="menu"], .score-symbol-popover form { display: flex; flex-direction: column; gap: 2px; margin: 0; }
+.score-symbol-heading { margin: 0; padding: 2px 8px 4px; color: var(--tp-muted,#B5ADA1); font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
+.score-symbol-popover button.score-symbol-item { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 32px; padding: 4px 8px; border: 1px solid transparent; border-radius: var(--tp-r-sm,4px); background: transparent; color: inherit; text-align: left; }
+.score-symbol-popover button.score-symbol-item:hover:not(.is-disabled), .score-symbol-popover button.score-symbol-item:focus-visible { background: var(--tp-raised,#2A2723); border-color: transparent; }
+.score-symbol-popover button:focus-visible, .score-symbol-popover input:focus-visible { outline: 2px solid var(--tp-focus,#6FA8FF); outline-offset: -2px; }
+.score-symbol-popover button.score-symbol-item.is-disabled { opacity: .45; cursor: default; }
+.score-symbol-check { display: inline-block; width: 1em; color: var(--tp-on,#B8E45F); }
+.score-symbol-field { display: flex; flex-direction: column; gap: 4px; padding: 2px 2px 0; color: var(--tp-muted,#B5ADA1); font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
+.score-symbol-field input { width: 100%; min-height: 32px; padding: 4px 8px; border: 1px solid var(--tp-line-strong,#57514A); border-radius: var(--tp-r-sm,4px); background: var(--tp-input,#100F0D); color: var(--tp-text,#F1ECE3); font-size: 14px; letter-spacing: 0; text-transform: none; }
+.score-symbol-field input[aria-invalid="true"] { border-color: var(--tp-danger,#F2907A); }
+.score-symbol-note { margin: 4px 2px 0; color: var(--tp-muted,#B5ADA1); font-size: 12px; }
+.score-symbol-problem { color: var(--tp-danger,#F2907A); }
+.score-symbol-actions { display: flex; justify-content: flex-end; gap: 6px; margin-top: 6px; }
+.score-symbol-actions button { min-height: 32px; }
+.score-symbol-popover[data-view="text"] { min-width: 260px; }

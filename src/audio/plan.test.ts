@@ -690,6 +690,13 @@ it('records the articulation a locked track keeps only where an automation would
   expect(plan(null).notes.every(n => !('lockedArticulation' in n))).toBe(true);
 });
 
+it('restores the automated level in force after a fade, not the written track volume',()=>{
+  const score=authored(1);note(score,0,0);note(score,0,1);
+  const beat=score.tracks[0].staves[0].bars[0].voices[0].beats[0];beat.fade=model.FadeType.FadeOut;beat.automations.push(Object.assign(new model.Automation(),{type:model.AutomationType.Volume,value:8,ratioPosition:0,isLinear:false}));score.finish(settings);
+  const volume=buildPlaybackPlan(score,1).midi.filter(e=>e.type==='controller'&&e.controller===7&&e.channel===0).map(e=>e as {tick:number;value:number});
+  const zero=volume.filter(e=>e.value===0).at(-1)!;
+  expect(volume.filter(e=>e.tick>zero.tick).at(-1)!.value).toBe(64);
+});
 it('restores the written track volume at the end of a fade out or swell, and writes nothing extra without a fade',()=>{
   const volume=(plan:PlaybackPlan)=>plan.midi.filter(e=>e.type==='controller'&&e.controller===7&&e.channel===0).map(e=>[e.tick,(e as {value:number}).value]);
   const build=(fade:model.FadeType|null)=>{const score=authored(1);note(score,0,0);note(score,0,1);if(fade!==null)score.tracks[0].staves[0].bars[0].voices[0].beats[0].fade=fade;score.finish(settings);return buildPlaybackPlan(score,1);};

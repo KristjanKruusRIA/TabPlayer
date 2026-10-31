@@ -59,3 +59,4 @@ I did not use a subagent reviewer for this slice. Review round 2 rejected the fi
 - T26 shows the control path and the rendered envelope on the synthetic sample voice at the renderer level, with the volume events taken from the playback plan. It is not a listening test on the real guitar or bass sounds, and not a comparison with GP8's fade curve.
 - Proposed progress changes (for the owner of the progress files): N09 partial to implemented; T26 partial to implemented with the limit above.
 - The 31 audio-resource tests above were not run with the sound bank present.
+- After a fade the volume returns to the automated level in force (playback and MIDI export), but the fade ramp itself still starts from the written track volume, so a track under volume automation can jump at the fade start. Fades in overlapping voices share a channel, so one voice's restore can change the level during another's fade.

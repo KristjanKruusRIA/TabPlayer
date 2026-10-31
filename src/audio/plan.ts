@@ -6,7 +6,7 @@ import type { ProjectView } from '../project';
 import type { BackingSettings, TrackInterpretation } from '../edit-types';
 import type { Articulation, MeasureOccurrence, PlanMidiEvent, PlanNote, PlanTempo, PlaybackPlan } from './types';
 import { scoreFromJson } from '../model-clone';
-import { gpControllerEvents, prepareGpMidiScore } from '../interchange/automation';
+import { gpControllerEvents, prepareGpMidiScore, type GpControllerEvent } from '../interchange/automation';
 import { preparePitchedGpScore } from '../interchange/pitched';
 import { buildPerformedBeats } from './performed-beats';
 import { applyNoteAudio, collectAudible, collectNoteAudio, type AudibleAttack, type AudioAdjustment } from './note-audio-plan';
@@ -82,8 +82,10 @@ class Collector implements midi.IMidiFileHandler {
 }
 /** alphaTab ends a fade out or a swell at volume 0 and never raises the track again, so every later note was silent.
  * This writes the volume the fade started from back at the end of the faded beat, on the channels the fade used.
- * Scores without a fade get no extra event. */
+ * Scores without a fade get no extra event. Mix automation is added after generation, so fadeRestoreLevels corrects these levels. */
+type FadeRestore = { track: number; channel: number; tick: number };
 export function restoreVolumeAfterFades(generator: midi.MidiFileGenerator, handler: midi.IMidiFileHandler) {
+  const restores: FadeRestore[] = [];
   const hooked = generator as unknown as { _generateFade(beat: model.Beat, start: number, duration: number): void };
   const original = hooked._generateFade.bind(generator);
   hooked._generateFade = (beat, start, duration) => {
@@ -94,12 +96,20 @@ export function restoreVolumeAfterFades(generator: midi.MidiFileGenerator, handl
     };
     try { original(beat, start, duration); } finally { handler.addControlChange = add; }
     if (beat.fade === model.FadeType.FadeIn) return;
-    for (const [channel, { track, level }] of levels) add(track, start + duration, channel, midi.ControllerType.VolumeCoarse, level);
+    for (const [channel, { track, level }] of levels) { add(track, start + duration, channel, midi.ControllerType.VolumeCoarse, level); restores.push({ track, channel, tick: start + duration }); }
   };
+  return restores;
+}
+/** A restore lands on the automated level in force at its tick, not the track's written volume. */
+export function fadeRestoreLevels(restores: readonly FadeRestore[], controllers: readonly GpControllerEvent[], tickShift: number) {
+  return restores.flatMap(({ track, channel, tick }) => {
+    const at = tick + tickShift, level = controllers.filter(e => e.controller === 7 && e.track === track && e.channel === channel && e.tick <= at).at(-1);
+    return level ? [{ ...level, tick: at }] : [];
+  });
 }
 function generate(score: model.Score) {
-  const events = new Collector(), generator = new midi.MidiFileGenerator(score, settings, events); restoreVolumeAfterFades(generator, events); generator.generate();
-  return { events, lookup: generator.tickLookup };
+  const events = new Collector(), generator = new midi.MidiFileGenerator(score, settings, events), restores = restoreVolumeAfterFades(generator, events); generator.generate();
+  return { events, lookup: generator.tickLookup, restores };
 }
 
 function resolvePrograms(score: model.Score, events: Collector) {
@@ -444,7 +454,8 @@ function buildWithIdentities(original: model.Score, generation: number, ids: str
   if (fullIndex !== complete.events.notes.length) throw new Error('The score has MIDI attacks without an unambiguous source-note lane.');
   if (interpreted.length) interpretAttacks(interpreted, interpretations!);
   const events: OrderedMidiEvent[] = converted(complete.events.events, ids, nativeChannel);
-  for(const event of gpControllerEvents(score,occurrences))events.push({type:'controller',trackId:ids[event.track],tick:event.tick,channel:nativeChannel(event.track,event.channel),controller:event.controller,value:event.value,order:Number.MAX_SAFE_INTEGER});
+  const automated = gpControllerEvents(score,occurrences);
+  for(const event of [...automated,...fadeRestoreLevels(complete.restores,automated,complete.events.shift)])events.push({type:'controller',trackId:ids[event.track],tick:event.tick,channel:nativeChannel(event.track,event.channel),controller:event.controller,value:event.value,order:Number.MAX_SAFE_INTEGER});
   if (audible.length) applyNoteAudio(audible, notes, Math.max(sliceExtent, complete.events.end, ...complete.events.notes.map(n => n.end)));
   for (const note of complete.events.notes) {
     const common = { trackId: ids[note.track], channel: nativeChannel(note.track, note.channel), key: note.key, velocity: note.velocity, ...(note.kit ? { kitElement: note.kit } : {}) };

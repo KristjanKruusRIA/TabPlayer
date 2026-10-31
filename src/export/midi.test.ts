@@ -160,6 +160,12 @@ it('writes rounded Guitar Pro mix controllers',async()=>{
   expect([...new Set(events.filter(event=>event.type===176&&(event.data[0]===7||event.data[0]===10)).map(event=>event.data.join(':')))].sort()).toEqual(['10:64','7:97']);
 });
 
+it('restores the automated level after a fade in the exported file',()=>{
+  const s=score(),beat=s.tracks[0].staves[0].bars[0].voices[0].beats[0];beat.fade=model.FadeType.FadeOut;beat.automations.push(Object.assign(new model.Automation(),{type:model.AutomationType.Volume,value:8,ratioPosition:0,isLinear:false}));
+  const parsed=decode(exportMidi(s,{tracks:[0],range:null})),volume=parsed.events.filter(e=>e.type===176&&e.data[0]===7&&e.channel===parsed.events.find(n=>n.type===144)!.channel);
+  const zero=volume.filter(e=>e.data[1]===0).at(-1)!;
+  expect(volume.filter(e=>e.tick>zero.tick).at(-1)!.data[1]).toBe(64);
+});
 it('raises the track volume again after a fade out so later notes sound in the exported file',()=>{
   const s=score();s.tracks[0].staves[0].bars[0].voices[0].beats[0].fade=model.FadeType.FadeOut;
   const parsed=decode(exportMidi(s,{tracks:[0],range:null})),volume=parsed.events.filter(e=>e.type===176&&e.data[0]===7&&e.channel===parsed.events.find(n=>n.type===144)!.channel);

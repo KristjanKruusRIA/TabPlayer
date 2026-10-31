@@ -40,6 +40,7 @@ fn all_bundled_scores_pass_native_admission_and_keep_clean_fork_baselines() {
                 title: "Independent user edit".into(),
                 artist: "TabPlayer".into(),
                 tempo: 120.0,
+                preserve_opening_mark: None,
             })
             .unwrap();
         assert!(session.snapshot().can_undo);

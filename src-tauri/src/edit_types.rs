@@ -1111,6 +1111,14 @@ pub enum EditCommand {
         title: String,
         artist: String,
         tempo: f64,
+        /// Omitted keeps the earlier behavior, which rebuilds the opening tempo mark as a plain one. `true` keeps the mark's label,
+        /// gradual change and visibility and sets only its value, so a rename or a retempo from the score loses nothing.
+        #[serde(
+            default,
+            deserialize_with = "present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        preserve_opening_mark: Option<bool>,
     },
     SetScoreMetadata {
         fields: ScoreMetadata,

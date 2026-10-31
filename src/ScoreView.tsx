@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react';
 import { AlphaTabApi, LayoutMode, SystemsLayoutMode, type model, StaveProfile, type PlaybackHighlightChangeEventArgs } from '@coderline/alphatab';
 import './tremolo-guard';
 import type { BeatTarget } from './project';
@@ -9,13 +9,17 @@ import { configureEngraving, type EngravingProjection } from './engraving/projec
 import type { EngravingOverrides,PageLayout } from './engraving/types';
 import {pageGeometry} from './engraving/page';
 import {isPhysicalPageLayout,type ScoreDisplayPreferences} from './engraving/screen-view';
-import {arrangeScreenPages,hitTestScreenPages,mapScreenRect,paginateScreenScore,resolveScreenZoom,type ScreenPagination,type ScreenRenderChunk,type ScreenRect,type ScreenSystem} from './engraving/screen-pages';
+import {arrangeScreenPages,hitTestScreenPages,mapScreenRect,paginateScreenScore,resolveScreenZoom,unmapScreenPoint,type ScreenPagination,type ScreenRenderChunk,type ScreenRect,type ScreenSystem} from './engraving/screen-pages';
 import {installScreenPlayback,type ScreenPlaybackContext} from './engraving/screen-playback';
 import { describeScoreError,type ScoreError } from './editor/score-errors';
 import { BAR_SCALE_BIG_STEP,BAR_SCALE_RANGE,BAR_SCALE_STEP,clampBarScale,scaleAfterDrag } from './engraving/bar-widths';
 import { busyGuard } from './ui/useBusyGuard';
 import { listScaleDiagrams,type ScaleDiagram } from './harmony/scale-diagram';
 import { ScaleDiagramView,scaleDiagramSize } from './harmony/ScaleDiagramView';
+import type { EditCommand } from './edit-types';
+import { targetSymbols,type SymbolRef } from './editor/symbol-edit';
+import { resolveSymbol,systemAt } from './editor/symbol-hit';
+import { SymbolPopover,type SymbolView } from './SymbolPopover';
 import './ScoreView.css';
 /** A scale diagram is a compact chip above the staff at its beat; hovering or focusing it opens the diagram at this fraction of its natural size. */
 const diagramScale=.45,chipHeight=16,chipGap=2;
@@ -32,11 +36,24 @@ type Drag={anchor:BeatTarget;last:BeatTarget;lanes:VoiceAddress[];bars?:Extract<
 
 /** Design mode for bar widths: `scaleOf` is a bar's saved weight (1 is the default) and `onScale` records one edit. */
 export interface BarDesign {busy:boolean;/** The bar's weight now, and the weight it has with no width set here (1, or what an imported file gave it). */scaleOf:(bar:number)=>number;defaultOf:(bar:number)=>number;onScale:(bar:number,scale:number)=>void}
+/** Direct editing of the title, tempo marks, chord names and clefs on the rendered score: double-click edits in place, right-click (or Shift+F10 / the Menu key, counted in `request`) opens the actions that fit. */
+export interface SymbolEditing {
+  /** An operation is running: editors open but refuse to record. */
+  busy:boolean;
+  /** Why editing is unavailable (a locked document), or null. */
+  locked:string|null;
+  /** Records the edit; a promise settles to whether it landed. */
+  onEdit:(command:EditCommand)=>Promise<boolean>|void;
+  /** Selects the chord's beat and opens the chord editor. */
+  onChordEditor:(target:BeatTarget)=>void;
+  /** Rises each time the keyboard asks for the symbol menu of the edit target. */
+  request?:number;
+}
 type BarHandle={bar:number;x:number;y:number;h:number;width:number};
 const defaultDisplay:ScoreDisplayPreferences={layout:'parchment',zoomMode:'manual'};
 const defaultPage:PageLayout={widthMm:210,heightMm:297,marginsMm:{top:15,right:15,bottom:15,left:15},scale:1,profile:'document'};
 
-export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSelection=null,onEditorSelection,projection,visibleTracks,engraving,editTarget,editString,editNoteIndex,display=defaultDisplay,page:pageInput=defaultPage,onDisplayStatus,errors=noErrors,barDesign=null}: {
+export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSelection=null,onEditorSelection,projection,visibleTracks,engraving,editTarget,editString,editNoteIndex,display=defaultDisplay,page:pageInput=defaultPage,onDisplayStatus,errors=noErrors,barDesign=null,symbols}: {
   score:model.Score;track:number;zoom:number;profile:string;onSelect:(target:BeatTarget,string?:number,noteIndex?:number)=>void;
   playback:NativePlaybackController|null;
   editorSelection?:MusicSelection|null;onEditorSelection?:(selection:MusicSelection|null)=>void;
@@ -47,6 +64,8 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
   errors?:readonly ScoreError[];
   /** Shows a handle on every bar's right edge for changing its width. Layouts that ignore widths show none. */
   barDesign?:BarDesign|null;
+  /** Double-click and context-menu editing of score symbols; absent, the score only selects. */
+  symbols?:SymbolEditing;
 }) {
   const wrapper=useRef<HTMLDivElement>(null),container=useRef<HTMLDivElement>(null),api=useRef<AlphaTabApi|null>(null);
   const tracks=visibleTracks??[track],renderedScore=projection?.score??score,trackKey=tracks.join(',');
@@ -324,7 +343,7 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
   },[]);
   useEffect(()=>{refreshErrors.current();},[errors,score,track,zoom,profile,projection,visibleTracks]);
   useEffect(()=>{refreshDiagrams.current();},[score,track,zoom,profile,projection,visibleTracks]);
-  const capture=(event:ReactMouseEvent<HTMLDivElement>)=>{if(event.button!==0||(event.target instanceof Element&&event.target.closest('.score-bar-handle')))return;event.preventDefault();event.currentTarget.focus({preventScroll:true});modifiers.current={shift:event.shiftKey,toggle:event.ctrlKey||event.metaKey,detail:event.detail};drag.current=null;};
+  const capture=(event:ReactMouseEvent<HTMLDivElement>)=>{if(event.button!==0||(event.target instanceof Element&&event.target.closest('.score-bar-handle,.score-symbol-popover')))return;event.preventDefault();event.currentTarget.focus({preventScroll:true});modifiers.current={shift:event.shiftKey,toggle:event.ctrlKey||event.metaKey,detail:event.detail};drag.current=null;};
   const resize=(edge:'start'|'end',event:ReactMouseEvent)=>{
     event.preventDefault();event.stopPropagation();if(event.button!==0||!handles||!editorSelection||editorSelection.kind==='notes')return;
     const fixed=handles[edge==='start'?'end':'start'].target;
@@ -380,7 +399,77 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
     const now=design.scaleOf(handle.bar),target=reset?design.defaultOf(handle.bar):clampBarScale(now+direction*step);
     if(target!==now){restoreBar.current=handle.bar;design.onScale(handle.bar,target);}
   };
-  return <div ref={wrapper} tabIndex={-1} className="score-presentation" data-layout={display.layout} onMouseDownCapture={capture}>
+  const [symbolUi,setSymbolUi]=useState<SymbolView|null>(null),symbolReturn=useRef<HTMLElement|null>(null),symbolSeen=useRef(symbols?.request??0),symbolOpen=useRef(false),symbolGeneration=useRef(0),symbolArea=useRef<{width:number;height:number}|null>(null);
+  /** Closing puts focus back where it was before the popover opened, unless focus already went somewhere else. */
+  const closeSymbol=useCallback((restore:boolean,id?:number)=>{
+    // A second close (the edit landing after the score changed) must not move focus again, and one for a popover that has been replaced must not close its successor.
+    if(!symbolOpen.current||(id!==undefined&&id!==symbolGeneration.current))return;symbolOpen.current=false;
+    setSymbolUi(null);const back=symbolReturn.current;symbolReturn.current=null;
+    if(restore)(back?.isConnected?back:wrapper.current)?.focus({preventScroll:true});
+  },[]);
+  const openSymbol=(next:SymbolView)=>{
+    if(!symbolReturn.current){const active=document.activeElement;symbolReturn.current=active instanceof HTMLElement&&active!==document.body&&!active.closest('.score-symbol-popover')?active:wrapper.current;}
+    symbolArea.current={width:available.width,height:available.height};symbolOpen.current=true;symbolGeneration.current+=1;setSymbolUi({...next,id:symbolGeneration.current});
+  };
+  // The popover is placed in the score's own coordinates, so anything that moves or removes the symbol being edited closes it unrecorded:
+  // a new score or set of shown tracks, a change of layout, zoom or page, or a resize of the score area. Focus goes back to where it was
+  // when it had been inside the popover.
+  useEffect(()=>{closeSymbol(!!wrapper.current?.querySelector('.score-symbol-popover')?.contains(document.activeElement));},[score,projection,trackKey,symbols===undefined,closeSymbol,fit.percent,display.layout,display.zoomMode,page]);
+  // A resize of the score area (the window, or a panel beside it) moves the symbol too. The popover itself can add a scrollbar and so change the
+  // area by a few pixels, which is not a resize: only a change past that, measured from when it opened, closes it.
+  useEffect(()=>{
+    const base=symbolArea.current;if(!symbolOpen.current||!base)return;
+    if(Math.abs(available.width-base.width)>24||Math.abs(available.height-base.height)>24)closeSymbol(!!wrapper.current?.querySelector('.score-symbol-popover')?.contains(document.activeElement));
+  },[available.width,available.height,closeSymbol]);
+  // Scrolling (by hand, or by playback following the cursor) carries the popover with the score; once it is out of sight it closes.
+  useEffect(()=>{
+    const host=scrollHost.current;if(!symbolUi||!host)return;
+    const away=()=>{
+      const popover=wrapper.current?.querySelector('.score-symbol-popover');if(!popover)return;
+      const box=popover.getBoundingClientRect(),area=host.getBoundingClientRect();
+      if(box.bottom<=area.top||box.top>=area.bottom||box.right<=area.left||box.left>=area.right)closeSymbol(popover.contains(document.activeElement));
+    };
+    host.addEventListener('scroll',away,{passive:true});return()=>host.removeEventListener('scroll',away);
+  },[!!symbolUi,closeSymbol]);
+  const symbolAnchor=(event:ReactMouseEvent)=>{const rect=wrapper.current?.getBoundingClientRect();return {x:Math.max(0,event.clientX-(rect?.left??0))+4,y:Math.max(0,event.clientY-(rect?.top??0))+4};};
+  /** Which score symbol a click landed on: the clicked <text> says what it is, the bounds of the system under it say where. */
+  const symbolAt=(event:ReactMouseEvent):SymbolRef|null=>{
+    const view=api.current,text=event.target instanceof Element?event.target.closest('text'):null;
+    if(!view||!text||text.closest('.score-symbol-popover'))return null;
+    let system:ScreenSystem|null=null,point:{x:number;y:number}|null=null;
+    const physical=presentation.current.physical;
+    if(physical&&wrapper.current){const rect=wrapper.current.getBoundingClientRect(),hit=unmapScreenPoint(physical.pagination,physical.arrangement,{x:event.clientX-rect.left,y:event.clientY-rect.top});if(hit){system=hit.system;point=hit.point;}}
+    else if(!layoutCurrent.current.sourcePhysical&&view.boundsLookup){
+      const bounds=view.uiFacade.getOffset(null,view.canvasElement),x=event.clientX+window.scrollX-bounds.x,y=event.clientY+window.scrollY-bounds.y;
+      system=systemAt(view.boundsLookup.staffSystems,y);if(system)point={x,y};
+    }
+    return resolveSymbol({score:current.current.score,tracks:current.current.tracks,text:text.textContent??'',centered:text.getAttribute('text-anchor')==='middle',system,point,sourceBeat:canonicalBeat});
+  };
+  const symbolDoubleClick=(event:ReactMouseEvent)=>{
+    if(!symbols||event.button!==0)return;const ref=symbolAt(event);if(!ref)return;
+    event.preventDefault();event.stopPropagation();
+    openSymbol({anchor:symbolAnchor(event),ref,view:symbols.locked?'menu':ref.kind==='clef'?'clef':'text'});
+  };
+  const symbolContextMenu=(event:ReactMouseEvent)=>{
+    if(!symbols)return;const ref=symbolAt(event);if(!ref)return;
+    event.preventDefault();event.stopPropagation();openSymbol({anchor:symbolAnchor(event),ref,view:'menu'});
+  };
+  /** The keyboard has no pointer: the menu lists the symbols at the edit target and opens beside its marker. */
+  const openTargetMenu=()=>{
+    const rect=wrapper.current?.getBoundingClientRect(),host=scrollHost.current?.getBoundingClientRect();
+    openSymbol({anchor:caret?{x:caret.x,y:caret.y+caret.h+4}:{x:Math.max(0,(host?.left??0)-(rect?.left??0))+16,y:Math.max(0,(host?.top??0)-(rect?.top??0))+16},ref:null,view:'menu'});
+  };
+  useEffect(()=>{
+    const request=symbols?.request??0;if(request===symbolSeen.current)return;symbolSeen.current=request;
+    if(symbols&&editTarget)openTargetMenu();
+    // Only a new request opens the menu.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[symbols?.request]);
+  const symbolKey=(event:ReactKeyboardEvent<HTMLDivElement>)=>{
+    if(!symbols||event.target!==event.currentTarget||!(event.key==='ContextMenu'||(event.key==='F10'&&event.shiftKey)))return;
+    event.preventDefault();event.stopPropagation();if(editTarget)openTargetMenu();
+  };
+  return <div ref={wrapper} tabIndex={-1} className="score-presentation" data-layout={display.layout} onMouseDownCapture={capture} onDoubleClick={symbolDoubleClick} onContextMenu={symbolContextMenu} onKeyDown={symbolKey}>
     {pageError&&<p className="score-page-error" role="alert">{pageError} Continuous view is shown at {zoom}%.</p>}
     <div className={sourcePhysical?'score-source-staging':'score-live-paper'} style={{width:sourceWidth||undefined}} aria-hidden={sourcePhysical||undefined} inert={sourcePhysical||undefined}>
       <div ref={container} data-testid="score-source" aria-hidden={sourcePhysical||undefined} aria-label="Music notation"/>
@@ -405,6 +494,7 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
         onPointerMove={moveBarDrag} onPointerUp={endBarDrag} onPointerCancel={cancelBarDrag} onLostPointerCapture={cancelBarDrag} onBlur={event=>{cancelBarDrag();if(event.relatedTarget)heldBar.current=null;}} onFocus={()=>{setActiveBar(handle.bar);heldBar.current=handle.bar;}}
         style={{left:handle.x-5,top:handle.y,height:handle.h}}>{moving!==null&&<span className="score-bar-guide" aria-hidden="true" style={{left:5+moving}}/>}</div>;
     })}
+    {symbolUi&&symbols&&<SymbolPopover state={symbolUi} score={score} targets={symbolUi.ref||!editTarget?[]:targetSymbols(score,editTarget,tracks)} busy={symbols.busy} locked={symbols.locked} onEdit={symbols.onEdit} onChordEditor={ref=>symbols.onChordEditor(ref.target)} onView={next=>setSymbolUi(old=>({...next,id:old?.id}))} onClose={closeSymbol}/>}
     <span className="score-edit-announcement" role="status" aria-live="polite" aria-atomic="true">{editLocation}</span>
     {caret&&<span ref={caretElement} role="img" aria-label="Edit target" className="score-edit-target" style={{left:caret.x,top:caret.y,width:caret.w,height:caret.h}}>{caret.entry&&<span className="score-edit-entry" aria-hidden="true">{editString?`String ${editString}`:'Entry'}</span>}</span>}
     {markers.map((marker,index)=><span key={index} role="img" aria-label={`Selected note ${index+1}`} style={{position:'absolute',left:marker.x,top:marker.y,width:marker.w,height:marker.h,boxSizing:'border-box',border:'2px solid #9aaf38',background:'rgba(185,205,105,.3)',borderRadius:3,pointerEvents:'none'}}/>)}

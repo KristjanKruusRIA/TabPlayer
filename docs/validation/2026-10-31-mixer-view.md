@@ -28,3 +28,9 @@ Branch `feat/ui-mixer`, merged with `feat/gp8-parity`. The Mixer is the third Vi
 - Not run in the desktop app or by ear: the live drag was verified against a fake bridge, not the native audio engine, so the 10 ms crossfade and the 70 ms rate are untested by hearing. No screenshots were taken of the master strip or the Selected slot; the CSS is unmeasured in a real window.
 - A drag on the master sliders is not heard live.
 - No Rust changed, so no Rust tests were run for this work.
+
+## Merge into feat/gp8-parity, 2026-10-31
+
+A fresh reviewer rejected two rounds of fixes; a5fcfb6 fixes its last Medium and Low and was not reviewed again. `tsc` is clean, `src/App.test.tsx`, `src/mixer` and the controller tests pass 226 with 1 skipped, and `parity-master-effects` passes on a merged Windows build.
+
+Limit: nobody has heard the live fader drag in the built app, and no driver measures it. It was tested against a fake native bridge.

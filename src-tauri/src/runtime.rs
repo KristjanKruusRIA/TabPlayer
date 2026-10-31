@@ -5,7 +5,8 @@ use crate::{
         backing::BackingMap,
         decode::{DecodedAudio, decode_audio},
         device::{
-            AudioDeviceInfo, AudioDiagnostics, AudioService, NativeAudioStatus, PracticeSettings, TransportCommand,
+            AudioDeviceInfo, AudioDiagnostics, AudioService, NativeAudioStatus, PracticeSettings,
+            TransportCommand,
         },
         plan::PlaybackPlan,
         reference_sync::ReferenceSyncMap,

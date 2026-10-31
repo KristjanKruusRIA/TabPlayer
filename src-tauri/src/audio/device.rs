@@ -3566,7 +3566,10 @@ mod diagnostics_and_test_tone_tests {
     fn test_tone_refused_during_playback() {
         let service = AudioService::new(PathBuf::new(), Arc::new(|_| {}));
         let _consumer = service.attach_test_audition(48_000);
-        service.shared.audition_rate.store(48_000, Ordering::Release);
+        service
+            .shared
+            .audition_rate
+            .store(48_000, Ordering::Release);
         service.shared.playing.store(true, Ordering::Release);
         let err = service.test_tone().unwrap_err();
         assert_eq!(err, "Test tone is unavailable during playback.");
@@ -3576,7 +3579,10 @@ mod diagnostics_and_test_tone_tests {
     fn test_tone_refused_when_faulted() {
         let service = AudioService::new(PathBuf::new(), Arc::new(|_| {}));
         let _consumer = service.attach_test_audition(48_000);
-        service.shared.audition_rate.store(48_000, Ordering::Release);
+        service
+            .shared
+            .audition_rate
+            .store(48_000, Ordering::Release);
         service.shared.mark_fault();
         let err = service.test_tone().unwrap_err();
         assert_eq!(err, "Audio output device has failed.");
@@ -3593,7 +3599,10 @@ mod diagnostics_and_test_tone_tests {
     fn test_tone_submits_500ms_sine_clip_when_idle() {
         let service = AudioService::new(PathBuf::new(), Arc::new(|_| {}));
         let mut consumer = service.attach_test_audition(48_000);
-        service.shared.audition_rate.store(48_000, Ordering::Release);
+        service
+            .shared
+            .audition_rate
+            .store(48_000, Ordering::Release);
         service.test_tone().expect("test tone should succeed");
         let clip = consumer.try_pop().expect("audition consumer received clip");
         assert_eq!(clip.rate, 48_000);
@@ -3610,7 +3619,10 @@ mod diagnostics_and_test_tone_tests {
         let service = AudioService::new(PathBuf::new(), Arc::new(|_| {}));
         assert_eq!(service.shared.buffer_size.load(Ordering::Relaxed), 0);
         if let Ok(diag) = service.diagnostics() {
-            assert_eq!(diag.buffer_size, None, "unreported buffer size must read as None, never default");
+            assert_eq!(
+                diag.buffer_size, None,
+                "unreported buffer size must read as None, never default"
+            );
         }
         service.shared.buffer_size.store(256, Ordering::Relaxed);
         if let Ok(diag) = service.diagnostics() {

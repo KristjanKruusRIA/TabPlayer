@@ -672,3 +672,39 @@ fn a_kit_edit_made_while_paused_with_notes_ringing_resumes_without_a_click() {
         "and it is silent once the ramp ends"
     );
 }
+
+#[test]
+fn a_kit_edit_made_after_a_seek_into_held_notes_applies_from_the_first_frame() {
+    let kit = |snare| {
+        settings_with(Some(DrumKitMix {
+            kick: element(0.9, 0.0, false, false),
+            snare,
+            ..Default::default()
+        }))
+    };
+    let after = |snare| {
+        let mut t = transport(kit(element(1.0, 0.0, false, false)));
+        command(&mut t, TransportCommand::Play { generation: 1 });
+        play(&mut t, 3000);
+        command(&mut t, TransportCommand::Pause { generation: 1 });
+        // Into the middle of the snare, which the seek strikes again before any frame is rendered.
+        command(
+            &mut t,
+            TransportCommand::SeekTick {
+                generation: 1,
+                tick: 1100.0,
+            },
+        );
+        install(&mut t, &kit(snare));
+        command(&mut t, TransportCommand::Play { generation: 1 });
+        peak(&play(&mut t, 480))
+    };
+    let full = after(element(1.0, 0.0, false, false));
+    assert!(full > 0.01);
+    assert_eq!(after(element(1.0, 0.0, true, false)), 0.0);
+    let quarter = after(element(0.25, 0.0, false, false));
+    assert!(
+        (quarter - 0.25 * full).abs() <= 0.02 * full,
+        "{quarter} vs {full}"
+    );
+}

@@ -276,6 +276,8 @@ struct Track {
     drum_synths: Option<[Synthesizer; KIT_ELEMENTS]>,
     kit_active: bool,
     drum_used: bool,
+    /// Whether a frame has been rendered since the last seek, which is when a kit level change has been heard to ramp.
+    kit_rendered: bool,
     automatic: bool,
     fixed_recorded: bool,
     locked: bool,
@@ -416,6 +418,7 @@ impl Renderer {
                 start_programs,
                 kit_active: mix.channels[track_index].kit_active,
                 drum_used: false,
+                kit_rendered: false,
                 percussion: track.percussion,
                 channels: std::array::from_fn(|c| MidiChannel::new(start_programs[c])),
                 ranges: [2.0; 16],
@@ -957,6 +960,7 @@ impl Renderer {
             }
             if let Some(synths) = &mut track.drum_synths {
                 // The ramp moves with the clock, struck or not, so a note struck after a change starts at the new level.
+                track.kit_rendered = true;
                 let gains = self.mix.channels[index].kit.step();
                 if track.drum_used {
                     for (synth, gain) in synths.iter_mut().zip(gains) {
@@ -1160,6 +1164,7 @@ impl Renderer {
             let start_programs = track.start_programs;
             track.channels = std::array::from_fn(|c| MidiChannel::new(start_programs[c]));
             track.drum_used = false;
+            track.kit_rendered = false;
             if let Some(synths) = &mut track.drum_synths {
                 for synth in synths.iter_mut() {
                     synth.reset();
@@ -1372,12 +1377,12 @@ impl Renderer {
     pub fn has_backing(&self) -> bool {
         self.configured_backing || self.backing.is_some()
     }
-    /// Puts every kit level at its target for a track whose kit has sounded nothing since the last seek. A stopped or
+    /// Puts every kit level at its target for a track that has rendered no frame since the last seek, even if the seek struck held notes again. A stopped or
     /// paused transport renders nothing, so a ramp armed meanwhile would still be on its way when the next note is struck.
     /// A track with notes ringing keeps its ramp, so they resume without a step.
     pub fn settle_idle_kit(&mut self) {
         for (track, channel) in self.tracks.iter().zip(&mut self.mix.channels) {
-            if !track.drum_used {
+            if !track.kit_rendered {
                 channel.kit.current = channel.kit.target;
                 channel.kit.remaining = 0;
             }

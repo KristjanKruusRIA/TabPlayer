@@ -8,7 +8,7 @@
 .track-panel .track-master .master-switch input { width:14px; height:14px; margin:0; accent-color:var(--ws-accent); }
 .track-panel .track-master .master-select { display:grid; gap:2px; margin:0; color:var(--ws-muted); font-size:12px; }
 .track-panel .track-master select { box-sizing:border-box; width:100%; min-height:26px; color:var(--ws-text); background:var(--ws-input); border:1px solid var(--ws-border); border-radius:3px; font-size:12px; }
-.track-panel .track-master select:disabled { color:var(--ws-muted); border-style:dashed; cursor:not-allowed; }
+.track-panel .track-master :is(select,input,button):is(:disabled,[aria-disabled=true]) { color:var(--ws-muted); border-style:dashed; cursor:not-allowed; }
 .track-panel .track-master select:focus-visible { outline:2px solid var(--ws-accent); outline-offset:2px; }
 .track-panel .track-master summary:focus-visible { outline:2px solid var(--ws-accent); outline-offset:2px; }
 .track-panel .track-master>button { min-height:26px; margin-top:2px; color:var(--ws-text); background:var(--ws-input); border:1px solid var(--ws-border); border-radius:3px; font-size:12px; }

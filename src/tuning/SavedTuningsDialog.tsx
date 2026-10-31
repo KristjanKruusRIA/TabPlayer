@@ -1,9 +1,10 @@
-import { useEffect,useMemo,useRef,useState,type KeyboardEvent } from 'react';
+import { useEffect,useMemo,useRef,useState } from 'react';
 import { createPortal } from 'react-dom';
 import { formatTuning,parseTuning } from '../tuning';
 import { tuningPresets } from '../tuning-presets';
 import { AuditionButtons } from './AuditionButtons';
 import { isXmlText,newTuningId,putTuningLibraryEntry,readTuningLibrary,removeTuningLibraryEntry,subscribeTuningLibrary,tuningNameError,type SavedTuning } from './library';
+import { Dialog } from '../ui/Dialog';
 import './saved-tunings-dialog.css';
 
 type Identity={kind:'personal';id:string}|{kind:'builtin';index:number};
@@ -20,14 +21,13 @@ export function SavedTuningsDialog({notes,name,onUse,onClose,onAudition}:{notes:
   const [entries,setEntries]=useState<SavedTuning[]>([]),[loaded,setLoaded]=useState(false),[readError,setReadError]=useState(''),[error,setError]=useState(''),[pending,setPending]=useState(false);
   const [selection,setSelection]=useState<Identity|null>(null),[detailNotes,setDetailNotes]=useState(notes),[detailName,setDetailName]=useState(name);
   // details counts selections and detail edits, so a library response that settles after the user moved on leaves them alone.
-  const dialog=useRef<HTMLElement>(null),nameInput=useRef<HTMLInputElement>(null),generation=useRef(0),details=useRef(0);
+  const nameInput=useRef<HTMLInputElement>(null),generation=useRef(0),details=useRef(0);
   useEffect(()=>{
-    const token=++generation.current,opener=document.activeElement,live=()=>generation.current===token;
+    const token=++generation.current,live=()=>generation.current===token;
     const apply=(next:SavedTuning[])=>{if(!live())return;setEntries(next);setLoaded(true);setReadError('');};
     const stop=subscribeTuningLibrary(library=>apply(library.entries));
     readTuningLibrary().then(library=>apply(library.entries),cause=>{if(live()){setLoaded(true);setReadError(`Could not read saved tunings: ${message(cause)}`);}});
-    nameInput.current?.focus({preventScroll:true});
-    return()=>{generation.current++;stop();if(opener instanceof HTMLElement&&opener.isConnected)opener.focus({preventScroll:true});};
+    return()=>{generation.current++;stop();};
   },[]);
   // A removed personal entry stays only as an independent unsaved draft.
   useEffect(()=>{setSelection(current=>current?.kind==='personal'&&!entries.some(entry=>entry.id.toLowerCase()===current.id.toLowerCase())?null:current);},[entries]);
@@ -48,20 +48,15 @@ export function SavedTuningsDialog({notes,name,onUse,onClose,onAudition}:{notes:
   const saveChanges=()=>{if(!selectedEntry)return;const entry={id:selectedEntry.id,name:trimmed,tuning:[...selectedEntry.tuning]};void mutate(async()=>(await putTuningLibraryEntry(entry)).entries,()=>setDetailName(entry.name));};
   const remove=()=>{if(!selectedEntry)return;void mutate(async()=>(await removeTuningLibraryEntry(selectedEntry.id)).entries,()=>{setSelection(null);nameInput.current?.focus({preventScroll:true});});};
   const use=()=>{if(!('notes' in result)||!canUse)return;generation.current++;onUse(formatTuning(result.notes),trimmed);onClose();};
-  function keyDown(event:KeyboardEvent<HTMLElement>){
-    if(event.key==='Escape'){event.preventDefault();event.stopPropagation();onClose();return;}
-    if(event.key!=='Tab')return;
-    const controls=Array.from(event.currentTarget.querySelectorAll<HTMLElement>('input,button')).filter(control=>!control.matches(':disabled')),first=controls[0],last=controls.at(-1);
-    if(!first||!last)return;
-    if(event.shiftKey&&(document.activeElement===first||document.activeElement===dialog.current)){event.preventDefault();last.focus();}
-    else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus();}
-  }
   const row=(identity:Identity,key:string,label:string,pitches:readonly number[])=>{
     const active=selection!==null&&(identity.kind==='builtin'?selection.kind==='builtin'&&selection.index===identity.index:selection.kind==='personal'&&selection.id.toLowerCase()===identity.id.toLowerCase());
     return <li key={key}><button type="button" className="saved-tuning-row" aria-pressed={active} onClick={()=>select(identity,pitches,label)}><span className="saved-tuning-row-name">{label}</span><span className="saved-tuning-row-pitches">{formatTuning(pitches)}</span></button></li>;
   };
-  return createPortal(<div className="dialog-backdrop"><section role="dialog" aria-modal="true" aria-labelledby="saved-tunings-title" className="chord-dialog saved-tunings-dialog" ref={dialog} tabIndex={-1} onKeyDown={keyDown}>
-    <header><h2 id="saved-tunings-title">Saved tunings</h2></header>
+  const actions=<>
+    <button type="button" className="tp-button" onClick={onClose}>Cancel</button>
+    <button type="button" className="tp-button primary" disabled={!canUse} onClick={use}>Use tuning</button>
+  </>;
+  return createPortal(<Dialog title="Saved tunings" onClose={onClose} className="saved-tunings-dialog" actions={actions}>
     <div className="saved-tunings-body">
       <div className="saved-tunings-list">
         <section aria-labelledby="saved-tunings-personal"><h3 id="saved-tunings-personal">Personal</h3>
@@ -72,7 +67,7 @@ export function SavedTuningsDialog({notes,name,onUse,onClose,onAudition}:{notes:
         </section>
       </div>
       <div className="saved-tunings-details"><h3>Details</h3>
-        <label>Saved tuning name<input ref={nameInput} value={detailName} aria-describedby="saved-tuning-name-help" aria-invalid={trimmed&&nameProblem?true:undefined} onChange={e=>{details.current++;setDetailName(e.target.value);}}/></label>
+        <label>Saved tuning name<input ref={nameInput} data-autofocus value={detailName} aria-describedby="saved-tuning-name-help" aria-invalid={trimmed&&nameProblem?true:undefined} onChange={e=>{details.current++;setDetailName(e.target.value);}}/></label>
         <p className="muted" id="saved-tuning-name-help">{trimmed&&nameProblem?nameProblem:'A name is needed to save. Using a tuning does not require one.'}</p>
         <label>Saved tuning pitches (notes, high to low)<input value={detailNotes} aria-invalid={'error' in result?true:undefined} aria-describedby="saved-tuning-pitch-help" onChange={e=>{details.current++;setDetailNotes(e.target.value);setDetailName('');setSelection(null);setError('');}}/></label>
         <p className={'error' in result?'saved-tuning-problem':'muted'} id="saved-tuning-pitch-help">{'error' in result?result.error:`${result.notes.length} strings. Built-in tunings cannot be changed; save a copy to keep your own.`}</p>
@@ -86,6 +81,5 @@ export function SavedTuningsDialog({notes,name,onUse,onClose,onAudition}:{notes:
         <p className="muted">Saving only updates your library. Use tuning fills the draft; Apply changes the score.</p>
       </div>
     </div>
-    <footer className="saved-tunings-footer"><button type="button" onClick={onClose}>Cancel</button><button type="button" className="primary" disabled={!canUse} onClick={use}>Use tuning</button></footer>
-  </section></div>,document.body);
+  </Dialog>,document.body);
 }

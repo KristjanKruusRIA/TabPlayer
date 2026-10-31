@@ -17,7 +17,7 @@ const status=()=>screen.getByRole('status');
 
 it('summarises pasted tab, imports it as a GP score and closes once it opens',async()=>{
   const {onImport,onClose,area,importButton}=setup();
-  expect(area).toHaveFocus();expect(importButton).toBeDisabled();expect(status()).toHaveTextContent('Nothing to import yet.');
+  expect(area).toHaveFocus();expect(importButton).toHaveAttribute('aria-disabled','true');expect(status()).toHaveTextContent('Nothing to import yet.');
   fireEvent.change(area,{target:{value:riff}});
   await waitFor(()=>expect(status()).toHaveTextContent('1 measure, 6 strings tuned E A D G B E.'));
   fireEvent.click(importButton);
@@ -30,17 +30,17 @@ it('summarises pasted tab, imports it as a GP score and closes once it opens',as
 
 it('keeps the dialog and the text when the score cannot be opened',async()=>{
   const {onClose,area,importButton}=setup(false,async()=>{throw new Error('The workspace is completing a session transition.');});
-  fireEvent.change(area,{target:{value:riff}});await waitFor(()=>expect(importButton).toBeEnabled());
+  fireEvent.change(area,{target:{value:riff}});await waitFor(()=>expect(importButton).not.toHaveAttribute('aria-disabled'));
   fireEvent.click(importButton);
   await waitFor(()=>expect(status()).toHaveTextContent('The score could not be opened: The workspace is completing a session transition.'));
-  expect(onClose).not.toHaveBeenCalled();expect(area).toHaveValue(riff);expect(importButton).toBeEnabled();
+  expect(onClose).not.toHaveBeenCalled();expect(area).toHaveValue(riff);expect(importButton).not.toHaveAttribute('aria-disabled');
 });
 
 it('explains text it cannot import and keeps Import disabled',async()=>{
   const {onImport,area,importButton}=setup();
   fireEvent.change(area,{target:{value:'just words'}});
   await waitFor(()=>expect(status()).toHaveTextContent('No tab lines were found.'));expect(area).toHaveAttribute('aria-invalid','true');
-  expect(importButton).toBeDisabled();fireEvent.submit(importButton.closest('form')!);expect(onImport).not.toHaveBeenCalled();
+  expect(importButton).toHaveAttribute('aria-disabled','true');fireEvent.submit(importButton.closest('form')!);expect(onImport).not.toHaveBeenCalled();
 });
 
 it('loads a chosen file, names the score after it, and forgets the name when the text is cleared',async()=>{
@@ -51,7 +51,7 @@ it('loads a chosen file, names the score after it, and forgets the name when the
   await waitFor(()=>expect(status()).toHaveTextContent('1 unsupported mark was skipped.'));
   // A file that is too large is refused without blocking the text already loaded.
   fireEvent.change(input,{target:{files:[new File(['-'.repeat(300_000)],'big.txt')]}});
-  expect(status()).toHaveTextContent('big.txt is larger than 256 KB, so it was not loaded.');expect(importButton).toBeEnabled();
+  expect(status()).toHaveTextContent('big.txt is larger than 256 KB, so it was not loaded.');expect(importButton).not.toHaveAttribute('aria-disabled');
   fireEvent.click(importButton);await waitFor(()=>expect(onImport).toHaveBeenCalledTimes(1));expect(onImport.mock.calls[0][0]).toBe('riff.gp');
 });
 
@@ -69,15 +69,31 @@ it('drops a file read that finishes after typing, and a cleared box forgets the 
   expect(area).toHaveValue(riff.replace('3-------3','5-------5'));expect(status()).toHaveTextContent('big.txt is larger than 256 KB');
   fireEvent.change(input,{target:{files:[new File([riff],'named.txt')]}});await waitFor(()=>expect(area).toHaveValue(riff));
   fireEvent.change(area,{target:{value:''}});fireEvent.change(area,{target:{value:riff}});
-  await waitFor(()=>expect(importButton).toBeEnabled());fireEvent.click(importButton);
+  await waitFor(()=>expect(importButton).not.toHaveAttribute('aria-disabled'));fireEvent.click(importButton);
   await waitFor(()=>expect(onImport).toHaveBeenCalled());expect(onImport.mock.calls[0][0]).toBe('Imported tab.gp');
 });
 
 it('keeps Tab inside the dialog, closes with Escape and blocks Import while busy',async()=>{
   const {onClose,area,importButton}=setup(true);
-  fireEvent.change(area,{target:{value:riff}});await waitFor(()=>expect(status()).toHaveTextContent('1 measure'));expect(importButton).toBeDisabled();
-  const cancel=screen.getByRole('button',{name:'Cancel'});cancel.focus();
-  fireEvent.keyDown(cancel,{key:'Tab'});expect(area).toHaveFocus();
-  fireEvent.keyDown(area,{key:'Tab',shiftKey:true});expect(cancel).toHaveFocus();
+  fireEvent.change(area,{target:{value:riff}});await waitFor(()=>expect(status()).toHaveTextContent('1 measure'));expect(importButton).toHaveAttribute('aria-disabled','true');
+  const close=screen.getByRole('button',{name:'Close'}),cancel=screen.getByRole('button',{name:'Cancel'});cancel.focus();
+  fireEvent.keyDown(cancel,{key:'Tab'});expect(close).toHaveFocus();
+  fireEvent.keyDown(close,{key:'Tab',shiftKey:true});expect(cancel).toHaveFocus();
   fireEvent.keyDown(area,{key:'Escape'});expect(onClose).toHaveBeenCalled();
+});
+
+it('closes from the backdrop, but not while the score is opening, and keeps focus on Import through it',async()=>{
+  let finish!:(opened:boolean)=>void;
+  const {onImport,onClose,area,importButton}=setup(false,()=>new Promise<boolean>(resolve=>{finish=resolve;}));
+  fireEvent.change(area,{target:{value:riff}});
+  await waitFor(()=>expect(status()).toHaveTextContent('1 measure'));
+  importButton.focus();fireEvent.click(importButton);
+  await waitFor(()=>expect(onImport).toHaveBeenCalledTimes(1));
+  expect(importButton).toHaveAttribute('aria-disabled','true');expect(importButton).not.toBeDisabled();expect(importButton).toHaveFocus();
+  fireEvent.click(importButton);fireEvent.mouseDown(screen.getByRole('dialog').parentElement!);
+  expect(onImport).toHaveBeenCalledTimes(1);expect(onClose).not.toHaveBeenCalled();
+  finish(false);
+  await waitFor(()=>expect(status()).toHaveTextContent('The score was not opened.'));
+  expect(importButton).toHaveFocus();expect(importButton).not.toHaveAttribute('aria-disabled');
+  fireEvent.mouseDown(screen.getByRole('dialog').parentElement!);expect(onClose).toHaveBeenCalledTimes(1);
 });

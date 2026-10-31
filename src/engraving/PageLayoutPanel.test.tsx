@@ -1,21 +1,22 @@
 // @vitest-environment jsdom
 import { afterEach,expect,it } from 'vitest';
-import { cleanup,fireEvent,render,screen } from '@testing-library/react';
+import { cleanup,fireEvent,render,screen,within } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { PageLayoutPanel } from './PageLayoutPanel';
 import type { EngravingCommand,PageLayout } from './types';
 
 type PageCommand=Extract<EngravingCommand,{type:'setPageLayout'}>;
 const page=():PageLayout=>({widthMm:180,heightMm:240,marginsMm:{top:10,right:12,bottom:14,left:16},scale:1,profile:'document'});
+const notationRadio=(name:string)=>within(screen.getByRole('radiogroup',{name:'PDF notation'})).getByRole('radio',{name});
 afterEach(cleanup);
 
 it('edits independent physical fields and emits one exact detached page command on Apply',()=>{
   const value=page(),commands:PageCommand[]=[];
   render(<PageLayoutPanel value={value} busy={false} onEdit={command=>commands.push(command)}/>);
   expect(screen.getByLabelText('Width (mm)')).toHaveValue(180);expect(screen.getByLabelText('Height (mm)')).toHaveValue(240);
-  expect(screen.getByLabelText('Scale (%)')).toHaveValue(100);expect(screen.getByLabelText('PDF notation')).toHaveValue('document');
+  expect(screen.getByLabelText('Scale (%)')).toHaveValue(100);expect(notationRadio('Document notation')).toBeChecked();
   for(const [label,number] of [['Width (mm)','190.5'],['Height (mm)','250.25'],['Top margin (mm)','1'],['Right margin (mm)','2'],['Bottom margin (mm)','3'],['Left margin (mm)','4'],['Scale (%)','125.5']])fireEvent.change(screen.getByLabelText(label),{target:{value:number}});
-  fireEvent.change(screen.getByLabelText('PDF notation'),{target:{value:'ScoreTab'}});expect(commands).toEqual([]);
+  fireEvent.click(notationRadio('Score and tab'));expect(commands).toEqual([]);
   fireEvent.click(screen.getByRole('button',{name:'Apply page layout'}));
   expect(commands).toEqual([{type:'setPageLayout',layout:{widthMm:190.5,heightMm:250.25,marginsMm:{top:1,right:2,bottom:3,left:4},scale:1.255,profile:'ScoreTab'}}]);
   fireEvent.change(screen.getByLabelText('Left margin (mm)'),{target:{value:'5'}});
@@ -28,7 +29,7 @@ it.each([['A3',297,420],['A4',210,297],['A5',148,210],['Letter',215.9,279.4],['L
   fireEvent.click(screen.getByRole('button',{name}));
   expect(screen.getByLabelText('Width (mm)')).toHaveValue(widthMm);expect(screen.getByLabelText('Height (mm)')).toHaveValue(heightMm);
   expect(screen.getByLabelText('Left margin (mm)')).toHaveValue(16);expect(screen.getByLabelText('Scale (%)')).toHaveValue(150);
-  expect(screen.getByLabelText('PDF notation')).toHaveValue('Tab');expect(commands).toEqual([]);
+  expect(notationRadio('Tab')).toBeChecked();expect(commands).toEqual([]);
   fireEvent.click(screen.getByRole('button',{name:'Apply page layout'}));
   expect(commands).toEqual([{type:'setPageLayout',layout:{widthMm,heightMm,marginsMm:{top:10,right:12,bottom:14,left:16},scale:1.5,profile:'Tab'}}]);
 });
@@ -59,9 +60,13 @@ it('resets drafts and validation on applied value changes, and disables every co
   fireEvent.change(screen.getByLabelText('Width (mm)'),{target:{value:''}});fireEvent.click(screen.getByRole('button',{name:'Apply page layout'}));expect(screen.getByRole('alert')).toBeInTheDocument();
   view.rerender(<PageLayoutPanel {...props} value={{widthMm:215.9,heightMm:355.6,marginsMm:{top:20,right:21,bottom:22,left:23},scale:0.75,profile:'Score'}}/>);
   expect(screen.queryByRole('alert')).not.toBeInTheDocument();expect(screen.getByLabelText('Width (mm)')).toHaveValue(215.9);expect(screen.getByLabelText('Height (mm)')).toHaveValue(355.6);
-  expect(screen.getByLabelText('Top margin (mm)')).toHaveValue(20);expect(screen.getByLabelText('Left margin (mm)')).toHaveValue(23);expect(screen.getByLabelText('Scale (%)')).toHaveValue(75);expect(screen.getByLabelText('PDF notation')).toHaveValue('Score');
+  expect(screen.getByLabelText('Top margin (mm)')).toHaveValue(20);expect(screen.getByLabelText('Left margin (mm)')).toHaveValue(23);expect(screen.getByLabelText('Scale (%)')).toHaveValue(75);expect(notationRadio('Score')).toBeChecked();
   view.rerender(<PageLayoutPanel {...props} busy/>);
-  for(const element of [...screen.getAllByRole('spinbutton'),...screen.getAllByRole('button'),screen.getByRole('combobox')])expect(element).toBeDisabled();
+  expect(screen.getByLabelText('Width (mm)').closest('fieldset')).toHaveAttribute('aria-disabled','true');
+  for(const element of [...screen.getAllByRole('radio'),screen.getByRole('button',{name:'Apply page layout'})])expect(element).toHaveAttribute('aria-disabled','true');
+  for(const element of [...screen.getAllByRole('spinbutton'),...screen.getAllByRole('button'),...screen.getAllByRole('radio')])expect(element).not.toBeDisabled();
+  fireEvent.click(screen.getByRole('button',{name:'A5'}));fireEvent.change(screen.getByLabelText('Width (mm)'),{target:{value:'300'}});
+  expect(screen.getByLabelText('Width (mm)')).toHaveValue(page().widthMm);
   fireEvent.click(screen.getByRole('button',{name:'Apply page layout'}));expect(commands).toEqual([]);
 });
 
@@ -70,11 +75,11 @@ it('keeps drafts and validation through equivalent detached applied values and s
   fireEvent.change(screen.getByLabelText('Width (mm)'),{target:{value:'190'}});
   fireEvent.change(screen.getByLabelText('Top margin (mm)'),{target:{value:'20'}});
   fireEvent.change(screen.getByLabelText('Scale (%)'),{target:{value:'125'}});
-  fireEvent.change(screen.getByLabelText('PDF notation'),{target:{value:'Tab'}});
+  fireEvent.click(notationRadio('Tab'));
   view.rerender(<PageLayoutPanel {...props} value={structuredClone(props.value)} busy/>);
   view.rerender(<PageLayoutPanel {...props} value={structuredClone(props.value)} onEdit={()=>{}}/>);
   expect(screen.getByLabelText('Width (mm)')).toHaveValue(190);expect(screen.getByLabelText('Top margin (mm)')).toHaveValue(20);
-  expect(screen.getByLabelText('Scale (%)')).toHaveValue(125);expect(screen.getByLabelText('PDF notation')).toHaveValue('Tab');
+  expect(screen.getByLabelText('Scale (%)')).toHaveValue(125);expect(notationRadio('Tab')).toBeChecked();
   fireEvent.change(screen.getByLabelText('Width (mm)'),{target:{value:''}});fireEvent.click(screen.getByRole('button',{name:'Apply page layout'}));
   view.rerender(<PageLayoutPanel {...props} value={structuredClone(props.value)}/>);
   expect(screen.getByLabelText('Width (mm)')).toHaveValue(null);expect(screen.getByRole('alert')).toBeInTheDocument();
@@ -126,4 +131,15 @@ it('shows a saved header and footer and refuses unknown fields',()=>{
   expect(commands.at(-1)!.layout).toEqual({...value,widthMm:200});
   fireEvent.change(screen.getByLabelText('First page footer center'),{target:{value:'%COMPOSER%'}});fireEvent.click(screen.getByRole('button',{name:'Apply page layout'}));
   expect(screen.getByRole('alert')).toHaveTextContent('First page footer center: unknown field %COMPOSER%.');expect(commands).toHaveLength(1);
+});
+
+it('keeps focus on the active control when busy, refuses its edits, and keeps the summary reachable',()=>{
+  const {rerender}=render(<PageLayoutPanel value={page()} busy={false} onEdit={()=>{}}/>);
+  const radio=notationRadio('Document notation');
+  radio.focus();
+  expect(radio).toHaveFocus();
+  rerender(<PageLayoutPanel value={page()} busy={true} onEdit={()=>{}}/>);
+  expect(radio).toHaveFocus();expect(radio).not.toBeDisabled();
+  fireEvent.keyDown(radio,{key:'ArrowRight'});expect(notationRadio('Document notation')).toBeChecked();
+  expect(screen.getByText('Page layout')).not.toHaveAttribute('tabindex','-1');
 });

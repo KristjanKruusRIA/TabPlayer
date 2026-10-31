@@ -62,7 +62,7 @@ try{
   await page.getByLabel('Width (mm)',{exact:true}).fill('250');await snapshot('presentation-1280');await click('Edit');await click('Practice');assert.equal(await page.getByLabel('Relative speed (%)').inputValue(),'123');
   await click('Presentation');assert.equal(await page.getByLabel('Width (mm)',{exact:true}).inputValue(),'250');await click('Edit');
   await click('Edit chord diagram');const harmony=page.getByRole('dialog',{name:'Harmony chord',exact:true});await harmony.waitFor();
-  await harmony.getByRole('button',{name:'Generate shapes',exact:true}).waitFor({state:'visible'});await page.waitForFunction(()=>!document.querySelector('.harmony-body fieldset')?.disabled);
+  await harmony.getByRole('button',{name:'Generate shapes',exact:true}).waitFor({state:'visible'});await page.waitForFunction(()=>document.querySelector('.harmony-body fieldset')?.getAttribute('aria-disabled')!=='true');
   const nameInput=await harmony.getByLabel('Chord name',{exact:true}).elementHandle();await page.waitForFunction(input=>input===document.activeElement,nameInput);
   result.harmonyInitial=await harmony.evaluate(element=>({bodyScroll:element.querySelector('.harmony-body')?.scrollTop,focus:document.activeElement?.closest('label')?.textContent??document.activeElement?.tagName}));
   assert.ok(result.harmonyInitial.bodyScroll<10,'Harmony must open at the beginning');await snapshot('harmony-initial-1280');await click('Generate shapes');

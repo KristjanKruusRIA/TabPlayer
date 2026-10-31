@@ -27,7 +27,7 @@ for(const format of ['png','pdf']){
     await clickWorkspaceCommand(page,'Export score',{waitForIdle:false});
     const dialog=page.getByRole('dialog',{name:'Export score'});await dialog.getByLabel('Export format').selectOption(format);
     await dialog.getByLabel('File name',{exact:true}).fill('%n %t');
-    if(format==='png'){await dialog.getByLabel('Resolution').selectOption('72');await dialog.getByLabel('Transparent background').check();}
+    if(format==='png'){await dialog.getByRole('radio',{name:'72 dpi'}).click();await dialog.getByLabel('Transparent background').check();}
     await dialog.getByLabel('One file per track').check();
     await dialog.getByRole('button',{name:'Export',exact:true}).click();
     const deadline=Date.now()+120000;let names=[];

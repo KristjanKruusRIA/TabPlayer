@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach,expect,it,vi } from 'vitest';
-import { cleanup,render,screen,fireEvent } from '@testing-library/react';
+import { cleanup,render,screen,fireEvent,within } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { model } from '@coderline/alphatab';
 import { ExportDialog } from './ExportDialog';
@@ -20,7 +20,7 @@ it('normalizes mixed audio to a chosen RMS level only when asked',()=>{
   fireEvent.click(box);expect(level).toBeEnabled();
   fireEvent.click(screen.getByRole('button',{name:'Export'}));
   expect(submit).toHaveBeenLastCalledWith({format:'wav',selection:{tracks:[0],range:null},audio:{...audio,normalizeRmsDb:-16}});
-  fireEvent.change(level,{target:{value:'-12.5'}});fireEvent.change(screen.getByLabelText('File type'),{target:{value:'aiff'}});
+  fireEvent.change(level,{target:{value:'-12.5'}});fireEvent.click(within(screen.getByRole('radiogroup',{name:'File type'})).getByRole('radio',{name:'AIFF'}));
   fireEvent.click(screen.getByRole('button',{name:'Export'}));
   expect(submit).toHaveBeenLastCalledWith({format:'wav',selection:{tracks:[0],range:null},audio:{...audio,container:'aiff',normalizeRmsDb:-12.5}});
 });

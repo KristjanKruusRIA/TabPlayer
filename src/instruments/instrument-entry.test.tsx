@@ -1,6 +1,9 @@
 // @vitest-environment jsdom
 import { afterEach, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { standardPercussionCatalog } from '../editor/percussion-catalog';
+import { defaultArticulation, drumPieces, instrumentHits, ownerOf, percussionInstruments } from './drum-kit';
+import { hasPercussionArt } from './percussion-art';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { model, Settings } from '@coderline/alphatab';
 import { formatPitch } from '../tuning';
@@ -8,12 +11,13 @@ import { InstrumentView } from './InstrumentView';
 
 afterEach(()=>{cleanup();localStorage.clear();});
 const guitar=[64,59,55,50,45,40], target={track:0,staff:0,bar:0,voice:0,beat:0};
-interface Spec { tuning?:number[]; program?:number; percussion?:boolean; frets?:[number,number][]; pitches?:number[]; articulations?:number[]; capo?:number; transposition?:number; empty?:boolean; custom?:number[] }
+interface Spec { tuning?:number[]; program?:number; percussion?:boolean; frets?:[number,number][]; pitches?:number[]; articulations?:number[]; capo?:number; transposition?:number; empty?:boolean; custom?:number[]; table?:model.InstrumentArticulation[] }
 /** One beat holding the given notes: string/fret pairs, written pitches or percussion articulation ids. */
-function build({tuning=guitar,program=25,percussion=false,frets=[],pitches=[],articulations=[],capo=0,transposition=0,empty=false,custom}:Spec={}) {
+function build({tuning=guitar,program=25,percussion=false,frets=[],pitches=[],articulations=[],capo=0,transposition=0,empty=false,custom,table}:Spec={}) {
   const score=new model.Score(),track=new model.Track(),staff=new model.Staff();track.name=percussion?'Drums':'Track';track.playbackInfo.program=program;
   staff.stringTuning.tunings=[...tuning];staff.isPercussion=percussion;staff.capo=capo;staff.transpositionPitch=transposition;
   if(custom)track.percussionArticulations=custom.map(out=>new model.InstrumentArticulation('Custom',0,out,model.MusicFontSymbol.NoteheadXBlack,model.MusicFontSymbol.NoteheadHalf,model.MusicFontSymbol.NoteheadWhole));
+  if(table)track.percussionArticulations=table;
   track.addStaff(staff);score.addTrack(track);score.addMasterBar(new model.MasterBar());
   if(percussion)track.playbackInfo.primaryChannel=track.playbackInfo.secondaryChannel=9;
   const bar=new model.Bar(),voice=new model.Voice(),beat=new model.Beat();beat.duration=model.Duration.Quarter;beat.isEmpty=empty;
@@ -116,15 +120,15 @@ it('prefers the articulation of a custom table when the track defines one for th
   fireEvent.click(button('Kick'));expect(onEdit).toHaveBeenLastCalledWith({type:'addPercussionNote',target,articulation:0},{note:{articulation:0}});
   fireEvent.click(button('Snare'));expect(onEdit).toHaveBeenLastCalledWith({type:'addPercussionNote',target,articulation:1},{note:{articulation:1}});
 });
-it('removes a note on a key outside the kit through its pad',()=>{
+it('removes a percussion note through its instrument',()=>{
   const {container,onEdit}=show(build({percussion:true,program:0,articulations:[56]}));
-  const pad=container.querySelector<HTMLElement>('.percussion-pad[data-percussion-key="56"]')!;expect(pad).toHaveAttribute('role','button');
+  const item=container.querySelector<HTMLElement>('[data-percussion="cowbell"]')!;expect(item).toHaveAttribute('role','button');
   fireEvent.click(button('Remove Cowbell'));expect(onEdit).toHaveBeenCalledWith({type:'removeNoteByIndex',target,noteIndex:0},{note:null});
 });
 
-it('never removes a pitched or fretted note through a pad of the drum view',()=>{
+it('never removes a pitched or fretted note through the percussion of the drum view',()=>{
   const {container,onEdit}=show(build({frets:[[6,0]]}));fireEvent.change(screen.getByLabelText('Instrument view mode'),{target:{value:'drums'}});
-  const pad=container.querySelector<HTMLElement>('.percussion-pad[data-percussion-key="64"]')!;expect(pad).toHaveAttribute('aria-disabled','true');
+  const pad=container.querySelector<HTMLElement>('[data-percussion="conga-low"]')!;expect(pad).toHaveAttribute('aria-disabled','true');
   fireEvent.click(pad);expect(onEdit).not.toHaveBeenCalled();
 });
 
@@ -172,4 +176,180 @@ it('moves between keys and between drum pieces with the arrow keys',()=>{
   const piece=(id:string)=>drums.container.querySelector<SVGElement>(`[data-drum="${id}"]`)!;
   expect(drums.container.querySelectorAll('[data-drum][tabindex="0"]')).toHaveLength(1);
   piece('splash').focus();fireEvent.keyDown(piece('splash'),{key:'ArrowRight'});expect(document.activeElement).toBe(piece('hi-hat'));
+});
+
+it('has hardware for every standard articulation, each on exactly one instrument',()=>{
+  const track=new model.Track(),owners=[...drumPieces,...percussionInstruments].flatMap(item=>instrumentHits(track,item).map(hit=>hit.id));
+  expect(new Set(owners).size).toBe(owners.length);expect(new Set(owners)).toEqual(new Set(standardPercussionCatalog.map(entry=>entry.id)));
+  for(const item of percussionInstruments)expect(hasPercussionArt(item.id)).toBe(true);
+  const sounding=[...drumPieces,...percussionInstruments].flatMap(item=>[...item.keys]);expect(new Set(sounding).size).toBe(sounding.length);
+});
+
+it('enters any hit of the chosen piece, and removes the hit the beat holds',()=>{
+  const {container,onEdit}=show(build({percussion:true,program:0,articulations:[91]}));
+  const snare=container.querySelector<SVGElement>('[data-drum="snare"]')!;fireEvent.focus(snare);
+  const hits=screen.getByRole('group',{name:'Snare hits'}),press=(name:string)=>fireEvent.click(within(hits).getByRole('button',{name}));
+  expect(within(hits).getByRole('button',{name:'rim shot'})).toHaveAttribute('aria-pressed','true');
+  press('side stick');expect(onEdit).toHaveBeenLastCalledWith({type:'addPercussionNote',target,articulation:37},{note:{articulation:37}});
+  press('rim shot');expect(onEdit).toHaveBeenLastCalledWith({type:'removeNoteByIndex',target,noteIndex:0},{note:null});
+  expect(button('Remove Snare')).toBe(snare);
+});
+
+it('refuses a named hit while busy and keeps it focusable',()=>{
+  const {container,onEdit}=show(build({percussion:true,program:0,articulations:[91]}),{busy:true});
+  fireEvent.focus(container.querySelector<SVGElement>('[data-drum="ride"]')!);
+  const bell=within(screen.getByRole('group',{name:'Ride hits'})).getByRole('button',{name:'bell'});
+  expect(bell).not.toHaveAttribute('disabled');expect(bell).toHaveAttribute('aria-disabled','true');fireEvent.click(bell);expect(onEdit).not.toHaveBeenCalled();
+});
+
+it('enters an instrument that shares its pitch with another as itself',()=>{
+  const {container,onEdit}=show(build({percussion:true,program:0}));
+  fireEvent.click(container.querySelector('[data-percussion="cowbell-low"]')!);expect(onEdit).toHaveBeenCalledWith({type:'addPercussionNote',target,articulation:99},{note:{articulation:99}});
+});
+
+/** A custom table shaped like the ones Guitar Pro 7 files carry: 60 entries, each named by the element it belongs to. Standard ids 0-59 are hidden by it. */
+function gpTable() {
+  const {NoteheadBlack:black,NoteheadXBlack:cross,PictEdgeOfCymbal:edge,None:none}=model.MusicFontSymbol;
+  const entry=(element:string,output:number,head=black,technique=none)=>new model.InstrumentArticulation(element,0,output,head,head,head,technique,1);
+  const table=Array.from({length:60},()=>entry('Unused',20));
+  Object.assign(table,{3:entry('Crash High',49,cross),30:entry('Reverse Cymbal',49,cross),37:entry('Metronome',37,cross),38:entry('Snare',38),39:entry('Snare',37,cross),49:entry('Piatti',49),51:entry('Ride',51,cross),53:entry('Bell Tree',53),58:entry('Ride Cymbal 2',59,cross),59:entry('Ride Cymbal 2',59,cross,edge)});
+  return table;
+}
+const gp=(articulations:number[]=[])=>build({percussion:true,program:0,table:gpTable(),articulations});
+const everyInstrument=[...drumPieces,...percussionInstruments], instrument=(id:string)=>everyInstrument.find(item=>item.id===id)!;
+
+it('attaches the hits of a Guitar Pro style table by the element they name, not by their pitch',()=>{
+  const track=new model.Track();track.percussionArticulations=gpTable();
+  const ids=(id:string)=>instrumentHits(track,instrument(id)).filter(hit=>hit.id<60).map(hit=>hit.id);
+  // Pitch 49 is a crash, a piatti and a reverse cymbal; each gets only its own.
+  expect(ids('crash')).toEqual([3]);expect(ids('piatti')).toEqual([49]);expect(ids('reverse')).toEqual([30]);
+  // 53 is the ride's bell pitch and a bell tree's; 37 and 38 are a snare's and a metronome's.
+  expect(ids('ride')).toEqual([51]);expect(ids('bell-tree')).toEqual([53]);expect(ids('metronome')).toEqual([37]);expect(ids('snare')).toEqual([38,39]);
+  const {onEdit}=show(gp());
+  const enters=(name:string,articulation:number)=>{fireEvent.click(button(name));expect(onEdit).toHaveBeenLastCalledWith({type:'addPercussionNote',target,articulation},{note:{articulation}});};
+  enters('Crash',3);enters('Piatti',49);enters('Reverse',30);enters('Ride',51);enters('Bell tree',53);enters('Metronome',37);enters('Snare',38);
+  // The second ride enters its middle, not the edge that comes after it.
+  enters('Ride 2',58);
+});
+it('lights and removes by the element of a custom hit as well, so a shared pitch holds only its owner',()=>{
+  const {container,onEdit}=show(gp([49]));
+  const active=(selector:string)=>container.querySelector(selector)!.getAttribute('data-active');
+  expect(active('[data-percussion="piatti"]')).toBe('true');expect(active('[data-drum="crash"]')).toBe('false');expect(active('[data-drum="reverse"]')).toBe('false');
+  fireEvent.click(button('Remove Piatti'));expect(onEdit).toHaveBeenLastCalledWith({type:'removeNoteByIndex',target,noteIndex:0},{note:null});
+  // The crash does not see the piatti as its own hit: it enters instead of removing.
+  fireEvent.click(button('Crash'));expect(onEdit).toHaveBeenLastCalledWith({type:'addPercussionNote',target,articulation:3},{note:{articulation:3}});
+});
+it('has no hit for a piece the custom table does not name',()=>{
+  const table=gpTable();table[30]=new model.InstrumentArticulation('Unused',0,20);
+  const {onEdit}=show(build({percussion:true,program:0,table}));
+  const reverse=button('Reverse (no articulation on this track)');expect(reverse).toHaveAttribute('aria-disabled','true');fireEvent.click(reverse);expect(onEdit).not.toHaveBeenCalled();
+});
+
+it('enters the plain hit of every piece with several hits by intent, not by key order',()=>{
+  const track=new model.Track(),several=everyInstrument.filter(item=>instrumentHits(track,item).length>1);
+  // Ride 2 enters its middle like the ride, the triangle its open hit and the cuica its open sound, never a mute.
+  const plain:Record<string,number>={snare:38,'hi-hat':42,ride:51,'ride-2':126,china:52,crash:49,'crash-2':57,splash:55,'conga-high':63,'conga-low':64,'bongo-high':60,'bongo-low':61,cowbell:56,'cowbell-low':99,'cowbell-high':102,tambourine:54,triangle:81,cuica:79,surdo:86,guiro:73,cabasa:69,shaker:82,'maraca-left':70,'maraca-right':119,'bell-tree':84,piatti:115,golpe:124,metronome:33};
+  expect(several.map(item=>item.id).sort()).toEqual(Object.keys(plain).sort());
+  for(const item of several)expect([item.id,defaultArticulation(track,item)]).toEqual([item.id,plain[item.id]]);
+  for(const item of everyInstrument)expect(instrumentHits(track,item).map(hit=>hit.id)).toContain(item.hit);
+});
+it('presses the triangle, the cuica and the second ride to their open, open and middle hits',()=>{
+  const {container,onEdit}=show(build({percussion:true,program:0}));
+  for(const [id,articulation] of [['triangle',81],['cuica',79]] as const){fireEvent.click(container.querySelector(`[data-percussion="${id}"]`)!);expect(onEdit).toHaveBeenLastCalledWith({type:'addPercussionNote',target,articulation},{note:{articulation}});}
+  fireEvent.click(button('Ride 2'));expect(onEdit).toHaveBeenLastCalledWith({type:'addPercussionNote',target,articulation:126},{note:{articulation:126}});
+});
+
+it('maps each standard articulation to the owner its element names and keeps pitch only as a fallback',()=>{
+  const track=new model.Track();
+  // Playback knows only a pitch, so it lights the instrument that lists it. Every standard articulation lights its owner, except these:
+  // the pitch is another instrument's (or nobody's), and during playback they light that one instead. Edit mode is exact.
+  const lightedBy=(key:number)=>everyInstrument.find(item=>item.keys.includes(key))?.id;
+  const wrong=Object.fromEntries(standardPercussionCatalog.flatMap(entry=>{const owner=ownerOf(track,entry.id)!.id,lit=lightedBy(entry.outputMidiNumber);return lit===owner?[]:[[entry.id,`${owner} -> ${lit}`]];}));
+  expect(wrong).toEqual({
+    30:'reverse -> crash',31:'snare -> electric-snare',33:'metronome -> snare',34:'metronome -> snare',83:'jingle-bell -> ride',84:'bell-tree -> ride',99:'cowbell-low -> cowbell',100:'cowbell-low -> cowbell',
+    102:'cowbell-high -> cowbell',103:'cowbell-high -> cowbell',114:'grancassa -> high-floor-tom',115:'piatti -> crash',116:'piatti -> crash',119:'maraca-right -> maraca-left',120:'maraca-right -> maraca-left',
+    123:'bell-tree -> ride',124:'golpe -> conga-high',125:'golpe -> conga-high',
+  });
+  expect(ownerOf(track,31)?.id).toBe('snare');expect(ownerOf(track,114)?.id).toBe('grancassa');expect(ownerOf(track,33)?.id).toBe('metronome');
+  // An element nobody knows is placed by its pitch.
+  const custom=new model.Track();custom.percussionArticulations=[new model.InstrumentArticulation('Custom',0,36)];
+  expect(ownerOf(custom,0)?.id).toBe('kick-2');
+});
+it('names a hit cleanly, never by a bare id or the tail of its label',()=>{
+  const track=new model.Track(),names=(id:string)=>instrumentHits(track,instrument(id)).map(hit=>hit.name);
+  expect(names('snare')).toEqual(['hit','side stick','rim shot','side stick 2']);expect(names('ride-2')).toEqual(['edge 2','middle 2','bell 2','choke 2']);
+  expect(names('hi-hat')).toEqual(['closed','half','open','pedal']);
+  const custom=new model.Track();custom.percussionArticulations=gpTable();
+  expect(instrumentHits(custom,instrument('snare')).filter(hit=>hit.id<60).map(hit=>hit.name)).toEqual(['hit','side stick']);
+  custom.percussionArticulations=[7,8,9].map(()=>new model.InstrumentArticulation('Snare',0,38,model.MusicFontSymbol.NoteheadSlashedBlack2));
+  expect(instrumentHits(custom,instrument('snare')).filter(hit=>hit.id<3).map(hit=>hit.name)).toEqual(['hit','hit 2','hit 3']);
+});
+
+it('lights what the beat holds by articulation in edit mode and names the same hardware in the list',()=>{
+  // Grancassa (id 114) sounds pitch 43, which is also the high floor tom; the two are different hardware.
+  const {container}=show(build({percussion:true,program:0,articulations:[114]}));
+  const active=(selector:string)=>container.querySelector(selector)!.getAttribute('data-active');
+  expect(active('[data-percussion="grancassa"]')).toBe('true');expect(active('[data-drum="high-floor-tom"]')).toBe('false');
+  const list=screen.getByRole('group',{name:'Sounding notes'});expect(list).toHaveTextContent('Grancassa');expect(list).not.toHaveTextContent('High floor');
+  expect(button('Remove Grancassa')).toBeInTheDocument();expect(button('High floor')).toBeInTheDocument();
+  expect(container.querySelector('.instrument-percussion-pads')).toBeNull();
+});
+it('lights the side stick 2 on the snare, the metronome on itself and the piatti on itself',()=>{
+  for(const [articulation,lit,unlit] of [[31,'snare','electric-snare'],[33,'metronome','snare'],[115,'piatti','crash']] as const){
+    const {container}=show(build({percussion:true,program:0,articulations:[articulation]}));
+    const state=(id:string)=>(container.querySelector(`[data-drum="${id}"]`)??container.querySelector(`[data-percussion="${id}"]`))!.getAttribute('data-active');
+    expect([lit,state(lit)]).toEqual([lit,'true']);expect([unlit,state(unlit)]).toEqual([unlit,'false']);cleanup();
+  }
+});
+it('removes only the hit of the pressed instrument when others share its pitch',()=>{
+  const {container,onEdit}=show(build({percussion:true,program:0,articulations:[56]}));
+  // The medium cowbell holds pitch 56; the low and high cowbells sound it too but are not held.
+  fireEvent.click(container.querySelector('[data-percussion="cowbell-low"]')!);expect(onEdit).toHaveBeenLastCalledWith({type:'addPercussionNote',target,articulation:99},{note:{articulation:99}});
+  fireEvent.click(container.querySelector('[data-percussion="cowbell-high"]')!);expect(onEdit).toHaveBeenLastCalledWith({type:'addPercussionNote',target,articulation:102},{note:{articulation:102}});
+  fireEvent.click(button('Remove Cowbell'));expect(onEdit).toHaveBeenLastCalledWith({type:'removeNoteByIndex',target,noteIndex:0},{note:null});
+});
+
+it('shows the hits only while their piece or the row has focus',()=>{
+  const {container}=show(build({percussion:true,program:0}));
+  const piece=(id:string)=>container.querySelector<SVGElement>(`[data-drum="${id}"]`)!,hits=(name:string)=>screen.queryByRole('group',{name});
+  // Nothing has focus on mount, and the roving tab stop is not focus.
+  expect(hits('Splash hits')).toBeNull();expect(container.querySelector('.drum-hits')).toBeNull();
+  act(()=>piece('snare').focus());expect(hits('Snare hits')).toBeInTheDocument();
+  // Moving from the piece to its row keeps the row, and the row keeps the focus.
+  const rim=within(hits('Snare hits')!).getByRole('button',{name:'rim shot'});act(()=>rim.focus());
+  expect(document.activeElement).toBe(rim);expect(hits('Snare hits')).toBeInTheDocument();
+  act(()=>piece('kick').focus());expect(container.querySelector('.drum-hits')).toBeNull();
+  act(()=>piece('ride').focus());expect(hits('Ride hits')).toBeInTheDocument();
+  act(()=>piece('ride').blur());expect(container.querySelector('.drum-hits')).toBeNull();
+});
+it('refuses the named hits of a pitched staff in the drum view as it refuses its pieces',()=>{
+  const {container,onEdit}=show(build({tuning:[],program:0,pitches:[60]}));fireEvent.change(screen.getByLabelText('Instrument view mode'),{target:{value:'drums'}});
+  act(()=>container.querySelector<SVGElement>('[data-drum="snare"]')!.focus());
+  const side=within(screen.getByRole('group',{name:'Snare hits'})).getByRole('button',{name:'side stick'});
+  expect(side).toHaveAttribute('aria-disabled','true');expect(side).not.toHaveAttribute('disabled');fireEvent.click(side);expect(onEdit).not.toHaveBeenCalled();
+});
+
+it('keeps the row when the window loses focus while the row has it',()=>{
+  const {container}=show(build({percussion:true,program:0}));
+  act(()=>container.querySelector<SVGElement>('[data-drum="snare"]')!.focus());
+  const rim=within(screen.getByRole('group',{name:'Snare hits'})).getByRole('button',{name:'rim shot'});act(()=>rim.focus());
+  // Alt-Tab fires a blur with no related target while the element stays the active one.
+  fireEvent.blur(rim);expect(screen.getByRole('group',{name:'Snare hits'})).toBeInTheDocument();expect(document.activeElement).toBe(rim);
+});
+it('reserves the row\'s place so nothing moves when it appears',()=>{
+  const {container}=show(build({percussion:true,program:0}));
+  const slot=container.querySelector('.drum-hits-slot')!;expect(slot).toBeInTheDocument();expect(slot.children).toHaveLength(0);
+  act(()=>container.querySelector<SVGElement>('[data-drum="snare"]')!.focus());
+  expect(container.querySelector('.drum-hits-slot')).toBe(slot);expect(slot.children).toHaveLength(1);
+});
+it('removes through a pad only a note nobody owns, not a hit that shares its pitch',()=>{
+  const entry=(element:string)=>new model.InstrumentArticulation(element,0,20,model.MusicFontSymbol.NoteheadBlack);
+  const {container,onEdit}=show(build({percussion:true,program:0,table:[entry('Snare'),entry('Foo')],articulations:[0,1]}));
+  fireEvent.click(container.querySelector('[data-percussion-key="20"]')!);
+  expect(onEdit).toHaveBeenLastCalledWith({type:'removeNoteByIndex',target,noteIndex:1},{note:null});
+});
+it('hides a standard hit that twins one of the custom table',()=>{
+  const track=new model.Track();track.percussionArticulations=[new model.InstrumentArticulation('Snare',0,38,model.MusicFontSymbol.NoteheadBlack)];
+  const hits=instrumentHits(track,instrument('snare'));
+  expect(hits.map(hit=>hit.id)).not.toContain(38);expect(hits[0]).toMatchObject({id:0,name:'hit'});expect(hits.map(hit=>hit.name)).toEqual(['hit','side stick','rim shot','side stick 2']);
 });

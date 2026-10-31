@@ -1008,7 +1008,7 @@ describe('F27 import field preservation matrix: failing fields (real defects)', 
     expect(targetBeat(reloaded).tremoloPicking?.style).toBe(model.TremoloPickingStyle.BuzzRoll);
   });
 
-  it.fails('Note.bendStyle: alphaTab GPIF writer and reader omit note bendStyle (lost: alphaTab.js:66610, alphaTab.js:21135)', () => {
+  it('Note.bendStyle: kept by the TabPlayerCurves property', () => {
     const score = createSyntheticScore();
     const n = targetNote(score);
     n.bendType = model.BendType.Bend;
@@ -1019,7 +1019,7 @@ describe('F27 import field preservation matrix: failing fields (real defects)', 
     expect(targetNote(reloaded).bendStyle).toBe(model.BendStyle.Gradual);
   });
 
-  it.fails('Beat.whammyStyle: alphaTab GPIF writer and reader omit beat whammyStyle (lost: alphaTab.js:66871, alphaTab.js:20650)', () => {
+  it('Beat.whammyStyle: kept by the TabPlayerCurves property', () => {
     const score = createSyntheticScore();
     const b = targetBeat(score);
     b.whammyBarType = model.WhammyType.Dive;

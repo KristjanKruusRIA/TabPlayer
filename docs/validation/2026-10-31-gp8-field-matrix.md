@@ -117,6 +117,7 @@ Run in this worktree (branch `agy/f27-field-matrix`):
 - **Clean worktree boundaries**: Untrusted or fixture-dependent files were not modified. All test scores are synthetically constructed in memory.
 
 ## Limits
+n- **Updated at merge**: `Note.bendStyle` and `Beat.whammyStyle` were failing fields when this matrix was written. The GP curves slice now keeps them in `TabPlayerCurves`, so their tests pass; the failing-field text above predates that. Only TabPlayer reads that property.
 
 - **Synthetic test scores only**: The test suite uses synthetic scores constructed in memory via the model API. This verifies preservation across TabPlayer's writers and alphaTab's readers, but **does not prove interoperability with original Guitar Pro 8**.
 - **No exporter/importer fixes**: In accordance with the task specification, defects were catalogued and isolated in `it.fails`, but not fixed. Task 4 addresses `TremoloPickingEffect.style` (`T17`).

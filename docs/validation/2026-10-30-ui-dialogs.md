@@ -58,3 +58,10 @@ A second review rejected the branch again. After merging `feat/gp8-parity` (conf
 ### Limits
 - Desktop drivers were edited to the new roles but not run; they need a desktop build.
 - Controls that stay natively `disabled` are those that are never reached with focus for a busy reason (for example the normalize level input and tuplet options).
+
+## Third and fourth review rounds (2026-10-31)
+
+- **Busy gestures (round 3):** `busyRegion` also refuses double click, context menu, aux click, drag start and input; a double-clicked scale mark survives a busy panel. A number field in the scale diagram editor reverts instead of committing on blur while busy. `busySelect` keeps select popups shut (MIDI tuplets, Library scope). The general aria-disabled and is-disabled dimming no longer depends on `.tp-dialog`, so the sidebar page layout dims too. Busy is announced in the scale browser, the Harmony library save and the Export dialog before progress exists. A Harmony dialog opened during library load starts on the panel and moves to the chord name when loading ends, only if focus has not moved.
+- **Final round:** the scale browser status sits outside the aria-busy fieldset; a busy region no longer marks itself a drop target (dropEffect none, no preventDefault on dragover); `busySelect` refuses F4 as well as the arrow keys (Alt+Down included); the shared dimming skips `.rig-footswitch`, which has its own look.
+- **Recount from one run** (src/ui, harmony, rig, engraving, export, library, help, plus the palette, saved tunings and both import dialogs; 62 files, 1265 tests, 0 failed): Controls 23, useBusyGuard 4, Export 33, Library 20, ASCII 7, MIDI 9, HarmonyChordDialog 24, ScaleToolPanel 6, ScaleDiagramEditor 15, PageLayoutPanel 31, CommandPalette 8, SavedTunings 15, help 4, SoundRig 66. These replace the second-round counts above where they differ.
+- App.test.tsx (146) passed in the previous round and was not rerun.

@@ -254,7 +254,7 @@ it('refuses every press, key and change inside a busy region without taking focu
 
 it('styles the palette backdrop above the shared one and dims aria-disabled controls',()=>{
   expect(readFileSync('src/styles.css','utf8')).toMatch(/\.tp-dialog-backdrop\.command-palette-backdrop\{[^}]*align-items:flex-start/);
-  expect(readFileSync('src/ui/ui.css','utf8')).toMatch(/^:is\(button,select,summary\)\[aria-disabled=true\], button\.is-disabled/m);
+  expect(readFileSync('src/ui/ui.css','utf8')).toMatch(/^:is\(button,select,summary\):not\(\.rig-footswitch\)\[aria-disabled=true\], button\.is-disabled:not\(\.rig-footswitch\)/m);
 });
 
 it('also refuses double clicks, context menus, drags and aux clicks in a busy region, and announces it',()=>{
@@ -272,7 +272,13 @@ it('keeps a busy select from opening its popup',()=>{
   const {rerender}=render(<select aria-label="Pick" {...busySelect(true)}><option>a</option></select>);
   const pick=screen.getByRole('combobox',{name:'Pick'});
   expect(pick).toHaveAttribute('aria-disabled','true');
-  expect(fireEvent.mouseDown(pick)).toBe(false);expect(fireEvent.keyDown(pick,{key:'ArrowDown'})).toBe(false);expect(fireEvent.keyDown(pick,{key:'Tab'})).toBe(true);
+  expect(fireEvent.mouseDown(pick)).toBe(false);expect(fireEvent.keyDown(pick,{key:'ArrowDown'})).toBe(false);expect(fireEvent.keyDown(pick,{key:'ArrowDown',altKey:true})).toBe(false);expect(fireEvent.keyDown(pick,{key:'F4'})).toBe(false);expect(fireEvent.keyDown(pick,{key:'Tab'})).toBe(true);
   rerender(<select aria-label="Pick" {...busySelect(false)}><option>a</option></select>);
   expect(fireEvent.mouseDown(pick)).toBe(true);
+});
+it('does not mark a busy region as a drop target',()=>{
+  const dataTransfer={dropEffect:'copy'};
+  render(<div {...busyRegion(true)} data-testid="region"><span>Item</span></div>);
+  expect(fireEvent.dragOver(screen.getByText('Item'),{dataTransfer})).toBe(true);
+  expect(dataTransfer.dropEffect).toBe('none');
 });

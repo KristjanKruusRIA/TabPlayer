@@ -1,4 +1,4 @@
-import type { ChangeEvent, KeyboardEvent, MouseEvent, PointerEvent, SyntheticEvent } from 'react';
+import type { ChangeEvent, DragEvent, KeyboardEvent, MouseEvent, PointerEvent, SyntheticEvent } from 'react';
 
 export interface BusyGuardProps<T = HTMLElement> {
   busy?: boolean;
@@ -98,7 +98,12 @@ export function busyRegion(busy: boolean) {
     onContextMenuCapture: refuse,
     onAuxClickCapture: refuse,
     onDragStartCapture: refuse,
-    onDragOverCapture: refuse,
+    // No preventDefault: that would mark the region as a drop target.
+    onDragOverCapture: (event: DragEvent<HTMLElement>) => {
+      if (!busy) return;
+      if (event.dataTransfer) event.dataTransfer.dropEffect = 'none';
+      event.stopPropagation();
+    },
     onInputCapture: refuse,
     onChangeCapture: (event: ChangeEvent<HTMLElement>) => refuse(event),
     onKeyUpCapture: (event: KeyboardEvent<HTMLElement>) => {
@@ -122,7 +127,7 @@ export function busySelect(busy: boolean) {
       if (busy) event.preventDefault();
     },
     onKeyDown: (event: KeyboardEvent<HTMLSelectElement>) => {
-      if (busy && (event.key === ' ' || event.key === 'Enter' || event.key.startsWith('Arrow'))) event.preventDefault();
+      if (busy && (event.key === ' ' || event.key === 'Enter' || event.key === 'F4' || event.key.startsWith('Arrow'))) event.preventDefault();
     },
   };
 }

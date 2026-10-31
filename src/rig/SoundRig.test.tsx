@@ -975,3 +975,11 @@ it('has no Hear for sources where the host cannot preview', ()=>{
   mount(soundPreset('lead'),{player:null});
   expect(screen.queryByRole('button',{name:/^Hear /})).toBeNull();
 });
+
+it('leaves the chain footswitch undimmed by the shared aria-disabled dimming while busy', () => {
+  const css = readFileSync(resolve(__dirname, '../ui/ui.css'), 'utf8');
+  const rule = css.split('\n').find(line => line.startsWith(':is(button,select,summary)'))!;
+  expect(rule).toContain(':not(.rig-footswitch)[aria-disabled=true]');
+  expect(rule).toContain('button.is-disabled:not(.rig-footswitch)');
+  expect(readFileSync(resolve(__dirname, 'rig.css'), 'utf8')).not.toMatch(/\.rig-footswitch[^{]*\{[^}]*opacity/);
+});

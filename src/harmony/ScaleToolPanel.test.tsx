@@ -40,5 +40,5 @@ it('announces that a busy scale browser is waiting',()=>{
   const score=music(),props={score,selection:null,onClose:()=>{}},view=render(<ScaleToolPanel {...props} busy={false}/>);
   expect(screen.queryByRole('status')).not.toBeInTheDocument();
   view.rerender(<ScaleToolPanel {...props} busy/>);
-  expect(screen.getByRole('status')).toHaveTextContent('Wait for the current operation to finish.');expect(screen.getByLabelText('Scale root').closest('fieldset')).toHaveAttribute('aria-busy','true');
+  expect(screen.getByRole('status')).toHaveTextContent('Wait for the current operation to finish.');expect(screen.getByLabelText('Scale root').closest('fieldset')).toHaveAttribute('aria-busy','true');expect(screen.getByRole('status').closest('fieldset')).toBeNull();
 });

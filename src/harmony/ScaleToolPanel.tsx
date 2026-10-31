@@ -20,8 +20,7 @@ export function ScaleToolPanel({score,staff:currentStaff,selection,busy,onClose,
   const staff=currentStaff??selected[0]?.beat.voice.bar.staff??score.tracks.flatMap(track=>track.staves).find(staff=>!staff.isPercussion),classes=new Set(pitches.map(pitch=>pitch%12));
   const open:HarmonyChord={name:'Scale',nameMode:'manual',recipe:null,firstFret:1,frets:staff?.tuning.map(()=>0)??[],fingers:staff?.tuning.map(()=>-2)??[],barreFrets:[],showName:false,showDiagram:true,showFingering:false};
   const fretPitches=staff?Array.from({length:13},(_,fret)=>soundingChordPitches({...open,frets:staff.tuning.map(()=>fret)},staff)):[],openPitches=fretPitches[0]??[];
-  return <Dialog title="Scale browser" onClose={onClose} className="scale-dialog" actions={<button type="button" className="tp-button" onClick={onClose}>Close scales</button>}><fieldset {...busyRegion(busy)}>
-    {busy&&<p role="status" className="muted">Wait for the current operation to finish.</p>}
+  return <Dialog title="Scale browser" onClose={onClose} className="scale-dialog" actions={<button type="button" className="tp-button" onClick={onClose}>Close scales</button>}>{busy&&<p role="status" className="muted">Wait for the current operation to finish.</p>}<fieldset {...busyRegion(busy)}>
     <label>Scale root<select data-autofocus={!busy||undefined} value={root} onChange={e=>setRoot(Number(e.target.value))}>{roots.map((name,index)=><option key={name} value={index}>{name}</option>)}</select></label>
     <label>Search scales<input value={search} onChange={e=>setSearch(e.target.value)}/></label>
     <label>Scale tag<select value={tag} onChange={e=>setTag(e.target.value)}>{tagOptions.map(option=><option key={option.value} value={option.value}>{option.label}</option>)}</select></label>

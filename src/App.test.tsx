@@ -182,6 +182,13 @@ it('reveals paste options through a collapsed Edit task without changing history
   const clipboardSummary=screen.getByText('Musical clipboard',{selector:'summary'}),scroll=vi.fn();clipboardSummary.parentElement!.scrollIntoView=scroll;
   const before=c.getState().snapshot;fireEvent.keyDown(workspace,{key:'v',ctrlKey:true,shiftKey:true});
   expect(editTask.open).toBe(true);expect(clipboardSummary).toHaveFocus();expect(scroll).toHaveBeenCalledWith({block:'nearest'});expect(c.getState().snapshot).toBe(before);
+
+  const contextCard=within(screen.getByRole('region',{name:'Selection context'}));
+  fireEvent.click(contextCard.getByRole('button',{name:'Note'}));
+  expect(clipboardSummary).not.toBeVisible();
+  fireEvent.keyDown(workspace,{key:'v',ctrlKey:true,shiftKey:true});
+  expect(clipboardSummary).toBeVisible();
+  expect(clipboardSummary).toHaveFocus();
 });
 
 it('leaves the score alone from the Sound view: no cut, paste or select-all, while undo, palette and play still work',async()=>{

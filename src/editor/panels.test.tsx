@@ -273,7 +273,7 @@ it('every bend and whammy preset matches alphaTab classification through real en
     expect(note.bendType, `Bend preset ${preset.name} stored type should match engine resolution`).toBe(preset.type);
   }
 
-  for (const preset of WHAMMY_PRESETS.filter(p => p.type !== model.WhammyType.Hold)) {
+  for (const preset of WHAMMY_PRESETS) {
     let project = blankProject();
     project = previewEdit(project, { type: 'setNote', target, string: 1, fret: 5 }).project;
     project = previewEdit(project, {
@@ -283,25 +283,27 @@ it('every bend and whammy preset matches alphaTab classification through real en
     }).project;
     const score = buildScore(project);
     const beat = score.tracks[0].staves[0].bars[0].voices[0].beats[0];
-    expect(beat.whammyBarType, `Whammy preset ${preset.name} stored type should match engine resolution`).toBe(preset.type);
+    // A preset sent as Custom is classified by the engine; on a lone beat a flat curve below zero is Predive (Hold is covered above).
+    const expected = preset.type === model.WhammyType.Custom ? model.WhammyType.Predive : preset.type;
+    expect(beat.whammyBarType, `Whammy preset ${preset.name} stored type should match engine resolution`).toBe(expected);
   }
 });
 
-it('whammy presets include Scoop and Hold player-facing labels with PrediveDive and Hold types', () => {
+it('whammy presets include Scoop and Hold player-facing labels with PrediveDive and Custom types', () => {
   const scoop = WHAMMY_PRESETS.find(p => p.name === 'Scoop');
   expect(scoop).toBeDefined();
   expect(scoop?.type).toBe(model.WhammyType.PrediveDive);
 
   const hold = WHAMMY_PRESETS.find(p => p.name === 'Hold');
   expect(hold).toBeDefined();
-  expect(hold?.type).toBe(model.WhammyType.Hold);
+  expect(hold?.type).toBe(model.WhammyType.Custom);
 });
 
 it('Hold is what alphaTab calls a flat whammy that continues the previous beat, and a lone flat one is Predive', () => {
   const hold = WHAMMY_PRESETS.find(p => p.name === 'Hold')!;
   const whammyOf = (project: ReturnType<typeof blankProject>, beat: number) =>
     buildScore(project).tracks[0].staves[0].bars[0].voices[0].beats[beat].whammyBarType;
-  const custom = (points: { offset: number; value: number }[]) => ({ type: model.WhammyType.Custom, style: 0, points });
+  const custom = (points: { offset: number; value: number }[]) => ({ type: hold.type, style: 0, points });
   let project = blankProject();
   project = previewEdit(project, { type: 'setNote', target, string: 1, fret: 5 }).project;
   project = previewEdit(project, { type: 'setNote', target: { ...target, beat: 1 }, string: 1, fret: 5 }).project;
@@ -309,7 +311,7 @@ it('Hold is what alphaTab calls a flat whammy that continues the previous beat, 
   expect(whammyOf(lone, 1)).toBe(model.WhammyType.Predive);
   project = previewEdit(project, { type: 'setBeatTechniques', target, patch: { whammy: custom([{ offset: 0, value: 0 }, { offset: 60, value: -4 }]) } }).project;
   project = previewEdit(project, { type: 'setBeatTechniques', target: { ...target, beat: 1 }, patch: { whammy: custom(hold.points) } }).project;
-  expect(whammyOf(project, 1)).toBe(hold.type);
+  expect(whammyOf(project, 1)).toBe(model.WhammyType.Hold);
 });
 
 it('bend preset re-click and arrow down-up record nothing through previewEdit', () => {
@@ -657,4 +659,11 @@ it('busy between a handle key press and its release or blur reverts the graph to
     expect(onChange).not.toHaveBeenCalled();
     unmount();
   }
+});
+
+it('the Hold preset button sends Custom with flat points so the engine classifies it', () => {
+  const onChange = vi.fn();
+  render(<CurveEditor label="Whammy" whammy value={null} onChange={onChange} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Whammy preset: Hold' }));
+  expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ type: model.WhammyType.Custom, points: [{ offset: 0, value: -4 }, { offset: 60, value: -4 }] }));
 });

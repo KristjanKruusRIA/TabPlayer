@@ -94,7 +94,8 @@ export const WHAMMY_PRESETS: readonly CurvePreset[] = [
   {
     id: 'hold',
     name: 'Hold',
-    type: model.WhammyType.Hold,
+    // Sent as Custom so alphaTab classifies it: Hold after a whammy, Predive on a lone beat.
+    type: model.WhammyType.Custom,
     points: [
       { offset: 0, value: -4 },
       { offset: 60, value: -4 },

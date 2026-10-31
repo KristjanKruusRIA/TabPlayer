@@ -284,3 +284,12 @@ it('stepping to the lowest or highest pitch keeps focus on the step button and m
   const up=screen.getByRole('button',{name:'Tune Notes string 6 up'});up.focus();fireEvent.click(up);
   expect(pegOf(6)).toHaveAttribute('aria-valuenow','127');expect(up).toHaveFocus();expect(up).not.toBeDisabled();expect(up).toHaveAttribute('aria-disabled','true');
 });
+it('audition buttons keep focus and say aria-disabled when busy, and refuse the press',()=>{
+  const onAudition=vi.fn(),props={label:'Notes',presetLabel:'Preset',value:'E4 B3 G3 D3 A2 E2',onChange:vi.fn(),tuningName:'',onTuningNameChange:vi.fn(),onAudition};
+  const view=render(<TuningInput {...props}/>);
+  const play=screen.getByRole('button',{name:'Play tuning'});play.focus();
+  view.rerender(<TuningInput {...props} busy/>);
+  expect(play).toHaveFocus();expect(play).not.toBeDisabled();expect(play).toHaveAttribute('aria-disabled','true');
+  fireEvent.click(play);fireEvent.click(screen.getByRole('button',{name:/Play string 1/}));
+  expect(onAudition).not.toHaveBeenCalled();
+});

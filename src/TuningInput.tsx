@@ -469,7 +469,7 @@ export function TuningInput({
           Saved tunings…
         </button>
         {audible && onAudition && (
-          <AuditionButtons pitches={audible} disabled={blocked} label={label} onAudition={onAudition} />
+          <AuditionButtons pitches={audible} disabled={disabled} busy={busy} label={label} onAudition={onAudition} />
         )}
       </div>
       {library && (

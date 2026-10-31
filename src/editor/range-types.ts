@@ -16,7 +16,9 @@ export type RangeCommand =
   | {type:'refingerSelection';selection:MusicSelection;maxFret:number}
   | {type:'setSelectionSustain';selection:MusicSelection;strings:number[];kind:'letRing'|'palmMute';enabled:boolean}
   | {type:'setSelectionStrokes';selection:MusicSelection;technique:StrokeTechnique;pattern:StrokeDirection[]}
-  | {type:'setSelectionTies';selection:MusicSelection;tied:boolean};
+  | {type:'setSelectionTies';selection:MusicSelection;tied:boolean}
+  /** Ties each selected guitar or bass note to the nearest earlier note on its string, taking that note's fret. */
+  | {type:'tieSelectionToEarlierPitch';selection:MusicSelection};
 export type StrokeTechnique='pick'|'brush'|'arpeggio';
 export type StrokeDirection='down'|'up'|'none';
 export interface FingeringRequest {note:model.Note;pitch:number;preferredString:number|null;fixedString:number|null}

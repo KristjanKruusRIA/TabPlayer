@@ -39,7 +39,7 @@ const shapes:Record<string,readonly string[]>={
   setSimile:['track','staff','bar','kind'],
   eraseSelection:['selection'],transposeSelection:['selection','semitones'],moveSelectionStrings:['selection','direction'],
   refingerSelection:['selection','maxFret'],setSelectionSustain:['selection','strings','kind','enabled'],
-  setSelectionStrokes:['selection','technique','pattern'],setSelectionTies:['selection','tied'],
+  setSelectionStrokes:['selection','technique','pattern'],setSelectionTies:['selection','tied'],tieSelectionToEarlierPitch:['selection'],
   insertMeasures:['beforeBar','count'],removeMeasures:['firstBar','lastBar'],
   pasteMusic:['clip','options'],
   setEngraving:['engraving'],setPageLayout:['layout'],setMaster:['master'],

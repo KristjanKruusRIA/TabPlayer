@@ -2,7 +2,7 @@ import { midi,model,Settings, type io } from '@coderline/alphatab';
 import '../tremolo-guard';
 import { validateSelection,type ExportSelection } from './types';
 import { selectStaves } from './selection';
-import { deadBrushMidiDurations,noteAudioMidiAdjustments,prepareMidiScore } from '../audio/plan';
+import { deadBrushMidiDurations,noteAudioMidiAdjustments,prepareMidiScore,restoreVolumeAfterFades } from '../audio/plan';
 import { hasNoteAudio } from '../editor/note-audio';
 import { gpControllerEvents,prepareGpMidiScore } from '../interchange/automation';
 class TrackName extends midi.MidiEvent {
@@ -44,7 +44,7 @@ export function exportMidi(score:model.Score,selection:ExportSelection):Uint8Arr
   const channels=Array.from({length:16},(_,i)=>i).filter(i=>i!==9);let channel=0;
   for(const track of prepared.tracks){track.playbackInfo.primaryChannel=track.isPercussion?9:channels[channel++];track.playbackInfo.secondaryChannel=track.playbackInfo.primaryChannel;}
   for(const track of melodic)track.playbackInfo.secondaryChannel=channels[channel++]??track.playbackInfo.primaryChannel;
-  const settings=new Settings(),handler=new ExportMidiHandler(source,true);const generator=new midi.MidiFileGenerator(prepared,settings,handler);
+  const settings=new Settings(),handler=new ExportMidiHandler(source,true);const generator=new midi.MidiFileGenerator(prepared,settings,handler);restoreVolumeAfterFades(generator,handler);
   generator.applyTranspositionPitches=true;generator.generate();
   const performed=generator.tickLookup.masterBars.map(bar=>({bar:bar.masterBar.index,startTick:bar.start+source.tickShift,endTick:bar.end+source.tickShift}));
   for(const event of gpControllerEvents(prepared,performed))source.addEvent(new midi.ControlChangeEvent(event.track,event.tick,event.channel,event.controller,event.value));

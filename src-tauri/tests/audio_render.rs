@@ -2370,3 +2370,132 @@ fn a_real_renderer_and_export_play_the_locked_articulation_only_when_locked() {
         &export(&automated, false)
     ));
 }
+
+/// Windowed RMS of one rendered second of a held note whose track channel gets the volume events `controllers` (tick, value),
+/// as the plan carries a beat's fade. Windows are 50 ms.
+fn fade_levels(controllers: &[(u32, u8)]) -> Vec<f64> {
+    use tabplayer_lib::audio::renderer::Renderer;
+    let (_, resources, settings) = renderer_fixture(false);
+    let mut midi = vec![
+        serde_json::json!({"type":"controller","trackId":"a","tick":0,"channel":0,"controller":7,"value":120}),
+        serde_json::json!({"type":"controller","trackId":"a","tick":0,"channel":0,"controller":11,"value":127}),
+    ];
+    for (tick, value) in controllers {
+        midi.push(serde_json::json!({"type":"controller","trackId":"a","tick":tick,"channel":0,"controller":7,"value":value}));
+    }
+    let tracks = serde_json::json!([{"id":"a","program":24,"percussion":false}]);
+    let note = serde_json::json!({"id":"n0","trackId":"a","source":{"target":{"track":0,"staff":0,"bar":0,"voice":0,"beat":0},"string":1},"occurrence":0,"startTick":0,"endTick":1920,"key":57,"velocity":100,"articulation":"picked","legatoFrom":null,"pitch":[{"tick":0,"semitones":0}]});
+    let plan = serde_json::from_value(serde_json::json!({"generation":1,"ppq":960,"durationTick":3840,"durationMs":2000,"tracks":tracks,"tempos":[{"tick":0,"bpm":120}],"occurrences":[{"bar":0,"occurrence":0,"meterNumerator":4,"meterDenominator":4,"startTick":0,"endTick":3840,"startMs":0,"endMs":2000}],"notes":[note],"midi":midi})).unwrap();
+    let mut renderer = Renderer::new(Arc::new(plan), resources, settings, 48_000).unwrap();
+    let mut out = vec![[0.0f32; 2]; 48_000];
+    renderer.render_into(&mut out);
+    out.chunks(2_400)
+        .map(|window| energy(window).sqrt())
+        .collect()
+}
+
+// The tick/value pairs below are the volume events the generator writes for a fade on a quarter-note beat
+// plus the restore of the written level at the end of the beat that the playback plan adds after a fade out or swell
+// (pinned against the plan in gestures.test.ts).
+const FADE_IN: [(u32, u8); 8] = [
+    (0, 0),
+    (120, 19),
+    (240, 38),
+    (360, 56),
+    (480, 75),
+    (600, 94),
+    (768, 120),
+    (1920, 120),
+];
+const FADE_OUT: [(u32, u8); 8] = [
+    (0, 120),
+    (120, 101),
+    (240, 83),
+    (360, 64),
+    (480, 45),
+    (600, 26),
+    (768, 0),
+    (960, 120),
+];
+const SWELL: [(u32, u8); 9] = [
+    (0, 0),
+    (120, 38),
+    (240, 75),
+    (384, 120),
+    (480, 120),
+    (600, 83),
+    (720, 45),
+    (864, 0),
+    (960, 120),
+];
+
+#[test]
+fn fades_shape_the_rendered_level_of_a_held_note() {
+    let held = fade_levels(&[(0, 120)]);
+    let steady = held[4..16].iter().sum::<f64>() / 12.0;
+    assert!(steady > 0.01, "the unfaded note must sound: {steady}");
+    // 768 ticks at 120 bpm is 0.4 s, which is windows 0 to 8 of 50 ms.
+    let fade_in = fade_levels(&FADE_IN);
+    assert!(
+        fade_in[0] < steady * 0.2,
+        "fade in starts near silence: {} vs {steady}",
+        fade_in[0]
+    );
+    assert!(
+        fade_in.windows(2).take(7).all(|pair| pair[1] > pair[0]),
+        "fade in rises every 50 ms: {fade_in:?}"
+    );
+    assert!(
+        (fade_in[10] / steady - 1.0).abs() < 0.1,
+        "fade in settles at the written level"
+    );
+    let fade_out = fade_levels(&FADE_OUT);
+    assert!(
+        (fade_out[0] / steady - 1.0).abs() < 0.2,
+        "fade out starts at the written level"
+    );
+    assert!(
+        fade_out.windows(2).take(7).all(|pair| pair[1] < pair[0]),
+        "fade out falls every 50 ms: {fade_out:?}"
+    );
+    assert!(
+        fade_out[9] < steady * 0.02,
+        "fade out ends silent: {}",
+        fade_out[9]
+    );
+    // The next beat starts at tick 960 (0.5 s): the restore brings the written level back for the note after the fade.
+    assert!(
+        fade_out[12..20]
+            .iter()
+            .all(|level| (level / steady - 1.0).abs() < 0.15),
+        "the note after a fade out sounds at the written level: {fade_out:?}"
+    );
+    // The swell peaks at 0.2 s (tick 384) and is silent again by tick 864 (0.45 s).
+    let swell = fade_levels(&SWELL);
+    let peak = (0..10)
+        .max_by(|a, b| swell[*a].total_cmp(&swell[*b]))
+        .unwrap();
+    assert!(
+        (3..=5).contains(&peak),
+        "swell peaks near 0.2 s, not window {peak}: {swell:?}"
+    );
+    assert!(
+        swell[0] < swell[peak] * 0.25 && swell[9] < swell[peak] * 0.05,
+        "swell opens and closes quiet: {swell:?}"
+    );
+    assert!(
+        swell[2] > swell[0] && swell[6] < swell[4],
+        "swell rises then falls"
+    );
+    assert!(
+        swell[12..20]
+            .iter()
+            .all(|level| (level / steady - 1.0).abs() < 0.15),
+        "the note after a swell sounds at the written level: {swell:?}"
+    );
+    // Written length is untouched: without a fade the note sounds to the end of the window.
+    assert!(
+        held[19] > steady * 0.5,
+        "the held note keeps sounding to the end of its beat window"
+    );
+}

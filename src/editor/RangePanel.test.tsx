@@ -104,3 +104,18 @@ it('ties and unties every selected note across voices as one command',()=>{
   fireEvent.click(screen.getByRole('button',{name:'Tie selected notes'}));
   expect(screen.getByRole('alert')).toHaveTextContent('Each selected note needs an earlier note.');
 });
+
+it('ties selected notes to the earlier pitch as one command and reports a refusal',()=>{
+  const score=music(),commands:RangeCommand[]=[],bars:MusicSelection={kind:'bars',tracks:[0],firstBar:1,lastBar:1};
+  render(<RangePanel score={score} target={target} selection={bars} busy={false} onSelection={()=>{}} onEdit={edit=>{commands.push(edit);if(commands.length>1)throw new Error('Each selected note needs an earlier note.');}}/>);
+  fireEvent.click(screen.getByRole('button',{name:'Tie to earlier pitch'}));
+  expect(commands).toEqual([{type:'tieSelectionToEarlierPitch',selection:bars}]);
+  fireEvent.click(screen.getByRole('button',{name:'Tie to earlier pitch'}));
+  expect(screen.getByRole('alert')).toHaveTextContent('Each selected note needs an earlier note.');
+});
+
+it('disables the earlier-pitch tie for drum selections',()=>{
+  const score=music();score.tracks[0].staves[0].isPercussion=true;
+  render(<RangePanel score={score} target={target} selection={{kind:'bars',tracks:[0],firstBar:1,lastBar:1}} busy={false} onSelection={()=>{}} onEdit={()=>{}}/>);
+  expect(screen.getByRole('button',{name:'Tie to earlier pitch'})).toBeDisabled();
+});

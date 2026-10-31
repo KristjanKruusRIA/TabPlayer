@@ -1265,3 +1265,17 @@ it('a drum kit change is a sound edit that keeps the music selection',async()=>{
   fireEvent.click(exposeFunctionalControl(screen.getByText('Selected playback',{selector:'summary'})));click('Play selection');
   expect(integration.playSelection).toHaveBeenCalledWith({kind:'bars',tracks:[1],firstBar:0,lastBar:0},expect.anything());
 },60000);
+it('ties and unties the selected notes from the keyboard, as one edit each, and stays out of fields and the Sound view',async()=>{
+  const c=await setup(),workspace=screen.getByRole('region',{name:'Score workspace'}),last=()=>c.getState().snapshot.project.edits.at(-1);
+  click('Set note');await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(1));
+  fireEvent.keyDown(workspace,{key:'ArrowRight'});click('Set note');await waitFor(()=>expect(c.getState().snapshot.project.edits.filter(edit=>edit.type==='setNote')).toHaveLength(2));
+  fireEvent.keyDown(workspace,{key:'ArrowRight',shiftKey:true});
+  const edits=()=>c.getState().snapshot.project.edits.length,before=edits();
+  fireEvent.keyDown(screen.getByLabelText('Fret'),{key:'t',ctrlKey:true});expect(edits()).toBe(before);
+  fireEvent.keyDown(workspace,{key:'t',ctrlKey:true});await waitFor(()=>expect(last()).toMatchObject({type:'tieSelectionToEarlierPitch'}));
+  expect(edits()).toBe(before+1);
+  fireEvent.keyDown(workspace,{key:'T',ctrlKey:true,shiftKey:true});await waitFor(()=>expect(last()).toMatchObject({type:'setSelectionTies',tied:false}));
+  expect(edits()).toBe(before+2);
+  const view=screen.getByRole('radiogroup',{name:'View'});fireEvent.click(within(view).getByRole('radio',{name:'Sound'}));
+  fireEvent.keyDown(workspace,{key:'t',ctrlKey:true});expect(edits()).toBe(before+2);
+});

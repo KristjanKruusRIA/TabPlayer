@@ -80,8 +80,25 @@ class Collector implements midi.IMidiFileHandler {
   private own() { if (this.provenance) this.starts.set(this.order - 1, Number(this.provenance.slice(this.provenance.indexOf('/') + 1))); }
   finishTrack(_track: number, tick: number) { this.end = Math.max(this.end, tick + this.shift); }
 }
+/** alphaTab ends a fade out or a swell at volume 0 and never raises the track again, so every later note was silent.
+ * This writes the volume the fade started from back at the end of the faded beat, on the channels the fade used.
+ * Scores without a fade get no extra event. */
+export function restoreVolumeAfterFades(generator: midi.MidiFileGenerator, handler: midi.IMidiFileHandler) {
+  const hooked = generator as unknown as { _generateFade(beat: model.Beat, start: number, duration: number): void };
+  const original = hooked._generateFade.bind(generator);
+  hooked._generateFade = (beat, start, duration) => {
+    const levels = new Map<number, { track: number; level: number }>(), add = handler.addControlChange.bind(handler);
+    handler.addControlChange = (track, tick, channel, controller, value) => {
+      if (controller === midi.ControllerType.VolumeCoarse) levels.set(channel, { track, level: Math.max(levels.get(channel)?.level ?? 0, value) });
+      add(track, tick, channel, controller, value);
+    };
+    try { original(beat, start, duration); } finally { handler.addControlChange = add; }
+    if (beat.fade === model.FadeType.FadeIn) return;
+    for (const [channel, { track, level }] of levels) add(track, start + duration, channel, midi.ControllerType.VolumeCoarse, level);
+  };
+}
 function generate(score: model.Score) {
-  const events = new Collector(), generator = new midi.MidiFileGenerator(score, settings, events); generator.generate();
+  const events = new Collector(), generator = new midi.MidiFileGenerator(score, settings, events); restoreVolumeAfterFades(generator, events); generator.generate();
   return { events, lookup: generator.tickLookup };
 }
 

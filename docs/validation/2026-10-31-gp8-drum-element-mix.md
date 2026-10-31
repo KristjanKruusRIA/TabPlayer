@@ -2,14 +2,16 @@
 
 GP8 row A23 mixes the pieces of a drum kit apart. Before, a percussion track had one volume, pan, mute and solo. Now the Mixer view of a selected percussion track also has six kit elements (kick, snare, hi-hat, toms, cymbals, other percussion), each with volume, pan, mute and solo, heard in playback and in audio export.
 
-## What an element is
+## Behavior
+
+### What an element is
 
 - A note belongs to the element of the **articulation** it plays, by the instrument that owns the articulation in `src/instruments/drum-kit.ts` (the owner is found by the articulation's element name, and only for a name nobody knows by its sounding pitch). The element of each instrument is the table in `src/audio/drum-kit.ts`: kick and kick 2 are kick; snare and electric snare are snare; hi-hat is hats; the six toms are toms; splash, the crashes, reverse, ride, china and ride 2 are cymbals; every other instrument is other.
 - The native player only plays MIDI. The playback plan names the element on a note's `noteOn`/`noteOff` (`kitElement`) **only where it is not the one the pitch gives**. Where the plan names nothing (plans written before this, auditions, an articulation nobody owns) the player groups by pitch: kick 35 36; snare 37 38 40; hats 42 44 46; toms 41 43 45 47 48 50; cymbals 49 51 52 53 55 57 59; everything else other (`gm_kit_element` in `settings.rs`).
 - Exactly 9 of the 95 standard articulation entries (94 ids; id 83 is both Jingle Bell and Tinkle Bell) sound the pitch of another element and are named by the plan: Metronome (hit, bell) sound snare pitches, Bell Tree (hit, return), Jingle Bell, Tinkle Bell and Piatti (hit, hand) sound cymbal pitches, and Grancassa sounds a tom pitch. All are `other`. A track's own articulation is read by its own element name whatever pitch it sounds.
 - A `.tabplayer` mix without `drumKit` replays as before. Elements at their defaults are never saved, and a kit of elements all at their defaults is the same as no kit, in the editor and in the player.
 
-## How it sounds
+### How it sounds
 
 - A kit is installed like any mix: no rebuild, nothing cut and no held note struck again, when the first kit arrives, changes or is removed. (An earlier version rebuilt the player on the first kit edit.)
 - Each percussion track with a General MIDI sound holds six synthesizers beside its own (seven in all). A track with no kit, or a kit of defaults, plays only on its own synthesizer exactly as it did; the six sound only while a kit is in effect.
@@ -17,7 +19,7 @@ GP8 row A23 mixes the pieces of a drum kit apart. Before, a percussion track had
 - A note already sounding when the **first** kit arrives plays out on the track's own synthesizer at its original level; the kit governs the notes struck after it. Once a kit is in effect, changes to it are heard on the notes already sounding too.
 - Pan is balance: the louder channel keeps its level and the other falls, as `1 - |pan|`. This differs from the track's own equal-power pan.
 
-## Mixer view
+### Mixer view
 
 - Reached in Mixer, with a percussion track selected (`aria-label` "Drum kit <track>"). There is no other kit panel: the Sound pane's panel is removed.
 - Controls are the shared `Fader` and `Knob` with `useLivePreview`, as on a strip. A drag is heard as it moves through `previewDrumElement` (nothing recorded) and saved once on release; a key press saves one change; Escape puts the sound back; choosing the value an element already has records nothing. A busy mixer refuses a change with `aria-disabled` (no `disabled` on a switch that may hold focus).

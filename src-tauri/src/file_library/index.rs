@@ -72,6 +72,8 @@ struct State {
     revision: u64,
     begin_sequence: u64,
     uncertain: Option<UncertainPublication>,
+    /// Files that became password-protected while the app ran. Whatever a scan read of them before is not published.
+    sealed: HashSet<String>,
 }
 
 struct Job {
@@ -147,6 +149,14 @@ fn key(path: &Path) -> String {
     #[cfg(windows)]
     let value = value.to_ascii_lowercase();
     value
+}
+
+/// The path as indexed for a lower-cased key; keys are not paths on Windows.
+fn wanted_path(files: &[CachedFile], wanted: &str) -> Option<PathBuf> {
+    files
+        .iter()
+        .find(|file| key(Path::new(&file.row.path)) == wanted)
+        .map(|file| PathBuf::from(&file.row.path))
 }
 
 fn file_id(root: &str, path: &Path) -> String {
@@ -515,6 +525,7 @@ impl LibraryIndex {
             revision: 0,
             begin_sequence: 0,
             uncertain: None,
+            sealed: HashSet::new(),
         };
         if roots.len() > 16 {
             return Err("Library folder limit is 16.".into());
@@ -1178,7 +1189,7 @@ impl LibraryIndex {
             .filter(|value| *value <= MAX_SAFE_INTEGER)
             .ok_or("Index revision limit reached.")?;
         let time = millis(SystemTime::now()).ok_or("Index clock is out of range.")?;
-        let index = RootIndex {
+        let mut index = RootIndex {
             format: "TabPlayerFolderIndex".into(),
             version: 1,
             root_id: job.root.id.clone(),
@@ -1193,6 +1204,7 @@ impl LibraryIndex {
                 .map(|file| file.cached.clone())
                 .collect(),
         };
+        Self::withhold_sealed(&mut state.sealed, &mut index.files);
         let bytes = serde_json::to_vec(&index).map_err(|error| error.to_string())?;
         let other_bytes: usize = state
             .committed
@@ -1260,6 +1272,99 @@ impl LibraryIndex {
             &job.id,
             warning,
         ))
+    }
+
+    /// A password-protected score must show nothing in the folder index. Removes whatever the index kept of the file
+    /// at once, in memory and in the cache file, and keeps later scans from publishing details they read before it
+    /// was protected. Returns whether any entry changed. When the cache cannot be rewritten it is deleted instead.
+    pub fn scrub_file(&self, path: &Path) -> Result<bool, String> {
+        let wanted = key(path);
+        let mut state = locked(&self.state)?;
+        state.sealed.insert(wanted.clone());
+        let holding: Vec<String> = state
+            .committed
+            .iter()
+            .filter(|(_, committed)| {
+                committed.index.files.iter().any(|file| {
+                    key(Path::new(&file.row.path)) == wanted && file.row.metadata.is_some()
+                })
+            })
+            .map(|(root_id, _)| root_id.clone())
+            .collect();
+        if holding.is_empty() {
+            return Ok(false);
+        }
+        if let Some(uncertain) = &state.uncertain {
+            return Err(uncertain.warning.clone());
+        }
+        for root_id in holding {
+            let mut index = (*state.committed[&root_id].index).clone();
+            for file in &mut index.files {
+                if key(Path::new(&file.row.path)) == wanted {
+                    file.row.metadata = None;
+                    file.row.status = LibraryResultStatus::MetadataUnavailable;
+                    file.sha256 = None;
+                }
+            }
+            index.index_revision = state
+                .revision
+                .checked_add(1)
+                .filter(|value| *value <= MAX_SAFE_INTEGER)
+                .ok_or("Index revision limit reached.")?;
+            let bytes = serde_json::to_vec(&index).map_err(|error| error.to_string())?;
+            let target = self.cache_path(&root_id)?;
+            self.verify_directory()?;
+            let written = write_bytes(&target, &bytes);
+            // The details are gone from memory whatever happens to the file.
+            Self::adopt(&mut state, index, bytes.len(), "", None);
+            if let Err(error) = written {
+                return match fs::remove_file(&target) {
+                    Ok(()) => {
+                        state.warnings.insert(
+                            root_id,
+                            "A protected score's details were removed from the folder index by deleting its cache. Refresh the folder to index it again.".into(),
+                        );
+                        Ok(true)
+                    }
+                    Err(removal) if removal.kind() == std::io::ErrorKind::NotFound => Ok(true),
+                    Err(removal) => Err(format!(
+                        "The folder index still holds a protected score's details on disk: {error}; {removal}"
+                    )),
+                };
+            }
+        }
+        Ok(true)
+    }
+
+    /// Drops the details of files known to be protected, unless the file on disk is plain again.
+    fn withhold_sealed(sealed: &mut HashSet<String>, files: &mut [CachedFile]) {
+        if sealed.is_empty() {
+            return;
+        }
+        sealed.retain(|wanted| {
+            // A file of another folder is judged when that folder is published.
+            let Some(path) = wanted_path(files, wanted) else {
+                return true;
+            };
+            let still = fs::File::open(path)
+                .and_then(|mut file| {
+                    let mut head = [0; 8];
+                    file.read_exact(&mut head).map(|()| head)
+                })
+                // Anything that cannot be read as plain is treated as protected.
+                .map_or(true, |head| &head == b"TABPLOCK");
+            if still {
+                for file in files
+                    .iter_mut()
+                    .filter(|file| key(Path::new(&file.row.path)) == *wanted)
+                {
+                    file.row.metadata = None;
+                    file.row.status = LibraryResultStatus::MetadataUnavailable;
+                    file.sha256 = None;
+                }
+            }
+            still
+        });
     }
 
     pub fn cancel(&self, job_id: &str) -> Result<(), String> {

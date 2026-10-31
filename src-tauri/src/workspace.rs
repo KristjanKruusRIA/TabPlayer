@@ -586,9 +586,12 @@ impl DocumentWorkspace {
         Ok(candidate)
     }
 
-    /// The document is under a password to open, so nothing about its contents may be written in plain form.
+    /// The document is under a password to open, or its file on disk is: nothing about its contents may be written in
+    /// plain form. The file counts even when the password was removed in this session and the removal is not saved,
+    /// because what the catalog and the index describe is the file.
     pub fn is_sealed(&self, id: &str) -> Result<bool, String> {
-        Ok(self.entry(id)?.session.open_lock().is_some())
+        let session = &self.entry(id)?.session;
+        Ok(session.open_lock().is_some() || session.saved_sealed())
     }
 
     pub fn protection_state(&self, address: &DocumentRevision) -> Result<ProtectionState, String> {

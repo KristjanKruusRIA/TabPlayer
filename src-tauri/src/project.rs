@@ -677,6 +677,11 @@ impl ProjectSession {
         self.project.open_lock.as_ref()
     }
 
+    /// The file this document was opened from, or last saved to, is sealed under a password to open.
+    pub fn saved_sealed(&self) -> bool {
+        self.saved_open_lock.is_some()
+    }
+
     /// Applies a protection change. Not an edit: it has no undo step. Returns whether anything changed. A change that
     /// was checked against a state the document has since left is refused.
     pub fn change_protection(&mut self, change: ProtectionChange) -> Result<bool, ProjectError> {

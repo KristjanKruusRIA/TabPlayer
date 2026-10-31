@@ -1020,3 +1020,203 @@ fn a_protected_score_leaves_no_details_in_the_plain_catalog_and_loses_those_it_h
         .unwrap();
     assert_eq!(again.revision, snapshot.revision);
 }
+
+fn protect_and_save(
+    workspace: &Mutex<DocumentWorkspace>,
+    document: &DocumentRevision,
+    request: crate::password_lock::ProtectionRequest,
+    path: &Path,
+) -> DocumentRevision {
+    let changed = crate::password_lock::apply_protection_with(
+        workspace,
+        document,
+        request,
+        crate::password_crypto::KdfParams::new(64, 1, 1).unwrap(),
+    )
+    .unwrap();
+    let saved = workspace
+        .lock()
+        .unwrap()
+        .save_to_path(
+            &DocumentRevision {
+                document_id: changed.document_id,
+                revision: changed.revision,
+            },
+            path.to_path_buf(),
+        )
+        .unwrap();
+    DocumentRevision {
+        document_id: saved.document_id,
+        revision: saved.revision,
+    }
+}
+
+#[test]
+fn sealing_a_score_in_a_library_folder_purges_its_index_entry_at_once_and_later_scans_keep_it_out()
+{
+    use crate::{password_crypto::Secret, password_lock::ProtectionRequest};
+    let (directory, library, workspace, _) = fixture();
+    let folder = directory.path().join("scores");
+    fs::create_dir(&folder).unwrap();
+    let path = folder.join("score.tabplayer");
+    write_project(&path, &Project::blank()).unwrap();
+    let snapshot = library.add_root(0, folder).unwrap();
+    let root = snapshot.roots[0].id.clone();
+    finish(&library, &root);
+    let index_files = || {
+        fs::read_dir(directory.path().join("file-library-v1"))
+            .unwrap()
+            .flatten()
+            .filter(|entry| entry.file_name().to_string_lossy().starts_with("index-"))
+            .map(|entry| fs::read_to_string(entry.path()).unwrap())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(library.search(&query()).unwrap().total, 1);
+    assert!(
+        index_files()
+            .iter()
+            .any(|text| text.contains("Indexed Study"))
+    );
+    // A pass is under way and has already read the plain file when the person seals it.
+    let scan = library.scan_begin(&root).unwrap();
+    let batch = library.scan_next(&scan.job_id).unwrap();
+    let file = batch.files[0].file_id.clone();
+    let input = library.scan_read(&scan.job_id, &file).unwrap();
+    // Seal the file where it sits, as Save does.
+    let opened = add(&library, &workspace, &path);
+    let sealed = protect_and_save(
+        &workspace,
+        &opened,
+        ProtectionRequest::SetOpenPassword {
+            current: None,
+            password: Secret::new("a long enough phrase"),
+        },
+        &path,
+    );
+    let receipt = workspace
+        .lock()
+        .unwrap()
+        .library_receipt(&sealed.document_id)
+        .unwrap();
+    library.record_saved(receipt, true);
+    // Nothing waits for a Refresh: the entry stays listed, with no details, and the cache file holds none.
+    assert_eq!(library.search(&query()).unwrap().total, 0);
+    let mut everything = query();
+    everything.text = String::new();
+    let page = library.search(&everything).unwrap();
+    assert_eq!(page.total, 1);
+    assert!(page.rows[0].metadata.is_none());
+    assert!(
+        index_files()
+            .iter()
+            .all(|text| !text.contains("Indexed Study"))
+    );
+    // The pass that read the file before it was sealed publishes now, and must not bring the details back.
+    library
+        .scan_accept(
+            &scan.job_id,
+            &file,
+            MetadataResult {
+                sha256: input.sha256,
+                metadata: Some(metadata("Indexed Study")),
+                error: None,
+            },
+        )
+        .unwrap();
+    while !library.scan_next(&scan.job_id).unwrap().done {}
+    library.scan_finish(&scan.job_id).unwrap();
+    assert_eq!(library.search(&query()).unwrap().total, 0);
+    assert!(
+        index_files()
+            .iter()
+            .all(|text| !text.contains("Indexed Study"))
+    );
+    // A later pass cannot read the sealed file at all, and still shows nothing.
+    let later = library.scan_begin(&root).unwrap();
+    loop {
+        let batch = library.scan_next(&later.job_id).unwrap();
+        for file in batch.files {
+            assert!(library.scan_read(&later.job_id, &file.file_id).is_err());
+        }
+        if batch.done {
+            break;
+        }
+    }
+    library.scan_finish(&later.job_id).unwrap();
+    assert_eq!(library.search(&query()).unwrap().total, 0);
+    // Once the file is plain again, a scan indexes it as before.
+    let plain = protect_and_save(
+        &workspace,
+        &sealed,
+        ProtectionRequest::RemoveOpenPassword {
+            current: Secret::new("a long enough phrase"),
+        },
+        &path,
+    );
+    assert!(
+        !workspace
+            .lock()
+            .unwrap()
+            .is_sealed(&plain.document_id)
+            .unwrap()
+    );
+    finish(&library, &root);
+    assert_eq!(library.search(&query()).unwrap().total, 1);
+}
+
+#[test]
+fn catalog_details_follow_the_sealed_state_on_disk_not_the_live_password() {
+    use crate::{password_crypto::Secret, password_lock::ProtectionRequest};
+    let (directory, library, workspace, _) = fixture();
+    let path = directory.path().join("secret.tabplayer");
+    write_project(&path, &Project::blank()).unwrap();
+    let opened = add(&library, &workspace, &path);
+    let sealed = protect_and_save(
+        &workspace,
+        &opened,
+        ProtectionRequest::SetOpenPassword {
+            current: None,
+            password: Secret::new("a long enough phrase"),
+        },
+        &path,
+    );
+    // The password is taken off in this session, but the removal is not saved: the file on disk is still sealed.
+    let removed = crate::password_lock::apply_protection_with(
+        &workspace,
+        &sealed,
+        ProtectionRequest::RemoveOpenPassword {
+            current: Secret::new("a long enough phrase"),
+        },
+        crate::password_crypto::KdfParams::new(64, 1, 1).unwrap(),
+    )
+    .unwrap();
+    let removed = DocumentRevision {
+        document_id: removed.document_id,
+        revision: removed.revision,
+    };
+    assert!(
+        workspace
+            .lock()
+            .unwrap()
+            .document(&removed.document_id)
+            .unwrap()
+            .snapshot
+            .dirty
+    );
+    success(&library, &workspace, &removed);
+    let snapshot = library
+        .metadata_ack(&removed, metadata("Reopened Secret"), &workspace)
+        .unwrap();
+    assert!(
+        snapshot
+            .recents
+            .iter()
+            .all(|entry| entry.metadata.is_none())
+    );
+    let catalog = directory.path().join("file-library-v1/catalog.json");
+    assert!(
+        !fs::read_to_string(catalog)
+            .unwrap()
+            .contains("Reopened Secret")
+    );
+}

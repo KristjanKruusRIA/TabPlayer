@@ -464,6 +464,33 @@ impl FileLibrary {
             Err(error) => Err(error),
         }
     }
+    /// Records a successful save. A score saved under a password to open first leaves the folder index, so no search can
+    /// find it by what it holds in the moment between the save and the next scan.
+    pub(crate) fn record_saved(&self, receipt: Option<NativeFileReceipt>, sealed: bool) {
+        if sealed {
+            if let Some(receipt) = &receipt {
+                self.scrub_protected(&receipt.path);
+            }
+        }
+        self.record_success(receipt);
+    }
+    /// A score has just been saved password-protected, or is known to be: its details leave the folder index at once.
+    /// A failure is shown as the Library's warning, since the save itself succeeded.
+    pub(crate) fn scrub_protected(&self, path: &Path) {
+        let Ok(core) = locked(&self.core) else {
+            return;
+        };
+        let Ok(index) = core.index.clone() else {
+            return;
+        };
+        drop(core);
+        let result = index.scrub_file(&history_identity(path));
+        if let Err(error) = result {
+            if let Ok(mut core) = locked(&self.core) {
+                core.warning = Some(error);
+            }
+        }
+    }
     pub(crate) fn metadata_ack(
         &self,
         document: &DocumentRevision,
@@ -488,6 +515,9 @@ impl FileLibrary {
             let record = core.receipts.iter().find(|record| record.native.document == *document && record.native.path == actual.path && record.native.digest == actual.digest).ok_or("Metadata requires the exact successful file operation for this document revision.")?;
             if sealed {
                 // The catalog is a plain file: a protected score leaves no details in it, and loses any it had.
+                if let Ok(index) = core.index.as_ref() {
+                    let _ = index.scrub_file(&record.native.path);
+                }
                 return store.strip_recent_metadata(&record.native.path);
             }
             store.enrich_recent(&record.native.path, &record.native.digest, metadata)

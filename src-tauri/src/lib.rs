@@ -200,7 +200,12 @@ fn save_document_to_path(
         let receipt = workspace.library_receipt(&saved.document_id).ok().flatten();
         (saved, receipt)
     };
-    library.record_success(receipt);
+    // A file saved under a password to open must show nothing in the folder index, whether or not it is in a folder.
+    let sealed = workspace
+        .lock()
+        .map(|workspace| workspace.is_sealed(&saved.document_id).unwrap_or(false))
+        .unwrap_or(false);
+    library.record_saved(receipt, sealed);
     Ok(saved)
 }
 

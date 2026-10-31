@@ -2,6 +2,7 @@ import { useEffect,useId,useRef,useState,type KeyboardEvent } from 'react';
 import { batchKinds,runBatch,summarize,TRUNCATED_NOTE,type BatchBridge,type BatchKind,type BatchRow,type BatchScan } from './convert';
 import type { Probe } from './probe';
 import { nativeBatchBridge } from './bridge';
+import { useI18n } from '../i18n';
 import './batch-convert.css';
 
 const message=(error:unknown)=>error instanceof Error?error.message:String(error);
@@ -12,6 +13,7 @@ type Phase='idle'|'picking'|'scanning'|'running'|'done';
  * originals are only read, and the open score is never touched. The report lists every file.
  */
 export function BatchConvertDialog({busy,bridge=nativeBatchBridge,probe,onClose}:{busy:boolean;bridge?:BatchBridge;probe?:Probe;onClose:()=>void}) {
+  const { t } = useI18n();
   const [source,setSource]=useState<string|null>(null),[destination,setDestination]=useState<string|null>(null);
   const [kinds,setKinds]=useState<Set<BatchKind>>(()=>new Set(batchKinds.filter(kind=>kind.on).map(kind=>kind.id)));
   const [keepFolders,setKeepFolders]=useState(true),[phase,setPhase]=useState<Phase>('idle'),[problem,setProblem]=useState<string|null>(null);
@@ -57,11 +59,11 @@ export function BatchConvertDialog({busy,bridge=nativeBatchBridge,probe,onClose}
   return <div className="dialog-backdrop" onMouseDown={event=>{if(event.target===event.currentTarget)close();}}>
     <form ref={form} role="dialog" aria-modal="true" aria-labelledby={heading} aria-describedby={hint} aria-busy={working} className="batch-convert" onSubmit={event=>{event.preventDefault();if(ready)void convert();}}
       onKeyDown={event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();if(running)stop();else close();}else if(event.key==='Tab')trap(event);}}>
-      <h2 id={heading}>Batch convert scores</h2>
+      <h2 id={heading}>{t('batch.title')}</h2>
       <p id={hint} className="muted">Converts every score of the chosen types in a folder and its subfolders to the current Guitar Pro format. The originals are only read, and each result is saved as a new file. The score you have open is not changed.</p>
-      <div className="batch-folder"><button type="button" disabled={working} onClick={()=>void pick('source')}>Choose source folder…</button><span aria-label="Source folder">{source??'No folder chosen'}</span></div>
-      <div className="batch-folder"><button type="button" disabled={working} onClick={()=>void pick('destination')}>Choose destination folder…</button><span aria-label="Destination folder">{destination??'No folder chosen'}</span></div>
-      <fieldset disabled={working}><legend>File types</legend>
+      <div className="batch-folder"><button type="button" disabled={working} onClick={()=>void pick('source')}>{t('batch.choose_source')}</button><span aria-label="Source folder">{source??'No folder chosen'}</span></div>
+      <div className="batch-folder"><button type="button" disabled={working} onClick={()=>void pick('destination')}>{t('batch.choose_dest')}</button><span aria-label="Destination folder">{destination??'No folder chosen'}</span></div>
+      <fieldset disabled={working}><legend>{t('batch.file_types')}</legend>
         {batchKinds.map(kind=><label key={kind.id} className="check"><input type="checkbox" checked={kinds.has(kind.id)} onChange={event=>toggle(kind.id,event.target.checked)}/>{kind.label}</label>)}
         <label className="check"><input type="checkbox" checked={keepFolders} onChange={event=>setKeepFolders(event.target.checked)}/>Keep the subfolders in the destination</label>
       </fieldset>
@@ -69,9 +71,9 @@ export function BatchConvertDialog({busy,bridge=nativeBatchBridge,probe,onClose}
       {rows&&<div className="batch-report"><table aria-label="Conversion report"><thead><tr><th scope="col">File</th><th scope="col">Result</th><th scope="col">Details</th></tr></thead>
         <tbody>{rows.map((row,index)=><tr key={index} data-status={row.status}><th scope="row">{row.relative}</th><td>{row.status}</td><td>{row.detail}</td></tr>)}</tbody></table></div>}
       <div className="dialog-actions">
-        <button type="submit" className="primary" disabled={!ready}>Convert</button>
-        {running?<button ref={cancelButton} type="button" onClick={stop}>Cancel conversion</button>:null}
-        <button ref={closeButton} type="button" disabled={working} onClick={close}>Close</button>
+        <button type="submit" className="primary" disabled={!ready}>{t('batch.convert_btn')}</button>
+        {running?<button ref={cancelButton} type="button" onClick={stop}>{t('batch.cancel_conversion')}</button>:null}
+        <button ref={closeButton} type="button" disabled={working} onClick={close}>{t('dialog.close')}</button>
       </div>
     </form>
   </div>;

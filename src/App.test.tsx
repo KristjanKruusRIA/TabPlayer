@@ -1238,3 +1238,44 @@ it('a drum kit change is a sound edit that keeps the music selection',async()=>{
   fireEvent.click(exposeFunctionalControl(screen.getByText('Selected playback',{selector:'summary'})));click('Play selection');
   expect(integration.playSelection).toHaveBeenCalledWith({kind:'bars',tracks:[1],firstBar:0,lastBar:0},expect.anything());
 },60000);
+it('switches application language at runtime through View preferences and updates shell, transport and top bar strings',async()=>{
+  const c=await setup();
+  const fileMenu=openCommand('File');
+  expect(within(fileMenu).getByRole('button',{name:'New'})).toBeVisible();
+  expect(screen.getByRole('button',{name:'Undo'})).toHaveAttribute('title',expect.stringContaining('Undo'));
+  
+  const viewMenu=openCommand('View');
+  const langSelect=within(viewMenu).getByLabelText('Language');
+  expect(langSelect).toHaveValue('system');
+
+  fireEvent.change(langSelect,{target:{value:'et'}});
+  await waitFor(()=>expect(screen.getByRole('button',{name:'Võta tagasi'})).toBeInTheDocument());
+  expect(screen.getByRole('button',{name:'Võta tagasi'})).toHaveAttribute('title',expect.stringContaining('Võta tagasi'));
+  expect(screen.getByText('Fail',{selector:'summary'})).toBeInTheDocument();
+  expect(screen.getByText('Vaade',{selector:'summary'})).toBeInTheDocument();
+  expect(screen.getByText('Abi',{selector:'summary'})).toBeInTheDocument();
+  expect(screen.getByRole('button',{name:'Esita'})).toBeInTheDocument();
+  expect(screen.getByRole('button',{name:'Peata'})).toBeInTheDocument();
+  expect(window.localStorage.getItem('tabplayer.language')).toBe('et');
+
+  const etViewMenu=openCommand('Vaade');
+  const etLangSelect=within(etViewMenu).getByLabelText('Keel');
+  fireEvent.change(etLangSelect,{target:{value:'de'}});
+  await waitFor(()=>expect(screen.getByRole('button',{name:'Rückgängig'})).toBeInTheDocument());
+  expect(screen.getByRole('button',{name:'Rückgängig'})).toHaveAttribute('title',expect.stringContaining('Rückgängig'));
+  expect(screen.getByText('Datei',{selector:'summary'})).toBeInTheDocument();
+  expect(screen.getByText('Ansicht',{selector:'summary'})).toBeInTheDocument();
+  expect(screen.getByText('Hilfe',{selector:'summary'})).toBeInTheDocument();
+  expect(screen.getByRole('button',{name:'Abspielen'})).toBeInTheDocument();
+  expect(screen.getByRole('button',{name:'Stopp'})).toBeInTheDocument();
+  expect(window.localStorage.getItem('tabplayer.language')).toBe('de');
+
+  const deViewMenu=openCommand('Ansicht');
+  const deLangSelect=within(deViewMenu).getByLabelText('Sprache');
+  fireEvent.change(deLangSelect,{target:{value:'en'}});
+  await waitFor(()=>expect(screen.getByRole('button',{name:'Undo'})).toBeInTheDocument());
+  expect(screen.getByText('File',{selector:'summary'})).toBeInTheDocument();
+  expect(screen.getByText('View',{selector:'summary'})).toBeInTheDocument();
+  expect(screen.getByText('Help',{selector:'summary'})).toBeInTheDocument();
+  window.localStorage.removeItem('tabplayer.language');
+});

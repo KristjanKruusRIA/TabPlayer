@@ -3,9 +3,10 @@ import type { CabinetIrRef } from '../edit-types';
 import { announceCabinetLibrary, cabinetIrs, irDuration, irNotice, type CabinetIrEntry, type CabinetIrStatus } from './cabinet-ir';
 
 /**
- * Picks the user's own cabinet impulse response for a cabinet block, imports one into the personal library, takes one
- * out of it, and trims its level. The response plays in place of the built-in model while the library has it; where it
- * does not, a notice says so and the model plays, and nothing in the document changes.
+ * Picks a cabinet impulse response for a cabinet block from the responses that ship with TabPlayer or the user's own
+ * library, imports one, takes one out of the library, and trims its level. The response plays in place of the built-in
+ * model while the library has it; where it does not, a notice says so and the model plays, and nothing in the document
+ * changes.
  */
 export function CabinetResponse({ir,model,label,scope,onChange,onLibraryChange}:{
   ir:CabinetIrRef|undefined;
@@ -45,7 +46,9 @@ export function CabinetResponse({ir,model,label,scope,onChange,onLibraryChange}:
       const now=latest.current;let note='';
       if(now.scope!==opened)note=' The track changed meanwhile, so no sound was changed; choose it from the list.';
       else if(now.ir?.id!==entry.id)now.onChange({id:entry.id,name:entry.name,levelDb:now.ir?.levelDb??0});
-      setMessage(`Imported “${entry.name}” (${irDuration(entry.durationMs)}).${entry.notice?` ${entry.notice}`:''}${note}`);
+      setMessage(entry.bundled
+        ?`“${entry.name}” already ships with TabPlayer, so nothing was copied.${note}`
+        :`Imported “${entry.name}” (${irDuration(entry.durationMs)}).${entry.notice?` ${entry.notice}`:''}${note}`);
     } catch(e) { setProblem(String(e instanceof Error?e.message:e)); }
   };
   const remove=async()=>{
@@ -72,12 +75,12 @@ export function CabinetResponse({ir,model,label,scope,onChange,onLibraryChange}:
       {ir&&!listed&&<option value={ir.id}>{ir.name} (not in this library)</option>}
     </select></label>
     <button aria-label={label('Import cabinet impulse response')} onClick={()=>void importFile()}>Import impulse response…</button>
-    <button aria-label={label('Remove cabinet impulse response from library')} disabled={!listed} onClick={()=>void remove()}>Remove from library</button>
+    <button aria-label={label('Remove cabinet impulse response from library')} disabled={!listed||listed.bundled} title={listed?.bundled?'Bundled responses ship with TabPlayer.':undefined} onClick={()=>void remove()}>Remove from library</button>
     {ir&&<label>Impulse response level (dB)<input aria-label={label('Cabinet impulse response level (dB)')} type="number" min={-12} max={12} step={.5} value={draft??ir.levelDb}
       onChange={e=>setDraft(e.target.value)} onBlur={commit} onKeyDown={e=>{if(e.key==='Enter')commit();else if(e.key==='Escape')setDraft(null);}}/></label>}
     {warning&&<p className="sound-ir-notice" role="status">{warning}</p>}
     {message&&<p className="muted" role="status">{message}</p>}
     {problem&&<p className="sound-ir-problem" role="alert">{problem}</p>}
-    <p className="muted">WAV files, mono or stereo, up to 2 seconds. A copy is kept in your library; documents only name it.</p>
+    <p className="muted">WAV files, mono or stereo, up to 2 seconds. Bundled responses ship with TabPlayer; imported files are copied into your library. Documents only name a response.</p>
   </div>;
 }

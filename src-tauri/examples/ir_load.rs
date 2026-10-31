@@ -216,7 +216,7 @@ fn spikes(kernel: &IrKernel, count: usize, block: usize, apart: bool) -> (f64, f
 fn main() {
     let dir = std::env::temp_dir().join(format!("ir-load-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
-    let library = cabinet_ir::install(dir.join("library"));
+    let library = cabinet_ir::install(dir.join("library"), None);
     let mut low = 0.0f32;
     let response: Vec<f32> = noise(48_000, 12)
         .iter()

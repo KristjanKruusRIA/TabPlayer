@@ -896,7 +896,12 @@ pub fn run() {
             // A library that cannot be placed leaves the built-in cabinets playing, and is tried again when a command
             // first asks for it. It never stops the app starting.
             if let Ok(directory) = audio::cabinet_ir::library_directory(app.handle()) {
-                audio::cabinet_ir::install(directory);
+                let bundled = app
+                    .path()
+                    .resource_dir()
+                    .ok()
+                    .map(|directory| directory.join("cabinet-irs"));
+                audio::cabinet_ir::install(directory, bundled);
             }
             let directory = session::session_directory(app.path().app_data_dir()?)?;
             let library_directory = directory.join("file-library-v1");

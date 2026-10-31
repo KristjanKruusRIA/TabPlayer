@@ -2,21 +2,26 @@
 
 ## Behavior
 
-The drum view is a three-quarter studio kit with 17 pieces: two kicks, six toms, snare, hi-hat and seven cymbals on a tom rack and boom stands. A scrolling Percussion row below it holds 35 more instruments, each with its own drawing. Every standard articulation in `src/editor/percussion-catalog.ts` belongs to exactly one piece. Pressing a piece enters its plain hit, or removes whichever of its hits the beat holds. When a piece with several hits has focus, a row of named hits appears (for example rim shot, side stick) and each one enters or removes that hit alone.
+The drum view is a three-quarter studio kit with 17 pieces: two kicks, six toms, snare, hi-hat and seven cymbals on a tom rack and boom stands. A scrolling Percussion row below it holds 35 more instruments, each with its own drawing. Every articulation belongs to exactly one instrument, by the element it names (a track's own table is read the same way; only an element nobody knows falls back to its sounding pitch).
+
+- Pressing an instrument enters its plain hit, chosen by intent and listed per instrument (`hit` in `src/instruments/drum-kit.ts`): the ride and Ride 2 their middle, the triangle its open hit and the cuica its open sound, never a mute. A track's own hit nearest that plain hit by sound, notehead and technique wins over a standard one. Pressing it again removes the hit of that instrument the beat holds. Choosing what is already there records nothing.
+- In edit mode what the beat holds is identified by articulation, so the lit instrument, its `Remove ...` name and the note list agree (Grancassa, pitch 43, does not light the high floor tom).
+- A piece with several hits shows a row of named hits (rim shot, side stick, edge 2, ...) only while the piece or the row has focus. Moving focus from the piece to the row keeps it. On a pitched or fretted staff in Drums mode the row is refused with `aria-disabled`, as the pieces are.
+- Cymbal targets keep at least 16 units of depth (the splash was about 6 px tall in the compact view) and their names sit just under the target.
 
 ## Evidence
 
-- `npx tsc --noEmit -p .` passes and `npx vitest run src/instruments` passes 79 of 79.
-- The new test proves 94 distinct articulation ids map one to one onto instruments, every percussion instrument has a drawing, and no sounding pitch lights two instruments.
-- Busy refusal of the named hits and focus staying available are covered by test.
-- Kit and percussion drawings were reviewed in rendered screenshots from the real components.
+- `npx tsc --noEmit -p .` passes. `npx vitest run src/instruments src/App.test.tsx` passes 232 of 237 when run together: `src/instruments` passes 91 of 91 and `src/App.test.tsx` alone passes 146 of 146, but together 4 to 5 App tests time out at 5 s under load (not investigated further).
+- Tests cover a Guitar Pro style 60 entry custom table (crash, piatti, reverse, ride, bell tree, metronome, snare, Ride 2 each on its own element although they share pitches), owner against output for every standard articulation, the plain hit of every instrument with several hits, shared-pitch removal, edit-mode lighting by articulation (ids 114, 31, 33, 115), hit names, row visibility with focus moving from piece to row, and the pitched-staff refusal.
+- `tests/desktop/native-audio.mjs` waited for `[data-percussion-key="69"]`, which is now the Cabasa; it waits for `[data-percussion="cabasa"][data-active="true"]`, proving the same thing (a fretted note shown in the drum view lights hardware during playback). Not run.
 
 ## Review
 
-Pending. Not yet reviewed by a fresh reviewer.
+Pending. Not yet reviewed by a fresh reviewer after the rework.
 
 ## Limits
 
-- Not yet run in the built app, and `tests/desktop/instruments.mjs` was edited without being run.
-- During playback only a pitch is known, so instruments that share one light once or not at all: cowbell low and high (56, lights Cowbell), maraca right (70), bell tree, jingle bell, grancassa, piatti, reverse cymbal, metronome and golpe. In edit mode they are identified exactly.
-- The kit is seen as one fixed layout. It does not change with the track's own articulations; custom ones attach to a piece by pitch.
+- Not yet run in the built app; `tests/desktop/instruments.mjs` and `tests/desktop/native-audio.mjs` were edited without being run.
+- During playback only a pitch is known, so some hits light another instrument: snare side stick 2 (id 31, sounds 40) lights Electric snare; Metronome (33, 34, sounds 37 and 38) lights Snare; Piatti (115, 116) lights Crash; Reverse cymbal (30) lights Crash; Grancassa (114) lights High floor; Bell tree (84, 123) and Jingle bell (83) light Ride; the low and high cowbells (99, 100, 102, 103) light Cowbell; Right maraca (119, 120) lights Left maraca; Golpe (124, 125) lights Conga high. Edit mode is exact. The test pins this list.
+- The kit is one fixed layout. It does not change with the track's own articulations. A custom hit whose element nobody knows attaches by pitch, and a track whose table hides every standard hit of a piece leaves that piece with no articulation (its name says so).
+- If a table hides a piece's plain hit but leaves a standard variant visible (a Guitar Pro table of 60 entries still shows crash high choke, id 97), pressing the piece enters that variant.

@@ -1,7 +1,7 @@
 import type { model } from '@coderline/alphatab';
-import { instrumentHits, type Instrument } from './drum-kit';
+import { defaultArticulation, instrumentHits, type Instrument } from './drum-kit';
 import type { EditCommand } from '../edit-types';
-import { percussionChoices, resolvePercussionArticulation } from '../editor/percussion-catalog';
+import { resolvePercussionArticulation } from '../editor/percussion-catalog';
 import type { BeatTarget } from '../project';
 import { formatPitch } from '../tuning';
 import { fretExists, fretKey, getBanjoDrone, droneString } from '../editor/banjo-drone';
@@ -76,16 +76,6 @@ export function keyTarget(ctx: EntryContext, key: number): EntryTarget {
   return { name, action: { command: { type: 'addPitchedNote', target, pitch }, follow: { note: { pitch } } } };
 }
 
-/** The default articulation of a kit piece on this track, if the track has one. The track's own table comes first, in
- *  the piece's key order. Otherwise the standard plain hit, whose id is the piece's key (such as 38, not the rim
- *  shot 91, for the snare), is preferred over the standard variants that share its output. */
-export function defaultArticulation(track: model.Track, keys: readonly number[]): number | null {
-  const choices = percussionChoices(track), custom = choices.filter(choice => choice.id < track.percussionArticulations.length);
-  const pick = (list: typeof choices) => keys.map(key => list.find(choice => choice.outputMidiNumber === key)).find(Boolean);
-  const plain = keys.map(key => choices.find(choice => choice.id === key && choice.outputMidiNumber === key)).find(Boolean);
-  return (pick(custom) ?? plain ?? pick(choices))?.id ?? null;
-}
-
 /** A pad for a note outside the kit: clicking it removes the first such note. */
 export function padTarget(ctx: EntryContext, key: number, label: string): EntryTarget {
   if (!ctx.staff.isPercussion) return { name: label, action: null };
@@ -99,13 +89,15 @@ export function instrumentTarget(ctx: EntryContext, instrument: Instrument): Ent
   if (!staff.isPercussion) return { name: label, action: null };
   const hits = instrumentHits(staff.track, instrument), present = ctx.notes.find(note => hits.some(hit => hit.id === note.articulation));
   if (present) return { name: `Remove ${label}`, action: { command: { type: 'removeNoteByIndex', target, noteIndex: present.index }, follow: { note: null } } };
-  const articulation = defaultArticulation(staff.track, instrument.keys) ?? hits[0]?.id ?? null;
+  const articulation = defaultArticulation(staff.track, instrument);
   if (articulation === null) return { name: `${label} (no articulation on this track)`, action: null };
   return { name: label, action: { command: { type: 'addPercussionNote', target, articulation }, follow: { note: { articulation } } } };
 }
 /** One named hit of an instrument, such as the snare's rim shot. */
 export function hitTarget(ctx: EntryContext, articulation: number, label: string): EntryTarget {
-  const { target } = ctx, present = ctx.notes.find(note => note.articulation === articulation);
+  const { target } = ctx;
+  if (!ctx.staff.isPercussion) return { name: label, action: null };
+  const present = ctx.notes.find(note => note.articulation === articulation);
   return present ? { name: `Remove ${label}`, action: { command: { type: 'removeNoteByIndex', target, noteIndex: present.index }, follow: { note: null } } } : { name: label, action: { command: { type: 'addPercussionNote', target, articulation }, follow: { note: { articulation } } } };
 }
 

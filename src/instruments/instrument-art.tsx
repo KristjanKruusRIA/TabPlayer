@@ -156,6 +156,8 @@ export const shellHeightOf=(piece:DrumPiece)=>shellHeights[piece.id]??38;
 const isKick=(piece:DrumPiece)=>piece.id.startsWith('kick');
 /** How much of a round surface shows from a three-quarter view above the kit. */
 export const surfaceDepthOf=(piece:DrumPiece)=>piece.r*(cymbalIds.includes(piece.id)?.2:.3);
+/** How far a piece's target reaches down from its centre: a cymbal seen edge-on is a sliver, so its target keeps a thumb-sized depth, and its name sits just under it. */
+export const targetDepthOf=(piece:DrumPiece)=>cymbalIds.includes(piece.id)?Math.max(surfaceDepthOf(piece),16):surfaceDepthOf(piece);
 /** Where each stand meets the floor, further up the picture for what stands further back, and where a boom arm leaves it. */
 const stands:Record<string,{x:number;foot:number;top:number}>={splash:{x:48,foot:250,top:58},crash:{x:128,foot:246,top:112},'crash-2':{x:252,foot:236,top:98},ride:{x:556,foot:238,top:118},china:{x:640,foot:232,top:104},'ride-2':{x:806,foot:258,top:126},'hi-hat':{x:84,foot:284,top:140}};
 const rackY=134,rack=`M226 ${rackY}H540M236 ${rackY}V242M530 ${rackY}V242M216 242H256M510 242H550`;
@@ -199,7 +201,7 @@ function DrumsArtBase({pieces}:{pieces:readonly DrumPiece[]}) {
           <path d={`M${-r*.88} ${-ry*.25}Q${-r*.3} ${-ry*1.05} ${r*.34} ${-ry*.8}`} fill="none" stroke="#fff6d4" strokeWidth="2" opacity=".55" strokeLinecap="round"/>
           {piece.id==='china'?<path d={`M${-r} 0Q0 ${-ry*1.8} ${r} 0`} fill="none" stroke="#f6dc98" strokeWidth="2" opacity=".75"/>:null}
           <ellipse cx="0" cy={-ry*.14} rx={r*.17} ry={ry*.42} fill="#f0d186" stroke="#7a5a24" strokeWidth=".7"/><rect x="-2.4" y={-ry*.5-5} width="4.8" height="4" rx="1" fill="#1f2224"/><path d={`M-4 ${-ry*.5-5.5}H4`} stroke="#d4dad9" strokeWidth="1.4"/>
-          <text className="drum-label" x="0" y={ry+13} textAnchor="middle" transform={upright}>{piece.label}</text>
+          <text className="drum-label" x="0" y={targetDepthOf(piece)+11} textAnchor="middle" transform={upright}>{piece.label}</text>
         </> : isKick(piece) ? <>
           <circle cx="15" cy="-9" r={r} fill={`url(#${id}-shell)`} stroke="#23292c" strokeWidth="1.2"/><circle cx="15" cy="-9" r={r} fill={`url(#${id}-wrap)`}/><circle cx="15" cy="-9" r={r-2} fill="none" stroke={chrome} strokeWidth="2.4"/>
           {tube(`M${-r*.82} ${r*.56}L${-r-12} ${foot(254)}`,'spur-left')}{tube(`M${r*.82} ${r*.56}L${r+12} ${foot(254)}`,'spur-right')}

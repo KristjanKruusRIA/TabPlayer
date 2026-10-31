@@ -1,4 +1,5 @@
 import { model, rendering, Settings } from '@coderline/alphatab';
+import '../tremolo-guard';
 
 const sources = new WeakMap<model.Note, boolean>();
 let used = false;

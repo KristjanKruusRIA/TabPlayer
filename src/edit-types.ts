@@ -46,7 +46,10 @@ export interface StaffSettings {
 export interface ChordDefinition { name: string; firstFret: number; frets: number[] }
 /** How a track's stringed notes are performed; each field is absent at its default (automatic style, normal palm mutes, no accent, no automatic let ring or brush). */
 export interface TrackInterpretation { style?: 'pick'|'fingers'; palmMute?: 'light'|'heavy'; accent?: 'light'|'strong'; letRing?: true; brush?: 'down'|'up' }
-export interface ChannelMix { gain: number; pan: number; mute: boolean; solo: boolean; interpretation?: TrackInterpretation }
+export type DrumKitElement = 'kick'|'snare'|'hats'|'toms'|'cymbals'|'other';
+export interface DrumElementMix { gain: number; pan: number; mute: boolean; solo: boolean }
+export interface DrumKitMix { kick?: DrumElementMix; snare?: DrumElementMix; hats?: DrumElementMix; toms?: DrumElementMix; cymbals?: DrumElementMix; other?: DrumElementMix }
+export interface ChannelMix { gain: number; pan: number; mute: boolean; solo: boolean; interpretation?: TrackInterpretation; drumKit?: DrumKitMix }
 /** A cabinet impulse response by the identity it has in a user's library (32 hex digits of the file's hash), with the name it was picked under and a level trim. Documents never hold the audio. */
 export interface CabinetIrRef { id:string;name:string;levelDb:number }
 export interface FxSettings {

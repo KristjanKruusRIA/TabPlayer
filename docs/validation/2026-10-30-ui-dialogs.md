@@ -17,17 +17,7 @@ This document records the resolution of findings from the independent review rej
 ## Evidence
 - **TypeScript:** `npx tsc --noEmit -p .` completed cleanly with zero diagnostics.
 - **Component & Unit Tests:** All failing-first unit tests were confirmed failing before implementation and passing after:
-  - `src/ui/Controls.test.tsx` (13/13 passed)
-  - `src/export/ExportDialog.test.tsx` (28/28 passed)
-  - `src/library/LibraryDialog.test.tsx` (12/12 passed)
-  - `src/workspace/AsciiTabImportDialog.test.tsx` (9/9 passed)
-  - `src/workspace/MidiImportDialog.test.tsx` (10/10 passed)
-  - `src/harmony/HarmonyChordDialog.test.tsx` (22/22 passed)
-  - `src/tuning/SavedTuningsDialog.test.tsx` (15/15 passed)
-  - `src/editor/CommandPalette.test.tsx` (6/6 passed)
-  - `src/engraving/PageLayoutPanel.test.tsx` (31/31 passed)
-  - `src/harmony/ScaleToolPanel.test.tsx` (5/5 passed)
-  - `src/harmony/ScaleDiagramEditor.test.tsx` (12/12 passed)
+  - The counts first recorded here for Library (12), ASCII (9), MIDI (10), Palette (6) and ScaleDiagramEditor (12) were wrong. The true counts are in the second round below.
 - **App Integration:** `npx vitest run src/App.test.tsx --testTimeout=60000` passed.
 
 ## Review
@@ -45,3 +35,26 @@ All 9 numbered review findings and all LOW items have been addressed at their so
 - **Segmented merge boundary:** Only the minimal same-value guard was applied to `Segmented.tsx` to prevent merge conflicts with ongoing work on the rig branch.
 - **Desktop test runner:** The desktop tests in `tests/desktop/` are Playwright-over-Tauri test scripts executed against native desktop builds with an active display server. Their selector contracts have been updated to match the DOM changes, while verification in this headless CI/worktree environment relies on Vitest component and App suites.
 - **Backdrop dismissal:** Modals with `dismissOnBackdrop: false` deliberately ignore clicks outside their panels; users must explicitly use Escape or dialog action buttons to close them.
+
+## Second review round (2026-10-31)
+
+A second review rejected the branch again. After merging `feat/gp8-parity` (conflicts in Segmented, CommandPalette, ExportDialog resolved keeping both sides):
+
+- **Focus recovery (High):** the `focusout` handler in `Dialog.tsx` ran in a microtask, while focus was still on `<body>` mid-move, so it sent focus back to the first control on every Tab and mouse click. It now waits one task and acts only if `activeElement` is `<body>` or gone. The effect no longer depends on `closeDisabled`, so a busy change no longer re-focuses, re-captures the opener or rebuilds the inert set.
+- **Busy rule:** a control holding focus is never `disabled` for busy. `busyGuard` (aria-disabled, refusing handlers, `unavailable` for other reasons) now covers the Dialog close button, Segmented options, ASCII and MIDI import, Export, Library, Harmony chord actions and library buttons, ScaleDiagramEditor and PageLayoutPanel Apply. New `busyRegion` does the same for the groups that used `<fieldset disabled>` (Export body, Harmony body, Scale browser, page layout): aria-disabled plus capture handlers that refuse clicks, keys, typing, paste and changes. The focus-relocation effects those groups needed are removed. The focus trap selector keeps aria-disabled controls and now includes `summary`.
+- **Backdrop close:** restored on Help, ASCII, MIDI and the palette through `dismissOnBackdrop`; the Dialog refuses it while `closeDisabled` (importing), as before.
+- **Palette anchor:** `.tp-dialog-backdrop.command-palette-backdrop` now outranks the shared backdrop.
+- **PageLayoutPanel:** `<summary>` lost `tabIndex={-1}`.
+- **MIDI import:** the fieldset and selects no longer drop focus; a failed import leaves focus on Import, so the refocus effect is gone.
+- **Desktop drivers:** midi-import, harmony (Name mode), scale-diagrams (Default and Mark shape), engraving (exact radio names; "Score" also matched "Score and tab") and master-effects (File type, Sample rate, Bit depth) now use radio groups.
+- Export width is already 620 px and ChordDiagramPreview already uses the shared tokens; neither was changed.
+
+### Evidence
+- `npx tsc --noEmit -p .` clean.
+- Edge (Playwright) on a throwaway harness: Tab cycles through the controls of the seg, midi, export, help, palette and ascii dialogs and mouse clicks keep the clicked field focused; a backdrop click closes help, ascii, midi and palette, not export. The harness was not committed.
+- Test counts after this round, all passing: Controls 20, Export 32, Library 20, ASCII 7, MIDI 9, HarmonyChordDialog 22, SavedTunings 15, CommandPalette 8, PageLayoutPanel 31, ScaleToolPanel 5, ScaleDiagramEditor 14, help 4, useBusyGuard 4.
+- Full `npx vitest run`: every file passed except tuning-ui, WorkspaceApp and midi-import, which timed out while other agents loaded the machine; those three and App.test.tsx (239 tests, 2 skipped corpus files) pass when run alone with `--testTimeout=60000`.
+
+### Limits
+- Desktop drivers were edited to the new roles but not run; they need a desktop build.
+- Controls that stay natively `disabled` are those that are never reached with focus for a busy reason (for example the normalize level input and tuplet options).

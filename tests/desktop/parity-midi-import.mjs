@@ -40,6 +40,9 @@ try{
     assert.equal(await dialog.getByRole('button',{name:'Choose MIDI file…'}).evaluate(node=>node===document.activeElement),true,'The file button takes focus.');
     return dialog;
   };
+  // Quantization and voices are radio groups of buttons now, not selects.
+  const grids={4:'Quarter note (1/4)',8:'Eighth note (1/8)',16:'16th note (1/16)',32:'32nd note (1/32)',64:'64th note (1/64)'};
+  const pick=(dialog,group,name)=>dialog.getByRole('radiogroup',{name:group,exact:true}).getByRole('radio',{name,exact:true}).click();
   const chooseFile=(dialog,name,buffer)=>dialog.locator('input[type="file"]').setInputFiles({name,mimeType:'audio/midi',buffer});
 
   // A cut-off file is refused with its reason, nothing opens and the open score is untouched.
@@ -91,9 +94,9 @@ try{
   dialog=await openDialog();
   await chooseFile(dialog,'Demo song.mid',demo);
   await dialog.getByRole('status').filter({hasText:/^Format 1, 3 parts/}).waitFor();
-  await dialog.getByLabel('Quantization').selectOption('8');
+  await pick(dialog,'Quantization',grids[8]);
   await dialog.getByLabel('Tuplets').selectOption('none');
-  await dialog.getByLabel('Voices per track').selectOption('1');
+  await pick(dialog,'Voices per track','1');
   await dialog.getByLabel('Guitar and bass as tablature').uncheck();
   await dialog.getByRole('list',{name:'Parts'}).getByText(/Acoustic Guitar \(steel\): notation/).waitFor();
   await dialog.getByRole('button',{name:'Import',exact:true}).click();
@@ -111,7 +114,7 @@ try{
     dialog=await openDialog();
     await chooseFile(dialog,'Sixteenths.mid',sixteenths);
     await dialog.getByRole('status').filter({hasText:/^Format 0, 1 part, 1 measure at 120 BPM\.$/}).waitFor();
-    await dialog.getByLabel('Quantization').selectOption(grid);
+    await pick(dialog,'Quantization',grids[grid]);
     await dialog.getByRole('status').filter({hasText:/^Format 0, 1 part/}).waitFor();
     await dialog.getByRole('button',{name:'Import',exact:true}).click();
     await dialog.waitFor({state:'detached'});await waitForWorkspaceIdle(page);

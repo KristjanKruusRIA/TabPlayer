@@ -30,8 +30,51 @@ it('workstation More playback Escape restores summary focus and Space does not i
   const {player}=fixture(),ancestor=vi.fn();render(<div onKeyDown={ancestor}><Transport player={player} measures={4} busy={false} cursor={cursor} selection={null}/></div>);const summary=more();fireEvent.click(summary);const seek=screen.getByLabelText('Seek measure');seek.focus();fireEvent.keyDown(seek,{key:'Escape'});expect(summary.closest('details')).not.toHaveAttribute('open');expect(summary).toHaveFocus();expect(ancestor).not.toHaveBeenCalled();fireEvent.keyDown(summary,{key:' '});expect(player.play).not.toHaveBeenCalled();expect(player.pause).not.toHaveBeenCalled();expect(player.stop).not.toHaveBeenCalled();
 });
 it('workstation primary Pause and Stop remain available during document and practice transitions',()=>{
-  const {player}=fixture(playback({playing:true,practicePending:true}));render(<Transport player={player} measures={4} busy cursor={cursor} selection={null}/>);expect(more()).toBeVisible();expect(screen.getByRole('button',{name:'Pause'})).toBeEnabled();expect(screen.getByRole('button',{name:'Stop'})).toBeEnabled();expect(screen.getByLabelText('Speed')).toBeDisabled();expect(screen.getByLabelText('Metronome')).toBeDisabled();fireEvent.click(screen.getByRole('button',{name:'Pause'}));fireEvent.click(screen.getByRole('button',{name:'Stop'}));expect(player.pause).toHaveBeenCalledOnce();expect(player.stop).toHaveBeenCalledOnce();
+  const {player}=fixture(playback({playing:true,practicePending:true}));render(<Transport player={player} measures={4} busy cursor={cursor} selection={null}/>);expect(more()).toBeVisible();expect(screen.getByRole('button',{name:'Pause'})).toBeEnabled();expect(screen.getByRole('button',{name:'Stop'})).toBeEnabled();expect(screen.getByRole('button',{name:'Slower'})).toHaveAttribute('aria-disabled','true');expect(screen.getByLabelText('Metronome')).toHaveAttribute('aria-disabled','true');fireEvent.click(screen.getByRole('button',{name:'Pause'}));fireEvent.click(screen.getByRole('button',{name:'Stop'}));expect(player.pause).toHaveBeenCalledOnce();expect(player.stop).toHaveBeenCalledOnce();
 });
 it('workstation hidden playback errors mark More playback while the native failure remains visible',()=>{
   const {player}=fixture(playback({error:'Audio device disconnected'}));render(<Transport player={player} measures={4} busy={false} cursor={cursor} selection={null}/>);const summary=more();expect(summary).toHaveTextContent('More playback · Error');expect(summary.closest('details')).not.toHaveAttribute('open');expect(screen.getByRole('alert')).toBeVisible();expect(screen.getByRole('alert')).toHaveTextContent('Audio device disconnected');
+});
+it('loop, speed, click and position are on the bar itself; only seek and passage choices wait behind More playback',()=>{
+  const {player}=fixture();render(<Transport player={player} measures={24} busy={false} cursor={cursor} selection={null}/>);
+  const bar=screen.getByRole('group',{name:'Transport'}),more=()=>screen.getByText(/^More playback/,{selector:'summary'}).closest('details')!;
+  for(const name of ['Loop start','Loop end','Metronome'])expect(screen.getByLabelText(name)).toBeVisible();
+  expect(screen.getByRole('group',{name:'Loop'})).toContainElement(screen.getByRole('button',{name:'Loop'}));
+  expect(screen.getByRole('group',{name:'Speed'})).toHaveTextContent('100%');expect(bar).toHaveTextContent('Bar 1of 24');
+  expect(more()).not.toHaveAttribute('open');expect(more().contains(screen.getByLabelText('Seek measure'))).toBe(true);expect(more().contains(screen.getByLabelText('Loop start'))).toBe(false);
+  fireEvent.change(screen.getByLabelText('Loop start'),{target:{value:'9'}});fireEvent.change(screen.getByLabelText('Loop end'),{target:{value:'12'}});fireEvent.click(screen.getByRole('button',{name:'Loop'}));expect(player.setLoop).toHaveBeenCalledWith(8,11);
+});
+it('speed steps through the preset list and stops at its ends',()=>{
+  const low=fixture(playback({speed:10}));render(<Transport player={low.player} measures={4} busy={false} cursor={cursor} selection={null}/>);
+  expect(screen.getByRole('button',{name:'Slower'})).toHaveAttribute('aria-disabled','true');fireEvent.click(screen.getByRole('button',{name:'Slower'}));expect(low.player.setSpeed).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button',{name:'Faster'}));expect(low.player.setSpeed).toHaveBeenLastCalledWith(25);cleanup();
+  const high=fixture(playback({speed:300}));render(<Transport player={high.player} measures={4} busy={false} cursor={cursor} selection={null}/>);
+  expect(screen.getByRole('button',{name:'Faster'})).toHaveAttribute('aria-disabled','true');fireEvent.click(screen.getByRole('button',{name:'Faster'}));expect(high.player.setSpeed).not.toHaveBeenCalled();
+});
+it('a focused Loop, Slower or Metronome keeps focus when the document goes busy and refuses until it is idle',()=>{
+  const {player}=fixture(),view=render(<Transport player={player} measures={4} busy={false} cursor={cursor} selection={null}/>);
+  for(const control of [screen.getByRole('button',{name:'Loop'}),screen.getByRole('button',{name:'Slower'}),screen.getByLabelText('Metronome')]){
+    control.focus();view.rerender(<Transport player={player} measures={4} busy cursor={cursor} selection={null}/>);
+    expect(control).not.toBeDisabled();expect(control).toHaveFocus();fireEvent.click(control);
+    view.rerender(<Transport player={player} measures={4} busy={false} cursor={cursor} selection={null}/>);
+  }
+  expect(player.setLoop).not.toHaveBeenCalled();expect(player.setSpeed).not.toHaveBeenCalled();expect(player.setPractice).not.toHaveBeenCalled();
+});
+it('the scrubber seeks to a bar: a key step at once, a drag once on release, and nothing while the document is busy',()=>{
+  const {player}=fixture(),view=render(<Transport player={player} measures={24} busy={false} cursor={cursor} selection={null}/>),scrub=()=>screen.getByRole('slider',{name:'Playback position'});
+  expect(scrub()).toHaveValue('1');expect(scrub()).toHaveAttribute('aria-valuetext','Bar 1 of 24');
+  fireEvent.change(scrub(),{target:{value:'5'}});expect(player.seekToMeasure).toHaveBeenCalledTimes(1);expect(player.seekToMeasure).toHaveBeenLastCalledWith(4);
+  fireEvent.pointerDown(scrub());fireEvent.change(scrub(),{target:{value:'9'}});fireEvent.change(scrub(),{target:{value:'12'}});expect(player.seekToMeasure).toHaveBeenCalledTimes(1);expect(scrub()).toHaveAttribute('aria-valuetext','Bar 12 of 24');
+  fireEvent.pointerUp(scrub());expect(player.seekToMeasure).toHaveBeenCalledTimes(2);expect(player.seekToMeasure).toHaveBeenLastCalledWith(11);
+  view.rerender(<Transport player={player} measures={24} busy cursor={cursor} selection={null}/>);expect(scrub()).toHaveAttribute('aria-disabled','true');expect(scrub()).not.toBeDisabled();
+  fireEvent.change(scrub(),{target:{value:'20'}});expect(player.seekToMeasure).toHaveBeenCalledTimes(2);
+});
+it('stylesheet rules that jsdom cannot apply: the bar stays one row, the popover opens upward, labels give way to glyphs under 1181px, the scrubber is a thin overlay',async()=>{
+  const {readFileSync}=await import('node:fs'),css=readFileSync('src/shell/transport.css','utf8'),shell=readFileSync('src/workstation/workstation-shell.css','utf8');
+  expect(css).toMatch(/\.transport>\.transport-primary\s*\{[^}]*flex-wrap:nowrap/);
+  expect(css).toMatch(/\.transport-more-content\s*\{[^}]*bottom:calc\(100% \+ 1px\)/);
+  expect(css).toMatch(/@media \(max-width:1180px\)[\s\S]*\.transport-label\s*\{[^}]*clip-path:inset\(50%\)/);
+  expect(css).toMatch(/input\.transport-scrub\s*\{[^}]*height:10px[^}]*min-height:0/);
+  expect(css).not.toMatch(/\.transport[^{}]*output\s*\{[^}]*min-width:135px/);
+  expect(shell).toMatch(/\.toolbar\s*\{[^}]*grid-template-columns:minmax\(0,1fr\) auto minmax\(0,1fr\)/);
 });

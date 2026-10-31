@@ -9,7 +9,7 @@ export interface HelpTopic {id:HelpTopicId;title:string;paragraphs:string[]}
 export const helpTopics:readonly HelpTopic[]=[
   {id:'start',title:'Getting started',paragraphs:[
     'Open a score with File → Open, start one with File → New, or pick an example or template from the Library.',
-    'The score sits in the middle, with the playback controls under the toolbar. Track tools are on the left, the inspector is on the right, and mixing, the instrument view and backing audio are in the bottom dock. View shows or hides each pane.',
+    'The score sits in the middle, with the playback controls in a bar along the bottom. Track tools are on the left, the inspector is on the right, and mixing, the instrument view and backing audio are in the bottom dock. View shows or hides each pane.',
     'Press F1 for help about the part of the window you are using. Inside another dialog, close it first.',
   ]},
   {id:'editing',title:'Editing the score',paragraphs:[
@@ -28,7 +28,7 @@ export const helpTopics:readonly HelpTopic[]=[
     'Most fields change nothing until you use the panel’s action button, such as Apply or Save.',
   ]},
   {id:'playback',title:'Playback and mixing',paragraphs:[
-    'Space plays or pauses. The playback controls under the toolbar play, stop and loop a selected passage, and More playback holds further options. Playback follows the score with a green cursor.',
+    'Space plays or pauses. The playback bar along the bottom plays, stop and loop a selected passage, and More playback holds further options. Playback follows the score with a green cursor.',
     'The bottom dock mixes tracks with volume, pan, mute and solo, shows the instrument view, and controls a backing recording.',
     'Choosing Mixer in View gives every track a channel strip and adds the master output. Dragging a fader or pan knob is heard as it moves and saved as one change that Undo reverses; Focus is for this session only and is not saved.',
   ]},

@@ -62,6 +62,20 @@ export async function revealDock(page,view) {
   if(await expand.isVisible())await expand.click();
 }
 
+const speedPresets=[10,25,50,75,100,125,150,200,250,300];
+/** The transport steps through its speed presets with Slower and Faster; this presses them until the readout shows `percent`. */
+export async function setPlaybackSpeed(page,percent) {
+  if(!speedPresets.includes(percent))throw new Error(`Unknown speed preset: ${percent}`);
+  const group=page.getByRole('group',{name:'Speed',exact:true}),readout=group.locator('.transport-speedvalue');
+  for(let attempt=0;attempt<speedPresets.length;attempt++) {
+    const text=await readout.textContent(),current=Number.parseFloat(text);
+    if(current===percent)return;
+    await group.getByRole('button',{name:percent<current?'Slower':'Faster',exact:true}).click();
+    await page.waitForFunction(([selector,previous])=>document.querySelector(selector)?.textContent!==previous,['.transport-speedvalue',text],{timeout:10000});
+  }
+  throw new Error(`Speed did not reach ${percent}%`);
+}
+
 export function revealPlaybackControls(page) {
   return openDisclosure(summary(page,/^More playback(?: · Error)?$/));
 }

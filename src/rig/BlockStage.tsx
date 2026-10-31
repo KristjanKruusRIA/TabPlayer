@@ -84,7 +84,7 @@ function AmpStage({editing,board}:{editing:SoundEditing;board:Board}) {
 
 /** The four placements as spots over a speaker, the model of cabinet and the mic's output. The microphone is its own block, so a
  * cabinet's stage offers its switch too. */
-function CabinetStage({editing,board,block,cabinetResponse}:{editing:SoundEditing;board:Board;block:'cabinet'|'microphone';cabinetResponse?:ReactNode}) {
+function CabinetStage({editing,board,block,cabinetResponse}:{editing:SoundEditing;board:Board;block:'cabinet'|'microphone';cabinetResponse?:(board:Board)=>ReactNode}) {
   const {fx,busy}=editing,mic=board.effects.microphone,off=!mic.enabled;
   const placements=(['close','standard','edge','room'] as const).map(value=>({value,label:<><span className="rig-spot-dot" aria-hidden="true"/><span className="rig-spot-name">{capital(value)}</span></>,style:{left:`${micSpots[value].x}%`,top:`${micSpots[value].y}%`,...(value==='close'?{flexDirection:'column-reverse' as const}:{})}}));
   return <div className="rig-cab-stage">
@@ -98,8 +98,7 @@ function CabinetStage({editing,board,block,cabinetResponse}:{editing:SoundEditin
       <Choice label={board.name('Microphone output')} value={mic.output} disabled={busy} onChange={value=>fx(board,'microphone','output',value)} options={[['stereo','Stereo'],['mono','Mono']]}/>
       {block==='cabinet'&&<div className="rig-field"><span className="rig-field-name">Microphone</span><Footswitch editing={editing} board={board} block="microphone"/></div>}
       <p className="rig-note">{off?'The microphone block is bypassed; its placement is kept.':`Microphone: ${capital(mic.placement)}.`}</p>
-      {/* Reserved for the cabinet impulse response control, `src/audio/CabinetResponse.tsx`, from its own branch. */}
-      <div className="rig-slot" data-slot="cabinet-response">{cabinetResponse}</div>
+      {block==='cabinet'&&<div className="rig-slot" data-slot="cabinet-response">{cabinetResponse?.(board)}</div>}
     </div>
   </div>;
 }
@@ -133,7 +132,7 @@ function PedalStage({editing,board,block}:{editing:SoundEditing;board:Board;bloc
 let stageFocusHandoff:{trackId:string;block:EffectBlock;role:string|null;className:string;label:string|null}|null=null;
 
 /** The selected block's controls: drawn as the gear it is, with its knobs, models and the actions every block shares. */
-export function BlockStage({editing,selected,cabinetResponse}:{editing:SoundEditing;selected:BlockRef;cabinetResponse?:ReactNode}) {
+export function BlockStage({editing,selected,cabinetResponse}:{editing:SoundEditing;selected:BlockRef;cabinetResponse?:(board:Board)=>ReactNode}) {
   const {block}=selected,board=selected.second&&editing.second?editing.second:editing.first;
   const {order,busy,clipboard,second}=editing,index=order.indexOf(block);
   const name=blockNames[block];

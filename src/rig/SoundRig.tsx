@@ -4,6 +4,7 @@ import type { EditCommand, TrackSound } from '../edit-types';
 import type { NativePlaybackController } from '../audio/NativePlaybackController';
 import { presetIds, presetName } from '../audio/sound-model';
 import { useSoundEditing } from '../audio/useSoundEditing';
+import type { Board } from '../audio/useSoundEditing';
 import { Segmented, busyGuard } from '../ui';
 import { BlockStage } from './BlockStage';
 import { SignalChain } from './SignalChain';
@@ -18,8 +19,8 @@ export interface SoundRigProps {
   trackId:string;sound?:TrackSound;onEdit:(edit:EditCommand)=>void|Promise<void>;playback?:NativePlaybackController|null;busy?:boolean;
   /** The score's tracks, to change which one the rig edits without leaving it. */
   tracks:readonly RigTrack[];onTrack:(id:string)=>void;
-  /** A control for the cabinet's impulse response, shown with the cabinet. Left empty until it exists. */
-  cabinetResponse?:ReactNode;
+  /** The control for a cabinet's impulse response, shown with that pedalboard's cabinet. */
+  cabinetResponse?:(board:Board)=>ReactNode;
   /** A control for the master output, shown below the stage. Left empty until it exists. */
   master?:ReactNode;
 }

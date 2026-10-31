@@ -33,7 +33,7 @@ function playback() {
   return fake;
 }
 type Fake=ReturnType<typeof playback>;
-interface Options {busy?:boolean;player?:Fake|null;edit?:(command:EditCommand)=>void|Promise<void>;cabinetResponse?:React.ReactNode;master?:React.ReactNode}
+interface Options {busy?:boolean;player?:Fake|null;edit?:(command:EditCommand)=>void|Promise<void>;cabinetResponse?:()=>React.ReactNode;master?:React.ReactNode}
 /** The rig over a sound it keeps, as the app does, recording every edit it is asked for. */
 function mount(initial:TrackSound=soundPreset('lead','green-guitar'),{busy=false,player=playback(),edit,cabinetResponse,master}:Options={}) {
   const edits:EditCommand[]=[];
@@ -396,7 +396,7 @@ it('keeps a clear place for the cabinet response and the master panel, and nothi
   const first=mount();await choose('cabinet');
   expect(document.querySelector('[data-slot="cabinet-response"]')).toBeEmptyDOMElement();expect(document.querySelector('[data-slot="master"]')).toBeNull();
   first.view.unmount();
-  mount(soundPreset('lead'),{cabinetResponse:<button>Load cabinet response</button>,master:<p>Master output</p>});await choose('cabinet');
+  mount(soundPreset('lead'),{cabinetResponse:()=><button>Load cabinet response</button>,master:<p>Master output</p>});await choose('cabinet');
   expect(within(document.querySelector<HTMLElement>('[data-slot="cabinet-response"]')!).getByRole('button',{name:'Load cabinet response'})).toBeInTheDocument();
   expect(within(document.querySelector<HTMLElement>('[data-slot="master"]')!).getByText('Master output')).toBeInTheDocument();
 });

@@ -12,6 +12,7 @@ import './styles.css';
 import { NativePlaybackController } from './audio/NativePlaybackController';
 import { SoundPanel } from './audio/SoundPanel';
 import { SoundRig } from './rig/SoundRig';
+import { CabinetResponse } from './audio/CabinetResponse';
 import { Segmented } from './ui';
 import { InterpretationPanel } from './audio/InterpretationPanel';
 import { CabinetNotices } from './audio/CabinetNotices';
@@ -496,7 +497,8 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
       </div>
       {view==='sound'&&<SoundRig trackId={trackId} sound={state.settings.sounds[trackId]} onEdit={command=>controller.edit(command)} playback={player} busy={editBusy}
         tracks={state.score.tracks.map((track,index)=>({id:trackIds[index],name:track.name||`Track ${index+1}`,program:track.playbackInfo.program,percussion:track.staves.some(staff=>staff.isPercussion)}))}
-        onTrack={id=>{const index=trackIds.indexOf(id);if(index>=0)select({track:index,staff:0,bar:target.bar,voice:0,beat:0},state.score.tracks[index].staves[0].tuning.length);}}/>}
+        onTrack={id=>{const index=trackIds.indexOf(id);if(index>=0)select({track:index,staff:0,bar:target.bar,voice:0,beat:0},state.score.tracks[index].staves[0].tuning.length);}}
+        cabinetResponse={board=><CabinetResponse ir={board.effects.cabinet.ir} model={board.effects.cabinet.model} label={board.name} scope={`${trackId}:${board.name('Cabinet')}`} onLibraryChange={()=>{if(player&&typeof player.refreshSounds==='function')void player.refreshSounds().catch(()=>{});}} onChange={ir=>{if(!editBusy)board.write(effects=>{if(ir)effects.cabinet.ir=ir;else delete effects.cabinet.ir;});}}/>}/>}
       <section className="workstation-dock" aria-label="Bottom dock" hidden={!dockVisible}>
         <nav aria-label="Dock views"><button aria-pressed={!instrumentVisible&&dockMode==='overview'} onClick={()=>chooseDock('overview')}>Overview</button><button aria-pressed={!instrumentVisible&&dockMode==='mixer'} onClick={()=>chooseDock('mixer')}>Mixer</button><button aria-pressed={instrumentVisible} onClick={()=>chooseDock('instrument')}>Instrument</button><button aria-pressed={!instrumentVisible&&dockMode==='backing'} onClick={()=>chooseDock('backing')}>Backing</button><button className="dock-collapse" aria-label={dockCollapsed?'Expand bottom dock':'Hide bottom dock'} onClick={()=>dockCollapsed?setDockForced(true):hideDock()}>{dockCollapsed?'Expand':'Hide'}</button></nav>
         <div className="workstation-dock-content" hidden={dockCollapsed}>

@@ -3,7 +3,7 @@ import { factoryCategories, factorySounds } from '../audio/factory-sounds';
 import { presetIds, presetName } from '../audio/sound-model';
 import type { TrackSound } from '../edit-types';
 import type { SoundEditing } from '../audio/useSoundEditing';
-import { Dialog, Segmented } from '../ui';
+import { Dialog, Segmented, busyGuard } from '../ui';
 
 type Scope='all'|'factory'|'mine';
 interface Row {key:string;/** Previewed as `kind:id`. */value:string;name:string;note:string;group:string;apply:()=>void;saved:boolean}
@@ -25,7 +25,7 @@ export function SoundBrowser({editing}:{editing:SoundEditing}) {
   const groups=[...new Set(shown.map(row=>row.group))];
   const stop=shown.some(row=>row.key===rover)?rover:shown[0]?.key;
   const mains=()=>[...list.current?.querySelectorAll<HTMLButtonElement>('button[data-row-main]')??[]];
-  const hear=(row:Row)=>editing.choosePreview(showingPreview&&previewChoice===row.value?'':row.value);
+  const hear=(row:Row,origin:HTMLElement)=>editing.choosePreview(showingPreview&&previewChoice===row.value?'':row.value,origin);
   return <aside className="rig-browser" aria-label="Sound browser" onKeyDown={editing.escapePreview}>
     <div className="rig-browser-head">
       <input className="rig-search" type="search" aria-label="Search sounds" placeholder="Search sounds" value={query} onChange={event=>setQuery(event.target.value)}/>
@@ -41,24 +41,24 @@ export function SoundBrowser({editing}:{editing:SoundEditing}) {
       {groups.map(group=><section key={group} aria-label={group} className="rig-browser-group">
         <h3>{group}</h3>
         <ul>{shown.filter(row=>row.group===group).map(row=><li key={row.key} className="rig-row" data-previewing={showingPreview&&previewChoice===row.value||undefined}>
-          <button type="button" data-row-main className="rig-row-main" aria-label={`Apply “${row.name}”`} tabIndex={row.key===stop?0:-1} disabled={busy} onFocus={()=>setRover(row.key)} onClick={row.apply}
-            onKeyDown={event=>{if(event.key===' '&&previewer){event.preventDefault();hear(row);}}} onKeyUp={event=>{if(event.key===' ')event.preventDefault();}}>
+          <button type="button" data-row-main aria-label={`Apply “${row.name}”`} tabIndex={row.key===stop?0:-1} onFocus={()=>setRover(row.key)} {...busyGuard({busy,className:'rig-row-main',onClick:row.apply,onKeyDown:event=>{if(event.key===' '&&previewer){event.preventDefault();hear(row,event.currentTarget);}},onKeyUp:event=>{if(event.key===' ')event.preventDefault();}})}>
+
             <span className="rig-row-name">{row.name}</span><span className="rig-row-note">{row.note}</span>
           </button>
-          {previewer&&<button type="button" className="rig-hear" aria-label={`Hear “${row.name}”`} aria-pressed={showingPreview&&previewChoice===row.value} tabIndex={-1} disabled={busy} onClick={()=>hear(row)}>Hear</button>}
+          {previewer&&<button type="button" aria-label={`Hear “${row.name}”`} aria-pressed={showingPreview&&previewChoice===row.value} tabIndex={-1} {...busyGuard({busy,className:'rig-hear',onClick:event=>hear(row,event.currentTarget)})}>Hear</button>}
           {row.saved&&<span className="rig-row-actions">
-            <button type="button" className="rig-link" aria-label={`Rename saved sound “${row.name}”`} disabled={busy} onClick={()=>{editing.setChosen(row.name);setName(row.name);nameField.current?.focus();}}>Rename</button>
-            <button type="button" className="rig-link" aria-label={`Delete saved sound “${row.name}”`} disabled={busy} onClick={()=>{editing.setChosen(row.name);editing.setConfirming(true);}}>Delete</button>
+            <button type="button" aria-label={`Rename saved sound “${row.name}”`} {...busyGuard({busy,className:'rig-link',onClick:()=>{editing.setChosen(row.name);setName(row.name);nameField.current?.focus();}})}>Rename</button>
+            <button type="button" aria-label={`Delete saved sound “${row.name}”`} {...busyGuard({busy,className:'rig-link',onClick:()=>{editing.setChosen(row.name);editing.setConfirming(true);}})}>Delete</button>
           </span>}
         </li>)}</ul>
       </section>)}
     </div>
     <div className="rig-browser-save">
       <div className="rig-browser-save-row">
-        <input className="rig-text" ref={nameField} aria-label="Saved sound name" placeholder="Name this sound" value={name} maxLength={60} disabled={busy} onChange={event=>setName(event.target.value)}/>
-        <button type="button" className="rig-button" disabled={busy||!name.trim()} onClick={editing.saveNamed}>Save sound</button>
+        <input className="rig-text" ref={nameField} aria-label="Saved sound name" placeholder="Name this sound" value={name} maxLength={60} aria-disabled={busy||undefined} readOnly={busy} onChange={event=>{if(!busy)setName(event.target.value);}}/>
+        <button type="button" {...busyGuard({busy,unavailable:!name.trim(),className:'rig-button',onClick:editing.saveNamed})}>Save sound</button>
       </div>
-      {entry&&<button type="button" className="rig-button" disabled={busy||!name.trim()} onClick={editing.renameChosen}>Rename saved sound</button>}
+      {entry&&<button type="button" {...busyGuard({busy,unavailable:!name.trim(),className:'rig-button',onClick:editing.renameChosen})}>Rename saved sound</button>}
     </div>
     {confirming&&entry&&<Dialog title={`Delete “${entry.name}”?`} onClose={editing.closeConfirm} actions={<><button type="button" data-autofocus onClick={editing.closeConfirm}>Cancel</button><button type="button" className="tp-danger" onClick={editing.deleteChosen}>Delete</button></>}>
       <p>Delete “{entry.name}” from My sounds? This cannot be undone.</p>

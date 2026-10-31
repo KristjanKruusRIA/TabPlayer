@@ -1,3 +1,5 @@
+import { existsSync,readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { importer, type model } from '@coderline/alphatab';
 import { zipSync } from 'fflate';
@@ -134,6 +136,13 @@ describe('bounded score admission',()=>{
     if(kind==='local-central mismatch')view.setUint32(22,11,true);
     const load=vi.spyOn(importer.ScoreLoader,'loadScoreFromBytes');
     expect(extractMetadata(source(zip)).error).toBeTruthy();expect(load).not.toHaveBeenCalled();
+  });
+
+  it('admits a real Guitar Pro archive, whose entries end in data descriptors',()=>{
+    const fixture=resolve(process.env.TABPLAYER_COMPATIBILITY_DIR??'.analysis/compatibility','guitarpro7-notes.gp');
+    if(!existsSync(fixture))return;
+    const result=extractMetadata(source(new Uint8Array(readFileSync(fixture))));
+    expect(result.error).toBeNull();expect(result.metadata).not.toBeNull();
   });
 
   it('accepts real authored GP metadata after the complete ZIP admission pass',()=>{

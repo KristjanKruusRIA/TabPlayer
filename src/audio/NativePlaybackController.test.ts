@@ -582,3 +582,51 @@ it('sends the sounds again on request, so a cabinet response imported meanwhile 
   await player.refreshSounds();expect(bridge.setMix).toHaveBeenCalledTimes(2);
   player.destroy();
 });
+
+it('mixes drum kit elements for percussion tracks with volume, pan, mute, and solo', async () => {
+  const { player, onEdit } = fixture();
+  const added = previewEdit(blankProject(), { type: 'addPercussionTrack', name: 'Drums', program: 0 });
+  const drumTrack = added.score.tracks[1];
+  const drumId = trackIdentity(drumTrack);
+  await player.loadDocument(added.project, added);
+
+  // Non-percussion track rejects drum kit mix edits
+  expect(() => player.setDrumVolume(0, 'kick', 0.5)).toThrow(/Select a percussion track/);
+
+  // Percussion track mixes kit elements
+  player.setDrumVolume(1, 'kick', 0.7);
+  expect(onEdit).toHaveBeenLastCalledWith({
+    type: 'setTrackMix',
+    trackId: drumId,
+    mix: { gain: 1, pan: 0, mute: false, solo: false, drumKit: { kick: { gain: 0.7, pan: 0, mute: false, solo: false } } },
+  });
+
+  // Re-applying current value records nothing
+  onEdit.mockClear();
+  player.setDrumVolume(1, 'kick', 1);
+  expect(onEdit).not.toHaveBeenCalled();
+
+  // Mute, solo and pan
+  player.setDrumPan(1, 'snare', -0.5);
+  expect(onEdit).toHaveBeenLastCalledWith({
+    type: 'setTrackMix',
+    trackId: drumId,
+    mix: { gain: 1, pan: 0, mute: false, solo: false, drumKit: { snare: { gain: 1, pan: -0.5, mute: false, solo: false } } },
+  });
+
+  player.setDrumMute(1, 'hats', true);
+  expect(onEdit).toHaveBeenLastCalledWith({
+    type: 'setTrackMix',
+    trackId: drumId,
+    mix: { gain: 1, pan: 0, mute: false, solo: false, drumKit: { hats: { gain: 1, pan: 0, mute: true, solo: false } } },
+  });
+
+  player.setDrumSolo(1, 'toms', true);
+  expect(onEdit).toHaveBeenLastCalledWith({
+    type: 'setTrackMix',
+    trackId: drumId,
+    mix: { gain: 1, pan: 0, mute: false, solo: false, drumKit: { toms: { gain: 1, pan: 0, mute: false, solo: true } } },
+  });
+
+  player.destroy();
+});

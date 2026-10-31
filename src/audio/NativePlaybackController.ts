@@ -2,7 +2,8 @@ import type { AlphaTabApi, model, synth } from '@coderline/alphatab';
 import '../tremolo-guard';
 import { effectiveAudioSettings, trackIdentity, type BuiltDocument } from '../engine';
 import { completeSound, defaultEffects, defaultMix, masterProblem, soundProblem } from '../document-settings';
-import type { ChannelMix, EditCommand, MasterSettings, TrackSound } from '../edit-types';
+import type { ChannelMix, DrumElementMix, DrumKitElement, DrumKitMix, EditCommand, MasterSettings, TrackSound } from '../edit-types';
+import { canonicalDrumKitMix, defaultDrumElement } from './drum-kit';
 import type { BeatTarget,ProjectView } from '../project';
 import type { MusicSelection } from '../editor/range-types';
 import type { AuditionNote, AuditionRequest, NativeAudioBridge, NativeAudioStatus, TransportCommand } from './bridge';
@@ -146,7 +147,7 @@ export class NativePlaybackController {
   devices(){return this.bridge.devices();}
   deviceId(){return this.lastStatus?.deviceId??null;}
   backingDurationMs(){const seconds=this.lastStatus?.backingDurationSeconds;return seconds==null?undefined:seconds*1000;}
-  mix(track:model.Track){const mix=this.built?.settings.mixes[trackIdentity(track)];return mix?{mute:mix.mute,solo:mix.solo,volume:mix.gain,pan:mix.pan}:undefined;}
+  mix(track:model.Track){const mix=this.built?.settings.mixes[trackIdentity(track)];return mix?{mute:mix.mute,solo:mix.solo,volume:mix.gain,pan:mix.pan,...(mix.drumKit?{drumKit:mix.drumKit}:{})}:undefined;}
   private editMix(index:number,patch:Partial<ChannelMix>){const track=this.built?.score.tracks[index];if(!track)throw new Error('Select an existing track.');const id=trackIdentity(track);const mix={...(this.options.latestMix?.(id)??this.built!.settings.mixes[id]??defaultMix()),...patch};void Promise.resolve(this.options.onEdit({type:'setTrackMix',trackId:id,mix})).catch(error=>this.fail(error));}
   setTrackVolume(index:number,value:number){this.editMix(index,{gain:Math.max(0,Math.min(1,value))});}
   setPan(index:number,value:number){this.editMix(index,{pan:Math.max(-1,Math.min(1,value))});}
@@ -159,6 +160,26 @@ export class NativePlaybackController {
     return Promise.resolve(this.options.onEdit({type:'setMaster',master:structuredClone(master)})).then(()=>undefined,error=>{this.fail(error);throw error;});
   }
   setMute(index:number,value:boolean){this.editMix(index,{mute:value});}setSolo(index:number,value:boolean){this.editMix(index,{solo:value});}
+  setDrumElement(index:number,element:DrumKitElement,patch:Partial<DrumElementMix>){
+    const track=this.built?.score.tracks[index];if(!track)throw new Error('Select an existing track.');
+    if(!track.isPercussion)throw new Error('Select a percussion track.');
+    const id=trackIdentity(track),currentMix=this.options.latestMix?.(id)??this.built!.settings.mixes[id]??defaultMix();
+    const currentKit=currentMix.drumKit??{},currentElement=currentKit[element]??defaultDrumElement();
+    const nextElement:DrumElementMix={
+      gain:patch.gain!==undefined?Math.max(0,Math.min(1,patch.gain)):currentElement.gain,
+      pan:patch.pan!==undefined?Math.max(-1,Math.min(1,patch.pan)):currentElement.pan,
+      mute:patch.mute!==undefined?patch.mute:currentElement.mute,
+      solo:patch.solo!==undefined?patch.solo:currentElement.solo,
+    };
+    if(nextElement.gain===currentElement.gain&&nextElement.pan===currentElement.pan&&nextElement.mute===currentElement.mute&&nextElement.solo===currentElement.solo)return;
+    const nextKit=canonicalDrumKitMix({...currentKit,[element]:nextElement});
+    const {drumKit:_dropped,...rest}=currentMix,mix:ChannelMix=nextKit?{...rest,drumKit:nextKit}:rest;
+    void Promise.resolve(this.options.onEdit({type:'setTrackMix',trackId:id,mix})).catch(error=>this.fail(error));
+  }
+  setDrumVolume(index:number,element:DrumKitElement,value:number){this.setDrumElement(index,element,{gain:value});}
+  setDrumPan(index:number,element:DrumKitElement,value:number){this.setDrumElement(index,element,{pan:value});}
+  setDrumMute(index:number,element:DrumKitElement,value:boolean){this.setDrumElement(index,element,{mute:value});}
+  setDrumSolo(index:number,element:DrumKitElement,value:boolean){this.setDrumElement(index,element,{solo:value});}
   /** The focused track (by identity) and amount, from -1 (unfocused) to 1 (focused), or null when off. */
   focus():TrackFocus|null{return this.trackFocus?{...this.trackFocus}:null;}
   /** Focuses a track by identity, so a selection resolved against a newer score cannot land on another track. */

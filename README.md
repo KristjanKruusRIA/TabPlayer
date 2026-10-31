@@ -6,7 +6,7 @@ The 0.2.0 expansion implements the advanced editor, native recorded guitar/bass 
 
 ## Using the app
 
-Open `.gp`, `.gpx`, `.gp3`, `.gp4`, `.gp5`, `.ptb` (Power Tab 1.5/1.7, partial import; a notice lists what was dropped), or `.tabplayer`. Select a track and click a note or beat; the inspector also targets empty strings and rests. Enter a fret and select **Set note**. Add notes on other strings to form a chord. Arrow keys navigate when the score workspace has focus; digits followed by Enter enter a fret.
+Open `.gp`, `.gpx`, `.gp3`, `.gp4`, `.gp5`, `.ptb` (Power Tab, experimental partial import that has not been tested on real Power Tab files; a notice lists what was dropped), or `.tabplayer`. Select a track and click a note or beat; the inspector also targets empty strings and rests. Enter a fret and select **Set note**. Add notes on other strings to form a chord. Arrow keys navigate when the score workspace has focus; digits followed by Enter enter a fret.
 
 The inspector edits note and beat techniques, bends/whammy curves, harmonics, slides, ties, hammer/pull links, slurs, trill, vibrato, brush and tremolo. Editing either end of a tie changes its sustained pitch; breaking a link permits independent editing. Deletion repairs both relationship ends. Empty measures, including imported ones, use **Insert beat** before note entry.
 

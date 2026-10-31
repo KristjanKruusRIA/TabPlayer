@@ -58,14 +58,7 @@ fn read_candidate(
     {
         candidates.stage_document(files::read_project(&path)?, Some(path))
     } else {
-        let bytes = if path
-            .extension()
-            .is_some_and(|e| e.eq_ignore_ascii_case("ptb"))
-        {
-            read_bounded(&path, MAX_POWERTAB_BYTES)?
-        } else {
-            std::fs::read(&path).map_err(|e| e.to_string())?
-        };
+        let bytes = read_import(&path)?;
         let original = std::fs::canonicalize(&path).map_err(|e| e.to_string())?;
         candidates.stage_document(
             Project::from_file(original.to_string_lossy().into_owned(), &bytes),
@@ -78,15 +71,27 @@ fn read_candidate(
 /// instead of trusting a separate size check.
 const MAX_POWERTAB_BYTES: u64 = 16 * 1024 * 1024;
 
-fn read_bounded(path: &Path, limit: u64) -> Result<Vec<u8>, String> {
+/// Reads an import from a single handle. Power Tab content (by `ptab` signature,
+/// whatever the extension) is capped; other formats keep their existing unbounded read.
+fn read_import(path: &Path) -> Result<Vec<u8>, String> {
     use std::io::Read;
-    let file = std::fs::File::open(path).map_err(|e| e.to_string())?;
-    let mut bytes = Vec::new();
-    file.take(limit + 1)
-        .read_to_end(&mut bytes)
+    let mut file = std::fs::File::open(path).map_err(|e| e.to_string())?;
+    let mut head = Vec::new();
+    (&mut file)
+        .take(4)
+        .read_to_end(&mut head)
         .map_err(|e| e.to_string())?;
-    if bytes.len() as u64 > limit {
-        return Err("The Power Tab file is larger than the 16 MiB import limit.".into());
+    let mut bytes = head;
+    if bytes == b"ptab" {
+        (&mut file)
+            .take(MAX_POWERTAB_BYTES + 1 - 4)
+            .read_to_end(&mut bytes)
+            .map_err(|e| e.to_string())?;
+        if bytes.len() as u64 > MAX_POWERTAB_BYTES {
+            return Err("The Power Tab file is larger than the 16 MiB import limit.".into());
+        }
+    } else {
+        file.read_to_end(&mut bytes).map_err(|e| e.to_string())?;
     }
     Ok(bytes)
 }
@@ -261,13 +266,19 @@ mod source_tests {
     use super::*;
 
     #[test]
-    fn bounded_read_rejects_oversized_files() {
+    fn power_tab_signature_is_capped_even_with_another_extension() {
         let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("big.ptb");
-        std::fs::write(&path, vec![0u8; 33]).unwrap();
-        assert_eq!(read_bounded(&path, 33).unwrap().len(), 33);
-        assert!(read_bounded(&path, 32).unwrap_err().contains("16 MiB"));
-        assert!(read_bounded(&directory.path().join("missing.ptb"), 32).is_err());
+        let big = directory.path().join("renamed.gp");
+        let mut bytes = b"ptab".to_vec();
+        bytes.resize(MAX_POWERTAB_BYTES as usize + 1, 0);
+        std::fs::write(&big, &bytes).unwrap();
+        assert!(read_import(&big).unwrap_err().contains("16 MiB"));
+        let other = directory.path().join("other.gp");
+        std::fs::write(&other, vec![7u8; 100]).unwrap();
+        assert_eq!(read_import(&other).unwrap(), vec![7u8; 100]);
+        let short = directory.path().join("tiny.gp");
+        std::fs::write(&short, b"ab").unwrap();
+        assert_eq!(read_import(&short).unwrap(), b"ab");
     }
 
     #[test]

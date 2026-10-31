@@ -33,9 +33,9 @@ export interface FxSystem { start?: FxBar; bars?: FxBar[]; endType?: number; end
 export interface FxScore {
   guitars?: { description?: string; preset?: number; capo?: number; tuning: number[] }[];
   tempos?: { system: number; position: number; data: number }[];
-  systems: FxSystem[]; chordDiagrams?: number; floatingTexts?: number; dynamics?: number; alternateEndings?: number; guitarIns?: number;
+  systems: FxSystem[]; chordDiagrams?: number; floatingTexts?: number; dynamics?: number; alternateEndings?: number; guitarIns?: { system: number; staff: number; position: number; data: number }[];
 }
-export interface FxFile { version?: 3 | 4; title?: string; artist?: string; guitar: FxScore; bass?: FxScore | null }
+export interface FxFile { version?: 3 | 4; title?: string; artist?: string; release?: 0 | 1 | 2 | 3; copyright?: string; lyrics?: string; composer?: string; known?: boolean; guitar: FxScore; bass?: FxScore | null }
 
 export const timeSig = (n: number, d: number, shown = true) => ((n - 1) << 27 | Math.log2(d) << 24 | (shown ? 0x100000 : 0)) >>> 0;
 export const tempoData = (bpm: number, beatType = 2, type = 1) => ((type << 27) | (beatType << 23) | bpm) >>> 0;
@@ -51,7 +51,7 @@ function score(w: W, s: FxScore) {
   });
   w.vec(Array.from({ length: s.chordDiagrams ?? 0 }), () => { w.u16(0).u8(0).u16(0).u8(0).u8(0).small([0, 1, 2], 1); });
   w.vec(Array.from({ length: s.floatingTexts ?? 0 }), () => { w.str('text').zeros(16).u8(0).str('Arial').zeros(8).zeros(3).zeros(4); });
-  w.vec(Array.from({ length: s.guitarIns ?? 0 }), () => { w.u16(0).u8(0).u8(0).u16(0); });
+  w.vec(s.guitarIns ?? [], g => { w.u16(g.system).u8(g.staff).u8(g.position).u16(g.data); });
   w.vec(s.tempos ?? [], t => { w.u16(t.system).u8(t.position).u32(t.data).str('tempo'); });
   w.vec(Array.from({ length: s.dynamics ?? 0 }), () => { w.u16(0).u8(0).u8(0).u16(0); });
   w.vec(Array.from({ length: s.alternateEndings ?? 0 }), () => { w.u16(0).u8(0).u32(0); });
@@ -65,7 +65,7 @@ function score(w: W, s: FxScore) {
       w.u8(((st.clef ?? 0) << 4) | (st.strings ?? 6)).zeros(4);
       for (const voice of [st.voices[0], st.voices[1] ?? []]) {
         w.vec(voice, p => {
-          w.u8(p.position).u8(p.beaming ?? 0).u32((((p.duration ?? 4) << 24) | (p.flags ?? 0)) >>> 0).small(p.symbols ?? [], 4);
+          w.u8(p.position).u16(p.beaming ?? 0).u32((((p.duration ?? 4) << 24) | (p.flags ?? 0)) >>> 0).small(p.symbols ?? [], 4);
           w.vec(p.notes ?? [], n => { w.u8((n.string << 5) | n.fret).u16(n.simple ?? 0).small(n.symbols ?? [], 4); });
         });
       }
@@ -78,10 +78,18 @@ export function buildPtb(f: FxFile): Uint8Array {
   const w = new W();
   w.out.push(0x70, 0x74, 0x61, 0x62); w.u16(f.version ?? 4);
   if ((f.version ?? 4) === 4) {
-    w.u8(0).u8(0).str(f.title ?? 'Synthetic').str(f.artist ?? 'Fixture').u8(3).u8(0).str('Composer').str('Lyricist');
-    for (let i = 0; i < 7; i++) w.str('');
+    w.u8(0).u8(0).str(f.title ?? 'Synthetic').str(f.artist ?? 'Fixture');
+    const release = f.release ?? 3;
+    w.u8(release);
+    if (release === 0) w.u8(0).str('Album').u16(1999).u8(0);
+    else if (release === 1) w.str('Video').u8(0);
+    else if (release === 2) w.str('Bootleg').u16(12).u16(31).u16(1998);
+    const known = f.known ?? true;
+    w.u8(known ? 0 : 1);
+    if (known) w.str(f.composer ?? 'Composer').str('Lyricist');
+    w.str('Arranger').str('').str('').str(f.copyright ?? '').str(f.lyrics ?? '').str('').str('');
   } else {
-    w.str(f.title ?? 'Synthetic').str(f.artist ?? 'Fixture').u8(0).str('').u8(0).str('').str('').str('').u16(2000).u8(0).str('').str('');
+    w.str(f.title ?? 'Synthetic').str(f.artist ?? 'Fixture').u8(0).str('').u8(0).str(f.composer ?? '').str('').str('').u16(2000).u8(0).str(f.copyright ?? '').str(f.lyrics ?? '');
   }
   score(w, f.guitar);
   score(w, f.bass ?? { systems: [] });

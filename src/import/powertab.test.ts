@@ -151,13 +151,13 @@ describe('Power Tab import into a score', () => {
 
   it('reports dropped content in the notice', () => {
     const file = basicFile();
-    file.guitar.chordDiagrams = 2; file.guitar.floatingTexts = 1; file.guitar.dynamics = 3; file.guitar.alternateEndings = 1; file.guitar.guitarIns = 1;
+    file.guitar.chordDiagrams = 2; file.guitar.floatingTexts = 1; file.guitar.dynamics = 3; file.guitar.alternateEndings = 1; file.guitar.guitarIns = [{ system: 0, staff: 0, position: 1, data: 1 }, { system: 0, staff: 0, position: 5, data: 1 }]; 
     const sys = file.guitar.systems[0];
     sys.directions = 2; sys.chordTexts = 1; sys.slashes = 4;
     sys.staves[0].voices[0][0].notes![0].symbols = [0x65000000];
     sys.staves[0].voices[0][1].flags = 0x60;
     const { notice } = importPowerTab(buildPtb(file), settings);
-    for (const fragment of ['2 chord diagrams', '1 text boxes', '3 dynamics', '1 alternate endings', '2 directions', '4 rhythm slashes', '1 slides, bends', '1 arpeggios']) expect(notice).toContain(fragment);
+    for (const fragment of ['2 chord diagrams', '1 text boxes', '3 dynamics', '1 alternate endings', '1 guitar changes after the first', '2 directions', '4 rhythm slashes', '1 slides, bends', '1 arpeggios']) expect(notice).toContain(fragment);
   });
 
   it('skips a damaged bass score with a notice instead of failing', () => {
@@ -175,6 +175,81 @@ describe('Power Tab import into a score', () => {
     file.bass = { systems: [{ staves: staves as never, bars: [{ position: 9 }] }] };
     const { score } = importPowerTab(buildPtb(file), settings);
     expect(score.tracks.length).toBeGreaterThan(8);
+  });
+
+  it('reads 16-bit beaming values and stays aligned afterwards', () => {
+    const file = basicFile();
+    file.guitar.systems[0].staves[0].voices[0][0].beaming = 0x2400 | (2 << 3) | 1;
+    file.guitar.systems[0].staves[0].voices[0][1].beaming = 0x3f80;
+    const doc = parsePowerTab(buildPtb(file));
+    const voice = doc.guitar.systems[0].staves[0].voices[0];
+    expect(voice[0].beaming).toBe(0x2400 | (2 << 3) | 1);
+    expect(voice).toHaveLength(6);
+    expect(voice[5].notes[0].fret).toBe(3);
+    expect(doc.guitar.systems[0].barlines).toHaveLength(1);
+  });
+
+  it('parses every release branch of the 1.7 header', () => {
+    for (const release of [0, 1, 2, 3] as const) {
+      const doc = parsePowerTab(buildPtb(basicFile({ release, title: `Release ${release}`, copyright: '(c) fixture', lyrics: 'la la' })));
+      expect(doc.title).toBe(`Release ${release}`);
+      expect(doc.copyright).toBe('(c) fixture');
+      expect(doc.guitar.systems[0].staves[0].voices[0]).toHaveLength(6);
+    }
+    expect(parsePowerTab(buildPtb(basicFile({ known: false }))).composer).toBe('');
+  });
+
+  it('keeps metadata and reports lyrics and notes that are not imported', () => {
+    const { score, notice } = importPowerTab(buildPtb(basicFile({ composer: 'C. Omposer', copyright: '(c) 2026', lyrics: 'words' })), settings);
+    expect(score.music).toBe('C. Omposer');
+    expect(score.copyright).toBe('(c) 2026');
+    expect(notice).toContain('1 lyrics text');
+    expect(notice).toContain('arranger, transcriber and note fields');
+  });
+
+  it('imports 64th notes and grace notes without overfilling the bar', () => {
+    const file = basicFile();
+    const voice = file.guitar.systems[0].staves[0].voices[0];
+    voice[0].duration = 64;
+    voice.splice(1, 0, { position: 2, duration: 8, flags: 0x10000, notes: [{ string: 0, fret: 5 }] });
+    const { score, notice } = importPowerTab(buildPtb(file), settings);
+    const beats = score.tracks[0].staves[0].bars[0].voices[0].beats;
+    expect(beats[0].duration).toBe(64);
+    expect(beats[1].graceType).toBe(model.GraceType.BeforeBeat);
+    expect(beats[1].playbackDuration).toBeLessThan(beats[2].playbackDuration);
+    expect(notice).not.toMatch(/grace notes.*dropped|\d+ grace notes/);
+    expect(notice).not.toMatch(/quarter notes/);
+  });
+
+  it('uses GuitarIn to pick the staff guitar and tuning', () => {
+    const file = basicFile();
+    file.guitar.guitars = [{ description: 'Standard', tuning: [64, 59, 55, 50, 45, 40] }, { description: 'Drop D', tuning: [64, 59, 55, 50, 45, 38], capo: 2 }];
+    file.guitar.guitarIns = [{ system: 0, staff: 0, position: 1, data: 0b10 }];
+    const { score } = importPowerTab(buildPtb(file), settings);
+    expect(score.tracks[0].name).toBe('Drop D');
+    expect(score.tracks[0].staves[0].tuning).toEqual([64, 59, 55, 50, 45, 38]);
+    expect(score.tracks[0].staves[0].capo).toBe(2);
+  });
+
+  it('imports a bass score whose system layout differs from the guitar score', () => {
+    const file = basicFile();
+    const bassStaff = { strings: 4, clef: 1, voices: [[{ position: 1, duration: 4, notes: [{ string: 3, fret: 0 }] }]] as [never] };
+    file.bass = { guitars: [{ tuning: [43, 38, 33, 28] }], systems: [{ staves: [bassStaff as never] }, { staves: [bassStaff as never] }] };
+    const { score, notice } = importPowerTab(buildPtb(file), settings);
+    expect(score.tracks).toHaveLength(2);
+    expect(score.tracks[1].staves[0].bars).toHaveLength(2);
+    expect(notice).not.toMatch(/bass score/);
+  });
+
+  it('refuses a file whose tracks x measures would exhaust memory', () => {
+    const staves = Array.from({ length: 4 }, () => ({ voices: [[]] as [never] }));
+    const bars = Array.from({ length: 255 }, (_, i) => ({ position: i % 250 }));
+    const file = basicFile();
+    file.guitar.systems = Array.from({ length: 70 }, () => ({ bars, staves: staves as never }));
+    file.guitar.tempos = [];
+    const bytes = buildPtb(file);
+    expect(bytes.length).toBeLessThan(1_500_000);
+    expect(() => importPowerTab(bytes, settings)).toThrow(/too large to import safely/);
   });
 
   it('opens through buildDocument and keeps edits replayable', () => {

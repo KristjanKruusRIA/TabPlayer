@@ -7,7 +7,7 @@ const STANDARD: Record<number, number[]> = {
   7: [64, 59, 55, 50, 45, 40, 35], 8: [64, 59, 55, 50, 45, 40, 35, 30],
 };
 const BEAT_QUARTERS = [2, 3, 1, 1.5, 0.5, 0.75, 0.25, 0.375, 0.125, 0.1875];
-const DURATIONS = new Set([1, 2, 4, 8, 16, 32]);
+const DURATIONS = new Set([1, 2, 4, 8, 16, 32, 64]);
 
 export interface PowerTabImport { score: model.Score; notice: string }
 
@@ -74,12 +74,16 @@ function convert(doc: PtbDocument, settings: Settings): PowerTabImport {
 
   const score = new Score();
   score.title = sanitize(doc.title, ''); score.artist = sanitize(doc.artist, '');
+  score.music = sanitize(doc.composer, ''); score.words = sanitize(doc.lyricist, ''); score.copyright = sanitize(doc.copyright, '');
+  if (doc.lyrics) bump('lyrics text');
+  if (doc.notes) bump('arranger, transcriber and note fields', doc.notes);
 
   // Master bars come from the guitar score's layout.
   let time = { n: 4, d: 4, common: false };
   let key = { value: 0, type: 0 };
   const bounds = guitar.systems.map(systemBoundaries);
   const barOffsets: number[] = [];
+  let sumNumerators = 0;
   const masters: model.MasterBar[] = [];
   const keys: { value: number; type: number }[] = [];
   guitar.systems.forEach((_, s) => {
@@ -110,7 +114,7 @@ function convert(doc: PtbDocument, settings: Settings): PowerTabImport {
         const section = new Section(); section.marker = String.fromCharCode(start.letter); section.text = sanitize(start.description, '');
         master.section = section;
       }
-      masters.push(master);
+      masters.push(master); sumNumerators += master.timeSignatureNumerator;
     });
   });
 
@@ -132,33 +136,56 @@ function convert(doc: PtbDocument, settings: Settings): PowerTabImport {
 
   const channels = Array.from({ length: 16 }, (_, i) => i).filter(i => i !== 9);
   let nextChannel = 0;
+  const staffCountOf = (g: PtbScore) => Math.max(...g.systems.map(s => s.staves.length), 0);
+  const positionsOf = (g: PtbScore) => g.systems.reduce((n, sys) => n + sys.staves.reduce((m, st) => m + st.voices[0].length + st.voices[1].length, 0), 0);
+  const trackBudget = Math.min(channels.length, staffCountOf(guitar) + (bass ? staffCountOf(bass) : 0));
+  if (trackBudget * measureCount > PTB_LIMITS.scoreBars)
+    throw new PowerTabError(`This Power Tab file is too large to import safely (${trackBudget} tracks x ${measureCount} measures; the limit is ${PTB_LIMITS.scoreBars} bars).`);
+  if (trackBudget * sumNumerators + positionsOf(guitar) + (bass ? positionsOf(bass) : 0) > PTB_LIMITS.scoreBeats)
+    throw new PowerTabError('This Power Tab file has too many beats to import safely.');
+
+  const guitarFor = (group: PtbScore, si: number, label: string) => {
+    const ins = group.guitarIns.filter(g => g.staff === si).sort((a, b) => a.system - b.system || a.position - b.position);
+    if (ins.length > 1) bump('guitar changes after the first on a staff', ins.length - 1);
+    for (const first of ins.slice(0, 1)) {
+      const bit = [...Array(16).keys()].find(i => first.data & (1 << i));
+      if (bit !== undefined && group.guitars[bit]) return group.guitars[bit];
+    }
+    if (ins.length && !group.guitars.length) warn(`${label}: guitar assignment refers to a missing guitar.`);
+    return group.guitars[si] ?? group.guitars[0];
+  };
   const addGroup = (group: PtbScore, label: string, defaultProgram: number, defaultTuningCount: number) => {
     const systems = group.systems;
-    const staffCount = Math.max(...systems.map(s => s.staves.length), 0);
+    const staffCount = staffCountOf(group);
+    const built: model.Track[] = [];
+    let channel = nextChannel;
     for (let si = 0; si < staffCount; si++) {
-      if (nextChannel + 1 > channels.length) { bump('tracks (more than 15 playback channels)'); continue; }
+      if (channel + 1 > channels.length) { bump('tracks (more than 15 playback channels)'); continue; }
       const ptStaff = systems.map(s => s.staves[si]).find(Boolean);
       const strings = ptStaff?.strings ?? defaultTuningCount;
-      const guitarInfo = group.guitars[si] ?? group.guitars[0];
+      const guitarInfo = guitarFor(group, si, `${label} ${si + 1}`);
       const name = sanitize(guitarInfo?.description ?? '', `${label} ${si + 1}`);
       const tuning = tuningFor(guitarInfo, strings, warn, name);
       const track = new Track(); track.name = name; track.shortName = name.slice(0, 12);
       const program = guitarInfo && guitarInfo.preset <= 127 ? guitarInfo.preset : defaultProgram;
       track.playbackInfo.program = program;
-      track.playbackInfo.primaryChannel = channels[nextChannel]; track.playbackInfo.secondaryChannel = channels[nextChannel + 1] ?? channels[nextChannel];
-      nextChannel += 1;
+      track.playbackInfo.primaryChannel = channels[channel]; track.playbackInfo.secondaryChannel = channels[channel + 1] ?? channels[channel];
+      channel += 1;
       const staff = new Staff(); staff.stringTuning.tunings = [...tuning]; staff.showTablature = true; staff.showStandardNotation = true;
       if (guitarInfo && guitarInfo.capo > 0 && guitarInfo.capo <= 24) staff.capo = guitarInfo.capo;
-      track.addStaff(staff); score.addTrack(track);
+      track.addStaff(staff);
       fillStaff(staff, group, si, strings, ptStaff?.clef === 1);
+      built.push(track);
     }
+    for (const track of built) score.addTrack(track);
+    nextChannel = channel;
   };
 
   function fillStaff(staff: model.Staff, group: PtbScore, si: number, strings: number, bassClef: boolean) {
     const frets = new Map<number, number>();
     const bars: { voices: model.Voice[] }[] = [];
-    let secondVoice = false;
-    group.systems.forEach((system, s) => {
+    let secondVoice = false, measureIndex = 0;
+    group.systems.forEach(system => {
       const ptStaff = system.staves[si];
       const { starts } = systemBoundaries(system);
       const spans = starts.map(() => [[], []] as PtbPosition[][]);
@@ -168,7 +195,8 @@ function convert(doc: PtbDocument, settings: Settings): PowerTabImport {
         });
       }
       starts.forEach((_, k) => {
-        const master = masters[barOffsets[s] + k];
+        const master = masters[measureIndex++];
+        if (!master) throw new PowerTabError('The Power Tab measure layout is inconsistent.');
         const voices = [0, 1].map(v => {
           const voice = new Voice();
           let tuplet: { n: number; d: number } | null = null;
@@ -202,6 +230,7 @@ function convert(doc: PtbDocument, settings: Settings): PowerTabImport {
     const type = p.data >>> 24;
     if (DURATIONS.has(type)) beat.duration = type as model.Duration; else { beat.duration = 4 as model.Duration; bump('positions with an unsupported note length (shown as quarter notes)'); }
     beat.dots = p.data & 0x02 ? 2 : p.data & 0x01 ? 1 : 0;
+    if (p.data & 0x18000) { beat.graceType = model.GraceType.BeforeBeat; beat.duration = 16 as model.Duration; beat.dots = 0; }
     const group = (p.data >>> 21) & 7;
     if (group) {
       const played = ((p.beaming & 0x78) >> 3) + 1, over = (p.beaming & 0x07) + 1;
@@ -211,7 +240,7 @@ function convert(doc: PtbDocument, settings: Settings): PowerTabImport {
     } else setTuplet(null);
     const flags = p.data;
     if (flags & 0x60) bump('arpeggios'); if (flags & 0x180) bump('pick strokes'); if (flags & 0xc00) bump('accents');
-    if (flags & 0x1000) bump('tremolo picking'); if (flags & 0x4000) bump('tapping'); if (flags & 0x18000) bump('grace notes');
+    if (flags & 0x1000) bump('tremolo picking'); if (flags & 0x4000) bump('tapping');
     if (flags & 0x60000) bump('triplet-feel marks'); if (flags & 0x100000) bump('fermatas');
     for (const symbol of p.symbols) if (symbol) bump('tremolo bars, volume swells and multi-bar rests');
     const isRest = (flags & 0x04) !== 0 || !p.notes.length;
@@ -243,7 +272,13 @@ function convert(doc: PtbDocument, settings: Settings): PowerTabImport {
   }
 
   addGroup(guitar, 'Guitar', 25, 6);
-  if (bass) addGroup(bass, 'Bass', 33, 4);
+  if (bass) {
+    try { addGroup(bass, 'Bass', 33, 4); }
+    catch (error) {
+      if (!(error instanceof PowerTabError) && !(error instanceof TypeError) && !(error instanceof RangeError)) throw error;
+      bump('bass score (could not be converted)');
+    }
+  }
   if (!score.tracks.length) throw new PowerTabError('The Power Tab file contains no playable staves.');
   score.finish(settings);
 
@@ -251,7 +286,7 @@ function convert(doc: PtbDocument, settings: Settings): PowerTabImport {
   const parts = [`Imported from Power Tab: ${measureCount} measures, ${score.tracks.length} track${score.tracks.length === 1 ? '' : 's'}.`];
   parts.push(labels.length
     ? `Not imported (dropped): ${labels.join('; ')}.`
-    : 'Nothing recognised was dropped; features outside the supported set are not detected.');
-  parts.push('Rhythm, pitches, ties, hammer-ons/pull-offs, repeats, key and time signatures, tempo and section letters are kept.');
+    : 'No dropped content was detected, but the importer cannot detect every unsupported Power Tab feature.');
+  parts.push('Imported where present: rhythm, pitches, grace notes, ties, hammer-ons/pull-offs, repeats, key and time signatures, tempo, section letters, composer, lyricist and copyright.');
   return { score, notice: [...parts, ...notes].join(' ') };
 }

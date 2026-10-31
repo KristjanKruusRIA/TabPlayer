@@ -25,6 +25,8 @@ export const PTB_LIMITS = {
   totalPositions: 400000,
   stringBytes: 65535,
   objectsPerVector: 100000,
+  scoreBars: 60000,
+  scoreBeats: 1000000,
 } as const;
 
 export interface PtbNote { string: number; fret: number; simple: number; symbols: number[] }
@@ -37,9 +39,13 @@ export interface PtbStaff { clef: number; strings: number; voices: PtbPosition[]
 export interface PtbSystem { startBar: PtbBarline; barlines: PtbBarline[]; endType: number; endRepeat: number; staves: PtbStaff[] }
 export interface PtbGuitar { number: number; description: string; preset: number; capo: number; tuning: number[] }
 export interface PtbTempo { system: number; position: number; data: number; description: string }
-export interface PtbScore { guitars: PtbGuitar[]; tempos: PtbTempo[]; systems: PtbSystem[] }
+export interface PtbGuitarIn { system: number; staff: number; position: number; data: number }
+export interface PtbScore { guitars: PtbGuitar[]; guitarIns: PtbGuitarIn[]; tempos: PtbTempo[]; systems: PtbSystem[] }
 export interface PtbDocument {
   version: number; title: string; artist: string;
+  composer: string; lyricist: string; copyright: string; lyrics: string;
+  /** Count of non-empty arranger, transcriber and note fields that are not imported. */
+  notes: number;
   guitar: PtbScore; bass: PtbScore | null;
   /** Reason the bass score was skipped, when it could not be read. */
   bassError: string | null;
@@ -123,7 +129,7 @@ function readNote(r: Reader): PtbNote {
 
 function readPosition(r: Reader, budget: { positions: number }): PtbPosition {
   if (++budget.positions > PTB_LIMITS.totalPositions) throw new PowerTabError('The Power Tab file contains too many positions.');
-  const position = r.u8(), beaming = r.u8(), data = r.u32(), symbols = r.smallVector(4);
+  const position = r.u8(), beaming = r.u16(), data = r.u32(), symbols = r.smallVector(4);
   const notes = vector(r, PTB_LIMITS.notesPerPosition, 'notes', () => readNote(r));
   return { position, beaming, data, symbols, notes };
 }
@@ -151,7 +157,7 @@ function readScore(r: Reader, dropped: Record<string, number>): PtbScore {
   });
   bump(dropped, 'chord diagrams', vector(r, PTB_LIMITS.objectsPerVector, 'chord diagrams', () => { readChordName(r); r.u8(); r.smallVector(1); }).length);
   bump(dropped, 'text boxes', vector(r, PTB_LIMITS.objectsPerVector, 'text boxes', () => { r.string(); r.skip(16); r.u8(); r.string(); r.skip(8); r.skip(3); r.skip(4); }).length);
-  bump(dropped, 'guitar changes', vector(r, PTB_LIMITS.objectsPerVector, 'guitar changes', () => { r.u16(); r.u8(); r.u8(); r.u16(); }).length);
+  const guitarIns = vector(r, PTB_LIMITS.objectsPerVector, 'guitar changes', (): PtbGuitarIn => ({ system: r.u16(), staff: r.u8(), position: r.u8(), data: r.u16() }));
   const tempos = vector(r, PTB_LIMITS.objectsPerVector, 'tempo markers', (): PtbTempo => ({ system: r.u16(), position: r.u8(), data: r.u32(), description: r.string() }));
   bump(dropped, 'dynamics', vector(r, PTB_LIMITS.objectsPerVector, 'dynamics', () => { r.u16(); r.u8(); r.u8(); r.u16(); }).length);
   bump(dropped, 'alternate endings', vector(r, PTB_LIMITS.objectsPerVector, 'alternate endings', () => { r.u16(); r.u8(); r.u32(); }).length);
@@ -166,7 +172,7 @@ function readScore(r: Reader, dropped: Record<string, number>): PtbScore {
     const barlines = vector(r, PTB_LIMITS.barlinesPerSystem, 'barlines', () => readBarline(r));
     return { startBar, barlines, endType: end >> 5, endRepeat: end & 0x1f, staves };
   });
-  return { guitars, tempos, systems };
+  return { guitars, guitarIns, tempos, systems };
 }
 
 function readHeader(r: Reader) {
@@ -181,18 +187,19 @@ function readHeader(r: Reader) {
     const release = r.u8();
     if (release === 0) { r.u8(); r.string(); r.u16(); r.u8(); }
     else if (release === 1) { r.string(); r.u8(); }
-    else if (release === 2) { r.string(); r.u8(); r.u8(); r.u16(); }
+    else if (release === 2) { r.string(); r.u16(); r.u16(); r.u16(); }
     else if (release !== 3) throw new PowerTabError('The Power Tab file header is damaged (unknown release type).');
-    if (r.u8() === 0) { r.string(); r.string(); }
-    for (let i = 0; i < 7; i++) r.string(); // arranger, transcribers, copyright, lyrics, notes
-    return { version, title, artist };
+    let composer = '', lyricist = '';
+    if (r.u8() === 0) { composer = r.string(); lyricist = r.string(); }
+    const rest = Array.from({ length: 7 }, () => r.string()); // arranger, 2 transcribers, copyright, lyrics, 2 notes
+    return { version, title, artist, composer, lyricist, copyright: rest[3], lyrics: rest[4], notes: [rest[5], rest[6], rest[0], rest[1], rest[2]].filter(Boolean).length };
   }
   const title = r.string(), artist = r.string();
   r.u8(); r.string(); r.u8(); // released-on code, release title, live flag
-  r.string(); r.string(); r.string(); // composer, lyricist, arranger
+  const composer = r.string(), lyricist = r.string(), arranger = r.string();
   r.u16(); r.u8(); // year, author type
-  r.string(); r.string(); // copyright, lyrics
-  return { version, title, artist };
+  const copyright = r.string(), lyrics = r.string();
+  return { version, title, artist, composer, lyricist, copyright, lyrics, notes: arranger ? 1 : 0 };
 }
 
 export function isPowerTabBytes(bytes: Uint8Array) {
@@ -204,7 +211,7 @@ export function parsePowerTab(bytes: Uint8Array): PtbDocument {
   if (bytes.length > PTB_LIMITS.fileBytes) throw new PowerTabError('The Power Tab file is larger than the 16 MiB import limit.');
   const r = new Reader(bytes), dropped: Record<string, number> = {};
   try {
-    const { version, title, artist } = readHeader(r);
+    const header = readHeader(r);
     const guitar = readScore(r, dropped);
     let bass: PtbScore | null = null, bassError: string | null = null;
     const mark = { ...dropped };
@@ -214,7 +221,7 @@ export function parsePowerTab(bytes: Uint8Array): PtbDocument {
       bassError = error.message;
       for (const key of Object.keys(dropped)) { if (key in mark) dropped[key] = mark[key]; else delete dropped[key]; }
     }
-    return { version, title, artist, guitar, bass, bassError, dropped };
+    return { ...header, guitar, bass, bassError, dropped };
   } catch (error) {
     if (error instanceof PowerTabError) throw error;
     throw new PowerTabError('The Power Tab file could not be read.', error);

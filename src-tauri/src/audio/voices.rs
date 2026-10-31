@@ -150,6 +150,37 @@ pub fn effective_note_program(
     }
 }
 
+/// The articulation `note` sounds with: its own, or when the track is locked the one its start sound gives it.
+pub fn effective_articulation(
+    note: &super::plan::PlanNote,
+    settings: &crate::settings::DocumentSettings,
+) -> Articulation {
+    match note.locked_articulation {
+        Some(kept) if track_locked(settings, &note.track_id) => kept,
+        _ => note.articulation,
+    }
+}
+
+/// `plan` with each locked track's notes carrying their locked articulation; the plan itself when nothing changes.
+pub fn with_locked_articulations(
+    plan: Arc<super::plan::PlaybackPlan>,
+    settings: &crate::settings::DocumentSettings,
+) -> Arc<super::plan::PlaybackPlan> {
+    if !plan
+        .notes
+        .iter()
+        .any(|n| effective_articulation(n, settings) != n.articulation)
+    {
+        return plan;
+    }
+    let mut changed = (*plan).clone();
+    for note in &mut changed.notes {
+        note.articulation = effective_articulation(note, settings);
+        note.locked_articulation = None;
+    }
+    Arc::new(changed)
+}
+
 pub fn voice_id_for_note<'a>(
     plan: &super::plan::PlaybackPlan,
     note: &super::plan::PlanNote,
@@ -177,7 +208,7 @@ pub fn resource_requests(
                 instrument_id: instrument_id.into(),
                 key: note.key,
                 velocity: note.velocity,
-                articulation: articulation_name(note.articulation).into(),
+                articulation: articulation_name(effective_articulation(note, settings)).into(),
             })
         })
         .collect();

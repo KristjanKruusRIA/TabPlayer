@@ -60,8 +60,6 @@ export const completeSound = (sound: TrackSound): TrackSound => {
   if (!completed.locked) delete completed.locked;
   return completed;
 };
-/** The tracks whose sound is locked against sound automations, by identity. A lock also shapes the playback plan, which reads articulations from the sound a track keeps. */
-export const lockedSoundTracks = (sounds: Record<string, TrackSound>): string[] => Object.keys(sounds).filter(id => sounds[id]?.locked === true).sort();
 /** Echo durations in quarter notes with their names: straight, dotted and triplet divisions. */
 export const delayDivisions:readonly (readonly [number,string])[]=[[.125,'1/32'],[.25,'1/16'],[1/3,'1/8 triplet'],[.5,'1/8'],[2/3,'1/4 triplet'],[.75,'Dotted 1/8'],[1,'1/4'],[1.5,'Dotted 1/4'],[2,'1/2'],[4,'Whole']];
 /** Cycle lengths in quarter notes a modulation block's rate can follow: the delay's divisions and two slower sweeps. */

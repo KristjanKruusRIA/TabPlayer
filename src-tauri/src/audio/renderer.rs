@@ -10,7 +10,7 @@ use super::{
     voices::{
         SampleVoice, VoiceParameters, articulation_name, automatic_voice_id,
         effective_note_program, pitch_at, select_region, start_program, track_locked,
-        voice_id_for_note, voice_id_for_track,
+        voice_id_for_note, voice_id_for_track, with_locked_articulations,
     },
 };
 use crate::settings::{BackingProcessing, ChannelMix, DocumentSettings};
@@ -271,6 +271,7 @@ impl Renderer {
         settings: DocumentSettings,
         sample_rate: u32,
     ) -> Result<Self, String> {
+        let plan = with_locked_articulations(plan, &settings);
         let timeline = Timeline::new(&plan)?;
         let mix = PreparedMix::prepare(&settings, &plan, sample_rate)?;
         let track_indices: HashMap<_, _> = plan

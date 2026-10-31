@@ -1,64 +1,45 @@
-import { afterEach, expect, it, vi } from 'vitest';
-import * as engine from '../engine';
+import { expect, it, vi } from 'vitest';
+import { buildDocument, previewEdit, replayDocumentSettings } from '../engine';
 import { blankProject } from '../project';
 import type { EditCommand } from '../edit-types';
-import type { NativeAudioBridge } from './bridge';
 import { NativePlaybackController } from './NativePlaybackController';
-import { buildPlaybackPlan, buildPlaybackPlanFromJson } from './plan';
+import type { NativeAudioBridge, NativeAudioStatus } from './bridge';
+import { buildPlaybackPlan } from './plan';
+import { DEFAULT_PRACTICE, type PracticeStatus } from './practice-types';
 import { soundPreset } from './sound-model';
 
-function bridge(): NativeAudioBridge { return { prepare: vi.fn(async () => {}), command: vi.fn(async () => {}), setMix: vi.fn(async () => {}), devices: vi.fn(async () => []), status: vi.fn(async () => null), subscribe: vi.fn(async () => () => {}), stageBacking: vi.fn(async () => null), stageEmbeddedBacking: vi.fn(async () => null) }; }
-afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+function status(player: NativePlaybackController, change: Partial<NativeAudioStatus>): NativeAudioStatus {
+  const settings = structuredClone(DEFAULT_PRACTICE);
+  const practice: PracticeStatus = { settings, phase: 'playing', countInRemaining: 0, completedPasses: 0, effectiveRatio: 1, currentBpm: 120, pulse: null };
+  return { generation: player.generation, ready: true, playing: true, tick: 480, seconds: 0.25, durationSeconds: 8, speed: 1, metronome: false, error: null, deviceId: null, range: null, loop: { startTick: 0, endTick: 3840 }, practice, ...change };
+}
 
-// A settings edit keeps the score, as the app's replay does, so only the settings decide what is prepared again.
-const apply = (project: ReturnType<typeof blankProject>, built: ReturnType<typeof engine.buildDocument>, edit: EditCommand) => { const next = engine.previewEdit(project, edit, built).project; return { project: next, built: engine.replayDocumentSettings(next, built) }; };
-
-it('prepares the plan again when a track is locked or unlocked, naming the locked tracks, and not for a mix change', async () => {
-  const prepare = vi.fn(async (_project: unknown, generation: number, _interpretations?: unknown, _locked?: readonly string[]) => buildPlaybackPlan(engine.buildDocument(blankProject()).score, generation));
-  const native = bridge(), player = new NativePlaybackController({ bridge: native, onEdit: vi.fn(), preparePlan: prepare as never });
+it('keeps playing, the position and the loop through a lock, and through its undo', async () => {
+  let receive: (value: NativeAudioStatus) => void = () => {};
+  const bridge: NativeAudioBridge = { prepare: vi.fn(async () => {}), command: vi.fn(async () => {}), setMix: vi.fn(async () => {}), devices: vi.fn(async () => []), status: vi.fn(async () => null), subscribe: vi.fn(async listener => { receive = listener; return () => {}; }), stageBacking: vi.fn(async () => null), stageEmbeddedBacking: vi.fn(async () => null) };
+  const prepare = vi.fn(async (_project: unknown, generation: number) => buildPlaybackPlan(buildDocument(blankProject()).score, generation));
+  const player = new NativePlaybackController({ bridge, onEdit: vi.fn(), preparePlan: prepare as never });
   try {
-    let project = blankProject(), built = engine.buildDocument(project);
+    let project = blankProject(), built = buildDocument(project);
     await player.loadDocument(project, built);
-    expect(prepare).toHaveBeenCalledTimes(1);
-    expect(prepare.mock.calls[0]).toHaveLength(2);
+    const generation = player.generation;
+    (bridge.command as ReturnType<typeof vi.fn>).mockClear();
+    receive(status(player, {}));
+    const before = player.getState();
+    expect(before).toMatchObject({ playing: true, loop: { startTick: 0, endTick: 3840 } });
+    const apply = (edit: EditCommand) => { project = previewEdit(project, edit, built).project; built = replayDocumentSettings(project, built); return player.loadDocument(project, built); };
     const sound = soundPreset('lead', 'green-guitar');
-    let step = apply(project, built, { type: 'setTrackSound', trackId: 'base/0', sound });
-    await player.loadDocument(step.project, step.built);
-    // An unlocked sound change is a mix change: the plan stays.
-    expect(prepare).toHaveBeenCalledTimes(1);
-    expect(native.setMix).toHaveBeenCalledTimes(1);
-    project = step.project; built = step.built;
-    step = apply(project, built, { type: 'setTrackSound', trackId: 'base/0', sound: { ...sound, locked: true } });
-    await player.loadDocument(step.project, step.built);
-    expect(prepare).toHaveBeenCalledTimes(2);
-    expect(prepare.mock.calls[1][2]).toBeUndefined();
-    expect(prepare.mock.calls[1][3]).toEqual(['base/0']);
-    expect(native.prepare).toHaveBeenCalledTimes(2);
-    project = step.project; built = step.built;
-    // While locked, a mix change leaves the plan alone.
-    step = apply(project, built, { type: 'setTrackMix', trackId: 'base/0', mix: { gain: 0.5, pan: 0, mute: false, solo: false } });
-    await player.loadDocument(step.project, step.built);
-    expect(prepare).toHaveBeenCalledTimes(2);
-    project = step.project; built = step.built;
-    // Unlocking (what undo does) prepares it again, without a lock.
-    step = apply(project, built, { type: 'setTrackSound', trackId: 'base/0', sound });
-    await player.loadDocument(step.project, step.built);
-    expect(prepare).toHaveBeenCalledTimes(3);
-    expect(prepare.mock.calls[2]).toHaveLength(2);
-  } finally { player.destroy(); }
-});
-
-it('sends the locked tracks to the plan worker', async () => {
-  const requests: { locked?: string[] }[] = [];
-  class WorkerFixture { onmessage: ((event: MessageEvent) => void) | null = null; onerror: ((event: ErrorEvent) => void) | null = null;
-    postMessage(data: { json: never; identities: string[]; generation: number; locked?: string[] }) { requests.push(data); queueMicrotask(() => this.onmessage?.({ data: { cmd: 'tabplayer.plan.result', plan: buildPlaybackPlanFromJson(data.json, data.identities, data.generation, undefined, data.locked) } } as MessageEvent)); }
-    terminate() {} }
-  vi.stubGlobal('Worker', WorkerFixture);
-  const player = new NativePlaybackController({ bridge: bridge(), onEdit: vi.fn() });
-  try {
-    const first = blankProject(), step = apply(first, engine.buildDocument(first), { type: 'setTrackSound', trackId: 'base/0', sound: { ...soundPreset('lead', 'green-guitar'), locked: true } });
-    await player.loadDocument(step.project, step.built);
-    expect(requests).toHaveLength(1);
-    expect(requests[0].locked).toEqual(['base/0']);
+    for (const [edit, locked] of [[{ type: 'setTrackSound', trackId: 'base/0', sound: { ...sound, locked: true } }, true], [{ type: 'setTrackSound', trackId: 'base/0', sound }, false]] as const) {
+      await apply(edit);
+      // The same plan, the same generation, no invalidation: the lock reaches the player as a mix change.
+      expect(prepare).toHaveBeenCalledTimes(1);
+      expect(bridge.prepare).toHaveBeenCalledTimes(1);
+      expect(player.generation).toBe(generation);
+      expect(bridge.command).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'invalidate' }));
+      expect(bridge.setMix).toHaveBeenLastCalledWith(expect.objectContaining({ sounds: { 'base/0': expect.objectContaining(locked ? { locked: true } : {}) } }), generation);
+      expect(!!(bridge.setMix as ReturnType<typeof vi.fn>).mock.lastCall![0].sounds['base/0'].locked).toBe(locked);
+      expect(player.getState()).toMatchObject({ ready: true, playing: true, time: before.time, loop: { startTick: 0, endTick: 3840 }, error: null });
+    }
+    expect(bridge.setMix).toHaveBeenCalledTimes(2);
   } finally { player.destroy(); }
 });

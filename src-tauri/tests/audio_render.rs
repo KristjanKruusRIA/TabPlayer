@@ -2093,3 +2093,46 @@ fn unlocking_needs_the_samples_an_unlocked_track_asks_for_that_a_locked_bank_lac
     bank.manifest.instruments.push(bass);
     assert!(Renderer::new(plan, resources, settings(false), 48_000).is_ok());
 }
+#[test]
+fn a_locked_track_plays_the_articulation_its_start_sound_gives() {
+    use tabplayer_lib::audio::voices::{resource_requests, with_locked_articulations};
+    // The score switches a guitar to a bass, so the note is fingered; kept, it is picked as the guitar plays it.
+    let plan: Arc<tabplayer_lib::audio::plan::PlaybackPlan> = Arc::new(serde_json::from_value(serde_json::json!({
+        "generation":1,"ppq":960,"durationTick":3840,"durationMs":2000,
+        "tracks":[{"id":"a","program":25,"percussion":false}],"tempos":[{"tick":0,"bpm":120}],
+        "occurrences":[{"bar":0,"occurrence":0,"meterNumerator":4,"meterDenominator":4,"startTick":0,"endTick":3840,"startMs":0,"endMs":2000}],
+        "notes":[{"id":"n0","trackId":"a","source":{"target":{"track":0,"staff":0,"bar":0,"voice":0,"beat":0},"string":1},
+            "occurrence":0,"channel":0,"program":33,"startTick":0,"endTick":960,"key":57,"velocity":100,
+            "articulation":"fingered","lockedArticulation":"picked","legatoFrom":null,"pitch":[{"tick":0,"semitones":0}]}],
+        "midi":[]
+    })).unwrap());
+    let sound = |locked| {
+        let mut settings = tabplayer_lib::settings::DocumentSettings::default();
+        settings.sounds.insert(
+            "a".into(),
+            tabplayer_lib::settings::TrackSound {
+                voice_id: Some("green-guitar".into()),
+                preset_id: "gm".into(),
+                effects: Default::default(),
+                locked,
+            },
+        );
+        settings
+    };
+    let articulations = |locked| -> Vec<String> {
+        resource_requests(&plan, &sound(locked))
+            .into_iter()
+            .map(|r| r.articulation)
+            .collect()
+    };
+    assert!(articulations(false).contains(&"fingered".to_string()));
+    assert!(articulations(true).iter().all(|a| a == "picked"));
+    use tabplayer_lib::audio::plan::Articulation;
+    assert_eq!(
+        with_locked_articulations(plan.clone(), &sound(true)).notes[0].articulation,
+        Articulation::Picked
+    );
+    let unlocked = with_locked_articulations(plan.clone(), &sound(false));
+    assert!(Arc::ptr_eq(&unlocked, &plan));
+    assert_eq!(unlocked.notes[0].articulation, Articulation::Fingered);
+}

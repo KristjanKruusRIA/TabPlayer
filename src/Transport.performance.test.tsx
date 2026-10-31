@@ -26,7 +26,7 @@ it('clock-only updates retain real occurrence controls without querying cursor o
   expect(screen.getByRole('button',{name:'Play from cursor'})).toBeEnabled();expect(screen.getByRole('button',{name:'Play selection'})).toBeEnabled();
   player.cursorPlaybackChoices.mockClear();player.selectionPlaybackChoices.mockClear();
   for(let time=1000;time<=3000;time+=1000)update({time,measure:time/1000});
-  expect(screen.getByText('0:03 / 0:10 · M4')).toBeVisible();expect(player.cursorPlaybackChoices).not.toHaveBeenCalled();expect(player.selectionPlaybackChoices).not.toHaveBeenCalled();
+  expect(document.querySelector('.transport-time')).toHaveTextContent('0:03 / 0:10');expect(screen.getByText('Bar 4')).toBeVisible();expect(player.cursorPlaybackChoices).not.toHaveBeenCalled();expect(player.selectionPlaybackChoices).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('button',{name:'Play from cursor'}));expect(player.playFromCursor).toHaveBeenCalledWith(cursor,{generation:7,occurrenceIndex:0,startTick:0});
   fireEvent.click(screen.getByRole('button',{name:'Play selection'}));expect(player.playSelection).toHaveBeenCalledWith(selection,{generation:7,startOccurrence:0,endOccurrence:0,startTick:0,endTick:3840});
 });

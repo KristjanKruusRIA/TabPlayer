@@ -2,6 +2,7 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
+import userEvent from '@testing-library/user-event';
 import { SoundPanel, soundPreset } from './SoundPanel';
 import { NativePlaybackController } from './NativePlaybackController';
 import type { NativeAudioBridge } from './bridge';
@@ -35,14 +36,46 @@ it('changes one actual parameter while preserving the complete chain and source 
   expect(onEdit).toHaveBeenCalledTimes(1);
 });
 
-it('allows busy rack inspection while disabling sound and output changes',async()=>{
+it('allows busy rack inspection while refusing sound and output changes without disabling anything that can hold focus',async()=>{
   const {player,bridge}=nativePlayer(),onEdit=vi.fn();render(<SoundPanel trackId="guitar" onEdit={onEdit} playback={player} busy/>);
   await screen.findByRole('option',{name:'Studio speakers'});
   fireEvent.click(screen.getByText('Gate',{exact:true}));
   expect(screen.getByLabelText('Enable gate')).toBeVisible();
-  for(const label of ['Sound source','Sound preset','gate Threshold (dB)','Enable gate','Audio output'])expect(screen.getByLabelText(label)).toBeDisabled();
-  expect(screen.getByRole('button',{name:'Restore preset'})).toBeDisabled();
+  // Busy is `aria-disabled` on each group, never the `disabled` attribute, which would drop focus from the control that holds it.
+  expect(document.querySelectorAll('fieldset[disabled]')).toHaveLength(0);
+  for(const fieldset of document.querySelectorAll('fieldset'))expect(fieldset).toHaveAttribute('aria-disabled','true');
+  for(const label of ['Sound source','Sound preset','gate Threshold (dB)','Enable gate','Audio output'])expect(screen.getByLabelText(label)).toBeEnabled();
+  expect(screen.getByRole('button',{name:'Restore preset'})).toBeEnabled();
   expect(onEdit).not.toHaveBeenCalled();expect(bridge.command).not.toHaveBeenCalled();
+});
+
+it('refuses the wheel over a number field while busy, and lets it through otherwise',()=>{
+  const wheel=()=>{const event=new WheelEvent('wheel',{bubbles:true,cancelable:true,deltaY:-100});screen.getByLabelText('amp Gain (dB)').dispatchEvent(event);return event.defaultPrevented;};
+  const sound=soundPreset('lead','green-guitar'),{rerender}=render(<SoundPanel trackId="guitar" sound={sound} onEdit={vi.fn()} busy/>);
+  fireEvent.click(screen.getByText('Amp',{exact:true}));
+  expect(wheel()).toBe(true);
+  rerender(<SoundPanel trackId="guitar" sound={sound} onEdit={vi.fn()}/>);
+  expect(wheel()).toBe(false);
+});
+
+it('does nothing on a click or change while busy, and focus stays where it was',async()=>{
+  const {player,bridge}=nativePlayer(),onEdit=vi.fn(),sound=soundPreset('lead','green-guitar');
+  const {rerender}=render(<SoundPanel trackId="guitar" sound={sound} onEdit={onEdit} playback={player}/>);
+  await screen.findByRole('option',{name:'Studio speakers'});
+  fireEvent.click(screen.getByText('Gate',{exact:true}));
+  const source=screen.getByLabelText('Sound source');source.focus();expect(document.activeElement).toBe(source);
+  rerender(<SoundPanel trackId="guitar" sound={sound} onEdit={onEdit} playback={player} busy/>);
+  expect(document.activeElement).toBe(source);
+  for(const target of [screen.getByRole('button',{name:'Restore preset'}),screen.getByLabelText('Enable gate'),screen.getByRole('button',{name:'Copy sound'})]) {
+    await userEvent.click(target);expect(document.activeElement).toBe(source);
+  }
+  fireEvent.change(source,{target:{value:'black-guitar'}});fireEvent.change(screen.getByLabelText('Audio output'),{target:{value:'speakers'}});
+  await userEvent.type(screen.getByLabelText('gate Threshold (dB)'),'5');
+  expect(onEdit).not.toHaveBeenCalled();expect(bridge.command).not.toHaveBeenCalled();
+  expect(source).toHaveValue('green-guitar');expect(screen.getByLabelText('Enable gate')).not.toBeChecked();
+  rerender(<SoundPanel trackId="guitar" sound={sound} onEdit={onEdit} playback={player}/>);
+  await userEvent.click(screen.getByRole('button',{name:'Restore preset'}));
+  expect(onEdit).toHaveBeenCalledTimes(1);
 });
 
 it('keeps preset failure visible outside the collapsed rack',async()=>{

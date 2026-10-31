@@ -455,3 +455,64 @@ it('ends a drag without saving when the fader loses focus or its pointer capture
     cleanup();
   }
 });
+
+it('mixes the kit of a selected percussion track only: six elements, each heard while dragged and saved once', async()=>{
+  const withDrums=previewEdit(blankProject(),{type:'addPercussionTrack',name:'Drums',program:0}).score;
+  const {player}=livePlayer(withDrums);
+  const kitPlayer={...player,mix:vi.fn(()=>({mute:false,solo:false,volume:1,pan:0,drumKit:{toms:{gain:.4,pan:.25,mute:true,solo:false}}})),setDrumElement:vi.fn(async()=>{}),previewDrumElement:vi.fn(async()=>{})};
+  // A guitar track has no kit.
+  const view=render(<MixerView {...props(withDrums)} player={kitPlayer}/>);
+  expect(screen.queryByRole('region',{name:/Drum kit/})).not.toBeInTheDocument();
+  view.rerender(<MixerView {...props(withDrums)} selected={1} player={kitPlayer}/>);
+  const kit=screen.getByRole('region',{name:'Drum kit Drums'});
+  expect(within(kit).getAllByRole('group').map(group=>group.getAttribute('aria-label'))).toEqual(['Kick','Snare','Hi-Hat','Toms','Cymbals','Other percussion']);
+  // It shows the saved kit, and a missing element at its defaults.
+  const toms=within(kit).getByRole('group',{name:'Toms'});
+  expect(within(toms).getByRole('slider',{name:'Volume Toms'})).toHaveAttribute('aria-valuenow','0.4');
+  expect(within(toms).getByRole('slider',{name:'Pan Toms'})).toHaveAttribute('aria-valuenow','0.25');
+  expect(within(toms).getByLabelText('Mute Toms')).toBeChecked();
+  expect(within(kit).getByRole('slider',{name:'Volume Kick'})).toHaveAttribute('aria-valuenow','1');
+  // A drag is heard through the preview, the release saves it once, and the keys save one change each.
+  const volume=within(kit).getByRole('slider',{name:'Volume Snare'});sized(volume);
+  const thumb=volume.querySelector('.tp-fader-thumb')!;
+  fireEvent.pointerDown(thumb,{clientY:100,pointerId:1});fireEvent.pointerMove(thumb,{clientY:136,pointerId:1});
+  await vi.waitFor(()=>expect(kitPlayer.previewDrumElement).toHaveBeenCalledWith(1,'snare',{gain:.7}));
+  expect(kitPlayer.setDrumElement).not.toHaveBeenCalled();
+  fireEvent.pointerUp(thumb,{clientY:136,pointerId:1});
+  expect(kitPlayer.setDrumElement).toHaveBeenCalledTimes(1);expect(kitPlayer.setDrumElement).toHaveBeenCalledWith(1,'snare',{gain:.7});
+  fireEvent.click(within(kit).getByLabelText('Solo Kick'));
+  expect(kitPlayer.setDrumElement).toHaveBeenLastCalledWith(1,'kick',{solo:true});
+  fireEvent.keyDown(within(kit).getByRole('slider',{name:'Pan Hi-Hat'}),{key:'ArrowLeft'});
+  expect(kitPlayer.setDrumElement).toHaveBeenLastCalledWith(1,'hats',{pan:-.05});
+  expect(kitPlayer.setDrumElement).toHaveBeenCalledTimes(3);
+});
+
+it('refuses kit changes while busy without dropping focus', ()=>{
+  const withDrums=previewEdit(blankProject(),{type:'addPercussionTrack',name:'Drums',program:0}).score;
+  const {player}=livePlayer(withDrums);
+  const kitPlayer={...player,setDrumElement:vi.fn(async()=>{}),previewDrumElement:vi.fn(async()=>{})};
+  render(<MixerView {...props(withDrums)} selected={1} busy player={kitPlayer}/>);
+  const mute=screen.getByLabelText('Mute Kick'),volume=screen.getByRole('slider',{name:'Volume Kick'});
+  expect(mute).toHaveAttribute('aria-disabled','true');expect(mute).not.toHaveAttribute('disabled');
+  expect(volume).toHaveAttribute('aria-disabled','true');
+  mute.focus();fireEvent.click(mute);volume.focus();fireEvent.keyDown(volume,{key:'ArrowDown'});
+  expect(volume).toHaveFocus();
+  expect(kitPlayer.setDrumElement).not.toHaveBeenCalled();expect(kitPlayer.previewDrumElement).not.toHaveBeenCalled();
+});
+
+it('drops a kit wheel turn when another track is selected before it is committed', async()=>{
+  vi.useFakeTimers();
+  try {
+    const first=previewEdit(blankProject(),{type:'addPercussionTrack',name:'Drums',program:0});
+    const both=previewEdit(first.project,{type:'addPercussionTrack',name:'Congas',program:0}).score;
+    const {player}=livePlayer(both);
+    const kitPlayer={...player,setDrumElement:vi.fn(async()=>{}),previewDrumElement:vi.fn(async()=>{})};
+    const view=render(<MixerView {...props(both)} selected={1} player={kitPlayer}/>);
+    const volume=screen.getByRole('slider',{name:'Volume Kick'});
+    volume.focus();fireEvent.wheel(volume,{deltaY:100});
+    view.rerender(<MixerView {...props(both)} selected={2} player={kitPlayer}/>);
+    await act(async()=>{await vi.advanceTimersByTimeAsync(2000);});
+    expect(screen.getByRole('region',{name:'Drum kit Congas'})).toBeInTheDocument();
+    expect(kitPlayer.setDrumElement).not.toHaveBeenCalled();
+  } finally { vi.useRealTimers(); }
+});

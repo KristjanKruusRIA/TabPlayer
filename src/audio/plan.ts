@@ -13,6 +13,9 @@ import { applyNoteAudio, collectAudible, collectNoteAudio, type AudibleAttack, t
 import { hasNoteAudio } from '../editor/note-audio';
 import type { ReferenceLocation } from './reference-sync-types';
 import { interpretAttacks, type Attack } from './interpretation';
+import { DRUM_KIT_ELEMENTS, planKitElement } from './drum-kit';
+import { ownerOf } from '../instruments/drum-kit';
+import type { DrumKitElement } from '../edit-types';
 
 const settings = new Settings();
 const validMeter = (numerator:number,denominator:number) => Number.isSafeInteger(numerator) && numerator > 0 && numerator <= 0xffffffff && [1,2,4,8,16,32,64,128,256].includes(denominator);
@@ -40,7 +43,7 @@ export function prepareMidiScore(score: model.Score): model.Score {
   return copy;
 }
 
-type RawNote = { track: number; trackAttack: number; onOrder: number; offOrder: number; start: number; end: number; channel: number; program?: number; key: number; rawKey: number; velocity: number; provenance?: string };
+type RawNote = { track: number; trackAttack: number; onOrder: number; offOrder: number; start: number; end: number; channel: number; program?: number; key: number; rawKey: number; velocity: number; provenance?: string; kit?: DrumKitElement };
 type RawEvent = (Omit<Extract<PlanMidiEvent, { type: 'program' }>, 'trackId'> & { track: number }
   | { type: 'controller'; track: number; tick: number; channel: number; controller: number; value: number }
   | { type: 'bend' | 'noteBend'; track: number; tick: number; channel: number; key?: number; value: number }) & { order: number };
@@ -391,6 +394,8 @@ function buildWithIdentities(original: model.Score, generation: number, ids: str
           actual.end = actual.start + baseline.end - baseline.start;
           corrected?.(actual.track, actual.trackAttack, actual.end - actual.start);
         }
+        // A drum note is mixed with the piece its articulation belongs to; the player knows only its pitch, and so is told wherever that is another piece.
+        if (source.note.isPercussion) { const kit = planKitElement(ownerOf(score.tracks[source.track], source.note.percussionArticulation), actual.key); if (kit) actual.kit = kit; }
         let origin = source.note.hammerPullOrigin ?? (source.note.slideOrigin?.slideOutType === model.SlideOutType.Legato ? source.note.slideOrigin : null) ?? source.note.slurOrigin;
         while (origin?.tieOrigin) origin = origin.tieOrigin;
         const from = origin && !source.note.beat.deadSlapped ? [...(played.get(origin) ?? [])].reverse().find(n => n.startTick < actual.start && n.source.target.track === source.track && n.source.target.staff === source.staff && n.source.target.voice === source.voice && n.source.string === Math.max(0, source.note.string)) : undefined;
@@ -425,7 +430,7 @@ function buildWithIdentities(original: model.Score, generation: number, ids: str
   for(const event of gpControllerEvents(score,occurrences))events.push({type:'controller',trackId:ids[event.track],tick:event.tick,channel:nativeChannel(event.track,event.channel),controller:event.controller,value:event.value,order:Number.MAX_SAFE_INTEGER});
   if (audible.length) applyNoteAudio(audible, notes, Math.max(sliceExtent, complete.events.end, ...complete.events.notes.map(n => n.end)));
   for (const note of complete.events.notes) {
-    const common = { trackId: ids[note.track], channel: nativeChannel(note.track, note.channel), key: note.key, velocity: note.velocity };
+    const common = { trackId: ids[note.track], channel: nativeChannel(note.track, note.channel), key: note.key, velocity: note.velocity, ...(note.kit ? { kitElement: note.kit } : {}) };
     events.push({ ...common, type: 'noteOn', tick: note.start, order: note.onOrder }, { ...common, type: 'noteOff', tick: note.end, order: note.offOrder });
   }
   const durationTick = Math.max(sliceExtent, complete.events.end, ...complete.events.notes.map(n => n.end), 0);
@@ -501,7 +506,7 @@ export function validatePlaybackPlan(plan: PlaybackPlan) {
     if (event.tick > plan.durationTick) fail(`MIDI ${event.type} after duration`);
     if (!integer(event.channel, 15)) fail('MIDI channel');
     if (!tracks.has(event.trackId) || event.tick < previous) fail('MIDI structure');
-    if ((event.type === 'noteOn' || event.type === 'noteOff') && (!integer(event.key, 127) || !integer(event.velocity, 127))) fail();
+    if ((event.type === 'noteOn' || event.type === 'noteOff') && (!integer(event.key, 127) || !integer(event.velocity, 127) || event.kitElement !== undefined && !DRUM_KIT_ELEMENTS.includes(event.kitElement))) fail();
     if (event.type === 'program' && !integer(event.program, 127)) fail();
     if (event.type === 'controller' && (!integer(event.controller, 127) || !integer(event.value, 127))) fail();
     if ((event.type === 'bend' || event.type === 'noteBend') && !Number.isFinite(event.value)) fail();

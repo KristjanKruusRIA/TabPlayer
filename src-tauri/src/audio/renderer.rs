@@ -13,13 +13,63 @@ use super::{
         voice_id_for_note, voice_id_for_track, with_drum_kits, with_locked_articulations,
     },
 };
-use crate::settings::{BackingProcessing, ChannelMix, DocumentSettings};
+use crate::settings::{
+    BackingProcessing, ChannelMix, DocumentSettings, DrumKitMix, KitElement, gm_kit_element,
+};
 use rustysynth::{Synthesizer, SynthesizerSettings};
 use std::{
     collections::{HashMap, VecDeque},
     sync::Arc,
 };
 
+const KIT_ELEMENTS: usize = KitElement::COUNT;
+
+/// What each drum kit element is multiplied by, left and right, moving to a new target over a short ramp so a mute or a
+/// level change never steps a ringing cymbal.
+#[derive(Clone, Copy)]
+struct KitGain {
+    current: [[f32; 2]; KIT_ELEMENTS],
+    target: [[f32; 2]; KIT_ELEMENTS],
+    remaining: u32,
+}
+impl KitGain {
+    fn new(kit: Option<&DrumKitMix>) -> Self {
+        let target = kit.map_or([[1.0; 2]; KIT_ELEMENTS], |kit| {
+            let elements = kit.elements();
+            let any_solo = elements.iter().any(|e| e.solo);
+            std::array::from_fn(|i| {
+                let e = &elements[i];
+                let gain = if !e.mute && (!any_solo || e.solo) {
+                    e.gain
+                } else {
+                    0.0
+                };
+                [
+                    gain * if e.pan > 0.0 { 1.0 - e.pan } else { 1.0 },
+                    gain * if e.pan < 0.0 { 1.0 + e.pan } else { 1.0 },
+                ]
+            })
+        });
+        Self {
+            current: target,
+            target,
+            remaining: 0,
+        }
+    }
+    /// The multipliers for the next frame.
+    fn step(&mut self) -> [[f32; 2]; KIT_ELEMENTS] {
+        if self.remaining > 0 {
+            let remaining = self.remaining as f32;
+            for (current, target) in self.current.iter_mut().zip(&self.target) {
+                for c in 0..2 {
+                    current[c] += (target[c] - current[c]) / remaining;
+                }
+            }
+            self.remaining -= 1;
+        }
+        self.current
+    }
+}
 #[derive(Clone, Copy)]
 struct Gain {
     current: [f32; 2],
@@ -51,6 +101,9 @@ struct PreparedChannel {
     dsp: TrackDsp,
     gain: Gain,
     mix: ChannelMix,
+    kit: KitGain,
+    /// Whether the kit mix changes anything. A kit of elements all at their defaults sounds as the track does without one.
+    kit_active: bool,
 }
 pub struct PreparedMix {
     channels: Vec<PreparedChannel>,
@@ -93,9 +146,12 @@ impl PreparedMix {
                 .unwrap_or_else(FxSettings::default);
             let mut dsp = TrackDsp::new(fx, sample_rate, MAX_TRACK_DELAY_SECONDS)?;
             dsp.set_ir_index(index);
+            let kit = mix.drum_kit.as_ref().filter(|kit| !kit.is_neutral());
             channels.push(PreparedChannel {
                 dsp,
                 gain: Gain::new(&mix, !mix.mute && (!any_solo || mix.solo)),
+                kit: KitGain::new(kit),
+                kit_active: kit.is_some(),
                 mix,
             });
         }
@@ -215,6 +271,13 @@ struct MidiAttack {
 }
 struct Track {
     synth: Option<Synthesizer>,
+    /// One synthesizer per kit element, on a percussion track. They sound only while a kit mix is in effect, and render only once
+    /// one of them has been struck since the last seek.
+    drum_synths: Option<[Synthesizer; KIT_ELEMENTS]>,
+    kit_active: bool,
+    drum_used: bool,
+    /// Whether a frame has been rendered since the last seek, which is when a kit level change has been heard to ramp.
+    kit_rendered: bool,
     automatic: bool,
     fixed_recorded: bool,
     locked: bool,
@@ -247,6 +310,8 @@ pub struct Renderer {
     midi_attacks: Vec<Option<MidiAttack>>,
     note_has_midi: Vec<bool>,
     note_programs: Vec<u8>,
+    /// The kit element the plan names for each note's MIDI attack, where it names one.
+    note_kit: Vec<Option<KitElement>>,
     note_end_ticks: Vec<f64>,
     slots: Vec<Option<ActiveVoice>>,
     active: Vec<usize>,
@@ -287,7 +352,7 @@ impl Renderer {
             .map(|(i, n)| (n.id.as_str(), i))
             .collect();
         let mut tracks = Vec::with_capacity(plan.tracks.len());
-        for track in &plan.tracks {
+        for (track_index, track) in plan.tracks.iter().enumerate() {
             if let Some(id) = voice_id_for_track(track, &settings) {
                 if !resources.manifest.instruments.iter().any(|i| i.id == id) {
                     return Err(format!("Unknown recorded instrument {id}."));
@@ -305,7 +370,7 @@ impl Renderer {
                     track.program
                 }
             });
-            let synth = if has_gm {
+            let make_synth = || -> Result<Synthesizer, String> {
                 let mut config = SynthesizerSettings::new(sample_rate as i32);
                 config.maximum_polyphony = 256;
                 config.block_size = 8;
@@ -320,12 +385,25 @@ impl Renderer {
                         0,
                     );
                 }
-                Some(synth)
+                Ok(synth)
+            };
+            let synth = if has_gm { Some(make_synth()?) } else { None };
+            // A percussion track keeps one synthesizer per kit element beside its own, idle until a kit mix is in
+            // effect, so a kit mix is installed like any other mix, without rebuilding the renderer.
+            let drum_synths = if has_gm && track.percussion {
+                let built = (0..KIT_ELEMENTS)
+                    .map(|_| make_synth())
+                    .collect::<Result<Vec<_>, _>>()?;
+                Some(
+                    <[Synthesizer; KIT_ELEMENTS]>::try_from(built)
+                        .map_err(|_| "Drum kit synthesizers are missing.".to_string())?,
+                )
             } else {
                 None
             };
             tracks.push(Track {
                 synth,
+                drum_synths,
                 automatic: settings
                     .sounds
                     .get(&track.id)
@@ -338,6 +416,9 @@ impl Renderer {
                     .is_some_and(|id| id != "gm"),
                 locked,
                 start_programs,
+                kit_active: mix.channels[track_index].kit_active,
+                drum_used: false,
+                kit_rendered: false,
                 percussion: track.percussion,
                 channels: std::array::from_fn(|c| MidiChannel::new(start_programs[c])),
                 ranges: [2.0; 16],
@@ -505,6 +586,7 @@ impl Renderer {
                 .push_back(index);
         }
         let mut note_has_midi = vec![false; plan.notes.len()];
+        let mut note_kit = vec![None; plan.notes.len()];
         let midi_attacks = plan
             .midi
             .iter()
@@ -514,6 +596,7 @@ impl Renderer {
                     channel,
                     key,
                     tick,
+                    kit_element,
                     ..
                 } = event
                 {
@@ -526,6 +609,7 @@ impl Renderer {
                         ))?
                         .pop_front()?;
                     note_has_midi[note] = true;
+                    note_kit[note] = *kit_element;
                     Some(MidiAttack {
                         program: note_programs[note],
                         recorded: selected[note].is_some(),
@@ -552,6 +636,7 @@ impl Renderer {
             selected,
             midi_attacks,
             note_has_midi,
+            note_kit,
             note_programs,
             note_end_ticks,
             slots,
@@ -641,16 +726,26 @@ impl Renderer {
             );
         }
     }
-    fn gm_note_on(track: &mut Track, channel: u8, key: u8, velocity: u8, program: u8) {
-        if let Some(synth) = &mut track.synth {
+    fn gm_note_on(
+        track: &mut Track,
+        channel: u8,
+        key: u8,
+        velocity: u8,
+        program: u8,
+        element: Option<KitElement>,
+    ) {
+        let restore = track.channels[channel as usize].program as i32;
+        let kit = track.kit_active;
+        if let (true, Some(synths)) = (kit, &mut track.drum_synths) {
+            let synth = &mut synths[element.unwrap_or_else(|| gm_kit_element(key)).index()];
             synth.process_midi_message(channel as i32, 0xc0, program as i32, 0);
             synth.note_on(channel as i32, key as i32, velocity as i32);
-            synth.process_midi_message(
-                channel as i32,
-                0xc0,
-                track.channels[channel as usize].program as i32,
-                0,
-            );
+            synth.process_midi_message(channel as i32, 0xc0, restore, 0);
+            track.drum_used = true;
+        } else if let Some(synth) = &mut track.synth {
+            synth.process_midi_message(channel as i32, 0xc0, program as i32, 0);
+            synth.note_on(channel as i32, key as i32, velocity as i32);
+            synth.process_midi_message(channel as i32, 0xc0, restore, 0);
         }
     }
     fn midi_event(track: &mut Track, event: &PlanMidiEvent, attack: Option<MidiAttack>) {
@@ -659,6 +754,7 @@ impl Renderer {
                 channel,
                 key,
                 velocity,
+                kit_element,
                 ..
             } => {
                 let program =
@@ -666,10 +762,22 @@ impl Renderer {
                 let recorded =
                     attack.map_or_else(|| track.recorded_program(program), |a| a.recorded);
                 if !recorded {
-                    Self::gm_note_on(track, *channel, *key, *velocity, program);
+                    Self::gm_note_on(track, *channel, *key, *velocity, program, *kit_element);
                 }
             }
-            PlanMidiEvent::NoteOff { channel, key, .. } => {
+            PlanMidiEvent::NoteOff {
+                channel,
+                key,
+                kit_element,
+                ..
+            } => {
+                // A note may have started on either side of a kit change, and releasing a key nobody holds is harmless.
+                if track.drum_used {
+                    if let Some(synths) = &mut track.drum_synths {
+                        let element = kit_element.unwrap_or_else(|| gm_kit_element(*key));
+                        synths[element.index()].note_off(*channel as i32, *key as i32);
+                    }
+                }
                 if let Some(synth) = &mut track.synth {
                     synth.note_off(*channel as i32, *key as i32);
                 }
@@ -679,6 +787,11 @@ impl Renderer {
             } => {
                 if !track.locked {
                     track.channels[*channel as usize].program = *program;
+                    if let Some(synths) = &mut track.drum_synths {
+                        for synth in synths.iter_mut() {
+                            synth.process_midi_message(*channel as i32, 0xc0, *program as i32, 0);
+                        }
+                    }
                     if let Some(synth) = &mut track.synth {
                         synth.process_midi_message(*channel as i32, 0xc0, *program as i32, 0);
                     }
@@ -714,6 +827,16 @@ impl Renderer {
                 if *controller == 6 && track.rpn_msb[c] == 0 && track.rpn_lsb[c] == 0 {
                     track.ranges[c] = (*value as f64).max(1.0);
                 }
+                if let Some(synths) = &mut track.drum_synths {
+                    for synth in synths.iter_mut() {
+                        synth.process_midi_message(
+                            *channel as i32,
+                            0xb0,
+                            *controller as i32,
+                            *value as i32,
+                        );
+                    }
+                }
                 if let Some(synth) = &mut track.synth {
                     synth.process_midi_message(
                         *channel as i32,
@@ -728,6 +851,11 @@ impl Renderer {
                 let wheel = (8192.0 + *value / track.ranges[*channel as usize] * 8192.0)
                     .round()
                     .clamp(0.0, 16383.0) as i32;
+                if let Some(synths) = &mut track.drum_synths {
+                    for synth in synths.iter_mut() {
+                        synth.process_midi_message(*channel as i32, 0xe0, wheel & 127, wheel >> 7);
+                    }
+                }
                 if let Some(synth) = &mut track.synth {
                     synth.process_midi_message(*channel as i32, 0xe0, wheel & 127, wheel >> 7);
                 }
@@ -829,6 +957,20 @@ impl Renderer {
                 synth.render(&mut left, &mut right);
                 self.scratch[index][0] += left[0];
                 self.scratch[index][1] += right[0];
+            }
+            if let Some(synths) = &mut track.drum_synths {
+                // The ramp moves with the clock, struck or not, so a note struck after a change starts at the new level.
+                track.kit_rendered = true;
+                let gains = self.mix.channels[index].kit.step();
+                if track.drum_used {
+                    for (synth, gain) in synths.iter_mut().zip(gains) {
+                        let mut left = [0.0];
+                        let mut right = [0.0];
+                        synth.render(&mut left, &mut right);
+                        self.scratch[index][0] += left[0] * gain[0];
+                        self.scratch[index][1] += right[0] * gain[1];
+                    }
+                }
             }
             let channel = &mut self.mix.channels[index];
             self.scratch[index] = channel
@@ -1012,12 +1154,33 @@ impl Renderer {
         for channel in &mut self.mix.channels {
             channel.dsp.reset();
         }
+        // Everything sounding is cut, so nothing needs the old level to fade from, and held notes struck again below
+        // already go where the effective kit sends them.
+        for track in &mut self.tracks {
+            track.kit_rendered = false;
+        }
+        self.settle_idle_kit();
         self.mix.master.reset();
         self.next_note = self.plan.notes.partition_point(|n| n.start_tick < tick);
         self.next_midi = self.plan.midi.partition_point(|m| m.tick() < tick);
         for (track_index, track) in self.tracks.iter_mut().enumerate() {
             let start_programs = track.start_programs;
             track.channels = std::array::from_fn(|c| MidiChannel::new(start_programs[c]));
+            track.drum_used = false;
+            track.kit_rendered = false;
+            if let Some(synths) = &mut track.drum_synths {
+                for synth in synths.iter_mut() {
+                    synth.reset();
+                    for channel in 0..16 {
+                        synth.process_midi_message(
+                            channel,
+                            0xc0,
+                            start_programs[channel as usize] as i32,
+                            0,
+                        );
+                    }
+                }
+            }
             if let Some(synth) = &mut track.synth {
                 synth.reset();
                 for channel in 0..16 {
@@ -1036,6 +1199,7 @@ impl Renderer {
             let mut sustained = [[false; 128]; 16];
             let mut velocities = [[0u8; 128]; 16];
             let mut programs = [[0u8; 128]; 16];
+            let mut elements = [[None::<KitElement>; 128]; 16];
             for (event_index, event) in self
                 .plan
                 .midi
@@ -1049,6 +1213,7 @@ impl Renderer {
                         channel,
                         key,
                         velocity,
+                        kit_element,
                         ..
                     } => {
                         let c = *channel as usize;
@@ -1059,6 +1224,7 @@ impl Renderer {
                             held[c][k] = held[c][k].saturating_add(1);
                             velocities[c][k] = *velocity;
                             programs[c][k] = track.channels[c].program;
+                            elements[c][k] = *kit_element;
                         }
                     }
                     PlanMidiEvent::NoteOff { channel, key, .. } => {
@@ -1094,6 +1260,7 @@ impl Renderer {
                             key as u8,
                             velocities[c][key],
                             programs[c][key],
+                            elements[c][key],
                         );
                     }
                 }
@@ -1129,6 +1296,7 @@ impl Renderer {
                         note.key,
                         note.velocity,
                         self.note_programs[index],
+                        self.note_kit[index],
                     );
                 }
             }
@@ -1212,6 +1380,32 @@ impl Renderer {
     pub fn has_backing(&self) -> bool {
         self.configured_backing || self.backing.is_some()
     }
+    /// Puts every kit level at its target for a track that has rendered no frame since the last seek, even if the seek struck held notes again. A stopped or
+    /// paused transport renders nothing, so a ramp armed meanwhile would still be on its way when the next note is struck.
+    /// A track with notes ringing keeps its ramp, so they resume without a step.
+    pub fn settle_idle_kit(&mut self) {
+        // The effective kit is the parked mix's if one waits, else the live one, and this is the only place that decides it. A
+        // mix parked behind a track DSP crossfade cannot install while nothing renders; it installs later with the same kit and
+        // nothing left to ramp.
+        let parked = self.parked_mix.as_ref();
+        for (index, (track, channel)) in self
+            .tracks
+            .iter_mut()
+            .zip(&mut self.mix.channels)
+            .enumerate()
+        {
+            if track.kit_rendered {
+                continue;
+            }
+            if let Some(next) = parked.and_then(|mix| mix.channels.get(index)) {
+                channel.kit.target = next.kit.target;
+                channel.kit_active = next.kit_active;
+                track.kit_active = next.kit_active;
+            }
+            channel.kit.current = channel.kit.target;
+            channel.kit.remaining = 0;
+        }
+    }
     fn mix_ramping(&self) -> bool {
         self.mix.channels.iter().any(|c| c.dsp.ramping()) || self.mix.master.ramping()
     }
@@ -1241,10 +1435,15 @@ impl Renderer {
             new.dsp.transition_from(&mut old.dsp);
             new.gain.current = old.gain.current;
             new.gain.remaining = (self.rate as f64 * 0.01) as u32;
+            new.kit.current = old.kit.current;
+            new.kit.remaining = (self.rate as f64 * 0.01) as u32;
         }
         settings.backing.current = self.mix.backing.current;
         settings.backing.remaining = (self.rate as f64 * 0.01) as u32;
         settings.master.transition_from(&mut self.mix.master);
+        for (track, channel) in self.tracks.iter_mut().zip(&settings.channels) {
+            track.kit_active = channel.kit_active;
+        }
         std::mem::replace(&mut self.mix, settings)
     }
     pub fn set_mix(&mut self, settings: PreparedMix) {
@@ -1339,6 +1538,11 @@ impl Renderer {
             }
         }
         for track in &mut self.tracks {
+            if let Some(synths) = &mut track.drum_synths {
+                for synth in synths.iter_mut() {
+                    synth.note_off_all(false);
+                }
+            }
             if let Some(synth) = &mut track.synth {
                 synth.note_off_all(false);
             }
@@ -1643,5 +1847,103 @@ mod selection_tests {
                 "no held voice or historical delay after seeking past its end"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod kit_tests {
+    use super::*;
+    use crate::settings::DrumElementMix;
+
+    fn plan() -> PlaybackPlan {
+        serde_json::from_value(serde_json::json!({
+            "generation": 1, "ppq": 960, "durationTick": 1920, "durationMs": 1000,
+            "tracks": [{"id": "drums", "program": 0, "percussion": true}],
+            "tempos": [{"tick": 0, "bpm": 120}],
+            "occurrences": [{"bar": 0, "occurrence": 0, "meterNumerator": 4, "meterDenominator": 4, "startTick": 0, "endTick": 1920, "startMs": 0, "endMs": 1000}],
+            "notes": [], "midi": []
+        }))
+        .unwrap()
+    }
+    fn prepared(kit: Option<DrumKitMix>) -> PreparedMix {
+        let mut settings = DocumentSettings::default();
+        settings.mixes.insert(
+            "drums".into(),
+            ChannelMix {
+                drum_kit: kit,
+                ..Default::default()
+            },
+        );
+        PreparedMix::prepare(&settings, &plan(), 48_000).unwrap()
+    }
+    fn element(gain: f32, pan: f32, mute: bool, solo: bool) -> Option<DrumElementMix> {
+        Some(DrumElementMix {
+            gain,
+            pan,
+            mute,
+            solo,
+        })
+    }
+
+    #[test]
+    fn a_kit_of_defaults_is_no_kit() {
+        assert!(!prepared(None).channels[0].kit_active);
+        let neutral = element(1.0, 0.0, false, false);
+        assert!(
+            !prepared(Some(DrumKitMix {
+                kick: neutral,
+                ..Default::default()
+            }))
+            .channels[0]
+                .kit_active
+        );
+        assert!(
+            prepared(Some(DrumKitMix {
+                kick: element(0.9, 0.0, false, false),
+                ..Default::default()
+            }))
+            .channels[0]
+                .kit_active
+        );
+    }
+
+    #[test]
+    fn element_gains_follow_level_pan_mute_and_solo() {
+        let kit = DrumKitMix {
+            kick: element(0.5, -0.5, false, false),
+            snare: element(1.0, 0.0, true, false),
+            hats: element(1.0, 1.0, false, true),
+            ..Default::default()
+        };
+        let gains = KitGain::new(Some(&kit)).current;
+        // Hats are the only element soloed: everything else is silent, and a muted snare would be anyway.
+        assert_eq!(gains[KitElement::Hats.index()], [0.0, 1.0]);
+        assert_eq!(gains[KitElement::Kick.index()], [0.0, 0.0]);
+        assert_eq!(gains[KitElement::Snare.index()], [0.0, 0.0]);
+        let kit = DrumKitMix {
+            kick: element(0.5, -0.5, false, false),
+            ..Default::default()
+        };
+        let gains = KitGain::new(Some(&kit)).current;
+        assert_eq!(gains[KitElement::Kick.index()], [0.5, 0.25]);
+        assert_eq!(gains[KitElement::Other.index()], [1.0, 1.0]);
+        assert_eq!(KitGain::new(None).current, [[1.0; 2]; KIT_ELEMENTS]);
+    }
+
+    #[test]
+    fn a_level_change_ramps_to_its_target_and_stays() {
+        let mut gain = KitGain::new(None);
+        gain.target[KitElement::Cymbals.index()] = [0.0, 0.0];
+        gain.remaining = 480;
+        let first = gain.step()[KitElement::Cymbals.index()][0];
+        assert!(first > 0.99 && first < 1.0, "no step on the first frame");
+        let mut last = first;
+        for _ in 1..480 {
+            let next = gain.step()[KitElement::Cymbals.index()][0];
+            assert!(next < last, "the level only falls");
+            last = next;
+        }
+        assert_eq!(gain.step()[KitElement::Cymbals.index()], [0.0, 0.0]);
+        assert_eq!(gain.step()[KitElement::Kick.index()], [1.0, 1.0]);
     }
 }

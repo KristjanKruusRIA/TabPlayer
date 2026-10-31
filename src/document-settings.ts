@@ -3,6 +3,7 @@ import type { DocumentSettings, EffectBlock, FxSettings, MasterSettings, Setting
 import {defaultEngraving,validateEngravingTracks} from './engraving/projection';
 import {validatePageLayout} from './engraving/page';
 import {validateInterpretation} from './audio/interpretation';
+import {validateDrumKit} from './audio/drum-kit';
 
 /** A duplicated track starts with its source's sound, mix and engraving profile; later changes are separate. */
 export function copyTrackSettings(settings:DocumentSettings,source:string,copy:string):void {
@@ -177,7 +178,8 @@ export const defaultDocumentSettings = (): DocumentSettings => ({sounds:{},mixes
 
 export function validateMix(mix: ChannelMix) {
   if (!mix || !Number.isFinite(mix.gain) || mix.gain<0 || mix.gain>1 || !Number.isFinite(mix.pan) || Math.abs(mix.pan)>1 || typeof mix.mute!=='boolean' || typeof mix.solo!=='boolean') throw new Error('Invalid mixer settings.');
-  if (Object.keys(mix).some(key=>!['gain','pan','mute','solo','interpretation'].includes(key))) throw new Error('Invalid mixer settings.');
+  if (Object.keys(mix).some(key=>!['gain','pan','mute','solo','interpretation','drumKit'].includes(key))) throw new Error('Invalid mixer settings.');
+  if (Object.hasOwn(mix,'drumKit')) validateDrumKit(mix.drumKit);
   if (Object.hasOwn(mix,'interpretation')) validateInterpretation(mix.interpretation);
 }
 

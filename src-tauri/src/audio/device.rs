@@ -1018,6 +1018,22 @@ impl CallbackTransport {
         self.passes = 0;
         self.resolve_renderer();
     }
+    /// Takes a mix for the playing document; what comes back is retired off the audio thread. A transport that is not
+    /// playing renders nothing to carry a level change through, so the change is complete when playing resumes.
+    pub fn replace_mix(&mut self, mix: PreparedMix, generation: u64) -> Option<PreparedMix> {
+        if generation != self.generation {
+            return Some(mix);
+        }
+        let playing = self.playing;
+        let Some(renderer) = self.renderer.as_mut() else {
+            return Some(mix);
+        };
+        let old = renderer.replace_mix(mix);
+        if !playing {
+            renderer.settle_idle_kit();
+        }
+        old
+    }
     pub fn command(&mut self, command: TransportCommand) -> Result<(), &'static str> {
         if self.shared.epoch.load(Ordering::Acquire) != self.epoch {
             return Err("Stale audio output epoch.");
@@ -1465,15 +1481,7 @@ impl OutputCallback {
                     }
                 }
                 CallbackCommand::Mix { mix, generation } => {
-                    let old = if generation == self.transport.generation {
-                        if let Some(renderer) = &mut self.transport.renderer {
-                            renderer.replace_mix(mix)
-                        } else {
-                            Some(mix)
-                        }
-                    } else {
-                        Some(mix)
-                    };
+                    let old = self.transport.replace_mix(mix, generation);
                     if let Some(old) = old {
                         let _ = self.retired.try_push(Retired::Mix(old));
                     }
@@ -2486,6 +2494,65 @@ mod reference_tests {
         let mut candidate = original;
         Arc::make_mut(&mut candidate.plan).playback_end_tick = None;
         assert!(AudioService::renderer(&candidate, 48_000).is_err());
+    }
+    #[test]
+    fn a_drum_kit_edit_reaches_a_playing_document_as_a_mix_and_never_rebuilds_it() {
+        use crate::settings::{ChannelMix, DrumElementMix, DrumKitMix};
+        let mut original = document();
+        let mut plan = (*original.plan).clone();
+        plan.tracks[0].percussion = true;
+        original.plan = Arc::new(plan);
+        let shared = Arc::new(SharedStatus::new());
+        shared.desired.store(1, Ordering::Release);
+        let (producer, mut commands) = HeapRb::new(CONTROL_CAPACITY).split();
+        let (manager, _requests) = mpsc::channel();
+        let service = AudioService {
+            root: PathBuf::new(),
+            shared,
+            control: Mutex::new(ControlState {
+                producer: Some(producer),
+                document: Some(original.clone()),
+                rate: 48_000,
+                device: None,
+                next_barrier: 0,
+            }),
+            audition: Mutex::new(None),
+            manager,
+        };
+        // Giving the track its first kit, changing it, and taking it away again: each is a mix, never an install, which
+        // would cut every ringing note and strike the held ones again.
+        let kit = |gain: f32| ChannelMix {
+            drum_kit: Some(DrumKitMix {
+                cymbals: Some(DrumElementMix {
+                    gain,
+                    pan: 0.0,
+                    mute: false,
+                    solo: false,
+                }),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        for mix in [Some(kit(0.5)), Some(kit(0.25)), None] {
+            let mut settings = original.settings.clone();
+            if let Some(mix) = mix {
+                settings.mixes.insert("gm".into(), mix);
+            }
+            service.set_mix(settings.clone(), 1).unwrap();
+            assert!(
+                matches!(
+                    commands.try_pop(),
+                    Some(CallbackCommand::Mix { generation: 1, .. })
+                ),
+                "a kit edit is a mix change"
+            );
+            assert!(commands.try_pop().is_none());
+            let state = service.control.lock().unwrap();
+            let next = state.document.as_ref().unwrap();
+            assert_eq!(next.settings, settings);
+            assert!(Arc::ptr_eq(&next.plan, &original.plan));
+            assert!(Arc::ptr_eq(&next.resources, &original.resources));
+        }
     }
     #[test]
     fn same_plan_mix_rejects_reference_timing_before_queue_or_document_publication() {

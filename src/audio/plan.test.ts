@@ -290,6 +290,33 @@ it('logical_channel_collisions_remain_distinct_and_percussion_keeps_channel_nine
   expect(Math.max(...plan.notes.find(n=>n.source.target.beat===1)!.pitch.map(p=>p.semitones))).toBe(2);
 });
 
+it('names the kit element of a drum note only where its pitch would put it in another piece', () => {
+  const score=authored(2,1,2), drums=score.tracks[1];
+  drums.staves[0].isPercussion=true;drums.staves[0].stringTuning.tunings=[];drums.playbackInfo.primaryChannel=9;drums.playbackInfo.secondaryChannel=9;
+  // The metronome click sounds a snare pitch (37) and a bell tree a ride pitch, but neither is part of the snare or the cymbals.
+  const beats=drums.staves[0].bars[0].voices[0].beats;
+  for(const [beat,articulation] of [[0,33],[1,38]] as const){const drum=new model.Note();drum.percussionArticulation=articulation;beats[beat].addNote(drum);}
+  score.finish(settings);const plan=agree(score);
+  const hits=plan.midi.filter(e=>e.trackId===plan.tracks[1].id&&(e.type==='noteOn'||e.type==='noteOff'));
+  expect(hits.map(e=>[e.type,e.type==='noteOn'||e.type==='noteOff'?e.key:0,e.type==='noteOn'||e.type==='noteOff'?e.kitElement:undefined])).toEqual([
+    ['noteOn',37,'other'],['noteOff',37,'other'],['noteOn',38,undefined],['noteOff',38,undefined],
+  ]);
+  expect(JSON.stringify(plan.midi.filter(e=>e.type==='noteOn'&&e.key===38))).not.toContain('kitElement');
+});
+
+it("reads the kit element of a track's own articulation by its element name, whatever pitch it sounds", () => {
+  const score=authored(2,1,2), drums=score.tracks[1];
+  drums.staves[0].isPercussion=true;drums.staves[0].stringTuning.tunings=[];drums.playbackInfo.primaryChannel=9;drums.playbackInfo.secondaryChannel=9;
+  const symbol=model.MusicFontSymbol.NoteheadBlack;
+  // A "Snare" that sounds a block's pitch, and a "Crash High" that sounds a snare's: the track says which piece each belongs to.
+  drums.percussionArticulations=[new model.InstrumentArticulation('Snare',3,77,symbol,symbol,symbol),new model.InstrumentArticulation('Crash High',-2,38,symbol,symbol,symbol)];
+  const beats=drums.staves[0].bars[0].voices[0].beats;
+  for(const [beat,articulation] of [[0,0],[1,1]] as const){const drum=new model.Note();drum.percussionArticulation=articulation;beats[beat].addNote(drum);}
+  score.finish(settings);const plan=agree(score);
+  const on=plan.midi.filter(e=>e.trackId===plan.tracks[1].id&&e.type==='noteOn');
+  expect(on.map(e=>e.type==='noteOn'?[e.key,e.kitElement]:[])).toEqual([[77,'snare'],[38,'cymbals']]);
+});
+
 it('dead_brush_negative_duration_uses_public_unbrushed_duration_after_delayed_attack', () => {
   const score=authored(), early=note(score,0,0,1), late=note(score,0,0,6);early.isDead=late.isDead=true;
   early.beat.brushType=model.BrushType.BrushDown;early.beat.brushDuration=120;score.finish(settings);

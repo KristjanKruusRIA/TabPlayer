@@ -5,7 +5,8 @@ import { factorySound, factorySounds } from '../audio/factory-sounds';
 import { MasterPanel } from '../audio/MasterPanel';
 import { automaticVoice, presetName, soundPreset, voiceNames } from '../audio/sound-model';
 import { completeSound } from '../document-settings';
-import type { ChannelMix, TrackSound } from '../edit-types';
+import { defaultDrumElement, DRUM_KIT_ELEMENT_LABELS, DRUM_KIT_ELEMENTS } from '../audio/drum-kit';
+import type { ChannelMix, DrumElementMix, DrumKitElement, TrackSound } from '../edit-types';
 import { trackIdentity } from '../engine';
 import { midiPrograms } from '../midi-programs';
 import { trackColorHex } from '../track-color';
@@ -46,7 +47,7 @@ export function describeTrackSound(track:model.Track,sound?:TrackSound):{voice:s
 export type MixerPlayer=Pick<
   NativePlaybackController,
   'subscribe'|'getState'|'mix'|'setMute'|'setSolo'|'setTrackVolume'|'setPan'|'focus'|'setFocus'
->&Partial<Pick<NativePlaybackController,'previewMix'|'master'|'setMaster'>>;
+>&Partial<Pick<NativePlaybackController,'previewMix'|'master'|'setMaster'|'previewDrumElement'|'setDrumElement'>>;
 
 export interface MixerViewProps {
   score:model.Score;
@@ -87,6 +88,15 @@ export function MixerView({score,sounds,selected,busy,onSelect,player}:MixerView
     // A saved drag stays heard until the player holds the edit, so it never steps back to the old level.
     onInputEnd:(committed:boolean)=>{void live.end({keep:committed});},
   });
+
+  /** One kit element of the selected percussion track: heard while dragged, then saved once, as a track's volume is. */
+  const kitControl=(index:number,element:DrumKitElement,patch:(value:number)=>Partial<DrumElementMix>)=>({
+    onInput:(value:number)=>live.hear(()=>player?.previewDrumElement?.(index,element,patch(value)),()=>player?.previewDrumElement?.(index,element,null)),
+    onCommit:(value:number)=>player?.setDrumElement?.(index,element,patch(value)),
+    onInputEnd:(committed:boolean)=>{void live.end({keep:committed});},
+  });
+  const kitTrack=score.tracks[selected]?.isPercussion&&player?.setDrumElement?score.tracks[selected]:null;
+  const kit=kitTrack?player?.mix(kitTrack)?.drumKit:undefined;
 
   return <section className="mixer-view" aria-label="Mixer">
     <section className="mixer-focus" aria-label="Focus">
@@ -180,6 +190,33 @@ export function MixerView({score,sounds,selected,busy,onSelect,player}:MixerView
         </section>;
       })}
     </div>
+    {kitTrack&&<section className="mixer-kit" key={trackIdentity(kitTrack)} aria-label={`Drum kit ${kitTrack.name}`}>
+      <div className="mixer-focus-head">
+        <span className="mixer-focus-title">Drum kit</span>
+        <span className="mixer-badge">Saved with the track</span>
+      </div>
+      <div className="mixer-kit-elements">
+        {DRUM_KIT_ELEMENTS.map(element=>{
+          const label=DRUM_KIT_ELEMENT_LABELS[element],current=kit?.[element]??defaultDrumElement(),off=busy||!player;
+          return <div className="mixer-kit-element" role="group" aria-label={label} key={element}>
+            <span className="mixer-kit-name">{label}</span>
+            <div className="mixer-strip-switches">
+              <label className="mixer-switch" data-kind="mute" data-active={current.mute||undefined} data-disabled={off||undefined}>
+                <input type="checkbox" checked={current.mute} aria-label={`Mute ${label}`} aria-disabled={off||undefined} onChange={e=>{if(!off)void player?.setDrumElement?.(kitTrack.index,element,{mute:e.target.checked});}}/>
+                <span>Mute</span>
+              </label>
+              <label className="mixer-switch" data-kind="solo" data-active={current.solo||undefined} data-disabled={off||undefined}>
+                <input type="checkbox" checked={current.solo} aria-label={`Solo ${label}`} aria-disabled={off||undefined} onChange={e=>{if(!off)void player?.setDrumElement?.(kitTrack.index,element,{solo:e.target.checked});}}/>
+                <span>Solo</span>
+              </label>
+            </div>
+            <Knob className="mixer-strip-pan" label="Pan" ariaLabel={`Pan ${label}`} bipolar min={-1} max={1} step={0.05} defaultValue={0} value={current.pan} format={v=>v.toFixed(2)} disabled={off} {...kitControl(kitTrack.index,element,pan=>({pan}))}/>
+            <Fader className="mixer-kit-fader" label="Volume" ariaLabel={`Volume ${label}`} min={0} max={1} step={0.05} defaultValue={1} value={current.gain} format={v=>v.toFixed(2)} disabled={off} {...kitControl(kitTrack.index,element,gain=>({gain}))}/>
+          </div>;
+        })}
+      </div>
+      <p className="mixer-kit-note">Heard as you drag and in the export. Notes belong to the piece their articulation plays on.</p>
+    </section>}
     <MasterPanel master={player?.master?.()} disabled={busy||!player?.setMaster} onChange={next=>player!.setMaster!(next)}/>
   </section>;
 }

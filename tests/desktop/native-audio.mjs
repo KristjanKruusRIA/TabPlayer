@@ -1,4 +1,4 @@
-import {waitForWorkspaceIdle,clickWorkstationButton,revealLeftTask,revealDock,revealPlaybackControls} from './workstation-commands.mjs';
+import {waitForWorkspaceIdle,clickWorkstationButton,revealLeftTask,revealDock,revealPlaybackControls,setPlaybackSpeed} from './workstation-commands.mjs';
 import { readActiveDocument } from './document-context.mjs';
 import assert from 'node:assert/strict';
 import {existsSync,mkdirSync,readFileSync,realpathSync,renameSync,writeFileSync} from 'node:fs';
@@ -66,7 +66,7 @@ try {
   await page.getByRole('combobox',{name:/^String/}).selectOption('4');await page.getByLabel('Fret',{exact:true}).fill('2');await button('Set note');await ready();await button('Play');await waitStatus(s=>s.playing);await instrument.locator('g[data-note-id][data-string="4"][data-fret="2"][data-key="45"]').waitFor({state:'visible'});
   await button('Track 1: Guitar');await instrument.getByRole('img',{name:'Guitar fretboard'}).waitFor();assert.equal(await instrument.locator('[data-string-row]').count(),6);await button('Stop');await waitStatus(s=>!s.playing&&s.tick===0);await button('Track 2: Bass');await button('Remove track');await ready();await instrument.getByRole('img',{name:'Guitar fretboard'}).waitFor();
   await page.getByRole('combobox',{name:/^String/}).selectOption('6');await button('Hide instrument');assert.equal(await instrument.count(),0);
-  await page.getByRole('combobox',{name:/^Speed/}).selectOption('50');await button('Loop');await button('Play');
+  await setPlaybackSpeed(page,50);await button('Loop');await button('Play');
   await waitStatus(s=>s.speed===.5&&s.tick>3600);
   await waitStatus(s=>s.playing&&s.tick<960);await button('Stop');await button('Clear loop');
   await page.getByLabel('Metronome',{exact:true}).click();await waitStatus(s=>s.metronome);

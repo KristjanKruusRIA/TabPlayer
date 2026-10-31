@@ -17,6 +17,12 @@ pub struct ChannelMix {
         deserialize_with = "present"
     )]
     pub interpretation: Option<TrackInterpretation>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub drum_kit: Option<DrumKitMix>,
 }
 impl Default for ChannelMix {
     fn default() -> Self {
@@ -26,6 +32,7 @@ impl Default for ChannelMix {
             mute: false,
             solo: false,
             interpretation: None,
+            drum_kit: None,
         }
     }
 }
@@ -40,6 +47,9 @@ impl ChannelMix {
         }
         if let Some(interpretation) = &self.interpretation {
             interpretation.validate()?;
+        }
+        if let Some(drum_kit) = &self.drum_kit {
+            drum_kit.validate()?;
         }
         Ok(())
     }
@@ -121,6 +131,170 @@ impl TrackInterpretation {
             || self.let_ring == Some(false)
         {
             return Err("Invalid track interpretation.".into());
+        }
+        Ok(())
+    }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum KitElement {
+    Kick,
+    Snare,
+    Hats,
+    Toms,
+    Cymbals,
+    Other,
+}
+
+impl KitElement {
+    pub const COUNT: usize = 6;
+    /// The element's place among `COUNT`, in the order the mix lists them.
+    pub fn index(self) -> usize {
+        match self {
+            Self::Kick => 0,
+            Self::Snare => 1,
+            Self::Hats => 2,
+            Self::Toms => 3,
+            Self::Cymbals => 4,
+            Self::Other => 5,
+        }
+    }
+}
+
+/// The element a sounding pitch belongs to, for a note whose articulation the plan does not name. The plan names the element
+/// of every articulation this does not agree with (the metronome and the bell tree sound pitches of other pieces), so what
+/// a note belongs to follows its articulation and only a plan written without that falls back to its pitch.
+pub fn gm_kit_element(key: u8) -> KitElement {
+    match key {
+        35 | 36 => KitElement::Kick,
+        37 | 38 | 40 => KitElement::Snare,
+        42 | 44 | 46 => KitElement::Hats,
+        41 | 43 | 45 | 47 | 48 | 50 => KitElement::Toms,
+        49 | 51 | 52 | 53 | 55 | 57 | 59 => KitElement::Cymbals,
+        _ => KitElement::Other,
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DrumElementMix {
+    pub gain: f32,
+    pub pan: f32,
+    pub mute: bool,
+    pub solo: bool,
+}
+
+impl Default for DrumElementMix {
+    fn default() -> Self {
+        Self {
+            gain: 1.0,
+            pan: 0.0,
+            mute: false,
+            solo: false,
+        }
+    }
+}
+
+impl DrumElementMix {
+    pub fn is_neutral(&self) -> bool {
+        *self == Self::default()
+    }
+    pub fn validate(&self) -> Result<(), String> {
+        if !self.gain.is_finite()
+            || !(0.0..=1.0).contains(&self.gain)
+            || !self.pan.is_finite()
+            || !(-1.0..=1.0).contains(&self.pan)
+        {
+            return Err("Drum element gain must be 0–1 and pan -1–1.".into());
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DrumKitMix {
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub kick: Option<DrumElementMix>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub snare: Option<DrumElementMix>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub hats: Option<DrumElementMix>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub toms: Option<DrumElementMix>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub cymbals: Option<DrumElementMix>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub other: Option<DrumElementMix>,
+}
+
+impl DrumKitMix {
+    /// Every element in `KitElement::index` order, the ones the mix leaves out at their defaults.
+    pub fn elements(&self) -> [DrumElementMix; KitElement::COUNT] {
+        [
+            self.kick.unwrap_or_default(),
+            self.snare.unwrap_or_default(),
+            self.hats.unwrap_or_default(),
+            self.toms.unwrap_or_default(),
+            self.cymbals.unwrap_or_default(),
+            self.other.unwrap_or_default(),
+        ]
+    }
+    /// Whether the kit sounds as no kit would.
+    pub fn is_neutral(&self) -> bool {
+        self.elements().iter().all(DrumElementMix::is_neutral)
+    }
+    pub fn validate(&self) -> Result<(), String> {
+        if self.kick.is_none()
+            && self.snare.is_none()
+            && self.hats.is_none()
+            && self.toms.is_none()
+            && self.cymbals.is_none()
+            && self.other.is_none()
+        {
+            return Err("Invalid drum kit mix.".into());
+        }
+        if let Some(kick) = &self.kick {
+            kick.validate()?;
+        }
+        if let Some(snare) = &self.snare {
+            snare.validate()?;
+        }
+        if let Some(hats) = &self.hats {
+            hats.validate()?;
+        }
+        if let Some(toms) = &self.toms {
+            toms.validate()?;
+        }
+        if let Some(cymbals) = &self.cymbals {
+            cymbals.validate()?;
+        }
+        if let Some(other) = &self.other {
+            other.validate()?;
         }
         Ok(())
     }

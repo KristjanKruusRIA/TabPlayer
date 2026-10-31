@@ -1,4 +1,4 @@
-import type { NoteTarget } from '../edit-types';
+import type { DrumKitElement, NoteTarget } from '../edit-types';
 import type { PracticeLoop,PracticeStatus } from './practice-types';
 import type { PerformedBeat,PlaybackSpan } from './selection-playback-types';
 export type { PracticeSettings } from './practice-types';
@@ -12,7 +12,7 @@ export interface PitchPoint { tick: number; semitones: number }
 export interface PlanNote { id: string; trackId: string; source: NoteTarget; playedBar?: number; channel?: number; program?: number; occurrence: number; startTick: number; endTick: number; key: number; velocity: number; articulation: Articulation; lockedArticulation?: Articulation; legatoFrom: string | null; pitch: PitchPoint[] }
 type MidiLocation = { trackId: string; tick: number; channel: number };
 export type PlanMidiEvent =
-  | (MidiLocation & { type: 'noteOn' | 'noteOff'; key: number; velocity: number })
+  | (MidiLocation & { type: 'noteOn' | 'noteOff'; key: number; velocity: number; /** The kit element of the articulation, named only where its pitch would give another. */ kitElement?: DrumKitElement })
   | (MidiLocation & { type: 'program'; program: number })
   | (MidiLocation & { type: 'controller'; controller: number; value: number })
   | (MidiLocation & { type: 'bend'; value: number })

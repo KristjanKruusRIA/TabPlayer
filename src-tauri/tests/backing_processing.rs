@@ -261,6 +261,7 @@ fn shared_core_mix_stems_score_clock_and_tail_agree() {
             channel: 0,
             key: 60,
             velocity: 70,
+            kit_element: None,
         },
         PlanMidiEvent::NoteOff {
             track_id: "gm".into(),
@@ -268,6 +269,7 @@ fn shared_core_mix_stems_score_clock_and_tail_agree() {
             channel: 0,
             key: 60,
             velocity: 0,
+            kit_element: None,
         },
     ];
     let p = Arc::new(p);

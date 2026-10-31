@@ -1,0 +1,588 @@
+{
+  "schemaVersion": 1,
+  "license": "CC0-1.0",
+  "licenseFile": "LICENSE-CC0.txt",
+  "source": "tabplayer-ir-packs",
+  "irs": [
+    {
+      "id": "00de735c9e92846d06f44556692cc525",
+      "name": "DT410 · Eden 4x10 · 4033 · A107",
+      "file": "tabplayer-dt-eden-4x10-4033-a107-241722.wav",
+      "sha256": "00de735c9e92846d06f44556692cc52555e08b17ba94d0ab77717c5a2b5de016",
+      "size": 135484,
+      "sampleRate": 44100,
+      "channels": 1,
+      "frames": 33738
+    },
+    {
+      "id": "04eae0ad866f1badc2d7f2bdc5da06a2",
+      "name": "Mesa V30 4x12 · Upper left · SM57 1.00in · 7603",
+      "file": "tabplayer-mesa-v30-ul-4fb-4x12-sm57-1-00in-0-0in-7603-239399.wav",
+      "sha256": "04eae0ad866f1badc2d7f2bdc5da06a28f9fff3a641edd8f84ebc168c89fad67",
+      "size": 72538,
+      "sampleRate": 48000,
+      "channels": 1,
+      "frames": 24001
+    },
+    {
+      "id": "0812e9d11f82bdb612c3f00d0bda499b",
+      "name": "DT410 · Eden 4x10 · D6 · A107",
+      "file": "tabplayer-dt-eden-4x10-d6-a107-241723.wav",
+      "sha256": "0812e9d11f82bdb612c3f00d0bda499b8f144865c03072dff66b6590608b330e",
+      "size": 109668,
+      "sampleRate": 44100,
+      "channels": 1,
+      "frames": 27284
+    },
+    {
+      "id": "0ba211d15a1241792a088028fcdad215",
+      "name": "Bass Amp · 8x10 Ampeg SVT 97",
+      "file": "tabplayer-bass-amp-1-8x10-ampeg-svt-97-dc-73244.wav",
+      "sha256": "0ba211d15a1241792a088028fcdad215210974802fa1e720439da8f918a2993b",
+      "size": 144542,
+      "sampleRate": 48000,
+      "channels": 1,
+      "frames": 48001
+    },
+    {
+      "id": "107dd6c219d641eca9f22cf0e621f506",
+      "name": "Fender · Oxford Big (48/24)",
+      "file": "tabplayer-fender-oxford-big-48-24-220918.wav",
+      "sha256": "107dd6c219d641eca9f22cf0e621f506cd8abf7204a619a1ff760945e4431b64",
+      "size": 105888,
+      "sampleRate": 48000,
+      "channels": 1,
+      "frames": 35109
+    },
+    {
+      "id": "11e8401afaa2d254dcf65facd732d86a",
+      "name": "Mesa V30 4x12 · Lower right · SM57 1.25in · CL7603",
+      "file": "tabplayer-mesa-v30-lr-4fb-4x12-sm57-1-25in-0-0in-cl7603-239352.wav",
+      "sha256": "11e8401afaa2d254dcf65facd732d86a84f2ec1d136b31f0f9f95880149cb362",
+      "size": 72538,
+      "sampleRate": 48000,
+      "channels": 1,
+      "frames": 24001
+    },
+    {
+      "id": "16594a41590fbc9716673f62f12cef92",
+      "name": "Bass Amp · 1x15 Leslie 760 Cab HF Driver",
+      "file": "tabplayer-bass-amp-12-1x15-leslie-760-cab-hf-driver-dc-73242.wav",
+      "sha256": "16594a41590fbc9716673f62f12cef92e66d221c16c31918fc471523935c7080",
+      "size": 144542,
+      "sampleRate": 48000,
+      "channels": 1,
+      "frames": 48001
+    },
+    {
+      "id": "1d059193ad6e5bfb75c09d1d7383d737",
+      "name": "Mesa V30 4x12 · Upper right · SM57 1.50in · VP28",
+      "file": "tabplayer-mesa-v30-ur-4fb-4x12-sm57-1-50in-0-0in-vp28-239460.wav",
+      "sha256": "1d059193ad6e5bfb75c09d1d7383d7372b23c9fca5e65e497a9de188b099e3a4",
+      "size": 72538,
+      "sampleRate": 48000,
+      "channels": 1,
+      "frames": 24001
+    },
+    {
+      "id": "1e271964737a19ffba8db5ce6494716f",
+      "name": "Bass Amp · 2x15 Vox AC100",
+      "file": "tabplayer-bass-amp-9-2x15-vox-ac100-dc-73234.wav",
+      "sha256": "1e271964737a19ffba8db5ce6494716f42a139ecc5ff91741daeb86849078868",
+      "size": 144542,
+      "sampleRate": 48000,
+      "channels": 1,
+      "frames": 48001
+    },
+    {
+      "id": "21d889381ec8e6115b27b092427d5585",
+      "name": "Bass Amp · 1x15 Ampeg B15 Closed Back Combo",
+      "file": "tabplayer-bass-amp-7-1x15-ampeg-b15-closed-back-combo-dc-73243.wav",
+      "sha256": "21d889381ec8e6115b27b092427d5585196e8cc87d900ccb8be283f4060b67cb",
+      "size": 144542,
+      "sampleRate": 48000,
+      "channels": 1,
+      "frames": 48001
+    },
+    {
+      "id": "22bd7828579a2fa90c1b5e3ca370231f",
+      "name": "Zilla V30 2x12 · Neumann U87 · pos 8 · DC",
+      "file": "tabplayer-zilla-neumannu87-8-dc-71281.wav",
+      "sha256": "22bd7828579a2fa90c1b5e3ca370231fd5008189ba25ab313d77036e469c107c",
+      "size": 38946,
+      "sampleRate": 48000,
+      "channels": 1,
+      "frames": 9603
+    },
+    {
+      "id": "2d4c2521b72c8a4a0f23d4571681a19d",
+      "name": "Bass Amp · 1x15 Polytone A101 Closed Back Combo",
+      "file": "tabplayer-bass-amp-8-1x15-polytone-a101-closed-back-combo-dc-73232.wav",
+      "sha256": "2d4c2521b72c8a4a0f23d4571681a19dd23c19934ddc58d17cbf4d766823f29e",
+      "size": 144542,
+      "sampleRate": 48000,
+      "channels": 1,
+      "frames": 48001
+    },
+    {
+      "id": "31699d1da1121d1b541c588c03eeafb0",
+      "name": "Fender · Oxford Lean (48/24)",
+      "file": "tabplayer-fende-oxford-lean-48-24-220917.wav",
+      "sha256": "31699d1da1121d1b541c588c03eeafb0020cc3df1d8b34a974290ee37d7b334a",
+      "size": 105888,
+      "sampleRate": 48000,
+      "channels": 1,
+      "frames": 35109
+    },
+    {
+      "id": "364532ce49f4185fe05de339c3c41ba1",
+      "name": "Mesa V30 4x12 · Upper right · SM57 0.00in · 7603",
+      "file": "tabplayer-mesa-v30-ur-4fb-4x12-sm57-0-00in-0-0in-7603-239429.wav",
+      "sha256": "364532ce49f4185fe05de339c3c41ba1dd17d8a553e5b0c12763029105bcf823",
+      "size": 72538,
+      "sampleRate": 48000,
+      "channels": 1,
+      "frames": 24001
+    },
+    {
+      "id": "3a5a213ae25edefeb061871c75de4eea",
+      "name": "Zilla V30 2x12 · Royer R-101 · pos 0 · DC",
+      "file": "tabplayer-zilla-royerr101-0-dc-71284.wav",
+      "sha256": "3a5a213ae25edefeb061871c75de4eea59c1a26861ca1292edbf0a716a4c9194",
+      "size": 38946,
+      "sampleRate": 48000,
+      "channels": 1,
+      "frames": 9603
+    },
+    {
+      "id": "3deccfb509ebba4e1422d1de7ca68f7f",
+      "name": "Bass Amp · 2x16 Fender Bassman with JBL",
+      "file": "tabplayer-bass-amp-11-2x16-fender-bassman-w-jbl-dc-73233.wav",
+      "sha256": "3deccfb509ebba4e1422d1de7ca68f7f89c257dd57af09f17db7e52c8e9e5715",
+      "size": 144542,
+      "sampleRate": 48000,
+      "channels": 1,
+      "frames": 48001
+    },
+    {
+      "id": "413d9cec3c160c9b9bc9e5c153f713aa",
+      "name": "DT410 · Eden 4x10 · E602 · A107",
+      "file": "tabplayer-dt-eden-4x10-e602-a107-241725.wav",
+      "sha256": "413d9cec3c160c9b9bc9e5c153f713aa83cb8e33e359bec8f734c6f3741b9da4",
+      "size": 122104,
+      "sampleRate": 44100,
+      "channels": 1,
+      "frames": 30393
+    },
+    {
+      "id": "436a6c4c9f0a2b9c7cdd0bb0b8e18776",
+      "name": "Zilla V30 2x12 · Neumann U87 · pos 1 · DC",
+      "file": "tabplayer-zilla-neumannu87-1-dc-71282.wav",
+      "sha256": "436a6c4c9f0a2b9c7cdd0bb0b8e187762263e58700e9b6146940790d8d49fe6d",
+      "size": 38946,
+      "sampleRate": 48000,
+      "channels": 1,
+      "frames": 9603
+    },
+    {
+      "id": "44004aaf5c9f7d11f966dc1cd372b5c3",
+      "name": "Mesa V30 4x12 · Lower right · SM57 1.25in · SA73",
+      "file": "tabplayer-mesa-v30-lr-4fb-4x12-sm57-1-25in-0-0in-sa73-239359.wav",
+      "sha256": "44004aaf5c9f7d11f966dc1cd372b5c334fd02792459c2f5250064e4e8d1e6fa",
+      "size": 72538,
+      "sampleRate": 48000,
+      "channels": 1,
+      "frames": 24001
+    },
+    {
+      "id": "44a316d297a486899e1945ae9810c19f",
+      "name": "Zilla V30 2x12 · Royer R-101 · pos 8 · DC",
+      "file": "tabplayer-zilla-royerr101-8-dc-71292.wav",
+      "sha256": "44a316d297a486899e1945ae9810c19ff9d2ea09cefac629e85619500a6bc622",
+      "size": 38946,
+      "sampleRate": 48000,
+      "channels": 1,
+      "frames": 9603
+    },
+    {
+      "id": "47bb397cbe7450765a0dc0bac78ed544",
+      "name": "Mesa V30 4x12 · Upper left · SM57 1.25in · VP28",
+      "file": "tabplayer-mesa-v30-ul-4fb-4x12-sm57-1-25in-0-0in-vp28-239407.wav",
+      "sha256": "47bb397cbe7450765a0dc0bac78ed544798e8cbaa21ad40d63cf8742f1bd01bb",
+      "size": 72538,
+      "sampleRate": 48000,
+      "channels": 1,
+      "frames": 24001
+    },
+    {
+      "id": "50a6fa58a8e11969e9473243b51bf18c",
+      "name": "Recto V30",
+      "file": "tabplayer-recto.wav",
+      "sha256": "50a6fa58a8e11969e9473243b51bf18c9708554436ec7ac1223aa294eda2b1ed",
+      "size": 31180,
+      "sampleRate": 48000,
+      "channels": 1,
+      "frames": 10000
+    },
+    {
+      "id": "50b9bbc7b05e1a75ac7e63870f0d4e15",
+      "name": "DT410 · Eden 4x10 · SM57 · A107",
+      "file": "tabplayer-dt-eden-4x10-57-a107-241720.wav",
+      "sha256": "50b9bbc7b05e1a75ac7e63870f0d4e15aed294c0fabfa96c71f1b8f2aed90f4d",
+      "size": 117764,
+      "sampleRate": 44100,
+      "channels": 1,
+      "frames": 29308
+    },
+    {
+      "id": "515b2a721f722440d5ccb3a59efead4b",
+      "name": "Fender · Oxford Lean",
+      "file": "tabplayer-fender-oxford-lean-106586.wav",
+      "sha256": "515b2a721f722440d5ccb3a59efead4b3f3dfb03a1c7962864c14db1220d10e7",
+      "size": 129842,
+      "sampleRate": 44100,
+      "channels": 1,
+      "frames": 32256
+    },
+    {
+      "id": "57fb4838f35461648b46e4dbd8498148",
+      "name": "DT410 · Eden 4x10 · E602 · AH",
+      "file": "tabplayer-dt-eden-4x10-e602-ah-241726.wav",
+      "sha256": "57fb4838f35461648b46e4dbd8498148d836793a92579e09e865047be5bd471b",
+      "size": 84552,
+      "sampleRate": 44100,
+      "channels": 1,
+      "frames": 21005
+    },
+    {
+      "id": "59b855ce3c73440cd46c20f1acedd200",
+      "name": "Zilla V30 2x12 · Shure SM57 · pos 3 · DC",
+      "file": "tabplayer-zilla-v30-2x12-zilla-v30-2-x12-shuresm57-3-dc-71294.wav",
+      "sha256": "59b855ce3c73440cd46c20f1acedd200eb2cd3ff6f15e75a42dcd8b3860b4ac3",
+      "size": 38946,
+      "sampleRate": 48000,
+      "channels": 1,
+      "frames": 9603
+    },
+    {
+      "id": "5f9cc2a5a8e277f87ee9a0dd7ace8025",
+      "name": "Bass Amp · 1x18 1x12 Sunn Coliseum",
+      "file": "tabplayer-bass-amp-15-1x18-1x12-sunn-coliseum-dc-73237.wav",
+      "sha256": "5f9cc2a5a8e277f87ee9a0dd7ace8025222eec731e9f7840e36869bfa58bc1f2",
+      "size": 144542,
+      "sampleRate": 48000,
+      "channels": 1,
+      "frames": 48001
+    },
+    {
+      "id": "6068df6e1fbc27a8c605c0f16923eb9e",
+      "name": "Zilla V30 2x12 · Shure SM57 · pos 1 · DC",
+      "file": "tabplayer-zilla-shuresm57-1-dc-71290.wav",
+      "sha256": "6068df6e1fbc27a8c605c0f16923eb9ef05ab7e99e4c5c8ec5b74a17e411c0af",
+      "size": 38946,
+      "sampleRate": 48000,
+      "channels": 1,
+      "frames": 9603
+    },
+    {
+      "id": "684313e7476f3ab37b7fd149893c4b22",
+      "name": "Bass Amp · 2x15 Mesa Boogie",
+      "file": "tabplayer-bass-amp-10-2x15-mesa-boogie-dc-73238.wav",
+      "sha256": "684313e7476f3ab37b7fd149893c4b22d82b64765f482b741fbafb3a68fd4259",
+      "size": 144542,
+      "sampleRate": 48000,
+      "channels": 1,
+      "frames": 48001
+    },
+    {
+      "id": "73b9a1d5d9eef43a5586c3b7ead8afc7",
+      "name": "Mesa V30 4x12 · Lower left · SM57 0.25in · SA73",
+      "file": "tabplayer-mesa-v30-ll-4fb-4x12-sm57-0-25in-0-0in-sa73-239293.wav",
+      "sha256": "73b9a1d5d9eef43a5586c3b7ead8afc71bc91fd709b585ace95d01ade56770b5",
+      "size": 72538,
+      "sampleRate": 48000,
+      "channels": 1,
+      "frames": 24001
+    },
+    {
+      "id": "765fcb93b7b97218b8690b42bd10bd8c",
+      "name": "Fender · Oxford Big",
+      "file": "tabplayer-fender-oxford-big-106585.wav",
+      "sha256": "765fcb93b7b97218b8690b42bd10bd8c816d00994fedd89c3e967d08cfbb23e1",
+      "size": 129842,
+      "sampleRate": 44100,
+      "channels": 1,
+      "frames": 32256
+    },
+    {
+      "id": "78b1e0108bfc612a890f3823687ac2b3",
+      "name": "Zilla V30 2x12 · Neumann U87 · pos 0 · DC",
+      "file": "tabplayer-zilla-neumannu87-0-dc-71286.wav",
+      "sha256": "78b1e0108bfc612a890f3823687ac2b32b56c89b62749b3b5595106082181967",
+      "size": 38946,
+      "sampleRate": 48000,
+      "channels": 1,
+      "frames": 9603
+    },
+    {
+      "id": "867d00e64bd8425aecc16b03293f1a2a",
+      "name": "DT410 · Eden 4x10 · 4033 · AH",
+      "file": "tabplayer-dt-eden-4x10-4033-ah-241721.wav",
+      "sha256": "867d00e64bd8425aecc16b03293f1a2a74a791e944eb2dab512428ea95536ecd",
+      "size": 147356,
+      "sampleRate": 44100,
+      "channels": 1,
+      "frames": 36706
+    },
+    {
+      "id": "8d10d5a8711597b738d111a64bbbfc47",
+      "name": "Zilla V30 2x12 · Sennheiser MD421 · pos 3 · DC",
+      "file": "tabplayer-zilla-sennheisermd421-3-dc-71285.wav",
+      "sha256": "8d10d5a8711597b738d111a64bbbfc4779ed5faa2399d140b5fba3213217568a",
+      "size": 38946,
+      "sampleRate": 48000,
+      "channels": 1,
+      "frames": 9603
+    },
+    {
+      "id": "9028659e57aab509f17bc81ca2d15645",
+      "name": "Zilla V30 2x12 · Sennheiser MD421 · pos 1 · DC",
+      "file": "tabplayer-zilla-sennheisermd421-1-dc-71293.wav",
+      "sha256": "9028659e57aab509f17bc81ca2d15645e49e0f0d08800140491124f0a5a16261",
+      "size": 38946,
+      "sampleRate": 48000,
+      "channels": 1,
+      "frames": 9603
+    },
+    {
+      "id": "a3a7e5f240a40d31c281b9f26c358974",
+      "name": "Zilla V30 2x12 · Shure SM57 · pos 0 · DC",
+      "file": "tabplayer-zilla-shuresm57-0-dc-71288.wav",
+      "sha256": "a3a7e5f240a40d31c281b9f26c358974f5e922a9f461bc4ffeee20e2a611ecd6",
+      "size": 38946,
+      "sampleRate": 48000,
+      "channels": 1,
+      "frames": 9603
+    },
+    {
+      "id": "a72535aef06747feea1357b4f9355d74",
+      "name": "Zilla V30 2x12 · Sennheiser MD421 · pos 2 · DC",
+      "file": "tabplayer-zilla-sennheisermd421-2-dc-71289.wav",
+      "sha256": "a72535aef06747feea1357b4f9355d74b9f04dcfc47c3a6111c049faebcf70a4",
+      "size": 38946,
+      "sampleRate": 48000,
+      "channels": 1,
+      "frames": 9603
+    },
+    {
+      "id": "ab5cdc93f6265f625fb9c747e18b9b4d",
+      "name": "Bass Amp · 1x18 SWR",
+      "file": "tabplayer-bass-amp-13-1x18-swr-dc-73240.wav",
+      "sha256": "ab5cdc93f6265f625fb9c747e18b9b4df75b711361395bbe1333010dcfd07db0",
+      "size": 144542,
+      "sampleRate": 48000,
+      "channels": 1,
+      "frames": 48001
+    },
+    {
+      "id": "acdaf52452e823e36521577f73eca458",
+      "name": "Zilla V30 2x12 · Neumann U87 · pos 9 · DC",
+      "file": "tabplayer-zilla-neumannu87-9-dc-71280.wav",
+      "sha256": "acdaf52452e823e36521577f73eca458961e47f68cb0b53e541db6665989d0e9",
+      "size": 38946,
+      "sampleRate": 48000,
+      "channels": 1,
+      "frames": 9603
+    },
+    {
+      "id": "ae0e6c0bece5852d9f24032bf08089a6",
+      "name": "Zilla V30 2x12 · Royer R-101 · pos 1 · DC",
+      "file": "tabplayer-zilla-royerr101-1-dc-71295.wav",
+      "sha256": "ae0e6c0bece5852d9f24032bf08089a688c80a2f2662f210f92b9b0a834ef83d",
+      "size": 38946,
+      "sampleRate": 48000,
+      "channels": 1,
+      "frames": 9603
+    },
+    {
+      "id": "afc8429548720a06c4491ebe67e1f4fa",
+      "name": "Mesa V30 4x12 · Lower right · SM57 0.00in · SA73",
+      "file": "tabplayer-mesa-v30-lr-4fb-4x12-sm57-0-00in-0-0in-sa73-239333.wav",
+      "sha256": "afc8429548720a06c4491ebe67e1f4fad107440d5f5ef2805e4b99d8838de66e",
+      "size": 72538,
+      "sampleRate": 48000,
+      "channels": 1,
+      "frames": 24001
+    },
+    {
+      "id": "aff9c3f5d458616ce9aee3c35f185926",
+      "name": "Zilla V30 2x12 · Royer R-101 · pos 6 · DC",
+      "file": "tabplayer-zilla-royerr101-6-dc-71283.wav",
+      "sha256": "aff9c3f5d458616ce9aee3c35f185926d0306fb7b190d972936e220e63a992dd",
+      "size": 38946,
+      "sampleRate": 48000,
+      "channels": 1,
+      "frames": 9603
+    },
+    {
+      "id": "b366651f5c05955b88af92429bb001c2",
+      "name": "Bass Amp · 4x10 Ampeg",
+      "file": "tabplayer-bass-amp-4-4x10-ampeg-dc-73235.wav",
+      "sha256": "b366651f5c05955b88af92429bb001c20a331e0b403607e65804f61211805ee0",
+      "size": 144542,
+      "sampleRate": 48000,
+      "channels": 1,
+      "frames": 48001
+    },
+    {
+      "id": "b55fc3c3781e0acdc751b52eae5f3757",
+      "name": "Mesa V30 4x12 · Lower left · SM57 1.25in · 7603",
+      "file": "tabplayer-mesa-v30-ll-4fb-4x12-sm57-1-25in-0-0in-7603-239305.wav",
+      "sha256": "b55fc3c3781e0acdc751b52eae5f375790fe9b183a3cd88dc5fe7cffb4c516ee",
+      "size": 72538,
+      "sampleRate": 48000,
+      "channels": 1,
+      "frames": 24001
+    },
+    {
+      "id": "b7d048c7e49a73ba1e4ea28e275fe6f4",
+      "name": "Zilla V30 2x12 · Sennheiser MD421 · pos 0 · DC",
+      "file": "tabplayer-zilla-sennheisermd421-0-dc-71287.wav",
+      "sha256": "b7d048c7e49a73ba1e4ea28e275fe6f464ebec7e5c3a144af1df4083faf96ed6",
+      "size": 38946,
+      "sampleRate": 48000,
+      "channels": 1,
+      "frames": 9603
+    },
+    {
+      "id": "c2e42e5fa72d6d6075aea4a58cad274c",
+      "name": "Mesa V30 4x12 · Lower right · SM57 0.50in · 7603",
+      "file": "tabplayer-mesa-v30-lr-4fb-4x12-sm57-0-50in-0-0in-7603-239338.wav",
+      "sha256": "c2e42e5fa72d6d6075aea4a58cad274c79f8b9d7050c912e99175f9cb86bbfc8",
+      "size": 72538,
+      "sampleRate": 48000,
+      "channels": 1,
+      "frames": 24001
+    },
+    {
+      "id": "c5d6d6e983fe66b2c15393c078e2be7d",
+      "name": "Bass Amp · 4x10 Trace Elliot",
+      "file": "tabplayer-bass-amp-2-4x10-trace-elliot-dc-73231.wav",
+      "sha256": "c5d6d6e983fe66b2c15393c078e2be7d839bebbe2060c0da90885b2a68a2a541",
+      "size": 144542,
+      "sampleRate": 48000,
+      "channels": 1,
+      "frames": 48001
+    },
+    {
+      "id": "d78943b96e64dc0c85f843b3924e3d7f",
+      "name": "Bass Amp · 1x18 Ampeg SVT18E",
+      "file": "tabplayer-bass-amp-14-1x18-ampeg-svt18e-dc-73241.wav",
+      "sha256": "d78943b96e64dc0c85f843b3924e3d7faea9134b01fc5f9c3fda37fc17a8b969",
+      "size": 144542,
+      "sampleRate": 48000,
+      "channels": 1,
+      "frames": 48001
+    },
+    {
+      "id": "d8e245209a5954d0f38f782a07ffc8e7",
+      "name": "Mesa V30 4x12 · Upper left · SM57 1.25in · 7603",
+      "file": "tabplayer-mesa-v30-ul-4fb-4x12-sm57-1-25in-0-0in-7603-239402.wav",
+      "sha256": "d8e245209a5954d0f38f782a07ffc8e7d59112b67d855b0894ad6e443a1efd18",
+      "size": 72538,
+      "sampleRate": 48000,
+      "channels": 1,
+      "frames": 24001
+    },
+    {
+      "id": "dae112a38948f5e749f9782df14fc00e",
+      "name": "Mesa V30 4x12 · Upper left · SM57 1.75in · 7603",
+      "file": "tabplayer-mesa-v30-ul-4fb-4x12-sm57-1-75in-0-0in-7603-239410.wav",
+      "sha256": "dae112a38948f5e749f9782df14fc00e8d3a90968b66ac9992036db23510d4e3",
+      "size": 72538,
+      "sampleRate": 48000,
+      "channels": 1,
+      "frames": 24001
+    },
+    {
+      "id": "db0b129c8c8d45c0d1d21714feb98cb3",
+      "name": "Mesa V30 4x12 · Lower right · SM57 2.00in · SA73",
+      "file": "tabplayer-mesa-v30-lr-4fb-4x12-sm57-2-00in-0-0in-sa73-239376.wav",
+      "sha256": "db0b129c8c8d45c0d1d21714feb98cb3b3ba51fe8fd4d7a01adbcc8df3ee0f7b",
+      "size": 72538,
+      "sampleRate": 48000,
+      "channels": 1,
+      "frames": 24001
+    },
+    {
+      "id": "dc50c2d1e209486c85b2f707d7b56136",
+      "name": "Bass Amp · 4x12 68 Marshall",
+      "file": "tabplayer-bass-amp-6-4x12-68-marshall-dc-73236.wav",
+      "sha256": "dc50c2d1e209486c85b2f707d7b561366b08356cbc5b5fa89adf3d3b067bcf99",
+      "size": 144542,
+      "sampleRate": 48000,
+      "channels": 1,
+      "frames": 48001
+    },
+    {
+      "id": "e527977e4c4dc8b620b0e95f4ed42f2c",
+      "name": "Mesa V30 4x12 · Upper right · SM57 1.00in · 7603",
+      "file": "tabplayer-mesa-v30-ur-4fb-4x12-sm57-1-00in-0-0in-7603-239444.wav",
+      "sha256": "e527977e4c4dc8b620b0e95f4ed42f2c2154e2def4cb3b0e69b79a324763cd5c",
+      "size": 72538,
+      "sampleRate": 48000,
+      "channels": 1,
+      "frames": 24001
+    },
+    {
+      "id": "ebb49100a6028fb4a4cfcb65ec2ec5a7",
+      "name": "DT410 · Eden 4x10 · D6 · AH",
+      "file": "tabplayer-dt-eden-4x10-d6-ah-241724.wav",
+      "sha256": "ebb49100a6028fb4a4cfcb65ec2ec5a719648e7f98532eaac032129e9d5f048d",
+      "size": 84356,
+      "sampleRate": 44100,
+      "channels": 1,
+      "frames": 20956
+    },
+    {
+      "id": "ed2ef3024043dd332af5ab42158c3bdb",
+      "name": "Mesa V30 4x12 · Lower right · SM57 0.50in · SA73",
+      "file": "tabplayer-mesa-v30-lr-4fb-4x12-sm57-0-50in-0-0in-sa73-239345.wav",
+      "sha256": "ed2ef3024043dd332af5ab42158c3bdbf6cd0694aa3694a1f1f9cea129d8c4ef",
+      "size": 72538,
+      "sampleRate": 48000,
+      "channels": 1,
+      "frames": 24001
+    },
+    {
+      "id": "f03d4ea3208ae2eda708f78bc866c9bd",
+      "name": "Bass Amp · 4x10 SWR Goliath",
+      "file": "tabplayer-bass-amp-3-4x10-swr-goliath-dc-73245.wav",
+      "sha256": "f03d4ea3208ae2eda708f78bc866c9bdce95feaae098dbedda472d8ed4e0f6f3",
+      "size": 144542,
+      "sampleRate": 48000,
+      "channels": 1,
+      "frames": 48001
+    },
+    {
+      "id": "f9669159ab64c99a1371aa4977d78707",
+      "name": "Zilla V30 2x12 · Shure SM57 · pos 2 · DC",
+      "file": "tabplayer-zilla-shuresm57-2-dc-71291.wav",
+      "sha256": "f9669159ab64c99a1371aa4977d787078d1b674c1d81c6ab3af85585c0ba3f27",
+      "size": 38946,
+      "sampleRate": 48000,
+      "channels": 1,
+      "frames": 9603
+    },
+    {
+      "id": "fe2b0a80788e5c4950e6e2142c2c75dd",
+      "name": "DT410 · Eden 4x10 · SM57 · AH",
+      "file": "tabplayer-dt-eden-4x10-57-ah-241719.wav",
+      "sha256": "fe2b0a80788e5c4950e6e2142c2c75dd6ce0d47639bd9932554e589da09113d9",
+      "size": 92180,
+      "sampleRate": 44100,
+      "channels": 1,
+      "frames": 22912
+    }
+  ]
+}

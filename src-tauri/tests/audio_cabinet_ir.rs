@@ -54,7 +54,7 @@ fn library() -> Arc<IrLibrary> {
         .get_or_init(|| {
             let directory = Path::new(env!("CARGO_TARGET_TMPDIR")).join("cabinet-ir-tests");
             let _ = std::fs::remove_dir_all(&directory);
-            cabinet_ir::install(directory)
+            cabinet_ir::install(directory, None)
         })
         .clone()
 }

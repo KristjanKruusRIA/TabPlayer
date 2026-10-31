@@ -25,4 +25,11 @@ try {
     } elseif ((Get-Item -LiteralPath $testAudio).Target -ne $preparedAudio) {
         throw 'Desktop test audio path must point to this worktree prepared resources'
     }
+    $testCabinetIrs=Join-Path $testDirectory 'cabinet-irs'
+    $bundledCabinetIrs=(Resolve-Path (Join-Path $taskRoot 'src-tauri/resources/cabinet-irs')).Path
+    if(-not (Test-Path -LiteralPath $testCabinetIrs)){
+        New-Item -ItemType Junction -Path $testCabinetIrs -Target $bundledCabinetIrs | Out-Null
+    } elseif ((Get-Item -LiteralPath $testCabinetIrs).Target -ne $bundledCabinetIrs) {
+        throw 'Desktop test cabinet IR path must point to this worktree bundled resources'
+    }
 } finally {Pop-Location;$env:VITE_DESKTOP_TEST=$previousTestFlag}

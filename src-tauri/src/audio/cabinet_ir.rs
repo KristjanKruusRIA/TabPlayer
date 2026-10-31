@@ -11,6 +11,7 @@ use super::ir_convolver::{IrKernel, MAX_SECONDS, RealFft, max_taps};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
+    collections::HashMap,
     io::Read,
     path::{Path, PathBuf},
     sync::{
@@ -402,6 +403,9 @@ pub struct IrEntry {
     /// Said once, by an import: that a long response was cut.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notice: Option<String>,
+    /// True for a response that ships with TabPlayer, which the picker lists but cannot remove.
+    #[serde(default)]
+    pub bundled: bool,
 }
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -416,6 +420,100 @@ struct Sidecar {
 const SIDECAR_FORMAT: &str = "tabplayer-cabinet-ir";
 /// The most a description may hold.
 const SIDECAR_LIMIT: u64 = 4096;
+
+/// The manifest of responses that ship with TabPlayer. The files are read-only, so the manifest, not a sidecar per
+/// file, is what describes them.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[allow(dead_code)]
+struct BundledManifest {
+    schema_version: u32,
+    license: String,
+    license_file: String,
+    source: String,
+    irs: Vec<BundledIr>,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct BundledIr {
+    id: String,
+    name: String,
+    file: String,
+    sha256: String,
+    size: u64,
+    sample_rate: u32,
+    channels: u16,
+    frames: u64,
+}
+/// Whether `file` names a WAV in the manifest's own folder and no path at all.
+fn safe_file(file: &str) -> bool {
+    !file.is_empty()
+        && file.ends_with(".wav")
+        && !file.contains(['/', '\\'])
+        && Path::new(file).file_name().and_then(|name| name.to_str()) == Some(file)
+}
+/// The bundled responses, described by their manifest and found by identity.
+struct Bundled {
+    entries: Vec<IrEntry>,
+    files: HashMap<String, PathBuf>,
+}
+impl Bundled {
+    fn load(directory: &Path) -> Result<Self, IrProblem> {
+        let bytes = read_bounded(&directory.join("manifest.json"))?;
+        let manifest: BundledManifest = serde_json::from_slice(&bytes)
+            .map_err(|e| IrProblem::refused(format!("Invalid bundled cabinet IR manifest: {e}")))?;
+        if manifest.schema_version != 1 || manifest.irs.len() > MAX_ENTRIES {
+            return Err(IrProblem::refused(
+                "Unsupported bundled cabinet IR manifest version.",
+            ));
+        }
+        let mut entries = Vec::with_capacity(manifest.irs.len());
+        let mut files = HashMap::with_capacity(manifest.irs.len());
+        for ir in manifest.irs {
+            if !valid_id(&ir.id)
+                || ir.name.trim().is_empty()
+                || !safe_file(&ir.file)
+                || ir.sha256.len() != 64
+                || !ir.sha256.bytes().all(|b| b.is_ascii_hexdigit())
+                || ir.size == 0
+                || ir.size > MAX_FILE_BYTES
+                || !(MIN_RATE..=MAX_RATE).contains(&ir.sample_rate)
+                || !(1..=2).contains(&ir.channels)
+                || ir.frames == 0
+            {
+                return Err(IrProblem::refused(format!(
+                    "Invalid bundled cabinet IR entry {}.",
+                    ir.id
+                )));
+            }
+            if files
+                .insert(ir.id.clone(), directory.join(&ir.file))
+                .is_some()
+            {
+                return Err(IrProblem::refused(format!(
+                    "Duplicate bundled cabinet IR {}.",
+                    ir.id
+                )));
+            }
+            entries.push(IrEntry {
+                id: ir.id,
+                // `display_name` takes a file name, so give it one; otherwise the last dot in a label such as
+                // "1.00in" would be read as an extension and the rest of the name dropped.
+                name: display_name(&format!("{}.wav", ir.name)),
+                sample_rate: ir.sample_rate,
+                channels: ir.channels,
+                duration_ms: ir.frames as f64 * 1000.0 / ir.sample_rate as f64,
+                bytes: ir.size,
+                notice: None,
+                bundled: true,
+            });
+        }
+        Ok(Self { entries, files })
+    }
+    fn entry(&self, id: &str) -> Option<IrEntry> {
+        self.entries.iter().find(|entry| entry.id == id).cloned()
+    }
+}
 /// What a response's state is, for the sound panel's notice.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -532,6 +630,8 @@ struct Cached {
 /// A folder of responses, one `<id>.wav` and `<id>.json` each, and the kernels designed from them.
 pub struct IrLibrary {
     directory: PathBuf,
+    /// The read-only responses that ship with TabPlayer, if this build has them.
+    bundled: Option<Bundled>,
     cache: Mutex<Vec<Cached>>,
     writes: Mutex<()>,
     /// The rate the latest kernel was asked for at, which is the sound card's, or 0 before any.
@@ -539,24 +639,61 @@ pub struct IrLibrary {
 }
 impl IrLibrary {
     pub fn new(directory: PathBuf) -> Self {
+        Self::with_bundled(directory, None)
+    }
+    /// The user's responses plus the read-only responses in `bundled`, a folder holding `manifest.json`. A bundled
+    /// folder that cannot be read leaves the user's responses playing, and never stops the app starting.
+    pub fn with_bundled(directory: PathBuf, bundled: Option<PathBuf>) -> Self {
+        let bundled = bundled.and_then(|directory| match Bundled::load(&directory) {
+            Ok(bundled) => Some(bundled),
+            Err(problem) => {
+                eprintln!("Bundled cabinet impulse responses are unavailable: {problem}");
+                None
+            }
+        });
         Self {
             directory,
+            bundled,
             cache: Mutex::new(Vec::new()),
             writes: Mutex::new(()),
             device_rate: AtomicU32::new(0),
         }
     }
+    fn wav_path_in(directory: &Path, id: &str) -> PathBuf {
+        directory.join(format!("{id}.wav"))
+    }
+    fn meta_path_in(directory: &Path, id: &str) -> PathBuf {
+        directory.join(format!("{id}.json"))
+    }
     fn wav_path(&self, id: &str) -> PathBuf {
-        self.directory.join(format!("{id}.wav"))
+        Self::wav_path_in(&self.directory, id)
     }
     fn meta_path(&self, id: &str) -> PathBuf {
-        self.directory.join(format!("{id}.json"))
+        Self::meta_path_in(&self.directory, id)
     }
     /// What the description kept beside a response says, if it can be read and is one of ours.
-    fn sidecar(&self, id: &str) -> Option<Sidecar> {
-        read_small(&self.meta_path(id), SIDECAR_LIMIT)
+    fn sidecar_in(directory: &Path, id: &str) -> Option<Sidecar> {
+        read_small(&Self::meta_path_in(directory, id), SIDECAR_LIMIT)
             .and_then(|b| serde_json::from_slice::<Sidecar>(&b).ok())
             .filter(|s| s.format == SIDECAR_FORMAT && s.version == 1)
+    }
+    fn sidecar(&self, id: &str) -> Option<Sidecar> {
+        Self::sidecar_in(&self.directory, id)
+    }
+    /// The file a response plays from: the bundled copy first, since that is the one that ships, then the user's.
+    fn locate(&self, id: &str) -> Option<PathBuf> {
+        if let Some(path) = self
+            .bundled
+            .as_ref()
+            .and_then(|bundled| bundled.files.get(id))
+        {
+            return Some(path.clone());
+        }
+        let path = self.wav_path(id);
+        path.is_file().then_some(path)
+    }
+    fn bundled_entry(&self, id: &str) -> Option<IrEntry> {
+        self.bundled.as_ref().and_then(|bundled| bundled.entry(id))
     }
     fn cache(&self) -> std::sync::MutexGuard<'_, Vec<Cached>> {
         self.cache.lock().unwrap_or_else(PoisonError::into_inner)
@@ -589,6 +726,11 @@ impl IrLibrary {
             format!("Longer than {MAX_SECONDS:.0} second, so the end was faded out and cut.")
         });
         let id = identity(bytes);
+        // A file that ships with TabPlayer needs no copy: the bundled response is already the same bytes, and the
+        // picker marks it as one that cannot be removed.
+        if let Some(entry) = self.bundled_entry(&id) {
+            return Ok(entry);
+        }
         let _guard = self.writes.lock().unwrap_or_else(PoisonError::into_inner);
         let existing = self.entries_unlocked();
         if !existing.iter().any(|e| e.id == id) && existing.len() >= MAX_ENTRIES {
@@ -609,6 +751,7 @@ impl IrLibrary {
             duration_ms: wav.mono.len() as f64 * 1000.0 / wav.rate as f64,
             bytes: bytes.len() as u64,
             notice,
+            bundled: false,
         };
         if !intact || sidecar.is_none() {
             std::fs::create_dir_all(&self.directory).map_err(|e| {
@@ -656,6 +799,7 @@ impl IrLibrary {
                         duration_ms: s.duration_ms,
                         bytes,
                         notice: None,
+                        bundled: false,
                     },
                     // A response whose description is lost is described again from its audio.
                     None => {
@@ -670,6 +814,7 @@ impl IrLibrary {
                             duration_ms: wav.mono.len() as f64 * 1000.0 / wav.rate as f64,
                             bytes,
                             notice: None,
+                            bundled: false,
                         }
                     }
                 })
@@ -684,10 +829,25 @@ impl IrLibrary {
         entries.truncate(MAX_ENTRIES);
         entries
     }
-    /// Every response in the library, by name.
+    /// Every response the picker can offer: the bundled responses and the user's, by name.
     pub fn list(&self) -> Vec<IrEntry> {
         let _guard = self.writes.lock().unwrap_or_else(PoisonError::into_inner);
-        self.entries_unlocked()
+        let mut entries = self.entries_unlocked();
+        if let Some(bundled) = &self.bundled {
+            for entry in &bundled.entries {
+                // A user copy of the same bytes is the same response; the bundled description is the canonical one.
+                if !entries.iter().any(|user| user.id == entry.id) {
+                    entries.push(entry.clone());
+                }
+            }
+        }
+        entries.sort_by(|a, b| {
+            a.name
+                .to_lowercase()
+                .cmp(&b.name.to_lowercase())
+                .then_with(|| a.id.cmp(&b.id))
+        });
+        entries
     }
     /// Takes a response out of the library. Documents that name it fall back to the built-in cabinet; a track already
     /// playing it carries on until its sound is next prepared.
@@ -695,8 +855,24 @@ impl IrLibrary {
         if !valid_id(id) {
             return Err("Not a cabinet response identity.".into());
         }
+        let user_wav = self.wav_path(id);
+        let user_meta = self.meta_path(id);
+        // A bundled response has no file in the user's folder to remove. A user copy of the same bytes, left by an
+        // older version, is still theirs to remove; the bundled one keeps playing.
+        if self
+            .bundled
+            .as_ref()
+            .is_some_and(|bundled| bundled.files.contains_key(id))
+            && !user_wav.exists()
+            && !user_meta.exists()
+        {
+            return Err(
+                "Bundled cabinet impulse responses ship with TabPlayer and cannot be removed."
+                    .into(),
+            );
+        }
         let _guard = self.writes.lock().unwrap_or_else(PoisonError::into_inner);
-        for path in [self.wav_path(id), self.meta_path(id)] {
+        for path in [user_wav, user_meta] {
             match std::fs::remove_file(&path) {
                 Ok(()) => {}
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
@@ -714,7 +890,10 @@ impl IrLibrary {
                 "Not a cabinet response identity.",
             ));
         }
-        let bytes = read_bounded(&self.wav_path(id))?;
+        let path = self.locate(id).ok_or_else(|| {
+            IrProblem::new(ProblemKind::Missing, "The response is not in this library.")
+        })?;
+        let bytes = read_bounded(&path)?;
         Self::taps_of(&bytes, id, rate)
     }
     fn taps_of(bytes: &[u8], id: &str, rate: u32) -> Result<Vec<f32>, IrProblem> {
@@ -741,7 +920,13 @@ impl IrLibrary {
                 "Not a cabinet response identity.",
             ));
         }
-        let path = self.wav_path(id);
+        let Some(path) = self.locate(id) else {
+            self.cache().retain(|c| c.id != id);
+            return Err(IrProblem::new(
+                ProblemKind::Missing,
+                "The response is not in this library.",
+            ));
+        };
         // Taken before the file is read, so a change after it shows next time.
         let Some(stamp) = Stamp::of(&path) else {
             self.cache().retain(|c| c.id != id);
@@ -826,9 +1011,10 @@ fn at_rate(problem: IrProblem, rate: u32) -> IrProblem {
 }
 
 static LIBRARY: Mutex<Option<Arc<IrLibrary>>> = Mutex::new(None);
-/// Makes the folder at `directory` the library every track resolves its responses from.
-pub fn install(directory: PathBuf) -> Arc<IrLibrary> {
-    let library = Arc::new(IrLibrary::new(directory));
+/// Makes the folder at `directory` the library every track resolves its responses from, with the read-only responses
+/// in `bundled` beside the user's own.
+pub fn install(directory: PathBuf, bundled: Option<PathBuf>) -> Arc<IrLibrary> {
+    let library = Arc::new(IrLibrary::with_bundled(directory, bundled));
     *LIBRARY.lock().unwrap_or_else(PoisonError::into_inner) = Some(library.clone());
     library
 }
@@ -889,7 +1075,13 @@ fn library_for(app: &tauri::AppHandle) -> Result<Arc<IrLibrary>, String> {
     if let Some(library) = library() {
         return Ok(library);
     }
-    Ok(install(library_directory(app)?))
+    use tauri::Manager;
+    let bundled = app
+        .path()
+        .resource_dir()
+        .ok()
+        .map(|directory| directory.join("cabinet-irs"));
+    Ok(install(library_directory(app)?, bundled))
 }
 
 #[tauri::command]

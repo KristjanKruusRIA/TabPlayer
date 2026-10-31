@@ -15,7 +15,7 @@ const calls={remove:[] as string[]};
 const native=async(command:string,args?:{id?:string;ids?:string[]})=>{
   if(command==='cabinet_ir_list')return structuredClone(library.entries);
   if(command==='cabinet_ir_status'){library.asked.push(args!.ids!);return (args!.ids!).map(id=>library.status[id]??{id,state:library.entries.some(e=>e.id===id)?'ready':'missing',message:null});}
-  if(command==='cabinet_ir_import'){await library.gate;if(library.importing instanceof Error)throw library.importing;if(library.importing)library.entries.push(library.importing);return library.importing;}
+  if(command==='cabinet_ir_import'){await library.gate;const importing=library.importing;if(importing instanceof Error)throw importing;if(importing&&!library.entries.some(entry=>entry.id===importing.id))library.entries.push(importing);return importing;}
   if(command==='cabinet_ir_remove'){calls.remove.push(args!.id!);library.entries=library.entries.filter(e=>e.id!==args!.id);return;}
   throw new Error(`unexpected ${command}`);
 };
@@ -58,6 +58,18 @@ it('lists the library, shows the choice and offers the built-in cabinet',async()
   expect(select).toHaveValue(B);
   await new Promise(done=>setTimeout(done,20));expect(notice()).toBeNull();
 });
+it('lists bundled responses beside the library and does not offer to remove them',async()=>{
+  const name='Bass Amp · 8x10 Ampeg SVT 97';
+  expect(cabinetIrFits({id:A,name,levelDb:0})).toBe(true);
+  library.entries=[{...entry(A,name),bundled:true}];
+  render(<SoundPanel trackId="t" sound={soundWith(ref(A,0,name))} onEdit={vi.fn()}/>);
+  const select=await screen.findByRole('combobox',{name:'Cabinet impulse response'});
+  await waitFor(()=>expect([...select.querySelectorAll('option')].map(o=>o.textContent)).toEqual(['Built-in cabinet (model above)',`${name} · 0.35 s`]));
+  const remove=screen.getByRole('button',{name:'Remove cabinet impulse response from library'});
+  expect(remove).toBeDisabled();
+  expect(remove).toHaveAttribute('title','Bundled responses ship with TabPlayer.');
+  expect(calls.remove).toEqual([]);
+});
 it('picks a response, keeps its level, and goes back to the built-in cabinet',async()=>{
   const onEdit=vi.fn();
   const {rerender}=render(<SoundPanel trackId="t" sound={soundWith()} onEdit={onEdit}/>);
@@ -92,6 +104,17 @@ it('imports a file, chooses it, and says what it did',async()=>{
   fireEvent.click(await screen.findByRole('button',{name:'Import cabinet impulse response'}));
   await waitFor(()=>expect(last(onEdit)?.ir).toEqual({id:'c'.repeat(32),name:'Vox AC30',levelDb:0}));
   expect(await screen.findByText(/Imported “Vox AC30” \(1\.00 s\)\. Longer than 1 second/)).toBeInTheDocument();
+});
+it('offers a response that already ships without copying it',async()=>{
+  const onEdit=vi.fn();
+  const name='Bass Amp · 8x10 Ampeg SVT 97';
+  library.entries=[{...entry(A,name),bundled:true}];
+  library.importing={...entry(A,name),bundled:true};
+  render(<SoundPanel trackId="t" sound={soundWith()} onEdit={onEdit}/>);
+  fireEvent.click(await screen.findByRole('button',{name:'Import cabinet impulse response'}));
+  await waitFor(()=>expect(last(onEdit)?.ir).toEqual({id:A,name,levelDb:0}));
+  expect(await screen.findByText(/already ships with TabPlayer, so nothing was copied/)).toBeInTheDocument();
+  expect(library.entries).toHaveLength(1);
 });
 it('does nothing when the file dialog is cancelled and says why a file was refused',async()=>{
   const onEdit=vi.fn();

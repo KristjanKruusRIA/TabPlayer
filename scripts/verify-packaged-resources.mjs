@@ -46,7 +46,7 @@ async function verifyLibraryInventory(root,allowed) {
 }
 
 /** Inspect extracted package bytes only. No process launch or network access. */
-export async function verifyPackage({packageRoot,referenceRoot=join(repository,'src-tauri/resources/audio'),sourceRoot=repository}) {
+export async function verifyPackage({packageRoot,referenceRoot=join(repository,'src-tauri/resources/audio'),cabinetRoot=join(repository,'src-tauri/resources/cabinet-irs'),sourceRoot=repository}) {
   const packageFiles=await files(packageRoot);
   const manifests=packageFiles.filter(path=>basename(path)==='manifest.json'&&basename(dirname(path))==='audio');
   if(manifests.length!==1)throw new Error(`Expected one extracted audio manifest, found ${manifests.length}`);
@@ -57,6 +57,27 @@ export async function verifyPackage({packageRoot,referenceRoot=join(repository,'
   const library=await prepareLibrary({source:join(sourceRoot,'assets/library'),destination:libraryRoot,checkOnly:true});
   const libraryFiles=new Set(library.files);
   await verifyLibraryInventory(libraryRoot,libraryFiles);
+  const cabinetManifests=packageFiles.filter(path=>basename(path)==='manifest.json'&&basename(dirname(path))==='cabinet-irs');
+  if(cabinetManifests.length!==1)throw new Error(`Expected one extracted cabinet IR manifest, found ${cabinetManifests.length}`);
+  const irRoot=dirname(cabinetManifests[0]);
+  const irBytes=await readFile(cabinetManifests[0]),irReference=await readFile(join(cabinetRoot,'manifest.json'));
+  if(digest(irBytes)!==digest(irReference))throw new Error('Packaged cabinet IR manifest does not match the bundled reference');
+  const irManifest=JSON.parse(irBytes);
+  if(irManifest.schemaVersion!==1||irManifest.license!=='CC0-1.0'||typeof irManifest.licenseFile!=='string'||!Array.isArray(irManifest.irs))throw new Error('Invalid packaged cabinet IR manifest');
+  const irAllowed=new Set(['manifest.json','README.txt',irManifest.licenseFile]),irIds=new Set();
+  for(const ir of irManifest.irs) {
+    if(typeof ir.file!=='string'||!ir.file.endsWith('.wav')||ir.file!==basename(ir.file)||/[\\/:]/.test(ir.file))throw new Error(`Invalid packaged cabinet IR path: ${ir.file}`);
+    if(typeof ir.id!=='string'||!/^[a-f0-9]{32}$/.test(ir.id))throw new Error(`Invalid packaged cabinet IR identity: ${ir.file}`);
+    if(typeof ir.sha256!=='string'||!/^[a-f0-9]{64}$/.test(ir.sha256)||!ir.sha256.startsWith(ir.id))throw new Error(`Invalid packaged cabinet IR hash: ${ir.file}`);
+    if(irIds.has(ir.id))throw new Error(`Duplicate packaged cabinet IR: ${ir.id}`);
+    irIds.add(ir.id);
+    await verifyHash(irRoot,ir.file,ir.sha256,ir.size);irAllowed.add(ir.file);
+  }
+  for(const path of ['README.txt',irManifest.licenseFile])await verifyHash(irRoot,path,await fileHash(await checkedPath(cabinetRoot,path)));
+  for(const path of packageFiles) {
+    const rel=relative(irRoot,path).replaceAll('\\','/');
+    if(rel!=='..'&&!rel.startsWith('../')&&!isAbsolute(rel)&&!irAllowed.has(rel))throw new Error(`Unexpected cabinet IR resource: ${rel}`);
+  }
   const bytes=await readFile(manifests[0]),reference=await readFile(join(referenceRoot,'manifest.json'));
   if(digest(bytes)!==digest(reference))throw new Error('Packaged audio manifest does not match the prepared offline reference');
   const manifest=JSON.parse(bytes),config=JSON.parse(await readFile(join(sourceRoot,'assets/audio/sources.json'),'utf8'));
@@ -92,10 +113,15 @@ export async function verifyPackage({packageRoot,referenceRoot=join(repository,'
       const libraryRelative=relative(libraryRoot,path).replaceAll('\\','/');
       if(libraryRelative!=='..'&&!libraryRelative.startsWith('../')&&!isAbsolute(libraryRelative)) {
         if(!libraryFiles.has(libraryRelative))throw new Error(`Unexpected library resource: ${libraryRelative}`);
-      }else if(/\.(gp[345]?|gpx|tabplayer|pdf|wav|mp3|flac|ogg)$/i.test(path))throw new Error(`Unexpected score/private media in package: ${relative(packageRoot,path)}`);
+      }else {
+        const irRelative=relative(irRoot,path).replaceAll('\\','/');
+        if(irRelative!=='..'&&!irRelative.startsWith('../')&&!isAbsolute(irRelative)) {
+          if(!irAllowed.has(irRelative))throw new Error(`Unexpected cabinet IR resource: ${irRelative}`);
+        }else if(/\.(gp[345]?|gpx|tabplayer|pdf|wav|mp3|flac|ogg)$/i.test(path))throw new Error(`Unexpected score/private media in package: ${relative(packageRoot,path)}`);
+      }
     }
   }
-  return {scope:'extracted packaged resource verification; native audition, print and installer lifecycle remain separate',platform:process.platform,architecture:process.arch,manifestSha256:digest(bytes),sampleCount:manifest.samples.length,regionCount,encodedSampleBytes:manifest.samples.reduce((total,item)=>total+item.size,0),sourceRevisions,library:{manifestSha256:await fileHash(libraryManifests[0]),templateCount:library.manifest.templates.length,exampleCount:library.manifest.examples.length,fileCount:library.files.length}};
+  return {scope:'extracted packaged resource verification; native audition, print and installer lifecycle remain separate',platform:process.platform,architecture:process.arch,manifestSha256:digest(bytes),sampleCount:manifest.samples.length,regionCount,encodedSampleBytes:manifest.samples.reduce((total,item)=>total+item.size,0),sourceRevisions,library:{manifestSha256:await fileHash(libraryManifests[0]),templateCount:library.manifest.templates.length,exampleCount:library.manifest.examples.length,fileCount:library.files.length},cabinetIrs:{manifestSha256:digest(irBytes),count:irManifest.irs.length}};
 }
 
 export async function packageArtifacts(bundleRoot,formats) {

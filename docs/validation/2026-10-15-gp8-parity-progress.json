@@ -1880,6 +1880,18 @@
       "end_line": 20,
       "kind": "validation_report"
     },
+    "bundled_cabinet_ir_behavior": {
+      "path": "docs/validation/2026-10-31-bundled-cabinet-irs.md",
+      "start_line": 5,
+      "end_line": 12,
+      "kind": "validation_report"
+    },
+    "bundled_cabinet_ir_limits": {
+      "path": "docs/validation/2026-10-31-bundled-cabinet-irs.md",
+      "start_line": 34,
+      "end_line": 38,
+      "kind": "validation_report"
+    },
     "master_effects_behavior": {
       "path": "docs/validation/2026-10-30-gp8-master-effects.md",
       "start_line": 3,
@@ -6499,12 +6511,14 @@
       "current_status": "partial",
       "assessment": "evidence_reviewed",
       "current_proven_status": "partial",
-      "current_behavior": "A track's cabinet can use an imported impulse response, heard in playback and export, with a level trim; a missing response falls back to the built-in cabinet with a notice.",
-      "remaining_gap": "No responses ship yet, and the rig view does not show the control until it merges.",
+      "current_behavior": "A track's cabinet can use an imported or bundled impulse response, heard in playback and export, with a level trim; a missing response falls back to the built-in cabinet with a notice.",
+      "remaining_gap": "The target's amp topology and routing breadth remain unproved.",
       "current_evidence": [
         "cabinet_ir_behavior",
         "cabinet_ir_evidence",
-        "cabinet_ir_limits"
+        "cabinet_ir_limits",
+        "bundled_cabinet_ir_behavior",
+        "bundled_cabinet_ir_limits"
       ],
       "runtime_rechecked_by_this_audit": false
     },

@@ -22,7 +22,21 @@ async function fixture() {
   const library=join(packageRoot,'usr/lib/tabplayer/library');
   await cp(new URL('../assets/library/',import.meta.url),join(sourceRoot,'assets/library'),{recursive:true});
   await cp(join(sourceRoot,'assets/library'),library,{recursive:true});
-  return {sourceRoot,referenceRoot,packageRoot,audio,library};
+  const cabinetRoot=join(sourceRoot,'cabinet-irs-reference'),cabinet=join(packageRoot,'usr/lib/tabplayer/cabinet-irs');
+  await mkdir(cabinetRoot,{recursive:true});
+  const irs=[Buffer.from('first fixture impulse response'),Buffer.from('second fixture impulse response')];
+  const notice=Buffer.from('CC0 1.0 Universal (CC0-1.0)\n'),dedication=Buffer.from('Full CC0 dedication\n');
+  const entries=[];
+  for(const [index,bytes] of irs.entries()) {
+    const sha256=hash(bytes),file=`fixture-${index}.wav`;
+    await writeFile(join(cabinetRoot,file),bytes);
+    entries.push({id:sha256.slice(0,32),name:`Fixture ${index}`,file,sha256,size:bytes.length,sampleRate:48000,channels:1,frames:16});
+  }
+  await writeFile(join(cabinetRoot,'README.txt'),notice);
+  await writeFile(join(cabinetRoot,'LICENSE-CC0.txt'),dedication);
+  await writeFile(join(cabinetRoot,'manifest.json'),JSON.stringify({schemaVersion:1,license:'CC0-1.0',licenseFile:'LICENSE-CC0.txt',source:'fixture',irs:entries}));
+  await cp(cabinetRoot,cabinet,{recursive:true});
+  return {sourceRoot,referenceRoot,packageRoot,audio,library,cabinet,cabinetRoot};
 }
 
 test('extracted_package_contains_all_pinned_recordings_and_exact_licenses',async()=> {
@@ -31,6 +45,19 @@ test('extracted_package_contains_all_pinned_recordings_and_exact_licenses',async
   assert.equal(report.sampleCount,1);assert.equal(report.regionCount,1);assert.equal(report.sourceRevisions.fixture,'1'.repeat(40));
   assert.equal(report.encodedSampleBytes,26);
   assert.equal(report.library.templateCount,10);assert.equal(report.library.exampleCount,3);assert.equal(report.library.fileCount,16);
+  assert.equal(report.cabinetIrs.count,2);assert.match(report.cabinetIrs.manifestSha256,/^[a-f0-9]{64}$/);
+});
+
+test('bundled_cabinet_irs_are_verified_against_the_shipped_manifest',async()=> {
+  const {verifyPackage}=await api();const options=await fixture();
+  await writeFile(join(options.cabinet,'fixture-0.wav'),'damaged');
+  await assert.rejects(verifyPackage(options),/hash|size/i);
+  const missing=await fixture();await unlink(join(missing.cabinet,'fixture-1.wav'));
+  await assert.rejects(verifyPackage(missing),/ENOENT|missing/i);
+  const extra=await fixture();await writeFile(join(extra.cabinet,'unlisted.wav'),'extra');
+  await assert.rejects(verifyPackage(extra),/Unexpected cabinet IR resource/i);
+  const changed=await fixture();await writeFile(join(changed.cabinet,'manifest.json'),'{}');
+  await assert.rejects(verifyPackage(changed),/cabinet IR manifest/i);
 });
 
 test('package_contains_all_offline_library_payloads_and_license_with_exact_source_hashes',async()=> {

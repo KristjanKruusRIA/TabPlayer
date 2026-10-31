@@ -760,7 +760,7 @@ fn ir_bench() {
     let plan = plan(&GUITAR, 30);
     let centred = render(&plan, FxSettings::default());
     let panned: Vec<[f32; 2]> = centred.iter().map(|f| [f[0], f[1] * 0.7]).collect();
-    let library = cabinet_ir::install(std::env::temp_dir().join("tabplayer-ir-bench"));
+    let library = cabinet_ir::install(std::env::temp_dir().join("tabplayer-ir-bench"), None);
     let board = factory("metal-rhythm").unwrap();
     let tracks = 8;
     let load =

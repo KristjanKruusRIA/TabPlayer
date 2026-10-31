@@ -1,4 +1,4 @@
-import {waitForWorkspaceIdle,clickWorkspaceCommand,clickWorkstationButton,revealInspector} from './workstation-commands.mjs';
+import {waitForWorkspaceIdle,clickWorkspaceCommand,clickWorkstationButton,revealInspector,setPlaybackSpeed} from './workstation-commands.mjs';
 import { readDocumentRecord } from './document-context.mjs';
 import assert from 'node:assert/strict';
 import { readFile,readdir,mkdir,stat } from 'node:fs/promises';
@@ -20,7 +20,7 @@ for(const {format,current=false,named=false} of [{format:'pdf',named:true},{form
     await waitForWorkspaceIdle(page);
     const {documentId}=(await page.evaluate(()=>window.__TAURI_INTERNALS__.invoke('workspace_snapshot'))).active;
     const origin=await readDocumentRecord(page,documentId),before=origin.snapshot;assert.equal(before.dirty,true);
-    if(current)await page.getByRole('combobox',{name:/^Speed/}).selectOption('50');
+    if(current)await setPlaybackSpeed(page,50);
     await clickWorkspaceCommand(page,'Export score',{waitForIdle:false});
     const dialog=page.getByRole('dialog',{name:'Export score'});await dialog.getByLabel('Export format').selectOption(format);
     if(format==='png')await dialog.getByRole('radio',{name:'150 dpi'}).click();

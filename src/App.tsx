@@ -15,6 +15,7 @@ import { MixerView } from './mixer/MixerView';
 import { SoundRig } from './rig/SoundRig';
 import { CabinetResponse } from './audio/CabinetResponse';
 import { Segmented } from './ui';
+import { MarkGlyph,PanelBottomGlyph,PanelLeftGlyph,PanelRightGlyph,RedoGlyph,UndoGlyph } from './shell/glyphs';
 import { InterpretationPanel } from './audio/InterpretationPanel';
 import { CabinetNotices } from './audio/CabinetNotices';
 import { BackingPanel } from './audio/BackingPanel';
@@ -432,7 +433,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     else if(event.key==='Escape'){editorSelection(null);event.preventDefault();}
   }
   return <div ref={shell} className="app-shell" aria-busy={controlsBusy} data-narrow={narrow} onKeyDown={selectionKeys}>
-    <header ref={commandBar} className="toolbar" onKeyDown={event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();closeCommands(true);}}} onClickCapture={event=>{if(!(event.target instanceof Element))return;if(event.target instanceof HTMLElement)onFileCommandCapture?.(event.target);const disclosure=event.target.closest('summary')?.parentElement;if(disclosure instanceof HTMLDetailsElement)commandBar.current?.querySelectorAll<HTMLDetailsElement>('details[open]').forEach(other=>{if(other!==disclosure)other.open=false;});else if(event.target.closest('button'))closeCommands(true);}}><h1>TabPlayer</h1><nav aria-label="File and history">
+    <header ref={commandBar} className="toolbar" onKeyDown={event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();closeCommands(true);}}} onClickCapture={event=>{if(!(event.target instanceof Element))return;if(event.target instanceof HTMLElement)onFileCommandCapture?.(event.target);const disclosure=event.target.closest('summary')?.parentElement;if(disclosure instanceof HTMLDetailsElement)commandBar.current?.querySelectorAll<HTMLDetailsElement>('details[open]').forEach(other=>{if(other!==disclosure)other.open=false;});else if(event.target.closest('button'))closeCommands(true);}}><div className="toolbar-left"><h1><MarkGlyph/>TabPlayer</h1><nav aria-label="File and history">
       <details className="command-menu" onToggle={event=>commandToggle(event.currentTarget)}><summary>File</summary><section aria-label="File commands">
       <button disabled={controlsBusy} onClick={()=>documentAction(onNew())}>New</button>
       <button disabled={controlsBusy} onClick={()=>documentAction(onOpen())}>Open</button>
@@ -452,21 +453,20 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
         <label className="check"><input type="checkbox" checked={dockVisible} onChange={event=>setDockVisible(event.target.checked)}/>Bottom dock</label>
         <InputPreferencesPanel preferences={inputPrefs} onChange={setInputPrefs} preview={auditionEdits} onPreview={play=>{setAuditionEdits(play);writeAuditionWhileEditing(play);}}/>
       </section></details>
-      <button disabled={editBusy || !state.snapshot.canUndo} onClick={()=>change(controller.undo())}>Undo</button>
-      <button disabled={editBusy || !state.snapshot.canRedo} onClick={()=>change(controller.redo())}>Redo</button>
-    </nav><Segmented className="view-switch" label="View" value={view} onChange={setView} options={[{value:'score',label:'Score'},{value:'sound',label:'Sound'},{value:'mixer',label:'Mixer'}]}/><details className="keyboard-help" onToggle={event=>commandToggle(event.currentTarget)} onKeyDown={event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();event.currentTarget.open=false;event.currentTarget.querySelector('summary')?.focus();}}}><summary>Help</summary><section role="region" aria-label="Keyboard and editing help">
+      <button disabled={editBusy || !state.snapshot.canUndo} onClick={()=>change(controller.undo())}><UndoGlyph/><span className="bar-label">Undo</span></button>
+      <button disabled={editBusy || !state.snapshot.canRedo} onClick={()=>change(controller.redo())}><RedoGlyph/><span className="bar-label">Redo</span></button>
+    </nav></div><Segmented className="view-switch" label="View" value={view} onChange={setView} options={[{value:'score',label:'Score'},{value:'sound',label:'Sound'},{value:'mixer',label:'Mixer'}]}/><div className="toolbar-right"><nav className="pane-toggles" aria-label="Panels"><button type="button" data-pane-toggle="left" aria-pressed={leftShown} title="Track panel" aria-label="Toggle track panel" onClick={()=>leftVisible&&leftShown?setLeftVisible(false):showTask(leftTask)}><PanelLeftGlyph/></button><button type="button" data-pane-toggle="inspector" aria-pressed={inspectorShown} title="Inspector" aria-label="Toggle inspector" onClick={()=>inspectorVisible&&inspectorShown?setInspectorVisible(false):showInspector()}><PanelRightGlyph/></button><button type="button" data-pane-toggle="dock" aria-pressed={dockVisible} title="Bottom dock" aria-label="Toggle bottom dock" onClick={()=>setDockVisible(!dockVisible)}><PanelBottomGlyph/></button></nav><details className="keyboard-help" onToggle={event=>commandToggle(event.currentTarget)} onKeyDown={event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();event.currentTarget.open=false;event.currentTarget.querySelector('summary')?.focus();}}}><summary>Help</summary><section role="region" aria-label="Keyboard and editing help">
       <div className="help-actions"><button type="button" onClick={()=>openHelp('start')}>Help topics (F1)</button><button type="button" onClick={()=>openHelp('about')}>About and updates</button></div>
       <h2>Keyboard & editing</h2><p>Use these shortcuts outside input fields and dialogs. F1 opens help about the part of the window you are using.</p>
       <dl><dt>Ctrl/Cmd + N / O</dt><dd>New score / Open score</dd><dt>Ctrl/Cmd + S</dt><dd>Save; add Shift for Save As</dd><dt>Ctrl/Cmd + W</dt><dd>Close the current score</dd><dt>Ctrl/Cmd + Tab</dt><dd>Next score; add Shift for the previous score</dd><dt>Ctrl/Cmd + Z</dt><dd>Undo; add Shift to redo. Ctrl/Cmd + Y also redoes.</dd><dt>Space</dt><dd>Play or pause</dd><dt>Ctrl/Cmd + Shift + P</dt><dd>Command palette: type a command such as measure 12, fret 5 or tempo 96</dd></dl>
       <button type="button" onClick={openPalette}>Open command palette</button>
       <h3>With the score focused</h3><dl><dt>Left / Right</dt><dd>Previous / next beat</dd><dt>Up / Down</dt><dd>Change string, or choose a pitched/percussion note</dd><dt>Digits, then Enter</dt><dd>Enter a fret and set the note on a fretted track</dd><dt>Shift + Left/Right</dt><dd>Extend the musical selection</dd><dt>Ctrl/Cmd + A</dt><dd>Select the current track</dd><dt>Ctrl/Cmd + C / X / V</dt><dd>Copy / Cut / Paste music. Add Shift to Copy/Cut for all selected tracks; Shift + Paste opens paste options.</dd><dt>Escape</dt><dd>Clear the musical selection</dd></dl>
       <p>The blue outline marks your edit target. Green follows playback or a selected passage. Use the inspector’s Edit, Practice and Presentation buttons to reach tools; changes apply only when you use their action buttons.</p>
-    </section></details><span className="document-title">{state.score.title || 'Untitled'}{state.snapshot.dirty?' •':''}</span>
+    </section></details><span className="document-title">{state.score.title || 'Untitled'}{state.snapshot.dirty?' •':''}</span></div>
     </header>
     {documentTabs}
     {editLocked&&<div className="finalized-banner" role="status"><p>Finalized: editing is locked.</p><button disabled={controlsBusy} onClick={()=>act(controller.setLock(null))}>Unfinalize</button></div>}
     <CabinetNotices sounds={state.settings.sounds} trackNames={trackNames}/>
-    {player && <Transport player={player} measures={state.score.masterBars.length} busy={controlsBusy} cursor={target} selection={musicSelection}/>}
     {(clipboardError||workspaceError||state.error||(!exportOpen&&exportError)||pageState.error||harmonyOpen&&libraryError) && <div className="error" role="alert">{clipboardError||workspaceError||state.error||exportError||pageState.error||libraryError}</div>}
     <div ref={workspace} className="workspace workstation-workspace" data-view={view} data-left={leftShown} data-inspector={inspectorShown} data-dock={dockVisible} data-dock-collapsed={dockCollapsed} style={{'--dock-height':`${dockHeight}px`} as React.CSSProperties}>
       <nav ref={paneRail} className="workstation-rail" aria-label="Workspace panes">
@@ -516,6 +516,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
         </div>
       </section>
     </div>
+    {player && <Transport player={player} measures={state.score.masterBars.length} busy={controlsBusy} cursor={target} selection={musicSelection}/>}
     {exportOpen&&<ExportDialog layoutLocked={editLocked} sounds={state.settings.sounds} trackNames={trackNames} score={state.score} layout={state.settings.print} page={page} currentSpeedAvailable={practiceRatio!==null} busy={exports.busy||state.busy||exportLaunching} progress={exports.progress} failure={exportError} gpBackingIssue={gpBackingIssue} hasBacking={!!audioSettings.backing} onExport={runExport} onCancel={cancelExport}/>}
     {harmonyOpen&&location.beat&&<HarmonyChordDialog score={state.score} target={target} selection={musicSelection} value={location.beat.chord?getHarmonyChord(location.beat.chord):null} busy={state.busy||libraryLoading} library={library} onEdit={edit} onClose={closeModal} onLibraryPut={async entry=>{const revision=++libraryRevision.current,value=await putHarmonyLibraryEntry(entry);if(revision===libraryRevision.current)setLibrary(value);}} onLibraryRemove={async id=>{const revision=++libraryRevision.current,value=await removeHarmonyLibraryEntry(id);if(revision===libraryRevision.current)setLibrary(value);}}/>}
     {helpTopic!==null&&<HelpDialog initial={helpTopic} onClose={closeHelp}/>}

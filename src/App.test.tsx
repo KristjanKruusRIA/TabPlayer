@@ -739,6 +739,16 @@ it('workstation File View Help are single disclosures with exclusive open state,
   const help=openCommand('Help');fireEvent.pointerDown(screen.getByRole('region',{name:'Score workspace'}));await waitFor(()=>expect(help).not.toHaveAttribute('open'));expect(c.getState()).toBe(before);expectSilentNavigation();
   openCommand('File');within(file).getByRole('button',{name:'New'}).focus();fireEvent.pointerDown(screen.getByRole('region',{name:'Score workspace'}));expect(file).not.toHaveAttribute('open');expect(file.querySelector('summary')).toHaveFocus();
 });
+it('top-bar panel toggles show and hide the track panel, inspector and dock, and mirror the View menu',async()=>{
+  const c=await setup(),before=c.getState(),toggle=(name:string)=>screen.getByRole('button',{name:`Toggle ${name}`}),pane=(selector:string)=>document.querySelector<HTMLElement>(selector)!;
+  for(const [name,selector] of [['track panel','.workstation-left'],['inspector','.workstation-inspector'],['bottom dock','.workstation-dock']] as const){
+    expect(toggle(name)).toHaveAttribute('aria-pressed','true');expect(pane(selector)).toBeVisible();
+    fireEvent.click(toggle(name));expect(toggle(name)).toHaveAttribute('aria-pressed','false');expect(pane(selector)).not.toBeVisible();
+    const menu=openCommand('View'),box=within(menu).getByRole('checkbox',{name:name==='track panel'?'Track panel':name==='inspector'?'Inspector':'Bottom dock'});expect(box).not.toBeChecked();fireEvent.keyDown(menu,{key:'Escape'});
+    fireEvent.click(toggle(name));expect(toggle(name)).toHaveAttribute('aria-pressed','true');expect(pane(selector)).toBeVisible();
+  }
+  expect(c.getState()).toBe(before);expectSilentNavigation();
+});
 it('workstation hidden panes retain their mounted tuning rhythm and text drafts without score changes',async()=>{
   const c=await setup(),before=c.getState();fireEvent.click(paneButton('Track'));const tuning=screen.getByLabelText('Tuning (notes, high to low)');fireEvent.change(tuning,{target:{value:'E4 B3 G3 D3 A2 D2'}});
   const duration=screen.getByLabelText('Duration'),text=screen.getByLabelText('Beat text');revealDetails(text);fireEvent.change(duration,{target:{value:'8'}});fireEvent.change(text,{target:{value:'Unapplied passage note'}});

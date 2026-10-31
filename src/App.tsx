@@ -47,6 +47,7 @@ import type { MusicSelection } from './editor/range-types';
 import { rangeFromBeats,selectionForTrack } from './editor/range-selection';
 import { planMeasureMap } from './editor/measures';
 import { ClipboardStore } from './editor/ClipboardStore';
+import { useI18n, type LanguagePreference } from './i18n';
 import { AUTO_DURATION_UNFIT,InputPreferencesPanel,applyInOrder,autoDurationEdit,autoDurationSkip,entryAfterWrite,numpadDurationEdit,numpadKey,useInputPreferences,type EntryDuration } from './editor/input-preferences';
 import { ClipboardPanel } from './editor/ClipboardPanel';
 import { NotationEntryPanel } from './editor/NotationEntryPanel';
@@ -99,6 +100,7 @@ export interface AppProps {
 }
 
 export function App({controller,audioBridge,waveformBridge,exportBridge,documentBridge,documentView,onViewChange,clipboard,workspaceBusy,workspaceError,beginEditorOperation,onNew,onOpen,onImportConverted,onClose,onCloseAll,documentTabs,sessionMenu,libraryMenu,onFileCommandCapture,recoveryStatus,playbackResumeEpoch=0}:AppProps) {
+  const { t, preference, setPreference } = useI18n();
   const state=useSyncExternalStore(controller.subscribe,controller.getState);
   const controlsBusy=state.busy||workspaceBusy;
   // A finalized document refuses every change to its music and layout. This is kept apart from controlsBusy so
@@ -448,39 +450,40 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   }
   return <div ref={shell} className="app-shell" aria-busy={controlsBusy} data-narrow={narrow} onKeyDown={selectionKeys}>
     <header ref={commandBar} className="toolbar" onKeyDown={event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();closeCommands(true);}}} onClickCapture={event=>{if(!(event.target instanceof Element))return;if(event.target instanceof HTMLElement)onFileCommandCapture?.(event.target);const disclosure=event.target.closest('summary')?.parentElement;if(disclosure instanceof HTMLDetailsElement)commandBar.current?.querySelectorAll<HTMLDetailsElement>('details[open]').forEach(other=>{if(other!==disclosure)other.open=false;});else if(event.target.closest('button'))closeCommands(true);}}><div className="toolbar-left"><h1><MarkGlyph/>TabPlayer</h1><nav aria-label="File and history">
-      <details className="command-menu" onToggle={event=>commandToggle(event.currentTarget)}><summary>File</summary><section aria-label="File commands">
-      <button disabled={controlsBusy} onClick={()=>documentAction(onNew())}>New</button>
-      <button disabled={controlsBusy} onClick={()=>documentAction(onOpen())}>Open</button>
-      {onImportConverted&&<button disabled={controlsBusy} onClick={openAscii}>Import ASCII tab…</button>}
-      {onImportConverted&&<button disabled={controlsBusy} onClick={openMidi}>Import MIDI…</button>}
-      <button disabled={controlsBusy} onClick={openBatch}>Batch convert…</button>
-      <button disabled={controlsBusy} onClick={()=>act(controller.save())}>Save</button>
-      <button disabled={controlsBusy} onClick={()=>act(controller.save(true))}>Save As</button>
-      <button disabled={controlsBusy} onClick={()=>documentAction(onClose())}>Close score</button>
-      <button disabled={controlsBusy} onClick={()=>documentAction(onCloseAll())}>Close all scores</button>
-      {finalized?<button disabled={controlsBusy||passwordLocked} onClick={()=>act(controller.setLock(null))}>Unfinalize document</button>:<button disabled={controlsBusy||passwordLocked} onClick={()=>act(controller.setLock({kind:'finalized'}))}>Finalize document</button>}
+      <details className="command-menu" onToggle={event=>commandToggle(event.currentTarget)}><summary>{t('menu.file')}</summary><section aria-label={t('menu.file_commands')}>
+      <button disabled={controlsBusy} onClick={()=>documentAction(onNew())}>{t('action.new')}</button>
+      <button disabled={controlsBusy} onClick={()=>documentAction(onOpen())}>{t('action.open')}</button>
+      {onImportConverted&&<button disabled={controlsBusy} onClick={openAscii}>{t('action.import_ascii')}</button>}
+      {onImportConverted&&<button disabled={controlsBusy} onClick={openMidi}>{t('action.import_midi')}</button>}
+      <button disabled={controlsBusy} onClick={openBatch}>{t('action.batch_convert')}</button>
+      <button disabled={controlsBusy} onClick={()=>act(controller.save())}>{t('action.save')}</button>
+      <button disabled={controlsBusy} onClick={()=>act(controller.save(true))}>{t('action.save_as')}</button>
+      <button disabled={controlsBusy} onClick={()=>documentAction(onClose())}>{t('action.close_score')}</button>
+      <button disabled={controlsBusy} onClick={()=>documentAction(onCloseAll())}>{t('action.close_all_scores')}</button>
+      {finalized?<button disabled={controlsBusy||passwordLocked} onClick={()=>act(controller.setLock(null))}>{t('action.unfinalize_document')}</button>:<button disabled={controlsBusy||passwordLocked} onClick={()=>act(controller.setLock({kind:'finalized'}))}>{t('action.finalize_document')}</button>}
       <button {...busyGuard({busy:controlsBusy,onClick:()=>openProtection('manage')})}>Password protection…</button>
-      <button disabled={controlsBusy||exports.busy} onClick={()=>openModal('export')}>Export score</button><button disabled={controlsBusy||exports.busy} onClick={directExport}>Export GP</button>
+      <button disabled={controlsBusy||exports.busy} onClick={()=>openModal('export')}>{t('action.export_score')}</button><button disabled={controlsBusy||exports.busy} onClick={directExport}>{t('action.export_gp')}</button>
       {libraryMenu}{sessionMenu}</section></details>
-      <details ref={viewMenu} className="command-menu" onToggle={event=>commandToggle(event.currentTarget)}><summary>View</summary><section aria-label="Workspace view">
-        <label className="check"><input type="checkbox" checked={leftVisible} onChange={event=>event.target.checked?showTask(leftTask):setLeftVisible(false)}/>Track panel</label>
-        <label className="check"><input type="checkbox" checked={inspectorVisible} onChange={event=>event.target.checked?showInspector():setInspectorVisible(false)}/>Inspector</label>
-        <label className="check"><input type="checkbox" checked={dockVisible} onChange={event=>setDockVisible(event.target.checked)}/>Bottom dock</label>
+      <details ref={viewMenu} className="command-menu" onToggle={event=>commandToggle(event.currentTarget)}><summary>{t('menu.view')}</summary><section aria-label={t('menu.workspace_view')}>
+        <label className="check"><input type="checkbox" checked={leftVisible} onChange={event=>event.target.checked?showTask(leftTask):setLeftVisible(false)}/>{t('view.track_panel')}</label>
+        <label className="check"><input type="checkbox" checked={inspectorVisible} onChange={event=>event.target.checked?showInspector():setInspectorVisible(false)}/>{t('view.inspector')}</label>
+        <label className="check"><input type="checkbox" checked={dockVisible} onChange={event=>setDockVisible(event.target.checked)}/>{t('view.bottom_dock')}</label>
         <InputPreferencesPanel preferences={inputPrefs} onChange={setInputPrefs} preview={auditionEdits} onPreview={play=>{setAuditionEdits(play);writeAuditionWhileEditing(play);}}/>
+        <div className="language-setting-row" style={{padding:'6px 8px',display:'flex',alignItems:'center',gap:'8px'}}><label style={{display:'flex',alignItems:'center',gap:'8px',fontSize:'13px'}}>{t('preferences.language')}: <select aria-label={t('preferences.language')} value={preference} onChange={e=>setPreference(e.target.value as LanguagePreference)}><option value="system">{t('preferences.lang_system')}</option><option value="en">{t('preferences.lang_en')}</option><option value="et">{t('preferences.lang_et')}</option><option value="de">{t('preferences.lang_de')}</option></select></label></div>
       </section></details>
-      <button disabled={editBusy || !state.snapshot.canUndo} onClick={()=>change(controller.undo())} title="Undo (Ctrl+Z)"><UndoGlyph/><span className="bar-label">Undo</span></button>
-      <button disabled={editBusy || !state.snapshot.canRedo} onClick={()=>change(controller.redo())} title="Redo (Ctrl+Shift+Z)"><RedoGlyph/><span className="bar-label">Redo</span></button>
-    </nav></div><Segmented className="view-switch" label="View" value={view} onChange={setView} options={[{value:'score',label:'Score'},{value:'sound',label:'Sound'},{value:'mixer',label:'Mixer'}]}/><div className="toolbar-right"><nav className="pane-toggles" aria-label="Panels"><button type="button" data-pane-toggle="left" aria-pressed={leftShown} title="Track panel" aria-label="Toggle track panel" onClick={()=>leftVisible&&leftShown?setLeftVisible(false):showTask(leftTask)}><PanelLeftGlyph/></button><button type="button" data-pane-toggle="inspector" aria-pressed={inspectorShown} title="Inspector" aria-label="Toggle inspector" onClick={()=>inspectorVisible&&inspectorShown?setInspectorVisible(false):showInspector()}><PanelRightGlyph/></button><button type="button" data-pane-toggle="dock" aria-pressed={dockVisible} title="Bottom dock" aria-label="Toggle bottom dock" onClick={()=>setDockVisible(!dockVisible)}><PanelBottomGlyph/></button></nav><details className="keyboard-help" onToggle={event=>commandToggle(event.currentTarget)} onKeyDown={event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();event.currentTarget.open=false;event.currentTarget.querySelector('summary')?.focus();}}}><summary>Help</summary><section role="region" aria-label="Keyboard and editing help">
-      <div className="help-actions"><button type="button" onClick={()=>openHelp('start')}>Help topics (F1)</button><button type="button" onClick={()=>openHelp('about')}>About and updates</button></div>
-      <h2>Keyboard & editing</h2><p>Use these shortcuts outside input fields and dialogs. F1 opens help about the part of the window you are using.</p>
-      <dl><dt>Ctrl/Cmd + N / O</dt><dd>New score / Open score</dd><dt>Ctrl/Cmd + S</dt><dd>Save; add Shift for Save As</dd><dt>Ctrl/Cmd + W</dt><dd>Close the current score</dd><dt>Ctrl/Cmd + Tab</dt><dd>Next score; add Shift for the previous score</dd><dt>Ctrl/Cmd + Z</dt><dd>Undo; add Shift to redo. Ctrl/Cmd + Y also redoes.</dd><dt>Space</dt><dd>Play or pause</dd><dt>Ctrl/Cmd + Shift + P</dt><dd>Command palette: type a command such as measure 12, fret 5 or tempo 96</dd></dl>
-      <button type="button" onClick={openPalette}>Open command palette</button>
-      <h3>With the score focused</h3><dl><dt>Left / Right</dt><dd>Previous / next beat</dd><dt>Up / Down</dt><dd>Change string, or choose a pitched/percussion note</dd><dt>Digits, then Enter</dt><dd>Enter a fret and set the note on a fretted track</dd><dt>Shift + Left/Right</dt><dd>Extend the musical selection</dd><dt>Ctrl/Cmd + A</dt><dd>Select the current track</dd><dt>Ctrl/Cmd + T</dt><dd>Tie the selected notes to the notes before them, giving each the earlier fret. Add Shift to untie.</dd><dt>Ctrl/Cmd + C / X / V</dt><dd>Copy / Cut / Paste music. Add Shift to Copy/Cut for all selected tracks; Shift + Paste opens paste options.</dd><dt>Escape</dt><dd>Clear the musical selection</dd></dl>
-      <p>The blue outline marks your edit target. Green follows playback or a selected passage. Use the inspector’s Edit, Practice and Presentation buttons to reach tools; changes apply only when you use their action buttons.</p>
-    </section></details><span className="document-title">{state.score.title || 'Untitled'}{state.snapshot.dirty?' •':''}</span></div>
+      <button disabled={editBusy || !state.snapshot.canUndo} onClick={()=>change(controller.undo())} title={t('action.undo_title')}><UndoGlyph/><span className="bar-label">{t('action.undo')}</span></button>
+      <button disabled={editBusy || !state.snapshot.canRedo} onClick={()=>change(controller.redo())} title={t('action.redo_title')}><RedoGlyph/><span className="bar-label">{t('action.redo')}</span></button>
+    </nav></div><Segmented className="view-switch" label={t('view.view_label')} value={view} onChange={setView} options={[{value:'score',label:t('view.score')},{value:'sound',label:t('view.sound')},{value:'mixer',label:t('view.mixer')}]}/><div className="toolbar-right"><nav className="pane-toggles" aria-label="Panels"><button type="button" data-pane-toggle="left" aria-pressed={leftShown} title={t('view.track_panel')} aria-label={t('view.toggle_track_panel')} onClick={()=>leftVisible&&leftShown?setLeftVisible(false):showTask(leftTask)}><PanelLeftGlyph/></button><button type="button" data-pane-toggle="inspector" aria-pressed={inspectorShown} title={t('view.inspector')} aria-label={t('view.toggle_inspector')} onClick={()=>inspectorVisible&&inspectorShown?setInspectorVisible(false):showInspector()}><PanelRightGlyph/></button><button type="button" data-pane-toggle="dock" aria-pressed={dockVisible} title={t('view.bottom_dock')} aria-label={t('view.toggle_bottom_dock')} onClick={()=>setDockVisible(!dockVisible)}><PanelBottomGlyph/></button></nav><details className="keyboard-help" onToggle={event=>commandToggle(event.currentTarget)} onKeyDown={event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();event.currentTarget.open=false;event.currentTarget.querySelector('summary')?.focus();}}}><summary>{t('menu.help')}</summary><section role="region" aria-label={t('help.keyboard_editing_help')}>
+      <div className="help-actions"><button type="button" onClick={()=>openHelp('start')}>{t('help.topics_f1')}</button><button type="button" onClick={()=>openHelp('about')}>{t('help.about_updates')}</button></div>
+      <h2>{t('help.keyboard_editing_heading')}</h2><p>{t('help.keyboard_editing_intro')}</p>
+      <dl><dt>Ctrl/Cmd + N / O</dt><dd>{t('help.shortcut_new_open')}</dd><dt>Ctrl/Cmd + S</dt><dd>{t('help.shortcut_save')}</dd><dt>Ctrl/Cmd + W</dt><dd>{t('help.shortcut_close')}</dd><dt>Ctrl/Cmd + Tab</dt><dd>{t('help.shortcut_next_score')}</dd><dt>Ctrl/Cmd + Z</dt><dd>{t('help.shortcut_undo_redo')}</dd><dt>Space</dt><dd>{t('help.shortcut_play')}</dd><dt>Ctrl/Cmd + Shift + P</dt><dd>{t('help.shortcut_palette')}</dd></dl>
+      <button type="button" onClick={openPalette}>{t('help.open_command_palette')}</button>
+      <h3>{t('help.score_focused_heading')}</h3><dl><dt>Left / Right</dt><dd>{t('help.shortcut_beat')}</dd><dt>Up / Down</dt><dd>{t('help.shortcut_string')}</dd><dt>Digits, then Enter</dt><dd>{t('help.shortcut_fret')}</dd><dt>Shift + Left/Right</dt><dd>{t('help.shortcut_selection')}</dd><dt>Ctrl/Cmd + A</dt><dd>{t('help.shortcut_select_track')}</dd><dt>Ctrl/Cmd + T</dt><dd>Tie the selected notes to the notes before them, giving each the earlier fret. Add Shift to untie.</dd><dt>Ctrl/Cmd + C / X / V</dt><dd>{t('help.shortcut_clipboard')}</dd><dt>Escape</dt><dd>{t('help.shortcut_clear')}</dd></dl>
+      <p>{t('help.workflow_description')}</p>
+    </section></details><span className="document-title">{state.score.title || t('score.untitled')}{state.snapshot.dirty?' •':''}</span></div>
     </header>
     {documentTabs}
-    {finalized&&<div className="finalized-banner" role="status"><p>Finalized: editing is locked.</p><button disabled={controlsBusy||passwordLocked} onClick={()=>act(controller.setLock(null))}>Unfinalize</button></div>}
+    {finalized&&<div className="finalized-banner" role="status"><p>{t('status.finalized_banner')}</p><button disabled={controlsBusy||passwordLocked} onClick={()=>act(controller.setLock(null))}>{t('action.unfinalize')}</button></div>}
     {passwordLocked&&<div className="finalized-banner" role="status"><p>Locked for editing: you can play and read this score, but changes need its password.</p><button {...busyGuard({busy:controlsBusy,onClick:()=>openProtection('unlock')})}>Unlock editing…</button></div>}
     <CabinetNotices sounds={state.settings.sounds} trackNames={trackNames}/>
     {(clipboardError||workspaceError||state.error||(!exportOpen&&exportError)||pageState.error||harmonyOpen&&libraryError) && <div className="error" role="alert">{clipboardError||workspaceError||state.error||exportError||pageState.error||libraryError}</div>}
@@ -490,7 +493,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
         <button data-pane="track" aria-pressed={leftShown&&leftTask==='track'} onClick={()=>showTask('track')}>Track</button><button data-pane="sound" aria-pressed={leftShown&&leftTask==='sound'} onClick={()=>showTask('sound')}>Sound</button><button data-pane="backing" aria-pressed={leftShown&&leftTask==='backing'} onClick={()=>showTask('backing')}>Backing</button><button data-pane="inspector" aria-pressed={inspectorShown} onClick={showInspector}>Inspector</button>
       </nav>
       <section ref={leftPane} className="workstation-left" aria-label="Track tools" hidden={!leftShown}>
-        <nav aria-label="Track tools"><button aria-pressed={leftTask==='track'} onClick={()=>showTask('track')}>Track</button><button aria-pressed={leftTask==='sound'} onClick={()=>showTask('sound')}>Sound</button><button aria-pressed={leftTask==='backing'} onClick={()=>showTask('backing')}>Backing</button></nav>
+        <nav aria-label={t('workspace.track_tools')}><button aria-pressed={leftTask==='track'} onClick={()=>showTask('track')}>{t('workspace.track')}</button><button aria-pressed={leftTask==='sound'} onClick={()=>showTask('sound')}>{t('workspace.sound')}</button><button aria-pressed={leftTask==='backing'} onClick={()=>showTask('backing')}>{t('workspace.backing')}</button></nav>
         <div className="workstation-task" hidden={leftTask!=='track'}><TrackSettingsPanel score={state.score} selected={target.track} busy={controlsBusy} locked={editLocked} onEdit={edit} onAudition={auditionTuning}/></div>
         <div className="workstation-task" hidden={leftTask!=='sound'}>
         {view==='score'&&<SoundPanel trackId={trackId} percussion={selectedTrack.isPercussion} sound={state.settings.sounds[trackId]} onEdit={command=>controller.edit(command)} playback={player} busy={editBusy} shown={leftShown&&leftTask==='sound'}/>}

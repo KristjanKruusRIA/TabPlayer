@@ -1,3 +1,4 @@
+import { useI18n } from '../i18n';
 import { useEffect, useState } from 'react';
 import type { model } from '@coderline/alphatab';
 import type { EditCommand } from '../edit-types';
@@ -11,12 +12,13 @@ const directions=[
 ] as const;
 
 export function DirectionsPanel({score,target,busy,onEdit}:{score:model.Score;target:BeatTarget;busy:boolean;onEdit:(edit:EditCommand)=>void}) {
+  const { t } = useI18n();
   const master=score.masterBars[target.bar],read=()=>[...master?.directions??[]];
   const [selected,setSelected]=useState<number[]>(read);
   useEffect(()=>{setSelected(read());},[score,master]);
-  return <details><summary>Directions</summary><fieldset disabled={busy||!master}>
-    <p className="muted">Directions apply to measure {target.bar+1}.</p>
+  return <details><summary>{t('editor.directions')}</summary><fieldset disabled={busy||!master}>
+    <p className="muted">{t('editor.directions_apply_hint', { bar: target.bar+1 })}</p>
     <div className="technique-grid">{directions.map(([value,label])=><label className="check" key={value}><input type="checkbox" checked={selected.includes(value)} onChange={e=>setSelected(e.target.checked?[...selected,value]:selected.filter(direction=>direction!==value))}/>{label}</label>)}</div>
-    <button onClick={()=>onEdit({type:'setDirections',bar:target.bar,directions:[...selected].sort((a,b)=>a-b)})}>Apply directions</button>
+    <button onClick={()=>onEdit({type:'setDirections',bar:target.bar,directions:[...selected].sort((a,b)=>a-b)})}>{t('editor.apply_directions')}</button>
   </fieldset></details>;
 }

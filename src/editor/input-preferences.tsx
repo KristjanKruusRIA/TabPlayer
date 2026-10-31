@@ -1,3 +1,4 @@
+import { useI18n } from '../i18n';
 import { useState } from 'react';
 import type { EditCommand } from '../edit-types';
 import { previewEdit } from '../engine';
@@ -89,10 +90,11 @@ export interface InputPreferencesPanelProps {
 }
 /** The View menu's score-input choices. They are viewer settings, so they stay usable on a finalized document. */
 export function InputPreferencesPanel({preferences,onChange,preview,onPreview}:InputPreferencesPanelProps):React.JSX.Element {
-  return <fieldset className="input-preferences"><legend>Score input</legend>
-    <label className="check"><input type="checkbox" checked={preview} onChange={event=>onPreview(event.target.checked)}/>Play notes while editing</label>
-    <label className="check"><input type="checkbox" checked={preferences.autoDuration} onChange={event=>onChange({autoDuration:event.target.checked})}/>Auto-duration: a note written on a rest takes the last duration</label>
-    <label className="check"><input type="checkbox" checked={preferences.numpadDurations} onChange={event=>onChange({numpadDurations:event.target.checked})}/>Keypad sets duration (1-7, . for dot)</label>
-    <label className="check"><input type="checkbox" checked={preferences.pasteDiagrams} onChange={event=>onChange({pasteDiagrams:event.target.checked})}/>Paste includes chord diagrams</label>
+  const { t } = useI18n();
+  return <fieldset className="input-preferences"><legend>{t('preferences.score_input')}</legend>
+    <label className="check"><input type="checkbox" checked={preview} onChange={event=>onPreview(event.target.checked)}/>{t('preferences.play_notes')}</label>
+    <label className="check"><input type="checkbox" checked={preferences.autoDuration} onChange={event=>onChange({autoDuration:event.target.checked})}/>{t('preferences.auto_duration')}</label>
+    <label className="check"><input type="checkbox" checked={preferences.numpadDurations} onChange={event=>onChange({numpadDurations:event.target.checked})}/>{t('preferences.numpad_durations')}</label>
+    <label className="check"><input type="checkbox" checked={preferences.pasteDiagrams} onChange={event=>onChange({pasteDiagrams:event.target.checked})}/>{t('preferences.paste_diagrams')}</label>
   </fieldset>;
 }

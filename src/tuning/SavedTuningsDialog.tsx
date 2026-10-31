@@ -5,6 +5,7 @@ import { tuningPresets } from '../tuning-presets';
 import { AuditionButtons } from './AuditionButtons';
 import { isXmlText,newTuningId,putTuningLibraryEntry,readTuningLibrary,removeTuningLibraryEntry,subscribeTuningLibrary,tuningNameError,type SavedTuning } from './library';
 import { Dialog } from '../ui/Dialog';
+import { useI18n } from '../i18n';
 import './saved-tunings-dialog.css';
 
 type Identity={kind:'personal';id:string}|{kind:'builtin';index:number};
@@ -18,6 +19,7 @@ const same=(a:readonly number[],b:readonly number[])=>a.length===b.length&&a.eve
 
 /** Mounted only while open; closing or unmounting discards every late library response. */
 export function SavedTuningsDialog({notes,name,onUse,onClose,onAudition}:{notes:string;name:string;onUse:(notes:string,name:string)=>void;onClose:()=>void;onAudition?:(pitches:number[],strum:boolean)=>void}) {
+  const { t } = useI18n();
   const [entries,setEntries]=useState<SavedTuning[]>([]),[loaded,setLoaded]=useState(false),[readError,setReadError]=useState(''),[error,setError]=useState(''),[pending,setPending]=useState(false);
   const [selection,setSelection]=useState<Identity|null>(null),[detailNotes,setDetailNotes]=useState(notes),[detailName,setDetailName]=useState(name);
   // details counts selections and detail edits, so a library response that settles after the user moved on leaves them alone.
@@ -53,10 +55,10 @@ export function SavedTuningsDialog({notes,name,onUse,onClose,onAudition}:{notes:
     return <li key={key}><button type="button" className="saved-tuning-row" aria-pressed={active} onClick={()=>select(identity,pitches,label)}><span className="saved-tuning-row-name">{label}</span><span className="saved-tuning-row-pitches">{formatTuning(pitches)}</span></button></li>;
   };
   const actions=<>
-    <button type="button" className="tp-button" onClick={onClose}>Cancel</button>
-    <button type="button" className="tp-button primary" disabled={!canUse} onClick={use}>Use tuning</button>
+    <button type="button" className="tp-button" onClick={onClose}>{t('dialog.cancel')}</button>
+    <button type="button" className="tp-button primary" disabled={!canUse} onClick={use}>{t('tuning.use_tuning')}</button>
   </>;
-  return createPortal(<Dialog title="Saved tunings" onClose={onClose} className="saved-tunings-dialog" actions={actions}>
+  return createPortal(<Dialog title={t('tuning.saved_tunings_title')} onClose={onClose} className="saved-tunings-dialog" actions={actions}>
     <div className="saved-tunings-body">
       <div className="saved-tunings-list">
         <section aria-labelledby="saved-tunings-personal"><h3 id="saved-tunings-personal">Personal</h3>
@@ -73,8 +75,8 @@ export function SavedTuningsDialog({notes,name,onUse,onClose,onAudition}:{notes:
         <p className={'error' in result?'saved-tuning-problem':'muted'} id="saved-tuning-pitch-help">{'error' in result?result.error:`${result.notes.length} strings. Built-in tunings cannot be changed; save a copy to keep your own.`}</p>
         {onAudition&&'notes' in result&&<AuditionButtons pitches={result.notes} onAudition={onAudition}/>}
         <div className="saved-tunings-actions">
-          <button type="button" disabled={!canSaveNew} aria-disabled={pending||undefined} onClick={saveNew}>Save as new</button>
-          <button type="button" disabled={!canSaveChanges} aria-disabled={pending||undefined} onClick={saveChanges}>Save changes</button>
+          <button type="button" disabled={!canSaveNew} aria-disabled={pending||undefined} onClick={saveNew}>{t('tuning.save_new')}</button>
+          <button type="button" disabled={!canSaveChanges} aria-disabled={pending||undefined} onClick={saveChanges}>{t('tuning.save_changes')}</button>
           <button type="button" disabled={!selectedEntry} aria-disabled={pending||undefined} onClick={remove}>Delete</button>
         </div>
         {(readError||error)&&<p role="alert" className="saved-tuning-problem">{error||readError}</p>}

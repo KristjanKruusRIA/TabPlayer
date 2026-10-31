@@ -13,6 +13,7 @@ import type { LockedDocument } from '../protection/protection';
 import type { LibrarySection } from '../library/types';
 import type { DocumentViewState } from './types';
 import type { RecoveryIssue,RecoveryStatus,SessionPreferences } from './recovery-types';
+import { useI18n } from '../i18n';
 import './document-tabs.css';
 
 export interface WorkspaceSession {
@@ -22,6 +23,7 @@ export interface WorkspaceSession {
 const noLibrarySubscribe=()=>()=>{};
 const noLibraryState:WorkspaceLibraryState={open:false,welcome:false,error:null,closeReason:null};
 export function WorkspaceApp({workspace,session,library}:{workspace:WorkspaceController;session?:WorkspaceSession;library?:WorkspaceLibrary}) {
+  const { t } = useI18n();
   const state=useSyncExternalStore(workspace.subscribe,workspace.getState);
   const libraryState=useSyncExternalStore(library?.subscribe??noLibrarySubscribe,library?.getState??(()=>noLibraryState));
   const {documentId,activationId}=state.active;
@@ -75,9 +77,9 @@ export function WorkspaceApp({workspace,session,library}:{workspace:WorkspaceCon
     if(!library)return;const opener=libraryInvoker.current??button;libraryInvoker.current=null;
     const disclosure=opener.closest('details');if(disclosure)disclosure.open=true;opener.focus();library.show(section,opener);
   }
-  const libraryMenu=library&&<section aria-label="File library">
-    {([['recent','Library'],['recent','Recent scores'],['templates','Templates'],['examples','Examples'],['templates','Save as template']] as const).map(([section,label])=><button key={label} data-library-section={section} disabled={state.busy||!!session?.pending} onClick={event=>showLibrary(section,event.currentTarget)}>{label}</button>)}
-    <button disabled={state.busy||!!session?.pending||!active.controller.getState().snapshot.path} onClick={()=>run(library.reveal())}>Open containing folder</button>
+  const libraryMenu=library&&<section aria-label={t('library.menu_section')}>
+    {([['recent',t('library.menu_library')],['recent',t('library.menu_recent')],['templates',t('library.menu_templates')],['examples',t('library.menu_examples')],['templates',t('library.menu_save_template')]] as const).map(([section,label])=><button key={label} data-library-section={section} disabled={state.busy||!!session?.pending} onClick={event=>showLibrary(section,event.currentTarget)}>{label}</button>)}
+    <button disabled={state.busy||!!session?.pending||!active.controller.getState().snapshot.path} onClick={()=>run(library.reveal())}>{t('library.open_containing_folder')}</button>
   </section>;
   function keys(event:KeyboardEvent) {
     const target=event.target;
@@ -92,16 +94,16 @@ export function WorkspaceApp({workspace,session,library}:{workspace:WorkspaceCon
   const backupError=state.recoveryError ?? (session?.status.state==='failed'?session.status.error:null);
   const backupState=session?.status.state;
   const backupTime=session?.status.capturedAtUnixMs===null||session?.status.capturedAtUnixMs===undefined?null:new Date(session.status.capturedAtUnixMs);
-  const backupText=backupError?`Recovery backup failed: ${backupError}`:backupState==='failed'?'Recovery backup failed.':backupState==='writing'?'Updating recovery backup…':backupState==='pending'?'Recovery backup pending.':backupState==='ready'?'Recovery backup complete.':'Recovery backup has not been written yet.';
-  const sessionMenu=session&&<section className="session-options" aria-label="Session settings">
-    <label className="check"><input type="checkbox" checked={session.preferences.restorePreviousSession} disabled={session.pending||state.busy} onChange={event=>session.onPreferencesChange(event.target.checked)}/>Restore previous session</label>
+  const backupText=backupError?t('session.backup_failed_error', { error: backupError }):backupState==='failed'?t('session.backup_failed'):backupState==='writing'?t('session.backup_updating'):backupState==='pending'?t('session.backup_pending'):backupState==='ready'?t('session.backup_complete'):t('session.backup_none');
+  const sessionMenu=session&&<section className="session-options" aria-label={t('session.settings')}>
+    <label className="check"><input type="checkbox" checked={session.preferences.restorePreviousSession} disabled={session.pending||state.busy} onChange={event=>session.onPreferencesChange(event.target.checked)}/>{t('session.restore_previous_session')}</label>
   </section>;
   const recoveryStatus=session&&<div className="recovery-feedback">
-    <span className="recovery-status" role="status">{backupText}{backupTime&&Number.isFinite(backupTime.getTime())&&<> Last backup: <time dateTime={backupTime.toISOString()}>{backupTime.toLocaleTimeString()}</time>.</>}</span>
+    <span className="recovery-status" role="status">{backupText}{backupTime&&Number.isFinite(backupTime.getTime())&&<> {t('session.last_backup')}<time dateTime={backupTime.toISOString()}>{backupTime.toLocaleTimeString()}</time>.</>}</span>
     {session.status.state==='ready'&&session.status.error&&<span className="recovery-status">{session.status.error}</span>}
-    {(backupError||backupState==='failed')&&<button disabled={session.pending} onClick={session.onRetry}>Retry</button>}
+    {(backupError||backupState==='failed')&&<button disabled={session.pending} onClick={session.onRetry}>{t('action.retry')}</button>}
     {session.error&&<span className="session-error" role="alert">{session.error}</span>}
-    {session.issues.length>0&&<details className="recovery-notices"><summary>Session details ({session.issues.length})</summary><ul>{session.issues.map((issue,index)=><li key={index}>{issue.message}</li>)}</ul></details>}
+    {session.issues.length>0&&<details className="recovery-notices"><summary>{t('session.details_count', { count: session.issues.length })}</summary><ul>{session.issues.map((issue,index)=><li key={index}>{issue.message}</li>)}</ul></details>}
   </div>;
   return <div ref={panel} role="tabpanel" id={`document-panel-${encodeURIComponent(documentId)}`} aria-labelledby={`document-tab-${encodeURIComponent(documentId)}`}
     onKeyDownCapture={keys} onFocusCapture={event=>{tabFocus.current=event.target instanceof Element&&!!event.target.closest('[role="tablist"]');}}>

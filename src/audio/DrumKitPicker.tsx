@@ -1,3 +1,4 @@
+import { useI18n } from '../i18n';
 import { busySelect } from '../ui';
 import { drumKitFor, drumKits, kitDifferences, sharedSounds } from '../editor/drum-kits';
 import type { SoundEditing } from './useSoundEditing';
@@ -5,12 +6,13 @@ import type { SoundEditing } from './useSoundEditing';
 /** The drum kit of a drum track, shared by the inspector's Sound task and the rig. Only kits the sound bank really carries are offered; a choice is
  * `editing.setDrumKit`, one undoable `setTrackSound` edit. The select stays focusable while busy (`busySelect`). */
 export function DrumKitPicker({editing,className}:{editing:SoundEditing;className?:string}) {
+  const { t } = useI18n();
   const {current,busy}=editing,kit=drumKitFor(current.drumKit);
   const note=kit.changes.length?`${kit.label} changes ${kitDifferences(kit).join(', ')}.`:'Standard is the reference kit.';
-  return <section className={className} aria-label="Drum kit settings">
-    <label><span className="drum-kit-label">Drum kit</span><select title={note} value={kit.program} {...busySelect(busy)} onChange={e=>{void editing.setDrumKit(Number(e.target.value));}}>{drumKits.map(option=><option key={option.program} value={option.program}>{option.label}</option>)}</select></label>
+  return <section className={className} aria-label={t('rig.drum_kit_settings')}>
+    <label><span className="drum-kit-label">{t('rig.drum_kit')}</span><select title={note} value={kit.program} {...busySelect(busy)} onChange={e=>{void editing.setDrumKit(Number(e.target.value));}}>{drumKits.map(option=><option key={option.program} value={option.program}>{option.label}</option>)}</select></label>
     <p className="muted">{note}</p>
-    <details onKeyDown={event=>{if(event.key==='Escape'&&event.currentTarget.open){event.preventDefault();event.stopPropagation();event.currentTarget.open=false;event.currentTarget.querySelector('summary')?.focus();}}}><summary title="Which hits differ">Which hits differ</summary>
+    <details onKeyDown={event=>{if(event.key==='Escape'&&event.currentTarget.open){event.preventDefault();event.stopPropagation();event.currentTarget.open=false;event.currentTarget.querySelector('summary')?.focus();}}}><summary title={t('rig.which_hits_differ')}>{t('rig.which_hits_differ')}</summary>
       <div className="drum-kit-table"><p className="muted">Every drum key has its own sound. Room and Jazz replay Standard's samples at other pitches; Brush changes the snare and electric snare.</p>
       <ul>{drumKits.filter(option=>option.changes.length).map(option=><li key={option.program}><strong>{option.label}</strong>: {kitDifferences(option).join(', ')}</li>)}</ul>
       <p className="muted">These notations play the same sound, so they differ on the page only (the bank has no separate rim shot, choke or half-open sample):</p>

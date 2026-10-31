@@ -1,3 +1,4 @@
+import { useI18n } from '../i18n';
 import { useEffect,useState } from 'react';
 import type { RangeCommand,RangePanelProps,StrokeDirection,StrokeTechnique,VoiceAddress } from './range-types';
 import { resolveSelectionBeats,resolveSelectionNotes,selectionForBars,selectionForTrack,validateMusicSelection } from './range-selection';
@@ -20,6 +21,7 @@ function readScope({score,target,selection}:Pick<RangePanelProps,'score'|'target
   return ['lane','staff','track','all'].find(scope=>equal(selection.range.lanes.map(key),scopeLanes({score,target},selection.range.start.bar,scope).map(key)))??'custom';
 }
 export function RangePanel({score,target,selection,busy,locked=false,onSelection,onEdit}:RangePanelProps) {
+  const { t } = useI18n();
   const [semitones,setSemitones]=useState('1'),[maxFret,setMaxFret]=useState('24'),[strings,setStrings]=useState<number[]>([]),[scope,setScope]=useState(()=>readScope({score,target,selection})),[error,setError]=useState('');
   const [technique,setTechnique]=useState<StrokeTechnique>('pick'),[pattern,setPattern]=useState('D U');
   const staff=score.tracks[target.track]?.staves[target.staff];
@@ -59,38 +61,38 @@ export function RangePanel({score,target,selection,busy,locked=false,onSelection
     const value=Number(maxFret);if(!maxFret.trim()||!Number.isInteger(value)||value<1||value>127){setError('Choose a maximum fret from 1 to 127.');return;}
     if(selection)edit({type:'refingerSelection',selection,maxFret:value});
   };
-  return <details className="editor-section" open><summary>Music selection</summary><fieldset disabled={busy}>
+  return <details className="editor-section" open><summary>{t('editor.music_selection')}</summary><fieldset disabled={busy}>
     <div className="editor-actions">
-      <button onClick={()=>action(()=>onSelection(selectionForBars(score,[target.track],target.bar,target.bar)))}>Select bar</button>
-      <button onClick={()=>action(()=>onSelection(selectionForTrack(score,target.track)))}>Select track</button>
-      <button onClick={()=>action(()=>onSelection(selectionForBars(score,score.tracks.map(track=>track.index),0,score.masterBars.length-1)))}>Select all</button>
-      <button disabled={!selection} onClick={()=>onSelection(null)}>Clear selection</button>
+      <button onClick={()=>action(()=>onSelection(selectionForBars(score,[target.track],target.bar,target.bar)))}>{t('editor.select_bar')}</button>
+      <button onClick={()=>action(()=>onSelection(selectionForTrack(score,target.track)))}>{t('editor.select_track')}</button>
+      <button onClick={()=>action(()=>onSelection(selectionForBars(score,score.tracks.map(track=>track.index),0,score.masterBars.length-1)))}>{t('editor.select_all')}</button>
+      <button disabled={!selection} onClick={()=>onSelection(null)}>{t('editor.clear_selection')}</button>
     </div>
-    <p>{selectedNotes.length} {selectedNotes.length===1?'note':'notes'} · {selectedBeats.length} {selectedBeats.length===1?'beat':'beats'}</p>
+    <p>{selectedNotes.length} {selectedNotes.length===1?t('editor.note_singular'):t('editor.note_plural')} · {selectedBeats.length} {selectedBeats.length===1?t('editor.beat_singular'):t('editor.beat_plural')}</p>
     {selection?.kind==='bars'&&<p>Measures {selection.firstBar+1}–{selection.lastBar+1} · Tracks {selection.tracks.map(track=>track+1).join(', ')}</p>}
     {lanes.map(lane=><p key={lane}>{lane}</p>)}
-    <label>Selection scope<select value={scope} disabled={!selection||selection.kind==='notes'} onChange={event=>setScope(event.target.value)}>
-      <option value="custom" disabled>Custom selection</option><option value="lane" disabled={selection?.kind==='bars'}>Current lane</option><option value="staff" disabled={selection?.kind==='bars'}>Current staff</option><option value="track">Current track</option><option value="all">All tracks</option>
+    <label>{t('editor.selection_scope')}<select value={scope} disabled={!selection||selection.kind==='notes'} onChange={event=>setScope(event.target.value)}>
+      <option value="custom" disabled>{t('editor.scope_custom')}</option><option value="lane" disabled={selection?.kind==='bars'}>{t('editor.scope_lane')}</option><option value="staff" disabled={selection?.kind==='bars'}>Current staff</option><option value="track">Current track</option><option value="all">All tracks</option>
     </select></label>
-    <button disabled={!selection||selection.kind==='notes'||!!selectionError||scope==='custom'} onClick={broaden}>Apply selection scope</button>
-    <fieldset disabled={!available||locked}><legend>Selected notes</legend>
-      <button onClick={()=>selection&&edit({type:'eraseSelection',selection})}>Erase selected notes</button>
-      <div className="editor-actions"><button disabled={!melodic} onClick={()=>selection&&edit({type:'setSelectionTies',selection,tied:true})}>Tie selected notes</button><button onClick={()=>selection&&edit({type:'setSelectionTies',selection,tied:false})}>Untie selected notes</button><button disabled={!melodic} title="Ties each note to the earlier note on its string and gives it that fret" onClick={()=>selection&&edit({type:'tieSelectionToEarlierPitch',selection})}>Tie to earlier pitch</button></div>
-      <fieldset disabled={!melodic}><legend>Transpose</legend>
-        <div className="editor-actions"><button onClick={()=>shift(-1)}>Down semitone</button><button onClick={()=>shift(1)}>Up semitone</button><button onClick={()=>shift(-12)}>Down octave</button><button onClick={()=>shift(12)}>Up octave</button></div>
-        <label>Semitones<input type="number" min={-127} max={127} step={1} value={semitones} onChange={event=>setSemitones(event.target.value)}/></label><button onClick={()=>shift(semitones.trim()?Number(semitones):0)}>Transpose selection</button>
+    <button disabled={!selection||selection.kind==='notes'||!!selectionError||scope==='custom'} onClick={broaden}>{t('editor.apply_selection_scope')}</button>
+    <fieldset disabled={!available||locked}><legend>{t('editor.selected_notes')}</legend>
+      <button onClick={()=>selection&&edit({type:'eraseSelection',selection})}>{t('editor.erase_selected_notes')}</button>
+      <div className="editor-actions"><button disabled={!melodic} onClick={()=>selection&&edit({type:'setSelectionTies',selection,tied:true})}>{t('editor.tie_selected_notes')}</button><button onClick={()=>selection&&edit({type:'setSelectionTies',selection,tied:false})}>{t('editor.untie_selected_notes')}</button><button disabled={!melodic} title="Ties each note to the earlier note on its string and gives it that fret" onClick={()=>selection&&edit({type:'tieSelectionToEarlierPitch',selection})}>Tie to earlier pitch</button></div>
+      <fieldset disabled={!melodic}><legend>{t('editor.transpose')}</legend>
+        <div className="editor-actions"><button onClick={()=>shift(-1)}>{t('editor.down_semitone')}</button><button onClick={()=>shift(1)}>{t('editor.up_semitone')}</button><button onClick={()=>shift(-12)}>{t('editor.down_octave')}</button><button onClick={()=>shift(12)}>{t('editor.up_octave')}</button></div>
+        <label>{t('editor.semitones')}<input type="number" min={-127} max={127} step={1} value={semitones} onChange={event=>setSemitones(event.target.value)}/></label><button onClick={()=>shift(semitones.trim()?Number(semitones):0)}>{t('editor.transpose_selection')}</button>
       </fieldset>
-      <fieldset disabled={!hasStrings}><legend>Guitar and bass</legend>
-        <div className="editor-actions"><button onClick={()=>selection&&edit({type:'moveSelectionStrings',selection,direction:'higher'})}>Move to higher string</button><button onClick={()=>selection&&edit({type:'moveSelectionStrings',selection,direction:'lower'})}>Move to lower string</button></div>
-        <label>Maximum fret<input type="number" min={1} max={127} step={1} value={maxFret} onChange={event=>setMaxFret(event.target.value)}/></label><button onClick={fretAction}>Re-finger selection</button>
-        <fieldset><legend>Sustain strings</legend>{staff?.tuning.map((_,index)=>{const string=index+1;return <label key={string}><input type="checkbox" checked={strings.includes(string)} onChange={event=>setStrings(event.target.checked?[...strings,string]:strings.filter(value=>value!==string))}/>String {string}</label>;})}</fieldset>
-        <div className="editor-actions"><button onClick={()=>sustain('letRing',true)}>Enable let ring</button><button onClick={()=>sustain('letRing',false)}>Disable let ring</button><button onClick={()=>sustain('palmMute',true)}>Enable palm mute</button><button onClick={()=>sustain('palmMute',false)}>Disable palm mute</button></div>
-        <fieldset><legend>Picking and strumming</legend>
-          <label>Pattern technique<select value={technique} onChange={event=>setTechnique(event.target.value as StrokeTechnique)}><option value="pick">Pick stroke</option><option value="brush">Brush</option><option value="arpeggio">Arpeggio</option></select></label>
-          <div className="editor-actions"><button onClick={()=>setPattern('D U')}>Alternate picking</button><button onClick={()=>setPattern('D')}>All downstrokes</button></div>
-          <label>Stroke pattern<input value={pattern} aria-describedby="stroke-pattern-help" onChange={event=>setPattern(event.target.value)}/></label>
-          <p className="muted" id="stroke-pattern-help">Steps D (down), U (up) or - (none) repeat over each voice's notes in order; rests, grace notes and tied notes are skipped. MusicXML export keeps pick strokes but not brushes or arpeggios.</p>
-          <div className="editor-actions"><button onClick={()=>strokes(parseStrokes(pattern))}>Apply stroke pattern</button><button onClick={()=>strokes(['none'])}>Clear strokes</button></div>
+      <fieldset disabled={!hasStrings}><legend>{t('editor.guitar_and_bass')}</legend>
+        <div className="editor-actions"><button onClick={()=>selection&&edit({type:'moveSelectionStrings',selection,direction:'higher'})}>{t('editor.move_to_higher_string')}</button><button onClick={()=>selection&&edit({type:'moveSelectionStrings',selection,direction:'lower'})}>{t('editor.move_to_lower_string')}</button></div>
+        <label>{t('editor.maximum_fret')}<input type="number" min={1} max={127} step={1} value={maxFret} onChange={event=>setMaxFret(event.target.value)}/></label><button onClick={fretAction}>{t('editor.refinger_selection')}</button>
+        <fieldset><legend>{t('editor.sustain_strings')}</legend>{staff?.tuning.map((_,index)=>{const string=index+1;return <label key={string}><input type="checkbox" checked={strings.includes(string)} onChange={event=>setStrings(event.target.checked?[...strings,string]:strings.filter(value=>value!==string))}/>String {string}</label>;})}</fieldset>
+        <div className="editor-actions"><button onClick={()=>sustain('letRing',true)}>{t('editor.enable_let_ring')}</button><button onClick={()=>sustain('letRing',false)}>{t('editor.disable_let_ring')}</button><button onClick={()=>sustain('palmMute',true)}>{t('editor.enable_palm_mute')}</button><button onClick={()=>sustain('palmMute',false)}>{t('editor.disable_palm_mute')}</button></div>
+        <fieldset><legend>{t('editor.picking_and_strumming')}</legend>
+          <label>{t('editor.pattern_technique')}<select value={technique} onChange={event=>setTechnique(event.target.value as StrokeTechnique)}><option value="pick">{t('editor.technique_pick')}</option><option value="brush">{t('editor.technique_brush')}</option><option value="arpeggio">{t('editor.technique_arpeggio')}</option></select></label>
+          <div className="editor-actions"><button onClick={()=>setPattern('D U')}>{t('editor.alternate_picking')}</button><button onClick={()=>setPattern('D')}>{t('editor.all_downstrokes')}</button></div>
+          <label>{t('editor.stroke_pattern')}<input value={pattern} aria-describedby="stroke-pattern-help" onChange={event=>setPattern(event.target.value)}/></label>
+          <p className="muted" id="stroke-pattern-help">{t('editor.stroke_pattern_help')}</p>
+          <div className="editor-actions"><button onClick={()=>strokes(parseStrokes(pattern))}>{t('editor.apply_stroke_pattern')}</button><button onClick={()=>strokes(['none'])}>{t('editor.clear_strokes')}</button></div>
         </fieldset>
       </fieldset>
     </fieldset>

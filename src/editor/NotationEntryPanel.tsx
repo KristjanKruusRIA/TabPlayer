@@ -1,3 +1,4 @@
+import { useI18n } from '../i18n';
 import { useId, useRef, useState, type KeyboardEvent } from 'react';
 import { model } from '@coderline/alphatab';
 import { describeSelection } from '../engine';
@@ -21,6 +22,7 @@ const stepY = (step: number) => (highestStep - step) * stepHeight + top;
 const clefLetter: Record<number, string> = { [model.Clef.G2]: '𝄞', [model.Clef.F4]: '𝄢', [model.Clef.C3]: '𝄡', [model.Clef.C4]: '𝄡' };
 
 export function NotationEntryPanel({ score, target, busy, locked = false, onEdit, latestScore }: NotationEntryPanelProps) {
+  const { t } = useI18n();
   const { staff, bar, beat } = describeSelection(score, target), clef = entryClef(bar), keySignature = bar.keySignature as number;
   const [accidental, setAccidental] = useState<EntryAccidental>('key'), [octave, setOctave] = useState(4), [cursor, setCursor] = useState(0), [status, setStatus] = useState(''), working = useRef(false);
   const staffBox = useRef<HTMLDivElement>(null), id = useId();
@@ -75,12 +77,12 @@ export function NotationEntryPanel({ score, target, busy, locked = false, onEdit
     return step === null ? [] : [step];
   }) : [];
   const stepId = (step: number) => `${id}-step${step - lowestStep}`;
-  return <details open className="notation-entry"><summary>Standard notation entry</summary>
+  return <details open className="notation-entry"><summary>{t('editor.standard_notation_entry')}</summary>
     <fieldset disabled={disabled}>
-      <div role="group" aria-label="Accidental" className="notation-entry-accidentals">{entryAccidentals.map(value => <button key={value} type="button" aria-pressed={accidental === value} onClick={() => setAccidental(value)}>{accidentalLabels[value]}</button>)}</div>
-      <div className="notation-entry-octave"><button type="button" aria-label="Octave down" disabled={octave <= octaveRange.min} onClick={() => chooseOctave(octave - 1)}>−</button><span data-testid="entry-octave">Octave {octave}</span><button type="button" aria-label="Octave up" disabled={octave >= octaveRange.max} onClick={() => chooseOctave(octave + 1)}>+</button></div>
+      <div role="group" aria-label={t('editor.accidental_group')} className="notation-entry-accidentals">{entryAccidentals.map(value => <button key={value} type="button" aria-pressed={accidental === value} onClick={() => setAccidental(value)}>{accidentalLabels[value]}</button>)}</div>
+      <div className="notation-entry-octave"><button type="button" aria-label={t('editor.octave_down')} disabled={octave <= octaveRange.min} onClick={() => chooseOctave(octave - 1)}>−</button><span data-testid="entry-octave">{t('editor.octave_n', { octave })}</span><button type="button" aria-label={t('editor.octave_up')} disabled={octave >= octaveRange.max} onClick={() => chooseOctave(octave + 1)}>+</button></div>
     </fieldset>
-    <div ref={staffBox} className="notation-entry-staff" role="group" aria-label="Pitch entry staff" aria-disabled={disabled} aria-activedescendant={stepId(cursor)} tabIndex={0} aria-keyshortcuts="A B C D E F G" onKeyDown={keys}>
+    <div ref={staffBox} className="notation-entry-staff" role="group" aria-label={t('editor.pitch_entry_staff')} aria-disabled={disabled} aria-activedescendant={stepId(cursor)} tabIndex={0} aria-keyshortcuts="A B C D E F G" onKeyDown={keys}>
       <svg viewBox={`0 0 ${staffWidth} ${stepY(lowestStep) + top}`} width={staffWidth} data-clef={clef} data-key-signature={keySignature}>
         <text x={6} y={stepY(2) + 4} className="notation-entry-clef" aria-hidden="true">{clefLetter[clef] ?? ''}</text>
         {steps.filter(step => step % 2 === 0).map(step => <line key={`line/${step}`} x1={left} x2={staffWidth - 4} y1={stepY(step)} y2={stepY(step)} className={step >= 0 && step <= 8 ? 'notation-entry-line' : 'notation-entry-ledger'}/>)}
@@ -91,6 +93,6 @@ export function NotationEntryPanel({ score, target, busy, locked = false, onEdit
         })}
       </svg>
     </div>
-    <p className="muted" role="status">{block ?? (status || 'Click a line or space, or press A to G. Up and Down move the cursor and Enter writes there. # and - choose sharp and flat, N natural, K the key signature, Page Up and Page Down the octave.')}</p>
+    <p className="muted" role="status">{block ?? (status || t('editor.notation_entry_instructions'))}</p>
   </details>;
 }

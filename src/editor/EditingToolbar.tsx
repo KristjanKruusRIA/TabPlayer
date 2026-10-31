@@ -1,3 +1,4 @@
+import { useI18n } from '../i18n';
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { model } from '@coderline/alphatab';
 import type { BeatTarget, EditCommand } from '../project';
@@ -98,6 +99,7 @@ export function EditingToolbar({
   onDotsChange,
   onEdit,
 }: {
+
   score: model.Score;
   target: BeatTarget;
   string: number;
@@ -111,6 +113,7 @@ export function EditingToolbar({
   onDotsChange: (dots: number) => void;
   onEdit: (edit: EditCommand) => void;
 }) {
+  const { t } = useI18n();
   const toolbarRef = useRef<HTMLDivElement>(null);
   const [focusIdx, setFocusIdx] = useState(0);
   const { staff, beat } = describeSelection(score, target);
@@ -253,11 +256,11 @@ export function EditingToolbar({
     <div
       ref={toolbarRef}
       role="toolbar"
-      aria-label="Editing toolbar"
+      aria-label={t('toolbar.editing_toolbar')}
       className="tp-editing-toolbar"
       onKeyDown={onToolbarKeyDown}
     >
-      <div className="tp-toolbar-group" role="group" aria-label="Durations">
+      <div className="tp-toolbar-group" role="group" aria-label={t('toolbar.durations')}>
         {DURATIONS.map(([d, label, short, flags, filled, stem]) =>
           glyphButton({
             key: `dur-${d}`,
@@ -277,10 +280,10 @@ export function EditingToolbar({
         )}
       </div>
 
-      <div className="tp-toolbar-group" role="group" aria-label="Dots, rest and tie">
+      <div className="tp-toolbar-group" role="group" aria-label={t('toolbar.dots_rest_tie')}>
         {glyphButton({
           key: 'dot-1',
-          label: 'Dotted',
+          label: t('toolbar.dotted'),
           pressed: activeDots === 1,
           disabled: editDisabled,
           badge: '·',
@@ -295,7 +298,7 @@ export function EditingToolbar({
         })}
         {glyphButton({
           key: 'dot-2',
-          label: 'Double dotted',
+          label: t('toolbar.double_dotted'),
           pressed: activeDots === 2,
           disabled: editDisabled,
           badge: '··',
@@ -310,7 +313,7 @@ export function EditingToolbar({
         })}
         {glyphButton({
           key: 'rest',
-          label: 'Toggle rest',
+          label: t('toolbar.toggle_rest'),
           pressed: Boolean(beat?.isRest),
           disabled: editDisabled || !beat || (Boolean(beat?.isRest) && !stringed),
           badge: 'R',
@@ -328,7 +331,7 @@ export function EditingToolbar({
         })}
         {glyphButton({
           key: 'tie',
-          label: 'Toggle tie',
+          label: t('toolbar.toggle_tie'),
           pressed: Boolean(note?.isTieOrigin || note?.isTieDestination),
           disabled: editDisabled || !note || (!note.isTieOrigin && !note.isTieDestination && !canTie),
           badge: 'Tie',
@@ -337,10 +340,10 @@ export function EditingToolbar({
         })}
       </div>
 
-      <div className="tp-toolbar-group" role="group" aria-label="Common techniques">
+      <div className="tp-toolbar-group" role="group" aria-label={t('toolbar.common_techniques')}>
         {glyphButton({
           key: 'hp',
-          label: 'Toggle hammer/pull',
+          label: t('toolbar.toggle_hp'),
           pressed: Boolean(note?.isHammerPullOrigin || note?.isHammerPullDestination),
           disabled:
             editDisabled ||
@@ -359,7 +362,7 @@ export function EditingToolbar({
         })}
         {glyphButton({
           key: 'slide',
-          label: 'Toggle slide',
+          label: t('toolbar.toggle_slide'),
           pressed: hasSlide,
           disabled: editDisabled || !note || !stringed || (!hasSlide && !destination),
           badge: 'Sl',
@@ -377,7 +380,7 @@ export function EditingToolbar({
         })}
         {glyphButton({
           key: 'bend',
-          label: 'Toggle bend',
+          label: t('toolbar.toggle_bend'),
           pressed: (note?.bendType ?? 0) !== 0,
           disabled: editDisabled || !note || !stringed,
           badge: 'B',
@@ -412,7 +415,7 @@ export function EditingToolbar({
         })}
         {glyphButton({
           key: 'vibrato',
-          label: 'Toggle vibrato',
+          label: t('toolbar.toggle_vibrato'),
           pressed: (note?.vibrato ?? 0) !== 0,
           disabled: editDisabled || !note || staff.isPercussion,
           badge: 'Vib',
@@ -435,7 +438,7 @@ export function EditingToolbar({
         })}
         {glyphButton({
           key: 'pm',
-          label: 'Toggle palm mute',
+          label: t('toolbar.toggle_pm'),
           pressed: Boolean(note?.isPalmMute),
           disabled: editDisabled || !note || !stringed,
           badge: 'PM',
@@ -449,7 +452,7 @@ export function EditingToolbar({
         })}
         {glyphButton({
           key: 'lr',
-          label: 'Toggle let ring',
+          label: t('toolbar.toggle_lr'),
           pressed: Boolean(note?.isLetRing),
           disabled: editDisabled || !note || !stringed,
           badge: 'LR',
@@ -464,7 +467,7 @@ export function EditingToolbar({
         })}
         {glyphButton({
           key: 'dead',
-          label: 'Toggle dead note',
+          label: t('toolbar.toggle_dead'),
           pressed: Boolean(note?.isDead),
           disabled: editDisabled || !note || !stringed,
           badge: '×',
@@ -478,7 +481,7 @@ export function EditingToolbar({
         })}
         {glyphButton({
           key: 'ghost',
-          label: 'Toggle ghost note',
+          label: t('toolbar.toggle_ghost'),
           pressed: Boolean(note?.isGhost),
           disabled: editDisabled || !note,
           badge: '(n)',
@@ -493,7 +496,7 @@ export function EditingToolbar({
         })}
         {glyphButton({
           key: 'staccato',
-          label: 'Toggle staccato',
+          label: t('toolbar.toggle_staccato'),
           pressed: Boolean(note?.isStaccato),
           disabled: editDisabled || !note,
           badge: 'St',
@@ -507,7 +510,7 @@ export function EditingToolbar({
         })}
         {glyphButton({
           key: 'harmonic',
-          label: 'Toggle harmonic',
+          label: t('toolbar.toggle_harmonic'),
           pressed: (note?.harmonicType ?? 0) !== 0,
           disabled: editDisabled || !note || !stringed,
           badge: 'Harm',
@@ -529,7 +532,7 @@ export function EditingToolbar({
         })}
         {glyphButton({
           key: 'accent',
-          label: 'Toggle accent',
+          label: t('toolbar.toggle_accent'),
           pressed: (note?.accentuated ?? 0) !== 0,
           disabled: editDisabled || !note,
           badge: '>',

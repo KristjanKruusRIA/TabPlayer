@@ -1,3 +1,4 @@
+import { useI18n } from '../i18n';
 import { useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
 import type { model } from '@coderline/alphatab';
 import type { NativePlaybackController } from '../audio/NativePlaybackController';
@@ -62,6 +63,7 @@ export interface MixerViewProps {
  * current sound, session focus for the selected track, and the master output. A fader, pan or focus drag is heard as it
  * moves; each gesture is saved as one undoable `setTrackMix` through the player, matching the dock mixer. */
 export function MixerView({score,sounds,selected,busy,onSelect,player}:MixerViewProps):React.JSX.Element {
+  const {t}=useI18n();
   const state=useSyncExternalStore(player?.subscribe??noSubscribe,player?.getState??noState);
   const live=useLivePreview(),focusFrom=useRef<number|null>(null);
   // Focus belongs to the selected track (by identity): selecting another track moves it there.
@@ -98,23 +100,23 @@ export function MixerView({score,sounds,selected,busy,onSelect,player}:MixerView
   const kitTrack=score.tracks[selected]?.isPercussion&&player?.setDrumElement?score.tracks[selected]:null;
   const kit=kitTrack?player?.mix(kitTrack)?.drumKit:undefined;
 
-  return <section className="mixer-view" aria-label="Mixer">
-    <section className="mixer-focus" aria-label="Focus">
+  return <section className="mixer-view" aria-label={t('mixer.title')}>
+    <section className="mixer-focus" aria-label={t('mixer.focus')}>
       <div className="mixer-focus-head">
-        <span className="mixer-focus-title">Focus</span>
-        <span className="mixer-badge">Not saved</span>
+        <span className="mixer-focus-title">{t('mixer.focus')}</span>
+        <span className="mixer-badge">{t('mixer.not_saved')}</span>
       </div>
       <Knob
         className="mixer-focus-knob"
-        label="Selected track"
-        ariaLabel="Focus selected track"
+        label={t('mixer.selected_track')}
+        ariaLabel={t('mixer.focus_selected_track')}
         bipolar
         min={-100}
         max={100}
         step={5}
         defaultValue={0}
         value={Math.round(amount*100)}
-        format={v=>v>0?`Focus ${Math.round(v)}%`:v<0?`Unfocus ${Math.round(-v)}%`:'Off'}
+        format={v=>v>0?t('mixer.focus_pct',{pct:Math.round(v)}):v<0?t('mixer.unfocus_pct',{pct:Math.round(-v)}):t('mixer.focus_off')}
         disabled={busy||focusOff}
         onInput={v=>{
           if(!selectedId)return;
@@ -125,8 +127,8 @@ export function MixerView({score,sounds,selected,busy,onSelect,player}:MixerView
         onCommit={v=>changeFocus(v/100)}
         onInputEnd={committed=>{focusFrom.current=null;void live.end({keep:committed});}}
       />
-      <button type="button" {...busyGuard({busy,unavailable:focusOff||amount===0,className:'mixer-button',onClick:()=>{void changeFocus(0);}})}>Reset focus</button>
-      {silent&&<p className="mixer-focus-note">The selected track is silent, so focusing it lowers everything you hear.</p>}
+      <button type="button" {...busyGuard({busy,unavailable:focusOff||amount===0,className:'mixer-button',onClick:()=>{void changeFocus(0);}})}>{t('mixer.reset_focus')}</button>
+      {silent&&<p className="mixer-focus-note">{t('mixer.focus_silent_note')}</p>}
     </section>
     <div className="mixer-strips">
       {score.tracks.map((track,position)=>{
@@ -135,33 +137,33 @@ export function MixerView({score,sounds,selected,busy,onSelect,player}:MixerView
         const isSelected=track.index===selected,off=busy||!player;
         const volumeControl=mixControl(track.index,gain=>({gain}),value=>player?.setTrackVolume(track.index,value));
         const panControl=mixControl(track.index,value=>({pan:value}),value=>player?.setPan(track.index,value));
-        return <section className={`mixer-strip${isSelected?' selected':''}`} data-selected={isSelected||undefined} key={ids[position]} aria-label={`Channel ${track.index+1}: ${track.name}`}>
+        return <section className={`mixer-strip${isSelected?' selected':''}`} data-selected={isSelected||undefined} key={ids[position]} aria-label={t('mixer.channel_track',{number:track.index+1,name:track.name})}>
           <div className="mixer-strip-head">
-            <button type="button" title={track.name} aria-label={`Track ${track.index+1}: ${track.name}`} aria-pressed={isSelected} {...busyGuard({busy,className:'mixer-strip-select',onClick:()=>onSelect(track.index)})}>
+            <button type="button" title={track.name} aria-label={t('mixer.track_number_name',{number:track.index+1,name:track.name})} aria-pressed={isSelected} {...busyGuard({busy,className:'mixer-strip-select',onClick:()=>onSelect(track.index)})}>
               <span className="track-color-swatch" aria-hidden="true" style={{backgroundColor:trackColorHex(track.color)}}/>
-              <span className="mixer-strip-name">{track.index+1}. {track.name||`Track ${track.index+1}`}</span>
+              <span className="mixer-strip-name">{track.index+1}. {track.name||t('mixer.track_number',{number:track.index+1})}</span>
             </button>
             {/* The slot is always there, so selecting a track moves nothing. */}
-            <span className="mixer-strip-status" data-on={isSelected||undefined}>{isSelected?'Selected':''}</span>
+            <span className="mixer-strip-status" data-on={isSelected||undefined}>{isSelected?t('mixer.selected'):''}</span>
           </div>
-          <div className="mixer-strip-sound" role="group" aria-label={`Sound ${track.name}`}>
+          <div className="mixer-strip-sound" role="group" aria-label={t('mixer.sound_track',{name:track.name})}>
             <span className="mixer-strip-voice" title={sound.voice}>{sound.voice}</span>
             <span className="mixer-strip-preset" title={sound.tone}>{sound.tone}</span>
           </div>
           <div className="mixer-strip-switches">
             <label className="mixer-switch" data-kind="mute" data-active={mute||undefined} data-disabled={off||undefined}>
               <input type="checkbox" checked={mute} aria-disabled={off||undefined} onChange={e=>{if(!off)void player?.setMute(track.index,e.target.checked);}}/>
-              <span>Mute</span>
+              <span>{t('mixer.mute')}</span>
             </label>
             <label className="mixer-switch" data-kind="solo" data-active={solo||undefined} data-disabled={off||undefined}>
               <input type="checkbox" checked={solo} aria-disabled={off||undefined} onChange={e=>{if(!off)void player?.setSolo(track.index,e.target.checked);}}/>
-              <span>Solo</span>
+              <span>{t('mixer.solo')}</span>
             </label>
           </div>
           <Knob
             className="mixer-strip-pan"
-            label="Pan"
-            ariaLabel={`Pan ${track.name}`}
+            label={t('mixer.pan')}
+            ariaLabel={t('mixer.pan_track',{name:track.name})}
             bipolar
             min={-1}
             max={1}
@@ -175,8 +177,8 @@ export function MixerView({score,sounds,selected,busy,onSelect,player}:MixerView
           <div className="mixer-strip-fader-well">
             <Fader
               className="mixer-strip-fader"
-              label="Volume"
-              ariaLabel={`Volume ${track.name}`}
+              label={t('mixer.volume')}
+              ariaLabel={t('mixer.volume_track',{name:track.name})}
               min={0}
               max={1}
               step={0.05}

@@ -1,17 +1,19 @@
+import { useI18n } from '../i18n';
 import { useEffect, useRef, useState } from 'react';
 import type { model } from '@coderline/alphatab';
 import { busyGuard } from '../ui/useBusyGuard';
 import { getNoteAudio, hasPitchEvents, isPlainNoteAudio, noteAudioLimits, plainNoteAudio, type NoteAudio } from './note-audio';
 
-const fields = [
-  ['length', 'Sounding length (%)'],
-  ['offset', 'Start offset (ticks, 960 = quarter note)'],
-  ['velocity', 'Velocity change'],
-] as const;
-type Field = typeof fields[number][0];
-
+const fieldKeys = ['length', 'offset', 'velocity'] as const;
+type Field = typeof fieldKeys[number];
 /** How the selected note sounds, apart from how it is written. A value is applied when the field loses focus or Enter is pressed, never while typing. */
 export function NoteAudioControls({ note, score, busy = false, onApply }: { note: model.Note | undefined; score: model.Score; busy?: boolean; onApply: (audio: NoteAudio | null) => void | boolean | Promise<boolean | void> }) {
+  const { t } = useI18n();
+  const fields = [
+    ['length', t('editor.sounding_length_pct')],
+    ['offset', t('editor.start_offset_ticks')],
+    ['velocity', t('editor.velocity_change')],
+  ] as const;
   const current = note ? getNoteAudio(note) ?? plainNoteAudio : plainNoteAudio;
   const [draft, setDraft] = useState<Record<Field, string>>({ length: String(current.length), offset: String(current.offset), velocity: String(current.velocity) });
   const [error, setError] = useState('');
@@ -42,8 +44,8 @@ export function NoteAudioControls({ note, score, busy = false, onApply }: { note
     const next = { ...base, [field]: value };
     send(isPlainNoteAudio(next) ? null : next, next);
   };
-  return <div className="note-audio" role="group" aria-label="Note audio">
-    <h3>Note audio</h3>
+  return <div className="note-audio" role="group" aria-label={t('editor.note_audio')}>
+    <h3>{t('editor.note_audio')}</h3>
     {tied && <p className="muted">A tied note continues the note before it. Set its audio on the first note of the tie.</p>}
     {fixed && !tied && <p className="muted">A bent, whammy, sliding or vibrato note keeps its start and length; only its velocity changes.</p>}
     <div className="pair">{fields.map(([name, label]) => <label key={name}>{label}
@@ -51,6 +53,6 @@ export function NoteAudioControls({ note, score, busy = false, onApply }: { note
         aria-disabled={busy || undefined} onChange={event => busy ? undefined : setDraft({ ...draft, [name]: event.target.value })} onBlur={() => commit(name)} onKeyDown={event => { if (event.key === 'Enter') commit(name); }}/>
     </label>)}</div>
     {error && <p role="alert" className="error">{error}</p>}
-    <button type="button" {...busyGuard({ busy, disabled: !note || isPlainNoteAudio(current), onClick: () => send(null, plainNoteAudio) })}>Reset note audio</button>
+    <button type="button" {...busyGuard({ busy, disabled: !note || isPlainNoteAudio(current), onClick: () => send(null, plainNoteAudio) })}>{t('editor.reset_note_audio')}</button>
   </div>;
 }

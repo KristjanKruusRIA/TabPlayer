@@ -4,6 +4,7 @@ import { exportGpInterchange } from '../interchange/gp';
 import { defaultMidiImportOptions,importMidi,midiImportFileName,type MidiImport,type MidiImportOptions,type MidiQuantization,type MidiTrackKind,type MidiTupletMode } from '../interchange/midi-import';
 import { MIDI_FILE_LIMIT,readMidiFile,type MidiSong } from '../interchange/midi-smf';
 import { Dialog } from '../ui/Dialog';
+import { useI18n } from '../i18n';
 import { Segmented } from '../ui/Segmented';
 import { busyGuard,busySelect } from '../ui/useBusyGuard';
 import './midi-import.css';
@@ -32,6 +33,7 @@ const plural=(count:number,word:string)=>`${count} ${word}${count===1?'':'s'}`;
  * read only shows its reason, so the score that is open stays as it was.
  */
 export function MidiImportDialog({busy,onImport,onClose}:{busy:boolean;onImport:(name:string,bytes:Uint8Array)=>Promise<boolean>;onClose:()=>void}) {
+  const { t } = useI18n();
   const [file,setFile]=useState<{name:string;bytes:Uint8Array}|null>(null),[fileProblem,setFileProblem]=useState<string|null>(null),[importProblem,setImportProblem]=useState<string|null>(null),[importing,setImporting]=useState(false);
   const [options,setOptions]=useState<MidiImportOptions>(defaultMidiImportOptions);
   const picker=useRef<HTMLInputElement>(null),reading=useRef(0),hint=useId(),status=useId();
@@ -57,7 +59,7 @@ export function MidiImportDialog({busy,onImport,onClose}:{busy:boolean;onImport:
     if(!chosen)return;
     // A newer choice, even a refused one, supersedes any file still loading.
     const request=++reading.current;setImportProblem(null);
-    if(chosen.size>MIDI_FILE_LIMIT){setFile(null);setFileProblem(`${chosen.name} is larger than 8 MB, so it was not loaded.`);return;}
+    if(chosen.size>MIDI_FILE_LIMIT){setFile(null);setFileProblem(t('midi_import.size_limit', { name: chosen.name }));return;}
     const reader=new FileReader();
     reader.onload=()=>{if(request!==reading.current)return;setFileProblem(null);setFile({name:chosen.name,bytes:new Uint8Array(reader.result as ArrayBuffer)});};
     reader.onerror=()=>{if(request===reading.current){setFile(null);setFileProblem(`${chosen.name} could not be read.`);}};
@@ -68,20 +70,20 @@ export function MidiImportDialog({busy,onImport,onClose}:{busy:boolean;onImport:
     let bytes:Uint8Array;
     try{bytes=exportGpInterchange(imported.score,new Settings());}catch(error){setImportProblem(message(error));return;}
     setImporting(true);setImportProblem(null);
-    try{if(await onImport(midiImportFileName(file.name),bytes))onClose();else setImportProblem('The score was not opened.');}
-    catch(error){setImportProblem(`The score could not be opened: ${message(error)}`);}
+    try{if(await onImport(midiImportFileName(file.name),bytes))onClose();else setImportProblem(t('midi_import.not_opened'));}
+    catch(error){setImportProblem(t('midi_import.open_failed', { error: message(error) }));}
     finally{setImporting(false);}
   };
   const summary=imported?`${imported.summary.format===0?'Format 0':'Format 1'}, ${plural(imported.summary.tracks.length,'part')}, ${plural(imported.summary.measures,'measure')} at ${imported.summary.tempo} BPM.`:'';
   const actions=<>
-    <button type="submit" {...busyGuard({busy:busy||importing,unavailable:!imported,className:'tp-button primary'})}>Import</button>
-    <button type="button" {...busyGuard({busy:importing,className:'tp-button',onClick:onClose})}>Cancel</button>
+    <button type="submit" {...busyGuard({busy:busy||importing,unavailable:!imported,className:'tp-button primary'})}>{t('midi_import.import_btn')}</button>
+    <button type="button" {...busyGuard({busy:importing,className:'tp-button',onClick:onClose})}>{t('dialog.cancel')}</button>
   </>;
-  return <Dialog title="Import MIDI" onClose={onClose} ariaDescribedBy={hint} busy={importing} closeDisabled={importing} dismissOnBackdrop className="ascii-import midi-import" onSubmit={event=>{event.preventDefault();void submit();}} actions={actions}>
+  return <Dialog title={t('midi_import.title')} onClose={onClose} ariaDescribedBy={hint} busy={importing} closeDisabled={importing} dismissOnBackdrop className="ascii-import midi-import" onSubmit={event=>{event.preventDefault();void submit();}} actions={actions}>
     <div className="ascii-import-form">
       <p id={hint} className="muted">Choose a Standard MIDI file (format 0 or 1). Each instrument part becomes a track with its program, tempo and time signatures. The quantization sets the shortest note value, so check the rhythm after importing.</p>
       <input ref={picker} type="file" accept=".mid,.midi,audio/midi,audio/x-midi" hidden aria-label="MIDI file" onChange={event=>{load(event.target.files?.[0]);event.target.value='';}}/>
-      <div className="midi-file"><button type="button" data-autofocus {...busyGuard({busy:importing,onClick:()=>picker.current?.click()})}>Choose MIDI file…</button><span>{file?file.name:'No file chosen'}</span></div>
+      <div className="midi-file"><button type="button" data-autofocus {...busyGuard({busy:importing,onClick:()=>picker.current?.click()})}>{t('midi_import.choose_file')}</button><span>{file?file.name:'No file chosen'}</span></div>
       <fieldset className="midi-options">
         <div className="tp-field midi-full-row">
           <span className="tp-field-label" aria-hidden="true">Quantization</span>

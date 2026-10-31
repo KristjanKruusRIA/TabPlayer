@@ -1,3 +1,4 @@
+import { useI18n } from '../i18n';
 import { useEffect, useRef, useState } from 'react';
 import { defaultMaster, masterIsNeutral } from '../document-settings';
 import { busyGuard } from '../ui';
@@ -37,6 +38,7 @@ function Slider({ label, value, min, max, step, format, disabled, commit }: {
 export function MasterPanel({ master, disabled, onChange }: {
   master: MasterSettings | undefined; disabled: boolean; onChange: Commit;
 }): React.JSX.Element {
+  const { t } = useI18n();
   const current = master ?? defaultMaster();
   const neutral = masterIsNeutral(master);
   // A change is built on the master as it stands now, not as it was drawn: a second control touched while the first
@@ -66,47 +68,47 @@ export function MasterPanel({ master, disabled, onChange }: {
   const block = <K extends 'compressor' | 'eq' | 'reverb' | 'limiter'>(name: K, patch: Partial<MasterSettings[K]>) =>
     change({ [name]: { ...latest.current[name], ...patch } } as Partial<MasterSettings>);
   const on = (name: 'compressor' | 'eq' | 'reverb' | 'limiter', title: string) =>
-    <label className="master-switch"><input type="checkbox" checked={current[name].enabled} aria-disabled={disabled || undefined} onChange={event => { if (!disabled) void block(name, { enabled: event.target.checked } as never); }} />{title} on</label>;
+    <label className="master-switch"><input type="checkbox" checked={current[name].enabled} aria-disabled={disabled || undefined} onChange={event => { if (!disabled) void block(name, { enabled: event.target.checked } as never); }} />{t('audio.effect_on', { title })}</label>;
   const db = (value: number) => `${signed(value, 1)} dB`;
   const plain = (value: number) => value.toFixed(2);
-  const balance = (value: number) => value === 0 ? 'Centre' : `${value < 0 ? 'Left' : 'Right'} ${Math.round(Math.abs(value) * 100)}%`;
-  return <section className="track-channel track-master" aria-label="Master">
-    <div className="track-channel-heading"><span>Master</span><span className="track-channel-status">{neutral ? 'Untouched' : 'Changed'}</span></div>
-    <Slider label="Master level" value={current.gainDb} min={-24} max={12} step={.5} format={db} disabled={disabled} commit={value => change({ gainDb: value })} />
-    <Slider label="Master balance" value={current.balance} min={-1} max={1} step={.05} format={balance} disabled={disabled} commit={value => change({ balance: value })} />
+  const balance = (value: number) => value === 0 ? t('audio.balance_centre') : value < 0 ? t('audio.balance_left', { pct: Math.round(Math.abs(value) * 100) }) : t('audio.balance_right', { pct: Math.round(Math.abs(value) * 100) });
+  return <section className="track-channel track-master" aria-label={t('audio.master')}>
+    <div className="track-channel-heading"><span>{t('audio.master')}</span><span className="track-channel-status">{neutral ? t('audio.untouched') : t('audio.changed')}</span></div>
+    <Slider label={t('audio.master_level')} value={current.gainDb} min={-24} max={12} step={.5} format={db} disabled={disabled} commit={value => change({ gainDb: value })} />
+    <Slider label={t('audio.master_balance')} value={current.balance} min={-1} max={1} step={.05} format={balance} disabled={disabled} commit={value => change({ balance: value })} />
     <details>
-      <summary>Compressor{current.compressor.enabled ? ' (on)' : ''}</summary>
-      {on('compressor', 'Compressor')}
-      <Slider label="Master compressor threshold" value={current.compressor.thresholdDb} min={-60} max={0} step={1} format={db} disabled={disabled} commit={value => block('compressor', { thresholdDb: value })} />
-      <Slider label="Master compressor ratio" value={current.compressor.ratio} min={1} max={20} step={.1} format={value => `${value.toFixed(1)}:1`} disabled={disabled} commit={value => block('compressor', { ratio: value })} />
-      <Slider label="Master compressor attack" value={current.compressor.attackMs} min={.1} max={200} step={.1} format={value => `${value.toFixed(1)} ms`} disabled={disabled} commit={value => block('compressor', { attackMs: value })} />
-      <Slider label="Master compressor release" value={current.compressor.releaseMs} min={1} max={2000} step={1} format={value => `${value.toFixed(0)} ms`} disabled={disabled} commit={value => block('compressor', { releaseMs: value })} />
-      <Slider label="Master compressor makeup" value={current.compressor.makeupDb} min={0} max={24} step={.1} format={db} disabled={disabled} commit={value => block('compressor', { makeupDb: value })} />
+      <summary>{t('audio.compressor')}{current.compressor.enabled ? t('audio.effect_on_suffix') : ''}</summary>
+      {on('compressor', t('audio.compressor'))}
+      <Slider label={t('audio.master_comp_threshold')} value={current.compressor.thresholdDb} min={-60} max={0} step={1} format={db} disabled={disabled} commit={value => block('compressor', { thresholdDb: value })} />
+      <Slider label={t('audio.master_comp_ratio')} value={current.compressor.ratio} min={1} max={20} step={.1} format={value => `${value.toFixed(1)}:1`} disabled={disabled} commit={value => block('compressor', { ratio: value })} />
+      <Slider label={t('audio.master_comp_attack')} value={current.compressor.attackMs} min={.1} max={200} step={.1} format={value => `${value.toFixed(1)} ms`} disabled={disabled} commit={value => block('compressor', { attackMs: value })} />
+      <Slider label={t('audio.master_comp_release')} value={current.compressor.releaseMs} min={1} max={2000} step={1} format={value => `${value.toFixed(0)} ms`} disabled={disabled} commit={value => block('compressor', { releaseMs: value })} />
+      <Slider label={t('audio.master_comp_makeup')} value={current.compressor.makeupDb} min={0} max={24} step={.1} format={db} disabled={disabled} commit={value => block('compressor', { makeupDb: value })} />
     </details>
     <details>
-      <summary>EQ{current.eq.enabled ? ' (on)' : ''}</summary>
-      {on('eq', 'EQ')}
-      <Slider label="Master EQ low" value={current.eq.lowDb} min={-24} max={24} step={.5} format={db} disabled={disabled} commit={value => block('eq', { lowDb: value })} />
-      <Slider label="Master EQ mid" value={current.eq.midDb} min={-24} max={24} step={.5} format={db} disabled={disabled} commit={value => block('eq', { midDb: value })} />
-      <Slider label="Master EQ mid frequency" value={current.eq.midHz} min={200} max={5000} step={50} format={value => `${value.toFixed(0)} Hz`} disabled={disabled} commit={value => block('eq', { midHz: value })} />
-      <Slider label="Master EQ high" value={current.eq.highDb} min={-24} max={24} step={.5} format={db} disabled={disabled} commit={value => block('eq', { highDb: value })} />
+      <summary>{t('audio.eq')}{current.eq.enabled ? t('audio.effect_on_suffix') : ''}</summary>
+      {on('eq', t('audio.eq'))}
+      <Slider label={t('audio.master_eq_low')} value={current.eq.lowDb} min={-24} max={24} step={.5} format={db} disabled={disabled} commit={value => block('eq', { lowDb: value })} />
+      <Slider label={t('audio.master_eq_mid')} value={current.eq.midDb} min={-24} max={24} step={.5} format={db} disabled={disabled} commit={value => block('eq', { midDb: value })} />
+      <Slider label={t('audio.master_eq_mid_freq')} value={current.eq.midHz} min={200} max={5000} step={50} format={value => `${value.toFixed(0)} Hz`} disabled={disabled} commit={value => block('eq', { midHz: value })} />
+      <Slider label={t('audio.master_eq_high')} value={current.eq.highDb} min={-24} max={24} step={.5} format={db} disabled={disabled} commit={value => block('eq', { highDb: value })} />
     </details>
     <details>
-      <summary>Reverb{current.reverb.enabled ? ' (on)' : ''}</summary>
-      {on('reverb', 'Reverb')}
-      <label className="master-select">Master reverb model<select aria-label="Master reverb model" value={current.reverb.model} aria-disabled={disabled || undefined} onChange={event => { if (!disabled) void block('reverb', { model: event.target.value as MasterSettings['reverb']['model'] }); }}>
-        <option value="room">Room</option><option value="hall">Hall</option><option value="plate">Plate</option><option value="spring">Spring</option>
+      <summary>{t('audio.reverb')}{current.reverb.enabled ? t('audio.effect_on_suffix') : ''}</summary>
+      {on('reverb', t('audio.reverb'))}
+      <label className="master-select">{t('audio.master_reverb_model')}<select aria-label={t('audio.master_reverb_model')} value={current.reverb.model} aria-disabled={disabled || undefined} onChange={event => { if (!disabled) void block('reverb', { model: event.target.value as MasterSettings['reverb']['model'] }); }}>
+        <option value="room">{t('audio.reverb_room')}</option><option value="hall">{t('audio.reverb_hall')}</option><option value="plate">{t('audio.reverb_plate')}</option><option value="spring">{t('audio.reverb_spring')}</option>
       </select></label>
-      <Slider label="Master reverb send" value={current.reverb.mix} min={0} max={1} step={.01} format={plain} disabled={disabled} commit={value => block('reverb', { mix: value })} />
-      <Slider label="Master reverb room" value={current.reverb.room} min={0} max={1} step={.01} format={plain} disabled={disabled} commit={value => block('reverb', { room: value })} />
-      <Slider label="Master reverb damping" value={current.reverb.damping} min={0} max={1} step={.01} format={plain} disabled={disabled} commit={value => block('reverb', { damping: value })} />
+      <Slider label={t('audio.master_reverb_send')} value={current.reverb.mix} min={0} max={1} step={.01} format={plain} disabled={disabled} commit={value => block('reverb', { mix: value })} />
+      <Slider label={t('audio.master_reverb_room')} value={current.reverb.room} min={0} max={1} step={.01} format={plain} disabled={disabled} commit={value => block('reverb', { room: value })} />
+      <Slider label={t('audio.master_reverb_damping')} value={current.reverb.damping} min={0} max={1} step={.01} format={plain} disabled={disabled} commit={value => block('reverb', { damping: value })} />
     </details>
     <details>
-      <summary>Limiter{current.limiter.enabled ? ' (on)' : ''}</summary>
-      {on('limiter', 'Limiter')}
-      <Slider label="Master limiter ceiling" value={current.limiter.ceilingDb} min={-12} max={0} step={.5} format={db} disabled={disabled} commit={value => block('limiter', { ceilingDb: value })} />
-      <Slider label="Master limiter release" value={current.limiter.releaseMs} min={10} max={1000} step={10} format={value => `${value.toFixed(0)} ms`} disabled={disabled} commit={value => block('limiter', { releaseMs: value })} />
+      <summary>{t('audio.limiter')}{current.limiter.enabled ? t('audio.effect_on_suffix') : ''}</summary>
+      {on('limiter', t('audio.limiter'))}
+      <Slider label={t('audio.master_limiter_ceiling')} value={current.limiter.ceilingDb} min={-12} max={0} step={.5} format={db} disabled={disabled} commit={value => block('limiter', { ceilingDb: value })} />
+      <Slider label={t('audio.master_limiter_release')} value={current.limiter.releaseMs} min={10} max={1000} step={10} format={value => `${value.toFixed(0)} ms`} disabled={disabled} commit={value => block('limiter', { releaseMs: value })} />
     </details>
-    <button type="button" {...busyGuard({ busy: disabled, unavailable: !master || JSON.stringify(master) === JSON.stringify(defaultMaster()), onClick: () => { void send(defaultMaster()); } })}>Reset master</button>
+    <button type="button" {...busyGuard({ busy: disabled, unavailable: !master || JSON.stringify(master) === JSON.stringify(defaultMaster()), onClick: () => { void send(defaultMaster()); } })}>{t('audio.reset_master')}</button>
   </section>;
 }

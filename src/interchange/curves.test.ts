@@ -4,6 +4,9 @@ import { exporter,importer,model,Settings } from '@coderline/alphatab';
 import { strFromU8,strToU8,unzipSync,zipSync } from 'fflate';
 import { music } from '../editor/fixtures';
 import { exportGpInterchange,loadInterchangeScore } from './gp';
+import { writeStylesheetTimeSignatures } from './stylesheet';
+import { scoreFromJson } from '../model-clone';
+import { buildPlaybackPlan } from '../audio/plan';
 
 const settings=new Settings();
 afterEach(()=>vi.restoreAllMocks());
@@ -121,5 +124,169 @@ describe('GP curves and slurs',()=>{
   it('ignores an item that refers to music the file no longer holds',()=>{
     const warn=warnings(),loaded=loadInterchangeScore(edit(exportGpInterchange(authored(),settings),xml=>xml.replaceAll('<Bend bar="0"','<Bend bar="40"')),settings);
     expect(beatsOf(loaded,0)[1].notes[0].hasBend).toBe(false);expect(warn).toHaveBeenCalled();
+  });
+});
+
+/** Editing the GPIF as a document, so a hostile file can be forged with every id and note it must agree with. */
+function editDoc(bytes:Uint8Array,change:(doc:Document)=>void) {
+  return edit(bytes,xml=>{const doc=new DOMParser().parseFromString(xml,'application/xml');change(doc);return new XMLSerializer().serializeToString(doc);});
+}
+const listOf=(node:Element|undefined,name:string)=>(node?.querySelector(`:scope > ${name}`)?.textContent??'').trim().split(/\s+/);
+const nodeById=(doc:Document,path:string,id:string)=>[...doc.querySelectorAll(path)].find(item=>item.getAttribute('id')===id);
+function idAt(doc:Document,bar:number,voice:number,beat:number,note:number) {
+  const barId=listOf(doc.querySelectorAll('GPIF > MasterBars > MasterBar')[bar],'Bars')[0],voiceId=listOf(nodeById(doc,'GPIF > Bars > Bar',barId),'Voices')[voice];
+  const beatId=listOf(nodeById(doc,'GPIF > Voices > Voice',voiceId),'Beats')[beat];
+  return listOf(nodeById(doc,'GPIF > Beats > Beat',beatId),'Notes')[note];
+}
+const sidecar=(doc:Document,name:string)=>[...doc.querySelectorAll(`Property[name="TabPlayerCurves"] > Items > ${name}`)];
+type Place=[number,number,number,number];
+/** Points a slur item at two notes of the authored model, ids and frets included, so only the rule can refuse it. */
+function aim(doc:Document,item:Element,score:model.Score,from:Place,to:Place) {
+  const note=(place:Place)=>score.tracks[0].staves[0].bars[place[0]].voices[place[1]].beats[place[2]].notes[place[3]];
+  for(const [prefix,place] of [['',from],['to',to]] as const){
+    for(const [name,value] of [['bar',place[0]],['voice',place[1]],['beat',place[2]],['note',place[3]]] as const)item.setAttribute(prefix+name,String(value));
+    item.setAttribute(prefix?'toId':'id',idAt(doc,...place));
+    item.setAttribute(prefix?'toStr':'string',String(note(place).string));item.setAttribute(prefix?'toFret':'fret',String(note(place).fret));
+  }
+}
+function twoVoices() {
+  const score=music(),staff=score.tracks[0].staves[0],second=new model.Voice();
+  for(let index=0;index<4;index++){const beat=new model.Beat();beat.duration=4;beat.isEmpty=false;const note=new model.Note();note.string=3;note.fret=2;beat.addNote(note);second.addBeat(beat);}
+  staff.bars[0].addVoice(second);
+  for(const bar of staff.bars.slice(1)){const quiet=new model.Voice(),beat=new model.Beat();beat.duration=4;beat.isEmpty=true;quiet.addBeat(beat);bar.addVoice(quiet);}
+  link(staff.bars[0].voices[0].beats[0].notes[0],staff.bars[0].voices[0].beats[2].notes[0]);score.finish(settings);return score;
+}
+const allNotes=(score:model.Score)=>score.tracks.flatMap(track=>track.staves.flatMap(staff=>staff.bars.flatMap(bar=>bar.voices.flatMap(voice=>voice.beats.flatMap(beat=>beat.notes)))));
+/** What the engine and the playback plan do with a freshly loaded score, which a hostile slur or curve used to break. */
+function usable(score:model.Score) {
+  expect(()=>scoreFromJson(model.JsonConverter.scoreToJson(score),settings)).not.toThrow();
+  expect(()=>buildPlaybackPlan(score,1)).not.toThrow();
+}
+
+describe('hostile slurs',()=>{
+  const cases:[string,Place,Place][]=[
+    ['a backward slur in one voice',[0,0,2,0],[0,0,0,0]],
+    ['a slur across voices',[0,0,1,0],[0,1,2,0]],
+    ['a slur to its own note',[0,0,1,0],[0,0,1,0]],
+    ['a slur on the same beat of another voice',[0,0,3,0],[0,1,3,0]],
+    ['a slur back into an earlier bar',[1,0,0,0],[0,0,3,0]],
+  ];
+  it.each(cases)('keeps %s out of the score',(name,from,to)=>{
+    const score=twoVoices();
+    // The forged slur sits beside the genuine one from beat 0 to beat 2, so the pair closes a cycle where the forged one runs back.
+    const bytes=editDoc(exportGpInterchange(score,settings),doc=>{
+      const [valid]=sidecar(doc,'Slur'),copy=valid.cloneNode(true) as Element;aim(doc,copy,score,from,to);valid.parentNode!.append(copy);
+    });
+    const warn=warnings(),loaded=loadInterchangeScore(bytes,settings),linked=allNotes(loaded).filter(note=>note.slurDestination);
+    expect(linked).toHaveLength(1);expect(linked[0].beat.index).toBe(0);expect(linked[0].slurDestination?.beat.index).toBe(2);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('slur'));
+    usable(loaded);
+  });
+  it('keeps a backward slur that would close a cycle out of the score',()=>{
+    const score=twoVoices(),warn=warnings();
+    const bytes=editDoc(exportGpInterchange(score,settings),doc=>{
+      const [valid]=sidecar(doc,'Slur'),copy=valid.cloneNode(true) as Element;aim(doc,copy,score,[0,0,2,0],[0,0,0,0]);valid.parentNode!.append(copy);
+    });
+    const loaded=loadInterchangeScore(bytes,settings),first=beatsOf(loaded,0)[0].notes[0],third=beatsOf(loaded,0)[2].notes[0];
+    expect(first.slurDestination).toBe(third);expect(third.slurDestination).toBeNull();expect(first.slurOrigin).toBeNull();expect(warn).toHaveBeenCalled();usable(loaded);
+  });
+});
+
+describe('stale curves and slurs',()=>{
+  const bendNote=(score:model.Score)=>beatsOf(score,0)[1].notes[0];
+  it('does not apply a long curve to a note whose fret was changed',()=>{
+    const score=authored(),warn=warnings();
+    const bytes=editDoc(exportGpInterchange(score,settings),doc=>{
+      nodeById(doc,'GPIF > Notes > Note',String(bendNote(score).id))!.querySelector('Property[name="Fret"] > Fret')!.textContent='9';
+    });
+    const loaded=loadInterchangeScore(bytes,settings);
+    expect(bendNote(loaded).fret).toBe(9);expect(bendNote(loaded).hasBend).toBe(false);expect(warn).toHaveBeenCalled();usable(loaded);
+  });
+  it('does not apply curves or slurs after two beats were swapped',()=>{
+    const score=authored(),warn=warnings();
+    const bytes=editDoc(exportGpInterchange(score,settings),doc=>{
+      const bar=nodeById(doc,'GPIF > Bars > Bar',listOf(doc.querySelectorAll('GPIF > MasterBars > MasterBar')[0],'Bars')[0])!;
+      const voice=nodeById(doc,'GPIF > Voices > Voice',listOf(bar,'Voices')[0])!,ids=listOf(voice,'Beats');
+      [ids[0],ids[1]]=[ids[1],ids[0]];voice.querySelector(':scope > Beats')!.textContent=ids.join(' ');
+    });
+    const loaded=loadInterchangeScore(bytes,settings);
+    expect(allNotes(loaded).some(note=>note.bendPoints?.length===6)).toBe(false);
+    expect(beatsOf(loaded,0)[0].notes[0].slurDestination).toBeNull();expect(warn).toHaveBeenCalled();usable(loaded);
+  });
+  it('does not apply anything after a bar was inserted before the music',()=>{
+    const score=authored(),warn=warnings();
+    const bytes=editDoc(exportGpInterchange(score,settings),doc=>{
+      const masters=doc.querySelectorAll('GPIF > MasterBars > MasterBar'),barId=listOf(masters[3],'Bars')[0];
+      const bar=nodeById(doc,'GPIF > Bars > Bar',barId)!,voice=nodeById(doc,'GPIF > Voices > Voice',listOf(bar,'Voices')[0])!,beat=nodeById(doc,'GPIF > Beats > Beat',listOf(voice,'Beats')[0])!,note=nodeById(doc,'GPIF > Notes > Note',listOf(beat,'Notes')[0])!;
+      const copies=[bar,voice,beat,note].map(node=>{const copy=node.cloneNode(true) as Element;copy.setAttribute('id','9000');node.after(copy);return copy;});
+      copies[0].querySelector(':scope > Voices')!.textContent='9000';copies[1].querySelector(':scope > Beats')!.textContent='9000';copies[2].querySelector(':scope > Notes')!.textContent='9000';
+      const master=masters[0].cloneNode(true) as Element;master.querySelector(':scope > Bars')!.textContent='9000';masters[0].before(master);
+    });
+    const loaded=loadInterchangeScore(bytes,settings);
+    expect(loaded.tracks[0].staves[0].bars).toHaveLength(5);
+    expect(allNotes(loaded).some(note=>note.bendPoints?.length===6||note.slurDestination)).toBe(false);
+    expect(loaded.tracks[0].staves[0].bars.some(bar=>bar.voices[0].beats.some(beat=>beat.whammyBarPoints?.length===5))).toBe(false);
+    expect(warn).toHaveBeenCalled();usable(loaded);
+  });
+  it('does not apply a long curve whose recorded id belongs to another note',()=>{
+    const score=authored(),warn=warnings();
+    const bytes=editDoc(exportGpInterchange(score,settings),doc=>{sidecar(doc,'Bend')[0].setAttribute('id',String(beatsOf(score,0)[3].notes[0].id));});
+    expect(bendNote(loadInterchangeScore(bytes,settings)).hasBend).toBe(false);expect(warn).toHaveBeenCalled();
+  });
+});
+
+describe('curve shape and range',()=>{
+  const longBend=(doc:Document)=>sidecar(doc,'Bend').find(item=>item.querySelectorAll('Point').length===6)!;
+  const points=(item:Element)=>item.querySelectorAll('Point');
+  const refuse:[string,(item:Element)=>void][]=[
+    ['a single point',item=>[...points(item)].slice(1).forEach(point=>point.remove())],
+    ['unsorted offsets',item=>points(item)[2].setAttribute('offset','5')],
+    ['an end past 60',item=>points(item)[5].setAttribute('offset','61')],
+    ['a start after 0',item=>points(item)[0].setAttribute('offset','1')],
+    ['a bend release with three points',item=>{item.setAttribute('type',String(model.BendType.BendRelease));points(item)[2].remove();points(item)[2].remove();points(item)[2].remove();}],
+    ['a negative bend value',item=>points(item)[1].setAttribute('value','-1')],
+    ['a value of a million',item=>points(item)[1].setAttribute('value','1000000')],
+    ['a value of 1e300',item=>points(item)[1].setAttribute('value','1e300')],
+    ['a value just past the range',item=>points(item)[1].setAttribute('value','32.5')],
+    ['a value that is not a number',item=>points(item)[1].setAttribute('value','oops')],
+    ['no curve type',item=>item.setAttribute('type','0')],
+    ['an unknown style',item=>item.setAttribute('style','9')],
+  ];
+  it.each(refuse)('refuses %s',(name,change)=>{
+    const warn=warnings(),loaded=loadInterchangeScore(editDoc(exportGpInterchange(authored(),settings),doc=>change(longBend(doc))),settings);
+    expect(beatsOf(loaded,0)[1].notes[0].hasBend).toBe(false);expect(warn).toHaveBeenCalled();usable(loaded);
+  });
+  it('refuses a whammy value past the range in either direction',()=>{
+    for(const value of ['-33','33','-1e300']){
+      const warn=warnings(),loaded=loadInterchangeScore(editDoc(exportGpInterchange(authored(),settings),doc=>points(sidecar(doc,'Whammy')[0])[1].setAttribute('value',value)),settings);
+      expect(beatsOf(loaded,1)[0].hasWhammyBar).toBe(false);expect(warn).toHaveBeenCalled();usable(loaded);
+    }
+  });
+  it('accepts the extremes of the range and still plays',()=>{
+    const score=music();
+    bend(beatsOf(score,0)[1].notes[0],model.BendType.Custom,model.BendStyle.Default,[0,0],[20,32],[40,32],[60,0]);whammy(beatsOf(score,1)[0],model.WhammyType.Custom,model.BendStyle.Default,[0,-32],[30,32],[60,-32]);score.finish(settings);
+    const loaded=roundTrip(score);expect(state(loaded)).toEqual(state(score));usable(loaded);
+  });
+  it('does not write a curve the reader would refuse, so a file never warns about itself',()=>{
+    const score=music();bend(beatsOf(score,0)[1].notes[0],model.BendType.Custom,model.BendStyle.Default,[0,0],[30,1e6],[60,0]);score.finish(settings);
+    expect(strFromU8(unzipSync(exportGpInterchange(score,settings))['Content/score.gpif'])).not.toContain('TabPlayerCurves');
+  });
+});
+
+describe('files without curves or slurs',()=>{
+  const normalized=(xml:string)=>new XMLSerializer().serializeToString(new DOMParser().parseFromString(xml,'application/xml'));
+  it('write exactly the bytes they wrote before curves were carried',()=>{
+    const score=music(),entries=unzipSync(new exporter.Gp7Exporter().export(score,settings));
+    const baseline=zipSync(writeStylesheetTimeSignatures(score,entries),{mtime:new Date(1980,0,1)});
+    expect(exportGpInterchange(score,settings)).toEqual(baseline);
+  });
+  it('differ from the plain alphaTab file only by the property and by the XML pass',()=>{
+    const score=authored(),raw=strFromU8(unzipSync(new exporter.Gp7Exporter().export(score,settings))['Content/score.gpif']);
+    const ours=new DOMParser().parseFromString(strFromU8(unzipSync(exportGpInterchange(score,settings))['Content/score.gpif']),'application/xml');
+    // Known differences of the XML pass: an empty <Automations/> in each ChannelStrip, and elements such as an empty
+    // <SystemsLayout></SystemsLayout> written as <SystemsLayout/>, which parsing both documents makes equal.
+    ours.querySelectorAll('Property[name="TabPlayerCurves"]').forEach(node=>node.remove());
+    ours.querySelectorAll('ChannelStrip > Automations').forEach(node=>{expect(node.childElementCount).toBe(0);node.remove();});
+    expect(normalized(new XMLSerializer().serializeToString(ours))).toBe(normalized(raw));
   });
 });

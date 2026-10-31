@@ -6,6 +6,7 @@ import { trackMixAutomations } from '../interchange/automation';
 import { scoreFromJson } from '../model-clone';
 import { selectScore } from './selection';
 import { withPlainDrone } from '../editor/banjo-drone';
+import { isNoteCautionary } from '../editor/cautionary';
 import type { ExportSelection } from './types';
 
 // An owned MusicXML 4.0 score-partwise writer. Durations use 960 divisions per
@@ -37,7 +38,9 @@ function spelling(value:number,fifths:number):[string,number] {
 // A forced accidental takes the enharmonic spelling with that offset, as alphaTab's
 // resolveSpelling does; <accidental> reads back as the same mode.
 const forced=new Map<model.NoteAccidentalMode,[number,string]>([[model.NoteAccidentalMode.ForceNatural,[0,'natural']],[model.NoteAccidentalMode.ForceSharp,[1,'sharp']],[model.NoteAccidentalMode.ForceFlat,[-1,'flat']],[model.NoteAccidentalMode.ForceDoubleSharp,[2,'double-sharp']],[model.NoteAccidentalMode.ForceDoubleFlat,[-2,'flat-flat']]]);
-function pitch(value:number,fifths:number,mode:model.NoteAccidentalMode=model.NoteAccidentalMode.Default){
+const accidentalNames=new Map<number,string>([[0,'natural'],[1,'sharp'],[-1,'flat'],[2,'double-sharp'],[-2,'flat-flat']]);
+// A cautionary note always shows its accidental, so the sign is written even when the key supplies it.
+function pitch(value:number,fifths:number,mode:model.NoteAccidentalMode=model.NoteAccidentalMode.Default,cautionary=false){
   if(!Number.isInteger(value)||value<0||value>127)unsupported('a pitch outside octaves 0–9');
   let [step,alter]=spelling(value,fifths),accidental='';
   if(mode!==model.NoteAccidentalMode.Default){
@@ -47,6 +50,7 @@ function pitch(value:number,fifths:number,mode:model.NoteAccidentalMode=model.No
   }
   const octave=Math.floor((value-alter)/12)-1;
   if(octave<0||octave>9)unsupported('a pitch outside octaves 0–9');
+  if(cautionary)accidental=element('accidental',accidentalNames.get(alter)??unsupported('a cautionary accidental on this pitch'),' cautionary="yes"');
   return {pitch:element('pitch',element('step',step)+(alter?element('alter',alter):'')+element('octave',octave)),accidental};
 }
 function tuningStep(value:number){
@@ -80,7 +84,7 @@ const written={
   // Stem direction is display; dynamics are written as directions.
   beat:new Set(['id','notes','isempty','duration','dots','tupletnumerator','tupletdenominator','automations','displaystart','playbackstart','displayduration','playbackduration','overridedisplayduration','preferredbeamdirection','dynamics','gracetype','lyrics','pickstroke','tap','tremolopicking']),
   // Bend points are written as <bend> elements (their type is derived from them).
-  note:new Set(['id','fret','string','octave','tone','istiedestination','tiedestinationnoteid','tieoriginnoteid','accidentalmode','dynamics','bendtype','bendpoints','iscontinuedbend','accentuated','isstaccato','vibrato','ornament','ishammerpullorigin','hammerpulloriginnoteid','hammerpulldestinationnoteid','slideouttype','slideoriginnoteid','slidetargetnoteid']),
+  note:new Set(['id','fret','string','octave','tone','istiedestination','tiedestinationnoteid','tieoriginnoteid','accidentalmode','tabplayercautionary','dynamics','bendtype','bendpoints','iscontinuedbend','accentuated','isstaccato','vibrato','ornament','ishammerpullorigin','hammerpulloriginnoteid','hammerpulldestinationnoteid','slideouttype','slideoriginnoteid','slidetargetnoteid']),
 };
 type Json=Record<string,unknown>;
 const toJson=(score:model.Score):Json=>{const value:unknown=model.JsonConverter.scoreToJson(score);return (typeof value==='string'?JSON.parse(value):value) as Json;};
@@ -396,7 +400,7 @@ function writePart(track:model.Track,score:model.Score,json:Json,scoreJson:Json,
         const sorted=[...beat.notes].sort((a,b)=>a.realValue-b.realValue),lyrics=lyricsOf(beat,sung);
         for(const [noteIndex,note] of sorted.entries()){
           check('note',(beatJson.notes as Json[])[note.index]);
-          const written=pitch(note.calculateRealValue(false,false)-transpose,bar.keySignature,note.accidentalMode);
+          const written=pitch(note.calculateRealValue(false,false)-transpose,bar.keySignature,note.accidentalMode,isNoteCautionary(note));
           layouts.forEach((layout,at)=>{
             const open=ties[at],links:[string,number][]=[];
             if(note.isTieDestination){

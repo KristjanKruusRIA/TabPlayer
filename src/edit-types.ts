@@ -121,6 +121,8 @@ export type EditCommand = LyricsCommand | GestureCommand | BarGestureCommand | R
   | { type: 'setScoreMetadata'; fields: ScoreMetadata }
   | { type: 'setDirections'; bar: number; directions: number[] }
   | { type: 'setNoteSpelling'; target: BeatTarget; noteIndex: number; accidentalMode: number }
+  | { type: 'setNoteCautionary'; target: BeatTarget; noteIndex: number; cautionary: boolean }
+  | { type: 'setNoteCourtesy'; target: BeatTarget; noteIndex: number; courtesy: boolean }
   | { type: 'addPitchedTrack'; name: string; program: number }
   | { type: 'addPercussionTrack'; name: string; program: number }
   | { type: 'addPitchedNote'; target: BeatTarget; pitch: number }

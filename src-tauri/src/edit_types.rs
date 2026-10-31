@@ -1111,6 +1111,16 @@ pub enum EditCommand {
         note_index: u32,
         accidental_mode: i32,
     },
+    SetNoteCautionary {
+        target: BeatTarget,
+        note_index: u32,
+        cautionary: bool,
+    },
+    SetNoteCourtesy {
+        target: BeatTarget,
+        note_index: u32,
+        courtesy: bool,
+    },
     SetNoteTechniques {
         target: BeatTarget,
         string: u32,
@@ -1589,6 +1599,7 @@ impl EditCommand {
             Self::SetNoteSpelling {
                 accidental_mode, ..
             } => enum_range(*accidental_mode, 0, 6)?,
+            Self::SetNoteCautionary { .. } | Self::SetNoteCourtesy { .. } => {}
             Self::SetNoteTechniques { patch, .. }
             | Self::SetNoteTechniquesByIndex { patch, .. } => {
                 for (value, min, max) in [
@@ -3266,5 +3277,21 @@ mod tests {
         value["from"]["target"]["bar"] = json!(0);
         value["kind"] = json!("legato");
         rejected(&value);
+    }
+
+    #[test]
+    fn cautionary_accidentals_roundtrip_and_validate() {
+        let target = json!({"track": 0, "staff": 0, "bar": 0, "voice": 0, "beat": 0});
+        for command in [
+            json!({"type": "setNoteCautionary", "target": target, "noteIndex": 0, "cautionary": true}),
+            json!({"type": "setNoteCautionary", "target": target, "noteIndex": 0, "cautionary": false}),
+            json!({"type": "setNoteCourtesy", "target": target, "noteIndex": 0, "courtesy": true}),
+            json!({"type": "setNoteCourtesy", "target": target, "noteIndex": 0, "courtesy": false}),
+        ] {
+            assert_eq!(serde_json::to_value(accepted(&command)).unwrap(), command);
+            let mut unknown = command.clone();
+            unknown["unexpected"] = json!(true);
+            rejected(&unknown);
+        }
     }
 }

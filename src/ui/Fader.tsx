@@ -11,7 +11,7 @@ export interface FaderProps extends ControlProps {
 const thumb=14;
 /** A vertical slider with the same contract as Knob: drag, arrows, the wheel while focused, double-click to reset. */
 export function Fader({label,ariaLabel,value,min,max,step,defaultValue,unit,format,disabled=false,onCommit,onInput,onInputEnd,bipolar=false,className}:FaderProps) {
-  const track=useRef<HTMLDivElement>(null);
+  const track=useRef<HTMLDivElement>(null),thumbEl=useRef<HTMLSpanElement>(null);
   const trackHeight=()=>Math.max(1,(track.current?.getBoundingClientRect().height||120)-thumb);
   const range=useRange({value,min,max,step,defaultValue,disabled,onCommit,onInput,onInputEnd,travel:trackHeight});
   const {shown,handlers}=range;
@@ -20,7 +20,7 @@ export function Fader({label,ariaLabel,value,min,max,step,defaultValue,unit,form
   const down=(event:React.PointerEvent<HTMLDivElement>)=>{
     // A press on the bare track jumps the thumb there and carries on as a drag.
     const rect=track.current?.getBoundingClientRect();
-    const onThumb=event.target instanceof Element&&event.target.closest('.tp-fader-thumb');
+    const onThumb=event.target instanceof Node&&thumbEl.current?.contains(event.target);
     if(!onThumb&&rect&&rect.height>thumb){const fraction=1-(event.clientY-rect.top-thumb/2)/(rect.height-thumb);handlers.onPointerDown(event,min+Math.min(1,Math.max(0,fraction))*(max-min));}
     else handlers.onPointerDown(event);
   };
@@ -34,7 +34,7 @@ export function Fader({label,ariaLabel,value,min,max,step,defaultValue,unit,form
       onKeyDown={event=>{if(handlers.key(event)){event.stopPropagation();return;}if(event.key==='Enter'&&!disabled){event.preventDefault();event.stopPropagation();typing.begin();}}}>
       <span className="tp-fader-rail" aria-hidden="true"/>
       {bipolar&&<span className="tp-fader-zero" aria-hidden="true" style={{bottom:`calc(${(0-min)/(max-min)} * (100% - ${thumb}px) + ${thumb/2}px)`}}/>}
-      <span className="tp-fader-thumb" aria-hidden="true" style={{bottom:`calc(${t} * (100% - ${thumb}px))`}}/>
+      <span ref={thumbEl} className="tp-fader-thumb" aria-hidden="true" style={{bottom:`calc(${t} * (100% - ${thumb}px))`}}/>
     </div>
     <span className="tp-fader-label">{label}</span>
   </div>;

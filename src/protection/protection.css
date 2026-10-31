@@ -1,0 +1,16 @@
+.protection-dialog { width:min(460px,100%); }
+.protection-dialog.protection-manage { width:min(560px,100%); }
+.protection-form { display:flex; flex-direction:column; gap:12px; }
+.protection-form p { margin:0; }
+.protection-section { display:flex; flex-direction:column; gap:8px; padding:0 0 16px; border-bottom:1px solid var(--tp-line-subtle); }
+.protection-section:last-of-type { border-bottom:0; padding-bottom:0; }
+.protection-section h3 { margin:0; font:600 13px/20px var(--tp-font-ui); text-transform:none; letter-spacing:0; }
+.protection-section form { display:flex; flex-direction:column; gap:10px; }
+.protection-status { font-weight:600; }
+.protection-warning { padding:6px 10px; border-left:3px solid var(--tp-line-strong); background:var(--tp-input); color:var(--tp-text); }
+.protection-field input { min-height:30px; padding:4px 8px; border:1px solid var(--tp-line-strong); border-radius:var(--tp-radius-s); background:var(--tp-input); color:var(--tp-text); font:400 13px/20px var(--tp-font-ui); }
+.protection-field input:focus-visible { outline:2px solid var(--tp-edit); outline-offset:1px; }
+.protection-field input[aria-invalid=true] { border-color:var(--tp-error); }
+.protection-actions { display:flex; flex-wrap:wrap; gap:8px; }
+.protection-dialog .error { color:var(--tp-error); }
+.protection-dialog .tp-button.is-disabled { opacity:.45; cursor:default; }

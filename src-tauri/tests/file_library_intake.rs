@@ -9,7 +9,7 @@ use std::{
         atomic::{AtomicUsize, Ordering},
     },
 };
-use tabplayer_lib::{project, workspace};
+use tabplayer_lib::{password_crypto, project, workspace};
 use workspace::{DocumentIntake, DocumentRevision, DocumentWorkspace};
 
 // Compile the checked seam with the same public workspace types without exposing it as IPC.
@@ -19,7 +19,9 @@ mod intake;
 fn candidate(result: Result<DocumentIntake, String>) -> DocumentCandidate {
     match result.unwrap() {
         DocumentIntake::Candidate { candidate } => candidate,
-        DocumentIntake::Existing { .. } => panic!("Expected a fresh candidate."),
+        DocumentIntake::Existing { .. } | DocumentIntake::Locked { .. } => {
+            panic!("Expected a fresh candidate.")
+        }
     }
 }
 

@@ -332,3 +332,51 @@ it('a cut-off Open leaves the workspace as it was and says so plainly',async()=>
   expect(w.getState().error).toBe('The file did not open within 15 seconds. It may be damaged.');
   expect(bridge.addDocument).not.toHaveBeenCalledWith('stalled');expect(bridge.cancelDocument).toHaveBeenCalledWith('stalled');
 });
+
+const locked={token:'locked-token',path:'C:/scores/band.tabplayer',fileName:'band.tabplayer'};
+it('a protected file asks for its password, keeps waiting after a wrong one and opens on the right one',async()=>{
+  const {workspace:w,bridge,stage}=await setup(),before=w.getState().documents.map(entry=>entry.id);
+  vi.mocked(bridge.readDocument).mockResolvedValueOnce({kind:'locked',locked});
+  bridge.unlockDocument=vi.fn(async(_token:string,password:string)=>{if(password!=='right password')throw new Error('The password is incorrect, or this file is damaged.');return {kind:'candidate' as const,candidate:stage(blankProject(),locked.token)};});
+  const attempts:string[]=[];
+  w.setPasswordPrompt(async({locked:asked,tryPassword})=>{
+    expect(asked).toEqual(locked);
+    for(const password of ['wrong password','right password']){
+      try{await tryPassword(password);attempts.push('opened');}catch(error){attempts.push((error as Error).message);}
+    }
+    return true;
+  });
+  expect(await w.openDocument()).toBe(true);
+  expect(attempts).toEqual(['The password is incorrect, or this file is damaged.','opened']);
+  expect(bridge.addDocument).toHaveBeenCalledWith(locked.token);expect(bridge.cancelDocument).not.toHaveBeenCalled();
+  expect(w.getState().documents).toHaveLength(before.length+1);
+});
+it.each([false,true])('giving up on a protected file opens nothing and stops it waiting: prompt answered %s',async answered=>{
+  const {workspace:w,bridge}=await setup(),before=w.getState().documents.map(entry=>entry.id),unchanged=preserve(w);
+  vi.mocked(bridge.readDocument).mockResolvedValueOnce({kind:'locked',locked});bridge.unlockDocument=vi.fn();
+  w.setPasswordPrompt(async()=>answered);
+  expect(await w.openDocument()).toBe(false);
+  unchanged();expect(w.getState().documents.map(entry=>entry.id)).toEqual(before);
+  expect(bridge.cancelDocument).toHaveBeenCalledExactlyOnceWith(locked.token);expect(bridge.addDocument).not.toHaveBeenCalled();expect(bridge.unlockDocument).not.toHaveBeenCalled();
+});
+it('a protected file cannot open where no password can be entered, and is not left waiting',async()=>{
+  const {workspace:w,bridge}=await setup();
+  vi.mocked(bridge.readDocument).mockResolvedValueOnce({kind:'locked',locked});
+  await expect(w.openDocument()).rejects.toThrow('This file is password-protected');
+  expect(bridge.cancelDocument).toHaveBeenCalledExactlyOnceWith(locked.token);expect(bridge.addDocument).not.toHaveBeenCalled();
+});
+it('the controller sends a protection request at the current revision and keeps the reason of a refusal off the document error',async()=>{
+  const {workspace:w}=await setup(),controller=current(w).controller,bridge=mocks.bridges.get(current(w).id)!;
+  const base=await bridge.snapshot();
+  const snapshot=(edit:'none'|'locked'|'unlocked'):DocumentSnapshot=>({...base,snapshot:{...base.snapshot,protection:{edit,open:false}}});
+  bridge.protect=vi.fn(async(request,_revision)=>{if(request.kind==='unlockEditing'&&request.password!=='right')throw new Error('That password is not correct.');return {...snapshot(request.kind==='lockEditing'?'locked':'unlocked'),revision:base.revision+1};});
+  await expect(controller.protect({kind:'unlockEditing',password:'wrong'})).rejects.toThrow('That password is not correct.');
+  expect(controller.getState().error).toBeNull();expect(controller.getState().revision).toBe(0);
+  await controller.protect({kind:'unlockEditing',password:'right'});
+  expect(bridge.protect).toHaveBeenLastCalledWith({kind:'unlockEditing',password:'right'},0);
+  expect(controller.getState().revision).toBe(1);expect(controller.getState().snapshot.protection?.edit).toBe('unlocked');
+  // Not an edit: nothing was applied and no history was touched.
+  expect(bridge.applyEdit).not.toHaveBeenCalled();expect(controller.getState().snapshot.project.edits).toEqual([]);
+  delete bridge.protect;
+  await expect(controller.protect({kind:'lockEditing'})).rejects.toThrow('Password protection is unavailable.');
+});

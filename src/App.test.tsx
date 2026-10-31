@@ -8,11 +8,11 @@ import {importer} from '@coderline/alphatab';
 import { WorkspaceApp,type WorkspaceSession } from './workspace/WorkspaceApp';
 import { WorkspaceController } from './workspace/WorkspaceController';
 import type { DocumentSnapshot,NativeWorkspaceBridge,WorkspaceSnapshot } from './workspace/types';
-import type { DocumentCandidate } from './project';
+import type { DocumentCandidate,Protection } from './project';
 import type { NativeAudioBridge } from './audio/bridge';
 import type { ExportNativeBridge } from './export/bridge';
 import { DocumentController } from './controller';
-import { FINALIZED_MESSAGE, blankProject, type EditCommand, type Project, type AssetInfo } from './project';
+import { EDIT_LOCKED_MESSAGE, FINALIZED_MESSAGE, blankProject, type EditCommand, type Project, type AssetInfo } from './project';
 import type { NativeBridge } from './bridge';
 import {buildScore,exportGp,effectiveAudioSettings,trackIdentity,type BuiltDocument} from './engine';
 import {createHash} from 'node:crypto';
@@ -90,6 +90,8 @@ it('shows score only when a template baseline removed original embedded backing'
   }finally{load.mockRestore();}
 });
 const activeController=()=>testWorkspace.getState().documents.find(entry=>entry.id===testWorkspace.getState().active.documentId)!.controller;
+/** The protection the next document set up starts with; the fake bridge keeps its own state from there. */
+const startingProtection:{value:Protection|undefined}={value:undefined};
 async function setup(initial=blankProject(),openProject?:Project,options:{width?:number;session?:WorkspaceSession;workspaceHeight?:number;instrumentVisible?:boolean}={}) {
   Object.defineProperty(window,'innerWidth',{configurable:true,writable:true,value:options.width??1280});
   vi.stubGlobal('ResizeObserver',class {
@@ -100,14 +102,15 @@ async function setup(initial=blankProject(),openProject?:Project,options:{width?
   documentBridges.clear();let next=0,activation=0,active={documentId:'',activationId:''};
   const records=new Map<string,DocumentSnapshot>(),staged=new Map<string,DocumentCandidate>();
   const add=(project:Project,path:string|null=null)=>{
-    const documentId=`app-document-${++next}`;let lock=project.lock,edits:EditCommand[]=[...project.edits],cursor=edits.length,revision=0,assets:Record<string,AssetInfo>={...project.assets},dirty=cursor>0;
-    const record=():DocumentSnapshot=>({documentId,revision,snapshot:{project:{...project,assets,edits:edits.slice(0,cursor),...(lock?{lock}:{})},canUndo:cursor>0,canRedo:cursor<edits.length,redoEdit:edits[cursor]??null,dirty,path}});
+    const documentId=`app-document-${++next}`;let protection=startingProtection.value,lock=project.lock,edits:EditCommand[]=[...project.edits],cursor=edits.length,revision=0,assets:Record<string,AssetInfo>={...project.assets},dirty=cursor>0;
+    const record=():DocumentSnapshot=>({documentId,revision,snapshot:{project:{...project,assets,edits:edits.slice(0,cursor),...(lock?{lock}:{})},canUndo:cursor>0,canRedo:cursor<edits.length,redoEdit:edits[cursor]??null,dirty,path,...(protection?{protection}:{})}});
     const update=()=>{revision++;const value=record();records.set(documentId,value);return value;};
     const check=(expected:number)=>{if(expected!==revision||!records.has(documentId))throw new Error('Invalid addressed revision');};
     const bridge:NativeBridge={documentId,snapshot:async()=>record(),cancelAsset:vi.fn(async()=>true),
       readBackingAsset:async(_assetId:string,_revision:number):Promise<Uint8Array>=>{throw new Error('Backing asset reads are not implemented.');},
+      protect:async(request,expected)=>{check(expected);if(request.kind==='unlockEditing'){if(request.password!=='teacher teacher')throw new Error('That password is not correct.');protection={edit:'unlocked',open:false};}else if(request.kind==='lockEditing')protection={edit:'locked',open:false};return update();},
       setLock:async(next,expected)=>{check(expected);if((lock?.kind??null)===(next?.kind??null))return record();if(next)lock=next;else lock=undefined;dirty=true;return update();},
-      applyEdit:async(command,expected,assetToken)=>{check(expected);if(lock&&command.type!=='setTrackMix')throw new Error(FINALIZED_MESSAGE);integration.commits(command,assetToken);if(assetToken&&command.type==='setBacking'&&command.backing)assets={...assets,[command.backing.assetId]:{filename:'backing.wav',mediaType:'audio/wav',byteLength:20}};edits=edits.slice(0,cursor);edits.push(command);cursor++;dirty=true;return update();},
+      applyEdit:async(command,expected,assetToken)=>{check(expected);if(protection?.edit==='locked'&&command.type!=='setTrackMix')throw new Error(EDIT_LOCKED_MESSAGE);if(lock&&command.type!=='setTrackMix')throw new Error(FINALIZED_MESSAGE);integration.commits(command,assetToken);if(assetToken&&command.type==='setBacking'&&command.backing)assets={...assets,[command.backing.assetId]:{filename:'backing.wav',mediaType:'audio/wav',byteLength:20}};edits=edits.slice(0,cursor);edits.push(command);cursor++;dirty=true;return update();},
       undo:async expected=>{check(expected);if(lock)throw new Error(FINALIZED_MESSAGE);cursor--;dirty=true;return update();},redo:async expected=>{check(expected);if(lock)throw new Error(FINALIZED_MESSAGE);cursor++;dirty=true;return update();},saveProject:async()=>null,exportGp:vi.fn(async()=>false),askUnsaved:vi.fn(async()=> 'discard' as const),confirmExport:vi.fn(async()=>false)};
     records.set(documentId,record());documentBridges.set(documentId,bridge);return documentId;
   };
@@ -1278,4 +1281,39 @@ it('ties and unties the selected notes from the keyboard, as one edit each, and 
   expect(edits()).toBe(before+2);
   const view=screen.getByRole('radiogroup',{name:'View'});fireEvent.click(within(view).getByRole('radio',{name:'Sound'}));
   fireEvent.keyDown(workspace,{key:'t',ctrlKey:true});expect(edits()).toBe(before+2);
+});
+
+it('a score locked for editing says so, refuses edits and unlocks with its password without touching the history',async()=>{
+  startingProtection.value={edit:'locked',open:false};
+  const c=await setup();startingProtection.value=undefined;
+  expect(screen.getByText(/Locked for editing: you can play and read this score/)).toBeInTheDocument();
+  // It is not finalized: finalizing is offered, and unfinalizing is not.
+  expect(menuButton('Finalize document')).toBeInTheDocument();expect(menuButton('Unfinalize document')).not.toBeInTheDocument();
+  expect(screen.queryByText('Finalized: editing is locked.')).not.toBeInTheDocument();
+  expect(screen.getByRole('button',{name:'Undo'})).toBeDisabled();expect(functionalButton('Append measure')).toBeDisabled();
+  expect(document.querySelector('[aria-keyshortcuts="Space"]')).toBeEnabled();expect(functionalButton('Save')).toBeEnabled();
+  fireEvent.click(screen.getByRole('button',{name:'Unlock editing…'}));
+  const dialog=await screen.findByRole('dialog',{name:'Unlock editing'});
+  const field=within(dialog).getByLabelText('Password to edit');expect(field).toHaveFocus();
+  fireEvent.change(field,{target:{value:'student student'}});fireEvent.click(within(dialog).getByRole('button',{name:'Unlock editing'}));
+  expect(await within(dialog).findByRole('alert')).toHaveTextContent('That password is not correct.');
+  expect(c.getState().snapshot.protection?.edit).toBe('locked');expect(c.getState().error).toBeNull();
+  expect(screen.getByText(/Locked for editing/)).toBeInTheDocument();
+  fireEvent.change(field,{target:{value:'teacher teacher'}});fireEvent.click(within(dialog).getByRole('button',{name:'Unlock editing'}));
+  await waitFor(()=>expect(screen.queryByRole('dialog',{name:'Unlock editing'})).toBeNull());
+  expect(c.getState().snapshot.protection?.edit).toBe('unlocked');
+  expect(screen.queryByText(/Locked for editing/)).not.toBeInTheDocument();
+  expect(c.getState().snapshot.project.edits).toHaveLength(0);expect(integration.commits).not.toHaveBeenCalled();
+  expect(functionalButton('Append measure')).toBeEnabled();
+  click('Append measure');await waitFor(()=>expect(c.getState().snapshot.project.edits).toHaveLength(1));
+});
+it('opens the password protection dialog from the File menu and shows where each password stands',async()=>{
+  startingProtection.value={edit:'unlocked',open:true};
+  await setup();startingProtection.value=undefined;
+  click('Password protection…');
+  const dialog=await screen.findByRole('dialog',{name:'Password protection'});
+  expect(within(dialog).getByRole('region',{name:'Password to edit'})).toHaveTextContent('Editing is unlocked for now.');
+  expect(within(dialog).getByRole('region',{name:'Password to open'})).toHaveTextContent('A password to open is set.');
+  fireEvent.click(within(dialog).getByRole('button',{name:'Done'}));
+  await waitFor(()=>expect(screen.queryByRole('dialog',{name:'Password protection'})).toBeNull());
 });

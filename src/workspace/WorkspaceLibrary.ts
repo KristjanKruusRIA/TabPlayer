@@ -60,7 +60,9 @@ export class WorkspaceLibrary {
   }
   private async acknowledge(document:DocumentRevision,score:model.Score):Promise<void>{
     if(this.disposed)return;
-    const metadata=projectMetadata({title:score.title,artist:score.artist,album:score.album,trackNames:score.tracks.slice(0,256).map(track=>track.name),metadataTruncated:score.tracks.length>256},[]);
+    // A password-protected score sends no details at all: the native side keeps none of them in the plain catalog and clears what an earlier build stored.
+    const sealed=this.workspace.getState().documents.find(entry=>entry.id===document.documentId)?.controller.getState().snapshot.protection?.open===true;
+    const metadata=sealed?{title:'',artist:'',album:'',trackNames:[],metadataTruncated:false}:projectMetadata({title:score.title,artist:score.artist,album:score.album,trackNames:score.tracks.slice(0,256).map(track=>track.name),metadataTruncated:score.tracks.length>256},[]);
     await this.bridge.ackMetadata({documentId:document.documentId,revision:document.revision},metadata);
     if(!this.disposed)await this.controller.refresh();
   }

@@ -5,11 +5,17 @@ import { buildDocument,type BuiltDocument } from '../engine';
 import { admitDocumentBase } from '../interchange/archive-gate';
 import type { DocumentCandidate } from '../project';
 import type { LibrarySource,NativeFileLibraryBridge } from '../library/types';
+import type { LockedDocument } from '../protection/protection';
 import type { AudioOwner,CloseDocument,DocumentId,DocumentIntake,DocumentRevision,DocumentViewState,NativeWorkspaceBridge,WorkspaceSnapshot } from './types';
 import type { NativeSessionBridge,RecoveryStatus } from './recovery-types';
 import { initialDocumentView,repairDocumentView } from './view-state';
 
 export interface LibraryDocumentObserver {committed(document:DocumentRevision,score:BuiltDocument['score']):void|Promise<void>;failed(error:unknown):void;transitioning?():void}
+/**
+ * Asks for a protected file's password. `tryPassword` rejects, with the reason, when the password is refused, and the file
+ * keeps waiting; it resolves once the password opened the file. Resolves false when the person gave up.
+ */
+export type PasswordPrompt=(request:{locked:LockedDocument;tryPassword:(password:string)=>Promise<void>})=>Promise<boolean>;
 export interface WorkspaceState {
   documents:readonly {id:DocumentId;controller:DocumentController;view:DocumentViewState}[];
   active:AudioOwner;busy:boolean;error:string|null;recoveryError:string|null;playbackResumeEpoch:number;
@@ -25,6 +31,7 @@ export class WorkspaceController {
   private editorOperation:DocumentId|null=null;
   private session:NativeSessionBridge|null=null;
   private libraryObserver:LibraryDocumentObserver|null=null;
+  private passwordPrompt:PasswordPrompt|null=null;
   private pendingViews=new Map<DocumentId,DocumentViewState>();
   private viewTail:Promise<void>|null=null;
   private constructor(private bridge:NativeWorkspaceBridge) {}
@@ -94,9 +101,25 @@ export class WorkspaceController {
     const score=entry.controller.getState().score;
     void Promise.resolve().then(()=>observer.committed({documentId:document.documentId,revision:document.revision},score)).catch(error=>observer.failed(error));
   }
+  setPasswordPrompt(prompt:PasswordPrompt|null):void {this.passwordPrompt=prompt;}
+  /** Opens a protected file once the person gives its password. Giving up stops the file waiting and opens nothing. */
+  private async unlock(locked:LockedDocument):Promise<DocumentIntake|null> {
+    const prompt=this.passwordPrompt,unlockDocument=this.bridge.unlockDocument?.bind(this.bridge);
+    if(!prompt||!unlockDocument){try{await this.bridge.cancelDocument(locked.token);}catch{}throw new Error('This file is password-protected, and passwords cannot be entered here.');}
+    const outcome:{opened:DocumentIntake|null}={opened:null};
+    await prompt({locked,tryPassword:async password=>{
+      const result=await unlockDocument(locked.token,password);
+      if(result.kind==='locked')throw new Error('The password could not be checked.');
+      outcome.opened=result;
+    }});
+    // Giving up, or closing the prompt any other way, stops the file waiting.
+    if(!outcome.opened){try{await this.bridge.cancelDocument(locked.token);}catch{}}
+    return outcome.opened;
+  }
   private async intake(intake:DocumentIntake,metadata=true):Promise<boolean> {
+    if(intake.kind==='locked'){const opened=await this.unlock(intake.locked);if(!opened)return false;intake=opened;}
     if(intake.kind==='candidate')await this.add(intake.candidate);
-    else await this.synchronize(await this.bridge.activateDocument(intake.documentId));
+    else if(intake.kind==='existing')await this.synchronize(await this.bridge.activateDocument(intake.documentId));
     if(metadata){const entry=this.state.documents.find(entry=>entry.id===this.state.active.documentId)!;this.notifyCommitted({documentId:entry.id,revision:entry.controller.getState().revision});}return true;
   }
   openDocument():Promise<boolean> {return this.transition(async()=>{

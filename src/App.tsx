@@ -3,7 +3,9 @@ import {model,Settings} from '@coderline/alphatab';
 import { DocumentController } from './controller';
 import { describeSelection, effectiveAudioSettings } from './engine';
 import type { BeatTarget, EditCommand } from './project';
-import { FINALIZED_MESSAGE, isFinalized, projectCommands } from './project';
+import { EDIT_LOCKED_MESSAGE, FINALIZED_MESSAGE, isEditPasswordLocked, isFinalized, projectCommands } from './project';
+import { ProtectionDialog,UnlockEditingDialog } from './protection/PasswordDialogs';
+import { busyGuard } from './ui/useBusyGuard';
 import { followSelectedTrack,movedTrackIndex,repairMeasureSelection,repairSelection, validSelectionIndices } from './selection';
 import { ScoreView } from './ScoreView';
 import { EditorPanel, type InspectorContextScope } from './EditorPanel';
@@ -101,7 +103,9 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   const controlsBusy=state.busy||workspaceBusy;
   // A finalized document refuses every change to its music and layout. This is kept apart from controlsBusy so
   // playback, practice, selection, the mixer, export and save stay usable.
-  const editLocked=isFinalized(state.snapshot.project),editBusy=controlsBusy||editLocked;
+  // A password to edit that has not been given in this session refuses changes the same way, but is lifted by the password, not by unfinalizing.
+  const finalized=isFinalized(state.snapshot.project),passwordLocked=isEditPasswordLocked(state.snapshot),editLocked=finalized||passwordLocked,editBusy=controlsBusy||editLocked;
+  const lockedMessage=finalized?FINALIZED_MESSAGE:EDIT_LOCKED_MESSAGE;
   const [player,setPlayer]=useState<NativePlaybackController|null>(null);
   const playbackState=useSyncExternalStore(player?.subscribe??noPlaybackSubscribe,()=>player?.getState()??null);
   useEffect(()=>{const playback=new NativePlaybackController({bridge:audioBridge,latestMix:id=>controller.getState().settings.mixes[id],latestMaster:()=>controller.getState().settings.master,onEdit:command=>controller.edit(command).then(()=>setSelection(old=>repairSelection(controller.getState().score,old)))});setPlayer(playback);return()=>playback.destroy();},[controller,audioBridge]);
@@ -232,6 +236,9 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   const showClipboard=()=>{setContextScope('all');showInspector();setClipboardFocus(value=>value+1);};
   const documentAction=(job:Promise<unknown>)=>change(job);
   const [paletteOpen,setPaletteOpen]=useState(false),paletteReturn=useRef<HTMLElement|null>(null);
+  const [protectionDialog,setProtectionDialog]=useState<'manage'|'unlock'|null>(null),protectionReturn=useRef<HTMLElement|null>(null);
+  const openProtection=(kind:'manage'|'unlock')=>{protectionReturn.current=document.activeElement instanceof HTMLElement?document.activeElement:null;closeCommands(false);setProtectionDialog(kind);};
+  const closeProtection=()=>{setProtectionDialog(null);const back=protectionReturn.current;protectionReturn.current=null;if(back?.isConnected)back.focus();if(document.activeElement!==back)scorePane.current?.focus();};
   const [asciiOpen,setAsciiOpen]=useState(false),asciiReturn=useRef<HTMLElement|null>(null),[midiOpen,setMidiOpen]=useState(false),[batchOpen,setBatchOpen]=useState(false);
   const [helpTopic,setHelpTopic]=useState<HelpTopicId|null>(null),helpReturn=useRef<HTMLElement|null>(null);
   /** Opens help on the topic for what had focus; help only reads, so open scores and edits are untouched. */
@@ -260,7 +267,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   };
   /** Runs a palette command through the same paths as the menus and inspector, so edits stay undoable. */
   const runPalette=(action:PaletteAction)=>{
-    if(action.kind==='edit'){if(view==='sound')return;if(editLocked)setClipboardError(FINALIZED_MESSAGE);else edit(action.command);}
+    if(action.kind==='edit'){if(view==='sound')return;if(editLocked)setClipboardError(lockedMessage);else edit(action.command);}
     else if(action.kind==='select'){editorSelection(null);select(action.target);}
     else if(action.name==='undo'){if(state.snapshot.canUndo&&!editLocked)change(controller.undo());}
     else if(action.name==='redo'){if(state.snapshot.canRedo&&!editLocked)change(controller.redo());}
@@ -451,7 +458,8 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
       <button disabled={controlsBusy} onClick={()=>act(controller.save(true))}>Save As</button>
       <button disabled={controlsBusy} onClick={()=>documentAction(onClose())}>Close score</button>
       <button disabled={controlsBusy} onClick={()=>documentAction(onCloseAll())}>Close all scores</button>
-      {editLocked?<button disabled={controlsBusy} onClick={()=>act(controller.setLock(null))}>Unfinalize document</button>:<button disabled={controlsBusy} onClick={()=>act(controller.setLock({kind:'finalized'}))}>Finalize document</button>}
+      {finalized?<button disabled={controlsBusy||passwordLocked} onClick={()=>act(controller.setLock(null))}>Unfinalize document</button>:<button disabled={controlsBusy||passwordLocked} onClick={()=>act(controller.setLock({kind:'finalized'}))}>Finalize document</button>}
+      <button {...busyGuard({busy:controlsBusy,onClick:()=>openProtection('manage')})}>Password protection…</button>
       <button disabled={controlsBusy||exports.busy} onClick={()=>openModal('export')}>Export score</button><button disabled={controlsBusy||exports.busy} onClick={directExport}>Export GP</button>
       {libraryMenu}{sessionMenu}</section></details>
       <details ref={viewMenu} className="command-menu" onToggle={event=>commandToggle(event.currentTarget)}><summary>View</summary><section aria-label="Workspace view">
@@ -472,7 +480,8 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     </section></details><span className="document-title">{state.score.title || 'Untitled'}{state.snapshot.dirty?' •':''}</span></div>
     </header>
     {documentTabs}
-    {editLocked&&<div className="finalized-banner" role="status"><p>Finalized: editing is locked.</p><button disabled={controlsBusy} onClick={()=>act(controller.setLock(null))}>Unfinalize</button></div>}
+    {finalized&&<div className="finalized-banner" role="status"><p>Finalized: editing is locked.</p><button disabled={controlsBusy||passwordLocked} onClick={()=>act(controller.setLock(null))}>Unfinalize</button></div>}
+    {passwordLocked&&<div className="finalized-banner" role="status"><p>Locked for editing: you can play and read this score, but changes need its password.</p><button {...busyGuard({busy:controlsBusy,onClick:()=>openProtection('unlock')})}>Unlock editing…</button></div>}
     <CabinetNotices sounds={state.settings.sounds} trackNames={trackNames}/>
     {(clipboardError||workspaceError||state.error||(!exportOpen&&exportError)||pageState.error||harmonyOpen&&libraryError) && <div className="error" role="alert">{clipboardError||workspaceError||state.error||exportError||pageState.error||libraryError}</div>}
     {state.importNotice && <div className="notice" role="status">{state.importNotice}</div>}
@@ -526,11 +535,13 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
       </section>
     </div>
     {player && <Transport player={player} measures={state.score.masterBars.length} busy={controlsBusy} cursor={target} selection={musicSelection}/>}
-    {exportOpen&&<ExportDialog layoutLocked={editLocked} sounds={state.settings.sounds} trackNames={trackNames} score={state.score} layout={state.settings.print} page={page} currentSpeedAvailable={practiceRatio!==null} busy={exports.busy||state.busy||exportLaunching} progress={exports.progress} failure={exportError} gpBackingIssue={gpBackingIssue} hasBacking={!!audioSettings.backing} onExport={runExport} onCancel={cancelExport}/>}
+    {exportOpen&&<ExportDialog layoutLocked={editLocked} layoutLockedNote={finalized?undefined:'This score is locked for editing, so exports use its current layout.'} plainNote={state.snapshot.protection&&(state.snapshot.protection.open||state.snapshot.protection.edit!=='none')?'This score is password-protected, but its exports are not: they are plain files with no password, and a Guitar Pro file opened again in TabPlayer has no edit lock.':undefined} sounds={state.settings.sounds} trackNames={trackNames} score={state.score} layout={state.settings.print} page={page} currentSpeedAvailable={practiceRatio!==null} busy={exports.busy||state.busy||exportLaunching} progress={exports.progress} failure={exportError} gpBackingIssue={gpBackingIssue} hasBacking={!!audioSettings.backing} onExport={runExport} onCancel={cancelExport}/>}
     {harmonyOpen&&location.beat&&<HarmonyChordDialog score={state.score} target={target} selection={musicSelection} value={location.beat.chord?getHarmonyChord(location.beat.chord):null} busy={state.busy||libraryLoading} library={library} onEdit={edit} onClose={closeModal} onLibraryPut={async entry=>{const revision=++libraryRevision.current,value=await putHarmonyLibraryEntry(entry);if(revision===libraryRevision.current)setLibrary(value);}} onLibraryRemove={async id=>{const revision=++libraryRevision.current,value=await removeHarmonyLibraryEntry(id);if(revision===libraryRevision.current)setLibrary(value);}}/>}
     {helpTopic!==null&&<HelpDialog initial={helpTopic} onClose={closeHelp}/>}
     {asciiOpen&&onImportConverted&&<AsciiTabImportDialog busy={controlsBusy} onImport={(name,bytes)=>{const job=onImportConverted(name,bytes);documentAction(job);return job;}} onClose={closeAscii}/>}
     {batchOpen&&<BatchConvertDialog busy={controlsBusy} onClose={closeBatch}/>}
+    {protectionDialog==='manage'&&<ProtectionDialog protection={state.snapshot.protection??{edit:'none',open:false}} dirty={state.snapshot.dirty} onRequest={request=>controller.protect(request)} onClose={closeProtection}/>}
+    {protectionDialog==='unlock'&&<UnlockEditingDialog onTry={async password=>{await controller.protect({kind:'unlockEditing',password});closeProtection();}} onClose={closeProtection}/>}
     {midiOpen&&onImportConverted&&<MidiImportDialog busy={controlsBusy} onImport={(name,bytes)=>{const job=onImportConverted(name,bytes);documentAction(job);return job;}} onClose={closeMidi}/>}
     {paletteOpen&&<CommandPalette context={{score:state.score,target,string,canUndo:state.snapshot.canUndo,canRedo:state.snapshot.canRedo,locked:editLocked,scoreHidden:view==='sound'}} busy={controlsBusy} onRun={runPalette} onClose={closePalette}/>}
     {scaleOpen&&<ScaleToolPanel score={state.score} staff={location.staff} selection={musicSelection} busy={state.busy} target={target} beat={location.beat} onEdit={editLocked?undefined:edit} onClose={closeModal}/>}

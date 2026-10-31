@@ -734,10 +734,15 @@ impl Inner {
     ) -> Result<RecoveryStatus, String> {
         self.state.lock().unwrap().status.state = RecoveryState::Writing;
         self.publish_latest();
+        // A protected score is left out of the backup, and no older backup that still holds it is kept.
+        let redacted = documents
+            .iter()
+            .any(|document| document.session.is_sealed());
+        let documents = crate::recovery::redact_sealed(documents);
         let result = {
             let mut store = self.store.lock().unwrap();
             let (epoch, generation) = store.next_identity(retire)?;
-            store.commit(
+            store.commit_keeping(
                 &RecoveryEnvelope {
                     format: "TabPlayerRecovery".into(),
                     version: 1,
@@ -749,6 +754,7 @@ impl Inner {
                 },
                 lifecycle,
                 retire,
+                !redacted,
             )
         };
         match result {

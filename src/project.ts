@@ -19,7 +19,14 @@ export const appliesFilePartialCapo=(project:{partialCapo?:true;baselineEdits?:r
 export type ProjectInput = ProjectView | Omit<ProjectView,'schemaVersion'|'assets'|'baselineEdits'> & {schemaVersion:1}
   | Omit<ProjectView,'schemaVersion'|'baselineEdits'> & {schemaVersion:2};
 export const projectCommands=(project:ProjectInput):EditCommand[]=>[...('baselineEdits' in project?project.baselineEdits:[]),...project.edits];
-export interface ProjectSnapshot { project: Project; canUndo: boolean; canRedo: boolean; redoEdit?: EditCommand | null; dirty: boolean; path: string | null }
+/** Where a document stands with its password to edit: none set, set and not yet given this session (edits refused), or given. */
+export type EditProtection = 'none' | 'locked' | 'unlocked';
+/** The password protections of a document. Only the state is ever sent here, never a hash, a key or a password. */
+export interface Protection { edit: EditProtection; open: boolean }
+export const EDIT_LOCKED_MESSAGE = 'This score is locked for editing. Enter its password to make changes.';
+/** A password to edit is set and has not been given in this session. Absent protection means none. */
+export const isEditPasswordLocked = (snapshot: { protection?: Protection } | null | undefined): boolean => snapshot?.protection?.edit === 'locked';
+export interface ProjectSnapshot { project: Project; canUndo: boolean; canRedo: boolean; redoEdit?: EditCommand | null; dirty: boolean; path: string | null; protection?: Protection }
 export interface DocumentCandidate { project: Project; path: string | null; token: string }
 export const blankProject = (): Project => ({
   format: 'TabPlayer', schemaVersion: 3, engineVersion: '1.8.4', assets: {}, baselineEdits: [],

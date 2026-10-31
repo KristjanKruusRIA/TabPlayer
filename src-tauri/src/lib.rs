@@ -12,6 +12,8 @@ pub mod fs_identity;
 pub mod harmony;
 pub mod harmony_library;
 pub mod intake;
+pub mod password_crypto;
+pub mod password_lock;
 pub mod project;
 pub mod recovery;
 pub mod reveal;
@@ -198,7 +200,12 @@ fn save_document_to_path(
         let receipt = workspace.library_receipt(&saved.document_id).ok().flatten();
         (saved, receipt)
     };
-    library.record_success(receipt);
+    // A file saved under a password to open must show nothing in the folder index, whether or not it is in a folder.
+    let sealed = workspace
+        .lock()
+        .map(|workspace| workspace.is_sealed(&saved.document_id).unwrap_or(false))
+        .unwrap_or(false);
+    library.record_saved(receipt, sealed);
     Ok(saved)
 }
 
@@ -503,6 +510,50 @@ fn document_set_lock(
         session.changed();
     }
     result
+}
+
+#[tauri::command]
+async fn document_protection(
+    document: DocumentRevision,
+    request: password_lock::ProtectionRequest,
+    app: AppHandle,
+) -> Result<DocumentSnapshot, String> {
+    // The key derivation takes a fraction of a second; it runs here, off the command thread and off every lock.
+    tauri::async_runtime::spawn_blocking(move || {
+        let result = password_lock::apply_protection(
+            &app.state::<Arc<Mutex<DocumentWorkspace>>>(),
+            &document,
+            request,
+        );
+        if result
+            .as_ref()
+            .is_ok_and(|snapshot| snapshot.revision != document.revision)
+        {
+            app.state::<session::SessionRuntime>().changed();
+        }
+        result
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+/// Tries a password on a sealed file waiting to open. A wrong one leaves the file waiting.
+#[tauri::command]
+async fn unlock_locked_document(
+    token: String,
+    password: password_crypto::Secret,
+    app: AppHandle,
+) -> Result<DocumentIntake, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        file_library::commands::admit_app(&app)?;
+        password_lock::unlock_document(
+            &app.state::<Arc<Mutex<DocumentWorkspace>>>(),
+            &token,
+            &password,
+        )
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
@@ -905,6 +956,8 @@ pub fn run() {
                     .map(|directory| directory.join("cabinet-irs"));
                 audio::cabinet_ir::install(directory, bundled);
             }
+            // Printed scores left in the cache by an earlier run are plain copies of the score; none outlives a run.
+            clear_print_cache(app.handle());
             let directory = session::session_directory(app.path().app_data_dir()?)?;
             let library_directory = directory.join("file-library-v1");
             let bundled_directory = app.path().resource_dir()?.join("library");
@@ -989,6 +1042,8 @@ pub fn run() {
         apply_edit,
         undo_edit,
         document_set_lock,
+        document_protection,
+        unlock_locked_document,
         document_mark_partial_capo,
         redo_edit,
         save_project,
@@ -1073,6 +1128,8 @@ pub fn run() {
         apply_edit,
         undo_edit,
         document_set_lock,
+        document_protection,
+        unlock_locked_document,
         document_mark_partial_capo,
         redo_edit,
         save_project,
@@ -1136,8 +1193,20 @@ pub fn run() {
         desktop_test_io
     ]);
     builder
-        .run(tauri::generate_context!())
-        .expect("Could not start TabPlayer");
+        .build(tauri::generate_context!())
+        .expect("Could not start TabPlayer")
+        .run(|app, event| {
+            if matches!(event, tauri::RunEvent::Exit) {
+                clear_print_cache(app);
+            }
+        });
+}
+
+/// Removes the printable PDFs kept for external viewers. Each holds a whole score in plain form.
+fn clear_print_cache(app: &AppHandle) {
+    if let Ok(cache) = app.path().app_cache_dir() {
+        export::print::remove_viewer_files(&cache.join("print"));
+    }
 }
 
 #[cfg(test)]

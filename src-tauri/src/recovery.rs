@@ -1,5 +1,5 @@
 use crate::{
-    project::{BaseDocument, ProjectCheckpoint, ProjectSession},
+    project::{BaseDocument, Project, ProjectCheckpoint, ProjectSession},
     workspace::{DocumentSnapshot, WorkspaceSnapshot, path_identity, same_path},
 };
 use serde::{Deserialize, Deserializer, Serialize, de::Error};
@@ -781,6 +781,28 @@ pub fn reconcile_paths(value: &mut ValidatedRecovery) -> Result<(), String> {
     Ok(())
 }
 
+/// A recovery backup is a plain file. A document under a password to open is therefore never written to one: its
+/// place, view and revision stay so every other rule about the backup holds, but its score is a blank one. Work in
+/// it that is not saved cannot be recovered; the backup says nothing of what the document held.
+pub fn redact_sealed(documents: Vec<RecoveryDocument>) -> Vec<RecoveryDocument> {
+    documents
+        .into_iter()
+        .map(|document| {
+            if !document.session.is_sealed() {
+                return document;
+            }
+            RecoveryDocument {
+                session: ProjectSession::new(Project::blank(), None)
+                    .expect("a blank project is valid")
+                    .checkpoint(),
+                imported_path: None,
+                saved_file_sha256: None,
+                ..document
+            }
+        })
+        .collect()
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct LoadedRecovery {
     pub manifest: RecoveryManifest,
@@ -893,6 +915,18 @@ impl RecoveryStore {
         lifecycle: SessionLifecycle,
         retire: bool,
     ) -> Result<RecoveryStatus, String> {
+        self.commit_keeping(envelope, lifecycle, retire, true)
+    }
+    /// As `commit`. With `keep_previous` false the manifest names no previous checkpoint, so housekeeping removes the
+    /// older file: used when this checkpoint leaves out a score's contents because it became password-protected, so the
+    /// older checkpoint, which holds them in plain form, does not stay on disk.
+    pub fn commit_keeping(
+        &mut self,
+        envelope: &RecoveryEnvelope,
+        lifecycle: SessionLifecycle,
+        retire: bool,
+        keep_previous: bool,
+    ) -> Result<RecoveryStatus, String> {
         if (envelope.epoch, envelope.generation) != self.next_identity(retire)? {
             return Err("Stale recovery checkpoint epoch or generation.".into());
         }
@@ -933,7 +967,7 @@ impl RecoveryStore {
             lifecycle,
             current,
             previous: previous
-                .filter(|value| !retire && value.epoch == envelope.epoch)
+                .filter(|value| keep_previous && !retire && value.epoch == envelope.epoch)
                 .map(|value| value.current),
         };
         validate_manifest(&manifest)?;

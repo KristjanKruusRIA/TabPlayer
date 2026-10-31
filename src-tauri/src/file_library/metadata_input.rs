@@ -297,6 +297,37 @@ impl<R: Read> Json<R> {
         }
     }
 
+    /// The hash of a password to edit: an object with exactly the six fields the project reader requires. Nothing here is
+    /// needed to index a score; the shape is checked so a malformed lock is refused as the project reader refuses it.
+    fn edit_lock(&mut self) -> Result<(), String> {
+        let mut fields = 0;
+        self.object(|json, key| {
+            let index = match key.as_deref() {
+                Some("kdf") => 0,
+                Some("memoryKib") => 1,
+                Some("iterations") => 2,
+                Some("parallelism") => 3,
+                Some("salt") => 4,
+                Some("hash") => 5,
+                _ => return Err("Indexed project has an unsupported edit lock.".into()),
+            };
+            seen(&mut fields, index)?;
+            match index {
+                0 if json.text(32)? != "argon2id" => {
+                    Err("Indexed project has an unsupported edit lock.".into())
+                }
+                0 => Ok(()),
+                1..=3 => json.unsigned().map(|_| ()),
+                _ => json.text(64).map(|_| ()),
+            }
+        })?;
+        if fields == 0b111111 {
+            Ok(())
+        } else {
+            Err("Indexed project has an unsupported edit lock.".into())
+        }
+    }
+
     /// A marker field is present only as `true`.
     fn literal_true(&mut self) -> Result<(), String> {
         self.whitespace()?;
@@ -405,6 +436,8 @@ impl<R: Read> Json<R> {
                 // Written only when set, as in a saved project: finalized, or marked for a file's partial capo.
                 Some("lock") => 7,
                 Some("partialCapo") => 8,
+                // The hash of a password to edit, written only when one is set.
+                Some("editLock") => 9,
                 _ => return Err("Indexed project contains an unknown field.".into()),
             };
             seen(&mut fields, index)?;
@@ -423,6 +456,7 @@ impl<R: Read> Json<R> {
                 6 => baseline = json.edits(&mut budget)?,
                 7 => json.lock()?,
                 8 => json.literal_true()?,
+                9 => json.edit_lock()?,
                 _ => unreachable!(),
             }
             Ok(())

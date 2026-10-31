@@ -64,8 +64,26 @@ pub struct WorkspaceSnapshot {
     rename_all_fields = "camelCase"
 )]
 pub enum DocumentIntake {
-    Candidate { candidate: DocumentCandidate },
-    Existing { document_id: DocumentId },
+    Candidate {
+        candidate: DocumentCandidate,
+    },
+    Existing {
+        document_id: DocumentId,
+    },
+    /// A password-protected project: nothing of it is shown until the password opens it.
+    Locked {
+        locked: LockedDocument,
+    },
+}
+
+/// A sealed file waiting for its password. The file's bytes stay in the workspace under the token; they are as
+/// unreadable as the file is.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LockedDocument {
+    pub token: String,
+    pub path: String,
+    pub file_name: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -80,17 +98,37 @@ pub struct CloseDocument {
 use crate::{
     assets::StoredAsset,
     files,
+    password_crypto::{OpenLock, PasswordVerifier},
     project::{
-        BaseDocument, CandidateStore, DocumentLock, EditCommand, FINALIZED_MESSAGE, Project,
-        ProjectSession, StagedAsset,
+        BaseDocument, CandidateStore, DocumentLock, EDIT_LOCKED_MESSAGE, EditCommand,
+        FINALIZED_MESSAGE, Project, ProjectSession, ProtectionChange, StagedAsset,
     },
     recovery::{DocumentViewState, RecoveryDocument},
 };
 use std::{
     collections::{BTreeMap, BTreeSet},
     path::{Path, PathBuf},
-    sync::atomic::{AtomicU64, Ordering},
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
 };
+
+/// How many sealed files may wait for a password at once. A new one pushes the oldest out.
+const WAITING_LOCKED_LIMIT: usize = 4;
+
+struct LockedIntake {
+    token: String,
+    path: PathBuf,
+    bytes: Arc<Vec<u8>>,
+    digest: String,
+}
+
+/// What a password has to be checked against, copied so the slow key derivation can run with the workspace unlocked.
+pub struct ProtectionState {
+    pub edit: Option<PasswordVerifier>,
+    pub open: Option<OpenLock>,
+}
 
 struct DocumentEntry {
     id: DocumentId,
@@ -175,6 +213,7 @@ pub struct DocumentWorkspace {
     candidates: CandidateStore,
     candidate_digests: BTreeMap<String, String>,
     fork_candidates: BTreeSet<String>,
+    locked_intakes: Vec<LockedIntake>,
     checkpoint_revision: u64,
     frozen: bool,
 }
@@ -360,6 +399,7 @@ impl DocumentWorkspace {
             candidates: CandidateStore::default(),
             candidate_digests: BTreeMap::new(),
             fork_candidates: BTreeSet::new(),
+            locked_intakes: Vec::new(),
             checkpoint_revision: 0,
             frozen: false,
         })
@@ -486,6 +526,99 @@ impl DocumentWorkspace {
         self.candidates = CandidateStore::default();
         self.candidate_digests.clear();
         self.fork_candidates.clear();
+        self.locked_intakes.clear();
+    }
+
+    /// Holds a sealed file's bytes until its password arrives.
+    pub fn stage_locked(
+        &mut self,
+        path: PathBuf,
+        bytes: Vec<u8>,
+        digest: String,
+    ) -> Result<LockedDocument, String> {
+        self.check_admission()?;
+        let token = crate::project::candidate_token();
+        let locked = LockedDocument {
+            token: token.clone(),
+            file_name: path
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+            path: path.to_string_lossy().into_owned(),
+        };
+        if self.locked_intakes.len() >= WAITING_LOCKED_LIMIT {
+            self.locked_intakes.remove(0);
+        }
+        self.locked_intakes.push(LockedIntake {
+            token,
+            path,
+            bytes: Arc::new(bytes),
+            digest,
+        });
+        Ok(locked)
+    }
+
+    /// The waiting file, for a password attempt that runs with the workspace unlocked.
+    pub fn locked_intake(&self, token: &str) -> Result<(PathBuf, Arc<Vec<u8>>, String), String> {
+        self.check_admission()?;
+        self.locked_intakes
+            .iter()
+            .find(|intake| intake.token == token)
+            .map(|intake| {
+                (
+                    intake.path.clone(),
+                    intake.bytes.clone(),
+                    intake.digest.clone(),
+                )
+            })
+            .ok_or_else(|| "This file is no longer waiting for a password. Open it again.".into())
+    }
+
+    /// Stages the project a correct password opened, and stops waiting for that file.
+    pub fn finish_locked(
+        &mut self,
+        token: &str,
+        project: Project,
+    ) -> Result<DocumentCandidate, String> {
+        let (path, _, digest) = self.locked_intake(token)?;
+        let candidate = self.stage_document_with_digest(project, Some(path), Some(digest))?;
+        self.locked_intakes.retain(|intake| intake.token != token);
+        Ok(candidate)
+    }
+
+    /// The document is under a password to open, or its file on disk is: nothing about its contents may be written in
+    /// plain form. The file counts even when the password was removed in this session and the removal is not saved,
+    /// because what the catalog and the index describe is the file.
+    pub fn is_sealed(&self, id: &str) -> Result<bool, String> {
+        let session = &self.entry(id)?.session;
+        Ok(session.open_lock().is_some() || session.saved_sealed())
+    }
+
+    pub fn protection_state(&self, address: &DocumentRevision) -> Result<ProtectionState, String> {
+        self.check_admission()?;
+        let session = &self.check_revision(address)?.session;
+        Ok(ProtectionState {
+            edit: session.edit_verifier(),
+            open: session.open_lock().cloned(),
+        })
+    }
+
+    /// Changes a document's password protections. Not an edit: history is untouched. A change that does not alter
+    /// anything (locking an unlocked score again) returns the current snapshot and bumps nothing.
+    pub fn change_protection(
+        &mut self,
+        address: &DocumentRevision,
+        change: ProtectionChange,
+    ) -> Result<DocumentSnapshot, String> {
+        let revision = self.check_mutation(address)?;
+        let entry = self.entry_mut(&address.document_id)?;
+        if !entry.session.change_protection(change)? {
+            return Ok(entry.snapshot());
+        }
+        entry.revision += 1;
+        let snapshot = entry.snapshot();
+        self.checkpoint_revision = revision;
+        Ok(snapshot)
     }
 
     pub fn template_project(&self, address: &DocumentRevision) -> Result<Project, String> {
@@ -508,7 +641,9 @@ impl DocumentWorkspace {
         }
         self.candidate_digests.remove(token);
         self.fork_candidates.remove(token);
-        self.candidates.cancel_document(token)
+        let waiting = self.locked_intakes.len();
+        self.locked_intakes.retain(|intake| intake.token != token);
+        self.candidates.cancel_document(token) || self.locked_intakes.len() != waiting
     }
 
     pub fn add_document(&mut self, token: &str) -> Result<WorkspaceSnapshot, String> {
@@ -732,8 +867,12 @@ impl DocumentWorkspace {
     /// Refuses a document that is finalized. Callers check this before opening a file picker.
     pub fn check_unlocked(&self, id: &str) -> Result<(), String> {
         self.check_admission()?;
-        if self.entry(id)?.session.lock().is_some() {
+        let session = &self.entry(id)?.session;
+        if session.lock().is_some() {
             return Err(FINALIZED_MESSAGE.into());
+        }
+        if session.edit_locked() {
+            return Err(EDIT_LOCKED_MESSAGE.into());
         }
         Ok(())
     }
@@ -747,6 +886,10 @@ impl DocumentWorkspace {
     ) -> Result<DocumentSnapshot, String> {
         let revision = self.check_mutation(address)?;
         let entry = self.entry_mut(&address.document_id)?;
+        // Finalizing or unfinalizing changes what the score can do, so a score locked for editing needs its password first.
+        if entry.session.edit_locked() && entry.session.lock() != lock {
+            return Err(EDIT_LOCKED_MESSAGE.into());
+        }
         if !entry.session.set_lock(lock) {
             return Ok(entry.snapshot());
         }
@@ -777,6 +920,9 @@ impl DocumentWorkspace {
         let entry = self.entry_mut(id)?;
         if entry.session.lock().is_some() {
             return Err(FINALIZED_MESSAGE.into());
+        }
+        if entry.session.edit_locked() {
+            return Err(EDIT_LOCKED_MESSAGE.into());
         }
         let staged = entry.candidates.stage_asset(asset)?;
         entry.asset_tokens.insert(staged.token.clone());

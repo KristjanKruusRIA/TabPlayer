@@ -147,6 +147,40 @@ describe('native GP channel-strip interchange',()=>{
     }finally{spy.mockRestore();}
     expect(midiNotes(loadInterchangeScore(output!,settings))).toEqual([[0,82,9],[960,38,9]]);
   });
+  it.each([
+    [1, model.TremoloPickingStyle.Default, '1/2'],
+    [2, model.TremoloPickingStyle.Default, '1/4'],
+    [3, model.TremoloPickingStyle.Default, '1/8'],
+  ])('preserves default tremolo picking with %i marks (%s) through GP export and import', (marks, style, expectedXmlValue) => {
+    const score = music();
+    const beat = score.tracks[0].staves[0].bars[0].voices[0].beats[0];
+    beat.tremoloPicking = Object.assign(new model.TremoloPickingEffect(), { marks, style });
+    const bytes = exportGpInterchange(score, settings);
+    const doc = xml(bytes);
+    const beatNode = doc.querySelector(`Beats > Beat[id="${beat.id}"]`);
+    expect(beatNode?.querySelector(':scope > Tremolo')?.textContent).toBe(expectedXmlValue);
+
+    const reimported = loadInterchangeScore(bytes, settings);
+    const reimportedBeat = reimported.tracks[0].staves[0].bars[0].voices[0].beats[0];
+    expect(reimportedBeat.isTremolo).toBe(true);
+    expect(reimportedBeat.tremoloPicking?.marks).toBe(marks);
+    expect(reimportedBeat.tremoloPicking?.style).toBe(model.TremoloPickingStyle.Default);
+  });
+  it('pins buzz-roll tremolo behavior: speed is retained in GPIF rational while target format lacks roll style', () => {
+    const score = music();
+    const beat = score.tracks[0].staves[0].bars[0].voices[0].beats[0];
+    beat.tremoloPicking = Object.assign(new model.TremoloPickingEffect(), { marks: 2, style: model.TremoloPickingStyle.BuzzRoll });
+    const bytes = exportGpInterchange(score, settings);
+    const doc = xml(bytes);
+    const beatNode = doc.querySelector(`Beats > Beat[id="${beat.id}"]`);
+    expect(beatNode?.querySelector(':scope > Tremolo')?.textContent).toBe('1/4');
+
+    const reimported = loadInterchangeScore(bytes, settings);
+    const reimportedBeat = reimported.tracks[0].staves[0].bars[0].voices[0].beats[0];
+    expect(reimportedBeat.isTremolo).toBe(true);
+    expect(reimportedBeat.tremoloPicking?.marks).toBe(2);
+    expect(reimportedBeat.tremoloPicking?.style).toBe(model.TremoloPickingStyle.Default);
+  });
 });
 it('writes byte-identical GP archives regardless of the wall clock',()=>{
   vi.useFakeTimers();

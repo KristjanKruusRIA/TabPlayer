@@ -147,8 +147,23 @@ fn rejects_unknown_fields_null_flags_invalid_enums_and_nonfinite_parameters() {
         title: String::new(),
         artist: String::new(),
         tempo: f64::NAN,
+        preserve_opening_mark: None,
     };
     assert!(command.validate().is_err());
+}
+
+#[test]
+fn score_info_keeps_its_old_wire_form_unless_the_opening_mark_is_preserved() {
+    let old = r#"{"type":"setScoreInfo","title":"T","artist":"A","tempo":96.0}"#;
+    let parsed: EditCommand = serde_json::from_str(old).unwrap();
+    assert!(parsed.validate().is_ok());
+    // An old log re-serializes without the new key, byte for byte.
+    assert_eq!(serde_json::to_string(&parsed).unwrap(), old);
+    let kept = r#"{"type":"setScoreInfo","title":"T","artist":"A","tempo":96.0,"preserveOpeningMark":true}"#;
+    let parsed: EditCommand = serde_json::from_str(kept).unwrap();
+    assert!(parsed.validate().is_ok());
+    assert_eq!(serde_json::to_string(&parsed).unwrap(), kept);
+    assert!(serde_json::from_str::<EditCommand>(r#"{"type":"setScoreInfo","title":"T","artist":"A","tempo":96.0,"preserveOpeningMark":null}"#).is_err());
 }
 
 #[test]

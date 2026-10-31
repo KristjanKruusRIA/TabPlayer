@@ -125,7 +125,8 @@ export type EditCommand = LyricsCommand | GestureCommand | BarGestureCommand | R
   | { type: 'setTrackColor'; track: number; color: string }
   | { type: 'setTuning'; track: number; tuning: number[]; tuningName?: string }
   | { type: 'setStringCount'; track: number; tuning: number[]; keep: StringCountKeep; tuningName?: string }
-  | { type: 'setScoreInfo'; title: string; artist: string; tempo: number }
+  /** `preserveOpeningMark`: absent rebuilds the opening tempo mark as a plain one (the original behavior, so old logs replay unchanged); true keeps its label, gradual change and visibility and sets only its value. */
+  | { type: 'setScoreInfo'; title: string; artist: string; tempo: number; preserveOpeningMark?: boolean }
   | { type: 'setScoreMetadata'; fields: ScoreMetadata }
   | { type: 'setDirections'; bar: number; directions: number[] }
   | { type: 'setNoteSpelling'; target: BeatTarget; noteIndex: number; accidentalMode: number }

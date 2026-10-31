@@ -110,6 +110,7 @@ fn existing_alias_precedes_missing_source_and_fresh_scope_checks() {
                 title: "Dirty intact score".into(),
                 artist: String::new(),
                 tempo: 133.0,
+                preserve_opening_mark: None,
             },
             None,
         )

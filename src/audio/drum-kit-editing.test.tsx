@@ -89,6 +89,19 @@ it('one choice is one setTrackSound edit that keeps the rest, Standard clears th
   expect(lastSound(onEdit)).toEqual({ ...soundPreset('lead', 'gm'), locked: true });
   expect(lastSound(onEdit)).not.toHaveProperty('drumKit');
 });
+it('Escape closes the hits table and returns focus to its summary, without leaving the panel', () => {
+  const onEdit = vi.fn(), outer = vi.fn();
+  render(<div onKeyDown={outer}>{panel(soundPreset('lead', 'gm'), onEdit)}</div>);
+  const summary = screen.getByText('Which hits differ'), details = summary.closest('details')!;
+  fireEvent.click(summary); details.open = true;
+  const inside = details.querySelector('.drum-kit-table')!;
+  fireEvent.keyDown(inside, { key: 'Escape' });
+  expect(details.open).toBe(false);
+  expect(summary).toHaveFocus();
+  expect(outer).not.toHaveBeenCalled();
+  fireEvent.keyDown(summary, { key: 'Escape' });
+  expect(outer).toHaveBeenCalledTimes(1);
+});
 it('the drum kit select keeps focus while busy and refuses the change', () => {
   const onEdit = vi.fn();
   const { rerender } = render(panel(soundPreset('lead', 'gm'), onEdit));

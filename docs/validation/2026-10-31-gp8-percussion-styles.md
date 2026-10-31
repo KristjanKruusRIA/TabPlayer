@@ -33,7 +33,7 @@ Notations that sound identical (they differ on the page only): snare hit = rim s
 
 ## Review
 
-Reviewed by the coordinator in two rounds; each found real defects (untested kit-keeping, a Track-panel edit route that cleared the selection, a kit control overlapping the source radios in the rig), all fixed here. Rounds stay open until approved. Rig layout was measured with the real `rig.css` in a static page at 1440x900 and 1280x700: the kit adds no height to the head (one compact row, its note in the select title, its table a popover); the page is lighter than the app head, so the app's own heights were not reproduced.
+Reviewed by the coordinator in two rounds; each found real defects (untested kit-keeping, a Track-panel edit route that cleared the selection, a kit control overlapping the source radios in the rig), all fixed here. Rounds stay open until approved. Rig layout was measured in a browser with the real `SoundRig`, the app's `styles.css`, `workstation-shell.css` and `rig.css`, on a drum track, with and without the kit in the head (the harness has three tracks and no surrounding app frame, so absolute heights differ from the app). Head height without / with the kit: 1440x900 83 / 83 px; 1280x700 46 / 46; 1100x700 46 / 81 (the lock wraps to a second row, +35 px); 1024x700 81 / 81 (already two rows). The kit is one nowrap row of about 94 px (the select and a small ? button; the label text and note are clipped for screen readers, the select title carries the note). Its table is a fixed-position popover inside the window at every width, at most 320 px high and scrolling; Escape closes it and returns focus to its summary. At 1100 the kit does add a row.
 
 ## Limits
 

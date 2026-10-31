@@ -134,15 +134,15 @@ it('changes the string count with an explicit kept side, and the engine keeps no
 it('tuning names start from the staff, clear on pitch typing, and saved-tuning Use supplies them to Apply and Add track',()=>{
   const score=previewEdit(blankProject(),{type:'setRest',target:{track:0,staff:0,bar:0,voice:0,beat:0}}).score,onEdit=vi.fn();score.tracks[0].staves[0].stringTuning.name='Imported';
   render(<TrackSettingsPanel score={score} selected={0} busy={false} onEdit={onEdit}/>);
-  fireEvent.click(screen.getByRole('button',{name:'Apply tuning'}));expect(onEdit).toHaveBeenLastCalledWith({type:'setTuning',track:0,tuning:[64,59,55,50,45,40],tuningName:'Imported'});
+  fireEvent.click(screen.getByRole('button',{name:'Apply tuning'}));expect(onEdit).not.toHaveBeenCalled();
   const input=screen.getByLabelText('Tuning (notes, high to low)');
   fireEvent.change(input,{target:{value:'E4 B3 G3 D3 A2 D2'}});fireEvent.click(screen.getByRole('button',{name:'Apply tuning'}));expect(onEdit).toHaveBeenLastCalledWith({type:'setTuning',track:0,tuning:[64,59,55,50,45,38],tuningName:''});
   fireEvent.click(screen.getByRole('button',{name:'Saved tunings for Tuning (notes, high to low)'}));
   fireEvent.click(within(within(screen.getByRole('dialog')).getByRole('group',{name:'Guitar · 6 strings'})).getByRole('button',{name:/^DADGAD/}));
-  fireEvent.click(screen.getByRole('button',{name:'Cancel'}));expect(input).toHaveValue('E4 B3 G3 D3 A2 D2');expect(onEdit).toHaveBeenCalledTimes(2);
+  fireEvent.click(screen.getByRole('button',{name:'Cancel'}));expect(input).toHaveValue('E4 B3 G3 D3 A2 D2');expect(onEdit).toHaveBeenCalledTimes(1);
   fireEvent.click(screen.getByRole('button',{name:'Saved tunings for Tuning (notes, high to low)'}));
   fireEvent.click(within(within(screen.getByRole('dialog')).getByRole('group',{name:'Guitar · 6 strings'})).getByRole('button',{name:/^DADGAD/}));fireEvent.click(screen.getByRole('button',{name:'Use tuning'}));
-  expect(input).toHaveValue('D4 A3 G3 D3 A2 D2');expect(onEdit).toHaveBeenCalledTimes(2);
+  expect(input).toHaveValue('D4 A3 G3 D3 A2 D2');expect(onEdit).toHaveBeenCalledTimes(1);
   fireEvent.click(screen.getByRole('button',{name:'Apply tuning'}));expect(onEdit).toHaveBeenLastCalledWith({type:'setTuning',track:0,tuning:[62,57,55,50,45,38],tuningName:'DADGAD'});
   fireEvent.click(screen.getByText('Add instrument'));fireEvent.click(screen.getByRole('button',{name:'Add track'}));expect(onEdit).toHaveBeenLastCalledWith({type:'addTrack',name:'Bass',program:33,tuning:[43,38,33,28],tuningName:''});
   fireEvent.click(screen.getByRole('button',{name:'Saved tunings for New track tuning'}));
@@ -154,8 +154,9 @@ it('a string-count change sends the draft tuning name and the draft resets when 
   const view=render(<TrackSettingsPanel score={fresh('Imported')} selected={0} busy={false} onEdit={onEdit}/>);
   fireEvent.change(screen.getByLabelText('Tuning (notes, high to low)'),{target:{value:'E4 B3 G3 D3 A2 E2 B1'}});fireEvent.click(screen.getByRole('button',{name:'Change string count'}));
   expect(onEdit).toHaveBeenLastCalledWith({type:'setStringCount',track:0,tuning:[64,59,55,50,45,40,35],keep:'high',tuningName:''});
+  // The draft name starts again from the new staff, so applying its own tuning and name records nothing.
   view.rerender(<TrackSettingsPanel score={fresh('Other')} selected={0} busy={false} onEdit={onEdit}/>);fireEvent.click(screen.getByRole('button',{name:'Apply tuning'}));
-  expect(onEdit).toHaveBeenLastCalledWith({type:'setTuning',track:0,tuning:[64,59,55,50,45,40],tuningName:'Other'});
+  expect(onEdit).toHaveBeenCalledTimes(1);
 });
 it('focusing dial does not erase tuning name or dispatch edits when unshifted',()=>{
   const score=previewEdit(blankProject(),{type:'setTuning',track:0,tuning:[64,59,55,50,45,38],tuningName:'Drop D'}).score,onEdit=vi.fn();
@@ -268,4 +269,17 @@ it('the Keep pitch box keeps focus and its value while busy', async () => {
   fireEvent.click(box);
   await waitFor(() => expect(box).toBeChecked());
   expect(box.closest('label')).toHaveClass('check');
+});
+
+it('Apply tuning records nothing when the tuning and name are the current ones, with or without Keep pitch', () => {
+  const score = previewEdit(blankProject(), { type: 'setRest', target: { track: 0, staff: 0, bar: 0, voice: 0, beat: 0 } }).score, onEdit = vi.fn();
+  render(<TrackSettingsPanel score={score} selected={0} busy={false} onEdit={onEdit} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Apply tuning' }));
+  fireEvent.click(screen.getByLabelText('Keep pitch'));
+  fireEvent.click(screen.getByRole('button', { name: 'Apply tuning' }));
+  expect(onEdit).not.toHaveBeenCalled();
+  fireEvent.change(screen.getByLabelText('Tuning (notes, high to low)'), { target: { value: 'E4 B3 G3 D3 A2 D2' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Apply tuning' }));
+  expect(onEdit).toHaveBeenCalledTimes(1);
+  expect(onEdit.mock.calls[0][0]).toMatchObject({ type: 'setTuning', keepPitch: true });
 });

@@ -393,6 +393,7 @@ it('lost pointer or dragging out and back preserves tuning name in StructurePane
   fireEvent.pointerDown(dial, { pointerId: 1, clientY: 100, button: 0 });
   fireEvent.pointerMove(dial, { pointerId: 1, clientY: 80 });
   fireEvent.pointerCancel(dial, { pointerId: 1 });
+  fireEvent.change(screen.getByLabelText('Capo'), { target: { value: '1' } });
   fireEvent.click(screen.getByRole('button', { name: 'Apply staff settings' }));
   expect(onEdit).toHaveBeenLastCalledWith(expect.objectContaining({
     type: 'setStaffSettings',
@@ -406,6 +407,7 @@ it('lost pointer or dragging out and back preserves tuning name in StructurePane
   fireEvent.pointerMove(dial, { pointerId: 2, clientY: 80 });
   fireEvent.pointerMove(dial, { pointerId: 2, clientY: 100 });
   fireEvent.pointerUp(dial, { pointerId: 2, clientY: 100 });
+  fireEvent.change(screen.getByLabelText('Capo'), { target: { value: '2' } });
   fireEvent.click(screen.getByRole('button', { name: 'Apply staff settings' }));
   expect(onEdit).toHaveBeenLastCalledWith(expect.objectContaining({
     type: 'setStaffSettings',
@@ -585,7 +587,7 @@ it('staff settings keep the staff tuning name through capo edits and send the dr
   fireEvent.click(screen.getByRole('button',{name:'Apply staff settings'}));
   expect(onEdit).toHaveBeenLastCalledWith(expect.objectContaining({settings:expect.objectContaining({tuning:[62,57,54,50,45,38],tuningName:'Open D'})}));
   const next=music();next.tracks[0].staves[0].stringTuning.name='Fresh';
-  view.rerender(<StructurePanel {...props} score={next}/>);fireEvent.click(screen.getByRole('button',{name:'Apply staff settings'}));
+  view.rerender(<StructurePanel {...props} score={next}/>);fireEvent.change(screen.getByLabelText('Capo'),{target:{value:'3'}});fireEvent.click(screen.getByRole('button',{name:'Apply staff settings'}));
   expect(onEdit).toHaveBeenLastCalledWith(expect.objectContaining({settings:expect.objectContaining({tuning:[64,59,55,50,45,40],tuningName:'Fresh'})}));
 });
 
@@ -675,6 +677,7 @@ it('StructurePanel keep pitch checkbox passes keepPitch: true to setStaffSetting
   expect(keepPitch).not.toBeChecked();
   fireEvent.click(keepPitch);
   expect(keepPitch).toBeChecked();
+  fireEvent.change(screen.getByLabelText('Capo'), { target: { value: '2' } });
   fireEvent.click(screen.getByRole('button', { name: 'Apply staff settings' }));
   expect(onEdit).toHaveBeenLastCalledWith(expect.objectContaining({
     type: 'setStaffSettings',
@@ -715,4 +718,17 @@ it('the Keep pitch box in the staff panel keeps focus and its value while busy',
   fireEvent.click(box);
   await waitFor(() => expect(box).toBeChecked());
   expect(box.closest('label')).toHaveClass('check');
+});
+
+it('Apply staff settings records nothing when every value is the current one, with or without Keep pitch', () => {
+  const onEdit = vi.fn(), props = { score: music(), target, string: 6, busy: false, onEdit, onSelect: vi.fn() };
+  render(<StructurePanel {...props} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Apply staff settings' }));
+  fireEvent.click(screen.getByLabelText('Keep pitch'));
+  fireEvent.click(screen.getByRole('button', { name: 'Apply staff settings' }));
+  expect(onEdit).not.toHaveBeenCalled();
+  fireEvent.change(screen.getByLabelText('Capo'), { target: { value: '2' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Apply staff settings' }));
+  expect(onEdit).toHaveBeenCalledTimes(1);
+  expect(onEdit.mock.calls[0][0].settings).toMatchObject({ capo: 2, keepPitch: true });
 });

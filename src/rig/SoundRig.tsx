@@ -11,6 +11,7 @@ import { BlockStage } from './BlockStage';
 import { SignalChain } from './SignalChain';
 import { SoundBrowser } from './SoundBrowser';
 import { SourcePicker, TrackStrip } from './SourcePicker';
+import { DrumKitPicker } from '../audio/DrumKitPicker';
 import type { BlockRef } from './blocks';
 import './rig.css';
 
@@ -42,6 +43,7 @@ export function SoundRig({trackId,sound,onEdit,playback,busy=false,tracks,onTrac
     <header className="rig-head">
       <TrackStrip tracks={tracks} trackId={trackId} onTrack={onTrack}/>
       <SourcePicker editing={editing} track={tracks.find(item=>item.id===trackId)}/>
+      {tracks.find(item=>item.id===trackId)?.percussion&&<DrumKitPicker editing={editing} className="rig-drum-kit"/>}
       <Segmented className="rig-presets" label="Sound preset" value={current.presetId} disabled={busy} onChange={id=>void editing.applyPreset(id)} options={presetIds.map(id=>({value:id,label:presetName(id)}))}/>
       <SoundLock editing={editing} className="rig-lock"/>
       <span className="rig-head-gap"/>

@@ -7,13 +7,14 @@ import { factoryCategories, factorySounds } from './factory-sounds';
 import { chainOrder } from '../document-settings';
 import { ampModels, blockNames, cabinetModels, graphicBands, modelName, parameters, presetIds, presetName, soundPreset } from './sound-model';
 import { SoundLock } from './SoundLock';
+import { DrumKitPicker } from './DrumKitPicker';
 import { useSoundEditing } from './useSoundEditing';
 import type { Board } from './useSoundEditing';
 import './sound-panel.css';
 
 export { soundPreset };
 /** The inspector's Sound task: every control as a field. The rig in `src/rig` shows the same sound as hardware; both share `useSoundEditing`. */
-export function SoundPanel({trackId,sound,onEdit,playback,busy=false,shown=true}:{trackId:string;sound?:TrackSound;onEdit:(edit:EditCommand)=>void|Promise<void>;playback?:NativePlaybackController|null;busy?:boolean;shown?:boolean}) {
+export function SoundPanel({trackId,sound,onEdit,playback,busy=false,shown=true,percussion=false}:{trackId:string;/** A drum track, which also chooses its drum kit here. */percussion?:boolean;sound?:TrackSound;onEdit:(edit:EditCommand)=>void|Promise<void>;playback?:NativePlaybackController|null;busy?:boolean;shown?:boolean}) {
   const editing=useSoundEditing({trackId,sound,onEdit,playback,busy,shown});
   const {playbackState,current,devices,error,status,fx,duplicate,syncOf,sync,order,move,movedBlock,pastePedal,clipboard,library,chosen,setChosen,name,setName,entry,confirming,setConfirming,savedSelect,closeConfirm,
     factoryChoice,setFactoryChoice,factory,factoryNote,applyFactory,previewer,previewChoice,previewLabel,showingPreview,previewSelect,choosePreview,cancelPreview,keepPreview,escapePreview,orphanPreview,first,second,save}=editing;
@@ -48,6 +49,7 @@ export function SoundPanel({trackId,sound,onEdit,playback,busy=false,shown=true}
 
   return <section className="sound-panel" aria-label="Track sound"><h3>Sound</h3>
     <SoundLock editing={editing} className="check"/>
+    {percussion&&<DrumKitPicker editing={editing} className="drum-kit"/>}
     <fieldset disabled={busy}>
     <label>Sound source<select value={current.voiceId??''} onChange={e=>save({...current,voiceId:e.target.value||null})}><option value="">Automatic instrument</option><option value="gm">General MIDI</option><option value="green-guitar">Green Guitar</option><option value="black-guitar">Black Guitar</option><option value="darkblack-bass">Darkblack Bass</option><option value="babyblue-bass">Babyblue Bass</option></select></label>
     <label>Sound preset<select value={current.presetId} onChange={e=>save(soundPreset(e.target.value as TrackSound['presetId'],current.voiceId))}>{presetIds.map(id=><option value={id} key={id}>{presetName(id)}</option>)}</select></label>

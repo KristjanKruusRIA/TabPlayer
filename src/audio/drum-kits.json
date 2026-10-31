@@ -1,0 +1,9 @@
+{
+  "note": "Drum kits the pinned GM sound bank carries (bank 128). A drum track picks one with its MIDI program; any other program plays Standard. `changes` lists the drum keys that sound different from Standard. Checked against the rendered sound by src-tauri/src/audio/drum_kit_tests.rs.",
+  "kits": [
+    { "program": 0, "label": "Standard", "changes": [] },
+    { "program": 8, "label": "Room", "changes": [41, 43, 47, 48, 50] },
+    { "program": 32, "label": "Jazz", "changes": [35, 36] },
+    { "program": 40, "label": "Brush", "changes": [35, 36, 38, 39, 40] }
+  ]
+}

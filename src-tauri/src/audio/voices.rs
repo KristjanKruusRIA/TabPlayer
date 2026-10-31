@@ -150,6 +150,63 @@ pub fn effective_note_program(
     }
 }
 
+/// The drum kit program a percussion track is set to play, when it is not Standard.
+pub fn drum_kit_for_track(
+    track: &super::plan::PlanTrack,
+    settings: &crate::settings::DocumentSettings,
+) -> Option<u8> {
+    if !track.percussion {
+        return None;
+    }
+    settings
+        .sounds
+        .get(&track.id)
+        .and_then(|sound| sound.drum_kit)
+}
+
+/// `plan` with each drum track that chose a kit selecting it everywhere the plan names a program: its
+/// own, its program changes and its notes. Playback, auditions and exports all build their renderer from
+/// this, so they play the same kit. The plan itself when no drum track chose one.
+pub fn with_drum_kits(
+    plan: Arc<super::plan::PlaybackPlan>,
+    settings: &crate::settings::DocumentSettings,
+) -> Arc<super::plan::PlaybackPlan> {
+    if !plan
+        .tracks
+        .iter()
+        .any(|track| drum_kit_for_track(track, settings).is_some())
+    {
+        return plan;
+    }
+    let kits: std::collections::HashMap<&str, u8> = plan
+        .tracks
+        .iter()
+        .filter_map(|track| Some((track.id.as_str(), drum_kit_for_track(track, settings)?)))
+        .collect();
+    let mut changed = (*plan).clone();
+    for track in &mut changed.tracks {
+        if let Some(kit) = kits.get(track.id.as_str()) {
+            track.program = *kit;
+        }
+    }
+    for note in &mut changed.notes {
+        if let (Some(kit), Some(_)) = (kits.get(note.track_id.as_str()), note.program) {
+            note.program = Some(*kit);
+        }
+    }
+    for event in &mut changed.midi {
+        if let super::plan::PlanMidiEvent::Program {
+            track_id, program, ..
+        } = event
+        {
+            if let Some(kit) = kits.get(track_id.as_str()) {
+                *program = *kit;
+            }
+        }
+    }
+    Arc::new(changed)
+}
+
 /// The articulation `note` sounds with: its own, or when the track is locked the one its start sound gives it.
 pub fn effective_articulation(
     note: &super::plan::PlanNote,

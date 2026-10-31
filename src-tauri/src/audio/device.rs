@@ -13,7 +13,7 @@ use super::{
     reference_sync::ReferenceSyncMap,
     renderer::{PreparedMix, Renderer},
     resources::AudioResources,
-    voices::{resource_requests, track_locked, voice_id_for_track},
+    voices::{drum_kit_for_track, resource_requests, track_locked, voice_id_for_track},
 };
 use crate::settings::{ChannelMix, DocumentSettings};
 use cpal::{
@@ -2569,11 +2569,38 @@ fn sound_source_changed(
     plan.tracks.iter().any(|track| {
         voice_id_for_track(track, new) != voice_id_for_track(track, old)
             || track_locked(new, &track.id) != track_locked(old, &track.id)
+            || drum_kit_for_track(track, new) != drum_kit_for_track(track, old)
     })
 }
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_change_of_drum_kit_needs_a_rebuilt_renderer_but_only_on_a_drum_track() {
+        use crate::settings::TrackSound;
+        let plan: PlaybackPlan = serde_json::from_value(serde_json::json!({"generation":1,"ppq":960,"durationTick":3840,"durationMs":2000,"tracks":[{"id":"d","program":0,"percussion":true},{"id":"g","program":25,"percussion":false}],"tempos":[{"tick":0,"bpm":120}],"occurrences":[{"bar":0,"occurrence":0,"meterNumerator":4,"meterDenominator":4,"startTick":0,"endTick":3840,"startMs":0,"endMs":2000}],"notes":[],"midi":[]})).unwrap();
+        let with = |track: &str, kit| {
+            let mut settings = DocumentSettings::default();
+            settings.sounds.insert(
+                track.into(),
+                TrackSound {
+                    drum_kit: kit,
+                    ..TrackSound::default()
+                },
+            );
+            settings
+        };
+        let none = DocumentSettings::default();
+        assert!(sound_source_changed(&plan, &none, &with("d", Some(32))));
+        assert!(sound_source_changed(&plan, &with("d", Some(32)), &none));
+        assert!(sound_source_changed(
+            &plan,
+            &with("d", Some(8)),
+            &with("d", Some(40))
+        ));
+        assert!(!sound_source_changed(&plan, &none, &with("g", Some(32))));
+    }
+
     #[test]
     fn a_change_of_lock_needs_a_rebuilt_renderer_and_new_samples_but_a_mix_change_does_not() {
         use crate::settings::TrackSound;

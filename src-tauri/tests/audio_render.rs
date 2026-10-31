@@ -1731,6 +1731,7 @@ fn locked_track_sound_ignores_scheduled_program_changes_and_seek_while_unlocked_
             preset_id: "gm".into(),
             effects: Default::default(),
             locked: false,
+            drum_kit: None,
         },
     );
     let mut unlocked_renderer =
@@ -1757,6 +1758,7 @@ fn locked_track_sound_ignores_scheduled_program_changes_and_seek_while_unlocked_
             preset_id: "gm".into(),
             effects: Default::default(),
             locked: true,
+            drum_kit: None,
         },
     );
     let requests = resource_requests(&plan, &locked_settings);
@@ -1846,6 +1848,7 @@ fn gm_lock_settings(locked: bool) -> tabplayer_lib::settings::DocumentSettings {
             preset_id: "gm".into(),
             effects: Default::default(),
             locked,
+            drum_kit: None,
         },
     );
     settings
@@ -2065,6 +2068,7 @@ fn unlocking_needs_the_samples_an_unlocked_track_asks_for_that_a_locked_bank_lac
                 preset_id: "gm".into(),
                 effects: Default::default(),
                 locked,
+                drum_kit: None,
             },
         );
         settings
@@ -2115,6 +2119,7 @@ fn a_locked_track_plays_the_articulation_its_start_sound_gives() {
                 preset_id: "gm".into(),
                 effects: Default::default(),
                 locked,
+                drum_kit: None,
             },
         );
         settings
@@ -2190,6 +2195,7 @@ fn a_real_renderer_and_export_play_the_locked_articulation_only_when_locked() {
                 preset_id: "gm".into(),
                 effects: Default::default(),
                 locked,
+                drum_kit: None,
             },
         );
         settings

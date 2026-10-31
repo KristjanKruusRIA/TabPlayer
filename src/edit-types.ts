@@ -77,7 +77,9 @@ export interface FxSettings {
   second?: FxSettings;
 }
 export type EffectBlock = Exclude<keyof FxSettings, 'order'|'second'>;
-export interface TrackSound { voiceId: string|null; presetId: 'clean'|'crunch'|'lead'|'bass'|'gm'; effects: FxSettings; locked?: boolean }
+export interface TrackSound { voiceId: string|null; presetId: 'clean'|'crunch'|'lead'|'bass'|'gm'; effects: FxSettings; locked?: boolean;
+  /** The drum kit a percussion track plays, as the program that selects it in the sound bank (8, 32 or 40); left out for the Standard kit. */
+  drumKit?: number }
 export interface SyncAnchor { bar: number; occurrence: number; ratio: number; audioMs: number }
 export interface ReferenceSyncBounds { entryAudioMs: number; exitAudioMs: number }
 export type BackingFilter = 'none'|'bassEnhance'|'bassAttenuation'|'mediumEnhance'|'mediumAttenuation'|'highEnhance'|'highAttenuation';

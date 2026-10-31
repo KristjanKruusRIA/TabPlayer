@@ -3,6 +3,8 @@ pub mod backing;
 pub mod cabinet_ir;
 pub mod decode;
 pub mod device;
+#[cfg(test)]
+mod drum_kit_tests;
 pub mod dsp;
 pub mod ir_convolver;
 pub mod master;

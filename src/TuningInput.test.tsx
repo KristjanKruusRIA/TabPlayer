@@ -1,12 +1,12 @@
 // @vitest-environment jsdom
 import { useState } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { TuningInput } from './TuningInput';
 vi.mock('@tauri-apps/api/core',()=>({invoke:vi.fn(async()=>({format:'tabplayer-tuning-library',version:1,entries:[]}))}));
 afterEach(cleanup);
-function Draft({onCommit}:{onCommit?:(pitches:number[])=>void}){const [value,onChange]=useState('E4 B3 G3 D3 A2 E2'),[name,setName]=useState('');return <><TuningInput label="Notes" presetLabel="Preset" value={value} onChange={onChange} tuningName={name} onTuningNameChange={setName} onCommit={onCommit}/><output aria-label="Draft name">{name}</output></>;}
+function Draft({onCommit}:{onCommit?:(pitches:number[],changed:number[])=>void}){const [value,onChange]=useState('E4 B3 G3 D3 A2 E2'),[name,setName]=useState('');return <><TuningInput label="Notes" presetLabel="Preset" value={value} onChange={onChange} tuningName={name} onTuningNameChange={setName} onCommit={onCommit}/><output aria-label="Draft name">{name}</output></>;}
 it('groups exactly25 presets and choosing nine-string guitar only fills the editable draft',()=>{
   render(<Draft/>);const select=screen.getByLabelText('Preset');expect(select.querySelectorAll('optgroup')).toHaveLength(7);expect(select.querySelectorAll('option')).toHaveLength(26);fireEvent.change(select,{target:{value:'guitar-9-standard-csharp'}});expect(screen.getByLabelText('Notes')).toHaveValue('E4 B3 G3 D3 A2 E2 B1 F#1 C#1');expect(select).toHaveValue('guitar-9-standard-csharp');
 });
@@ -33,12 +33,12 @@ it('string pegs step semitones by button, keyboard, and drag and commit one undo
   fireEvent.click(screen.getByRole('button',{name:'Tune Notes string 6 down'}));
   expect(screen.getByLabelText('Notes')).toHaveValue('E4 B3 G3 D3 A2 D#2');
   expect(onCommit).toHaveBeenCalledTimes(1);
-  expect(onCommit).toHaveBeenLastCalledWith([64,59,55,50,45,39]);
+  expect(onCommit).toHaveBeenLastCalledWith([64,59,55,50,45,39],[5]);
 
   fireEvent.keyDown(peg6,{key:'ArrowDown'});
   expect(screen.getByLabelText('Notes')).toHaveValue('E4 B3 G3 D3 A2 D2');
   expect(onCommit).toHaveBeenCalledTimes(2);
-  expect(onCommit).toHaveBeenLastCalledWith([64,59,55,50,45,38]);
+  expect(onCommit).toHaveBeenLastCalledWith([64,59,55,50,45,38],[5]);
 
   // Pointer drag updates the draft live and commits once on pointerUp.
   const peg1=screen.getByRole('slider',{name:'Notes string 1 peg'});
@@ -49,7 +49,7 @@ it('string pegs step semitones by button, keyboard, and drag and commit one undo
   expect(onCommit).toHaveBeenCalledTimes(2);
   fireEvent.pointerUp(peg1,{pointerId:1,clientY:116});
   expect(onCommit).toHaveBeenCalledTimes(3);
-  expect(onCommit).toHaveBeenLastCalledWith([62,59,55,50,45,38]);
+  expect(onCommit).toHaveBeenLastCalledWith([62,59,55,50,45,38],[0]);
 });
 
 it('peg clicked with no movement commits nothing and preserves tuning name',()=>{
@@ -170,7 +170,7 @@ it('wheel over an unfocused peg does not retune and focused wheel commits once a
     expect(onCommit).not.toHaveBeenCalled();
     vi.advanceTimersByTime(300);
     expect(onCommit).toHaveBeenCalledTimes(1);
-    expect(onCommit).toHaveBeenLastCalledWith([66,59,55,50,45,40]);
+    expect(onCommit).toHaveBeenLastCalledWith([66,59,55,50,45,40],[0]);
   }finally{
     vi.useRealTimers();
   }
@@ -201,4 +201,86 @@ it('9 strings peg strip enables horizontal scrolling to prevent clipping in narr
   expect(strip).toHaveStyle({ 'grid-template-columns': 'repeat(9, minmax(20px, 1fr))' });
   const cells = document.querySelectorAll('.tp-tuning-peg-cell');
   expect(cells).toHaveLength(9);
+});
+function Live({initial='E4 B3 G3 D3 A2 E2',busy=false,revision,onCommit,onNameChange}:{initial?:string;busy?:boolean;revision?:object;onCommit?:(pitches:number[],changed:number[])=>void;onNameChange?:(name:string)=>void}){const [value,onChange]=useState(initial),[name,setName]=useState('Standard');return <TuningInput label="Notes" presetLabel="Preset" value={value} onChange={onChange} tuningName={name} onTuningNameChange={n=>{setName(n);onNameChange?.(n);}} busy={busy} revision={revision} onCommit={onCommit}/>;}
+const pegOf=(n:number)=>screen.getByRole('slider',{name:`Notes string ${n} peg`});
+it('wheel over peg 1, Tab, wheel over peg 2 within the settle time commits both pegs as one edit',()=>{
+  vi.useFakeTimers();
+  try{
+    const onCommit=vi.fn();render(<Live onCommit={onCommit}/>);
+    pegOf(1).focus();fireEvent.wheel(pegOf(1),{deltaY:-100});
+    pegOf(2).focus();fireEvent.wheel(pegOf(2),{deltaY:-100});
+    vi.advanceTimersByTime(299);expect(onCommit).not.toHaveBeenCalled();vi.advanceTimersByTime(1);
+    expect(onCommit).toHaveBeenCalledTimes(1);expect(onCommit).toHaveBeenLastCalledWith([65,60,55,50,45,40],[0,1]);
+  }finally{vi.useRealTimers();}
+});
+it('a step press while a wheel gesture is waiting joins it instead of recording a second edit',()=>{
+  vi.useFakeTimers();
+  try{
+    const onCommit=vi.fn();render(<Live onCommit={onCommit}/>);
+    pegOf(1).focus();fireEvent.wheel(pegOf(1),{deltaY:-100});
+    fireEvent.click(screen.getByRole('button',{name:'Tune Notes string 6 up'}));
+    vi.advanceTimersByTime(1000);
+    expect(onCommit).toHaveBeenCalledTimes(1);expect(onCommit).toHaveBeenLastCalledWith([65,59,55,50,45,41],[0,5]);
+  }finally{vi.useRealTimers();}
+});
+it('a wheel commit uses the latest onCommit, not the one from the render that scheduled it',()=>{
+  vi.useFakeTimers();
+  try{
+    const first=vi.fn(),second=vi.fn(),revision={};const props={label:'Notes',presetLabel:'Preset',value:'E4 B3 G3 D3 A2 E2',onChange:vi.fn(),tuningName:'',onTuningNameChange:vi.fn(),revision};
+    const view=render(<TuningInput {...props} onCommit={first}/>);
+    pegOf(1).focus();fireEvent.wheel(pegOf(1),{deltaY:-100});
+    view.rerender(<TuningInput {...props} onCommit={second}/>);
+    vi.advanceTimersByTime(300);
+    expect(first).not.toHaveBeenCalled();expect(second).toHaveBeenCalledTimes(1);expect(second).toHaveBeenLastCalledWith([65,59,55,50,45,40],[0]);
+  }finally{vi.useRealTimers();}
+});
+it('wheel then undo within the settle time commits nothing: the new revision already replaced the draft',()=>{
+  vi.useFakeTimers();
+  try{
+    const first=vi.fn(),second=vi.fn(),props={label:'Notes',presetLabel:'Preset',onChange:vi.fn(),tuningName:'',onTuningNameChange:vi.fn()};
+    const view=render(<TuningInput {...props} value="E4 B3 G3 D3 A2 E2" revision={{}} onCommit={first}/>);
+    pegOf(1).focus();fireEvent.wheel(pegOf(1),{deltaY:-100});
+    view.rerender(<TuningInput {...props} value="E4 B3 G3 D3 A2 D2" revision={{}} onCommit={second}/>);
+    vi.advanceTimersByTime(1000);
+    expect(first).not.toHaveBeenCalled();expect(second).not.toHaveBeenCalled();
+  }finally{vi.useRealTimers();}
+});
+it('wheel that settles while busy commits nothing and reverts the draft and its name to the saved tuning',()=>{
+  vi.useFakeTimers();
+  try{
+    const onCommit=vi.fn(),onNameChange=vi.fn(),view=render(<Live onCommit={onCommit} onNameChange={onNameChange}/>);
+    pegOf(1).focus();fireEvent.wheel(pegOf(1),{deltaY:-100});
+    expect(screen.getByLabelText('Notes')).toHaveValue('F4 B3 G3 D3 A2 E2');
+    view.rerender(<Live busy onCommit={onCommit} onNameChange={onNameChange}/>);
+    act(()=>{vi.advanceTimersByTime(300);});
+    expect(onCommit).not.toHaveBeenCalled();
+    expect(screen.getByLabelText('Notes')).toHaveValue('E4 B3 G3 D3 A2 E2');expect(onNameChange).toHaveBeenLastCalledWith('Standard');
+  }finally{vi.useRealTimers();}
+});
+it('a held arrow key is one edit; a new press is another',()=>{
+  const onCommit=vi.fn();render(<Live onCommit={onCommit}/>);
+  fireEvent.keyDown(pegOf(6),{key:'ArrowUp'});
+  for(let i=0;i<5;i++)fireEvent.keyDown(pegOf(6),{key:'ArrowUp',repeat:true});
+  expect(onCommit).toHaveBeenCalledTimes(1);expect(screen.getByLabelText('Notes')).toHaveValue('E4 B3 G3 D3 A2 F2');
+  fireEvent.keyUp(pegOf(6),{key:'ArrowUp'});fireEvent.keyDown(pegOf(6),{key:'ArrowUp'});
+  expect(onCommit).toHaveBeenCalledTimes(2);
+});
+it('busy keeps every control focusable with aria-disabled, refuses presses, and records nothing',()=>{
+  const onCommit=vi.fn(),view=render(<Live onCommit={onCommit}/>);
+  const input=screen.getByLabelText('Notes'),preset=screen.getByLabelText('Preset'),saved=screen.getByRole('button',{name:'Saved tunings for Notes'}),up=screen.getByRole('button',{name:'Tune Notes string 6 up'});
+  for(const control of [input,preset,saved,up]){control.focus();view.rerender(<Live busy onCommit={onCommit}/>);expect(control).toHaveFocus();expect(control).not.toBeDisabled();expect(control).toHaveAttribute('aria-disabled','true');view.rerender(<Live onCommit={onCommit}/>);}
+  view.rerender(<Live busy onCommit={onCommit}/>);
+  fireEvent.click(up);fireEvent.click(saved);fireEvent.keyDown(pegOf(6),{key:'ArrowUp'});fireEvent.change(input,{target:{value:'E4 B3 G3 D3 A2 D2'}});fireEvent.change(preset,{target:{value:'guitar-6-drop-d'}});
+  expect(onCommit).not.toHaveBeenCalled();expect(input).toHaveValue('E4 B3 G3 D3 A2 E2');expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+});
+it('stepping to the lowest or highest pitch keeps focus on the step button and marks it aria-disabled, not disabled',()=>{
+  const view=render(<Live initial="E4 B3 G3 D3 A2 C#-1"/>);
+  const down=screen.getByRole('button',{name:'Tune Notes string 6 down'});down.focus();fireEvent.click(down);
+  expect(pegOf(6)).toHaveAttribute('aria-valuenow','0');expect(down).toHaveFocus();expect(down).not.toBeDisabled();expect(down).toHaveAttribute('aria-disabled','true');
+  fireEvent.click(down);expect(pegOf(6)).toHaveAttribute('aria-valuenow','0');
+  view.unmount();
+  render(<Live initial="E4 B3 G3 D3 A2 G9"/>);
+  const up=screen.getByRole('button',{name:'Tune Notes string 6 up'});up.focus();fireEvent.click(up);
+  expect(pegOf(6)).toHaveAttribute('aria-valuenow','127');expect(up).toHaveFocus();expect(up).not.toBeDisabled();expect(up).toHaveAttribute('aria-disabled','true');
 });

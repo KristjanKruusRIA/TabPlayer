@@ -65,7 +65,7 @@ it('clears the settings with the reset button, and when the last field returns t
 it('is disabled while busy or locked, and explains a tie destination and a bent note', () => {
   const score = music(), onEdit = vi.fn();
   const view = render(<TechniquePanel score={score} target={target} string={6} busy onEdit={onEdit} />);
-  for (const name of [/Sounding length/, /Start offset/, /Velocity change/]) expect(field(name)).toBeDisabled();
+  for (const name of [/Sounding length/, /Start offset/, /Velocity change/]) { expect(field(name)).not.toBeDisabled(); expect(field(name).closest('fieldset')).toHaveAttribute('aria-disabled', 'true'); }
   view.unmount();
   const tied = music(); const first = noteAt(tied), second = noteAt(tied, 0, 1);
   first.tieDestination = second; second.tieOrigin = first; second.isTieDestination = true;

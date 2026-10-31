@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { previewEdit } from '../engine';
 import { blankProject } from '../project';
@@ -217,4 +217,17 @@ it('with string 1 edited in the text box and not applied, peg 6 step commits sav
   expect(peg7Up).toBeDisabled();
   const peg7Dial = screen.getByRole('slider', { name: 'Tuning (notes, high to low) string 7 peg' });
   expect(peg7Dial).toHaveAttribute('aria-disabled', 'true');
+});
+it('wheel over two pegs within the settle time dispatches one setTuning edit with both strings', () => {
+  vi.useFakeTimers();
+  try {
+    const score = previewEdit(blankProject(), { type: 'setNote', target: { track: 0, staff: 0, bar: 0, voice: 0, beat: 0 }, string: 6, fret: 3 }).score, onEdit = vi.fn();
+    render(<TrackSettingsPanel score={score} selected={0} busy={false} onEdit={onEdit} />);
+    const peg = (n: number) => screen.getByRole('slider', { name: `Tuning (notes, high to low) string ${n} peg` });
+    peg(1).focus(); fireEvent.wheel(peg(1), { deltaY: -100 });
+    peg(2).focus(); fireEvent.wheel(peg(2), { deltaY: -100 });
+    act(() => { vi.advanceTimersByTime(300); });
+    expect(onEdit).toHaveBeenCalledTimes(1);
+    expect(onEdit).toHaveBeenLastCalledWith({ type: 'setTuning', track: 0, tuning: [65, 60, 55, 50, 45, 40], tuningName: '' });
+  } finally { vi.useRealTimers(); }
 });

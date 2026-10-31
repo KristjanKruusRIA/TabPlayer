@@ -2,6 +2,8 @@ import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, 
 import { model } from '@coderline/alphatab';
 import type { PitchCurve } from '../edit-types';
 import { EnumInput } from './controls';
+import { BusyFieldset } from '../ui/BusyFieldset';
+import { busyGuard } from '../ui/useBusyGuard';
 
 type PitchPoint = PitchCurve['points'][number];
 
@@ -90,9 +92,9 @@ export const WHAMMY_PRESETS: readonly CurvePreset[] = [
     svgPath: 'M2 13 L16 4',
   },
   {
-    id: 'predive',
+    id: 'hold',
     name: 'Hold',
-    type: model.WhammyType.Predive,
+    type: model.WhammyType.Hold,
     points: [
       { offset: 0, value: -4 },
       { offset: 60, value: -4 },
@@ -106,6 +108,10 @@ function areCurvesEqual(a: PitchCurve | null, b: PitchCurve | null): boolean {
   if (!a || !b) return false;
   if (a.style !== b.style || a.points.length !== b.points.length) return false;
   return a.points.every((p, i) => p.offset === b.points[i].offset && p.value === b.points[i].value);
+}
+
+function isSameCurve(a: PitchCurve | null, b: PitchCurve | null): boolean {
+  return areCurvesEqual(a, b) && a?.type === b?.type;
 }
 
 function matchingPresetType(points: PitchPoint[], whammy: boolean): number | null {
@@ -325,9 +331,15 @@ export function CurveEditor({
     setCurve(updated);
   };
 
+  const revertPendingKey = () => {
+    const pending = pendingKeyCommitRef.current;
+    pendingKeyCommitRef.current = null;
+    if (pending) setCurve(pending.initial);
+  };
+
   const handlePointKeyUp = (index: number, event: ReactKeyboardEvent<SVGGElement>) => {
     if (disabled) {
-      pendingKeyCommitRef.current = null;
+      revertPendingKey();
       return;
     }
     if (pendingKeyCommitRef.current) {
@@ -341,7 +353,7 @@ export function CurveEditor({
 
   const handlePointBlur = () => {
     if (disabled) {
-      pendingKeyCommitRef.current = null;
+      revertPendingKey();
       return;
     }
     if (pendingKeyCommitRef.current) {
@@ -407,7 +419,7 @@ export function CurveEditor({
   return (
     <details className="curve-editor">
       <summary>{label} curve</summary>
-      <fieldset disabled={disabled}>
+      <BusyFieldset busy={disabled}>
         <label className="check">
           <input
             type="checkbox"
@@ -429,7 +441,7 @@ export function CurveEditor({
           />
           Enable {label}
         </label>
-      </fieldset>
+      </BusyFieldset>
 
       <div className="tp-curve-presets" role="group" aria-label={`${label} presets`}>
         {presets.map(preset => {
@@ -441,14 +453,9 @@ export function CurveEditor({
               <button
                 key={preset.id}
                 type="button"
-                className="tp-curve-preset-btn"
                 aria-label={`${label} preset: ${preset.name}`}
                 aria-pressed={isCurrent}
-                aria-disabled={disabled ? 'true' : undefined}
-                onClick={() => {
-                  if (disabled) return;
-                  applyPreset(preset);
-                }}
+                {...busyGuard({ busy: disabled, className: 'tp-curve-preset-btn', onClick: () => applyPreset(preset) })}
               >
                 <svg viewBox="0 0 18 16" width="16" height="14" aria-hidden="true">
                   <path
@@ -468,7 +475,7 @@ export function CurveEditor({
 
         {curve && (
           <>
-            <fieldset disabled={disabled}>
+            <BusyFieldset busy={disabled}>
               <div className="pair">
                 <EnumInput
                   label={`${label} type`}
@@ -483,7 +490,7 @@ export function CurveEditor({
                   onValue={style => setCurve({ ...curve, style })}
                 />
               </div>
-            </fieldset>
+            </BusyFieldset>
 
             <svg
               ref={svgRef}
@@ -592,7 +599,7 @@ export function CurveEditor({
               })}
             </svg>
 
-            <fieldset disabled={disabled}>
+            <BusyFieldset busy={disabled}>
               <p className="muted">
                 Drag points or click the graph to shape pitch. Position 0–60; pitch in quarter tones
                 {whammy ? ', including negative values' : ''}.
@@ -647,20 +654,21 @@ export function CurveEditor({
               >
                 Add {label} point
               </button>
-            </fieldset>
+            </BusyFieldset>
           </>
         )}
-        <fieldset disabled={disabled}>
+        <BusyFieldset busy={disabled}>
           <button
-            disabled={disabled}
-            onClick={() => {
-              if (disabled) return;
-              onChange(curve);
-            }}
+            {...busyGuard({
+              busy: disabled,
+              onClick: () => {
+                if (!isSameCurve(curve, value)) onChange(curve);
+              },
+            })}
           >
             Apply {label} curve
           </button>
-        </fieldset>
+        </BusyFieldset>
       </details>
   );
 }

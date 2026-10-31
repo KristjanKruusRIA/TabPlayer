@@ -29,7 +29,7 @@ it('all technique families dispatch finite selected-string commands and refresh 
   fireEvent.click(screen.getByRole('button',{name:'Tie to next note'}));expect(onEdit).toHaveBeenLastCalledWith({type:'setNoteLink',from:{target,string:6},to:{target:{...target,beat:1},string:6},kind:'tie'});
   fireEvent.click(screen.getByRole('button',{name:'Break tie'}));expect(onEdit).toHaveBeenLastCalledWith({type:'setNoteLink',from:{target,string:6},to:null,kind:'tie'});
   score.tracks[0].staves[0].bars[0].voices[0].beats[0].notes[0].isPalmMute=true;view.rerender(<TechniquePanel {...props}/>);expect(screen.getByLabelText('Palm mute')).toBeChecked();view.rerender(<TechniquePanel {...props} score={music()}/>);expect(screen.getByLabelText('Palm mute')).not.toBeChecked();
-  view.rerender(<TechniquePanel {...props} busy/>);expect(screen.getByLabelText('Palm mute')).toBeDisabled();
+  view.rerender(<TechniquePanel {...props} busy/>);expect(screen.getByLabelText('Palm mute')).not.toBeDisabled();expect(screen.getByLabelText('Palm mute').closest('fieldset')).toHaveAttribute('aria-disabled','true');onEdit.mockClear();fireEvent.click(screen.getByLabelText('Palm mute'));expect(onEdit).not.toHaveBeenCalled();
 });
 it.each([
   ['Let ring','letRing'],['Palm mute','palmMute'],['Dead note','dead'],['Ghost note','ghost'],['Staccato','staccato'],['Left-hand tapping','leftHandTapped'],
@@ -273,7 +273,7 @@ it('every bend and whammy preset matches alphaTab classification through real en
     expect(note.bendType, `Bend preset ${preset.name} stored type should match engine resolution`).toBe(preset.type);
   }
 
-  for (const preset of WHAMMY_PRESETS) {
+  for (const preset of WHAMMY_PRESETS.filter(p => p.type !== model.WhammyType.Hold)) {
     let project = blankProject();
     project = previewEdit(project, { type: 'setNote', target, string: 1, fret: 5 }).project;
     project = previewEdit(project, {
@@ -287,14 +287,29 @@ it('every bend and whammy preset matches alphaTab classification through real en
   }
 });
 
-it('whammy presets include Scoop and Hold player-facing labels with PrediveDive and Predive types', () => {
+it('whammy presets include Scoop and Hold player-facing labels with PrediveDive and Hold types', () => {
   const scoop = WHAMMY_PRESETS.find(p => p.name === 'Scoop');
   expect(scoop).toBeDefined();
   expect(scoop?.type).toBe(model.WhammyType.PrediveDive);
 
   const hold = WHAMMY_PRESETS.find(p => p.name === 'Hold');
   expect(hold).toBeDefined();
-  expect(hold?.type).toBe(model.WhammyType.Predive);
+  expect(hold?.type).toBe(model.WhammyType.Hold);
+});
+
+it('Hold is what alphaTab calls a flat whammy that continues the previous beat, and a lone flat one is Predive', () => {
+  const hold = WHAMMY_PRESETS.find(p => p.name === 'Hold')!;
+  const whammyOf = (project: ReturnType<typeof blankProject>, beat: number) =>
+    buildScore(project).tracks[0].staves[0].bars[0].voices[0].beats[beat].whammyBarType;
+  const custom = (points: { offset: number; value: number }[]) => ({ type: model.WhammyType.Custom, style: 0, points });
+  let project = blankProject();
+  project = previewEdit(project, { type: 'setNote', target, string: 1, fret: 5 }).project;
+  project = previewEdit(project, { type: 'setNote', target: { ...target, beat: 1 }, string: 1, fret: 5 }).project;
+  const lone = previewEdit(project, { type: 'setBeatTechniques', target: { ...target, beat: 1 }, patch: { whammy: custom(hold.points) } }).project;
+  expect(whammyOf(lone, 1)).toBe(model.WhammyType.Predive);
+  project = previewEdit(project, { type: 'setBeatTechniques', target, patch: { whammy: custom([{ offset: 0, value: 0 }, { offset: 60, value: -4 }]) } }).project;
+  project = previewEdit(project, { type: 'setBeatTechniques', target: { ...target, beat: 1 }, patch: { whammy: custom(hold.points) } }).project;
+  expect(whammyOf(project, 1)).toBe(hold.type);
 });
 
 it('bend preset re-click and arrow down-up record nothing through previewEdit', () => {
@@ -476,9 +491,13 @@ it('disabled curve editor prevents Apply from firing onChange, and on a piano no
   const curve: PitchCurve = { type: 1, style: 0, points: [{ offset: 0, value: 0 }, { offset: 60, value: 4 }] };
   render(<CurveEditor label="Bend" value={curve} disabled={true} onChange={onChange} />);
   const applyBtn = screen.getByRole('button', { name: 'Apply Bend curve' });
-  expect(applyBtn).toBeDisabled();
+  expect(applyBtn).not.toBeDisabled();
+  expect(applyBtn).toHaveAttribute('aria-disabled', 'true');
+  applyBtn.focus();
   fireEvent.click(applyBtn);
+  fireEvent.keyDown(applyBtn, { key: 'Enter' });
   expect(onChange).not.toHaveBeenCalled();
+  expect(applyBtn).toHaveFocus();
 
   cleanup();
 
@@ -491,8 +510,10 @@ it('disabled curve editor prevents Apply from firing onChange, and on a piano no
 
   const applyBend = screen.getByRole('button', { name: 'Apply Bend curve' });
   const applyWhammy = screen.getByRole('button', { name: 'Apply Whammy curve' });
-  expect(applyBend).toBeDisabled();
-  expect(applyWhammy).toBeDisabled();
+  expect(applyBend).not.toBeDisabled();
+  expect(applyBend).toHaveAttribute('aria-disabled', 'true');
+  expect(applyWhammy).not.toBeDisabled();
+  expect(applyWhammy).toHaveAttribute('aria-disabled', 'true');
   fireEvent.click(applyBend);
   fireEvent.click(applyWhammy);
   expect(onEdit).not.toHaveBeenCalled();
@@ -564,4 +585,76 @@ it('staff settings keep the staff tuning name through capo edits and send the dr
   const next=music();next.tracks[0].staves[0].stringTuning.name='Fresh';
   view.rerender(<StructurePanel {...props} score={next}/>);fireEvent.click(screen.getByRole('button',{name:'Apply staff settings'}));
   expect(onEdit).toHaveBeenLastCalledWith(expect.objectContaining({settings:expect.objectContaining({tuning:[64,59,55,50,45,40],tuningName:'Fresh'})}));
+});
+
+const flat: PitchCurve = { type: model.BendType.Bend, style: 0, points: [{ offset: 0, value: 0 }, { offset: 60, value: 4 }] };
+it('Apply keeps focus and the focus ring when busy flips on, and a press while busy records nothing', () => {
+  const onChange = vi.fn();
+  const { rerender } = render(<CurveEditor label="Bend" value={flat} onChange={onChange} />);
+  fireEvent.change(screen.getByLabelText('Bend point 2 value'), { target: { value: '6' } });
+  const apply = screen.getByRole('button', { name: 'Apply Bend curve' });
+  apply.focus();
+  fireEvent.click(apply);
+  expect(onChange).toHaveBeenCalledTimes(1);
+  rerender(<CurveEditor label="Bend" value={flat} disabled onChange={onChange} />);
+  expect(apply).toHaveFocus();
+  expect(apply).not.toHaveAttribute('disabled');
+  expect(apply.closest('fieldset[disabled]')).toBeNull();
+  expect(apply).toHaveAttribute('aria-disabled', 'true');
+  fireEvent.click(apply);
+  fireEvent.keyDown(apply, { key: ' ' });
+  expect(onChange).toHaveBeenCalledTimes(1);
+});
+it('TechniquePanel controls that hold focus stay enabled and focused when busy flips, and refuse the press', () => {
+  const onEdit = vi.fn(), props = { score: music(), target, string: 6, onEdit };
+  const { rerender } = render(<TechniquePanel {...props} busy={false} />);
+  for (const control of [screen.getByLabelText('Let ring'), screen.getByRole('button', { name: 'Tie to next note' }), screen.getByRole('button', { name: 'Break tie' }), screen.getByLabelText('Enable Whammy')]) {
+    control.focus();
+    rerender(<TechniquePanel {...props} busy />);
+    expect(control).toHaveFocus();
+    expect(control).not.toBeDisabled();
+    rerender(<TechniquePanel {...props} busy={false} />);
+  }
+  rerender(<TechniquePanel {...props} busy />);
+  fireEvent.click(screen.getByLabelText('Let ring'));
+  fireEvent.click(screen.getByRole('button', { name: 'Tie to next note' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Break tie' }));
+  fireEvent.change(screen.getByLabelText('Pick stroke'), { target: { value: '2' } });
+  expect(onEdit).not.toHaveBeenCalled();
+  expect(screen.getByLabelText('Let ring')).not.toBeChecked();
+  expect(screen.getByRole('button', { name: 'Break tie' })).toHaveAttribute('aria-disabled', 'true');
+});
+it('Apply on an unchanged curve records nothing, on a changed curve records once', () => {
+  const onChange = vi.fn();
+  const { rerender } = render(<CurveEditor label="Bend" value={flat} onChange={onChange} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Apply Bend curve' }));
+  expect(onChange).not.toHaveBeenCalled();
+  rerender(<CurveEditor label="Bend" value={null} onChange={onChange} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Apply Bend curve' }));
+  expect(onChange).not.toHaveBeenCalled();
+  rerender(<CurveEditor label="Bend" value={flat} onChange={onChange} />);
+  fireEvent.change(screen.getByLabelText('Bend point 2 value'), { target: { value: '6' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Apply Bend curve' }));
+  expect(onChange).toHaveBeenCalledTimes(1);
+  expect(onChange.mock.calls[0][0].points[1].value).toBe(6);
+  onChange.mockClear();
+  fireEvent.change(screen.getByLabelText('Bend point 2 value'), { target: { value: '4' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Apply Bend curve' }));
+  expect(onChange).not.toHaveBeenCalled();
+});
+it('busy between a handle key press and its release or blur reverts the graph to the saved curve and records nothing', () => {
+  for (const release of ['keyUp', 'blur'] as const) {
+    const onChange = vi.fn();
+    const { rerender, unmount } = render(<CurveEditor label="Bend" value={flat} onChange={onChange} />);
+    const handle = screen.getByRole('slider', { name: 'Bend graph point 2' });
+    handle.focus();
+    fireEvent.keyDown(handle, { key: 'ArrowUp' });
+    expect(handle).toHaveAttribute('aria-valuenow', '5');
+    rerender(<CurveEditor label="Bend" value={flat} disabled onChange={onChange} />);
+    if (release === 'keyUp') fireEvent.keyUp(handle, { key: 'ArrowUp' });
+    else fireEvent.blur(handle);
+    expect(screen.getByRole('slider', { name: 'Bend graph point 2' })).toHaveAttribute('aria-valuenow', '4');
+    expect(onChange).not.toHaveBeenCalled();
+    unmount();
+  }
 });

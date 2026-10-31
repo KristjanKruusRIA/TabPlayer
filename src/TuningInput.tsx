@@ -13,6 +13,7 @@ import { formatPitch, formatTuning, parseTuning } from './tuning';
 import { findTuningPreset, tuningPresets } from './tuning-presets';
 import { SavedTuningsDialog } from './tuning/SavedTuningsDialog';
 import { AuditionButtons } from './tuning/AuditionButtons';
+import { busyGuard } from './ui/useBusyGuard';
 
 const groups = [...new Set(tuningPresets.map(p => `${p.instrument}/${p.strings}`))];
 
@@ -25,6 +26,7 @@ export function TuningInput({
   onTuningNameChange,
   onCommit,
   disabled = false,
+  busy = false,
   placeholder,
   revision,
   error,
@@ -38,8 +40,12 @@ export function TuningInput({
   onChange: (notes: string) => void;
   tuningName: string;
   onTuningNameChange: (name: string) => void;
-  onCommit?: (pitches: number[], changedIndex?: number) => void;
+  /** One call per gesture group: `pitches` is the whole draft, `changed` the ascending string indexes the gesture touched. */
+  onCommit?: (pitches: number[], changed: number[]) => void;
+  /** Unavailable for a reason other than busy (locked, no strings); native `disabled`. */
   disabled?: boolean;
+  /** An edit is in flight: controls stay focusable, refuse changes and say aria-disabled. */
+  busy?: boolean;
   placeholder?: string;
   revision?: object;
   error?: string | null;
@@ -51,8 +57,8 @@ export function TuningInput({
   const [library, setLibrary] = useState(false);
   useEffect(() => setCustom(false), [value, revision]);
   useEffect(() => {
-    if (disabled) setLibrary(false);
-  }, [disabled]);
+    if (disabled || busy) setLibrary(false);
+  }, [disabled, busy]);
   useEffect(() => setLibrary(false), [revision]);
 
   const errorId = useId();
@@ -73,14 +79,47 @@ export function TuningInput({
   const selected = custom ? 'custom' : (findTuningPreset(value)?.id ?? 'custom');
 
   const dragRef = useRef<{ index: number; startY: number; startPitch: number; initialPitches: number[]; latest: number[]; initialTuningName: string } | null>(null);
-  const wheelRef = useRef<{ timer: ReturnType<typeof setTimeout> | null; pending: number[] | null }>({
-    timer: null,
-    pending: null,
-  });
+  const wheelRef = useRef<{
+    timer: ReturnType<typeof setTimeout> | null;
+    pending: number[] | null;
+    base: number[];
+    baseName: string;
+    changed: Set<number>;
+  }>({ timer: null, pending: null, base: [], baseName: '', changed: new Set() });
+  const latest = useRef({ onCommit, onChange, onTuningNameChange, busy, disabled });
+  latest.current = { onCommit, onChange, onTuningNameChange, busy, disabled };
+  const blocked = disabled || busy;
 
-  useEffect(() => () => {
-    if (wheelRef.current.timer) clearTimeout(wheelRef.current.timer);
-  }, []);
+  const clearWheel = () => {
+    const wheel = wheelRef.current;
+    if (wheel.timer) clearTimeout(wheel.timer);
+    wheel.timer = null;
+    wheel.pending = null;
+    wheel.changed = new Set();
+  };
+  /** Takes the wheel gesture still waiting for its timer, so a later gesture commits in the same edit. */
+  const takeWheelChanged = () => {
+    const changed = [...wheelRef.current.changed];
+    clearWheel();
+    return changed;
+  };
+  useEffect(() => clearWheel, []);
+  // A new document revision (undo, redo, another edit) has already replaced the draft; the pending wheel change is stale.
+  useEffect(() => clearWheel(), [revision]);
+  const flushWheel = () => {
+    const wheel = wheelRef.current;
+    const { pending, base, baseName } = wheel;
+    const changed = [...wheel.changed].sort((a, b) => a - b);
+    clearWheel();
+    if (!pending) return;
+    const now = latest.current;
+    if (now.busy || now.disabled) {
+      now.onChange(formatTuning(base));
+      now.onTuningNameChange(baseName);
+      return;
+    }
+    now.onCommit?.(pending, changed);
+  };
 
   const pegElements = useRef<Map<number, HTMLDivElement>>(new Map());
   const prevWheelListeners = useRef<Map<number, (e: WheelEvent) => void>>(new Map());
@@ -108,17 +147,13 @@ export function TuningInput({
     };
   }, []);
 
-  const commitPitches = (pitches: number[], index?: number) => {
-    if (!onCommit) return;
-    if (onCommit.length > 1 && index !== undefined) {
-      onCommit(pitches, index);
-    } else {
-      onCommit(pitches);
-    }
+  const commitPitches = (pitches: number[], index: number) => {
+    const changed = [...new Set([...takeWheelChanged(), index])].sort((a, b) => a - b);
+    onCommit?.(pitches, changed);
   };
 
   const updateStringPitch = (index: number, nextPitch: number, commit: boolean) => {
-    if (disabled || !parsedPitches || (stringCount !== undefined && index >= stringCount)) return;
+    if (blocked || !parsedPitches || (stringCount !== undefined && index >= stringCount)) return;
     const clamped = Math.max(0, Math.min(127, Math.round(nextPitch)));
     if (clamped === parsedPitches[index]) return;
     const next = parsedPitches.map((p, i) => (i === index ? clamped : p));
@@ -129,7 +164,7 @@ export function TuningInput({
   };
 
   const handlePegPointerDown = (index: number, pitch: number, event: ReactPointerEvent<HTMLDivElement>) => {
-    if (disabled || !parsedPitches || (stringCount !== undefined && index >= stringCount) || event.button !== 0) return;
+    if (blocked || !parsedPitches || (stringCount !== undefined && index >= stringCount) || event.button !== 0) return;
     event.preventDefault();
     event.currentTarget.focus();
     event.currentTarget.setPointerCapture?.(event.pointerId);
@@ -144,7 +179,7 @@ export function TuningInput({
   };
 
   const handlePegPointerMove = (index: number, event: ReactPointerEvent<HTMLDivElement>) => {
-    if (!dragRef.current || dragRef.current.index !== index || disabled || !parsedPitches) return;
+    if (!dragRef.current || dragRef.current.index !== index || blocked || !parsedPitches) return;
     const deltaSemitones = Math.round((dragRef.current.startY - event.clientY) / 8);
     const nextPitch = Math.max(0, Math.min(127, dragRef.current.startPitch + deltaSemitones));
     if (nextPitch === dragRef.current.latest[index]) return;
@@ -165,7 +200,7 @@ export function TuningInput({
         event.currentTarget.releasePointerCapture(event.pointerId);
       } catch {}
     }
-    if (disabled) {
+    if (blocked) {
       setCustom(false);
       onChange(formatTuning(initialPitches));
       onTuningNameChange(initialTuningName);
@@ -194,7 +229,7 @@ export function TuningInput({
   };
 
   const handlePegKeyDown = (index: number, pitch: number, event: ReactKeyboardEvent<HTMLDivElement>) => {
-    if (disabled || !parsedPitches || (stringCount !== undefined && index >= stringCount)) return;
+    if (blocked || !parsedPitches || (stringCount !== undefined && index >= stringCount)) return;
     let delta = 0;
     if (event.key === 'ArrowUp' || event.key === 'ArrowRight') delta = event.shiftKey ? 12 : 1;
     else if (event.key === 'ArrowDown' || event.key === 'ArrowLeft') delta = event.shiftKey ? -12 : -1;
@@ -202,31 +237,33 @@ export function TuningInput({
     else if (event.key === 'PageDown') delta = -12;
     else return;
     event.preventDefault();
+    if (event.repeat) return;
     updateStringPitch(index, pitch + delta, true);
   };
 
   const handlePegWheel = (index: number, event: ReactWheelEvent<HTMLDivElement> | WheelEvent) => {
-    if (disabled || !parsedPitches || (stringCount !== undefined && index >= stringCount) || !('deltaY' in event) || event.deltaY === 0) return;
+    if (blocked || !parsedPitches || (stringCount !== undefined && index >= stringCount) || !('deltaY' in event) || event.deltaY === 0) return;
     const targetElement = (event.currentTarget ?? event.target) as HTMLElement | null;
     if (document.activeElement !== targetElement) return;
     event.preventDefault();
-    const currentBase = wheelRef.current.pending ?? parsedPitches;
+    const wheel = wheelRef.current;
+    const currentBase = wheel.pending ?? parsedPitches;
     const currentPitch = currentBase[index];
     const delta = event.deltaY < 0 ? 1 : -1;
     const nextPitch = Math.max(0, Math.min(127, currentPitch + delta));
     if (nextPitch === currentPitch) return;
     const next = currentBase.map((p, i) => (i === index ? nextPitch : p));
-    wheelRef.current.pending = next;
+    if (!wheel.pending) {
+      wheel.base = [...parsedPitches];
+      wheel.baseName = tuningName;
+    }
+    wheel.pending = next;
+    wheel.changed.add(index);
     setCustom(false);
     onChange(formatTuning(next));
     onTuningNameChange('');
-    if (wheelRef.current.timer) clearTimeout(wheelRef.current.timer);
-    wheelRef.current.timer = setTimeout(() => {
-      const committed = wheelRef.current.pending;
-      wheelRef.current.pending = null;
-      wheelRef.current.timer = null;
-      if (committed) commitPitches(committed, index);
-    }, 300);
+    if (wheel.timer) clearTimeout(wheel.timer);
+    wheel.timer = setTimeout(flushWheel, 300);
   };
 
   return (
@@ -235,8 +272,11 @@ export function TuningInput({
         {presetLabel}
         <select
           disabled={disabled}
+          aria-disabled={busy || undefined}
           value={selected}
+          onMouseDown={busy ? e => e.preventDefault() : undefined}
           onChange={e => {
+            if (busy) return;
             if (e.target.value === 'custom') {
               setCustom(true);
               return;
@@ -274,11 +314,14 @@ export function TuningInput({
           <input
             ref={inputRef}
             disabled={disabled}
+            readOnly={busy || undefined}
+            aria-disabled={busy || undefined}
             placeholder={placeholder}
             value={value}
             aria-invalid={error ? true : undefined}
             aria-describedby={error ? errorId : undefined}
             onChange={e => {
+              if (busy) return;
               setCustom(false);
               onChange(e.target.value);
               onTuningNameChange('');
@@ -362,7 +405,7 @@ export function TuningInput({
                       ref={el => registerPeg(index, el)}
                       role="slider"
                       tabIndex={isOutOfRange ? -1 : 0}
-                      aria-disabled={disabled || isOutOfRange || undefined}
+                      aria-disabled={blocked || isOutOfRange || undefined}
                       aria-label={`${label} string ${index + 1} peg`}
                       aria-valuemin={0}
                       aria-valuemax={127}
@@ -387,27 +430,27 @@ export function TuningInput({
                     <div className="tp-peg-steps">
                       <button
                         type="button"
-                        className="tp-peg-step"
-                        disabled={(pitch <= 0 && !disabled) || isOutOfRange}
-                        aria-disabled={disabled || isOutOfRange || pitch <= 0 ? 'true' : undefined}
                         aria-label={`Tune ${label} string ${index + 1} down`}
-                        onClick={() => {
-                          if (disabled || isOutOfRange || pitch <= 0) return;
-                          updateStringPitch(index, pitch - 1, true);
-                        }}
+                        {...busyGuard({
+                          busy,
+                          className: 'tp-peg-step',
+                          disabled: isOutOfRange,
+                          unavailable: disabled || pitch <= 0,
+                          onClick: () => updateStringPitch(index, pitch - 1, true),
+                        })}
                       >
                         −
                       </button>
                       <button
                         type="button"
-                        className="tp-peg-step"
-                        disabled={(pitch >= 127 && !disabled) || isOutOfRange}
-                        aria-disabled={disabled || isOutOfRange || pitch >= 127 ? 'true' : undefined}
                         aria-label={`Tune ${label} string ${index + 1} up`}
-                        onClick={() => {
-                          if (disabled || isOutOfRange || pitch >= 127) return;
-                          updateStringPitch(index, pitch + 1, true);
-                        }}
+                        {...busyGuard({
+                          busy,
+                          className: 'tp-peg-step',
+                          disabled: isOutOfRange,
+                          unavailable: disabled || pitch >= 127,
+                          onClick: () => updateStringPitch(index, pitch + 1, true),
+                        })}
                       >
                         +
                       </button>
@@ -420,15 +463,13 @@ export function TuningInput({
         )}
         <button
           type="button"
-          className="tuning-saved-button"
-          disabled={disabled}
           aria-label={`Saved tunings for ${label}`}
-          onClick={() => setLibrary(true)}
+          {...busyGuard({ busy, disabled, className: 'tuning-saved-button', onClick: () => setLibrary(true) })}
         >
           Saved tunings…
         </button>
         {audible && onAudition && (
-          <AuditionButtons pitches={audible} disabled={disabled} label={label} onAudition={onAudition} />
+          <AuditionButtons pitches={audible} disabled={blocked} label={label} onAudition={onAudition} />
         )}
       </div>
       {library && (

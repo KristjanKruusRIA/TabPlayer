@@ -9,4 +9,4 @@ export type { DialogProps } from './Dialog';
 export { snapToStep, parseTyped } from './useRange';
 export { busyGuard } from './useBusyGuard';
 export type { BusyGuardProps } from './useBusyGuard';
-
+export { BusyFieldset } from './BusyFieldset';

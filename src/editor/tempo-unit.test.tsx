@@ -178,7 +178,7 @@ describe('tempo units', () => {
     }
   });
 
-  it('a project logged before units replays a file tempo as quarter notes; a new import and a marked project read the unit', () => {
+  it('a project with edits and no marker replays a file tempo as quarter notes; a new import and a project carrying the (shared partial-capo) marker read the unit', () => {
     const dotted = previewEdit(withNote(), settingsEdit([{ beat: 0, bpm: 80, linear: false, unit: 3 }])).score;
     const bytes = exportGp(dotted);
     const base = { kind: 'file' as const, filename: 'unit.gp', bytesBase64: Buffer.from(bytes).toString('base64'), sha256: createHash('sha256').update(bytes).digest('hex') };
@@ -205,6 +205,21 @@ describe('tempo units', () => {
     expect(screen.getByLabelText('Tempo 1 BPM')).toHaveValue(83.333);
     fireEvent.click(screen.getByRole('button', { name: 'Apply measure settings' }));
     expect(onEdit.mock.calls.at(-1)![0].tempos[0].bpm).toBe(125 / 1.5);
+  });
+
+  it('the tempo field shows what is typed while focused and never shows a nonzero tempo as 0', () => {
+    const score = buildScore(withNote());
+    render(<MeasurePanel score={score} target={target} string={6} busy={false} onEdit={vi.fn()} />);
+    const field = screen.getByLabelText('Tempo 1 BPM');
+    fireEvent.focus(field);
+    fireEvent.change(field, { target: { value: '83.33339' } });
+    expect(field).toHaveValue(83.33339);
+    fireEvent.blur(field);
+    expect(field).toHaveValue(83.333);
+    fireEvent.focus(field);
+    fireEvent.change(field, { target: { value: '0.0001' } });
+    fireEvent.blur(field);
+    expect(field).toHaveValue(0.0001);
   });
 
   it('the measure panel offers units and sends the unit with a kept sounding tempo', () => {

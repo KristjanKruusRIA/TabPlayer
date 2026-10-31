@@ -39,7 +39,7 @@ export const displayedBpm = (automation: model.Automation): number => {
   return unit === quarterUnit ? automation.value : automation.value / unitQuarters[unit];
 };
 /** A tempo rounded for showing (three decimals); the stored value is never rounded. */
-export const shownBpm = (bpm: number): number => Math.round(bpm * 1000) / 1000;
+export const shownBpm = (bpm: number): number => { const rounded = Math.round(bpm * 1000) / 1000; return rounded === 0 && bpm !== 0 ? bpm : rounded; };
 /** A tempo automation for `bpm` beats of `unit` per minute. Its `value` is the quarter-note tempo that plays. */
 export function buildTempo(linear: boolean, ratio: number, bpm: number, unit: TempoUnit = quarterUnit, visible = true): model.Automation {
   const automation = model.Automation.buildTempoAutomation(linear, ratio, bpm, unit, visible);

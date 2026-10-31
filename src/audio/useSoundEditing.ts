@@ -6,6 +6,7 @@ import type { NativePlaybackController } from './NativePlaybackController';
 import type { AudioDeviceInfo } from './bridge';
 import { factorySound, factorySounds } from './factory-sounds';
 import { copyPedal, copySound, deleteSoundPreset, renameSoundPreset, saveSoundPreset, soundClipboard, soundLibrary, subscribeSoundClipboard, subscribeSoundLibrary } from './sound-library';
+import { drumKitFor } from '../editor/drum-kits';
 import { blockNames, presetName, soundPreset, voiceNames } from './sound-model';
 import type { VoiceId } from './sound-model';
 
@@ -32,9 +33,9 @@ export function useSoundEditing({trackId,sound,onEdit,playback,busy=false,shown=
   const current=completeSound(sound??soundPreset('gm'));const [devices,setDevices]=useState<AudioDeviceInfo[]>([]);const [error,setError]=useState<string|null>(null);
   useEffect(()=>{let alive=true;if(playback)void playback.devices().then(items=>{if(alive)setDevices(items);}).catch(e=>{if(alive)setError(String(e));});return()=>{alive=false;};},[playback]);
   /** `sound` with the track's lock: the lock belongs to the track, not to the sound, so presets, factory and saved sounds, pastes and previews all keep it. It is left out when off, so a file that never locked a track is unchanged. */
-  const withLock=(sound:TrackSound,locked:boolean=!!current.locked):TrackSound=>{const next={...sound};if(locked)next.locked=true;else delete next.locked;/* The drum kit belongs to the track too, so a preset, factory or saved sound keeps it. */if(current.drumKit!==undefined)next.drumKit=current.drumKit;else delete next.drumKit;return next;};
+  const withLock=(sound:TrackSound,locked:boolean=!!current.locked,kit:number|null|undefined=current.drumKit):TrackSound=>{const next={...sound};if(locked)next.locked=true;else delete next.locked;/* The drum kit belongs to the track too, so a preset, factory or saved sound keeps it. */if(kit!=null)next.drumKit=kit;else delete next.drumKit;return next;};
   /** Records `next` as one undoable edit, with the track's lock unless `locked` says otherwise; resolves to whether it was accepted. */
-  const record=(next:TrackSound,locked?:boolean)=>Promise.resolve(onEdit({type:'setTrackSound',trackId,sound:withLock(next,locked)})).then(()=>true,e=>{setError(String(e));return false;});
+  const record=(next:TrackSound,locked?:boolean,kit?:number|null)=>Promise.resolve(onEdit({type:'setTrackSound',trackId,sound:withLock(next,locked,kit)})).then(()=>true,e=>{setError(String(e));return false;});
   // Hosts may give a playback surface without sound previews.
   const previewer=playback&&typeof playback.soundPreview==='function'?playback:null;
   const [previewChoice,setPreviewChoice]=useState(''),[previewLabel,setPreviewLabel]=useState(''),previewRequest=useRef(0),previewSelect=useRef<HTMLSelectElement>(null);
@@ -43,11 +44,11 @@ export function useSoundEditing({trackId,sound,onEdit,playback,busy=false,shown=
   /** Ends this track's preview; a preview still being started is dropped. */
   const endPreview=()=>{previewRequest.current++;setPreviewChoice('');return previewer&&previewer.soundPreview()?.track===trackId?Promise.resolve(previewer.previewSound(trackId,null)).catch(e=>setError(String(e))):Promise.resolve();};
   /** Applies `next` as one undoable edit. A preview ends at once, so the edit is what plays and edits keep their order. */
-  const save=(next:TrackSound,locked?:boolean)=>{
+  const save=(next:TrackSound,locked?:boolean,kit?:number|null)=>{
     // A drag being heard ends once its edit is recorded, so the sound never steps back to the old one in between.
     const heard=live.current.active;
     if(!heard&&(previewChoice||activePreview)){void endPreview();setStatus('Preview ended.');}
-    return record(next,locked).then(ok=>{if(heard)void endLive();return ok;});
+    return record(next,locked,kit).then(ok=>{if(heard)void endLive();return ok;});
   };
   const first:Board={effects:current.effects,second:false,name:label=>label,
     build:change=>{const next=structuredClone(current);change(next.effects);return next;},write:change=>save(first.build(change))};
@@ -173,6 +174,8 @@ export function useSoundEditing({trackId,sound,onEdit,playback,busy=false,shown=
     /** Locks or unlocks the track's sound against sound automations in the score, as one undoable edit; choosing the value it already has records nothing. */
     setLocked:(locked:boolean)=>locked===!!current.locked?Promise.resolve(false):save(current,locked),
     selectOutput,restorePreset:()=>save(soundPreset(current.presetId,current.voiceId)),applyPreset:(id:TrackSound['presetId'])=>save(soundPreset(id,current.voiceId)),setVoice:(voiceId:string|null)=>save({...current,voiceId}),
+    /** Plays a drum track as the kit with this program (0 is Standard, stored as no kit); a kit already in effect records nothing. One undoable edit that keeps the rest of the sound. */
+    setDrumKit:(program:number)=>{if(busy||program===drumKitFor(current.drumKit).program)return Promise.resolve(false);return save(current,undefined,program===0?null:program);},
   };
 }
 export type SoundEditing=ReturnType<typeof useSoundEditing>;

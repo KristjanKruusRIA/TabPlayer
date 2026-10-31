@@ -19,7 +19,7 @@
 - **Missing or Failed Device Handling:**
   - When the audio output device is missing or faulted, a plain error message is displayed (`role="alert"`) in the panel, and playback facilities remain operating safely without crashing.
 - **Hot-Path Non-Interference Constraint:**
-  - The audio callback (`OutputCallback::render`) executes a single relaxed atomic store for the buffer size, after the epoch check so a retired callback never overwrites its replacement's value; the field is reset when a new stream opens.
+  - The audio callback (`OutputCallback::render`) executes a single relaxed atomic store for the buffer size, after the epoch check so a retired callback does not normally overwrite its replacement's value; the field is reset when a new stream opens. One stale store is possible on the prepare path, and the next block corrects it.
   - The callback also sets one boolean on the audition mixer per block. No allocation, lock or logging is added to it.
 - **UI & Accessibility:**
   - Focus controls are guarded with `busyGuard`, ensuring they are never `disabled` while busy (retaining focus).
@@ -58,6 +58,7 @@
 - **Fixed Level:** The test tone is emitted at a fixed -22 dBFS (0.08 peak amplitude) to protect user ears and hardware.
 - **Callback Frames Dependency:** The reported buffer size reflects the buffer frame length supplied by the host audio driver on callback invocation. Before any buffer has rendered, the buffer size is reported as Unknown.
 - **Desktop verification not performed:** this change has not been driven in the real app through the `tests/desktop/` drivers, and no tone was heard on a real device. It is covered by unit tests only; the 500 ms tone, the cut when playback starts, and the readout against real devices still need a desktop check.
+- **macOS and Linux:** on macOS a system default reroute raises cpal `DeviceChanged`; the code clears the cached name for the live epoch so it reads Unknown until the next open (tested at the notice-handler level with synthetic error kinds). This was checked by reading the code only, not run on macOS. Linux was not run either.
 - **Platform:** Rust tests ran on Windows only; the worktree has no `.analysis/compatibility` fixtures, so `plan.test.ts` failures there are unrelated to this change.
 - **Cut granularity:** the tone is cut at the next callback block after the playing flag is seen, over 5 ms; the device's own buffer latency is not removed. The name is cached when a stream opens, so a device renamed afterwards reads as before until the next open.
 - **Out of Scope:** Input meters and dynamic audio buffer resizing remain intentionally out of scope as specified.

@@ -476,6 +476,9 @@ struct SharedStatus {
     /// Name of the device the open stream was built on; set when the stream opens,
     /// so diagnostics never probe the backend.
     stream_name: Mutex<Option<String>>,
+    /// The system rerouted the live stream (`DeviceChanged`), so the cached name may
+    /// be wrong until the next open. A plain flag: the stream's error callback sets it.
+    name_stale: AtomicBool,
 }
 impl SharedStatus {
     fn new() -> Self {
@@ -524,6 +527,7 @@ impl SharedStatus {
             audition_rate: AtomicU32::new(0),
             buffer_size: AtomicU32::new(0),
             stream_name: Mutex::new(None),
+            name_stale: AtomicBool::new(false),
         }
     }
     fn read(&self) -> NativeAudioStatus {
@@ -1708,7 +1712,11 @@ impl AudioService {
         let rate = self.shared.audition_rate.load(Ordering::Acquire);
         let buffer = self.shared.buffer_size.load(Ordering::Relaxed);
         Ok(AudioDiagnostics {
-            device_name: self.shared.stream_name.lock().unwrap().clone(),
+            device_name: if self.shared.name_stale.load(Ordering::Acquire) {
+                None
+            } else {
+                self.shared.stream_name.lock().unwrap().clone()
+            },
             sample_rate: (rate != 0).then_some(rate),
             buffer_size: (buffer != 0).then_some(buffer),
         })
@@ -1744,7 +1752,7 @@ impl AudioService {
             .map(|device| {
                 Ok(AudioDeviceInfo {
                     id: device.id().map_err(|e| e.to_string())?.to_string(),
-                    name: device.to_string(),
+                    name: device_label(&device).unwrap_or_else(|| "Audio output".into()),
                     is_default: default.as_ref() == Some(&device),
                 })
             })
@@ -2169,6 +2177,7 @@ impl AudioService {
         let (epoch, snapshot) = self.shared.next_epoch_snapshot();
         // The replacement stream reports its own size on its first callback.
         self.shared.buffer_size.store(0, Ordering::Relaxed);
+        self.shared.name_stale.store(false, Ordering::Release);
         let preserve_position = preserve && snapshot.generation == document.plan.generation;
         let mut transport = CallbackTransport::new(rate, self.shared.clone());
         let (audition_producer, audition_consumer): (AuditionProducer, AuditionConsumer) =
@@ -2193,8 +2202,7 @@ impl AudioService {
         transport.resolve_renderer();
         let actual_id = device.id().map_err(|e| e.to_string())?.to_string();
         // Cached for diagnostics. `Display` for a device can panic in a backend.
-        let name =
-            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| device.to_string())).ok();
+        let name = device_label(&device);
         let (reply, answer) = mpsc::channel();
         let callback = OutputCallback {
             transport,
@@ -2291,6 +2299,23 @@ fn choose_output(id: Option<&str>) -> Result<(cpal::Device, cpal::SupportedStrea
     }
     Ok((device, config))
 }
+/// A device's display name. `Display` can panic inside a backend, so a panic reads as no name.
+fn device_label(device: &cpal::Device) -> Option<String> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| device.to_string())).ok()
+}
+/// Handles a backend notification for the stream of `epoch`. Allocation- and lock-free.
+/// Rerouting and xruns do not mean playback has failed; a reroute only makes the cached
+/// device name unreliable until the next open.
+fn stream_notice(shared: &SharedStatus, epoch: u64, kind: cpal::ErrorKind) {
+    if shared.epoch.load(Ordering::Acquire) != epoch {
+        return;
+    }
+    match kind {
+        cpal::ErrorKind::DeviceChanged => shared.name_stale.store(true, Ordering::Release),
+        cpal::ErrorKind::Xrun | cpal::ErrorKind::RealtimeDenied => {}
+        _ => shared.mark_fault_for_epoch(epoch),
+    }
+}
 fn build_stream<T: SizedSample + FromSample<f32>>(
     device: &cpal::Device,
     config: &cpal::SupportedStreamConfig,
@@ -2304,16 +2329,7 @@ fn build_stream<T: SizedSample + FromSample<f32>>(
             config.clone().into(),
             move |data: &mut [T], _| callback.render(data, channels),
             move |error| {
-                // Backend notifications about rerouting/xruns do not mean playback has failed.
-                if !matches!(
-                    error.kind(),
-                    cpal::ErrorKind::DeviceChanged
-                        | cpal::ErrorKind::Xrun
-                        | cpal::ErrorKind::RealtimeDenied
-                ) && shared.epoch.load(Ordering::Acquire) == epoch
-                {
-                    shared.mark_fault_for_epoch(epoch);
-                }
+                stream_notice(&shared, epoch, error.kind());
             },
             None,
         )
@@ -3665,6 +3681,35 @@ mod diagnostics_and_test_tone_tests {
         let service = AudioService::new(PathBuf::new(), Arc::new(|_| {}));
         service.shared.mark_fault();
         assert_eq!(service.diagnostics().unwrap_err(), AUDIO_ERROR_FAILED);
+    }
+
+    #[test]
+    fn a_reroute_of_the_live_stream_makes_the_name_unknown_until_the_next_open() {
+        let (service, _consumer) = service_with_stream(48_000);
+        *service.shared.stream_name.lock().unwrap() = Some("Speakers".into());
+        let epoch = service.shared.epoch.load(Ordering::Acquire);
+        let name = |s: &AudioService| s.diagnostics().unwrap().device_name;
+        stream_notice(&service.shared, epoch, cpal::ErrorKind::Xrun);
+        assert_eq!(name(&service).as_deref(), Some("Speakers"));
+        // A retired stream's notice changes nothing.
+        stream_notice(&service.shared, epoch + 1, cpal::ErrorKind::DeviceChanged);
+        assert_eq!(name(&service).as_deref(), Some("Speakers"));
+        stream_notice(&service.shared, epoch, cpal::ErrorKind::DeviceChanged);
+        let diagnostics = service.diagnostics().expect("a reroute is not a fault");
+        assert_eq!(diagnostics.device_name, None);
+        assert_eq!(diagnostics.sample_rate, Some(48_000));
+        service.shared.name_stale.store(false, Ordering::Release);
+        assert_eq!(name(&service).as_deref(), Some("Speakers"));
+    }
+
+    #[test]
+    fn other_backend_errors_still_fault_the_live_stream() {
+        let shared = SharedStatus::new();
+        let epoch = shared.epoch.load(Ordering::Acquire);
+        stream_notice(&shared, epoch, cpal::ErrorKind::RealtimeDenied);
+        assert!(!shared.is_faulted());
+        stream_notice(&shared, epoch, cpal::ErrorKind::DeviceNotAvailable);
+        assert!(shared.is_faulted());
     }
 
     fn callback_for(shared: &Arc<SharedStatus>, epoch: u64) -> OutputCallback {

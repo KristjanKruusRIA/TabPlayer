@@ -274,3 +274,33 @@ it('reads the device diagnostics only where the readout is shown', async () => {
   await act(async () => { await Promise.resolve(); });
   expect(bridge.diagnostics).toHaveBeenCalledTimes(1);
 });
+
+it('reads the buffer size once more after a device switch, when the first callback has run', async () => {
+  let current: { deviceName: string; sampleRate: number; bufferSize?: number } = { deviceName: 'Speakers', sampleRate: 44100, bufferSize: 441 };
+  const { player, bridge } = nativePlayer();
+  bridge.command = vi.fn(async (command) => { if (command.type === 'selectDevice') current = { deviceName: 'Headphones', sampleRate: 48000 }; });
+  bridge.devices = vi.fn(async () => [{ id: 'phones', name: 'Headphones', isDefault: false }]);
+  bridge.diagnostics = vi.fn(async () => current);
+  render(<SoundPanel trackId="guitar" onEdit={() => {}} playback={player} />);
+  const group = await screen.findByRole('group', { name: 'Audio diagnostics' });
+  await screen.findByRole('option', { name: 'Headphones' });
+  await vi.waitFor(() => expect(group).toHaveTextContent('Buffer size: 441 frames'));
+  fireEvent.change(screen.getByLabelText('Audio output'), { target: { value: 'phones' } });
+  await vi.waitFor(() => expect(group).toHaveTextContent('Device: Headphones'));
+  expect(group).toHaveTextContent('Buffer size: Unknown');
+  current = { ...current, bufferSize: 512 };
+  await vi.waitFor(() => expect(group).toHaveTextContent('Buffer size: 512 frames'), { timeout: 2000 });
+});
+
+it('clears a tone failure when the output recovers', async () => {
+  let receive: (status: NativeAudioStatus) => void = () => {};
+  const { player, bridge } = nativePlayer({ subscribe: vi.fn(async (listener) => { receive = listener; return () => {}; }) });
+  bridge.testTone = vi.fn(async () => { throw 'audio_output_unavailable'; });
+  const emit = (ready: boolean) => receive({ generation: player.generation, ready, playing: false, tick: 0, seconds: 0, durationSeconds: 8, speed: 1, metronome: false, error: null, deviceId: null, range: null, loop: null, practice: { settings: structuredClone(DEFAULT_PRACTICE), phase: 'paused', countInRemaining: 0, completedPasses: 0, effectiveRatio: 1, currentBpm: 120, pulse: null } } as NativeAudioStatus);
+  render(<SoundPanel trackId="guitar" onEdit={() => {}} playback={player} />);
+  await act(async () => { await Promise.resolve(); });
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Test tone' })); });
+  expect(await screen.findByRole('alert')).toHaveTextContent('The audio output is unavailable.');
+  await act(async () => { emit(true); });
+  expect(screen.queryByRole('alert')).toBeNull();
+});

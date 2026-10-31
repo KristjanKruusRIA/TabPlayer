@@ -32,6 +32,8 @@ export interface SoundEditingInput {trackId:string;sound?:TrackSound;onEdit:(edi
 /** Everything the Sound task does to a track's sound: each change is one undoable `setTrackSound` edit, a preview
  * never records one, and the same logic serves the inspector panel and the full-area rig. */
 const liveEveryMs=70;
+/** One extra readout after a device switch, once the new stream has rendered its first block. */
+export const diagnosticsFollowUpMs=400;
 export function useSoundEditing({trackId,sound,onEdit,playback,busy=false,shown=true,diagnostics:withDiagnostics=false}:SoundEditingInput) {
   const playbackState=useSyncExternalStore(playback?.subscribe??noSubscribe,playback?.getState??noState);
   const current=completeSound(sound??soundPreset('gm'));const [devices,setDevices]=useState<AudioDeviceInfo[]>([]);const [error,setError]=useState<string|null>(null);
@@ -58,6 +60,11 @@ export function useSoundEditing({trackId,sound,onEdit,playback,busy=false,shown=
   // A refusal is only true while playback runs.
   const isPlaying = playbackState?.playing ?? false;
   useEffect(() => { if (!isPlaying) setTestToneMessage(null); }, [isPlaying]);
+  // A failure also ends when the output recovers.
+  const isReady = playbackState?.ready ?? false;
+  useEffect(() => { setTestToneMessage(null); }, [isReady]);
+  const followUp = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (followUp.current) clearTimeout(followUp.current); }, []);
   const testTone = useCallback(() => {
     if (!playback || typeof playback.testTone !== 'function') return;
     setTestToneMessage(null);
@@ -198,7 +205,12 @@ export function useSoundEditing({trackId,sound,onEdit,playback,busy=false,shown=
   const renameChosen=()=>{if(entry&&report(renameSoundPreset(entry.name,name),`Renamed “${entry.name}” to “${name.trim()}”.`)){setChosen(name.trim());setName('');}};
   const deleteChosen=()=>{if(entry&&report(deleteSoundPreset(entry.name),`Deleted “${entry.name}”.`))setChosen('');closeConfirm();};
   /** The readout follows the switch once it has completed, not when it is queued. */
-  const selectOutput=(id:string)=>{if(playback)void Promise.resolve(playback.selectDevice(id||null)).then(refreshDiagnostics);};
+  /* The buffer size only appears with the new stream's first callback, so one bounded follow-up read fills it in. */
+  const selectOutput=(id:string)=>{if(playback)void Promise.resolve(playback.selectDevice(id||null)).then(()=>{
+    if(!alive.current)return;refreshDiagnostics();
+    if(followUp.current)clearTimeout(followUp.current);
+    followUp.current=setTimeout(()=>{followUp.current=null;if(alive.current)refreshDiagnostics();},diagnosticsFollowUpMs);
+  });};
   return {
     playbackState,current,devices,error,setError,status,setStatus,busy,playback:playback??null,record,save,
     trackId,first,second,fx,hearField,hear,endLive,duplicate,syncOf,sync,order,place,move,movedBlock,pastePedal,copyPedalOf,copyCurrentSound,pasteSound,clipboard,library,

@@ -739,6 +739,13 @@ it('workstation File View Help are single disclosures with exclusive open state,
   const help=openCommand('Help');fireEvent.pointerDown(screen.getByRole('region',{name:'Score workspace'}));await waitFor(()=>expect(help).not.toHaveAttribute('open'));expect(c.getState()).toBe(before);expectSilentNavigation();
   openCommand('File');within(file).getByRole('button',{name:'New'}).focus();fireEvent.pointerDown(screen.getByRole('region',{name:'Score workspace'}));expect(file).not.toHaveAttribute('open');expect(file.querySelector('summary')).toHaveFocus();
 });
+it('Space still plays from the focused scrubber, a number field still counts as typing, and Undo and Redo keep names and tooltips',async()=>{
+  await setup();const scrub=await screen.findByRole('slider',{name:'Playback position'});scrub.focus();
+  const before=integration.play.mock.calls.length;fireEvent.keyDown(scrub,{key:' '});expect(integration.play.mock.calls.length).toBe(before+1);
+  const arrow=fireEvent.keyDown(scrub,{key:'ArrowRight'});expect(arrow).toBe(true);
+  const field=screen.getByLabelText('Loop start');field.focus();fireEvent.keyDown(field,{key:' '});expect(integration.play.mock.calls.length).toBe(before+1);
+  expect(screen.getByRole('button',{name:'Undo'})).toHaveAttribute('title',expect.stringContaining('Undo'));expect(screen.getByRole('button',{name:'Redo'})).toHaveAttribute('title',expect.stringContaining('Redo'));
+});
 it('top-bar panel toggles show and hide the track panel, inspector and dock, and mirror the View menu',async()=>{
   const c=await setup(),before=c.getState(),toggle=(name:string)=>screen.getByRole('button',{name:`Toggle ${name}`}),pane=(selector:string)=>document.querySelector<HTMLElement>(selector)!;
   for(const [name,selector] of [['track panel','.workstation-left'],['inspector','.workstation-inspector'],['bottom dock','.workstation-dock']] as const){

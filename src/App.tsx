@@ -82,7 +82,7 @@ import { HarmonyTransposePanel } from './harmony/HarmonyTransposePanel';
 import { TrackSettingsPanel } from './workstation/TrackSettingsPanel';
 import './workstation/workstation-shell.css';
 const noPlaybackSubscribe=()=>()=>{};
-const textEntry=(target:EventTarget)=>target instanceof HTMLElement&&(['INPUT','SELECT','TEXTAREA'].includes(target.tagName)||target.isContentEditable);
+const textEntry=(target:EventTarget)=>target instanceof HTMLElement&&(['INPUT','SELECT','TEXTAREA'].includes(target.tagName)&&!(target instanceof HTMLInputElement&&target.type==='range')||target.isContentEditable);
 
 export interface AppProps {
   controller:DocumentController;audioBridge:NativeAudioBridge;waveformBridge:NativeBackingWaveformBridge;exportBridge:ExportNativeBridge;
@@ -453,8 +453,8 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
         <label className="check"><input type="checkbox" checked={dockVisible} onChange={event=>setDockVisible(event.target.checked)}/>Bottom dock</label>
         <InputPreferencesPanel preferences={inputPrefs} onChange={setInputPrefs} preview={auditionEdits} onPreview={play=>{setAuditionEdits(play);writeAuditionWhileEditing(play);}}/>
       </section></details>
-      <button disabled={editBusy || !state.snapshot.canUndo} onClick={()=>change(controller.undo())}><UndoGlyph/><span className="bar-label">Undo</span></button>
-      <button disabled={editBusy || !state.snapshot.canRedo} onClick={()=>change(controller.redo())}><RedoGlyph/><span className="bar-label">Redo</span></button>
+      <button disabled={editBusy || !state.snapshot.canUndo} onClick={()=>change(controller.undo())} title="Undo (Ctrl+Z)"><UndoGlyph/><span className="bar-label">Undo</span></button>
+      <button disabled={editBusy || !state.snapshot.canRedo} onClick={()=>change(controller.redo())} title="Redo (Ctrl+Shift+Z)"><RedoGlyph/><span className="bar-label">Redo</span></button>
     </nav></div><Segmented className="view-switch" label="View" value={view} onChange={setView} options={[{value:'score',label:'Score'},{value:'sound',label:'Sound'},{value:'mixer',label:'Mixer'}]}/><div className="toolbar-right"><nav className="pane-toggles" aria-label="Panels"><button type="button" data-pane-toggle="left" aria-pressed={leftShown} title="Track panel" aria-label="Toggle track panel" onClick={()=>leftVisible&&leftShown?setLeftVisible(false):showTask(leftTask)}><PanelLeftGlyph/></button><button type="button" data-pane-toggle="inspector" aria-pressed={inspectorShown} title="Inspector" aria-label="Toggle inspector" onClick={()=>inspectorVisible&&inspectorShown?setInspectorVisible(false):showInspector()}><PanelRightGlyph/></button><button type="button" data-pane-toggle="dock" aria-pressed={dockVisible} title="Bottom dock" aria-label="Toggle bottom dock" onClick={()=>setDockVisible(!dockVisible)}><PanelBottomGlyph/></button></nav><details className="keyboard-help" onToggle={event=>commandToggle(event.currentTarget)} onKeyDown={event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();event.currentTarget.open=false;event.currentTarget.querySelector('summary')?.focus();}}}><summary>Help</summary><section role="region" aria-label="Keyboard and editing help">
       <div className="help-actions"><button type="button" onClick={()=>openHelp('start')}>Help topics (F1)</button><button type="button" onClick={()=>openHelp('about')}>About and updates</button></div>
       <h2>Keyboard & editing</h2><p>Use these shortcuts outside input fields and dialogs. F1 opens help about the part of the window you are using.</p>

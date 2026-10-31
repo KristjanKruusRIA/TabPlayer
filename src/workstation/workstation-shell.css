@@ -25,6 +25,7 @@ body { overflow:hidden; }
 .toolbar-left { gap:16px; }
 .toolbar-right { justify-content:flex-end; gap:6px; }
 .toolbar h1 { display:flex; align-items:center; gap:8px; margin:0; font:600 14px/1 var(--tp-font-ui); letter-spacing:0; color:var(--ws-text); white-space:nowrap; }
+.toolbar nav>button { position:relative; }
 .toolbar nav { display:flex; align-items:center; gap:2px; }
 .toolbar :is(nav>button,.pane-toggles>button) { display:inline-flex; align-items:center; gap:6px; min-height:28px; padding:0 8px; border-color:transparent; background:transparent; font:500 13px/1 var(--tp-font-ui); }
 .toolbar :is(nav>button,.pane-toggles>button):hover:enabled { background:var(--ws-raised); border-color:var(--ws-border); }
@@ -110,7 +111,8 @@ body { overflow:hidden; }
   .workstation-left>nav { display:none; }
   .app-shell .paper-scroll { padding:10px; }
   .toolbar { gap:8px; }
-  .toolbar .bar-label,.toolbar .document-title { display:none; }
+  .toolbar .document-title { display:none; }
+  .toolbar .bar-label { position:absolute; width:1px; height:1px; margin:-1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
   .toolbar :is(nav>button) { padding:0 7px; }
 }
 

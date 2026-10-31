@@ -2,6 +2,7 @@ import {model,Settings} from '@coderline/alphatab';
 import type {BackingSettings,SyncAnchor} from '../edit-types';
 import {applyTempoAutomations} from '../editor/tempo-automations';
 import type {RatioTempoPoint} from '../editor/tempo-types';
+import {displayedBpm,quarterUnit,tempoUnitOf} from '../editor/tempo-unit';
 import {captureNoteLinks,restoreNoteLinks} from '../editor/links';
 import {scoreFromJson} from '../model-clone';
 import {buildPlaybackPlan,validatePlaybackPlan} from './plan';
@@ -102,6 +103,11 @@ export function scoreTemposFromSync(score:model.Score,timing:ReferenceSyncTiming
   }
   if(!bars.has(0))points.push({bar:0,ratio:0,bpm:target[0].bpm,linear:false});
   points.sort((a,b)=>a.bar-b.bar||a.ratio-b.ratio);
+  // A point that lands on a tempo the score already writes in another unit keeps that unit and counts in it.
+  for(const point of points) {
+    const old=score.masterBars[point.bar].tempoAutomations.find(value=>value.ratioPosition===point.ratio);
+    if(old&&tempoUnitOf(old)!==quarterUnit&&Math.abs(old.value-point.bpm)<=bpmTolerance){point.unit=tempoUnitOf(old);point.bpm=displayedBpm(old);}
+  }
   const candidate=scoreFromJson(model.JsonConverter.scoreToJson(score),new Settings());
   restoreNoteLinks(candidate,captureNoteLinks(score));applyTempoAutomations(candidate,points);
   const regenerated=buildPlaybackPlan(candidate,0);

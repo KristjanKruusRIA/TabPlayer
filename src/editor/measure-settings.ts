@@ -1,5 +1,6 @@
 import type { model } from '@coderline/alphatab';
 import type { EditCommand } from '../edit-types';
+import { displayedBpm, quarterUnit, tempoUnitOf } from './tempo-unit';
 
 export type MeasureSettings=Omit<Extract<EditCommand,{type:'setMeasureSettings'}>,'type'|'bar'>;
 
@@ -8,7 +9,7 @@ export function readMeasureSettings(score:model.Score,bar:number):MeasureSetting
   const master=score.masterBars[bar],reference=score.tracks[0].staves[0].bars[bar].voices[0];
   return {numerator:master.timeSignatureNumerator,denominator:master.timeSignatureDenominator,pickup:master.isAnacrusis,freeTime:master.isFreeTime,repeatStart:master.isRepeatStart,repeatCount:master.repeatCount,
     endings:Array.from({length:8},(_,i)=>i+1).filter(n=>master.alternateEndings&(1<<(n-1))),section:master.section?.text??'',
-    tempos:master.tempoAutomations.map(a=>({beat:Math.max(0,reference.beats.findIndex(b=>Math.abs(b.playbackStart-a.ratioPosition*master.calculateDuration(false))<1)),bpm:a.value,linear:a.isLinear}))};
+    tempos:master.tempoAutomations.map(a=>({beat:Math.max(0,reference.beats.findIndex(b=>Math.abs(b.playbackStart-a.ratioPosition*master.calculateDuration(false))<1)),bpm:displayedBpm(a),linear:a.isLinear,...tempoUnitOf(a)!==quarterUnit?{unit:tempoUnitOf(a)}:{}}))};
 }
 
 /**

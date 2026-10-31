@@ -686,6 +686,10 @@ pub struct TempoPoint {
     pub beat: u32,
     pub bpm: f64,
     pub linear: bool,
+    /// The note `bpm` counts, as a GP tempo unit code (1 eighth, 2 quarter, 3 dotted quarter, 4 half,
+    /// 5 dotted half). Absent counts quarter notes, as every tempo did before units existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unit: Option<u8>,
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -694,6 +698,9 @@ pub struct RatioTempoPoint {
     pub ratio: f64,
     pub bpm: f64,
     pub linear: bool,
+    /// The note `bpm` counts; see `TempoPoint::unit`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unit: Option<u8>,
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -1349,6 +1356,15 @@ pub fn validate_tuning(tuning: &[i32]) -> Result<(), String> {
     }
     Ok(())
 }
+/// A tempo unit is a GP code: 1 eighth, 2 quarter, 3 dotted quarter, 4 half, 5 dotted half.
+pub fn validate_tempo_unit(unit: Option<u8>) -> Result<(), String> {
+    match unit {
+        None | Some(1..=5) => Ok(()),
+        Some(_) => {
+            Err("Choose a tempo unit: eighth, quarter, dotted quarter, half or dotted half.".into())
+        }
+    }
+}
 pub fn validate_tempo(tempo: f64) -> Result<(), String> {
     if !tempo.is_finite() || tempo <= 0.0 {
         return Err("Tempo must be a positive number.".into());
@@ -1452,6 +1468,7 @@ impl EditCommand {
                             || !(0.0..=1.0).contains(&point.ratio)
                             || !point.bpm.is_finite()
                             || point.bpm <= 0.0
+                            || validate_tempo_unit(point.unit).is_err()
                     })
                     || points
                         .windows(2)
@@ -1794,6 +1811,7 @@ impl EditCommand {
                 }
                 for tempo in tempos {
                     validate_tempo(tempo.bpm)?;
+                    validate_tempo_unit(tempo.unit)?;
                 }
                 if tempos.windows(2).any(|pair| pair[0].beat >= pair[1].beat) {
                     return Err("Tempo positions must be sorted and distinct.".into());
@@ -3323,6 +3341,35 @@ mod tests {
             let mut unknown = command.clone();
             unknown["unexpected"] = json!(true);
             rejected(&unknown);
+        }
+    }
+    #[test]
+    fn tempo_units_roundtrip_validate_and_leave_old_edits_unchanged() {
+        let measure = |tempos: Value| {
+            json!({"type": "setMeasureSettings", "bar": 0, "numerator": 4, "denominator": 4, "pickup": false,
+                "freeTime": false, "repeatStart": false, "repeatCount": 0, "endings": [], "section": "", "tempos": tempos})
+        };
+        // An edit logged before units existed has no unit and serializes exactly as it was read.
+        let old = measure(json!([{"beat": 0, "bpm": 120.0, "linear": false}]));
+        assert_eq!(serde_json::to_value(accepted(&old)).unwrap(), old);
+        let ratio_old = json!({"type": "replaceTempoAutomations", "points": [{"bar": 0, "ratio": 0.0, "bpm": 90.0, "linear": true}]});
+        assert_eq!(
+            serde_json::to_value(accepted(&ratio_old)).unwrap(),
+            ratio_old
+        );
+        for unit in 1..=5 {
+            let beat = measure(json!([{"beat": 0, "bpm": 100.0, "linear": false, "unit": unit}]));
+            assert_eq!(serde_json::to_value(accepted(&beat)).unwrap(), beat);
+            let ratio = json!({"type": "replaceTempoAutomations", "points": [{"bar": 0, "ratio": 0.0, "bpm": 100.0, "linear": false, "unit": unit}]});
+            assert_eq!(serde_json::to_value(accepted(&ratio)).unwrap(), ratio);
+        }
+        for unit in [json!(0), json!(6), json!(-1), json!(2.5), json!("3")] {
+            rejected(&measure(
+                json!([{"beat": 0, "bpm": 100.0, "linear": false, "unit": unit}]),
+            ));
+            rejected(
+                &json!({"type": "replaceTempoAutomations", "points": [{"bar": 0, "ratio": 0.0, "bpm": 100.0, "linear": false, "unit": unit}]}),
+            );
         }
     }
 }

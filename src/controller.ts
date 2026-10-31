@@ -14,11 +14,12 @@ import type {NativeBackingWaveformBridge} from './audio/backing-waveform-types';
 import {backingLocationsForScore} from './audio/plan';
 import {backingProcessingKey} from './audio/backing-processing';
 import {referenceSyncTiming,referenceTimingKey} from './audio/reference-sync';
+import {scoreUsesTempoUnits,tempoUnitOf} from './editor/tempo-unit';
 import {projectGpDocument} from './interchange/backing-projection';
 
 type ReferenceWaveformBinding={bridge:NativeBackingWaveformBridge};
 const tempoState=(score:model.Score)=>JSON.stringify(score.masterBars.map(bar=>bar.tempoAutomations.map(tempo=>[
-  tempo.type,tempo.value,tempo.ratioPosition,tempo.isLinear,tempo.isVisible,tempo.text??'',tempo.syncPointValue,
+  tempo.type,tempo.value,tempo.ratioPosition,tempo.isLinear,tempo.isVisible,tempo.text??'',tempo.syncPointValue,tempoUnitOf(tempo),
 ])));
 const backingState=(backing:BackingSettings|null)=>JSON.stringify(backing?[
   backing.assetId,backing.offsetMs,backing.anchors.map(a=>[a.bar,a.occurrence,a.ratio,a.audioMs]).sort((a,b)=>a[0]-b[0]||a[1]-b[1]||a[2]-b[2]||a[3]-b[3]),
@@ -81,7 +82,7 @@ export class DocumentController {
   }
   private needsPartialCapoMark() {
     const project=this.state.snapshot.project;
-    return !!this.bridge.markPartialCapo&&project.base.kind==='file'&&!this.state.snapshot.canRedo&&appliesFilePartialCapo(project)&&project.partialCapo!==true&&this.state.score.tracks.some(track=>track.staves.some(staff=>getPartialCapo(staff)));
+    return !!this.bridge.markPartialCapo&&project.base.kind==='file'&&!this.state.snapshot.canRedo&&appliesFilePartialCapo(project)&&project.partialCapo!==true&&(scoreUsesTempoUnits(this.state.score)||this.state.score.tracks.some(track=>track.staves.some(staff=>getPartialCapo(staff))));
   }
   private async editNow(command:EditCommand,asset?:AssetCandidate) {
     let candidate:ReturnType<typeof previewEdit>;let record:DocumentSnapshot;

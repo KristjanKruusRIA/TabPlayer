@@ -77,15 +77,15 @@
       "unverified": 8
     },
     "current_dispositions": {
-      "implemented": 101,
-      "partial": 130,
+      "implemented": 100,
+      "partial": 131,
       "missing": 19,
       "unverified": 8
     },
     "evidence_reviewed_total": 176,
     "evidence_reviewed": {
-      "implemented": 59,
-      "partial": 113,
+      "implemented": 58,
+      "partial": 114,
       "missing": 0,
       "unverified": 4
     },
@@ -96,11 +96,11 @@
       "missing": 19,
       "unverified": 4
     },
-    "status_changed_total": 138,
+    "status_changed_total": 137,
     "transition_counts": {
       "missing -> implemented": 39,
       "missing -> partial": 88,
-      "partial -> implemented": 11
+      "partial -> implemented": 10
     }
   },
   "evidence": {
@@ -1991,19 +1991,19 @@
     "editing_gaps_behavior": {
       "path": "docs/validation/2026-10-31-gp8-editing-gaps.md",
       "start_line": 13,
-      "end_line": 26,
+      "end_line": 28,
       "kind": "validation_report"
     },
     "editing_gaps_evidence": {
       "path": "docs/validation/2026-10-31-gp8-editing-gaps.md",
-      "start_line": 28,
-      "end_line": 41,
+      "start_line": 30,
+      "end_line": 44,
       "kind": "validation_report"
     },
     "editing_gaps_limits": {
       "path": "docs/validation/2026-10-31-gp8-editing-gaps.md",
-      "start_line": 53,
-      "end_line": 55,
+      "start_line": 56,
+      "end_line": 58,
       "kind": "validation_report"
     }
   },
@@ -2123,7 +2123,7 @@
     "docs/validation/2026-10-31-gp8-track-sound-lock.md": "1ce9519b7d2b749b6968917011699aa2a2863b0072a7cb4030ba814c2fcfe2d6",
     "docs/validation/2026-10-31-gp8-bar-widths.md": "12a757daab19bf8be0101c89facb68f249d3817fe1d1d0af4397a504197b7d7b",
     "docs/validation/2026-10-31-gp8-percussion-styles.md": "953e068957c72136ffd0bc9e5321a10f78d04e68a006124453f4d267cd1e2300",
-    "docs/validation/2026-10-31-gp8-editing-gaps.md": "8b4ffd66792199dd461dbcadae0396c3ae35be5a2a34cd0bf277c8ea4d54b691"
+    "docs/validation/2026-10-31-gp8-editing-gaps.md": "f0a6108f8cf98f7277f27d18ddf9a4322881e6debf0c5bcbe7723423f51ad24b"
   },
   "next_open_families": [
     {
@@ -4242,11 +4242,11 @@
       "acceptance_required": "Report invalid track/bar/voice and repair duration with rests/ties correctly.",
       "runtime_rechecked": false,
       "historical_status": "partial",
-      "current_status": "implemented",
+      "current_status": "partial",
       "assessment": "evidence_reviewed",
-      "current_proven_status": "implemented",
-      "current_behavior": "The Score errors list now repairs each reported voice with one undoable edit, `fitVoice`: Fill with rests adds the fewest standard rests to a short voice, and Trim to fit removes beats past the barline from an overfull one and fills the rest with rests. A complete or unused voice, a free-time measure and an unrepresentable remainder are refused and record nothing. Older projects replay unchanged.",
-      "remaining_gap": "A beat crossing the barline is removed rather than split into tied beats; no rebalance across measures, no fix-all and no live check while typing; Windows desktop and GP8 comparison not run.",
+      "current_proven_status": "partial",
+      "current_behavior": "The Score errors list now repairs each reported voice with one undoable edit, `fitVoice`: Fill with rests adds the fewest standard rests to a short voice, and Trim to fit removes the beat crossing the barline and what follows (whole tuplets, grace notes with their beat) after showing what it removes. Complete or unused voices, free-time measures, unwritable remainders and a last note tied into the next measure are refused. Older projects replay unchanged.",
+      "remaining_gap": "Ties are not handled: a crossing beat is removed rather than split with a tie, and a note tied into the next measure blocks the fill; no rebalance across measures, no fix-all and no live check while typing; Windows desktop and GP8 comparison not run.",
       "current_evidence": [
         "editing_gaps_behavior",
         "editing_gaps_evidence",

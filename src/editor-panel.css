@@ -535,3 +535,20 @@
   font-family: var(--tp-font-mono);
   text-align: center;
 }
+
+.inspector .score-error-list {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.inspector .score-error-list li {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.inspector .score-error-list li > button {
+  text-align: left;
+}

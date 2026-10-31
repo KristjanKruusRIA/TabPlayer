@@ -63,3 +63,49 @@ it('is a known command with exactly its four fields',()=>{
   expect(() =>validateParityCommand({type:'fitVoice',track:0,staff:0,bar:0})).toThrow();
   expect(() =>validateParityCommand(fit({bar:-1}))).toThrow();
 });
+
+/** An imported project whose bar 1 holds the beats `build` puts after three quarter notes. */
+function overfull(build:(voice:model.Voice)=>void) {
+  const authored=music(),voice=authored.tracks[0].staves[0].bars[1].voices[0];
+  voice.beats.splice(3);build(voice);
+  const bytes=exportGp(authored);
+  return {...blankProject(),base:{kind:'file' as const,filename:'over.gp',bytesBase64:Buffer.from(bytes).toString('base64'),sha256:createHash('sha256').update(bytes).digest('hex')},edits:[] as EditCommand[]};
+}
+const beat=(duration:number,tuplet=false,grace=false)=>{
+  const value=new model.Beat();value.duration=duration;value.isEmpty=false;
+  if(tuplet){value.tupletNumerator=3;value.tupletDenominator=2;}
+  if(grace)value.graceType=model.GraceType.BeforeBeat;
+  const note=new model.Note();note.string=1;note.fret=2;value.addNote(note);return value;
+};
+
+it('trims a tuplet that crosses the barline whole instead of keeping some of its beats',()=>{
+  const project=overfull(voice=>{voice.addBeat(beat(8));for(let i=0;i<3;i++)voice.addBeat(beat(8,true));voice.addBeat(beat(8,true));});
+  const built=buildDocument(project),before=beatsOf(built.score,1);
+  expect(before.length).toBeGreaterThan(5);
+  const result=previewEdit(project,fit({bar:1}),built);
+  expect(findScoreErrors(result.score)).toEqual([]);
+  const voice=result.score.tracks[0].staves[0].bars[1].voices[0];
+  expect(voice.beats.every(value=>value.tupletNumerator<=1||value.tupletDenominator<=1)).toBe(true);
+});
+
+it('removes the grace note that belongs to a removed beat',()=>{
+  const project=overfull(voice=>{voice.addBeat(beat(16,false,true));voice.addBeat(beat(2));});
+  const built=buildDocument(project);
+  expect(findScoreErrors(built.score).map(error=>error.kind)).toEqual(['overfull']);
+  const result=previewEdit(project,fit({bar:1}),built);
+  const voice=result.score.tracks[0].staves[0].bars[1].voices[0];
+  expect(findScoreErrors(result.score)).toEqual([]);
+  expect(voice.beats.some(value=>value.graceType!==model.GraceType.None)).toBe(false);
+});
+
+it('reports what Trim to fit would remove',()=>{
+  const built=buildDocument(overfull(voice=>{voice.addBeat(beat(2));}));
+  expect(findScoreErrors(built.score)[0].trim).toEqual({beats:1,notes:1});
+});
+
+it('will not put rests after a note that is tied into the next measure',()=>{
+  const at=(bar:number,beatIndex:number)=>({...where,bar,beat:beatIndex});
+  const edits:EditCommand[]=[{type:'appendMeasure'},{type:'setNote',target:at(0,2),string:1,fret:3},{type:'setNote',target:at(1,0),string:1,fret:3},
+    {type:'setNoteLink',from:{target:at(0,2),string:1},to:{target:at(1,0),string:1},kind:'tie'},{type:'deleteBeat',target:at(0,3)}];
+  expect(()=>previewEdit({...blankProject(),edits},fit())).toThrow(/tied into the next measure/);
+});

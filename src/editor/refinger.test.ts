@@ -331,3 +331,176 @@ describe('refinger keepPitch on retune and capo', () => {
     expect(() => previewEdit(base.project, { type: 'setStaffSettings', track: 0, staff: 0, settings })).toThrow(/chord diagram E, string 1 \(E2\): no fret reaches this pitch/);
   });
 });
+
+const at = (bar: number, beat = 0, voice = 0): BeatTarget => ({ track: 0, staff: 0, bar, voice, beat });
+const settingsOf = (staff: model.Staff, over: Partial<StaffSettings>): StaffSettings => ({
+  tuning: [...staff.tuning], capo: staff.capo, transposition: staff.transpositionPitch, displayTransposition: staff.displayTranspositionPitch,
+  clef: staff.bars[0].clef, showTab: true, showNotation: true, ...over,
+});
+/** What a note sounds like, whatever its capo, drone or transposition. */
+const sounds = (note: model.Note) => note.string > 0 ? fretKey(note.beat.voice.bar.staff, note.string, note.fret) : NaN;
+const notesOf = (score: model.Score, trackIndex = 0) =>
+  score.tracks[trackIndex].staves[0].bars.flatMap(b => b.voices.flatMap(v => v.beats.flatMap(beat => beat.notes)));
+
+describe('refinger keeps links, techniques and other cases intact', () => {
+  const dropDKeep: EditCommand = { type: 'setTuning', track: 0, tuning: dropD, keepPitch: true };
+
+  it('keeps a slide attached to the next note on its string', () => {
+    const base = projectWithEdits(
+      { type: 'setNote', target: at(0), string: 1, fret: 2 },
+      { type: 'setNote', target: at(0, 1), string: 1, fret: 5 },
+      { type: 'setNoteTechniques', target: at(0), string: 1, patch: { slideOut: model.SlideOutType.Shift } }
+    );
+    expect(notesOf(base.score)[0].slideTarget).toBe(notesOf(base.score)[1]);
+    const moved = previewEdit(base.project, dropDKeep).score;
+    const [from, to] = notesOf(moved);
+    expect([from.fret, to.fret]).toEqual([4, 7]);
+    expect(from.slideTarget).toBe(to);
+    expect(to.slideOrigin).toBe(from);
+    expect(from.slideOutType).toBe(model.SlideOutType.Shift);
+  });
+
+  it('keeps a hammer-on attached', () => {
+    const base = projectWithEdits(
+      { type: 'setNote', target: at(0), string: 1, fret: 2 },
+      { type: 'setNote', target: at(0, 1), string: 1, fret: 4 },
+      { type: 'setNoteLink', from: { target: at(0), string: 1 }, to: { target: at(0, 1), string: 1 }, kind: 'hammerPull' }
+    );
+    const moved = previewEdit(base.project, dropDKeep).score;
+    const [from, to] = notesOf(moved);
+    expect([from.fret, to.fret]).toEqual([4, 6]);
+    expect(from.hammerPullDestination).toBe(to);
+    expect(to.hammerPullOrigin).toBe(from);
+  });
+
+  it('leaves a bend as it was written while the note moves', () => {
+    const curve = { type: model.BendType.Bend, style: 0, points: [{ offset: 0, value: 0 }, { offset: 60, value: 4 }] };
+    const base = projectWithEdits(
+      { type: 'setNote', target: at(0), string: 1, fret: 2 },
+      { type: 'setNoteTechniques', target: at(0), string: 1, patch: { bend: curve } }
+    );
+    const moved = previewEdit(base.project, dropDKeep).score;
+    const note = notesOf(moved)[0];
+    expect(note.fret).toBe(4);
+    expect(note.bendType).toBe(model.BendType.Bend);
+    expect(note.bendPoints!.map(p => [p.offset, p.value])).toEqual([[0, 0], [60, 4]]);
+  });
+
+  it('moves a grace note with its beat and keeps it a grace note', () => {
+    const base = projectWithEdits(
+      { type: 'setBeatRhythm', target: at(0, 1), duration: 16, dots: 0, tupletNumerator: 1, tupletDenominator: 1, graceType: model.GraceType.BeforeBeat },
+      { type: 'setNote', target: at(0, 1), string: 1, fret: 2 },
+      { type: 'setNote', target: at(0, 2), string: 1, fret: 2 }
+    );
+    const moved = previewEdit(base.project, dropDKeep).score;
+    const beats = moved.tracks[0].staves[0].bars[0].voices[0].beats;
+    expect(beats[1].graceType).toBe(model.GraceType.BeforeBeat);
+    expect([beats[1].notes[0].fret, beats[2].notes[0].fret]).toEqual([4, 4]);
+  });
+
+  it('refuses a harmonic that would have to move, and names it', () => {
+    const base = projectWithEdits(
+      { type: 'setNote', target: at(0), string: 6, fret: 12 },
+      { type: 'setNoteTechniques', target: at(0), string: 6, patch: { harmonic: { type: 1, value: 12 } } },
+      { type: 'setNote', target: at(0, 1), string: 1, fret: 12 },
+      { type: 'setNoteTechniques', target: at(0, 1), string: 1, patch: { harmonic: { type: 1, value: 12 } } }
+    );
+    // Only string 1 changes: its harmonic would need fret 14.
+    expect(() => previewEdit(base.project, dropDKeep)).toThrow(/beat 2, string 1 \(E3\): a harmonic cannot move/);
+    // Only string 6 is retuned up a tone: that harmonic would need a lower fret.
+    expect(() => previewEdit(base.project, { type: 'setTuning', track: 0, tuning: [66, 59, 55, 50, 45, 40], keepPitch: true })).toThrow(/string 6 \(E5\): a harmonic cannot move/);
+  });
+
+  it('keeps a harmonic in place when no string it needs is retuned', () => {
+    const base = projectWithEdits(
+      { type: 'setNote', target: at(0), string: 6, fret: 12 },
+      { type: 'setNoteTechniques', target: at(0), string: 6, patch: { harmonic: { type: 1, value: 12 } } }
+    );
+    const note = notesOf(previewEdit(base.project, dropDKeep).score)[0];
+    expect([note.string, note.fret, note.harmonicType]).toEqual([6, 12, 1]);
+  });
+
+  it('keeps pitch when a partial capo is removed', () => {
+    const withCapo = projectWithEdits(
+      { type: 'setStaffSettings', track: 0, staff: 0, settings: settingsOf(buildScore(blankProject()).tracks[0].staves[0], { partialCapo: { fret: 5, strings: [1, 2, 3] } }) },
+      { type: 'setNote', target: at(0), string: 2, fret: 3 },
+      { type: 'setNote', target: at(0, 1), string: 5, fret: 3 }
+    );
+    const before = notesOf(withCapo.score).map(sounds);
+    const staff = withCapo.score.tracks[0].staves[0];
+    const moved = previewEdit(withCapo.project, {
+      type: 'setStaffSettings', track: 0, staff: 0, settings: settingsOf(staff, { partialCapo: { fret: 0, strings: [] }, keepPitch: true }),
+    }).score;
+    expect(notesOf(moved).map(sounds)).toEqual(before);
+    expect(notesOf(moved).map(n => [n.string, n.fret])).toEqual([[2, 8], [5, 3]]);
+  });
+
+  it('keeps pitch on a banjo drone string and never lands on a fret the drone lacks', () => {
+    const created = previewEdit(blankProject(), { type: 'addTrack', name: 'Banjo', tuning: [62, 59, 55, 50, 67], program: 105, tuningName: '' });
+    const banjoAt = (beat: number): BeatTarget => ({ ...at(0, beat), track: 1 });
+    let state = previewEdit(created.project, { type: 'setStaffSettings', track: 1, staff: 0, settings: settingsOf(created.score.tracks[1].staves[0], { droneFret: 5 }) });
+    state = previewEdit(state.project, { type: 'setNote', target: banjoAt(0), string: 1, fret: 7 });
+    state = previewEdit(state.project, { type: 'setNote', target: banjoAt(1), string: 1, fret: 0 });
+    const before = notesOf(state.score, 1).map(sounds);
+    expect(before).toEqual([69, 67]);
+    // The drone string is tuned up a semitone: the fret-7 note is one above its open string (fret 6); the open note needs a lower pitch than the string now has.
+    const moved = previewEdit(state.project, { type: 'setTuning', track: 1, tuning: [62, 59, 55, 50, 68], keepPitch: true });
+    const after = notesOf(moved.score, 1);
+    expect(after[0]).toMatchObject({ string: 1, fret: 6 });
+    expect(sounds(after[0])).toBe(69);
+    expect(after[1].fret === 0 || after[1].fret > 5).toBe(true);
+    expect(sounds(after[1])).toBe(67);
+  });
+});
+
+describe('refinger fuzz', () => {
+  // A small seeded generator keeps failures reproducible.
+  const random = (seed: number) => () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 2 ** 32; };
+
+  it('keeps every sounding pitch, tie and string for random scores and tunings, or refuses cleanly', () => {
+    const next = random(20261031);
+    let moved = 0, refused = 0, tied = 0;
+    for (let round = 0; round < 40; round++) {
+      const edits: EditCommand[] = [];
+      const placed = new Map<string, [number, number]>();
+      for (let bar = 0; bar < 2; bar++) for (let beat = 0; beat < 4; beat++) {
+        const count = 1 + Math.floor(next() * 3), strings = new Set<number>();
+        while (strings.size < count) strings.add(1 + Math.floor(next() * 6));
+        for (const string of strings) {
+          const fret = Math.floor(next() * 15);
+          edits.push({ type: 'setNote', target: at(bar, beat), string, fret });
+          placed.set(`${bar}/${beat}/${string}`, [string, fret]);
+        }
+      }
+      // Tie a note to the same fret on the same string in the next beat when both exist.
+      for (let bar = 0; bar < 2; bar++) for (let beat = 0; beat < 3; beat++) for (let string = 1; string <= 6; string++) {
+        const here = placed.get(`${bar}/${beat}/${string}`), there = placed.get(`${bar}/${beat + 1}/${string}`);
+        if (here && there && here[1] === there[1] && next() < 0.8) edits.push({ type: 'setNoteLink', from: { target: at(bar, beat), string }, to: { target: at(bar, beat + 1), string }, kind: 'tie' });
+      }
+      const base = projectWithEdits(...edits);
+      const tuning = standard.map(pitch => pitch + Math.floor(next() * 7) - 3);
+      const before = notesOf(base.score).map(sounds);
+      const ties = notesOf(base.score).filter(n => n.tieDestination).length;
+      tied += ties;
+      let result;
+      try {
+        result = previewEdit(base.project, { type: 'setTuning', track: 0, tuning, keepPitch: true }).score;
+      } catch (error) {
+        expect(String(error)).toMatch(/Keep pitch could not move every note|next-note relationship/);
+        refused++;
+        continue;
+      }
+      moved++;
+      const after = notesOf(result);
+      expect([...after.map(sounds)].sort()).toEqual([...before].sort());
+      expect(after.filter(n => n.tieDestination).length).toBe(ties);
+      for (const bar of result.tracks[0].staves[0].bars) for (const beat of bar.voices[0].beats) {
+        expect(new Set(beat.notes.map(n => n.string)).size).toBe(beat.notes.length);
+      }
+      for (const note of after) if (note.tieDestination) expect(note.tieDestination.string).toBe(note.string);
+    }
+    expect(moved).toBeGreaterThan(5);
+    expect(tied).toBeGreaterThan(0);
+    expect(moved + refused).toBe(40);
+  });
+});

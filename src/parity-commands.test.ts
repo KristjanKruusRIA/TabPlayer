@@ -37,3 +37,18 @@ it('rejects invalid note targets, pitch domains, enums and metadata shapes',()=>
   ];
   for(const edit of invalid)expect(()=>validate(edit),JSON.stringify(edit)).toThrow();
 });
+
+it('keepPitch is an optional boolean on setTuning and staff settings only, and absent edits keep their exact shape',()=>{
+  const tuning={type:'setTuning',track:0,tuning:[64,59,55,50,45,38]},staff=commands.find(command=>command.type==='setStaffSettings')!;
+  for(const keepPitch of [true,false]){
+    expect(validate({...tuning,keepPitch}).edits).toEqual([{...tuning,keepPitch}]);
+    expect(validate({...staff,settings:{...staff.settings,keepPitch}}).edits).toEqual([{...staff,settings:{...staff.settings,keepPitch}}]);
+  }
+  expect(validate(tuning).edits).toEqual([tuning]);
+  for(const keepPitch of [null,1,'true',undefined]){
+    expect(()=>validate({...tuning,keepPitch}),String(keepPitch)).toThrow();
+    expect(()=>validate({...staff,settings:{...staff.settings,keepPitch}}),String(keepPitch)).toThrow();
+  }
+  expect(()=>validate({type:'setStringCount',track:0,tuning:[64,59,55,50,45,40,35],keep:'high',keepPitch:true})).toThrow();
+  expect(()=>validate({type:'addTrack',name:'Bass',tuning:[43,38,33,28],program:33,keepPitch:true})).toThrow();
+});

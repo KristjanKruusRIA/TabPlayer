@@ -90,7 +90,8 @@ export class NativePlaybackController {
       } finally {this.suppressHandler=prior;}
     }
   }
-  private send(command:TransportCommand){void this.bridge.command(command).then(()=>{if(command.generation===this.generation){this.operationError=null;this.update({error:null});}}).catch(error=>{if(command.generation===this.generation){if(command.type==='setPractice'){if(this.pendingPractice!==command.settings)return;this.pendingPractice=null;this.update({practicePending:false});}this.fail(error);}});}
+  /** Resolves when the command has completed, whether or not it succeeded. */
+  private send(command:TransportCommand):Promise<void>{return this.bridge.command(command).then(()=>{if(command.generation===this.generation){this.operationError=null;this.update({error:null});}}).catch(error=>{if(command.generation===this.generation){if(command.type==='setPractice'){if(this.pendingPractice!==command.settings)return;this.pendingPractice=null;this.update({practicePending:false});}this.fail(error);}});}
   private selectionReady(){return !this.destroyed&&!this.preparing&&this.prepared&&this.state.ready&&this.built!==null&&this.plan?.generation===this.generation;}
   private requireSelectionReady(){if(!this.selectionReady())throw new Error('Select a measure after playback is ready.');return {score:this.built!.score,plan:this.plan!};}
   cursorPlaybackChoices(target:BeatTarget):CursorPlaybackChoice[]{if(!this.selectionReady())return [];return cursorPlaybackChoices(this.built!.score,this.plan!,target);}
@@ -146,7 +147,7 @@ export class NativePlaybackController {
   setLoop(start:number,end:number){if(end<start)throw new Error('Loop end must follow its start.');this.send({type:'setLoop',startTick:this.occurrence(start).startTick,endTick:this.occurrence(end).endTick,generation:this.generation});}
   clearLoop(){this.send({type:'clearLoop',generation:this.generation});}
   setMetronome(volume:number){this.setPractice({...this.practice,metronome:{...this.practice.metronome,enabled:volume>0,volume}});}
-  selectDevice(deviceId:string|null){this.send({type:'selectDevice',deviceId,generation:this.generation});}
+  selectDevice(deviceId:string|null){return this.send({type:'selectDevice',deviceId,generation:this.generation});}
   devices(){return this.bridge.devices();}
   diagnostics(){return this.bridge.diagnostics?.()??Promise.resolve({} as AudioDiagnostics);}
   testTone(){return this.bridge.testTone?.()??Promise.resolve();}

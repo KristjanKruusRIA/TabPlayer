@@ -55,7 +55,11 @@ const completeEffects=(saved:FxSettings):FxSettings=>{
   return effects as unknown as FxSettings;
 };
 /** Completes a sound's pedalboards as `completeEffects` does. */
-export const completeSound = (sound: TrackSound): TrackSound => ({...sound,effects:completeEffects(sound.effects)});
+export const completeSound = (sound: TrackSound): TrackSound => {
+  const completed: TrackSound = { ...sound, effects: completeEffects(sound.effects) };
+  if (!completed.locked) delete completed.locked;
+  return completed;
+};
 /** Echo durations in quarter notes with their names: straight, dotted and triplet divisions. */
 export const delayDivisions:readonly (readonly [number,string])[]=[[.125,'1/32'],[.25,'1/16'],[1/3,'1/8 triplet'],[.5,'1/8'],[2/3,'1/4 triplet'],[.75,'Dotted 1/8'],[1,'1/4'],[1.5,'Dotted 1/4'],[2,'1/2'],[4,'Whole']];
 /** Cycle lengths in quarter notes a modulation block's rate can follow: the delay's divisions and two slower sweeps. */
@@ -103,7 +107,11 @@ export const cabinetIrFits=(value:unknown):boolean=>{
 const fits=(value:unknown,rule:FieldRule):boolean=>'cabinetIr' in rule?cabinetIrFits(value):'one' in rule?rule.one.includes(value as string|number):'each' in rule?Array.isArray(value)&&value.length===rule.length&&value.every(item=>fits(item,rule.each)):typeof value==='number'&&Number.isFinite(value)&&value>=rule.low&&value<=rule.high;
 /** Why a sound cannot be applied, or null. It is checked as completed with any blocks it lacks, against the native rules. */
 export function soundProblem(sound: TrackSound): string|null {
-  if (!sound||typeof sound!=='object'||Object.keys(sound).sort().join()!=='effects,presetId,voiceId'||!sound.effects||typeof sound.effects!=='object') return 'Invalid sound.';
+  if (!sound||typeof sound!=='object') return 'Invalid sound.';
+  const keys = Object.keys(sound).sort().join();
+  if (keys!=='effects,presetId,voiceId' && keys!=='effects,locked,presetId,voiceId') return 'Invalid sound.';
+  if (Object.hasOwn(sound,'locked')&&typeof (sound as {locked?:unknown}).locked!=='boolean') return 'Invalid sound.';
+  if (!sound.effects||typeof sound.effects!=='object') return 'Invalid sound.';
   if (!['gm','clean','crunch','lead','bass'].includes(sound.presetId)) return 'Invalid sound preset.';
   if (sound.voiceId!==null && !['gm','green-guitar','black-guitar','darkblack-bass','babyblue-bass'].includes(sound.voiceId)) return 'Unknown instrument voice.';
   return effectsProblem(completeSound(sound).effects,true);

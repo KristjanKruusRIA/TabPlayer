@@ -1372,6 +1372,17 @@ impl Renderer {
     pub fn has_backing(&self) -> bool {
         self.configured_backing || self.backing.is_some()
     }
+    /// Puts every kit level at its target for a track whose kit has sounded nothing since the last seek. A stopped or
+    /// paused transport renders nothing, so a ramp armed meanwhile would still be on its way when the next note is struck.
+    /// A track with notes ringing keeps its ramp, so they resume without a step.
+    pub fn settle_idle_kit(&mut self) {
+        for (track, channel) in self.tracks.iter().zip(&mut self.mix.channels) {
+            if !track.drum_used {
+                channel.kit.current = channel.kit.target;
+                channel.kit.remaining = 0;
+            }
+        }
+    }
     fn mix_ramping(&self) -> bool {
         self.mix.channels.iter().any(|c| c.dsp.ramping()) || self.mix.master.ramping()
     }

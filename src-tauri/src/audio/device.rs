@@ -1018,6 +1018,22 @@ impl CallbackTransport {
         self.passes = 0;
         self.resolve_renderer();
     }
+    /// Takes a mix for the playing document; what comes back is retired off the audio thread. A transport that is not
+    /// playing renders nothing to carry a level change through, so the change is complete when playing resumes.
+    pub fn replace_mix(&mut self, mix: PreparedMix, generation: u64) -> Option<PreparedMix> {
+        if generation != self.generation {
+            return Some(mix);
+        }
+        let playing = self.playing;
+        let Some(renderer) = self.renderer.as_mut() else {
+            return Some(mix);
+        };
+        let old = renderer.replace_mix(mix);
+        if !playing {
+            renderer.settle_idle_kit();
+        }
+        old
+    }
     pub fn command(&mut self, command: TransportCommand) -> Result<(), &'static str> {
         if self.shared.epoch.load(Ordering::Acquire) != self.epoch {
             return Err("Stale audio output epoch.");
@@ -1465,15 +1481,7 @@ impl OutputCallback {
                     }
                 }
                 CallbackCommand::Mix { mix, generation } => {
-                    let old = if generation == self.transport.generation {
-                        if let Some(renderer) = &mut self.transport.renderer {
-                            renderer.replace_mix(mix)
-                        } else {
-                            Some(mix)
-                        }
-                    } else {
-                        Some(mix)
-                    };
+                    let old = self.transport.replace_mix(mix, generation);
                     if let Some(old) = old {
                         let _ = self.retired.try_push(Retired::Mix(old));
                     }

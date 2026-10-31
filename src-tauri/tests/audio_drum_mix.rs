@@ -1,6 +1,7 @@
 use std::{collections::HashMap, io::Cursor, sync::Arc};
 use tabplayer_lib::{
     audio::{
+        device::{CallbackTransport, TransportCommand},
         plan::PlaybackPlan,
         renderer::{PreparedMix, Renderer},
         resources::{AudioResources, InstrumentManifest},
@@ -544,4 +545,130 @@ fn a_kit_element_in_a_plan_is_one_of_the_six_and_is_left_out_when_absent() {
         "midi": hit(37, 0, 1920, Some("xylophone"))
     });
     assert!(serde_json::from_value::<PlaybackPlan>(unknown).is_err());
+}
+
+/// A transport with the drum plan installed, driven the way the app drives it.
+fn transport(settings: DocumentSettings) -> CallbackTransport {
+    let plan = drum_plan();
+    let mut transport = CallbackTransport::headless(RATE);
+    let renderer = Renderer::new(plan, drum_resources(), settings, RATE).unwrap();
+    assert!(
+        transport
+            .install_with_practice(Box::new(renderer), 1, false, Default::default())
+            .is_none()
+    );
+    transport
+}
+
+fn command(transport: &mut CallbackTransport, command: TransportCommand) {
+    transport.command(command).unwrap();
+}
+
+fn play(transport: &mut CallbackTransport, frames: usize) -> Vec<[f32; 2]> {
+    let mut output = vec![[0.0; 2]; frames];
+    transport.render_into(&mut output);
+    output
+}
+
+fn install(transport: &mut CallbackTransport, settings: &DocumentSettings) {
+    let mix = PreparedMix::prepare(settings, &drum_plan(), RATE).unwrap();
+    assert!(transport.replace_mix(mix, 1).is_some());
+}
+
+#[test]
+fn a_kit_edit_made_while_stopped_applies_from_the_first_attack_on_play() {
+    for (kick, scale) in [
+        (element(1.0, 0.0, true, false), 0.0),
+        (element(0.25, 0.0, false, false), 0.25),
+    ] {
+        let mut t = transport(DocumentSettings::default());
+        command(&mut t, TransportCommand::Play { generation: 1 });
+        play(&mut t, 3000);
+        command(&mut t, TransportCommand::Stop { generation: 1 });
+        // The kit's first edit arrives while nothing is playing.
+        install(
+            &mut t,
+            &settings_with(Some(DrumKitMix {
+                kick,
+                ..Default::default()
+            })),
+        );
+        command(&mut t, TransportCommand::Play { generation: 1 });
+        let heard = peak(&play(&mut t, 480));
+        let mut plain = transport(DocumentSettings::default());
+        command(&mut plain, TransportCommand::Play { generation: 1 });
+        let full = peak(&play(&mut plain, 480));
+        assert!(full > 0.01);
+        assert!(
+            (heard - scale * full).abs() <= 0.02 * full,
+            "kick at {scale} from the hit: {heard} vs {full}"
+        );
+    }
+}
+
+#[test]
+fn a_kit_edit_made_while_paused_applies_from_the_first_attack_after_a_seek() {
+    let mut t = transport(DocumentSettings::default());
+    command(&mut t, TransportCommand::Play { generation: 1 });
+    play(&mut t, 3000);
+    command(&mut t, TransportCommand::Pause { generation: 1 });
+    install(
+        &mut t,
+        &settings_with(Some(DrumKitMix {
+            kick: element(1.0, 0.0, true, false),
+            ..Default::default()
+        })),
+    );
+    command(
+        &mut t,
+        TransportCommand::SeekTick {
+            generation: 1,
+            tick: 0.0,
+        },
+    );
+    command(&mut t, TransportCommand::Play { generation: 1 });
+    assert_eq!(peak(&play(&mut t, 480)), 0.0);
+}
+
+#[test]
+fn a_kit_edit_made_while_paused_with_notes_ringing_resumes_without_a_click() {
+    let kit = |kick| {
+        settings_with(Some(DrumKitMix {
+            kick,
+            snare: element(0.9, 0.0, false, false),
+            ..Default::default()
+        }))
+    };
+    // The same pause and resume, with and without the mute arriving while paused.
+    let resumed = |edit: bool| {
+        let mut t = transport(kit(element(1.0, 0.0, false, false)));
+        command(&mut t, TransportCommand::Play { generation: 1 });
+        let before = play(&mut t, 1500);
+        command(&mut t, TransportCommand::Pause { generation: 1 });
+        if edit {
+            install(&mut t, &kit(element(1.0, 0.0, true, false)));
+        }
+        command(&mut t, TransportCommand::Play { generation: 1 });
+        (before, play(&mut t, 1000))
+    };
+    let (before, control) = resumed(false);
+    let (_, after) = resumed(true);
+    assert!(
+        peak(&before[1000..]) > 0.01,
+        "the kick is ringing at the pause"
+    );
+    // The kick keeps ringing from where it stopped and fades out over the ramp: no step at the resume.
+    assert_eq!(after[0][0].signum(), control[0][0].signum());
+    assert!(
+        (after[0][0] - control[0][0]).abs() <= 0.01 * peak(&control[..480]),
+        "click on resume: {} against {}",
+        after[0][0],
+        control[0][0]
+    );
+    assert!(peak(&after[..240]) > 0.3 * peak(&control[..240]));
+    assert_eq!(
+        peak(&after[600..]),
+        0.0,
+        "and it is silent once the ramp ends"
+    );
 }

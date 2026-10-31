@@ -13,6 +13,10 @@ export interface RefingerStaffTarget {
   transposition?: number;
 }
 
+/** Whether two beats of different voices sound at the same time. */
+const sounding = (a: model.Beat, b: model.Beat) =>
+  a.playbackStart < b.playbackStart + b.playbackDuration && b.playbackStart < a.playbackStart + a.playbackDuration;
+
 export function planStaffRefinger(
   staff: model.Staff,
   target: RefingerStaffTarget
@@ -92,19 +96,34 @@ export function planStaffRefinger(
   const unreachable: string[] = [];
 
   for (const bar of staff.bars) {
+    // Beats already placed in this bar, so a note in another voice that sounds at the same time keeps off their strings.
+    const placed: Array<{ beat: model.Beat; strings: Map<model.Note, number> }> = [];
     for (const voice of bar.voices) {
       for (const beat of voice.beats) {
         const notes = beat.notes.filter(n => n.string > 0);
         if (!notes.length) continue;
         const where = `bar ${bar.index + 1}, beat ${beat.index + 1}`;
+        const overlapping = placed.filter(other => other.beat.voice !== voice && sounding(other.beat, beat));
+        // A string two voices already shared before the edit may stay shared.
+        const taken = (note: model.Note) =>
+          new Set(overlapping.flatMap(other => [...other.strings].filter(([from]) => from.string !== note.string).map(([, string]) => string)));
+        const keptHere = (note: model.Note) => {
+          const place = kept(note);
+          return place && taken(note).has(place.string) ? null : place;
+        };
+        const choicesHere = (note: model.Note) => {
+          const busy = taken(note);
+          return choices(note).filter(choice => !busy.has(choice.string));
+        };
         try {
-          const planned = placeBeat(notes, kept, choices, false, where) ?? placeBeat(notes, kept, choices, true, where);
+          const planned = placeBeat(notes, keptHere, choicesHere, false, where) ?? placeBeat(notes, keptHere, choicesHere, true, where);
           if (!planned) {
             unreachable.push(where);
           } else {
             for (const [note, place] of planned) {
               moves.push({ note, ...place });
             }
+            placed.push({ beat, strings: new Map([...planned].map(([note, place]) => [note, place.string])) });
           }
         } catch {
           unreachable.push(where);

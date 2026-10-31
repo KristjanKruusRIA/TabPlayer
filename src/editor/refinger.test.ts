@@ -234,4 +234,19 @@ describe('refinger keepPitch on retune and capo', () => {
     expect(fretKey(moved.score.tracks[0].staves[0], 3, note.fret)).toBe(57);
     expect(note.trillValue).toBe(59);
   });
+
+  it('never puts notes of two voices that sound together on one string', () => {
+    // Voice 1 A2 (string 2) must leave string 2 once it is tuned up; voice 2 holds 47 on string 1.
+    const voice1: BeatTarget = { ...target, voice: 1 };
+    const base = projectWithEdits(
+      { type: 'addVoice', track: 0, staff: 0 },
+      { type: 'setNote', target, string: 2, fret: 0 },
+      { type: 'setNote', target: voice1, string: 1, fret: 7 }
+    );
+    const retuned = previewEdit(base.project, { type: 'setTuning', track: 0, tuning: [64, 59, 55, 50, 47, 40], keepPitch: true });
+    const bar = retuned.score.tracks[0].staves[0].bars[0];
+    const first = bar.voices[0].beats[0].notes[0], second = bar.voices[1].beats[0].notes[0];
+    expect(first.string).not.toBe(second.string);
+    expect([first, second].map(n => [64, 59, 55, 50, 47, 40][6 - n.string] + n.fret).sort()).toEqual([45, 47]);
+  });
 });

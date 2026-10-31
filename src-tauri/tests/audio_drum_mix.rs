@@ -337,10 +337,76 @@ fn a_kit_installed_into_a_playing_renderer_leaves_what_rings_alone() {
         close(&output[..HALF], &reference[..HALF], 1e-5),
         "the ringing bass drum sounds as if nothing was installed"
     );
-    // What the kit then governs is heard: the snare is muted.
-    let snare = energy(&reference[HALF + 1000..HALF + 6000]);
-    assert!(snare > 1e-5, "the snare is what the kit mutes");
-    assert!(energy(&output[HALF + 1000..HALF + 6000]) < snare * 1e-3);
+    // What the kit then governs is heard from the hit itself: the snare is muted, attack included.
+    assert!(
+        peak(&reference[HALF..HALF + 480]) > 0.01,
+        "the snare is what the kit mutes"
+    );
+    assert_eq!(peak(&output[HALF..HALF + 480]), 0.0);
+    assert_eq!(energy(&output[HALF + 480..]), 0.0);
+}
+
+#[test]
+fn a_level_from_the_first_kit_edit_applies_from_the_attack() {
+    let plan = drum_plan();
+    let reference = render(&plan, DocumentSettings::default(), SECOND);
+    let mut renderer = Renderer::new(
+        plan.clone(),
+        drum_resources(),
+        DocumentSettings::default(),
+        RATE,
+    )
+    .unwrap();
+    let mut output = vec![[0.0; 2]; SECOND];
+    renderer.render_into(&mut output[..RINGING]);
+    let kit = settings_with(Some(DrumKitMix {
+        snare: element(0.25, 0.0, false, false),
+        ..Default::default()
+    }));
+    drop(renderer.replace_mix(PreparedMix::prepare(&kit, &plan, RATE).unwrap()));
+    renderer.render_into(&mut output[RINGING..]);
+    let want = 0.25 * peak(&reference[HALF..HALF + 480]);
+    let got = peak(&output[HALF..HALF + 480]);
+    assert!(
+        (got - want).abs() < 0.02 * want,
+        "attack at a quarter level: {got} vs {want}"
+    );
+}
+
+#[test]
+fn an_active_kit_applies_from_the_attack_after_a_seek() {
+    let plan = drum_plan();
+    // The snare is struck again by the seek (it is held there), with a kit in effect that has just changed its level.
+    let after_seek = |snare: Option<DrumElementMix>| {
+        let before = settings_with(Some(DrumKitMix {
+            snare: element(1.0, 0.0, false, false),
+            kick: element(0.9, 0.0, false, false),
+            ..Default::default()
+        }));
+        let kit = settings_with(Some(DrumKitMix {
+            snare,
+            kick: element(0.9, 0.0, false, false),
+            ..Default::default()
+        }));
+        let mut renderer = Renderer::new(plan.clone(), drum_resources(), before, RATE).unwrap();
+        let mut warm = vec![[0.0; 2]; 3000];
+        renderer.render_into(&mut warm);
+        drop(renderer.replace_mix(PreparedMix::prepare(&kit, &plan, RATE).unwrap()));
+        let mut ramp = vec![[0.0; 2]; 10];
+        renderer.render_into(&mut ramp);
+        renderer.seek_tick(1100.0);
+        let mut after = vec![[0.0; 2]; 480];
+        renderer.render_into(&mut after);
+        peak(&after)
+    };
+    let full = after_seek(element(1.0, 0.0, false, false));
+    assert!(full > 0.01);
+    assert_eq!(after_seek(element(1.0, 0.0, true, false)), 0.0);
+    let quarter = after_seek(element(0.25, 0.0, false, false));
+    assert!(
+        (quarter - 0.25 * full).abs() < 0.02 * full,
+        "{quarter} vs {full}"
+    );
 }
 
 #[test]

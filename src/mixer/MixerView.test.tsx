@@ -499,3 +499,20 @@ it('refuses kit changes while busy without dropping focus', ()=>{
   expect(volume).toHaveFocus();
   expect(kitPlayer.setDrumElement).not.toHaveBeenCalled();expect(kitPlayer.previewDrumElement).not.toHaveBeenCalled();
 });
+
+it('drops a kit wheel turn when another track is selected before it is committed', async()=>{
+  vi.useFakeTimers();
+  try {
+    const first=previewEdit(blankProject(),{type:'addPercussionTrack',name:'Drums',program:0});
+    const both=previewEdit(first.project,{type:'addPercussionTrack',name:'Congas',program:0}).score;
+    const {player}=livePlayer(both);
+    const kitPlayer={...player,setDrumElement:vi.fn(async()=>{}),previewDrumElement:vi.fn(async()=>{})};
+    const view=render(<MixerView {...props(both)} selected={1} player={kitPlayer}/>);
+    const volume=screen.getByRole('slider',{name:'Volume Kick'});
+    volume.focus();fireEvent.wheel(volume,{deltaY:100});
+    view.rerender(<MixerView {...props(both)} selected={2} player={kitPlayer}/>);
+    await act(async()=>{await vi.advanceTimersByTimeAsync(2000);});
+    expect(screen.getByRole('region',{name:'Drum kit Congas'})).toBeInTheDocument();
+    expect(kitPlayer.setDrumElement).not.toHaveBeenCalled();
+  } finally { vi.useRealTimers(); }
+});

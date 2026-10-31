@@ -955,9 +955,10 @@ impl Renderer {
                 self.scratch[index][0] += left[0];
                 self.scratch[index][1] += right[0];
             }
-            if track.drum_used {
-                if let Some(synths) = &mut track.drum_synths {
-                    let gains = self.mix.channels[index].kit.step();
+            if let Some(synths) = &mut track.drum_synths {
+                // The ramp moves with the clock, struck or not, so a note struck after a change starts at the new level.
+                let gains = self.mix.channels[index].kit.step();
+                if track.drum_used {
                     for (synth, gain) in synths.iter_mut().zip(gains) {
                         let mut left = [0.0];
                         let mut right = [0.0];
@@ -1148,6 +1149,9 @@ impl Renderer {
         self.active.clear();
         for channel in &mut self.mix.channels {
             channel.dsp.reset();
+            // Everything sounding was just cut, so nothing needs the old level to fade from.
+            channel.kit.current = channel.kit.target;
+            channel.kit.remaining = 0;
         }
         self.mix.master.reset();
         self.next_note = self.plan.notes.partition_point(|n| n.start_tick < tick);

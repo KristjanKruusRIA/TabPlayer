@@ -190,7 +190,7 @@ export function MixerView({score,sounds,selected,busy,onSelect,player}:MixerView
         </section>;
       })}
     </div>
-    {kitTrack&&<section className="mixer-kit" aria-label={`Drum kit ${kitTrack.name}`}>
+    {kitTrack&&<section className="mixer-kit" key={trackIdentity(kitTrack)} aria-label={`Drum kit ${kitTrack.name}`}>
       <div className="mixer-focus-head">
         <span className="mixer-focus-title">Drum kit</span>
         <span className="mixer-badge">Saved with the track</span>

@@ -9,7 +9,7 @@ import type { Project } from '../project';
 const settings = new Settings();
 const toBase64 = (bytes: Uint8Array) => Buffer.from(bytes).toString('base64');
 const projectFor = (bytes: Uint8Array): Project => ({
-  format: 'TabPlayer', schemaVersion: 2, engineVersion: '1.8.4', edits: [], assets: {},
+  format: 'TabPlayer', schemaVersion: 3, engineVersion: '1.8.4', edits: [], baselineEdits: [], assets: {},
   base: { kind: 'file', filename: 'synthetic.ptb', bytesBase64: toBase64(bytes), sha256: 'a'.repeat(64) },
 });
 
@@ -224,7 +224,7 @@ describe('Power Tab import into a score', () => {
   it('uses GuitarIn to pick the staff guitar and tuning', () => {
     const file = basicFile();
     file.guitar.guitars = [{ description: 'Standard', tuning: [64, 59, 55, 50, 45, 40] }, { description: 'Drop D', tuning: [64, 59, 55, 50, 45, 38], capo: 2 }];
-    file.guitar.guitarIns = [{ system: 0, staff: 0, position: 1, data: 0b10 }];
+    file.guitar.guitarIns = [{ system: 0, staff: 0, position: 1, data: 0x0200 }];
     const { score } = importPowerTab(buildPtb(file), settings);
     expect(score.tracks[0].name).toBe('Drop D');
     expect(score.tracks[0].staves[0].tuning).toEqual([64, 59, 55, 50, 45, 38]);
@@ -252,6 +252,33 @@ describe('Power Tab import into a score', () => {
     expect(() => importPowerTab(bytes, settings)).toThrow(/too large to import safely/);
   });
 
+  it('refuses millions of notes before building anything', () => {
+    const chord = Array.from({ length: 16 }, (_, i) => ({ string: i % 6, fret: i % 20 }));
+    const positions = Array.from({ length: 1000 }, (_, i) => ({ position: i % 250, duration: 16, notes: chord }));
+    const file = basicFile();
+    file.guitar.systems = Array.from({ length: 5 }, () => ({ staves: [{ voices: [positions] as [never] }] }));
+    const bytes = buildPtb(file);
+    expect(() => parsePowerTab(bytes)).toThrow(/too large to import safely/);
+    expect(() => importPowerTab(bytes, settings)).toThrow(/too large to import safely/);
+  });
+
+  it('imports an at-limit file or refuses it cleanly, never with a raw engine error', () => {
+    const staves = Array.from({ length: 3 }, () => ({ voices: [[]] as [never] }));
+    const bars = Array.from({ length: 255 }, (_, i) => ({ position: i }));
+    const file = basicFile();
+    file.guitar.systems = Array.from({ length: 15 }, () => ({ bars, staves: staves as never }));
+    file.guitar.tempos = [];
+    const bytes = buildPtb(file);
+    expect(bytes.length).toBeLessThan(200_000);
+    const started = Date.now();
+    const built = buildDocument(projectFor(bytes));
+    expect(built.score.tracks).toHaveLength(3);
+    expect(Date.now() - started).toBeLessThan(30_000);
+    const four = basicFile();
+    four.guitar.systems = Array.from({ length: 15 }, () => ({ bars, staves: Array.from({ length: 4 }, () => ({ voices: [[]] as [never] })) as never }));
+    expect(() => importPowerTab(buildPtb(four), settings)).toThrow(/too large to import safely/);
+  });
+
   it('opens through buildDocument and keeps edits replayable', () => {
     const bytes = buildPtb(basicFile());
     const built = buildDocument(projectFor(bytes));
@@ -261,7 +288,7 @@ describe('Power Tab import into a score', () => {
   });
 
   it('leaves non-Power-Tab documents without a notice', () => {
-    const built = buildDocument({ format: 'TabPlayer', schemaVersion: 2, engineVersion: '1.8.4', edits: [], assets: {}, base: { kind: 'blank', title: 'x', artist: '', tempo: 120, tuning: [64, 59, 55, 50, 45, 40], measureCount: 1 } });
+    const built = buildDocument({ format: 'TabPlayer', schemaVersion: 3, engineVersion: '1.8.4', edits: [], baselineEdits: [], assets: {}, base: { kind: 'blank', title: 'x', artist: '', tempo: 120, tuning: [64, 59, 55, 50, 45, 40], measureCount: 1 } });
     expect(built.importNotice).toBeNull();
   });
 });

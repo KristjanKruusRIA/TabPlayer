@@ -1,0 +1,383 @@
+{
+  "format": "TabPlayer",
+  "schemaVersion": 3,
+  "engineVersion": "1.8.4",
+  "base": {
+    "kind": "blank",
+    "title": "Keys",
+    "artist": "TabPlayer Originals",
+    "tempo": 120,
+    "tuning": [
+      64,
+      59,
+      55,
+      50,
+      45,
+      40
+    ],
+    "measureCount": 4
+  },
+  "baselineEdits": [
+    {
+      "type": "addPitchedTrack",
+      "name": "Keys",
+      "program": 0
+    },
+    {
+      "type": "removeTrack",
+      "track": 0
+    },
+    {
+      "type": "setTrackInfo",
+      "track": 0,
+      "name": "Keys",
+      "shortName": "Keys",
+      "program": 0
+    },
+    {
+      "type": "setStaffSettings",
+      "track": 0,
+      "staff": 0,
+      "settings": {
+        "tuning": [],
+        "capo": 0,
+        "transposition": 0,
+        "displayTransposition": 0,
+        "clef": 4,
+        "showTab": false,
+        "showNotation": true
+      }
+    },
+    {
+      "type": "setTrackLayout",
+      "track": 0,
+      "barsPerSystem": 4,
+      "lineBreaks": []
+    },
+    {
+      "type": "setTrackSound",
+      "trackId": "added/0/{\"type\":\"addPitchedTrack\",\"name\":\"Keys\",\"program\":0}",
+      "sound": {
+        "voiceId": "gm",
+        "presetId": "gm",
+        "effects": {
+          "gate": {
+            "enabled": false,
+            "thresholdDb": -60,
+            "releaseMs": 100
+          },
+          "compressor": {
+            "enabled": false,
+            "thresholdDb": -18,
+            "ratio": 4,
+            "attackMs": 10,
+            "releaseMs": 100,
+            "makeupDb": 0
+          },
+          "amp": {
+            "enabled": false,
+            "model": "clean",
+            "drive": 0.1,
+            "gainDb": 0
+          },
+          "cabinet": {
+            "enabled": false,
+            "model": "open"
+          },
+          "eq": {
+            "enabled": false,
+            "lowDb": 0,
+            "midDb": 0,
+            "highDb": 0,
+            "midHz": 1000
+          },
+          "chorus": {
+            "enabled": false,
+            "rateHz": 1,
+            "depthMs": 5,
+            "mix": 0.15
+          },
+          "delay": {
+            "enabled": false,
+            "quarterNotes": 1,
+            "feedback": 0.25,
+            "mix": 0.15
+          },
+          "reverb": {
+            "enabled": false,
+            "room": 0.5,
+            "damping": 0.5,
+            "mix": 0.12
+          }
+        }
+      }
+    },
+    {
+      "type": "setTrackMix",
+      "trackId": "added/0/{\"type\":\"addPitchedTrack\",\"name\":\"Keys\",\"program\":0}",
+      "mix": {
+        "gain": 0.76,
+        "pan": 0,
+        "mute": false,
+        "solo": false
+      }
+    },
+    {
+      "type": "addStaff",
+      "track": 0,
+      "settings": {
+        "tuning": [],
+        "capo": 0,
+        "transposition": 0,
+        "displayTransposition": 0,
+        "clef": 3,
+        "showTab": false,
+        "showNotation": true
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 0,
+        "voice": 0,
+        "beat": 0
+      }
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 0,
+        "voice": 0,
+        "beat": 0
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 0,
+        "voice": 0,
+        "beat": 1
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 0,
+        "voice": 0,
+        "beat": 2
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 0,
+        "voice": 0,
+        "beat": 3
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 1,
+        "voice": 0,
+        "beat": 0
+      }
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 1,
+        "voice": 0,
+        "beat": 0
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 1,
+        "voice": 0,
+        "beat": 1
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 1,
+        "voice": 0,
+        "beat": 2
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 1,
+        "voice": 0,
+        "beat": 3
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 2,
+        "voice": 0,
+        "beat": 0
+      }
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 2,
+        "voice": 0,
+        "beat": 0
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 2,
+        "voice": 0,
+        "beat": 1
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 2,
+        "voice": 0,
+        "beat": 2
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 2,
+        "voice": 0,
+        "beat": 3
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 3,
+        "voice": 0,
+        "beat": 0
+      }
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 3,
+        "voice": 0,
+        "beat": 0
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 3,
+        "voice": 0,
+        "beat": 1
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 3,
+        "voice": 0,
+        "beat": 2
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 1,
+        "bar": 3,
+        "voice": 0,
+        "beat": 3
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "setPrintLayout",
+      "layout": {
+        "paper": "A4",
+        "orientation": "portrait",
+        "marginMm": 15,
+        "scale": 1,
+        "profile": "Score"
+      }
+    }
+  ],
+  "edits": [],
+  "assets": {}
+}

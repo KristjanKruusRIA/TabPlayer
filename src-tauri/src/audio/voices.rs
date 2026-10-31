@@ -106,13 +106,149 @@ pub fn note_program(plan: &super::plan::PlaybackPlan, note: &super::plan::PlanNo
     })
 }
 
+/// Whether the track's sound is locked against sound automations in the score.
+pub fn track_locked(settings: &crate::settings::DocumentSettings, track_id: &str) -> bool {
+    settings.sounds.get(track_id).is_some_and(|s| s.locked)
+}
+
+/// The program `channel` of a track sounds at the start of the score: its last program change at or before the first
+/// bar's start, else the track's own. This is the sound a locked track keeps; `track.program` alone is GP's first
+/// sound, which a bar-one automation may replace.
+pub fn start_program(plan: &super::plan::PlaybackPlan, track_id: &str, channel: u8) -> u8 {
+    let start = plan.occurrences.first().map_or(0.0, |o| o.start_tick);
+    plan.midi
+        .iter()
+        .take_while(|event| event.tick() <= start)
+        .filter_map(|event| match event {
+            super::plan::PlanMidiEvent::Program {
+                track_id: id,
+                channel: c,
+                program,
+                ..
+            } if id == track_id && *c == channel => Some(*program),
+            _ => None,
+        })
+        .last()
+        .unwrap_or_else(|| {
+            plan.tracks
+                .iter()
+                .find(|t| t.id == track_id)
+                .map_or(0, |t| t.program)
+        })
+}
+
+/// The program that decides `note`'s sound: the score's, or the start program when the track is locked.
+pub fn effective_note_program(
+    plan: &super::plan::PlaybackPlan,
+    note: &super::plan::PlanNote,
+    settings: &crate::settings::DocumentSettings,
+) -> u8 {
+    if track_locked(settings, &note.track_id) {
+        start_program(plan, &note.track_id, note.channel.unwrap_or(0))
+    } else {
+        note_program(plan, note)
+    }
+}
+
+/// The drum kit program a percussion track is set to play, when it is not Standard.
+pub fn drum_kit_for_track(
+    track: &super::plan::PlanTrack,
+    settings: &crate::settings::DocumentSettings,
+) -> Option<u8> {
+    if !track.percussion {
+        return None;
+    }
+    settings
+        .sounds
+        .get(&track.id)
+        .and_then(|sound| sound.drum_kit)
+}
+
+/// `plan` with each drum track that chose a kit selecting it everywhere the plan names a program: its
+/// own, its program changes and its notes. Playback, auditions and exports all build their renderer from
+/// this, so they play the same kit. The plan itself when no drum track chose one.
+pub fn with_drum_kits(
+    plan: Arc<super::plan::PlaybackPlan>,
+    settings: &crate::settings::DocumentSettings,
+) -> Arc<super::plan::PlaybackPlan> {
+    if !plan
+        .tracks
+        .iter()
+        .any(|track| drum_kit_for_track(track, settings).is_some())
+    {
+        return plan;
+    }
+    let kits: std::collections::HashMap<&str, u8> = plan
+        .tracks
+        .iter()
+        .filter_map(|track| Some((track.id.as_str(), drum_kit_for_track(track, settings)?)))
+        .collect();
+    let mut changed = (*plan).clone();
+    for track in &mut changed.tracks {
+        if let Some(kit) = kits.get(track.id.as_str()) {
+            track.program = *kit;
+        }
+    }
+    for note in &mut changed.notes {
+        if let (Some(kit), Some(_)) = (kits.get(note.track_id.as_str()), note.program) {
+            note.program = Some(*kit);
+        }
+    }
+    for event in &mut changed.midi {
+        if let super::plan::PlanMidiEvent::Program {
+            track_id, program, ..
+        } = event
+        {
+            if let Some(kit) = kits.get(track_id.as_str()) {
+                *program = *kit;
+            }
+        }
+    }
+    Arc::new(changed)
+}
+
+/// The articulation `note` sounds with: its own, or when the track is locked the one its start sound gives it.
+pub fn effective_articulation(
+    note: &super::plan::PlanNote,
+    settings: &crate::settings::DocumentSettings,
+) -> Articulation {
+    match note.locked_articulation {
+        Some(kept) if track_locked(settings, &note.track_id) => kept,
+        _ => note.articulation,
+    }
+}
+
+/// `plan` with each locked track's notes carrying their locked articulation; the plan itself when nothing changes.
+pub fn with_locked_articulations(
+    plan: Arc<super::plan::PlaybackPlan>,
+    settings: &crate::settings::DocumentSettings,
+) -> Arc<super::plan::PlaybackPlan> {
+    if !plan
+        .notes
+        .iter()
+        .any(|n| effective_articulation(n, settings) != n.articulation)
+    {
+        return plan;
+    }
+    let mut changed = (*plan).clone();
+    for note in &mut changed.notes {
+        note.articulation = effective_articulation(note, settings);
+        note.locked_articulation = None;
+    }
+    Arc::new(changed)
+}
+
 pub fn voice_id_for_note<'a>(
     plan: &super::plan::PlaybackPlan,
     note: &super::plan::PlanNote,
     settings: &'a crate::settings::DocumentSettings,
 ) -> Option<&'a str> {
     let track = plan.tracks.iter().find(|track| track.id == note.track_id)?;
-    voice_id_for_program(track, settings, note_program(plan, note))
+    voice_id_for_program(
+        track,
+        settings,
+        effective_note_program(plan, note, settings),
+    )
 }
 
 pub fn resource_requests(
@@ -129,7 +265,7 @@ pub fn resource_requests(
                 instrument_id: instrument_id.into(),
                 key: note.key,
                 velocity: note.velocity,
-                articulation: articulation_name(note.articulation).into(),
+                articulation: articulation_name(effective_articulation(note, settings)).into(),
             })
         })
         .collect();

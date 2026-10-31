@@ -59,7 +59,7 @@ function convert(doc: PtbDocument, settings: Settings): PowerTabImport {
   const guitar = doc.guitar;
   if (!guitar.systems.length) throw new PowerTabError('The Power Tab file contains no music.');
   const measureCount = guitar.systems.reduce((sum, s) => sum + 1 + s.barlines.length, 0);
-  if (measureCount > PTB_LIMITS.totalMeasures) throw new PowerTabError('The Power Tab file has too many measures.');
+  if (measureCount > PTB_LIMITS.totalMeasures) throw new PowerTabError(`This Power Tab file is too large to import safely (${measureCount} measures; the limit is ${PTB_LIMITS.totalMeasures}).`);
 
   let bass: PtbScore | null = doc.bass;
   if (bass) {
@@ -148,7 +148,8 @@ function convert(doc: PtbDocument, settings: Settings): PowerTabImport {
     const ins = group.guitarIns.filter(g => g.staff === si).sort((a, b) => a.system - b.system || a.position - b.position);
     if (ins.length > 1) bump('guitar changes after the first on a staff', ins.length - 1);
     for (const first of ins.slice(0, 1)) {
-      const bit = [...Array(16).keys()].find(i => first.data & (1 << i));
+      // Power Tab Editor keeps the staff's guitar bitmask in the high byte of the data word.
+      const bit = [...Array(8).keys()].find(i => first.data & (0x100 << i));
       if (bit !== undefined && group.guitars[bit]) return group.guitars[bit];
     }
     if (ins.length && !group.guitars.length) warn(`${label}: guitar assignment refers to a missing guitar.`);

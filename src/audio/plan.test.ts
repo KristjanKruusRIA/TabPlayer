@@ -1,9 +1,30 @@
+import { readFileSync } from 'node:fs';
 import { expect, it, vi } from 'vitest';
 import { midi, model, Settings } from '@coderline/alphatab';
 import { createHash } from 'node:crypto';
 import { buildScore, exportGp } from '../engine';
 import { buildPlaybackPlan, buildPlaybackPlanFromJson, deadBrushMidiDurations, prepareMidiScore, preparePlan, validateBackingAnchors, validatePlaybackPlan } from './plan';
 import { blankProject } from '../project';
+import selectionProtocol from '../../tests/selection-playback-protocol.json';
+import type { PlaybackPlan } from './types';
+import {captureNoteLinks} from '../editor/links';
+import {preparePitchedGpScore} from '../interchange/pitched';
+
+it('performed_map_accepts_missing_empty_and_pre_measure_grace_but_rejects_null',()=>{
+  const plan=structuredClone(selectionProtocol.plan) as PlaybackPlan;
+  expect(()=>validatePlaybackPlan(plan)).not.toThrow();
+  expect(JSON.parse(JSON.stringify(plan))).not.toHaveProperty('performedBeats');
+  for(const performedBeats of [[],selectionProtocol.performedBeats])expect(()=>validatePlaybackPlan({...plan,performedBeats} as PlaybackPlan)).not.toThrow();
+  expect(()=>validatePlaybackPlan({...plan,performedBeats:null} as unknown as PlaybackPlan)).toThrow(/Invalid native playback plan/);
+});
+
+it('performed_map_rejects_bad_addresses_clocks_duplicates_and_extra_keys',()=>{
+  const plan=structuredClone(selectionProtocol.plan) as PlaybackPlan,base=selectionProtocol.performedBeats[0];
+  const invalid:unknown[]=[null,undefined,[base,base]];
+  for(const [key,value] of [['startTick',-1],['startTick',121],['endTick',3841],['leadInTick',1],['occurrence',1],['extra',0],['startTick',NaN],['endTick',Infinity]] as const)invalid.push([{...base,[key]:value}]);
+  for(const [key,value] of [['track',1],['bar',1],['beat',-1],['staff',.5],['voice',0x100000000],['extra',0]] as const)invalid.push([{...base,target:{...base.target,[key]:value}}]);
+  for(const performedBeats of invalid)expect(()=>validatePlaybackPlan({...plan,performedBeats} as PlaybackPlan)).toThrow(/Invalid native playback plan/);
+});
 
 const settings = new Settings();
 function authored(bars = 2, voices = 1, tracks = 1) {
@@ -37,6 +58,27 @@ function agree(score: model.Score) {
   expect(new Set(plan.notes.map(n => n.id)).size).toBe(plan.notes.length);
   expect(plan.generation).toBe(7); expect(plan.ppq).toBe(960); return plan;
 }
+
+it('generated_performed_map_retains_rests_tie_destinations_and_worker_canonical_addresses',()=>{
+  const score=authored(1,2);note(score,0,1);note(score,0,2).isTieDestination=true;score.finish(settings);
+  const json=model.JsonConverter.scoreToJson(score),links=captureNoteLinks(score),reference=new midi.MidiFile();new midi.MidiFileGenerator(score,settings,new midi.AlphaSynthMidiFileHandler(reference,true)).generate();const smf=Array.from(reference.toBinary());
+  const plan=buildPlaybackPlan(score,7);expect(plan.performedBeats).toHaveLength(8);
+  expect(plan.performedBeats?.filter(row=>row.target.voice===0)).toEqual([0,1,2,3].map(beat=>({target:{track:0,staff:0,bar:0,voice:0,beat},occurrence:0,startTick:beat*960,endTick:(beat+1)*960,leadInTick:beat*960})));
+  expect(plan.notes).toHaveLength(1);expect(plan.notes[0]).toMatchObject({startTick:960,endTick:2880});
+  expect(buildPlaybackPlanFromJson(json,['base/0'],7).performedBeats).toEqual(plan.performedBeats);
+  expect(model.JsonConverter.scoreToJson(score)).toBe(json);expect(captureNoteLinks(score)).toEqual(links);
+  const after=new midi.MidiFile();new midi.MidiFileGenerator(score,settings,new midi.AlphaSynthMidiFileHandler(after,true)).generate();expect(Array.from(after.toBinary())).toEqual(smf);
+});
+
+it('generated_performed_map_shifts_grace_once_and_keeps_only_the_played_simile_placeholder',()=>{
+  const score=authored(2);const grace=new model.Beat();grace.duration=model.Duration.Eighth;grace.graceType=model.GraceType.BeforeBeat;grace.isEmpty=false;const n=new model.Note();n.string=1;n.fret=2;grace.addNote(n);
+  grace.voice=score.tracks[0].staves[0].bars[0].voices[0];grace.voice.beats.unshift(grace);note(score,0,1);score.tracks[0].staves[0].bars[1].simileMark=model.SimileMark.Simple;score.finish(settings);
+  const json=model.JsonConverter.scoreToJson(score),plan=buildPlaybackPlan(score,9),rows=plan.performedBeats;
+  expect(rows?.find(row=>row.target.bar===0&&row.target.beat===0)).toMatchObject({occurrence:0,startTick:0,endTick:120,leadInTick:0});
+  expect(rows?.find(row=>row.target.bar===0&&row.target.beat===1)).toMatchObject({occurrence:0,startTick:120,endTick:1080,leadInTick:0});
+  expect(rows?.filter(row=>row.target.bar===1)).toEqual([{target:{track:0,staff:0,bar:1,voice:0,beat:0},occurrence:0,startTick:3960,endTick:7800,leadInTick:3960}]);
+  expect(model.JsonConverter.scoreToJson(score)).toBe(json);
+});
 
 it.each([
   {anchors:[{bar:0,occurrence:999,ratio:0,audioMs:0}]},
@@ -77,6 +119,40 @@ it('metronome_clicks_reset_at_pickup_end_and_each_repeated_measure', () => {
   const repeatPlan=agree(repeated);for(const o of repeatPlan.occurrences)expect(o.clickTicks).toEqual([o.startTick,o.startTick+960,o.startTick+1920,o.startTick+2880]);
 });
 
+it('meter_fields_keep_written_pickup_and_rare_denominators_after_gp_import_and_repeats', () => {
+  const score=authored(3);
+  for(const [bar,numerator,denominator] of [[0,3,8],[1,5,128],[2,33,256]]) {
+    const master=score.masterBars[bar],voice=score.tracks[0].staves[0].bars[bar].voices[0];
+    master.timeSignatureNumerator=numerator;master.timeSignatureDenominator=denominator;voice.beats=[];
+    for(let i=0;i<numerator;i++){const beat=new model.Beat();beat.duration=denominator;beat.isEmpty=false;voice.addBeat(beat);note(score,bar,i);}
+  }
+  score.masterBars[0].isRepeatStart=true;score.masterBars[2].repeatCount=2;score.rebuildRepeatGroups();score.finish(settings);
+  const bytes=exportGp(score),project={...blankProject(),base:{kind:'file' as const,filename:'written-meter.gp',bytesBase64:Buffer.from(bytes).toString('base64'),sha256:createHash('sha256').update(bytes).digest('hex')}};
+  const imported=buildScore(project),plan=agree(imported);
+  expect(plan.occurrences.map(o=>[o.bar,o.occurrence,o.endTick-o.startTick])).toEqual([[0,0,1440],[1,0,150],[2,0,495],[0,1,1440],[1,1,150],[2,1,495]]);
+  expect(plan.occurrences).toMatchObject([
+    {meterNumerator:3,meterDenominator:8},{meterNumerator:5,meterDenominator:128},{meterNumerator:33,meterDenominator:256},
+    {meterNumerator:3,meterDenominator:8},{meterNumerator:5,meterDenominator:128},{meterNumerator:33,meterDenominator:256},
+  ]);
+  const pickup=authored(2),first=pickup.tracks[0].staves[0].bars[0].voices[0];first.beats.splice(1);first.beats[0].duration=model.Duration.Eighth;pickup.masterBars[0].isAnacrusis=true;pickup.finish(settings);
+  expect(agree(pickup).occurrences[0]).toMatchObject({meterNumerator:4,meterDenominator:4,startTick:0,endTick:480,clickTicks:[0]});
+});
+
+it('requires_exact_written_meter_bounds_without_a_32_numerator_cap', () => {
+  const valid=agree(buildScore(blankProject()));
+  for(const meterNumerator of [1,33,0xffffffff])for(const meterDenominator of [1,2,4,8,16,32,64,128,256]) {
+    const plan=structuredClone(valid);Object.assign(plan.occurrences[0],{meterNumerator,meterDenominator});expect(()=>validatePlaybackPlan(plan)).not.toThrow();
+  }
+  for(const [field,values] of [['meterNumerator',[undefined,null,0,-1,.5,NaN,Infinity,0x100000000,'4',true]],['meterDenominator',[undefined,null,0,-1,3,.5,NaN,Infinity,512,'4',true]]] as const)for(const value of values) {
+    const plan=structuredClone(valid);Object.assign(plan.occurrences[0],{[field]:value});expect(()=>validatePlaybackPlan(plan)).toThrow(/Invalid native/);
+  }
+});
+
+it.each([[0,4],[4,3]])('rejects_invalid_written_score_meter_%i_over_%i', (numerator,denominator) => {
+  const score=authored(1);score.masterBars[0].timeSignatureNumerator=numerator;score.masterBars[0].timeSignatureDenominator=denominator;score.finish(settings);
+  expect(()=>buildPlaybackPlan(score,7)).toThrow(/Invalid score meter/);
+});
+
 it('rejects_invalid_optional_click_ticks_and_accepts_old_missing_click_ticks', () => {
   const valid=agree(buildScore(blankProject()));
   for(const clicks of [[],[1],[0,0],[0,NaN],[0,3840],[0,-1]]){const p=structuredClone(valid);p.occurrences[0].clickTicks=clicks;expect(()=>validatePlaybackPlan(p)).toThrow(/Invalid native/);}
@@ -88,6 +164,16 @@ it('same_pitch_different_voice_keeps_identity', () => {
   const plan = agree(score); expect(plan.notes).toHaveLength(2);
   expect(plan.notes.map(n => n.source.target.voice).sort()).toEqual([0, 1]);
   expect(plan.notes[0].key).toBe(plan.notes[1].key); expect(plan.notes[0].id).not.toBe(plan.notes[1].id);
+});
+
+it('duplicate_chord_tie_destinations_keep_the_public_single_attack_and_source_links',()=>{
+  const score=authored(1),origin=note(score,0,0),first=note(score,0,1),last=note(score,0,1);
+  first.isTieDestination=true;last.isTieDestination=true;score.finish(settings);
+  expect(first.tieOrigin).toBe(origin);expect(last.tieOrigin).toBe(origin);expect(origin.tieDestination).toBe(last);
+  const before=model.JsonConverter.scoreToJson(score),plan=agree(score);
+  expect(plan.notes).toHaveLength(1);expect(plan.notes[0]).toMatchObject({startTick:0,endTick:1920});
+  expect(buildPlaybackPlanFromJson(before,['base/0'],7)).toEqual(plan);
+  expect(model.JsonConverter.scoreToJson(score)).toBe(before);expect(first.tieOrigin).toBe(origin);expect(last.tieOrigin).toBe(origin);expect(origin.tieDestination).toBe(last);
 });
 
 it('same_pitch_voices_keep_exact_attack_channels_and_active_programs', () => {
@@ -158,6 +244,7 @@ it('initial_grace_in_another_voice_preserves_full_score_tick_shift', () => {
   const n=new model.Note();n.string=1;n.fret=3;grace.addNote(n);grace.voice=voice;voice.beats.unshift(grace);
   note(score,0,0,1,3,1);const bent=note(score,0,0,1,3,0,1);bent.addBendPoint(new model.BendPoint(0,0));bent.addBendPoint(new model.BendPoint(60,4));
   score.finish(settings);const plan=agree(score);
+  expect(plan.occurrences[0]).toMatchObject({meterNumerator:4,meterDenominator:4,startTick:120,endTick:3960});
   expect(plan.notes.find(n=>n.source.target.voice===1)?.startTick).toBe(120);
   const other=plan.notes.find(n=>n.source.target.track===1)!;expect(other.startTick).toBe(120);expect(Math.max(...other.pitch.map(p=>p.semitones))).toBe(2);
 });
@@ -407,6 +494,40 @@ it('picked_fingered_tapped_and_harmonic_articulations_are_explicit', () => {
   score.finish(settings);const plan=agree(score);expect(plan.notes.map(n=>n.articulation)).toEqual(['picked','fingered','tapped','harmonic']);
 });
 
+it('pitched_preparers_normalize_once_preserve_display_and_return_neutral_identity',()=>{
+  const neutral=authored(1);note(neutral,0,0);neutral.finish(settings);
+  expect(preparePitchedGpScore(neutral,settings)).toBe(neutral);expect(prepareMidiScore(neutral)).toBe(neutral);
+  for(const prepare of [(score:model.Score)=>preparePitchedGpScore(score,settings),prepareMidiScore]) {
+    const score=authored(1),staff=score.tracks[0].staves[0],n=note(score,0,0);staff.stringTuning.tunings=[];staff.transpositionPitch=12;staff.displayTranspositionPitch=7;
+    n.string=-1;n.fret=-1;n.octave=5;n.tone=0;n.trillValue=62;n.trillSpeed=model.Duration.Sixteenth;score.finish(settings);n.dynamics=3;
+    const json=model.JsonConverter.scoreToJson(score),links=captureNoteLinks(score),safe=prepare(score),normalized=safe.tracks[0].staves[0].bars[0].voices[0].beats[0].notes[0];
+    expect(normalized).toMatchObject({id:n.id,octave:4,tone:0,trillValue:50,dynamics:3});expect(safe.tracks[0].staves[0]).toMatchObject({transpositionPitch:0,displayTranspositionPitch:7});
+    expect(preparePitchedGpScore(safe,settings)).toBe(safe);expect(prepareMidiScore(safe)).toBe(safe);expect(captureNoteLinks(safe)).toEqual(links);
+    expect(model.JsonConverter.scoreToJson(score)).toBe(json);expect(captureNoteLinks(score)).toEqual(links);
+  }
+});
+
+it('pitched_and_negative_tremolo_preparation_composes_without_changing_duration_ids_or_links',()=>{
+  const score=authored(),staff=score.tracks[0].staves[0];staff.stringTuning.tunings=[];staff.transpositionPitch=12;staff.displayTranspositionPitch=7;score.masterBars[0].timeSignatureNumerator=8;
+  const a=note(score,0,0),b=note(score,1,0);a.beat.voice.beats.splice(1);a.beat.duration=model.Duration.DoubleWhole;
+  for(const n of [a,b]){n.string=-1;n.fret=-1;n.octave=5;n.tone=0;}
+  a.trillValue=62;a.trillSpeed=model.Duration.Sixteenth;a.beat.tremoloPicking=new model.TremoloPickingEffect();a.beat.tremoloPicking.marks=4;
+  score.finish(settings);a.tieDestination=b;b.tieOrigin=a;b.isTieDestination=true;a.dynamics=3;b.dynamics=6;
+  const json=model.JsonConverter.scoreToJson(score),links=captureNoteLinks(score);
+  for(const safe of [prepareMidiScore(score),prepareMidiScore(preparePitchedGpScore(score,settings))]) {
+    const first=safe.tracks[0].staves[0].bars[0].voices[0].beats[0],destination=safe.tracks[0].staves[0].bars[1].voices[0].beats[0].notes[0];
+    expect(first).toMatchObject({id:a.beat.id,duration:model.Duration.Whole,displayDuration:7680,playbackDuration:7680});
+    expect(first.notes[0]).toMatchObject({id:a.id,octave:4,tone:0,trillValue:50,dynamics:3});expect(destination).toMatchObject({id:b.id,octave:4,tone:0,dynamics:6});
+    expect(first.notes[0].tieDestination).toBe(destination);expect(destination.tieOrigin).toBe(first.notes[0]);expect(captureNoteLinks(safe)).toEqual(links);
+    expect(first.tremoloPicking!.getDurationAsTicks(first.duration)*first.playbackDuration/3840).toBe(480);
+    expect(safe.tracks[0].staves[0]).toMatchObject({transpositionPitch:0,displayTranspositionPitch:7});
+    expect(prepareMidiScore(safe)).toBe(safe);expect(preparePitchedGpScore(safe,settings)).toBe(safe);
+    const plan=buildPlaybackPlan(safe,7);expect(plan.notes.every(n=>n.key===48||n.key===50)).toBe(true);expect(plan.durationTick).toBe(11520);
+    expect(buildPlaybackPlan(score,7)).toEqual(plan);
+  }
+  expect(model.JsonConverter.scoreToJson(score)).toBe(json);expect(captureNoteLinks(score)).toEqual(links);expect(a.tieDestination).toBe(b);
+});
+
 it('negative_tremolo_hosts_normalize_public_fields_and_keep_rhythm_ids_links', () => {
   for(const [duration,marks,numerator] of [[model.Duration.DoubleWhole,4,8],[model.Duration.QuadrupleWhole,5,16]] as const) {
     const score=authored();score.masterBars[0].timeSignatureNumerator=numerator;
@@ -470,4 +591,74 @@ it('worker_protocol_tags_requests_and_ignores_upstream_ready_messages', async ()
   }
   vi.stubGlobal('Worker',WorkerFixture);
   try{const plan=await preparePlan(blankProject(),21);expect(plan.generation).toBe(21);expect(terminated).toBe(true);}finally{vi.unstubAllGlobals();}
+});
+
+// Guitar Pro mixes are fractional on alphaTab's 0–16 scale; alphaTab's MIDI
+// generator scales them by 8 unrounded, so native controllers must round them.
+it.each([['guitarpro7-bends.gp',['10:64','7:97']],['guitarpro8-beat-tempo-change.gp',['10:64','7:102']]])('plans %s with rounded mix controllers',(name,values)=>{
+  const bytes=readFileSync(`${process.cwd()}/.analysis/compatibility/${name}`);
+  const score=buildScore({...blankProject(),base:{kind:'file',filename:name,bytesBase64:bytes.toString('base64'),sha256:createHash('sha256').update(bytes).digest('hex')}});
+  const mix=buildPlaybackPlan(score,1).midi.filter(event=>event.type==='controller'&&(event.controller===7||event.controller===10));
+  // 12.08 and 12.72 on the 0–16 scale round to 97 and 102, not truncate.
+  expect([...new Set(mix.map(event=>event.type==='controller'?`${event.controller}:${event.value}`:''))].sort()).toEqual(values);
+});
+
+// These fixtures' only bar is over-full: its beats play past the bar end, as on main.
+it.each([['guitarpro3-notes.gp3',28],['guitarpro4-notes.gp4',28],['guitarpro5-notes.gp5',28],['guitarpro6-notes.gpx',28],['guitarpro7-notes.gp',28]] as const)('plans the over-full last bar of %s',(name,count)=>{
+  const bytes=readFileSync(`${process.cwd()}/.analysis/compatibility/${name}`);
+  const score=buildScore({...blankProject(),base:{kind:'file',filename:name,bytesBase64:bytes.toString('base64'),sha256:createHash('sha256').update(bytes).digest('hex')}});
+  const plan=buildPlaybackPlan(score,1),last=Math.max(...plan.performedBeats!.map(row=>row.endTick));
+  expect(plan.notes).toHaveLength(count);
+  expect(last).toBeGreaterThan(plan.occurrences.at(-1)!.endTick);
+  expect(last).toBeLessThanOrEqual(plan.durationTick);
+});
+
+// An over-full last bar (six quarters in 4/4) plays past its end, as on main.
+function overfull(rest = false, repeat = false) {
+  const score=authored(1),voice=score.tracks[0].staves[0].bars[0].voices[0];
+  for(let i=0;i<2;i++){const beat=new model.Beat();beat.duration=model.Duration.Quarter;beat.isEmpty=false;voice.addBeat(beat);}
+  for(let beat=0;beat<(rest?5:6);beat++)note(score,0,beat,1,beat+1);
+  if(repeat){score.masterBars[0].isRepeatStart=true;score.masterBars[0].repeatCount=2;}
+  score.finish(settings);return score;
+}
+it.each([
+  ['notes',false,false,5760,5760],
+  ['a trailing rest',true,false,5760,4800],
+  ['a repeat',false,true,9600,9600],
+] as const)('plans an over-full last bar with %s to its last slice',(_name,rest,repeat,duration,lastNote)=>{
+  const plan=buildPlaybackPlan(overfull(rest,repeat),1);
+  expect(plan.durationTick).toBe(duration);
+  expect(Math.max(...plan.notes.map(n=>n.endTick))).toBe(lastNote);
+  expect(Math.max(...plan.performedBeats!.map(row=>row.endTick))).toBe(duration);
+});
+it('keeps a dead brush that ends after the last bar inside the plan',()=>{
+  const score=authored(1);
+  for(let string=1;string<=6;string++)note(score,0,3,string).isDead=true;
+  const beat=score.tracks[0].staves[0].bars[0].voices[0].beats[3];beat.brushType=model.BrushType.BrushDown;beat.brushDuration=960;score.finish(settings);
+  const plan=buildPlaybackPlan(score,1);
+  expect(plan.durationTick).toBe(3900);
+  expect(plan.durationTick).toBe(Math.max(...plan.notes.map(n=>n.endTick)));
+});
+
+it('records the articulation a locked track keeps only where an automation would change it', () => {
+  // A guitar (program 25) with two quarter notes; an automation to a bass (33) may sit on either beat.
+  const plan = (automationAt: number | null) => {
+    const score = authored(2, 1); note(score, 0, 0); note(score, 0, 1);
+    if (automationAt !== null) score.tracks[0].staves[0].bars[0].voices[0].beats[automationAt].automations.push(model.Automation.buildInstrumentAutomation(false, 0, 33));
+    score.finish(settings);
+    return buildPlaybackPlanFromJson(model.JsonConverter.scoreToJson(score), ['base/0'], 7);
+  };
+  const played = (automationAt: number | null) => plan(automationAt).notes.map(n => n.articulation);
+  const kept = (automationAt: number | null) => plan(automationAt).notes.map(n => n.lockedArticulation ?? n.articulation);
+  const written = played(null);
+  expect(written).toEqual(['picked', 'picked']);
+  // Unlocked, the automation on the second beat makes that note a bass; locked, the guitar's articulation stays.
+  expect(played(1)).toEqual(['picked', 'fingered']);
+  expect(plan(1).notes.map(n => n.lockedArticulation)).toEqual([undefined, 'picked']);
+  expect(kept(1)).toEqual(written);
+  // The lock keeps the sound in effect at the start: with the automation on the first beat that is the bass, as it is unlocked.
+  expect(played(0)).toEqual(['fingered', 'fingered']);
+  expect(kept(0)).toEqual(played(0));
+  // A plan with no automation carries no extra field.
+  expect(plan(null).notes.every(n => !('lockedArticulation' in n))).toBe(true);
 });

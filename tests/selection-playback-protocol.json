@@ -1,0 +1,32 @@
+{
+  "durationTick": 3840,
+  "commands": [
+    {"name":"finite", "value":{"type":"playRange","generation":7,"startTick":960,"endTick":1920}, "decode":true,"valid":true},
+    {"name":"ordinary EOF", "value":{"type":"playRange","generation":7,"startTick":960,"endTick":null}, "decode":true,"valid":true},
+    {"name":"missing end", "value":{"type":"playRange","generation":7,"startTick":960}, "decode":false,"valid":false},
+    {"name":"extra field", "value":{"type":"playRange","generation":7,"startTick":960,"endTick":1920,"extra":true}, "decode":false,"valid":false},
+    {"name":"string start", "value":{"type":"playRange","generation":7,"startTick":"960","endTick":1920}, "decode":false,"valid":false},
+    {"name":"boolean start", "value":{"type":"playRange","generation":7,"startTick":true,"endTick":1920}, "decode":false,"valid":false},
+    {"name":"string end", "value":{"type":"playRange","generation":7,"startTick":960,"endTick":"1920"}, "decode":false,"valid":false},
+    {"name":"boolean end", "value":{"type":"playRange","generation":7,"startTick":960,"endTick":false}, "decode":false,"valid":false},
+    {"name":"negative generation", "value":{"type":"playRange","generation":-1,"startTick":960,"endTick":1920}, "decode":false,"valid":false},
+    {"name":"fractional generation", "value":{"type":"playRange","generation":7.5,"startTick":960,"endTick":1920}, "decode":false,"valid":false},
+    {"name":"negative start", "value":{"type":"playRange","generation":7,"startTick":-1,"endTick":1920}, "decode":true,"valid":false},
+    {"name":"start at score end", "value":{"type":"playRange","generation":7,"startTick":3840,"endTick":null}, "decode":true,"valid":false},
+    {"name":"empty range", "value":{"type":"playRange","generation":7,"startTick":960,"endTick":960}, "decode":true,"valid":false},
+    {"name":"reversed range", "value":{"type":"playRange","generation":7,"startTick":960,"endTick":480}, "decode":true,"valid":false},
+    {"name":"past score end", "value":{"type":"playRange","generation":7,"startTick":960,"endTick":3841}, "decode":true,"valid":false}
+  ],
+  "plan": {
+    "generation":7,"ppq":960,"durationTick":3840,"durationMs":2000,
+    "tracks":[{"id":"base/0","program":25,"percussion":false}],
+    "tempos":[{"tick":0,"bpm":120}],
+    "occurrences":[{"bar":0,"occurrence":0,"meterNumerator":4,"meterDenominator":4,"startTick":120,"endTick":3840,"startMs":62.5,"endMs":2000}],
+    "notes":[],"midi":[]
+  },
+  "performedBeats": [
+    {"target":{"track":0,"staff":0,"bar":0,"voice":0,"beat":0},"occurrence":0,"startTick":0,"endTick":120,"leadInTick":0},
+    {"target":{"track":0,"staff":0,"bar":0,"voice":0,"beat":1},"occurrence":0,"startTick":120,"endTick":1080,"leadInTick":0},
+    {"target":{"track":0,"staff":0,"bar":0,"voice":1,"beat":0},"occurrence":0,"startTick":120,"endTick":120,"leadInTick":120}
+  ]
+}

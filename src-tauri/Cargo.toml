@@ -12,11 +12,12 @@ name = "tabplayer_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [dependencies]
-serde = { version = "1", features = ["derive"] }
+serde = { version = "1", features = ["derive", "rc"] }
 serde_json = "1"
 base64 = "0.22"
 sha2 = "0.10"
 atomic-write-file = "0.3"
+fs2 = "=0.4.3"
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 cpal = "=0.18.2"
@@ -24,7 +25,12 @@ symphonia = { version = "=0.6.1", default-features = false, features = ["wav", "
 rustysynth = "=1.3.7"
 ringbuf = "=0.5.3"
 svg2pdf = "=0.13.0"
+resvg = { version = "=0.45.1", default-features = false }
+png = "=0.17.16"
 pdf-writer = "=0.12.1"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -33,3 +39,6 @@ tauri-build = { version = "2", features = [] }
 tempfile = "3"
 midly = "=0.5.3"
 hound = "=3.5.1"
+
+[patch.crates-io]
+usvg = { path = "../vendor/usvg" }

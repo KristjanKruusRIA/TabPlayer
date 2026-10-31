@@ -1,0 +1,36 @@
+.score-overview {
+  width:100%; height:100%; min-width:0; min-height:0; overflow:auto;
+  color:var(--ws-text); background:var(--ws-panel); font-size:12px;
+  font-variant-numeric:tabular-nums; scrollbar-color:var(--ws-border) var(--ws-input);
+}
+.score-overview-content { position:relative; min-width:100%; }
+.score-overview-ruler {
+  position:sticky; top:0; height:28px; z-index:4; background:var(--ws-raised);
+  border-bottom:1px solid var(--ws-border);
+}
+.score-overview-corner,.score-overview-track {
+  position:sticky; left:0; width:144px; height:28px; box-sizing:border-box;
+  padding:6px 8px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  background:var(--ws-panel); border-right:1px solid var(--ws-border); z-index:3;
+}
+.score-overview-corner { background:var(--ws-raised); color:var(--ws-muted); }
+.score-overview-bar-label { position:absolute; top:0; width:28px; height:28px; text-align:center; padding-top:11px; line-height:16px; box-sizing:border-box; }
+.score-overview-section {
+  position:absolute; left:0; top:0; max-width:140px; padding:0 4px; overflow:hidden;
+  white-space:nowrap; text-overflow:ellipsis; background:var(--ws-raised); color:var(--ws-accent); font-size:11px; line-height:11px;
+}
+.score-overview-row { position:absolute; left:0; width:100%; height:28px; }
+.score-overview-cell {
+  position:absolute; top:0; width:28px; height:28px; box-sizing:border-box; cursor:pointer;
+  border:1px solid var(--ws-border); border-top:0; border-left:0; background:var(--ws-input);
+}
+.score-overview-cell:hover { background:var(--ws-raised); }
+.score-overview-cell[aria-selected="true"] { box-shadow:inset 0 0 0 2px var(--ws-accent); }
+.score-overview-cell:focus-visible { outline:2px solid var(--ws-accent); outline-offset:2px; z-index:2; }
+.score-overview-occupancy { position:absolute; left:7px; right:7px; top:8px; height:10px; }
+.score-overview-cell[data-content="music"] .score-overview-occupancy { background:var(--ws-muted); }
+.score-overview-cell[data-content="rest"] .score-overview-occupancy { border-bottom:1px solid var(--ws-muted); height:5px; }
+.score-overview-playhead {
+  position:absolute; top:28px; width:28px; box-sizing:border-box; border-left:2px solid var(--ws-playback);
+  border-right:1px solid var(--ws-playback); pointer-events:none; z-index:1;
+}

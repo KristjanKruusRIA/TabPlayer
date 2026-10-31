@@ -14,6 +14,64 @@ pub struct SvgPage {
     pub height_mm: f32,
 }
 
+fn load_export_fonts(database: &mut usvg::fontdb::Database) {
+    for bytes in [
+        include_bytes!("../../../assets/fonts/Bravura.otf").as_slice(),
+        include_bytes!("../../../assets/fonts/NotoSans-Regular.ttf").as_slice(),
+        include_bytes!("../../../assets/fonts/NotoSansCJKjp-Regular.otf").as_slice(),
+        include_bytes!("../../../assets/fonts/NotoEmoji.ttf").as_slice(),
+    ] {
+        database.load_font_data(bytes.to_vec());
+    }
+}
+
+/// Bundled fonts only, with every external or embedded resource denied.
+pub(crate) fn export_options() -> usvg::Options<'static> {
+    let mut options = usvg::Options {
+        font_family: "Noto Sans".into(),
+        image_href_resolver: usvg::ImageHrefResolver {
+            resolve_data: Box::new(|_, _, _| None),
+            resolve_string: Box::new(|_, _| None),
+        },
+        ..usvg::Options::default()
+    };
+    load_export_fonts(options.fontdb_mut());
+    options.fontdb_mut().set_sans_serif_family("Noto Sans");
+    options.fontdb_mut().set_serif_family("Noto Sans");
+    options
+}
+/// Checks one rendered page and parses it with the export options.
+pub(crate) fn notation_tree(
+    page: &SvgPage,
+    options: &usvg::Options,
+    kind: &str,
+) -> Result<usvg::Tree, String> {
+    if !page.width_mm.is_finite()
+        || !page.height_mm.is_finite()
+        || page.width_mm < 20.0
+        || page.width_mm > 1000.0
+        || page.height_mm < 20.0
+        || page.height_mm > 1000.0
+        || page.svg.len() > 20_000_000
+    {
+        return Err(format!("Invalid {kind} page size or content."));
+    }
+    // Notation is entirely vector/text. Reject resource-bearing markup even though resolvers also deny it.
+    let lower = page.svg.to_ascii_lowercase();
+    if [
+        "<image",
+        "<script",
+        "<foreignobject",
+        "<!doctype",
+        "<!entity",
+    ]
+    .iter()
+    .any(|s| lower.contains(s))
+    {
+        return Err("External SVG resources are not supported in score exports.".into());
+    }
+    usvg::Tree::from_str(&page.svg, options).map_err(|e| format!("Invalid notation SVG: {e}"))
+}
 pub fn convert_pages(pages: &[SvgPage], cancel: &AtomicBool) -> Result<Vec<u8>, String> {
     convert_pages_with_progress(pages, cancel, |_| {})
 }
@@ -25,22 +83,7 @@ pub fn convert_pages_with_progress(
     if pages.is_empty() || pages.len() > 2000 {
         return Err("Choose between one and 2000 printable pages.".into());
     }
-    let mut options = usvg::Options {
-        font_family: "Noto Sans".into(),
-        image_href_resolver: usvg::ImageHrefResolver {
-            resolve_data: Box::new(|_, _, _| None),
-            resolve_string: Box::new(|_, _| None),
-        },
-        ..usvg::Options::default()
-    };
-    options
-        .fontdb_mut()
-        .load_font_data(include_bytes!("../../../assets/fonts/Bravura.otf").to_vec());
-    options
-        .fontdb_mut()
-        .load_font_data(include_bytes!("../../../assets/fonts/NotoSans-Regular.ttf").to_vec());
-    options.fontdb_mut().set_sans_serif_family("Noto Sans");
-    options.fontdb_mut().set_serif_family("Noto Sans");
+    let options = export_options();
     let mut alloc = Ref::new(1);
     let catalog = alloc.bump();
     let tree_id = alloc.bump();
@@ -54,32 +97,7 @@ pub fn convert_pages_with_progress(
         if cancel.load(Ordering::Acquire) {
             return Err("PDF export cancelled.".into());
         }
-        if !page.width_mm.is_finite()
-            || !page.height_mm.is_finite()
-            || page.width_mm < 20.0
-            || page.width_mm > 1000.0
-            || page.height_mm < 20.0
-            || page.height_mm > 1000.0
-            || page.svg.len() > 20_000_000
-        {
-            return Err("Invalid PDF page size or content.".into());
-        }
-        // Notation is entirely vector/text. Reject resource-bearing markup even though resolvers also deny it.
-        let lower = page.svg.to_ascii_lowercase();
-        if [
-            "<image",
-            "<script",
-            "<foreignobject",
-            "<!doctype",
-            "<!entity",
-        ]
-        .iter()
-        .any(|s| lower.contains(s))
-        {
-            return Err("External SVG resources are not supported in score exports.".into());
-        }
-        let tree = usvg::Tree::from_str(&page.svg, &options)
-            .map_err(|e| format!("Invalid notation SVG: {e}"))?;
+        let tree = notation_tree(page, &options, "PDF")?;
         let (chunk, svg_id) = svg2pdf::to_chunk(
             &tree,
             ConversionOptions {
@@ -134,6 +152,159 @@ mod tests {
             .join("../.analysis/expansion/vector-export.pdf");
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(path, bytes).unwrap();
+    }
+    #[test]
+    fn exports_exact_mixed_unicode_title_with_vector_notation() {
+        let mut p = page();
+        p.svg = p.svg.replace(
+            "TabPlayer Ä",
+            "Öölaul — 同じ楽譜 🎸 · A very long independently authored document title for horizontal score tab overflow",
+        );
+        let mut options = usvg::Options::default();
+        load_export_fonts(options.fontdb_mut());
+        let tree = usvg::Tree::from_str(&p.svg, &options).unwrap();
+        fn assert_resolved(group: &usvg::Group, tree: &usvg::Tree) {
+            for node in group.children() {
+                match node {
+                    usvg::Node::Text(text) => {
+                        for glyph in text
+                            .layouted()
+                            .iter()
+                            .flat_map(|span| &span.positioned_glyphs)
+                        {
+                            assert_ne!(
+                                glyph.id.0,
+                                0,
+                                "Unresolved mixed-title glyph {:?} using {:?}",
+                                glyph.text,
+                                tree.fontdb().face(glyph.font).unwrap().families
+                            );
+                        }
+                    }
+                    usvg::Node::Group(group) => assert_resolved(group, tree),
+                    _ => {}
+                }
+            }
+        }
+        assert_resolved(tree.root(), &tree);
+        let bytes = convert_pages(&[p], &AtomicBool::new(false)).unwrap();
+        let content = String::from_utf8_lossy(&bytes);
+        assert!(content.starts_with("%PDF-"));
+        assert!(content.contains("/Count 1"));
+        assert!(content.contains("/FontFile"));
+        assert!(!content.contains("/Subtype /Image"));
+        assert!(content.contains("595.275"));
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../.analysis/parity/pdf-unicode-regression.pdf");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, bytes).unwrap();
+    }
+    #[test]
+    fn bundled_unicode_fallback_has_nonzero_glyphs_and_vector_outlines() {
+        let mut options = usvg::Options::default();
+        load_export_fonts(options.fontdb_mut());
+        for (family, text) in [
+            ("Noto Sans", "Öö—·"),
+            ("Noto Sans CJK JP", "同じ楽譜"),
+            ("Noto Emoji", "🎸"),
+            ("Bravura", "\u{e050}"),
+        ] {
+            for character in text.chars() {
+                let svg = format!(
+                    "<svg xmlns='http://www.w3.org/2000/svg' width='100' height='100'><text x='10' y='50' font-family='{family}' font-size='24'>{character}</text></svg>"
+                );
+                let tree = usvg::Tree::from_str(&svg, &options).unwrap();
+                let usvg::Node::Text(text) = &tree.root().children()[0] else {
+                    panic!("Expected text for {character}");
+                };
+                let glyphs: Vec<_> = text
+                    .layouted()
+                    .iter()
+                    .flat_map(|span| &span.positioned_glyphs)
+                    .collect();
+                assert!(!glyphs.is_empty(), "Missing glyph for {character}");
+                for glyph in glyphs {
+                    assert_ne!(glyph.id.0, 0, "Missing glyph for {character}");
+                    let face = tree.fontdb().face(glyph.font).unwrap();
+                    assert!(
+                        face.families.iter().any(|(name, _)| name == family),
+                        "Unexpected fallback for {character}: {:?}",
+                        face.families
+                    );
+                }
+                assert!(
+                    text.flattened()
+                        .children()
+                        .iter()
+                        .any(|node| matches!(node, usvg::Node::Path(_))),
+                    "No vector outline for {character}"
+                );
+            }
+        }
+    }
+    #[test]
+    fn preserves_latin_ligatures_across_multiple_unicode_fallbacks() {
+        let mut options = usvg::Options::default();
+        load_export_fonts(options.fontdb_mut());
+        let parse = |value: &str| {
+            usvg::Tree::from_str(&format!("<svg xmlns='http://www.w3.org/2000/svg' width='600' height='100'><text x='10' y='50' font-family='Noto Sans' font-size='24'>{value}</text></svg>"), &options).unwrap()
+        };
+        let plain = parse("fl");
+        let usvg::Node::Text(plain_text) = &plain.root().children()[0] else {
+            panic!("Expected Latin text");
+        };
+        let ligature = &plain_text.layouted()[0].positioned_glyphs;
+        assert_eq!(
+            ligature.len(),
+            1,
+            "Fixture must exercise a real Latin ligature"
+        );
+        for value in ["fl同じ楽譜🎸fl", "同じfl🎸楽譜fl", "🎸fl同じ楽譜fl"] {
+            let tree = parse(value);
+            let usvg::Node::Text(text) = &tree.root().children()[0] else {
+                panic!("Expected mixed text");
+            };
+            let glyphs: Vec<_> = text
+                .layouted()
+                .iter()
+                .flat_map(|span| &span.positioned_glyphs)
+                .collect();
+            assert_eq!(
+                glyphs
+                    .iter()
+                    .map(|glyph| glyph.text.as_str())
+                    .collect::<String>(),
+                value
+            );
+            assert!(glyphs.iter().all(|glyph| glyph.id.0 != 0));
+            let latin: Vec<_> = glyphs.iter().filter(|glyph| glyph.text == "fl").collect();
+            assert_eq!(latin.len(), 2);
+            for glyph in latin {
+                assert_eq!(glyph.id, ligature[0].id);
+                assert!(
+                    tree.fontdb()
+                        .face(glyph.font)
+                        .unwrap()
+                        .families
+                        .iter()
+                        .any(|(name, _)| name == "Noto Sans")
+                );
+            }
+            let mut p = page();
+            p.svg = p.svg.replace("TabPlayer Ä", value);
+            let bytes = convert_pages(&[p], &AtomicBool::new(false)).unwrap();
+            assert!(!String::from_utf8_lossy(&bytes).contains("/Subtype /Image"));
+        }
+    }
+    #[test]
+    fn still_rejects_a_character_without_a_bundled_glyph() {
+        let mut p = page();
+        p.svg = p.svg.replace("TabPlayer Ä", "fl 同じ楽譜 🎸 \u{10ffff}");
+        assert!(
+            convert_pages(&[p], &AtomicBool::new(false))
+                .unwrap_err()
+                .contains("could not be displayed with any font")
+        );
     }
     #[test]
     fn refuses_remote_file_data_resources_and_cancelled_conversion() {

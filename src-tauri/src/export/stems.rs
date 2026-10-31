@@ -1,4 +1,4 @@
-use super::wav::{AudioFormat, BLOCK_FRAMES, PcmWriter};
+use super::wav::{AudioContainer, AudioFormat, BLOCK_FRAMES, PcmWriter};
 use serde::{Deserialize, Serialize};
 use std::{
     fs::File,
@@ -72,7 +72,7 @@ impl Drop for Stage {
         let _ = std::fs::remove_dir_all(&self.0);
     }
 }
-fn filename(index: usize, name: &str) -> String {
+fn filename(index: usize, name: &str, container: AudioContainer) -> String {
     let safe: String = name
         .chars()
         .take(80)
@@ -86,9 +86,10 @@ fn filename(index: usize, name: &str) -> String {
         .collect();
     let safe = safe.trim_matches([' ', '.']);
     format!(
-        "{:03}-{}.wav",
+        "{:03}-{}.{}",
         index + 1,
-        if safe.is_empty() { "Track" } else { safe }
+        if safe.is_empty() { "Track" } else { safe },
+        container.extension()
     )
 }
 #[cfg(target_os = "linux")]
@@ -181,7 +182,7 @@ pub fn write_stems(
         .enumerate()
         .map(|(i, t)| ManifestTrack {
             id: t.id.clone(),
-            filename: filename(i, &t.name),
+            filename: filename(i, &t.name, spec.format.container),
             preset: t.preset.clone(),
             kind: t.kind.clone(),
         })
@@ -256,10 +257,7 @@ mod tests {
     use std::sync::atomic::{AtomicBool, Ordering};
     fn spec() -> StemSpec {
         StemSpec {
-            format: AudioFormat {
-                sample_rate: 48000,
-                bit_depth: 24,
-            },
+            format: AudioFormat::wav(48000, 24),
             tracks: vec![
                 StemTrack {
                     id: "base/0".into(),
@@ -383,5 +381,85 @@ mod tests {
         assert!(result.unwrap_err().contains("gain"));
         assert!(!dest.exists());
         assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 0);
+    }
+    #[test]
+    fn writes_aiff_stems_named_and_recorded_as_aiff() {
+        let root = tempfile::tempdir().unwrap();
+        let dest = root.path().join("AIFF stems");
+        let mut spec = spec();
+        spec.format.container = AudioContainer::Aiff;
+        let mut remaining = 1200;
+        let manifest = write_stems(
+            &dest,
+            &spec,
+            |outputs| {
+                let n = remaining.min(BLOCK_FRAMES);
+                outputs[0][..n].fill([0.25, 0.1]);
+                outputs[1][..n].fill([0.0, 0.0]);
+                remaining -= n;
+                Ok(n)
+            },
+            &AtomicBool::new(false),
+            |_| {},
+        )
+        .unwrap();
+        assert_eq!(manifest.format.container, AudioContainer::Aiff);
+        let written: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(dest.join("manifest.json")).unwrap()).unwrap();
+        assert_eq!(written["format"]["container"], "aiff");
+        for track in &manifest.tracks {
+            assert!(track.filename.ends_with(".aiff"), "{}", track.filename);
+            let bytes = std::fs::read(dest.join(&track.filename)).unwrap();
+            assert_eq!(&bytes[..4], b"FORM");
+            assert_eq!(&bytes[8..16], b"AIFFCOMM");
+            assert_eq!(bytes.len(), 54 + 1200 * 6);
+        }
+        // A WAV stem set's manifest does not name a container.
+        let wav: serde_json::Value = serde_json::to_value(StemManifest {
+            format: AudioFormat::wav(48000, 24),
+            ..manifest
+        })
+        .unwrap();
+        assert!(wav["format"].get("container").is_none());
+    }
+    #[test]
+    fn writes_flac_stems_that_decode_to_each_track() {
+        let root = tempfile::tempdir().unwrap();
+        let dest = root.path().join("FLAC stems");
+        let mut spec = spec();
+        spec.format.container = AudioContainer::Flac;
+        let mut remaining = 5000;
+        let manifest = write_stems(
+            &dest,
+            &spec,
+            |outputs| {
+                let n = remaining.min(BLOCK_FRAMES);
+                outputs[0][..n].fill([0.25, 0.1]);
+                outputs[1][..n].fill([0.0, 0.0]);
+                remaining -= n;
+                Ok(n)
+            },
+            &AtomicBool::new(false),
+            |_| {},
+        )
+        .unwrap();
+        let written: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(dest.join("manifest.json")).unwrap()).unwrap();
+        assert_eq!(written["format"]["container"], "flac");
+        for (track, level) in manifest.tracks.iter().zip([[0.25, 0.1], [0.0, 0.0]]) {
+            assert!(track.filename.ends_with(".flac"), "{}", track.filename);
+            let bytes = std::fs::read(dest.join(&track.filename)).unwrap();
+            let decoded = crate::audio::decode::decode_audio(&bytes, Some("flac")).unwrap();
+            assert_eq!(decoded.frames.len(), 5000);
+            // Each stem holds its own track, within the dither.
+            for frame in decoded.frames.iter() {
+                for (value, expected) in frame.iter().zip(level) {
+                    assert!(
+                        (value - expected).abs() < 1e-5,
+                        "{value} against {expected}"
+                    );
+                }
+            }
+        }
     }
 }

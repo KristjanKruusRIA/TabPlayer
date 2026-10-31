@@ -1,0 +1,19 @@
+import { useState } from 'react';
+import type { model } from '@coderline/alphatab';
+import { maxDroneFret, standardDroneFret } from './banjo-drone';
+
+/** The short fifth string of a banjo. The fret is committed on blur or Enter, the checkbox at once. `onChange` only ever gets a valid value (0 for none), never one for a field nobody changed; `onInvalid` says whether the draft on screen is not valid, so the caller can hold back Apply and keep the last valid value. */
+export function BanjoDroneControls({staff,value,disabled,onChange,onInvalid}:{staff:model.Staff;value:number;disabled?:boolean;onChange:(value:number)=>void;onInvalid?:(invalid:boolean)=>void}) {
+  const [on,setOn]=useState(value>0),[fretText,setFretText]=useState(String(value||standardDroneFret)),[dirty,setDirty]=useState(false);
+  const fret=fretText.trim()===''?NaN:Number(fretText),valid=Number.isInteger(fret)&&fret>=1&&fret<=maxDroneFret;
+  const commit=(enabled:boolean)=>{const good=!enabled||valid;onInvalid?.(!good);if(good)onChange(enabled?fret:0);};
+  const fiveStrings=staff.tuning.length===5&&!staff.isPercussion;
+  return <fieldset className="banjo-drone" disabled={disabled||!fiveStrings}>
+    <legend>Banjo drone</legend>
+    <label className="check"><input type="checkbox" checked={on} onChange={event=>{setOn(event.target.checked);setDirty(true);commit(event.target.checked);}}/>Short drone string (string 1)</label>
+    <label>Drone string starts at fret<input type="number" min={1} max={maxDroneFret} disabled={!on} value={fretText} onChange={event=>{setFretText(event.target.value);setDirty(true);}} onBlur={()=>{if(dirty)commit(on);}} onKeyDown={event=>{if(event.key==='Enter'&&dirty)commit(on);}}/></label>
+    {!fiveStrings&&<p className="muted" role="note">The banjo drone needs a 5-string staff.</p>}
+    {dirty&&on&&!valid&&<p className="muted" role="alert">Use a drone fret from 1 to {maxDroneFret}.</p>}
+    {on&&valid&&<p className="muted" role="note">Frets on string 1 are numbered along the neck: fret 0 is open, frets 1 to {fret} do not exist, and fret {fret+1} sounds one semitone above open.</p>}
+  </fieldset>;
+}

@@ -1,26 +1,124 @@
 use crate::assets::{AssetInfo, StoredAsset};
 pub use crate::edit_types::{EditCommand, NoteTarget};
-use crate::edit_types::{validate_tempo, validate_tuning};
+use crate::edit_types::{ScoreMetadata, validate_tempo, validate_tuning};
 use base64::{Engine, engine::general_purpose::STANDARD};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, de::Error};
 use sha2::{Digest, Sha256};
 use std::{
     collections::BTreeMap,
     path::{Path, PathBuf},
-    sync::atomic::{AtomicU64, Ordering},
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
 };
 
 pub type ProjectError = String;
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+/// The message every refused change to a finalized document carries.
+pub const FINALIZED_MESSAGE: &str = "This document is finalized. Unfinalize it to make changes.";
+
+/// A lock field may be absent (unlocked) but never null: a null would read as unlocked and lose the lock on save.
+fn present_lock<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<DocumentLock>, D::Error> {
+    DocumentLock::deserialize(deserializer).map(Some)
+}
+
+/// A lock on a document. Only finalizing exists; later kinds (password locks) can be added here.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
+pub enum DocumentLock {
+    Finalized,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Project {
     pub format: String,
     pub schema_version: u32,
     pub engine_version: String,
     pub base: BaseDocument,
+    pub baseline_edits: Vec<EditCommand>,
     pub edits: Vec<EditCommand>,
     pub assets: BTreeMap<String, StoredAsset>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lock: Option<DocumentLock>,
+    /// Set the first time a score read from a file is edited: from then on the capo over some strings that the file
+    /// holds applies. Absent on every other project, so those serialize as they always did.
+    #[serde(skip_serializing_if = "is_false")]
+    pub partial_capo: bool,
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
+impl<'de> Deserialize<'de> for Project {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase", deny_unknown_fields)]
+        struct CanonicalProject {
+            format: String,
+            schema_version: u32,
+            engine_version: String,
+            base: BaseDocument,
+            baseline_edits: Vec<EditCommand>,
+            edits: Vec<EditCommand>,
+            assets: BTreeMap<String, StoredAsset>,
+            #[serde(default, deserialize_with = "present_lock")]
+            lock: Option<DocumentLock>,
+            #[serde(default)]
+            partial_capo: Option<bool>,
+        }
+        let mut value = serde_json::Value::deserialize(deserializer)?;
+        let fields = value
+            .as_object_mut()
+            .ok_or_else(|| D::Error::custom("A project must be an object."))?;
+        match fields
+            .get("schemaVersion")
+            .and_then(serde_json::Value::as_u64)
+        {
+            Some(version @ (1 | 2)) => {
+                if fields.contains_key("baselineEdits")
+                    || (version == 1 && fields.contains_key("assets"))
+                {
+                    return Err(D::Error::custom(
+                        "Legacy project contains fields from a newer version.",
+                    ));
+                }
+                if version == 1 {
+                    fields.insert("assets".into(), serde_json::json!({}));
+                }
+                fields.insert("baselineEdits".into(), serde_json::json!([]));
+                fields.insert("schemaVersion".into(), serde_json::json!(3));
+            }
+            Some(3) => {}
+            _ => {
+                return Err(D::Error::custom(
+                    "This is not a supported TabPlayer project version.",
+                ));
+            }
+        }
+        let wire: CanonicalProject = serde_json::from_value(value).map_err(D::Error::custom)?;
+        // The marker is written only as true; a false would read as unmarked and be lost on save.
+        if wire.partial_capo == Some(false) {
+            return Err(D::Error::custom(
+                "The partial capo marker is only ever true.",
+            ));
+        }
+        Ok(Self {
+            format: wire.format,
+            schema_version: wire.schema_version,
+            engine_version: wire.engine_version,
+            base: wire.base,
+            baseline_edits: wire.baseline_edits,
+            edits: wire.edits,
+            assets: wire.assets,
+            lock: wire.lock,
+            partial_capo: wire.partial_capo.unwrap_or(false),
+        })
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -30,8 +128,17 @@ pub struct ProjectView {
     pub schema_version: u32,
     pub engine_version: String,
     pub base: BaseDocument,
+    pub baseline_edits: Vec<EditCommand>,
     pub edits: Vec<EditCommand>,
     pub assets: BTreeMap<String, AssetInfo>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present_lock"
+    )]
+    pub lock: Option<DocumentLock>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub partial_capo: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -51,7 +158,7 @@ pub enum BaseDocument {
     },
     File {
         filename: String,
-        bytes_base64: String,
+        bytes_base64: Arc<str>,
         sha256: String,
     },
 }
@@ -66,11 +173,64 @@ pub struct BeatTarget {
     pub beat: u32,
 }
 
+/// Author details a new score starts with, from the viewer's GP8-style "My info" preferences.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct NewScoreDefaults {
+    pub artist: String,
+    pub words: String,
+    pub music: String,
+    pub tab: String,
+    pub copyright: String,
+}
+
+/// The longest default the frontend offers, counted in UTF-16 units as the editor counts them.
+pub const NEW_SCORE_DEFAULT_LIMIT: usize = 1000;
+
 impl Project {
+    /// A blank score carrying author defaults. The metadata is a baseline edit, so it is not an undo step.
+    pub fn blank_with_defaults(defaults: &NewScoreDefaults) -> Result<Self, ProjectError> {
+        let fields = [
+            &defaults.artist,
+            &defaults.words,
+            &defaults.music,
+            &defaults.tab,
+            &defaults.copyright,
+        ];
+        if fields
+            .iter()
+            .any(|field| field.encode_utf16().count() > NEW_SCORE_DEFAULT_LIMIT)
+        {
+            return Err(format!(
+                "New score defaults must be at most {NEW_SCORE_DEFAULT_LIMIT} characters each."
+            ));
+        }
+        let mut project = Self::blank();
+        if let BaseDocument::Blank { artist, .. } = &mut project.base {
+            artist.clone_from(&defaults.artist);
+        }
+        if fields[1..].iter().any(|field| !field.is_empty()) {
+            project.baseline_edits.push(EditCommand::SetScoreMetadata {
+                fields: ScoreMetadata {
+                    sub_title: String::new(),
+                    album: String::new(),
+                    words: defaults.words.clone(),
+                    music: defaults.music.clone(),
+                    copyright: defaults.copyright.clone(),
+                    tab: defaults.tab.clone(),
+                    notices: String::new(),
+                    instructions: String::new(),
+                },
+            });
+        }
+        project.validate()?;
+        Ok(project)
+    }
+
     pub fn blank() -> Self {
         Self {
             format: "TabPlayer".into(),
-            schema_version: 2,
+            schema_version: 3,
             engine_version: "1.8.4".into(),
             base: BaseDocument::Blank {
                 title: "Untitled".into(),
@@ -79,8 +239,11 @@ impl Project {
                 tuning: vec![64, 59, 55, 50, 45, 40],
                 measure_count: 4,
             },
+            baseline_edits: vec![],
             edits: vec![],
             assets: BTreeMap::new(),
+            lock: None,
+            partial_capo: false,
         }
     }
 
@@ -88,7 +251,7 @@ impl Project {
         Self {
             base: BaseDocument::File {
                 filename,
-                bytes_base64: STANDARD.encode(bytes),
+                bytes_base64: STANDARD.encode(bytes).into(),
                 sha256: format!("{:x}", Sha256::digest(bytes)),
             },
             ..Self::blank()
@@ -96,7 +259,7 @@ impl Project {
     }
 
     pub fn validate(&self) -> Result<(), ProjectError> {
-        if self.format != "TabPlayer" || self.schema_version != 2 {
+        if self.format != "TabPlayer" || self.schema_version != 3 {
             return Err("This is not a supported TabPlayer project version.".into());
         }
         if self.engine_version != "1.8.4" {
@@ -104,6 +267,9 @@ impl Project {
                 "This project requires alphaTab {}. This app uses 1.8.4.",
                 self.engine_version
             ));
+        }
+        if self.partial_capo && !matches!(self.base, BaseDocument::File { .. }) {
+            return Err("Only a score read from a file can hold a partial capo marker.".into());
         }
         match &self.base {
             BaseDocument::Blank {
@@ -124,14 +290,14 @@ impl Project {
                 ..
             } => {
                 let bytes = STANDARD
-                    .decode(bytes_base64)
+                    .decode(bytes_base64.as_bytes())
                     .map_err(|_| "Original score bytes are corrupt.".to_string())?;
                 if !format!("{:x}", Sha256::digest(&bytes)).eq_ignore_ascii_case(sha256) {
                     return Err("Original score checksum does not match.".into());
                 }
             }
         }
-        for edit in &self.edits {
+        for edit in self.baseline_edits.iter().chain(&self.edits) {
             edit.validate()?;
             if edit
                 .asset_id()
@@ -152,12 +318,15 @@ impl Project {
             schema_version: self.schema_version,
             engine_version: self.engine_version.clone(),
             base: self.base.clone(),
+            baseline_edits: self.baseline_edits.clone(),
             edits: self.edits.clone(),
             assets: self
                 .assets
                 .iter()
                 .map(|(id, asset)| (id.clone(), asset.info().expect("validated asset")))
                 .collect(),
+            lock: self.lock,
+            partial_capo: self.partial_capo,
         }
     }
 }
@@ -177,17 +346,98 @@ pub struct ProjectSession {
     project: Project,
     cursor: usize,
     saved: Vec<EditCommand>,
+    saved_lock: Option<DocumentLock>,
     asset_info: BTreeMap<String, AssetInfo>,
     path: Option<PathBuf>,
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ProjectCheckpoint {
+    pub project: Project,
+    pub cursor: usize,
+    pub saved: Vec<EditCommand>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present_lock"
+    )]
+    pub saved_lock: Option<DocumentLock>,
+    #[serde(deserialize_with = "Option::<PathBuf>::deserialize")]
+    pub path: Option<PathBuf>,
+}
+
+impl ProjectCheckpoint {
+    /// Unsaved changes: the edits up to the cursor or the lock differ from the last save.
+    pub fn is_dirty(&self) -> bool {
+        self.project.edits[..self.cursor] != self.saved || self.project.lock != self.saved_lock
+    }
+}
+
 impl ProjectSession {
+    pub fn checkpoint(&self) -> ProjectCheckpoint {
+        ProjectCheckpoint {
+            project: self.project.clone(),
+            cursor: self.cursor,
+            saved: self.saved.clone(),
+            saved_lock: self.saved_lock,
+            path: self.path.clone(),
+        }
+    }
+
+    pub fn from_checkpoint(value: ProjectCheckpoint) -> Result<Self, ProjectError> {
+        value.project.validate()?;
+        if value.cursor > value.project.edits.len() {
+            return Err("Recovery cursor exceeds the complete edit history.".into());
+        }
+        for edit in &value.saved {
+            edit.validate()?;
+            if edit
+                .asset_id()
+                .is_some_and(|id| !value.project.assets.contains_key(id))
+            {
+                return Err("Saved backing asset is missing from recovery.".into());
+            }
+        }
+        let asset_info = value.project.view().assets;
+        Ok(Self {
+            project: value.project,
+            cursor: value.cursor,
+            saved: value.saved,
+            saved_lock: value.saved_lock,
+            asset_info,
+            path: value.path,
+        })
+    }
+
+    pub fn saved_checkpoint(&self) -> Result<ProjectCheckpoint, ProjectError> {
+        let mut project = self.project.clone();
+        project.edits = self.saved.clone();
+        project.lock = self.saved_lock;
+        project.assets.retain(|id, _| {
+            project
+                .baseline_edits
+                .iter()
+                .chain(&self.saved)
+                .any(|edit| edit.asset_id() == Some(id.as_str()))
+        });
+        project.validate()?;
+        Ok(ProjectCheckpoint {
+            project,
+            cursor: self.saved.len(),
+            saved: self.saved.clone(),
+            saved_lock: self.saved_lock,
+            path: self.path.clone(),
+        })
+    }
+
     pub fn new(project: Project, path: Option<PathBuf>) -> Result<Self, ProjectError> {
         project.validate()?;
         let asset_info = project.view().assets;
         Ok(Self {
             cursor: project.edits.len(),
             saved: project.edits.clone(),
+            saved_lock: project.lock,
             asset_info,
             project,
             path,
@@ -200,12 +450,15 @@ impl ProjectSession {
             schema_version: self.project.schema_version,
             engine_version: self.project.engine_version.clone(),
             base: self.project.base.clone(),
+            baseline_edits: self.project.baseline_edits.clone(),
             edits: self.project.edits.clone(),
             assets: self.asset_info.clone(),
+            lock: self.project.lock,
+            partial_capo: self.project.partial_capo,
         };
         project.edits.truncate(self.cursor);
         ProjectSnapshot {
-            dirty: project.edits != self.saved,
+            dirty: project.edits != self.saved || self.project.lock != self.saved_lock,
             project,
             can_undo: self.cursor > 0,
             can_redo: self.cursor < self.project.edits.len(),
@@ -247,6 +500,8 @@ impl ProjectSession {
             self.asset_info.entry(id.clone()).or_insert(info);
             self.project.assets.entry(id).or_insert(asset);
         }
+        // A mixer edit on a finalized document clears the redo stack like any edit. List positions are
+        // persisted identity (added tracks are keyed by the edit's position), so they must never shift.
         self.project.edits.truncate(self.cursor);
         self.project.edits.push(command);
         self.cursor += 1;
@@ -269,7 +524,42 @@ impl ProjectSession {
         Ok(self.snapshot())
     }
 
+    pub fn lock(&self) -> Option<DocumentLock> {
+        self.project.lock
+    }
+
+    /// Sets or clears the lock. It is not an edit: it has no undo step. Returns whether it changed.
+    pub fn set_lock(&mut self, lock: Option<DocumentLock>) -> bool {
+        let changed = self.project.lock != lock;
+        self.project.lock = lock;
+        changed
+    }
+
+    /// Records that the file's capo over some strings applies to this project. It is not an edit and not a change to save,
+    /// and it never goes back: a project must not change meaning between saves. It is refused once there is any history
+    /// (edits, a redo tail, baseline edits or a saved edit list) or for a score that is not read from a file, because the
+    /// project could then replay differently from how it was saved. Returns whether it changed.
+    pub fn mark_partial_capo(&mut self) -> Result<bool, ProjectError> {
+        if self.project.partial_capo {
+            return Ok(false);
+        }
+        if !matches!(self.project.base, BaseDocument::File { .. })
+            || self.cursor != 0
+            || !self.project.edits.is_empty()
+            || !self.project.baseline_edits.is_empty()
+            || !self.saved.is_empty()
+        {
+            return Err(
+                "Partial capo can be recorded only before a score read from a file has any edits."
+                    .into(),
+            );
+        }
+        self.project.partial_capo = true;
+        Ok(true)
+    }
+
     pub fn mark_saved(&mut self, path: PathBuf) {
+        self.saved_lock = self.project.lock;
         self.saved = self.project.edits[..self.cursor].to_vec();
         self.path = Some(path);
     }
@@ -281,8 +571,10 @@ impl ProjectSession {
             .assets
             .iter()
             .filter(|(id, _)| {
-                edits
+                self.project
+                    .baseline_edits
                     .iter()
+                    .chain(&edits)
                     .any(|edit| edit.asset_id() == Some(id.as_str()))
             })
             .map(|(id, asset)| (id.clone(), asset.clone()))
@@ -292,8 +584,11 @@ impl ProjectSession {
             schema_version: self.project.schema_version,
             engine_version: self.project.engine_version.clone(),
             base: self.project.base.clone(),
+            baseline_edits: self.project.baseline_edits.clone(),
             edits,
             assets,
+            lock: self.project.lock,
+            partial_capo: self.project.partial_capo,
         }
     }
 
@@ -305,8 +600,45 @@ impl ProjectSession {
             .bytes()
     }
 
+    pub(crate) fn capture_asset(&self, id: &str) -> Result<StoredAsset, ProjectError> {
+        self.project
+            .assets
+            .get(id)
+            .cloned()
+            .ok_or_else(|| "Backing asset is missing from this project.".into())
+    }
+
+    pub(crate) fn current_backing_asset(&self) -> Option<Option<&str>> {
+        for command in self
+            .project
+            .baseline_edits
+            .iter()
+            .chain(&self.project.edits[..self.cursor])
+            .rev()
+        {
+            if let EditCommand::SetBacking { backing } = command {
+                return Some(backing.as_ref().map(|value| value.asset_id.as_str()));
+            }
+        }
+        None
+    }
+
+    pub fn fork_project(&self) -> Result<Project, ProjectError> {
+        let mut project = self.stored_project();
+        project.baseline_edits.append(&mut project.edits);
+        project.lock = None;
+        Ok(project)
+    }
+
     pub fn path(&self) -> Option<&Path> {
         self.path.as_deref()
+    }
+
+    pub(crate) fn imported_digest(&self) -> Option<&str> {
+        match &self.project.base {
+            BaseDocument::File { sha256, .. } => Some(sha256),
+            _ => None,
+        }
     }
 }
 
@@ -357,6 +689,19 @@ impl CandidateStore {
         };
         self.documents.insert(token, (project, path));
         Ok(candidate)
+    }
+    pub fn take_document(
+        &mut self,
+        token: &str,
+    ) -> Result<(Project, Option<PathBuf>), ProjectError> {
+        let (project, _) = self
+            .documents
+            .get(token)
+            .ok_or("Document candidate has expired.")?;
+        project.validate()?;
+        self.documents
+            .remove(token)
+            .ok_or_else(|| "Document candidate has expired.".into())
     }
     pub fn commit_document(
         &mut self,

@@ -1,0 +1,321 @@
+@import '../ui/ui.css';
+
+/* The Sound view. Every selector starts with .sound-view so it outranks the shell's own button, input and select rules. */
+.sound-view { display:flex; flex-direction:column; min-height:0; min-width:0; container-type:inline-size; background:var(--tp-base); color:var(--tp-text); font:400 13px/1.35 var(--tp-font-ui); }
+.sound-view :is(button,select,input,[role=slider],[role=tab],[role=switch]):focus-visible { outline:2px solid var(--tp-edit); outline-offset:2px; }
+.sound-view h2,.sound-view h3 { text-transform:none; letter-spacing:0; margin:0; color:var(--tp-text); }
+.sound-view ::selection { color:var(--tp-on-ink); background:var(--tp-on); }
+
+/* Shared form pieces */
+.sound-view .rig-field { display:flex; flex-direction:column; gap:2px; min-width:0; }
+.sound-view .rig-field-name { font-size:11px; line-height:14px; color:var(--tp-muted); }
+.sound-view .rig-button { min-height:28px; padding:3px 10px; border:1px solid var(--tp-line-strong); border-radius:var(--tp-radius-s); background:var(--tp-raised); color:var(--tp-text); font:500 12px/18px var(--tp-font-ui); white-space:nowrap; }
+.sound-view .rig-button:hover:enabled:not([aria-disabled=true]) { border-color:var(--tp-text); background:var(--tp-raised); }
+.sound-view .rig-button[data-primary] { border-color:var(--tp-on); background:var(--tp-on); color:var(--tp-on-ink); font-weight:600; }
+.sound-view .rig-button[aria-pressed=true] { border-color:var(--tp-text); }
+.sound-view :is(.rig-button,.rig-select,.rig-text,.rig-hear,.rig-link,.rig-row-main):is(:disabled,[aria-disabled=true],.is-disabled) { opacity:.45; border-style:solid; cursor:default; }
+.sound-view :is(.rig-select,.rig-text,.rig-search) { min-height:28px; padding:3px 8px; border:1px solid var(--tp-line-strong); border-radius:var(--tp-radius-s); background:var(--tp-input); color:var(--tp-text); font:400 12px/18px var(--tp-font-ui); max-width:100%; }
+.sound-view .rig-select { padding-right:4px; }
+.sound-view .rig-note { margin:0; font-size:11px; line-height:1.4; color:var(--tp-muted); }
+.sound-view .rig-slot:empty { display:none; }
+.sound-view .rig-switch { display:inline-flex; align-items:center; gap:8px; min-height:28px; padding:3px 10px 3px 8px; border:1px solid var(--tp-line-strong); border-radius:var(--tp-radius-s); background:var(--tp-raised); color:var(--tp-text); font:500 12px/18px var(--tp-font-ui); }
+.sound-view .rig-switch:hover:enabled:not([aria-disabled=true]) { border-color:var(--tp-text); background:var(--tp-raised); }
+.sound-view .rig-switch:is(:disabled,[aria-disabled=true],.is-disabled) { opacity:.45; cursor:default; }
+.sound-view .rig-switch-lamp { width:10px; height:10px; border-radius:50%; background:var(--tp-line-subtle); box-shadow:inset 0 0 0 1px var(--tp-line-strong); }
+.sound-view .rig-switch[aria-checked=true] .rig-switch-lamp { background:var(--tp-on); box-shadow:0 0 0 3px color-mix(in srgb,var(--tp-on) 22%,transparent); }
+.sound-view .rig-switch-text { font-family:var(--tp-font-mono); font-size:11px; min-width:4.6em; text-align:left; }
+
+/* Head */
+.sound-view .rig-head { display:flex; flex-wrap:wrap; align-items:flex-end; gap:6px 12px; padding:8px 12px; border-bottom:1px solid var(--tp-line-subtle); background:var(--tp-panel); }
+.sound-view .rig-head-gap { flex:1; }
+.sound-view .rig-lock { display:inline-flex; align-items:center; gap:6px; min-height:28px; color:var(--tp-text); font:500 12px/18px var(--tp-font-ui); white-space:nowrap; }
+.sound-view .rig-lock input { margin:0; }
+.sound-view .rig-lock:has(input[aria-disabled=true]) { opacity:.45; }
+.sound-view .rig-browser-toggle { display:none; }
+@container (max-width:1099px) { .sound-view .rig-browser-toggle { display:inline-block; } }
+
+/* Signal chain */
+.sound-view .rig-chain { --icon-h:46px; display:flex; align-items:flex-start; gap:6px; padding:8px 12px 6px; background:var(--tp-base); border-bottom:1px solid var(--tp-line-subtle); overflow-x:auto; scrollbar-width:thin; scrollbar-color:var(--tp-line-strong) transparent; }
+.sound-view .rig-chain-end { flex:none; margin-top:18px; font:500 10px/12px var(--tp-font-mono); letter-spacing:.06em; text-transform:uppercase; color:var(--tp-muted); }
+.sound-view .rig-chain-track { position:relative; display:flex; flex:1; gap:2px; min-width:max-content; }
+.sound-view .rig-chain-then { align-self:center; margin:0 4px; font:500 10px/12px var(--tp-font-mono); letter-spacing:.06em; text-transform:uppercase; color:var(--tp-muted); white-space:nowrap; z-index:1; background:var(--tp-base); padding:0 2px; }
+.sound-view .rig-chain-item { position:relative; flex:1 1 0; min-width:44px; max-width:76px; }
+.sound-view .rig-chain-item[data-dragging] { z-index:3; opacity:.9; }
+.sound-view .rig-chain-item[data-drop] { box-shadow:-2px 0 0 var(--tp-edit); }
+.sound-view .rig-chain-tab { position:relative; display:flex; flex-direction:column; align-items:center; gap:1px; width:100%; min-height:0; padding:2px 0 3px; border:1px solid transparent; border-radius:var(--tp-radius-s); background:transparent; color:var(--tp-muted); cursor:pointer; touch-action:none; }
+.sound-view .rig-chain-tab:hover:enabled { background:var(--tp-panel); border-color:transparent; }
+.sound-view .rig-chain-name { font:600 9.5px/12px var(--tp-font-ui); letter-spacing:.03em; text-transform:uppercase; white-space:nowrap; }
+.sound-view .rig-name-full { display:none; }
+@container (min-width:1180px) { .sound-view .rig-name-full { display:inline; } .sound-view .rig-name-short { display:none; } .sound-view .rig-chain { --icon-h:66px; } .sound-view .rig-chain-end { margin-top:30px; } }
+
+/* Body */
+.sound-view .rig-body { position:relative; display:flex; flex:1; min-height:0; }
+.sound-view .rig-main { display:flex; flex-direction:column; flex:1; min-width:0; min-height:0; padding:10px 16px 6px; gap:8px; }
+
+/* Sound browser */
+.sound-view .rig-browser { display:none; flex-direction:column; width:272px; flex:none; min-height:0; border-right:1px solid var(--tp-line-subtle); background:var(--tp-panel); }
+@container (min-width:1100px) { .sound-view .rig-browser { display:flex; } }
+.sound-view[data-browser-open] .rig-browser { display:flex; position:absolute; z-index:6; top:0; bottom:0; left:0; width:min(320px,86%); box-shadow:8px 0 24px rgb(0 0 0 / .5); }
+@container (min-width:1100px) { .sound-view[data-browser-open] .rig-browser { position:static; width:272px; box-shadow:none; } }
+.sound-view .rig-browser-head { display:flex; flex-direction:column; gap:6px; padding:8px; }
+.sound-view .rig-browser-head .tp-segmented { align-self:flex-start; }
+.sound-view .rig-browser-list { flex:1; min-height:0; overflow-y:auto; padding:0 8px 8px; scrollbar-width:thin; scrollbar-color:var(--tp-line-strong) transparent; }
+.sound-view .rig-browser-group h3 { position:sticky; top:0; z-index:1; padding:6px 4px 3px; background:var(--tp-panel); font:600 11px/14px var(--tp-font-ui); letter-spacing:.06em; text-transform:uppercase; color:var(--tp-muted); }
+.sound-view .rig-browser-group ul { list-style:none; margin:0; padding:0; }
+.sound-view .rig-row { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:4px; border-radius:var(--tp-radius-s); }
+.sound-view .rig-row[data-previewing] { background:var(--tp-raised); box-shadow:inset 2px 0 0 var(--tp-on); }
+.sound-view .rig-row-main { display:flex; flex-direction:column; align-items:flex-start; min-width:0; min-height:36px; padding:3px 6px; border:1px solid transparent; border-radius:var(--tp-radius-s); background:transparent; color:var(--tp-text); text-align:left; }
+.sound-view .rig-row-main:hover:enabled:not([aria-disabled=true]) { background:var(--tp-raised); border-color:transparent; }
+.sound-view .rig-row-name { font:500 13px/18px var(--tp-font-ui); max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.sound-view .rig-row-note { font:400 11px/14px var(--tp-font-ui); color:var(--tp-muted); max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.sound-view .rig-hear { min-height:24px; padding:1px 8px; border:1px solid var(--tp-line-strong); border-radius:var(--tp-radius-s); background:transparent; color:var(--tp-text); font:500 11px/16px var(--tp-font-ui); }
+.sound-view .rig-hear:hover:enabled:not([aria-disabled=true]) { background:var(--tp-raised); border-color:var(--tp-text); color:var(--tp-text); }
+.sound-view .rig-hear[aria-pressed=true] { background:var(--tp-on); border-color:var(--tp-on); color:var(--tp-on-ink); }
+.sound-view .rig-hear[aria-pressed=true]:hover:enabled { background:color-mix(in srgb,var(--tp-on) 85%,white); border-color:var(--tp-on); color:var(--tp-on-ink); }
+.sound-view .rig-row-actions { grid-column:1/-1; display:flex; gap:12px; padding:0 6px 4px; }
+.sound-view .rig-link { min-height:22px; padding:0; border:0; background:none; color:var(--tp-muted); font:500 11px/16px var(--tp-font-ui); text-decoration:underline; text-underline-offset:2px; }
+.sound-view .rig-link:hover:enabled:not([aria-disabled=true]) { color:var(--tp-text); background:none; border-color:transparent; }
+.sound-view .rig-browser-save { display:flex; flex-direction:column; gap:6px; padding:8px; border-top:1px solid var(--tp-line-subtle); }
+.sound-view .rig-browser-save-row { display:flex; gap:6px; align-items:center; }
+.sound-view .rig-browser-save-row .rig-text { flex:1; min-width:0; }
+
+/* Stage */
+.sound-view .rig-stage { display:flex; flex-direction:column; flex:1; min-height:0; gap:8px; }
+.sound-view .rig-stage-head { display:flex; flex-wrap:wrap; align-items:center; gap:6px 10px; }
+.sound-view .rig-stage-head h2 { font:600 15px/22px var(--tp-font-ui); }
+.sound-view .rig-stage-place { font:400 11px/16px var(--tp-font-mono); color:var(--tp-muted); }
+.sound-view .rig-stage-actions { display:flex; flex-wrap:wrap; align-items:center; gap:6px; margin-left:auto; }
+.sound-view :is(.rig-amp-stage,.rig-cab-stage,.rig-pedal-stage,.rig-geq-stage) { display:flex; flex:1; min-height:0; min-width:0; gap:12px; }
+.sound-view .rig-art-slot { flex:1 1 0; min-height:0; min-width:0; container-type:size; display:grid; place-items:center; }
+.sound-view :is(.rig-pedal-stage,.rig-cab-stage) { justify-content:center; }
+
+/* Amp */
+
+/* Pedal */
+
+/* Cabinet and microphone */
+.sound-view .rig-cab { position:relative; width:min(100cqw,100cqh,520px); aspect-ratio:1; }
+.sound-view .rig-cab[data-off] .rig-cab-art { filter:saturate(.5) brightness(.8); }
+.sound-view .rig-cab-art { position:absolute; inset:0; width:100%; height:100%; }
+.sound-view .rig-cab .rig-spots { position:absolute; inset:0; display:block; padding:0; border:0; background:none; }
+.sound-view .rig-cab .rig-spots .tp-seg-option { position:absolute; transform:translate(-50%,-50%); display:flex; flex-direction:column; align-items:center; gap:2px; min-height:0; min-width:44px; padding:2px; border:0; background:transparent; color:var(--tp-text); }
+.sound-view .rig-cab .rig-spots .tp-seg-option:hover:not(:disabled) { background:transparent; }
+.sound-view .rig-spot-dot { width:16px; height:16px; border-radius:50%; border:2px solid var(--tp-text); background:rgb(0 0 0 / .45); box-sizing:border-box; }
+.sound-view .rig-spot-name { padding:0 4px; border-radius:3px; background:rgb(10 9 8 / .72); font:500 11px/16px var(--tp-font-ui); }
+.sound-view .rig-spots .tp-seg-option[aria-checked=true] .rig-spot-dot { background:var(--tp-on); border-color:var(--tp-on); box-shadow:0 0 0 4px color-mix(in srgb,var(--tp-on) 30%,transparent); }
+.sound-view .rig-spots .tp-seg-option[aria-checked=true] .rig-spot-name { color:var(--tp-on); font-weight:600; }
+.sound-view .rig-spots .tp-seg-option:focus-visible .rig-spot-dot { outline:2px solid var(--tp-edit); outline-offset:2px; }
+.sound-view .rig-spots .tp-seg-option:focus-visible { outline:none; }
+
+/* Graphic EQ */
+.sound-view .rig-geq-stage { align-items:stretch; }
+.sound-view .rig-geq { display:flex; flex:1; min-width:0; min-height:0; justify-content:space-between; gap:4px; padding:8px 12px; border:1px solid var(--tp-line-subtle); border-radius:var(--tp-radius-m); background:var(--tp-panel); }
+.sound-view .rig-geq-side { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px; flex:none; width:130px; }
+
+/* Foot: status and preview */
+.sound-view .rig-messages { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:6px 12px; min-height:36px; padding:4px 12px; border-top:1px solid var(--tp-line-subtle); background:var(--tp-panel); }
+.sound-view .rig-status { margin:0; flex:1 1 200px; min-width:0; height:18px; font-size:12px; line-height:18px; color:var(--tp-muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+/* Always laid out at one height and width; hidden and inert while no preview runs, so starting one moves nothing. */
+.sound-view .rig-preview { display:flex; flex-wrap:nowrap; align-items:center; gap:6px 8px; height:28px; flex:none; }
+.sound-view .rig-preview-name { display:inline-block; width:22ch; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.sound-view .rig-preview-name { font:500 12px/18px var(--tp-font-ui); color:var(--tp-on); }
+.sound-view .rig-alert { margin:0; padding:6px 12px; border-top:1px solid var(--tp-error); background:color-mix(in srgb,var(--tp-error) 12%,var(--tp-base)); color:var(--tp-error); font-size:12px; line-height:1.35; overflow-wrap:anywhere; }
+
+/* A window as small as 960 by 600: the pedal's controls sit beneath it rather than beside it, and spacing tightens. */
+@container (max-width:1099px) {
+  .sound-view .rig-main { padding:8px 12px 4px; }
+  .sound-view :is(.rig-pedal-stage,.rig-cab-stage) { gap:8px; }
+  .sound-view .rig-pedal-side:empty { display:none; }
+.sound-view :is(.rig-pedal-stage,.rig-cab-stage) { justify-content:center; }
+}
+@media (max-height:700px) {
+  .sound-view .rig-head { padding:4px 12px; gap:4px 10px; }
+  .sound-view .rig-chain { padding:4px 12px 2px; }
+  .sound-view .rig-main { gap:4px; }
+  .sound-view .rig-messages { min-height:30px; padding:2px 12px; }
+}
+
+.sound-view .rig-inline .rig-field-name { white-space:nowrap; }
+.sound-view .rig-inline { display:flex; flex-direction:row; align-items:center; gap:6px; margin-left:auto; }
+@container (max-width:1099px) {
+  .sound-view .rig-chain { --icon-h:46px; }
+  .sound-view .rig-head .tp-segmented .tp-seg-option { padding:2px 7px; }
+  .sound-view .rig-head .rig-select { max-width:130px; }
+}
+
+/* v2: material and faces */
+.sound-view .rig-main { background:radial-gradient(ellipse 80% 70% at 50% 62%, #3b2a1b 0%, #231a12 45%, #14110d 100%); }
+.sound-view .rig-chain { background:linear-gradient(#17130f,#100e0b); }
+.sound-view .rig-chain-end { margin-top:calc(var(--icon-h) * .4); }
+.sound-view .rig-chain-track { padding-top:2px; }
+.sound-view .rig-face { display:block; height:var(--icon-h); width:calc(var(--icon-h) * .8333); filter:drop-shadow(0 2px 2px rgb(0 0 0 / .6)); }
+.sound-view .rig-face[data-on=false] .rig-face-body { filter:brightness(.55) saturate(.78); }
+.sound-view .rig-face-name { font:700 5.4px var(--tp-font-ui); letter-spacing:.12em; fill:var(--tp-text); }
+.sound-view .rig-chain-wire { position:absolute; left:0; right:0; top:calc(3px + var(--icon-h) * .42); height:3px; border-radius:2px; background:#2e2822; box-shadow:0 1px 0 rgb(0 0 0 / .6); }
+/* The cable carries the signal from In to Out: bright where it passes through a pedal that is on, faint through one that is bypassed. */
+.sound-view .rig-chain-item::before,.sound-view .rig-chain-item::after { content:''; position:absolute; top:calc(3px + var(--icon-h) * .42); height:3px; width:calc(50% + 1px); background:var(--tp-on); opacity:.3; border-radius:2px; }
+.sound-view .rig-chain-item::before { left:-1px; } .sound-view .rig-chain-item::after { right:-1px; }
+.sound-view .rig-chain-item[data-on=true]::before,.sound-view .rig-chain-item[data-on=true]::after { opacity:1; box-shadow:0 0 6px color-mix(in srgb,var(--tp-on) 70%,transparent); }
+.sound-view .rig-chain-tab { z-index:1; }
+.sound-view .rig-chain-item[data-selected] .rig-chain-tab { border-color:var(--tp-on); background:rgb(184 228 95 / .07); box-shadow:0 0 0 1px var(--tp-on), 0 0 12px rgb(184 228 95 / .25); }
+.sound-view .rig-chain-item[data-on=true] .rig-chain-tab { color:var(--tp-text); }
+.sound-view .rig-chain-item[data-drop] { box-shadow:-2px 0 0 var(--tp-on); }
+.sound-view .rig-chain-switch { position:absolute; left:50%; top:calc(3px + var(--icon-h) * .72); width:calc(var(--icon-h) * .24); height:calc(var(--icon-h) * .22); transform:translateX(-50%); border-radius:50%; cursor:pointer; z-index:2; }
+.sound-view .rig-chain-name { position:relative; z-index:1; }
+
+/* Amp */
+.sound-view .rig-amp-stage { flex-direction:column; }
+.sound-view .rig-amp-stage>.rig-field { align-self:center; }
+.sound-view .rig-amp { position:relative; width:min(100cqw,calc(100cqh * 2),1000px); aspect-ratio:640 / 320; container-type:inline-size; }
+.sound-view .rig-amp-art { position:absolute; inset:0; width:100%; height:100%; overflow:visible; }
+.sound-view .rig-amp[data-on=false] .rig-amp-body { filter:brightness(.7) saturate(.6); }
+.sound-view .rig-amp-model { font:700 15px var(--tp-font-ui); letter-spacing:.28em; }
+.sound-view .rig-amp-knobs { position:absolute; left:5%; right:5%; top:61.5%; bottom:8%; display:grid; grid-template-columns:repeat(6,1fr); align-items:start; justify-items:center; --knob-size:clamp(26px,7.8cqw,76px); }
+.sound-view .rig-amp .tp-knob { filter:none; }
+.sound-view .rig-amp .tp-knob-label { font-size:clamp(8px,1.7cqw,12px); font-weight:700; }
+.sound-view .rig-amp .tp-knob-readout { font-size:clamp(8px,1.7cqw,12px); line-height:1.3; min-height:0; }
+
+/* Pedal: a large version of the chain's face, with the real knobs laid over it */
+.sound-view .rig-pedal { position:relative; width:min(100cqw,calc(100cqh * .8333),430px); aspect-ratio:100 / 120; container-type:inline-size; }
+.sound-view .rig-pedal .rig-face { position:absolute; inset:0; width:100%; height:100%; filter:drop-shadow(0 8px 10px rgb(0 0 0 / .65)); }
+.sound-view .rig-pedal-knobs { position:absolute; inset:0; /* the second bound keeps a knob, its label and its readout inside the row spacing, which is a fixed share of the pedal's width */ --knob-size:clamp(22px,min(19cqw,calc(28cqw - 38px)),76px); }
+.sound-view .rig-spot-knob { position:absolute; transform:translate(-50%,-50%); display:block; }
+.sound-view .rig-pedal[data-on=false] .tp-knob { --knob-arc:var(--tp-muted); }
+.sound-view .rig-pedal .tp-knob-label,.sound-view .rig-pedal .tp-knob-readout { font-size:clamp(8px,3.4cqw,12px); line-height:1.25; min-height:0; color:var(--tp-text); text-shadow:0 1px 1px rgb(0 0 0 / .7); }
+.sound-view .rig-footswitch { position:absolute; left:50%; top:86.7%; width:22%; aspect-ratio:1; min-height:0; padding:0; transform:translate(-50%,-50%); border:0; border-radius:50%; background:transparent; cursor:pointer; }
+.sound-view .rig-footswitch[data-wah] { top:88%; width:54%; height:16%; aspect-ratio:auto; border-radius:6px; }
+.sound-view .rig-footswitch:hover:enabled:not([aria-disabled=true]) { background:rgb(255 255 255 / .07); border:0; }
+.sound-view .rig-footswitch:is(:disabled,[aria-disabled=true],.is-disabled) { cursor:default; }
+
+/* Cabinet and microphone */
+.sound-view :is(.rig-cab-stage) { align-items:flex-start; }
+.sound-view .rig-cab-stage>.rig-art-slot { align-self:stretch; }
+.sound-view :is(.rig-pedal-side,.rig-cab-side) { display:flex; flex-direction:column; gap:10px; flex:0 1 250px; min-width:170px; align-self:center; }
+.sound-view .rig-cab-side { align-self:flex-start; padding-top:2px; }
+.sound-view .rig-cab { position:relative; width:min(100cqw,100cqh,540px); aspect-ratio:1; }
+.sound-view .rig-mic { position:absolute; width:24%; aspect-ratio:96 / 118; transform:translate(calc(-20.8% + 14px),calc(-11.9% + 14px)); pointer-events:none; z-index:1; }
+.sound-view .rig-mic-art { display:block; width:100%; height:100%; overflow:visible; }
+.sound-view .rig-cab .rig-spots { z-index:2; }
+
+/* Graphic EQ: the same enamel as its face */
+.sound-view .rig-geq { background:linear-gradient(color-mix(in srgb,#4F6667 80%,white),#4F6667 40%,color-mix(in srgb,#4F6667 70%,black)); border-color:rgb(0 0 0 / .6); box-shadow:inset 0 0 0 1px rgb(255 255 255 / .14), 0 8px 16px rgb(0 0 0 / .5); }
+.sound-view .rig-geq .tp-fader-label,.sound-view .rig-geq .tp-fader-readout { color:var(--tp-text); }
+.sound-view .rig-geq .tp-fader-rail { background:#0c0f10; }
+.sound-view .rig-geq .tp-fader-thumb { background:linear-gradient(#f4f0e6,#a8a399); box-shadow:inset 0 0 0 1px rgb(0 0 0 / .6), 0 2px 3px rgb(0 0 0 / .5); }
+.sound-view .rig-pedal .tp-knob-label { white-space:nowrap; max-width:none; }
+.sound-view :is(.rig-pedal-stage,.rig-cab-stage)>.rig-art-slot { flex:0 1 540px; }
+.sound-view .rig-stage-head h2 { text-shadow:0 1px 2px rgb(0 0 0 / .6); }
+
+.sound-view .rig-stage-head .rig-field-name { display:none; }
+.sound-view .rig-stage-head>.rig-field { margin-left:8px; }
+.sound-view .rig-short { display:none; }
+@container (max-width:1099px) {
+  .sound-view .rig-long { display:none; } .sound-view .rig-short { display:inline; }
+  .sound-view .rig-stage-actions .rig-button { padding:3px 8px; }
+  .sound-view .rig-stage-head h2 { font-size:14px; }
+}
+
+/* Instrument picker: the sources and the tracks, drawn */
+.sound-view .rig-head { flex-wrap:wrap; align-items:center; gap:6px 10px; padding:5px 12px; background:linear-gradient(#1d1a16,#17140f); }
+.sound-view .rig-head>* { min-width:0; }
+/* The radios and their Hear buttons share one grid (radio i in column 2i+1, its button in 2i+2): the group is as wide as both together, and
+ * if the row cannot hold it beside the presets the presets wrap below. Nothing is positioned out of flow. */
+.sound-view .rig-source-picker { display:grid; grid-template-columns:repeat(6,auto auto); align-items:center; max-width:100%; }
+.sound-view .rig-source-picker>* { grid-row:1; grid-column:1/-1; display:grid; grid-template-columns:subgrid; }
+/* The drum kit sits in the head as its own item beside the source picker, never inside it (the picker puts every child in its row 1).
+ * It is one compact row: the select and a small summary link. Its note is the select's title (and stays for screen readers, clipped), and the
+ * table opens as a popover under the head, so the head keeps its height. */
+.sound-view .rig-drum-kit { position:relative; display:flex; flex-direction:row; flex-wrap:nowrap; align-items:center; gap:2px; font-size:11px; }
+.sound-view .rig-drum-kit label { display:flex; flex-direction:row; align-items:center; gap:6px; white-space:nowrap; }
+.sound-view .rig-drum-kit select { min-height:26px; padding:2px 0 2px 5px; font-size:11px; border:1px solid var(--tp-line-strong); border-radius:var(--tp-radius-s); background:var(--tp-input); color:inherit; font:inherit; }
+.sound-view .rig-drum-kit select[aria-disabled=true] { opacity:.45; }
+.sound-view .rig-drum-kit>p { position:absolute; width:1px; height:1px; margin:-1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; }
+.sound-view .rig-drum-kit .drum-kit-label { position:absolute; width:1px; height:1px; margin:-1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; }
+/* The head is tight: the label and the summary shrink to the select and a small ?; both keep their text for screen readers, and the select and summary carry titles. */
+.sound-view .rig-drum-kit details>summary { cursor:pointer; font-size:0; white-space:nowrap; display:inline-flex; align-items:center; justify-content:center; box-sizing:border-box; width:18px; height:18px; min-height:0; margin:0; padding:0; line-height:1; border:1px solid var(--tp-line-strong); border-radius:50%; list-style:none; }
+.sound-view .rig-drum-kit details>summary::-webkit-details-marker { display:none; }
+.sound-view .rig-drum-kit details>summary::before { content:"?"; font-size:12px; }
+.sound-view .rig-drum-kit .drum-kit-table { position:fixed; left:12px; z-index:20; box-sizing:border-box; width:min(440px,calc(100vw - 24px)); max-height:min(40vh,320px); overflow:auto; padding:6px 10px; border:1px solid var(--tp-line-strong); border-radius:var(--tp-radius-s); background:var(--tp-panel); box-shadow:0 6px 18px rgb(0 0 0 / .5); }
+.sound-view .rig-drum-kit .drum-kit-table :is(p,ul) { margin:2px 0 4px; }
+.sound-view .rig-drum-kit ul { padding-left:16px; }
+.sound-view .rig-hears { pointer-events:none; align-items:center; z-index:1; }
+.sound-view .rig-hears>button { pointer-events:auto; justify-self:start; margin-left:1px; }
+.sound-view .rig-sources,.sound-view .rig-tracks { flex-wrap:nowrap; gap:0; padding:2px; background:rgb(0 0 0 / .28); border-color:var(--tp-line-subtle); }
+.sound-view .rig-tracks { max-width:210px; overflow-x:auto; scrollbar-width:thin; scrollbar-color:var(--tp-line-strong) transparent; }
+.sound-view :is(.rig-sources,.rig-tracks) .tp-seg-option { min-height:0; padding:2px 3px 1px; border:1px solid transparent; border-radius:var(--tp-radius-s); background:transparent; flex:none; }
+.sound-view :is(.rig-sources,.rig-tracks) .tp-seg-option:hover:not(:disabled):not([aria-disabled=true]) { background:rgb(255 255 255 / .05); }
+.sound-view :is(.rig-sources,.rig-tracks) .tp-seg-option[aria-checked=true] { border-color:var(--tp-on); background:rgb(184 228 95 / .08); box-shadow:0 0 0 1px var(--tp-on), 0 0 10px rgb(184 228 95 / .2); color:var(--tp-text); }
+.sound-view .rig-source { display:flex; flex-direction:column; align-items:center; gap:0; }
+.sound-view .rig-source-art { display:block; width:58px; height:27px; }
+.sound-view .rig-source[data-auto] .rig-source-art { opacity:.72; }
+.sound-view .rig-source-name { font:600 9.5px/12px var(--tp-font-ui); letter-spacing:.03em; text-transform:uppercase; white-space:nowrap; color:var(--tp-muted); }
+.sound-view .rig-source-to { display:inline-flex; flex-direction:column; align-items:flex-start; color:var(--tp-text); }
+/* A slot as wide as the longest name, so Auto→GM and Auto→Darkblack are the same width and nothing beside them moves. */
+.sound-view .rig-source-to::after { content:'→Darkblack'; height:0; overflow:hidden; visibility:hidden; }
+.sound-view .tp-seg-option[aria-checked=true] .rig-source-name { color:var(--tp-text); }
+.sound-view .rig-track { display:flex; flex-direction:column; align-items:center; gap:0; }
+.sound-view .rig-track-glyph { display:block; width:36px; height:17px; }
+.sound-view .rig-track-name { max-width:64px; overflow:hidden; text-overflow:ellipsis; font:600 9.5px/12px var(--tp-font-ui); letter-spacing:.03em; white-space:nowrap; color:var(--tp-muted); }
+.sound-view .tp-seg-option[aria-checked=true] .rig-track-name { color:var(--tp-text); }
+.sound-view .rig-hear-source { min-height:20px; padding:1px 5px; border:1px solid var(--tp-line-strong); border-radius:var(--tp-radius-s); background:transparent; color:var(--tp-muted); font:500 10px/14px var(--tp-font-ui); white-space:nowrap; flex:none; align-self:center; }
+.sound-view .rig-presets { flex:0 1 auto; min-width:0; flex-wrap:wrap; }
+.sound-view .rig-presets .tp-seg-option { padding:2px 7px; }
+.sound-view .rig-sound-actions { display:flex; gap:6px; flex:none; }
+@container (min-width:1180px) {
+  .sound-view .rig-head { padding:8px 12px; gap:16px; }
+  .sound-view .rig-source-art { width:96px; height:45px; }
+  .sound-view .rig-track-glyph { width:52px; height:25px; }
+  .sound-view .rig-track-name { max-width:90px; font-size:10.5px; }
+  .sound-view .rig-source-name { font-size:10.5px; }
+  .sound-view .rig-tracks { max-width:320px; }
+}
+@container (max-width:1099px) {
+  .sound-view .rig-sound-actions .rig-button { padding:3px 8px; }
+  .sound-view .rig-head { gap:8px; padding:5px 8px; }
+  .sound-view .rig-source-art { width:46px; height:21px; }
+  .sound-view .rig-source-name { font-size:8.5px; letter-spacing:0; }
+  .sound-view :is(.rig-sources,.rig-tracks) .tp-seg-option { padding:2px 2px 1px; }
+  .sound-view .rig-tracks { max-width:130px; flex-shrink:0; }
+  .sound-view .rig-track-glyph { width:30px; height:14px; }
+  .sound-view .rig-track-name { max-width:44px; font-size:8.5px; letter-spacing:0; }
+  .sound-view .rig-presets .tp-seg-option { padding:2px 5px; font-size:11px; }
+  .sound-view .rig-hear-source { min-height:18px; padding:0 3px; font-size:9px; line-height:16px; }
+}
+
+/* A short window: the stage wins. The drawings give way to text with Hear beside it, the chain stays at its small size, the preview strip shares a line
+ * with the status, and the browser's controls take one row, so the amp and the sound list keep room. The workspace is the window less the title bar and
+ * transport, so 700px of window is about 570px of workspace. */
+@media (max-height:700px) {
+  .sound-view .rig-head { gap:4px 10px; padding:4px 12px; }
+  .sound-view :is(.rig-source-art,.rig-track-glyph) { display:none; }
+  .sound-view :is(.rig-sources,.rig-tracks) .tp-seg-option { padding:3px 6px; }
+  .sound-view :is(.rig-source-name,.rig-track-name) { font-size:11px; line-height:16px; letter-spacing:.02em; }
+  .sound-view .rig-track-name { max-width:56px; }
+  .sound-view .rig-tracks { max-width:none; }
+  .sound-view .rig-name-short { display:inline; } .sound-view .rig-name-full { display:none; }
+  .sound-view .rig-hear-source { min-height:20px; padding:0 5px; font-size:10px; line-height:16px; }
+  .sound-view .rig-presets .tp-seg-option { padding:3px 7px; }
+  .sound-view .rig-chain { --icon-h:46px; padding:4px 12px 2px; }
+  .sound-view .rig-chain-end { margin-top:calc(var(--icon-h) * .4); }
+  .sound-view .rig-main { padding-top:6px; gap:4px; }
+  .sound-view .rig-long { display:none; } .sound-view .rig-short { display:inline; }
+  .sound-view .rig-browser-head { flex-direction:row; flex-wrap:wrap; align-items:center; padding:6px 8px; gap:4px 6px; }
+  .sound-view .rig-browser-head .rig-search { flex:1 1 100px; min-width:0; }
+  .sound-view .rig-browser-save { padding:6px 8px; gap:4px; }
+  .sound-view .rig-messages { min-height:32px; padding:2px 12px; gap:4px 10px; }
+  .sound-view .rig-preview-name { width:16ch; }
+  .sound-view .rig-preview { gap:6px; }
+}
+/* With room across, the foot's controls stay on one line in a short window: the status gives way first. */
+@container (min-width:1100px) {
+  @media (max-height:700px) {
+    .sound-view .rig-messages { flex-wrap:nowrap; }
+    .sound-view .rig-status { flex:1 1 60px; }
+    .sound-view .rig-inline { margin-left:0; flex:none; }
+  }
+}
+
+/* The impulse response control, beside the cabinet. */
+.rig-cab-side .sound-cabinet-ir { display:flex; flex-wrap:wrap; gap:8px; }
+.rig-cab-side .sound-cabinet-ir > :not(button) { flex:1 0 100%; }
+.rig-cab-side .sound-cabinet-ir > button { flex:1 1 auto; }

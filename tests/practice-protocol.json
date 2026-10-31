@@ -1,0 +1,719 @@
+{
+  "valid": [
+    {
+      "name": "relative 0.1",
+      "hasBacking": false,
+      "settings": {
+        "tempo": {
+          "kind": "relative",
+          "ratio": 0.1
+        },
+        "metronome": {
+          "enabled": false,
+          "volume": 0.4,
+          "visual": false
+        },
+        "countIn": {
+          "bars": 0,
+          "betweenLoops": false
+        }
+      }
+    },
+    {
+      "name": "relative 1.23",
+      "hasBacking": false,
+      "settings": {
+        "tempo": {
+          "kind": "relative",
+          "ratio": 1.23
+        },
+        "metronome": {
+          "enabled": false,
+          "volume": 0.4,
+          "visual": false
+        },
+        "countIn": {
+          "bars": 0,
+          "betweenLoops": false
+        }
+      }
+    },
+    {
+      "name": "relative 3",
+      "hasBacking": false,
+      "settings": {
+        "tempo": {
+          "kind": "relative",
+          "ratio": 3
+        },
+        "metronome": {
+          "enabled": false,
+          "volume": 0.4,
+          "visual": false
+        },
+        "countIn": {
+          "bars": 0,
+          "betweenLoops": false
+        }
+      }
+    },
+    {
+      "name": "fixed 10",
+      "hasBacking": false,
+      "settings": {
+        "tempo": {
+          "kind": "fixed",
+          "bpm": 10
+        },
+        "metronome": {
+          "enabled": false,
+          "volume": 0.4,
+          "visual": false
+        },
+        "countIn": {
+          "bars": 0,
+          "betweenLoops": false
+        }
+      }
+    },
+    {
+      "name": "fixed 100.5",
+      "hasBacking": false,
+      "settings": {
+        "tempo": {
+          "kind": "fixed",
+          "bpm": 100.5
+        },
+        "metronome": {
+          "enabled": false,
+          "volume": 0.4,
+          "visual": false
+        },
+        "countIn": {
+          "bars": 0,
+          "betweenLoops": false
+        }
+      }
+    },
+    {
+      "name": "fixed 300",
+      "hasBacking": false,
+      "settings": {
+        "tempo": {
+          "kind": "fixed",
+          "bpm": 300
+        },
+        "metronome": {
+          "enabled": false,
+          "volume": 0.4,
+          "visual": false
+        },
+        "countIn": {
+          "bars": 0,
+          "betweenLoops": false
+        }
+      }
+    },
+    {
+      "name": "trainer repeats",
+      "hasBacking": false,
+      "settings": {
+        "tempo": {
+          "kind": "progressive",
+          "start": 0.5,
+          "end": 1,
+          "step": 0.2,
+          "repetitions": 2
+        },
+        "metronome": {
+          "enabled": false,
+          "volume": 0.4,
+          "visual": false
+        },
+        "countIn": {
+          "bars": 0,
+          "betweenLoops": false
+        }
+      }
+    },
+    {
+      "name": "trainer equal endpoints",
+      "hasBacking": false,
+      "settings": {
+        "tempo": {
+          "kind": "progressive",
+          "start": 1,
+          "end": 1,
+          "step": 2.9,
+          "repetitions": 100
+        },
+        "metronome": {
+          "enabled": false,
+          "volume": 0.4,
+          "visual": false
+        },
+        "countIn": {
+          "bars": 0,
+          "betweenLoops": false
+        }
+      }
+    },
+    {
+      "name": "visual silence and count sixteen",
+      "hasBacking": false,
+      "settings": {
+        "tempo": {
+          "kind": "relative",
+          "ratio": 1
+        },
+        "metronome": {
+          "enabled": true,
+          "volume": 0,
+          "visual": true
+        },
+        "countIn": {
+          "bars": 16,
+          "betweenLoops": true
+        }
+      }
+    },
+    {
+      "name": "relative backing",
+      "hasBacking": true,
+      "settings": {
+        "tempo": {
+          "kind": "relative",
+          "ratio": 1
+        },
+        "metronome": {
+          "enabled": false,
+          "volume": 0.4,
+          "visual": false
+        },
+        "countIn": {
+          "bars": 0,
+          "betweenLoops": false
+        }
+      }
+    }
+  ],
+  "invalid": [
+    {
+      "name": "bad relative 0.099",
+      "hasBacking": false,
+      "settings": {
+        "tempo": {
+          "kind": "relative",
+          "ratio": 0.099
+        },
+        "metronome": {
+          "enabled": false,
+          "volume": 0.4,
+          "visual": false
+        },
+        "countIn": {
+          "bars": 0,
+          "betweenLoops": false
+        }
+      }
+    },
+    {
+      "name": "bad relative 3.001",
+      "hasBacking": false,
+      "settings": {
+        "tempo": {
+          "kind": "relative",
+          "ratio": 3.001
+        },
+        "metronome": {
+          "enabled": false,
+          "volume": 0.4,
+          "visual": false
+        },
+        "countIn": {
+          "bars": 0,
+          "betweenLoops": false
+        }
+      }
+    },
+    {
+      "name": "bad fixed 9.9",
+      "hasBacking": false,
+      "settings": {
+        "tempo": {
+          "kind": "fixed",
+          "bpm": 9.9
+        },
+        "metronome": {
+          "enabled": false,
+          "volume": 0.4,
+          "visual": false
+        },
+        "countIn": {
+          "bars": 0,
+          "betweenLoops": false
+        }
+      }
+    },
+    {
+      "name": "bad fixed 300.1",
+      "hasBacking": false,
+      "settings": {
+        "tempo": {
+          "kind": "fixed",
+          "bpm": 300.1
+        },
+        "metronome": {
+          "enabled": false,
+          "volume": 0.4,
+          "visual": false
+        },
+        "countIn": {
+          "bars": 0,
+          "betweenLoops": false
+        }
+      }
+    },
+    {
+      "name": "bad trainer step 0",
+      "hasBacking": false,
+      "settings": {
+        "tempo": {
+          "kind": "progressive",
+          "start": 0.5,
+          "end": 1,
+          "step": 0,
+          "repetitions": 2
+        },
+        "metronome": {
+          "enabled": false,
+          "volume": 0.4,
+          "visual": false
+        },
+        "countIn": {
+          "bars": 0,
+          "betweenLoops": false
+        }
+      }
+    },
+    {
+      "name": "bad trainer step 2.901",
+      "hasBacking": false,
+      "settings": {
+        "tempo": {
+          "kind": "progressive",
+          "start": 0.5,
+          "end": 1,
+          "step": 2.901,
+          "repetitions": 2
+        },
+        "metronome": {
+          "enabled": false,
+          "volume": 0.4,
+          "visual": false
+        },
+        "countIn": {
+          "bars": 0,
+          "betweenLoops": false
+        }
+      }
+    },
+    {
+      "name": "bad trainer repetitions 0",
+      "hasBacking": false,
+      "settings": {
+        "tempo": {
+          "kind": "progressive",
+          "start": 0.5,
+          "end": 1,
+          "step": 0.2,
+          "repetitions": 0
+        },
+        "metronome": {
+          "enabled": false,
+          "volume": 0.4,
+          "visual": false
+        },
+        "countIn": {
+          "bars": 0,
+          "betweenLoops": false
+        }
+      }
+    },
+    {
+      "name": "bad trainer repetitions 101",
+      "hasBacking": false,
+      "settings": {
+        "tempo": {
+          "kind": "progressive",
+          "start": 0.5,
+          "end": 1,
+          "step": 0.2,
+          "repetitions": 101
+        },
+        "metronome": {
+          "enabled": false,
+          "volume": 0.4,
+          "visual": false
+        },
+        "countIn": {
+          "bars": 0,
+          "betweenLoops": false
+        }
+      }
+    },
+    {
+      "name": "bad trainer repetitions 1.5",
+      "hasBacking": false,
+      "settings": {
+        "tempo": {
+          "kind": "progressive",
+          "start": 0.5,
+          "end": 1,
+          "step": 0.2,
+          "repetitions": 1.5
+        },
+        "metronome": {
+          "enabled": false,
+          "volume": 0.4,
+          "visual": false
+        },
+        "countIn": {
+          "bars": 0,
+          "betweenLoops": false
+        }
+      }
+    },
+    {
+      "name": "bad trainer repetitions -1",
+      "hasBacking": false,
+      "settings": {
+        "tempo": {
+          "kind": "progressive",
+          "start": 0.5,
+          "end": 1,
+          "step": 0.2,
+          "repetitions": -1
+        },
+        "metronome": {
+          "enabled": false,
+          "volume": 0.4,
+          "visual": false
+        },
+        "countIn": {
+          "bars": 0,
+          "betweenLoops": false
+        }
+      }
+    },
+    {
+      "name": "bad trainer end 0.4",
+      "hasBacking": false,
+      "settings": {
+        "tempo": {
+          "kind": "progressive",
+          "start": 0.5,
+          "end": 0.4,
+          "step": 0.2,
+          "repetitions": 2
+        },
+        "metronome": {
+          "enabled": false,
+          "volume": 0.4,
+          "visual": false
+        },
+        "countIn": {
+          "bars": 0,
+          "betweenLoops": false
+        }
+      }
+    },
+    {
+      "name": "bad count -1",
+      "hasBacking": false,
+      "settings": {
+        "tempo": {
+          "kind": "relative",
+          "ratio": 1
+        },
+        "metronome": {
+          "enabled": false,
+          "volume": 0.4,
+          "visual": false
+        },
+        "countIn": {
+          "bars": -1,
+          "betweenLoops": false
+        }
+      }
+    },
+    {
+      "name": "bad count 0.5",
+      "hasBacking": false,
+      "settings": {
+        "tempo": {
+          "kind": "relative",
+          "ratio": 1
+        },
+        "metronome": {
+          "enabled": false,
+          "volume": 0.4,
+          "visual": false
+        },
+        "countIn": {
+          "bars": 0.5,
+          "betweenLoops": false
+        }
+      }
+    },
+    {
+      "name": "bad count 17",
+      "hasBacking": false,
+      "settings": {
+        "tempo": {
+          "kind": "relative",
+          "ratio": 1
+        },
+        "metronome": {
+          "enabled": false,
+          "volume": 0.4,
+          "visual": false
+        },
+        "countIn": {
+          "bars": 17,
+          "betweenLoops": false
+        }
+      }
+    },
+    {
+      "name": "bad volume -0.1",
+      "hasBacking": false,
+      "settings": {
+        "tempo": {
+          "kind": "relative",
+          "ratio": 1
+        },
+        "metronome": {
+          "enabled": false,
+          "volume": -0.1,
+          "visual": false
+        },
+        "countIn": {
+          "bars": 0,
+          "betweenLoops": false
+        }
+      }
+    },
+    {
+      "name": "bad volume 1.01",
+      "hasBacking": false,
+      "settings": {
+        "tempo": {
+          "kind": "relative",
+          "ratio": 1
+        },
+        "metronome": {
+          "enabled": false,
+          "volume": 1.01,
+          "visual": false
+        },
+        "countIn": {
+          "bars": 0,
+          "betweenLoops": false
+        }
+      }
+    },
+    {
+      "name": "fixed backing",
+      "hasBacking": true,
+      "settings": {
+        "tempo": {
+          "kind": "fixed",
+          "bpm": 120
+        },
+        "metronome": {
+          "enabled": false,
+          "volume": 0.4,
+          "visual": false
+        },
+        "countIn": {
+          "bars": 0,
+          "betweenLoops": false
+        }
+      }
+    },
+    {
+      "name": "unknown root",
+      "hasBacking": false,
+      "settings": {
+        "tempo": {
+          "kind": "relative",
+          "ratio": 1
+        },
+        "metronome": {
+          "enabled": false,
+          "volume": 0.4,
+          "visual": false
+        },
+        "countIn": {
+          "bars": 0,
+          "betweenLoops": false
+        },
+        "extra": true
+      }
+    },
+    {
+      "name": "unknown tempo",
+      "hasBacking": false,
+      "settings": {
+        "tempo": {
+          "kind": "relative",
+          "ratio": 1,
+          "extra": 0
+        },
+        "metronome": {
+          "enabled": false,
+          "volume": 0.4,
+          "visual": false
+        },
+        "countIn": {
+          "bars": 0,
+          "betweenLoops": false
+        }
+      }
+    },
+    {
+      "name": "unknown metronome",
+      "hasBacking": false,
+      "settings": {
+        "tempo": {
+          "kind": "relative",
+          "ratio": 1
+        },
+        "metronome": {
+          "enabled": false,
+          "volume": 0.4,
+          "visual": false,
+          "extra": 0
+        },
+        "countIn": {
+          "bars": 0,
+          "betweenLoops": false
+        }
+      }
+    },
+    {
+      "name": "unknown count",
+      "hasBacking": false,
+      "settings": {
+        "tempo": {
+          "kind": "relative",
+          "ratio": 1
+        },
+        "metronome": {
+          "enabled": false,
+          "volume": 0.4,
+          "visual": false
+        },
+        "countIn": {
+          "bars": 0,
+          "betweenLoops": false,
+          "extra": 0
+        }
+      }
+    },
+    {
+      "name": "missing volume",
+      "hasBacking": false,
+      "settings": {
+        "tempo": {
+          "kind": "relative",
+          "ratio": 1
+        },
+        "metronome": {
+          "enabled": false,
+          "visual": false
+        },
+        "countIn": {
+          "bars": 0,
+          "betweenLoops": false
+        }
+      }
+    },
+    {
+      "name": "missing ratio",
+      "hasBacking": false,
+      "settings": {
+        "tempo": {
+          "kind": "relative"
+        },
+        "metronome": {
+          "enabled": false,
+          "volume": 0.4,
+          "visual": false
+        },
+        "countIn": {
+          "bars": 0,
+          "betweenLoops": false
+        }
+      }
+    },
+    {
+      "name": "null enabled",
+      "hasBacking": false,
+      "settings": {
+        "tempo": {
+          "kind": "relative",
+          "ratio": 1
+        },
+        "metronome": {
+          "enabled": null,
+          "volume": 0.4,
+          "visual": false
+        },
+        "countIn": {
+          "bars": 0,
+          "betweenLoops": false
+        }
+      }
+    },
+    {
+      "name": "string visual",
+      "hasBacking": false,
+      "settings": {
+        "tempo": {
+          "kind": "relative",
+          "ratio": 1
+        },
+        "metronome": {
+          "enabled": false,
+          "volume": 0.4,
+          "visual": "true"
+        },
+        "countIn": {
+          "bars": 0,
+          "betweenLoops": false
+        }
+      }
+    },
+    {
+      "name": "null between loops",
+      "hasBacking": false,
+      "settings": {
+        "tempo": {
+          "kind": "relative",
+          "ratio": 1
+        },
+        "metronome": {
+          "enabled": false,
+          "volume": 0.4,
+          "visual": false
+        },
+        "countIn": {
+          "bars": 0,
+          "betweenLoops": null
+        }
+      }
+    }
+  ]
+}

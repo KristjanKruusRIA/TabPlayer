@@ -1057,6 +1057,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "fs2"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9564fc758e15025b46aa6643b1b77d047d1a56a1aea6e01002ac0c7026876213"
+dependencies = [
+ "libc",
+ "winapi",
+]
+
+[[package]]
 name = "futures-channel"
 version = "0.3.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3823,9 +3833,13 @@ dependencies = [
  "atomic-write-file",
  "base64 0.22.1",
  "cpal",
+ "fs2",
  "hound",
+ "libc",
  "midly",
  "pdf-writer",
+ "png 0.17.16",
+ "resvg",
  "ringbuf",
  "rustysynth",
  "serde",
@@ -4679,8 +4693,6 @@ dependencies = [
 [[package]]
 name = "usvg"
 version = "0.45.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "80be9b06fbae3b8b303400ab20778c80bbaf338f563afe567cf3c9eea17b47ef"
 dependencies = [
  "base64 0.22.1",
  "data-url",

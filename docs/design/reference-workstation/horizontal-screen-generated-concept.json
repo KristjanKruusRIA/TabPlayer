@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "kind": "generated-ui-design-reference",
+  "view": "Horizontal screen",
+  "scope": "Generated visual arrangement reference only; no application implementation or runtime verification.",
+  "tool": "builtin image_gen.imagegen",
+  "generated_original_path": "C:/Users/krist/.codex/generated_images/01a141dd-626c-7712-92c4-39f1033e2b0d/exec-eeb34a8f-213b-4a52-8a55-340079eacd5e.png",
+  "project_image_path": "docs/design/reference-workstation/horizontal-screen-concept.png",
+  "prompt": "Use case: ui-mockup.\nAsset type: generated visual design reference only, not an actual application verification screenshot.\nPrimary request: One high-fidelity flat Windows desktop screenshot of TabPlayer in Horizontal screen score layout, landscape 1600x1000-like.\nStyle and palette: professional compact guitar tablature workstation; flat charcoal #171a20/#23272f, fine #434b59 separators, light grey labels, restrained existing blue active accents, cream #fffdf5 notation.\nComposition: Keep top compact File/View menus, document tabs and Play/Stop transport with time/speed; LEFT compact Track/Sound/Backing sidebar, RIGHT inspector with Edit/Practice/Presentation and note controls; BOTTOM Overview/Mixer/Instrument/Backing dock with track measure blocks. Central score viewport is dominant.\nMain new-view content: one LONG CONTINUOUS HORIZONTAL staff-and-guitar-tab system through several measures, extending past the viewport with a visible horizontal scrollbar; no physical page breaks or page grid. Blue outlined selected note and thin playhead coherent on music; most canvas is notation, not empty.\nExisting score toolbar directly above canvas: compact labeled Display mode native select showing \"Horizontal screen\", Displayed tracks select \"Selected track\", Zoom (%) numeric \"100\", \"Fit width\" quiet button, \"Fit page\" visibly disabled in this endless mode, Visible tracks disclosure and Show instrument.\nTypography: text exact where practical, readable system sans around 12–13px, tight aligned controls, modest corners matching desktop utility.\nAuthorship sample: \"Windowline\" guitar/bass score only.\nConstraints: No browser frame, photography, perspective, decorative cards, gradients, large art, logo, extra features, titles, or slogans. This image defines visual arrangement only; incidental notes/text do not override behavior. Page fit disabled semantics are proposed for endless mode. Generate a polished coherent full view, single panel only.",
+  "transparent_background": false,
+  "input_images": [],
+  "inspection": {
+    "observed": "Compact charcoal desktop workstation with transport, track sidebar, inspector, score toolbar including Horizontal screen and disabled Fit page, horizontal scrollbar, and bottom overview.",
+    "limitations": [
+      "The generated score wraps into two staff-and-tab systems instead of the requested single continuous horizontal system.",
+      "The score background is charcoal with cream notation; it does not show a cream score surface.",
+      "Incidental music and labels are generated visual content and do not define product behavior."
+    ]
+  },
+  "saved_at_utc": "2026-10-15T23:20:53.8903389Z",
+  "sha256": "5fdcb0ed4862d04cdb42d1de2453ef1932372059695661b010530847d6ff2dd6",
+  "geometry": {
+    "width": 1586,
+    "height": 992
+  }
+}

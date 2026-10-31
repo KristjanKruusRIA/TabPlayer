@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Independently authored standard fields. String numbers are reversed and zero-based; frets are relative to baseFret. -->
+<GPIF><MasterTrack><Tracks>42</Tracks></MasterTrack><Tracks><Track id="42"><Staves><Staff><Properties>
+<Property name="DiagramCollection"><Items><Item id="cm" name="Cm"><Diagram stringCount="6" fretCount="5" baseFret="2" barStates="1 1 1 1 1 1">
+<Fret string="5" fret="1"/><Fret string="4" fret="2"/><Fret string="3" fret="3"/><Fret string="2" fret="3"/><Fret string="1" fret="1"/>
+<Fingering><Position finger="Index" fret="1" string="5"/><Position finger="Middle" fret="2" string="4"/><Position finger="Ring" fret="3" string="3"/><Position finger="Pinky" fret="3" string="2"/><Position finger="Index" fret="1" string="1"/><Position finger="Thumb" fret="-3" string="0"/></Fingering>
+<Property name="ShowName" type="bool" value="false"/><Property name="ShowDiagram" type="bool" value="true"/><Property name="ShowFingering" type="bool" value="false"/>
+</Diagram></Item></Items></Property>
+<Property name="DiagramWorkingSet"><Items><Item id="cm" name="Cm"><Diagram stringCount="6" fretCount="5" baseFret="2" barStates="1 1 1 1 1 1">
+<Fret string="5" fret="1"/><Fret string="4" fret="2"/><Fret string="3" fret="3"/><Fret string="2" fret="3"/><Fret string="1" fret="1"/>
+<Fingering><Position finger="Index" fret="1" string="5"/><Position finger="Middle" fret="2" string="4"/><Position finger="Rank" fret="3" string="3"/><Position finger="Pinky" fret="3" string="2"/><Position finger="Index" fret="1" string="1"/><Position finger="Thumb" fret="-3" string="0"/></Fingering>
+<Property name="ShowName" type="bool" value="false"/><Property name="ShowDiagram" type="bool" value="true"/><Property name="ShowFingering" type="bool" value="false"/>
+</Diagram></Item></Items></Property>
+</Properties></Staff></Staves></Track></Tracks></GPIF>

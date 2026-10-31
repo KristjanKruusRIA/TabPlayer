@@ -1,0 +1,44 @@
+.tp-dialog.midi-import {
+  width: min(560px, calc(100vw - 32px));
+}
+.midi-import .midi-file {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.midi-import .midi-file span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--tp-muted);
+  font-size: 12px;
+}
+.midi-import .midi-options {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  border: 0;
+  padding: 0;
+  margin: 0;
+}
+.midi-import .midi-options .midi-full-row {
+  grid-column: 1 / -1;
+}
+.midi-import .midi-options .check {
+  flex-direction: row;
+  align-items: center;
+  grid-column: 1 / -1;
+  gap: 8px;
+}
+.midi-import .midi-options .check input {
+  width: auto;
+}
+.midi-import .midi-parts {
+  margin: 0;
+  padding-left: 18px;
+  max-height: 9em;
+  overflow: auto;
+  font-size: 12px;
+  color: var(--tp-text);
+}

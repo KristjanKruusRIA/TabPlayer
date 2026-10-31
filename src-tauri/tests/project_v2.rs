@@ -8,6 +8,8 @@ use tabplayer_lib::{
 fn backing(id: &str) -> EditCommand {
     EditCommand::SetBacking {
         backing: Some(BackingSettings {
+            processing: None,
+            reference_sync: None,
             asset_id: id.into(),
             offset_ms: 0.0,
             anchors: vec![],
@@ -25,6 +27,39 @@ fn asset() -> StoredAsset {
 }
 
 #[test]
+fn take_document_consumes_only_its_candidate() {
+    let mut candidates = CandidateStore::default();
+    let mut original = Project::from_file("source.gp".into(), b"immutable source");
+    let original_asset = asset();
+    let original_id = original_asset.id().unwrap();
+    original.assets.insert(original_id.clone(), original_asset);
+    original.edits.push(backing(&original_id));
+    let path = std::path::PathBuf::from("first.tabplayer");
+    let first = candidates
+        .stage_document(original.clone(), Some(path.clone()))
+        .unwrap();
+    let second = candidates.stage_document(Project::blank(), None).unwrap();
+    let staged = candidates.stage_asset(asset()).unwrap();
+
+    let taken = candidates.take_document(&first.token).unwrap();
+    assert_eq!(taken, (original, Some(path)));
+    assert!(candidates.take_document(&first.token).is_err());
+    assert!(!candidates.cancel_document(&first.token));
+    let mut session = ProjectSession::new(Project::blank(), None).unwrap();
+    candidates
+        .commit_edit(Some(&staged.token), backing(&staged.asset_id), &mut session)
+        .unwrap();
+    assert_eq!(
+        session.asset_bytes(&staged.asset_id).unwrap(),
+        b"encoded audio bytes"
+    );
+    let replaced = candidates
+        .commit_document(&second.token, &mut session)
+        .unwrap();
+    assert_eq!(replaced.project, Project::blank().view());
+}
+
+#[test]
 fn migrates_v1_without_music_change() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("legacy.tabplayer");
@@ -32,13 +67,15 @@ fn migrates_v1_without_music_change() {
     let mut legacy = serde_json::to_value(&original).unwrap();
     legacy["schemaVersion"] = serde_json::json!(1);
     legacy.as_object_mut().unwrap().remove("assets");
+    legacy.as_object_mut().unwrap().remove("baselineEdits");
     legacy["edits"] = serde_json::json!([{
         "type":"setNote", "target":{"track":0,"staff":0,"bar":0,"voice":0,"beat":0},
         "string":1, "fret":7
     }]);
     std::fs::write(&path, serde_json::to_vec(&legacy).unwrap()).unwrap();
     let loaded = read_project(&path).unwrap();
-    assert_eq!(loaded.schema_version, 2);
+    assert_eq!(loaded.schema_version, 3);
+    assert!(loaded.baseline_edits.is_empty());
     assert_eq!(loaded.base, original.base);
     assert_eq!(
         serde_json::to_value(&loaded.edits).unwrap(),
@@ -46,7 +83,8 @@ fn migrates_v1_without_music_change() {
     );
     write_project(&path, &loaded).unwrap();
     let saved: serde_json::Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
-    assert_eq!(saved["schemaVersion"], 2);
+    assert_eq!(saved["schemaVersion"], 3);
+    assert_eq!(saved["baselineEdits"], serde_json::json!([]));
     assert_eq!(saved["base"], legacy["base"]);
 }
 
@@ -60,6 +98,7 @@ fn snapshot_omits_large_audio() {
     let digest = format!("{:x}", Sha256::digest(&bytes));
     let mut value = serde_json::to_value(Project::from_file("score.gp".into(), b"source")).unwrap();
     value["schemaVersion"] = serde_json::json!(2);
+    value.as_object_mut().unwrap().remove("baselineEdits");
     value["assets"] = serde_json::json!({digest.clone(): {
         "filename":"backing.wav", "mediaType":"audio/wav", "bytesBase64":STANDARD.encode(&bytes)
     }});
@@ -249,6 +288,8 @@ fn redo_metadata_references_backing_without_serializing_audio_bytes() {
 #[test]
 fn repeat_anchor_coordinates_are_valid_without_lexicographic_order() {
     let settings = BackingSettings {
+        processing: None,
+        reference_sync: None,
         asset_id: "embedded".into(),
         offset_ms: 0.0,
         mix: ChannelMix::default(),
@@ -287,6 +328,7 @@ fn settings_replay_tracks_structural_identity() {
             name: "Bass".into(),
             tuning: vec![43, 38, 33, 28],
             program: 33,
+            tuning_name: None,
         })
         .unwrap();
     let mix = EditCommand::SetTrackMix {
@@ -324,4 +366,53 @@ fn settings_replay_tracks_structural_identity() {
         .snapshot();
     assert_eq!(reopened.project, configured);
     assert_eq!(&reopened.project.edits[1..], &[mix, sound]);
+}
+
+#[test]
+fn sound_lock_is_one_edit_that_undo_and_redo_restore_and_a_saved_file_keeps() {
+    let mut session = ProjectSession::new(Project::blank(), None).unwrap();
+    let unlocked = TrackSound {
+        voice_id: Some("green-guitar".into()),
+        preset_id: "lead".into(),
+        ..TrackSound::default()
+    };
+    let locked = TrackSound {
+        locked: true,
+        ..unlocked.clone()
+    };
+    // A sound that never locked serializes with no `locked` field, so a saved file does not change.
+    assert!(!serde_json::to_string(&unlocked).unwrap().contains("locked"));
+    assert!(
+        serde_json::to_string(&locked)
+            .unwrap()
+            .contains("\"locked\":true")
+    );
+    let set = |sound: &TrackSound| EditCommand::SetTrackSound {
+        track_id: "base/0".into(),
+        sound: sound.clone(),
+    };
+    session.apply_edit(set(&unlocked)).unwrap();
+    let before = session.snapshot();
+    session.apply_edit(set(&locked)).unwrap();
+    let after = session.snapshot();
+    // One gesture is one edit.
+    assert_eq!(after.project.edits.len(), before.project.edits.len() + 1);
+    assert_eq!(after.project.edits.last(), Some(&set(&locked)));
+    // Undo restores the unlocked sound, redo the locked one, and neither is merely an emptied log.
+    let undone = session.undo().unwrap();
+    assert_eq!(undone.project, before.project);
+    assert!(undone.can_redo);
+    assert_eq!(undone.project.edits.last(), Some(&set(&unlocked)));
+    let redone = session.redo().unwrap();
+    assert_eq!(redone.project, after.project);
+    assert_eq!(redone.project.edits.last(), Some(&set(&locked)));
+    // A saved and reopened file keeps the lock.
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("lock.tabplayer");
+    write_project(&path, &session.stored_project()).unwrap();
+    let reopened = ProjectSession::new(read_project(&path).unwrap(), Some(path))
+        .unwrap()
+        .snapshot();
+    assert_eq!(reopened.project, after.project);
+    assert_eq!(reopened.project.edits.last(), Some(&set(&locked)));
 }

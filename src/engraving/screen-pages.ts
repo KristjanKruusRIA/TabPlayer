@@ -1,0 +1,131 @@
+import type {AlphaTabApi,model} from '@coderline/alphatab';
+import {pageGeometry} from './page';
+import type {PageLayout} from './types';
+import type {ScoreLayoutMode,ScoreZoomMode} from './screen-view';
+
+export type ScreenRect={x:number;y:number;w:number;h:number};
+export type ScreenPoint={x:number;y:number};
+export type ScreenBounds=NonNullable<AlphaTabApi['boundsLookup']>;
+export type ScreenSystem=ScreenBounds['staffSystems'][number];
+export type ScreenRenderChunk={id:string;x:number;y:number;width:number;height:number;firstMasterBarIndex:number;lastMasterBarIndex:number;svg:string};
+export type ScreenPageBlock={chunk:ScreenRenderChunk;system:ScreenSystem|null;page:number;sourceBounds:ScreenRect;x:number;y:number};
+export type ScreenPagination={paper:{width:number;height:number;left:number;top:number;right:number;bottom:number};pageCount:number;blocks:ScreenPageBlock[]};
+export type ScreenPageArrangement={scale:number;width:number;height:number;pages:Array<{index:number;x:number;y:number;width:number;height:number}>};
+export type ScreenPageHit={system:ScreenSystem;beat:model.Beat;note:model.Note|null};
+export const SCREEN_PAGE_GAP=24;
+
+const oversize='This score does not fit the selected paper. Display fewer staves, choose a larger page, or reduce print scale.';
+function positive(value:number):boolean {return Number.isFinite(value)&&value>0;}
+function validRect(rect:ScreenRect,nonempty=false):void {
+  if(![rect.x,rect.y,rect.w,rect.h,rect.x+rect.w,rect.y+rect.h].every(Number.isFinite)||rect.w<0||rect.h<0||(nonempty&&(rect.w===0||rect.h===0)))throw new Error('Invalid screen bounds geometry.');
+}
+function contains(rect:ScreenRect,point:ScreenPoint):boolean {
+  return point.x>=rect.x&&point.x<rect.x+rect.w&&point.y>=rect.y&&point.y<rect.y+rect.h;
+}
+function overlaps(a:ScreenRect,b:ScreenRect):boolean {
+  return a.x<b.x+b.w&&b.x<a.x+a.w&&a.y<b.y+b.h&&b.y<a.y+a.h;
+}
+
+export function paginateScreenScore(chunks:readonly ScreenRenderChunk[],bounds:ScreenBounds,page:PageLayout):ScreenPagination {
+  const {width,height,left,top,right,bottom}=pageGeometry(page);
+  const paper={width,height,left,top,right,bottom},blocks:ScreenPageBlock[]=[],ids=new Set<string>(),positions=new Set<string>(),matched=new Set<ScreenSystem>();
+  for(const system of bounds.staffSystems) {
+    validRect(system.realBounds,true);validRect(system.visualBounds,true);
+    if(!system.bars.length)throw new Error('A screen system has no bar interval.');
+    if(system.bars.some((bar,i)=>!Number.isInteger(bar.index)||bar.index<0||(i>0&&bar.index<=system.bars[i-1].index)))throw new Error('Invalid screen system bar interval.');
+    for(const master of system.bars)for(const bar of master.bars) {
+      validRect(bar.realBounds);validRect(bar.visualBounds);
+      for(const beat of bar.beats) {
+        validRect(beat.realBounds);validRect(beat.visualBounds);
+        for(const note of beat.notes??[])validRect(note.noteHeadBounds);
+      }
+    }
+  }
+  let pageIndex=0,used=0,lastBar=-1;
+  for(const chunk of [...chunks].sort((a,b)=>a.y-b.y||a.x-b.x)) {
+    const rect={x:chunk.x,y:chunk.y,w:chunk.width,h:chunk.height};validRect(rect,true);
+    if(typeof chunk.id!=='string'||!chunk.id||ids.has(chunk.id))throw new Error('Missing or duplicate screen chunk ID.');
+    ids.add(chunk.id);
+    const position=[rect.x,rect.y,rect.w,rect.h].join(',');
+    if(positions.has(position))throw new Error('Duplicate screen render chunk geometry.');
+    positions.add(position);
+    if(typeof chunk.svg!=='string'||!/^\s*<svg\b[^>]*>[\s\S]*<\/svg>\s*$/.test(chunk.svg))throw new Error('A screen chunk is missing its SVG string.');
+    const first=chunk.firstMasterBarIndex,last=chunk.lastMasterBarIndex;
+    if(!Number.isInteger(first)||!Number.isInteger(last)||first< -1||last<first||(first===-1&&last!==-1))throw new Error('Invalid screen chunk bar interval.');
+    const candidates=first===-1?[]:bounds.staffSystems.filter(s=>s.bars[0].index===first&&s.bars.at(-1)!.index===last);
+    if(first!==-1&&(candidates.length!==1||matched.has(candidates[0])))throw new Error('Missing, duplicate or ambiguous screen system chunk association.');
+    const system=candidates[0]??null;
+    if(system&&(!overlaps(rect,system.realBounds)||!overlaps(rect,system.visualBounds)||first<=lastBar))throw new Error('Invalid screen system chunk geometry or musical order.');
+    if(system){matched.add(system);lastBar=last;}
+    const envelopes=system?[rect,system.realBounds,system.visualBounds]:[rect];
+    const x=Math.min(...envelopes.map(r=>r.x)),y=Math.min(...envelopes.map(r=>r.y));
+    const sourceBounds={x,y,w:Math.max(...envelopes.map(r=>r.x+r.w))-x,h:Math.max(...envelopes.map(r=>r.y+r.h))-y};
+    if(sourceBounds.w>width-left-right||sourceBounds.h>height-top-bottom)throw new Error(oversize);
+    if(used+sourceBounds.h>height-top-bottom){pageIndex++;used=0;}
+    blocks.push({chunk,system,page:pageIndex,sourceBounds,x:left,y:top+used});used+=sourceBounds.h;
+  }
+  if(matched.size!==bounds.staffSystems.length)throw new Error('Missing or duplicate screen system chunks.');
+  if(!blocks.length)throw new Error('No screen render chunks are available.');
+  return {paper,pageCount:pageIndex+1,blocks};
+}
+
+export function arrangeScreenPages(pagination:ScreenPagination,mode:Extract<ScoreLayoutMode,'verticalPage'|'horizontalPage'|'grid'>,scale:number,availableWidth:number):ScreenPageArrangement {
+  if(!positive(scale)||!Number.isFinite(availableWidth)||availableWidth<0||!positive(pagination.paper.width)||!positive(pagination.paper.height)||!Number.isInteger(pagination.pageCount)||pagination.pageCount<1)throw new Error('Invalid screen page arrangement geometry.');
+  const width=pagination.paper.width*scale,height=pagination.paper.height*scale,gap=SCREEN_PAGE_GAP,count=pagination.pageCount;
+  const columns=mode==='horizontalPage'?count:mode==='verticalPage'?1:Math.min(count,Math.max(1,Math.floor((availableWidth+gap)/(width+gap))));
+  const groupWidth=columns*width+(columns-1)*gap,rows=Math.ceil(count/columns),offset=mode==='horizontalPage'?0:Math.max(0,(availableWidth-groupWidth)/2);
+  const totalWidth=groupWidth+2*offset,totalHeight=rows*height+(rows-1)*gap;
+  if(![width,height,totalWidth,totalHeight].every(positive))throw new Error('Invalid screen page arrangement geometry.');
+  return {scale,width:totalWidth,height:totalHeight,pages:Array.from({length:count},(_,index)=>({index,x:offset+(index%columns)*(width+gap),y:Math.floor(index/columns)*(height+gap),width,height}))};
+}
+
+export function mapScreenRect(pagination:ScreenPagination,arrangement:ScreenPageArrangement,system:ScreenSystem,rect:ScreenRect):ScreenRect|null {
+  validRect(rect);
+  const block=pagination.blocks.find(b=>b.system===system);
+  if(!block)return null;
+  const sheet=arrangement.pages[block.page],scale=arrangement.scale;
+  return {x:sheet.x+(block.x+rect.x-block.sourceBounds.x)*scale,y:sheet.y+(block.y+rect.y-block.sourceBounds.y)*scale,w:rect.w*scale,h:rect.h*scale};
+}
+
+export function unmapScreenPoint(pagination:ScreenPagination,arrangement:ScreenPageArrangement,point:ScreenPoint):{system:ScreenSystem;point:ScreenPoint}|null {
+  if(![point.x,point.y].every(Number.isFinite))throw new Error('Invalid screen point geometry.');
+  for(const block of pagination.blocks) {
+    if(!block.system)continue;
+    const sheet=arrangement.pages[block.page],scale=arrangement.scale;
+    const left=sheet.x+block.x*scale,top=sheet.y+block.y*scale;
+    const right=sheet.x+(block.x+block.sourceBounds.w)*scale,bottom=sheet.y+(block.y+block.sourceBounds.h)*scale;
+    if(point.x>=left&&point.x<right&&point.y>=top&&point.y<bottom)return {system:block.system,point:{x:(point.x-sheet.x)/scale-block.x+block.sourceBounds.x,y:(point.y-sheet.y)/scale-block.y+block.sourceBounds.y}};
+  }
+  return null;
+}
+
+export function hitTestScreenPages(pagination:ScreenPagination,arrangement:ScreenPageArrangement,point:ScreenPoint,preferredLane?:{track:number;staff:number;voice:number}):ScreenPageHit|null {
+  const hit=unmapScreenPoint(pagination,arrangement,point);if(!hit)return null;
+  const {system,point:source}=hit,notes:ScreenPageHit[]=[],beats:ScreenPageHit[]=[];
+  // Actual noteheads take precedence over the broad beat rectangles of another voice.
+  for(const master of system.bars)for(const bar of master.bars)for(const beat of bar.beats) {
+    for(const note of beat.notes??[])if(contains(note.noteHeadBounds,source))notes.push({system,beat:beat.beat,note:note.note});
+    if(contains(bar.realBounds,source)&&source.x>=beat.realBounds.x&&source.x<beat.realBounds.x+beat.realBounds.w)beats.push({system,beat:beat.beat,note:null});
+  }
+  const preferred=(hit:ScreenPageHit)=>{
+    const voice=hit.beat.voice,staff=voice.bar.staff;
+    return preferredLane&&staff.track.index===preferredLane.track&&staff.index===preferredLane.staff&&voice.index===preferredLane.voice?0:1;
+  };
+  return (notes.length?notes:beats).sort((a,b)=>preferred(a)-preferred(b)||a.beat.voice.index-b.beat.voice.index||(a.note?.index??0)-(b.note?.index??0)||a.beat.index-b.beat.index)[0]??null;
+}
+
+export function resolveScreenZoom(input:{zoomMode:ScoreZoomMode;manualPercent:number;available:{width:number;height:number};natural:{width:number;height?:number}}):{percent:number;limited:boolean} {
+  if(input.zoomMode==='manual') {
+    if(!Number.isFinite(input.manualPercent)||input.manualPercent<25||input.manualPercent>300)throw new Error('Manual zoom must be between 25% and 300%.');
+    return {percent:input.manualPercent,limited:false};
+  }
+  const {available,natural}=input;
+  if(!positive(available.width)||!positive(natural.width))throw new Error('Fit requires positive measured widths.');
+  let ratio=available.width/natural.width;
+  if(input.zoomMode==='fitPage') {
+    if(!positive(available.height)||natural.height===undefined||!positive(natural.height))throw new Error('Fit page requires positive measured heights.');
+    ratio=Math.min(ratio,available.height/natural.height);
+  }
+  const percent=ratio*100;
+  return {percent:Math.max(25,Math.min(300,percent)),limited:percent<25||percent>300};
+}

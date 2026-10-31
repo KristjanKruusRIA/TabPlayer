@@ -1,0 +1,31 @@
+{
+  "asset": "saved-tunings-concept.png",
+  "use_case": "ui-mockup",
+  "tool": "tools.image_gen__imagegen",
+  "mode": "built-in",
+  "date": "2026-10-22",
+  "reference_path": "E:/git/TabPlayer/.worktrees/gp8-parity/docs/design/reference-workstation/vertical-page-concept.png",
+  "source_output_path": "C:/Users/krist/.codex/generated_images/01a1649f-4d92-7702-82a2-bd5dcacb57d9/exec-85ea66c1-f691-4879-a445-f4e52d26d8dc.png",
+  "output_path": "E:/git/TabPlayer/.worktrees/gp8-parity/docs/design/reference-workstation/saved-tunings-concept.png",
+  "sha256": "953c3fb9f5cf0ebc5d378a3d0b91d258381fdd9d4faeee385b99dfd75aa3f113",
+  "dimensions": {
+    "width": 1586,
+    "height": 992
+  },
+  "requested_dimensions": {
+    "width": 1600,
+    "height": 1000
+  },
+  "prompt": "Use case: ui-mockup\nAsset type: one polished desktop UI design reference, 1600x1000 pixels.\nInput image 1 is a STYLE REFERENCE ONLY: preserve its compact charcoal TabPlayer Windows music workstation shell, cream music notation sheet, precise thin borders, restrained blue selection and compact readable typography. Create a DIFFERENT VIEW of that same product, with Track settings on the right and a foreground Saved tunings dialog.\nScene: Windows desktop TabPlayer musical-score workstation. Top compact menus and transport, left Guitar and Bass track list, cream notation score beneath, bottom overview strip. Right side visible Track settings panel includes tuning draft and an ordinary Apply tuning button. The foreground centered dialog is restrained charcoal, balanced, legible, proportionate to desktop tool UI. No dramatic blur; underlying context subdued but recognizable.\nDialog title verbatim: \"Saved tunings\"\nPurpose: manage personal tuning presets; save, recall, rename and delete. Built-in presets are immutable and visibly separate from personal entries.\nDialog layout: broad two-column body. Left column heading \"Personal tunings\", with grouped selectable named list. Guitar group entries: \"Studio standard · 6 strings\", selected blue row \"Band Drop A · 7 strings\", \"Low F sharp · 8 strings\", \"Extended range · 9 strings\". Bass group entries: \"Session bass · 4 strings\", \"Low B bass · 5 strings\", \"Studio bass · 6 strings\". Beneath a thin divider, a subdued separate read-only section \"Built-in presets\" with lock icon and caption \"Read-only\". Make group labels restrained.\nRight column is selected preset editor: label \"Tuning name\", editable field \"Band Drop A\"; small optional \"Instrument group\" selector set to \"Guitar\"; label \"Notes (high to low)\"; seven compact editable pitch fields displaying EXACTLY \"E4\", \"B3\", \"G3\", \"D3\", \"A2\", \"E2\", \"A1\" in that order. Show note names plus octaves, never MIDI numbers. Use readable compact string labels if useful. Keep hierarchy and spacing calm and precise.\nEditor action row: \"Save changes\", \"Save as new\", quiet secondary \"Delete\". Footer contains muted helper text verbatim \"Use tuning fills the draft. Apply tuning updates the score.\" and right aligned \"Cancel\" secondary and \"Use tuning\" blue primary.\nBehavior implied by clear copy: Use tuning only fills the existing Track tuning draft. Ordinary Apply tuning remains required to alter the score. Preset name is a snapshot when applied to document.\nNo unrequested effects panels, accounts, cloud sync, avatars, gradients, promotional copy, large empty decorative cards, or feature panels. One concept only. Crisp realistic application screenshot design, no device bezel, no perspective, no watermark.",
+  "generation_count": 1,
+  "visual_review": {
+    "status": "inspected",
+    "limitations": [
+      "Actual output is 1586x992, rather than requested 1600x1000; saved unchanged.",
+      "Generated UI image is a design reference, not an implementation or proof of behavior.",
+      "Save changes is blue as well as Use tuning, which weakens the requested primary action hierarchy.",
+      "Built-in preset rows use abbreviated pitch strings without octave numbers; personal editable pitches correctly show E4 B3 G3 D3 A2 E2 A1.",
+      "The image does not explicitly display the applied document label snapshot behavior; implementation must preserve it."
+    ]
+  }
+}

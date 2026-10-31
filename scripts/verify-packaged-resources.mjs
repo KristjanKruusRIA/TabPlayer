@@ -3,6 +3,7 @@ import { createReadStream } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { basename, dirname, extname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { prepareLibrary } from './prepare-library.mjs';
 
 const repository=fileURLToPath(new URL('../',import.meta.url));
 const digest=bytes=>createHash('sha256').update(bytes).digest('hex');
@@ -32,6 +33,17 @@ async function verifyHash(root,path,sha256,size) {
   if(size!==undefined&&(await stat(actual)).size!==size)throw new Error(`Packaged resource size mismatch: ${path}`);
   if(await fileHash(actual)!==sha256)throw new Error(`Packaged resource hash mismatch: ${path}`);
 }
+async function verifyLibraryInventory(root,allowed) {
+  const paths=[...allowed];
+  async function visit(directory,prefix='') {
+    for(const entry of await readdir(directory,{withFileTypes:true})) {
+      const path=prefix?`${prefix}/${entry.name}`:entry.name;
+      if(entry.isDirectory()&&paths.some(known=>known.startsWith(`${path}/`)))await visit(join(directory,entry.name),path);
+      else if(!entry.isFile()||!allowed.has(path))throw new Error(`Unexpected library resource: ${path}`);
+    }
+  }
+  await visit(root);
+}
 
 /** Inspect extracted package bytes only. No process launch or network access. */
 export async function verifyPackage({packageRoot,referenceRoot=join(repository,'src-tauri/resources/audio'),sourceRoot=repository}) {
@@ -39,6 +51,12 @@ export async function verifyPackage({packageRoot,referenceRoot=join(repository,'
   const manifests=packageFiles.filter(path=>basename(path)==='manifest.json'&&basename(dirname(path))==='audio');
   if(manifests.length!==1)throw new Error(`Expected one extracted audio manifest, found ${manifests.length}`);
   const audioRoot=dirname(manifests[0]);
+  const libraryManifests=packageFiles.filter(path=>basename(path)==='manifest.json'&&basename(dirname(path))==='library');
+  if(libraryManifests.length!==1)throw new Error(`Expected one extracted library manifest, found ${libraryManifests.length}`);
+  const libraryRoot=dirname(libraryManifests[0]);
+  const library=await prepareLibrary({source:join(sourceRoot,'assets/library'),destination:libraryRoot,checkOnly:true});
+  const libraryFiles=new Set(library.files);
+  await verifyLibraryInventory(libraryRoot,libraryFiles);
   const bytes=await readFile(manifests[0]),reference=await readFile(join(referenceRoot,'manifest.json'));
   if(digest(bytes)!==digest(reference))throw new Error('Packaged audio manifest does not match the prepared offline reference');
   const manifest=JSON.parse(bytes),config=JSON.parse(await readFile(join(sourceRoot,'assets/audio/sources.json'),'utf8'));
@@ -70,9 +88,14 @@ export async function verifyPackage({packageRoot,referenceRoot=join(repository,'
     const rel=relative(audioRoot,path).replaceAll('\\','/');
     if(rel!== '..'&&!rel.startsWith('../')&&!isAbsolute(rel)) {
       if(!allowed.has(rel))throw new Error(`Unexpected audio resource: ${rel}`);
-    }else if(/\.(gp[345]?|gpx|tabplayer|pdf|wav|mp3|flac|ogg)$/i.test(path))throw new Error(`Unexpected score/private media in package: ${relative(packageRoot,path)}`);
+    }else {
+      const libraryRelative=relative(libraryRoot,path).replaceAll('\\','/');
+      if(libraryRelative!=='..'&&!libraryRelative.startsWith('../')&&!isAbsolute(libraryRelative)) {
+        if(!libraryFiles.has(libraryRelative))throw new Error(`Unexpected library resource: ${libraryRelative}`);
+      }else if(/\.(gp[345]?|gpx|tabplayer|pdf|wav|mp3|flac|ogg)$/i.test(path))throw new Error(`Unexpected score/private media in package: ${relative(packageRoot,path)}`);
+    }
   }
-  return {scope:'extracted packaged resource verification; native audition, print and installer lifecycle remain separate',platform:process.platform,architecture:process.arch,manifestSha256:digest(bytes),sampleCount:manifest.samples.length,regionCount,encodedSampleBytes:manifest.samples.reduce((total,item)=>total+item.size,0),sourceRevisions};
+  return {scope:'extracted packaged resource verification; native audition, print and installer lifecycle remain separate',platform:process.platform,architecture:process.arch,manifestSha256:digest(bytes),sampleCount:manifest.samples.length,regionCount,encodedSampleBytes:manifest.samples.reduce((total,item)=>total+item.size,0),sourceRevisions,library:{manifestSha256:await fileHash(libraryManifests[0]),templateCount:library.manifest.templates.length,exampleCount:library.manifest.examples.length,fileCount:library.files.length}};
 }
 
 export async function packageArtifacts(bundleRoot,formats) {

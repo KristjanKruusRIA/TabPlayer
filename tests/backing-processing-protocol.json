@@ -1,0 +1,843 @@
+{
+  "version": 1,
+  "contract": "Local TabPlayer backing processing, not observed proprietary GP ranges/curves.",
+  "valid": [
+    {
+      "id": "legacy_missing",
+      "backing": {
+        "assetId": "processing-fixture",
+        "offsetMs": 0,
+        "anchors": [],
+        "mix": {
+          "gain": 1,
+          "pan": 0,
+          "mute": false,
+          "solo": false
+        }
+      }
+    },
+    {
+      "id": "legacy_null",
+      "backing": {
+        "assetId": "processing-fixture",
+        "offsetMs": 0,
+        "anchors": [],
+        "mix": {
+          "gain": 1,
+          "pan": 0,
+          "mute": false,
+          "solo": false
+        },
+        "processing": null
+      }
+    },
+    {
+      "id": "mode_none",
+      "backing": {
+        "assetId": "processing-fixture",
+        "offsetMs": 0,
+        "anchors": [],
+        "mix": {
+          "gain": 1,
+          "pan": 0,
+          "mute": false,
+          "solo": false
+        },
+        "processing": {
+          "semitones": 0,
+          "cents": 0,
+          "filter": "none"
+        }
+      }
+    },
+    {
+      "id": "mode_bassEnhance",
+      "backing": {
+        "assetId": "processing-fixture",
+        "offsetMs": 0,
+        "anchors": [],
+        "mix": {
+          "gain": 1,
+          "pan": 0,
+          "mute": false,
+          "solo": false
+        },
+        "processing": {
+          "semitones": 0,
+          "cents": 0,
+          "filter": "bassEnhance"
+        }
+      }
+    },
+    {
+      "id": "mode_bassAttenuation",
+      "backing": {
+        "assetId": "processing-fixture",
+        "offsetMs": 0,
+        "anchors": [],
+        "mix": {
+          "gain": 1,
+          "pan": 0,
+          "mute": false,
+          "solo": false
+        },
+        "processing": {
+          "semitones": 0,
+          "cents": 0,
+          "filter": "bassAttenuation"
+        }
+      }
+    },
+    {
+      "id": "mode_mediumEnhance",
+      "backing": {
+        "assetId": "processing-fixture",
+        "offsetMs": 0,
+        "anchors": [],
+        "mix": {
+          "gain": 1,
+          "pan": 0,
+          "mute": false,
+          "solo": false
+        },
+        "processing": {
+          "semitones": 0,
+          "cents": 0,
+          "filter": "mediumEnhance"
+        }
+      }
+    },
+    {
+      "id": "mode_mediumAttenuation",
+      "backing": {
+        "assetId": "processing-fixture",
+        "offsetMs": 0,
+        "anchors": [],
+        "mix": {
+          "gain": 1,
+          "pan": 0,
+          "mute": false,
+          "solo": false
+        },
+        "processing": {
+          "semitones": 0,
+          "cents": 0,
+          "filter": "mediumAttenuation"
+        }
+      }
+    },
+    {
+      "id": "mode_highEnhance",
+      "backing": {
+        "assetId": "processing-fixture",
+        "offsetMs": 0,
+        "anchors": [],
+        "mix": {
+          "gain": 1,
+          "pan": 0,
+          "mute": false,
+          "solo": false
+        },
+        "processing": {
+          "semitones": 0,
+          "cents": 0,
+          "filter": "highEnhance"
+        }
+      }
+    },
+    {
+      "id": "mode_highAttenuation",
+      "backing": {
+        "assetId": "processing-fixture",
+        "offsetMs": 0,
+        "anchors": [],
+        "mix": {
+          "gain": 1,
+          "pan": 0,
+          "mute": false,
+          "solo": false
+        },
+        "processing": {
+          "semitones": 0,
+          "cents": 0,
+          "filter": "highAttenuation"
+        }
+      }
+    },
+    {
+      "id": "positive_combined_limit",
+      "backing": {
+        "assetId": "processing-fixture",
+        "offsetMs": 0,
+        "anchors": [],
+        "mix": {
+          "gain": 1,
+          "pan": 0,
+          "mute": false,
+          "solo": false
+        },
+        "processing": {
+          "semitones": 12,
+          "cents": 100,
+          "filter": "none"
+        }
+      }
+    },
+    {
+      "id": "negative_combined_limit",
+      "backing": {
+        "assetId": "processing-fixture",
+        "offsetMs": 0,
+        "anchors": [],
+        "mix": {
+          "gain": 1,
+          "pan": 0,
+          "mute": false,
+          "solo": false
+        },
+        "processing": {
+          "semitones": -12,
+          "cents": -100,
+          "filter": "none"
+        }
+      }
+    },
+    {
+      "id": "cancel_minus_one_plus_100",
+      "backing": {
+        "assetId": "processing-fixture",
+        "offsetMs": 0,
+        "anchors": [],
+        "mix": {
+          "gain": 1,
+          "pan": 0,
+          "mute": false,
+          "solo": false
+        },
+        "processing": {
+          "semitones": -1,
+          "cents": 100,
+          "filter": "none"
+        }
+      }
+    },
+    {
+      "id": "cancel_plus_one_minus_100",
+      "backing": {
+        "assetId": "processing-fixture",
+        "offsetMs": 0,
+        "anchors": [],
+        "mix": {
+          "gain": 1,
+          "pan": 0,
+          "mute": false,
+          "solo": false
+        },
+        "processing": {
+          "semitones": 1,
+          "cents": -100,
+          "filter": "none"
+        }
+      }
+    },
+    {
+      "id": "pair_plus_one_minus_50",
+      "backing": {
+        "assetId": "processing-fixture",
+        "offsetMs": 0,
+        "anchors": [],
+        "mix": {
+          "gain": 1,
+          "pan": 0,
+          "mute": false,
+          "solo": false
+        },
+        "processing": {
+          "semitones": 1,
+          "cents": -50,
+          "filter": "none"
+        }
+      }
+    },
+    {
+      "id": "pair_zero_plus_50",
+      "backing": {
+        "assetId": "processing-fixture",
+        "offsetMs": 0,
+        "anchors": [],
+        "mix": {
+          "gain": 1,
+          "pan": 0,
+          "mute": false,
+          "solo": false
+        },
+        "processing": {
+          "semitones": 0,
+          "cents": 50,
+          "filter": "none"
+        }
+      }
+    },
+    {
+      "id": "integer_decimal_spelling",
+      "backing": {
+        "assetId": "processing-fixture",
+        "offsetMs": 0,
+        "anchors": [],
+        "mix": {
+          "gain": 1,
+          "pan": 0,
+          "mute": false,
+          "solo": false
+        },
+        "processing": {
+          "semitones": 1.0,
+          "cents": -0.0,
+          "filter": "none"
+        }
+      }
+    }
+  ],
+  "invalid": [
+    {
+      "id": "object_array",
+      "backing": {
+        "assetId": "processing-fixture",
+        "offsetMs": 0,
+        "anchors": [],
+        "mix": {
+          "gain": 1,
+          "pan": 0,
+          "mute": false,
+          "solo": false
+        },
+        "processing": []
+      }
+    },
+    {
+      "id": "object_string",
+      "backing": {
+        "assetId": "processing-fixture",
+        "offsetMs": 0,
+        "anchors": [],
+        "mix": {
+          "gain": 1,
+          "pan": 0,
+          "mute": false,
+          "solo": false
+        },
+        "processing": "none"
+      }
+    },
+    {
+      "id": "object_bool",
+      "backing": {
+        "assetId": "processing-fixture",
+        "offsetMs": 0,
+        "anchors": [],
+        "mix": {
+          "gain": 1,
+          "pan": 0,
+          "mute": false,
+          "solo": false
+        },
+        "processing": false
+      }
+    },
+    {
+      "id": "missing_semitones",
+      "backing": {
+        "assetId": "processing-fixture",
+        "offsetMs": 0,
+        "anchors": [],
+        "mix": {
+          "gain": 1,
+          "pan": 0,
+          "mute": false,
+          "solo": false
+        },
+        "processing": {
+          "cents": 0,
+          "filter": "none"
+        }
+      }
+    },
+    {
+      "id": "missing_cents",
+      "backing": {
+        "assetId": "processing-fixture",
+        "offsetMs": 0,
+        "anchors": [],
+        "mix": {
+          "gain": 1,
+          "pan": 0,
+          "mute": false,
+          "solo": false
+        },
+        "processing": {
+          "semitones": 0,
+          "filter": "none"
+        }
+      }
+    },
+    {
+      "id": "missing_filter",
+      "backing": {
+        "assetId": "processing-fixture",
+        "offsetMs": 0,
+        "anchors": [],
+        "mix": {
+          "gain": 1,
+          "pan": 0,
+          "mute": false,
+          "solo": false
+        },
+        "processing": {
+          "semitones": 0,
+          "cents": 0
+        }
+      }
+    },
+    {
+      "id": "extra_neutral",
+      "backing": {
+        "assetId": "processing-fixture",
+        "offsetMs": 0,
+        "anchors": [],
+        "mix": {
+          "gain": 1,
+          "pan": 0,
+          "mute": false,
+          "solo": false
+        },
+        "processing": {
+          "semitones": 0,
+          "cents": 0,
+          "filter": "none",
+          "surprise": 0
+        }
+      }
+    },
+    {
+      "id": "semitones_above",
+      "backing": {
+        "assetId": "processing-fixture",
+        "offsetMs": 0,
+        "anchors": [],
+        "mix": {
+          "gain": 1,
+          "pan": 0,
+          "mute": false,
+          "solo": false
+        },
+        "processing": {
+          "semitones": 13,
+          "cents": 0,
+          "filter": "none"
+        }
+      }
+    },
+    {
+      "id": "semitones_below",
+      "backing": {
+        "assetId": "processing-fixture",
+        "offsetMs": 0,
+        "anchors": [],
+        "mix": {
+          "gain": 1,
+          "pan": 0,
+          "mute": false,
+          "solo": false
+        },
+        "processing": {
+          "semitones": -13,
+          "cents": 0,
+          "filter": "none"
+        }
+      }
+    },
+    {
+      "id": "semitones_fraction",
+      "backing": {
+        "assetId": "processing-fixture",
+        "offsetMs": 0,
+        "anchors": [],
+        "mix": {
+          "gain": 1,
+          "pan": 0,
+          "mute": false,
+          "solo": false
+        },
+        "processing": {
+          "semitones": 0.5,
+          "cents": 0,
+          "filter": "none"
+        }
+      }
+    },
+    {
+      "id": "semitones_null",
+      "backing": {
+        "assetId": "processing-fixture",
+        "offsetMs": 0,
+        "anchors": [],
+        "mix": {
+          "gain": 1,
+          "pan": 0,
+          "mute": false,
+          "solo": false
+        },
+        "processing": {
+          "semitones": null,
+          "cents": 0,
+          "filter": "none"
+        }
+      }
+    },
+    {
+      "id": "semitones_string",
+      "backing": {
+        "assetId": "processing-fixture",
+        "offsetMs": 0,
+        "anchors": [],
+        "mix": {
+          "gain": 1,
+          "pan": 0,
+          "mute": false,
+          "solo": false
+        },
+        "processing": {
+          "semitones": "1",
+          "cents": 0,
+          "filter": "none"
+        }
+      }
+    },
+    {
+      "id": "semitones_bool",
+      "backing": {
+        "assetId": "processing-fixture",
+        "offsetMs": 0,
+        "anchors": [],
+        "mix": {
+          "gain": 1,
+          "pan": 0,
+          "mute": false,
+          "solo": false
+        },
+        "processing": {
+          "semitones": true,
+          "cents": 0,
+          "filter": "none"
+        }
+      }
+    },
+    {
+      "id": "semitones_array",
+      "backing": {
+        "assetId": "processing-fixture",
+        "offsetMs": 0,
+        "anchors": [],
+        "mix": {
+          "gain": 1,
+          "pan": 0,
+          "mute": false,
+          "solo": false
+        },
+        "processing": {
+          "semitones": [],
+          "cents": 0,
+          "filter": "none"
+        }
+      }
+    },
+    {
+      "id": "cents_above",
+      "backing": {
+        "assetId": "processing-fixture",
+        "offsetMs": 0,
+        "anchors": [],
+        "mix": {
+          "gain": 1,
+          "pan": 0,
+          "mute": false,
+          "solo": false
+        },
+        "processing": {
+          "semitones": 0,
+          "cents": 101,
+          "filter": "none"
+        }
+      }
+    },
+    {
+      "id": "cents_below",
+      "backing": {
+        "assetId": "processing-fixture",
+        "offsetMs": 0,
+        "anchors": [],
+        "mix": {
+          "gain": 1,
+          "pan": 0,
+          "mute": false,
+          "solo": false
+        },
+        "processing": {
+          "semitones": 0,
+          "cents": -101,
+          "filter": "none"
+        }
+      }
+    },
+    {
+      "id": "cents_fraction",
+      "backing": {
+        "assetId": "processing-fixture",
+        "offsetMs": 0,
+        "anchors": [],
+        "mix": {
+          "gain": 1,
+          "pan": 0,
+          "mute": false,
+          "solo": false
+        },
+        "processing": {
+          "semitones": 0,
+          "cents": 0.5,
+          "filter": "none"
+        }
+      }
+    },
+    {
+      "id": "cents_null",
+      "backing": {
+        "assetId": "processing-fixture",
+        "offsetMs": 0,
+        "anchors": [],
+        "mix": {
+          "gain": 1,
+          "pan": 0,
+          "mute": false,
+          "solo": false
+        },
+        "processing": {
+          "semitones": 0,
+          "cents": null,
+          "filter": "none"
+        }
+      }
+    },
+    {
+      "id": "cents_string",
+      "backing": {
+        "assetId": "processing-fixture",
+        "offsetMs": 0,
+        "anchors": [],
+        "mix": {
+          "gain": 1,
+          "pan": 0,
+          "mute": false,
+          "solo": false
+        },
+        "processing": {
+          "semitones": 0,
+          "cents": "1",
+          "filter": "none"
+        }
+      }
+    },
+    {
+      "id": "cents_bool",
+      "backing": {
+        "assetId": "processing-fixture",
+        "offsetMs": 0,
+        "anchors": [],
+        "mix": {
+          "gain": 1,
+          "pan": 0,
+          "mute": false,
+          "solo": false
+        },
+        "processing": {
+          "semitones": 0,
+          "cents": false,
+          "filter": "none"
+        }
+      }
+    },
+    {
+      "id": "cents_object",
+      "backing": {
+        "assetId": "processing-fixture",
+        "offsetMs": 0,
+        "anchors": [],
+        "mix": {
+          "gain": 1,
+          "pan": 0,
+          "mute": false,
+          "solo": false
+        },
+        "processing": {
+          "semitones": 0,
+          "cents": {},
+          "filter": "none"
+        }
+      }
+    },
+    {
+      "id": "filter_unknown",
+      "backing": {
+        "assetId": "processing-fixture",
+        "offsetMs": 0,
+        "anchors": [],
+        "mix": {
+          "gain": 1,
+          "pan": 0,
+          "mute": false,
+          "solo": false
+        },
+        "processing": {
+          "semitones": 0,
+          "cents": 0,
+          "filter": "vocalRemove"
+        }
+      }
+    },
+    {
+      "id": "filter_case",
+      "backing": {
+        "assetId": "processing-fixture",
+        "offsetMs": 0,
+        "anchors": [],
+        "mix": {
+          "gain": 1,
+          "pan": 0,
+          "mute": false,
+          "solo": false
+        },
+        "processing": {
+          "semitones": 0,
+          "cents": 0,
+          "filter": "BassEnhance"
+        }
+      }
+    },
+    {
+      "id": "filter_null",
+      "backing": {
+        "assetId": "processing-fixture",
+        "offsetMs": 0,
+        "anchors": [],
+        "mix": {
+          "gain": 1,
+          "pan": 0,
+          "mute": false,
+          "solo": false
+        },
+        "processing": {
+          "semitones": 0,
+          "cents": 0,
+          "filter": null
+        }
+      }
+    },
+    {
+      "id": "filter_numeric",
+      "backing": {
+        "assetId": "processing-fixture",
+        "offsetMs": 0,
+        "anchors": [],
+        "mix": {
+          "gain": 1,
+          "pan": 0,
+          "mute": false,
+          "solo": false
+        },
+        "processing": {
+          "semitones": 0,
+          "cents": 0,
+          "filter": 0
+        }
+      }
+    },
+    {
+      "id": "filter_object",
+      "backing": {
+        "assetId": "processing-fixture",
+        "offsetMs": 0,
+        "anchors": [],
+        "mix": {
+          "gain": 1,
+          "pan": 0,
+          "mute": false,
+          "solo": false
+        },
+        "processing": {
+          "semitones": 0,
+          "cents": 0,
+          "filter": {}
+        }
+      }
+    },
+    {
+      "id": "filter_tagged_none_object",
+      "backing": {
+        "assetId": "processing-fixture",
+        "offsetMs": 0,
+        "anchors": [],
+        "mix": {"gain": 1, "pan": 0, "mute": false, "solo": false},
+        "processing": {"semitones": 0, "cents": 0, "filter": {"none": null}}
+      }
+    },
+    {
+      "id": "filter_tagged_enhance_object",
+      "backing": {
+        "assetId": "processing-fixture",
+        "offsetMs": 0,
+        "anchors": [],
+        "mix": {"gain": 1, "pan": 0, "mute": false, "solo": false},
+        "processing": {"semitones": 0, "cents": 0, "filter": {"bassEnhance": null}}
+      }
+    },
+    {
+      "id": "processing_positional_array",
+      "backing": {
+        "assetId": "processing-fixture",
+        "offsetMs": 0,
+        "anchors": [],
+        "mix": {"gain": 1, "pan": 0, "mute": false, "solo": false},
+        "processing": [0, 0, "none"]
+      }
+    },
+    {
+      "id": "processing_non_neutral_positional_array",
+      "backing": {
+        "assetId": "processing-fixture",
+        "offsetMs": 0,
+        "anchors": [],
+        "mix": {"gain": 1, "pan": 0, "mute": false, "solo": false},
+        "processing": [2, -25, "bassEnhance"]
+      }
+    },
+    {
+      "id": "unknown_backing_neutral",
+      "backing": {
+        "assetId": "processing-fixture",
+        "offsetMs": 0,
+        "anchors": [],
+        "mix": {
+          "gain": 1,
+          "pan": 0,
+          "mute": false,
+          "solo": false
+        },
+        "processing": {
+          "semitones": 0,
+          "cents": 0,
+          "filter": "none"
+        },
+        "unknownProcessing": 0
+      }
+    }
+  ]
+}

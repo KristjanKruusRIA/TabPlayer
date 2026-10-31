@@ -1,0 +1,955 @@
+{
+  "format": "TabPlayerBackingTimelineMapping",
+  "version": 1,
+  "toleranceMs": 0.000001,
+  "timelines": {
+    "straight": {
+      "generation": 11,
+      "durationTick": 15360,
+      "tempos": [
+        {
+          "tick": 0,
+          "bpm": 120
+        }
+      ],
+      "occurrences": [
+        {
+          "bar": 0,
+          "occurrence": 0,
+          "meterNumerator": 4,
+          "meterDenominator": 4,
+          "startTick": 0,
+          "endTick": 3840,
+          "startMs": 0,
+          "endMs": 2000
+        },
+        {
+          "bar": 1,
+          "occurrence": 0,
+          "meterNumerator": 4,
+          "meterDenominator": 4,
+          "startTick": 3840,
+          "endTick": 7680,
+          "startMs": 2000,
+          "endMs": 4000
+        },
+        {
+          "bar": 2,
+          "occurrence": 0,
+          "meterNumerator": 4,
+          "meterDenominator": 4,
+          "startTick": 7680,
+          "endTick": 11520,
+          "startMs": 4000,
+          "endMs": 6000
+        },
+        {
+          "bar": 3,
+          "occurrence": 0,
+          "meterNumerator": 4,
+          "meterDenominator": 4,
+          "startTick": 11520,
+          "endTick": 15360,
+          "startMs": 6000,
+          "endMs": 8000
+        }
+      ]
+    },
+    "tempoChange": {
+      "generation": 12,
+      "durationTick": 7680,
+      "tempos": [
+        {
+          "tick": 0,
+          "bpm": 120
+        },
+        {
+          "tick": 960,
+          "bpm": 60
+        }
+      ],
+      "occurrences": [
+        {
+          "bar": 0,
+          "occurrence": 0,
+          "meterNumerator": 4,
+          "meterDenominator": 4,
+          "startTick": 0,
+          "endTick": 3840,
+          "startMs": 0,
+          "endMs": 3500
+        },
+        {
+          "bar": 1,
+          "occurrence": 0,
+          "meterNumerator": 4,
+          "meterDenominator": 4,
+          "startTick": 3840,
+          "endTick": 7680,
+          "startMs": 3500,
+          "endMs": 7500
+        }
+      ]
+    },
+    "sixEight": {
+      "generation": 13,
+      "durationTick": 5760,
+      "tempos": [
+        {
+          "tick": 0,
+          "bpm": 120
+        }
+      ],
+      "occurrences": [
+        {
+          "bar": 0,
+          "occurrence": 0,
+          "meterNumerator": 6,
+          "meterDenominator": 8,
+          "startTick": 0,
+          "endTick": 2880,
+          "startMs": 0,
+          "endMs": 1500,
+          "clickTicks": [
+            0,
+            480,
+            960,
+            1440,
+            1920,
+            2400
+          ]
+        },
+        {
+          "bar": 1,
+          "occurrence": 0,
+          "meterNumerator": 6,
+          "meterDenominator": 8,
+          "startTick": 2880,
+          "endTick": 5760,
+          "startMs": 1500,
+          "endMs": 3000,
+          "clickTicks": [
+            2880,
+            3360,
+            3840,
+            4320,
+            4800,
+            5280
+          ]
+        }
+      ]
+    },
+    "pickup": {
+      "generation": 14,
+      "durationTick": 4800,
+      "tempos": [
+        {
+          "tick": 0,
+          "bpm": 120
+        }
+      ],
+      "occurrences": [
+        {
+          "bar": 0,
+          "occurrence": 0,
+          "meterNumerator": 4,
+          "meterDenominator": 4,
+          "startTick": 0,
+          "endTick": 960,
+          "startMs": 0,
+          "endMs": 500,
+          "clickTicks": [
+            0
+          ]
+        },
+        {
+          "bar": 1,
+          "occurrence": 0,
+          "meterNumerator": 4,
+          "meterDenominator": 4,
+          "startTick": 960,
+          "endTick": 4800,
+          "startMs": 500,
+          "endMs": 2500,
+          "clickTicks": [
+            960,
+            1920,
+            2880,
+            3840
+          ]
+        }
+      ]
+    },
+    "repeatRoute": {
+      "generation": 15,
+      "durationTick": 15360,
+      "tempos": [
+        {
+          "tick": 0,
+          "bpm": 120
+        }
+      ],
+      "occurrences": [
+        {
+          "bar": 0,
+          "occurrence": 0,
+          "meterNumerator": 4,
+          "meterDenominator": 4,
+          "startTick": 0,
+          "endTick": 3840,
+          "startMs": 0,
+          "endMs": 2000
+        },
+        {
+          "bar": 1,
+          "occurrence": 0,
+          "meterNumerator": 4,
+          "meterDenominator": 4,
+          "startTick": 3840,
+          "endTick": 7680,
+          "startMs": 2000,
+          "endMs": 4000
+        },
+        {
+          "bar": 0,
+          "occurrence": 1,
+          "meterNumerator": 4,
+          "meterDenominator": 4,
+          "startTick": 7680,
+          "endTick": 11520,
+          "startMs": 4000,
+          "endMs": 6000
+        },
+        {
+          "bar": 3,
+          "occurrence": 0,
+          "meterNumerator": 4,
+          "meterDenominator": 4,
+          "startTick": 11520,
+          "endTick": 15360,
+          "startMs": 6000,
+          "endMs": 8000
+        }
+      ]
+    },
+    "freeTime": {
+      "generation": 16,
+      "durationTick": 1200,
+      "tempos": [
+        {
+          "tick": 0,
+          "bpm": 120
+        }
+      ],
+      "occurrences": [
+        {
+          "bar": 0,
+          "occurrence": 0,
+          "meterNumerator": 6,
+          "meterDenominator": 8,
+          "startTick": 0,
+          "endTick": 1200,
+          "startMs": 0,
+          "endMs": 625,
+          "clickTicks": [
+            0,
+            480,
+            960
+          ]
+        }
+      ]
+    }
+  },
+  "cases": [
+    {
+      "name": "unsorted-array-preserves-written-identities",
+      "timeline": "straight",
+      "backing": {
+        "offsetMs": 0,
+        "anchors": [
+          {
+            "bar": 1,
+            "occurrence": 0,
+            "ratio": 0,
+            "audioMs": 4000
+          },
+          {
+            "bar": 0,
+            "occurrence": 0,
+            "ratio": 0,
+            "audioMs": 1000
+          }
+        ]
+      },
+      "samples": [
+        {
+          "tick": 0,
+          "sourceMs": 1000
+        },
+        {
+          "tick": 960,
+          "sourceMs": 1750
+        },
+        {
+          "tick": 7680,
+          "sourceMs": 7000
+        }
+      ]
+    },
+    {
+      "name": "unanchored-unit-slope",
+      "timeline": "straight",
+      "backing": {
+        "offsetMs": 0,
+        "anchors": []
+      },
+      "samples": [
+        {
+          "tick": 0,
+          "sourceMs": 0
+        },
+        {
+          "tick": 960,
+          "sourceMs": 500
+        },
+        {
+          "tick": 3840,
+          "sourceMs": 2000
+        },
+        {
+          "tick": 15360,
+          "sourceMs": 8000
+        }
+      ]
+    },
+    {
+      "name": "positive-offset-subtracts",
+      "timeline": "straight",
+      "backing": {
+        "offsetMs": 120,
+        "anchors": []
+      },
+      "samples": [
+        {
+          "tick": 0,
+          "sourceMs": -120
+        },
+        {
+          "tick": 3840,
+          "sourceMs": 1880
+        }
+      ]
+    },
+    {
+      "name": "negative-offset-adds",
+      "timeline": "straight",
+      "backing": {
+        "offsetMs": -120,
+        "anchors": []
+      },
+      "samples": [
+        {
+          "tick": 0,
+          "sourceMs": 120
+        },
+        {
+          "tick": 3840,
+          "sourceMs": 2120
+        }
+      ]
+    },
+    {
+      "name": "one-anchor-translation",
+      "timeline": "straight",
+      "backing": {
+        "offsetMs": 0,
+        "anchors": [
+          {
+            "bar": 1,
+            "occurrence": 0,
+            "ratio": 0,
+            "audioMs": 2500
+          }
+        ]
+      },
+      "samples": [
+        {
+          "tick": 0,
+          "sourceMs": 500
+        },
+        {
+          "tick": 3840,
+          "sourceMs": 2500
+        },
+        {
+          "tick": 7680,
+          "sourceMs": 4500
+        }
+      ]
+    },
+    {
+      "name": "two-anchor-endpoint-extrapolation",
+      "timeline": "straight",
+      "backing": {
+        "offsetMs": 0,
+        "anchors": [
+          {
+            "bar": 0,
+            "occurrence": 0,
+            "ratio": 0,
+            "audioMs": 1000
+          },
+          {
+            "bar": 1,
+            "occurrence": 0,
+            "ratio": 0,
+            "audioMs": 4000
+          }
+        ]
+      },
+      "samples": [
+        {
+          "tick": 0,
+          "sourceMs": 1000
+        },
+        {
+          "tick": 960,
+          "sourceMs": 1750
+        },
+        {
+          "tick": 7680,
+          "sourceMs": 7000
+        },
+        {
+          "tick": 15360,
+          "sourceMs": 13000
+        }
+      ]
+    },
+    {
+      "name": "intra-bar-tempo-integration",
+      "timeline": "tempoChange",
+      "backing": {
+        "offsetMs": 0,
+        "anchors": []
+      },
+      "samples": [
+        {
+          "tick": 0,
+          "sourceMs": 0
+        },
+        {
+          "tick": 960,
+          "sourceMs": 500
+        },
+        {
+          "tick": 1920,
+          "sourceMs": 1500
+        },
+        {
+          "tick": 3840,
+          "sourceMs": 3500
+        },
+        {
+          "tick": 7680,
+          "sourceMs": 7500
+        }
+      ]
+    },
+    {
+      "name": "intra-bar-anchor-uses-tempo-segments",
+      "timeline": "tempoChange",
+      "backing": {
+        "offsetMs": 0,
+        "anchors": [
+          {
+            "bar": 0,
+            "occurrence": 0,
+            "ratio": 0.5,
+            "audioMs": 2000
+          }
+        ]
+      },
+      "samples": [
+        {
+          "tick": 960,
+          "sourceMs": 1000
+        },
+        {
+          "tick": 1920,
+          "sourceMs": 2000
+        },
+        {
+          "tick": 3840,
+          "sourceMs": 4000
+        }
+      ]
+    },
+    {
+      "name": "six-eight-denominator-grid",
+      "timeline": "sixEight",
+      "backing": {
+        "offsetMs": 0,
+        "anchors": []
+      },
+      "samples": [
+        {
+          "tick": 480,
+          "sourceMs": 250
+        },
+        {
+          "tick": 2880,
+          "sourceMs": 1500
+        },
+        {
+          "tick": 5760,
+          "sourceMs": 3000
+        }
+      ],
+      "gridWindow": {
+        "startMs": 0,
+        "endMs": 1499
+      },
+      "gridTicks": [
+        0,
+        480,
+        960,
+        1440,
+        1920,
+        2400
+      ]
+    },
+    {
+      "name": "pickup-uses-performed-bounds",
+      "timeline": "pickup",
+      "backing": {
+        "offsetMs": 0,
+        "anchors": [
+          {
+            "bar": 0,
+            "occurrence": 0,
+            "ratio": 1,
+            "audioMs": 900
+          }
+        ]
+      },
+      "samples": [
+        {
+          "tick": 0,
+          "sourceMs": 400
+        },
+        {
+          "tick": 480,
+          "sourceMs": 650
+        },
+        {
+          "tick": 960,
+          "sourceMs": 900
+        },
+        {
+          "tick": 4800,
+          "sourceMs": 2900
+        }
+      ]
+    },
+    {
+      "name": "repeat-occurrence-is-explicit",
+      "timeline": "repeatRoute",
+      "backing": {
+        "offsetMs": 0,
+        "anchors": [
+          {
+            "bar": 0,
+            "occurrence": 1,
+            "ratio": 0.5,
+            "audioMs": 6000
+          }
+        ]
+      },
+      "samples": [
+        {
+          "tick": 0,
+          "sourceMs": 1000
+        },
+        {
+          "tick": 7680,
+          "sourceMs": 5000
+        },
+        {
+          "tick": 9600,
+          "sourceMs": 6000
+        },
+        {
+          "tick": 11520,
+          "sourceMs": 7000
+        }
+      ],
+      "selection": {
+        "points": [
+          {
+            "tick": 0,
+            "anchor": {
+              "bar": 0,
+              "occurrence": 0,
+              "ratio": 0
+            }
+          },
+          {
+            "tick": 7680,
+            "anchor": {
+              "bar": 0,
+              "occurrence": 1,
+              "ratio": 0
+            }
+          }
+        ],
+        "spans": [
+          {
+            "startTick": 0,
+            "endTick": 3840
+          },
+          {
+            "startTick": 7680,
+            "endTick": 11520
+          }
+        ]
+      },
+      "expectedSelection": {
+        "points": [
+          1000,
+          5000
+        ],
+        "spans": [
+          {
+            "startMs": 1000,
+            "endMs": 3000
+          },
+          {
+            "startMs": 5000,
+            "endMs": 7000
+          }
+        ]
+      }
+    },
+    {
+      "name": "free-time-grid-clips-at-end",
+      "timeline": "freeTime",
+      "backing": {
+        "offsetMs": 0,
+        "anchors": []
+      },
+      "samples": [
+        {
+          "tick": 1200,
+          "sourceMs": 625
+        }
+      ],
+      "gridWindow": {
+        "startMs": 0,
+        "endMs": 625
+      },
+      "gridTicks": [
+        0,
+        480,
+        960
+      ]
+    }
+  ],
+  "invalidMaps": [
+    {
+      "name": "duplicate-score-seam",
+      "timeline": "straight",
+      "backing": {
+        "offsetMs": 0,
+        "anchors": [
+          {
+            "bar": 0,
+            "occurrence": 0,
+            "ratio": 1,
+            "audioMs": 1000
+          },
+          {
+            "bar": 1,
+            "occurrence": 0,
+            "ratio": 0,
+            "audioMs": 2000
+          }
+        ]
+      }
+    },
+    {
+      "name": "crossed-audio-neighbors",
+      "timeline": "straight",
+      "backing": {
+        "offsetMs": 0,
+        "anchors": [
+          {
+            "bar": 0,
+            "occurrence": 0,
+            "ratio": 0,
+            "audioMs": 2000
+          },
+          {
+            "bar": 1,
+            "occurrence": 0,
+            "ratio": 0,
+            "audioMs": 1000
+          }
+        ]
+      }
+    },
+    {
+      "name": "equal-audio-neighbors",
+      "timeline": "straight",
+      "backing": {
+        "offsetMs": 0,
+        "anchors": [
+          {
+            "bar": 0,
+            "occurrence": 0,
+            "ratio": 0,
+            "audioMs": 1000
+          },
+          {
+            "bar": 1,
+            "occurrence": 0,
+            "ratio": 0,
+            "audioMs": 1000
+          }
+        ]
+      }
+    },
+    {
+      "name": "skipped-ending-absent",
+      "timeline": "repeatRoute",
+      "backing": {
+        "offsetMs": 0,
+        "anchors": [
+          {
+            "bar": 2,
+            "occurrence": 0,
+            "ratio": 0,
+            "audioMs": 1000
+          }
+        ]
+      }
+    },
+    {
+      "name": "repeat-occurrence-absent",
+      "timeline": "repeatRoute",
+      "backing": {
+        "offsetMs": 0,
+        "anchors": [
+          {
+            "bar": 0,
+            "occurrence": 2,
+            "ratio": 0,
+            "audioMs": 1000
+          }
+        ]
+      }
+    },
+    {
+      "name": "ratio-before-bar",
+      "timeline": "straight",
+      "backing": {
+        "offsetMs": 0,
+        "anchors": [
+          {
+            "bar": 0,
+            "occurrence": 0,
+            "ratio": -0.1,
+            "audioMs": 1000
+          }
+        ]
+      }
+    },
+    {
+      "name": "ratio-after-bar",
+      "timeline": "straight",
+      "backing": {
+        "offsetMs": 0,
+        "anchors": [
+          {
+            "bar": 0,
+            "occurrence": 0,
+            "ratio": 1.1,
+            "audioMs": 1000
+          }
+        ]
+      }
+    }
+  ],
+  "moves": [
+    {
+      "name": "unsorted-array-keeps-selected-index",
+      "timeline": "straight",
+      "backing": {
+        "offsetMs": 0,
+        "anchors": [
+          {
+            "bar": 1,
+            "occurrence": 0,
+            "ratio": 0,
+            "audioMs": 4000
+          },
+          {
+            "bar": 0,
+            "occurrence": 0,
+            "ratio": 0,
+            "audioMs": 1000
+          }
+        ]
+      },
+      "index": 0,
+      "sourceMs": 8000,
+      "durationMs": 16000,
+      "expectedAudioMs": 8000
+    },
+    {
+      "name": "positive-offset-stores-pre-offset-value",
+      "timeline": "straight",
+      "backing": {
+        "offsetMs": 120,
+        "anchors": [
+          {
+            "bar": 1,
+            "occurrence": 0,
+            "ratio": 0,
+            "audioMs": 2500
+          }
+        ]
+      },
+      "index": 0,
+      "sourceMs": 8000,
+      "durationMs": 16000,
+      "expectedAudioMs": 8120
+    },
+    {
+      "name": "negative-offset-stores-pre-offset-value",
+      "timeline": "straight",
+      "backing": {
+        "offsetMs": -120,
+        "anchors": [
+          {
+            "bar": 1,
+            "occurrence": 0,
+            "ratio": 0,
+            "audioMs": 2500
+          }
+        ]
+      },
+      "index": 0,
+      "sourceMs": 8000,
+      "durationMs": 16000,
+      "expectedAudioMs": 7880
+    },
+    {
+      "name": "no-op-is-equal",
+      "timeline": "straight",
+      "backing": {
+        "offsetMs": 120,
+        "anchors": [
+          {
+            "bar": 1,
+            "occurrence": 0,
+            "ratio": 0,
+            "audioMs": 2500
+          }
+        ]
+      },
+      "index": 0,
+      "sourceMs": 2380,
+      "durationMs": 16000,
+      "expectedAudioMs": 2500
+    },
+    {
+      "name": "neighbor-crossing-rejects",
+      "timeline": "straight",
+      "backing": {
+        "offsetMs": 0,
+        "anchors": [
+          {
+            "bar": 0,
+            "occurrence": 0,
+            "ratio": 0,
+            "audioMs": 0
+          },
+          {
+            "bar": 1,
+            "occurrence": 0,
+            "ratio": 0,
+            "audioMs": 2000
+          },
+          {
+            "bar": 2,
+            "occurrence": 0,
+            "ratio": 0,
+            "audioMs": 4000
+          }
+        ]
+      },
+      "index": 1,
+      "sourceMs": 5000,
+      "durationMs": 16000,
+      "reject": true
+    },
+    {
+      "name": "negative-stored-audio-rejects",
+      "timeline": "straight",
+      "backing": {
+        "offsetMs": -120,
+        "anchors": [
+          {
+            "bar": 0,
+            "occurrence": 0,
+            "ratio": 0,
+            "audioMs": 0
+          }
+        ]
+      },
+      "index": 0,
+      "sourceMs": 0,
+      "durationMs": 16000,
+      "reject": true
+    },
+    {
+      "name": "before-source-rejects",
+      "timeline": "straight",
+      "backing": {
+        "offsetMs": 0,
+        "anchors": [
+          {
+            "bar": 1,
+            "occurrence": 0,
+            "ratio": 0,
+            "audioMs": 2500
+          }
+        ]
+      },
+      "index": 0,
+      "sourceMs": -1,
+      "durationMs": 16000,
+      "reject": true
+    },
+    {
+      "name": "after-source-rejects",
+      "timeline": "straight",
+      "backing": {
+        "offsetMs": 0,
+        "anchors": [
+          {
+            "bar": 1,
+            "occurrence": 0,
+            "ratio": 0,
+            "audioMs": 2500
+          }
+        ]
+      },
+      "index": 0,
+      "sourceMs": 16001,
+      "durationMs": 16000,
+      "reject": true
+    }
+  ]
+}

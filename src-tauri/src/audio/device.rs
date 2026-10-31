@@ -1,12 +1,19 @@
 //! Device ownership and bounded controls. Only the stream callback owns the renderer;
 //! resource work, stream creation, status events and retired allocations run elsewhere.
 use super::{
+    audition::{AuditionClip, AuditionConsumer, AuditionMixer, AuditionProducer, audition_channel},
     backing::BackingMap,
     decode::{DecodedAudio, decode_audio},
     plan::PlaybackPlan,
+    playback::PlaybackSpan,
+    practice::{
+        ClickVoice, CountInClock, CountInSnapshot, MetronomeSettings, PracticeTempo, PulsePosition,
+        RenderTempo, progressive_ratio,
+    },
+    reference_sync::ReferenceSyncMap,
     renderer::{PreparedMix, Renderer},
     resources::AudioResources,
-    voices::{resource_requests, voice_id_for_track},
+    voices::{drum_kit_for_track, resource_requests, track_locked, voice_id_for_track},
 };
 use crate::settings::{ChannelMix, DocumentSettings};
 use cpal::{
@@ -19,36 +26,71 @@ use std::{
     path::PathBuf,
     sync::{
         Arc, Mutex,
-        atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicU64, Ordering},
         mpsc,
     },
     thread,
     time::Duration,
 };
 
+fn reference_timing_changed(
+    before: Option<&crate::settings::BackingSettings>,
+    after: Option<&crate::settings::BackingSettings>,
+) -> bool {
+    if !before.is_some_and(|b| b.reference_sync.is_some())
+        && !after.is_some_and(|b| b.reference_sync.is_some())
+    {
+        return false;
+    }
+    match (before, after) {
+        (Some(a), Some(b)) => {
+            a.asset_id != b.asset_id
+                || a.offset_ms != b.offset_ms
+                || a.anchors != b.anchors
+                || a.reference_sync != b.reference_sync
+        }
+        _ => true,
+    }
+}
+
 const CONTROL_CAPACITY: usize = 64;
 const BLOCK: usize = 512;
-#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+pub use super::practice::PracticeSettings;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct PracticeSettings {
-    pub speed: f64,
-    pub metronome: bool,
+pub enum PracticePhase {
+    Idle,
+    CountIn,
+    Playing,
+    Paused,
+    Ended,
 }
-impl Default for PracticeSettings {
-    fn default() -> Self {
-        Self {
-            speed: 1.0,
-            metronome: false,
-        }
-    }
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PracticePulse {
+    pub serial: u64,
+    pub beat: u32,
+    pub beats_per_bar: u32,
+    pub accent: bool,
+    pub counting: bool,
 }
-impl PracticeSettings {
-    fn validate(self) -> Result<(), String> {
-        if !self.speed.is_finite() || !(0.25..=2.0).contains(&self.speed) {
-            return Err("Speed must be between 25% and 200%.".into());
-        }
-        Ok(())
-    }
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PracticeStatus {
+    pub settings: PracticeSettings,
+    pub phase: PracticePhase,
+    pub count_in_remaining: u32,
+    pub completed_passes: u64,
+    pub effective_ratio: f64,
+    pub current_bpm: f64,
+    pub pulse: Option<PracticePulse>,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PracticeLoop {
+    pub start_tick: f64,
+    pub end_tick: f64,
 }
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -74,6 +116,14 @@ pub struct NativeAudioStatus {
     pub rendered_frames: u64,
     pub output_peak: f64,
     pub backing_duration_seconds: Option<f64>,
+    pub practice: PracticeStatus,
+    pub r#loop: Option<PracticeLoop>,
+    pub range: Option<PlaybackSpan>,
+    /// Clips that began sounding in the callback since the process started.
+    pub audition_serial: u64,
+    /// Peak absolute sample of the latest clip's own samples, before summing with
+    /// playback, clamping or downmix.
+    pub audition_peak: f64,
 }
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(
@@ -85,6 +135,12 @@ pub struct NativeAudioStatus {
 pub enum TransportCommand {
     Play {
         generation: u64,
+    },
+    PlayRange {
+        generation: u64,
+        start_tick: f64,
+        #[serde(deserialize_with = "crate::edit_types::required_nullable")]
+        end_tick: Option<f64>,
     },
     Pause {
         generation: u64,
@@ -99,9 +155,9 @@ pub enum TransportCommand {
         generation: u64,
         tick: f64,
     },
-    SetSpeed {
+    SetPractice {
         generation: u64,
-        speed: f64,
+        settings: PracticeSettings,
     },
     SetLoop {
         generation: u64,
@@ -110,10 +166,6 @@ pub enum TransportCommand {
     },
     ClearLoop {
         generation: u64,
-    },
-    SetMetronome {
-        generation: u64,
-        enabled: bool,
     },
     SelectDevice {
         generation: u64,
@@ -124,25 +176,36 @@ impl TransportCommand {
     fn generation(&self) -> u64 {
         match self {
             Self::Play { generation }
+            | Self::PlayRange { generation, .. }
             | Self::Pause { generation }
             | Self::Stop { generation }
             | Self::Invalidate { generation }
             | Self::SeekTick { generation, .. }
-            | Self::SetSpeed { generation, .. }
+            | Self::SetPractice { generation, .. }
             | Self::SetLoop { generation, .. }
             | Self::ClearLoop { generation }
-            | Self::SetMetronome { generation, .. }
             | Self::SelectDevice { generation, .. } => *generation,
         }
     }
     fn validate(&self, duration: f64) -> Result<(), &'static str> {
         match self {
+            Self::PlayRange {
+                start_tick,
+                end_tick,
+                ..
+            } if !start_tick.is_finite()
+                || *start_tick < 0.0
+                || *start_tick >= duration
+                || end_tick.is_some_and(|end| {
+                    !end.is_finite() || end <= *start_tick || end > duration
+                }) =>
+            {
+                Err("Select a valid playback passage within the score.")
+            }
             Self::SeekTick { tick, .. } if !tick.is_finite() || *tick < 0.0 || *tick > duration => {
                 Err("Seek position is outside the score.")
             }
-            Self::SetSpeed { speed, .. } if !speed.is_finite() || !(0.25..=2.0).contains(speed) => {
-                Err("Speed must be between 25% and 200%.")
-            }
+            Self::SetPractice { settings, .. } => settings.validate(false),
             Self::SetLoop {
                 start_tick,
                 end_tick,
@@ -159,8 +222,208 @@ impl TransportCommand {
         }
     }
 }
+#[cfg(test)]
+mod selection_command_contract_tests {
+    use super::TransportCommand;
+
+    #[test]
+    fn range_command_rejects_invalid_span_before_state_mutation() {
+        let cases: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../tests/selection-playback-protocol.json"
+        ))
+        .unwrap();
+        let duration = cases["durationTick"].as_f64().unwrap();
+        for case in cases["commands"].as_array().unwrap() {
+            if case["decode"] == false {
+                continue;
+            }
+            let command: TransportCommand = serde_json::from_value(case["value"].clone()).unwrap();
+            assert_eq!(
+                command.validate(duration).is_ok(),
+                case["valid"].as_bool().unwrap(),
+                "{}",
+                case["name"]
+            );
+        }
+        for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert!(
+                TransportCommand::PlayRange {
+                    generation: 7,
+                    start_tick: value,
+                    end_tick: None
+                }
+                .validate(duration)
+                .is_err()
+            );
+            assert!(
+                TransportCommand::PlayRange {
+                    generation: 7,
+                    start_tick: 0.0,
+                    end_tick: Some(value)
+                }
+                .validate(duration)
+                .is_err()
+            );
+        }
+    }
+}
+// All callback runtime fields are scalar atomics, read together under sequence.
+struct SharedPractice {
+    kind: AtomicU8,
+    a: AtomicU64,
+    b: AtomicU64,
+    step: AtomicU64,
+    repetitions: AtomicU64,
+    enabled: AtomicBool,
+    volume: AtomicU64,
+    visual: AtomicBool,
+    bars: AtomicU8,
+    between: AtomicBool,
+}
+impl SharedPractice {
+    fn new() -> Self {
+        Self {
+            kind: AtomicU8::new(0),
+            a: AtomicU64::new(1f64.to_bits()),
+            b: AtomicU64::new(1f64.to_bits()),
+            step: AtomicU64::new(0),
+            repetitions: AtomicU64::new(1),
+            enabled: AtomicBool::new(false),
+            volume: AtomicU64::new(0.4f64.to_bits()),
+            visual: AtomicBool::new(false),
+            bars: AtomicU8::new(0),
+            between: AtomicBool::new(false),
+        }
+    }
+    fn store(&self, value: PracticeSettings) {
+        let (kind, a, b, step, repetitions) = match value.tempo {
+            PracticeTempo::Relative { ratio } => (0, ratio, 0.0, 0.0, 1),
+            PracticeTempo::Fixed { bpm } => (1, bpm, 0.0, 0.0, 1),
+            PracticeTempo::Progressive {
+                start,
+                end,
+                step,
+                repetitions,
+            } => (2, start, end, step, repetitions),
+        };
+        self.kind.store(kind, Ordering::Relaxed);
+        self.a.store(a.to_bits(), Ordering::Relaxed);
+        self.b.store(b.to_bits(), Ordering::Relaxed);
+        self.step.store(step.to_bits(), Ordering::Relaxed);
+        self.repetitions
+            .store(repetitions.into(), Ordering::Relaxed);
+        self.enabled
+            .store(value.metronome.enabled, Ordering::Relaxed);
+        self.volume
+            .store(value.metronome.volume.to_bits(), Ordering::Relaxed);
+        self.visual.store(value.metronome.visual, Ordering::Relaxed);
+        self.bars.store(value.count_in.bars, Ordering::Relaxed);
+        self.between
+            .store(value.count_in.between_loops, Ordering::Relaxed);
+    }
+    fn read(&self) -> PracticeSettings {
+        let a = f64::from_bits(self.a.load(Ordering::Relaxed));
+        PracticeSettings {
+            tempo: match self.kind.load(Ordering::Relaxed) {
+                1 => PracticeTempo::Fixed { bpm: a },
+                2 => PracticeTempo::Progressive {
+                    start: a,
+                    end: f64::from_bits(self.b.load(Ordering::Relaxed)),
+                    step: f64::from_bits(self.step.load(Ordering::Relaxed)),
+                    repetitions: self.repetitions.load(Ordering::Relaxed) as u32,
+                },
+                _ => PracticeTempo::Relative { ratio: a },
+            },
+            metronome: MetronomeSettings {
+                enabled: self.enabled.load(Ordering::Relaxed),
+                volume: f64::from_bits(self.volume.load(Ordering::Relaxed)),
+                visual: self.visual.load(Ordering::Relaxed),
+            },
+            count_in: super::practice::CountInSettings {
+                bars: self.bars.load(Ordering::Relaxed),
+                between_loops: self.between.load(Ordering::Relaxed),
+            },
+        }
+    }
+}
+struct SharedCount {
+    present: AtomicBool,
+    bars: AtomicU8,
+    numerator: AtomicU64,
+    denominator: AtomicU64,
+    bpm: AtomicU64,
+    rate: AtomicU64,
+    total: AtomicU64,
+    elapsed: AtomicU64,
+    emitted: AtomicU64,
+}
+impl SharedCount {
+    fn new() -> Self {
+        Self {
+            present: AtomicBool::new(false),
+            bars: AtomicU8::new(0),
+            numerator: AtomicU64::new(0),
+            denominator: AtomicU64::new(0),
+            bpm: AtomicU64::new(0),
+            rate: AtomicU64::new(0),
+            total: AtomicU64::new(0),
+            elapsed: AtomicU64::new(0),
+            emitted: AtomicU64::new(0),
+        }
+    }
+    fn store(&self, value: Option<CountInSnapshot>) {
+        self.present.store(value.is_some(), Ordering::Relaxed);
+        if let Some(v) = value {
+            self.bars.store(v.bars, Ordering::Relaxed);
+            self.numerator.store(v.numerator.into(), Ordering::Relaxed);
+            self.denominator
+                .store(v.denominator.into(), Ordering::Relaxed);
+            self.bpm.store(v.bpm.to_bits(), Ordering::Relaxed);
+            self.rate.store(v.rate.into(), Ordering::Relaxed);
+            self.total.store(v.total_frames, Ordering::Relaxed);
+            self.elapsed.store(v.elapsed_frames, Ordering::Relaxed);
+            self.emitted
+                .store(v.emitted_pulses.into(), Ordering::Relaxed);
+        }
+    }
+    fn read(&self) -> Option<CountInSnapshot> {
+        self.present
+            .load(Ordering::Relaxed)
+            .then(|| CountInSnapshot {
+                bars: self.bars.load(Ordering::Relaxed),
+                numerator: self.numerator.load(Ordering::Relaxed) as u32,
+                denominator: self.denominator.load(Ordering::Relaxed) as u32,
+                bpm: f64::from_bits(self.bpm.load(Ordering::Relaxed)),
+                rate: self.rate.load(Ordering::Relaxed) as u32,
+                total_frames: self.total.load(Ordering::Relaxed),
+                elapsed_frames: self.elapsed.load(Ordering::Relaxed),
+                emitted_pulses: self.emitted.load(Ordering::Relaxed) as u32,
+            })
+    }
+}
+#[derive(Clone, Copy)]
+struct RuntimeSnapshot {
+    generation: u64,
+    tick: f64,
+    seconds: f64,
+    phase: PracticePhase,
+    resume_count: bool,
+    count: Option<CountInSnapshot>,
+    passes: u64,
+    pulse: Option<PracticePulse>,
+    serial: u64,
+    interrupted_count: bool,
+    settings: PracticeSettings,
+    loop_range: Option<(f64, f64)>,
+    range: Option<PlaybackSpan>,
+    fault: bool,
+    frames: u64,
+    peak: f64,
+}
 struct SharedStatus {
     sequence: AtomicU64,
+    barrier: AtomicU64,
+    barrier_request: AtomicU64,
     generation: AtomicU64,
     desired: AtomicU64,
     invalidated: AtomicU64,
@@ -172,73 +435,272 @@ struct SharedStatus {
     duration: AtomicU64,
     speed: AtomicU64,
     metronome: AtomicBool,
-    fault: AtomicU8,
+    fault: AtomicU64,
     frames: AtomicU64,
     peak: AtomicU64,
     shutdown: AtomicBool,
     device: Mutex<Option<String>>,
     backing_duration: AtomicU64,
+    settings: SharedPractice,
+    phase: AtomicU8,
+    resume_count: AtomicBool,
+    count: SharedCount,
+    passes: AtomicU64,
+    serial: AtomicU64,
+    pulse_present: AtomicBool,
+    pulse_serial: AtomicU64,
+    pulse_beat: AtomicU64,
+    pulse_beats: AtomicU64,
+    pulse_accent: AtomicBool,
+    pulse_counting: AtomicBool,
+    interrupted_count: AtomicBool,
+    loop_start: AtomicU64,
+    loop_end: AtomicU64,
+    range_present: AtomicBool,
+    range_start: AtomicU64,
+    range_end: AtomicU64,
+    current_bpm: AtomicU64,
+    audition_serial: AtomicU64,
+    audition_peak: AtomicU64,
+    /// Sample rate of the open output stream; zero until one has been opened.
+    audition_rate: AtomicU32,
 }
 impl SharedStatus {
     fn new() -> Self {
         Self {
             sequence: AtomicU64::new(0),
+            barrier: AtomicU64::new(0),
+            barrier_request: AtomicU64::new(0),
             generation: AtomicU64::new(0),
             desired: AtomicU64::new(0),
             invalidated: AtomicU64::new(0),
             epoch: AtomicU64::new(0),
             ready: AtomicBool::new(false),
             playing: AtomicBool::new(false),
-            tick: AtomicU64::new(0f64.to_bits()),
-            seconds: AtomicU64::new(0f64.to_bits()),
-            duration: AtomicU64::new(0f64.to_bits()),
+            tick: AtomicU64::new(0),
+            seconds: AtomicU64::new(0),
+            duration: AtomicU64::new(0),
             speed: AtomicU64::new(1f64.to_bits()),
             metronome: AtomicBool::new(false),
-            fault: AtomicU8::new(0),
+            fault: AtomicU64::new(0),
             frames: AtomicU64::new(0),
-            peak: AtomicU64::new(0f64.to_bits()),
+            peak: AtomicU64::new(0),
             shutdown: AtomicBool::new(false),
             device: Mutex::new(None),
             backing_duration: AtomicU64::new(f64::NAN.to_bits()),
+            settings: SharedPractice::new(),
+            phase: AtomicU8::new(0),
+            resume_count: AtomicBool::new(false),
+            count: SharedCount::new(),
+            passes: AtomicU64::new(0),
+            serial: AtomicU64::new(0),
+            pulse_present: AtomicBool::new(false),
+            pulse_serial: AtomicU64::new(0),
+            pulse_beat: AtomicU64::new(0),
+            pulse_beats: AtomicU64::new(0),
+            pulse_accent: AtomicBool::new(false),
+            pulse_counting: AtomicBool::new(false),
+            interrupted_count: AtomicBool::new(false),
+            loop_start: AtomicU64::new(f64::NAN.to_bits()),
+            loop_end: AtomicU64::new(0),
+            range_present: AtomicBool::new(false),
+            range_start: AtomicU64::new(0),
+            range_end: AtomicU64::new(0),
+            current_bpm: AtomicU64::new(0),
+            audition_serial: AtomicU64::new(0),
+            audition_peak: AtomicU64::new(0),
+            audition_rate: AtomicU32::new(0),
         }
     }
     fn read(&self) -> NativeAudioStatus {
+        self.snapshot().0
+    }
+    fn read_fields(&self) -> (NativeAudioStatus, RuntimeSnapshot) {
+        let fault = self.is_faulted();
+        let backing = f64::from_bits(self.backing_duration.load(Ordering::Relaxed));
+        let settings = self.settings.read();
+        let phase = match self.phase.load(Ordering::Relaxed) {
+            1 => PracticePhase::CountIn,
+            2 => PracticePhase::Playing,
+            3 => PracticePhase::Paused,
+            4 => PracticePhase::Ended,
+            _ => PracticePhase::Idle,
+        };
+        let pulse = self
+            .pulse_present
+            .load(Ordering::Relaxed)
+            .then(|| PracticePulse {
+                serial: self.pulse_serial.load(Ordering::Relaxed),
+                beat: self.pulse_beat.load(Ordering::Relaxed) as u32,
+                beats_per_bar: self.pulse_beats.load(Ordering::Relaxed) as u32,
+                accent: self.pulse_accent.load(Ordering::Relaxed),
+                counting: self.pulse_counting.load(Ordering::Relaxed),
+            });
+        let count = self.count.read();
+        let loop_start = f64::from_bits(self.loop_start.load(Ordering::Relaxed));
+        let loop_range = loop_start.is_finite().then(|| {
+            (
+                loop_start,
+                f64::from_bits(self.loop_end.load(Ordering::Relaxed)),
+            )
+        });
+        let snapshot = RuntimeSnapshot {
+            generation: self.generation.load(Ordering::Relaxed),
+            tick: f64::from_bits(self.tick.load(Ordering::Relaxed)),
+            seconds: f64::from_bits(self.seconds.load(Ordering::Relaxed)),
+            phase,
+            resume_count: self.resume_count.load(Ordering::Relaxed),
+            count,
+            passes: self.passes.load(Ordering::Relaxed),
+            pulse,
+            serial: self.serial.load(Ordering::Relaxed),
+            interrupted_count: self.interrupted_count.load(Ordering::Relaxed),
+            settings,
+            loop_range,
+            range: self
+                .range_present
+                .load(Ordering::Relaxed)
+                .then(|| PlaybackSpan {
+                    start_tick: f64::from_bits(self.range_start.load(Ordering::Relaxed)),
+                    end_tick: f64::from_bits(self.range_end.load(Ordering::Relaxed)),
+                }),
+            fault,
+            frames: self.frames.load(Ordering::Relaxed),
+            peak: f64::from_bits(self.peak.load(Ordering::Relaxed)),
+        };
+        // Acquire pairs with the Release increment, so a new serial never shows a stale peak.
+        let audition_serial = self.audition_serial.load(Ordering::Acquire);
+        let status = NativeAudioStatus {
+            range: snapshot.range,
+            generation: snapshot.generation,
+            desired_generation: self.desired.load(Ordering::Acquire),
+            ready: self.ready.load(Ordering::Relaxed) && !fault,
+            playing: self.playing.load(Ordering::Relaxed) && !fault,
+            tick: snapshot.tick,
+            seconds: snapshot.seconds,
+            duration_seconds: f64::from_bits(self.duration.load(Ordering::Relaxed)),
+            speed: f64::from_bits(self.speed.load(Ordering::Relaxed)),
+            metronome: self.metronome.load(Ordering::Relaxed),
+            error: fault.then(|| {
+                "Audio output stopped. Select an available output device to recover.".into()
+            }),
+            device_id: self.device.lock().unwrap().clone(),
+            rendered_frames: self.frames.load(Ordering::Relaxed),
+            output_peak: f64::from_bits(self.peak.load(Ordering::Relaxed)),
+            backing_duration_seconds: backing.is_finite().then_some(backing),
+            practice: PracticeStatus {
+                settings,
+                phase: if fault { PracticePhase::Paused } else { phase },
+                count_in_remaining: count_remaining(count),
+                completed_passes: snapshot.passes,
+                effective_ratio: f64::from_bits(self.speed.load(Ordering::Relaxed)),
+                current_bpm: f64::from_bits(self.current_bpm.load(Ordering::Relaxed)),
+                pulse,
+            },
+            r#loop: loop_range.map(|(start_tick, end_tick)| PracticeLoop {
+                start_tick,
+                end_tick,
+            }),
+            audition_serial,
+            audition_peak: f64::from_bits(self.audition_peak.load(Ordering::Relaxed)),
+        };
+        (status, snapshot)
+    }
+    fn snapshot(&self) -> (NativeAudioStatus, RuntimeSnapshot) {
         loop {
             let version = self.sequence.load(Ordering::Acquire);
             if version & 1 != 0 {
                 thread::yield_now();
                 continue;
             }
-            let fault = self.fault.load(Ordering::Acquire);
-            let backing = f64::from_bits(self.backing_duration.load(Ordering::Relaxed));
-            let status = NativeAudioStatus {
-                generation: self.generation.load(Ordering::Relaxed),
-                desired_generation: self.desired.load(Ordering::Acquire),
-                ready: self.ready.load(Ordering::Relaxed) && fault == 0,
-                playing: self.playing.load(Ordering::Relaxed) && fault == 0,
-                tick: f64::from_bits(self.tick.load(Ordering::Relaxed)),
-                seconds: f64::from_bits(self.seconds.load(Ordering::Relaxed)),
-                duration_seconds: f64::from_bits(self.duration.load(Ordering::Relaxed)),
-                speed: f64::from_bits(self.speed.load(Ordering::Relaxed)),
-                metronome: self.metronome.load(Ordering::Relaxed),
-                error: if fault != 0 {
-                    Some(
-                        "Audio output stopped. Select an available output device to recover."
-                            .into(),
-                    )
-                } else {
-                    None
-                },
-                device_id: self.device.lock().unwrap().clone(),
-                rendered_frames: self.frames.load(Ordering::Relaxed),
-                output_peak: f64::from_bits(self.peak.load(Ordering::Relaxed)),
-                backing_duration_seconds: backing.is_finite().then_some(backing),
-            };
+            let result = self.read_fields();
             if self.sequence.load(Ordering::Acquire) == version {
-                return status;
+                return result;
             }
         }
     }
+    fn is_faulted(&self) -> bool {
+        self.fault.load(Ordering::Acquire) == self.epoch.load(Ordering::Acquire).saturating_add(1)
+    }
+    fn mark_fault(&self) {
+        self.mark_fault_for_epoch(self.epoch.load(Ordering::Acquire));
+    }
+    fn mark_fault_for_epoch(&self, epoch: u64) {
+        self.fault
+            .fetch_max(epoch.saturating_add(1), Ordering::AcqRel);
+    }
+    // Control-thread epoch changes serialize with publication. A retired callback
+    // never overwrites fields belonging to its replacement stream.
+    fn next_epoch_snapshot(&self) -> (u64, RuntimeSnapshot) {
+        loop {
+            let version = self.sequence.load(Ordering::Acquire);
+            if version & 1 == 0
+                && self
+                    .sequence
+                    .compare_exchange(version, version + 1, Ordering::AcqRel, Ordering::Acquire)
+                    .is_ok()
+            {
+                let snapshot = self.read_fields().1;
+                let epoch = self.epoch.fetch_add(1, Ordering::AcqRel) + 1;
+                self.sequence.store(version + 2, Ordering::Release);
+                return (epoch, snapshot);
+            }
+            thread::yield_now();
+        }
+    }
+}
+fn count_remaining(count: Option<CountInSnapshot>) -> u32 {
+    count.map_or(0, |s| {
+        if s.elapsed_frames >= s.total_frames {
+            0
+        } else {
+            (u32::from(s.bars) * s.numerator)
+                .saturating_sub(s.emitted_pulses)
+                .saturating_add(1)
+                .min(u32::from(s.bars) * s.numerator)
+        }
+    })
+}
+fn validate_count(
+    plan: &PlaybackPlan,
+    settings: PracticeSettings,
+    rate: u32,
+) -> Result<(), String> {
+    if settings.count_in.bars == 0 {
+        return Ok(());
+    }
+    // Validate the slowest trainer coefficient and both ends: all intermediate
+    // speeds have durations between these bounds. No constructor can fail live.
+    let ratios = match settings.tempo {
+        PracticeTempo::Relative { ratio } => [ratio, ratio],
+        PracticeTempo::Progressive { start, end, .. } => [start, end],
+        PracticeTempo::Fixed { .. } => [1.0, 1.0],
+    };
+    let minimum = plan
+        .tempos
+        .iter()
+        .map(|t| t.bpm)
+        .fold(f64::INFINITY, f64::min);
+    let maximum = plan.tempos.iter().map(|t| t.bpm).fold(0.0, f64::max);
+    for occurrence in &plan.occurrences {
+        for authored in [minimum, maximum] {
+            for ratio in ratios {
+                let bpm = match settings.tempo {
+                    PracticeTempo::Fixed { bpm } => bpm,
+                    _ => authored * ratio,
+                };
+                CountInClock::new(
+                    settings.count_in.bars,
+                    occurrence.meter_numerator,
+                    occurrence.meter_denominator,
+                    bpm,
+                    rate,
+                )
+                .map_err(str::to_string)?;
+            }
+        }
+    }
+    Ok(())
 }
 
 /// The same callback transport is exercisable without an audio device.
@@ -250,16 +712,41 @@ pub struct CallbackTransport {
     tick: f64,
     seconds: f64,
     duration: f64,
-    speed: f64,
-    metronome: bool,
+    practice: PracticeSettings,
+    phase: PracticePhase,
+    resume_count: bool,
+    count: Option<CountInClock>,
+    click: ClickVoice,
+    passes: u64,
+    pulse: Option<PracticePulse>,
+    serial: u64,
+    interrupted_count: bool,
     loop_range: Option<(f64, f64)>,
+    range: Option<PlaybackSpan>,
     rate: u32,
     shared: Arc<SharedStatus>,
     epoch: u64,
+    frames: u64,
+    peak: f64,
+    audition: AuditionMixer,
 }
 impl CallbackTransport {
     pub fn headless(rate: u32) -> Self {
         Self::new(rate, Arc::new(SharedStatus::new()))
+    }
+    /// A headless transport with its own audition queue, for tests.
+    pub fn headless_with_audition(rate: u32) -> (Self, AuditionProducer) {
+        let (producer, consumer) = audition_channel();
+        let mut transport = Self::headless(rate);
+        transport.audition.attach(consumer);
+        (transport, producer)
+    }
+    /// Hand finished audition clips to `retire` so they are freed off the audio thread.
+    pub fn retire_auditions(
+        &mut self,
+        retire: impl FnMut(Box<AuditionClip>) -> Option<Box<AuditionClip>>,
+    ) {
+        self.audition.retire(retire);
     }
     fn new(rate: u32, shared: Arc<SharedStatus>) -> Self {
         let epoch = shared.epoch.load(Ordering::Acquire);
@@ -271,22 +758,72 @@ impl CallbackTransport {
             tick: 0.0,
             seconds: 0.0,
             duration: 0.0,
-            speed: 1.0,
-            metronome: false,
+            practice: PracticeSettings::default(),
+            phase: PracticePhase::Idle,
+            resume_count: false,
+            count: None,
+            click: ClickVoice::new(rate),
+            passes: 0,
+            pulse: None,
+            serial: 0,
+            interrupted_count: false,
             loop_range: None,
+            range: None,
             rate,
             shared,
             epoch,
+            frames: 0,
+            peak: 0.0,
+            audition: AuditionMixer::new(rate),
         }
     }
     pub fn status(&self) -> NativeAudioStatus {
         self.shared.read()
     }
+    fn resolved_tempo(&self) -> RenderTempo {
+        match self.practice.tempo {
+            PracticeTempo::Fixed { bpm } => RenderTempo::Fixed { bpm },
+            _ => RenderTempo::Relative {
+                ratio: progressive_ratio(&self.practice.tempo, self.passes),
+            },
+        }
+    }
+    fn actual_bpm(&self) -> f64 {
+        if let Some(count) = self.count {
+            return count.snapshot().bpm;
+        }
+        match self.resolved_tempo() {
+            RenderTempo::Fixed { bpm } => bpm,
+            RenderTempo::Relative { ratio } => {
+                self.renderer
+                    .as_ref()
+                    .map_or(0.0, |r| r.authored_bpm_at(self.tick))
+                    * ratio
+            }
+        }
+    }
+    fn resolve_renderer(&mut self) {
+        let tempo = self.resolved_tempo();
+        if let Some(renderer) = &mut self.renderer {
+            let _ = renderer.set_practice_tempo(tempo);
+            renderer.set_metronome_settings(self.practice.metronome);
+        }
+    }
     fn publish(&self) {
-        if self.shared.epoch.load(Ordering::Acquire) != self.epoch {
+        let version = self.shared.sequence.load(Ordering::Acquire);
+        if version & 1 != 0
+            || self
+                .shared
+                .sequence
+                .compare_exchange(version, version + 1, Ordering::AcqRel, Ordering::Acquire)
+                .is_err()
+        {
             return;
         }
-        self.shared.sequence.fetch_add(1, Ordering::AcqRel);
+        if self.shared.epoch.load(Ordering::Acquire) != self.epoch {
+            self.shared.sequence.store(version + 2, Ordering::Release);
+            return;
+        }
         self.shared
             .generation
             .store(self.generation, Ordering::Relaxed);
@@ -301,15 +838,82 @@ impl CallbackTransport {
         self.shared
             .duration
             .store(self.duration.to_bits(), Ordering::Relaxed);
+        let bpm = self.actual_bpm();
+        let authored = self
+            .renderer
+            .as_ref()
+            .map_or(0.0, |r| r.authored_bpm_at(self.tick));
+        self.shared.speed.store(
+            if authored > 0.0 { bpm / authored } else { 1.0 }.to_bits(),
+            Ordering::Relaxed,
+        );
         self.shared
-            .speed
-            .store(self.speed.to_bits(), Ordering::Relaxed);
+            .current_bpm
+            .store(bpm.to_bits(), Ordering::Relaxed);
         self.shared
             .metronome
-            .store(self.metronome, Ordering::Relaxed);
-        self.shared.sequence.fetch_add(1, Ordering::Release);
+            .store(self.practice.metronome.enabled, Ordering::Relaxed);
+        self.shared.settings.store(self.practice);
+        self.shared.phase.store(
+            match self.phase {
+                PracticePhase::Idle => 0,
+                PracticePhase::CountIn => 1,
+                PracticePhase::Playing => 2,
+                PracticePhase::Paused => 3,
+                PracticePhase::Ended => 4,
+            },
+            Ordering::Relaxed,
+        );
+        self.shared
+            .resume_count
+            .store(self.resume_count, Ordering::Relaxed);
+        self.shared.count.store(self.count.map(|c| c.snapshot()));
+        self.shared.passes.store(self.passes, Ordering::Relaxed);
+        self.shared.serial.store(self.serial, Ordering::Relaxed);
+        self.shared
+            .pulse_present
+            .store(self.pulse.is_some(), Ordering::Relaxed);
+        if let Some(p) = self.pulse {
+            self.shared.pulse_serial.store(p.serial, Ordering::Relaxed);
+            self.shared
+                .pulse_beat
+                .store(p.beat.into(), Ordering::Relaxed);
+            self.shared
+                .pulse_beats
+                .store(p.beats_per_bar.into(), Ordering::Relaxed);
+            self.shared.pulse_accent.store(p.accent, Ordering::Relaxed);
+            self.shared
+                .pulse_counting
+                .store(p.counting, Ordering::Relaxed);
+        }
+        self.shared
+            .interrupted_count
+            .store(self.interrupted_count, Ordering::Relaxed);
+        self.shared.loop_start.store(
+            self.loop_range.map_or(f64::NAN, |r| r.0).to_bits(),
+            Ordering::Relaxed,
+        );
+        self.shared.loop_end.store(
+            self.loop_range.map_or(0.0, |r| r.1).to_bits(),
+            Ordering::Relaxed,
+        );
+        self.shared
+            .range_present
+            .store(self.range.is_some(), Ordering::Relaxed);
+        self.shared.range_start.store(
+            self.range.map_or(0.0, |r| r.start_tick).to_bits(),
+            Ordering::Relaxed,
+        );
+        self.shared.range_end.store(
+            self.range.map_or(0.0, |r| r.end_tick).to_bits(),
+            Ordering::Relaxed,
+        );
+        self.shared.frames.store(self.frames, Ordering::Relaxed);
+        self.shared
+            .peak
+            .store(self.peak.to_bits(), Ordering::Relaxed);
+        self.shared.sequence.store(version + 2, Ordering::Release);
     }
-    /// Returns allocations to the caller; live callers retire them off the callback.
     pub fn install(
         &mut self,
         renderer: Box<Renderer>,
@@ -325,35 +929,99 @@ impl CallbackTransport {
         preserve: bool,
         practice: PracticeSettings,
     ) -> Option<Box<Renderer>> {
-        if generation < self.generation || generation < self.shared.desired.load(Ordering::Acquire)
+        let preserving = preserve && generation == self.generation;
+        let accepted = if preserving { self.practice } else { practice };
+        if self.shared.epoch.load(Ordering::Acquire) != self.epoch
+            || generation < self.generation
+            || generation < self.shared.desired.load(Ordering::Acquire)
+            || accepted.validate(renderer.has_backing()).is_err()
         {
             return Some(renderer);
         }
+        let tempo = match accepted.tempo {
+            PracticeTempo::Fixed { bpm } => RenderTempo::Fixed { bpm },
+            _ => RenderTempo::Relative {
+                ratio: progressive_ratio(&accepted.tempo, if preserving { self.passes } else { 0 }),
+            },
+        };
+        if renderer.set_practice_tempo(tempo).is_err() {
+            return Some(renderer);
+        }
+        renderer.set_metronome_settings(accepted.metronome);
         if preserve && generation == self.generation {
-            let _ = renderer.set_speed(self.speed);
             renderer.seek_tick(self.tick);
-            renderer.set_metronome(self.metronome);
         } else {
             self.playing = false;
             self.tick = 0.0;
             self.seconds = 0.0;
             self.loop_range = None;
-            self.speed = practice.speed;
-            self.metronome = practice.metronome;
-            let _ = renderer.set_speed(self.speed);
-            renderer.set_metronome(self.metronome);
-            self.shared.frames.store(0, Ordering::Relaxed);
-            self.shared.peak.store(0f64.to_bits(), Ordering::Relaxed);
+            self.range = None;
+            self.practice = practice;
+            self.phase = PracticePhase::Idle;
+            self.cancel_count();
+            self.passes = 0;
+            self.pulse = None;
+            self.serial = 0;
+            self.frames = 0;
+            self.peak = 0.0;
         }
         self.generation = generation;
         self.duration = renderer.duration_seconds();
         self.ready = true;
         self.shared.fault.store(0, Ordering::Release);
         let previous = self.renderer.replace(renderer);
+        self.resolve_renderer();
         self.publish();
         previous
     }
+    fn add_pulse(&mut self, pulse: PulsePosition, counting: bool, count: u32) {
+        self.serial = self.serial.saturating_add(u64::from(count));
+        self.pulse = Some(PracticePulse {
+            serial: self.serial,
+            beat: pulse.beat,
+            beats_per_bar: pulse.beats_per_bar,
+            accent: pulse.accent,
+            counting,
+        });
+    }
+    fn cancel_count(&mut self) {
+        self.count = None;
+        self.click = ClickVoice::new(self.rate);
+        self.resume_count = false;
+        self.interrupted_count = false;
+    }
+    fn start_count(&mut self) {
+        if self.practice.count_in.bars == 0 {
+            self.phase = PracticePhase::Playing;
+            return;
+        }
+        if let Some(renderer) = &self.renderer {
+            let (numerator, denominator) = renderer.meter_at(self.tick);
+            self.count = CountInClock::new(
+                self.practice.count_in.bars,
+                numerator,
+                denominator,
+                self.actual_bpm(),
+                self.rate,
+            )
+            .ok();
+            self.click = ClickVoice::new(self.rate);
+            if self.count.is_some() {
+                self.phase = PracticePhase::CountIn;
+                self.resume_count = true;
+            } else {
+                self.device_error();
+            }
+        }
+    }
+    fn reset_passes(&mut self) {
+        self.passes = 0;
+        self.resolve_renderer();
+    }
     pub fn command(&mut self, command: TransportCommand) -> Result<(), &'static str> {
+        if self.shared.epoch.load(Ordering::Acquire) != self.epoch {
+            return Err("Stale audio output epoch.");
+        }
         if matches!(command, TransportCommand::Invalidate { .. }) {
             if command.generation() < self.generation {
                 return Err("Stale transport generation.");
@@ -361,12 +1029,13 @@ impl CallbackTransport {
             self.generation = command.generation();
             self.ready = false;
             self.playing = false;
-            self.tick = 0.0;
-            self.seconds = 0.0;
             self.loop_range = None;
-            if let Some(renderer) = &mut self.renderer {
-                renderer.seek_tick(0.0);
-            }
+            self.range = None;
+            self.cancel_count();
+            self.reset_passes();
+            self.pulse = None;
+            self.phase = PracticePhase::Idle;
+            self.seek(0.0);
             self.publish();
             return Ok(());
         }
@@ -374,45 +1043,162 @@ impl CallbackTransport {
             return Err("Stale transport generation.");
         }
         let duration = self.renderer.as_ref().map_or(0.0, |r| r.duration_tick());
-        command.validate(duration)?;
-        if !self.ready || self.shared.fault.load(Ordering::Acquire) != 0 {
+        let validation_duration = if matches!(command, TransportCommand::PlayRange { .. }) {
+            self.renderer
+                .as_ref()
+                .map_or(0.0, |r| r.score_duration_tick())
+        } else {
+            duration
+        };
+        command.validate(validation_duration)?;
+        if !self.ready || self.shared.is_faulted() {
             return Err("Audio output is not ready. Select an output device to recover.");
         }
         match command {
-            TransportCommand::Play { .. } => {
-                if self.tick >= duration {
-                    self.seek(0.0);
+            TransportCommand::PlayRange {
+                start_tick,
+                end_tick,
+                ..
+            } => {
+                // Validate the fresh count before changing any accepted transport state.
+                if self.practice.count_in.bars > 0 {
+                    let renderer = self.renderer.as_ref().unwrap();
+                    let (numerator, denominator) = renderer.meter_at(start_tick);
+                    let bpm = match self.practice.tempo {
+                        PracticeTempo::Fixed { bpm } => bpm,
+                        _ => {
+                            renderer.authored_bpm_at(start_tick)
+                                * progressive_ratio(&self.practice.tempo, 0)
+                        }
+                    };
+                    CountInClock::new(
+                        self.practice.count_in.bars,
+                        numerator,
+                        denominator,
+                        bpm,
+                        self.rate,
+                    )?;
                 }
+                self.loop_range = None;
+                self.range = end_tick.map(|end_tick| PlaybackSpan {
+                    start_tick,
+                    end_tick,
+                });
+                self.cancel_count();
+                self.pulse = None;
+                self.reset_passes();
+                self.seek(start_tick);
                 self.playing = true;
+                self.phase = PracticePhase::Playing;
+                self.start_count();
             }
-            TransportCommand::Pause { .. } => self.playing = false,
-            TransportCommand::Stop { .. } => {
-                self.playing = false;
-                self.seek(0.0);
-            }
-            TransportCommand::SeekTick { tick, .. } => self.seek(tick),
-            TransportCommand::SetSpeed { speed, .. } => {
-                if let Some(renderer) = &mut self.renderer {
-                    let _ = renderer.set_speed(speed);
+            TransportCommand::Play { .. } => {
+                if !self.playing {
+                    if self.phase == PracticePhase::Paused {
+                        self.playing = true;
+                        if self.interrupted_count {
+                            self.cancel_count();
+                            self.phase = PracticePhase::Playing;
+                            self.start_count();
+                        } else {
+                            self.phase = if self.resume_count {
+                                PracticePhase::CountIn
+                            } else {
+                                PracticePhase::Playing
+                            };
+                        }
+                    } else {
+                        self.cancel_count();
+                        self.reset_passes();
+                        if let Some((start, end)) = self.loop_range {
+                            if self.tick < start || self.tick >= end {
+                                self.seek(start);
+                            }
+                        } else if let Some(range) = self.range {
+                            self.seek(range.start_tick);
+                        } else if self.tick >= duration {
+                            self.seek(0.0);
+                        }
+                        self.playing = true;
+                        self.phase = PracticePhase::Playing;
+                        self.start_count();
+                    }
                 }
-                self.speed = speed;
+            }
+            TransportCommand::Pause { .. } => {
+                if self.playing {
+                    self.resume_count = self.count.is_some();
+                    self.playing = false;
+                    self.phase = PracticePhase::Paused;
+                }
+            }
+            TransportCommand::Stop { .. } => {
+                self.range = None;
+                self.playing = false;
+                self.cancel_count();
+                self.reset_passes();
+                self.seek(0.0);
+                self.pulse = None;
+                self.phase = PracticePhase::Idle;
+            }
+            TransportCommand::SeekTick { tick, .. } => {
+                self.range = None;
+                self.cancel_count();
+                self.reset_passes();
+                self.seek(tick);
+                self.pulse = None;
+                self.phase = if self.playing {
+                    PracticePhase::Playing
+                } else if self.phase == PracticePhase::Paused {
+                    PracticePhase::Paused
+                } else {
+                    PracticePhase::Idle
+                };
+            }
+            TransportCommand::SetPractice { settings, .. } => {
+                settings.validate(self.renderer.as_ref().is_some_and(|r| r.has_backing()))?;
+                let tempo_changed = self.practice.tempo != settings.tempo;
+                self.practice = settings;
+                if tempo_changed {
+                    self.reset_passes();
+                } else {
+                    self.resolve_renderer();
+                }
             }
             TransportCommand::SetLoop {
                 start_tick,
                 end_tick,
                 ..
             } => {
+                self.range = None;
+                self.cancel_count();
+                self.reset_passes();
                 self.loop_range = Some((start_tick, end_tick));
                 if self.tick < start_tick || self.tick >= end_tick {
                     self.seek(start_tick);
                 }
+                self.pulse = None;
+                self.phase = if self.playing {
+                    PracticePhase::Playing
+                } else if self.phase == PracticePhase::Paused {
+                    PracticePhase::Paused
+                } else {
+                    PracticePhase::Idle
+                };
             }
-            TransportCommand::ClearLoop { .. } => self.loop_range = None,
-            TransportCommand::SetMetronome { enabled, .. } => {
-                self.metronome = enabled;
-                if let Some(renderer) = &mut self.renderer {
-                    renderer.set_metronome(enabled);
-                }
+            TransportCommand::ClearLoop { .. } => {
+                self.range = None;
+                self.cancel_count();
+                self.reset_passes();
+                self.loop_range = None;
+                self.pulse = None;
+                self.phase = if self.playing {
+                    PracticePhase::Playing
+                } else if self.phase == PracticePhase::Paused {
+                    PracticePhase::Paused
+                } else {
+                    PracticePhase::Idle
+                };
             }
             TransportCommand::SelectDevice { .. } => {
                 return Err("Device selection must run outside the audio callback.");
@@ -429,79 +1215,199 @@ impl CallbackTransport {
         }
         self.tick = tick;
     }
-    pub fn device_error(&mut self) {
-        self.shared.fault.store(1, Ordering::Release);
+    fn fault(&mut self) {
+        self.interrupted_count =
+            self.interrupted_count || self.count.is_some() || self.resume_count;
+        self.cancel_count_after_fault();
         self.ready = false;
         self.playing = false;
+        self.phase = PracticePhase::Paused;
+    }
+    fn cancel_count_after_fault(&mut self) {
+        self.count = None;
+        self.click = ClickVoice::new(self.rate);
+        self.resume_count = false;
+    }
+    pub fn device_error(&mut self) {
+        if self.shared.epoch.load(Ordering::Acquire) != self.epoch {
+            return;
+        }
+        self.shared.mark_fault_for_epoch(self.epoch);
+        self.fault();
         self.publish();
+    }
+    fn wrap(&mut self, start: f64) {
+        self.passes = self.passes.saturating_add(1);
+        self.resolve_renderer();
+        self.seek(start);
+        if self.practice.count_in.between_loops {
+            self.start_count();
+        }
     }
     pub fn render_into(&mut self, output: &mut [[f32; 2]]) {
         output.fill([0.0; 2]);
+        if self.shared.epoch.load(Ordering::Acquire) != self.epoch {
+            return;
+        }
         let invalidated = self.shared.invalidated.load(Ordering::Acquire);
         if invalidated > self.generation {
             let _ = self.command(TransportCommand::Invalidate {
                 generation: invalidated,
             });
         }
-        if self.shared.fault.load(Ordering::Acquire) != 0 {
-            self.ready = false;
-            self.playing = false;
+        if self.shared.is_faulted() {
+            self.fault();
             self.publish();
             return;
         }
         let mut offset = 0;
         while self.playing && offset < output.len() {
-            if let Some((start, end)) = self.loop_range {
-                if self.tick >= end - 1e-7 {
-                    self.seek(start);
+            if let Some(clock) = &mut self.count {
+                let frame = clock.next_frame();
+                if frame.finished {
+                    self.count = None;
+                    self.resume_count = false;
+                    self.phase = PracticePhase::Playing;
+                    continue;
                 }
+                if let Some(pulse) = frame.pulse {
+                    self.click.trigger(pulse.accent);
+                    self.add_pulse(pulse, true, 1);
+                }
+                let click = self.click.frame(self.practice.metronome.volume);
+                output[offset] = [click, click];
+                offset += 1;
+                continue;
             }
-            let mut count = (output.len() - offset).min(BLOCK);
-            if let (Some((_, end)), Some(renderer)) = (self.loop_range, &self.renderer) {
-                let frames = ((renderer.tick_to_seconds(end) - self.seconds) * self.rate as f64
-                    / self.speed
-                    - 1e-7)
-                    .ceil()
-                    .max(1.0) as usize;
-                count = count.min(frames);
+            if let Some((start, end)) = self.loop_range {
+                if self.tick >= end {
+                    self.wrap(start);
+                    continue;
+                }
             }
             let Some(renderer) = &mut self.renderer else {
                 self.playing = false;
                 break;
             };
-            let status = renderer.render_into(&mut output[offset..offset + count]);
+            let ceiling = self
+                .loop_range
+                .map(|r| r.1)
+                .or(self.range.map(|r| r.end_tick));
+            let end = ceiling.unwrap_or_else(|| renderer.duration_tick());
+            let remaining = renderer.output_frames_until(end);
+            let count = (output.len() - offset).min(BLOCK).min(remaining);
+            if count == 0 {
+                self.seek(end);
+                if let Some((start, _)) = self.loop_range {
+                    self.wrap(start);
+                    continue;
+                }
+                self.playing = false;
+                self.phase = PracticePhase::Ended;
+                self.cancel_count();
+                self.pulse = None;
+                break;
+            }
+            let status = if let Some(end) = ceiling {
+                renderer.render_until(&mut output[offset..offset + count], end)
+            } else {
+                renderer.render_into(&mut output[offset..offset + count])
+            };
             self.tick = status.tick;
             self.seconds = status.seconds;
             offset += count;
-            if status.ended {
+            if let Some(pulse) = status.last_pulse {
+                self.add_pulse(pulse, false, status.pulse_count);
+            }
+            if count == remaining || (ceiling.is_none() && status.ended) {
+                self.seek(end);
                 if let Some((start, _)) = self.loop_range {
-                    self.seek(start);
+                    self.wrap(start);
                 } else {
                     self.playing = false;
+                    self.phase = PracticePhase::Ended;
+                    self.cancel_count();
+                    self.pulse = None;
                 }
             }
         }
-        if let Some((start, end)) = self.loop_range {
-            if self.playing && self.tick >= end - 1e-7 {
-                self.seek(start);
-            }
-        }
         if offset > 0 {
-            self.shared
-                .frames
-                .fetch_add(offset as u64, Ordering::Relaxed);
+            self.frames = self.frames.saturating_add(offset as u64);
             let peak = output[..offset]
                 .iter()
                 .flat_map(|f| f.iter())
                 .fold(0.0f64, |p, x| p.max(x.abs() as f64));
-            let previous = f64::from_bits(self.shared.peak.load(Ordering::Relaxed));
-            if peak > previous {
-                self.shared.peak.store(peak.to_bits(), Ordering::Relaxed);
-            }
+            self.peak = self.peak.max(peak);
+        }
+        // Audition clips ride on top of normal playback and never touch its counters.
+        let report = self.audition.mix(output);
+        if let Some(peak) = report.peak {
+            self.shared
+                .audition_peak
+                .store(peak.to_bits(), Ordering::Relaxed);
+        }
+        if report.started {
+            self.shared.audition_serial.fetch_add(1, Ordering::Release);
         }
         self.publish();
     }
+    fn restore(&mut self, snapshot: RuntimeSnapshot) -> Result<(), String> {
+        self.frames = snapshot.frames;
+        self.peak = snapshot.peak;
+        self.tick = snapshot.tick;
+        self.seconds = snapshot.seconds;
+        self.practice = snapshot.settings;
+        self.loop_range = snapshot.loop_range;
+        self.range = snapshot.range;
+        self.passes = snapshot.passes;
+        self.pulse = snapshot.pulse;
+        self.serial = snapshot.serial;
+        self.resolve_renderer();
+        self.seek(snapshot.tick);
+        self.interrupted_count = snapshot.interrupted_count
+            || snapshot.fault && (snapshot.count.is_some() || snapshot.resume_count);
+        if snapshot.fault {
+            self.phase = PracticePhase::Paused;
+            self.playing = false;
+            self.resume_count = false;
+            self.count = None;
+        } else {
+            self.phase = snapshot.phase;
+            self.playing = matches!(
+                snapshot.phase,
+                PracticePhase::CountIn | PracticePhase::Playing
+            );
+            self.resume_count = snapshot.resume_count;
+            self.count = snapshot
+                .count
+                .map(|s| CountInClock::from_snapshot(s, self.rate))
+                .transpose()
+                .map_err(|error| {
+                    self.shared.mark_fault_for_epoch(self.epoch);
+                    error.to_string()
+                })?;
+            if let Some(count) = self.count {
+                let s = count.snapshot();
+                if s.emitted_pulses > 0 {
+                    let boundary = (f64::from(s.emitted_pulses - 1) * 60.0 / s.bpm * 4.0
+                        / f64::from(s.denominator)
+                        * f64::from(self.rate))
+                    .round() as u64;
+                    let age = s.elapsed_frames.saturating_sub(boundary);
+                    if age < (f64::from(self.rate) * 0.05) as u64 {
+                        self.click
+                            .trigger((s.emitted_pulses - 1) % s.numerator == 0);
+                        for _ in 0..age {
+                            self.click.frame(0.0);
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
 }
+
 enum CallbackCommand {
     Install {
         renderer: Box<Renderer>,
@@ -514,11 +1420,13 @@ enum CallbackCommand {
         generation: u64,
     },
     Transport(TransportCommand),
+    Barrier(u64),
 }
 #[allow(dead_code)]
 enum Retired {
     Renderer(Box<Renderer>),
     Mix(PreparedMix),
+    Clip(Box<AuditionClip>),
 }
 struct OutputCallback {
     transport: CallbackTransport,
@@ -526,10 +1434,11 @@ struct OutputCallback {
     retired: HeapProd<Retired>,
     scratch: [[f32; 2]; BLOCK],
     epoch: u64,
+    suspended: bool,
 }
 impl OutputCallback {
     fn render<T: SizedSample + FromSample<f32>>(&mut self, output: &mut [T], channels: usize) {
-        if self.transport.shared.epoch.load(Ordering::Acquire) != self.epoch {
+        if self.suspended || self.transport.shared.epoch.load(Ordering::Acquire) != self.epoch {
             output.fill(T::from_sample(0.0));
             return;
         }
@@ -560,21 +1469,67 @@ impl OutputCallback {
                         if let Some(renderer) = &mut self.transport.renderer {
                             renderer.replace_mix(mix)
                         } else {
-                            mix
+                            Some(mix)
                         }
                     } else {
-                        mix
+                        Some(mix)
                     };
-                    let _ = self.retired.try_push(Retired::Mix(old));
+                    if let Some(old) = old {
+                        let _ = self.retired.try_push(Retired::Mix(old));
+                    }
                 }
                 CallbackCommand::Transport(command) => {
                     let _ = self.transport.command(command);
                 }
+                CallbackCommand::Barrier(sequence) => {
+                    // Freeze at an acknowledged boundary before the control
+                    // thread snapshots and retires this stream's epoch.
+                    if self
+                        .transport
+                        .shared
+                        .barrier_request
+                        .compare_exchange(sequence, 0, Ordering::AcqRel, Ordering::Acquire)
+                        .is_ok()
+                    {
+                        self.suspended = true;
+                        self.transport.publish();
+                        self.transport
+                            .shared
+                            .barrier
+                            .store(sequence, Ordering::Release);
+                        break;
+                    }
+                }
             }
+        }
+        if self.suspended {
+            output.fill(T::from_sample(0.0));
+            return;
         }
         for chunk in output.chunks_mut(BLOCK * channels) {
             let frames = chunk.len() / channels;
+            // A mix parked during a crossfade takes over between blocks, once there is room to retire the one it replaces.
+            if !self.retired.is_full() {
+                if let Some(old) = self
+                    .transport
+                    .renderer
+                    .as_mut()
+                    .and_then(|r| r.settle_mix())
+                {
+                    let _ = self.retired.try_push(Retired::Mix(old));
+                }
+            }
             self.transport.render_into(&mut self.scratch[..frames]);
+            let retired = &mut self.retired;
+            self.transport
+                .retire_auditions(|clip| match retired.try_push(Retired::Clip(clip)) {
+                    Ok(()) => None,
+                    Err(Retired::Clip(clip)) => Some(clip),
+                    Err(other) => {
+                        std::mem::forget(other);
+                        None
+                    }
+                });
             for (frame, source) in chunk.chunks_mut(channels).zip(&self.scratch[..frames]) {
                 for (channel, sample) in frame.iter_mut().enumerate() {
                     let value = if channels == 1 {
@@ -606,6 +1561,7 @@ struct ControlState {
     document: Option<PreparedDocument>,
     rate: u32,
     device: Option<String>,
+    next_barrier: u64,
 }
 struct OpenRequest {
     device: cpal::Device,
@@ -618,10 +1574,19 @@ enum ManagerRequest {
     Open(OpenRequest),
     Shutdown,
 }
+/// The audition producer with the stream (epoch and rate) it feeds.
+struct AuditionSlot {
+    producer: AuditionProducer,
+    epoch: u64,
+    rate: u32,
+}
 pub struct AudioService {
     root: PathBuf,
     shared: Arc<SharedStatus>,
     control: Mutex<ControlState>,
+    /// Producer for the audition queue. Its own leaf lock, never held with `control`
+    /// by anything that waits, so an audition never queues behind a prepare.
+    audition: Mutex<Option<AuditionSlot>>,
     manager: mpsc::Sender<ManagerRequest>,
 }
 impl AudioService {
@@ -654,9 +1619,48 @@ impl AudioService {
                 document: None,
                 rate: 48_000,
                 device: None,
+                next_barrier: 0,
             }),
+            audition: Mutex::new(None),
             manager,
         }
+    }
+    /// Sample rate to render an audition for, or None when no output stream has ever
+    /// opened or the device has failed. Reads atomics only.
+    pub fn audition_rate(&self) -> Option<u32> {
+        let rate = self.shared.audition_rate.load(Ordering::Acquire);
+        (rate != 0 && !self.shared.is_faulted()).then_some(rate)
+    }
+    /// Queue a finished clip for the callback. False when no stream exists or the queue is full.
+    /// Refuses clips the live stream could not sound: a replaced stream (epoch), a
+    /// faulted device, or a clip rendered for another sample rate.
+    ///
+    /// Not handled: during `SelectDevice`, while the old callback is suspended and
+    /// before `open_current` bumps the epoch, a clip is still accepted (true) and is
+    /// lost with the old stream.
+    pub fn submit_audition(&self, clip: Box<AuditionClip>) -> bool {
+        match self.audition.lock().unwrap().as_mut() {
+            Some(slot)
+                if slot.epoch == self.shared.epoch.load(Ordering::Acquire)
+                    && !self.shared.is_faulted()
+                    && clip.rate == slot.rate =>
+            {
+                slot.producer.try_push(clip).is_ok()
+            }
+            _ => false,
+        }
+    }
+    /// Test hook: attach an audition queue as if a stream at `rate` had opened.
+    #[cfg(test)]
+    pub(crate) fn attach_test_audition(&self, rate: u32) -> AuditionConsumer {
+        let (producer, consumer) = audition_channel();
+        *self.audition.lock().unwrap() = Some(AuditionSlot {
+            producer,
+            epoch: self.shared.epoch.load(Ordering::Acquire),
+            rate,
+        });
+        self.shared.audition_rate.store(rate, Ordering::Release);
+        consumer
     }
     pub fn status(&self) -> NativeAudioStatus {
         self.shared.read()
@@ -699,8 +1703,12 @@ impl AudioService {
         backing_bytes: Option<Vec<u8>>,
         practice: PracticeSettings,
     ) -> Result<(), String> {
-        practice.validate()?;
+        practice
+            .validate(backing_bytes.is_some() || settings.backing.is_some())
+            .map_err(str::to_string)?;
         plan.validate()?;
+        validate_count(&plan, practice, 8_000)?;
+        validate_count(&plan, practice, 192_000)?;
         let generation = plan.generation;
         let previous = self.shared.desired.fetch_max(generation, Ordering::AcqRel);
         let result = self.prepare_current(plan, settings, backing_bytes, practice);
@@ -747,13 +1755,13 @@ impl AudioService {
             backing,
             practice,
         };
-        if state.producer.is_none() || self.shared.fault.load(Ordering::Acquire) != 0 {
+        if state.producer.is_none() || self.shared.is_faulted() {
             // Validate music independently of the available device. Retain it after
             // an output failure so selecting a working device can recover it.
             let _ = Self::renderer(&document, state.rate)?;
             if let Err(error) = self.open(&mut state, document.clone(), false) {
                 if self.shared.desired.load(Ordering::Acquire) == generation
-                    && self.shared.fault.load(Ordering::Acquire) != 0
+                    && self.shared.is_faulted()
                 {
                     state.document = Some(document);
                 }
@@ -788,6 +1796,24 @@ impl AudioService {
             .store(value.to_bits(), Ordering::Relaxed);
     }
     fn renderer(document: &PreparedDocument, rate: u32) -> Result<Box<Renderer>, String> {
+        let reference = document
+            .settings
+            .backing
+            .as_ref()
+            .filter(|backing| backing.reference_sync.is_some());
+        if reference.is_some() != document.plan.playback_end_tick.is_some() {
+            return Err(
+                "Reference playback requires matching source settings and an effective plan."
+                    .into(),
+            );
+        }
+        if let Some(settings) = reference {
+            let audio = document
+                .backing
+                .as_ref()
+                .ok_or("Reference playback requires decoded backing audio.")?;
+            ReferenceSyncMap::new(settings, &document.plan)?.validate_audio(audio)?;
+        }
         let mut renderer = Renderer::new(
             document.plan.clone(),
             document.resources.clone(),
@@ -802,11 +1828,18 @@ impl AudioService {
                 .map_or((&[][..], 0.0, ChannelMix::default()), |b| {
                     (b.anchors.as_slice(), b.offset_ms, b.mix.clone())
                 });
-            renderer.install_backing(
-                audio.clone(),
-                BackingMap::new(anchors, offset, &document.plan)?,
-                mix,
-            )?;
+            let map = if let Some(settings) = &document.settings.backing {
+                BackingMap::from_settings(settings, &document.plan)?
+            } else {
+                BackingMap::new(anchors, offset, &document.plan)?
+            };
+            let processing = document
+                .settings
+                .backing
+                .as_ref()
+                .and_then(|backing| backing.processing.clone())
+                .unwrap_or_default();
+            renderer.install_processed_backing(audio.clone(), map, mix, processing)?;
         }
         Ok(Box::new(renderer))
     }
@@ -817,6 +1850,51 @@ impl AudioService {
             .ok_or("Audio output is not ready.")?
             .try_push(command)
             .map_err(|_| "Audio control queue is full; retry the control.".to_string())
+    }
+    fn synchronize_callback(
+        &self,
+        state: &mut ControlState,
+        timeout: Duration,
+    ) -> Result<(), String> {
+        if state.producer.is_none() || self.shared.is_faulted() {
+            return Ok(());
+        }
+        state.next_barrier = state
+            .next_barrier
+            .checked_add(1)
+            .ok_or("Audio control sequence exceeds its supported range.")?;
+        let sequence = state.next_barrier;
+        self.shared
+            .barrier_request
+            .store(sequence, Ordering::Release);
+        if let Err(error) = Self::enqueue(state, CallbackCommand::Barrier(sequence)) {
+            let _ = self.shared.barrier_request.compare_exchange(
+                sequence,
+                0,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            );
+            return Err(error);
+        }
+        let deadline = std::time::Instant::now() + timeout;
+        while self.shared.barrier.load(Ordering::Acquire) < sequence {
+            if self.shared.is_faulted() {
+                return Ok(());
+            }
+            if std::time::Instant::now() >= deadline
+                && self
+                    .shared
+                    .barrier_request
+                    .compare_exchange(sequence, 0, Ordering::AcqRel, Ordering::Acquire)
+                    .is_ok()
+            {
+                return Err(
+                    "Audio output did not acknowledge device selection; retry the control.".into(),
+                );
+            }
+            thread::sleep(Duration::from_millis(1));
+        }
+        Ok(())
     }
     pub fn set_mix(&self, settings: DocumentSettings, generation: u64) -> Result<(), String> {
         self.set_mix_inner(settings, generation, None)
@@ -840,25 +1918,48 @@ impl AudioService {
             .document
             .as_ref()
             .ok_or("Prepare a score before setting sound.")?;
+        old.practice
+            .validate(
+                settings.backing.is_some()
+                    || backing_bytes
+                        .as_ref()
+                        .map_or(old.backing.is_some(), |bytes| bytes.is_some()),
+            )
+            .map_err(str::to_string)?;
         if old.plan.generation != generation
             || self.shared.desired.load(Ordering::Acquire) != generation
         {
             return Err("Stale sound configuration.".into());
         }
-        let voice_changed = old.plan.tracks.iter().any(|track| {
-            voice_id_for_track(track, &settings) != voice_id_for_track(track, &old.settings)
-        });
+        if reference_timing_changed(old.settings.backing.as_ref(), settings.backing.as_ref()) {
+            return Err("Reference timing changes require a newly prepared playback plan.".into());
+        }
+        let voice_changed = sound_source_changed(&old.plan, &old.settings, &settings);
         let map_changed = match (&old.settings.backing, &settings.backing) {
             (Some(a), Some(b)) => {
-                a.asset_id != b.asset_id || a.offset_ms != b.offset_ms || a.anchors != b.anchors
+                a.asset_id != b.asset_id
+                    || a.offset_ms != b.offset_ms
+                    || a.anchors != b.anchors
+                    || a.reference_sync != b.reference_sync
             }
             (None, None) => false,
             _ => true,
         };
+        let processing_changed = old
+            .settings
+            .backing
+            .as_ref()
+            .and_then(|backing| backing.processing.clone())
+            .unwrap_or_default()
+            != settings
+                .backing
+                .as_ref()
+                .and_then(|backing| backing.processing.clone())
+                .unwrap_or_default();
         let presence_changed = backing_bytes
             .as_ref()
             .is_some_and(|bytes| bytes.is_some() != old.backing.is_some());
-        if voice_changed || map_changed || presence_changed {
+        if voice_changed || map_changed || presence_changed || processing_changed {
             let resources = if voice_changed {
                 Arc::new(AudioResources::load_for_requests(
                     &self.root,
@@ -920,8 +2021,28 @@ impl AudioService {
             return Err("Stale transport generation.".into());
         }
         command
-            .validate(document.plan.duration_tick)
+            .validate(
+                document
+                    .plan
+                    .playback_end_tick
+                    .unwrap_or(document.plan.duration_tick),
+            )
             .map_err(str::to_string)?;
+        if matches!(command, TransportCommand::PlayRange { .. }) {
+            let status = self.shared.read();
+            if !status.ready || status.generation != command.generation() {
+                return Err(
+                    "Audio output is not ready. Select an output device to recover.".into(),
+                );
+            }
+            validate_count(&document.plan, document.practice, state.rate)?;
+        }
+        if let TransportCommand::SetPractice { settings, .. } = &command {
+            settings
+                .validate(document.backing.is_some() || document.settings.backing.is_some())
+                .map_err(str::to_string)?;
+            validate_count(&document.plan, *settings, state.rate)?;
+        }
         if let TransportCommand::SelectDevice { device_id, .. } = command {
             let saved = PreparedDocument {
                 plan: document.plan.clone(),
@@ -930,20 +2051,18 @@ impl AudioService {
                 backing: document.backing.clone(),
                 practice: document.practice,
             };
+            self.synchronize_callback(&mut state, Duration::from_secs(1))?;
             state.device = device_id;
             return self.open(&mut state, saved, true);
         }
-        if self.shared.fault.load(Ordering::Acquire) != 0 {
+        if self.shared.is_faulted() {
             return Err("Audio output stopped. Select an output device to recover.".into());
         }
         let accepted = command.clone();
         Self::enqueue(&mut state, CallbackCommand::Transport(command))?;
         match accepted {
-            TransportCommand::SetSpeed { speed, .. } => {
-                state.document.as_mut().unwrap().practice.speed = speed
-            }
-            TransportCommand::SetMetronome { enabled, .. } => {
-                state.document.as_mut().unwrap().practice.metronome = enabled
+            TransportCommand::SetPractice { settings, .. } => {
+                state.document.as_mut().unwrap().practice = settings
             }
             _ => {}
         }
@@ -955,40 +2074,50 @@ impl AudioService {
         document: PreparedDocument,
         preserve: bool,
     ) -> Result<(), String> {
-        let (device, config) = choose_output(state.device.as_deref()).map_err(|error| {
-            self.shared.fault.store(1, Ordering::Release);
-            error
-        })?;
-        let rate = config.sample_rate();
-        let mut renderer = Self::renderer(&document, rate)?;
-        let snapshot = self.status();
-        let preserve_position = preserve && snapshot.generation == document.plan.generation;
-        renderer.set_speed(document.practice.speed)?;
-        renderer.set_metronome(document.practice.metronome);
-        if preserve_position {
-            renderer.seek_tick(snapshot.tick);
+        let result = self.open_current(state, document, preserve);
+        if result.is_err() {
+            self.shared.mark_fault();
         }
+        result
+    }
+    fn open_current(
+        &self,
+        state: &mut ControlState,
+        document: PreparedDocument,
+        preserve: bool,
+    ) -> Result<(), String> {
+        let (device, config) = choose_output(state.device.as_deref())?;
+        let rate = config.sample_rate();
+        let renderer = Self::renderer(&document, rate)?;
+        validate_count(&document.plan, document.practice, rate)?;
         if document.plan.generation != self.shared.desired.load(Ordering::Acquire) {
             return Err("A newer score preparation superseded this request.".into());
         }
         let (producer, controls) = HeapRb::new(CONTROL_CAPACITY).split();
         let (retired_out, retired) = HeapRb::new(CONTROL_CAPACITY).split();
-        let epoch = self.shared.epoch.fetch_add(1, Ordering::AcqRel) + 1;
+        let (epoch, snapshot) = self.shared.next_epoch_snapshot();
+        let preserve_position = preserve && snapshot.generation == document.plan.generation;
         let mut transport = CallbackTransport::new(rate, self.shared.clone());
+        let (audition_producer, audition_consumer): (AuditionProducer, AuditionConsumer) =
+            audition_channel();
+        transport.audition.attach(audition_consumer);
         transport.duration = renderer.duration_seconds();
         transport.renderer = Some(renderer);
         transport.generation = document.plan.generation;
         transport.ready = true;
-        transport.speed = document.practice.speed;
-        transport.metronome = document.practice.metronome;
+        transport.practice = document.practice;
         if preserve_position {
-            transport.tick = snapshot.tick;
-            transport.seconds = snapshot.seconds;
-            transport.playing = snapshot.playing;
-        } else {
-            self.shared.frames.store(0, Ordering::Relaxed);
-            self.shared.peak.store(0f64.to_bits(), Ordering::Relaxed);
+            transport.restore(snapshot)?;
+            // A fault may have prevented an already accepted Apply from reaching
+            // its old callback. Keep the validated, queued settings on recovery.
+            if snapshot.fault && transport.practice != document.practice {
+                if transport.practice.tempo != document.practice.tempo {
+                    transport.passes = 0;
+                }
+                transport.practice = document.practice;
+            }
         }
+        transport.resolve_renderer();
         let actual_id = device.id().map_err(|e| e.to_string())?.to_string();
         let (reply, answer) = mpsc::channel();
         let callback = OutputCallback {
@@ -997,6 +2126,7 @@ impl AudioService {
             retired: retired_out,
             scratch: [[0.0; 2]; BLOCK],
             epoch,
+            suspended: false,
         };
         self.manager
             .send(ManagerRequest::Open(OpenRequest {
@@ -1012,6 +2142,12 @@ impl AudioService {
             .map_err(|_| "Audio device manager stopped.")??;
         *self.shared.device.lock().unwrap() = Some(actual_id);
         self.set_backing_duration(&document);
+        *self.audition.lock().unwrap() = Some(AuditionSlot {
+            producer: audition_producer,
+            epoch,
+            rate,
+        });
+        self.shared.audition_rate.store(rate, Ordering::Release);
         state.rate = rate;
         state.producer = Some(producer);
         state.document = Some(document);
@@ -1064,7 +2200,7 @@ fn build_stream<T: SizedSample + FromSample<f32>>(
                         | cpal::ErrorKind::RealtimeDenied
                 ) && shared.epoch.load(Ordering::Acquire) == epoch
                 {
-                    shared.fault.store(1, Ordering::Release);
+                    shared.mark_fault_for_epoch(epoch);
                 }
             },
             None,
@@ -1091,6 +2227,7 @@ fn device_manager(requests: mpsc::Receiver<ManagerRequest>, shared: Arc<SharedSt
                     retired: next_retired,
                     reply,
                 } = request;
+                let epoch = callback.epoch;
                 let next = match config.sample_format() {
                     SampleFormat::F32 => build_stream::<f32>(&device, &config, callback),
                     SampleFormat::F64 => build_stream::<f64>(&device, &config, callback),
@@ -1119,7 +2256,7 @@ fn device_manager(requests: mpsc::Receiver<ManagerRequest>, shared: Arc<SharedSt
                         let _ = reply.send(Ok(()));
                     }
                     Err(error) => {
-                        shared.fault.store(1, Ordering::Release);
+                        shared.mark_fault_for_epoch(epoch);
                         let _ = reply.send(Err(error));
                     }
                 }
@@ -1130,26 +2267,414 @@ fn device_manager(requests: mpsc::Receiver<ManagerRequest>, shared: Arc<SharedSt
 }
 
 #[cfg(test)]
-mod tests {
+mod reference_tests {
     use super::*;
+    fn document() -> PreparedDocument {
+        let plan: PlaybackPlan = serde_json::from_value(serde_json::json!({"generation":1,"ppq":960,"durationTick":7680,"durationMs":4000,"playbackEndTick":3840,"tracks":[{"id":"gm","program":0,"percussion":false}],"tempos":[{"tick":0,"bpm":120}],"occurrences":[{"bar":0,"occurrence":0,"meterNumerator":4,"meterDenominator":4,"startTick":0,"endTick":3840,"startMs":0,"endMs":2000}],"notes":[],"midi":[]})).unwrap();
+        let settings: DocumentSettings = {
+            let mut settings = DocumentSettings::default();
+            settings.backing=Some(serde_json::from_value(serde_json::json!({"assetId":"a","offsetMs":0,"anchors":[],"referenceSync":{"entryAudioMs":1000,"exitAudioMs":3000},"mix":{"gain":1,"pan":0,"mute":false,"solo":false}})).unwrap());
+            settings
+        };
+        PreparedDocument {
+            plan: Arc::new(plan),
+            settings,
+            resources: Arc::new(
+                AudioResources::load_for_requests(
+                    &PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/audio"),
+                    &[],
+                )
+                .unwrap(),
+            ),
+            backing: Some(Arc::new(DecodedAudio {
+                sample_rate: 48_000,
+                channels: 2,
+                frames: Arc::new(vec![[0.0; 2]; 192_000]),
+            })),
+            practice: PracticeSettings::default(),
+        }
+    }
+    #[test]
+    fn processing_mix_reuses_source_and_resources_and_queues_preserved_install() {
+        let mut original = document();
+        original.backing = Some(Arc::new(DecodedAudio {
+            sample_rate: 48_000,
+            channels: 2,
+            frames: Arc::new(
+                (0..192_000)
+                    .map(|n| {
+                        let x = (std::f64::consts::TAU * 440.0 * n as f64 / 48_000.0).sin() as f32
+                            * 0.05;
+                        [x, -x]
+                    })
+                    .collect(),
+            ),
+        }));
+        original.practice.tempo = PracticeTempo::Relative { ratio: 0.5 };
+        let mut transport = CallbackTransport::headless(48_000);
+        transport.install_with_practice(
+            AudioService::renderer(&original, 48_000).unwrap(),
+            1,
+            false,
+            original.practice,
+        );
+        transport
+            .command(TransportCommand::PlayRange {
+                generation: 1,
+                start_tick: 480.0,
+                end_tick: Some(3360.0),
+            })
+            .unwrap();
+        transport
+            .command(TransportCommand::SetLoop {
+                generation: 1,
+                start_tick: 480.0,
+                end_tick: 3360.0,
+            })
+            .unwrap();
+        transport.render_into(&mut [[0.0; 2]; 512]);
+        let before = transport.status();
+        let shared = Arc::new(SharedStatus::new());
+        shared.desired.store(1, Ordering::Release);
+        let (producer, mut commands) = HeapRb::new(CONTROL_CAPACITY).split();
+        let (manager, _requests) = mpsc::channel();
+        let service = AudioService {
+            root: PathBuf::new(),
+            shared,
+            control: Mutex::new(ControlState {
+                producer: Some(producer),
+                document: Some(original.clone()),
+                rate: 48_000,
+                device: None,
+                next_barrier: 0,
+            }),
+            audition: Mutex::new(None),
+            manager,
+        };
+        let mut candidate = original.settings.clone();
+        candidate.backing.as_mut().unwrap().processing = Some(crate::settings::BackingProcessing {
+            semitones: 12.0,
+            cents: 0.0,
+            filter: crate::settings::BackingFilter::BassEnhance,
+        });
+        service.set_mix(candidate.clone(), 1).unwrap();
+        let Some(CallbackCommand::Install {
+            renderer,
+            generation,
+            preserve,
+            practice,
+        }) = commands.try_pop()
+        else {
+            panic!("processing must install a prepared renderer")
+        };
+        assert_eq!(generation, 1);
+        assert!(preserve);
+        transport.install_with_practice(renderer, generation, preserve, practice);
+        let after = transport.status();
+        assert_eq!(after.tick, before.tick);
+        assert_eq!(after.generation, before.generation);
+        assert_eq!(after.practice, before.practice);
+        assert_eq!(after.range, before.range);
+        assert_eq!(after.r#loop, before.r#loop);
+        let mut pcm = vec![[0.0; 2]; 48_000];
+        transport.render_into(&mut pcm);
+        let crossings: Vec<_> = pcm[4800..]
+            .windows(2)
+            .enumerate()
+            .filter_map(|(i, w)| {
+                (w[0][0] <= 0.0 && w[1][0] > 0.0)
+                    .then(|| i as f64 - w[0][0] as f64 / (w[1][0] - w[0][0]) as f64)
+            })
+            .collect();
+        let hz =
+            (crossings.len() - 1) as f64 * 48_000.0 / (crossings.last().unwrap() - crossings[0]);
+        assert!(
+            (hz - 880.0).abs() <= 2.64,
+            "installed processing frequency {hz}"
+        );
+        {
+            let state = service.control.lock().unwrap();
+            let next = state.document.as_ref().unwrap();
+            assert!(Arc::ptr_eq(
+                next.backing.as_ref().unwrap(),
+                original.backing.as_ref().unwrap()
+            ));
+            assert!(Arc::ptr_eq(&next.resources, &original.resources));
+            assert!(Arc::ptr_eq(&next.plan, &original.plan));
+            assert_eq!(next.practice, original.practice);
+        }
+        candidate.backing.as_mut().unwrap().mix.gain = 0.25;
+        service.set_mix(candidate.clone(), 1).unwrap();
+        assert!(matches!(
+            commands.try_pop(),
+            Some(CallbackCommand::Mix { generation: 1, .. })
+        ));
+        candidate
+            .backing
+            .as_mut()
+            .unwrap()
+            .processing
+            .as_mut()
+            .unwrap()
+            .cents = 0.5;
+        assert!(service.set_mix(candidate, 1).is_err());
+        assert!(commands.try_pop().is_none());
+    }
+    #[test]
+    fn processed_device_rate_reconstruction_uses_frozen_settings() {
+        let mut original = document();
+        original.backing = Some(Arc::new(DecodedAudio {
+            sample_rate: 48_000,
+            channels: 2,
+            frames: Arc::new(
+                (0..192_000)
+                    .map(|n| {
+                        let x = (std::f64::consts::TAU * 440.0 * n as f64 / 48_000.0).sin() as f32
+                            * 0.05;
+                        [x, x]
+                    })
+                    .collect(),
+            ),
+        }));
+        original.settings.backing.as_mut().unwrap().processing =
+            Some(crate::settings::BackingProcessing {
+                semitones: -12.0,
+                cents: 0.0,
+                filter: crate::settings::BackingFilter::HighAttenuation,
+            });
+        for rate in [44_100, 48_000] {
+            let mut renderer = AudioService::renderer(&original, rate).unwrap();
+            let mut pcm = vec![[0.0; 2]; rate as usize];
+            renderer.render_into(&mut pcm);
+            let crossings: Vec<_> = pcm[rate as usize / 4..]
+                .windows(2)
+                .enumerate()
+                .filter_map(|(i, w)| {
+                    (w[0][0] <= 0.0 && w[1][0] > 0.0)
+                        .then(|| i as f64 - w[0][0] as f64 / (w[1][0] - w[0][0]) as f64)
+                })
+                .collect();
+            let hz = (crossings.len() - 1) as f64 * rate as f64
+                / (crossings.last().unwrap() - crossings[0]);
+            assert!((hz - 220.0).abs() <= 1.0, "rate {rate}: {hz}");
+        }
+    }
+    #[test]
+    fn reference_admission_requires_real_pcm_effective_clock_and_settings_authority() {
+        let original = document();
+        assert!(AudioService::renderer(&original, 48_000).is_ok());
+        let mut candidate = original.clone();
+        candidate.backing = None;
+        assert!(AudioService::renderer(&candidate, 48_000).is_err());
+        let mut candidate = original.clone();
+        candidate.settings.backing = None;
+        assert!(AudioService::renderer(&candidate, 48_000).is_err());
+        let mut candidate = original.clone();
+        candidate.settings.backing.as_mut().unwrap().reference_sync = None;
+        assert!(AudioService::renderer(&candidate, 48_000).is_err());
+        let mut candidate = original.clone();
+        candidate
+            .settings
+            .backing
+            .as_mut()
+            .unwrap()
+            .reference_sync
+            .as_mut()
+            .unwrap()
+            .exit_audio_ms = 4001.0;
+        assert!(AudioService::renderer(&candidate, 48_000).is_err());
+        let mut candidate = original;
+        Arc::make_mut(&mut candidate.plan).playback_end_tick = None;
+        assert!(AudioService::renderer(&candidate, 48_000).is_err());
+    }
+    #[test]
+    fn same_plan_mix_rejects_reference_timing_before_queue_or_document_publication() {
+        let original = document();
+        let shared = Arc::new(SharedStatus::new());
+        shared.desired.store(1, Ordering::Release);
+        let (producer, mut commands) = HeapRb::new(CONTROL_CAPACITY).split();
+        let (manager, _requests) = mpsc::channel();
+        // A control-only service: no app, manager thread, stream or device access.
+        let service = AudioService {
+            root: PathBuf::new(),
+            shared,
+            control: Mutex::new(ControlState {
+                producer: Some(producer),
+                document: Some(original.clone()),
+                rate: 48_000,
+                device: None,
+                next_barrier: 0,
+            }),
+            audition: Mutex::new(None),
+            manager,
+        };
+        for change in 0..5 {
+            let mut candidate = original.settings.clone();
+            let backing = candidate.backing.as_mut().unwrap();
+            match change {
+                0 => backing.asset_id = "b".into(),
+                1 => backing.offset_ms = 1.0,
+                2 => backing.reference_sync.as_mut().unwrap().exit_audio_ms = 3001.0,
+                3 => backing.anchors.push(crate::settings::SyncAnchor {
+                    bar: 0,
+                    occurrence: 0,
+                    ratio: 0.5,
+                    audio_ms: 2000.0,
+                }),
+                _ => backing.reference_sync = None,
+            }
+            assert!(service.set_mix(candidate, 1).is_err());
+            assert!(commands.try_pop().is_none());
+            assert_eq!(
+                service
+                    .control
+                    .lock()
+                    .unwrap()
+                    .document
+                    .as_ref()
+                    .unwrap()
+                    .settings,
+                original.settings
+            );
+        }
+        let mut candidate = original.settings.clone();
+        candidate.backing.as_mut().unwrap().mix.gain = 0.25;
+        service.set_mix(candidate.clone(), 1).unwrap();
+        assert!(matches!(
+            commands.try_pop(),
+            Some(CallbackCommand::Mix { .. })
+        ));
+        assert_eq!(
+            service
+                .control
+                .lock()
+                .unwrap()
+                .document
+                .as_ref()
+                .unwrap()
+                .settings,
+            candidate
+        );
+    }
+}
+
+/// Whether the sound sources a prepared plan needs differ between two settings: a track's instrument, or its lock
+/// against sound automations, which decides which program each note sounds as. Either needs a rebuilt renderer and the
+/// samples the new settings ask for, not a mix change, so a locked-era bank is never kept for an unlocked track.
+fn sound_source_changed(
+    plan: &PlaybackPlan,
+    old: &DocumentSettings,
+    new: &DocumentSettings,
+) -> bool {
+    plan.tracks.iter().any(|track| {
+        voice_id_for_track(track, new) != voice_id_for_track(track, old)
+            || track_locked(new, &track.id) != track_locked(old, &track.id)
+            || drum_kit_for_track(track, new) != drum_kit_for_track(track, old)
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn a_change_of_drum_kit_needs_a_rebuilt_renderer_but_only_on_a_drum_track() {
+        use crate::settings::TrackSound;
+        let plan: PlaybackPlan = serde_json::from_value(serde_json::json!({"generation":1,"ppq":960,"durationTick":3840,"durationMs":2000,"tracks":[{"id":"d","program":0,"percussion":true},{"id":"g","program":25,"percussion":false}],"tempos":[{"tick":0,"bpm":120}],"occurrences":[{"bar":0,"occurrence":0,"meterNumerator":4,"meterDenominator":4,"startTick":0,"endTick":3840,"startMs":0,"endMs":2000}],"notes":[],"midi":[]})).unwrap();
+        let with = |track: &str, kit| {
+            let mut settings = DocumentSettings::default();
+            settings.sounds.insert(
+                track.into(),
+                TrackSound {
+                    drum_kit: kit,
+                    ..TrackSound::default()
+                },
+            );
+            settings
+        };
+        let none = DocumentSettings::default();
+        assert!(sound_source_changed(&plan, &none, &with("d", Some(32))));
+        assert!(sound_source_changed(&plan, &with("d", Some(32)), &none));
+        assert!(sound_source_changed(
+            &plan,
+            &with("d", Some(8)),
+            &with("d", Some(40))
+        ));
+        assert!(!sound_source_changed(&plan, &none, &with("g", Some(32))));
+    }
+
+    #[test]
+    fn a_change_of_lock_needs_a_rebuilt_renderer_and_new_samples_but_a_mix_change_does_not() {
+        use crate::settings::TrackSound;
+        let plan: PlaybackPlan = serde_json::from_value(serde_json::json!({"generation":1,"ppq":960,"durationTick":3840,"durationMs":2000,"tracks":[{"id":"a","program":25,"percussion":false},{"id":"b","program":33,"percussion":false}],"tempos":[{"tick":0,"bpm":120}],"occurrences":[{"bar":0,"occurrence":0,"meterNumerator":4,"meterDenominator":4,"startTick":0,"endTick":3840,"startMs":0,"endMs":2000}],"notes":[],"midi":[]})).unwrap();
+        let sound = |locked| TrackSound {
+            locked,
+            ..TrackSound::default()
+        };
+        let with = |track: &str, locked| {
+            let mut settings = DocumentSettings::default();
+            settings.sounds.insert(track.into(), sound(locked));
+            settings
+        };
+        let none = DocumentSettings::default();
+        // Locking and unlocking either track, as a toggle and as its undo, each need a rebuild.
+        for track in ["a", "b"] {
+            assert!(sound_source_changed(&plan, &none, &with(track, true)));
+            assert!(sound_source_changed(&plan, &with(track, true), &none));
+            assert!(sound_source_changed(
+                &plan,
+                &with(track, true),
+                &with(track, false)
+            ));
+        }
+        // A lock on a track the plan does not have changes nothing the player sounds.
+        assert!(!sound_source_changed(
+            &plan,
+            &none,
+            &with("elsewhere", true)
+        ));
+        // Nothing but the lock-free settings changed: the cheap mix path stands.
+        assert!(!sound_source_changed(
+            &plan,
+            &with("a", true),
+            &with("a", true)
+        ));
+        assert!(!sound_source_changed(&plan, &none, &with("a", false)));
+        let mut louder = with("a", true);
+        louder.mixes.insert(
+            "a".into(),
+            crate::settings::ChannelMix {
+                gain: 0.5,
+                ..Default::default()
+            },
+        );
+        assert!(!sound_source_changed(&plan, &with("a", true), &louder));
+    }
+
+    use super::*;
+    fn practice(speed: f64, enabled: bool) -> PracticeSettings {
+        PracticeSettings {
+            tempo: super::super::practice::PracticeTempo::Relative { ratio: speed },
+            metronome: super::super::practice::MetronomeSettings {
+                enabled,
+                volume: 0.4,
+                visual: false,
+            },
+            count_in: super::super::practice::CountInSettings {
+                bars: 0,
+                between_loops: false,
+            },
+        }
+    }
+
     fn unavailable_device_with_practice() -> AudioService {
         let service = AudioService::new(
             PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/audio"),
             Arc::new(|_| {}),
         );
         service.control.lock().unwrap().device = Some("unavailable-test-device".into());
-        let plan: PlaybackPlan = serde_json::from_value(serde_json::json!({"generation":1,"ppq":960,"durationTick":3840,"durationMs":2000,"tracks":[{"id":"gm","program":0,"percussion":false}],"tempos":[{"tick":0,"bpm":120}],"occurrences":[{"bar":0,"occurrence":0,"startTick":0,"endTick":3840,"startMs":0,"endMs":2000}],"notes":[],"midi":[]})).unwrap();
+        let plan: PlaybackPlan = serde_json::from_value(serde_json::json!({"generation":1,"ppq":960,"durationTick":3840,"durationMs":2000,"tracks":[{"id":"gm","program":0,"percussion":false}],"tempos":[{"tick":0,"bpm":120}],"occurrences":[{"bar":0,"occurrence":0,"meterNumerator":4,"meterDenominator":4,"startTick":0,"endTick":3840,"startMs":0,"endMs":2000}],"notes":[],"midi":[]})).unwrap();
         assert!(
             service
-                .prepare_with_practice(
-                    plan,
-                    DocumentSettings::default(),
-                    None,
-                    PracticeSettings {
-                        speed: 0.5,
-                        metronome: true
-                    }
-                )
+                .prepare_with_practice(plan, DocumentSettings::default(), None, practice(0.5, true))
                 .is_err()
         );
         assert_eq!(service.prepared_generation(), Some(1));
@@ -1159,8 +2684,11 @@ mod tests {
     fn initial_device_failure_retains_prepared_practice_for_recovery() {
         let service = unavailable_device_with_practice();
         let document = service.control.lock().unwrap().document.clone().unwrap();
-        assert_eq!(document.practice.speed, 0.5);
-        assert!(document.practice.metronome);
+        assert_eq!(
+            document.practice.tempo,
+            PracticeTempo::Relative { ratio: 0.5 }
+        );
+        assert!(document.practice.metronome.enabled);
         let mut transport = CallbackTransport::headless(48_000);
         transport.install_with_practice(
             AudioService::renderer(&document, 48_000).unwrap(),
@@ -1219,23 +2747,648 @@ mod tests {
             .plan
             .as_ref()
             .clone();
-        for speed in [f64::NAN, 0.24, 2.01] {
+        for speed in [f64::NAN, 0.099, 3.001] {
             assert!(
                 service
                     .prepare_with_practice(
                         plan.clone(),
                         DocumentSettings::default(),
                         None,
-                        PracticeSettings {
-                            speed,
-                            metronome: false
-                        }
+                        practice(speed, false)
                     )
                     .is_err()
             );
             assert_eq!(service.prepared_generation(), Some(1));
             assert_eq!(service.shared.desired.load(Ordering::Acquire), 1);
         }
+    }
+    fn counted_document() -> PreparedDocument {
+        let service = unavailable_device_with_practice();
+        let mut document = service.control.lock().unwrap().document.clone().unwrap();
+        document.practice.count_in.bars = 1;
+        document
+    }
+    fn recreate(
+        old: &mut CallbackTransport,
+        document: &PreparedDocument,
+        rate: u32,
+    ) -> CallbackTransport {
+        let (_, snapshot) = old.shared.next_epoch_snapshot();
+        let mut next = CallbackTransport::new(rate, old.shared.clone());
+        next.generation = document.plan.generation;
+        next.renderer = Some(AudioService::renderer(document, rate).unwrap());
+        next.ready = true;
+        next.duration = old.duration;
+        next.restore(snapshot).unwrap();
+        next.shared.fault.store(0, Ordering::Release);
+        next.publish();
+        next
+    }
+    #[test]
+    fn range_survives_quiescent_switch_and_fault() {
+        let document = counted_document();
+        let mut old = CallbackTransport::headless(48_000);
+        old.install_with_practice(
+            AudioService::renderer(&document, 48_000).unwrap(),
+            1,
+            false,
+            document.practice,
+        );
+        old.command(TransportCommand::PlayRange {
+            generation: 1,
+            start_tick: 960.0,
+            end_tick: Some(1920.0),
+        })
+        .unwrap();
+        old.render_into(&mut [[0.0; 2]; 12345]);
+        old.command(TransportCommand::Pause { generation: 1 })
+            .unwrap();
+        let before = old.status();
+        let remaining = old.count.unwrap().remaining_wall_seconds();
+        let (mut producer, controls) = HeapRb::new(CONTROL_CAPACITY).split();
+        let (retired, _retirement_queue) = HeapRb::new(CONTROL_CAPACITY).split();
+        old.shared.barrier_request.store(1, Ordering::Release);
+        assert!(producer.try_push(CallbackCommand::Barrier(1)).is_ok());
+        let mut callback = OutputCallback {
+            transport: old,
+            controls,
+            retired,
+            scratch: [[0.0; 2]; BLOCK],
+            epoch: 0,
+            suspended: false,
+        };
+        callback.render(&mut [1.0f32; BLOCK * 2], 2);
+        assert!(callback.suspended);
+        assert_eq!(callback.transport.shared.barrier.load(Ordering::Acquire), 1);
+        let mut next = recreate(&mut callback.transport, &document, 44_100);
+        assert_eq!(next.status().range, before.range);
+        assert_eq!(next.tick, before.tick);
+        assert_eq!(next.phase, PracticePhase::Paused);
+        assert_eq!(next.pulse, before.practice.pulse);
+        assert!((next.count.unwrap().remaining_wall_seconds() - remaining).abs() <= 1.0 / 44_100.0);
+        let stable = serde_json::to_value(next.status()).unwrap();
+        callback.transport.publish();
+        callback.transport.device_error();
+        assert_eq!(serde_json::to_value(next.status()).unwrap(), stable);
+        next.device_error();
+        let mut recovered = recreate(&mut next, &document, 48_000);
+        assert_eq!(recovered.status().range, before.range);
+        assert_eq!(recovered.phase, PracticePhase::Paused);
+        assert!(recovered.interrupted_count);
+        recovered
+            .command(TransportCommand::Play { generation: 1 })
+            .unwrap();
+        assert_eq!(recovered.count.unwrap().snapshot().elapsed_frames, 0);
+        recovered.render_into(&mut [[0.0; 2]; 123]);
+        recovered
+            .command(TransportCommand::Play { generation: 1 })
+            .unwrap();
+        assert_eq!(recovered.count.unwrap().snapshot().elapsed_frames, 123);
+        recovered.render_into(&mut vec![[0.0; 2]; 240_000]);
+        assert_eq!(recovered.phase, PracticePhase::Ended);
+        assert_eq!(recovered.tick, 1920.0);
+        let ended = recreate(&mut recovered, &document, 44_100);
+        assert_eq!(ended.phase, PracticePhase::Ended);
+        assert_eq!(ended.status().range, before.range);
+        assert!(!ended.playing);
+        assert_eq!(ended.passes, 0);
+    }
+
+    #[test]
+    fn range_validation_and_queue_failure_preserve_accepted_state() {
+        let document = counted_document();
+        let service = AudioService::new(PathBuf::new(), Arc::new(|_| {}));
+        service.shared.desired.store(1, Ordering::Release);
+        let (producer, mut controls) = HeapRb::new(CONTROL_CAPACITY).split();
+        {
+            let mut state = service.control.lock().unwrap();
+            state.document = Some(document.clone());
+            state.producer = Some(producer);
+            state.rate = 48_000;
+        }
+        let request = TransportCommand::PlayRange {
+            generation: 1,
+            start_tick: 960.0,
+            end_tick: Some(1920.0),
+        };
+        let before = serde_json::to_value(service.status()).unwrap();
+        assert!(
+            service.command(request.clone()).is_err(),
+            "not-ready requests must reject before enqueue"
+        );
+        assert_eq!(serde_json::to_value(service.status()).unwrap(), before);
+        assert!(controls.try_pop().is_none());
+        let mut transport = CallbackTransport::new(48_000, service.shared.clone());
+        transport.install_with_practice(
+            AudioService::renderer(&document, 48_000).unwrap(),
+            1,
+            false,
+            document.practice,
+        );
+        transport.command(request.clone()).unwrap();
+        transport.render_into(&mut [[0.0; 2]; 123]);
+        let before = serde_json::to_value(service.status()).unwrap();
+        for command in [
+            TransportCommand::PlayRange {
+                generation: 1,
+                start_tick: 3840.0,
+                end_tick: None,
+            },
+            TransportCommand::PlayRange {
+                generation: 1,
+                start_tick: 960.0,
+                end_tick: Some(3841.0),
+            },
+            TransportCommand::PlayRange {
+                generation: 0,
+                start_tick: 960.0,
+                end_tick: None,
+            },
+        ] {
+            assert!(service.command(command).is_err());
+            assert_eq!(serde_json::to_value(service.status()).unwrap(), before);
+            assert!(controls.try_pop().is_none());
+        }
+        for _ in 0..CONTROL_CAPACITY {
+            service
+                .command(TransportCommand::Pause { generation: 1 })
+                .unwrap();
+        }
+        assert!(
+            service
+                .command(request.clone())
+                .unwrap_err()
+                .contains("queue is full")
+        );
+        assert_eq!(serde_json::to_value(service.status()).unwrap(), before);
+        while let Some(command) = controls.try_pop() {
+            assert!(matches!(
+                command,
+                CallbackCommand::Transport(TransportCommand::Pause { .. })
+            ));
+        }
+        service.command(request).unwrap();
+        // Queue acceptance alone cannot publish a new start or reset the count.
+        assert_eq!(serde_json::to_value(service.status()).unwrap(), before);
+        let CallbackCommand::Transport(command) = controls.try_pop().unwrap() else {
+            panic!("expected transport command")
+        };
+        transport.command(command).unwrap();
+        assert_eq!(transport.count.unwrap().snapshot().elapsed_frames, 0);
+        let before_mix = serde_json::to_value(transport.status()).unwrap();
+        let mix = PreparedMix::prepare(&document.settings, &document.plan, 48_000).unwrap();
+        AudioService::enqueue(
+            &mut service.control.lock().unwrap(),
+            CallbackCommand::Mix { mix, generation: 1 },
+        )
+        .unwrap();
+        let (retired, _retirement_queue) = HeapRb::new(CONTROL_CAPACITY).split();
+        let mut callback = OutputCallback {
+            transport,
+            controls,
+            retired,
+            scratch: [[0.0; 2]; BLOCK],
+            epoch: 0,
+            suspended: false,
+        };
+        callback.render(&mut [] as &mut [f32], 2);
+        assert_eq!(
+            serde_json::to_value(callback.transport.status()).unwrap(),
+            before_mix
+        );
+    }
+
+    #[test]
+    fn output_callback_parks_a_mix_during_a_crossfade_and_retires_every_one_off_thread() {
+        let service = unavailable_device_with_practice();
+        let document = service.control.lock().unwrap().document.clone().unwrap();
+        let mut transport = CallbackTransport::headless(48_000);
+        transport.install_with_practice(
+            AudioService::renderer(&document, 48_000).unwrap(),
+            1,
+            false,
+            document.practice,
+        );
+        transport
+            .command(TransportCommand::Play { generation: 1 })
+            .unwrap();
+        let (mut controls_in, controls) = HeapRb::<CallbackCommand>::new(CONTROL_CAPACITY).split();
+        let (retired_in, mut retired_out) = HeapRb::<Retired>::new(CONTROL_CAPACITY).split();
+        let mut callback = OutputCallback {
+            transport,
+            controls,
+            retired: retired_in,
+            scratch: [[0.0; 2]; BLOCK],
+            epoch: 0,
+            suspended: false,
+        };
+        let mut retired = |callback: &mut OutputCallback, frames: usize| {
+            callback.render(&mut vec![0.0f32; frames * 2], 2);
+            let mut count = 0;
+            while let Some(item) = retired_out.try_pop() {
+                assert!(matches!(item, Retired::Mix(_)));
+                count += 1;
+            }
+            count
+        };
+        let mut send = |mix| {
+            assert!(
+                controls_in
+                    .try_push(CallbackCommand::Mix { mix, generation: 1 })
+                    .is_ok()
+            );
+        };
+        let mix = || PreparedMix::prepare(&document.settings, &document.plan, 48_000).unwrap();
+        send(mix());
+        assert_eq!(retired(&mut callback, 64), 1, "taken at once");
+        send(mix());
+        assert_eq!(retired(&mut callback, 64), 0, "waits for the crossfade");
+        send(mix());
+        assert_eq!(retired(&mut callback, 64), 1, "the one waiting gives way");
+        // Blocks run one after another inside a callback, and the mix goes in between them.
+        assert_eq!(
+            retired(&mut callback, BLOCK * 2),
+            1,
+            "installed when it ends"
+        );
+        assert_eq!(retired(&mut callback, BLOCK * 2), 0, "nothing is left");
+    }
+
+    #[test]
+    fn range_count_preflight_failure_leaves_complete_callback_state_unchanged() {
+        let mut document = counted_document();
+        let mut plan = document.plan.as_ref().clone();
+        plan.occurrences[0].meter_numerator = u32::MAX;
+        document.plan = Arc::new(plan);
+        document.practice.count_in.bars = 16;
+        let mut transport = CallbackTransport::headless(48_000);
+        transport.install_with_practice(
+            AudioService::renderer(&document, 48_000).unwrap(),
+            1,
+            false,
+            document.practice,
+        );
+        transport
+            .command(TransportCommand::SetLoop {
+                generation: 1,
+                start_tick: 0.0,
+                end_tick: 1920.0,
+            })
+            .unwrap();
+        let before = serde_json::to_value(transport.status()).unwrap();
+        assert!(
+            transport
+                .command(TransportCommand::PlayRange {
+                    generation: 1,
+                    start_tick: 960.0,
+                    end_tick: Some(1920.0)
+                })
+                .is_err()
+        );
+        assert_eq!(serde_json::to_value(transport.status()).unwrap(), before);
+    }
+    #[test]
+    fn device_snapshot_preserves_fractional_count_and_epoch() {
+        let document = counted_document();
+        let mut old = CallbackTransport::headless(48_000);
+        old.install_with_practice(
+            AudioService::renderer(&document, 48_000).unwrap(),
+            1,
+            false,
+            document.practice,
+        );
+        old.command(TransportCommand::Play { generation: 1 })
+            .unwrap();
+        old.render_into(&mut [[0.0; 2]; 12_345]);
+        let before = old.count.unwrap().remaining_wall_seconds();
+        let serial = old.serial;
+        let mut next = recreate(&mut old, &document, 44_100);
+        assert_eq!(next.phase, PracticePhase::CountIn);
+        assert_eq!(next.serial, serial);
+        assert!((next.count.unwrap().remaining_wall_seconds() - before).abs() <= 1.0 / 44_100.0);
+        next.render_into(&mut [[0.0; 2]; 1]);
+        assert_eq!(next.serial, serial);
+        let stable = next.status();
+        let mut silence = [[1.0; 2]; 511];
+        old.render_into(&mut silence);
+        old.device_error();
+        assert!(silence.iter().all(|f| *f == [0.0; 2]));
+        assert_eq!(next.status().practice, stable.practice);
+        assert!(next.status().ready);
+        assert!(
+            old.command(TransportCommand::Stop { generation: 1 })
+                .is_err()
+        );
+        assert!(
+            old.install(AudioService::renderer(&document, 48_000).unwrap(), 2, false)
+                .is_some()
+        );
+        assert_eq!(next.status().generation, 1);
+    }
+    #[test]
+    fn paused_count_reselect_keeps_pulse_and_subbeat() {
+        let document = counted_document();
+        let mut old = CallbackTransport::headless(48_000);
+        old.install_with_practice(
+            AudioService::renderer(&document, 48_000).unwrap(),
+            1,
+            false,
+            document.practice,
+        );
+        old.command(TransportCommand::Play { generation: 1 })
+            .unwrap();
+        old.render_into(&mut [[0.0; 2]; 12_345]);
+        old.command(TransportCommand::Pause { generation: 1 })
+            .unwrap();
+        let before = old.count.unwrap().remaining_wall_seconds();
+        let serial = old.serial;
+        let mut next = recreate(&mut old, &document, 44_100);
+        assert_eq!(next.phase, PracticePhase::Paused);
+        assert!(next.resume_count);
+        next.render_into(&mut [[0.0; 2]; 511]);
+        assert!((next.count.unwrap().remaining_wall_seconds() - before).abs() <= 1.0 / 44_100.0);
+        next.command(TransportCommand::Play { generation: 1 })
+            .unwrap();
+        next.render_into(&mut [[0.0; 2]; 1]);
+        assert_eq!(next.serial, serial);
+    }
+    #[test]
+    fn fault_count_restarts_full_and_score_recovers_paused() {
+        let document = counted_document();
+        let mut old = CallbackTransport::headless(48_000);
+        old.install_with_practice(
+            AudioService::renderer(&document, 48_000).unwrap(),
+            1,
+            false,
+            document.practice,
+        );
+        old.command(TransportCommand::Play { generation: 1 })
+            .unwrap();
+        old.render_into(&mut [[0.0; 2]; 12_345]);
+        old.device_error();
+        old.render_into(&mut [[0.0; 2]; 2]);
+        let mut next = recreate(&mut old, &document, 44_100);
+        assert_eq!(next.phase, PracticePhase::Paused);
+        assert!(next.interrupted_count);
+        assert!(next.count.is_none());
+        next.command(TransportCommand::Play { generation: 1 })
+            .unwrap();
+        assert_eq!(next.count.unwrap().snapshot().elapsed_frames, 0);
+        assert!((next.count.unwrap().remaining_wall_seconds() - 4.0).abs() < 1e-12);
+        next.command(TransportCommand::SeekTick {
+            generation: 1,
+            tick: 960.0,
+        })
+        .unwrap();
+        next.render_into(&mut [[0.0; 2]; 511]);
+        let tick = next.tick;
+        next.device_error();
+        let mut recovered = recreate(&mut next, &document, 48_000);
+        assert_eq!(recovered.phase, PracticePhase::Paused);
+        assert_eq!(recovered.tick, tick);
+        assert!(!recovered.interrupted_count);
+        recovered
+            .command(TransportCommand::Play { generation: 1 })
+            .unwrap();
+        assert!(recovered.count.is_none());
+        recovered.render_into(&mut [[0.0; 2]; 1]);
+        assert!(recovered.tick > tick);
+    }
+    #[test]
+    fn count_overflow_rejected_before_prepared_document_mutates() {
+        let service = unavailable_device_with_practice();
+        let old = service.control.lock().unwrap().document.clone().unwrap();
+        let mut plan = old.plan.as_ref().clone();
+        plan.generation = 2;
+        plan.occurrences[0].meter_numerator = u32::MAX;
+        let mut settings = old.practice;
+        settings.count_in.bars = 16;
+        assert!(
+            service
+                .prepare_with_practice(plan, old.settings.clone(), None, settings)
+                .is_err()
+        );
+        assert_eq!(service.prepared_generation(), Some(1));
+        assert_eq!(service.shared.desired.load(Ordering::Acquire), 1);
+    }
+    #[test]
+    fn count_fault_preserves_progressive_pass_on_full_count_restart() {
+        let mut document = counted_document();
+        document.practice.tempo = PracticeTempo::Progressive {
+            start: 0.5,
+            end: 1.0,
+            step: 0.2,
+            repetitions: 2,
+        };
+        document.practice.count_in.between_loops = true;
+        let mut old = CallbackTransport::headless(48_000);
+        old.install_with_practice(
+            AudioService::renderer(&document, 48_000).unwrap(),
+            1,
+            false,
+            document.practice,
+        );
+        old.command(TransportCommand::SetLoop {
+            generation: 1,
+            start_tick: 0.0,
+            end_tick: 3840.0,
+        })
+        .unwrap();
+        old.command(TransportCommand::Play { generation: 1 })
+            .unwrap();
+        old.render_into(&mut vec![[0.0; 2]; 768_001]);
+        assert_eq!(old.passes, 2);
+        old.device_error();
+        let mut next = recreate(&mut old, &document, 44_100);
+        next.command(TransportCommand::Play { generation: 1 })
+            .unwrap();
+        assert_eq!(next.passes, 2);
+        assert!((next.count.unwrap().snapshot().bpm - 84.0).abs() < 1e-12);
+        assert_eq!(next.count.unwrap().snapshot().elapsed_frames, 0);
+    }
+    #[test]
+    fn healthy_device_barrier_acknowledges_queued_settings_and_freezes_clock() {
+        let service = AudioService::new(PathBuf::new(), Arc::new(|_| {}));
+        let document = counted_document();
+        service.shared.desired.store(1, Ordering::Release);
+        let mut transport = CallbackTransport::new(48_000, service.shared.clone());
+        transport.install_with_practice(
+            AudioService::renderer(&document, 48_000).unwrap(),
+            1,
+            false,
+            document.practice,
+        );
+        transport
+            .command(TransportCommand::Play { generation: 1 })
+            .unwrap();
+        let (producer, controls) = HeapRb::new(CONTROL_CAPACITY).split();
+        let (retired, retirement_queue) = HeapRb::new(CONTROL_CAPACITY).split();
+        {
+            let mut state = service.control.lock().unwrap();
+            state.producer = Some(producer);
+            state.document = Some(document);
+        }
+        let mut applied = practice(0.7, true);
+        applied.count_in.bars = 1;
+        service
+            .command(TransportCommand::SetPractice {
+                generation: 1,
+                settings: applied,
+            })
+            .unwrap();
+        service
+            .command(TransportCommand::SetLoop {
+                generation: 1,
+                start_tick: 0.0,
+                end_tick: 3840.0,
+            })
+            .unwrap();
+        let mut callback = OutputCallback {
+            transport,
+            controls,
+            retired,
+            scratch: [[0.0; 2]; BLOCK],
+            epoch: 0,
+            suspended: false,
+        };
+        let worker = thread::spawn(move || {
+            let _retirement_queue = retirement_queue;
+            let until = std::time::Instant::now() + Duration::from_secs(1);
+            let mut output = [1.0f32; BLOCK * 2];
+            while !callback.suspended {
+                callback.render(&mut output, 2);
+                assert!(std::time::Instant::now() < until);
+                thread::sleep(Duration::from_millis(1));
+            }
+            assert!(output.iter().all(|x| *x == 0.0));
+            let tick = callback.transport.tick;
+            callback.render(&mut output, 2);
+            assert_eq!(callback.transport.tick, tick);
+            callback.transport
+        });
+        service
+            .synchronize_callback(&mut service.control.lock().unwrap(), Duration::from_secs(1))
+            .unwrap();
+        let snapshot = service.shared.snapshot().1;
+        assert_eq!(snapshot.settings, applied);
+        assert_eq!(snapshot.loop_range, Some((0.0, 3840.0)));
+        assert_eq!(snapshot.phase, PracticePhase::Playing);
+        let frozen = worker.join().unwrap();
+        assert_eq!(snapshot.tick, frozen.tick);
+        assert_eq!(snapshot.count, frozen.count.map(|c| c.snapshot()));
+    }
+    #[test]
+    fn timed_out_device_barrier_cannot_suspend_a_later_callback() {
+        let service = AudioService::new(PathBuf::new(), Arc::new(|_| {}));
+        let mut document = counted_document();
+        document.practice.count_in.bars = 0;
+        let mut transport = CallbackTransport::new(48_000, service.shared.clone());
+        transport.install_with_practice(
+            AudioService::renderer(&document, 48_000).unwrap(),
+            1,
+            false,
+            document.practice,
+        );
+        transport
+            .command(TransportCommand::Play { generation: 1 })
+            .unwrap();
+        let (producer, controls) = HeapRb::new(CONTROL_CAPACITY).split();
+        let (retired, _retirement_queue) = HeapRb::new(CONTROL_CAPACITY).split();
+        let mut state = service.control.lock().unwrap();
+        state.producer = Some(producer);
+        assert!(
+            service
+                .synchronize_callback(&mut state, Duration::from_millis(1))
+                .is_err()
+        );
+        let mut callback = OutputCallback {
+            transport,
+            controls,
+            retired,
+            scratch: [[0.0; 2]; BLOCK],
+            epoch: 0,
+            suspended: false,
+        };
+        callback.render(&mut [0.0f32; BLOCK * 2], 2);
+        assert!(!callback.suspended);
+        assert!(callback.transport.tick > 0.0);
+    }
+    #[test]
+    fn unrepresentable_frozen_count_recovery_reports_fault_in_new_epoch() {
+        let mut document = counted_document();
+        let mut plan = document.plan.as_ref().clone();
+        plan.tempos[0].bpm = 44_000.0;
+        plan.occurrences[0].meter_denominator = 256;
+        plan.duration_ms = 3840.0 * 60_000.0 / (44_000.0 * 960.0);
+        plan.occurrences[0].end_ms = plan.duration_ms;
+        document.plan = Arc::new(plan);
+        document.practice = practice(1.0, true);
+        document.practice.count_in.bars = 1;
+        let mut old = CallbackTransport::headless(48_000);
+        old.install_with_practice(
+            AudioService::renderer(&document, 48_000).unwrap(),
+            1,
+            false,
+            document.practice,
+        );
+        old.command(TransportCommand::Play { generation: 1 })
+            .unwrap();
+        old.render_into(&mut [[0.0; 2]; 1]);
+        old.command(TransportCommand::SetPractice {
+            generation: 1,
+            settings: PracticeSettings {
+                tempo: PracticeTempo::Relative { ratio: 0.1 },
+                ..document.practice
+            },
+        })
+        .unwrap();
+        let (_, snapshot) = old.shared.next_epoch_snapshot();
+        let mut next = CallbackTransport::new(44_100, old.shared.clone());
+        next.renderer = Some(AudioService::renderer(&document, 44_100).unwrap());
+        next.generation = 1;
+        next.ready = true;
+        assert!(next.restore(snapshot).is_err());
+        assert!(!next.status().ready);
+        assert!(!next.status().playing);
+        assert_eq!(next.status().practice.phase, PracticePhase::Paused);
+    }
+    #[test]
+    fn suspended_callback_cannot_acknowledge_later_installs_or_clear_fault() {
+        let document = counted_document();
+        let mut transport = CallbackTransport::headless(48_000);
+        transport.install_with_practice(
+            AudioService::renderer(&document, 48_000).unwrap(),
+            1,
+            false,
+            document.practice,
+        );
+        transport.device_error();
+        let (mut producer, controls) = HeapRb::new(CONTROL_CAPACITY).split();
+        let (retired, _retirement_queue) = HeapRb::new(CONTROL_CAPACITY).split();
+        assert!(
+            producer
+                .try_push(CallbackCommand::Install {
+                    renderer: AudioService::renderer(&document, 48_000).unwrap(),
+                    generation: 2,
+                    preserve: false,
+                    practice: document.practice
+                })
+                .is_ok()
+        );
+        let mut callback = OutputCallback {
+            transport,
+            controls,
+            retired,
+            scratch: [[0.0; 2]; BLOCK],
+            epoch: 0,
+            suspended: true,
+        };
+        let mut output = [1.0f32; BLOCK * 2];
+        callback.render(&mut output, 2);
+        assert!(output.iter().all(|x| *x == 0.0));
+        assert_eq!(callback.transport.status().generation, 1);
+        assert!(!callback.transport.status().ready);
+        assert!(!callback.controls.is_empty());
     }
     #[test]
     fn invalidate_does_not_wait_for_preparation_mutex() {
@@ -1254,5 +3407,85 @@ mod tests {
             immediate.is_ok(),
             "Invalidation must interrupt preparation without waiting on its control mutex."
         );
+    }
+}
+
+#[cfg(test)]
+mod audition_callback_tests {
+    use super::*;
+
+    #[test]
+    fn submit_refuses_clips_the_live_stream_could_not_sound() {
+        let service = AudioService::new(PathBuf::new(), Arc::new(|_| {}));
+        let clip = |rate| {
+            Box::new(AuditionClip {
+                rate,
+                frames: vec![[0.1; 2]; 8],
+            })
+        };
+        assert!(!service.submit_audition(clip(48_000)), "no stream yet");
+        let mut consumer = service.attach_test_audition(48_000);
+        assert!(!service.submit_audition(clip(44_100)), "wrong rate");
+        assert!(service.submit_audition(clip(48_000)));
+        assert!(consumer.try_pop().is_some());
+        service.shared.mark_fault();
+        assert!(!service.submit_audition(clip(48_000)), "faulted device");
+        let _consumer = service.attach_test_audition(48_000);
+        service.shared.fault.store(0, Ordering::Release);
+        assert!(service.submit_audition(clip(48_000)));
+        // A newer stream epoch retires the old producer.
+        service.shared.next_epoch_snapshot();
+        assert!(!service.submit_audition(clip(48_000)), "replaced stream");
+    }
+
+    #[test]
+    fn output_callback_adds_a_clip_while_stopped_and_retires_it_off_thread() {
+        let shared = Arc::new(SharedStatus::new());
+        let mut transport = CallbackTransport::new(48_000, shared.clone());
+        let (mut producer, consumer) = audition_channel();
+        transport.audition.attach(consumer);
+        let (_controls_in, controls) = HeapRb::<CallbackCommand>::new(CONTROL_CAPACITY).split();
+        let (retired_in, mut retired_out) = HeapRb::<Retired>::new(CONTROL_CAPACITY).split();
+        let mut callback = OutputCallback {
+            transport,
+            controls,
+            retired: retired_in,
+            scratch: [[0.0; 2]; BLOCK],
+            epoch: shared.epoch.load(Ordering::Acquire),
+            suspended: false,
+        };
+        let clip = Box::new(AuditionClip {
+            rate: 48_000,
+            frames: vec![[0.5, -0.25]; 600],
+        });
+        assert!(producer.try_push(clip).is_ok());
+        let mut stereo = vec![0.0f32; 1024 * 2];
+        callback.render(&mut stereo, 2);
+        assert_eq!(&stereo[..2], &[0.5, -0.25]);
+        assert_eq!(&stereo[599 * 2..599 * 2 + 2], &[0.5, -0.25]);
+        assert_eq!(&stereo[600 * 2..600 * 2 + 2], &[0.0, 0.0]);
+        // Mono output downmixes the clip like normal playback.
+        assert!(
+            producer
+                .try_push(Box::new(AuditionClip {
+                    rate: 48_000,
+                    frames: vec![[0.5, -0.25]; 8],
+                }))
+                .is_ok()
+        );
+        let mut mono = vec![0.0f32; 16];
+        callback.render(&mut mono, 1);
+        assert_eq!(mono[0], 0.125);
+        let status = shared.snapshot().0;
+        assert_eq!(status.audition_serial, 2);
+        assert_eq!(status.audition_peak, 0.5);
+        assert!(!status.playing);
+        assert_eq!(status.rendered_frames, 0);
+        let mut retired = 0;
+        while let Some(item) = retired_out.try_pop() {
+            assert!(matches!(item, Retired::Clip(_)));
+            retired += 1;
+        }
+        assert_eq!(retired, 2);
     }
 }

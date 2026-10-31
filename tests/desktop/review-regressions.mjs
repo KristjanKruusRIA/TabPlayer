@@ -1,3 +1,4 @@
+import {waitForWorkspaceIdle,clickWorkstationButton,revealDock} from './workstation-commands.mjs';
 import assert from 'node:assert/strict';
 import {writeFileSync} from 'node:fs';
 import {resolve} from 'node:path';
@@ -6,17 +7,17 @@ const run=Date.now(), exported=resolve(directory,`review-${run}.gp`);
 const id=launch({TABPLAYER_TEST_SAVE:resolve(directory,`review-${run}.tabplayer`),TABPLAYER_TEST_EXPORT:exported,TABPLAYER_TEST_OPEN:exported});
 const browser=await connect(),page=browser.contexts()[0].pages()[0];
 let stage='startup';const errors=[];page.on('pageerror',error=>errors.push({stage,message:error.message,stack:error.stack}));
-const idle=()=>page.waitForFunction(()=>!document.querySelector('nav button').disabled);
-const click=async name=>{stage=name;await page.getByRole('button',{name,exact:true}).click();await idle();};
+const idle=()=>waitForWorkspaceIdle(page);
+const click=async name=>{stage=name;await clickWorkstationButton(page,name,{waitForIdle:false});await idle();};
 const fill=(name,value)=>page.getByLabel(name,{exact:true}).fill(String(value));
 const status=()=>page.evaluate(()=>window.__TAURI_INTERNALS__.invoke('audio_status'));
 const waitStatus=async predicate=>{const deadline=Date.now()+10000;let last;while(Date.now()<deadline){last=await status();if(predicate(last))return last;await page.waitForTimeout(25);}throw new Error(`Native status timed out at ${stage}: ${JSON.stringify(last)}`);};
 const ready=async()=>{await waitStatus(s=>s.ready&&!s.error&&s.generation===s.desiredGeneration);await page.waitForFunction(()=>[...document.querySelectorAll('button')].some(b=>b.textContent==='Play'&&!b.disabled));};
 const signals=[];
 const audible=async label=>{stage=label;console.log(`Checking native callbacks: ${label}`);const before=await status();assert.equal(before.outputPeak,0,'A newly prepared score must not report an earlier score signal.');await click('Play');const played=await waitStatus(s=>s.generation===before.generation&&s.playing&&s.renderedFrames>before.renderedFrames+1024&&s.outputPeak>.001);signals.push({label,generation:played.generation,renderedFrames:played.renderedFrames,outputPeak:played.outputPeak});await click('Stop');await waitStatus(s=>!s.playing&&s.tick===0);};
-const check=async(label,index,checked)=>{const input=page.getByLabel(label,{exact:true}).nth(index);assert.notEqual(await input.isChecked(),checked);await input.click();await page.waitForFunction(({label,index,checked})=>[...document.querySelectorAll('.track-card label')].filter(node=>node.textContent.trim()===label)[index]?.querySelector('input')?.checked===checked,{label,index,checked});await idle();};
+const check=async(label,index,checked)=>{await revealDock(page,'Mixer');const input=page.getByLabel(label,{exact:true}).nth(index);assert.notEqual(await input.isChecked(),checked);await input.click();await page.waitForFunction(({label,index,checked})=>[...document.querySelectorAll('.track-channel label')].filter(node=>node.textContent.trim()===label)[index]?.querySelector('input')?.checked===checked,{label,index,checked});await idle();};
 try {
-  await page.getByRole('button',{name:'New',exact:true}).waitFor();
+  await waitForWorkspaceIdle(page);
   await page.context().route('**/*',route=>['tauri.localhost','ipc.localhost','127.0.0.1'].includes(new URL(route.request().url()).hostname)?route.continue():route.abort());
   await page.evaluate(async()=>{
     const {AlphaTabApi}=await import('/alphatab/alphaTab.mjs'),original=AlphaTabApi.prototype.renderScore;
@@ -53,6 +54,6 @@ try {
   writeFileSync(resolve(directory,'review-regressions-result.json'),JSON.stringify({emptyFollowingMeasure:true,tripleDotTimingExportReimport:true,persistedMixerUndoRedo:true,deletedSoloRecovery:true,newClearsMix:true,nativeSignals:signals,externalRequestsBlocked:true},null,2));
   console.log('Packaged regression checks passed: empty following measure; triple-dot render/timing/export/reimport; mixer undo/redo; audio after solo deletion and New. External requests blocked.');
 } catch(error){
-  console.log(JSON.stringify(await page.evaluate(async()=>({status:await window.__TAURI_INTERNALS__.invoke('audio_status'),project:await window.__TAURI_INTERNALS__.invoke('project_snapshot'),score:window.__reviewScore?.tracks.map(t=>({name:t.name,notes:t.staves[0].bars[0].voices[0].beats.map(b=>b.notes.map(n=>({string:n.string,fret:n.fret,pitch:n.realValue})))})),transport:document.querySelector('.transport')?.textContent})).catch(()=>({diagnosticsUnavailable:true})),null,2));
+  console.log(JSON.stringify(await page.evaluate(async()=>({status:await window.__TAURI_INTERNALS__.invoke('audio_status'),project:(await window.__TAURI_INTERNALS__.invoke('project_snapshot',{documentId:(await window.__TAURI_INTERNALS__.invoke('workspace_snapshot')).active.documentId})).snapshot,score:window.__reviewScore?.tracks.map(t=>({name:t.name,notes:t.staves[0].bars[0].voices[0].beats.map(b=>b.notes.map(n=>({string:n.string,fret:n.fret,pitch:n.realValue})))})),transport:document.querySelector('.transport')?.textContent})).catch(()=>({diagnosticsUnavailable:true})),null,2));
   throw error;
 } finally {await page.context().unrouteAll({behavior:'ignoreErrors'});await browser.close();stop(id);}

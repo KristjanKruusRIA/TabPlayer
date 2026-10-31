@@ -1,6 +1,10 @@
 pub mod audio;
+pub mod flac;
 pub mod jobs;
 pub mod pdf;
+pub mod png;
 pub mod print;
 pub mod stems;
+pub mod svg;
+pub mod tracks;
 pub mod wav;

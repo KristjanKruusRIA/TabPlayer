@@ -4,12 +4,12 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "predev": "node scripts/copy-assets.mjs && node scripts/prepare-fonts.mjs && node scripts/prepare-audio.mjs",
-    "prebuild": "node scripts/copy-assets.mjs && node scripts/prepare-fonts.mjs && node scripts/prepare-audio.mjs && node scripts/copy-notices.mjs",
+    "predev": "node scripts/copy-assets.mjs && node scripts/prepare-fonts.mjs && node scripts/prepare-audio.mjs && node scripts/prepare-library.mjs",
+    "prebuild": "node scripts/copy-assets.mjs && node scripts/prepare-fonts.mjs && node scripts/prepare-audio.mjs && node scripts/prepare-library.mjs && node scripts/copy-notices.mjs",
     "pretest": "node scripts/fetch-fixtures.mjs",
     "dev": "vite --host 127.0.0.1 --port 1420 --strictPort",
     "build": "tsc --noEmit && vite build",
-    "test": "node --test scripts/prepare-audio.test.mjs scripts/verify-packaged-resources.test.mjs && vitest run",
+    "test": "node --test scripts/prepare-audio.test.mjs scripts/prepare-library.test.mjs scripts/verify-packaged-resources.test.mjs && vitest run",
     "prepare:audio": "node scripts/prepare-audio.mjs",
     "test:audio-assets": "node --test scripts/prepare-audio.test.mjs",
     "typecheck": "tsc --noEmit",
@@ -17,8 +17,11 @@
   },
   "dependencies": {
     "@coderline/alphatab": "1.8.4",
+    "@fontsource/ibm-plex-mono": "5.3.0",
+    "@fontsource/instrument-sans": "5.3.0",
     "@tauri-apps/api": "2.11.1",
     "@tauri-apps/plugin-dialog": "2.7.3",
+    "fflate": "0.8.3",
     "react": "19.3.0",
     "react-dom": "19.3.0"
   },

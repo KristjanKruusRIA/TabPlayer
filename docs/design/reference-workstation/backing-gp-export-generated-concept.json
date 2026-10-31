@@ -1,0 +1,16 @@
+{
+  "tool": "built-in image_gen.imagegen",
+  "purpose": "Pre-implementation reference for the existing Export score dialog's GP backing-inclusion/ambiguous-selection state, within P16.",
+  "image": {
+    "view": "backing-gp-export",
+    "path": "docs/design/reference-workstation/backing-gp-export-concept.png",
+    "sha256": "5ab74c5408a5e56e237a3f161791951ae718d91cc969030d2f6211974c218e9d",
+    "reference_paths": [
+      "docs/design/reference-workstation/export-concept.png",
+      ".analysis/desktop-smoke/backing-waveform-9bjOw8/outputs/run-AqBpw1/editable-stereo-focused-sync-point-1280.png"
+    ],
+    "prompt": "Use case: ui-mockup. Asset type: one high-fidelity implementation reference screenshot for an existing desktop Export dialog's Guitar Pro state. Reference image1 is the established Export score dialog concept; reference image2 is the ACTUAL current TabPlayer shell. Preserve image2's practical Windows/Tauri compact charcoal panels, cream score/TAB, restrained blue active controls and native rectangular desktop UI. Do not redesign the shell to match image1's incidental Mac traffic lights or extra toolbar. Image1 supplies the established modal hierarchy only. Full app screenshot1280x900, current shell dimmed behind a centered compact charcoal Export score dialog about540px wide with proper readable system text, thin borders,3px corners, no gradient/glass/glow/cards. Dialog title 'Export score', close X. Native select 'Export format' selected 'Guitar Pro (.gp)'. Tracks to export has checked Guitar and Bass. Measures to export has checked 'Measure range', numeric First measure2 and Last measure4 in one row. Then a subtle separator, an explicit checked checkbox 'Include backing audio'. Under it short muted copy 'Keeps the selected passage aligned to the recording.' Directly beneath, a compact inline field-associated error with a simple small warning icon and clear text: 'This passage occurs more than once. Clear Include backing audio to export the notation.' This is a real actionable validation state, no confirmation modal, no huge red banner. Keep checkbox focus visible in white. Bottom action row Cancel and blue Export, Export disabled in this pictured invalid state. Preserve the rest of existing format/track/range hierarchy; no sample-rate/speed/bit-depth controls in GP mode, no new audio mixer or export preview illustration. Intent: transparent choice to export notation when a selected repeated passage has ambiguous reference audio. This is an illustration, not an implementation or evidence. Output only the usable app screenshot.",
+    "created_date": "2026-10-15",
+    "review": "Root inspected actual generated pixels before GP export UI edits. Adopt incumbent dialog hierarchy, a GP-only Include backing audio checkbox and compact associated actionable selection error, visible keyboard focus and disabled invalid submit. Preserve actual shell/dialog geometry/controls and native focus management; generated large pane sizes, invalid measure4 example beyond pictured score, italic error, icon styling and unrelated score/track values are illustrative. Use actual route validation, normal existing error typography and real selection bounds; omit waveform data from the modal. This extends the prior Export reference without replacing it."
+  }
+}

@@ -262,7 +262,7 @@ fn renderer_fixture(
     } else {
         serde_json::json!([])
     };
-    let plan=serde_json::from_value(serde_json::json!({"generation":1,"ppq":960,"durationTick":3840,"durationMs":2000,"tracks":tracks,"tempos":[{"tick":0,"bpm":120}],"occurrences":[{"bar":0,"occurrence":0,"startTick":0,"endTick":3840,"startMs":0,"endMs":2000}],"notes":notes,"midi":midi})).unwrap();
+    let plan=serde_json::from_value(serde_json::json!({"generation":1,"ppq":960,"durationTick":3840,"durationMs":2000,"tracks":tracks,"tempos":[{"tick":0,"bpm":120}],"occurrences":[{"bar":0,"occurrence":0,"meterNumerator":4,"meterDenominator":4,"startTick":0,"endTick":3840,"startMs":0,"endMs":2000}],"notes":notes,"midi":midi})).unwrap();
     (
         Arc::new(plan),
         Arc::new(resources),
@@ -298,6 +298,354 @@ fn stem_sum_matches_pre_limiter_and_speed_keeps_sample_pitch() {
         renderer.render_into(&mut repeat);
         assert_eq!(mix, repeat);
     }
+}
+
+#[test]
+fn relative_10_123_300_keeps_attack_clock_and_pitch() {
+    use tabplayer_lib::{
+        audio::{plan::PlanMidiEvent, renderer::Renderer},
+        settings::TrackSound,
+    };
+    let (source, resources, settings) = renderer_fixture(false);
+    let mut plan = (*source).clone();
+    plan.tracks.truncate(1);
+    plan.notes.truncate(1);
+    plan.notes[0].key = 69;
+    plan.notes[0].end_tick = 240.0;
+    for index in 1..4 {
+        let mut note = plan.notes[0].clone();
+        note.id = format!("quarter{index}");
+        note.start_tick = index as f64 * 960.0;
+        note.end_tick += note.start_tick;
+        note.pitch[0].tick = note.start_tick;
+        plan.notes.push(note);
+    }
+    plan.midi = plan
+        .notes
+        .iter()
+        .flat_map(|note| {
+            [
+                PlanMidiEvent::NoteOn {
+                    track_id: "a".into(),
+                    tick: note.start_tick,
+                    channel: 0,
+                    key: note.key,
+                    velocity: note.velocity,
+                },
+                PlanMidiEvent::NoteOff {
+                    track_id: "a".into(),
+                    tick: note.end_tick,
+                    channel: 0,
+                    key: note.key,
+                    velocity: 0,
+                },
+                // Isolate each SoundFont attack from its sampled release tail.
+                PlanMidiEvent::Controller {
+                    track_id: "a".into(),
+                    tick: note.end_tick,
+                    channel: 0,
+                    controller: 120,
+                    value: 0,
+                },
+            ]
+        })
+        .collect();
+    for rate in [44_100, 48_000] {
+        for speed in [0.1, 1.23, 3.0] {
+            for recorded in [true, false] {
+                let mut settings = settings.clone();
+                if !recorded {
+                    settings.sounds.insert(
+                        "a".into(),
+                        TrackSound {
+                            voice_id: Some("gm".into()),
+                            ..Default::default()
+                        },
+                    );
+                }
+                let mut renderer =
+                    Renderer::new(Arc::new(plan.clone()), resources.clone(), settings, rate)
+                        .unwrap();
+                renderer.set_speed(speed).unwrap();
+                let spacing = 0.5 * rate as f64 / speed;
+                let mut output =
+                    vec![[0.0; 2]; (spacing * 3.0 + rate as f64 * 0.08).ceil() as usize];
+                renderer.render_into(&mut output);
+                // Find PCM attacks independently in each expected quarter window.
+                // Rustysynth's minimum block is eight frames; recorded attacks use
+                // the sample clock directly and retain the tighter two-frame bound.
+                let attacks: Vec<_> = (0..4)
+                    .map(|quarter| {
+                        let start = (quarter as f64 * spacing).floor() as usize;
+                        start
+                            + output[start..start + rate as usize / 25]
+                                .iter()
+                                .position(|sample| sample[0].abs() > 0.001)
+                                .unwrap_or_else(|| panic!("No attack: rate={rate} speed={speed} recorded={recorded} quarter={quarter}"))
+                    })
+                    .collect();
+                for pair in attacks.windows(2) {
+                    assert!(
+                        (pair[1] as f64 - pair[0] as f64 - spacing).abs()
+                            <= if recorded { 2.0 } else { 8.0 },
+                        "rate={rate} speed={speed} recorded={recorded}: {attacks:?}"
+                    );
+                }
+                let start = attacks[0] + rate as usize / 100;
+                let end = start + rate as usize / 40;
+                let measured = if recorded {
+                    frequency(&output[start..end]) * rate as f64 / 48_000.0
+                } else {
+                    // The SoundFont guitar's attack has strong upper partials, so
+                    // estimate its fundamental from waveform recurrence instead
+                    // of counting every harmonic's zero crossing.
+                    let wave = &output[start..end];
+                    let recurrence = |lag: usize| {
+                        let mut cross = 0.0;
+                        let mut left = 0.0;
+                        let mut right = 0.0;
+                        for pair in wave.iter().zip(wave.iter().skip(lag)) {
+                            let a = pair.0[0] as f64;
+                            let b = pair.1[0] as f64;
+                            cross += a * b;
+                            left += a * a;
+                            right += b * b;
+                        }
+                        cross / (left * right).sqrt()
+                    };
+                    let lag = (rate as usize / 600..rate as usize / 300)
+                        .max_by(|&a, &b| recurrence(a).total_cmp(&recurrence(b)))
+                        .unwrap();
+                    let (before, peak, after) =
+                        (recurrence(lag - 1), recurrence(lag), recurrence(lag + 1));
+                    let fractional = 0.5 * (before - after) / (before - 2.0 * peak + after);
+                    rate as f64 / (lag as f64 + fractional)
+                };
+                assert!(
+                    (measured - 440.0).abs() < if recorded { 2.0 } else { 12.0 },
+                    "rate={rate} speed={speed} recorded={recorded}: {measured}"
+                );
+            }
+        }
+    }
+}
+
+fn changing_tempo_practice_plan() -> Arc<tabplayer_lib::audio::plan::PlaybackPlan> {
+    Arc::new(serde_json::from_value(serde_json::json!({
+        "generation":1,"ppq":960,"durationTick":7680,"durationMs":6000,
+        "tracks":[{"id":"a","program":24,"percussion":false}],
+        "tempos":[{"tick":0,"bpm":120},{"tick":3840,"bpm":60}],
+        "occurrences":[
+            {"bar":0,"occurrence":0,"meterNumerator":4,"meterDenominator":4,"startTick":0,"endTick":3840,"startMs":0,"endMs":2000},
+            {"bar":1,"occurrence":0,"meterNumerator":4,"meterDenominator":4,"startTick":3840,"endTick":7680,"startMs":2000,"endMs":6000}
+        ],"notes":[],"midi":[]
+    })).unwrap())
+}
+
+#[test]
+fn fixed_90_ignores_source_120_then_60() {
+    use tabplayer_lib::audio::{practice::RenderTempo, renderer::Renderer};
+    let (source, mut resources, settings) = renderer_fixture(false);
+    let mut plan = (*changing_tempo_practice_plan()).clone();
+    for index in 0..8 {
+        let mut note = source.notes[0].clone();
+        note.id = format!("fixed-quarter-{index}");
+        note.source.target.bar = index / 4;
+        note.source.target.beat = index % 4;
+        note.start_tick = index as f64 * 960.0;
+        note.end_tick = note.start_tick + 240.0;
+        note.pitch[0].tick = note.start_tick;
+        plan.notes.push(note);
+    }
+    let bank = Arc::get_mut(&mut resources).unwrap();
+    let audio = Arc::get_mut(bank.samples.get_mut("tone").unwrap()).unwrap();
+    let frames = Arc::get_mut(&mut audio.frames).unwrap();
+    frames.fill([0.0; 2]);
+    frames[0] = [1.0; 2];
+    let plan = Arc::new(plan);
+    let original = serde_json::to_vec(&*plan).unwrap();
+    let mut renderer = Renderer::new(plan.clone(), resources, settings, 48_000).unwrap();
+    renderer
+        .set_practice_tempo(RenderTempo::Fixed { bpm: 90.0 })
+        .unwrap();
+    renderer.set_metronome(true);
+    let mut score = vec![[0.0; 2]; 256_000];
+    let mut click = score.clone();
+    let status = renderer.render_stems_into(&mut [&mut score, &mut click]);
+    let onsets = click_onsets(&click, 48_000);
+    assert_eq!(onsets.len(), 8, "{onsets:?}");
+    for (beat, onset) in onsets.into_iter().enumerate() {
+        assert!(onset.abs_diff(beat * 32_000 + 1) <= 2);
+    }
+    let attacks: Vec<_> = score
+        .iter()
+        .enumerate()
+        .filter(|(_, sample)| sample[0] > 0.3)
+        .map(|(frame, _)| frame)
+        .collect();
+    assert_eq!(attacks.len(), 8, "{attacks:?}");
+    for (beat, frame) in attacks.into_iter().enumerate() {
+        assert!(frame.abs_diff(beat * 32_000) <= 1);
+    }
+    assert!((status.tick - 7680.0).abs() < 0.031);
+    assert!((status.seconds - 6.0).abs() < 1.0 / 48_000.0);
+    assert!(status.ended);
+    assert_eq!(serde_json::to_vec(&*plan).unwrap(), original);
+}
+
+#[test]
+fn fixed_output_budget_crosses_tempo_step_and_rejects_backing_atomically() {
+    use tabplayer_lib::{
+        audio::{backing::BackingMap, practice::RenderTempo, renderer::Renderer},
+        settings::ChannelMix,
+    };
+    let (_, resources, settings) = renderer_fixture(false);
+    let plan = changing_tempo_practice_plan();
+    let mut renderer =
+        Renderer::new(plan.clone(), resources.clone(), settings.clone(), 48_000).unwrap();
+    renderer.seek_tick(2880.0);
+    renderer
+        .set_practice_tempo(RenderTempo::Fixed { bpm: 90.0 })
+        .unwrap();
+    assert_eq!(renderer.output_frames_until(2880.000000001), 1);
+    assert_eq!(renderer.output_frames_until(4800.0), 64_000);
+    renderer.render_into(&mut vec![[0.0; 2]; 32_000]);
+    assert_eq!(renderer.output_frames_until(4800.0), 32_000);
+    renderer.render_into(&mut vec![[0.0; 2]; 31_999]);
+    assert_eq!(renderer.output_frames_until(4800.0), 1);
+    renderer.render_into(&mut [[0.0; 2]; 1]);
+    assert_eq!(renderer.output_frames_until(4800.0), 0);
+    assert_eq!(renderer.authored_bpm_at(2880.0), 120.0);
+    assert_eq!(renderer.authored_bpm_at(4800.0), 60.0);
+    assert_eq!(renderer.meter_at(4800.0), (4, 4));
+    assert!(!renderer.has_backing());
+    let mut backed = Renderer::new(plan.clone(), resources, settings, 48_000).unwrap();
+    backed.set_speed(1.23).unwrap();
+    backed.seek_tick(2880.0);
+    backed
+        .install_backing(
+            tone(),
+            BackingMap::new(&[], 0.0, &plan).unwrap(),
+            ChannelMix {
+                mute: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert!(backed.has_backing());
+    let before = backed.position();
+    let budget = backed.output_frames_until(4800.0);
+    assert_eq!(
+        backed
+            .set_practice_tempo(RenderTempo::Fixed { bpm: 90.0 })
+            .unwrap_err(),
+        "Fixed tempo is unavailable while a backing track is present."
+    );
+    assert_eq!(backed.position().tick, before.tick);
+    assert_eq!(backed.output_frames_until(4800.0), budget);
+    assert!(
+        renderer
+            .install_backing(
+                tone(),
+                BackingMap::new(&[], 0.0, &plan).unwrap(),
+                ChannelMix::default()
+            )
+            .is_err()
+    );
+    assert!(!renderer.has_backing());
+}
+
+#[test]
+fn irregular_relative_buffers_do_not_add_an_endpoint_frame() {
+    use tabplayer_lib::audio::renderer::Renderer;
+    let (_, resources, settings) = renderer_fixture(false);
+    let plan = changing_tempo_practice_plan();
+    for rate in [44_100, 48_000] {
+        for ratio in [0.1, 0.5, 0.7, 1.23, 3.0] {
+            let mut renderer =
+                Renderer::new(plan.clone(), resources.clone(), settings.clone(), rate).unwrap();
+            renderer.set_speed(ratio).unwrap();
+            let expected = (2.0 * rate as f64 / ratio - 1e-7).ceil() as usize;
+            let mut frames = 0;
+            let mut block = [[0.0; 2]; 511];
+            while frames < expected {
+                let remaining = renderer.output_frames_until(3840.0);
+                assert_eq!(
+                    remaining,
+                    expected - frames,
+                    "rate={rate} ratio={ratio} atframe={frames}"
+                );
+                let count = remaining.min(if frames % 2 == 0 { 127 } else { 511 });
+                renderer.render_into(&mut block[..count]);
+                frames += count;
+            }
+            assert_eq!(
+                renderer.output_frames_until(3840.0),
+                0,
+                "rate={rate} ratio={ratio}"
+            );
+            // Reapplying accepted settings must not change the clock origin.
+            renderer.set_speed(ratio).unwrap();
+            assert_eq!(renderer.output_frames_until(3840.0), 0);
+            renderer.seek_tick(0.0);
+            assert_eq!(renderer.output_frames_until(3840.0), expected);
+        }
+    }
+}
+
+#[test]
+fn visual_only_pulses_and_gain_preserve_stems() {
+    use tabplayer_lib::audio::{
+        practice::{MetronomeSettings, PulsePosition},
+        renderer::Renderer,
+    };
+    let (_, resources, settings) = renderer_fixture(false);
+    let plan = changing_tempo_practice_plan();
+    let mut energies = Vec::new();
+    for volume in [0.0, 0.2, 0.4] {
+        let mut renderer =
+            Renderer::new(plan.clone(), resources.clone(), settings.clone(), 48_000).unwrap();
+        renderer.set_metronome_settings(MetronomeSettings {
+            enabled: true,
+            volume,
+            visual: true,
+        });
+        assert_eq!(renderer.stem_count(), 2);
+        let mut score = vec![[0.0; 2]; 72_000];
+        let mut click = score.clone();
+        let mut mix = score.clone();
+        let status = renderer.render_stems_and_mix_into(&mut [&mut score, &mut click], &mut mix);
+        assert_eq!(status.pulse_count, 3);
+        assert_eq!(
+            status.last_pulse,
+            Some(PulsePosition {
+                beat: 2,
+                beats_per_bar: 4,
+                accent: false
+            })
+        );
+        assert!(score.iter().flatten().all(|sample| *sample == 0.0));
+        assert_eq!(mix, click);
+        energies.push(energy(&click));
+        let status = renderer.render_into(&mut []);
+        assert_eq!(status.pulse_count, 0);
+        assert_eq!(status.last_pulse, None);
+        assert_eq!(renderer.position().pulse_count, 0);
+    }
+    assert_eq!(energies[0], 0.0);
+    assert!((energies[2] / energies[1] - 4.0).abs() < 1e-5);
+    let mut renderer = Renderer::new(plan, resources, settings, 48_000).unwrap();
+    renderer.set_metronome_settings(MetronomeSettings {
+        enabled: false,
+        volume: 0.4,
+        visual: true,
+    });
+    assert_eq!(renderer.stem_count(), 1);
+    let mut output = vec![[0.0; 2]; 72_000];
+    let status = renderer.render_into(&mut output);
+    assert_eq!(status.pulse_count, 3);
+    assert_eq!(status.last_pulse.unwrap().beat, 2);
+    assert!(output.iter().flatten().all(|sample| *sample == 0.0));
 }
 
 #[test]
@@ -405,10 +753,17 @@ fn render_seek_and_prepared_mix_install_do_not_touch_heap() {
             voice_id: None,
             preset_id: "lead".into(),
             effects,
+            ..Default::default()
         },
     );
     let mix = PreparedMix::prepare(&settings, &plan, 48_000).unwrap();
+    let waiting = PreparedMix::prepare(&settings, &plan, 48_000).unwrap();
     let mut renderer = Renderer::new(plan, resources, settings, 48_000).unwrap();
+    renderer.set_metronome_settings(tabplayer_lib::audio::practice::MetronomeSettings {
+        enabled: true,
+        volume: 0.4,
+        visual: true,
+    });
     let mut block = [[0.0; 2]; 512];
     HEAP_OPERATIONS.with(|n| n.set(0));
     COUNT_HEAP.with(|f| f.set(true));
@@ -416,11 +771,20 @@ fn render_seek_and_prepared_mix_install_do_not_touch_heap() {
         renderer.render_into(&mut block);
     }
     renderer.seek_tick(960.0);
+    renderer
+        .set_practice_tempo(tabplayer_lib::audio::practice::RenderTempo::Fixed { bpm: 90.0 })
+        .unwrap();
+    let _ = renderer.output_frames_until(2880.0);
     let retired = renderer.replace_mix(mix);
+    // A mix that arrives during the crossfade waits for it, and takes over with no heap work either.
+    let parked = renderer.replace_mix(waiting);
+    renderer.render_into(&mut block);
+    let settled = renderer.settle_mix();
     renderer.render_into(&mut block);
     COUNT_HEAP.with(|f| f.set(false));
     let operations = HEAP_OPERATIONS.with(Cell::get);
-    drop(retired);
+    assert!(retired.is_some() && parked.is_none() && settled.is_some());
+    drop((retired, parked, settled));
     assert_eq!(
         operations, 0,
         "audio callback allocated or freed heap memory"
@@ -601,6 +965,8 @@ fn metronome_accents_actual_measure_grid_and_seek_waits_for_beat() {
         .map(|bar| MeasureOccurrence {
             bar,
             occurrence: 0,
+            meter_numerator: 3,
+            meter_denominator: 4,
             start_tick: bar as f64 * 2880.0,
             end_tick: (bar + 1) as f64 * 2880.0,
             start_ms: bar as f64 * 1500.0,
@@ -626,16 +992,16 @@ fn metronome_accents_actual_measure_grid_and_seek_waits_for_beat() {
 fn meter_plan(mixed: bool) -> Arc<tabplayer_lib::audio::plan::PlaybackPlan> {
     let occurrences = if mixed {
         serde_json::json!([
-            {"bar":0,"occurrence":0,"startTick":0,"endTick":720,"startMs":0,"endMs":375,"clickTicks":[0,480]},
-            {"bar":1,"occurrence":0,"startTick":720,"endTick":2160,"startMs":375,"endMs":1125,"clickTicks":[720,1200,1680]},
-            {"bar":2,"occurrence":0,"startTick":2160,"endTick":5040,"startMs":1125,"endMs":3125,"clickTicks":[2160,2640,3120,3600,4080,4560]},
-            {"bar":1,"occurrence":1,"startTick":5040,"endTick":6480,"startMs":3125,"endMs":4125,"clickTicks":[5040,5520,6000]},
-            {"bar":3,"occurrence":0,"startTick":6480,"endTick":8400,"startMs":4125,"endMs":5125,"clickTicks":[6480,7440]}
+            {"bar":0,"occurrence":0,"meterNumerator":3,"meterDenominator":8,"startTick":0,"endTick":720,"startMs":0,"endMs":375,"clickTicks":[0,480]},
+            {"bar":1,"occurrence":0,"meterNumerator":3,"meterDenominator":8,"startTick":720,"endTick":2160,"startMs":375,"endMs":1125,"clickTicks":[720,1200,1680]},
+            {"bar":2,"occurrence":0,"meterNumerator":6,"meterDenominator":8,"startTick":2160,"endTick":5040,"startMs":1125,"endMs":3125,"clickTicks":[2160,2640,3120,3600,4080,4560]},
+            {"bar":1,"occurrence":1,"meterNumerator":3,"meterDenominator":8,"startTick":5040,"endTick":6480,"startMs":3125,"endMs":4125,"clickTicks":[5040,5520,6000]},
+            {"bar":3,"occurrence":0,"meterNumerator":2,"meterDenominator":4,"startTick":6480,"endTick":8400,"startMs":4125,"endMs":5125,"clickTicks":[6480,7440]}
         ])
     } else {
         serde_json::json!([
-            {"bar":0,"occurrence":0,"startTick":0,"endTick":1440,"startMs":0,"endMs":750,"clickTicks":[0,480,960]},
-            {"bar":0,"occurrence":1,"startTick":1440,"endTick":2880,"startMs":750,"endMs":1500,"clickTicks":[1440,1920,2400]}
+            {"bar":0,"occurrence":0,"meterNumerator":3,"meterDenominator":8,"startTick":0,"endTick":1440,"startMs":0,"endMs":750,"clickTicks":[0,480,960]},
+            {"bar":0,"occurrence":1,"meterNumerator":3,"meterDenominator":8,"startTick":1440,"endTick":2880,"startMs":750,"endMs":1500,"clickTicks":[1440,1920,2400]}
         ])
     };
     Arc::new(
@@ -772,15 +1138,13 @@ fn metronome_offline_export_keeps_eighth_pulses_across_disjoint_repeat_ranges() 
                 kind: StemKind::Score,
             }],
             range: Some(MeasureRange { first: 1, last: 1 }),
-            format: AudioFormat {
-                sample_rate: rate,
-                bit_depth: 24,
-            },
+            format: AudioFormat::wav(rate, 24),
             speed: 2.0,
             metronome: true,
             tail_seconds: 0.03,
             include_backing: false,
             include_mix: true,
+            normalize_rms_db: None,
         };
         let renderer =
             Renderer::new(plan.clone(), resources.clone(), settings.clone(), rate).unwrap();
@@ -836,6 +1200,7 @@ fn renderer_rejects_invalid_persisted_sound_before_install() {
             voice_id: None,
             preset_id: "missing-preset".into(),
             effects: FxSettings::default(),
+            ..Default::default()
         },
     );
     assert!(Renderer::new(plan, resources, settings, 48_000).is_err());
@@ -884,7 +1249,7 @@ fn automatic_program_changes_prepare_recorded_and_gm_attacks_and_seek() {
     let plan: Arc<tabplayer_lib::audio::plan::PlaybackPlan> = Arc::new(serde_json::from_value(serde_json::json!({
         "generation":1,"ppq":960,"durationTick":5760,"durationMs":3000,
         "tracks":[{"id":"a","program":25,"percussion":false}],"tempos":[{"tick":0,"bpm":120}],
-        "occurrences":[{"bar":0,"occurrence":0,"startTick":0,"endTick":5760,"startMs":0,"endMs":3000}],
+        "occurrences":[{"bar":0,"occurrence":0,"meterNumerator":6,"meterDenominator":4,"startTick":0,"endTick":5760,"startMs":0,"endMs":3000}],
         "notes":notes,"midi":midi
     })).unwrap());
     let requests = resource_requests(&plan, &settings);
@@ -902,6 +1267,7 @@ fn automatic_program_changes_prepare_recorded_and_gm_attacks_and_seek() {
             voice_id: Some("gm".into()),
             preset_id: "gm".into(),
             effects: Default::default(),
+            ..Default::default()
         },
     );
     let mut gm = Renderer::new(plan.clone(), resources.clone(), settings.clone(), 48_000).unwrap();
@@ -971,6 +1337,7 @@ fn simultaneous_same_channel_attacks_keep_their_exact_programs() {
                     voice_id: Some("gm".into()),
                     preset_id: "gm".into(),
                     effects: Default::default(),
+                    ..Default::default()
                 },
             );
         }
@@ -1135,6 +1502,7 @@ fn positive_low_tempos_render_with_bypassed_and_enabled_effects() {
                     voice_id: None,
                     preset_id: "gm".into(),
                     effects,
+                    ..Default::default()
                 },
             );
             let mut renderer =
@@ -1185,6 +1553,8 @@ fn pinned_recorded_presets_render_at_both_export_rates() {
             .map(|bar| MeasureOccurrence {
                 bar,
                 occurrence: 0,
+                meter_numerator: 4,
+                meter_denominator: 4,
                 start_tick: bar as f64 * 3840.0,
                 end_tick: (bar + 1) as f64 * 3840.0,
                 start_ms: bar as f64 * 2000.0,
@@ -1235,6 +1605,7 @@ fn pinned_recorded_presets_render_at_both_export_rates() {
                 voice_id: Some(voice.into()),
                 preset_id: preset.into(),
                 effects: FxSettings::preset(preset).unwrap(),
+                ..Default::default()
             },
         );
         let requests = resource_requests(&plan, &settings);
@@ -1299,4 +1670,593 @@ fn pinned_recorded_presets_render_at_both_export_rates() {
             );
         }
     }
+}
+
+#[test]
+fn locked_track_sound_ignores_scheduled_program_changes_and_seek_while_unlocked_renders_bit_identically()
+ {
+    use tabplayer_lib::{
+        audio::{renderer::Renderer, voices::resource_requests},
+        settings::TrackSound,
+    };
+    let (_, mut resources, settings) = renderer_fixture(false);
+    let bank = Arc::get_mut(&mut resources).unwrap();
+    let mut bass = bank.manifest.instruments[0].clone();
+    bass.id = "babyblue-bass".into();
+    bass.regions[0].sample_id = "bass".into();
+    bank.manifest.instruments.push(bass);
+    let mut audio = (*tone()).clone();
+    audio.frames = Arc::new(
+        (0..96_000)
+            .map(|n| {
+                let x = (std::f64::consts::TAU * 110.0 * n as f64 / 48_000.0).sin() as f32 * 0.5;
+                [x; 2]
+            })
+            .collect(),
+    );
+    bank.samples.insert("bass".into(), Arc::new(audio));
+    let notes: Vec<_> = [(0, 240, 57, 25), (1920, 2880, 69, 0), (3840, 4800, 57, 33)]
+        .into_iter()
+        .enumerate()
+        .map(|(i, (start, end, key, program))| serde_json::json!({
+            "id":format!("n{i}"),"trackId":"a","source":{"target":{"track":0,"staff":0,"bar":0,"voice":0,"beat":i},"string":1},
+            "occurrence":0,"channel":2,"program":program,"startTick":start,"endTick":end,"key":key,"velocity":100,
+            "articulation":"picked","legatoFrom":null,"pitch":[{"tick":start,"semitones":0}]
+        }))
+        .collect();
+    let mut midi = Vec::new();
+    for (start, end, key, program) in [(0, 240, 57, 25), (1920, 2880, 69, 0), (3840, 4800, 57, 33)]
+    {
+        midi.extend([
+            serde_json::json!({"type":"program","trackId":"a","tick":start,"channel":2,"program":program}),
+            serde_json::json!({"type":"noteOn","trackId":"a","tick":start,"channel":2,"key":key,"velocity":100}),
+            serde_json::json!({"type":"noteOff","trackId":"a","tick":end,"channel":2,"key":key,"velocity":0}),
+        ]);
+    }
+    let plan: Arc<tabplayer_lib::audio::plan::PlaybackPlan> = Arc::new(serde_json::from_value(serde_json::json!({
+        "generation":1,"ppq":960,"durationTick":5760,"durationMs":3000,
+        "tracks":[{"id":"a","program":25,"percussion":false}],"tempos":[{"tick":0,"bpm":120}],
+        "occurrences":[{"bar":0,"occurrence":0,"meterNumerator":6,"meterDenominator":4,"startTick":0,"endTick":5760,"startMs":0,"endMs":3000}],
+        "notes":notes,"midi":midi
+    })).unwrap());
+
+    // 1. Bit-identical proof: an unlocked document renders identically to default settings.
+    let mut default_renderer =
+        Renderer::new(plan.clone(), resources.clone(), settings.clone(), 48_000).unwrap();
+    let mut unlocked_settings = settings.clone();
+    unlocked_settings.sounds.insert(
+        "a".into(),
+        TrackSound {
+            voice_id: None,
+            preset_id: "gm".into(),
+            effects: Default::default(),
+            locked: false,
+            drum_kit: None,
+        },
+    );
+    let mut unlocked_renderer =
+        Renderer::new(plan.clone(), resources.clone(), unlocked_settings, 48_000).unwrap();
+    let mut default_output = vec![[0.0; 2]; 144_000];
+    let mut unlocked_output = vec![[0.0; 2]; 144_000];
+    default_renderer.render_into(&mut default_output);
+    unlocked_renderer.render_into(&mut unlocked_output);
+    for (i, (d, u)) in default_output.iter().zip(&unlocked_output).enumerate() {
+        assert_eq!(
+            d.map(f32::to_bits),
+            u.map(f32::to_bits),
+            "frame {i} must render bit-identically when unlocked"
+        );
+    }
+
+    // 2. Locked track sound: score automations (program 0 piano and program 33 bass) are ignored.
+    // The track's sound remains locked to green-guitar (program 25).
+    let mut locked_settings = settings.clone();
+    locked_settings.sounds.insert(
+        "a".into(),
+        TrackSound {
+            voice_id: None,
+            preset_id: "gm".into(),
+            effects: Default::default(),
+            locked: true,
+            drum_kit: None,
+        },
+    );
+    let requests = resource_requests(&plan, &locked_settings);
+    assert!(
+        requests.iter().all(|r| r.instrument_id == "green-guitar"),
+        "all requests for a locked guitar track must be green-guitar"
+    );
+
+    let mut locked = Renderer::new(
+        plan.clone(),
+        resources.clone(),
+        locked_settings.clone(),
+        48_000,
+    )
+    .unwrap();
+    let mut locked_output = vec![[0.0; 2]; 144_000];
+    locked.render_into(&mut locked_output);
+    // At tick 0 (green-guitar, ~220Hz):
+    assert!((frequency(&locked_output[2400..4800]) - 220.0).abs() < 1.0);
+    // At tick 1920 (score has program 0 piano, but locked track keeps green-guitar ~220Hz):
+    let f1 = frequency(&locked_output[48_000..50_400]);
+    println!("f1={}", f1);
+    assert!((f1 - 440.0).abs() < 1.0);
+    // At tick 3840 (score has program 33 bass, but locked track keeps green-guitar ~220Hz):
+    assert!((frequency(&locked_output[98_400..100_800]) - 220.0).abs() < 1.0);
+
+    // 3. Seeking while locked maintains the locked track sound.
+    let mut seek = vec![[0.0; 2]; 2400];
+    locked.seek_tick(1920.0);
+    locked.render_into(&mut seek);
+    assert!((frequency(&seek[480..]) - 440.0).abs() < 1.0);
+    locked.seek_tick(3840.0);
+    locked.render_into(&mut seek);
+    assert!((frequency(&seek[480..]) - 220.0).abs() < 1.0);
+}
+/// A General MIDI track whose guitar program is replaced by a piano at bar one. With `automated`, the score later
+/// switches to a violin at 960 and plays a note at 1920 as one, both as an attack the plan matched and as one it did not.
+fn lock_plan(
+    automated: bool,
+    matched: bool,
+    bar_one: bool,
+) -> Arc<tabplayer_lib::audio::plan::PlaybackPlan> {
+    let mut midi = vec![];
+    if bar_one {
+        midi.push(
+            serde_json::json!({"type":"program","trackId":"a","tick":0,"channel":0,"program":0}),
+        );
+    }
+    let mut notes = vec![];
+    for (index, (start, end, program)) in [(0, 960, 0), (1920, 2880, 40)].into_iter().enumerate() {
+        if start > 0 && automated {
+            midi.push(serde_json::json!({"type":"program","trackId":"a","tick":960,"channel":0,"program":40}));
+        }
+        midi.extend([
+            serde_json::json!({"type":"noteOn","trackId":"a","tick":start,"channel":0,"key":60,"velocity":100}),
+            serde_json::json!({"type":"noteOff","trackId":"a","tick":end,"channel":0,"key":60,"velocity":0}),
+        ]);
+        if matched {
+            let mut note = serde_json::json!({
+                "id":format!("n{index}"),"trackId":"a","source":{"target":{"track":0,"staff":0,"bar":0,"voice":0,"beat":index},"string":1},
+                "occurrence":0,"channel":0,"startTick":start,"endTick":end,"key":60,"velocity":100,
+                "articulation":"picked","legatoFrom":null,"pitch":[{"tick":start,"semitones":0}]
+            });
+            if automated {
+                note["program"] = serde_json::json!(program);
+            }
+            notes.push(note);
+        }
+    }
+    Arc::new(
+        serde_json::from_value(serde_json::json!({
+            "generation":1,"ppq":960,"durationTick":3840,"durationMs":2000,
+            "tracks":[{"id":"a","program":24,"percussion":false},{"id":"b","program":24,"percussion":false}],
+            "tempos":[{"tick":0,"bpm":120}],
+            "occurrences":[{"bar":0,"occurrence":0,"meterNumerator":4,"meterDenominator":4,"startTick":0,"endTick":3840,"startMs":0,"endMs":2000}],
+            "notes":notes,"midi":midi
+        }))
+        .unwrap(),
+    )
+}
+fn gm_lock_settings(locked: bool) -> tabplayer_lib::settings::DocumentSettings {
+    let mut settings = tabplayer_lib::settings::DocumentSettings::default();
+    settings.sounds.insert(
+        "a".into(),
+        tabplayer_lib::settings::TrackSound {
+            voice_id: Some("gm".into()),
+            preset_id: "gm".into(),
+            effects: Default::default(),
+            locked,
+            drum_kit: None,
+        },
+    );
+    settings
+}
+fn differs(a: &[[f32; 2]], b: &[[f32; 2]]) -> bool {
+    a.iter()
+        .zip(b)
+        .any(|(x, y)| x.map(f32::to_bits) != y.map(f32::to_bits))
+}
+fn render_frames(
+    plan: &Arc<tabplayer_lib::audio::plan::PlaybackPlan>,
+    settings: tabplayer_lib::settings::DocumentSettings,
+    seek: Option<f64>,
+    mix: Option<tabplayer_lib::audio::renderer::PreparedMix>,
+) -> Vec<[f32; 2]> {
+    use tabplayer_lib::audio::renderer::Renderer;
+    let (_, resources, _) = renderer_fixture(false);
+    let mut renderer = Renderer::new(plan.clone(), resources, settings, 48_000).unwrap();
+    let mut output = vec![[0.0; 2]; 96_000];
+    if let Some(tick) = seek {
+        renderer.seek_tick(tick);
+    }
+    if let Some(mix) = mix {
+        let mut head = vec![[0.0; 2]; 4_800];
+        renderer.render_into(&mut head);
+        renderer.replace_mix(mix);
+        renderer.render_into(&mut output);
+        return [head, output].concat();
+    }
+    renderer.render_into(&mut output);
+    output
+}
+
+#[test]
+fn a_locked_track_keeps_its_bar_one_sound_through_attacks_program_changes_and_seeks() {
+    // Both ways the renderer learns a program: the program an attack carries, and the program changes it follows.
+    for matched in [true, false] {
+        let baseline = lock_plan(false, matched, true);
+        let automated = lock_plan(true, matched, true);
+        let reference = render_frames(&baseline, gm_lock_settings(false), None, None);
+        assert!(energy(&reference) > 1e-6);
+        // Unlocked, the later violin is heard, so the plans really differ.
+        let unlocked = render_frames(&automated, gm_lock_settings(false), None, None);
+        assert!(
+            differs(&unlocked, &reference),
+            "matched={matched}: the automation must be audible unlocked"
+        );
+        // Locked, the automation changes nothing.
+        let locked = render_frames(&automated, gm_lock_settings(true), None, None);
+        assert!(
+            !differs(&locked, &reference),
+            "matched={matched}: a locked track must ignore the automation"
+        );
+        // A seek past the automation lands on the same locked sound.
+        let reference_seek = render_frames(&baseline, gm_lock_settings(false), Some(2000.0), None);
+        let unlocked_seek = render_frames(&automated, gm_lock_settings(false), Some(2000.0), None);
+        let locked_seek = render_frames(&automated, gm_lock_settings(true), Some(2000.0), None);
+        assert!(
+            differs(&unlocked_seek, &reference_seek),
+            "matched={matched}: a seek must hear the automation unlocked"
+        );
+        assert!(
+            !differs(&locked_seek, &reference_seek),
+            "matched={matched}: a seek must keep the locked sound"
+        );
+    }
+}
+
+#[test]
+fn locking_keeps_the_sound_in_effect_at_the_start_not_the_track_first_sound() {
+    for matched in [true, false] {
+        // The track is a guitar (24) but bar one switches it to a piano (0): the lock is to the piano.
+        let bar_one = lock_plan(false, matched, true);
+        let unlocked = render_frames(&bar_one, gm_lock_settings(false), None, None);
+        let locked = render_frames(&bar_one, gm_lock_settings(true), None, None);
+        assert!(
+            !differs(&locked, &unlocked),
+            "matched={matched}: locking must not change a bar-one sound"
+        );
+        let guitar = render_frames(
+            &lock_plan(false, matched, false),
+            gm_lock_settings(true),
+            None,
+            None,
+        );
+        assert!(
+            differs(&locked, &guitar),
+            "matched={matched}: the locked sound must be the piano, not the track's guitar"
+        );
+    }
+}
+
+#[test]
+fn a_locked_track_ignores_automation_in_export_and_after_a_mix_change() {
+    use tabplayer_lib::{
+        audio::renderer::{PreparedMix, Renderer},
+        export::{
+            audio::{AudioExportRender, AudioExportRequest},
+            stems::{StemKind, StemTrack},
+            wav::AudioFormat,
+        },
+    };
+    for matched in [true, false] {
+        let baseline = lock_plan(false, matched, true);
+        let automated = lock_plan(true, matched, true);
+        // The mix an export writes.
+        let export = |plan: &Arc<tabplayer_lib::audio::plan::PlaybackPlan>, locked: bool| {
+            let (_, resources, _) = renderer_fixture(false);
+            let renderer =
+                Renderer::new(plan.clone(), resources, gm_lock_settings(locked), 48_000).unwrap();
+            let request = AudioExportRequest {
+                tracks: vec![StemTrack {
+                    id: "a".into(),
+                    name: "Guitar".into(),
+                    preset: "gm".into(),
+                    kind: StemKind::Score,
+                }],
+                range: None,
+                format: AudioFormat::wav(48_000, 24),
+                speed: 1.0,
+                metronome: false,
+                tail_seconds: 0.0,
+                include_backing: false,
+                include_mix: true,
+                normalize_rms_db: None,
+            };
+            let mut render = AudioExportRender::new(renderer, plan, request).unwrap();
+            let mut all = vec![];
+            loop {
+                let mut block = vec![[0.0; 2]; 4096];
+                let n = render.render_mix(&mut block).unwrap();
+                if n == 0 {
+                    break;
+                }
+                all.extend_from_slice(&block[..n]);
+            }
+            all
+        };
+        let reference = export(&baseline, false);
+        assert!(energy(&reference) > 1e-6);
+        assert!(
+            differs(&export(&automated, false), &reference),
+            "the automation must be audible in an unlocked export"
+        );
+        assert!(
+            !differs(&export(&automated, true), &reference),
+            "a locked track must ignore the automation in an export"
+        );
+        // A mix change reaches a renderer built locked without unlocking it.
+        let mix = tabplayer_lib::settings::ChannelMix {
+            gain: 0.5,
+            ..Default::default()
+        };
+        let mut locked_settings = gm_lock_settings(true);
+        locked_settings.mixes.insert("a".into(), mix.clone());
+        let mut unlocked_settings = gm_lock_settings(false);
+        unlocked_settings.mixes.insert("a".into(), mix);
+        let prepared = |settings: &tabplayer_lib::settings::DocumentSettings, plan| {
+            PreparedMix::prepare(settings, plan, 48_000).unwrap()
+        };
+        let want = render_frames(
+            &baseline,
+            gm_lock_settings(false),
+            None,
+            Some(prepared(&unlocked_settings, &baseline)),
+        );
+        let heard = render_frames(
+            &automated,
+            gm_lock_settings(false),
+            None,
+            Some(prepared(&unlocked_settings, &automated)),
+        );
+        let got = render_frames(
+            &automated,
+            gm_lock_settings(true),
+            None,
+            Some(prepared(&locked_settings, &automated)),
+        );
+        assert!(
+            differs(&heard, &want),
+            "the automation must be audible after a mix change when unlocked"
+        );
+        assert!(
+            !differs(&got, &want),
+            "a mix change must leave a locked track locked"
+        );
+    }
+}
+#[test]
+fn unlocking_needs_the_samples_an_unlocked_track_asks_for_that_a_locked_bank_lacks() {
+    use tabplayer_lib::{
+        audio::{renderer::Renderer, voices::resource_requests},
+        settings::TrackSound,
+    };
+    // A guitar the score switches to a bass: locked, only the guitar is needed.
+    let notes: Vec<_> = [(0, 960, 25), (1920, 2880, 33)]
+        .into_iter()
+        .enumerate()
+        .map(|(i, (start, end, program))| serde_json::json!({
+            "id":format!("n{i}"),"trackId":"a","source":{"target":{"track":0,"staff":0,"bar":0,"voice":0,"beat":i},"string":1},
+            "occurrence":0,"channel":0,"program":program,"startTick":start,"endTick":end,"key":57,"velocity":100,
+            "articulation":"picked","legatoFrom":null,"pitch":[{"tick":start,"semitones":0}]
+        }))
+        .collect();
+    let plan: Arc<tabplayer_lib::audio::plan::PlaybackPlan> = Arc::new(serde_json::from_value(serde_json::json!({
+        "generation":1,"ppq":960,"durationTick":3840,"durationMs":2000,
+        "tracks":[{"id":"a","program":25,"percussion":false}],"tempos":[{"tick":0,"bpm":120}],
+        "occurrences":[{"bar":0,"occurrence":0,"meterNumerator":4,"meterDenominator":4,"startTick":0,"endTick":3840,"startMs":0,"endMs":2000}],
+        "notes":notes,"midi":[]
+    })).unwrap());
+    let settings = |locked| {
+        let mut settings = tabplayer_lib::settings::DocumentSettings::default();
+        settings.sounds.insert(
+            "a".into(),
+            TrackSound {
+                voice_id: None,
+                preset_id: "gm".into(),
+                effects: Default::default(),
+                locked,
+                drum_kit: None,
+            },
+        );
+        settings
+    };
+    let ids = |locked| -> std::collections::BTreeSet<String> {
+        resource_requests(&plan, &settings(locked))
+            .into_iter()
+            .map(|r| r.instrument_id)
+            .collect()
+    };
+    assert_eq!(ids(true), ["green-guitar".to_string()].into());
+    assert_eq!(
+        ids(false),
+        ["babyblue-bass".to_string(), "green-guitar".to_string()].into()
+    );
+    // The bank loaded for the locked track cannot build the unlocked one: it must be loaded again for the new settings.
+    let (_, mut resources, _) = renderer_fixture(false);
+    assert!(Renderer::new(plan.clone(), resources.clone(), settings(true), 48_000).is_ok());
+    let error = Renderer::new(plan.clone(), resources.clone(), settings(false), 48_000)
+        .err()
+        .expect("a locked-era bank has no bass");
+    assert_eq!(error, "Unknown recorded instrument babyblue-bass.");
+    let bank = Arc::get_mut(&mut resources).unwrap();
+    let mut bass = bank.manifest.instruments[0].clone();
+    bass.id = "babyblue-bass".into();
+    bank.manifest.instruments.push(bass);
+    assert!(Renderer::new(plan, resources, settings(false), 48_000).is_ok());
+}
+#[test]
+fn a_locked_track_plays_the_articulation_its_start_sound_gives() {
+    use tabplayer_lib::audio::voices::{resource_requests, with_locked_articulations};
+    // The score switches a guitar to a bass, so the note is fingered; kept, it is picked as the guitar plays it.
+    let plan: Arc<tabplayer_lib::audio::plan::PlaybackPlan> = Arc::new(serde_json::from_value(serde_json::json!({
+        "generation":1,"ppq":960,"durationTick":3840,"durationMs":2000,
+        "tracks":[{"id":"a","program":25,"percussion":false}],"tempos":[{"tick":0,"bpm":120}],
+        "occurrences":[{"bar":0,"occurrence":0,"meterNumerator":4,"meterDenominator":4,"startTick":0,"endTick":3840,"startMs":0,"endMs":2000}],
+        "notes":[{"id":"n0","trackId":"a","source":{"target":{"track":0,"staff":0,"bar":0,"voice":0,"beat":0},"string":1},
+            "occurrence":0,"channel":0,"program":33,"startTick":0,"endTick":960,"key":57,"velocity":100,
+            "articulation":"fingered","lockedArticulation":"picked","legatoFrom":null,"pitch":[{"tick":0,"semitones":0}]}],
+        "midi":[]
+    })).unwrap());
+    let sound = |locked| {
+        let mut settings = tabplayer_lib::settings::DocumentSettings::default();
+        settings.sounds.insert(
+            "a".into(),
+            tabplayer_lib::settings::TrackSound {
+                voice_id: Some("green-guitar".into()),
+                preset_id: "gm".into(),
+                effects: Default::default(),
+                locked,
+                drum_kit: None,
+            },
+        );
+        settings
+    };
+    let articulations = |locked| -> Vec<String> {
+        resource_requests(&plan, &sound(locked))
+            .into_iter()
+            .map(|r| r.articulation)
+            .collect()
+    };
+    assert!(articulations(false).contains(&"fingered".to_string()));
+    assert!(articulations(true).iter().all(|a| a == "picked"));
+    use tabplayer_lib::audio::plan::Articulation;
+    assert_eq!(
+        with_locked_articulations(plan.clone(), &sound(true)).notes[0].articulation,
+        Articulation::Picked
+    );
+    let unlocked = with_locked_articulations(plan.clone(), &sound(false));
+    assert!(Arc::ptr_eq(&unlocked, &plan));
+    assert_eq!(unlocked.notes[0].articulation, Articulation::Fingered);
+}
+#[test]
+fn a_real_renderer_and_export_play_the_locked_articulation_only_when_locked() {
+    use tabplayer_lib::{
+        audio::renderer::Renderer,
+        export::{
+            audio::{AudioExportRender, AudioExportRequest},
+            stems::{StemKind, StemTrack},
+            wav::AudioFormat,
+        },
+    };
+    // A guitar whose "fingered" articulation is a different sample (110 Hz) from its "picked" one (220 Hz).
+    let (_, mut resources, _) = renderer_fixture(false);
+    let bank = Arc::get_mut(&mut resources).unwrap();
+    let mut fingered = bank.manifest.instruments[0].regions[0].clone();
+    fingered.sample_id = "low".into();
+    fingered.articulation = "fingered".into();
+    bank.manifest.instruments[0].regions.push(fingered);
+    let mut audio = (*tone()).clone();
+    audio.frames = Arc::new(
+        (0..96_000)
+            .map(|n| {
+                let x = (std::f64::consts::TAU * 110.0 * n as f64 / 48_000.0).sin() as f32 * 0.5;
+                [x; 2]
+            })
+            .collect(),
+    );
+    bank.samples.insert("low".into(), Arc::new(audio));
+    let plan = |articulation: &str,
+                kept: Option<&str>|
+     -> Arc<tabplayer_lib::audio::plan::PlaybackPlan> {
+        let mut note = serde_json::json!({
+            "id":"n0","trackId":"a","source":{"target":{"track":0,"staff":0,"bar":0,"voice":0,"beat":0},"string":1},
+            "occurrence":0,"channel":0,"startTick":0,"endTick":1920,"key":57,"velocity":100,
+            "articulation":articulation,"legatoFrom":null,"pitch":[{"tick":0,"semitones":0}]
+        });
+        if let Some(kept) = kept {
+            note["lockedArticulation"] = serde_json::json!(kept);
+        }
+        Arc::new(serde_json::from_value(serde_json::json!({
+            "generation":1,"ppq":960,"durationTick":3840,"durationMs":2000,
+            "tracks":[{"id":"a","program":25,"percussion":false}],"tempos":[{"tick":0,"bpm":120}],
+            "occurrences":[{"bar":0,"occurrence":0,"meterNumerator":4,"meterDenominator":4,"startTick":0,"endTick":3840,"startMs":0,"endMs":2000}],
+            "notes":[note],"midi":[]
+        })).unwrap())
+    };
+    let settings = |locked| {
+        let mut settings = tabplayer_lib::settings::DocumentSettings::default();
+        settings.sounds.insert(
+            "a".into(),
+            tabplayer_lib::settings::TrackSound {
+                voice_id: Some("green-guitar".into()),
+                preset_id: "gm".into(),
+                effects: Default::default(),
+                locked,
+                drum_kit: None,
+            },
+        );
+        settings
+    };
+    let renderer = |plan: &Arc<tabplayer_lib::audio::plan::PlaybackPlan>, locked| {
+        Renderer::new(plan.clone(), resources.clone(), settings(locked), 48_000).unwrap()
+    };
+    let render = |plan: &Arc<tabplayer_lib::audio::plan::PlaybackPlan>, locked| {
+        let mut output = vec![[0.0; 2]; 48_000];
+        renderer(plan, locked).render_into(&mut output);
+        output
+    };
+    let export = |plan: &Arc<tabplayer_lib::audio::plan::PlaybackPlan>, locked| {
+        let request = AudioExportRequest {
+            tracks: vec![StemTrack {
+                id: "a".into(),
+                name: "Guitar".into(),
+                preset: "gm".into(),
+                kind: StemKind::Score,
+            }],
+            range: None,
+            format: AudioFormat::wav(48_000, 24),
+            speed: 1.0,
+            metronome: false,
+            tail_seconds: 0.0,
+            include_backing: false,
+            include_mix: true,
+            normalize_rms_db: None,
+        };
+        let mut export = AudioExportRender::new(renderer(plan, locked), plan, request).unwrap();
+        let mut all = vec![];
+        loop {
+            let mut block = vec![[0.0; 2]; 4096];
+            let n = export.render_mix(&mut block).unwrap();
+            if n == 0 {
+                break;
+            }
+            all.extend_from_slice(&block[..n]);
+        }
+        all
+    };
+    let automated = plan("fingered", Some("picked"));
+    let picked = plan("picked", None);
+    let fingered = plan("fingered", None);
+    // The two articulations really sound different.
+    assert!((frequency(&render(&picked, false)[2400..4800]) - 220.0).abs() < 1.0);
+    assert!((frequency(&render(&fingered, false)[2400..4800]) - 110.0).abs() < 1.0);
+    // Unlocked, the automated note is fingered; locked, it is picked, bit for bit, in playback and in export.
+    assert!(!differs(
+        &render(&automated, false),
+        &render(&fingered, false)
+    ));
+    assert!(differs(&render(&automated, false), &render(&picked, false)));
+    assert!(!differs(&render(&automated, true), &render(&picked, false)));
+    assert!(!differs(
+        &export(&automated, false),
+        &export(&fingered, false)
+    ));
+    assert!(!differs(&export(&automated, true), &export(&picked, false)));
+    assert!(differs(
+        &export(&automated, true),
+        &export(&automated, false)
+    ));
 }

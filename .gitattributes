@@ -1,0 +1,6 @@
+# Preserve the exact vendored source bytes recorded in UPSTREAM-SOURCE.json.
+vendor/usvg/** -text
+# Library manifests pin exact authored payload and license bytes on every OS.
+assets/library/** -text
+# The native-drop acceptance driver pins this helper's exact source bytes.
+tests/desktop/drop-score-files.ps1 -text

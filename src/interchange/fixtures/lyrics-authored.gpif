@@ -1,0 +1,17 @@
+<!-- Authored standard Track lyrics; grafted onto public score music by the focused tests. -->
+<GPIF>
+  <MasterTrack><Tracks>7 42</Tracks></MasterTrack>
+  <Tracks>
+    <Track id="42">
+      <Lyrics dispatched="true">
+        <Line><Text>[VERSE]
+Hel-lo  world+today</Text><Offset>0</Offset></Line>
+        <Line><Text>&amp; &lt; ]]&gt;</Text><Offset>1</Offset></Line>
+        <Line><Text></Text><Offset>2</Offset></Line>
+        <Line><Text>Õhtu kaunis</Text><Offset>0</Offset></Line>
+        <Line><Text>last verse</Text><Offset>3</Offset></Line>
+      </Lyrics>
+    </Track>
+    <Track id="7"><Lyrics dispatched="true"><Line><Text>Other+track source</Text><Offset>0</Offset></Line></Lyrics></Track>
+  </Tracks>
+</GPIF>

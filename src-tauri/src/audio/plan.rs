@@ -1,4 +1,4 @@
-use crate::project::NoteTarget;
+use crate::project::{BeatTarget, NoteTarget};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
@@ -9,11 +9,44 @@ pub struct PlaybackPlan {
     pub ppq: u32,
     pub duration_tick: f64,
     pub duration_ms: f64,
+    #[serde(
+        default,
+        deserialize_with = "present_playback_end_tick",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub playback_end_tick: Option<f64>,
     pub tracks: Vec<PlanTrack>,
     pub tempos: Vec<PlanTempo>,
     pub occurrences: Vec<MeasureOccurrence>,
+    #[serde(
+        default,
+        deserialize_with = "present_performed_beats",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub performed_beats: Option<Vec<PerformedBeat>>,
     pub notes: Vec<PlanNote>,
     pub midi: Vec<PlanMidiEvent>,
+}
+fn present_playback_end_tick<'de, D>(deserializer: D) -> Result<Option<f64>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    f64::deserialize(deserializer).map(Some)
+}
+fn present_performed_beats<'de, D>(deserializer: D) -> Result<Option<Vec<PerformedBeat>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Vec::<PerformedBeat>::deserialize(deserializer).map(Some)
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PerformedBeat {
+    pub target: BeatTarget,
+    pub occurrence: u32,
+    pub start_tick: f64,
+    pub end_tick: f64,
+    pub lead_in_tick: f64,
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -33,6 +66,8 @@ pub struct PlanTempo {
 pub struct MeasureOccurrence {
     pub bar: u32,
     pub occurrence: u32,
+    pub meter_numerator: u32,
+    pub meter_denominator: u32,
     pub start_tick: f64,
     pub end_tick: f64,
     pub start_ms: f64,
@@ -78,6 +113,9 @@ pub struct PlanNote {
     pub key: u8,
     pub velocity: u8,
     pub articulation: Articulation,
+    /// The articulation the note has when its track's sound is locked: the default of the start sound, where an automation would change it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub locked_articulation: Option<Articulation>,
     pub legato_from: Option<String>,
     pub pitch: Vec<PitchPoint>,
 }
@@ -193,7 +231,12 @@ impl PlaybackPlan {
         prior = 0.0;
         for o in &self.occurrences {
             let count = counts.entry(o.bar).or_insert(0);
-            if !nonnegative(o.start_tick)
+            if o.meter_numerator == 0
+                || !matches!(
+                    o.meter_denominator,
+                    1 | 2 | 4 | 8 | 16 | 32 | 64 | 128 | 256
+                )
+                || !nonnegative(o.start_tick)
                 || o.start_tick < prior
                 || !nonnegative(o.end_tick)
                 || o.end_tick <= o.start_tick
@@ -221,6 +264,42 @@ impl PlaybackPlan {
             *count += 1;
             occurrences.insert((o.bar, o.occurrence));
             prior = o.end_tick;
+        }
+        if self.playback_end_tick.is_some_and(|end| {
+            !end.is_finite()
+                || end <= 0.0
+                || end > self.duration_tick
+                || self
+                    .occurrences
+                    .last()
+                    .is_none_or(|last| last.end_tick != end)
+        }) {
+            return Err(invalid());
+        }
+        if let Some(rows) = &self.performed_beats {
+            let mut mapped = HashSet::new();
+            for row in rows {
+                let target = &row.target;
+                if target.track as usize >= self.tracks.len()
+                    || !occurrences.contains(&(target.bar, row.occurrence))
+                    || !nonnegative(row.lead_in_tick)
+                    || !nonnegative(row.start_tick)
+                    || !nonnegative(row.end_tick)
+                    || row.lead_in_tick > row.start_tick
+                    || row.start_tick > row.end_tick
+                    || row.end_tick > self.duration_tick
+                    || !mapped.insert((
+                        target.track,
+                        target.staff,
+                        target.bar,
+                        target.voice,
+                        target.beat,
+                        row.occurrence,
+                    ))
+                {
+                    return Err(invalid());
+                }
+            }
         }
         let mut note_ids = HashMap::new();
         prior = -1.0;

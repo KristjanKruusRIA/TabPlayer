@@ -1,0 +1,30 @@
+# Interface critique fixes — 2026-10-15
+
+The five priority issues from the Impeccable critique are addressed. This is a refinement of the existing slate/cream/lime editor and realistic instrument artwork. The three-column layout and existing editing, history, audio and export paths remain in use.
+
+| Critique finding | Result and verification |
+| --- | --- |
+| P1: edit location is invisible on the score | A separate blue outline follows the canonical edit target through the engraving projection. Note/beat bounds, rest/entry fallback and a polite location announcement have focused tests. Native ArrowRight moved the outline and inspector together. Piano and percussion entry omit string context. |
+| P1: Harmony opens at Cancel and obscures shape choice/actions | A bounded preview, visual candidate buttons, adjacent formula controls and collapsed advanced settings replace the oversized/raw shape list. Apply/Cancel remain outside the scrolling body. Deferred-library App tests cover initial loading; native confirmation opened at body scroll 0 with Chord name focused, selected a candidate and kept Apply visible at 960 and 1600px. |
+| P1: tuning errors appear away from the field | Existing/new tuning drafts have separate, associated inline errors. Invalid Apply preserves the draft and focuses/reveals that input. Native confirmation showed the invalid token and explanation together in the visible viewport. |
+| P2: export checkboxes separate from labels | Track rows have adjacent checkboxes; staves are nested under their track, with measures in a separate group. Audio flags use the same pattern. Native geometry confirms 16px controls beside labels; empty selection now says “Select at least one track to export.” |
+| P2: inspector lacks task landmarks | Sticky track/measure/beat context and Edit, Practice and Presentation navigation lead to independent collapsible sections. Controls stay mounted; native practice-speed and page-width drafts survived navigation without applying changes. Advanced rhythm is disclosed separately and chord/scales tools remain discoverable. |
+
+The smaller critique findings were also handled: instrument views offer Compact/Expand while retaining the physical guitar/bass/drum/keyboard artwork; nested vertical instrument scrolling is removed; track-display labels have more room; clean documents distinguish New score, Not saved imports and Saved native projects. Help documents the existing editing keys and newly routed file/history/Space shortcuts. Inputs and dialogs retain their own keyboard handling. The paste-options shortcut also opens a collapsed enclosing Edit section before focusing its disclosure.
+
+## Verification
+
+- Full frontend: **1,494 passed, one explicit benchmark skipped, 111 files**, exit 0. Ten Node audio/package-resource tests and TypeScript checking passed. Evidence: `.analysis/critique-fixes/full-frontend-clean.{json,log}`.
+- Behavior changes have meaningful regression coverage, including failing cases for closed-Edit paste reveal, non-string caret context, initial Harmony loading focus and imported-score status. An intermediate run had all assertions pass but exit 1 because jsdom lacks `scrollIntoView`; the new test now provides that browser method on its own element and asserts the scroll request. The final run has no unhandled error.
+- Five component implementations received independent source/spec reviews. A separate joined review found three integration defects; regressions reproduced them and the scoped correction review accepted all three. Root checked the React effect/cleanup, state, keyboard and label paths. Reports remain in `.analysis/critique-fixes/`.
+- The manual Impeccable detector ran on `src` once, returned `[]`, exit 0. It is scoped source evidence, not proof of visual quality. The original 22/40 critique is retained in `.impeccable/critique/`; `critique-storage latest` returned exit 2 after the target changed and marked that old snapshot closed. No new heuristic score or browser overlay is claimed.
+
+The Windows Rust 1.88 diagnostic build succeeded. One initial native batch and one confirmation batch each captured 16 states across 960, 1280 and 1600px; root visually inspected all captures. The final harness is `tests/desktop/critique-fixes.mjs`, with screenshots and assertions in `.analysis/desktop-smoke/critique-fixes/validation.json`. Initial evidence remains separately in `critique-fixes-first`.
+
+The final score toolbar is **89px** high at all three widths (the initial narrow pass was 181px). At 1280px Compact leaves **445px** for score scrolling versus **389px** when expanded. No document horizontal overflow was found. Actual native Play/Pause via Space and Stop worked. Final native project content exactly matched the initial imported project; the authored GP fixture SHA256 stayed `a19cd67ee67038eb62655119f56459351576626c6d5a71dcfcd89e39e0a8cfba`. There were no page errors. The owned app PID 38820 was stopped and its CDP port was confirmed free.
+
+Final diagnostic binary SHA256: `17ef74af856878bc064346cbcee95179c5d334c5da2ea1c3dc81fd5ebf8b8a0a`. Final harness SHA256: `f959ea862a940efc6417eafc232bf7a08f6a500c0a02b257c6afaee58c0d6501`. Reviewed App and styles hashes are respectively `f24a8c187b024065112484997d1ba448bdd7a8c421b838b9120a521fcf5795a6` and `f8cfe47cbf0afffa28874eae74b9ac55de1d4fe3da29559178b00b82548d496b`.
+
+## Scope limits
+
+This batch does not establish full Guitar Pro parity, original GP8 runtime equivalence, a new installer/release, physical macOS/Linux UI acceptance, screen-reader speech, 200% zoom accessibility or audible listening quality. Dense notation can still collide in narrow score space; that existing engraving limitation is outside these interface findings. Source stylesheet import/export integration and selection playback remain ongoing work: commits 8564623 and 7b72984 contain reviewed primitives/contracts, not completed user-facing implementations. The range command deliberately rejects before mutation until its native implementation is ready.

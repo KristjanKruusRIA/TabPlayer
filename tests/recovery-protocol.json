@@ -1,0 +1,512 @@
+{
+  "counters": [
+    {
+      "name": "zero",
+      "value": 0,
+      "valid": true
+    },
+    {
+      "name": "maximum safe",
+      "value": 9007199254740991,
+      "valid": true
+    },
+    {
+      "name": "unsafe integer",
+      "value": 9007199254740992,
+      "valid": false
+    },
+    {
+      "name": "negative",
+      "value": -1,
+      "valid": false
+    },
+    {
+      "name": "fractional",
+      "value": 1.5,
+      "valid": false
+    },
+    {
+      "name": "boolean",
+      "value": true,
+      "valid": false
+    },
+    {
+      "name": "string",
+      "value": "1",
+      "valid": false
+    },
+    {
+      "name": "null",
+      "value": null,
+      "valid": false
+    }
+  ],
+  "preferences": [
+    {
+      "name": "default enabled",
+      "value": {
+        "version": 1,
+        "restorePreviousSession": true
+      },
+      "valid": true
+    },
+    {
+      "name": "disabled",
+      "value": {
+        "version": 1,
+        "restorePreviousSession": false
+      },
+      "valid": true
+    },
+    {
+      "name": "future version",
+      "value": {
+        "version": 2,
+        "restorePreviousSession": true
+      },
+      "valid": false
+    },
+    {
+      "name": "missing version",
+      "value": {
+        "restorePreviousSession": true
+      },
+      "valid": false
+    },
+    {
+      "name": "missing preference",
+      "value": {
+        "version": 1
+      },
+      "valid": false
+    },
+    {
+      "name": "string preference",
+      "value": {
+        "version": 1,
+        "restorePreviousSession": "false"
+      },
+      "valid": false
+    },
+    {
+      "name": "unknown field",
+      "value": {
+        "version": 1,
+        "restorePreviousSession": true,
+        "project": {}
+      },
+      "valid": false
+    }
+  ],
+  "views": [
+    {
+      "name": "initial",
+      "value": {
+        "target": {
+          "track": 0,
+          "staff": 0,
+          "bar": 0,
+          "voice": 0,
+          "beat": 0
+        },
+        "selectedString": 6,
+        "selectedNoteIndex": null,
+        "zoom": 100,
+        "trackView": {
+          "kind": "selected"
+        },
+        "instrumentVisible": false
+      },
+      "valid": true
+    },
+    {
+      "name": "minimum zoom",
+      "value": {
+        "target": {
+          "track": 0,
+          "staff": 0,
+          "bar": 0,
+          "voice": 0,
+          "beat": 0
+        },
+        "selectedString": 6,
+        "selectedNoteIndex": null,
+        "zoom": 25,
+        "trackView": {
+          "kind": "selected"
+        },
+        "instrumentVisible": false
+      },
+      "valid": true
+    },
+    {
+      "name": "maximum zoom",
+      "value": {
+        "target": {
+          "track": 0,
+          "staff": 0,
+          "bar": 0,
+          "voice": 0,
+          "beat": 0
+        },
+        "selectedString": 6,
+        "selectedNoteIndex": null,
+        "zoom": 300,
+        "trackView": {
+          "kind": "selected"
+        },
+        "instrumentVisible": false
+      },
+      "valid": true
+    },
+    {
+      "name": "out of range zoom resets",
+      "value": {
+        "target": {
+          "track": 0,
+          "staff": 0,
+          "bar": 0,
+          "voice": 0,
+          "beat": 0
+        },
+        "selectedString": 6,
+        "selectedNoteIndex": null,
+        "zoom": 0,
+        "trackView": {
+          "kind": "selected"
+        },
+        "instrumentVisible": false
+      },
+      "valid": true,
+      "expectedZoom": 100
+    },
+    {
+      "name": "all tracks",
+      "value": {
+        "target": {
+          "track": 0,
+          "staff": 0,
+          "bar": 0,
+          "voice": 0,
+          "beat": 0
+        },
+        "selectedString": 6,
+        "selectedNoteIndex": null,
+        "zoom": 100,
+        "trackView": {
+          "kind": "all"
+        },
+        "instrumentVisible": false
+      },
+      "valid": true
+    },
+    {
+      "name": "custom tracks",
+      "value": {
+        "target": {
+          "track": 0,
+          "staff": 0,
+          "bar": 0,
+          "voice": 0,
+          "beat": 0
+        },
+        "selectedString": 6,
+        "selectedNoteIndex": null,
+        "zoom": 100,
+        "trackView": {
+          "kind": "custom",
+          "trackIds": [
+            "base/0",
+            "added/1"
+          ]
+        },
+        "instrumentVisible": false
+      },
+      "valid": true
+    },
+    {
+      "name": "unknown field",
+      "value": {
+        "target": {
+          "track": 0,
+          "staff": 0,
+          "bar": 0,
+          "voice": 0,
+          "beat": 0
+        },
+        "selectedString": 6,
+        "selectedNoteIndex": null,
+        "zoom": 100,
+        "trackView": {
+          "kind": "selected"
+        },
+        "instrumentVisible": false,
+        "playing": true
+      },
+      "valid": false
+    },
+    {
+      "name": "missing nullable note",
+      "value": {
+        "target": {
+          "track": 0,
+          "staff": 0,
+          "bar": 0,
+          "voice": 0,
+          "beat": 0
+        },
+        "selectedString": 6,
+        "zoom": 100,
+        "trackView": {
+          "kind": "selected"
+        },
+        "instrumentVisible": false
+      },
+      "valid": false
+    },
+    {
+      "name": "negative target",
+      "value": {
+        "target": {
+          "track": 0,
+          "staff": 0,
+          "bar": -1,
+          "voice": 0,
+          "beat": 0
+        },
+        "selectedString": 6,
+        "selectedNoteIndex": null,
+        "zoom": 100,
+        "trackView": {
+          "kind": "selected"
+        },
+        "instrumentVisible": false
+      },
+      "valid": false
+    },
+    {
+      "name": "fractional target",
+      "value": {
+        "target": {
+          "track": 0,
+          "staff": 0,
+          "bar": 0,
+          "voice": 0,
+          "beat": 1.5
+        },
+        "selectedString": 6,
+        "selectedNoteIndex": null,
+        "zoom": 100,
+        "trackView": {
+          "kind": "selected"
+        },
+        "instrumentVisible": false
+      },
+      "valid": false
+    },
+    {
+      "name": "unknown target",
+      "value": {
+        "target": {
+          "track": 0,
+          "staff": 0,
+          "bar": 0,
+          "voice": 0,
+          "beat": 0,
+          "page": 1
+        },
+        "selectedString": 6,
+        "selectedNoteIndex": null,
+        "zoom": 100,
+        "trackView": {
+          "kind": "selected"
+        },
+        "instrumentVisible": false
+      },
+      "valid": false
+    },
+    {
+      "name": "negative selected string",
+      "value": {
+        "target": {
+          "track": 0,
+          "staff": 0,
+          "bar": 0,
+          "voice": 0,
+          "beat": 0
+        },
+        "selectedString": -1,
+        "selectedNoteIndex": null,
+        "zoom": 100,
+        "trackView": {
+          "kind": "selected"
+        },
+        "instrumentVisible": false
+      },
+      "valid": false
+    },
+    {
+      "name": "negative note",
+      "value": {
+        "target": {
+          "track": 0,
+          "staff": 0,
+          "bar": 0,
+          "voice": 0,
+          "beat": 0
+        },
+        "selectedString": 6,
+        "selectedNoteIndex": -1,
+        "zoom": 100,
+        "trackView": {
+          "kind": "selected"
+        },
+        "instrumentVisible": false
+      },
+      "valid": false
+    },
+    {
+      "name": "null zoom",
+      "value": {
+        "target": {
+          "track": 0,
+          "staff": 0,
+          "bar": 0,
+          "voice": 0,
+          "beat": 0
+        },
+        "selectedString": 6,
+        "selectedNoteIndex": null,
+        "zoom": null,
+        "trackView": {
+          "kind": "selected"
+        },
+        "instrumentVisible": false
+      },
+      "valid": false
+    },
+    {
+      "name": "unknown track view",
+      "value": {
+        "target": {
+          "track": 0,
+          "staff": 0,
+          "bar": 0,
+          "voice": 0,
+          "beat": 0
+        },
+        "selectedString": 6,
+        "selectedNoteIndex": null,
+        "zoom": 100,
+        "trackView": {
+          "kind": "all",
+          "trackIds": []
+        },
+        "instrumentVisible": false
+      },
+      "valid": false
+    },
+    {
+      "name": "missing custom IDs",
+      "value": {
+        "target": {
+          "track": 0,
+          "staff": 0,
+          "bar": 0,
+          "voice": 0,
+          "beat": 0
+        },
+        "selectedString": 6,
+        "selectedNoteIndex": null,
+        "zoom": 100,
+        "trackView": {
+          "kind": "custom"
+        },
+        "instrumentVisible": false
+      },
+      "valid": false
+    }
+  ],
+  "statuses": [
+    {
+      "name": "ready",
+      "value": {
+        "state": "ready",
+        "capturedAtUnixMs": 1792070000000,
+        "generation": 1,
+        "error": null
+      },
+      "valid": true
+    },
+    {
+      "name": "idle",
+      "value": {
+        "state": "idle",
+        "capturedAtUnixMs": null,
+        "generation": null,
+        "error": null
+      },
+      "valid": true
+    },
+    {
+      "name": "failure",
+      "value": {
+        "state": "failed",
+        "capturedAtUnixMs": 1792070000000,
+        "generation": 1,
+        "error": "Authored backup failure"
+      },
+      "valid": true
+    },
+    {
+      "name": "unknown state",
+      "value": {
+        "state": "saved",
+        "capturedAtUnixMs": 1792070000000,
+        "generation": 1,
+        "error": null
+      },
+      "valid": false
+    },
+    {
+      "name": "unsafe generation",
+      "value": {
+        "state": "ready",
+        "capturedAtUnixMs": 1792070000000,
+        "generation": 9007199254740992,
+        "error": null
+      },
+      "valid": false
+    },
+    {
+      "name": "unsafe time",
+      "value": {
+        "state": "ready",
+        "capturedAtUnixMs": 9007199254740992,
+        "generation": 1,
+        "error": null
+      },
+      "valid": false
+    },
+    {
+      "name": "missing nullable error",
+      "value": {
+        "state": "ready",
+        "capturedAtUnixMs": 1792070000000,
+        "generation": 1
+      },
+      "valid": false
+    },
+    {
+      "name": "frontend music forbidden",
+      "value": {
+        "state": "ready",
+        "capturedAtUnixMs": 1792070000000,
+        "generation": 1,
+        "error": null,
+        "project": {}
+      },
+      "valid": false
+    }
+  ]
+}

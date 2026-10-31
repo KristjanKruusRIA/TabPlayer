@@ -21,12 +21,13 @@ export const PTB_LIMITS = {
   positionsPerVoice: 1024,
   notesPerPosition: 16,
   tuningStrings: 12,
-  totalMeasures: 20000,
-  totalPositions: 400000,
+  totalMeasures: 4000,
+  totalPositions: 100000,
+  totalNotes: 60000,
   stringBytes: 65535,
   objectsPerVector: 100000,
-  scoreBars: 60000,
-  scoreBeats: 1000000,
+  scoreBars: 12000,
+  scoreBeats: 150000,
 } as const;
 
 export interface PtbNote { string: number; fret: number; simple: number; symbols: number[] }
@@ -127,14 +128,20 @@ function readNote(r: Reader): PtbNote {
   return { string: stringData >> 5, fret: stringData & 0x1f, simple, symbols };
 }
 
-function readPosition(r: Reader, budget: { positions: number }): PtbPosition {
-  if (++budget.positions > PTB_LIMITS.totalPositions) throw new PowerTabError('The Power Tab file contains too many positions.');
+interface Budget { positions: number; notes: number }
+
+function tooLarge() { return new PowerTabError('This Power Tab file is too large to import safely (too many notes or positions).'); }
+
+function readPosition(r: Reader, budget: Budget): PtbPosition {
+  if (++budget.positions > PTB_LIMITS.totalPositions) throw tooLarge();
   const position = r.u8(), beaming = r.u16(), data = r.u32(), symbols = r.smallVector(4);
   const notes = vector(r, PTB_LIMITS.notesPerPosition, 'notes', () => readNote(r));
+  budget.notes += notes.length;
+  if (budget.notes > PTB_LIMITS.totalNotes) throw tooLarge();
   return { position, beaming, data, symbols, notes };
 }
 
-function readStaff(r: Reader, budget: { positions: number }): PtbStaff {
+function readStaff(r: Reader, budget: Budget): PtbStaff {
   const data = r.u8(); r.skip(4); // spacing bytes
   const voices = [0, 1].map(() => vector(r, PTB_LIMITS.positionsPerVoice, 'positions', () => readPosition(r, budget)));
   const strings = data & 0x0f;
@@ -144,8 +151,7 @@ function readStaff(r: Reader, budget: { positions: number }): PtbStaff {
 
 function readChordName(r: Reader) { r.u16(); r.u8(); r.u16(); r.u8(); }
 
-function readScore(r: Reader, dropped: Record<string, number>): PtbScore {
-  const budget = { positions: 0 };
+function readScore(r: Reader, dropped: Record<string, number>, budget: Budget): PtbScore {
   const guitars = vector(r, PTB_LIMITS.guitars, 'guitars', (): PtbGuitar => {
     const number = r.u8(), description = r.string();
     const preset = r.u8(); r.skip(6); // volume, pan, reverb, chorus, tremolo, phaser
@@ -212,10 +218,11 @@ export function parsePowerTab(bytes: Uint8Array): PtbDocument {
   const r = new Reader(bytes), dropped: Record<string, number> = {};
   try {
     const header = readHeader(r);
-    const guitar = readScore(r, dropped);
+    const budget = { positions: 0, notes: 0 };
+    const guitar = readScore(r, dropped, budget);
     let bass: PtbScore | null = null, bassError: string | null = null;
     const mark = { ...dropped };
-    try { bass = readScore(r, dropped); }
+    try { bass = readScore(r, dropped, budget); }
     catch (error) {
       if (!(error instanceof PowerTabError)) throw error;
       bassError = error.message;

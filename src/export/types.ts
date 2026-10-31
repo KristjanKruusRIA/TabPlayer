@@ -1,19 +1,33 @@
 import type { PrintLayout } from '../document-settings';
+import type { PageLayout } from '../engraving/types';
 export type { PrintLayout } from '../document-settings';
 export interface ExportSelection { tracks:number[]; range:{first:number;last:number}|null;staves?:Record<number,number[]> }
 export interface SvgPage { svg:string; widthMm:number; heightMm:number }
+export interface TrackPages { name:string; pages:SvgPage[] }
+export const PNG_RESOLUTIONS=[72,150,300,600] as const;
+export type PngResolution=typeof PNG_RESOLUTIONS[number];
 export interface SvgSystem { svg:string; width:number; height:number }
-export interface AudioExportOptions { sampleRate:44100|48000;bitDepth:16|24;speed:'saved'|'current';metronome:boolean;tailSeconds:number;backing:boolean;includeMix:boolean }
-export type ExportOptions =
-  | {format:'gp';selection:ExportSelection}
+/** `container` is present only for AIFF or FLAC; audio is written as WAV without it. `normalizeRmsDb` is present only when
+ * mixed audio is normalized to that RMS level. */
+export interface AudioExportOptions { sampleRate:44100|48000;bitDepth:16|24;container?:'aiff'|'flac';normalizeRmsDb?:number;speed:'saved'|'current';metronome:boolean;tailSeconds:number;backing:boolean;includeMix:boolean }
+/** `fileName` is a GP8 token template, present only when it differs from the default. */
+export type ExportOptions = (
+  | {format:'gp';selection:ExportSelection;backing?:boolean}
+  | {format:'gp5';selection:ExportSelection}
   | {format:'midi';selection:ExportSelection}
-  | {format:'pdf';selection:ExportSelection;layout:PrintLayout}
-  | {format:'print';selection:ExportSelection;layout:PrintLayout}
+  | {format:'musicxml';selection:ExportSelection}
+  | {format:'ascii';selection:ExportSelection}
+  | {format:'pdf';selection:ExportSelection;layout:PrintLayout;page?:PageLayout;perTrack?:true}
+  | {format:'print';selection:ExportSelection;layout:PrintLayout;page?:PageLayout}
+  | {format:'svg';selection:ExportSelection;layout:PrintLayout;page?:PageLayout;transparent:boolean;perTrack?:true}
+  | {format:'png';selection:ExportSelection;layout:PrintLayout;page?:PageLayout;transparent:boolean;dpi:PngResolution;perTrack?:true}
   | {format:'wav';selection:ExportSelection;audio:AudioExportOptions}
-  | {format:'stems';selection:ExportSelection;audio:AudioExportOptions};
+  | {format:'stems';selection:ExportSelection;audio:AudioExportOptions}
+)&{fileName?:string};
 export interface ExportProgress { id:string;frames:number;totalFrames:number;status:'running'|'complete'|'cancelled'|'failed';error?:string|null }
 export function validateSelection(trackCount:number,barCount:number,selection:ExportSelection,staffCounts:number[]=[]) {
-  if (!selection.tracks.length || new Set(selection.tracks).size!==selection.tracks.length || selection.tracks.some(n=>!Number.isInteger(n)||n<0||n>=trackCount)) throw new Error('Select existing tracks to export.');
+  if (!selection.tracks.length) throw new Error('Select at least one track to export.');
+  if (new Set(selection.tracks).size!==selection.tracks.length || selection.tracks.some(n=>!Number.isInteger(n)||n<0||n>=trackCount)) throw new Error('Select existing tracks to export.');
   const r=selection.range;
   if(r && (![r.first,r.last].every(Number.isInteger)||r.first<0||r.last<r.first||r.last>=barCount)) throw new Error('Use an inclusive range of existing measures.');
   for(const [track,staves] of Object.entries(selection.staves??{})){const index=Number(track);if(!selection.tracks.includes(index)||!Array.isArray(staves)||!staves.length||new Set(staves).size!==staves.length||staves.some(n=>!Number.isInteger(n)||n<0||n>=(staffCounts[index]??0)))throw new Error('Select existing staves for each exported track.');}

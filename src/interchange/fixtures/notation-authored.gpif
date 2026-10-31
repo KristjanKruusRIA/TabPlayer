@@ -1,0 +1,14 @@
+<!-- Authored standard GPIF fragments from the pinned public reader/writer, not a vendor score. -->
+<GPIF>
+  <MasterBars>
+    <MasterBar><Time>4/4</Time><Bars>0</Bars><Fermatas>
+      <Fermata><Type>Short</Type><Length>0.5</Length><Offset>0/1</Offset></Fermata>
+      <Fermata><Type>Medium</Type><Length>1.25</Length><Offset>29/320</Offset></Fermata>
+      <Fermata><Type>Long</Type><Length>2</Length><Offset>1/1</Offset></Fermata>
+    </Fermatas><XProperties><XProperty id="1124139010"><Int>8</Int></XProperty></XProperties></MasterBar>
+  </MasterBars>
+  <Beats><Beat id="0"><Dynamic>F</Dynamic><XProperties>
+    <XProperty id="1124204545"><Int>1</Int></XProperty>
+    <XProperty id="687935489"><Int>120</Int></XProperty>
+  </XProperties></Beat></Beats>
+</GPIF>

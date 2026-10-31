@@ -1,3 +1,4 @@
+import { readActiveDocument } from './document-context.mjs';
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -8,7 +9,7 @@ const source=process.env.TABPLAYER_TEST_GP;
 if(!source)throw new Error('Set TABPLAYER_TEST_GP to an authorized private score.');
 const bytes=readFileSync(source),sourceHash=createHash('sha256').update(bytes).digest('hex'),saved=resolve(directory,`advanced-${Date.now()}.tabplayer`);
 let id=launch({TABPLAYER_TEST_OPEN:source,TABPLAYER_TEST_SAVE:saved}),browser=await connect(),page=browser.contexts()[0].pages()[0];
-const snapshot=()=>page.evaluate(()=>window.__TAURI_INTERNALS__.invoke('project_snapshot'));
+const snapshot=()=>readActiveDocument(page);
 const idle=async()=>{await page.waitForFunction(()=>!document.querySelector('nav button').disabled);const error=page.getByRole('alert');if(await error.count())throw new Error(await error.textContent());};
 const button=async name=>{await page.getByRole('button',{name,exact:true}).click();await idle();};
 const openDetails=async text=>{const summary=page.locator('summary').filter({hasText:text}).first();await summary.evaluate(node=>node.parentElement.open=true);};
@@ -29,7 +30,7 @@ try {
   await openDetails('Selected instrument');await change('Track name','Advanced study');await change('Track short name','Adv');await page.getByRole('combobox',{name:/^Track MIDI instrument/}).selectOption('27');await button('Apply instrument settings');
   await openDetails('Staff, voices & layout');await change('Staff tuning (notes, high to low)','E4 B3 G3 D3 A2 D2');await button('Apply staff settings');assert.deepEqual((await snapshot()).project.edits.at(-1).settings.tuning,[64,59,55,50,45,38]);if(await page.getByRole('button',{name:'Add voice',exact:true}).isDisabled()){await page.getByRole('combobox',{name:/^Voice/}).selectOption('3');await button('Remove voice');}await button('Add voice');await page.getByRole('combobox',{name:/^Voice/}).selectOption('0');await page.getByRole('combobox',{name:/^Copy selected voice to/}).selectOption('1');await button('Copy voice range');await button('Add staff');await page.locator('.inspector > fieldset').getByRole('combobox',{name:/^Staff/}).selectOption('0');
   await openDetails('Measure & notation');await change('Section label','Advanced verse');await button('Apply measure settings');await page.getByRole('combobox',{name:/^Key signature/}).selectOption('2');await button('Apply bar notation');
-  await openDetails('Beat text & chord');await change('Beat text','Advanced editor smoke');await button('Apply beat text');await button('Edit chord diagram');await change('Chord name','D');await change('Diagram string 1',2);await change('Diagram string 2',3);await change('Diagram string 3',2);await button('Apply chord');
+  await openDetails('Beat text & chord');await change('Beat text','Advanced editor smoke');await button('Apply beat text');await button('Edit chord diagram');await page.waitForFunction(()=>document.querySelector('[role="dialog"] fieldset')?.getAttribute('aria-disabled')!=='true');await change('Chord name','D');await openDetails('Shape and display');await change('String 1 fret',2);await change('String 2 fret',3);await change('String 3 fret',2);await button('Apply chord');
   const beforeUndo=await snapshot();await button('Undo');assert.equal((await snapshot()).project.edits.length,beforeUndo.project.edits.length-1);await button('Redo');assert.deepEqual((await snapshot()).project,beforeUndo.project);
   await openDetails('Add instrument');await change('New track name','Preset bass six');await combo('MIDI instrument').selectOption('33');
   const beforePreset=await snapshot();await combo('New track tuning preset').selectOption('bass-6-standard-b');assert.equal(await page.getByLabel('New track tuning',{exact:true}).inputValue(),'C3 G2 D2 A1 E1 B0');assert.deepEqual(await snapshot(),beforePreset);
@@ -48,7 +49,7 @@ try {
   assert.equal(await page.getByLabel('Tuning (notes, high to low)',{exact:true}).inputValue(),'E4 B3 G3 D3 A2 D2');
   await page.getByRole('button',{name:bassLabel,exact:true}).click();assert.equal(await page.getByLabel('Tuning (notes, high to low)',{exact:true}).inputValue(),'C3 G2 D2 A1 E1 A#0');assert.equal(await combo('Tuning preset').inputValue(),'custom');await page.getByRole('button',{name:guitarLabel,exact:true}).click();assert.equal(await page.getByLabel('Tuning (notes, high to low)',{exact:true}).inputValue(),'E4 B3 G3 D3 A2 E2 B1 F#1 D1');
   await openDetails('Staff, voices & layout');assert.equal(await combo('Staff tuning preset').inputValue(),'custom');
-  const types=new Set(before.project.edits.map(e=>e.type));for(const type of ['setBeatRhythm','setNoteTechniques','setTrackInfo','addVoice','copyVoice','addStaff','setMeasureSettings','setBarNotation','setBeatAnnotation'])assert(types.has(type),`Missing ${type}`);
+  const types=new Set(before.project.edits.map(e=>e.type));for(const type of ['setBeatRhythm','setNoteTechniques','setTrackInfo','addVoice','copyVoice','addStaff','setMeasureSettings','setBarNotation','setBeatText','setHarmonyChord'])assert(types.has(type),`Missing ${type}`);
   writeFileSync(resolve(directory,'advanced-editor-result.json'),JSON.stringify({sourceHash,sourcePreserved:true,nativeRestartReopen:true,tuningPresets:{bass6:true,guitar9:true,custom:true,historyRoundtrip:true},editCount:before.project.edits.length,commandTypes:[...types],saved},null,2));
   console.log('Advanced native editor: curves, articulation, imported program, voice copy, staff, measure, key, chord, bass6/guitar9 tuning presets and custom notes, undo/redo and save/restart/reopen passed.');
 } finally {await browser.close();try{stop(id);}catch{}}

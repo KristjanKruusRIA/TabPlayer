@@ -1,0 +1,57 @@
+.score-edit-target {
+  position: absolute;
+  box-sizing: border-box;
+  border: 2px solid var(--ws-edit,#245cb2);
+  border-radius: 4px;
+  pointer-events: none;
+  z-index: 3;
+}
+
+.score-edit-entry {
+  position: absolute;
+  left: -2px;
+  bottom: calc(100% + 3px);
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: var(--ws-edit,#245cb2);
+  color: var(--ws-paper,#fffdf5);
+  white-space: nowrap;
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.score-edit-announcement {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+.app-shell .paper.score-paper-host, .paper.score-paper-host {
+  padding: 0; min-width: 0; min-height: 100%; background: transparent; box-shadow: none;
+}
+.score-presentation { position: relative; min-height: 100%; outline: none; }
+.score-source-staging { position: absolute; inset: 0 auto auto 0; height: 0; overflow: hidden; visibility: hidden; pointer-events: none; contain: layout paint; }
+.score-live-paper { margin-inline: auto; min-height: 100%; background: var(--ws-paper,#fffdf5); color-scheme: light; }
+.score-presentation[data-layout="horizontalScreen"] .score-live-paper .at-surface { background: var(--ws-paper,#fffdf5); }
+.score-pages { position: relative; }
+.score-sheet { position: absolute; background: var(--ws-paper,#fffdf5); box-shadow: inset 0 0 0 1px #b8b2a5; color-scheme: light; }
+.score-svg-chunk { position: absolute; transform-origin: top left; }
+.score-svg-chunk svg { overflow: visible; display: block; }
+.score-svg-chunk .at { font-style: normal; font-weight: normal; font-variant: normal; text-transform: none; line-height: 1; -webkit-font-smoothing: antialiased; overflow: visible; }
+.score-page-error { margin: 0 0 12px; padding: 8px 12px; color: var(--ws-text,#edf1f5); background: var(--ws-panel,#1d2530); }
+.score-playback-bar,.score-playback-beat,.score-range-block { position: absolute; pointer-events: none; }
+.score-playback-bar { background: #437ec226; }
+.score-playback-beat { background: var(--ws-edit,#245cb2); min-width: 2px; z-index: 2; }
+.score-range-block { background: #437ec22b; }
+/* Score errors: a translucent red wash with a dashed outline, so the mark survives without color. */
+.score-error-bar { position: absolute; pointer-events: none; background: #d1424214; outline: 2px dashed #c23b3b; outline-offset: -2px; }
+.score-bar-handle { position: absolute; width: 10px; z-index: 5; cursor: ew-resize; touch-action: none; background: #245cb21f; border-left: 2px solid #245cb2; box-sizing: border-box; }
+.score-bar-handle:hover, .score-bar-handle:focus-visible { background: #245cb259; outline: 2px solid var(--ws-edit,#245cb2); outline-offset: 1px; }
+.score-bar-handle.is-disabled { cursor: default; opacity: .5; }
+.score-bar-guide { position: absolute; top: 0; bottom: 0; width: 0; border-left: 2px dashed #245cb2; pointer-events: none; }

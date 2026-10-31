@@ -1,13 +1,14 @@
 use base64::{Engine, engine::general_purpose::STANDARD};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::sync::Arc;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct StoredAsset {
     pub filename: String,
     pub media_type: String,
-    pub bytes_base64: String,
+    pub bytes_base64: Arc<str>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -18,18 +19,26 @@ pub struct AssetInfo {
     pub byte_length: usize,
 }
 
+#[cfg(test)]
+thread_local! {
+    /// How many times this thread has decoded an asset, so a test can show that a path does not.
+    pub static DECODES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 impl StoredAsset {
     pub fn from_bytes(filename: String, media_type: String, bytes: &[u8]) -> Self {
         Self {
             filename,
             media_type,
-            bytes_base64: STANDARD.encode(bytes),
+            bytes_base64: STANDARD.encode(bytes).into(),
         }
     }
 
     pub fn bytes(&self) -> Result<Vec<u8>, String> {
+        #[cfg(test)]
+        DECODES.with(|count| count.set(count.get() + 1));
         STANDARD
-            .decode(&self.bytes_base64)
+            .decode(self.bytes_base64.as_bytes())
             .map_err(|_| "Asset bytes are corrupt.".into())
     }
 

@@ -1,0 +1,55 @@
+// @vitest-environment jsdom
+import {useState} from 'react';
+import {afterEach,expect,it,vi} from 'vitest';
+import {act,cleanup,fireEvent,render,screen,waitFor} from '@testing-library/react';
+import '@testing-library/jest-dom/vitest';
+import type {BackingSettings} from '../edit-types';
+import {BackingProcessingControls} from './BackingProcessingControls';
+afterEach(cleanup);
+const backing:BackingSettings={assetId:'asset',offsetMs:120,anchors:[{bar:1,occurrence:0,ratio:0,audioMs:3120}],referenceSync:{entryAudioMs:1120,exitAudioMs:7120},mix:{gain:.7,pan:-.2,mute:false,solo:true}};
+function setup(onEdit=vi.fn(async()=>{}),initial=backing){
+ const begin=vi.fn(),release=vi.fn(),keys=vi.fn();
+ function Harness({settings=initial,visible=true}:{settings?:BackingSettings;visible?:boolean}){const [leases,setLeases]=useState(0);return <div onKeyDown={keys} onKeyUp={keys}><BackingProcessingControls settings={settings} visible={visible} busy={leases>0} beginOperation={()=>{begin();setLeases(n=>n+1);return()=>{release();setLeases(n=>n-1);};}} onEdit={onEdit}/></div>;}
+ const view=render(<Harness/>);return {begin,release,onEdit,keys,view,Harness};
+}
+const semitones=()=>screen.getByRole('spinbutton',{name:'Semitones'});
+const cents=()=>screen.getByRole('spinbutton',{name:'Cents'});
+it('leases only on change, keeps the active field enabled, and commits the captured settings once',async()=>{
+ let finish!:()=>void;const p=setup(vi.fn(()=>new Promise<void>(resolve=>{finish=resolve;}))),input=semitones();
+ fireEvent.focus(input);fireEvent.keyDown(input,{key:'Enter'});expect(p.begin).not.toHaveBeenCalled();
+ fireEvent.change(input,{target:{value:'2'}});expect(p.begin).toHaveBeenCalledOnce();expect(input).toBeEnabled();expect(cents()).toBeDisabled();expect(screen.getByRole('combobox')).toBeDisabled();
+ fireEvent.keyDown(input,{key:'Enter'});fireEvent.keyDown(input,{key:'Enter'});fireEvent.blur(input);expect(p.release).not.toHaveBeenCalled();expect(p.onEdit).toHaveBeenCalledExactlyOnceWith({type:'setBacking',backing:{...backing,processing:{semitones:2,cents:0,filter:'none'}}});
+ await act(async()=>finish());expect(p.release).toHaveBeenCalledOnce();
+});
+it.each(['Escape','blur','window blur','collapse','hide','settings','source','unmount'])('%s cancels a draft',async action=>{
+ const p=setup();fireEvent.change(semitones(),{target:{value:'3'}});
+ if(action==='Escape')fireEvent.keyDown(semitones(),{key:'Escape'});if(action==='blur')fireEvent.blur(semitones());if(action==='window blur')fireEvent.blur(window);
+ if(action==='collapse'){fireEvent.click(screen.getByText('Pitch & filter'));await waitFor(()=>expect(p.release).toHaveBeenCalledOnce());}
+ if(action==='hide')p.view.rerender(<p.Harness visible={false}/>);if(action==='settings')p.view.rerender(<p.Harness settings={{...backing,offsetMs:121}}/>);if(action==='source')p.view.rerender(<p.Harness settings={{...backing,assetId:'other'}}/>);if(action==='unmount')p.view.unmount();
+ expect(p.release).toHaveBeenCalledOnce();expect(p.onEdit).not.toHaveBeenCalled();
+});
+it.each(['Semitones','Cents'] as const)('%s invalid drafts show associated range feedback and clear it on correction or cancel',name=>{
+ const p=setup(),input=screen.getByRole('spinbutton',{name}),limit=name==='Semitones'?12:100,message=`${name}: enter a whole number from -${limit} to ${limit}.`;
+ for(const value of ['','-','1.','1e','1.5',String(limit+1),'Infinity']){
+  fireEvent.change(input,{target:{value:'2'}});fireEvent.change(input,{target:{value}});
+  expect(input).toHaveAttribute('aria-invalid','true');expect(input).toHaveAccessibleName(name);expect(input.closest('label')).toHaveTextContent(new RegExp(`^${name}$`));
+  const feedback=screen.getByText(message);expect(feedback).toBeVisible();expect(feedback.closest('label')).toBeNull();expect(input).toHaveAccessibleDescription(`Enter applies; Escape or blur cancels. Changes backing audio only. ${message}`);
+  fireEvent.keyDown(input,{key:'Enter'});expect(p.onEdit).not.toHaveBeenCalled();
+  fireEvent.change(input,{target:{value:'2'}});expect(screen.queryByText(message)).not.toBeInTheDocument();expect(input).not.toHaveAttribute('aria-invalid');expect(input).toHaveAccessibleDescription('Enter applies; Escape or blur cancels. Changes backing audio only.');
+  fireEvent.change(input,{target:{value}});fireEvent.blur(input);expect(screen.queryByText(message)).not.toBeInTheDocument();expect(input).not.toHaveAttribute('aria-invalid');
+ }
+ expect(p.release).toHaveBeenCalledTimes(7);expect(p.onEdit).not.toHaveBeenCalled();
+});
+it('steps and clamps both fields with 1/Shift10 and contains keyboard shortcuts',()=>{const p=setup();fireEvent.keyDown(semitones(),{key:'ArrowUp',shiftKey:true});fireEvent.keyDown(semitones(),{key:'ArrowUp',shiftKey:true});expect(semitones()).toHaveValue('12');fireEvent.keyDown(semitones(),{key:'Escape'});fireEvent.keyDown(cents(),{key:'ArrowDown'});fireEvent.keyUp(cents(),{key:'ArrowDown'});expect(cents()).toHaveValue('-1');expect(p.keys).not.toHaveBeenCalled();expect(p.onEdit).not.toHaveBeenCalled();});
+it('returning to the committed value releases without an edit',()=>{const p=setup();fireEvent.change(cents(),{target:{value:'1'}});fireEvent.change(cents(),{target:{value:'0'}});fireEvent.keyDown(cents(),{key:'Enter'});expect(p.onEdit).not.toHaveBeenCalled();expect(p.release).toHaveBeenCalledOnce();});
+it.each(['hide','settings','unmount','collapse'])('pending %s keeps its lease and suppresses stale rejection',async action=>{let reject!:(e:Error)=>void;const p=setup(vi.fn(()=>new Promise<void>((_,no)=>{reject=no;})));fireEvent.change(cents(),{target:{value:'50'}});fireEvent.keyDown(cents(),{key:'Enter'});
+ if(action==='hide')p.view.rerender(<p.Harness visible={false}/>);if(action==='settings')p.view.rerender(<p.Harness settings={{...backing,offsetMs:121}}/>);if(action==='unmount')p.view.unmount();if(action==='collapse'){fireEvent.click(screen.getByText('Pitch & filter'));await act(async()=>{await new Promise(resolve=>setTimeout(resolve,0));});}
+ expect(p.release).not.toHaveBeenCalled();await act(async()=>reject(new Error('stale rejection')));expect(p.release).toHaveBeenCalledOnce();expect(screen.queryByRole('alert',{hidden:true})).not.toBeInTheDocument();
+});
+it('reports current rejection and restores committed values',async()=>{const p=setup(vi.fn(async()=>{throw new Error('Processing rejected');}));fireEvent.change(cents(),{target:{value:'50'}});fireEvent.keyDown(cents(),{key:'Enter'});expect(await screen.findByRole('alert')).toHaveTextContent('Processing rejected');expect(cents()).toHaveValue('0');expect(p.release).toHaveBeenCalledOnce();});
+it('offers the seven ordered modes and commits a single full snapshot for each',async()=>{const p=setup();const select=screen.getByRole('combobox',{name:'Filter'}),modes=['none','bassEnhance','bassAttenuation','mediumEnhance','mediumAttenuation','highEnhance','highAttenuation'];expect(screen.getAllByRole('option').map(x=>x.textContent)).toEqual(['No Filter','Bass Enhance','Bass Attenuation','Medium Enhance','Medium Attenuation','Hi Freq Enhance','Hi Freq Attenuation']);for(const filter of modes.slice(1)){fireEvent.change(select,{target:{value:filter}});await waitFor(()=>expect(p.release).toHaveBeenCalledTimes(modes.indexOf(filter)));expect(p.onEdit).toHaveBeenLastCalledWith({type:'setBacking',backing:{...backing,processing:{semitones:0,cents:0,filter}}});}expect(p.onEdit).toHaveBeenCalledTimes(6);});
+it('reset clears a nonneutral raw pair even when its pitch cancels',async()=>{const p=setup(vi.fn(async()=>{}),{...backing,processing:{semitones:-1,cents:100,filter:'none'}});fireEvent.click(screen.getByRole('button',{name:'Reset'}));await waitFor(()=>expect(p.release).toHaveBeenCalledOnce());expect(p.onEdit).toHaveBeenCalledExactlyOnceWith({type:'setBacking',backing:{...backing,processing:null}});});
+it('neutral Reset is disabled and instructions describe the fields',()=>{setup();expect(screen.getByRole('button',{name:'Reset'})).toBeDisabled();expect(semitones()).toHaveAccessibleDescription('Enter applies; Escape or blur cancels. Changes backing audio only.');});
+it('No Filter commits once from a filtered backing and retains its raw pitch pair',async()=>{const initial={...backing,processing:{semitones:1,cents:-50,filter:'highAttenuation' as const}},p=setup(vi.fn(async()=>{}),initial);fireEvent.change(screen.getByRole('combobox',{name:'Filter'}),{target:{value:'none'}});await waitFor(()=>expect(p.release).toHaveBeenCalledOnce());expect(p.onEdit).toHaveBeenCalledExactlyOnceWith({type:'setBacking',backing:{...initial,processing:{...initial.processing,filter:'none'}}});});
+it.each(['filter','reset'])('%s holds one lease through pending rejection',async action=>{let reject!:(e:Error)=>void;const p=setup(vi.fn(()=>new Promise<void>((_,no)=>{reject=no;})),{...backing,processing:{semitones:2,cents:0,filter:'none'}});if(action==='filter')fireEvent.change(screen.getByRole('combobox'),{target:{value:'bassEnhance'}});else fireEvent.click(screen.getByRole('button',{name:'Reset'}));expect(p.begin).toHaveBeenCalledOnce();expect(p.release).not.toHaveBeenCalled();expect(semitones()).toBeDisabled();expect(cents()).toBeDisabled();expect(screen.getByRole('combobox')).toBeDisabled();await act(async()=>reject(new Error('Rejected')));expect(screen.getByRole('alert')).toHaveTextContent('Rejected');expect(p.release).toHaveBeenCalledOnce();});
+it('new settings immediately replace a pending stale draft without releasing its lease',async()=>{let finish!:()=>void;const p=setup(vi.fn(()=>new Promise<void>(resolve=>{finish=resolve;})));fireEvent.change(cents(),{target:{value:'50'}});fireEvent.keyDown(cents(),{key:'Enter'});p.view.rerender(<p.Harness settings={{...backing,processing:{semitones:0,cents:25,filter:'none'}}}/>);expect(cents()).toHaveValue('25');expect(cents()).toBeDisabled();expect(p.release).not.toHaveBeenCalled();await act(async()=>finish());expect(p.release).toHaveBeenCalledOnce();});

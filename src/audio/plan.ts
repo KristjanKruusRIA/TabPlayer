@@ -1,20 +1,31 @@
 import { midi, model, Settings } from '@coderline/alphatab';
+import '../tremolo-guard';
 import { buildScore, trackIdentity } from '../engine';
 import { captureNoteLinks, restoreNoteLinks } from '../editor/links';
 import type { ProjectView } from '../project';
-import type { BackingSettings } from '../edit-types';
+import type { BackingSettings, TrackInterpretation } from '../edit-types';
 import type { Articulation, MeasureOccurrence, PlanMidiEvent, PlanNote, PlanTempo, PlaybackPlan } from './types';
+import { scoreFromJson } from '../model-clone';
+import { gpControllerEvents, prepareGpMidiScore } from '../interchange/automation';
+import { preparePitchedGpScore } from '../interchange/pitched';
+import { buildPerformedBeats } from './performed-beats';
+import { applyNoteAudio, collectAudible, collectNoteAudio, type AudibleAttack, type AudioAdjustment } from './note-audio-plan';
+import { hasNoteAudio } from '../editor/note-audio';
+import type { ReferenceLocation } from './reference-sync-types';
+import { interpretAttacks, type Attack } from './interpretation';
 
 const settings = new Settings();
+const validMeter = (numerator:number,denominator:number) => Number.isSafeInteger(numerator) && numerator > 0 && numerator <= 0xffffffff && [1,2,4,8,16,32,64,128,256].includes(denominator);
 const beatsOf = (score: model.Score) => score.tracks.flatMap(t => t.staves.flatMap(s => s.bars.flatMap(b => b.voices.flatMap(v => v.beats))));
 function cloneWithLinks(score: model.Score) {
-  const copy = model.JsonConverter.jsonToScore(model.JsonConverter.scoreToJson(score), settings);
+  const copy = scoreFromJson(model.JsonConverter.scoreToJson(score), settings);
   restoreNoteLinks(copy, captureNoteLinks(score)); return copy;
 }
 
 // 1.8.4 multiplies negative whole-note enum values by the mark count instead of
 // dividing their whole-note multiplier. Normalize only the transient MIDI model.
 export function prepareMidiScore(score: model.Score): model.Score {
+  score = preparePitchedGpScore(score, settings);
   const original = beatsOf(score);
   if (!original.some(b => b.duration < 0 && b.tremoloPicking)) return score;
   const copy = cloneWithLinks(score), byId = new Map(original.map(b => [b.id, b]));
@@ -59,8 +70,11 @@ class Collector implements midi.IMidiFileHandler {
     this.events.push({ type: 'program', track, tick: tick + this.shift, channel, program, order: this.order++ });
   }
   addTempo(tick: number, bpm: number) { this.tempos.push({ tick: tick + this.shift, bpm }); }
-  addBend(track: number, tick: number, channel: number, value: number) { this.events.push({ type: 'bend', track, tick: tick + this.shift, channel, value: Math.min(16384, Math.floor(value)), order: this.order++ }); }
-  addNoteBend(track: number, tick: number, channel: number, key: number, value: number) { this.events.push({ type: 'noteBend', track, tick: tick + this.shift, channel, key, value, order: this.order++ }); }
+  addBend(track: number, tick: number, channel: number, value: number) { this.events.push({ type: 'bend', track, tick: tick + this.shift, channel, value: Math.min(16384, Math.floor(value)), order: this.order++ }); this.own(); }
+  addNoteBend(track: number, tick: number, channel: number, key: number, value: number) { this.events.push({ type: 'noteBend', track, tick: tick + this.shift, channel, key, value, order: this.order++ }); this.own(); }
+  // The tick at which the beat that generated a bend began, by the bend's order.
+  starts = new Map<number, number>();
+  private own() { if (this.provenance) this.starts.set(this.order - 1, Number(this.provenance.slice(this.provenance.indexOf('/') + 1))); }
   finishTrack(_track: number, tick: number) { this.end = Math.max(this.end, tick + this.shift); }
 }
 function generate(score: model.Score) {
@@ -83,33 +97,38 @@ function resolvePrograms(score: model.Score, events: Collector) {
   }
 }
 
-type PerformedLocation = Pick<MeasureOccurrence, 'bar' | 'occurrence' | 'startTick' | 'endTick'>;
-// Committed/candidate scores are immutable; settings edits retain their object
-// identity, while notation/history replacements construct a different score.
-const backingLocations = new WeakMap<model.Score, PerformedLocation[]>();
-export function validateBackingAnchors(score: model.Score, backing: Pick<BackingSettings, 'offsetMs' | 'anchors'> | null | undefined): void {
+export function backingLocationsForScore(score:model.Score):readonly ReferenceLocation[] {
+  let shift = 0;
+  const handler: midi.IMidiFileHandler = {
+    addTickShift(value) { shift = value; }, addTimeSignature() {}, addRest() {}, addNote() {}, addControlChange() {}, addProgramChange() {}, addTempo() {}, addBend() {}, addNoteBend() {}, finishTrack() {},
+  };
+  const generator = new midi.MidiFileGenerator(score, settings, handler); generator.generate();
+  const counts = new Map<number, number>();
+  return generator.tickLookup.masterBars.map(m => {
+    const bar = m.masterBar.index, occurrence = counts.get(bar) ?? 0; counts.set(bar, occurrence + 1);
+    return { bar, occurrence, startTick: m.start + shift, endTick: m.end + shift };
+  });
+}
+// Legacy settings validation can reuse committed immutable score geometry.
+// Reference replay uses the fresh resolver above after each musical edit.
+const backingLocations=new WeakMap<model.Score,readonly ReferenceLocation[]>();
+export function validateBackingAnchors(score: model.Score, backing: Pick<BackingSettings, 'offsetMs' | 'anchors' | 'referenceSync'> | null | undefined): void {
   if (!backing) return;
   if (!Number.isFinite(backing.offsetMs)) throw new Error('Invalid backing offset.');
-  if (!backing.anchors.length) return;
-  let locations = backingLocations.get(score);
-  if (!locations) {
-    let shift = 0;
-    const handler: midi.IMidiFileHandler = {
-      addTickShift(value) { shift = value; }, addTimeSignature() {}, addRest() {}, addNote() {}, addControlChange() {}, addProgramChange() {}, addTempo() {}, addBend() {}, addNoteBend() {}, finishTrack() {},
-    };
-    const generator = new midi.MidiFileGenerator(score, settings, handler); generator.generate();
-    const counts = new Map<number, number>();
-    locations = generator.tickLookup.masterBars.map(m => {
-      const bar = m.masterBar.index, occurrence = counts.get(bar) ?? 0; counts.set(bar, occurrence + 1);
-      return { bar, occurrence, startTick: m.start + shift, endTick: m.end + shift };
-    });
-    backingLocations.set(score, locations);
-  }
+  const bounds=backing.referenceSync;
+  if (!backing.anchors.length&&!bounds) return;
+  let locations=backing.referenceSync?undefined:backingLocations.get(score);
+  if(!locations){locations=backingLocationsForScore(score);if(!backing.referenceSync)backingLocations.set(score,locations);}
+  const entrySourceMs=bounds?bounds.entryAudioMs-backing.offsetMs:0,exitSourceMs=bounds?bounds.exitAudioMs-backing.offsetMs:0;
+  if(bounds&&(!locations.length||!Number.isFinite(bounds.entryAudioMs)||!Number.isFinite(bounds.exitAudioMs)||!Number.isFinite(entrySourceMs)||entrySourceMs<0||!Number.isFinite(exitSourceMs)||exitSourceMs<=entrySourceMs||!Number.isFinite(exitSourceMs-entrySourceMs)))throw new Error('Invalid reference synchronization bounds.');
   const points = backing.anchors.map(anchor => {
-    if (!Number.isSafeInteger(anchor.bar) || anchor.bar < 0 || !Number.isSafeInteger(anchor.occurrence) || anchor.occurrence < 0 || !Number.isFinite(anchor.ratio) || anchor.ratio < 0 || anchor.ratio > 1 || !Number.isFinite(anchor.audioMs) || anchor.audioMs < 0) throw new Error('Backing anchor has an invalid synchronization position.');
+    if (!Number.isSafeInteger(anchor.bar) || anchor.bar < 0 || anchor.bar > 0xffffffff || !Number.isSafeInteger(anchor.occurrence) || anchor.occurrence < 0 || anchor.occurrence > 0xffffffff || !Number.isFinite(anchor.ratio) || anchor.ratio < 0 || anchor.ratio > 1 || !Number.isFinite(anchor.audioMs) || (!bounds&&anchor.audioMs < 0)) throw new Error('Backing anchor has an invalid synchronization position.');
     const occurrence = locations.find(o => o.bar === anchor.bar && o.occurrence === anchor.occurrence);
     if (!occurrence) throw new Error('Backing anchor refers to missing score music.');
-    return { tick: occurrence.startTick + (occurrence.endTick - occurrence.startTick) * anchor.ratio, audioMs: anchor.audioMs };
+    const tick=occurrence.startTick + (occurrence.endTick - occurrence.startTick) * anchor.ratio;
+    const sourceMs=anchor.audioMs-backing.offsetMs;
+    if(bounds&&(tick<=locations[0].startTick||tick>=locations[locations.length-1].endTick||!Number.isFinite(sourceMs)||sourceMs<=entrySourceMs||sourceMs>=exitSourceMs))throw new Error('Reference anchors must lie inside the synchronization endpoints.');
+    return { tick, audioMs: bounds?sourceMs:anchor.audioMs };
   }).sort((a, b) => a.tick - b.tick);
   if (points.some((point, i) => i > 0 && (points[i - 1].tick >= point.tick || points[i - 1].audioMs >= point.audioMs))) throw new Error('Backing anchors must have distinct score positions and increasing audio times in playback order.');
 }
@@ -155,6 +174,9 @@ function converted(events: RawEvent[], identities: string[], nativeChannel: (tra
         if (event.controller === 38) state.range = state.coarse + event.value / 100;
       }
     }
+    // Guitar Pro mixes are fractional on the 0–16 scale and alphaTab scales them by 8
+    // unrounded; round volume and pan as gpControllerEvents does.
+    if (event.type === 'controller' && (event.controller === 7 || event.controller === 10)) return { ...data, trackId: identities[track], value: Math.max(0, Math.min(127, Math.round(event.value))) } as OrderedMidiEvent;
     if (event.type === 'bend' || event.type === 'noteBend') return { ...data, trackId: identities[track], value: (event.value - 8192) / 8192 * state.range } as OrderedMidiEvent;
     return { ...data, trackId: identities[track] } as OrderedMidiEvent;
   });
@@ -172,7 +194,7 @@ function sources(score: model.Score) {
   return all;
 }
 function laneScore(json: ReturnType<typeof model.JsonConverter.scoreToJson>, lane: Source[]) {
-  const score = model.JsonConverter.jsonToScore(json, settings), first = lane[0];
+  const score = scoreFromJson(json, settings), first = lane[0];
   const track = score.tracks[first.track], staff = track.staves[first.staff];
   // Finish before removing notes: retain original grace/tuplet rhythm and all
   // derived tie/let-ring/slide links. Do not refinish an isolated musical lane.
@@ -217,7 +239,7 @@ function playbackBar(bar: model.Bar): model.Bar {
     default: return bar;
   }
 }
-function articulation(note: model.Note, program: number, legato: boolean): Articulation {
+function articulation(note: model.Note, program: number, legato: boolean, style?: TrackInterpretation['style']): Articulation {
   if (note.isDead) return 'dead';
   if (note.isPalmMute) return 'muted';
   if (note.isGhost) return 'ghost';
@@ -226,7 +248,9 @@ function articulation(note: model.Note, program: number, legato: boolean): Artic
   if (note.harmonicType !== model.HarmonicType.None) return 'harmonic';
   if (legato) return 'legato';
   if (note.beat.pickStroke !== model.PickStroke.None) return 'picked';
-  return note.rightHandFinger >= 0 || program >= 32 && program <= 39 ? 'fingered' : 'picked';
+  // A written right-hand finger outranks the track's playing style, as a written pick stroke does above.
+  if (note.rightHandFinger >= 0) return 'fingered';
+  return style ? style === 'fingers' ? 'fingered' : 'picked' : program >= 32 && program <= 39 ? 'fingered' : 'picked';
 }
 function pitchCurve(note: RawNote, destination: RawNote, events: PlanMidiEvent[]) {
   const relevant = events.filter(e => e.channel === note.channel && (e.type === 'bend' || e.type === 'noteBend' && e.key === note.key) && e.tick <= note.end);
@@ -244,11 +268,19 @@ function pitchCurve(note: RawNote, destination: RawNote, events: PlanMidiEvent[]
   return [...values].filter(([tick]) => tick >= destination.start && tick <= destination.end).sort(([a], [b]) => a - b).map(([tick, semitones]) => ({ tick, semitones }));
 }
 
-function buildWithIdentities(original: model.Score, generation: number, ids: string[], corrected?: (track: number, attack: number, length: number) => void): PlaybackPlan {
+/** `interpretations` is by track identity; a track missing from it, or any track when it is absent, plays as written. */
+function buildWithIdentities(original: model.Score, generation: number, ids: string[], corrected?: (track: number, attack: number, length: number) => void, interpretations?: Record<string, TrackInterpretation>): PlaybackPlan {
   if (!Number.isSafeInteger(generation) || generation < 0) throw new Error('Invalid playback generation.');
-  const score = prepareMidiScore(original);
+  if (original.masterBars.some(bar=>!validMeter(bar.timeSignatureNumerator,bar.timeSignatureDenominator))) throw new Error('Invalid score meter.');
+  const score = prepareGpMidiScore(prepareMidiScore(original),settings);
   if (ids.length !== score.tracks.length || new Set(ids).size !== ids.length || ids.some(id => typeof id !== 'string' || !id)) throw new Error('Invalid playback track identities.');
   const complete = generate(score), all = sources(score), nativeChannel = channelMapping(score, complete.events);
+  // An over-full last bar plays past its end: its beats' slices bound performed beats
+  // and, with the (dead-brush corrected) note ends, the plan's duration.
+  const sliceExtent = Math.max(0, ...complete.lookup.masterBars.map(bar => {
+    let end = bar.end; for (let slice = bar.firstBeat; slice; slice = slice.nextBeat) end = Math.max(end, bar.start + slice.end); return end + complete.events.shift;
+  }));
+  const performedBeats=buildPerformedBeats(score,complete.lookup,complete.events.shift,sliceExtent);
   resolvePrograms(score, complete.events);
   const tempos = [...new Map(complete.events.tempos.map(t => [t.tick, t])).values()].sort((a, b) => a.tick - b.tick);
   if (!tempos.length || tempos[0].tick !== 0) tempos.unshift({ tick: 0, bpm: score.tempo });
@@ -259,24 +291,76 @@ function buildWithIdentities(original: model.Score, generation: number, ids: str
     const step = 960 * 4 / m.masterBar.timeSignatureDenominator, clickTicks: number[] = [];
     if (!Number.isFinite(step) || step <= 0) throw new Error('Invalid score meter.');
     for (let pulse = 0; startTick + pulse * step < endTick; pulse++) clickTicks.push(startTick + pulse * step);
-    return { bar, occurrence, startTick, endTick, startMs: timeAt(startTick, tempos), endMs: timeAt(endTick, tempos), clickTicks };
+    return { bar, occurrence, meterNumerator:m.masterBar.timeSignatureNumerator, meterDenominator:m.masterBar.timeSignatureDenominator, startTick, endTick, startMs: timeAt(startTick, tempos), endMs: timeAt(endTick, tempos), clickTicks };
   });
   const lanes = new Map<string, Source[]>();
   for (const source of all) { const lane = lanes.get(source.lane) ?? []; lane.push(source); lanes.set(source.lane, lane); }
   const json = model.JsonConverter.scoreToJson(score);
-  const laneData = new Map<string, { events: Collector; bends: PlanMidiEvent[]; markers: Map<string, number>; attacks: Map<string, RawNote[]> }>();
+  const serialized = JSON.parse(json) as {tracks:{staves:unknown[]}[]};
+  const fullTracks = new Set<number>();
+  for (const source of all) {
+    const note = source.note;
+    for (const linked of [note.tieOrigin,note.tieDestination,note.slurOrigin,note.slurDestination,note.slideOrigin,note.slideTarget,note.hammerPullOrigin,note.hammerPullDestination,note.bendOrigin,note.letRingDestination,note.palmMuteDestination]) {
+      if (!linked) continue;
+      const other = linked.beat.voice.bar.staff.track.index;
+      if (other !== source.track) { fullTracks.add(source.track);fullTracks.add(other); }
+    }
+  }
+  // Pickup duration is the maximum across all tracks, including silent staves.
+  const fullTiming = score.masterBars.some(bar=>bar.isAnacrusis);
+  const trackJson = new Map<number,string>();
+  const jsonForTrack = (track:number):string => {
+    if (fullTiming || fullTracks.has(track)) return json;
+    let value = trackJson.get(track);
+    if (!value) {
+      // Keep global timing and every target staff/voice through finish. Empty
+      // track slots preserve the original indices before lane isolation.
+      value = JSON.stringify({...serialized,tracks:serialized.tracks.map((source,index)=>index===track?source:{...source,staves:[]})});
+      trackJson.set(track,value);
+    }
+    return value;
+  };
+  const laneData = new Map<string, { events: Collector; gaps: number[]; bends: PlanMidiEvent[]; markers: Map<string, number>; attacks: Map<string, RawNote[]> }>();
+  const audible: AudibleAttack[] = [];
   for (const [id, lane] of lanes) {
-    const isolated = laneScore(json, lane), generated = generate(isolated.score);
+    const isolated = laneScore(jsonForTrack(lane[0].track), lane), generated = generate(isolated.score);
     generated.events.notes = generated.events.notes.filter(n => n.rawKey < 500);
     generated.events.events = generated.events.events.filter(e => e.type !== 'noteBend' || e.key! < 500);
     const attacks = new Map<string, RawNote[]>();
     for (const note of generated.events.notes) { const group = attacks.get(note.provenance!) ?? []; group.push(note); attacks.set(note.provenance!, group); }
-    laneData.set(id, { events: generated.events, markers: isolated.markers, attacks, bends: converted(generated.events.events, ids, nativeChannel) });
+    // The public generator sizes a pickup bar from the staves present, so a lane
+    // holding only a shorter pickup track starts every later bar earlier than the
+    // complete score does. Map the lane's clock onto the complete score's, bar by
+    // bar, for its attacks and for the bends that continue across the gap.
+    const laneBars = generated.lookup.masterBars, completeBars = complete.lookup.masterBars;
+    if (laneBars.length !== completeBars.length) throw new Error('Public MIDI bars disagree between the complete score and a source-note lane.');
+    const gaps = completeBars.map((bar, index) => bar.start - laneBars[index].start), laneShift = generated.events.shift;
+    // A note keeps its own clock from where it starts, so a bend runs on from the bar
+    // it began in; the bends of a note that begins after the gap move with its bar.
+    // A tick on a bar boundary opens the later bar.
+    const gapAt = (tick: number) => { let low = 0, high = laneBars.length - 1; while (low < high) { const middle = (low + high + 1) >> 1; if (laneBars[middle].start + laneShift <= tick) low = middle; else high = middle - 1; } return gaps[low]; };
+    const bends = converted(generated.events.events, ids, nativeChannel).filter(event => event.type === 'bend' || event.type === 'noteBend')
+      .map(event => ({ ...event, tick: event.tick + gapAt(generated.events.starts.get(event.order) ?? event.tick) })).sort((a, b) => a.tick - b.tick);
+    laneData.set(id, { events: generated.events, gaps, markers: isolated.markers, attacks, bends });
   }
-  const notes: PlanNote[] = [], played = new Map<model.Note, PlanNote[]>();
+  const notes: PlanNote[] = [], played = new Map<model.Note, PlanNote[]>(), interpreted: Attack[] = [];
+  // The program each channel sounds at the start: its last program change at or before the first bar's start, else the track's own. A locked track keeps this sound.
+  const startPrograms = new Map<string, number>();
+  for (const event of complete.events.events.flatMap(e => e.type === 'program' && e.tick <= occurrences[0].startTick && e.program < 128 ? [e] : []).sort((x, y) => x.tick - y.tick || x.order - y.order)) startPrograms.set(`${event.track}/${nativeChannel(event.track, event.channel)}`, event.program);
   const byNote = new Map(all.map(source => [source.note, source]));
   let fullIndex = 0;
-  for (const occurrence of occurrences) {
+  // How far a pickup bar is right-aligned: the heard bar's meter less its written length in the longest part of any track or staff.
+  const pickups = new Map<number, number>();
+  const pickupShift = (bar: number) => {
+    let shift = pickups.get(bar);
+    if (shift === undefined) {
+      const heard = score.masterBars[bar];
+      shift = heard.isAnacrusis ? Math.max(0, heard.timeSignatureNumerator * 3840 / heard.timeSignatureDenominator - Math.max(0, ...score.tracks.flatMap(track => track.staves.flatMap(staff => staff.bars[bar]?.voices ?? [])).filter(voice => !voice.isEmpty).map(voice => { const last = voice.beats.at(-1); return last ? last.displayStart + last.displayDuration : 0; }))) : 0;
+      pickups.set(bar, shift);
+    }
+    return shift;
+  };
+  for (const [occurrenceIndex, occurrence] of occurrences.entries()) {
     const occurrenceSources = score.tracks.flatMap(t => t.staves.flatMap(staff => {
       const bar = staff.bars[occurrence.bar];
       return bar ? playbackBar(bar).voices.flatMap(v => v.beats.flatMap(b => (b.deadSlapped ? b.notes.slice(0, 1) : b.notes).map(n => byNote.get(n)!))) : [];
@@ -284,7 +368,8 @@ function buildWithIdentities(original: model.Score, generation: number, ids: str
     for (const source of occurrenceSources) {
       const lane = laneData.get(source.lane)!;
       const marker = lane.markers.get(`${source.bar}/${source.beat}`);
-      const logicalTick = occurrence.startTick + source.note.beat.playbackStart - complete.events.shift + lane.events.shift;
+      const barGap = lane.gaps[occurrenceIndex];
+      const logicalTick = occurrence.startTick + source.note.beat.playbackStart - complete.events.shift + lane.events.shift - barGap;
       const generated = lane.attacks.get(`${marker}/${logicalTick}`) ?? [];
       // Within one lane there is one source note per beat, including any trill,
       // tremolo or rasgueado attacks. The full handler uses score source order.
@@ -292,14 +377,14 @@ function buildWithIdentities(original: model.Score, generation: number, ids: str
         const actual = complete.events.notes[fullIndex++];
         // A grace beat in a different track/voice shifts the complete clock;
         // a filtered lane has its own public initial-grace shift.
-        const shiftDifference = complete.events.shift - lane.events.shift;
+        const shiftDifference = complete.events.shift - lane.events.shift + barGap;
         const mismatch = !actual ? 'missing attack' : actual.track !== source.track ? 'track' : actual.key !== isolated.key ? 'key' : actual.velocity !== isolated.velocity ? 'velocity' : source.note.beat.brushType === model.BrushType.None && !source.note.beat.hasRasgueado && Math.abs(actual.start - isolated.start - shiftDifference) > 0.001 ? 'timing' : null;
         if (mismatch) throw new Error(`Public MIDI timing disagrees with the source-note playback lanes (${mismatch}; track ${source.track}, staff ${source.staff}, bar ${source.bar}, voice ${source.voice}, beat ${source.beat}).`);
         if (actual.end <= actual.start && source.note.isDead) {
           // alphaTab subtracts brush offset from its short static dead duration.
           // Recover that public duration with the same transient beat unbrushed;
           // keep the original delayed attack and avoid an off-before-on voice.
-          const plain = laneScore(json, lanes.get(source.lane)!);
+          const plain = laneScore(jsonForTrack(source.track), lanes.get(source.lane)!);
           plain.score.tracks[0].staves[0].bars[source.bar].voices[0].beats[source.beat].brushType = model.BrushType.None;
           const baseline = generate(plain.score).events.notes.filter(n => n.rawKey < 500 && n.provenance === `${marker}/${logicalTick}`)[attack];
           if (!baseline || baseline.end <= baseline.start) throw new Error('Invalid public dead-note duration.');
@@ -310,31 +395,51 @@ function buildWithIdentities(original: model.Score, generation: number, ids: str
         while (origin?.tieOrigin) origin = origin.tieOrigin;
         const from = origin && !source.note.beat.deadSlapped ? [...(played.get(origin) ?? [])].reverse().find(n => n.startTick < actual.start && n.source.target.track === source.track && n.source.target.staff === source.staff && n.source.target.voice === source.voice && n.source.string === Math.max(0, source.note.string)) : undefined;
         const string = source.note.beat.deadSlapped ? score.tracks[source.track].staves[source.staff].tuning.length - attack : Math.max(0, source.note.string);
+        const profile = interpretations?.[ids[source.track]], styled = profile && source.note.isStringed;
+        const interpretedStyle = styled && !source.note.beat.slap && !source.note.beat.pop ? profile.style : undefined;
         const note: PlanNote = {
           id: `${ids[source.track]}/${source.staff}/${source.bar}/${source.voice}/${source.beat}/${source.index}/${occurrence.bar}/${occurrence.occurrence}/${attack}`,
           trackId: ids[source.track], source: { target: { track: source.track, staff: source.staff, bar: source.bar, voice: source.voice, beat: source.beat }, string },
           ...(source.bar !== occurrence.bar ? { playedBar: occurrence.bar } : {}),
           occurrence: occurrence.occurrence, startTick: actual.start, endTick: actual.end, key: actual.key, velocity: actual.velocity,
           channel: nativeChannel(source.track, actual.channel), program: actual.program ?? score.tracks[source.track].playbackInfo.program,
-          articulation: source.note.beat.deadSlapped ? 'dead' : articulation(source.note, actual.program ?? score.tracks[source.track].playbackInfo.program, !!from), legatoFrom: from?.id ?? null, pitch: pitchCurve({ ...isolated, channel: nativeChannel(source.track, isolated.channel) }, actual, lane.bends),
+          articulation: source.note.beat.deadSlapped ? 'dead' : articulation(source.note, actual.program ?? score.tracks[source.track].playbackInfo.program, !!from, interpretedStyle), legatoFrom: from?.id ?? null, pitch: pitchCurve({ ...isolated, channel: nativeChannel(source.track, isolated.channel), start: isolated.start + barGap, end: isolated.end + barGap }, actual, lane.bends),
         };
+        // What the note would sound as if its track's sound is locked: the default articulation of the start sound, not of the automated one. Left out when it is the same.
+        if (!source.note.beat.deadSlapped) { const kept = articulation(source.note, startPrograms.get(`${source.track}/${nativeChannel(source.track, actual.channel)}`) ?? score.tracks[source.track].playbackInfo.program, !!from, interpretedStyle); if (kept !== note.articulation) note.lockedArticulation = kept; }
+        if (styled) {
+          const beat = source.note.beat, masterBar = beat.voice.bar.masterBar;
+          // Strong beats are counted from the written start; a pickup bar is right-aligned by its written length, ending where a full bar does.
+          const pickup = profile.accent ? pickupShift(occurrence.bar) : 0;
+          interpreted.push({ note, raw: actual, staff: source.staff, offset: beat.displayStart + pickup, accentable: attack === 0 && beat.graceType === model.GraceType.None, meter: [masterBar.timeSignatureNumerator, masterBar.timeSignatureDenominator], occurrenceEnd: occurrence.endTick, beat: `${source.staff}/${source.voice}/${source.bar}/${source.beat}`,
+            brushable: generated.length === 1 && beat.brushType === model.BrushType.None && !beat.hasRasgueado && !beat.deadSlapped && beat.pickStroke === model.PickStroke.None && note.pitch.every(point => point.semitones === note.pitch[0].semitones) });
+        }
         notes.push(note); const chain = played.get(source.note) ?? []; chain.push(note); played.set(source.note, chain);
+        collectAudible(audible, source.note, note, actual);
       }
     }
   }
   if (fullIndex !== complete.events.notes.length) throw new Error('The score has MIDI attacks without an unambiguous source-note lane.');
+  if (interpreted.length) interpretAttacks(interpreted, interpretations!);
   const events: OrderedMidiEvent[] = converted(complete.events.events, ids, nativeChannel);
+  for(const event of gpControllerEvents(score,occurrences))events.push({type:'controller',trackId:ids[event.track],tick:event.tick,channel:nativeChannel(event.track,event.channel),controller:event.controller,value:event.value,order:Number.MAX_SAFE_INTEGER});
+  if (audible.length) applyNoteAudio(audible, notes, Math.max(sliceExtent, complete.events.end, ...complete.events.notes.map(n => n.end)));
   for (const note of complete.events.notes) {
     const common = { trackId: ids[note.track], channel: nativeChannel(note.track, note.channel), key: note.key, velocity: note.velocity };
     events.push({ ...common, type: 'noteOn', tick: note.start, order: note.onOrder }, { ...common, type: 'noteOff', tick: note.end, order: note.offOrder });
   }
-  const durationTick = Math.max(complete.events.end, ...complete.events.notes.map(n => n.end), 0);
-  const plan: PlaybackPlan = { generation, ppq: 960, durationTick, durationMs: timeAt(durationTick, tempos), tracks: score.tracks.map(t => ({ id: ids[t.index], program: t.playbackInfo.program, percussion: t.isPercussion })), tempos, occurrences, notes: notes.sort((a, b) => a.startTick - b.startTick), midi: events.sort((a, b) => a.tick - b.tick || a.order - b.order).map(({ order, ...event }) => event as PlanMidiEvent) };
+  const durationTick = Math.max(sliceExtent, complete.events.end, ...complete.events.notes.map(n => n.end), 0);
+  const plan: PlaybackPlan = { generation, ppq: 960, durationTick, durationMs: timeAt(durationTick, tempos), tracks: score.tracks.map(t => ({ id: ids[t.index], program: t.playbackInfo.program, percussion: t.isPercussion })), tempos, occurrences, performedBeats, notes: notes.sort((a, b) => a.startTick - b.startTick), midi: events.sort((a, b) => a.tick - b.tick || a.order - b.order).map(({ order, ...event }) => event as PlanMidiEvent) };
   validatePlaybackPlan(plan); return plan;
 }
 
 export function buildPlaybackPlan(score: model.Score, generation: number): PlaybackPlan {
   return buildWithIdentities(score, generation, score.tracks.map(trackIdentity));
+}
+
+// What a score's per-note audio settings do to each attack, for a MIDI export that generates its own attacks.
+export function noteAudioMidiAdjustments(score: model.Score): AudioAdjustment[] {
+  return hasNoteAudio(score) ? collectNoteAudio(() => buildWithIdentities(score, 0, score.tracks.map(trackIdentity))).adjustments : [];
 }
 
 // Export adapters use zero-based public addNote ordinals per track, preserving
@@ -345,8 +450,8 @@ export function deadBrushMidiDurations(score: model.Score): { track: number; att
   return corrections;
 }
 
-export function buildPlaybackPlanFromJson(json: ReturnType<typeof model.JsonConverter.scoreToJson>, identities: string[], generation: number): PlaybackPlan {
-  return buildWithIdentities(model.JsonConverter.jsonToScore(json, settings), generation, identities);
+export function buildPlaybackPlanFromJson(json: ReturnType<typeof model.JsonConverter.scoreToJson>, identities: string[], generation: number, interpretations?: Record<string, TrackInterpretation>): PlaybackPlan {
+  return buildWithIdentities(scoreFromJson(json, settings), generation, identities, undefined, interpretations);
 }
 
 export function validatePlaybackPlan(plan: PlaybackPlan) {
@@ -361,9 +466,23 @@ export function validatePlaybackPlan(plan: PlaybackPlan) {
   for (const tempo of plan.tempos) { if (!validTime(tempo.tick) || tempo.tick <= previous || tempo.tick > plan.durationTick || !Number.isFinite(tempo.bpm) || tempo.bpm <= 0 || !Number.isFinite(60 / (tempo.bpm * 960))) fail(); previous = tempo.tick; }
   const occurrences = new Set<string>(), counts = new Map<number, number>(); previous = 0;
   for (const o of plan.occurrences) {
+    if (!validMeter(o.meterNumerator,o.meterDenominator)) fail('meter');
     if (!integer(o.bar, 0xffffffff) || !integer(o.occurrence, 0xffffffff) || o.occurrence !== (counts.get(o.bar) ?? 0) || !validTime(o.startTick) || o.startTick < previous || !validTime(o.endTick) || o.endTick <= o.startTick || o.endTick > plan.durationTick || !validTime(o.startMs) || !validTime(o.endMs) || o.endMs <= o.startMs || o.endMs > plan.durationMs + .001) fail();
     counts.set(o.bar, o.occurrence + 1); occurrences.add(`${o.bar}/${o.occurrence}`); previous = o.endTick;
     if (o.clickTicks !== undefined && (!o.clickTicks.length || o.clickTicks[0] !== o.startTick || o.clickTicks.some((tick, i) => !validTime(tick) || tick < o.startTick || tick >= o.endTick || i > 0 && tick <= o.clickTicks![i - 1]))) fail('metronome ticks');
+  }
+  if(Object.hasOwn(plan,'playbackEndTick')&&(!Number.isFinite(plan.playbackEndTick)||plan.playbackEndTick!<=0||plan.playbackEndTick!>plan.durationTick||plan.playbackEndTick!==plan.occurrences.at(-1)?.endTick))fail('active end');
+  if (Object.hasOwn(plan,'performedBeats')) {
+    const exact=(value:unknown,keys:readonly string[]):value is Record<string,unknown>=>!!value&&typeof value==='object'&&!Array.isArray(value)&&Object.keys(value).length===keys.length&&keys.every(key=>Object.hasOwn(value,key));
+    if (!Array.isArray(plan.performedBeats)) fail('performed beats');
+    const mapped=new Set<string>();
+    for (const row of plan.performedBeats!) {
+      if (!exact(row,['target','occurrence','startTick','endTick','leadInTick'])||!exact(row.target,['track','staff','bar','voice','beat'])) fail('performed beats');
+      const target=row.target;
+      if (Object.values(target).some(value=>!integer(value,0xffffffff))||target.track>=plan.tracks.length||!integer(row.occurrence,0xffffffff)||!occurrences.has(`${target.bar}/${row.occurrence}`)||!validTime(row.leadInTick)||!validTime(row.startTick)||!validTime(row.endTick)||row.leadInTick>row.startTick||row.startTick>row.endTick||row.endTick>plan.durationTick) fail('performed beats');
+      const key=`${target.track}/${target.staff}/${target.bar}/${target.voice}/${target.beat}/${row.occurrence}`;
+      if(mapped.has(key))fail('performed beats');mapped.add(key);
+    }
   }
   previous = -1;
   for (const n of plan.notes) {
@@ -395,15 +514,18 @@ export function validatePlaybackPlan(plan: PlaybackPlan) {
 
 // Worker inputs contain only transient public model data and stable track IDs.
 // Audio asset payloads remain outside this boundary.
-export async function preparePlan(project: ProjectView, generation: number): Promise<PlaybackPlan> {
-  const score = buildScore(project);
-  if (typeof Worker === 'undefined') return buildPlaybackPlan(score, generation);
+export async function preparePlan(project: ProjectView, generation: number, interpretations?: Record<string, TrackInterpretation>): Promise<PlaybackPlan> {
+  return preparePlanFromScore(buildScore(project),generation,interpretations);
+}
+
+export async function preparePlanFromScore(score:model.Score,generation:number,interpretations?:Record<string,TrackInterpretation>):Promise<PlaybackPlan> {
+  if (typeof Worker === 'undefined') return buildWithIdentities(score, generation, score.tracks.map(trackIdentity), undefined, interpretations);
   const worker = new Worker(new URL('./plan.worker.ts', import.meta.url), { type: 'module' });
   try {
     return await new Promise<PlaybackPlan>((resolve, reject) => {
       worker.onmessage = event => { const reply = event.data as { cmd?: string; plan?: PlaybackPlan; error?: string }; if (reply.cmd !== 'tabplayer.plan.result') return; if (reply.plan?.generation === generation) resolve(reply.plan); else reject(new Error(reply.error ?? 'Playback plan generation changed.')); };
       worker.onerror = event => reject(new Error(event.message || 'Playback preparation failed.'));
-      worker.postMessage({ cmd: 'tabplayer.plan.prepare', json: model.JsonConverter.scoreToJson(score), identities: score.tracks.map(trackIdentity), generation });
+      worker.postMessage({ cmd: 'tabplayer.plan.prepare', json: model.JsonConverter.scoreToJson(score), identities: score.tracks.map(trackIdentity), generation, ...interpretations ? { interpretations } : {} });
     });
   } finally { worker.terminate(); }
 }

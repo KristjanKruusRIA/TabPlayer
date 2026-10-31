@@ -1,0 +1,1188 @@
+{
+  "version": 1,
+  "description": "Authored static wire oracles for P16 only. Logical payloads, not IPC top-level invocation. Plan nullable end is invalid; referenceSync nullable bounds retain legacy semantics. Reference indices/route order are further checked against actual music by pure/native runtime consumers.",
+  "valid": [
+    {
+      "name": "legacy bounds omitted",
+      "kind": "backing",
+      "payload": {
+        "assetId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "offsetMs": 120,
+        "anchors": [
+          {
+            "bar": 0,
+            "occurrence": 0,
+            "ratio": 0.5,
+            "audioMs": 1120
+          }
+        ],
+        "mix": {
+          "gain": 1,
+          "pan": 0,
+          "mute": false,
+          "solo": false
+        }
+      }
+    },
+    {
+      "name": "legacy bounds null",
+      "kind": "backing",
+      "payload": {
+        "assetId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "offsetMs": 120,
+        "anchors": [
+          {
+            "bar": 0,
+            "occurrence": 0,
+            "ratio": 0.5,
+            "audioMs": 1120
+          }
+        ],
+        "mix": {
+          "gain": 1,
+          "pan": 0,
+          "mute": false,
+          "solo": false
+        },
+        "referenceSync": null
+      }
+    },
+    {
+      "name": "reference source zero with positive offset",
+      "kind": "backing",
+      "payload": {
+        "assetId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "offsetMs": 120,
+        "anchors": [
+          {
+            "bar": 0,
+            "occurrence": 0,
+            "ratio": 0.5,
+            "audioMs": 1120
+          }
+        ],
+        "mix": {
+          "gain": 1,
+          "pan": 0,
+          "mute": false,
+          "solo": false
+        },
+        "referenceSync": {
+          "entryAudioMs": 120,
+          "exitAudioMs": 2120
+        }
+      }
+    },
+    {
+      "name": "reference negative stored source40",
+      "kind": "backing",
+      "payload": {
+        "assetId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "offsetMs": -120,
+        "anchors": [
+          {
+            "bar": 0,
+            "occurrence": 0,
+            "ratio": 0.25,
+            "audioMs": -80
+          }
+        ],
+        "mix": {
+          "gain": 1,
+          "pan": 0,
+          "mute": false,
+          "solo": false
+        },
+        "referenceSync": {
+          "entryAudioMs": -120,
+          "exitAudioMs": 1880
+        }
+      }
+    },
+    {
+      "name": "ratio tempo replacement",
+      "kind": "command",
+      "payload": {
+        "type": "replaceTempoAutomations",
+        "points": [
+          {
+            "bar": 0,
+            "ratio": 0,
+            "bpm": 120,
+            "linear": false
+          },
+          {
+            "bar": 0,
+            "ratio": 0.3333333333333333,
+            "bpm": 60,
+            "linear": false
+          },
+          {
+            "bar": 0,
+            "ratio": 0.375,
+            "bpm": 90,
+            "linear": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "ratio one and positive outside practice range",
+      "kind": "command",
+      "payload": {
+        "type": "replaceTempoAutomations",
+        "points": [
+          {
+            "bar": 0,
+            "ratio": 0,
+            "bpm": 0.5,
+            "linear": false
+          },
+          {
+            "bar": 1,
+            "ratio": 1,
+            "bpm": 1200,
+            "linear": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "legacy plan missing active end",
+      "kind": "plan",
+      "payload": {
+        "generation": 1,
+        "ppq": 960,
+        "durationTick": 8640,
+        "durationMs": 4500,
+        "tracks": [
+          {
+            "id": "base/0",
+            "program": 27,
+            "percussion": false
+          }
+        ],
+        "tempos": [
+          {
+            "tick": 0,
+            "bpm": 120
+          }
+        ],
+        "occurrences": [
+          {
+            "bar": 0,
+            "occurrence": 0,
+            "meterNumerator": 4,
+            "meterDenominator": 4,
+            "startTick": 0,
+            "endTick": 3840,
+            "startMs": 0,
+            "endMs": 2000
+          },
+          {
+            "bar": 1,
+            "occurrence": 0,
+            "meterNumerator": 4,
+            "meterDenominator": 4,
+            "startTick": 3840,
+            "endTick": 7680,
+            "startMs": 2000,
+            "endMs": 4000
+          }
+        ],
+        "notes": [],
+        "midi": []
+      }
+    },
+    {
+      "name": "active musical end before note extent",
+      "kind": "plan",
+      "payload": {
+        "generation": 1,
+        "ppq": 960,
+        "durationTick": 8640,
+        "durationMs": 4500,
+        "tracks": [
+          {
+            "id": "base/0",
+            "program": 27,
+            "percussion": false
+          }
+        ],
+        "tempos": [
+          {
+            "tick": 0,
+            "bpm": 120
+          }
+        ],
+        "occurrences": [
+          {
+            "bar": 0,
+            "occurrence": 0,
+            "meterNumerator": 4,
+            "meterDenominator": 4,
+            "startTick": 0,
+            "endTick": 3840,
+            "startMs": 0,
+            "endMs": 2000
+          },
+          {
+            "bar": 1,
+            "occurrence": 0,
+            "meterNumerator": 4,
+            "meterDenominator": 4,
+            "startTick": 3840,
+            "endTick": 7680,
+            "startMs": 2000,
+            "endMs": 4000
+          }
+        ],
+        "notes": [],
+        "midi": [],
+        "playbackEndTick": 7680
+      }
+    },
+    {
+      "name": "strict source byte read",
+      "kind": "assetRead",
+      "payload": {
+        "document": {
+          "documentId": "document-a",
+          "revision": 3
+        },
+        "assetId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    }
+  ],
+  "invalid": [
+    {
+      "name": "backing unknown field",
+      "kind": "backing",
+      "payload": {
+        "assetId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "offsetMs": 120,
+        "anchors": [
+          {
+            "bar": 0,
+            "occurrence": 0,
+            "ratio": 0.5,
+            "audioMs": 1120
+          }
+        ],
+        "mix": {
+          "gain": 1,
+          "pan": 0,
+          "mute": false,
+          "solo": false
+        },
+        "other": true
+      }
+    },
+    {
+      "name": "reference bounds missing exit",
+      "kind": "backing",
+      "payload": {
+        "assetId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "offsetMs": -120,
+        "anchors": [
+          {
+            "bar": 0,
+            "occurrence": 0,
+            "ratio": 0.25,
+            "audioMs": -80
+          }
+        ],
+        "mix": {
+          "gain": 1,
+          "pan": 0,
+          "mute": false,
+          "solo": false
+        },
+        "referenceSync": {
+          "entryAudioMs": -120
+        }
+      }
+    },
+    {
+      "name": "reference bounds unknown field",
+      "kind": "backing",
+      "payload": {
+        "assetId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "offsetMs": -120,
+        "anchors": [
+          {
+            "bar": 0,
+            "occurrence": 0,
+            "ratio": 0.25,
+            "audioMs": -80
+          }
+        ],
+        "mix": {
+          "gain": 1,
+          "pan": 0,
+          "mute": false,
+          "solo": false
+        },
+        "referenceSync": {
+          "entryAudioMs": -120,
+          "exitAudioMs": 1880,
+          "other": 1
+        }
+      }
+    },
+    {
+      "name": "reference bounds wrong variant",
+      "kind": "backing",
+      "payload": {
+        "assetId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "offsetMs": -120,
+        "anchors": [
+          {
+            "bar": 0,
+            "occurrence": 0,
+            "ratio": 0.25,
+            "audioMs": -80
+          }
+        ],
+        "mix": {
+          "gain": 1,
+          "pan": 0,
+          "mute": false,
+          "solo": false
+        },
+        "referenceSync": "reference"
+      }
+    },
+    {
+      "name": "reference bounds array",
+      "kind": "backing",
+      "payload": {
+        "assetId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "offsetMs": -120,
+        "anchors": [
+          {
+            "bar": 0,
+            "occurrence": 0,
+            "ratio": 0.25,
+            "audioMs": -80
+          }
+        ],
+        "mix": {
+          "gain": 1,
+          "pan": 0,
+          "mute": false,
+          "solo": false
+        },
+        "referenceSync": []
+      }
+    },
+    {
+      "name": "reference source below zero",
+      "kind": "backing",
+      "payload": {
+        "assetId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "offsetMs": -120,
+        "anchors": [
+          {
+            "bar": 0,
+            "occurrence": 0,
+            "ratio": 0.25,
+            "audioMs": -80
+          }
+        ],
+        "mix": {
+          "gain": 1,
+          "pan": 0,
+          "mute": false,
+          "solo": false
+        },
+        "referenceSync": {
+          "entryAudioMs": -121,
+          "exitAudioMs": 1880
+        }
+      }
+    },
+    {
+      "name": "reference zero span",
+      "kind": "backing",
+      "payload": {
+        "assetId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "offsetMs": -120,
+        "anchors": [
+          {
+            "bar": 0,
+            "occurrence": 0,
+            "ratio": 0.25,
+            "audioMs": -80
+          }
+        ],
+        "mix": {
+          "gain": 1,
+          "pan": 0,
+          "mute": false,
+          "solo": false
+        },
+        "referenceSync": {
+          "entryAudioMs": -120,
+          "exitAudioMs": -120
+        }
+      }
+    },
+    {
+      "name": "reference anchor outside bounds",
+      "kind": "backing",
+      "payload": {
+        "assetId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "offsetMs": -120,
+        "anchors": [
+          {
+            "bar": 0,
+            "occurrence": 0,
+            "ratio": 0.25,
+            "audioMs": 1880
+          }
+        ],
+        "mix": {
+          "gain": 1,
+          "pan": 0,
+          "mute": false,
+          "solo": false
+        },
+        "referenceSync": {
+          "entryAudioMs": -120,
+          "exitAudioMs": 1880
+        }
+      }
+    },
+    {
+      "name": "legacy negative stored anchor",
+      "kind": "backing",
+      "payload": {
+        "assetId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "offsetMs": 120,
+        "anchors": [
+          {
+            "bar": 0,
+            "occurrence": 0,
+            "ratio": 0.5,
+            "audioMs": -0.1
+          }
+        ],
+        "mix": {
+          "gain": 1,
+          "pan": 0,
+          "mute": false,
+          "solo": false
+        }
+      }
+    },
+    {
+      "name": "reference nested anchor unknown field",
+      "kind": "backing",
+      "payload": {
+        "assetId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "offsetMs": -120,
+        "anchors": [
+          {
+            "bar": 0,
+            "occurrence": 0,
+            "ratio": 0.25,
+            "audioMs": -80,
+            "other": true
+          }
+        ],
+        "mix": {
+          "gain": 1,
+          "pan": 0,
+          "mute": false,
+          "solo": false
+        },
+        "referenceSync": {
+          "entryAudioMs": -120,
+          "exitAudioMs": 1880
+        }
+      }
+    },
+    {
+      "name": "reference fractional bar",
+      "kind": "backing",
+      "payload": {
+        "assetId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "offsetMs": -120,
+        "anchors": [
+          {
+            "bar": 0.5,
+            "occurrence": 0,
+            "ratio": 0.25,
+            "audioMs": -80
+          }
+        ],
+        "mix": {
+          "gain": 1,
+          "pan": 0,
+          "mute": false,
+          "solo": false
+        },
+        "referenceSync": {
+          "entryAudioMs": -120,
+          "exitAudioMs": 1880
+        }
+      }
+    },
+    {
+      "name": "reference bad mix field",
+      "kind": "backing",
+      "payload": {
+        "assetId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "offsetMs": -120,
+        "anchors": [
+          {
+            "bar": 0,
+            "occurrence": 0,
+            "ratio": 0.25,
+            "audioMs": -80
+          }
+        ],
+        "mix": {
+          "gain": 2,
+          "pan": 0,
+          "mute": false,
+          "solo": false
+        },
+        "referenceSync": {
+          "entryAudioMs": -120,
+          "exitAudioMs": 1880
+        }
+      }
+    },
+    {
+      "name": "tempo replacement empty",
+      "kind": "command",
+      "payload": {
+        "type": "replaceTempoAutomations",
+        "points": []
+      }
+    },
+    {
+      "name": "tempo replacement no initial zero",
+      "kind": "command",
+      "payload": {
+        "type": "replaceTempoAutomations",
+        "points": [
+          {
+            "bar": 0,
+            "ratio": 0.1,
+            "bpm": 120,
+            "linear": false
+          },
+          {
+            "bar": 0,
+            "ratio": 0.3333333333333333,
+            "bpm": 60,
+            "linear": false
+          },
+          {
+            "bar": 0,
+            "ratio": 0.375,
+            "bpm": 90,
+            "linear": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "tempo replacement duplicate",
+      "kind": "command",
+      "payload": {
+        "type": "replaceTempoAutomations",
+        "points": [
+          {
+            "bar": 0,
+            "ratio": 0,
+            "bpm": 120,
+            "linear": false
+          },
+          {
+            "bar": 0,
+            "ratio": 0.3333333333333333,
+            "bpm": 60,
+            "linear": false
+          },
+          {
+            "bar": 0,
+            "ratio": 0.3333333333333333,
+            "bpm": 60,
+            "linear": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "tempo replacement unordered",
+      "kind": "command",
+      "payload": {
+        "type": "replaceTempoAutomations",
+        "points": [
+          {
+            "bar": 0,
+            "ratio": 0.375,
+            "bpm": 90,
+            "linear": true
+          },
+          {
+            "bar": 0,
+            "ratio": 0.3333333333333333,
+            "bpm": 60,
+            "linear": false
+          },
+          {
+            "bar": 0,
+            "ratio": 0,
+            "bpm": 120,
+            "linear": false
+          }
+        ]
+      }
+    },
+    {
+      "name": "tempo replacement unknown point field",
+      "kind": "command",
+      "payload": {
+        "type": "replaceTempoAutomations",
+        "points": [
+          {
+            "bar": 0,
+            "ratio": 0,
+            "bpm": 120,
+            "linear": false
+          },
+          {
+            "bar": 0,
+            "ratio": 0.3333333333333333,
+            "bpm": 60,
+            "linear": false,
+            "beat": 1
+          },
+          {
+            "bar": 0,
+            "ratio": 0.375,
+            "bpm": 90,
+            "linear": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "tempo replacement missing linear",
+      "kind": "command",
+      "payload": {
+        "type": "replaceTempoAutomations",
+        "points": [
+          {
+            "bar": 0,
+            "ratio": 0,
+            "bpm": 120,
+            "linear": false
+          },
+          {
+            "bar": 0,
+            "ratio": 0.3333333333333333,
+            "bpm": 60
+          },
+          {
+            "bar": 0,
+            "ratio": 0.375,
+            "bpm": 90,
+            "linear": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "tempo replacement zero bpm",
+      "kind": "command",
+      "payload": {
+        "type": "replaceTempoAutomations",
+        "points": [
+          {
+            "bar": 0,
+            "ratio": 0,
+            "bpm": 120,
+            "linear": false
+          },
+          {
+            "bar": 0,
+            "ratio": 0.3333333333333333,
+            "bpm": 0,
+            "linear": false
+          },
+          {
+            "bar": 0,
+            "ratio": 0.375,
+            "bpm": 90,
+            "linear": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "tempo replacement ratio beyond one",
+      "kind": "command",
+      "payload": {
+        "type": "replaceTempoAutomations",
+        "points": [
+          {
+            "bar": 0,
+            "ratio": 0,
+            "bpm": 120,
+            "linear": false
+          },
+          {
+            "bar": 0,
+            "ratio": 1.1,
+            "bpm": 60,
+            "linear": false
+          },
+          {
+            "bar": 0,
+            "ratio": 0.375,
+            "bpm": 90,
+            "linear": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "tempo replacement fractional bar",
+      "kind": "command",
+      "payload": {
+        "type": "replaceTempoAutomations",
+        "points": [
+          {
+            "bar": 0,
+            "ratio": 0,
+            "bpm": 120,
+            "linear": false
+          },
+          {
+            "bar": 0.5,
+            "ratio": 0.3333333333333333,
+            "bpm": 60,
+            "linear": false
+          },
+          {
+            "bar": 0,
+            "ratio": 0.375,
+            "bpm": 90,
+            "linear": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "tempo replacement beyond u32 bar",
+      "kind": "command",
+      "payload": {
+        "type": "replaceTempoAutomations",
+        "points": [
+          {
+            "bar": 0,
+            "ratio": 0,
+            "bpm": 120,
+            "linear": false
+          },
+          {
+            "bar": 4294967296,
+            "ratio": 0.3333333333333333,
+            "bpm": 60,
+            "linear": false
+          },
+          {
+            "bar": 0,
+            "ratio": 0.375,
+            "bpm": 90,
+            "linear": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "tempo replacement unknown envelope field",
+      "kind": "command",
+      "payload": {
+        "type": "replaceTempoAutomations",
+        "points": [
+          {
+            "bar": 0,
+            "ratio": 0,
+            "bpm": 120,
+            "linear": false
+          },
+          {
+            "bar": 0,
+            "ratio": 0.3333333333333333,
+            "bpm": 60,
+            "linear": false
+          },
+          {
+            "bar": 0,
+            "ratio": 0.375,
+            "bpm": 90,
+            "linear": true
+          }
+        ],
+        "backing": null
+      }
+    },
+    {
+      "name": "plan explicit null end",
+      "kind": "plan",
+      "payload": {
+        "generation": 1,
+        "ppq": 960,
+        "durationTick": 8640,
+        "durationMs": 4500,
+        "tracks": [
+          {
+            "id": "base/0",
+            "program": 27,
+            "percussion": false
+          }
+        ],
+        "tempos": [
+          {
+            "tick": 0,
+            "bpm": 120
+          }
+        ],
+        "occurrences": [
+          {
+            "bar": 0,
+            "occurrence": 0,
+            "meterNumerator": 4,
+            "meterDenominator": 4,
+            "startTick": 0,
+            "endTick": 3840,
+            "startMs": 0,
+            "endMs": 2000
+          },
+          {
+            "bar": 1,
+            "occurrence": 0,
+            "meterNumerator": 4,
+            "meterDenominator": 4,
+            "startTick": 3840,
+            "endTick": 7680,
+            "startMs": 2000,
+            "endMs": 4000
+          }
+        ],
+        "notes": [],
+        "midi": [],
+        "playbackEndTick": null
+      }
+    },
+    {
+      "name": "plan end before music",
+      "kind": "plan",
+      "payload": {
+        "generation": 1,
+        "ppq": 960,
+        "durationTick": 8640,
+        "durationMs": 4500,
+        "tracks": [
+          {
+            "id": "base/0",
+            "program": 27,
+            "percussion": false
+          }
+        ],
+        "tempos": [
+          {
+            "tick": 0,
+            "bpm": 120
+          }
+        ],
+        "occurrences": [
+          {
+            "bar": 0,
+            "occurrence": 0,
+            "meterNumerator": 4,
+            "meterDenominator": 4,
+            "startTick": 0,
+            "endTick": 3840,
+            "startMs": 0,
+            "endMs": 2000
+          },
+          {
+            "bar": 1,
+            "occurrence": 0,
+            "meterNumerator": 4,
+            "meterDenominator": 4,
+            "startTick": 3840,
+            "endTick": 7680,
+            "startMs": 2000,
+            "endMs": 4000
+          }
+        ],
+        "notes": [],
+        "midi": [],
+        "playbackEndTick": 3840
+      }
+    },
+    {
+      "name": "plan end after duration",
+      "kind": "plan",
+      "payload": {
+        "generation": 1,
+        "ppq": 960,
+        "durationTick": 8640,
+        "durationMs": 4500,
+        "tracks": [
+          {
+            "id": "base/0",
+            "program": 27,
+            "percussion": false
+          }
+        ],
+        "tempos": [
+          {
+            "tick": 0,
+            "bpm": 120
+          }
+        ],
+        "occurrences": [
+          {
+            "bar": 0,
+            "occurrence": 0,
+            "meterNumerator": 4,
+            "meterDenominator": 4,
+            "startTick": 0,
+            "endTick": 3840,
+            "startMs": 0,
+            "endMs": 2000
+          },
+          {
+            "bar": 1,
+            "occurrence": 0,
+            "meterNumerator": 4,
+            "meterDenominator": 4,
+            "startTick": 3840,
+            "endTick": 7680,
+            "startMs": 2000,
+            "endMs": 4000
+          }
+        ],
+        "notes": [],
+        "midi": [],
+        "playbackEndTick": 9000
+      }
+    },
+    {
+      "name": "plan end zero",
+      "kind": "plan",
+      "payload": {
+        "generation": 1,
+        "ppq": 960,
+        "durationTick": 8640,
+        "durationMs": 4500,
+        "tracks": [
+          {
+            "id": "base/0",
+            "program": 27,
+            "percussion": false
+          }
+        ],
+        "tempos": [
+          {
+            "tick": 0,
+            "bpm": 120
+          }
+        ],
+        "occurrences": [
+          {
+            "bar": 0,
+            "occurrence": 0,
+            "meterNumerator": 4,
+            "meterDenominator": 4,
+            "startTick": 0,
+            "endTick": 3840,
+            "startMs": 0,
+            "endMs": 2000
+          },
+          {
+            "bar": 1,
+            "occurrence": 0,
+            "meterNumerator": 4,
+            "meterDenominator": 4,
+            "startTick": 3840,
+            "endTick": 7680,
+            "startMs": 2000,
+            "endMs": 4000
+          }
+        ],
+        "notes": [],
+        "midi": [],
+        "playbackEndTick": 0
+      }
+    },
+    {
+      "name": "plan end string",
+      "kind": "plan",
+      "payload": {
+        "generation": 1,
+        "ppq": 960,
+        "durationTick": 8640,
+        "durationMs": 4500,
+        "tracks": [
+          {
+            "id": "base/0",
+            "program": 27,
+            "percussion": false
+          }
+        ],
+        "tempos": [
+          {
+            "tick": 0,
+            "bpm": 120
+          }
+        ],
+        "occurrences": [
+          {
+            "bar": 0,
+            "occurrence": 0,
+            "meterNumerator": 4,
+            "meterDenominator": 4,
+            "startTick": 0,
+            "endTick": 3840,
+            "startMs": 0,
+            "endMs": 2000
+          },
+          {
+            "bar": 1,
+            "occurrence": 0,
+            "meterNumerator": 4,
+            "meterDenominator": 4,
+            "startTick": 3840,
+            "endTick": 7680,
+            "startMs": 2000,
+            "endMs": 4000
+          }
+        ],
+        "notes": [],
+        "midi": [],
+        "playbackEndTick": "7680"
+      }
+    },
+    {
+      "name": "read asset extra field",
+      "kind": "assetRead",
+      "payload": {
+        "document": {
+          "documentId": "document-a",
+          "revision": 3
+        },
+        "assetId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "owner": {}
+      }
+    },
+    {
+      "name": "read asset document extra field",
+      "kind": "assetRead",
+      "payload": {
+        "document": {
+          "documentId": "document-a",
+          "revision": 3,
+          "activationId": "a"
+        },
+        "assetId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    {
+      "name": "read asset missing revision",
+      "kind": "assetRead",
+      "payload": {
+        "document": {
+          "documentId": "document-a"
+        },
+        "assetId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    {
+      "name": "read asset unsafe revision",
+      "kind": "assetRead",
+      "payload": {
+        "document": {
+          "documentId": "document-a",
+          "revision": 9007199254740992
+        },
+        "assetId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    {
+      "name": "read asset negative revision",
+      "kind": "assetRead",
+      "payload": {
+        "document": {
+          "documentId": "document-a",
+          "revision": -1
+        },
+        "assetId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    {
+      "name": "read asset fractional revision",
+      "kind": "assetRead",
+      "payload": {
+        "document": {
+          "documentId": "document-a",
+          "revision": 0.5
+        },
+        "assetId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    {
+      "name": "read asset empty document",
+      "kind": "assetRead",
+      "payload": {
+        "document": {
+          "documentId": "",
+          "revision": 3
+        },
+        "assetId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    {
+      "name": "read asset uppercase digest",
+      "kind": "assetRead",
+      "payload": {
+        "document": {
+          "documentId": "document-a",
+          "revision": 3
+        },
+        "assetId": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+      }
+    },
+    {
+      "name": "read asset invalid digest",
+      "kind": "assetRead",
+      "payload": {
+        "document": {
+          "documentId": "document-a",
+          "revision": 3
+        },
+        "assetId": "gggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggg"
+      }
+    },
+    {
+      "name": "read asset missing id",
+      "kind": "assetRead",
+      "payload": {
+        "document": {
+          "documentId": "document-a",
+          "revision": 3
+        }
+      }
+    }
+  ]
+}

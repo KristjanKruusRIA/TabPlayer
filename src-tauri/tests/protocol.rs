@@ -28,10 +28,83 @@ fn accepts_triple_dots_and_rejects_more() {
 }
 
 #[test]
+fn a_track_move_must_change_the_position() {
+    let same: EditCommand =
+        serde_json::from_value(serde_json::json!({"type":"moveTrack","track":1,"to":1})).unwrap();
+    assert!(same.validate().is_err());
+    for bad in [
+        serde_json::json!({"type":"moveTrack","track":1}),
+        serde_json::json!({"type":"moveTrack","track":1,"to":1.5}),
+        serde_json::json!({"type":"moveTrack","track":1,"to":-1}),
+    ] {
+        assert!(serde_json::from_value::<EditCommand>(bad).is_err());
+    }
+}
+
+#[test]
+fn a_sustain_pedal_mark_is_down_up_or_none() {
+    let target = serde_json::json!({"track":0,"staff":0,"bar":0,"voice":0,"beat":0});
+    for pedal in ["down", "up", "none"] {
+        let good: EditCommand = serde_json::from_value(
+            serde_json::json!({"type":"setSustainPedal","target":target,"pedal":pedal}),
+        )
+        .unwrap();
+        assert!(good.validate().is_ok());
+    }
+    for pedal in ["sideways", "Down", ""] {
+        let bad: EditCommand = serde_json::from_value(
+            serde_json::json!({"type":"setSustainPedal","target":target,"pedal":pedal}),
+        )
+        .unwrap();
+        assert!(bad.validate().is_err(), "{pedal}");
+    }
+    for bad in [
+        serde_json::json!({"type":"setSustainPedal","target":target}),
+        serde_json::json!({"type":"setSustainPedal","target":target,"pedal":null}),
+        serde_json::json!({"type":"setSustainPedal","target":target,"pedal":"up","extra":0}),
+    ] {
+        assert!(serde_json::from_value::<EditCommand>(bad).is_err());
+    }
+}
+
+#[test]
+fn a_track_color_must_be_six_hex_digits() {
+    let good: EditCommand = serde_json::from_value(
+        serde_json::json!({"type":"setTrackColor","track":0,"color":"#1a2B3c"}),
+    )
+    .unwrap();
+    assert!(good.validate().is_ok());
+    for color in [
+        "red",
+        "#fff",
+        "#12345",
+        "#1234567",
+        "#gg0000",
+        " #112233",
+        "#11223344",
+        "x112233",
+        "é12345",
+        "#ééé",
+    ] {
+        let bad: EditCommand = serde_json::from_value(
+            serde_json::json!({"type":"setTrackColor","track":0,"color":color}),
+        )
+        .unwrap();
+        assert!(bad.validate().is_err(), "{color}");
+    }
+    assert!(
+        serde_json::from_value::<EditCommand>(
+            serde_json::json!({"type":"setTrackColor","track":0,"color":7})
+        )
+        .is_err()
+    );
+}
+
+#[test]
 fn every_frontend_command_round_trips_through_rust() {
     let examples: Vec<serde_json::Value> =
         serde_json::from_str(include_str!("../../tests/protocol.json")).unwrap();
-    assert_eq!(examples.len(), 31);
+    assert_eq!(examples.len(), 78);
     for mut example in examples {
         let command: EditCommand = serde_json::from_value(example.clone()).unwrap();
         assert!(command.validate().is_ok(), "invalid fixture {example}");
@@ -90,4 +163,36 @@ fn accepts_new_signed_rhythm_and_nullable_technique_patches() {
     let parsed = serde_json::from_value::<EditCommand>(patch.clone());
     assert!(parsed.is_ok(), "new command must deserialize: {parsed:?}");
     assert_eq!(serde_json::to_value(parsed.unwrap()).unwrap(), patch);
+}
+
+#[test]
+fn track_interpretation_rides_the_track_mix_and_rejects_anything_non_canonical() {
+    let mix = |interpretation: serde_json::Value| serde_json::json!({"type":"setTrackMix","trackId":"base-0","mix":{"gain":1,"pan":0,"mute":false,"solo":false,"interpretation":interpretation}});
+    let ok = serde_json::from_value::<EditCommand>(mix(
+        serde_json::json!({"style":"pick","brush":"up"}),
+    ))
+    .unwrap();
+    assert!(ok.validate().is_ok());
+    // A mix with no interpretation encodes without the key, so defaults stay byte-identical.
+    let plain = serde_json::json!({"type":"setTrackMix","trackId":"base-0","mix":{"gain":1,"pan":0,"mute":false,"solo":false}});
+    let parsed = serde_json::from_value::<EditCommand>(plain.clone()).unwrap();
+    let (mut encoded, mut expected) = (serde_json::to_value(parsed).unwrap(), plain);
+    normalize_numbers(&mut encoded);
+    normalize_numbers(&mut expected);
+    assert_eq!(encoded, expected);
+    for bad in [
+        serde_json::json!({}),
+        serde_json::json!({"style":"slap"}),
+        serde_json::json!({"style":"picking"}),
+        serde_json::json!({"letRing":false}),
+        serde_json::json!({"brush":"down","extra":1}),
+        serde_json::json!({"palmMute":null}),
+        serde_json::json!({"style":"pick","brush":null}),
+        serde_json::Value::Null,
+    ] {
+        let accepted = serde_json::from_value::<EditCommand>(mix(bad.clone()))
+            .map(|command| command.validate().is_ok())
+            .unwrap_or(false);
+        assert!(!accepted, "accepted {bad}");
+    }
 }

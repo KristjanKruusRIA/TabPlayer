@@ -1,0 +1,185 @@
+{
+  "format": "TabPlayerReferenceSyncTiming",
+  "version": 1,
+  "ppq": 960,
+  "toleranceMs": 0.0000001,
+  "timingCases": [
+    {
+      "name": "two-spans-120-then-60",
+      "locations": [{"bar":0,"occurrence":0,"startTick":0,"endTick":3840},{"bar":1,"occurrence":0,"startTick":3840,"endTick":7680}],
+      "backing": {"offsetMs":0,"anchors":[{"bar":1,"occurrence":0,"ratio":0,"audioMs":3000}],"referenceSync":{"entryAudioMs":1000,"exitAudioMs":7000}},
+      "sourceDurationMs": 16000,
+      "expected": {
+        "entryTick":0,"exitTick":7680,"entrySourceMs":1000,"exitSourceMs":7000,
+        "segments":[{"startTick":0,"endTick":3840,"startSourceMs":1000,"endSourceMs":3000,"bpm":120},{"startTick":3840,"endTick":7680,"startSourceMs":3000,"endSourceMs":7000,"bpm":60}],
+        "playbackEndTick":7680,"activeDurationMs":6000,"durationMs":6000,
+        "sourceSamples":[{"tick":0,"elapsedMs":0,"sourceMs":1000},{"tick":3840,"elapsedMs":2000,"sourceMs":3000},{"tick":4800,"elapsedMs":3000,"sourceMs":4000},{"tick":7680,"elapsedMs":6000,"sourceMs":7000}],
+        "rateSamples":[{"relativeSpeed":1,"wallMs":3000,"tick":4800,"sourceMs":4000},{"relativeSpeed":0.5,"wallMs":6000,"tick":4800,"sourceMs":4000}],
+        "waveformPercentages":{"entry":6.25,"exit":43.75}
+      }
+    },
+    {
+      "name": "positive-offset-adds-once-to-stored-pins",
+      "locations": [{"bar":0,"occurrence":0,"startTick":0,"endTick":3840},{"bar":1,"occurrence":0,"startTick":3840,"endTick":7680}],
+      "backing": {"offsetMs":120,"anchors":[{"bar":1,"occurrence":0,"ratio":0,"audioMs":3120}],"referenceSync":{"entryAudioMs":1120,"exitAudioMs":7120}},
+      "sourceDurationMs": 16000,
+      "expected": {"entryTick":0,"exitTick":7680,"entrySourceMs":1000,"exitSourceMs":7000,"segments":[{"startTick":0,"endTick":3840,"startSourceMs":1000,"endSourceMs":3000,"bpm":120},{"startTick":3840,"endTick":7680,"startSourceMs":3000,"endSourceMs":7000,"bpm":60}],"activeDurationMs":6000,"sourceSamples":[{"tick":4800,"elapsedMs":3000,"sourceMs":4000}],"movedInterior":{"sourceMs":3100,"audioMs":3220}}
+    },
+    {
+      "name": "offset-only-change-translates-source-with-fixed-stored-pins",
+      "locations": [{"bar":0,"occurrence":0,"startTick":0,"endTick":3840},{"bar":1,"occurrence":0,"startTick":3840,"endTick":7680}],
+      "backing": {"offsetMs":220,"anchors":[{"bar":1,"occurrence":0,"ratio":0,"audioMs":3120}],"referenceSync":{"entryAudioMs":1120,"exitAudioMs":7120}},
+      "expected": {"entryTick":0,"exitTick":7680,"entrySourceMs":900,"exitSourceMs":6900,"segments":[{"startTick":0,"endTick":3840,"startSourceMs":900,"endSourceMs":2900,"bpm":120},{"startTick":3840,"endTick":7680,"startSourceMs":2900,"endSourceMs":6900,"bpm":60}],"activeDurationMs":6000,"sourceSamples":[{"tick":4800,"elapsedMs":3000,"sourceMs":3900}]}
+    },
+    {
+      "name": "negative-offset-allows-signed-stored-entry-at-source-zero",
+      "locations": [{"bar":0,"occurrence":0,"startTick":0,"endTick":3840},{"bar":1,"occurrence":0,"startTick":3840,"endTick":7680}],
+      "backing": {"offsetMs":-120,"anchors":[{"bar":1,"occurrence":0,"ratio":0,"audioMs":880}],"referenceSync":{"entryAudioMs":-120,"exitAudioMs":1880}},
+      "sourceDurationMs": 2000,
+      "expected": {"entryTick":0,"exitTick":7680,"entrySourceMs":0,"exitSourceMs":2000,"segments":[{"startTick":0,"endTick":3840,"startSourceMs":0,"endSourceMs":1000,"bpm":240},{"startTick":3840,"endTick":7680,"startSourceMs":1000,"endSourceMs":2000,"bpm":240}],"activeDurationMs":2000,"sourceSamples":[{"tick":1920,"elapsedMs":500,"sourceMs":500}]}
+    },
+    {
+      "name": "six-eight-uses-quarter-bpm-and-eighth-pulses",
+      "meter": {"numerator":6,"denominator":8},
+      "locations": [{"bar":0,"occurrence":0,"startTick":0,"endTick":2880}],
+      "backing": {"offsetMs":0,"anchors":[],"referenceSync":{"entryAudioMs":0,"exitAudioMs":3000}},
+      "sourceDurationMs": 3000,
+      "expected": {"entryTick":0,"exitTick":2880,"entrySourceMs":0,"exitSourceMs":3000,"segments":[{"startTick":0,"endTick":2880,"startSourceMs":0,"endSourceMs":3000,"bpm":60}],"activeDurationMs":3000,"sourceSamples":[{"tick":0,"elapsedMs":0,"sourceMs":0},{"tick":480,"elapsedMs":500,"sourceMs":500},{"tick":960,"elapsedMs":1000,"sourceMs":1000},{"tick":1440,"elapsedMs":1500,"sourceMs":1500},{"tick":1920,"elapsedMs":2000,"sourceMs":2000},{"tick":2400,"elapsedMs":2500,"sourceMs":2500},{"tick":2880,"elapsedMs":3000,"sourceMs":3000}]}
+    },
+    {
+      "name": "pickup-uses-actual-960-tick-body",
+      "locations": [{"bar":0,"occurrence":0,"startTick":0,"endTick":960}],
+      "backing": {"offsetMs":0,"anchors":[],"referenceSync":{"entryAudioMs":250,"exitAudioMs":750}},
+      "expected": {"entryTick":0,"exitTick":960,"entrySourceMs":250,"exitSourceMs":750,"segments":[{"startTick":0,"endTick":960,"startSourceMs":250,"endSourceMs":750,"bpm":120}],"activeDurationMs":500,"sourceSamples":[{"tick":320,"elapsedMs":166.66666666666666,"sourceMs":416.6666666666667},{"tick":960,"elapsedMs":500,"sourceMs":750}]}
+    },
+    {
+      "name": "free-time-retains-unrepresented-in-occurrence-tail",
+      "lastRepresentedBeatEndTick": 3840,
+      "locations": [{"bar":0,"occurrence":0,"startTick":0,"endTick":4560}],
+      "backing": {"offsetMs":0,"anchors":[],"referenceSync":{"entryAudioMs":100,"exitAudioMs":2475}},
+      "expected": {"entryTick":0,"exitTick":4560,"entrySourceMs":100,"exitSourceMs":2475,"segments":[{"startTick":0,"endTick":4560,"startSourceMs":100,"endSourceMs":2475,"bpm":120}],"playbackEndTick":4560,"activeDurationMs":2375,"sourceSamples":[{"tick":3840,"elapsedMs":2000,"sourceMs":2100},{"tick":4560,"elapsedMs":2375,"sourceMs":2475}]}
+    },
+    {
+      "name": "initial-grace-pre-roll-and-note-extent-tail",
+      "durationTick": 4440,
+      "locations": [{"bar":0,"occurrence":0,"startTick":120,"endTick":3960}],
+      "backing": {"offsetMs":0,"anchors":[],"referenceSync":{"entryAudioMs":1000,"exitAudioMs":3000}},
+      "sourceDurationMs": 6000,
+      "expected": {"entryTick":120,"exitTick":3960,"entrySourceMs":1000,"exitSourceMs":3000,"segments":[{"startTick":120,"endTick":3960,"startSourceMs":1000,"endSourceMs":3000,"bpm":120}],"playbackEndTick":3960,"preRollMs":62.5,"activeDurationMs":2062.5,"durationMs":2312.5,"sourceSamples":[{"tick":0,"elapsedMs":0,"sourceMs":937.5,"backingAudible":false},{"tick":120,"elapsedMs":62.5,"sourceMs":1000,"backingAudible":true},{"tick":3960,"elapsedMs":2062.5,"sourceMs":3000,"backingAudible":false},{"tick":4440,"elapsedMs":2312.5,"sourceMs":3250,"backingAudible":false}],"exportDurations":[{"relativeSpeed":1,"tailMs":500,"durationMs":2562.5},{"relativeSpeed":0.5,"tailMs":500,"durationMs":4625}]}
+    },
+    {
+      "name": "fractional-source-is-not-rounded-on-no-op",
+      "locations": [{"bar":0,"occurrence":0,"startTick":0,"endTick":1920}],
+      "backing": {"offsetMs":-120,"anchors":[],"referenceSync":{"entryAudioMs":0.1,"exitAudioMs":1000.1}},
+      "expected": {"entryTick":0,"exitTick":1920,"entrySourceMs":120.1,"exitSourceMs":1120.1,"segments":[{"startTick":0,"endTick":1920,"startSourceMs":120.1,"endSourceMs":1120.1,"bpm":120}],"activeDurationMs":1000,"sourceSamples":[{"tick":960,"elapsedMs":500,"sourceMs":620.1}],"unchangedStoredBounds":{"entryAudioMs":0.1,"exitAudioMs":1000.1}}
+    },
+    {
+      "name": "long-file-does-not-extend-active-playback-or-omitted-backing-export",
+      "locations": [{"bar":0,"occurrence":0,"startTick":0,"endTick":3840},{"bar":1,"occurrence":0,"startTick":3840,"endTick":7680}],
+      "backing": {"offsetMs":0,"anchors":[{"bar":1,"occurrence":0,"ratio":0,"audioMs":3000}],"referenceSync":{"entryAudioMs":1000,"exitAudioMs":7000}},
+      "sourceDurationMs": 60000,
+      "expected": {"entryTick":0,"exitTick":7680,"entrySourceMs":1000,"exitSourceMs":7000,"segments":[{"startTick":0,"endTick":3840,"startSourceMs":1000,"endSourceMs":3000,"bpm":120},{"startTick":3840,"endTick":7680,"startSourceMs":3000,"endSourceMs":7000,"bpm":60}],"playbackEndTick":7680,"activeDurationMs":6000,"mutedActiveDurationMs":6000,"omittedBackingActiveDurationMs":6000,"exportDurations":[{"relativeSpeed":1,"tailMs":0,"durationMs":6000},{"relativeSpeed":0.5,"tailMs":500,"durationMs":12500}],"sourceGate":{"includedMs":[1000,6999.999],"excludedMs":[999.999,7000]},"sourceFrameGate":{"sampleRate":44100,"firstIncludedFrame":44100,"lastIncludedFrame":308699,"firstExcludedExitFrame":308700}}
+    },
+    {
+      "name": "activation-falls-back-to-whole-six-second-source",
+      "operation": "initialize",
+      "locations": [{"bar":0,"occurrence":0,"startTick":0,"endTick":3840},{"bar":1,"occurrence":0,"startTick":3840,"endTick":7680},{"bar":2,"occurrence":0,"startTick":7680,"endTick":11520},{"bar":3,"occurrence":0,"startTick":11520,"endTick":15360}],
+      "authoredTempos": [{"tick":0,"bpm":120}],
+      "backing": {"offsetMs":0,"anchors":[]},
+      "sourceDurationMs": 6000,
+      "expected": {"legacyEntrySourceMs":0,"legacyExitSourceMs":8000,"storedBounds":{"entryAudioMs":0,"exitAudioMs":6000},"entryTick":0,"exitTick":15360,"entrySourceMs":0,"exitSourceMs":6000,"segments":[{"startTick":0,"endTick":15360,"startSourceMs":0,"endSourceMs":6000,"bpm":160}],"activeDurationMs":6000,"disabledAuthoredDurationMs":8000}
+    }
+  ],
+  "invalidCases": [
+    {"name":"empty-performed-route","locations":[],"backing":{"offsetMs":0,"anchors":[],"referenceSync":{"entryAudioMs":1000,"exitAudioMs":7000}},"expected":{"rejectReason":"no-performed-music"}},
+    {"name":"zero-musical-extent","locations":[{"bar":0,"occurrence":0,"startTick":0,"endTick":0}],"backing":{"offsetMs":0,"anchors":[],"referenceSync":{"entryAudioMs":1000,"exitAudioMs":7000}},"expected":{"rejectReason":"nonpositive-musical-extent"}},
+    {"name":"entry-anchor-alias-is-not-an-interior","locations":[{"bar":0,"occurrence":0,"startTick":0,"endTick":3840}],"backing":{"offsetMs":0,"anchors":[{"bar":0,"occurrence":0,"ratio":0,"audioMs":1000}],"referenceSync":{"entryAudioMs":1000,"exitAudioMs":3000}},"expected":{"rejectReason":"endpoint-alias"}},
+    {"name":"exit-anchor-alias-is-not-an-interior","locations":[{"bar":0,"occurrence":0,"startTick":0,"endTick":3840}],"backing":{"offsetMs":0,"anchors":[{"bar":0,"occurrence":0,"ratio":1,"audioMs":3000}],"referenceSync":{"entryAudioMs":1000,"exitAudioMs":3000}},"expected":{"rejectReason":"endpoint-alias"}},
+    {"name":"duplicate-internal-seam-aliases","locations":[{"bar":0,"occurrence":0,"startTick":0,"endTick":3840},{"bar":1,"occurrence":0,"startTick":3840,"endTick":7680}],"backing":{"offsetMs":0,"anchors":[{"bar":0,"occurrence":0,"ratio":1,"audioMs":2500},{"bar":1,"occurrence":0,"ratio":0,"audioMs":3000}],"referenceSync":{"entryAudioMs":1000,"exitAudioMs":7000}},"expected":{"resolvedDuplicateTick":3840,"rejectReason":"duplicate-performed-tick"}},
+    {"name":"missing-repeated-occurrence","locations":[{"bar":0,"occurrence":0,"startTick":0,"endTick":3840}],"backing":{"offsetMs":0,"anchors":[{"bar":0,"occurrence":1,"ratio":0.5,"audioMs":2000}],"referenceSync":{"entryAudioMs":1000,"exitAudioMs":3000}},"expected":{"rejectReason":"missing-occurrence"}},
+    {"name":"skipped-written-bar","locations":[{"bar":0,"occurrence":0,"startTick":0,"endTick":3840},{"bar":2,"occurrence":0,"startTick":3840,"endTick":7680}],"backing":{"offsetMs":0,"anchors":[{"bar":1,"occurrence":0,"ratio":0.5,"audioMs":3000}],"referenceSync":{"entryAudioMs":1000,"exitAudioMs":7000}},"expected":{"rejectReason":"missing-occurrence"}},
+    {"name":"source-pins-cross-in-performed-order","locations":[{"bar":0,"occurrence":0,"startTick":0,"endTick":3840},{"bar":1,"occurrence":0,"startTick":3840,"endTick":7680}],"backing":{"offsetMs":0,"anchors":[{"bar":0,"occurrence":0,"ratio":0.5,"audioMs":5000},{"bar":1,"occurrence":0,"ratio":0,"audioMs":3000}],"referenceSync":{"entryAudioMs":1000,"exitAudioMs":7000}},"expected":{"rejectReason":"nonincreasing-source-pins"}},
+    {"name":"interior-source-equals-entry","locations":[{"bar":0,"occurrence":0,"startTick":0,"endTick":7680}],"backing":{"offsetMs":0,"anchors":[{"bar":0,"occurrence":0,"ratio":0.5,"audioMs":1000}],"referenceSync":{"entryAudioMs":1000,"exitAudioMs":7000}},"expected":{"rejectReason":"interior-outside-source-bounds"}},
+    {"name":"interior-source-equals-exit","locations":[{"bar":0,"occurrence":0,"startTick":0,"endTick":7680}],"backing":{"offsetMs":0,"anchors":[{"bar":0,"occurrence":0,"ratio":0.5,"audioMs":7000}],"referenceSync":{"entryAudioMs":1000,"exitAudioMs":7000}},"expected":{"rejectReason":"interior-outside-source-bounds"}},
+    {"name":"negative-physical-entry-despite-positive-stored-entry","locations":[{"bar":0,"occurrence":0,"startTick":0,"endTick":3840}],"backing":{"offsetMs":120,"anchors":[],"referenceSync":{"entryAudioMs":119,"exitAudioMs":3120}},"expected":{"entrySourceMs":-1,"rejectReason":"negative-physical-source"}},
+    {"name":"equal-brackets","locations":[{"bar":0,"occurrence":0,"startTick":0,"endTick":3840}],"backing":{"offsetMs":0,"anchors":[],"referenceSync":{"entryAudioMs":1000,"exitAudioMs":1000}},"expected":{"rejectReason":"nonpositive-source-interval"}},
+    {"name":"actual-source-eof-precedes-exit","locations":[{"bar":0,"occurrence":0,"startTick":0,"endTick":7680}],"backing":{"offsetMs":0,"anchors":[],"referenceSync":{"entryAudioMs":1000,"exitAudioMs":7000}},"sourceDurationMs":6999,"expected":{"rejectReason":"source-eof"}},
+    {"name":"legacy-stored-anchor-must-remain-nonnegative","operation":"validateLegacySettings","locations":[{"bar":0,"occurrence":0,"startTick":0,"endTick":3840}],"backing":{"offsetMs":-120,"anchors":[{"bar":0,"occurrence":0,"ratio":0.5,"audioMs":-70}]},"expected":{"physicalAnchorSourceMs":50,"rejectReason":"legacy-negative-stored-anchor"}},
+    {"name":"unrepresentable-derived-bpm","locations":[{"bar":0,"occurrence":0,"startTick":0,"endTick":3840}],"backing":{"offsetMs":0,"anchors":[],"referenceSync":{"entryAudioMs":0,"exitAudioMs":5e-324}},"expected":{"rejectReason":"nonfinite-derived-rate"}}
+  ],
+  "structuralCases": [
+    {
+      "name":"append-preserves-prefix-and-extends-last-slope",
+      "previousLocations":[{"bar":0,"occurrence":0,"startTick":0,"endTick":3840},{"bar":1,"occurrence":0,"startTick":3840,"endTick":7680}],
+      "locations":[{"bar":0,"occurrence":0,"startTick":0,"endTick":3840},{"bar":1,"occurrence":0,"startTick":3840,"endTick":7680},{"bar":2,"occurrence":0,"startTick":7680,"endTick":11520}],
+      "previousBacking":{"offsetMs":0,"anchors":[{"bar":1,"occurrence":0,"ratio":0,"audioMs":3000}],"referenceSync":{"entryAudioMs":1000,"exitAudioMs":7000}},
+      "backing":{"offsetMs":0,"anchors":[{"bar":1,"occurrence":0,"ratio":0,"audioMs":3000}],"referenceSync":{"entryAudioMs":1000,"exitAudioMs":7000}},
+      "sourceDurationMs":12000,
+      "expected":{"oldExtentTick":7680,"newExtentTick":11520,"deltaExtentTick":3840,"exitAudioMs":11000,"entrySourceMs":1000,"exitSourceMs":11000,"segments":[{"startTick":0,"endTick":3840,"startSourceMs":1000,"endSourceMs":3000,"bpm":120},{"startTick":3840,"endTick":11520,"startSourceMs":3000,"endSourceMs":11000,"bpm":60}],"activeDurationMs":10000,"sourceSamples":[{"tick":3840,"elapsedMs":2000,"sourceMs":3000},{"tick":4800,"elapsedMs":3000,"sourceMs":4000},{"tick":7680,"elapsedMs":6000,"sourceMs":7000},{"tick":11520,"elapsedMs":10000,"sourceMs":11000}]}
+    },
+    {
+      "name":"interior-insert-keeps-surviving-source-pin-fixed",
+      "previousLocations":[{"bar":0,"occurrence":0,"startTick":0,"endTick":3840},{"bar":1,"occurrence":0,"startTick":3840,"endTick":7680}],
+      "locations":[{"bar":0,"occurrence":0,"startTick":0,"endTick":3840},{"bar":1,"occurrence":0,"startTick":3840,"endTick":7680},{"bar":2,"occurrence":0,"startTick":7680,"endTick":11520}],
+      "previousBacking":{"offsetMs":0,"anchors":[{"bar":1,"occurrence":0,"ratio":0,"audioMs":3000}],"referenceSync":{"entryAudioMs":1000,"exitAudioMs":7000}},
+      "backing":{"offsetMs":0,"anchors":[{"bar":2,"occurrence":0,"ratio":0,"audioMs":3000}],"referenceSync":{"entryAudioMs":1000,"exitAudioMs":7000}},
+      "sourceDurationMs":12000,
+      "expected":{"oldExtentTick":7680,"newExtentTick":11520,"deltaExtentTick":3840,"exitAudioMs":11000,"entrySourceMs":1000,"exitSourceMs":11000,"segments":[{"startTick":0,"endTick":7680,"startSourceMs":1000,"endSourceMs":3000,"bpm":240},{"startTick":7680,"endTick":11520,"startSourceMs":3000,"endSourceMs":11000,"bpm":30}],"activeDurationMs":10000,"sourceSamples":[{"tick":3840,"elapsedMs":1000,"sourceMs":2000},{"tick":7680,"elapsedMs":2000,"sourceMs":3000},{"tick":11520,"elapsedMs":10000,"sourceMs":11000}]}
+    },
+    {
+      "name":"append-eof-rejects-entire-candidate",
+      "previousLocations":[{"bar":0,"occurrence":0,"startTick":0,"endTick":3840},{"bar":1,"occurrence":0,"startTick":3840,"endTick":7680}],
+      "locations":[{"bar":0,"occurrence":0,"startTick":0,"endTick":3840},{"bar":1,"occurrence":0,"startTick":3840,"endTick":7680},{"bar":2,"occurrence":0,"startTick":7680,"endTick":11520}],
+      "previousBacking":{"offsetMs":0,"anchors":[{"bar":1,"occurrence":0,"ratio":0,"audioMs":3000}],"referenceSync":{"entryAudioMs":1000,"exitAudioMs":7000}},
+      "backing":{"offsetMs":0,"anchors":[{"bar":1,"occurrence":0,"ratio":0,"audioMs":3000}],"referenceSync":{"entryAudioMs":1000,"exitAudioMs":7000}},
+      "sourceDurationMs":10000,
+      "expected":{"candidateExitAudioMs":11000,"rejectReason":"source-eof","historyUnchanged":true}
+    },
+    {
+      "name":"initial-grace-shift-does-not-grow-body-brackets",
+      "previousLocations":[{"bar":0,"occurrence":0,"startTick":120,"endTick":3960}],
+      "locations":[{"bar":0,"occurrence":0,"startTick":240,"endTick":4080}],
+      "previousBacking":{"offsetMs":0,"anchors":[],"referenceSync":{"entryAudioMs":1000,"exitAudioMs":3000}},
+      "backing":{"offsetMs":0,"anchors":[],"referenceSync":{"entryAudioMs":1000,"exitAudioMs":3000}},
+      "expected":{"oldExtentTick":3840,"newExtentTick":3840,"deltaExtentTick":0,"exitAudioMs":3000,"entrySourceMs":1000,"exitSourceMs":3000,"segments":[{"startTick":240,"endTick":4080,"startSourceMs":1000,"endSourceMs":3000,"bpm":120}],"preRollMs":125,"activeDurationMs":2125}
+    },
+    {
+      "name":"remove-final-bar-discards-its-anchor-and-contracts-exit",
+      "previousLocations":[{"bar":0,"occurrence":0,"startTick":0,"endTick":3840},{"bar":1,"occurrence":0,"startTick":3840,"endTick":7680}],
+      "locations":[{"bar":0,"occurrence":0,"startTick":0,"endTick":3840}],
+      "previousBacking":{"offsetMs":0,"anchors":[{"bar":1,"occurrence":0,"ratio":0,"audioMs":3000}],"referenceSync":{"entryAudioMs":1000,"exitAudioMs":7000}},
+      "backing":{"offsetMs":0,"anchors":[],"referenceSync":{"entryAudioMs":1000,"exitAudioMs":7000}},
+      "expected":{"oldExtentTick":7680,"newExtentTick":3840,"deltaExtentTick":-3840,"exitAudioMs":3000,"entrySourceMs":1000,"exitSourceMs":3000,"segments":[{"startTick":0,"endTick":3840,"startSourceMs":1000,"endSourceMs":3000,"bpm":120}],"activeDurationMs":2000}
+    }
+  ],
+  "conversionCases": [
+    {"name":"arbitrary-written-ratios","kind":"ratioPositions","locations":[{"bar":0,"occurrence":0,"startTick":0,"endTick":3840}],"points":[{"bar":0,"ratio":0,"bpm":120,"linear":false},{"bar":0,"ratio":0.3333333333333333,"bpm":60,"linear":false},{"bar":0,"ratio":0.375,"bpm":90,"linear":true}],"expected":{"ticks":[0,1280,1440],"ratios":[0,0.3333333333333333,0.375],"bpms":[120,60,90],"linear":[false,false,true]}},
+    {"name":"six-eight-ratio-positions","kind":"ratioPositions","locations":[{"bar":0,"occurrence":0,"startTick":0,"endTick":2880}],"ratios":[0.3333333333333333,0.8333333333333334],"expected":{"ticks":[960,2400]}},
+    {"name":"pickup-ratio-positions","kind":"ratioPositions","locations":[{"bar":0,"occurrence":0,"startTick":0,"endTick":960}],"ratios":[0.3333333333333333,0.375],"expected":{"ticks":[320,360]}},
+    {
+      "name":"score-to-sync-authored-fractional-breakpoints",
+      "kind":"scoreToSync","mode":"replace",
+      "locations":[{"bar":0,"occurrence":0,"startTick":0,"endTick":3840},{"bar":1,"occurrence":0,"startTick":3840,"endTick":7680}],
+      "authoredTempos":[{"tick":0,"bpm":120},{"tick":1280,"bpm":60},{"tick":5760,"bpm":180}],
+      "backing":{"offsetMs":120,"anchors":[],"referenceSync":{"entryAudioMs":1120,"exitAudioMs":9120}},"sourceDurationMs":16000,
+      "expected":{"authoredSamples":[{"tick":0,"elapsedMs":0,"sourceMs":1000,"audioMs":1120},{"tick":1280,"elapsedMs":666.6666666666666,"sourceMs":1666.6666666666667,"audioMs":1786.6666666666667},{"tick":5760,"elapsedMs":5333.333333333333,"sourceMs":6333.333333333333,"audioMs":6453.333333333333},{"tick":7680,"elapsedMs":6000,"sourceMs":7000,"audioMs":7120}],"storedBounds":{"entryAudioMs":1120,"exitAudioMs":7120},"anchors":[{"bar":0,"occurrence":0,"ratio":0.3333333333333333,"audioMs":1786.6666666666667},{"bar":1,"occurrence":0,"ratio":0.5,"audioMs":6453.333333333333}],"authoredUnchanged":true}
+    },
+    {"name":"add-agrees-at-existing-generated-tick","kind":"scoreToSyncAdd","generatedPins":[{"tick":0,"sourceMs":1000},{"tick":1280,"sourceMs":1666.6666666666667},{"tick":5760,"sourceMs":6333.333333333333},{"tick":7680,"sourceMs":7000}],"existingPins":[{"tick":0,"sourceMs":1000},{"tick":1280,"sourceMs":1666.6666666666667},{"tick":7680,"sourceMs":7000}],"expected":{"mergedPins":[{"tick":0,"sourceMs":1000},{"tick":1280,"sourceMs":1666.6666666666667},{"tick":5760,"sourceMs":6333.333333333333},{"tick":7680,"sourceMs":7000}],"duplicateCount":0}},
+    {"name":"add-rejects-same-tick-different-source","kind":"scoreToSyncAdd","generatedPins":[{"tick":0,"sourceMs":1000},{"tick":1280,"sourceMs":1666.6666666666667},{"tick":7680,"sourceMs":7000}],"existingPins":[{"tick":0,"sourceMs":1000},{"tick":1280,"sourceMs":1667.6666666666667},{"tick":7680,"sourceMs":7000}],"expected":{"rejectReason":"same-tick-source-conflict","historyUnchanged":true}},
+    {"name":"add-rejects-new-pin-crossing-retained-neighbor","kind":"scoreToSyncAdd","generatedPins":[{"tick":0,"sourceMs":1000},{"tick":1280,"sourceMs":1666.6666666666667},{"tick":7680,"sourceMs":7000}],"existingPins":[{"tick":0,"sourceMs":1000},{"tick":1920,"sourceMs":1600},{"tick":7680,"sourceMs":7000}],"expected":{"rejectReason":"nonincreasing-source-pins","historyUnchanged":true}},
+    {"name":"write-score-compares-inherited-repeat-start","kind":"syncToScore","requiredPasses":[{"bar":0,"occurrence":0,"inheritedBpm":120,"points":[{"ratio":0.3333333333333333,"bpm":90}]},{"bar":0,"occurrence":1,"inheritedBpm":60,"points":[{"ratio":0.3333333333333333,"bpm":90}]}],"expected":{"rejectReason":"incompatible-repeated-bar","conflictBar":0,"conflictRatioInterval":[0,0.3333333333333333],"historyUnchanged":true}},
+    {"name":"write-score-sees-hidden-second-pass-breakpoint","kind":"syncToScore","requiredPasses":[{"bar":0,"occurrence":0,"inheritedBpm":120,"points":[]},{"bar":0,"occurrence":1,"inheritedBpm":120,"points":[{"ratio":0.3333333333333333,"bpm":60}]}],"expected":{"rejectReason":"incompatible-repeated-bar","conflictBar":0,"conflictRatioInterval":[0.3333333333333333,1],"historyUnchanged":true}},
+    {"name":"write-score-does-not-round-away-small-repeat-conflict","kind":"syncToScore","requiredPasses":[{"bar":0,"occurrence":0,"inheritedBpm":120,"points":[]},{"bar":0,"occurrence":1,"inheritedBpm":120.000001,"points":[]}],"expected":{"rejectReason":"incompatible-repeated-bar","conflictBar":0,"conflictRatioInterval":[0,1],"historyUnchanged":true}},
+    {"name":"compatible-repeat-emits-one-written-function","kind":"syncToScore","requiredPasses":[{"bar":0,"occurrence":0,"inheritedBpm":120,"points":[{"ratio":0.3333333333333333,"bpm":60}]},{"bar":0,"occurrence":1,"inheritedBpm":120,"points":[{"ratio":0.3333333333333333,"bpm":60}]}],"expected":{"points":[{"bar":0,"ratio":0,"bpm":120,"linear":false},{"bar":0,"ratio":0.3333333333333333,"bpm":60,"linear":false}],"terminalOutgoingEvent":false}},
+    {"name":"gp-padding-truncation-and-relative-offset-rounding","kind":"gpFrames","framesPerMs":44.1,"sourcePoints":[{"bar":0,"occurrence":0,"ratio":0,"sourceMs":1000.01},{"bar":0,"occurrence":0,"ratio":0.5,"sourceMs":2500.02}],"expected":{"framePadding":-44100,"frameOffsets":[0,66150],"importedSourceMs":[1000,2500],"secondRoundtripSourceMs":[1000,2500],"absoluteErrorMs":[0.01,0.02]}},
+    {"name":"gp-selected-third-bar-positive-offset-without-anchors","kind":"gpSelection","sourceLocations":[{"bar":0,"occurrence":0,"startTick":0,"endTick":3840},{"bar":1,"occurrence":0,"startTick":3840,"endTick":7680},{"bar":2,"occurrence":0,"startTick":7680,"endTick":11520}],"locations":[{"bar":0,"occurrence":0,"startTick":0,"endTick":3840}],"authoredTempos":[{"tick":0,"bpm":120}],"backing":{"offsetMs":250,"anchors":[]},"firstBar":2,"lastBar":2,"expected":{"sourceWindowCount":1,"tickTranslation":7680,"sourcePins":[{"tick":0,"sourceMs":3750},{"tick":3840,"sourceMs":5750}],"framePadding":-165375,"frameOffsets":[0,88200],"importedSourceMs":[3750,5750]}},
+    {"name":"gp-selected-third-bar-negative-offset-without-anchors","kind":"gpSelection","sourceLocations":[{"bar":0,"occurrence":0,"startTick":0,"endTick":3840},{"bar":1,"occurrence":0,"startTick":3840,"endTick":7680},{"bar":2,"occurrence":0,"startTick":7680,"endTick":11520}],"locations":[{"bar":0,"occurrence":0,"startTick":0,"endTick":3840}],"authoredTempos":[{"tick":0,"bpm":120}],"backing":{"offsetMs":-120,"anchors":[]},"firstBar":2,"lastBar":2,"expected":{"sourceWindowCount":1,"tickTranslation":7680,"sourcePins":[{"tick":0,"sourceMs":4120},{"tick":3840,"sourceMs":6120}],"framePadding":-181692,"frameOffsets":[0,88200],"importedSourceMs":[4120,6120]}},
+    {"name":"gp-selected-range-inside-wider-anchor-span","kind":"gpSelectionMap","sourcePins":[{"tick":0,"sourceMs":1000},{"tick":15360,"sourceMs":9000}],"selectedOriginalTicks":[7680,11520],"expected":{"sourcePins":[{"tick":0,"sourceMs":5000},{"tick":3840,"sourceMs":7000}],"framePadding":-220500,"frameOffsets":[0,88200]}},
+    {"name":"gp-selected-reference-second-bar-preserves-absolute-source","kind":"gpSelectionMap","sourcePins":[{"tick":0,"sourceMs":1000},{"tick":3840,"sourceMs":3000},{"tick":7680,"sourceMs":7000}],"selectedOriginalTicks":[3840,7680],"expected":{"sourcePins":[{"tick":0,"sourceMs":3000},{"tick":3840,"sourceMs":7000}],"quarterBpm":60,"framePadding":-132300,"frameOffsets":[0,176400]}},
+    {"name":"gp-contained-repeat-has-one-contiguous-window","kind":"gpSelectionRoute","sourceRoute":[{"bar":0,"occurrence":0,"durationTick":3840},{"bar":1,"occurrence":0,"durationTick":3840},{"bar":0,"occurrence":1,"durationTick":3840},{"bar":1,"occurrence":1,"durationTick":3840},{"bar":2,"occurrence":0,"durationTick":3840}],"selectedRoute":[{"bar":0,"occurrence":0,"durationTick":3840},{"bar":1,"occurrence":0,"durationTick":3840},{"bar":0,"occurrence":1,"durationTick":3840},{"bar":1,"occurrence":1,"durationTick":3840}],"writtenBarMap":[0,1],"expected":{"sourceWindowStarts":[0],"sourceOccurrenceIndices":[0,1,2,3]}},
+    {"name":"gp-cut-repeat-is-ambiguous-without-pass-selection","kind":"gpSelectionRoute","sourceRoute":[{"bar":0,"occurrence":0,"durationTick":3840},{"bar":1,"occurrence":0,"durationTick":3840},{"bar":0,"occurrence":1,"durationTick":3840},{"bar":1,"occurrence":1,"durationTick":3840},{"bar":2,"occurrence":0,"durationTick":3840}],"selectedRoute":[{"bar":0,"occurrence":0,"durationTick":3840}],"writtenBarMap":[1],"expected":{"sourceWindowStarts":[1,3],"rejectReason":"ambiguous-performed-window","omitBackingAllowed":true}},
+    {"name":"gp-selection-cannot-join-separated-source-windows","kind":"gpSelectionRoute","sourceRoute":[{"bar":0,"occurrence":0,"durationTick":3840},{"bar":1,"occurrence":0,"durationTick":3840},{"bar":2,"occurrence":0,"durationTick":3840}],"selectedRoute":[{"bar":0,"occurrence":0,"durationTick":3840},{"bar":1,"occurrence":0,"durationTick":3840}],"writtenBarMap":[0,2],"expected":{"sourceWindowStarts":[],"rejectReason":"no-contiguous-performed-window","omitBackingAllowed":true}},
+    {"name":"gp-selected-track-cannot-shorten-controlling-pickup","kind":"gpSelectionRoute","sourceRoute":[{"bar":0,"occurrence":0,"durationTick":1920}],"selectedRoute":[{"bar":0,"occurrence":0,"durationTick":960}],"writtenBarMap":[0],"expected":{"sourceWindowStarts":[],"rejectReason":"changed-occurrence-duration","omitBackingAllowed":true}},
+    {"name":"signed-gp-source-import-preserves-physical-map","kind":"gpSignedImport","sourcePins":[{"tick":0,"sourceMs":-250},{"tick":960,"sourceMs":250}],"expected":{"offsetMs":250,"storedPins":[{"tick":0,"audioMs":0},{"tick":960,"audioMs":500}],"sourceSamples":[{"tick":0,"sourceMs":-250},{"tick":960,"elapsedMs":500,"sourceMs":250}]}}
+  ]
+}

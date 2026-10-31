@@ -1,0 +1,1811 @@
+{
+  "format": "TabPlayer",
+  "schemaVersion": 3,
+  "engineVersion": "1.8.4",
+  "base": {
+    "kind": "blank",
+    "title": "Seven Steps, Five Echoes",
+    "artist": "TabPlayer Originals",
+    "tempo": 126,
+    "tuning": [
+      64,
+      59,
+      55,
+      50,
+      45,
+      40
+    ],
+    "measureCount": 8
+  },
+  "baselineEdits": [
+    {
+      "type": "addPercussionTrack",
+      "name": "Drums",
+      "program": 0
+    },
+    {
+      "type": "removeTrack",
+      "track": 0
+    },
+    {
+      "type": "setTrackInfo",
+      "track": 0,
+      "name": "Drums",
+      "shortName": "Dr.",
+      "program": 0
+    },
+    {
+      "type": "setStaffSettings",
+      "track": 0,
+      "staff": 0,
+      "settings": {
+        "tuning": [],
+        "capo": 0,
+        "transposition": 0,
+        "displayTransposition": 0,
+        "clef": 0,
+        "showTab": false,
+        "showNotation": true
+      }
+    },
+    {
+      "type": "setTrackLayout",
+      "track": 0,
+      "barsPerSystem": 4,
+      "lineBreaks": []
+    },
+    {
+      "type": "setTrackSound",
+      "trackId": "added/0/{\"type\":\"addPercussionTrack\",\"name\":\"Drums\",\"program\":0}",
+      "sound": {
+        "voiceId": "gm",
+        "presetId": "gm",
+        "effects": {
+          "gate": {
+            "enabled": false,
+            "thresholdDb": -60,
+            "releaseMs": 100
+          },
+          "compressor": {
+            "enabled": false,
+            "thresholdDb": -18,
+            "ratio": 4,
+            "attackMs": 10,
+            "releaseMs": 100,
+            "makeupDb": 0
+          },
+          "amp": {
+            "enabled": false,
+            "model": "clean",
+            "drive": 0.1,
+            "gainDb": 0
+          },
+          "cabinet": {
+            "enabled": false,
+            "model": "open"
+          },
+          "eq": {
+            "enabled": false,
+            "lowDb": 0,
+            "midDb": 0,
+            "highDb": 0,
+            "midHz": 1000
+          },
+          "chorus": {
+            "enabled": false,
+            "rateHz": 1,
+            "depthMs": 5,
+            "mix": 0.15
+          },
+          "delay": {
+            "enabled": false,
+            "quarterNotes": 1,
+            "feedback": 0.25,
+            "mix": 0.15
+          },
+          "reverb": {
+            "enabled": false,
+            "room": 0.5,
+            "damping": 0.5,
+            "mix": 0.12
+          }
+        }
+      }
+    },
+    {
+      "type": "setTrackMix",
+      "trackId": "added/0/{\"type\":\"addPercussionTrack\",\"name\":\"Drums\",\"program\":0}",
+      "mix": {
+        "gain": 0.72,
+        "pan": 0,
+        "mute": false,
+        "solo": false
+      }
+    },
+    {
+      "type": "setPrintLayout",
+      "layout": {
+        "paper": "A4",
+        "orientation": "portrait",
+        "marginMm": 15,
+        "scale": 1,
+        "profile": "Score"
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 0,
+        "voice": 0,
+        "beat": 3
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 0,
+        "voice": 0,
+        "beat": 2
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 0,
+        "voice": 0,
+        "beat": 1
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 0,
+        "voice": 0,
+        "beat": 0
+      }
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 0,
+        "voice": 0,
+        "beat": 0
+      },
+      "duration": 8,
+      "dots": 0
+    },
+    {
+      "type": "addPercussionNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 0,
+        "voice": 0,
+        "beat": 0
+      },
+      "articulation": 35
+    },
+    {
+      "type": "addPercussionNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 0,
+        "voice": 0,
+        "beat": 0
+      },
+      "articulation": 42
+    },
+    {
+      "type": "setNoteTechniquesByIndex",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 0,
+        "voice": 0,
+        "beat": 0
+      },
+      "noteIndex": 0,
+      "patch": {
+        "accent": 2
+      }
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 0,
+        "voice": 0,
+        "beat": 1
+      },
+      "duration": 8,
+      "dots": 0
+    },
+    {
+      "type": "addPercussionNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 0,
+        "voice": 0,
+        "beat": 1
+      },
+      "articulation": 42
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 0,
+        "voice": 0,
+        "beat": 2
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "addPercussionNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 0,
+        "voice": 0,
+        "beat": 2
+      },
+      "articulation": 38
+    },
+    {
+      "type": "addPercussionNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 0,
+        "voice": 0,
+        "beat": 2
+      },
+      "articulation": 42
+    },
+    {
+      "type": "setNoteTechniquesByIndex",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 0,
+        "voice": 0,
+        "beat": 2
+      },
+      "noteIndex": 0,
+      "patch": {
+        "accent": 1
+      }
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 0,
+        "voice": 0,
+        "beat": 3
+      },
+      "duration": 8,
+      "dots": 0
+    },
+    {
+      "type": "addPercussionNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 0,
+        "voice": 0,
+        "beat": 3
+      },
+      "articulation": 48
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 0,
+        "voice": 0,
+        "beat": 4
+      },
+      "duration": 8,
+      "dots": 0
+    },
+    {
+      "type": "addPercussionNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 0,
+        "voice": 0,
+        "beat": 4
+      },
+      "articulation": 45
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 0,
+        "voice": 0,
+        "beat": 5
+      },
+      "duration": 8,
+      "dots": 0
+    },
+    {
+      "type": "addPercussionNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 0,
+        "voice": 0,
+        "beat": 5
+      },
+      "articulation": 43
+    },
+    {
+      "type": "setMeasureSettings",
+      "bar": 0,
+      "numerator": 7,
+      "denominator": 8,
+      "pickup": false,
+      "freeTime": false,
+      "repeatStart": false,
+      "repeatCount": 0,
+      "endings": [],
+      "section": "2 + 2 + 3",
+      "tempos": [
+        {
+          "beat": 0,
+          "bpm": 126,
+          "linear": false
+        }
+      ]
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 1,
+        "voice": 0,
+        "beat": 3
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 1,
+        "voice": 0,
+        "beat": 2
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 1,
+        "voice": 0,
+        "beat": 1
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 1,
+        "voice": 0,
+        "beat": 0
+      }
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 1,
+        "voice": 0,
+        "beat": 0
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "addPercussionNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 1,
+        "voice": 0,
+        "beat": 0
+      },
+      "articulation": 35
+    },
+    {
+      "type": "addPercussionNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 1,
+        "voice": 0,
+        "beat": 0
+      },
+      "articulation": 51
+    },
+    {
+      "type": "setNoteTechniquesByIndex",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 1,
+        "voice": 0,
+        "beat": 0
+      },
+      "noteIndex": 0,
+      "patch": {
+        "accent": 1
+      }
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 1,
+        "voice": 0,
+        "beat": 1
+      },
+      "duration": 8,
+      "dots": 0
+    },
+    {
+      "type": "addPercussionNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 1,
+        "voice": 0,
+        "beat": 1
+      },
+      "articulation": 37
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 1,
+        "voice": 0,
+        "beat": 2
+      },
+      "duration": 8,
+      "dots": 0
+    },
+    {
+      "type": "addPercussionNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 1,
+        "voice": 0,
+        "beat": 2
+      },
+      "articulation": 53
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 1,
+        "voice": 0,
+        "beat": 3
+      },
+      "duration": 8,
+      "dots": 0
+    },
+    {
+      "type": "addPercussionNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 1,
+        "voice": 0,
+        "beat": 3
+      },
+      "articulation": 38
+    },
+    {
+      "type": "setNoteTechniquesByIndex",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 1,
+        "voice": 0,
+        "beat": 3
+      },
+      "noteIndex": 0,
+      "patch": {
+        "ghost": true
+      }
+    },
+    {
+      "type": "setMeasureSettings",
+      "bar": 1,
+      "numerator": 5,
+      "denominator": 8,
+      "pickup": false,
+      "freeTime": false,
+      "repeatStart": false,
+      "repeatCount": 0,
+      "endings": [],
+      "section": "2 + 3",
+      "tempos": []
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 2,
+        "voice": 0,
+        "beat": 3
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 2,
+        "voice": 0,
+        "beat": 2
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 2,
+        "voice": 0,
+        "beat": 1
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 2,
+        "voice": 0,
+        "beat": 0
+      }
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 2,
+        "voice": 0,
+        "beat": 0
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "addPercussionNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 2,
+        "voice": 0,
+        "beat": 0
+      },
+      "articulation": 35
+    },
+    {
+      "type": "addPercussionNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 2,
+        "voice": 0,
+        "beat": 0
+      },
+      "articulation": 42
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 2,
+        "voice": 0,
+        "beat": 1
+      },
+      "duration": 8,
+      "dots": 0
+    },
+    {
+      "type": "addPercussionNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 2,
+        "voice": 0,
+        "beat": 1
+      },
+      "articulation": 38
+    },
+    {
+      "type": "setNoteTechniquesByIndex",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 2,
+        "voice": 0,
+        "beat": 1
+      },
+      "noteIndex": 0,
+      "patch": {
+        "accent": 1
+      }
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 2,
+        "voice": 0,
+        "beat": 2
+      },
+      "duration": 8,
+      "dots": 0
+    },
+    {
+      "type": "addPercussionNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 2,
+        "voice": 0,
+        "beat": 2
+      },
+      "articulation": 42
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 2,
+        "voice": 0,
+        "beat": 3
+      },
+      "duration": 8,
+      "dots": 0
+    },
+    {
+      "type": "addPercussionNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 2,
+        "voice": 0,
+        "beat": 3
+      },
+      "articulation": 50
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 2,
+        "voice": 0,
+        "beat": 4
+      },
+      "duration": 8,
+      "dots": 0
+    },
+    {
+      "type": "addPercussionNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 2,
+        "voice": 0,
+        "beat": 4
+      },
+      "articulation": 48
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 2,
+        "voice": 0,
+        "beat": 5
+      },
+      "duration": 8,
+      "dots": 0
+    },
+    {
+      "type": "addPercussionNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 2,
+        "voice": 0,
+        "beat": 5
+      },
+      "articulation": 45
+    },
+    {
+      "type": "setMeasureSettings",
+      "bar": 2,
+      "numerator": 7,
+      "denominator": 8,
+      "pickup": false,
+      "freeTime": false,
+      "repeatStart": false,
+      "repeatCount": 0,
+      "endings": [],
+      "section": "",
+      "tempos": []
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 3,
+        "voice": 0,
+        "beat": 3
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 3,
+        "voice": 0,
+        "beat": 2
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 3,
+        "voice": 0,
+        "beat": 1
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 3,
+        "voice": 0,
+        "beat": 0
+      }
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 3,
+        "voice": 0,
+        "beat": 0
+      },
+      "duration": 8,
+      "dots": 0
+    },
+    {
+      "type": "addPercussionNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 3,
+        "voice": 0,
+        "beat": 0
+      },
+      "articulation": 36
+    },
+    {
+      "type": "addPercussionNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 3,
+        "voice": 0,
+        "beat": 0
+      },
+      "articulation": 46
+    },
+    {
+      "type": "setNoteTechniquesByIndex",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 3,
+        "voice": 0,
+        "beat": 0
+      },
+      "noteIndex": 0,
+      "patch": {
+        "accent": 2
+      }
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 3,
+        "voice": 0,
+        "beat": 1
+      },
+      "duration": 8,
+      "dots": 0
+    },
+    {
+      "type": "addPercussionNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 3,
+        "voice": 0,
+        "beat": 1
+      },
+      "articulation": 42
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 3,
+        "voice": 0,
+        "beat": 2
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "addPercussionNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 3,
+        "voice": 0,
+        "beat": 2
+      },
+      "articulation": 38
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 3,
+        "voice": 0,
+        "beat": 3
+      },
+      "duration": 8,
+      "dots": 0
+    },
+    {
+      "type": "addPercussionNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 3,
+        "voice": 0,
+        "beat": 3
+      },
+      "articulation": 43
+    },
+    {
+      "type": "setMeasureSettings",
+      "bar": 3,
+      "numerator": 5,
+      "denominator": 8,
+      "pickup": false,
+      "freeTime": false,
+      "repeatStart": false,
+      "repeatCount": 0,
+      "endings": [],
+      "section": "",
+      "tempos": []
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 4,
+        "voice": 0,
+        "beat": 3
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 4,
+        "voice": 0,
+        "beat": 2
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 4,
+        "voice": 0,
+        "beat": 1
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 4,
+        "voice": 0,
+        "beat": 0
+      }
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 4,
+        "voice": 0,
+        "beat": 0
+      },
+      "duration": 8,
+      "dots": 0
+    },
+    {
+      "type": "addPercussionNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 4,
+        "voice": 0,
+        "beat": 0
+      },
+      "articulation": 35
+    },
+    {
+      "type": "addPercussionNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 4,
+        "voice": 0,
+        "beat": 0
+      },
+      "articulation": 51
+    },
+    {
+      "type": "setNoteTechniquesByIndex",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 4,
+        "voice": 0,
+        "beat": 0
+      },
+      "noteIndex": 0,
+      "patch": {
+        "accent": 1
+      }
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 4,
+        "voice": 0,
+        "beat": 1
+      },
+      "duration": 8,
+      "dots": 0
+    },
+    {
+      "type": "addPercussionNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 4,
+        "voice": 0,
+        "beat": 1
+      },
+      "articulation": 53
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 4,
+        "voice": 0,
+        "beat": 2
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "addPercussionNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 4,
+        "voice": 0,
+        "beat": 2
+      },
+      "articulation": 38
+    },
+    {
+      "type": "addPercussionNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 4,
+        "voice": 0,
+        "beat": 2
+      },
+      "articulation": 51
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 4,
+        "voice": 0,
+        "beat": 3
+      },
+      "duration": 8,
+      "dots": 0
+    },
+    {
+      "type": "addPercussionNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 4,
+        "voice": 0,
+        "beat": 3
+      },
+      "articulation": 37
+    },
+    {
+      "type": "setNoteTechniquesByIndex",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 4,
+        "voice": 0,
+        "beat": 3
+      },
+      "noteIndex": 0,
+      "patch": {
+        "ghost": true
+      }
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 4,
+        "voice": 0,
+        "beat": 4
+      },
+      "duration": 8,
+      "dots": 0
+    },
+    {
+      "type": "addPercussionNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 4,
+        "voice": 0,
+        "beat": 4
+      },
+      "articulation": 48
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 4,
+        "voice": 0,
+        "beat": 5
+      },
+      "duration": 8,
+      "dots": 0
+    },
+    {
+      "type": "addPercussionNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 4,
+        "voice": 0,
+        "beat": 5
+      },
+      "articulation": 43
+    },
+    {
+      "type": "setMeasureSettings",
+      "bar": 4,
+      "numerator": 7,
+      "denominator": 8,
+      "pickup": false,
+      "freeTime": false,
+      "repeatStart": false,
+      "repeatCount": 0,
+      "endings": [],
+      "section": "",
+      "tempos": []
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 5,
+        "voice": 0,
+        "beat": 3
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 5,
+        "voice": 0,
+        "beat": 2
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 5,
+        "voice": 0,
+        "beat": 1
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 5,
+        "voice": 0,
+        "beat": 0
+      }
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 5,
+        "voice": 0,
+        "beat": 0
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "addPercussionNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 5,
+        "voice": 0,
+        "beat": 0
+      },
+      "articulation": 35
+    },
+    {
+      "type": "addPercussionNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 5,
+        "voice": 0,
+        "beat": 0
+      },
+      "articulation": 42
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 5,
+        "voice": 0,
+        "beat": 1
+      },
+      "duration": 8,
+      "dots": 0
+    },
+    {
+      "type": "addPercussionNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 5,
+        "voice": 0,
+        "beat": 1
+      },
+      "articulation": 38
+    },
+    {
+      "type": "setNoteTechniquesByIndex",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 5,
+        "voice": 0,
+        "beat": 1
+      },
+      "noteIndex": 0,
+      "patch": {
+        "accent": 1
+      }
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 5,
+        "voice": 0,
+        "beat": 2
+      },
+      "duration": 8,
+      "dots": 0
+    },
+    {
+      "type": "addPercussionNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 5,
+        "voice": 0,
+        "beat": 2
+      },
+      "articulation": 46
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 5,
+        "voice": 0,
+        "beat": 3
+      },
+      "duration": 8,
+      "dots": 0
+    },
+    {
+      "type": "addPercussionNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 5,
+        "voice": 0,
+        "beat": 3
+      },
+      "articulation": 45
+    },
+    {
+      "type": "setMeasureSettings",
+      "bar": 5,
+      "numerator": 5,
+      "denominator": 8,
+      "pickup": false,
+      "freeTime": false,
+      "repeatStart": false,
+      "repeatCount": 0,
+      "endings": [],
+      "section": "",
+      "tempos": []
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 6,
+        "voice": 0,
+        "beat": 3
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 6,
+        "voice": 0,
+        "beat": 2
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 6,
+        "voice": 0,
+        "beat": 1
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 6,
+        "voice": 0,
+        "beat": 0
+      }
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 6,
+        "voice": 0,
+        "beat": 0
+      },
+      "duration": 8,
+      "dots": 0
+    },
+    {
+      "type": "addPercussionNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 6,
+        "voice": 0,
+        "beat": 0
+      },
+      "articulation": 36
+    },
+    {
+      "type": "addPercussionNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 6,
+        "voice": 0,
+        "beat": 0
+      },
+      "articulation": 49
+    },
+    {
+      "type": "setNoteTechniquesByIndex",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 6,
+        "voice": 0,
+        "beat": 0
+      },
+      "noteIndex": 0,
+      "patch": {
+        "accent": 2
+      }
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 6,
+        "voice": 0,
+        "beat": 1
+      },
+      "duration": 8,
+      "dots": 0
+    },
+    {
+      "type": "addPercussionNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 6,
+        "voice": 0,
+        "beat": 1
+      },
+      "articulation": 42
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 6,
+        "voice": 0,
+        "beat": 2
+      },
+      "duration": 8,
+      "dots": 0
+    },
+    {
+      "type": "addPercussionNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 6,
+        "voice": 0,
+        "beat": 2
+      },
+      "articulation": 38
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 6,
+        "voice": 0,
+        "beat": 3
+      },
+      "duration": 8,
+      "dots": 0
+    },
+    {
+      "type": "addPercussionNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 6,
+        "voice": 0,
+        "beat": 3
+      },
+      "articulation": 48
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 6,
+        "voice": 0,
+        "beat": 4
+      },
+      "duration": 4,
+      "dots": 0
+    },
+    {
+      "type": "addPercussionNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 6,
+        "voice": 0,
+        "beat": 4
+      },
+      "articulation": 45
+    },
+    {
+      "type": "addPercussionNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 6,
+        "voice": 0,
+        "beat": 4
+      },
+      "articulation": 51
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 6,
+        "voice": 0,
+        "beat": 5
+      },
+      "duration": 8,
+      "dots": 0
+    },
+    {
+      "type": "addPercussionNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 6,
+        "voice": 0,
+        "beat": 5
+      },
+      "articulation": 43
+    },
+    {
+      "type": "setMeasureSettings",
+      "bar": 6,
+      "numerator": 7,
+      "denominator": 8,
+      "pickup": false,
+      "freeTime": false,
+      "repeatStart": false,
+      "repeatCount": 0,
+      "endings": [],
+      "section": "",
+      "tempos": []
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 7,
+        "voice": 0,
+        "beat": 3
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 7,
+        "voice": 0,
+        "beat": 2
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 7,
+        "voice": 0,
+        "beat": 1
+      }
+    },
+    {
+      "type": "deleteBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 7,
+        "voice": 0,
+        "beat": 0
+      }
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 7,
+        "voice": 0,
+        "beat": 0
+      },
+      "duration": 8,
+      "dots": 0
+    },
+    {
+      "type": "addPercussionNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 7,
+        "voice": 0,
+        "beat": 0
+      },
+      "articulation": 35
+    },
+    {
+      "type": "addPercussionNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 7,
+        "voice": 0,
+        "beat": 0
+      },
+      "articulation": 51
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 7,
+        "voice": 0,
+        "beat": 1
+      },
+      "duration": 8,
+      "dots": 0
+    },
+    {
+      "type": "addPercussionNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 7,
+        "voice": 0,
+        "beat": 1
+      },
+      "articulation": 38
+    },
+    {
+      "type": "setNoteTechniquesByIndex",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 7,
+        "voice": 0,
+        "beat": 1
+      },
+      "noteIndex": 0,
+      "patch": {
+        "ghost": true
+      }
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 7,
+        "voice": 0,
+        "beat": 2
+      },
+      "duration": 8,
+      "dots": 0
+    },
+    {
+      "type": "addPercussionNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 7,
+        "voice": 0,
+        "beat": 2
+      },
+      "articulation": 50
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 7,
+        "voice": 0,
+        "beat": 3
+      },
+      "duration": 8,
+      "dots": 0
+    },
+    {
+      "type": "addPercussionNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 7,
+        "voice": 0,
+        "beat": 3
+      },
+      "articulation": 43
+    },
+    {
+      "type": "insertBeat",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 7,
+        "voice": 0,
+        "beat": 4
+      },
+      "duration": 8,
+      "dots": 0
+    },
+    {
+      "type": "addPercussionNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 7,
+        "voice": 0,
+        "beat": 4
+      },
+      "articulation": 36
+    },
+    {
+      "type": "addPercussionNote",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 7,
+        "voice": 0,
+        "beat": 4
+      },
+      "articulation": 49
+    },
+    {
+      "type": "setNoteTechniquesByIndex",
+      "target": {
+        "track": 0,
+        "staff": 0,
+        "bar": 7,
+        "voice": 0,
+        "beat": 4
+      },
+      "noteIndex": 0,
+      "patch": {
+        "accent": 2
+      }
+    },
+    {
+      "type": "setMeasureSettings",
+      "bar": 7,
+      "numerator": 5,
+      "denominator": 8,
+      "pickup": false,
+      "freeTime": false,
+      "repeatStart": false,
+      "repeatCount": 0,
+      "endings": [],
+      "section": "",
+      "tempos": []
+    }
+  ],
+  "edits": [],
+  "assets": {}
+}

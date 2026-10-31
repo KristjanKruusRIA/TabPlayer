@@ -1,0 +1,663 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "native3_required_empty_baseline",
+      "project": {
+        "format": "TabPlayer",
+        "schemaVersion": 3,
+        "engineVersion": "1.8.4",
+        "base": {
+          "kind": "blank",
+          "title": "Baseline protocol",
+          "artist": "TabPlayer",
+          "tempo": 120,
+          "tuning": [
+            64,
+            59,
+            55,
+            50,
+            45,
+            40
+          ],
+          "measureCount": 2
+        },
+        "baselineEdits": [],
+        "edits": [],
+        "assets": {}
+      },
+      "valid": true
+    },
+    {
+      "name": "native3_baseline_and_user_history",
+      "project": {
+        "format": "TabPlayer",
+        "schemaVersion": 3,
+        "engineVersion": "1.8.4",
+        "base": {
+          "kind": "blank",
+          "title": "Baseline protocol",
+          "artist": "TabPlayer",
+          "tempo": 120,
+          "tuning": [
+            64,
+            59,
+            55,
+            50,
+            45,
+            40
+          ],
+          "measureCount": 2
+        },
+        "baselineEdits": [
+          {
+            "type": "setScoreInfo",
+            "title": "Template title",
+            "artist": "Original",
+            "tempo": 105
+          }
+        ],
+        "edits": [
+          {
+            "type": "setScoreInfo",
+            "title": "User title",
+            "artist": "Player",
+            "tempo": 108
+          }
+        ],
+        "assets": {}
+      },
+      "valid": true
+    },
+    {
+      "name": "legacy1_without_assets_or_baseline",
+      "project": {
+        "format": "TabPlayer",
+        "schemaVersion": 1,
+        "engineVersion": "1.8.4",
+        "base": {
+          "kind": "blank",
+          "title": "Baseline protocol",
+          "artist": "TabPlayer",
+          "tempo": 120,
+          "tuning": [
+            64,
+            59,
+            55,
+            50,
+            45,
+            40
+          ],
+          "measureCount": 2
+        },
+        "edits": []
+      },
+      "valid": true
+    },
+    {
+      "name": "legacy2_without_baseline",
+      "project": {
+        "format": "TabPlayer",
+        "schemaVersion": 2,
+        "engineVersion": "1.8.4",
+        "base": {
+          "kind": "blank",
+          "title": "Baseline protocol",
+          "artist": "TabPlayer",
+          "tempo": 120,
+          "tuning": [
+            64,
+            59,
+            55,
+            50,
+            45,
+            40
+          ],
+          "measureCount": 2
+        },
+        "edits": [
+          {
+            "type": "setScoreInfo",
+            "title": "Legacy title",
+            "artist": "Original",
+            "tempo": 120
+          }
+        ],
+        "assets": {}
+      },
+      "valid": true
+    },
+    {
+      "name": "future_version",
+      "project": {
+        "format": "TabPlayer",
+        "schemaVersion": 4,
+        "engineVersion": "1.8.4",
+        "base": {
+          "kind": "blank",
+          "title": "Baseline protocol",
+          "artist": "TabPlayer",
+          "tempo": 120,
+          "tuning": [
+            64,
+            59,
+            55,
+            50,
+            45,
+            40
+          ],
+          "measureCount": 2
+        },
+        "baselineEdits": [],
+        "edits": [],
+        "assets": {}
+      },
+      "valid": false
+    },
+    {
+      "name": "unknown_top_level",
+      "project": {
+        "format": "TabPlayer",
+        "schemaVersion": 3,
+        "engineVersion": "1.8.4",
+        "base": {
+          "kind": "blank",
+          "title": "Baseline protocol",
+          "artist": "TabPlayer",
+          "tempo": 120,
+          "tuning": [
+            64,
+            59,
+            55,
+            50,
+            45,
+            40
+          ],
+          "measureCount": 2
+        },
+        "baselineEdits": [],
+        "edits": [],
+        "assets": {},
+        "unrecognized": true
+      },
+      "valid": false
+    },
+    {
+      "name": "unknown_blank_field",
+      "project": {
+        "format": "TabPlayer",
+        "schemaVersion": 3,
+        "engineVersion": "1.8.4",
+        "base": {
+          "kind": "blank",
+          "title": "Baseline protocol",
+          "artist": "TabPlayer",
+          "tempo": 120,
+          "tuning": [
+            64,
+            59,
+            55,
+            50,
+            45,
+            40
+          ],
+          "measureCount": 2,
+          "unrecognized": true
+        },
+        "baselineEdits": [],
+        "edits": [],
+        "assets": {}
+      },
+      "valid": false
+    },
+    {
+      "name": "missing_baseline",
+      "project": {
+        "format": "TabPlayer",
+        "schemaVersion": 3,
+        "engineVersion": "1.8.4",
+        "base": {
+          "kind": "blank",
+          "title": "Baseline protocol",
+          "artist": "TabPlayer",
+          "tempo": 120,
+          "tuning": [
+            64,
+            59,
+            55,
+            50,
+            45,
+            40
+          ],
+          "measureCount": 2
+        },
+        "edits": [],
+        "assets": {}
+      },
+      "valid": false
+    },
+    {
+      "name": "null_baseline",
+      "project": {
+        "format": "TabPlayer",
+        "schemaVersion": 3,
+        "engineVersion": "1.8.4",
+        "base": {
+          "kind": "blank",
+          "title": "Baseline protocol",
+          "artist": "TabPlayer",
+          "tempo": 120,
+          "tuning": [
+            64,
+            59,
+            55,
+            50,
+            45,
+            40
+          ],
+          "measureCount": 2
+        },
+        "baselineEdits": null,
+        "edits": [],
+        "assets": {}
+      },
+      "valid": false
+    },
+    {
+      "name": "object_baseline",
+      "project": {
+        "format": "TabPlayer",
+        "schemaVersion": 3,
+        "engineVersion": "1.8.4",
+        "base": {
+          "kind": "blank",
+          "title": "Baseline protocol",
+          "artist": "TabPlayer",
+          "tempo": 120,
+          "tuning": [
+            64,
+            59,
+            55,
+            50,
+            45,
+            40
+          ],
+          "measureCount": 2
+        },
+        "baselineEdits": {},
+        "edits": [],
+        "assets": {}
+      },
+      "valid": false
+    },
+    {
+      "name": "missing_user_history",
+      "project": {
+        "format": "TabPlayer",
+        "schemaVersion": 3,
+        "engineVersion": "1.8.4",
+        "base": {
+          "kind": "blank",
+          "title": "Baseline protocol",
+          "artist": "TabPlayer",
+          "tempo": 120,
+          "tuning": [
+            64,
+            59,
+            55,
+            50,
+            45,
+            40
+          ],
+          "measureCount": 2
+        },
+        "baselineEdits": [],
+        "assets": {}
+      },
+      "valid": false
+    },
+    {
+      "name": "null_user_history",
+      "project": {
+        "format": "TabPlayer",
+        "schemaVersion": 3,
+        "engineVersion": "1.8.4",
+        "base": {
+          "kind": "blank",
+          "title": "Baseline protocol",
+          "artist": "TabPlayer",
+          "tempo": 120,
+          "tuning": [
+            64,
+            59,
+            55,
+            50,
+            45,
+            40
+          ],
+          "measureCount": 2
+        },
+        "baselineEdits": [],
+        "edits": null,
+        "assets": {}
+      },
+      "valid": false
+    },
+    {
+      "name": "missing_assets",
+      "project": {
+        "format": "TabPlayer",
+        "schemaVersion": 3,
+        "engineVersion": "1.8.4",
+        "base": {
+          "kind": "blank",
+          "title": "Baseline protocol",
+          "artist": "TabPlayer",
+          "tempo": 120,
+          "tuning": [
+            64,
+            59,
+            55,
+            50,
+            45,
+            40
+          ],
+          "measureCount": 2
+        },
+        "baselineEdits": [],
+        "edits": []
+      },
+      "valid": false
+    },
+    {
+      "name": "null_assets",
+      "project": {
+        "format": "TabPlayer",
+        "schemaVersion": 3,
+        "engineVersion": "1.8.4",
+        "base": {
+          "kind": "blank",
+          "title": "Baseline protocol",
+          "artist": "TabPlayer",
+          "tempo": 120,
+          "tuning": [
+            64,
+            59,
+            55,
+            50,
+            45,
+            40
+          ],
+          "measureCount": 2
+        },
+        "baselineEdits": [],
+        "edits": [],
+        "assets": null
+      },
+      "valid": false
+    },
+    {
+      "name": "legacy1_with_assets",
+      "project": {
+        "format": "TabPlayer",
+        "schemaVersion": 1,
+        "engineVersion": "1.8.4",
+        "base": {
+          "kind": "blank",
+          "title": "Baseline protocol",
+          "artist": "TabPlayer",
+          "tempo": 120,
+          "tuning": [
+            64,
+            59,
+            55,
+            50,
+            45,
+            40
+          ],
+          "measureCount": 2
+        },
+        "edits": [],
+        "assets": {}
+      },
+      "valid": false
+    },
+    {
+      "name": "legacy1_with_empty_baseline",
+      "project": {
+        "format": "TabPlayer",
+        "schemaVersion": 1,
+        "engineVersion": "1.8.4",
+        "base": {
+          "kind": "blank",
+          "title": "Baseline protocol",
+          "artist": "TabPlayer",
+          "tempo": 120,
+          "tuning": [
+            64,
+            59,
+            55,
+            50,
+            45,
+            40
+          ],
+          "measureCount": 2
+        },
+        "baselineEdits": [],
+        "edits": []
+      },
+      "valid": false
+    },
+    {
+      "name": "legacy1_with_null_baseline",
+      "project": {
+        "format": "TabPlayer",
+        "schemaVersion": 1,
+        "engineVersion": "1.8.4",
+        "base": {
+          "kind": "blank",
+          "title": "Baseline protocol",
+          "artist": "TabPlayer",
+          "tempo": 120,
+          "tuning": [
+            64,
+            59,
+            55,
+            50,
+            45,
+            40
+          ],
+          "measureCount": 2
+        },
+        "baselineEdits": null,
+        "edits": []
+      },
+      "valid": false
+    },
+    {
+      "name": "legacy2_with_empty_baseline",
+      "project": {
+        "format": "TabPlayer",
+        "schemaVersion": 2,
+        "engineVersion": "1.8.4",
+        "base": {
+          "kind": "blank",
+          "title": "Baseline protocol",
+          "artist": "TabPlayer",
+          "tempo": 120,
+          "tuning": [
+            64,
+            59,
+            55,
+            50,
+            45,
+            40
+          ],
+          "measureCount": 2
+        },
+        "baselineEdits": [],
+        "edits": [],
+        "assets": {}
+      },
+      "valid": false
+    },
+    {
+      "name": "legacy2_with_null_baseline",
+      "project": {
+        "format": "TabPlayer",
+        "schemaVersion": 2,
+        "engineVersion": "1.8.4",
+        "base": {
+          "kind": "blank",
+          "title": "Baseline protocol",
+          "artist": "TabPlayer",
+          "tempo": 120,
+          "tuning": [
+            64,
+            59,
+            55,
+            50,
+            45,
+            40
+          ],
+          "measureCount": 2
+        },
+        "baselineEdits": null,
+        "edits": [],
+        "assets": {}
+      },
+      "valid": false
+    },
+    {
+      "name": "baseline_unknown_command",
+      "project": {
+        "format": "TabPlayer",
+        "schemaVersion": 3,
+        "engineVersion": "1.8.4",
+        "base": {
+          "kind": "blank",
+          "title": "Baseline protocol",
+          "artist": "TabPlayer",
+          "tempo": 120,
+          "tuning": [
+            64,
+            59,
+            55,
+            50,
+            45,
+            40
+          ],
+          "measureCount": 2
+        },
+        "baselineEdits": [
+          {
+            "type": "notAnEdit"
+          }
+        ],
+        "edits": [],
+        "assets": {}
+      },
+      "valid": false
+    },
+    {
+      "name": "baseline_missing_backing_asset",
+      "project": {
+        "format": "TabPlayer",
+        "schemaVersion": 3,
+        "engineVersion": "1.8.4",
+        "base": {
+          "kind": "blank",
+          "title": "Baseline protocol",
+          "artist": "TabPlayer",
+          "tempo": 120,
+          "tuning": [
+            64,
+            59,
+            55,
+            50,
+            45,
+            40
+          ],
+          "measureCount": 2
+        },
+        "baselineEdits": [
+          {
+            "type": "setBacking",
+            "backing": {
+              "assetId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "offsetMs": 0,
+              "anchors": [],
+              "mix": {
+                "gain": 1,
+                "pan": 0,
+                "mute": false,
+                "solo": false
+              }
+            }
+          }
+        ],
+        "edits": [],
+        "assets": {}
+      },
+      "valid": false
+    },
+    {
+      "name": "user_unknown_command",
+      "project": {
+        "format": "TabPlayer",
+        "schemaVersion": 3,
+        "engineVersion": "1.8.4",
+        "base": {
+          "kind": "blank",
+          "title": "Baseline protocol",
+          "artist": "TabPlayer",
+          "tempo": 120,
+          "tuning": [
+            64,
+            59,
+            55,
+            50,
+            45,
+            40
+          ],
+          "measureCount": 2
+        },
+        "baselineEdits": [],
+        "edits": [
+          {
+            "type": "notAnEdit"
+          }
+        ],
+        "assets": {}
+      },
+      "valid": false
+    },
+    {
+      "name": "engine_mismatch",
+      "project": {
+        "format": "TabPlayer",
+        "schemaVersion": 3,
+        "engineVersion": "9.0.0",
+        "base": {
+          "kind": "blank",
+          "title": "Baseline protocol",
+          "artist": "TabPlayer",
+          "tempo": 120,
+          "tuning": [
+            64,
+            59,
+            55,
+            50,
+            45,
+            40
+          ],
+          "measureCount": 2
+        },
+        "baselineEdits": [],
+        "edits": [],
+        "assets": {}
+      },
+      "valid": false
+    }
+  ]
+}

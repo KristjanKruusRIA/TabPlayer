@@ -1,14 +1,69 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { blankProject } from '../project';
 import { buildScore, previewEdit } from '../engine';
-import { paginateSystems, renderPdfPages } from './pdf';
+import { loadExportFonts, paginateSystems, renderPdfPages } from './pdf';
 import { writeFileSync,mkdirSync } from 'node:fs';
 import { model,Settings } from '@coderline/alphatab';
 import { music,noteAt } from '../editor/fixtures';
+import { defaultEngraving } from '../engraving/projection';
 
 const layout = {paper:'A4' as const,orientation:'portrait' as const,marginMm:15,scale:1,profile:'ScoreTab' as const};
 const system=(height:number,id:string)=>({width:680,height,svg:`<svg xmlns="http://www.w3.org/2000/svg"><path id="${id}" d="M0 0L10 10"/></svg>`});
 describe('vector notation pagination',()=>{
+  it('preserves the mixed Unicode title with portable text fallback in both page paths',()=>{
+    const score=music();score.title='Öölaul — 同じ楽譜 🎸 · A very long independently authored document title for horizontal score tab overflow';score.defaultSystemsLayout=1;
+    score.tracks[0].staves[0].bars[0].voices[0].beats[0].text='同じ楽譜 🎸';
+    const before=model.JsonConverter.scoreToJson(score),options={page:{widthMm:210,heightMm:297,marginsMm:{top:15,right:15,bottom:15,left:15},scale:1,profile:'document' as const},engraving:defaultEngraving(),trackIds:['base/0']};
+    for(const frozen of [undefined,options]){
+      const svg=renderPdfPages(score,{tracks:[0],range:null},layout,frozen).map(page=>page.svg).join('');
+      const doc=new DOMParser().parseFromString(svg,'image/svg+xml'),title=[...doc.querySelectorAll('text')].find(text=>text.textContent===score.title);
+      expect(title).toBeDefined();expect(title!.getAttribute('font-family')).toBe('Noto Sans, Noto Sans CJK JP, Noto Emoji');
+      const annotation=[...doc.querySelectorAll('text')].find(text=>text.textContent==='同じ楽譜 🎸');
+      expect(annotation).toBeDefined();expect(annotation!.getAttribute('style')).toContain('Noto Sans CJK JP');expect(annotation!.getAttribute('style')).toContain('Noto Emoji');
+    }
+    expect(model.JsonConverter.scoreToJson(score)).toBe(before);
+  });
+  it('fills custom header and footer fields from the exported score metadata',()=>{
+    const score=music();Object.assign(score,{title:'Song',artist:'Band',copyright:'© 2026',tab:'Tabber'});
+    const bands=(header:string,footer:string)=>({header:{left:header,center:'',right:''},footer:{left:'',center:'',right:footer}});
+    const page={widthMm:210,heightMm:297,marginsMm:{top:15,right:15,bottom:15,left:15},scale:1,profile:'document' as const,headerFooter:{first:bands('%TITLE% — %ARTIST%','%COPYRIGHT% · %PAGE%/%PAGES%'),other:bands('','tab %TABBER%')}};
+    const pages=renderPdfPages(score,{tracks:[0],range:null},layout,{page,engraving:defaultEngraving(),trackIds:['base/0']});
+    const texts=pages.map(page=>[...new DOMParser().parseFromString(page.svg,'image/svg+xml').querySelectorAll('svg > text')].map(text=>text.textContent));
+    expect(texts).toEqual(pages.map((_page,index)=>index?['tab Tabber']:['Song — Band',`© 2026 · 1/${pages.length}`]));
+  });
+  it('loads and registers all bundled export font bytes before measurement',async()=>{
+    const loaded:Array<{family:string;source:string}>=[],registered:string[]=[];
+    class ExportFontFace {
+      constructor(readonly family:string,readonly source:string){}
+      async load(){loaded.push({family:this.family,source:this.source});return this;}
+    }
+    vi.stubGlobal('FontFace',ExportFontFace);vi.stubGlobal('document',{fonts:{add:(font:ExportFontFace)=>registered.push(font.family)}});
+    try {
+      await loadExportFonts();
+      expect(loaded).toEqual([
+        {family:'Noto Sans',source:'url(/export-fonts/NotoSans-Regular.ttf)'},
+        {family:'Bravura',source:'url(/export-fonts/Bravura.otf)'},
+        {family:'Noto Sans CJK JP',source:'url(/export-fonts/NotoSansCJKjp-Regular.otf)'},
+        {family:'Noto Emoji',source:'url(/export-fonts/NotoEmoji.ttf)'}
+      ]);
+      expect(registered).toEqual(['Noto Sans','Bravura','Noto Sans CJK JP','Noto Emoji']);
+    } finally {vi.unstubAllGlobals();}
+  });
+  it('uses explicit custom pages and shared engraving without changing musical sources',()=>{
+    const score=music();score.title='A & B';score.artist='HEADER MUST NOT REPEAT';score.defaultSystemsLayout=1;
+    const before=model.JsonConverter.scoreToJson(score),engraving=defaultEngraving(),page={widthMm:250,heightMm:350,marginsMm:{top:12,right:22,bottom:32,left:42},scale:.8,profile:'document' as const};
+    const options={page,engraving,trackIds:['base/0']},plain=renderPdfPages(score,{tracks:[0],range:null},layout,options);
+    expect(plain[0]).toMatchObject({widthMm:250,heightMm:350});expect(plain.map(p=>p.svg).join('')).not.toContain('HEADER MUST NOT REPEAT');
+    expect(plain[0].svg).toContain(`translate(${42*96/25.4} ${12*96/25.4+40})`);expect(plain[0].svg).toContain('A &amp; B');
+    engraving.stylesheet.hideDynamics=true;const hidden=renderPdfPages(score,{tracks:[0],range:null},layout,options);
+    expect(hidden.map(p=>p.svg).join('')).not.toBe(plain.map(p=>p.svg).join(''));expect(model.JsonConverter.scoreToJson(score)).toBe(before);
+  });
+  it('validates selected temporary profile applicability and keeps unselected instruments independent',()=>{
+    const score=music();score.addTrack(music().tracks[0]);score.tracks[1].staves[0].stringTuning.tunings=[];score.finish(new Settings());
+    const options={page:{widthMm:297,heightMm:420,marginsMm:{top:15,right:15,bottom:15,left:15},scale:.75,profile:'Tab' as const},engraving:defaultEngraving(),trackIds:['base/0','base/1']};
+    expect(renderPdfPages(score,{tracks:[0],range:null},layout,options).length).toBeGreaterThan(0);
+    expect(()=>renderPdfPages(score,{tracks:[1],range:null},layout,options)).toThrow(/tablature|tuned/i);
+  });
   it('packs complete systems onto physical pages with escaped headers and page numbers',()=>{
     const pages=paginateSystems([system(450,'first'),system(450,'second'),system(450,'third')],'A&B <solo>',layout);
     expect(pages).toHaveLength(2);expect(pages[0].widthMm).toBe(210);expect(pages[0].heightMm).toBe(297);

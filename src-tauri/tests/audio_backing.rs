@@ -9,7 +9,7 @@ use tabplayer_lib::{
 };
 
 fn plan() -> PlaybackPlan {
-    serde_json::from_value(serde_json::json!({"generation":1,"ppq":960,"durationTick":7680,"durationMs":4000,"tracks":[{"id":"guitar","program":24,"percussion":false}],"tempos":[{"tick":0,"bpm":120}],"occurrences":[{"bar":0,"occurrence":0,"startTick":0,"endTick":3840,"startMs":0,"endMs":2000},{"bar":0,"occurrence":1,"startTick":3840,"endTick":7680,"startMs":2000,"endMs":4000}],"notes":[],"midi":[]})).unwrap()
+    serde_json::from_value(serde_json::json!({"generation":1,"ppq":960,"durationTick":7680,"durationMs":4000,"tracks":[{"id":"guitar","program":24,"percussion":false}],"tempos":[{"tick":0,"bpm":120}],"occurrences":[{"bar":0,"occurrence":0,"meterNumerator":4,"meterDenominator":4,"startTick":0,"endTick":3840,"startMs":0,"endMs":2000},{"bar":0,"occurrence":1,"meterNumerator":4,"meterDenominator":4,"startTick":3840,"endTick":7680,"startMs":2000,"endMs":4000}],"notes":[],"midi":[]})).unwrap()
 }
 
 #[test]
@@ -70,6 +70,111 @@ fn drift_offset_seek_loop_speed_pitch() {
             let first = voice.next_frame(0.75);
             voice.seek(0.75);
             assert_eq!(first, voice.next_frame(0.75));
+        }
+    }
+}
+
+#[test]
+fn renderer_backing_10_123_300_preserves_pitch_and_anchor_at_both_rates() {
+    use tabplayer_lib::{
+        audio::{renderer::Renderer, resources::AudioResources},
+        settings::{ChannelMix, DocumentSettings, TrackSound},
+    };
+    let resources = Arc::new(AudioResources {
+        manifest: Default::default(),
+        samples: Default::default(),
+        sound_font: Arc::new(
+            rustysynth::SoundFont::new(&mut std::io::Cursor::new(
+                std::fs::read(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/../node_modules/@coderline/alphatab/dist/soundfont/sonivox.sf2"
+                ))
+                .unwrap(),
+            ))
+            .unwrap(),
+        ),
+    });
+    let mut settings = DocumentSettings::default();
+    settings.sounds.insert(
+        "guitar".into(),
+        TrackSound {
+            voice_id: Some("gm".into()),
+            ..Default::default()
+        },
+    );
+    let plan = Arc::new(plan());
+    for rate in [44_100, 48_000] {
+        let tone = Arc::new(DecodedAudio {
+            sample_rate: rate,
+            channels: 2,
+            frames: Arc::new(
+                (0..rate * 2)
+                    .map(|frame| {
+                        let sample = (std::f64::consts::TAU * 440.0 * frame as f64 / rate as f64)
+                            .sin() as f32
+                            * 0.2;
+                        [sample, sample * 0.5]
+                    })
+                    .collect(),
+            ),
+        });
+        let mut impulse = vec![[0.0; 2]; rate as usize * 2];
+        impulse[(rate as f64 * 0.5) as usize] = [1.0, 0.5];
+        let impulse = Arc::new(DecodedAudio {
+            sample_rate: rate,
+            channels: 2,
+            frames: Arc::new(impulse),
+        });
+        for speed in [0.1, 1.23, 3.0] {
+            let mut renderer =
+                Renderer::new(plan.clone(), resources.clone(), settings.clone(), rate).unwrap();
+            renderer
+                .install_backing(
+                    tone.clone(),
+                    BackingMap::new(&[], 0.0, &plan).unwrap(),
+                    ChannelMix::default(),
+                )
+                .unwrap();
+            renderer.set_speed(speed).unwrap();
+            let mut output = vec![[0.0; 2]; rate as usize / 2];
+            let status = renderer.render_into(&mut output);
+            assert!((status.tick - 960.0 * speed).abs() < 1e-5);
+            let wave = &output[rate as usize / 10..];
+            let crossings: Vec<_> = wave
+                .windows(2)
+                .enumerate()
+                .filter(|(_, pair)| pair[0][0] <= 0.0 && pair[1][0] > 0.0)
+                .map(|(index, pair)| {
+                    index as f64 - pair[0][0] as f64 / (pair[1][0] - pair[0][0]) as f64
+                })
+                .collect();
+            let hz = (crossings.len() - 1) as f64 * rate as f64
+                / (crossings.last().unwrap() - crossings[0]);
+            assert!((hz - 440.0).abs() < 4.4, "rate={rate}, speed={speed}: {hz}");
+            let mut renderer =
+                Renderer::new(plan.clone(), resources.clone(), settings.clone(), rate).unwrap();
+            renderer
+                .install_backing(
+                    impulse.clone(),
+                    BackingMap::new(&[], 100.0, &plan).unwrap(),
+                    ChannelMix::default(),
+                )
+                .unwrap();
+            renderer.set_speed(speed).unwrap();
+            let mut output = vec![[0.0; 2]; (rate as f64 / speed).ceil() as usize];
+            renderer.render_into(&mut output);
+            let peak = output
+                .iter()
+                .enumerate()
+                .max_by(|a, b| a.1[0].abs().total_cmp(&b.1[0].abs()))
+                .unwrap();
+            let expected = (0.6 * rate as f64 / speed).ceil() as usize;
+            assert!(
+                peak.0.abs_diff(expected) <= 1,
+                "rate={rate} speed={speed}: {} expected {expected}",
+                peak.0
+            );
+            assert!(peak.1[0] > 0.6);
         }
     }
 }
@@ -171,6 +276,8 @@ fn unordered_repeat_anchors_resolve_before_order_validation() {
         .map(|index| MeasureOccurrence {
             bar: index % 2,
             occurrence: index / 2,
+            meter_numerator: 4,
+            meter_denominator: 4,
             start_tick: index as f64 * 3840.0,
             end_tick: (index + 1) as f64 * 3840.0,
             start_ms: index as f64 * 2000.0,

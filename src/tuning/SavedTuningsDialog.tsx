@@ -1,7 +1,7 @@
 import { useEffect,useMemo,useRef,useState } from 'react';
 import { createPortal } from 'react-dom';
 import { formatTuning,parseTuning } from '../tuning';
-import { tuningPresets } from '../tuning-presets';
+import { instrumentTitle, tuningPresets } from '../tuning-presets';
 import { AuditionButtons } from './AuditionButtons';
 import { isXmlText,newTuningId,putTuningLibraryEntry,readTuningLibrary,removeTuningLibraryEntry,subscribeTuningLibrary,tuningNameError,type SavedTuning } from './library';
 import { Dialog } from '../ui/Dialog';
@@ -12,7 +12,7 @@ type Identity={kind:'personal';id:string}|{kind:'builtin';index:number};
 const message=(cause:unknown)=>cause instanceof Error?cause.message:String(cause);
 const groups=[...new Set(tuningPresets.map(p=>`${p.instrument}/${p.strings}`))].map(key=>{
   const members=tuningPresets.map((preset,index)=>({preset,index})).filter(({preset})=>`${preset.instrument}/${preset.strings}`===key),first=members[0].preset;
-  return {key,title:`${first.instrument==='guitar'?'Guitar':'Bass'} · ${first.strings} strings`,members};
+  return {key,title:`${instrumentTitle(first.instrument)} · ${first.strings} strings`,members};
 });
 const parsed=(text:string):{notes:number[]}|{error:string}=>{try{return {notes:parseTuning(text)};}catch(cause){return {error:message(cause)};}};
 const same=(a:readonly number[],b:readonly number[])=>a.length===b.length&&a.every((pitch,index)=>pitch===b[index]);

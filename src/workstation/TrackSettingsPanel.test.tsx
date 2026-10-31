@@ -97,7 +97,7 @@ it('keeps full long track names accessible and selected/remove/notation command 
 it('retains all 25 guitar 6–9 and bass 4–6 presets for both tuning drafts',()=>{
   const score=previewEdit(blankProject(),{type:'setRest',target:{track:0,staff:0,bar:0,voice:0,beat:0}}).score,onEdit=vi.fn();
   render(<TrackSettingsPanel score={score} selected={0} busy={false} onEdit={onEdit}/>);
-  expect(tuningPresets).toHaveLength(25);
+  expect(tuningPresets.filter(p=>p.instrument==='guitar'||p.instrument==='bass')).toHaveLength(25);expect(tuningPresets).toHaveLength(47);
   expect(new Set(tuningPresets.filter(p=>p.instrument==='guitar').map(p=>p.strings))).toEqual(new Set([6,7,8,9]));
   expect(new Set(tuningPresets.filter(p=>p.instrument==='bass').map(p=>p.strings))).toEqual(new Set([4,5,6]));
   for(const preset of tuningPresets){

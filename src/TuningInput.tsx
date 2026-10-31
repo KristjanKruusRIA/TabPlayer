@@ -10,7 +10,7 @@ import {
   type WheelEvent as ReactWheelEvent,
 } from 'react';
 import { formatPitch, formatTuning, parseTuning } from './tuning';
-import { findTuningPreset, tuningPresets } from './tuning-presets';
+import { findTuningPreset, instrumentTitle, tuningPresets } from './tuning-presets';
 import { SavedTuningsDialog } from './tuning/SavedTuningsDialog';
 import { AuditionButtons } from './tuning/AuditionButtons';
 import { busyGuard } from './ui/useBusyGuard';
@@ -296,7 +296,7 @@ export function TuningInput({
             return (
               <optgroup
                 key={group}
-                label={`${first.instrument === 'guitar' ? 'Guitar' : 'Bass'} · ${first.strings} strings`}
+                label={`${instrumentTitle(first.instrument)} · ${first.strings} strings`}
               >
                 {presets.map(p => (
                   <option key={p.id} value={p.id}>

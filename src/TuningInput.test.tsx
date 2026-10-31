@@ -7,8 +7,8 @@ import { TuningInput } from './TuningInput';
 vi.mock('@tauri-apps/api/core',()=>({invoke:vi.fn(async()=>({format:'tabplayer-tuning-library',version:1,entries:[]}))}));
 afterEach(cleanup);
 function Draft({onCommit}:{onCommit?:(pitches:number[],changed:number[])=>void}){const [value,onChange]=useState('E4 B3 G3 D3 A2 E2'),[name,setName]=useState('');return <><TuningInput label="Notes" presetLabel="Preset" value={value} onChange={onChange} tuningName={name} onTuningNameChange={setName} onCommit={onCommit}/><output aria-label="Draft name">{name}</output></>;}
-it('groups exactly25 presets and choosing nine-string guitar only fills the editable draft',()=>{
-  render(<Draft/>);const select=screen.getByLabelText('Preset');expect(select.querySelectorAll('optgroup')).toHaveLength(7);expect(select.querySelectorAll('option')).toHaveLength(26);fireEvent.change(select,{target:{value:'guitar-9-standard-csharp'}});expect(screen.getByLabelText('Notes')).toHaveValue('E4 B3 G3 D3 A2 E2 B1 F#1 C#1');expect(select).toHaveValue('guitar-9-standard-csharp');
+it('groups presets and choosing nine-string guitar only fills the editable draft',()=>{
+  render(<Draft/>);const select=screen.getByLabelText('Preset');expect(select.querySelectorAll('optgroup')).toHaveLength(13);expect(select.querySelectorAll('option')).toHaveLength(48);fireEvent.change(select,{target:{value:'guitar-9-standard-csharp'}});expect(screen.getByLabelText('Notes')).toHaveValue('E4 B3 G3 D3 A2 E2 B1 F#1 C#1');expect(select).toHaveValue('guitar-9-standard-csharp');
 });
 it('lets Custom stay selected at matching notes then autodetects manual equivalent flats',()=>{
   render(<Draft/>);const select=screen.getByLabelText('Preset');expect(select).toHaveValue('guitar-6-standard-e');fireEvent.change(select,{target:{value:'custom'}});expect(select).toHaveValue('custom');expect(screen.getByLabelText('Notes')).toHaveValue('E4 B3 G3 D3 A2 E2');fireEvent.change(screen.getByLabelText('Notes'),{target:{value:'Eb4 Bb3 Gb3 Db3 Ab2 Eb2'}});expect(select).toHaveValue('guitar-6-half-step-down');

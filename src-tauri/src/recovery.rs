@@ -782,8 +782,10 @@ pub fn reconcile_paths(value: &mut ValidatedRecovery) -> Result<(), String> {
 }
 
 /// A recovery backup is a plain file. A document under a password to open is therefore never written to one: its
-/// place, view and revision stay so every other rule about the backup holds, but its score is a blank one. Work in
-/// it that is not saved cannot be recovered; the backup says nothing of what the document held.
+/// place and revision stay so every other rule about the backup holds, but its score is a blank one. Work in
+/// it that is not saved cannot be recovered; the backup says nothing of what the document held. The view keeps its
+/// display preferences (zoom, layout) but not the cursor, the selected string or note, or the track ids, which point
+/// into the score.
 pub fn redact_sealed(documents: Vec<RecoveryDocument>) -> Vec<RecoveryDocument> {
     documents
         .into_iter()
@@ -797,6 +799,12 @@ pub fn redact_sealed(documents: Vec<RecoveryDocument>) -> Vec<RecoveryDocument> 
                     .checkpoint(),
                 imported_path: None,
                 saved_file_sha256: None,
+                view: DocumentViewState {
+                    zoom: document.view.zoom,
+                    instrument_visible: document.view.instrument_visible,
+                    score_display: document.view.score_display.clone(),
+                    ..DocumentViewState::default()
+                },
                 ..document
             }
         })

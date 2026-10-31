@@ -14,7 +14,7 @@ use tabplayer_lib::{
         BaseDocument, BeatTarget, EDIT_LOCKED_MESSAGE, EditCommand, EditProtection, Project,
         ProjectCheckpoint, ProjectSession, SEALED_COPY_MESSAGE,
     },
-    recovery::redact_sealed,
+    recovery::{DocumentViewState, TrackView, ViewTarget, redact_sealed},
     settings::ChannelMix,
     workspace::{DocumentIntake, DocumentRevision, DocumentSnapshot, DocumentWorkspace},
 };
@@ -922,6 +922,30 @@ fn a_sealed_score_cannot_become_a_plain_copy_or_a_plain_recovery_backup() {
             .as_deref(),
         Some(SEALED_COPY_MESSAGE)
     );
+    workspace
+        .lock()
+        .unwrap()
+        .set_view(
+            &id,
+            DocumentViewState {
+                target: ViewTarget {
+                    track: 2,
+                    staff: 0,
+                    bar: 3,
+                    voice: 0,
+                    beat: 1,
+                },
+                selected_string: 2,
+                selected_note_index: Some(1),
+                zoom: 150.0,
+                track_view: TrackView::Custom {
+                    track_ids: vec!["secret-track-id".into()],
+                },
+                instrument_visible: true,
+                score_display: None,
+            },
+        )
+        .unwrap();
     let documents = workspace.lock().unwrap().recovery_documents().unwrap();
     let sealed = documents
         .iter()
@@ -938,11 +962,16 @@ fn a_sealed_score_cannot_become_a_plain_copy_or_a_plain_recovery_backup() {
             && !text.contains("locked.tabplayer")
     );
     assert!(!text.contains("openLock") && !text.contains(PASSWORD));
+    assert!(!text.contains("secret-track-id"));
     assert_eq!(redacted.len(), documents.len());
     for (kept, original) in redacted.iter().zip(&documents) {
         assert_eq!(kept.document_id, original.document_id);
         assert_eq!(kept.revision, original.revision);
-        assert_eq!(kept.view, original.view);
+        // Only display preferences survive; positions and track ids point into the score.
+        assert_eq!(kept.view.zoom, original.view.zoom);
+        assert_eq!(kept.view.score_display, original.view.score_display);
+        assert_eq!(kept.view.target, DocumentViewState::default().target);
+        assert_eq!(kept.view.track_view, TrackView::Selected {});
     }
     // Unsealed documents are untouched.
     let plain = documents

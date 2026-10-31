@@ -1277,70 +1277,135 @@ impl LibraryIndex {
     /// A password-protected score must show nothing in the folder index. Removes whatever the index kept of the file
     /// at once, in memory and in the cache file, and keeps later scans from publishing details they read before it
     /// was protected. Returns whether any entry changed. When the cache cannot be rewritten it is deleted instead.
+    /// A publication whose outcome is uncertain is scrubbed too, and its cache is rewritten without the details, so
+    /// that reconciling it later cannot bring them back.
     pub fn scrub_file(&self, path: &Path) -> Result<bool, String> {
         let wanted = key(path);
         let mut state = locked(&self.state)?;
         state.sealed.insert(wanted.clone());
+        let holds = |index: &RootIndex| {
+            index
+                .files
+                .iter()
+                .any(|file| key(Path::new(&file.row.path)) == wanted && file.row.metadata.is_some())
+        };
         let holding: Vec<String> = state
             .committed
             .iter()
-            .filter(|(_, committed)| {
-                committed.index.files.iter().any(|file| {
-                    key(Path::new(&file.row.path)) == wanted && file.row.metadata.is_some()
-                })
-            })
+            .filter(|(_, committed)| holds(&committed.index))
             .map(|(root_id, _)| root_id.clone())
             .collect();
-        if holding.is_empty() {
+        let pending_holds = state
+            .uncertain
+            .as_ref()
+            .is_some_and(|pending| holds(&pending.index));
+        if holding.is_empty() && !pending_holds {
             return Ok(false);
         }
-        if let Some(uncertain) = &state.uncertain {
-            return Err(uncertain.warning.clone());
-        }
-        for root_id in holding {
-            let mut index = (*state.committed[&root_id].index).clone();
-            for file in &mut index.files {
-                if key(Path::new(&file.row.path)) == wanted {
-                    file.row.metadata = None;
-                    file.row.status = LibraryResultStatus::MetadataUnavailable;
-                    file.sha256 = None;
-                }
-            }
-            index.index_revision = state
-                .revision
-                .checked_add(1)
-                .filter(|value| *value <= MAX_SAFE_INTEGER)
-                .ok_or("Index revision limit reached.")?;
+        let uncertain_root = state
+            .uncertain
+            .as_ref()
+            .map(|pending| pending.index.root_id.clone());
+        // Memory first: the details are gone from every index whatever happens to the files.
+        let mut writes: Vec<(String, Vec<u8>)> = Vec::new();
+        for root_id in &holding {
+            let mut index = (*state.committed[root_id].index).clone();
+            Self::strip(&mut index.files, &wanted);
+            index.index_revision = Self::next_revision(&state)?;
             let bytes = serde_json::to_vec(&index).map_err(|error| error.to_string())?;
-            let target = self.cache_path(&root_id)?;
-            self.verify_directory()?;
-            let written = write_bytes(&target, &bytes);
-            // The details are gone from memory whatever happens to the file.
-            Self::adopt(&mut state, index, bytes.len(), "", None);
-            if let Err(error) = written {
-                return match fs::remove_file(&target) {
-                    Ok(()) => {
-                        state.warnings.insert(
-                            root_id,
-                            "A protected score's details were removed from the folder index by deleting its cache. Refresh the folder to index it again.".into(),
-                        );
-                        Ok(true)
-                    }
-                    Err(removal) if removal.kind() == std::io::ErrorKind::NotFound => Ok(true),
-                    Err(removal) => Err(format!(
-                        "The folder index still holds a protected score's details on disk: {error}; {removal}"
-                    )),
-                };
+            let warning = state.warnings.get(root_id).cloned();
+            Self::adopt(&mut state, index, bytes.len(), "", warning);
+            if uncertain_root.as_ref() != Some(root_id) {
+                writes.push((root_id.clone(), bytes));
             }
         }
-        Ok(true)
+        if let Some(root_id) = &uncertain_root {
+            if pending_holds || holding.contains(root_id) {
+                // The cache of this root holds either the intended bytes or the previous ones. It ends up holding the
+                // intended ones, scrubbed, which is what reconciling expects to find.
+                let revision = Self::next_revision(&state)?;
+                let pending = state
+                    .uncertain
+                    .as_mut()
+                    .ok_or("Missing uncertain publication.")?;
+                Self::strip(&mut pending.index.files, &wanted);
+                pending.index.index_revision = pending.index.index_revision.max(revision);
+                pending.bytes =
+                    serde_json::to_vec(&pending.index).map_err(|error| error.to_string())?;
+                writes.push((root_id.clone(), pending.bytes.clone()));
+            }
+        }
+        let mut failure = None;
+        for (root_id, bytes) in writes {
+            match self.rewrite_or_delete_cache(&root_id, &bytes) {
+                Ok(false) => {}
+                Ok(true) => {
+                    state.warnings.insert(
+                        root_id.clone(),
+                        "A protected score's details were removed from the folder index by deleting its cache. Refresh the folder to index it again.".into(),
+                    );
+                    if uncertain_root.as_ref() == Some(&root_id) {
+                        // The cache is absent now, which is the outcome the pending publication is reconciled against.
+                        if let Some(pending) = state.uncertain.as_mut() {
+                            pending.previous = None;
+                        }
+                    }
+                }
+                Err(error) => failure = failure.or(Some(error)),
+            }
+        }
+        failure.map_or(Ok(true), Err)
     }
 
-    /// Drops the details of files known to be protected, unless the file on disk is plain again.
-    fn withhold_sealed(sealed: &mut HashSet<String>, files: &mut [CachedFile]) {
-        if sealed.is_empty() {
-            return;
+    fn next_revision(state: &State) -> Result<u64, String> {
+        state
+            .revision
+            .checked_add(1)
+            .filter(|value| *value <= MAX_SAFE_INTEGER)
+            .ok_or_else(|| "Index revision limit reached.".to_owned())
+    }
+
+    /// Rewrites a folder's cache file with `bytes`; when that fails, deletes it, since it may hold a protected score's
+    /// details. Returns whether the cache was deleted.
+    fn rewrite_or_delete_cache(&self, root_id: &str, bytes: &[u8]) -> Result<bool, String> {
+        let target = self.cache_path(root_id)?;
+        self.verify_directory()?;
+        match write_bytes(&target, bytes) {
+            Ok(()) => Ok(false),
+            Err(error) => match fs::remove_file(&target) {
+                Ok(()) => Ok(true),
+                Err(removal) if removal.kind() == std::io::ErrorKind::NotFound => Ok(true),
+                Err(removal) => Err(format!(
+                    "The folder index still holds a protected score's details on disk: {error}; {removal}"
+                )),
+            },
         }
+    }
+
+    /// Removes the details of one file. Returns whether anything changed.
+    fn strip(files: &mut [CachedFile], wanted: &str) -> bool {
+        let mut changed = false;
+        for file in files
+            .iter_mut()
+            .filter(|file| key(Path::new(&file.row.path)) == wanted)
+        {
+            changed |= file.row.metadata.is_some()
+                || file.sha256.is_some()
+                || !matches!(file.row.status, LibraryResultStatus::MetadataUnavailable);
+            file.row.metadata = None;
+            file.row.status = LibraryResultStatus::MetadataUnavailable;
+            file.sha256 = None;
+        }
+        changed
+    }
+
+    /// Drops the details of files known to be protected, unless the file on disk is plain again. Returns whether any
+    /// entry changed.
+    fn withhold_sealed(sealed: &mut HashSet<String>, files: &mut [CachedFile]) -> bool {
+        if sealed.is_empty() {
+            return false;
+        }
+        let mut changed = false;
         sealed.retain(|wanted| {
             // A file of another folder is judged when that folder is published.
             let Some(path) = wanted_path(files, wanted) else {
@@ -1354,19 +1419,12 @@ impl LibraryIndex {
                 // Anything that cannot be read as plain is treated as protected.
                 .map_or(true, |head| &head == b"TABPLOCK");
             if still {
-                for file in files
-                    .iter_mut()
-                    .filter(|file| key(Path::new(&file.row.path)) == *wanted)
-                {
-                    file.row.metadata = None;
-                    file.row.status = LibraryResultStatus::MetadataUnavailable;
-                    file.sha256 = None;
-                }
+                changed |= Self::strip(files, wanted);
             }
             still
         });
+        changed
     }
-
     pub fn cancel(&self, job_id: &str) -> Result<(), String> {
         let job = self.active(job_id)?;
         job.cancelled.store(true, Ordering::Release);
@@ -1430,6 +1488,22 @@ impl LibraryIndex {
         if !published && !unchanged {
             return Err(pending.warning.clone());
         }
+        // What is about to be adopted may hold details of a file protected since it was written. They leave the
+        // index and the cache before it is adopted, and nothing is adopted if that fails.
+        let mut withheld = None;
+        if published && matches {
+            let mut index = state
+                .uncertain
+                .as_ref()
+                .ok_or("Missing uncertain publication.")?
+                .index
+                .clone();
+            if Self::withhold_sealed(&mut state.sealed, &mut index.files) {
+                let bytes = serde_json::to_vec(&index).map_err(|error| error.to_string())?;
+                let deleted = self.rewrite_or_delete_cache(&root_id, &bytes)?;
+                withheld = Some((index, bytes.len(), deleted));
+            }
+        }
         let pending = state
             .uncertain
             .take()
@@ -1439,10 +1513,19 @@ impl LibraryIndex {
                 "Folder index publication was reconciled, but its durability could not be confirmed: {}. Refresh the folder to retry.",
                 pending.error
             );
+            let (index, length, warning) = match withheld {
+                Some((index, length, true)) => (
+                    index,
+                    length,
+                    "A protected score's details were removed from the folder index by deleting its cache. Refresh the folder to index it again.".to_owned(),
+                ),
+                Some((index, length, false)) => (index, length, warning),
+                None => (pending.index, pending.bytes.len(), warning),
+            };
             return Ok(Some(Self::adopt(
                 &mut state,
-                pending.index,
-                pending.bytes.len(),
+                index,
+                length,
                 &pending.job_id,
                 Some(warning),
             )));
@@ -2154,6 +2237,96 @@ mod tests {
         assert!(index.begin(root.clone()).is_err());
         assert_eq!(index.search(&title_query("replacement")).unwrap().total, 0);
         assert!(external.join(format!("index-{}.json", root.id)).is_file());
+    }
+
+    /// A publication of unknown outcome, over a committed index that holds `Secret`: the cache then holds the
+    /// intended bytes, as it does when the write took effect before it reported an error.
+    fn uncertain_over_secret() -> (
+        tempfile::TempDir,
+        Arc<LibraryIndex>,
+        LibraryRoot,
+        PathBuf,
+        PathBuf,
+    ) {
+        let (temp, index, root) = fixture();
+        let original = seeded(&index, &root, 1, Some(summary("Secret")));
+        index.finish(&original, &root).unwrap();
+        let replacement = seeded(&index, &root, 1, Some(summary("Secret")));
+        let intended = std::cell::RefCell::new(Vec::new());
+        assert!(
+            index
+                .finish_with(&replacement, &root, |path, bytes| {
+                    *intended.borrow_mut() = bytes.to_vec();
+                    fs::write(path, b"unknown").unwrap();
+                    Err("Injected uncertain result".into())
+                })
+                .is_err()
+        );
+        let target = index.cache_path(&root.id).unwrap();
+        let file = {
+            let state = index.state.lock().unwrap();
+            PathBuf::from(&state.committed[&root.id].index.files[0].row.path)
+        };
+        // The write is found to have taken effect once the cache is read back.
+        fs::write(&target, intended.borrow().as_slice()).unwrap();
+        (temp, index, root, target, file)
+    }
+
+    #[test]
+    fn scrubbing_a_protected_score_during_an_uncertain_publication_keeps_its_details_out_of_memory_and_cache()
+     {
+        let (_temp, index, root, target, file) = uncertain_over_secret();
+        assert!(fs::read_to_string(&target).unwrap().contains("Secret"));
+        assert_eq!(index.search(&title_query("secret")).unwrap().total, 1);
+        assert!(index.scrub_file(&file).unwrap());
+        assert_eq!(index.search(&title_query("secret")).unwrap().total, 0);
+        assert!(
+            !fs::read_to_string(&target).unwrap().contains("Secret"),
+            "the cache still holds the details"
+        );
+        // Reconciling the publication cannot bring them back, in memory or on disk.
+        assert!(index.reconcile(&[root.clone()]).unwrap().is_some());
+        assert_eq!(index.search(&title_query("secret")).unwrap().total, 0);
+        assert!(!fs::read_to_string(&target).unwrap().contains("Secret"));
+        // The next scan cannot publish them either.
+        assert!(index.begin(root).is_ok());
+    }
+
+    #[test]
+    fn reconciling_a_publication_withholds_details_of_a_file_protected_since_it_was_written() {
+        let (_temp, index, root, target, file) = uncertain_over_secret();
+        // The file is sealed on disk and known to be, but the pending publication was written before that.
+        fs::write(&file, b"TABPLOCK and then some").unwrap();
+        index.state.lock().unwrap().sealed.insert(key(&file));
+        assert!(fs::read_to_string(&target).unwrap().contains("Secret"));
+        assert!(index.reconcile(&[root]).unwrap().is_some());
+        assert_eq!(index.search(&title_query("secret")).unwrap().total, 0);
+        assert!(
+            !fs::read_to_string(&target).unwrap().contains("Secret"),
+            "the adopted cache still holds the details"
+        );
+    }
+
+    #[test]
+    fn a_cache_that_cannot_be_rewritten_still_loses_the_details_from_memory() {
+        let (_temp, index, root) = fixture();
+        let original = seeded(&index, &root, 1, Some(summary("Secret")));
+        index.finish(&original, &root).unwrap();
+        let target = index.cache_path(&root.id).unwrap();
+        let file = {
+            let state = index.state.lock().unwrap();
+            PathBuf::from(&state.committed[&root.id].index.files[0].row.path)
+        };
+        // A directory where the cache file is: neither a rewrite nor a deletion can succeed.
+        fs::remove_file(&target).unwrap();
+        fs::create_dir(&target).unwrap();
+        let outcome = index.scrub_file(&file);
+        assert!(outcome.is_err(), "the failure is reported");
+        assert_eq!(
+            index.search(&title_query("secret")).unwrap().total,
+            0,
+            "the details are gone from memory whatever happens to the file"
+        );
     }
 
     fn seeded(

@@ -504,3 +504,71 @@ describe('refinger fuzz', () => {
     expect(moved + refused).toBe(40);
   });
 });
+
+describe('refinger uses the current rhythm, not stale playback timing', () => {
+  const upOne: EditCommand = { type: 'setTuning', track: 0, tuning: [64, 59, 55, 50, 46, 40], keepPitch: true };
+  const quarters = (voice: number): EditCommand[] => [0, 1, 2, 3].map(beat => ({ type: 'insertBeat', target: at(0, beat, voice), duration: 4, dots: 0 }));
+
+  it('a lengthened first beat in voice 0 makes later beats overlap, and the notes keep apart', () => {
+    const base = projectWithEdits(
+      { type: 'addVoice', track: 0, staff: 0 }, ...quarters(1),
+      { type: 'setNote', target: at(0, 2, 1), string: 1, fret: 8 },
+      { type: 'setNote', target: at(0, 1, 0), string: 2, fret: 0 },
+      { type: 'deleteBeat', target: at(0, 3, 0) },
+      { type: 'setDuration', target: at(0, 0, 0), duration: 2, dots: 0 }
+    );
+    const bar = previewEdit(base.project, upOne).score.tracks[0].staves[0].bars[0];
+    expect(bar.voices[0].beats[1].notes[0].string).not.toBe(bar.voices[1].beats[2].notes[0].string);
+  });
+
+  it('a tuplet set just before keeps overlapping notes on different strings', () => {
+    // Triplet eighths last 320 ticks, so the second (320 to 640) overlaps voice 0's eighth (0 to 480); stale timing would put it at 480 to 960.
+    const trip = (beat: number): EditCommand => ({ type: 'setBeatRhythm', target: at(0, beat, 1), duration: 8, dots: 0, tupletNumerator: 3, tupletDenominator: 2, graceType: 0 });
+    const eighths = [0, 1, 2].map((beat): EditCommand => ({ type: 'insertBeat', target: at(0, beat, 1), duration: 8, dots: 0 }));
+    const base = projectWithEdits(
+      { type: 'addVoice', track: 0, staff: 0 }, ...eighths, trip(0), trip(1), trip(2),
+      { type: 'setNote', target: at(0, 1, 1), string: 1, fret: 8 },
+      { type: 'setDuration', target: at(0, 0, 0), duration: 8, dots: 0 },
+      { type: 'setNote', target: at(0, 0, 0), string: 2, fret: 0 }
+    );
+    const bar = previewEdit(base.project, upOne).score.tracks[0].staves[0].bars[0];
+    expect(bar.voices[0].beats[0].notes[0].string).not.toBe(bar.voices[1].beats[1].notes[0].string);
+  });
+
+  it('gives the same result with or without a rebuild before it', () => {
+    const edits: EditCommand[] = [
+      { type: 'addVoice', track: 0, staff: 0 }, ...quarters(1),
+      { type: 'setNote', target: at(0, 2, 1), string: 1, fret: 8 },
+      { type: 'setNote', target: at(0, 1, 0), string: 2, fret: 0 },
+      { type: 'deleteBeat', target: at(0, 3, 0) },
+      { type: 'setDuration', target: at(0, 0, 0), duration: 2, dots: 0 },
+    ];
+    const strings = (extra: EditCommand[]) => notesOf(previewEdit(projectWithEdits(...edits, ...extra).project, upOne).score).map(n => [n.string, n.fret]);
+    expect(strings([])).toEqual(strings([{ type: 'appendMeasure' }]));
+  });
+});
+
+describe('refinger chord diagrams that no beat uses', () => {
+  it('an unused diagram that cannot follow does not refuse the edit, and one that can is remapped', () => {
+    // Both diagrams stay in the staff after their beats stop pointing at them.
+    const base = projectWithEdits(
+      { type: 'setBeatAnnotation', target, text: '', chord: { name: 'E', firstFret: 1, frets: [0, 0, 1, 2, 2, 0] } },
+      { type: 'setBeatAnnotation', target, text: '', chord: null },
+      { type: 'setBeatAnnotation', target: at(0, 1), text: '', chord: { name: 'D5', firstFret: 1, frets: [-1, -1, -1, 2, 2, -1] } },
+      { type: 'setBeatAnnotation', target: at(0, 1), text: '', chord: null }
+    );
+    const staff = base.score.tracks[0].staves[0];
+    expect([...staff.chords!.values()]).toHaveLength(2);
+    const settings = settingsOf(staff, { capo: 2, keepPitch: true });
+    const moved = previewEdit(base.project, { type: 'setStaffSettings', track: 0, staff: 0, settings }).score.tracks[0].staves[0];
+    const byName = new Map([...moved.chords!.values()].map(chord => [chord.name, [...chord.strings]]));
+    expect(byName.get('E')).toEqual([0, 0, 1, 2, 2, 0]);
+    expect(byName.get('D5')).toEqual([-1, -1, -1, 0, 0, -1]);
+  });
+
+  it('a diagram a beat uses still refuses', () => {
+    const base = projectWithEdits({ type: 'setBeatAnnotation', target, text: '', chord: { name: 'E', firstFret: 1, frets: [0, 0, 1, 2, 2, 0] } });
+    const settings = settingsOf(base.score.tracks[0].staves[0], { capo: 2, keepPitch: true });
+    expect(() => previewEdit(base.project, { type: 'setStaffSettings', track: 0, staff: 0, settings })).toThrow(/chord diagram E/);
+  });
+});

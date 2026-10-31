@@ -25,6 +25,8 @@
 .track-settings fieldset+fieldset { margin-top:12px; padding-top:8px; border-top:1px solid var(--ws-border); }
 .track-settings label { display:grid; min-width:0; gap:4px; margin:0; color:var(--ws-muted); font-size:12px; }
 .track-settings :is(input,select,button) { box-sizing:border-box; min-width:0; width:100%; min-height:28px; margin:0; padding:3px 6px; color:var(--ws-text); background:var(--ws-input); border:1px solid var(--ws-border); border-radius:3px; font:inherit; }
+.track-settings label.check { display:flex; flex-direction:row; align-items:center; gap:6px; white-space:normal; }
+.track-settings .check input[type="checkbox"] { width:14px; height:14px; min-height:0; padding:0; flex-shrink:0; accent-color:var(--ws-accent); }
 .track-settings :is(input,select) { font-variant-numeric:tabular-nums; caret-color:var(--ws-accent); }
 .track-settings input::placeholder { color:var(--ws-muted); }
 .track-settings details { padding:6px 0; border-top:1px solid var(--ws-border); }

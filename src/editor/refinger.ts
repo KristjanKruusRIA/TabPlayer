@@ -3,6 +3,7 @@ import type { PartialCapo } from './partial-capo';
 import { getPartialCapo, stringCapo } from './partial-capo';
 import { getBanjoDrone, neckFret, fretExists, droneShift } from './banjo-drone';
 import { allNotes, captureNoteLinks } from './links';
+import { rhythmTicks } from './common';
 import { placeBeat, maxRelocatedFret, holds, linked, type Place } from './structure';
 import { formatPitch } from '../tuning';
 import { getHarmonyChord, setHarmonyChordSource, validateHarmonyChord } from '../harmony/chord-source';
@@ -19,8 +20,28 @@ export interface RefingerStaffTarget {
 }
 
 /** Whether two beats of different voices sound at the same time. */
-const sounding = (a: model.Beat, b: model.Beat) =>
-  a.playbackStart < b.playbackStart + b.playbackDuration && b.playbackStart < a.playbackStart + a.playbackDuration;
+const sounding = (spans: Map<model.Beat, [number, number]>, a: model.Beat, b: model.Beat) => {
+  const x = spans.get(a)!, y = spans.get(b)!;
+  return x[0] < y[1] && y[0] < x[1];
+};
+
+/** Where each beat of a bar sits, from its current rhythm. The model's playback timing is only rebuilt after some edits, so it can be stale here. A grace beat takes the tick before the beat it leads into. */
+function beatSpans(bar: model.Bar): Map<model.Beat, [number, number]> {
+  const spans = new Map<model.Beat, [number, number]>();
+  for (const voice of bar.voices) {
+    let at = 0;
+    for (const beat of voice.beats) {
+      if (beat.graceType !== model.GraceType.None) {
+        spans.set(beat, [at - 1, at]);
+        continue;
+      }
+      const ticks = rhythmTicks(beat);
+      spans.set(beat, [at, at + ticks]);
+      at += ticks;
+    }
+  }
+  return spans;
+}
 
 /** A note keep pitch could not place, named so the user can find it. Numbers count from 1; `beat` skips grace beats. */
 export interface Unreachable {
@@ -128,13 +149,14 @@ export function planStaffRefinger(
 
   for (const bar of staff.bars) {
     // Beats already placed in this bar, so a note in another voice that sounds at the same time keeps off their strings.
+    const spans = beatSpans(bar);
     const placed: Array<{ beat: model.Beat; strings: Map<model.Note, number> }> = [];
     for (const voice of bar.voices) {
       for (const beat of voice.beats) {
         const notes = beat.notes.filter(n => n.string > 0);
         if (!notes.length) continue;
         const where = `bar ${bar.index + 1}, beat ${beat.index + 1}`;
-        const overlapping = placed.filter(other => other.beat.voice !== voice && sounding(other.beat, beat));
+        const overlapping = placed.filter(other => other.beat.voice !== voice && sounding(spans, other.beat, beat));
         // A string two voices already shared before the edit may stay shared.
         const taken = (note: model.Note) =>
           new Set(overlapping.flatMap(other => [...other.strings].filter(([from]) => from.string !== note.string).map(([, string]) => string)));
@@ -195,8 +217,10 @@ export function planStaffRefinger(
   const chords: ChordMove[] = [];
   const chordProblems: string[] = [];
   const language = getResolvedLanguage();
-  for (const chord of staff.chords?.values() ?? []) {
+  const used = new Set(staff.bars.flatMap(bar => bar.voices.flatMap(voice => voice.beats.map(beat => beat.chordId))));
+  for (const [id, chord] of staff.chords ?? []) {
     if (chord.strings.length !== to) continue;
+    const problems: string[] = [];
     const value = getHarmonyChord(chord);
     const frets = chord.strings.map((fret, index) => {
       const string = to - index;
@@ -204,11 +228,16 @@ export function planStaffRefinger(
       const plain = fretPitch(string, fret) - targetOpenPitch(string);
       const moved = plain < 0 ? -1 : neckFret(staff, string, plain, targetDrone);
       if (moved < 0 || moved > 127 || moved > Math.max(maxRelocatedFret, fret) || !fretExists(staff, string, moved, targetDrone)) {
-        chordProblems.push(getMessage(language, 'refinger.chord_diagram', { name: chord.name, string, pitch: formatPitch(fretPitch(string, fret)) }));
+        problems.push(getMessage(language, 'refinger.chord_diagram', { name: chord.name, string, pitch: formatPitch(fretPitch(string, fret)) }));
         return fret;
       }
       return moved;
     });
+    // Only a diagram a beat uses can refuse the edit; an unused one that cannot follow is left as it is.
+    if (problems.length) {
+      if (used.has(id)) chordProblems.push(...problems);
+      continue;
+    }
     const delta = frets.map((fret, index) => fret - chord.strings[index]);
     const changed = delta.map(d => d !== 0);
     if (!changed.some(Boolean)) continue;
@@ -222,7 +251,7 @@ export function planStaffRefinger(
     try {
       validateHarmonyChord(source);
     } catch {
-      chordProblems.push(getMessage(language, 'refinger.chord_diagram', { name: chord.name, string: 0, pitch: '' }));
+      if (used.has(id)) chordProblems.push(getMessage(language, 'refinger.chord_diagram', { name: chord.name, string: 0, pitch: '' }));
       continue;
     }
     chords.push({ chord, strings: frets, source });

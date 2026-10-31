@@ -1,4 +1,5 @@
 import { model } from '@coderline/alphatab';
+import { plainFret } from '../editor/banjo-drone';
 
 /**
  * GPIF holds a bend or whammy as at most four points (origin, two middles, destination) and no style. alphaTab writes
@@ -20,6 +21,13 @@ import { model } from '@coderline/alphatab';
 export const gpifCurvesProperty='TabPlayerCurves';
 const maxPoints=1024;
 /**
+ * The most curve points one file may hold in total. Playback of the worst curve (alternating between the extremes of the
+ * value range) measured 98 MIDI events per point in this build, so a thousand 1024-point curves would be 100 million
+ * events. An ordinary score does not come near: GP itself holds at most 4 points per bend, so even a bend on every beat
+ * of a 300-bar song is about 5000 points. 16384 is three times that and bounds the worst case at about 1.6 million events.
+ */
+export const maxCurvePoints=16384;
+/**
  * No native validator bounds a curve value beyond "finite" (and "not negative" for a bend). The playback plan and the
  * synth do need a bound: alphaTab maps a value of v to v/2 semitones on a pitch wheel it sets to ±16 semitones, so
  * beyond ±32 the wheel saturates, and a huge value costs millions of events or stalls the synth. Values beyond it are
@@ -31,7 +39,9 @@ function orderedTracks(doc:Document):(Element|undefined)[] {
   const tracks=new Map([...doc.querySelectorAll('GPIF > Tracks > Track')].map(track=>[track.getAttribute('id'),track]));
   return (doc.querySelector('GPIF > MasterTrack > Tracks')?.textContent??'').trim().split(/\s+/).filter(Boolean).map(id=>tracks.get(id));
 }
-const holderOf=(scope:Element)=>[...scope.querySelectorAll(':scope > Property')].find(item=>item.getAttribute('name')===gpifCurvesProperty);
+/** Direct children by name. A selector with `:scope` is slow on a large document, and a project replays its base file on every edit. */
+const kids=(node:Element|null|undefined,name?:string)=>node?[...node.children].filter(child=>name===undefined||child.localName===name):[];
+const holderOf=(scope:Element)=>kids(scope,'Property').find(item=>item.getAttribute('name')===gpifCurvesProperty);
 function element(doc:Document,parent:Element,name:string,attributes:Record<string,string>={}):Element {
   const node=doc.createElement(name);for(const [key,value]of Object.entries(attributes))node.setAttribute(key,value);parent.append(node);return node;
 }
@@ -42,27 +52,32 @@ const number=(value:string|null)=>{const parsed=value!==null&&value.trim()!==''?
 const enumOf=(kind:Record<number,string>,value:number)=>Number.isInteger(value)&&kind[value]!==undefined;
 
 /** What the ordinary GPIF fields of a note or beat hold, in a form that changes whenever any of them does. */
-const noteFields=(node:Element|undefined)=>node?[...node.querySelectorAll(':scope > Properties > Property')].filter(item=>(item.getAttribute('name')??'').startsWith('Bend')).map(item=>`${item.getAttribute('name')}=${item.querySelector(':scope > Float')?.textContent??''}`).join(';'):'';
-const beatFields=(node:Element|undefined)=>{const whammy=node?.querySelector(':scope > Whammy');return whammy?[...whammy.attributes].map(attribute=>`${attribute.name}=${attribute.value}`).sort().join(';'):'';};
-const byId=(doc:Document,path:string)=>new Map([...doc.querySelectorAll(path)].map(node=>[node.getAttribute('id'),node]));
+const noteFields=(node:Element|undefined)=>node?kids(kids(node,'Properties')[0],'Property').filter(item=>(item.getAttribute('name')??'').startsWith('Bend')).map(item=>`${item.getAttribute('name')}=${kids(item,'Float')[0]?.textContent??''}`).join(';'):'';
+const beatFields=(node:Element|undefined)=>{const whammy=kids(node,'Whammy')[0];return whammy?[...whammy.attributes].map(attribute=>`${attribute.name}=${attribute.value}`).sort().join(';'):'';};
+/** The children of a top-level section of the GPIF, by walking rather than selecting, which is slow on a large document. */
+const section=(doc:Document,name:string,child:string)=>doc.documentElement.localName==='GPIF'?kids(kids(doc.documentElement,name)[0],child):[];
+const byId=(doc:Document,name:string,child:string)=>new Map(section(doc,name,child).map(node=>[node.getAttribute('id'),node]));
 /** The strings and frets of a beat's notes, which a moved or edited beat would not keep. */
-const noteList=(beat:model.Beat)=>beat.notes.map(note=>`${note.string}:${note.fret}`).join(',');
+const noteList=(beat:model.Beat,fret:(note:model.Note)=>number=note=>note.fret)=>beat.notes.map(note=>`${note.string}:${fret(note)}`).join(',');
+/** GPIF holds the plain fret of a banjo drone note, and so does the score read back, which has no drone set. */
+const writtenFret=(note:model.Note)=>plainFret(note.beat.voice.bar.staff,note.string,note.fret);
 
 interface Curve {type:number;style:number;points:{offset:number;value:number}[]}
 /**
- * The rules a native curve already obeys: `validateCurve` (sorted finite offsets from 0 to 60, endpoints at 0 and 60, a
- * bend never negative), the Rust `PitchCurve::validate`, the point count each bend type needs to draw (a BendRelease
- * reads its fourth point), and the value bound above.
+ * The rules a curve in the model obeys: finite offsets inside 0 to 60 that never go backwards, a bend never negative (as
+ * `validateCurve` and the Rust `PitchCurve::validate` require), the point count each type needs to play and draw (a
+ * BendRelease reads its fourth point, a Dip its third in every style), and the value bound above. Equal offsets and ends
+ * short of 60 are allowed: `Note.finish` turns a 3-point bend-release into 4 points with a repeated offset, and GP files
+ * hold curves that stop short of 60.
  */
 export function checkCurve(whammy:boolean,curve:Curve):void {
   const kind=(whammy?model.WhammyType:model.BendType) as unknown as Record<number,string>;
   if(!enumOf(kind,curve.type)||curve.type===0||!enumOf(model.BendStyle as unknown as Record<number,string>,curve.style))throw new Error('Invalid curve type or style.');
   const {points}=curve;
-  if(points.length<2||points.length>maxPoints||(!whammy&&curve.type===model.BendType.BendRelease&&points.length<4))throw new Error('The curve has too few or too many points for its type.');
-  if(points[0].offset!==0||points[points.length-1].offset!==60)throw new Error('The curve must run from 0 to 60.');
+  if(points.length<2||points.length>maxPoints||(!whammy&&curve.type===model.BendType.BendRelease&&points.length<4)||(whammy&&curve.type===model.WhammyType.Dip&&points.length<3))throw new Error('The curve has too few or too many points for its type.');
   let previous=-1;
   for(const point of points){
-    if(!Number.isFinite(point.offset)||point.offset<0||point.offset>60||point.offset<=previous)throw new Error('The curve points must be sorted and within 0 to 60.');
+    if(!Number.isFinite(point.offset)||point.offset<0||point.offset>60||point.offset<previous)throw new Error('The curve points must not go backwards and must lie within 0 to 60.');
     if(!Number.isFinite(point.value)||Math.abs(point.value)>maxCurveValue||(!whammy&&point.value<0))throw new Error('A curve value is outside the range playback can use.');
     previous=point.offset;
   }
@@ -73,7 +88,6 @@ export function checkSlur(from:model.Note,to:model.Note):void {
   if(from===to||a.voice.bar.staff!==b.voice.bar.staff||a.voice.index!==b.voice.index)throw new Error('A slur links notes of one voice.');
   if(b.voice.bar.index<a.voice.bar.index||(b.voice.bar.index===a.voice.bar.index&&b.index<=a.index))throw new Error('A slur runs strictly forward.');
 }
-const valid=(check:()=>void)=>{try{check();return true;}catch{return false;}};
 
 interface Address {bar:number;voice:number;beat:number;note:number}
 /** Position in the staff. The writer lists an empty voice as -1 and the reader puts an empty voice back, so voice numbers hold. */
@@ -85,13 +99,13 @@ const attributes=(address:Address,prefix='')=>({[`${prefix}bar`]:String(address.
 
 /** Where the file's own Bars, Voices, Beats and Notes lists place each id. An id listed twice has no place. */
 function placement(full:Document) {
-  const list=(node:Element,name:string)=>(node.querySelector(`:scope > ${name}`)?.textContent??'').trim().split(/\s+/).filter(Boolean);
+  const list=(node:Element,name:string)=>(kids(node,name)[0]?.textContent??'').trim().split(/\s+/).filter(Boolean);
   const bars=new Map<string,{master:number;position:number}|null>(),voices=new Map<string,{bar:string;order:number}|null>(),beats=new Map<string,{voice:string;order:number}|null>(),notes=new Map<string,{beat:string;order:number}|null>();
   const put=<T,>(map:Map<string,T|null>,id:string,value:T)=>{if(id!=='-1')map.set(id,map.has(id)?null:value);};
-  full.querySelectorAll('GPIF > MasterBars > MasterBar').forEach((master,index)=>list(master,'Bars').forEach((id,position)=>put(bars,id,{master:index,position})));
-  for(const bar of full.querySelectorAll('GPIF > Bars > Bar'))list(bar,'Voices').forEach((id,order)=>put(voices,id,{bar:bar.getAttribute('id')??'',order}));
-  for(const voice of full.querySelectorAll('GPIF > Voices > Voice'))list(voice,'Beats').forEach((id,order)=>put(beats,id,{voice:voice.getAttribute('id')??'',order}));
-  for(const beat of full.querySelectorAll('GPIF > Beats > Beat'))list(beat,'Notes').forEach((id,order)=>put(notes,id,{beat:beat.getAttribute('id')??'',order}));
+  section(full,'MasterBars','MasterBar').forEach((master,index)=>list(master,'Bars').forEach((id,position)=>put(bars,id,{master:index,position})));
+  for(const bar of section(full,'Bars','Bar'))list(bar,'Voices').forEach((id,order)=>put(voices,id,{bar:bar.getAttribute('id')??'',order}));
+  for(const voice of section(full,'Voices','Voice'))list(voice,'Beats').forEach((id,order)=>put(beats,id,{voice:voice.getAttribute('id')??'',order}));
+  for(const beat of section(full,'Beats','Beat'))list(beat,'Notes').forEach((id,order)=>put(notes,id,{beat:beat.getAttribute('id')??'',order}));
   /** The address of a beat, or of one of its notes, as the file places it, or undefined when the ids do not chain. */
   return (id:string|null,isNote:boolean):(Address&{staff:number})|undefined=>{
     let note=-1,beatId=id??'';
@@ -110,11 +124,29 @@ export function hasGpifCurves(score:model.Score):boolean {
   return score.tracks.some(track=>track.staves.some(staff=>staff.bars.some(bar=>bar.voices.some(voice=>!voice.isEmpty&&voice.beats.some(beat=>beat.hasWhammyBar||beat.notes.some(note=>note.hasBend||!!note.slurDestination))))));
 }
 
-/** `xml` is the full document alphaTab wrote, which `doc` (tracks only) leaves out; it is read only to note what the ordinary fields hold. */
+/**
+ * `xml` is the full document alphaTab wrote, which `doc` (tracks only) leaves out; it is read only to note what the
+ * ordinary fields hold. Nothing may vanish silently: a curve of more than four points has no ordinary fields, so one this
+ * cannot carry (a value outside the range, or past the per-file point cap) and a slur it cannot carry stop the export
+ * with a message that says where, which is the one way an export reports a problem to the user.
+ */
 export function writeGpifCurves(score:model.Score,doc:Document,xml:string):void {
-  let notes:Map<string|null,Element>,beats:Map<string|null,Element>,ready=false;
-  const written=()=>{if(!ready){const full=new DOMParser().parseFromString(xml,'application/xml');notes=byId(full,'GPIF > Notes > Note');beats=byId(full,'GPIF > Beats > Beat');ready=true;}};
-  const tracks=orderedTracks(doc);
+  let notes!:Map<string|null,Element>,beats!:Map<string|null,Element>,ready=false;
+  const written=()=>{if(!ready){const full=new DOMParser().parseFromString(xml,'application/xml');notes=byId(full,'Notes','Note');beats=byId(full,'Beats','Beat');ready=true;}};
+  const tracks=orderedTracks(doc),lost:string[]=[];let total=0;
+  const where=(beat:model.Beat)=>`track ${beat.voice.bar.staff.track.index+1}, bar ${beat.voice.bar.index+1}, beat ${beat.index+1}`;
+  /** Whether a curve is carried; a curve nothing else can hold is reported. */
+  const carry=(whammy:boolean,beat:model.Beat,type:number,style:number,points:model.BendPoint[])=>{
+    try{
+      checkCurve(whammy,{type,style,points});
+      if(total+points.length>maxCurvePoints)throw new Error(`the file would hold more than ${maxCurvePoints} curve points`);
+      total+=points.length;return true;
+    }catch(cause){
+      // Up to four points the ordinary fields still hold the curve as alphaTab writes it.
+      if(points.length>4)lost.push(`the ${whammy?'whammy bar':'bend'} at ${where(beat)} (${cause instanceof Error?cause.message:String(cause)})`);
+      return false;
+    }
+  };
   score.tracks.forEach((track,trackIndex)=>track.staves.forEach((staff,staffIndex)=>{
     const items=doc.createElement('Items');let count=0;
     const curve=(parent:Element,type:number,style:number,points:model.BendPoint[])=>{
@@ -124,19 +156,19 @@ export function writeGpifCurves(score:model.Score,doc:Document,xml:string):void 
     for(const bar of staff.bars)for(const voice of bar.voices){
       if(voice.isEmpty)continue;
       for(const beat of voice.beats){
-        // What the reader would refuse is not written, so a file never warns about its own content.
-        if(beat.hasWhammyBar&&beat.whammyBarPoints&&valid(()=>checkCurve(true,{type:beat.whammyBarType,style:beat.whammyStyle,points:beat.whammyBarPoints!}))){
-          written();const node=element(doc,items,'Whammy',{...attributes(beatAddress(beat)),id:String(beat.id),notes:noteList(beat),fields:beatFields(beats.get(String(beat.id)))});
+        if(beat.hasWhammyBar&&beat.whammyBarPoints&&carry(true,beat,beat.whammyBarType,beat.whammyStyle,beat.whammyBarPoints)){
+          written();const node=element(doc,items,'Whammy',{...attributes(beatAddress(beat)),id:String(beat.id),notes:noteList(beat,writtenFret),fields:beatFields(beats.get(String(beat.id)))});
           curve(node,beat.whammyBarType,beat.whammyStyle,beat.whammyBarPoints);count++;
         }
         for(const note of beat.notes){
-          if(note.hasBend&&note.bendPoints&&valid(()=>checkCurve(false,{type:note.bendType,style:note.bendStyle,points:note.bendPoints!}))){
-            written();const node=element(doc,items,'Bend',{...attributes(noteAddress(note)),id:String(note.id),string:String(note.string),fret:String(note.fret),fields:noteFields(notes.get(String(note.id)))});
+          if(note.hasBend&&note.bendPoints&&carry(false,beat,note.bendType,note.bendStyle,note.bendPoints)){
+            written();const node=element(doc,items,'Bend',{...attributes(noteAddress(note)),id:String(note.id),string:String(note.string),fret:String(writtenFret(note)),fields:noteFields(notes.get(String(note.id)))});
             curve(node,note.bendType,note.bendStyle,note.bendPoints);count++;
           }
           const target=note.slurDestination;
-          if(target&&valid(()=>checkSlur(note,target))){
-            element(doc,items,'Slur',{...attributes(noteAddress(note)),id:String(note.id),string:String(note.string),fret:String(note.fret),...attributes(noteAddress(target),'to'),toId:String(target.id),toStr:String(target.string),toFret:String(target.fret)});count++;
+          if(target){
+            try{checkSlur(note,target);}catch(cause){lost.push(`the slur at ${where(beat)} (${cause instanceof Error?cause.message:String(cause)})`);continue;}
+            element(doc,items,'Slur',{...attributes(noteAddress(note)),id:String(note.id),string:String(note.string),fret:String(writtenFret(note)),...attributes(noteAddress(target),'to'),toId:String(target.id),toStr:String(target.string),toFret:String(writtenFret(target))});count++;
           }
         }
       }
@@ -146,6 +178,7 @@ export function writeGpifCurves(score:model.Score,doc:Document,xml:string):void 
     if(!scope)throw new Error('Missing GPIF staff for curve export.');
     (holderOf(scope)??element(doc,scope,'Property',{name:gpifCurvesProperty})).append(items);
   }));
+  if(lost.length)throw new Error(`GP export cannot keep ${lost.slice(0,3).join('; ')}${lost.length>3?` and ${lost.length-3} more`:''}: Guitar Pro files hold at most four points per curve and no note slur, so TabPlayer keeps these itself, within limits it cannot meet here. Shorten or remove them, or export another format.`);
 }
 
 function locate(staff:model.Staff,node:Element,prefix=''):{note?:model.Note;beat?:model.Beat} {
@@ -153,7 +186,7 @@ function locate(staff:model.Staff,node:Element,prefix=''):{note?:model.Note;beat
   return {beat,note:beat&&noteIndex!==null?beat.notes[whole(noteIndex)]:undefined};
 }
 function readCurve(node:Element,whammy:boolean):Curve {
-  const curve={type:number(node.getAttribute('type')),style:number(node.getAttribute('style')),points:[...node.querySelectorAll(':scope > Point')].map(point=>({offset:number(point.getAttribute('offset')),value:number(point.getAttribute('value'))}))};
+  const curve={type:number(node.getAttribute('type')),style:number(node.getAttribute('style')),points:kids(node,'Point').map(point=>({offset:number(point.getAttribute('offset')),value:number(point.getAttribute('value'))}))};
   checkCurve(whammy,curve);return curve;
 }
 
@@ -164,15 +197,16 @@ function readCurve(node:Element,whammy:boolean):Curve {
 export function readGpifCurves(score:model.Score,doc:Document,xml:string):void {
   const staves=score.tracks.flatMap(track=>track.staves);
   let notes!:Map<string|null,Element>,beats!:Map<string|null,Element>,where!:ReturnType<typeof placement>,ready=false;
-  const written=()=>{if(!ready){const full=new DOMParser().parseFromString(xml,'application/xml');notes=byId(full,'GPIF > Notes > Note');beats=byId(full,'GPIF > Beats > Beat');where=placement(full);ready=true;}};
+  const written=()=>{if(!ready){const full=new DOMParser().parseFromString(xml,'application/xml');notes=byId(full,'Notes','Note');beats=byId(full,'Beats','Beat');where=placement(full);ready=true;}};
+  let total=0;
   const touched=new Set<model.Note>(),beatsTouched=new Set<model.Beat>(),slurs:{staff:model.Staff;node:Element}[]=[];
   const stale=(reason:string)=>console.warn(`Skipped a curve or slur in the GP file that no longer matches its music: ${reason}`);
   orderedTracks(doc).forEach((node,index)=>{
     const track=score.tracks[index];if(!track||!node)return;
-    [...node.querySelectorAll(':scope > Staves > Staff')].forEach((staffNode,staffIndex)=>{
-      const staff=track.staves[staffIndex],scope=staffNode.querySelector(':scope > Properties'),holder=scope&&holderOf(scope);if(!staff||!holder)return;
+    kids(kids(node,'Staves')[0],'Staff').forEach((staffNode,staffIndex)=>{
+      const staff=track.staves[staffIndex],scope=kids(staffNode,'Properties')[0],holder=scope&&holderOf(scope);if(!staff||!holder)return;
       const position=staves.indexOf(staff);
-      for(const item of holder.querySelectorAll(':scope > Items > *')){
+      for(const item of kids(kids(holder,'Items')[0])){
         try{
           if(item.localName==='Slur'){slurs.push({staff,node:item});continue;}
           if(item.localName!=='Bend'&&item.localName!=='Whammy')throw new Error('Unknown curve item.');
@@ -183,6 +217,8 @@ export function readGpifCurves(score:model.Score,doc:Document,xml:string):void {
           if(isBend?note!.string!==number(item.getAttribute('string'))||note!.fret!==number(item.getAttribute('fret')):noteList(beat!)!==item.getAttribute('notes')){stale('the notes differ.');continue;}
           // The ordinary fields changed after this was written: they are what the file now says.
           if((isBend?noteFields(notes.get(item.getAttribute('id')??'')):beatFields(beats.get(item.getAttribute('id')??'')))!==item.getAttribute('fields')){stale('its ordinary fields were edited.');continue;}
+          if(total+curve.points.length>maxCurvePoints){console.warn(`Skipped a curve in the GP file: it would take the file past ${maxCurvePoints} curve points.`);continue;}
+          total+=curve.points.length;
           if(isBend){
             note!.bendPoints=null;note!.maxBendPoint=null;note!.bendType=curve.type;note!.bendStyle=curve.style;
             for(const point of curve.points)note!.addBendPoint(new model.BendPoint(point.offset,point.value));

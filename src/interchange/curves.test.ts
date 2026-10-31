@@ -7,6 +7,7 @@ import { exportGpInterchange,loadInterchangeScore } from './gp';
 import { writeStylesheetTimeSignatures } from './stylesheet';
 import { scoreFromJson } from '../model-clone';
 import { buildPlaybackPlan } from '../audio/plan';
+import { setBanjoDrone } from '../editor/banjo-drone';
 
 const settings=new Settings();
 afterEach(()=>vi.restoreAllMocks());
@@ -242,7 +243,7 @@ describe('curve shape and range',()=>{
     ['a single point',item=>[...points(item)].slice(1).forEach(point=>point.remove())],
     ['unsorted offsets',item=>points(item)[2].setAttribute('offset','5')],
     ['an end past 60',item=>points(item)[5].setAttribute('offset','61')],
-    ['a start after 0',item=>points(item)[0].setAttribute('offset','1')],
+    ['a negative offset',item=>points(item)[0].setAttribute('offset','-1')],
     ['a bend release with three points',item=>{item.setAttribute('type',String(model.BendType.BendRelease));points(item)[2].remove();points(item)[2].remove();points(item)[2].remove();}],
     ['a negative bend value',item=>points(item)[1].setAttribute('value','-1')],
     ['a value of a million',item=>points(item)[1].setAttribute('value','1000000')],
@@ -288,5 +289,89 @@ describe('files without curves or slurs',()=>{
     ours.querySelectorAll('Property[name="TabPlayerCurves"]').forEach(node=>node.remove());
     ours.querySelectorAll('ChannelStrip > Automations').forEach(node=>{expect(node.childElementCount).toBe(0);node.remove();});
     expect(normalized(new XMLSerializer().serializeToString(ours))).toBe(normalized(raw));
+  });
+});
+
+describe('curves the first version lost or broke',()=>{
+  it('refuses a two-point whammy dip in the styles that read a third point, and carries a three-point one',()=>{
+    for(const style of [model.BendStyle.Gradual,model.BendStyle.Fast]){
+      const score=music();whammy(beatsOf(score,1)[2],model.WhammyType.Dip,style,[0,0],[30,-4],[60,0]);score.finish(settings);
+      const loaded=roundTrip(score);expect(state(loaded)).toEqual(state(score));usable(loaded);
+      const warn=warnings(),forged=loadInterchangeScore(editDoc(exportGpInterchange(score,settings),doc=>sidecar(doc,'Whammy')[0].querySelectorAll('Point')[1].remove()),settings);
+      // The forged two-point dip is not applied: the ordinary fields stand, in the default style, and the plan builds.
+      expect(beatsOf(forged,1)[2].whammyStyle).toBe(model.BendStyle.Default);expect(warn).toHaveBeenCalled();usable(forged);
+    }
+  });
+  it('keeps the style of a bend release that Note.finish rewrites with a repeated offset',()=>{
+    const score=music(),note=beatsOf(score,0)[1].notes[0];
+    bend(note,model.BendType.Custom,model.BendStyle.Fast,[0,0],[30,4],[60,0]);score.finish(settings);
+    expect(note.bendType).toBe(model.BendType.BendRelease);expect(pointsOf(note.bendPoints)).toEqual([[0,0],[30,4],[30,4],[60,0]]);
+    const loaded=roundTrip(score);expect(state(loaded)).toEqual(state(score));expect(beatsOf(loaded,0)[1].notes[0].bendStyle).toBe(model.BendStyle.Fast);usable(loaded);
+  });
+  it('carries long curves with a repeated offset or an end short of 60',()=>{
+    const score=music();
+    bend(beatsOf(score,0)[1].notes[0],model.BendType.Custom,model.BendStyle.Fast,[0,0],[10,2],[10,3],[30,4],[50,0]);
+    whammy(beatsOf(score,1)[0],model.WhammyType.Custom,model.BendStyle.Default,[0,0],[20,-2],[20,-3],[40,-1],[45,0]);score.finish(settings);
+    const loaded=roundTrip(score);expect(state(loaded)).toEqual(state(score));usable(loaded);
+  });
+  it('stops the export instead of silently dropping a long curve it cannot carry',()=>{
+    const score=music();
+    bend(beatsOf(score,0)[1].notes[0],model.BendType.Custom,model.BendStyle.Default,[0,0],[10,2],[20,4],[40,40],[60,0]);score.finish(settings);
+    expect(()=>exportGpInterchange(score,settings)).toThrow(/cannot keep the bend at track 1, bar 1, beat 2/);
+  });
+  it('keeps curves on banjo drone notes, which GPIF holds at their plain fret',()=>{
+    const score=music(),staff=score.tracks[0].staves[0];
+    staff.stringTuning.tunings=[62,59,55,50,67];
+    for(const bar of staff.bars)for(const beat of bar.voices[0].beats){beat.notes[0].string=2;beat.notes[0].fret=3;}
+    setBanjoDrone(staff,5);
+    const beats=beatsOf(score,0);
+    for(const [index,fret]of [[0,7],[2,9]]){beats[index].notes[0].string=1;beats[index].notes[0].fret=fret;}
+    bend(beats[0].notes[0],model.BendType.Custom,model.BendStyle.Fast,[0,0],[10,2],[20,4],[30,4],[60,0]);
+    whammy(beats[2],model.WhammyType.Custom,model.BendStyle.Gradual,[0,0],[10,-3],[25,-5],[40,-2],[60,1]);
+    link(beats[0].notes[0],beats[2].notes[0]);score.finish(settings);
+    const loaded=roundTrip(score),read=beatsOf(loaded,0);
+    // GPIF and the score read back hold semitones above the open string; the drone is set again by the project.
+    expect(read[0].notes[0].fret).toBe(2);expect(read[2].notes[0].fret).toBe(4);
+    expect(pointsOf(read[0].notes[0].bendPoints)).toEqual([[0,0],[10,2],[20,4],[30,4],[60,0]]);expect(read[0].notes[0].bendStyle).toBe(model.BendStyle.Fast);
+    expect(pointsOf(read[2].whammyBarPoints)).toEqual([[0,0],[10,-3],[25,-5],[40,-2],[60,1]]);
+    expect(read[0].notes[0].slurDestination).toBe(read[2].notes[0]);
+  });
+  it('keeps a beat whammy when only one of its notes sits on the drone string',()=>{
+    const score=music(),staff=score.tracks[0].staves[0];
+    staff.stringTuning.tunings=[62,59,55,50,67];
+    for(const bar of staff.bars)for(const beat of bar.voices[0].beats){beat.notes[0].string=2;beat.notes[0].fret=3;}
+    setBanjoDrone(staff,5);
+    const beat=beatsOf(score,0)[1],drone=new model.Note();drone.string=1;drone.fret=8;beat.addNote(drone);
+    whammy(beat,model.WhammyType.Custom,model.BendStyle.Default,[0,0],[10,-3],[25,-5],[40,-2],[60,1]);score.finish(settings);
+    expect(beatsOf(roundTrip(score),0)[1].whammyBarPoints).toHaveLength(5);
+  });
+  it('does not apply an edited ordinary bend field over the property',()=>{
+    const score=authored(),note=beatsOf(score,0)[3].notes[0],warn=warnings();
+    const loaded=loadInterchangeScore(editDoc(exportGpInterchange(score,settings),doc=>{
+      nodeById(doc,'GPIF > Notes > Note',String(note.id))!.querySelector('Property[name="BendDestinationValue"] > Float')!.textContent='50';
+    }),settings),read=beatsOf(loaded,0)[3].notes[0];
+    // The file now says a destination of 2, in the style alphaTab reads; the property's older 3 and Gradual are not restored.
+    expect(read.bendPoints?.at(-1)?.value).toBe(2);expect(read.bendStyle).toBe(model.BendStyle.Default);expect(warn).toHaveBeenCalledWith(expect.stringContaining('edited'));
+  });
+  describe('the per-file point cap',()=>{
+    const dense=(count:number)=>{
+      const score=music(),notes=score.tracks[0].staves[0].bars.flatMap(bar=>bar.voices[0].beats.map(beat=>beat.notes[0])).slice(0,count);
+      for(const note of notes)bend(note,model.BendType.Custom,model.BendStyle.Default,...Array.from({length:1024},(_,index)=>[60*index/1023,index%2?1:2]));
+      score.finish(settings);return score;
+    };
+    it('carries a file at the cap',()=>{
+      const loaded=roundTrip(dense(16));
+      expect(allNotes(loaded).filter(note=>note.bendPoints?.length===1024)).toHaveLength(16);
+    });
+    it('stops the export of a file past the cap rather than dropping curves',()=>{
+      const score=dense(16);whammy(beatsOf(score,0)[0],model.WhammyType.Custom,model.BendStyle.Default,...Array.from({length:1024},(_,index)=>[60*index/1023,index%2?-1:-2]));score.finish(settings);
+      expect(()=>exportGpInterchange(score,settings)).toThrow(/more than 16384 curve points/);
+    });
+    it('skips curves past the cap when reading a file that holds more',()=>{
+      const warn=warnings(),bytes=editDoc(exportGpInterchange(dense(16),settings),doc=>{const [first]=sidecar(doc,'Bend');first.parentNode!.append(first.cloneNode(true),first.cloneNode(true));});
+      const loaded=loadInterchangeScore(bytes,settings);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('16384 curve points'));
+      expect(allNotes(loaded).filter(note=>note.bendPoints?.length===1024)).toHaveLength(16);
+    });
   });
 });

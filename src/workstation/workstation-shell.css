@@ -112,3 +112,10 @@ body { overflow:hidden; }
 .finalized-banner p { margin:0; }
 .export-layout-fields { border:0; margin:0; padding:0; display:contents; }
 .inspector-edit-locked { border:0; margin:0; padding:0; min-width:0; }
+
+/* The Sound view covers the whole workspace; the score and its panels stay laid out underneath, out of sight and out of reach. */
+.workstation-workspace { position:relative; }
+.workstation-workspace>:is(.sound-view,.mixer-view) { position:absolute; inset:0; z-index:5; }
+.workstation-workspace[data-view=sound]>:not(.sound-view),.workstation-workspace[data-view=mixer]>:not(.mixer-view) { visibility:hidden; }
+.toolbar .view-switch { flex:none; }
+.toolbar .view-switch .tp-seg-option { min-height:24px; padding:0 10px; }

@@ -51,7 +51,7 @@ try{
     const name=`master-${++count}`,expected=`${name}.wav`;
     await clickWorkspaceCommand(page,'Export score',{waitForIdle:false});
     const dialog=page.getByRole('dialog',{name:'Export score'});await dialog.getByLabel('Export format').selectOption('wav');
-    await dialog.getByLabel('File type').selectOption('wav');await dialog.getByLabel('Sample rate').selectOption('48000');await dialog.getByLabel('Bit depth').selectOption('24');
+    for(const [group,name] of [['File type','WAV'],['Sample rate','48 kHz'],['Bit depth','24 bit']])await dialog.getByRole('radiogroup',{name:group,exact:true}).getByRole('radio',{name,exact:true}).click();
     await dialog.getByLabel('File name',{exact:true}).fill(name);await dialog.getByText(`Saves as ${name}.wav`,{exact:true}).waitFor();
     await dialog.getByRole('button',{name:'Export',exact:true}).click();
     const deadline=Date.now()+120000;

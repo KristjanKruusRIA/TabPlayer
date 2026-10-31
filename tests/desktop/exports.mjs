@@ -23,14 +23,14 @@ for(const {format,current=false,named=false} of [{format:'pdf',named:true},{form
     if(current)await page.getByRole('combobox',{name:/^Speed/}).selectOption('50');
     await clickWorkspaceCommand(page,'Export score',{waitForIdle:false});
     const dialog=page.getByRole('dialog',{name:'Export score'});await dialog.getByLabel('Export format').selectOption(format);
-    if(format==='png')await dialog.getByLabel('Resolution').selectOption('150');
+    if(format==='png')await dialog.getByRole('radio',{name:'150 dpi'}).click();
     if(named){
       // The inner dot checks that the extension is appended, not substituted, exactly as previewed.
       await dialog.getByLabel('File name',{exact:true}).fill('%T - %t. (%n of %N) %d');
       const preview=(await dialog.getByText(/^Saves as /).innerText()).replace(/^Saves as /,'');
       assert.match(preview,/^Untitled - .+\. \(1 of \d+\) \d{4}-\d{2}-\d{2}\.pdf$/);destination=join(namedDirectory,preview);
     }
-    if(format==='wav'||format==='stems'){await dialog.getByLabel('Bit depth').selectOption('24');await dialog.getByLabel('Effect tail (seconds)').fill('0.1');if(current)await dialog.getByRole('combobox',{name:/^Speed/}).selectOption('current');}
+    if(format==='wav'||format==='stems'){await dialog.getByRole('radio',{name:'24 bit'}).click();await dialog.getByLabel('Effect tail (seconds)').fill('0.1');if(current)await dialog.getByRole('radio',{name:'Current speed coefficient'}).click();}
     await dialog.getByRole('button',{name:'Export',exact:true}).click();
     const deadline=Date.now()+120000;let exists=false;
     while(Date.now()<deadline){

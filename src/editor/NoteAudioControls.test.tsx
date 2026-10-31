@@ -65,7 +65,13 @@ it('clears the settings with the reset button, and when the last field returns t
 it('is disabled while busy or locked, and explains a tie destination and a bent note', () => {
   const score = music(), onEdit = vi.fn();
   const view = render(<TechniquePanel score={score} target={target} string={6} busy onEdit={onEdit} />);
-  for (const name of [/Sounding length/, /Start offset/, /Velocity change/]) expect(field(name)).toBeDisabled();
+  for (const name of [/Sounding length/, /Start offset/, /Velocity change/]) {
+    const input = field(name);
+    expect(input).not.toHaveAttribute('disabled'); expect(input).toHaveAttribute('aria-disabled', 'true'); expect(input.closest('fieldset')).toHaveAttribute('aria-disabled', 'true');
+    input.focus(); fireEvent.change(input, { target: { value: '120' } }); fireEvent.keyDown(input, { key: 'Enter' }); fireEvent.blur(input);
+    expect(input).toHaveFocus();
+  }
+  expect(onEdit).not.toHaveBeenCalled();
   view.unmount();
   const tied = music(); const first = noteAt(tied), second = noteAt(tied, 0, 1);
   first.tieDestination = second; second.tieOrigin = first; second.isTieDestination = true;
@@ -98,4 +104,16 @@ it('forgets what a refused edit sent, and shows a message', async () => {
   expect(field(/Sounding length/).value).toBe('100');
   fireEvent.change(field(/Start offset/), { target: { value: '20' } }); fireEvent.blur(field(/Start offset/));
   expect(onEdit).toHaveBeenLastCalledWith(patch({ length: 100, offset: 20, velocity: 0 }));
+});
+
+it('busy flipping after a value was typed refuses Enter and blur, records nothing and shows the saved value', () => {
+  const score = music(), onEdit = vi.fn(), props = { score, target, string: 6, onEdit };
+  const view = render(<TechniquePanel {...props} busy={false} />);
+  const input = field(/Sounding length/);
+  input.focus(); fireEvent.change(input, { target: { value: '120' } });
+  view.rerender(<TechniquePanel {...props} busy />);
+  fireEvent.keyDown(input, { key: 'Enter' }); fireEvent.blur(input); fireEvent.doubleClick(input);
+  expect(onEdit).not.toHaveBeenCalled();
+  expect(input.value).toBe('100');
+  expect(input).not.toHaveAttribute('disabled');
 });

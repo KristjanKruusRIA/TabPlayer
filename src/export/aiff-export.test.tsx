@@ -14,15 +14,15 @@ it('exports mixed audio as AIFF and names the file .aiff',()=>{
   const format=screen.getByLabelText('Export format');
   expect(within(format).getByRole('option',{name:'Mixed audio'})).toHaveValue('wav');expect(within(format).getByRole('option',{name:'Audio stems'})).toHaveValue('stems');
   fireEvent.change(format,{target:{value:'wav'}});
-  const type=screen.getByLabelText('File type');expect(type).toHaveValue('wav');
-  expect(within(type).getAllByRole('option').map(option=>option.textContent)).toEqual(['WAV','AIFF','FLAC (lossless)']);
+  const type=screen.getByRole('radiogroup',{name:'File type'});expect(within(type).getByRole('radio',{name:'WAV'})).toBeChecked();
+  expect(within(type).getAllByRole('radio').map(option=>option.textContent)).toEqual(['WAV','AIFF','FLAC (lossless)']);
   expect(screen.getByText(/^Saves as .*\.wav$/)).toBeInTheDocument();
-  fireEvent.change(type,{target:{value:'aiff'}});
+  fireEvent.click(within(type).getByRole('radio',{name:'AIFF'}));
   expect(screen.getByText(/^Saves as .*\.aiff$/)).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button',{name:'Export'}));
   expect(submit).toHaveBeenLastCalledWith({format:'wav',selection:{tracks:[0],range:null},audio:{...audio,container:'aiff'}});
   // Back to WAV, the request is exactly as before AIFF.
-  fireEvent.change(type,{target:{value:'wav'}});
+  fireEvent.click(within(type).getByRole('radio',{name:'WAV'}));
   expect(screen.getByText(/^Saves as .*\.wav$/)).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button',{name:'Export'}));
   expect(submit).toHaveBeenLastCalledWith({format:'wav',selection:{tracks:[0],range:null},audio});
@@ -31,7 +31,7 @@ it('exports mixed audio as AIFF and names the file .aiff',()=>{
 it('exports stems as AIFF',()=>{
   const submit=vi.fn();render(<ExportDialog score={fixture()} layout={layout} busy={false} currentSpeedAvailable={true} onExport={submit} onCancel={()=>{}}/>);
   fireEvent.change(screen.getByLabelText('Export format'),{target:{value:'stems'}});
-  fireEvent.change(screen.getByLabelText('File type'),{target:{value:'aiff'}});
+  fireEvent.click(within(screen.getByRole('radiogroup',{name:'File type'})).getByRole('radio',{name:'AIFF'}));
   fireEvent.click(screen.getByRole('button',{name:'Export'}));
   expect(submit).toHaveBeenLastCalledWith({format:'stems',selection:{tracks:[0],range:null},audio:{...audio,container:'aiff'}});
 });

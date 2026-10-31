@@ -98,7 +98,7 @@ it('drums highlight kick, snare, toms and cymbals together and retain auxiliary 
   const score=scoreWith([[],[]],0,true);
   for (const [index,key] of [36,38,41,47,50,42,49,51,52,55,54,81].entries()) {const note=new model.Note(); note.percussionArticulation=key; score.tracks[0].staves[index%2].bars[0].voices[0].beats[0].addNote(note);}
   const notes=finish(score),{container}=render(<InstrumentView score={score} track={0} staff={0} notes={notes}/>); expect(screen.getByRole('img',{name:'Drum kit'})).toBeInTheDocument();
-  for (const piece of ['kick','snare','floor-tom','low-tom','high-tom','hi-hat','crash','ride','china','splash']) expect(container.querySelector(`[data-drum="${piece}"][data-active="true"]`)).toBeInTheDocument();
+  for (const piece of ['kick-2','snare','floor-tom','low-mid-tom','high-tom','hi-hat','crash','ride','china','splash']) expect(container.querySelector(`[data-drum="${piece}"][data-active="true"]`)).toBeInTheDocument();
   expect(screen.getByText('Tambourine',{selector:'.instrument-note'})).toBeInTheDocument(); expect(screen.getByText('Open triangle',{selector:'.instrument-note'})).toBeInTheDocument();
 });
 
@@ -129,8 +129,8 @@ it('renders a guitar body and pickup poles for every string with physical fret s
 
 it('renders acoustic drum shells, heads, cymbals and the kick pedal', () => {
   const score=scoreWith([[]],0,true);finish(score);const {container}=render(<InstrumentView score={score} track={0} staff={0} notes={[]}/>);
-  expect(container.querySelector('[data-drum="snare"] [data-drum-surface="head"]')).toBeInTheDocument();expect(container.querySelector('[data-drum="floor-tom"] [data-drum-surface="shell"]')).toBeInTheDocument();
-  expect(container.querySelector('[data-drum="ride"] [data-drum-surface="cymbal"]')).toBeInTheDocument();expect(container.querySelector('[data-drum="kick"] [data-drum-surface="pedal"]')).toBeInTheDocument();
+  expect(container.querySelector('[data-drum-art="snare"] [data-drum-surface="head"]')).toBeInTheDocument();expect(container.querySelector('[data-drum-art="floor-tom"] [data-drum-surface="shell"]')).toBeInTheDocument();
+  expect(container.querySelector('[data-drum-art="ride"] [data-drum-surface="cymbal"]')).toBeInTheDocument();expect(container.querySelector('[data-drum-art="kick"] [data-drum-surface="pedal"]')).toBeInTheDocument();
 });
 
 it('keeps descriptive SVG titles intact when rendering instrument artwork', () => {

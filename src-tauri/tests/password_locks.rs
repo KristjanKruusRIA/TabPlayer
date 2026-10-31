@@ -971,6 +971,11 @@ fn a_sealed_score_cannot_become_a_plain_copy_or_a_plain_recovery_backup() {
         assert_eq!(kept.view.zoom, original.view.zoom);
         assert_eq!(kept.view.score_display, original.view.score_display);
         assert_eq!(kept.view.target, DocumentViewState::default().target);
+        assert_eq!(
+            kept.view.selected_string,
+            DocumentViewState::default().selected_string
+        );
+        assert_eq!(kept.view.selected_note_index, None);
         assert_eq!(kept.view.track_view, TrackView::Selected {});
     }
     // Unsealed documents are untouched.

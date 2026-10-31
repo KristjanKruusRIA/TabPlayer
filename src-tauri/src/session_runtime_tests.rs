@@ -1633,22 +1633,27 @@ fn saving_a_score_under_a_password_leaves_no_plain_copy_in_the_recovery_backup_a
 
     // Nothing waits for the next scheduled checkpoint: saving the protected score rewrites the backup by itself,
     // through the real worker, without the score and without the older plain backup that held it.
-    // The scheduled checkpoint is two seconds after a change, so a shorter wait shows the save asked for this one.
-    let deadline = Instant::now() + Duration::from_millis(1500);
-    loop {
+    // The save itself asked the worker for the checkpoint: it is requested, under way or already written, which
+    // the ordinary schedule (two seconds after a change) is none of.
+    let asked = {
+        let state = runtime.inner.state.lock().unwrap();
+        state.retry
+            || state.writing
+            || state
+                .status
+                .generation
+                .is_some_and(|value| value > generation)
+    };
+    assert!(
+        asked,
+        "saving the protected score did not ask for a recovery checkpoint"
+    );
+    wait_until(|| {
         let status = runtime.status();
-        if status.state == RecoveryState::Ready
+        status.state == RecoveryState::Ready
             && status.generation.is_some_and(|value| value > generation)
-            && !runtime.inner.state.lock().unwrap().writing
-        {
-            break;
-        }
-        assert!(
-            Instant::now() < deadline,
-            "saving the protected score did not rewrite the recovery backup"
-        );
-        thread::yield_now();
-    }
+    });
+    wait_until(|| !runtime.inner.state.lock().unwrap().writing);
     assert_eq!(
         files_holding(directory.path(), MARKER),
         Vec::<String>::new(),
@@ -1664,4 +1669,70 @@ fn saving_a_score_under_a_password_leaves_no_plain_copy_in_the_recovery_backup_a
     checkpoint(&runtime);
     assert!(files_holding(directory.path(), MARKER).is_empty());
     assert!(checkpoint_files(directory.path()).len() <= 2);
+}
+
+#[test]
+fn saving_a_plain_score_only_schedules_a_checkpoint_and_keeps_the_previous_one() {
+    const MARKER: &str = "HeronQuartzMarker";
+    let directory = tempfile::tempdir().unwrap();
+    let saved = tempfile::tempdir().unwrap();
+    let runtime = open(directory.path());
+    let audio = audio();
+    let jobs = ExportJobs::default();
+    let library = crate::file_library::service::FileLibrary::open(
+        saved.path().join("file-library-v1"),
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .join("assets/library"),
+        Arc::new(|_| {}),
+    );
+    library.resume();
+    resolve(&runtime, &audio, &jobs);
+    title_it(&runtime, MARKER);
+    checkpoint(&runtime);
+    edit(&runtime, 3);
+    checkpoint(&runtime);
+    let generation = runtime.status().generation.unwrap();
+    let workspace = runtime.workspace();
+    let current = {
+        let state = workspace.lock().unwrap();
+        let id = state.active_owner().document_id.clone();
+        address(&state, &id)
+    };
+    let latest = runtime.inner.state.lock().unwrap().latest_revision;
+    let target = saved.path().join("plain.tabplayer");
+    crate::save_document_to_path(&audio, &library, &runtime, &workspace, &current, target).unwrap();
+    let (latest_after, pending) = {
+        let state = runtime.inner.state.lock().unwrap();
+        (
+            state.latest_revision,
+            state.status.state == RecoveryState::Pending,
+        )
+    };
+    assert!(latest_after > latest, "the save was not noted as a change");
+    assert!(pending);
+    // Nothing is written at once: the ordinary schedule waits two seconds after a change.
+    let started = Instant::now();
+    while started.elapsed() < Duration::from_millis(1000) {
+        let (writing, written) = {
+            let state = runtime.inner.state.lock().unwrap();
+            (state.writing, state.status.generation != Some(generation))
+        };
+        assert!(
+            !writing && !written,
+            "a plain save asked for an immediate checkpoint"
+        );
+        thread::yield_now();
+    }
+    // The ordinary schedule writes it later, and the plain previous checkpoint stays.
+    wait_until(|| {
+        runtime
+            .status()
+            .generation
+            .is_some_and(|value| value > generation)
+    });
+    wait_until(|| !runtime.inner.state.lock().unwrap().writing);
+    assert_eq!(checkpoint_files(directory.path()).len(), 2);
+    assert!(!files_holding(directory.path(), MARKER).is_empty());
 }

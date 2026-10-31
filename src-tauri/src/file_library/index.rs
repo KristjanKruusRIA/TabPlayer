@@ -1280,6 +1280,14 @@ impl LibraryIndex {
     /// A publication whose outcome is uncertain is scrubbed too, and its cache is rewritten without the details, so
     /// that reconciling it later cannot bring them back.
     pub fn scrub_file(&self, path: &Path) -> Result<bool, String> {
+        self.scrub_file_with(path, &write_bytes)
+    }
+
+    fn scrub_file_with(
+        &self,
+        path: &Path,
+        write: &dyn Fn(&Path, &[u8]) -> Result<(), String>,
+    ) -> Result<bool, String> {
         let wanted = key(path);
         let mut state = locked(&self.state)?;
         state.sealed.insert(wanted.clone());
@@ -1337,7 +1345,7 @@ impl LibraryIndex {
         }
         let mut failure = None;
         for (root_id, bytes) in writes {
-            match self.rewrite_or_delete_cache(&root_id, &bytes) {
+            match self.rewrite_or_delete_cache(&root_id, &bytes, write) {
                 Ok(false) => {}
                 Ok(true) => {
                     state.warnings.insert(
@@ -1367,10 +1375,15 @@ impl LibraryIndex {
 
     /// Rewrites a folder's cache file with `bytes`; when that fails, deletes it, since it may hold a protected score's
     /// details. Returns whether the cache was deleted.
-    fn rewrite_or_delete_cache(&self, root_id: &str, bytes: &[u8]) -> Result<bool, String> {
+    fn rewrite_or_delete_cache(
+        &self,
+        root_id: &str,
+        bytes: &[u8],
+        write: &dyn Fn(&Path, &[u8]) -> Result<(), String>,
+    ) -> Result<bool, String> {
         let target = self.cache_path(root_id)?;
         self.verify_directory()?;
-        match write_bytes(&target, bytes) {
+        match write(&target, bytes) {
             Ok(()) => Ok(false),
             Err(error) => match fs::remove_file(&target) {
                 Ok(()) => Ok(true),
@@ -1440,6 +1453,14 @@ impl LibraryIndex {
     }
 
     pub fn reconcile(&self, current_roots: &[LibraryRoot]) -> Result<Option<IndexCommit>, String> {
+        self.reconcile_with(current_roots, &write_bytes)
+    }
+
+    fn reconcile_with(
+        &self,
+        current_roots: &[LibraryRoot],
+        write: &dyn Fn(&Path, &[u8]) -> Result<(), String>,
+    ) -> Result<Option<IndexCommit>, String> {
         let mut state = locked(&self.state)?;
         let Some(pending) = &state.uncertain else {
             return Ok(None);
@@ -1500,7 +1521,7 @@ impl LibraryIndex {
                 .clone();
             if Self::withhold_sealed(&mut state.sealed, &mut index.files) {
                 let bytes = serde_json::to_vec(&index).map_err(|error| error.to_string())?;
-                let deleted = self.rewrite_or_delete_cache(&root_id, &bytes)?;
+                let deleted = self.rewrite_or_delete_cache(&root_id, &bytes, write)?;
                 withheld = Some((index, bytes.len(), deleted));
             }
         }
@@ -2327,6 +2348,137 @@ mod tests {
             0,
             "the details are gone from memory whatever happens to the file"
         );
+    }
+
+    fn fails(_: &Path, _: &[u8]) -> Result<(), String> {
+        Err("Injected cache write failure".into())
+    }
+
+    /// An uncertain publication holding `title`, over a committed index of `committed` (None: an empty one).
+    /// `landed` says whether the cache holds the intended bytes (otherwise unrecognized ones).
+    fn uncertain_over(
+        committed: Option<&str>,
+        pending: Option<&str>,
+        landed: bool,
+    ) -> (
+        tempfile::TempDir,
+        Arc<LibraryIndex>,
+        LibraryRoot,
+        PathBuf,
+        PathBuf,
+    ) {
+        let (temp, index, root) = fixture();
+        match committed {
+            Some(title) => {
+                let original = seeded(&index, &root, 1, Some(summary(title)));
+                index.finish(&original, &root).unwrap();
+            }
+            None => complete_empty(&index, &root),
+        }
+        let job = seeded(&index, &root, 1, pending.map(summary));
+        let intended = std::cell::RefCell::new(Vec::new());
+        assert!(
+            index
+                .finish_with(&job, &root, |path, bytes| {
+                    *intended.borrow_mut() = bytes.to_vec();
+                    fs::write(path, b"unknown").unwrap();
+                    Err("Injected uncertain result".into())
+                })
+                .is_err()
+        );
+        index.cancel(&job).unwrap();
+        let target = index.cache_path(&root.id).unwrap();
+        if landed {
+            fs::write(&target, intended.borrow().as_slice()).unwrap();
+        }
+        let file = PathBuf::from(&root.path)
+            .canonicalize()
+            .unwrap()
+            .join("00000.tabplayer");
+        (temp, index, root, target, file)
+    }
+
+    fn cache_holds(target: &Path, text: &str) -> bool {
+        fs::read_to_string(target).is_ok_and(|content| content.contains(text))
+    }
+
+    #[test]
+    fn details_held_only_by_an_uncertain_publication_are_scrubbed_from_memory_and_cache() {
+        for landed in [true, false] {
+            let (_temp, index, root, target, file) = uncertain_over(None, Some("Secret"), landed);
+            assert_eq!(index.scrub_file(&file), Ok(true), "landed {landed}");
+            assert!(!cache_holds(&target, "Secret"), "landed {landed}");
+            assert!(
+                index.reconcile(&[root.clone()]).unwrap().is_some(),
+                "landed {landed}"
+            );
+            assert_eq!(index.search(&title_query("secret")).unwrap().total, 0);
+            assert!(!cache_holds(&target, "Secret"), "landed {landed}");
+            assert!(index.begin(root).is_ok(), "scans must run again");
+        }
+    }
+
+    #[test]
+    fn a_committed_index_holding_details_is_scrubbed_while_the_pending_one_holds_none() {
+        for landed in [true, false] {
+            let (_temp, index, root, target, file) = uncertain_over(Some("Secret"), None, landed);
+            assert_eq!(index.search(&title_query("secret")).unwrap().total, 1);
+            assert_eq!(index.scrub_file(&file), Ok(true), "landed {landed}");
+            assert_eq!(index.search(&title_query("secret")).unwrap().total, 0);
+            assert!(!cache_holds(&target, "Secret"), "landed {landed}");
+            // The cache now holds the pending publication, which is what reconciling looks for.
+            assert!(
+                index.reconcile(&[root.clone()]).unwrap().is_some(),
+                "landed {landed}"
+            );
+            assert!(index.begin(root).is_ok(), "scans must run again");
+        }
+    }
+
+    #[test]
+    fn a_cache_that_cannot_be_rewritten_is_deleted_so_no_details_stay_on_disk() {
+        let (_temp, index, root) = fixture();
+        let original = seeded(&index, &root, 1, Some(summary("Secret")));
+        index.finish(&original, &root).unwrap();
+        let target = index.cache_path(&root.id).unwrap();
+        let file = {
+            let state = index.state.lock().unwrap();
+            PathBuf::from(&state.committed[&root.id].index.files[0].row.path)
+        };
+        assert_eq!(index.scrub_file_with(&file, &fails), Ok(true));
+        assert!(!target.exists(), "the cache still holds the details");
+        let warning = index.state.lock().unwrap().warnings.get(&root.id).cloned();
+        assert!(warning.is_some_and(|text| text.contains("deleting its cache")));
+        assert_eq!(index.search(&title_query("secret")).unwrap().total, 0);
+    }
+
+    #[test]
+    fn deleting_the_cache_of_an_uncertain_publication_lets_it_be_reconciled() {
+        let (_temp, index, root, target, file) = uncertain_over(None, Some("Secret"), true);
+        assert_eq!(index.scrub_file_with(&file, &fails), Ok(true));
+        assert!(!target.exists());
+        // The cache is absent, the outcome the publication is reconciled against: nothing is adopted.
+        assert!(index.reconcile(&[root.clone()]).unwrap().is_none());
+        assert_eq!(index.search(&title_query("secret")).unwrap().total, 0);
+        assert!(index.begin(root).is_ok(), "the library is wedged");
+    }
+
+    #[test]
+    fn reconciling_deletes_the_cache_when_it_cannot_be_rewritten_without_the_details() {
+        let (_temp, index, root, target, file) = uncertain_over(None, Some("Secret"), true);
+        fs::write(&file, b"TABPLOCK and then some").unwrap();
+        index.state.lock().unwrap().sealed.insert(key(&file));
+        let commit = index
+            .reconcile_with(&[root], &fails)
+            .unwrap()
+            .expect("the publication is adopted");
+        assert!(
+            commit
+                .warning
+                .is_some_and(|text| text.contains("deleting its cache"))
+        );
+        assert!(!target.exists());
+        assert_eq!(index.search(&title_query("secret")).unwrap().total, 0);
     }
 
     fn seeded(

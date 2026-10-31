@@ -139,6 +139,17 @@ impl EngravingTypography {
     }
 }
 
+/// One bar's width as a weight within its system (1 is the default width). The default is the absence of an entry.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct BarWidth {
+    pub bar: u32,
+    pub scale: f64,
+}
+
+pub const MAX_BAR_INDEX: u32 = 99_999;
+pub const MAX_BAR_WIDTHS: usize = 10_000;
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct TrackProfileOverride {
@@ -157,9 +168,35 @@ pub struct EngravingOverrides {
     /// Absent (and omitted again when default) in documents saved before typography existed.
     #[serde(default, skip_serializing_if = "EngravingTypography::is_default")]
     pub typography: EngravingTypography,
+    /// Absent (and omitted again when empty) in documents saved before bar widths existed. Entries run in bar order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bar_widths: Vec<BarWidth>,
 }
 
 impl EngravingOverrides {
+    fn validate_bar_widths(&self) -> Result<(), String> {
+        if self.bar_widths.len() > MAX_BAR_WIDTHS {
+            return Err("Too many bar widths.".into());
+        }
+        // Strictly ascending bars are distinct and in order; a weight of 1 is the default and is never stored.
+        let ordered = self
+            .bar_widths
+            .windows(2)
+            .all(|pair| pair[0].bar < pair[1].bar);
+        let fits = self.bar_widths.iter().all(|entry| {
+            entry.bar <= MAX_BAR_INDEX
+                && entry.scale.is_finite()
+                && (0.25..=4.0).contains(&entry.scale)
+                && entry.scale != 1.0
+        });
+        if !ordered || !fits {
+            return Err(
+                "Bar widths must be 25% to 400% of the default, one per bar, in bar order.".into(),
+            );
+        }
+        Ok(())
+    }
+
     pub fn validate(&self) -> Result<(), String> {
         if self
             .system_spacing
@@ -168,6 +205,7 @@ impl EngravingOverrides {
             return Err("System spacing must be null or a finite factor from 0.25 to 4.".into());
         }
         self.typography.validate()?;
+        self.validate_bar_widths()?;
         let mut ids = HashSet::new();
         if self
             .profiles

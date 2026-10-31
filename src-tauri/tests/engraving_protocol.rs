@@ -318,6 +318,115 @@ fn engraving_typography_is_optional_and_round_trips_only_when_set() {
     rejected(&missing);
 }
 
+fn widths(entries: Value) -> Value {
+    let mut value = engraving_command();
+    value["engraving"]["barWidths"] = entries;
+    value
+}
+
+#[test]
+fn engraving_bar_widths_are_optional_ordered_bounded_and_round_trip_only_when_set() {
+    // A command from before bar widths existed stays valid and serializes unchanged.
+    let plain = engraving_command();
+    assert!(plain["engraving"].get("barWidths").is_none());
+    assert_eq!(serde_json::to_value(accepted(&plain)).unwrap(), plain);
+    let set = widths(
+        json!([{"bar": 0, "scale": 1.5}, {"bar": 3, "scale": 0.25}, {"bar": 99999, "scale": 4.0}]),
+    );
+    assert_eq!(serde_json::to_value(accepted(&set)).unwrap(), set);
+    // An explicit empty list is accepted and is written back without the field.
+    assert_eq!(
+        serde_json::to_value(accepted(&widths(json!([])))).unwrap(),
+        plain
+    );
+    for invalid in [
+        json!([{"bar": 1, "scale": 1.0}]),
+        json!([{"bar": 1, "scale": 0.249}]),
+        json!([{"bar": 1, "scale": 4.01}]),
+        json!([{"bar": 1, "scale": 0.0}]),
+        json!([{"bar": 1, "scale": -1.5}]),
+        json!([{"bar": 1, "scale": "2"}]),
+        json!([{"bar": 1, "scale": null}]),
+        json!([{"bar": 100000, "scale": 2.0}]),
+        json!([{"bar": -1, "scale": 2.0}]),
+        json!([{"bar": 1.5, "scale": 2.0}]),
+        json!([{"bar": 4294967296u64, "scale": 2.0}]),
+        json!([{"bar": 2, "scale": 2.0}, {"bar": 1, "scale": 2.0}]),
+        json!([{"bar": 2, "scale": 2.0}, {"bar": 2, "scale": 1.5}]),
+        json!([{"bar": 1}]),
+        json!([{"scale": 2.0}]),
+        json!([{"bar": 1, "scale": 2.0, "extra": true}]),
+        json!({"bar": 1, "scale": 2.0}),
+        json!(null),
+    ] {
+        rejected(&widths(invalid));
+    }
+    // Hostile sizes are refused: one entry past the cap, however well formed.
+    let many = |count: u32| {
+        Value::Array(
+            (0..count)
+                .map(|bar| json!({"bar": bar, "scale": 2.0}))
+                .collect(),
+        )
+    };
+    accepted(&widths(many(10_000)));
+    rejected(&widths(many(10_001)));
+    let mut non_finite = EngravingOverrides::default();
+    for scale in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        non_finite.bar_widths = vec![tabplayer_lib::engraving::BarWidth { bar: 0, scale }];
+        assert!(non_finite.validate().is_err());
+    }
+}
+
+#[test]
+fn engraving_bar_widths_survive_history_undo_redo_save_and_reopen_beside_an_old_log() {
+    let mut session = ProjectSession::new(Project::blank(), None).unwrap();
+    let last_widths = |project: Value| {
+        project["edits"]
+            .as_array()
+            .and_then(|edits| edits.last().cloned())
+            .and_then(|edit| edit["engraving"].get("barWidths").cloned())
+    };
+    // An old log: a setEngraving written before bar widths existed is retained and replayed unchanged.
+    session.apply_edit(accepted(&engraving_command())).unwrap();
+    let old = session.snapshot().project;
+    let old_stored = serde_json::to_value(session.stored_project()).unwrap();
+    assert_eq!(last_widths(serde_json::to_value(&old).unwrap()), None);
+    session
+        .apply_edit(accepted(&widths(json!([{"bar": 2, "scale": 1.7}]))))
+        .unwrap();
+    let dragged = session.snapshot().project;
+    assert_eq!(dragged.edits.len(), 2);
+    assert_eq!(
+        last_widths(serde_json::to_value(&dragged).unwrap()),
+        Some(json!([{"bar": 2, "scale": 1.7}]))
+    );
+    // Restoring the defaults is one more edit that leaves the field out.
+    session.apply_edit(accepted(&engraving_command())).unwrap();
+    assert_eq!(session.snapshot().project.edits.len(), 3);
+    assert_eq!(
+        last_widths(serde_json::to_value(&session.snapshot().project).unwrap()),
+        None
+    );
+    session.undo().unwrap();
+    assert_eq!(session.snapshot().project, dragged);
+    session.undo().unwrap();
+    assert_eq!(session.snapshot().project, old);
+    session.redo().unwrap();
+    assert_eq!(session.snapshot().project, dragged);
+    let stored = serde_json::to_value(session.stored_project()).unwrap();
+    let reopened = ProjectSession::new(serde_json::from_value(stored).unwrap(), None).unwrap();
+    assert_eq!(reopened.snapshot().project, dragged);
+    assert_eq!(
+        last_widths(serde_json::to_value(&reopened.snapshot().project).unwrap()),
+        Some(json!([{"bar": 2, "scale": 1.7}]))
+    );
+    // The old log alone still opens.
+    let reopened_old =
+        ProjectSession::new(serde_json::from_value(old_stored).unwrap(), None).unwrap();
+    assert_eq!(reopened_old.snapshot().project, old);
+}
+
 #[test]
 fn engraving_system_spacing_requires_null_or_a_bounded_factor() {
     for valid in [json!(null), json!(0.25), json!(4.0)] {

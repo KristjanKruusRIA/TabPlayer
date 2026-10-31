@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { AlphaTabApi, LayoutMode, SystemsLayoutMode, type model, StaveProfile, type PlaybackHighlightChangeEventArgs } from '@coderline/alphatab';
 import './tremolo-guard';
 import type { BeatTarget } from './project';
@@ -12,6 +12,8 @@ import {isPhysicalPageLayout,type ScoreDisplayPreferences} from './engraving/scr
 import {arrangeScreenPages,hitTestScreenPages,mapScreenRect,paginateScreenScore,resolveScreenZoom,type ScreenPagination,type ScreenRenderChunk,type ScreenRect,type ScreenSystem} from './engraving/screen-pages';
 import {installScreenPlayback,type ScreenPlaybackContext} from './engraving/screen-playback';
 import { describeScoreError,type ScoreError } from './editor/score-errors';
+import { BAR_SCALE_BIG_STEP,BAR_SCALE_RANGE,BAR_SCALE_STEP,clampBarScale,scaleAfterDrag } from './engraving/bar-widths';
+import { busyGuard } from './ui/useBusyGuard';
 import { listScaleDiagrams,type ScaleDiagram } from './harmony/scale-diagram';
 import { ScaleDiagramView,scaleDiagramSize } from './harmony/ScaleDiagramView';
 import './ScoreView.css';
@@ -28,10 +30,13 @@ const noErrors:readonly ScoreError[]=[];
 type Handles={start:Marker&{target:BeatTarget};end:Marker&{target:BeatTarget}};
 type Drag={anchor:BeatTarget;last:BeatTarget;lanes:VoiceAddress[];bars?:Extract<MusicSelection,{kind:'bars'}>};
 
+/** Design mode for bar widths: `scaleOf` is a bar's saved weight (1 is the default) and `onScale` records one edit. */
+export interface BarDesign {busy:boolean;scaleOf:(bar:number)=>number;onScale:(bar:number,scale:number)=>void}
+type BarHandle={bar:number;x:number;y:number;h:number;width:number};
 const defaultDisplay:ScoreDisplayPreferences={layout:'parchment',zoomMode:'manual'};
 const defaultPage:PageLayout={widthMm:210,heightMm:297,marginsMm:{top:15,right:15,bottom:15,left:15},scale:1,profile:'document'};
 
-export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSelection=null,onEditorSelection,projection,visibleTracks,engraving,editTarget,editString,editNoteIndex,display=defaultDisplay,page:pageInput=defaultPage,onDisplayStatus,errors=noErrors}: {
+export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSelection=null,onEditorSelection,projection,visibleTracks,engraving,editTarget,editString,editNoteIndex,display=defaultDisplay,page:pageInput=defaultPage,onDisplayStatus,errors=noErrors,barDesign=null}: {
   score:model.Score;track:number;zoom:number;profile:string;onSelect:(target:BeatTarget,string?:number,noteIndex?:number)=>void;
   playback:NativePlaybackController|null;
   editorSelection?:MusicSelection|null;onEditorSelection?:(selection:MusicSelection|null)=>void;
@@ -40,6 +45,8 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
   editTarget?:BeatTarget;editString?:number;editNoteIndex?:number|null;
   /** Measures to mark as score errors; empty when the viewer turned marking off. */
   errors?:readonly ScoreError[];
+  /** Shows a handle on every bar's right edge for changing its width. Layouts that ignore widths show none. */
+  barDesign?:BarDesign|null;
 }) {
   const wrapper=useRef<HTMLDivElement>(null),container=useRef<HTMLDivElement>(null),api=useRef<AlphaTabApi|null>(null);
   const tracks=visibleTracks??[track],renderedScore=projection?.score??score,trackKey=tracks.join(',');
@@ -82,6 +89,7 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
   const [caret,setCaret]=useState<(Marker&{entry:boolean})|null>(null),caretElement=useRef<HTMLSpanElement>(null),revealCaret=useRef(false),rendering=useRef(false);
   const refresh=useRef(()=>{}),refreshCaret=useRef(()=>{}),refreshErrors=useRef(()=>{});
   const [errorBlocks,setErrorBlocks]=useState<(Marker&{label:string})[]>([]);
+  const refreshDesign=useRef(()=>{}),[barHandles,setBarHandles]=useState<BarHandle[]>([]),[barDrag,setBarDrag]=useState<{bar:number;delta:number}|null>(null),designing=useRef<BarDesign|null>(null);
   const refreshDiagrams=useRef(()=>{}),[diagramBlocks,setDiagramBlocks]=useState<Array<{x:number;y:number;w:number;diagram:ScaleDiagram}>>([]),[openDiagram,setOpenDiagram]=useState<number|null>(null);
   const editBeat=editTarget?score.tracks[editTarget.track]?.staves[editTarget.staff]?.bars[editTarget.bar]?.voices[editTarget.voice]?.beats[editTarget.beat]:undefined;
   const editLocation=editBeat&&editTarget?`Editing ${score.tracks[editTarget.track].name || `track ${editTarget.track+1}`}, measure ${editTarget.bar+1}, beat ${editTarget.beat+1}, voice ${editTarget.voice+1}${editBeat.isEmpty?', empty':editBeat.isRest?', rest':''}${editNoteIndex!=null?`, note ${editNoteIndex+1}`:editString?`, string ${editString}`:''}`:'';
@@ -147,6 +155,17 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
       const rect=mapped({x:left,y:top,w:Math.max(...boxes.map(box=>box.x+box.w))-left,h:Math.max(...boxes.map(box=>box.y+box.h))-top},system);
       return rect&&[rect.x,rect.y,rect.w,rect.h].every(Number.isFinite)?[{...rect,label:`Score error: ${group.map(describeScoreError).join('; ')}`}]:[];
     }));
+  };
+  /** Puts a width handle on the right edge of each master bar the renderer placed, in the layouts that size bars by weight. */
+  refreshDesign.current=()=>{
+    const view=api.current,layout=layoutCurrent.current.display.layout;
+    if(!designing.current||layout==='verticalScreen'||layout==='horizontalScreen'){setBarHandles([]);return;}
+    // A render in progress keeps the handles where they were: removing them would drop the keyboard focus of the one just used.
+    if(!view||rendering.current)return;
+    setBarHandles((view.boundsLookup?.staffSystems??[]).flatMap(system=>system.bars.flatMap(bar=>{
+      const rect=mapped(bar.realBounds,system);
+      return rect&&[rect.x,rect.y,rect.w,rect.h].every(Number.isFinite)&&rect.w>0&&rect.h>0?[{bar:bar.index,x:rect.x+rect.w,y:rect.y,h:rect.h,width:rect.w}]:[];
+    })));
   };
   /** Anchors each shown track's scale diagrams above the staff at their beat, wherever the renderer placed it. */
   refreshDiagrams.current=()=>{
@@ -246,7 +265,7 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
           setNatural({score:c.renderedScore,tracks:c.trackKey,layout:c.display.layout,width:c.available.width,engraving:c.engraving,profile:c.profile,value:width});
         }
       }
-      refresh.current();refreshCaret.current();refreshErrors.current();refreshDiagrams.current();
+      refresh.current();refreshCaret.current();refreshErrors.current();refreshDiagrams.current();refreshDesign.current();
     }),view.playbackRangeHighlightChanged.on(event=>{if(current.current.editorSelection&&current.current.editorSelection.kind!=='notes')placeHandles(event);})];
     const mouseMove=(event:MouseEvent)=>{
       if(!drag.current)return;const physical=presentation.current.physical;if(physical&&wrapper.current){const rect=wrapper.current.getBoundingClientRect(),hit=hitTestScreenPages(physical.pagination,physical.arrangement,{x:event.clientX-rect.left,y:event.clientY-rect.top},current.current.editTarget);if(hit)move(hit.beat);return;}if(layoutCurrent.current.sourcePhysical)return;const bounds=view.uiFacade.getOffset(null,view.canvasElement),beat=view.boundsLookup?.getBeatAtPos(event.clientX+window.scrollX-bounds.x,event.clientY+window.scrollY-bounds.y);if(beat)move(beat);
@@ -273,7 +292,9 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
     if(!old||old.score!==renderedScore||old.tracks!==trackKey){loaded.current={score:renderedScore,tracks:trackKey};if(playback)playback.setRenderedScore(renderedScore,tracks);else view.renderScore(renderedScore,tracks);}
     else view.render();
   },[renderedScore,trackKey,playback,sourceWidth,sourceScale,sourcePhysical,measureBase,screenLayout,display.layout==='verticalScreen',display.layout==='horizontalScreen',engraving,profile,page]);
-  useLayoutEffect(()=>{playbackPresentation.current?.presentationChanged();refresh.current();refreshCaret.current();refreshErrors.current();refreshDiagrams.current();},[pagination,arrangement,pageError]);
+  useLayoutEffect(()=>{playbackPresentation.current?.presentationChanged();refresh.current();refreshCaret.current();refreshErrors.current();refreshDiagrams.current();refreshDesign.current();},[pagination,arrangement,pageError]);
+  designing.current=barDesign;
+  useEffect(()=>{setBarDrag(null);refreshDesign.current();},[!!barDesign,display.layout,zoom,renderedScore]);
   useEffect(()=>{refreshErrors.current();},[errors,score,track,zoom,profile,projection,visibleTracks]);
   useEffect(()=>{refreshDiagrams.current();},[score,track,zoom,profile,projection,visibleTracks]);
   const capture=(event:ReactMouseEvent<HTMLDivElement>)=>{if(event.button!==0)return;event.preventDefault();event.currentTarget.focus({preventScroll:true});modifiers.current={shift:event.shiftKey,toggle:event.ctrlKey||event.metaKey,detail:event.detail};drag.current=null;};
@@ -286,6 +307,25 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
     if(event.button!==0||!pagination||!arrangement||!wrapper.current)return;
     const rect=wrapper.current.getBoundingClientRect(),hit=hitTestScreenPages(pagination,arrangement,{x:event.clientX-rect.left,y:event.clientY-rect.top},editTarget);
     if(hit){pointerActions.current.downBeat(hit.beat);if(hit.note)pointerActions.current.downNote(hit.note);}
+  };
+  /** One drag is one edit: the guide follows the mouse, and only the release records a width. Escape abandons it. */
+  const dragBar=(handle:BarHandle,event:ReactMouseEvent)=>{
+    const design=barDesign;if(event.button!==0||!design)return;event.preventDefault();event.stopPropagation();if(design.busy)return;
+    const startX=event.clientX,start=design.scaleOf(handle.bar);let delta=0;
+    const move=(next:MouseEvent)=>{delta=Math.max(-handle.width*.75,next.clientX-startX);setBarDrag({bar:handle.bar,delta});};
+    const finish=(commit:boolean)=>{
+      document.removeEventListener('mousemove',move);document.removeEventListener('mouseup',up);document.removeEventListener('keydown',key,true);setBarDrag(null);
+      if(commit&&delta!==0&&!design.busy){const next=scaleAfterDrag(start,handle.width,delta);if(next!==start)design.onScale(handle.bar,next);}
+    };
+    const up=()=>finish(true),key=(next:KeyboardEvent)=>{if(next.key==='Escape'){next.preventDefault();next.stopPropagation();finish(false);}};
+    document.addEventListener('mousemove',move);document.addEventListener('mouseup',up);document.addEventListener('keydown',key,true);setBarDrag({bar:handle.bar,delta:0});
+  };
+  const nudgeBar=(handle:BarHandle,event:ReactKeyboardEvent)=>{
+    const design=barDesign;if(!design||design.busy||event.ctrlKey||event.metaKey||event.altKey)return;
+    const now=design.scaleOf(handle.bar),step=event.shiftKey?BAR_SCALE_BIG_STEP:BAR_SCALE_STEP;
+    const next=event.key==='ArrowRight'?now+step:event.key==='ArrowLeft'?now-step:event.key==='Home'||event.key==='Delete'||event.key==='Backspace'?1:null;
+    if(next===null)return;event.preventDefault();event.stopPropagation();
+    const target=clampBarScale(next);if(target!==now)design.onScale(handle.bar,target);
   };
   return <div ref={wrapper} tabIndex={-1} className="score-presentation" data-layout={display.layout} onMouseDownCapture={capture}>
     {pageError&&<p className="score-page-error" role="alert">{pageError} Continuous view is shown at {zoom}%.</p>}
@@ -305,6 +345,12 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
       <button type="button" className="score-scale-diagram-chip" aria-label={`Show scale diagram ${block.diagram.name||'without a name'}`} aria-expanded={openDiagram===index} style={{height:chipHeight,width:block.w,padding:'0 4px',font:'600 10px sans-serif',border:'1px solid #97a6b6',borderRadius:4,background:'#fffdf8',color:'#161c24',overflow:'hidden',whiteSpace:'nowrap',textOverflow:'ellipsis',cursor:'pointer'}}>▦ {chipLabel(block.diagram)}</button>
       {openDiagram===index&&<div style={{position:'absolute',left:0,top:chipHeight+chipGap,width:scaleDiagramSize(block.diagram).width*diagramScale,border:'1px solid #97a6b6',borderRadius:4,overflow:'hidden',background:'#fffdf8',pointerEvents:'none'}}><ScaleDiagramView diagram={block.diagram}/></div>}
     </div>)}
+    {barHandles.map(handle=>{
+      const scale=barDesign?.scaleOf(handle.bar)??1,dragging=barDrag?.bar===handle.bar?barDrag.delta:null,percent=Math.round(scale*100);
+      return <div key={handle.bar} role="slider" tabIndex={0} aria-orientation="horizontal" aria-label={`Bar ${handle.bar+1} width`} aria-valuemin={BAR_SCALE_RANGE.min*100} aria-valuemax={BAR_SCALE_RANGE.max*100} aria-valuenow={percent} aria-valuetext={`${percent}% of the default width`} title="Drag, or use Left and Right arrows. Home restores the default width."
+        {...busyGuard<HTMLDivElement>({busy:barDesign?.busy,className:'score-bar-handle',onKeyDown:event=>nudgeBar(handle,event)})} onMouseDown={event=>dragBar(handle,event)}
+        style={{left:handle.x-5,top:handle.y,height:handle.h}}>{dragging!==null&&<span className="score-bar-guide" aria-hidden="true" style={{left:5+dragging}}/>}</div>;
+    })}
     <span className="score-edit-announcement" role="status" aria-live="polite" aria-atomic="true">{editLocation}</span>
     {caret&&<span ref={caretElement} role="img" aria-label="Edit target" className="score-edit-target" style={{left:caret.x,top:caret.y,width:caret.w,height:caret.h}}>{caret.entry&&<span className="score-edit-entry" aria-hidden="true">{editString?`String ${editString}`:'Entry'}</span>}</span>}
     {markers.map((marker,index)=><span key={index} role="img" aria-label={`Selected note ${index+1}`} style={{position:'absolute',left:marker.x,top:marker.y,width:marker.w,height:marker.h,boxSizing:'border-box',border:'2px solid #9aaf38',background:'rgba(185,205,105,.3)',borderRadius:3,pointerEvents:'none'}}/>)}

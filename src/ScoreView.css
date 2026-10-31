@@ -51,3 +51,7 @@
 .score-range-block { background: #437ec22b; }
 /* Score errors: a translucent red wash with a dashed outline, so the mark survives without color. */
 .score-error-bar { position: absolute; pointer-events: none; background: #d1424214; outline: 2px dashed #c23b3b; outline-offset: -2px; }
+.score-bar-handle { position: absolute; width: 10px; z-index: 5; cursor: ew-resize; touch-action: none; background: #245cb21f; border-left: 2px solid #245cb2; box-sizing: border-box; }
+.score-bar-handle:hover, .score-bar-handle:focus-visible { background: #245cb259; outline: 2px solid var(--ws-edit,#245cb2); outline-offset: 1px; }
+.score-bar-handle.is-disabled { cursor: default; opacity: .5; }
+.score-bar-guide { position: absolute; top: 0; bottom: 0; width: 0; border-left: 2px dashed #245cb2; pointer-events: none; }

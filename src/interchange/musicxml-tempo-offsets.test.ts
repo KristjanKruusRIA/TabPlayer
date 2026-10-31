@@ -272,3 +272,21 @@ describe('MusicXML playback tempo offsets',()=>{
     expect(()=>buildScore(project(strToU8('<score-partwise><offset sound="yes">'),'xml'))).toThrow();
   });
 });
+
+describe('a file written to stall the offset match',()=>{
+  it('stays linear on comment text full of unfinished offset tags',()=>{
+    const filler=`<!--${'<offset '.repeat(180000)}-->`;
+    const xml=musicXml(480).replace('</score-partwise>',`${filler}</score-partwise>`);
+    const started=performance.now();
+    expect(strFromU8(prepareMusicXmlTempoOffsets(strToU8(xml),settings))).not.toBe(xml);
+    expect(performance.now()-started).toBeLessThan(20000);
+  });
+  it('stays linear with a long moved part beside many empty parts',()=>{
+    const source=musicXml(480),bar=source.match(/<measure[\s\S]*<\/measure>/)![0],count=8000;
+    const bars=Array.from({length:count},(_,index)=>bar.replace(/number="[^"]*"/,`number="${index+2}"`)).join('');
+    const xml=source.replace('</part>',`${bars}</part>${'<part/>'.repeat(600000)}`);
+    const started=performance.now();
+    prepareMusicXmlTempoOffsets(strToU8(xml),settings);
+    expect(performance.now()-started).toBeLessThan(40000);
+  },120000);
+});

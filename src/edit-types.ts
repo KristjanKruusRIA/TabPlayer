@@ -47,12 +47,15 @@ export interface ChordDefinition { name: string; firstFret: number; frets: numbe
 /** How a track's stringed notes are performed; each field is absent at its default (automatic style, normal palm mutes, no accent, no automatic let ring or brush). */
 export interface TrackInterpretation { style?: 'pick'|'fingers'; palmMute?: 'light'|'heavy'; accent?: 'light'|'strong'; letRing?: true; brush?: 'down'|'up' }
 export interface ChannelMix { gain: number; pan: number; mute: boolean; solo: boolean; interpretation?: TrackInterpretation }
+/** A cabinet impulse response by the identity it has in a user's library (32 hex digits of the file's hash), with the name it was picked under and a level trim. Documents never hold the audio. */
+export interface CabinetIrRef { id:string;name:string;levelDb:number }
 export interface FxSettings {
   gate: {enabled:boolean;thresholdDb:number;releaseMs:number};
   compressor: {enabled:boolean;thresholdDb:number;ratio:number;attackMs:number;releaseMs:number;makeupDb:number};
   /** The tone stack fields are absent while flat (0 dB). */
   amp: {enabled:boolean;model:'clean'|'crunch'|'lead'|'metal'|'bass'|'bassDrive';drive:number;gainDb:number;bassDb?:number;midDb?:number;trebleDb?:number;presenceDb?:number};
-  cabinet: {enabled:boolean;model:'open'|'closed'|'combo'|'bass'|'bassStack'};
+  /** `ir` names a cabinet impulse response in the user's own library, which plays in place of `model` where the library has it. */
+  cabinet: {enabled:boolean;model:'open'|'closed'|'combo'|'bass'|'bassStack';ir?:CabinetIrRef};
   eq: {enabled:boolean;lowDb:number;midDb:number;highDb:number;midHz:number};
   /** `syncQuarterNotes` on a modulation block: quarter notes per cycle when its rate follows the tempo; absent for the free rate. */
   chorus: {enabled:boolean;rateHz:number;depthMs:number;mix:number;syncQuarterNotes?:number};
@@ -83,9 +86,19 @@ export interface BackingSettings { assetId: string; offsetMs: number; anchors: S
 export interface PrintLayout {
   paper: 'A4'|'Letter'; orientation: 'portrait'|'landscape'; marginMm: number; scale: number; profile: 'ScoreTab'|'Score'|'Tab';
 }
+/** The master limiter: nothing it passes is above `ceilingDb`, and it has an instant attack. */
+export interface MasterLimiter { enabled:boolean; ceilingDb:number; releaseMs:number }
+/** The song-level chain after the mix: the compressor, EQ and reverb on the tracks and backing, the overall level and
+ * balance, and the limiter on everything that sounds. */
+export interface MasterSettings {
+  gainDb:number; balance:number;
+  compressor:FxSettings['compressor']; eq:FxSettings['eq']; reverb:FxSettings['reverb']; limiter:MasterLimiter;
+}
 export interface DocumentSettings {
   sounds: Record<string,TrackSound>; mixes: Record<string,ChannelMix>; backing: BackingSettings|null; print: PrintLayout;
   engraving:EngravingOverrides;page:PageLayout|null;
+  /** Absent until the master is first edited; a document without one plays as the defaults do. */
+  master?:MasterSettings;
 }
 
 export type EditCommand = LyricsCommand | GestureCommand | BarGestureCommand | RangeCommand | MeasureCommand | ClipboardCommand | EngravingCommand | HarmonyCommand | ScaleDiagramCommand | ReplaceTempoAutomations
@@ -135,8 +148,9 @@ export type EditCommand = LyricsCommand | GestureCommand | BarGestureCommand | R
   | { type: 'setTrackSound'; trackId: string; sound: TrackSound }
   | { type: 'setTrackMix'; trackId: string; mix: ChannelMix }
   | { type: 'setBacking'; backing: BackingSettings|null }
-  | { type: 'setPrintLayout'; layout: PrintLayout };
+  | { type: 'setPrintLayout'; layout: PrintLayout }
+  | { type: 'setMaster'; master: MasterSettings };
 
-export type SettingsEdit = Extract<EditCommand,{type:'setTrackSound'|'setTrackMix'|'setBacking'|'setPrintLayout'|'setEngraving'|'setPageLayout'}>;
+export type SettingsEdit = Extract<EditCommand,{type:'setTrackSound'|'setTrackMix'|'setBacking'|'setPrintLayout'|'setEngraving'|'setPageLayout'|'setMaster'}>;
 export const isSettingsEdit = (edit: EditCommand): edit is SettingsEdit =>
-  ['setTrackSound','setTrackMix','setBacking','setPrintLayout','setEngraving','setPageLayout'].includes(edit.type);
+  ['setTrackSound','setTrackMix','setBacking','setPrintLayout','setEngraving','setPageLayout','setMaster'].includes(edit.type);

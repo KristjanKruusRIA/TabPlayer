@@ -25,6 +25,21 @@ it('is a vertical slider with the knob contract', ()=>{
   expect(onCommit).toHaveBeenCalledTimes(3);
 });
 
+it('takes a typed value like a knob does, from its readout or the Enter key', async()=>{
+  const user=userEvent.setup(),onCommit=vi.fn();
+  function Host(){const [value,setValue]=useState(3);return <Fader label="1k" ariaLabel="Graphic EQ 1k Hz (dB)" value={value} min={-12} max={12} step={.5} unit=" dB" bipolar onCommit={next=>{onCommit(next);setValue(next);}}/>;}
+  render(<Host/>);
+  await user.click(screen.getByText('+3.0 dB'));
+  const field=screen.getByRole('textbox',{name:'Graphic EQ 1k Hz (dB) value'}) as HTMLInputElement;
+  expect(field).toHaveFocus();expect(field.selectionEnd).toBe(field.value.length);
+  await user.keyboard('-4.5{Enter}');
+  expect(onCommit).toHaveBeenCalledExactlyOnceWith(-4.5);expect(screen.getByRole('slider')).toHaveAttribute('aria-valuenow','-4.5');expect(screen.getByRole('slider')).toHaveFocus();
+  screen.getByRole('slider').focus();await user.keyboard('{Enter}30{Enter}');
+  expect(onCommit).toHaveBeenLastCalledWith(12);
+  screen.getByRole('slider').focus();await user.keyboard('{Enter}1{Escape}');
+  expect(onCommit).toHaveBeenCalledTimes(2);
+});
+
 it('records one change for a drag along its track', ()=>{
   const onCommit=vi.fn();render(fader({onCommit}));
   const slider=screen.getByRole('slider');sized(slider);
@@ -85,9 +100,29 @@ it('skips a disabled option and chooses on click', async()=>{
   await user.click(radios[3]);expect(radios[3]).toBeChecked();
 });
 
-it('disables the whole group', ()=>{
-  render(<Segmented label="Output" value="stereo" onChange={()=>{}} disabled options={[{value:'stereo',label:'Stereo'},{value:'mono',label:'Mono'}]}/>);
-  for(const radio of screen.getAllByRole('radio'))expect(radio).toBeDisabled();
+it('disables the whole group while keeping the chosen option focusable and refusing presses', async()=>{
+  const onChange=vi.fn();
+  const {rerender}=render(<Segmented label="Output" value="stereo" onChange={onChange} options={[{value:'stereo',label:'Stereo'},{value:'mono',label:'Mono'}]}/>);
+  const radios=screen.getAllByRole('radio');
+  radios[0].focus();expect(radios[0]).toHaveFocus();
+  rerender(<Segmented label="Output" value="stereo" onChange={onChange} disabled options={[{value:'stereo',label:'Stereo'},{value:'mono',label:'Mono'}]}/>);
+  for(const radio of radios){expect(radio).toHaveAttribute('aria-disabled','true');expect(radio).not.toBeDisabled();}
+  expect(radios[0].tabIndex).toBe(0);expect(radios[0]).toHaveFocus();
+  await userEvent.click(radios[1]);
+  expect(onChange).not.toHaveBeenCalled();
+  await userEvent.keyboard('{ArrowRight}');
+  expect(onChange).not.toHaveBeenCalled();
+});
+
+it('does not report a change when Home or End lands on the option already chosen', async()=>{
+  const user=userEvent.setup(),onChange=vi.fn();
+  const {rerender}=render(<Segmented label="Source" value="gm" onChange={onChange} options={[{value:'auto',label:'Auto'},{value:'gm',label:'GM'}]}/>);
+  const radios=screen.getAllByRole('radio');
+  radios[1].focus();await user.keyboard('{End}');
+  expect(onChange).not.toHaveBeenCalled();
+  rerender(<Segmented label="Source" value="auto" onChange={onChange} options={[{value:'auto',label:'Auto'},{value:'gm',label:'GM'}]}/>);
+  radios[0].focus();await user.keyboard('{Home}');
+  expect(onChange).not.toHaveBeenCalled();
 });
 
 it('frames a dialog: named, focused, closed by Escape, and focus returns', async()=>{

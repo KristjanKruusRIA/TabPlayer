@@ -19,6 +19,12 @@ pub struct AssetInfo {
     pub byte_length: usize,
 }
 
+#[cfg(test)]
+thread_local! {
+    /// How many times this thread has decoded an asset, so a test can show that a path does not.
+    pub static DECODES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 impl StoredAsset {
     pub fn from_bytes(filename: String, media_type: String, bytes: &[u8]) -> Self {
         Self {
@@ -29,6 +35,8 @@ impl StoredAsset {
     }
 
     pub fn bytes(&self) -> Result<Vec<u8>, String> {
+        #[cfg(test)]
+        DECODES.with(|count| count.set(count.get() + 1));
         STANDARD
             .decode(self.bytes_base64.as_bytes())
             .map_err(|_| "Asset bytes are corrupt.".into())

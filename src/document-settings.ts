@@ -1,5 +1,5 @@
 import type { model } from '@coderline/alphatab';
-import type { DocumentSettings, EffectBlock, FxSettings, SettingsEdit, TrackSound, ChannelMix, PrintLayout, BackingSettings } from './edit-types';
+import type { DocumentSettings, EffectBlock, FxSettings, MasterSettings, SettingsEdit, TrackSound, ChannelMix, PrintLayout, BackingSettings } from './edit-types';
 import {defaultEngraving,validateEngravingTracks} from './engraving/projection';
 import {validatePageLayout} from './engraving/page';
 import {validateInterpretation} from './audio/interpretation';
@@ -11,7 +11,7 @@ export function copyTrackSettings(settings:DocumentSettings,source:string,copy:s
   const profile=settings.engraving.profiles.find(entry=>entry.trackId===source);
   if(profile)settings.engraving={...settings.engraving,profiles:[...settings.engraving.profiles,{...profile,trackId:copy}]};
 }
-export type { DocumentSettings, FxSettings, TrackSound, ChannelMix, PrintLayout, SyncAnchor, BackingSettings, ReferenceSyncBounds } from './edit-types';
+export type { DocumentSettings, FxSettings, TrackSound, ChannelMix, PrintLayout, SyncAnchor, BackingSettings, ReferenceSyncBounds, MasterSettings, MasterLimiter } from './edit-types';
 
 export const defaultMix = (): ChannelMix => ({gain:1,pan:0,mute:false,solo:false});
 export const defaultEffects = (): FxSettings => ({
@@ -65,7 +65,9 @@ export const syncedBlocks:readonly EffectBlock[]=['vibrato','phaser','flanger','
 const range=(low:number,high:number)=>({low,high}),one=(...values:(string|number)[])=>({one:values}),unit=range(0,1);
 const list=(length:number,each:ReturnType<typeof range>)=>({length,each});
 /** A field added after sounds could be saved: a sound may leave it out. */
-const later=<Rule extends ReturnType<typeof range>|ReturnType<typeof one>>(rule:Rule)=>({...rule,later:true});
+/** A cabinet impulse response reference: its library identity, the name it was picked under, and a level trim. */
+const cabinetIr={cabinetIr:true as const};
+const later=<Rule extends ReturnType<typeof range>|ReturnType<typeof one>|typeof cabinetIr>(rule:Rule)=>({...rule,later:true});
 type FieldRule=ReturnType<typeof range>|ReturnType<typeof one>|ReturnType<typeof list>|ReturnType<typeof later>;
 const tone=later(range(-12,12));
 const sync=later(one(0,...modulationDivisions.map(([value])=>value)));
@@ -73,7 +75,7 @@ const sync=later(one(0,...modulationDivisions.map(([value])=>value)));
 const effectRules:Record<EffectBlock,Record<string,FieldRule>>={
   gate:{thresholdDb:range(-96,0),releaseMs:range(1,1000)},
   compressor:{thresholdDb:range(-60,0),ratio:range(1,20),attackMs:range(.1,200),releaseMs:range(1,2000),makeupDb:range(0,24)},
-  amp:{model:one('clean','crunch','lead','metal','bass','bassDrive'),drive:unit,gainDb:range(-24,24),bassDb:tone,midDb:tone,trebleDb:tone,presenceDb:tone},cabinet:{model:one('open','closed','combo','bass','bassStack')},
+  amp:{model:one('clean','crunch','lead','metal','bass','bassDrive'),drive:unit,gainDb:range(-24,24),bassDb:tone,midDb:tone,trebleDb:tone,presenceDb:tone},cabinet:{model:one('open','closed','combo','bass','bassStack'),ir:later(cabinetIr)},
   eq:{lowDb:range(-24,24),midDb:range(-24,24),highDb:range(-24,24),midHz:range(200,5000)},
   chorus:{rateHz:range(.1,8),depthMs:range(0,20),mix:unit,syncQuarterNotes:sync},
   wah:{model:one('classic','vintage','wide','bass'),mode:one('manual','auto'),position:unit,resonance:unit,sensitivity:unit,mix:unit},
@@ -88,7 +90,17 @@ const effectRules:Record<EffectBlock,Record<string,FieldRule>>={
 };
 /** The fields of each block that a sound may leave out. */
 export const laterFields=(block:EffectBlock)=>Object.entries(effectRules[block]).filter(([,rule])=>'later' in rule).map(([field])=>field);
-const fits=(value:unknown,rule:FieldRule):boolean=>'one' in rule?rule.one.includes(value as string|number):'each' in rule?Array.isArray(value)&&value.length===rule.length&&value.every(item=>fits(item,rule.each)):typeof value==='number'&&Number.isFinite(value)&&value>=rule.low&&value<=rule.high;
+/** The longest impulse response name, in characters. */
+export const MAX_IR_NAME_LENGTH=64;
+const irText=(text:string)=>{for(const char of text){const code=char.codePointAt(0)!;if(!(code===9||code===10||code===13||(code>=0x20&&code<=0xD7FF)||(code>=0xE000&&code<=0xFFFD)||(code>=0x10000&&code<=0x10FFFF)))return false;}return true;};
+/** Whether `value` is a cabinet impulse response reference the native player accepts. A null is read as none, as the native player reads it. */
+export const cabinetIrFits=(value:unknown):boolean=>{
+  if(value===null)return true;
+  if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).sort().join()!=='id,levelDb,name')return false;
+  const {id,name,levelDb}=value as Record<string,unknown>;
+  return typeof id==='string'&&/^[0-9a-f]{32}$/.test(id)&&typeof name==='string'&&name===name.trim()&&!/^[\u0085﻿]|[\u0085﻿]$/.test(name)&&[...name].length>=1&&[...name].length<=MAX_IR_NAME_LENGTH&&irText(name)&&typeof levelDb==='number'&&Number.isFinite(levelDb)&&levelDb>=-12&&levelDb<=12;
+};
+const fits=(value:unknown,rule:FieldRule):boolean=>'cabinetIr' in rule?cabinetIrFits(value):'one' in rule?rule.one.includes(value as string|number):'each' in rule?Array.isArray(value)&&value.length===rule.length&&value.every(item=>fits(item,rule.each)):typeof value==='number'&&Number.isFinite(value)&&value>=rule.low&&value<=rule.high;
 /** Why a sound cannot be applied, or null. It is checked as completed with any blocks it lacks, against the native rules. */
 export function soundProblem(sound: TrackSound): string|null {
   if (!sound||typeof sound!=='object'||Object.keys(sound).sort().join()!=='effects,presetId,voiceId'||!sound.effects||typeof sound.effects!=='object') return 'Invalid sound.';
@@ -109,6 +121,43 @@ function effectsProblem(effects:FxSettings,first:boolean):string|null {
     const second=effects.second;
     if (!first||!second||typeof second!=='object'||Array.isArray(second)||Object.hasOwn(second,'second')) return 'Invalid second pedalboard.';
     return effectsProblem(second,false);
+  }
+  return null;
+}
+/** The master as a new document plays it: everything off, level and balance centred. The numbers behind the switched-off
+ * blocks are where each starts when it is switched on: a gentler compressor than a track's, and a hall for the reverb. */
+export const defaultMaster = (): MasterSettings => ({
+  gainDb:0,balance:0,
+  compressor:{enabled:false,thresholdDb:-12,ratio:2,attackMs:30,releaseMs:200,makeupDb:0},
+  eq:{enabled:false,lowDb:0,midDb:0,highDb:0,midHz:1000},
+  reverb:{enabled:false,model:'hall',room:.6,damping:.5,mix:.1},
+  limiter:{enabled:false,ceilingDb:-1,releaseMs:100},
+});
+/** Whether the master changes nothing it is given. The numbers behind a switched-off block do not count. */
+export const masterIsNeutral=(master:MasterSettings|undefined|null):boolean=>!master||master.gainDb===0&&master.balance===0&&!master.compressor.enabled&&!master.eq.enabled&&!master.reverb.enabled&&!master.limiter.enabled;
+/** A master with the reverb model that a room reverb is saved without put back: the native player writes it that way, as it does for every pedalboard. */
+export const completeMaster=(master:MasterSettings):MasterSettings=>{
+  const reverb=(master as {reverb?:unknown}|null)?.reverb as {model?:unknown}|undefined;
+  if(!master||typeof master!=='object'||!reverb||typeof reverb!=='object'||Array.isArray(reverb)||reverb.model!==undefined)return master;
+  return {...master,reverb:{...master.reverb,model:'room'}};
+};
+const masterRules={
+  compressor:effectRules.compressor,eq:effectRules.eq,reverb:effectRules.reverb,
+  limiter:{ceilingDb:range(-12,0),releaseMs:range(10,1000)} as Record<string,FieldRule>,
+};
+/** Why a master cannot be applied, or null. It is checked as completed, against the native rules, which accept nothing more. */
+export function masterProblem(value:unknown):string|null {
+  const invalid='Invalid master settings.';
+  if(!value||typeof value!=='object'||Array.isArray(value))return invalid;
+  const master=completeMaster(value as MasterSettings) as unknown as Record<string,unknown>;
+  const keys=['gainDb','balance','compressor','eq','reverb','limiter'];
+  if(Object.keys(master).length!==keys.length||keys.some(key=>!Object.hasOwn(master,key)))return invalid;
+  if(!fits(master.gainDb,range(-24,12))||!fits(master.balance,range(-1,1)))return invalid;
+  for(const [block,rules] of Object.entries(masterRules)) {
+    const settings=master[block] as Record<string,unknown>|null;
+    if(!settings||typeof settings!=='object'||Array.isArray(settings)||typeof settings.enabled!=='boolean')return invalid;
+    // The same fields and no others: a block holds `enabled` and its rules' fields, the native structs being closed.
+    if(Object.keys(settings).length!==Object.keys(rules).length+1||Object.entries(rules).some(([field,rule])=>!Object.hasOwn(settings,field)||!fits(settings[field],rule)))return invalid;
   }
   return null;
 }
@@ -170,5 +219,6 @@ export function applySettingsEdit(settings: DocumentSettings, edit: SettingsEdit
     }
     case 'setEngraving':validateEngravingTracks(score,trackIds,edit.engraving);settings.engraving=structuredClone(edit.engraving);break;
     case 'setPageLayout':validatePageLayout(edit.layout);settings.page=structuredClone(edit.layout);break;
+    case 'setMaster': {const problem=masterProblem(edit.master);if(problem)throw new Error(problem);settings.master=structuredClone(completeMaster(edit.master));break;}
   }
 }

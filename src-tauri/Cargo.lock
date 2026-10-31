@@ -3835,6 +3835,7 @@ dependencies = [
  "cpal",
  "fs2",
  "hound",
+ "libc",
  "midly",
  "pdf-writer",
  "png 0.17.16",

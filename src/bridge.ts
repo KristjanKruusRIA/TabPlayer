@@ -20,7 +20,8 @@ export interface NativeBridge {
   exportGp(bytes: Uint8Array,revision:number,fileName?:string): Promise<boolean>;
   readBackingAsset(assetId:string,revision:number):Promise<Uint8Array>;
   askUnsaved(title:string,path:string|null): Promise<'save' | 'discard' | 'cancel'>;
-  confirmExport(): Promise<boolean>;
+  /** Asks before a Guitar Pro export; `detail` replaces the general warning with what this export leaves out. */
+  confirmExport(detail?:{title:string;message:string}): Promise<boolean>;
 }
 
 const desktopTest=import.meta.env.VITE_DESKTOP_TEST==='1';
@@ -55,6 +56,6 @@ export function createDocumentBridge(documentId:DocumentId,observer?:DocumentSav
     const result = await message(`Save changes to “${title}” before closing?${path?`\n${path}`:''}`,{title:'Unsaved score',kind:'warning',buttons:{yes:'Save',no:'Discard',cancel:'Cancel'}});
     return result === 'Yes' || result === 'Save' ? 'save' : result === 'No' || result === 'Discard' ? 'discard' : 'cancel';
   },
-  confirmExport: () => desktopTest?Promise.resolve(true):confirm('Guitar Pro export rebuilds the score. Some techniques, layout, or sound settings may change. Your native project and original file are preserved.',{title:'Export Guitar Pro file',kind:'warning'}),
+  confirmExport: detail => desktopTest?Promise.resolve(true):confirm(detail?.message??'Guitar Pro export rebuilds the score. Some techniques, layout, or sound settings may change. Your native project and original file are preserved.',{title:detail?.title??'Export Guitar Pro file',kind:'warning'}),
   };
 }

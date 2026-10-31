@@ -6,9 +6,16 @@ import type { NativePlaybackController } from './NativePlaybackController';
 import type { AudioDeviceInfo } from './bridge';
 import { factorySound, factorySounds } from './factory-sounds';
 import { copyPedal, copySound, deleteSoundPreset, renameSoundPreset, saveSoundPreset, soundClipboard, soundLibrary, subscribeSoundClipboard, subscribeSoundLibrary } from './sound-library';
-import { blockNames, presetName, soundPreset } from './sound-model';
+import { blockNames, presetName, soundPreset, voiceNames } from './sound-model';
+import type { VoiceId } from './sound-model';
 
 const noSubscribe=()=>()=>{},noState=()=>null;
+/** Whether `element` could take focus now: attached, not inert, not disabled, and neither it nor an ancestor hidden. Focusing one that is not does nothing, so the caller also confirms `document.activeElement`. */
+function canTakeFocus(element:HTMLElement) {
+  if(!element.isConnected||(element as HTMLButtonElement).disabled)return false;
+  for(let node:HTMLElement|null=element;node;node=node.parentElement)if(node.hasAttribute('inert')||getComputedStyle(node).display==='none')return false;
+  return getComputedStyle(element).visibility!=='hidden';
+}
 
 /** A pedalboard's effects and how to change them: the track's own, or the second one after it. A second board
  * left with no pedal switched on is removed. */
@@ -51,31 +58,37 @@ export function useSoundEditing({trackId,sound,onEdit,playback,busy=false,shown=
   // Hearing a drag. The sound being dragged plays through the preview path, which the player applies as a mix change on the
   // running plan (no re-preparation, 10 ms crossfade, newest settings win), at most once every `liveEveryMs`. Nothing is
   // recorded until the drag ends.
-  const live=useRef<{active:boolean;pending:TrackSound|null;sending:boolean;timer:ReturnType<typeof setTimeout>|null;lastSent:number}>({active:false,pending:null,sending:false,timer:null,lastSent:0});
+  // Each request names the track it is for, so what is still in flight when the track changes cannot reach another one.
+  const live=useRef<{active:boolean;track:string|null;pending:{track:string;sound:TrackSound}|null;sending:boolean;timer:ReturnType<typeof setTimeout>|null;lastSent:number}>({active:false,track:null,pending:null,sending:false,timer:null,lastSent:0});
+  const liveApi=useRef({send:()=>{},schedule:()=>{},end:()=>Promise.resolve() as Promise<void>});
   const sendLive=()=>{
     const state=live.current;state.timer=null;
     if(!state.active||state.sending||!state.pending||!previewer)return;
-    const sound=state.pending;state.pending=null;state.sending=true;state.lastSent=Date.now();
-    void Promise.resolve(previewer.previewSound(trackId,sound)).catch(e=>setError(String(e))).finally(()=>{state.sending=false;if(state.active&&state.pending)scheduleLive();});
+    const {track,sound}=state.pending;state.pending=null;state.sending=true;state.lastSent=Date.now();
+    void Promise.resolve(previewer.previewSound(track,sound)).catch(e=>setError(String(e))).finally(()=>{state.sending=false;if(state.active&&state.pending)liveApi.current.schedule();});
   };
   const scheduleLive=()=>{
     const state=live.current;if(state.timer||state.sending)return;
     const wait=Math.max(0,liveEveryMs-(Date.now()-state.lastSent));
-    if(wait===0)sendLive();else state.timer=setTimeout(sendLive,wait);
+    if(wait===0)liveApi.current.send();else state.timer=setTimeout(()=>liveApi.current.send(),wait);
   };
   /** Plays `next` in place of the track's sound while a control is being dragged. */
   const hear=(next:TrackSound)=>{
     if(!previewer||busy||showingPreview)return;
-    const state=live.current;state.active=true;state.pending=structuredClone(next);scheduleLive();
+    const state=live.current;
+    // A drag that began on another track ends first; its sound is never played on this one.
+    if(state.active&&state.track!==trackId){state.pending=null;void liveApi.current.end();}
+    state.active=true;state.track=trackId;state.pending={track:trackId,sound:structuredClone(next)};scheduleLive();
   };
-  /** Stops hearing a drag and goes back to the saved sound. Resolves once the player has. */
+  /** Stops hearing a drag and goes back to the saved sound of the track it was for. Resolves once the player has. */
   const endLive=()=>{
     const state=live.current;if(!state.active)return Promise.resolve();
-    state.active=false;state.pending=null;if(state.timer){clearTimeout(state.timer);state.timer=null;}
-    const settle=()=>previewer&&!previewChoice&&previewer.soundPreview()?.track===trackId?Promise.resolve(previewer.previewSound(trackId,null)).catch(e=>setError(String(e))):Promise.resolve();
+    const track=state.track;state.active=false;state.pending=null;if(state.timer){clearTimeout(state.timer);state.timer=null;}
+    const settle=()=>previewer&&track!==null&&!previewChoice&&previewer.soundPreview()?.track===track?Promise.resolve(previewer.previewSound(track,null)).catch(e=>setError(String(e))):Promise.resolve();
     // A request still in flight finishes first, so the old sound cannot come back after the end.
     return state.sending?new Promise<void>(resolve=>{const wait=()=>{if(state.sending)setTimeout(wait,5);else resolve(settle());};wait();}).then(()=>undefined):settle().then(()=>undefined);
   };
+  liveApi.current={send:sendLive,schedule:scheduleLive,end:endLive};
   /** Plays one field of `block` at `value` for as long as a control is dragged. */
   const hearField=(board:Board,block:EffectBlock,key:string,value:unknown)=>hear(board.build(effects=>setField(effects,block,key,value)));
   /** Puts a copy of `block` from the track's pedalboard on the second one, switched on; the second board starts with every pedal off. */
@@ -107,7 +120,7 @@ export function useSoundEditing({trackId,sound,onEdit,playback,busy=false,shown=
   // Messages and an open confirmation belong to the track they were shown for.
   const shownTrack=useRef(trackId);
   // A drag being heard ends with its track, and with the view.
-  useEffect(()=>()=>{const state=live.current;state.active=false;state.pending=null;if(state.timer){clearTimeout(state.timer);state.timer=null;}},[trackId]);
+  useEffect(()=>()=>{void liveApi.current.end();},[trackId]);
   useEffect(()=>{shownTrack.current=trackId;setStatus('');setConfirming(false);setPreviewChoice('');setFactoryChoice('');},[trackId]);
   // A preview lasts only while its track's panel is shown.
   useEffect(()=>()=>{if(previewer?.soundPreview()?.track===trackId)void Promise.resolve(previewer.previewSound(trackId,null)).catch(()=>{});},[previewer,trackId]);
@@ -116,22 +129,26 @@ export function useSoundEditing({trackId,sound,onEdit,playback,busy=false,shown=
   const previewGone=!!previewChoice&&!activePreview;
   useEffect(()=>{if(previewGone)setPreviewChoice('');},[previewGone]);
   /** Starts previewing `value`: `preset:`, `factory:` or `saved:` followed by the id or name; an empty value ends the preview. */
-  const choosePreview=(value:string)=>{
+  const choosePreview=(value:string,origin?:HTMLElement|null)=>{
     if(!previewer)return;
+    previewOrigin.current=origin??null;
     if(!value){void endPreview().then(()=>setStatus('Back to this track’s sound.'));return;}
     const split=value.indexOf(':'),kind=value.slice(0,split),id=value.slice(split+1),saved=library.find(item=>item.name===id);
     const named=factorySounds.find(item=>item.id===id);
-    const heard=kind==='preset'?soundPreset(id as TrackSound['presetId'],current.voiceId):kind==='factory'?factorySound(id,current.voiceId):saved?.sound;
-    const label=kind==='preset'?presetName(id):`“${kind==='factory'?named?.name:id}”`;if(!heard)return;
+    // A source previews the track's own sound through that source: only the instrument changes.
+    const heard=kind==='voice'?{...structuredClone(current),voiceId:id==='auto'?null:id}:kind==='preset'?soundPreset(id as TrackSound['presetId'],current.voiceId):kind==='factory'?factorySound(id,current.voiceId):saved?.sound;
+    const label=kind==='voice'?(id==='auto'?'Automatic':voiceNames[id as VoiceId]??id):kind==='preset'?presetName(id):`“${kind==='factory'?named?.name:id}”`;if(!heard)return;
     const request=++previewRequest.current,track=trackId;setPreviewChoice('');
     // A result that arrives after another choice, a cancel or a track change is dropped.
     void Promise.resolve(previewer.previewSound(track,structuredClone(heard))).then(()=>{if(request!==previewRequest.current||shownTrack.current!==track||previewer.soundPreview()?.track!==track)return;setPreviewChoice(value);setPreviewLabel(label);setError(null);setStatus(`Previewing ${label}. Keep it or cancel to go back to this track’s sound.`);},e=>{if(request===previewRequest.current)setError(String(e));});
   };
   /** Where focus returns after a preview is kept or cancelled; set by the surface showing the preview. */
   const previewReturn=useRef<(()=>void)|null>(null);
-  const returnFocus=()=>{(previewReturn.current??(()=>previewSelect.current?.focus()))();};
+  /** The button that started the preview; focus goes back to it, or to `previewReturn` once it is gone. */
+  const previewOrigin=useRef<HTMLElement|null>(null),keeping=useRef(false);
+  const returnFocus=()=>{const origin=previewOrigin.current;if(origin&&canTakeFocus(origin)){origin.focus();if(document.activeElement===origin)return;}(previewReturn.current??(()=>previewSelect.current?.focus()))();};
   const cancelPreview=()=>{void endPreview().then(()=>setStatus('Back to this track’s sound.'));returnFocus();};
-  const keepPreview=()=>{const kept=previewer?.soundPreview();if(kept?.track!==trackId)return;const label=previewLabel;void record(kept.sound).then(ok=>{if(ok){void endPreview();setStatus(`Kept ${label}.`);}returnFocus();});returnFocus();};
+  const keepPreview=()=>{if(keeping.current)return;const kept=previewer?.soundPreview();if(kept?.track!==trackId)return;const label=previewLabel;keeping.current=true;void record(kept.sound).then(ok=>{if(ok){void endPreview();setStatus(`Kept ${label}.`);}returnFocus();}).finally(()=>{keeping.current=false;});returnFocus();};
   const escapePreview=(event:React.KeyboardEvent)=>{if(event.key==='Escape'&&showingPreview){event.preventDefault();event.stopPropagation();cancelPreview();}};
   const orphanPreview=showingPreview&&previewChoice.startsWith('saved:')&&!library.some(item=>`saved:${item.name}`===previewChoice);
   const closeConfirm=()=>{setConfirming(false);savedSelect.current?.focus();};
@@ -146,7 +163,7 @@ export function useSoundEditing({trackId,sound,onEdit,playback,busy=false,shown=
   const selectOutput=(id:string)=>playback?.selectDevice(id||null);
   return {
     playbackState,current,devices,error,setError,status,setStatus,busy,playback:playback??null,record,save,
-    first,second,fx,hearField,hear,endLive,duplicate,syncOf,sync,order,place,move,movedBlock,pastePedal,copyPedalOf,copyCurrentSound,pasteSound,clipboard,library,
+    trackId,first,second,fx,hearField,hear,endLive,duplicate,syncOf,sync,order,place,move,movedBlock,pastePedal,copyPedalOf,copyCurrentSound,pasteSound,clipboard,library,
     chosen,setChosen,name,setName,entry,confirming,setConfirming,savedSelect,closeConfirm,saveNamed,renameChosen,deleteChosen,applySaved,
     factoryChoice,setFactoryChoice,factory,factoryNote,applyFactory,applyFactoryId,
     previewer,previewChoice,previewLabel,showingPreview,previewSelect,previewReturn,choosePreview,cancelPreview,keepPreview,escapePreview,orphanPreview,

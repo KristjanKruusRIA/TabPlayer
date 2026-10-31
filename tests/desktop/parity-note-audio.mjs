@@ -3,7 +3,7 @@
 // Reuses the S14 build packet and owned-process checks. Build with tests/desktop/string-count-build.mjs, then:
 // node tests/desktop/parity-note-audio.mjs --run --build=<absolute build.json>
 import assert from 'node:assert/strict';
-import {existsSync,mkdirSync,mkdtempSync,readFileSync,realpathSync,writeFileSync} from 'node:fs';
+import {existsSync,mkdirSync,mkdtempSync,readFileSync,realpathSync,renameSync,writeFileSync} from 'node:fs';
 import {dirname,resolve} from 'node:path';
 import {fileURLToPath,pathToFileURL} from 'node:url';
 import {sha256} from './score-layout-fixture.mjs';
@@ -44,7 +44,7 @@ export function readNotes(bytes){
     const variable=()=>{let value=0,byte;do{byte=bytes[at++];value=value*128+(byte&127);}while(byte&128);return value;};
     while(at<end){
       tick+=variable();let type=bytes[at];if(type&128){at++;if(type<240)status=type;}else type=status;
-      if(type===255){at++;at+=variable();}else if(type===240||type===247)at+=variable();
+      if(type===255||type===240||type===247){if(type===255)at++;const length=variable();at+=length;}
       else{const kind=type&240,size=kind===192||kind===208?1:2,key=bytes[at],value=size===2?bytes[at+1]:0;at+=size;if(kind===144&&value>0)on.push([tick,key,value]);else if(kind===128||kind===144)off.push([tick,key]);}
     }
   }
@@ -87,22 +87,23 @@ export async function runNoteAudioAcceptance({buildPath}={}){
   const field=name=>page.getByLabel(name,{exact:false});
   /** Opens a disclosure and every one around it. */
   const reveal=async locator=>locator.evaluate(node=>{for(let item=node.closest('details');item;item=item.parentElement?.closest('details'))item.open=true;});
-  /** Exports through the dialog and waits for the file; the app shell stays busy while the dialog is open. */
+  /** Exports through the dialog and waits for the file; the app shell stays busy while the dialog is open. The desktop-test GP path takes one fixed destination, so that file is renamed once written. */
+  const gpTarget=resolve(exportFolder,'written.gp');
   const exportAs=async({format,name,extension,audio})=>{
     await ui.clickWorkspaceCommand(page,'Export score',{waitForIdle:false});
     const dialog=page.getByRole('dialog',{name:'Export score'});await dialog.getByLabel('Export format').selectOption(format);
     if(audio){await dialog.getByRole('radio',{name:'16 bit'}).click();await dialog.getByLabel('Effect tail (seconds)').fill('0.1');}
     await dialog.getByLabel('File name',{exact:true}).fill(name);await dialog.getByRole('button',{name:'Export',exact:true}).click();
-    const path=resolve(exportFolder,`${name}.${extension}`),until=performance.now()+120000;
-    while(performance.now()<until&&!existsSync(path)){const failure=dialog.getByRole('alert');if(await failure.count())throw Error(await failure.innerText());await sleep(200);}
-    assert.ok(existsSync(path),`${name}.${extension} was written`);await dialog.waitFor({state:'detached',timeout:30000}).catch(()=>{});await idle();await sleep(300);
+    const path=resolve(exportFolder,`${name}.${extension}`),written=format==='gp'?gpTarget:path,until=performance.now()+120000;
+    while(performance.now()<until&&!existsSync(written)){const failure=dialog.getByRole('alert');if(await failure.count())throw Error(await failure.innerText());await sleep(200);}
+    assert.ok(existsSync(written),`${name}.${extension} was written`);if(written!==path)renameSync(written,path);await dialog.waitFor({state:'detached',timeout:30000}).catch(()=>{});await idle();await sleep(300);
     return path;
   };
   try{
     ui=await import('./workstation-commands.mjs');const {importer,Settings}=await import('@coderline/alphatab');load=bytes=>importer.ScoreLoader.loadScoreFromBytes(bytes,new Settings());
     writeFileSync(inputPath,await buildNoteAudioFixture(),{flag:'wx'});result.input={inputPath,sha256:hashFile(inputPath)};
     assertStringCountBuild(packet);assertStringCountPortFree(portRows());
-    const environment={...stringCountEnvironment(process.env),TABPLAYER_DESKTOP_TEST:'1',TABPLAYER_TEST_SESSION_DIR:paths.session,TABPLAYER_TEST_APP_DATA_DIR:paths['app-data'],TABPLAYER_TEST_OPEN:inputPath,TABPLAYER_TEST_EXPORT_DIR:exportFolder,WEBVIEW2_USER_DATA_FOLDER:paths.profile,WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS:'--remote-debugging-port=9223',STRING_COUNT_EXE:packet.executable,STRING_COUNT_IDENTITY:identityPath};
+    const environment={...stringCountEnvironment(process.env),TABPLAYER_DESKTOP_TEST:'1',TABPLAYER_TEST_SESSION_DIR:paths.session,TABPLAYER_TEST_APP_DATA_DIR:paths['app-data'],TABPLAYER_TEST_OPEN:inputPath,TABPLAYER_TEST_EXPORT_DIR:exportFolder,TABPLAYER_TEST_EXPORT:gpTarget,WEBVIEW2_USER_DATA_FOLDER:paths.profile,WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS:'--remote-debugging-port=9223',STRING_COUNT_EXE:packet.executable,STRING_COUNT_IDENTITY:identityPath};
     const script='$ErrorActionPreference="Stop";$p=Start-Process -FilePath $env:STRING_COUNT_EXE -WindowStyle Hidden -PassThru;$text=@{pid=$p.Id;path=$p.Path;startTicks=$p.StartTime.ToUniversalTime().Ticks.ToString()}|ConvertTo-Json -Compress;[IO.File]::WriteAllText($env:STRING_COUNT_IDENTITY,$text);$text';
     identity=JSON.parse(execFileSync('powershell.exe',['-NoProfile','-Command',script],{encoding:'utf8',windowsHide:true,timeout:20000,env:environment}).trim());
     assertStringCountIdentity(identity,json(identityPath));assert.ok(samePath(identity.path,packet.executable));owned();
@@ -118,7 +119,7 @@ export async function runNoteAudioAcceptance({buildPath}={}){
     const baseMidi=readNotes(readFileSync(await exportAs({format:'midi',name:'baseline',extension:'mid'})));
     assert.equal(baseMidi.division,960);assert.equal(baseMidi.on.length,3,'Three notes and a rest');
     assert.deepEqual(baseMidi.on.map(note=>note[0]),[0,960,1920],'Notes on beats 1, 2 and 3');
-    assert.deepEqual(baseMidi.on.map(note=>note[1]),[69,62,57],'Frets 5, 3 and 2 on strings 1, 2 and 3');
+    assert.deepEqual(baseMidi.on.map(note=>note[1]),[45,48,52],'Frets 5, 3 and 2 on alphaTab strings 1, 2 and 3, counted from the lowest');
     const baseLength=baseMidi.off[0][0]-baseMidi.on[0][0];assert.ok(baseLength>=100,'The first note has a length to scale');
     const baseWave=readWave(readFileSync(await exportAs({format:'wav',name:'baseline',extension:'wav',audio:true})));
     assert.ok(baseWave.onset>=0&&baseWave.peak>300,'The baseline audio sounds');
@@ -127,7 +128,8 @@ export async function runNoteAudioAcceptance({buildPath}={}){
     step('The baseline exports exist and the document is untouched',{baseMidi,baseWave:{onset:baseWave.onset,peak:baseWave.peak}});
 
     // The inspector: the first note's three fields, each committed on Enter or blur, each one setNoteTechniques edit.
-    await ui.revealInspector(page);await reveal(page.locator('summary').filter({hasText:'Notes & techniques'}).first());
+    await ui.revealInspector(page);await page.getByRole('combobox',{name:/^String/}).first().selectOption('1');await idle();
+    await reveal(page.locator('summary').filter({hasText:'Notes & techniques'}).first());
     await page.getByText('Note controls apply to string 1.',{exact:false}).waitFor();
     const length=field('Sounding length'),offset=field('Start offset'),velocity=field('Velocity change');
     assert.deepEqual([await length.inputValue(),await offset.inputValue(),await velocity.inputValue()],['100','0','0'],'A note starts at the plain values');
@@ -175,7 +177,7 @@ export async function runNoteAudioAcceptance({buildPath}={}){
     const editedGp=await exportAs({format:'gp',name:'edited',extension:'gp'});
     const notesOf=path=>{const score=load(readFileSync(path)),beats=score.tracks[0].staves[0].bars[0].voices[0].beats;return beats.map(beat=>[beat.duration,beat.dots,beat.notes.map(note=>[note.string,note.fret])]);};
     assert.deepEqual(notesOf(editedGp),notesOf(baseGp),'Written position is unchanged');
-    assert.doesNotMatch(strFromU8(unzipSync(readFileSync(editedGp))['Content/score.gpif']),/audio|offset/i,'Guitar Pro has no field for these, so none is written');
+    const gpif=path=>strFromU8(unzipSync(readFileSync(path))['Content/score.gpif']);assert.equal(gpif(editedGp),gpif(baseGp),'Guitar Pro has no field for these, so the written score is the baseline byte for byte');
     assert.deepEqual((await record()).snapshot.project,edited.snapshot.project,'Export never edits');
     step('The written notes and rhythm are unchanged',{notes:notesOf(editedGp)});
 

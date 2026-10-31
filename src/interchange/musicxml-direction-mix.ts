@@ -125,7 +125,13 @@ function plan(doc:Document,score:model.Score):{points:Point[];layout:Layout;stoc
         end=Math.max(end,cursor);
       }
       if(end!==length)return null; // incomplete or overfull bars
-      for(const [key,value] of voices){const staff=`${index}/${bar}/${key.split('/')[0]}`;layout.set(staff,[...layout.get(staff)??[],value].sort((a,b)=>a-b));}
+      // Each staff's list is sorted once, so a bar of many voices stays near linear.
+      const ends=new Map<string,number[]>();
+      for(const [key,value] of voices){
+        const staff=`${index}/${bar}/${key.split('/')[0]}`,list=ends.get(staff);
+        if(list)list.push(value);else ends.set(staff,[...layout.get(staff)??[],value]);
+      }
+      for(const [staff,list] of ends)layout.set(staff,list.sort((a,b)=>a-b));
     }
   }
   return found?{points,layout,stock,measureOk,measureTypes}:null;
@@ -134,12 +140,15 @@ function plan(doc:Document,score:model.Score):{points:Point[];layout:Layout;stoc
 // Part-level <volume>/<pan> is common, so only sounds carrying them justify a parse.
 // One pass over opening tags; self-closing ones (common for dynamics) end at once.
 function hasSoundMix(xml:string){
-  let closers=true;
+  // Sounds that share a closer share a region, which is searched once, so many unclosed tags stay linear.
+  let closers=true,searched=-1;
   for(const match of xml.matchAll(/<sound(?=[\s/>])[^>]*>/g)){
     const tag=match[0];if(/\span\s*=/.test(tag))return true;
     if(tag.endsWith('/>')||!closers)continue;
-    const start=match.index!+tag.length,end=xml.indexOf('</sound',start);
+    const start=match.index!+tag.length;if(start<searched)continue;
+    const end=xml.indexOf('</sound',start);
     if(end<0){closers=false;continue;}
+    searched=end;
     if(/<(volume|pan)[\s>]/.test(xml.slice(start,end)))return true;
   }
   return false;

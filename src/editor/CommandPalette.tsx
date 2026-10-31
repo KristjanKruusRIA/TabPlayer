@@ -9,7 +9,15 @@ import { Dialog } from '../ui/Dialog';
  */
 export function CommandPalette({context,busy,onRun,onClose}:{context:PaletteContext;busy:boolean;onRun:(action:PaletteAction)=>void;onClose:()=>void}) {
   const [query,setQuery]=useState(''),[active,setActive]=useState(0),input=useRef<HTMLInputElement>(null),list=useId();
-  const matches=useMemo(()=>searchCommands(query,context).map(match=>context.locked&&match.action&&(match.action.kind==='edit'||match.action.kind==='app'&&(match.action.name==='undo'||match.action.name==='redo'))?{...match,action:undefined,error:FINALIZED_MESSAGE}:match),[query,context]),current=matches[Math.min(active,matches.length-1)];
+  const matches=useMemo(()=>searchCommands(query,context).map(match=>{
+    if(context.locked&&match.action&&(match.action.kind==='edit'||match.action.kind==='app'&&(match.action.name==='undo'||match.action.name==='redo'))){
+      return {...match,action:undefined,error:FINALIZED_MESSAGE};
+    }
+    if(context.scoreHidden&&match.action&&match.action.kind==='edit'){
+      return {...match,action:undefined,error:'Score editing is unavailable while the score is hidden.'};
+    }
+    return match;
+  }),[query,context]),current=matches[Math.min(active,matches.length-1)];
   useEffect(()=>{if(current)document.getElementById(`${list}-${current.id}`)?.scrollIntoView?.({block:'nearest'});},[current,list]);
   // Closing first returns focus, so a dialog the command opens keeps the focus it takes.
   const run=(index:number)=>{const match=matches[index];if(!match?.action||busy)return;onClose();onRun(match.action);};

@@ -3,6 +3,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import { listen } from '@tauri-apps/api/event';
 import { nativeWorkspaceBridge } from './bridge';
 import { buildDocument } from './engine';
+import { admitDocumentBase } from './interchange/archive-gate';
 import { WorkspaceController } from './workspace/WorkspaceController';
 import { WorkspaceApp } from './workspace/WorkspaceApp';
 import { RecoveryPrompt } from './workspace/RecoveryPrompt';
@@ -117,10 +118,11 @@ async function retry() {
   if(startup.resumed&&!preview){await resolve(false,true);return;}
   const emptyClean=preview?.reason==='clean'&&preview.documents.length===0;
   if(preview) {
-    const valid=preview.documents.filter(document=>{
-      try {buildDocument(document.snapshot.project,document.snapshot.canRedo);return true;}
-      catch(error){preview!.issues=[...preview!.issues,{documentId:document.documentId,message:`A recovered score could not be opened: ${message(error)}`}];return false;}
-    });
+    const valid:typeof preview.documents=[];
+    for(const document of preview.documents) {
+      try {await admitDocumentBase(document.snapshot.project);buildDocument(document.snapshot.project,document.snapshot.canRedo);valid.push(document);}
+      catch(error){preview.issues=[...preview.issues,{documentId:document.documentId,message:`A recovered score could not be opened: ${message(error)}`}];}
+    }
     preview={...preview,documents:valid};
     if(!valid.length&&!emptyClean)preview={...preview,reason:'unavailable'};
   }

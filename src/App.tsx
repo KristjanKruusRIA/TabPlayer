@@ -12,8 +12,10 @@ import './styles.css';
 import { NativePlaybackController } from './audio/NativePlaybackController';
 import { SoundPanel } from './audio/SoundPanel';
 import { SoundRig } from './rig/SoundRig';
+import { CabinetResponse } from './audio/CabinetResponse';
 import { Segmented } from './ui';
 import { InterpretationPanel } from './audio/InterpretationPanel';
+import { CabinetNotices } from './audio/CabinetNotices';
 import { BackingPanel } from './audio/BackingPanel';
 import { BackingWaveform } from './audio/BackingWaveform';
 import { useReferenceSyncEdit } from './audio/useReferenceSyncEdit';
@@ -48,6 +50,7 @@ import { ScoreErrorsPanel } from './editor/ScoreErrorsPanel';
 import { CommandPalette } from './editor/CommandPalette';
 import { AsciiTabImportDialog } from './workspace/AsciiTabImportDialog';
 import { MidiImportDialog } from './workspace/MidiImportDialog';
+import { BatchConvertDialog } from './batch/BatchConvertDialog';
 import { HelpDialog } from './help/HelpDialog';
 import { topicFor,type HelpTopicId } from './help/help-topics';
 import type { PaletteAction } from './editor/command-palette';
@@ -159,6 +162,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   const target=repairSelection(state.score,selection);
   useEffect(()=>{onViewChange({target,selectedString,selectedNoteIndex,zoom,trackView,instrumentVisible,...(scoreDisplay?{scoreDisplay}:{})});},[target.track,target.staff,target.bar,target.voice,target.beat,selectedString,selectedNoteIndex,zoom,trackView,instrumentVisible,scoreDisplay,onViewChange]);
   const trackIds=useMemo(()=>state.score.tracks.map(trackIdentity),[state.score]);
+  const trackNames=useMemo(()=>Object.fromEntries(state.score.tracks.map(track=>[trackIdentity(track),track.name||`Track ${track.index+1}`])),[state.score]);
   const visibleTracks=useMemo(()=>resolveVisibleTracks(trackIds,target.track,trackView),[trackIds,target.track,trackView]);
   const projection=useMemo(()=>projectEngraving(state.score,trackIds,state.settings.engraving),[state.score,trackIds,state.settings.engraving]);
   const pageState=useMemo(()=>{
@@ -221,7 +225,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   const showClipboard=()=>{showInspector();setClipboardFocus(value=>value+1);};
   const documentAction=(job:Promise<unknown>)=>change(job);
   const [paletteOpen,setPaletteOpen]=useState(false),paletteReturn=useRef<HTMLElement|null>(null);
-  const [asciiOpen,setAsciiOpen]=useState(false),asciiReturn=useRef<HTMLElement|null>(null),[midiOpen,setMidiOpen]=useState(false);
+  const [asciiOpen,setAsciiOpen]=useState(false),asciiReturn=useRef<HTMLElement|null>(null),[midiOpen,setMidiOpen]=useState(false),[batchOpen,setBatchOpen]=useState(false);
   const [helpTopic,setHelpTopic]=useState<HelpTopicId|null>(null),helpReturn=useRef<HTMLElement|null>(null);
   /** Opens help on the topic for what had focus; help only reads, so open scores and edits are untouched. */
   const openHelp=(topic?:HelpTopicId)=>{const focused=document.activeElement instanceof HTMLElement?document.activeElement:null;helpReturn.current=focused;closeCommands(false);setHelpTopic(topic??topicFor(focused));};
@@ -230,13 +234,15 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   helpKey.current=event=>{
     if(event.key!=='F1'||event.ctrlKey||event.metaKey||event.altKey||event.shiftKey)return;
     event.preventDefault();
-    if(event.repeat||helpTopic!==null||exportOpen||harmonyOpen||scaleOpen||paletteOpen||asciiOpen||document.querySelector('[role="dialog"]'))return;
+    if(event.repeat||helpTopic!==null||exportOpen||harmonyOpen||scaleOpen||paletteOpen||asciiOpen||batchOpen||document.querySelector('[role="dialog"]'))return;
     openHelp();
   };
   useEffect(()=>{const listener=(event:globalThis.KeyboardEvent)=>helpKey.current(event);window.addEventListener('keydown',listener);return ()=>window.removeEventListener('keydown',listener);},[]);
   const closeHelp=()=>{setHelpTopic(null);const back=helpReturn.current;helpReturn.current=null;if(back?.isConnected)back.focus();if(document.activeElement!==back)scorePane.current?.focus();};
   const openAscii=()=>{asciiReturn.current=document.activeElement instanceof HTMLElement?document.activeElement:null;closeCommands(false);setAsciiOpen(true);};
   const openMidi=()=>{asciiReturn.current=document.activeElement instanceof HTMLElement?document.activeElement:null;closeCommands(false);setMidiOpen(true);};
+  const openBatch=()=>{asciiReturn.current=document.activeElement instanceof HTMLElement?document.activeElement:null;closeCommands(false);setBatchOpen(true);};
+  const closeBatch=()=>{setBatchOpen(false);closeAscii();};
   const closeMidi=()=>{setMidiOpen(false);closeAscii();};
   const closeAscii=()=>{setAsciiOpen(false);const back=asciiReturn.current;asciiReturn.current=null;if(back?.isConnected)back.focus();if(document.activeElement!==back)scorePane.current?.focus();};
   const openPalette=()=>{paletteReturn.current=document.activeElement instanceof HTMLElement?document.activeElement:null;closeCommands(false);setPaletteOpen(true);};
@@ -247,7 +253,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   };
   /** Runs a palette command through the same paths as the menus and inspector, so edits stay undoable. */
   const runPalette=(action:PaletteAction)=>{
-    if(action.kind==='edit'){if(editLocked)setClipboardError(FINALIZED_MESSAGE);else edit(action.command);}
+    if(action.kind==='edit'){if(view==='sound')return;if(editLocked)setClipboardError(FINALIZED_MESSAGE);else edit(action.command);}
     else if(action.kind==='select'){editorSelection(null);select(action.target);}
     else if(action.name==='undo'){if(state.snapshot.canUndo&&!editLocked)change(controller.undo());}
     else if(action.name==='redo'){if(state.snapshot.canRedo&&!editLocked)change(controller.redo());}
@@ -394,8 +400,8 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     select(next);event.preventDefault();
   }
   function selectionKeys(event:KeyboardEvent){
-    if((event.ctrlKey||event.metaKey)&&event.shiftKey&&!event.altKey&&event.key.toLowerCase()==='p'&&!exportOpen&&!harmonyOpen&&!scaleOpen&&!paletteOpen&&!asciiOpen&&!midiOpen&&helpTopic===null&&!(event.target instanceof Element&&event.target.closest('[role="dialog"]'))){event.preventDefault();if(!event.repeat)openPalette();return;}
-    if(textEntry(event.target)||exportOpen||harmonyOpen||scaleOpen||paletteOpen||asciiOpen||midiOpen||helpTopic!==null||(event.target instanceof Element&&event.target.closest('[role="dialog"]')))return;
+    if((event.ctrlKey||event.metaKey)&&event.shiftKey&&!event.altKey&&event.key.toLowerCase()==='p'&&!exportOpen&&!harmonyOpen&&!scaleOpen&&!paletteOpen&&!asciiOpen&&!midiOpen&&!batchOpen&&helpTopic===null&&!(event.target instanceof Element&&event.target.closest('[role="dialog"]'))){event.preventDefault();if(!event.repeat)openPalette();return;}
+    if(textEntry(event.target)||exportOpen||harmonyOpen||scaleOpen||paletteOpen||asciiOpen||midiOpen||batchOpen||helpTopic!==null||(event.target instanceof Element&&event.target.closest('[role="dialog"]')))return;
     const key=event.key.toLowerCase();
     if((event.ctrlKey||event.metaKey)&&!event.altKey&&['n','o','s','z','y'].includes(key)){
       event.preventDefault();if(controlsBusy||event.repeat)return;
@@ -406,6 +412,9 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
       else if(state.snapshot.canUndo&&!editLocked)change(controller.undo());
       return;
     }
+    // The Sound view covers the score, which stays laid out underneath: keys that edit or select in it wait for the Score view.
+    // Document commands (new, open, save, undo, redo) and Space for play stay.
+    if(view==='sound'&&(((event.ctrlKey||event.metaKey)&&['c','x','v','a'].includes(key))||event.key==='Escape')){event.preventDefault();return;}
     if(key===' '&&!event.ctrlKey&&!event.metaKey&&!event.altKey&&!event.repeat&&!(event.target instanceof Element&&event.target.closest('button,summary,a,[role="button"]'))){
       event.preventDefault();event.currentTarget.querySelector<HTMLButtonElement>('[aria-keyshortcuts="Space"]')?.click();return;
     }
@@ -425,6 +434,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
       <button disabled={controlsBusy} onClick={()=>documentAction(onOpen())}>Open</button>
       {onImportConverted&&<button disabled={controlsBusy} onClick={openAscii}>Import ASCII tab…</button>}
       {onImportConverted&&<button disabled={controlsBusy} onClick={openMidi}>Import MIDI…</button>}
+      <button disabled={controlsBusy} onClick={openBatch}>Batch convert…</button>
       <button disabled={controlsBusy} onClick={()=>act(controller.save())}>Save</button>
       <button disabled={controlsBusy} onClick={()=>act(controller.save(true))}>Save As</button>
       <button disabled={controlsBusy} onClick={()=>documentAction(onClose())}>Close score</button>
@@ -451,6 +461,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     </header>
     {documentTabs}
     {editLocked&&<div className="finalized-banner" role="status"><p>Finalized: editing is locked.</p><button disabled={controlsBusy} onClick={()=>act(controller.setLock(null))}>Unfinalize</button></div>}
+    <CabinetNotices sounds={state.settings.sounds} trackNames={trackNames}/>
     {player && <Transport player={player} measures={state.score.masterBars.length} busy={controlsBusy} cursor={target} selection={musicSelection}/>}
     {(clipboardError||workspaceError||state.error||(!exportOpen&&exportError)||pageState.error||harmonyOpen&&libraryError) && <div className="error" role="alert">{clipboardError||workspaceError||state.error||exportError||pageState.error||libraryError}</div>}
     <div ref={workspace} className="workspace workstation-workspace" data-view={view} data-left={leftShown} data-inspector={inspectorShown} data-dock={dockVisible} data-dock-collapsed={dockCollapsed} style={{'--dock-height':`${dockHeight}px`} as React.CSSProperties}>
@@ -485,8 +496,9 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
       </EditorPanel>
       </div>
       {view==='sound'&&<SoundRig trackId={trackId} sound={state.settings.sounds[trackId]} onEdit={command=>controller.edit(command)} playback={player} busy={editBusy}
-        tracks={state.score.tracks.map((track,index)=>({id:trackIds[index],name:track.name||`Track ${index+1}`}))}
-        onTrack={id=>{const index=trackIds.indexOf(id);if(index>=0)select({track:index,staff:0,bar:target.bar,voice:0,beat:0},state.score.tracks[index].staves[0].tuning.length);}}/>}
+        tracks={state.score.tracks.map((track,index)=>({id:trackIds[index],name:track.name||`Track ${index+1}`,program:track.playbackInfo.program,percussion:track.staves.some(staff=>staff.isPercussion)}))}
+        onTrack={id=>{const index=trackIds.indexOf(id);if(index>=0)select({track:index,staff:0,bar:target.bar,voice:0,beat:0},state.score.tracks[index].staves[0].tuning.length);}}
+        cabinetResponse={board=><CabinetResponse ir={board.effects.cabinet.ir} model={board.effects.cabinet.model} label={board.name} scope={`${trackId}:${board.name('Cabinet')}`} onLibraryChange={()=>{if(player&&typeof player.refreshSounds==='function')void player.refreshSounds().catch(()=>{});}} onChange={ir=>{if(!editBusy)board.write(effects=>{if(ir)effects.cabinet.ir=ir;else delete effects.cabinet.ir;});}}/>}/>}
       <section className="workstation-dock" aria-label="Bottom dock" hidden={!dockVisible}>
         <nav aria-label="Dock views"><button aria-pressed={!instrumentVisible&&dockMode==='overview'} onClick={()=>chooseDock('overview')}>Overview</button><button aria-pressed={!instrumentVisible&&dockMode==='mixer'} onClick={()=>chooseDock('mixer')}>Mixer</button><button aria-pressed={instrumentVisible} onClick={()=>chooseDock('instrument')}>Instrument</button><button aria-pressed={!instrumentVisible&&dockMode==='backing'} onClick={()=>chooseDock('backing')}>Backing</button><button className="dock-collapse" aria-label={dockCollapsed?'Expand bottom dock':'Hide bottom dock'} onClick={()=>dockCollapsed?setDockForced(true):hideDock()}>{dockCollapsed?'Expand':'Hide'}</button></nav>
         <div className="workstation-dock-content" hidden={dockCollapsed}>
@@ -499,12 +511,13 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
         </div>
       </section>
     </div>
-    {exportOpen&&<ExportDialog layoutLocked={editLocked} score={state.score} layout={state.settings.print} page={page} currentSpeedAvailable={practiceRatio!==null} busy={exports.busy||state.busy||exportLaunching} progress={exports.progress} failure={exportError} gpBackingIssue={gpBackingIssue} onExport={runExport} onCancel={cancelExport}/>}
+    {exportOpen&&<ExportDialog layoutLocked={editLocked} sounds={state.settings.sounds} trackNames={trackNames} score={state.score} layout={state.settings.print} page={page} currentSpeedAvailable={practiceRatio!==null} busy={exports.busy||state.busy||exportLaunching} progress={exports.progress} failure={exportError} gpBackingIssue={gpBackingIssue} hasBacking={!!audioSettings.backing} onExport={runExport} onCancel={cancelExport}/>}
     {harmonyOpen&&location.beat&&<HarmonyChordDialog score={state.score} target={target} selection={musicSelection} value={location.beat.chord?getHarmonyChord(location.beat.chord):null} busy={state.busy||libraryLoading} library={library} onEdit={edit} onClose={closeModal} onLibraryPut={async entry=>{const revision=++libraryRevision.current,value=await putHarmonyLibraryEntry(entry);if(revision===libraryRevision.current)setLibrary(value);}} onLibraryRemove={async id=>{const revision=++libraryRevision.current,value=await removeHarmonyLibraryEntry(id);if(revision===libraryRevision.current)setLibrary(value);}}/>}
     {helpTopic!==null&&<HelpDialog initial={helpTopic} onClose={closeHelp}/>}
     {asciiOpen&&onImportConverted&&<AsciiTabImportDialog busy={controlsBusy} onImport={(name,bytes)=>{const job=onImportConverted(name,bytes);documentAction(job);return job;}} onClose={closeAscii}/>}
+    {batchOpen&&<BatchConvertDialog busy={controlsBusy} onClose={closeBatch}/>}
     {midiOpen&&onImportConverted&&<MidiImportDialog busy={controlsBusy} onImport={(name,bytes)=>{const job=onImportConverted(name,bytes);documentAction(job);return job;}} onClose={closeMidi}/>}
-    {paletteOpen&&<CommandPalette context={{score:state.score,target,string,canUndo:state.snapshot.canUndo,canRedo:state.snapshot.canRedo,locked:editLocked}} busy={controlsBusy} onRun={runPalette} onClose={closePalette}/>}
+    {paletteOpen&&<CommandPalette context={{score:state.score,target,string,canUndo:state.snapshot.canUndo,canRedo:state.snapshot.canRedo,locked:editLocked,scoreHidden:view==='sound'}} busy={controlsBusy} onRun={runPalette} onClose={closePalette}/>}
     {scaleOpen&&<ScaleToolPanel score={state.score} staff={location.staff} selection={musicSelection} busy={state.busy} target={target} beat={location.beat} onEdit={editLocked?undefined:edit} onClose={closeModal}/>}
     <footer className="statusbar">{state.busy?'Working…':state.snapshot.dirty?'Unsaved changes':state.snapshot.path?'Saved':state.snapshot.project.base.kind==='file'?'Not saved':'New score'}<span>{state.snapshot.path ?? 'Save a .tabplayer project to keep the original score and edits.'}</span>{recoveryStatus}</footer>
   </div>;

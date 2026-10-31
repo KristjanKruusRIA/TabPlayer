@@ -6,9 +6,12 @@ import { PageLayoutPanel } from '../engraving/PageLayoutPanel';
 import { validatePageLayout } from '../engraving/page';
 import { DEFAULT_FILE_NAME,FILE_NAME_TOKENS,PER_TRACK_FILE_NAME,expandFileName,fileNameContext,withExtension } from './file-name';
 import { Dialog,Segmented } from '../ui';
+import { CabinetNotices } from '../audio/CabinetNotices';
+import type { TrackSound } from '../edit-types';
+import { previewGp5 } from './gp5';
 import './export-dialog.css';
-const EXTENSIONS:Record<ExportOptions['format'],string>={gp:'gp',pdf:'pdf',print:'',svg:'svg',png:'png',midi:'mid',musicxml:'musicxml',ascii:'txt',wav:'wav',stems:''};
-export function ExportDialog({score,layout,page,busy,progress,failure,currentSpeedAvailable,gpBackingIssue,onExport,onCancel,layoutLocked=false}:{score:model.Score;layout:PrintLayout;page?:PageLayout;busy:boolean;progress?:ExportProgress;failure?:string|null;currentSpeedAvailable:boolean;layoutLocked?:boolean;onExport:(options:ExportOptions)=>void;onCancel:()=>void;gpBackingIssue?:(selection:ExportSelection)=>string|null}) {
+const EXTENSIONS:Record<ExportOptions['format'],string>={gp:'gp',gp5:'gp5',pdf:'pdf',print:'',svg:'svg',png:'png',midi:'mid',musicxml:'musicxml',ascii:'txt',wav:'wav',stems:''};
+export function ExportDialog({score,layout,page,busy,progress,failure,currentSpeedAvailable,gpBackingIssue,hasBacking=false,onExport,onCancel,layoutLocked=false,sounds,trackNames}:{sounds?:Record<string,TrackSound>;trackNames?:Record<string,string>;score:model.Score;layout:PrintLayout;page?:PageLayout;busy:boolean;progress?:ExportProgress;failure?:string|null;currentSpeedAvailable:boolean;layoutLocked?:boolean;onExport:(options:ExportOptions)=>void;onCancel:()=>void;gpBackingIssue?:(selection:ExportSelection)=>string|null;hasBacking?:boolean}) {
   const [format,setFormat]=useState<ExportOptions['format']>('gp');const [tracks,setTracks]=useState(score.tracks.map(t=>t.index));
   const [staves,setStaves]=useState<Record<number,number[]>>(Object.fromEntries(score.tracks.map(t=>[t.index,t.staves.map(s=>s.index)])));
   const [range,setRange]=useState(false),[first,setFirst]=useState('1'),[last,setLast]=useState(String(score.masterBars.length));
@@ -34,7 +37,10 @@ export function ExportDialog({score,layout,page,busy,progress,failure,currentSpe
   }
   const selection=useMemo(()=>{try{return exportSelection();}catch{return null;}},[score,topology,tracks,staves,range,first,last]);
   const backingIssue=useMemo(()=>format==='gp'&&gpBacking&&selection?gpBackingIssue?.(selection)??null:null,[format,gpBacking,selection,gpBackingIssue]);
-  const visibleError=backingIssue||error||progress?.error||failure;
+  // What a Guitar Pro 5 file would leave out of this selection, or why it cannot be written, before anything is saved.
+  const gp5=useMemo(()=>format==='gp5'&&selection?previewGp5(score,selection,{backing:hasBacking}):null,[format,selection,score,hasBacking]);
+  const gp5Issue=gp5&&'refusal' in gp5?gp5.refusal:null;
+  const visibleError=backingIssue||gp5Issue||error||progress?.error||failure;
   useEffect(()=>{if(busy)cancel.current?.focus();},[busy]);
   useEffect(()=>{if(!currentSpeedAvailable)setAudio(previous=>previous.speed==='current'?{...previous,speed:'saved'}:previous);},[currentSpeedAvailable]);
   useEffect(()=>{
@@ -46,6 +52,7 @@ export function ExportDialog({score,layout,page,busy,progress,failure,currentSpe
     try {
       const selection=exportSelection();
       if(backingIssue)throw new Error(backingIssue);
+      if(gp5Issue)throw new Error(gp5Issue);
       if(!Number.isFinite(audio.tailSeconds)||audio.tailSeconds<0||audio.tailSeconds>30)throw new Error('Effect tail must be between 0 and 30 seconds.');
       if(format==='wav'&&normalize&&!(Number.isFinite(normalizeLevel)&&normalizeLevel>=-30&&normalizeLevel<=-6))throw new Error('Choose a normalization level from -30 to -6 dB RMS.');
       if(paged&&!customPage&&(!Number.isFinite(print.marginMm)||print.marginMm<0||print.marginMm>50||!Number.isFinite(print.scale)||print.scale<.25||print.scale>3))throw new Error('Use margins from 0 to 50 mm and scale from 25% to 300%.');
@@ -54,9 +61,9 @@ export function ExportDialog({score,layout,page,busy,progress,failure,currentSpe
       setError('');onExport({...(format==='svg'?{format,selection,layout:print,...(customPage?{page:structuredClone(customPage)}:{}),transparent}:format==='png'?{format,selection,layout:print,...(customPage?{page:structuredClone(customPage)}:{}),transparent,dpi}:format==='pdf'||format==='print'?{format,selection,layout:print,...(customPage?{page:structuredClone(customPage)}:{})}:format==='wav'?{format,selection,audio:normalize?{...audio,normalizeRmsDb:normalizeLevel}:audio}:format==='stems'?{format,selection,audio}:format==='gp'?{format,selection,...(!gpBacking?{backing:false}:{})}:{format,selection}),...named} as ExportOptions);
     }catch(e){setError((e as Error).message);}
   }
-  return <Dialog title="Export score" onClose={onCancel} closeLabel={busy?'Cancel':'Close'} busy={busy} className="export-dialog" actions={<><button type="button" className="tp-primary export-submit" disabled={busy||Boolean(backingIssue)} onClick={submit}>Export</button><button ref={cancel} data-autofocus={busy||undefined} type="button" onClick={onCancel}>{busy?'Cancel export':'Cancel'}</button></>}>
+  return <Dialog title="Export score" onClose={onCancel} closeLabel={busy?'Cancel':'Close'} busy={busy} className="export-dialog" actions={<><button type="button" className="tp-primary export-submit" disabled={busy||Boolean(backingIssue)||Boolean(gp5Issue)} onClick={submit}>Export</button><button ref={cancel} data-autofocus={busy||undefined} type="button" onClick={onCancel}>{busy?'Cancel export':'Cancel'}</button></>}>
     <fieldset disabled={busy}>
-      <label>Export format<select data-autofocus={!busy||undefined} value={format} onChange={e=>{const next=e.target.value as ExportOptions['format'];setFormat(next);if(next!=='pdf'&&next!=='svg'&&next!=='png'&&perTrack){setPerTrack(false);if(fileName===PER_TRACK_FILE_NAME)setFileName(DEFAULT_FILE_NAME);}}}><option value="gp">Guitar Pro</option><option value="pdf">PDF</option><option value="print">Print</option><option value="svg">SVG</option><option value="png">PNG</option><option value="midi">MIDI</option><option value="musicxml">MusicXML</option><option value="ascii">ASCII tablature</option><option value="wav">Mixed audio</option><option value="stems">Audio stems</option></select></label>
+      <label>Export format<select data-autofocus={!busy||undefined} value={format} onChange={e=>{const next=e.target.value as ExportOptions['format'];setFormat(next);if(next!=='pdf'&&next!=='svg'&&next!=='png'&&perTrack){setPerTrack(false);if(fileName===PER_TRACK_FILE_NAME)setFileName(DEFAULT_FILE_NAME);}}}><option value="gp">Guitar Pro</option><option value="gp5">Guitar Pro 5</option><option value="pdf">PDF</option><option value="print">Print</option><option value="svg">SVG</option><option value="png">PNG</option><option value="midi">MIDI</option><option value="musicxml">MusicXML</option><option value="ascii">ASCII tablature</option><option value="wav">Mixed audio</option><option value="stems">Audio stems</option></select></label>
       {format!=='print'&&<div className="export-file-name"><label>File name<input value={fileName} spellCheck={false} onChange={e=>setFileName(e.target.value)}/></label>
         <p className="muted">{`Tokens: ${FILE_NAME_TOKENS}. Track tokens use the first selected track.`}</p>
         <p aria-live="polite">{`Saves as ${savedName}`}</p>{(format==='svg'||format==='png')&&<p className="muted">Several pages are saved with -1, -2 and so on before the extension.</p>}</div>}
@@ -84,6 +91,8 @@ export function ExportDialog({score,layout,page,busy,progress,failure,currentSpe
       {format==='png'&&<><div className="export-field"><span className="export-field-label" aria-hidden="true">Resolution</span><Segmented label="Resolution" value={dpi} disabled={busy} options={PNG_RESOLUTIONS.map(value=>({value,label:`${value} dpi`}))} onChange={setDpi}/></div><p>PNG writes one image per page at the chosen resolution.</p></>}
       {format==='musicxml'&&<p>MusicXML keeps notes, techniques, lyrics and tempo. It leaves out fermata lengths, backing audio, mixer settings, and layout and styling. Anything else it cannot write, such as instrument changes or gradual volume changes, stops the export with a message.</p>}
       {format==='ascii'&&<p>ASCII tablature writes the fret numbers of stringed tracks as plain text, with common techniques, repeats, endings, sections and directions, and a legend of the marks used. Rhythm is shown only by spacing, simile bars are written out, and where voices share a string at one moment the first voice is kept. Percussion and staves without strings are left out.</p>}
+      {format==='gp5'&&<><p>Guitar Pro 5 keeps notes and rhythm, tuning and capo, repeats and endings, sections, tempo, key and time signatures, lyrics, chord diagrams and the common techniques. It leaves out page layout, styling, sound settings and backing audio, and anything the older format has no place for. What this selection loses is listed here, and you confirm it before the save dialog opens. Guitar Pro 6 (.gpx) export is not available.</p>
+        {gp5&&'losses' in gp5&&(gp5.losses.length?<div role="status"><p>Left out or changed in this selection:</p><ul>{gp5.losses.map(item=><li key={item}>{item}</li>)}</ul></div>:<p role="status">Nothing in this selection is left out beyond layout, styling, sound settings and backing audio.</p>)}</>}
       {format==='midi'&&<p>MIDI preserves generated notes and controls. Ordinary MIDI players share pitch bends on a channel, so simultaneous independent bends may differ.</p>}
       {(format==='wav'||format==='stems')&&<fieldset className="export-audio"><legend>Audio</legend><div className="export-audio-options">
         <div className="export-field"><span className="export-field-label" aria-hidden="true">File type</span><Segmented label="File type" value={audio.container??'wav'} disabled={busy} options={[{value:'wav' as const,label:'WAV'},{value:'aiff' as const,label:'AIFF'},{value:'flac' as const,label:'FLAC (lossless)'}]} onChange={value=>{const {container:_,...rest}=audio;setAudio(value==='aiff'||value==='flac'?{...rest,container:value}:rest);}}/></div>
@@ -92,6 +101,7 @@ export function ExportDialog({score,layout,page,busy,progress,failure,currentSpe
         <div className="export-field"><span className="export-field-label" aria-hidden="true">Speed</span><Segmented label="Speed" value={audio.speed} disabled={busy} options={[{value:'saved' as const,label:'100%'},{value:'current' as const,label:'Current speed coefficient',disabled:!currentSpeedAvailable}]} onChange={speed=>setAudio({...audio,speed})}/></div>
         {!currentSpeedAvailable&&<p>Fixed BPM has no single speed coefficient. Export at saved speed is available.</p>}
         <p>Audio export does not include count-in or progressive speed changes.</p>
+        <CabinetNotices sounds={sounds} trackNames={trackNames} className="export-cabinet-notices"/>
         <label className="export-check"><input type="checkbox" checked={audio.metronome} onChange={e=>setAudio({...audio,metronome:e.target.checked})}/>Metronome</label>
         <label className="export-check"><input type="checkbox" checked={audio.backing} onChange={e=>setAudio({...audio,backing:e.target.checked})}/>Include backing</label>
         <label>Effect tail (seconds)<input type="number" min="0" max="30" step=".1" value={audio.tailSeconds} onChange={e=>setAudio({...audio,tailSeconds:Number(e.target.value)})}/></label>

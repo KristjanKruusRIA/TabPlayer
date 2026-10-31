@@ -180,7 +180,7 @@ pub struct DocumentWorkspace {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct NativeFileReceipt {
+pub struct NativeFileReceipt {
     pub document: DocumentRevision,
     pub path: PathBuf,
     pub digest: String,
@@ -458,7 +458,7 @@ impl DocumentWorkspace {
         Ok(self.entry(id)?.saved_file_sha256.as_deref())
     }
 
-    pub(crate) fn library_receipt(&self, id: &str) -> Result<Option<NativeFileReceipt>, String> {
+    pub fn library_receipt(&self, id: &str) -> Result<Option<NativeFileReceipt>, String> {
         self.check_admission()?;
         let entry = self.entry(id)?;
         let target = if let Some(path) = entry.session.path() {
@@ -641,8 +641,13 @@ impl DocumentWorkspace {
     ) -> Result<DocumentSnapshot, String> {
         let revision = self.check_mutation(address)?;
         let entry = self.entry_mut(&address.document_id)?;
-        // The mixer is how a player balances playback, so it stays usable on a finalized score.
-        if entry.session.lock().is_some() && !matches!(command, EditCommand::SetTrackMix { .. }) {
+        // The mixer is how a player balances playback, so it stays usable on a finalized score, the master included.
+        if entry.session.lock().is_some()
+            && !matches!(
+                command,
+                EditCommand::SetTrackMix { .. } | EditCommand::SetMaster { .. }
+            )
+        {
             return Err(FINALIZED_MESSAGE.into());
         }
         entry

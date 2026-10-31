@@ -77,30 +77,30 @@
       "unverified": 8
     },
     "current_dispositions": {
-      "implemented": 99,
-      "partial": 132,
+      "implemented": 101,
+      "partial": 130,
       "missing": 19,
       "unverified": 8
     },
-    "evidence_reviewed_total": 174,
+    "evidence_reviewed_total": 176,
     "evidence_reviewed": {
-      "implemented": 57,
+      "implemented": 59,
       "partial": 113,
       "missing": 0,
       "unverified": 4
     },
-    "baseline_not_reaudited_total": 84,
+    "baseline_not_reaudited_total": 82,
     "baseline_not_reaudited": {
       "implemented": 42,
-      "partial": 19,
+      "partial": 17,
       "missing": 19,
       "unverified": 4
     },
-    "status_changed_total": 136,
+    "status_changed_total": 138,
     "transition_counts": {
       "missing -> implemented": 39,
       "missing -> partial": 88,
-      "partial -> implemented": 9
+      "partial -> implemented": 11
     }
   },
   "evidence": {
@@ -1987,6 +1987,24 @@
       "start_line": 38,
       "end_line": 47,
       "kind": "validation_report"
+    },
+    "editing_gaps_behavior": {
+      "path": "docs/validation/2026-10-31-gp8-editing-gaps.md",
+      "start_line": 13,
+      "end_line": 26,
+      "kind": "validation_report"
+    },
+    "editing_gaps_evidence": {
+      "path": "docs/validation/2026-10-31-gp8-editing-gaps.md",
+      "start_line": 28,
+      "end_line": 41,
+      "kind": "validation_report"
+    },
+    "editing_gaps_limits": {
+      "path": "docs/validation/2026-10-31-gp8-editing-gaps.md",
+      "start_line": 53,
+      "end_line": 55,
+      "kind": "validation_report"
     }
   },
   "evidence_file_sha256": {
@@ -2104,7 +2122,8 @@
     "docs/validation/2026-10-31-gp8-courtesy-accidentals.md": "bbea197527ed9a5e6bd4b7724c687bc8f1f8d03cbc1bedc24bcfcf8bd4c509e6",
     "docs/validation/2026-10-31-gp8-track-sound-lock.md": "1ce9519b7d2b749b6968917011699aa2a2863b0072a7cb4030ba814c2fcfe2d6",
     "docs/validation/2026-10-31-gp8-bar-widths.md": "12a757daab19bf8be0101c89facb68f249d3817fe1d1d0af4397a504197b7d7b",
-    "docs/validation/2026-10-31-gp8-percussion-styles.md": "953e068957c72136ffd0bc9e5321a10f78d04e68a006124453f4d267cd1e2300"
+    "docs/validation/2026-10-31-gp8-percussion-styles.md": "953e068957c72136ffd0bc9e5321a10f78d04e68a006124453f4d267cd1e2300",
+    "docs/validation/2026-10-31-gp8-editing-gaps.md": "8b4ffd66792199dd461dbcadae0396c3ae35be5a2a34cd0bf277c8ea4d54b691"
   },
   "next_open_families": [
     {
@@ -4223,12 +4242,16 @@
       "acceptance_required": "Report invalid track/bar/voice and repair duration with rests/ties correctly.",
       "runtime_rechecked": false,
       "historical_status": "partial",
-      "current_status": "partial",
-      "assessment": "baseline_not_reaudited",
-      "current_proven_status": null,
-      "current_behavior": "Overflow rejection exists; no underfull report/fill/split/rebalance assistant.",
-      "remaining_gap": "Not re-audited in this delivery-progress audit. The original baseline behavior, gap and acceptance remain authoritative historical context; this is not a new current proof.",
-      "current_evidence": [],
+      "current_status": "implemented",
+      "assessment": "evidence_reviewed",
+      "current_proven_status": "implemented",
+      "current_behavior": "The Score errors list now repairs each reported voice with one undoable edit, `fitVoice`: Fill with rests adds the fewest standard rests to a short voice, and Trim to fit removes beats past the barline from an overfull one and fills the rest with rests. A complete or unused voice, a free-time measure and an unrepresentable remainder are refused and record nothing. Older projects replay unchanged.",
+      "remaining_gap": "A beat crossing the barline is removed rather than split into tied beats; no rebalance across measures, no fix-all and no live check while typing; Windows desktop and GP8 comparison not run.",
+      "current_evidence": [
+        "editing_gaps_behavior",
+        "editing_gaps_evidence",
+        "editing_gaps_limits"
+      ],
       "runtime_rechecked_by_this_audit": false
     },
     {
@@ -4316,12 +4339,16 @@
       "acceptance_required": "Jump between named sections and find requested musical positions.",
       "runtime_rechecked": false,
       "historical_status": "partial",
-      "current_status": "partial",
-      "assessment": "baseline_not_reaudited",
-      "current_proven_status": null,
-      "current_behavior": "Numeric bar/beat selectors exist; no section navigator/global timeline.",
-      "remaining_gap": "Not re-audited in this delivery-progress audit. The original baseline behavior, gap and acceptance remain authoritative historical context; this is not a new current proof.",
-      "current_evidence": [],
+      "current_status": "implemented",
+      "assessment": "evidence_reviewed",
+      "current_proven_status": "implemented",
+      "current_behavior": "A Sections list names every measure with a Section label, jumps to it, marks the section the cursor is in and steps to the previous or next section; the Measure and Beat selectors still reach any other position.",
+      "remaining_gap": "Sections come only from Section labels; no timeline strip, text search, shortcut or reorder; whether playback follows a jump was not checked; Windows desktop and GP8 comparison not run.",
+      "current_evidence": [
+        "editing_gaps_behavior",
+        "editing_gaps_evidence",
+        "editing_gaps_limits"
+      ],
       "runtime_rechecked_by_this_audit": false
     },
     {

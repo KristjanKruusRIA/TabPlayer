@@ -46,3 +46,27 @@ it('opens for a score that starts with errors and then leaves opening to the use
   const first=render(<ScoreErrorsPanel errors={errors} mark onMark={()=>{}} onSelect={()=>{}}/>);
   expect(first.container.querySelector('details')!.open).toBe(true);
 });
+
+it('offers one repair per error: rests for a short voice, trimming for a long one',()=>{
+  const onFit=vi.fn();
+  render(<ScoreErrorsPanel errors={errors} mark onMark={()=>{}} onSelect={()=>{}} onFit={onFit}/>);
+  fireEvent.click(screen.getByRole('button',{name:'Fill with rests: measure 2, Guitar, voice 1'}));
+  expect(onFit).toHaveBeenLastCalledWith(errors[0]);
+  fireEvent.click(screen.getByRole('button',{name:'Trim to fit: measure 4, Piano · Staff 2, voice 2'}));
+  expect(onFit).toHaveBeenLastCalledWith(errors[1]);
+  expect(onFit).toHaveBeenCalledTimes(2);
+});
+
+it('offers no repair when editing is not available',()=>{
+  render(<ScoreErrorsPanel errors={errors} mark onMark={()=>{}} onSelect={()=>{}}/>);
+  expect(screen.queryByRole('button',{name:/Fill with rests|Trim to fit/})).toBeNull();
+});
+
+it('refuses a repair while busy without disabling the focused button',()=>{
+  const onFit=vi.fn();
+  render(<ScoreErrorsPanel errors={errors} mark onMark={()=>{}} onSelect={()=>{}} onFit={onFit} busy/>);
+  const button=screen.getByRole('button',{name:'Fill with rests: measure 2, Guitar, voice 1'});
+  expect(button).not.toBeDisabled();expect(button).toHaveAttribute('aria-disabled','true');
+  button.focus();fireEvent.click(button);
+  expect(onFit).not.toHaveBeenCalled();expect(button).toHaveFocus();
+});

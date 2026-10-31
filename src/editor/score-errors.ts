@@ -8,11 +8,11 @@ export interface ScoreError {track:number;staff:number;bar:number;voice:number;
   place:string}
 
 const quarter=960;
-type Fraction=[number,number];
+export type Fraction=[number,number];
 const gcd=(a:number,b:number):number=>b?gcd(b,a%b):a;
 const add=([a,b]:Fraction,[c,d]:Fraction):Fraction=>{const top=a*d+c*b,bottom=b*d,divisor=gcd(Math.abs(top),bottom)||1;return [top/divisor,bottom/divisor];};
 /** Written length in exact ticks: playback lengths lend grace-note time to neighbours and round tuplets down. */
-function writtenTicks(beat:model.Beat,measure:number):Fraction {
+export function writtenTicks(beat:model.Beat,measure:number):Fraction {
   if(beat.graceType!==model.GraceType.None)return [0,1];
   if(beat.isFullBarRest)return [measure,1];
   if(beat.overrideDisplayDuration!==undefined)return [beat.overrideDisplayDuration,1];
@@ -22,7 +22,7 @@ function writtenTicks(beat:model.Beat,measure:number):Fraction {
   return add(fraction,[0,1]);
 }
 /** Voices holding only empty beats are unused, not errors; an empty filler beat before a late entry still takes its time. */
-function voiceTicks(voice:model.Voice,measure:number):Fraction|null {
+export function voiceTicks(voice:model.Voice,measure:number):Fraction|null {
   if(voice.beats.every(beat=>beat.isEmpty))return null;
   return voice.beats.reduce<Fraction>((total,beat)=>add(total,writtenTicks(beat,measure)),[0,1]);
 }

@@ -113,6 +113,8 @@ export type EditCommand = LyricsCommand | GestureCommand | BarGestureCommand | R
   | { type: 'setDuration'; target: BeatTarget; duration: number; dots: number }
   | { type: 'insertBeat'; target: BeatTarget; duration: number; dots: number }
   | { type: 'deleteBeat'; target: BeatTarget }
+  /** Makes one voice fill its measure exactly: rests are added for a short voice, and beats past the barline are removed from an overfull one. */
+  | { type: 'fitVoice'; track: number; staff: number; bar: number; voice: number }
   | { type: 'appendMeasure' }
   | { type: 'removeMeasure'; bar: number }
   | { type: 'addTrack'; name: string; tuning: number[]; program: number; tuningName?: string }

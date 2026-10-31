@@ -49,6 +49,8 @@ import { AUTO_DURATION_UNFIT,InputPreferencesPanel,applyInOrder,autoDurationEdit
 import { ClipboardPanel } from './editor/ClipboardPanel';
 import { NotationEntryPanel } from './editor/NotationEntryPanel';
 import { ScoreErrorsPanel } from './editor/ScoreErrorsPanel';
+import { SectionsPanel } from './editor/SectionsPanel';
+import { listSections } from './editor/sections';
 import { CommandPalette } from './editor/CommandPalette';
 import { AsciiTabImportDialog } from './workspace/AsciiTabImportDialog';
 import { MidiImportDialog } from './workspace/MidiImportDialog';
@@ -111,7 +113,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   const [clipboardVersion,setClipboardVersion]=useState(0),[clipboardError,setClipboardError]=useState<string|null>(null),[contextScope,setContextScope]=useState<InspectorContextScope>('all');
   const [inputPrefs,setInputPrefs]=useInputPreferences(),entryDuration=useRef<EntryDuration|null>(null),[inputNotice,setInputNotice]=useState<{text:string;at:string}|null>(null);
   const [auditionEdits,setAuditionEdits]=useState(readAuditionWhileEditing),auditionEditsNow=useRef(auditionEdits);auditionEditsNow.current=auditionEdits;
-  const [markErrors,setMarkErrors]=useState(readScoreErrorDisplay),scoreErrors=useMemo(()=>findScoreErrors(state.score),[state.score]);
+  const [markErrors,setMarkErrors]=useState(readScoreErrorDisplay),scoreErrors=useMemo(()=>findScoreErrors(state.score),[state.score]),sections=useMemo(()=>listSections(state.score),[state.score]);
   const clip=useMemo(()=>clipboard.get(),[clipboard,clipboardVersion]),clipboardSection=useRef<HTMLDivElement>(null);
   useEffect(()=>{setMusicSelection(null);rangeAnchor.current=null;},[state.documentEpoch]);
   const editorSelection=(value:MusicSelection|null)=>{rangeAnchor.current=null;setMusicSelection(value);};
@@ -495,7 +497,8 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
         presentationTools={<><EngravingPanel key={`engraving/${state.documentEpoch}`} score={state.score} trackIds={trackIds} value={state.settings.engraving} busy={controlsBusy} onEdit={edit}/><BarWidthsPanel value={state.settings.engraving} design={barDesign} onDesign={setBarDesign} busy={editBusy} honoured={barWidthsHonoured} onEdit={edit}/><PageLayoutPanel key={`page/${state.documentEpoch}`} value={page} busy={controlsBusy} onEdit={edit}/></>} presentationViewTools={<ViewDefaultsPanel current={{zoom,trackView,scoreDisplay}} load={currentViewDefaults} onSave={writeViewDefaults}/>}>
         <NotationEntryPanel score={state.score} target={target} busy={controlsBusy} locked={editLocked} onEdit={instrumentEdit} latestScore={()=>controller.getState().score}/>
         <div ref={clipboardSection}><ClipboardPanel score={state.score} target={target} selection={musicSelection} clip={clip} busy={controlsBusy} locked={editLocked} onCopy={mode=>copyMusic(mode)} onCut={mode=>copyMusic(mode,true)} onPaste={pasteMusic} diagramsDefault={inputPrefs.pasteDiagrams}/></div>
-        <ScoreErrorsPanel errors={scoreErrors} mark={markErrors} onMark={mark=>{setMarkErrors(mark);writeScoreErrorDisplay(mark);}} onSelect={next=>select(next)} shownTracks={visibleTracks}/>
+        <SectionsPanel sections={sections} bar={target.bar} onGo={bar=>{editorSelection(null);select({...target,bar,beat:0});}}/>
+        <ScoreErrorsPanel errors={scoreErrors} mark={markErrors} onMark={mark=>{setMarkErrors(mark);writeScoreErrorDisplay(mark);}} onSelect={next=>select(next)} onFit={editLocked?undefined:error=>edit({type:'fitVoice',track:error.track,staff:error.staff,bar:error.bar,voice:error.voice})} busy={controlsBusy} shownTracks={visibleTracks}/>
         <HarmonyTransposePanel key={`harmony/${state.documentEpoch}`} score={state.score} selection={musicSelection} busy={editBusy} onEdit={edit}/>
       </EditorPanel>
       </div>

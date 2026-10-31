@@ -28,7 +28,7 @@
 /* Head */
 .sound-view .rig-head { display:flex; flex-wrap:wrap; align-items:flex-end; gap:6px 12px; padding:8px 12px; border-bottom:1px solid var(--tp-line-subtle); background:var(--tp-panel); }
 .sound-view .rig-head-gap { flex:1; }
-.sound-view .rig-lock { display:inline-flex; align-items:center; gap:6px; min-height:28px; color:var(--tp-text); font:500 12px/18px var(--tp-font-ui); white-space:nowrap; }
+.sound-view .rig-lock { display:inline-flex; flex-direction:row; align-items:center; gap:6px; min-height:28px; color:var(--tp-text); font:500 12px/18px var(--tp-font-ui); white-space:nowrap; }
 .sound-view .rig-lock input { margin:0; }
 .sound-view .rig-lock:has(input[aria-disabled=true]) { opacity:.45; }
 .sound-view .rig-browser-toggle { display:none; }
@@ -222,22 +222,19 @@
  * if the row cannot hold it beside the presets the presets wrap below. Nothing is positioned out of flow. */
 .sound-view .rig-source-picker { display:grid; grid-template-columns:repeat(6,auto auto); align-items:center; max-width:100%; }
 .sound-view .rig-source-picker>* { grid-row:1; grid-column:1/-1; display:grid; grid-template-columns:subgrid; }
-/* The drum kit sits in the head as its own item beside the source picker, never inside it (the picker puts every child in its row 1).
- * It is one compact row: the select and a small summary link. Its note is the select's title (and stays for screen readers, clipped), and the
- * table opens as a popover under the head, so the head keeps its height. */
-.sound-view .rig-drum-kit { position:relative; display:flex; flex-direction:row; flex-wrap:nowrap; align-items:center; gap:2px; font-size:11px; }
-.sound-view .rig-drum-kit label { display:flex; flex-direction:row; align-items:center; gap:6px; white-space:nowrap; }
-.sound-view .rig-drum-kit select { min-height:26px; padding:2px 0 2px 5px; font-size:11px; border:1px solid var(--tp-line-strong); border-radius:var(--tp-radius-s); background:var(--tp-input); color:inherit; font:inherit; }
-.sound-view .rig-drum-kit select[aria-disabled=true] { opacity:.45; }
-.sound-view .rig-drum-kit>p { position:absolute; width:1px; height:1px; margin:-1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; }
-.sound-view .rig-drum-kit .drum-kit-label { position:absolute; width:1px; height:1px; margin:-1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; }
-/* The head is tight: the label and the summary shrink to the select and a small ?; both keep their text for screen readers, and the select and summary carry titles. */
-.sound-view .rig-drum-kit details>summary { cursor:pointer; font-size:0; white-space:nowrap; display:inline-flex; align-items:center; justify-content:center; box-sizing:border-box; width:18px; height:18px; min-height:0; margin:0; padding:0; line-height:1; border:1px solid var(--tp-line-strong); border-radius:50%; list-style:none; }
-.sound-view .rig-drum-kit details>summary::-webkit-details-marker { display:none; }
-.sound-view .rig-drum-kit details>summary::before { content:"?"; font-size:12px; }
-.sound-view .rig-drum-kit .drum-kit-table { position:fixed; left:12px; z-index:20; box-sizing:border-box; width:min(440px,calc(100vw - 24px)); max-height:min(40vh,320px); overflow:auto; padding:6px 10px; border:1px solid var(--tp-line-strong); border-radius:var(--tp-radius-s); background:var(--tp-panel); box-shadow:0 6px 18px rgb(0 0 0 / .5); }
-.sound-view .rig-drum-kit .drum-kit-table :is(p,ul) { margin:2px 0 4px; }
-.sound-view .rig-drum-kit ul { padding-left:16px; }
+/* The drum kit sits at the end of the head as its own item, never inside the source picker (the picker puts every child in its row 1). A pitched track
+ * renders the same slot empty (.rig-drum-kit-reserve), so the head wraps the same for every track and changing track moves nothing. Its table is a popover
+ * under the ? button, inside the kit's own box (right edges aligned, so it grows leftwards into the head). */
+.sound-view .rig-drum-kit { position:relative; display:flex; flex:none; align-items:center; gap:6px; box-sizing:border-box; width:184px; min-height:28px; margin:0 0 0 auto; }
+.sound-view .rig-drum-kit-reserve { visibility:hidden; }
+.sound-view .rig-kit-label { display:flex; flex:1 1 auto; flex-direction:row; align-items:center; gap:6px; min-width:0; margin:0; white-space:nowrap; font-size:11px; color:var(--tp-muted); }
+.sound-view .rig-kit-label .rig-select { flex:1 1 auto; min-width:0; }
+.sound-view .rig-kit-help { flex:none; display:inline-flex; align-items:center; justify-content:center; box-sizing:border-box; width:20px; height:20px; min-height:0; margin:0; padding:0; border:1px solid var(--tp-line-strong); border-radius:50%; background:transparent; color:var(--tp-text); font:600 12px/1 var(--tp-font-ui); }
+.sound-view .rig-kit-help[aria-expanded=true] { background:var(--tp-raised); border-color:var(--tp-text); }
+.sound-view .rig-visually-hidden { position:absolute; width:1px; height:1px; margin:-1px; padding:0; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; }
+.sound-view .rig-kit-table { position:absolute; z-index:20; top:calc(100% + 4px); right:0; box-sizing:border-box; width:min(440px,calc(100cqw - 24px)); max-height:min(40vh,320px); overflow:auto; padding:6px 10px; border:1px solid var(--tp-line-strong); border-radius:var(--tp-radius-s); background:var(--tp-panel); box-shadow:0 6px 18px rgb(0 0 0 / .5); font-size:11px; white-space:normal; }
+.sound-view .rig-kit-table :is(p,ul) { margin:2px 0 4px; }
+.sound-view .rig-kit-table ul { padding-left:16px; }
 .sound-view .rig-hears { pointer-events:none; align-items:center; z-index:1; }
 .sound-view .rig-hears>button { pointer-events:auto; justify-self:start; margin-left:1px; }
 .sound-view .rig-sources,.sound-view .rig-tracks { flex-wrap:nowrap; gap:0; padding:2px; background:rgb(0 0 0 / .28); border-color:var(--tp-line-subtle); }
@@ -294,10 +291,12 @@
   .sound-view .rig-tracks { max-width:none; }
   .sound-view .rig-name-short { display:inline; } .sound-view .rig-name-full { display:none; }
   .sound-view .rig-hear-source { min-height:20px; padding:0 5px; font-size:10px; line-height:16px; }
-  .sound-view .rig-presets .tp-seg-option { padding:3px 7px; }
+  .sound-view .rig-presets .tp-seg-option { min-height:0; padding:2px 7px; }
+  /* Every group in the head is the same height (the strips shrink a little below 1100), so a row is as tall whichever groups share it. */
+  .sound-view .rig-head>:is(.rig-tracks,.rig-source-picker,.rig-presets,.rig-lock,.rig-drum-kit) { min-height:30px; }
   .sound-view .rig-chain { --icon-h:46px; padding:4px 12px 2px; }
   .sound-view .rig-chain-end { margin-top:calc(var(--icon-h) * .4); }
-  .sound-view .rig-main { padding-top:6px; gap:4px; }
+  .sound-view .rig-main { padding-top:6px; padding-bottom:4px; gap:4px; }
   .sound-view .rig-long { display:none; } .sound-view .rig-short { display:inline; }
   .sound-view .rig-browser-head { flex-direction:row; flex-wrap:wrap; align-items:center; padding:6px 8px; gap:4px 6px; }
   .sound-view .rig-browser-head .rig-search { flex:1 1 100px; min-width:0; }
@@ -305,6 +304,14 @@
   .sound-view .rig-messages { min-height:32px; padding:2px 12px; gap:4px 10px; }
   .sound-view .rig-preview-name { width:16ch; }
   .sound-view .rig-preview { gap:6px; }
+  /* The stage's title row stays one row at every width, so the browser appearing at 1100 or the window changing width never drops the amp by a row.
+   * The title and actions keep their size and the model strip beside them gives way (it scrolls). */
+  .sound-view .rig-stage-head { flex-wrap:nowrap; }
+  .sound-view .rig-stage-head>:is(h2,.rig-stage-place,.rig-stage-actions) { flex:none; }
+  .sound-view .rig-stage-head>.rig-field { flex:0 1 auto; min-width:0; overflow-x:auto; scrollbar-width:none; }
+  .sound-view .rig-stage-head .tp-segmented { flex-wrap:nowrap; }
+  .sound-view .rig-stage-actions { flex-wrap:nowrap; gap:4px; }
+  .sound-view .rig-stage-actions :is(.rig-button,.rig-switch) { padding-left:7px; padding-right:7px; }
 }
 /* With room across, the foot's controls stay on one line in a short window: the status gives way first. */
 @container (min-width:1100px) {

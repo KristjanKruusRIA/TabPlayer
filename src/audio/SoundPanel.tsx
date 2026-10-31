@@ -19,7 +19,13 @@ export function SoundPanel({trackId,sound,onEdit,playback,busy=false,shown=true,
   const editing=useSoundEditing({trackId,sound,onEdit,playback,busy,shown});
   const {playbackState,current,devices,error,status,fx,duplicate,syncOf,sync,order,move,movedBlock,pastePedal,clipboard,library,chosen,setChosen,name,setName,entry,confirming,setConfirming,savedSelect,closeConfirm,
     factoryChoice,setFactoryChoice,factory,factoryNote,applyFactory,previewer,previewChoice,previewLabel,showingPreview,previewSelect,choosePreview,cancelPreview,keepPreview,escapePreview,orphanPreview,first,second,save}=editing;
-  const chainRef=useRef<HTMLDivElement>(null);
+  const chainRef=useRef<HTMLDivElement>(null),panel=useRef<HTMLElement>(null);
+  // The wheel over a focused number field steps it natively, and a refused change does not put the number back; while busy the wheel is refused (React's own wheel listener is passive, so this one is native).
+  useEffect(()=>{
+    const node=panel.current;if(!node||!busy)return;
+    const refuse=(event:WheelEvent)=>{if(event.target instanceof HTMLInputElement&&event.target.type==='number')event.preventDefault();};
+    node.addEventListener('wheel',refuse,{passive:false});return()=>node.removeEventListener('wheel',refuse);
+  },[busy]);
   // A moved block's buttons move with it, which loses their focus; it returns to the same button once the new order shows,
   // or to the other one when the block reached an end of the chain.
   useEffect(()=>{
@@ -48,7 +54,7 @@ export function SoundPanel({trackId,sound,onEdit,playback,busy=false,shown=true,
       {block==='delay'&&<><label>Delay model<select aria-label={board.name('Delay model')} value={board.effects.delay.model} onChange={e=>fx(board,'delay','model',e.target.value)}><option value="digital">Digital</option><option value="tape">Tape</option><option value="analog">Analog</option></select></label><label>Delay time<select aria-label={board.name('Delay time')} value={board.effects.delay.quarterNotes} onChange={e=>fx(board,'delay','quarterNotes',Number(e.target.value))}>{delayDivisions.map(([value,name])=><option key={value} value={value}>{name}</option>)}</select></label><p className="muted">Delay times are limited to 16 seconds.</p></>}
     </BusyFieldset></details>;
 
-  return <section className="sound-panel" aria-label="Track sound"><h3>Sound</h3>
+  return <section ref={panel} className="sound-panel" aria-label="Track sound"><h3>Sound</h3>
     <SoundLock editing={editing} className="check"/>
     {percussion&&<DrumKitPicker editing={editing} className="drum-kit"/>}
     <BusyFieldset busy={busy}>

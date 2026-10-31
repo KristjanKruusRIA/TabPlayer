@@ -226,7 +226,7 @@
  * renders the same slot empty (.rig-drum-kit-reserve), so the head wraps the same for every track and changing track moves nothing. Its table is a popover
  * under the ? button, inside the kit's own box (right edges aligned, so it grows leftwards into the head). */
 .sound-view .rig-drum-kit { position:relative; display:flex; flex:none; align-items:center; gap:6px; box-sizing:border-box; width:184px; min-height:28px; margin:0 0 0 auto; }
-.sound-view .rig-drum-kit-reserve { visibility:hidden; }
+.sound-view .rig-drum-kit-reserve { display:none; visibility:hidden; }
 .sound-view .rig-kit-label { display:flex; flex:1 1 auto; flex-direction:row; align-items:center; gap:6px; min-width:0; margin:0; white-space:nowrap; font-size:11px; color:var(--tp-muted); }
 .sound-view .rig-kit-label .rig-select { flex:1 1 auto; min-width:0; }
 .sound-view .rig-kit-help { flex:none; display:inline-flex; align-items:center; justify-content:center; box-sizing:border-box; width:20px; height:20px; min-height:0; margin:0; padding:0; border:1px solid var(--tp-line-strong); border-radius:50%; background:transparent; color:var(--tp-text); font:600 12px/1 var(--tp-font-ui); }
@@ -293,6 +293,8 @@
   .sound-view .rig-hear-source { min-height:20px; padding:0 5px; font-size:10px; line-height:16px; }
   .sound-view .rig-presets .tp-seg-option { min-height:0; padding:2px 7px; }
   /* Every group in the head is the same height (the strips shrink a little below 1100), so a row is as tall whichever groups share it. */
+  /* Only here is the empty kit slot kept for a pitched track; a taller window gives a guitar track the room. */
+  .sound-view .rig-drum-kit-reserve { display:flex; }
   .sound-view .rig-head>:is(.rig-tracks,.rig-source-picker,.rig-presets,.rig-lock,.rig-drum-kit) { min-height:30px; }
   .sound-view .rig-chain { --icon-h:46px; padding:4px 12px 2px; }
   .sound-view .rig-chain-end { margin-top:calc(var(--icon-h) * .4); }

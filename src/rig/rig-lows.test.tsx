@@ -98,6 +98,10 @@ it('keeps the kit slot in the head for a pitched track, so changing track moves 
   expect(slot()).toBe(before);
   expect(head.children).toHaveLength(count);
   expect(rules('.rig-drum-kit-reserve')).toMatch(/visibility:\s*hidden/);
+  // The slot takes room only in a short window; a taller one gives a pitched track the whole head.
+  const start = css.indexOf('/* A short window: the stage wins.'), short = css.slice(start, css.indexOf('/* With room across', start));
+  expect(css.slice(0, start)).toMatch(/\.rig-drum-kit-reserve\s*\{\s*display:\s*none/);
+  expect(short).toMatch(/\.rig-drum-kit-reserve\s*\{\s*display:\s*flex/);
 });
 
 it('lays the sound lock out as a row and keeps the head groups, and the stage title row, one height at any width in a short window', () => {

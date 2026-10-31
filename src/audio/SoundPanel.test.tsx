@@ -49,6 +49,15 @@ it('allows busy rack inspection while refusing sound and output changes without 
   expect(onEdit).not.toHaveBeenCalled();expect(bridge.command).not.toHaveBeenCalled();
 });
 
+it('refuses the wheel over a number field while busy, and lets it through otherwise',()=>{
+  const wheel=()=>{const event=new WheelEvent('wheel',{bubbles:true,cancelable:true,deltaY:-100});screen.getByLabelText('amp Gain (dB)').dispatchEvent(event);return event.defaultPrevented;};
+  const sound=soundPreset('lead','green-guitar'),{rerender}=render(<SoundPanel trackId="guitar" sound={sound} onEdit={vi.fn()} busy/>);
+  fireEvent.click(screen.getByText('Amp',{exact:true}));
+  expect(wheel()).toBe(true);
+  rerender(<SoundPanel trackId="guitar" sound={sound} onEdit={vi.fn()}/>);
+  expect(wheel()).toBe(false);
+});
+
 it('does nothing on a click or change while busy, and focus stays where it was',async()=>{
   const {player,bridge}=nativePlayer(),onEdit=vi.fn(),sound=soundPreset('lead','green-guitar');
   const {rerender}=render(<SoundPanel trackId="guitar" sound={sound} onEdit={onEdit} playback={player}/>);

@@ -50,6 +50,7 @@ struct PreparedChannel {
     dsp: TrackDsp,
     gain: Gain,
     mix: ChannelMix,
+    drum_gains: [[f32; 2]; 6],
 }
 pub struct PreparedMix {
     channels: Vec<PreparedChannel>,
@@ -92,10 +93,32 @@ impl PreparedMix {
                 .unwrap_or_else(FxSettings::default);
             let mut dsp = TrackDsp::new(fx, sample_rate, MAX_TRACK_DELAY_SECONDS)?;
             dsp.set_ir_index(index);
+            let drum_gains = if let Some(kit) = &mix.drum_kit {
+                let elements = [
+                    kit.kick.unwrap_or_default(),
+                    kit.snare.unwrap_or_default(),
+                    kit.hats.unwrap_or_default(),
+                    kit.toms.unwrap_or_default(),
+                    kit.cymbals.unwrap_or_default(),
+                    kit.other.unwrap_or_default(),
+                ];
+                let any_kit_solo = elements.iter().any(|e| e.solo);
+                std::array::from_fn(|i| {
+                    let e = &elements[i];
+                    let audible = !e.mute && (!any_kit_solo || e.solo);
+                    let gain = if audible { e.gain } else { 0.0 };
+                    let left_mult = gain * if e.pan > 0.0 { 1.0 - e.pan } else { 1.0 };
+                    let right_mult = gain * if e.pan < 0.0 { 1.0 + e.pan } else { 1.0 };
+                    [left_mult, right_mult]
+                })
+            } else {
+                [[1.0, 1.0]; 6]
+            };
             channels.push(PreparedChannel {
                 dsp,
                 gain: Gain::new(&mix, !mix.mute && (!any_solo || mix.solo)),
                 mix,
+                drum_gains,
             });
         }
         let backing = settings
@@ -214,6 +237,7 @@ struct MidiAttack {
 }
 struct Track {
     synth: Option<Synthesizer>,
+    drum_synths: Option<[Synthesizer; 6]>,
     automatic: bool,
     fixed_recorded: bool,
     percussion: bool,
@@ -292,7 +316,27 @@ impl Renderer {
                 || plan.notes.iter().any(|n| {
                     n.track_id == track.id && voice_id_for_note(&plan, n, &settings).is_none()
                 });
-            let synth = if has_gm {
+            let has_drum_kit = track.percussion
+                && settings
+                    .mixes
+                    .get(&track.id)
+                    .and_then(|m| m.drum_kit.as_ref())
+                    .is_some();
+            let (synth, drum_synths) = if has_drum_kit {
+                let mut config = SynthesizerSettings::new(sample_rate as i32);
+                config.maximum_polyphony = 256;
+                config.block_size = 8;
+                config.enable_reverb_and_chorus = false;
+                let synths = std::array::from_fn(|_| {
+                    let mut synth =
+                        Synthesizer::new(&resources.sound_font, &config).expect("soundfont valid");
+                    for channel in 0..16 {
+                        synth.process_midi_message(channel, 0xc0, track.program as i32, 0);
+                    }
+                    synth
+                });
+                (None, Some(synths))
+            } else if has_gm {
                 let mut config = SynthesizerSettings::new(sample_rate as i32);
                 config.maximum_polyphony = 256;
                 config.block_size = 8;
@@ -302,12 +346,13 @@ impl Renderer {
                 for channel in 0..16 {
                     synth.process_midi_message(channel, 0xc0, track.program as i32, 0);
                 }
-                Some(synth)
+                (Some(synth), None)
             } else {
-                None
+                (None, None)
             };
             tracks.push(Track {
                 synth,
+                drum_synths,
                 automatic: settings
                     .sounds
                     .get(&track.id)
@@ -618,7 +663,25 @@ impl Renderer {
         }
     }
     fn gm_note_on(track: &mut Track, channel: u8, key: u8, velocity: u8, program: u8) {
-        if let Some(synth) = &mut track.synth {
+        if let Some(synths) = &mut track.drum_synths {
+            let elem_idx = match crate::settings::gm_kit_element(key) {
+                crate::settings::KitElement::Kick => 0,
+                crate::settings::KitElement::Snare => 1,
+                crate::settings::KitElement::Hats => 2,
+                crate::settings::KitElement::Toms => 3,
+                crate::settings::KitElement::Cymbals => 4,
+                crate::settings::KitElement::Other => 5,
+            };
+            let synth = &mut synths[elem_idx];
+            synth.process_midi_message(channel as i32, 0xc0, program as i32, 0);
+            synth.note_on(channel as i32, key as i32, velocity as i32);
+            synth.process_midi_message(
+                channel as i32,
+                0xc0,
+                track.channels[channel as usize].program as i32,
+                0,
+            );
+        } else if let Some(synth) = &mut track.synth {
             synth.process_midi_message(channel as i32, 0xc0, program as i32, 0);
             synth.note_on(channel as i32, key as i32, velocity as i32);
             synth.process_midi_message(
@@ -646,7 +709,17 @@ impl Renderer {
                 }
             }
             PlanMidiEvent::NoteOff { channel, key, .. } => {
-                if let Some(synth) = &mut track.synth {
+                if let Some(synths) = &mut track.drum_synths {
+                    let elem_idx = match crate::settings::gm_kit_element(*key) {
+                        crate::settings::KitElement::Kick => 0,
+                        crate::settings::KitElement::Snare => 1,
+                        crate::settings::KitElement::Hats => 2,
+                        crate::settings::KitElement::Toms => 3,
+                        crate::settings::KitElement::Cymbals => 4,
+                        crate::settings::KitElement::Other => 5,
+                    };
+                    synths[elem_idx].note_off(*channel as i32, *key as i32);
+                } else if let Some(synth) = &mut track.synth {
                     synth.note_off(*channel as i32, *key as i32);
                 }
             }
@@ -654,7 +727,11 @@ impl Renderer {
                 channel, program, ..
             } => {
                 track.channels[*channel as usize].program = *program;
-                if let Some(synth) = &mut track.synth {
+                if let Some(synths) = &mut track.drum_synths {
+                    for synth in synths.iter_mut() {
+                        synth.process_midi_message(*channel as i32, 0xc0, *program as i32, 0);
+                    }
+                } else if let Some(synth) = &mut track.synth {
                     synth.process_midi_message(*channel as i32, 0xc0, *program as i32, 0);
                 }
             }
@@ -688,7 +765,16 @@ impl Renderer {
                 if *controller == 6 && track.rpn_msb[c] == 0 && track.rpn_lsb[c] == 0 {
                     track.ranges[c] = (*value as f64).max(1.0);
                 }
-                if let Some(synth) = &mut track.synth {
+                if let Some(synths) = &mut track.drum_synths {
+                    for synth in synths.iter_mut() {
+                        synth.process_midi_message(
+                            *channel as i32,
+                            0xb0,
+                            *controller as i32,
+                            *value as i32,
+                        );
+                    }
+                } else if let Some(synth) = &mut track.synth {
                     synth.process_midi_message(
                         *channel as i32,
                         0xb0,
@@ -702,7 +788,11 @@ impl Renderer {
                 let wheel = (8192.0 + *value / track.ranges[*channel as usize] * 8192.0)
                     .round()
                     .clamp(0.0, 16383.0) as i32;
-                if let Some(synth) = &mut track.synth {
+                if let Some(synths) = &mut track.drum_synths {
+                    for synth in synths.iter_mut() {
+                        synth.process_midi_message(*channel as i32, 0xe0, wheel & 127, wheel >> 7);
+                    }
+                } else if let Some(synth) = &mut track.synth {
                     synth.process_midi_message(*channel as i32, 0xe0, wheel & 127, wheel >> 7);
                 }
             }
@@ -797,7 +887,16 @@ impl Renderer {
             RenderTempo::Fixed { bpm } => bpm,
         };
         for (index, track) in self.tracks.iter_mut().enumerate() {
-            if let Some(synth) = &mut track.synth {
+            if let Some(synths) = &mut track.drum_synths {
+                for (elem_idx, synth) in synths.iter_mut().enumerate() {
+                    let mut left = [0.0];
+                    let mut right = [0.0];
+                    synth.render(&mut left, &mut right);
+                    let g = self.mix.channels[index].drum_gains[elem_idx];
+                    self.scratch[index][0] += left[0] * g[0];
+                    self.scratch[index][1] += right[0] * g[1];
+                }
+            } else if let Some(synth) = &mut track.synth {
                 let mut left = [0.0];
                 let mut right = [0.0];
                 synth.render(&mut left, &mut right);
@@ -991,7 +1090,19 @@ impl Renderer {
         self.next_midi = self.plan.midi.partition_point(|m| m.tick() < tick);
         for (track_index, track) in self.tracks.iter_mut().enumerate() {
             track.channels = [MidiChannel::new(self.plan.tracks[track_index].program); 16];
-            if let Some(synth) = &mut track.synth {
+            if let Some(synths) = &mut track.drum_synths {
+                for synth in synths.iter_mut() {
+                    synth.reset();
+                    for channel in 0..16 {
+                        synth.process_midi_message(
+                            channel,
+                            0xc0,
+                            self.plan.tracks[track_index].program as i32,
+                            0,
+                        );
+                    }
+                }
+            } else if let Some(synth) = &mut track.synth {
                 synth.reset();
                 for channel in 0..16 {
                     synth.process_midi_message(
@@ -1312,7 +1423,11 @@ impl Renderer {
             }
         }
         for track in &mut self.tracks {
-            if let Some(synth) = &mut track.synth {
+            if let Some(synths) = &mut track.drum_synths {
+                for synth in synths.iter_mut() {
+                    synth.note_off_all(false);
+                }
+            } else if let Some(synth) = &mut track.synth {
                 synth.note_off_all(false);
             }
         }

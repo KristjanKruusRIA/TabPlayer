@@ -1,4 +1,4 @@
-//! Device ownership and bounded controls. Only the stream callback owns the renderer;
+﻿//! Device ownership and bounded controls. Only the stream callback owns the renderer;
 //! resource work, stream creation, status events and retired allocations run elsewhere.
 use super::{
     audition::{AuditionClip, AuditionConsumer, AuditionMixer, AuditionProducer, audition_channel},
@@ -1961,7 +1961,22 @@ impl AudioService {
         let presence_changed = backing_bytes
             .as_ref()
             .is_some_and(|bytes| bytes.is_some() != old.backing.is_some());
-        if voice_changed || map_changed || presence_changed || processing_changed {
+        let kit_changed = old.plan.tracks.iter().any(|track| {
+            if !track.percussion {
+                return false;
+            }
+            old.settings
+                .mixes
+                .get(&track.id)
+                .and_then(|m| m.drum_kit.as_ref())
+                .is_some()
+                != settings
+                    .mixes
+                    .get(&track.id)
+                    .and_then(|m| m.drum_kit.as_ref())
+                    .is_some()
+        });
+        if voice_changed || map_changed || presence_changed || processing_changed || kit_changed {
             let resources = if voice_changed {
                 Arc::new(AudioResources::load_for_requests(
                     &self.root,

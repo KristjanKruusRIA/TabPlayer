@@ -16,3 +16,5 @@ src-tauri/icons/ios/
 src-tauri/icons/StoreLogo.png
 src-tauri/icons/Square*Logo.png
 .superdesign/tmp/
+.claude/worktrees/
+.claude/settings.local.json

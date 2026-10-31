@@ -328,3 +328,28 @@ it('refuses the named hits of a pitched staff in the drum view as it refuses its
   const side=within(screen.getByRole('group',{name:'Snare hits'})).getByRole('button',{name:'side stick'});
   expect(side).toHaveAttribute('aria-disabled','true');expect(side).not.toHaveAttribute('disabled');fireEvent.click(side);expect(onEdit).not.toHaveBeenCalled();
 });
+
+it('keeps the row when the window loses focus while the row has it',()=>{
+  const {container}=show(build({percussion:true,program:0}));
+  act(()=>container.querySelector<SVGElement>('[data-drum="snare"]')!.focus());
+  const rim=within(screen.getByRole('group',{name:'Snare hits'})).getByRole('button',{name:'rim shot'});act(()=>rim.focus());
+  // Alt-Tab fires a blur with no related target while the element stays the active one.
+  fireEvent.blur(rim);expect(screen.getByRole('group',{name:'Snare hits'})).toBeInTheDocument();expect(document.activeElement).toBe(rim);
+});
+it('reserves the row\'s place so nothing moves when it appears',()=>{
+  const {container}=show(build({percussion:true,program:0}));
+  const slot=container.querySelector('.drum-hits-slot')!;expect(slot).toBeInTheDocument();expect(slot.children).toHaveLength(0);
+  act(()=>container.querySelector<SVGElement>('[data-drum="snare"]')!.focus());
+  expect(container.querySelector('.drum-hits-slot')).toBe(slot);expect(slot.children).toHaveLength(1);
+});
+it('removes through a pad only a note nobody owns, not a hit that shares its pitch',()=>{
+  const entry=(element:string)=>new model.InstrumentArticulation(element,0,20,model.MusicFontSymbol.NoteheadBlack);
+  const {container,onEdit}=show(build({percussion:true,program:0,table:[entry('Snare'),entry('Foo')],articulations:[0,1]}));
+  fireEvent.click(container.querySelector('[data-percussion-key="20"]')!);
+  expect(onEdit).toHaveBeenLastCalledWith({type:'removeNoteByIndex',target,noteIndex:1},{note:null});
+});
+it('hides a standard hit that twins one of the custom table',()=>{
+  const track=new model.Track();track.percussionArticulations=[new model.InstrumentArticulation('Snare',0,38,model.MusicFontSymbol.NoteheadBlack)];
+  const hits=instrumentHits(track,instrument('snare'));
+  expect(hits.map(hit=>hit.id)).not.toContain(38);expect(hits[0]).toMatchObject({id:0,name:'hit'});expect(hits.map(hit=>hit.name)).toEqual(['hit','side stick','rim shot','side stick 2']);
+});

@@ -1,5 +1,5 @@
 import type { model } from '@coderline/alphatab';
-import { defaultArticulation, instrumentHits, type Instrument } from './drum-kit';
+import { defaultArticulation, instrumentHits, ownerOf, type Instrument } from './drum-kit';
 import type { EditCommand } from '../edit-types';
 import { resolvePercussionArticulation } from '../editor/percussion-catalog';
 import type { BeatTarget } from '../project';
@@ -79,7 +79,7 @@ export function keyTarget(ctx: EntryContext, key: number): EntryTarget {
 /** A pad for a note outside the kit: clicking it removes the first such note. */
 export function padTarget(ctx: EntryContext, key: number, label: string): EntryTarget {
   if (!ctx.staff.isPercussion) return { name: label, action: null };
-  const present = ctx.notes.find(note => note.key === key);
+  const present = ctx.notes.find(note => note.key === key && (note.articulation === null || !ownerOf(ctx.staff.track, note.articulation)));
   return present ? { name: `Remove ${label}`, action: { command: { type: 'removeNoteByIndex', target: ctx.target, noteIndex: present.index }, follow: { note: null } } } : { name: label, action: null };
 }
 

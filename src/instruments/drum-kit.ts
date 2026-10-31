@@ -88,7 +88,11 @@ function customName(articulation:model.InstrumentArticulation) {
 /** The hits this instrument offers on a track, the track's own first, each with a name that is unique among them. */
 export function instrumentHits(track:model.Track,instrument:Instrument):InstrumentHit[] {
   const custom=track.percussionArticulations.length, seen=new Map<string,number>();
-  return percussionChoices(track).filter((choice,index,all)=>all.findIndex(other=>other.id===choice.id)===index&&ownerOf(track,choice.id)===instrument).map(choice=>{
+  const mine=percussionChoices(track).filter((choice,index,all)=>all.findIndex(other=>other.id===choice.id)===index&&ownerOf(track,choice.id)===instrument);
+  // A standard hit the track's own table already has, with the same sound, notehead and technique, would be a twin of it.
+  const look=(id:number)=>{const a=resolvePercussionArticulation(track,id);return a?`${a.outputMidiNumber}/${a.noteHeadDefault}/${a.techniqueSymbol}`:'';};
+  const own=new Set(mine.filter(choice=>choice.id<custom).map(choice=>look(choice.id)));
+  return mine.filter(choice=>choice.id<custom||!own.has(look(choice.id))).map(choice=>{
     const base=choice.id<custom?customName(track.percussionArticulations[choice.id]):labelName(choice.label), count=(seen.get(base)??0)+1;
     seen.set(base,count);return {...choice,name:count>1?`${base} ${count}`:base};
   });

@@ -23,7 +23,7 @@ import { RangePanel } from './editor/RangePanel';
 import { MeasureTransformPanel } from './editor/MeasureTransformPanel';
 import { EditingToolbar } from './editor/EditingToolbar';
 import { durationLabel } from './editor/common';
-import { displayedBpm, quarterUnit, tempoUnitKeys, tempoUnitOf } from './editor/tempo-unit';
+import { displayedBpm, shownBpm, quarterUnit, tempoUnitKeys, tempoUnitOf } from './editor/tempo-unit';
 import type { MusicSelection } from './editor/range-types';
 import './editor-panel.css';
 
@@ -178,7 +178,7 @@ export function EditorPanel({
   // The opening tempo in the note it is written in, such as 100 BPM (Dotted quarter note); the quarter-note tempo plays.
   const opening = score.masterBars[0].tempoAutomations.find(a => a.ratioPosition === 0);
   const openingTempo = opening && tempoUnitOf(opening) !== quarterUnit
-    ? t('editor.context_tempo_unit', { bpm: displayedBpm(opening), unit: t(tempoUnitKeys[tempoUnitOf(opening)]) })
+    ? t('editor.context_tempo_unit', { bpm: shownBpm(displayedBpm(opening)), unit: t(tempoUnitKeys[tempoUnitOf(opening)]) })
     : `${score.tempo} BPM`;
   const [title, setTitle] = useState(score.title);
   const [artist, setArtist] = useState(score.artist);

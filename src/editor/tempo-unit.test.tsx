@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { model, Settings } from '@coderline/alphatab';
 import { unzipSync, zipSync } from 'fflate';
+import { createHash } from 'node:crypto';
 import { buildScore, exportGp, previewEdit } from '../engine';
 import { blankProject, type EditCommand, type Project } from '../project';
 import { buildPlaybackPlan } from '../audio/plan';
@@ -152,6 +153,58 @@ describe('tempo units', () => {
     const points = scoreTemposFromSync(score, timing as never, locations as never);
     expect(points[0]).toEqual({ bar: 0, ratio: 0, bpm: 100, linear: false, unit: 3 });
     expect(points.slice(1).every(point => point.bpm === 150 && point.unit === undefined)).toBe(true);
+  });
+
+  it.each([170, 125, 155, 70, 1e-10, 66.7, 170 / 1.5, 125 / 1.5, 155 / 1.5, 70 / 1.5])('a tempo of %f dotted quarters is written and read back without rounding', bpm => {
+    const score = previewEdit(withNote(), settingsEdit([{ beat: 0, bpm, linear: false, unit: 3 }])).score;
+    const again = loadInterchangeScore(exportGp(score), new Settings());
+    const [before, after] = [score, again].map(value => value.masterBars[0].tempoAutomations[0]);
+    expect(Math.abs(after.value - before.value) / before.value).toBeLessThan(1e-12);
+    expect(tempoUnitOf(after)).toBe(3);
+    expect(() => buildPlaybackPlan(again, 1)).not.toThrow();
+  });
+
+  it('score text holding master-track and automation tags cannot move or hide the unit', () => {
+    const score = previewEdit(withNote(), settingsEdit([{ beat: 0, bpm: 100, linear: false, unit: 3 }])).score;
+    const fake = '<Automation><Type>Tempo</Type><Bar>0</Bar><Position>0</Position><Value>120 2</Value></Automation>';
+    for (const title of ['<MasterTrack></MasterTrack>', '<MasterTrack>' + fake + '</MasterTrack>', fake]) {
+      score.title = title; score.notices = title;
+      const bytes = exportGp(score), text = gpif(bytes);
+      expect(text).toContain('<Value>100 3</Value>');
+      expect(text).toContain(fake.includes(title) || title.includes(fake) ? fake : '<Value>100 3</Value>');
+      const again = loadInterchangeScore(bytes, new Settings());
+      expect(shape(again)).toEqual([[150, 3]]);
+      expect(again.title).toBe(title);
+    }
+  });
+
+  it('a project logged before units replays a file tempo as quarter notes; a new import and a marked project read the unit', () => {
+    const dotted = previewEdit(withNote(), settingsEdit([{ beat: 0, bpm: 80, linear: false, unit: 3 }])).score;
+    const bytes = exportGp(dotted);
+    const base = { kind: 'file' as const, filename: 'unit.gp', bytesBase64: Buffer.from(bytes).toString('base64'), sha256: createHash('sha256').update(bytes).digest('hex') };
+    const fresh: Project = { ...blankProject(), base };
+    expect(shape(buildScore(fresh))).toEqual([[120, 3]]);
+    const edit: EditCommand = { type: 'setNote', target, string: 6, fret: 5 };
+    const old: Project = { ...fresh, edits: [edit] };
+    expect(shape(buildScore(old))).toEqual([[120, 2]]);
+    expect(model.JsonConverter.scoreToJson(buildScore(old))).not.toContain('tabplayertempounit');
+    // A logged replaceTempoAutomations that matches the file's sounding tempo stays a no-op change of the sound it always was.
+    const replaced = buildScore({ ...fresh, edits: [{ type: 'replaceTempoAutomations', points: [{ bar: 0, ratio: 0, bpm: 120, linear: false }] }] });
+    expect(shape(replaced)).toEqual([[120, 2]]);
+    expect(shape(buildScore({ ...old, partialCapo: true }))).toEqual([[120, 3]]);
+  });
+
+  it('a non-terminating tempo is shown rounded but applied exactly', () => {
+    const score = previewEdit(withNote(), settingsEdit([{ beat: 0, bpm: 125, linear: false, unit: 3 }])).score, onEdit = vi.fn();
+    render(<MeasurePanel score={score} target={target} string={6} busy={false} onEdit={onEdit} />);
+    expect(screen.getByLabelText('Tempo 1 BPM')).toHaveValue(125);
+    const quarter = previewEdit(withNote(), settingsEdit([{ beat: 0, bpm: 125, linear: false }])).score;
+    cleanup();
+    render(<MeasurePanel score={quarter} target={target} string={6} busy={false} onEdit={onEdit} />);
+    fireEvent.change(screen.getByLabelText('Tempo 1 unit'), { target: { value: '3' } });
+    expect(screen.getByLabelText('Tempo 1 BPM')).toHaveValue(83.333);
+    fireEvent.click(screen.getByRole('button', { name: 'Apply measure settings' }));
+    expect(onEdit.mock.calls.at(-1)![0].tempos[0].bpm).toBe(125 / 1.5);
   });
 
   it('the measure panel offers units and sends the unit with a kept sounding tempo', () => {

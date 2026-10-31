@@ -9,8 +9,8 @@ import { isTempoUnit, quarterUnit, setTempoUnit, tempoUnitOf, unitQuarters, disp
  * tempo automation of that bar in the model; two at one position are told apart by that order.
  */
 const tolerance = 1e-6;
-/** The tempo text of a unit-bearing automation: nine decimals hide the division's rounding noise without moving the sounding tempo. */
-const written = (automation: model.Automation) => String(Math.round(displayedBpm(automation) * 1e9) / 1e9);
+/** The tempo text of a unit-bearing automation, unrounded so that reading it back plays the tempo that was written. */
+const written = (automation: model.Automation) => String(displayedBpm(automation));
 
 /** Gives each tempo automation the unit its GPIF value names. A value that disagrees with what alphaTab read is left as it is. */
 export function readGpifTempoUnits(score: model.Score, doc: Document): void {
@@ -33,18 +33,23 @@ export function readGpifTempoUnits(score: model.Score, doc: Document): void {
  * patched in place, which also keeps the exporter's projection of the original file valid.
  */
 export function writeGpifTempoUnits(score: model.Score, xml: string): string {
-  const start = xml.indexOf('<MasterTrack>'), end = start < 0 ? -1 : xml.indexOf('</MasterTrack>', start);
+  // Score text (title, notices) is CDATA and may hold anything, tags included; blank it out of every search and
+  // patch the original at the same offsets.
+  const masked = xml.replace(/<!\[CDATA\[[\s\S]*?\]\]>/g, text => ' '.repeat(text.length));
+  const start = masked.indexOf('<MasterTrack>'), end = start < 0 ? -1 : masked.indexOf('</MasterTrack>', start);
   if (start < 0 || end < 0) return xml;
   const tag = (block: string, name: string) => new RegExp(`<${name}>([^<]*)</${name}>`).exec(block)?.[1];
   const seen = new Map<number, number>();
-  const patched = xml.slice(start, end).replace(/<Automation>[\s\S]*?<\/Automation>/g, block => {
-    if (tag(block, 'Type') !== 'Tempo') return block;
+  let out = '', at = start;
+  for (const match of masked.slice(start, end).matchAll(/<Automation>[\s\S]*?<\/Automation>/g)) {
+    const from = start + match.index, to = from + match[0].length, block = xml.slice(from, to);
+    if (tag(block, 'Type') !== 'Tempo') continue;
     const bar = Number(tag(block, 'Bar')), position = Number(tag(block, 'Position')), ordinal = seen.get(bar) ?? 0;
     seen.set(bar, ordinal + 1);
     const automation = score.masterBars[bar]?.tempoAutomations[ordinal];
-    if (!automation || automation.ratioPosition !== position) return block;
-    const unit = tempoUnitOf(automation);
-    return unit === quarterUnit ? block : block.replace(/<Value>[^<]*<\/Value>/, `<Value>${written(automation)} ${unit}</Value>`);
-  });
-  return xml.slice(0, start) + patched + xml.slice(end);
+    if (!automation || automation.ratioPosition !== position || tempoUnitOf(automation) === quarterUnit) continue;
+    out += xml.slice(at, from) + block.replace(/<Value>[^<]*<\/Value>/, `<Value>${written(automation)} ${tempoUnitOf(automation)}</Value>`);
+    at = to;
+  }
+  return xml.slice(0, start) + out + xml.slice(at);
 }

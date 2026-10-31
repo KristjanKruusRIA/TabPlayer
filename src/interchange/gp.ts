@@ -85,7 +85,8 @@ export function loadInterchangeScore(bytes:Uint8Array,settings:Settings,partialC
   readGpifHarmony(score,doc);
   readGpifScaleDiagrams(score,doc);
   readGpifPartialCapo(score,doc,partialCapo);
-  readGpifTempoUnits(score,doc);
+  // Gated with the partial capo: projects logged before units replay a file's tempo as quarter notes, as they did.
+  if(partialCapo)readGpifTempoUnits(score,doc);
   orderedTracks(doc).forEach((node,index)=>{
     const track=score.tracks[index];if(!node||!track)return;
     const transpose=node.querySelector(':scope > Transpose');

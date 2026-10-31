@@ -1,3 +1,4 @@
+import { useI18n } from '../i18n';
 import {memo,useCallback,useLayoutEffect,useMemo,useRef,useState} from 'react';
 import type {KeyboardEvent} from 'react';
 import type {BeatTarget} from '../project';
@@ -18,12 +19,13 @@ interface GridContentProps {
   onFocus:(position:Position)=>void;onSelect:(track:number,bar:number)=>void;
 }
 const GridContent=memo(function GridContent({model,targetTrack,targetBar,focused,columns,rows,onFocus,onSelect}:GridContentProps){
+  const { t } = useI18n();
   const bars=Array.from({length:columns.last-columns.first},(_,index)=>columns.first+index);
   const tracks=Array.from({length:rows.last-rows.first},(_,index)=>rows.first+index);
   if(!tracks.includes(focused.track))tracks.push(focused.track);
   return <>
     <div className="score-overview-ruler" role="row" aria-rowindex={1}>
-      <div className="score-overview-corner" role="columnheader">Track / measure</div>
+      <div className="score-overview-corner" role="columnheader">{t('overview.track_measure')}</div>
       {bars.map(bar=>{
         const section=model.sections.find(section=>section.bar===bar);
         return <div key={bar} role="columnheader" aria-colindex={bar+2} aria-label={`Measure ${bar+1}${section?`, ${section.text}`:''}`}
@@ -54,6 +56,7 @@ const GridContent=memo(function GridContent({model,targetTrack,targetBar,focused
 });
 
 export function ScoreOverview({model,target,playbackBar,onSelect,onExit}:ScoreOverviewProps) {
+  const { t } = useI18n();
   const grid=useRef<HTMLDivElement>(null),pendingFocus=useRef(false);
   const callbacks=useRef({onSelect,onExit});callbacks.current={onSelect,onExit};
   const [retainedFocus,setFocused]=useState<Position>(()=>({track:Math.max(0,model.tracks.findIndex(track=>track.index===target.track)),bar:Math.min(target.bar,model.barCount-1)}));
@@ -102,7 +105,7 @@ export function ScoreOverview({model,target,playbackBar,onSelect,onExit}:ScoreOv
     pendingFocus.current=true;focusPosition(next);readViewport();
   }
   const playing=playbackBar!==null&&Number.isInteger(playbackBar)&&playbackBar>=0&&playbackBar<model.barCount;
-  return <div ref={grid} role="grid" aria-label="Written measure overview" aria-rowcount={model.tracks.length+1} aria-colcount={model.barCount+1}
+  return <div ref={grid} role="grid" aria-label={t('overview.written_measure_overview')} aria-rowcount={model.tracks.length+1} aria-colcount={model.barCount+1}
     className="score-overview" onScroll={readViewport} onKeyDown={keyDown}>
     <div className="score-overview-content" style={{width:nameWidth+model.barCount*cellSize,height:(model.tracks.length+1)*cellSize}}>
       <GridContent model={model} targetTrack={target.track} targetBar={target.bar} focused={focused} columns={columns} rows={rows}

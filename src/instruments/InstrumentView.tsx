@@ -1,3 +1,4 @@
+import { useI18n } from '../i18n';
 import { useMemo, useRef, useState, type FocusEvent as ReactFocusEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
 import type { model } from '@coderline/alphatab';
 import type { PlanNote } from '../audio/types';
@@ -73,8 +74,9 @@ const percussionNames = [
 const percussionName = (key: number) => percussionNames[key-35] ?? `Percussion ${formatPitch(key)} (${key})`;
 
 function Fretboard({staff, notes, mode, leftHanded, entry}: {staff: model.Staff; notes: readonly ShownNote[]; mode: 'guitar' | 'bass'; leftHanded: boolean; entry?: EntryState}) {
+  const { t } = useI18n();
   const rove=useRoving();
-  if (!staff.tuning.length) return <p className="instrument-empty">No string tuning on this staff. Choose Keys to view its pitches.</p>;
+  if (!staff.tuning.length) return <p className="instrument-empty">{t('instruments.no_tuning')}</p>;
   const order = entry ? staff.tuning.flatMap((_,index)=>Array.from({length:Math.max(24,...entry.ctx.notes.map(note=>Math.ceil(note.fret)))+1},(_,fret)=>`${staff.tuning.length-index}/${fret}`)) : [];
   const start = `${entry?.string && entry.string >= 1 && entry.string <= staff.tuning.length ? entry.string : staff.tuning.length}/0`, roving = rove(order, start);
   const positions: FretPosition[] = [];
@@ -91,7 +93,7 @@ function Fretboard({staff, notes, mode, leftHanded, entry}: {staff: model.Staff;
   }
   const maxFret = Math.max(24,...positions.map(p => Math.ceil(p.fret))), {left,top,row,width,boundary,position} = neckGeometry(staff.tuning.length,mode,maxFret);
   const openKeys = staff.tuning.map((_,index)=>formatPitch(openStringKey(staff,staff.tuning.length-index))).join(',');
-  const name=`${mode === 'bass' ? 'Bass' : 'Guitar'} fretboard${leftHanded ? ', left-handed' : ''}`;
+  const name=`${mode === 'bass' ? t('instruments.fretboard_bass') : t('instruments.fretboard_guitar')}${leftHanded ? t('instruments.left_handed_suffix') : ''}`;
   return <>
     <p className="instrument-detail">Staff {staff.index+1} · {staff.tuning.length} strings · Capo {staff.capo}{staff.capo ? ' · fret numbers relative to capo' : ''}{describePartialCapo(getPartialCapo(staff)) ? ` · ${describePartialCapo(getPartialCapo(staff))} · fret numbers on those strings relative to it` : ''}{getBanjoDrone(staff) ? ` · ${describeBanjoDrone(getBanjoDrone(staff))} · string 1 fret numbers follow the neck` : ''} · Open {staff.tuning.map((_,index)=>formatPitch(openStringKey(staff,staff.tuning.length-index))).join(' ')}</p>
     <div className="instrument-canvas instrument-fretboard"><svg role={entry?'group':'img'} aria-label={name} viewBox={`0 0 ${width} 226`}>
@@ -124,6 +126,7 @@ function Fretboard({staff, notes, mode, leftHanded, entry}: {staff: model.Staff;
 }
 
 function Keyboard({staves,notes,compact,entry}: {staves: readonly model.Staff[]; notes: readonly ShownNote[]; compact:boolean; entry?: EntryState}) {
+  const { t } = useI18n();
   const rove=useRoving();
   const sourceRange = useMemo(()=>{
     let low=128,high=-1;
@@ -142,7 +145,7 @@ function Keyboard({staves,notes,compact,entry}: {staves: readonly model.Staff[];
   const order = [...white,...black].map(item=>item.key).sort((a,b)=>a-b).map(String), roving = rove(order, order.includes('60') ? '60' : order[0]);
   const props = (key: number) => entry ? {className: 'entry-target', ...entryProps(roving, String(key), entry, keyTarget(entry.ctx, key), (name, from) => stepKeys(order, name, from, ['ArrowRight','ArrowUp'], ['ArrowLeft','ArrowDown']))} : {};
   const total=white.length*keyWidth;
-  return <div className="instrument-canvas instrument-keyboard"><svg role={entry?'group':'img'} aria-label="Keyboard" viewBox={`0 0 ${total} 125`} style={{minWidth:total*(compact?80/125:1)}}>
+  return <div className="instrument-canvas instrument-keyboard"><svg role={entry?'group':'img'} aria-label={t('instruments.keyboard')} viewBox={`0 0 ${total} 125`} style={{minWidth:total*(compact?80/125:1)}}>
     <title>{`Keyboard · sounding pitches ${formatPitch(low)} to ${formatPitch(high)}`}</title>
     {/* The keys are one memoised layer; each key below only holds its hit area, its lit mark and its label. */}
     <KeyboardArt low={low} high={high}/>
@@ -152,6 +155,7 @@ function Keyboard({staves,notes,compact,entry}: {staves: readonly model.Staff[];
 }
 
 function DrumKit({notes, entry}: {notes: readonly ShownNote[]; entry?: EntryState}) {
+  const { t } = useI18n();
   const rove=useRoving(), [focused,setFocused]=useState<string|null>(null);
   // Edit mode lights the instrument that owns each hit; the pitch only decides for notes without an articulation, as in playback.
   const struck = notes.filter(note=>note.hit!=null), keys = new Set(notes.filter(note=>note.hit==null).map(note=>note.key)), kitKeys = new Set([...drumPieces,...percussionInstruments].flatMap(piece=>piece.keys));
@@ -166,7 +170,7 @@ function DrumKit({notes, entry}: {notes: readonly ShownNote[]; entry?: EntryStat
   const focusOut = (event: ReactFocusEvent) => { if (document.activeElement === event.target) return; const to = event.relatedTarget as Element | null, view = event.currentTarget.closest('.instrument-view'); if (!to || !view?.contains(to) || !to.closest('[data-entry-target],.drum-hits')) setFocused(null); };
   const struckNames = (item: Instrument) => [...item.keys.filter(key=>keys.has(key)).map(percussionName),...(entry ? struck.filter(note=>owners.get(note)===item).map(note=>instrumentHits(entry.ctx.staff.track, item).find(hit=>hit.id===note.hit)?.name ?? percussionName(note.key)) : [])];
   return <>
-    <div className="instrument-canvas instrument-drums" onFocus={focusIn} onBlur={focusOut}><svg role={entry?'group':'img'} aria-label="Drum kit" viewBox="0 0 860 300">
+    <div className="instrument-canvas instrument-drums" onFocus={focusIn} onBlur={focusOut}><svg role={entry?'group':'img'} aria-label={t('instruments.drum_kit')} viewBox="0 0 860 300">
       <title>Drum kit · active percussion</title>
       {/* The kit is one memoised layer; each piece below only holds its hit area, its lit mark and its name when struck. */}
       <DrumsArt pieces={drumPieces}/>
@@ -183,13 +187,14 @@ function DrumKit({notes, entry}: {notes: readonly ShownNote[]; entry?: EntryStat
         </g>;
       })}
     </svg></div>
-    <div className="instrument-percussion" role="group" aria-label="Percussion" onFocus={focusIn} onBlur={focusOut}>{percussionInstruments.map(item=>{const on=lit(item);return <div key={item.id} className={`percussion-item${on?' active':''}${entry?' entry-target':''}`} data-percussion={item.id} data-active={on} title={item.label} {...(entry?entryProps(roving, item.id, entry, instrumentTarget(entry.ctx, item), move):{})}><PercussionArt id={item.id}/><span>{item.label}</span></div>;})}</div>
+    <div className="instrument-percussion" role="group" aria-label={t('instruments.percussion')} onFocus={focusIn} onBlur={focusOut}>{percussionInstruments.map(item=>{const on=lit(item);return <div key={item.id} className={`percussion-item${on?' active':''}${entry?' entry-target':''}`} data-percussion={item.id} data-active={on} title={item.label} {...(entry?entryProps(roving, item.id, entry, instrumentTarget(entry.ctx, item), move):{})}><PercussionArt id={item.id}/><span>{item.label}</span></div>;})}</div>
     {entry ? <div className="drum-hits-slot">{chosen&&hits.length>1 ? <div className="drum-hits" role="group" aria-label={`${chosen.label} hits`} onFocus={focusIn} onBlur={focusOut} onMouseDown={event=>event.preventDefault()}>{hits.map(hit=>{const pressed=entry.ctx.notes.some(note=>note.articulation===hit.id),target=hitTarget(entry.ctx,hit.id,hit.label);return <button type="button" key={hit.id} aria-pressed={pressed} {...busyGuard<HTMLButtonElement>({unavailable:!!entry.disabled||!target.action,onClick:()=>{if(target.action)entry.send(target.action);}})}>{hit.name}</button>;})}</div> : null}</div> : null}
-    {auxiliary.length>0 ? <div className="instrument-percussion-pads" aria-label="Additional percussion" onFocus={focusIn} onBlur={focusOut}>{auxiliary.map(key=><span className={entry?'percussion-pad entry-target':'percussion-pad'} data-percussion-key={key} data-active="true" key={key} {...(entry?entryProps(roving, `pad/${key}`, entry, padTarget(entry.ctx, key, percussionName(key)), move):{})}>{percussionName(key)}</span>)}</div> : null}
+    {auxiliary.length>0 ? <div className="instrument-percussion-pads" aria-label={t('instruments.additional_percussion')} onFocus={focusIn} onBlur={focusOut}>{auxiliary.map(key=><span className={entry?'percussion-pad entry-target':'percussion-pad'} data-percussion-key={key} data-active="true" key={key} {...(entry?entryProps(roving, `pad/${key}`, entry, padTarget(entry.ctx, key, percussionName(key)), move):{})}>{percussionName(key)}</span>)}</div> : null}
   </>;
 }
 
 export function InstrumentView({score,track:trackIndex,staff:staffIndex,notes,caption='Sounding notes',empty='No notes sounding',controls,entry:entryProps_}: InstrumentViewProps) {
+  const { t } = useI18n();
   const [requestedMode,setMode] = useState<InstrumentMode>('auto'), [neckChoice,setNeckChoice] = useState<'guitar'|'bass'|null>(null), track = score.tracks[trackIndex], staff = track.staves[staffIndex];
   const [expanded,setExpanded] = useState(false), [leftHanded,setLeftHanded] = useState(storedHandedness);
   const handedness = (left: boolean) => { setLeftHanded(left); try { localStorage.setItem(handednessKey, left ? 'left' : 'right'); } catch { /* the choice still applies to this view */ } };
@@ -207,11 +212,11 @@ export function InstrumentView({score,track:trackIndex,staff:staffIndex,notes,ca
   })();
   const entryNow = entry && entryBeatNow ? entry.ctx.notes.map((note):ShownNote=>({id: note.id, key: note.key, source: {target: entry.ctx.target, string: note.string}, hit: note.articulation})) : null;
   const active: readonly ShownNote[] = entryNow ?? (entry ? [] : notes.filter(note=>note.source.target.track===trackIndex && (mode!=='both' || note.source.target.staff===staffIndex)));
-  const kindHint = !entry || entry.disabled ? null : staff.isPercussion && (mode==='keys'||mode==='both') ? 'The keyboard cannot enter notes on a percussion staff' : !staff.isPercussion && mode==='drums' ? 'The drum kit cannot enter notes on a pitched or fretted staff' : null;
+  const kindHint = !entry || entry.disabled ? null : staff.isPercussion && (mode==='keys'||mode==='both') ? t('instruments.cant_enter_keys_on_perc') : !staff.isPercussion && mode==='drums' ? t('instruments.cant_enter_drums_on_pitched') : null;
   const staves = useMemo(()=>mode==='both' ? [staff] : track.staves,[mode,staff,track]);
   const labels = [...new Set(active.map(note=>mode!=='drums'?formatPitch(note.key):note.hit!=null?ownerOf(track,note.hit)?.label??percussionName(note.key):percussionName(note.key)))], hint = entry?.disabled ?? kindHint;
   return <div className="instrument-view" data-size={expanded?'expanded':'compact'}>
-    <div className="instrument-header"><h3>{track.name}<span> · {modeNames[mode]}</span></h3><div className="instrument-controls">{controls}<label>Instrument view mode<select value={requestedMode==='both'&&staff.isPercussion?'auto':requestedMode} onChange={event=>{const value=event.target.value as InstrumentMode;setMode(value);if(value==='guitar'||value==='bass')setNeckChoice(value);}}><option value="auto">Auto</option><option value="guitar">Guitar</option><option value="bass">Bass</option><option value="drums">Drums</option><option value="keys">Keys</option><option value="both" disabled={staff.isPercussion}>Neck + keys</option></select></label>{mode==='guitar'||mode==='bass'||mode==='both' ? <label className="instrument-check"><input type="checkbox" checked={leftHanded} onChange={event=>handedness(event.target.checked)}/>Left-handed</label> : null}<button type="button" aria-label={expanded?'Compact instrument view':'Expand instrument view'} aria-expanded={expanded} onClick={()=>setExpanded(value=>!value)}>{expanded?'Compact':'Expand'}</button></div></div>
+    <div className="instrument-header"><h3>{track.name}<span> · {modeNames[mode]}</span></h3><div className="instrument-controls">{controls}<label>{t('instruments.view_mode')}<select value={requestedMode==='both'&&staff.isPercussion?'auto':requestedMode} onChange={event=>{const value=event.target.value as InstrumentMode;setMode(value);if(value==='guitar'||value==='bass')setNeckChoice(value);}}><option value="auto">{t('instruments.mode_auto')}</option><option value="guitar">{t('instruments.mode_guitar')}</option><option value="bass">{t('instruments.mode_bass')}</option><option value="drums">{t('instruments.mode_drums')}</option><option value="keys">{t('instruments.mode_keys')}</option><option value="both" disabled={staff.isPercussion}>{t('instruments.mode_both')}</option></select></label>{mode==='guitar'||mode==='bass'||mode==='both' ? <label className="instrument-check"><input type="checkbox" checked={leftHanded} onChange={event=>handedness(event.target.checked)}/>{t('instruments.left_handed')}</label> : null}<button type="button" aria-label={expanded?t('instruments.compact_view'):t('instruments.expand_view')} aria-expanded={expanded} onClick={()=>setExpanded(value=>!value)}>{expanded?t('instruments.compact'):t('instruments.expand')}</button></div></div>
     {mode==='both' ? <><Fretboard staff={staff} notes={active} mode={neck} leftHanded={leftHanded} entry={entry}/><Keyboard staves={staves} notes={active} compact={!expanded} entry={entry}/></> : mode==='guitar'||mode==='bass' ? <Fretboard staff={staff} notes={active} mode={mode} leftHanded={leftHanded} entry={entry}/> : mode==='drums' ? <DrumKit notes={active} entry={entry}/> : <Keyboard staves={staves} notes={active} compact={!expanded} entry={entry}/>}
     {entry&&hint ? <p className="instrument-entry-hint" role="status">{hint}</p> : null}
     <div className="instrument-playing" role="group" aria-label={caption}>{labels.length ? labels.map(label=><span className="instrument-note" key={label}>{label}</span>) : <span className="instrument-empty">{empty}</span>}</div>

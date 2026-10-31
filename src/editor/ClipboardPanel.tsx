@@ -1,3 +1,4 @@
+import { useI18n } from '../i18n';
 import { useEffect,useMemo,useState } from 'react';
 import { musicClipSelection,readMusicClip } from './clipboard-source';
 import type { ClipboardMode,ClipboardPanelProps,MusicClip,PasteFilters,PasteOptions } from './clipboard-types';
@@ -18,6 +19,7 @@ function metadata(clip:MusicClip|null):{value:ClipMetadata|null;error:string} {
 }
 
 export function ClipboardPanel({score,target,selection,clip,busy,locked=false,diagramsDefault=true,onCopy,onCut,onPaste}:ClipboardPanelProps):React.JSX.Element {
+  const { t } = useI18n();
   const payload=useMemo(()=>metadata(clip),[clip]),source=payload.value;
   const [mode,setMode]=useState<ClipboardMode>('singleTrack'),[count,setCount]=useState('1'),[filters,setFilters]=useState(()=>defaults(source?.mode==='multiTrack',diagramsDefault)),[mappings,setMappings]=useState<MappingDraft[]>([]),[error,setError]=useState('');
   useEffect(()=>{
@@ -30,7 +32,7 @@ export function ClipboardPanel({score,target,selection,clip,busy,locked=false,di
   // Changing the preference only moves the diagram filter; the repeat count and mappings being typed stay.
   useEffect(()=>{setFilters(old=>old.diagrams===diagramsDefault?old:{...old,diagrams:diagramsDefault});},[diagramsDefault]);
   const scope=useMemo(()=>{
-    if(!selection)return {text:'Select music to copy or cut.',error:''};
+    if(!selection)return {text:t('editor.select_music_to_copy'),error:''};
     try {
       const selected=musicClipSelection(score,selection,mode);
       if(selected.kind==='bars')return {text:`Measures ${selected.firstBar+1}–${selected.lastBar+1} · Tracks ${selected.tracks.map(track=>track+1).join(', ')}`,error:''};
@@ -57,22 +59,22 @@ export function ClipboardPanel({score,target,selection,clip,busy,locked=false,di
     onPaste(options);
   });
   const visibleError=payload.error||error||scope.error;
-  return <details className="editor-section"><summary>Musical clipboard</summary><fieldset disabled={busy}>
-    <label>Copy/cut mode<select value={mode} onChange={event=>{setMode(event.target.value as ClipboardMode);setError('');}}><option value="singleTrack">Single track</option><option value="multiTrack">Multitrack</option></select></label>
+  return <details className="editor-section"><summary>{t('editor.musical_clipboard')}</summary><fieldset disabled={busy}>
+    <label>{t('editor.copy_cut_mode')}<select value={mode} onChange={event=>{setMode(event.target.value as ClipboardMode);setError('');}}><option value="singleTrack">{t('editor.mode_single_track')}</option><option value="multiTrack">{t('editor.mode_multi_track')}</option></select></label>
     <p>{scope.text}</p>
-    {mode==='multiTrack'?<><p>Multitrack copy expands to complete measures and all staves and voices of the selected tracks.</p><p>Cut removes these measures from every track, including unselected tracks.</p></>:<p>Single-track phrases require one voice lane. Complete bars include all staves and voices of that track.</p>}
-    <div className="editor-actions"><button type="button" disabled={!selection||!!scope.error} onClick={()=>{if(selection&&!scope.error&&!busy)try{onCopy(mode);setError('');}catch(reason){setError(reason instanceof Error?reason.message:String(reason));}}}>Copy music</button><button type="button" disabled={locked||!selection||!!scope.error} onClick={()=>selection&&!scope.error&&action(()=>onCut(mode))}>Cut music</button></div>
+    {mode==='multiTrack'?<><p>{t('editor.clipboard_multi_hint')}</p><p>{t('editor.clipboard_multi_cut_hint')}</p></>:<p>{t('editor.clipboard_single_hint')}</p>}
+    <div className="editor-actions"><button type="button" disabled={!selection||!!scope.error} onClick={()=>{if(selection&&!scope.error&&!busy)try{onCopy(mode);setError('');}catch(reason){setError(reason instanceof Error?reason.message:String(reason));}}}>{t('editor.copy_music')}</button><button type="button" disabled={locked||!selection||!!scope.error} onClick={()=>selection&&!scope.error&&action(()=>onCut(mode))}>{t('editor.cut_music')}</button></div>
     {source?<>
       <p>{source.kind==='phrase'?`Phrase at the current beat · Measure ${target.bar+1}, beat ${target.beat+1}`:`Complete bars inserted before measure ${target.bar+1}`}</p>
-      <p>Phrases fill a rest or empty suffix in one voice. Complete bars insert globally; other tracks receive empty bars. Unsupported musical contexts are rejected before editing.</p>
+      <p>{t('editor.paste_context_hint')}</p>
       {source.tracks.map((track,sourceTrack)=><fieldset key={sourceTrack}><legend>Copied track {sourceTrack+1}: {track.name||'Untitled'}</legend>
-        <label>Destination track for copied track {sourceTrack+1}<select value={mappings[sourceTrack]?.track??''} disabled={source.kind==='phrase'} onChange={event=>{const destination=event.target.value;setMappings(value=>value.map((mapping,index)=>index===sourceTrack?{...mapping,track:destination}:mapping));}}><option value="">Choose a track</option>{score.tracks.map((track,index)=><option key={index} value={index}>Track {index+1}: {track.name||'Untitled'}</option>)}</select></label>
-        {track.voices.map((_,sourceStaff)=><label key={sourceStaff}>Destination staff for copied track {sourceTrack+1}, staff {sourceStaff+1}<select value={mappings[sourceTrack]?.staffMap[sourceStaff]??''} disabled={source.kind==='phrase'} onChange={event=>{const staff=event.target.value;setMappings(value=>value.map((mapping,index)=>index===sourceTrack?{...mapping,staffMap:mapping.staffMap.map((value,index)=>index===sourceStaff?staff:value)}:mapping));}}><option value="">Choose a staff</option>{score.tracks[numeric(mappings[sourceTrack]?.track??'')]?.staves.map((_,index)=><option key={index} value={index}>Staff {index+1}</option>)}</select></label>)}
+        <label>Destination track for copied track {sourceTrack+1}<select value={mappings[sourceTrack]?.track??''} disabled={source.kind==='phrase'} onChange={event=>{const destination=event.target.value;setMappings(value=>value.map((mapping,index)=>index===sourceTrack?{...mapping,track:destination}:mapping));}}><option value="">{t('editor.choose_a_track')}</option>{score.tracks.map((track,index)=><option key={index} value={index}>Track {index+1}: {track.name||'Untitled'}</option>)}</select></label>
+        {track.voices.map((_,sourceStaff)=><label key={sourceStaff}>Destination staff for copied track {sourceTrack+1}, staff {sourceStaff+1}<select value={mappings[sourceTrack]?.staffMap[sourceStaff]??''} disabled={source.kind==='phrase'} onChange={event=>{const staff=event.target.value;setMappings(value=>value.map((mapping,index)=>index===sourceTrack?{...mapping,staffMap:mapping.staffMap.map((value,index)=>index===sourceStaff?staff:value)}:mapping));}}><option value="">{t('editor.choose_a_staff')}</option>{score.tracks[numeric(mappings[sourceTrack]?.track??'')]?.staves.map((_,index)=><option key={index} value={index}>Staff {index+1}</option>)}</select></label>)}
       </fieldset>)}
-      <label>Paste repetitions<input type="number" min={1} max={1000} step={1} value={count} onChange={event=>setCount(event.target.value)}/></label>
-      <fieldset><legend>Paste special</legend>{filterLabels.map(([key,label])=><label className="check" key={key}><input type="checkbox" checked={filters[key]} disabled={source.mode==='singleTrack'&&(key==='masterAutomations'||key==='sections')} onChange={event=>{const enabled=event.target.checked;setFilters(value=>({...value,[key]:enabled}));}}/>{label}</label>)}</fieldset>
-    </>:!payload.error&&<p>The musical clipboard is empty.</p>}
-    <button type="button" disabled={locked||!source} onClick={paste}>Paste music</button>
+      <label>{t('editor.paste_repetitions')}<input type="number" min={1} max={1000} step={1} value={count} onChange={event=>setCount(event.target.value)}/></label>
+      <fieldset><legend>{t('editor.paste_special')}</legend>{filterLabels.map(([key,label])=><label className="check" key={key}><input type="checkbox" checked={filters[key]} disabled={source.mode==='singleTrack'&&(key==='masterAutomations'||key==='sections')} onChange={event=>{const enabled=event.target.checked;setFilters(value=>({...value,[key]:enabled}));}}/>{label}</label>)}</fieldset>
+    </>:!payload.error&&<p>{t('editor.clipboard_empty')}</p>}
+    <button type="button" disabled={locked||!source} onClick={paste}>{t('editor.paste_music')}</button>
     {visibleError&&<p role="alert">{visibleError}</p>}
   </fieldset></details>;
 }

@@ -1,3 +1,4 @@
+import { useI18n } from './i18n';
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { model } from '@coderline/alphatab';
 import { describeSelection } from './engine';
@@ -86,6 +87,7 @@ export function EditorPanel({
   contextScope?: InspectorContextScope;
   onContextScopeChange?: (scope: InspectorContextScope) => void;
 }) {
+  const { t } = useI18n();
   const busy = controlsBusy || locked;
   const id = useId();
   const editTask = useRef<HTMLDetailsElement>(null);
@@ -113,11 +115,11 @@ export function EditorPanel({
 
   const selectContextScope = (scope: InspectorContextScope) => {
     setContextScope(scope);
-    if (scope === 'note') openSummaryByText('Notes & techniques');
-    else if (scope === 'beat') openSummaryByText('Beat notation');
-    else if (scope === 'measure') openSummaryByText('Measure & notation');
-    else if (scope === 'staff') openSummaryByText('Staff, voices & layout');
-    else if (scope === 'selection') openSummaryByText('Music selection');
+    if (scope === 'note') openSummaryByText(t('editor.notes_and_techniques'));
+    else if (scope === 'beat') openSummaryByText(t('editor.beat_notation'));
+    else if (scope === 'measure') openSummaryByText(t('editor.measure_and_notation'));
+    else if (scope === 'staff') openSummaryByText(t('editor.staff_voices_layout'));
+    else if (scope === 'selection') openSummaryByText(t('editor.music_selection'));
   };
 
   useEffect(() => {
@@ -219,29 +221,29 @@ export function EditorPanel({
   return (
     <aside className="inspector">
       <header className="inspector-heading">
-        <h2>Inspector</h2>
-        <p className="inspector-location" aria-label="Editing location">
+        <h2>{t('editor.inspector_title')}</h2>
+        <p className="inspector-location" aria-label={t('editor.editing_location')}>
           {score.tracks[target.track].name || `Track ${target.track + 1}`} · Measure {target.bar + 1} · Beat {target.beat + 1}
           <span>
             Staff {target.staff + 1} · Voice {target.voice + 1}
             {indexed ? (noteIndex === null ? ' · No note selected' : ` · Note ${noteIndex + 1}`) : ` · String ${string}`}
           </span>
         </p>
-        <nav aria-label="Inspector tasks">
+        <nav aria-label={t('editor.inspector_tasks')}>
           <button aria-controls={`${id}-edit`} onClick={() => openTask(editTask.current)}>
-            Edit
+            {t('editor.task_edit')}
           </button>
           <button aria-controls={`${id}-practice`} onClick={() => openTask(practiceTask.current)}>
-            Practice
+            {t('editor.task_practice')}
           </button>
           <button aria-controls={`${id}-presentation`} onClick={() => openTask(presentationTask.current)}>
-            Presentation
+            {t('editor.task_presentation')}
           </button>
         </nav>
       </header>
-      <section aria-label="Edit tools">
+      <section aria-label={t('editor.edit_tools')}>
         <details className="inspector-task" id={`${id}-edit`} ref={editTask} open>
-          <summary>Edit</summary>
+          <summary>{t('editor.task_edit')}</summary>
           <div ref={editBodyRef} className="tp-inspector-edit-body">
             <EditingToolbar
               score={score}
@@ -258,7 +260,7 @@ export function EditorPanel({
               onEdit={onEdit}
             />
 
-            <div className="tp-context-card" role="region" aria-label="Selection context">
+            <div className="tp-context-card" role="region" aria-label={t('editor.selection_context')}>
               <div className="tp-context-summary">
                 <span className="tp-context-primary">{selectionSummary}</span>
                 <span className="tp-context-meta">
@@ -276,7 +278,9 @@ export function EditorPanel({
                 </div>
               )}
               <div className="tp-context-filter" role="group" aria-label="Inspector context">
-                {CONTEXT_SCOPES.map(([scope, label]) => (
+                {CONTEXT_SCOPES.map(([scope]) => {
+                  const labels: Record<InspectorContextScope, string> = { all: t('editor.scope_all'), note: t('editor.scope_note'), beat: t('editor.scope_beat'), measure: t('editor.scope_measure'), staff: t('editor.scope_staff'), selection: t('editor.scope_selection') };
+                  return (
                   <button
                     key={scope}
                     type="button"
@@ -284,23 +288,23 @@ export function EditorPanel({
                     aria-pressed={contextScope === scope}
                     onClick={() => selectContextScope(scope)}
                   >
-                    {label}
+                    {labels[scope]}
                   </button>
-                ))}
+                );})}
               </div>
             </div>
 
             <fieldset disabled={controlsBusy}>
               <div className="pair" hidden={!showSection(['note', 'beat', 'measure'])}>
                 <IndexInput
-                  label="Measure"
+                  label={t('editor.measure')}
                   value={target.bar + 1}
                   min={1}
                   max={score.masterBars.length}
                   onValue={value => onSelect({ ...target, bar: value - 1, beat: 0 })}
                 />
                 <IndexInput
-                  label="Beat"
+                  label={t('editor.beat')}
                   value={target.beat + 1}
                   min={1}
                   max={Math.max(1, voice.beats.length)}
@@ -309,7 +313,7 @@ export function EditorPanel({
               </div>
               <div className="pair" hidden={!showSection(['staff', 'note'])}>
                 <label>
-                  Staff
+                  {t('editor.staff')}
                   <select
                     value={target.staff}
                     onChange={e => onSelect({ ...target, staff: Number(e.target.value), voice: 0, beat: 0 })}
@@ -322,7 +326,7 @@ export function EditorPanel({
                   </select>
                 </label>
                 <label>
-                  Voice
+                  {t('editor.voice')}
                   <select
                     value={target.voice}
                     onChange={e => onSelect({ ...target, voice: Number(e.target.value), beat: 0 })}
@@ -349,7 +353,7 @@ export function EditorPanel({
                 ) : (
                   <div className="pair">
                     <label>
-                      String
+                      {t('editor.string')}
                       <select
                         value={string}
                         disabled={!staff.tuning.length}
@@ -363,7 +367,7 @@ export function EditorPanel({
                       </select>
                     </label>
                     <label>
-                      Fret
+                      {t('editor.fret')}
                       <input type="number" min={0} max={127} value={fret} onChange={e => onFret(Number(e.target.value))} />
                     </label>
                   </div>
@@ -387,13 +391,13 @@ export function EditorPanel({
                         Remove note
                       </button>
                     </div>
-                    <p className="muted">Add notes on different strings of this beat to make a chord.</p>
+                    <p className="muted">{t('editor.chord_hint')}</p>
                   </div>
                 )}
                 <div hidden={!showSection(['beat', 'note'])}>
                   <div className="pair">
                     <label>
-                      Duration
+                      {t('editor.duration')}
                       <select value={duration} onChange={e => setDuration(Number(e.target.value))}>
                         {[-4, -2, 1, 2, 4, 8, 16, 32, 64, 128, 256].map(d => (
                           <option key={d} value={d}>
@@ -403,15 +407,15 @@ export function EditorPanel({
                       </select>
                     </label>
                     <label>
-                      Dots
+                      {t('editor.dots')}
                       <input type="number" min={0} max={3} value={dots} onChange={e => setDots(Number(e.target.value))} />
                     </label>
                   </div>
                   <details className="inspector-advanced">
-                    <summary>Advanced rhythm</summary>
+                    <summary>{t('editor.advanced_rhythm')}</summary>
                     <div className="pair">
                       <label>
-                        Tuplet numerator
+                        {t('editor.tuplet_numerator')}
                         <input
                           type="number"
                           min={1}
@@ -420,7 +424,7 @@ export function EditorPanel({
                         />
                       </label>
                       <label>
-                        Tuplet denominator
+                        {t('editor.tuplet_denominator')}
                         <input
                           type="number"
                           min={1}
@@ -429,7 +433,7 @@ export function EditorPanel({
                         />
                       </label>
                     </div>
-                    <EnumInput label="Grace type" value={graceType} enumeration={model.GraceType} onValue={setGraceType} />
+                    <EnumInput label={t('editor.grace_type')} value={graceType} enumeration={model.GraceType} onValue={setGraceType} />
                   </details>
                   <div className="pair">
                     <button
@@ -467,14 +471,14 @@ export function EditorPanel({
                     remaining
                   </p>
                   <div className="pair">
-                    <button onClick={() => onEdit({ type: 'insertBeat', target, duration, dots })}>Insert beat</button>
+                    <button onClick={() => onEdit({ type: 'insertBeat', target, duration, dots })}>{t('editor.insert_beat')}</button>
                     <button disabled={!beat} onClick={() => onEdit({ type: 'deleteBeat', target })}>
                       Delete beat
                     </button>
                   </div>
                 </div>
                 <div className="pair" hidden={!showSection(['measure'])}>
-                  <button onClick={() => onEdit({ type: 'appendMeasure' })}>Append measure</button>
+                  <button onClick={() => onEdit({ type: 'appendMeasure' })}>{t('editor.append_measure')}</button>
                   <button
                     disabled={score.masterBars.length === 1}
                     onClick={() => onEdit({ type: 'removeMeasure', bar: target.bar })}
@@ -485,7 +489,7 @@ export function EditorPanel({
               </fieldset>
             </fieldset>
             <div className="inspector-musical-tools" hidden={!showSection(['beat', 'note'])}>
-              <h3>Musical tools</h3>
+              <h3>{t('editor.musical_tools')}</h3>
               <div className="pair">
                 <button disabled={busy || !beat} onClick={onChord}>
                   Edit chord diagram
@@ -494,7 +498,7 @@ export function EditorPanel({
                   Browse scales
                 </button>
               </div>
-              <p className="muted">{beat?.chord?.name || 'No chord diagram on this beat'}</p>
+              <p className="muted">{beat?.chord?.name || t('editor.no_chord_diagram')}</p>
             </div>
             <div hidden={!showSection(['note'])}>
               <SpellingControl
@@ -525,13 +529,13 @@ export function EditorPanel({
             </div>
             <div hidden={!showSection(['beat'])}>
               <details>
-                <summary>Beat text</summary>
+                <summary>{t('editor.beat_text')}</summary>
                 <fieldset disabled={busy || !beat}>
                   <label>
-                    Beat text
+                    {t('editor.beat_text')}
                     <input value={text} onChange={e => setText(e.target.value)} />
                   </label>
-                  <button onClick={() => onEdit({ type: 'setBeatText', target, text })}>Apply beat text</button>
+                  <button onClick={() => onEdit({ type: 'setBeatText', target, text })}>{t('editor.apply_beat_text')}</button>
                 </fieldset>
               </details>
             </div>
@@ -563,35 +567,35 @@ export function EditorPanel({
           </div>
         </details>
       </section>
-      <section aria-label="Practice tools">
+      <section aria-label={t('editor.practice_tools')}>
         <details className="inspector-task" id={`${id}-practice`} ref={practiceTask}>
-          <summary>Practice</summary>
+          <summary>{t('editor.task_practice')}</summary>
           <fieldset disabled={controlsBusy}>
-            {practiceTools ?? <p className="muted">Use the playback controls below the score to rehearse.</p>}
+            {practiceTools ?? <p className="muted">{t('editor.practice_hint')}</p>}
           </fieldset>
         </details>
       </section>
-      <section aria-label="Presentation tools">
+      <section aria-label={t('editor.presentation_tools')}>
         <details className="inspector-task" id={`${id}-presentation`} ref={presentationTask}>
-          <summary>Presentation</summary>
+          <summary>{t('editor.task_presentation')}</summary>
           <fieldset disabled={busy}>{presentationTools}</fieldset>
           {presentationViewTools && <fieldset disabled={controlsBusy}>{presentationViewTools}</fieldset>}
           <details>
-            <summary>Score information</summary>
+            <summary>{t('editor.score_info')}</summary>
             <fieldset disabled={busy}>
               <label>
-                Title
+                {t('editor.title')}
                 <input value={title} onChange={e => setTitle(e.target.value)} />
               </label>
               <label>
-                Artist
+                {t('editor.artist')}
                 <input value={artist} onChange={e => setArtist(e.target.value)} />
               </label>
               <label>
-                Initial tempo
+                {t('editor.initial_tempo')}
                 <input type="number" min={1} value={tempo} onChange={e => setTempo(Number(e.target.value))} />
               </label>
-              <button onClick={() => onEdit({ type: 'setScoreInfo', title, artist, tempo })}>Apply score info</button>
+              <button onClick={() => onEdit({ type: 'setScoreInfo', title, artist, tempo })}>{t('editor.apply_score_info')}</button>
             </fieldset>
           </details>
           <SongPanel score={score} busy={busy} onEdit={onEdit} />

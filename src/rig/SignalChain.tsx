@@ -1,3 +1,4 @@
+import { useI18n } from '../i18n';
 import { useEffect, useRef, useState } from 'react';
 import { chainOrder } from '../document-settings';
 import type { EffectBlock } from '../edit-types';
@@ -15,6 +16,7 @@ interface Drag {block:EffectBlock;startX:number;dx:number;over:number;moved:bool
  * Click chooses a block; Space switches it on or off; the arrow keys move between blocks and Alt with an arrow moves the
  * block along the chain, as does dragging it. */
 export function SignalChain({editing,selected,onSelect,disabled}:{editing:SoundEditing;selected:BlockRef;onSelect:(ref:BlockRef)=>void;disabled:boolean}) {
+  const { t } = useI18n();
   const {first,second,order,place,fx,movedBlock}=editing;
   const entries:Entry[]=order.map((block,index)=>({ref:{block,second:false},board:first,index}));
   const secondBlocks=second?chainOrder(second.effects).filter(block=>second.effects[block].enabled):[];
@@ -61,7 +63,7 @@ export function SignalChain({editing,selected,onSelect,disabled}:{editing:SoundE
     const {ref,board}=entry,{block}=ref,key=keyOf(ref),on=board.effects[block].enabled,look=blockLook[block],name=board.name(blockNames[block]);
     const dragging=drag?.moved&&!ref.second&&drag.block===block,target=drag?.moved&&!ref.second&&drag.over===entry.index&&drag.block!==block;
     return <div key={key} className="rig-chain-item" role="presentation" data-selected={sameRef(ref,selected)||undefined} data-on={on} data-dragging={dragging||undefined} data-drop={target||undefined} style={{'--pedal':look.color,transform:dragging?`translateX(${drag!.dx}px)`:undefined} as React.CSSProperties}>
-      <button ref={el=>{if(el)buttons.current.set(key,el);else buttons.current.delete(key);}} type="button" role="tab" className="rig-chain-tab" aria-selected={sameRef(ref,selected)} aria-label={`${name}, ${on?'enabled':'bypassed'}`} tabIndex={key===stop?0:-1}
+      <button ref={el=>{if(el)buttons.current.set(key,el);else buttons.current.delete(key);}} type="button" role="tab" className="rig-chain-tab" aria-selected={sameRef(ref,selected)} aria-label={`${name}, ${on?t('rig.enabled'):t('rig.bypassed')}`} tabIndex={key===stop?0:-1}
         onFocus={()=>setRover(key)}
         onClick={()=>{if(swallowClick.current)return;onSelect(ref);}}
         onPointerDown={event=>down(event,entry)} onPointerMove={move} onPointerUp={up} onPointerCancel={cancel}
@@ -86,13 +88,13 @@ export function SignalChain({editing,selected,onSelect,disabled}:{editing:SoundE
   };
   const firstEntries=entries.filter(entry=>!entry.ref.second),secondEntries=entries.filter(entry=>entry.ref.second);
   return <div className="rig-chain" ref={strip}>
-    <span className="rig-chain-end" aria-hidden="true">In</span>
-    <div className="rig-chain-track" role="tablist" aria-label="Signal chain" aria-orientation="horizontal">
+    <span className="rig-chain-end" aria-hidden="true">{t('rig.chain_in')}</span>
+    <div className="rig-chain-track" role="tablist" aria-label={t('rig.signal_chain')} aria-orientation="horizontal">
       <span className="rig-chain-wire" aria-hidden="true"/>
       {firstEntries.map(item)}
-      {secondEntries.length>0&&<span className="rig-chain-then" role="presentation" aria-hidden="true">2nd board</span>}
+      {secondEntries.length>0&&<span className="rig-chain-then" role="presentation" aria-hidden="true">{t('rig.second_board')}</span>}
       {secondEntries.map(item)}
     </div>
-    <span className="rig-chain-end" aria-hidden="true">Out</span>
+    <span className="rig-chain-end" aria-hidden="true">{t('rig.chain_out')}</span>
   </div>;
 }

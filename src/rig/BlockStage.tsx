@@ -1,3 +1,4 @@
+import { useI18n } from '../i18n';
 import { useLayoutEffect, useRef } from 'react';
 import type { ReactNode } from 'react';
 import { defaultEffects, delayDivisions, modulationDivisions, syncedBlocks } from '../document-settings';
@@ -45,14 +46,16 @@ function Dropdown({label,visible,value,options,onChange,disabled}:{label:string;
 }
 /** The footswitch: switches a block on or off. */
 function Footswitch({editing,board,block}:{editing:SoundEditing;board:Board;block:EffectBlock}) {
+  const { t } = useI18n();
   const on=board.effects[block].enabled;
   return <button type="button" role="switch" aria-checked={on} aria-label={board.name(`Enable ${block}`)} className="rig-switch" aria-disabled={editing.busy||undefined} onClick={()=>{if(!editing.busy)editing.fx(board,block,'enabled',!on);}}>
-    <span className="rig-switch-lamp" aria-hidden="true"/><span className="rig-switch-text" aria-hidden="true">{on?'On':'Bypassed'}</span>
+    <span className="rig-switch-lamp" aria-hidden="true"/><span className="rig-switch-text" aria-hidden="true">{on?t('rig.on'):t('rig.bypassed_title')}</span>
   </button>;
 }
 
 /** What each block adds beside its knobs: its models and any tempo sync. */
 function BlockOptions({editing,board,block}:{editing:SoundEditing;board:Board;block:EffectBlock}) {
+  const { t } = useI18n();
   const {fx,sync,syncOf,busy}=editing,name=board.name,e=board.effects;
   return <>
     {block==='drive'&&<Choice label={name('Drive model')} value={e.drive.model} disabled={busy} onChange={value=>fx(board,'drive','model',value)} options={[['overdrive','Overdrive'],['distortion','Distortion'],['fuzz','Fuzz']]}/>}
@@ -66,7 +69,7 @@ function BlockOptions({editing,board,block}:{editing:SoundEditing;board:Board;bl
     {block==='delay'&&<>
       <Choice label={name('Delay model')} value={e.delay.model} disabled={busy} onChange={value=>fx(board,'delay','model',value)} options={[['digital','Digital'],['tape','Tape'],['analog','Analog']]}/>
       <Dropdown label={name('Delay time')} visible="Delay time" value={e.delay.quarterNotes} options={delayDivisions} disabled={busy} onChange={value=>fx(board,'delay','quarterNotes',value)}/>
-      <p className="rig-note">Delay times are limited to 16 seconds.</p>
+      <p className="rig-note">{t('rig.delay_limit_note')}</p>
     </>}
     {syncedBlocks.includes(block)&&<Dropdown label={name(`${blockNames[block]} tempo sync`)} visible="Tempo sync" value={syncOf(board,block)} options={[[0,'Off (free rate)'],...modulationDivisions]} disabled={busy} onChange={value=>sync(board,block,value)}/>}
   </>;
@@ -85,6 +88,7 @@ function AmpStage({editing,board}:{editing:SoundEditing;board:Board}) {
 /** The four placements as spots over a speaker, the model of cabinet and the mic's output. The microphone is its own block, so a
  * cabinet's stage offers its switch too. */
 function CabinetStage({editing,board,block,cabinetResponse}:{editing:SoundEditing;board:Board;block:'cabinet'|'microphone';cabinetResponse?:(board:Board)=>ReactNode}) {
+  const { t } = useI18n();
   const {fx,busy}=editing,mic=board.effects.microphone,off=!mic.enabled;
   const placements=(['close','standard','edge','room'] as const).map(value=>({value,label:<><span className="rig-spot-dot" aria-hidden="true"/><span className="rig-spot-name">{capital(value)}</span></>,style:{left:`${micSpots[value].x}%`,top:`${micSpots[value].y}%`,...(value==='close'?{flexDirection:'column-reverse' as const}:{})}}));
   return <div className="rig-cab-stage">
@@ -97,13 +101,14 @@ function CabinetStage({editing,board,block,cabinetResponse}:{editing:SoundEditin
       {block==='cabinet'&&<Choice label={board.name('Cabinet model')} value={board.effects.cabinet.model} disabled={busy} onChange={value=>fx(board,'cabinet','model',value)} options={cabinetModels.map(item=>[item,capital(modelName(item))] as const)}/>}
       <Choice label={board.name('Microphone output')} value={mic.output} disabled={busy} onChange={value=>fx(board,'microphone','output',value)} options={[['stereo','Stereo'],['mono','Mono']]}/>
       {block==='cabinet'&&<div className="rig-field"><span className="rig-field-name">Microphone</span><Footswitch editing={editing} board={board} block="microphone"/></div>}
-      <p className="rig-note">{off?'The microphone block is bypassed; its placement is kept.':`Microphone: ${capital(mic.placement)}.`}</p>
+      <p className="rig-note">{off?t('rig.mic_bypassed_note'):t('rig.mic_placement_note',{placement:capital(mic.placement)})}</p>
       {block==='cabinet'&&<div className="rig-slot" data-slot="cabinet-response">{cabinetResponse?.(board)}</div>}
     </div>
   </div>;
 }
 
 function GraphicEqStage({editing,board}:{editing:SoundEditing;board:Board}) {
+  const { t } = useI18n();
   const gains=board.effects.graphicEq.gainsDb,{fx,busy}=editing;
   return <div className="rig-geq-stage">
     <div className="rig-geq" role="group" aria-label={board.name('Graphic EQ bands')}>
@@ -111,7 +116,7 @@ function GraphicEqStage({editing,board}:{editing:SoundEditing;board:Board}) {
     </div>
     <div className="rig-geq-side">
       <BlockKnobs editing={editing} board={board} block="graphicEq" tone="pedal"/>
-      <button type="button" aria-label={board.name('Flatten graphic EQ')} {...busyGuard({busy,className:'rig-button',onClick:()=>fx(board,'graphicEq','gainsDb',graphicBands.map(()=>0))})}>Flatten graphic EQ</button>
+      <button type="button" aria-label={board.name(t('rig.flatten_graphic_eq'))} {...busyGuard({busy,className:'rig-button',onClick:()=>fx(board,'graphicEq','gainsDb',graphicBands.map(()=>0))})}>{t('rig.flatten_graphic_eq')}</button>
     </div>
   </div>;
 }
@@ -133,6 +138,7 @@ let stageFocusHandoff:{trackId:string;block:EffectBlock;role:string|null;classNa
 
 /** The selected block's controls: drawn as the gear it is, with its knobs, models and the actions every block shares. */
 export function BlockStage({editing,selected,cabinetResponse}:{editing:SoundEditing;selected:BlockRef;cabinetResponse?:(board:Board)=>ReactNode}) {
+  const { t } = useI18n();
   const {block}=selected,board=selected.second&&editing.second?editing.second:editing.first;
   const {order,busy,clipboard,second}=editing,index=order.indexOf(block);
   const name=blockNames[block];
@@ -169,18 +175,18 @@ export function BlockStage({editing,selected,cabinetResponse}:{editing:SoundEdit
     onBlurCapture={e=>{if(!stageRef.current?.contains(e.relatedTarget as Node))lastFocused.current=null;}}>
     <header className="rig-stage-head">
       <h2>{board.second?'Second pedalboard · ':''}{name}</h2>
-      {!board.second&&<span className="rig-stage-place">{index+1} of {order.length}</span>}
+      {!board.second&&<span className="rig-stage-place">{t('rig.n_of_total',{current:index+1,total:order.length})}</span>}
       {block==='amp'&&<Choice label={board.name('Amp model')} value={board.effects.amp.model} disabled={busy} onChange={value=>editing.fx(board,'amp','model',value)} options={ampModels.map(item=>[item,capital(modelName(item))] as const)}/>}
       <div className="rig-stage-actions">
         <Footswitch editing={editing} board={board} block={block}/>
-        <button type="button" aria-label={board.name(`Copy pedal: ${name}`)} {...busyGuard({busy,className:'rig-button',onClick:()=>editing.copyPedalOf(board,block)})}><span className="rig-long">Copy pedal</span><span className="rig-short" aria-hidden="true">Copy</span></button>
-        <button type="button" aria-label={board.name(`Paste pedal: ${name}`)} {...busyGuard({busy,unavailable:clipboard.pedal?.block!==block,className:'rig-button',onClick:()=>editing.pastePedal(board)})}><span className="rig-long">Paste pedal</span><span className="rig-short" aria-hidden="true">Paste</span></button>
+        <button type="button" aria-label={board.name(`Copy pedal: ${name}`)} {...busyGuard({busy,className:'rig-button',onClick:()=>editing.copyPedalOf(board,block)})}><span className="rig-long">{t('rig.copy_pedal')}</span><span className="rig-short" aria-hidden="true">{t('rig.copy')}</span></button>
+        <button type="button" aria-label={board.name(`Paste pedal: ${name}`)} {...busyGuard({busy,unavailable:clipboard.pedal?.block!==block,className:'rig-button',onClick:()=>editing.pastePedal(board)})}><span className="rig-long">{t('rig.paste_pedal')}</span><span className="rig-short" aria-hidden="true">{t('rig.paste')}</span></button>
         {board.second
-          ?<button type="button" aria-label={`Remove duplicate: ${name}`} {...busyGuard({busy,className:'rig-button',onClick:()=>editing.fx(board,block,'enabled',false)})}><span className="rig-long">Remove duplicate</span><span className="rig-short" aria-hidden="true">Remove</span></button>
-          :<button type="button" aria-label={`Duplicate pedal: ${name}`} {...busyGuard({busy,unavailable:!!second?.effects[block].enabled,className:'rig-button',onClick:()=>editing.duplicate(block)})}><span className="rig-long">Duplicate pedal</span><span className="rig-short" aria-hidden="true">Duplicate</span></button>}
+          ?<button type="button" aria-label={`Remove duplicate: ${name}`} {...busyGuard({busy,className:'rig-button',onClick:()=>editing.fx(board,block,'enabled',false)})}><span className="rig-long">{t('rig.remove_duplicate')}</span><span className="rig-short" aria-hidden="true">{t('action.remove')}</span></button>
+          :<button type="button" aria-label={`Duplicate pedal: ${name}`} {...busyGuard({busy,unavailable:!!second?.effects[block].enabled,className:'rig-button',onClick:()=>editing.duplicate(block)})}><span className="rig-long">{t('rig.duplicate_pedal')}</span><span className="rig-short" aria-hidden="true">{t('rig.duplicate')}</span></button>}
         {!board.second&&<>
-          <button type="button" aria-label={`Move ${name} earlier`} {...busyGuard({busy,unavailable:index===0,className:'rig-button',onClick:()=>editing.move(block,-1)})}><span className="rig-long">Move earlier</span><span className="rig-short" aria-hidden="true">Earlier</span></button>
-          <button type="button" aria-label={`Move ${name} later`} {...busyGuard({busy,unavailable:index===order.length-1,className:'rig-button',onClick:()=>editing.move(block,1)})}><span className="rig-long">Move later</span><span className="rig-short" aria-hidden="true">Later</span></button>
+          <button type="button" aria-label={`Move ${name} earlier`} {...busyGuard({busy,unavailable:index===0,className:'rig-button',onClick:()=>editing.move(block,-1)})}><span className="rig-long">{t('rig.move_earlier')}</span><span className="rig-short" aria-hidden="true">{t('rig.earlier')}</span></button>
+          <button type="button" aria-label={`Move ${name} later`} {...busyGuard({busy,unavailable:index===order.length-1,className:'rig-button',onClick:()=>editing.move(block,1)})}><span className="rig-long">{t('rig.move_later')}</span><span className="rig-short" aria-hidden="true">{t('rig.later')}</span></button>
         </>}
       </div>
     </header>

@@ -1,3 +1,4 @@
+import { useI18n } from '../i18n';
 import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { EditCommand, TrackSound } from '../edit-types';
@@ -31,6 +32,7 @@ export interface SoundRigProps {
  * stage and the sound browser sits beside it. Every change goes through the shared sound editing, so each is one
  * undoable `setTrackSound` edit, exactly as in the inspector's Sound task. */
 export function SoundRig({trackId,sound,onEdit,playback,busy=false,tracks,onTrack,cabinetResponse,master}:SoundRigProps) {
+  const { t } = useI18n();
   const editing=useSoundEditing({trackId,sound,onEdit,playback,busy,shown:true});
   const {current,second,playbackState,error,status,showingPreview,previewLabel,previewReturn}=editing;
   const [chosen,setChosen]=useState<BlockRef>({block:'amp',second:false}),[browserOpen,setBrowserOpen]=useState(false);
@@ -39,15 +41,15 @@ export function SoundRig({trackId,sound,onEdit,playback,busy=false,tracks,onTrac
   useEffect(()=>{if(chosen.second&&!(second&&second.effects[chosen.block].enabled)){setChosen({block:chosen.block,second:false});}},[chosen,second]);
   const root=useRef<HTMLElement>(null);
   useEffect(()=>{previewReturn.current=()=>root.current?.querySelector<HTMLElement>('.rig-sources [role=radio][aria-checked=true]')?.focus();return()=>{previewReturn.current=null;};},[previewReturn]);
-  return <section ref={root} className="sound-view" aria-label="Sound rig" data-browser-open={browserOpen||undefined} onKeyDown={editing.escapePreview}>
+  return <section ref={root} className="sound-view" aria-label={t('rig.sound_rig')} data-browser-open={browserOpen||undefined} onKeyDown={editing.escapePreview}>
     <header className="rig-head">
       <TrackStrip tracks={tracks} trackId={trackId} onTrack={onTrack}/>
       <SourcePicker editing={editing} track={tracks.find(item=>item.id===trackId)}/>
       {tracks.find(item=>item.id===trackId)?.percussion&&<DrumKitPicker editing={editing} className="rig-drum-kit"/>}
-      <Segmented className="rig-presets" label="Sound preset" value={current.presetId} disabled={busy} onChange={id=>void editing.applyPreset(id)} options={presetIds.map(id=>({value:id,label:presetName(id)}))}/>
+      <Segmented className="rig-presets" label={t('rig.sound_preset')} value={current.presetId} disabled={busy} onChange={id=>void editing.applyPreset(id)} options={presetIds.map(id=>({value:id,label:presetName(id)}))}/>
       <SoundLock editing={editing} className="rig-lock"/>
       <span className="rig-head-gap"/>
-      <button type="button" className="rig-button rig-browser-toggle" aria-pressed={browserOpen} aria-expanded={browserOpen} onClick={()=>setBrowserOpen(open=>!open)}>Sounds</button>
+      <button type="button" className="rig-button rig-browser-toggle" aria-pressed={browserOpen} aria-expanded={browserOpen} onClick={()=>setBrowserOpen(open=>!open)}>{t('rig.sounds_toggle')}</button>
     </header>
     <SignalChain editing={editing} selected={selected} onSelect={setChosen} disabled={busy}/>
     <div className="rig-body">
@@ -59,19 +61,19 @@ export function SoundRig({trackId,sound,onEdit,playback,busy=false,tracks,onTrac
     </div>
     <div className="rig-messages">
       <div className="rig-sound-actions">
-        <button type="button" {...busyGuard({busy,className:'rig-button',onClick:()=>void editing.restorePreset()})}>Restore preset</button>
-        <button type="button" className="rig-button" onClick={editing.copyCurrentSound}>Copy sound</button>
-        <button type="button" {...busyGuard({busy,unavailable:!editing.clipboard.sound,className:'rig-button',onClick:editing.pasteSound})}>Paste sound</button>
+        <button type="button" {...busyGuard({busy,className:'rig-button',onClick:()=>void editing.restorePreset()})}>{t('rig.restore_preset')}</button>
+        <button type="button" className="rig-button" onClick={editing.copyCurrentSound}>{t('rig.copy_sound')}</button>
+        <button type="button" {...busyGuard({busy,unavailable:!editing.clipboard.sound,className:'rig-button',onClick:editing.pasteSound})}>{t('rig.paste_sound')}</button>
       </div>
       {/* Always laid out, so a preview starting or ending moves nothing; hidden and inert while none runs. */}
-      <div className="rig-preview" role="group" aria-label="Sound preview" inert={!showingPreview} style={{visibility:showingPreview?'visible':'hidden'}}>
-        <span className="rig-preview-name" title={showingPreview?`Previewing ${previewLabel}`:undefined}>{showingPreview&&`Previewing ${previewLabel}`}</span>
-        <button type="button" data-primary aria-label="Keep previewed sound" {...busyGuard({busy,className:'rig-button',onClick:editing.keepPreview})}><span className="rig-long">Keep previewed sound</span><span className="rig-short" aria-hidden="true">Keep</span></button>
-        <button type="button" className="rig-button" aria-label="Cancel preview" onClick={editing.cancelPreview}><span className="rig-long">Cancel preview</span><span className="rig-short" aria-hidden="true">Cancel</span></button>
+      <div className="rig-preview" role="group" aria-label={t('rig.sound_preview')} inert={!showingPreview} style={{visibility:showingPreview?'visible':'hidden'}}>
+        <span className="rig-preview-name" title={showingPreview?t('rig.previewing_label',{label:previewLabel}):undefined}>{showingPreview&&t('rig.previewing_label',{label:previewLabel})}</span>
+        <button type="button" data-primary aria-label={t('rig.keep_previewed_sound')} {...busyGuard({busy,className:'rig-button',onClick:editing.keepPreview})}><span className="rig-long">{t('rig.keep_previewed_sound')}</span><span className="rig-short" aria-hidden="true">{t('rig.keep')}</span></button>
+        <button type="button" className="rig-button" aria-label={t('rig.cancel_preview')} onClick={editing.cancelPreview}><span className="rig-long">{t('rig.cancel_preview')}</span><span className="rig-short" aria-hidden="true">{t('action.cancel')}</span></button>
       </div>
       <p className="rig-status" role="status" title={status||undefined}>{status}</p>
-      {playback&&<label className="rig-inline"><span className="rig-field-name">Audio output</span><select className="rig-select" aria-label="Audio output" aria-disabled={busy||undefined} value={playback.deviceId()??''} onChange={event=>{if(busy){event.target.value=playback.deviceId()??'';return;}editing.selectOutput(event.target.value);}} onKeyDown={event=>{if(busy)event.preventDefault();}} onPointerDown={event=>{if(busy)event.preventDefault();}} onMouseDown={event=>{if(busy)event.preventDefault();}}>
-        <option value="">System default</option>{editing.devices.map(device=><option key={device.id} value={device.id}>{device.name}</option>)}</select></label>}
+      {playback&&<label className="rig-inline"><span className="rig-field-name">{t('rig.audio_output')}</span><select className="rig-select" aria-label={t('rig.audio_output')} aria-disabled={busy||undefined} value={playback.deviceId()??''} onChange={event=>{if(busy){event.target.value=playback.deviceId()??'';return;}editing.selectOutput(event.target.value);}} onKeyDown={event=>{if(busy)event.preventDefault();}} onPointerDown={event=>{if(busy)event.preventDefault();}} onMouseDown={event=>{if(busy)event.preventDefault();}}>
+        <option value="">{t('rig.system_default')}</option>{editing.devices.map(device=><option key={device.id} value={device.id}>{device.name}</option>)}</select></label>}
     </div>
     {error&&<p role="alert" className="rig-alert">{error}</p>}{playbackState?.error&&playbackState.error!==error&&<p role="alert" className="rig-alert">{playbackState.error}</p>}
   </section>;

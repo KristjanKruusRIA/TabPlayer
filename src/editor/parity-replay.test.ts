@@ -3,6 +3,7 @@ import { model } from '@coderline/alphatab';
 import { blankProject, type EditCommand, type Project } from '../project';
 import { buildScore, previewEdit, trackIdentity } from '../engine';
 import { buildPlaybackPlan } from '../audio/plan';
+import { isNoteCautionary } from './cautionary';
 
 const target={track:0,staff:0,bar:0,voice:0,beat:0};
 function apply(edits:EditCommand[]) {
@@ -44,4 +45,43 @@ it('replays new piano and drum tracks, preserves identities and validates non-ta
   const source=JSON.stringify(project);expect(JSON.stringify(project)).toBe(source);
   const deleted=previewEdit(project,{type:'removeTrack',track:0});expect(trackIdentity(deleted.score.tracks[0])).toBe(trackIdentity(score.tracks[1]));
   expect(buildScore({...project,edits:project.edits.slice(0,-1)} as Project).masterBars).toHaveLength(4);
+});
+
+it('replays a cautionary mark with undo and redo, and a re-fret leaves no stale forced accidental', () => {
+  const { project, score } = apply([
+    { type: 'setNote', target, string: 1, fret: 1 },
+    { type: 'setNoteCautionary', target, noteIndex: 0, cautionary: true },
+    { type: 'setNote', target, string: 1, fret: 2 },
+  ]);
+  const note = (value: model.Score) => value.tracks[0].staves[0].bars[0].voices[0].beats[0].notes[0];
+  expect(isNoteCautionary(note(score))).toBe(true);
+  expect(note(score).fret).toBe(2);
+  expect(note(score).accidentalMode).toBe(model.NoteAccidentalMode.Default);
+  const marked = buildScore({ ...project, edits: project.edits.slice(0, -1) });
+  expect(isNoteCautionary(note(marked))).toBe(true);
+  expect(note(marked).accidentalMode).toBe(model.NoteAccidentalMode.Default);
+  const undone = buildScore({ ...project, edits: project.edits.slice(0, -2) });
+  expect(isNoteCautionary(note(undone))).toBe(false);
+  expect(isNoteCautionary(note(buildScore(project)))).toBe(true);
+});
+
+it('keeps a note spelling through marking and unmarking, as separate undo steps', () => {
+  const { project, score } = apply([
+    { type: 'setNote', target, string: 1, fret: 2 },
+    { type: 'setNoteSpelling', target, noteIndex: 0, accidentalMode: model.NoteAccidentalMode.ForceFlat },
+    { type: 'setNoteCautionary', target, noteIndex: 0, cautionary: true },
+    { type: 'setNoteCautionary', target, noteIndex: 0, cautionary: false },
+  ]);
+  const note = (value: model.Score) => value.tracks[0].staves[0].bars[0].voices[0].beats[0].notes[0];
+  expect(project.edits).toHaveLength(4);
+  expect(isNoteCautionary(note(score))).toBe(false);
+  expect(note(score).accidentalMode).toBe(model.NoteAccidentalMode.ForceFlat);
+});
+
+it('refuses a cautionary mark on a percussion note', () => {
+  const { project } = apply([
+    { type: 'addPercussionTrack', name: 'Drums', program: 0 },
+    { type: 'addPercussionNote', target: { ...target, track: 1 }, articulation: 38 },
+  ]);
+  expect(() => previewEdit(project, { type: 'setNoteCautionary', target: { ...target, track: 1 }, noteIndex: 0, cautionary: true })).toThrow(/percussion/i);
 });

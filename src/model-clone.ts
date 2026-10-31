@@ -4,6 +4,7 @@ import { repairPedalPresses } from './editor/sustain-pedal';
 import './editor/partial-capo';
 import './editor/banjo-drone';
 import './editor/note-audio';
+import './editor/cautionary';
 
 type NoteJson={id:number;dynamics:number};
 type BeatJson={notes:NoteJson[]};

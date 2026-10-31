@@ -7,6 +7,7 @@ import { loadInterchangeScore } from '../interchange/gp';
 import { setLyricsSource } from '../editor/lyrics-source';
 import { applyLyricsEdit,getTrackLyrics } from '../editor/lyrics';
 import { exportMusicXml } from './musicxml';
+import { isNoteCautionary,setNoteCautionary } from '../editor/cautionary';
 import { buildPlaybackPlan } from '../audio/plan';
 
 const settings=new Settings();
@@ -165,6 +166,24 @@ describe('MusicXML export',()=>{
     expect(back.tracks[0].staves[0].bars[0].voices[0].beats[0].text).toBeFalsy();
     expect(back.masterBars[0].tempoAutomations.map(a=>a.text)).toEqual(['Moderate']);
     expect(back.tracks[0].staves[0].bars[0].voices[0].beats[0].automations.filter(a=>a.type===model.AutomationType.Volume).map(a=>[a.value,a.ratioPosition])).toEqual([[8,.5]]);
+  });
+
+  it('exports a score with a cautionary note, writing cautionary="yes" on its accidental and leaving other notes alone',()=>{
+    const score=piano(),voice=score.tracks[0].staves[0].bars[0].voices[0],other=score.tracks[0].staves[0].bars[0].voices[1].beats[0].notes[0];
+    // Key of F major: the B♭ and the F are as the key says, so neither would show a sign unmarked.
+    const plain=parse(exportMusicXml(score,selectAll(score)));
+    expect([...plain.querySelectorAll('note')].map(note=>note.querySelector('accidental')?.textContent??'')).toEqual(['','','']);
+    setNoteCautionary(voice.beats[1].notes[0],true);setNoteCautionary(voice.beats[0].notes[0],true);
+    const xml=exportMusicXml(score,selectAll(score)),doc=parse(xml);
+    expect([...doc.querySelectorAll('note')].map(note=>{const sign=note.querySelector('accidental');return sign?`${sign.textContent}:${sign.getAttribute('cautionary')}`:'';})).toEqual(['flat:yes','natural:yes','']);
+    expect(isNoteCautionary(other)).toBe(false);
+    // The mark does not change spelling or pitch.
+    expect(voice.beats[0].notes[0].accidentalMode).toBe(model.NoteAccidentalMode.Default);
+    expect([...doc.querySelectorAll('note > pitch')].map(node=>`${node.querySelector('step')?.textContent}${node.querySelector('alter')?.textContent??''}${node.querySelector('octave')?.textContent}`)).toEqual(['B-14','F4','F3']);
+    // alphaTab's MusicXML reader has no notion of a cautionary sign: pitch survives, the mark does not.
+    const back=loadInterchangeScore(xml,settings),notes=back.tracks[0].staves[0].bars[0].voices[0].beats.map(beat=>beat.notes[0]);
+    expect(notes.map(note=>note.realValue)).toEqual([70,65]);
+    expect(notes.map(note=>isNoteCautionary(note))).toEqual([false,false]);
   });
 
   it('reads every tempo text of a bar back as tempo text',()=>{

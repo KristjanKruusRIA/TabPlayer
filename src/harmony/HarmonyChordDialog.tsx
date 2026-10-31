@@ -39,6 +39,10 @@ export function HarmonyChordDialog({score,target,selection,value,busy,library,on
   const preservedShape=useRef(JSON.stringify([draft.frets,draft.barreFrets]));
   const dialogRef=useRef<HTMLDivElement>(null),nameInput=useRef<HTMLInputElement>(null),contextKey=JSON.stringify([target,staff.tuning,staff.capo,staff.transpositionPitch]),valueKey=JSON.stringify(value);
   const install=(next:HarmonyChord)=>{preservedShape.current=JSON.stringify([next.frets,next.barreFrets]);setDraft(structuredClone(next));setRecipe(next.recipe?structuredClone(next.recipe):newRecipe());setBarres(next.barreFrets.join(', '));setShapes([]);setError('');};
+  // Opened while the library loads: start on the dialog, not a button Enter could press; move to the name once ready if focus has not moved.
+  const startedBusy=useRef(busy);
+  useEffect(()=>{if(startedBusy.current)dialogRef.current?.focus({preventScroll:true});},[]);
+  useEffect(()=>{if(!busy&&startedBusy.current){startedBusy.current=false;if(document.activeElement===dialogRef.current)nameInput.current?.focus({preventScroll:true});}},[busy]);
   useEffect(()=>{install(initial(value,staff));setText(beat.text??'');setFill(false);setStatus('');},[score,contextKey,valueKey]);
   function updateRecipe(next:ChordRecipe){
     setRecipe(next);setShapes([]);try{const name=formatChordName(next);setDraft({...draft,name,nameMode:'theory',recipe:structuredClone(next)});setError('');}catch(cause){setError(message(cause));}
@@ -74,6 +78,7 @@ export function HarmonyChordDialog({score,target,selection,value,busy,library,on
   return <>
     <Dialog ref={dialogRef} title="Harmony chord" onClose={onClose} className="harmony-dialog" actions={actions}>
       {busy&&<p role="status" className="muted">Loading chord library…</p>}
+      {pending&&<p role="status" className="muted">Updating the chord library…</p>}
       <div className="harmony-body"><fieldset {...busyRegion(busy||pending)}>
         <div className="harmony-workbench"><div className="harmony-formula"><h3>Name and formula</h3>
         <label>Chord name<input ref={nameInput} data-autofocus={!busy||undefined} value={draft.name} onChange={e=>{setDraft({...draft,name:e.target.value.replace(/^['‘’]/,''),nameMode:'manual',recipe:null});setError('');}}/></label>

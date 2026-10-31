@@ -91,14 +91,21 @@ it('unchanged_passively_recalled_legacy_barres_remain_exact_on_apply',()=>{
   const {input,commands}=props();input.library.entries=[{id:'d1fb4ba1-6491-4bc9-932d-e194f72be671',label:'Legacy recall',chord:legacy,tuning:[...input.score.tracks[0].staves[0].tuning],capo:0,transposition:0}];render(<HarmonyChordDialog {...input}/>);
   fireEvent.change(screen.getByLabelText('Personal chord'),{target:{value:input.library.entries[0].id}});fireEvent.click(screen.getByRole('button',{name:'Recall library chord'}));fireEvent.click(screen.getByRole('button',{name:'Apply chord'}));expect(commands).toEqual([{type:'setHarmonyChord',target,chord:legacy,fillEmptyBeat:false}]);
 });
-it('initial_library_loading_keeps_focus_at_the_top_and_does_not_hop_when_loading_ends',()=>{
+it('initial_library_loading_keeps_focus_at_the_top_then_focuses_the_chord_name',()=>{
   const {input,commands}=props(),opener=document.createElement('button');document.body.append(opener);opener.focus();
-  const view=render(<HarmonyChordDialog {...input} busy/>),close=screen.getByRole('button',{name:'Close'}),apply=screen.getByRole('button',{name:'Apply chord'});
-  expect(close).toHaveFocus();
+  const view=render(<HarmonyChordDialog {...input} busy/>),dialog=screen.getByRole('dialog'),cancel=screen.getByRole('button',{name:'Cancel'}),apply=screen.getByRole('button',{name:'Apply chord'});
+  expect(dialog).toHaveFocus();expect(cancel).not.toHaveFocus();
   expect(apply).toHaveAttribute('aria-disabled','true');expect(apply).not.toBeDisabled();
-  fireEvent.click(apply);expect(commands).toEqual([]);expect(close).toHaveFocus();
-  view.rerender(<HarmonyChordDialog {...input}/>);expect(close).toHaveFocus();
+  fireEvent.click(apply);expect(commands).toEqual([]);
+  fireEvent.keyDown(dialog,{key:'Tab',shiftKey:true});expect(cancel).toHaveFocus();
+  dialog.focus();view.rerender(<HarmonyChordDialog {...input}/>);expect(screen.getByLabelText('Chord name')).toHaveFocus();
   view.unmount();expect(opener).toHaveFocus();opener.remove();
+});
+it('loading_ending_leaves_focus_where_the_user_moved_it_and_the_load_is_announced',()=>{
+  const {input}=props(),view=render(<HarmonyChordDialog {...input} busy/>);
+  expect(screen.getByRole('status')).toHaveTextContent('Loading chord library…');
+  const cancel=screen.getByRole('button',{name:'Cancel'});cancel.focus();
+  view.rerender(<HarmonyChordDialog {...input}/>);expect(cancel).toHaveFocus();
 });
 it('compares_generated_shapes_with_passive_diagrams_and_marks_the_selected_shape',()=>{
   const {input}=props();input.score.tracks[0].staves[0].stringTuning.tunings=[64,60,67];render(<HarmonyChordDialog {...input}/>);
@@ -123,4 +130,11 @@ it('uses harmony-dialog without chord-dialog so 900px width is not overridden',(
   const dialog=screen.getByRole('dialog');
   expect(dialog).toHaveClass('harmony-dialog');
   expect(dialog).not.toHaveClass('chord-dialog');
+});
+
+it('a_pending_library_save_is_announced_and_keeps_focus_on_the_button',()=>{
+  const {input}=props();render(<HarmonyChordDialog {...input} onLibraryPut={()=>new Promise<void>(()=>{})}/>);
+  fireEvent.change(screen.getByLabelText('Library label'),{target:{value:'Pending'}});
+  const save=screen.getByRole('button',{name:'Save to library'});save.focus();fireEvent.click(save);
+  expect(screen.getByRole('status')).toHaveTextContent('Updating the chord library…');expect(save).toHaveFocus();
 });

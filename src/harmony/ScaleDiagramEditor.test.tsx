@@ -148,3 +148,18 @@ it('keeps focus on a diagram button that cannot act, and refuses it, while busy 
   const reset=screen.getByRole('button',{name:'Reset marks'});
   expect(reset).toHaveAttribute('aria-disabled','true');expect(reset).not.toBeDisabled();
 });
+
+it('refuses double click removal and a pending number commit while busy',()=>{
+  const score=music(),commands:ScaleDiagramCommand[]=[],view=open(score,commands),staff=score.tracks[0].staves[0],beat=staff.bars[0].voices[0].beats[0];
+  fireEvent.click(screen.getByRole('button',{name:'Blank diagram'}));fireEvent.click(screen.getByLabelText('String 3, fret 4'));
+  const mark=()=>screen.queryByLabelText(/String 3, fret 4: circle mark/);
+  expect(mark()).toBeInTheDocument();
+  const strings=screen.getByLabelText('Diagram strings') as HTMLInputElement;
+  fireEvent.change(strings,{target:{value:'8'}});
+  view.rerender(<ScaleToolPanel score={score} staff={staff} beat={beat} target={target} selection={null} busy onClose={()=>{}} onEdit={command=>commands.push(command as ScaleDiagramCommand)}/>);
+  fireEvent.doubleClick(mark()!);expect(mark()).toBeInTheDocument();
+  fireEvent.blur(strings);expect(strings.value).toBe('6');
+  expect(screen.queryByLabelText('String 8, open')).not.toBeInTheDocument();
+  view.rerender(<ScaleToolPanel score={score} staff={staff} beat={beat} target={target} selection={null} busy={false} onClose={()=>{}} onEdit={command=>commands.push(command as ScaleDiagramCommand)}/>);
+  fireEvent.doubleClick(mark()!);expect(mark()).not.toBeInTheDocument();
+});

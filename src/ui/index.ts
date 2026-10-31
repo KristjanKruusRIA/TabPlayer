@@ -7,6 +7,6 @@ export type { SegmentedOption, SegmentedProps } from './Segmented';
 export { Dialog } from './Dialog';
 export type { DialogProps } from './Dialog';
 export { snapToStep, parseTyped } from './useRange';
-export { busyGuard, busyRegion } from './useBusyGuard';
+export { busyGuard, busyRegion, busySelect } from './useBusyGuard';
 export type { BusyGuardProps } from './useBusyGuard';
 

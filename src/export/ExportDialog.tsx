@@ -109,6 +109,6 @@ export function ExportDialog({score,layout,page,busy,progress,failure,currentSpe
         {format==='stems'&&<label className="export-check"><input type="checkbox" checked={audio.includeMix} onChange={e=>setAudio({...audio,includeMix:e.target.checked})}/>Include limited mix</label>}
       </div></fieldset>}
     </fieldset>
-    {visibleError&&<p id={errorId} role="alert">{visibleError}</p>}{progress&&<><progress aria-label="Export progress" data-job-id={progress.id} max={Math.max(1,progress.totalFrames)} value={progress.frames}/><p role="status">{progress.status==='running'?'Exporting…':progress.status}</p></>}
+    {visibleError&&<p id={errorId} role="alert">{visibleError}</p>}{busy&&!progress&&<p role="status">Preparing the export…</p>}{progress&&<><progress aria-label="Export progress" data-job-id={progress.id} max={Math.max(1,progress.totalFrames)} value={progress.frames}/><p role="status">{progress.status==='running'?'Exporting…':progress.status}</p></>}
   </Dialog>;
 }

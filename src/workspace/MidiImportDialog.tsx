@@ -5,7 +5,7 @@ import { defaultMidiImportOptions,importMidi,midiImportFileName,type MidiImport,
 import { MIDI_FILE_LIMIT,readMidiFile,type MidiSong } from '../interchange/midi-smf';
 import { Dialog } from '../ui/Dialog';
 import { Segmented } from '../ui/Segmented';
-import { busyGuard } from '../ui/useBusyGuard';
+import { busyGuard,busySelect } from '../ui/useBusyGuard';
 import './midi-import.css';
 
 const message=(error:unknown)=>error instanceof Error?error.message:String(error);
@@ -87,7 +87,7 @@ export function MidiImportDialog({busy,onImport,onClose}:{busy:boolean;onImport:
           <span className="tp-field-label" aria-hidden="true">Quantization</span>
           <Segmented label="Quantization" disabled={importing} value={String(options.quantization)} options={quantizationOptions} onChange={val=>choice('quantization',Number(val) as MidiQuantization)}/>
         </div>
-        <label>Tuplets<select value={options.tuplets} aria-disabled={importing||undefined} onChange={event=>{if(!importing)choice('tuplets',event.target.value as MidiTupletMode);}}>{tupletModes.map(([value,label])=><option key={value} value={value} disabled={(value!=='none'&&options.quantization<8)||(value==='triplets-quintuplets'&&options.quantization<16)}>{label}</option>)}</select></label>
+        <label>Tuplets<select value={options.tuplets} {...busySelect(importing)} onChange={event=>{if(!importing)choice('tuplets',event.target.value as MidiTupletMode);}}>{tupletModes.map(([value,label])=><option key={value} value={value} disabled={(value!=='none'&&options.quantization<8)||(value==='triplets-quintuplets'&&options.quantization<16)}>{label}</option>)}</select></label>
         <div className="tp-field">
           <span className="tp-field-label" aria-hidden="true">Voices per track</span>
           <Segmented label="Voices per track" disabled={importing} value={String(options.voices)} options={voiceOptions} onChange={val=>choice('voices',Number(val) as MidiImportOptions['voices'])}/>

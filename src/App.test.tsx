@@ -214,12 +214,12 @@ it.each(['Add pitched track','Add percussion track'])('omits string caret contex
   expect(engravingView.mock.lastCall?.[0].editString).toBeUndefined();
 });
 
-it('starts Harmony on its first control during initial library loading and keeps focus there when it is ready',async()=>{
+it('starts Harmony at its heading during initial library loading and focuses name when ready',async()=>{
   let finish!:(library:HarmonyLibrary)=>void;personalLibrary.read.mockReturnValueOnce(new Promise(resolve=>{finish=resolve;}));
   await setup();click('Edit chord diagram');const dialog=screen.getByRole('dialog',{name:'Harmony chord'});
   const initialFocus=document.activeElement;await act(async()=>finish({format:'TabPlayerHarmonyLibrary',version:1,entries:[]}));
   await waitFor(()=>expect(within(dialog).getByLabelText('Chord name').closest('fieldset')).not.toHaveAttribute('aria-disabled'));
-  expect(initialFocus).toBe(within(dialog).getByRole('button',{name:'Close'}));expect(document.activeElement).toBe(initialFocus);
+  expect(initialFocus).toBe(dialog);expect(within(dialog).getByLabelText('Chord name')).toHaveFocus();
 });
 
 it('distinguishes a clean imported score from a new or saved native project',async()=>{

@@ -35,3 +35,10 @@ it('valid_fretted_scale_tones_remain_visible_when_the_open_pitch_is_below_midi_z
   const score=music(),staff=score.tracks[0].staves[0];staff.stringTuning.tunings=[0];staff.transpositionPitch=1;const before=model.JsonConverter.scoreToJson(score);render(<ScaleToolPanel score={score} selection={null} busy={false} onClose={()=>{}}/>);
   expect(screen.getByLabelText('String 1 fret 1: C-1, root')).toBeInTheDocument();expect(screen.queryByLabelText(/String 1 fret 0:/)).not.toBeInTheDocument();expect(model.JsonConverter.scoreToJson(score)).toBe(before);
 });
+
+it('announces that a busy scale browser is waiting',()=>{
+  const score=music(),props={score,selection:null,onClose:()=>{}},view=render(<ScaleToolPanel {...props} busy={false}/>);
+  expect(screen.queryByRole('status')).not.toBeInTheDocument();
+  view.rerender(<ScaleToolPanel {...props} busy/>);
+  expect(screen.getByRole('status')).toHaveTextContent('Wait for the current operation to finish.');expect(screen.getByLabelText('Scale root').closest('fieldset')).toHaveAttribute('aria-busy','true');
+});

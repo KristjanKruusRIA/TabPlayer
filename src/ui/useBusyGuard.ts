@@ -85,6 +85,7 @@ export function busyRegion(busy: boolean) {
   };
   return {
     'aria-disabled': busy ? ('true' as const) : undefined,
+    'aria-busy': busy || undefined,
     className: busy ? 'is-disabled' : undefined,
     onClickCapture: refuse,
     onMouseDownCapture: refuse,
@@ -93,6 +94,12 @@ export function busyRegion(busy: boolean) {
     onPasteCapture: refuse,
     onCutCapture: refuse,
     onDropCapture: refuse,
+    onDoubleClickCapture: refuse,
+    onContextMenuCapture: refuse,
+    onAuxClickCapture: refuse,
+    onDragStartCapture: refuse,
+    onDragOverCapture: refuse,
+    onInputCapture: refuse,
     onChangeCapture: (event: ChangeEvent<HTMLElement>) => refuse(event),
     onKeyUpCapture: (event: KeyboardEvent<HTMLElement>) => {
       if (event.key === ' ' || event.key === 'Enter') refuse(event);
@@ -103,6 +110,19 @@ export function busyRegion(busy: boolean) {
       // Moving the caret inside a text field changes nothing.
       const text = target instanceof HTMLTextAreaElement || (target instanceof HTMLInputElement && target.type !== 'checkbox' && target.type !== 'radio');
       if (!(text && (event.key.startsWith('Arrow') || event.key === 'Home' || event.key === 'End'))) refuse(event);
+    },
+  };
+}
+
+/** For a select that must not act while busy but keeps focus: aria-disabled, and its popup does not open (the caller also ignores onChange). */
+export function busySelect(busy: boolean) {
+  return {
+    'aria-disabled': busy ? ('true' as const) : undefined,
+    onMouseDown: (event: MouseEvent<HTMLSelectElement>) => {
+      if (busy) event.preventDefault();
+    },
+    onKeyDown: (event: KeyboardEvent<HTMLSelectElement>) => {
+      if (busy && (event.key === ' ' || event.key === 'Enter' || event.key.startsWith('Arrow'))) event.preventDefault();
     },
   };
 }

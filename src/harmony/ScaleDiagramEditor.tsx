@@ -23,10 +23,10 @@ const orientationOptions:ReadonlyArray<{value:ScaleDiagram['orientation'];label:
   {value:'vertical',label:'Vertical'},
 ];
 /** Commits a typed number on blur or Enter, so "10" is never read as "1" on the way. */
-function NumberField({label,value,min,max,change}:{label:string;value:number;min:number;max:number;change:(value:number)=>void}) {
+function NumberField({label,value,min,max,busy,change}:{label:string;value:number;min:number;max:number;busy:boolean;change:(value:number)=>void}) {
   const [text,setText]=useState(String(value));
   useEffect(()=>setText(String(value)),[value]);
-  const commit=()=>{const next=Number(text);if(text.trim()!==''&&Number.isInteger(next)){const clamped=Math.min(max,Math.max(min,next));setText(String(clamped));if(clamped!==value)change(clamped);}else setText(String(value));};
+  const commit=()=>{if(busy){setText(String(value));return;}const next=Number(text);if(text.trim()!==''&&Number.isInteger(next)){const clamped=Math.min(max,Math.max(min,next));setText(String(clamped));if(clamped!==value)change(clamped);}else setText(String(value));};
   return <label>{label}<input type="number" min={min} max={max} value={text} onChange={event=>setText(event.target.value)} onBlur={commit} onKeyDown={event=>{if(event.key==='Enter'){event.preventDefault();commit();}}}/></label>;
 }
 const message=(cause:unknown)=>cause instanceof Error?cause.message:String(cause);
@@ -63,9 +63,9 @@ export function ScaleDiagramEditor({score,staff,beat,target,selection,busy,scale
     {error&&<p role="alert">{error}</p>}
     {draft&&<>
       <label>Diagram name<input value={draft.name} maxLength={64} onChange={event=>edit(value=>({...value,name:event.target.value}))}/></label>
-      <NumberField label="Diagram strings" value={draft.strings} min={3} max={10} change={next=>edit(value=>resized(value,{strings:next}))}/>
-      <NumberField label="Diagram frets" value={draft.frets} min={4} max={24} change={next=>edit(value=>resized(value,{frets:next}))}/>
-      <NumberField label="Starting fret" value={draft.firstFret} min={1} max={128-draft.frets} change={next=>edit(value=>resized(value,{firstFret:next}))}/>
+      <NumberField label="Diagram strings" value={draft.strings} min={3} max={10} busy={busy} change={next=>edit(value=>resized(value,{strings:next}))}/>
+      <NumberField label="Diagram frets" value={draft.frets} min={4} max={24} busy={busy} change={next=>edit(value=>resized(value,{frets:next}))}/>
+      <NumberField label="Starting fret" value={draft.firstFret} min={1} max={128-draft.frets} busy={busy} change={next=>edit(value=>resized(value,{firstFret:next}))}/>
       <div className="tp-field">
         <span className="tp-field-label" aria-hidden="true">Diagram orientation</span>
         <Segmented label="Diagram orientation" value={draft.orientation} options={orientationOptions} onChange={orientation=>edit(value=>({...value,orientation}))}/>

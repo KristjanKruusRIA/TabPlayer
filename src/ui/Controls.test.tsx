@@ -8,7 +8,7 @@ import { useState } from 'react';
 import { Dialog } from './Dialog';
 import { Fader } from './Fader';
 import { Segmented } from './Segmented';
-import { busyRegion } from './useBusyGuard';
+import { busyRegion,busySelect } from './useBusyGuard';
 
 afterEach(cleanup);
 
@@ -254,5 +254,25 @@ it('refuses every press, key and change inside a busy region without taking focu
 
 it('styles the palette backdrop above the shared one and dims aria-disabled controls',()=>{
   expect(readFileSync('src/styles.css','utf8')).toMatch(/\.tp-dialog-backdrop\.command-palette-backdrop\{[^}]*align-items:flex-start/);
-  expect(readFileSync('src/ui/ui.css','utf8')).toMatch(/\.tp-dialog :is\(button,select,summary\)\[aria-disabled=true\]/);
+  expect(readFileSync('src/ui/ui.css','utf8')).toMatch(/^:is\(button,select,summary\)\[aria-disabled=true\], button\.is-disabled/m);
+});
+
+it('also refuses double clicks, context menus, drags and aux clicks in a busy region, and announces it',()=>{
+  const seen=vi.fn();
+  function Region({busy}:{busy:boolean}){return <div {...busyRegion(busy)} data-testid="region"><span role="button" tabIndex={0} onDoubleClick={seen} onContextMenu={seen} onDragStart={seen} onAuxClick={seen}>Mark</span></div>;}
+  const {rerender}=render(<Region busy/>);
+  const mark=screen.getByRole('button',{name:'Mark'});
+  fireEvent.doubleClick(mark);fireEvent.contextMenu(mark);fireEvent.dragStart(mark);fireEvent.mouseDown(mark,{button:1});
+  expect(seen).not.toHaveBeenCalled();expect(screen.getByTestId('region')).toHaveAttribute('aria-busy','true');
+  rerender(<Region busy={false}/>);fireEvent.doubleClick(mark);fireEvent.contextMenu(mark);
+  expect(seen).toHaveBeenCalledTimes(2);expect(screen.getByTestId('region')).not.toHaveAttribute('aria-busy');
+});
+
+it('keeps a busy select from opening its popup',()=>{
+  const {rerender}=render(<select aria-label="Pick" {...busySelect(true)}><option>a</option></select>);
+  const pick=screen.getByRole('combobox',{name:'Pick'});
+  expect(pick).toHaveAttribute('aria-disabled','true');
+  expect(fireEvent.mouseDown(pick)).toBe(false);expect(fireEvent.keyDown(pick,{key:'ArrowDown'})).toBe(false);expect(fireEvent.keyDown(pick,{key:'Tab'})).toBe(true);
+  rerender(<select aria-label="Pick" {...busySelect(false)}><option>a</option></select>);
+  expect(fireEvent.mouseDown(pick)).toBe(true);
 });

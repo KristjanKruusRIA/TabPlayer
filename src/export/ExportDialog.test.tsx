@@ -331,3 +331,10 @@ it('keeps focus on Export while exporting, refuses its presses and the inputs, a
   const format=screen.getByLabelText('Export format');fireEvent.change(format,{target:{value:'midi'}});expect(format).toHaveValue('gp');
   fireEvent.click(screen.getByRole('button',{name:'Cancel export'}));expect(onCancel).toHaveBeenCalledTimes(1);
 });
+
+it('says an export is starting before any progress exists',()=>{
+  const score=music(),view=render(<ExportDialog currentSpeedAvailable={true} score={score} layout={layout} busy={false} onExport={()=>{}} onCancel={()=>{}}/>);
+  expect(screen.queryByRole('status')).not.toBeInTheDocument();
+  view.rerender(<ExportDialog currentSpeedAvailable={true} score={score} layout={layout} busy onExport={()=>{}} onCancel={()=>{}}/>);
+  expect(screen.getByRole('status')).toHaveTextContent('Preparing the export…');
+});

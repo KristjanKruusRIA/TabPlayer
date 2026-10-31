@@ -96,7 +96,7 @@ export async function runInstrumentEntryAcceptance({buildPath}={}){
     await ui.selectWorkspaceTrack(page,'Track 3: Drums');await view().getByRole('group',{name:'Drum kit',exact:true}).waitFor();
     const d={track:2,...at};
     await click('drum add','Snare',{type:'addPercussionNote',target:d,articulation:2});
-    await click('drum remove','Remove Kick',{type:'removeNoteByIndex',target:d,noteIndex:0});
+    await click('drum remove','Remove Kick 2',{type:'removeNoteByIndex',target:d,noteIndex:0});
     await page.screenshot({path:resolve(paths.results,'03-drums.png')});result.screenshots.push('03-drums.png');
     step('Drum clicks add and remove percussion notes',{edits:result.edits});
 

@@ -27,6 +27,7 @@ const shapes:Record<string,readonly string[]>={
   setTrackSound:['trackId','sound'],setTrackMix:['trackId','mix'],setBacking:['backing'],setPrintLayout:['layout'],
   replaceTempoAutomations:['points'],
   setScoreMetadata:['fields'],setDirections:['bar','directions'],setNoteSpelling:['target','noteIndex','accidentalMode'],
+  setNoteCautionary:['target','noteIndex','cautionary'],setNoteCourtesy:['target','noteIndex','courtesy'],
   addPitchedTrack:['name','program'],addPercussionTrack:['name','program'],
   addPitchedNote:['target','pitch'],setPitchedNote:['target','noteIndex','pitch'],
   addPercussionNote:['target','articulation'],setPercussionNote:['target','noteIndex','articulation'],
@@ -221,6 +222,8 @@ export function validateParityCommand(value:unknown):void {
     if(!Array.isArray(edit.directions))throw new Error('Invalid directions.');edit.directions.forEach(value=>integer(value,18));
   }
   if(type==='setNoteSpelling')integer(edit.accidentalMode,6);
+  if(type==='setNoteCautionary')flag(edit.cautionary);
+  if(type==='setNoteCourtesy')flag(edit.courtesy);
   if(type==='setTrackLyrics') {
     flag(edit.visible);
     if(!Array.isArray(edit.lines)||edit.lines.length>5)throw new Error('Use at most five lyric lines.');

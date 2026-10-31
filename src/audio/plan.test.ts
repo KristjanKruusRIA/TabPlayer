@@ -290,6 +290,33 @@ it('logical_channel_collisions_remain_distinct_and_percussion_keeps_channel_nine
   expect(Math.max(...plan.notes.find(n=>n.source.target.beat===1)!.pitch.map(p=>p.semitones))).toBe(2);
 });
 
+it('names the kit element of a drum note only where its pitch would put it in another piece', () => {
+  const score=authored(2,1,2), drums=score.tracks[1];
+  drums.staves[0].isPercussion=true;drums.staves[0].stringTuning.tunings=[];drums.playbackInfo.primaryChannel=9;drums.playbackInfo.secondaryChannel=9;
+  // The metronome click sounds a snare pitch (37) and a bell tree a ride pitch, but neither is part of the snare or the cymbals.
+  const beats=drums.staves[0].bars[0].voices[0].beats;
+  for(const [beat,articulation] of [[0,33],[1,38]] as const){const drum=new model.Note();drum.percussionArticulation=articulation;beats[beat].addNote(drum);}
+  score.finish(settings);const plan=agree(score);
+  const hits=plan.midi.filter(e=>e.trackId===plan.tracks[1].id&&(e.type==='noteOn'||e.type==='noteOff'));
+  expect(hits.map(e=>[e.type,e.type==='noteOn'||e.type==='noteOff'?e.key:0,e.type==='noteOn'||e.type==='noteOff'?e.kitElement:undefined])).toEqual([
+    ['noteOn',37,'other'],['noteOff',37,'other'],['noteOn',38,undefined],['noteOff',38,undefined],
+  ]);
+  expect(JSON.stringify(plan.midi.filter(e=>e.type==='noteOn'&&e.key===38))).not.toContain('kitElement');
+});
+
+it("reads the kit element of a track's own articulation by its element name, whatever pitch it sounds", () => {
+  const score=authored(2,1,2), drums=score.tracks[1];
+  drums.staves[0].isPercussion=true;drums.staves[0].stringTuning.tunings=[];drums.playbackInfo.primaryChannel=9;drums.playbackInfo.secondaryChannel=9;
+  const symbol=model.MusicFontSymbol.NoteheadBlack;
+  // A "Snare" that sounds a block's pitch, and a "Crash High" that sounds a snare's: the track says which piece each belongs to.
+  drums.percussionArticulations=[new model.InstrumentArticulation('Snare',3,77,symbol,symbol,symbol),new model.InstrumentArticulation('Crash High',-2,38,symbol,symbol,symbol)];
+  const beats=drums.staves[0].bars[0].voices[0].beats;
+  for(const [beat,articulation] of [[0,0],[1,1]] as const){const drum=new model.Note();drum.percussionArticulation=articulation;beats[beat].addNote(drum);}
+  score.finish(settings);const plan=agree(score);
+  const on=plan.midi.filter(e=>e.trackId===plan.tracks[1].id&&e.type==='noteOn');
+  expect(on.map(e=>e.type==='noteOn'?[e.key,e.kitElement]:[])).toEqual([[77,'snare'],[38,'cymbals']]);
+});
+
 it('dead_brush_negative_duration_uses_public_unbrushed_duration_after_delayed_attack', () => {
   const score=authored(), early=note(score,0,0,1), late=note(score,0,0,6);early.isDead=late.isDead=true;
   early.beat.brushType=model.BrushType.BrushDown;early.beat.brushDuration=120;score.finish(settings);
@@ -638,4 +665,27 @@ it('keeps a dead brush that ends after the last bar inside the plan',()=>{
   const plan=buildPlaybackPlan(score,1);
   expect(plan.durationTick).toBe(3900);
   expect(plan.durationTick).toBe(Math.max(...plan.notes.map(n=>n.endTick)));
+});
+
+it('records the articulation a locked track keeps only where an automation would change it', () => {
+  // A guitar (program 25) with two quarter notes; an automation to a bass (33) may sit on either beat.
+  const plan = (automationAt: number | null) => {
+    const score = authored(2, 1); note(score, 0, 0); note(score, 0, 1);
+    if (automationAt !== null) score.tracks[0].staves[0].bars[0].voices[0].beats[automationAt].automations.push(model.Automation.buildInstrumentAutomation(false, 0, 33));
+    score.finish(settings);
+    return buildPlaybackPlanFromJson(model.JsonConverter.scoreToJson(score), ['base/0'], 7);
+  };
+  const played = (automationAt: number | null) => plan(automationAt).notes.map(n => n.articulation);
+  const kept = (automationAt: number | null) => plan(automationAt).notes.map(n => n.lockedArticulation ?? n.articulation);
+  const written = played(null);
+  expect(written).toEqual(['picked', 'picked']);
+  // Unlocked, the automation on the second beat makes that note a bass; locked, the guitar's articulation stays.
+  expect(played(1)).toEqual(['picked', 'fingered']);
+  expect(plan(1).notes.map(n => n.lockedArticulation)).toEqual([undefined, 'picked']);
+  expect(kept(1)).toEqual(written);
+  // The lock keeps the sound in effect at the start: with the automation on the first beat that is the bass, as it is unlocked.
+  expect(played(0)).toEqual(['fingered', 'fingered']);
+  expect(kept(0)).toEqual(played(0));
+  // A plan with no automation carries no extra field.
+  expect(plan(null).notes.every(n => !('lockedArticulation' in n))).toBe(true);
 });

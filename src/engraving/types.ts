@@ -16,6 +16,9 @@ export interface EngravingTypography {
   tabScale:number|null;
 }
 
+/** One bar's width as a weight within its system (1 is the default width); a bar without an entry keeps the default. */
+export interface BarWidth {bar:number;scale:number}
+
 export interface EngravingOverrides {
   stylesheet:{
     hideDynamics:InheritBool;
@@ -43,6 +46,8 @@ export interface EngravingOverrides {
   profiles:Array<{trackId:string;profile:TrackProfile}>;
   /** Absent means the default typography; documents saved before typography existed have no such field. */
   typography?:EngravingTypography;
+  /** Absent means every bar keeps its default width; documents saved before bar widths existed have no such field. Entries run in bar order. */
+  barWidths?:BarWidth[];
 }
 
 export interface PageLayout {

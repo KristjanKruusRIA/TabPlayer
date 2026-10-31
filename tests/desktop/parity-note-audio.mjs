@@ -92,7 +92,7 @@ export async function runNoteAudioAcceptance({buildPath}={}){
   const exportAs=async({format,name,extension,audio})=>{
     await ui.clickWorkspaceCommand(page,'Export score',{waitForIdle:false});
     const dialog=page.getByRole('dialog',{name:'Export score'});await dialog.getByLabel('Export format').selectOption(format);
-    if(audio){await dialog.getByLabel('Bit depth').selectOption('16');await dialog.getByLabel('Effect tail (seconds)').fill('0.1');}
+    if(audio){await dialog.getByRole('radio',{name:'16 bit'}).click();await dialog.getByLabel('Effect tail (seconds)').fill('0.1');}
     await dialog.getByLabel('File name',{exact:true}).fill(name);await dialog.getByRole('button',{name:'Export',exact:true}).click();
     const path=resolve(exportFolder,`${name}.${extension}`),written=format==='gp'?gpTarget:path,until=performance.now()+120000;
     while(performance.now()<until&&!existsSync(written)){const failure=dialog.getByRole('alert');if(await failure.count())throw Error(await failure.innerText());await sleep(200);}

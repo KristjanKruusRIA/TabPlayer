@@ -13,6 +13,9 @@ import { applyNoteAudio, collectAudible, collectNoteAudio, type AudibleAttack, t
 import { hasNoteAudio } from '../editor/note-audio';
 import type { ReferenceLocation } from './reference-sync-types';
 import { interpretAttacks, type Attack } from './interpretation';
+import { DRUM_KIT_ELEMENTS, planKitElement } from './drum-kit';
+import { ownerOf } from '../instruments/drum-kit';
+import type { DrumKitElement } from '../edit-types';
 
 const settings = new Settings();
 const validMeter = (numerator:number,denominator:number) => Number.isSafeInteger(numerator) && numerator > 0 && numerator <= 0xffffffff && [1,2,4,8,16,32,64,128,256].includes(denominator);
@@ -40,7 +43,7 @@ export function prepareMidiScore(score: model.Score): model.Score {
   return copy;
 }
 
-type RawNote = { track: number; trackAttack: number; onOrder: number; offOrder: number; start: number; end: number; channel: number; program?: number; key: number; rawKey: number; velocity: number; provenance?: string };
+type RawNote = { track: number; trackAttack: number; onOrder: number; offOrder: number; start: number; end: number; channel: number; program?: number; key: number; rawKey: number; velocity: number; provenance?: string; kit?: DrumKitElement };
 type RawEvent = (Omit<Extract<PlanMidiEvent, { type: 'program' }>, 'trackId'> & { track: number }
   | { type: 'controller'; track: number; tick: number; channel: number; controller: number; value: number }
   | { type: 'bend' | 'noteBend'; track: number; tick: number; channel: number; key?: number; value: number }) & { order: number };
@@ -344,6 +347,9 @@ function buildWithIdentities(original: model.Score, generation: number, ids: str
     laneData.set(id, { events: generated.events, gaps, markers: isolated.markers, attacks, bends });
   }
   const notes: PlanNote[] = [], played = new Map<model.Note, PlanNote[]>(), interpreted: Attack[] = [];
+  // The program each channel sounds at the start: its last program change at or before the first bar's start, else the track's own. A locked track keeps this sound.
+  const startPrograms = new Map<string, number>();
+  for (const event of complete.events.events.flatMap(e => e.type === 'program' && e.tick <= occurrences[0].startTick && e.program < 128 ? [e] : []).sort((x, y) => x.tick - y.tick || x.order - y.order)) startPrograms.set(`${event.track}/${nativeChannel(event.track, event.channel)}`, event.program);
   const byNote = new Map(all.map(source => [source.note, source]));
   let fullIndex = 0;
   // How far a pickup bar is right-aligned: the heard bar's meter less its written length in the longest part of any track or staff.
@@ -388,19 +394,24 @@ function buildWithIdentities(original: model.Score, generation: number, ids: str
           actual.end = actual.start + baseline.end - baseline.start;
           corrected?.(actual.track, actual.trackAttack, actual.end - actual.start);
         }
+        // A drum note is mixed with the piece its articulation belongs to; the player knows only its pitch, and so is told wherever that is another piece.
+        if (source.note.isPercussion) { const kit = planKitElement(ownerOf(score.tracks[source.track], source.note.percussionArticulation), actual.key); if (kit) actual.kit = kit; }
         let origin = source.note.hammerPullOrigin ?? (source.note.slideOrigin?.slideOutType === model.SlideOutType.Legato ? source.note.slideOrigin : null) ?? source.note.slurOrigin;
         while (origin?.tieOrigin) origin = origin.tieOrigin;
         const from = origin && !source.note.beat.deadSlapped ? [...(played.get(origin) ?? [])].reverse().find(n => n.startTick < actual.start && n.source.target.track === source.track && n.source.target.staff === source.staff && n.source.target.voice === source.voice && n.source.string === Math.max(0, source.note.string)) : undefined;
         const string = source.note.beat.deadSlapped ? score.tracks[source.track].staves[source.staff].tuning.length - attack : Math.max(0, source.note.string);
         const profile = interpretations?.[ids[source.track]], styled = profile && source.note.isStringed;
+        const interpretedStyle = styled && !source.note.beat.slap && !source.note.beat.pop ? profile.style : undefined;
         const note: PlanNote = {
           id: `${ids[source.track]}/${source.staff}/${source.bar}/${source.voice}/${source.beat}/${source.index}/${occurrence.bar}/${occurrence.occurrence}/${attack}`,
           trackId: ids[source.track], source: { target: { track: source.track, staff: source.staff, bar: source.bar, voice: source.voice, beat: source.beat }, string },
           ...(source.bar !== occurrence.bar ? { playedBar: occurrence.bar } : {}),
           occurrence: occurrence.occurrence, startTick: actual.start, endTick: actual.end, key: actual.key, velocity: actual.velocity,
           channel: nativeChannel(source.track, actual.channel), program: actual.program ?? score.tracks[source.track].playbackInfo.program,
-          articulation: source.note.beat.deadSlapped ? 'dead' : articulation(source.note, actual.program ?? score.tracks[source.track].playbackInfo.program, !!from, styled && !source.note.beat.slap && !source.note.beat.pop ? profile.style : undefined), legatoFrom: from?.id ?? null, pitch: pitchCurve({ ...isolated, channel: nativeChannel(source.track, isolated.channel), start: isolated.start + barGap, end: isolated.end + barGap }, actual, lane.bends),
+          articulation: source.note.beat.deadSlapped ? 'dead' : articulation(source.note, actual.program ?? score.tracks[source.track].playbackInfo.program, !!from, interpretedStyle), legatoFrom: from?.id ?? null, pitch: pitchCurve({ ...isolated, channel: nativeChannel(source.track, isolated.channel), start: isolated.start + barGap, end: isolated.end + barGap }, actual, lane.bends),
         };
+        // What the note would sound as if its track's sound is locked: the default articulation of the start sound, not of the automated one. Left out when it is the same.
+        if (!source.note.beat.deadSlapped) { const kept = articulation(source.note, startPrograms.get(`${source.track}/${nativeChannel(source.track, actual.channel)}`) ?? score.tracks[source.track].playbackInfo.program, !!from, interpretedStyle); if (kept !== note.articulation) note.lockedArticulation = kept; }
         if (styled) {
           const beat = source.note.beat, masterBar = beat.voice.bar.masterBar;
           // Strong beats are counted from the written start; a pickup bar is right-aligned by its written length, ending where a full bar does.
@@ -419,7 +430,7 @@ function buildWithIdentities(original: model.Score, generation: number, ids: str
   for(const event of gpControllerEvents(score,occurrences))events.push({type:'controller',trackId:ids[event.track],tick:event.tick,channel:nativeChannel(event.track,event.channel),controller:event.controller,value:event.value,order:Number.MAX_SAFE_INTEGER});
   if (audible.length) applyNoteAudio(audible, notes, Math.max(sliceExtent, complete.events.end, ...complete.events.notes.map(n => n.end)));
   for (const note of complete.events.notes) {
-    const common = { trackId: ids[note.track], channel: nativeChannel(note.track, note.channel), key: note.key, velocity: note.velocity };
+    const common = { trackId: ids[note.track], channel: nativeChannel(note.track, note.channel), key: note.key, velocity: note.velocity, ...(note.kit ? { kitElement: note.kit } : {}) };
     events.push({ ...common, type: 'noteOn', tick: note.start, order: note.onOrder }, { ...common, type: 'noteOff', tick: note.end, order: note.offOrder });
   }
   const durationTick = Math.max(sliceExtent, complete.events.end, ...complete.events.notes.map(n => n.end), 0);
@@ -495,7 +506,7 @@ export function validatePlaybackPlan(plan: PlaybackPlan) {
     if (event.tick > plan.durationTick) fail(`MIDI ${event.type} after duration`);
     if (!integer(event.channel, 15)) fail('MIDI channel');
     if (!tracks.has(event.trackId) || event.tick < previous) fail('MIDI structure');
-    if ((event.type === 'noteOn' || event.type === 'noteOff') && (!integer(event.key, 127) || !integer(event.velocity, 127))) fail();
+    if ((event.type === 'noteOn' || event.type === 'noteOff') && (!integer(event.key, 127) || !integer(event.velocity, 127) || event.kitElement !== undefined && !DRUM_KIT_ELEMENTS.includes(event.kitElement))) fail();
     if (event.type === 'program' && !integer(event.program, 127)) fail();
     if (event.type === 'controller' && (!integer(event.controller, 127) || !integer(event.value, 127))) fail();
     if ((event.type === 'bend' || event.type === 'noteBend') && !Number.isFinite(event.value)) fail();

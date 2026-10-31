@@ -1,4 +1,5 @@
 use crate::project::{BeatTarget, NoteTarget};
+use crate::settings::KitElement;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
@@ -113,6 +114,9 @@ pub struct PlanNote {
     pub key: u8,
     pub velocity: u8,
     pub articulation: Articulation,
+    /// The articulation the note has when its track's sound is locked: the default of the start sound, where an automation would change it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub locked_articulation: Option<Articulation>,
     pub legato_from: Option<String>,
     pub pitch: Vec<PitchPoint>,
 }
@@ -130,6 +134,9 @@ pub enum PlanMidiEvent {
         channel: u8,
         key: u8,
         velocity: u8,
+        /// The kit element the articulation belongs to, where that is not the one its pitch sounds.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        kit_element: Option<KitElement>,
     },
     NoteOff {
         track_id: String,
@@ -137,6 +144,9 @@ pub enum PlanMidiEvent {
         channel: u8,
         key: u8,
         velocity: u8,
+        /// The kit element the articulation belongs to, where that is not the one its pitch sounds.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        kit_element: Option<KitElement>,
     },
     Program {
         track_id: String,

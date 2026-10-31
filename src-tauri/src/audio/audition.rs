@@ -160,6 +160,7 @@ fn build(request: &AuditionRequest) -> (PlaybackPlan, DocumentSettings, f64) {
             key: note.key,
             velocity: note.velocity,
             articulation,
+            locked_articulation: None,
             legato_from: None,
             pitch: vec![PitchPoint {
                 tick: start,
@@ -172,6 +173,7 @@ fn build(request: &AuditionRequest) -> (PlaybackPlan, DocumentSettings, f64) {
             channel,
             key: note.key,
             velocity: note.velocity,
+            kit_element: None,
         });
         midi.push(PlanMidiEvent::NoteOff {
             track_id: TRACK_ID.into(),
@@ -179,6 +181,7 @@ fn build(request: &AuditionRequest) -> (PlaybackPlan, DocumentSettings, f64) {
             channel,
             key: note.key,
             velocity: 0,
+            kit_element: None,
         });
     }
     midi.sort_by(|a, b| {

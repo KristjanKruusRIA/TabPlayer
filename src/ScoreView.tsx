@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react';
 import { AlphaTabApi, LayoutMode, SystemsLayoutMode, type model, StaveProfile, type PlaybackHighlightChangeEventArgs } from '@coderline/alphatab';
 import './tremolo-guard';
 import type { BeatTarget } from './project';
@@ -12,6 +12,8 @@ import {isPhysicalPageLayout,type ScoreDisplayPreferences} from './engraving/scr
 import {arrangeScreenPages,hitTestScreenPages,mapScreenRect,paginateScreenScore,resolveScreenZoom,type ScreenPagination,type ScreenRenderChunk,type ScreenRect,type ScreenSystem} from './engraving/screen-pages';
 import {installScreenPlayback,type ScreenPlaybackContext} from './engraving/screen-playback';
 import { describeScoreError,type ScoreError } from './editor/score-errors';
+import { BAR_SCALE_BIG_STEP,BAR_SCALE_RANGE,BAR_SCALE_STEP,clampBarScale,scaleAfterDrag } from './engraving/bar-widths';
+import { busyGuard } from './ui/useBusyGuard';
 import { listScaleDiagrams,type ScaleDiagram } from './harmony/scale-diagram';
 import { ScaleDiagramView,scaleDiagramSize } from './harmony/ScaleDiagramView';
 import './ScoreView.css';
@@ -28,10 +30,13 @@ const noErrors:readonly ScoreError[]=[];
 type Handles={start:Marker&{target:BeatTarget};end:Marker&{target:BeatTarget}};
 type Drag={anchor:BeatTarget;last:BeatTarget;lanes:VoiceAddress[];bars?:Extract<MusicSelection,{kind:'bars'}>};
 
+/** Design mode for bar widths: `scaleOf` is a bar's saved weight (1 is the default) and `onScale` records one edit. */
+export interface BarDesign {busy:boolean;/** The bar's weight now, and the weight it has with no width set here (1, or what an imported file gave it). */scaleOf:(bar:number)=>number;defaultOf:(bar:number)=>number;onScale:(bar:number,scale:number)=>void}
+type BarHandle={bar:number;x:number;y:number;h:number;width:number};
 const defaultDisplay:ScoreDisplayPreferences={layout:'parchment',zoomMode:'manual'};
 const defaultPage:PageLayout={widthMm:210,heightMm:297,marginsMm:{top:15,right:15,bottom:15,left:15},scale:1,profile:'document'};
 
-export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSelection=null,onEditorSelection,projection,visibleTracks,engraving,editTarget,editString,editNoteIndex,display=defaultDisplay,page:pageInput=defaultPage,onDisplayStatus,errors=noErrors}: {
+export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSelection=null,onEditorSelection,projection,visibleTracks,engraving,editTarget,editString,editNoteIndex,display=defaultDisplay,page:pageInput=defaultPage,onDisplayStatus,errors=noErrors,barDesign=null}: {
   score:model.Score;track:number;zoom:number;profile:string;onSelect:(target:BeatTarget,string?:number,noteIndex?:number)=>void;
   playback:NativePlaybackController|null;
   editorSelection?:MusicSelection|null;onEditorSelection?:(selection:MusicSelection|null)=>void;
@@ -40,6 +45,8 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
   editTarget?:BeatTarget;editString?:number;editNoteIndex?:number|null;
   /** Measures to mark as score errors; empty when the viewer turned marking off. */
   errors?:readonly ScoreError[];
+  /** Shows a handle on every bar's right edge for changing its width. Layouts that ignore widths show none. */
+  barDesign?:BarDesign|null;
 }) {
   const wrapper=useRef<HTMLDivElement>(null),container=useRef<HTMLDivElement>(null),api=useRef<AlphaTabApi|null>(null);
   const tracks=visibleTracks??[track],renderedScore=projection?.score??score,trackKey=tracks.join(',');
@@ -82,6 +89,8 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
   const [caret,setCaret]=useState<(Marker&{entry:boolean})|null>(null),caretElement=useRef<HTMLSpanElement>(null),revealCaret=useRef(false),rendering=useRef(false);
   const refresh=useRef(()=>{}),refreshCaret=useRef(()=>{}),refreshErrors=useRef(()=>{});
   const [errorBlocks,setErrorBlocks]=useState<(Marker&{label:string})[]>([]);
+  const refreshDesign=useRef(()=>{}),[barHandles,setBarHandles]=useState<BarHandle[]>([]),[barDrag,setBarDrag]=useState<{bar:number;delta:number}|null>(null),designing=useRef<BarDesign|null>(null);
+  const handleRefs=useRef(new Map<number,HTMLElement>()),[activeBar,setActiveBar]=useState<number|null>(null),restoreBar=useRef<number|null>(null),heldBar=useRef<number|null>(null),dragging=useRef<{bar:number;pointer:number;startX:number;start:number;width:number;delta:number;element:HTMLElement}|null>(null);
   const refreshDiagrams=useRef(()=>{}),[diagramBlocks,setDiagramBlocks]=useState<Array<{x:number;y:number;w:number;diagram:ScaleDiagram}>>([]),[openDiagram,setOpenDiagram]=useState<number|null>(null);
   const editBeat=editTarget?score.tracks[editTarget.track]?.staves[editTarget.staff]?.bars[editTarget.bar]?.voices[editTarget.voice]?.beats[editTarget.beat]:undefined;
   const editLocation=editBeat&&editTarget?`Editing ${score.tracks[editTarget.track].name || `track ${editTarget.track+1}`}, measure ${editTarget.bar+1}, beat ${editTarget.beat+1}, voice ${editTarget.voice+1}${editBeat.isEmpty?', empty':editBeat.isRest?', rest':''}${editNoteIndex!=null?`, note ${editNoteIndex+1}`:editString?`, string ${editString}`:''}`:'';
@@ -147,6 +156,19 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
       const rect=mapped({x:left,y:top,w:Math.max(...boxes.map(box=>box.x+box.w))-left,h:Math.max(...boxes.map(box=>box.y+box.h))-top},system);
       return rect&&[rect.x,rect.y,rect.w,rect.h].every(Number.isFinite)?[{...rect,label:`Score error: ${group.map(describeScoreError).join('; ')}`}]:[];
     }));
+  };
+  /** Puts a width handle on the right edge of each master bar the renderer placed, in the layouts that size bars by weight. */
+  refreshDesign.current=()=>{
+    const view=api.current,layout=layoutCurrent.current.display.layout;
+    if(!designing.current||layout==='verticalScreen'||layout==='horizontalScreen'){setBarHandles([]);return;}
+    // A render in progress keeps the handles where they were: removing them would drop the keyboard focus of the one just used.
+    if(!view||rendering.current)return;
+    // Between a page edit and its new pagination there is nothing to place the handles on; they stay where they were rather than being rebuilt (and losing focus).
+    if(layoutCurrent.current.sourcePhysical&&!presentation.current.physical)return;
+    setBarHandles((view.boundsLookup?.staffSystems??[]).flatMap(system=>system.bars.flatMap(bar=>{
+      const rect=mapped(bar.realBounds,system);
+      return rect&&[rect.x,rect.y,rect.w,rect.h].every(Number.isFinite)&&rect.w>0&&rect.h>0?[{bar:bar.index,x:rect.x+rect.w,y:rect.y,h:rect.h,width:rect.w}]:[];
+    })));
   };
   /** Anchors each shown track's scale diagrams above the staff at their beat, wherever the renderer placed it. */
   refreshDiagrams.current=()=>{
@@ -246,7 +268,7 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
           setNatural({score:c.renderedScore,tracks:c.trackKey,layout:c.display.layout,width:c.available.width,engraving:c.engraving,profile:c.profile,value:width});
         }
       }
-      refresh.current();refreshCaret.current();refreshErrors.current();refreshDiagrams.current();
+      refresh.current();refreshCaret.current();refreshErrors.current();refreshDiagrams.current();refreshDesign.current();
     }),view.playbackRangeHighlightChanged.on(event=>{if(current.current.editorSelection&&current.current.editorSelection.kind!=='notes')placeHandles(event);})];
     const mouseMove=(event:MouseEvent)=>{
       if(!drag.current)return;const physical=presentation.current.physical;if(physical&&wrapper.current){const rect=wrapper.current.getBoundingClientRect(),hit=hitTestScreenPages(physical.pagination,physical.arrangement,{x:event.clientX-rect.left,y:event.clientY-rect.top},current.current.editTarget);if(hit)move(hit.beat);return;}if(layoutCurrent.current.sourcePhysical)return;const bounds=view.uiFacade.getOffset(null,view.canvasElement),beat=view.boundsLookup?.getBeatAtPos(event.clientX+window.scrollX-bounds.x,event.clientY+window.scrollY-bounds.y);if(beat)move(beat);
@@ -273,10 +295,36 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
     if(!old||old.score!==renderedScore||old.tracks!==trackKey){loaded.current={score:renderedScore,tracks:trackKey};if(playback)playback.setRenderedScore(renderedScore,tracks);else view.renderScore(renderedScore,tracks);}
     else view.render();
   },[renderedScore,trackKey,playback,sourceWidth,sourceScale,sourcePhysical,measureBase,screenLayout,display.layout==='verticalScreen',display.layout==='horizontalScreen',engraving,profile,page]);
-  useLayoutEffect(()=>{playbackPresentation.current?.presentationChanged();refresh.current();refreshCaret.current();refreshErrors.current();refreshDiagrams.current();},[pagination,arrangement,pageError]);
+  useLayoutEffect(()=>{playbackPresentation.current?.presentationChanged();refresh.current();refreshCaret.current();refreshErrors.current();refreshDiagrams.current();refreshDesign.current();},[pagination,arrangement,pageError]);
+  designing.current=barDesign;
+  const tabBar=barHandles.some(handle=>handle.bar===activeBar)?activeBar:barHandles[0]?.bar;
+  useEffect(()=>{refreshDesign.current();},[!!barDesign,display.layout,zoom,renderedScore,available.width,available.height]);
+  // A drag belongs to the document and the free state it started in: a busy score or a changed score or width ends it unrecorded.
+  useEffect(()=>{if(dragging.current)cancelBarDrag();},[barDesign?.busy,renderedScore,engraving,!!barDesign,display.layout]);
+  useEffect(()=>{if(dragging.current&&!barHandles.some(handle=>handle.bar===dragging.current!.bar))cancelBarDrag();},[barHandles]);
+  useEffect(()=>{
+    const abandon=()=>cancelBarDrag(),key=(event:KeyboardEvent)=>{if(event.key==='Escape'&&dragging.current){event.preventDefault();event.stopPropagation();cancelBarDrag();}};
+    window.addEventListener('blur',abandon);document.addEventListener('keydown',key,true);
+    return()=>{window.removeEventListener('blur',abandon);document.removeEventListener('keydown',key,true);dragging.current=null;};
+  },[]);
+  // After an accepted width the handle may be rebuilt (page layouts re-paginate): put focus back on that bar once it exists, unless the user went elsewhere.
+  useLayoutEffect(()=>{
+    const bar=restoreBar.current;if(bar===null)return;const element=handleRefs.current.get(bar);if(!element)return;
+    if(document.activeElement!==element)element.focus({preventScroll:true});restoreBar.current=null;
+  },[barHandles,barDesign]);
+  // The focused bar is gone (measures were removed): focus its nearest neighbour rather than dropping to the page.
+  useLayoutEffect(()=>{
+    const held=heldBar.current;
+    if(held===null||!barHandles.length||handleRefs.current.has(held)||(document.activeElement&&document.activeElement!==document.body))return;
+    const near=barHandles.reduce((a,b)=>Math.abs(b.bar-held)<Math.abs(a.bar-held)?b:a);restoreBar.current=null;handleRefs.current.get(near.bar)?.focus({preventScroll:true});
+  },[barHandles]);
+  useEffect(()=>{
+    const away=(event:FocusEvent)=>{if(restoreBar.current!==null&&event.target instanceof Element&&!event.target.closest('.score-bar-handle'))restoreBar.current=null;};
+    document.addEventListener('focusin',away);return()=>document.removeEventListener('focusin',away);
+  },[]);
   useEffect(()=>{refreshErrors.current();},[errors,score,track,zoom,profile,projection,visibleTracks]);
   useEffect(()=>{refreshDiagrams.current();},[score,track,zoom,profile,projection,visibleTracks]);
-  const capture=(event:ReactMouseEvent<HTMLDivElement>)=>{if(event.button!==0)return;event.preventDefault();event.currentTarget.focus({preventScroll:true});modifiers.current={shift:event.shiftKey,toggle:event.ctrlKey||event.metaKey,detail:event.detail};drag.current=null;};
+  const capture=(event:ReactMouseEvent<HTMLDivElement>)=>{if(event.button!==0||(event.target instanceof Element&&event.target.closest('.score-bar-handle')))return;event.preventDefault();event.currentTarget.focus({preventScroll:true});modifiers.current={shift:event.shiftKey,toggle:event.ctrlKey||event.metaKey,detail:event.detail};drag.current=null;};
   const resize=(edge:'start'|'end',event:ReactMouseEvent)=>{
     event.preventDefault();event.stopPropagation();if(event.button!==0||!handles||!editorSelection||editorSelection.kind==='notes')return;
     const fixed=handles[edge==='start'?'end':'start'].target;
@@ -286,6 +334,51 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
     if(event.button!==0||!pagination||!arrangement||!wrapper.current)return;
     const rect=wrapper.current.getBoundingClientRect(),hit=hitTestScreenPages(pagination,arrangement,{x:event.clientX-rect.left,y:event.clientY-rect.top},editTarget);
     if(hit){pointerActions.current.downBeat(hit.beat);if(hit.note)pointerActions.current.downNote(hit.note);}
+  };
+  /** One drag is one edit: the guide follows the pointer, and only a release that still has the pointer, the document and a free score records a width. Anything else abandons it. */
+  const cancelBarDrag=()=>{
+    const active=dragging.current;if(!active)return;dragging.current=null;
+    try{active.element.releasePointerCapture?.(active.pointer);}catch{ /* The pointer may already be gone. */ }
+    setBarDrag(null);
+  };
+  const startBarDrag=(handle:BarHandle,event:ReactPointerEvent<HTMLDivElement>)=>{
+    const design=designing.current;if(event.button!==0||!design)return;event.preventDefault();event.stopPropagation();if(design.busy)return;
+    event.currentTarget.focus({preventScroll:true});
+    try{event.currentTarget.setPointerCapture?.(event.pointerId);}catch{ /* Capture is a refinement; blur and a missing button still end the drag. */ }
+    dragging.current={bar:handle.bar,pointer:event.pointerId,startX:event.clientX,start:design.scaleOf(handle.bar),width:handle.width,delta:0,element:event.currentTarget};setBarDrag({bar:handle.bar,delta:0});
+  };
+  const moveBarDrag=(event:ReactPointerEvent<HTMLDivElement>)=>{
+    const active=dragging.current;if(!active||event.pointerId!==active.pointer)return;
+    // A move with no button down means the release was missed (another window had it).
+    if(event.buttons===0){cancelBarDrag();return;}
+    active.delta=Math.max(-active.width*.75,event.clientX-active.startX);setBarDrag({bar:active.bar,delta:active.delta});
+  };
+  const endBarDrag=(event:ReactPointerEvent<HTMLDivElement>)=>{
+    const active=dragging.current;if(!active||event.pointerId!==active.pointer)return;
+    const latest=designing.current;cancelBarDrag();
+    // The latest score decides: a busy score or a changed width since the press drops the drag.
+    if(!latest||latest.busy||active.delta===0||latest.scaleOf(active.bar)!==active.start)return;
+    const next=scaleAfterDrag(active.start,active.width,active.delta);if(next===active.start)return;
+    restoreBar.current=active.bar;latest.onScale(active.bar,next);
+  };
+  const keyBar=(handle:BarHandle,event:ReactKeyboardEvent<HTMLDivElement>)=>{
+    // Tab and Escape keep their usual jobs; a modified key stays with the app (Ctrl+Z). Every other key stays out of the score.
+    if(event.key==='Enter')event.stopPropagation();
+    if(event.ctrlKey||event.metaKey||event.altKey||event.key==='Tab'||event.key==='Escape')return;
+    event.stopPropagation();
+    const order=barHandles.map(item=>item.bar),at=order.indexOf(handle.bar),key=event.key;
+    const go=key==='Home'?0:key==='End'?order.length-1:!event.shiftKey&&key==='ArrowRight'?at+1:!event.shiftKey&&key==='ArrowLeft'?at-1:null;
+    if(go!==null){
+      event.preventDefault();const to=order[go];
+      if(to!==undefined&&to!==handle.bar){setActiveBar(to);handleRefs.current.get(to)?.focus();}
+      return;
+    }
+    const design=designing.current,step=key==='PageUp'||key==='PageDown'?BAR_SCALE_BIG_STEP:BAR_SCALE_STEP;
+    const direction=key==='ArrowRight'||key==='PageUp'?1:key==='ArrowLeft'||key==='PageDown'?-1:0,reset=key==='Delete'||key==='Backspace';
+    if(!direction&&!reset)return;
+    event.preventDefault();if(!design||design.busy)return;
+    const now=design.scaleOf(handle.bar),target=reset?design.defaultOf(handle.bar):clampBarScale(now+direction*step);
+    if(target!==now){restoreBar.current=handle.bar;design.onScale(handle.bar,target);}
   };
   return <div ref={wrapper} tabIndex={-1} className="score-presentation" data-layout={display.layout} onMouseDownCapture={capture}>
     {pageError&&<p className="score-page-error" role="alert">{pageError} Continuous view is shown at {zoom}%.</p>}
@@ -305,6 +398,13 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
       <button type="button" className="score-scale-diagram-chip" aria-label={`Show scale diagram ${block.diagram.name||'without a name'}`} aria-expanded={openDiagram===index} style={{height:chipHeight,width:block.w,padding:'0 4px',font:'600 10px sans-serif',border:'1px solid #97a6b6',borderRadius:4,background:'#fffdf8',color:'#161c24',overflow:'hidden',whiteSpace:'nowrap',textOverflow:'ellipsis',cursor:'pointer'}}>▦ {chipLabel(block.diagram)}</button>
       {openDiagram===index&&<div style={{position:'absolute',left:0,top:chipHeight+chipGap,width:scaleDiagramSize(block.diagram).width*diagramScale,border:'1px solid #97a6b6',borderRadius:4,overflow:'hidden',background:'#fffdf8',pointerEvents:'none'}}><ScaleDiagramView diagram={block.diagram}/></div>}
     </div>)}
+    {barHandles.map(handle=>{
+      const scale=barDesign?.scaleOf(handle.bar)??1,base=barDesign?.defaultOf(handle.bar)??1,moving=barDrag?.bar===handle.bar?barDrag.delta:null,percent=Math.round(scale*100);
+      return <div key={handle.bar} ref={element=>{if(element)handleRefs.current.set(handle.bar,element);else handleRefs.current.delete(handle.bar);}} role="slider" tabIndex={handle.bar===tabBar?0:-1} aria-orientation="horizontal" aria-label={`Bar ${handle.bar+1} width`} aria-valuemin={BAR_SCALE_RANGE.min*100} aria-valuemax={BAR_SCALE_RANGE.max*100} aria-valuenow={percent} aria-valuetext={`${percent}% of the standard width${base!==1?`, imported ${Math.round(base*100)}%`:''}`} title="Drag, or press Shift+Left and Shift+Right. Left and Right move between bars. Delete restores the default width."
+        {...busyGuard<HTMLDivElement>({busy:barDesign?.busy,className:'score-bar-handle',onKeyDown:event=>keyBar(handle,event),onPointerDown:event=>startBarDrag(handle,event)})}
+        onPointerMove={moveBarDrag} onPointerUp={endBarDrag} onPointerCancel={cancelBarDrag} onLostPointerCapture={cancelBarDrag} onBlur={event=>{cancelBarDrag();if(event.relatedTarget)heldBar.current=null;}} onFocus={()=>{setActiveBar(handle.bar);heldBar.current=handle.bar;}}
+        style={{left:handle.x-5,top:handle.y,height:handle.h}}>{moving!==null&&<span className="score-bar-guide" aria-hidden="true" style={{left:5+moving}}/>}</div>;
+    })}
     <span className="score-edit-announcement" role="status" aria-live="polite" aria-atomic="true">{editLocation}</span>
     {caret&&<span ref={caretElement} role="img" aria-label="Edit target" className="score-edit-target" style={{left:caret.x,top:caret.y,width:caret.w,height:caret.h}}>{caret.entry&&<span className="score-edit-entry" aria-hidden="true">{editString?`String ${editString}`:'Entry'}</span>}</span>}
     {markers.map((marker,index)=><span key={index} role="img" aria-label={`Selected note ${index+1}`} style={{position:'absolute',left:marker.x,top:marker.y,width:marker.w,height:marker.h,boxSizing:'border-box',border:'2px solid #9aaf38',background:'rgba(185,205,105,.3)',borderRadius:3,pointerEvents:'none'}}/>)}

@@ -50,8 +50,8 @@ try{
   const exportAudio=async({format,type,rate,depth,name,expected})=>{
     await clickWorkspaceCommand(page,'Export score',{waitForIdle:false});
     const dialog=page.getByRole('dialog',{name:'Export score'});await dialog.getByLabel('Export format').selectOption(format);
-    await dialog.getByLabel('File type').selectOption(type);
-    await dialog.getByLabel('Sample rate').selectOption(String(rate));await dialog.getByLabel('Bit depth').selectOption(String(depth));
+    await dialog.getByRole('radio',{name:type==='flac'?'FLAC (lossless)':type.toUpperCase()}).click();
+    await dialog.getByRole('radio',{name:rate===48000?'48 kHz':'44.1 kHz'}).click();await dialog.getByRole('radio',{name:`${depth} bit`}).click();
     await dialog.getByLabel('File name',{exact:true}).fill(name);
     if(format==='wav')await dialog.getByText(`Saves as ${name}.${type}`,{exact:true}).waitFor();
     await dialog.getByRole('button',{name:'Export',exact:true}).click();

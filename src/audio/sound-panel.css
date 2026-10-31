@@ -30,12 +30,3 @@
 .sound-panel .sound-library-confirm{padding:6px;border:1px solid var(--ws-border);border-radius:3px;background:var(--ws-raised);font-size:12px}
 .sound-panel .sound-library [role=status]{min-height:1lh;margin:4px 0 0}
 .cabinet-notices,.export-cabinet-notices{display:flex;flex-direction:column;gap:4px;margin:6px 12px}.cabinet-notices .sound-ir-notice,.export-cabinet-notices .sound-ir-notice{margin:0;padding:6px 8px;border:1px solid var(--ws-border,currentColor);border-radius:3px;background:var(--ws-raised,transparent);font-size:12px;line-height:1.35;overflow-wrap:anywhere}
-
-.sound-panel .drum-kit-elements{display:flex;flex-direction:column;gap:8px;margin-top:6px}
-.sound-panel .drum-element-channel{display:flex;flex-direction:column;gap:4px;padding:6px;border:1px solid var(--ws-border);border-radius:3px}
-.sound-panel .drum-element-channel>legend{padding:0 4px;font-size:12px;font-weight:600;color:var(--ws-text)}
-.sound-panel .drum-element-switches{display:flex;gap:8px}
-.sound-panel .drum-element-switches label{display:flex;flex-direction:row;align-items:center;gap:4px}
-.sound-panel .drum-element-range{display:grid;grid-template-columns:1fr auto;gap:0 4px}
-.sound-panel .drum-element-range output{color:var(--ws-text);font-variant-numeric:tabular-nums}
-.sound-panel .drum-element-range input{grid-column:1 / -1;width:100%;height:20px;accent-color:var(--ws-accent)}

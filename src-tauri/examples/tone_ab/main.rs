@@ -224,6 +224,7 @@ fn settings_for(effects: FxSettings) -> DocumentSettings {
             voice_id: None,
             preset_id: "crunch".into(),
             effects,
+            ..Default::default()
         },
     );
     settings

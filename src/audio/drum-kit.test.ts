@@ -4,9 +4,14 @@ import { resolve } from 'node:path';
 import { buildDocument, previewEdit, trackIdentity } from '../engine';
 import { defaultMix, validateMix } from '../document-settings';
 import type { EditCommand, Project } from '../project';
+import { standardPercussionCatalog } from '../editor/percussion-catalog';
+import { drumPieces, instrumentOf, percussionInstruments } from '../instruments/drum-kit';
 import {
   canonicalDrumKitMix,
   DRUM_KIT_ELEMENTS,
+  kitElementOfInstrument,
+  pitchKitElement,
+  planKitElement,
   validateDrumElement,
   validateDrumKit,
 } from './drum-kit';
@@ -113,5 +118,66 @@ describe('drum-kit settings and validation', () => {
     const restored: Project = JSON.parse(serialized);
     const restoredBuild = buildDocument(restored);
     expect(restoredBuild.settings.mixes[trackId].drumKit).toEqual(next.settings.mixes[trackId].drumKit);
+  });
+});
+
+describe('drum kit elements follow the articulation, not only its pitch', () => {
+  const owner = (id: number) => {
+    const entry = standardPercussionCatalog.find(item => item.id === id)!;
+    return instrumentOf(entry.element, entry.outputMidiNumber);
+  };
+  const named = (label: string) => standardPercussionCatalog.find(item => item.label.startsWith(label))!;
+
+  it('puts every instrument of the kit in one element', () => {
+    for (const instrument of [...drumPieces, ...percussionInstruments]) {
+      expect(DRUM_KIT_ELEMENTS, instrument.id).toContain(kitElementOfInstrument(instrument.id));
+    }
+    expect(kitElementOfInstrument('kick')).toBe('kick');
+    expect(kitElementOfInstrument('snare')).toBe('snare');
+    expect(kitElementOfInstrument('hi-hat')).toBe('hats');
+    expect(kitElementOfInstrument('low-tom')).toBe('toms');
+    expect(kitElementOfInstrument('floor-tom')).toBe('toms');
+    expect(kitElementOfInstrument('crash')).toBe('cymbals');
+    expect(kitElementOfInstrument('ride-2')).toBe('cymbals');
+    expect(kitElementOfInstrument('cowbell')).toBe('other');
+  });
+
+  it('names the element for exactly the standard articulations whose pitch would mix them elsewhere', () => {
+    const differing = standardPercussionCatalog.filter(entry => {
+      const instrument = owner(entry.id);
+      return instrument && planKitElement(instrument, entry.outputMidiNumber) !== undefined;
+    });
+    // They sound the pitch of a snare, a ride or a tom, and are not those pieces.
+    expect(differing.map(entry => entry.label).sort()).toEqual([
+      'Bell Tree (hit)', 'Bell Tree (return)', 'Grancassa (hit)', 'Jingle Bell (hit)', 'Metronome (bell)', 'Metronome (hit)',
+      'Piatti (hand)', 'Piatti (hit)', 'Tinkle Bell (hit)',
+    ]);
+    for (const entry of differing) expect(planKitElement(owner(entry.id), entry.outputMidiNumber), entry.label).toBe('other');
+    // An ordinary snare, bass drum, hat and ride name nothing: the player reads their pitch.
+    for (const label of ['Snare (hit)', 'Kick (hit)', 'Hi-Hat (closed)', 'Ride (middle)']) {
+      const entry = named(label);
+      expect(planKitElement(owner(entry.id), entry.outputMidiNumber), label).toBeUndefined();
+    }
+  });
+
+  it('names nothing for an articulation nobody owns', () => {
+    expect(planKitElement(undefined, 38)).toBeUndefined();
+    expect(instrumentOf('Mystery', 77)?.id).toBe('woodblock-low');
+    expect(instrumentOf('Mystery', 1)).toBeUndefined();
+  });
+
+  it('groups pitches as the native player does', () => {
+    // settings.rs `gm_kit_element` is what the player falls back to, so read its match arms and compare every pitch.
+    const source = readFileSync(resolve(__dirname, '../../src-tauri/src/settings.rs'), 'utf8').replace(/\r\n/g, '\n');
+    const body = /pub fn gm_kit_element\(key: u8\) -> KitElement \{\n\s*match key \{\n([\s\S]*?)\n\s*\}\n\}/.exec(source)![1];
+    const native = new Map<number, string>();
+    let other = '';
+    for (const line of body.split('\n')) {
+      const arm = /^\s*([\d |]+|_) => KitElement::(\w+),/.exec(line)!;
+      if (arm[1] === '_') other = arm[2].toLowerCase();
+      else for (const key of arm[1].split('|')) native.set(Number(key.trim()), arm[2].toLowerCase());
+    }
+    expect(other).toBe('other');
+    for (let key = 0; key < 128; key++) expect(pitchKitElement(key), `pitch ${key}`).toBe(native.get(key) ?? 'other');
   });
 });

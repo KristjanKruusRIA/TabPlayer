@@ -80,7 +80,7 @@ export interface FxSettings {
   second?: FxSettings;
 }
 export type EffectBlock = Exclude<keyof FxSettings, 'order'|'second'>;
-export interface TrackSound { voiceId: string|null; presetId: 'clean'|'crunch'|'lead'|'bass'|'gm'; effects: FxSettings }
+export interface TrackSound { voiceId: string|null; presetId: 'clean'|'crunch'|'lead'|'bass'|'gm'; effects: FxSettings; locked?: boolean }
 export interface SyncAnchor { bar: number; occurrence: number; ratio: number; audioMs: number }
 export interface ReferenceSyncBounds { entryAudioMs: number; exitAudioMs: number }
 export type BackingFilter = 'none'|'bassEnhance'|'bassAttenuation'|'mediumEnhance'|'mediumAttenuation'|'highEnhance'|'highAttenuation';
@@ -124,6 +124,8 @@ export type EditCommand = LyricsCommand | GestureCommand | BarGestureCommand | R
   | { type: 'setScoreMetadata'; fields: ScoreMetadata }
   | { type: 'setDirections'; bar: number; directions: number[] }
   | { type: 'setNoteSpelling'; target: BeatTarget; noteIndex: number; accidentalMode: number }
+  | { type: 'setNoteCautionary'; target: BeatTarget; noteIndex: number; cautionary: boolean }
+  | { type: 'setNoteCourtesy'; target: BeatTarget; noteIndex: number; courtesy: boolean }
   | { type: 'addPitchedTrack'; name: string; program: number }
   | { type: 'addPercussionTrack'; name: string; program: number }
   | { type: 'addPitchedNote'; target: BeatTarget; pitch: number }

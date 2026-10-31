@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { previewEdit } from '../engine';
 import { blankProject } from '../project';
@@ -156,4 +156,78 @@ it('a string-count change sends the draft tuning name and the draft resets when 
   expect(onEdit).toHaveBeenLastCalledWith({type:'setStringCount',track:0,tuning:[64,59,55,50,45,40,35],keep:'high',tuningName:''});
   view.rerender(<TrackSettingsPanel score={fresh('Other')} selected={0} busy={false} onEdit={onEdit}/>);fireEvent.click(screen.getByRole('button',{name:'Apply tuning'}));
   expect(onEdit).toHaveBeenLastCalledWith({type:'setTuning',track:0,tuning:[64,59,55,50,45,40],tuningName:'Other'});
+});
+it('focusing dial does not erase tuning name or dispatch edits when unshifted',()=>{
+  const score=previewEdit(blankProject(),{type:'setTuning',track:0,tuning:[64,59,55,50,45,38],tuningName:'Drop D'}).score,onEdit=vi.fn();
+  render(<TrackSettingsPanel score={score} selected={0} busy={false} onEdit={onEdit}/>);
+  const dial=screen.getByRole('slider',{name:'Tuning (notes, high to low) string 6 peg'});
+  fireEvent.pointerDown(dial,{pointerId:1,clientY:100});
+  fireEvent.pointerUp(dial,{pointerId:1,clientY:100});
+  expect(onEdit).not.toHaveBeenCalled();
+});
+
+it('peg step does not commit unapplied draft text and sends only tuning change', () => {
+  const score = previewEdit(blankProject(), { type: 'setRest', target: { track: 0, staff: 0, bar: 0, voice: 0, beat: 0 } }).score;
+  const onEdit = vi.fn();
+  render(<TrackSettingsPanel score={score} selected={0} busy={false} onEdit={onEdit} />);
+
+  // Type 7 notes into the text box (unapplied draft text)
+  const input = screen.getByLabelText('Tuning (notes, high to low)');
+  fireEvent.change(input, { target: { value: 'E4 B3 G3 D3 A2 E2 B1' } });
+
+  // Click peg 6 step down
+  const downBtn = screen.getByRole('button', { name: 'Tune Tuning (notes, high to low) string 6 down' });
+  fireEvent.click(downBtn);
+
+  // Must NOT send setStringCount! Must send setTuning with 6 strings!
+  expect(onEdit).toHaveBeenCalledTimes(1);
+  expect(onEdit).toHaveBeenLastCalledWith({
+    type: 'setTuning',
+    track: 0,
+    tuning: [64, 59, 55, 50, 45, 39],
+    tuningName: '',
+  });
+});
+
+it('with string 1 edited in the text box and not applied, peg 6 step commits saved string 1, and peg 7 is disabled when 7 notes are typed', () => {
+  const score = previewEdit(blankProject(), { type: 'setRest', target: { track: 0, staff: 0, bar: 0, voice: 0, beat: 0 } }).score;
+  const onEdit = vi.fn();
+  render(<TrackSettingsPanel score={score} selected={0} busy={false} onEdit={onEdit} />);
+
+  // 1. Edit string 1 in the text box (E4 -> F4) and do not apply
+  const input = screen.getByLabelText('Tuning (notes, high to low)');
+  fireEvent.change(input, { target: { value: 'F4 B3 G3 D3 A2 E2' } });
+
+  // 2. Step peg 6 up (E2 40 -> F2 41)
+  const peg6Up = screen.getByRole('button', { name: 'Tune Tuning (notes, high to low) string 6 up' });
+  fireEvent.click(peg6Up);
+
+  // Must commit saved string 1 (64 / E4), NOT the draft string 1 (65 / F4)
+  expect(onEdit).toHaveBeenCalledTimes(1);
+  expect(onEdit).toHaveBeenLastCalledWith({
+    type: 'setTuning',
+    track: 0,
+    tuning: [64, 59, 55, 50, 45, 41],
+    tuningName: '',
+  });
+
+  // 3. On a 6-string track with 7 notes typed, peg 7 does not exist in the saved tuning: disable it
+  fireEvent.change(input, { target: { value: 'E4 B3 G3 D3 A2 E2 B1' } });
+  const peg7Up = screen.getByRole('button', { name: 'Tune Tuning (notes, high to low) string 7 up' });
+  expect(peg7Up).toBeDisabled();
+  const peg7Dial = screen.getByRole('slider', { name: 'Tuning (notes, high to low) string 7 peg' });
+  expect(peg7Dial).toHaveAttribute('aria-disabled', 'true');
+});
+it('wheel over two pegs within the settle time dispatches one setTuning edit with both strings', () => {
+  vi.useFakeTimers();
+  try {
+    const score = previewEdit(blankProject(), { type: 'setNote', target: { track: 0, staff: 0, bar: 0, voice: 0, beat: 0 }, string: 6, fret: 3 }).score, onEdit = vi.fn();
+    render(<TrackSettingsPanel score={score} selected={0} busy={false} onEdit={onEdit} />);
+    const peg = (n: number) => screen.getByRole('slider', { name: `Tuning (notes, high to low) string ${n} peg` });
+    peg(1).focus(); fireEvent.wheel(peg(1), { deltaY: -100 });
+    peg(2).focus(); fireEvent.wheel(peg(2), { deltaY: -100 });
+    act(() => { vi.advanceTimersByTime(300); });
+    expect(onEdit).toHaveBeenCalledTimes(1);
+    expect(onEdit).toHaveBeenLastCalledWith({ type: 'setTuning', track: 0, tuning: [65, 60, 55, 50, 45, 40], tuningName: '' });
+  } finally { vi.useRealTimers(); }
 });

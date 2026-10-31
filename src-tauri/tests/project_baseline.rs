@@ -225,6 +225,7 @@ fn source_session() -> (ProjectSession, [String; 4]) {
                 mute: false,
                 solo: true,
                 interpretation: None,
+                drum_kit: None,
             },
         })
         .unwrap();

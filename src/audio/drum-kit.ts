@@ -90,3 +90,53 @@ export function drumKitsOf(mixes: Record<string, ChannelMix>): Record<string, Dr
   }
   return out;
 }
+
+/** The kit element each instrument of the drum kit belongs to, by its place on the kit. Every instrument not listed is `other`. */
+const KIT_ELEMENT_OF_INSTRUMENT: Readonly<Record<string, DrumKitElement>> = {
+  kick: 'kick',
+  'kick-2': 'kick',
+  snare: 'snare',
+  'electric-snare': 'snare',
+  'hi-hat': 'hats',
+  'high-tom': 'toms',
+  'hi-mid-tom': 'toms',
+  'low-mid-tom': 'toms',
+  'low-tom': 'toms',
+  'high-floor-tom': 'toms',
+  'floor-tom': 'toms',
+  splash: 'cymbals',
+  crash: 'cymbals',
+  'crash-2': 'cymbals',
+  reverse: 'cymbals',
+  ride: 'cymbals',
+  china: 'cymbals',
+  'ride-2': 'cymbals',
+};
+
+/** The element an instrument of the kit belongs to. */
+export const kitElementOfInstrument = (instrumentId: string): DrumKitElement =>
+  KIT_ELEMENT_OF_INSTRUMENT[instrumentId] ?? 'other';
+
+/**
+ * The element a sounding pitch belongs to, which is all the native player knows of a note whose plan names no element.
+ * It must stay equal to `gm_kit_element` in src-tauri/src/settings.rs.
+ */
+export function pitchKitElement(key: number): DrumKitElement {
+  if (key === 35 || key === 36) return 'kick';
+  if (key === 37 || key === 38 || key === 40) return 'snare';
+  if (key === 42 || key === 44 || key === 46) return 'hats';
+  if ([41, 43, 45, 47, 48, 50].includes(key)) return 'toms';
+  if ([49, 51, 52, 53, 55, 57, 59].includes(key)) return 'cymbals';
+  return 'other';
+}
+
+/**
+ * The element a note names in the playback plan: the one its articulation belongs to, given the instrument that owns the
+ * articulation, and only where that is not the one its pitch gives (a metronome click sounds a snare pitch). A note nobody owns
+ * names none, and is mixed by its pitch.
+ */
+export function planKitElement(owner: { id: string } | undefined, key: number): DrumKitElement | undefined {
+  if (!owner) return undefined;
+  const element = kitElementOfInstrument(owner.id);
+  return element === pitchKitElement(key) ? undefined : element;
+}

@@ -1,3 +1,4 @@
+import { busyGuard } from '../ui/useBusyGuard';
 import { useEffect,useState } from 'react';
 import type { model } from '@coderline/alphatab';
 import type { BeatTarget } from '../project';
@@ -7,6 +8,7 @@ import {
   blankScaleDiagram,defaultMarkColor,defaultTextColor,getScaleDiagram,markAt,newMark,resized,scaleDiagramFromPitchClasses,sameScaleDiagram,scaleDiagramFromSelection,scaleMarkShapes,
   validateScaleDiagram,withMark,withoutMark,type ScaleDiagram,type ScaleDiagramCommand,type ScaleMark,type ScaleMarkShape,
 } from './scale-diagram';
+import { Segmented } from '../ui/Segmented';
 
 export interface ScaleDiagramEditorProps {
   score:model.Score;staff?:model.Staff;beat?:model.Beat;target:BeatTarget|null;selection:MusicSelection|null;busy:boolean;
@@ -15,11 +17,16 @@ export interface ScaleDiagramEditorProps {
   onEdit:(command:ScaleDiagramCommand)=>void;
 }
 const same=sameScaleDiagram;
+const shapeOptions=scaleMarkShapes.map(value=>({value,label:value}));
+const orientationOptions:ReadonlyArray<{value:ScaleDiagram['orientation'];label:string}>=[
+  {value:'horizontal',label:'Horizontal'},
+  {value:'vertical',label:'Vertical'},
+];
 /** Commits a typed number on blur or Enter, so "10" is never read as "1" on the way. */
-function NumberField({label,value,min,max,change}:{label:string;value:number;min:number;max:number;change:(value:number)=>void}) {
+function NumberField({label,value,min,max,busy,change}:{label:string;value:number;min:number;max:number;busy:boolean;change:(value:number)=>void}) {
   const [text,setText]=useState(String(value));
   useEffect(()=>setText(String(value)),[value]);
-  const commit=()=>{const next=Number(text);if(text.trim()!==''&&Number.isInteger(next)){const clamped=Math.min(max,Math.max(min,next));setText(String(clamped));if(clamped!==value)change(clamped);}else setText(String(value));};
+  const commit=()=>{if(busy){setText(String(value));return;}const next=Number(text);if(text.trim()!==''&&Number.isInteger(next)){const clamped=Math.min(max,Math.max(min,next));setText(String(clamped));if(clamped!==value)change(clamped);}else setText(String(value));};
   return <label>{label}<input type="number" min={min} max={max} value={text} onChange={event=>setText(event.target.value)} onBlur={commit} onKeyDown={event=>{if(event.key==='Enter'){event.preventDefault();commit();}}}/></label>;
 }
 const message=(cause:unknown)=>cause instanceof Error?cause.message:String(cause);
@@ -49,27 +56,36 @@ export function ScaleDiagramEditor({score,staff,beat,target,selection,busy,scale
     {!usable&&<p className="muted">Select a written beat on a stringed or keyboard staff to give it a scale diagram.</p>}
     <p className="muted">{stored?`This beat has a diagram${stored.name?` named “${stored.name}”`:''} with ${stored.marks.length} marks.`:'This beat has no scale diagram.'}</p>
     <div role="group" aria-label="Start a scale diagram">
-      <button type="button" disabled={busyOrUnusable} onClick={()=>make(()=>blankScaleDiagram(strings))}>Blank diagram</button>
-      <button type="button" disabled={busyOrUnusable||!selection||!staff} onClick={()=>make(()=>scaleDiagramFromSelection(score,selection!,staff!))}>From selected notes</button>
-      <button type="button" disabled={busyOrUnusable||!scale||!staff} onClick={()=>make(()=>scaleDiagramFromPitchClasses(staff!,scale!.root,scale!.classes,scale!.name))}>From scale above</button>
+      <button type="button" {...busyGuard({busy:busy,unavailable:!usable,onClick:()=>make(()=>blankScaleDiagram(strings))})}>Blank diagram</button>
+      <button type="button" {...busyGuard({busy:busy,unavailable:!usable||!selection||!staff,onClick:()=>make(()=>scaleDiagramFromSelection(score,selection!,staff!))})}>From selected notes</button>
+      <button type="button" {...busyGuard({busy:busy,unavailable:!usable||!scale||!staff,onClick:()=>make(()=>scaleDiagramFromPitchClasses(staff!,scale!.root,scale!.classes,scale!.name))})}>From scale above</button>
     </div>
     {error&&<p role="alert">{error}</p>}
     {draft&&<>
       <label>Diagram name<input value={draft.name} maxLength={64} onChange={event=>edit(value=>({...value,name:event.target.value}))}/></label>
-      <NumberField label="Diagram strings" value={draft.strings} min={3} max={10} change={next=>edit(value=>resized(value,{strings:next}))}/>
-      <NumberField label="Diagram frets" value={draft.frets} min={4} max={24} change={next=>edit(value=>resized(value,{frets:next}))}/>
-      <NumberField label="Starting fret" value={draft.firstFret} min={1} max={128-draft.frets} change={next=>edit(value=>resized(value,{firstFret:next}))}/>
-      <label>Diagram orientation<select value={draft.orientation} onChange={event=>edit(value=>({...value,orientation:event.target.value as ScaleDiagram['orientation']}))}><option value="horizontal">Horizontal</option><option value="vertical">Vertical</option></select></label>
+      <NumberField label="Diagram strings" value={draft.strings} min={3} max={10} busy={busy} change={next=>edit(value=>resized(value,{strings:next}))}/>
+      <NumberField label="Diagram frets" value={draft.frets} min={4} max={24} busy={busy} change={next=>edit(value=>resized(value,{frets:next}))}/>
+      <NumberField label="Starting fret" value={draft.firstFret} min={1} max={128-draft.frets} busy={busy} change={next=>edit(value=>resized(value,{firstFret:next}))}/>
+      <div className="tp-field">
+        <span className="tp-field-label" aria-hidden="true">Diagram orientation</span>
+        <Segmented label="Diagram orientation" value={draft.orientation} options={orientationOptions} onChange={orientation=>edit(value=>({...value,orientation}))}/>
+      </div>
       <label><input type="checkbox" checked={draft.showFretMarkers} onChange={event=>edit(value=>({...value,showFretMarkers:event.target.checked}))}/> Show fret markers</label>
       <fieldset><legend>New marks</legend>
-        <label>Default shape<select value={shape} onChange={event=>setShape(event.target.value as ScaleMarkShape)}>{scaleMarkShapes.map(value=><option key={value} value={value}>{value}</option>)}</select></label>
+        <div className="tp-field">
+          <span className="tp-field-label" aria-hidden="true">Default shape</span>
+          <Segmented label="Default shape" value={shape} options={shapeOptions} onChange={setShape}/>
+        </div>
         <label>Default mark color<input type="color" value={color} onChange={event=>setColor(event.target.value)}/></label>
         <label>Default text color<input type="color" value={textColor} onChange={event=>setTextColor(event.target.value)}/></label>
       </fieldset>
       <p className="muted">Click a position to add a mark, click a mark to edit it, double-click or press Delete to remove it.</p>
       <ScaleDiagramView diagram={draft} selected={selected} onCell={cell} onRemove={(string,fret)=>{edit(value=>withoutMark(value,string,fret));setSelected(null);}}/>
       {mark?<fieldset><legend>{`Mark on string ${mark.string}, ${mark.fret===0?'open':`fret ${mark.fret}`}`}</legend>
-        <label>Mark shape<select value={mark.shape} onChange={event=>patch({shape:event.target.value as ScaleMarkShape})}>{scaleMarkShapes.map(value=><option key={value} value={value}>{value}</option>)}</select></label>
+        <div className="tp-field">
+          <span className="tp-field-label" aria-hidden="true">Mark shape</span>
+          <Segmented label="Mark shape" value={mark.shape} options={shapeOptions} onChange={nextShape=>patch({shape:nextShape})}/>
+        </div>
         <label>Mark color<input type="color" value={mark.color} onChange={event=>patch({color:event.target.value})}/></label>
         <label>Mark text<input value={mark.text} aria-describedby="scale-mark-text-hint" onChange={event=>patch({text:[...event.target.value].slice(0,3).join('')})}/></label>
         <span id="scale-mark-text-hint" className="muted">Up to 3 characters: a note name or a finger.</span>
@@ -77,11 +93,11 @@ export function ScaleDiagramEditor({score,staff,beat,target,selection,busy,scale
         <button type="button" onClick={()=>{edit(value=>withoutMark(value,mark.string,mark.fret));setSelected(null);}}>Remove mark</button>
       </fieldset>:<p className="muted">No mark selected.</p>}
       <div role="group" aria-label="Apply scale diagram">
-        <button type="button" disabled={busyOrUnusable||same(draft,stored)} onClick={()=>apply(draft)}>Apply diagram to beat</button>
-        <button type="button" disabled={!draft.marks.length} onClick={()=>{edit(value=>({...value,marks:[]}));setSelected(null);}}>Reset marks</button>
-        <button type="button" onClick={()=>{setDraft(stored);setSelected(null);setError('');}} disabled={same(draft,stored)}>Discard changes</button>
+        <button type="button" {...busyGuard({busy:busy,unavailable:!usable||same(draft,stored),onClick:()=>apply(draft)})}>Apply diagram to beat</button>
+        <button type="button" {...busyGuard({unavailable:!draft.marks.length,onClick:()=>{edit(value=>({...value,marks:[]}));setSelected(null);}})}>Reset marks</button>
+        <button type="button" {...busyGuard({unavailable:same(draft,stored),onClick:()=>{setDraft(stored);setSelected(null);setError('');}})}>Discard changes</button>
       </div>
     </>}
-    {stored&&<button type="button" disabled={busyOrUnusable} onClick={()=>apply(null)}>Delete diagram from beat</button>}
+    {stored&&<button type="button" {...busyGuard({busy:busy,unavailable:!usable,onClick:()=>apply(null)})}>Delete diagram from beat</button>}
   </section>;
 }

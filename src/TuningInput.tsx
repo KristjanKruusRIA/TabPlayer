@@ -10,7 +10,7 @@ import {
   type WheelEvent as ReactWheelEvent,
 } from 'react';
 import { formatPitch, formatTuning, parseTuning } from './tuning';
-import { findTuningPreset, instrumentTitle, tuningPresets } from './tuning-presets';
+import { findTuningPreset, instrumentTitle, presetWithPitches, tuningPresets } from './tuning-presets';
 import { SavedTuningsDialog } from './tuning/SavedTuningsDialog';
 import { AuditionButtons } from './tuning/AuditionButtons';
 import { busyGuard } from './ui/useBusyGuard';
@@ -54,6 +54,8 @@ export function TuningInput({
   stringCount?: number;
 }) {
   const [custom, setCustom] = useState(false);
+  // Pitches can belong to several instruments; remember the picked preset so the select does not rename it.
+  const [chosen, setChosen] = useState<string | null>(null);
   const [library, setLibrary] = useState(false);
   useEffect(() => setCustom(false), [value, revision]);
   useEffect(() => {
@@ -76,7 +78,7 @@ export function TuningInput({
   }, [value]);
 
   const audible = onAudition ? parsedPitches : null;
-  const selected = custom ? 'custom' : (findTuningPreset(value)?.id ?? 'custom');
+  const selected = custom ? 'custom' : ((chosen && presetWithPitches(chosen, value)?.id) || findTuningPreset(value)?.id || 'custom');
 
   const dragRef = useRef<{ index: number; startY: number; startPitch: number; initialPitches: number[]; latest: number[]; initialTuningName: string } | null>(null);
   const wheelRef = useRef<{
@@ -284,6 +286,7 @@ export function TuningInput({
             const preset = tuningPresets.find(p => p.id === e.target.value);
             if (preset) {
               setCustom(false);
+              setChosen(preset.id);
               onChange(formatTuning(preset.tuning));
               onTuningNameChange(preset.name);
             }

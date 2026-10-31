@@ -1,10 +1,10 @@
 import { expect, it } from 'vitest';
 import { formatTuning } from './tuning';
-import { findTuningPreset, instrumentTitle, tuningPresets } from './tuning-presets';
+import { findTuningPreset, instrumentTitle, presetWithPitches, tuningPresets } from './tuning-presets';
 
-it('contains exactly 47 distinct presets across guitar, bass, banjo, ukulele, mandolin, bowed strings, and shamisen', () => {
-  expect(tuningPresets).toHaveLength(47);
-  expect(new Set(tuningPresets.map(p => p.id)).size).toBe(47);
+it('contains exactly 46 distinct presets across guitar, bass, banjo, ukulele, mandolin, bowed strings, and shamisen', () => {
+  expect(tuningPresets).toHaveLength(46);
+  expect(new Set(tuningPresets.map(p => p.id)).size).toBe(46);
   const groups: Record<string, number> = {};
   for (const preset of tuningPresets) {
     const key = `${preset.instrument}/${preset.strings}`;
@@ -23,7 +23,7 @@ it('contains exactly 47 distinct presets across guitar, bass, banjo, ukulele, ma
     'banjo/5': 5,
     'banjo/4': 3,
     'ukulele/4': 4,
-    'mandolin/4': 3,
+    'mandolin/4': 2,
     'bowed/4': 4,
     'shamisen/3': 3,
   });
@@ -79,7 +79,6 @@ it('matches curated high-to-low notes for every preset across all instrument fam
     // Mandolin
     'mandolin-4-standard': 'E5 A4 D4 G3',
     'mandolin-4-cross-a': 'E5 A4 E4 A3',
-    'mandolin-4-open-g': 'D5 B4 D4 G3',
 
     // Bowed strings
     'bowed-4-violin': 'E5 A4 D4 G3',
@@ -113,5 +112,11 @@ it('detects presets by pitches including equivalent flats and leaves invalid cus
   expect(findTuningPreset('A4 E4 C4 G4')?.id).toBe('ukulele-4-standard-c');
   expect(findTuningPreset('D4 G3 D3')?.id).toBe('shamisen-3-honchoshi');
   expect(findTuningPreset('invalid')).toBeUndefined();
+  // Shared pitches never rename the instrument: guitar/bass ties keep their ids, other ties are undetected.
+  expect(findTuningPreset('G2 D2 A1 E1')?.id).toBe('bass-4-standard-e');
+  expect(findTuningPreset('E5 A4 D4 G3')).toBeUndefined();
+  expect(findTuningPreset('A4 D4 G3 C3')).toBeUndefined();
+  expect(presetWithPitches('bowed-4-violin', 'E5 A4 D4 G3')?.id).toBe('bowed-4-violin');
+  expect(presetWithPitches('bowed-4-violin', 'A4 D4 G3 C3')).toBeUndefined();
   expect(findTuningPreset('E4 B3 G3 D3 A2 F2')).toBeUndefined();
 });

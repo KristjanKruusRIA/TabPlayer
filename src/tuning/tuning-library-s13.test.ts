@@ -5,43 +5,13 @@ import { buildDocument, previewEdit } from '../engine';
 import { blankProject } from '../project';
 
 /**
- * Authoritative primary sources for every tuning preset:
- *
- * Banjo:
- * - 5-string Open G: Earl Scruggs, "Earl Scruggs and the 5-String Banjo" (1968), p. 28; Pete Seeger, "How to Play the 5-String Banjo" (1962), p. 9.
- * - 5-string Double C: Art Rosenbaum, "Old-Time Mountain Banjo" (Oak Publications, 1968), p. 24.
- * - 5-string Drop C: Pete Seeger, "How to Play the 5-String Banjo" (1962), p. 10.
- * - 5-string Open D: Earl Scruggs (1968), p. 30 (Reuben tuning).
- * - 5-string G Modal: Art Rosenbaum, "Old-Time Mountain Banjo" (1968), p. 39 (Sawmill / Mountain Minor).
- * - 4-string Tenor Standard: Frank Bradbury, "Mel Bay's Tenor Banjo Method" (1974), p. 4.
- * - 4-string Irish Tenor: Enda Scahill, "Irish Tenor Banjo Tutor" (2008), p. 8.
- * - 4-string Plectrum Standard: Frank Bradbury, "Mel Bay's Plectrum Banjo Method" (1975), p. 5.
- *
- * Ukulele:
- * - 4-string Standard C (High-G): John King, "The 'Ukulele: A History" (2012), pp. 41-43; Jim Beloff, "The Daily Ukulele" (2010), p. 4.
- * - 4-string Low G (Linear): Jim Beloff, "The Daily Ukulele" (2010), p. 5.
- * - 4-string D Tuning: Roy Sakuma, "Treasury of Ukulele Chords" (1987); George Formby Ukulele Method.
- * - 4-string Baritone: Hal Leonard, "Hal Leonard Ukulele Method: Baritone Ukulele" (2012), p. 4.
- *
- * Mandolin:
- * - 4-course Standard: Marilyn Mair, "The Complete Mandolinist" (Mel Bay, 2007), p. 6.
- * - 4-course Cross A: Todd Collins, "Old-Time Festival Tunes for Mandolin" (Mel Bay, 2011), p. 8.
- * - 4-course Open G: Todd Collins, "Old-Time Festival Tunes for Mandolin" (Mel Bay, 2011), p. 9.
- *
- * Bowed strings:
- * - Violin Standard: Leopold Mozart, "Versuch einer gründlichen Violinschule" (1756), Ch. 1; Carl Flesch, "The Art of Violin Playing" (1924), p. 12.
- * - Viola Standard: Cecil Forsyth, "Orchestration" (Macmillan, 1914), p. 381.
- * - Cello Standard: Cecil Forsyth, "Orchestration" (Macmillan, 1914), p. 402.
- * - Double Bass Standard: Cecil Forsyth, "Orchestration" (Macmillan, 1914), p. 431.
- *
- * Shamisen:
- * - Honchōshi: William P. Malm, "Traditional Japanese Music and Musical Instruments" (Kodansha, 2000), Ch. 8, pp. 216-218; Linda Fujie, "Worlds of Music" (1996), p. 367.
- * - Niagari: William P. Malm (2000), p. 217.
- * - Sansagari: William P. Malm (2000), p. 217.
+ * Pitches were checked on 2026-10-31 against pages opened on the web; see
+ * docs/validation/2026-10-31-gp8-tuning-library.md for the per-preset source list.
+ * No book or page citations are claimed here.
  */
 
 describe('S13: Full tuning library across string instruments', () => {
-  it('pins all 22 new presets with their exact instrument category, string count, pitches, and ordering', () => {
+  it('pins all 21 retained new presets with their exact instrument category, string count, pitches, and ordering', () => {
     const catalog: [string, PresetInstrument, number, string, number[]][] = [
       // Banjo (5-string and 4-string)
       ['banjo-5-open-g', 'banjo', 5, 'Open G (Standard)', [62, 59, 55, 50, 67]],
@@ -62,7 +32,6 @@ describe('S13: Full tuning library across string instruments', () => {
       // Mandolin (4-course/string)
       ['mandolin-4-standard', 'mandolin', 4, 'Standard', [76, 69, 62, 55]],
       ['mandolin-4-cross-a', 'mandolin', 4, 'Cross A', [76, 69, 64, 57]],
-      ['mandolin-4-open-g', 'mandolin', 4, 'Open G', [74, 71, 62, 55]],
 
       // Bowed strings (4-string)
       ['bowed-4-violin', 'bowed', 4, 'Violin standard', [76, 69, 62, 55]],

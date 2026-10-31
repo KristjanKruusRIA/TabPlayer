@@ -79,7 +79,6 @@ export const tuningPresets: readonly TuningPreset[] = [
   // Mandolin (4-course/string)
   preset('mandolin', 4, 'standard', 'Standard', 'E5 A4 D4 G3'),
   preset('mandolin', 4, 'cross-a', 'Cross A', 'E5 A4 E4 A3'),
-  preset('mandolin', 4, 'open-g', 'Open G', 'D5 B4 D4 G3'),
 
   // Bowed strings (4-string)
   preset('bowed', 4, 'violin', 'Violin standard', 'E5 A4 D4 G3'),
@@ -93,10 +92,32 @@ export const tuningPresets: readonly TuningPreset[] = [
   preset('shamisen', 3, 'sansagari', 'Sansagari', 'C4 G3 D3'),
 ];
 
+const samePitches = (preset: TuningPreset, tuning: readonly number[]) =>
+  preset.tuning.length === tuning.length && preset.tuning.every((pitch, index) => pitch === tuning[index]);
+
+/**
+ * Detects a preset from pitches alone. Different instruments share pitches (violin and mandolin,
+ * viola and tenor banjo, double bass and bass guitar), so pitches cannot name the instrument.
+ * Guitar and bass keep first-match detection; any other tie returns undefined rather than
+ * misnaming the instrument. A control that knows which preset the user chose should keep that choice.
+ */
 export function findTuningPreset(notes: string): TuningPreset | undefined {
   try {
     const tuning = parseTuning(notes);
-    return tuningPresets.find(p => p.tuning.length === tuning.length && p.tuning.every((pitch, index) => pitch === tuning[index]));
+    const matches = tuningPresets.filter(p => samePitches(p, tuning));
+    if (matches.length <= 1) return matches[0];
+    return matches.find(p => p.instrument === 'guitar' || p.instrument === 'bass');
+  } catch {
+    return undefined;
+  }
+}
+
+/** The preset with this id when its pitches still equal `notes`; keeps an explicit choice among shared pitches. */
+export function presetWithPitches(id: string, notes: string): TuningPreset | undefined {
+  try {
+    const tuning = parseTuning(notes);
+    const found = tuningPresets.find(p => p.id === id);
+    return found && samePitches(found, tuning) ? found : undefined;
   } catch {
     return undefined;
   }

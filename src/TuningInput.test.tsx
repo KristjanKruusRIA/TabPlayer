@@ -8,7 +8,7 @@ vi.mock('@tauri-apps/api/core',()=>({invoke:vi.fn(async()=>({format:'tabplayer-t
 afterEach(cleanup);
 function Draft({onCommit}:{onCommit?:(pitches:number[],changed:number[])=>void}){const [value,onChange]=useState('E4 B3 G3 D3 A2 E2'),[name,setName]=useState('');return <><TuningInput label="Notes" presetLabel="Preset" value={value} onChange={onChange} tuningName={name} onTuningNameChange={setName} onCommit={onCommit}/><output aria-label="Draft name">{name}</output></>;}
 it('groups presets and choosing nine-string guitar only fills the editable draft',()=>{
-  render(<Draft/>);const select=screen.getByLabelText('Preset');expect(select.querySelectorAll('optgroup')).toHaveLength(13);expect(select.querySelectorAll('option')).toHaveLength(48);fireEvent.change(select,{target:{value:'guitar-9-standard-csharp'}});expect(screen.getByLabelText('Notes')).toHaveValue('E4 B3 G3 D3 A2 E2 B1 F#1 C#1');expect(select).toHaveValue('guitar-9-standard-csharp');
+  render(<Draft/>);const select=screen.getByLabelText('Preset');expect(select.querySelectorAll('optgroup')).toHaveLength(13);expect(select.querySelectorAll('option')).toHaveLength(47);fireEvent.change(select,{target:{value:'guitar-9-standard-csharp'}});expect(screen.getByLabelText('Notes')).toHaveValue('E4 B3 G3 D3 A2 E2 B1 F#1 C#1');expect(select).toHaveValue('guitar-9-standard-csharp');
 });
 it('lets Custom stay selected at matching notes then autodetects manual equivalent flats',()=>{
   render(<Draft/>);const select=screen.getByLabelText('Preset');expect(select).toHaveValue('guitar-6-standard-e');fireEvent.change(select,{target:{value:'custom'}});expect(select).toHaveValue('custom');expect(screen.getByLabelText('Notes')).toHaveValue('E4 B3 G3 D3 A2 E2');fireEvent.change(screen.getByLabelText('Notes'),{target:{value:'Eb4 Bb3 Gb3 Db3 Ab2 Eb2'}});expect(select).toHaveValue('guitar-6-half-step-down');
@@ -292,4 +292,18 @@ it('audition buttons keep focus and say aria-disabled when busy, and refuse the 
   expect(play).toHaveFocus();expect(play).not.toBeDisabled();expect(play).toHaveAttribute('aria-disabled','true');
   fireEvent.click(play);fireEvent.click(screen.getByRole('button',{name:/Play string 1/}));
   expect(onAudition).not.toHaveBeenCalled();
+});
+it('does not rename shared pitches: a violin tuning is not read as mandolin, and a chosen preset stays chosen',()=>{
+  const props={label:'Notes',presetLabel:'Preset',onChange:vi.fn(),tuningName:'',onTuningNameChange:vi.fn()};
+  const view=render(<TuningInput {...props} value="E5 A4 D4 G3"/>);
+  expect(screen.getByLabelText('Preset')).toHaveValue('custom');
+  view.rerender(<TuningInput {...props} value="G2 D2 A1 E1"/>);
+  expect(screen.getByLabelText('Preset')).toHaveValue('bass-4-standard-e');
+  view.unmount();
+  function Live(){const [value,setValue]=useState('E4 B3 G3 D3 A2 E2');return <TuningInput {...props} value={value} onChange={setValue}/>;}
+  render(<Live/>);
+  fireEvent.change(screen.getByLabelText('Preset'),{target:{value:'bowed-4-violin'}});
+  expect(screen.getByLabelText('Preset')).toHaveValue('bowed-4-violin');
+  fireEvent.change(screen.getByLabelText('Preset'),{target:{value:'bowed-4-viola'}});
+  expect(screen.getByLabelText('Preset')).toHaveValue('bowed-4-viola');
 });

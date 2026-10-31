@@ -45,6 +45,7 @@ export const helpTopics:readonly HelpTopic[]=[
     'Ctrl/Cmd + N, O, S: New, Open, Save (add Shift for Save As). Ctrl/Cmd + W closes the score; Ctrl/Cmd + Tab moves between scores.',
     'Ctrl/Cmd + Z undoes and Ctrl/Cmd + Shift + Z or Ctrl/Cmd + Y redoes. Space plays or pauses.',
     'Ctrl/Cmd + C, X, V copy, cut and paste music; add Shift to Copy or Cut for all selected tracks.',
+    'Ctrl/Cmd + T ties the selected notes to the notes before them, giving each the earlier fret; Ctrl/Cmd + Shift + T unties them.',
     'Ctrl/Cmd + Shift + P opens the command palette. F1 opens this help.',
   ]},
   {id:'about',title:'About and updates',paragraphs:[

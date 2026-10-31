@@ -159,3 +159,10 @@ it('writes rounded Guitar Pro mix controllers',async()=>{
   const {events}=decode(exportMidi(score,{tracks:[0],range:null}));
   expect([...new Set(events.filter(event=>event.type===176&&(event.data[0]===7||event.data[0]===10)).map(event=>event.data.join(':')))].sort()).toEqual(['10:64','7:97']);
 });
+
+it('raises the track volume again after a fade out so later notes sound in the exported file',()=>{
+  const s=score();s.tracks[0].staves[0].bars[0].voices[0].beats[0].fade=model.FadeType.FadeOut;
+  const parsed=decode(exportMidi(s,{tracks:[0],range:null})),volume=parsed.events.filter(e=>e.type===176&&e.data[0]===7&&e.channel===parsed.events.find(n=>n.type===144)!.channel);
+  const zero=volume.filter(e=>e.data[1]===0).at(-1)!,after=volume.filter(e=>e.tick>zero.tick);
+  expect(zero.tick).toBeGreaterThan(0);expect(after.length).toBeGreaterThan(0);expect(after[0].data[1]).toBeGreaterThan(0);
+});

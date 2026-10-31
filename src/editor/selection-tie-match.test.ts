@@ -66,3 +66,17 @@ it('validates the new command envelope for saved projects and live edits',()=>{
   for(const bad of [{...edit,tied:true},{type:edit.type},{...edit,extra:0}])expect(()=>validateParityCommand(bad)).toThrow();
   expect(()=>applyRangeEdit(music(),{...edit,extra:1} as unknown as RangeCommand)).toThrow();
 });
+
+it('moves a trill with the retuned note and resets a forced accidental, as transposing does',()=>{
+  const score=music(),beats=lane(score),note=beats[1].notes[0],origin=beats[0].notes[0];
+  note.fret=9;note.trillValue=note.realValue+2;note.accidentalMode=model.NoteAccidentalMode.ForceSharp;score.finish(new Settings());
+  applyRangeEdit(score,match(notes([0,1])));
+  expect([note.fret,note.trillValue-note.realValue,note.realValue,note.accidentalMode]).toEqual([3,2,origin.realValue,model.NoteAccidentalMode.Default]);
+});
+
+it('refuses a retune that would push a trill out of range and leaves the score as it was',()=>{
+  const score=music(),beats=lane(score),note=beats[1].notes[0];
+  beats[0].notes[0].fret=9;note.trillValue=126;score.finish(new Settings());
+  const before=json(score);expect(()=>applyRangeEdit(score,match(notes([0,1])))).toThrow(/trill/i);expect(json(score)).toEqual(before);
+  expect([note.fret,note.isTieDestination]).toEqual([3,false]);
+});

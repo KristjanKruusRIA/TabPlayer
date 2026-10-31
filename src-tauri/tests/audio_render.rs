@@ -2395,7 +2395,8 @@ fn fade_levels(controllers: &[(u32, u8)]) -> Vec<f64> {
 }
 
 // The tick/value pairs below are the volume events the generator writes for a fade on a quarter-note beat
-// (the same events `fade_and_rasgueado_survive_command_and_rebuild` pins in gestures.test.ts).
+// plus the restore of the written level at the end of the beat that the playback plan adds after a fade out or swell
+// (pinned against the plan in gestures.test.ts).
 const FADE_IN: [(u32, u8); 8] = [
     (0, 0),
     (120, 19),
@@ -2414,7 +2415,7 @@ const FADE_OUT: [(u32, u8); 8] = [
     (480, 45),
     (600, 26),
     (768, 0),
-    (1920, 0),
+    (960, 120),
 ];
 const SWELL: [(u32, u8); 9] = [
     (0, 0),
@@ -2425,7 +2426,7 @@ const SWELL: [(u32, u8); 9] = [
     (600, 83),
     (720, 45),
     (864, 0),
-    (1920, 0),
+    (960, 120),
 ];
 
 #[test]
@@ -2458,13 +2459,20 @@ fn fades_shape_the_rendered_level_of_a_held_note() {
         "fade out falls every 50 ms: {fade_out:?}"
     );
     assert!(
-        fade_out[10] < steady * 0.02,
+        fade_out[9] < steady * 0.02,
         "fade out ends silent: {}",
-        fade_out[10]
+        fade_out[9]
+    );
+    // The next beat starts at tick 960 (0.5 s): the restore brings the written level back for the note after the fade.
+    assert!(
+        fade_out[12..20]
+            .iter()
+            .all(|level| (level / steady - 1.0).abs() < 0.15),
+        "the note after a fade out sounds at the written level: {fade_out:?}"
     );
     // The swell peaks at 0.2 s (tick 384) and is silent again by tick 864 (0.45 s).
     let swell = fade_levels(&SWELL);
-    let peak = (0..swell.len())
+    let peak = (0..10)
         .max_by(|a, b| swell[*a].total_cmp(&swell[*b]))
         .unwrap();
     assert!(
@@ -2472,14 +2480,20 @@ fn fades_shape_the_rendered_level_of_a_held_note() {
         "swell peaks near 0.2 s, not window {peak}: {swell:?}"
     );
     assert!(
-        swell[0] < swell[peak] * 0.25 && swell[10] < swell[peak] * 0.05,
+        swell[0] < swell[peak] * 0.25 && swell[9] < swell[peak] * 0.05,
         "swell opens and closes quiet: {swell:?}"
     );
     assert!(
         swell[2] > swell[0] && swell[6] < swell[4],
         "swell rises then falls"
     );
-    // Written length is untouched: the note still sounds to the end of its second when not faded out.
+    assert!(
+        swell[12..20]
+            .iter()
+            .all(|level| (level / steady - 1.0).abs() < 0.15),
+        "the note after a swell sounds at the written level: {swell:?}"
+    );
+    // Written length is untouched: without a fade the note sounds to the end of the window.
     assert!(
         held[19] > steady * 0.5,
         "the held note keeps sounding to the end of its beat window"

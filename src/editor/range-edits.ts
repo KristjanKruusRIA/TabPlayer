@@ -196,7 +196,15 @@ function applySelectionTies(notes:model.Note[],tied:boolean,retune=false) {
   const changes=plan.filter(([origin,note])=>retuned.has(note)||note.tieOrigin!==origin||origin.tieDestination!==note||!note.isTieDestination);
   if(!changes.length)throw new Error(plan.length?'The selected notes are already tied.':'Select notes to tie.');
   for(const [origin] of changes){const other=origin.tieDestination;if(other&&!planned.has(other)&&other.tieOrigin===origin)throw new Error('Tying here would cut an existing tie into a later note.');}
-  for(const [note,pitch] of retuned){note.fret=pitch.fret;note.harmonicType=pitch.harmonicType;note.harmonicValue=pitch.harmonicValue;}
+  // A retune moves the note like a transpose does: a trill keeps its interval and a forced accidental is dropped. Undone whole if a trill leaves range.
+  const kept=[...retuned.keys()].map(note=>({note,fret:note.fret,harmonicType:note.harmonicType,harmonicValue:note.harmonicValue,trillValue:note.trillValue,accidentalMode:note.accidentalMode}));
+  try{
+    for(const [note,tuned] of retuned){
+      const before=note.realValue;note.fret=tuned.fret;note.harmonicType=tuned.harmonicType;note.harmonicValue=tuned.harmonicValue;
+      if(note.isTrill){const trill=note.trillValue+note.realValue-before;pitch(trill,'trill pitch');note.trillValue=trill;}
+      note.accidentalMode=model.NoteAccidentalMode.Default;
+    }
+  }catch(reason){for(const old of kept)Object.assign(old.note,{fret:old.fret,harmonicType:old.harmonicType,harmonicValue:old.harmonicValue,trillValue:old.trillValue,accidentalMode:old.accidentalMode});throw reason;}
   for(const [origin,note] of changes){untie(note);origin.tieDestination=note;note.tieOrigin=origin;note.isTieDestination=true;}
 }
 export function applyRangeEdit(score:model.Score,command:RangeCommand):boolean {

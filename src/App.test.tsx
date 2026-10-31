@@ -1272,7 +1272,7 @@ it('ties and unties the selected notes from the keyboard, as one edit each, and 
   fireEvent.keyDown(workspace,{key:'ArrowRight',shiftKey:true});
   const edits=()=>c.getState().snapshot.project.edits.length,before=edits();
   fireEvent.keyDown(screen.getByLabelText('Fret'),{key:'t',ctrlKey:true});expect(edits()).toBe(before);
-  fireEvent.keyDown(workspace,{key:'t',ctrlKey:true});await waitFor(()=>expect(last()).toMatchObject({type:'setSelectionTies',tied:true}));
+  fireEvent.keyDown(workspace,{key:'t',ctrlKey:true});await waitFor(()=>expect(last()).toMatchObject({type:'tieSelectionToEarlierPitch'}));
   expect(edits()).toBe(before+1);
   fireEvent.keyDown(workspace,{key:'T',ctrlKey:true,shiftKey:true});await waitFor(()=>expect(last()).toMatchObject({type:'setSelectionTies',tied:false}));
   expect(edits()).toBe(before+2);

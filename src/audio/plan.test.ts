@@ -689,3 +689,17 @@ it('records the articulation a locked track keeps only where an automation would
   // A plan with no automation carries no extra field.
   expect(plan(null).notes.every(n => !('lockedArticulation' in n))).toBe(true);
 });
+
+it('restores the written track volume at the end of a fade out or swell, and writes nothing extra without a fade',()=>{
+  const volume=(plan:PlaybackPlan)=>plan.midi.filter(e=>e.type==='controller'&&e.controller===7&&e.channel===0).map(e=>[e.tick,(e as {value:number}).value]);
+  const build=(fade:model.FadeType|null)=>{const score=authored(1);note(score,0,0);note(score,0,1);if(fade!==null)score.tracks[0].staves[0].bars[0].voices[0].beats[0].fade=fade;score.finish(settings);return buildPlaybackPlan(score,1);};
+  const plain=volume(build(null)),level=plain.at(-1)![1];
+  for(const fade of [model.FadeType.FadeOut,model.FadeType.VolumeSwell]){
+    const events=volume(build(fade)),last=events.at(-1)!,zero=events.filter(e=>e[1]===0).at(-1)!;
+    expect(zero[0]).toBeLessThan(960);expect(last).toEqual([960,level]);
+  }
+  // A fade in already ends at the written level, so it needs no restore; a score without fades is unchanged.
+  expect(volume(build(model.FadeType.FadeIn)).at(-1)![0]).toBeLessThan(960);
+  expect(plain.every(e=>e[0]===0)).toBe(true);
+  const first=build(null),second=build(null);expect(JSON.stringify(first.midi)).toBe(JSON.stringify(second.midi));
+});

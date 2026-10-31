@@ -33,9 +33,11 @@ function validateStaff(staff:model.Staff|null,settings:StaffSettings) {
   if(settings.droneFret!==undefined)validateBanjoDrone(settings.droneFret,settings.tuning.length,settings.tuning);
   const drone=settings.droneFret===undefined?staff?getBanjoDrone(staff):0:settings.droneFret;
   if(drone>0&&!droneTuningOk(settings.tuning))throw new Error("The banjo drone is string 1, which must be tuned higher than string 2.");
-  if(!settings.keepPitch){
+  // Keep pitch moves the notes of a strung staff; refinger.ts checks their new pitches. Every other note is checked here.
+  const refingers=!!settings.keepPitch&&!!staff&&!staff.isPercussion&&staff.tuning.length>0;
+  {
   for(const bar of staff?.bars??[])for(const voice of bar.voices)for(const beat of voice.beats)for(const note of beat.notes) {
-    if(staff?.isPercussion)continue;
+    if(staff?.isPercussion||(refingers&&note.string>0))continue;
     if(note.string===droneString&&!note.isDead&&!fretExists(staff!,note.string,note.fret,drone))throw new Error(`The banjo drone string has no frets 1 to ${drone}: bar ${bar.index+1} has fret ${note.fret} on it.`);
     if(note.string===droneString&&note.trillValue>=0){const shift=droneShift(staff!,note.string,note.fret,drone)-droneShift(staff!,note.string,note.fret),moved=note.trillValue+shift;if(shift&&(moved<0||moved>127))throw new Error('Staff settings put a trill outside the playable MIDI pitch range.');}
     const capo=partial?.strings.includes(note.string)?Math.max(settings.capo,partial.fret):settings.capo;

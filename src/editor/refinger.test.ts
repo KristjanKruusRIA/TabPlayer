@@ -249,4 +249,31 @@ describe('refinger keepPitch on retune and capo', () => {
     expect(first.string).not.toBe(second.string);
     expect([first, second].map(n => [64, 59, 55, 50, 47, 40][6 - n.string] + n.fret).sort()).toEqual([45, 47]);
   });
+
+  it('still checks the pitch range of a staff with no strings when keep pitch is set', () => {
+    const base = projectWithEdits(
+      { type: 'addPitchedTrack', name: 'Piano', program: 0 },
+      { type: 'addPitchedNote', target: { ...target, track: 1 }, pitch: 72 }
+    );
+    const staff = base.score.tracks[1].staves[0];
+    const settings: StaffSettings = {
+      tuning: [], capo: 0, transposition: -100, displayTransposition: 0, clef: staff.bars[0].clef,
+      showTab: false, showNotation: true, keepPitch: true,
+    };
+    expect(() => previewEdit(base.project, { type: 'setStaffSettings', track: 1, staff: 0, settings })).toThrow(/outside the playable MIDI pitch range/);
+  });
+
+  it('leaves frets alone when only the transposition changes, and still range-checks the result', () => {
+    const base = projectWithEdits({ type: 'setNote', target, string: 6, fret: 5 });
+    const staff = base.score.tracks[0].staves[0];
+    const settings: StaffSettings = {
+      tuning: [...staff.tuning], capo: 0, transposition: 12, displayTransposition: 0, clef: staff.bars[0].clef,
+      showTab: true, showNotation: true, keepPitch: true,
+    };
+    const moved = previewEdit(base.project, { type: 'setStaffSettings', track: 0, staff: 0, settings });
+    const note = moved.score.tracks[0].staves[0].bars[0].voices[0].beats[0].notes[0];
+    expect([note.string, note.fret]).toEqual([6, 5]);
+    expect(moved.score.tracks[0].staves[0].transpositionPitch).toBe(12);
+    expect(() => previewEdit(base.project, { type: 'setStaffSettings', track: 0, staff: 0, settings: { ...settings, transposition: -100 } })).toThrow(/outside the playable MIDI pitch range/);
+  });
 });

@@ -62,6 +62,7 @@ export function EditorPanel({
   presentationViewTools,
   contextScope: controlledScope,
   onContextScopeChange,
+  documentEpoch,
 }: {
   score: model.Score;
   target: BeatTarget;
@@ -70,6 +71,8 @@ export function EditorPanel({
   busy: boolean;
   /** The document is finalized: every edit control is disabled, but practice tools and view settings are not. */
   locked?: boolean;
+  /** Changes when another document is opened; per-document panel state starts again. */
+  documentEpoch?: number;
   noteIndex: number | null;
   onSelectNote: (index: number | null) => void;
   onSelect: (target: BeatTarget) => void;
@@ -534,6 +537,7 @@ export function EditorPanel({
             </div>
             <div hidden={!showSection(['staff'])}>
               <StructurePanel
+                key={documentEpoch}
                 score={score}
                 target={target}
                 string={string}

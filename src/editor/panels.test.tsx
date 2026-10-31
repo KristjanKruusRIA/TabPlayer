@@ -683,3 +683,19 @@ it('StructurePanel keep pitch checkbox passes keepPitch: true to setStaffSetting
     settings: expect.objectContaining({ keepPitch: true }),
   }));
 });
+
+it('keep pitch starts unticked on another staff and never goes into Add staff', () => {
+  const score = previewEdit(blankProject(), { type: 'addTrack', name: 'Bass', tuning: [43, 38, 33, 28], program: 33, tuningName: '' }).score, onEdit = vi.fn();
+  const props = { score, string: 1, busy: false, onEdit, onSelect: vi.fn() };
+  const view = render(<StructurePanel {...props} target={target} />);
+  fireEvent.click(screen.getByLabelText('Keep pitch'));
+  expect(screen.getByLabelText('Keep pitch')).toBeChecked();
+  fireEvent.click(screen.getByRole('button', { name: 'Add staff' }));
+  expect(onEdit.mock.calls.at(-1)![0].type).toBe('addStaff');
+  expect(onEdit.mock.calls.at(-1)![0].settings).not.toHaveProperty('keepPitch');
+  view.rerender(<StructurePanel {...props} target={{ ...target, track: 1 }} />);
+  expect(screen.getByLabelText('Keep pitch')).not.toBeChecked();
+  onEdit.mockClear();
+  fireEvent.click(screen.getByRole('button', { name: 'Apply staff settings' }));
+  expect(onEdit.mock.calls.at(-1)?.[0].settings ?? {}).not.toHaveProperty('keepPitch');
+});

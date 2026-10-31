@@ -30,6 +30,7 @@ export function planStaffRefinger(
   const targetCapo = target.capo ?? staff.capo;
   const targetPartial = target.partialCapo === undefined ? getPartialCapo(staff) : target.partialCapo;
   const targetDrone = target.droneFret === undefined ? getBanjoDrone(staff) : target.droneFret;
+  // Keep pitch compensates for tuning, capo and drone only: a changed transposition changes what sounds, as it always has.
   const targetTransposition = target.transposition ?? staff.transpositionPitch;
 
   const currentPartial = getPartialCapo(staff);
@@ -38,7 +39,7 @@ export function planStaffRefinger(
 
   const targetOpenPitch = (s: number) => {
     const capo = targetPartial && targetPartial.strings.includes(s) ? Math.max(targetCapo, targetPartial.fret) : targetCapo;
-    return targetTuning[to - s] + capo - targetTransposition;
+    return targetTuning[to - s] + capo - currentTransposition;
   };
 
   const notePitch = (note: model.Note) => {
@@ -129,6 +130,14 @@ export function planStaffRefinger(
           unreachable.push(where);
         }
       }
+    }
+  }
+
+  // The moved notes keep their pitch only for the old transposition; check what they sound at the new one.
+  for (const { note, string, fret } of moves) {
+    const sounding = targetOpenPitch(string) + currentTransposition - targetTransposition + fret + droneShift(staff, string, fret, targetDrone) + note.harmonicPitch;
+    if (!Number.isFinite(sounding) || sounding < 0 || sounding > 127) {
+      throw new Error('Staff settings put a note outside the playable MIDI pitch range.');
     }
   }
 

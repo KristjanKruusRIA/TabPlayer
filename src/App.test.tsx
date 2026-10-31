@@ -229,6 +229,40 @@ it.each(['Add pitched track','Add percussion track'])('omits string caret contex
   expect(engravingView.mock.lastCall?.[0].editString).toBeUndefined();
 });
 
+it('wires direct symbol editing to the document: one edit per gesture, undoable, refused once locked',async()=>{
+  const c=await setup(),symbols=()=>engravingView.mock.lastCall![0].symbols as {busy:boolean;locked:string|null;request?:number;onEdit:(command:EditCommand)=>Promise<boolean>|void;onChordEditor:(target:unknown)=>void};
+  expect(symbols()).toMatchObject({busy:false,locked:null});
+  const before=c.getState().snapshot.project.edits.length;
+  act(()=>{void symbols().onEdit({type:'setScoreInfo',title:'Typed on the score',artist:'',tempo:100});});
+  await waitFor(()=>expect(c.getState().score.title).toBe('Typed on the score'));
+  expect(c.getState().snapshot.project.edits).toHaveLength(before+1);
+  click('Undo');await waitFor(()=>expect(c.getState().score.title).not.toBe('Typed on the score'));
+  expect(c.getState().snapshot.project.edits).toHaveLength(before);
+  await act(async()=>{await c.setLock({kind:'finalized'});});
+  await waitFor(()=>expect(symbols().locked).toBe(FINALIZED_MESSAGE));
+  // The app refuses too, so a stale popover cannot slip an edit past the lock.
+  const locked=c.getState().snapshot.project.edits.length;
+  let landed:unknown;await act(async()=>{landed=await symbols().onEdit({type:'setScoreInfo',title:'Locked out',artist:'',tempo:100});});
+  expect(landed).toBe(false);expect(c.getState().snapshot.project.edits).toHaveLength(locked);expect(c.getState().score.title).not.toBe('Locked out');
+});
+it('opens the score-symbol menu from the Menu key or Shift+F10 on the score, but not from a text field',async()=>{
+  await setup();const symbols=()=>engravingView.mock.lastCall![0].symbols as {request?:number};
+  const region=screen.getByRole('region',{name:'Score workspace'}),first=symbols().request??0;
+  fireEvent.keyDown(region,{key:'ContextMenu'});expect(symbols().request).toBe(first+1);
+  fireEvent.keyDown(region,{key:'F10',shiftKey:true});expect(symbols().request).toBe(first+2);
+  fireEvent.keyDown(region,{key:'F10'});expect(symbols().request).toBe(first+2);
+  const field=document.createElement('input');region.appendChild(field);fireEvent.keyDown(field,{key:'ContextMenu'});field.remove();expect(symbols().request).toBe(first+2);
+});
+it('opens the chord editor on the beat of the chord picked on the score',async()=>{
+  const chord={name:'Am',nameMode:'manual' as const,recipe:null,firstFret:0,frets:[0,0,2,2,1,0],fingers:[-2,-2,2,3,1,-2],barreFrets:[],showName:true,showDiagram:true,showFingering:false};
+  const edit:EditCommand={type:'setHarmonyChord',target:{track:0,staff:0,bar:1,voice:0,beat:2},chord,fillEmptyBeat:false};
+  await setup({...blankProject(),edits:[edit]});
+  const symbols=()=>engravingView.mock.lastCall![0].symbols as {onChordEditor:(target:unknown)=>void};
+  act(()=>symbols().onChordEditor({track:0,staff:0,bar:1,voice:0,beat:2}));
+  const dialog=within(await screen.findByRole('dialog',{name:'Harmony chord'}));
+  await waitFor(()=>expect(dialog.getByLabelText('Chord name')).toHaveValue('Am'));
+  expect(engravingView.mock.lastCall![0].editTarget).toMatchObject({bar:1,beat:2});
+});
 it('starts Harmony at its heading during initial library loading and focuses name when ready',async()=>{
   let finish!:(library:HarmonyLibrary)=>void;personalLibrary.read.mockReturnValueOnce(new Promise(resolve=>{finish=resolve;}));
   await setup();click('Edit chord diagram');const dialog=screen.getByRole('dialog',{name:'Harmony chord'});

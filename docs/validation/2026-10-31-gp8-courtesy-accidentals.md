@@ -63,3 +63,19 @@ Wire format: `tests/protocol.json` gets the new example appended at the end, so 
 - `npx vitest run src/App.test.tsx --testTimeout=40000 --maxWorkers=2`: 147 passed (an earlier run under cargo load lost a worker and was repeated alone).
 - `cargo test --locked --no-fail-fast --manifest-path src-tauri/Cargo.toml`: 987 passed, 1 failed. The failure is `a_page_search_over_fifty_thousand_rows_stays_fast`, a timing test that fails under load; it was not touched and is unrelated to this slice.
 - `src/harmony-commands.test.ts` now expects 78 wire examples (it expected 77).
+
+## Behavior
+
+A note can be marked to show a courtesy accidental. The sign draws in notation only on marked notes, and spelling is unchanged when the mark comes off. MusicXML writes `cautionary="yes"`.
+
+## Evidence
+
+See "What is proved, and by which test". After merging into feat/gp8-parity, `tsc` is clean, the full Vitest run had one failure, the MIDI guard rule for the new probe, fixed in the same change and rerun. `parity-harmony` and `parity-instrument-entry` pass on a Windows build.
+
+## Review
+
+A fresh Opus reviewer rejected the first version and approved 1b6dd57 with no fault of Medium or higher.
+
+## Limits
+
+The sign depends on alphaTab 1.8.4 private fields, so an alphaTab upgrade must recheck it. The mark is lost on GP and MusicXML re-import. Numbered and slash views show no sign, by code reading. MusicXML writes a sign on tie continuations where notation does not. Rust cannot refuse percussion targets. Not checked by eye in the desktop app. CI cannot run.

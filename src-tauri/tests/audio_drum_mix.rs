@@ -572,7 +572,7 @@ fn play(transport: &mut CallbackTransport, frames: usize) -> Vec<[f32; 2]> {
 
 fn install(transport: &mut CallbackTransport, settings: &DocumentSettings) {
     let mix = PreparedMix::prepare(settings, &drum_plan(), RATE).unwrap();
-    assert!(transport.replace_mix(mix, 1).is_some());
+    drop(transport.replace_mix(mix, 1));
 }
 
 #[test]
@@ -707,4 +707,41 @@ fn a_kit_edit_made_after_a_seek_into_held_notes_applies_from_the_first_frame() {
         (quarter - 0.25 * full).abs() <= 0.02 * full,
         "{quarter} vs {full}"
     );
+}
+
+#[test]
+fn several_kit_edits_made_while_stopped_all_apply_from_the_first_attack() {
+    // Each install arms a track DSP crossfade that cannot run while stopped, so the later ones wait behind it.
+    for (last, scale) in [
+        (element(1.0, 0.0, true, false), 0.0),
+        (element(0.25, 0.0, false, false), 0.25),
+    ] {
+        let mut t = transport(DocumentSettings::default());
+        command(&mut t, TransportCommand::Play { generation: 1 });
+        play(&mut t, 3000);
+        command(&mut t, TransportCommand::Stop { generation: 1 });
+        for kick in [
+            element(0.5, 0.0, false, false),
+            element(0.8, 0.0, false, false),
+            element(0.1, 0.0, false, false),
+            last,
+        ] {
+            install(
+                &mut t,
+                &settings_with(Some(DrumKitMix {
+                    kick,
+                    ..Default::default()
+                })),
+            );
+        }
+        command(&mut t, TransportCommand::Play { generation: 1 });
+        let heard = peak(&play(&mut t, 2400));
+        let mut plain = transport(DocumentSettings::default());
+        command(&mut plain, TransportCommand::Play { generation: 1 });
+        let full = peak(&play(&mut plain, 2400));
+        assert!(
+            (heard - scale * full).abs() <= 0.02 * full,
+            "last edit {scale}: {heard} vs {full}"
+        );
+    }
 }

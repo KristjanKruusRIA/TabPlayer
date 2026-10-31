@@ -1381,11 +1381,25 @@ impl Renderer {
     /// paused transport renders nothing, so a ramp armed meanwhile would still be on its way when the next note is struck.
     /// A track with notes ringing keeps its ramp, so they resume without a step.
     pub fn settle_idle_kit(&mut self) {
-        for (track, channel) in self.tracks.iter().zip(&mut self.mix.channels) {
-            if !track.kit_rendered {
-                channel.kit.current = channel.kit.target;
-                channel.kit.remaining = 0;
+        // A mix parked behind a track DSP crossfade cannot install while nothing renders, so its kit is taken from it here:
+        // the parked mix then installs later with the same kit and nothing left to ramp.
+        let parked = self.parked_mix.as_ref();
+        for (index, (track, channel)) in self
+            .tracks
+            .iter_mut()
+            .zip(&mut self.mix.channels)
+            .enumerate()
+        {
+            if track.kit_rendered {
+                continue;
             }
+            if let Some(next) = parked.and_then(|mix| mix.channels.get(index)) {
+                channel.kit.target = next.kit.target;
+                channel.kit_active = next.kit_active;
+                track.kit_active = next.kit_active;
+            }
+            channel.kit.current = channel.kit.target;
+            channel.kit.remaining = 0;
         }
     }
     fn mix_ramping(&self) -> bool {

@@ -8,7 +8,7 @@ import { buildPlaybackPlan } from '../audio/plan';
 import { adoptAdmittedBase, admitDocumentBase } from '../interchange/archive-gate';
 import type { Project } from '../project';
 
-// Every fixture here is synthetic: written by tabledit-fixture.ts from the layout the importer assumes. No real .tef was tested.
+// Every fixture here is synthetic, written by tabledit-fixture.ts. Real files are covered in tabledit-corpus.test.ts.
 const settings = new Settings();
 const toBase64 = (bytes: Uint8Array) => Buffer.from(bytes).toString('base64');
 const projectFor = (bytes: Uint8Array, sha = 'b'.repeat(64)): Project => ({
@@ -189,7 +189,7 @@ describe('TablEdit conversion', () => {
     expect(bar2[0].duration).toBe(2);
     expect(bar2[0].notes[0].isTieDestination).toBe(true);
     expect(bar2[0].notes[0].fret).toBe(3);
-    expect(notice).toMatch(/Imported from TablEdit \(experimental import, tested only on synthetic files\): 2 measures, 1 track\./);
+    expect(notice).toMatch(/Imported from TablEdit \(experimental import, tested on small sample files only\): 2 measures, 1 track\./);
   });
 
   it('fills bars: gaps become rests and every bar is exactly full', () => {

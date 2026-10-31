@@ -25,6 +25,7 @@ export const TEF_LIMITS = {
 /** Header pointer and field offsets, from the MuseScore reader (read for facts). */
 const OFFSET = { tbed: 0x38, contents: 0x3c, title: 0x40, subtitle: 0x44, comment: 0x48, notes: 0x4c, measures: 0x5c, instruments: 0x60, readingList: 0x80, link: 0x84, copyright: 0x8c, format: 0xcc } as const;
 const HEADER_BYTES = 0xd0;
+/** Real files declare 12 in the table header here but store 8-byte records. */
 const MEASURE_BYTES = 8;
 const INSTRUMENT_BYTES = 68;
 const END_OF_CONTENTS = 0xffffffff;
@@ -84,12 +85,12 @@ class Reader extends ByteReader {
   }
 }
 
-function readTable(r: Reader, pointer: number, what: string, max: number, minStride: number, header: number) {
+function readTable(r: Reader, pointer: number, what: string, max: number, minStride: number, header: number, fixedStride = false) {
   r.seek(pointer);
   const structSize = r.u16(), count = r.u16();
   r.skip(header - 4);
   if (count > max) throw new TablEditError(`The TablEdit file declares too many ${what} (${count}).`);
-  const stride = Math.max(minStride, structSize);
+  const stride = fixedStride ? minStride : Math.max(minStride, structSize);
   if (stride * count > r.remaining) throw new TablEditError('The TablEdit file is truncated or damaged (more records declared than data remains).');
   return { count, stride, start: r.pos };
 }
@@ -128,7 +129,7 @@ function read(r: Reader): TefDocument {
   const measuresAt = pointer(OFFSET.measures), instrumentsAt = pointer(OFFSET.instruments), contentsAt = pointer(OFFSET.contents);
   if (!measuresAt || !instrumentsAt || !contentsAt) throw new TablEditError('The TablEdit file has no music (a required table is missing).');
 
-  const mt = readTable(r, measuresAt, 'measures', TEF_LIMITS.measures, MEASURE_BYTES, 8);
+  const mt = readTable(r, measuresAt, 'measures', TEF_LIMITS.measures, MEASURE_BYTES, 8, true);
   if (!mt.count) throw new TablEditError('The TablEdit file contains no measures.');
   const measures: TefMeasure[] = [];
   for (let i = 0; i < mt.count; i++) {

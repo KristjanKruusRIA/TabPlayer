@@ -41,7 +41,8 @@ Sources: **M** = MuseScore `importexport/tabledit` reader (`importtef.h`, `impor
 - `src/import/powertab.test.ts` (25) still passes after sharing the reader.
 - `npx tsc --noEmit` passes. `vitest run src/import src/interchange/archive-gate.test.ts --testTimeout=40000 --maxWorkers=2`: a wider run over `src/interchange` and `src/engine` showed only `ENOENT` failures for `.analysis/compatibility` fixtures that are absent in this worktree (GP and MusicXML suites); those suites were not exercised against real files.
 - `cargo test --locked --lib intake` passes (12 tests, including the new TablEdit cap) and `drop_tests` pass (4, including `.ptb`/`.tef`), with empty stand-in `resources/audio` and `resources/library` directories created for the build and removed afterwards.
-- No `.tef` exists under `E:\git\TabPlayer\.analysis\compatibility` (Glob found none).
+- **Real files, 2026-10-31.** All 60 `.tef` test files from MuseScore commit 32f0a26 (`.analysis/tef-corpus`, not committed) open without an error. `src/import/tabledit-corpus.test.ts` pins meters, keys, tuning, title and rhythm on them and skips where the files are absent. They exposed one real defect: files declare 12 in the measure table header but store 8-byte records, so every measure after the first was misread (wrong meter, stray keys and pickups). The reader now always uses 8 bytes, and the synthetic fixture declares 12 like real files do.
+- 28 of the 60 were inspected against what their file names describe: rhythm, dots, triplets, rests, chords, ties, grace notes, tunings, repeats and titles match. This is a reading of names, not a comparison with TablEdit or MuseScore output.
 
 ## Review
 
@@ -49,9 +50,10 @@ A first review rejected 207c8b9 (drop whitelist, unsourced gates labelled confir
 
 ## Limits
 
-- **No real TablEdit file was tested.** Fixtures come from `tabledit-fixture.ts`, which encodes the same assumptions as the parser; tests prove self-consistency, not agreement with TablEdit. Every "guessed" row above can make a real file fail with an error or import wrongly (string orientation, triplets and voices are the likeliest). A first real-file test is required before claiming support.
+- **Small sample files only.** The 60 real files are short test pieces written for MuseScore's importer. No full-length score from a TablEdit user was opened, and no output was compared with TablEdit itself.
+- `voices.tef` still reports dropped notes (9 overflowing a measure, chord notes of unequal length), so music with more independent voices than the two supported loses notes; the notice says so.
 - The layout comes from one third-party reader, learned through summaries of its text, not from a specification.
 - Zip-compressed `.tef`, TablEdit 2 files, big-endian files, protected files, `.tbt`/`.ptb`-style sibling formats are out of scope.
 - Texts, chord diagrams, effects (bends, slides, harmonics, etc.), dynamics, repeats beyond simple ones, endings and page layout are not imported; the native project keeps the original bytes.
-- **Licensing.** The MuseScore reader is GPL. Only facts about the file layout were taken from it; no code or structure is copied. The format is not covered by that licence, but re-check before bundling real TablEdit samples.
+- **Licensing.** The MuseScore reader is GPL. Only facts about the file layout were taken from it; no code or structure is copied. The format is not covered by that licence. The MuseScore test files are not committed or redistributed here.
 - Not verified: macOS and Linux, the desktop open dialog and drop with `.tef`, restore of a saved TablEdit project in the real app, playback of an imported score through the native audio plan, library index or batch converter (they do not list `.tef`).

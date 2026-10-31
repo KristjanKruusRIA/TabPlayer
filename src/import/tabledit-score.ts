@@ -152,7 +152,7 @@ function convert(doc: TefDocument, settings: Settings): TablEditImport {
   score.finish(settings);
 
   const labels = report.labels();
-  const parts = [`Imported from TablEdit (experimental import, tested only on synthetic files): ${measureCount} measures, ${score.tracks.length} track${score.tracks.length === 1 ? '' : 's'}.`];
+  const parts = [`Imported from TablEdit (experimental import, tested on small sample files only): ${measureCount} measures, ${score.tracks.length} track${score.tracks.length === 1 ? '' : 's'}.`];
   parts.push(labels.length
     ? `Not imported (dropped): ${labels.join('; ')}.`
     : 'No dropped content was detected, but the importer cannot detect every unsupported TablEdit feature.');

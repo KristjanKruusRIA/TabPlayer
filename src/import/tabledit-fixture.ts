@@ -51,7 +51,7 @@ export function buildTef(f: TefFx = {}): Uint8Array {
   const textAt = (key: keyof typeof TEF_OFFSETS, value: string | undefined) => { if (value) { ptr(TEF_OFFSETS[key], at(body)); body.text(value); } };
   textAt('title', f.title ?? 'Synthetic'); textAt('subtitle', f.subtitle); textAt('comment', f.comment); textAt('notes', f.notes); textAt('link', f.link); textAt('copyright', f.copyright);
   ptr(TEF_OFFSETS.measures, at(body));
-  body.u16(f.measureStructSize ?? 8).u16(measures.length).u32(0);
+  body.u16(f.measureStructSize ?? 12).u16(measures.length).u32(0);
   for (const m of measures) body.u8(m.flag ?? 0).u8(0).u8((m.key ?? 0) & 0xff).u8(0).u8(m.den ?? 4).u8(m.num ?? 4).u16(0);
   ptr(TEF_OFFSETS.instruments, at(body));
   body.u16(68).u16(instruments.length);

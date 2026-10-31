@@ -62,3 +62,5 @@ input[aria-invalid="true"]{border-color:var(--tp-danger)}
 .command-palette [role="option"][aria-disabled="true"]{cursor:default}
 .command-palette kbd{float:right;margin-left:12px;font:inherit;font-size:11px;color:var(--tp-muted);border:1px solid var(--tp-line-strong);border-radius:var(--tp-r-sm);padding:0 4px}
 button.is-disabled,fieldset[aria-disabled="true"]{opacity:.4;cursor:default}button.is-disabled:hover{border-color:var(--tp-line-strong)}fieldset[aria-disabled="true"] button.is-disabled{opacity:1}
+
+.notice{background:#2b3a4d;padding:10px 16px;color:#edf1f5;font-size:12px;line-height:1.5;border-bottom:1px solid #394454}

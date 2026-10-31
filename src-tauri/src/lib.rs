@@ -307,6 +307,8 @@ async fn read_document(app: AppHandle) -> Result<Option<DocumentIntake>, String>
                     "gp3",
                     "gp4",
                     "gp5",
+                    "ptb",
+                    "tef",
                     "xml",
                     "musicxml",
                     "mxl",

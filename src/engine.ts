@@ -27,6 +27,10 @@ import { duplicateStylesheetTrack,remapStylesheetTracks,validateEngravingTracks 
 import { mapBarWidths } from './engraving/bar-widths';
 import { prepareHarmonyTranspose } from './harmony/transpose';
 import { copyMasterTimeSignatureSource } from './editor/time-signature-source';
+import { isPowerTabBytes } from './import/powertab';
+import { importPowerTab } from './import/powertab-score';
+import { isTablEditBytes } from './import/tabledit';
+import { importTablEdit } from './import/tabledit-score';
 
 const settings = new Settings();
 const { Score, Track, Staff, Bar, Voice, Beat, Note, MasterBar, Automation, JsonConverter } = model;
@@ -128,18 +132,20 @@ function addTrack(score: model.Score, name: string, tuning: number[], program: n
   for (const master of score.masterBars) appendBar(staff, master);
 }
 
-function initialScore(project: Project, canRedo: boolean): model.Score {
+function initialScore(project: Project, canRedo: boolean): {score:model.Score;notice:string|null} {
   if (project.base.kind === 'file') {
     const bytes = Uint8Array.from(atob(project.base.bytesBase64), c => c.charCodeAt(0));
+    if (isPowerTabBytes(bytes)) {const imported=importPowerTab(bytes,settings);return {score:imported.score,notice:imported.notice};}
+    if (isTablEditBytes(bytes)) {const imported=importTablEdit(bytes,settings);return {score:imported.score,notice:imported.notice};}
     adoptAdmittedBase(project.base.sha256, bytes);
-    return loadInterchangeScore(bytes, settings, appliesFilePartialCapo(project, canRedo));
+    return {score:loadInterchangeScore(bytes, settings, appliesFilePartialCapo(project, canRedo)),notice:null};
   }
   const score = new Score(); score.title = project.base.title; score.artist = project.base.artist;
   for (let i = 0; i < project.base.measureCount; i++) score.addMasterBar(new MasterBar());
   score.masterBars[0].tempoAutomations = [Automation.buildTempoAutomation(false, 0, project.base.tempo, 2)];
   addTrack(score, 'Guitar', project.base.tuning, 25);
   score.finish(settings);
-  return score;
+  return {score,notice:null};
 }
 
 function trackAt(score: model.Score, index: number) {
@@ -273,7 +279,7 @@ function apply(score: model.Score, edit: EditCommand, editIndex=0) {
 }
 
 export interface BuiltDocument {
-  score:model.Score; settings:DocumentSettings; embeddedBacking:Uint8Array|null;
+  score:model.Score; settings:DocumentSettings; embeddedBacking:Uint8Array|null; importNotice?:string|null;
   embeddedBackingSettings?:Omit<BackingSettings,'assetId'>; sourceMixes?:Record<string,ChannelMix>;
   sourceBarCount?:number;
 }
@@ -284,7 +290,7 @@ function removeBackingMeasure(backing:Pick<BackingSettings,'anchors'>|null|undef
 
 /** `canRedo`: the document has undone edits, so it is not edit-free even when its list is empty. */
 export function buildDocument(value: ProjectInput, canRedo = false): BuiltDocument {
-  const project = validateProject(value); let score = initialScore(project, canRedo);
+  const project = validateProject(value); const initial = initialScore(project, canRedo); let score = initial.score;
   const sourceBarCount=score.masterBars.length;
   const identities=score.tracks.map((_,index)=>`base/${index}`);
   const documentSettings=defaultDocumentSettings();
@@ -328,7 +334,7 @@ export function buildDocument(value: ProjectInput, canRedo = false): BuiltDocume
   // Transient conversion rebuilds derived links and caches; native files store source bytes and commands.
   score=rebuild(score);prepareScoreTimers(score);score.tracks.forEach((track,index)=>trackIdentities.set(track,identities[index]));
   validateEngravingTracks(score,identities,{...documentSettings.engraving,profiles:documentSettings.engraving.profiles.filter(entry=>identities.includes(entry.trackId))});
-  const built={score,settings:documentSettings,embeddedBacking,embeddedBackingSettings,sourceMixes,sourceBarCount};
+  const built={score,settings:documentSettings,embeddedBacking,embeddedBackingSettings,sourceMixes,sourceBarCount,importNotice:initial.notice};
   validateBackingAnchors(score,effectiveAudioSettings(project,built).backing);return built;
 }
 
@@ -336,7 +342,7 @@ export function replayDocumentSettings(value:ProjectInput,current:BuiltDocument)
   const project=validateProject(value);const next=defaultDocumentSettings();
   // A duplicated track's copied settings come from the full build, which tracks identities through track edits.
   if(projectCommands(project).some(edit=>edit.type==='pasteMusic'||edit.type==='duplicateTrack'||edit.type==='setBacking'&&edit.backing?.referenceSync))return {...buildDocument(project),score:current.score,embeddedBacking:current.embeddedBacking};
-  const sourceBarCount=current.sourceBarCount??(project.base.kind==='blank'?project.base.measureCount:initialScore(project,false).masterBars.length);
+  const sourceBarCount=current.sourceBarCount??(project.base.kind==='blank'?project.base.measureCount:initialScore(project,false).score.masterBars.length);
   let barCount=sourceBarCount;
   next.mixes=structuredClone(current.sourceMixes ?? Object.fromEntries(current.score.tracks.map(track=>[trackIdentity(track),{...defaultMix(),mute:track.playbackInfo.isMute,solo:track.playbackInfo.isSolo}])));
   // Applied history already passed candidate validation. Its earlier backing anchors
@@ -356,7 +362,7 @@ export function replayDocumentSettings(value:ProjectInput,current:BuiltDocument)
       barCount=map.oldToNew.filter(bar=>bar!==null).length+map.inserted.length;break;
     }
   }
-  const built={score:current.score,settings:next,embeddedBacking:current.embeddedBacking,embeddedBackingSettings:current.embeddedBackingSettings,sourceMixes:current.sourceMixes,sourceBarCount};
+  const built={score:current.score,settings:next,embeddedBacking:current.embeddedBacking,embeddedBackingSettings:current.embeddedBackingSettings,sourceMixes:current.sourceMixes,sourceBarCount,importNotice:current.importNotice};
   validateBackingAnchors(current.score,effectiveAudioSettings(project,built).backing);return built;
 }
 

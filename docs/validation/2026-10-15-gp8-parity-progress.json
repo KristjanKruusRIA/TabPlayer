@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "audit_date": "2026-10-30",
+  "audit_date": "2026-10-31",
   "audit_kind": "read_only_delivery_progress_overlay",
   "target": "Guitar Pro 8.1.5.31 desktop",
   "requirement_catalog_id": "gp8-desktop-parity-v1",
@@ -19,7 +19,7 @@
     "value": "088b973cea94bde876859c7e6efadb4dd23da64a",
     "accepted_source_revision": "088b973cea94bde876859c7e6efadb4dd23da64a",
     "documentation_revision": null,
-    "documentation_status": "2026-10-21 update on feat/gp8-parity: F13 missing -> partial, W05 missing -> implemented, F03/F04/D01/D02 evidence refreshed. Earlier P17/P18 checkpoint text is kept in previous_checkpoint and provenance. 2026-10-22: F17 SVG export missing -> implemented. 2026-10-22: F16 PNG export missing -> partial. 2026-10-22: D20 export file-name tokens missing -> partial. 2026-10-22: D20 one file per track added; D20 stays partial. 2026-10-22: S03 track reorder missing -> partial. 2026-10-22: S03 track duplicate added (still partial). 2026-10-22: S03 track color added (still partial). 2026-10-22: T28 wah gestures missing -> partial. 2026-10-22: T27 sustain pedal missing -> partial. 2026-10-22: F14 ASCII tablature export missing -> partial. 2026-10-22: A20 track focus missing -> partial. 2026-10-22: D10 header and footer fields missing -> partial. 2026-10-22: T05 picking and strumming patterns missing -> partial. 2026-10-22: N09 multi-voice selection ties missing -> partial. 2026-10-22: L05 score error display missing -> partial. 2026-10-22: L06 new score author defaults missing -> partial. 2026-10-22: L07 default view preferences missing -> partial. 2026-10-22: W18 command palette missing -> partial. 2026-10-23: F05 ASCII tab import missing -> partial. 2026-10-23: W21 help and update status missing -> partial. 2026-10-23: W22 expression text and action list missing -> partial. 2026-10-23: U13 instrument view selected beat, bar and next-beat focus missing -> partial. 2026-10-23: U14 left-handed neck and neck + keys view missing -> partial. 2026-10-23: A10 flanger and phaser and A11 tremolo and vibrato missing -> partial. 2026-10-23: A13 wah and auto-wah missing -> partial. 2026-10-23: A12 octaver and pitch shift missing -> partial. 2026-10-23: A05 user sound library missing -> implemented; A37 copy and paste of sounds and pedals missing -> partial. 2026-10-23: A33 sound preview during playback missing -> implemented. 2026-10-23: A07 drive families partial -> implemented. 2026-10-23: A15 reverb families partial -> implemented. 2026-10-23: A16 delay models and divisions partial -> implemented. 2026-10-24: A34 sound-bank microphone and mono/stereo missing -> implemented. 2026-10-24: A17 reorderable signal chain re-audited; stays partial. 2026-10-24: A14 track graphic EQ re-audited; stays partial. 2026-10-24: A10 and A11 modulation tempo sync re-audited; both stay partial. 2026-10-24: A06 amp and cabinet controls re-audited with a new tone stack; stays partial. 2026-10-24: A04 factory sound catalog re-audited; partial to implemented. 2026-10-24: A37 duplicate pedals re-audited; partial to implemented. 2026-10-24: A13 wah models re-audited; stays partial. 2026-10-24: F22 AIFF audio export re-audited; missing to implemented. 2026-10-24: F23 normalized audio export re-audited; missing to partial. 2026-10-24: F21 FLAC audio export re-audited; missing to implemented. 2026-10-24: S14 string count change re-audited; missing to implemented. 2026-10-24: S15 saved personal tunings re-audited; missing to implemented. 2026-10-24: S16 tuning audition and E17 edit audition re-audited; missing to implemented. 2026-10-24: U12 instrument view note entry re-audited; missing to implemented. 2026-10-30: W15 finalize and unfinalize re-audited; missing to implemented. 2026-10-30: D13 personal styles re-audited; missing to implemented. 2026-10-30: F02 MIDI import re-audited; missing to implemented. 2026-10-30: U05 scale diagram authoring re-audited; missing to partial. 2026-10-30: L08 input preferences re-audited; missing to partial. 2026-10-30: E05 notation pitch entry re-audited; missing to partial. 2026-10-30: D12 typography and style presets re-audited; missing to partial. 2026-10-30: S18 partial capo re-audited; missing to partial. 2026-10-30: L01 library browsing re-audited; partial. 2026-10-30: S20 banjo drone re-audited; partial. 2026-10-30: S22 and S23 re-audited; partial.",
+    "documentation_status": "2026-10-21 update on feat/gp8-parity: F13 missing -> partial, W05 missing -> implemented, F03/F04/D01/D02 evidence refreshed. Earlier P17/P18 checkpoint text is kept in previous_checkpoint and provenance. 2026-10-22: F17 SVG export missing -> implemented. 2026-10-22: F16 PNG export missing -> partial. 2026-10-22: D20 export file-name tokens missing -> partial. 2026-10-22: D20 one file per track added; D20 stays partial. 2026-10-22: S03 track reorder missing -> partial. 2026-10-22: S03 track duplicate added (still partial). 2026-10-22: S03 track color added (still partial). 2026-10-22: T28 wah gestures missing -> partial. 2026-10-22: T27 sustain pedal missing -> partial. 2026-10-22: F14 ASCII tablature export missing -> partial. 2026-10-22: A20 track focus missing -> partial. 2026-10-22: D10 header and footer fields missing -> partial. 2026-10-22: T05 picking and strumming patterns missing -> partial. 2026-10-22: N09 multi-voice selection ties missing -> partial. 2026-10-22: L05 score error display missing -> partial. 2026-10-22: L06 new score author defaults missing -> partial. 2026-10-22: L07 default view preferences missing -> partial. 2026-10-22: W18 command palette missing -> partial. 2026-10-23: F05 ASCII tab import missing -> partial. 2026-10-23: W21 help and update status missing -> partial. 2026-10-23: W22 expression text and action list missing -> partial. 2026-10-23: U13 instrument view selected beat, bar and next-beat focus missing -> partial. 2026-10-23: U14 left-handed neck and neck + keys view missing -> partial. 2026-10-23: A10 flanger and phaser and A11 tremolo and vibrato missing -> partial. 2026-10-23: A13 wah and auto-wah missing -> partial. 2026-10-23: A12 octaver and pitch shift missing -> partial. 2026-10-23: A05 user sound library missing -> implemented; A37 copy and paste of sounds and pedals missing -> partial. 2026-10-23: A33 sound preview during playback missing -> implemented. 2026-10-23: A07 drive families partial -> implemented. 2026-10-23: A15 reverb families partial -> implemented. 2026-10-23: A16 delay models and divisions partial -> implemented. 2026-10-24: A34 sound-bank microphone and mono/stereo missing -> implemented. 2026-10-24: A17 reorderable signal chain re-audited; stays partial. 2026-10-24: A14 track graphic EQ re-audited; stays partial. 2026-10-24: A10 and A11 modulation tempo sync re-audited; both stay partial. 2026-10-24: A06 amp and cabinet controls re-audited with a new tone stack; stays partial. 2026-10-24: A04 factory sound catalog re-audited; partial to implemented. 2026-10-24: A37 duplicate pedals re-audited; partial to implemented. 2026-10-24: A13 wah models re-audited; stays partial. 2026-10-24: F22 AIFF audio export re-audited; missing to implemented. 2026-10-24: F23 normalized audio export re-audited; missing to partial. 2026-10-24: F21 FLAC audio export re-audited; missing to implemented. 2026-10-24: S14 string count change re-audited; missing to implemented. 2026-10-24: S15 saved personal tunings re-audited; missing to implemented. 2026-10-24: S16 tuning audition and E17 edit audition re-audited; missing to implemented. 2026-10-24: U12 instrument view note entry re-audited; missing to implemented. 2026-10-30: W15 finalize and unfinalize re-audited; missing to implemented. 2026-10-30: D13 personal styles re-audited; missing to implemented. 2026-10-30: F02 MIDI import re-audited; missing to implemented. 2026-10-30: U05 scale diagram authoring re-audited; missing to partial. 2026-10-30: L08 input preferences re-audited; missing to partial. 2026-10-30: E05 notation pitch entry re-audited; missing to partial. 2026-10-30: D12 typography and style presets re-audited; missing to partial. 2026-10-30: S18 partial capo re-audited; missing to partial. 2026-10-30: L01 library browsing re-audited; partial. 2026-10-30: S20 banjo drone re-audited; partial. 2026-10-30: S22 and S23 re-audited; partial. 2026-10-30: A30 re-audited; partial. 2026-10-30: F10 re-audited; partial. 2026-10-30: A06 re-audited; partial. 2026-10-30: A18 re-audited; partial. 2026-10-31: F08 re-audited; partial.",
     "provenance": "Root locally accepts P16 source 447d2a9240dc5727ff0679b5b0f84dd7107db603; delivery is pending and the source is not yet pushed at this checkpoint. The final versioned tempo report supports the bounded source/native/current Windows/GP-publication/visual scope. Proprietary GP bracket import/export and playback clipping remain unverified, and the report retains audible, platform and shipping limits. This documentation audit executes no runtime or Git/network operation. The unchanged CI checkpoint belongs to historical Library source only and supplies no P16/current-head CI proof. 2026-10-16 P17/P18 checkpoint: root locally accepts source a87bae29deb08e31a8974d6d2ed390e7b5adca0b for the declared local pitch/filter scope after the frozen 57-step functional workflow at be9e61aa2383974821e7ecf70899e7f755f74f53 and sole 17-step/four-frame targeted confirmation at a87bae29deb08e31a8974d6d2ed390e7b5adca0b. The final UI source has its own admitted diagnostic build; the coherent 2647/617 whole-suite evidence belongs to earlier product source 4a01c341eca58cb25f52c89175ba1fb8c14ee803, not a rerun at this later source. The immutable visual receipt retains inherited observer metadata; the final report binds its additive provenance corrigendum and distinguishes current source/executable/admission/resource/log identities. P17 is implemented within declared local numeric scope and P18 remains partial without vocal/center/channel separation. P16 remains reviewed partial; GP bracket import/export and playback clipping remain unverified. Physical audio, original-GP8, macOS/Linux and shipping acceptance remain separate. Independent final document/adoption review and local documentation delivery/push remain pending; no current-head CI result is supplied and the unchanged CI object remains historical Library evidence. This documentation audit executes no runtime/build, Git or network operation.",
     "previous_accepted_checkpoint": "447d2a9240dc5727ff0679b5b0f84dd7107db603",
     "ci_checkpoint": {
@@ -78,28 +78,28 @@
     },
     "current_dispositions": {
       "implemented": 98,
-      "partial": 125,
-      "missing": 27,
+      "partial": 129,
+      "missing": 23,
       "unverified": 8
     },
-    "evidence_reviewed_total": 166,
+    "evidence_reviewed_total": 170,
     "evidence_reviewed": {
       "implemented": 56,
-      "partial": 106,
+      "partial": 110,
       "missing": 0,
       "unverified": 4
     },
-    "baseline_not_reaudited_total": 92,
+    "baseline_not_reaudited_total": 88,
     "baseline_not_reaudited": {
       "implemented": 42,
       "partial": 19,
-      "missing": 27,
+      "missing": 23,
       "unverified": 4
     },
-    "status_changed_total": 128,
+    "status_changed_total": 132,
     "transition_counts": {
       "missing -> implemented": 38,
-      "missing -> partial": 81,
+      "missing -> partial": 85,
       "partial -> implemented": 9
     }
   },
@@ -1825,6 +1825,96 @@
       "start_line": 22,
       "end_line": 27,
       "kind": "validation_report"
+    },
+    "note_audio_behavior": {
+      "path": "docs/validation/2026-10-30-gp8-note-audio.md",
+      "start_line": 5,
+      "end_line": 9,
+      "kind": "validation_report"
+    },
+    "note_audio_evidence": {
+      "path": "docs/validation/2026-10-30-gp8-note-audio.md",
+      "start_line": 11,
+      "end_line": 14,
+      "kind": "validation_report"
+    },
+    "note_audio_limits": {
+      "path": "docs/validation/2026-10-30-gp8-note-audio.md",
+      "start_line": 20,
+      "end_line": 22,
+      "kind": "validation_report"
+    },
+    "gp5_export_behavior": {
+      "path": "docs/validation/2026-10-30-gp8-gp5-export.md",
+      "start_line": 5,
+      "end_line": 13,
+      "kind": "validation_report"
+    },
+    "gp5_export_evidence": {
+      "path": "docs/validation/2026-10-30-gp8-gp5-export.md",
+      "start_line": 15,
+      "end_line": 23,
+      "kind": "validation_report"
+    },
+    "gp5_export_limits": {
+      "path": "docs/validation/2026-10-30-gp8-gp5-export.md",
+      "start_line": 29,
+      "end_line": 34,
+      "kind": "validation_report"
+    },
+    "cabinet_ir_behavior": {
+      "path": "docs/validation/2026-10-30-gp8-cabinet-ir.md",
+      "start_line": 5,
+      "end_line": 8,
+      "kind": "validation_report"
+    },
+    "cabinet_ir_evidence": {
+      "path": "docs/validation/2026-10-30-gp8-cabinet-ir.md",
+      "start_line": 10,
+      "end_line": 12,
+      "kind": "validation_report"
+    },
+    "cabinet_ir_limits": {
+      "path": "docs/validation/2026-10-30-gp8-cabinet-ir.md",
+      "start_line": 17,
+      "end_line": 20,
+      "kind": "validation_report"
+    },
+    "master_effects_behavior": {
+      "path": "docs/validation/2026-10-30-gp8-master-effects.md",
+      "start_line": 3,
+      "end_line": 5,
+      "kind": "validation_report"
+    },
+    "master_effects_evidence": {
+      "path": "docs/validation/2026-10-30-gp8-master-effects.md",
+      "start_line": 7,
+      "end_line": 11,
+      "kind": "validation_report"
+    },
+    "master_effects_limits": {
+      "path": "docs/validation/2026-10-30-gp8-master-effects.md",
+      "start_line": 17,
+      "end_line": 23,
+      "kind": "validation_report"
+    },
+    "batch_convert_behavior": {
+      "path": "docs/validation/2026-10-31-gp8-batch-convert-acceptance.md",
+      "start_line": 5,
+      "end_line": 7,
+      "kind": "validation_report"
+    },
+    "batch_convert_evidence": {
+      "path": "docs/validation/2026-10-31-gp8-batch-convert-acceptance.md",
+      "start_line": 9,
+      "end_line": 12,
+      "kind": "validation_report"
+    },
+    "batch_convert_limits": {
+      "path": "docs/validation/2026-10-31-gp8-batch-convert-acceptance.md",
+      "start_line": 18,
+      "end_line": 24,
+      "kind": "validation_report"
     }
   },
   "evidence_file_sha256": {
@@ -1933,7 +2023,12 @@
     "docs/validation/2026-10-30-gp8-partial-capo.md": "2c14bf9fc2d144eaa6df4bcea0e868ab1f9c6d0a287d2aeef79eee0dc89891d0",
     "docs/validation/2026-10-30-gp8-library-browse.md": "2d5ca61088976a8080ac3e11115a5925d637c1cce813f6f9656cbdb5b204a419",
     "docs/validation/2026-10-30-gp8-banjo-drone.md": "455b1fa5dd5e551365af45e1b606a4c75c44e7f395225e265150465ee3dbab34",
-    "docs/validation/2026-10-30-gp8-track-interpretation.md": "1af58ed8b8113cacc94cd7dc0421e40b2d0087cc48d62e574a8b5b0872871100"
+    "docs/validation/2026-10-30-gp8-track-interpretation.md": "1af58ed8b8113cacc94cd7dc0421e40b2d0087cc48d62e574a8b5b0872871100",
+    "docs/validation/2026-10-30-gp8-note-audio.md": "64c30119c4667e2e5baeaa53218b7b2f4ed02c5370e7654da3b14a432247d77d",
+    "docs/validation/2026-10-30-gp8-gp5-export.md": "f725190bf54a74b1782d5ec73bdbeae3f4028541489655e4492691632c7454da",
+    "docs/validation/2026-10-30-gp8-cabinet-ir.md": "915c1d2982c14f05ea3167fcb0d4ccf825d52147d0be017e2b5bbaa45801341c",
+    "docs/validation/2026-10-30-gp8-master-effects.md": "a59d26d265b3afb1601b2c0c16fd9c8e2ce111d2e7e4830e41397f3ff2954813",
+    "docs/validation/2026-10-31-gp8-batch-convert-acceptance.md": "840133863673a39cc9e3a5207804e6ac1e92721b626f1a86134fcb5895e59efb"
   },
   "next_open_families": [
     {
@@ -6240,12 +6335,12 @@
       "current_status": "partial",
       "assessment": "evidence_reviewed",
       "current_proven_status": "partial",
-      "current_behavior": "Each track sound has an Amp block with four models (clean, crunch, lead, bass), drive, output gain and a tone stack of bass (100 Hz shelf), mid (650 Hz peak), treble (2.5 kHz shelf) and presence (4.5 kHz peak), each ±12 dB, and a Cabinet block with open, closed and bass models; all editable, undoable and saved in sounds. Native tests measure each tone control within 1 dB of its setting at its centre and near flat away from it, harmonic distortion rising with drive for every model (lead 40–42% and crunch 31–42% from a quarter drive, clean under 0.4%, bass under 1.4%), the three cabinets’ low and high roll-offs, and click-free tone changes on both edit paths; a Windows desktop WAV export shows treble +12 dB lifting the 8 kHz octave by 11.9 dB and bass −12 dB cutting the 63 Hz octave by 7.9 dB while the 1 kHz octave holds.",
-      "remaining_gap": "Four amp and three cabinet models with fixed filter cabinets rather than GP8’s amp topologies, power amps, cabinet impulse responses and microphones; one tone curve for every model; no listening comparison with GP8; sounds using the tone stack cannot be opened by older builds.",
+      "current_behavior": "A track's cabinet can use an imported impulse response, heard in playback and export, with a level trim; a missing response falls back to the built-in cabinet with a notice.",
+      "remaining_gap": "No responses ship yet, and the rig view does not show the control until it merges.",
       "current_evidence": [
-        "amp_tone_behavior",
-        "amp_tone_evidence",
-        "amp_tone_limits"
+        "cabinet_ir_behavior",
+        "cabinet_ir_evidence",
+        "cabinet_ir_limits"
       ],
       "runtime_rechecked_by_this_audit": false
     },
@@ -6628,12 +6723,16 @@
       "acceptance_required": "Set song-level EQ/dynamics/reverb and verify all tracks/backing obey intended routing.",
       "runtime_rechecked": false,
       "historical_status": "missing",
-      "current_status": "missing",
-      "assessment": "baseline_not_reaudited",
-      "current_proven_status": null,
-      "current_behavior": "No master sound chain/master volume/pan controls; limiter is fixed implementation detail.",
-      "remaining_gap": "Not re-audited in this delivery-progress audit. The original baseline behavior, gap and acceptance remain authoritative historical context; this is not a new current proof.",
-      "current_evidence": [],
+      "current_status": "partial",
+      "assessment": "evidence_reviewed",
+      "current_proven_status": "partial",
+      "current_behavior": "A song has a master level, balance, compressor, EQ, reverb and limiter, saved as one undoable edit and heard in playback and export; an untouched chain is bit-identical to none.",
+      "remaining_gap": "Measured, not judged by ear; Windows only; the strip is not yet in the Sound rig.",
+      "current_evidence": [
+        "master_effects_behavior",
+        "master_effects_evidence",
+        "master_effects_limits"
+      ],
       "runtime_rechecked_by_this_audit": false
     },
     {
@@ -6985,12 +7084,16 @@
       "acceptance_required": "Adjust one note onset/length/level without changing written position and export settings.",
       "runtime_rechecked": false,
       "historical_status": "missing",
-      "current_status": "missing",
-      "assessment": "baseline_not_reaudited",
-      "current_proven_status": null,
-      "current_behavior": "Written rhythm/dynamic enums only; no fine audio properties.",
-      "remaining_gap": "Not re-audited in this delivery-progress audit. The original baseline behavior, gap and acceptance remain authoritative historical context; this is not a new current proof.",
-      "current_evidence": [],
+      "current_status": "partial",
+      "assessment": "evidence_reviewed",
+      "current_proven_status": "partial",
+      "current_behavior": "One note can have its own sounding length, start offset and velocity change, heard in playback and exports, as undoable edits, with the written rhythm unchanged.",
+      "remaining_gap": "Project only: Guitar Pro 7 and 8 have no known field, so a GP file loses them.",
+      "current_evidence": [
+        "note_audio_behavior",
+        "note_audio_evidence",
+        "note_audio_limits"
+      ],
       "runtime_rechecked_by_this_audit": false
     },
     {
@@ -7925,12 +8028,16 @@
       "acceptance_required": "Convert a mixed public corpus with per-file report and originals unchanged.",
       "runtime_rechecked": false,
       "historical_status": "missing",
-      "current_status": "missing",
-      "assessment": "baseline_not_reaudited",
-      "current_proven_status": null,
-      "current_behavior": "No recursive folder conversion with type/destination options.",
-      "remaining_gap": "Not re-audited in this delivery-progress audit. The original baseline behavior, gap and acceptance remain authoritative historical context; this is not a new current proof.",
-      "current_evidence": [],
+      "current_status": "partial",
+      "assessment": "evidence_reviewed",
+      "current_proven_status": "partial",
+      "current_behavior": "A folder of older scores converts to the current GP format with a per-file report, originals unchanged and nothing replaced silently.",
+      "remaining_gap": "The Unix path is proven only by CI; overlays on the window are not fully bounded.",
+      "current_evidence": [
+        "batch_convert_behavior",
+        "batch_convert_evidence",
+        "batch_convert_limits"
+      ],
       "runtime_rechecked_by_this_audit": false
     },
     {
@@ -7995,12 +8102,16 @@
       "acceptance_required": "Export selected score to each documented legacy destination with compatibility report.",
       "runtime_rechecked": false,
       "historical_status": "missing",
-      "current_status": "missing",
-      "assessment": "baseline_not_reaudited",
-      "current_proven_status": null,
-      "current_behavior": "Only Gp7Exporter available in product.",
-      "remaining_gap": "Not re-audited in this delivery-progress audit. The original baseline behavior, gap and acceptance remain authoritative historical context; this is not a new current proof.",
-      "current_evidence": [],
+      "current_status": "partial",
+      "assessment": "evidence_reviewed",
+      "current_proven_status": "partial",
+      "current_behavior": "The export dialog writes GP5 with a compatibility report, keeps pickups at their absolute ticks, and refuses what the format cannot hold.",
+      "remaining_gap": "GPX is not delivered, and bytes taken from the format were not checked in real Guitar Pro.",
+      "current_evidence": [
+        "gp5_export_behavior",
+        "gp5_export_evidence",
+        "gp5_export_limits"
+      ],
       "runtime_rechecked_by_this_audit": false
     },
     {

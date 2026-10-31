@@ -10,6 +10,12 @@ import { blockNames, presetName, soundPreset, voiceNames } from './sound-model';
 import type { VoiceId } from './sound-model';
 
 const noSubscribe=()=>()=>{},noState=()=>null;
+/** Whether `element` could take focus now: attached, not inert, not disabled, and neither it nor an ancestor hidden. Focusing one that is not does nothing, so the caller also confirms `document.activeElement`. */
+function canTakeFocus(element:HTMLElement) {
+  if(!element.isConnected||(element as HTMLButtonElement).disabled)return false;
+  for(let node:HTMLElement|null=element;node;node=node.parentElement)if(node.hasAttribute('inert')||getComputedStyle(node).display==='none')return false;
+  return getComputedStyle(element).visibility!=='hidden';
+}
 
 /** A pedalboard's effects and how to change them: the track's own, or the second one after it. A second board
  * left with no pedal switched on is removed. */
@@ -123,8 +129,9 @@ export function useSoundEditing({trackId,sound,onEdit,playback,busy=false,shown=
   const previewGone=!!previewChoice&&!activePreview;
   useEffect(()=>{if(previewGone)setPreviewChoice('');},[previewGone]);
   /** Starts previewing `value`: `preset:`, `factory:` or `saved:` followed by the id or name; an empty value ends the preview. */
-  const choosePreview=(value:string)=>{
+  const choosePreview=(value:string,origin?:HTMLElement|null)=>{
     if(!previewer)return;
+    previewOrigin.current=origin??null;
     if(!value){void endPreview().then(()=>setStatus('Back to this track’s sound.'));return;}
     const split=value.indexOf(':'),kind=value.slice(0,split),id=value.slice(split+1),saved=library.find(item=>item.name===id);
     const named=factorySounds.find(item=>item.id===id);
@@ -137,9 +144,11 @@ export function useSoundEditing({trackId,sound,onEdit,playback,busy=false,shown=
   };
   /** Where focus returns after a preview is kept or cancelled; set by the surface showing the preview. */
   const previewReturn=useRef<(()=>void)|null>(null);
-  const returnFocus=()=>{(previewReturn.current??(()=>previewSelect.current?.focus()))();};
+  /** The button that started the preview; focus goes back to it, or to `previewReturn` once it is gone. */
+  const previewOrigin=useRef<HTMLElement|null>(null),keeping=useRef(false);
+  const returnFocus=()=>{const origin=previewOrigin.current;if(origin&&canTakeFocus(origin)){origin.focus();if(document.activeElement===origin)return;}(previewReturn.current??(()=>previewSelect.current?.focus()))();};
   const cancelPreview=()=>{void endPreview().then(()=>setStatus('Back to this track’s sound.'));returnFocus();};
-  const keepPreview=()=>{const kept=previewer?.soundPreview();if(kept?.track!==trackId)return;const label=previewLabel;void record(kept.sound).then(ok=>{if(ok){void endPreview();setStatus(`Kept ${label}.`);}returnFocus();});returnFocus();};
+  const keepPreview=()=>{if(keeping.current)return;const kept=previewer?.soundPreview();if(kept?.track!==trackId)return;const label=previewLabel;keeping.current=true;void record(kept.sound).then(ok=>{if(ok){void endPreview();setStatus(`Kept ${label}.`);}returnFocus();}).finally(()=>{keeping.current=false;});returnFocus();};
   const escapePreview=(event:React.KeyboardEvent)=>{if(event.key==='Escape'&&showingPreview){event.preventDefault();event.stopPropagation();cancelPreview();}};
   const orphanPreview=showingPreview&&previewChoice.startsWith('saved:')&&!library.some(item=>`saved:${item.name}`===previewChoice);
   const closeConfirm=()=>{setConfirming(false);savedSelect.current?.focus();};

@@ -460,3 +460,26 @@ fn the_marker_and_lock_are_checked_as_strictly_as_the_project_reader_does() {
         assert!(MetadataInputReader::read(&path).is_err());
     }
 }
+
+#[test]
+fn a_master_edit_is_ignored_by_the_index_wherever_its_type_sits() {
+    let directory = tempfile::tempdir().unwrap();
+    let master = json!({
+        "gainDb":-3.0,"balance":0.0,
+        "compressor":{"enabled":true,"thresholdDb":-12.0,"ratio":2.0,"attackMs":30.0,"releaseMs":200.0,"makeupDb":0.0},
+        "eq":{"enabled":false,"lowDb":0.0,"midDb":0.0,"highDb":0.0,"midHz":1000.0},
+        "reverb":{"enabled":false,"model":"hall","room":0.6,"damping":0.5,"mix":0.1},
+        "limiter":{"enabled":true,"ceilingDb":-1.0,"releaseMs":100.0}
+    });
+    let mut value = project(3);
+    value["edits"] = json!([
+        {"type":"setMaster","master":master},
+        {"master":master,"type":"setMaster"},
+        {"type":"setTrackInfo","track":0,"name":"After","shortName":"A","program":1}
+    ]);
+    let actual = read_value(directory.path(), &value).unwrap();
+    assert_eq!(
+        actual["edits"],
+        json!([{"type":"setTrackInfo","track":0,"name":"After"}])
+    );
+}

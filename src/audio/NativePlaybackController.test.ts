@@ -571,3 +571,14 @@ it('schedules notes for instrument previews with the position only while a perfo
   player.stop();emit({tick:0});expect(player.scheduledNotes('base/0').tick).toBeNull();
   player.beforeScoreChange();scheduled=player.scheduledNotes('base/0');expect(scheduled).toEqual({notes:[],beats:[],tick:null,counting:false,loop:null,range:null});player.destroy();
 });
+
+it('sends the sounds again on request, so a cabinet response imported meanwhile is resolved anew',async()=>{
+  const {player,bridge}=fixture(),project=blankProject(),built=buildDocument(project);
+  await player.loadDocument(project,built);
+  // The same document sends nothing, which is why an import that leaves it as it was needs this.
+  await player.loadDocument(project,built);expect(bridge.setMix).not.toHaveBeenCalled();
+  await player.refreshSounds();
+  expect(bridge.setMix).toHaveBeenCalledTimes(1);expect(bridge.prepare).toHaveBeenCalledTimes(1);
+  await player.refreshSounds();expect(bridge.setMix).toHaveBeenCalledTimes(2);
+  player.destroy();
+});

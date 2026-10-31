@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { afterEach,expect,it,vi } from 'vitest';
+import { afterEach,describe,expect,it,vi } from 'vitest';
 import { act,cleanup,renderHook,waitFor } from '@testing-library/react';
 import { importer,model,Settings } from '@coderline/alphatab';
 import { buildScore,previewEdit,trackIdentity } from '../engine';
@@ -95,7 +95,7 @@ it.each([true,false])('freezes exact raw and hidden lyrics through the export di
   expect(getTrackLyrics(loadInterchangeScore(bytes!,new Settings()),0)).toEqual({visible,lines:[{startBar:0,text:raw}],source:'raw'});
   expect(getTrackLyrics(score,0).lines[0].text).toBe('Later');
 });
-function native():ExportNativeBridge{return {exportPdf:async()=>null,exportMidi:async()=>true,exportMusicXml:async()=>true,exportAsciiTab:async()=>true,exportSvg:async()=>true,exportPng:async()=>true,exportTrackFiles:async()=>true,exportAudio:async()=>null,status:async()=>null,cancel:async()=>{}};}
+function native():ExportNativeBridge{return {exportPdf:async()=>null,exportMidi:async()=>true,exportMusicXml:async()=>true,exportAsciiTab:async()=>true,exportGp5:async()=>true,exportSvg:async()=>true,exportPng:async()=>true,exportTrackFiles:async()=>true,exportAudio:async()=>null,status:async()=>null,cancel:async()=>{}};}
 it('rejects an unavailable current coefficient before launching or entering a native job',async()=>{
   const score=buildScore(blankProject()),api=native(),exportAudio=vi.fn(api.exportAudio);api.exportAudio=exportAudio;
   const bridge={readBackingAsset:async()=>{throw new Error('Unexpected backing read.');},confirmExport:async()=>true,exportGp:async()=>true};
@@ -203,6 +203,30 @@ it('leaves embedded backing audio out of MusicXML without touching the live scor
   await act(async()=>{expect(await result.current.run({format:'musicxml',selection:{tracks:[0],range:null}})).toBe(true);});
   const reopened=loadInterchangeScore(save.mock.calls[0][0],new Settings());expect(reopened.backingTrack).toBeFalsy();expect(reopened.masterBars.every(bar=>!bar.syncPoints?.length)).toBe(true);
   expect(model.JsonConverter.scoreToJson(score)).toBe(before);
+});
+describe('Guitar Pro 5 export',()=>{
+  const setup=(score=music(),confirm=vi.fn(async(_detail?:{title:string;message:string})=>true))=>{
+    const api=native(),save=vi.fn(async(_bytes:Uint8Array,_revision:number,_name:string)=>true);api.exportGp5=save;
+    const {result}=renderHook(()=>useExportCoordinator({revision:7,score,settings:defaultDocumentSettings(),currentSpeed:1,bridge:{readBackingAsset:async()=>{throw new Error('Unexpected backing read.');},confirmExport:confirm,exportGp:async()=>true},native:api}));
+    return {result,save,confirm};
+  };
+  it('confirms what the format leaves out, then saves a Guitar Pro 5 file',async()=>{
+    const {result,save,confirm}=setup();
+    await act(async()=>{expect(await result.current.run({format:'gp5',selection:{tracks:[0],range:null}})).toBe(true);});
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({title:'Export Guitar Pro 5 file',message:expect.stringContaining('not stored in a Guitar Pro 5 file')}));
+    const [[bytes,revision]]=save.mock.calls;expect(revision).toBe(7);expect(new TextDecoder().decode(bytes.subarray(1,25))).toBe('FICHIER GUITAR PRO v5.10');
+  });
+  it('does not save when the confirmation is declined',async()=>{
+    const {result,save}=setup(music(),vi.fn(async()=>false));
+    await act(async()=>{expect(await result.current.run({format:'gp5',selection:{tracks:[0],range:null}})).toBe(false);});
+    expect(save).not.toHaveBeenCalled();
+  });
+  it('refuses music it cannot hold before confirming or opening the native save dialog',async()=>{
+    const score=music();score.tracks[0].staves[0].bars[0].voices[0].beats[0].dots=2;
+    const {result,save,confirm}=setup(score);
+    await act(async()=>{await expect(result.current.run({format:'gp5',selection:{tracks:[0],range:null}})).rejects.toThrow(/double-dotted/);});
+    expect(confirm).not.toHaveBeenCalled();expect(save).not.toHaveBeenCalled();expect(result.current.busy).toBe(false);
+  });
 });
 it.each([false,true])('writes SVG pages with a white background unless transparent is %s',async transparent=>{
   const score=music(),before=model.JsonConverter.scoreToJson(score),api=native(),save=vi.fn(async(_pages:SvgPage[],_revision:number)=>true);api.exportSvg=save;

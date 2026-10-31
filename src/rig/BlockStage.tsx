@@ -84,7 +84,7 @@ function AmpStage({editing,board}:{editing:SoundEditing;board:Board}) {
 
 /** The four placements as spots over a speaker, the model of cabinet and the mic's output. The microphone is its own block, so a
  * cabinet's stage offers its switch too. */
-function CabinetStage({editing,board,block,cabinetResponse}:{editing:SoundEditing;board:Board;block:'cabinet'|'microphone';cabinetResponse?:ReactNode}) {
+function CabinetStage({editing,board,block,cabinetResponse}:{editing:SoundEditing;board:Board;block:'cabinet'|'microphone';cabinetResponse?:(board:Board)=>ReactNode}) {
   const {fx,busy}=editing,mic=board.effects.microphone,off=!mic.enabled;
   const placements=(['close','standard','edge','room'] as const).map(value=>({value,label:<><span className="rig-spot-dot" aria-hidden="true"/><span className="rig-spot-name">{capital(value)}</span></>,style:{left:`${micSpots[value].x}%`,top:`${micSpots[value].y}%`,...(value==='close'?{flexDirection:'column-reverse' as const}:{})}}));
   return <div className="rig-cab-stage">
@@ -98,8 +98,7 @@ function CabinetStage({editing,board,block,cabinetResponse}:{editing:SoundEditin
       <Choice label={board.name('Microphone output')} value={mic.output} disabled={busy} onChange={value=>fx(board,'microphone','output',value)} options={[['stereo','Stereo'],['mono','Mono']]}/>
       {block==='cabinet'&&<div className="rig-field"><span className="rig-field-name">Microphone</span><Footswitch editing={editing} board={board} block="microphone"/></div>}
       <p className="rig-note">{off?'The microphone block is bypassed; its placement is kept.':`Microphone: ${capital(mic.placement)}.`}</p>
-      {/* Reserved for the cabinet impulse response control, `src/audio/CabinetResponse.tsx`, from its own branch. */}
-      <div className="rig-slot" data-slot="cabinet-response">{cabinetResponse}</div>
+      {block==='cabinet'&&<div className="rig-slot" data-slot="cabinet-response">{cabinetResponse?.(board)}</div>}
     </div>
   </div>;
 }
@@ -133,7 +132,7 @@ function PedalStage({editing,board,block}:{editing:SoundEditing;board:Board;bloc
 let stageFocusHandoff:{trackId:string;block:EffectBlock;role:string|null;className:string;label:string|null}|null=null;
 
 /** The selected block's controls: drawn as the gear it is, with its knobs, models and the actions every block shares. */
-export function BlockStage({editing,selected,cabinetResponse}:{editing:SoundEditing;selected:BlockRef;cabinetResponse?:ReactNode}) {
+export function BlockStage({editing,selected,cabinetResponse}:{editing:SoundEditing;selected:BlockRef;cabinetResponse?:(board:Board)=>ReactNode}) {
   const {block}=selected,board=selected.second&&editing.second?editing.second:editing.first;
   const {order,busy,clipboard,second}=editing,index=order.indexOf(block);
   const name=blockNames[block];
@@ -145,6 +144,9 @@ export function BlockStage({editing,selected,cabinetResponse}:{editing:SoundEdit
       if(target.label?.startsWith('Remove duplicate:')){
         const btn=stageRef.current?.querySelector<HTMLElement>(`button[aria-label="Duplicate pedal: ${name}"]`);
         btn?.focus();
+      }else if(target.label?.includes('Paste pedal:')){
+        // A paste that left a second board with no pedal on removed it, and with it the button that had focus.
+        stageRef.current?.querySelector<HTMLElement>(`button[aria-label$="Paste pedal: ${name}"]`)?.focus();
       }else if(target.role==='switch'||target.className.includes('rig-switch')){
         stageRef.current?.querySelector<HTMLElement>('.rig-switch')?.focus();
       }
@@ -172,13 +174,13 @@ export function BlockStage({editing,selected,cabinetResponse}:{editing:SoundEdit
       <div className="rig-stage-actions">
         <Footswitch editing={editing} board={board} block={block}/>
         <button type="button" aria-label={board.name(`Copy pedal: ${name}`)} {...busyGuard({busy,className:'rig-button',onClick:()=>editing.copyPedalOf(board,block)})}><span className="rig-long">Copy pedal</span><span className="rig-short" aria-hidden="true">Copy</span></button>
-        <button type="button" aria-label={board.name(`Paste pedal: ${name}`)} {...busyGuard({busy,disabled:clipboard.pedal?.block!==block,className:'rig-button',onClick:()=>editing.pastePedal(board)})}><span className="rig-long">Paste pedal</span><span className="rig-short" aria-hidden="true">Paste</span></button>
+        <button type="button" aria-label={board.name(`Paste pedal: ${name}`)} {...busyGuard({busy,unavailable:clipboard.pedal?.block!==block,className:'rig-button',onClick:()=>editing.pastePedal(board)})}><span className="rig-long">Paste pedal</span><span className="rig-short" aria-hidden="true">Paste</span></button>
         {board.second
           ?<button type="button" aria-label={`Remove duplicate: ${name}`} {...busyGuard({busy,className:'rig-button',onClick:()=>editing.fx(board,block,'enabled',false)})}><span className="rig-long">Remove duplicate</span><span className="rig-short" aria-hidden="true">Remove</span></button>
-          :<button type="button" aria-label={`Duplicate pedal: ${name}`} {...busyGuard({busy,disabled:!!second?.effects[block].enabled,className:'rig-button',onClick:()=>editing.duplicate(block)})}><span className="rig-long">Duplicate pedal</span><span className="rig-short" aria-hidden="true">Duplicate</span></button>}
+          :<button type="button" aria-label={`Duplicate pedal: ${name}`} {...busyGuard({busy,unavailable:!!second?.effects[block].enabled,className:'rig-button',onClick:()=>editing.duplicate(block)})}><span className="rig-long">Duplicate pedal</span><span className="rig-short" aria-hidden="true">Duplicate</span></button>}
         {!board.second&&<>
-          <button type="button" aria-label={`Move ${name} earlier`} {...busyGuard({busy,disabled:index===0,className:'rig-button',onClick:()=>editing.move(block,-1)})}><span className="rig-long">Move earlier</span><span className="rig-short" aria-hidden="true">Earlier</span></button>
-          <button type="button" aria-label={`Move ${name} later`} {...busyGuard({busy,disabled:index===order.length-1,className:'rig-button',onClick:()=>editing.move(block,1)})}><span className="rig-long">Move later</span><span className="rig-short" aria-hidden="true">Later</span></button>
+          <button type="button" aria-label={`Move ${name} earlier`} {...busyGuard({busy,unavailable:index===0,className:'rig-button',onClick:()=>editing.move(block,-1)})}><span className="rig-long">Move earlier</span><span className="rig-short" aria-hidden="true">Earlier</span></button>
+          <button type="button" aria-label={`Move ${name} later`} {...busyGuard({busy,unavailable:index===order.length-1,className:'rig-button',onClick:()=>editing.move(block,1)})}><span className="rig-long">Move later</span><span className="rig-short" aria-hidden="true">Later</span></button>
         </>}
       </div>
     </header>

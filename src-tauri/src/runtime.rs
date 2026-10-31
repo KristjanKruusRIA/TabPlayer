@@ -690,6 +690,40 @@ pub async fn export_musicxml(
     .await
     .map_err(|e| e.to_string())?
 }
+/// Writes a Guitar Pro 5 file the frontend built. Anything that is not one is refused before a destination is asked for.
+#[tauri::command]
+pub async fn export_gp5(
+    document: DocumentRevision,
+    bytes: Vec<u8>,
+    file_name: Option<String>,
+    app: AppHandle,
+) -> Result<bool, String> {
+    check_gp5(&bytes)?;
+    let Some(path) = export_destination(&app, "gp5", false, file_name.as_deref())? else {
+        return Ok(false);
+    };
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::export_document_to_path(
+            &app.state::<NativeAudio>(),
+            &app.state::<ExportJobs>(),
+            &app.state::<Arc<Mutex<DocumentWorkspace>>>(),
+            &document,
+            &path,
+            &bytes,
+        )?;
+        Ok(true)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+/// A Guitar Pro 5 file starts with a length byte and the text of its version; a zip (Guitar Pro 7 and later) does not.
+fn check_gp5(bytes: &[u8]) -> Result<(), String> {
+    const VERSION: &[u8] = b"FICHIER GUITAR PRO v5.";
+    if bytes.len() < 32 || bytes[0] as usize != 24 || !bytes[1..].starts_with(VERSION) {
+        return Err("The data is not a Guitar Pro 5 file.".into());
+    }
+    Ok(())
+}
 #[tauri::command]
 pub async fn export_ascii_tab(
     document: DocumentRevision,
@@ -1106,4 +1140,27 @@ pub fn cancel_export(
     jobs: State<'_, ExportJobs>,
 ) -> Result<(), String> {
     jobs.cancel(&document_id, &id)
+}
+
+#[cfg(test)]
+mod gp5_tests {
+    use super::check_gp5;
+
+    fn header(text: &[u8]) -> Vec<u8> {
+        let mut bytes = vec![text.len() as u8];
+        bytes.extend_from_slice(text);
+        bytes.resize(31, 0);
+        bytes.extend_from_slice(&[0; 8]);
+        bytes
+    }
+
+    #[test]
+    fn only_a_guitar_pro_5_header_is_accepted() {
+        assert!(check_gp5(&header(b"FICHIER GUITAR PRO v5.10")).is_ok());
+        assert!(check_gp5(&header(b"FICHIER GUITAR PRO v5.00")).is_ok());
+        assert!(check_gp5(&header(b"FICHIER GUITAR PRO v4.06")).is_err());
+        assert!(check_gp5(b"PK\x03\x04 a Guitar Pro 7 archive, not a Guitar Pro 5 file").is_err());
+        assert!(check_gp5(&[]).is_err());
+        assert!(check_gp5(&header(b"FICHIER GUITAR PRO v5.10")[..20]).is_err());
+    }
 }

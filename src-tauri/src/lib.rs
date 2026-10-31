@@ -187,25 +187,31 @@ fn write_new_files(outputs: &[(&Path, &[u8])]) -> Result<(), String> {
 fn save_document_to_path(
     audio: &runtime::NativeAudio,
     library: &FileLibrary,
+    session: &session::SessionRuntime,
     workspace: &Mutex<DocumentWorkspace>,
     document: &DocumentRevision,
     path: PathBuf,
 ) -> Result<DocumentSnapshot, String> {
     let epoch = library.admit()?;
     audio.protect_destination(&path)?;
-    let (saved, receipt) = {
+    let (saved, receipt, sealed) = {
         let mut workspace = workspace.lock().map_err(|error| error.to_string())?;
         library.check_epoch(epoch)?;
         let saved = workspace.save_to_path(document, path)?;
         let receipt = workspace.library_receipt(&saved.document_id).ok().flatten();
-        (saved, receipt)
+        // A file saved under a password to open must show nothing in the folder index, whether or not it is in a
+        // folder. Read under the same lock as the save; when that cannot be told, the file is treated as protected.
+        let sealed = workspace.is_sealed(&saved.document_id).unwrap_or(true);
+        (saved, receipt, sealed)
     };
-    // A file saved under a password to open must show nothing in the folder index, whether or not it is in a folder.
-    let sealed = workspace
-        .lock()
-        .map(|workspace| workspace.is_sealed(&saved.document_id).unwrap_or(false))
-        .unwrap_or(false);
     library.record_saved(receipt, sealed);
+    session.changed();
+    if sealed {
+        // The recovery backup is a plain file. Rewrite it now, without this score, so that no older backup that still
+        // holds it stays on disk until the next scheduled checkpoint. Not running (a session transition) is fine: the
+        // backup is written without it then, too.
+        let _ = session.retry();
+    }
     Ok(saved)
 }
 
@@ -706,17 +712,15 @@ async fn save_project(
         } else {
             existing.unwrap()
         };
-        let result = save_document_to_path(
+        save_document_to_path(
             &app.state::<runtime::NativeAudio>(),
             &app.state::<FileLibrary>(),
+            &app.state::<session::SessionRuntime>(),
             &workspace,
             &document,
             path,
-        );
-        if result.is_ok() {
-            app.state::<session::SessionRuntime>().changed();
-        }
-        result.map(Some)
+        )
+        .map(Some)
     })
     .await
     .map_err(|error| error.to_string())?
@@ -869,11 +873,11 @@ fn desktop_test_io(
             let saved = save_document_to_path(
                 &app.state::<runtime::NativeAudio>(),
                 &app.state::<FileLibrary>(),
+                &app.state::<session::SessionRuntime>(),
                 &state,
                 &document,
                 with_extension(path, "tabplayer"),
             )?;
-            app.state::<session::SessionRuntime>().changed();
             desktop_test_response(saved)
         }
         "export" => {

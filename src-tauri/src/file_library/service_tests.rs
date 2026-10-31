@@ -1220,3 +1220,115 @@ fn catalog_details_follow_the_sealed_state_on_disk_not_the_live_password() {
             .contains("Reopened Secret")
     );
 }
+fn index_text(directory: &Path) -> Vec<String> {
+    fs::read_dir(directory.join("file-library-v1"))
+        .unwrap()
+        .flatten()
+        .filter(|entry| entry.file_name().to_string_lossy().starts_with("index-"))
+        .map(|entry| fs::read_to_string(entry.path()).unwrap())
+        .collect()
+}
+
+/// A plain score in an indexed library folder, opened as a document.
+fn indexed_score(
+    directory: &Path,
+    library: &FileLibrary,
+    workspace: &Mutex<DocumentWorkspace>,
+) -> (PathBuf, String, DocumentRevision) {
+    let folder = directory.join("scores");
+    fs::create_dir(&folder).unwrap();
+    let path = folder.join("score.tabplayer");
+    write_project(&path, &Project::blank()).unwrap();
+    let root = library.add_root(0, folder).unwrap().roots[0].id.clone();
+    finish(library, &root);
+    assert_eq!(library.search(&query()).unwrap().total, 1);
+    assert!(
+        index_text(directory)
+            .iter()
+            .any(|text| text.contains("Indexed Study"))
+    );
+    let opened = add(library, workspace, &path);
+    (path, root, opened)
+}
+
+#[test]
+fn the_save_command_takes_a_score_sealed_in_a_library_folder_out_of_the_index_at_once() {
+    use crate::{password_crypto::Secret, password_lock::ProtectionRequest};
+    let (directory, library, _unused, _) = fixture();
+    let session_directory = tempfile::tempdir().unwrap();
+    let runtime = crate::session::SessionRuntime::open(
+        session_directory.path().to_path_buf(),
+        Arc::new(|_| {}),
+    )
+    .unwrap();
+    let audio = crate::runtime::NativeAudio::new(PathBuf::new(), Arc::new(|_| {}));
+    runtime
+        .resolve(
+            None,
+            vec![],
+            &audio,
+            &crate::export::jobs::ExportJobs::default(),
+        )
+        .unwrap();
+    let workspace = runtime.workspace();
+    let (path, _root, opened) = indexed_score(directory.path(), &library, &workspace);
+    let changed = crate::password_lock::apply_protection_with(
+        &workspace,
+        &opened,
+        ProtectionRequest::SetOpenPassword {
+            current: None,
+            password: Secret::new("a long enough phrase"),
+        },
+        crate::password_crypto::KdfParams::new(64, 1, 1).unwrap(),
+    )
+    .unwrap();
+    // Save goes through the function the command uses: it alone decides that the index must forget the score.
+    crate::save_document_to_path(
+        &audio,
+        &library,
+        &runtime,
+        &workspace,
+        &DocumentRevision {
+            document_id: changed.document_id,
+            revision: changed.revision,
+        },
+        path,
+    )
+    .unwrap();
+    assert_eq!(library.search(&query()).unwrap().total, 0);
+    assert!(
+        index_text(directory.path())
+            .iter()
+            .all(|text| !text.contains("Indexed Study")),
+        "the folder index file still holds the details of a score saved under a password"
+    );
+}
+
+#[test]
+fn acknowledging_metadata_for_a_sealed_score_scrubs_the_folder_index_under_its_canonical_path() {
+    use crate::{password_crypto::Secret, password_lock::ProtectionRequest};
+    let (directory, library, workspace, _) = fixture();
+    let (path, _root, opened) = indexed_score(directory.path(), &library, &workspace);
+    // Sealed and saved without the command, so nothing but the metadata callback can scrub the index. The receipt
+    // keeps the path the save was given, while the index rows hold canonical paths (\\?\ on Windows).
+    let sealed = protect_and_save(
+        &workspace,
+        &opened,
+        ProtectionRequest::SetOpenPassword {
+            current: None,
+            password: Secret::new("a long enough phrase"),
+        },
+        &path,
+    );
+    success(&library, &workspace, &sealed);
+    assert_eq!(library.search(&query()).unwrap().total, 1);
+    library
+        .metadata_ack(&sealed, metadata("Secret Title"), &workspace)
+        .unwrap();
+    assert_eq!(library.search(&query()).unwrap().total, 0);
+    assert!(
+        index_text(directory.path())
+            .iter()
+            .all(|text| !text.contains("Indexed Study") && !text.contains("Secret Title"))
+    );
+}

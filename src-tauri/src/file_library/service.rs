@@ -516,7 +516,7 @@ impl FileLibrary {
             if sealed {
                 // The catalog is a plain file: a protected score leaves no details in it, and loses any it had.
                 if let Ok(index) = core.index.as_ref() {
-                    let _ = index.scrub_file(&record.native.path);
+                    let _ = index.scrub_file(&history_identity(&record.native.path));
                 }
                 return store.strip_recent_metadata(&record.native.path);
             }

@@ -1510,3 +1510,229 @@ fn clean_shutdown_keeps_only_the_saved_lock_after_restart() {
     assert_eq!(recovered.snapshot.project.lock, lock);
     assert!(!recovered.snapshot.dirty);
 }
+/// Every file under `root` that holds `needle`, as a path relative to it.
+fn files_holding(root: &std::path::Path, needle: &str) -> Vec<String> {
+    let mut found = Vec::new();
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(directory) = stack.pop() {
+        for entry in std::fs::read_dir(&directory).unwrap().flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+            } else if let Ok(bytes) = std::fs::read(&path) {
+                if String::from_utf8_lossy(&bytes).contains(needle) {
+                    found.push(path.strip_prefix(root).unwrap().display().to_string());
+                }
+            }
+        }
+    }
+    found
+}
+
+fn checkpoint_files(root: &std::path::Path) -> Vec<String> {
+    let mut names: Vec<String> = std::fs::read_dir(root.join("recovery-v1"))
+        .unwrap()
+        .flatten()
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .filter(|name| name.starts_with("checkpoint"))
+        .collect();
+    names.sort();
+    names
+}
+
+fn title_it(runtime: &SessionRuntime, title: &str) {
+    let workspace = runtime.workspace();
+    let mut state = workspace.lock().unwrap();
+    let id = state.active_owner().document_id.clone();
+    let address = address(&state, &id);
+    state
+        .apply_edit(
+            &address,
+            EditCommand::SetScoreInfo {
+                title: title.into(),
+                artist: "Nobody".into(),
+                tempo: 120.0,
+            },
+            None,
+        )
+        .unwrap();
+    drop(state);
+    runtime.changed();
+}
+
+/// Saves through the function the Save command uses, with the real worker running.
+fn protect_and_save_through_the_command(
+    runtime: &SessionRuntime,
+    audio: &NativeAudio,
+    library: &crate::file_library::service::FileLibrary,
+    target: &std::path::Path,
+) {
+    let workspace = runtime.workspace();
+    let current = {
+        let state = workspace.lock().unwrap();
+        let id = state.active_owner().document_id.clone();
+        address(&state, &id)
+    };
+    let changed = crate::password_lock::apply_protection_with(
+        &workspace,
+        &current,
+        crate::password_lock::ProtectionRequest::SetOpenPassword {
+            current: None,
+            password: crate::password_crypto::Secret::new("a long enough phrase"),
+        },
+        crate::password_crypto::KdfParams::new(64, 1, 1).unwrap(),
+    )
+    .unwrap();
+    crate::save_document_to_path(
+        audio,
+        library,
+        runtime,
+        &workspace,
+        &DocumentRevision {
+            document_id: changed.document_id,
+            revision: changed.revision,
+        },
+        target.to_path_buf(),
+    )
+    .unwrap();
+}
+
+#[test]
+fn saving_a_score_under_a_password_leaves_no_plain_copy_in_the_recovery_backup_at_once() {
+    const MARKER: &str = "ZebraMoonlightMarker";
+    let directory = tempfile::tempdir().unwrap();
+    let saved = tempfile::tempdir().unwrap();
+    let runtime = open(directory.path());
+    let audio = audio();
+    let jobs = ExportJobs::default();
+    let library = crate::file_library::service::FileLibrary::open(
+        saved.path().join("file-library-v1"),
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .join("assets/library"),
+        Arc::new(|_| {}),
+    );
+    library.resume();
+    resolve(&runtime, &audio, &jobs);
+    title_it(&runtime, MARKER);
+    checkpoint(&runtime);
+    edit(&runtime, 3);
+    checkpoint(&runtime);
+    // Control: the ordinary backups are plain, and the search below can see the marker in them.
+    assert!(
+        !files_holding(directory.path(), MARKER).is_empty(),
+        "control: the plain backups hold the title"
+    );
+    assert_eq!(checkpoint_files(directory.path()).len(), 2);
+
+    let generation = runtime.status().generation.unwrap_or(0);
+    let target = saved.path().join("score.tabplayer");
+    protect_and_save_through_the_command(&runtime, &audio, &library, &target);
+    assert_eq!(&std::fs::read(&target).unwrap()[..8], b"TABPLOCK");
+
+    // Nothing waits for the next scheduled checkpoint: saving the protected score rewrites the backup by itself,
+    // through the real worker, without the score and without the older plain backup that held it.
+    // The save itself asked the worker for the checkpoint: it is requested, under way or already written, which
+    // the ordinary schedule (two seconds after a change) is none of.
+    let asked = {
+        let state = runtime.inner.state.lock().unwrap();
+        state.retry
+            || state.writing
+            || state
+                .status
+                .generation
+                .is_some_and(|value| value > generation)
+    };
+    assert!(
+        asked,
+        "saving the protected score did not ask for a recovery checkpoint"
+    );
+    wait_until(|| {
+        let status = runtime.status();
+        status.state == RecoveryState::Ready
+            && status.generation.is_some_and(|value| value > generation)
+    });
+    wait_until(|| !runtime.inner.state.lock().unwrap().writing);
+    assert_eq!(
+        files_holding(directory.path(), MARKER),
+        Vec::<String>::new(),
+        "plain copy left in the recovery backup"
+    );
+    assert_eq!(
+        checkpoint_files(directory.path()).len(),
+        1,
+        "only the checkpoint without the score remains"
+    );
+    // Later checkpoints stay clean too.
+    edit(&runtime, 5);
+    checkpoint(&runtime);
+    assert!(files_holding(directory.path(), MARKER).is_empty());
+    assert!(checkpoint_files(directory.path()).len() <= 2);
+}
+
+#[test]
+fn saving_a_plain_score_only_schedules_a_checkpoint_and_keeps_the_previous_one() {
+    const MARKER: &str = "HeronQuartzMarker";
+    let directory = tempfile::tempdir().unwrap();
+    let saved = tempfile::tempdir().unwrap();
+    let runtime = open(directory.path());
+    let audio = audio();
+    let jobs = ExportJobs::default();
+    let library = crate::file_library::service::FileLibrary::open(
+        saved.path().join("file-library-v1"),
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .join("assets/library"),
+        Arc::new(|_| {}),
+    );
+    library.resume();
+    resolve(&runtime, &audio, &jobs);
+    title_it(&runtime, MARKER);
+    checkpoint(&runtime);
+    edit(&runtime, 3);
+    checkpoint(&runtime);
+    let generation = runtime.status().generation.unwrap();
+    let workspace = runtime.workspace();
+    let current = {
+        let state = workspace.lock().unwrap();
+        let id = state.active_owner().document_id.clone();
+        address(&state, &id)
+    };
+    let latest = runtime.inner.state.lock().unwrap().latest_revision;
+    let target = saved.path().join("plain.tabplayer");
+    crate::save_document_to_path(&audio, &library, &runtime, &workspace, &current, target).unwrap();
+    let (latest_after, pending) = {
+        let state = runtime.inner.state.lock().unwrap();
+        (
+            state.latest_revision,
+            state.status.state == RecoveryState::Pending,
+        )
+    };
+    assert!(latest_after > latest, "the save was not noted as a change");
+    assert!(pending);
+    // Nothing is written at once: the ordinary schedule waits two seconds after a change.
+    let started = Instant::now();
+    while started.elapsed() < Duration::from_millis(1000) {
+        let (writing, written) = {
+            let state = runtime.inner.state.lock().unwrap();
+            (state.writing, state.status.generation != Some(generation))
+        };
+        assert!(
+            !writing && !written,
+            "a plain save asked for an immediate checkpoint"
+        );
+        thread::yield_now();
+    }
+    // The ordinary schedule writes it later, and the plain previous checkpoint stays.
+    wait_until(|| {
+        runtime
+            .status()
+            .generation
+            .is_some_and(|value| value > generation)
+    });
+    wait_until(|| !runtime.inner.state.lock().unwrap().writing);
+    assert_eq!(checkpoint_files(directory.path()).len(), 2);
+    assert!(!files_holding(directory.path(), MARKER).is_empty());
+}

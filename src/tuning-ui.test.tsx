@@ -63,7 +63,7 @@ function exposeControl(element:HTMLElement){
 const change=(label:string,value:string)=>fireEvent.change(exposeControl(screen.getByLabelText(label)),{target:{value}});
 const click=(name:string)=>{
   if(/^Track \d+:/.test(name))fireEvent.click(screen.getByRole('button',{name:'Mixer'}));
-  else exposeControl(screen.getByText(name,{selector:'button'}));
+  else exposeControl(screen.getByRole('button',{name,hidden:true}));
   fireEvent.click(screen.getByRole('button',{name}));
 };
 const trackLabel='Tuning (notes, high to low)',staffLabel='Staff tuning (notes, high to low)';

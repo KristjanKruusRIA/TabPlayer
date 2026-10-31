@@ -1040,3 +1040,156 @@ fn the_costs_the_app_writes_with_run_in_a_moments_wait_and_open_what_they_seal()
     assert!(started.elapsed().as_secs() < 30, "{:?}", started.elapsed());
     println!("one derivation at the default costs: {derive_time:?}");
 }
+
+#[test]
+fn a_score_locked_for_editing_cannot_be_sealed_unsealed_or_finalized_without_its_password() {
+    use tabplayer_lib::project::DocumentLock;
+    let (workspace, id) = open_one();
+    protect(
+        &workspace,
+        &id,
+        ProtectionRequest::SetOpenPassword {
+            current: None,
+            password: secret(OTHER),
+        },
+    )
+    .unwrap();
+    set_edit(&workspace, &id, PASSWORD);
+    lock_editing(&workspace, &id);
+    let before = snapshot(&workspace, &id);
+    let set = |current: Option<&str>| {
+        protect(
+            &workspace,
+            &id,
+            ProtectionRequest::SetOpenPassword {
+                current: current.map(secret),
+                password: secret("yet another phrase"),
+            },
+        )
+    };
+    assert_eq!(set(Some(OTHER)).err().as_deref(), Some(EDIT_LOCKED_MESSAGE));
+    assert_eq!(
+        protect(
+            &workspace,
+            &id,
+            ProtectionRequest::RemoveOpenPassword {
+                current: secret(OTHER)
+            }
+        )
+        .err()
+        .as_deref(),
+        Some(EDIT_LOCKED_MESSAGE)
+    );
+    for lock in [Some(DocumentLock::Finalized), None] {
+        let address = current(&workspace, &id);
+        assert_eq!(
+            workspace
+                .lock()
+                .unwrap()
+                .set_lock(&address, lock)
+                .err()
+                .as_deref(),
+            // Unfinalizing an unfinalized score changes nothing, so only the finalize is refused.
+            if lock.is_some() {
+                Some(EDIT_LOCKED_MESSAGE)
+            } else {
+                None
+            }
+        );
+    }
+    assert_eq!(snapshot(&workspace, &id), before);
+    // With the password given, all of it works.
+    protect(
+        &workspace,
+        &id,
+        ProtectionRequest::UnlockEditing {
+            password: secret(PASSWORD),
+        },
+    )
+    .unwrap();
+    set(Some(OTHER)).unwrap();
+    let address = current(&workspace, &id);
+    workspace
+        .lock()
+        .unwrap()
+        .set_lock(&address, Some(DocumentLock::Finalized))
+        .unwrap();
+    lock_editing(&workspace, &id);
+    let address = current(&workspace, &id);
+    assert_eq!(
+        workspace
+            .lock()
+            .unwrap()
+            .set_lock(&address, None)
+            .err()
+            .as_deref(),
+        Some(EDIT_LOCKED_MESSAGE)
+    );
+}
+
+#[test]
+fn sealing_a_score_removes_the_older_recovery_backup_that_holds_it_in_plain_form() {
+    use tabplayer_lib::recovery::{RecoveryEnvelope, RecoveryStore, SessionLifecycle};
+    let directory = tempfile::tempdir().unwrap();
+    let plain_path = directory.path().join("song.tabplayer");
+    write_project(&plain_path, &titled()).unwrap();
+    let (workspace, _) = open_one();
+    let id = open_file(&workspace, &plain_path, None).unwrap();
+    let mut store = RecoveryStore::acquire(directory.path().join("session")).unwrap();
+    let checkpoints = || {
+        std::fs::read_dir(directory.path().join("session/recovery-v1"))
+            .unwrap()
+            .flatten()
+            .filter(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with("checkpoint")
+            })
+            .count()
+    };
+    let mut commit = |documents, keep_previous| {
+        let (epoch, generation) = store.next_identity(false).unwrap();
+        store
+            .commit_keeping(
+                &RecoveryEnvelope {
+                    format: "TabPlayerRecovery".into(),
+                    version: 1,
+                    epoch,
+                    generation,
+                    captured_at_unix_ms: 1,
+                    active_document_id: None,
+                    documents,
+                },
+                SessionLifecycle::Running,
+                false,
+                keep_previous,
+            )
+            .unwrap();
+    };
+    let plain = workspace.lock().unwrap().recovery_documents().unwrap();
+    commit(plain.clone(), true);
+    commit(plain, true);
+    assert_eq!(checkpoints(), 2, "two plain checkpoints are kept");
+    protect(
+        &workspace,
+        &id,
+        ProtectionRequest::SetOpenPassword {
+            current: None,
+            password: secret(PASSWORD),
+        },
+    )
+    .unwrap();
+    let documents = workspace.lock().unwrap().recovery_documents().unwrap();
+    assert!(
+        documents
+            .iter()
+            .any(|document| document.session.is_sealed())
+    );
+    commit(redact_sealed(documents), false);
+    assert_eq!(
+        checkpoints(),
+        1,
+        "only the checkpoint without the score remains"
+    );
+}

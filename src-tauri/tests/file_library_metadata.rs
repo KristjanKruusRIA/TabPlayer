@@ -483,3 +483,50 @@ fn a_master_edit_is_ignored_by_the_index_wherever_its_type_sits() {
         json!([{"type":"setTrackInfo","track":0,"name":"After"}])
     );
 }
+
+#[test]
+fn a_project_with_a_password_to_edit_is_indexed_and_a_malformed_one_is_refused() {
+    use tabplayer_lib::password_crypto::{KdfParams, PasswordVerifier};
+    let directory = tempfile::tempdir().unwrap();
+    let plain = read_value(directory.path(), &file_project(3)).unwrap();
+    let verifier =
+        PasswordVerifier::create("a long enough phrase", KdfParams::new(64, 1, 1).unwrap())
+            .unwrap();
+    let lock = serde_json::to_value(&verifier).unwrap();
+    let mut locked = file_project(3);
+    locked["editLock"] = lock.clone();
+    let actual = read_value(directory.path(), &locked)
+        .unwrap_or_else(|error| panic!("an edit lock must be accepted: {error}"));
+    assert_eq!(actual["base"], plain["base"]);
+    // The lock is checked as the project reader checks it: every field, once, of the right kind.
+    let mut bad_locks = vec![json!(null), json!("x"), json!({}), json!([])];
+    for field in [
+        "kdf",
+        "memoryKib",
+        "iterations",
+        "parallelism",
+        "salt",
+        "hash",
+    ] {
+        let mut missing = lock.clone();
+        missing.as_object_mut().unwrap().remove(field);
+        bad_locks.push(missing);
+    }
+    let mut extra = lock.clone();
+    extra["password"] = json!("x");
+    bad_locks.push(extra);
+    let mut wrong_kdf = lock.clone();
+    wrong_kdf["kdf"] = json!("md5");
+    bad_locks.push(wrong_kdf);
+    let mut wrong_cost = lock.clone();
+    wrong_cost["memoryKib"] = json!("lots");
+    bad_locks.push(wrong_cost);
+    for bad_lock in bad_locks {
+        let mut bad = file_project(3);
+        bad["editLock"] = bad_lock.clone();
+        assert!(
+            read_value(directory.path(), &bad).is_err(),
+            "{bad_lock} must be refused"
+        );
+    }
+}

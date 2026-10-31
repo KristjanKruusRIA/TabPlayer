@@ -43,3 +43,16 @@ it('a successful reveal retry clears the old Library failure, and an unsaved sco
   vi.mocked(f.library.reveal).mockRejectedValueOnce(new Error('Launcher unavailable.'));await library.reveal();expect(library.getState().error).toContain('Launcher unavailable.');await library.reveal();expect(library.getState().error).toBeNull();library.dispose();
   const unsaved=setup();unsaved.records.get('b')!.snapshot.path=null;const second=await WorkspaceController.create(unsaved.bridge),next=await WorkspaceLibrary.create(second,unsaved.library,{run:vi.fn(),dispose:vi.fn()},{blocked:()=>null,restoredWorkingDocument:true});await next.reveal();expect(unsaved.library.reveal).not.toHaveBeenCalled();expect(next.getState().error).toMatch(/Save this score/);expect(second.getState().busy).toBe(false);next.dispose();
 });
+
+it('a password-protected score sends the Library no title, artist, album or track names',async()=>{
+  const f=setup();
+  for(const [id,record] of f.records)f.records.set(id,{...record,snapshot:{...record.snapshot,protection:{edit:'none',open:true}}});
+  const w=await WorkspaceController.create(f.bridge),library=await WorkspaceLibrary.create(w,f.library,{run:vi.fn(),dispose:vi.fn()},{blocked:()=>null,restoredWorkingDocument:true});
+  await w.getState().documents[1].controller.save(true);
+  await vi.waitFor(()=>expect(f.library.ackMetadata).toHaveBeenCalledTimes(1));
+  const [address,metadata]=vi.mocked(f.library.ackMetadata).mock.calls[0];
+  expect(address).toEqual({documentId:'b',revision:4});
+  expect(metadata).toEqual({title:'',artist:'',album:'',trackNames:[],metadataTruncated:false});
+  expect(JSON.stringify(vi.mocked(f.library.ackMetadata).mock.calls)).not.toMatch(/Saved ensemble|Composer|Studies|Guitar/);
+  library.dispose();
+});

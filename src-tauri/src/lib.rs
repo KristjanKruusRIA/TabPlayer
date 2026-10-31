@@ -944,6 +944,8 @@ pub fn run() {
             if let Ok(directory) = audio::cabinet_ir::library_directory(app.handle()) {
                 audio::cabinet_ir::install(directory);
             }
+            // Printed scores left in the cache by an earlier run are plain copies of the score; none outlives a run.
+            clear_print_cache(app.handle());
             let directory = session::session_directory(app.path().app_data_dir()?)?;
             let library_directory = directory.join("file-library-v1");
             let bundled_directory = app.path().resource_dir()?.join("library");
@@ -1179,8 +1181,20 @@ pub fn run() {
         desktop_test_io
     ]);
     builder
-        .run(tauri::generate_context!())
-        .expect("Could not start TabPlayer");
+        .build(tauri::generate_context!())
+        .expect("Could not start TabPlayer")
+        .run(|app, event| {
+            if matches!(event, tauri::RunEvent::Exit) {
+                clear_print_cache(app);
+            }
+        });
+}
+
+/// Removes the printable PDFs kept for external viewers. Each holds a whole score in plain form.
+fn clear_print_cache(app: &AppHandle) {
+    if let Ok(cache) = app.path().app_cache_dir() {
+        export::print::remove_viewer_files(&cache.join("print"));
+    }
 }
 
 #[cfg(test)]

@@ -439,6 +439,30 @@ impl LibraryStore {
         }
         self.snapshot()
     }
+    /// Forgets the details kept for a file's recent entry. A password-protected score must not leave its title, artist
+    /// or track names in this plain catalog, so they are removed whichever digest they were stored under.
+    pub fn strip_recent_metadata(&mut self, path: &Path) -> Result<LibrarySnapshot, String> {
+        self.reconcile_publication()?;
+        if !self
+            .catalog
+            .recents
+            .iter()
+            .any(|entry| entry.metadata.is_some() && paths_match(&entry.path, path))
+        {
+            return self.snapshot();
+        }
+        let mut next = self.catalog.clone();
+        for entry in &mut next.recents {
+            if paths_match(&entry.path, path) {
+                entry.metadata = None;
+            }
+        }
+        if let Err(error) = self.publish_with(next, false, write_bytes) {
+            self.history_warning = Some(format!("Library metadata could not be removed: {error}"));
+            return Err(error);
+        }
+        self.snapshot()
+    }
     pub fn ack_index(
         &mut self,
         root_id: &str,

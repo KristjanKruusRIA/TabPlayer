@@ -926,3 +926,97 @@ fn acquired_store_cannot_grow_a_second_history_queue_beside_the_original_tail() 
             .starts_with("new-")
     }));
 }
+
+#[test]
+fn a_protected_score_leaves_no_details_in_the_plain_catalog_and_loses_those_it_had() {
+    use crate::password_crypto::{KdfParams, Secret};
+    use crate::password_lock::{ProtectionRequest, apply_protection_with};
+    let (directory, library, workspace, _) = fixture();
+    let path = directory.path().join("secret.tabplayer");
+    write_project(&path, &Project::blank()).unwrap();
+    let plain = add(&library, &workspace, &path);
+    success(&library, &workspace, &plain);
+    // Unprotected, details are kept as ever.
+    let snapshot = library
+        .metadata_ack(&plain, metadata("Plain Title"), &workspace)
+        .unwrap();
+    assert_eq!(
+        snapshot.recents[0].metadata.as_ref().unwrap().title,
+        "Plain Title"
+    );
+    // Protect it with a password to open and save it over the same file.
+    let sealed = apply_protection_with(
+        &workspace,
+        &plain,
+        ProtectionRequest::SetOpenPassword {
+            current: None,
+            password: Secret::new("a long enough phrase"),
+        },
+        KdfParams::new(64, 1, 1).unwrap(),
+    )
+    .unwrap();
+    let saved = workspace
+        .lock()
+        .unwrap()
+        .save_to_path(
+            &DocumentRevision {
+                document_id: sealed.document_id,
+                revision: sealed.revision,
+            },
+            path.clone(),
+        )
+        .unwrap();
+    let saved = DocumentRevision {
+        document_id: saved.document_id,
+        revision: saved.revision,
+    };
+    success(&library, &workspace, &saved);
+    // An earlier build stored the details of this very file; they are removed too.
+    let (recent_path, digest) = {
+        let receipt = workspace
+            .lock()
+            .unwrap()
+            .library_receipt(&saved.document_id)
+            .unwrap()
+            .unwrap();
+        let mut store = library.store.lock().unwrap();
+        let store = store.as_mut().unwrap();
+        let recent = store.snapshot().unwrap().recents[0].path.clone();
+        store
+            .enrich_recent(
+                Path::new(&recent),
+                &receipt.digest,
+                metadata("Legacy Secret"),
+            )
+            .unwrap();
+        (recent, receipt.digest)
+    };
+    assert!(!digest.is_empty());
+    let catalog = directory.path().join("file-library-v1/catalog.json");
+    assert!(
+        fs::read_to_string(&catalog)
+            .unwrap()
+            .contains("Legacy Secret")
+    );
+    let snapshot = library
+        .metadata_ack(&saved, metadata("Secret Title"), &workspace)
+        .unwrap();
+    assert!(
+        snapshot
+            .recents
+            .iter()
+            .all(|entry| entry.metadata.is_none()),
+        "{recent_path}"
+    );
+    let text = fs::read_to_string(&catalog).unwrap();
+    assert!(
+        !text.contains("Secret Title")
+            && !text.contains("Legacy Secret")
+            && !text.contains("Plain Title")
+    );
+    // Asking again changes nothing.
+    let again = library
+        .metadata_ack(&saved, metadata("Secret Title"), &workspace)
+        .unwrap();
+    assert_eq!(again.revision, snapshot.revision);
+}

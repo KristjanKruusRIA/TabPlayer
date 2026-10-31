@@ -481,10 +481,15 @@ impl FileLibrary {
             if receipt.document != *document {
                 return Err("Document changed; its metadata callback is stale.".into());
             }
-            receipt
+            (receipt, state.is_sealed(&document.document_id)?)
         };
+        let (actual, sealed) = actual;
         let snapshot = self.catalog(Some(epoch), |store, core| {
             let record = core.receipts.iter().find(|record| record.native.document == *document && record.native.path == actual.path && record.native.digest == actual.digest).ok_or("Metadata requires the exact successful file operation for this document revision.")?;
+            if sealed {
+                // The catalog is a plain file: a protected score leaves no details in it, and loses any it had.
+                return store.strip_recent_metadata(&record.native.path);
+            }
             store.enrich_recent(&record.native.path, &record.native.digest, metadata)
         })?;
         self.decorate(snapshot)

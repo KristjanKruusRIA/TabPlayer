@@ -915,6 +915,18 @@ impl RecoveryStore {
         lifecycle: SessionLifecycle,
         retire: bool,
     ) -> Result<RecoveryStatus, String> {
+        self.commit_keeping(envelope, lifecycle, retire, true)
+    }
+    /// As `commit`. With `keep_previous` false the manifest names no previous checkpoint, so housekeeping removes the
+    /// older file: used when this checkpoint leaves out a score's contents because it became password-protected, so the
+    /// older checkpoint, which holds them in plain form, does not stay on disk.
+    pub fn commit_keeping(
+        &mut self,
+        envelope: &RecoveryEnvelope,
+        lifecycle: SessionLifecycle,
+        retire: bool,
+        keep_previous: bool,
+    ) -> Result<RecoveryStatus, String> {
         if (envelope.epoch, envelope.generation) != self.next_identity(retire)? {
             return Err("Stale recovery checkpoint epoch or generation.".into());
         }
@@ -955,7 +967,7 @@ impl RecoveryStore {
             lifecycle,
             current,
             previous: previous
-                .filter(|value| !retire && value.epoch == envelope.epoch)
+                .filter(|value| keep_previous && !retire && value.epoch == envelope.epoch)
                 .map(|value| value.current),
         };
         validate_manifest(&manifest)?;

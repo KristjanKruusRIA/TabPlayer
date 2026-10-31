@@ -67,21 +67,22 @@ export function UnlockEditingDialog({onTry,onClose}:{onTry:(password:string)=>Pr
 }
 
 interface SectionText {title:string;blurb:string;warning:string;setNotice:string;changeNotice:string;removeNotice:string}
-function ProtectionSection({text,isSet,status,onSet,onRemove,extra}:{text:SectionText;isSet:boolean;status:string;onSet:(current:string|null,password:string)=>Promise<void>;onRemove:(current:string)=>Promise<void>;extra?:React.ReactNode}) {
+function ProtectionSection({text,isSet,status,onSet,onRemove,extra,blocked,onWorking}:{text:SectionText;isSet:boolean;status:string;onSet:(current:string|null,password:string)=>Promise<void>;onRemove:(current:string)=>Promise<void>;extra?:React.ReactNode;/** Why this password cannot be changed now. The controls stay, focusable, and refuse. */blocked?:string;onWorking:(working:boolean)=>void}) {
   const [current,setCurrent]=useState(''),[next,setNext]=useState(''),[confirmation,setConfirmation]=useState('');
   const [problem,setProblem]=useState<string|null>(null),[notice,setNotice]=useState<string|null>(null),[working,setWorking]=useState(false),[shown,setShown]=useState(false);
   const alive=useRef(true),first=useRef<HTMLInputElement>(null),note=useId(),heading=useId();
   useEffect(()=>{alive.current=true;return()=>{alive.current=false;};},[]);
   const clear=()=>{setCurrent('');setNext('');setConfirmation('');};
   const run=async(job:()=>Promise<void>,done:string)=>{
-    setWorking(true);setProblem(null);setNotice(null);
+    setWorking(true);onWorking(true);setProblem(null);setNotice(null);
     try{await job();if(alive.current){clear();setNotice(done);}}
     catch(error){if(alive.current){setProblem(message(error));setCurrent('');queueMicrotask(()=>first.current?.focus());}}
-    finally{if(alive.current)setWorking(false);}
+    finally{onWorking(false);if(alive.current)setWorking(false);}
   };
   const submit=(event:FormEvent)=>{
     event.preventDefault();
     if(working)return;
+    if(blocked){setProblem(blocked);setNotice(null);return;}
     if(isSet&&!current){setProblem('Enter the current password.');setNotice(null);first.current?.focus();return;}
     const invalid=newPasswordProblem(next,confirmation);
     if(invalid){setProblem(invalid);setNotice(null);return;}
@@ -89,6 +90,7 @@ function ProtectionSection({text,isSet,status,onSet,onRemove,extra}:{text:Sectio
   };
   const remove=()=>{
     if(working)return;
+    if(blocked){setProblem(blocked);setNotice(null);return;}
     if(!current){setProblem('Enter the current password to remove it.');setNotice(null);first.current?.focus();return;}
     void run(()=>onRemove(current),text.removeNotice);
   };
@@ -103,11 +105,11 @@ function ProtectionSection({text,isSet,status,onSet,onRemove,extra}:{text:Sectio
       <PasswordField label="Confirm password" value={confirmation} onChange={setConfirmation} shown={shown} readOnly={working} describedBy={note}/>
       <ShowPasswords shown={shown} onChange={setShown}/>
       <div className="protection-actions">
-        <button type="submit" {...busyGuard({busy:working,className:'tp-button primary'})}>{isSet?'Change password':'Set password'}</button>
-        {isSet&&<button type="button" {...busyGuard({busy:working,className:'tp-button tp-danger',onClick:remove})}>Remove password</button>}
+        <button type="submit" {...busyGuard({busy:working,unavailable:!!blocked,className:'tp-button primary'})}>{isSet?'Change password':'Set password'}</button>
+        {isSet&&<button type="button" {...busyGuard({busy:working,unavailable:!!blocked,className:'tp-button tp-danger',onClick:remove})}>Remove password</button>}
         {extra}
       </div>
-      <p id={note} role={problem?'alert':'status'} className={problem?'error':'muted'}>{problem??(working?'Checking the password…':notice??'')}</p>
+      <p id={note} role={problem?'alert':'status'} className={problem?'error':'muted'}>{problem??(working?'Checking the password…':blocked??notice??'')}</p>
     </form>
   </section>;
 }
@@ -115,13 +117,13 @@ function ProtectionSection({text,isSet,status,onSet,onRemove,extra}:{text:Sectio
 const EDIT_TEXT:SectionText={
   title:'Password to edit',
   blurb:'Anyone can still open, read and play the score. TabPlayer asks for this password before it allows changes.',
-  warning:'This is a deterrent, not encryption. The score stays readable in the file, so another program or someone editing the file by hand can get around it. Use a password to open for real protection.',
+  warning:'This is a deterrent, not encryption. The score stays readable in the file, so another program or someone editing the file by hand can get around it. Exports are not protected either, and a Guitar Pro export opened again in TabPlayer has no edit lock. Use a password to open for real protection.',
   setNotice:'Password to edit set. Save the score to keep it.',changeNotice:'Password to edit changed. Save the score to keep it.',removeNotice:'Password to edit removed. Save the score to keep this.',
 };
 const OPEN_TEXT:SectionText={
   title:'Password to open',
   blurb:'Encrypts the saved file. Without the password nobody can open it, and no part of the score can be read from the file.',
-  warning:'There is no way to recover a forgotten password, and TabPlayer cannot reset it. Keep it somewhere safe. It applies when you save; recovery backups, templates and library details are not kept for a protected score.',
+  warning:'There is no way to recover a forgotten password, and TabPlayer cannot reset it. Keep it somewhere safe. It applies when you save; recovery backups, templates and library details are not kept for a protected score. Exports and printed copies are plain: they carry no password, and a print leaves a temporary PDF that is removed when TabPlayer closes.',
   setNotice:'Password to open set. Save the score to encrypt the file.',changeNotice:'Password to open changed. Save the score to use it.',removeNotice:'Password to open removed. Save the score to keep it unencrypted.',
 };
 
@@ -130,14 +132,17 @@ export function ProtectionDialog({protection,dirty,onRequest,onClose}:{protectio
   const editSet=protection.edit!=='none';
   const editStatus=protection.edit==='none'?'No password to edit is set.':protection.edit==='locked'?'A password to edit is set. Editing is locked.':'A password to edit is set. Editing is unlocked for now.';
   const openStatus=protection.open?'A password to open is set.':'No password to open is set.';
-  const [locking,setLocking]=useState(false);
+  // The dialog stays open while any change is being made, so its result is never lost and its fields are never left behind.
+  const [locking,setLocking]=useState(false),[changing,setChanging]=useState(0);
+  const working=(on:boolean)=>setChanging(count=>Math.max(0,count+(on?1:-1)));
   const lockNow=async()=>{if(locking)return;setLocking(true);try{await onRequest({kind:'lockEditing'});}catch{}finally{setLocking(false);}};
-  return <Dialog title="Password protection" onClose={onClose} dismissOnBackdrop className="protection-dialog protection-manage" actions={<button type="button" className="tp-button primary" onClick={onClose}>Done</button>}>
+  const busy=locking||changing>0;
+  return <Dialog title="Password protection" onClose={onClose} busy={busy} closeDisabled={busy} dismissOnBackdrop className="protection-dialog protection-manage" actions={<button type="button" {...busyGuard({busy,className:'tp-button primary',onClick:onClose})}>Done</button>}>
     <div className="protection-form">
       <ProtectionSection text={EDIT_TEXT} isSet={editSet} status={editStatus}
         onSet={(current,password)=>onRequest({kind:'setEditPassword',current,password})} onRemove={current=>onRequest({kind:'removeEditPassword',current})}
-        extra={protection.edit==='unlocked'?<button type="button" {...busyGuard({busy:locking,className:'tp-button',onClick:()=>void lockNow()})}>Lock editing now</button>:undefined}/>
-      <ProtectionSection text={OPEN_TEXT} isSet={protection.open} status={openStatus}
+        onWorking={working} extra={protection.edit==='unlocked'?<button type="button" {...busyGuard({busy:locking,className:'tp-button',onClick:()=>void lockNow()})}>Lock editing now</button>:undefined}/>
+      <ProtectionSection text={OPEN_TEXT} isSet={protection.open} status={openStatus} onWorking={working} blocked={protection.edit==='locked'?'Unlock editing first: the password to open cannot be changed while this score is locked for editing.':undefined}
         onSet={(current,password)=>onRequest({kind:'setOpenPassword',current,password})} onRemove={current=>onRequest({kind:'removeOpenPassword',current})}/>
       {dirty&&<p className="muted" role="status">Passwords take effect in the saved file when you save the score.</p>}
     </div>

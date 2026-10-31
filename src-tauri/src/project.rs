@@ -710,6 +710,12 @@ impl ProjectSession {
                 self.edit_unlocked = false;
                 Ok(true)
             }
+            // Sealing, resealing or unsealing changes the whole file, so it needs the password to edit as well.
+            ProtectionChange::SetOpen { .. } | ProtectionChange::RemoveOpen { .. }
+                if self.edit_locked() =>
+            {
+                Err(EDIT_LOCKED_MESSAGE.into())
+            }
             ProtectionChange::SetOpen { replacing, lock } => {
                 if self.project.open_lock.as_ref().map(OpenLock::salt) != replacing {
                     return Err(STALE.into());

@@ -586,6 +586,11 @@ impl DocumentWorkspace {
         Ok(candidate)
     }
 
+    /// The document is under a password to open, so nothing about its contents may be written in plain form.
+    pub fn is_sealed(&self, id: &str) -> Result<bool, String> {
+        Ok(self.entry(id)?.session.open_lock().is_some())
+    }
+
     pub fn protection_state(&self, address: &DocumentRevision) -> Result<ProtectionState, String> {
         self.check_admission()?;
         let session = &self.check_revision(address)?.session;
@@ -878,6 +883,10 @@ impl DocumentWorkspace {
     ) -> Result<DocumentSnapshot, String> {
         let revision = self.check_mutation(address)?;
         let entry = self.entry_mut(&address.document_id)?;
+        // Finalizing or unfinalizing changes what the score can do, so a score locked for editing needs its password first.
+        if entry.session.edit_locked() && entry.session.lock() != lock {
+            return Err(EDIT_LOCKED_MESSAGE.into());
+        }
         if !entry.session.set_lock(lock) {
             return Ok(entry.snapshot());
         }

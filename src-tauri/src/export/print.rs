@@ -3,7 +3,8 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 static SEQUENCE: AtomicU64 = AtomicU64::new(0);
-/// Viewer files are retained in the app cache; asynchronous viewers must be able to reopen them.
+/// Viewer files are retained in the app cache while the app runs, because asynchronous viewers must be able to reopen
+/// them. They hold the whole printed score in plain form, so they are removed when the app starts and when it exits.
 pub fn prepare_pdf(bytes: &[u8], directory: &Path) -> Result<PathBuf, String> {
     if !bytes.starts_with(b"%PDF-") {
         return Err("Print requires a prepared PDF document.".into());
@@ -20,6 +21,35 @@ pub fn prepare_pdf(bytes: &[u8], directory: &Path) -> Result<PathBuf, String> {
     ));
     crate::files::write_bytes(&path, bytes)?;
     Ok(path)
+}
+/// Whether a name is one this module made: `TabPlayer-print-<digits>-<digits>.pdf`.
+fn is_viewer_file(name: &str) -> bool {
+    let Some(rest) = name
+        .strip_prefix("TabPlayer-print-")
+        .and_then(|rest| rest.strip_suffix(".pdf"))
+    else {
+        return false;
+    };
+    let mut parts = rest.split('-');
+    let digits = |part: Option<&str>| {
+        part.is_some_and(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()))
+    };
+    digits(parts.next()) && digits(parts.next()) && parts.next().is_none()
+}
+/// Removes the viewer files left in `directory`, and nothing else. A file a viewer still holds open is left for the next
+/// start. Returns how many were removed.
+pub fn remove_viewer_files(directory: &Path) -> usize {
+    let Ok(entries) = std::fs::read_dir(directory) else {
+        return 0;
+    };
+    entries
+        .flatten()
+        .filter(|entry| {
+            entry.file_type().is_ok_and(|kind| kind.is_file())
+                && entry.file_name().to_str().is_some_and(is_viewer_file)
+                && std::fs::remove_file(entry.path()).is_ok()
+        })
+        .count()
 }
 pub fn prepare_and_open(bytes: &[u8], directory: &Path) -> Result<PathBuf, String> {
     let path = prepare_pdf(bytes, directory)?;
@@ -91,5 +121,38 @@ mod tests {
         assert!(path.is_absolute());
         assert_eq!(std::fs::read(path).unwrap(), b"%PDF-1.7\nviewer fixture");
         assert!(prepare_pdf(b"invalid", &root).is_err());
+    }
+    #[test]
+    fn leftover_viewer_files_are_removed_and_nothing_else_is() {
+        let d = tempfile::tempdir().unwrap();
+        let first = prepare_pdf(
+            b"%PDF-1.7
+one",
+            d.path(),
+        )
+        .unwrap();
+        let second = prepare_pdf(
+            b"%PDF-1.7
+two",
+            d.path(),
+        )
+        .unwrap();
+        let others = [
+            "notes.pdf",
+            "TabPlayer-print-x-1.pdf",
+            "TabPlayer-print-1-2-3.pdf",
+            "TabPlayer-print-1-2.txt",
+        ];
+        for name in others {
+            std::fs::write(d.path().join(name), b"keep").unwrap();
+        }
+        std::fs::create_dir(d.path().join("TabPlayer-print-1-2.pdf")).unwrap();
+        assert_eq!(remove_viewer_files(d.path()), 2);
+        assert!(!first.exists() && !second.exists());
+        for name in others {
+            assert!(d.path().join(name).exists(), "{name}");
+        }
+        assert!(d.path().join("TabPlayer-print-1-2.pdf").is_dir());
+        assert_eq!(remove_viewer_files(&d.path().join("missing")), 0);
     }
 }

@@ -140,3 +140,36 @@ it('tells the person when the new passwords still need saving',()=>{
   manage({edit:'unlocked',open:false},async()=>{},true);
   expect(screen.getByRole('dialog')).toHaveTextContent('Passwords take effect in the saved file when you save the score.');
 });
+
+it('the protection dialog cannot be closed while a change is being made, then can',async()=>{
+  const wait=pending(),onRequest=vi.fn((_request:ProtectionRequest)=>wait.promise);
+  const {open,onClose}=manage(none,onRequest);
+  type('Password','a good long phrase',open);type('Confirm password','a good long phrase',open);fireEvent.click(within(open).getByRole('button',{name:'Set password'}));
+  await waitFor(()=>expect(onRequest).toHaveBeenCalledTimes(1));
+  const done=screen.getByRole('button',{name:'Done'});
+  expect(done).toHaveAttribute('aria-disabled','true');expect(done).not.toBeDisabled();
+  fireEvent.click(done);fireEvent.click(screen.getByRole('button',{name:'Close'}));fireEvent.keyDown(document,{key:'Escape'});
+  expect(onClose).not.toHaveBeenCalled();
+  wait.resolve();
+  await waitFor(()=>expect(screen.getByRole('button',{name:'Done'})).not.toHaveAttribute('aria-disabled'));
+  fireEvent.click(screen.getByRole('button',{name:'Done'}));expect(onClose).toHaveBeenCalledTimes(1);
+});
+
+it('the password to open cannot be changed while the score is locked for editing, and says why',()=>{
+  const onRequest=vi.fn(async(_request:ProtectionRequest)=>{});
+  const {open}=manage({edit:'locked',open:true},onRequest);
+  type('Current password','current phrase',open);type('New password','a new long phrase',open);type('Confirm password','a new long phrase',open);
+  fireEvent.click(within(open).getByRole('button',{name:'Change password'}));
+  expect(open).toHaveTextContent('Unlock editing first');expect(within(open).getByRole('button',{name:'Change password'})).toHaveAttribute('aria-disabled','true');
+  fireEvent.click(within(open).getByRole('button',{name:'Remove password'}));
+  expect(onRequest).not.toHaveBeenCalled();
+  expect(within(open).getByRole('button',{name:'Remove password'})).not.toBeDisabled();
+});
+
+it('says that exports and prints are plain and that a Guitar Pro export loses the edit lock',()=>{
+  const {edit,open}=manage(none);
+  expect(edit).toHaveTextContent('Exports are not protected either');
+  expect(edit).toHaveTextContent('a Guitar Pro export opened again in TabPlayer has no edit lock');
+  expect(open).toHaveTextContent('Exports and printed copies are plain');
+  expect(open).toHaveTextContent('a print leaves a temporary PDF that is removed when TabPlayer closes');
+});

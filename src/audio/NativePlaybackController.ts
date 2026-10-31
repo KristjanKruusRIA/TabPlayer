@@ -6,7 +6,7 @@ import type { ChannelMix, DrumElementMix, DrumKitElement, DrumKitMix, EditComman
 import { canonicalDrumKitMix, defaultDrumElement } from './drum-kit';
 import type { BeatTarget,ProjectView } from '../project';
 import type { MusicSelection } from '../editor/range-types';
-import type { AuditionNote, AuditionRequest, NativeAudioBridge, NativeAudioStatus, TransportCommand } from './bridge';
+import type { AudioDiagnostics, AuditionNote, AuditionRequest, NativeAudioBridge, NativeAudioStatus, TransportCommand } from './bridge';
 import type { AuditionSource } from './audition';
 import { preparePlan,preparePlanFromScore } from './plan';
 import { interpretationsOf } from './interpretation';
@@ -148,6 +148,8 @@ export class NativePlaybackController {
   setMetronome(volume:number){this.setPractice({...this.practice,metronome:{...this.practice.metronome,enabled:volume>0,volume}});}
   selectDevice(deviceId:string|null){this.send({type:'selectDevice',deviceId,generation:this.generation});}
   devices(){return this.bridge.devices();}
+  diagnostics(){return this.bridge.diagnostics?.()??Promise.resolve({} as AudioDiagnostics);}
+  testTone(){return this.bridge.testTone?.()??Promise.resolve();}
   deviceId(){return this.lastStatus?.deviceId??null;}
   backingDurationMs(){const seconds=this.lastStatus?.backingDurationSeconds;return seconds==null?undefined:seconds*1000;}
   /** The track's mix as saved. The newest document wins over the one last loaded, so a control reads back what an edit just saved. */

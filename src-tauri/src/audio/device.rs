@@ -99,6 +99,13 @@ pub struct AudioDeviceInfo {
     pub name: String,
     pub is_default: bool,
 }
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AudioDiagnostics {
+    pub device_name: Option<String>,
+    pub sample_rate: Option<u32>,
+    pub buffer_size: Option<u32>,
+}
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NativeAudioStatus {
@@ -464,6 +471,7 @@ struct SharedStatus {
     audition_peak: AtomicU64,
     /// Sample rate of the open output stream; zero until one has been opened.
     audition_rate: AtomicU32,
+    buffer_size: AtomicU32,
 }
 impl SharedStatus {
     fn new() -> Self {
@@ -510,6 +518,7 @@ impl SharedStatus {
             audition_serial: AtomicU64::new(0),
             audition_peak: AtomicU64::new(0),
             audition_rate: AtomicU32::new(0),
+            buffer_size: AtomicU32::new(0),
         }
     }
     fn read(&self) -> NativeAudioStatus {
@@ -1454,6 +1463,12 @@ struct OutputCallback {
 }
 impl OutputCallback {
     fn render<T: SizedSample + FromSample<f32>>(&mut self, output: &mut [T], channels: usize) {
+        if channels > 0 {
+            self.transport
+                .shared
+                .buffer_size
+                .store((output.len() / channels) as u32, Ordering::Relaxed);
+        }
         if self.suspended || self.transport.shared.epoch.load(Ordering::Acquire) != self.epoch {
             output.fill(T::from_sample(0.0));
             return;
@@ -1672,6 +1687,71 @@ impl AudioService {
     }
     pub fn status(&self) -> NativeAudioStatus {
         self.shared.read()
+    }
+    pub fn diagnostics(&self) -> Result<AudioDiagnostics, String> {
+        if self.shared.is_faulted() {
+            return Err("Audio output device has failed.".into());
+        }
+        let selected_id = self.shared.device.lock().unwrap().clone();
+        let (device_name, default_rate) = match choose_output(selected_id.as_deref()) {
+            Ok((device, config)) => {
+                let name = device.to_string();
+                (Some(name), Some(config.sample_rate()))
+            }
+            Err(e) => {
+                return Err(e);
+            }
+        };
+        let active_rate = self.audition_rate();
+        let sample_rate = active_rate.or(default_rate);
+        let buf = self.shared.buffer_size.load(Ordering::Relaxed);
+        let buffer_size = (buf != 0).then_some(buf);
+
+        Ok(AudioDiagnostics {
+            device_name,
+            sample_rate,
+            buffer_size,
+        })
+    }
+    pub fn test_tone(&self) -> Result<(), String> {
+        if self.shared.playing.load(Ordering::Acquire) {
+            return Err("Test tone is unavailable during playback.".into());
+        }
+        if self.shared.is_faulted() {
+            return Err("Audio output device has failed.".into());
+        }
+        let rate = self
+            .audition_rate()
+            .ok_or_else(|| "Audio output device is unavailable.".to_string())?;
+
+        let duration_secs = 0.500;
+        let total_frames = (rate as f64 * duration_secs).round() as usize;
+        let fade_frames = (rate as f64 * 0.020).round() as usize;
+        let frequency = 440.0;
+        let amplitude = 0.08f32;
+
+        let mut frames = Vec::with_capacity(total_frames);
+        for i in 0..total_frames {
+            let t = (i as f64) / (rate as f64);
+            let sample = (2.0 * std::f64::consts::PI * frequency * t).sin() as f32;
+            let mut gain = 1.0f32;
+            if fade_frames > 0 {
+                if i < fade_frames {
+                    gain = (i as f32) / (fade_frames as f32);
+                } else if i + fade_frames > total_frames {
+                    gain = ((total_frames - 1 - i) as f32) / (fade_frames as f32);
+                }
+            }
+            let val = sample * amplitude * gain;
+            frames.push([val, val]);
+        }
+
+        let clip = Box::new(AuditionClip { rate, frames });
+        if self.submit_audition(clip) {
+            Ok(())
+        } else {
+            Err("Audio output is unavailable.".into())
+        }
     }
     pub fn devices(&self) -> Result<Vec<AudioDeviceInfo>, String> {
         let host = cpal::default_host();
@@ -3478,6 +3558,75 @@ mod tests {
 }
 
 #[cfg(test)]
+#[cfg(test)]
+mod diagnostics_and_test_tone_tests {
+    use super::*;
+
+    #[test]
+    fn test_tone_refused_during_playback() {
+        let service = AudioService::new(PathBuf::new(), Arc::new(|_| {}));
+        let _consumer = service.attach_test_audition(48_000);
+        service.shared.audition_rate.store(48_000, Ordering::Release);
+        service.shared.playing.store(true, Ordering::Release);
+        let err = service.test_tone().unwrap_err();
+        assert_eq!(err, "Test tone is unavailable during playback.");
+    }
+
+    #[test]
+    fn test_tone_refused_when_faulted() {
+        let service = AudioService::new(PathBuf::new(), Arc::new(|_| {}));
+        let _consumer = service.attach_test_audition(48_000);
+        service.shared.audition_rate.store(48_000, Ordering::Release);
+        service.shared.mark_fault();
+        let err = service.test_tone().unwrap_err();
+        assert_eq!(err, "Audio output device has failed.");
+    }
+
+    #[test]
+    fn test_tone_refused_when_no_stream() {
+        let service = AudioService::new(PathBuf::new(), Arc::new(|_| {}));
+        let err = service.test_tone().unwrap_err();
+        assert_eq!(err, "Audio output device is unavailable.");
+    }
+
+    #[test]
+    fn test_tone_submits_500ms_sine_clip_when_idle() {
+        let service = AudioService::new(PathBuf::new(), Arc::new(|_| {}));
+        let mut consumer = service.attach_test_audition(48_000);
+        service.shared.audition_rate.store(48_000, Ordering::Release);
+        service.test_tone().expect("test tone should succeed");
+        let clip = consumer.try_pop().expect("audition consumer received clip");
+        assert_eq!(clip.rate, 48_000);
+        assert_eq!(clip.frames.len(), 24_000);
+        for frame in &clip.frames {
+            assert!(frame[0].abs() <= 0.081);
+            assert!(frame[1].abs() <= 0.081);
+            assert_eq!(frame[0], frame[1]);
+        }
+    }
+
+    #[test]
+    fn diagnostics_reports_unknown_for_unreported_buffer_size() {
+        let service = AudioService::new(PathBuf::new(), Arc::new(|_| {}));
+        assert_eq!(service.shared.buffer_size.load(Ordering::Relaxed), 0);
+        if let Ok(diag) = service.diagnostics() {
+            assert_eq!(diag.buffer_size, None, "unreported buffer size must read as None, never default");
+        }
+        service.shared.buffer_size.store(256, Ordering::Relaxed);
+        if let Ok(diag) = service.diagnostics() {
+            assert_eq!(diag.buffer_size, Some(256));
+        }
+    }
+
+    #[test]
+    fn diagnostics_reports_error_when_device_faulted() {
+        let service = AudioService::new(PathBuf::new(), Arc::new(|_| {}));
+        service.shared.mark_fault();
+        let err = service.diagnostics().unwrap_err();
+        assert_eq!(err, "Audio output device has failed.");
+    }
+}
+
 mod audition_callback_tests {
     use super::*;
 

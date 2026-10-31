@@ -30,3 +30,7 @@
 .sound-panel .sound-library-confirm{padding:6px;border:1px solid var(--ws-border);border-radius:3px;background:var(--ws-raised);font-size:12px}
 .sound-panel .sound-library [role=status]{min-height:1lh;margin:4px 0 0}
 .cabinet-notices,.export-cabinet-notices{display:flex;flex-direction:column;gap:4px;margin:6px 12px}.cabinet-notices .sound-ir-notice,.export-cabinet-notices .sound-ir-notice{margin:0;padding:6px 8px;border:1px solid var(--ws-border,currentColor);border-radius:3px;background:var(--ws-raised,transparent);font-size:12px;line-height:1.35;overflow-wrap:anywhere}
+
+.sound-panel .sound-diagnostics{display:flex;flex-direction:column;gap:4px;margin-top:6px;font-size:12px;color:var(--ws-muted)}
+.sound-panel .sound-diag-item{display:flex;justify-content:space-between;gap:8px}
+.sound-panel .sound-diag-value{font-variant-numeric:tabular-nums;color:var(--ws-text)}

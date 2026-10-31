@@ -5,7 +5,7 @@ use crate::{
         backing::BackingMap,
         decode::{DecodedAudio, decode_audio},
         device::{
-            AudioDeviceInfo, AudioService, NativeAudioStatus, PracticeSettings, TransportCommand,
+            AudioDeviceInfo, AudioDiagnostics, AudioService, NativeAudioStatus, PracticeSettings, TransportCommand,
         },
         plan::PlaybackPlan,
         reference_sync::ReferenceSyncMap,
@@ -491,6 +491,14 @@ pub fn audio_devices(audio: State<'_, NativeAudio>) -> Result<Vec<AudioDeviceInf
 #[tauri::command]
 pub fn audio_status(audio: State<'_, NativeAudio>) -> NativeAudioStatus {
     audio.service.status()
+}
+#[tauri::command]
+pub fn audio_diagnostics(audio: State<'_, NativeAudio>) -> Result<AudioDiagnostics, String> {
+    audio.service.diagnostics()
+}
+#[tauri::command]
+pub fn audio_test_tone(audio: State<'_, NativeAudio>) -> Result<(), String> {
+    audio.service.test_tone()
 }
 
 fn stage_audio(

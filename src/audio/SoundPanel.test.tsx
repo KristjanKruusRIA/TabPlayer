@@ -10,7 +10,7 @@ import type { NativeAudioBridge } from './bridge';
 const players:NativePlaybackController[]=[];
 afterEach(()=>{cleanup();for(const player of players)player.destroy();players.length=0;});
 function nativePlayer() {
-  const bridge:NativeAudioBridge={prepare:vi.fn(async()=>{}),command:vi.fn(async()=>{}),setMix:vi.fn(async()=>{}),devices:vi.fn(async()=>[{id:'speakers',name:'Studio speakers',isDefault:false}]),status:vi.fn(async()=>null),subscribe:vi.fn(async()=>()=>{}),stageBacking:vi.fn(async()=>null),stageEmbeddedBacking:vi.fn(async()=>null)};
+  const bridge:NativeAudioBridge={prepare:vi.fn(async()=>{}),command:vi.fn(async()=>{}),setMix:vi.fn(async()=>{}),devices:vi.fn(async()=>[{id:'speakers',name:'Studio speakers',isDefault:false}]),diagnostics:vi.fn(async()=>({deviceName:'Studio speakers',sampleRate:48000,bufferSize:512})),testTone:vi.fn(async()=>{}),status:vi.fn(async()=>null),subscribe:vi.fn(async()=>()=>{}),stageBacking:vi.fn(async()=>null),stageEmbeddedBacking:vi.fn(async()=>null)};
   const player=new NativePlaybackController({bridge,onEdit:()=>{}});players.push(player);return {bridge,player};
 }
 
@@ -144,4 +144,65 @@ it('keeps the lock control focusable while busy with aria-disabled and refuses c
   // Clicking while busy refuses and records nothing
   fireEvent.click(lockBox);
   expect(onEdit).not.toHaveBeenCalled();
+});
+
+it('displays diagnostics readout of device name, sample rate, and buffer size from backend', async () => {
+  const { player } = nativePlayer();
+  render(<SoundPanel trackId="guitar" onEdit={() => {}} playback={player} />);
+  const diagGroup = await screen.findByRole('generic', { name: 'Audio diagnostics' });
+  expect(diagGroup).toHaveTextContent('Device: Studio speakers');
+  expect(diagGroup).toHaveTextContent('Sample rate: 48000 Hz');
+  expect(diagGroup).toHaveTextContent('Buffer size: 512');
+});
+
+it('reads unknown when diagnostic values are unreported and never uses defaults', async () => {
+  const { player, bridge } = nativePlayer();
+  bridge.diagnostics = vi.fn(async () => ({}));
+  render(<SoundPanel trackId="guitar" onEdit={() => {}} playback={player} />);
+  const diagGroup = await screen.findByRole('generic', { name: 'Audio diagnostics' });
+  expect(diagGroup).toHaveTextContent('Device: Unknown');
+  expect(diagGroup).toHaveTextContent('Sample rate: Unknown');
+  expect(diagGroup).toHaveTextContent('Buffer size: Unknown');
+});
+
+it('triggers test tone on button click and keeps control focusable while busy', async () => {
+  const { player, bridge } = nativePlayer();
+  const { rerender } = render(<SoundPanel trackId="guitar" onEdit={() => {}} playback={player} />);
+  const btn = screen.getByRole('button', { name: 'Test tone' });
+  expect(btn).toBeEnabled();
+  fireEvent.click(btn);
+  expect(bridge.testTone).toHaveBeenCalledTimes(1);
+
+  // While busy: stays focusable, click refused
+  rerender(<SoundPanel trackId="guitar" onEdit={() => {}} playback={player} busy />);
+  expect(btn).not.toBeDisabled();
+  btn.focus();
+  expect(document.activeElement).toBe(btn);
+  fireEvent.click(btn);
+  expect(bridge.testTone).toHaveBeenCalledTimes(1);
+});
+
+it('shows plain message when test tone is refused during playback', async () => {
+  const { player, bridge } = nativePlayer();
+  bridge.testTone = vi.fn(async () => {
+    throw new Error('Test tone is unavailable during playback.');
+  });
+  render(<SoundPanel trackId="guitar" onEdit={() => {}} playback={player} />);
+  const btn = screen.getByRole('button', { name: 'Test tone' });
+  await act(async () => {
+    fireEvent.click(btn);
+  });
+  const alert = await screen.findByRole('alert');
+  expect(alert).toHaveTextContent('Test tone is unavailable during playback.');
+});
+
+it('shows plain message when device diagnostics fail and leaves output selectable', async () => {
+  const { player, bridge } = nativePlayer();
+  bridge.diagnostics = vi.fn(async () => {
+    throw new Error('Selected audio output is unavailable.');
+  });
+  render(<SoundPanel trackId="guitar" onEdit={() => {}} playback={player} />);
+  const alert = await screen.findByRole('alert');
+  expect(alert).toHaveTextContent('Selected audio output is unavailable.');
+  expect(screen.getByLabelText('Audio output')).toBeVisible();
 });

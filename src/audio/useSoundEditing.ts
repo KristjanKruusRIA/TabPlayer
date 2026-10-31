@@ -1,9 +1,9 @@
-import { useEffect, useId, useRef, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useId, useRef, useState, useSyncExternalStore } from 'react';
 import type React from 'react';
 import { chainOrder, completeSound, defaultEffects, effectBlocks, laterFields } from '../document-settings';
 import type { EditCommand, EffectBlock, FxSettings, TrackSound } from '../edit-types';
 import type { NativePlaybackController } from './NativePlaybackController';
-import type { AudioDeviceInfo } from './bridge';
+import type { AudioDeviceInfo, AudioDiagnostics } from './bridge';
 import { factorySound, factorySounds } from './factory-sounds';
 import { copyPedal, copySound, deleteSoundPreset, renameSoundPreset, saveSoundPreset, soundClipboard, soundLibrary, subscribeSoundClipboard, subscribeSoundLibrary } from './sound-library';
 import { drumKitFor } from '../editor/drum-kits';
@@ -32,6 +32,45 @@ export function useSoundEditing({trackId,sound,onEdit,playback,busy=false,shown=
   const playbackState=useSyncExternalStore(playback?.subscribe??noSubscribe,playback?.getState??noState);
   const current=completeSound(sound??soundPreset('gm'));const [devices,setDevices]=useState<AudioDeviceInfo[]>([]);const [error,setError]=useState<string|null>(null);
   useEffect(()=>{let alive=true;if(playback)void playback.devices().then(items=>{if(alive)setDevices(items);}).catch(e=>{if(alive)setError(String(e));});return()=>{alive=false;};},[playback]);
+  const [diagnostics, setDiagnostics] = useState<AudioDiagnostics | null>(null);
+  const [diagnosticsError, setDiagnosticsError] = useState<string | null>(null);
+  const [testToneMessage, setTestToneMessage] = useState<string | null>(null);
+  const refreshDiagnostics = useCallback(() => {
+    let alive = true;
+    if (playback && typeof playback.diagnostics === 'function') {
+      void playback.diagnostics()
+        .then(d => {
+          if (alive) {
+            setDiagnostics(d);
+            setDiagnosticsError(null);
+          }
+        })
+        .catch(e => {
+          if (alive) {
+            setDiagnostics(null);
+            setDiagnosticsError(typeof e === 'string' ? e : (e instanceof Error ? e.message : String(e)));
+          }
+        });
+    }
+    return () => { alive = false; };
+  }, [playback]);
+  useEffect(() => {
+    const cancel = refreshDiagnostics();
+    return cancel;
+  }, [refreshDiagnostics, playbackState?.ready]);
+  const testTone = useCallback(() => {
+    if (!playback || typeof playback.testTone !== 'function') return;
+    setTestToneMessage(null);
+    void playback.testTone()
+      .then(() => {
+        setTestToneMessage(null);
+        refreshDiagnostics();
+      })
+      .catch(e => {
+        const msg = typeof e === 'string' ? e : (e instanceof Error ? e.message : String(e));
+        setTestToneMessage(msg);
+      });
+  }, [playback, refreshDiagnostics]);
   /** `sound` with the track's lock: the lock belongs to the track, not to the sound, so presets, factory and saved sounds, pastes and previews all keep it. It is left out when off, so a file that never locked a track is unchanged. */
   const withLock=(sound:TrackSound,locked:boolean=!!current.locked,kit:number|null|undefined=current.drumKit):TrackSound=>{const next={...sound};if(locked)next.locked=true;else delete next.locked;/* The drum kit belongs to the track too, so a preset, factory or saved sound keeps it. */if(kit!=null)next.drumKit=kit;else delete next.drumKit;return next;};
   /** Records `next` as one undoable edit, with the track's lock unless `locked` says otherwise; resolves to whether it was accepted. */
@@ -164,7 +203,7 @@ export function useSoundEditing({trackId,sound,onEdit,playback,busy=false,shown=
   const saveNamed=()=>{const result=saveSoundPreset(name,withLock(current,false));if(report(result,`${result.ok&&result.replaced?'Replaced':'Saved'} “${name.trim()}”.`)){setChosen(name.trim());setName('');}};
   const renameChosen=()=>{if(entry&&report(renameSoundPreset(entry.name,name),`Renamed “${entry.name}” to “${name.trim()}”.`)){setChosen(name.trim());setName('');}};
   const deleteChosen=()=>{if(entry&&report(deleteSoundPreset(entry.name),`Deleted “${entry.name}”.`))setChosen('');closeConfirm();};
-  const selectOutput=(id:string)=>playback?.selectDevice(id||null);
+  const selectOutput=(id:string)=>{playback?.selectDevice(id||null);refreshDiagnostics();};
   return {
     playbackState,current,devices,error,setError,status,setStatus,busy,playback:playback??null,record,save,
     trackId,first,second,fx,hearField,hear,endLive,duplicate,syncOf,sync,order,place,move,movedBlock,pastePedal,copyPedalOf,copyCurrentSound,pasteSound,clipboard,library,
@@ -173,6 +212,7 @@ export function useSoundEditing({trackId,sound,onEdit,playback,busy=false,shown=
     previewer,previewChoice,previewLabel,showingPreview,previewSelect,previewReturn,choosePreview,cancelPreview,keepPreview,escapePreview,orphanPreview,
     /** Locks or unlocks the track's sound against sound automations in the score, as one undoable edit; choosing the value it already has records nothing. */
     setLocked:(locked:boolean)=>locked===!!current.locked?Promise.resolve(false):save(current,locked),
+    diagnostics, diagnosticsError, testToneMessage, testTone, refreshDiagnostics,
     selectOutput,restorePreset:()=>save(soundPreset(current.presetId,current.voiceId)),applyPreset:(id:TrackSound['presetId'])=>save(soundPreset(id,current.voiceId)),setVoice:(voiceId:string|null)=>save({...current,voiceId}),
     /** Plays a drum track as the kit with this program (0 is Standard, stored as no kit); a kit already in effect records nothing. One undoable edit that keeps the rest of the sound. */
     setDrumKit:(program:number)=>{if(busy||program===drumKitFor(current.drumKit).program)return Promise.resolve(false);return save(current,undefined,program===0?null:program);},

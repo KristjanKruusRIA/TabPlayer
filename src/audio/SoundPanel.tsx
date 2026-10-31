@@ -7,7 +7,8 @@ import { factoryCategories, factorySounds } from './factory-sounds';
 import { chainOrder } from '../document-settings';
 import { ampModels, blockNames, cabinetModels, graphicBands, modelName, parameters, presetIds, presetName, soundPreset } from './sound-model';
 import { SoundLock } from './SoundLock';
-import { BusyFieldset } from '../ui';
+import { BusyFieldset, busyGuard } from '../ui';
+import { useI18n } from '../i18n';
 import { DrumKitPicker } from './DrumKitPicker';
 import { useSoundEditing } from './useSoundEditing';
 import type { Board } from './useSoundEditing';
@@ -16,8 +17,9 @@ import './sound-panel.css';
 export { soundPreset };
 /** The inspector's Sound task: every control as a field. The rig in `src/rig` shows the same sound as hardware; both share `useSoundEditing`. */
 export function SoundPanel({trackId,sound,onEdit,playback,busy=false,shown=true,percussion=false}:{trackId:string;/** A drum track, which also chooses its drum kit here. */percussion?:boolean;sound?:TrackSound;onEdit:(edit:EditCommand)=>void|Promise<void>;playback?:NativePlaybackController|null;busy?:boolean;shown?:boolean}) {
+  const { t } = useI18n();
   const editing=useSoundEditing({trackId,sound,onEdit,playback,busy,shown});
-  const {playbackState,current,devices,error,status,fx,duplicate,syncOf,sync,order,move,movedBlock,pastePedal,clipboard,library,chosen,setChosen,name,setName,entry,confirming,setConfirming,savedSelect,closeConfirm,
+  const {playbackState,current,devices,diagnostics,diagnosticsError,testToneMessage,testTone,error,status,fx,duplicate,syncOf,sync,order,move,movedBlock,pastePedal,clipboard,library,chosen,setChosen,name,setName,entry,confirming,setConfirming,savedSelect,closeConfirm,
     factoryChoice,setFactoryChoice,factory,factoryNote,applyFactory,previewer,previewChoice,previewLabel,showingPreview,previewSelect,choosePreview,cancelPreview,keepPreview,escapePreview,orphanPreview,first,second,save}=editing;
   const chainRef=useRef<HTMLDivElement>(null),panel=useRef<HTMLElement>(null);
   // The wheel over a focused number field steps it natively, and a refused change does not put the number back; while busy the wheel is refused (React's own wheel listener is passive, so this one is native).
@@ -79,6 +81,16 @@ export function SoundPanel({trackId,sound,onEdit,playback,busy=false,shown=true,
     </BusyFieldset><p className="sound-chain-label muted">Signal chain</p>
     <div className="sound-chain" ref={chainRef}>{order.map((block,index)=>pedal(first,block,index))}</div>
     {second&&effectBlocks.some(block=>second.effects[block].enabled)&&<section className="sound-second-board" aria-label="Second pedalboard"><p className="sound-chain-label muted">Second pedalboard, after the signal chain</p><div className="sound-chain">{chainOrder(second.effects).filter(block=>second.effects[block].enabled).map((block,index)=>pedal(second,block,index))}</div></section>}
-    {playback&&<BusyFieldset busy={busy} className="sound-output"><label>Audio output<select value={playback.deviceId()??''} onChange={e=>editing.selectOutput(e.target.value)}><option value="">System default</option>{devices.map(device=><option key={device.id} value={device.id}>{device.name}</option>)}</select></label></BusyFieldset>}
+    {playback&&<BusyFieldset busy={busy} className="sound-output">
+      <label>{t('audio.audio_output')}<select value={playback.deviceId()??''} onChange={e=>editing.selectOutput(e.target.value)}><option value="">{t('audio.system_default')}</option>{devices.map(device=><option key={device.id} value={device.id}>{device.name}</option>)}</select></label>
+      <button type="button" {...busyGuard({ busy, onClick: testTone })}>{t('audio.test_tone')}</button>
+      <div className="sound-diagnostics" aria-label={t('audio.diagnostics_label')}>
+        <div className="sound-diag-item"><span className="sound-diag-label">{t('audio.current_device')}:</span> <span className="sound-diag-value">{diagnostics?.deviceName ?? t('audio.unknown')}</span></div>
+        <div className="sound-diag-item"><span className="sound-diag-label">{t('audio.sample_rate')}:</span> <span className="sound-diag-value">{diagnostics?.sampleRate ? `${diagnostics.sampleRate} Hz` : t('audio.unknown')}</span></div>
+        <div className="sound-diag-item"><span className="sound-diag-label">{t('audio.buffer_size')}:</span> <span className="sound-diag-value">{diagnostics?.bufferSize != null ? `${diagnostics.bufferSize}` : t('audio.unknown')}</span></div>
+      </div>
+      {diagnosticsError&&<p role="alert" className="sound-diagnostics-error">{diagnosticsError}</p>}
+      {testToneMessage&&<p role="alert" className="sound-test-tone-message">{testToneMessage}</p>}
+    </BusyFieldset>}
   {error&&<p role="alert">{error}</p>}{playbackState?.error&&playbackState.error!==error&&<p role="alert">{playbackState.error}</p>}</section>;
 }

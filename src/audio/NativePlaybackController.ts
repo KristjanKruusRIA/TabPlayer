@@ -1,7 +1,7 @@
 import type { AlphaTabApi, model, synth } from '@coderline/alphatab';
 import '../tremolo-guard';
 import { effectiveAudioSettings, trackIdentity, type BuiltDocument } from '../engine';
-import { completeSound, defaultEffects, defaultMix, masterProblem, soundProblem } from '../document-settings';
+import { completeSound, defaultEffects, defaultMix, lockedSoundTracks, masterProblem, soundProblem } from '../document-settings';
 import type { ChannelMix, EditCommand, MasterSettings, TrackSound } from '../edit-types';
 import type { BeatTarget,ProjectView } from '../project';
 import type { MusicSelection } from '../editor/range-types';
@@ -263,7 +263,9 @@ export class NativePlaybackController {
     const audioSettingsKey=JSON.stringify([audioSettings.sounds,audioSettings.mixes,audioSettings.backing,audioSettings.master??null]);
     // The saved interpretations shape the plan itself, so a change re-plans like a change of reference timing.
     const interpretations=interpretationsOf(saved.mixes),interpreted=Object.keys(interpretations).length>0;
-    const timingKey=referenceTimingKey(audioSettings.backing),interpretationKey=interpreted?JSON.stringify(interpretations):'';
+    // A track's lock also shapes the plan: a locked track's attacks take their articulation from the sound it keeps.
+    const locked=lockedSoundTracks(saved.sounds);
+    const timingKey=referenceTimingKey(audioSettings.backing),interpretationKey=(interpreted?JSON.stringify(interpretations):'')+(locked.length?`|locked:${locked.join()}`:'');
     const normalized=practiceForBacking(this.practice,this.hasBacking);
     if(normalized.notice){this.practice=normalized.settings;this.update({practiceNotice:normalized.notice});}
     if(!documentChanged && !normalized.notice && this.built?.score===built.score && timingKey===this.planTimingKey && interpretationKey===this.planInterpretationKey && (this.preparing || this.plan&&this.prepared)){
@@ -283,7 +285,7 @@ export class NativePlaybackController {
     const practice=structuredClone(this.practice);
     this.beforeScoreChange();const generation=this.generation;this.built=built;this.preparing=true;this.planTimingKey=timingKey;this.planInterpretationKey=interpretationKey;this.desiredAudioSettingsKey=audioSettingsKey;
     try {
-      const authored=await (this.options.preparePlan?(interpreted?this.options.preparePlan(project,generation,interpretations):this.options.preparePlan(project,generation)):(interpreted?preparePlanFromScore(built.score,generation,interpretations):preparePlanFromScore(built.score,generation)));if(generation!==this.generation||this.destroyed)return;
+      const authored=await (this.options.preparePlan?(locked.length?this.options.preparePlan(project,generation,interpreted?interpretations:undefined,locked):interpreted?this.options.preparePlan(project,generation,interpretations):this.options.preparePlan(project,generation)):(locked.length?preparePlanFromScore(built.score,generation,interpreted?interpretations:undefined,locked):interpreted?preparePlanFromScore(built.score,generation,interpretations):preparePlanFromScore(built.score,generation)));if(generation!==this.generation||this.destroyed)return;
       const plan=applyReferenceSyncPlan(authored,audioSettings.backing);
       const sourceKey=project.base.kind==='file'?project.base.sha256:'blank';
       this.authoredPlan=authored;this.plan=plan;this.update({endTime:plan.playbackEndTick===undefined?plan.durationMs:this.millisecondsAtTick(plan.playbackEndTick,plan)});for(const note of plan.notes){let track=this.notesByTrack.get(note.trackId);if(!track){track=[];this.notesByTrack.set(note.trackId,track);}track.push(note);}

@@ -268,8 +268,8 @@ function pitchCurve(note: RawNote, destination: RawNote, events: PlanMidiEvent[]
   return [...values].filter(([tick]) => tick >= destination.start && tick <= destination.end).sort(([a], [b]) => a - b).map(([tick, semitones]) => ({ tick, semitones }));
 }
 
-/** `interpretations` is by track identity; a track missing from it, or any track when it is absent, plays as written. */
-function buildWithIdentities(original: model.Score, generation: number, ids: string[], corrected?: (track: number, attack: number, length: number) => void, interpretations?: Record<string, TrackInterpretation>): PlaybackPlan {
+/** `interpretations` is by track identity; a track missing from it, or any track when it is absent, plays as written. `locked` names the tracks whose sound is locked against sound automations: their attacks take the default articulation of the sound in effect at the start of the score, as the native player takes their instrument. */
+function buildWithIdentities(original: model.Score, generation: number, ids: string[], corrected?: (track: number, attack: number, length: number) => void, interpretations?: Record<string, TrackInterpretation>, locked?: readonly string[]): PlaybackPlan {
   if (!Number.isSafeInteger(generation) || generation < 0) throw new Error('Invalid playback generation.');
   if (original.masterBars.some(bar=>!validMeter(bar.timeSignatureNumerator,bar.timeSignatureDenominator))) throw new Error('Invalid score meter.');
   const score = prepareGpMidiScore(prepareMidiScore(original),settings);
@@ -344,6 +344,9 @@ function buildWithIdentities(original: model.Score, generation: number, ids: str
     laneData.set(id, { events: generated.events, gaps, markers: isolated.markers, attacks, bends });
   }
   const notes: PlanNote[] = [], played = new Map<model.Note, PlanNote[]>(), interpreted: Attack[] = [];
+  // The program a locked track's channel sounds at the start: its last program change at or before the first bar's start, else the track's own.
+  const lockedIds = new Set(locked), lockedStart = new Map<string, number>();
+  if (lockedIds.size) for (const event of converted(complete.events.events, ids, nativeChannel).sort((a, b) => a.tick - b.tick || a.order - b.order)) if (event.type === 'program' && lockedIds.has(event.trackId) && event.tick <= occurrences[0].startTick && event.program < 128) lockedStart.set(`${event.trackId}/${event.channel}`, event.program);
   const byNote = new Map(all.map(source => [source.note, source]));
   let fullIndex = 0;
   // How far a pickup bar is right-aligned: the heard bar's meter less its written length in the longest part of any track or staff.
@@ -399,7 +402,7 @@ function buildWithIdentities(original: model.Score, generation: number, ids: str
           ...(source.bar !== occurrence.bar ? { playedBar: occurrence.bar } : {}),
           occurrence: occurrence.occurrence, startTick: actual.start, endTick: actual.end, key: actual.key, velocity: actual.velocity,
           channel: nativeChannel(source.track, actual.channel), program: actual.program ?? score.tracks[source.track].playbackInfo.program,
-          articulation: source.note.beat.deadSlapped ? 'dead' : articulation(source.note, actual.program ?? score.tracks[source.track].playbackInfo.program, !!from, styled && !source.note.beat.slap && !source.note.beat.pop ? profile.style : undefined), legatoFrom: from?.id ?? null, pitch: pitchCurve({ ...isolated, channel: nativeChannel(source.track, isolated.channel), start: isolated.start + barGap, end: isolated.end + barGap }, actual, lane.bends),
+          articulation: source.note.beat.deadSlapped ? 'dead' : articulation(source.note, lockedIds.has(ids[source.track]) ? lockedStart.get(`${ids[source.track]}/${nativeChannel(source.track, actual.channel)}`) ?? score.tracks[source.track].playbackInfo.program : actual.program ?? score.tracks[source.track].playbackInfo.program, !!from, styled && !source.note.beat.slap && !source.note.beat.pop ? profile.style : undefined), legatoFrom: from?.id ?? null, pitch: pitchCurve({ ...isolated, channel: nativeChannel(source.track, isolated.channel), start: isolated.start + barGap, end: isolated.end + barGap }, actual, lane.bends),
         };
         if (styled) {
           const beat = source.note.beat, masterBar = beat.voice.bar.masterBar;
@@ -444,8 +447,8 @@ export function deadBrushMidiDurations(score: model.Score): { track: number; att
   return corrections;
 }
 
-export function buildPlaybackPlanFromJson(json: ReturnType<typeof model.JsonConverter.scoreToJson>, identities: string[], generation: number, interpretations?: Record<string, TrackInterpretation>): PlaybackPlan {
-  return buildWithIdentities(scoreFromJson(json, settings), generation, identities, undefined, interpretations);
+export function buildPlaybackPlanFromJson(json: ReturnType<typeof model.JsonConverter.scoreToJson>, identities: string[], generation: number, interpretations?: Record<string, TrackInterpretation>, locked?: readonly string[]): PlaybackPlan {
+  return buildWithIdentities(scoreFromJson(json, settings), generation, identities, undefined, interpretations, locked);
 }
 
 export function validatePlaybackPlan(plan: PlaybackPlan) {
@@ -508,18 +511,18 @@ export function validatePlaybackPlan(plan: PlaybackPlan) {
 
 // Worker inputs contain only transient public model data and stable track IDs.
 // Audio asset payloads remain outside this boundary.
-export async function preparePlan(project: ProjectView, generation: number, interpretations?: Record<string, TrackInterpretation>): Promise<PlaybackPlan> {
-  return preparePlanFromScore(buildScore(project),generation,interpretations);
+export async function preparePlan(project: ProjectView, generation: number, interpretations?: Record<string, TrackInterpretation>, locked?: readonly string[]): Promise<PlaybackPlan> {
+  return preparePlanFromScore(buildScore(project),generation,interpretations,locked);
 }
 
-export async function preparePlanFromScore(score:model.Score,generation:number,interpretations?:Record<string,TrackInterpretation>):Promise<PlaybackPlan> {
-  if (typeof Worker === 'undefined') return buildWithIdentities(score, generation, score.tracks.map(trackIdentity), undefined, interpretations);
+export async function preparePlanFromScore(score:model.Score,generation:number,interpretations?:Record<string,TrackInterpretation>,locked?:readonly string[]):Promise<PlaybackPlan> {
+  if (typeof Worker === 'undefined') return buildWithIdentities(score, generation, score.tracks.map(trackIdentity), undefined, interpretations, locked);
   const worker = new Worker(new URL('./plan.worker.ts', import.meta.url), { type: 'module' });
   try {
     return await new Promise<PlaybackPlan>((resolve, reject) => {
       worker.onmessage = event => { const reply = event.data as { cmd?: string; plan?: PlaybackPlan; error?: string }; if (reply.cmd !== 'tabplayer.plan.result') return; if (reply.plan?.generation === generation) resolve(reply.plan); else reject(new Error(reply.error ?? 'Playback plan generation changed.')); };
       worker.onerror = event => reject(new Error(event.message || 'Playback preparation failed.'));
-      worker.postMessage({ cmd: 'tabplayer.plan.prepare', json: model.JsonConverter.scoreToJson(score), identities: score.tracks.map(trackIdentity), generation, ...interpretations ? { interpretations } : {} });
+      worker.postMessage({ cmd: 'tabplayer.plan.prepare', json: model.JsonConverter.scoreToJson(score), identities: score.tracks.map(trackIdentity), generation, ...interpretations ? { interpretations } : {}, ...locked?.length ? { locked } : {} });
     });
   } finally { worker.terminate(); }
 }

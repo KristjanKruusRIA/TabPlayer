@@ -2,6 +2,7 @@ import { useEffect,useRef,useState } from 'react';
 import { model,Settings } from '@coderline/alphatab';
 import { exportGp,trackIdentity } from '../engine';
 import type { NativeBridge } from '../bridge';
+import { lockedSoundTracks } from '../document-settings';
 import type { DocumentSettings } from '../document-settings';
 import { backingLocationsForScore,buildPlaybackPlanFromJson } from '../audio/plan';
 import { interpretationsOf } from '../audio/interpretation';
@@ -101,7 +102,7 @@ export function useExportCoordinator({score,settings,currentSpeed,bridge,native,
         const original=backingLocationsForScore(copy),route=backingLocationsForScore(selected);
         if(original.length!==route.length||original.some((item,index)=>{const next=route[index];return item.bar!==next.bar||item.occurrence!==next.occurrence||item.startTick!==next.startTick||item.endTick!==next.endTick;}))throw new Error('The selected staves change reference playback timing. Choose staves with the original performed route.');
       }
-      const plan=applyReferenceSyncPlan(buildPlaybackPlanFromJson(model.JsonConverter.scoreToJson(selected),ids,++generation.current,interpretationsOf(frozenSettings.mixes)),frozenSettings.backing);
+      const plan=applyReferenceSyncPlan(buildPlaybackPlanFromJson(model.JsonConverter.scoreToJson(selected),ids,++generation.current,interpretationsOf(frozenSettings.mixes),lockedSoundTracks(frozenSettings.sounds)),frozenSettings.backing);
       if(cancelled.current)return false;
       return await watch(await native.exportAudio({plan,settings:frozenSettings,embeddedBytes:embedded?Array.from(embedded):null,stems:frozenOptions.format==='stems',request:{tracks:selection.tracks.map(i=>({id:ids[i],name:copy.tracks[i].name,preset:frozenSettings.sounds[ids[i]]?.presetId??'gm',kind:'score'})),range:selection.range,format:{sampleRate:audio.sampleRate,bitDepth:audio.bitDepth,...(audio.container?{container:audio.container}:{})},speed,metronome:audio.metronome,tailSeconds:audio.tailSeconds,includeBacking:audio.backing,includeMix:audio.includeMix,...(frozenOptions.format==='wav'&&audio.normalizeRmsDb!==undefined?{normalizeRmsDb:audio.normalizeRmsDb}:{})}},revision,name),active);
     }finally{if(active.cancelRequest)await active.cancelRequest.catch(()=>{});pending.current=false;job.current=null;if(alive.current)setBusy(false);operation.current=null;finish();}

@@ -31,8 +31,10 @@ export function useSoundEditing({trackId,sound,onEdit,playback,busy=false,shown=
   const playbackState=useSyncExternalStore(playback?.subscribe??noSubscribe,playback?.getState??noState);
   const current=completeSound(sound??soundPreset('gm'));const [devices,setDevices]=useState<AudioDeviceInfo[]>([]);const [error,setError]=useState<string|null>(null);
   useEffect(()=>{let alive=true;if(playback)void playback.devices().then(items=>{if(alive)setDevices(items);}).catch(e=>{if(alive)setError(String(e));});return()=>{alive=false;};},[playback]);
-  /** Records `next` as one undoable edit; resolves to whether it was accepted. */
-  const record=(next:TrackSound)=>Promise.resolve(onEdit({type:'setTrackSound',trackId,sound:next})).then(()=>true,e=>{setError(String(e));return false;});
+  /** `sound` with the track's lock: the lock belongs to the track, not to the sound, so presets, factory and saved sounds, pastes and previews all keep it. It is left out when off, so a file that never locked a track is unchanged. */
+  const withLock=(sound:TrackSound,locked:boolean=!!current.locked):TrackSound=>{const next={...sound};if(locked)next.locked=true;else delete next.locked;return next;};
+  /** Records `next` as one undoable edit, with the track's lock unless `locked` says otherwise; resolves to whether it was accepted. */
+  const record=(next:TrackSound,locked?:boolean)=>Promise.resolve(onEdit({type:'setTrackSound',trackId,sound:withLock(next,locked)})).then(()=>true,e=>{setError(String(e));return false;});
   // Hosts may give a playback surface without sound previews.
   const previewer=playback&&typeof playback.soundPreview==='function'?playback:null;
   const [previewChoice,setPreviewChoice]=useState(''),[previewLabel,setPreviewLabel]=useState(''),previewRequest=useRef(0),previewSelect=useRef<HTMLSelectElement>(null);
@@ -41,11 +43,11 @@ export function useSoundEditing({trackId,sound,onEdit,playback,busy=false,shown=
   /** Ends this track's preview; a preview still being started is dropped. */
   const endPreview=()=>{previewRequest.current++;setPreviewChoice('');return previewer&&previewer.soundPreview()?.track===trackId?Promise.resolve(previewer.previewSound(trackId,null)).catch(e=>setError(String(e))):Promise.resolve();};
   /** Applies `next` as one undoable edit. A preview ends at once, so the edit is what plays and edits keep their order. */
-  const save=(next:TrackSound)=>{
+  const save=(next:TrackSound,locked?:boolean)=>{
     // A drag being heard ends once its edit is recorded, so the sound never steps back to the old one in between.
     const heard=live.current.active;
     if(!heard&&(previewChoice||activePreview)){void endPreview();setStatus('Preview ended.');}
-    return record(next).then(ok=>{if(heard)void endLive();return ok;});
+    return record(next,locked).then(ok=>{if(heard)void endLive();return ok;});
   };
   const first:Board={effects:current.effects,second:false,name:label=>label,
     build:change=>{const next=structuredClone(current);change(next.effects);return next;},write:change=>save(first.build(change))};
@@ -136,7 +138,8 @@ export function useSoundEditing({trackId,sound,onEdit,playback,busy=false,shown=
     const split=value.indexOf(':'),kind=value.slice(0,split),id=value.slice(split+1),saved=library.find(item=>item.name===id);
     const named=factorySounds.find(item=>item.id===id);
     // A source previews the track's own sound through that source: only the instrument changes.
-    const heard=kind==='voice'?{...structuredClone(current),voiceId:id==='auto'?null:id}:kind==='preset'?soundPreset(id as TrackSound['presetId'],current.voiceId):kind==='factory'?factorySound(id,current.voiceId):saved?.sound;
+    const chosenSound=kind==='voice'?{...structuredClone(current),voiceId:id==='auto'?null:id}:kind==='preset'?soundPreset(id as TrackSound['presetId'],current.voiceId):kind==='factory'?factorySound(id,current.voiceId):saved?.sound;
+    const heard=chosenSound&&withLock(chosenSound);
     const label=kind==='voice'?(id==='auto'?'Automatic':voiceNames[id as VoiceId]??id):kind==='preset'?presetName(id):`“${kind==='factory'?named?.name:id}”`;if(!heard)return;
     const request=++previewRequest.current,track=trackId;setPreviewChoice('');
     // A result that arrives after another choice, a cancel or a track change is dropped.
@@ -155,9 +158,9 @@ export function useSoundEditing({trackId,sound,onEdit,playback,busy=false,shown=
   const report=(result:ReturnType<typeof saveSoundPreset>,done:string)=>{if(!result.ok){setStatus(result.error);return false;}setStatus(result.stored===false?`${done} It is kept until TabPlayer closes, because the sound library could not be stored.`:done);return true;};
   const pastePedal=(board:Board)=>{const pedal=clipboard.pedal;if(!pedal)return;board.write(effects=>{(effects as unknown as Record<string,unknown>)[pedal.block]=structuredClone(pedal.settings);});};
   const copyPedalOf=(board:Board,block:EffectBlock)=>{copyPedal(block,board.effects[block]);setStatus(`Copied the ${blockNames[block]} pedal.`);};
-  const copyCurrentSound=()=>{copySound(current);setStatus('Copied this track’s sound.');};
+  const copyCurrentSound=()=>{copySound(withLock(current,false));setStatus('Copied this track’s sound.');};
   const pasteSound=()=>{if(clipboard.sound)void save(structuredClone(clipboard.sound));};
-  const saveNamed=()=>{const result=saveSoundPreset(name,current);if(report(result,`${result.ok&&result.replaced?'Replaced':'Saved'} “${name.trim()}”.`)){setChosen(name.trim());setName('');}};
+  const saveNamed=()=>{const result=saveSoundPreset(name,withLock(current,false));if(report(result,`${result.ok&&result.replaced?'Replaced':'Saved'} “${name.trim()}”.`)){setChosen(name.trim());setName('');}};
   const renameChosen=()=>{if(entry&&report(renameSoundPreset(entry.name,name),`Renamed “${entry.name}” to “${name.trim()}”.`)){setChosen(name.trim());setName('');}};
   const deleteChosen=()=>{if(entry&&report(deleteSoundPreset(entry.name),`Deleted “${entry.name}”.`))setChosen('');closeConfirm();};
   const selectOutput=(id:string)=>playback?.selectDevice(id||null);
@@ -167,6 +170,8 @@ export function useSoundEditing({trackId,sound,onEdit,playback,busy=false,shown=
     chosen,setChosen,name,setName,entry,confirming,setConfirming,savedSelect,closeConfirm,saveNamed,renameChosen,deleteChosen,applySaved,
     factoryChoice,setFactoryChoice,factory,factoryNote,applyFactory,applyFactoryId,
     previewer,previewChoice,previewLabel,showingPreview,previewSelect,previewReturn,choosePreview,cancelPreview,keepPreview,escapePreview,orphanPreview,
+    /** Locks or unlocks the track's sound against sound automations in the score, as one undoable edit; choosing the value it already has records nothing. */
+    setLocked:(locked:boolean)=>locked===!!current.locked?Promise.resolve(false):save(current,locked),
     selectOutput,restorePreset:()=>save(soundPreset(current.presetId,current.voiceId)),applyPreset:(id:TrackSound['presetId'])=>save(soundPreset(id,current.voiceId)),setVoice:(voiceId:string|null)=>save({...current,voiceId}),
   };
 }

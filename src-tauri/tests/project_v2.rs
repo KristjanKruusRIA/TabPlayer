@@ -367,3 +367,52 @@ fn settings_replay_tracks_structural_identity() {
     assert_eq!(reopened.project, configured);
     assert_eq!(&reopened.project.edits[1..], &[mix, sound]);
 }
+
+#[test]
+fn sound_lock_is_one_edit_that_undo_and_redo_restore_and_a_saved_file_keeps() {
+    let mut session = ProjectSession::new(Project::blank(), None).unwrap();
+    let unlocked = TrackSound {
+        voice_id: Some("green-guitar".into()),
+        preset_id: "lead".into(),
+        ..TrackSound::default()
+    };
+    let locked = TrackSound {
+        locked: true,
+        ..unlocked.clone()
+    };
+    // A sound that never locked serializes with no `locked` field, so a saved file does not change.
+    assert!(!serde_json::to_string(&unlocked).unwrap().contains("locked"));
+    assert!(
+        serde_json::to_string(&locked)
+            .unwrap()
+            .contains("\"locked\":true")
+    );
+    let set = |sound: &TrackSound| EditCommand::SetTrackSound {
+        track_id: "base/0".into(),
+        sound: sound.clone(),
+    };
+    session.apply_edit(set(&unlocked)).unwrap();
+    let before = session.snapshot();
+    session.apply_edit(set(&locked)).unwrap();
+    let after = session.snapshot();
+    // One gesture is one edit.
+    assert_eq!(after.project.edits.len(), before.project.edits.len() + 1);
+    assert_eq!(after.project.edits.last(), Some(&set(&locked)));
+    // Undo restores the unlocked sound, redo the locked one, and neither is merely an emptied log.
+    let undone = session.undo().unwrap();
+    assert_eq!(undone.project, before.project);
+    assert!(undone.can_redo);
+    assert_eq!(undone.project.edits.last(), Some(&set(&unlocked)));
+    let redone = session.redo().unwrap();
+    assert_eq!(redone.project, after.project);
+    assert_eq!(redone.project.edits.last(), Some(&set(&locked)));
+    // A saved and reopened file keeps the lock.
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("lock.tabplayer");
+    write_project(&path, &session.stored_project()).unwrap();
+    let reopened = ProjectSession::new(read_project(&path).unwrap(), Some(path))
+        .unwrap()
+        .snapshot();
+    assert_eq!(reopened.project, after.project);
+    assert_eq!(reopened.project.edits.last(), Some(&set(&locked)));
+}

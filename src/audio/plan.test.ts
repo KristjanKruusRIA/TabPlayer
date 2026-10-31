@@ -639,3 +639,28 @@ it('keeps a dead brush that ends after the last bar inside the plan',()=>{
   expect(plan.durationTick).toBe(3900);
   expect(plan.durationTick).toBe(Math.max(...plan.notes.map(n=>n.endTick)));
 });
+
+it('articulates a locked track by the sound it keeps, not by a sound automation that would replace it', () => {
+  // A guitar (program 25) with two quarter notes; an automation to a bass (33) may sit on either beat.
+  const plan = (automationAt: number | null, locked: boolean) => {
+    const score = authored(2, 1); note(score, 0, 0); note(score, 0, 1);
+    if (automationAt !== null) score.tracks[0].staves[0].bars[0].voices[0].beats[automationAt].automations.push(model.Automation.buildInstrumentAutomation(false, 0, 33));
+    score.finish(settings);
+    return buildPlaybackPlanFromJson(model.JsonConverter.scoreToJson(score), ['base/0'], 7, undefined, locked ? ['base/0'] : undefined);
+  };
+  const articulations = (automationAt: number | null, locked: boolean) => plan(automationAt, locked).notes.map(n => n.articulation);
+  const written = articulations(null, false);
+  expect(written).toEqual(['picked', 'picked']);
+  // Unlocked, the automation on the second beat makes that note a bass; locked, the guitar's articulation stays.
+  expect(articulations(1, false)).toEqual(['picked', 'fingered']);
+  expect(articulations(1, true)).toEqual(written);
+  // The lock keeps the sound in effect at the start: with the automation on the first beat that is the bass, as it is unlocked.
+  expect(articulations(0, false)).toEqual(['fingered', 'fingered']);
+  expect(articulations(0, true)).toEqual(articulations(0, false));
+  // Locking a track with no automation changes nothing in its plan.
+  expect(plan(null, true)).toEqual(plan(null, false));
+  // A lock on another track does not affect this one.
+  const score = authored(2, 1); note(score, 0, 0); note(score, 0, 1);
+  score.tracks[0].staves[0].bars[0].voices[0].beats[1].automations.push(model.Automation.buildInstrumentAutomation(false, 0, 33)); score.finish(settings);
+  expect(buildPlaybackPlanFromJson(model.JsonConverter.scoreToJson(score), ['base/0'], 7, undefined, ['base/9']).notes.map(n => n.articulation)).toEqual(articulations(1, false));
+});

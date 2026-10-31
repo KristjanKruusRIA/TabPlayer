@@ -6,6 +6,7 @@ import type { NativePlaybackController } from './NativePlaybackController';
 import { factoryCategories, factorySounds } from './factory-sounds';
 import { chainOrder } from '../document-settings';
 import { ampModels, blockNames, cabinetModels, graphicBands, modelName, parameters, presetIds, presetName, soundPreset } from './sound-model';
+import { SoundLock } from './SoundLock';
 import { useSoundEditing } from './useSoundEditing';
 import type { Board } from './useSoundEditing';
 import './sound-panel.css';
@@ -46,7 +47,7 @@ export function SoundPanel({trackId,sound,onEdit,playback,busy=false,shown=true}
     </fieldset></details>;
 
   return <section className="sound-panel" aria-label="Track sound"><h3>Sound</h3>
-    <label className="check"><input aria-label="Lock sound against automations" type="checkbox" checked={!!current.locked} aria-disabled={busy||undefined} onChange={e=>{if(busy||e.target.checked===!!current.locked)return;const next={...current};if(e.target.checked)next.locked=true;else delete next.locked;void save(next);}}/>Lock sound against automations</label>
+    <SoundLock editing={editing} className="check"/>
     <fieldset disabled={busy}>
     <label>Sound source<select value={current.voiceId??''} onChange={e=>save({...current,voiceId:e.target.value||null})}><option value="">Automatic instrument</option><option value="gm">General MIDI</option><option value="green-guitar">Green Guitar</option><option value="black-guitar">Black Guitar</option><option value="darkblack-bass">Darkblack Bass</option><option value="babyblue-bass">Babyblue Bass</option></select></label>
     <label>Sound preset<select value={current.presetId} onChange={e=>save(soundPreset(e.target.value as TrackSound['presetId'],current.voiceId))}>{presetIds.map(id=><option value={id} key={id}>{presetName(id)}</option>)}</select></label>

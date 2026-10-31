@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import type { EditCommand, TrackSound } from '../edit-types';
 import type { NativePlaybackController } from '../audio/NativePlaybackController';
 import { presetIds, presetName } from '../audio/sound-model';
+import { SoundLock } from '../audio/SoundLock';
 import { useSoundEditing } from '../audio/useSoundEditing';
 import type { Board } from '../audio/useSoundEditing';
 import { Segmented, busyGuard } from '../ui';
@@ -42,6 +43,7 @@ export function SoundRig({trackId,sound,onEdit,playback,busy=false,tracks,onTrac
       <TrackStrip tracks={tracks} trackId={trackId} onTrack={onTrack}/>
       <SourcePicker editing={editing} track={tracks.find(item=>item.id===trackId)}/>
       <Segmented className="rig-presets" label="Sound preset" value={current.presetId} disabled={busy} onChange={id=>void editing.applyPreset(id)} options={presetIds.map(id=>({value:id,label:presetName(id)}))}/>
+      <SoundLock editing={editing} className="rig-lock"/>
       <span className="rig-head-gap"/>
       <button type="button" className="rig-button rig-browser-toggle" aria-pressed={browserOpen} aria-expanded={browserOpen} onClick={()=>setBrowserOpen(open=>!open)}>Sounds</button>
     </header>

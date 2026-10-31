@@ -1,24 +1,25 @@
-# GP8 parity A32: lock track sound against automations (2026-10-31)
+# GP8 parity A32: lock a track's sound against automations (2026-10-31)
 
-GP8 row A32: lock the current track sound against sound automations. While locked, sound changes in the score (instrument and sound automations) do not change what the track plays, in playback and export alike; unlocked, they apply as they do now.
+GP8 row A32: a per-track lock so sound automations in the score do not change what the track plays, in playback and in export. Unlocked tracks play as they did.
 
 ## Behavior
-- **Lock control:** The Sound view (`SoundPanel`) provides a "Lock sound against automations" checkbox directly in the track sound view.
-- **Undoable edit:** Toggling the lock records a single undoable `setTrackSound` edit with `locked: true` or `locked` omitted/false, preserved in the document and project history. Selecting the current value records nothing.
-- **Focus and interaction:** Controls stay focusable while busy (`aria-disabled` with handlers that refuse clicks), never disabling the focus-holding element.
-- **Playback & Export:** In `audio::renderer` and `audio::voices`, locked tracks preserve the track's configured instrument / program throughout playback and audio export, ignoring score sound automations (`PlanMidiEvent::Program`) and note-level voice overrides.
-- **Bit-identical unlocked rendering:** An unlocked document renders bit-identically (`f32::to_bits` float exactness) to an untouched default document.
-- **Backward compatibility:** Older project documents and edit logs omit `locked`; older files replay cleanly and validate without schema migration issues.
+- **The lock.** `TrackSound.locked` is written only when on, so a file that never locked a track is unchanged. It is the track's, not the sound's: presets, Restore preset, factory sounds, previews, Keep preview, Paste sound and Apply saved sound keep the track's own lock and never carry another's. Copy sound and Save sound store the sound without it.
+- **What it locks to.** The sound in effect at the start of the score: each channel's last program change at or before the first bar's start, else the track's own program. A bar-one automation is therefore not undone by locking. Instrument automations, note programs and later program changes are ignored by the renderer, by seeks, and by the sample requests; the plan gives a locked track's attacks the articulation of that start sound, not of the automated one.
+- **Changing the lock.** The toggle is one `setTrackSound` edit; choosing the value it already has records nothing. In the Sound panel and in the rig head it is a checkbox on `busyGuard`: `aria-disabled` while busy, still focusable.
+- **Rebuild.** A change of lock (toggle or undo/redo) re-prepares the plan in the controller, because the lock shapes articulations, and makes `set_mix` rebuild the renderer instead of queueing a mix. The rebuild reloads the samples the new settings ask for and is installed through the callback's install command, off the realtime path, preserving position. Nothing in the render path was given an allocation or a lock.
 
 ## Evidence
-- **Rust rendering test:** `audio_render::locked_track_sound_ignores_scheduled_program_changes_and_seek_while_unlocked_renders_bit_identically` proves bit-identical rendering between default and unlocked document (`f32::to_bits`), that locked playback ignores scheduled score program automations, and that seeking while locked preserves locked voice sound.
-- **TypeScript & replay test:** `src/audio/track-sound-lock.test.ts` validates `completeSound` / `soundProblem`, verifies omitted `locked: false` for byte-identical serialization, replays old log entries without `locked`, and proves undo/redo restores state.
-- **UI unit test:** `src/audio/SoundPanel.test.tsx` tests that clicking toggles lock via a single `setTrackSound` edit, unchanged values record nothing, and controls remain focusable while busy with `aria-disabled` refusing clicks.
-- **Protocol verification:** `cargo test --release --test protocol` passes against schema serialization rules.
-
-## Review
-Pending.
+- **Rust, `src-tauri/tests/audio_render.rs`.** `a_locked_track_keeps_its_bar_one_sound_through_attacks_program_changes_and_seeks`, `locking_keeps_the_sound_in_effect_at_the_start_not_the_track_first_sound` and `a_locked_track_ignores_automation_in_export_and_after_a_mix_change` render a General MIDI track with bit-for-bit comparison against a plan with no automation, for attacks the plan matched and for ones it did not, from the start, after a seek, through `AudioExportRender`, and after a `PreparedMix` is installed. Each also asserts the automation is audible when unlocked. Turning off the program-change guard (`renderer.rs`), the lock in `effective_note_program`, or the start programs each fails them (checked by editing each out in turn). `locked_track_sound_ignores_scheduled_program_changes_and_seek_while_unlocked_renders_bit_identically` keeps its recorded-instrument proof and the proof that unlocked renders bit-identically to default settings. `unlocking_needs_the_samples_an_unlocked_track_asks_for_that_a_locked_bank_lacks` shows a locked bank cannot build the unlocked track (`Unknown recorded instrument babyblue-bass.`) and that the unlocked settings ask for the bass.
+- **Rust, `device.rs`.** `a_change_of_lock_needs_a_rebuilt_renderer_and_new_samples_but_a_mix_change_does_not` tests the rule `set_mix` uses to choose a rebuild (`sound_source_changed`): a lock either way needs one, a mix change does not.
+- **Rust, `src-tauri/tests/project_v2.rs`.** `sound_lock_is_one_edit_that_undo_and_redo_restore_and_a_saved_file_keeps`: one edit per gesture, undo returns the previous project and redo the locked one, a saved and reopened file keeps the lock, and an unlocked sound serializes without the field.
+- **TypeScript.** `src/audio/plan.test.ts` builds real plans and compares the articulations of a locked guitar automated to a bass with those of the unautomated score, and with the unlocked plan. `src/audio/NativePlaybackController.sound-lock.test.ts` shows locking and unlocking prepare the plan again, naming the locked tracks, and a mix change does not. `src/audio/sound-lock-editing.test.tsx` covers each way the lock could be lost or carried (preset, Restore preset, source, factory sound, previews and Keep preview, Paste sound, Copy and Save sound, Apply saved sound) and `setLocked` recording once or not at all. `src/audio/SoundPanel.test.tsx` and `src/rig/SoundRig.test.tsx` cover the checkbox, its refusal while busy, and focus staying on it across the busy flicker its own edit causes. `src/audio/track-sound-lock.test.ts` covers validation, omission when off, and replay of old logs.
 
 ## Limits
-- **Per-track scope:** The lock is per-track within the document; it does not lock automations across other unlocked tracks.
-- **Score display:** The score itself continues to display written sound/instrument change markings even while playback for the locked track ignores them.
+- Not run on a real output device: the rebuild-on-toggle path in `AudioService::set_mix` is argued from the code and from the tested rule, not exercised end to end, because the unit tests have no output device. No listening check was made.
+- Undo and redo are proven on the native project history, not through the UI.
+- The start sound is the last program change at or before the first bar's start; a lock on a track whose first program change comes only later keeps the track's own program.
+- The score still shows its written sound markings while a locked track ignores them.
+- In the TypeScript suite, seven `plan.test.ts` tests that read GP files from `.analysis/compatibility` fail here because that folder is not present in this worktree. In the Rust suite `a_page_search_over_fifty_thousand_rows_stays_fast` fails under load; neither is related to this change.
+
+## Review
+Pending a second review.

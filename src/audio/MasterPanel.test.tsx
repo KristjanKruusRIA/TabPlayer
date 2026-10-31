@@ -157,3 +157,19 @@ it('keeps the master strip, disabled, in a mixer with no player or a busy one',(
   render(<TrackPanel {...busy.props} busy={true}/>);
   expect(slider('Master level')).toHaveAttribute('aria-disabled','true');
 });
+
+it('keeps the slider where it was put while its commit is on the way, even when busy turns on, and goes back only once it settles',async()=>{
+  let settle:()=>void=()=>{};
+  const onChange=vi.fn(()=>new Promise<void>(resolve=>{settle=resolve;}));
+  const view=render(<MasterPanel master={undefined} disabled={false} onChange={onChange}/>);
+  const level=slider('Master level');
+  fireEvent.change(level,{target:{value:'-6'}});fireEvent.pointerUp(level);
+  expect(onChange).toHaveBeenCalledTimes(1);
+  view.rerender(<MasterPanel master={undefined} disabled={true} onChange={onChange}/>);
+  fireEvent.blur(level);
+  expect(slider('Master level')).toHaveValue('-6');
+  expect(onChange).toHaveBeenCalledTimes(1);
+  await act(async()=>{settle();await Promise.resolve();await Promise.resolve();});
+  view.rerender(<MasterPanel master={{...defaultMaster(),gainDb:-6}} disabled={false} onChange={onChange}/>);
+  expect(slider('Master level')).toHaveValue('-6');
+});

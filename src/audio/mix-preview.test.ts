@@ -128,3 +128,45 @@ it('shows the master as the newest document has it, so a master slider does not 
   expect(player.master()?.gainDb).toBe(-6);
   player.destroy();
 });
+
+it('ends a heard mix when the accepted edit leaves the loaded mix as it was (heard .8, saved 1, edit 1)',async()=>{
+  const project=blankProject(),built=buildDocument(project),guitar=trackIdentity(built.score.tracks[0]);
+  const {player,bridge,onEdit}=fixture();
+  await player.loadDocument(project,built,0,1);
+  const gain=()=>{
+    // The newest settings the player has sent, whether as a mix change or with a fresh preparation.
+    const mixes=vi.mocked(bridge.setMix).mock,prepares=vi.mocked(bridge.prepare).mock;
+    const newestMix=mixes.invocationCallOrder.at(-1)??0,newestPrepare=prepares.invocationCallOrder.at(-1)??0;
+    const settings=newestMix>newestPrepare?mixes.calls.at(-1)![0]:prepares.calls.at(-1)![1];
+    return settings.mixes[guitar]?.gain??1;
+  };
+  await player.previewMix(0,{gain:.8});expect(gain()).toBe(.8);
+  await player.setTrackVolume(0,1);
+  // Selection reload: same project, nothing ended.
+  await player.loadDocument(project,buildDocument(project),0,1);expect(gain()).toBe(.8);
+  const edited=previewEdit(project,onEdit.mock.calls[0][0],built);
+  expect(edited.project).not.toBe(project);
+  await player.loadDocument(edited.project,edited,0,1);
+  expect(gain()).toBe(1);
+  player.destroy();
+});
+
+it('ends a heard mix when the accepted edit was never loaded and is undone to another project',async()=>{
+  const project=blankProject(),built=buildDocument(project),guitar=trackIdentity(built.score.tracks[0]);
+  const {player,bridge}=fixture();
+  await player.loadDocument(project,built,0,1);
+  const gain=()=>{
+    // The newest settings the player has sent, whether as a mix change or with a fresh preparation.
+    const mixes=vi.mocked(bridge.setMix).mock,prepares=vi.mocked(bridge.prepare).mock;
+    const newestMix=mixes.invocationCallOrder.at(-1)??0,newestPrepare=prepares.invocationCallOrder.at(-1)??0;
+    const settings=newestMix>newestPrepare?mixes.calls.at(-1)![0]:prepares.calls.at(-1)![1];
+    return settings.mixes[guitar]?.gain??1;
+  };
+  await player.previewMix(0,{gain:.8});await player.setTrackVolume(0,.8);
+  const undone=blankProject();expect(undone).not.toBe(project);
+  await player.loadDocument(undone,buildDocument(undone),0,1);
+  const prepared=vi.mocked(bridge.prepare).mock.calls.at(-1)![1];
+  expect(prepared.mixes[guitar]?.gain??1).toBe(1);
+  expect(gain()).toBe(1);
+  player.destroy();
+});

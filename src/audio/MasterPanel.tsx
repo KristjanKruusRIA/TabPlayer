@@ -14,14 +14,17 @@ function Slider({ label, value, min, max, step, format, disabled, commit }: {
   disabled: boolean; commit: (value: number) => Promise<unknown> | void;
 }): React.JSX.Element {
   const [draft, setDraft] = useState<number | null>(null);
+  // A commit on its way keeps its draft, busy or not, until it settles; only a change not yet committed is dropped when the control goes busy.
+  const sending = useRef(false);
   const shown = draft ?? value;
   const finish = () => {
-    if (draft === null) return;
+    if (draft === null || sending.current) return;
     if (disabled) { setDraft(null); return; }
     if (draft === value) { setDraft(null); return; }
-    void Promise.resolve(commit(draft)).catch(() => {}).finally(() => setDraft(null));
+    sending.current = true;
+    void Promise.resolve(commit(draft)).catch(() => {}).finally(() => { sending.current = false; setDraft(null); });
   };
-  useEffect(() => { if (disabled) setDraft(null); }, [disabled]);
+  useEffect(() => { if (disabled && !sending.current) setDraft(null); }, [disabled]);
   return <label className="track-channel-range">{label} <output>{format(shown)}</output>
     <input type="range" min={min} max={max} step={step} value={shown} aria-label={label} aria-valuetext={format(shown)} aria-disabled={disabled || undefined}
       onChange={event => { if (!disabled) setDraft(Number(event.target.value)); }} onPointerUp={finish} onKeyUp={finish} onBlur={finish} />

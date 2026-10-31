@@ -25,8 +25,8 @@ function idlePractice(settings:PracticeSettings):PracticeStatus {return {setting
 
 /** `latestMix` and `latestMaster` read a track's mix and the master from the newest document, which can be ahead of the one last loaded here. */
 const mixKey=(mix:ChannelMix|undefined)=>{const m=mix??defaultMix();return JSON.stringify([m.gain,m.pan,m.mute,m.solo]);};
-/** Whether `built` holds the edit that a dragged mix became: its mix for the track moved off what the edit began from, or is the one heard. */
-const mixLanded=(heard:{track:string;mix:ChannelMix;landing:string|null},built:BuiltDocument|null)=>{if(heard.landing===null||!built)return false;const key=mixKey(built.settings.mixes[heard.track]);return key!==heard.landing||key===mixKey(heard.mix);};
+/** Whether the loaded document holds the edit that a dragged mix became: it is another project than the edit began from (a track-selection reload keeps the same one), so the edit or an undo of it has been loaded; or its mix for the track moved off what the edit began from, or is the one heard. */
+const mixLanded=(heard:{track:string;mix:ChannelMix;landing:{key:string;project:ProjectView|null}|null},built:BuiltDocument|null,project:ProjectView|null)=>{if(heard.landing===null||!built)return false;if(project!==heard.landing.project)return true;const key=mixKey(built.settings.mixes[heard.track]);return key!==heard.landing.key||key===mixKey(heard.mix);};
 type Options={bridge:NativeAudioBridge;onEdit:(edit:EditCommand)=>void|Promise<void>;preparePlan?:typeof preparePlan;latestMix?:(trackId:string)=>ChannelMix|undefined;latestMaster?:()=>MasterSettings|undefined};
 export class NativePlaybackController {
   private state:PlaybackState={ready:false,playing:false,time:0,endTime:0,measure:0,speed:100,metronome:false,practice:idlePractice(DEFAULT_PRACTICE),practicePending:false,practiceNotice:null,range:null,loop:null,error:null};
@@ -34,7 +34,7 @@ export class NativePlaybackController {
   private unlisten:()=>void=()=>{};private subscription:Promise<void>;private destroyed=false;private suppressHandler=false;private viewPlaying=false;
   // Focus is session-only: it changes what native audio plays, never the saved mix or the project.
   private requested:{project:ProjectView;built:BuiltDocument;documentEpoch:number;playbackResumeEpoch:number}|null=null;
-  private trackFocus:TrackFocus|null=null;private preview:{track:string;sound:TrackSound}|null=null;private mixPreview:{track:string;mix:ChannelMix;landing:string|null}|null=null;private mixPending=false;private loaded:{project:ProjectView;documentEpoch:number;playbackResumeEpoch:number}|null=null;
+  private trackFocus:TrackFocus|null=null;private preview:{track:string;sound:TrackSound}|null=null;private mixPreview:{track:string;mix:ChannelMix;landing:{key:string;project:ProjectView|null}|null}|null=null;private mixPending=false;private loaded:{project:ProjectView;documentEpoch:number;playbackResumeEpoch:number}|null=null;
   private built:BuiltDocument|null=null;private plan:PlaybackPlan|null=null;private authoredPlan:PlaybackPlan|null=null;private planTimingKey:string|null=null;private planInterpretationKey='';private lastStatus:NativeAudioStatus|null=null;private operationError:string|null=null;private prepared=false;private preparing=false;private audioSettingsKey:string|null=null;private desiredAudioSettingsKey:string|null=null;private mixQueue:Promise<void>=Promise.resolve();private mixRequest=0;private embeddedSource:string|null=null;
   private documentEpoch:number|undefined;private practice:PracticeSettings=structuredClone(DEFAULT_PRACTICE);private pendingPractice:PracticeSettings|null=null;private hasBacking=false;
   private playbackResumeEpoch=0;private floorReadyEpoch=0;private resumeRefresh:Promise<boolean>|null=null;private loadRequest=0;
@@ -151,9 +151,9 @@ export class NativePlaybackController {
   backingDurationMs(){const seconds=this.lastStatus?.backingDurationSeconds;return seconds==null?undefined:seconds*1000;}
   /** The track's mix as saved. The newest document wins over the one last loaded, so a control reads back what an edit just saved. */
   mix(track:model.Track){const id=trackIdentity(track),mix=this.options.latestMix?.(id)??this.built?.settings.mixes[id];return mix?{mute:mix.mute,solo:mix.solo,volume:mix.gain,pan:mix.pan}:undefined;}
-  private editMix(index:number,patch:Partial<ChannelMix>){const track=this.built?.score.tracks[index];if(!track)throw new Error('Select an existing track.');const id=trackIdentity(track);const mix={...(this.options.latestMix?.(id)??this.built!.settings.mixes[id]??defaultMix()),...patch};const from=this.built,heard=this.mixPreview;return Promise.resolve(this.options.onEdit({type:'setTrackMix',trackId:id,mix})).then(()=>this.landMixPreview(heard,from),error=>this.endMixPreview(heard).then(()=>this.fail(error)));}
+  private editMix(index:number,patch:Partial<ChannelMix>){const track=this.built?.score.tracks[index];if(!track)throw new Error('Select an existing track.');const id=trackIdentity(track);const mix={...(this.options.latestMix?.(id)??this.built!.settings.mixes[id]??defaultMix()),...patch};const from=this.built,fromProject=this.requested?.project??null,heard=this.mixPreview;return Promise.resolve(this.options.onEdit({type:'setTrackMix',trackId:id,mix})).then(()=>this.landMixPreview(heard,from,fromProject),error=>this.endMixPreview(heard).then(()=>this.fail(error)));}
   /** The edit that a dragged mix became was accepted: the preview ends once the player holds a document whose mix for the track is not the one the edit began from (or is the one heard), or at once when it already does, so the sound never steps back to the old mix in between. A reload that leaves the mix alone, such as a track selection, ends nothing. A refusal is told after the saved mix is back, because that reload clears an earlier error. */
-  private landMixPreview(heard:typeof this.mixPreview,from:BuiltDocument|null):Promise<void>|void{if(!heard||this.mixPreview!==heard)return;heard.landing=mixKey(from?.settings.mixes[heard.track]);if(mixLanded(heard,this.built))return this.endMixPreview(heard);}
+  private landMixPreview(heard:typeof this.mixPreview,from:BuiltDocument|null,fromProject:ProjectView|null):Promise<void>|void{if(!heard||this.mixPreview!==heard)return;heard.landing={key:mixKey(from?.settings.mixes[heard.track]),project:fromProject};if(mixLanded(heard,this.built,this.requested?.project??null))return this.endMixPreview(heard);}
   private async endMixPreview(heard:typeof this.mixPreview){if(!heard||this.mixPreview!==heard)return;this.mixPreview=null;this.update({});await this.reloadLatest().catch(error=>this.fail(error));}
   /** Each of these saves one undoable edit and settles once it has been accepted or refused (a refusal is reported through `fail`). */
   setTrackVolume(index:number,value:number){return this.editMix(index,{gain:Math.max(0,Math.min(1,value))});}
@@ -253,7 +253,7 @@ export class NativePlaybackController {
     const documentChanged=this.documentEpoch!==documentEpoch;this.documentEpoch=documentEpoch;this.loaded={project,documentEpoch,playbackResumeEpoch};
     // Focus ends with its document or its track, so an undo that restores the track does not revive it.
     const focused=this.trackFocus;if(focused&&!built.score.tracks.some(track=>trackIdentity(track)===focused.track)){this.trackFocus=null;this.update({});}
-    if(this.mixPreview&&mixLanded(this.mixPreview,built))this.mixPreview=null;
+    if(this.mixPreview&&mixLanded(this.mixPreview,built,project))this.mixPreview=null;
     const mixed=this.mixPreview;if(mixed&&!built.score.tracks.some(track=>trackIdentity(track)===mixed.track))this.mixPreview=null;
     const previewed=this.preview;if(previewed&&!built.score.tracks.some(track=>trackIdentity(track)===previewed.track)){this.preview=null;this.update({});}
     if(documentChanged){this.trackFocus=null;this.preview=null;this.mixPreview=null;this.practice=structuredClone(DEFAULT_PRACTICE);this.update({practiceNotice:null});}

@@ -1,6 +1,5 @@
 import { automaticVoice, voiceIds, voiceNames } from '../audio/sound-model';
 import type { VoiceId } from '../audio/sound-model';
-import { DrumKitPicker } from '../audio/DrumKitPicker';
 import type { SoundEditing } from '../audio/useSoundEditing';
 import { Segmented } from '../ui';
 import { busyGuard } from '../ui/useBusyGuard';
@@ -29,7 +28,6 @@ export function SourcePicker({editing,track}:{editing:SoundEditing;track:RigTrac
   }));
   return <div className="rig-source-picker">
     <Segmented className="rig-sources" label="Sound source" value={chosen} disabled={busy} options={options} onChange={choice=>void editing.setVoice(choice==='auto'?null:choice)}/>
-    {track?.percussion&&<DrumKitPicker editing={editing} className="rig-drum-kit"/>}
     {previewer&&<div className="rig-hears" role="group" aria-label="Hear a source">{choices.map((choice,index)=>{
       const hearing=showingPreview&&previewChoice===`voice:${choice}`;
       return <button key={choice} type="button" aria-pressed={hearing} aria-label={`Hear ${nameOf(choice)}`} style={{gridColumn:index*2+2}}

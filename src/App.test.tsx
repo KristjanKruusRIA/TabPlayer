@@ -1208,3 +1208,16 @@ it('enters a note from the notation staff as one undoable edit and refuses it on
   await act(async()=>{await Promise.resolve();});
   expect(c.getState().snapshot.project.edits.map(edit=>edit.type)).toEqual(['setNote']);
 });
+
+it('a drum kit change is a sound edit that keeps the music selection',async()=>{
+  const c=await setup({...blankProject(),edits:[{type:'addPercussionTrack',name:'Drums',program:0}]});
+  fireEvent.click(within(screen.getByRole('grid',{name:'Written measure overview'})).getByRole('gridcell',{name:'Drums, measure 1, rest'}));
+  click('Select bar');
+  fireEvent.click(within(screen.getByRole('navigation',{name:'Track tools'})).getByRole('button',{name:'Sound'}));
+  const kit=await screen.findByLabelText('Drum kit'),before=c.getState().snapshot.project.edits.length;
+  fireEvent.change(kit,{target:{value:'32'}});
+  await waitFor(()=>expect(c.getState().snapshot.project.edits.length).toBe(before+1));
+  expect(c.getState().snapshot.project.edits.at(-1)).toMatchObject({type:'setTrackSound',sound:{drumKit:32}});
+  fireEvent.click(exposeFunctionalControl(screen.getByText('Selected playback',{selector:'summary'})));click('Play selection');
+  expect(integration.playSelection).toHaveBeenCalledWith({kind:'bars',tracks:[1],firstBar:0,lastBar:0},expect.anything());
+});

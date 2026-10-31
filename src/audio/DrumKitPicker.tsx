@@ -10,7 +10,7 @@ export function DrumKitPicker({editing,className}:{editing:SoundEditing;classNam
     <label>Drum kit<select value={kit.program} {...busySelect(busy)} onChange={e=>{void editing.setDrumKit(Number(e.target.value));}}>{drumKits.map(option=><option key={option.program} value={option.program}>{option.label}</option>)}</select></label>
     <p className="muted">{kit.changes.length?`${kit.label} changes ${kitDifferences(kit).join(', ')}.`:'Standard is the reference kit.'}</p>
     <details><summary>Which drum hits sound different</summary>
-      <p className="muted">Every drum key has its own sound. Room and Jazz replay Standard's samples at other pitches; Brush swaps the snare.</p>
+      <p className="muted">Every drum key has its own sound. Room and Jazz replay Standard's samples at other pitches; Brush changes the snare and electric snare.</p>
       <ul>{drumKits.filter(option=>option.changes.length).map(option=><li key={option.program}><strong>{option.label}</strong>: {kitDifferences(option).join(', ')}</li>)}</ul>
       <p className="muted">These notations play the same sound, so they differ on the page only (the bank has no separate rim shot, choke or half-open sample):</p>
       <ul>{sharedSounds().map(group=><li key={group.key}>{group.labels.join(' = ')}</li>)}</ul>

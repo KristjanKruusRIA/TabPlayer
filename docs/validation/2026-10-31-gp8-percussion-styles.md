@@ -8,7 +8,7 @@ What the bundled bank holds (`sonivox.sf2`, General MIDI, bank 128, read from it
 
 - Four drum kits: Standard (program 0), Room (8), Jazz (32) and Brush (40). Guitar and bass recordings are separate and hold no drums.
 - Within each kit every drum key 27 to 87 renders a different sound from every other key (pitch or envelope differ even where two keys share a sample).
-- The kits differ from Standard only on some keys, and only by replaying Standard's samples at other pitches (Room on the five toms 41, 43, 47, 48, 50; Jazz on the two kicks 35, 36); Brush also swaps the snare, hand clap and electric snare (38, 39, 40) for a brush sample. Everything else is the Standard sample.
+- The kits differ from Standard only on some keys, and only by replaying Standard's samples at other pitches (Room on the five toms 41, 43, 47, 48, 50; Jazz on the two kicks 35, 36); Brush also changes the snare (38) and electric snare (40) to a different sample, and key 39 (hand clap) plays Standard's snare sample. Everything else is the Standard sample.
 - Any other program (such as a 1980s electronic or TR-808 kit) falls back to Standard.
 
 What was missing: a drum track could not choose a kit. alphaTab 1.8.4 forces every percussion track's own MIDI program to 0 when a score is finished, so the track's program cannot carry the choice.
@@ -16,7 +16,7 @@ What was missing: a drum track could not choose a kit. alphaTab 1.8.4 forces eve
 What is built:
 
 - A stored per-track field `drumKit` on the track's sound (the `setTrackSound` edit and the document sound settings), holding the program that selects the kit (8, 32 or 40). It is left out for Standard, like `locked`. Rust bounds it to those three values and TypeScript refuses anything else.
-- The kit select is one shared component (`src/audio/DrumKitPicker.tsx`) driven by `useSoundEditing.setDrumKit`. It appears for drum tracks in the rig (Sound view, beside the source picker) and in the inspector Sound task, both of which route edits through `controller.edit`, so a kit change does not clear the music selection (the earlier Track-panel route did, and was removed). The Track panel no longer shows the 128-entry MIDI instrument list for drum tracks, none of which changed the sound. One choice is one undoable `setTrackSound` edit that keeps the rest of the sound; choosing the kit already in effect records nothing; the select uses `busySelect`.
+- The kit select is one shared component (`src/audio/DrumKitPicker.tsx`) driven by `useSoundEditing.setDrumKit`. It appears for drum tracks in the rig (Sound view, as its own item in the head, beside and not inside the source picker; checked with the real rig.css in a static page, where no radio or the select is covered) and in the inspector Sound task, both of which route edits through `controller.edit`, so a kit change does not clear the music selection (the earlier Track-panel route did, and was removed). The Track panel no longer shows the 128-entry MIDI instrument list for drum tracks, none of which changed the sound. One choice is one undoable `setTrackSound` edit that keeps the rest of the sound; choosing the kit already in effect records nothing; the select uses `busySelect`.
 - The preset, Restore, factory, paste, saved-sound and kept-preview paths keep the track's kit, as they keep its lock (`withLock` in `useSoundEditing.ts`).
 - The renderer rewrites the plan's programs (track, program changes, notes) to the kit before it is built. Playback, WAV and audio export, runtime renders and note audition all build their renderer the same way (audition carries the kit), so they agree. A kit change during playback rebuilds the renderer (`sound_source_changed`). Nothing in the realtime path changed: the work happens when the renderer is built.
 - A collapsible table beside the select lists which hits each kit changes and which notations play the identical sound.
@@ -33,7 +33,7 @@ Notations that sound identical (they differ on the page only): snare hit = rim s
 
 ## Review
 
-Not independently reviewed. This is not a guard, permission or migration path, but it adds a field to a persisted, validated settings struct, so a fresh read of `settings.rs`, `voices.rs::with_drum_kits` and `document-settings.ts` is worth doing. Points checked by hand: `drumKit: null` is read as no kit by Rust and refused by TypeScript; the field travels with a duplicated track (settings are copied through `completeSound`); older app builds reject a file that stores a kit (`deny_unknown_fields`).
+Reviewed by the coordinator in two rounds; each found real defects (untested kit-keeping, a Track-panel edit route that cleared the selection, a kit control overlapping the source radios in the rig), all fixed here. Rounds stay open until approved.
 
 ## Limits
 

@@ -2,7 +2,6 @@ import type { MessageCatalog } from './en';
 
 export const et: MessageCatalog = {
   // App brand & title
-  'app.title': 'TabPlayer',
   'score.untitled': 'Nimetu',
 
   // Actions & Commands
@@ -26,8 +25,6 @@ export const et: MessageCatalog = {
   'action.redo_title': 'Tee uuesti (Ctrl+Shift+Z)',
   'action.retry': 'Proovi uuesti',
   'action.cancel': 'Loobu',
-  'action.close': 'Sulge',
-  'action.apply': 'Rakenda',
 
   // Menus
   'menu.file': 'Fail',
@@ -58,11 +55,6 @@ export const et: MessageCatalog = {
   'status.finalized_banner': 'Lukustatud: muutmine on keelatud.',
 
   // Preferences & Language
-  'preferences.score_input': 'Nootide sisestus',
-  'preferences.play_notes': 'Mängi noote redigeerimisel',
-  'preferences.auto_duration': 'Automaatne pikkus: pausile lisatud noot võtab viimase pikkuse',
-  'preferences.numpad_durations': 'Numbriklahvistik määrab pikkuse (1-7, . punktiks)',
-  'preferences.paste_diagrams': 'Asetamine sisaldab akordiskeeme',
   'preferences.language': 'Keel',
   'preferences.lang_system': 'Süsteemi keel',
   'preferences.lang_en': 'English',
@@ -136,29 +128,11 @@ export const et: MessageCatalog = {
   'library.menu_examples': 'Näited',
   'library.menu_save_template': 'Salvesta mallina',
   'library.open_containing_folder': 'Ava faili kaust',
-  'library.dialog_title': 'Partituuride teek',
-  'library.section_recent': 'Hiljutised',
-  'library.section_templates': 'Mallid',
-  'library.section_folders': 'Kaustad',
-  'library.section_examples': 'Näited',
-  'library.heading_recent': 'Hiljutised palad',
-  'library.heading_templates': 'Alusta mallist',
-  'library.heading_folders': 'Kohalikud partituuride kaustad',
-  'library.heading_examples': 'Näidispartituurid',
-  'library.field_title': 'Pealkiri',
-  'library.field_artist': 'Esitaja',
-  'library.field_instrument': 'Pill',
-  'library.field_modified': 'Muudetud',
   'library.available_offline': 'Saadaval võrguühenduseta',
-  'library.rename': 'Nimeta ümber',
-  'library.remove': 'Eemalda',
 
   // Dialog common
   'dialog.close': 'Sulge',
   'dialog.cancel': 'Loobu',
-  'dialog.apply': 'Rakenda',
-  'dialog.save': 'Salvesta',
-  'dialog.ok': 'Sobib',
 
   // Help & Shortcuts
   'help.dialog_title': 'TabPlayeri abi',
@@ -178,7 +152,7 @@ export const et: MessageCatalog = {
   'help.shortcut_next_score': 'Järgmine pala; koos Shiftiga eelmine pala',
   'help.shortcut_undo_redo': 'Võta tagasi; koos Shiftiga tee uuesti. Ka Ctrl/Cmd + Y teeb uuesti.',
   'help.shortcut_play': 'Esita või pane pausile',
-  'help.shortcut_palette': 'Käsupalett: sisesta käsk nagu takt 12, krihv 5 või tempo 96',
+  'help.shortcut_palette': 'Käsupalett: sisesta käsk nagu measure 12, fret 5 või tempo 96',
   'help.shortcut_beat': 'Eelmine / järgmine löök',
   'help.shortcut_string': 'Vaheta keelt või vali noot/löökpill',
   'help.shortcut_fret': 'Sisesta krihv ja määra noot krihvidega rajal',
@@ -197,7 +171,7 @@ export const et: MessageCatalog = {
   'help.topic.editing.title': 'Partituuri toimetamine',
   'help.topic.editing.p1': 'Klõpsa löögile või liiguta sinist toimetamismärki nooleklahvidega. Üles ja Alla vahetavad keelt; noodi seadmiseks sisesta krihvinumber ja vajuta Enter.',
   'help.topic.editing.p2': 'Shift koos Vasaku või Parema noolega laiendab valikut kopeerimiseks, asetamiseks ja valikutööriistadeks. Escape tühistab valiku.',
-  'help.topic.editing.p3': 'Ctrl/Cmd + Shift + P avab käsupaleti, kuhu saab sisestada käske nagu takt 12, krihv 5 või tempo 96.',
+  'help.topic.editing.p3': 'Ctrl/Cmd + Shift + P avab käsupaleti, kuhu saab sisestada käske nagu measure 12, fret 5 või tempo 96.',
   'help.topic.editing.p4': 'Iga muudatuse saab tagasi võtta klahvidega Ctrl/Cmd + Z ja uuesti teha klahvidega Ctrl/Cmd + Shift + Z.',
 
   'help.topic.tracks.title': 'Rajad ja helid',
@@ -216,8 +190,8 @@ export const et: MessageCatalog = {
 
   'help.topic.files.title': 'Failid, import ja eksport',
   'help.topic.files.p1': 'TabPlayer avab Guitar Pro (.gp, .gpx, .gp3–.gp5) ja MusicXML-faile ning salvestab oma .tabplayer-projekte. Iga partituur avaneb eraldi vahekaardil.',
-  'help.topic.files.p2': 'Fail → Impordi ASCII tabulatuur… loeb kleebitud või failist laaditud tekstitabulatuuri uude nimetusse partituuri.',
-  'help.topic.files.p3': 'Fail → Impordi MIDI… loeb standardse MIDI-faili (formaat 0 või 1) uude nimetusse partituuri; vali esmalt kvantimine, triooolid, hääled ja tabulatuur.',
+  'help.topic.files.p2': 'Fail → Impordi ASCII tabulatuur… loeb kleebitud või failist laaditud tekstitabulatuuri uueks nimetuks partituuriks.',
+  'help.topic.files.p3': 'Fail → Impordi MIDI… loeb standardse MIDI-faili (formaat 0 või 1) uueks nimetuks partituuriks; vali esmalt kvantimine, trioolid, hääled ja tabulatuur.',
   'help.topic.files.p4': 'Fail → Hulgikonverteerimine… muudab vanemate partituuride kausta (koos alamkaustadega) uuteks .gp-failideks eraldi sihtkaustas. Algfaile ei muudeta kunagi.',
   'help.topic.files.p5': 'Fail → Ekspordi partituur salvestab PDF-, pildi-, MIDI-, MusicXML-, ASCII-tabulatuuri või helifailina; Ekspordi GP kirjutab Guitar Pro faili.',
   'help.topic.files.p6': 'Ekspordi partituur → Guitar Pro 5 kirjutab .gp5-faili vanemate programmide jaoks ja loetleb enne salvestamist, mis sellest formaadist välja jääb.',
@@ -242,9 +216,8 @@ export const et: MessageCatalog = {
   'recovery.recover_desc': 'Taasta dokumendid viimasest valminud varukoopiast. Pärast seda kontrollpunkti tehtud muudatused võivad puududa.',
   'recovery.checkpoint': 'Kontrollpunkt: {time}',
   'recovery.checkpoint_unavailable': 'Kontrollpunkti aeg pole saadaval.',
-  'recovery.recoverable_count': '{count} taastatav {documents}',
-  'recovery.document_singular': 'dokument',
-  'recovery.document_plural': 'dokumenti',
+  'recovery.recoverable_one': '{count} taastatav dokument',
+  'recovery.recoverable_other': '{count} taastatavat dokumenti',
   'recovery.recoverable_region': 'Taastatavad dokumendid',
   'recovery.score_entry': 'Pala {index} / {total}: {title}',
   'recovery.details_heading': 'Taaste üksikasjad',
@@ -266,62 +239,36 @@ export const et: MessageCatalog = {
 
   // MIDI Import Dialog
   'midi_import.title': 'Impordi MIDI',
-  'midi_import.hint': 'Vali standardne MIDI-fail. Määra kvantimine ning trioolide, häälte ja tabulatuuri lugemise viis ning kontrolli enne importi eelvaadet.',
   'midi_import.choose_file': 'Vali MIDI-fail…',
   'midi_import.import_btn': 'Impordi',
   'midi_import.size_limit': '{name} on suurem kui 8 MB, mistõttu seda ei laaditud.',
-  'midi_import.read_failed': 'Faili {name} lugemine ebaõnnestus.',
   'midi_import.not_opened': 'Partituuri ei avatud.',
   'midi_import.open_failed': 'Partituuri ei saanud avada: {error}',
-  'midi_import.quantization': 'Kvantimine',
-  'midi_import.q_quarter': 'Veandnoot (1/4)',
-  'midi_import.q_eighth': 'Kaheksandiknoot (1/8)',
-  'midi_import.q_16th': 'Kuueteistkümnendiknoot (1/16)',
-  'midi_import.q_32nd': 'Kolmekümnekahjandiknoot (1/32)',
-  'midi_import.q_64th': 'Kuuekümneneljandiknoot (1/64)',
-  'midi_import.tuplets': 'Trioolid ja rütmigrupid',
-  'midi_import.tuplet_none': 'Puudub',
-  'midi_import.tuplet_triplets': 'Trioolid',
-  'midi_import.tuplet_triplets_quintuplets': 'Trioolid ja kvintoolid',
-  'midi_import.voices': 'Maksimaalselt hääli',
-  'midi_import.kind_guitar': 'kitarri tabulatuur',
-  'midi_import.kind_bass': 'bassi tabulatuur',
-  'midi_import.kind_keys': 'noodikiri',
-  'midi_import.kind_drums': 'trummid',
 
   // Batch Convert Dialog
   'batch.title': 'Hulgikonverteerimine',
   'batch.file_types': 'Failitüübid',
-  'batch.pick_source': 'Vali lähtekaust…',
-  'batch.pick_dest': 'Vali sihtkaust…',
   'batch.choose_source': 'Vali lähtekaust…',
   'batch.choose_dest': 'Vali sihtkaust…',
   'batch.cancel_conversion': 'Katkesta konverteerimine',
   'batch.convert_btn': 'Konverteeri',
-  'batch.no_files': 'Vastavaid faile ei leitud.',
-  'batch.keep_folders': 'Säilita kaustastruktuur',
 
   // Export Dialog
   'export.title': 'Ekspordi partituur',
   'export.tracks_to_export': 'Eksporditavad rajad',
   'export.measures_to_export': 'Eksporditavad taktid',
   'export.audio': 'Heli',
-  'export.export_btn': 'Ekspordi',
 
   // Saved Tunings Dialog
   'tuning.saved_tunings_title': 'Salvestatud häälestused',
   'tuning.use_tuning': 'Kasuta häälestust',
   'tuning.save_new': 'Salvesta uuena',
   'tuning.save_changes': 'Salvesta muudatused',
-  'tuning.tuning_notes': 'Häälestuse noodid',
-  'tuning.tuning_name': 'Häälestuse nimi',
-  'tuning.preset_group': 'Häälestuse eelseadistused',
-  'tuning.my_tunings': 'Minu häälestused',
 
   // Command Palette
   'palette.title': 'Käsud',
-  'palette.placeholder': 'Sisesta käsk või avaldis, näiteks takt 12, ff, 3/4 või Am7',
+  'palette.placeholder': 'Sisesta käsk või avaldis, näiteks measure 12, ff, 3/4 või Am7',
   'palette.matching_commands': 'Vastavad käsud',
   'palette.wait_busy': 'Oota praeguse toimingu lõppemist.',
-  'palette.no_matches': 'Ükski käsk ega avaldis ei vasta. Proovi: takt 12, krihv 5, ff, 3/4, Eb major, [Chorus] või Am7.',
+  'palette.no_matches': 'Ükski käsk ega avaldis ei vasta. Proovi: measure 12, fret 5, ff, 3/4, Eb major, [Chorus] või Am7.',
 };

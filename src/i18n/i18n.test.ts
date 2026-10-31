@@ -172,3 +172,30 @@ describe('useI18n hook and runtime switching', () => {
     expect(msg).toBe('Bar 3 of 16');
   });
 });
+
+describe('i18n pinned wording', () => {
+  it('keeps the English text the desktop drivers and tests rely on', () => {
+    expect(catalogs.en['batch.title']).toBe('Batch convert scores');
+  });
+
+  it('keeps the command palette words in translated hints', () => {
+    for (const lang of ['et', 'de'] as const) {
+      for (const key of ['palette.placeholder', 'palette.no_matches', 'help.shortcut_palette', 'help.topic.editing.p3'] as const) {
+        const text = getMessage(lang, key);
+        expect(text, `${lang} ${key}`).not.toMatch(/\b(takt|krihv|bund|eb-dur)\b/i);
+      }
+    }
+  });
+
+  it('uses grammatical singular and plural document counts', () => {
+    expect(getMessage('en', 'recovery.recoverable_one', { count: 1 })).toBe('1 recoverable document');
+    expect(getMessage('et', 'recovery.recoverable_one', { count: 1 })).toBe('1 taastatav dokument');
+    expect(getMessage('et', 'recovery.recoverable_other', { count: 3 })).toBe('3 taastatavat dokumenti');
+    expect(getMessage('de', 'recovery.recoverable_one', { count: 1 })).toBe('1 wiederherstellbares Dokument');
+    expect(getMessage('de', 'recovery.recoverable_other', { count: 3 })).toBe('3 wiederherstellbare Dokumente');
+  });
+
+  it('uses Strg in German shortcut text', () => {
+    for (const key of Object.keys(catalogs.de) as MessageKey[]) expect(catalogs.de[key], key).not.toContain('Ctrl');
+  });
+});

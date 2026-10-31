@@ -21,6 +21,12 @@ it('chooses the topic for the focused part of the window',()=>{
   document.body.innerHTML='';
 });
 
+it('explains the Mixer and Sound views from their own controls',()=>{
+  document.body.innerHTML='<section class="mixer-view"><button id="mix">Mute</button></section><section class="sound-view"><button id="rig">Hear</button></section>';
+  expect([topicFor(document.getElementById('mix')),topicFor(document.getElementById('rig'))]).toEqual(['playback','tracks']);
+  document.body.innerHTML='';
+});
+
 it('opens on the given topic, switches topics, discloses update status and keeps focus inside',()=>{
   const onClose=vi.fn();render(<HelpDialog initial="editing" onClose={onClose}/>);
   const topic=(name:string)=>screen.getByRole('button',{name});

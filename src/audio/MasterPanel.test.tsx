@@ -69,18 +69,26 @@ it('edits each effect from its own section, keeping the rest of the master',()=>
 it('resets to the defaults, and has nothing to reset on an untouched master',()=>{
   const onChange=vi.fn();
   const view=render(<MasterPanel master={undefined} disabled={false} onChange={onChange}/>);
-  expect(screen.getByRole('button',{name:'Reset master'})).toBeDisabled();
+  expect(screen.getByRole('button',{name:'Reset master'})).toHaveAttribute('aria-disabled','true');
   view.rerender(<MasterPanel master={{...defaultMaster(),gainDb:3}} disabled={false} onChange={onChange}/>);
   fireEvent.click(screen.getByRole('button',{name:'Reset master'}));
   expect(onChange).toHaveBeenCalledWith(defaultMaster());
   view.rerender(<MasterPanel master={defaultMaster()} disabled={false} onChange={onChange}/>);
-  expect(screen.getByRole('button',{name:'Reset master'})).toBeDisabled();
+  expect(screen.getByRole('button',{name:'Reset master'})).toHaveAttribute('aria-disabled','true');
 });
 
-it('disables every control while busy or without a player',()=>{
-  render(<MasterPanel master={{...defaultMaster(),gainDb:3}} disabled={true} onChange={vi.fn()}/>);
+it('refuses every control while busy or without a player, with aria-disabled so a focused one keeps focus',()=>{
+  const onChange=vi.fn();
+  render(<MasterPanel master={{...defaultMaster(),gainDb:3}} disabled={true} onChange={onChange}/>);
   open('Compressor');open('EQ');open('Reverb');open('Limiter');
-  for(const control of [...screen.getAllByRole('slider'),...screen.getAllByRole('checkbox'),screen.getByRole('combobox'),screen.getByRole('button',{name:'Reset master'})])expect(control).toBeDisabled();
+  const controls=[...screen.getAllByRole('slider'),...screen.getAllByRole('checkbox'),screen.getByRole('combobox'),screen.getByRole('button',{name:'Reset master'})];
+  for(const control of controls){expect(control).toHaveAttribute('aria-disabled','true');expect(control).not.toBeDisabled();}
+  const level=slider('Master level');level.focus();
+  fireEvent.change(level,{target:{value:'6'}});fireEvent.keyUp(level,{key:'ArrowRight'});fireEvent.pointerUp(level);
+  fireEvent.click(screen.getByLabelText('EQ on'));
+  fireEvent.change(screen.getByRole('combobox'),{target:{value:'hall'}});
+  fireEvent.click(screen.getByRole('button',{name:'Reset master'}));
+  expect(onChange).not.toHaveBeenCalled();expect(level).toHaveFocus();expect(level).toHaveValue('3');
 });
 
 it('drops the draft when the edit is refused, so the slider goes back to the saved value',async()=>{
@@ -143,9 +151,25 @@ it('puts the master strip in the mixer and saves its edits through the player',(
 it('keeps the master strip, disabled, in a mixer with no player or a busy one',()=>{
   const none=mixer(undefined);
   const view=render(<TrackPanel {...none.props} player={null}/>);
-  expect(slider('Master level')).toBeDisabled();
+  expect(slider('Master level')).toHaveAttribute('aria-disabled','true');
   view.unmount();
   const busy=mixer(undefined);
   render(<TrackPanel {...busy.props} busy={true}/>);
-  expect(slider('Master level')).toBeDisabled();
+  expect(slider('Master level')).toHaveAttribute('aria-disabled','true');
+});
+
+it('keeps the slider where it was put while its commit is on the way, even when busy turns on, and goes back only once it settles',async()=>{
+  let settle:()=>void=()=>{};
+  const onChange=vi.fn(()=>new Promise<void>(resolve=>{settle=resolve;}));
+  const view=render(<MasterPanel master={undefined} disabled={false} onChange={onChange}/>);
+  const level=slider('Master level');
+  fireEvent.change(level,{target:{value:'-6'}});fireEvent.pointerUp(level);
+  expect(onChange).toHaveBeenCalledTimes(1);
+  view.rerender(<MasterPanel master={undefined} disabled={true} onChange={onChange}/>);
+  fireEvent.blur(level);
+  expect(slider('Master level')).toHaveValue('-6');
+  expect(onChange).toHaveBeenCalledTimes(1);
+  await act(async()=>{settle();await Promise.resolve();await Promise.resolve();});
+  view.rerender(<MasterPanel master={{...defaultMaster(),gainDb:-6}} disabled={false} onChange={onChange}/>);
+  expect(slider('Master level')).toHaveValue('-6');
 });

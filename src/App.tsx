@@ -11,6 +11,7 @@ import { TrackPanel } from './TrackPanel';
 import './styles.css';
 import { NativePlaybackController } from './audio/NativePlaybackController';
 import { SoundPanel } from './audio/SoundPanel';
+import { MixerView } from './mixer/MixerView';
 import { SoundRig } from './rig/SoundRig';
 import { CabinetResponse } from './audio/CabinetResponse';
 import { Segmented } from './ui';
@@ -98,7 +99,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   const editLocked=isFinalized(state.snapshot.project),editBusy=controlsBusy||editLocked;
   const [player,setPlayer]=useState<NativePlaybackController|null>(null);
   const playbackState=useSyncExternalStore(player?.subscribe??noPlaybackSubscribe,()=>player?.getState()??null);
-  useEffect(()=>{const playback=new NativePlaybackController({bridge:audioBridge,latestMix:id=>controller.getState().settings.mixes[id],onEdit:command=>controller.edit(command).then(()=>setSelection(old=>repairSelection(controller.getState().score,old)))});setPlayer(playback);return()=>playback.destroy();},[controller,audioBridge]);
+  useEffect(()=>{const playback=new NativePlaybackController({bridge:audioBridge,latestMix:id=>controller.getState().settings.mixes[id],latestMaster:()=>controller.getState().settings.master,onEdit:command=>controller.edit(command).then(()=>setSelection(old=>repairSelection(controller.getState().score,old)))});setPlayer(playback);return()=>playback.destroy();},[controller,audioBridge]);
   useEffect(()=>{controller.setBeforeChange(()=>player?.beforeScoreChange());return()=>controller.setBeforeChange(()=>{});},[controller,player]);
   const referenceLifetime=useMemo(()=>({active:true}),[controller,waveformBridge]);
   useEffect(()=>{referenceLifetime.active=true;const unbind=controller.setReferenceWaveformBridge(waveformBridge);return()=>{referenceLifetime.active=false;unbind();};},[controller,waveformBridge,referenceLifetime]);
@@ -125,7 +126,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   const [leftTask,setLeftTask]=useState<'track'|'sound'|'backing'>('track');
   const [leftVisible,setLeftVisible]=useState(true),[inspectorVisible,setInspectorVisible]=useState(true),[dockVisible,setDockVisible]=useState(true);
   /** The centre region shows the score or the Sound rig; the transport and the rest of the shell stay as they are. */
-  const [view,setView]=useState<'score'|'sound'>('score');
+  const [view,setView]=useState<'score'|'sound'|'mixer'>('score');
   const [narrowPane,setNarrowPane]=useState<'track'|'sound'|'backing'|'inspector'>('inspector');
   const [viewport,setViewport]=useState(()=>({width:window.innerWidth,height:window.innerHeight}));
   const [dockMode,setDockMode]=useState<'overview'|'mixer'|'backing'>('overview'),[dockForced,setDockForced]=useState(false),[waveformOpened,setWaveformOpened]=useState(false);
@@ -450,7 +451,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
       </section></details>
       <button disabled={editBusy || !state.snapshot.canUndo} onClick={()=>change(controller.undo())}>Undo</button>
       <button disabled={editBusy || !state.snapshot.canRedo} onClick={()=>change(controller.redo())}>Redo</button>
-    </nav><Segmented className="view-switch" label="View" value={view} onChange={setView} options={[{value:'score',label:'Score'},{value:'sound',label:'Sound'}]}/><details className="keyboard-help" onToggle={event=>commandToggle(event.currentTarget)} onKeyDown={event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();event.currentTarget.open=false;event.currentTarget.querySelector('summary')?.focus();}}}><summary>Help</summary><section role="region" aria-label="Keyboard and editing help">
+    </nav><Segmented className="view-switch" label="View" value={view} onChange={setView} options={[{value:'score',label:'Score'},{value:'sound',label:'Sound'},{value:'mixer',label:'Mixer'}]}/><details className="keyboard-help" onToggle={event=>commandToggle(event.currentTarget)} onKeyDown={event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();event.currentTarget.open=false;event.currentTarget.querySelector('summary')?.focus();}}}><summary>Help</summary><section role="region" aria-label="Keyboard and editing help">
       <div className="help-actions"><button type="button" onClick={()=>openHelp('start')}>Help topics (F1)</button><button type="button" onClick={()=>openHelp('about')}>About and updates</button></div>
       <h2>Keyboard & editing</h2><p>Use these shortcuts outside input fields and dialogs. F1 opens help about the part of the window you are using.</p>
       <dl><dt>Ctrl/Cmd + N / O</dt><dd>New score / Open score</dd><dt>Ctrl/Cmd + S</dt><dd>Save; add Shift for Save As</dd><dt>Ctrl/Cmd + W</dt><dd>Close the current score</dd><dt>Ctrl/Cmd + Tab</dt><dd>Next score; add Shift for the previous score</dd><dt>Ctrl/Cmd + Z</dt><dd>Undo; add Shift to redo. Ctrl/Cmd + Y also redoes.</dd><dt>Space</dt><dd>Play or pause</dd><dt>Ctrl/Cmd + Shift + P</dt><dd>Command palette: type a command such as measure 12, fret 5 or tempo 96</dd></dl>
@@ -499,10 +500,11 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
         tracks={state.score.tracks.map((track,index)=>({id:trackIds[index],name:track.name||`Track ${index+1}`,program:track.playbackInfo.program,percussion:track.staves.some(staff=>staff.isPercussion)}))}
         onTrack={id=>{const index=trackIds.indexOf(id);if(index>=0)select({track:index,staff:0,bar:target.bar,voice:0,beat:0},state.score.tracks[index].staves[0].tuning.length);}}
         cabinetResponse={board=><CabinetResponse ir={board.effects.cabinet.ir} model={board.effects.cabinet.model} label={board.name} scope={`${trackId}:${board.name('Cabinet')}`} onLibraryChange={()=>{if(player&&typeof player.refreshSounds==='function')void player.refreshSounds().catch(()=>{});}} onChange={ir=>{if(!editBusy)board.write(effects=>{if(ir)effects.cabinet.ir=ir;else delete effects.cabinet.ir;});}}/>}/>}
+      {view==='mixer'&&<MixerView score={state.score} sounds={state.settings.sounds} selected={target.track} busy={controlsBusy} player={player} onSelect={track=>select({track,staff:0,bar:target.bar,voice:0,beat:0},state.score.tracks[track].staves[0].tuning.length)}/>}
       <section className="workstation-dock" aria-label="Bottom dock" hidden={!dockVisible}>
         <nav aria-label="Dock views"><button aria-pressed={!instrumentVisible&&dockMode==='overview'} onClick={()=>chooseDock('overview')}>Overview</button><button aria-pressed={!instrumentVisible&&dockMode==='mixer'} onClick={()=>chooseDock('mixer')}>Mixer</button><button aria-pressed={instrumentVisible} onClick={()=>chooseDock('instrument')}>Instrument</button><button aria-pressed={!instrumentVisible&&dockMode==='backing'} onClick={()=>chooseDock('backing')}>Backing</button><button className="dock-collapse" aria-label={dockCollapsed?'Expand bottom dock':'Hide bottom dock'} onClick={()=>dockCollapsed?setDockForced(true):hideDock()}>{dockCollapsed?'Expand':'Hide'}</button></nav>
         <div className="workstation-dock-content" hidden={dockCollapsed}>
-          <div className="workstation-dock-tracks" hidden={instrumentVisible||dockMode==='backing'}><TrackPanel score={state.score} selected={target.track} busy={controlsBusy} player={player} view={dockMode==='mixer'?'mixer':'overview'} target={target} onExitOverview={()=>scorePane.current?.focus()} onSelectPosition={(track,bar)=>select({track,staff:0,bar,voice:0,beat:0})} onSelect={track=>select({track,staff:0,bar:target.bar,voice:0,beat:0},state.score.tracks[track].staves[0].tuning.length)}/></div>
+          <div className="workstation-dock-tracks" hidden={instrumentVisible||dockMode==='backing'}>{view!=='mixer'&&<TrackPanel score={state.score} selected={target.track} busy={controlsBusy} player={player} view={dockMode==='mixer'?'mixer':'overview'} target={target} onExitOverview={()=>scorePane.current?.focus()} onSelectPosition={(track,bar)=>select({track,staff:0,bar,voice:0,beat:0})} onSelect={track=>select({track,staff:0,bar:target.bar,voice:0,beat:0},state.score.tracks[track].staves[0].tuning.length)}/>}</div>
           {instrumentVisible&&<LiveInstrumentView score={state.score} track={target.track} staff={target.staff} target={target} player={player} onEdit={instrumentEdit} busy={controlsBusy} locked={editLocked} string={string}/>}
           <div className="workstation-dock-backing" hidden={instrumentVisible||dockMode!=='backing'}>
             {waveformEnabled&&!referenceVisible&&sourceMetadataStatus}

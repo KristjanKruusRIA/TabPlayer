@@ -67,3 +67,48 @@ it('shows device enumeration failure without hiding the default output',async()=
   expect(await screen.findByRole('alert')).toHaveTextContent('Devices could not be read');
   expect(screen.getByLabelText('Audio output')).toBeVisible();
 });
+
+
+it('toggles track sound lock with one undoable edit and records nothing for unchanged value', () => {
+  const onEdit = vi.fn();
+  const { rerender } = render(<SoundPanel trackId="guitar" sound={soundPreset('lead')} onEdit={onEdit} />);
+  const lockBox = screen.getByRole('checkbox', { name: 'Lock sound against automations' });
+  expect(lockBox).not.toBeChecked();
+
+  // Clicking checks it and calls onEdit once with locked: true
+  fireEvent.click(lockBox);
+  expect(onEdit).toHaveBeenCalledTimes(1);
+  const recorded = onEdit.mock.calls[0][0];
+  expect(recorded).toEqual({
+    type: 'setTrackSound',
+    trackId: 'guitar',
+    sound: { ...soundPreset('lead'), locked: true },
+  });
+
+  // Re-render with locked sound
+  rerender(<SoundPanel trackId="guitar" sound={recorded.sound} onEdit={onEdit} />);
+  expect(screen.getByRole('checkbox', { name: 'Lock sound against automations' })).toBeChecked();
+
+  // Clicking again unlocks with locked removed/omitted
+  fireEvent.click(screen.getByRole('checkbox', { name: 'Lock sound against automations' }));
+  expect(onEdit).toHaveBeenCalledTimes(2);
+  const unlocked = onEdit.mock.calls[1][0];
+  expect(unlocked.sound.locked).toBeUndefined();
+});
+
+it('keeps the lock control focusable while busy with aria-disabled and refuses clicks', () => {
+  const onEdit = vi.fn();
+  render(<SoundPanel trackId="guitar" sound={soundPreset('lead')} onEdit={onEdit} busy />);
+  const lockBox = screen.getByRole('checkbox', { name: 'Lock sound against automations' });
+
+  // Control stays focusable: not disabled attribute, but aria-disabled="true"
+  expect(lockBox).not.toBeDisabled();
+  expect(lockBox).toHaveAttribute('aria-disabled', 'true');
+
+  lockBox.focus();
+  expect(document.activeElement).toBe(lockBox);
+
+  // Clicking while busy refuses and records nothing
+  fireEvent.click(lockBox);
+  expect(onEdit).not.toHaveBeenCalled();
+});

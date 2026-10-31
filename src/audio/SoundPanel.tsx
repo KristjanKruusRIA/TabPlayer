@@ -137,7 +137,9 @@ export function SoundPanel({trackId,sound,onEdit,playback,busy=false,shown=true}
       {block==='delay'&&<><label>Delay model<select aria-label={board.name('Delay model')} value={board.effects.delay.model} onChange={e=>fx(board,'delay','model',e.target.value)}><option value="digital">Digital</option><option value="tape">Tape</option><option value="analog">Analog</option></select></label><label>Delay time<select aria-label={board.name('Delay time')} value={board.effects.delay.quarterNotes} onChange={e=>fx(board,'delay','quarterNotes',Number(e.target.value))}>{delayDivisions.map(([value,name])=><option key={value} value={value}>{name}</option>)}</select></label><p className="muted">Delay times are limited to 16 seconds.</p></>}
     </fieldset></details>;
 
-  return <section className="sound-panel" aria-label="Track sound"><h3>Sound</h3><fieldset disabled={busy}>
+  return <section className="sound-panel" aria-label="Track sound"><h3>Sound</h3>
+    <label className="check"><input aria-label="Lock sound against automations" type="checkbox" checked={!!current.locked} aria-disabled={busy||undefined} onChange={e=>{if(busy||e.target.checked===!!current.locked)return;const next={...current};if(e.target.checked)next.locked=true;else delete next.locked;void save(next);}}/>Lock sound against automations</label>
+    <fieldset disabled={busy}>
     <label>Sound source<select value={current.voiceId??''} onChange={e=>save({...current,voiceId:e.target.value||null})}><option value="">Automatic instrument</option><option value="gm">General MIDI</option><option value="green-guitar">Green Guitar</option><option value="black-guitar">Black Guitar</option><option value="darkblack-bass">Darkblack Bass</option><option value="babyblue-bass">Babyblue Bass</option></select></label>
     <label>Sound preset<select value={current.presetId} onChange={e=>save(soundPreset(e.target.value as TrackSound['presetId'],current.voiceId))}>{presetIds.map(id=><option value={id} key={id}>{presetName(id)}</option>)}</select></label>
     <button onClick={()=>save(soundPreset(current.presetId,current.voiceId))}>Restore preset</button>

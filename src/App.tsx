@@ -90,6 +90,7 @@ export function App({controller}: {controller: DocumentController}) {
     </nav><span className="document-title">{state.score.title || 'Untitled'}{state.snapshot.dirty?' •':''}</span>
     <button disabled={state.busy||exports.busy} onClick={()=>{setExportError(null);setExportOpen(true);}}>Export score</button><button disabled={state.busy||exports.busy} onClick={()=>act(controller.export())}>Export GP</button></header>
     {(state.error||(!exportOpen&&exportError)) && <div className="error" role="alert">{state.error||exportError}</div>}
+    {state.importNotice && <div className="notice" role="status">{state.importNotice}</div>}
     <div className="workspace">
       <TrackPanel score={state.score} selected={target.track} busy={state.busy} player={player} onSelect={track=>select({track,staff:0,bar:target.bar,voice:0,beat:0},state.score.tracks[track].staves[0].tuning.length)} onEdit={edit}>
         <SoundPanel trackId={trackId} sound={state.settings.sounds[trackId]} onEdit={command=>controller.edit(command)} playback={player} busy={state.busy}/>

@@ -6,6 +6,8 @@ import { defaultDocumentSettings, defaultMix, applySettingsEdit } from './docume
 import { applyAdvancedEdit } from './editor/advanced';
 import { captureNoteLinks, restoreNoteLinks, detachNote } from './editor/links';
 import { validateBackingAnchors } from './audio/plan';
+import { isPowerTabBytes } from './import/powertab';
+import { importPowerTab } from './import/powertab-score';
 
 const settings = new Settings();
 const { Score, Track, Staff, Bar, Voice, Beat, Note, MasterBar, Automation, JsonConverter } = model;
@@ -68,17 +70,18 @@ function addTrack(score: model.Score, name: string, tuning: number[], program: n
   for (const master of score.masterBars) appendBar(staff, master);
 }
 
-function initialScore(project: Project): model.Score {
+function initialScore(project: Project): {score:model.Score;notice:string|null} {
   if (project.base.kind === 'file') {
     const bytes = Uint8Array.from(atob(project.base.bytesBase64), c => c.charCodeAt(0));
-    return importer.ScoreLoader.loadScoreFromBytes(bytes, settings);
+    if (isPowerTabBytes(bytes)) {const imported=importPowerTab(bytes,settings);return {score:imported.score,notice:imported.notice};}
+    return {score:importer.ScoreLoader.loadScoreFromBytes(bytes, settings),notice:null};
   }
   const score = new Score(); score.title = project.base.title; score.artist = project.base.artist;
   for (let i = 0; i < project.base.measureCount; i++) score.addMasterBar(new MasterBar());
   score.masterBars[0].tempoAutomations = [Automation.buildTempoAutomation(false, 0, project.base.tempo, 2)];
   addTrack(score, 'Guitar', project.base.tuning, 25);
   score.finish(settings);
-  return score;
+  return {score,notice:null};
 }
 
 function trackAt(score: model.Score, index: number) {
@@ -203,7 +206,7 @@ function apply(score: model.Score, edit: EditCommand, editIndex=0) {
 }
 
 export interface BuiltDocument {
-  score:model.Score; settings:DocumentSettings; embeddedBacking:Uint8Array|null;
+  score:model.Score; settings:DocumentSettings; embeddedBacking:Uint8Array|null; importNotice?:string|null;
   embeddedBackingSettings?:Omit<BackingSettings,'assetId'>; sourceMixes?:Record<string,ChannelMix>;
 }
 
@@ -212,7 +215,7 @@ function removeBackingMeasure(backing:Pick<BackingSettings,'anchors'>|null|undef
 }
 
 export function buildDocument(value: ProjectInput): BuiltDocument {
-  const project = validateProject(value); let score = initialScore(project);
+  const project = validateProject(value); const initial = initialScore(project); let score = initial.score;
   const identities=score.tracks.map((_,index)=>`base/${index}`);
   const documentSettings=defaultDocumentSettings();
   const embeddedBacking=score.backingTrack?.rawAudioFile?.slice() ?? null;
@@ -235,7 +238,7 @@ export function buildDocument(value: ProjectInput): BuiltDocument {
   }
   // Transient conversion rebuilds derived links and caches; native files store source bytes and commands.
   score=rebuild(score);score.tracks.forEach((track,index)=>trackIdentities.set(track,identities[index]));
-  const built={score,settings:documentSettings,embeddedBacking,embeddedBackingSettings,sourceMixes};
+  const built={score,settings:documentSettings,embeddedBacking,embeddedBackingSettings,sourceMixes,importNotice:initial.notice};
   validateBackingAnchors(score,effectiveAudioSettings(project,built).backing);return built;
 }
 
@@ -251,7 +254,7 @@ export function replayDocumentSettings(value:ProjectInput,current:BuiltDocument)
     case 'setPrintLayout': next.print=structuredClone(edit.layout);break;
     case 'removeMeasure': removeBackingMeasure(next.backing,edit.bar);break;
   }
-  const built={score:current.score,settings:next,embeddedBacking:current.embeddedBacking,embeddedBackingSettings:current.embeddedBackingSettings,sourceMixes:current.sourceMixes};
+  const built={score:current.score,settings:next,embeddedBacking:current.embeddedBacking,embeddedBackingSettings:current.embeddedBackingSettings,sourceMixes:current.sourceMixes,importNotice:current.importNotice};
   validateBackingAnchors(current.score,effectiveAudioSettings(project,built).backing);return built;
 }
 

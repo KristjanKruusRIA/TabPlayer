@@ -667,3 +667,19 @@ it('the Hold preset button sends Custom with flat points so the engine classifie
   fireEvent.click(screen.getByRole('button', { name: 'Whammy preset: Hold' }));
   expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ type: model.WhammyType.Custom, points: [{ offset: 0, value: -4 }, { offset: 60, value: -4 }] }));
 });
+
+it('StructurePanel keep pitch checkbox passes keepPitch: true to setStaffSettings', () => {
+  const score = music(), onEdit = vi.fn(), props = { score, target, string: 6, busy: false, onEdit, onSelect: vi.fn() };
+  render(<StructurePanel {...props} />);
+  const keepPitch = screen.getByLabelText('Keep pitch');
+  expect(keepPitch).not.toBeChecked();
+  fireEvent.click(keepPitch);
+  expect(keepPitch).toBeChecked();
+  fireEvent.click(screen.getByRole('button', { name: 'Apply staff settings' }));
+  expect(onEdit).toHaveBeenLastCalledWith(expect.objectContaining({
+    type: 'setStaffSettings',
+    track: 0,
+    staff: 0,
+    settings: expect.objectContaining({ keepPitch: true }),
+  }));
+});

@@ -231,3 +231,23 @@ it('wheel over two pegs within the settle time dispatches one setTuning edit wit
     expect(onEdit).toHaveBeenLastCalledWith({ type: 'setTuning', track: 0, tuning: [65, 60, 55, 50, 45, 40], tuningName: '' });
   } finally { vi.useRealTimers(); }
 });
+
+it('keep pitch checkbox adds keepPitch: true to setTuning edit', () => {
+  const score = previewEdit(blankProject(), { type: 'setRest', target: { track: 0, staff: 0, bar: 0, voice: 0, beat: 0 } }).score;
+  const onEdit = vi.fn();
+  render(<TrackSettingsPanel score={score} selected={0} busy={false} onEdit={onEdit} />);
+  const input = screen.getByLabelText('Tuning (notes, high to low)');
+  fireEvent.change(input, { target: { value: 'E4 B3 G3 D3 A2 D2' } });
+  const keepPitch = screen.getByLabelText('Keep pitch');
+  expect(keepPitch).not.toBeChecked();
+  fireEvent.click(keepPitch);
+  expect(keepPitch).toBeChecked();
+  fireEvent.click(screen.getByRole('button', { name: 'Apply tuning' }));
+  expect(onEdit).toHaveBeenLastCalledWith({
+    type: 'setTuning',
+    track: 0,
+    tuning: [64, 59, 55, 50, 45, 38],
+    tuningName: '',
+    keepPitch: true,
+  });
+});

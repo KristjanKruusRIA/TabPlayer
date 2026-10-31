@@ -459,6 +459,8 @@ export const en = {
   'track_settings.string_count_help': 'Notes keep their pitch. Notes on a removed or unplayable string move to a free string in the same beat; chord diagrams follow the kept strings.',
   'track_settings.change_string_count': 'Change string count',
   'track_settings.apply_tuning': 'Apply tuning',
+  'track_settings.keep_pitch': 'Keep pitch',
+  'editor.keep_pitch': 'Keep pitch',
   'track_settings.add_instrument': 'Add instrument',
   'track_settings.new_track_name': 'New track name',
   'track_settings.midi_instrument': 'MIDI instrument',

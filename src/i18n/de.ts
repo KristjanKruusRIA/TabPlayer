@@ -461,6 +461,8 @@ export const de: MessageCatalog = {
   'track_settings.string_count_help': 'Noten behalten ihre Tonhöhe. Noten auf einer entfernten oder unspielbaren Saite wandern auf eine freie Saite im selben Beat; Akkorddiagramme folgen den beibehaltenen Saiten.',
   'track_settings.change_string_count': 'Saitenanzahl ändern',
   'track_settings.apply_tuning': 'Stimmung anwenden',
+  'track_settings.keep_pitch': 'Tonhöhe beibehalten',
+  'editor.keep_pitch': 'Tonhöhe beibehalten',
   'track_settings.add_instrument': 'Instrument hinzufügen',
   'track_settings.new_track_name': 'Neuer Spurname',
   'track_settings.midi_instrument': 'MIDI-Instrument',

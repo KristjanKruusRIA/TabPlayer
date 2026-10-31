@@ -461,6 +461,8 @@ export const et: MessageCatalog = {
   'track_settings.string_count_help': 'Noodid säilitavad oma helikõrguse. Eemaldatud või mittemängitava keele noodid liiguvad samas löögis vabale keelele; akordidiagrammid järgivad allesjäetud keeli.',
   'track_settings.change_string_count': 'Muuda keelte arvu',
   'track_settings.apply_tuning': 'Rakenda häälestus',
+  'track_settings.keep_pitch': 'Säilita helikõrgus',
+  'editor.keep_pitch': 'Säilita helikõrgus',
   'track_settings.add_instrument': 'Lisa pill',
   'track_settings.new_track_name': 'Uue raja nimi',
   'track_settings.midi_instrument': 'MIDI pill',

@@ -733,6 +733,13 @@ pub struct StaffSettings {
         skip_serializing_if = "Option::is_none"
     )]
     pub drone_fret: Option<u32>,
+    /// Move existing notes to keep their sounding pitch when retuning or changing capo.
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub keep_pitch: Option<bool>,
 }
 /// A capo over some strings only. Strings count from 1 for the lowest-pitched string, as notes do.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1094,6 +1101,12 @@ pub enum EditCommand {
             skip_serializing_if = "Option::is_none"
         )]
         tuning_name: Option<String>,
+        #[serde(
+            default,
+            deserialize_with = "present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        keep_pitch: Option<bool>,
     },
     SetStringCount {
         track: u32,

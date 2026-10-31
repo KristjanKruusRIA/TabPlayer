@@ -12,6 +12,7 @@ import './styles.css';
 import { NativePlaybackController } from './audio/NativePlaybackController';
 import { SoundPanel } from './audio/SoundPanel';
 import { InterpretationPanel } from './audio/InterpretationPanel';
+import { DrumKitPanel } from './audio/DrumKitPanel';
 import { CabinetNotices } from './audio/CabinetNotices';
 import { BackingPanel } from './audio/BackingPanel';
 import { BackingWaveform } from './audio/BackingWaveform';
@@ -466,6 +467,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
         <div className="workstation-task" hidden={leftTask!=='sound'}>
         <SoundPanel trackId={trackId} sound={state.settings.sounds[trackId]} onEdit={command=>controller.edit(command)} playback={player} busy={editBusy} shown={leftShown&&leftTask==='sound'}/>
         <InterpretationPanel trackId={trackId} mix={state.settings.mixes[trackId]} stringed={selectedTrack.staves.some(staff=>staff.isStringed)} busy={controlsBusy} onEdit={command=>controller.edit(command)}/>
+        <DrumKitPanel trackId={trackId} mix={state.settings.mixes[trackId]} percussion={Boolean(selectedTrack.isPercussion)} busy={controlsBusy} onEdit={command=>controller.edit(command)}/>
         </div><div className="workstation-task" hidden={leftTask!=='backing'}><BackingPanel visible={referenceVisible} settings={originalBacking?undefined:state.settings.backing} originalSettings={state.embeddedBackingSettings?{assetId:'embedded',...state.embeddedBackingSettings}:null} assets={state.snapshot.project.assets} embedded={state.embeddedBacking} playback={player} onEdit={backingEdit} stageBacking={audioBridge.stageBacking} stageEmbeddedBacking={audioBridge.stageEmbeddedBacking} beginOperation={beginEditorOperation} busy={editBusy} durationMs={sourceDurationMs??undefined} reference={reference} onShowWaveform={()=>chooseDock('backing')}/>{referenceVisible&&sourceMetadataStatus}</div>
       </section>
       <section ref={scorePane} className="score-workspace" aria-label="Score workspace" tabIndex={0} onKeyDown={keys}>

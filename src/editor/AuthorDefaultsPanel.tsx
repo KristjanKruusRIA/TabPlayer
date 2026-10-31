@@ -11,7 +11,7 @@ export function AuthorDefaultsPanel({score,load,onSave}:{score:model.Score;load:
   const copy=()=>{
     const long=authorDefaultFields.some(field=>score[field].length>authorDefaultsLimit);
     setFields(Object.fromEntries(authorDefaultFields.map(field=>[field,clipAuthorText(score[field])])) as AuthorDefaults);
-    setStatus(`Copied this score’s details${long?`, shortening long ones to ${authorDefaultsLimit} characters`:''}. Save to keep them.`);
+    setStatus(long?t('editor.copied_details_shortened',{limit:authorDefaultsLimit}):t('editor.copied_details'));
   };
   return <details><summary>{t('editor.author_defaults_title')}</summary>
     <p id={help} className="muted">{t('editor.author_defaults_help')}</p>

@@ -40,7 +40,8 @@ export function SourcePicker({editing,track}:{editing:SoundEditing;track:RigTrac
 
 /** The score's tracks, each as a small drawing of its instrument and its name. A radio group where arrow keys move to and select a track. */
 export function TrackStrip({tracks,trackId,onTrack}:{tracks:readonly RigTrack[];trackId:string;onTrack:(id:string)=>void}) {
-  return <Segmented className="rig-tracks" label="Track" value={trackId} onChange={onTrack} options={tracks.map(track=>({
+  const { t } = useI18n();
+  return <Segmented className="rig-tracks" label={t('workspace.track')} value={trackId} onChange={onTrack} options={tracks.map(track=>({
     value:track.id,ariaLabel:track.name,
     label:<span className="rig-track" title={track.name}><TrackGlyph kind={trackKind(track.program??0,track.percussion??false)}/><span className="rig-track-name">{track.name}</span></span>,
   }))}/>;

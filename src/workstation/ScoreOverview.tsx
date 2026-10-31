@@ -42,7 +42,7 @@ const GridContent=memo(function GridContent({model,targetTrack,targetBar,focused
         <div role="rowheader" aria-colindex={1} className="score-overview-track" title={track.name}>{track.name}</div>
         {cells.map(bar=>{
           const content=track.cells[bar],selected=targetTrack===track.index&&targetBar===bar;
-          return <div key={bar} role="gridcell" aria-colindex={bar+2} aria-label={`${track.name}, measure ${bar+1}, ${content}`}
+          return <div key={bar} role="gridcell" aria-colindex={bar+2} aria-label={t('overview.cell_label',{track:track.name,measure:bar+1,content})}
             aria-selected={selected} tabIndex={focused.track===row&&focused.bar===bar?0:-1}
             data-overview-track={row} data-overview-bar={bar} data-content={content}
             className="score-overview-cell" style={{left:nameWidth+bar*cellSize}}
@@ -110,7 +110,7 @@ export function ScoreOverview({model,target,playbackBar,onSelect,onExit}:ScoreOv
     <div className="score-overview-content" style={{width:nameWidth+model.barCount*cellSize,height:(model.tracks.length+1)*cellSize}}>
       <GridContent model={model} targetTrack={target.track} targetBar={target.bar} focused={focused} columns={columns} rows={rows}
         onFocus={focusPosition} onSelect={select}/>
-      {playing&&<div role="img" aria-label={`Playback measure ${playbackBar+1}`} className="score-overview-playhead"
+      {playing&&<div role="img" aria-label={t('overview.playback_measure',{measure:playbackBar+1})} className="score-overview-playhead"
         style={{left:nameWidth+playbackBar*cellSize,height:model.tracks.length*cellSize}}/>}
     </div>
   </div>;

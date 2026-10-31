@@ -12,7 +12,7 @@ export function MeasureTransformPanel({score,bar,busy,onEdit}:MeasureTransformPa
     try {planMeasureMap(score.masterBars.length,command);setError('');onEdit(command);}catch(reason){setError(reason instanceof Error?reason.message:String(reason));}
   };
   return <details><summary>{t('editor.insert_remove_measures')}</summary><fieldset disabled={busy}>
-    <p>Measure {bar+1} of {score.masterBars.length}</p>
+    <p>{t('editor.measure_n_of',{measure:bar+1,total:score.masterBars.length})}</p>
     <label>{t('editor.measures_to_insert')}<input type="number" min={1} max={1000} step={1} value={count} onChange={event=>setCount(event.target.value)}/></label>
     <div className="pair"><button onClick={()=>submit({type:'insertMeasures',beforeBar:bar,count:count.trim()?Number(count):NaN})}>{t('editor.insert_before')}</button><button onClick={()=>submit({type:'insertMeasures',beforeBar:bar+1,count:count.trim()?Number(count):NaN})}>{t('editor.insert_after')}</button></div>
     <div className="pair"><label>{t('editor.first_measure_to_remove')}<input type="number" min={1} max={score.masterBars.length} step={1} value={first} onChange={event=>setFirst(event.target.value)}/></label><label>{t('editor.last_measure_to_remove')}<input type="number" min={1} max={score.masterBars.length} step={1} value={last} onChange={event=>setLast(event.target.value)}/></label></div>

@@ -97,10 +97,12 @@
 }
 
 /* Mute & Solo switches */
+/* Two equal switches in a row. A longer translated label (uppercase "VAIGISTA") that cannot fit its half widens its switch, and the pair then wraps to two rows. */
 .mixer-strip-switches {
-  display:grid; grid-template-columns:1fr 1fr; gap:6px; width:100%;
+  display:flex; flex-wrap:wrap; gap:6px; width:100%;
 }
 .mixer-switch {
+  flex:1 1 calc(50% - 3px); min-width:max-content; box-sizing:border-box;
   position:relative; display:inline-flex; align-items:center; justify-content:center;
   min-height:26px; padding:2px 6px; border:1px solid var(--tp-line-strong); border-radius:var(--tp-radius-s);
   background:var(--tp-raised); color:var(--tp-muted);
@@ -145,7 +147,7 @@
   border:1px solid var(--tp-line-subtle); border-radius:var(--tp-radius-m); background:var(--tp-raised);
 }
 .mixer-kit-name { font-size:12px; font-weight:600; color:var(--tp-text); text-align:center; }
-.mixer-kit-element .mixer-strip-switches { grid-template-columns:1fr; }
+.mixer-kit-element .mixer-strip-switches>.mixer-switch { flex-basis:100%; }
 .mixer-kit-fader { height:112px; }
 .mixer-kit-note { max-width:36ch; margin:0; font-size:11px; line-height:15px; color:var(--tp-muted); }
 

@@ -29,7 +29,7 @@ export function BarGesturePanel({score,track,staff,bar,busy,onEdit}:BarGesturePa
     setError('');onEdit({type:'setMasterBarGestures',bar,commonTime:values.commonTime,doubleBar:values.doubleBar,tripletFeel:values.tripletFeel,beaming:values.custom?{unit:values.unit,groups}:null});
   };
   return <details><summary>{t('editor.bar_gestures')}</summary><fieldset disabled={busy}>
-    <p>Measure {bar+1}</p>
+    <p>{t('editor.measure_n',{measure:bar+1})}</p>
     <label>{t('editor.clef_octave')}<select value={values.clefOttava} onChange={e=>setValues({...values,clefOttava:Number(e.target.value)})}>{octaves.map((name,value)=><option key={value} value={value}>{name}</option>)}</select></label>
     <button onClick={()=>onEdit({type:'setBarGestures',track,staff,bar,clefOttava:values.clefOttava})}>{t('editor.apply_clef_octave')}</button>
     <label>{t('editor.simile')}<select value={values.simile} onChange={e=>setValues({...values,simile:e.target.value as SimileKind})}><option value="none">{t('editor.simile_none')}</option><option value="single">{t('editor.simile_single')}</option><option value="double">{t('editor.simile_double')}</option></select></label>

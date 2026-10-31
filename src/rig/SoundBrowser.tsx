@@ -62,7 +62,7 @@ export function SoundBrowser({editing}:{editing:SoundEditing}) {
       </div>
       {entry&&<button type="button" {...busyGuard({busy,unavailable:!name.trim(),className:'rig-button',onClick:editing.renameChosen})}>{t('rig.rename_saved_sound')}</button>}
     </div>
-    {confirming&&entry&&<Dialog title={`Delete “${entry.name}”?`} onClose={editing.closeConfirm} actions={<><button type="button" data-autofocus onClick={editing.closeConfirm}>Cancel</button><button type="button" className="tp-danger" onClick={editing.deleteChosen}>{t('action.delete')}</button></>}>
+    {confirming&&entry&&<Dialog title={t('rig.delete_sound_title',{name:entry.name})} onClose={editing.closeConfirm} actions={<><button type="button" data-autofocus onClick={editing.closeConfirm}>{t('action.cancel')}</button><button type="button" className="tp-danger" onClick={editing.deleteChosen}>{t('action.delete')}</button></>}>
       <p>{t('rig.delete_sound_prompt',{name:entry.name})}</p>
     </Dialog>}
   </aside>;

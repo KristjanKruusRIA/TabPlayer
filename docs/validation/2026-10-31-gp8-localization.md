@@ -41,7 +41,7 @@ Run after the review fixes, in the `slice-w20` worktree.
 - **Surrounding style:** Maintained concise functional style matching surrounding workspace code.
 
 ## Limits
-- **Partial localization.** This slice does not localize every visible string. Still English: the input preferences panel in the View menu, the bodies of the ASCII import, MIDI import (hint, quantization, tuplets, voices, part summaries), Library, Batch convert (hint, status text, report), Export, Saved tunings and Command palette result lists (command titles), and error text from the project and controller layers. Rig, mixer, inspector, instrument and track settings surfaces are covered by `slice-w20b` below.
+- **Partial localization.** This slice does not localize every visible string. Still English: the bodies of the ASCII import, MIDI import (hint, quantization, tuplets, voices, part summaries), Library, Batch convert (hint, status text, report), Export, Saved tunings and Command palette result lists (command titles), and error text from the project and controller layers. Rig, mixer, inspector, instrument and track settings surfaces are covered by `slice-w20b` below.
 - **Unused catalog key.** `action.cancel` has no caller on this branch; `slice-w20b` uses it. All other previously unused keys were deleted; add them back with the dialog bodies that need them.
 - **Translation quality.** Estonian and German were written without a native-speaker review. Terms such as the Estonian note values and German "Fertigstellung aufheben" should be checked by a native speaker.
 - **Toolbar width at 960 px is unproven.** Longer Estonian and German labels could wrap or overflow the top bar. It could not be measured with real CSS because the app needs the Tauri backend and fails to open in a plain browser (`Could not open TabPlayer: Cannot read properties of undefined`). A desktop-test build at 960 px is still needed.
@@ -54,7 +54,7 @@ Run after the review fixes, in the `slice-w20` worktree.
 
 ## Extended Coverage (Slice W20b: Mixer, Rig, Instruments, Workstation & Editor Panels)
 
-Extended localization to all remaining user-visible interface strings across the Mixer view, Sound Rig hardware view, Instrument and live playback surfaces, Workstation panels, and all Editor panels / Inspector tasks. Full Catalan-free, natural Estonian (`et`) and German (`de`) translations were added for every message key alongside the canonical English (`en`) strings.
+Extended localization to the Mixer view, the Sound Rig hardware view, the Instrument and live playback surfaces, the Workstation panels, and the Editor panels and Inspector tasks listed below. Estonian (`et`) and German (`de`) translations were added for every message key alongside the canonical English (`en`) strings. This is not every visible string: what is still English is listed under "Still English after W20c" at the end of this file.
 
 ### What Moved to the Catalogs
 - **Mixer (`src/mixer/MixerView.tsx`, `src/audio/MasterPanel.tsx`):**
@@ -103,3 +103,51 @@ Extended localization to all remaining user-visible interface strings across the
 - **Musical chord symbols & pitch notation:** Chord diagrams and names (`Am7`, `C#dim`, `Gsus4`), note pitch identifiers (`C4`, `F#3`), scale names (`Major`, `Dorian`), and dynamic symbols (`ppp`, `pp`, `p`, `mp`, `mf`, `f`, `ff`, `fff`).
 - **Direction notation terms:** Traditional Italian musical direction markers (`Fine`, `Segno`, `Coda`, `D.C.`, `D.S.`, `To Coda`).
 - **alphaTab engraving canvas:** Score canvas glyphs, tabs, noteheads, and notation elements rendered internally by alphaTab.
+
+## Review fixes (Slice W20c)
+
+A review rejected the W20b extension. This slice fixes what it found. English text and behavior are unchanged; no audio, undo or edit-log change.
+
+### Wired to catalog keys that already existed
+- `EditorPanel`: Set note, Remove note, Apply rhythm, Make rest, Delete beat, Remove measure, Edit chord diagram, Browse scales (`editor.set_note` and the rest). Before this they were fixed English even though the keys existed, so a screen in Estonian or German still showed English buttons.
+- `SoundBrowser`: the delete-sound dialog title (`rig.delete_sound_title`) and its Cancel button (`action.cancel`).
+- `InstrumentView`: view mode names (`instruments.mode_*`) and the default caption and empty text (`instruments.caption_playing`, `instruments.empty_playing`).
+- `SourcePicker`: the track strip label (`workspace.track`).
+
+### Newly localized (new keys in all three catalogs)
+Range, clipboard (including the paste special filter labels, which W20b listed as moved but were still English), technique, structure, bar gesture and measure transform panels (measure, staff, voice, lane and scope labels, "String N", the four local input errors, the note controls intro, Bend and Whammy curve labels); author defaults status; notation entry status messages; partial capo and banjo drone messages; note audio errors and notes (the whole message is one catalog entry with the field name as a parameter, so word order can differ per language); drum kit picker text; score overview cell and playhead labels; instrument fretboard detail line and drum kit title; rig stage: Cabinet model, Microphone, Microphone output, Stereo, Mono, Amp model, the second pedalboard title and label, and the accessible names of the footswitch and the Copy, Paste, Duplicate, Remove duplicate, Move earlier and Move later buttons (they overrode the visible localized text before). Inspector: the two group labels, the chord line, the beat state line and the quarter notes remaining line.
+
+Strings that the engine throws or commands parse were not changed. The notation entry panel still passes through `No free string ...` from the entry engine unchanged, because the panel checks it with `startsWith`. Local `Error` messages thrown by the clipboard (`Copy music before pasting.`) are still English; they are caught and shown, but were not in this review.
+
+### Estonian and German wording
+- Estonian: `Kolmekümnekahendikud`, `fermaat`, `flažolett`/`Flažoleti`, `mediaator` for the pick, one beaming term (`noodirühmitus`) instead of `Balkeni`, `Oktavivahemik` instead of `Oktavipuhver`, `Mediaatoritõmbed ja akordilöögid` instead of `roopimine`, `Jäta alles`, `Muutemärk`, `ründeaeg`/`vabastusaeg` for compressor attack and release, `Tehase kõlad`, `Varem`/`Hiljem`, and the focus note now says focusing lowers what you hear instead of muting it. English words in parentheses were dropped from the Estonian labels they were attached to.
+- German: `Tapping mit der linken Hand`, `Finger der Griffhand`/`Finger der Anschlaghand`, `Explizites Bogenziel`, `Haltebogen` everywhere for a tie (no `Bindung`), `Früher` for the short earlier label.
+- The string recount legend now reads as a change: `Von {from} auf {to} Saiten` and `Muuda {from} keelelt {to} keelele`.
+- The byte order mark is removed from all three catalogs.
+- `editor.key_flats` and `editor.key_sharps` in Estonian are left as `{count} bemolli` and `{count} dieesi`, which is the partitive singular used after a number. They were not changed.
+
+**These translations are not native-reviewed.** They were written and corrected from a reviewer's notes. A native Estonian and a native German speaker should read the catalogs before release.
+
+### Fit in narrow places
+- Mute/Solo switches (`.mixer-switch`, `src/mixer/mixer.css`): the uppercase Estonian label `VAIGISTA` is wider than half of a 156 px channel strip. The pair is now a wrapping flex row: each switch takes half the strip as before, and a switch whose label does not fit widens and the pair stacks. English `MUTE` and `SOLO` still take half each.
+- Rig stage actions (`src/rig/rig.css`, narrow-height rule): the head and its actions stay `nowrap` (an existing test pins that, and it keeps the amp from dropping a row). Longer labels could run past the head, so the model strip now gives way first (`flex-shrink:1000`), and only if it has nothing left do the actions shrink, each clipping its label with an ellipsis. In that narrow rule the short labels (`Kopeeri`, `Varem`) are already shown, so clipping is a last resort. English layout is not changed.
+- **Fit was not measured in the real app.** The app needs the Tauri backend and does not open in a plain browser, and jsdom does no layout. The CSS is written to be safe by construction; a desktop-test build with Estonian and German at 960 px is still needed to confirm it.
+
+### Evidence
+Run in the `slice-w20c` worktree on 2026-10-31 (`--testTimeout=60000`).
+- **TypeScript (`tsc --noEmit -p .`):** no errors.
+- **`src/i18n src/editor src/rig src/mixer src/instruments src/workstation src/EditorPanel.test.tsx src/App.test.tsx`:** 89 files passed, 1 skipped; 1341 tests passed, 1 skipped, none failed.
+- **`src/audio src/ui src/workspace`:** 83 files passed. Seven tests in `src/audio/plan.test.ts` failed because this worktree has no `.analysis/compatibility` fixtures (file not found); they do not touch localization.
+- **New `src/i18n/surfaces.test.tsx`:**
+  - *Surfaces in Estonian and German.* The editor panel, mixer, sound rig and instrument view are each rendered in English first (to prove the sample names are really on the page), then in `et` and `de`. The test asserts that a sample of English button, label and group names (for example `Set note`, `Remove measure`, `Browse scales`, `Mute`, `Copy pedal: Amp`, `Move Amp later`, `Guitar fretboard`, `Instrument view mode`, the capo detail line) is absent, and that the catalog translation of a few keys is present. A mutation check (putting `Browse scales` back into the editor) made the test fail in `et`, in `de` and in the literal guard.
+  - *Literal guard.* Source files of these surfaces are scanned for the fixed English literals that were removed (buttons, aria labels, status messages, scope options, filter labels, rig labels). The guard fails if one comes back.
+  - *Catalog encoding and wording.* No byte order mark in `en.ts`, `et.ts`, `de.ts`; the corrected Estonian and German terms stay corrected.
+  - These tests are about names and text. They do not check layout.
+- **Not run:** the desktop-test build and the Windows, macOS and Linux CI. The CSS changes above were not measured in a real window.
+
+### Still English after W20c
+- Inspector Sound task (`src/audio/SoundPanel.tsx`) in full, including its `Second pedalboard` section and the `board.name` English prefix it shares with the rig; the rig's knob, fader, graphic EQ band and microphone placement labels that come from the control metadata in `sound-model.ts`.
+- `CurveEditor` (bend and whammy graphs, preset names, point labels) and the active technique pills at the top of the inspector (`Bend`, `Slide`, `PM`, ...).
+- The drum kit difference list inside the drum kit picker (`kitDifferences`) and the partial capo and banjo drone descriptions in the instrument detail line (`describePartialCapo`, `describeBanjoDrone`): they are built in the editor layer and stay English.
+- Clipboard and range panel errors thrown by the engine or the project layer.
+- Everything listed under Limits above that is not named in W20b.

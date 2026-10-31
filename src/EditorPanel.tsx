@@ -265,11 +265,11 @@ export function EditorPanel({
                 <span className="tp-context-primary">{selectionSummary}</span>
                 <span className="tp-context-meta">
                   {master.timeSignatureNumerator}/{master.timeSignatureDenominator} · {score.tempo} BPM
-                  {beat?.chord?.name ? ` · Chord ${beat.chord.name}` : ''}
+                  {beat?.chord?.name ? ` · ${t('editor.context_chord', { name: beat.chord.name })}` : ''}
                 </span>
               </div>
               {activeTechniques.length > 0 && (
-                <div className="tp-context-pills" aria-label="Active note techniques">
+                <div className="tp-context-pills" aria-label={t('editor.active_note_techniques')}>
                   {activeTechniques.map(tag => (
                     <span key={tag} className="tp-context-pill">
                       {tag}
@@ -277,7 +277,7 @@ export function EditorPanel({
                   ))}
                 </div>
               )}
-              <div className="tp-context-filter" role="group" aria-label="Inspector context">
+              <div className="tp-context-filter" role="group" aria-label={t('editor.inspector_context')}>
                 {CONTEXT_SCOPES.map(([scope]) => {
                   const labels: Record<InspectorContextScope, string> = { all: t('editor.scope_all'), note: t('editor.scope_note'), beat: t('editor.scope_beat'), measure: t('editor.scope_measure'), staff: t('editor.scope_staff'), selection: t('editor.scope_selection') };
                   return (
@@ -381,15 +381,11 @@ export function EditorPanel({
                         className="primary"
                         disabled={!beat || staff.isPercussion || !staff.tuning.length}
                         onClick={() => onEdit({ type: 'setNote', target, string, fret })}
-                      >
-                        Set note
-                      </button>
+                      >{t('editor.set_note')}</button>
                       <button
                         disabled={!beat || !staff.tuning.length}
                         onClick={() => onEdit({ type: 'removeNote', target, string })}
-                      >
-                        Remove note
-                      </button>
+                      >{t('editor.remove_note')}</button>
                     </div>
                     <p className="muted">{t('editor.chord_hint')}</p>
                   </div>
@@ -449,32 +445,25 @@ export function EditorPanel({
                           graceType,
                         })
                       }
-                    >
-                      Apply rhythm
-                    </button>
-                    <button disabled={!beat} onClick={() => onEdit({ type: 'setRest', target })}>
-                      Make rest
-                    </button>
+                    >{t('editor.apply_rhythm')}</button>
+                    <button disabled={!beat} onClick={() => onEdit({ type: 'setRest', target })}>{t('editor.make_rest')}</button>
                   </div>
                   <p className="muted">
                     {!beat
-                      ? 'Empty voice insertion'
+                      ? t('editor.beat_state_empty')
                       : beat.isFullBarRest
-                        ? 'Full-measure rest'
+                        ? t('editor.beat_state_full_rest')
                         : beat.isRest
-                          ? 'Explicit rest'
-                          : 'Pitched beat'}
-                    {beat?.isRest && !beat.isFullBarRest ? ' · Use a single whole rest for a full-measure rest.' : ''}
+                          ? t('editor.beat_state_explicit_rest')
+                          : t('editor.beat_state_pitched')}
+                    {beat?.isRest && !beat.isFullBarRest ? ` · ${t('editor.full_rest_hint')}` : ''}
                   </p>
                   <p className="muted">
-                    {master.timeSignatureNumerator}/{master.timeSignatureDenominator} · {remaining / 960} quarter notes
-                    remaining
+                    {master.timeSignatureNumerator}/{master.timeSignatureDenominator} · {t('editor.quarters_remaining', { count: remaining / 960 })}
                   </p>
                   <div className="pair">
                     <button onClick={() => onEdit({ type: 'insertBeat', target, duration, dots })}>{t('editor.insert_beat')}</button>
-                    <button disabled={!beat} onClick={() => onEdit({ type: 'deleteBeat', target })}>
-                      Delete beat
-                    </button>
+                    <button disabled={!beat} onClick={() => onEdit({ type: 'deleteBeat', target })}>{t('editor.delete_beat')}</button>
                   </div>
                 </div>
                 <div className="pair" hidden={!showSection(['measure'])}>
@@ -482,21 +471,15 @@ export function EditorPanel({
                   <button
                     disabled={score.masterBars.length === 1}
                     onClick={() => onEdit({ type: 'removeMeasure', bar: target.bar })}
-                  >
-                    Remove measure
-                  </button>
+                  >{t('editor.remove_measure')}</button>
                 </div>
               </fieldset>
             </fieldset>
             <div className="inspector-musical-tools" hidden={!showSection(['beat', 'note'])}>
               <h3>{t('editor.musical_tools')}</h3>
               <div className="pair">
-                <button disabled={busy || !beat} onClick={onChord}>
-                  Edit chord diagram
-                </button>
-                <button disabled={controlsBusy} onClick={onScales}>
-                  Browse scales
-                </button>
+                <button disabled={busy || !beat} onClick={onChord}>{t('editor.edit_chord_diagram')}</button>
+                <button disabled={controlsBusy} onClick={onScales}>{t('editor.browse_scales')}</button>
               </div>
               <p className="muted">{beat?.chord?.name || t('editor.no_chord_diagram')}</p>
             </div>

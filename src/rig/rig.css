@@ -314,6 +314,10 @@
   .sound-view .rig-stage-head .tp-segmented { flex-wrap:nowrap; }
   .sound-view .rig-stage-actions { flex-wrap:nowrap; gap:4px; }
   .sound-view .rig-stage-actions :is(.rig-button,.rig-switch) { padding-left:7px; padding-right:7px; }
+  /* Longer translated labels: the model strip gives way first (it scrolls), and only when it has nothing left to give do the actions shrink, each clipping its label with an ellipsis instead of running past the head. With English labels nothing here changes. */
+  .sound-view .rig-stage-head>.rig-field { flex-shrink:1000; }
+  .sound-view .rig-stage-head>.rig-stage-actions { flex:0 1 auto; min-width:0; }
+  .sound-view .rig-stage-actions :is(.rig-button,.rig-switch) { min-width:0; overflow:hidden; text-overflow:ellipsis; }
 }
 /* With room across, the foot's controls stay on one line in a short window: the status gives way first. */
 @container (min-width:1100px) {

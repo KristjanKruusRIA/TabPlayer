@@ -15,6 +15,6 @@ A track's cabinet can now use an impulse response the user imports. The row stay
 - **Hot path:** the first reviews rejected tail cost, all tracks working in one callback and a startup failure. A fresh review approved 4354d10, with fuzzing over 5.59M frames at a worst error of 4.7e-6 against direct convolution.
 
 ## Limits
-- **Why partial:** no responses ship with the app, and the new rig view does not show this control yet.
+- **Why partial:** the target's amp topology and routing breadth remain unproved. Bundled responses now ship and the rig view shows the control ([bundled cabinet IRs](2026-10-31-bundled-cabinet-irs.md)).
 - **Glitches:** a kernel join and a wake with unequal channels each do their work in one frame, so 8 tracks together can glitch once at small buffers.
 - **Platforms:** macOS and Linux were not run, and the sound was not judged by ear.

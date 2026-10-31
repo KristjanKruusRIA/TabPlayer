@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import type { model } from '@coderline/alphatab';
 import type { EditCommand } from '../project';
-import type { StringCountKeep } from '../edit-types';
+import type { StringCountKeep, TrackSound } from '../edit-types';
+import { completeSound } from '../document-settings';
+import { soundPreset } from '../audio/sound-model';
 import { midiPrograms } from '../midi-programs';
 import { formatTuning, parseTuning } from '../tuning';
 import { TuningInput } from '../TuningInput';
@@ -9,10 +11,12 @@ import { trackIdentity } from '../engine';
 import type { TuningAudition } from '../audio/audition';
 import { NotationTrackControls } from '../editor/NonTabPanel';
 import { trackColorHex } from '../track-color';
+import { busySelect } from '../ui';
+import { drumKitFor, drumKits, kitDifferences, sharedSounds } from '../editor/drum-kits';
 import './track-panels.css';
 
-export function TrackSettingsPanel({score,selected,busy,locked=false,onEdit,onAudition}: {
-  score:model.Score;selected:number;busy:boolean;/** Finalized: edits are disabled, but tuning audition is not. */locked?:boolean;onEdit:(command:EditCommand)=>void;onAudition?:TuningAudition;
+export function TrackSettingsPanel({score,selected,busy,locked=false,onEdit,onAudition,sound}: {
+  score:model.Score;selected:number;busy:boolean;/** Finalized: edits are disabled, but tuning audition is not. */locked?:boolean;onEdit:(command:EditCommand)=>void;onAudition?:TuningAudition;/** The selected track's sound settings, whose drum kit a drum track shows. */sound?:TrackSound;
 }):React.JSX.Element {
   const current=score.tracks[selected];const pitches=formatTuning(current.staves[0].tuning);
   const savedName=current.staves[0].stringTuning.name;
@@ -31,8 +35,9 @@ export function TrackSettingsPanel({score,selected,busy,locked=false,onEdit,onAu
       <button disabled={locked||selected===0} onClick={()=>onEdit({type:'moveTrack',track:selected,to:selected-1})}>Move track up</button>
       <button disabled={locked||selected===score.tracks.length-1} onClick={()=>onEdit({type:'moveTrack',track:selected,to:selected+1})}>Move track down</button>
       <button disabled={locked} onClick={()=>onEdit({type:'duplicateTrack',track:selected})}>Duplicate track</button>
-      <details><summary>Selected instrument</summary><label>Track name<input value={trackName} onChange={e=>setTrackName(e.target.value)}/></label><label>Track short name<input value={shortName} onChange={e=>setShortName(e.target.value)}/></label><label>Track MIDI instrument<select value={program} onChange={e=>setProgram(Number(e.target.value))}>{midiPrograms.map((name,index)=><option key={index} value={index}>{index+1}. {name}</option>)}</select></label><button disabled={locked} onClick={()=>onEdit({type:'setTrackInfo',track:selected,name:trackName,shortName,program})}>Apply instrument settings</button><label>Track color<input type="color" value={color} onChange={e=>setColor(e.target.value)}/></label><button disabled={locked||color===trackColorHex(current.color)} onClick={()=>onEdit({type:'setTrackColor',track:selected,color})}>Apply track color</button></details>
+      <details><summary>Selected instrument</summary><label>Track name<input value={trackName} onChange={e=>setTrackName(e.target.value)}/></label><label>Track short name<input value={shortName} onChange={e=>setShortName(e.target.value)}/></label>{!current.isPercussion&&<label>Track MIDI instrument<select value={program} onChange={e=>setProgram(Number(e.target.value))}>{midiPrograms.map((name,index)=><option key={index} value={index}>{index+1}. {name}</option>)}</select></label>}<button disabled={locked} onClick={()=>onEdit({type:'setTrackInfo',track:selected,name:trackName,shortName,program})}>Apply instrument settings</button><label>Track color<input type="color" value={color} onChange={e=>setColor(e.target.value)}/></label><button disabled={locked||color===trackColorHex(current.color)} onClick={()=>onEdit({type:'setTrackColor',track:selected,color})}>Apply track color</button></details>
     </fieldset>
+    {current.isPercussion&&<DrumKitPicker trackId={trackIdentity(current)} sound={sound} busy={busy||!!locked} onEdit={onEdit}/>}
     <TuningInput label="Tuning (notes, high to low)" presetLabel="Tuning preset" busy={busy} disabled={locked||current.isPercussion||!current.staves[0].tuning.length} stringCount={strings} placeholder="E4 B3 G3 D3 A2 E2" value={tuning} tuningName={tuningName} onTuningNameChange={setTuningName} revision={current} error={tuningError} inputRef={tuningInput} onAudition={onAudition&&((pitches,strum)=>onAudition({trackId:trackIdentity(current)},pitches,strum))} onChange={notes=>{setTuning(notes);setTuningError(null);}} onCommit={(notes,changed)=>{if(locked||busy)return;const currentTuning=current.staves[0].tuning;const nextTuning=currentTuning.map((p,i)=>changed.includes(i)?notes[i]:p);const same=nextTuning.length===currentTuning.length&&nextTuning.every((p,i)=>p===currentTuning[i]);if(same)return;setTuningError(null);setTuning(formatTuning(nextTuning));onEdit({type:'setTuning',track:selected,tuning:nextTuning,tuningName:''});}}/>
     <fieldset disabled={busy}>
       {recount&&<fieldset className="string-count"><legend>{strings} to {typed} strings</legend>
@@ -47,4 +52,27 @@ export function TrackSettingsPanel({score,selected,busy,locked=false,onEdit,onAu
       </details>
     </fieldset>
     <NotationTrackControls busy={busy||locked} onEdit={onEdit}/></aside>;
+}
+
+/** The drum kit belongs to the track's sound, so a choice is one undoable `setTrackSound` edit that leaves the rest of the sound as it is. Only kits
+ * the sound bank really carries are offered, the Standard kit is stored as no kit, and choosing the kit that already plays records nothing.
+ * The select stays focusable while busy (`busySelect`). */
+function DrumKitPicker({trackId,sound,busy,onEdit}:{trackId:string;sound?:TrackSound;busy:boolean;onEdit:(command:EditCommand)=>void}):React.JSX.Element {
+  const kit=drumKitFor(sound?.drumKit),shared=sharedSounds();
+  const choose=(program:number)=>{
+    if(busy||program===kit.program)return;
+    const next=completeSound(structuredClone(sound??soundPreset('gm')));
+    if(program===0)delete next.drumKit;else next.drumKit=program;
+    onEdit({type:'setTrackSound',trackId,sound:next});
+  };
+  return <section className="drum-kit" aria-label="Drum kit settings">
+    <label>Drum kit<select value={kit.program} {...busySelect(busy)} onChange={e=>choose(Number(e.target.value))}>{drumKits.map(option=><option key={option.program} value={option.program}>{option.label}</option>)}</select></label>
+    <p className="muted">{kit.changes.length?`${kit.label} changes ${kitDifferences(kit).join(', ')}.`:'Standard is the reference kit.'}</p>
+    <details><summary>Which drum hits sound different</summary>
+      <p className="muted">Every drum key has its own sound. The kits differ only where listed.</p>
+      <ul>{drumKits.filter(option=>option.changes.length).map(option=><li key={option.program}><strong>{option.label}</strong>: {kitDifferences(option).join(', ')}</li>)}</ul>
+      <p className="muted">These notations play the same sound, so they differ on the page only (the bank has no separate rim shot, choke or half-open sample):</p>
+      <ul>{shared.map(group=><li key={group.key}>{group.labels.join(' = ')}</li>)}</ul>
+    </details>
+  </section>;
 }

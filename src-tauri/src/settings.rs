@@ -135,7 +135,15 @@ pub struct TrackSound {
     pub effects: FxSettings,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub locked: bool,
+    /// The drum kit a percussion track plays, as the General MIDI program that selects it in the
+    /// sound bank. Left out for the Standard kit, so a file that never chose one is unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub drum_kit: Option<u8>,
 }
+/// The drum kits beyond Standard that the bundled sound bank carries (Room, Jazz, Brush), by the
+/// program that selects each. `src/audio/drum-kits.json` lists the same, and a test renders the bank
+/// to keep both true.
+pub const DRUM_KIT_PROGRAMS: [u8; 3] = [8, 32, 40];
 impl Default for TrackSound {
     fn default() -> Self {
         Self {
@@ -143,11 +151,18 @@ impl Default for TrackSound {
             preset_id: "gm".into(),
             effects: FxSettings::default(),
             locked: false,
+            drum_kit: None,
         }
     }
 }
 impl TrackSound {
     pub fn validate(&self) -> Result<(), String> {
+        if self
+            .drum_kit
+            .is_some_and(|kit| !DRUM_KIT_PROGRAMS.contains(&kit))
+        {
+            return Err("Unknown drum kit.".into());
+        }
         if !["clean", "crunch", "lead", "bass", "gm"].contains(&self.preset_id.as_str()) {
             return Err("Unknown sound preset.".into());
         }

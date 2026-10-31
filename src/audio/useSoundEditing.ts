@@ -32,7 +32,7 @@ export function useSoundEditing({trackId,sound,onEdit,playback,busy=false,shown=
   const current=completeSound(sound??soundPreset('gm'));const [devices,setDevices]=useState<AudioDeviceInfo[]>([]);const [error,setError]=useState<string|null>(null);
   useEffect(()=>{let alive=true;if(playback)void playback.devices().then(items=>{if(alive)setDevices(items);}).catch(e=>{if(alive)setError(String(e));});return()=>{alive=false;};},[playback]);
   /** `sound` with the track's lock: the lock belongs to the track, not to the sound, so presets, factory and saved sounds, pastes and previews all keep it. It is left out when off, so a file that never locked a track is unchanged. */
-  const withLock=(sound:TrackSound,locked:boolean=!!current.locked):TrackSound=>{const next={...sound};if(locked)next.locked=true;else delete next.locked;return next;};
+  const withLock=(sound:TrackSound,locked:boolean=!!current.locked):TrackSound=>{const next={...sound};if(locked)next.locked=true;else delete next.locked;/* The drum kit belongs to the track too, so a preset, factory or saved sound keeps it. */if(current.drumKit!==undefined)next.drumKit=current.drumKit;else delete next.drumKit;return next;};
   /** Records `next` as one undoable edit, with the track's lock unless `locked` says otherwise; resolves to whether it was accepted. */
   const record=(next:TrackSound,locked?:boolean)=>Promise.resolve(onEdit({type:'setTrackSound',trackId,sound:withLock(next,locked)})).then(()=>true,e=>{setError(String(e));return false;});
   // Hosts may give a playback surface without sound previews.

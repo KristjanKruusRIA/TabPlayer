@@ -474,7 +474,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
       </nav>
       <section ref={leftPane} className="workstation-left" aria-label="Track tools" hidden={!leftShown}>
         <nav aria-label="Track tools"><button aria-pressed={leftTask==='track'} onClick={()=>showTask('track')}>Track</button><button aria-pressed={leftTask==='sound'} onClick={()=>showTask('sound')}>Sound</button><button aria-pressed={leftTask==='backing'} onClick={()=>showTask('backing')}>Backing</button></nav>
-        <div className="workstation-task" hidden={leftTask!=='track'}><TrackSettingsPanel score={state.score} selected={target.track} busy={controlsBusy} locked={editLocked} onEdit={edit} onAudition={auditionTuning}/></div>
+        <div className="workstation-task" hidden={leftTask!=='track'}><TrackSettingsPanel score={state.score} selected={target.track} busy={controlsBusy} locked={editLocked} onEdit={edit} onAudition={auditionTuning} sound={state.settings.sounds[trackId]}/></div>
         <div className="workstation-task" hidden={leftTask!=='sound'}>
         {view==='score'&&<SoundPanel trackId={trackId} sound={state.settings.sounds[trackId]} onEdit={command=>controller.edit(command)} playback={player} busy={editBusy} shown={leftShown&&leftTask==='sound'}/>}
         <InterpretationPanel trackId={trackId} mix={state.settings.mixes[trackId]} stringed={selectedTrack.staves.some(staff=>staff.isStringed)} busy={controlsBusy} onEdit={command=>controller.edit(command)}/>

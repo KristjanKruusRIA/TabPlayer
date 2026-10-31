@@ -278,6 +278,8 @@ impl DropTokens {
                                 "gp3",
                                 "gp4",
                                 "gp5",
+                                "ptb",
+                                "tef",
                                 "xml",
                                 "musicxml",
                                 "mxl",
@@ -354,12 +356,22 @@ mod drop_tests {
                     "one.gp".into(),
                     "unsupported.txt".into(),
                     "three.MUSICXML".into(),
+                    "song.PTB".into(),
+                    "song.tef".into(),
                 ],
                 now,
                 true,
             )
             .unwrap();
-        assert_eq!(event.count, 3);
+        assert_eq!(event.count, 5);
+        assert_eq!(
+            tokens.take(&event.drop_token, 3, now).unwrap(),
+            PathBuf::from("song.PTB")
+        );
+        assert_eq!(
+            tokens.take(&event.drop_token, 4, now).unwrap(),
+            PathBuf::from("song.tef")
+        );
         assert_eq!(
             tokens.take(&event.drop_token, 0, now).unwrap(),
             PathBuf::from("one.gp")

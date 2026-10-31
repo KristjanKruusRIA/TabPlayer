@@ -15,24 +15,23 @@ export class TablEditError extends Error {
 
 export const TEF_LIMITS = {
   fileBytes: IMPORT_FILE_BYTES,
-  measures: 4000,
-  instruments: 32,
+  measures: 1000,
+  instruments: 16,
   stringsPerInstrument: 12,
-  events: 100000,
+  events: 20000,
   readingListItems: 2000,
 } as const;
 
 /** Header pointer and field offsets, from the MuseScore reader (read for facts). */
-const OFFSET = { tbed: 0x38, contents: 0x3c, title: 0x40, subtitle: 0x44, comment: 0x48, notes: 0x4c, measures: 0x5c, instruments: 0x60, readingList: 0x80, link: 0x84, copyright: 0x8c, oldNum: 0xca } as const;
+const OFFSET = { tbed: 0x38, contents: 0x3c, title: 0x40, subtitle: 0x44, comment: 0x48, notes: 0x4c, measures: 0x5c, instruments: 0x60, readingList: 0x80, link: 0x84, copyright: 0x8c, format: 0xcc } as const;
 const HEADER_BYTES = 0xd0;
 const MEASURE_BYTES = 8;
 const INSTRUMENT_BYTES = 68;
 const END_OF_CONTENTS = 0xffffffff;
 const TBED = 0x64656274;
-const TBED_REVERSED = 0x74626564;
 
 export interface TefInstrument {
-  strings: number; midi: number; capo: number; name: string;
+  strings: number; midi: number; /** Read but not applied: whether the stored tuning already includes it is not known. */ capo: number; name: string;
   /** MIDI pitch of each open string, string 1 (highest, top tab line) first. */
   tuning: number[];
   /** Zero-based index of this instrument's first string among all strings in the file. */
@@ -58,7 +57,7 @@ export interface TefDocument {
 export function isTablEditBytes(bytes: Uint8Array) {
   if (bytes.length < OFFSET.tbed + 4) return false;
   const word = (bytes[OFFSET.tbed] | bytes[OFFSET.tbed + 1] << 8 | bytes[OFFSET.tbed + 2] << 16 | bytes[OFFSET.tbed + 3] << 24) >>> 0;
-  return word === TBED || word === TBED_REVERSED;
+  return word === TBED;
 }
 
 function tooLarge() { return new TablEditError('This TablEdit file is too large to import safely (too many notes or measures).'); }
@@ -107,12 +106,11 @@ function read(r: Reader): TefDocument {
   const report = new ImportReport();
   if (r.bytes.length < OFFSET.tbed + 4) throw new TablEditError('This is not a TablEdit file (too short).');
   const tbed = r.u32At(OFFSET.tbed);
-  if (tbed === TBED_REVERSED) throw new TablEditError('This TablEdit file uses the byte-swapped (big-endian) layout, which is not supported.');
   if (tbed !== TBED) throw new TablEditError('This is not a TablEdit file (missing "tbed" marker).');
   if (r.bytes.length < HEADER_BYTES) throw new TablEditError('The TablEdit file is truncated or damaged (header incomplete).');
   const tempo = r.u16At(6);
   if (r.u32At(16) !== 0) throw new TablEditError('Protected TablEdit files (with a security code) cannot be opened.');
-  if (r.u16At(OFFSET.oldNum) !== 4 || (r.u16At(OFFSET.oldNum + 2) >> 8) !== 10)
+  if ((r.u16At(OFFSET.format) >> 8) !== 10)
     throw new TablEditError('This TablEdit file version is not supported (only TablEdit 3.x files are).');
 
   const pointer = (offset: number) => {
@@ -120,8 +118,10 @@ function read(r: Reader): TefDocument {
     if (p >= r.bytes.length) throw new TablEditError('The TablEdit file is truncated or damaged (a pointer lies outside the file).');
     return p;
   };
-  const title = r.textAt(pointer(OFFSET.title)), subtitle = r.textAt(pointer(OFFSET.subtitle)), copyright = r.textAt(pointer(OFFSET.copyright));
-  report.bump('comment, notes and link fields', [OFFSET.comment, OFFSET.notes, OFFSET.link].filter(o => r.textAt(pointer(o)) !== '').length);
+  // Text fields are optional metadata: a bad pointer or size loses the text, not the song.
+  const optionalText = (offset: number) => { try { const p = r.u32At(offset); return p < r.bytes.length ? r.textAt(p) : ''; } catch { report.bump('unreadable text fields'); return ''; } };
+  const title = optionalText(OFFSET.title), subtitle = optionalText(OFFSET.subtitle), copyright = optionalText(OFFSET.copyright);
+  report.bump('comment, notes and link fields', [OFFSET.comment, OFFSET.notes, OFFSET.link].filter(o => optionalText(o) !== '').length);
 
   const measuresAt = pointer(OFFSET.measures), instrumentsAt = pointer(OFFSET.instruments), contentsAt = pointer(OFFSET.contents);
   if (!measuresAt || !instrumentsAt || !contentsAt) throw new TablEditError('The TablEdit file has no music (a required table is missing).');

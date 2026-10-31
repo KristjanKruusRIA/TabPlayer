@@ -4,6 +4,7 @@ import { isTablEditBytes, parseTablEdit, TablEditError, TEF_LIMITS } from './tab
 import { importTablEdit } from './tabledit-score';
 import { basicTef, buildTef, durationCode, TEF_OFFSETS, type TefFx } from './tabledit-fixture';
 import { buildDocument } from '../engine';
+import { buildPlaybackPlan } from '../audio/plan';
 import { adoptAdmittedBase, admitDocumentBase } from '../interchange/archive-gate';
 import type { Project } from '../project';
 
@@ -15,6 +16,13 @@ const projectFor = (bytes: Uint8Array, sha = 'b'.repeat(64)): Project => ({
   base: { kind: 'file', filename: 'synthetic.tef', bytesBase64: toBase64(bytes), sha256: sha },
 });
 const beatsOf = (score: model.Score, bar = 0, voice = 0, track = 0) => score.tracks[track].staves[0].bars[bar].voices[voice].beats;
+
+function playedBars(score: model.Score) {
+  const handler: midi.IMidiFileHandler = { addTickShift() {}, addTimeSignature() {}, addRest() {}, addNote() {}, addControlChange() {}, addProgramChange() {}, addTempo() {}, addBend() {}, addNoteBend() {}, finishTrack() {} };
+  const generator = new midi.MidiFileGenerator(score, settings, handler);
+  generator.generate();
+  return generator.tickLookup.masterBars.map(m => m.masterBar.index);
+}
 
 function prng(seed: number) { let s = seed >>> 0; return () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 0x100000000; }; }
 
@@ -46,10 +54,12 @@ describe('TablEdit parsing', () => {
   it('refuses wrong, protected, reversed, old and damaged files with clear messages', () => {
     expect(() => parseTablEdit(new Uint8Array())).toThrow(/not a TablEdit file/);
     expect(() => parseTablEdit(new Uint8Array(0x100))).toThrow(/missing "tbed"/);
-    expect(() => parseTablEdit(buildTef({ reversedTbed: true }))).toThrow(/byte-swapped/);
+    expect(isTablEditBytes(buildTef({ reversedTbed: true }))).toBe(false);
+    expect(() => parseTablEdit(buildTef({ reversedTbed: true }))).toThrow(/missing "tbed"/);
     expect(() => parseTablEdit(buildTef({ securityCode: 5 }))).toThrow(/Protected/);
     expect(() => parseTablEdit(buildTef({ formatHigh: 8 }))).toThrow(/version is not supported/);
-    expect(() => parseTablEdit(buildTef({ oldNum: 3 }))).toThrow(/version is not supported/);
+    // The old-number word is not sourced as a gate, so a file with another value still opens.
+    expect(parseTablEdit(buildTef({ oldNum: 3 })).measures).toHaveLength(2);
     expect(() => parseTablEdit(buildTef({ instruments: [{ strings: 0 }] }))).toThrow(/0 strings/);
     expect(() => parseTablEdit(buildTef({ instruments: [{ strings: 13 }] }))).toThrow(/13 strings/);
     expect(() => parseTablEdit(buildTef({ measures: [] }))).toThrow(/no measures/);
@@ -126,7 +136,7 @@ describe('TablEdit parsing', () => {
   });
 
   it('refuses tracks x measures that would exhaust memory', () => {
-    const measures = Array.from({ length: 4000 }, () => ({ num: 4, den: 4 }));
+    const measures = Array.from({ length: TEF_LIMITS.measures }, () => ({ num: 4, den: 4 }));
     const instruments = Array.from({ length: 4 }, () => ({}));
     const events = instruments.map((_, i) => ({ position: 0, string: 1 + i * 6, fret: 0 }));
     expect(() => importTablEdit(buildTef({ measures, instruments, events }), settings)).toThrow(/too large to import safely/);
@@ -150,16 +160,15 @@ describe('TablEdit conversion', () => {
 
   it('uses the second instrument strings, tuning, program, capo and a bass clef', () => {
     const file = basicTef({
-      instruments: [{ name: 'Lead', midi: 29 }, { strings: 4, midi: 33, capo: 2, name: 'Bass', tuning: [43, 38, 33, 28] }],
+      instruments: [{ name: 'Lead', midi: 29 }, { strings: 4, midi: 33, name: 'Bass', tuning: [43, 38, 33, 28] }],
       events: [{ position: 0, string: 1, fret: 0 }, { position: 0, string: 7, fret: 0 }, { position: 0, string: 10, fret: 3 }],
     });
     const { score } = importTablEdit(buildTef(file), settings);
     expect(score.tracks).toHaveLength(2);
     expect(score.tracks[1].name).toBe('Bass');
     expect(score.tracks[1].playbackInfo.program).toBe(33);
-    expect(score.tracks[1].staves[0].capo).toBe(2);
     expect(score.tracks[1].staves[0].bars[0].clef).toBe(model.Clef.F4);
-    expect(beatsOf(score, 0, 0, 1)[0].notes.map(n => n.realValue - 2).sort()).toEqual([31, 43]);
+    expect(beatsOf(score, 0, 0, 1)[0].notes.map(n => n.realValue).sort()).toEqual([31, 43]);
     expect(score.tracks[1].playbackInfo.primaryChannel).not.toBe(score.tracks[0].playbackInfo.primaryChannel);
   });
 
@@ -240,21 +249,57 @@ describe('TablEdit conversion', () => {
     expect(notice).toContain('reading-list jumps and endings');
   });
 
-  it('bounds playback expansion for a tiny file full of nested or huge repeats', () => {
+  it('does not apply the capo twice: E4 stays E4 and the notice says the capo was not applied', () => {
+    const file = basicTef({ instruments: [{ capo: 3 }], events: [{ position: 0, string: 1, fret: 0 }] });
+    const { score, notice } = importTablEdit(buildTef(file), settings);
+    expect(score.tracks[0].staves[0].capo).toBe(0);
+    expect(beatsOf(score)[0].notes[0].realValue).toBe(64);
+    expect(notice).toContain('1 capo settings (pitches use the stored tuning)');
+  });
+
+  it('plays a repeat the expected number of times (real MIDI generation, rebuilt repeat groups)', () => {
+    const measures = Array.from({ length: 6 }, () => ({ num: 4, den: 4 }));
+    const { score } = importTablEdit(buildTef({ measures, events: [{ position: 0, string: 1, fret: 0 }], readingList: [[1, 2], [1, 2], [1, 2], [3, 6]] }), settings);
+    expect(score.masterBars[1].repeatCount).toBe(3);
+    expect(playedBars(score)).toEqual([0, 1, 0, 1, 0, 1, 2, 3, 4, 5]);
+  });
+
+  it('bounds playback for a small file full of nested, overlapping and huge repeats, including plan generation', () => {
     const measures = Array.from({ length: 60 }, () => ({ num: 4, den: 4 }));
     const nested: [number, number][] = [];
     for (let level = 1; level <= 30; level++) for (let k = 0; k < 20; k++) nested.push([level, 60 - level], [level, 60 - level]);
-    const file: TefFx = { measures, events: [{ position: 0, string: 1, fret: 0 }], readingList: [...nested, [1, 5], ...Array.from({ length: 600 }, () => [1, 5] as [number, number])] };
-    const bytes = buildTef(file);
+    const events = Array.from({ length: 300 }, (_, i) => ({ position: i % 60 * 4, string: 1 + (i % 6), fret: i % 12, duration: 6 }));
+    const bytes = buildTef({ measures, events, readingList: [...nested, [1, 5], ...Array.from({ length: 600 }, () => [1, 5] as [number, number])] });
     expect(bytes.length).toBeLessThan(40000);
     const { score, notice } = importTablEdit(bytes, settings);
-    let played = 0;
-    const handler: midi.IMidiFileHandler = { addTickShift() {}, addTimeSignature() {}, addRest() {}, addNote() {}, addControlChange() {}, addProgramChange() {}, addTempo() {}, addBend() {}, addNoteBend() {}, finishTrack() {} };
-    const generator = new midi.MidiFileGenerator(score, settings, handler);
-    generator.generate();
-    played = generator.tickLookup.masterBars.length;
-    expect(played).toBeLessThanOrEqual(60 * MAX_REPEAT);
+    expect(playedBars(score).length).toBeLessThanOrEqual(60 * 16);
     expect(notice).toMatch(/overlapping an earlier repeat|reduced/);
+    expect(() => buildPlaybackPlan(score, 1)).not.toThrow();
+  });
+
+  it('stays fast and bounded at the caps: largest allowed file imports quickly and its playback plan builds', () => {
+    const measures = Array.from({ length: TEF_LIMITS.measures }, () => ({ num: 4, den: 4 }));
+    const instruments = Array.from({ length: 3 }, () => ({}));
+    const events: { position: number; string: number; fret: number }[] = [];
+    for (let slot = 0; slot < 4000; slot++) for (let ins = 0; ins < 3; ins++) events.push({ position: slot * 16, string: ins * 6 + 1, fret: slot % 20 });
+    for (let i = 0; i < TEF_LIMITS.events - 12000; i++) events.push({ position: (i % 4000) * 16, string: Math.floor(i / 4000) * 6 + 2, fret: i % 20 });
+    const readingList: [number, number][] = [];
+    for (let i = 0; i < 40; i++) readingList.push([1, 100]);
+    const bytes = buildTef({ measures, instruments, events, readingList });
+    const started = Date.now();
+    const { score, notice } = importTablEdit(bytes, settings);
+    expect(notice).not.toMatch(/overflow|overlap/);
+    expect(Date.now() - started).toBeLessThan(10000);
+    expect(playedBars(score).length).toBeGreaterThan(TEF_LIMITS.measures + 1000);
+    const planStarted = Date.now();
+    const plan = buildPlaybackPlan(score, 1);
+    expect(Date.now() - planStarted).toBeLessThan(30000);
+    expect(plan.notes.length).toBeLessThan(400000);
+  }, 60000);
+
+  it('reports notes that are shifted later by an overlap', () => {
+    const file = basicTef({ measures: [{ num: 4, den: 4 }], events: [{ position: 0, string: 1, fret: 0, duration: 0 }, { position: 16, string: 1, fret: 1 }] });
+    expect(importTablEdit(buildTef(file), settings).notice).toContain('1 notes shifted later because an earlier note overlaps them');
   });
 
   it('puts a pickup measure on the anacrusis and does not pad it', () => {
@@ -296,5 +341,3 @@ describe('TablEdit conversion', () => {
     expect(() => adoptAdmittedBase('d'.repeat(64), bytes)).not.toThrow();
   });
 });
-
-const MAX_REPEAT = 16;

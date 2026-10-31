@@ -5,10 +5,11 @@ import { ImportReport } from './import-support';
 
 const { Score, Track, Staff, Bar, Voice, Beat, Note, MasterBar, Automation } = model;
 
-const MAX_BARS = 12000;
-const MAX_BEATS = 150000;
+const MAX_BARS = 3000;
+const MAX_BEATS = 30000;
 const MAX_REPEAT_COUNT = 16;
-const MAX_EXPANDED_BARS = 100000;
+/** Beats and notes the audio engine may be asked to play, counting every pass through a repeat. */
+const MAX_PLAYED_EVENTS = 120000;
 /** Internal time unit: one 64th of a whole note is 12 units, so dots and 3:2 tuplets stay integers. */
 const U = 12;
 
@@ -75,7 +76,6 @@ function convert(doc: TefDocument, settings: Settings): TablEditImport {
   if (tempo !== doc.tempo) report.warn(`The tempo (${doc.tempo}) is out of range, so 120 was used.`);
   masters[0].tempoAutomations = [Automation.buildTempoAutomation(false, 0, tempo, 2)];
 
-  applyReadingList(doc, masters, report);
 
   // Group events by instrument and voice, keyed by position.
   const perInstrument = doc.instruments.map(() => [new Map<number, Slot>(), new Map<number, Slot>()]);
@@ -95,6 +95,12 @@ function convert(doc: TefDocument, settings: Settings): TablEditImport {
   report.bump('instruments with no notes', used.length - trackCount);
   if (Math.min(trackCount, 15) * measureCount > MAX_BARS) throw tooLarge(` (${trackCount} instruments x ${measureCount} measures)`);
 
+  // Playback cost of one pass through each measure: its events plus the rests every track needs.
+  const weights = starts.map(() => 2 * Math.min(trackCount, 15));
+  for (const slots of perInstrument.flat()) for (const position of slots.keys()) weights[measureAt(starts, position)] += 2;
+  applyReadingList(doc, masters, report, weights);
+  score.rebuildRepeatGroups();
+
   const channels = Array.from({ length: 16 }, (_, i) => i).filter(i => i !== 9);
   let nextChannel = 0, beatBudget = 0;
   doc.instruments.forEach((ins, index) => {
@@ -106,18 +112,20 @@ function convert(doc: TefDocument, settings: Settings): TablEditImport {
     track.playbackInfo.primaryChannel = channels[nextChannel]; track.playbackInfo.secondaryChannel = channels[nextChannel + 1] ?? channels[nextChannel];
     nextChannel++;
     const staff = new Staff(); staff.stringTuning.tunings = [...ins.tuning]; staff.showTablature = true; staff.showStandardNotation = true;
-    if (ins.capo > 0) { if (ins.capo <= 24) staff.capo = ins.capo; else report.bump('capo values out of range'); }
+    // The capo is not applied: it is not known whether the stored tuning already includes it, and applying both would raise every pitch twice.
+    if (ins.capo > 0) report.bump('capo settings (pitches use the stored tuning)');
     track.addStaff(staff);
     const [first, second] = perInstrument[index];
+    const buckets = [first, second].map(slots => bucketByMeasure(slots, starts, sizes));
     const bassClef = ins.tuning[0] < 52;
     const frets = [new Map<number, number>(), new Map<number, number>()];
     const bars: model.Voice[][] = [];
     let secondVoice = false;
     for (let m = 0; m < measureCount; m++) {
       const pickup = doc.measures[m].pickup;
-      const voices = [first, second].map((slots, v) => {
+      const voices = [first, second].map((_, v) => {
         const voice = new Voice();
-        const items = [...slots.entries()].filter(([p]) => p >= starts[m] && p < starts[m] + sizes[m]).sort((a, b) => a[0] - b[0]);
+        const items = buckets[v][m];
         buildVoice(voice, items, starts[m], sizes[m], pickup, v === 0, ins, frets[v], report, () => {
           if (++beatBudget > MAX_BEATS) throw tooLarge(' (too many beats)');
         });
@@ -148,18 +156,18 @@ function convert(doc: TefDocument, settings: Settings): TablEditImport {
   parts.push(labels.length
     ? `Not imported (dropped): ${labels.join('; ')}.`
     : 'No dropped content was detected, but the importer cannot detect every unsupported TablEdit feature.');
-  parts.push('Imported where present: notes, rests, rhythm (including dots and triplets), ties, grace notes, two voices, tuning and capo, repeats, key and time signatures, tempo and title.');
+  parts.push('Imported where present: notes, rests, rhythm (including dots and triplets), ties, grace notes, two voices, tuning, repeats, key and time signatures, tempo and title.');
   return { score, notice: [...parts, ...report.warningText()].join(' ') };
 }
 
 /**
  * The reading list is read as the order in which measure ranges are played. Only runs of one identical range in order become
- * repeats; jumps, endings and anything overlapping an earlier repeat are reported as dropped. Repeats never nest, so the
- * audio engine's expansion stays bounded.
+ * repeats; jumps, endings and anything overlapping an earlier repeat are reported as dropped. Repeats never nest, and their total cost is capped, so
+ * the audio engine's expansion stays bounded.
  */
-function applyReadingList(doc: TefDocument, masters: model.MasterBar[], report: ImportReport) {
+function applyReadingList(doc: TefDocument, masters: model.MasterBar[], report: ImportReport, weights: number[]) {
   const count = masters.length;
-  let expected = 1, lastRepeatEnd = 0, expanded = count;
+  let expected = 1, lastRepeatEnd = 0, played = weights.reduce((a, b) => a + b, 0);
   const list = doc.readingList;
   for (let i = 0; i < list.length;) {
     const [a, b] = list[i];
@@ -174,11 +182,28 @@ function applyReadingList(doc: TefDocument, masters: model.MasterBar[], report: 
     if (a <= lastRepeatEnd) { report.bump('repeats overlapping an earlier repeat'); continue; }
     const times = Math.min(run, MAX_REPEAT_COUNT);
     if (times < run) report.bump(`repeat counts above ${MAX_REPEAT_COUNT} (reduced)`);
-    const extra = (b - a + 1) * (times - 1);
-    if (expanded + extra > MAX_EXPANDED_BARS) { report.bump('repeats beyond the playback expansion limit'); continue; }
-    expanded += extra; lastRepeatEnd = b;
+    const extra = weights.slice(a - 1, b).reduce((x, y) => x + y, 0) * (times - 1);
+    if (played + extra > MAX_PLAYED_EVENTS) { report.bump('repeats beyond the playback size limit'); continue; }
+    played += extra; lastRepeatEnd = b;
     masters[a - 1].isRepeatStart = true; masters[b - 1].repeatCount = times;
   }
+}
+
+function measureAt(starts: number[], position: number) {
+  let lo = 0, hi = starts.length - 1;
+  while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (starts[mid] <= position) lo = mid; else hi = mid - 1; }
+  return lo;
+}
+
+/** Sorted slots per measure, found by binary search so the cost is linear in the number of events. */
+function bucketByMeasure(slots: Map<number, Slot>, starts: number[], sizes: number[]) {
+  const out: [number, Slot][][] = starts.map(() => []);
+  for (const entry of slots.entries()) {
+    const lo = measureAt(starts, entry[0]);
+    if (entry[0] >= starts[lo] && entry[0] < starts[lo] + sizes[lo]) out[lo].push(entry);
+  }
+  for (const list of out) list.sort((a, b) => a[0] - b[0]);
+  return out;
 }
 
 function addRests(voice: model.Voice, units: number, tick: () => void) {
@@ -198,6 +223,7 @@ function buildVoice(
   for (const [position, slot] of items) {
     const offset = (position - start) * U;
     if (!open && offset > cursor) { addRests(voice, offset - cursor, tick); cursor = offset; }
+    else if (!open && offset < cursor) report.bump('notes shifted later because an earlier note overlaps them');
     const lead = slot.notes[0] ?? slot.rest;
     if (!lead) continue;
     const length = decodeLength(lead.code);

@@ -266,7 +266,7 @@ it('every bend and whammy preset matches alphaTab classification through real en
       type: 'setNoteTechniques',
       target,
       string: 1,
-      patch: { bend: { type: preset.type, style: 0, points: preset.points.map(p => ({ ...p })) } },
+      patch: { bend: { type: model.BendType.Custom, style: 0, points: preset.points.map(p => ({ ...p })) } },
     }).project;
     const score = buildScore(project);
     const note = score.tracks[0].staves[0].bars[0].voices[0].beats[0].notes[0];
@@ -279,7 +279,7 @@ it('every bend and whammy preset matches alphaTab classification through real en
     project = previewEdit(project, {
       type: 'setBeatTechniques',
       target,
-      patch: { whammy: { type: preset.type, style: 0, points: preset.points.map(p => ({ ...p })) } },
+      patch: { whammy: { type: model.WhammyType.Custom, style: 0, points: preset.points.map(p => ({ ...p })) } },
     }).project;
     const score = buildScore(project);
     const beat = score.tracks[0].staves[0].bars[0].voices[0].beats[0];

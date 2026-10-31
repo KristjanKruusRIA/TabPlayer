@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { model } from '@coderline/alphatab';
 import { TechniquePanel } from './TechniquePanel';
@@ -698,4 +698,21 @@ it('keep pitch starts unticked on another staff and never goes into Add staff', 
   onEdit.mockClear();
   fireEvent.click(screen.getByRole('button', { name: 'Apply staff settings' }));
   expect(onEdit.mock.calls.at(-1)?.[0].settings ?? {}).not.toHaveProperty('keepPitch');
+});
+
+it('the Keep pitch box in the staff panel keeps focus and its value while busy', async () => {
+  const onEdit = vi.fn(), props = { score: music(), target, string: 6, onEdit, onSelect: vi.fn() };
+  const view = render(<StructurePanel {...props} busy={false} />);
+  const box = screen.getByLabelText('Keep pitch') as HTMLInputElement;
+  box.focus();
+  fireEvent.click(box);
+  expect(box).toBeChecked();
+  view.rerender(<StructurePanel {...props} busy />);
+  expect(screen.getByLabelText('Keep pitch')).toBe(box);
+  expect(box).not.toBeDisabled();
+  expect(box).toHaveAttribute('aria-disabled', 'true');
+  expect(box).toHaveFocus();
+  fireEvent.click(box);
+  await waitFor(() => expect(box).toBeChecked());
+  expect(box.closest('label')).toHaveClass('check');
 });

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { previewEdit } from '../engine';
 import { blankProject } from '../project';
@@ -250,4 +250,22 @@ it('keep pitch checkbox adds keepPitch: true to setTuning edit', () => {
     tuningName: '',
     keepPitch: true,
   });
+});
+
+it('the Keep pitch box keeps focus and its value while busy', async () => {
+  const score = previewEdit(blankProject(), { type: 'setRest', target: { track: 0, staff: 0, bar: 0, voice: 0, beat: 0 } }).score;
+  const props = { score, selected: 0, onEdit: vi.fn() };
+  const view = render(<TrackSettingsPanel {...props} busy={false} />);
+  const box = screen.getByLabelText('Keep pitch') as HTMLInputElement;
+  box.focus();
+  fireEvent.click(box);
+  expect(box).toBeChecked();
+  view.rerender(<TrackSettingsPanel {...props} busy />);
+  expect(screen.getByLabelText('Keep pitch')).toBe(box);
+  expect(box).not.toBeDisabled();
+  expect(box).toHaveAttribute('aria-disabled', 'true');
+  expect(box).toHaveFocus();
+  fireEvent.click(box);
+  await waitFor(() => expect(box).toBeChecked());
+  expect(box.closest('label')).toHaveClass('check');
 });

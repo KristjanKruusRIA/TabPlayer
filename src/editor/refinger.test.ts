@@ -4,6 +4,7 @@ import { buildScore, previewEdit } from '../engine';
 import type { BeatTarget, Project } from '../project';
 import type { EditCommand, StaffSettings } from '../edit-types';
 import type { model } from '@coderline/alphatab';
+import { fretKey } from './banjo-drone';
 
 const target: BeatTarget = { track: 0, staff: 0, bar: 0, voice: 0, beat: 0 };
 const bar1Beat0: BeatTarget = { track: 0, staff: 0, bar: 1, voice: 0, beat: 0 };
@@ -214,5 +215,23 @@ describe('refinger keepPitch on retune and capo', () => {
     const redoneScore = buildScore(redone);
     expect(redoneScore.tracks[0].staves[0].bars[0].voices[0].beats[0].notes[0].fret).toBe(4);
     expect(redoneScore.tracks[0].staves[0].tuning).toEqual(dropD);
+  });
+
+  it('keeps a trill sounding the same when a partial capo and keep pitch are applied', () => {
+    // String 3 (D3) fret 7 is 57; the trill goes two semitones up to 59.
+    const base = projectWithEdits(
+      { type: 'setNote', target, string: 3, fret: 7 },
+      { type: 'setNoteTechniques', target, string: 3, patch: { trill: { pitch: 59, speed: 16 } } }
+    );
+    const staff = base.score.tracks[0].staves[0];
+    const settings: StaffSettings = {
+      tuning: [...staff.tuning], capo: 0, transposition: 0, displayTransposition: 0, clef: staff.bars[0].clef,
+      showTab: true, showNotation: true, partialCapo: { fret: 5, strings: [1, 2, 3] }, keepPitch: true,
+    };
+    const moved = previewEdit(base.project, { type: 'setStaffSettings', track: 0, staff: 0, settings });
+    const note = moved.score.tracks[0].staves[0].bars[0].voices[0].beats[0].notes[0];
+    expect(note.fret).toBe(2);
+    expect(fretKey(moved.score.tracks[0].staves[0], 3, note.fret)).toBe(57);
+    expect(note.trillValue).toBe(59);
   });
 });

@@ -46,10 +46,11 @@ function validateStaff(staff:model.Staff|null,settings:StaffSettings) {
 }
 /** The name alphaTab gives an unnamed tuning it recognises; routes that omit a name keep it, as before S15. */
 export function defaultTuningName(tuning:readonly number[]):string {return model.Tuning.findTuning([...tuning])?.name??'';}
-function configure(staff:model.Staff,settings:StaffSettings) {
+/** `refingered`: the notes were moved to keep their sounding pitch, so a trill (an absolute pitch) already has the right interval and must not be rebased. */
+function configure(staff:model.Staff,settings:StaffSettings,refingered=false) {
   const oldCapo=staff.capo;staff.stringTuning.tunings=[...settings.tuning];staff.capo=settings.capo;staff.transpositionPitch=settings.transposition;staff.displayTranspositionPitch=settings.displayTransposition;staff.showTablature=settings.showTab;staff.showStandardNotation=settings.showNotation;
-  if(settings.partialCapo!==undefined){const before=getPartialCapo(staff);setPartialCapo(staff,settings.partialCapo);rebaseTrills(staff,oldCapo,before,getPartialCapo(staff));}
-  if(settings.droneFret!==undefined){const before=getBanjoDrone(staff);setBanjoDrone(staff,settings.droneFret);rebaseDroneTrills(staff,before,settings.droneFret);}
+  if(settings.partialCapo!==undefined){const before=getPartialCapo(staff);setPartialCapo(staff,settings.partialCapo);if(!refingered)rebaseTrills(staff,oldCapo,before,getPartialCapo(staff));}
+  if(settings.droneFret!==undefined){const before=getBanjoDrone(staff);setBanjoDrone(staff,settings.droneFret);if(!refingered)rebaseDroneTrills(staff,before,settings.droneFret);}
   for(const bar of staff.bars)bar.clef=settings.clef;
   // An omitted name keeps the current one, and an empty one gets alphaTab's label as it did before S15.
   if(settings.tuningName!==undefined)staff.stringTuning.name=settings.tuningName;else if(!staff.stringTuning.name)staff.stringTuning.name=defaultTuningName(settings.tuning);
@@ -151,8 +152,9 @@ export function applyStructureEdit(score:model.Score,command:EditCommand,_editIn
     case 'setStaffSettings': {
       const staff=staffAt(score,command.track,command.staff);
       validateStaff(staff,command.settings);
-      if(command.settings.keepPitch)refingerStaff(staff,command.settings);
-      configure(staff,command.settings);
+      const refingered=!!command.settings.keepPitch;
+      if(refingered)refingerStaff(staff,command.settings);
+      configure(staff,command.settings,refingered);
       return true;
     }
     case 'addStaff': {

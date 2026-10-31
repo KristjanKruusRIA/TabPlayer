@@ -73,6 +73,16 @@ it('refuses edit commands, undo and redo while the document is finalized but sti
   expect(onRun).toHaveBeenCalledWith({kind:'select',target:{...target,bar:2}});
 });
 
+it('keeps input focus when clicking the dialog title or padding, and anchors near top',()=>{
+  const {input}=setup();
+  expect(input).toHaveFocus();
+  const title=screen.getByRole('heading',{name:'Commands'});
+  fireEvent.mouseDown(title);
+  expect(input).toHaveFocus();
+  const dialog=screen.getByRole('dialog');
+  expect(dialog.parentElement).toHaveClass('command-palette-backdrop');
+});
+
 it('refuses score-editing palette commands while the score is hidden but allows non-score commands',()=>{
   const onRun=vi.fn(),onClose=vi.fn();
   render(<CommandPalette context={{...context,scoreHidden:true}} busy={false} onRun={onRun} onClose={onClose}/>);
@@ -85,4 +95,10 @@ it('refuses score-editing palette commands while the score is hidden but allows 
   fireEvent.change(input,{target:{value:'play'}});
   fireEvent.keyDown(input,{key:'Enter'});
   expect(onRun).toHaveBeenCalledWith({kind:'app',name:'play'});
+});
+
+it('closes when the backdrop is pressed but not when the panel is',()=>{
+  const {onClose}=setup();
+  fireEvent.mouseDown(screen.getByRole('dialog'));expect(onClose).not.toHaveBeenCalled();
+  fireEvent.mouseDown(screen.getByRole('dialog').parentElement!);expect(onClose).toHaveBeenCalledTimes(1);
 });

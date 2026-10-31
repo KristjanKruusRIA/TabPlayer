@@ -40,7 +40,7 @@ try{
   const exportAudio=async({name,level})=>{
     await clickWorkspaceCommand(page,'Export score',{waitForIdle:false});
     const dialog=page.getByRole('dialog',{name:'Export score'});await dialog.getByLabel('Export format').selectOption('wav');
-    await dialog.getByLabel('Bit depth').selectOption('24');
+    await dialog.getByRole('radio',{name:'24 bit'}).click();
     if(level!==undefined){await dialog.getByLabel('Normalize',{exact:true}).check();await dialog.getByLabel('Normalized level (dB RMS)').fill(String(level));}
     await dialog.getByLabel('File name',{exact:true}).fill(name);await dialog.getByRole('button',{name:'Export',exact:true}).click();
     const file=join(folder,`${name}.wav`),deadline=Date.now()+120000;

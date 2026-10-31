@@ -81,8 +81,8 @@ it('chord dialog has accessible focus and saves per-string positions',()=>{
   const input=screen.getByLabelText('Chord name');expect(input).toHaveFocus();fireEvent.change(input,{target:{value:'Am'}});fireEvent.click(screen.getByRole('button',{name:'Apply chord'}));expect(onChange).toHaveBeenCalledWith({name:'Am',firstFret:1,frets:[-1,-1,-1,-1,-1,-1]});expect(onClose).toHaveBeenCalled();
 });
 it('chord dialog traps keyboard focus and Escape closes',()=>{
-  const onClose=vi.fn();render(<ChordDialog strings={6} value={null} onChange={vi.fn()} onClose={onClose}/>);const name=screen.getByLabelText('Chord name'),cancel=screen.getByRole('button',{name:'Cancel'});
-  fireEvent.keyDown(name,{key:'Tab',shiftKey:true});expect(cancel).toHaveFocus();fireEvent.keyDown(cancel,{key:'Tab'});expect(name).toHaveFocus();fireEvent.keyDown(name,{key:'Escape'});expect(onClose).toHaveBeenCalled();
+  const onClose=vi.fn();render(<ChordDialog strings={6} value={null} onChange={vi.fn()} onClose={onClose}/>);const name=screen.getByLabelText('Chord name'),close=screen.getByRole('button',{name:'Close'}),cancel=screen.getByRole('button',{name:'Cancel'});
+  close.focus();fireEvent.keyDown(close,{key:'Tab',shiftKey:true});expect(cancel).toHaveFocus();fireEvent.keyDown(cancel,{key:'Tab'});expect(close).toHaveFocus();fireEvent.keyDown(name,{key:'Escape'});expect(onClose).toHaveBeenCalled();
 });
 
 it('staff settings keep the staff tuning name through capo edits and send the draft name after tuning changes',()=>{

@@ -218,7 +218,7 @@ it('starts Harmony at its heading during initial library loading and focuses nam
   let finish!:(library:HarmonyLibrary)=>void;personalLibrary.read.mockReturnValueOnce(new Promise(resolve=>{finish=resolve;}));
   await setup();click('Edit chord diagram');const dialog=screen.getByRole('dialog',{name:'Harmony chord'});
   const initialFocus=document.activeElement;await act(async()=>finish({format:'TabPlayerHarmonyLibrary',version:1,entries:[]}));
-  await waitFor(()=>expect(within(dialog).getByLabelText('Chord name')).toBeEnabled());
+  await waitFor(()=>expect(within(dialog).getByLabelText('Chord name').closest('fieldset')).not.toHaveAttribute('aria-disabled'));
   expect(initialFocus).toBe(dialog);expect(within(dialog).getByLabelText('Chord name')).toHaveFocus();
 });
 
@@ -345,7 +345,7 @@ it('routes music clipboard shortcuts while preserving text input shortcuts and p
 });
 it('passes fixed-mode export unavailability without claiming a constant practice coefficient',async()=>{
   integration.practiceFixed=true;await setup();await waitFor(()=>expect(integration.exportOptions).toHaveBeenLastCalledWith(expect.objectContaining({currentSpeed:null})));
-  click('Export score');change('Export format','wav');expect(screen.getByRole('option',{name:'Current speed coefficient'})).toBeDisabled();
+  click('Export score');change('Export format','wav');expect(screen.getByRole('radio',{name:'Current speed coefficient'})).toHaveAttribute('aria-disabled','true');
 });
 
 it('selects editable music with keyboard shortcuts without changing history or text editing',async()=>{
@@ -857,8 +857,8 @@ it('reference Write score tempos rejects incompatible repeated passes without ch
 });
 it('reference GP preflight blocks an ambiguous backing selection and omission publishes selected notation',async()=>{
   const c=await setup(referenceProject({},[repeatMeasure(0,true,0),repeatMeasure(1,false,2)])),before=c.getState().snapshot;click('Export score');const dialog=within(screen.getByRole('dialog',{name:'Export score'}));fireEvent.click(dialog.getByLabelText('Measure range'));fireEvent.change(dialog.getByLabelText('Last measure'),{target:{value:'1'}});
-  expect(dialog.getByRole('button',{name:'Export'})).toBeDisabled();expect(dialog.getByRole('alert')).toHaveTextContent(/more than once|unique|ambiguous/i);expect(dialog.getByLabelText('Include backing audio')).toHaveAttribute('aria-describedby');expect(waveform.read).not.toHaveBeenCalled();
-  fireEvent.click(dialog.getByLabelText('Include backing audio'));expect(dialog.getByRole('button',{name:'Export'})).toBeEnabled();fireEvent.click(dialog.getByRole('button',{name:'Export'}));await waitFor(()=>expect(integration.exportRun).toHaveBeenCalledWith({format:'gp',selection:{tracks:[0],range:{first:0,last:0}},backing:false},expect.objectContaining({revision:0})));expect(c.getState().snapshot).toBe(before);
+  expect(dialog.getByRole('button',{name:'Export'})).toHaveAttribute('aria-disabled','true');fireEvent.click(dialog.getByRole('button',{name:'Export'}));expect(integration.exportRun).not.toHaveBeenCalled();expect(dialog.getByRole('alert')).toHaveTextContent(/more than once|unique|ambiguous/i);expect(dialog.getByLabelText('Include backing audio')).toHaveAttribute('aria-describedby');expect(waveform.read).not.toHaveBeenCalled();
+  fireEvent.click(dialog.getByLabelText('Include backing audio'));expect(dialog.getByRole('button',{name:'Export'})).not.toHaveAttribute('aria-disabled');fireEvent.click(dialog.getByRole('button',{name:'Export'}));await waitFor(()=>expect(integration.exportRun).toHaveBeenCalledWith({format:'gp',selection:{tracks:[0],range:{first:0,last:0}},backing:false},expect.objectContaining({revision:0})));expect(c.getState().snapshot).toBe(before);
 });
 it('joins exact asset, revision and live backing checks while its operation lease is busy',async()=>{
   const id='a'.repeat(64),backing={assetId:id,offsetMs:120,anchors:[],mix:defaultMix()};
@@ -1134,7 +1134,8 @@ it('exports a finalized document with its current layout and sends no layout edi
   const c=await setup();click('Finalize document');await waitFor(()=>expect(c.getState().snapshot.project.lock).toEqual({kind:'finalized'}));
   click('Export score');change('Export format','pdf');
   const dialog=within(screen.getByRole('dialog',{name:'Export score'}));
-  expect(dialog.getByLabelText('Width (mm)')).toBeDisabled();
+  expect(dialog.getByLabelText('Width (mm)').closest('fieldset')).toHaveAttribute('aria-disabled','true');
+  fireEvent.change(dialog.getByLabelText('Width (mm)'),{target:{value:'300'}});expect(dialog.getByLabelText('Width (mm)')).toHaveValue(210);
   click('Export');await waitFor(()=>expect(integration.exportRun).toHaveBeenCalled());
   expect(integration.commits).not.toHaveBeenCalled();expect(c.getState().snapshot.project.edits).toHaveLength(0);
 });

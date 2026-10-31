@@ -32,7 +32,7 @@ it('opens on the given topic, switches topics, discloses update status and keeps
   const topic=(name:string)=>screen.getByRole('button',{name});
   expect(topic('Editing the score')).toHaveFocus();expect(topic('Editing the score')).toHaveAttribute('aria-current','true');
   expect(screen.getByRole('article',{name:'Editing the score'})).toHaveTextContent('command palette');
-  expect(screen.getAllByRole('button').map(button=>button.textContent)).toEqual(['Close',...helpTopics.map(entry=>entry.title)]);
+  expect(screen.getAllByRole('button').map(button=>button.getAttribute('aria-label')??button.textContent)).toEqual(['Close',...helpTopics.map(entry=>entry.title)]);
   fireEvent.click(topic('About and updates'));
   expect(screen.getByRole('article',{name:'About and updates'})).toHaveTextContent(`TabPlayer ${appVersion} for desktop.`);
   expect(screen.getByRole('status')).toHaveTextContent('');
@@ -42,4 +42,10 @@ it('opens on the given topic, switches topics, discloses update status and keeps
   fireEvent.keyDown(check,{key:'Tab'});expect(close).toHaveFocus();
   fireEvent.keyDown(close,{key:'Tab',shiftKey:true});expect(check).toHaveFocus();
   fireEvent.keyDown(check,{key:'Escape'});expect(onClose).toHaveBeenCalled();
+});
+
+it('closes when the backdrop is pressed but not when the panel is',()=>{
+  const onClose=vi.fn();render(<HelpDialog initial="editing" onClose={onClose}/>);
+  fireEvent.mouseDown(screen.getByRole('dialog'));expect(onClose).not.toHaveBeenCalled();
+  fireEvent.mouseDown(screen.getByRole('dialog').parentElement!);expect(onClose).toHaveBeenCalledTimes(1);
 });

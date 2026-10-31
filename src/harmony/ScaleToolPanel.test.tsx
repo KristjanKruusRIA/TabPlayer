@@ -25,8 +25,8 @@ it('selection_matches_count_distinct_sounding_classes_and_exclude_dead_and_percu
 });
 it('scale_modal_restores_focus_traps_tabs_and_keeps_close_available_while_busy',()=>{
   const score=music();score.tracks[0].staves[0].stringTuning.tunings=[];const opener=document.createElement('button');document.body.append(opener);opener.focus();const closed:string[]=[],props={score,selection:null,busy:false,onClose:()=>closed.push('closed')},view=render(<ScaleToolPanel {...props}/>);
-  expect(screen.getByLabelText('Scale keyboard')).toBeInTheDocument();const root=screen.getByLabelText('Scale root'),close=screen.getByRole('button',{name:'Close scales'});expect(root).toHaveFocus();fireEvent.keyDown(root,{key:'Tab',shiftKey:true});expect(close).toHaveFocus();fireEvent.keyDown(close,{key:'Tab'});expect(root).toHaveFocus();
-  view.rerender(<ScaleToolPanel {...props} busy/>);expect(root).toBeDisabled();expect(close).toHaveFocus();fireEvent.keyDown(close,{key:'Escape'});expect(closed).toEqual(['closed']);view.unmount();expect(opener).toHaveFocus();opener.remove();
+  expect(screen.getByLabelText('Scale keyboard')).toBeInTheDocument();const root=screen.getByLabelText('Scale root'),headClose=screen.getByRole('button',{name:'Close'}),close=screen.getByRole('button',{name:'Close scales'});expect(root).toHaveFocus();headClose.focus();fireEvent.keyDown(headClose,{key:'Tab',shiftKey:true});expect(close).toHaveFocus();fireEvent.keyDown(close,{key:'Tab'});expect(headClose).toHaveFocus();
+  root.focus();view.rerender(<ScaleToolPanel {...props} busy/>);expect(root.closest('fieldset')).toHaveAttribute('aria-disabled','true');expect(root).not.toBeDisabled();expect(root).toHaveFocus();fireEvent.keyDown(close,{key:'Escape'});expect(closed).toEqual(['closed']);view.unmount();expect(opener).toHaveFocus();opener.remove();
 });
 it('out_of_range_sounding_selection_is_reported_without_crashing_the_browser',()=>{
   const score=music();score.tracks[0].staves[0].transpositionPitch=127;render(<ScaleToolPanel score={score} selection={{kind:'notes',notes:[{target,noteIndex:0}]}} busy={false} onClose={()=>{}}/>);expect(screen.getByRole('alert')).toHaveTextContent('0 to 127');
@@ -34,4 +34,11 @@ it('out_of_range_sounding_selection_is_reported_without_crashing_the_browser',()
 it('valid_fretted_scale_tones_remain_visible_when_the_open_pitch_is_below_midi_zero',()=>{
   const score=music(),staff=score.tracks[0].staves[0];staff.stringTuning.tunings=[0];staff.transpositionPitch=1;const before=model.JsonConverter.scoreToJson(score);render(<ScaleToolPanel score={score} selection={null} busy={false} onClose={()=>{}}/>);
   expect(screen.getByLabelText('String 1 fret 1: C-1, root')).toBeInTheDocument();expect(screen.queryByLabelText(/String 1 fret 0:/)).not.toBeInTheDocument();expect(model.JsonConverter.scoreToJson(score)).toBe(before);
+});
+
+it('announces that a busy scale browser is waiting',()=>{
+  const score=music(),props={score,selection:null,onClose:()=>{}},view=render(<ScaleToolPanel {...props} busy={false}/>);
+  expect(screen.queryByRole('status')).not.toBeInTheDocument();
+  view.rerender(<ScaleToolPanel {...props} busy/>);
+  expect(screen.getByRole('status')).toHaveTextContent('Wait for the current operation to finish.');expect(screen.getByLabelText('Scale root').closest('fieldset')).toHaveAttribute('aria-busy','true');expect(screen.getByRole('status').closest('fieldset')).toBeNull();
 });

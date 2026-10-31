@@ -91,7 +91,7 @@ export async function runStyleTypographyAcceptance({buildPath}={}){
       // Several pages are written as -1, -2 and so on; a single page has the plain name.
       const pagesOf=()=>readdirSync(exportDirectory).filter(name=>name===`typography.${format}`||new RegExp(`^typography-\\d+\\.${format}$`).test(name)).sort((a,b)=>a.localeCompare(b,undefined,{numeric:true})).map(name=>resolve(exportDirectory,name));assert.deepEqual(pagesOf(),[]);
       await ui.clickWorkspaceCommand(page,'Export score',{waitForIdle:false});const dialog=page.getByRole('dialog',{name:'Export score'});
-      await dialog.getByLabel('Export format').selectOption(format);if(format==='png')await dialog.getByLabel('Resolution').selectOption('150');
+      await dialog.getByLabel('Export format').selectOption(format);if(format==='png')await dialog.getByRole('radio',{name:'150 dpi'}).click();
       await dialog.getByRole('button',{name:'Export',exact:true}).click();
       const until=Date.now()+120000;while(await dialog.isVisible()||!pagesOf().length){const failure=dialog.getByRole('alert');if(await failure.count())throw new Error(`${label} ${format}: ${await failure.innerText()}`);if(Date.now()>until)throw new Error(`${label} ${format}: no output`);await sleep(200);}
       await idle();const paths=pagesOf();assert.ok(paths.length>0,`${label} ${format}: no output`);const digest=createHash('sha256'),pageSizes=[];

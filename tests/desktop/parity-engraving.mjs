@@ -24,7 +24,7 @@ try{
   const details=async name=>{await page.locator('summary').filter({hasText:new RegExp(`^${name}$`)}).first().evaluate(node=>{node.parentElement.open=true;});};
   const fill=(name,value)=>page.getByLabel(name,{exact:true}).fill(String(value));
   const combo=name=>page.getByRole('combobox',{name:new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')}(?:\\s|$)`)});
-  const choose=(name,value)=>combo(name).selectOption(value);
+  const choose=async(name,value)=>{const radioGroup=page.getByRole('radiogroup',{name});if(await radioGroup.count()){const map={'document':'Document notation','ScoreTab':'Score and tab','Score':'Score','Tab':'Tab'};await radioGroup.getByRole('radio',{name:map[value]||value,exact:true}).click();}else await combo(name).selectOption(value);};
   const musical=bytes=>{const score=importer.ScoreLoader.loadScoreFromBytes(bytes,new Settings()),file=new midi.MidiFile();new midi.MidiFileGenerator(score,new Settings(),new midi.AlphaSynthMidiFileHandler(file)).generate();return file.tracks.flatMap(track=>track.events).filter(event=>event instanceof midi.NoteOnEvent||event instanceof midi.NoteOffEvent).map(event=>({type:event.constructor.name,track:event.track,tick:event.tick,pitch:event.noteKey,velocity:event.noteVelocity??null}));};
   await button('Open');await waitStatus(value=>value.ready&&!value.error);await page.locator('[aria-label="Music notation"] svg').first().waitFor();
   await button('Export GP');const baselineGp=readFileSync(exported),baselineMusic=musical(baselineGp),baseline=await snapshot();

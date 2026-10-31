@@ -160,6 +160,7 @@ fn build(request: &AuditionRequest) -> (PlaybackPlan, DocumentSettings, f64) {
             key: note.key,
             velocity: note.velocity,
             articulation,
+            locked_articulation: None,
             legato_from: None,
             pitch: vec![PitchPoint {
                 tick: start,

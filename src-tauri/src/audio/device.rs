@@ -13,7 +13,7 @@ use super::{
     reference_sync::ReferenceSyncMap,
     renderer::{PreparedMix, Renderer},
     resources::AudioResources,
-    voices::{resource_requests, voice_id_for_track},
+    voices::{resource_requests, track_locked, voice_id_for_track},
 };
 use crate::settings::{ChannelMix, DocumentSettings};
 use cpal::{
@@ -1934,9 +1934,7 @@ impl AudioService {
         if reference_timing_changed(old.settings.backing.as_ref(), settings.backing.as_ref()) {
             return Err("Reference timing changes require a newly prepared playback plan.".into());
         }
-        let voice_changed = old.plan.tracks.iter().any(|track| {
-            voice_id_for_track(track, &settings) != voice_id_for_track(track, &old.settings)
-        });
+        let voice_changed = sound_source_changed(&old.plan, &old.settings, &settings);
         let map_changed = match (&old.settings.backing, &settings.backing) {
             (Some(a), Some(b)) => {
                 a.asset_id != b.asset_id
@@ -2560,8 +2558,70 @@ mod reference_tests {
     }
 }
 
+/// Whether the sound sources a prepared plan needs differ between two settings: a track's instrument, or its lock
+/// against sound automations, which decides which program each note sounds as. Either needs a rebuilt renderer and the
+/// samples the new settings ask for, not a mix change, so a locked-era bank is never kept for an unlocked track.
+fn sound_source_changed(
+    plan: &PlaybackPlan,
+    old: &DocumentSettings,
+    new: &DocumentSettings,
+) -> bool {
+    plan.tracks.iter().any(|track| {
+        voice_id_for_track(track, new) != voice_id_for_track(track, old)
+            || track_locked(new, &track.id) != track_locked(old, &track.id)
+    })
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_change_of_lock_needs_a_rebuilt_renderer_and_new_samples_but_a_mix_change_does_not() {
+        use crate::settings::TrackSound;
+        let plan: PlaybackPlan = serde_json::from_value(serde_json::json!({"generation":1,"ppq":960,"durationTick":3840,"durationMs":2000,"tracks":[{"id":"a","program":25,"percussion":false},{"id":"b","program":33,"percussion":false}],"tempos":[{"tick":0,"bpm":120}],"occurrences":[{"bar":0,"occurrence":0,"meterNumerator":4,"meterDenominator":4,"startTick":0,"endTick":3840,"startMs":0,"endMs":2000}],"notes":[],"midi":[]})).unwrap();
+        let sound = |locked| TrackSound {
+            locked,
+            ..TrackSound::default()
+        };
+        let with = |track: &str, locked| {
+            let mut settings = DocumentSettings::default();
+            settings.sounds.insert(track.into(), sound(locked));
+            settings
+        };
+        let none = DocumentSettings::default();
+        // Locking and unlocking either track, as a toggle and as its undo, each need a rebuild.
+        for track in ["a", "b"] {
+            assert!(sound_source_changed(&plan, &none, &with(track, true)));
+            assert!(sound_source_changed(&plan, &with(track, true), &none));
+            assert!(sound_source_changed(
+                &plan,
+                &with(track, true),
+                &with(track, false)
+            ));
+        }
+        // A lock on a track the plan does not have changes nothing the player sounds.
+        assert!(!sound_source_changed(
+            &plan,
+            &none,
+            &with("elsewhere", true)
+        ));
+        // Nothing but the lock-free settings changed: the cheap mix path stands.
+        assert!(!sound_source_changed(
+            &plan,
+            &with("a", true),
+            &with("a", true)
+        ));
+        assert!(!sound_source_changed(&plan, &none, &with("a", false)));
+        let mut louder = with("a", true);
+        louder.mixes.insert(
+            "a".into(),
+            crate::settings::ChannelMix {
+                gain: 0.5,
+                ..Default::default()
+            },
+        );
+        assert!(!sound_source_changed(&plan, &with("a", true), &louder));
+    }
+
     use super::*;
     fn practice(speed: f64, enabled: bool) -> PracticeSettings {
         PracticeSettings {

@@ -28,6 +28,9 @@
 /* Head */
 .sound-view .rig-head { display:flex; flex-wrap:wrap; align-items:flex-end; gap:6px 12px; padding:8px 12px; border-bottom:1px solid var(--tp-line-subtle); background:var(--tp-panel); }
 .sound-view .rig-head-gap { flex:1; }
+.sound-view .rig-lock { display:inline-flex; align-items:center; gap:6px; min-height:28px; color:var(--tp-text); font:500 12px/18px var(--tp-font-ui); white-space:nowrap; }
+.sound-view .rig-lock input { margin:0; }
+.sound-view .rig-lock:has(input[aria-disabled=true]) { opacity:.45; }
 .sound-view .rig-browser-toggle { display:none; }
 @container (max-width:1099px) { .sound-view .rig-browser-toggle { display:inline-block; } }
 

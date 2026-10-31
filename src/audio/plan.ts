@@ -344,6 +344,9 @@ function buildWithIdentities(original: model.Score, generation: number, ids: str
     laneData.set(id, { events: generated.events, gaps, markers: isolated.markers, attacks, bends });
   }
   const notes: PlanNote[] = [], played = new Map<model.Note, PlanNote[]>(), interpreted: Attack[] = [];
+  // The program each channel sounds at the start: its last program change at or before the first bar's start, else the track's own. A locked track keeps this sound.
+  const startPrograms = new Map<string, number>();
+  for (const event of complete.events.events.flatMap(e => e.type === 'program' && e.tick <= occurrences[0].startTick && e.program < 128 ? [e] : []).sort((x, y) => x.tick - y.tick || x.order - y.order)) startPrograms.set(`${event.track}/${nativeChannel(event.track, event.channel)}`, event.program);
   const byNote = new Map(all.map(source => [source.note, source]));
   let fullIndex = 0;
   // How far a pickup bar is right-aligned: the heard bar's meter less its written length in the longest part of any track or staff.
@@ -393,14 +396,17 @@ function buildWithIdentities(original: model.Score, generation: number, ids: str
         const from = origin && !source.note.beat.deadSlapped ? [...(played.get(origin) ?? [])].reverse().find(n => n.startTick < actual.start && n.source.target.track === source.track && n.source.target.staff === source.staff && n.source.target.voice === source.voice && n.source.string === Math.max(0, source.note.string)) : undefined;
         const string = source.note.beat.deadSlapped ? score.tracks[source.track].staves[source.staff].tuning.length - attack : Math.max(0, source.note.string);
         const profile = interpretations?.[ids[source.track]], styled = profile && source.note.isStringed;
+        const interpretedStyle = styled && !source.note.beat.slap && !source.note.beat.pop ? profile.style : undefined;
         const note: PlanNote = {
           id: `${ids[source.track]}/${source.staff}/${source.bar}/${source.voice}/${source.beat}/${source.index}/${occurrence.bar}/${occurrence.occurrence}/${attack}`,
           trackId: ids[source.track], source: { target: { track: source.track, staff: source.staff, bar: source.bar, voice: source.voice, beat: source.beat }, string },
           ...(source.bar !== occurrence.bar ? { playedBar: occurrence.bar } : {}),
           occurrence: occurrence.occurrence, startTick: actual.start, endTick: actual.end, key: actual.key, velocity: actual.velocity,
           channel: nativeChannel(source.track, actual.channel), program: actual.program ?? score.tracks[source.track].playbackInfo.program,
-          articulation: source.note.beat.deadSlapped ? 'dead' : articulation(source.note, actual.program ?? score.tracks[source.track].playbackInfo.program, !!from, styled && !source.note.beat.slap && !source.note.beat.pop ? profile.style : undefined), legatoFrom: from?.id ?? null, pitch: pitchCurve({ ...isolated, channel: nativeChannel(source.track, isolated.channel), start: isolated.start + barGap, end: isolated.end + barGap }, actual, lane.bends),
+          articulation: source.note.beat.deadSlapped ? 'dead' : articulation(source.note, actual.program ?? score.tracks[source.track].playbackInfo.program, !!from, interpretedStyle), legatoFrom: from?.id ?? null, pitch: pitchCurve({ ...isolated, channel: nativeChannel(source.track, isolated.channel), start: isolated.start + barGap, end: isolated.end + barGap }, actual, lane.bends),
         };
+        // What the note would sound as if its track's sound is locked: the default articulation of the start sound, not of the automated one. Left out when it is the same.
+        if (!source.note.beat.deadSlapped) { const kept = articulation(source.note, startPrograms.get(`${source.track}/${nativeChannel(source.track, actual.channel)}`) ?? score.tracks[source.track].playbackInfo.program, !!from, interpretedStyle); if (kept !== note.articulation) note.lockedArticulation = kept; }
         if (styled) {
           const beat = source.note.beat, masterBar = beat.voice.bar.masterBar;
           // Strong beats are counted from the written start; a pickup bar is right-aligned by its written length, ending where a full bar does.

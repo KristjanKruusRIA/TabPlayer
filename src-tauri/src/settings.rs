@@ -133,6 +133,8 @@ pub struct TrackSound {
     pub voice_id: Option<String>,
     pub preset_id: String,
     pub effects: FxSettings,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub locked: bool,
 }
 impl Default for TrackSound {
     fn default() -> Self {
@@ -140,6 +142,7 @@ impl Default for TrackSound {
             voice_id: None,
             preset_id: "gm".into(),
             effects: FxSettings::default(),
+            locked: false,
         }
     }
 }

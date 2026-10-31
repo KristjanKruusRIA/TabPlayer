@@ -610,6 +610,7 @@ fn sounding(fx: &FxSettings) -> DocumentSettings {
             voice_id: None,
             preset_id: "lead".into(),
             effects: fx.clone(),
+            ..Default::default()
         },
     );
     settings

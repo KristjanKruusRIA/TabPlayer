@@ -8,8 +8,9 @@ use super::{
     practice::{ClickVoice, MetronomeSettings, PulsePosition, RenderTempo},
     resources::{AudioResources, Region},
     voices::{
-        SampleVoice, VoiceParameters, articulation_name, automatic_voice_id, note_program,
-        pitch_at, select_region, voice_id_for_note, voice_id_for_track,
+        SampleVoice, VoiceParameters, articulation_name, automatic_voice_id,
+        effective_note_program, pitch_at, select_region, start_program, track_locked,
+        voice_id_for_note, voice_id_for_track, with_locked_articulations,
     },
 };
 use crate::settings::{BackingProcessing, ChannelMix, DocumentSettings};
@@ -216,6 +217,9 @@ struct Track {
     synth: Option<Synthesizer>,
     automatic: bool,
     fixed_recorded: bool,
+    locked: bool,
+    /// The program each channel starts a seek or a render from: the track's own, or for a locked track the sound in effect at the start.
+    start_programs: [u8; 16],
     percussion: bool,
     channels: [MidiChannel; 16],
     ranges: [f64; 16],
@@ -267,6 +271,7 @@ impl Renderer {
         settings: DocumentSettings,
         sample_rate: u32,
     ) -> Result<Self, String> {
+        let plan = with_locked_articulations(plan, &settings);
         let timeline = Timeline::new(&plan)?;
         let mix = PreparedMix::prepare(&settings, &plan, sample_rate)?;
         let track_indices: HashMap<_, _> = plan
@@ -292,6 +297,14 @@ impl Renderer {
                 || plan.notes.iter().any(|n| {
                     n.track_id == track.id && voice_id_for_note(&plan, n, &settings).is_none()
                 });
+            let locked = track_locked(&settings, &track.id);
+            let start_programs: [u8; 16] = std::array::from_fn(|channel| {
+                if locked {
+                    start_program(&plan, &track.id, channel as u8)
+                } else {
+                    track.program
+                }
+            });
             let synth = if has_gm {
                 let mut config = SynthesizerSettings::new(sample_rate as i32);
                 config.maximum_polyphony = 256;
@@ -300,7 +313,12 @@ impl Renderer {
                 let mut synth =
                     Synthesizer::new(&resources.sound_font, &config).map_err(|e| e.to_string())?;
                 for channel in 0..16 {
-                    synth.process_midi_message(channel, 0xc0, track.program as i32, 0);
+                    synth.process_midi_message(
+                        channel,
+                        0xc0,
+                        start_programs[channel as usize] as i32,
+                        0,
+                    );
                 }
                 Some(synth)
             } else {
@@ -318,14 +336,20 @@ impl Renderer {
                     .get(&track.id)
                     .and_then(|s| s.voice_id.as_deref())
                     .is_some_and(|id| id != "gm"),
+                locked,
+                start_programs,
                 percussion: track.percussion,
-                channels: [MidiChannel::new(track.program); 16],
+                channels: std::array::from_fn(|c| MidiChannel::new(start_programs[c])),
                 ranges: [2.0; 16],
                 rpn_msb: [127; 16],
                 rpn_lsb: [127; 16],
             });
         }
-        let note_programs: Vec<_> = plan.notes.iter().map(|n| note_program(&plan, n)).collect();
+        let note_programs: Vec<_> = plan
+            .notes
+            .iter()
+            .map(|n| effective_note_program(&plan, n, &settings))
+            .collect();
         let sustain_events: Vec<_> = plan
             .midi
             .iter()
@@ -653,9 +677,11 @@ impl Renderer {
             PlanMidiEvent::Program {
                 channel, program, ..
             } => {
-                track.channels[*channel as usize].program = *program;
-                if let Some(synth) = &mut track.synth {
-                    synth.process_midi_message(*channel as i32, 0xc0, *program as i32, 0);
+                if !track.locked {
+                    track.channels[*channel as usize].program = *program;
+                    if let Some(synth) = &mut track.synth {
+                        synth.process_midi_message(*channel as i32, 0xc0, *program as i32, 0);
+                    }
                 }
             }
             PlanMidiEvent::Controller {
@@ -990,14 +1016,15 @@ impl Renderer {
         self.next_note = self.plan.notes.partition_point(|n| n.start_tick < tick);
         self.next_midi = self.plan.midi.partition_point(|m| m.tick() < tick);
         for (track_index, track) in self.tracks.iter_mut().enumerate() {
-            track.channels = [MidiChannel::new(self.plan.tracks[track_index].program); 16];
+            let start_programs = track.start_programs;
+            track.channels = std::array::from_fn(|c| MidiChannel::new(start_programs[c]));
             if let Some(synth) = &mut track.synth {
                 synth.reset();
                 for channel in 0..16 {
                     synth.process_midi_message(
                         channel,
                         0xc0,
-                        self.plan.tracks[track_index].program as i32,
+                        start_programs[channel as usize] as i32,
                         0,
                     );
                 }

@@ -639,3 +639,26 @@ it('keeps a dead brush that ends after the last bar inside the plan',()=>{
   expect(plan.durationTick).toBe(3900);
   expect(plan.durationTick).toBe(Math.max(...plan.notes.map(n=>n.endTick)));
 });
+
+it('records the articulation a locked track keeps only where an automation would change it', () => {
+  // A guitar (program 25) with two quarter notes; an automation to a bass (33) may sit on either beat.
+  const plan = (automationAt: number | null) => {
+    const score = authored(2, 1); note(score, 0, 0); note(score, 0, 1);
+    if (automationAt !== null) score.tracks[0].staves[0].bars[0].voices[0].beats[automationAt].automations.push(model.Automation.buildInstrumentAutomation(false, 0, 33));
+    score.finish(settings);
+    return buildPlaybackPlanFromJson(model.JsonConverter.scoreToJson(score), ['base/0'], 7);
+  };
+  const played = (automationAt: number | null) => plan(automationAt).notes.map(n => n.articulation);
+  const kept = (automationAt: number | null) => plan(automationAt).notes.map(n => n.lockedArticulation ?? n.articulation);
+  const written = played(null);
+  expect(written).toEqual(['picked', 'picked']);
+  // Unlocked, the automation on the second beat makes that note a bass; locked, the guitar's articulation stays.
+  expect(played(1)).toEqual(['picked', 'fingered']);
+  expect(plan(1).notes.map(n => n.lockedArticulation)).toEqual([undefined, 'picked']);
+  expect(kept(1)).toEqual(written);
+  // The lock keeps the sound in effect at the start: with the automation on the first beat that is the bass, as it is unlocked.
+  expect(played(0)).toEqual(['fingered', 'fingered']);
+  expect(kept(0)).toEqual(played(0));
+  // A plan with no automation carries no extra field.
+  expect(plan(null).notes.every(n => !('lockedArticulation' in n))).toBe(true);
+});

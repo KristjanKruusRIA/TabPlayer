@@ -983,3 +983,48 @@ it('leaves the chain footswitch undimmed by the shared aria-disabled dimming whi
   expect(rule).toContain('button.is-disabled:not(.rig-footswitch)');
   expect(readFileSync(resolve(__dirname, 'rig.css'), 'utf8')).not.toMatch(/\.rig-footswitch[^{]*\{[^}]*opacity/);
 });
+
+it('puts the sound lock in the head, and one click or Space records one undoable edit', async()=>{
+  const {edits,last}=mount(soundPreset('lead','green-guitar'));
+  const lock=within(document.querySelector('.rig-head') as HTMLElement).getByRole('checkbox',{name:'Lock sound against automations'});
+  expect(lock).not.toBeChecked();
+  await userEvent.click(lock);
+  expect(edits).toHaveLength(1);expect(last()).toEqual({...soundPreset('lead','green-guitar'),locked:true});
+  expect(lock).toBeChecked();
+  lock.focus();await userEvent.keyboard(' ');
+  expect(edits).toHaveLength(2);expect(last()).toEqual(soundPreset('lead','green-guitar'));expect(last()).not.toHaveProperty('locked');
+  expect(lock).not.toBeChecked();
+});
+
+it('keeps the track locked through a preset and a source change made in the rig', async()=>{
+  const {last}=mount({...soundPreset('lead','green-guitar'),locked:true});
+  await userEvent.click(within(screen.getByRole('radiogroup',{name:'Sound preset'})).getByRole('radio',{name:'Crunch'}));
+  expect(last()).toEqual({...soundPreset('crunch','green-guitar'),locked:true});
+  await userEvent.click(screen.getByRole('button',{name:'Restore preset'}));
+  expect(last()).toEqual({...soundPreset('crunch','green-guitar'),locked:true});
+});
+
+it('refuses the lock while busy, keeps it focusable and records nothing', async()=>{
+  const {edits}=mount(soundPreset('lead','green-guitar'),{busy:true});
+  const lock=screen.getByRole('checkbox',{name:'Lock sound against automations'});
+  expect(lock).toHaveAttribute('aria-disabled','true');expect(lock).not.toBeDisabled();
+  lock.focus();expect(lock).toHaveFocus();
+  await userEvent.click(lock);await userEvent.keyboard(' ');
+  expect(edits).toHaveLength(0);expect(lock).not.toBeChecked();expect(lock).toHaveFocus();
+});
+
+it('keeps focus on the lock across the busy flicker its own edit causes', async()=>{
+  const user=userEvent.setup(),edits:Extract<EditCommand,{type:'setTrackSound'}>[]=[];
+  function Host() {
+    const [sound,setSound]=useState(soundPreset('lead')),[busy,setBusy]=useState(false);
+    return <SoundRig trackId="guitar" sound={sound} tracks={[{id:'guitar',name:'Lead Guitar',program:29}]} onTrack={()=>{}} busy={busy}
+      onEdit={async command=>{if(command.type==='setTrackSound'){edits.push(command);setBusy(true);setSound(command.sound);await Promise.resolve();setBusy(false);}}}/>;
+  }
+  render(<Host/>);
+  const lock=screen.getByRole('checkbox',{name:'Lock sound against automations'});
+  lock.focus();await user.keyboard(' ');
+  expect(lock).toHaveFocus();expect(lock).toBeChecked();
+  await user.keyboard(' ');
+  expect(lock).toHaveFocus();expect(lock).not.toBeChecked();
+  expect(edits.map(edit=>!!edit.sound.locked)).toEqual([true,false]);
+});

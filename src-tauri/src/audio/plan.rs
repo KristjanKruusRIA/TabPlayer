@@ -113,6 +113,9 @@ pub struct PlanNote {
     pub key: u8,
     pub velocity: u8,
     pub articulation: Articulation,
+    /// The articulation the note has when its track's sound is locked: the default of the start sound, where an automation would change it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub locked_articulation: Option<Articulation>,
     pub legato_from: Option<String>,
     pub pitch: Vec<PitchPoint>,
 }

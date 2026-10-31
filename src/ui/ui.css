@@ -1,0 +1,80 @@
+/* Bundled fonts, so the interface looks the same offline. Both are SIL OFL 1.1; see THIRD_PARTY_NOTICES.md. */
+@import '@fontsource/instrument-sans/latin-400.css';
+@import '@fontsource/instrument-sans/latin-500.css';
+@import '@fontsource/instrument-sans/latin-600.css';
+@import '@fontsource/instrument-sans/latin-700.css';
+@import '@fontsource/ibm-plex-mono/latin-400.css';
+@import '@fontsource/ibm-plex-mono/latin-500.css';
+
+/* Design tokens. Warm charcoal surfaces; lime means playback and "on", blue the edit selection, tungsten is for amp hardware only. */
+:root {
+  --tp-base:#141311; --tp-panel:#1E1C19; --tp-raised:#2A2723; --tp-input:#100F0D;
+  --tp-line-subtle:#37332D; --tp-line-strong:#57514A;
+  --tp-text:#F1ECE3; --tp-muted:#B5ADA1;
+  --tp-on:#B8E45F; --tp-on-ink:#1A2108; --tp-edit:#6FA8FF; --tp-warning:#E9B65C; --tp-error:#F2907A;
+  --tp-amp:#C29A5B; --tp-amp-ink:#231A0E;
+  --tp-radius-s:4px; --tp-radius-m:6px;
+  --tp-font-ui:'Instrument Sans',ui-sans-serif,'Segoe UI',sans-serif;
+  --tp-font-mono:'IBM Plex Mono',ui-monospace,'Cascadia Mono',Consolas,monospace;
+}
+
+/* Knob */
+.tp-knob { --knob-track:var(--tp-line-strong); --knob-arc:var(--tp-on); --knob-body:var(--tp-raised); --knob-edge:var(--tp-line-strong); --knob-cap:var(--tp-line-subtle); --knob-pointer:var(--tp-text);
+  display:inline-flex; flex-direction:column; align-items:center; gap:2px; min-width:var(--knob-size,56px); font-family:var(--tp-font-ui); user-select:none; }
+.tp-knob[data-tone=amp] { --knob-track:color-mix(in srgb,var(--tp-amp-ink) 40%,transparent); --knob-arc:var(--tp-amp-ink); --knob-body:var(--tp-amp-ink); --knob-edge:#0d0905; --knob-cap:color-mix(in srgb,var(--tp-amp) 30%,var(--tp-amp-ink)); --knob-pointer:var(--tp-amp); }
+.tp-knob-dial { width:var(--knob-size,56px); height:var(--knob-size,56px); border-radius:50%; cursor:ns-resize; touch-action:none; outline-offset:1px; }
+.tp-knob-dial:focus-visible { outline:2px solid var(--tp-edit); }
+.tp-knob-dial svg { display:block; width:100%; height:100%; overflow:visible; }
+.tp-knob-track,.tp-knob-arc { fill:none; stroke-width:3; stroke-linecap:round; }
+.tp-knob-track { stroke:var(--knob-track); } .tp-knob-arc { stroke:var(--knob-arc); }
+.tp-knob-body { fill:var(--knob-body); stroke:var(--knob-edge); stroke-width:1.5; } .tp-knob-cap { fill:var(--knob-cap); }
+.tp-knob-pointer { stroke:var(--knob-pointer); stroke-width:3; stroke-linecap:round; }
+.tp-knob-tick { stroke:var(--knob-ink,currentColor); stroke-width:1; stroke-linecap:round; }
+.tp-knob-num { fill:var(--knob-ink,currentColor); font:600 6.6px var(--tp-font-ui); }
+.tp-knob-knurl { fill:none; stroke:#050302; stroke-width:2.6; stroke-dasharray:1.15 1.05; opacity:.85; }
+.tp-knob[data-tone=amp] .tp-knob-pointer { stroke:#1a1208; stroke-width:2.8; }
+.tp-knob[data-disabled] { opacity:.5; } .tp-knob[data-disabled] .tp-knob-dial { cursor:default; }
+.tp-knob-label { max-width:calc(var(--knob-size,56px) + 28px); font-size:11px; font-weight:600; line-height:1.2; letter-spacing:.04em; text-transform:uppercase; color:var(--tp-muted); text-align:center; }
+.tp-knob[data-tone=amp] .tp-knob-label { color:var(--knob-ink,var(--tp-amp-ink)); }
+.tp-knob-readout,.tp-knob .tp-knob-field { font-family:var(--tp-font-mono); font-size:11px; line-height:16px; font-variant-numeric:tabular-nums; color:var(--tp-text); }
+.tp-knob[data-tone=amp] .tp-knob-readout { color:var(--knob-ink,var(--tp-amp-ink)); }
+.tp-knob-readout { min-height:16px; cursor:text; border-radius:var(--tp-radius-s); padding:0 3px; }
+.tp-knob:not([data-disabled]) .tp-knob-readout:hover { background:color-mix(in srgb,currentColor 14%,transparent); }
+.tp-knob .tp-knob-field { width:calc(var(--knob-size,56px) + 8px); min-height:20px; padding:0 3px; text-align:center; border:1px solid var(--tp-edit); border-radius:var(--tp-radius-s); background:var(--tp-input); color:var(--tp-text); }
+
+/* Fader */
+.tp-fader { display:inline-flex; flex-direction:column; align-items:center; gap:4px; width:44px; height:100%; min-height:130px; font-family:var(--tp-font-ui); user-select:none; }
+.tp-fader-track { position:relative; flex:1; width:36px; min-height:80px; cursor:ns-resize; touch-action:none; border-radius:var(--tp-radius-s); }
+.tp-fader-track:focus-visible { outline:2px solid var(--tp-edit); outline-offset:1px; }
+.tp-fader-rail { position:absolute; left:50%; top:7px; bottom:7px; width:4px; margin-left:-2px; border-radius:2px; background:var(--tp-input); box-shadow:inset 0 0 0 1px var(--tp-line-subtle); }
+.tp-fader-zero { position:absolute; left:6px; right:6px; height:1px; margin-bottom:-.5px; background:var(--tp-line-strong); }
+.tp-fader-thumb { position:absolute; left:3px; right:3px; height:14px; border-radius:3px; background:var(--tp-raised); box-shadow:inset 0 0 0 1px var(--tp-line-strong), inset 0 6px 0 -5px var(--tp-text); }
+.tp-fader[data-disabled] { opacity:.5; } .tp-fader[data-disabled] .tp-fader-track { cursor:default; }
+.tp-fader-readout { font-family:var(--tp-font-mono); font-size:11px; line-height:16px; color:var(--tp-text); font-variant-numeric:tabular-nums; }
+.tp-fader .tp-fader-field { width:44px; min-height:20px; padding:0 2px; text-align:center; border:1px solid var(--tp-edit); border-radius:var(--tp-radius-s); background:var(--tp-input); color:var(--tp-text); font:400 11px/16px var(--tp-font-mono); }
+.tp-fader-readout { cursor:text; }
+.tp-fader-label { font-size:11px; font-weight:600; line-height:1.2; letter-spacing:.04em; text-transform:uppercase; color:var(--tp-muted); }
+
+/* Segmented */
+.tp-segmented { display:inline-flex; flex-wrap:wrap; gap:2px; padding:2px; border:1px solid var(--tp-line-subtle); border-radius:var(--tp-radius-s); background:var(--tp-input); font-family:var(--tp-font-ui); }
+.tp-segmented .tp-seg-option { min-height:26px; padding:2px 10px; border:1px solid transparent; border-radius:3px; background:transparent; color:var(--tp-muted); font:500 12px/18px var(--tp-font-ui); white-space:nowrap; cursor:pointer; }
+.tp-segmented .tp-seg-option:hover:not(:disabled):not([aria-disabled=true]) { background:var(--tp-panel); color:var(--tp-text); border-color:transparent; }
+.tp-segmented .tp-seg-option[aria-checked=true] { background:var(--tp-raised); color:var(--tp-text); border-color:var(--tp-line-strong); font-weight:600; }
+.tp-segmented .tp-seg-option:focus-visible { outline:2px solid var(--tp-edit); outline-offset:1px; }
+.tp-segmented .tp-seg-option:is(:disabled,[aria-disabled=true]) { opacity:.45; border-style:solid; border-color:transparent; cursor:default; color:var(--tp-muted); }
+
+/* Dialog */
+.tp-dialog-backdrop { position:fixed; inset:0; z-index:40; display:flex; align-items:center; justify-content:center; padding:16px; background:rgb(10 9 8 / .7); }
+.tp-dialog { display:flex; flex-direction:column; width:min(440px,100%); max-height:calc(100dvh - 32px); border:1px solid var(--tp-line-strong); border-radius:var(--tp-radius-m); background:var(--tp-panel); color:var(--tp-text); font-family:var(--tp-font-ui); }
+.tp-dialog:focus { outline:none; }
+.tp-dialog-head { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 16px; border-bottom:1px solid var(--tp-line-subtle); }
+.tp-dialog-head h2 { margin:0; font:600 14px/20px var(--tp-font-ui); text-transform:none; letter-spacing:0; color:var(--tp-text); }
+.tp-dialog .tp-dialog-close { min-height:28px; min-width:28px; padding:0; border:1px solid transparent; border-radius:var(--tp-radius-s); background:transparent; color:var(--tp-muted); font-size:18px; line-height:1; }
+.tp-dialog .tp-dialog-close:hover:enabled { background:var(--tp-raised); color:var(--tp-text); border-color:transparent; }
+.tp-dialog-body { padding:16px; overflow:auto; font-size:13px; line-height:1.45; color:var(--tp-text); }
+.tp-dialog-foot { display:flex; justify-content:flex-end; gap:8px; padding:12px 16px; border-top:1px solid var(--tp-line-subtle); }
+.tp-dialog :is(button,input):focus-visible { outline:2px solid var(--tp-edit); outline-offset:2px; }
+.tp-dialog .tp-dialog-foot button { min-height:30px; padding:4px 14px; border:1px solid var(--tp-line-strong); border-radius:var(--tp-radius-s); background:var(--tp-raised); color:var(--tp-text); font:500 13px/20px var(--tp-font-ui); }
+.tp-dialog .tp-dialog-foot button:hover:enabled { border-color:var(--tp-text); background:var(--tp-raised); }
+.tp-dialog .tp-dialog-foot button.tp-danger { border-color:var(--tp-error); color:var(--tp-error); }
+.tp-dialog .tp-dialog-foot button.tp-primary { border-color:var(--tp-on); background:var(--tp-on); color:var(--tp-on-ink); font-weight:600; }

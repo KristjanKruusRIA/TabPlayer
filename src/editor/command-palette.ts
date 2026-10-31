@@ -5,7 +5,7 @@ import { readExpression } from './expressions';
 
 /** What a palette command does: an undoable edit, a selection move, or an application command. */
 export type PaletteAction={kind:'edit';command:EditCommand}|{kind:'select';target:BeatTarget}|{kind:'app';name:'undo'|'redo'|'play'|'new'|'open'|'importAscii'|'save'|'saveAs'|'export'|'help'|'about'};
-export interface PaletteContext {score:model.Score;target:BeatTarget;string:number;canUndo:boolean;canRedo:boolean;/** The document is finalized: edit actions, undo and redo cannot run. */locked?:boolean}
+export interface PaletteContext {score:model.Score;target:BeatTarget;string:number;canUndo:boolean;canRedo:boolean;/** The document is finalized: edit actions, undo and redo cannot run. */locked?:boolean;/** The score is hidden (e.g. in Sound view): score editing commands cannot run. */scoreHidden?:boolean}
 /** A command matching the typed text, with either a ready action or the reason it cannot run. */
 export interface PaletteMatch {id:string;title:string;hint:string;keys?:string;action?:PaletteAction;error?:string}
 

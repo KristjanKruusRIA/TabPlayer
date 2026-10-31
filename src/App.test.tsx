@@ -184,6 +184,29 @@ it('reveals paste options through a collapsed Edit task without changing history
   expect(editTask.open).toBe(true);expect(clipboardSummary).toHaveFocus();expect(scroll).toHaveBeenCalledWith({block:'nearest'});expect(c.getState().snapshot).toBe(before);
 });
 
+it('leaves the score alone from the Sound view: no cut, paste or select-all, while undo, palette and play still work',async()=>{
+  const c=await setup(),workspace=screen.getByRole('region',{name:'Score workspace'});
+  click('Set note');await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(1));
+  click('Select bar');fireEvent.keyDown(workspace,{key:'c',ctrlKey:true});
+  const edits=()=>c.getState().snapshot.project.edits.length,view=screen.getByRole('radiogroup',{name:'View'});
+  fireEvent.click(within(view).getByRole('radio',{name:'Sound'}));
+  const rig=await screen.findByRole('region',{name:'Sound rig'}),at=edits(),selection=c.getState().snapshot;
+  for(const init of [{key:'x',ctrlKey:true},{key:'v',ctrlKey:true},{key:'v',ctrlKey:true,shiftKey:true},{key:'a',ctrlKey:true},{key:'Escape'},{key:'x',metaKey:true},{key:'v',metaKey:true}])fireEvent.keyDown(within(rig).getByRole('tab',{name:/^Amp, /}),init);
+  fireEvent.keyDown(rig,{key:'p',ctrlKey:true,shiftKey:true});
+  await new Promise(resolve=>setTimeout(resolve,30));
+  expect(edits()).toBe(at);expect(c.getState().snapshot).toBe(selection);
+  expect(screen.getByRole('dialog',{name:/command/i})).toBeInTheDocument();
+  fireEvent.keyDown(screen.getByRole('combobox',{name:/command/i}),{key:'Escape'});
+  expect(screen.queryByRole('dialog',{name:/command/i})).not.toBeInTheDocument();
+  // Undo is a document command, so it still works from here, and Space still plays.
+  fireEvent.keyDown(rig,{key:'z',ctrlKey:true});await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(0));
+  // Back in the score the same keys act on it again.
+  fireEvent.click(within(view).getByRole('radio',{name:'Score'}));
+  click('Select bar');fireEvent.keyDown(workspace,{key:'x',ctrlKey:true});
+  // The undo left one edit fewer; a cut in the score is a new edit again.
+  await waitFor(()=>expect(edits()).toBe(at));
+});
+
 it.each(['Add pitched track','Add percussion track'])('omits string caret context for %s',async action=>{
   const c=await setup();click(action);await waitFor(()=>expect(c.getState().score.tracks).toHaveLength(2));
   fireEvent.click(functionalButton(/^Track 2:/));
@@ -402,6 +425,57 @@ it('persists selected track sound and mixer without replacing the score identity
   const c=await setup(),score=c.getState().score;change('Sound source','green-guitar');await waitFor(()=>expect(c.getState().settings.sounds['base/0'].voiceId).toBe('green-guitar'));expect(c.getState().score).toBe(score);
   fireEvent.click(exposeFunctionalControl(screen.getByLabelText('Mute')));await waitFor(()=>expect(c.getState().settings.mixes['base/0'].mute).toBe(true));expect(c.getState().score).toBe(score);
   expect(integration.beforeScoreChange).not.toHaveBeenCalled();expect(integration.loadDocument).toHaveBeenLastCalledWith(c.getState().snapshot.project,expect.objectContaining({score,settings:c.getState().settings}),0,0);
+});
+it('shows the Sound rig over the whole workspace while the transport stays, and edits through the same undoable history',async()=>{
+  const c=await setup(),score=c.getState().score,before=c.getState().snapshot.project.edits.length;
+  const view=screen.getByRole('radiogroup',{name:'View'});expect(within(view).getByRole('radio',{name:'Score'})).toBeChecked();
+  expect(screen.queryByRole('region',{name:'Sound rig'})).not.toBeInTheDocument();
+  fireEvent.click(within(view).getByRole('radio',{name:'Sound'}));
+  const rig=await screen.findByRole('region',{name:'Sound rig'});
+  // The transport is still there to play and loop while the sound changes, and the inspector's panel gives way to the rig.
+  expect(document.querySelector('[aria-keyshortcuts="Space"]')).toBeInTheDocument();
+  expect(screen.getAllByLabelText('Sound source')).toHaveLength(1);expect(rig).toContainElement(screen.getByLabelText('Sound source'));
+  expect(within(rig).getAllByRole('tab')).toHaveLength(18);
+  // One knob drag is one edit in the document's history, and undo takes it back.
+  fireEvent.click(within(rig).getByRole('tab',{name:'Drive, bypassed'}));
+  const drive=within(rig).getByRole('slider',{name:'drive Drive'});
+  fireEvent.pointerDown(drive,{clientY:300,pointerId:1});for(const y of [290,270,240])fireEvent.pointerMove(drive,{clientY:y,pointerId:1});fireEvent.pointerUp(drive,{clientY:240,pointerId:1});
+  await waitFor(()=>expect(c.getState().settings.sounds['base/0'].effects.drive.drive).toBe(.88));
+  expect(c.getState().snapshot.project.edits).toHaveLength(before+1);expect(c.getState().score).toBe(score);
+  fireEvent.click(within(rig).getByRole('switch',{name:'Enable drive'}));
+  await waitFor(()=>expect(c.getState().settings.sounds['base/0'].effects.drive.enabled).toBe(true));
+  expect(c.getState().snapshot.project.edits).toHaveLength(before+2);
+  fireEvent.click(screen.getByRole('button',{name:'Undo'}));
+  await waitFor(()=>expect(c.getState().settings.sounds['base/0'].effects.drive.enabled).toBe(false));
+  expect(c.getState().settings.sounds['base/0'].effects.drive.drive).toBe(.88);
+  // Back to the score: the rig is gone and the inspector's Sound panel is back, unchanged.
+  fireEvent.click(within(view).getByRole('radio',{name:'Score'}));
+  expect(screen.queryByRole('region',{name:'Sound rig'})).not.toBeInTheDocument();
+  expect(screen.getByLabelText('Sound source')).toBeInTheDocument();
+  expect(c.getState().settings.sounds['base/0'].effects.drive.drive).toBe(.88);
+});
+it('opens command palette in Sound view for non-score commands and refuses score-editing commands',async()=>{
+  const c=await setup();
+  const view=screen.getByRole('radiogroup',{name:'View'});
+  fireEvent.click(within(view).getByRole('radio',{name:'Sound'}));
+  await screen.findByRole('region',{name:'Sound rig'});
+  const shell=document.querySelector('.app-shell')!;
+  const event=new KeyboardEvent('keydown',{key:'P',code:'KeyP',ctrlKey:true,shiftKey:true,bubbles:true,cancelable:true});
+  shell.dispatchEvent(event);
+  expect(event.defaultPrevented).toBe(true);
+  const palette=await screen.findByRole('dialog',{name:'Commands'});
+  const input=within(palette).getByRole('combobox',{name:'Command'});
+  fireEvent.change(input,{target:{value:'append measure'}});
+  const before=c.getState().score.masterBars.length;
+  expect(within(palette).getAllByRole('option')[0]).toHaveTextContent('Score editing is unavailable while the score is hidden.');
+  fireEvent.keyDown(input,{key:'Enter'});
+  expect(c.getState().score.masterBars.length).toBe(before);
+  fireEvent.change(input,{target:{value:'play'}});
+  fireEvent.keyDown(input,{key:'Enter'});
+  await waitFor(()=>expect(screen.queryByRole('dialog',{name:'Commands'})).not.toBeInTheDocument());
+  const aEvent=new KeyboardEvent('keydown',{key:'a',ctrlKey:true,bubbles:true,cancelable:true});
+  shell.dispatchEvent(aEvent);
+  expect(aEvent.defaultPrevented).toBe(true);
 });
 it('loads documents into native playback and opening does not reset saved mix',async()=>{
   const c=await setup();await waitFor(()=>expect(integration.loadDocument).toHaveBeenCalled());fireEvent.click(exposeFunctionalControl(screen.getByLabelText('Mute')));await waitFor(()=>expect(c.getState().settings.mixes['base/0'].mute).toBe(true));

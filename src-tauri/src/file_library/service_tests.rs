@@ -55,6 +55,7 @@ fn add(
                 .active
                 .document_id
         }
+        DocumentIntake::Locked { .. } => panic!("These scores are not password-protected."),
     };
     let snapshot = state.document(&id).unwrap();
     DocumentRevision {

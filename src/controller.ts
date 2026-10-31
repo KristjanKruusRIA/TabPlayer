@@ -6,6 +6,7 @@ import { getPartialCapo } from './editor/partial-capo';
 import type { DocumentId,DocumentRevision,DocumentSnapshot } from './workspace/types';
 import { isSettingsEdit,type BackingSettings } from './edit-types';
 import type { NativeBridge } from './bridge';
+import type { ProtectionRequest } from './protection/protection';
 import type { ClipboardMode,MusicClip } from './editor/clipboard-types';
 import type { MusicSelection } from './editor/range-types';
 import { makeMusicClip,musicClipSelection } from './editor/clipboard-source';
@@ -164,6 +165,18 @@ export class DocumentController {
     const record=await this.bridge.setLock(lock,current.revision);this.verifyRecord(record);
     this.update({...record});
   }); }
+  /**
+   * Gives or withdraws the password to edit, or sets, changes or removes a password. Not an edit: history and the redo
+   * stack stay as they are. A refused password rejects without leaving the controller's own error behind, because the
+   * dialog that asked shows the reason beside the field.
+   */
+  protect(request:ProtectionRequest) {
+    return this.run(async()=>{
+      if(!this.bridge.protect)throw new Error('Password protection is unavailable.');
+      const record=await this.bridge.protect(request,this.state.revision);this.verifyRecord(record);
+      this.update({...record});
+    }).catch(error=>{this.update({error:null});throw error;});
+  }
   save(saveAs = false) { return this.run(()=>this.saveNow(saveAs)); }
   export() { return this.run(async()=>{
     if(!await this.bridge.confirmExport())return;

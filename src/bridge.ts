@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { confirm, message } from '@tauri-apps/plugin-dialog';
 import type { DocumentLock, EditCommand } from './project';
+import type { ProtectionRequest } from './protection/protection';
 import type { DocumentId,DocumentSnapshot,NativeWorkspaceBridge } from './workspace/types';
 import {readExportBackingAsset} from './export/backing-asset-read';
 import { newScoreDefaults } from './workspace/author-defaults';
@@ -14,6 +15,8 @@ export interface NativeBridge {
   redo(revision:number): Promise<DocumentSnapshot>;
   /** Finalizes or unfinalizes the document. The lock is not an edit and has no history entry. */
   setLock(lock:DocumentLock|null,revision:number): Promise<DocumentSnapshot>;
+  /** Sets, changes or removes a password, or gives or withdraws the password to edit. Not an edit: no history entry. Absent bridges have no passwords. */
+  protect?(request:ProtectionRequest,revision:number): Promise<DocumentSnapshot>;
   /** Marks a score read from a file as one whose partial capo applies; not an edit. Absent bridges leave the project unmarked. */
   markPartialCapo?(revision:number): Promise<DocumentSnapshot>;
   saveProject(saveAs: boolean,revision:number): Promise<DocumentSnapshot | null>;
@@ -31,6 +34,7 @@ export const nativeWorkspaceBridge:NativeWorkspaceBridge={
   createBlankDocument: () => invoke('new_document',{defaults:newScoreDefaults()}),
   importConverted:(name,bytes)=>invoke('import_converted',{name,bytes:Array.from(bytes)}),
   cancelDocument: token => invoke('cancel_document',{token}),
+  unlockDocument: (token,password) => invoke('unlock_locked_document',{token,password}),
   addDocument:token=>invoke('workspace_add',{token}),
   activateDocument:documentId=>invoke('workspace_activate',{documentId}),
   closeDocuments:documents=>invoke('workspace_close',{documents}),
@@ -44,6 +48,7 @@ export function createDocumentBridge(documentId:DocumentId,observer?:DocumentSav
   applyEdit: (command,revision,assetToken) => invoke('apply_edit',{document:{documentId,revision},command,assetToken}),
   undo: revision => invoke('undo_edit',{document:{documentId,revision}}), redo: revision => invoke('redo_edit',{document:{documentId,revision}}),
   setLock: (lock,revision) => invoke('document_set_lock',{document:{documentId,revision},lock}),
+  protect: (request,revision) => invoke('document_protection',{document:{documentId,revision},request}),
   markPartialCapo: revision => invoke('document_mark_partial_capo',{document:{documentId,revision}}),
   saveProject: async (saveAs,revision) => {
     const record=await (desktopTest?invoke<DocumentSnapshot|null>('desktop_test_io',{action:'save',documentId,revision}):invoke<DocumentSnapshot|null>('save_project',{document:{documentId,revision},saveAs}));

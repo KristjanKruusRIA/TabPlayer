@@ -12,6 +12,8 @@ pub mod fs_identity;
 pub mod harmony;
 pub mod harmony_library;
 pub mod intake;
+pub mod password_crypto;
+pub mod password_lock;
 pub mod project;
 pub mod recovery;
 pub mod reveal;
@@ -504,6 +506,50 @@ fn document_set_lock(
 }
 
 #[tauri::command]
+async fn document_protection(
+    document: DocumentRevision,
+    request: password_lock::ProtectionRequest,
+    app: AppHandle,
+) -> Result<DocumentSnapshot, String> {
+    // The key derivation takes a fraction of a second; it runs here, off the command thread and off every lock.
+    tauri::async_runtime::spawn_blocking(move || {
+        let result = password_lock::apply_protection(
+            &app.state::<Arc<Mutex<DocumentWorkspace>>>(),
+            &document,
+            request,
+        );
+        if result
+            .as_ref()
+            .is_ok_and(|snapshot| snapshot.revision != document.revision)
+        {
+            app.state::<session::SessionRuntime>().changed();
+        }
+        result
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+/// Tries a password on a sealed file waiting to open. A wrong one leaves the file waiting.
+#[tauri::command]
+async fn unlock_locked_document(
+    token: String,
+    password: password_crypto::Secret,
+    app: AppHandle,
+) -> Result<DocumentIntake, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        file_library::commands::admit_app(&app)?;
+        password_lock::unlock_document(
+            &app.state::<Arc<Mutex<DocumentWorkspace>>>(),
+            &token,
+            &password,
+        )
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
 fn document_mark_partial_capo(
     document: DocumentRevision,
     state: State<'_, Arc<Mutex<DocumentWorkspace>>>,
@@ -982,6 +1028,8 @@ pub fn run() {
         apply_edit,
         undo_edit,
         document_set_lock,
+        document_protection,
+        unlock_locked_document,
         document_mark_partial_capo,
         redo_edit,
         save_project,
@@ -1066,6 +1114,8 @@ pub fn run() {
         apply_edit,
         undo_edit,
         document_set_lock,
+        document_protection,
+        unlock_locked_document,
         document_mark_partial_capo,
         redo_edit,
         save_project,

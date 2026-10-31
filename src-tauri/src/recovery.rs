@@ -1,5 +1,5 @@
 use crate::{
-    project::{BaseDocument, ProjectCheckpoint, ProjectSession},
+    project::{BaseDocument, Project, ProjectCheckpoint, ProjectSession},
     workspace::{DocumentSnapshot, WorkspaceSnapshot, path_identity, same_path},
 };
 use serde::{Deserialize, Deserializer, Serialize, de::Error};
@@ -779,6 +779,28 @@ pub fn reconcile_paths(value: &mut ValidatedRecovery) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+/// A recovery backup is a plain file. A document under a password to open is therefore never written to one: its
+/// place, view and revision stay so every other rule about the backup holds, but its score is a blank one. Work in
+/// it that is not saved cannot be recovered; the backup says nothing of what the document held.
+pub fn redact_sealed(documents: Vec<RecoveryDocument>) -> Vec<RecoveryDocument> {
+    documents
+        .into_iter()
+        .map(|document| {
+            if !document.session.is_sealed() {
+                return document;
+            }
+            RecoveryDocument {
+                session: ProjectSession::new(Project::blank(), None)
+                    .expect("a blank project is valid")
+                    .checkpoint(),
+                imported_path: None,
+                saved_file_sha256: None,
+                ..document
+            }
+        })
+        .collect()
 }
 
 #[derive(Clone, Debug, PartialEq)]

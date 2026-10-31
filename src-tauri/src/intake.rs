@@ -1,4 +1,5 @@
 use crate::{
+    password_crypto::{check_sealed, is_sealed},
     project::Project,
     workspace::{DocumentIntake, DocumentWorkspace},
 };
@@ -54,6 +55,20 @@ fn read_candidate_using(
         scope,
         if native { PROJECT_LIMIT } else { SCORE_LIMIT },
     )?;
+    if native && is_sealed(&bytes) {
+        // A sealed project reveals nothing, not even its title, until its password opens it.
+        check_sealed(&bytes)?;
+        let digest = format!("{:x}", Sha256::digest(&bytes));
+        if scope.is_some() && resolve(&path, scope)? != original {
+            return Err(CHANGED.into());
+        }
+        let mut state = workspace.lock().map_err(|error| error.to_string())?;
+        admit()?;
+        check_admission(&state)?;
+        return state
+            .stage_locked(path, bytes, digest)
+            .map(|locked| DocumentIntake::Locked { locked });
+    }
     let (project, native_path, digest) = if native {
         let project: Project =
             serde_json::from_slice(&bytes).map_err(|error| format!("Invalid project: {error}"))?;
@@ -285,7 +300,9 @@ mod tests {
         let bytes = b"PK\x03\x04converted";
         let stage = || match stage_converted("riff.gp", bytes, &workspace).unwrap() {
             DocumentIntake::Candidate { candidate } => candidate,
-            DocumentIntake::Existing { .. } => panic!("a converted score is always new"),
+            DocumentIntake::Existing { .. } | DocumentIntake::Locked { .. } => {
+                panic!("a converted score is always new")
+            }
         };
         let first = stage();
         assert_eq!(first.path, None);

@@ -734,6 +734,7 @@ impl Inner {
     ) -> Result<RecoveryStatus, String> {
         self.state.lock().unwrap().status.state = RecoveryState::Writing;
         self.publish_latest();
+        let documents = crate::recovery::redact_sealed(documents);
         let result = {
             let mut store = self.store.lock().unwrap();
             let (epoch, generation) = store.next_identity(retire)?;

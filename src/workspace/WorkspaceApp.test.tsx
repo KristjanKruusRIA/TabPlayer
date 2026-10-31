@@ -292,3 +292,27 @@ it.each([false,true])('a successful drop preserves a new Library history warning
   const f=fixture(),w=await WorkspaceController.create(f.bridge),bridge=libraryBridge(),library=await WorkspaceLibrary.create(w,bridge,{run:vi.fn(),dispose:vi.fn()},{blocked:()=>null,restoredWorkingDocument:true});bridge.dropStage=vi.fn().mockImplementationOnce(async()=>{library.reportError('History could not be written. Retry in Library.');return {kind:'existing' as const,documentId:f.first};}).mockRejectedValueOnce(new Error('Unsupported file.'));
   await library.drop({dropToken:'native',count:withFailure?2:1});expect(library.getState().error).toBe('Library: History could not be written. Retry in Library.'+(withFailure?' 1 score opened. Unsupported file.':''));expect(w.getState().active.documentId).toBe(f.first);expect(w.getState().busy).toBe(false);library.dispose();
 });
+
+it('a protected file opens through a password dialog that survives a wrong password and goes away when it is cancelled or answered',async()=>{
+  const f=fixture(),workspace=await WorkspaceController.create(f.bridge);render(<WorkspaceApp workspace={workspace}/>);
+  const locked={token:'locked-token',path:'C:/scores/band.tabplayer',fileName:'band.tabplayer'};
+  f.bridge.unlockDocument=vi.fn(async(_token:string,password:string)=>{if(password!=='right password')throw new Error('The password is incorrect, or this file is damaged.');return {kind:'candidate' as const,candidate:f.stage(blankProject(),locked.token)};});
+  vi.mocked(f.bridge.readDocument).mockResolvedValue({kind:'locked',locked});
+  // Cancelling opens nothing and stops the file waiting.
+  let opening=workspace.openDocument();
+  expect(await screen.findByRole('dialog',{name:'Password required'})).toHaveTextContent('“band.tabplayer” is password-protected.');
+  expect(workspace.getState().busy).toBe(true);
+  fireEvent.click(screen.getByRole('button',{name:'Cancel'}));
+  expect(await opening).toBe(false);
+  expect(screen.queryByRole('dialog')).toBeNull();expect(f.bridge.cancelDocument).toHaveBeenCalledWith(locked.token);expect(workspace.getState().documents).toHaveLength(1);expect(workspace.getState().busy).toBe(false);
+  // A wrong password keeps the dialog; the right one opens the file.
+  opening=workspace.openDocument();
+  const field=await screen.findByLabelText('Password');
+  fireEvent.change(field,{target:{value:'wrong password'}});fireEvent.click(screen.getByRole('button',{name:'Open'}));
+  expect(await screen.findByRole('alert')).toHaveTextContent('The password is incorrect, or this file is damaged.');
+  expect(workspace.getState().documents).toHaveLength(1);
+  fireEvent.change(field,{target:{value:'right password'}});fireEvent.click(screen.getByRole('button',{name:'Open'}));
+  expect(await opening).toBe(true);
+  await waitFor(()=>expect(screen.queryByRole('dialog')).toBeNull());
+  expect(workspace.getState().documents).toHaveLength(2);
+});

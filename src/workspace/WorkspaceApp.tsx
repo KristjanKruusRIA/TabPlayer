@@ -1,4 +1,4 @@
-import { useCallback,useEffect,useLayoutEffect,useMemo,useRef,useSyncExternalStore,type KeyboardEvent } from 'react';
+import { useCallback,useEffect,useLayoutEffect,useMemo,useRef,useState,useSyncExternalStore,type KeyboardEvent } from 'react';
 import { App } from '../App';
 import { createDocumentBridge } from '../bridge';
 import { createDocumentAudioBridge } from '../audio/bridge';
@@ -8,6 +8,8 @@ import { DocumentTabs } from './DocumentTabs';
 import type { WorkspaceController } from './WorkspaceController';
 import type { WorkspaceLibrary,WorkspaceLibraryState } from './WorkspaceLibrary';
 import { LibraryDialog } from '../library/LibraryDialog';
+import { OpenPasswordDialog } from '../protection/PasswordDialogs';
+import type { LockedDocument } from '../protection/protection';
 import type { LibrarySection } from '../library/types';
 import type { DocumentViewState } from './types';
 import type { RecoveryIssue,RecoveryStatus,SessionPreferences } from './recovery-types';
@@ -27,6 +29,14 @@ export function WorkspaceApp({workspace,session,library}:{workspace:WorkspaceCon
   const panel=useRef<HTMLDivElement>(null),tabFocus=useRef(false);
   const focusIntent=useRef<{activationId:string;origin:Element|null}|null>(null);
   const libraryInvoker=useRef<HTMLElement|null>(null);
+  // A protected file asks for its password in a dialog. The workspace waits for the answer; closing the dialog any way gives up.
+  const [asking,setAsking]=useState<{locked:LockedDocument;tryPassword:(password:string)=>Promise<void>}|null>(null);
+  const answer=useRef<((opened:boolean)=>void)|null>(null);
+  useEffect(()=>{
+    workspace.setPasswordPrompt(request=>new Promise<boolean>(resolve=>{answer.current=resolve;setAsking(request);}));
+    return()=>{workspace.setPasswordPrompt(null);answer.current?.(false);answer.current=null;};
+  },[workspace]);
+  const settle=(opened:boolean)=>{const resolve=answer.current;answer.current=null;setAsking(null);resolve?.(opened);};
   const audio=useMemo(()=>createDocumentAudioBridge({documentId,activationId}),[documentId,activationId]);
   const waveform=useMemo(()=>createDocumentBackingWaveformBridge({documentId,activationId}),[documentId,activationId]);
   const exports=useMemo(()=>createDocumentExportBridge(documentId),[documentId]);
@@ -101,5 +111,6 @@ export function WorkspaceApp({workspace,session,library}:{workspace:WorkspaceCon
       sessionMenu={sessionMenu} libraryMenu={libraryMenu} onFileCommandCapture={captureLibraryInvoker} recoveryStatus={<>{recoveryStatus}{libraryState.error&&<p className="session-error" role="alert">{libraryState.error}</p>}</>}
       documentTabs={<DocumentTabs tabs={tabs} activeId={documentId} disabled={state.busy} onActivate={id=>run(perform(()=>workspace.activate(id)))} onClose={id=>run(perform(()=>workspace.close(id)))}/>}/>
     {library&&libraryState.open&&<LibraryDialog controller={library.controller} welcome={libraryState.welcome} onClose={()=>library.close()}/>}
+    {asking&&<OpenPasswordDialog fileName={asking.locked.fileName} onTry={async password=>{await asking.tryPassword(password);settle(true);}} onCancel={()=>settle(false)}/>}
   </div>;
 }

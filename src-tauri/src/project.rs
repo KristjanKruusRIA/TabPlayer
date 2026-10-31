@@ -1,6 +1,7 @@
 use crate::assets::{AssetInfo, StoredAsset};
 pub use crate::edit_types::{EditCommand, NoteTarget};
 use crate::edit_types::{ScoreMetadata, validate_tempo, validate_tuning};
+use crate::password_crypto::{OpenLock, PasswordVerifier, Salt, present};
 use base64::{Engine, engine::general_purpose::STANDARD};
 use serde::{Deserialize, Deserializer, Serialize, de::Error};
 use sha2::{Digest, Sha256};
@@ -48,6 +49,15 @@ pub struct Project {
     /// holds applies. Absent on every other project, so those serialize as they always did.
     #[serde(skip_serializing_if = "is_false")]
     pub partial_capo: bool,
+    /// The password to edit, as a salted hash. Absent on every project that never set one, so those serialize as they
+    /// always did, and an older build, which does not know the field, refuses a project that has it instead of ignoring
+    /// the lock.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub edit_lock: Option<PasswordVerifier>,
+    /// The key this project is sealed under while it is open. Runtime only: it is never serialized, so a project
+    /// that is written as JSON (a recovery backup, say) can never carry it, and saving it to a file seals the file.
+    #[serde(skip)]
+    pub open_lock: Option<OpenLock>,
 }
 
 fn is_false(value: &bool) -> bool {
@@ -70,6 +80,8 @@ impl<'de> Deserialize<'de> for Project {
             lock: Option<DocumentLock>,
             #[serde(default)]
             partial_capo: Option<bool>,
+            #[serde(default, deserialize_with = "present")]
+            edit_lock: Option<PasswordVerifier>,
         }
         let mut value = serde_json::Value::deserialize(deserializer)?;
         let fields = value
@@ -117,6 +129,8 @@ impl<'de> Deserialize<'de> for Project {
             assets: wire.assets,
             lock: wire.lock,
             partial_capo: wire.partial_capo.unwrap_or(false),
+            edit_lock: wire.edit_lock,
+            open_lock: None,
         })
     }
 }
@@ -244,6 +258,8 @@ impl Project {
             assets: BTreeMap::new(),
             lock: None,
             partial_capo: false,
+            edit_lock: None,
+            open_lock: None,
         }
     }
 
@@ -270,6 +286,9 @@ impl Project {
         }
         if self.partial_capo && !matches!(self.base, BaseDocument::File { .. }) {
             return Err("Only a score read from a file can hold a partial capo marker.".into());
+        }
+        if let Some(edit_lock) = &self.edit_lock {
+            edit_lock.validate()?;
         }
         match &self.base {
             BaseDocument::Blank {
@@ -331,6 +350,58 @@ impl Project {
     }
 }
 
+/// The message every refused change to a score whose password to edit has not been given carries.
+pub const EDIT_LOCKED_MESSAGE: &str =
+    "This score is locked for editing. Enter its password to make changes.";
+
+/// Why a password-protected score cannot become a template or another unprotected document.
+pub const SEALED_COPY_MESSAGE: &str =
+    "Remove the password to open before using this score as a template.";
+
+/// Where a document stands with its password to edit. The hash itself never leaves the session.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum EditProtection {
+    /// No password to edit is set.
+    None,
+    /// A password is set and has not been given in this session: edits are refused.
+    Locked,
+    /// A password is set and was given in this session: edits work until the score is locked again or closed.
+    Unlocked,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Protection {
+    pub edit: EditProtection,
+    /// The score is saved sealed under a password to open.
+    pub open: bool,
+}
+
+/// A change to a document's password protections, already checked against the passwords it needs. It carries what
+/// it was checked against, so a change made meanwhile cannot slip through between the check and the change.
+#[derive(Clone, Debug, PartialEq)]
+pub enum ProtectionChange {
+    UnlockEditing {
+        verifier: PasswordVerifier,
+    },
+    LockEditing,
+    SetEdit {
+        replacing: Option<PasswordVerifier>,
+        verifier: PasswordVerifier,
+    },
+    RemoveEdit {
+        verifier: PasswordVerifier,
+    },
+    SetOpen {
+        replacing: Option<Salt>,
+        lock: OpenLock,
+    },
+    RemoveOpen {
+        replacing: Salt,
+    },
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectSnapshot {
@@ -340,6 +411,7 @@ pub struct ProjectSnapshot {
     pub redo_edit: Option<EditCommand>,
     pub dirty: bool,
     pub path: Option<String>,
+    pub protection: Protection,
 }
 
 pub struct ProjectSession {
@@ -347,6 +419,10 @@ pub struct ProjectSession {
     cursor: usize,
     saved: Vec<EditCommand>,
     saved_lock: Option<DocumentLock>,
+    saved_edit_lock: Option<PasswordVerifier>,
+    saved_open_lock: Option<Salt>,
+    /// The password to edit was given in this session. Never saved, never recovered.
+    edit_unlocked: bool,
     asset_info: BTreeMap<String, AssetInfo>,
     path: Option<PathBuf>,
 }
@@ -363,14 +439,33 @@ pub struct ProjectCheckpoint {
         deserialize_with = "present_lock"
     )]
     pub saved_lock: Option<DocumentLock>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub saved_edit_lock: Option<PasswordVerifier>,
     #[serde(deserialize_with = "Option::<PathBuf>::deserialize")]
     pub path: Option<PathBuf>,
+    /// The password-to-open salt of the saved file, if it is sealed. A checkpoint can hold the key of an open document,
+    /// but neither it nor this is ever serialized, so a checkpoint on disk is never of a sealed document.
+    #[serde(skip)]
+    pub saved_open_lock: Option<Salt>,
 }
 
 impl ProjectCheckpoint {
-    /// Unsaved changes: the edits up to the cursor or the lock differ from the last save.
+    /// Unsaved changes: the edits up to the cursor, the lock or the passwords differ from the last save.
     pub fn is_dirty(&self) -> bool {
-        self.project.edits[..self.cursor] != self.saved || self.project.lock != self.saved_lock
+        self.project.edits[..self.cursor] != self.saved
+            || self.project.lock != self.saved_lock
+            || self.project.edit_lock != self.saved_edit_lock
+            || self.project.open_lock.as_ref().map(OpenLock::salt) != self.saved_open_lock
+    }
+
+    /// The document is, or was last saved, sealed under a password to open. Its contents must not be written to a
+    /// file in plain form.
+    pub fn is_sealed(&self) -> bool {
+        self.project.open_lock.is_some() || self.saved_open_lock.is_some()
     }
 }
 
@@ -381,7 +476,9 @@ impl ProjectSession {
             cursor: self.cursor,
             saved: self.saved.clone(),
             saved_lock: self.saved_lock,
+            saved_edit_lock: self.saved_edit_lock.clone(),
             path: self.path.clone(),
+            saved_open_lock: self.saved_open_lock,
         }
     }
 
@@ -405,6 +502,9 @@ impl ProjectSession {
             cursor: value.cursor,
             saved: value.saved,
             saved_lock: value.saved_lock,
+            saved_edit_lock: value.saved_edit_lock,
+            saved_open_lock: value.saved_open_lock,
+            edit_unlocked: false,
             asset_info,
             path: value.path,
         })
@@ -414,6 +514,7 @@ impl ProjectSession {
         let mut project = self.project.clone();
         project.edits = self.saved.clone();
         project.lock = self.saved_lock;
+        project.edit_lock = self.saved_edit_lock.clone();
         project.assets.retain(|id, _| {
             project
                 .baseline_edits
@@ -427,7 +528,9 @@ impl ProjectSession {
             cursor: self.saved.len(),
             saved: self.saved.clone(),
             saved_lock: self.saved_lock,
+            saved_edit_lock: self.saved_edit_lock.clone(),
             path: self.path.clone(),
+            saved_open_lock: self.saved_open_lock,
         })
     }
 
@@ -438,6 +541,9 @@ impl ProjectSession {
             cursor: project.edits.len(),
             saved: project.edits.clone(),
             saved_lock: project.lock,
+            saved_edit_lock: project.edit_lock.clone(),
+            saved_open_lock: project.open_lock.as_ref().map(OpenLock::salt),
+            edit_unlocked: false,
             asset_info,
             project,
             path,
@@ -458,7 +564,11 @@ impl ProjectSession {
         };
         project.edits.truncate(self.cursor);
         ProjectSnapshot {
-            dirty: project.edits != self.saved || self.project.lock != self.saved_lock,
+            dirty: project.edits != self.saved
+                || self.project.lock != self.saved_lock
+                || self.project.edit_lock != self.saved_edit_lock
+                || self.project.open_lock.as_ref().map(OpenLock::salt) != self.saved_open_lock,
+            protection: self.protection(),
             project,
             can_undo: self.cursor > 0,
             can_redo: self.cursor < self.project.edits.len(),
@@ -476,6 +586,14 @@ impl ProjectSession {
         command: EditCommand,
         asset: Option<(String, StoredAsset)>,
     ) -> Result<ProjectSnapshot, ProjectError> {
+        if self.edit_locked()
+            && !matches!(
+                command,
+                EditCommand::SetTrackMix { .. } | EditCommand::SetMaster { .. }
+            )
+        {
+            return Err(EDIT_LOCKED_MESSAGE.into());
+        }
         command.validate()?;
         let staged = if let Some((id, asset)) = asset {
             asset.validate(&id)?;
@@ -509,6 +627,9 @@ impl ProjectSession {
     }
 
     pub fn undo(&mut self) -> Result<ProjectSnapshot, ProjectError> {
+        if self.edit_locked() {
+            return Err(EDIT_LOCKED_MESSAGE.into());
+        }
         if self.cursor == 0 {
             return Err("Nothing to undo.".into());
         }
@@ -517,6 +638,9 @@ impl ProjectSession {
     }
 
     pub fn redo(&mut self) -> Result<ProjectSnapshot, ProjectError> {
+        if self.edit_locked() {
+            return Err(EDIT_LOCKED_MESSAGE.into());
+        }
         if self.cursor == self.project.edits.len() {
             return Err("Nothing to redo.".into());
         }
@@ -526,6 +650,81 @@ impl ProjectSession {
 
     pub fn lock(&self) -> Option<DocumentLock> {
         self.project.lock
+    }
+
+    /// A password to edit is set and has not been given in this session.
+    pub fn edit_locked(&self) -> bool {
+        self.project.edit_lock.is_some() && !self.edit_unlocked
+    }
+
+    pub fn protection(&self) -> Protection {
+        Protection {
+            edit: match (&self.project.edit_lock, self.edit_unlocked) {
+                (None, _) => EditProtection::None,
+                (Some(_), false) => EditProtection::Locked,
+                (Some(_), true) => EditProtection::Unlocked,
+            },
+            open: self.project.open_lock.is_some(),
+        }
+    }
+
+    /// What a password has to be checked against, copied so the slow check can run without the workspace locked.
+    pub fn edit_verifier(&self) -> Option<PasswordVerifier> {
+        self.project.edit_lock.clone()
+    }
+
+    pub fn open_lock(&self) -> Option<&OpenLock> {
+        self.project.open_lock.as_ref()
+    }
+
+    /// Applies a protection change. Not an edit: it has no undo step. Returns whether anything changed. A change that
+    /// was checked against a state the document has since left is refused.
+    pub fn change_protection(&mut self, change: ProtectionChange) -> Result<bool, ProjectError> {
+        const STALE: &str = "The protection changed meanwhile. Try again.";
+        match change {
+            ProtectionChange::UnlockEditing { verifier } => {
+                if self.project.edit_lock.as_ref() != Some(&verifier) {
+                    return Err(STALE.into());
+                }
+                Ok(!std::mem::replace(&mut self.edit_unlocked, true))
+            }
+            ProtectionChange::LockEditing => Ok(self.project.edit_lock.is_some()
+                && std::mem::replace(&mut self.edit_unlocked, false)),
+            ProtectionChange::SetEdit {
+                replacing,
+                verifier,
+            } => {
+                if self.project.edit_lock != replacing {
+                    return Err(STALE.into());
+                }
+                self.project.edit_lock = Some(verifier);
+                // Whoever sets or changes the password knows it, so the score stays editable for them.
+                self.edit_unlocked = true;
+                Ok(true)
+            }
+            ProtectionChange::RemoveEdit { verifier } => {
+                if self.project.edit_lock.as_ref() != Some(&verifier) {
+                    return Err(STALE.into());
+                }
+                self.project.edit_lock = None;
+                self.edit_unlocked = false;
+                Ok(true)
+            }
+            ProtectionChange::SetOpen { replacing, lock } => {
+                if self.project.open_lock.as_ref().map(OpenLock::salt) != replacing {
+                    return Err(STALE.into());
+                }
+                self.project.open_lock = Some(lock);
+                Ok(true)
+            }
+            ProtectionChange::RemoveOpen { replacing } => {
+                if self.project.open_lock.as_ref().map(OpenLock::salt) != Some(replacing) {
+                    return Err(STALE.into());
+                }
+                self.project.open_lock = None;
+                Ok(true)
+            }
+        }
     }
 
     /// Sets or clears the lock. It is not an edit: it has no undo step. Returns whether it changed.
@@ -560,6 +759,8 @@ impl ProjectSession {
 
     pub fn mark_saved(&mut self, path: PathBuf) {
         self.saved_lock = self.project.lock;
+        self.saved_edit_lock = self.project.edit_lock.clone();
+        self.saved_open_lock = self.project.open_lock.as_ref().map(OpenLock::salt);
         self.saved = self.project.edits[..self.cursor].to_vec();
         self.path = Some(path);
     }
@@ -589,6 +790,8 @@ impl ProjectSession {
             assets,
             lock: self.project.lock,
             partial_capo: self.project.partial_capo,
+            edit_lock: self.project.edit_lock.clone(),
+            open_lock: self.project.open_lock.clone(),
         }
     }
 
@@ -624,6 +827,11 @@ impl ProjectSession {
     }
 
     pub fn fork_project(&self) -> Result<Project, ProjectError> {
+        // A copy of a sealed score would be written in plain form, so it is refused. A copy of an unsealed score
+        // keeps its edit lock: forking is no way around it.
+        if self.project.open_lock.is_some() {
+            return Err(SEALED_COPY_MESSAGE.into());
+        }
         let mut project = self.stored_project();
         project.baseline_edits.append(&mut project.edits);
         project.lock = None;
@@ -663,7 +871,7 @@ pub struct CandidateStore {
     assets: BTreeMap<String, (String, StoredAsset)>,
 }
 
-fn candidate_token() -> String {
+pub(crate) fn candidate_token() -> String {
     static NEXT: AtomicU64 = AtomicU64::new(1);
     format!(
         "candidate-{}-{}",

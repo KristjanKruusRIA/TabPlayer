@@ -64,3 +64,5 @@ input[aria-invalid="true"]{border-color:var(--tp-danger)}
 button.is-disabled,fieldset[aria-disabled="true"]{opacity:.4;cursor:default}button.is-disabled:hover{border-color:var(--tp-line-strong)}fieldset[aria-disabled="true"] button.is-disabled{opacity:1}
 
 .notice{background:#2b3a4d;padding:10px 16px;color:#edf1f5;font-size:12px;line-height:1.5;border-bottom:1px solid #394454}
+.language-setting-row{padding:6px 8px;display:flex;align-items:center;gap:8px}
+.language-setting-row label{display:flex;align-items:center;gap:8px;font-size:13px}

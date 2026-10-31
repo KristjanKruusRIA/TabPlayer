@@ -1,6 +1,5 @@
-export const en = {
+﻿export const en = {
   // App brand & title
-  'app.title': 'TabPlayer',
   'score.untitled': 'Untitled',
 
   // Actions & Commands
@@ -24,8 +23,6 @@ export const en = {
   'action.redo_title': 'Redo (Ctrl+Shift+Z)',
   'action.retry': 'Retry',
   'action.cancel': 'Cancel',
-  'action.close': 'Close',
-  'action.apply': 'Apply',
 
   // Menus
   'menu.file': 'File',
@@ -134,29 +131,11 @@ export const en = {
   'library.menu_examples': 'Examples',
   'library.menu_save_template': 'Save as template',
   'library.open_containing_folder': 'Open containing folder',
-  'library.dialog_title': 'Score library',
-  'library.section_recent': 'Recent',
-  'library.section_templates': 'Templates',
-  'library.section_folders': 'Folders',
-  'library.section_examples': 'Examples',
-  'library.heading_recent': 'Recent scores',
-  'library.heading_templates': 'Start from a template',
-  'library.heading_folders': 'Local score folders',
-  'library.heading_examples': 'Example scores',
-  'library.field_title': 'Title',
-  'library.field_artist': 'Artist',
-  'library.field_instrument': 'Instrument',
-  'library.field_modified': 'Modified',
   'library.available_offline': 'Available offline',
-  'library.rename': 'Rename',
-  'library.remove': 'Remove',
 
   // Dialog common
   'dialog.close': 'Close',
   'dialog.cancel': 'Cancel',
-  'dialog.apply': 'Apply',
-  'dialog.save': 'Save',
-  'dialog.ok': 'OK',
 
   // Help & Shortcuts
   'help.dialog_title': 'TabPlayer help',
@@ -241,9 +220,8 @@ export const en = {
   'recovery.recover_desc': 'Restore documents from the last completed backup. Changes after that checkpoint may be missing.',
   'recovery.checkpoint': 'Checkpoint: {time}',
   'recovery.checkpoint_unavailable': 'Checkpoint time unavailable.',
-  'recovery.recoverable_count': '{count} recoverable {documents}',
-  'recovery.document_singular': 'document',
-  'recovery.document_plural': 'documents',
+  'recovery.recoverable_one': '{count} recoverable document',
+  'recovery.recoverable_other': '{count} recoverable documents',
   'recovery.recoverable_region': 'Recoverable documents',
   'recovery.score_entry': 'Score {index} of {total}: {title}',
   'recovery.details_heading': 'Recovery details',
@@ -265,57 +243,31 @@ export const en = {
 
   // MIDI Import Dialog
   'midi_import.title': 'Import MIDI',
-  'midi_import.hint': 'Choose a Standard MIDI file. Pick the quantization and how tuplets, voices and tablature are read, and check the preview before importing.',
   'midi_import.choose_file': 'Choose MIDI file…',
   'midi_import.import_btn': 'Import',
   'midi_import.size_limit': '{name} is larger than 8 MB, so it was not loaded.',
-  'midi_import.read_failed': '{name} could not be read.',
   'midi_import.not_opened': 'The score was not opened.',
   'midi_import.open_failed': 'The score could not be opened: {error}',
-  'midi_import.quantization': 'Quantization',
-  'midi_import.q_quarter': 'Quarter note (1/4)',
-  'midi_import.q_eighth': 'Eighth note (1/8)',
-  'midi_import.q_16th': '16th note (1/16)',
-  'midi_import.q_32nd': '32nd note (1/32)',
-  'midi_import.q_64th': '64th note (1/64)',
-  'midi_import.tuplets': 'Tuplets',
-  'midi_import.tuplet_none': 'None',
-  'midi_import.tuplet_triplets': 'Triplets',
-  'midi_import.tuplet_triplets_quintuplets': 'Triplets and quintuplets',
-  'midi_import.voices': 'Max voices',
-  'midi_import.kind_guitar': 'guitar tab',
-  'midi_import.kind_bass': 'bass tab',
-  'midi_import.kind_keys': 'notation',
-  'midi_import.kind_drums': 'drums',
 
   // Batch Convert Dialog
-  'batch.title': 'Batch convert',
+  'batch.title': 'Batch convert scores',
   'batch.file_types': 'File types',
-  'batch.pick_source': 'Pick source folder…',
-  'batch.pick_dest': 'Pick destination folder…',
   'batch.choose_source': 'Choose source folder…',
   'batch.choose_dest': 'Choose destination folder…',
   'batch.cancel_conversion': 'Cancel conversion',
   'batch.convert_btn': 'Convert',
-  'batch.no_files': 'No matching files were found.',
-  'batch.keep_folders': 'Keep folder structure',
 
   // Export Dialog
   'export.title': 'Export score',
   'export.tracks_to_export': 'Tracks to export',
   'export.measures_to_export': 'Measures to export',
   'export.audio': 'Audio',
-  'export.export_btn': 'Export',
 
   // Saved Tunings Dialog
   'tuning.saved_tunings_title': 'Saved tunings',
   'tuning.use_tuning': 'Use tuning',
   'tuning.save_new': 'Save as new',
   'tuning.save_changes': 'Save changes',
-  'tuning.tuning_notes': 'Tuning notes',
-  'tuning.tuning_name': 'Tuning name',
-  'tuning.preset_group': 'Tuning presets',
-  'tuning.my_tunings': 'My tunings',
 
   // Command Palette
   'palette.title': 'Commands',

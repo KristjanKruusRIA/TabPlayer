@@ -8,15 +8,15 @@ export interface RecoveryPromptProps {
   preview:RecoveryPreview;busy:boolean;
   onRestore:()=>void;onDiscard:()=>void;onStartNew:()=>void;
 }
-function documentTitle(document:RecoveryPreview['documents'][number]):string {
+function documentTitle(document:RecoveryPreview['documents'][number],untitled:string):string {
   const project=document.snapshot.project;
   const commands=projectCommands(project);
   for(let index=commands.length-1;index>=0;index--){
     const edit=commands[index];
-    if(edit.type==='setScoreInfo')return edit.title.trim()?edit.title:'Untitled';
+    if(edit.type==='setScoreInfo')return edit.title.trim()?edit.title:untitled;
   }
   const title=project.base.kind==='blank'?project.base.title:project.base.filename.split(/[\\/]/).pop()??'';
-  return title.trim()?title:'Untitled';
+  return title.trim()?title:untitled;
 }
 
 export function RecoveryPrompt({preview,busy,onRestore,onDiscard,onStartNew}:RecoveryPromptProps){
@@ -25,9 +25,8 @@ export function RecoveryPrompt({preview,busy,onRestore,onDiscard,onStartNew}:Rec
   const unavailable=preview.reason==='unavailable'||preview.documents.length===0;
   const automatic=!unavailable&&preview.reason==='clean';
   const title=unavailable?t('recovery.unavailable_title'):automatic?t('recovery.restoring_title'):t('recovery.recover_title');
-  const description=unavailable?'TabPlayer could not recover a previous session. Start a new session to continue.':
-    automatic?'Your previous session is being restored. Playback will remain stopped.':
-    'Restore documents from the last completed backup. Changes after that checkpoint may be missing.';
+  const description=unavailable?t('recovery.unavailable_desc'):automatic?t('recovery.restoring_desc'):t('recovery.recover_desc');
+  const [checkpointBefore,checkpointAfter]=t('recovery.checkpoint',{time:'{time}'}).split('{time}');
   const captured=preview.capturedAtUnixMs===null?null:new Date(preview.capturedAtUnixMs);
 
   useEffect(()=>{
@@ -52,12 +51,12 @@ export function RecoveryPrompt({preview,busy,onRestore,onDiscard,onStartNew}:Rec
     aria-labelledby={`${id}-title`} aria-describedby={`${id}-description`} aria-busy={busy} tabIndex={-1} onKeyDown={keyDown}>
     <h2 id={`${id}-title`}>{title}</h2>
     <p id={`${id}-description`}>{description}</p>
-    {captured&&Number.isFinite(captured.getTime())?<p className="recovery-time">Checkpoint: <time dateTime={captured.toISOString()}>{captured.toLocaleString()}</time></p>:
-      <p className="recovery-time">Checkpoint time unavailable.</p>}
+    {captured&&Number.isFinite(captured.getTime())?<p className="recovery-time">{checkpointBefore}<time dateTime={captured.toISOString()}>{captured.toLocaleString()}</time>{checkpointAfter}</p>:
+      <p className="recovery-time">{t('recovery.checkpoint_unavailable')}</p>}
     {!unavailable&&<>
-      <p className="recovery-count">{t('recovery.recoverable_count', { count: preview.documents.length, documents: preview.documents.length === 1 ? t('recovery.document_singular') : t('recovery.document_plural') })}</p>
+      <p className="recovery-count">{t(preview.documents.length===1?'recovery.recoverable_one':'recovery.recoverable_other', { count: preview.documents.length })}</p>
       <div className="recovery-documents" role="region" aria-label={t('recovery.recoverable_region')} tabIndex={0}><ol>
-        {preview.documents.map((document,index)=><li key={document.documentId} aria-label={t('recovery.score_entry', { index: index + 1, total: preview.documents.length, title: documentTitle(document) })}>{documentTitle(document)}</li>)}
+        {preview.documents.map((document,index)=><li key={document.documentId} aria-label={t('recovery.score_entry', { index: index + 1, total: preview.documents.length, title: documentTitle(document,t('score.untitled')) })}>{documentTitle(document,t('score.untitled'))}</li>)}
       </ol></div>
     </>}
     {preview.issues.length>0&&<section className="recovery-issues" aria-labelledby={`${id}-issues`}>

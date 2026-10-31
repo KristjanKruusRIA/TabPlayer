@@ -287,6 +287,16 @@ it('every bend and whammy preset matches alphaTab classification through real en
   }
 });
 
+it('whammy presets include Scoop and Hold player-facing labels with PrediveDive and Predive types', () => {
+  const scoop = WHAMMY_PRESETS.find(p => p.name === 'Scoop');
+  expect(scoop).toBeDefined();
+  expect(scoop?.type).toBe(model.WhammyType.PrediveDive);
+
+  const hold = WHAMMY_PRESETS.find(p => p.name === 'Hold');
+  expect(hold).toBeDefined();
+  expect(hold?.type).toBe(model.WhammyType.Predive);
+});
+
 it('bend preset re-click and arrow down-up record nothing through previewEdit', () => {
   let project = blankProject();
   project = previewEdit(project, { type: 'setNote', target, string: 1, fret: 5 }).project;

@@ -108,6 +108,15 @@ export function TuningInput({
     };
   }, []);
 
+  const commitPitches = (pitches: number[], index?: number) => {
+    if (!onCommit) return;
+    if (onCommit.length > 1 && index !== undefined) {
+      onCommit(pitches, index);
+    } else {
+      onCommit(pitches);
+    }
+  };
+
   const updateStringPitch = (index: number, nextPitch: number, commit: boolean) => {
     if (disabled || !parsedPitches || (stringCount !== undefined && index >= stringCount)) return;
     const clamped = Math.max(0, Math.min(127, Math.round(nextPitch)));
@@ -116,7 +125,7 @@ export function TuningInput({
     setCustom(false);
     onChange(formatTuning(next));
     onTuningNameChange('');
-    if (commit) onCommit?.(next, index);
+    if (commit) commitPitches(next, index);
   };
 
   const handlePegPointerDown = (index: number, pitch: number, event: ReactPointerEvent<HTMLDivElement>) => {
@@ -164,7 +173,7 @@ export function TuningInput({
     }
     const changed = latest.some((p, i) => p !== initialPitches[i]);
     if (changed) {
-      onCommit?.(latest, index);
+      commitPitches(latest, index);
     } else {
       onTuningNameChange(initialTuningName);
     }
@@ -216,7 +225,7 @@ export function TuningInput({
       const committed = wheelRef.current.pending;
       wheelRef.current.pending = null;
       wheelRef.current.timer = null;
-      if (committed) onCommit?.(committed, index);
+      if (committed) commitPitches(committed, index);
     }, 300);
   };
 
@@ -335,8 +344,9 @@ export function TuningInput({
               className="tp-tuning-peg-strip"
               data-compact={parsedPitches.length >= 7 ? 'true' : undefined}
               style={{
-                gridTemplateColumns: `repeat(${parsedPitches.length}, minmax(0, 1fr))`,
+                gridTemplateColumns: `repeat(${parsedPitches.length}, minmax(${parsedPitches.length >= 9 ? '20px' : '0'}, 1fr))`,
                 ...(parsedPitches.length >= 7 ? { gap: '2px' } : {}),
+                overflowX: 'auto',
               }}
             >
               {parsedPitches.map((pitch, index) => {
@@ -351,7 +361,7 @@ export function TuningInput({
                     <div
                       ref={el => registerPeg(index, el)}
                       role="slider"
-                      tabIndex={disabled || isOutOfRange ? -1 : 0}
+                      tabIndex={isOutOfRange ? -1 : 0}
                       aria-disabled={disabled || isOutOfRange || undefined}
                       aria-label={`${label} string ${index + 1} peg`}
                       aria-valuemin={0}

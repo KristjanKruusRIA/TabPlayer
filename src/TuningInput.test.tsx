@@ -193,3 +193,12 @@ it('fits 7+ strings in a compact peg strip layout without clipping', () => {
   expect(cells).toHaveLength(7);
   expect(screen.getByText('C#2')).toHaveClass('tp-peg-pitch');
 });
+
+it('9 strings peg strip enables horizontal scrolling to prevent clipping in narrow rails', () => {
+  render(<TuningInput label="Notes" presetLabel="Preset" value="E4 B3 G3 D3 A2 E2 B1 F#1 C#1" onChange={vi.fn()} tuningName="9-String" onTuningNameChange={vi.fn()}/>);
+  const strip = document.querySelector('.tp-tuning-peg-strip');
+  expect(strip).toHaveStyle({ 'overflow-x': 'auto' });
+  expect(strip).toHaveStyle({ 'grid-template-columns': 'repeat(9, minmax(20px, 1fr))' });
+  const cells = document.querySelectorAll('.tp-tuning-peg-cell');
+  expect(cells).toHaveLength(9);
+});

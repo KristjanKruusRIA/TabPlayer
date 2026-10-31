@@ -81,7 +81,7 @@ export const WHAMMY_PRESETS: readonly CurvePreset[] = [
   },
   {
     id: 'predive-dive',
-    name: 'Predive dive',
+    name: 'Scoop',
     type: model.WhammyType.PrediveDive,
     points: [
       { offset: 0, value: -4 },
@@ -91,7 +91,7 @@ export const WHAMMY_PRESETS: readonly CurvePreset[] = [
   },
   {
     id: 'predive',
-    name: 'Predive',
+    name: 'Hold',
     type: model.WhammyType.Predive,
     points: [
       { offset: 0, value: -4 },

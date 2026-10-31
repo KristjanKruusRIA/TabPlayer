@@ -9,7 +9,7 @@ export function PartialCapoControls({staff,value,disabled,onChange,onInvalid}:{s
   const { t } = useI18n();
   const [fretText,setFretText]=useState(value.fret?String(value.fret):''),[strings,setStrings]=useState<number[]>(value.strings),[dirty,setDirty]=useState(false);
   const count=staff.tuning.length,fret=fretText.trim()===''?0:Number(fretText),fretValid=Number.isInteger(fret)&&fret>=0&&fret<=127;
-  const problem=!fretValid?'Use a fret from 1 to 127, or leave it empty for no partial capo.':fret>0&&!strings.length?'Choose the strings the partial capo covers.':fret===0&&strings.length?'Enter the fret of the partial capo, or clear the strings.':'';
+  const problem=!fretValid?t('editor.partial_capo_fret_range'):fret>0&&!strings.length?t('editor.partial_capo_choose_strings'):fret===0&&strings.length?t('editor.partial_capo_enter_fret'):'';
   const commit=(nextFret:number,nextStrings:number[],ok:boolean)=>{
     const good=ok&&(nextFret===0?nextStrings.length===0:nextFret>=1&&nextStrings.length>0);
     onInvalid?.(!good);if(good)onChange(nextFret===0?noPartialCapo:{fret:nextFret,strings:[...nextStrings].sort((a,b)=>a-b)});

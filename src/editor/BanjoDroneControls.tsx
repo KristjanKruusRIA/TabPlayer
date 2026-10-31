@@ -14,8 +14,8 @@ export function BanjoDroneControls({staff,value,disabled,onChange,onInvalid}:{st
     <legend>{t('editor.banjo_drone')}</legend>
     <label className="check"><input type="checkbox" checked={on} onChange={event=>{setOn(event.target.checked);setDirty(true);commit(event.target.checked);}}/>{t('editor.short_drone_string')}</label>
     <label>{t('editor.drone_starts_at_fret')}<input type="number" min={1} max={maxDroneFret} disabled={!on} value={fretText} onChange={event=>{setFretText(event.target.value);setDirty(true);}} onBlur={()=>{if(dirty)commit(on);}} onKeyDown={event=>{if(event.key==='Enter'&&dirty)commit(on);}}/></label>
-    {!fiveStrings&&<p className="muted" role="note">The banjo drone needs a 5-string staff.</p>}
-    {dirty&&on&&!valid&&<p className="muted" role="alert">Use a drone fret from 1 to {maxDroneFret}.</p>}
-    {on&&valid&&<p className="muted" role="note">Frets on string 1 are numbered along the neck: fret 0 is open, frets 1 to {fret} do not exist, and fret {fret+1} sounds one semitone above open.</p>}
+    {!fiveStrings&&<p className="muted" role="note">{t('editor.banjo_drone_needs_five')}</p>}
+    {dirty&&on&&!valid&&<p className="muted" role="alert">{t('editor.drone_fret_range',{max:maxDroneFret})}</p>}
+    {on&&valid&&<p className="muted" role="note">{t('editor.drone_fret_numbering',{fret,next:fret+1})}</p>}
   </fieldset>;
 }

@@ -33,22 +33,22 @@ export function NotationEntryPanel({ score, target, busy, locked = false, onEdit
 
   const enter = async (entered: EntryPitch | null) => {
     if (disabled) return;
-    if (working.current) { setStatus('Still entering the previous note; try again in a moment.'); return; }
-    if (!entered) { setStatus('That pitch is outside the MIDI range.'); return; }
+    if (working.current) { setStatus(t('editor.entry_busy')); return; }
+    if (!entered) { setStatus(t('editor.entry_out_of_range')); return; }
     const result = enterPitch(context, entered);
-    if (!result.action) { setStatus(result.name.startsWith('No free string') ? result.name : `${result.name} cannot be entered here.`); return; }
+    if (!result.action) { setStatus(result.name.startsWith('No free string') ? result.name : t('editor.entry_cannot_enter', { name: result.name })); return; }
     working.current = true;
     try {
       const { command, follow } = result.action;
-      if (!await onEdit(command, follow)) { setStatus(`${entered.name} was not entered: the edit was refused (see the message above).`); return; }
-      let message = `${result.removes ? 'Removed' : 'Entered'} ${entered.name}`;
+      if (!await onEdit(command, follow)) { setStatus(t('editor.entry_refused', { name: entered.name })); return; }
+      let message = t(result.removes ? 'editor.entry_removed' : 'editor.entry_entered', { name: entered.name });
       if (!result.removes) {
         // Spelling is a second edit of the new note, made only when the note's spelling differs from what it needs.
         const written = latestScore().tracks[target.track]?.staves[target.staff]?.bars[target.bar]?.voices[target.voice]?.beats[target.beat];
         const index = enteredNoteIndex(written, command), note = index >= 0 ? written?.notes[index] : undefined;
         const mode = result.spelling ?? model.NoteAccidentalMode.Default;
-        if (!note) message = `${entered.name} was edited, but the new note could not be found to check its spelling.`;
-        else if (note.accidentalMode !== mode && !await onEdit({ type: 'setNoteSpelling', target, noteIndex: index, accidentalMode: mode }, {})) message = `${entered.name} entered, but its spelling was not changed (see the message above).`;
+        if (!note) message = t('editor.entry_spelling_missing', { name: entered.name });
+        else if (note.accidentalMode !== mode && !await onEdit({ type: 'setNoteSpelling', target, noteIndex: index, accidentalMode: mode }, {})) message = t('editor.entry_spelling_unchanged', { name: entered.name });
       }
       setStatus(message);
       setAccidental('key');

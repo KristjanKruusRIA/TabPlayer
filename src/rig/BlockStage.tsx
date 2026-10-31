@@ -1,4 +1,4 @@
-import { useI18n } from '../i18n';
+import { useI18n, type MessageKey } from '../i18n';
 import { useLayoutEffect, useRef } from 'react';
 import type { ReactNode } from 'react';
 import { defaultEffects, delayDivisions, modulationDivisions, syncedBlocks } from '../document-settings';
@@ -12,6 +12,8 @@ import { ampLooks, blockLook, knobSpots } from './blocks';
 import type { BlockRef } from './blocks';
 
 const defaults=defaultEffects() as unknown as Record<string,Record<string,unknown>>;
+/** A label for `board`: the second board's controls say which board they belong to. */
+const boardName=(board:Board,t:(key:MessageKey,params?:Record<string,string|number>)=>string,label:string)=>board.second?t('rig.second_pedalboard_named',{name:label}):board.name(label);
 const capital=(text:string)=>text[0].toUpperCase()+text.slice(1);
 /** `Gain (dB)` as the name `Gain` and the unit ` dB`. */
 function nameAndUnit(label:string) {
@@ -39,7 +41,8 @@ function BlockKnobs({editing,board,block,tone,spots}:{editing:SoundEditing;board
   })}</>;
 }
 function Choice<T extends string|number>({label,value,options,onChange,disabled}:{label:string;value:T;options:readonly (readonly [T,string])[];onChange:(value:T)=>void;disabled:boolean}) {
-  return <div className="rig-field"><span className="rig-field-name" aria-hidden="true">{label.replace(/^Second pedalboard: /,'')}</span><Segmented label={label} value={value} options={options.map(([v,text])=>({value:v,label:text}))} onChange={onChange} disabled={disabled}/></div>;
+  const { t } = useI18n(), prefix = t('rig.second_pedalboard_named',{name:''});
+  return <div className="rig-field"><span className="rig-field-name" aria-hidden="true">{label.startsWith(prefix)?label.slice(prefix.length):label.replace(/^Second pedalboard: /,'')}</span><Segmented label={label} value={value} options={options.map(([v,text])=>({value:v,label:text}))} onChange={onChange} disabled={disabled}/></div>;
 }
 function Dropdown({label,visible,value,options,onChange,disabled}:{label:string;visible:string;value:number;options:readonly (readonly [number,string])[];onChange:(value:number)=>void;disabled:boolean}) {
   return <label className="rig-field"><span className="rig-field-name">{visible}</span><select className="rig-select" aria-label={label} value={value} aria-disabled={disabled||undefined} onChange={event=>{if(disabled){event.target.value=String(value);return;}onChange(Number(event.target.value));}} onKeyDown={event=>{if(disabled)event.preventDefault();}} onPointerDown={event=>{if(disabled)event.preventDefault();}} onMouseDown={event=>{if(disabled)event.preventDefault();}}>{options.map(([v,text])=><option key={v} value={v}>{text}</option>)}</select></label>;
@@ -48,7 +51,7 @@ function Dropdown({label,visible,value,options,onChange,disabled}:{label:string;
 function Footswitch({editing,board,block}:{editing:SoundEditing;board:Board;block:EffectBlock}) {
   const { t } = useI18n();
   const on=board.effects[block].enabled;
-  return <button type="button" role="switch" aria-checked={on} aria-label={board.name(`Enable ${block}`)} className="rig-switch" aria-disabled={editing.busy||undefined} onClick={()=>{if(!editing.busy)editing.fx(board,block,'enabled',!on);}}>
+  return <button type="button" role="switch" aria-checked={on} aria-label={boardName(board,t,t('rig.enable_block',{block}))} className="rig-switch" aria-disabled={editing.busy||undefined} onClick={()=>{if(!editing.busy)editing.fx(board,block,'enabled',!on);}}>
     <span className="rig-switch-lamp" aria-hidden="true"/><span className="rig-switch-text" aria-hidden="true">{on?t('rig.on'):t('rig.bypassed_title')}</span>
   </button>;
 }
@@ -98,9 +101,9 @@ function CabinetStage({editing,board,block,cabinetResponse}:{editing:SoundEditin
       <Segmented className="rig-spots" label={board.name('Microphone placement')} value={mic.placement} options={placements} disabled={busy} onChange={value=>fx(board,'microphone','placement',value)}/>
     </div></div>
     <div className="rig-cab-side">
-      {block==='cabinet'&&<Choice label={board.name('Cabinet model')} value={board.effects.cabinet.model} disabled={busy} onChange={value=>fx(board,'cabinet','model',value)} options={cabinetModels.map(item=>[item,capital(modelName(item))] as const)}/>}
-      <Choice label={board.name('Microphone output')} value={mic.output} disabled={busy} onChange={value=>fx(board,'microphone','output',value)} options={[['stereo','Stereo'],['mono','Mono']]}/>
-      {block==='cabinet'&&<div className="rig-field"><span className="rig-field-name">Microphone</span><Footswitch editing={editing} board={board} block="microphone"/></div>}
+      {block==='cabinet'&&<Choice label={boardName(board,t,t('rig.cabinet_model'))} value={board.effects.cabinet.model} disabled={busy} onChange={value=>fx(board,'cabinet','model',value)} options={cabinetModels.map(item=>[item,capital(modelName(item))] as const)}/>}
+      <Choice label={boardName(board,t,t('rig.microphone_output'))} value={mic.output} disabled={busy} onChange={value=>fx(board,'microphone','output',value)} options={[['stereo',t('rig.stereo')],['mono',t('rig.mono')]]}/>
+      {block==='cabinet'&&<div className="rig-field"><span className="rig-field-name">{t('rig.microphone')}</span><Footswitch editing={editing} board={board} block="microphone"/></div>}
       <p className="rig-note">{off?t('rig.mic_bypassed_note'):t('rig.mic_placement_note',{placement:capital(mic.placement)})}</p>
       {block==='cabinet'&&<div className="rig-slot" data-slot="cabinet-response">{cabinetResponse?.(board)}</div>}
     </div>
@@ -116,7 +119,7 @@ function GraphicEqStage({editing,board}:{editing:SoundEditing;board:Board}) {
     </div>
     <div className="rig-geq-side">
       <BlockKnobs editing={editing} board={board} block="graphicEq" tone="pedal"/>
-      <button type="button" aria-label={board.name(t('rig.flatten_graphic_eq'))} {...busyGuard({busy,className:'rig-button',onClick:()=>fx(board,'graphicEq','gainsDb',graphicBands.map(()=>0))})}>{t('rig.flatten_graphic_eq')}</button>
+      <button type="button" aria-label={boardName(board,t,t('rig.flatten_graphic_eq'))} {...busyGuard({busy,className:'rig-button',onClick:()=>fx(board,'graphicEq','gainsDb',graphicBands.map(()=>0))})}>{t('rig.flatten_graphic_eq')}</button>
     </div>
   </div>;
 }
@@ -147,12 +150,12 @@ export function BlockStage({editing,selected,cabinetResponse}:{editing:SoundEdit
   useLayoutEffect(()=>{
     if(stageFocusHandoff&&stageFocusHandoff.trackId===editing.trackId&&stageFocusHandoff.block===block){
       const target=stageFocusHandoff;stageFocusHandoff=null;
-      if(target.label?.startsWith('Remove duplicate:')){
-        const btn=stageRef.current?.querySelector<HTMLElement>(`button[aria-label="Duplicate pedal: ${name}"]`);
+      if(target.label?.startsWith(t('rig.remove_duplicate_named',{name:''}).trim())){
+        const btn=stageRef.current?.querySelector<HTMLElement>(`button[aria-label="${t('rig.duplicate_pedal_named',{name})}"]`);
         btn?.focus();
-      }else if(target.label?.includes('Paste pedal:')){
+      }else if(target.label?.includes(t('rig.paste_pedal_named',{name:''}).trim())){
         // A paste that left a second board with no pedal on removed it, and with it the button that had focus.
-        stageRef.current?.querySelector<HTMLElement>(`button[aria-label$="Paste pedal: ${name}"]`)?.focus();
+        stageRef.current?.querySelector<HTMLElement>(`button[aria-label$="${t('rig.paste_pedal_named',{name})}"]`)?.focus();
       }else if(target.role==='switch'||target.className.includes('rig-switch')){
         stageRef.current?.querySelector<HTMLElement>('.rig-switch')?.focus();
       }
@@ -170,23 +173,23 @@ export function BlockStage({editing,selected,cabinetResponse}:{editing:SoundEdit
   else if(block==='graphicEq')body=<GraphicEqStage editing={editing} board={board}/>;
   else body=<PedalStage editing={editing} board={board} block={block}/>;
   // A stage belongs to one track, board and block: another one is a new stage, so a drag begun on this one ends with it.
-  return <section ref={stageRef} key={`${editing.trackId}/${board.second?'second':'first'}/${block}`} className="rig-stage" role="tabpanel" aria-label={board.second?`Second pedalboard: ${name}`:name} data-block={block}
+  return <section ref={stageRef} key={`${editing.trackId}/${board.second?'second':'first'}/${block}`} className="rig-stage" role="tabpanel" aria-label={board.second?t('rig.second_pedalboard_named',{name}):name} data-block={block}
     onFocusCapture={e=>{lastFocused.current=e.target as HTMLElement;}}
     onBlurCapture={e=>{if(!stageRef.current?.contains(e.relatedTarget as Node))lastFocused.current=null;}}>
     <header className="rig-stage-head">
-      <h2>{board.second?'Second pedalboard · ':''}{name}</h2>
+      <h2>{board.second?t('rig.second_pedalboard_title',{name}):name}</h2>
       {!board.second&&<span className="rig-stage-place">{t('rig.n_of_total',{current:index+1,total:order.length})}</span>}
-      {block==='amp'&&<Choice label={board.name('Amp model')} value={board.effects.amp.model} disabled={busy} onChange={value=>editing.fx(board,'amp','model',value)} options={ampModels.map(item=>[item,capital(modelName(item))] as const)}/>}
+      {block==='amp'&&<Choice label={boardName(board,t,t('rig.amp_model'))} value={board.effects.amp.model} disabled={busy} onChange={value=>editing.fx(board,'amp','model',value)} options={ampModels.map(item=>[item,capital(modelName(item))] as const)}/>}
       <div className="rig-stage-actions">
         <Footswitch editing={editing} board={board} block={block}/>
-        <button type="button" aria-label={board.name(`Copy pedal: ${name}`)} {...busyGuard({busy,className:'rig-button',onClick:()=>editing.copyPedalOf(board,block)})}><span className="rig-long">{t('rig.copy_pedal')}</span><span className="rig-short" aria-hidden="true">{t('rig.copy')}</span></button>
-        <button type="button" aria-label={board.name(`Paste pedal: ${name}`)} {...busyGuard({busy,unavailable:clipboard.pedal?.block!==block,className:'rig-button',onClick:()=>editing.pastePedal(board)})}><span className="rig-long">{t('rig.paste_pedal')}</span><span className="rig-short" aria-hidden="true">{t('rig.paste')}</span></button>
+        <button type="button" aria-label={boardName(board,t,t('rig.copy_pedal_named',{name}))} {...busyGuard({busy,className:'rig-button',onClick:()=>editing.copyPedalOf(board,block)})}><span className="rig-long">{t('rig.copy_pedal')}</span><span className="rig-short" aria-hidden="true">{t('rig.copy')}</span></button>
+        <button type="button" aria-label={boardName(board,t,t('rig.paste_pedal_named',{name}))} {...busyGuard({busy,unavailable:clipboard.pedal?.block!==block,className:'rig-button',onClick:()=>editing.pastePedal(board)})}><span className="rig-long">{t('rig.paste_pedal')}</span><span className="rig-short" aria-hidden="true">{t('rig.paste')}</span></button>
         {board.second
-          ?<button type="button" aria-label={`Remove duplicate: ${name}`} {...busyGuard({busy,className:'rig-button',onClick:()=>editing.fx(board,block,'enabled',false)})}><span className="rig-long">{t('rig.remove_duplicate')}</span><span className="rig-short" aria-hidden="true">{t('action.remove')}</span></button>
-          :<button type="button" aria-label={`Duplicate pedal: ${name}`} {...busyGuard({busy,unavailable:!!second?.effects[block].enabled,className:'rig-button',onClick:()=>editing.duplicate(block)})}><span className="rig-long">{t('rig.duplicate_pedal')}</span><span className="rig-short" aria-hidden="true">{t('rig.duplicate')}</span></button>}
+          ?<button type="button" aria-label={t('rig.remove_duplicate_named',{name})} {...busyGuard({busy,className:'rig-button',onClick:()=>editing.fx(board,block,'enabled',false)})}><span className="rig-long">{t('rig.remove_duplicate')}</span><span className="rig-short" aria-hidden="true">{t('action.remove')}</span></button>
+          :<button type="button" aria-label={t('rig.duplicate_pedal_named',{name})} {...busyGuard({busy,unavailable:!!second?.effects[block].enabled,className:'rig-button',onClick:()=>editing.duplicate(block)})}><span className="rig-long">{t('rig.duplicate_pedal')}</span><span className="rig-short" aria-hidden="true">{t('rig.duplicate')}</span></button>}
         {!board.second&&<>
-          <button type="button" aria-label={`Move ${name} earlier`} {...busyGuard({busy,unavailable:index===0,className:'rig-button',onClick:()=>editing.move(block,-1)})}><span className="rig-long">{t('rig.move_earlier')}</span><span className="rig-short" aria-hidden="true">{t('rig.earlier')}</span></button>
-          <button type="button" aria-label={`Move ${name} later`} {...busyGuard({busy,unavailable:index===order.length-1,className:'rig-button',onClick:()=>editing.move(block,1)})}><span className="rig-long">{t('rig.move_later')}</span><span className="rig-short" aria-hidden="true">{t('rig.later')}</span></button>
+          <button type="button" aria-label={t('rig.move_earlier_named',{name})} {...busyGuard({busy,unavailable:index===0,className:'rig-button',onClick:()=>editing.move(block,-1)})}><span className="rig-long">{t('rig.move_earlier')}</span><span className="rig-short" aria-hidden="true">{t('rig.earlier')}</span></button>
+          <button type="button" aria-label={t('rig.move_later_named',{name})} {...busyGuard({busy,unavailable:index===order.length-1,className:'rig-button',onClick:()=>editing.move(block,1)})}><span className="rig-long">{t('rig.move_later')}</span><span className="rig-short" aria-hidden="true">{t('rig.later')}</span></button>
         </>}
       </div>
     </header>

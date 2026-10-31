@@ -8,14 +8,14 @@ import type { SoundEditing } from './useSoundEditing';
 export function DrumKitPicker({editing,className}:{editing:SoundEditing;className?:string}) {
   const { t } = useI18n();
   const {current,busy}=editing,kit=drumKitFor(current.drumKit);
-  const note=kit.changes.length?`${kit.label} changes ${kitDifferences(kit).join(', ')}.`:'Standard is the reference kit.';
+  const note=kit.changes.length?t('rig.kit_changes',{kit:kit.label,changes:kitDifferences(kit).join(', ')}):t('rig.kit_standard_reference');
   return <section className={className} aria-label={t('rig.drum_kit_settings')}>
     <label><span className="drum-kit-label">{t('rig.drum_kit')}</span><select title={note} value={kit.program} {...busySelect(busy)} onChange={e=>{void editing.setDrumKit(Number(e.target.value));}}>{drumKits.map(option=><option key={option.program} value={option.program}>{option.label}</option>)}</select></label>
     <p className="muted">{note}</p>
     <details onKeyDown={event=>{if(event.key==='Escape'&&event.currentTarget.open){event.preventDefault();event.stopPropagation();event.currentTarget.open=false;event.currentTarget.querySelector('summary')?.focus();}}}><summary title={t('rig.which_hits_differ')}>{t('rig.which_hits_differ')}</summary>
-      <div className="drum-kit-table"><p className="muted">Every drum key has its own sound. Room and Jazz replay Standard's samples at other pitches; Brush changes the snare and electric snare.</p>
+      <div className="drum-kit-table"><p className="muted">{t('rig.kit_help_keys')}</p>
       <ul>{drumKits.filter(option=>option.changes.length).map(option=><li key={option.program}><strong>{option.label}</strong>: {kitDifferences(option).join(', ')}</li>)}</ul>
-      <p className="muted">These notations play the same sound, so they differ on the page only (the bank has no separate rim shot, choke or half-open sample):</p>
+      <p className="muted">{t('rig.kit_help_shared')}</p>
       <ul>{sharedSounds().map(group=><li key={group.key}>{group.labels.join(' = ')}</li>)}</ul></div>
     </details>
   </section>;

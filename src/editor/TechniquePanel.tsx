@@ -32,7 +32,7 @@ export function TechniquePanel({score,target,string,noteIndex=0,busy,onEdit}:Edi
   };
   const bend=useMemo(()=>curveOf(note?.bendType??0,note?.bendStyle??0,note?.bendPoints??null),[score,note]),whammy=useMemo(()=>curveOf(beat?.whammyBarType??0,beat?.whammyStyle??0,beat?.whammyBarPoints??null),[score,beat]);
   const availableTremolo=durationValues.filter(speed=>tremoloMarks(beat?.duration??4,speed)!==null),defaultTremolo=availableTremolo.includes(16)?16:availableTremolo[0];
-  return <details><summary>{t('editor.notes_and_techniques')}</summary><p className="muted">Note controls apply to {indexed?noteIndex===null?'the selected chord note':`chord note ${noteIndex+1}`:`string ${string}`}. Beat controls apply to every note in the beat.</p>
+  return <details><summary>{t('editor.notes_and_techniques')}</summary><p className="muted">{t('editor.note_controls_intro',{target:indexed?noteIndex===null?t('editor.note_target_chord'):t('editor.note_target_chord_n',{n:noteIndex+1}):t('editor.note_target_string',{string})})}</p>
     <BusyFieldset busy={busy} disabled={!note}><div className="technique-grid">{([
       [t('editor.let_ring'),'letRing',note?.isLetRing],[t('editor.palm_mute'),'palmMute',note?.isPalmMute],[t('editor.dead_note'),'dead',note?.isDead],[t('editor.ghost_note'),'ghost',note?.isGhost],[t('editor.staccato'),'staccato',note?.isStaccato],[t('editor.left_hand_tapping'),'leftHandTapped',note?.isLeftHandTapped],
     ] as const).map(([label,key,value])=><label className="check" key={key}><input type="checkbox" disabled={!stringed&&['letRing','palmMute','dead','leftHandTapped'].includes(key)} checked={value??false} onChange={e=>patch({[key]:e.target.checked})}/>{label}</label>)}</div>
@@ -45,7 +45,7 @@ export function TechniquePanel({score,target,string,noteIndex=0,busy,onEdit}:Edi
       <label className="check"><input type="checkbox" disabled={staff.isPercussion} checked={note?.isTrill??false} onChange={e=>patch({trill:e.target.checked?{pitch:Math.min(127,(note?.realValue??60)+2),speed:16}:null})}/>{t('editor.trill')}</label>
       <div className="pair"><label>{t('editor.trill_pitch')}<input disabled={staff.isPercussion} type="number" min={0} max={127} value={note?.isTrill?note.trillValue:Math.min(127,(note?.realValue??60)+2)} onChange={e=>patch({trill:{pitch:Number(e.target.value),speed:note?.trillSpeed??16}})}/></label><label>{t('editor.trill_speed')}<select disabled={staff.isPercussion} value={note?.trillSpeed??16} onChange={e=>patch({trill:{pitch:note?.isTrill?note.trillValue:Math.min(127,(note?.realValue??60)+2),speed:Number(e.target.value)}})}>{durationValues.map(n=><option key={n} value={n}>{durationLabel(n)}</option>)}</select></label></div>
     </BusyFieldset>
-    <CurveEditor label="Bend" value={bend} disabled={busy||!note||!stringed} onChange={bend=>patch({bend})}/>
+    <CurveEditor label={t('editor.bend')} value={bend} disabled={busy||!note||!stringed} onChange={bend=>patch({bend})}/>
     <BusyFieldset busy={busy} disabled={!note}>
       <div className="pair"><button {...busyGuard({busy,disabled:!next(),onClick:()=>link('tie',next())})}>{t('editor.tie_to_next')}</button><button {...busyGuard({busy,onClick:()=>link('tie',null)})}>{t('editor.break_tie')}</button></div>
       <button {...busyGuard({busy,disabled:!note?.tieOrigin,onClick:()=>breakIncoming('tie')})}>{t('editor.break_incoming_tie')}</button>
@@ -58,6 +58,6 @@ export function TechniquePanel({score,target,string,noteIndex=0,busy,onEdit}:Edi
       <label className="check"><input type="checkbox" checked={beat?.isTremolo??false} disabled={!availableTremolo.length} onChange={e=>beatPatch({tremolo:e.target.checked?{speed:defaultTremolo,style:0}:null})}/>{t('editor.tremolo_picking')}</label>
       <div className="pair"><label>{t('editor.tremolo_speed')}<select disabled={!availableTremolo.length} value={tremoloSpeed(beat)??defaultTremolo??16} onChange={e=>beatPatch({tremolo:{speed:Number(e.target.value),style:beat?.tremoloPicking?.style??0}})}>{durationValues.map(n=><option key={n} value={n} disabled={!availableTremolo.includes(n)}>{durationLabel(n)}</option>)}</select></label><EnumInput label={t('editor.tremolo_style')} disabled={!availableTremolo.length} value={beat?.tremoloPicking?.style??0} enumeration={model.TremoloPickingStyle} onValue={style=>beatPatch({tremolo:{speed:tremoloSpeed(beat)??defaultTremolo,style}})}/></div>
     </BusyFieldset>
-    <CurveEditor label="Whammy" value={whammy} whammy disabled={busy||!beat||!stringed} onChange={whammy=>beatPatch({whammy})}/>
+    <CurveEditor label={t('editor.whammy')} value={whammy} whammy disabled={busy||!beat||!stringed} onChange={whammy=>beatPatch({whammy})}/>
   </details>;
 }

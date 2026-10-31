@@ -29,7 +29,7 @@ export function RangePanel({score,target,selection,busy,locked=false,onSelection
   let selectedBeats:ReturnType<typeof resolveSelectionBeats>=[],selectedNotes:ReturnType<typeof resolveSelectionNotes>=[],selectionError='';
   if(selection)try{selectedBeats=resolveSelectionBeats(score,selection);selectedNotes=resolveSelectionNotes(score,selection);}catch(reason){selectionError=reason instanceof Error?reason.message:String(reason);}
   const selectedLanes:VoiceAddress[]=selection&&!selectionError&&selection.kind==='range'?selection.range.lanes:selection&&!selectionError&&selection.kind==='bars'?selection.tracks.flatMap(track=>score.tracks[track].staves.flatMap(staff=>staff.bars.slice(selection.firstBar,selection.lastBar+1).flatMap(bar=>bar.voices.map(voice=>({track,staff:staff.index,voice:voice.index}))))):selectedBeats.map(beat=>({track:beat.voice.bar.staff.track.index,staff:beat.voice.bar.staff.index,voice:beat.voice.index}));
-  const lanes=[...new Set(selectedLanes.map(lane=>`Track ${lane.track+1} · Staff ${lane.staff+1} · Voice ${lane.voice+1}`))];
+  const lanes=[...new Set(selectedLanes.map(lane=>t('editor.lane_label',{track:lane.track+1,staff:lane.staff+1,voice:lane.voice+1})))];
   const available=!!selection&&!selectionError&&selectedNotes.length>0;
   const hasStrings=available&&selectedLanes.every(lane=>{const staff=score.tracks[lane.track].staves[lane.staff];return !staff.isPercussion&&staff.tuning.length>0;})&&selectedNotes.every(note=>note.isStringed&&!note.isPercussion);
   const melodic=available&&selectedNotes.every(note=>!note.isPercussion&&!note.beat.voice.bar.staff.isPercussion);
@@ -37,15 +37,15 @@ export function RangePanel({score,target,selection,busy,locked=false,onSelection
   const edit=(command:RangeCommand)=>action(()=>onEdit(command));
   const shift=(value:number)=>{
     if(!selection)return;
-    if(!Number.isInteger(value)||value===0||value< -127||value>127){setError('Choose nonzero semitones from −127 to 127.');return;}
+    if(!Number.isInteger(value)||value===0||value< -127||value>127){setError(t('editor.err_semitones'));return;}
     edit({type:'transposeSelection',selection,semitones:value});
   };
   const sustain=(kind:'letRing'|'palmMute',enabled:boolean)=>{
-    if(!selection)return;if(!strings.length){setError('Choose at least one string.');return;}
+    if(!selection)return;if(!strings.length){setError(t('editor.err_choose_string'));return;}
     edit({type:'setSelectionSustain',selection,strings:[...strings].sort((a,b)=>a-b),kind,enabled});
   };
   const strokes=(steps:StrokeDirection[]|null)=>{
-    if(!selection)return;if(!steps){setError('Use 1 to 16 steps of D, U or -.');return;}
+    if(!selection)return;if(!steps){setError(t('editor.err_stroke_steps'));return;}
     edit({type:'setSelectionStrokes',selection,technique,pattern:steps});
   };
   const broaden=()=>action(()=>{
@@ -58,7 +58,7 @@ export function RangePanel({score,target,selection,busy,locked=false,onSelection
     const value={kind:'range' as const,range:{...selection.range,lanes}};validateMusicSelection(score,value);onSelection(value);
   });
   const fretAction=()=>{
-    const value=Number(maxFret);if(!maxFret.trim()||!Number.isInteger(value)||value<1||value>127){setError('Choose a maximum fret from 1 to 127.');return;}
+    const value=Number(maxFret);if(!maxFret.trim()||!Number.isInteger(value)||value<1||value>127){setError(t('editor.err_max_fret'));return;}
     if(selection)edit({type:'refingerSelection',selection,maxFret:value});
   };
   return <details className="editor-section" open><summary>{t('editor.music_selection')}</summary><fieldset disabled={busy}>
@@ -69,10 +69,10 @@ export function RangePanel({score,target,selection,busy,locked=false,onSelection
       <button disabled={!selection} onClick={()=>onSelection(null)}>{t('editor.clear_selection')}</button>
     </div>
     <p>{selectedNotes.length} {selectedNotes.length===1?t('editor.note_singular'):t('editor.note_plural')} · {selectedBeats.length} {selectedBeats.length===1?t('editor.beat_singular'):t('editor.beat_plural')}</p>
-    {selection?.kind==='bars'&&<p>Measures {selection.firstBar+1}–{selection.lastBar+1} · Tracks {selection.tracks.map(track=>track+1).join(', ')}</p>}
+    {selection?.kind==='bars'&&<p>{t('editor.bars_tracks_summary',{first:selection.firstBar+1,last:selection.lastBar+1,tracks:selection.tracks.map(track=>track+1).join(', ')})}</p>}
     {lanes.map(lane=><p key={lane}>{lane}</p>)}
     <label>{t('editor.selection_scope')}<select value={scope} disabled={!selection||selection.kind==='notes'} onChange={event=>setScope(event.target.value)}>
-      <option value="custom" disabled>{t('editor.scope_custom')}</option><option value="lane" disabled={selection?.kind==='bars'}>{t('editor.scope_lane')}</option><option value="staff" disabled={selection?.kind==='bars'}>Current staff</option><option value="track">Current track</option><option value="all">All tracks</option>
+      <option value="custom" disabled>{t('editor.scope_custom')}</option><option value="lane" disabled={selection?.kind==='bars'}>{t('editor.scope_lane')}</option><option value="staff" disabled={selection?.kind==='bars'}>{t('editor.scope_current_staff')}</option><option value="track">{t('editor.scope_current_track')}</option><option value="all">{t('editor.scope_all_tracks')}</option>
     </select></label>
     <button disabled={!selection||selection.kind==='notes'||!!selectionError||scope==='custom'} onClick={broaden}>{t('editor.apply_selection_scope')}</button>
     <fieldset disabled={!available||locked}><legend>{t('editor.selected_notes')}</legend>
@@ -85,7 +85,7 @@ export function RangePanel({score,target,selection,busy,locked=false,onSelection
       <fieldset disabled={!hasStrings}><legend>{t('editor.guitar_and_bass')}</legend>
         <div className="editor-actions"><button onClick={()=>selection&&edit({type:'moveSelectionStrings',selection,direction:'higher'})}>{t('editor.move_to_higher_string')}</button><button onClick={()=>selection&&edit({type:'moveSelectionStrings',selection,direction:'lower'})}>{t('editor.move_to_lower_string')}</button></div>
         <label>{t('editor.maximum_fret')}<input type="number" min={1} max={127} step={1} value={maxFret} onChange={event=>setMaxFret(event.target.value)}/></label><button onClick={fretAction}>{t('editor.refinger_selection')}</button>
-        <fieldset><legend>{t('editor.sustain_strings')}</legend>{staff?.tuning.map((_,index)=>{const string=index+1;return <label key={string}><input type="checkbox" checked={strings.includes(string)} onChange={event=>setStrings(event.target.checked?[...strings,string]:strings.filter(value=>value!==string))}/>String {string}</label>;})}</fieldset>
+        <fieldset><legend>{t('editor.sustain_strings')}</legend>{staff?.tuning.map((_,index)=>{const string=index+1;return <label key={string}><input type="checkbox" checked={strings.includes(string)} onChange={event=>setStrings(event.target.checked?[...strings,string]:strings.filter(value=>value!==string))}/>{t('editor.string_n',{string})}</label>;})}</fieldset>
         <div className="editor-actions"><button onClick={()=>sustain('letRing',true)}>{t('editor.enable_let_ring')}</button><button onClick={()=>sustain('letRing',false)}>{t('editor.disable_let_ring')}</button><button onClick={()=>sustain('palmMute',true)}>{t('editor.enable_palm_mute')}</button><button onClick={()=>sustain('palmMute',false)}>{t('editor.disable_palm_mute')}</button></div>
         <fieldset><legend>{t('editor.picking_and_strumming')}</legend>
           <label>{t('editor.pattern_technique')}<select value={technique} onChange={event=>setTechnique(event.target.value as StrokeTechnique)}><option value="pick">{t('editor.technique_pick')}</option><option value="brush">{t('editor.technique_brush')}</option><option value="arpeggio">{t('editor.technique_arpeggio')}</option></select></label>

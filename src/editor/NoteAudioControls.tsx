@@ -28,14 +28,14 @@ export function NoteAudioControls({ note, score, busy = false, onApply }: { note
   // A refused edit leaves the score as it was, so what was sent is forgotten and the message shown.
   const send = (audio: NoteAudio | null, sentValues: NoteAudio) => {
     sent.current = sentValues;
-    const refused = () => { if (sent.current === sentValues) sent.current = null; setDraft({ length: String(current.length), offset: String(current.offset), velocity: String(current.velocity) }); setError('The note audio change was not applied.'); };
+    const refused = () => { if (sent.current === sentValues) sent.current = null; setDraft({ length: String(current.length), offset: String(current.offset), velocity: String(current.velocity) }); setError(t('editor.note_audio_not_applied')); };
     try { void Promise.resolve(onApply(audio)).then(result => { if (result === false) refused(); }, refused); } catch { refused(); }
   };
   const commit = (field: Field) => {
     if (busy) return;
     const text = draft[field].trim(), value = Number(text), { min, max } = noteAudioLimits[field], base = sent.current ?? current;
     if (text === '' || !Number.isInteger(value) || value < min || value > max) {
-      setError(`${fields.find(([name]) => name === field)![1]} must be a whole number from ${min} to ${max}.`);
+      setError(t('editor.note_audio_whole_number', { field: fields.find(([name]) => name === field)![1], min, max }));
       setDraft({ ...draft, [field]: String(base[field]) });
       return;
     }
@@ -46,8 +46,8 @@ export function NoteAudioControls({ note, score, busy = false, onApply }: { note
   };
   return <div className="note-audio" role="group" aria-label={t('editor.note_audio')}>
     <h3>{t('editor.note_audio')}</h3>
-    {tied && <p className="muted">A tied note continues the note before it. Set its audio on the first note of the tie.</p>}
-    {fixed && !tied && <p className="muted">A bent, whammy, sliding or vibrato note keeps its start and length; only its velocity changes.</p>}
+    {tied && <p className="muted">{t('editor.note_audio_tied')}</p>}
+    {fixed && !tied && <p className="muted">{t('editor.note_audio_fixed')}</p>}
     <div className="pair">{fields.map(([name, label]) => <label key={name}>{label}
       <input type="number" step={1} min={noteAudioLimits[name].min} max={noteAudioLimits[name].max} disabled={!note || tied || fixed && name !== 'velocity'} value={draft[name]}
         aria-disabled={busy || undefined} onChange={event => busy ? undefined : setDraft({ ...draft, [name]: event.target.value })} onBlur={() => commit(name)} onKeyDown={event => { if (event.key === 'Enter') commit(name); }}/>

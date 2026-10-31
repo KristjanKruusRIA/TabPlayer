@@ -112,7 +112,12 @@ pub fn voice_id_for_note<'a>(
     settings: &'a crate::settings::DocumentSettings,
 ) -> Option<&'a str> {
     let track = plan.tracks.iter().find(|track| track.id == note.track_id)?;
-    voice_id_for_program(track, settings, note_program(plan, note))
+    let program = if settings.sounds.get(&track.id).is_some_and(|s| s.locked) {
+        track.program
+    } else {
+        note_program(plan, note)
+    };
+    voice_id_for_program(track, settings, program)
 }
 
 pub fn resource_requests(

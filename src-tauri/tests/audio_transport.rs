@@ -293,6 +293,7 @@ fn default_device_playback_and_recovery() {
             voice_id: Some("unavailable-voice".into()),
             preset_id: "gm".into(),
             effects: tabplayer_lib::audio::dsp::FxSettings::default(),
+            ..Default::default()
         },
     );
     assert!(service.prepare(failed_plan, bad_settings, None).is_err());

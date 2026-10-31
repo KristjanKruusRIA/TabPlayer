@@ -216,6 +216,7 @@ struct Track {
     synth: Option<Synthesizer>,
     automatic: bool,
     fixed_recorded: bool,
+    locked: bool,
     percussion: bool,
     channels: [MidiChannel; 16],
     ranges: [f64; 16],
@@ -318,6 +319,7 @@ impl Renderer {
                     .get(&track.id)
                     .and_then(|s| s.voice_id.as_deref())
                     .is_some_and(|id| id != "gm"),
+                locked: settings.sounds.get(&track.id).is_some_and(|s| s.locked),
                 percussion: track.percussion,
                 channels: [MidiChannel::new(track.program); 16],
                 ranges: [2.0; 16],
@@ -325,7 +327,20 @@ impl Renderer {
                 rpn_lsb: [127; 16],
             });
         }
-        let note_programs: Vec<_> = plan.notes.iter().map(|n| note_program(&plan, n)).collect();
+        let note_programs: Vec<_> = plan
+            .notes
+            .iter()
+            .map(|n| {
+                if settings.sounds.get(&n.track_id).is_some_and(|s| s.locked) {
+                    plan.tracks
+                        .iter()
+                        .find(|t| t.id == n.track_id)
+                        .map_or(0, |t| t.program)
+                } else {
+                    note_program(&plan, n)
+                }
+            })
+            .collect();
         let sustain_events: Vec<_> = plan
             .midi
             .iter()
@@ -653,9 +668,11 @@ impl Renderer {
             PlanMidiEvent::Program {
                 channel, program, ..
             } => {
-                track.channels[*channel as usize].program = *program;
-                if let Some(synth) = &mut track.synth {
-                    synth.process_midi_message(*channel as i32, 0xc0, *program as i32, 0);
+                if !track.locked {
+                    track.channels[*channel as usize].program = *program;
+                    if let Some(synth) = &mut track.synth {
+                        synth.process_midi_message(*channel as i32, 0xc0, *program as i32, 0);
+                    }
                 }
             }
             PlanMidiEvent::Controller {

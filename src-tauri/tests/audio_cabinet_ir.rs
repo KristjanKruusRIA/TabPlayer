@@ -320,6 +320,7 @@ fn an_edit_that_names_a_response_is_stored_and_an_old_edit_log_replays_as_before
         voice_id: None,
         preset_id: "lead".into(),
         effects: fx,
+        ..Default::default()
     };
     let plain = built_in(amp("lead", 0.5), "closed");
     let named = names(plain.clone(), &"ab".repeat(16), 2.5);
@@ -527,6 +528,7 @@ fn sounding(fx: &FxSettings) -> DocumentSettings {
             voice_id: None,
             preset_id: "lead".into(),
             effects: fx.clone(),
+            ..Default::default()
         },
     );
     settings

@@ -753,6 +753,7 @@ fn render_seek_and_prepared_mix_install_do_not_touch_heap() {
             voice_id: None,
             preset_id: "lead".into(),
             effects,
+            ..Default::default()
         },
     );
     let mix = PreparedMix::prepare(&settings, &plan, 48_000).unwrap();
@@ -1199,6 +1200,7 @@ fn renderer_rejects_invalid_persisted_sound_before_install() {
             voice_id: None,
             preset_id: "missing-preset".into(),
             effects: FxSettings::default(),
+            ..Default::default()
         },
     );
     assert!(Renderer::new(plan, resources, settings, 48_000).is_err());
@@ -1265,6 +1267,7 @@ fn automatic_program_changes_prepare_recorded_and_gm_attacks_and_seek() {
             voice_id: Some("gm".into()),
             preset_id: "gm".into(),
             effects: Default::default(),
+            ..Default::default()
         },
     );
     let mut gm = Renderer::new(plan.clone(), resources.clone(), settings.clone(), 48_000).unwrap();
@@ -1334,6 +1337,7 @@ fn simultaneous_same_channel_attacks_keep_their_exact_programs() {
                     voice_id: Some("gm".into()),
                     preset_id: "gm".into(),
                     effects: Default::default(),
+                    ..Default::default()
                 },
             );
         }
@@ -1498,6 +1502,7 @@ fn positive_low_tempos_render_with_bypassed_and_enabled_effects() {
                     voice_id: None,
                     preset_id: "gm".into(),
                     effects,
+                    ..Default::default()
                 },
             );
             let mut renderer =
@@ -1600,6 +1605,7 @@ fn pinned_recorded_presets_render_at_both_export_rates() {
                 voice_id: Some(voice.into()),
                 preset_id: preset.into(),
                 effects: FxSettings::preset(preset).unwrap(),
+                ..Default::default()
             },
         );
         let requests = resource_requests(&plan, &settings);
@@ -1664,4 +1670,125 @@ fn pinned_recorded_presets_render_at_both_export_rates() {
             );
         }
     }
+}
+
+#[test]
+fn locked_track_sound_ignores_scheduled_program_changes_and_seek_while_unlocked_renders_bit_identically()
+ {
+    use tabplayer_lib::{
+        audio::{renderer::Renderer, voices::resource_requests},
+        settings::TrackSound,
+    };
+    let (_, mut resources, settings) = renderer_fixture(false);
+    let bank = Arc::get_mut(&mut resources).unwrap();
+    let mut bass = bank.manifest.instruments[0].clone();
+    bass.id = "babyblue-bass".into();
+    bass.regions[0].sample_id = "bass".into();
+    bank.manifest.instruments.push(bass);
+    let mut audio = (*tone()).clone();
+    audio.frames = Arc::new(
+        (0..96_000)
+            .map(|n| {
+                let x = (std::f64::consts::TAU * 110.0 * n as f64 / 48_000.0).sin() as f32 * 0.5;
+                [x; 2]
+            })
+            .collect(),
+    );
+    bank.samples.insert("bass".into(), Arc::new(audio));
+    let notes: Vec<_> = [(0, 240, 57, 25), (1920, 2880, 69, 0), (3840, 4800, 57, 33)]
+        .into_iter()
+        .enumerate()
+        .map(|(i, (start, end, key, program))| serde_json::json!({
+            "id":format!("n{i}"),"trackId":"a","source":{"target":{"track":0,"staff":0,"bar":0,"voice":0,"beat":i},"string":1},
+            "occurrence":0,"channel":2,"program":program,"startTick":start,"endTick":end,"key":key,"velocity":100,
+            "articulation":"picked","legatoFrom":null,"pitch":[{"tick":start,"semitones":0}]
+        }))
+        .collect();
+    let mut midi = Vec::new();
+    for (start, end, key, program) in [(0, 240, 57, 25), (1920, 2880, 69, 0), (3840, 4800, 57, 33)]
+    {
+        midi.extend([
+            serde_json::json!({"type":"program","trackId":"a","tick":start,"channel":2,"program":program}),
+            serde_json::json!({"type":"noteOn","trackId":"a","tick":start,"channel":2,"key":key,"velocity":100}),
+            serde_json::json!({"type":"noteOff","trackId":"a","tick":end,"channel":2,"key":key,"velocity":0}),
+        ]);
+    }
+    let plan: Arc<tabplayer_lib::audio::plan::PlaybackPlan> = Arc::new(serde_json::from_value(serde_json::json!({
+        "generation":1,"ppq":960,"durationTick":5760,"durationMs":3000,
+        "tracks":[{"id":"a","program":25,"percussion":false}],"tempos":[{"tick":0,"bpm":120}],
+        "occurrences":[{"bar":0,"occurrence":0,"meterNumerator":6,"meterDenominator":4,"startTick":0,"endTick":5760,"startMs":0,"endMs":3000}],
+        "notes":notes,"midi":midi
+    })).unwrap());
+
+    // 1. Bit-identical proof: an unlocked document renders identically to default settings.
+    let mut default_renderer =
+        Renderer::new(plan.clone(), resources.clone(), settings.clone(), 48_000).unwrap();
+    let mut unlocked_settings = settings.clone();
+    unlocked_settings.sounds.insert(
+        "a".into(),
+        TrackSound {
+            voice_id: None,
+            preset_id: "gm".into(),
+            effects: Default::default(),
+            locked: false,
+        },
+    );
+    let mut unlocked_renderer =
+        Renderer::new(plan.clone(), resources.clone(), unlocked_settings, 48_000).unwrap();
+    let mut default_output = vec![[0.0; 2]; 144_000];
+    let mut unlocked_output = vec![[0.0; 2]; 144_000];
+    default_renderer.render_into(&mut default_output);
+    unlocked_renderer.render_into(&mut unlocked_output);
+    for (i, (d, u)) in default_output.iter().zip(&unlocked_output).enumerate() {
+        assert_eq!(
+            d.map(f32::to_bits),
+            u.map(f32::to_bits),
+            "frame {i} must render bit-identically when unlocked"
+        );
+    }
+
+    // 2. Locked track sound: score automations (program 0 piano and program 33 bass) are ignored.
+    // The track's sound remains locked to green-guitar (program 25).
+    let mut locked_settings = settings.clone();
+    locked_settings.sounds.insert(
+        "a".into(),
+        TrackSound {
+            voice_id: None,
+            preset_id: "gm".into(),
+            effects: Default::default(),
+            locked: true,
+        },
+    );
+    let requests = resource_requests(&plan, &locked_settings);
+    assert!(
+        requests.iter().all(|r| r.instrument_id == "green-guitar"),
+        "all requests for a locked guitar track must be green-guitar"
+    );
+
+    let mut locked = Renderer::new(
+        plan.clone(),
+        resources.clone(),
+        locked_settings.clone(),
+        48_000,
+    )
+    .unwrap();
+    let mut locked_output = vec![[0.0; 2]; 144_000];
+    locked.render_into(&mut locked_output);
+    // At tick 0 (green-guitar, ~220Hz):
+    assert!((frequency(&locked_output[2400..4800]) - 220.0).abs() < 1.0);
+    // At tick 1920 (score has program 0 piano, but locked track keeps green-guitar ~220Hz):
+    let f1 = frequency(&locked_output[48_000..50_400]);
+    println!("f1={}", f1);
+    assert!((f1 - 440.0).abs() < 1.0);
+    // At tick 3840 (score has program 33 bass, but locked track keeps green-guitar ~220Hz):
+    assert!((frequency(&locked_output[98_400..100_800]) - 220.0).abs() < 1.0);
+
+    // 3. Seeking while locked maintains the locked track sound.
+    let mut seek = vec![[0.0; 2]; 2400];
+    locked.seek_tick(1920.0);
+    locked.render_into(&mut seek);
+    assert!((frequency(&seek[480..]) - 440.0).abs() < 1.0);
+    locked.seek_tick(3840.0);
+    locked.render_into(&mut seek);
+    assert!((frequency(&seek[480..]) - 220.0).abs() < 1.0);
 }

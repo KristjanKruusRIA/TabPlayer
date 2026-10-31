@@ -158,3 +158,16 @@ it('keeps the handle focused through a render that does not move it',()=>{
   act(()=>api.postRenderFinished.emit(undefined));expect(document.activeElement).toBe(bar1());
   expect(defaultEngraving().barWidths).toBeUndefined();
 });
+
+it('keeps Enter, even with Ctrl or Alt, out of note entry',()=>{
+  const {onKey}=setup();const bar=bar1();bar.focus();
+  for(const init of [{},{ctrlKey:true},{altKey:true},{metaKey:true}])fireEvent.keyDown(bar,{key:'Enter',...init});
+  expect(onKey).not.toHaveBeenCalled();
+});
+
+it('moves focus to the nearest remaining bar when the focused bar disappears',()=>{
+  setup();const api=view.api as Fake,good=api.boundsLookup.staffSystems,three=screen.getByRole('slider',{name:'Bar 3 width'});
+  three.focus();api.boundsLookup.staffSystems=systems(2);act(()=>api.postRenderFinished.emit(undefined));
+  expect(screen.queryByRole('slider',{name:'Bar 3 width'})).toBeNull();expect(document.activeElement).toBe(screen.getByRole('slider',{name:'Bar 2 width'}));
+  api.boundsLookup.staffSystems=good;
+});

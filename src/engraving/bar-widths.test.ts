@@ -3,7 +3,7 @@ import { expect,it } from 'vitest';
 import { midi,model,Settings } from '@coderline/alphatab';
 import { buildDocument,previewEdit,replayDocumentSettings,trackIdentity } from '../engine';
 import { blankProject } from '../project';
-import { BAR_SCALE_BIG_STEP,BAR_SCALE_STEP,barScaleOf,clampBarScale,mapBarWidths,scaleAfterDrag,sourceBarScale,validateBarWidths,withBarScale,withBarWidths } from './bar-widths';
+import { BAR_SCALE_BIG_STEP,BAR_SCALE_STEP,barScaleOf,clampBarScale,mapBarWidths,scaleAfterDrag,sourceBarScale,sourceWeight,validateBarWidths,withBarScale,withBarWidths } from './bar-widths';
 import { defaultEngraving,projectEngraving,validateEngraving } from './projection';
 import { defaultStyle,styleApplied,styleOf } from './style-library';
 import { withTypography } from './typography';
@@ -132,4 +132,17 @@ it('moves widths with their bars when measures are inserted or removed, in the s
   const several=previewEdit(styled.project,{type:'removeMeasures',firstBar:0,lastBar:1},styled);
   expect(several.settings.engraving.barWidths).toEqual([{bar:1,scale:3}]);
   expect(buildDocument(JSON.parse(JSON.stringify(several.project))).settings.engraving.barWidths).toEqual([{bar:1,scale:3}]);
+});
+
+it('reads the own weight of the score where alphaTab does: the bar for one staff, the master bar for several',()=>{
+  const bar=(displayScale:number)=>({displayScale}),staff=(...scales:number[])=>({bars:scales.map(bar)});
+  const score=(master:number[],tracks:number[][][])=>({masterBars:master.map(bar),tracks:tracks.map(staves=>({staves:staves.map(scales=>staff(...scales))}))});
+  // Bar-only weights (master bars at 1) and master-bar-only weights (bars at 1), in one-track and two-track views.
+  const barOnly=score([1,1],[[[2,3]],[[1,1]]]),masterOnly=score([2,3],[[[1,1]],[[1,1]]]);
+  expect([sourceWeight(barOnly,[0],0),sourceWeight(barOnly,[0],1)]).toEqual([2,3]);
+  expect([sourceWeight(barOnly,[0,1],0),sourceWeight(barOnly,[0,1],1)]).toEqual([1,1]);
+  expect([sourceWeight(masterOnly,[0],0),sourceWeight(masterOnly,[0],1)]).toEqual([1,1]);
+  expect([sourceWeight(masterOnly,[0,1],0),sourceWeight(masterOnly,[0,1],1)]).toEqual([2,3]);
+  // Two staves of one track also use the master bar; a missing or unusable weight reads 1.
+  expect(sourceWeight(score([2],[[[1],[1]]]),[0],0)).toBe(2);expect(sourceWeight(barOnly,[0],9)).toBe(1);expect(sourceWeight(score([0],[[[Number.NaN]]]),[0],0)).toBe(1);
 });

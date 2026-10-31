@@ -90,7 +90,7 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
   const refresh=useRef(()=>{}),refreshCaret=useRef(()=>{}),refreshErrors=useRef(()=>{});
   const [errorBlocks,setErrorBlocks]=useState<(Marker&{label:string})[]>([]);
   const refreshDesign=useRef(()=>{}),[barHandles,setBarHandles]=useState<BarHandle[]>([]),[barDrag,setBarDrag]=useState<{bar:number;delta:number}|null>(null),designing=useRef<BarDesign|null>(null);
-  const handleRefs=useRef(new Map<number,HTMLElement>()),[activeBar,setActiveBar]=useState<number|null>(null),restoreBar=useRef<number|null>(null),dragging=useRef<{bar:number;pointer:number;startX:number;start:number;width:number;delta:number;element:HTMLElement}|null>(null);
+  const handleRefs=useRef(new Map<number,HTMLElement>()),[activeBar,setActiveBar]=useState<number|null>(null),restoreBar=useRef<number|null>(null),heldBar=useRef<number|null>(null),dragging=useRef<{bar:number;pointer:number;startX:number;start:number;width:number;delta:number;element:HTMLElement}|null>(null);
   const refreshDiagrams=useRef(()=>{}),[diagramBlocks,setDiagramBlocks]=useState<Array<{x:number;y:number;w:number;diagram:ScaleDiagram}>>([]),[openDiagram,setOpenDiagram]=useState<number|null>(null);
   const editBeat=editTarget?score.tracks[editTarget.track]?.staves[editTarget.staff]?.bars[editTarget.bar]?.voices[editTarget.voice]?.beats[editTarget.beat]:undefined;
   const editLocation=editBeat&&editTarget?`Editing ${score.tracks[editTarget.track].name || `track ${editTarget.track+1}`}, measure ${editTarget.bar+1}, beat ${editTarget.beat+1}, voice ${editTarget.voice+1}${editBeat.isEmpty?', empty':editBeat.isRest?', rest':''}${editNoteIndex!=null?`, note ${editNoteIndex+1}`:editString?`, string ${editString}`:''}`:'';
@@ -312,6 +312,12 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
     const bar=restoreBar.current;if(bar===null)return;const element=handleRefs.current.get(bar);if(!element)return;
     if(document.activeElement!==element)element.focus({preventScroll:true});restoreBar.current=null;
   },[barHandles,barDesign]);
+  // The focused bar is gone (measures were removed): focus its nearest neighbour rather than dropping to the page.
+  useLayoutEffect(()=>{
+    const held=heldBar.current;
+    if(held===null||!barHandles.length||handleRefs.current.has(held)||(document.activeElement&&document.activeElement!==document.body))return;
+    const near=barHandles.reduce((a,b)=>Math.abs(b.bar-held)<Math.abs(a.bar-held)?b:a);restoreBar.current=null;handleRefs.current.get(near.bar)?.focus({preventScroll:true});
+  },[barHandles]);
   useEffect(()=>{
     const away=(event:FocusEvent)=>{if(restoreBar.current!==null&&event.target instanceof Element&&!event.target.closest('.score-bar-handle'))restoreBar.current=null;};
     document.addEventListener('focusin',away);return()=>document.removeEventListener('focusin',away);
@@ -357,6 +363,7 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
   };
   const keyBar=(handle:BarHandle,event:ReactKeyboardEvent<HTMLDivElement>)=>{
     // Tab and Escape keep their usual jobs; a modified key stays with the app (Ctrl+Z). Every other key stays out of the score.
+    if(event.key==='Enter')event.stopPropagation();
     if(event.ctrlKey||event.metaKey||event.altKey||event.key==='Tab'||event.key==='Escape')return;
     event.stopPropagation();
     const order=barHandles.map(item=>item.bar),at=order.indexOf(handle.bar),key=event.key;
@@ -395,7 +402,7 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
       const scale=barDesign?.scaleOf(handle.bar)??1,base=barDesign?.defaultOf(handle.bar)??1,moving=barDrag?.bar===handle.bar?barDrag.delta:null,percent=Math.round(scale*100);
       return <div key={handle.bar} ref={element=>{if(element)handleRefs.current.set(handle.bar,element);else handleRefs.current.delete(handle.bar);}} role="slider" tabIndex={handle.bar===tabBar?0:-1} aria-orientation="horizontal" aria-label={`Bar ${handle.bar+1} width`} aria-valuemin={BAR_SCALE_RANGE.min*100} aria-valuemax={BAR_SCALE_RANGE.max*100} aria-valuenow={percent} aria-valuetext={`${percent}% of the standard width${base!==1?`, imported ${Math.round(base*100)}%`:''}`} title="Drag, or press Shift+Left and Shift+Right. Left and Right move between bars. Delete restores the default width."
         {...busyGuard<HTMLDivElement>({busy:barDesign?.busy,className:'score-bar-handle',onKeyDown:event=>keyBar(handle,event),onPointerDown:event=>startBarDrag(handle,event)})}
-        onPointerMove={moveBarDrag} onPointerUp={endBarDrag} onPointerCancel={cancelBarDrag} onLostPointerCapture={cancelBarDrag} onBlur={cancelBarDrag} onFocus={()=>setActiveBar(handle.bar)}
+        onPointerMove={moveBarDrag} onPointerUp={endBarDrag} onPointerCancel={cancelBarDrag} onLostPointerCapture={cancelBarDrag} onBlur={event=>{cancelBarDrag();if(event.relatedTarget)heldBar.current=null;}} onFocus={()=>{setActiveBar(handle.bar);heldBar.current=handle.bar;}}
         style={{left:handle.x-5,top:handle.y,height:handle.h}}>{moving!==null&&<span className="score-bar-guide" aria-hidden="true" style={{left:5+moving}}/>}</div>;
     })}
     <span className="score-edit-announcement" role="status" aria-live="polite" aria-atomic="true">{editLocation}</span>

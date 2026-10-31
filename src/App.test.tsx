@@ -322,10 +322,10 @@ it('persists layout and fit choices, retains manual percent and restores them ac
 });
 it('wires Design mode bar widths: handles only while on, one edit per width, imported weights as the base, restore clears, busy refuses',async()=>{
   const c=await setup(),original=c.getState().score,last=()=>engravingView.mock.lastCall![0] as {barDesign:BarDesign|null};
-  expect(last().barDesign).toBeNull();c.getState().score.masterBars[2].displayScale=2;
+  expect(last().barDesign).toBeNull();c.getState().score.tracks[0].staves[0].bars[2].displayScale=2;c.getState().score.masterBars[1].displayScale=3;
   fireEvent.click(screen.getByRole('checkbox',{name:/Design mode/}));
   const design=()=>last().barDesign!;expect(design()).not.toBeNull();
-  expect(design().scaleOf(1)).toBe(1);expect(design().defaultOf(1)).toBe(1);expect(design().defaultOf(2)).toBe(2);expect(design().scaleOf(2)).toBe(2);
+  expect(design().scaleOf(1)).toBe(1);expect(design().defaultOf(1)).toBe(1);expect(design().defaultOf(2)).toBe(2);expect(design().scaleOf(2)).toBe(2);expect(design().defaultOf(1)).toBe(1);
   act(()=>design().onScale(1,1.5));await waitFor(()=>expect(c.getState().settings.engraving.barWidths).toEqual([{bar:1,scale:1.5}]));
   expect(c.getState().snapshot.project.edits).toHaveLength(1);expect(c.getState().score).toBe(original);expect(design().scaleOf(1)).toBe(1.5);
   // The current value records nothing.

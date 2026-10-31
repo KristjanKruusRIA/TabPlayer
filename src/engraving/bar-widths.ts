@@ -50,3 +50,9 @@ export function mapBarWidths(engraving:EngravingOverrides,oldToNew:ReadonlyArray
 /** The weight a bar of `width` px and weight `scale` takes when its right edge is dragged by `delta` px. Fixed clef and signature widths are not
  * known here, so the result is an estimate that the next layout corrects. */
 export const scaleAfterDrag=(scale:number,width:number,delta:number)=>width>0&&Number.isFinite(delta)?clampBarScale(scale*Math.max(.01,(width+delta)/width)):scale;
+
+/** The weight the score itself gives bar ar in the view shown tracks make, from the same place alphaTab reads it: the master bar when several staves are shown, the bar of the one staff otherwise. */
+export function sourceWeight(score:{masterBars:ReadonlyArray<{displayScale:number}>;tracks:ReadonlyArray<{staves:ReadonlyArray<{bars:ReadonlyArray<{displayScale:number}>}>}>},shown:readonly number[],bar:number):number {
+  const staves=shown.flatMap(index=>score.tracks[index]?.staves??[]);
+  return sourceBarScale(staves.length>1||!staves.length?score.masterBars[bar]?.displayScale:staves[0].bars[bar]?.displayScale);
+}

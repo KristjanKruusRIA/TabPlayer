@@ -5,6 +5,8 @@ import { getBanjoDrone, neckFret, fretExists, droneShift } from './banjo-drone';
 import { allNotes, captureNoteLinks } from './links';
 import { placeBeat, maxRelocatedFret, holds, linked, type Place } from './structure';
 import { formatPitch } from '../tuning';
+import { getHarmonyChord, setHarmonyChordSource, validateHarmonyChord } from '../harmony/chord-source';
+import type { HarmonyChord } from './harmony-types';
 import { getMessage, getResolvedLanguage } from '../i18n';
 import type { MessageKey } from '../i18n';
 
@@ -36,18 +38,21 @@ const reasonKeys: Record<Unreachable['reason'], MessageKey> = {
 };
 
 /** The message listing every note that could not be placed, in the interface language. */
-export function describeUnreachable(list: readonly Unreachable[]): string {
+export function describeUnreachable(list: readonly Unreachable[], extra: readonly string[] = []): string {
   const language = getResolvedLanguage();
   const items = list.map(item => getMessage(language, item.grace ? 'refinger.where_grace' : 'refinger.where', {
     staff: item.staff, voice: item.voice, bar: item.bar, beat: item.beat, string: item.string, pitch: item.pitch,
   }) + ': ' + getMessage(language, reasonKeys[item.reason]));
-  return getMessage(language, 'refinger.cannot_place', { list: items.join('; ') });
+  return getMessage(language, 'refinger.cannot_place', { list: [...items, ...extra].join('; ') });
 }
+
+/** A chord diagram's new frets, and its definition with the finger marks that no longer apply cleared. */
+export interface ChordMove { chord: model.Chord; strings: number[]; source: HarmonyChord }
 
 export function planStaffRefinger(
   staff: model.Staff,
   target: RefingerStaffTarget
-): { moves: Array<{ note: model.Note } & Place>; unreachable: Unreachable[] } {
+): { moves: Array<{ note: model.Note } & Place>; unreachable: Unreachable[]; chords: ChordMove[]; chordProblems: string[] } {
   const to = target.tuning.length;
   if (to !== staff.tuning.length) {
     throw new Error('Retuning must keep the current string count.');
@@ -69,15 +74,13 @@ export function planStaffRefinger(
     return targetTuning[to - s] + capo - currentTransposition;
   };
 
-  const notePitch = (note: model.Note) => {
-    return (
-      staff.tuning[staff.tuning.length - note.string] +
-      note.fret +
-      stringCapo(staff, note.string, currentPartial) +
-      droneShift(staff, note.string, note.fret, currentDrone) -
-      currentTransposition
-    );
-  };
+  const fretPitch = (string: number, fret: number) =>
+    staff.tuning[staff.tuning.length - string] +
+    fret +
+    stringCapo(staff, string, currentPartial) +
+    droneShift(staff, string, fret, currentDrone) -
+    currentTransposition;
+  const notePitch = (note: model.Note) => fretPitch(note.string, note.fret);
 
   const choices = (note: model.Note): Place[] => {
     if (note.isDead) {
@@ -188,7 +191,44 @@ export function planStaffRefinger(
     }
   }
 
-  return { moves, unreachable };
+  // Chord diagrams hold a fret per string, so they follow the strings' new pitches too.
+  const chords: ChordMove[] = [];
+  const chordProblems: string[] = [];
+  const language = getResolvedLanguage();
+  for (const chord of staff.chords?.values() ?? []) {
+    if (chord.strings.length !== to) continue;
+    const value = getHarmonyChord(chord);
+    const frets = chord.strings.map((fret, index) => {
+      const string = to - index;
+      if (fret < 0) return fret;
+      const plain = fretPitch(string, fret) - targetOpenPitch(string);
+      const moved = plain < 0 ? -1 : neckFret(staff, string, plain, targetDrone);
+      if (moved < 0 || moved > 127 || moved > Math.max(maxRelocatedFret, fret) || !fretExists(staff, string, moved, targetDrone)) {
+        chordProblems.push(getMessage(language, 'refinger.chord_diagram', { name: chord.name, string, pitch: formatPitch(fretPitch(string, fret)) }));
+        return fret;
+      }
+      return moved;
+    });
+    const delta = frets.map((fret, index) => fret - chord.strings[index]);
+    const changed = delta.map(d => d !== 0);
+    if (!changed.some(Boolean)) continue;
+    // One shift for every played string (a capo change) keeps the barre; strings that moved differently lose their finger marks.
+    const played = delta.filter((_, index) => chord.strings[index] >= 0);
+    const uniform = played.every(d => d === played[0]);
+    const barreFrets = uniform ? value.barreFrets.map(fret => fret + played[0]).filter(fret => fret > 0) : [];
+    const fingers = value.fingers.map((finger, index) => (uniform ? (frets[index] > 0 && chord.strings[index] > 0 ? finger : changed[index] ? -2 : finger) : -2));
+    const positive = frets.filter(fret => fret > 0);
+    const source = { ...value, frets, fingers, barreFrets, firstFret: positive.length ? Math.min(...positive) : 1 };
+    try {
+      validateHarmonyChord(source);
+    } catch {
+      chordProblems.push(getMessage(language, 'refinger.chord_diagram', { name: chord.name, string: 0, pitch: '' }));
+      continue;
+    }
+    chords.push({ chord, strings: frets, source });
+  }
+
+  return { moves, unreachable, chords, chordProblems };
 }
 
 export function validateNoteLinks(
@@ -213,35 +253,42 @@ export function validateNoteLinks(
   }
 }
 
-export function refingerStaff(staff: model.Staff, target: RefingerStaffTarget): void {
-  const { moves, unreachable } = planStaffRefinger(staff, target);
-  if (unreachable.length > 0) {
-    throw new Error(describeUnreachable(unreachable));
-  }
-  validateNoteLinks(staff.track.score, moves);
+function commit(moves: Array<{ note: model.Note } & Place>, chords: ChordMove[]): void {
   for (const { note, string, fret } of moves) {
     note.string = string;
     note.fret = fret;
   }
+  for (const { chord, strings, source } of chords) {
+    chord.strings = strings;
+    chord.firstFret = source.firstFret;
+    chord.barreFrets = [...source.barreFrets];
+    setHarmonyChordSource(chord, source);
+  }
+}
+
+export function refingerStaff(staff: model.Staff, target: RefingerStaffTarget): void {
+  refingerStaves([staff], target);
 }
 
 export function refingerTrack(track: model.Track, target: RefingerStaffTarget): void {
-  const allMoves: Array<{ note: model.Note } & Place> = [];
-  const allUnreachable: Unreachable[] = [];
+  refingerStaves(track.staves, target);
+}
 
-  for (const staff of track.staves) {
-    const { moves, unreachable } = planStaffRefinger(staff, target);
-    allMoves.push(...moves);
-    allUnreachable.push(...unreachable);
+function refingerStaves(staves: readonly model.Staff[], target: RefingerStaffTarget): void {
+  const moves: Array<{ note: model.Note } & Place> = [];
+  const chords: ChordMove[] = [];
+  const unreachable: Unreachable[] = [];
+  const chordProblems: string[] = [];
+  for (const staff of staves) {
+    const plan = planStaffRefinger(staff, target);
+    moves.push(...plan.moves);
+    chords.push(...plan.chords);
+    unreachable.push(...plan.unreachable);
+    chordProblems.push(...plan.chordProblems);
   }
-
-  if (allUnreachable.length > 0) {
-    throw new Error(describeUnreachable(allUnreachable));
+  if (unreachable.length > 0 || chordProblems.length > 0) {
+    throw new Error(describeUnreachable(unreachable, chordProblems));
   }
-
-  validateNoteLinks(track.score, allMoves);
-  for (const { note, string, fret } of allMoves) {
-    note.string = string;
-    note.fret = fret;
-  }
+  validateNoteLinks(staves[0].track.score, moves);
+  commit(moves, chords);
 }

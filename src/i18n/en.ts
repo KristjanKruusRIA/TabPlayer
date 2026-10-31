@@ -468,6 +468,7 @@ export const en = {
   'refinger.reason_harmonic': 'a harmonic cannot move to another string or fret',
   'refinger.reason_linked': 'a tied, slid or hammered note cannot move off its string',
   'refinger.reason_conflict': 'the notes of this beat have no free strings for all of them',
+  'refinger.chord_diagram': 'chord diagram {name}, string {string} ({pitch}): no fret reaches this pitch',
   'track_settings.add_instrument': 'Add instrument',
   'track_settings.new_track_name': 'New track name',
   'track_settings.midi_instrument': 'MIDI instrument',

@@ -470,6 +470,7 @@ export const de: MessageCatalog = {
   'refinger.reason_harmonic': 'ein Flageolett kann nicht auf eine andere Saite oder einen anderen Bund wechseln',
   'refinger.reason_linked': 'eine gebundene, gerutschte oder gehämmerte Note kann ihre Saite nicht verlassen',
   'refinger.reason_conflict': 'für die Noten dieses Schlags gibt es nicht genug freie Saiten',
+  'refinger.chord_diagram': 'Akkorddiagramm {name}, Saite {string} ({pitch}): kein Bund erreicht diese Tonhöhe',
   'track_settings.add_instrument': 'Instrument hinzufügen',
   'track_settings.new_track_name': 'Neuer Spurname',
   'track_settings.midi_instrument': 'MIDI-Instrument',

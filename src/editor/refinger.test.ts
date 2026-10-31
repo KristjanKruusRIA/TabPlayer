@@ -309,4 +309,25 @@ describe('refinger keepPitch on retune and capo', () => {
     };
     expect(() => previewEdit(base.project, { type: 'setStaffSettings', track: 0, staff: 0, settings })).toThrow(/string 6 \(E5\): a harmonic cannot move to another string or fret/);
   });
+
+  it('moves chord diagram frets with the notes so the diagram sounds as before', () => {
+    // An E-shape diagram: low E string (string 1) fret 0, then 2 2 1 0 0 from the low strings up. Frets are listed high string first.
+    const base = projectWithEdits({ type: 'setBeatAnnotation', target, text: '', chord: { name: 'E', firstFret: 1, frets: [0, 0, 1, 2, 2, 0] } });
+    const retuned = previewEdit(base.project, { type: 'setTuning', track: 0, tuning: dropD, keepPitch: true });
+    const staff = retuned.score.tracks[0].staves[0];
+    const chord = [...staff.chords!.values()][0];
+    // String 1 was E2 (fret 0); in drop D it is fret 2 on the D string. Other strings are unchanged.
+    expect([...chord.strings]).toEqual([0, 0, 1, 2, 2, 2]);
+    expect(chord.firstFret).toBe(1);
+  });
+
+  it('refuses when a chord diagram string cannot sound its pitch', () => {
+    const base = projectWithEdits({ type: 'setBeatAnnotation', target, text: '', chord: { name: 'E', firstFret: 1, frets: [0, 0, 1, 2, 2, 0] } });
+    const staff = base.score.tracks[0].staves[0];
+    const settings: StaffSettings = {
+      tuning: [...staff.tuning], capo: 2, transposition: 0, displayTransposition: 0, clef: staff.bars[0].clef,
+      showTab: true, showNotation: true, keepPitch: true,
+    };
+    expect(() => previewEdit(base.project, { type: 'setStaffSettings', track: 0, staff: 0, settings })).toThrow(/chord diagram E, string 1 \(E2\): no fret reaches this pitch/);
+  });
 });

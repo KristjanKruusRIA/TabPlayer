@@ -101,6 +101,8 @@ Done when:
 
 Check against a real Guitar Pro file is out of scope; say so in Limits.
 
+The notation slice recorded that the GP5 side of this may need an alphaTab change. Report that and stop rather than patching alphaTab; a fix limited to the GP7/GP8 writer is fine.
+
 ## Task 5: L09 audio test tone and device diagnostics
 
 The Settings audio area lists output devices only. Add a test tone button and a diagnostics readout of the current device, sample rate and buffer size.

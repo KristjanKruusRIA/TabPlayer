@@ -963,6 +963,12 @@ pub enum EditCommand {
     DeleteBeat {
         target: BeatTarget,
     },
+    FitVoice {
+        track: u32,
+        staff: u32,
+        bar: u32,
+        voice: u32,
+    },
     #[serde(deserialize_with = "empty_command")]
     AppendMeasure,
     RemoveMeasure {

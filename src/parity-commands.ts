@@ -15,7 +15,7 @@ const tuningNamed=new Set(['addTrack','setTuning','setStringCount']);
 const staffSettingKeys=['tuning','capo','transposition','displayTransposition','clef','showTab','showNotation'];
 const shapes:Record<string,readonly string[]>={
   setNote:['target','string','fret'],removeNote:['target','string'],setRest:['target'],setDuration:['target','duration','dots'],
-  insertBeat:['target','duration','dots'],deleteBeat:['target'],appendMeasure:[],removeMeasure:['bar'],
+  insertBeat:['target','duration','dots'],deleteBeat:['target'],fitVoice:['track','staff','bar','voice'],appendMeasure:[],removeMeasure:['bar'],
   addTrack:['name','tuning','program'],removeTrack:['track'],moveTrack:['track','to'],duplicateTrack:['track'],setTrackColor:['track','color'],setTuning:['track','tuning'],setStringCount:['track','tuning','keep'],setScoreInfo:['title','artist','tempo'],
   setNoteTechniques:['target','string','patch'],setBeatTechniques:['target','patch'],setNoteLink:['from','to','kind'],
   setBeatRhythm:['target','duration','dots','tupletNumerator','tupletDenominator','graceType'],

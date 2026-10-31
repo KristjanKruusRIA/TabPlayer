@@ -20,6 +20,7 @@ import { adoptAdmittedBase } from './interchange/archive-gate';
 import { copyGpInterchangeSource, exportGpInterchange, forgetTrackOrderedEntries, loadInterchangeScore } from './interchange/gp';
 import { reflowLyrics,removeLyricsMeasure } from './editor/lyrics';
 import { prepareScoreTimers } from './editor/timers';
+import { addTicks,trimStart,voiceTicks,writtenTicks,type Fraction } from './editor/score-errors';
 import { planMeasureMap,mapBackingMeasures } from './editor/measures';
 import { mapLyricsMeasures } from './editor/lyrics-measures';
 import { preparePasteMusic } from './editor/clipboard-paste';
@@ -77,6 +78,43 @@ export function validateProject(value: unknown): Project {
 function rest(duration: number, dots = 0) {
   const beat = new Beat(); beat.duration = duration; beat.dots = dots; beat.isEmpty = false;
   return beat;
+}
+
+/** Standard rest lengths in ticks, longest first: a whole to a 64th, each plain, dotted or double dotted. */
+const restLengths=[1,2,4,8,16,32,64].flatMap(duration=>[0,1,2].map(dots=>({duration,dots,ticks:3840/duration*(2**(dots+1)-1)/2**dots}))).sort((a,b)=>b.ticks-a.ticks);
+
+/** Makes a voice fill its measure exactly. Beats from the one that crosses the barline on go (a tuplet and the grace
+ * notes before a removed beat go whole), then the remainder is written as the fewest standard rests. A crossing beat
+ * is removed, not split. A last note tied into the next measure, or a remainder no standard rest can write, is refused. */
+function fitVoiceToMeasure(master: model.MasterBar, voice: model.Voice) {
+  if (master.isFreeTime) throw new Error('A free-time measure has no length to fill.');
+  const expected = master.calculateDuration(false), whole = voiceTicks(voice, expected);
+  if (!whole) throw new Error('This voice is unused; there is nothing to fill.');
+  if (whole[0] === expected * whole[1]) throw new Error('This voice is already complete.');
+  const cut = whole[0] > expected * whole[1] ? trimStart(voice, expected) : voice.beats.length;
+  const kept = voice.beats.slice(0, cut), removed = voice.beats.slice(cut);
+  let total: Fraction = [0, 1];
+  for (const beat of kept) total = addTicks(total, writtenTicks(beat, expected));
+  const missing = expected * total[1] - total[0];
+  if (missing % total[1]) throw new Error('The missing time cannot be written as standard rests.');
+  let left = missing / total[1];
+  const added: model.Beat[] = [];
+  while (left > 0) {
+    const length = restLengths.find(candidate => candidate.ticks <= left);
+    if (!length) throw new Error('The missing time cannot be written as standard rests.');
+    const inserted = rest(length.duration, length.dots); inserted.voice = voice; added.push(inserted); left -= length.ticks;
+  }
+  if (added.length) {
+    const lastSounding = [...kept].reverse().find(beat => beat.graceType === model.GraceType.None);
+    for (const note of lastSounding?.notes ?? []) {
+      const next = note.tieDestination;
+      if (next && !removed.includes(next.beat) && next.beat.voice.bar !== voice.bar) throw new Error('The last note is tied into the next measure, so rests cannot follow it. Remove the tie first.');
+    }
+  }
+  for (const beat of removed) for (const note of [...beat.notes]) removeNote(note);
+  voice.beats.splice(cut);
+  if (voice.beats.length === 1 && voice.beats[0].isEmpty) voice.beats.splice(0);
+  voice.beats.push(...added);
 }
 
 function appendBar(staff: model.Staff, master: model.MasterBar) {
@@ -192,6 +230,11 @@ function removeNote(note: model.Note) {
 
 function apply(score: model.Score, edit: EditCommand, editIndex=0) {
   switch (edit.type) {
+    case 'fitVoice': {
+      const {voice} = voiceAt(score, {track: edit.track, staff: edit.staff, bar: edit.bar, voice: edit.voice, beat: 0});
+      fitVoiceToMeasure(score.masterBars[edit.bar], voice);
+      break;
+    }
     case 'setNote': case 'removeNote': case 'setRest': case 'setDuration': case 'insertBeat': case 'deleteBeat': {
       const {staff, voice} = voiceAt(score, edit.target);
       const beat = voice.beats[edit.target.beat];
@@ -324,7 +367,7 @@ export function buildDocument(value: ProjectInput, canRedo = false): BuiltDocume
       if (edit.type==='duplicateTrack') {identities.splice(edit.track+1,0,`added/${index}/${JSON.stringify(edit)}`);copyTrackSettings(documentSettings,identities[edit.track],identities[edit.track+1]);}
       if (['addTrack','addPitchedTrack','addPercussionTrack','removeTrack','moveTrack','duplicateTrack'].includes(edit.type)) forgetTrackOrderedEntries(score);
       if(edit.type==='removeMeasure') {removeBackingMeasure(documentSettings.backing,edit.bar);removeBackingMeasure(embeddedBackingSettings,edit.bar);documentSettings.engraving=mapBarWidths(documentSettings.engraving,Array.from({length:score.masterBars.length+1},(_,bar)=>bar<edit.bar?bar:bar===edit.bar?null:bar-1));}
-      if (!previous&&['insertBeat','deleteBeat','appendMeasure','removeMeasure','insertMeasures','removeMeasures','addTrack','addPitchedTrack','addPercussionTrack','removeTrack','moveTrack','duplicateTrack','addStaff','removeStaff','addVoice','removeVoice','copyVoice'].includes(edit.type)) {
+      if (!previous&&['insertBeat','deleteBeat','fitVoice','appendMeasure','removeMeasure','insertMeasures','removeMeasures','addTrack','addPitchedTrack','addPercussionTrack','removeTrack','moveTrack','duplicateTrack','addStaff','removeStaff','addVoice','removeVoice','copyVoice'].includes(edit.type)) {
         score = rebuild(score);
       }
     }

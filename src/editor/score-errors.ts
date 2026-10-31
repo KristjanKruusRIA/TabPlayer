@@ -4,27 +4,46 @@ import { model } from '@coderline/alphatab';
 export interface ScoreError {track:number;staff:number;bar:number;voice:number;
   /** The first sounding beat of the voice, which the inspector selects. */
   beat:number;kind:'incomplete'|'overfull';ticks:number;
+  /** What Trim to fit would remove from an overfull voice. */
+  trim?:{beats:number;notes:number};
   /** Track name, plus the staff when the track has several. */
   place:string}
 
 const quarter=960;
-type Fraction=[number,number];
+export type Fraction=[number,number];
 const gcd=(a:number,b:number):number=>b?gcd(b,a%b):a;
-const add=([a,b]:Fraction,[c,d]:Fraction):Fraction=>{const top=a*d+c*b,bottom=b*d,divisor=gcd(Math.abs(top),bottom)||1;return [top/divisor,bottom/divisor];};
+export const addTicks=([a,b]:Fraction,[c,d]:Fraction):Fraction=>{const top=a*d+c*b,bottom=b*d,divisor=gcd(Math.abs(top),bottom)||1;return [top/divisor,bottom/divisor];};
 /** Written length in exact ticks: playback lengths lend grace-note time to neighbours and round tuplets down. */
-function writtenTicks(beat:model.Beat,measure:number):Fraction {
+export function writtenTicks(beat:model.Beat,measure:number):Fraction {
   if(beat.graceType!==model.GraceType.None)return [0,1];
   if(beat.isFullBarRest)return [measure,1];
   if(beat.overrideDisplayDuration!==undefined)return [beat.overrideDisplayDuration,1];
   const base=beat.duration<0?3840*-beat.duration:3840/beat.duration,dotted=2**beat.dots;
   let fraction:Fraction=[base*(2*dotted-1),dotted];
   if(beat.tupletNumerator>0&&beat.tupletDenominator>0)fraction=[fraction[0]*beat.tupletDenominator,fraction[1]*beat.tupletNumerator];
-  return add(fraction,[0,1]);
+  return addTicks(fraction,[0,1]);
 }
 /** Voices holding only empty beats are unused, not errors; an empty filler beat before a late entry still takes its time. */
-function voiceTicks(voice:model.Voice,measure:number):Fraction|null {
+export function voiceTicks(voice:model.Voice,measure:number):Fraction|null {
   if(voice.beats.every(beat=>beat.isEmpty))return null;
-  return voice.beats.reduce<Fraction>((total,beat)=>add(total,writtenTicks(beat,measure)),[0,1]);
+  return voice.beats.reduce<Fraction>((total,beat)=>addTicks(total,writtenTicks(beat,measure)),[0,1]);
+}
+/** Index of the first beat Trim to fit removes from an overfull voice: the beat crossing the barline, backed up over
+ * the start of its tuplet and over the grace notes that belong to it. */
+export function trimStart(voice:model.Voice,expected:number):number {
+  let sum:Fraction=[0,1],cut=voice.beats.length;
+  for(const [index,beat] of voice.beats.entries()){
+    const length=writtenTicks(beat,expected);if(length[0]===0)continue;
+    sum=addTicks(sum,length);if(sum[0]>expected*sum[1]){cut=index;break;}
+  }
+  const ratio=(beat:model.Beat|undefined)=>beat&&beat.tupletNumerator>0&&beat.tupletDenominator>0?`${beat.tupletNumerator}/${beat.tupletDenominator}`:null;
+  const tuplet=ratio(voice.beats[cut]);
+  if(tuplet){
+    let start=cut;while(start>0&&ratio(voice.beats[start-1])===tuplet)start--;
+    const size=voice.beats[cut].tupletNumerator;cut=start+Math.floor((cut-start)/size)*size;
+  }
+  while(cut>0&&voice.beats[cut-1].graceType!==model.GraceType.None)cut--;
+  return cut;
 }
 export function findScoreErrors(score:model.Score):ScoreError[] {
   const errors:ScoreError[]=[];
@@ -40,7 +59,8 @@ export function findScoreErrors(score:model.Score):ScoreError[] {
         // A pickup measure may be shorter than its time signature.
         if(ticks<expected&&master.isAnacrusis)continue;
         const beat=voice.beats.findIndex(value=>!value.isEmpty&&value.graceType===model.GraceType.None);
-        errors.push({track:track.index,staff:staff.index,bar:master.index,voice:voice.index,beat:Math.max(0,beat),kind:ticks<expected?'incomplete':'overfull',ticks:Math.max(1,Math.round(Math.abs(expected-ticks))),place:`${track.name||`Track ${track.index+1}`}${track.staves.length>1?` · Staff ${staff.index+1}`:''}`});
+        const removed=ticks>expected?voice.beats.slice(trimStart(voice,expected)):[];
+        errors.push({track:track.index,staff:staff.index,bar:master.index,voice:voice.index,beat:Math.max(0,beat),kind:ticks<expected?'incomplete':'overfull',ticks:Math.max(1,Math.round(Math.abs(expected-ticks))),...(removed.length?{trim:{beats:removed.length,notes:removed.reduce((count,value)=>count+value.notes.length,0)}}:{}),place:`${track.name||`Track ${track.index+1}`}${track.staves.length>1?` · Staff ${staff.index+1}`:''}`});
       }
     }
   }

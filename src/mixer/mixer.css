@@ -133,6 +133,22 @@
 }
 .mixer-strip-fader { height:100%; min-height:110px; }
 
+/* The drum kit of the selected percussion track, between the strips and the master output */
+.mixer-kit {
+  flex:0 0 auto; box-sizing:border-box; display:flex; flex-direction:column; gap:10px; min-height:0;
+  padding:12px; overflow-y:auto; overscroll-behavior:contain;
+  border-left:1px solid var(--tp-line-subtle); background:var(--tp-panel);
+}
+.mixer-kit-elements { display:grid; grid-template-columns:repeat(3,minmax(96px,1fr)); gap:8px; }
+.mixer-kit-element {
+  display:flex; flex-direction:column; align-items:center; gap:6px; min-width:0; padding:8px 6px;
+  border:1px solid var(--tp-line-subtle); border-radius:var(--tp-radius-m); background:var(--tp-raised);
+}
+.mixer-kit-name { font-size:12px; font-weight:600; color:var(--tp-text); text-align:center; }
+.mixer-kit-element .mixer-strip-switches { grid-template-columns:1fr; }
+.mixer-kit-fader { height:112px; }
+.mixer-kit-note { max-width:36ch; margin:0; font-size:11px; line-height:15px; color:var(--tp-muted); }
+
 /* The master output, at the right end beside the scrolling strips. MasterPanel keeps its own markup and classes. */
 .mixer-view .track-master {
   flex:0 0 232px; box-sizing:border-box; display:flex; flex-direction:column; gap:6px; min-height:0;

@@ -17,9 +17,9 @@ const settle=()=>act(async()=>{await vi.advanceTimersByTimeAsync(200);});
 
 /** The real player against a fake native bridge and a host that takes edits the way the app does: the edit settles after
  * a delay, and the newest document is ahead of the one the player last loaded until the host loads it. */
-async function rig() {
+async function rig(start=blankProject(),selected=0) {
   const bridge:NativeAudioBridge={prepare:vi.fn(async()=>{}),command:vi.fn(async()=>{}),setMix:vi.fn(async()=>{}),devices:vi.fn(async()=>[]),status:vi.fn(async()=>null),subscribe:vi.fn(async()=>()=>{}),stageBacking:vi.fn(async()=>null),stageEmbeddedBacking:vi.fn(async()=>null)};
-  let project=blankProject(),built=buildDocument(project);
+  let project=start,built=buildDocument(project);
   const edits:EditCommand[]=[],editDelayMs=40;
   const player:NativePlaybackController=new NativePlaybackController({
     bridge,
@@ -33,9 +33,10 @@ async function rig() {
     },
   });
   await player.loadDocument(project,built,0,1);
-  const id=trackIdentity(built.score.tracks[0]);
+  const id=trackIdentity(built.score.tracks[selected]);
   const gains=()=>vi.mocked(bridge.setMix).mock.calls.map(call=>call[0].mixes[id]?.gain);
-  return {bridge,player,edits,gains,view:()=><MixerView score={built.score} selected={0} busy={false} onSelect={()=>{}} player={player}/>};
+  const kits=()=>vi.mocked(bridge.setMix).mock.calls.map(call=>call[0].mixes[id]?.drumKit);
+  return {bridge,player,edits,gains,kits,view:()=><MixerView score={built.score} selected={selected} busy={false} onSelect={()=>{}} player={player}/>};
 }
 
 it('is heard while a fader moves, saved as one undoable edit on release, and never steps back to the old level',async()=>{
@@ -97,4 +98,57 @@ it('records one edit per pan key press, and pressing toward the value it already
   fireEvent.keyDown(pan,{key:'Home'});fireEvent.keyDown(pan,{key:'Home'});
   await settle();
   expect(edits).toHaveLength(2);
+});
+
+it('hears a drum kit fader as it moves, then saves the whole drag as one edit and never steps back',async()=>{
+  const drums=previewEdit(blankProject(),{type:'addPercussionTrack',name:'Drums',program:0}).project;
+  const {edits,kits,view}=await rig(drums,1);
+  const mounted=render(view());
+  const fader=screen.getByRole('slider',{name:'Volume Cymbals'});sized(fader);
+  const thumb=fader.querySelector('.tp-fader-thumb')!;
+  const before=kits().length;
+  fireEvent.pointerDown(thumb,{clientY:100,pointerId:1});
+  fireEvent.pointerMove(thumb,{clientY:136,pointerId:1});
+  await settle();
+  // Heard before the button comes up, and nothing recorded.
+  expect(kits().at(-1)).toEqual({cymbals:{gain:.7,pan:0,mute:false,solo:false}});
+  expect(kits().length).toBeGreaterThan(before);expect(edits).toHaveLength(0);
+  fireEvent.pointerMove(thumb,{clientY:148,pointerId:1});
+  await settle();
+  expect(kits().at(-1)).toEqual({cymbals:{gain:.6,pan:0,mute:false,solo:false}});expect(edits).toHaveLength(0);
+  fireEvent.pointerUp(thumb,{clientY:148,pointerId:1});
+  expect(edits).toHaveLength(1);
+  expect(edits[0]).toMatchObject({type:'setTrackMix',mix:{drumKit:{cymbals:{gain:.6}}}});
+  await settle();
+  mounted.rerender(view());
+  expect(edits).toHaveLength(1);
+  expect(fader).toHaveAttribute('aria-valuenow','0.6');
+  // After the drag the sound is the saved one, and the old level was never sent again.
+  expect(kits().at(-1)).toEqual({cymbals:{gain:.6,pan:0,mute:false,solo:false}});
+  expect(kits().slice(before)).not.toContain(undefined);
+});
+
+it('puts the kit back when a drum kit drag is cancelled, and records nothing',async()=>{
+  const drums=previewEdit(blankProject(),{type:'addPercussionTrack',name:'Drums',program:0}).project;
+  const {edits,kits,view}=await rig(drums,1);
+  render(view());
+  const pan=screen.getByRole('slider',{name:'Pan Snare'});
+  fireEvent.pointerDown(pan,{clientY:100,pointerId:1});
+  fireEvent.pointerMove(pan,{clientY:60,pointerId:1});
+  await settle();expect(kits().at(-1)?.snare?.pan).toBeGreaterThan(0);
+  fireEvent.keyDown(pan,{key:'Escape'});
+  await settle();
+  expect(edits).toHaveLength(0);expect(kits().at(-1)).toBeUndefined();
+});
+
+it('records one edit for a kit element switch, and none for the state it already has',async()=>{
+  const drums=previewEdit(blankProject(),{type:'addPercussionTrack',name:'Drums',program:0}).project;
+  const {edits,view}=await rig(drums,1);
+  render(view());
+  fireEvent.click(screen.getByLabelText('Mute Hi-Hat'));
+  await settle();
+  expect(edits).toHaveLength(1);expect(edits[0]).toMatchObject({type:'setTrackMix',mix:{drumKit:{hats:{mute:true}}}});
+  fireEvent.keyDown(screen.getByRole('slider',{name:'Volume Hi-Hat'}),{key:'End'});
+  await settle();
+  expect(edits).toHaveLength(1);
 });

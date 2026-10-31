@@ -14,9 +14,11 @@ import type { ExportNativeBridge } from './export/bridge';
 import { DocumentController } from './controller';
 import { FINALIZED_MESSAGE, blankProject, type EditCommand, type Project, type AssetInfo } from './project';
 import type { NativeBridge } from './bridge';
-import {buildScore,exportGp,effectiveAudioSettings,type BuiltDocument} from './engine';
+import {buildScore,exportGp,effectiveAudioSettings,trackIdentity,type BuiltDocument} from './engine';
 import {createHash} from 'node:crypto';
 import { defaultMix } from './document-settings';
+import { canonicalDrumKitMix, defaultDrumElement } from './audio/drum-kit';
+import type { DrumElementMix, DrumKitElement } from './edit-types';
 import { DEFAULT_PRACTICE } from './audio/practice-types';
 import type { PlaybackState } from './audio/types';
 import type { BackingWaveform as WaveformReceipt,BackingWaveformProps,NativeBackingWaveformBridge,WaveformSourceInput } from './audio/backing-waveform-types';
@@ -55,9 +57,11 @@ vi.mock('./audio/NativePlaybackController',()=>({NativePlaybackController:class 
   play=integration.play;pause=integration.pause;stop=integration.stop;seekToMeasure=integration.seekToMeasure;setSpeed=vi.fn();setLoop=integration.setLoop;clearLoop=integration.clearLoop;setMetronome=vi.fn();
   setPractice=integration.setPractice;exportPracticeRatio=()=>integration.practiceFixed?null:this.state.speed/100;
   devices=async()=>[];deviceId=()=>null;selectDevice=vi.fn();backingDurationMs=()=>undefined;
-  mix=(track:{index:number})=>{const value=this.built?.settings.mixes[`base/${track.index}`];return value?{mute:value.mute,solo:value.solo,volume:value.gain,pan:value.pan}:undefined;};
+  mix=(track:{index:number})=>{const value=this.built?.settings.mixes[this.identity(track.index)];return value?{mute:value.mute,solo:value.solo,volume:value.gain,pan:value.pan,...(value.drumKit?{drumKit:value.drumKit}:{})}:undefined;};
   setMix=(track:number,patch:object)=>this.options.onEdit({type:'setTrackMix',trackId:`base/${track}`,mix:{...(this.built?.settings.mixes[`base/${track}`]??defaultMix()),...patch}});
   setMute=(track:number,mute:boolean)=>this.setMix(track,{mute});setSolo=(track:number,solo:boolean)=>this.setMix(track,{solo});setTrackVolume=(track:number,gain:number)=>this.setMix(track,{gain});setPan=(track:number,pan:number)=>this.setMix(track,{pan});
+  identity=(track:number)=>{const found=this.built?.score.tracks[track];return found?trackIdentity(found):`base/${track}`;};
+  setDrumElement=(track:number,element:DrumKitElement,patch:Partial<DrumElementMix>)=>{const id=this.identity(track),mix=this.built?.settings.mixes[id]??defaultMix(),next=canonicalDrumKitMix({...mix.drumKit,[element]:{...defaultDrumElement(),...mix.drumKit?.[element],...patch}}),{drumKit:_kit,...rest}=mix;return this.options.onEdit({type:'setTrackMix',trackId:id,mix:next?{...rest,drumKit:next}:rest});};previewDrumElement=async()=>{};
 }}));
 
 vi.mock('./ScoreView',()=>({ScoreView:({onSelect,track,...rest}: {track:number;onSelect: (target: unknown, string: number,noteIndex?:number)=>void}) =>{engravingView({track,...rest});return (
@@ -511,6 +515,29 @@ it('shows the Mixer view as the third View option while the transport stays, and
   expect(document.querySelector('.workstation-workspace')).toHaveAttribute('data-view','score');
   expect(c.getState().settings.mixes['base/0'].gain).toBe(.95);
   expect(c.getState().settings.mixes['base/0'].pan).toBe(.05);
+});
+it('reaches the drum kit mix from the Mixer view of a percussion track, saves one undoable edit per change, and has no other kit panel',async()=>{
+  const c=await setup({...blankProject(),edits:[{type:'addPercussionTrack',name:'Drums',program:0}]});
+  const before=c.getState().snapshot.project.edits.length;
+  // Neither the Sound pane nor the Mixer shows a kit for the guitar track.
+  fireEvent.click(within(screen.getByRole('radiogroup',{name:'View'})).getByRole('radio',{name:'Mixer'}));
+  const mixer=screen.getByRole('region',{name:'Mixer'});
+  expect(within(mixer).queryByRole('region',{name:/Drum kit/})).not.toBeInTheDocument();
+  expect(screen.queryByRole('region',{name:'Drum kit mix'})).not.toBeInTheDocument();
+  fireEvent.click(within(within(mixer).getByRole('region',{name:'Channel 2: Drums'})).getByRole('button',{name:'Track 2: Drums'}));
+  const kit=await within(mixer).findByRole('region',{name:'Drum kit Drums'});
+  expect(screen.queryByRole('region',{name:'Drum kit mix'})).not.toBeInTheDocument();
+  const mixOf=()=>Object.values(c.getState().settings.mixes).find(mix=>mix.drumKit);
+  fireEvent.keyDown(within(kit).getByRole('slider',{name:'Volume Cymbals'}),{key:'ArrowDown'});
+  await waitFor(()=>expect(mixOf()?.drumKit).toEqual({cymbals:{gain:.95,pan:0,mute:false,solo:false}}));
+  expect(c.getState().snapshot.project.edits).toHaveLength(before+1);
+  fireEvent.click(within(kit).getByLabelText('Mute Kick'));
+  await waitFor(()=>expect(mixOf()?.drumKit?.kick?.mute).toBe(true));
+  expect(c.getState().snapshot.project.edits).toHaveLength(before+2);
+  fireEvent.click(screen.getByRole('button',{name:'Undo'}));
+  await waitFor(()=>expect(mixOf()?.drumKit?.kick).toBeUndefined());
+  fireEvent.click(screen.getByRole('button',{name:'Undo'}));
+  await waitFor(()=>expect(mixOf()).toBeUndefined());
 });
 it('opens command palette in Sound view for non-score commands and refuses score-editing commands',async()=>{
   const c=await setup();

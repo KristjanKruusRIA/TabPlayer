@@ -170,3 +170,39 @@ it('ends a heard mix when the accepted edit was never loaded and is undone to an
   expect(gain()).toBe(1);
   player.destroy();
 });
+
+it('plays a dragged drum kit element through the native mix, records nothing, and goes back to the saved kit', async () => {
+  const { player, bridge, onEdit } = fixture();
+  const added = previewEdit(blankProject(), { type: 'addPercussionTrack', name: 'Drums', program: 0 }), built = buildDocument(added.project);
+  await player.loadDocument(added.project, built, 0, 1);
+  const drums = trackIdentity(built.score.tracks[1]), calls = vi.mocked(bridge.setMix).mock.calls.length;
+  await player.previewDrumElement(1, 'cymbals', { gain: 0.25 });
+  expect(sent(bridge)?.mixes[drums]).toMatchObject({ gain: 1, drumKit: { cymbals: { gain: 0.25, pan: 0, mute: false, solo: false } } });
+  await player.previewDrumElement(1, 'cymbals', { mute: true });
+  expect(sent(bridge)?.mixes[drums]?.drumKit).toEqual({ cymbals: { gain: 1, pan: 0, mute: true, solo: false } });
+  // A value the element already has is heard as the saved mix, and a track that is not percussion has no kit.
+  await player.previewDrumElement(1, 'kick', { gain: 1 });
+  expect(sent(bridge)?.mixes[drums]?.drumKit).toBeUndefined();
+  expect(() => player.previewDrumElement(0, 'kick', { gain: 0.5 })).toThrow('Select a percussion track.');
+  expect(onEdit).not.toHaveBeenCalled();
+  expect(bridge.prepare).toHaveBeenCalledTimes(1);
+  expect(player.mix(built.score.tracks[1])?.drumKit).toBeUndefined();
+  await player.previewDrumElement(1, 'kick', null);
+  expect(vi.mocked(bridge.setMix).mock.calls.length).toBe(calls + 4);
+  expect(sent(bridge)?.mixes[drums]?.drumKit).toBeUndefined();
+  player.destroy();
+});
+
+it('saves a drum kit element as one edit and records nothing for the value it already has', async () => {
+  const added = previewEdit(blankProject(), { type: 'addPercussionTrack', name: 'Drums', program: 0 }), built = buildDocument(added.project);
+  const onEdit = vi.fn(async () => {});
+  const { player } = fixture(onEdit);
+  await player.loadDocument(added.project, built, 0, 1);
+  const drums = trackIdentity(built.score.tracks[1]);
+  await player.setDrumElement(1, 'snare', { gain: 0.5 });
+  expect(onEdit).toHaveBeenCalledTimes(1);
+  expect(onEdit).toHaveBeenCalledWith({ type: 'setTrackMix', trackId: drums, mix: { gain: 1, pan: 0, mute: false, solo: false, drumKit: { snare: { gain: 0.5, pan: 0, mute: false, solo: false } } } });
+  await player.setDrumElement(1, 'snare', { gain: 1 });
+  expect(onEdit).toHaveBeenCalledTimes(1);
+  player.destroy();
+});

@@ -196,3 +196,44 @@ fn track_interpretation_rides_the_track_mix_and_rejects_anything_non_canonical()
         assert!(!accepted, "accepted {bad}");
     }
 }
+
+#[test]
+fn drum_kit_mix_rides_the_track_mix_and_rejects_anything_non_canonical() {
+    let mix = |drum_kit: serde_json::Value| serde_json::json!({"type":"setTrackMix","trackId":"base-0","mix":{"gain":1,"pan":0,"mute":false,"solo":false,"drumKit":drum_kit}});
+    let ok = serde_json::from_value::<EditCommand>(mix(serde_json::json!({
+        "kick": {"gain": 0.8, "pan": 0.0, "mute": false, "solo": false},
+        "snare": {"gain": 1.0, "pan": -0.2, "mute": true, "solo": false},
+    })))
+    .unwrap();
+    assert!(ok.validate().is_ok());
+
+    // A mix with no drumKit encodes without the key, so defaults stay byte-identical.
+    let plain = serde_json::json!({"type":"setTrackMix","trackId":"base-0","mix":{"gain":1,"pan":0,"mute":false,"solo":false}});
+    let parsed = serde_json::from_value::<EditCommand>(plain.clone()).unwrap();
+    let (mut encoded, mut expected) = (serde_json::to_value(parsed).unwrap(), plain);
+    normalize_numbers(&mut encoded);
+    normalize_numbers(&mut expected);
+    assert_eq!(encoded, expected);
+
+    // Old logs without drumKit deserialize cleanly and have no drumKit
+    let old_log = serde_json::json!({"type":"setTrackMix","trackId":"base-0","mix":{"gain":0.5,"pan":0.25,"mute":false,"solo":true}});
+    let old_parsed = serde_json::from_value::<EditCommand>(old_log.clone()).unwrap();
+    assert!(old_parsed.validate().is_ok());
+
+    for bad in [
+        serde_json::json!({}),
+        serde_json::json!({"cowbell": {"gain": 1.0, "pan": 0.0, "mute": false, "solo": false}}),
+        serde_json::json!({"kick": {"gain": 1.5, "pan": 0.0, "mute": false, "solo": false}}),
+        serde_json::json!({"kick": {"gain": -0.1, "pan": 0.0, "mute": false, "solo": false}}),
+        serde_json::json!({"kick": {"gain": 1.0, "pan": 1.5, "mute": false, "solo": false}}),
+        serde_json::json!({"kick": {"gain": 1.0, "pan": -1.5, "mute": false, "solo": false}}),
+        serde_json::json!({"kick": null}),
+        serde_json::json!({"kick": {"gain": 1.0, "pan": 0.0, "mute": false, "solo": false, "extra": 1}}),
+        serde_json::Value::Null,
+    ] {
+        let accepted = serde_json::from_value::<EditCommand>(mix(bad.clone()))
+            .map(|command| command.validate().is_ok())
+            .unwrap_or(false);
+        assert!(!accepted, "accepted {bad}");
+    }
+}

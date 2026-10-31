@@ -331,6 +331,7 @@ fn relative_10_123_300_keeps_attack_clock_and_pitch() {
                     channel: 0,
                     key: note.key,
                     velocity: note.velocity,
+                    kit_element: None,
                 },
                 PlanMidiEvent::NoteOff {
                     track_id: "a".into(),
@@ -338,6 +339,7 @@ fn relative_10_123_300_keeps_attack_clock_and_pitch() {
                     channel: 0,
                     key: note.key,
                     velocity: 0,
+                    kit_element: None,
                 },
                 // Isolate each SoundFont attack from its sampled release tail.
                 PlanMidiEvent::Controller {
@@ -785,6 +787,114 @@ fn render_seek_and_prepared_mix_install_do_not_touch_heap() {
     let operations = HEAP_OPERATIONS.with(Cell::get);
     assert!(retired.is_some() && parked.is_none() && settled.is_some());
     drop((retired, parked, settled));
+    assert_eq!(
+        operations, 0,
+        "audio callback allocated or freed heap memory"
+    );
+}
+
+#[test]
+fn render_seek_and_kit_mix_install_do_not_touch_heap() {
+    use tabplayer_lib::{
+        audio::{
+            plan::PlanMidiEvent,
+            renderer::{PreparedMix, Renderer},
+        },
+        settings::{ChannelMix, DrumElementMix, DrumKitMix, KitElement},
+    };
+    let kit = |gain: f32, mute: bool| {
+        let (_, _, mut settings) = renderer_fixture(true);
+        settings.mixes.insert(
+            "a".into(),
+            ChannelMix {
+                drum_kit: Some(DrumKitMix {
+                    snare: Some(DrumElementMix {
+                        gain,
+                        pan: -0.3,
+                        mute,
+                        solo: false,
+                    }),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+        );
+        settings
+    };
+    let (source, resources, _) = renderer_fixture(true);
+    // A drum track whose notes cross a kit change: a kit element named by the plan, a held one, and a seek into them.
+    let mut plan = (*source).clone();
+    plan.midi = vec![
+        PlanMidiEvent::NoteOn {
+            track_id: "a".into(),
+            tick: 0.,
+            channel: 9,
+            key: 38,
+            velocity: 100,
+            kit_element: None,
+        },
+        PlanMidiEvent::NoteOn {
+            track_id: "a".into(),
+            tick: 480.,
+            channel: 9,
+            key: 37,
+            velocity: 100,
+            kit_element: Some(KitElement::Other),
+        },
+        PlanMidiEvent::NoteOff {
+            track_id: "a".into(),
+            tick: 1920.,
+            channel: 9,
+            key: 37,
+            velocity: 0,
+            kit_element: Some(KitElement::Other),
+        },
+        PlanMidiEvent::NoteOff {
+            track_id: "a".into(),
+            tick: 1920.,
+            channel: 9,
+            key: 38,
+            velocity: 0,
+            kit_element: None,
+        },
+    ];
+    let plan = Arc::new(plan);
+    let first = PreparedMix::prepare(&kit(0.5, false), &plan, 48_000).unwrap();
+    let second = PreparedMix::prepare(&kit(1.0, true), &plan, 48_000).unwrap();
+    let neutral = PreparedMix::prepare(
+        &tabplayer_lib::settings::DocumentSettings::default(),
+        &plan,
+        48_000,
+    )
+    .unwrap();
+    let mut renderer = Renderer::new(plan, resources, kit(0.8, false), 48_000).unwrap();
+    let mut block = [[0.0; 2]; 512];
+    HEAP_OPERATIONS.with(|n| n.set(0));
+    COUNT_HEAP.with(|f| f.set(true));
+    for _ in 0..20 {
+        renderer.render_into(&mut block);
+    }
+    // Seeking into held notes strikes them again, each on its own element; mixes arrive and leave a kit while they ring.
+    renderer.seek_tick(960.0);
+    let retired = renderer.replace_mix(first);
+    renderer.render_into(&mut block);
+    let parked = renderer.replace_mix(second);
+    renderer.render_into(&mut block);
+    let settled = renderer.settle_mix();
+    renderer.render_into(&mut block);
+    let removed = renderer.replace_mix(neutral);
+    renderer.render_into(&mut block);
+    renderer.seek_tick(0.0);
+    renderer.render_into(&mut block);
+    renderer.begin_tail();
+    renderer.render_into(&mut block);
+    COUNT_HEAP.with(|f| f.set(false));
+    let operations = HEAP_OPERATIONS.with(Cell::get);
+    assert!(
+        block.iter().any(|frame| *frame != [0.0; 2]),
+        "the blocks under test hold sound"
+    );
+    drop((retired, parked, settled, removed));
     assert_eq!(
         operations, 0,
         "audio callback allocated or freed heap memory"

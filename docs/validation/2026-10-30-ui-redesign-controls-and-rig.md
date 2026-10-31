@@ -45,3 +45,11 @@ The rule for a pointer gesture: it records only when its release is seen with th
 - **Left in the inspector panel:** nothing was removed from `SoundPanel`; the rig covers every function it has (see the rig tests).
 - **Cabinet response and master panel:** only empty slots exist (`data-slot="cabinet-response"`, `data-slot="master"`).
 - **Native change:** the `set_mix` change skips the asset check when the backing is unchanged, so an unreadable asset is reported when the backing changes rather than on every mix change.
+
+## Merge into feat/gp8-parity, 2026-10-31
+
+Scoped review of c199b9d approved it. The cabinet impulse response control now sits on the rig's cabinet stage, once per pedalboard; while busy, a change from it is refused. `parity-factory-sounds`, `parity-sound-library`, `parity-sound-preview` and `parity-instrument-entry` pass on a merged Windows build, and the cabinet stage was checked in the built app at 1440x900 with no page errors and no overflow.
+
+The full Vitest run under heavy machine load gave 4415 passed and 13 failed, mostly timeouts. The six affected files then passed 252 of 252 alone with a 40 second timeout and two workers. The whole suite has not been run clean in one pass since the merge.
+
+Limits: importing a response from the rig was not driven, since it needs the native file dialog. The master output stays in the track panel. CI still cannot run. `src/audio/SoundPanel.tsx:47,59,69` keep their fieldset disabled, and the reviewer's layout Lows at short windows stay open.

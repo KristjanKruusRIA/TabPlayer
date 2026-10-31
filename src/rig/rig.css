@@ -295,3 +295,8 @@
     .sound-view .rig-inline { margin-left:0; flex:none; }
   }
 }
+
+/* The impulse response control, beside the cabinet. */
+.rig-cab-side .sound-cabinet-ir { display:flex; flex-wrap:wrap; gap:8px; }
+.rig-cab-side .sound-cabinet-ir > :not(button) { flex:1 0 100%; }
+.rig-cab-side .sound-cabinet-ir > button { flex:1 1 auto; }

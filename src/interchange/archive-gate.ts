@@ -1,4 +1,5 @@
 import { isPowerTabBytes } from '../import/powertab';
+import { isTablEditBytes } from '../import/tabledit';
 import { Settings } from '@coderline/alphatab';
 import { OPEN_ENTRY_LIMIT,isArchive,validateArchive } from './archive';
 import { ARCHIVE_CHECK_REQUEST,ARCHIVE_CHECK_RESULT } from './archive-gate-messages';
@@ -65,8 +66,8 @@ export async function admitDocumentBase(project:{base?:{kind:string;bytesBase64?
   if(!options.createWorker&&typeof Worker==='undefined')return;
   if(Math.floor(base.bytesBase64.length/4)*3>BASE_FILE_LIMIT+3)throw new Error(`The file is larger than ${BASE_FILE_LIMIT/(1024*1024)} MiB.`);
   const bytes=decode(base.bytesBase64);
-  // Power Tab files are not read by alphaTab; the bounded Power Tab reader checks them when the document is built.
-  if(isPowerTabBytes(bytes)){admitted.add(base.sha256);return;}
+  // Power Tab and TablEdit files are not read by alphaTab; their bounded readers check them when the document is built.
+  if(isPowerTabBytes(bytes)||isTablEditBytes(bytes)){admitted.add(base.sha256);return;}
   if(isArchive(bytes))await checkArchiveInWorker(bytes,OPEN_ENTRY_LIMIT,options);
   const result=await runCheck(prepareMusicXmlLoaderBytes(bytes,new Settings()),OPEN_ENTRY_LIMIT,true,options);
   if(!result.ok)throw new Error(result.error);

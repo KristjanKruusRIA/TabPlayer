@@ -8,12 +8,14 @@
 // checked against the bytes that remain, nothing recurses, and every failure is a
 // PowerTabError with a message suitable for the user.
 
+import { ByteReader, IMPORT_FILE_BYTES } from './import-support';
+
 export class PowerTabError extends Error {
   constructor(message: string, cause?: unknown) { super(message, cause === undefined ? undefined : { cause }); this.name = 'PowerTabError'; }
 }
 
 export const PTB_LIMITS = {
-  fileBytes: 16 * 1024 * 1024,
+  fileBytes: IMPORT_FILE_BYTES,
   guitars: 32,
   systems: 4096,
   stavesPerSystem: 8,
@@ -54,18 +56,8 @@ export interface PtbDocument {
   dropped: Record<string, number>;
 }
 
-class Reader {
-  pos = 0;
-  constructor(readonly bytes: Uint8Array, readonly view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)) {}
-  get remaining() { return this.bytes.length - this.pos; }
-  private need(n: number) {
-    if (!Number.isInteger(n) || n < 0 || n > this.remaining) throw new PowerTabError('The Power Tab file is truncated or damaged (unexpected end of data).');
-  }
-  u8() { this.need(1); return this.bytes[this.pos++]; }
-  i8() { this.need(1); return this.view.getInt8(this.pos++); }
-  u16() { this.need(2); const v = this.view.getUint16(this.pos, true); this.pos += 2; return v; }
-  u32() { this.need(4); const v = this.view.getUint32(this.pos, true); this.pos += 4; return v; }
-  skip(n: number) { this.need(n); this.pos += n; }
+class Reader extends ByteReader {
+  constructor(bytes: Uint8Array) { super(bytes, 'Power Tab', message => new PowerTabError(message)); }
   string() {
     let length = this.u8();
     if (length === 0xff) { length = this.u16(); if (length === 0xffff) length = this.u32(); }

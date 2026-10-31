@@ -1,4 +1,5 @@
 import { model, type Settings } from '@coderline/alphatab';
+import { droppedLabels } from './import-support';
 import { parsePowerTab, PowerTabError, PTB_LIMITS, type PtbBarline, type PtbDocument, type PtbGuitar, type PtbPosition, type PtbScore, type PtbSystem } from './powertab';
 
 const { Score, Track, Staff, Bar, Voice, Beat, Note, MasterBar, Automation, Section } = model;
@@ -283,7 +284,7 @@ function convert(doc: PtbDocument, settings: Settings): PowerTabImport {
   if (!score.tracks.length) throw new PowerTabError('The Power Tab file contains no playable staves.');
   score.finish(settings);
 
-  const labels = Object.entries(dropped).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => `${v} ${k}`);
+  const labels = droppedLabels(dropped);
   const parts = [`Imported from Power Tab: ${measureCount} measures, ${score.tracks.length} track${score.tracks.length === 1 ? '' : 's'}.`];
   parts.push(labels.length
     ? `Not imported (dropped): ${labels.join('; ')}.`

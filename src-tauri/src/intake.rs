@@ -12,8 +12,19 @@ use std::{
 };
 
 const SCORE_LIMIT: u64 = 64 * 1024 * 1024;
-/// Power Tab content (by `ptab` signature, whatever the extension) is capped below the general score limit.
+/// Power Tab and TablEdit content (by signature, whatever the extension) is capped below the general score limit.
 const POWERTAB_LIMIT: u64 = 16 * 1024 * 1024;
+
+/// Name of the experimental importer format these bytes claim to be: Power Tab starts with `ptab`, TablEdit has `tbed` at 0x38.
+fn capped_import_format(bytes: &[u8]) -> Option<&'static str> {
+    if bytes.starts_with(b"ptab") {
+        Some("Power Tab")
+    } else if bytes.get(0x38..0x3c) == Some(&b"tbed"[..]) {
+        Some("TablEdit")
+    } else {
+        None
+    }
+}
 const PROJECT_LIMIT: u64 = 512 * 1024 * 1024;
 const CHANGED: &str = "The score changed while it was being read. Retry opening it.";
 
@@ -56,8 +67,12 @@ fn read_candidate_using(
         scope,
         if native { PROJECT_LIMIT } else { SCORE_LIMIT },
     )?;
-    if !native && bytes.starts_with(b"ptab") && bytes.len() as u64 > POWERTAB_LIMIT {
-        return Err("The Power Tab file is larger than the 16 MiB import limit.".into());
+    if !native && bytes.len() as u64 > POWERTAB_LIMIT {
+        if let Some(format) = capped_import_format(&bytes) {
+            return Err(format!(
+                "The {format} file is larger than the 16 MiB import limit."
+            ));
+        }
     }
     let (project, native_path, digest) = if native {
         let project: Project =
@@ -373,6 +388,28 @@ mod tests {
     #[test]
     fn bounded_read_rejects_a_file_that_shrinks() {
         assert!(read_bounded(&mut Cursor::new(b"tiny"), 5).is_err());
+    }
+
+    #[test]
+    fn tablature_edit_content_is_capped_even_with_another_extension() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("renamed.gp");
+        fs::write(&path, b"x").unwrap();
+        let workspace = Mutex::new(DocumentWorkspace::new().unwrap());
+        let mut big = vec![0u8; POWERTAB_LIMIT as usize + 1];
+        big[0x38..0x3c].copy_from_slice(b"tbed");
+        let error = match read_candidate_using(
+            path,
+            &workspace,
+            None,
+            || Ok(()),
+            move |path, _, _| Ok((path.to_path_buf(), big)),
+        ) {
+            Ok(_) => panic!("an oversized TablEdit file must be refused"),
+            Err(error) => error,
+        };
+        assert!(error.contains("TablEdit") && error.contains("16 MiB"));
+        assert_eq!(capped_import_format(b"tiny"), None);
     }
 
     #[test]

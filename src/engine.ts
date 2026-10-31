@@ -29,6 +29,8 @@ import { prepareHarmonyTranspose } from './harmony/transpose';
 import { copyMasterTimeSignatureSource } from './editor/time-signature-source';
 import { isPowerTabBytes } from './import/powertab';
 import { importPowerTab } from './import/powertab-score';
+import { isTablEditBytes } from './import/tabledit';
+import { importTablEdit } from './import/tabledit-score';
 
 const settings = new Settings();
 const { Score, Track, Staff, Bar, Voice, Beat, Note, MasterBar, Automation, JsonConverter } = model;
@@ -134,6 +136,7 @@ function initialScore(project: Project, canRedo: boolean): {score:model.Score;no
   if (project.base.kind === 'file') {
     const bytes = Uint8Array.from(atob(project.base.bytesBase64), c => c.charCodeAt(0));
     if (isPowerTabBytes(bytes)) {const imported=importPowerTab(bytes,settings);return {score:imported.score,notice:imported.notice};}
+    if (isTablEditBytes(bytes)) {const imported=importTablEdit(bytes,settings);return {score:imported.score,notice:imported.notice};}
     adoptAdmittedBase(project.base.sha256, bytes);
     return {score:loadInterchangeScore(bytes, settings, appliesFilePartialCapo(project, canRedo)),notice:null};
   }

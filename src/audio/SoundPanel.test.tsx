@@ -304,3 +304,21 @@ it('clears a tone failure when the output recovers', async () => {
   await act(async () => { emit(true); });
   expect(screen.queryByRole('alert')).toBeNull();
 });
+
+it('reads the diagnostics again when the window regains focus, and stops listening on unmount', async () => {
+  const { player, bridge } = nativePlayer();
+  const { unmount } = render(<SoundPanel trackId="guitar" onEdit={() => {}} playback={player} />);
+  await vi.waitFor(() => expect(bridge.diagnostics).toHaveBeenCalledTimes(1));
+  await act(async () => { fireEvent.focus(window); });
+  expect(bridge.diagnostics).toHaveBeenCalledTimes(2);
+  unmount();
+  fireEvent.focus(window);
+  expect(bridge.diagnostics).toHaveBeenCalledTimes(2);
+});
+
+it('words a device the backend cannot name with the translated label', async () => {
+  const { player, bridge } = nativePlayer();
+  bridge.devices = vi.fn(async () => [{ id: 'x', isDefault: false }]);
+  render(<SoundPanel trackId="guitar" onEdit={() => {}} playback={player} />);
+  expect(await screen.findByRole('option', { name: 'Unknown device' })).toBeInTheDocument();
+});

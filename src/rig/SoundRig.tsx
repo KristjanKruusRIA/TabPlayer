@@ -74,7 +74,7 @@ export function SoundRig({trackId,sound,onEdit,playback,busy=false,tracks,onTrac
       </div>
       <p className="rig-status" role="status" title={status||undefined}>{status}</p>
       {playback&&<label className="rig-inline"><span className="rig-field-name">{t('rig.audio_output')}</span><select className="rig-select" aria-label={t('rig.audio_output')} aria-disabled={busy||undefined} value={playback.deviceId()??''} onChange={event=>{if(busy){event.target.value=playback.deviceId()??'';return;}editing.selectOutput(event.target.value);}} onKeyDown={event=>{if(busy)event.preventDefault();}} onPointerDown={event=>{if(busy)event.preventDefault();}} onMouseDown={event=>{if(busy)event.preventDefault();}}>
-        <option value="">{t('rig.system_default')}</option>{editing.devices.map(device=><option key={device.id} value={device.id}>{device.name}</option>)}</select></label>}
+        <option value="">{t('rig.system_default')}</option>{editing.devices.map(device=><option key={device.id} value={device.id}>{device.name??t('audio.unknown_device')}</option>)}</select></label>}
     </div>
     {error&&<p role="alert" className="rig-alert">{error}</p>}{playbackState?.error&&playbackState.error!==error&&<p role="alert" className="rig-alert">{playbackState.error}</p>}
   </section>;

@@ -96,7 +96,8 @@ pub struct PracticeLoop {
 #[serde(rename_all = "camelCase")]
 pub struct AudioDeviceInfo {
     pub id: String,
-    pub name: String,
+    /// None when the backend cannot name the device; the interface words it.
+    pub name: Option<String>,
     pub is_default: bool,
 }
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -478,7 +479,7 @@ struct SharedStatus {
     stream_name: Mutex<Option<String>>,
     /// The system rerouted the live stream (`DeviceChanged`), so the cached name may
     /// be wrong until the next open. A plain flag: the stream's error callback sets it.
-    name_stale: AtomicBool,
+    name_stale: AtomicU64,
 }
 impl SharedStatus {
     fn new() -> Self {
@@ -527,7 +528,7 @@ impl SharedStatus {
             audition_rate: AtomicU32::new(0),
             buffer_size: AtomicU32::new(0),
             stream_name: Mutex::new(None),
-            name_stale: AtomicBool::new(false),
+            name_stale: AtomicU64::new(0),
         }
     }
     fn read(&self) -> NativeAudioStatus {
@@ -639,6 +640,16 @@ impl SharedStatus {
     }
     fn is_faulted(&self) -> bool {
         self.fault.load(Ordering::Acquire) == self.epoch.load(Ordering::Acquire).saturating_add(1)
+    }
+    /// Epoch-tagged like `fault`: stale only for the stream it was raised on, so an
+    /// open (which bumps the epoch) clears it and a late notice cannot mark a new stream.
+    fn name_stale(&self) -> bool {
+        self.name_stale.load(Ordering::Acquire)
+            == self.epoch.load(Ordering::Acquire).saturating_add(1)
+    }
+    fn mark_name_stale_for_epoch(&self, epoch: u64) {
+        self.name_stale
+            .fetch_max(epoch.saturating_add(1), Ordering::AcqRel);
     }
     fn mark_fault(&self) {
         self.mark_fault_for_epoch(self.epoch.load(Ordering::Acquire));
@@ -1712,7 +1723,7 @@ impl AudioService {
         let rate = self.shared.audition_rate.load(Ordering::Acquire);
         let buffer = self.shared.buffer_size.load(Ordering::Relaxed);
         Ok(AudioDiagnostics {
-            device_name: if self.shared.name_stale.load(Ordering::Acquire) {
+            device_name: if self.shared.name_stale() {
                 None
             } else {
                 self.shared.stream_name.lock().unwrap().clone()
@@ -1752,7 +1763,7 @@ impl AudioService {
             .map(|device| {
                 Ok(AudioDeviceInfo {
                     id: device.id().map_err(|e| e.to_string())?.to_string(),
-                    name: device_label(&device).unwrap_or_else(|| "Audio output".into()),
+                    name: device_label(&device),
                     is_default: default.as_ref() == Some(&device),
                 })
             })
@@ -2177,7 +2188,6 @@ impl AudioService {
         let (epoch, snapshot) = self.shared.next_epoch_snapshot();
         // The replacement stream reports its own size on its first callback.
         self.shared.buffer_size.store(0, Ordering::Relaxed);
-        self.shared.name_stale.store(false, Ordering::Release);
         let preserve_position = preserve && snapshot.generation == document.plan.generation;
         let mut transport = CallbackTransport::new(rate, self.shared.clone());
         let (audition_producer, audition_consumer): (AuditionProducer, AuditionConsumer) =
@@ -2311,7 +2321,7 @@ fn stream_notice(shared: &SharedStatus, epoch: u64, kind: cpal::ErrorKind) {
         return;
     }
     match kind {
-        cpal::ErrorKind::DeviceChanged => shared.name_stale.store(true, Ordering::Release),
+        cpal::ErrorKind::DeviceChanged => shared.mark_name_stale_for_epoch(epoch),
         cpal::ErrorKind::Xrun | cpal::ErrorKind::RealtimeDenied => {}
         _ => shared.mark_fault_for_epoch(epoch),
     }
@@ -3698,7 +3708,11 @@ mod diagnostics_and_test_tone_tests {
         let diagnostics = service.diagnostics().expect("a reroute is not a fault");
         assert_eq!(diagnostics.device_name, None);
         assert_eq!(diagnostics.sample_rate, Some(48_000));
-        service.shared.name_stale.store(false, Ordering::Release);
+        // The next open bumps the epoch, which retires the mark with no reset.
+        service.shared.next_epoch_snapshot();
+        assert_eq!(name(&service).as_deref(), Some("Speakers"));
+        // A notice from the old stream racing that open cannot mark the new one.
+        stream_notice(&service.shared, epoch, cpal::ErrorKind::DeviceChanged);
         assert_eq!(name(&service).as_deref(), Some("Speakers"));
     }
 

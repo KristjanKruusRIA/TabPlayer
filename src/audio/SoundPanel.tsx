@@ -82,7 +82,7 @@ export function SoundPanel({trackId,sound,onEdit,playback,busy=false,shown=true,
     <div className="sound-chain" ref={chainRef}>{order.map((block,index)=>pedal(first,block,index))}</div>
     {second&&effectBlocks.some(block=>second.effects[block].enabled)&&<section className="sound-second-board" aria-label="Second pedalboard"><p className="sound-chain-label muted">Second pedalboard, after the signal chain</p><div className="sound-chain">{chainOrder(second.effects).filter(block=>second.effects[block].enabled).map((block,index)=>pedal(second,block,index))}</div></section>}
     {playback&&<BusyFieldset busy={busy} className="sound-output">
-      <label>{t('audio.audio_output')}<select value={playback.deviceId()??''} onChange={e=>editing.selectOutput(e.target.value)}><option value="">{t('audio.system_default')}</option>{devices.map(device=><option key={device.id} value={device.id}>{device.name}</option>)}</select></label>
+      <label>{t('audio.audio_output')}<select value={playback.deviceId()??''} onChange={e=>editing.selectOutput(e.target.value)}><option value="">{t('audio.system_default')}</option>{devices.map(device=><option key={device.id} value={device.id}>{device.name??t('audio.unknown_device')}</option>)}</select></label>
       <button type="button" {...busyGuard({ busy, onClick: testTone })}>{t('audio.test_tone')}</button>
       <div className="sound-diagnostics" role="group" aria-label={t('audio.diagnostics_label')}>
         <div className="sound-diag-item"><span className="sound-diag-label">{t('audio.current_device')}:</span> <span className="sound-diag-value">{diagnostics?.deviceName ?? t('audio.unknown')}</span></div>

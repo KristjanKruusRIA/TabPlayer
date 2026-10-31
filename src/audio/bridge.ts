@@ -8,7 +8,7 @@ import type { PlaybackSpan } from './selection-playback-types';
 import type { AudioOwner } from '../workspace/types';
 
 export interface NativeAudioStatus {generation:number;desiredGeneration?:number;ready:boolean;playing:boolean;tick:number;seconds:number;durationSeconds:number;speed:number;metronome:boolean;practice:PracticeStatus;loop:PracticeLoop|null;range:PlaybackSpan|null;error:string|null;deviceId:string|null;backingDurationSeconds?:number|null;renderedFrames?:number;outputPeak?:number;auditionSerial?:number;auditionPeak?:number}
-export interface AudioDeviceInfo {id:string;name:string;isDefault:boolean}
+export interface AudioDeviceInfo {id:string;name?:string;isDefault:boolean}
 export interface BackingCandidate {token:string;assetId:string;info:AssetInfo;durationMs?:number}
 export type TransportCommand =
   | {type:'play'|'pause'|'stop'|'clearLoop';generation:number}

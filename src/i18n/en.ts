@@ -342,6 +342,7 @@ export const en = {
   'audio.sample_rate': 'Sample rate',
   'audio.buffer_size': 'Buffer size',
   'audio.unknown': 'Unknown',
+  'audio.unknown_device': 'Unknown device',
   'audio.frames': '{count} frames',
   'audio.error.output_failed': 'The audio output device has failed.',
   'audio.error.unavailable': 'The audio output is unavailable.',

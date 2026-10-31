@@ -344,6 +344,7 @@ export const et: MessageCatalog = {
   'audio.sample_rate': 'Diskreetimissagedus',
   'audio.buffer_size': 'Puhvri suurus',
   'audio.unknown': 'Teadmata',
+  'audio.unknown_device': 'Tundmatu seade',
   'audio.frames': '{count} kaadrit',
   'audio.error.output_failed': 'Heliväljundi seade on rikki läinud.',
   'audio.error.unavailable': 'Heliväljund ei ole saadaval.',

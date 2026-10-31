@@ -63,6 +63,12 @@ export function useSoundEditing({trackId,sound,onEdit,playback,busy=false,shown=
   // A failure also ends when the output recovers.
   const isReady = playbackState?.ready ?? false;
   useEffect(() => { setTestToneMessage(null); }, [isReady]);
+  // Changing the system output means leaving the app, so read again when the window regains focus. No polling.
+  useEffect(() => {
+    if (!withDiagnostics || !playback) return;
+    window.addEventListener('focus', refreshDiagnostics);
+    return () => window.removeEventListener('focus', refreshDiagnostics);
+  }, [withDiagnostics, playback, refreshDiagnostics]);
   const followUp = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => { if (followUp.current) clearTimeout(followUp.current); }, []);
   const testTone = useCallback(() => {

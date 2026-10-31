@@ -344,6 +344,7 @@ export const de: MessageCatalog = {
   'audio.sample_rate': 'Abtastrate',
   'audio.buffer_size': 'Puffergröße',
   'audio.unknown': 'Unbekannt',
+  'audio.unknown_device': 'Unbekanntes Gerät',
   'audio.frames': '{count} Frames',
   'audio.error.output_failed': 'Das Audioausgabegerät ist ausgefallen.',
   'audio.error.unavailable': 'Die Audioausgabe ist nicht verfügbar.',

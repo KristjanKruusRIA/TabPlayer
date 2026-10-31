@@ -20,8 +20,6 @@ export function validateBarWidths(value:unknown):asserts value is BarWidth[] {
     if(bar<=previous)throw new Error('Bar widths must list each bar once, in bar order.');
     previous=bar;
     if(typeof scale!=='number'||!Number.isFinite(scale)||scale<BAR_SCALE_RANGE.min||scale>BAR_SCALE_RANGE.max)throw new Error('Bar widths must be between 25% and 400% of the default.');
-    // The default width is the absence of an entry, so one width has one saved form.
-    if(scale===1)throw new Error('A default bar width is not stored.');
   }
 }
 
@@ -30,16 +28,24 @@ export function withBarWidths(engraving:EngravingOverrides,widths:readonly BarWi
   const {barWidths:_dropped,...rest}=structuredClone(engraving);void _dropped;
   return widths.length?{...rest,barWidths:widths.map(entry=>({...entry}))}:rest;
 }
-/** The weight of bar `bar` (0-based): 1 when it keeps its default width. */
-export const barScaleOf=(engraving:Pick<EngravingOverrides,'barWidths'>,bar:number)=>engraving.barWidths?.find(entry=>entry.bar===bar)?.scale??1;
+/** The weight set here for bar `bar` (0-based), or `base` when none is: `base` is the weight the score itself gives the bar (1, unless an imported file set one). */
+export const barScaleOf=(engraving:Pick<EngravingOverrides,'barWidths'>,bar:number,base=1)=>engraving.barWidths?.find(entry=>entry.bar===bar)?.scale??base;
+/** A weight a score gives a bar, as the controls show it: unusable values read as the default 1 and the rest are held to the supported range. */
+export const sourceBarScale=(weight:unknown)=>typeof weight==='number'&&Number.isFinite(weight)&&weight>0?clampBarScale(weight):1;
 export const hasBarWidths=(engraving:Pick<EngravingOverrides,'barWidths'>)=>!!engraving.barWidths?.length;
-/** `engraving` with bar `bar` at weight `scale` (a weight of 1 restores the default), or the same object when nothing would change. */
-export function withBarScale(engraving:EngravingOverrides,bar:number,scale:number):EngravingOverrides {
+/** `engraving` with bar `bar` at weight `scale`; the score's own weight `base` for that bar (1 unless imported) clears the entry. Returns the same object when nothing would change. */
+export function withBarScale(engraving:EngravingOverrides,bar:number,scale:number,base=1):EngravingOverrides {
   const next=clampBarScale(scale);
   if(!Number.isInteger(bar)||bar<0||bar>MAX_BAR_INDEX)throw new Error('Bar widths must name a bar from 1 to 100000.');
-  if(next===barScaleOf(engraving,bar))return engraving;
+  if(next===barScaleOf(engraving,bar,base))return engraving;
   const others=(engraving.barWidths??[]).filter(entry=>entry.bar!==bar);
-  return withBarWidths(engraving,next===1?others:[...others,{bar,scale:next}].sort((a,b)=>a.bar-b.bar));
+  return withBarWidths(engraving,next===base?others:[...others,{bar,scale:next}].sort((a,b)=>a.bar-b.bar));
+}
+/** `engraving` after measures moved: `oldToNew[old]` is a bar's new index, or null when it was removed. A removed bar's width goes with it; inserted bars keep the score's own weight. */
+export function mapBarWidths(engraving:EngravingOverrides,oldToNew:ReadonlyArray<number|null>):EngravingOverrides {
+  if(!engraving.barWidths?.length)return engraving;
+  const moved=engraving.barWidths.flatMap(({bar,scale})=>{const to=oldToNew[bar];return to===null||to===undefined?[]:[{bar:to,scale}];}).sort((a,b)=>a.bar-b.bar);
+  return withBarWidths(engraving,moved);
 }
 /** The weight a bar of `width` px and weight `scale` takes when its right edge is dragged by `delta` px. Fixed clef and signature widths are not
  * known here, so the result is an estimate that the next layout corrects. */

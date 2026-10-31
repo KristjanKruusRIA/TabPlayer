@@ -3,6 +3,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { act,cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import userEvent from '@testing-library/user-event';
+import type { BarDesign } from './ScoreView';
 import {importer} from '@coderline/alphatab';
 import { WorkspaceApp,type WorkspaceSession } from './workspace/WorkspaceApp';
 import { WorkspaceController } from './workspace/WorkspaceController';
@@ -318,6 +319,21 @@ it('persists layout and fit choices, retains manual percent and restores them ac
   await act(async()=>{await testWorkspace.activate(id);});
   expect(screen.getByLabelText('Display mode')).toHaveValue('horizontalPage');expect(screen.getByLabelText('Zoom (%)')).toHaveValue(142.75);
   expect(screen.getByRole('button',{name:'Fit width'})).toHaveAttribute('aria-pressed','true');expect(c.getState()).toBe(before);
+});
+it('wires Design mode bar widths: handles only while on, one edit per width, imported weights as the base, restore clears, busy refuses',async()=>{
+  const c=await setup(),original=c.getState().score,last=()=>engravingView.mock.lastCall![0] as {barDesign:BarDesign|null};
+  expect(last().barDesign).toBeNull();c.getState().score.masterBars[2].displayScale=2;
+  fireEvent.click(screen.getByRole('checkbox',{name:/Design mode/}));
+  const design=()=>last().barDesign!;expect(design()).not.toBeNull();
+  expect(design().scaleOf(1)).toBe(1);expect(design().defaultOf(1)).toBe(1);expect(design().defaultOf(2)).toBe(2);expect(design().scaleOf(2)).toBe(2);
+  act(()=>design().onScale(1,1.5));await waitFor(()=>expect(c.getState().settings.engraving.barWidths).toEqual([{bar:1,scale:1.5}]));
+  expect(c.getState().snapshot.project.edits).toHaveLength(1);expect(c.getState().score).toBe(original);expect(design().scaleOf(1)).toBe(1.5);
+  // The current value records nothing.
+  act(()=>design().onScale(1,1.5));expect(c.getState().snapshot.project.edits).toHaveLength(1);
+  act(()=>design().onScale(1,1));await waitFor(()=>expect(c.getState().settings.engraving.barWidths).toBeUndefined());expect(c.getState().snapshot.project.edits).toHaveLength(2);
+  act(()=>design().onScale(0,2));await waitFor(()=>expect(c.getState().settings.engraving.barWidths).toHaveLength(1));
+  click('Restore default widths');await waitFor(()=>expect(c.getState().settings.engraving.barWidths).toBeUndefined());expect(c.getState().snapshot.project.edits).toHaveLength(4);
+  fireEvent.click(screen.getByRole('checkbox',{name:/Design mode/}));expect(last().barDesign).toBeNull();
 });
 it('applies engraving and custom page edits once while keeping canonical music through history',async()=>{
   const c=await setup(),original=c.getState().score;

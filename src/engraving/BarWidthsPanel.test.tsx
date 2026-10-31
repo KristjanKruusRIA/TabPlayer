@@ -17,7 +17,7 @@ const setup=(props:Partial<Parameters<typeof BarWidthsPanel>[0]>={})=>{
 it('restores every default width in one edit that keeps the other engraving choices',()=>{
   const typed=withTypography(withBarScale(withBarScale(defaultEngraving(),1,1.5),3,.5),{family:'serif',textScale:null,titleScale:null,tabScale:null});
   const {onEdit}=setup({value:typed});
-  expect(screen.getByText('2 bars have a custom width.')).toBeTruthy();
+  expect(screen.getByText(/2 bars have a width set here\./)).toBeTruthy();
   fireEvent.click(screen.getByRole('button',{name:'Restore default widths'}));
   expect(onEdit).toHaveBeenCalledTimes(1);
   const sent=onEdit.mock.calls[0][0];expect(sent.type).toBe('setEngraving');expect(Object.hasOwn(sent.engraving,'barWidths')).toBe(false);expect(sent.engraving.typography?.family).toBe('serif');
@@ -26,7 +26,7 @@ it('restores every default width in one edit that keeps the other engraving choi
 it('records nothing when every bar already has its default width',()=>{
   const {onEdit}=setup({value:defaultEngraving()});
   const button=screen.getByRole('button',{name:'Restore default widths'});expect(button.getAttribute('aria-disabled')).toBe('true');
-  fireEvent.click(button);expect(onEdit).not.toHaveBeenCalled();expect(screen.getByText('Every bar has its default width.')).toBeTruthy();
+  fireEvent.click(button);expect(onEdit).not.toHaveBeenCalled();expect(screen.getByText(/Every bar has its default width\./)).toBeTruthy();
 });
 
 it('refuses to restore while busy without disabling the button, so it keeps focus',()=>{

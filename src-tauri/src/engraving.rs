@@ -178,7 +178,7 @@ impl EngravingOverrides {
         if self.bar_widths.len() > MAX_BAR_WIDTHS {
             return Err("Too many bar widths.".into());
         }
-        // Strictly ascending bars are distinct and in order; a weight of 1 is the default and is never stored.
+        // Strictly ascending bars are distinct and in order.
         let ordered = self
             .bar_widths
             .windows(2)
@@ -187,7 +187,6 @@ impl EngravingOverrides {
             entry.bar <= MAX_BAR_INDEX
                 && entry.scale.is_finite()
                 && (0.25..=4.0).contains(&entry.scale)
-                && entry.scale != 1.0
         });
         if !ordered || !fits {
             return Err(

@@ -331,7 +331,7 @@ fn engraving_bar_widths_are_optional_ordered_bounded_and_round_trip_only_when_se
     assert!(plain["engraving"].get("barWidths").is_none());
     assert_eq!(serde_json::to_value(accepted(&plain)).unwrap(), plain);
     let set = widths(
-        json!([{"bar": 0, "scale": 1.5}, {"bar": 3, "scale": 0.25}, {"bar": 99999, "scale": 4.0}]),
+        json!([{"bar": 0, "scale": 1.5}, {"bar": 1, "scale": 1.0}, {"bar": 3, "scale": 0.25}, {"bar": 99999, "scale": 4.0}]),
     );
     assert_eq!(serde_json::to_value(accepted(&set)).unwrap(), set);
     // An explicit empty list is accepted and is written back without the field.
@@ -340,7 +340,6 @@ fn engraving_bar_widths_are_optional_ordered_bounded_and_round_trip_only_when_se
         plain
     );
     for invalid in [
-        json!([{"bar": 1, "scale": 1.0}]),
         json!([{"bar": 1, "scale": 0.249}]),
         json!([{"bar": 1, "scale": 4.01}]),
         json!([{"bar": 1, "scale": 0.0}]),

@@ -3,7 +3,7 @@ import { expect,it } from 'vitest';
 import { midi,model,Settings } from '@coderline/alphatab';
 import { buildDocument,previewEdit,replayDocumentSettings,trackIdentity } from '../engine';
 import { blankProject } from '../project';
-import { BAR_SCALE_BIG_STEP,BAR_SCALE_STEP,barScaleOf,clampBarScale,scaleAfterDrag,validateBarWidths,withBarScale,withBarWidths } from './bar-widths';
+import { BAR_SCALE_BIG_STEP,BAR_SCALE_STEP,barScaleOf,clampBarScale,mapBarWidths,scaleAfterDrag,sourceBarScale,validateBarWidths,withBarScale,withBarWidths } from './bar-widths';
 import { defaultEngraving,projectEngraving,validateEngraving } from './projection';
 import { defaultStyle,styleApplied,styleOf } from './style-library';
 import { withTypography } from './typography';
@@ -17,8 +17,8 @@ const midiBytes=(score:model.Score)=>{
 const authored=()=>previewEdit(previewEdit(blankProject(),{type:'setNote',target:{track:0,staff:0,bar:0,voice:0,beat:0},string:6,fret:5}).project,{type:'setNote',target:{track:0,staff:0,bar:2,voice:0,beat:0},string:5,fret:3});
 
 it('accepts only ordered, bounded, non-default widths and keeps old shapes valid',()=>{
-  validateEngraving(defaultEngraving());validateEngraving(widths([0,1.5],[3,.25],[99_999,4]));validateEngraving({...defaultEngraving(),barWidths:[]});
-  for(const bad of [[{bar:1,scale:1}],[{bar:1,scale:.24}],[{bar:1,scale:4.01}],[{bar:1,scale:0}],[{bar:1,scale:-2}],[{bar:1,scale:Number.NaN}],[{bar:1,scale:Number.POSITIVE_INFINITY}],[{bar:1,scale:'2'}],[{bar:-1,scale:2}],[{bar:1.5,scale:2}],[{bar:100_000,scale:2}],[{bar:2,scale:2},{bar:1,scale:2}],[{bar:2,scale:2},{bar:2,scale:3}],[{bar:1}],[{bar:1,scale:2,extra:true}],[null],{bar:1,scale:2},null])
+  validateEngraving(defaultEngraving());validateEngraving(widths([0,1.5],[1,1],[3,.25],[99_999,4]));validateEngraving({...defaultEngraving(),barWidths:[]});
+  for(const bad of [[{bar:1,scale:.24}],[{bar:1,scale:4.01}],[{bar:1,scale:0}],[{bar:1,scale:-2}],[{bar:1,scale:Number.NaN}],[{bar:1,scale:Number.POSITIVE_INFINITY}],[{bar:1,scale:'2'}],[{bar:-1,scale:2}],[{bar:1.5,scale:2}],[{bar:100_000,scale:2}],[{bar:2,scale:2},{bar:1,scale:2}],[{bar:2,scale:2},{bar:2,scale:3}],[{bar:1}],[{bar:1,scale:2,extra:true}],[null],{bar:1,scale:2},null])
     expect(()=>validateEngraving({...defaultEngraving(),barWidths:bad}),JSON.stringify(bad)).toThrow();
   expect(()=>validateBarWidths(Array.from({length:10_001},(_,bar)=>({bar,scale:2})))).toThrow();
   expect(()=>validateBarWidths(Array.from({length:10_000},(_,bar)=>({bar,scale:2})))).not.toThrow();
@@ -84,16 +84,14 @@ it('replays an old log with default widths and keeps new widths through undo, re
 
 it('refuses out-of-range widths in a command or a saved log, and tolerates a width for a bar that is gone',()=>{
   const built=authored(),bad=(barWidths:unknown)=>({...defaultEngraving(),barWidths} as EngravingOverrides);
-  for(const barWidths of [[{bar:1,scale:9}],[{bar:1,scale:1}],[{bar:2,scale:2},{bar:1,scale:2}]]){
+  for(const barWidths of [[{bar:1,scale:9}],[{bar:2,scale:2},{bar:1,scale:2}]]){
     expect(()=>previewEdit(built.project,{type:'setEngraving',engraving:bad(barWidths)},built)).toThrow();
     const log={...built.project,edits:[...built.project.edits,{type:'setEngraving',engraving:bad(barWidths)}]};
     expect(()=>buildDocument(JSON.parse(JSON.stringify(log)))).toThrow();
   }
-  // Removing bars leaves a stored width pointing past the end; it is ignored, not an error.
+  // A width past the end of the score (a log that shrank some other way) is ignored, not an error.
   const stale=previewEdit(built.project,{type:'setEngraving',engraving:widths([3,2])},built);
-  const shorter=previewEdit(stale.project,{type:'removeMeasure',bar:3},stale);
-  expect(shorter.score.masterBars).toHaveLength(3);
-  expect(()=>projectEngraving(shorter.score,shorter.score.tracks.map(trackIdentity),shorter.settings.engraving)).not.toThrow();
+  expect(()=>projectEngraving(stale.score,stale.score.tracks.map(trackIdentity),widths([40,2]))).not.toThrow();
 });
 
 it('keeps widths out of saved styles while a style applied to a document keeps its own widths',()=>{
@@ -101,4 +99,37 @@ it('keeps widths out of saved styles while a style applied to a document keeps i
   expect(styleOf(current).barWidths).toBeUndefined();expect(defaultStyle().barWidths).toBeUndefined();
   const applied=styleApplied(defaultStyle(),current);expect(applied.barWidths).toEqual([{bar:1,scale:2}]);expect(applied.systemSpacing).toBeNull();
   expect(styleApplied(defaultStyle(),defaultEngraving())).toEqual(defaultEngraving());
+});
+
+it('sets a width against the weight the score itself gives the bar, so an imported weight is visible and restorable',()=>{
+  expect(sourceBarScale(2)).toBe(2);expect(sourceBarScale(0)).toBe(1);expect(sourceBarScale(Number.NaN)).toBe(1);expect(sourceBarScale(undefined)).toBe(1);expect(sourceBarScale(99)).toBe(4);
+  const base=defaultEngraving();
+  // A bar imported at 2: showing 2, the current value records nothing, 1 is a real override, and 2 again clears it.
+  expect(barScaleOf(base,0,2)).toBe(2);expect(withBarScale(base,0,2,2)).toBe(base);
+  const one=withBarScale(base,0,1,2);expect(one.barWidths).toEqual([{bar:0,scale:1}]);expect(barScaleOf(one,0,2)).toBe(1);
+  expect(Object.hasOwn(withBarScale(one,0,2,2),'barWidths')).toBe(false);
+  // The imported weight is what a rendered copy without an override keeps, and an override replaces.
+  const score=authored().score;score.masterBars[0].displayScale=2;score.tracks[0].staves[0].bars[0].displayScale=2;
+  const ids=score.tracks.map(trackIdentity);
+  expect(projectEngraving(score,ids,base).score.masterBars[0].displayScale).toBe(2);
+  expect(projectEngraving(score,ids,one).score.masterBars[0].displayScale).toBe(1);expect(projectEngraving(score,ids,one).score.tracks[0].staves[0].bars[0].displayScale).toBe(1);
+});
+
+it('moves widths with their bars when measures are inserted or removed, in the same replay as the edit',()=>{
+  const map=(removed:number)=>Array.from({length:4},(_,bar)=>bar<removed?bar:bar===removed?null:bar-1);
+  const set=widths([0,.5],[1,2],[3,3]);
+  expect(mapBarWidths(set,map(1)).barWidths).toEqual([{bar:0,scale:.5},{bar:2,scale:3}]);
+  expect(Object.hasOwn(mapBarWidths(widths([1,2]),map(1)),'barWidths')).toBe(false);expect(mapBarWidths(defaultEngraving(),map(0))).toEqual(defaultEngraving());
+  expect(mapBarWidths(widths([1,2]),[0,2,3,4]).barWidths).toEqual([{bar:2,scale:2}]);expect(mapBarWidths(widths([9,2]),map(0)).barWidths).toBeUndefined();
+  const built=authored(),styled=previewEdit(built.project,{type:'setEngraving',engraving:set},built);
+  const removed=previewEdit(styled.project,{type:'removeMeasure',bar:1},styled);
+  expect(removed.settings.engraving.barWidths).toEqual([{bar:0,scale:.5},{bar:2,scale:3}]);
+  expect(buildDocument(JSON.parse(JSON.stringify(removed.project))).settings.engraving.barWidths).toEqual([{bar:0,scale:.5},{bar:2,scale:3}]);
+  const replayed=replayDocumentSettings(removed.project,styled);expect(replayed.settings.engraving.barWidths).toEqual([{bar:0,scale:.5},{bar:2,scale:3}]);
+  const inserted=previewEdit(styled.project,{type:'insertMeasures',beforeBar:1,count:2},styled);
+  expect(inserted.settings.engraving.barWidths).toEqual([{bar:0,scale:.5},{bar:3,scale:2},{bar:5,scale:3}]);
+  expect(replayDocumentSettings(inserted.project,styled).settings.engraving.barWidths).toEqual([{bar:0,scale:.5},{bar:3,scale:2},{bar:5,scale:3}]);
+  const several=previewEdit(styled.project,{type:'removeMeasures',firstBar:0,lastBar:1},styled);
+  expect(several.settings.engraving.barWidths).toEqual([{bar:1,scale:3}]);
+  expect(buildDocument(JSON.parse(JSON.stringify(several.project))).settings.engraving.barWidths).toEqual([{bar:1,scale:3}]);
 });

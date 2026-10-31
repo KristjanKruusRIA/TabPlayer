@@ -3,6 +3,7 @@ import { model } from '@coderline/alphatab';
 import { blankProject, type EditCommand, type Project } from '../project';
 import { buildScore, previewEdit, trackIdentity } from '../engine';
 import { buildPlaybackPlan } from '../audio/plan';
+import { isNoteCautionary } from './cautionary';
 
 const target={track:0,staff:0,bar:0,voice:0,beat:0};
 function apply(edits:EditCommand[]) {
@@ -44,4 +45,22 @@ it('replays new piano and drum tracks, preserves identities and validates non-ta
   const source=JSON.stringify(project);expect(JSON.stringify(project)).toBe(source);
   const deleted=previewEdit(project,{type:'removeTrack',track:0});expect(trackIdentity(deleted.score.tracks[0])).toBe(trackIdentity(score.tracks[1]));
   expect(buildScore({...project,edits:project.edits.slice(0,-1)} as Project).masterBars).toHaveLength(4);
+});
+
+it('replays courtesy accidentals with undo and redo while preserving existing logs', () => {
+  const { project, score } = apply([
+    { type: 'setNote', target, string: 1, fret: 0 },
+    { type: 'setNoteCautionary', target, noteIndex: 0, cautionary: true },
+  ]);
+  const note = (value: model.Score) => value.tracks[0].staves[0].bars[0].voices[0].beats[0].notes[0];
+  expect(isNoteCautionary(note(score))).toBe(true);
+  expect(note(score).accidentalMode).toBe(model.NoteAccidentalMode.ForceNatural);
+  // Undo:
+  const undone = buildScore({ ...project, edits: project.edits.slice(0, -1) });
+  expect(isNoteCautionary(note(undone))).toBe(false);
+  expect(note(undone).accidentalMode).toBe(model.NoteAccidentalMode.Default);
+  // Redo:
+  const redone = buildScore(project);
+  expect(isNoteCautionary(note(redone))).toBe(true);
+  expect(note(redone).accidentalMode).toBe(model.NoteAccidentalMode.ForceNatural);
 });

@@ -2,6 +2,7 @@ import { expect, it } from 'vitest';
 import { exporter, importer, model, Settings } from '@coderline/alphatab';
 import type { EditCommand } from '../edit-types';
 import { applyPitchEdit } from './pitch';
+import { isNoteCautionary } from './cautionary';
 import { music, noteAt, reopened, target } from './fixtures';
 
 it.each([0,1,2,3,4,5,6])('spelling mode %i survives native roundtrip while sounding pitch stays unchanged',accidentalMode=>{
@@ -36,3 +37,49 @@ it('invalid beat targets reject before spelling changes',()=>{
 });
 
 it('leaves commands owned by another router untouched',()=>{expect(applyPitchEdit(music(),{type:'appendMeasure'})).toBe(false);});
+
+it('marks a note with a courtesy accidental that survives native roundtrip while pitch is preserved', () => {
+  const score = music(), note = noteAt(score);
+  note.fret = 0; // E (pitch 64 in C major: alteration 0, natural)
+  score.finish(new Settings());
+  const pitch = note.realValue;
+  expect(applyPitchEdit(score, { type: 'setNoteCautionary', target, noteIndex: 0, cautionary: true })).toBe(true);
+  expect(isNoteCautionary(note)).toBe(true);
+  expect(note.accidentalMode).toBe(model.NoteAccidentalMode.ForceNatural);
+  expect(note.realValue).toBe(pitch);
+
+  for (const copy of [score, reopened(score)]) {
+    const result = noteAt(copy);
+    expect(isNoteCautionary(result)).toBe(true);
+    expect(result.accidentalMode).toBe(model.NoteAccidentalMode.ForceNatural);
+    expect(result.realValue).toBe(pitch);
+  }
+
+  // Toggling cautionary off clears the courtesy mark and reverts accidentalMode
+  expect(applyPitchEdit(score, { type: 'setNoteCautionary', target, noteIndex: 0, cautionary: false })).toBe(true);
+  expect(isNoteCautionary(note)).toBe(false);
+  expect(note.accidentalMode).toBe(model.NoteAccidentalMode.Default);
+  expect(note.realValue).toBe(pitch);
+});
+
+it('supports setNoteCourtesy as an alias for setNoteCautionary', () => {
+  const score = music(), note = noteAt(score);
+  note.fret = 2; // F# (pitch 66 in C major: alteration 1, sharp)
+  score.finish(new Settings());
+  expect(applyPitchEdit(score, { type: 'setNoteCourtesy', target, noteIndex: 0, courtesy: true })).toBe(true);
+  expect(isNoteCautionary(note)).toBe(true);
+  expect(note.accidentalMode).toBe(model.NoteAccidentalMode.ForceSharp);
+  expect(note.realValue).toBe(66);
+});
+
+it.each([
+  { noteIndex: -1, cautionary: true },
+  { noteIndex: 1, cautionary: true },
+  { noteIndex: 0.5, cautionary: true },
+  { noteIndex: 0, cautionary: 'yes' },
+  { noteIndex: 0, cautionary: null },
+])('invalid cautionary targets and flags reject without mutation: %j', invalid => {
+  const score = music();
+  expect(() => applyPitchEdit(score, { type: 'setNoteCautionary', target, ...invalid } as any)).toThrow(/note|cautionary|boolean/i);
+  expect(isNoteCautionary(noteAt(score))).toBe(false);
+});

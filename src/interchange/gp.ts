@@ -10,6 +10,7 @@ import { readGpifLyrics,writeGpifLyrics } from './lyrics';
 import { writeGpifNotation } from './notation';
 import { readGpifHarmony,writeGpifHarmony } from './harmony';
 import { readGpifScaleDiagrams,writeGpifScaleDiagrams } from './scale-diagram';
+import { gpifCurvesProperty,hasGpifCurves,readGpifCurves,writeGpifCurves } from './curves';
 import { withPlainTrills } from '../editor/partial-capo';
 import { withPlainDrone } from '../editor/banjo-drone';
 import { hasPartialCapo,readGpifPartialCapo,writeGpifPartialCapo } from './partial-capo';
@@ -83,6 +84,7 @@ export function loadInterchangeScore(bytes:Uint8Array,settings:Settings,partialC
   readGpifHarmony(score,doc);
   readGpifScaleDiagrams(score,doc);
   readGpifPartialCapo(score,doc,partialCapo);
+  if(xml.includes(gpifCurvesProperty))readGpifCurves(score,doc,xml);
   orderedTracks(doc).forEach((node,index)=>{
     const track=score.tracks[index];if(!node||!track)return;
     const transpose=node.querySelector(':scope > Transpose');
@@ -129,8 +131,8 @@ export function exportGpInterchange(score:model.Score,settings:Settings):Uint8Ar
   const lyrics=score.tracks.some(track=>{const source=getLyricsSource(track);return source&&(source.managed||!source.value.visible||source.value.lines.some(line=>line.text.length>0));});
   const harmony=score.tracks.some(track=>track.staves.some(staff=>!!staff.chords?.size));
   const scales=listScaleDiagrams(score).length>0;
-  const partialCapo=hasPartialCapo(score);
-  const raw=withPlainDrone(score,()=>withPlainTrills(score,()=>new exporter.Gp7Exporter().export(score,settings))),changes=score.tracks.map(trackMixAutomations),needsXml=harmony||scales||lyrics||!!notation||changes.some(stream=>stream.length>0)||score.tracks.some(track=>track.isPercussion)||rawTuning||partialCapo;
+  const partialCapo=hasPartialCapo(score),curves=hasGpifCurves(score);
+  const raw=withPlainDrone(score,()=>withPlainTrills(score,()=>new exporter.Gp7Exporter().export(score,settings))),changes=score.tracks.map(trackMixAutomations),needsXml=harmony||scales||lyrics||!!notation||changes.some(stream=>stream.length>0)||score.tracks.some(track=>track.isPercussion)||rawTuning||partialCapo||curves;
   const original=sourceEntries.get(score);
   const generated=unzip(raw,settings);
   const entries:Record<string,Uint8Array>={...generated,...original,[gpifPath]:generated[gpifPath]};
@@ -139,7 +141,7 @@ export function exportGpInterchange(score:model.Score,settings:Settings):Uint8Ar
   if(!needsXml)return zipSync(writeStylesheetTimeSignatures(score,entries),archiveOptions);
   const xml=new TextDecoder().decode(generated[gpifPath]),projection=projectGpifTracks(xml,notation),doc=parseXml(projection?.xml??xml);
   const references=writePercussionReferences(score,doc,settings);
-  writeGpifLyrics(score,doc);writeGpifNotation(score,doc);if(harmony)writeGpifHarmony(score,doc);if(scales)writeGpifScaleDiagrams(score,doc);if(partialCapo)writeGpifPartialCapo(score,doc);
+  writeGpifLyrics(score,doc);writeGpifNotation(score,doc);if(harmony)writeGpifHarmony(score,doc);if(scales)writeGpifScaleDiagrams(score,doc);if(partialCapo)writeGpifPartialCapo(score,doc);if(curves)writeGpifCurves(score,doc,xml);
   for(const node of doc.querySelectorAll('GPIF > Beats > Beat'))if(lyricBeatIds.has(Number(node.getAttribute('id')))){
     // alphaTab's reader keeps only the final adjacent CDATA chunk. Plain XML
     // text retains the combined literal syllable for both readers.

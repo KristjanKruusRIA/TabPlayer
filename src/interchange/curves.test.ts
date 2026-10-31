@@ -8,6 +8,7 @@ import { writeStylesheetTimeSignatures } from './stylesheet';
 import { scoreFromJson } from '../model-clone';
 import { buildPlaybackPlan } from '../audio/plan';
 import { setBanjoDrone } from '../editor/banjo-drone';
+import { curveLosses } from './curves';
 
 const settings=new Settings();
 afterEach(()=>vi.restoreAllMocks());
@@ -314,10 +315,11 @@ describe('curves the first version lost or broke',()=>{
     whammy(beatsOf(score,1)[0],model.WhammyType.Custom,model.BendStyle.Default,[0,0],[20,-2],[20,-3],[40,-1],[45,0]);score.finish(settings);
     const loaded=roundTrip(score);expect(state(loaded)).toEqual(state(score));usable(loaded);
   });
-  it('stops the export instead of silently dropping a long curve it cannot carry',()=>{
+  it('exports a long curve it cannot carry, leaves it out of the property and reports it',()=>{
     const score=music();
     bend(beatsOf(score,0)[1].notes[0],model.BendType.Custom,model.BendStyle.Default,[0,0],[10,2],[20,4],[40,40],[60,0]);score.finish(settings);
-    expect(()=>exportGpInterchange(score,settings)).toThrow(/cannot keep the bend at track 1, bar 1, beat 2/);
+    expect(curveLosses(score)).toEqual([expect.stringMatching(/5-point bend at track 1, bar 1, beat 2 is left out/)]);
+    const loaded=roundTrip(score);expect(beatsOf(loaded,0)[1].notes[0].hasBend).toBe(false);expect(loaded.masterBars).toHaveLength(4);
   });
   it('keeps curves on banjo drone notes, which GPIF holds at their plain fret',()=>{
     const score=music(),staff=score.tracks[0].staves[0];
@@ -363,14 +365,15 @@ describe('curves the first version lost or broke',()=>{
       const loaded=roundTrip(dense(16));
       expect(allNotes(loaded).filter(note=>note.bendPoints?.length===1024)).toHaveLength(16);
     });
-    it('stops the export of a file past the cap rather than dropping curves',()=>{
+    it('exports a file past the cap, keeping the shortest curves and reporting the one left out',()=>{
       const score=dense(16);whammy(beatsOf(score,0)[0],model.WhammyType.Custom,model.BendStyle.Default,...Array.from({length:1024},(_,index)=>[60*index/1023,index%2?-1:-2]));score.finish(settings);
-      expect(()=>exportGpInterchange(score,settings)).toThrow(/more than 16384 curve points/);
+      expect(curveLosses(score)).toEqual([expect.stringMatching(/1024-point bend .* more than 16384 points/)]);
+      const loaded=roundTrip(score);expect(allNotes(loaded).filter(note=>note.bendPoints?.length===1024)).toHaveLength(15);expect(beatsOf(loaded,0)[0].whammyBarPoints).toHaveLength(1024);
     });
     it('skips curves past the cap when reading a file that holds more',()=>{
       const warn=warnings(),bytes=editDoc(exportGpInterchange(dense(16),settings),doc=>{const [first]=sidecar(doc,'Bend');first.parentNode!.append(first.cloneNode(true),first.cloneNode(true));});
       const loaded=loadInterchangeScore(bytes,settings);
-      expect(warn).toHaveBeenCalledWith(expect.stringContaining('16384 curve points'));
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('16384 points'));
       expect(allNotes(loaded).filter(note=>note.bendPoints?.length===1024)).toHaveLength(16);
     });
   });

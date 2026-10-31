@@ -1,5 +1,7 @@
 import type { model } from '@coderline/alphatab';
 import { admitDocumentBase } from './interchange/archive-gate';
+import { curveLosses } from './interchange/curves';
+import { gpWarning } from './export/gp-warning';
 import { buildDocument, effectiveAudioSettings,exportGp, previewEdit, replayDocumentSettings, type BuiltDocument } from './engine';
 import { appliesFilePartialCapo, type EditCommand, type ProjectSnapshot, type AssetCandidate, type DocumentLock } from './project';
 import { getPartialCapo } from './editor/partial-capo';
@@ -179,7 +181,9 @@ export class DocumentController {
   }
   save(saveAs = false) { return this.run(()=>this.saveNow(saveAs)); }
   export() { return this.run(async()=>{
-    if(!await this.bridge.confirmExport())return;
+    // What the file cannot keep is worked out first, so the user is asked once, with it, and not after confirming.
+    const losses=curveLosses(this.state.score);
+    if(!await (losses.length?this.bridge.confirmExport(gpWarning(losses)):this.bridge.confirmExport()))return;
     const current=this.state,settings=effectiveAudioSettings(current.snapshot.project,current),backing=settings.backing;
     const bytes=backing&&backing.assetId!=='embedded'?await this.bridge.readBackingAsset(backing.assetId,current.revision):current.embeddedBacking;
     const score=projectGpDocument({score:current.score,settings,bytes,selection:{tracks:current.score.tracks.map((_,index)=>index),range:null},backing:true});

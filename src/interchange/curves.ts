@@ -2,8 +2,8 @@ import { model } from '@coderline/alphatab';
 import { plainFret } from '../editor/banjo-drone';
 
 /**
- * GPIF holds a bend or whammy as at most four points (origin, two middles, destination) and no style. alphaTab writes
- * nothing at all for a longer curve, truncates every value to a whole unit when it reads (so a quarter tone held as a
+ * A GPIF (Guitar Pro 7/8) file holds a bend or whammy as at most four points (origin, two middles, destination) and no
+ * style; the older GP3-5 formats can hold more points. alphaTab writes nothing at all for a longer curve into GPIF, truncates every value to a whole unit when it reads (so a quarter tone held as a
  * fractional value is lost), re-derives the curve type and drops the style. It never writes or reads a note-to-note
  * slur, which GPIF can only hint at with beat legato over adjacent beats.
  *
@@ -21,10 +21,11 @@ import { plainFret } from '../editor/banjo-drone';
 export const gpifCurvesProperty='TabPlayerCurves';
 const maxPoints=1024;
 /**
- * The most curve points one file may hold in total. Playback of the worst curve (alternating between the extremes of the
+ * The most points of curves over four points one file may hold in total (curves of four or fewer are not counted: GPIF
+ * holds those itself, and the ordinary fields are unbounded as before). Playback of the worst curve (alternating between the extremes of the
  * value range) measured 98 MIDI events per point in this build, so a thousand 1024-point curves would be 100 million
- * events. An ordinary score does not come near: GP itself holds at most 4 points per bend, so even a bend on every beat
- * of a 300-bar song is about 5000 points. 16384 is three times that and bounds the worst case at about 1.6 million events.
+ * events. An ordinary score does not come near: a GPIF file holds at most 4 points per bend, so such curves arrive only
+ * from older formats or from editing, and even one on every beat of a 300-bar song is about 5000 points. 16384 is three times that and bounds the worst case at about 1.6 million events.
  */
 export const maxCurvePoints=16384;
 /**
@@ -124,29 +125,62 @@ export function hasGpifCurves(score:model.Score):boolean {
   return score.tracks.some(track=>track.staves.some(staff=>staff.bars.some(bar=>bar.voices.some(voice=>!voice.isEmpty&&voice.beats.some(beat=>beat.hasWhammyBar||beat.notes.some(note=>note.hasBend||!!note.slurDestination))))));
 }
 
+/** What the property will carry, and what it cannot. Pure: the export and every place that warns about it use this one result. */
+export interface CurvePlan {carriedBeats:Set<model.Beat>;carriedNotes:Set<model.Note>;carriedSlurs:Set<model.Note>;losses:string[]}
+const wherever=(beat:model.Beat)=>`track ${beat.voice.bar.staff.track.index+1}, bar ${beat.voice.bar.index+1}, beat ${beat.index+1}`;
+const reasonOf=(cause:unknown)=>cause instanceof Error?cause.message.replace(/\.$/,''):String(cause);
+export function planCurves(score:model.Score):CurvePlan {
+  const plan:CurvePlan={carriedBeats:new Set(),carriedNotes:new Set(),carriedSlurs:new Set(),losses:[]};
+  const long:{beat:model.Beat;note?:model.Note;points:number;label:string}[]=[];
+  for(const track of score.tracks)for(const staff of track.staves)for(const bar of staff.bars)for(const voice of bar.voices){
+    if(voice.isEmpty)continue;
+    for(const beat of voice.beats){
+      const consider=(whammy:boolean,type:number,style:number,points:model.BendPoint[],note?:model.Note)=>{
+        const label=`${points.length}-point ${whammy?'whammy bar':'bend'} at ${wherever(beat)}`;
+        try{checkCurve(whammy,{type,style,points});}catch(cause){
+          // Up to four points the ordinary GPIF fields still hold the curve as alphaTab writes it, as before; longer has nothing.
+          if(points.length>4)plan.losses.push(`the ${label} is left out (${reasonOf(cause)})`);
+          return;
+        }
+        if(points.length>4)long.push({beat,note,points:points.length,label});
+        else if(note)plan.carriedNotes.add(note);else plan.carriedBeats.add(beat);
+      };
+      if(beat.hasWhammyBar&&beat.whammyBarPoints)consider(true,beat.whammyBarType,beat.whammyStyle,beat.whammyBarPoints);
+      for(const note of beat.notes){
+        if(note.hasBend&&note.bendPoints)consider(false,note.bendType,note.bendStyle,note.bendPoints,note);
+        const target=note.slurDestination;
+        if(target){
+          try{checkSlur(note,target);plan.carriedSlurs.add(note);}
+          catch(cause){plan.losses.push(`the slur at ${wherever(beat)} is left out (${reasonOf(cause)})`);}
+        }
+      }
+    }
+  }
+  // Only curves over four points count toward the cap: they are the ones GPIF cannot hold at all. When they do not all fit,
+  // the shortest are kept first, so no curve is lost merely for coming later in the score and as many as possible survive.
+  let used=0;
+  long.map((item,order)=>({...item,order})).sort((a,b)=>a.points-b.points||a.order-b.order).forEach(item=>{
+    if(used+item.points>maxCurvePoints){plan.losses.push(`the ${item.label} is left out (the file would hold more than ${maxCurvePoints} points of curves over four points)`);return;}
+    used+=item.points;if(item.note)plan.carriedNotes.add(item.note);else plan.carriedBeats.add(item.beat);
+  });
+  plan.losses.sort();
+  return plan;
+}
+/**
+ * What a Guitar Pro 7/8 export of this score cannot keep: curves over four points and slurs the property cannot carry.
+ * A file holds four points at most, and the export never refuses: the rest of the score is written, and callers say what
+ * was left out before saving.
+ */
+export const curveLosses=(score:model.Score):string[]=>planCurves(score).losses;
+
 /**
  * `xml` is the full document alphaTab wrote, which `doc` (tracks only) leaves out; it is read only to note what the
- * ordinary fields hold. Nothing may vanish silently: a curve of more than four points has no ordinary fields, so one this
- * cannot carry (a value outside the range, or past the per-file point cap) and a slur it cannot carry stop the export
- * with a message that says where, which is the one way an export reports a problem to the user.
+ * ordinary fields hold. Whatever `planCurves` cannot carry is left out of the property; the export itself goes on.
  */
 export function writeGpifCurves(score:model.Score,doc:Document,xml:string):void {
   let notes!:Map<string|null,Element>,beats!:Map<string|null,Element>,ready=false;
   const written=()=>{if(!ready){const full=new DOMParser().parseFromString(xml,'application/xml');notes=byId(full,'Notes','Note');beats=byId(full,'Beats','Beat');ready=true;}};
-  const tracks=orderedTracks(doc),lost:string[]=[];let total=0;
-  const where=(beat:model.Beat)=>`track ${beat.voice.bar.staff.track.index+1}, bar ${beat.voice.bar.index+1}, beat ${beat.index+1}`;
-  /** Whether a curve is carried; a curve nothing else can hold is reported. */
-  const carry=(whammy:boolean,beat:model.Beat,type:number,style:number,points:model.BendPoint[])=>{
-    try{
-      checkCurve(whammy,{type,style,points});
-      if(total+points.length>maxCurvePoints)throw new Error(`the file would hold more than ${maxCurvePoints} curve points`);
-      total+=points.length;return true;
-    }catch(cause){
-      // Up to four points the ordinary fields still hold the curve as alphaTab writes it.
-      if(points.length>4)lost.push(`the ${whammy?'whammy bar':'bend'} at ${where(beat)} (${cause instanceof Error?cause.message:String(cause)})`);
-      return false;
-    }
-  };
+  const tracks=orderedTracks(doc),plan=planCurves(score);
   score.tracks.forEach((track,trackIndex)=>track.staves.forEach((staff,staffIndex)=>{
     const items=doc.createElement('Items');let count=0;
     const curve=(parent:Element,type:number,style:number,points:model.BendPoint[])=>{
@@ -156,18 +190,17 @@ export function writeGpifCurves(score:model.Score,doc:Document,xml:string):void 
     for(const bar of staff.bars)for(const voice of bar.voices){
       if(voice.isEmpty)continue;
       for(const beat of voice.beats){
-        if(beat.hasWhammyBar&&beat.whammyBarPoints&&carry(true,beat,beat.whammyBarType,beat.whammyStyle,beat.whammyBarPoints)){
+        if(plan.carriedBeats.has(beat)){
           written();const node=element(doc,items,'Whammy',{...attributes(beatAddress(beat)),id:String(beat.id),notes:noteList(beat,writtenFret),fields:beatFields(beats.get(String(beat.id)))});
-          curve(node,beat.whammyBarType,beat.whammyStyle,beat.whammyBarPoints);count++;
+          curve(node,beat.whammyBarType,beat.whammyStyle,beat.whammyBarPoints!);count++;
         }
         for(const note of beat.notes){
-          if(note.hasBend&&note.bendPoints&&carry(false,beat,note.bendType,note.bendStyle,note.bendPoints)){
+          if(plan.carriedNotes.has(note)){
             written();const node=element(doc,items,'Bend',{...attributes(noteAddress(note)),id:String(note.id),string:String(note.string),fret:String(writtenFret(note)),fields:noteFields(notes.get(String(note.id)))});
-            curve(node,note.bendType,note.bendStyle,note.bendPoints);count++;
+            curve(node,note.bendType,note.bendStyle,note.bendPoints!);count++;
           }
           const target=note.slurDestination;
-          if(target){
-            try{checkSlur(note,target);}catch(cause){lost.push(`the slur at ${where(beat)} (${cause instanceof Error?cause.message:String(cause)})`);continue;}
+          if(target&&plan.carriedSlurs.has(note)){
             element(doc,items,'Slur',{...attributes(noteAddress(note)),id:String(note.id),string:String(note.string),fret:String(writtenFret(note)),...attributes(noteAddress(target),'to'),toId:String(target.id),toStr:String(target.string),toFret:String(writtenFret(target))});count++;
           }
         }
@@ -178,7 +211,6 @@ export function writeGpifCurves(score:model.Score,doc:Document,xml:string):void 
     if(!scope)throw new Error('Missing GPIF staff for curve export.');
     (holderOf(scope)??element(doc,scope,'Property',{name:gpifCurvesProperty})).append(items);
   }));
-  if(lost.length)throw new Error(`GP export cannot keep ${lost.slice(0,3).join('; ')}${lost.length>3?` and ${lost.length-3} more`:''}: Guitar Pro files hold at most four points per curve and no note slur, so TabPlayer keeps these itself, within limits it cannot meet here. Shorten or remove them, or export another format.`);
 }
 
 function locate(staff:model.Staff,node:Element,prefix=''):{note?:model.Note;beat?:model.Beat} {
@@ -217,8 +249,10 @@ export function readGpifCurves(score:model.Score,doc:Document,xml:string):void {
           if(isBend?note!.string!==number(item.getAttribute('string'))||note!.fret!==number(item.getAttribute('fret')):noteList(beat!)!==item.getAttribute('notes')){stale('the notes differ.');continue;}
           // The ordinary fields changed after this was written: they are what the file now says.
           if((isBend?noteFields(notes.get(item.getAttribute('id')??'')):beatFields(beats.get(item.getAttribute('id')??'')))!==item.getAttribute('fields')){stale('its ordinary fields were edited.');continue;}
-          if(total+curve.points.length>maxCurvePoints){console.warn(`Skipped a curve in the GP file: it would take the file past ${maxCurvePoints} curve points.`);continue;}
-          total+=curve.points.length;
+          if(curve.points.length>4){
+            if(total+curve.points.length>maxCurvePoints){console.warn(`Skipped a curve in the GP file: it would take the file past ${maxCurvePoints} points of curves over four points.`);continue;}
+            total+=curve.points.length;
+          }
           if(isBend){
             note!.bendPoints=null;note!.maxBendPoint=null;note!.bendType=curve.type;note!.bendStyle=curve.style;
             for(const point of curve.points)note!.addBendPoint(new model.BendPoint(point.offset,point.value));

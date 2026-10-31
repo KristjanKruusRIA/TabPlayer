@@ -745,3 +745,39 @@ fn several_kit_edits_made_while_stopped_all_apply_from_the_first_attack() {
         );
     }
 }
+
+#[test]
+fn a_kit_edit_parked_while_paused_applies_from_the_first_attack_after_stop_or_seek() {
+    for stop in [true, false] {
+        let mut t = transport(DocumentSettings::default());
+        command(&mut t, TransportCommand::Play { generation: 1 });
+        play(&mut t, 3000);
+        command(&mut t, TransportCommand::Pause { generation: 1 });
+        // Two edits: the first starts a track crossfade that cannot run while paused, the second waits behind it.
+        for kick in [
+            element(0.5, 0.0, false, false),
+            element(1.0, 0.0, true, false),
+        ] {
+            install(
+                &mut t,
+                &settings_with(Some(DrumKitMix {
+                    kick,
+                    ..Default::default()
+                })),
+            );
+        }
+        if stop {
+            command(&mut t, TransportCommand::Stop { generation: 1 });
+        } else {
+            command(
+                &mut t,
+                TransportCommand::SeekTick {
+                    generation: 1,
+                    tick: 0.0,
+                },
+            );
+        }
+        command(&mut t, TransportCommand::Play { generation: 1 });
+        assert_eq!(peak(&play(&mut t, 2400)), 0.0, "stop: {stop}");
+    }
+}

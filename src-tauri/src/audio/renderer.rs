@@ -1153,10 +1153,13 @@ impl Renderer {
         self.active.clear();
         for channel in &mut self.mix.channels {
             channel.dsp.reset();
-            // Everything sounding was just cut, so nothing needs the old level to fade from.
-            channel.kit.current = channel.kit.target;
-            channel.kit.remaining = 0;
         }
+        // Everything sounding is cut, so nothing needs the old level to fade from, and held notes struck again below
+        // already go where the effective kit sends them.
+        for track in &mut self.tracks {
+            track.kit_rendered = false;
+        }
+        self.settle_idle_kit();
         self.mix.master.reset();
         self.next_note = self.plan.notes.partition_point(|n| n.start_tick < tick);
         self.next_midi = self.plan.midi.partition_point(|m| m.tick() < tick);
@@ -1381,8 +1384,9 @@ impl Renderer {
     /// paused transport renders nothing, so a ramp armed meanwhile would still be on its way when the next note is struck.
     /// A track with notes ringing keeps its ramp, so they resume without a step.
     pub fn settle_idle_kit(&mut self) {
-        // A mix parked behind a track DSP crossfade cannot install while nothing renders, so its kit is taken from it here:
-        // the parked mix then installs later with the same kit and nothing left to ramp.
+        // The effective kit is the parked mix's if one waits, else the live one, and this is the only place that decides it. A
+        // mix parked behind a track DSP crossfade cannot install while nothing renders; it installs later with the same kit and
+        // nothing left to ramp.
         let parked = self.parked_mix.as_ref();
         for (index, (track, channel)) in self
             .tracks

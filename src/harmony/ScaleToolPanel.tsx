@@ -1,17 +1,16 @@
-import { useEffect,useRef,useState } from 'react';
+import { useState } from 'react';
 import type { HarmonyChord,ScaleToolPanelProps } from '../editor/harmony-types';
 import { resolveSelectionNotes } from '../editor/range-selection';
 import { matchScales,scalePatterns,scalePitches } from './scales';
 import { harmonyPitchName,soundingChordPitches } from './ChordDiagramPreview';
 import { ScaleDiagramEditor } from './ScaleDiagramEditor';
 import { Dialog } from '../ui/Dialog';
+import { busyRegion } from '../ui/useBusyGuard';
 
 const roots=['C','C# / Db','D','D# / Eb','E','F','F# / Gb','G','G# / Ab','A','A# / Bb','B'];
 const tagOptions=[{value:'',label:'All tags'},...[...new Set(scalePatterns.flatMap(value=>value.tags))].map(value=>({value,label:value}))];
 export function ScaleToolPanel({score,staff:currentStaff,selection,busy,onClose,target,beat,onEdit}:ScaleToolPanelProps) {
   const [root,setRoot]=useState(0),[pattern,setPattern]=useState('major'),[search,setSearch]=useState(''),[tag,setTag]=useState(''),[custom,setCustom]=useState('0, 2, 4, 5, 7, 9, 11');
-  const close=useRef<HTMLButtonElement>(null);
-  useEffect(()=>{if(busy)close.current?.focus();},[busy]);
   const filtered=scalePatterns.filter(value=>(!tag||value.tags.includes(tag))&&`${value.name} ${value.tags.join(' ')}`.toLowerCase().includes(search.trim().toLowerCase())),active=pattern==='custom'?null:filtered.find(value=>value.id===pattern)??filtered[0];
   const intervals=active?[...active.intervals]:custom.trim().split(/[\s,]+/).filter(Boolean).map(Number);let pitches:number[]=[],error='';
   try{pitches=scalePitches(root,intervals,5);}catch(cause){error=cause instanceof Error?cause.message:String(cause);}
@@ -21,7 +20,7 @@ export function ScaleToolPanel({score,staff:currentStaff,selection,busy,onClose,
   const staff=currentStaff??selected[0]?.beat.voice.bar.staff??score.tracks.flatMap(track=>track.staves).find(staff=>!staff.isPercussion),classes=new Set(pitches.map(pitch=>pitch%12));
   const open:HarmonyChord={name:'Scale',nameMode:'manual',recipe:null,firstFret:1,frets:staff?.tuning.map(()=>0)??[],fingers:staff?.tuning.map(()=>-2)??[],barreFrets:[],showName:false,showDiagram:true,showFingering:false};
   const fretPitches=staff?Array.from({length:13},(_,fret)=>soundingChordPitches({...open,frets:staff.tuning.map(()=>fret)},staff)):[],openPitches=fretPitches[0]??[];
-  return <Dialog title="Scale browser" onClose={onClose} className="scale-dialog" actions={<button ref={close} data-autofocus={busy||undefined} type="button" className="tp-button" onClick={onClose}>Close scales</button>}><fieldset disabled={busy}>
+  return <Dialog title="Scale browser" onClose={onClose} className="scale-dialog" actions={<button type="button" className="tp-button" onClick={onClose}>Close scales</button>}><fieldset {...busyRegion(busy)}>
     <label>Scale root<select data-autofocus={!busy||undefined} value={root} onChange={e=>setRoot(Number(e.target.value))}>{roots.map((name,index)=><option key={name} value={index}>{name}</option>)}</select></label>
     <label>Search scales<input value={search} onChange={e=>setSearch(e.target.value)}/></label>
     <label>Scale tag<select value={tag} onChange={e=>setTag(e.target.value)}>{tagOptions.map(option=><option key={option.value} value={option.value}>{option.label}</option>)}</select></label>

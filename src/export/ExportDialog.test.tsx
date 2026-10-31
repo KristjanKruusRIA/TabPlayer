@@ -33,7 +33,7 @@ it('blocks an unsupported GP backing selection and permits explicit notation exp
   render(<ExportDialog score={fixture()} layout={layout} busy={false} currentSpeedAvailable={true} gpBackingIssue={()=>issue} onExport={submit} onCancel={()=>{}}/>);
   const backing=screen.getByLabelText('Include backing audio');
   expect(screen.getByRole('alert')).toHaveTextContent(issue);expect(backing).toHaveAccessibleDescription(issue);expect(backing).toHaveAttribute('aria-invalid','true');
-  expect(screen.getByRole('button',{name:'Export'})).toBeDisabled();fireEvent.click(screen.getByRole('button',{name:'Export'}));expect(submit).not.toHaveBeenCalled();
+  expect(screen.getByRole('button',{name:'Export'})).toHaveAttribute('aria-disabled','true');fireEvent.click(screen.getByRole('button',{name:'Export'}));expect(submit).not.toHaveBeenCalled();
   fireEvent.click(backing);expect(screen.queryByRole('alert')).toBeNull();expect(backing).not.toHaveAttribute('aria-invalid','true');
   fireEvent.click(screen.getByRole('button',{name:'Export'}));expect(submit).toHaveBeenCalledWith({format:'gp',selection:{tracks:[0],range:null},backing:false});
 });
@@ -185,7 +185,7 @@ it('refreshes GP preflight for score and settings changes without repeating it f
   expect(preflight).toHaveBeenLastCalledWith({tracks:[0],range:null});
   const changedSettings=()=> 'The changed sync points cannot represent this selection. Clear Include backing audio to export the notation.';
   rerender(<ExportDialog score={changed} layout={layout} busy={false} currentSpeedAvailable={true} gpBackingIssue={changedSettings} onExport={submit} onCancel={cancel}/>);
-  expect(screen.getByRole('alert')).toHaveTextContent('The changed sync points cannot represent this selection.');expect(screen.getByRole('button',{name:'Export'})).toBeDisabled();
+  expect(screen.getByRole('alert')).toHaveTextContent('The changed sync points cannot represent this selection.');expect(screen.getByRole('button',{name:'Export'})).toHaveAttribute('aria-disabled','true');
 });
 
 it('keeps staves within their track group and the measure range separate while exporting partial staves',()=>{
@@ -230,14 +230,14 @@ describe('export dialog',()=>{
     const {rerender}=render(<ExportDialog score={score} layout={layout} busy={false} currentSpeedAvailable={true} onExport={submit} onCancel={()=>{}}/>);
     fireEvent.change(screen.getByLabelText('Export format'),{target:{value:'wav'}});
     fireEvent.click(radio('Speed','Current speed coefficient'));expect(radio('Speed','Current speed coefficient')).toBeChecked();
-    expect(radio('Speed','Current speed coefficient')).toBeEnabled();
+    expect(radio('Speed','Current speed coefficient')).not.toHaveAttribute('aria-disabled');
     rerender(<ExportDialog score={score} layout={layout} busy={false} currentSpeedAvailable={false} onExport={submit} onCancel={()=>{}}/>);
-    expect(radio('Speed','Current speed coefficient')).toBeDisabled();expect(radio('Speed','100%')).toBeChecked();
+    expect(radio('Speed','Current speed coefficient')).toHaveAttribute('aria-disabled','true');expect(radio('Speed','100%')).toBeChecked();
     expect(screen.getByText(/fixed BPM.*saved speed/i)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button',{name:'Export'}));
     expect(submit.mock.calls[0][0].audio.speed).toBe('saved');
     rerender(<ExportDialog score={score} layout={layout} busy={false} currentSpeedAvailable={true} onExport={submit} onCancel={()=>{}}/>);
-    expect(radio('Speed','100%')).toBeChecked();expect(radio('Speed','Current speed coefficient')).toBeEnabled();
+    expect(radio('Speed','100%')).toBeChecked();expect(radio('Speed','Current speed coefficient')).not.toHaveAttribute('aria-disabled');
   });
   it('validates inclusive measure drafts and sends explicit audio settings',()=>{
     const submit=vi.fn();render(<ExportDialog currentSpeedAvailable={true} score={fixture()} layout={layout} busy={false} onExport={submit} onCancel={()=>{}}/>);
@@ -253,7 +253,7 @@ describe('export dialog',()=>{
     const cancel=vi.fn();const {rerender}=render(<ExportDialog currentSpeedAvailable={true} score={fixture()} layout={layout} busy={false} onExport={()=>{}} onCancel={cancel}/>);
     fireEvent.change(screen.getByLabelText('Export format'),{target:{value:'pdf'}});expect(radio('Paper','A4')).toBeChecked();
     rerender(<ExportDialog currentSpeedAvailable={true} score={fixture()} layout={layout} busy={true} progress={{id:'job',frames:20,totalFrames:100,status:'running'}} onExport={()=>{}} onCancel={cancel}/>);
-    expect(screen.getByRole('button',{name:'Export'})).toBeDisabled();expect(screen.getByRole('progressbar')).toHaveAttribute('value','20');
+    expect(screen.getByRole('button',{name:'Export'})).toHaveAttribute('aria-disabled','true');expect(screen.getByRole('progressbar')).toHaveAttribute('value','20');
     fireEvent.click(screen.getByRole('button',{name:'Cancel export'}));expect(cancel).toHaveBeenCalledTimes(1);expect(layout.marginMm).toBe(15);
   });
   it('shows a native export failure inside the modal and retries with the selected options',()=>{
@@ -264,7 +264,7 @@ describe('export dialog',()=>{
     rerender(<ExportDialog currentSpeedAvailable={true} score={score} layout={layout} busy={true} progress={{id:'job',frames:20,totalFrames:100,status:'running'}} onExport={submit} onCancel={()=>{}}/>);
     rerender(<ExportDialog currentSpeedAvailable={true} score={score} layout={layout} busy={false} progress={{id:'job',frames:20,totalFrames:100,status:'failed',error:'The output disk is full.'}} failure="Export failed" onExport={submit} onCancel={()=>{}}/>);
     const dialog=within(screen.getByRole('dialog'));expect(dialog.getByRole('alert')).toHaveTextContent('The output disk is full.');
-    expect(dialog.getByRole('button',{name:'Export'})).toBeEnabled();expect(radio('Sample rate','44.1 kHz')).toBeChecked();
+    expect(dialog.getByRole('button',{name:'Export'})).not.toHaveAttribute('aria-disabled');expect(radio('Sample rate','44.1 kHz')).toBeChecked();
     fireEvent.click(dialog.getByRole('button',{name:'Export'}));expect(submit).toHaveBeenCalledTimes(2);
     expect(submit.mock.calls[1][0]).toEqual({format:'wav',selection:{tracks:[0],range:null},audio:{sampleRate:44100,bitDepth:16,speed:'saved',metronome:false,tailSeconds:2,backing:true,includeMix:true}});
   });
@@ -280,12 +280,12 @@ describe('export dialog',()=>{
     const format=screen.getByLabelText('Export format'),closeButton=screen.getByRole('button',{name:'Close'}),cancelButton=screen.getByRole('button',{name:'Cancel'});
     expect(format).toHaveFocus();closeButton.focus();fireEvent.keyDown(closeButton,{key:'Tab',shiftKey:true});expect(cancelButton).toHaveFocus();
     fireEvent.keyDown(cancelButton,{key:'Tab'});expect(closeButton).toHaveFocus();
-    rerender(<ExportDialog currentSpeedAvailable={true} score={score} layout={layout} busy={true} onExport={()=>{}} onCancel={cancel}/>);
-    const busyCancel=screen.getByRole('button',{name:'Cancel export'});expect(busyCancel).toHaveFocus();
+    format.focus();rerender(<ExportDialog currentSpeedAvailable={true} score={score} layout={layout} busy={true} onExport={()=>{}} onCancel={cancel}/>);
+    const busyCancel=screen.getByRole('button',{name:'Cancel export'});expect(format).toHaveFocus();expect(format).not.toBeDisabled();expect(format.closest('fieldset')).toHaveAttribute('aria-disabled','true');
     const busyCloseButton=screen.getByRole('button',{name:'Cancel'});
     expect(busyCloseButton).toHaveClass('tp-dialog-close');
     expect(screen.queryByRole('button',{name:'Close'})).toBeNull();
-    fireEvent.keyDown(busyCancel,{key:'Tab'});expect(busyCloseButton).toHaveFocus();fireEvent.keyDown(busyCancel,{key:'Escape'});expect(cancel).toHaveBeenCalledTimes(1);
+    busyCancel.focus();fireEvent.keyDown(busyCancel,{key:'Tab'});expect(busyCloseButton).toHaveFocus();fireEvent.keyDown(busyCancel,{key:'Escape'});expect(cancel).toHaveBeenCalledTimes(1);
     unmount();expect(opener).toHaveFocus();opener.remove();
   });
   it('uses the shared hit-testable dialog backdrop to contain pointer input without dismissing on backdrop mousedown',()=>{
@@ -317,4 +317,17 @@ it('says in the audio export that a cabinet response is missing, and only there'
   expect((await screen.findByText(/Shared cab/)).textContent).toMatch(/^Lead: The impulse response “Shared cab” is not in this computer's cabinet library/);
   expect(sound).toEqual(before);
   expect(vi.mocked(invoke)).toHaveBeenCalledWith('cabinet_ir_status',{ids:['d'.repeat(32)]});
+});
+
+it('keeps focus on Export while exporting, refuses its presses and the inputs, and stays closable',()=>{
+  const onExport=vi.fn(),onCancel=vi.fn(),score=music();
+  const view=(busy:boolean)=><ExportDialog currentSpeedAvailable={true} score={score} layout={layout} busy={busy} onExport={onExport} onCancel={onCancel}/>;
+  const {rerender}=render(view(false));
+  const exportButton=screen.getByRole('button',{name:'Export'});exportButton.focus();
+  fireEvent.click(exportButton);expect(onExport).toHaveBeenCalledTimes(1);
+  rerender(view(true));
+  expect(exportButton).toHaveFocus();expect(exportButton).toHaveAttribute('aria-disabled','true');expect(exportButton).not.toBeDisabled();
+  fireEvent.click(exportButton);expect(onExport).toHaveBeenCalledTimes(1);expect(exportButton).toHaveFocus();
+  const format=screen.getByLabelText('Export format');fireEvent.change(format,{target:{value:'midi'}});expect(format).toHaveValue('gp');
+  fireEvent.click(screen.getByRole('button',{name:'Cancel export'}));expect(onCancel).toHaveBeenCalledTimes(1);
 });

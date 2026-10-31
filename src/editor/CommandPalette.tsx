@@ -21,7 +21,7 @@ export function CommandPalette({context,busy,onRun,onClose}:{context:PaletteCont
   useEffect(()=>{if(current)document.getElementById(`${list}-${current.id}`)?.scrollIntoView?.({block:'nearest'});},[current,list]);
   // Closing first returns focus, so a dialog the command opens keeps the focus it takes.
   const run=(index:number)=>{const match=matches[index];if(!match?.action||busy)return;onClose();onRun(match.action);};
-  return <Dialog title="Commands" onClose={onClose} className="command-palette" backdropClassName="command-palette-backdrop" onMouseDown={event=>{if(event.target!==input.current){event.preventDefault();input.current?.focus();}}}>
+  return <Dialog title="Commands" onClose={onClose} className="command-palette" backdropClassName="command-palette-backdrop" dismissOnBackdrop onMouseDown={event=>{if(event.target!==input.current){event.preventDefault();input.current?.focus();}}}>
     <div className="command-palette-inner" onKeyDown={event=>{
       if(event.key==='Tab'){event.preventDefault();event.stopPropagation();input.current?.focus();}
       else if(event.key==='ArrowDown'||event.key==='ArrowUp'){event.preventDefault();if(matches.length)setActive(index=>(Math.min(index,matches.length-1)+(event.key==='ArrowDown'?1:matches.length-1))%matches.length);}

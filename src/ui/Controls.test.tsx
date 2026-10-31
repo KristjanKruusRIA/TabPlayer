@@ -8,6 +8,7 @@ import { useState } from 'react';
 import { Dialog } from './Dialog';
 import { Fader } from './Fader';
 import { Segmented } from './Segmented';
+import { busyRegion } from './useBusyGuard';
 
 afterEach(cleanup);
 
@@ -95,7 +96,8 @@ it('moves focus and choice together with the arrow keys, wrapping at neither end
 it('skips a disabled option and chooses on click', async()=>{
   const user=userEvent.setup();render(<Choice disabledOption/>);
   const radios=screen.getAllByRole('radio');
-  expect(radios[1]).toBeDisabled();
+  expect(radios[1]).toHaveAttribute('aria-disabled','true');expect(radios[1]).not.toBeDisabled();
+  await user.click(radios[1]);expect(radios[1]).not.toBeChecked();
   radios[0].focus();await user.keyboard('{ArrowRight}');expect(radios[2]).toHaveFocus();expect(radios[2]).toBeChecked();
   await user.click(radios[3]);expect(radios[3]).toBeChecked();
 });
@@ -198,4 +200,59 @@ it('does not fire onChange when Home or End targets the already selected option'
   radios[0].focus();
   fireEvent.keyDown(radios[0],{key:'Home'});
   expect(onChange).not.toHaveBeenCalled();
+});
+
+const wait=()=>new Promise<void>(resolve=>setTimeout(resolve,20));
+it('leaves focus alone when it moves to another element, and only recovers a real loss',async()=>{
+  const user=userEvent.setup();
+  render(<Dialog title="Frame" onClose={()=>{}} actions={<button>Done</button>}><input aria-label="One"/><input aria-label="Two"/></Dialog>);
+  const [one,two]=[screen.getByRole('textbox',{name:'One'}),screen.getByRole('textbox',{name:'Two'})];
+  await user.click(two);await wait();expect(two).toHaveFocus();
+  await user.tab();await wait();expect(screen.getByRole('button',{name:'Done'})).toHaveFocus();
+  await user.click(one);await wait();expect(one).toHaveFocus();
+  one.blur();expect(document.body).toHaveFocus();await wait();
+  expect(screen.getByRole('dialog').contains(document.activeElement)).toBe(true);expect(document.activeElement).not.toBe(document.body);
+});
+
+it('keeps the focus-holding controls through a busy change and keeps aria-disabled controls in the trap',async()=>{
+  const user=userEvent.setup(),onClose=vi.fn();
+  const view=(closeDisabled:boolean)=><><button>Opener</button><Dialog title="Frame" onClose={onClose} closeDisabled={closeDisabled} dismissOnBackdrop busy={closeDisabled} actions={<button aria-disabled="true">Wait</button>}><input aria-label="One"/><input aria-label="Two"/></Dialog></>;
+  const {rerender}=render(view(false));
+  const two=screen.getByRole('textbox',{name:'Two'}),close=screen.getByRole('button',{name:'Close'}),wait_=screen.getByRole('button',{name:'Wait'});
+  two.focus();rerender(view(true));
+  expect(two).toHaveFocus();
+  expect(close).toHaveAttribute('aria-disabled','true');expect(close).not.toBeDisabled();
+  await user.click(close);fireEvent.mouseDown(screen.getByRole('dialog').parentElement!);await user.keyboard('{Escape}');
+  expect(onClose).not.toHaveBeenCalled();
+  await user.tab();expect(wait_).toHaveFocus();
+  await user.tab();expect(close).toHaveFocus();
+  rerender(view(false));await user.click(close);expect(onClose).toHaveBeenCalledTimes(1);
+});
+
+it('closes from the backdrop only when asked to',()=>{
+  const onClose=vi.fn();
+  render(<Dialog title="Frame" onClose={onClose} dismissOnBackdrop><p>Body</p></Dialog>);
+  fireEvent.mouseDown(screen.getByRole('dialog'));expect(onClose).not.toHaveBeenCalled();
+  fireEvent.mouseDown(screen.getByRole('dialog').parentElement!);expect(onClose).toHaveBeenCalledTimes(1);
+});
+
+it('refuses every press, key and change inside a busy region without taking focus away',async()=>{
+  const user=userEvent.setup(),act=vi.fn(),change=vi.fn();
+  function Region({busy}:{busy:boolean}){return <fieldset {...busyRegion(busy)}><button onClick={act}>Go</button><input aria-label="Text" defaultValue="a" onChange={change}/><input type="checkbox" aria-label="Check" onChange={change}/><select aria-label="Pick" onChange={change}><option>a</option><option>b</option></select></fieldset>;}
+  const {rerender}=render(<Region busy={false}/>);
+  const go=screen.getByRole('button',{name:'Go'});go.focus();
+  rerender(<Region busy/>);
+  expect(go).toHaveFocus();expect(screen.getByRole('group')).toHaveAttribute('aria-disabled','true');
+  await user.click(go);await user.keyboard('{Enter}');await user.keyboard(' ');
+  const text=screen.getByRole('textbox',{name:'Text'});text.focus();await user.keyboard('xyz{Backspace}');
+  await user.click(screen.getByRole('checkbox',{name:'Check'}));
+  const pick=screen.getByRole('combobox',{name:'Pick'});pick.focus();await user.keyboard('{ArrowDown}');
+  expect(act).not.toHaveBeenCalled();expect(change).not.toHaveBeenCalled();
+  expect(text).toHaveValue('a');expect(screen.getByRole('checkbox',{name:'Check'})).not.toBeChecked();
+  rerender(<Region busy={false}/>);await user.click(go);expect(act).toHaveBeenCalledTimes(1);
+});
+
+it('styles the palette backdrop above the shared one and dims aria-disabled controls',()=>{
+  expect(readFileSync('src/styles.css','utf8')).toMatch(/\.tp-dialog-backdrop\.command-palette-backdrop\{[^}]*align-items:flex-start/);
+  expect(readFileSync('src/ui/ui.css','utf8')).toMatch(/\.tp-dialog :is\(button,select,summary\)\[aria-disabled=true\]/);
 });

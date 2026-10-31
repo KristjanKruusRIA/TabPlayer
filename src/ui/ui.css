@@ -88,6 +88,8 @@
 .tp-dialog-body { padding:16px; overflow:auto; font-size:13px; line-height:1.45; color:var(--tp-text); }
 .tp-dialog-form { display:flex; flex-direction:column; min-height:0; flex:1; }
 .tp-dialog-foot { display:flex; justify-content:flex-end; gap:8px; padding:12px 16px; border-top:1px solid var(--tp-line-subtle); }
-.tp-dialog :is(button,input):focus-visible { outline:2px solid var(--tp-edit); outline-offset:2px; }
+.tp-dialog :is(button,select,summary)[aria-disabled=true] { opacity:.55; cursor:default; }
+.tp-dialog fieldset[aria-disabled=true] { opacity:.7; }
+.tp-dialog :is(button,input,summary):focus-visible { outline:2px solid var(--tp-edit); outline-offset:2px; }
 .tp-dialog .tp-dialog-foot button { min-height:30px; padding:4px 14px; border:1px solid var(--tp-line-strong); border-radius:var(--tp-radius-s); background:var(--tp-raised); color:var(--tp-text); font:500 13px/20px var(--tp-font-ui); }
 .tp-dialog .tp-dialog-foot button:hover:enabled { border-color:var(--tp-text); background:var(--tp-raised); }

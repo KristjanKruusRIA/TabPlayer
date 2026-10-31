@@ -1,11 +1,11 @@
-import { useEffect,useId,useMemo,useRef,useState } from 'react';
+import { useEffect,useId,useMemo,useState } from 'react';
 import type { model } from '@coderline/alphatab';
 import { PNG_RESOLUTIONS,validateSelection,type AudioExportOptions,type ExportOptions,type ExportProgress,type ExportSelection,type PngResolution,type PrintLayout } from './types';
 import type { PageLayout } from '../engraving/types';
 import { PageLayoutPanel } from '../engraving/PageLayoutPanel';
 import { validatePageLayout } from '../engraving/page';
 import { DEFAULT_FILE_NAME,FILE_NAME_TOKENS,PER_TRACK_FILE_NAME,expandFileName,fileNameContext,withExtension } from './file-name';
-import { Dialog,Segmented } from '../ui';
+import { Dialog,Segmented,busyGuard,busyRegion } from '../ui';
 import { CabinetNotices } from '../audio/CabinetNotices';
 import type { TrackSound } from '../edit-types';
 import { previewGp5 } from './gp5';
@@ -27,7 +27,6 @@ export function ExportDialog({score,layout,page,busy,progress,failure,currentSpe
   const [error,setError]=useState('');
   const [customPage,setCustomPage]=useState(()=>page?structuredClone(page):null);
   const topology=`${score.masterBars.length}:${score.tracks.map(track=>track.staves.length).join(',')}`;
-  const cancel=useRef<HTMLButtonElement>(null);
   const errorId=useId();
   function exportSelection():ExportSelection {
     if(range&&(!first.trim()||!last.trim()||!Number.isInteger(Number(first))||!Number.isInteger(Number(last))))throw new Error('Enter whole measure numbers for the inclusive range.');
@@ -41,7 +40,6 @@ export function ExportDialog({score,layout,page,busy,progress,failure,currentSpe
   const gp5=useMemo(()=>format==='gp5'&&selection?previewGp5(score,selection,{backing:hasBacking}):null,[format,selection,score,hasBacking]);
   const gp5Issue=gp5&&'refusal' in gp5?gp5.refusal:null;
   const visibleError=backingIssue||gp5Issue||error||progress?.error||failure;
-  useEffect(()=>{if(busy)cancel.current?.focus();},[busy]);
   useEffect(()=>{if(!currentSpeedAvailable)setAudio(previous=>previous.speed==='current'?{...previous,speed:'saved'}:previous);},[currentSpeedAvailable]);
   useEffect(()=>{
     setTracks(selected=>selected.filter(index=>score.tracks[index]!==undefined));
@@ -61,8 +59,8 @@ export function ExportDialog({score,layout,page,busy,progress,failure,currentSpe
       setError('');onExport({...(format==='svg'?{format,selection,layout:print,...(customPage?{page:structuredClone(customPage)}:{}),transparent}:format==='png'?{format,selection,layout:print,...(customPage?{page:structuredClone(customPage)}:{}),transparent,dpi}:format==='pdf'||format==='print'?{format,selection,layout:print,...(customPage?{page:structuredClone(customPage)}:{})}:format==='wav'?{format,selection,audio:normalize?{...audio,normalizeRmsDb:normalizeLevel}:audio}:format==='stems'?{format,selection,audio}:format==='gp'?{format,selection,...(!gpBacking?{backing:false}:{})}:{format,selection}),...named} as ExportOptions);
     }catch(e){setError((e as Error).message);}
   }
-  return <Dialog title="Export score" onClose={onCancel} closeLabel={busy?'Cancel':'Close'} busy={busy} className="export-dialog" actions={<><button type="button" className="tp-primary export-submit" disabled={busy||Boolean(backingIssue)||Boolean(gp5Issue)} onClick={submit}>Export</button><button ref={cancel} data-autofocus={busy||undefined} type="button" onClick={onCancel}>{busy?'Cancel export':'Cancel'}</button></>}>
-    <fieldset disabled={busy}>
+  return <Dialog title="Export score" onClose={onCancel} closeLabel={busy?'Cancel':'Close'} busy={busy} className="export-dialog" actions={<><button type="button" {...busyGuard({busy,unavailable:Boolean(backingIssue)||Boolean(gp5Issue),className:'tp-primary export-submit',onClick:submit})}>Export</button><button type="button" onClick={onCancel}>{busy?'Cancel export':'Cancel'}</button></>}>
+    <fieldset {...busyRegion(busy)}>
       <label>Export format<select data-autofocus={!busy||undefined} value={format} onChange={e=>{const next=e.target.value as ExportOptions['format'];setFormat(next);if(next!=='pdf'&&next!=='svg'&&next!=='png'&&perTrack){setPerTrack(false);if(fileName===PER_TRACK_FILE_NAME)setFileName(DEFAULT_FILE_NAME);}}}><option value="gp">Guitar Pro</option><option value="gp5">Guitar Pro 5</option><option value="pdf">PDF</option><option value="print">Print</option><option value="svg">SVG</option><option value="png">PNG</option><option value="midi">MIDI</option><option value="musicxml">MusicXML</option><option value="ascii">ASCII tablature</option><option value="wav">Mixed audio</option><option value="stems">Audio stems</option></select></label>
       {format!=='print'&&<div className="export-file-name"><label>File name<input value={fileName} spellCheck={false} onChange={e=>setFileName(e.target.value)}/></label>
         <p className="muted">{`Tokens: ${FILE_NAME_TOKENS}. Track tokens use the first selected track.`}</p>

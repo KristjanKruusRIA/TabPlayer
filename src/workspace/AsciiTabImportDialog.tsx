@@ -3,6 +3,7 @@ import { Settings } from '@coderline/alphatab';
 import { asciiTabFileName,parseAsciiTab } from '../interchange/ascii-tab';
 import { exportGpInterchange } from '../interchange/gp';
 import { Dialog } from '../ui/Dialog';
+import { busyGuard } from '../ui/useBusyGuard';
 
 const names=['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
 const FILE_LIMIT=256*1024;
@@ -50,11 +51,11 @@ export function AsciiTabImportDialog({busy,onImport,onClose}:{busy:boolean;onImp
     finally{setImporting(false);}
   };
   const actions=<>
-    <button type="button" className="tp-button" disabled={importing} onClick={()=>file.current?.click()}>Choose text file…</button>
-    <button type="button" className="tp-button primary" disabled={!result||!!parseProblem||busy||importing} onClick={submit}>Import</button>
-    <button type="button" className="tp-button" disabled={importing} onClick={onClose}>Cancel</button>
+    <button type="button" {...busyGuard({busy:importing,className:'tp-button',onClick:()=>file.current?.click()})}>Choose text file…</button>
+    <button type="button" {...busyGuard({busy:busy||importing,unavailable:!result||!!parseProblem,className:'tp-button primary',onClick:()=>void submit()})}>Import</button>
+    <button type="button" {...busyGuard({busy:importing,className:'tp-button',onClick:onClose})}>Cancel</button>
   </>;
-  return <Dialog title="Import ASCII tab" onClose={onClose} ariaDescribedBy={hint} busy={importing} closeDisabled={importing} className="ascii-import" onSubmit={event=>{event.preventDefault();void submit();}} actions={actions}>
+  return <Dialog title="Import ASCII tab" onClose={onClose} ariaDescribedBy={hint} busy={importing} closeDisabled={importing} dismissOnBackdrop className="ascii-import" onSubmit={event=>{event.preventDefault();void submit();}} actions={actions}>
     <div className="ascii-import-form">
       <p id={hint} className="muted">Paste tablature with one line per string, or choose a text file. String names set the tuning, and the spacing between notes sets the rhythm, so check the rhythm after importing.</p>
       <label>ASCII tab<textarea ref={area} data-autofocus value={text} rows={14} spellCheck={false} wrap="off" aria-describedby={status} aria-invalid={!!problem} readOnly={importing}

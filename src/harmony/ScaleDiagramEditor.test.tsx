@@ -61,13 +61,13 @@ it('shows_the_stored_diagram_and_deletes_it_with_one_command',()=>{
   const score=music(),commands:ScaleDiagramCommand[]=[],beat=score.tracks[0].staves[0].bars[0].voices[0].beats[0];
   setScaleDiagram(beat,{name:'Stored',strings:6,frets:5,firstFret:1,orientation:'vertical',showFretMarkers:false,marks:[newMark(2,3,'triangle','#ff0000','x','#ffffff')]});
   open(score,commands);expect(screen.getByText(/This beat has a diagram named “Stored” with 1 marks\./)).toBeInTheDocument();
-  expect(screen.getByLabelText('String 2, fret 3: triangle mark "x"')).toBeInTheDocument();expect(screen.getByRole('button',{name:'Apply diagram to beat'})).toBeDisabled();
+  expect(screen.getByLabelText('String 2, fret 3: triangle mark "x"')).toBeInTheDocument();expect(screen.getByRole('button',{name:'Apply diagram to beat'})).toHaveAttribute('aria-disabled','true');
   fireEvent.click(screen.getByRole('button',{name:'Delete diagram from beat'}));expect(commands).toEqual([{type:'setScaleDiagram',target,diagram:null}]);
 });
 
 it('is_disabled_when_busy_or_the_beat_cannot_hold_a_diagram',()=>{
-  const score=music(),commands:ScaleDiagramCommand[]=[];open(score,commands,{busy:true});expect(screen.getByRole('button',{name:'Blank diagram'})).toBeDisabled();cleanup();
-  score.tracks[0].staves[0].isPercussion=true;open(score,commands);expect(screen.getByRole('button',{name:'Blank diagram'})).toBeDisabled();
+  const score=music(),commands:ScaleDiagramCommand[]=[];open(score,commands,{busy:true});expect(screen.getByRole('button',{name:'Blank diagram'})).toHaveAttribute('aria-disabled','true');cleanup();
+  score.tracks[0].staves[0].isPercussion=true;open(score,commands);expect(screen.getByRole('button',{name:'Blank diagram'})).toHaveAttribute('aria-disabled','true');
   expect(screen.getByText(/Select a written beat on a stringed or keyboard staff/)).toBeInTheDocument();
 });
 
@@ -98,9 +98,9 @@ it('typing_ten_strings_commits_on_blur_without_dropping_marks_on_the_way',()=>{
 it('apply_is_disabled_again_after_a_change_is_reverted_even_when_mark_order_differs',()=>{
   const score=music(),commands:ScaleDiagramCommand[]=[],beat=score.tracks[0].staves[0].bars[0].voices[0].beats[0];
   setScaleDiagram(beat,{name:'S',strings:6,frets:5,firstFret:1,orientation:'horizontal',showFretMarkers:true,marks:[newMark(1,1),newMark(2,2)]});
-  open(score,commands);const apply=screen.getByRole('button',{name:'Apply diagram to beat'});expect(apply).toBeDisabled();
-  fireEvent.click(screen.getByLabelText(/String 1, fret 1: circle mark/));fireEvent.click(screen.getByRole('button',{name:'Remove mark'}));expect(apply).toBeEnabled();
-  fireEvent.click(screen.getByLabelText('String 1, fret 1'));expect(apply).toBeDisabled();
+  open(score,commands);const apply=screen.getByRole('button',{name:'Apply diagram to beat'});expect(apply).toHaveAttribute('aria-disabled','true');
+  fireEvent.click(screen.getByLabelText(/String 1, fret 1: circle mark/));fireEvent.click(screen.getByRole('button',{name:'Remove mark'}));expect(apply).not.toHaveAttribute('aria-disabled');
+  fireEvent.click(screen.getByLabelText('String 1, fret 1'));expect(apply).toHaveAttribute('aria-disabled','true');
 });
 
 it('the_grid_has_one_tab_stop_and_arrow_keys_follow_the_picture',()=>{
@@ -135,4 +135,16 @@ it('preserves ScoreView paper overlay colours and active mark stroke',()=>{
   expect(svg.style.background).toBe('rgb(255, 253, 248)');
   const activeRect=container.querySelector('rect[stroke-dasharray="3 2"]')!;
   expect(activeRect.getAttribute('stroke')).toBe('#161c24');
+});
+
+it('keeps focus on a diagram button that cannot act, and refuses it, while busy or once nothing is left to apply',()=>{
+  const score=music(),commands:ScaleDiagramCommand[]=[],view=open(score,commands);
+  fireEvent.click(screen.getByRole('button',{name:'Blank diagram'}));
+  const apply=screen.getByRole('button',{name:'Apply diagram to beat'}),staff=score.tracks[0].staves[0],beat=staff.bars[0].voices[0].beats[0];
+  apply.focus();
+  view.rerender(<ScaleToolPanel score={score} staff={staff} beat={beat} target={target} selection={null} busy onClose={()=>{}} onEdit={command=>commands.push(command as ScaleDiagramCommand)}/>);
+  expect(apply).toHaveFocus();expect(apply).toHaveAttribute('aria-disabled','true');expect(apply).not.toBeDisabled();
+  fireEvent.click(apply);expect(commands).toEqual([]);expect(apply).toHaveFocus();
+  const reset=screen.getByRole('button',{name:'Reset marks'});
+  expect(reset).toHaveAttribute('aria-disabled','true');expect(reset).not.toBeDisabled();
 });

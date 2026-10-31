@@ -1,4 +1,4 @@
-import type { KeyboardEvent, MouseEvent, PointerEvent } from 'react';
+import type { ChangeEvent, KeyboardEvent, MouseEvent, PointerEvent, SyntheticEvent } from 'react';
 
 export interface BusyGuardProps<T = HTMLElement> {
   busy?: boolean;
@@ -69,6 +69,40 @@ export function busyGuard<T extends HTMLElement = HTMLButtonElement>({
         return;
       }
       onPointerDown?.(event);
+    },
+  };
+}
+
+const passing = ['Tab', 'Escape', 'Shift', 'Control', 'Alt', 'Meta'];
+/** For a group of controls (a fieldset or div) that must not act while busy but must not drop focus either: `disabled` would blur
+ * the focused one. Gives aria-disabled, a class matching the dimmed look, and capture handlers that refuse presses, typing,
+ * pasting and changes made inside it. */
+export function busyRegion(busy: boolean) {
+  const refuse = (event: SyntheticEvent) => {
+    if (!busy) return;
+    event.preventDefault();
+    event.stopPropagation();
+  };
+  return {
+    'aria-disabled': busy ? ('true' as const) : undefined,
+    className: busy ? 'is-disabled' : undefined,
+    onClickCapture: refuse,
+    onMouseDownCapture: refuse,
+    onPointerDownCapture: refuse,
+    onBeforeInputCapture: refuse,
+    onPasteCapture: refuse,
+    onCutCapture: refuse,
+    onDropCapture: refuse,
+    onChangeCapture: (event: ChangeEvent<HTMLElement>) => refuse(event),
+    onKeyUpCapture: (event: KeyboardEvent<HTMLElement>) => {
+      if (event.key === ' ' || event.key === 'Enter') refuse(event);
+    },
+    onKeyDownCapture: (event: KeyboardEvent<HTMLElement>) => {
+      if (!busy || passing.includes(event.key) || event.ctrlKey || event.metaKey) return;
+      const target = event.target;
+      // Moving the caret inside a text field changes nothing.
+      const text = target instanceof HTMLTextAreaElement || (target instanceof HTMLInputElement && target.type !== 'checkbox' && target.type !== 'radio');
+      if (!(text && (event.key.startsWith('Arrow') || event.key === 'Home' || event.key === 'End'))) refuse(event);
     },
   };
 }

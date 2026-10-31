@@ -37,3 +37,9 @@ it('opens on the given topic, switches topics, discloses update status and keeps
   fireEvent.keyDown(close,{key:'Tab',shiftKey:true});expect(check).toHaveFocus();
   fireEvent.keyDown(check,{key:'Escape'});expect(onClose).toHaveBeenCalled();
 });
+
+it('closes when the backdrop is pressed but not when the panel is',()=>{
+  const onClose=vi.fn();render(<HelpDialog initial="editing" onClose={onClose}/>);
+  fireEvent.mouseDown(screen.getByRole('dialog'));expect(onClose).not.toHaveBeenCalled();
+  fireEvent.mouseDown(screen.getByRole('dialog').parentElement!);expect(onClose).toHaveBeenCalledTimes(1);
+});

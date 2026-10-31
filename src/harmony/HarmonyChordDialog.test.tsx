@@ -54,7 +54,7 @@ it('library_save_recall_and_remove_use_callbacks_without_editing_the_score',asyn
 });
 it('modal_traps_focus_restores_opener_and_keeps_close_available_when_busy',()=>{
   const {input,closed}=props(),opener=document.createElement('button');document.body.append(opener);opener.focus();const view=render(<HarmonyChordDialog {...input}/>),name=screen.getByLabelText('Chord name'),close=screen.getByRole('button',{name:'Close'}),cancel=screen.getByRole('button',{name:'Cancel'});expect(name).toHaveFocus();close.focus();fireEvent.keyDown(close,{key:'Tab',shiftKey:true});expect(cancel).toHaveFocus();fireEvent.keyDown(cancel,{key:'Tab'});expect(close).toHaveFocus();
-  view.rerender(<HarmonyChordDialog {...input} busy/>);expect(name).toBeDisabled();expect(cancel).toHaveFocus();expect(within(screen.getByRole('dialog')).getByRole('button',{name:'Apply chord'})).toBeDisabled();fireEvent.keyDown(cancel,{key:'Escape'});expect(closed).toEqual(['closed']);view.unmount();expect(opener).toHaveFocus();opener.remove();
+  name.focus();view.rerender(<HarmonyChordDialog {...input} busy/>);expect(name.closest('fieldset')).toHaveAttribute('aria-disabled','true');expect(name).not.toBeDisabled();expect(name).toHaveFocus();expect(within(screen.getByRole('dialog')).getByRole('button',{name:'Apply chord'})).toHaveAttribute('aria-disabled','true');fireEvent.keyDown(cancel,{key:'Escape'});expect(closed).toEqual(['closed']);view.unmount();expect(opener).toHaveFocus();opener.remove();
 });
 it('library_theory_recall_regenerates_for_the_current_staff_and_incompatible_manual_recall_rejects',()=>{
   const {input,commands}=props(),theory:HarmonyChord={name:'C',nameMode:'theory',recipe:{root:{step:0,alteration:0},formula:'major',alterations:[],omissions:[],bass:null},firstFret:1,frets:[0,0,0],fingers:[-2,-2,-2],barreFrets:[],showName:false,showDiagram:true,showFingering:false};
@@ -91,12 +91,13 @@ it('unchanged_passively_recalled_legacy_barres_remain_exact_on_apply',()=>{
   const {input,commands}=props();input.library.entries=[{id:'d1fb4ba1-6491-4bc9-932d-e194f72be671',label:'Legacy recall',chord:legacy,tuning:[...input.score.tracks[0].staves[0].tuning],capo:0,transposition:0}];render(<HarmonyChordDialog {...input}/>);
   fireEvent.change(screen.getByLabelText('Personal chord'),{target:{value:input.library.entries[0].id}});fireEvent.click(screen.getByRole('button',{name:'Recall library chord'}));fireEvent.click(screen.getByRole('button',{name:'Apply chord'}));expect(commands).toEqual([{type:'setHarmonyChord',target,chord:legacy,fillEmptyBeat:false}]);
 });
-it('initial_library_loading_keeps_focus_at_the_top_then_focuses_the_chord_name',()=>{
-  const {input}=props(),opener=document.createElement('button');document.body.append(opener);opener.focus();
-  const view=render(<HarmonyChordDialog {...input} busy/>),dialog=screen.getByRole('dialog'),cancel=screen.getByRole('button',{name:'Cancel'});
-  expect(dialog).toHaveFocus();expect(cancel).not.toHaveFocus();
-  fireEvent.keyDown(dialog,{key:'Tab',shiftKey:true});expect(cancel).toHaveFocus();
-  dialog.focus();view.rerender(<HarmonyChordDialog {...input}/>);expect(screen.getByLabelText('Chord name')).toHaveFocus();
+it('initial_library_loading_keeps_focus_at_the_top_and_does_not_hop_when_loading_ends',()=>{
+  const {input,commands}=props(),opener=document.createElement('button');document.body.append(opener);opener.focus();
+  const view=render(<HarmonyChordDialog {...input} busy/>),close=screen.getByRole('button',{name:'Close'}),apply=screen.getByRole('button',{name:'Apply chord'});
+  expect(close).toHaveFocus();
+  expect(apply).toHaveAttribute('aria-disabled','true');expect(apply).not.toBeDisabled();
+  fireEvent.click(apply);expect(commands).toEqual([]);expect(close).toHaveFocus();
+  view.rerender(<HarmonyChordDialog {...input}/>);expect(close).toHaveFocus();
   view.unmount();expect(opener).toHaveFocus();opener.remove();
 });
 it('compares_generated_shapes_with_passive_diagrams_and_marks_the_selected_shape',()=>{

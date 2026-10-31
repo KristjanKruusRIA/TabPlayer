@@ -96,3 +96,9 @@ it('refuses score-editing palette commands while the score is hidden but allows 
   fireEvent.keyDown(input,{key:'Enter'});
   expect(onRun).toHaveBeenCalledWith({kind:'app',name:'play'});
 });
+
+it('closes when the backdrop is pressed but not when the panel is',()=>{
+  const {onClose}=setup();
+  fireEvent.mouseDown(screen.getByRole('dialog'));expect(onClose).not.toHaveBeenCalled();
+  fireEvent.mouseDown(screen.getByRole('dialog').parentElement!);expect(onClose).toHaveBeenCalledTimes(1);
+});

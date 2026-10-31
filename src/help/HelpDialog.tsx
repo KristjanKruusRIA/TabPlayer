@@ -7,7 +7,7 @@ export function HelpDialog({initial,onClose}:{initial:HelpTopicId;onClose:()=>vo
   const [topic,setTopic]=useState<HelpTopicId>(initial),[checked,setChecked]=useState<string|null>(null);
   const list=useId(),title=useId();
   const current=helpTopics.find(entry=>entry.id===topic)!;
-  return <Dialog title="TabPlayer help" onClose={onClose} className="help-dialog">
+  return <Dialog title="TabPlayer help" onClose={onClose} dismissOnBackdrop className="help-dialog">
     <div className="help-layout">
       <nav aria-labelledby={list}><h3 id={list}>Topics</h3><ul>{helpTopics.map(entry=><li key={entry.id}>
         <button type="button" data-autofocus={entry.id===topic||undefined} aria-current={entry.id===topic?'true':undefined} onClick={()=>{setTopic(entry.id);setChecked(null);}}>{entry.title}</button>

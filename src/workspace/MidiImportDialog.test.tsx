@@ -19,7 +19,7 @@ const choose=(input:HTMLInputElement,bytes:Uint8Array,name='riff.mid')=>fireEven
 
 it('starts with nothing to import, focus on the file button and the default options',()=>{
   const {importButton}=setup();
-  expect(screen.getByRole('button',{name:'Choose MIDI file…'})).toHaveFocus();expect(importButton).toBeDisabled();expect(status()).toHaveTextContent('Nothing to import yet.');
+  expect(screen.getByRole('button',{name:'Choose MIDI file…'})).toHaveFocus();expect(importButton).toHaveAttribute('aria-disabled','true');expect(status()).toHaveTextContent('Nothing to import yet.');
   expect(within(screen.getByRole('radiogroup',{name:'Quantization'})).getByRole('radio',{name:'16th note (1/16)'})).toBeChecked();expect(screen.getByLabelText('Tuplets')).toHaveValue('triplets');
   expect(within(screen.getByRole('radiogroup',{name:'Voices per track'})).getByRole('radio',{name:'2'})).toBeChecked();expect(screen.getByLabelText('Guitar and bass as tablature')).toBeChecked();
 });
@@ -38,7 +38,7 @@ it('summarises a chosen file, imports it as a GP score named after it and closes
 
 it('applies the chosen options to the score it imports',async()=>{
   const {onImport,input,importButton}=setup();
-  choose(input,midi);await waitFor(()=>expect(importButton).toBeEnabled());
+  choose(input,midi);await waitFor(()=>expect(importButton).not.toHaveAttribute('aria-disabled'));
   fireEvent.click(screen.getByLabelText('Guitar and bass as tablature'));
   await waitFor(()=>expect(screen.getByRole('list',{name:'Parts'})).toHaveTextContent('notation'));
   fireEvent.click(importButton);await waitFor(()=>expect(onImport).toHaveBeenCalled());
@@ -57,31 +57,51 @@ it('refuses a malformed file with its reason, keeps Import disabled and opens no
   const {onImport,onClose,input,importButton}=setup();
   choose(input,midi.slice(0,30),'cut.mid');
   await waitFor(()=>expect(status()).toHaveTextContent('This is not a valid MIDI file: track 1 is cut off.'));
-  expect(importButton).toBeDisabled();fireEvent.submit(importButton.closest('form')!);
+  expect(importButton).toHaveAttribute('aria-disabled','true');fireEvent.submit(importButton.closest('form')!);
   expect(onImport).not.toHaveBeenCalled();expect(onClose).not.toHaveBeenCalled();
   // A later good file replaces the refusal.
-  choose(input,midi);await waitFor(()=>expect(importButton).toBeEnabled());
+  choose(input,midi);await waitFor(()=>expect(importButton).not.toHaveAttribute('aria-disabled'));
 });
 
 it('refuses a file that is too large without reading it',()=>{
   const {input,importButton}=setup();
   fireEvent.change(input,{target:{files:[Object.defineProperty(new File(['x'],'huge.mid'),'size',{value:9*1024*1024})]}});
-  expect(status()).toHaveTextContent('huge.mid is larger than 8 MB, so it was not loaded.');expect(importButton).toBeDisabled();
+  expect(status()).toHaveTextContent('huge.mid is larger than 8 MB, so it was not loaded.');expect(importButton).toHaveAttribute('aria-disabled','true');
 });
 
 it('keeps the dialog and file when the score cannot be opened',async()=>{
   const {onClose,input,importButton}=setup(false,async()=>{throw new Error('The workspace is completing a session transition.');});
-  choose(input,midi);await waitFor(()=>expect(importButton).toBeEnabled());
+  choose(input,midi);await waitFor(()=>expect(importButton).not.toHaveAttribute('aria-disabled'));
   fireEvent.click(importButton);
   await waitFor(()=>expect(status()).toHaveTextContent('The score could not be opened: The workspace is completing a session transition.'));
-  expect(onClose).not.toHaveBeenCalled();expect(importButton).toBeEnabled();
+  expect(onClose).not.toHaveBeenCalled();expect(importButton).not.toHaveAttribute('aria-disabled');
 });
 
 it('keeps Tab inside the dialog, closes with Escape and blocks Import while busy',async()=>{
   const {onClose,input,importButton}=setup(true);
-  choose(input,midi);await waitFor(()=>expect(status()).toHaveTextContent('1 part'));expect(importButton).toBeDisabled();
+  choose(input,midi);await waitFor(()=>expect(status()).toHaveTextContent('1 part'));expect(importButton).toHaveAttribute('aria-disabled','true');
   const close=screen.getByRole('button',{name:'Close'}),cancel=screen.getByRole('button',{name:'Cancel'});cancel.focus();
   fireEvent.keyDown(cancel,{key:'Tab'});expect(close).toHaveFocus();
   fireEvent.keyDown(close,{key:'Tab',shiftKey:true});expect(cancel).toHaveFocus();
   fireEvent.keyDown(close,{key:'Escape'});expect(onClose).toHaveBeenCalled();
+});
+
+it('closes from the backdrop, refuses presses while opening without losing focus, and leaves focus on Import after a failed open',async()=>{
+  let finish!:(opened:boolean)=>void;
+  const {onImport,onClose,input,importButton}=setup(false,()=>new Promise<boolean>(resolve=>{finish=resolve;}));
+  choose(input,midi);
+  await waitFor(()=>expect(status()).toHaveTextContent('Format 0, 1 part'));
+  importButton.focus();fireEvent.click(importButton);
+  await waitFor(()=>expect(onImport).toHaveBeenCalledTimes(1));
+  expect(importButton).toHaveAttribute('aria-disabled','true');expect(importButton).not.toBeDisabled();expect(importButton).toHaveFocus();
+  const eighth=within(screen.getByRole('radiogroup',{name:'Quantization'})).getByRole('radio',{name:'Eighth note (1/8)'});
+  fireEvent.click(eighth);expect(eighth).not.toBeChecked();
+  fireEvent.change(screen.getByLabelText('Tuplets'),{target:{value:'none'}});expect(screen.getByLabelText('Tuplets')).toHaveValue('triplets');
+  fireEvent.click(screen.getByLabelText('Guitar and bass as tablature'));expect(screen.getByLabelText('Guitar and bass as tablature')).toBeChecked();
+  fireEvent.click(importButton);fireEvent.mouseDown(screen.getByRole('dialog').parentElement!);
+  expect(onImport).toHaveBeenCalledTimes(1);expect(onClose).not.toHaveBeenCalled();
+  finish(false);
+  await waitFor(()=>expect(status()).toHaveTextContent('The score was not opened.'));
+  expect(importButton).toHaveFocus();
+  fireEvent.mouseDown(screen.getByRole('dialog').parentElement!);expect(onClose).toHaveBeenCalledTimes(1);
 });

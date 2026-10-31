@@ -53,7 +53,7 @@ input[aria-invalid="true"]{border-color:var(--tp-danger)}
 .ascii-import label{display:flex;flex-direction:column;gap:4px}
 .ascii-import textarea{font-family:var(--tp-font-mono);font-size:.85rem;min-height:14em;resize:vertical;white-space:pre;overflow:auto}
 .ascii-import .error{color:var(--tp-danger)}
-.command-palette-backdrop{align-items:flex-start;padding-top:12vh}
+.tp-dialog-backdrop.command-palette-backdrop{align-items:flex-start;padding-top:12vh}
 .tp-dialog.command-palette{width:min(560px,calc(100vw - 32px));max-height:70vh}
 .command-palette-inner{display:flex;flex-direction:column;gap:8px}
 .command-palette input{width:100%}

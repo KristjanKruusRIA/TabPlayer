@@ -8,6 +8,7 @@ import { createHarmonyLibraryEntry,recallHarmonyLibraryEntry } from './library';
 import { ChordDiagramPreview,soundingChordPitches } from './ChordDiagramPreview';
 import { Dialog } from '../ui/Dialog';
 import { Segmented } from '../ui/Segmented';
+import { busyGuard,busyRegion } from '../ui/useBusyGuard';
 import './harmony-dialog.css';
 
 const newRecipe=():ChordRecipe=>({root:{step:0,alteration:0},formula:'major',alterations:[],omissions:[],bass:null});
@@ -31,24 +32,14 @@ function effective(value:HarmonyChord,staff:model.Staff):HarmonyChord {
 function initial(value:HarmonyChord|null,staff:model.Staff):HarmonyChord {
   return value?effective(value,staff):{name:'C',nameMode:'theory',recipe:newRecipe(),firstFret:1,frets:staff.tuning.map(()=>-1),fingers:staff.tuning.map(()=>-2),barreFrets:[],showName:true,showDiagram:true,showFingering:true};
 }
-function InitialBusyFocus({busy,dialogRef}:{busy:boolean;dialogRef:React.RefObject<HTMLDivElement|null>}) {
-  useEffect(()=>{if(busy)dialogRef.current?.focus({preventScroll:true});},[busy,dialogRef]);
-  return null;
-}
 export function HarmonyChordDialog({score,target,selection,value,busy,library,onEdit,onClose,onLibraryPut,onLibraryRemove}:HarmonyChordDialogProps) {
   const staff=score.tracks[target.track].staves[target.staff],beat=staff.bars[target.bar].voices[target.voice].beats[target.beat];
   const [draft,setDraft]=useState(()=>initial(value,staff)),[recipe,setRecipe]=useState(()=>draft.recipe??newRecipe()),[barres,setBarres]=useState(()=>draft.barreFrets.join(', ')),[text,setText]=useState(beat.text??'');
   const [shapes,setShapes]=useState<HarmonyChord[]>([]),[fill,setFill]=useState(false),[error,setError]=useState(''),[pending,setPending]=useState(false),[libraryId,setLibraryId]=useState(''),[libraryLabel,setLibraryLabel]=useState(''),[status,setStatus]=useState('');
   const preservedShape=useRef(JSON.stringify([draft.frets,draft.barreFrets]));
-  const dialogRef=useRef<HTMLDivElement>(null),bodyRef=useRef<HTMLDivElement>(null),nameInput=useRef<HTMLInputElement>(null),cancel=useRef<HTMLButtonElement>(null),wasBusy=useRef(busy||pending),contextKey=JSON.stringify([target,staff.tuning,staff.capo,staff.transpositionPitch]),valueKey=JSON.stringify(value);
+  const dialogRef=useRef<HTMLDivElement>(null),nameInput=useRef<HTMLInputElement>(null),contextKey=JSON.stringify([target,staff.tuning,staff.capo,staff.transpositionPitch]),valueKey=JSON.stringify(value);
   const install=(next:HarmonyChord)=>{preservedShape.current=JSON.stringify([next.frets,next.barreFrets]);setDraft(structuredClone(next));setRecipe(next.recipe?structuredClone(next.recipe):newRecipe());setBarres(next.barreFrets.join(', '));setShapes([]);setError('');};
   useEffect(()=>{install(initial(value,staff));setText(beat.text??'');setFill(false);setStatus('');},[score,contextKey,valueKey]);
-  useEffect(()=>{
-    const loading=busy||pending,dialogEl=bodyRef.current?.closest<HTMLElement>('[role="dialog"]');
-    if(loading&&!wasBusy.current)cancel.current?.focus({preventScroll:true});
-    else if(!loading&&wasBusy.current&&(document.activeElement===dialogEl||document.activeElement===cancel.current))nameInput.current?.focus({preventScroll:true});
-    wasBusy.current=loading;
-  },[busy,pending]);
   function updateRecipe(next:ChordRecipe){
     setRecipe(next);setShapes([]);try{const name=formatChordName(next);setDraft({...draft,name,nameMode:'theory',recipe:structuredClone(next)});setError('');}catch(cause){setError(message(cause));}
   }
@@ -74,16 +65,16 @@ export function HarmonyChordDialog({score,target,selection,value,busy,library,on
   let matches:ReturnType<typeof recognizeChords>=[];try{matches=recognizeChords(pitches,recipe.root);}catch(cause){analysisError=message(cause);}
   const trackChords=score.tracks[target.track].staves.flatMap(source=>[...source.chords??[]].map(([id,chord])=>({id:JSON.stringify([source.index,id]),source,chord})));
   const actions=<>
-    <fieldset className="harmony-actions-set" disabled={busy||pending}>
-      <button type="button" className="tp-button" onClick={()=>submit({type:'setHarmonyChord',target:{...target},chord:null,fillEmptyBeat:false})}>Remove chord</button>
-      <button type="button" className="tp-button primary" onClick={apply}>Apply chord</button>
-    </fieldset>
-    <button ref={cancel} type="button" className="tp-button" onClick={onClose}>Cancel</button>
+    <div className="harmony-actions-set">
+      <button type="button" {...busyGuard({busy:busy||pending,className:'tp-button',onClick:()=>submit({type:'setHarmonyChord',target:{...target},chord:null,fillEmptyBeat:false})})}>Remove chord</button>
+      <button type="button" {...busyGuard({busy:busy||pending,className:'tp-button primary',onClick:apply})}>Apply chord</button>
+    </div>
+    <button type="button" className="tp-button" onClick={onClose}>Cancel</button>
   </>;
   return <>
     <Dialog ref={dialogRef} title="Harmony chord" onClose={onClose} className="harmony-dialog" actions={actions}>
       {busy&&<p role="status" className="muted">Loading chord library…</p>}
-      <div className="harmony-body" ref={bodyRef}><fieldset disabled={busy||pending}>
+      <div className="harmony-body"><fieldset {...busyRegion(busy||pending)}>
         <div className="harmony-workbench"><div className="harmony-formula"><h3>Name and formula</h3>
         <label>Chord name<input ref={nameInput} data-autofocus={!busy||undefined} value={draft.name} onChange={e=>{setDraft({...draft,name:e.target.value.replace(/^['‘’]/,''),nameMode:'manual',recipe:null});setError('');}}/></label>
         <div className="tp-field">
@@ -121,15 +112,14 @@ export function HarmonyChordDialog({score,target,selection,value,busy,library,on
         <details><summary>Chord library</summary><fieldset>
           <label>Track chord<select defaultValue="" onChange={e=>{const entry=trackChords.find(value=>value.id===e.target.value);if(!entry)return;try{install(recallHarmonyLibraryEntry(createHarmonyLibraryEntry(crypto.randomUUID(),entry.chord.name||'Track chord',getHarmonyChord(entry.chord),entry.source),staff));}catch(cause){setError(message(cause));}}}><option value="">Choose a track chord</option>{trackChords.map(entry=><option key={entry.id} value={entry.id}>{entry.chord.name||'Unnamed'} · staff {entry.source.index+1}</option>)}</select></label>
           <label>Personal chord<select value={libraryId} onChange={e=>setLibraryId(e.target.value)}><option value="">Choose a saved chord</option>{library.entries.map(entry=><option key={entry.id} value={entry.id}>{entry.label}</option>)}</select></label>
-          <button type="button" disabled={!libraryId} onClick={()=>{const entry=library.entries.find(value=>value.id===libraryId);if(!entry)return;try{install(recallHarmonyLibraryEntry(entry,staff));}catch(cause){setError(message(cause));}}}>Recall library chord</button>
+          <button type="button" {...busyGuard({unavailable:!libraryId,onClick:()=>{const entry=library.entries.find(value=>value.id===libraryId);if(!entry)return;try{install(recallHarmonyLibraryEntry(entry,staff));}catch(cause){setError(message(cause));}}})}>Recall library chord</button>
           <label>Library label<input value={libraryLabel} onChange={e=>setLibraryLabel(e.target.value)} maxLength={400}/></label>
           <button type="button" onClick={async()=>{try{const entry=createHarmonyLibraryEntry(crypto.randomUUID(),libraryLabel,prepared(),staff);setPending(true);await onLibraryPut(entry);setStatus('Saved to library.');setError('');}catch(cause){setError(message(cause));}finally{setPending(false);}}}>Save to library</button>
-          <button type="button" disabled={!libraryId} onClick={async()=>{try{setPending(true);await onLibraryRemove(libraryId);setLibraryId('');setStatus('Removed from library.');setError('');}catch(cause){setError(message(cause));}finally{setPending(false);}}}>Delete library chord</button>
+          <button type="button" {...busyGuard({unavailable:!libraryId,onClick:async()=>{try{setPending(true);await onLibraryRemove(libraryId);setLibraryId('');setStatus('Removed from library.');setError('');}catch(cause){setError(message(cause));}finally{setPending(false);}}})}>Delete library chord</button>
         </fieldset></details>
         <details><summary>Beat text</summary><fieldset><label>Beat text<input value={text} onChange={e=>setText(e.target.value)}/></label><button type="button" onClick={()=>submit({type:'setBeatText',target:{...target},text})}>Apply beat text</button></fieldset></details>
         {(error||analysisError)&&<p role="alert">{error||analysisError}</p>}{status&&<p role="status">{status}</p>}
       </fieldset></div>
     </Dialog>
-    <InitialBusyFocus busy={busy} dialogRef={dialogRef}/>
   </>;
 }

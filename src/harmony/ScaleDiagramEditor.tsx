@@ -1,3 +1,4 @@
+import { busyGuard } from '../ui/useBusyGuard';
 import { useEffect,useState } from 'react';
 import type { model } from '@coderline/alphatab';
 import type { BeatTarget } from '../project';
@@ -55,9 +56,9 @@ export function ScaleDiagramEditor({score,staff,beat,target,selection,busy,scale
     {!usable&&<p className="muted">Select a written beat on a stringed or keyboard staff to give it a scale diagram.</p>}
     <p className="muted">{stored?`This beat has a diagram${stored.name?` named “${stored.name}”`:''} with ${stored.marks.length} marks.`:'This beat has no scale diagram.'}</p>
     <div role="group" aria-label="Start a scale diagram">
-      <button type="button" disabled={busyOrUnusable} onClick={()=>make(()=>blankScaleDiagram(strings))}>Blank diagram</button>
-      <button type="button" disabled={busyOrUnusable||!selection||!staff} onClick={()=>make(()=>scaleDiagramFromSelection(score,selection!,staff!))}>From selected notes</button>
-      <button type="button" disabled={busyOrUnusable||!scale||!staff} onClick={()=>make(()=>scaleDiagramFromPitchClasses(staff!,scale!.root,scale!.classes,scale!.name))}>From scale above</button>
+      <button type="button" {...busyGuard({busy:busy,unavailable:!usable,onClick:()=>make(()=>blankScaleDiagram(strings))})}>Blank diagram</button>
+      <button type="button" {...busyGuard({busy:busy,unavailable:!usable||!selection||!staff,onClick:()=>make(()=>scaleDiagramFromSelection(score,selection!,staff!))})}>From selected notes</button>
+      <button type="button" {...busyGuard({busy:busy,unavailable:!usable||!scale||!staff,onClick:()=>make(()=>scaleDiagramFromPitchClasses(staff!,scale!.root,scale!.classes,scale!.name))})}>From scale above</button>
     </div>
     {error&&<p role="alert">{error}</p>}
     {draft&&<>
@@ -92,11 +93,11 @@ export function ScaleDiagramEditor({score,staff,beat,target,selection,busy,scale
         <button type="button" onClick={()=>{edit(value=>withoutMark(value,mark.string,mark.fret));setSelected(null);}}>Remove mark</button>
       </fieldset>:<p className="muted">No mark selected.</p>}
       <div role="group" aria-label="Apply scale diagram">
-        <button type="button" disabled={busyOrUnusable||same(draft,stored)} onClick={()=>apply(draft)}>Apply diagram to beat</button>
-        <button type="button" disabled={!draft.marks.length} onClick={()=>{edit(value=>({...value,marks:[]}));setSelected(null);}}>Reset marks</button>
-        <button type="button" onClick={()=>{setDraft(stored);setSelected(null);setError('');}} disabled={same(draft,stored)}>Discard changes</button>
+        <button type="button" {...busyGuard({busy:busy,unavailable:!usable||same(draft,stored),onClick:()=>apply(draft)})}>Apply diagram to beat</button>
+        <button type="button" {...busyGuard({unavailable:!draft.marks.length,onClick:()=>{edit(value=>({...value,marks:[]}));setSelected(null);}})}>Reset marks</button>
+        <button type="button" {...busyGuard({unavailable:same(draft,stored),onClick:()=>{setDraft(stored);setSelected(null);setError('');}})}>Discard changes</button>
       </div>
     </>}
-    {stored&&<button type="button" disabled={busyOrUnusable} onClick={()=>apply(null)}>Delete diagram from beat</button>}
+    {stored&&<button type="button" {...busyGuard({busy:busy,unavailable:!usable,onClick:()=>apply(null)})}>Delete diagram from beat</button>}
   </section>;
 }

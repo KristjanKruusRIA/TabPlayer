@@ -1,8 +1,8 @@
-import { useEffect,useId,useRef,useState } from 'react';
+import { useEffect,useId,useState } from 'react';
 import type { EngravingCommand,PageLayout } from './types';
 import { validatePageLayout } from './page';
 import { defaultHeaderFooter,scoreFieldNames,type HeaderFooter } from './header-footer';
-import { Segmented } from '../ui';
+import { Segmented,busyGuard,busyRegion } from '../ui';
 
 interface PageLayoutPanelProps {value:PageLayout;busy:boolean;onEdit:(command:Extract<EngravingCommand,{type:'setPageLayout'}>)=>void}
 const draftOf=(value:PageLayout)=>({widthMm:String(value.widthMm),heightMm:String(value.heightMm),top:String(value.marginsMm.top),right:String(value.marginsMm.right),bottom:String(value.marginsMm.bottom),left:String(value.marginsMm.left),scale:String(value.scale*100),profile:value.profile,headerFooter:structuredClone(value.headerFooter??defaultHeaderFooter())});
@@ -14,14 +14,8 @@ const fieldList=[...scoreFieldNames,'PAGE','PAGES'].map(name=>`%${name}%`).join(
 
 export function PageLayoutPanel({value,busy,onEdit}:PageLayoutPanelProps) {
   const [draft,setDraft]=useState(()=>draftOf(value)),[error,setError]=useState(''),fieldHelp=useId();
-  const summaryRef=useRef<HTMLElement>(null),fieldsetRef=useRef<HTMLFieldSetElement>(null);
   const appliedKey=JSON.stringify([value.widthMm,value.heightMm,value.marginsMm.top,value.marginsMm.right,value.marginsMm.bottom,value.marginsMm.left,value.scale,value.profile,value.headerFooter??null]);
   useEffect(()=>{setDraft(draftOf(value));setError('');},[appliedKey]);
-  useEffect(()=>{
-    if(busy&&fieldsetRef.current?.contains(document.activeElement)){
-      summaryRef.current?.focus({preventScroll:true});
-    }
-  },[busy]);
   const setText=(page:keyof HeaderFooter,band:typeof bands[number],slot:typeof slots[number],text:string)=>{
     const headerFooter=structuredClone(draft.headerFooter);headerFooter[page][band][slot]=text;setDraft({...draft,headerFooter});
   };
@@ -32,7 +26,7 @@ export function PageLayoutPanel({value,busy,onEdit}:PageLayoutPanelProps) {
     if(JSON.stringify(draft.headerFooter)!==JSON.stringify(defaultHeaderFooter()))layout.headerFooter=structuredClone(draft.headerFooter);
     try{validatePageLayout(layout);setError('');onEdit({type:'setPageLayout',layout});}catch(reason){setError(reason instanceof Error?reason.message:String(reason));}
   };
-  return <details><summary ref={summaryRef} tabIndex={-1}>Page layout</summary><fieldset ref={fieldsetRef} disabled={busy}>
+  return <details><summary>Page layout</summary><fieldset {...busyRegion(busy)}>
     <div className="actions">{presets.map(([name,width,height])=><button type="button" key={name} onClick={()=>setDraft({...draft,widthMm:String(width),heightMm:String(height)})}>{name}</button>)}</div>
     <div className="pair">
       <label>Width (mm)<input type="number" min={20} max={1000} step="any" value={draft.widthMm} onChange={e=>setDraft({...draft,widthMm:e.target.value})}/></label>
@@ -47,7 +41,8 @@ export function PageLayoutPanel({value,busy,onEdit}:PageLayoutPanelProps) {
       {pages.map(([page,pageName])=>bands.map(band=><fieldset key={`${page}/${band}`}><legend>{`${pageName} ${band}`}</legend><div className="pair">{slots.map(slot=><label key={slot}>{slot[0].toUpperCase()+slot.slice(1)}<input aria-label={`${pageName} ${band} ${slot}`} aria-describedby={fieldHelp} aria-invalid={error.startsWith(`${pageName} ${band} ${slot}:`)||undefined} value={draft.headerFooter[page][band][slot]} onChange={e=>setText(page,band,slot,e.target.value)}/></label>)}</div></fieldset>))}
       <button type="button" onClick={()=>setDraft({...draft,headerFooter:defaultHeaderFooter()})}>Default header and footer</button>
     </fieldset>
-    <button type="button" onClick={apply}>Apply page layout</button>
+  </fieldset>
+    <button type="button" {...busyGuard({busy,onClick:apply})}>Apply page layout</button>
     {error&&<p role="alert">{error}</p>}
-  </fieldset></details>;
+  </details>;
 }

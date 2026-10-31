@@ -62,7 +62,11 @@ it('resets drafts and validation on applied value changes, and disables every co
   expect(screen.queryByRole('alert')).not.toBeInTheDocument();expect(screen.getByLabelText('Width (mm)')).toHaveValue(215.9);expect(screen.getByLabelText('Height (mm)')).toHaveValue(355.6);
   expect(screen.getByLabelText('Top margin (mm)')).toHaveValue(20);expect(screen.getByLabelText('Left margin (mm)')).toHaveValue(23);expect(screen.getByLabelText('Scale (%)')).toHaveValue(75);expect(notationRadio('Score')).toBeChecked();
   view.rerender(<PageLayoutPanel {...props} busy/>);
-  for(const element of [...screen.getAllByRole('spinbutton'),...screen.getAllByRole('button'),...screen.getAllByRole('radio')])expect(element).toBeDisabled();
+  expect(screen.getByLabelText('Width (mm)').closest('fieldset')).toHaveAttribute('aria-disabled','true');
+  for(const element of [...screen.getAllByRole('radio'),screen.getByRole('button',{name:'Apply page layout'})])expect(element).toHaveAttribute('aria-disabled','true');
+  for(const element of [...screen.getAllByRole('spinbutton'),...screen.getAllByRole('button'),...screen.getAllByRole('radio')])expect(element).not.toBeDisabled();
+  fireEvent.click(screen.getByRole('button',{name:'A5'}));fireEvent.change(screen.getByLabelText('Width (mm)'),{target:{value:'300'}});
+  expect(screen.getByLabelText('Width (mm)')).toHaveValue(page().widthMm);
   fireEvent.click(screen.getByRole('button',{name:'Apply page layout'}));expect(commands).toEqual([]);
 });
 
@@ -129,11 +133,13 @@ it('shows a saved header and footer and refuses unknown fields',()=>{
   expect(screen.getByRole('alert')).toHaveTextContent('First page footer center: unknown field %COMPOSER%.');expect(commands).toHaveLength(1);
 });
 
-it('falls back focus to summary when busy disables an active control',()=>{
+it('keeps focus on the active control when busy, refuses its edits, and keeps the summary reachable',()=>{
   const {rerender}=render(<PageLayoutPanel value={page()} busy={false} onEdit={()=>{}}/>);
   const radio=notationRadio('Document notation');
   radio.focus();
   expect(radio).toHaveFocus();
   rerender(<PageLayoutPanel value={page()} busy={true} onEdit={()=>{}}/>);
-  expect(screen.getByText('Page layout')).toHaveFocus();
+  expect(radio).toHaveFocus();expect(radio).not.toBeDisabled();
+  fireEvent.keyDown(radio,{key:'ArrowRight'});expect(notationRadio('Document notation')).toBeChecked();
+  expect(screen.getByText('Page layout')).not.toHaveAttribute('tabindex','-1');
 });

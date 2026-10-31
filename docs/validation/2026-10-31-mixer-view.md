@@ -12,6 +12,13 @@ Branch `feat/ui-mixer`, merged with `feat/gp8-parity`. The Mixer is the third Vi
 - **Low:** help contexts for `.mixer-view` (Playback and mixing) and `.sound-view` (Tracks and sounds); the sound names are memoised per score and sounds, factory and preset effect keys are computed once; the sound readout is a `role="group"`; the Fader finds its thumb by ref rather than class.
 - **Master:** `MasterPanel` sits at the right end of the mixer with the same props as `TrackPanel`, styled with the mixer tokens. Its audio and edits are unchanged.
 
+## Second review fixes
+- **Identity:** strips are keyed by track identity, and the sound heard for a drag ends when the track list changes, so a drag cannot be saved onto the track that took its index (deletion, undo, Ctrl+Z during a drag).
+- **Busy mid-drag:** `useRange` ends a gesture when its control becomes disabled, and a release or move on a disabled control saves nothing; the value and the heard sound go back.
+- **Refusal kept:** a refused dragged edit puts the saved mix back first and then reports the error, so the restoring `setMix` no longer clears it.
+- **Master:** `MasterPanel` uses `aria-disabled` and `busyGuard`, so a focused control keeps focus when busy; `master()` reads the newest document (`latestMaster`), so a master slider does not step back. Audio and edit behaviour are otherwise unchanged.
+- **Landing:** a heard drag ends when the loaded document's mix for the track moves off what the edit began from (or equals the one heard), so an unrelated reload, such as a track selection, no longer ends it.
+
 ## Evidence
 - `src/mixer/MixerView.live.test.tsx` runs the real player against a fake native bridge and a host that takes edits late. It fails if the drag is silent, if it records before release, if the sound or the fader steps back, or if a cancelled drag keeps its level (checked by mutating the view).
 - `src/audio/mix-preview.test.ts` covers the preview, clamping, an unknown track, a new document, edit settlement, the newest-mix read and a refused edit.
@@ -19,6 +26,5 @@ Branch `feat/ui-mixer`, merged with `feat/gp8-parity`. The Mixer is the third Vi
 
 ## Limits
 - Not run in the desktop app or by ear: the live drag was verified against a fake bridge, not the native audio engine, so the 10 ms crossfade and the 70 ms rate are untested by hearing. No screenshots were taken of the master strip or the Selected slot; the CSS is unmeasured in a real window.
-- `MasterPanel` still uses `disabled` for busy on its own sliders and buttons; it was left alone because its behaviour was out of scope.
 - A drag on the master sliders is not heard live.
 - No Rust changed, so no Rust tests were run for this work.

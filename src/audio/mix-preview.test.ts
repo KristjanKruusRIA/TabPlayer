@@ -2,6 +2,7 @@ import {expect,it,vi} from 'vitest';
 import {NativePlaybackController} from './NativePlaybackController';
 import type {NativeAudioBridge} from './bridge';
 import {blankProject} from '../project';
+import {defaultMaster} from '../document-settings';
 import {buildDocument,previewEdit,trackIdentity} from '../engine';
 
 function fixture(onEdit=vi.fn(),latestMix?:(id:string)=>never){
@@ -83,5 +84,47 @@ it('keeps a dragged mix until the player holds the accepted edit, so it never st
   await refusing.player.loadDocument(project,built,0,1);
   await refusing.player.previewMix(0,{gain:.2});await refusing.player.setTrackVolume(0,.2);
   expect(sent(refusing.bridge)?.mixes[guitar]?.gain).toBe(1);
+  // The refusal is still told: putting the saved mix back must not clear it.
+  expect(refusing.player.getState().error).toContain('Edit refused.');
   player.destroy();refusing.player.destroy();
+});
+
+it('drops a heard mix with its deleted track, so an undo that brings the track back does not bring the preview back',async()=>{
+  const {player,bridge}=fixture();const added=previewEdit(blankProject(),{type:'addTrack',name:'Bass',tuning:[43,38,33,28],program:33});
+  const built=buildDocument(added.project);await player.loadDocument(added.project,built,0,1);
+  const bass=trackIdentity(built.score.tracks[1]);
+  await player.previewMix(1,{gain:.2});expect(sent(bridge)?.mixes[bass]?.gain).toBe(.2);
+  const removed=previewEdit(added.project,{type:'removeTrack',track:1},built);await player.loadDocument(removed.project,removed,0,1);
+  const back=buildDocument(added.project);await player.loadDocument(added.project,back,0,1);
+  const prepared=vi.mocked(bridge.prepare).mock.calls.at(-1)![1];
+  expect(prepared.mixes[bass]?.gain??1).toBe(1);
+  player.destroy();
+});
+
+it('keeps a heard mix through a reload that leaves the mix alone, and ends it when the edit lands',async()=>{
+  const project=blankProject(),built=buildDocument(project),guitar=trackIdentity(built.score.tracks[0]);
+  const {player,bridge,onEdit}=fixture();
+  await player.loadDocument(project,built,0,1);
+  const gain=()=>sent(bridge)?.mixes[guitar]?.gain;
+  await player.previewMix(0,{gain:.4});await player.setTrackVolume(0,.4);
+  // A track selection reloads a newer document with the same mixes: the preview stays.
+  const selected=buildDocument(project);await player.loadDocument(project,selected,0,1);
+  expect(gain()).toBe(.4);
+  const edited=previewEdit(project,onEdit.mock.calls[0][0],selected);
+  await player.loadDocument(edited.project,edited,0,1);
+  expect(gain()).toBe(.4);
+  const louder=previewEdit(edited.project,{type:'setTrackMix',trackId:guitar,mix:{gain:.9,pan:0,mute:false,solo:false}},edited);
+  await player.loadDocument(louder.project,louder,0,1);expect(gain()).toBe(.9);
+  player.destroy();
+});
+
+it('shows the master as the newest document has it, so a master slider does not step back', async()=>{
+  let newest=undefined as ReturnType<NativePlaybackController['master']>;
+  const bridge=fixture().bridge;
+  const player=new NativePlaybackController({bridge,onEdit:vi.fn(async()=>{}),latestMaster:()=>newest});
+  const project=blankProject(),built=buildDocument(project);await player.loadDocument(project,built,0,1);
+  expect(player.master()).toBeUndefined();
+  newest={...defaultMaster(),gainDb:-6};
+  expect(player.master()?.gainDb).toBe(-6);
+  player.destroy();
 });

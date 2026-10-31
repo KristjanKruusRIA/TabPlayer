@@ -165,8 +165,8 @@
   min-height:28px; margin-top:2px; border:1px solid var(--tp-line-strong); border-radius:var(--tp-radius-s);
   background:var(--tp-raised); color:var(--tp-text); font:500 12px/18px var(--tp-font-ui); cursor:pointer;
 }
-.mixer-view .track-master>button:hover:enabled { border-color:var(--tp-text); }
-.mixer-view .track-master :is(button,select,input):disabled { opacity:.45; cursor:default; }
+.mixer-view .track-master>button:hover:not(:is(:disabled,[aria-disabled=true])) { border-color:var(--tp-text); }
+.mixer-view .track-master :is(button,select,input):is(:disabled,[aria-disabled=true]) { opacity:.45; cursor:default; }
 .mixer-view .track-master :is(summary,select):focus-visible { outline:2px solid var(--tp-edit); outline-offset:2px; }
 
 @media (max-width:1100px),(max-height:700px) {

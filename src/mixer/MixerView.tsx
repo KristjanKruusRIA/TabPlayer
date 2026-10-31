@@ -72,6 +72,9 @@ export function MixerView({score,sounds,selected,busy,onSelect,player}:MixerView
     const current=player?.focus();
     if(current&&selectedId&&current.track!==selectedId)void player?.setFocus(selectedId,current.amount).catch(()=>{});
   },[player,selectedId]);
+  // A strip belongs to a track, not to a place in the list: a deleted or moved track takes its drag, and the sound it was heard at, with it.
+  const ids=score.tracks.map(trackIdentity),idsKey=ids.join('|');
+  useEffect(()=>()=>{void live.end();},[live,idsKey]);
   const described=useMemo(()=>score.tracks.map(track=>describeTrackSound(track,sounds?.[trackIdentity(track)])),[score,sounds]);
   const selectedMix=score.tracks[selected]?player?.mix(score.tracks[selected]):undefined;
   const anySolo=score.tracks.some(track=>player?.mix(track)?.solo);
@@ -122,7 +125,7 @@ export function MixerView({score,sounds,selected,busy,onSelect,player}:MixerView
         const isSelected=track.index===selected,off=busy||!player;
         const volumeControl=mixControl(track.index,gain=>({gain}),value=>player?.setTrackVolume(track.index,value));
         const panControl=mixControl(track.index,value=>({pan:value}),value=>player?.setPan(track.index,value));
-        return <section className={`mixer-strip${isSelected?' selected':''}`} data-selected={isSelected||undefined} key={track.index} aria-label={`Channel ${track.index+1}: ${track.name}`}>
+        return <section className={`mixer-strip${isSelected?' selected':''}`} data-selected={isSelected||undefined} key={ids[position]} aria-label={`Channel ${track.index+1}: ${track.name}`}>
           <div className="mixer-strip-head">
             <button type="button" title={track.name} aria-label={`Track ${track.index+1}: ${track.name}`} aria-pressed={isSelected} {...busyGuard({busy,className:'mixer-strip-select',onClick:()=>onSelect(track.index)})}>
               <span className="track-color-swatch" aria-hidden="true" style={{backgroundColor:trackColorHex(track.color)}}/>

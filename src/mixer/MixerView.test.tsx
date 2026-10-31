@@ -360,7 +360,7 @@ it('puts the master output in the mixer and sends its changes through setMaster,
   // No setMaster on the player: the master is shown but cannot be changed.
   cleanup();
   render(<MixerView {...initial} player={player}/>);
-  expect(within(screen.getByRole('region',{name:'Master'})).getByRole('slider',{name:'Master level'})).toBeDisabled();
+  expect(within(screen.getByRole('region',{name:'Master'})).getByRole('slider',{name:'Master level'})).toHaveAttribute('aria-disabled','true');
 });
 
 it('ends the heard drag without saving when it is cancelled or ends where it began', async()=>{
@@ -382,4 +382,76 @@ it('ends the heard drag without saving when it is cancelled or ends where it beg
   fireEvent.pointerUp(thumb,{clientY:150,pointerId:2});
   await vi.waitFor(()=>expect(player.previewMix).toHaveBeenLastCalledWith(0,null));
   expect(player.setTrackVolume).not.toHaveBeenCalled();
+});
+
+/** A fader drag begun on the Guitar strip of a two-track score, with the preview heard. */
+function dragGuitar(player:ReturnType<typeof livePlayer>['player'],score:model.Score) {
+  const view=render(<MixerView {...props(score)} player={player}/>);
+  const volume=screen.getByRole('slider',{name:'Volume Guitar'});sized(volume);
+  const thumb=volume.querySelector('.tp-fader-thumb')!;
+  fireEvent.pointerDown(thumb,{clientY:150,pointerId:1});
+  fireEvent.pointerMove(thumb,{clientY:168,pointerId:1});
+  expect(player.previewMix).toHaveBeenLastCalledWith(0,{gain:.55});
+  expect(volume).toHaveAttribute('aria-valuenow','0.55');
+  return {view,volume,thumb};
+}
+const twoTracks=()=>previewEdit(blankProject(),{type:'addTrack',name:'Bass',tuning:[43,38,33,28],program:33});
+
+it('drops a drag when its track is deleted, even after Ctrl+Z passes through the fader, and never saves it onto the track that took its place', async()=>{
+  const added=twoTracks(),{player}=livePlayer(added.score);
+  const {view,volume,thumb}=dragGuitar(player,added.score);
+  fireEvent.keyDown(volume,{key:'z',ctrlKey:true});
+  // The track list changes under the drag: Guitar is gone and Bass is now track 0.
+  const removed=previewEdit(added.project,{type:'removeTrack',track:0}).score;
+  view.rerender(<MixerView {...props(removed)} player={player}/>);
+  expect(screen.queryByRole('slider',{name:'Volume Guitar'})).toBeNull();
+  fireEvent.pointerUp(thumb,{clientY:168,pointerId:1});
+  expect(player.setTrackVolume).not.toHaveBeenCalled();
+  await vi.waitFor(()=>expect(player.previewMix).toHaveBeenLastCalledWith(expect.any(Number),null));
+  const bass=screen.getByRole('slider',{name:'Volume Bass'});
+  expect(bass).toHaveAttribute('aria-valuenow','0.7');
+  // And a drag of the survivor is its own: it saves on index 0.
+  sized(bass);const bassThumb=bass.querySelector('.tp-fader-thumb')!;
+  fireEvent.pointerDown(bassThumb,{clientY:150,pointerId:2});fireEvent.pointerMove(bassThumb,{clientY:168,pointerId:2});fireEvent.pointerUp(bassThumb,{clientY:168,pointerId:2});
+  expect(player.setTrackVolume).toHaveBeenCalledTimes(1);expect(player.setTrackVolume).toHaveBeenCalledWith(0,.55);
+});
+
+it('keeps a drag with its track when the track list is reordered by an undo that adds a track before it', ()=>{
+  const added=twoTracks(),{player}=livePlayer(added.score);
+  const removed=previewEdit(added.project,{type:'removeTrack',track:0}).score;
+  const view=render(<MixerView {...props(removed)} player={player}/>);
+  const bass=screen.getByRole('slider',{name:'Volume Bass'});sized(bass);
+  const thumb=bass.querySelector('.tp-fader-thumb')!;
+  fireEvent.pointerDown(thumb,{clientY:150,pointerId:1});fireEvent.pointerMove(thumb,{clientY:168,pointerId:1});
+  // Guitar comes back (undo): Bass is track 1 now, and the same strip goes on being dragged.
+  view.rerender(<MixerView {...props(added.score)} player={player}/>);
+  expect(screen.getByRole('slider',{name:'Volume Bass'})).toBe(bass);
+  fireEvent.pointerUp(thumb,{clientY:168,pointerId:1});
+  expect(player.setTrackVolume).toHaveBeenCalledTimes(1);expect(player.setTrackVolume).toHaveBeenCalledWith(1,.55);
+});
+
+it('ends a drag when the mixer turns busy: the level goes back, the sound goes back and release saves nothing', async()=>{
+  const added=twoTracks(),{player}=livePlayer(added.score);
+  const {view,volume,thumb}=dragGuitar(player,added.score);
+  view.rerender(<MixerView {...props(added.score)} busy player={player}/>);
+  expect(volume).toHaveAttribute('aria-valuenow','0.7');
+  await vi.waitFor(()=>expect(player.previewMix).toHaveBeenLastCalledWith(0,null));
+  player.previewMix.mockClear();
+  fireEvent.pointerMove(thumb,{clientY:190,pointerId:1});
+  fireEvent.pointerUp(thumb,{clientY:190,pointerId:1});
+  expect(volume).toHaveAttribute('aria-valuenow','0.7');
+  expect(player.setTrackVolume).not.toHaveBeenCalled();expect(player.previewMix).not.toHaveBeenCalledWith(0,{gain:expect.any(Number)});
+});
+
+it('ends a drag without saving when the fader loses focus or its pointer capture', async()=>{
+  for(const lose of ['blur','capture'] as const){
+    const added=twoTracks(),{player}=livePlayer(added.score);
+    const {volume,thumb}=dragGuitar(player,added.score);
+    if(lose==='blur')fireEvent.blur(volume);else fireEvent.lostPointerCapture(volume,{pointerId:1});
+    expect(volume).toHaveAttribute('aria-valuenow','0.7');
+    await vi.waitFor(()=>expect(player.previewMix).toHaveBeenLastCalledWith(0,null));
+    fireEvent.pointerUp(thumb,{clientY:168,pointerId:1});
+    expect(player.setTrackVolume).not.toHaveBeenCalled();
+    cleanup();
+  }
 });

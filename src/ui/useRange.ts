@@ -89,6 +89,9 @@ export function useRange(options:RangeOptions) {
     return()=>{window.removeEventListener('blur',lost);lost();const state=wheel.current;if(state.timer)clearTimeout(state.timer);};
   },[]);
 
+  // A control that becomes unavailable (as when the host turns busy) ends its gesture where it stands: the value goes back and nothing is recorded.
+  useEffect(()=>{if(disabled&&api.current.active())api.current.cancelGesture();},[disabled]);
+
   const handlers={
     /** `from` starts the gesture at a value other than the shown one, as a click on a fader's track does. */
     onPointerDown(event:React.PointerEvent<HTMLElement>,from?:number){
@@ -101,6 +104,7 @@ export function useRange(options:RangeOptions) {
     },
     onPointerMove(event:React.PointerEvent<HTMLElement>){
       const state=drag.current;if(!state||state.pointer!==event.pointerId)return;
+      if(latest.current.disabled){cancelGesture();return;}
       // A mouse move with no button held means the release happened where this control could not see it.
       if(event.pointerType==='mouse'&&event.buttons===0){cancelGesture();return;}
       const travel=Math.max(40,options.travel?.()??160),fine=event.shiftKey?.2:1;
@@ -109,6 +113,7 @@ export function useRange(options:RangeOptions) {
     onPointerUp(event:React.PointerEvent<HTMLElement>){
       const state=drag.current;if(!state||state.pointer!==event.pointerId)return;
       drag.current=null;try{event.currentTarget.releasePointerCapture?.(event.pointerId);}catch{ /* Already released. */ }
+      if(latest.current.disabled){lastDraft.current=null;setDraft(null);latest.current.onInputEnd?.(false);return;}
       // Only a gesture that moved the value records; a press and release in place does not.
       finish(lastDraft.current);
     },

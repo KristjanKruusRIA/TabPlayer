@@ -1,5 +1,4 @@
-import { model, type Settings } from '@coderline/alphatab';
-import { automaticSpelling } from './notation-entry';
+import { model, rendering, Settings } from '@coderline/alphatab';
 
 const sources = new WeakMap<model.Note, boolean>();
 let used = false;
@@ -9,39 +8,103 @@ export function isNoteCautionary(note: model.Note): boolean {
   return sources.get(note) ?? false;
 }
 
-/** The forced accidental mode that makes this note's standard-staff accidental explicit. */
-export function automaticForcedMode(note: model.Note): model.NoteAccidentalMode {
-  const bar = note.beat.voice.bar;
-  const key = bar?.keySignature ?? 0;
-  const pitchClass = ((note.displayValueWithoutBend % 12) + 12) % 12;
-  const { alteration } = automaticSpelling(key, pitchClass);
-  switch (alteration) {
-    case 1: return model.NoteAccidentalMode.ForceSharp;
-    case -1: return model.NoteAccidentalMode.ForceFlat;
-    case 2: return model.NoteAccidentalMode.ForceDoubleSharp;
-    case -2: return model.NoteAccidentalMode.ForceDoubleFlat;
-    default: return model.NoteAccidentalMode.ForceNatural;
-  }
-}
-
 /**
- * Sets or clears the cautionary / courtesy accidental on a note.
- * When enabled and accidentalMode is Default, chooses the forced accidental mode for the note's pitch;
- * when disabled, resets accidentalMode to Default.
+ * Sets or clears the cautionary (courtesy) mark on a note. The mark is only a flag: it never touches the note's
+ * pitch or its accidental mode (spelling), so clearing it leaves exactly the spelling the note had, and a re-fret or
+ * transposition cannot leave a stale forced accidental behind. The sign is worked out when the note is drawn.
  */
 export function setNoteCautionary(note: model.Note, cautionary: boolean): void {
   if (cautionary) {
     sources.set(note, true);
     used = true;
-    if (note.accidentalMode === model.NoteAccidentalMode.Default) {
-      note.accidentalMode = automaticForcedMode(note);
-    }
-  } else {
-    sources.delete(note);
-    if (note.accidentalMode !== model.NoteAccidentalMode.Default) {
-      note.accidentalMode = model.NoteAccidentalMode.Default;
-    }
+    installRendering();
+  } else sources.delete(note);
+}
+
+/*
+ * alphaTab 1.8.4 draws an accidental only when the note's spelling differs from the key signature or from what the
+ * bar has already shown, and offers no option to draw one anyway. This hooks the standard-notation accidental
+ * helper, which alphaTab does not export, so that a marked note whose sign would be left out gets the sign for its
+ * own spelling. It is reached through one throw-away render; if that fails the mark is kept but nothing extra is drawn.
+ * A note with accidental mode "Force none" or a tie continuation is left without a sign, as alphaTab decides.
+ */
+interface AccidentalHelperLike {
+  applyAccidental(note: model.Note): number;
+  _registeredAccidentals: Map<number, number>;
+  _appliedScoreSteps: Map<number, number>;
+}
+const hooked = Symbol.for('tabplayer.cautionary.rendering');
+let renderingState: 'pending' | 'installed' | 'unavailable' = 'pending';
+
+function probe(): object | null {
+  const score = new model.Score(), track = new model.Track(), staff = new model.Staff();
+  staff.stringTuning.tunings = [64, 59, 55, 50, 45, 40];
+  track.addStaff(staff);
+  score.addTrack(track);
+  score.addMasterBar(new model.MasterBar());
+  const bar = new model.Bar(), voice = new model.Voice(), beat = new model.Beat(), note = new model.Note();
+  note.string = 6;
+  note.fret = 3;
+  beat.duration = model.Duration.Quarter;
+  beat.isEmpty = false;
+  beat.addNote(note);
+  voice.addBeat(beat);
+  bar.addVoice(voice);
+  staff.addBar(bar);
+  score.finish(new Settings());
+  const settings = new Settings();
+  settings.core.engine = 'svg';
+  settings.core.useWorkers = false;
+  settings.core.enableLazyLoading = false;
+  const renderer = new rendering.ScoreRenderer(settings);
+  renderer.width = 400;
+  try {
+    renderer.renderScore(score, [0]);
+    const layout = (renderer as unknown as { layout: unknown }).layout as { getRendererForBar(staffId: string, bar: model.Bar): { accidentalHelper?: object } | null };
+    const found = layout?.getRendererForBar('default-score', score.tracks[0].staves[0].bars[0])
+      ?? layout?.getRendererForBar('score', score.tracks[0].staves[0].bars[0]);
+    return found?.accidentalHelper ? Object.getPrototypeOf(found.accidentalHelper) : null;
+  } finally {
+    renderer.destroy();
   }
+}
+
+function installRendering(): void {
+  if (renderingState !== 'pending') return;
+  try {
+    const prototype = probe() as (AccidentalHelperLike & Record<symbol, unknown>) | null;
+    if (!prototype || typeof prototype.applyAccidental !== 'function') throw new Error('accidental helper not found');
+    if (prototype[hooked]) {
+      renderingState = 'installed';
+      return;
+    }
+    const original = prototype.applyAccidental;
+    prototype.applyAccidental = function (this: AccidentalHelperLike, note: model.Note): number {
+      const type = original.call(this, note);
+      if (type !== 0 || !sources.get(note) || note.isPercussion) return type;
+      const steps = this._appliedScoreSteps.get(note.id);
+      if (steps === undefined) return type;
+      const registered = this._registeredAccidentals, had = registered.has(steps), prior = registered.get(steps);
+      // A value no spelling can equal makes alphaTab treat the step as showing a different accidental.
+      registered.set(steps, Number.NaN);
+      const forced = original.call(this, note);
+      if (forced === 0) {
+        if (had) registered.set(steps, prior!);
+        else registered.delete(steps);
+      }
+      return forced;
+    };
+    prototype[hooked] = true;
+    renderingState = 'installed';
+  } catch {
+    renderingState = 'unavailable';
+  }
+}
+
+/** Whether the notation renderer will draw the courtesy sign for marked notes (false only if alphaTab could not be hooked). */
+export function cautionaryAccidentalsDrawn(): boolean {
+  installRendering();
+  return renderingState === 'installed';
 }
 
 const eachNote = (score: model.Score, action: (note: model.Note, track: number, staff: number, bar: number, voice: number, beat: number, index: number) => void) => {
@@ -105,7 +168,10 @@ function install(): void {
       });
       return finish.apply(this, args);
     };
-    try { return toScore(value, settings); } finally { scoreProto.finish = finish; }
+    let score: model.Score;
+    try { score = toScore(value, settings); } finally { scoreProto.finish = finish; }
+    if (used) installRendering();
+    return score;
   };
 }
 install();

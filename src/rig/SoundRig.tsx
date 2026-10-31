@@ -56,13 +56,13 @@ export function SoundRig({trackId,sound,onEdit,playback,busy=false,tracks,onTrac
       <div className="rig-sound-actions">
         <button type="button" {...busyGuard({busy,className:'rig-button',onClick:()=>void editing.restorePreset()})}>Restore preset</button>
         <button type="button" className="rig-button" onClick={editing.copyCurrentSound}>Copy sound</button>
-        <button type="button" {...busyGuard({busy,disabled:!editing.clipboard.sound,className:'rig-button',onClick:editing.pasteSound})}>Paste sound</button>
+        <button type="button" {...busyGuard({busy,unavailable:!editing.clipboard.sound,className:'rig-button',onClick:editing.pasteSound})}>Paste sound</button>
       </div>
       {/* Always laid out, so a preview starting or ending moves nothing; hidden and inert while none runs. */}
       <div className="rig-preview" role="group" aria-label="Sound preview" inert={!showingPreview} style={{visibility:showingPreview?'visible':'hidden'}}>
         <span className="rig-preview-name" title={showingPreview?`Previewing ${previewLabel}`:undefined}>{showingPreview&&`Previewing ${previewLabel}`}</span>
-        <button type="button" data-primary {...busyGuard({busy,className:'rig-button',onClick:editing.keepPreview})}>Keep previewed sound</button>
-        <button type="button" className="rig-button" onClick={editing.cancelPreview}>Cancel preview</button>
+        <button type="button" data-primary aria-label="Keep previewed sound" {...busyGuard({busy,className:'rig-button',onClick:editing.keepPreview})}><span className="rig-long">Keep previewed sound</span><span className="rig-short" aria-hidden="true">Keep</span></button>
+        <button type="button" className="rig-button" aria-label="Cancel preview" onClick={editing.cancelPreview}><span className="rig-long">Cancel preview</span><span className="rig-short" aria-hidden="true">Cancel</span></button>
       </div>
       <p className="rig-status" role="status" title={status||undefined}>{status}</p>
       {playback&&<label className="rig-inline"><span className="rig-field-name">Audio output</span><select className="rig-select" aria-label="Audio output" aria-disabled={busy||undefined} value={playback.deviceId()??''} onChange={event=>{if(busy){event.target.value=playback.deviceId()??'';return;}editing.selectOutput(event.target.value);}} onKeyDown={event=>{if(busy)event.preventDefault();}} onPointerDown={event=>{if(busy)event.preventDefault();}} onMouseDown={event=>{if(busy)event.preventDefault();}}>

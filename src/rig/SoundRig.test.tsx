@@ -129,10 +129,10 @@ it('moves a block by dragging it, as one edit', ()=>{
 it('moves blocks earlier and later with its buttons, which stop at the ends', async()=>{
   const user=userEvent.setup(),{edits,last}=mount();
   await choose('microphone');
-  expect(screen.getByRole('button',{name:'Move Microphone earlier'})).toBeDisabled();
+  {const b=screen.getByRole('button',{name:'Move Microphone earlier'});expect(b).toHaveAttribute('aria-disabled','true');expect(b).not.toBeDisabled();}
   await user.click(screen.getByRole('button',{name:'Move Microphone later'}));
   expect(last().effects.order!.slice(0,2)).toEqual(['gate','microphone']);expect(edits).toHaveLength(1);
-  await choose('reverb');expect(screen.getByRole('button',{name:'Move Reverb later'})).toBeDisabled();
+  await choose('reverb');{const b=screen.getByRole('button',{name:'Move Reverb later'});expect(b).toHaveAttribute('aria-disabled','true');expect(b).not.toBeDisabled();}
 });
 
 it('records one undoable edit for a whole knob drag', async()=>{
@@ -298,7 +298,7 @@ it('duplicates a pedal onto a second pedalboard, shows it after the chain and re
 it('copies a pedal and pastes it on the same kind of pedal, and copies and pastes a whole sound', async()=>{
   const {last}=mount(soundPreset('lead','green-guitar'));
   await choose('amp');
-  const paste=screen.getByRole('button',{name:'Paste pedal: Amp'});expect(paste).toBeDisabled();
+  const paste=screen.getByRole('button',{name:'Paste pedal: Amp'});expect(paste).toHaveAttribute('aria-disabled','true');expect(paste).not.toBeDisabled();
   const source=soundPreset('crunch');source.effects.amp.drive=.9;
   copyPedal('amp',source.effects.amp);
   await userEvent.click(screen.getByRole('button',{name:'Copy pedal: Amp'}));
@@ -306,8 +306,8 @@ it('copies a pedal and pastes it on the same kind of pedal, and copies and paste
   copyPedal('amp',source.effects.amp);
   await userEvent.click(screen.getByRole('button',{name:'Paste pedal: Amp'}));
   expect(last().effects.amp.drive).toBe(.9);
-  await choose('gate');expect(screen.getByRole('button',{name:'Paste pedal: Gate'})).toBeDisabled();
-  expect(screen.getByRole('button',{name:'Paste sound'})).toBeDisabled();
+  await choose('gate');{const b=screen.getByRole('button',{name:'Paste pedal: Gate'});expect(b).toHaveAttribute('aria-disabled','true');expect(b).not.toBeDisabled();}
+  {const b=screen.getByRole('button',{name:'Paste sound'});expect(b).toHaveAttribute('aria-disabled','true');expect(b).not.toBeDisabled();}
   await userEvent.click(screen.getByRole('button',{name:'Copy sound'}));
   expect(screen.getByRole('status')).toHaveTextContent('Copied this track’s sound.');
   copySound(soundPreset('bass'));
@@ -892,6 +892,54 @@ it('falls back to the checked source when the Hear button that started a preview
   expect(document.activeElement?.hasAttribute('data-row-main')).toBe(false);
 });
 
+for(const how of ['Keep','Cancel','Escape'] as const) it(`falls back to the checked source when ${how} ends a preview begun in a browser that has since been hidden`, async()=>{
+  const user=userEvent.setup(),{edits}=mount(soundPreset('clean','green-guitar'));
+  const hear=screen.getByRole('button',{name:'Hear “Lead”'});
+  await user.click(hear);
+  await screen.findByRole('group',{name:'Sound preview'});
+  // Below 1100px the browser is closed again with Sounds; its rows are still in the page but cannot take focus.
+  const hidden=document.createElement('style');hidden.textContent='.rig-browser{display:none}';document.head.append(hidden);
+  try {
+    if(how==='Keep')await user.click(screen.getByRole('button',{name:'Keep previewed sound'}));
+    else if(how==='Cancel')await user.click(screen.getByRole('button',{name:'Cancel preview'}));
+    else{screen.getByRole('radio',{name:'Green Guitar',checked:true}).focus();await user.keyboard('{Escape}');}
+    await waitForNoPreview();
+    expect(hear.isConnected).toBe(true);
+    expect(within(screen.getByRole('radiogroup',{name:'Sound source'})).getByRole('radio',{checked:true})).toHaveFocus();
+    expect(document.activeElement).not.toBe(document.body);
+    expect(edits).toHaveLength(how==='Keep'?1:0);
+  } finally {hidden.remove();}
+});
+
+it('hands focus to the first board\'s Paste pedal when a paste leaves the second board with no pedal on', async()=>{
+  const user=userEvent.setup();mount(soundPreset('lead','green-guitar'));
+  await choose('drive');
+  await user.click(screen.getByRole('button',{name:'Duplicate pedal: Drive'}));
+  await user.click(screen.getByRole('tab',{name:'Second pedalboard: Drive, enabled'}));
+  copyPedal('drive',{...soundPreset('lead').effects.drive,enabled:false});
+  const paste=screen.getByRole('button',{name:'Second pedalboard: Paste pedal: Drive'});
+  expect(paste).not.toBeDisabled();
+  await user.click(paste);
+  expect(screen.queryByRole('tab',{name:/Second pedalboard/})).toBeNull();
+  const first=screen.getByRole('button',{name:'Paste pedal: Drive'});
+  expect(first).toHaveFocus();
+});
+
+it('keeps Move earlier, Move later, Paste pedal and Paste sound focusable and refuses them while unavailable or busy', async()=>{
+  const user=userEvent.setup(),{edits,holdBusy}=mountBusyable();
+  await choose('microphone');
+  const earlier=screen.getByRole('button',{name:'Move Microphone earlier'}),later=screen.getByRole('button',{name:'Move Microphone later'});
+  expect(earlier).toHaveAttribute('aria-disabled','true');expect(earlier).not.toBeDisabled();
+  earlier.focus();await user.click(earlier);expect(edits).toHaveLength(0);expect(earlier).toHaveFocus();
+  await user.click(later);expect(edits).toHaveLength(1);
+  await holdBusy(true);await user.click(later);expect(edits).toHaveLength(1);await holdBusy(false);
+  // The clipboard holds a Drive pedal, so Paste pedal on the Microphone has nothing to paste; Paste sound is covered with the copy and paste test.
+  copyPedal('drive',soundPreset('lead').effects.drive);
+  const pastePedal=await screen.findByRole('button',{name:'Paste pedal: Microphone'});
+  expect(pastePedal).toHaveAttribute('aria-disabled','true');expect(pastePedal).not.toBeDisabled();await user.click(pastePedal);
+  expect(edits).toHaveLength(1);
+});
+
 it('lays the preview strip out whether or not a preview runs, so starting one moves nothing', async()=>{
   const user=userEvent.setup();mount(soundPreset('clean','green-guitar'));
   const strip=document.querySelector<HTMLElement>('.rig-preview')!;
@@ -917,6 +965,9 @@ it('puts the Hear buttons beside the source radios, not inside them, and the sou
   expect(rules('.rig-head').split(';').filter(rule=>rule.includes('flex-wrap')).at(-1)).toMatch(/flex-wrap:\s*wrap/);
   expect(rules('.rig-head>*')).toMatch(/min-width:\s*0/);expect(rules('.rig-presets')).toMatch(/min-width:\s*0/);expect(rules('.rig-source-picker')).toMatch(/max-width:\s*100%/);
   for(const selector of ['.rig-head','.rig-source-picker','.rig-presets','.rig-sources','.rig-hears'])expect(rules(selector)).not.toMatch(/position:\s*(absolute|fixed)|margin[a-z-]*:\s*-/);
+  // A short window drops the drawings for text and keeps the foot on one line.
+  expect(css).toMatch(/@media \(max-height:700px\)[\s\S]*\.rig-source-art[^}]*display:none/);
+  expect(css).toMatch(/@container \(min-width:1100px\)\s*\{\s*@media \(max-height:700px\)[\s\S]*\.rig-messages\s*\{\s*flex-wrap:nowrap/);
   // The real proof that nothing overlaps at rig widths is a browser measurement, recorded in docs/validation.
 });
 

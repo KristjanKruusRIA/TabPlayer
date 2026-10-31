@@ -175,7 +175,7 @@
 /* Pedal: a large version of the chain's face, with the real knobs laid over it */
 .sound-view .rig-pedal { position:relative; width:min(100cqw,calc(100cqh * .8333),430px); aspect-ratio:100 / 120; container-type:inline-size; }
 .sound-view .rig-pedal .rig-face { position:absolute; inset:0; width:100%; height:100%; filter:drop-shadow(0 8px 10px rgb(0 0 0 / .65)); }
-.sound-view .rig-pedal-knobs { position:absolute; inset:0; --knob-size:clamp(28px,19cqw,76px); }
+.sound-view .rig-pedal-knobs { position:absolute; inset:0; /* the second bound keeps a knob, its label and its readout inside the row spacing, which is a fixed share of the pedal's width */ --knob-size:clamp(22px,min(19cqw,calc(28cqw - 38px)),76px); }
 .sound-view .rig-spot-knob { position:absolute; transform:translate(-50%,-50%); display:block; }
 .sound-view .rig-pedal[data-on=false] .tp-knob { --knob-arc:var(--tp-muted); }
 .sound-view .rig-pedal .tp-knob-label,.sound-view .rig-pedal .tp-knob-readout { font-size:clamp(8px,3.4cqw,12px); line-height:1.25; min-height:0; color:var(--tp-text); text-shadow:0 1px 1px rgb(0 0 0 / .7); }
@@ -230,7 +230,7 @@
 .sound-view .rig-source-art { display:block; width:58px; height:27px; }
 .sound-view .rig-source[data-auto] .rig-source-art { opacity:.72; }
 .sound-view .rig-source-name { font:600 9.5px/12px var(--tp-font-ui); letter-spacing:.03em; text-transform:uppercase; white-space:nowrap; color:var(--tp-muted); }
-.sound-view .rig-source-to { display:inline-flex; flex-direction:column; color:var(--tp-text); }
+.sound-view .rig-source-to { display:inline-flex; flex-direction:column; align-items:flex-start; color:var(--tp-text); }
 /* A slot as wide as the longest name, so Auto→GM and Auto→Darkblack are the same width and nothing beside them moves. */
 .sound-view .rig-source-to::after { content:'→Darkblack'; height:0; overflow:hidden; visibility:hidden; }
 .sound-view .tp-seg-option[aria-checked=true] .rig-source-name { color:var(--tp-text); }
@@ -261,4 +261,37 @@
   .sound-view .rig-track-name { max-width:44px; font-size:8.5px; letter-spacing:0; }
   .sound-view .rig-presets .tp-seg-option { padding:2px 5px; font-size:11px; }
   .sound-view .rig-hear-source { min-height:18px; padding:0 3px; font-size:9px; line-height:16px; }
+}
+
+/* A short window: the stage wins. The drawings give way to text with Hear beside it, the chain stays at its small size, the preview strip shares a line
+ * with the status, and the browser's controls take one row, so the amp and the sound list keep room. The workspace is the window less the title bar and
+ * transport, so 700px of window is about 570px of workspace. */
+@media (max-height:700px) {
+  .sound-view .rig-head { gap:4px 10px; padding:4px 12px; }
+  .sound-view :is(.rig-source-art,.rig-track-glyph) { display:none; }
+  .sound-view :is(.rig-sources,.rig-tracks) .tp-seg-option { padding:3px 6px; }
+  .sound-view :is(.rig-source-name,.rig-track-name) { font-size:11px; line-height:16px; letter-spacing:.02em; }
+  .sound-view .rig-track-name { max-width:56px; }
+  .sound-view .rig-tracks { max-width:none; }
+  .sound-view .rig-name-short { display:inline; } .sound-view .rig-name-full { display:none; }
+  .sound-view .rig-hear-source { min-height:20px; padding:0 5px; font-size:10px; line-height:16px; }
+  .sound-view .rig-presets .tp-seg-option { padding:3px 7px; }
+  .sound-view .rig-chain { --icon-h:46px; padding:4px 12px 2px; }
+  .sound-view .rig-chain-end { margin-top:calc(var(--icon-h) * .4); }
+  .sound-view .rig-main { padding-top:6px; gap:4px; }
+  .sound-view .rig-long { display:none; } .sound-view .rig-short { display:inline; }
+  .sound-view .rig-browser-head { flex-direction:row; flex-wrap:wrap; align-items:center; padding:6px 8px; gap:4px 6px; }
+  .sound-view .rig-browser-head .rig-search { flex:1 1 100px; min-width:0; }
+  .sound-view .rig-browser-save { padding:6px 8px; gap:4px; }
+  .sound-view .rig-messages { min-height:32px; padding:2px 12px; gap:4px 10px; }
+  .sound-view .rig-preview-name { width:16ch; }
+  .sound-view .rig-preview { gap:6px; }
+}
+/* With room across, the foot's controls stay on one line in a short window: the status gives way first. */
+@container (min-width:1100px) {
+  @media (max-height:700px) {
+    .sound-view .rig-messages { flex-wrap:nowrap; }
+    .sound-view .rig-status { flex:1 1 60px; }
+    .sound-view .rig-inline { margin-left:0; flex:none; }
+  }
 }

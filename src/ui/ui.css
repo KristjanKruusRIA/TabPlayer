@@ -62,7 +62,6 @@
 .tp-segmented .tp-seg-option[aria-checked=true] { background:var(--tp-raised); color:var(--tp-text); border-color:var(--tp-line-strong); font-weight:600; }
 .tp-segmented .tp-seg-option:focus-visible { outline:2px solid var(--tp-edit); outline-offset:1px; }
 .tp-segmented .tp-seg-option:is(:disabled,[aria-disabled=true]) { opacity:.45; border-style:solid; border-color:transparent; cursor:default; color:var(--tp-muted); }
-.tp-segmented .tp-seg-item { display:inline-flex; align-items:center; gap:2px; }
 
 /* Dialog */
 .tp-dialog-backdrop { position:fixed; inset:0; z-index:40; display:flex; align-items:center; justify-content:center; padding:16px; background:rgb(10 9 8 / .7); }

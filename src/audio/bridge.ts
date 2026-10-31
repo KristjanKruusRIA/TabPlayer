@@ -8,7 +8,7 @@ import type { PlaybackSpan } from './selection-playback-types';
 import type { AudioOwner } from '../workspace/types';
 
 export interface NativeAudioStatus {generation:number;desiredGeneration?:number;ready:boolean;playing:boolean;tick:number;seconds:number;durationSeconds:number;speed:number;metronome:boolean;practice:PracticeStatus;loop:PracticeLoop|null;range:PlaybackSpan|null;error:string|null;deviceId:string|null;backingDurationSeconds?:number|null;renderedFrames?:number;outputPeak?:number;auditionSerial?:number;auditionPeak?:number}
-export interface AudioDeviceInfo {id:string;name:string;isDefault:boolean}
+export interface AudioDeviceInfo {id:string;name?:string;isDefault:boolean}
 export interface BackingCandidate {token:string;assetId:string;info:AssetInfo;durationMs?:number}
 export type TransportCommand =
   | {type:'play'|'pause'|'stop'|'clearLoop';generation:number}
@@ -21,6 +21,11 @@ export type TransportCommand =
 // A note audition plays 1-12 notes through a track's own sound without touching playback. `voice` and `mix`
 // are the track's TrackSound and ChannelMix as sent to prepare/setMix (mute and solo are ignored natively);
 // `program`/`percussion` identify the plan track; `durationMs` (100-3000) is how long each note is held.
+export interface AudioDiagnostics {
+  deviceName?: string;
+  sampleRate?: number;
+  bufferSize?: number;
+}
 export interface AuditionNote {key:number;startMs:number;velocity:number}
 export interface AuditionRequest {voice:TrackSound;program:number;percussion:boolean;mix:ChannelMix;notes:AuditionNote[];durationMs:number}
 export interface AuditionResult {played:boolean}
@@ -33,6 +38,8 @@ export interface NativeAudioBridge {
   subscribe(listener:(status:NativeAudioStatus)=>void):Promise<()=>void>;
   stageBacking():Promise<BackingCandidate|null>;
   stageEmbeddedBacking(bytes:Uint8Array):Promise<BackingCandidate|null>;
+  diagnostics?():Promise<AudioDiagnostics>;
+  testTone?():Promise<void>;
   /** Optional so existing fixtures stay valid. Not queued behind transport commands; resolves `{played:false}` when no output stream is open. */
   audition?(request:AuditionRequest):Promise<AuditionResult>;
 }
@@ -52,6 +59,8 @@ export function createDocumentAudioBridge(context:AudioOwner):NativeAudioBridge 
   setMix:async(settings,generation)=>{await invoke('audio_set_mix',{owner,settings,generation});recordForTest('__tabplayerTestMixes',settings);},
   audition:async request=>{const result=await invoke<AuditionResult>('audio_audition',{owner,request});recordForTest('__tabplayerTestAuditions',request);return result;},
   devices:()=>invoke('audio_devices'),status:()=>invoke('audio_status'),
+  diagnostics:()=>invoke<AudioDiagnostics>('audio_diagnostics'),
+  testTone:()=>invoke<void>('audio_test_tone'),
   subscribe:listener=>listen<NativeAudioStatus>('native-audio-status',event=>listener(event.payload)),
   stageBacking:()=>invoke('stage_backing',{documentId:owner.documentId}),
   stageEmbeddedBacking:bytes=>invoke('stage_embedded_backing',{documentId:owner.documentId,bytes:Array.from(bytes)}),

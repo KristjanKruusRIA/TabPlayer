@@ -6,7 +6,7 @@ import type { ChannelMix, DrumElementMix, DrumKitElement, DrumKitMix, EditComman
 import { canonicalDrumKitMix, defaultDrumElement } from './drum-kit';
 import type { BeatTarget,ProjectView } from '../project';
 import type { MusicSelection } from '../editor/range-types';
-import type { AuditionNote, AuditionRequest, NativeAudioBridge, NativeAudioStatus, TransportCommand } from './bridge';
+import type { AudioDiagnostics, AuditionNote, AuditionRequest, NativeAudioBridge, NativeAudioStatus, TransportCommand } from './bridge';
 import type { AuditionSource } from './audition';
 import { preparePlan,preparePlanFromScore } from './plan';
 import { interpretationsOf } from './interpretation';
@@ -90,7 +90,8 @@ export class NativePlaybackController {
       } finally {this.suppressHandler=prior;}
     }
   }
-  private send(command:TransportCommand){void this.bridge.command(command).then(()=>{if(command.generation===this.generation){this.operationError=null;this.update({error:null});}}).catch(error=>{if(command.generation===this.generation){if(command.type==='setPractice'){if(this.pendingPractice!==command.settings)return;this.pendingPractice=null;this.update({practicePending:false});}this.fail(error);}});}
+  /** Resolves when the command has completed, whether or not it succeeded. */
+  private send(command:TransportCommand):Promise<void>{return this.bridge.command(command).then(()=>{if(command.generation===this.generation){this.operationError=null;this.update({error:null});}}).catch(error=>{if(command.generation===this.generation){if(command.type==='setPractice'){if(this.pendingPractice!==command.settings)return;this.pendingPractice=null;this.update({practicePending:false});}this.fail(error);}});}
   private selectionReady(){return !this.destroyed&&!this.preparing&&this.prepared&&this.state.ready&&this.built!==null&&this.plan?.generation===this.generation;}
   private requireSelectionReady(){if(!this.selectionReady())throw new Error('Select a measure after playback is ready.');return {score:this.built!.score,plan:this.plan!};}
   cursorPlaybackChoices(target:BeatTarget):CursorPlaybackChoice[]{if(!this.selectionReady())return [];return cursorPlaybackChoices(this.built!.score,this.plan!,target);}
@@ -146,8 +147,10 @@ export class NativePlaybackController {
   setLoop(start:number,end:number){if(end<start)throw new Error('Loop end must follow its start.');this.send({type:'setLoop',startTick:this.occurrence(start).startTick,endTick:this.occurrence(end).endTick,generation:this.generation});}
   clearLoop(){this.send({type:'clearLoop',generation:this.generation});}
   setMetronome(volume:number){this.setPractice({...this.practice,metronome:{...this.practice.metronome,enabled:volume>0,volume}});}
-  selectDevice(deviceId:string|null){this.send({type:'selectDevice',deviceId,generation:this.generation});}
+  selectDevice(deviceId:string|null){return this.send({type:'selectDevice',deviceId,generation:this.generation});}
   devices(){return this.bridge.devices();}
+  diagnostics(){return this.bridge.diagnostics?.()??Promise.resolve({} as AudioDiagnostics);}
+  testTone(){return this.bridge.testTone?.()??Promise.resolve();}
   deviceId(){return this.lastStatus?.deviceId??null;}
   backingDurationMs(){const seconds=this.lastStatus?.backingDurationSeconds;return seconds==null?undefined:seconds*1000;}
   /** The track's mix as saved. The newest document wins over the one last loaded, so a control reads back what an edit just saved. */

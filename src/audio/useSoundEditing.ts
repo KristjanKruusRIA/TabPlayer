@@ -1,9 +1,11 @@
-import { useEffect, useId, useRef, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useId, useRef, useState, useSyncExternalStore } from 'react';
 import type React from 'react';
 import { chainOrder, completeSound, defaultEffects, effectBlocks, laterFields } from '../document-settings';
 import type { EditCommand, EffectBlock, FxSettings, TrackSound } from '../edit-types';
 import type { NativePlaybackController } from './NativePlaybackController';
-import type { AudioDeviceInfo } from './bridge';
+import type { AudioDeviceInfo, AudioDiagnostics } from './bridge';
+import type { MessageKey } from '../i18n/en';
+import { audioErrorKey } from './audio-errors';
 import { factorySound, factorySounds } from './factory-sounds';
 import { copyPedal, copySound, deleteSoundPreset, renameSoundPreset, saveSoundPreset, soundClipboard, soundLibrary, subscribeSoundClipboard, subscribeSoundLibrary } from './sound-library';
 import { drumKitFor } from '../editor/drum-kits';
@@ -23,15 +25,59 @@ function canTakeFocus(element:HTMLElement) {
 export interface Board {effects:FxSettings;second:boolean;name:(label:string)=>string;write:(change:(effects:FxSettings)=>void)=>Promise<boolean>;
   /** The whole sound as it would be after `change`, without recording or playing anything. */
   build:(change:(effects:FxSettings)=>void)=>TrackSound}
-export interface SoundEditingInput {trackId:string;sound?:TrackSound;onEdit:(edit:EditCommand)=>void|Promise<void>;playback?:NativePlaybackController|null;busy?:boolean;shown?:boolean}
+export interface SoundEditingInput {trackId:string;sound?:TrackSound;onEdit:(edit:EditCommand)=>void|Promise<void>;playback?:NativePlaybackController|null;busy?:boolean;shown?:boolean;
+  /** Reads the output device's diagnostics; only the Sound panel shows them. */
+  diagnostics?:boolean}
 
 /** Everything the Sound task does to a track's sound: each change is one undoable `setTrackSound` edit, a preview
  * never records one, and the same logic serves the inspector panel and the full-area rig. */
 const liveEveryMs=70;
-export function useSoundEditing({trackId,sound,onEdit,playback,busy=false,shown=true}:SoundEditingInput) {
+/** One extra readout after a device switch, once the new stream has rendered its first block. */
+export const diagnosticsFollowUpMs=400;
+export function useSoundEditing({trackId,sound,onEdit,playback,busy=false,shown=true,diagnostics:withDiagnostics=false}:SoundEditingInput) {
   const playbackState=useSyncExternalStore(playback?.subscribe??noSubscribe,playback?.getState??noState);
   const current=completeSound(sound??soundPreset('gm'));const [devices,setDevices]=useState<AudioDeviceInfo[]>([]);const [error,setError]=useState<string|null>(null);
   useEffect(()=>{let alive=true;if(playback)void playback.devices().then(items=>{if(alive)setDevices(items);}).catch(e=>{if(alive)setError(String(e));});return()=>{alive=false;};},[playback]);
+  const [diagnostics, setDiagnostics] = useState<AudioDiagnostics | null>(null);
+  const [diagnosticsError, setDiagnosticsError] = useState<MessageKey | null>(null);
+  const [testToneMessage, setTestToneMessage] = useState<MessageKey | null>(null);
+  const diagnosticsRequest = useRef(0);
+  const alive = useRef(true);
+  useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
+  /** Asks for the readout; only the newest request may answer, so a slow earlier one never overwrites it. */
+  const refreshDiagnostics = useCallback(() => {
+    if (!withDiagnostics || !playback || typeof playback.diagnostics !== 'function') return;
+    const request = ++diagnosticsRequest.current;
+    const current = () => alive.current && request === diagnosticsRequest.current;
+    void playback.diagnostics()
+      .then(d => { if (current()) { setDiagnostics(d); setDiagnosticsError(null); } })
+      .catch(e => { if (current()) { setDiagnostics(null); setDiagnosticsError(audioErrorKey(e)); } });
+  }, [playback, withDiagnostics]);
+  useEffect(() => {
+    refreshDiagnostics();
+    return () => { diagnosticsRequest.current++; };
+  }, [refreshDiagnostics, playbackState?.ready]);
+  // A refusal is only true while playback runs.
+  const isPlaying = playbackState?.playing ?? false;
+  useEffect(() => { if (!isPlaying) setTestToneMessage(null); }, [isPlaying]);
+  // A failure also ends when the output recovers.
+  const isReady = playbackState?.ready ?? false;
+  useEffect(() => { setTestToneMessage(null); }, [isReady]);
+  // Changing the system output means leaving the app, so read again when the window regains focus. No polling.
+  useEffect(() => {
+    if (!withDiagnostics || !playback) return;
+    window.addEventListener('focus', refreshDiagnostics);
+    return () => window.removeEventListener('focus', refreshDiagnostics);
+  }, [withDiagnostics, playback, refreshDiagnostics]);
+  const followUp = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (followUp.current) clearTimeout(followUp.current); }, []);
+  const testTone = useCallback(() => {
+    if (!playback || typeof playback.testTone !== 'function') return;
+    setTestToneMessage(null);
+    void playback.testTone()
+      .then(() => { if (alive.current) refreshDiagnostics(); })
+      .catch(e => { if (alive.current) setTestToneMessage(audioErrorKey(e)); });
+  }, [playback, refreshDiagnostics]);
   /** `sound` with the track's lock: the lock belongs to the track, not to the sound, so presets, factory and saved sounds, pastes and previews all keep it. It is left out when off, so a file that never locked a track is unchanged. */
   const withLock=(sound:TrackSound,locked:boolean=!!current.locked,kit:number|null|undefined=current.drumKit):TrackSound=>{const next={...sound};if(locked)next.locked=true;else delete next.locked;/* The drum kit belongs to the track too, so a preset, factory or saved sound keeps it. */if(kit!=null)next.drumKit=kit;else delete next.drumKit;return next;};
   /** Records `next` as one undoable edit, with the track's lock unless `locked` says otherwise; resolves to whether it was accepted. */
@@ -164,7 +210,13 @@ export function useSoundEditing({trackId,sound,onEdit,playback,busy=false,shown=
   const saveNamed=()=>{const result=saveSoundPreset(name,withLock(current,false));if(report(result,`${result.ok&&result.replaced?'Replaced':'Saved'} “${name.trim()}”.`)){setChosen(name.trim());setName('');}};
   const renameChosen=()=>{if(entry&&report(renameSoundPreset(entry.name,name),`Renamed “${entry.name}” to “${name.trim()}”.`)){setChosen(name.trim());setName('');}};
   const deleteChosen=()=>{if(entry&&report(deleteSoundPreset(entry.name),`Deleted “${entry.name}”.`))setChosen('');closeConfirm();};
-  const selectOutput=(id:string)=>playback?.selectDevice(id||null);
+  /** The readout follows the switch once it has completed, not when it is queued. */
+  /* The buffer size only appears with the new stream's first callback, so one bounded follow-up read fills it in. */
+  const selectOutput=(id:string)=>{if(playback)void Promise.resolve(playback.selectDevice(id||null)).then(()=>{
+    if(!alive.current)return;refreshDiagnostics();
+    if(followUp.current)clearTimeout(followUp.current);
+    followUp.current=setTimeout(()=>{followUp.current=null;if(alive.current)refreshDiagnostics();},diagnosticsFollowUpMs);
+  });};
   return {
     playbackState,current,devices,error,setError,status,setStatus,busy,playback:playback??null,record,save,
     trackId,first,second,fx,hearField,hear,endLive,duplicate,syncOf,sync,order,place,move,movedBlock,pastePedal,copyPedalOf,copyCurrentSound,pasteSound,clipboard,library,
@@ -173,6 +225,7 @@ export function useSoundEditing({trackId,sound,onEdit,playback,busy=false,shown=
     previewer,previewChoice,previewLabel,showingPreview,previewSelect,previewReturn,choosePreview,cancelPreview,keepPreview,escapePreview,orphanPreview,
     /** Locks or unlocks the track's sound against sound automations in the score, as one undoable edit; choosing the value it already has records nothing. */
     setLocked:(locked:boolean)=>locked===!!current.locked?Promise.resolve(false):save(current,locked),
+    diagnostics, diagnosticsError, testToneMessage, testTone, refreshDiagnostics,
     selectOutput,restorePreset:()=>save(soundPreset(current.presetId,current.voiceId)),applyPreset:(id:TrackSound['presetId'])=>save(soundPreset(id,current.voiceId)),setVoice:(voiceId:string|null)=>save({...current,voiceId}),
     /** Plays a drum track as the kit with this program (0 is Standard, stored as no kit); a kit already in effect records nothing. One undoable edit that keeps the rest of the sound. */
     setDrumKit:(program:number)=>{if(busy||program===drumKitFor(current.drumKit).program)return Promise.resolve(false);return save(current,undefined,program===0?null:program);},

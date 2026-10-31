@@ -96,8 +96,16 @@ pub struct PracticeLoop {
 #[serde(rename_all = "camelCase")]
 pub struct AudioDeviceInfo {
     pub id: String,
-    pub name: String,
+    /// None when the backend cannot name the device; the interface words it.
+    pub name: Option<String>,
     pub is_default: bool,
+}
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AudioDiagnostics {
+    pub device_name: Option<String>,
+    pub sample_rate: Option<u32>,
+    pub buffer_size: Option<u32>,
 }
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -464,6 +472,14 @@ struct SharedStatus {
     audition_peak: AtomicU64,
     /// Sample rate of the open output stream; zero until one has been opened.
     audition_rate: AtomicU32,
+    /// Frames per callback of the open stream; zero until its first callback.
+    buffer_size: AtomicU32,
+    /// Name of the device the open stream was built on; set when the stream opens,
+    /// so diagnostics never probe the backend.
+    stream_name: Mutex<Option<String>>,
+    /// The system rerouted the live stream (`DeviceChanged`), so the cached name may
+    /// be wrong until the next open. A plain flag: the stream's error callback sets it.
+    name_stale: AtomicU64,
 }
 impl SharedStatus {
     fn new() -> Self {
@@ -510,6 +526,9 @@ impl SharedStatus {
             audition_serial: AtomicU64::new(0),
             audition_peak: AtomicU64::new(0),
             audition_rate: AtomicU32::new(0),
+            buffer_size: AtomicU32::new(0),
+            stream_name: Mutex::new(None),
+            name_stale: AtomicU64::new(0),
         }
     }
     fn read(&self) -> NativeAudioStatus {
@@ -621,6 +640,16 @@ impl SharedStatus {
     }
     fn is_faulted(&self) -> bool {
         self.fault.load(Ordering::Acquire) == self.epoch.load(Ordering::Acquire).saturating_add(1)
+    }
+    /// Epoch-tagged like `fault`: stale only for the stream it was raised on, so an
+    /// open (which bumps the epoch) clears it and a late notice cannot mark a new stream.
+    fn name_stale(&self) -> bool {
+        self.name_stale.load(Ordering::Acquire)
+            == self.epoch.load(Ordering::Acquire).saturating_add(1)
+    }
+    fn mark_name_stale_for_epoch(&self, epoch: u64) {
+        self.name_stale
+            .fetch_max(epoch.saturating_add(1), Ordering::AcqRel);
     }
     fn mark_fault(&self) {
         self.mark_fault_for_epoch(self.epoch.load(Ordering::Acquire));
@@ -1277,6 +1306,7 @@ impl CallbackTransport {
             return;
         }
         let mut offset = 0;
+        let was_playing = self.playing;
         while self.playing && offset < output.len() {
             if let Some(clock) = &mut self.count {
                 let frame = clock.next_frame();
@@ -1356,6 +1386,8 @@ impl CallbackTransport {
             self.peak = self.peak.max(peak);
         }
         // Audition clips ride on top of normal playback and never touch its counters.
+        // The device test tone is the exception: it yields to playback and count-in.
+        self.audition.cut_tones(was_playing || self.playing);
         let report = self.audition.mix(output);
         if let Some(peak) = report.peak {
             self.shared
@@ -1457,6 +1489,14 @@ impl OutputCallback {
         if self.suspended || self.transport.shared.epoch.load(Ordering::Acquire) != self.epoch {
             output.fill(T::from_sample(0.0));
             return;
+        }
+        // Only the live stream reports its size; a retired callback must not
+        // overwrite the replacement's field.
+        if channels > 0 {
+            self.transport
+                .shared
+                .buffer_size
+                .store((output.len() / channels) as u32, Ordering::Relaxed);
         }
         // Reserve a retirement slot before consuming an owning command.
         for _ in 0..CONTROL_CAPACITY {
@@ -1673,6 +1713,48 @@ impl AudioService {
     pub fn status(&self) -> NativeAudioStatus {
         self.shared.read()
     }
+    /// What the open stream reported when it opened, plus the live callback size.
+    /// Reads cached values only: it never probes the audio backend, so it cannot
+    /// disturb a running stream. Anything not known reads `None`, never a default.
+    pub fn diagnostics(&self) -> Result<AudioDiagnostics, String> {
+        if self.shared.is_faulted() {
+            return Err(AUDIO_ERROR_FAILED.into());
+        }
+        let rate = self.shared.audition_rate.load(Ordering::Acquire);
+        let buffer = self.shared.buffer_size.load(Ordering::Relaxed);
+        Ok(AudioDiagnostics {
+            device_name: if self.shared.name_stale() {
+                None
+            } else {
+                self.shared.stream_name.lock().unwrap().clone()
+            },
+            sample_rate: (rate != 0).then_some(rate),
+            buffer_size: (buffer != 0).then_some(buffer),
+        })
+    }
+    /// Plays a quiet 440 Hz tone through the open stream. The refusal is a stable
+    /// code (`AUDIO_ERROR_*`); the interface words it.
+    pub fn test_tone(&self) -> Result<(), String> {
+        if self.shared.is_faulted() {
+            return Err(AUDIO_ERROR_FAILED.into());
+        }
+        if self.shared.playing.load(Ordering::Acquire) {
+            return Err(AUDIO_ERROR_TONE_PLAYBACK.into());
+        }
+        let rate = self
+            .audition_rate()
+            .ok_or_else(|| AUDIO_ERROR_UNAVAILABLE.to_string())?;
+        let clip = Box::new(tone_clip(rate));
+        if !self.submit_audition(clip) {
+            return Err(AUDIO_ERROR_UNAVAILABLE.into());
+        }
+        // Playback may have started between the check and the submit; the callback
+        // cuts the tone either way, so report the refusal the player will hear.
+        if self.shared.playing.load(Ordering::Acquire) {
+            return Err(AUDIO_ERROR_TONE_PLAYBACK.into());
+        }
+        Ok(())
+    }
     pub fn devices(&self) -> Result<Vec<AudioDeviceInfo>, String> {
         let host = cpal::default_host();
         let default = host.default_output_device();
@@ -1681,7 +1763,7 @@ impl AudioService {
             .map(|device| {
                 Ok(AudioDeviceInfo {
                     id: device.id().map_err(|e| e.to_string())?.to_string(),
-                    name: device.to_string(),
+                    name: device_label(&device),
                     is_default: default.as_ref() == Some(&device),
                 })
             })
@@ -2104,6 +2186,8 @@ impl AudioService {
         let (producer, controls) = HeapRb::new(CONTROL_CAPACITY).split();
         let (retired_out, retired) = HeapRb::new(CONTROL_CAPACITY).split();
         let (epoch, snapshot) = self.shared.next_epoch_snapshot();
+        // The replacement stream reports its own size on its first callback.
+        self.shared.buffer_size.store(0, Ordering::Relaxed);
         let preserve_position = preserve && snapshot.generation == document.plan.generation;
         let mut transport = CallbackTransport::new(rate, self.shared.clone());
         let (audition_producer, audition_consumer): (AuditionProducer, AuditionConsumer) =
@@ -2127,6 +2211,8 @@ impl AudioService {
         }
         transport.resolve_renderer();
         let actual_id = device.id().map_err(|e| e.to_string())?.to_string();
+        // Cached for diagnostics. `Display` for a device can panic in a backend.
+        let name = device_label(&device);
         let (reply, answer) = mpsc::channel();
         let callback = OutputCallback {
             transport,
@@ -2149,6 +2235,7 @@ impl AudioService {
             .recv()
             .map_err(|_| "Audio device manager stopped.")??;
         *self.shared.device.lock().unwrap() = Some(actual_id);
+        *self.shared.stream_name.lock().unwrap() = name;
         self.set_backing_duration(&document);
         *self.audition.lock().unwrap() = Some(AuditionSlot {
             producer: audition_producer,
@@ -2166,6 +2253,41 @@ impl Drop for AudioService {
     fn drop(&mut self) {
         self.shared.shutdown.store(true, Ordering::Release);
         let _ = self.manager.send(ManagerRequest::Shutdown);
+    }
+}
+/// Stable refusal codes for the audio diagnostics commands. The interface maps
+/// them to words (`audio.error.*` in `src/i18n`).
+pub const AUDIO_ERROR_FAILED: &str = "audio_output_failed";
+pub const AUDIO_ERROR_UNAVAILABLE: &str = "audio_output_unavailable";
+pub const AUDIO_ERROR_TONE_PLAYBACK: &str = "audio_test_tone_playback";
+const TONE_HZ: f64 = 440.0;
+const TONE_AMPLITUDE: f32 = 0.08;
+const TONE_SECONDS: f64 = 0.5;
+const TONE_FADE_SECONDS: f64 = 0.02;
+/// The 500 ms test tone at `rate`, with 20 ms linear fades at both ends.
+fn tone_clip(rate: u32) -> AuditionClip {
+    let total = (f64::from(rate) * TONE_SECONDS).round() as usize;
+    let fade = (f64::from(rate) * TONE_FADE_SECONDS).round() as usize;
+    let frames = (0..total)
+        .map(|i| {
+            let sine =
+                (2.0 * std::f64::consts::PI * TONE_HZ * i as f64 / f64::from(rate)).sin() as f32;
+            let mut gain = 1.0f32;
+            if fade > 0 {
+                if i < fade {
+                    gain = i as f32 / fade as f32;
+                } else if i + fade > total {
+                    gain = (total - 1 - i) as f32 / fade as f32;
+                }
+            }
+            let value = sine * TONE_AMPLITUDE * gain;
+            [value, value]
+        })
+        .collect();
+    AuditionClip {
+        rate,
+        frames,
+        tone: true,
     }
 }
 fn choose_output(id: Option<&str>) -> Result<(cpal::Device, cpal::SupportedStreamConfig), String> {
@@ -2187,6 +2309,23 @@ fn choose_output(id: Option<&str>) -> Result<(cpal::Device, cpal::SupportedStrea
     }
     Ok((device, config))
 }
+/// A device's display name. `Display` can panic inside a backend, so a panic reads as no name.
+fn device_label(device: &cpal::Device) -> Option<String> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| device.to_string())).ok()
+}
+/// Handles a backend notification for the stream of `epoch`. Allocation- and lock-free.
+/// Rerouting and xruns do not mean playback has failed; a reroute only makes the cached
+/// device name unreliable until the next open.
+fn stream_notice(shared: &SharedStatus, epoch: u64, kind: cpal::ErrorKind) {
+    if shared.epoch.load(Ordering::Acquire) != epoch {
+        return;
+    }
+    match kind {
+        cpal::ErrorKind::DeviceChanged => shared.mark_name_stale_for_epoch(epoch),
+        cpal::ErrorKind::Xrun | cpal::ErrorKind::RealtimeDenied => {}
+        _ => shared.mark_fault_for_epoch(epoch),
+    }
+}
 fn build_stream<T: SizedSample + FromSample<f32>>(
     device: &cpal::Device,
     config: &cpal::SupportedStreamConfig,
@@ -2200,16 +2339,7 @@ fn build_stream<T: SizedSample + FromSample<f32>>(
             config.clone().into(),
             move |data: &mut [T], _| callback.render(data, channels),
             move |error| {
-                // Backend notifications about rerouting/xruns do not mean playback has failed.
-                if !matches!(
-                    error.kind(),
-                    cpal::ErrorKind::DeviceChanged
-                        | cpal::ErrorKind::Xrun
-                        | cpal::ErrorKind::RealtimeDenied
-                ) && shared.epoch.load(Ordering::Acquire) == epoch
-                {
-                    shared.mark_fault_for_epoch(epoch);
-                }
+                stream_notice(&shared, epoch, error.kind());
             },
             None,
         )
@@ -3478,6 +3608,197 @@ mod tests {
 }
 
 #[cfg(test)]
+mod diagnostics_and_test_tone_tests {
+    use super::*;
+
+    fn service_with_stream(rate: u32) -> (AudioService, AuditionConsumer) {
+        let service = AudioService::new(PathBuf::new(), Arc::new(|_| {}));
+        let consumer = service.attach_test_audition(rate);
+        (service, consumer)
+    }
+
+    #[test]
+    fn test_tone_refused_during_playback_with_a_stable_code() {
+        let (service, _consumer) = service_with_stream(48_000);
+        service.shared.playing.store(true, Ordering::Release);
+        assert_eq!(service.test_tone().unwrap_err(), AUDIO_ERROR_TONE_PLAYBACK);
+    }
+
+    #[test]
+    fn a_fault_is_reported_before_playback() {
+        let (service, _consumer) = service_with_stream(48_000);
+        service.shared.playing.store(true, Ordering::Release);
+        service.shared.mark_fault();
+        assert_eq!(service.test_tone().unwrap_err(), AUDIO_ERROR_FAILED);
+    }
+
+    #[test]
+    fn test_tone_refused_when_no_stream() {
+        let service = AudioService::new(PathBuf::new(), Arc::new(|_| {}));
+        assert_eq!(service.test_tone().unwrap_err(), AUDIO_ERROR_UNAVAILABLE);
+    }
+
+    #[test]
+    fn test_tone_is_an_audible_440_hz_clip_at_the_stream_rate() {
+        let (service, mut consumer) = service_with_stream(48_000);
+        service.test_tone().expect("test tone should succeed");
+        let clip = consumer.try_pop().expect("audition consumer received clip");
+        assert!(clip.tone, "marked so playback can cut it");
+        assert_eq!(clip.rate, 48_000);
+        assert_eq!(clip.frames.len(), 24_000);
+        let peak = clip.frames.iter().fold(0.0f32, |p, f| p.max(f[0].abs()));
+        assert!(peak > 0.075 && peak <= 0.0801, "audible but quiet: {peak}");
+        assert!(clip.frames.iter().all(|f| f[0] == f[1]));
+        // Fades: starts and ends silent.
+        assert_eq!(clip.frames[0][0], 0.0);
+        assert!(clip.frames[23_999][0].abs() < 1e-3);
+        // 440 Hz: count rising zero crossings across 0.1 s..0.4 s (0.3 s = 132 cycles).
+        let window = &clip.frames[4_800..19_200];
+        let rising = window
+            .windows(2)
+            .filter(|w| w[0][0] < 0.0 && w[1][0] >= 0.0)
+            .count();
+        assert!((131..=133).contains(&rising), "rising crossings: {rising}");
+    }
+
+    #[test]
+    fn diagnostics_read_unknown_with_no_stream_whatever_the_hardware() {
+        let service = AudioService::new(PathBuf::new(), Arc::new(|_| {}));
+        let diagnostics = service.diagnostics().expect("no stream is not an error");
+        assert_eq!(
+            diagnostics,
+            AudioDiagnostics {
+                device_name: None,
+                sample_rate: None,
+                buffer_size: None
+            }
+        );
+    }
+
+    #[test]
+    fn diagnostics_report_the_cached_stream_values() {
+        let (service, _consumer) = service_with_stream(44_100);
+        *service.shared.stream_name.lock().unwrap() = Some("Studio speakers".into());
+        service.shared.buffer_size.store(256, Ordering::Relaxed);
+        let diagnostics = service.diagnostics().unwrap();
+        assert_eq!(diagnostics.device_name.as_deref(), Some("Studio speakers"));
+        assert_eq!(diagnostics.sample_rate, Some(44_100));
+        assert_eq!(diagnostics.buffer_size, Some(256));
+    }
+
+    #[test]
+    fn diagnostics_report_a_fault_with_a_stable_code() {
+        let service = AudioService::new(PathBuf::new(), Arc::new(|_| {}));
+        service.shared.mark_fault();
+        assert_eq!(service.diagnostics().unwrap_err(), AUDIO_ERROR_FAILED);
+    }
+
+    #[test]
+    fn a_reroute_of_the_live_stream_makes_the_name_unknown_until_the_next_open() {
+        let (service, _consumer) = service_with_stream(48_000);
+        *service.shared.stream_name.lock().unwrap() = Some("Speakers".into());
+        let epoch = service.shared.epoch.load(Ordering::Acquire);
+        let name = |s: &AudioService| s.diagnostics().unwrap().device_name;
+        stream_notice(&service.shared, epoch, cpal::ErrorKind::Xrun);
+        assert_eq!(name(&service).as_deref(), Some("Speakers"));
+        // A retired stream's notice changes nothing.
+        stream_notice(&service.shared, epoch + 1, cpal::ErrorKind::DeviceChanged);
+        assert_eq!(name(&service).as_deref(), Some("Speakers"));
+        stream_notice(&service.shared, epoch, cpal::ErrorKind::DeviceChanged);
+        let diagnostics = service.diagnostics().expect("a reroute is not a fault");
+        assert_eq!(diagnostics.device_name, None);
+        assert_eq!(diagnostics.sample_rate, Some(48_000));
+        // The next open bumps the epoch, which retires the mark with no reset.
+        service.shared.next_epoch_snapshot();
+        assert_eq!(name(&service).as_deref(), Some("Speakers"));
+        // A notice from the old stream racing that open cannot mark the new one.
+        stream_notice(&service.shared, epoch, cpal::ErrorKind::DeviceChanged);
+        assert_eq!(name(&service).as_deref(), Some("Speakers"));
+    }
+
+    #[test]
+    fn other_backend_errors_still_fault_the_live_stream() {
+        let shared = SharedStatus::new();
+        let epoch = shared.epoch.load(Ordering::Acquire);
+        stream_notice(&shared, epoch, cpal::ErrorKind::RealtimeDenied);
+        assert!(!shared.is_faulted());
+        stream_notice(&shared, epoch, cpal::ErrorKind::DeviceNotAvailable);
+        assert!(shared.is_faulted());
+    }
+
+    fn callback_for(shared: &Arc<SharedStatus>, epoch: u64) -> OutputCallback {
+        let transport = CallbackTransport::new(48_000, shared.clone());
+        let (_controls_in, controls) = HeapRb::<CallbackCommand>::new(CONTROL_CAPACITY).split();
+        let (retired_in, _retired_out) = HeapRb::<Retired>::new(CONTROL_CAPACITY).split();
+        OutputCallback {
+            transport,
+            controls,
+            retired: retired_in,
+            scratch: [[0.0; 2]; BLOCK],
+            epoch,
+            suspended: false,
+        }
+    }
+
+    #[test]
+    fn only_the_live_callback_reports_its_buffer_size() {
+        let shared = Arc::new(SharedStatus::new());
+        let live = shared.epoch.load(Ordering::Acquire);
+        let mut retired = callback_for(&shared, live);
+        shared.next_epoch_snapshot();
+        let mut out = vec![0.0f32; 128 * 2];
+        retired.render(&mut out, 2);
+        assert_eq!(
+            shared.buffer_size.load(Ordering::Relaxed),
+            0,
+            "a retired callback must not write the replacement's field"
+        );
+        let mut replacement = callback_for(&shared, live + 1);
+        replacement.render(&mut out, 2);
+        assert_eq!(shared.buffer_size.load(Ordering::Relaxed), 128);
+    }
+
+    fn clip(value: f32, tone: bool) -> Box<AuditionClip> {
+        Box::new(AuditionClip {
+            rate: 48_000,
+            frames: vec![[value; 2]; 9_600],
+            tone,
+        })
+    }
+
+    #[test]
+    fn playback_cuts_a_sounding_tone_but_not_a_note_audition() {
+        for (tone, survives) in [(true, false), (false, true)] {
+            let (mut transport, mut producer) = CallbackTransport::headless_with_audition(48_000);
+            let mut output = [[0.0; 2]; 512];
+            assert!(producer.try_push(clip(0.5, tone)).is_ok());
+            transport.render_into(&mut output);
+            assert_eq!(output[511], [0.5, 0.5], "sounds while stopped");
+            // Playback starts (count-in counts): the next block fades the tone out.
+            transport.playing = true;
+            transport.render_into(&mut output);
+            if survives {
+                assert_eq!(output[511], [0.5, 0.5], "a note audition rides on top");
+            } else {
+                assert_eq!(output[300], [0.0, 0.0], "the tone is gone after 5 ms");
+                assert!(output[0][0] > 0.4, "fades rather than clicks");
+            }
+        }
+    }
+
+    #[test]
+    fn a_tone_queued_during_playback_never_sounds() {
+        let (mut transport, mut producer) = CallbackTransport::headless_with_audition(48_000);
+        transport.playing = true;
+        assert!(producer.try_push(clip(0.5, true)).is_ok());
+        let mut output = [[0.0; 2]; 512];
+        transport.render_into(&mut output);
+        assert!(output.iter().all(|f| *f == [0.0, 0.0]));
+        assert_eq!(transport.status().audition_serial, 0);
+    }
+}
+
+#[cfg(test)]
 mod audition_callback_tests {
     use super::*;
 
@@ -3488,6 +3809,7 @@ mod audition_callback_tests {
             Box::new(AuditionClip {
                 rate,
                 frames: vec![[0.1; 2]; 8],
+                tone: false,
             })
         };
         assert!(!service.submit_audition(clip(48_000)), "no stream yet");
@@ -3524,6 +3846,7 @@ mod audition_callback_tests {
         let clip = Box::new(AuditionClip {
             rate: 48_000,
             frames: vec![[0.5, -0.25]; 600],
+            tone: false,
         });
         assert!(producer.try_push(clip).is_ok());
         let mut stereo = vec![0.0f32; 1024 * 2];
@@ -3537,6 +3860,7 @@ mod audition_callback_tests {
                 .try_push(Box::new(AuditionClip {
                     rate: 48_000,
                     frames: vec![[0.5, -0.25]; 8],
+                    tone: false,
                 }))
                 .is_ok()
         );

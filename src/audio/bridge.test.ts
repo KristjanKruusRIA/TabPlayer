@@ -38,3 +38,10 @@ it('sends audition requests with the owner, bypassing the transport command queu
   expect(nativeInvoke.mock.calls).toEqual([['audio_command',{owner,command:{type:'play',generation:3}}],['audio_audition',{owner,request}]]);
   release();await playing;
 });
+
+it('calls the native diagnostics and test tone commands by their registered names',async()=>{
+  vi.resetModules();nativeInvoke.mockReset();nativeInvoke.mockResolvedValue({});
+  const {createDocumentAudioBridge}=await import('./bridge');const nativeAudioBridge=createDocumentAudioBridge(owner);
+  await nativeAudioBridge.diagnostics!();await nativeAudioBridge.testTone!();
+  expect(nativeInvoke.mock.calls.map(call=>call[0])).toEqual(['audio_diagnostics','audio_test_tone']);
+});

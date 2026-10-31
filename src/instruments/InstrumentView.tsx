@@ -1,13 +1,16 @@
-import { useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
+import { useMemo, useRef, useState, type FocusEvent as ReactFocusEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
 import type { model } from '@coderline/alphatab';
 import type { PlanNote } from '../audio/types';
 import type { EditCommand } from '../edit-types';
 import type { BeatTarget } from '../project';
 import { formatPitch } from '../tuning';
+import { busyGuard } from '../ui';
 import { describePartialCapo, getPartialCapo, openStringKey } from '../editor/partial-capo';
 import { describeBanjoDrone, fretExists, getBanjoDrone, neckFret, plainFret } from '../editor/banjo-drone';
-import { busyHint, drumTarget, entryBeat, entryNotes, fretTarget, keyTarget, noBeatHint, padTarget, type EntryAction, type EntryContext, type EntryFollow, type EntryTarget } from './entry';
-import { DrumsArt, FretboardArt, KeyboardArt, cymbalIds, neckGeometry, shellHeightOf } from './instrument-art';
+import { busyHint, entryBeat, entryNotes, fretTarget, hitTarget, instrumentTarget, keyTarget, noBeatHint, padTarget, type EntryAction, type EntryContext, type EntryFollow, type EntryTarget } from './entry';
+import { DrumsArt, FretboardArt, KeyboardArt, cymbalIds, neckGeometry, shellHeightOf, surfaceDepthOf, targetDepthOf } from './instrument-art';
+import { drumPieces, instrumentHits, kitOrder, ownerOf, percussionInstruments, type Instrument } from './drum-kit';
+import { PercussionArt } from './percussion-art';
 import './instruments.css';
 
 export interface InstrumentViewProps {
@@ -25,7 +28,8 @@ export interface InstrumentEntry {
   string?: number;
   onEdit: (command: EditCommand, follow: EntryFollow) => void;
 }
-type ShownNote = Pick<PlanNote, 'id' | 'key' | 'source'>;
+/** `hit`, an articulation id, is only known in edit mode, where the score says exactly which hit a note is; playback knows a pitch. */
+type ShownNote = Pick<PlanNote, 'id' | 'key' | 'source'> & { hit?: number | null };
 /** Entry mode as the instruments see it: the click rules' context, why targets are disabled, and how an action is sent. */
 interface EntryState { ctx: EntryContext; disabled: string | null; send: (action: EntryAction) => void; string?: number }
 interface Roving { active: string; setCurrent: (id: string) => void; move: (id: string) => void; ref: (id: string) => (element: Element | null) => void }
@@ -65,19 +69,6 @@ type FretPosition = { id: string; key: number; string: number; fret: number };
 const blackKeys = new Set([1,3,6,8,10]);
 const percussionNames = [
   'Acoustic bass drum','Bass drum','Side stick','Acoustic snare','Hand clap','Electric snare','Low floor tom','Closed hi-hat','High floor tom','Pedal hi-hat','Low tom','Open hi-hat','Low-mid tom','Hi-mid tom','Crash cymbal 1','High tom','Ride cymbal 1','Chinese cymbal','Ride bell','Tambourine','Splash cymbal','Cowbell','Crash cymbal 2','Vibraslap','Ride cymbal 2','Hi bongo','Low bongo','Mute hi conga','Open hi conga','Low conga','High timbale','Low timbale','High agogo','Low agogo','Cabasa','Maracas','Short whistle','Long whistle','Short guiro','Long guiro','Claves','Hi wood block','Low wood block','Mute cuica','Open cuica','Mute triangle','Open triangle',
-];
-// Each piece lists its plain hit first (the snare's 38 before its side stick), which is what a click enters by default.
-const drumPieces = [
-  {id:'kick',label:'Kick',keys:[35,36],x:415,y:148,r:57},
-  {id:'snare',label:'Snare',keys:[38,37,40],x:270,y:154,r:39},
-  {id:'floor-tom',label:'Floor tom',keys:[41,43],x:594,y:143,r:48},
-  {id:'low-tom',label:'Low tom',keys:[45,47],x:411,y:70,r:35},
-  {id:'high-tom',label:'High tom',keys:[48,50],x:321,y:64,r:32},
-  {id:'hi-hat',label:'Hi-hat',keys:[42,44,46],x:157,y:117,r:40},
-  {id:'crash',label:'Crash',keys:[49,57],x:215,y:33,r:61},
-  {id:'ride',label:'Ride',keys:[51,53,59],x:566,y:38,r:66},
-  {id:'china',label:'China',keys:[52],x:713,y:99,r:54},
-  {id:'splash',label:'Splash',keys:[55],x:104,y:42,r:33},
 ];
 const percussionName = (key: number) => percussionNames[key-35] ?? `Percussion ${formatPitch(key)} (${key})`;
 
@@ -161,29 +152,40 @@ function Keyboard({staves,notes,compact,entry}: {staves: readonly model.Staff[];
 }
 
 function DrumKit({notes, entry}: {notes: readonly ShownNote[]; entry?: EntryState}) {
-  const rove=useRoving();
-  const keys = new Set(notes.map(note=>note.key)), kitKeys = new Set(drumPieces.flatMap(piece=>piece.keys)), auxiliary = [...keys].filter(key=>!kitKeys.has(key));
-  const kit = [...drumPieces].sort((a,b)=>a.x-b.x), order = entry ? [...kit.map(piece=>piece.id),...auxiliary.map(key=>`pad/${key}`)] : [], roving = rove(order, order[0] ?? '');
+  const rove=useRoving(), [focused,setFocused]=useState<string|null>(null);
+  // Edit mode lights the instrument that owns each hit; the pitch only decides for notes without an articulation, as in playback.
+  const struck = notes.filter(note=>note.hit!=null), keys = new Set(notes.filter(note=>note.hit==null).map(note=>note.key)), kitKeys = new Set([...drumPieces,...percussionInstruments].flatMap(piece=>piece.keys));
+  const owners = new Map(struck.map(note=>[note, entry ? ownerOf(entry.ctx.staff.track, note.hit!) : undefined])), held = new Set([...owners.values()].flatMap(item=>item?[item.id]:[]));
+  const auxiliary = [...new Set([...[...keys].filter(key=>!kitKeys.has(key)),...struck.filter(note=>!owners.get(note)).map(note=>note.key)])];
+  const lit = (item: Instrument) => held.has(item.id) || item.keys.some(key=>keys.has(key));
+  const kit = [...drumPieces].sort((a,b)=>a.x-b.x), order = entry ? [...kit.map(piece=>piece.id),...percussionInstruments.map(item=>item.id),...auxiliary.map(key=>`pad/${key}`)] : [], roving = rove(order, order[0] ?? '');
+  const chosen = entry && focused ? [...drumPieces,...percussionInstruments].find(item=>item.id===focused) : undefined, hits = entry && chosen ? instrumentHits(entry.ctx.staff.track, chosen) : [];
   const move = (name: string, from: string) => stepKeys(order, name, from, ['ArrowRight','ArrowDown'], ['ArrowLeft','ArrowUp']);
+  // The hits show while their instrument or the row itself has focus, so reaching the row from the instrument keeps them.
+  const focusIn = (event: ReactFocusEvent) => { const id = (event.target as Element).closest('[data-entry-target]')?.getAttribute('data-entry-target'); if (id) setFocused(id.startsWith('pad/') ? null : id); };
+  const focusOut = (event: ReactFocusEvent) => { if (document.activeElement === event.target) return; const to = event.relatedTarget as Element | null, view = event.currentTarget.closest('.instrument-view'); if (!to || !view?.contains(to) || !to.closest('[data-entry-target],.drum-hits')) setFocused(null); };
+  const struckNames = (item: Instrument) => [...item.keys.filter(key=>keys.has(key)).map(percussionName),...(entry ? struck.filter(note=>owners.get(note)===item).map(note=>instrumentHits(entry.ctx.staff.track, item).find(hit=>hit.id===note.hit)?.name ?? percussionName(note.key)) : [])];
   return <>
-    <div className="instrument-canvas instrument-drums"><svg role={entry?'group':'img'} aria-label="Drum kit" viewBox="0 0 860 242">
+    <div className="instrument-canvas instrument-drums" onFocus={focusIn} onBlur={focusOut}><svg role={entry?'group':'img'} aria-label="Drum kit" viewBox="0 0 860 300">
       <title>Drum kit · active percussion</title>
       {/* The kit is one memoised layer; each piece below only holds its hit area, its lit mark and its name when struck. */}
       <DrumsArt pieces={drumPieces}/>
-      {[...drumPieces].sort((a,b)=>a.y-b.y).map(piece=>{
-        const active=piece.keys.some(key=>keys.has(key)), cymbal=cymbalIds.includes(piece.id);
-        const r=piece.r,ry=r*.43,shellHeight=shellHeightOf(piece);
-        return <g key={piece.id} data-drum={piece.id} data-active={active} className={`drum-piece${cymbal?' cymbal':''}${active?' active':''}${entry?' entry-target':''}`} transform={`translate(${piece.x},${piece.y})`} {...(entry?entryProps(roving, piece.id, entry, drumTarget(entry.ctx, piece.label, piece.keys), move):{})}>
-          <title>{`${piece.label}${active?` · ${piece.keys.filter(key=>keys.has(key)).map(percussionName).join(', ')}`:''}`}</title>
-          {cymbal ? <ellipse className="drum-area" cx="0" cy="0" rx={r} ry={ry}/>
-            : piece.id==='kick' ? <circle className="drum-area" cx="0" cy="0" r={r}/>
-            : <path className="drum-area" d={`M${-r} 0V${shellHeight}C${-r} ${shellHeight+ry} ${r} ${shellHeight+ry} ${r} ${shellHeight}V0A${r} ${ry} 0 0 0 ${-r} 0Z`}/>}
-          {active ? (cymbal ? <ellipse className="drum-hit" cx="0" cy="0" rx={r-2} ry={ry-1}/> : piece.id==='kick' ? <circle className="drum-hit" cx="0" cy="0" r={r-5}/> : <ellipse className="drum-hit" cx="0" cy="0" rx={r-3} ry={ry-2}/>) : null}
-          {active ? <text className={`drum-label${cymbal?'':' on-head'}`} x="0" y={cymbal?ry+14:3} textAnchor="middle">{piece.label}</text> : null}
+      {kitOrder(drumPieces).map(piece=>{
+        const active=lit(piece), cymbal=cymbalIds.includes(piece.id);
+        const r=piece.r,ry=surfaceDepthOf(piece),shellHeight=shellHeightOf(piece),upright=`rotate(${-piece.tilt})`;
+        return <g key={piece.id} data-drum={piece.id} data-active={active} className={`drum-piece${cymbal?' cymbal':''}${active?' active':''}${entry?' entry-target':''}`} transform={`translate(${piece.x},${piece.y}) rotate(${piece.tilt})`} {...(entry?entryProps(roving, piece.id, entry, instrumentTarget(entry.ctx, piece), move):{})}>
+          <title>{`${piece.label}${active?` · ${struckNames(piece).join(', ')}`:''}`}</title>
+          {cymbal ? <ellipse className="drum-area" cx="0" cy="0" rx={r} ry={targetDepthOf(piece)}/>
+            : piece.id.startsWith('kick') ? <circle className="drum-area" cx="0" cy="0" r={r}/>
+            : <path className="drum-area" d={`M${-r} 0V${shellHeight}C${-r} ${shellHeight+ry*1.33} ${r} ${shellHeight+ry*1.33} ${r} ${shellHeight}V0A${r} ${ry} 0 0 0 ${-r} 0Z`}/>}
+          {active ? (cymbal ? <ellipse className="drum-hit" cx="0" cy="0" rx={r-2} ry={ry-1}/> : piece.id.startsWith('kick') ? <circle className="drum-hit" cx="0" cy="0" r={r-5}/> : <ellipse className="drum-hit" cx="0" cy="0" rx={r-3} ry={ry-2}/>) : null}
+          {active ? <text className={`drum-label${cymbal?'':' on-head'}`} x="0" y={cymbal?targetDepthOf(piece)+11:3} textAnchor="middle" transform={upright}>{piece.label}</text> : null}
         </g>;
       })}
     </svg></div>
-    {auxiliary.length>0 ? <div className="instrument-percussion-pads" aria-label="Additional percussion">{auxiliary.map(key=><span className={entry?'percussion-pad entry-target':'percussion-pad'} data-percussion-key={key} data-active="true" key={key} {...(entry?entryProps(roving, `pad/${key}`, entry, padTarget(entry.ctx, key, percussionName(key)), move):{})}>{percussionName(key)}</span>)}</div> : null}
+    <div className="instrument-percussion" role="group" aria-label="Percussion" onFocus={focusIn} onBlur={focusOut}>{percussionInstruments.map(item=>{const on=lit(item);return <div key={item.id} className={`percussion-item${on?' active':''}${entry?' entry-target':''}`} data-percussion={item.id} data-active={on} title={item.label} {...(entry?entryProps(roving, item.id, entry, instrumentTarget(entry.ctx, item), move):{})}><PercussionArt id={item.id}/><span>{item.label}</span></div>;})}</div>
+    {entry ? <div className="drum-hits-slot">{chosen&&hits.length>1 ? <div className="drum-hits" role="group" aria-label={`${chosen.label} hits`} onFocus={focusIn} onBlur={focusOut} onMouseDown={event=>event.preventDefault()}>{hits.map(hit=>{const pressed=entry.ctx.notes.some(note=>note.articulation===hit.id),target=hitTarget(entry.ctx,hit.id,hit.label);return <button type="button" key={hit.id} aria-pressed={pressed} {...busyGuard<HTMLButtonElement>({unavailable:!!entry.disabled||!target.action,onClick:()=>{if(target.action)entry.send(target.action);}})}>{hit.name}</button>;})}</div> : null}</div> : null}
+    {auxiliary.length>0 ? <div className="instrument-percussion-pads" aria-label="Additional percussion" onFocus={focusIn} onBlur={focusOut}>{auxiliary.map(key=><span className={entry?'percussion-pad entry-target':'percussion-pad'} data-percussion-key={key} data-active="true" key={key} {...(entry?entryProps(roving, `pad/${key}`, entry, padTarget(entry.ctx, key, percussionName(key)), move):{})}>{percussionName(key)}</span>)}</div> : null}
   </>;
 }
 
@@ -203,11 +205,11 @@ export function InstrumentView({score,track:trackIndex,staff:staffIndex,notes,ca
     const ctx: EntryContext = {target: entryTarget ?? {track: trackIndex, staff: staffIndex, bar: 0, voice: 0, beat: 0}, staff, notes: entryBeatNow ? entryNotes(staff, entryBeatNow) : []};
     return {ctx, string: entryProps_.string, disabled: !entryBeatNow ? noBeatHint : entryProps_.busy ? busyHint : null, send: action => entryProps_.onEdit(action.command, action.follow)};
   })();
-  const entryNow = entry && entryBeatNow ? entry.ctx.notes.map((note):ShownNote=>({id: note.id, key: note.key, source: {target: entry.ctx.target, string: note.string}})) : null;
-  const active = entryNow ?? (entry ? [] : notes.filter(note=>note.source.target.track===trackIndex && (mode!=='both' || note.source.target.staff===staffIndex)));
+  const entryNow = entry && entryBeatNow ? entry.ctx.notes.map((note):ShownNote=>({id: note.id, key: note.key, source: {target: entry.ctx.target, string: note.string}, hit: note.articulation})) : null;
+  const active: readonly ShownNote[] = entryNow ?? (entry ? [] : notes.filter(note=>note.source.target.track===trackIndex && (mode!=='both' || note.source.target.staff===staffIndex)));
   const kindHint = !entry || entry.disabled ? null : staff.isPercussion && (mode==='keys'||mode==='both') ? 'The keyboard cannot enter notes on a percussion staff' : !staff.isPercussion && mode==='drums' ? 'The drum kit cannot enter notes on a pitched or fretted staff' : null;
   const staves = useMemo(()=>mode==='both' ? [staff] : track.staves,[mode,staff,track]);
-  const labels = [...new Set(active.map(note=>mode==='drums'?percussionName(note.key):formatPitch(note.key)))], hint = entry?.disabled ?? kindHint;
+  const labels = [...new Set(active.map(note=>mode!=='drums'?formatPitch(note.key):note.hit!=null?ownerOf(track,note.hit)?.label??percussionName(note.key):percussionName(note.key)))], hint = entry?.disabled ?? kindHint;
   return <div className="instrument-view" data-size={expanded?'expanded':'compact'}>
     <div className="instrument-header"><h3>{track.name}<span> · {modeNames[mode]}</span></h3><div className="instrument-controls">{controls}<label>Instrument view mode<select value={requestedMode==='both'&&staff.isPercussion?'auto':requestedMode} onChange={event=>{const value=event.target.value as InstrumentMode;setMode(value);if(value==='guitar'||value==='bass')setNeckChoice(value);}}><option value="auto">Auto</option><option value="guitar">Guitar</option><option value="bass">Bass</option><option value="drums">Drums</option><option value="keys">Keys</option><option value="both" disabled={staff.isPercussion}>Neck + keys</option></select></label>{mode==='guitar'||mode==='bass'||mode==='both' ? <label className="instrument-check"><input type="checkbox" checked={leftHanded} onChange={event=>handedness(event.target.checked)}/>Left-handed</label> : null}<button type="button" aria-label={expanded?'Compact instrument view':'Expand instrument view'} aria-expanded={expanded} onClick={()=>setExpanded(value=>!value)}>{expanded?'Compact':'Expand'}</button></div></div>
     {mode==='both' ? <><Fretboard staff={staff} notes={active} mode={neck} leftHanded={leftHanded} entry={entry}/><Keyboard staves={staves} notes={active} compact={!expanded} entry={entry}/></> : mode==='guitar'||mode==='bass' ? <Fretboard staff={staff} notes={active} mode={mode} leftHanded={leftHanded} entry={entry}/> : mode==='drums' ? <DrumKit notes={active} entry={entry}/> : <Keyboard staves={staves} notes={active} compact={!expanded} entry={entry}/>}

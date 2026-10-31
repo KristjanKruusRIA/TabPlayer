@@ -54,7 +54,7 @@ try {
       await page.waitForFunction(keys=>JSON.stringify([...document.querySelectorAll('.instrument-view g[data-key][data-active="true"]')].map(node=>Number(node.dataset.key)).sort((a,b)=>a-b))===JSON.stringify(keys),keys);
     } else {
       await view.getByRole('img',{name:'Drum kit'}).waitFor();const labels=expected.map(note=>metadata.notes.find(item=>item.trackId===note.trackId&&item.key===note.key&&item.startTick===note.startTick)?.drum).filter(Boolean);
-      for(const label of labels)await view.locator('.instrument-note').filter({hasText:label}).waitFor();assert.equal(await view.locator('g[data-drum][data-active="true"]').count()+await view.locator('[data-percussion-key][data-active="true"]').count(),new Set(expected.map(note=>note.key)).size);
+      for(const label of labels)await view.locator('.instrument-note').filter({hasText:label}).waitFor();assert.equal(await view.locator('g[data-drum][data-active="true"]').count()+await view.locator('[data-percussion-key][data-active="true"],[data-percussion][data-active="true"]').count(),new Set(expected.map(note=>note.key)).size);
     }
     return expected.map(note=>({id:note.id,key:note.key,startTick:note.startTick,endTick:note.endTick}));
   };

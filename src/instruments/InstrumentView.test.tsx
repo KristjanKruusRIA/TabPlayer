@@ -98,7 +98,7 @@ it('drums highlight kick, snare, toms and cymbals together and retain auxiliary 
   const score=scoreWith([[],[]],0,true);
   for (const [index,key] of [36,38,41,47,50,42,49,51,52,55,54,81].entries()) {const note=new model.Note(); note.percussionArticulation=key; score.tracks[0].staves[index%2].bars[0].voices[0].beats[0].addNote(note);}
   const notes=finish(score),{container}=render(<InstrumentView score={score} track={0} staff={0} notes={notes}/>); expect(screen.getByRole('img',{name:'Drum kit'})).toBeInTheDocument();
-  for (const piece of ['kick','snare','floor-tom','low-tom','high-tom','hi-hat','crash','ride','china','splash']) expect(container.querySelector(`[data-drum="${piece}"][data-active="true"]`)).toBeInTheDocument();
+  for (const piece of ['kick-2','snare','floor-tom','low-mid-tom','high-tom','hi-hat','crash','ride','china','splash']) expect(container.querySelector(`[data-drum="${piece}"][data-active="true"]`)).toBeInTheDocument();
   expect(screen.getByText('Tambourine',{selector:'.instrument-note'})).toBeInTheDocument(); expect(screen.getByText('Open triangle',{selector:'.instrument-note'})).toBeInTheDocument();
 });
 

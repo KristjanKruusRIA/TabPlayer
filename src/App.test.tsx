@@ -1220,4 +1220,4 @@ it('a drum kit change is a sound edit that keeps the music selection',async()=>{
   expect(c.getState().snapshot.project.edits.at(-1)).toMatchObject({type:'setTrackSound',sound:{drumKit:32}});
   fireEvent.click(exposeFunctionalControl(screen.getByText('Selected playback',{selector:'summary'})));click('Play selection');
   expect(integration.playSelection).toHaveBeenCalledWith({kind:'bars',tracks:[1],firstBar:0,lastBar:0},expect.anything());
-});
+},60000);

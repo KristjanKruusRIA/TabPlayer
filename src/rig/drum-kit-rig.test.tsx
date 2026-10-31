@@ -35,6 +35,14 @@ it('shows the drum kit select in the rig for a drum track, as one edit that keep
   expect(sounds(edits)[1]).toEqual(soundPreset('gm'));
   expect(sounds(edits)[1]).not.toHaveProperty('drumKit');
 });
+it('puts the kit in the head beside the source picker, never inside it (the picker forces every child into its row 1)', () => {
+  mount(true);
+  const section = screen.getByLabelText('Drum kit').closest('section')!;
+  expect(section.closest('.rig-source-picker')).toBeNull();
+  expect(section.closest('.rig-head')).not.toBeNull();
+  expect(section.parentElement).toBe(document.querySelector('.rig-source-picker')!.parentElement);
+  expect(screen.getByLabelText('Drum kit')).toHaveAttribute('title', expect.stringMatching(/reference kit/));
+});
 it('keeps the kit through a preset chosen in the rig', () => {
   const edits = mount(true, { ...soundPreset('gm'), drumKit: 40 });
   fireEvent.click(within(screen.getByRole('radiogroup', { name: 'Sound preset' })).getByRole('radio', { name: 'Crunch' }));

@@ -223,16 +223,17 @@
 .sound-view .rig-source-picker { display:grid; grid-template-columns:repeat(6,auto auto); align-items:center; max-width:100%; }
 .sound-view .rig-source-picker>* { grid-row:1; grid-column:1/-1; display:grid; grid-template-columns:subgrid; }
 /* The drum kit sits in the head as its own item beside the source picker, never inside it (the picker puts every child in its row 1).
- * Its table opens on its own row of the item and scrolls. */
-.sound-view .rig-drum-kit { position:relative; display:flex; flex-wrap:wrap; align-items:center; gap:2px 8px; font-size:12px; }
-.sound-view .rig-drum-kit label { display:flex; align-items:center; gap:6px; }
+ * It is one compact row: the select and a small summary link. Its note is the select's title (and stays for screen readers, clipped), and the
+ * table opens as a popover under the head, so the head keeps its height. */
+.sound-view .rig-drum-kit { position:relative; display:flex; flex-direction:row; flex-wrap:nowrap; align-items:center; gap:8px; font-size:12px; }
+.sound-view .rig-drum-kit label { display:flex; align-items:center; gap:6px; white-space:nowrap; }
 .sound-view .rig-drum-kit select { min-height:28px; padding:3px 4px 3px 8px; border:1px solid var(--tp-line-strong); border-radius:var(--tp-radius-s); background:var(--tp-input); color:inherit; font:inherit; }
 .sound-view .rig-drum-kit select[aria-disabled=true] { opacity:.45; }
-.sound-view .rig-drum-kit>p { margin:0; font-size:11px; max-width:200px; }
-.sound-view .rig-drum-kit details>summary { cursor:pointer; font-size:11px; }
-.sound-view .rig-drum-kit details { flex:1 1 100%; max-width:min(520px,100%); }
-.sound-view .rig-drum-kit details[open] { max-height:36vh; overflow:auto; }
-.sound-view .rig-drum-kit ul { margin:2px 0 4px; padding-left:16px; }
+.sound-view .rig-drum-kit>p { position:absolute; width:1px; height:1px; margin:-1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; }
+.sound-view .rig-drum-kit details>summary { cursor:pointer; font-size:11px; white-space:nowrap; }
+.sound-view .rig-drum-kit .drum-kit-table { position:absolute; top:100%; left:0; z-index:20; width:min(440px,90vw); max-height:40vh; overflow:auto; padding:6px 10px; border:1px solid var(--tp-line-strong); border-radius:var(--tp-radius-s); background:var(--tp-panel); box-shadow:0 6px 18px rgb(0 0 0 / .5); }
+.sound-view .rig-drum-kit .drum-kit-table :is(p,ul) { margin:2px 0 4px; }
+.sound-view .rig-drum-kit ul { padding-left:16px; }
 .sound-view .rig-hears { pointer-events:none; align-items:center; z-index:1; }
 .sound-view .rig-hears>button { pointer-events:auto; justify-self:start; margin-left:1px; }
 .sound-view .rig-sources,.sound-view .rig-tracks { flex-wrap:nowrap; gap:0; padding:2px; background:rgb(0 0 0 / .28); border-color:var(--tp-line-subtle); }

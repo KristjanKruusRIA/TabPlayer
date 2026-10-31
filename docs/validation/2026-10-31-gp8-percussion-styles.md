@@ -28,12 +28,12 @@ Notations that sound identical (they differ on the page only): snare hit = rim s
 - `src-tauri/src/audio/drum_kit_tests.rs`: renders the bank with the same synthesizer playback and export use. It checks that the bank holds exactly the four kits listed in `src/audio/drum-kits.json`, that no two drum keys render alike in any kit, that each kit differs from Standard on exactly its listed keys, that programs without a kit play Standard (all 124 others), and that the real `Renderer` plays Jazz, Brush and Room differently from Standard, leaves untouched keys untouched, overrides the plan's own program and program change, and leaves a plan alone when no kit is chosen. It also checks the sound serializes byte for byte as before when no kit is set, accepts 8, 32 and 40, and refuses 0, 1, 25, 127, 128, 255 and 300. `device.rs` has a test that a kit change forces a renderer rebuild on a drum track and not on a pitched one.
 - `src/editor/drum-kits.test.ts`: kit table, shared-sound table, and an old edit log (a sound edit without the field) replaying to identical settings; the kit edit saves, reloads and undoes; TypeScript validation of `drumKit`.
 - `src/audio/drum-kit-editing.test.tsx`: preset, Restore, source change, factory, paste, saved sound and kept preview keep the kit (these fail when the clause in `withLock` is removed; checked by removing it); a kit never travels by paste; options, one edit per choice, no edit for the current kit, Standard clears the field and keeps the lock, focus kept while busy. `src/rig/drum-kit-rig.test.tsx`: the rig shows the select for drum tracks only, one edit per choice, a rig preset keeps the kit.
-- `npx tsc --noEmit -p .` clean. Vitest over `src/audio src/editor src/workstation src/mixer src/rig src/App.test.tsx`: 2058 passed; 7 failed in `src/audio/plan.test.ts` because the `.analysis/compatibility` fixtures are not in this worktree (ENOENT), unrelated to this change.
+- `npx tsc --noEmit -p .` clean. Vitest over `src/audio src/rig src/App.test.tsx src/editor/drum-kits.test.ts src/workstation`: 1192 passed; 7 failed in `src/audio/plan.test.ts` because the `.analysis/compatibility` fixtures are not in this worktree (ENOENT), unrelated to this change.
 - `cargo test --locked --no-fail-fast`: all integration tests pass; in the library tests 406 passed and 1 failed, `file_library::index::tests::a_page_search_over_fifty_thousand_rows_stays_fast`, a timing test in code this change does not touch (it failed again alone in a debug build).
 
 ## Review
 
-Reviewed by the coordinator in two rounds; each found real defects (untested kit-keeping, a Track-panel edit route that cleared the selection, a kit control overlapping the source radios in the rig), all fixed here. Rounds stay open until approved.
+Reviewed by the coordinator in two rounds; each found real defects (untested kit-keeping, a Track-panel edit route that cleared the selection, a kit control overlapping the source radios in the rig), all fixed here. Rounds stay open until approved. Rig layout was measured with the real `rig.css` in a static page at 1440x900 and 1280x700: the kit adds no height to the head (one compact row, its note in the select title, its table a popover); the page is lighter than the app head, so the app's own heights were not reproduced.
 
 ## Limits
 
@@ -42,5 +42,6 @@ Reviewed by the coordinator in two rounds; each found real defects (untested kit
 - The kit applies to the whole track; a mid-song kit change is not supported.
 - Brush-kit output was verified by rendering, not by ear.
 - A kit chosen here lives in the sound settings, not in the exported MIDI or Guitar Pro file, so another program opens those with its own drum kit.
+- A file that stores a kit is refused by older builds (`deny_unknown_fields` on the sound settings). `drumKit: null` is read as no kit by Rust and refused by TypeScript.
 - Desktop app was not launched for this change.
 - The Rust tests render with the synthesizer's reverb and chorus on, while the app and exports render with them off; kit differences are in the samples and tunings, not those effects, but the exact output was not compared with effects off.

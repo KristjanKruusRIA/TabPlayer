@@ -3,7 +3,10 @@ import type { PartialCapo } from './partial-capo';
 import { getPartialCapo, stringCapo } from './partial-capo';
 import { getBanjoDrone, neckFret, fretExists, droneShift } from './banjo-drone';
 import { allNotes, captureNoteLinks } from './links';
-import { placeBeat, maxRelocatedFret, holds, type Place } from './structure';
+import { placeBeat, maxRelocatedFret, holds, linked, type Place } from './structure';
+import { formatPitch } from '../tuning';
+import { getMessage, getResolvedLanguage } from '../i18n';
+import type { MessageKey } from '../i18n';
 
 export interface RefingerStaffTarget {
   tuning: readonly number[];
@@ -17,10 +20,34 @@ export interface RefingerStaffTarget {
 const sounding = (a: model.Beat, b: model.Beat) =>
   a.playbackStart < b.playbackStart + b.playbackDuration && b.playbackStart < a.playbackStart + a.playbackDuration;
 
+/** A note keep pitch could not place, named so the user can find it. Numbers count from 1; `beat` skips grace beats. */
+export interface Unreachable {
+  staff: number; voice: number; bar: number; beat: number; grace: boolean; string: number; pitch: string;
+  reason: 'range' | 'harmonic' | 'linked' | 'conflict';
+}
+
+const beatNumber = (beat: model.Beat) => beat.voice.beats.filter(b => b.index < beat.index && b.graceType === model.GraceType.None).length + 1;
+
+const reasonKeys: Record<Unreachable['reason'], MessageKey> = {
+  range: 'refinger.reason_range',
+  harmonic: 'refinger.reason_harmonic',
+  linked: 'refinger.reason_linked',
+  conflict: 'refinger.reason_conflict',
+};
+
+/** The message listing every note that could not be placed, in the interface language. */
+export function describeUnreachable(list: readonly Unreachable[]): string {
+  const language = getResolvedLanguage();
+  const items = list.map(item => getMessage(language, item.grace ? 'refinger.where_grace' : 'refinger.where', {
+    staff: item.staff, voice: item.voice, bar: item.bar, beat: item.beat, string: item.string, pitch: item.pitch,
+  }) + ': ' + getMessage(language, reasonKeys[item.reason]));
+  return getMessage(language, 'refinger.cannot_place', { list: items.join('; ') });
+}
+
 export function planStaffRefinger(
   staff: model.Staff,
   target: RefingerStaffTarget
-): { moves: Array<{ note: model.Note } & Place>; unreachable: string[] } {
+): { moves: Array<{ note: model.Note } & Place>; unreachable: Unreachable[] } {
   const to = target.tuning.length;
   if (to !== staff.tuning.length) {
     throw new Error('Retuning must keep the current string count.');
@@ -94,7 +121,7 @@ export function planStaffRefinger(
   };
 
   const moves: Array<{ note: model.Note } & Place> = [];
-  const unreachable: string[] = [];
+  const unreachable: Unreachable[] = [];
 
   for (const bar of staff.bars) {
     // Beats already placed in this bar, so a note in another voice that sounds at the same time keeps off their strings.
@@ -116,10 +143,30 @@ export function planStaffRefinger(
           const busy = taken(note);
           return choices(note).filter(choice => !busy.has(choice.string));
         };
+        const fail = () => {
+          const blocked = new Map<model.Note, Unreachable['reason']>();
+          for (const note of notes) {
+            const place = keptHere(note);
+            const stays = place !== null && place.fret >= 0 && place.fret <= Math.max(maxRelocatedFret, note.fret) && (!note.harmonicType || place.fret === note.fret);
+            if (stays) continue;
+            if (note.harmonicType) blocked.set(note, 'harmonic');
+            else if (linked(note)) blocked.set(note, 'linked');
+            else if (!choicesHere(note).length) blocked.set(note, 'range');
+          }
+          // No single note is at fault: the notes of the beat compete for the strings.
+          if (!blocked.size) for (const note of notes) blocked.set(note, 'conflict');
+          for (const [note, reason] of blocked) {
+            unreachable.push({
+              staff: staff.index + 1, voice: voice.index + 1, bar: bar.index + 1, beat: beatNumber(beat),
+              grace: beat.graceType !== model.GraceType.None, string: note.string,
+              pitch: note.isDead ? 'x' : formatPitch(notePitch(note)), reason,
+            });
+          }
+        };
         try {
           const planned = placeBeat(notes, keptHere, choicesHere, false, where) ?? placeBeat(notes, keptHere, choicesHere, true, where);
           if (!planned) {
-            unreachable.push(where);
+            fail();
           } else {
             for (const [note, place] of planned) {
               moves.push({ note, ...place });
@@ -127,7 +174,7 @@ export function planStaffRefinger(
             placed.push({ beat, strings: new Map([...planned].map(([note, place]) => [note, place.string])) });
           }
         } catch {
-          unreachable.push(where);
+          fail();
         }
       }
     }
@@ -169,7 +216,7 @@ export function validateNoteLinks(
 export function refingerStaff(staff: model.Staff, target: RefingerStaffTarget): void {
   const { moves, unreachable } = planStaffRefinger(staff, target);
   if (unreachable.length > 0) {
-    throw new Error(`Notes cannot be reached in the new tuning or capo: ${unreachable.join('; ')}.`);
+    throw new Error(describeUnreachable(unreachable));
   }
   validateNoteLinks(staff.track.score, moves);
   for (const { note, string, fret } of moves) {
@@ -180,7 +227,7 @@ export function refingerStaff(staff: model.Staff, target: RefingerStaffTarget): 
 
 export function refingerTrack(track: model.Track, target: RefingerStaffTarget): void {
   const allMoves: Array<{ note: model.Note } & Place> = [];
-  const allUnreachable: string[] = [];
+  const allUnreachable: Unreachable[] = [];
 
   for (const staff of track.staves) {
     const { moves, unreachable } = planStaffRefinger(staff, target);
@@ -189,7 +236,7 @@ export function refingerTrack(track: model.Track, target: RefingerStaffTarget): 
   }
 
   if (allUnreachable.length > 0) {
-    throw new Error(`Notes cannot be reached in the new tuning or capo: ${allUnreachable.join('; ')}.`);
+    throw new Error(describeUnreachable(allUnreachable));
   }
 
   validateNoteLinks(track.score, allMoves);

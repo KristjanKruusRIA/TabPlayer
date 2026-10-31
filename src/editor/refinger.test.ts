@@ -3,7 +3,7 @@ import { blankProject } from '../project';
 import { buildScore, previewEdit } from '../engine';
 import type { BeatTarget, Project } from '../project';
 import type { EditCommand, StaffSettings } from '../edit-types';
-import type { model } from '@coderline/alphatab';
+import { model } from '@coderline/alphatab';
 import { fretKey } from './banjo-drone';
 
 const target: BeatTarget = { track: 0, staff: 0, bar: 0, voice: 0, beat: 0 };
@@ -124,7 +124,7 @@ describe('refinger keepPitch on retune and capo', () => {
     };
 
     expect(() => previewEdit(base.project, { type: 'setStaffSettings', track: 0, staff: 0, settings })).toThrow(
-      /Notes cannot be reached in the new tuning or capo: bar 1, beat 1\./
+      /Keep pitch could not move every note: staff 1, voice 1, bar 1, beat 1, string 1 \(E2\): no string in the new setup reaches this pitch\./
     );
   });
 
@@ -275,5 +275,38 @@ describe('refinger keepPitch on retune and capo', () => {
     expect([note.string, note.fret]).toEqual([6, 5]);
     expect(moved.score.tracks[0].staves[0].transpositionPitch).toBe(12);
     expect(() => previewEdit(base.project, { type: 'setStaffSettings', track: 0, staff: 0, settings: { ...settings, transposition: -100 } })).toThrow(/outside the playable MIDI pitch range/);
+  });
+
+  it('names the staff, voice, bar, real beat, string and pitch of a note that cannot move', () => {
+    // The second of the bar's four beats becomes a grace note: it does not count, so the third is beat 2.
+    const at = (beat: number): BeatTarget => ({ ...target, beat });
+    const base = projectWithEdits(
+      { type: 'setNote', target: at(0), string: 5, fret: 0 },
+      { type: 'setBeatRhythm', target: at(1), duration: 16, dots: 0, tupletNumerator: 1, tupletDenominator: 1, graceType: model.GraceType.BeforeBeat },
+      { type: 'setNote', target: at(1), string: 1, fret: 0 },
+      { type: 'setNote', target: at(2), string: 1, fret: 0 }
+    );
+    const staff = base.score.tracks[0].staves[0];
+    const settings: StaffSettings = {
+      tuning: [...staff.tuning], capo: 2, transposition: 0, displayTransposition: 0, clef: staff.bars[0].clef,
+      showTab: true, showNotation: true, keepPitch: true,
+    };
+    let message = '';
+    try { previewEdit(base.project, { type: 'setStaffSettings', track: 0, staff: 0, settings }); } catch (error) { message = String(error); }
+    expect(message).toContain('staff 1, voice 1, bar 1, grace note before beat 2, string 1 (E2): no string in the new setup reaches this pitch');
+    expect(message).toContain('staff 1, voice 1, bar 1, beat 2, string 1 (E2)');
+  });
+
+  it('says a harmonic cannot move instead of calling it unreachable', () => {
+    const base = projectWithEdits(
+      { type: 'setNote', target, string: 6, fret: 12 },
+      { type: 'setNoteTechniques', target, string: 6, patch: { harmonic: { type: 1, value: 12 } } }
+    );
+    const staff = base.score.tracks[0].staves[0];
+    const settings: StaffSettings = {
+      tuning: [...staff.tuning], capo: 2, transposition: 0, displayTransposition: 0, clef: staff.bars[0].clef,
+      showTab: true, showNotation: true, keepPitch: true,
+    };
+    expect(() => previewEdit(base.project, { type: 'setStaffSettings', track: 0, staff: 0, settings })).toThrow(/string 6 \(E5\): a harmonic cannot move to another string or fret/);
   });
 });

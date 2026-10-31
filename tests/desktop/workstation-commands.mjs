@@ -4,7 +4,7 @@ export function waitForWorkspaceIdle(page,options={}) {
   return page.locator('.app-shell[aria-busy="false"]').waitFor({state:'visible',...options});
 }
 
-const fileCommands=new Set(['New','Open','Save','Save As','Close score','Close all scores','Export score','Export GP','Import ASCII tab…','Import MIDI…','Finalize document','Unfinalize document']);
+const fileCommands=new Set(['New','Open','Save','Save As','Close score','Close all scores','Export score','Export GP','Import ASCII tab…','Import MIDI…','Batch convert…','Finalize document','Unfinalize document']);
 const summary=(page,name)=>page.locator('summary').filter({hasText:name});
 async function openDisclosure(locator) {
   if(!await locator.evaluate(node=>node.parentElement.open))await locator.click();

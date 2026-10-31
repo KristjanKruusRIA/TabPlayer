@@ -1,4 +1,5 @@
 import { LayoutMode, model, rendering, Settings, SystemsLayoutMode,NotationElement } from '@coderline/alphatab';
+import '../tremolo-guard';
 import { validateSelection, type ExportSelection, type PrintLayout, type SvgPage, type SvgSystem } from './types';
 import { selectStaves } from './selection';
 import { prepareScoreTimers } from '../editor/timers';

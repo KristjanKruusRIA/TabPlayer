@@ -33,7 +33,7 @@ vi.mock('./harmony/library',async original=>({...await original<typeof import('.
 
 const integration=vi.hoisted(()=>({running:false,players:[] as {getState:()=>PlaybackState;publish:(patch:Partial<PlaybackState>)=>void;generation:number;built:BuiltDocument|null}[],seekToMeasure:vi.fn(),setLoop:vi.fn(),clearLoop:vi.fn(),loadDocument:vi.fn(),beforeScoreChange:vi.fn(),destroy:vi.fn(),playerOptions:vi.fn(),stop:vi.fn(),stageBacking:vi.fn<NativeAudioBridge['stageBacking']>(),commits:vi.fn(),audition:vi.fn(),activeNotes:vi.fn((_trackId:string)=>[]),practiceSpeed:100,practiceFixed:false,setPractice:vi.fn(),play:vi.fn(),pause:vi.fn(),playFromCursor:vi.fn(),playSelection:vi.fn(),loopSelection:vi.fn(),exportOptions:vi.fn(),exportBusy:false,exportRun:vi.fn(async(_options:unknown,_source?:unknown)=>true),exportCancel:vi.fn(async()=>{})}));
 vi.mock('./audio/bridge',()=>({createDocumentAudioBridge:vi.fn(()=>({prepare:vi.fn(async()=>{}),command:vi.fn(async()=>{}),setMix:vi.fn(async()=>{}),devices:vi.fn(async()=>[]),status:vi.fn(async()=>null),subscribe:vi.fn(async()=>()=>{}),stageBacking:integration.stageBacking,stageEmbeddedBacking:vi.fn(async()=>null)} satisfies NativeAudioBridge))}));
-vi.mock('./export/bridge',()=>({createDocumentExportBridge:vi.fn(()=>({exportPdf:vi.fn(async()=>null),exportMidi:vi.fn(async()=>false),exportMusicXml:vi.fn(async()=>false),exportAsciiTab:vi.fn(async()=>false),exportSvg:vi.fn(async()=>false),exportPng:vi.fn(async()=>false),exportTrackFiles:vi.fn(async()=>false),exportAudio:vi.fn(async()=>null),status:vi.fn(async()=>null),cancel:vi.fn(async()=>{})} satisfies ExportNativeBridge))}));
+vi.mock('./export/bridge',()=>({createDocumentExportBridge:vi.fn(()=>({exportPdf:vi.fn(async()=>null),exportMidi:vi.fn(async()=>false),exportMusicXml:vi.fn(async()=>false),exportAsciiTab:vi.fn(async()=>false),exportGp5:vi.fn(async()=>false),exportSvg:vi.fn(async()=>false),exportPng:vi.fn(async()=>false),exportTrackFiles:vi.fn(async()=>false),exportAudio:vi.fn(async()=>null),status:vi.fn(async()=>null),cancel:vi.fn(async()=>{})} satisfies ExportNativeBridge))}));
 vi.mock('./export/useExportCoordinator',()=>({useExportCoordinator:(options:unknown)=>{integration.exportOptions(options);return {busy:integration.exportBusy,progress:undefined,run:integration.exportRun,cancel:integration.exportCancel};}}));
 vi.mock('./audio/NativePlaybackController',()=>({NativePlaybackController:class {
   built:BuiltDocument|null=null;state:PlaybackState={ready:true,playing:integration.running,time:integration.running?1234:0,endTime:4000,measure:integration.running?1:0,speed:integration.practiceSpeed,metronome:false,practice:{settings:{...structuredClone(DEFAULT_PRACTICE),tempo:integration.practiceFixed?{kind:'fixed',bpm:90}:{kind:'relative',ratio:integration.practiceSpeed/100}},phase:integration.running?'playing':'idle',countInRemaining:0,completedPasses:0,effectiveRatio:integration.practiceSpeed/100,currentBpm:120,pulse:null},practicePending:false,practiceNotice:null,range:null,loop:integration.running?{startTick:0,endTick:3840}:null,error:null};
@@ -182,6 +182,29 @@ it('reveals paste options through a collapsed Edit task without changing history
   const clipboardSummary=screen.getByText('Musical clipboard',{selector:'summary'}),scroll=vi.fn();clipboardSummary.parentElement!.scrollIntoView=scroll;
   const before=c.getState().snapshot;fireEvent.keyDown(workspace,{key:'v',ctrlKey:true,shiftKey:true});
   expect(editTask.open).toBe(true);expect(clipboardSummary).toHaveFocus();expect(scroll).toHaveBeenCalledWith({block:'nearest'});expect(c.getState().snapshot).toBe(before);
+});
+
+it('leaves the score alone from the Sound view: no cut, paste or select-all, while undo, palette and play still work',async()=>{
+  const c=await setup(),workspace=screen.getByRole('region',{name:'Score workspace'});
+  click('Set note');await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(1));
+  click('Select bar');fireEvent.keyDown(workspace,{key:'c',ctrlKey:true});
+  const edits=()=>c.getState().snapshot.project.edits.length,view=screen.getByRole('radiogroup',{name:'View'});
+  fireEvent.click(within(view).getByRole('radio',{name:'Sound'}));
+  const rig=await screen.findByRole('region',{name:'Sound rig'}),at=edits(),selection=c.getState().snapshot;
+  for(const init of [{key:'x',ctrlKey:true},{key:'v',ctrlKey:true},{key:'v',ctrlKey:true,shiftKey:true},{key:'a',ctrlKey:true},{key:'Escape'},{key:'x',metaKey:true},{key:'v',metaKey:true}])fireEvent.keyDown(within(rig).getByRole('tab',{name:/^Amp, /}),init);
+  fireEvent.keyDown(rig,{key:'p',ctrlKey:true,shiftKey:true});
+  await new Promise(resolve=>setTimeout(resolve,30));
+  expect(edits()).toBe(at);expect(c.getState().snapshot).toBe(selection);
+  expect(screen.getByRole('dialog',{name:/command/i})).toBeInTheDocument();
+  fireEvent.keyDown(screen.getByRole('combobox',{name:/command/i}),{key:'Escape'});
+  expect(screen.queryByRole('dialog',{name:/command/i})).not.toBeInTheDocument();
+  // Undo is a document command, so it still works from here, and Space still plays.
+  fireEvent.keyDown(rig,{key:'z',ctrlKey:true});await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(0));
+  // Back in the score the same keys act on it again.
+  fireEvent.click(within(view).getByRole('radio',{name:'Score'}));
+  click('Select bar');fireEvent.keyDown(workspace,{key:'x',ctrlKey:true});
+  // The undo left one edit fewer; a cut in the score is a new edit again.
+  await waitFor(()=>expect(edits()).toBe(at));
 });
 
 it.each(['Add pitched track','Add percussion track'])('omits string caret context for %s',async action=>{
@@ -465,6 +488,29 @@ it('shows the Mixer view as the third View option while the transport stays, and
   expect(document.querySelector('.workstation-workspace')).toHaveAttribute('data-view','score');
   expect(c.getState().settings.mixes['base/0'].gain).toBe(.95);
   expect(c.getState().settings.mixes['base/0'].pan).toBe(.05);
+});
+it('opens command palette in Sound view for non-score commands and refuses score-editing commands',async()=>{
+  const c=await setup();
+  const view=screen.getByRole('radiogroup',{name:'View'});
+  fireEvent.click(within(view).getByRole('radio',{name:'Sound'}));
+  await screen.findByRole('region',{name:'Sound rig'});
+  const shell=document.querySelector('.app-shell')!;
+  const event=new KeyboardEvent('keydown',{key:'P',code:'KeyP',ctrlKey:true,shiftKey:true,bubbles:true,cancelable:true});
+  shell.dispatchEvent(event);
+  expect(event.defaultPrevented).toBe(true);
+  const palette=await screen.findByRole('dialog',{name:'Commands'});
+  const input=within(palette).getByRole('combobox',{name:'Command'});
+  fireEvent.change(input,{target:{value:'append measure'}});
+  const before=c.getState().score.masterBars.length;
+  expect(within(palette).getAllByRole('option')[0]).toHaveTextContent('Score editing is unavailable while the score is hidden.');
+  fireEvent.keyDown(input,{key:'Enter'});
+  expect(c.getState().score.masterBars.length).toBe(before);
+  fireEvent.change(input,{target:{value:'play'}});
+  fireEvent.keyDown(input,{key:'Enter'});
+  await waitFor(()=>expect(screen.queryByRole('dialog',{name:'Commands'})).not.toBeInTheDocument());
+  const aEvent=new KeyboardEvent('keydown',{key:'a',ctrlKey:true,bubbles:true,cancelable:true});
+  shell.dispatchEvent(aEvent);
+  expect(aEvent.defaultPrevented).toBe(true);
 });
 it('loads documents into native playback and opening does not reset saved mix',async()=>{
   const c=await setup();await waitFor(()=>expect(integration.loadDocument).toHaveBeenCalled());fireEvent.click(exposeFunctionalControl(screen.getByLabelText('Mute')));await waitFor(()=>expect(c.getState().settings.mixes['base/0'].mute).toBe(true));

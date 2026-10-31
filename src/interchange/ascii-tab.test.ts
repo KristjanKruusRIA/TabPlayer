@@ -200,3 +200,11 @@ it('names the imported score file from the source file',()=>{
   const long=asciiTabFileName(`${'譜'.repeat(100)}.txt`);
   expect(new TextEncoder().encode(long).length).toBeLessThanOrEqual(200);expect(long).toBe(`${'譜'.repeat(63)}.gp`);
 });
+
+it('reads a header in linear time and treats an empty one as absent',()=>{
+  const started=performance.now();
+  const {score}=parseAsciiTab(block(`Title: a${' '.repeat(200000)}b`,'Artist:   ','e|--0--3--|','B|--0--3--|','G|--0--3--|','D|--0--3--|','A|--0--3--|','E|--0--3--|'));
+  expect(performance.now()-started).toBeLessThan(3000);
+  expect(score.title.length).toBeGreaterThan(1000);
+  expect(score.artist).toBe('');
+});

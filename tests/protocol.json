@@ -74,5 +74,6 @@
   {"type":"setSelectionStrokes","selection":{"kind":"bars","tracks":[0],"firstBar":0,"lastBar":0},"technique":"pick","pattern":["down","up"]},
   {"type":"setSelectionTies","selection":{"kind":"bars","tracks":[0],"firstBar":1,"lastBar":1},"tied":false},
   {"type":"setStringCount","track":0,"tuning":[64,59,55,50,45,40,35],"keep":"high"},
-  {"type":"setScaleDiagram","target":{"track":0,"staff":0,"bar":0,"voice":0,"beat":0},"diagram":{"name":"A minor pentatonic","strings":6,"frets":5,"firstFret":5,"orientation":"horizontal","showFretMarkers":true,"marks":[{"string":6,"fret":5,"shape":"circle","color":"#b5df73","text":"A","textColor":"#161c24"},{"string":6,"fret":8,"shape":"square","color":"#ffffff","text":"1","textColor":"#000000"}]}}
+  {"type":"setScaleDiagram","target":{"track":0,"staff":0,"bar":0,"voice":0,"beat":0},"diagram":{"name":"A minor pentatonic","strings":6,"frets":5,"firstFret":5,"orientation":"horizontal","showFretMarkers":true,"marks":[{"string":6,"fret":5,"shape":"circle","color":"#b5df73","text":"A","textColor":"#161c24"},{"string":6,"fret":8,"shape":"square","color":"#ffffff","text":"1","textColor":"#000000"}]}},
+  {"type":"setMaster","master":{"gainDb":-3.5,"balance":0.25,"compressor":{"enabled":true,"thresholdDb":-12,"ratio":2,"attackMs":30,"releaseMs":200,"makeupDb":1.5},"eq":{"enabled":true,"lowDb":2,"midDb":-1.5,"highDb":3,"midHz":1200},"reverb":{"enabled":true,"model":"hall","room":0.6,"damping":0.5,"mix":0.1},"limiter":{"enabled":true,"ceilingDb":-1,"releaseMs":100}}}
 ]

@@ -2136,3 +2136,121 @@ fn a_locked_track_plays_the_articulation_its_start_sound_gives() {
     assert!(Arc::ptr_eq(&unlocked, &plan));
     assert_eq!(unlocked.notes[0].articulation, Articulation::Fingered);
 }
+#[test]
+fn a_real_renderer_and_export_play_the_locked_articulation_only_when_locked() {
+    use tabplayer_lib::{
+        audio::renderer::Renderer,
+        export::{
+            audio::{AudioExportRender, AudioExportRequest},
+            stems::{StemKind, StemTrack},
+            wav::AudioFormat,
+        },
+    };
+    // A guitar whose "fingered" articulation is a different sample (110 Hz) from its "picked" one (220 Hz).
+    let (_, mut resources, _) = renderer_fixture(false);
+    let bank = Arc::get_mut(&mut resources).unwrap();
+    let mut fingered = bank.manifest.instruments[0].regions[0].clone();
+    fingered.sample_id = "low".into();
+    fingered.articulation = "fingered".into();
+    bank.manifest.instruments[0].regions.push(fingered);
+    let mut audio = (*tone()).clone();
+    audio.frames = Arc::new(
+        (0..96_000)
+            .map(|n| {
+                let x = (std::f64::consts::TAU * 110.0 * n as f64 / 48_000.0).sin() as f32 * 0.5;
+                [x; 2]
+            })
+            .collect(),
+    );
+    bank.samples.insert("low".into(), Arc::new(audio));
+    let plan = |articulation: &str,
+                kept: Option<&str>|
+     -> Arc<tabplayer_lib::audio::plan::PlaybackPlan> {
+        let mut note = serde_json::json!({
+            "id":"n0","trackId":"a","source":{"target":{"track":0,"staff":0,"bar":0,"voice":0,"beat":0},"string":1},
+            "occurrence":0,"channel":0,"startTick":0,"endTick":1920,"key":57,"velocity":100,
+            "articulation":articulation,"legatoFrom":null,"pitch":[{"tick":0,"semitones":0}]
+        });
+        if let Some(kept) = kept {
+            note["lockedArticulation"] = serde_json::json!(kept);
+        }
+        Arc::new(serde_json::from_value(serde_json::json!({
+            "generation":1,"ppq":960,"durationTick":3840,"durationMs":2000,
+            "tracks":[{"id":"a","program":25,"percussion":false}],"tempos":[{"tick":0,"bpm":120}],
+            "occurrences":[{"bar":0,"occurrence":0,"meterNumerator":4,"meterDenominator":4,"startTick":0,"endTick":3840,"startMs":0,"endMs":2000}],
+            "notes":[note],"midi":[]
+        })).unwrap())
+    };
+    let settings = |locked| {
+        let mut settings = tabplayer_lib::settings::DocumentSettings::default();
+        settings.sounds.insert(
+            "a".into(),
+            tabplayer_lib::settings::TrackSound {
+                voice_id: Some("green-guitar".into()),
+                preset_id: "gm".into(),
+                effects: Default::default(),
+                locked,
+            },
+        );
+        settings
+    };
+    let renderer = |plan: &Arc<tabplayer_lib::audio::plan::PlaybackPlan>, locked| {
+        Renderer::new(plan.clone(), resources.clone(), settings(locked), 48_000).unwrap()
+    };
+    let render = |plan: &Arc<tabplayer_lib::audio::plan::PlaybackPlan>, locked| {
+        let mut output = vec![[0.0; 2]; 48_000];
+        renderer(plan, locked).render_into(&mut output);
+        output
+    };
+    let export = |plan: &Arc<tabplayer_lib::audio::plan::PlaybackPlan>, locked| {
+        let request = AudioExportRequest {
+            tracks: vec![StemTrack {
+                id: "a".into(),
+                name: "Guitar".into(),
+                preset: "gm".into(),
+                kind: StemKind::Score,
+            }],
+            range: None,
+            format: AudioFormat::wav(48_000, 24),
+            speed: 1.0,
+            metronome: false,
+            tail_seconds: 0.0,
+            include_backing: false,
+            include_mix: true,
+            normalize_rms_db: None,
+        };
+        let mut export = AudioExportRender::new(renderer(plan, locked), plan, request).unwrap();
+        let mut all = vec![];
+        loop {
+            let mut block = vec![[0.0; 2]; 4096];
+            let n = export.render_mix(&mut block).unwrap();
+            if n == 0 {
+                break;
+            }
+            all.extend_from_slice(&block[..n]);
+        }
+        all
+    };
+    let automated = plan("fingered", Some("picked"));
+    let picked = plan("picked", None);
+    let fingered = plan("fingered", None);
+    // The two articulations really sound different.
+    assert!((frequency(&render(&picked, false)[2400..4800]) - 220.0).abs() < 1.0);
+    assert!((frequency(&render(&fingered, false)[2400..4800]) - 110.0).abs() < 1.0);
+    // Unlocked, the automated note is fingered; locked, it is picked, bit for bit, in playback and in export.
+    assert!(!differs(
+        &render(&automated, false),
+        &render(&fingered, false)
+    ));
+    assert!(differs(&render(&automated, false), &render(&picked, false)));
+    assert!(!differs(&render(&automated, true), &render(&picked, false)));
+    assert!(!differs(
+        &export(&automated, false),
+        &export(&fingered, false)
+    ));
+    assert!(!differs(&export(&automated, true), &export(&picked, false)));
+    assert!(differs(
+        &export(&automated, true),
+        &export(&automated, false)
+    ));
+}

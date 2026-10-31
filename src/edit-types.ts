@@ -32,7 +32,8 @@ export interface BeatTechniques {
   pickStroke?: number; brushType?: number; brushDuration?: number; whammy?: PitchCurve|null;
   tremolo?: {speed:number;style:number}|null;
 }
-export interface TempoPoint { beat: number; bpm: number; linear: boolean }
+/** `bpm` counts beats of `unit` (a GP tempo unit code, 2 a quarter when absent) per minute. */
+export interface TempoPoint { beat: number; bpm: number; linear: boolean; unit?: number }
 export interface StaffSettings {
   tuning: number[]; capo: number; transposition: number; displayTransposition: number; clef: number;
   showTab: boolean; showNotation: boolean;

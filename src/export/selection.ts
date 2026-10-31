@@ -7,6 +7,7 @@ import { captureNoteLinks,restoreNoteLinks } from '../editor/links';
 import { applyLyricsEdit,reconstructTrackLyrics } from '../editor/lyrics';
 import { getLyricsSource,setLyricsSource } from '../editor/lyrics-source';
 import { remapStylesheetTracks } from '../engraving/projection';
+import { setTempoUnit,tempoUnitOf } from '../editor/tempo-unit';
 
 function materializeCutSimiles(score:model.Score,first:number,last:number):void {
   const links=captureNoteLinks(score),copies=new Map<number,Map<number,number>>();
@@ -51,9 +52,12 @@ export function selectScore(score:model.Score,selection:ExportSelection):model.S
     lyricSources.forEach((source,track)=>{if(source&&!source.value.visible)applyLyricsEdit(copy,{type:'setTrackLyrics',track,visible:true,lines:source.value.lines.map(line=>line.startBar<copy.masterBars.length?line:{startBar:0,text:''})});});
     materializeCutSimiles(copy,first,last);
     // GP is a written-bar excerpt. MIDI separately exports played occurrences.
-    let tempo=score.tempo;
-    for(const bar of copy.masterBars.slice(0,first))for(const change of [...bar.tempoAutomations].sort((a,b)=>a.ratioPosition-b.ratioPosition))tempo=change.value;
-    if(!copy.masterBars[first].tempoAutomations.some(change=>change.ratioPosition===0))copy.masterBars[first].tempoAutomations.unshift(Object.assign(new model.Automation(),{type:model.AutomationType.Tempo,value:tempo,isVisible:false}));
+    let tempo=score.tempo,tempoUnit=tempoUnitOf(score.masterBars[0].tempoAutomations.find(change=>change.ratioPosition===0&&change.value===tempo)??new model.Automation());
+    for(const bar of copy.masterBars.slice(0,first))for(const change of [...bar.tempoAutomations].sort((a,b)=>a.ratioPosition-b.ratioPosition)){tempo=change.value;tempoUnit=tempoUnitOf(change);}
+    if(!copy.masterBars[first].tempoAutomations.some(change=>change.ratioPosition===0)){
+      const inherited=Object.assign(new model.Automation(),{type:model.AutomationType.Tempo,value:tempo,isVisible:false});setTempoUnit(inherited,tempoUnit);
+      copy.masterBars[first].tempoAutomations.unshift(inherited);
+    }
     for(const track of copy.tracks){
       const changes:{bar:number;tick:number;change:model.Automation}[]=[];
       for(const staff of track.staves)for(const bar of staff.bars.slice(0,first+1))for(const voice of bar.voices)for(const beat of voice.beats)for(const change of beat.automations){

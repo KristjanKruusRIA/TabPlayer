@@ -1,6 +1,7 @@
 import { model } from '@coderline/alphatab';
 import { setTimeSignatureIntent } from './time-signature-source';
 import type { EditCommand } from '../edit-types';
+import { buildTempo, isTempoUnit, quarterUnit, type TempoUnit } from './tempo-unit';
 import { beatAt, durationValues, enumValue, integer, rhythmTicks, staffAt, validateCapacity } from './common';
 
 export function applyNotationEdit(score:model.Score,command:EditCommand,editIndex:number):boolean {
@@ -20,8 +21,8 @@ export function applyNotationEdit(score:model.Score,command:EditCommand,editInde
       for(const track of score.tracks)for(const staff of track.staves)for(const voice of staff.bars[command.bar].voices)validateCapacity(voice,measureTicks,command.freeTime);
       const reference=score.tracks[0].staves[0].bars[command.bar].voices[0];let previous=-1;
       if(!Array.isArray(command.tempos))throw new Error('Invalid tempo points.');
-      const tempos=command.tempos.map(point=>{if(!integer(point.beat,0,reference.beats.length-1)||point.beat<=previous||!Number.isFinite(point.bpm)||point.bpm<=0||typeof point.linear!=='boolean')throw new Error('Use ordered beat positions and positive tempo values.');previous=point.beat;
-        const start=reference.beats.slice(0,point.beat).reduce((sum,b)=>sum+rhythmTicks(b,measureTicks),0);return model.Automation.buildTempoAutomation(point.linear,start/measureTicks,point.bpm,2);
+      const tempos=command.tempos.map(point=>{if(!integer(point.beat,0,reference.beats.length-1)||point.beat<=previous||!Number.isFinite(point.bpm)||point.bpm<=0||typeof point.linear!=='boolean'||point.unit!==undefined&&!isTempoUnit(point.unit))throw new Error('Use ordered beat positions and positive tempo values.');previous=point.beat;
+        const start=reference.beats.slice(0,point.beat).reduce((sum,b)=>sum+rhythmTicks(b,measureTicks),0);return buildTempo(point.linear,start/measureTicks,point.bpm,(point.unit??quarterUnit) as TempoUnit);
       });
       // Common time (C) and a section's own marker survive when the time and section text are unchanged.
       const common=master.timeSignatureCommon&&master.timeSignatureNumerator===command.numerator&&master.timeSignatureDenominator===command.denominator;

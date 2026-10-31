@@ -13,6 +13,8 @@ import { readGpifScaleDiagrams,writeGpifScaleDiagrams } from './scale-diagram';
 import { withPlainTrills } from '../editor/partial-capo';
 import { withPlainDrone } from '../editor/banjo-drone';
 import { hasPartialCapo,readGpifPartialCapo,writeGpifPartialCapo } from './partial-capo';
+import { readGpifTempoUnits,writeGpifTempoUnits } from './tempo-unit';
+import { scoreUsesTempoUnits } from '../editor/tempo-unit';
 import { copyHarmonySources } from '../harmony/chord-source';
 import { copyScaleDiagrams,listScaleDiagrams } from '../harmony/scale-diagram';
 import { scoreFromJson } from '../model-clone';
@@ -83,6 +85,7 @@ export function loadInterchangeScore(bytes:Uint8Array,settings:Settings,partialC
   readGpifHarmony(score,doc);
   readGpifScaleDiagrams(score,doc);
   readGpifPartialCapo(score,doc,partialCapo);
+  readGpifTempoUnits(score,doc);
   orderedTracks(doc).forEach((node,index)=>{
     const track=score.tracks[index];if(!node||!track)return;
     const transpose=node.querySelector(':scope > Transpose');
@@ -133,6 +136,8 @@ export function exportGpInterchange(score:model.Score,settings:Settings):Uint8Ar
   const raw=withPlainDrone(score,()=>withPlainTrills(score,()=>new exporter.Gp7Exporter().export(score,settings))),changes=score.tracks.map(trackMixAutomations),needsXml=harmony||scales||lyrics||!!notation||changes.some(stream=>stream.length>0)||score.tracks.some(track=>track.isPercussion)||rawTuning||partialCapo;
   const original=sourceEntries.get(score);
   const generated=unzip(raw,settings);
+  // alphaTab writes every tempo as quarter notes; a tempo written in another note keeps its own unit in the file.
+  if(scoreUsesTempoUnits(score))generated[gpifPath]=strToU8(writeGpifTempoUnits(score,new TextDecoder().decode(generated[gpifPath])));
   const entries:Record<string,Uint8Array>={...generated,...original,[gpifPath]:generated[gpifPath]};
   const activeBacking='Content/Assets/backing-track';
   if(generated[activeBacking])entries[activeBacking]=generated[activeBacking];

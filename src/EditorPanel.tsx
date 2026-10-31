@@ -23,6 +23,7 @@ import { RangePanel } from './editor/RangePanel';
 import { MeasureTransformPanel } from './editor/MeasureTransformPanel';
 import { EditingToolbar } from './editor/EditingToolbar';
 import { durationLabel } from './editor/common';
+import { displayedBpm, quarterUnit, tempoUnitKeys, tempoUnitOf } from './editor/tempo-unit';
 import type { MusicSelection } from './editor/range-types';
 import './editor-panel.css';
 
@@ -174,6 +175,11 @@ export function EditorPanel({
     master.calculateDuration(false) -
     voice.beats.reduce((total, b) => total + (b.isEmpty || b.graceType !== 0 ? 0 : b.playbackDuration), 0);
 
+  // The opening tempo in the note it is written in, such as 100 BPM (Dotted quarter note); the quarter-note tempo plays.
+  const opening = score.masterBars[0].tempoAutomations.find(a => a.ratioPosition === 0);
+  const openingTempo = opening && tempoUnitOf(opening) !== quarterUnit
+    ? t('editor.context_tempo_unit', { bpm: displayedBpm(opening), unit: t(tempoUnitKeys[tempoUnitOf(opening)]) })
+    : `${score.tempo} BPM`;
   const [title, setTitle] = useState(score.title);
   const [artist, setArtist] = useState(score.artist);
   const [tempo, setTempo] = useState(score.tempo);
@@ -264,7 +270,7 @@ export function EditorPanel({
               <div className="tp-context-summary">
                 <span className="tp-context-primary">{selectionSummary}</span>
                 <span className="tp-context-meta">
-                  {master.timeSignatureNumerator}/{master.timeSignatureDenominator} · {score.tempo} BPM
+                  {master.timeSignatureNumerator}/{master.timeSignatureDenominator} · {openingTempo}
                   {beat?.chord?.name ? ` · ${t('editor.context_chord', { name: beat.chord.name })}` : ''}
                 </span>
               </div>

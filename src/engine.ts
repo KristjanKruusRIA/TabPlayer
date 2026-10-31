@@ -15,6 +15,7 @@ import { scoreFromJson } from './model-clone';
 import { validateParityCommand } from './parity-commands';
 import { defaultTuningName, validateTuningName } from './editor/structure';
 import { stringCapo } from './editor/partial-capo';
+import { setTempoUnit, tempoUnitOf } from './editor/tempo-unit';
 import { assertDiagramFrets, assertDroneFrets, droneShift, droneTuningOk, fretExists, fretKey, getBanjoDrone } from './editor/banjo-drone';
 import { adoptAdmittedBase } from './interchange/archive-gate';
 import { copyGpInterchangeSource, exportGpInterchange, forgetTrackOrderedEntries, loadInterchangeScore } from './interchange/gp';
@@ -273,13 +274,17 @@ function apply(score: model.Score, edit: EditCommand, editIndex=0) {
     case 'removeMeasure': {
       if (!integer(edit.bar) || !score.masterBars[edit.bar] || score.masterBars.length === 1) throw new Error('Keep at least one measure.');
       removeLyricsMeasure(score,edit.bar);
-      const tempo = score.tempo; score.masterBars.splice(edit.bar,1);
+      const tempo = score.tempo, opening = score.masterBars[0].tempoAutomations.find(a => a.ratioPosition === 0); score.masterBars.splice(edit.bar,1);
       for(const track of score.tracks)track.lineBreaks=new Set([...(track.lineBreaks ?? [])].filter(index=>index!==edit.bar).map(index=>index>edit.bar?index-1:index));
       for (const track of score.tracks) for (const staff of track.staves) {
         for (const voice of staff.bars[edit.bar].voices) for (const beat of voice.beats) for (const note of [...beat.notes]) removeNote(note);
         staff.bars.splice(edit.bar,1);
       }
-      if (edit.bar === 0 && !score.masterBars[0].tempoAutomations.length) score.masterBars[0].tempoAutomations = [Automation.buildTempoAutomation(false,0,tempo,2)];
+      if (edit.bar === 0 && !score.masterBars[0].tempoAutomations.length) {
+        const inherited = Automation.buildTempoAutomation(false,0,tempo,2);
+        if (opening && opening.value === tempo) setTempoUnit(inherited, tempoUnitOf(opening));
+        score.masterBars[0].tempoAutomations = [inherited];
+      }
       break;
     }
     case 'addTrack': addTrack(score,edit.name,edit.tuning,edit.program,edit.tuningName); break;
@@ -316,7 +321,14 @@ function apply(score: model.Score, edit: EditCommand, editIndex=0) {
     case 'setScoreInfo':
       if (!Number.isFinite(edit.tempo) || edit.tempo <= 0) throw new Error('Tempo must be positive.');
       score.title = edit.title; score.artist = edit.artist;
-      score.masterBars[0].tempoAutomations = [Automation.buildTempoAutomation(false,0,edit.tempo,2), ...score.masterBars[0].tempoAutomations.filter(a => a.ratioPosition !== 0)]; break;
+      {
+        // The song tempo field shows quarter notes per minute; an opening tempo that already plays at that speed keeps the unit it is written in.
+        const opening = score.masterBars[0].tempoAutomations.find(a => a.ratioPosition === 0);
+        const fresh = Automation.buildTempoAutomation(false, 0, edit.tempo, 2);
+        if (opening && opening.value === edit.tempo) setTempoUnit(fresh, tempoUnitOf(opening));
+        score.masterBars[0].tempoAutomations = [fresh, ...score.masterBars[0].tempoAutomations.filter(a => a.ratioPosition !== 0)];
+      }
+      break;
     default: if(!applyAdvancedEdit(score,edit,editIndex)) throw new Error('Unknown edit command in project.');
   }
 }

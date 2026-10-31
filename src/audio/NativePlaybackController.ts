@@ -31,7 +31,7 @@ export class NativePlaybackController {
   private unlisten:()=>void=()=>{};private subscription:Promise<void>;private destroyed=false;private suppressHandler=false;private viewPlaying=false;
   // Focus is session-only: it changes what native audio plays, never the saved mix or the project.
   private requested:{project:ProjectView;built:BuiltDocument;documentEpoch:number;playbackResumeEpoch:number}|null=null;
-  private trackFocus:TrackFocus|null=null;private preview:{track:string;sound:TrackSound}|null=null;private mixPending=false;private loaded:{project:ProjectView;documentEpoch:number;playbackResumeEpoch:number}|null=null;
+  private trackFocus:TrackFocus|null=null;private preview:{track:string;sound:TrackSound}|null=null;private mixPreview:{track:string;mix:ChannelMix;landing:BuiltDocument|null}|null=null;private mixPending=false;private loaded:{project:ProjectView;documentEpoch:number;playbackResumeEpoch:number}|null=null;
   private built:BuiltDocument|null=null;private plan:PlaybackPlan|null=null;private authoredPlan:PlaybackPlan|null=null;private planTimingKey:string|null=null;private planInterpretationKey='';private lastStatus:NativeAudioStatus|null=null;private operationError:string|null=null;private prepared=false;private preparing=false;private audioSettingsKey:string|null=null;private desiredAudioSettingsKey:string|null=null;private mixQueue:Promise<void>=Promise.resolve();private mixRequest=0;private embeddedSource:string|null=null;
   private documentEpoch:number|undefined;private practice:PracticeSettings=structuredClone(DEFAULT_PRACTICE);private pendingPractice:PracticeSettings|null=null;private hasBacking=false;
   private playbackResumeEpoch=0;private floorReadyEpoch=0;private resumeRefresh:Promise<boolean>|null=null;private loadRequest=0;
@@ -146,10 +146,15 @@ export class NativePlaybackController {
   devices(){return this.bridge.devices();}
   deviceId(){return this.lastStatus?.deviceId??null;}
   backingDurationMs(){const seconds=this.lastStatus?.backingDurationSeconds;return seconds==null?undefined:seconds*1000;}
-  mix(track:model.Track){const mix=this.built?.settings.mixes[trackIdentity(track)];return mix?{mute:mix.mute,solo:mix.solo,volume:mix.gain,pan:mix.pan}:undefined;}
-  private editMix(index:number,patch:Partial<ChannelMix>){const track=this.built?.score.tracks[index];if(!track)throw new Error('Select an existing track.');const id=trackIdentity(track);const mix={...(this.options.latestMix?.(id)??this.built!.settings.mixes[id]??defaultMix()),...patch};void Promise.resolve(this.options.onEdit({type:'setTrackMix',trackId:id,mix})).catch(error=>this.fail(error));}
-  setTrackVolume(index:number,value:number){this.editMix(index,{gain:Math.max(0,Math.min(1,value))});}
-  setPan(index:number,value:number){this.editMix(index,{pan:Math.max(-1,Math.min(1,value))});}
+  /** The track's mix as saved. The newest document wins over the one last loaded, so a control reads back what an edit just saved. */
+  mix(track:model.Track){const id=trackIdentity(track),mix=this.options.latestMix?.(id)??this.built?.settings.mixes[id];return mix?{mute:mix.mute,solo:mix.solo,volume:mix.gain,pan:mix.pan}:undefined;}
+  private editMix(index:number,patch:Partial<ChannelMix>){const track=this.built?.score.tracks[index];if(!track)throw new Error('Select an existing track.');const id=trackIdentity(track);const mix={...(this.options.latestMix?.(id)??this.built!.settings.mixes[id]??defaultMix()),...patch};const from=this.built,heard=this.mixPreview;return Promise.resolve(this.options.onEdit({type:'setTrackMix',trackId:id,mix})).then(()=>this.landMixPreview(heard,from),error=>{this.fail(error);return this.endMixPreview(heard);});}
+  /** The edit that a dragged mix became was accepted: the preview ends once the player holds a newer document than the one the edit began from, or at once when it already does, so the sound never steps back to the old mix in between. */
+  private landMixPreview(heard:typeof this.mixPreview,from:BuiltDocument|null):Promise<void>|void{if(!heard||this.mixPreview!==heard)return;if(this.built!==from)return this.endMixPreview(heard);heard.landing=from;}
+  private async endMixPreview(heard:typeof this.mixPreview){if(!heard||this.mixPreview!==heard)return;this.mixPreview=null;this.update({});await this.reloadLatest().catch(error=>this.fail(error));}
+  /** Each of these saves one undoable edit and settles once it has been accepted or refused (a refusal is reported through `fail`). */
+  setTrackVolume(index:number,value:number){return this.editMix(index,{gain:Math.max(0,Math.min(1,value))});}
+  setPan(index:number,value:number){return this.editMix(index,{pan:Math.max(-1,Math.min(1,value))});}
   /** The song's master chain as saved, or undefined while it has never been edited. */
   master():MasterSettings|undefined{const master=this.built?.settings.master;return master?structuredClone(master):undefined;}
   /** Saves the master chain as an undoable edit. It settles once the edit has been accepted or refused. */
@@ -158,7 +163,18 @@ export class NativePlaybackController {
     if(problem){const error=new Error(problem);this.fail(error);return Promise.reject(error);}
     return Promise.resolve(this.options.onEdit({type:'setMaster',master:structuredClone(master)})).then(()=>undefined,error=>{this.fail(error);throw error;});
   }
-  setMute(index:number,value:boolean){this.editMix(index,{mute:value});}setSolo(index:number,value:boolean){this.editMix(index,{solo:value});}
+  setMute(index:number,value:boolean){return this.editMix(index,{mute:value});}setSolo(index:number,value:boolean){return this.editMix(index,{solo:value});}
+  /** Plays a track's mix with `patch` on top while a fader or knob is dragged, as the player applies a mix change on the running plan; it edits nothing. Null ends it and goes back to the saved mix. */
+  async previewMix(index:number,patch:Partial<ChannelMix>|null){
+    if(patch){
+      const track=this.built?.score.tracks[index];if(!track)throw new Error('Select an existing track.');
+      const id=trackIdentity(track),saved=this.options.latestMix?.(id)??this.built!.settings.mixes[id]??defaultMix();
+      this.mixPreview={landing:null,track:id,mix:{...saved,...patch,gain:Math.max(0,Math.min(1,patch.gain??saved.gain)),pan:Math.max(-1,Math.min(1,patch.pan??saved.pan))}};
+    } else if(this.mixPreview)this.mixPreview=null;
+    else return;
+    this.update({});
+    await this.reloadLatest();
+  }
   /** The focused track (by identity) and amount, from -1 (unfocused) to 1 (focused), or null when off. */
   focus():TrackFocus|null{return this.trackFocus?{...this.trackFocus}:null;}
   /** Focuses a track by identity, so a selection resolved against a newer score cannot land on another track. */
@@ -234,10 +250,13 @@ export class NativePlaybackController {
     const documentChanged=this.documentEpoch!==documentEpoch;this.documentEpoch=documentEpoch;this.loaded={project,documentEpoch,playbackResumeEpoch};
     // Focus ends with its document or its track, so an undo that restores the track does not revive it.
     const focused=this.trackFocus;if(focused&&!built.score.tracks.some(track=>trackIdentity(track)===focused.track)){this.trackFocus=null;this.update({});}
+    if(this.mixPreview?.landing&&this.mixPreview.landing!==built)this.mixPreview=null;
+    const mixed=this.mixPreview;if(mixed&&!built.score.tracks.some(track=>trackIdentity(track)===mixed.track))this.mixPreview=null;
     const previewed=this.preview;if(previewed&&!built.score.tracks.some(track=>trackIdentity(track)===previewed.track)){this.preview=null;this.update({});}
-    if(documentChanged){this.trackFocus=null;this.preview=null;this.practice=structuredClone(DEFAULT_PRACTICE);this.update({practiceNotice:null});}
-    const saved=effectiveAudioSettings(project,built),preview=this.preview;
-    const audioSettings=focusedSettings(preview?{...saved,sounds:{...saved.sounds,[preview.track]:preview.sound}}:saved,built.score.tracks.map(trackIdentity),this.trackFocus);this.hasBacking=audioSettings.backing!==null;
+    if(documentChanged){this.trackFocus=null;this.preview=null;this.mixPreview=null;this.practice=structuredClone(DEFAULT_PRACTICE);this.update({practiceNotice:null});}
+    const saved=effectiveAudioSettings(project,built),preview=this.preview,mixHeard=this.mixPreview;
+    const heard={...saved,...(preview?{sounds:{...saved.sounds,[preview.track]:preview.sound}}:{}),...(mixHeard?{mixes:{...saved.mixes,[mixHeard.track]:mixHeard.mix}}:{})};
+    const audioSettings=focusedSettings(preview||mixHeard?heard:saved,built.score.tracks.map(trackIdentity),this.trackFocus);this.hasBacking=audioSettings.backing!==null;
     const audioSettingsKey=JSON.stringify([audioSettings.sounds,audioSettings.mixes,audioSettings.backing,audioSettings.master??null]);
     // The saved interpretations shape the plan itself, so a change re-plans like a change of reference timing.
     const interpretations=interpretationsOf(saved.mixes),interpreted=Object.keys(interpretations).length>0;

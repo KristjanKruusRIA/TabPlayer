@@ -20,7 +20,7 @@ export const helpTopics:readonly HelpTopic[]=[
   ]},
   {id:'tracks',title:'Tracks and sounds',paragraphs:[
     'The Track task lists the instruments. Select one to edit it, and use Selected instrument to change its name, tuning and other settings.',
-    'The Sound task chooses the instrument sound and effects; the Backing task aligns an audio recording with the score.',
+    'The Sound task chooses the instrument sound and effects; the Backing task aligns an audio recording with the score. Choosing Sound in View shows the full rig for the selected track.',
     'Track changes are recorded in the score history, so Undo reverses them.',
   ]},
   {id:'inspector',title:'The inspector',paragraphs:[
@@ -30,6 +30,7 @@ export const helpTopics:readonly HelpTopic[]=[
   {id:'playback',title:'Playback and mixing',paragraphs:[
     'Space plays or pauses. The playback controls under the toolbar play, stop and loop a selected passage, and More playback holds further options. Playback follows the score with a green cursor.',
     'The bottom dock mixes tracks with volume, pan, mute and solo, shows the instrument view, and controls a backing recording.',
+    'Choosing Mixer in View gives every track a channel strip and adds the master output. Dragging a fader or pan knob is heard as it moves and saved as one change that Undo reverses; Focus is for this session only and is not saved.',
   ]},
   {id:'files',title:'Files, import and export',paragraphs:[
     'TabPlayer opens Guitar Pro (.gp, .gpx, .gp3–.gp5) and MusicXML files and saves its own .tabplayer projects. Each score opens in its own tab.',
@@ -54,7 +55,7 @@ export const helpTopics:readonly HelpTopic[]=[
 
 /** Areas of the window and the topic that explains them; the first match from the focused element wins. */
 const contexts:readonly [string,HelpTopicId][]=[
-  ['.score-workspace','editing'],['.workstation-left','tracks'],['.workstation-inspector','inspector'],['.workstation-dock','playback'],['.transport','playback'],['.toolbar','files'],['.document-tabs','files'],
+  ['.mixer-view','playback'],['.sound-view','tracks'],['.score-workspace','editing'],['.workstation-left','tracks'],['.workstation-inspector','inspector'],['.workstation-dock','playback'],['.transport','playback'],['.toolbar','files'],['.document-tabs','files'],
 ];
 
 /** Picks the help topic for the part of the window that had focus. */

@@ -10,8 +10,8 @@
   min-height:28px; padding:3px 10px; border:1px solid var(--tp-line-strong); border-radius:var(--tp-radius-s);
   background:var(--tp-raised); color:var(--tp-text); font:500 12px/18px var(--tp-font-ui); cursor:pointer;
 }
-.mixer-view .mixer-button:hover:enabled { border-color:var(--tp-text); background:var(--tp-raised); }
-.mixer-view .mixer-button:disabled { opacity:.45; border-style:solid; border-color:var(--tp-line-subtle); color:var(--tp-muted); cursor:default; }
+.mixer-view .mixer-button:hover:not(:is(:disabled,.is-disabled)) { border-color:var(--tp-text); background:var(--tp-raised); }
+.mixer-view .mixer-button:is(:disabled,.is-disabled) { opacity:.45; border-style:solid; border-color:var(--tp-line-subtle); color:var(--tp-muted); cursor:default; }
 
 /* Session Focus rail */
 .mixer-focus {
@@ -34,6 +34,8 @@
   background:color-mix(in srgb,var(--tp-warning) 12%,var(--tp-input));
   color:var(--tp-warning); font-size:11px; line-height:1.4; text-align:center;
 }
+
+.mixer-view .mixer-strip-select.is-disabled { opacity:.6; cursor:default; }
 
 /* Horizontally scrolling channel strips */
 .mixer-strips {
@@ -63,7 +65,7 @@
   background:var(--tp-input); color:var(--tp-text); font:600 12px/18px var(--tp-font-ui);
   text-align:left; cursor:pointer;
 }
-.mixer-view .mixer-strip-select:hover:enabled { border-color:var(--tp-line-strong); background:var(--tp-raised); }
+.mixer-view .mixer-strip-select:hover:not(.is-disabled) { border-color:var(--tp-line-strong); background:var(--tp-raised); }
 .mixer-view .mixer-strip-select[aria-pressed=true] {
   border-color:var(--tp-edit); background:color-mix(in srgb,var(--tp-edit) 16%,var(--tp-raised));
 }
@@ -74,10 +76,10 @@
   min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
 }
 .mixer-strip-status {
-  align-self:flex-start; padding:0 5px; border-radius:var(--tp-radius-s);
-  background:color-mix(in srgb,var(--tp-edit) 18%,var(--tp-input));
+  align-self:flex-start; box-sizing:border-box; min-width:0; height:16px; padding:0 5px; border-radius:var(--tp-radius-s);
   color:var(--tp-edit); font-size:10px; font-weight:600; line-height:16px; letter-spacing:.03em; text-transform:uppercase;
 }
+.mixer-strip-status[data-on] { background:color-mix(in srgb,var(--tp-edit) 18%,var(--tp-input)); }
 
 /* Current sound readout */
 .mixer-strip-sound {
@@ -131,6 +133,42 @@
 }
 .mixer-strip-fader { height:100%; min-height:110px; }
 
+/* The master output, at the right end beside the scrolling strips. MasterPanel keeps its own markup and classes. */
+.mixer-view .track-master {
+  flex:0 0 232px; box-sizing:border-box; display:flex; flex-direction:column; gap:6px; min-height:0;
+  padding:12px; overflow-y:auto; overscroll-behavior:contain;
+  border-left:1px solid var(--tp-line-subtle); background:var(--tp-panel); color:var(--tp-text); font:400 12px/16px var(--tp-font-ui);
+}
+.mixer-view .track-master>.track-channel-heading {
+  display:flex; align-items:center; justify-content:space-between; gap:8px;
+  padding-bottom:8px; border-bottom:1px solid var(--tp-line-subtle);
+  font-size:12px; font-weight:600; letter-spacing:.04em; text-transform:uppercase;
+}
+.mixer-view .track-master .track-channel-status {
+  padding:1px 6px; border:1px solid var(--tp-line-subtle); border-radius:var(--tp-radius-s);
+  background:var(--tp-input); color:var(--tp-muted); font-size:11px; font-weight:400; letter-spacing:0; line-height:16px; text-transform:none;
+}
+.mixer-view .track-master .track-channel-range { display:grid; grid-template-columns:1fr auto; gap:0 6px; margin:0; color:var(--tp-muted); }
+.mixer-view .track-master .track-channel-range output { color:var(--tp-text); font-variant-numeric:tabular-nums; }
+.mixer-view .track-master .track-channel-range input { grid-column:1 / -1; width:100%; min-width:0; height:20px; margin:0; padding:0; accent-color:var(--tp-edit); }
+.mixer-view .track-master details { padding:2px 0; border-top:1px solid var(--tp-line-subtle); }
+.mixer-view .track-master details[open] { display:flex; flex-direction:column; gap:4px; padding-bottom:6px; }
+.mixer-view .track-master summary { min-height:24px; line-height:24px; color:var(--tp-text); cursor:pointer; }
+.mixer-view .track-master .master-switch { display:flex; align-items:center; gap:6px; min-height:24px; margin:0; color:var(--tp-text); }
+.mixer-view .track-master .master-switch input { width:14px; height:14px; margin:0; accent-color:var(--tp-edit); }
+.mixer-view .track-master .master-select { display:grid; gap:2px; margin:0; color:var(--tp-muted); }
+.mixer-view .track-master select {
+  box-sizing:border-box; width:100%; min-height:26px; border:1px solid var(--tp-line-strong); border-radius:var(--tp-radius-s);
+  background:var(--tp-input); color:var(--tp-text); font:inherit;
+}
+.mixer-view .track-master>button {
+  min-height:28px; margin-top:2px; border:1px solid var(--tp-line-strong); border-radius:var(--tp-radius-s);
+  background:var(--tp-raised); color:var(--tp-text); font:500 12px/18px var(--tp-font-ui); cursor:pointer;
+}
+.mixer-view .track-master>button:hover:enabled { border-color:var(--tp-text); }
+.mixer-view .track-master :is(button,select,input):disabled { opacity:.45; cursor:default; }
+.mixer-view .track-master :is(summary,select):focus-visible { outline:2px solid var(--tp-edit); outline-offset:2px; }
+
 @media (max-width:1100px),(max-height:700px) {
   .mixer-focus { flex-basis:156px; padding:10px; gap:8px; }
   .mixer-focus-knob { --knob-size:48px; }
@@ -139,4 +177,5 @@
   .mixer-strip-pan { --knob-size:44px; }
   .mixer-strip-fader-well { min-height:96px; padding-top:4px; }
   .mixer-strip-fader { min-height:90px; }
+  .mixer-view .track-master { flex-basis:200px; padding:10px; }
 }

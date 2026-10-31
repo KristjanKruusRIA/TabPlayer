@@ -948,7 +948,7 @@ export const en = {
   'symbol.apply': 'Apply',
   'symbol.cancel': 'Cancel',
   'symbol.tempo_invalid': 'Type a tempo from 1 to 999 BPM.',
-  'symbol.tempo_inexact': 'Measure {bar} has a tempo mark that cannot be rewritten without changing it (it is between beats, has a label, or is hidden).',
+  'symbol.tempo_inexact': 'Measure {bar} has a tempo mark or section marker that cannot be rewritten without changing it (for example a mark between beats, with a label or hidden).',
   'symbol.tempo_initial': 'The initial tempo cannot be removed; type a new value instead.',
   'symbol.chord_empty': 'Type a chord name, or remove the chord.',
   'symbol.chord_long': 'A chord name can have up to {max} characters.',
@@ -959,7 +959,6 @@ export const en = {
   'symbol.change_clef_at': 'Change clef, measure {bar}…',
   'symbol.edit_chord_name_at': 'Edit chord name {name}…',
   'symbol.remove_tempo_at': 'Remove tempo change {value}, measure {bar}',
-  'symbol.title_inexact': 'This score\'s opening tempo mark has a label, a gradual change or is hidden, and renaming the score here would change it.',
   'symbol.chord_shape': 'This chord has no diagram for this staff\'s strings, so it cannot be renamed here. Use the chord editor.',
   'symbol.not_applied': 'The change was not applied.',
 } as const;

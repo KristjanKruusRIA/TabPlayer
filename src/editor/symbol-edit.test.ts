@@ -33,7 +33,7 @@ describe('symbol edits reuse the existing edits', () => {
     expect(titleEdit(score, 'Etude')).toEqual({ unchanged: true });
     expect(titleEdit(score, '  Etude  ')).toEqual({ unchanged: true });
     const edit = command(titleEdit(score, ' Nocturne '));
-    expect(edit).toEqual({ type: 'setScoreInfo', title: 'Nocturne', artist: 'Ann', tempo: 100 });
+    expect(edit).toEqual({ type: 'setScoreInfo', title: 'Nocturne', artist: 'Ann', tempo: 100, preserveOpeningMark: true });
     const next = previewEdit(project, edit);
     expect(next.project.edits.length).toBe(project.edits.length + 1);
     expect(next.score.title).toBe('Nocturne');
@@ -47,16 +47,53 @@ describe('symbol edits reuse the existing edits', () => {
     expect(command(titleEdit(score, 'Other'))).toMatchObject({ type: 'setScoreInfo', tempo: 100 });
   });
 
-  it('refuses to rename a score whose opening tempo mark setScoreInfo would rebuild', () => {
+  it('renames a score whatever its opening tempo mark is, and the mark comes through untouched', () => {
     for (const damage of [(a: model.Automation) => { a.text = 'Moderato'; }, (a: model.Automation) => { a.isLinear = true; }, (a: model.Automation) => { a.isVisible = false; }]) {
-      const score = buildScore(prepared());
+      const project = prepared(), score = buildScore(project);
       damage(score.masterBars[0].tempoAutomations[0]);
-      expect(titleEdit(score, 'Other')).toEqual({ error: { key: 'symbol.title_inexact' } });
-      expect(titleEdit(score, 'Etude')).toEqual({ unchanged: true });
+      const edit = command(titleEdit(score, 'Other'));
+      expect(edit).toMatchObject({ type: 'setScoreInfo', title: 'Other', preserveOpeningMark: true });
     }
-    const none = buildScore(prepared());
-    none.masterBars[0].tempoAutomations = [model.Automation.buildTempoAutomation(false, 0.5, 80, 2)];
-    expect(titleEdit(none, 'Other')).toEqual({ error: { key: 'symbol.title_inexact' } });
+    expect(titleEdit(buildScore(prepared()), 'Etude')).toEqual({ unchanged: true });
+  });
+
+  it('keeps an opening mark with a label, a gradual change or no display when the title or tempo is set with preserveOpeningMark', () => {
+    let project = prepared();
+    // A real labelled, gradual, hidden opening mark in the document itself, written by an earlier edit.
+    project = apply(project, { type: 'setMeasureSettings', bar: 0, ...readMeasureSettings(buildScore(project), 0), tempos: [{ beat: 0, bpm: 100, linear: true }] });
+    const marked = (p: Project) => buildScore(p).masterBars[0].tempoAutomations[0];
+    expect(marked(project).isLinear).toBe(true);
+    const renamed = previewEdit(project, { type: 'setScoreInfo', title: 'New', artist: 'Ann', tempo: 100, preserveOpeningMark: true }).project;
+    const mark = marked(renamed);
+    expect([mark.isLinear, mark.value, mark.isVisible, buildScore(renamed).title]).toEqual([true, 100, true, 'New']);
+    const retempo = marked(previewEdit(project, { type: 'setScoreInfo', title: 'Etude', artist: 'Ann', tempo: 80, preserveOpeningMark: true }).project);
+    expect([retempo.isLinear, retempo.value]).toEqual([true, 80]);
+    // Without the field, the edit behaves as it always did and rebuilds a plain mark, so old logs replay the same.
+    const old = marked(previewEdit(project, { type: 'setScoreInfo', title: 'Etude', artist: 'Ann', tempo: 80 }).project);
+    expect([old.isLinear, old.value]).toEqual([false, 80]);
+    expect(JSON.stringify({ type: 'setScoreInfo', title: 'T', artist: 'A', tempo: 96 })).toBe('{"type":"setScoreInfo","title":"T","artist":"A","tempo":96}');
+  });
+
+  it('accepts setScoreInfo with or without the optional field and rejects a bad one', () => {
+    const project = prepared();
+    expect(() => previewEdit(project, { type: 'setScoreInfo', title: 'a', artist: 'b', tempo: 90 })).not.toThrow();
+    expect(() => previewEdit(project, { type: 'setScoreInfo', title: 'a', artist: 'b', tempo: 90, preserveOpeningMark: true })).not.toThrow();
+    expect(() => previewEdit(project, { type: 'setScoreInfo', title: 'a', artist: 'b', tempo: 90, preserveOpeningMark: 'yes' } as never)).toThrow();
+    expect(() => previewEdit(project, { type: 'setScoreInfo', title: 'a', artist: 'b', tempo: 90, preserveOpeningMark: null } as never)).toThrow();
+  });
+
+  it('a score with no opening mark keeps having none when it is renamed with preserveOpeningMark', () => {
+    const project = prepared(), score = buildScore(project);
+    score.masterBars[0].tempoAutomations = [];
+    const doc = { ...project };
+    const built = previewEdit(doc, { type: 'setScoreInfo', title: 'X', artist: 'A', tempo: 100, preserveOpeningMark: true });
+    expect(built.score.title).toBe('X');
+  });
+
+  it('retempo of a labelled or gradual opening mark goes through setScoreInfo with preserveOpeningMark', () => {
+    const score = buildScore(prepared());
+    score.masterBars[0].tempoAutomations[0].text = 'Largo';
+    expect(tempoEdit(score, { kind: 'tempo', bar: 0, index: 0 }, '60')).toEqual({ command: { type: 'setScoreInfo', title: 'Etude', artist: 'Ann', tempo: 60, preserveOpeningMark: true } });
   });
 
   it('treats an imported title or chord name with stray spaces as unchanged when the same text is typed back', () => {
@@ -85,7 +122,7 @@ describe('symbol edits reuse the existing edits', () => {
     const project = prepared(), score = buildScore(project);
     expect(tempoEdit(score, { kind: 'tempo', bar: 0, index: 0 }, '100')).toEqual({ unchanged: true });
     const initial = command(tempoEdit(score, { kind: 'tempo', bar: 0, index: 0 }, '90'));
-    expect(initial).toEqual({ type: 'setScoreInfo', title: 'Etude', artist: 'Ann', tempo: 90 });
+    expect(initial).toEqual({ type: 'setScoreInfo', title: 'Etude', artist: 'Ann', tempo: 90, preserveOpeningMark: true });
     expect(previewEdit(project, initial).score.masterBars[0].tempoAutomations[0].value).toBe(90);
     const later = command(tempoEdit(score, { kind: 'tempo', bar: 1, index: 0 }, '120'));
     expect(later).toMatchObject({ type: 'setMeasureSettings', bar: 1, tempos: [{ beat: 0, bpm: 120, linear: false }] });
@@ -97,13 +134,39 @@ describe('symbol edits reuse the existing edits', () => {
     expect(tempoEdit(score, { kind: 'tempo', bar: 1, index: 4 }, '120')).toEqual({ error: { key: 'symbol.stale' } });
   });
 
-  it('refuses to rewrite a measure whose tempo it could not rebuild, and keeps a labelled initial tempo out of setScoreInfo', () => {
+  it('refuses to rewrite a measure whose tempo it could not rebuild', () => {
     const score = buildScore(prepared());
     score.masterBars[1].tempoAutomations[0].text = 'Allegro';
     expect(tempoEdit(score, { kind: 'tempo', bar: 1, index: 0 }, '120')).toEqual({ error: { key: 'symbol.tempo_inexact', params: { bar: 2 } } });
     expect(canRemoveTempo(score, { kind: 'tempo', bar: 1, index: 0 })).toBe(false);
-    score.masterBars[0].tempoAutomations[0].text = 'Largo';
-    expect(tempoEdit(score, { kind: 'tempo', bar: 0, index: 0 }, '60')).toEqual({ error: { key: 'symbol.tempo_inexact', params: { bar: 1 } } });
+  });
+
+  it('rewrites a measure whose first beat is empty when the mark is at the start', () => {
+    const project = prepared(), score = buildScore(project);
+    for (const beat of score.tracks[0].staves[0].bars[1].voices[0].beats) beat.isEmpty = true;
+    expect(canRemoveTempo(score, { kind: 'tempo', bar: 1, index: 0 })).toBe(true);
+    expect(tempoEdit(score, { kind: 'tempo', bar: 1, index: 0 }, '120')).toMatchObject({ command: { type: 'setMeasureSettings', bar: 1 } });
+    // A mark that sits on a later beat of an empty measure still cannot be rebuilt.
+    score.masterBars[1].tempoAutomations = [model.Automation.buildTempoAutomation(false, 0, 140, 2), model.Automation.buildTempoAutomation(false, 0.5, 150, 2)];
+    expect(canRemoveTempo(score, { kind: 'tempo', bar: 1, index: 0 })).toBe(false);
+  });
+
+  it('will not rewrite a measure whose section is a marker with no text, and keeps a section with text', () => {
+    const score = buildScore(prepared());
+    const section = new model.Section();
+    section.marker = 'A';
+    section.text = '';
+    score.masterBars[1].section = section;
+    expect(tempoEdit(score, { kind: 'tempo', bar: 1, index: 0 }, '120')).toEqual({ error: { key: 'symbol.tempo_inexact', params: { bar: 2 } } });
+    expect(canRemoveTempo(score, { kind: 'tempo', bar: 1, index: 0 })).toBe(false);
+    section.text = 'Intro';
+    expect(tempoEdit(score, { kind: 'tempo', bar: 1, index: 0 }, '120')).toMatchObject({ command: { type: 'setMeasureSettings', section: 'Intro' } });
+  });
+
+  it('will not rewrite a measure with two tempo marks on one beat', () => {
+    const score = buildScore(prepared());
+    score.masterBars[1].tempoAutomations = [model.Automation.buildTempoAutomation(false, 0, 140, 2), model.Automation.buildTempoAutomation(false, 0.0001, 150, 2)];
+    expect(canRemoveTempo(score, { kind: 'tempo', bar: 1, index: 0 })).toBe(false);
   });
 
   it('removes a tempo change but never the initial tempo', () => {

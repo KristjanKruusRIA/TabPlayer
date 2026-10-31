@@ -18,7 +18,7 @@ import { listScaleDiagrams,type ScaleDiagram } from './harmony/scale-diagram';
 import { ScaleDiagramView,scaleDiagramSize } from './harmony/ScaleDiagramView';
 import type { EditCommand } from './edit-types';
 import { targetSymbols,type SymbolRef } from './editor/symbol-edit';
-import { resolveSymbol } from './editor/symbol-hit';
+import { resolveSymbol,systemAt } from './editor/symbol-hit';
 import { SymbolPopover,type SymbolView } from './SymbolPopover';
 import './ScoreView.css';
 /** A scale diagram is a compact chip above the staff at its beat; hovering or focusing it opens the diagram at this fraction of its natural size. */
@@ -399,21 +399,38 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
     const now=design.scaleOf(handle.bar),target=reset?design.defaultOf(handle.bar):clampBarScale(now+direction*step);
     if(target!==now){restoreBar.current=handle.bar;design.onScale(handle.bar,target);}
   };
-  const [symbolUi,setSymbolUi]=useState<SymbolView|null>(null),symbolReturn=useRef<HTMLElement|null>(null),symbolSeen=useRef(symbols?.request??0),symbolOpen=useRef(false);
+  const [symbolUi,setSymbolUi]=useState<SymbolView|null>(null),symbolReturn=useRef<HTMLElement|null>(null),symbolSeen=useRef(symbols?.request??0),symbolOpen=useRef(false),symbolGeneration=useRef(0),symbolArea=useRef<{width:number;height:number}|null>(null);
   /** Closing puts focus back where it was before the popover opened, unless focus already went somewhere else. */
-  const closeSymbol=useCallback((restore:boolean)=>{
-    // A second close (the edit landing after the score changed) must not move focus again.
-    if(!symbolOpen.current)return;symbolOpen.current=false;
+  const closeSymbol=useCallback((restore:boolean,id?:number)=>{
+    // A second close (the edit landing after the score changed) must not move focus again, and one for a popover that has been replaced must not close its successor.
+    if(!symbolOpen.current||(id!==undefined&&id!==symbolGeneration.current))return;symbolOpen.current=false;
     setSymbolUi(null);const back=symbolReturn.current;symbolReturn.current=null;
     if(restore)(back?.isConnected?back:wrapper.current)?.focus({preventScroll:true});
   },[]);
   const openSymbol=(next:SymbolView)=>{
     if(!symbolReturn.current){const active=document.activeElement;symbolReturn.current=active instanceof HTMLElement&&active!==document.body&&!active.closest('.score-symbol-popover')?active:wrapper.current;}
-    symbolOpen.current=true;setSymbolUi(next);
+    symbolArea.current={width:available.width,height:available.height};symbolOpen.current=true;symbolGeneration.current+=1;setSymbolUi({...next,id:symbolGeneration.current});
   };
-  // A new score, layout or shown track set can move or remove the symbol being edited: the popover closes unrecorded,
-  // and focus goes back where it was when it had been inside the popover.
-  useEffect(()=>{closeSymbol(!!wrapper.current?.querySelector('.score-symbol-popover')?.contains(document.activeElement));},[score,projection,trackKey,symbols===undefined,closeSymbol]);
+  // The popover is placed in the score's own coordinates, so anything that moves or removes the symbol being edited closes it unrecorded:
+  // a new score or set of shown tracks, a change of layout, zoom or page, or a resize of the score area. Focus goes back to where it was
+  // when it had been inside the popover.
+  useEffect(()=>{closeSymbol(!!wrapper.current?.querySelector('.score-symbol-popover')?.contains(document.activeElement));},[score,projection,trackKey,symbols===undefined,closeSymbol,fit.percent,display.layout,display.zoomMode,page]);
+  // A resize of the score area (the window, or a panel beside it) moves the symbol too. The popover itself can add a scrollbar and so change the
+  // area by a few pixels, which is not a resize: only a change past that, measured from when it opened, closes it.
+  useEffect(()=>{
+    const base=symbolArea.current;if(!symbolOpen.current||!base)return;
+    if(Math.abs(available.width-base.width)>24||Math.abs(available.height-base.height)>24)closeSymbol(!!wrapper.current?.querySelector('.score-symbol-popover')?.contains(document.activeElement));
+  },[available.width,available.height,closeSymbol]);
+  // Scrolling (by hand, or by playback following the cursor) carries the popover with the score; once it is out of sight it closes.
+  useEffect(()=>{
+    const host=scrollHost.current;if(!symbolUi||!host)return;
+    const away=()=>{
+      const popover=wrapper.current?.querySelector('.score-symbol-popover');if(!popover)return;
+      const box=popover.getBoundingClientRect(),area=host.getBoundingClientRect();
+      if(box.bottom<=area.top||box.top>=area.bottom||box.right<=area.left||box.left>=area.right)closeSymbol(popover.contains(document.activeElement));
+    };
+    host.addEventListener('scroll',away,{passive:true});return()=>host.removeEventListener('scroll',away);
+  },[!!symbolUi,closeSymbol]);
   const symbolAnchor=(event:ReactMouseEvent)=>{const rect=wrapper.current?.getBoundingClientRect();return {x:Math.max(0,event.clientX-(rect?.left??0))+4,y:Math.max(0,event.clientY-(rect?.top??0))+4};};
   /** Which score symbol a click landed on: the clicked <text> says what it is, the bounds of the system under it say where. */
   const symbolAt=(event:ReactMouseEvent):SymbolRef|null=>{
@@ -424,9 +441,9 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
     if(physical&&wrapper.current){const rect=wrapper.current.getBoundingClientRect(),hit=unmapScreenPoint(physical.pagination,physical.arrangement,{x:event.clientX-rect.left,y:event.clientY-rect.top});if(hit){system=hit.system;point=hit.point;}}
     else if(!layoutCurrent.current.sourcePhysical&&view.boundsLookup){
       const bounds=view.uiFacade.getOffset(null,view.canvasElement),x=event.clientX+window.scrollX-bounds.x,y=event.clientY+window.scrollY-bounds.y;
-      system=view.boundsLookup.staffSystems.find(item=>y>=item.visualBounds.y&&y<item.visualBounds.y+item.visualBounds.h)??null;if(system)point={x,y};
+      system=systemAt(view.boundsLookup.staffSystems,y);if(system)point={x,y};
     }
-    return resolveSymbol({score:current.current.score,tracks:current.current.tracks,text:text.textContent??'',system,point,sourceBeat:canonicalBeat});
+    return resolveSymbol({score:current.current.score,tracks:current.current.tracks,text:text.textContent??'',centered:text.getAttribute('text-anchor')==='middle',system,point,sourceBeat:canonicalBeat});
   };
   const symbolDoubleClick=(event:ReactMouseEvent)=>{
     if(!symbols||event.button!==0)return;const ref=symbolAt(event);if(!ref)return;
@@ -477,7 +494,7 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
         onPointerMove={moveBarDrag} onPointerUp={endBarDrag} onPointerCancel={cancelBarDrag} onLostPointerCapture={cancelBarDrag} onBlur={event=>{cancelBarDrag();if(event.relatedTarget)heldBar.current=null;}} onFocus={()=>{setActiveBar(handle.bar);heldBar.current=handle.bar;}}
         style={{left:handle.x-5,top:handle.y,height:handle.h}}>{moving!==null&&<span className="score-bar-guide" aria-hidden="true" style={{left:5+moving}}/>}</div>;
     })}
-    {symbolUi&&symbols&&<SymbolPopover state={symbolUi} score={score} targets={symbolUi.ref||!editTarget?[]:targetSymbols(score,editTarget,tracks)} busy={symbols.busy} locked={symbols.locked} onEdit={symbols.onEdit} onChordEditor={ref=>symbols.onChordEditor(ref.target)} onView={setSymbolUi} onClose={closeSymbol}/>}
+    {symbolUi&&symbols&&<SymbolPopover state={symbolUi} score={score} targets={symbolUi.ref||!editTarget?[]:targetSymbols(score,editTarget,tracks)} busy={symbols.busy} locked={symbols.locked} onEdit={symbols.onEdit} onChordEditor={ref=>symbols.onChordEditor(ref.target)} onView={next=>setSymbolUi(old=>({...next,id:old?.id}))} onClose={closeSymbol}/>}
     <span className="score-edit-announcement" role="status" aria-live="polite" aria-atomic="true">{editLocation}</span>
     {caret&&<span ref={caretElement} role="img" aria-label="Edit target" className="score-edit-target" style={{left:caret.x,top:caret.y,width:caret.w,height:caret.h}}>{caret.entry&&<span className="score-edit-entry" aria-hidden="true">{editString?`String ${editString}`:'Entry'}</span>}</span>}
     {markers.map((marker,index)=><span key={index} role="img" aria-label={`Selected note ${index+1}`} style={{position:'absolute',left:marker.x,top:marker.y,width:marker.w,height:marker.h,boxSizing:'border-box',border:'2px solid #9aaf38',background:'rgba(185,205,105,.3)',borderRadius:3,pointerEvents:'none'}}/>)}

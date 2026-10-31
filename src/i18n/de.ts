@@ -950,7 +950,7 @@ export const de: MessageCatalog = {
   'symbol.apply': 'Anwenden',
   'symbol.cancel': 'Abbrechen',
   'symbol.tempo_invalid': 'Geben Sie ein Tempo von 1 bis 999 BPM ein.',
-  'symbol.tempo_inexact': 'Takt {bar} hat eine Tempoangabe, die sich nicht unverändert neu schreiben lässt (sie steht zwischen den Schlägen, hat eine Beschriftung oder ist ausgeblendet).',
+  'symbol.tempo_inexact': 'Takt {bar} hat eine Tempoangabe oder Abschnittsmarke, die sich nicht unverändert neu schreiben lässt (zum Beispiel eine Angabe zwischen den Schlägen, mit Beschriftung oder ausgeblendet).',
   'symbol.tempo_initial': 'Das Anfangstempo kann nicht entfernt werden; geben Sie stattdessen einen neuen Wert ein.',
   'symbol.chord_empty': 'Geben Sie einen Akkordnamen ein oder entfernen Sie den Akkord.',
   'symbol.chord_long': 'Ein Akkordname darf bis zu {max} Zeichen haben.',
@@ -961,7 +961,6 @@ export const de: MessageCatalog = {
   'symbol.change_clef_at': 'Schlüssel ändern, Takt {bar}…',
   'symbol.edit_chord_name_at': 'Akkordnamen {name} bearbeiten…',
   'symbol.remove_tempo_at': 'Tempowechsel {value} entfernen, Takt {bar}',
-  'symbol.title_inexact': 'Die Anfangstempoangabe dieser Partitur hat eine Beschriftung oder einen allmählichen Wechsel oder ist ausgeblendet; ein Umbenennen der Partitur hier würde sie ändern.',
   'symbol.chord_shape': 'Dieser Akkord hat kein Diagramm für die Saiten dieses Systems und kann hier nicht umbenannt werden. Verwenden Sie den Akkord-Editor.',
   'symbol.not_applied': 'Die Änderung wurde nicht angewendet.',
 };

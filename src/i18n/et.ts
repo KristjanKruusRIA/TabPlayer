@@ -950,7 +950,7 @@ export const et: MessageCatalog = {
   'symbol.apply': 'Rakenda',
   'symbol.cancel': 'Loobu',
   'symbol.tempo_invalid': 'Sisesta tempo vahemikus 1 kuni 999 BPM.',
-  'symbol.tempo_inexact': 'Taktis {bar} on tempomärk, mida ei saa muutmata ümber kirjutada (see on löökide vahel, sildiga või peidetud).',
+  'symbol.tempo_inexact': 'Taktis {bar} on tempomärk või jaotise märk, mida ei saa muutmata ümber kirjutada (näiteks löökide vahel olev, sildiga või peidetud märk).',
   'symbol.tempo_initial': 'Algtempot ei saa eemaldada; sisesta selle asemel uus väärtus.',
   'symbol.chord_empty': 'Sisesta akordi nimi või eemalda akord.',
   'symbol.chord_long': 'Akordi nimes võib olla kuni {max} märki.',
@@ -961,7 +961,6 @@ export const et: MessageCatalog = {
   'symbol.change_clef_at': 'Muuda võtit, takt {bar}…',
   'symbol.edit_chord_name_at': 'Muuda akordi nime {name}…',
   'symbol.remove_tempo_at': 'Eemalda tempomuutus {value}, takt {bar}',
-  'symbol.title_inexact': 'Selle partituuri algtempo märgil on silt, järkjärguline muutus või see on peidetud ning partituuri siin ümbernimetamine muudaks seda.',
   'symbol.chord_shape': 'Sellel akordil pole diagrammi selle noodirea keelte jaoks, seega ei saa seda siin ümber nimetada. Kasuta akordiredaktorit.',
   'symbol.not_applied': 'Muudatust ei rakendatud.',
 };

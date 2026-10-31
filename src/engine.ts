@@ -315,7 +315,14 @@ function apply(score: model.Score, edit: EditCommand, editIndex=0) {
     }
     case 'setScoreInfo':
       if (!Number.isFinite(edit.tempo) || edit.tempo <= 0) throw new Error('Tempo must be positive.');
+      if (edit.preserveOpeningMark !== undefined && typeof edit.preserveOpeningMark !== 'boolean') throw new Error('Invalid score info.');
       score.title = edit.title; score.artist = edit.artist;
+      if (edit.preserveOpeningMark) {
+        // The mark keeps everything but its value; a score with no opening mark keeps having none.
+        const opening = score.masterBars[0].tempoAutomations.find(a => a.ratioPosition === 0);
+        if (opening) opening.value = edit.tempo;
+        break;
+      }
       score.masterBars[0].tempoAutomations = [Automation.buildTempoAutomation(false,0,edit.tempo,2), ...score.masterBars[0].tempoAutomations.filter(a => a.ratioPosition !== 0)]; break;
     default: if(!applyAdvancedEdit(score,edit,editIndex)) throw new Error('Unknown edit command in project.');
   }

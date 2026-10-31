@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type FocusEvent as ReactFocusEvent, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type FocusEvent as ReactFocusEvent, type FormEvent, type MouseEvent as ReactMouseEvent, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import type { model } from '@coderline/alphatab';
 import { useI18n } from './i18n';
 import type { MessageKey } from './i18n';
@@ -10,7 +10,7 @@ import {
 } from './editor/symbol-edit';
 
 /** What the popover shows: a menu of actions (for a clicked symbol, or for the edit target when `ref` is null), a one-line text editor, or the clef choices. */
-export interface SymbolView { anchor: { x: number; y: number }; ref: SymbolRef | null; view: 'menu' | 'text' | 'clef' }
+export interface SymbolView { anchor: { x: number; y: number }; ref: SymbolRef | null; view: 'menu' | 'text' | 'clef'; /** Which popover this is, so that a late result of an earlier one cannot close a later one. */ id?: number }
 
 export interface SymbolPopoverProps {
   state: SymbolView;
@@ -25,21 +25,21 @@ export interface SymbolPopoverProps {
   onChordEditor: (ref: Extract<SymbolRef, { kind: 'chord' }>) => void;
   onView: (next: SymbolView) => void;
   /** `restore`: put focus back where it was before the popover opened. A focus move away from the popover closes it without restoring. */
-  onClose: (restore: boolean) => void;
+  onClose: (restore: boolean, id?: number) => void;
 }
 
 const entryAction = (items: SymbolMenuItem[], ref: SymbolRef | null) => items.map(item => ({ item, ref }));
 const RECORDS: SymbolAction[] = ['removeTempo', 'removeChord', 'openChordEditor'];
 
 /** Sends one edit and closes once it has landed; one that is refused keeps the popover and says so. Only one is in flight at a time. */
-function useApply(onEdit: SymbolPopoverProps['onEdit'], onClose: SymbolPopoverProps['onClose'], fail: (problem: SymbolProblem) => void) {
+function useApply(id: number | undefined, onEdit: SymbolPopoverProps['onEdit'], onClose: SymbolPopoverProps['onClose'], fail: (problem: SymbolProblem) => void) {
   const pending = useRef(false);
   return (command: EditCommand) => {
     if (pending.current) return;
     const result = onEdit(command);
-    if (!result || typeof result.then !== 'function') { onClose(true); return; }
+    if (!result || typeof result.then !== 'function') { onClose(true, id); return; }
     pending.current = true;
-    result.then(landed => { pending.current = false; if (landed) onClose(true); else fail({ key: 'symbol.not_applied' }); }, () => { pending.current = false; fail({ key: 'symbol.not_applied' }); });
+    result.then(landed => { pending.current = false; if (landed) onClose(true, id); else fail({ key: 'symbol.not_applied' }); }, () => { pending.current = false; fail({ key: 'symbol.not_applied' }); });
   };
 }
 
@@ -48,18 +48,26 @@ function useKeepInside(root: { current: HTMLElement | null }, key: unknown) {
   useLayoutEffect(() => {
     const element = root.current;
     if (!element) return;
-    element.style.transform = '';
-    // The visible part of the scroller: its padding box without the scrollbars.
-    const scroller = element.closest<HTMLElement>('.paper-scroll'), host = scroller?.getBoundingClientRect();
-    const box = element.getBoundingClientRect();
-    const edge = 8, left = host ? host.left + scroller!.clientLeft : 0, top = host ? host.top + scroller!.clientTop : 0;
-    const right = host ? left + scroller!.clientWidth : window.innerWidth, bottom = host ? top + scroller!.clientHeight : window.innerHeight;
-    let dx = 0, dy = 0;
-    if (box.right > right - edge) dx = right - edge - box.right;
-    if (box.left + dx < left + edge) dx = left + edge - box.left;
-    if (box.bottom > bottom - edge) dy = bottom - edge - box.bottom;
-    if (box.top + dy < top + edge) dy = top + edge - box.top;
-    if (dx || dy) element.style.transform = `translate(${dx}px, ${dy}px)`;
+    const fit = () => {
+      element.style.transform = '';
+      // The visible part of the scroller: its padding box without the scrollbars.
+      const scroller = element.closest<HTMLElement>('.paper-scroll'), host = scroller?.getBoundingClientRect();
+      const box = element.getBoundingClientRect();
+      const edge = 8, left = host ? host.left + scroller!.clientLeft : 0, top = host ? host.top + scroller!.clientTop : 0;
+      const right = host ? left + scroller!.clientWidth : window.innerWidth, bottom = host ? top + scroller!.clientHeight : window.innerHeight;
+      let dx = 0, dy = 0;
+      if (box.right > right - edge) dx = right - edge - box.right;
+      if (box.left + dx < left + edge) dx = left + edge - box.left;
+      if (box.bottom > bottom - edge) dy = bottom - edge - box.bottom;
+      if (box.top + dy < top + edge) dy = top + edge - box.top;
+      if (dx || dy) element.style.transform = `translate(${dx}px, ${dy}px)`;
+    };
+    fit();
+    // An error or status line grows the popover after it opened: fit again whenever its size changes.
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(fit);
+    observer.observe(element);
+    return () => observer.disconnect();
   }, [root, key]);
 }
 
@@ -78,12 +86,14 @@ export function SymbolPopover(props: SymbolPopoverProps) {
     event.stopPropagation();
     if (event.key === 'Escape') { event.preventDefault(); onClose(true); }
   };
+  // Pressing on the popover's padding, heading or text would move focus to the score and close it; only a field or button takes focus.
+  const keepFocus = (event: ReactMouseEvent<HTMLDivElement>) => { if (!(event.target instanceof Element && event.target.closest('input, button'))) event.preventDefault(); };
   const blur = (event: ReactFocusEvent<HTMLDivElement>) => {
     const next = event.relatedTarget;
     if (next instanceof Node && !event.currentTarget.contains(next)) onClose(false);
   };
   return <div ref={root} className="score-symbol-popover" data-view={state.view} style={{ left: state.anchor.x, top: state.anchor.y }}
-    onKeyDown={key} onBlur={blur} onDoubleClick={event => event.stopPropagation()} onContextMenu={event => { event.stopPropagation(); if (!(event.target instanceof HTMLInputElement)) event.preventDefault(); }}>
+    onMouseDown={keepFocus} onKeyDown={key} onBlur={blur} onDoubleClick={event => event.stopPropagation()} onContextMenu={event => { event.stopPropagation(); if (!(event.target instanceof HTMLInputElement)) event.preventDefault(); }}>
     {state.view === 'text' && state.ref && state.ref.kind !== 'clef' ? <TextView {...props} ref_={state.ref}/> : state.view === 'clef' && state.ref?.kind === 'clef' ? <ClefView {...props} ref_={state.ref}/> : <MenuView {...props}/>}
   </div>;
 }
@@ -129,7 +139,7 @@ function MenuView({ state, score, targets, busy, locked, onEdit, onChordEditor, 
   const list = useRef<HTMLDivElement>(null);
   const [problem, setProblem] = useState<SymbolProblem | null>(null);
   const roving = useRoving(list, items => items.find(item => item.getAttribute('aria-disabled') !== 'true'));
-  const apply = useApply(onEdit, onClose, setProblem);
+  const apply = useApply(state.id, onEdit, onClose, setProblem);
   const entries = state.ref ? entryAction(symbolMenu(score, state.ref), state.ref) : targets.flatMap(ref => entryAction(symbolMenu(score, ref, true), ref));
   const record = (build: SymbolBuild) => {
     if ('error' in build) { setProblem(build.error); return; }
@@ -151,12 +161,12 @@ function MenuView({ state, score, targets, busy, locked, onEdit, onChordEditor, 
   </div>;
 }
 
-function ClefView({ score, ref_, busy, locked, onEdit, onClose }: SymbolPopoverProps & { ref_: Extract<SymbolRef, { kind: 'clef' }> }) {
+function ClefView({ state, score, ref_, busy, locked, onEdit, onClose }: SymbolPopoverProps & { ref_: Extract<SymbolRef, { kind: 'clef' }> }) {
   const { t } = useI18n();
   const list = useRef<HTMLDivElement>(null);
   const [problem, setProblem] = useState<SymbolProblem | null>(null);
   const current = currentClef(score, ref_);
-  const apply = useApply(onEdit, onClose, setProblem);
+  const apply = useApply(state.id, onEdit, onClose, setProblem);
   const roving = useRoving(list, items => items.find(item => item.getAttribute('aria-checked') === 'true'));
   const choose = (clef: number) => {
     const build = clefEdit(score, ref_, clef);
@@ -177,7 +187,7 @@ function TextView({ state, score, busy, locked, onEdit, onClose, ref_ }: SymbolP
   const field = useRef<HTMLInputElement>(null);
   const [draft, setDraft] = useState(() => symbolText(score, ref_));
   const [problem, setProblem] = useState<SymbolProblem | null>(null);
-  const apply = useApply(onEdit, onClose, setProblem);
+  const apply = useApply(state.id, onEdit, onClose, setProblem);
   useEffect(() => { field.current?.focus({ preventScroll: true }); field.current?.select(); }, []);
   const label = ref_.kind === 'title' ? t('symbol.title_label') : ref_.kind === 'tempo' ? t('symbol.tempo_label') : t('symbol.chord_label');
   const build = (): SymbolBuild => ref_.kind === 'title' ? titleEdit(score, draft) : ref_.kind === 'tempo' ? tempoEdit(score, ref_, draft) : chordNameEdit(score, ref_, draft);

@@ -578,7 +578,7 @@ export function EditorPanel({
                 {t('editor.initial_tempo')}
                 <input type="number" min={1} value={tempo} onChange={e => setTempo(Number(e.target.value))} />
               </label>
-              <button onClick={() => onEdit({ type: 'setScoreInfo', title, artist, tempo })}>{t('editor.apply_score_info')}</button>
+              <button onClick={() => onEdit({ type: 'setScoreInfo', title, artist, tempo, ...(tempo === score.tempo ? { preserveOpeningMark: true } : {}) })}>{t('editor.apply_score_info')}</button>
             </fieldset>
           </details>
           <SongPanel score={score} busy={busy} onEdit={onEdit} />

@@ -3,7 +3,7 @@ import type { EditCommand } from '../edit-types';
 import type { BeatTarget } from '../project';
 import type { MessageKey } from '../i18n';
 import { getHarmonyChord } from '../harmony/chord-source';
-import { measureSettingsExact, readMeasureSettings } from './measure-settings';
+import { readMeasureSettings } from './measure-settings';
 
 /**
  * Direct symbol editing: the title, a tempo mark, a chord name or a clef, picked on the rendered score. Every builder here
@@ -51,27 +51,34 @@ export function symbolText(score: model.Score, ref: SymbolRef): string {
   return '';
 }
 
-/** The tempo setScoreInfo must be given so that it leaves the tempo as it is: what the first measure's opening mark says. */
+/** The tempo setScoreInfo is given when only the title changes: what the first measure's opening mark already says. */
 const initialTempo = (score: model.Score) => score.masterBars[0]?.tempoAutomations.find(automation => automation.ratioPosition === 0)?.value ?? score.tempo;
 
-/**
- * setScoreInfo rebuilds the opening tempo mark as a plain, visible, unlabelled one. A score whose opening mark is anything else
- * (labelled, gradual, hidden, or only in the middle of the measure) would lose that, so renaming it here is refused.
- */
-const openingTempoSurvives = (score: model.Score) => {
-  const opening = score.masterBars[0]?.tempoAutomations.find(automation => automation.ratioPosition === 0);
-  return !!opening && opening.isVisible && !opening.text && !opening.isLinear;
-};
-
+/** `preserveOpeningMark` keeps the opening mark's label, gradual change and visibility, so a rename or a retempo loses nothing. */
 export function titleEdit(score: model.Score, text: string): SymbolBuild {
   const title = text.trim();
   if (title === score.title || title === score.title.trim()) return { unchanged: true };
-  if (!openingTempoSurvives(score)) return { error: { key: 'symbol.title_inexact' } };
-  return { command: { type: 'setScoreInfo', title, artist: score.artist, tempo: initialTempo(score) } };
+  return { command: { type: 'setScoreInfo', title, artist: score.artist, tempo: initialTempo(score), preserveOpeningMark: true } };
 }
 
-/** setMeasureSettings rebuilds every mark of the measure as a visible one on a beat, so a hidden one would come back. */
-const rewritable = (score: model.Score, bar: number) => measureSettingsExact(score, bar) && (score.masterBars[bar]?.tempoAutomations.every(automation => automation.isVisible) ?? false);
+/**
+ * Whether setMeasureSettings can rewrite this measure's tempo marks and section as they are. It rebuilds every mark as a visible,
+ * unlabelled one on a distinct beat, and a section as its text alone, so a hidden or labelled mark, two marks on one beat, a mark
+ * between beats, or a section marker with no text would change. A mark at the very start is fine in an empty measure.
+ */
+const rewritable = (score: model.Score, bar: number) => {
+  const master = score.masterBars[bar], reference = score.tracks[0]?.staves[0]?.bars[bar]?.voices[0];
+  if (!master || !reference || (master.section && !master.section.text)) return false;
+  const length = master.calculateDuration(false);
+  let previous = -1;
+  return master.tempoAutomations.every(automation => {
+    if (!automation.isVisible || automation.text) return false;
+    const at = reference.beats.findIndex(beat => Math.abs(beat.playbackStart - automation.ratioPosition * length) < 1 && (automation.ratioPosition === 0 || !beat.isEmpty));
+    if (at <= previous) return false;
+    previous = at;
+    return true;
+  });
+};
 const isInitialTempo = (ref: Extract<SymbolRef, { kind: 'tempo' }>, automation: model.Automation) => ref.bar === 0 && automation.ratioPosition === 0;
 
 export function tempoEdit(score: model.Score, ref: Extract<SymbolRef, { kind: 'tempo' }>, text: string): SymbolBuild {
@@ -80,8 +87,8 @@ export function tempoEdit(score: model.Score, ref: Extract<SymbolRef, { kind: 't
   const automation = score.masterBars[ref.bar]?.tempoAutomations[ref.index];
   if (!automation) return stale;
   if (automation.value === value) return { unchanged: true };
-  // The initial tempo has its own edit; a label or a gradual change would not survive it, so those go through the measure rewrite.
-  if (isInitialTempo(ref, automation) && automation.isVisible && !automation.text && !automation.isLinear) return { command: { type: 'setScoreInfo', title: score.title, artist: score.artist, tempo: value } };
+  // The initial tempo has its own edit, which can keep the mark's label and gradual change.
+  if (isInitialTempo(ref, automation)) return { command: { type: 'setScoreInfo', title: score.title, artist: score.artist, tempo: value, preserveOpeningMark: true } };
   if (!rewritable(score, ref.bar)) return { error: { key: 'symbol.tempo_inexact', params: { bar: ref.bar + 1 } } };
   const settings = readMeasureSettings(score, ref.bar);
   return { command: { type: 'setMeasureSettings', bar: ref.bar, ...settings, tempos: settings.tempos.map((point, index) => (index === ref.index ? { ...point, bpm: value } : point)) } };

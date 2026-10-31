@@ -13,6 +13,8 @@ export interface SymbolProbe {
   tracks: readonly number[];
   /** Characters of the clicked <text> element. */
   text: string;
+  /** Whether the clicked <text> is centred on its anchor, as chord names are and section labels (left-aligned) are not. Defaults to true. */
+  centered?: boolean;
   /** The staff system under the pointer and the pointer in that system's coordinates; null off the systems (the title). */
   system: ScreenSystem | null;
   point: { x: number; y: number } | null;
@@ -23,6 +25,8 @@ export interface SymbolProbe {
 /** Clef glyphs of the music font: G, C and F clefs with their octave variants, and the unpitched percussion clef. The tab clef is not one. */
 const CLEF_GLYPHS = new Set([0xe050, 0xe051, 0xe052, 0xe053, 0xe054, 0xe05c, 0xe05d, 0xe062, 0xe063, 0xe064, 0xe065, 0xe066, 0xe069]);
 const TEMPO = /^=\s*(\d+(?:\.\d+)?)$/;
+/** The quarter-note metronome glyph drawn before a tempo mark's equals sign and value. */
+const METRONOME_NOTE = String.fromCodePoint(0xeca5);
 /** How far outside a measure a click may be and still belong to it: a clef sits just left of the first beat, and a label can overhang. */
 const REACH = 48;
 
@@ -37,6 +41,20 @@ function nearestMaster(system: ScreenSystem, x: number) {
     if (!best || gap < best.gap) best = { master, gap };
   }
   return best && best.gap <= REACH ? best.master : null;
+}
+
+/**
+ * The staff system a point belongs to. Tempo marks and chord names are drawn above the first staff, partly outside the bounds
+ * alphaTab reports for the system, so a point up to SYSTEM_BAND above one still belongs to it.
+ */
+const SYSTEM_BAND = 48;
+export function systemAt<S extends { visualBounds: { y: number; h: number } }>(systems: readonly S[], y: number): S | null {
+  let best: { system: S; gap: number } | null = null;
+  for (const system of systems) {
+    const gap = y < system.visualBounds.y ? system.visualBounds.y - y : y > system.visualBounds.y + system.visualBounds.h ? Infinity : 0;
+    if (gap <= SYSTEM_BAND && (!best || gap < best.gap)) best = { system, gap };
+  }
+  return best?.system ?? null;
 }
 
 export function resolveSymbol(probe: SymbolProbe): SymbolRef | null {
@@ -60,12 +78,14 @@ export function resolveSymbol(probe: SymbolProbe): SymbolRef | null {
       const tempo = TEMPO.exec(text);
       const shown = automations.flatMap((automation, index) => (automation.isVisible ? [index] : []));
       const byValue = tempo ? nearestAutomation(shown.filter(index => automations[index].value === Number(tempo[1]))) : null;
-      const byLabel = !tempo ? nearestAutomation(shown.filter(index => automations[index].text.trim() === text)) : null;
-      const index = byValue ?? byLabel;
+      const byLabel = !tempo && text !== METRONOME_NOTE ? nearestAutomation(shown.filter(index => automations[index].text.trim() === text)) : null;
+      const byGlyph = text === METRONOME_NOTE ? nearestAutomation(shown) : null;
+      const index = byValue ?? byLabel ?? byGlyph;
       if (index !== null) return { kind: 'tempo', bar: master.index, index };
-      // A chord name: the nearest beat of this measure whose chord carries these characters.
+      // A chord name: the nearest beat of this measure whose chord carries these characters. Names are drawn centred; a section
+      // label spelled alike is left-aligned.
       let best: { target: SymbolRef; gap: number } | null = null;
-      for (const row of master.bars) for (const beat of row.beats) {
+      if (probe.centered !== false) for (const row of master.bars) for (const beat of row.beats) {
         const source = probe.sourceBeat(beat.beat);
         if (!source?.chord || source.chord.name.trim() !== text || !probe.tracks.includes(source.voice.bar.staff.track.index)) continue;
         const centre = beat.realBounds.x + beat.realBounds.w / 2, gap = Math.abs(point.x - centre) + distance(row.visualBounds.y, row.visualBounds.h, point.y) * 4;
@@ -75,6 +95,6 @@ export function resolveSymbol(probe: SymbolProbe): SymbolRef | null {
     }
   }
   // The title sits above the first system, outside every measure.
-  if (score.title && text === score.title.trim() && !(system && point)) return { kind: 'title' };
+  if (score.title && text === score.title.trim() && !(system && point && point.y >= system.visualBounds.y)) return { kind: 'title' };
   return null;
 }

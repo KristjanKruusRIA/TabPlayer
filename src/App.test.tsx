@@ -663,6 +663,16 @@ it('inserts a beat into an empty voice and changes score information and tuning'
   await waitFor(()=>expect(c.getState().score.tracks[0].staves[0].tuning.at(-1)).toBe(38));
 });
 
+it('renaming from the inspector keeps the opening tempo mark, and changing the tempo field sets it',async()=>{
+  const c=await setup();
+  change('Title','Renamed only');click('Apply score info');
+  await waitFor(()=>expect(c.getState().score.title).toBe('Renamed only'));
+  expect(c.getState().snapshot.project.edits.at(-1)).toMatchObject({type:'setScoreInfo',title:'Renamed only',preserveOpeningMark:true});
+  change('Initial tempo','77');click('Apply score info');
+  await waitFor(()=>expect(c.getState().score.tempo).toBe(77));
+  expect(c.getState().snapshot.project.edits.at(-1)).not.toHaveProperty('preserveOpeningMark');
+});
+
 it('refreshes_fret_after_undo_with_same_indices',async()=>{
   const c=await setup();change('Fret','3');click('Set note');
   await waitFor(()=>expect(currentBeat(c).notes[0]?.fret).toBe(3));

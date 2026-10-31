@@ -2,10 +2,14 @@ import { describe, expect, it } from 'vitest';
 import { model, rendering } from '@coderline/alphatab';
 import type { ScreenSystem } from '../engraving/screen-pages';
 import { music } from './fixtures';
-import { isClefGlyph, resolveSymbol } from './symbol-hit';
+import { isClefGlyph, resolveSymbol, systemAt } from './symbol-hit';
 
 const { Bounds, BeatBounds, BarBounds, MasterBarBounds, StaffSystemBounds } = rendering;
 const G_CLEF = String.fromCodePoint(0xe050), TAB_CLEF = String.fromCodePoint(0xe06d);
+
+const setupResult = {} as { score: model.Score; system: ScreenSystem };
+const probeScore = () => setupResult.score;
+const probeSystem = () => setupResult.system;
 
 /** Two measures of 200px each in one system; the staff row is y 40..100. */
 function setup() {
@@ -43,6 +47,8 @@ function setup() {
     master.staffSystemBounds = system;
     system.bars.push(master);
   });
+  setupResult.score = score;
+  setupResult.system = system as unknown as ScreenSystem;
   const probe = (text: string, x: number, y: number, tracks = [0]) => resolveSymbol({ score, tracks, text, system: system as unknown as ScreenSystem, point: { x, y }, sourceBeat: beat => beat });
   return { score, system, probe };
 }
@@ -73,6 +79,32 @@ describe('resolving a clicked symbol', () => {
     expect(probe('= 99', 20, 10)).toBeNull();
     score.masterBars[0].tempoAutomations[0].text = 'Allegro';
     expect(probe('Allegro', 20, 10)).toEqual({ kind: 'tempo', bar: 0, index: 0 });
+  });
+
+  it('places a point above a system, where tempo marks and chord names are drawn, in that system', () => {
+    const systems = [{ visualBounds: { y: 100, h: 140 } }, { visualBounds: { y: 400, h: 140 } }];
+    expect(systemAt(systems, 150)).toBe(systems[0]);
+    expect(systemAt(systems, 70)).toBe(systems[0]);
+    expect(systemAt(systems, 360)).toBe(systems[1]);
+    // Between systems, past the band of the next one: nobody's.
+    expect(systemAt(systems, 300)).toBeNull();
+    expect(systemAt(systems, 20)).toBeNull();
+  });
+
+  it('opens the tempo mark from its metronome note too', () => {
+    const { probe } = setup();
+    const note = String.fromCodePoint(0xeca5);
+    expect(probe(note, 290, 10)).toEqual({ kind: 'tempo', bar: 1, index: 0 });
+    expect(probe(note, 20, 10)).toEqual({ kind: 'tempo', bar: 0, index: 0 });
+    expect(probe(note, 100, 130)).not.toBeNull();
+  });
+
+  it('does not take a left-aligned section label spelled like a chord for the chord', () => {
+    const { probe } = setup();
+    const at = (centered: boolean) => resolveSymbol({ score: probeScore(), tracks: [0], text: 'Am', centered, system: probeSystem(), point: { x: 330, y: 10 }, sourceBeat: beat => beat });
+    expect(at(true)).toEqual({ kind: 'chord', target: { track: 0, staff: 0, bar: 1, voice: 0, beat: 2 } });
+    expect(at(false)).toBeNull();
+    expect(probe('Am', 330, 10)).not.toBeNull();
   });
 
   it('chooses between two marks with the same value by position', () => {

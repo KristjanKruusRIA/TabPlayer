@@ -60,11 +60,11 @@ function setup(patch: Partial<SymbolEditing> = {}, score = document_()) {
   const notation = screen.getByLabelText('Music notation');
   const draw = (text: string) => {
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg'), element = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-    element.textContent = text; svg.appendChild(element); notation.appendChild(svg);
+    element.textContent = text; if (text === 'Am') element.setAttribute('text-anchor', 'middle'); svg.appendChild(element); notation.appendChild(svg);
     return element as unknown as HTMLElement;
   };
   const wrapper = notation.closest('.score-presentation') as HTMLElement;
-  return { ...result, props, symbols, score, onEdit, onChordEditor, onSelect, notation, draw, wrapper, rerender: (next: Partial<SymbolEditing>) => result.rerender(<ScoreView {...props} symbols={{ ...symbols, ...next }}/>), rerenderScore: (next: model.Score) => result.rerender(<ScoreView {...props} score={next} symbols={symbols}/>) };
+  return { ...result, props, symbols, score, onEdit, onChordEditor, onSelect, notation, draw, wrapper, rerender: (next: Partial<SymbolEditing>) => result.rerender(<ScoreView {...props} symbols={{ ...symbols, ...next }}/>), rerenderScore: (next: model.Score) => result.rerender(<ScoreView {...props} score={next} symbols={symbols}/>), rerenderProps: (next: Record<string, unknown>) => result.rerender(<ScoreView {...props} {...next} symbols={symbols}/>) };
 }
 afterEach(() => { cleanup(); vi.clearAllMocks(); fake.systems = []; });
 
@@ -78,7 +78,7 @@ it('edits the title in place: Enter records one setScoreInfo and focus returns t
   fireEvent.change(field, { target: { value: 'Nocturne' } });
   fireEvent.submit(dialog);
   expect(view.onEdit).toHaveBeenCalledTimes(1);
-  expect(view.onEdit).toHaveBeenCalledWith({ type: 'setScoreInfo', title: 'Nocturne', artist: view.score.artist, tempo: view.score.tempo });
+  expect(view.onEdit).toHaveBeenCalledWith({ type: 'setScoreInfo', title: 'Nocturne', artist: view.score.artist, tempo: view.score.tempo, preserveOpeningMark: true });
   expect(screen.queryByRole('dialog')).toBeNull();
   expect(document.activeElement).toBe(view.wrapper);
 });
@@ -112,7 +112,7 @@ it('edits a tempo mark: the initial one through setScoreInfo, a later one throug
   expect(screen.getByRole('dialog', { name: 'Tempo (BPM)' })).toBeTruthy();
   fireEvent.change(screen.getByRole('textbox'), { target: { value: '90' } });
   fireEvent.submit(screen.getByRole('dialog'));
-  expect(view.onEdit).toHaveBeenLastCalledWith({ type: 'setScoreInfo', title: 'Etude', artist: view.score.artist, tempo: 90 });
+  expect(view.onEdit).toHaveBeenLastCalledWith({ type: 'setScoreInfo', title: 'Etude', artist: view.score.artist, tempo: 90, preserveOpeningMark: true });
 
   fireEvent.doubleClick(view.draw(' = 140'), { clientX: 300, clientY: 10 });
   const field = screen.getByRole('textbox');
@@ -188,6 +188,15 @@ it('opens a context menu with the actions that fit the clicked symbol', () => {
   fireEvent.contextMenu(view.draw(' = 120'), { clientX: 20, clientY: 10 });
   expect(within(screen.getByRole('menu')).getAllByRole('menuitem').map(item => item.textContent)).toEqual(['Edit tempo…']);
   fireEvent.click(screen.getByRole('menuitem', { name: 'Edit tempo…' }));
+  expect(screen.getByRole('textbox', { name: 'Tempo (BPM)' })).toBeTruthy();
+});
+
+it('finds a chord name and a tempo mark drawn just above the system bounds', () => {
+  const view = setup();
+  fireEvent.doubleClick(view.draw('Am'), { clientX: 330, clientY: -14 });
+  expect(screen.getByRole('textbox', { name: 'Chord name' })).toBeTruthy();
+  fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Escape' });
+  fireEvent.doubleClick(view.draw(' = 140'), { clientX: 300, clientY: -14 });
   expect(screen.getByRole('textbox', { name: 'Tempo (BPM)' })).toBeTruthy();
 });
 
@@ -391,4 +400,106 @@ it('keeps the browser menu from opening over ours, except inside the text field'
   fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
   fireEvent.doubleClick(view.draw('Etude'), { clientX: 60, clientY: -20 });
   expect(fireEvent.contextMenu(screen.getByRole('textbox'))).toBe(true);
+});
+
+it('keeps focus in the popover when a non-focusable part of it is pressed, so typed text survives', () => {
+  const view = setup();
+  fireEvent.doubleClick(view.draw('Etude'), { clientX: 60, clientY: -20 });
+  const field = screen.getByRole('textbox');
+  fireEvent.change(field, { target: { value: 'Half typed' } });
+  const popover = field.closest('.score-symbol-popover') as HTMLElement;
+  // Padding, the label text, the heading and an error line are not focusable: pressing them must not move focus to the score.
+  for (const part of [popover, field.closest('label')!, popover.querySelector('.score-symbol-actions')!]) expect(fireEvent.mouseDown(part, { button: 0 })).toBe(false);
+  expect(fireEvent.mouseDown(field, { button: 0 })).toBe(true);
+  expect(fireEvent.mouseDown(screen.getByRole('button', { name: 'Apply' }), { button: 0 })).toBe(true);
+  expect(screen.getByRole('dialog')).toBeTruthy();
+  expect((screen.getByRole('textbox') as HTMLInputElement).value).toBe('Half typed');
+  fireEvent.keyDown(field, { key: 'Escape' });
+  fireEvent.contextMenu(view.draw('Am'), { clientX: 330, clientY: 10 });
+  expect(fireEvent.mouseDown(screen.getByRole('menu').querySelector('.score-symbol-heading')!, { button: 0 })).toBe(false);
+});
+
+it('fits the popover again when an error line makes it taller', () => {
+  const observers: { callback: () => void }[] = [];
+  vi.stubGlobal('ResizeObserver', class { constructor(public callback: () => void) { observers.push(this); } observe() {} disconnect() {} });
+  const bottom = { value: 700 };
+  const spy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+    return this.classList.contains('score-symbol-popover') ? ({ left: 100, right: 360, top: bottom.value - 100, bottom: bottom.value, width: 260, height: 100, x: 100, y: bottom.value - 100, toJSON() {} } as DOMRect) : ({ left: 0, right: 1000, top: 0, bottom: 1000, width: 1000, height: 1000, x: 0, y: 0, toJSON() {} } as DOMRect);
+  });
+  try {
+    const view = setup();
+    fireEvent.doubleClick(view.draw('Etude'), { clientX: 60, clientY: -20 });
+    const popover = document.querySelector('.score-symbol-popover') as HTMLElement;
+    expect(observers.length).toBeGreaterThan(0);
+    // The editor opened inside the area; now a growth pushes its bottom past the edge and the observer refits it.
+    expect(popover.style.transform).toBe('');
+    bottom.value = 1040;
+    act(() => observers.forEach(observer => observer.callback()));
+    expect(popover.style.transform).toBe('translate(0px, -280px)');
+  } finally { spy.mockRestore(); vi.unstubAllGlobals(); }
+});
+
+it('closes unrecorded when the zoom or layout changes under it', () => {
+  const view = setup();
+  fireEvent.doubleClick(view.draw('Etude'), { clientX: 60, clientY: -20 });
+  expect(screen.getByRole('dialog')).toBeTruthy();
+  view.rerenderProps({ zoom: 150 });
+  expect(screen.queryByRole('dialog')).toBeNull();
+  expect(view.onEdit).not.toHaveBeenCalled();
+  fireEvent.doubleClick(view.draw('Etude'), { clientX: 60, clientY: -20 });
+  expect(screen.getByRole('dialog')).toBeTruthy();
+  view.rerenderProps({ display: { layout: 'horizontalScreen', zoomMode: 'manual' } });
+  expect(screen.queryByRole('dialog')).toBeNull();
+});
+
+it('closes when the score area is resized or the popover is scrolled out of sight', () => {
+  const view = setup();
+  const host = view.wrapper.parentElement as HTMLElement;
+  fireEvent.doubleClick(view.draw('Etude'), { clientX: 60, clientY: -20 });
+  expect(screen.getByRole('dialog')).toBeTruthy();
+  // A few pixels, as a scrollbar the popover itself adds, is not a resize.
+  Object.defineProperty(host, 'clientWidth', { configurable: true, value: 17 });
+  act(() => { window.dispatchEvent(new Event('resize')); });
+  expect(screen.getByRole('dialog')).toBeTruthy();
+  Object.defineProperty(host, 'clientWidth', { configurable: true, value: 640 });
+  act(() => { window.dispatchEvent(new Event('resize')); });
+  expect(screen.queryByRole('dialog')).toBeNull();
+
+  fireEvent.doubleClick(view.draw('Etude'), { clientX: 60, clientY: -20 });
+  const popover = document.querySelector('.score-symbol-popover') as HTMLElement;
+  const spy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+    return (this === popover ? { left: 10, right: 270, top: 900, bottom: 1000, width: 260, height: 100, x: 10, y: 900, toJSON() {} } : { left: 0, right: 500, top: 0, bottom: 400, width: 500, height: 400, x: 0, y: 0, toJSON() {} }) as DOMRect;
+  });
+  try {
+    fireEvent.scroll(host);
+    expect(screen.queryByRole('dialog')).toBeNull();
+  } finally { spy.mockRestore(); }
+
+  // Scrolled but still in view: it stays.
+  fireEvent.doubleClick(view.draw('Etude'), { clientX: 60, clientY: -20 });
+  const shown = document.querySelector('.score-symbol-popover') as HTMLElement;
+  const again = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+    return (this === shown ? { left: 10, right: 270, top: 50, bottom: 150, width: 260, height: 100, x: 10, y: 50, toJSON() {} } : { left: 0, right: 500, top: 0, bottom: 400, width: 500, height: 400, x: 0, y: 0, toJSON() {} }) as DOMRect;
+  });
+  try {
+    fireEvent.scroll(host);
+    expect(screen.getByRole('dialog')).toBeTruthy();
+  } finally { again.mockRestore(); }
+});
+
+it('an edit landing for a closed popover does not close a newer one', async () => {
+  const landing: ((landed: boolean) => void)[] = [];
+  const view = setup({ onEdit: vi.fn(() => new Promise<boolean>(resolve => { landing.push(resolve); })) });
+  view.wrapper.focus();
+  fireEvent.doubleClick(view.draw('Etude'), { clientX: 60, clientY: -20 });
+  fireEvent.change(screen.getByRole('textbox'), { target: { value: 'First' } });
+  fireEvent.submit(screen.getByRole('dialog'));
+  fireEvent.keyDown(screen.getByRole('textbox'), { key: 'Escape' });
+  expect(screen.queryByRole('dialog')).toBeNull();
+  // A second popover opens while the first edit is still in flight.
+  fireEvent.contextMenu(view.draw('Am'), { clientX: 330, clientY: 10 });
+  expect(screen.getByRole('menu', { name: 'Chord Am' })).toBeTruthy();
+  await act(async () => landing[0](true));
+  expect(screen.getByRole('menu', { name: 'Chord Am' })).toBeTruthy();
+  expect(document.activeElement).toBe(screen.getAllByRole('menuitem')[0]);
 });

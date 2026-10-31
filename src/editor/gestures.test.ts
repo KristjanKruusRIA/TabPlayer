@@ -199,3 +199,15 @@ it('sustain_pedal_marks_press_and_release_at_beats_with_derived_holds_and_gp_rou
   const drums=music();drums.tracks[0].staves[0].isPercussion=true;expect(()=>edit(drums,{type:'setSustainPedal',target,pedal:'down'})).toThrow(/percussion/);
 });
 
+
+it('fade_volume_series_match_the_native_envelope_fixture',()=>{
+  // tests/audio_render.rs renders these exact (tick, value) series and measures the PCM envelope.
+  const series={1:[[0,0],[120,19],[240,38],[360,56],[480,75],[600,94],[768,120]],2:[[0,120],[120,101],[240,83],[360,64],[480,45],[600,26],[768,0]],3:[[0,0],[120,38],[240,75],[384,120],[480,120],[600,83],[720,45],[864,0]]};
+  for(const [fade,expected] of Object.entries(series)){
+    const score=music();patch(score,{fade:Number(fade)});
+    const volume=smf(rebuild(score)).cc.filter(n=>n[1]===7&&n[3]===0&&n[0]<960).map(n=>[n[0],n[2]]);
+    const once=(list:number[][])=>list.filter((n,index)=>index===0||n[0]!==list[index-1][0]||n[1]!==list[index-1][1]);
+    // The default level 120 is written first; a fade out starts from it.
+    expect(once(volume)).toEqual(once([[0,120],...expected]));
+  }
+});

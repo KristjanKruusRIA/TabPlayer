@@ -1006,6 +1006,11 @@ pub enum EditCommand {
         selection: MusicSelection,
         tied: bool,
     },
+    /// Ties each selected guitar or bass note to the nearest earlier note on its string and
+    /// gives it that note's fret. The origin search and refusals are those of a plain tie.
+    TieSelectionToEarlierPitch {
+        selection: MusicSelection,
+    },
     PasteMusic {
         clip: MusicClip,
         options: PasteOptions,
@@ -1482,7 +1487,8 @@ impl EditCommand {
             | Self::RefingerSelection { selection, .. }
             | Self::SetSelectionSustain { selection, .. }
             | Self::SetSelectionStrokes { selection, .. }
-            | Self::SetSelectionTies { selection, .. } => {
+            | Self::SetSelectionTies { selection, .. }
+            | Self::TieSelectionToEarlierPitch { selection } => {
                 selection.validate()?;
                 match self {
                     Self::TransposeSelection { semitones, .. }
@@ -2160,6 +2166,9 @@ mod tests {
         commands.extend(music_selections().into_iter().map(
             |selection| json!({"type": "setSelectionTies", "selection": selection, "tied": true}),
         ));
+        commands.extend(music_selections().into_iter().map(
+            |selection| json!({"type": "tieSelectionToEarlierPitch", "selection": selection}),
+        ));
         commands
     }
 
@@ -2591,6 +2600,22 @@ mod tests {
             low["settings"]["droneFret"] = json!(0);
             accepted(&low);
         }
+    }
+
+    #[test]
+    fn matched_ties_take_a_selection_and_nothing_else() {
+        let base = json!({"type": "tieSelectionToEarlierPitch",
+            "selection": {"kind": "bars", "tracks": [0], "firstBar": 1, "lastBar": 1}});
+        accepted(&base);
+        let mut extra = base.clone();
+        extra["tied"] = json!(true);
+        rejected(&extra);
+        let mut bare = base.clone();
+        bare.as_object_mut().unwrap().remove("selection");
+        rejected(&bare);
+        let mut bad = base.clone();
+        bad["selection"]["lastBar"] = json!(0);
+        rejected(&bad);
     }
 
     #[test]

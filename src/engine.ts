@@ -307,7 +307,7 @@ export function buildDocument(value: ProjectInput, canRedo = false): BuiltDocume
       mapBackingMeasures(documentSettings.backing,prepared.barMap);mapBackingMeasures(embeddedBackingSettings,prepared.barMap);documentSettings.engraving=mapBarWidths(documentSettings.engraving,prepared.barMap.oldToNew);
     }else if(edit.type==='transposeHarmony')score=prepareHarmonyTranspose(rebuild(score),edit,index);
     else {
-      if(!previous&&['setOttava','setCrescendo','setFermata','setSustainPedal','setSimile','eraseSelection','transposeSelection','moveSelectionStrings','refingerSelection','setSelectionSustain','setSelectionStrokes','setSelectionTies','insertMeasures','removeMeasures'].includes(edit.type))score=rebuild(score);
+      if(!previous&&['setOttava','setCrescendo','setFermata','setSustainPedal','setSimile','eraseSelection','transposeSelection','moveSelectionStrings','refingerSelection','setSelectionSustain','setSelectionStrokes','setSelectionTies','tieSelectionToEarlierPitch','insertMeasures','removeMeasures'].includes(edit.type))score=rebuild(score);
       const measureMap=edit.type==='insertMeasures'||edit.type==='removeMeasures'?planMeasureMap(score.masterBars.length,edit):null;
       if(measureMap)mapLyricsMeasures(score,measureMap);
       apply(score, edit,index);

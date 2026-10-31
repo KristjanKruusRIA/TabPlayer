@@ -419,7 +419,12 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     }
     // The Sound view covers the score, which stays laid out underneath: keys that edit or select in it wait for the Score view.
     // Document commands (new, open, save, undo, redo) and Space for play stay.
-    if(view==='sound'&&(((event.ctrlKey||event.metaKey)&&['c','x','v','a'].includes(key))||event.key==='Escape')){event.preventDefault();return;}
+    if(view==='sound'&&(((event.ctrlKey||event.metaKey)&&['c','x','v','a','t'].includes(key))||event.key==='Escape')){event.preventDefault();return;}
+    if((event.ctrlKey||event.metaKey)&&!event.altKey&&key==='t'){
+      event.preventDefault();if(controlsBusy||event.repeat||!musicSelection)return;
+      if(editLocked){setClipboardError(FINALIZED_MESSAGE);return;}
+      edit({type:'setSelectionTies',selection:musicSelection,tied:!event.shiftKey});return;
+    }
     if(key===' '&&!event.ctrlKey&&!event.metaKey&&!event.altKey&&!event.repeat&&!(event.target instanceof Element&&event.target.closest('button,summary,a,[role="button"]'))){
       event.preventDefault();event.currentTarget.querySelector<HTMLButtonElement>('[aria-keyshortcuts="Space"]')?.click();return;
     }
@@ -460,7 +465,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
       <h2>Keyboard & editing</h2><p>Use these shortcuts outside input fields and dialogs. F1 opens help about the part of the window you are using.</p>
       <dl><dt>Ctrl/Cmd + N / O</dt><dd>New score / Open score</dd><dt>Ctrl/Cmd + S</dt><dd>Save; add Shift for Save As</dd><dt>Ctrl/Cmd + W</dt><dd>Close the current score</dd><dt>Ctrl/Cmd + Tab</dt><dd>Next score; add Shift for the previous score</dd><dt>Ctrl/Cmd + Z</dt><dd>Undo; add Shift to redo. Ctrl/Cmd + Y also redoes.</dd><dt>Space</dt><dd>Play or pause</dd><dt>Ctrl/Cmd + Shift + P</dt><dd>Command palette: type a command such as measure 12, fret 5 or tempo 96</dd></dl>
       <button type="button" onClick={openPalette}>Open command palette</button>
-      <h3>With the score focused</h3><dl><dt>Left / Right</dt><dd>Previous / next beat</dd><dt>Up / Down</dt><dd>Change string, or choose a pitched/percussion note</dd><dt>Digits, then Enter</dt><dd>Enter a fret and set the note on a fretted track</dd><dt>Shift + Left/Right</dt><dd>Extend the musical selection</dd><dt>Ctrl/Cmd + A</dt><dd>Select the current track</dd><dt>Ctrl/Cmd + C / X / V</dt><dd>Copy / Cut / Paste music. Add Shift to Copy/Cut for all selected tracks; Shift + Paste opens paste options.</dd><dt>Escape</dt><dd>Clear the musical selection</dd></dl>
+      <h3>With the score focused</h3><dl><dt>Left / Right</dt><dd>Previous / next beat</dd><dt>Up / Down</dt><dd>Change string, or choose a pitched/percussion note</dd><dt>Digits, then Enter</dt><dd>Enter a fret and set the note on a fretted track</dd><dt>Shift + Left/Right</dt><dd>Extend the musical selection</dd><dt>Ctrl/Cmd + A</dt><dd>Select the current track</dd><dt>Ctrl/Cmd + T</dt><dd>Tie the selected notes to the notes before them. Add Shift to untie.</dd><dt>Ctrl/Cmd + C / X / V</dt><dd>Copy / Cut / Paste music. Add Shift to Copy/Cut for all selected tracks; Shift + Paste opens paste options.</dd><dt>Escape</dt><dd>Clear the musical selection</dd></dl>
       <p>The blue outline marks your edit target. Green follows playback or a selected passage. Use the inspector’s Edit, Practice and Presentation buttons to reach tools; changes apply only when you use their action buttons.</p>
     </section></details><span className="document-title">{state.score.title || 'Untitled'}{state.snapshot.dirty?' •':''}</span></div>
     </header>

@@ -30,6 +30,7 @@ export function TuningInput({
   error,
   inputRef,
   onAudition,
+  stringCount,
 }: {
   label: string;
   presetLabel: string;
@@ -37,13 +38,14 @@ export function TuningInput({
   onChange: (notes: string) => void;
   tuningName: string;
   onTuningNameChange: (name: string) => void;
-  onCommit?: (pitches: number[]) => void;
+  onCommit?: (pitches: number[], changedIndex?: number) => void;
   disabled?: boolean;
   placeholder?: string;
   revision?: object;
   error?: string | null;
   inputRef?: Ref<HTMLInputElement>;
   onAudition?: (pitches: number[], strum: boolean) => void;
+  stringCount?: number;
 }) {
   const [custom, setCustom] = useState(false);
   const [library, setLibrary] = useState(false);
@@ -107,18 +109,18 @@ export function TuningInput({
   }, []);
 
   const updateStringPitch = (index: number, nextPitch: number, commit: boolean) => {
-    if (disabled || !parsedPitches) return;
+    if (disabled || !parsedPitches || (stringCount !== undefined && index >= stringCount)) return;
     const clamped = Math.max(0, Math.min(127, Math.round(nextPitch)));
     if (clamped === parsedPitches[index]) return;
     const next = parsedPitches.map((p, i) => (i === index ? clamped : p));
     setCustom(false);
     onChange(formatTuning(next));
     onTuningNameChange('');
-    if (commit) onCommit?.(next);
+    if (commit) onCommit?.(next, index);
   };
 
   const handlePegPointerDown = (index: number, pitch: number, event: ReactPointerEvent<HTMLDivElement>) => {
-    if (disabled || !parsedPitches || event.button !== 0) return;
+    if (disabled || !parsedPitches || (stringCount !== undefined && index >= stringCount) || event.button !== 0) return;
     event.preventDefault();
     event.currentTarget.focus();
     event.currentTarget.setPointerCapture?.(event.pointerId);
@@ -162,7 +164,7 @@ export function TuningInput({
     }
     const changed = latest.some((p, i) => p !== initialPitches[i]);
     if (changed) {
-      onCommit?.(latest);
+      onCommit?.(latest, index);
     } else {
       onTuningNameChange(initialTuningName);
     }
@@ -183,7 +185,7 @@ export function TuningInput({
   };
 
   const handlePegKeyDown = (index: number, pitch: number, event: ReactKeyboardEvent<HTMLDivElement>) => {
-    if (disabled || !parsedPitches) return;
+    if (disabled || !parsedPitches || (stringCount !== undefined && index >= stringCount)) return;
     let delta = 0;
     if (event.key === 'ArrowUp' || event.key === 'ArrowRight') delta = event.shiftKey ? 12 : 1;
     else if (event.key === 'ArrowDown' || event.key === 'ArrowLeft') delta = event.shiftKey ? -12 : -1;
@@ -195,7 +197,7 @@ export function TuningInput({
   };
 
   const handlePegWheel = (index: number, event: ReactWheelEvent<HTMLDivElement> | WheelEvent) => {
-    if (disabled || !parsedPitches || !('deltaY' in event) || event.deltaY === 0) return;
+    if (disabled || !parsedPitches || (stringCount !== undefined && index >= stringCount) || !('deltaY' in event) || event.deltaY === 0) return;
     const targetElement = (event.currentTarget ?? event.target) as HTMLElement | null;
     if (document.activeElement !== targetElement) return;
     event.preventDefault();
@@ -214,7 +216,7 @@ export function TuningInput({
       const committed = wheelRef.current.pending;
       wheelRef.current.pending = null;
       wheelRef.current.timer = null;
-      if (committed) onCommit?.(committed);
+      if (committed) onCommit?.(committed, index);
     }, 300);
   };
 
@@ -338,6 +340,7 @@ export function TuningInput({
               }}
             >
               {parsedPitches.map((pitch, index) => {
+                const isOutOfRange = stringCount !== undefined && index >= stringCount;
                 const deg = (pitch % 12) * 30;
                 const noteText = formatPitch(pitch);
                 return (
@@ -348,8 +351,8 @@ export function TuningInput({
                     <div
                       ref={el => registerPeg(index, el)}
                       role="slider"
-                      tabIndex={0}
-                      aria-disabled={disabled || undefined}
+                      tabIndex={disabled || isOutOfRange ? -1 : 0}
+                      aria-disabled={disabled || isOutOfRange || undefined}
                       aria-label={`${label} string ${index + 1} peg`}
                       aria-valuemin={0}
                       aria-valuemax={127}
@@ -375,11 +378,11 @@ export function TuningInput({
                       <button
                         type="button"
                         className="tp-peg-step"
-                        disabled={pitch <= 0 && !disabled}
-                        aria-disabled={disabled || pitch <= 0 ? 'true' : undefined}
+                        disabled={(pitch <= 0 && !disabled) || isOutOfRange}
+                        aria-disabled={disabled || isOutOfRange || pitch <= 0 ? 'true' : undefined}
                         aria-label={`Tune ${label} string ${index + 1} down`}
                         onClick={() => {
-                          if (disabled || pitch <= 0) return;
+                          if (disabled || isOutOfRange || pitch <= 0) return;
                           updateStringPitch(index, pitch - 1, true);
                         }}
                       >
@@ -388,11 +391,11 @@ export function TuningInput({
                       <button
                         type="button"
                         className="tp-peg-step"
-                        disabled={pitch >= 127 && !disabled}
-                        aria-disabled={disabled || pitch >= 127 ? 'true' : undefined}
+                        disabled={(pitch >= 127 && !disabled) || isOutOfRange}
+                        aria-disabled={disabled || isOutOfRange || pitch >= 127 ? 'true' : undefined}
                         aria-label={`Tune ${label} string ${index + 1} up`}
                         onClick={() => {
-                          if (disabled || pitch >= 127) return;
+                          if (disabled || isOutOfRange || pitch >= 127) return;
                           updateStringPitch(index, pitch + 1, true);
                         }}
                       >

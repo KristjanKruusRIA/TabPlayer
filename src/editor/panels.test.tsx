@@ -499,6 +499,32 @@ it('with busy=true a bend preset button has no disabled attribute and a click re
   fireEvent.click(presetBtn);
   expect(onEdit).not.toHaveBeenCalled();
 });
+
+it('with string 1 edited in the text box and not applied, peg 6 step commits saved string 1 in StructurePanel, and peg 7 is disabled when 7 notes typed', () => {
+  const score = music();
+  const onEdit = vi.fn();
+  render(<StructurePanel score={score} target={target} string={6} busy={false} onEdit={onEdit} onSelect={vi.fn()} />);
+
+  const input = screen.getByLabelText('Staff tuning (notes, high to low)');
+  fireEvent.change(input, { target: { value: 'F4 B3 G3 D3 A2 E2' } });
+
+  const peg6Up = screen.getByRole('button', { name: 'Tune Staff tuning (notes, high to low) string 6 up' });
+  fireEvent.click(peg6Up);
+
+  expect(onEdit).toHaveBeenCalledTimes(1);
+  expect(onEdit).toHaveBeenLastCalledWith(expect.objectContaining({
+    type: 'setStaffSettings',
+    settings: expect.objectContaining({
+      tuning: [64, 59, 55, 50, 45, 41],
+    }),
+  }));
+
+  fireEvent.change(input, { target: { value: 'E4 B3 G3 D3 A2 E2 B1' } });
+  const peg7Up = screen.getByRole('button', { name: 'Tune Staff tuning (notes, high to low) string 7 up' });
+  expect(peg7Up).toBeDisabled();
+  const peg7Dial = screen.getByRole('slider', { name: 'Staff tuning (notes, high to low) string 7 peg' });
+  expect(peg7Dial).toHaveAttribute('aria-disabled', 'true');
+});
 it('staff tuning uses named notes, validates drafts and refreshes from history',()=>{
   const score=music(),onEdit=vi.fn(),props={score,target,string:6,busy:false,onEdit,onSelect:vi.fn()};const view=render(<StructurePanel {...props}/>);const input=screen.getByLabelText('Staff tuning (notes, high to low)');expect(input).toHaveValue('E4 B3 G3 D3 A2 E2');
   fireEvent.change(input,{target:{value:'E4 B3 G3 D3 A2 Db2'}});fireEvent.click(screen.getByRole('button',{name:'Apply staff settings'}));expect(onEdit).toHaveBeenLastCalledWith(expect.objectContaining({type:'setStaffSettings',settings:expect.objectContaining({tuning:[64,59,55,50,45,37]})}));onEdit.mockClear();

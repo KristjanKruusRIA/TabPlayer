@@ -188,3 +188,33 @@ it('peg step does not commit unapplied draft text and sends only tuning change',
     tuningName: '',
   });
 });
+
+it('with string 1 edited in the text box and not applied, peg 6 step commits saved string 1, and peg 7 is disabled when 7 notes are typed', () => {
+  const score = previewEdit(blankProject(), { type: 'setRest', target: { track: 0, staff: 0, bar: 0, voice: 0, beat: 0 } }).score;
+  const onEdit = vi.fn();
+  render(<TrackSettingsPanel score={score} selected={0} busy={false} onEdit={onEdit} />);
+
+  // 1. Edit string 1 in the text box (E4 -> F4) and do not apply
+  const input = screen.getByLabelText('Tuning (notes, high to low)');
+  fireEvent.change(input, { target: { value: 'F4 B3 G3 D3 A2 E2' } });
+
+  // 2. Step peg 6 up (E2 40 -> F2 41)
+  const peg6Up = screen.getByRole('button', { name: 'Tune Tuning (notes, high to low) string 6 up' });
+  fireEvent.click(peg6Up);
+
+  // Must commit saved string 1 (64 / E4), NOT the draft string 1 (65 / F4)
+  expect(onEdit).toHaveBeenCalledTimes(1);
+  expect(onEdit).toHaveBeenLastCalledWith({
+    type: 'setTuning',
+    track: 0,
+    tuning: [64, 59, 55, 50, 45, 41],
+    tuningName: '',
+  });
+
+  // 3. On a 6-string track with 7 notes typed, peg 7 does not exist in the saved tuning: disable it
+  fireEvent.change(input, { target: { value: 'E4 B3 G3 D3 A2 E2 B1' } });
+  const peg7Up = screen.getByRole('button', { name: 'Tune Tuning (notes, high to low) string 7 up' });
+  expect(peg7Up).toBeDisabled();
+  const peg7Dial = screen.getByRole('slider', { name: 'Tuning (notes, high to low) string 7 peg' });
+  expect(peg7Dial).toHaveAttribute('aria-disabled', 'true');
+});

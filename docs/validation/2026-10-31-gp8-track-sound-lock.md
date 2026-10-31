@@ -22,4 +22,5 @@ GP8 row A32: a per-track lock so sound automations in the score do not change wh
 - In the TypeScript suite, seven `plan.test.ts` tests that read GP files from `.analysis/compatibility` fail here because that folder is not present in this worktree. In the Rust suite `a_page_search_over_fifty_thousand_rows_stays_fast` fails under load; neither is related to this change.
 
 ## Review
-Pending a second review.
+
+A fresh Opus reviewer rejected three rounds, then passed the real transport probe. Its one remaining Medium, a missing renderer test, was fixed in a7d68d5 and confirmed by mutation; that commit was not reviewed again.

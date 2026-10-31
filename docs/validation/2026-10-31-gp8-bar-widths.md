@@ -32,9 +32,9 @@ Run in this worktree (branch `worktree-agent-af74aa6a48b893cbc`):
 - `cargo test --locked --no-fail-fast`: all pass except `a_page_search_over_fifty_thousand_rows_stays_fast` (load-sensitive, known). New: `engraving_bar_widths_are_optional_ordered_bounded_and_round_trip_only_when_set` and `engraving_bar_widths_survive_history_undo_redo_save_and_reopen_beside_an_old_log`, plus a saved-style case. `rustfmt --edition 2024 --check` clean on the touched files.
 - Full `vitest run` also shows 26 failures in `compatibility`, `gp`, `musicxml`, `midi` and `plan` tests that read Guitar Pro fixtures from `.analysis/compatibility`, which this worktree does not hold; they do not touch engraving and were not changed.
 
-## Review (Pending)
+## Review
 
-No independent review yet. A fresh-context adversarial read of the validation in `engraving.rs` / `bar-widths.ts`, the handle input handling in `ScoreView.tsx`, and the style-library change is outstanding.
+A fresh Opus reviewer rejected two rounds. Its last Medium, reading imported weights from the wrong object, and two Lows were fixed in 31e1192, which was not reviewed again.
 
 ## Limits
 

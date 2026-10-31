@@ -18,11 +18,12 @@ The drum view is a three-quarter studio kit with 17 pieces: two kicks, six toms,
 
 ## Review
 
-Pending. Not yet reviewed by a fresh reviewer after the rework.
+A fresh reviewer rejected two rounds. The first found custom Guitar Pro articulations attaching by pitch and exact-identity gaps; the second found the hits row lost on window blur and four Lows. All were fixed in 5c5a4ee, which was not reviewed again; I accepted that diff as small and each fix has a test except the doc change.
+
+Merged into feat/gp8-parity. `parity-instrument-entry`, `parity-instrument-focus`, `parity-instrument-handedness` and `instruments.mjs` pass on a Windows build. `parity-instrument-entry` now expects the fixture kick, element Kick Drum (36), to be named Kick 2, which is what the kit calls it. `native-audio.mjs` was not run.
 
 ## Limits
 
-- Not yet run in the built app; `tests/desktop/instruments.mjs` and `tests/desktop/native-audio.mjs` were edited without being run.
 - During playback only a pitch is known, so some hits light another instrument: snare side stick 2 (id 31, sounds 40) lights Electric snare; Metronome (33, 34, sounds 37 and 38) lights Snare; Piatti (115, 116) lights Crash; Reverse cymbal (30) lights Crash; Grancassa (114) lights High floor; Bell tree (84, 123) and Jingle bell (83) light Ride; the low and high cowbells (99, 100, 102, 103) light Cowbell; Right maraca (119, 120) lights Left maraca; Golpe (124, 125) lights Conga high. Edit mode is exact. The test pins this list.
 - The kit is one fixed layout. It does not change with the track's own articulations. A custom hit whose element nobody knows attaches by pitch, and a track whose table hides every standard hit of a piece leaves that piece with no articulation (its name says so).
 - If a table hides a piece's plain hit but leaves a standard variant visible (a Guitar Pro table of 60 entries still shows crash high choke, id 97), pressing the piece enters that variant.

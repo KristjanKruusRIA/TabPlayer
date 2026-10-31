@@ -9,7 +9,7 @@ const MAX_BARS = 3000;
 const MAX_BEATS = 30000;
 const MAX_REPEAT_COUNT = 16;
 /** Beats and notes the audio engine may be asked to play, counting every pass through a repeat. */
-const MAX_PLAYED_EVENTS = 120000;
+const MAX_PLAYED_EVENTS = 50000;
 /** Internal time unit: one 64th of a whole note is 12 units, so dots and 3:2 tuplets stay integers. */
 const U = 12;
 
@@ -95,9 +95,9 @@ function convert(doc: TefDocument, settings: Settings): TablEditImport {
   report.bump('instruments with no notes', used.length - trackCount);
   if (Math.min(trackCount, 15) * measureCount > MAX_BARS) throw tooLarge(` (${trackCount} instruments x ${measureCount} measures)`);
 
-  // Playback cost of one pass through each measure: its events plus the rests every track needs.
+  // Playback cost of one pass through each measure: its notes and rests. The audio engine spreads its note list into one call, so total played notes must stay far below the engine's argument limit.
   const weights = starts.map(() => 2 * Math.min(trackCount, 15));
-  for (const slots of perInstrument.flat()) for (const position of slots.keys()) weights[measureAt(starts, position)] += 2;
+  for (const slots of perInstrument.flat()) for (const [position, slot] of slots) weights[measureAt(starts, position)] += slot.notes.length + 1;
   applyReadingList(doc, masters, report, weights);
   score.rebuildRepeatGroups();
 

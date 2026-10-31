@@ -18,7 +18,7 @@ export const TEF_LIMITS = {
   measures: 1000,
   instruments: 16,
   stringsPerInstrument: 12,
-  events: 20000,
+  events: 10000,
   readingListItems: 2000,
 } as const;
 
@@ -29,6 +29,8 @@ const MEASURE_BYTES = 8;
 const INSTRUMENT_BYTES = 68;
 const END_OF_CONTENTS = 0xffffffff;
 const TBED = 0x64656274;
+/** The header comment in M says the marker is sometimes byte-reversed; whether the rest of such a file is also swapped is not known. */
+const TBED_REVERSED = 0x74626564;
 
 export interface TefInstrument {
   strings: number; midi: number; /** Read but not applied: whether the stored tuning already includes it is not known. */ capo: number; name: string;
@@ -57,7 +59,7 @@ export interface TefDocument {
 export function isTablEditBytes(bytes: Uint8Array) {
   if (bytes.length < OFFSET.tbed + 4) return false;
   const word = (bytes[OFFSET.tbed] | bytes[OFFSET.tbed + 1] << 8 | bytes[OFFSET.tbed + 2] << 16 | bytes[OFFSET.tbed + 3] << 24) >>> 0;
-  return word === TBED;
+  return word === TBED || word === TBED_REVERSED;
 }
 
 function tooLarge() { return new TablEditError('This TablEdit file is too large to import safely (too many notes or measures).'); }
@@ -106,7 +108,7 @@ function read(r: Reader): TefDocument {
   const report = new ImportReport();
   if (r.bytes.length < OFFSET.tbed + 4) throw new TablEditError('This is not a TablEdit file (too short).');
   const tbed = r.u32At(OFFSET.tbed);
-  if (tbed !== TBED) throw new TablEditError('This is not a TablEdit file (missing "tbed" marker).');
+  if (tbed !== TBED && tbed !== TBED_REVERSED) throw new TablEditError('This is not a TablEdit file (missing "tbed" marker).');
   if (r.bytes.length < HEADER_BYTES) throw new TablEditError('The TablEdit file is truncated or damaged (header incomplete).');
   const tempo = r.u16At(6);
   if (r.u32At(16) !== 0) throw new TablEditError('Protected TablEdit files (with a security code) cannot be opened.');

@@ -54,8 +54,9 @@ describe('TablEdit parsing', () => {
   it('refuses wrong, protected, reversed, old and damaged files with clear messages', () => {
     expect(() => parseTablEdit(new Uint8Array())).toThrow(/not a TablEdit file/);
     expect(() => parseTablEdit(new Uint8Array(0x100))).toThrow(/missing "tbed"/);
-    expect(isTablEditBytes(buildTef({ reversedTbed: true }))).toBe(false);
-    expect(() => parseTablEdit(buildTef({ reversedTbed: true }))).toThrow(/missing "tbed"/);
+    // The header comment says the marker is sometimes byte-reversed; both orders are accepted.
+    expect(isTablEditBytes(buildTef({ reversedTbed: true }))).toBe(true);
+    expect(parseTablEdit(buildTef({ ...basicTef(), reversedTbed: true })).measures).toHaveLength(2);
     expect(() => parseTablEdit(buildTef({ securityCode: 5 }))).toThrow(/Protected/);
     expect(() => parseTablEdit(buildTef({ formatHigh: 8 }))).toThrow(/version is not supported/);
     // The old-number word is not sourced as a gate, so a file with another value still opens.
@@ -281,21 +282,33 @@ describe('TablEdit conversion', () => {
     const measures = Array.from({ length: TEF_LIMITS.measures }, () => ({ num: 4, den: 4 }));
     const instruments = Array.from({ length: 3 }, () => ({}));
     const events: { position: number; string: number; fret: number }[] = [];
-    for (let slot = 0; slot < 4000; slot++) for (let ins = 0; ins < 3; ins++) events.push({ position: slot * 16, string: ins * 6 + 1, fret: slot % 20 });
-    for (let i = 0; i < TEF_LIMITS.events - 12000; i++) events.push({ position: (i % 4000) * 16, string: Math.floor(i / 4000) * 6 + 2, fret: i % 20 });
+    for (let slot = 0; slot < 2500; slot++) for (let ins = 0; ins < 3; ins++) events.push({ position: slot * 16, string: ins * 6 + 1, fret: slot % 20 });
+    for (let i = 0; i < TEF_LIMITS.events - 7500; i++) events.push({ position: (i % 2500) * 16, string: 2, fret: i % 20 });
     const readingList: [number, number][] = [];
-    for (let i = 0; i < 40; i++) readingList.push([1, 100]);
+    for (let i = 0; i < 40; i++) readingList.push([1, 50]);
     const bytes = buildTef({ measures, instruments, events, readingList });
     const started = Date.now();
     const { score, notice } = importTablEdit(bytes, settings);
     expect(notice).not.toMatch(/overflow|overlap/);
     expect(Date.now() - started).toBeLessThan(10000);
-    expect(playedBars(score).length).toBeGreaterThan(TEF_LIMITS.measures + 1000);
+    expect(playedBars(score).length).toBeGreaterThan(TEF_LIMITS.measures + 500);
     const planStarted = Date.now();
     const plan = buildPlaybackPlan(score, 1);
     expect(Date.now() - planStarted).toBeLessThan(30000);
     expect(plan.notes.length).toBeLessThan(400000);
   }, 60000);
+
+  it('rejects the 248 KB shape that used to overflow the playback plan: one track, 12-string chords, a huge repeat', () => {
+    const events = Array.from({ length: 20000 }, (_, i) => ({ position: Math.floor(i / 12) * 16 % 64000, string: 1 + (i % 12), fret: i % 20 }));
+    const measures = Array.from({ length: 1000 }, () => ({ num: 4, den: 4 }));
+    const readingList = Array.from({ length: 30 }, () => [1, 500] as [number, number]);
+    expect(() => importTablEdit(buildTef({ measures, instruments: [{ strings: 12 }], events, readingList }), settings)).toThrow(/too large to import safely/);
+    // Within the cap, the same shape keeps a buildable playback plan because repeats are dropped once they cost too much.
+    const smaller = buildTef({ measures, instruments: [{ strings: 12 }], events: events.slice(0, TEF_LIMITS.events), readingList });
+    const { score, notice } = importTablEdit(smaller, settings);
+    expect(notice).toContain('repeats beyond the playback size limit');
+    expect(() => buildPlaybackPlan(score, 1)).not.toThrow();
+  });
 
   it('reports notes that are shifted later by an overlap', () => {
     const file = basicTef({ measures: [{ num: 4, den: 4 }], events: [{ position: 0, string: 1, fret: 0, duration: 0 }, { position: 16, string: 1, fret: 1 }] });

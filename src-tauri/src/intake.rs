@@ -15,11 +15,11 @@ const SCORE_LIMIT: u64 = 64 * 1024 * 1024;
 /// Power Tab and TablEdit content (by signature, whatever the extension) is capped below the general score limit.
 const POWERTAB_LIMIT: u64 = 16 * 1024 * 1024;
 
-/// Name of the experimental importer format these bytes claim to be: Power Tab starts with `ptab`, TablEdit has `tbed` at 0x38.
+/// Name of the experimental importer format these bytes claim to be: Power Tab starts with `ptab`, TablEdit has `tbed` (sometimes byte-reversed, `debt`) at 0x38.
 fn capped_import_format(bytes: &[u8]) -> Option<&'static str> {
     if bytes.starts_with(b"ptab") {
         Some("Power Tab")
-    } else if bytes.get(0x38..0x3c) == Some(&b"tbed"[..]) {
+    } else if matches!(bytes.get(0x38..0x3c), Some(b"tbed" | b"debt")) {
         Some("TablEdit")
     } else {
         None
@@ -410,6 +410,9 @@ mod tests {
         };
         assert!(error.contains("TablEdit") && error.contains("16 MiB"));
         assert_eq!(capped_import_format(b"tiny"), None);
+        let mut reversed = vec![0u8; 0x40];
+        reversed[0x38..0x3c].copy_from_slice(b"debt");
+        assert_eq!(capped_import_format(&reversed), Some("TablEdit"));
     }
 
     #[test]

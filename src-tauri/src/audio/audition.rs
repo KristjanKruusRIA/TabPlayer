@@ -94,6 +94,9 @@ impl AuditionRequest {
 pub struct AuditionClip {
     pub rate: u32,
     pub frames: Vec<[f32; 2]>,
+    /// The device test tone. Unlike a note audition it never sounds over playback:
+    /// the mixer cuts it and refuses it while the transport is playing.
+    pub tone: bool,
 }
 
 /// One-track plan: 62.5 bpm at 960 ppq makes one tick exactly one millisecond.
@@ -252,7 +255,11 @@ pub fn render_clip(
         frame[0] *= gain;
         frame[1] *= gain;
     }
-    Ok(Box::new(AuditionClip { rate, frames }))
+    Ok(Box::new(AuditionClip {
+        rate,
+        frames,
+        tone: false,
+    }))
 }
 
 pub type AuditionProducer = HeapProd<Box<AuditionClip>>;
@@ -290,6 +297,8 @@ pub struct AuditionMixer {
     done: [Option<Box<AuditionClip>>; DONE_SLOTS],
     peak: f64,
     fresh: bool,
+    /// Set by the callback each block while playback runs; tone clips are then cut.
+    tones_cut: bool,
 }
 
 fn stash(done: &mut [Option<Box<AuditionClip>>; DONE_SLOTS], clip: Box<AuditionClip>) {
@@ -313,6 +322,30 @@ impl AuditionMixer {
             done: std::array::from_fn(|_| None),
             peak: 0.0,
             fresh: false,
+            tones_cut: false,
+        }
+    }
+    /// While true, a sounding test tone fades out over the replacement fade and
+    /// queued tone clips are dropped unplayed. Plain flag writes, no allocation.
+    pub fn cut_tones(&mut self, cut: bool) {
+        self.tones_cut = cut;
+    }
+    /// Moves the current clip to a short fade-out slot.
+    fn fade_out_current(&mut self) {
+        let Some(mut old) = self.current.take() else {
+            return;
+        };
+        let total = ((u64::from(self.rate) * u64::from(REPLACE_FADE_MS) / 1000) as usize).max(1);
+        old.fade_total = total;
+        old.fade_left = total;
+        if let Some(free) = self.fading.iter_mut().find(|s| s.is_none()) {
+            *free = Some(old);
+        } else {
+            if let Some(oldest) = self.fading[0].take() {
+                stash(&mut self.done, oldest.clip);
+            }
+            self.fading[0] = self.fading[1].take();
+            self.fading[1] = Some(old);
         }
     }
     pub fn attach(&mut self, queue: AuditionConsumer) {
@@ -343,7 +376,7 @@ impl AuditionMixer {
             let Some(clip) = queue.try_pop() else {
                 break;
             };
-            if clip.rate != rate {
+            if clip.rate != rate || (self.tones_cut && clip.tone) {
                 stash(&mut self.done, clip);
             } else if let Some(previous) = incoming.replace(clip) {
                 stash(&mut self.done, previous);
@@ -352,20 +385,7 @@ impl AuditionMixer {
         let Some(clip) = incoming else {
             return;
         };
-        if let Some(mut old) = self.current.take() {
-            let total = ((u64::from(rate) * u64::from(REPLACE_FADE_MS) / 1000) as usize).max(1);
-            old.fade_total = total;
-            old.fade_left = total;
-            if let Some(free) = self.fading.iter_mut().find(|s| s.is_none()) {
-                *free = Some(old);
-            } else {
-                if let Some(oldest) = self.fading[0].take() {
-                    stash(&mut self.done, oldest.clip);
-                }
-                self.fading[0] = self.fading[1].take();
-                self.fading[1] = Some(old);
-            }
-        }
+        self.fade_out_current();
         self.current = Some(Sounding {
             clip,
             pos: 0,
@@ -377,6 +397,9 @@ impl AuditionMixer {
     }
     /// Add the sounding clips into `output`.
     pub fn mix(&mut self, output: &mut [[f32; 2]]) -> MixReport {
+        if self.tones_cut && self.current.as_ref().is_some_and(|s| s.clip.tone) {
+            self.fade_out_current();
+        }
         self.intake();
         for slot in self.fading.iter_mut() {
             let Some(sounding) = slot else {

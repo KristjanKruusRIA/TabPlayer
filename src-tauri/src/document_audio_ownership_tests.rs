@@ -577,6 +577,7 @@ fn audition_renders_one_at_a_time_and_the_latest_request_wins() {
         Ok(Box::new(AuditionClip {
             rate: 48_000,
             frames: vec![[0.5; 2]; frames],
+            tone: false,
         }))
     };
     let (started, started_rx) = mpsc::channel();
@@ -668,6 +669,7 @@ fn a_panicking_audition_render_does_not_block_later_auditions() {
             Ok(Box::new(AuditionClip {
                 rate: 48_000,
                 frames: vec![[0.5; 2]; 100],
+                tone: false,
             }))
         })
         .unwrap();

@@ -64,6 +64,7 @@ fn constant(rate: u32, frames: usize, value: f32) -> Box<AuditionClip> {
     Box::new(AuditionClip {
         rate,
         frames: vec![[value; 2]; frames],
+        tone: false,
     })
 }
 fn silent_renderer(generation: u64) -> Box<Renderer> {

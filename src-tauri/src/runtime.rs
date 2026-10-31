@@ -494,8 +494,10 @@ pub fn audio_status(audio: State<'_, NativeAudio>) -> NativeAudioStatus {
     audio.service.status()
 }
 #[tauri::command]
-pub fn audio_diagnostics(audio: State<'_, NativeAudio>) -> Result<AudioDiagnostics, String> {
-    audio.service.diagnostics()
+pub async fn audio_diagnostics(app: AppHandle) -> Result<AudioDiagnostics, String> {
+    tauri::async_runtime::spawn_blocking(move || app.state::<NativeAudio>().service.diagnostics())
+        .await
+        .map_err(|e| e.to_string())?
 }
 #[tauri::command]
 pub fn audio_test_tone(audio: State<'_, NativeAudio>) -> Result<(), String> {

@@ -19,7 +19,9 @@ function build(strings=5,drone=0) {
   voice.addBeat(beat);bar.addVoice(voice);staff.addBar(bar);score.finish(new Settings());return score;
 }
 const panel=(score:model.Score,props:{locked?:boolean}={})=>{const onEdit=vi.fn();render(<StructurePanel score={score} target={target} string={1} busy={false} onEdit={onEdit} onSelect={vi.fn()} {...props}/>);return onEdit;};
-const applied=(onEdit:ReturnType<typeof vi.fn>)=>{fireEvent.click(screen.getByRole('button',{name:'Apply staff settings'}));return onEdit.mock.calls.at(-1)![0].settings;};
+// Applying the values a staff already has records nothing, so each press first changes the capo.
+let capoStep=0;
+const applied=(onEdit:ReturnType<typeof vi.fn>)=>{capoStep+=1;fireEvent.change(screen.getByLabelText('Capo'),{target:{value:String(capoStep)}});fireEvent.click(screen.getByRole('button',{name:'Apply staff settings'}));return onEdit.mock.calls.at(-1)![0].settings;};
 
 it('shows the staff drone and sends nothing about it until changed',()=>{
   const onEdit=panel(build(5,5));

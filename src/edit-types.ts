@@ -43,6 +43,8 @@ export interface StaffSettings {
   partialCapo?: PartialCapo;
   /** Optional banjo drone on a 5-string staff: the neck fret its short string starts at (1-12); omitted keeps the staff's, 0 clears it. */
   droneFret?: number;
+  /** Optional: when true, retuning or changing capo moves existing notes to keep their sounding pitch. Default false (keeps frets). */
+  keepPitch?: boolean;
 }
 export interface ChordDefinition { name: string; firstFret: number; frets: number[] }
 /** How a track's stringed notes are performed; each field is absent at its default (automatic style, normal palm mutes, no accent, no automatic let ring or brush). */
@@ -123,7 +125,7 @@ export type EditCommand = LyricsCommand | GestureCommand | BarGestureCommand | R
   | { type: 'moveTrack'; track: number; to: number }
   | { type: 'duplicateTrack'; track: number }
   | { type: 'setTrackColor'; track: number; color: string }
-  | { type: 'setTuning'; track: number; tuning: number[]; tuningName?: string }
+  | { type: 'setTuning'; track: number; tuning: number[]; tuningName?: string; keepPitch?: boolean }
   | { type: 'setStringCount'; track: number; tuning: number[]; keep: StringCountKeep; tuningName?: string }
   /** `preserveOpeningMark`: absent rebuilds the opening tempo mark as a plain one (the original behavior, so old logs replay unchanged); true keeps its label, gradual change and visibility and sets only its value. */
   | { type: 'setScoreInfo'; title: string; artist: string; tempo: number; preserveOpeningMark?: boolean }

@@ -48,7 +48,9 @@ it('clicking a fret writes the fret on its own string, so the audition and the p
 });
 
 const panel=(score:model.Score,onEdit=vi.fn())=>{render(<StructurePanel score={score} target={target} string={6} busy={false} onEdit={onEdit} onSelect={vi.fn()}/>);return onEdit;};
-const applied=(onEdit:ReturnType<typeof vi.fn>)=>{fireEvent.click(screen.getByRole('button',{name:'Apply staff settings'}));return onEdit.mock.calls.at(-1)![0].settings;};
+// Applying the values a staff already has records nothing, so each press first changes the capo.
+let capoStep=0;
+const applied=(onEdit:ReturnType<typeof vi.fn>)=>{capoStep+=1;fireEvent.change(screen.getByLabelText('Capo'),{target:{value:String(capoStep)}});fireEvent.click(screen.getByRole('button',{name:'Apply staff settings'}));return onEdit.mock.calls.at(-1)![0].settings;};
 it('shows the staff partial capo and sends it only once changed',()=>{
   const onEdit=panel(build());
   expect(screen.getByLabelText('Partial capo fret')).toHaveValue(5);
@@ -112,7 +114,7 @@ it('resets the controls with the settings when another bar is selected',()=>{
   expect(screen.getByLabelText('Partial capo fret')).toHaveValue(9);
   view.rerender(<StructurePanel {...props} target={{...target,bar:1}}/>);
   expect(screen.getByLabelText('Partial capo fret')).toHaveValue(5);
-  fireEvent.click(screen.getByRole('button',{name:'Apply staff settings'}));expect(props.onEdit.mock.calls.at(-1)![0].settings).not.toHaveProperty('partialCapo');
+  fireEvent.change(screen.getByLabelText('Capo'),{target:{value:'1'}});fireEvent.click(screen.getByRole('button',{name:'Apply staff settings'}));expect(props.onEdit.mock.calls.at(-1)![0].settings).not.toHaveProperty('partialCapo');
 });
 
 it('names the partial capo and sounds the covered strings of a chord diagram by it',async()=>{

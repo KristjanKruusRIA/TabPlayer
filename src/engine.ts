@@ -17,6 +17,7 @@ import { defaultTuningName, validateTuningName } from './editor/structure';
 import { stringCapo } from './editor/partial-capo';
 import { setTempoUnit, tempoUnitOf } from './editor/tempo-unit';
 import { assertDiagramFrets, assertDroneFrets, droneShift, droneTuningOk, fretExists, fretKey, getBanjoDrone } from './editor/banjo-drone';
+import { refingerTrack } from './editor/refinger';
 import { adoptAdmittedBase } from './interchange/archive-gate';
 import { copyGpInterchangeSource, exportGpInterchange, forgetTrackOrderedEntries, loadInterchangeScore } from './interchange/gp';
 import { reflowLyrics,removeLyricsMeasure } from './editor/lyrics';
@@ -311,10 +312,14 @@ function apply(score: model.Score, edit: EditCommand, editIndex=0) {
       tuningValid(edit.tuning); validateTuningName(edit.tuningName); const track = trackAt(score,edit.track);
       if (track.isPercussion || track.staves.some(s => s.tuning.length !== edit.tuning.length)) throw new Error('Retuning must keep the current string count.');
       if (track.staves.some(s => getBanjoDrone(s) > 0 && !droneTuningOk(edit.tuning))) throw new Error('The banjo drone is string 1, which must be tuned higher than string 2.');
-      for (const staff of track.staves) for (const bar of staff.bars) for (const voice of bar.voices) for (const beat of voice.beats) for (const note of beat.notes) {
-        if (!note.string) continue;
-        const pitch=edit.tuning[edit.tuning.length-note.string]+note.fret+stringCapo(staff,note.string)+droneShift(staff,note.string,note.fret)-staff.transpositionPitch;
-        if (pitch<0 || pitch>127) throw new Error('That tuning puts an existing note outside the MIDI pitch range.');
+      if (edit.keepPitch) {
+        refingerTrack(track, { tuning: edit.tuning });
+      } else {
+        for (const staff of track.staves) for (const bar of staff.bars) for (const voice of bar.voices) for (const beat of voice.beats) for (const note of beat.notes) {
+          if (!note.string) continue;
+          const pitch=edit.tuning[edit.tuning.length-note.string]+note.fret+stringCapo(staff,note.string)+droneShift(staff,note.string,note.fret)-staff.transpositionPitch;
+          if (pitch<0 || pitch>127) throw new Error('That tuning puts an existing note outside the MIDI pitch range.');
+        }
       }
       for (const staff of track.staves) { staff.stringTuning.tunings = [...edit.tuning]; if (edit.tuningName !== undefined) staff.stringTuning.name = edit.tuningName; else if (!staff.stringTuning.name) staff.stringTuning.name = defaultTuningName(edit.tuning); } break;
     }

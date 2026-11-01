@@ -4,6 +4,15 @@ export function waitForWorkspaceIdle(page,options={}) {
   return page.locator('.app-shell[aria-busy="false"]').waitFor({state:'visible',...options});
 }
 
+/** A fresh session opens the Library with a welcome. It is modal, so nothing behind it takes a click until it is closed.
+ * This waits for the welcome itself, so a launch that should show it and does not still fails. */
+export async function closeWelcomeLibrary(page) {
+  const library=page.getByRole('dialog',{name:'Library',exact:true});
+  await library.getByRole('heading',{name:'Welcome to TabPlayer',exact:true}).waitFor();
+  await library.getByRole('button',{name:'Close',exact:true}).click();
+  await library.waitFor({state:'hidden'});
+}
+
 const fileCommands=new Set(['New','Open','Save','Save As','Close score','Close all scores','Export score','Export GP','Import ASCII tab…','Import MIDI…','Batch convert…','Finalize document','Unfinalize document']);
 const summary=(page,name)=>page.locator('summary').filter({hasText:name});
 async function openDisclosure(locator) {
@@ -78,6 +87,12 @@ export async function setPlaybackSpeed(page,percent) {
 
 export function revealPlaybackControls(page) {
   return openDisclosure(summary(page,/^More playback(?: · Error)?$/));
+}
+
+/** The More playback panel opens upward over the inspector, so close it before touching anything behind it. */
+export async function hidePlaybackControls(page) {
+  const more=summary(page,/^More playback(?: · Error)?$/);
+  if(await more.evaluate(node=>node.parentElement.open))await more.click();
 }
 
 export async function selectWorkspaceTrack(page,name) {

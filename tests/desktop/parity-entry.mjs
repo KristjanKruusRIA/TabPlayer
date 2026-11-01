@@ -1,4 +1,4 @@
-import {waitForWorkspaceIdle,clickWorkstationButton,revealLeftTask,revealInspector} from './workstation-commands.mjs';
+import {waitForWorkspaceIdle,closeWelcomeLibrary,clickWorkstationButton,revealLeftTask,revealInspector} from './workstation-commands.mjs';
 import { readActiveDocument } from './document-context.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync,writeFileSync } from 'node:fs';
@@ -12,7 +12,7 @@ let browser,page;
 const result={};
 try {
   browser=await connect();page=browser.contexts()[0].pages()[0];
-  await waitForWorkspaceIdle(page);
+  await closeWelcomeLibrary(page);await waitForWorkspaceIdle(page);
   const errors=[];page.on('pageerror',error=>errors.push(error.message));
   await page.context().route('**/*',route=>{
     const url=new URL(route.request().url());
@@ -39,7 +39,7 @@ try {
   await revealLeftTask(page,'Track');await change('New notation track name','Kit');await button('Add percussion track');await button('Track 3: Kit');await revealInspector(page);
   await page.getByRole('combobox',{name:/^Percussion articulation/}).selectOption('91');await button('Add percussion note');
   await page.getByRole('combobox',{name:/^Percussion articulation/}).selectOption('92');await button('Add percussion note');
-  await details('Song metadata');await change('Album','Parity session');await button('Apply song metadata');
+  await button('Presentation');await details('Song metadata');await change('Album','Parity session');await button('Apply song metadata');await button('Edit');
   await details('Directions');await page.getByLabel('Segno',{exact:true}).check();await button('Apply directions');
   await button('Append measure');await button('Show instrument');
   await page.locator('.inspector').evaluate(node=>{node.scrollTop=0;});await page.screenshot({path:resolve('.analysis/parity/native-drums.png')});
@@ -62,7 +62,7 @@ try {
   assert.deepEqual(music.notes.filter(note=>note.track===2).map(note=>note.pitch),[38,46]);
   result.gpRoundtrip=music;result.commands=native.edits.length;assert.deepEqual(errors,[]);
   await browser.close();browser=null;stop(id);id=launch({TABPLAYER_TEST_OPEN:saved});
-  browser=await connect();page=browser.contexts()[0].pages()[0];await waitForWorkspaceIdle(page);await button('Open');
+  browser=await connect();page=browser.contexts()[0].pages()[0];await closeWelcomeLibrary(page);await waitForWorkspaceIdle(page);await button('Open');
   assert.equal((await snapshot()).project.edits.length,native.edits.length);result.processRestartReopen=true;
   // A real authored WAV also checks GP references after an edit/rebuild, not just ZIP bytes.
   const wave=new Uint8Array(44+48000*2),view=new DataView(wave.buffer),ascii=(offset,text)=>[...text].forEach((char,index)=>wave[offset+index]=char.charCodeAt(0));
@@ -76,8 +76,8 @@ try {
   },{bytes:[...bytes],wave:[...wave]});
   writeFileSync(backed,Uint8Array.from(backedBytes));const hash=createHash('sha256').update(readFileSync(backed)).digest('hex');
   await browser.close();browser=null;stop(id);id=launch({TABPLAYER_TEST_OPEN:backed,TABPLAYER_TEST_EXPORT:backedExport});
-  browser=await connect();page=browser.contexts()[0].pages()[0];await waitForWorkspaceIdle(page);await button('Open');
-  await details('Song metadata');await change('Album','Backed study');await button('Apply song metadata');
+  browser=await connect();page=browser.contexts()[0].pages()[0];await closeWelcomeLibrary(page);await waitForWorkspaceIdle(page);await button('Open');
+  await button('Presentation');await details('Song metadata');await change('Album','Backed study');await button('Apply song metadata');
   const readyDeadline=Date.now()+15000;let prepared;
   do{prepared=await status();if(prepared.ready&&Math.abs(prepared.backingDurationSeconds-1)<.001)break;await page.waitForTimeout(50);}while(Date.now()<readyDeadline);
   assert.ok(prepared.ready&&Math.abs(prepared.backingDurationSeconds-1)<.001,JSON.stringify(prepared));

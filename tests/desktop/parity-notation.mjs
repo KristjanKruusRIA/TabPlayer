@@ -1,4 +1,4 @@
-import {waitForWorkspaceIdle,clickWorkstationButton} from './workstation-commands.mjs';
+import {waitForWorkspaceIdle,closeWelcomeLibrary,clickWorkstationButton} from './workstation-commands.mjs';
 import { readActiveDocument } from './document-context.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync,writeFileSync } from 'node:fs';
@@ -11,7 +11,7 @@ const raw='[VERSE]\nHel-lo  world+today';
 let id=launch({TABPLAYER_TEST_SAVE:saved,TABPLAYER_TEST_EXPORT:exported,TABPLAYER_TEST_OPEN:saved}),browser,page;
 const result={};
 try {
-  browser=await connect();page=browser.contexts()[0].pages()[0];await waitForWorkspaceIdle(page);
+  browser=await connect();page=browser.contexts()[0].pages()[0];await closeWelcomeLibrary(page);await waitForWorkspaceIdle(page);
   const errors=[];page.on('pageerror',error=>errors.push(error.message));
   const snapshot=()=>readActiveDocument(page);
   const idle=async()=>{await waitForWorkspaceIdle(page);assert.equal(await page.getByRole('alert').count(),0,await page.getByRole('alert').allTextContents());};
@@ -26,6 +26,8 @@ try {
   await page.getByRole('combobox',{name:/^Global fermata/}).selectOption('2');await change('Stored length','1.5');await button('Apply global fermata');
   await details('Bar gestures');await page.getByRole('combobox',{name:/^Clef octave/}).selectOption('1');await button('Apply clef octave');
   await page.getByLabel('Common / cut time',{exact:true}).check();await page.getByLabel('Double bar',{exact:true}).check();await button('Apply measure gestures');
+  // GP keeps common/cut time as one score-wide style, so export refuses a mix of the two (b73ae93): give the other bars the same choice.
+  for(const measure of [2,3,4]){await change('Measure',measure);await page.getByLabel('Common / cut time',{exact:true}).check();await button('Apply measure gestures');}
   await page.locator('.inspector').evaluate(node=>{node.scrollTop=0;});await page.screenshot({path:resolve('.analysis/parity/native-notation.png')});
   await change('Measure',2);await details('Bar gestures');await page.getByRole('combobox',{name:/^Simile/}).selectOption('single');await button('Apply simile');
   await button('Save');await button('Export GP');
@@ -37,13 +39,13 @@ try {
   assert.deepEqual(exportedFields,{error:false,raw,visible:'true',inverted:'1',fermata:'1.5'});result.visibleGp=exportedFields;
   await details('Lyrics');await page.getByLabel('Visible',{exact:true}).uncheck();await button('Apply lyrics');await button('Undo');
   assert.equal((await snapshot()).redoEdit.visible,false);await button('Redo');await button('Save');await button('Export GP');
-  await button('Export score');await page.getByRole('dialog',{name:'Export score'}).getByRole('button',{name:'Export',exact:true}).click();
+  await clickWorkstationButton(page,'Export score',{waitForIdle:false});await page.getByRole('dialog',{name:'Export score'}).getByRole('button',{name:'Export',exact:true}).click();
   await page.getByRole('dialog',{name:'Export score'}).waitFor({state:'hidden'});await idle();
   const hiddenXml=strFromU8(unzipSync(readFileSync(exported))['Content/score.gpif']);assert.match(hiddenXml,/<Lyrics dispatched="false">/);
   assert.ok(hiddenXml.includes('[VERSE]'));result.dialogHiddenExport=true;
   const native=JSON.parse(readFileSync(saved,'utf8'));assert.equal(native.edits.at(-1).visible,false);result.commands=native.edits.length;
   assert.deepEqual(errors,[]);await browser.close();browser=null;stop(id);id=launch({TABPLAYER_TEST_OPEN:saved});
-  browser=await connect();page=browser.contexts()[0].pages()[0];await waitForWorkspaceIdle(page);await button('Open');
+  browser=await connect();page=browser.contexts()[0].pages()[0];await closeWelcomeLibrary(page);await waitForWorkspaceIdle(page);await button('Open');
   await details('Lyrics');assert.equal(await page.getByLabel('Visible',{exact:true}).isChecked(),false);assert.equal(await page.getByRole('textbox',{name:/^Line 1 text/}).inputValue(),raw);
   assert.equal((await snapshot()).project.edits.length,native.edits.length);result.processRestartReopen=true;result.hiddenRawPreserved=true;
   writeFileSync(resolve('.analysis/parity/native-notation-result.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result));

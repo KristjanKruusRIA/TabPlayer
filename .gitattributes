@@ -4,3 +4,6 @@ vendor/usvg/** -text
 assets/library/** -text
 # The native-drop acceptance driver pins this helper's exact source bytes.
 tests/desktop/drop-score-files.ps1 -text
+# The Library and resumed-playback acceptance drivers pin these helpers' exact source bytes.
+tests/desktop/answer-unsaved-dialog.ps1 -text
+tests/desktop/cancel-dialog.ps1 -text

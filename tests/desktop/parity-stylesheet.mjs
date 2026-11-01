@@ -1,4 +1,4 @@
-import {waitForWorkspaceIdle,clickWorkstationButton} from './workstation-commands.mjs';
+import {waitForWorkspaceIdle,closeWelcomeLibrary,clickWorkstationButton} from './workstation-commands.mjs';
 import { readActiveDocument } from './document-context.mjs';
 import assert from 'node:assert/strict';
 import {existsSync,readFileSync,rmSync,writeFileSync} from 'node:fs';
@@ -30,7 +30,7 @@ async function open(path,label){
   id=launch({TABPLAYER_TEST_OPEN:path,TABPLAYER_TEST_SAVE:saved,TABPLAYER_TEST_EXPORT:destination});
   browser=await connect();page=browser.contexts()[0].pages()[0];page.on('pageerror',error=>errors.push(error.message));
   await page.setViewportSize({width:1600,height:1000});
-  await waitForWorkspaceIdle(page);await button('Open');await noAlerts();
+  await closeWelcomeLibrary(page);await waitForWorkspaceIdle(page);await button('Open');await noAlerts();
   await page.locator('[aria-label="Music notation"] svg').first().waitFor();
   const source=readFileSync(path),state=await snapshot();
   if(!path.endsWith('.tabplayer')){assert.equal(state.project.base.sha256,hash(source));assert.equal(state.project.base.bytesBase64,source.toString('base64'));assert.deepEqual(state.project.edits,[]);}
@@ -67,7 +67,8 @@ async function capture(label){
 }
 const dialog=()=>page.getByRole('dialog',{name:'Export score',exact:true});
 async function startDialog(){
-  await button('Export score');await dialog().waitFor();await dialog().getByRole('combobox',{name:'Export format',exact:true}).selectOption('gp');
+  // The open dialog holds the workspace busy, so wait for the dialog itself, not for idle.
+  await clickWorkstationButton(page,'Export score',{waitForIdle:false});await dialog().waitFor();await dialog().getByRole('combobox',{name:'Export format',exact:true}).selectOption('gp');
   await dialog().getByText('Engraving settings affect the screen and PDF. GP export preserves source styling and supports uniform common/cut choices; mixed measure choices cannot be exported.',{exact:true}).waitFor();
 }
 async function exportValid(surface,fixture,expectation,label){
@@ -85,7 +86,8 @@ async function exportFailure(surface,message,label){
   if(surface==='direct'){if(existsSync(destination))rmSync(destination);}
   else {existing=Buffer.from(`owned output sentinel: ${label}`);writeFileSync(destination,existing);}
   if(surface==='direct')await button('Export GP');
-  else {await startDialog();await dialog().getByRole('button',{name:'Export',exact:true}).click();await idle();}
+  // A refused export leaves its dialog open, and the open dialog keeps the workspace busy, so the alert in it is what is awaited.
+  else {await startDialog();await dialog().getByRole('button',{name:'Export',exact:true}).click();}
   const alert=surface==='dialog'?dialog().getByRole('alert'):page.getByRole('alert');
   await alert.first().waitFor();const messages=await alert.allTextContents();
   if(typeof message==='string')assert.ok(messages.includes(message),JSON.stringify(messages));

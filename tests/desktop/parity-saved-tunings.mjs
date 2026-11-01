@@ -150,8 +150,9 @@ export async function runSavedTuningsAcceptance({buildPath}={}){
     // Short window: the dialog body scrolls and Cancel / Use tuning stay reachable.
     const cdp=await page.context().newCDPSession(page);await cdp.send('Emulation.setDeviceMetricsOverride',{width:1000,height:420,deviceScaleFactor:1,mobile:false});
     try{
-      await openDialog();const layout=await dialog().evaluate(section=>{const rect=e=>e.getBoundingClientRect();const footer=[...section.querySelectorAll('.saved-tunings-footer button')].map(b=>({text:b.textContent,top:rect(b).top,bottom:rect(b).bottom}));const body=section.querySelector('.saved-tunings-body');return {height:innerHeight,footer,bodyScrolls:body.scrollHeight>body.clientHeight,overflow:getComputedStyle(body).overflowY};});
-      assert.equal(layout.height,420);for(const b of layout.footer)assert.ok(b.top>=0&&b.bottom<=420,`${b.text} reachable`);assert.equal(layout.bodyScrolls,true);result.shortLayout=layout;await shot('short-height');
+      // The shared Dialog frame owns the scrolling body and the foot, so those are measured; the foot must really hold both buttons.
+      await openDialog();const layout=await dialog().evaluate(section=>{const rect=e=>e.getBoundingClientRect();const footer=[...section.querySelectorAll('.tp-dialog-foot button')].map(b=>({text:b.textContent,top:rect(b).top,bottom:rect(b).bottom}));const body=section.querySelector('.tp-dialog-body');return {height:innerHeight,footer,bodyScrolls:body.scrollHeight>body.clientHeight,overflow:getComputedStyle(body).overflowY};});
+      assert.equal(layout.height,420);assert.deepEqual(layout.footer.map(b=>b.text),['Cancel','Use tuning']);for(const b of layout.footer)assert.ok(b.top>=0&&b.bottom<=420,`${b.text} reachable`);assert.equal(layout.bodyScrolls,true);assert.match(layout.overflow,/^(auto|scroll)$/);result.shortLayout=layout;await shot('short-height');
       await dialog().getByRole('button',{name:'Cancel',exact:true}).click();await dialog().waitFor({state:'detached'});
     }finally{await cdp.send('Emulation.clearDeviceMetricsOverride');}
     step('Short window keeps Cancel and Use tuning reachable',result.shortLayout);

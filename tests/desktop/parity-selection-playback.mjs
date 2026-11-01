@@ -1,4 +1,4 @@
-import {waitForWorkspaceIdle,clickWorkstationButton,revealPlaybackControls} from './workstation-commands.mjs';
+import {waitForWorkspaceIdle,closeWelcomeLibrary,clickWorkstationButton,revealPlaybackControls,hidePlaybackControls} from './workstation-commands.mjs';
 import { readActiveDocument } from './document-context.mjs';
 import assert from 'node:assert/strict';
 import {existsSync,readFileSync,realpathSync,writeFileSync} from 'node:fs';
@@ -25,9 +25,13 @@ async function waitStatus(predicate,timeout=15000){
   do{value=await status();if(predicate(value))return value;await page.waitForTimeout(20);}while(Date.now()<deadline);
   throw new Error(`Native status timed out: ${JSON.stringify(value)}`);
 }
-async function button(name){await clickWorkstationButton(page,name,{waitForIdle:false});await idle();}
+// More playback opens upward over the inspector. Playback buttons open it themselves; everything else closes it first so the inspector can be clicked.
+const playbackButtons=new Set(['Seek','Loop','Clear loop','Play from cursor','Play selection','Loop selection']);
+async function button(name){if(!playbackButtons.has(name))await hidePlaybackControls(page);await clickWorkstationButton(page,name,{waitForIdle:false});await idle();}
+async function playbackField(label){await revealPlaybackControls(page);return page.getByLabel(label,{exact:true});}
+async function playbackCombo(name){await revealPlaybackControls(page);await disclosure('Selected playback');return page.getByRole('combobox',{name,exact:true});}
 async function noAlerts(){assert.deepEqual(await page.getByRole('alert').allTextContents(),[]);}
-async function disclosure(label){const summary=page.locator('summary').filter({hasText:new RegExp(`^${label}$`)}).first();if(!await summary.evaluate(node=>node.parentElement.open))await summary.click();}
+async function disclosure(label){if(label!=='Selected playback')await hidePlaybackControls(page);const summary=page.locator('summary').filter({hasText:new RegExp(`^${label}$`)}).first();if(!await summary.evaluate(node=>node.parentElement.open))await summary.click();}
 async function close(){
   const ownedBrowser=browser,ownedId=id;browser=null;page=null;
   try{if(ownedBrowser)await ownedBrowser.close();}finally{if(ownedId!==null){stop(ownedId);id=null;}}
@@ -35,7 +39,7 @@ async function close(){
 async function open(path){
   await close();id=launch({TABPLAYER_TEST_OPEN:path,TABPLAYER_TEST_SAVE:saved,TABPLAYER_TEST_BACKING:fixture.backing.path});
   browser=await connect();page=browser.contexts()[0].pages()[0];page.on('pageerror',error=>errors.push(error.message));
-  await page.setViewportSize({width:1600,height:1100});await waitForWorkspaceIdle(page);await button('Open');await revealPlaybackControls(page);
+  await page.setViewportSize({width:1600,height:1100});await closeWelcomeLibrary(page);await waitForWorkspaceIdle(page);await button('Open');await revealPlaybackControls(page);
   owner=(await page.evaluate(()=>window.__TAURI_INTERNALS__.invoke('workspace_snapshot'))).active;
   await waitStatus(value=>value.ready&&!value.error);await page.locator('[aria-label="Music notation"] svg').first().waitFor();await disclosure('Selected playback');await noAlerts();
 }
@@ -48,7 +52,7 @@ async function selectTiePassage(occurrence=1){
   await cursor(1,2);await workspaceRegion().focus();await page.keyboard.press('Shift+ArrowRight');
   await page.getByLabel('Editing location',{exact:true}).filter({hasText:'Measure 1 · Beat 3'}).waitFor();
   assert.match(await page.locator('.inspector').innerText(),/2 notes · 2 beats/);
-  const choices=page.getByRole('combobox',{name:'Selection occurrence',exact:true});await choices.selectOption({label:`Measure 1, occurrence ${occurrence} → measure 1, occurrence ${occurrence}`});
+  const choices=(await playbackCombo('Selection occurrence'));await choices.selectOption({label:`Measure 1, occurrence ${occurrence} → measure 1, occurrence ${occurrence}`});
 }
 async function assertRange(startTick,endTick){
   const value=await waitStatus(value=>value.range?.startTick===startTick&&value.range?.endTick===endTick);
@@ -100,7 +104,7 @@ try{
   await open(fixture.fixtures.main.path);const baseline=await snapshot();assert.deepEqual(baseline.project.edits,[]);assert.equal(baseline.project.base.sha256,fixture.fixtures.main.sha256);
   await button('Show instrument');const instrument=page.getByRole('region',{name:'Instrument view'});
   await cursor(1,2);assert.equal(await page.getByRole('button',{name:'Play',exact:true}).isDisabled(),true,'Repeated cursor requires an occurrence');
-  await page.getByRole('combobox',{name:'Cursor occurrence',exact:true}).selectOption({label:'Measure 1, occurrence 2'});await button('Play');
+  await (await playbackCombo('Cursor occurrence')).selectOption({label:'Measure 1, occurrence 2'});await button('Play');
   const second=await waitStatus(value=>value.playing&&value.tick>=8640&&value.tick<10000);assert.equal(second.range,null);assert.equal(second.loop,null);result.checks.cursorOccurrence2=second;await stopPlayback();
 
   const beforeSelection=await status();await selectTiePassage();const selected=await status();assert.equal(selected.tick,beforeSelection.tick);assert.equal(selected.playing,false);assert.equal(selected.range,null);assert.equal(selected.loop,null);assert.equal(selected.generation,beforeSelection.generation);assert.deepEqual(await snapshot(),baseline);
@@ -116,7 +120,7 @@ try{
   await stopPlayback();await selectTiePassage();const selectedCapture=await capture('one-shot');await button('Play selection');await assertRange(960,2880);await waitStatus(value=>value.practice.phase==='ended'&&value.tick===2880);const bounded=await selectedCapture.finish();
   assert.ok(bounded.wave.rms(.2,.7)>.0001);assert.ok(bounded.wave.rms(2.2,2.9)<.0001,'Physical output is quiet after finite cutoff; native tests establish exact callback frame exclusivity');result.checks.finitePcmSilence=true;
 
-  await stopPlayback();await cursor(1,4);await page.getByRole('combobox',{name:'Cursor occurrence',exact:true}).selectOption({label:'Measure 1, occurrence 1'});const sentinelCapture=await capture('sentinel-positive-control');await button('Play from cursor');const sentinel=await sentinelCapture.finish();await stopPlayback();
+  await stopPlayback();await cursor(1,4);await (await playbackCombo('Cursor occurrence')).selectOption({label:'Measure 1, occurrence 1'});const sentinelCapture=await capture('sentinel-positive-control');await button('Play from cursor');const sentinel=await sentinelCapture.finish();await stopPlayback();
   const sentinelHz=fixture.expected.sentinelHz,positiveOnset=sentinel.wave.onset(),boundedOnset=bounded.wave.onset();
   const positive=sentinel.wave.band(sentinelHz,positiveOnset+.05,positiveOnset+.25);
   assert.ok(positive>.00005,'Exclusive-end sentinel has a detectable physical positive control');
@@ -125,7 +129,7 @@ try{
   result.checks.sentinelPositiveControl={sentinelHz,positiveOnset,boundedOnset,positive,boundedMaximum,ratio:boundedMaximum/positive,maximumRatio:.1};
 
   // Explicit Seek must win even though the canonical cursor points elsewhere.
-  await cursor(1,2);await page.getByLabel('Seek measure',{exact:true}).fill('3');await button('Seek');await waitStatus(value=>value.tick===11520);assert.equal(await page.getByRole('button',{name:'Play',exact:true}).getAttribute('title'),'Play from transport position');await button('Play');await waitStatus(value=>value.playing&&value.tick>=11520&&value.tick<12500&&value.range===null);await stopPlayback();result.checks.explicitSeekPriority=true;
+  await cursor(1,2);await (await playbackField('Seek measure')).fill('3');await button('Seek');await waitStatus(value=>value.tick===11520);assert.equal(await page.getByRole('button',{name:'Play',exact:true}).getAttribute('title'),'Play from transport position');await button('Play');await waitStatus(value=>value.playing&&value.tick>=11520&&value.tick<12500&&value.range===null);await stopPlayback();result.checks.explicitSeekPriority=true;
 
   await practice('fixed',{'Fixed tempo (BPM)':240,'Count-in bars':1,'Metronome volume (%)':0},{'Visual metronome':true,'Count in between loops':true});await selectTiePassage();await button('Play selection');const counting=await waitStatus(value=>value.practice.phase==='countIn');assert.equal(counting.tick,960);assert.deepEqual(counting.range,{startTick:960,endTick:2880});await button('Pause');const countPaused=await waitStatus(value=>value.practice.phase==='paused'&&value.practice.countInRemaining>0);await page.waitForTimeout(100);assert.equal((await status()).practice.countInRemaining,countPaused.practice.countInRemaining);await button('Play');await waitStatus(value=>value.practice.phase==='ended'&&value.tick===2880);assert.equal((await status()).practice.completedPasses,0);await stopPlayback();
   await button('Loop selection');await button('Play');const betweenLoops=await waitStatus(value=>value.practice.completedPasses===1&&value.practice.phase==='countIn');assert.equal(betweenLoops.tick,960);assert.equal(betweenLoops.range,null);assert.ok(betweenLoops.practice.countInRemaining>0);await stopPlayback();await button('Clear loop');result.checks.betweenLoopCount=true;
@@ -136,12 +140,12 @@ try{
   // Exercise its native ClearLoop contract with the existing finite bridge API.
   await page.evaluate(({owner,generation})=>window.__TAURI_INTERNALS__.invoke('audio_command',{owner,command:{type:'clearLoop',generation}}),{owner,generation:(await status()).generation});
   await waitStatus(value=>value.range===null&&value.loop===null&&value.playing);await stopPlayback();
-  await selectTiePassage();await button('Play selection');await assertRange(960,2880);await page.getByLabel('Seek measure',{exact:true}).fill('2');await button('Seek');await waitStatus(value=>value.range===null&&value.playing&&value.tick>=3840);await stopPlayback();result.checks.clearAndSeekRetireFiniteRange=true;
+  await selectTiePassage();await button('Play selection');await assertRange(960,2880);await (await playbackField('Seek measure')).fill('2');await button('Seek');await waitStatus(value=>value.range===null&&value.playing&&value.tick>=3840);await stopPlayback();result.checks.clearAndSeekRetireFiniteRange=true;
 
   // Score projection and actual pointer/keyboard selection stay canonical.
   await page.getByRole('combobox',{name:'Displayed tracks',exact:true}).selectOption('all');await page.getByLabel('Zoom (%)',{exact:true}).fill('115');await cursor(1,2);
   const fret=page.locator('[aria-label="Music notation"] svg text').filter({hasText:/^5$/}).first();await fret.scrollIntoViewIfNeeded();await fret.click();assert.match(await page.getByLabel('Editing location',{exact:true}).innerText(),/Selection guitar · Measure 1 · Beat 2/);
-  await page.keyboard.press('Shift+ArrowRight');assert.match(await page.locator('.inspector').innerText(),/2 notes · 2 beats/);await page.getByRole('combobox',{name:'Selection occurrence',exact:true}).selectOption({label:'Measure 1, occurrence 2 → measure 1, occurrence 2'});await button('Play selection');await assertRange(8640,10560);await waitStatus(value=>value.practice.phase==='ended');await stopPlayback();result.checks.canonicalZoomAllTracksPointerAndShift=true;
+  await page.keyboard.press('Shift+ArrowRight');assert.match(await page.locator('.inspector').innerText(),/2 notes · 2 beats/);await (await playbackCombo('Selection occurrence')).selectOption({label:'Measure 1, occurrence 2 → measure 1, occurrence 2'});await button('Play selection');await assertRange(8640,10560);await waitStatus(value=>value.practice.phase==='ended');await stopPlayback();result.checks.canonicalZoomAllTracksPointerAndShift=true;
   for(const width of [960,1280,1600])await picture('selected-playback-layout',width);
 
   // A display-only authored history entry must preserve the active native span.
@@ -162,10 +166,10 @@ try{
 
   // Whole-track passage must include the first ending; second-pass starts that
   // would skip it are excluded. No hidden source beat is selected for simile.
-  await open(fixture.fixtures.main.path);await button('Select track');assert.equal(await page.getByRole('combobox',{name:'Selection occurrence',exact:true}).locator('option').count(),2);await button('Loop selection');const completeRoute=await waitStatus(value=>value.loop?.startTick===0&&value.loop?.endTick===15360);assert.equal(completeRoute.playing,false);await button('Clear loop');result.checks.routeRequiresInternalEnding=true;
+  await open(fixture.fixtures.main.path);await button('Select track');assert.equal(await (await playbackCombo('Selection occurrence')).locator('option').count(),2);await button('Loop selection');const completeRoute=await waitStatus(value=>value.loop?.startTick===0&&value.loop?.endTick===15360);assert.equal(completeRoute.playing,false);await button('Clear loop');result.checks.routeRequiresInternalEnding=true;
   await open(fixture.fixtures.grace.path);await cursor(3,1);await button('Select bar');await button('Loop selection');const simile=await waitStatus(value=>value.loop!==null);assert.equal(simile.playing,false);assert.ok(simile.loop.endTick>simile.loop.startTick);await picture('simile-whole-bar');result.checks.completeSimileBar=true;
   await open(fixture.fixtures.rhythm.path);await cursor(2,1);await workspaceRegion().focus();await page.keyboard.press('Shift+ArrowRight');await button('Loop selection');const swing=await waitStatus(value=>value.loop!==null);assert.deepEqual(swing.loop,{startTick:960,endTick:1920});assert.equal(swing.playing,false);result.checks.pickupAndSwingPartialLoop=true;
-  await open(fixture.fixtures.directed.path);await cursor(1,1);assert.equal(await page.getByRole('combobox',{name:'Cursor occurrence',exact:true}).locator('option').count(),3);await page.getByRole('combobox',{name:'Cursor occurrence',exact:true}).selectOption({label:'Measure 1, occurrence 2'});await button('Play from cursor');await waitStatus(value=>value.playing&&value.tick>=15360);await stopPlayback();result.checks.directedOccurrence2=true;
+  await open(fixture.fixtures.directed.path);await cursor(1,1);assert.equal(await (await playbackCombo('Cursor occurrence')).locator('option').count(),3);await (await playbackCombo('Cursor occurrence')).selectOption({label:'Measure 1, occurrence 2'});await button('Play from cursor');await waitStatus(value=>value.playing&&value.tick>=15360);await stopPlayback();result.checks.directedOccurrence2=true;
   await button('New');await waitStatus(value=>value.ready&&value.range===null&&value.loop===null&&!value.playing);result.checks.newClearsPlayback=true;
 
   for(const source of Object.values(fixture.fixtures))assert.equal(sha256(readFileSync(source.path)),source.sha256);assert.equal(sha256(readFileSync(fixture.backing.path)),fixture.backing.sha256);assert.deepEqual(errors,[]);

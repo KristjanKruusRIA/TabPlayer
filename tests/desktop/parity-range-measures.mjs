@@ -1,4 +1,4 @@
-import {waitForWorkspaceIdle,clickWorkstationButton} from './workstation-commands.mjs';
+import {waitForWorkspaceIdle,closeWelcomeLibrary,clickWorkstationButton} from './workstation-commands.mjs';
 import { readActiveDocument } from './document-context.mjs';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
@@ -12,7 +12,7 @@ const saved=resolve(directory,'gp8-range-measures.tabplayer'),exported=resolve(d
 const sourceHash=createHash('sha256').update(readFileSync(fixturePath)).digest('hex'),result={};
 let id=launch({TABPLAYER_TEST_OPEN:fixturePath,TABPLAYER_TEST_SAVE:saved,TABPLAYER_TEST_EXPORT:exported}),browser,page;
 try{
-  browser=await connect();page=browser.contexts()[0].pages()[0];await waitForWorkspaceIdle(page);
+  browser=await connect();page=browser.contexts()[0].pages()[0];await closeWelcomeLibrary(page);await waitForWorkspaceIdle(page);
   await page.setViewportSize({width:1440,height:1400});
   const errors=[];page.on('pageerror',error=>errors.push(error.message));
   const snapshot=()=>readActiveDocument(page);
@@ -73,7 +73,7 @@ try{
   assert.ok(native.playing&&native.outputPeak>.001);result.nativeAudio=true;await button('Stop');
   await button('Save');const persisted=JSON.parse(readFileSync(saved,'utf8'));assert.equal(persisted.base.sha256,sourceHash);assert.deepEqual(errors,[]);
   await page.locator('.inspector').evaluate(node=>{node.scrollTop=0;});await page.screenshot({path:resolve('.analysis/parity/native-range-measures.png')});
-  await browser.close();browser=null;stop(id);id=launch({TABPLAYER_TEST_OPEN:saved,TABPLAYER_TEST_EXPORT:exported});browser=await connect();page=browser.contexts()[0].pages()[0];await waitForWorkspaceIdle(page);await button('Open');
+  await browser.close();browser=null;stop(id);id=launch({TABPLAYER_TEST_OPEN:saved,TABPLAYER_TEST_EXPORT:exported});browser=await connect();page=browser.contexts()[0].pages()[0];await closeWelcomeLibrary(page);await waitForWorkspaceIdle(page);await button('Open');
   assert.deepEqual((await snapshot()).project.edits,persisted.edits);await button('Export GP');assert.deepEqual((await music()).notes,transposed.notes);
   assert.equal(createHash('sha256').update(readFileSync(fixturePath)).digest('hex'),sourceHash);result.sourceUnchanged=true;result.processRestartReopen=true;result.commands=persisted.edits.length;
   writeFileSync(resolve('.analysis/parity/native-range-measures-result.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result));

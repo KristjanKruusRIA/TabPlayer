@@ -1,3 +1,4 @@
+import { getMessage, getResolvedLanguage, type SupportedLanguage } from '../i18n';
 import { model, type Settings } from '@coderline/alphatab';
 
 /** A capo over some strings only. `strings` count from 1 for the lowest-pitched string, as notes do; `fret` is where the bar sits. */

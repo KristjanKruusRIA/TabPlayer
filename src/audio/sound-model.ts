@@ -1,3 +1,4 @@
+import { getMessage, getResolvedLanguage, type SupportedLanguage, type MessageKey } from '../i18n';
 import { defaultEffects } from '../document-settings';
 import type { EffectBlock, TrackSound } from '../edit-types';
 
@@ -14,6 +15,91 @@ export type NumericControl={key:string;label:string;min:number;max:number;step:n
 /** The graphic EQ's bands, an octave apart, as their centres are named. */
 export const graphicBands=['31','63','125','250','500','1k','2k','4k','8k','16k'];
 export const presetIds=['gm','clean','crunch','lead','bass'] as const;
+
+export function localizedBlockName(block: EffectBlock, lang?: SupportedLanguage): string {
+  const language = lang ?? getResolvedLanguage();
+  return getMessage(language, `block.${block}` as MessageKey) || blockNames[block];
+}
+
+export function localizedPresetName(id: string, lang?: SupportedLanguage): string {
+  const language = lang ?? getResolvedLanguage();
+  const map: Record<string, MessageKey> = {
+    gm: 'sound.preset_bypass',
+    clean: 'sound.preset_clean',
+    crunch: 'sound.preset_crunch',
+    lead: 'sound.preset_lead',
+    bass: 'sound.preset_bass',
+  };
+  const key = map[id];
+  return key ? getMessage(language, key) : (id === 'gm' ? 'Bypass' : id[0].toUpperCase() + id.slice(1));
+}
+
+export function localizedAmpModelName(model: string, lang?: SupportedLanguage): string {
+  const language = lang ?? getResolvedLanguage();
+  const map: Record<string, MessageKey> = {
+    clean: 'sound.amp_clean',
+    crunch: 'sound.amp_crunch',
+    lead: 'sound.amp_lead',
+    metal: 'sound.amp_metal',
+    bass: 'sound.amp_bass',
+    bassDrive: 'sound.amp_bass_drive',
+  };
+  const key = map[model];
+  return key ? getMessage(language, key) : modelName(model);
+}
+
+export function localizedCabinetModelName(model: string, lang?: SupportedLanguage): string {
+  const language = lang ?? getResolvedLanguage();
+  const map: Record<string, MessageKey> = {
+    open: 'sound.cab_open',
+    closed: 'sound.cab_closed',
+    combo: 'sound.cab_combo',
+    bass: 'sound.cab_bass',
+    bassStack: 'sound.cab_bass_stack',
+  };
+  const key = map[model];
+  return key ? getMessage(language, key) : modelName(model);
+}
+
+export function localizedParamLabel(block: EffectBlock, key: string, defaultLabel: string, lang?: SupportedLanguage): string {
+  const language = lang ?? getResolvedLanguage();
+  const map: Record<string, MessageKey> = {
+    thresholdDb: 'param.threshold_db',
+    releaseMs: 'param.release_ms',
+    ratio: 'param.ratio',
+    attackMs: 'param.attack_ms',
+    makeupDb: 'param.makeup_db',
+    position: 'param.pedal_position',
+    resonance: 'param.resonance',
+    sensitivity: 'param.sensitivity',
+    mix: 'param.mix',
+    octaveDown: 'param.octave_down',
+    twoOctavesDown: 'param.two_octaves_down',
+    direct: 'param.direct',
+    semitones: 'param.semitones',
+    drive: 'param.drive',
+    tone: 'param.tone',
+    levelDb: 'param.level_db',
+    gainDb: 'param.gain_db',
+    bassDb: 'param.bass_db',
+    midDb: 'param.mid_db',
+    trebleDb: 'param.treble_db',
+    presenceDb: 'param.presence_db',
+    lowDb: 'param.low_db',
+    highDb: 'param.high_db',
+    midHz: 'param.mid_hz',
+    rateHz: 'param.rate_hz',
+    depthCents: 'param.depth_cents',
+    depth: 'param.depth',
+    depthMs: 'param.depth_ms',
+    feedback: 'param.feedback',
+    room: 'param.room',
+    damping: 'param.damping',
+  };
+  const msgKey = map[key];
+  return msgKey ? getMessage(language, msgKey) : defaultLabel;
+}
+
 export const presetName=(id:string)=>id==='gm'?'Bypass':id[0].toUpperCase()+id.slice(1);
 export const ampModels=['clean','crunch','lead','metal','bass','bassDrive'] as const,cabinetModels=['open','closed','combo','bass','bassStack'] as const;
 export const modelName=(model:string)=>model.replace(/[A-Z]/g,letter=>` ${letter.toLowerCase()}`);

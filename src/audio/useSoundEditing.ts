@@ -1,3 +1,4 @@
+import { getMessage, getResolvedLanguage } from '../i18n';
 import { useCallback, useEffect, useId, useRef, useState, useSyncExternalStore } from 'react';
 import type React from 'react';
 import { chainOrder, completeSound, defaultEffects, effectBlocks, laterFields } from '../document-settings';
@@ -98,7 +99,7 @@ export function useSoundEditing({trackId,sound,onEdit,playback,busy=false,shown=
   };
   const first:Board={effects:current.effects,second:false,name:label=>label,
     build:change=>{const next=structuredClone(current);change(next.effects);return next;},write:change=>save(first.build(change))};
-  const second:Board|null=current.effects.second?{effects:current.effects.second,second:true,name:label=>`Second pedalboard: ${label}`,
+  const second:Board|null=current.effects.second?{effects:current.effects.second,second:true,name:label=>getMessage(getResolvedLanguage(), 'sound.second_pedalboard_label', { label }),
     build:change=>{const next=structuredClone(current),board=next.effects.second!;change(board);if(effectBlocks.every(block=>!board[block].enabled))delete next.effects.second;return next;},
     write:change=>save(second!.build(change))}:null;
   /** Sets one field of `block`. A field added after sounds could be saved is left out while 0, as the native player writes it. */

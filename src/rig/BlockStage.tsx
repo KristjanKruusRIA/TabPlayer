@@ -3,7 +3,7 @@ import { useLayoutEffect, useRef } from 'react';
 import type { ReactNode } from 'react';
 import { defaultEffects, delayDivisions, modulationDivisions, syncedBlocks } from '../document-settings';
 import type { EffectBlock } from '../edit-types';
-import { ampModels, blockNames, cabinetModels, graphicBands, modelName, parameters } from '../audio/sound-model';
+import { ampModels, blockNames, cabinetModels, graphicBands, modelName, parameters, localizedBlockName, localizedParamLabel, localizedAmpModelName, localizedCabinetModelName } from '../audio/sound-model';
 import type { NumericControl } from '../audio/sound-model';
 import type { Board, SoundEditing } from '../audio/useSoundEditing';
 import { Fader, Knob, Segmented, busyGuard } from '../ui';
@@ -91,7 +91,7 @@ function AmpStage({editing,board}:{editing:SoundEditing;board:Board}) {
 /** The four placements as spots over a speaker, the model of cabinet and the mic's output. The microphone is its own block, so a
  * cabinet's stage offers its switch too. */
 function CabinetStage({editing,board,block,cabinetResponse}:{editing:SoundEditing;board:Board;block:'cabinet'|'microphone';cabinetResponse?:(board:Board)=>ReactNode}) {
-  const { t } = useI18n();
+  const { lang, t } = useI18n();
   const {fx,busy}=editing,mic=board.effects.microphone,off=!mic.enabled;
   const placements=(['close','standard','edge','room'] as const).map(value=>({value,label:<><span className="rig-spot-dot" aria-hidden="true"/><span className="rig-spot-name">{capital(value)}</span></>,style:{left:`${micSpots[value].x}%`,top:`${micSpots[value].y}%`,...(value==='close'?{flexDirection:'column-reverse' as const}:{})}}));
   return <div className="rig-cab-stage">
@@ -101,7 +101,7 @@ function CabinetStage({editing,board,block,cabinetResponse}:{editing:SoundEditin
       <Segmented className="rig-spots" label={board.name('Microphone placement')} value={mic.placement} options={placements} disabled={busy} onChange={value=>fx(board,'microphone','placement',value)}/>
     </div></div>
     <div className="rig-cab-side">
-      {block==='cabinet'&&<Choice label={boardName(board,t,t('rig.cabinet_model'))} value={board.effects.cabinet.model} disabled={busy} onChange={value=>fx(board,'cabinet','model',value)} options={cabinetModels.map(item=>[item,capital(modelName(item))] as const)}/>}
+      {block==='cabinet'&&<Choice label={boardName(board,t,t('rig.cabinet_model'))} value={board.effects.cabinet.model} disabled={busy} onChange={value=>fx(board,'cabinet','model',value)} options={cabinetModels.map(item=>[item,capital(localizedCabinetModelName(item,lang))] as const)}/>}
       <Choice label={boardName(board,t,t('rig.microphone_output'))} value={mic.output} disabled={busy} onChange={value=>fx(board,'microphone','output',value)} options={[['stereo',t('rig.stereo')],['mono',t('rig.mono')]]}/>
       {block==='cabinet'&&<div className="rig-field"><span className="rig-field-name">{t('rig.microphone')}</span><Footswitch editing={editing} board={board} block="microphone"/></div>}
       <p className="rig-note">{off?t('rig.mic_bypassed_note'):t('rig.mic_placement_note',{placement:capital(mic.placement)})}</p>
@@ -114,8 +114,8 @@ function GraphicEqStage({editing,board}:{editing:SoundEditing;board:Board}) {
   const { t } = useI18n();
   const gains=board.effects.graphicEq.gainsDb,{fx,busy}=editing;
   return <div className="rig-geq-stage">
-    <div className="rig-geq" role="group" aria-label={board.name('Graphic EQ bands')}>
-      {graphicBands.map((band,index)=><Fader key={band} label={band} ariaLabel={board.name(`Graphic EQ ${band} Hz (dB)`)} unit="" bipolar min={-12} max={12} step={.5} defaultValue={0} value={gains[index]} disabled={busy} onCommit={value=>fx(board,'graphicEq','gainsDb',gains.map((gain,other)=>other===index?value:gain))} onInput={value=>editing.hearField(board,'graphicEq','gainsDb',gains.map((gain,other)=>other===index?value:gain))} onInputEnd={committed=>{if(!committed)void editing.endLive();}}/>)}
+    <div className="rig-geq" role="group" aria-label={board.name(t('sound.graphic_eq_bands'))}>
+      {graphicBands.map((band,index)=><Fader key={band} label={band} ariaLabel={board.name(t('sound.graphic_eq_band_label',{band}))} unit="" bipolar min={-12} max={12} step={.5} defaultValue={0} value={gains[index]} disabled={busy} onCommit={value=>fx(board,'graphicEq','gainsDb',gains.map((gain,other)=>other===index?value:gain))} onInput={value=>editing.hearField(board,'graphicEq','gainsDb',gains.map((gain,other)=>other===index?value:gain))} onInputEnd={committed=>{if(!committed)void editing.endLive();}}/>)}
     </div>
     <div className="rig-geq-side">
       <BlockKnobs editing={editing} board={board} block="graphicEq" tone="pedal"/>
@@ -141,7 +141,7 @@ let stageFocusHandoff:{trackId:string;block:EffectBlock;role:string|null;classNa
 
 /** The selected block's controls: drawn as the gear it is, with its knobs, models and the actions every block shares. */
 export function BlockStage({editing,selected,cabinetResponse}:{editing:SoundEditing;selected:BlockRef;cabinetResponse?:(board:Board)=>ReactNode}) {
-  const { t } = useI18n();
+  const { lang, t } = useI18n();
   const {block}=selected,board=selected.second&&editing.second?editing.second:editing.first;
   const {order,busy,clipboard,second}=editing,index=order.indexOf(block);
   const name=blockNames[block];
@@ -179,7 +179,7 @@ export function BlockStage({editing,selected,cabinetResponse}:{editing:SoundEdit
     <header className="rig-stage-head">
       <h2>{board.second?t('rig.second_pedalboard_title',{name}):name}</h2>
       {!board.second&&<span className="rig-stage-place">{t('rig.n_of_total',{current:index+1,total:order.length})}</span>}
-      {block==='amp'&&<Choice label={boardName(board,t,t('rig.amp_model'))} value={board.effects.amp.model} disabled={busy} onChange={value=>editing.fx(board,'amp','model',value)} options={ampModels.map(item=>[item,capital(modelName(item))] as const)}/>}
+      {block==='amp'&&<Choice label={boardName(board,t,t('rig.amp_model'))} value={board.effects.amp.model} disabled={busy} onChange={value=>editing.fx(board,'amp','model',value)} options={ampModels.map(item=>[item,capital(localizedAmpModelName(item,lang))] as const)}/>}
       <div className="rig-stage-actions">
         <Footswitch editing={editing} board={board} block={block}/>
         <button type="button" aria-label={boardName(board,t,t('rig.copy_pedal_named',{name}))} {...busyGuard({busy,className:'rig-button',onClick:()=>editing.copyPedalOf(board,block)})}><span className="rig-long">{t('rig.copy_pedal')}</span><span className="rig-short" aria-hidden="true">{t('rig.copy')}</span></button>

@@ -10,7 +10,8 @@ import {
   type WheelEvent as ReactWheelEvent,
 } from 'react';
 import { formatPitch, formatTuning, parseTuning } from './tuning';
-import { findTuningPreset, instrumentTitle, presetWithPitches, tuningPresets } from './tuning-presets';
+import { findTuningPreset, instrumentTitle, presetWithPitches, tuningPresets, tuningGroupTitle, tuningPresetName } from './tuning-presets';
+import { useI18n } from './i18n';
 import { SavedTuningsDialog } from './tuning/SavedTuningsDialog';
 import { AuditionButtons } from './tuning/AuditionButtons';
 import { busyGuard } from './ui/useBusyGuard';
@@ -53,6 +54,7 @@ export function TuningInput({
   onAudition?: (pitches: number[], strum: boolean) => void;
   stringCount?: number;
 }) {
+  const { lang } = useI18n();
   const [custom, setCustom] = useState(false);
   // Pitches can belong to several instruments; remember the picked preset so the select does not rename it.
   const [chosen, setChosen] = useState<string | null>(null);

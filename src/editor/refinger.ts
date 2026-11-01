@@ -107,7 +107,7 @@ export function planStaffRefinger(
 ): { moves: Array<{ note: model.Note } & Place>; unreachable: Unreachable[]; chords: ChordMove[]; chordProblems: string[] } {
   const to = target.tuning.length;
   if (to !== staff.tuning.length) {
-    throw new Error('Retuning must keep the current string count.');
+    throw new Error(getMessage(getResolvedLanguage(), 'engine.retuning_keep_string_count'));
   }
 
   const targetTuning = target.tuning;
@@ -240,7 +240,7 @@ export function planStaffRefinger(
   for (const { note, string, fret } of moves) {
     const sounding = targetOpenPitch(string) + currentTransposition - targetTransposition + fret + droneShift(staff, string, fret, targetDrone) + note.harmonicPitch;
     if (!Number.isFinite(sounding) || sounding < 0 || sounding > 127) {
-      throw new Error('Staff settings put a note outside the playable MIDI pitch range.');
+      throw new Error(getMessage(getResolvedLanguage(), 'refinger.note_outside_midi_pitch'));
     }
   }
 

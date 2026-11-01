@@ -1,25 +1,25 @@
 import { useEffect,useMemo,useRef,useState } from 'react';
 import { createPortal } from 'react-dom';
 import { formatTuning,parseTuning } from '../tuning';
-import { instrumentTitle, tuningPresets } from '../tuning-presets';
+import { instrumentTitle, tuningGroupTitle, tuningPresetName, tuningPresets } from '../tuning-presets';
 import { AuditionButtons } from './AuditionButtons';
 import { isXmlText,newTuningId,putTuningLibraryEntry,readTuningLibrary,removeTuningLibraryEntry,subscribeTuningLibrary,tuningNameError,type SavedTuning } from './library';
 import { Dialog } from '../ui/Dialog';
-import { useI18n } from '../i18n';
+import { useI18n, getMessage, getResolvedLanguage } from '../i18n';
 import './saved-tunings-dialog.css';
 
 type Identity={kind:'personal';id:string}|{kind:'builtin';index:number};
 const message=(cause:unknown)=>cause instanceof Error?cause.message:String(cause);
-const groups=[...new Set(tuningPresets.map(p=>`${p.instrument}/${p.strings}`))].map(key=>{
-  const members=tuningPresets.map((preset,index)=>({preset,index})).filter(({preset})=>`${preset.instrument}/${preset.strings}`===key),first=members[0].preset;
-  return {key,title:`${instrumentTitle(first.instrument)} · ${first.strings} strings`,members};
-});
 const parsed=(text:string):{notes:number[]}|{error:string}=>{try{return {notes:parseTuning(text)};}catch(cause){return {error:message(cause)};}};
 const same=(a:readonly number[],b:readonly number[])=>a.length===b.length&&a.every((pitch,index)=>pitch===b[index]);
 
 /** Mounted only while open; closing or unmounting discards every late library response. */
 export function SavedTuningsDialog({notes,name,onUse,onClose,onAudition}:{notes:string;name:string;onUse:(notes:string,name:string)=>void;onClose:()=>void;onAudition?:(pitches:number[],strum:boolean)=>void}) {
-  const { t } = useI18n();
+  const { lang, t } = useI18n();
+  const groups=useMemo(()=>[...new Set(tuningPresets.map(p=>`${p.instrument}/${p.strings}`))].map(key=>{
+    const members=tuningPresets.map((preset,index)=>({preset,index})).filter(({preset})=>`${preset.instrument}/${preset.strings}`===key),first=members[0].preset;
+    return {key,title:tuningGroupTitle(first.instrument,first.strings,lang),members};
+  }),[lang]);
   const [entries,setEntries]=useState<SavedTuning[]>([]),[loaded,setLoaded]=useState(false),[readError,setReadError]=useState(''),[error,setError]=useState(''),[pending,setPending]=useState(false);
   const [selection,setSelection]=useState<Identity|null>(null),[detailNotes,setDetailNotes]=useState(notes),[detailName,setDetailName]=useState(name);
   // details counts selections and detail edits, so a library response that settles after the user moved on leaves them alone.
@@ -28,7 +28,7 @@ export function SavedTuningsDialog({notes,name,onUse,onClose,onAudition}:{notes:
     const token=++generation.current,live=()=>generation.current===token;
     const apply=(next:SavedTuning[])=>{if(!live())return;setEntries(next);setLoaded(true);setReadError('');};
     const stop=subscribeTuningLibrary(library=>apply(library.entries));
-    readTuningLibrary().then(library=>apply(library.entries),cause=>{if(live()){setLoaded(true);setReadError(`Could not read saved tunings: ${message(cause)}`);}});
+    readTuningLibrary().then(library=>apply(library.entries),cause=>{if(live()){setLoaded(true);setReadError(getMessage(getResolvedLanguage(),'tuning.read_error',{message:message(cause)}));}});
     return()=>{generation.current++;stop();};
   },[]);
   // A removed personal entry stays only as an independent unsaved draft.
@@ -61,26 +61,26 @@ export function SavedTuningsDialog({notes,name,onUse,onClose,onAudition}:{notes:
   return createPortal(<Dialog title={t('tuning.saved_tunings_title')} onClose={onClose} className="saved-tunings-dialog" actions={actions}>
     <div className="saved-tunings-body">
       <div className="saved-tunings-list">
-        <section aria-labelledby="saved-tunings-personal"><h3 id="saved-tunings-personal">Personal</h3>
-          {entries.length?<ul>{entries.map(entry=>row({kind:'personal',id:entry.id},entry.id,entry.name,entry.tuning))}</ul>:<p className="muted">{readError?'Personal tunings are unavailable.':loaded?'No personal tunings saved yet.':'Loading saved tunings…'}</p>}
+        <section aria-labelledby="saved-tunings-personal"><h3 id="saved-tunings-personal">{t('tuning.personal_heading')}</h3>
+          {entries.length?<ul>{entries.map(entry=>row({kind:'personal',id:entry.id},entry.id,entry.name,entry.tuning))}</ul>:<p className="muted">{readError?t('tuning.personal_unavailable'):loaded?t('tuning.no_personal_tunings'):t('tuning.loading_tunings')}</p>}
         </section>
-        <section aria-labelledby="saved-tunings-builtin"><h3 id="saved-tunings-builtin">Built-in</h3>
-          {groups.map(group=><div key={group.key} role="group" aria-label={group.title}><h4>{group.title}</h4><ul>{group.members.map(({preset,index})=>row({kind:'builtin',index},preset.id,preset.name,preset.tuning))}</ul></div>)}
+        <section aria-labelledby="saved-tunings-builtin"><h3 id="saved-tunings-builtin">{t('tuning.builtin_heading')}</h3>
+          {groups.map(group=><div key={group.key} role="group" aria-label={group.title}><h4>{group.title}</h4><ul>{group.members.map(({preset,index})=>row({kind:'builtin',index},preset.id,tuningPresetName(preset,lang),preset.tuning))}</ul></div>)}
         </section>
       </div>
-      <div className="saved-tunings-details"><h3>Details</h3>
-        <label>Saved tuning name<input ref={nameInput} data-autofocus value={detailName} aria-describedby="saved-tuning-name-help" aria-invalid={trimmed&&nameProblem?true:undefined} onChange={e=>{details.current++;setDetailName(e.target.value);}}/></label>
-        <p className="muted" id="saved-tuning-name-help">{trimmed&&nameProblem?nameProblem:'A name is needed to save. Using a tuning does not require one.'}</p>
-        <label>Saved tuning pitches (notes, high to low)<input value={detailNotes} aria-invalid={'error' in result?true:undefined} aria-describedby="saved-tuning-pitch-help" onChange={e=>{details.current++;setDetailNotes(e.target.value);setDetailName('');setSelection(null);setError('');}}/></label>
-        <p className={'error' in result?'saved-tuning-problem':'muted'} id="saved-tuning-pitch-help">{'error' in result?result.error:`${result.notes.length} strings. Built-in tunings cannot be changed; save a copy to keep your own.`}</p>
+      <div className="saved-tunings-details"><h3>{t('tuning.details_heading')}</h3>
+        <label>{t('tuning.saved_tuning_name')}<input ref={nameInput} data-autofocus value={detailName} aria-describedby="saved-tuning-name-help" aria-invalid={trimmed&&nameProblem?true:undefined} onChange={e=>{details.current++;setDetailName(e.target.value);}}/></label>
+        <p className="muted" id="saved-tuning-name-help">{trimmed&&nameProblem?nameProblem:t('tuning.name_help')}</p>
+        <label>{t('tuning.saved_tuning_pitches')}<input value={detailNotes} aria-invalid={'error' in result?true:undefined} aria-describedby="saved-tuning-pitch-help" onChange={e=>{details.current++;setDetailNotes(e.target.value);setDetailName('');setSelection(null);setError('');}}/></label>
+        <p className={'error' in result?'saved-tuning-problem':'muted'} id="saved-tuning-pitch-help">{'error' in result?result.error:t('tuning.builtin_immutable_help',{count:result.notes.length})}</p>
         {onAudition&&'notes' in result&&<AuditionButtons pitches={result.notes} onAudition={onAudition}/>}
         <div className="saved-tunings-actions">
           <button type="button" disabled={!canSaveNew} aria-disabled={pending||undefined} onClick={saveNew}>{t('tuning.save_new')}</button>
           <button type="button" disabled={!canSaveChanges} aria-disabled={pending||undefined} onClick={saveChanges}>{t('tuning.save_changes')}</button>
-          <button type="button" disabled={!selectedEntry} aria-disabled={pending||undefined} onClick={remove}>Delete</button>
+          <button type="button" disabled={!selectedEntry} aria-disabled={pending||undefined} onClick={remove}>{t('action.delete')}</button>
         </div>
         {(readError||error)&&<p role="alert" className="saved-tuning-problem">{error||readError}</p>}
-        <p className="muted">Saving only updates your library. Use tuning fills the draft; Apply changes the score.</p>
+        <p className="muted">{t('tuning.save_help')}</p>
       </div>
     </div>
   </Dialog>,document.body);

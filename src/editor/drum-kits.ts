@@ -1,3 +1,4 @@
+import { getMessage, getResolvedLanguage, type SupportedLanguage, type MessageKey } from '../i18n';
 import kitData from '../audio/drum-kits.json';
 import { standardPercussionCatalog } from './percussion-catalog';
 

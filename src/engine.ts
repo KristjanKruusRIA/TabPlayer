@@ -1,3 +1,4 @@
+import { getMessage, getResolvedLanguage, type MessageKey } from './i18n';
 import { model, Settings } from '@coderline/alphatab';
 import type { BeatTarget, EditCommand, Project, ProjectInput } from './project';
 import { appliesFilePartialCapo,projectCommands } from './project';
@@ -42,37 +43,41 @@ const supportedDurations=[-4,-2,1,2,4,8,16,32,64,128,256];
 const trackIdentities=new WeakMap<model.Track,string>();
 export const trackIdentity=(track:model.Track)=>trackIdentities.get(track) ?? `base/${track.index}`;
 
+function refusal(key: MessageKey, params?: Record<string, string | number>): Error {
+  return new Error(getMessage(getResolvedLanguage(), key, params));
+}
+
 function tuningValid(tuning: number[]) {
-  if (!Array.isArray(tuning) || !tuning.length || tuning.some(n => !integer(n) || n > 127)) throw new Error('Use MIDI tuning pitches from 0 to 127.');
+  if (!Array.isArray(tuning) || !tuning.length || tuning.some(n => !integer(n) || n > 127)) throw refusal('engine.tuning_pitch_range');
 }
 
 export function validateProject(value: unknown): Project {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid project.');
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw refusal('engine.invalid_project');
   const input = value as ProjectInput;
-  if (input.format !== 'TabPlayer' || ![1,2,3].includes(input.schemaVersion)) throw new Error('Unsupported project version.');
+  if (input.format !== 'TabPlayer' || ![1,2,3].includes(input.schemaVersion)) throw refusal('engine.unsupported_project_version');
   const hasLock=Object.hasOwn(input,'lock'),hasPartialCapo=Object.hasOwn(input,'partialCapo');
   const fields=['format','schemaVersion','engineVersion','base','edits',...(input.schemaVersion>=2?['assets']:[]),...(input.schemaVersion===3?['baselineEdits']:[]),...(hasLock?['lock']:[]),...(hasPartialCapo?['partialCapo']:[])];
-  if(Object.keys(input).length!==fields.length || fields.some(field=>!Object.hasOwn(input,field)))throw new Error('Invalid project fields.');
+  if(Object.keys(input).length!==fields.length || fields.some(field=>!Object.hasOwn(input,field)))throw refusal('engine.invalid_project_fields');
   const p:Project={...structuredClone(input),schemaVersion:3,assets:input.schemaVersion===1?{}:structuredClone(input.assets),baselineEdits:input.schemaVersion===3?structuredClone(input.baselineEdits):[]};
-  if(hasLock){const lock=(input as {lock?:unknown}).lock;if(!lock||typeof lock!=='object'||Array.isArray(lock)||Object.keys(lock).length!==1||(lock as {kind?:unknown}).kind!=='finalized')throw new Error('Invalid project lock.');}
-  if(hasPartialCapo&&((input as {partialCapo?:unknown}).partialCapo!==true||input.base?.kind!=='file'))throw new Error('Invalid partial capo marker.');
-  if (p.engineVersion !== '1.8.4') throw new Error('This project requires a different engine version.');
-  if (!p.base || !['blank', 'file'].includes(p.base.kind) || !Array.isArray(p.edits) || !Array.isArray(p.baselineEdits)) throw new Error('Invalid project contents.');
+  if(hasLock){const lock=(input as {lock?:unknown}).lock;if(!lock||typeof lock!=='object'||Array.isArray(lock)||Object.keys(lock).length!==1||(lock as {kind?:unknown}).kind!=='finalized')throw refusal('engine.invalid_project_lock');}
+  if(hasPartialCapo&&((input as {partialCapo?:unknown}).partialCapo!==true||input.base?.kind!=='file'))throw refusal('engine.invalid_partial_capo_marker');
+  if (p.engineVersion !== '1.8.4') throw refusal('engine.engine_version_mismatch');
+  if (!p.base || !['blank', 'file'].includes(p.base.kind) || !Array.isArray(p.edits) || !Array.isArray(p.baselineEdits)) throw refusal('engine.invalid_project_contents');
   const baseFields=p.base.kind==='blank'?['kind','title','artist','tempo','tuning','measureCount']:['kind','filename','bytesBase64','sha256'];
-  if(Object.keys(p.base).length!==baseFields.length || baseFields.some(field=>!Object.hasOwn(p.base,field)))throw new Error('Invalid project base fields.');
+  if(Object.keys(p.base).length!==baseFields.length || baseFields.some(field=>!Object.hasOwn(p.base,field)))throw refusal('engine.invalid_project_base_fields');
   if (p.base.kind === 'blank') {
     tuningValid(p.base.tuning);
-    if (typeof p.base.title!=='string' || typeof p.base.artist!=='string' || !integer(p.base.measureCount, 1) || !Number.isFinite(p.base.tempo) || p.base.tempo <= 0) throw new Error('Invalid new-score settings.');
+    if (typeof p.base.title!=='string' || typeof p.base.artist!=='string' || !integer(p.base.measureCount, 1) || !Number.isFinite(p.base.tempo) || p.base.tempo <= 0) throw refusal('engine.invalid_new_score_settings');
   } else if (typeof p.base.bytesBase64 !== 'string' || typeof p.base.filename !== 'string' || !/^[a-f0-9]{64}$/i.test(p.base.sha256)) {
-    throw new Error('Invalid original score data.');
+    throw refusal('engine.invalid_original_score_data');
   }
-  if(!p.assets || typeof p.assets!=='object' || Array.isArray(p.assets)) throw new Error('Invalid project asset metadata.');
+  if(!p.assets || typeof p.assets!=='object' || Array.isArray(p.assets)) throw refusal('engine.invalid_project_asset_metadata');
   for(const [id,asset] of Object.entries(p.assets)) {
-    if(!/^[a-f0-9]{64}$/i.test(id) || !asset || Object.keys(asset).some(key=>!['filename','mediaType','byteLength'].includes(key)) || typeof asset.filename!=='string' || typeof asset.mediaType!=='string' || !integer(asset.byteLength)) throw new Error('Invalid project asset metadata.');
+    if(!/^[a-f0-9]{64}$/i.test(id) || !asset || Object.keys(asset).some(key=>!['filename','mediaType','byteLength'].includes(key)) || typeof asset.filename!=='string' || typeof asset.mediaType!=='string' || !integer(asset.byteLength)) throw refusal('engine.invalid_project_asset_metadata');
   }
   for(const edit of projectCommands(p)) {
     validateParityCommand(edit);
-    if(edit.type==='setBacking' && edit.backing && !p.assets[edit.backing.assetId]) throw new Error('Backing audio asset is missing.');
+    if(edit.type==='setBacking' && edit.backing && !p.assets[edit.backing.assetId]) throw refusal('engine.backing_asset_missing');
   }
   return structuredClone(p);
 }
@@ -89,28 +94,28 @@ const restLengths=[1,2,4,8,16,32,64].flatMap(duration=>[0,1,2].map(dots=>({durat
  * notes before a removed beat go whole), then the remainder is written as the fewest standard rests. A crossing beat
  * is removed, not split. A last note tied into the next measure, or a remainder no standard rest can write, is refused. */
 function fitVoiceToMeasure(master: model.MasterBar, voice: model.Voice) {
-  if (master.isFreeTime) throw new Error('A free-time measure has no length to fill.');
+  if (master.isFreeTime) throw refusal('engine.free_time_fill');
   const expected = master.calculateDuration(false), whole = voiceTicks(voice, expected);
-  if (!whole) throw new Error('This voice is unused; there is nothing to fill.');
-  if (whole[0] === expected * whole[1]) throw new Error('This voice is already complete.');
+  if (!whole) throw refusal('engine.voice_unused_fill');
+  if (whole[0] === expected * whole[1]) throw refusal('engine.voice_complete_fill');
   const cut = whole[0] > expected * whole[1] ? trimStart(voice, expected) : voice.beats.length;
   const kept = voice.beats.slice(0, cut), removed = voice.beats.slice(cut);
   let total: Fraction = [0, 1];
   for (const beat of kept) total = addTicks(total, writtenTicks(beat, expected));
   const missing = expected * total[1] - total[0];
-  if (missing % total[1]) throw new Error('The missing time cannot be written as standard rests.');
+  if (missing % total[1]) throw refusal('engine.cannot_fill_standard_rests');
   let left = missing / total[1];
   const added: model.Beat[] = [];
   while (left > 0) {
     const length = restLengths.find(candidate => candidate.ticks <= left);
-    if (!length) throw new Error('The missing time cannot be written as standard rests.');
+    if (!length) throw refusal('engine.cannot_fill_standard_rests');
     const inserted = rest(length.duration, length.dots); inserted.voice = voice; added.push(inserted); left -= length.ticks;
   }
   if (added.length) {
     const lastSounding = [...kept].reverse().find(beat => beat.graceType === model.GraceType.None);
     for (const note of lastSounding?.notes ?? []) {
       const next = note.tieDestination;
-      if (next && !removed.includes(next.beat) && next.beat.voice.bar !== voice.bar) throw new Error('The last note is tied into the next measure, so rests cannot follow it. Remove the tie first.');
+      if (next && !removed.includes(next.beat) && next.beat.voice.bar !== voice.bar) throw refusal('engine.tied_note_fill');
     }
   }
   for (const beat of removed) for (const note of [...beat.notes]) removeNote(note);
@@ -160,10 +165,10 @@ function movedOrder(count:number,track:number,to:number):number[] {
 
 function addTrack(score: model.Score, name: string, tuning: number[], program: number, tuningName?: string) {
   tuningValid(tuning);validateTuningName(tuningName);
-  if (!integer(program) || program > 127) throw new Error('Invalid MIDI instrument.');
+  if (!integer(program) || program > 127) throw refusal('engine.invalid_midi_instrument');
   const used = new Set(score.tracks.flatMap(t => [t.playbackInfo.primaryChannel, t.playbackInfo.secondaryChannel]));
   const free = Array.from({length:16}, (_,i) => i).filter(i => i !== 9 && !used.has(i));
-  if (!free.length) throw new Error('No MIDI channel is available for another instrument.');
+  if (!free.length) throw refusal('engine.no_midi_channel');
   const track = new Track(); track.name = name || 'Instrument'; track.shortName = track.name;
   track.playbackInfo.program = program;
   track.playbackInfo.primaryChannel = free[0]; track.playbackInfo.secondaryChannel = free[1] ?? free[0];
@@ -189,15 +194,15 @@ function initialScore(project: Project, canRedo: boolean): {score:model.Score;no
 }
 
 function trackAt(score: model.Score, index: number) {
-  if (!integer(index) || !score.tracks[index]) throw new Error('Select an existing track.');
+  if (!integer(index) || !score.tracks[index]) throw refusal('engine.select_existing_track');
   return score.tracks[index];
 }
 
 function voiceAt(score: model.Score, target: BeatTarget) {
-  if (!target || Object.values(target).some(n => !integer(n))) throw new Error('Invalid beat selection.');
+  if (!target || Object.values(target).some(n => !integer(n))) throw refusal('engine.invalid_beat_selection');
   const staff = trackAt(score, target.track).staves[target.staff];
   const bar = staff?.bars[target.bar]; const voice = bar?.voices[target.voice];
-  if (!staff || !bar || !voice) throw new Error('Select an existing measure and voice.');
+  if (!staff || !bar || !voice) throw refusal('engine.select_existing_measure_voice');
   return {staff, bar, voice};
 }
 
@@ -212,7 +217,7 @@ function capacity(score: model.Score, target: BeatTarget) {
   for (const beat of voice.beats) { tripleDotTiming(beat);beat.updateDurations(); }
   const duration = voice.beats.reduce((sum, b) => sum + (b.isEmpty || b.graceType !== model.GraceType.None ? 0 : b.playbackDuration), 0);
   const master = score.masterBars[target.bar];
-  if (!master.isFreeTime && duration > master.calculateDuration(false)) throw new Error('That rhythm would overfill this measure. Shorten or remove another beat first.');
+  if (!master.isFreeTime && duration > master.calculateDuration(false)) throw refusal('engine.rhythm_overfill');
 }
 
 function tripleDotTiming(beat: model.Beat) {
@@ -242,23 +247,23 @@ function apply(score: model.Score, edit: EditCommand, editIndex=0) {
       const beat = voice.beats[edit.target.beat];
       if (edit.type === 'insertBeat') {
         if (voice.beats.length === 1 && voice.beats[0].isEmpty) voice.beats.splice(0);
-        if (edit.target.beat > voice.beats.length || !supportedDurations.includes(edit.duration) || !integer(edit.dots) || edit.dots > 3) throw new Error('Invalid beat insertion.');
+        if (edit.target.beat > voice.beats.length || !supportedDurations.includes(edit.duration) || !integer(edit.dots) || edit.dots > 3) throw refusal('engine.invalid_beat_insertion');
         const inserted = rest(edit.duration, edit.dots); inserted.voice = voice;
         voice.beats.splice(edit.target.beat, 0, inserted); capacity(score, edit.target); break;
       }
-      if (!beat) throw new Error('Select an existing beat.');
+      if (!beat) throw refusal('engine.select_existing_beat');
       if (edit.type === 'deleteBeat') { for (const note of [...beat.notes]) removeNote(note);voice.beats.splice(edit.target.beat, 1); break; }
       if (edit.type === 'setDuration') {
-        if (!supportedDurations.includes(edit.duration) || !integer(edit.dots) || edit.dots > 3) throw new Error('Invalid rhythm.');
+        if (!supportedDurations.includes(edit.duration) || !integer(edit.dots) || edit.dots > 3) throw refusal('engine.invalid_rhythm');
         beat.duration = edit.duration; beat.dots = edit.dots;beat.overrideDisplayDuration=undefined;capacity(score, edit.target); break;
       }
       if (edit.type === 'setRest') { for (const note of [...beat.notes]) removeNote(note); beat.isEmpty = false; break; }
-      if (staff.isPercussion || !integer(edit.string,1) || edit.string > staff.tuning.length) throw new Error('Select a string on a guitar or bass track.');
+      if (staff.isPercussion || !integer(edit.string,1) || edit.string > staff.tuning.length) throw refusal('engine.select_string_guitar_bass');
       const existing = beat.notes.find(n => n.string === edit.string);
       if (edit.type === 'removeNote') { if (existing) removeNote(existing); break; }
       const pitch = fretKey(staff, edit.string, edit.fret);
-      if (!integer(edit.fret) || pitch < 0 || pitch > 127) throw new Error('That fret is outside the playable MIDI pitch range.');
-      if (!fretExists(staff, edit.string, edit.fret)) throw new Error(`The banjo drone string has no frets 1 to ${getBanjoDrone(staff)}.`);
+      if (!integer(edit.fret) || pitch < 0 || pitch > 127) throw refusal('engine.fret_outside_midi_range');
+      if (!fretExists(staff, edit.string, edit.fret)) throw refusal('engine.banjo_drone_no_frets', { fret: getBanjoDrone(staff) });
       if (existing) {
         let first=existing;while(first.tieOrigin)first=first.tieOrigin;
         for (let note:model.Note|null=first;note;note=note.tieDestination) note.fret=edit.fret;
@@ -273,7 +278,7 @@ function apply(score: model.Score, edit: EditCommand, editIndex=0) {
       score.addMasterBar(master); for (const track of score.tracks) for (const staff of track.staves) appendBar(staff, master); break;
     }
     case 'removeMeasure': {
-      if (!integer(edit.bar) || !score.masterBars[edit.bar] || score.masterBars.length === 1) throw new Error('Keep at least one measure.');
+      if (!integer(edit.bar) || !score.masterBars[edit.bar] || score.masterBars.length === 1) throw refusal('engine.keep_at_least_one_measure');
       removeLyricsMeasure(score,edit.bar);
       const tempo = score.tempo, opening = score.masterBars[0].tempoAutomations.find(a => a.ratioPosition === 0); score.masterBars.splice(edit.bar,1);
       for(const track of score.tracks)track.lineBreaks=new Set([...(track.lineBreaks ?? [])].filter(index=>index!==edit.bar).map(index=>index>edit.bar?index-1:index));
@@ -290,7 +295,7 @@ function apply(score: model.Score, edit: EditCommand, editIndex=0) {
     }
     case 'addTrack': addTrack(score,edit.name,edit.tuning,edit.program,edit.tuningName); break;
     case 'removeTrack': {
-      const track=trackAt(score,edit.track); if (score.tracks.length === 1) throw new Error('Keep at least one track.');
+      const track=trackAt(score,edit.track); if (score.tracks.length === 1) throw refusal('engine.keep_at_least_one_track');
       for(const staff of track.staves)for(const bar of staff.bars)for(const voice of bar.voices)for(const beat of voice.beats)for(const note of beat.notes)detachNote(note);
       remapStylesheetTracks(score.stylesheet,score.tracks.map((_,index)=>index===edit.track?null:index>edit.track?index-1:index));
       score.tracks.splice(edit.track,1); break;
@@ -303,29 +308,29 @@ function apply(score: model.Score, edit: EditCommand, editIndex=0) {
     }
     case 'moveTrack': {
       const count=score.tracks.length;trackAt(score,edit.track);
-      if(!integer(edit.to)||edit.to>=count||edit.to===edit.track)throw new Error('Choose a different track position.');
+      if(!integer(edit.to)||edit.to>=count||edit.to===edit.track)throw refusal('engine.choose_different_track_position');
       const order=movedOrder(count,edit.track,edit.to);
       remapStylesheetTracks(score.stylesheet,order.map((_,index)=>order.indexOf(index)));
       score.tracks.splice(edit.to,0,...score.tracks.splice(edit.track,1)); break;
     }
     case 'setTuning': {
       tuningValid(edit.tuning); validateTuningName(edit.tuningName); const track = trackAt(score,edit.track);
-      if (track.isPercussion || track.staves.some(s => s.tuning.length !== edit.tuning.length)) throw new Error('Retuning must keep the current string count.');
-      if (track.staves.some(s => getBanjoDrone(s) > 0 && !droneTuningOk(edit.tuning))) throw new Error('The banjo drone is string 1, which must be tuned higher than string 2.');
+      if (track.isPercussion || track.staves.some(s => s.tuning.length !== edit.tuning.length)) throw refusal('engine.retuning_keep_string_count');
+      if (track.staves.some(s => getBanjoDrone(s) > 0 && !droneTuningOk(edit.tuning))) throw refusal('engine.banjo_drone_higher_pitch');
       if (edit.keepPitch) {
         refingerTrack(track, { tuning: edit.tuning });
       } else {
         for (const staff of track.staves) for (const bar of staff.bars) for (const voice of bar.voices) for (const beat of voice.beats) for (const note of beat.notes) {
           if (!note.string) continue;
           const pitch=edit.tuning[edit.tuning.length-note.string]+note.fret+stringCapo(staff,note.string)+droneShift(staff,note.string,note.fret)-staff.transpositionPitch;
-          if (pitch<0 || pitch>127) throw new Error('That tuning puts an existing note outside the MIDI pitch range.');
+          if (pitch<0 || pitch>127) throw refusal('engine.tuning_puts_note_outside_midi');
         }
       }
       for (const staff of track.staves) { staff.stringTuning.tunings = [...edit.tuning]; if (edit.tuningName !== undefined) staff.stringTuning.name = edit.tuningName; else if (!staff.stringTuning.name) staff.stringTuning.name = defaultTuningName(edit.tuning); } break;
     }
     case 'setScoreInfo':
-      if (!Number.isFinite(edit.tempo) || edit.tempo <= 0) throw new Error('Tempo must be positive.');
-      if (edit.preserveOpeningMark !== undefined && typeof edit.preserveOpeningMark !== 'boolean') throw new Error('Invalid score info.');
+      if (!Number.isFinite(edit.tempo) || edit.tempo <= 0) throw refusal('engine.tempo_must_be_positive');
+      if (edit.preserveOpeningMark !== undefined && typeof edit.preserveOpeningMark !== 'boolean') throw refusal('engine.invalid_score_info');
       score.title = edit.title; score.artist = edit.artist;
       if (edit.preserveOpeningMark) {
         // The mark keeps everything but its value; a score with no opening mark keeps having none.
@@ -341,7 +346,7 @@ function apply(score: model.Score, edit: EditCommand, editIndex=0) {
         score.masterBars[0].tempoAutomations = [fresh, ...score.masterBars[0].tempoAutomations.filter(a => a.ratioPosition !== 0)];
       }
       break;
-    default: if(!applyAdvancedEdit(score,edit,editIndex)) throw new Error('Unknown edit command in project.');
+    default: if(!applyAdvancedEdit(score,edit,editIndex)) throw refusal('engine.unknown_edit_command');
   }
 }
 

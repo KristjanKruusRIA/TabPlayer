@@ -1,3 +1,4 @@
+import { getMessage, getResolvedLanguage, type SupportedLanguage } from '../i18n';
 import { model, type Settings } from '@coderline/alphatab';
 // The pitch hook below wraps the one partial-capo.ts installs, so that module must have loaded first.
 import { openStringKey } from './partial-capo';
@@ -34,14 +35,14 @@ export const fretExists=(staff:model.Staff,string:number,fret:number,drone=getBa
 /** The sounding key of a fretted note, including the capo on its string and the drone string's short neck. */
 export const fretKey=(staff:model.Staff,string:number,fret:number):number=>openStringKey(staff,string)+fret+droneShift(staff,string,fret);
 /** One-line description for readouts, such as "Banjo drone from fret 5". */
-export const describeBanjoDrone=(drone:number):string=>drone>0?`Banjo drone from fret ${drone}`:'';
+export const describeBanjoDrone=(drone:number,lang?:SupportedLanguage):string=>drone>0?getMessage(lang??getResolvedLanguage(),'generated.banjo_drone',{drone}):'';
 
 /** Throws when a note sits on a fret the drone string does not have. Every edit is checked with it, so no edit can leave such a note. */
 export function assertDroneFrets(score:model.Score):void {
   for(const track of score.tracks)for(const staff of track.staves){
     const drone=getBanjoDrone(staff);if(!drone)continue;
     for(const bar of staff.bars)for(const voice of bar.voices)for(const beat of voice.beats)for(const note of beat.notes)
-      if(note.string===droneString&&!note.isDead&&!fretExists(staff,note.string,note.fret,drone))throw new Error(`The banjo drone string has no frets 1 to ${drone}: bar ${bar.index+1} has fret ${note.fret} on it.`);
+      if(note.string===droneString&&!note.isDead&&!fretExists(staff,note.string,note.fret,drone))throw new Error(getMessage(getResolvedLanguage(),'engine.banjo_drone_assert',{drone,bar:bar.index+1,fret:note.fret}));
   }
 }
 /** Edit time only, never replay: a harmony diagram being set on a drone staff must not use a fret the drone string lacks. */

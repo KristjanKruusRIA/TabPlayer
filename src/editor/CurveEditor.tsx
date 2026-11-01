@@ -1,3 +1,4 @@
+import { useI18n, getMessage, getResolvedLanguage, type SupportedLanguage, type MessageKey } from '../i18n';
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react';
 import { model } from '@coderline/alphatab';
 import type { PitchCurve } from '../edit-types';
@@ -58,6 +59,23 @@ export const BEND_PRESETS: readonly CurvePreset[] = [
     svgPath: 'M2 3 L16 12',
   },
 ];
+
+
+export function curvePresetName(id: string, lang?: SupportedLanguage): string {
+  const language = lang ?? getResolvedLanguage();
+  const map: Record<string, MessageKey> = {
+    bend: 'curve.preset_bend',
+    'bend-release': 'curve.preset_bend_release',
+    prebend: 'curve.preset_prebend',
+    'prebend-release': 'curve.preset_prebend_release',
+    dip: 'curve.preset_dip',
+    dive: 'curve.preset_dive',
+    'predive-dive': 'curve.preset_scoop',
+    hold: 'curve.preset_hold',
+  };
+  const key = map[id];
+  return key ? getMessage(language, key) : id;
+}
 
 export const WHAMMY_PRESETS: readonly CurvePreset[] = [
   {
@@ -138,15 +156,17 @@ const PLOT_BOTTOM = 104;
 const PLOT_WIDTH = PLOT_RIGHT - PLOT_LEFT;
 const PLOT_HEIGHT = PLOT_BOTTOM - PLOT_TOP;
 
-export function formatQuarterTones(q: number): string {
+export function formatQuarterTones(q: number, lang?: SupportedLanguage): string {
   if (q === 0) return '0';
   const sign = q < 0 ? '−' : '+';
   const abs = Math.abs(q);
   const whole = Math.floor(abs / 4);
   const rem = abs % 4;
   const frac = rem === 1 ? '¼' : rem === 2 ? '½' : rem === 3 ? '¾' : '';
-  if (whole === 0) return `${sign}${frac} step`;
-  return `${sign}${whole}${frac} step${whole > 1 || frac ? 's' : ''}`;
+  const value = whole === 0 ? frac : `${whole}${frac}`;
+  const resolved = lang ?? getResolvedLanguage();
+  const isPlural = whole > 1 || (whole === 1 && Boolean(frac));
+  return getMessage(resolved, isPlural ? 'curve.step_plural' : 'curve.step_singular', { sign, value });
 }
 
 export function CurveEditor({
@@ -162,6 +182,7 @@ export function CurveEditor({
   disabled?: boolean;
   whammy?: boolean;
 }) {
+  const { lang, t } = useI18n();
   const [curve, setCurve] = useState<PitchCurve | null>(value);
   const svgRef = useRef<SVGSVGElement>(null);
   const dragRef = useRef<{ index: number; initial: PitchCurve; latest: PitchCurve } | null>(null);
@@ -419,7 +440,7 @@ export function CurveEditor({
 
   return (
     <details className="curve-editor">
-      <summary>{label} curve</summary>
+      <summary>{t('curve.curve_summary', { label })}</summary>
       <BusyFieldset busy={disabled}>
         <label className="check">
           <input
@@ -440,11 +461,11 @@ export function CurveEditor({
               )
             }
           />
-          Enable {label}
+          {t('curve.enable', { label })}
         </label>
       </BusyFieldset>
 
-      <div className="tp-curve-presets" role="group" aria-label={`${label} presets`}>
+      <div className="tp-curve-presets" role="group" aria-label={t('curve.presets_label', { label })}>
         {presets.map(preset => {
             const isCurrent =
               curve !== null &&
@@ -454,7 +475,7 @@ export function CurveEditor({
               <button
                 key={preset.id}
                 type="button"
-                aria-label={`${label} preset: ${preset.name}`}
+                aria-label={t('curve.preset_button_label', { label, name: curvePresetName(preset.id, lang) })}
                 aria-pressed={isCurrent}
                 {...busyGuard({ busy: disabled, className: 'tp-curve-preset-btn', onClick: () => applyPreset(preset) })}
               >
@@ -468,7 +489,7 @@ export function CurveEditor({
                     strokeLinejoin="round"
                   />
                 </svg>
-                <span>{preset.name}</span>
+                <span>{curvePresetName(preset.id, lang)}</span>
               </button>
             );
           })}
@@ -479,13 +500,13 @@ export function CurveEditor({
             <BusyFieldset busy={disabled}>
               <div className="pair">
                 <EnumInput
-                  label={`${label} type`}
+                  label={t('curve.type_label', { label })}
                   value={curve.type}
                   enumeration={whammy ? model.WhammyType : model.BendType}
                   onValue={type => setCurve({ ...curve, type })}
                 />
                 <EnumInput
-                  label={`${label} style`}
+                  label={t('curve.style_label', { label })}
                   value={curve.style}
                   enumeration={model.BendStyle}
                   onValue={style => setCurve({ ...curve, style })}
@@ -497,7 +518,7 @@ export function CurveEditor({
               ref={svgRef}
               viewBox="0 0 240 124"
               role="group"
-              aria-label={`${label} pitch curve preview`}
+              aria-label={t('curve.preview_label', { label })}
               className="tp-curve-graph"
             >
               <rect
@@ -577,11 +598,11 @@ export function CurveEditor({
                     key={index}
                     role="slider"
                     tabIndex={0}
-                    aria-label={`${label} graph point ${index + 1}`}
+                    aria-label={t('curve.graph_point_label', { label, index: index + 1 })}
                     aria-valuemin={minPitch}
                     aria-valuemax={maxPitch}
                     aria-valuenow={p.value}
-                    aria-valuetext={`offset ${p.offset}, ${formatQuarterTones(p.value)}`}
+                    aria-valuetext={t('curve.point_valuetext', { offset: p.offset, value: formatQuarterTones(p.value, lang) })}
                     aria-disabled={disabled ? 'true' : undefined}
                     className="tp-curve-handle"
                     onPointerDown={e => handlePointPointerDown(index, e)}
@@ -631,7 +652,7 @@ export function CurveEditor({
                     />
                   </label>
                   <button
-                    aria-label={`Remove ${label} point ${index + 1}`}
+                    aria-label={t('curve.remove_point_label', { label, index: index + 1 })}
                     disabled={index === 0 || index === curve.points.length - 1}
                     onClick={() => setCurve({ ...curve, points: curve.points.filter((_, i) => i !== index) })}
                   >
@@ -653,7 +674,7 @@ export function CurveEditor({
                   });
                 }}
               >
-                Add {label} point
+                {t('curve.add_point', { label })}
               </button>
             </BusyFieldset>
           </>
@@ -667,7 +688,7 @@ export function CurveEditor({
               },
             })}
           >
-            Apply {label} curve
+            {t('curve.apply_curve', { label })}
           </button>
         </BusyFieldset>
       </details>

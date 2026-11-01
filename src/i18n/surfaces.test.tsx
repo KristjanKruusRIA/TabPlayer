@@ -16,6 +16,13 @@ import { soundPreset } from '../audio/sound-model';
 import { previewEdit } from '../engine';
 import { blankProject } from '../project';
 import type { NativePlaybackController } from '../audio/NativePlaybackController';
+import { SoundPanel } from '../audio/SoundPanel';
+import { CurveEditor, BEND_PRESETS } from '../editor/CurveEditor';
+import { SavedTuningsDialog } from '../tuning/SavedTuningsDialog';
+
+vi.mock('@tauri-apps/api/core', () => ({
+  invoke: vi.fn(async () => ({ format: 'tabplayer-tuning-library', version: 1, entries: [] }))
+}));
 import { catalogs, setLanguagePreference, type MessageKey, type SupportedLanguage } from './index';
 
 afterEach(() => { cleanup(); setLanguagePreference('en'); localStorage.clear(); });
@@ -26,7 +33,7 @@ function names(container: HTMLElement): Set<string> {
   const found = new Set<string>();
   const add = (text: string | null | undefined) => { const value = (text ?? '').replace(/\s+/g, ' ').trim(); if (value) found.add(value); };
   container.querySelectorAll('details').forEach(details => { details.open = true; });
-  container.querySelectorAll('button,summary,label,legend,option,h2,h3,[role=tab],[role=radio],[role=img],[role=group],[role=region],[role=tablist],[role=tabpanel],[role=gridcell],title,p').forEach(element => {
+  container.querySelectorAll('button,summary,label,legend,option,h2,h3,h4,[role=tab],[role=radio],[role=img],[role=group],[role=region],[role=tablist],[role=tabpanel],[role=gridcell],title,p').forEach(element => {
     add(element.textContent);
     add(element.getAttribute('aria-label'));
     add(element.getAttribute('title'));
@@ -90,7 +97,8 @@ describe('localized surfaces', () => {
     describe(surface.title, () => {
       it('offers the English sample in English mode, so the checks below are not vacuous', () => {
         const view = surface.mount();
-        const found = names(view.container);
+        const targetEl = (v: ReturnType<typeof render>) => (v.container.childElementCount ? v.container : v.baseElement);
+        const found = names(targetEl(view));
         const present = surface.sample.filter(item => found.has(item));
         expect(present.length, `${surface.title}: ${[...found].slice(0, 40).join(' | ')}`).toBeGreaterThan(0);
       });

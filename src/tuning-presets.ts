@@ -1,3 +1,4 @@
+import { getMessage, getResolvedLanguage, type SupportedLanguage, type MessageKey } from './i18n';
 import { parseTuning } from './tuning';
 
 export type PresetInstrument = 'guitar' | 'bass' | 'banjo' | 'ukulele' | 'mandolin' | 'bowed' | 'shamisen';
@@ -10,16 +11,33 @@ export interface TuningPreset {
   tuning: readonly number[];
 }
 
-export function instrumentTitle(instrument: PresetInstrument): string {
-  switch (instrument) {
-    case 'guitar': return 'Guitar';
-    case 'bass': return 'Bass';
-    case 'banjo': return 'Banjo';
-    case 'ukulele': return 'Ukulele';
-    case 'mandolin': return 'Mandolin';
-    case 'bowed': return 'Bowed strings';
-    case 'shamisen': return 'Shamisen';
-  }
+export function instrumentTitle(instrument: PresetInstrument, lang?: SupportedLanguage): string {
+  const language = lang ?? getResolvedLanguage();
+  const keyMap: Record<PresetInstrument, MessageKey> = {
+    guitar: 'tuning.instrument.guitar',
+    bass: 'tuning.instrument.bass',
+    banjo: 'tuning.instrument.banjo',
+    ukulele: 'tuning.instrument.ukulele',
+    mandolin: 'tuning.instrument.mandolin',
+    bowed: 'tuning.instrument.bowed',
+    shamisen: 'tuning.instrument.shamisen',
+  };
+  return getMessage(language, keyMap[instrument]) || (instrument[0].toUpperCase() + instrument.slice(1));
+}
+
+export function tuningPresetName(preset: TuningPreset, lang?: SupportedLanguage): string {
+  const language = lang ?? getResolvedLanguage();
+  const key = `tuning.preset.${preset.id}` as MessageKey;
+  const translated = getMessage(language, key);
+  return translated || preset.name;
+}
+
+export function tuningGroupTitle(instrument: PresetInstrument, strings: number, lang?: SupportedLanguage): string {
+  const language = lang ?? getResolvedLanguage();
+  return getMessage(language, 'tuning.group_title', {
+    instrument: instrumentTitle(instrument, language),
+    strings,
+  });
 }
 
 const preset = (instrument: PresetInstrument, strings: number, id: string, name: string, notes: string): TuningPreset => ({
@@ -95,12 +113,6 @@ export const tuningPresets: readonly TuningPreset[] = [
 const samePitches = (preset: TuningPreset, tuning: readonly number[]) =>
   preset.tuning.length === tuning.length && preset.tuning.every((pitch, index) => pitch === tuning[index]);
 
-/**
- * Detects a preset from pitches alone. Different instruments share pitches (violin and mandolin,
- * viola and tenor banjo, double bass and bass guitar), so pitches cannot name the instrument.
- * Guitar and bass keep first-match detection; any other tie returns undefined rather than
- * misnaming the instrument. A control that knows which preset the user chose should keep that choice.
- */
 export function findTuningPreset(notes: string): TuningPreset | undefined {
   try {
     const tuning = parseTuning(notes);
@@ -112,7 +124,6 @@ export function findTuningPreset(notes: string): TuningPreset | undefined {
   }
 }
 
-/** The preset with this id when its pitches still equal `notes`; keeps an explicit choice among shared pitches. */
 export function presetWithPitches(id: string, notes: string): TuningPreset | undefined {
   try {
     const tuning = parseTuning(notes);

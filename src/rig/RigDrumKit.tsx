@@ -1,3 +1,4 @@
+import { useI18n } from '../i18n';
 import { useEffect, useId, useRef, useState } from 'react';
 import { busySelect } from '../ui';
 import { drumKitFor, drumKits, kitDifferences, sharedSounds } from '../editor/drum-kits';

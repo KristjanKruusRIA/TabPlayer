@@ -107,7 +107,17 @@ export function selectScore(score:model.Score,selection:ExportSelection):model.S
     if(note.hammerPullOrigin&&!notes.has(note.hammerPullOrigin))note.hammerPullOrigin=null;
     if(note.hammerPullDestination&&!notes.has(note.hammerPullDestination)){note.hammerPullDestination=null;note.isHammerPullOrigin=false;}
   }
-  const result=scoreFromJson(model.JsonConverter.scoreToJson(copy),new Settings());copyGpInterchangeSource(copy,result);return result;
+  const result=scoreFromJson(model.JsonConverter.scoreToJson(copy),new Settings());copyGpInterchangeSource(copy,result);
+  result.tracks.forEach((track,t)=>{
+    (track as any).sourceIndex=(score.tracks[selection.tracks[t]] as any)?.sourceIndex??selection.tracks[t];
+    track.staves.forEach(staff=>{
+      staff.bars.forEach((bar,b)=>{
+        const offset=(selection.range?.first??0)+b;
+        (bar as any).sourceIndex=(score.tracks[selection.tracks[t]]?.staves[0]?.bars[offset] as any)?.sourceIndex??offset;
+      });
+    });
+  });
+  return result;
 }
 /** Retains original track indexing for public MIDI/playback plan generation. */
 export function selectStaves(score:model.Score,selection:ExportSelection):model.Score {

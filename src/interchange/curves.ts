@@ -127,7 +127,11 @@ export function hasGpifCurves(score:model.Score):boolean {
 
 /** What the property will carry, and what it cannot. Pure: the export and every place that warns about it use this one result. */
 export interface CurvePlan {carriedBeats:Set<model.Beat>;carriedNotes:Set<model.Note>;carriedSlurs:Set<model.Note>;losses:string[]}
-const wherever=(beat:model.Beat)=>`track ${beat.voice.bar.staff.track.index+1}, bar ${beat.voice.bar.index+1}, beat ${beat.index+1}`;
+const wherever=(beat:model.Beat)=>{
+  const trackIndex=(beat.voice.bar.staff.track as {sourceIndex?:number}).sourceIndex??beat.voice.bar.staff.track.index;
+  const barIndex=(beat.voice.bar as {sourceIndex?:number}).sourceIndex??beat.voice.bar.index;
+  return `track ${trackIndex+1}, bar ${barIndex+1}, beat ${beat.index+1}`;
+};
 const reasonOf=(cause:unknown)=>cause instanceof Error?cause.message.replace(/\.$/,''):String(cause);
 export function planCurves(score:model.Score):CurvePlan {
   const plan:CurvePlan={carriedBeats:new Set(),carriedNotes:new Set(),carriedSlurs:new Set(),losses:[]};
@@ -135,6 +139,9 @@ export function planCurves(score:model.Score):CurvePlan {
   for(const track of score.tracks)for(const staff of track.staves)for(const bar of staff.bars)for(const voice of bar.voices){
     if(voice.isEmpty)continue;
     for(const beat of voice.beats){
+      if(beat.tremoloPicking?.style===model.TremoloPickingStyle.BuzzRoll){
+        plan.losses.push(`the buzz-roll tremolo picking at ${wherever(beat)} becomes ordinary tremolo picking`);
+      }
       const consider=(whammy:boolean,type:number,style:number,points:model.BendPoint[],note?:model.Note)=>{
         const label=`${points.length}-point ${whammy?'whammy bar':'bend'} at ${wherever(beat)}`;
         try{checkCurve(whammy,{type,style,points});}catch(cause){

@@ -11,6 +11,7 @@ import { music } from '../editor/fixtures';
 import { defaultDocumentSettings } from '../document-settings';
 import { convertScoreBytes,runBatch,type BatchBridge } from '../batch/convert';
 import { curveLosses } from '../interchange/curves';
+import { projectGpDocument } from '../interchange/backing-projection';
 import { exportGpInterchange,loadInterchangeScore } from '../interchange/gp';
 import { useExportCoordinator } from './useExportCoordinator';
 import type { ExportNativeBridge } from './bridge';
@@ -75,6 +76,34 @@ describe('what a Guitar Pro 7/8 export cannot keep',()=>{
     expect(curveLosses(over).length).toBeGreaterThan(0);
     expect(()=>exportGpInterchange(over,settings)).not.toThrow();
   });
+  it('lists buzz-roll tremolo picking loss as ordinary tremolo picking with source position',()=>{
+    const score=music(),beat=score.tracks[0].staves[0].bars[0].voices[0].beats[0];
+    beat.tremoloPicking=Object.assign(new model.TremoloPickingEffect(),{marks:2,style:model.TremoloPickingStyle.BuzzRoll});
+    score.finish(settings);
+    expect(curveLosses(score)).toEqual(['the buzz-roll tremolo picking at track 1, bar 1, beat 1 becomes ordinary tremolo picking']);
+  });
+  it('names the source track and bar rather than projected position for selected tracks or bar range',()=>{
+    const score=music(),secondTrack=new model.Track(),staff=new model.Staff();
+    secondTrack.name='Bass';secondTrack.addStaff(staff);score.addTrack(secondTrack);
+    for(let i=0;i<4;i++){
+      const bar=new model.Bar(),voice=new model.Voice();
+      for(let b=0;b<4;b++){
+        const beat=new model.Beat(),note=new model.Note();note.string=1;note.fret=0;
+        beat.addNote(note);voice.addBeat(beat);
+      }
+      bar.addVoice(voice);staff.addBar(bar);
+    }
+    const targetBeat=staff.bars[2].voices[0].beats[1];
+    targetBeat.tremoloPicking=Object.assign(new model.TremoloPickingEffect(),{marks:2,style:model.TremoloPickingStyle.BuzzRoll});
+    const bendNote=staff.bars[3].voices[0].beats[0].notes[0];bendNote.bendType=model.BendType.Custom;
+    for(let p=0;p<5;p++)bendNote.addBendPoint(new model.BendPoint(15*p,p===2?48:1));
+    score.finish(settings);
+    const projected=projectGpDocument({score,settings:defaultDocumentSettings(),bytes:null,selection:{tracks:[1],range:{first:2,last:3}},backing:false});
+    const losses=curveLosses(projected);
+    expect(losses).toContain('the buzz-roll tremolo picking at track 2, bar 3, beat 2 becomes ordinary tremolo picking');
+    expect(losses.some(l=>l.includes('track 2, bar 4, beat 1'))).toBe(true);
+    expect(losses.some(l=>l.includes('track 1'))).toBe(false);
+  });
 });
 
 describe('batch conversion',()=>{
@@ -94,6 +123,11 @@ describe('batch conversion',()=>{
   });
   it('adds no note when nothing is left out',()=>{
     expect(convertScoreBytes(twoVoiceXml(`<note><pitch><step>C</step><octave>4</octave></pitch><duration>4</duration><type>whole</type></note>`)).detail).not.toContain('left out');
+  });
+  it('converts a score with buzz-roll tremolo picking and reports it on the batch row',()=>{
+    const buzzXml=twoVoiceXml('<note><pitch><step>C</step><octave>4</octave></pitch><duration>4</duration><voice>1</voice><type>whole</type><notations><ornaments><tremolo type="single" smufl="buzzRoll">2</tremolo></ornaments></notations></note>');
+    const converted=convertScoreBytes(buzzXml);
+    expect(converted.detail).toMatch(/left out of the Guitar Pro file: .*buzz-roll tremolo picking at track 1, bar 1, beat 1/);
   });
 });
 
@@ -119,6 +153,18 @@ describe('the app asks before writing',()=>{
     const {result}=renderHook(()=>useExportCoordinator({revision:3,score,settings:defaultDocumentSettings(),currentSpeed:1,bridge:{confirmExport,readBackingAsset:vi.fn(),exportGp},native}));
     await act(async()=>{expect(await result.current.run({format:'gp',selection:{tracks:[0],range:null}})).toBe(true);});
     expect(confirmExport).toHaveBeenCalledTimes(1);expect(confirmExport.mock.calls[0][0]?.message).toMatch(/5-point whammy bar/);
+    expect(confirmExport.mock.invocationCallOrder[0]).toBeLessThan(exportGp.mock.invocationCallOrder[0]);
+  });
+  it('the export dialog asks with buzz-roll loss before writing when buzz roll is present',async()=>{
+    const score=music();
+    score.tracks[0].staves[0].bars[0].voices[0].beats[0].tremoloPicking=Object.assign(new model.TremoloPickingEffect(),{marks:2,style:model.TremoloPickingStyle.BuzzRoll});
+    score.finish(settings);
+    const confirmExport=vi.fn(async(_detail?:{title:string;message:string})=>true),exportGp=vi.fn(async()=>true);
+    const native={exportGp5:async()=>true} as unknown as ExportNativeBridge;
+    const {result}=renderHook(()=>useExportCoordinator({revision:1,score,settings:defaultDocumentSettings(),currentSpeed:1,bridge:{confirmExport,readBackingAsset:vi.fn(),exportGp},native}));
+    await act(async()=>{expect(await result.current.run({format:'gp',selection:{tracks:[0],range:null}})).toBe(true);});
+    expect(confirmExport).toHaveBeenCalledTimes(1);
+    expect(confirmExport.mock.calls[0][0]?.message).toMatch(/buzz-roll tremolo picking/);
     expect(confirmExport.mock.invocationCallOrder[0]).toBeLessThan(exportGp.mock.invocationCallOrder[0]);
   });
 });

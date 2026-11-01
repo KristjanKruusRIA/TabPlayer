@@ -1,4 +1,4 @@
-import { expect,it } from 'vitest';
+import { describe,expect,it } from 'vitest';
 import { createHash } from 'node:crypto';
 import { model,Settings } from '@coderline/alphatab';
 import { music } from './fixtures';
@@ -224,4 +224,106 @@ it('moves a dead note off a removed string by its fret, since it has no pitch',(
   const dead=new model.Note();dead.string=1;dead.fret=3;dead.isDead=true;beat.addNote(dead);score.finish(new Settings());
   applyStructureEdit(score,command(standard),0);
   expect(placed(beat)).toEqual(['6:3']);expect(dead.isDead).toBe(true);
+});
+
+
+describe('S19: cross-voice collision checks in setStringCount', () => {
+  it('never puts notes of two voices that sound together on one string after a string count change', () => {
+    // 7-string tuning [64,59,55,50,45,40,35] (strings 7 down to 1)
+    // String 1 is low B1 (35), String 2 is E2 (40), String 3 is A2 (45)
+    const base = sparse(seven);
+    applyStructureEdit(base, { type: 'addVoice', track: 0, staff: 0 }, 0);
+    const staff = base.tracks[0].staves[0];
+    const bar = staff.bars[0];
+
+    // Voice 0, beat 0 has A2 (pitch 45) on string 3 (open string 3)
+    add(base, 0, 3, 0);
+
+    // Voice 1, beat 0 has A2 (pitch 45) on string 1 (fret 10)
+    const n2 = new model.Note();
+    n2.string = 1;
+    n2.fret = 10;
+    bar.voices[1].beats[0].addNote(n2);
+    bar.voices[1].beats[0].isEmpty = false;
+    base.finish(new Settings());
+
+    // Reduce from 7 strings to 6 (standard: [64,59,55,50,45,40]) keeping high strings (keep: 'high').
+    // String 1 (low B1) is removed. String 3 remains string 2 (A2).
+    // Voice 1 note was on string 1, so it must be relocated.
+    // In 6-string standard, A2 can be played on string 2 fret 0 (kept for voice 0), or string 1 fret 5 (low E fret 5).
+    // Because Voice 0 is sounding at the exact same beat, Voice 1 must NOT land on Voice 0's string!
+    applyStructureEdit(base, command(standard, 'high'), 1);
+
+    const first = bar.voices[0].beats[0].notes[0];
+    const second = bar.voices[1].beats[0].notes[0];
+    expect(first.string).not.toBe(second.string);
+    expect(first.realValue).toBe(45);
+    expect(second.realValue).toBe(45);
+  });
+
+  it('refuses and lists conflicting notes when overlapping voices have no free strings', () => {
+    // 2-string tuning [45, 40] reducing to 1-string [40]
+    const twoStrings = [45, 40];
+    const oneString = [40];
+    const s2 = sparse(twoStrings);
+    applyStructureEdit(s2, { type: 'addVoice', track: 0, staff: 0 }, 0);
+    const b2 = s2.tracks[0].staves[0].bars[0];
+
+    // Voice 0 has note on string 1 (fret 0, pitch 40)
+    const noteV0 = new model.Note();
+    noteV0.string = 1;
+    noteV0.fret = 0;
+    b2.voices[0].beats[0].addNote(noteV0);
+    b2.voices[0].beats[0].isEmpty = false;
+
+    // Voice 1 has note on string 2 (pitch 45)
+    // When reducing to 1 string [40], string 2 is removed. Pitch 45 on string 1 would be fret 5.
+    // But string 1 is already sounding Voice 0's note at beat 0!
+    // Since there is only 1 string in the new tuning, both voices cannot be placed on different strings!
+    const noteV1 = new model.Note();
+    noteV1.string = 2;
+    noteV1.fret = 0;
+    b2.voices[1].beats[0].addNote(noteV1);
+    b2.voices[1].beats[0].isEmpty = false;
+    s2.finish(new Settings());
+
+    expect(() => applyStructureEdit(s2, { type: 'setStringCount', track: 0, tuning: oneString, keep: 'low' }, 1))
+      .toThrow(/the notes of this beat have no free strings for all of them/);
+  });
+
+  it('uses current rhythm including an edit made just before to detect cross-voice overlap', () => {
+    // Voice 0 beat 0 is lengthened from quarter note (4) to half note (2).
+    // Voice 1 beat 1 (which starts at tick 960) now overlaps Voice 0 (0 to 1920 ticks).
+    const base = sparse(seven);
+    applyStructureEdit(base, { type: 'addVoice', track: 0, staff: 0 }, 0);
+    const staff = base.tracks[0].staves[0];
+    const bar = staff.bars[0];
+
+    // Voice 0, beat 0: duration = 2 (half note), note on string 3 (pitch 45)
+    bar.voices[0].beats[0].duration = 2;
+    add(base, 0, 3, 0);
+
+    // Voice 1, beat 0 is a quarter rest (duration = 4), beat 1 is a quarter note on string 1 (fret 10, pitch 45)
+    bar.voices[1].beats[0].duration = 4;
+    bar.voices[1].beats[0].isEmpty = false;
+
+    const b1 = new model.Beat();
+    b1.duration = 4;
+    b1.isEmpty = false;
+    const n2 = new model.Note();
+    n2.string = 1;
+    n2.fret = 10;
+    b1.addNote(n2);
+    bar.voices[1].addBeat(b1);
+    base.finish(new Settings());
+
+    // Without rebuilding the model playback cache, setStringCount uses beatSpans(bar) to calculate current rhythm.
+    applyStructureEdit(base, command(standard, 'high'), 1);
+
+    const first = bar.voices[0].beats[0].notes[0];
+    const second = bar.voices[1].beats[1].notes[0];
+    expect(first.string).not.toBe(second.string);
+    expect(first.realValue).toBe(45);
+    expect(second.realValue).toBe(45);
+  });
 });

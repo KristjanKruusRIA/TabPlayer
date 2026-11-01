@@ -20,13 +20,13 @@ export interface RefingerStaffTarget {
 }
 
 /** Whether two beats of different voices sound at the same time. */
-const sounding = (spans: Map<model.Beat, [number, number]>, a: model.Beat, b: model.Beat) => {
+export const sounding = (spans: Map<model.Beat, [number, number]>, a: model.Beat, b: model.Beat) => {
   const x = spans.get(a)!, y = spans.get(b)!;
   return x[0] < y[1] && y[0] < x[1];
 };
 
 /** Where each beat of a bar sits, from its current rhythm. The model's playback timing is only rebuilt after some edits, so it can be stale here. A before-beat grace note takes 120 ticks ahead of its beat; an on-beat or bend grace note takes 120 from the beat's start. */
-function beatSpans(bar: model.Bar): Map<model.Beat, [number, number]> {
+export function beatSpans(bar: model.Bar): Map<model.Beat, [number, number]> {
   const spans = new Map<model.Beat, [number, number]>();
   for (const voice of bar.voices) {
     let at = 0;
@@ -51,7 +51,7 @@ export interface Unreachable {
   reason: 'range' | 'harmonic' | 'linked' | 'conflict';
 }
 
-const beatNumber = (beat: model.Beat) => beat.voice.beats.filter(b => b.index < beat.index && b.graceType === model.GraceType.None).length + 1;
+export const beatNumber = (beat: model.Beat) => beat.voice.beats.filter(b => b.index < beat.index && b.graceType === model.GraceType.None).length + 1;
 
 const reasonKeys: Record<Unreachable['reason'], MessageKey> = {
   range: 'refinger.reason_range',
@@ -71,6 +71,35 @@ export function describeUnreachable(list: readonly Unreachable[], extra: readonl
 
 /** A chord diagram's new frets, and its definition with the finger marks that no longer apply cleared. */
 export interface ChordMove { chord: model.Chord; strings: number[]; source: HarmonyChord }
+
+export interface VoiceStringAllocation {
+  overlapping: Array<{ beat: model.Beat; strings: Map<model.Note, number> }>;
+  taken: (note: model.Note) => Set<number>;
+  keptHere: (note: model.Note) => Place | null;
+  choicesHere: (note: model.Note) => Place[];
+}
+
+export function crossVoicePlacement(
+  placed: Array<{ beat: model.Beat; strings: Map<model.Note, number> }>,
+  spans: Map<model.Beat, [number, number]>,
+  voice: model.Voice,
+  beat: model.Beat,
+  kept: (note: model.Note) => Place | null,
+  choices: (note: model.Note) => Place[]
+): VoiceStringAllocation {
+  const overlapping = placed.filter(other => other.beat.voice !== voice && sounding(spans, other.beat, beat));
+  const taken = (note: model.Note) =>
+    new Set(overlapping.flatMap(other => [...other.strings].filter(([from]) => from.string !== note.string).map(([, string]) => string)));
+  const keptHere = (note: model.Note) => {
+    const place = kept(note);
+    return place && taken(note).has(place.string) ? null : place;
+  };
+  const choicesHere = (note: model.Note) => {
+    const busy = taken(note);
+    return choices(note).filter(choice => !busy.has(choice.string));
+  };
+  return { overlapping, taken, keptHere, choicesHere };
+}
 
 export function planStaffRefinger(
   staff: model.Staff,

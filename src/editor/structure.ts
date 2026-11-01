@@ -7,7 +7,8 @@ import { scoreFromJson } from '../model-clone';
 import { parseTrackColor } from '../track-color';
 import { droneShift, droneString, droneTuningOk, fretExists, getBanjoDrone, rebaseDroneTrills, setBanjoDrone, validateBanjoDrone } from './banjo-drone';
 import { getPartialCapo, partialLift, rebaseTrills, remapPartialCapo, setPartialCapo, validatePartialCapo } from './partial-capo';
-import { refingerStaff } from './refinger';
+import { refingerStaff, beatNumber, beatSpans, crossVoicePlacement, describeUnreachable } from './refinger';
+import { formatPitch } from '../tuning';
 
 const xmlText=/^(?:[\t\n\r\u0020-\uD7FF\uE000-\uFFFD]|[\uD800-\uDBFF][\uDC00-\uDFFF])*$/;
 /** An omitted name is valid; a present one must be a string of XML 1.0 characters (empty allowed). */
@@ -111,11 +112,35 @@ function setStringCount(track:model.Track,tuning:number[],keep:StringCountKeep,t
     const open=(string:number)=>tuning[to-string]+partialLift(staff,string,after),pitch=(note:model.Note)=>staff.tuning[from-note.string]+note.fret+partialLift(staff,note.string,before);
     const kept=(note:model.Note):Place|null=>{const index=keptIndex(from-note.string,from,to,keep);if(index===null)return null;const string=to-index;return {string,fret:note.isDead?note.fret:pitch(note)-open(string)};};
     const choices=(note:model.Note)=>Array.from({length:to},(_,i)=>to-i).map(string=>({string,fret:note.isDead?Math.min(note.fret,maxRelocatedFret):pitch(note)-open(string)})).filter(choice=>choice.fret>=0&&choice.fret<=maxRelocatedFret).sort((a,b)=>a.fret-b.fret);
-    for(const bar of staff.bars)for(const voice of bar.voices)for(const beat of voice.beats){
-      const notes=beat.notes.filter(note=>note.string>0),where=`bar ${bar.index+1}, beat ${beat.index+1}`;
-      const planned=placeBeat(notes,kept,choices,false,where)??placeBeat(notes,kept,choices,true,where);
-      if(!planned)throw new Error(`A note at ${where} has no playable string in the new tuning.`);
-      for(const [note,place] of planned)moves.push({note,...place});
+    for(const bar of staff.bars){
+      const spans=beatSpans(bar);
+      const placed:Array<{beat:model.Beat;strings:Map<model.Note,number>}>=[];
+      for(const voice of bar.voices){
+        for(const beat of voice.beats){
+          const notes=beat.notes.filter(note=>note.string>0),where=`bar ${bar.index+1}, beat ${beat.index+1}`;
+          if(!notes.length)continue;
+          const {overlapping,keptHere,choicesHere}=crossVoicePlacement(placed,spans,voice,beat,kept,choices);
+          const planned=placeBeat(notes,keptHere,choicesHere,false,where)??placeBeat(notes,keptHere,choicesHere,true,where);
+          if(!planned){
+            if(overlapping.length>0){
+              const failNotes=notes.map(note=>({
+                staff:staff.index+1,
+                voice:voice.index+1,
+                bar:bar.index+1,
+                beat:beatNumber(beat),
+                grace:beat.graceType!==model.GraceType.None,
+                string:note.string,
+                pitch:note.isDead?'x':formatPitch(pitch(note)),
+                reason:'conflict' as const,
+              }));
+              throw new Error(describeUnreachable(failNotes));
+            }
+            throw new Error(`A note at ${where} has no playable string in the new tuning.`);
+          }
+          for(const [note,place] of planned)moves.push({note,...place});
+          placed.push({beat,strings:new Map([...planned].map(([note,place])=>[note,place.string]))});
+        }
+      }
     }
   }
   // A tie, slide or hammer-on joins a note to the next note on its string. The change is refused only for a link that

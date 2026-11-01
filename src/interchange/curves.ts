@@ -55,6 +55,7 @@ const enumOf=(kind:Record<number,string>,value:number)=>Number.isInteger(value)&
 /** What the ordinary GPIF fields of a note or beat hold, in a form that changes whenever any of them does. */
 const noteFields=(node:Element|undefined)=>node?kids(kids(node,'Properties')[0],'Property').filter(item=>(item.getAttribute('name')??'').startsWith('Bend')).map(item=>`${item.getAttribute('name')}=${kids(item,'Float')[0]?.textContent??''}`).join(';'):'';
 const beatFields=(node:Element|undefined)=>{const whammy=kids(node,'Whammy')[0];return whammy?[...whammy.attributes].map(attribute=>`${attribute.name}=${attribute.value}`).sort().join(';'):'';};
+const tremoloFields=(node:Element|undefined)=>kids(node,'Tremolo')[0]?.textContent??'';
 /** The children of a top-level section of the GPIF, by walking rather than selecting, which is slow on a large document. */
 const section=(doc:Document,name:string,child:string)=>doc.documentElement.localName==='GPIF'?kids(kids(doc.documentElement,name)[0],child):[];
 const byId=(doc:Document,name:string,child:string)=>new Map(section(doc,name,child).map(node=>[node.getAttribute('id'),node]));
@@ -122,7 +123,7 @@ function sameAddress(found:(Address&{staff:number})|undefined,staff:number,node:
 
 /** Whether the score has a curve or slur the ordinary GPIF fields cannot hold exactly. */
 export function hasGpifCurves(score:model.Score):boolean {
-  return score.tracks.some(track=>track.staves.some(staff=>staff.bars.some(bar=>bar.voices.some(voice=>!voice.isEmpty&&voice.beats.some(beat=>beat.hasWhammyBar||beat.notes.some(note=>note.hasBend||!!note.slurDestination))))));
+  return score.tracks.some(track=>track.staves.some(staff=>staff.bars.some(bar=>bar.voices.some(voice=>!voice.isEmpty&&voice.beats.some(beat=>beat.hasWhammyBar||(beat.tremoloPicking?.style??model.TremoloPickingStyle.Default)!==model.TremoloPickingStyle.Default||beat.notes.some(note=>note.hasBend||!!note.slurDestination||note.durationPercent!==1||!note.isVisible))))));
 }
 
 /** What the property will carry, and what it cannot. Pure: the export and every place that warns about it use this one result. */
@@ -201,6 +202,9 @@ export function writeGpifCurves(score:model.Score,doc:Document,xml:string):void 
           written();const node=element(doc,items,'Whammy',{...attributes(beatAddress(beat)),id:String(beat.id),notes:noteList(beat,writtenFret),fields:beatFields(beats.get(String(beat.id)))});
           curve(node,beat.whammyBarType,beat.whammyStyle,beat.whammyBarPoints!);count++;
         }
+        if(beat.tremoloPicking&&beat.tremoloPicking.style!==model.TremoloPickingStyle.Default){
+          written();element(doc,items,'Tremolo',{...attributes(beatAddress(beat)),id:String(beat.id),notes:noteList(beat,writtenFret),fields:tremoloFields(beats.get(String(beat.id))),style:String(beat.tremoloPicking.style)});count++;
+        }
         for(const note of beat.notes){
           if(plan.carriedNotes.has(note)){
             written();const node=element(doc,items,'Bend',{...attributes(noteAddress(note)),id:String(note.id),string:String(note.string),fret:String(writtenFret(note)),fields:noteFields(notes.get(String(note.id)))});
@@ -209,6 +213,18 @@ export function writeGpifCurves(score:model.Score,doc:Document,xml:string):void 
           const target=note.slurDestination;
           if(target&&plan.carriedSlurs.has(note)){
             element(doc,items,'Slur',{...attributes(noteAddress(note)),id:String(note.id),string:String(note.string),fret:String(writtenFret(note)),...attributes(noteAddress(target),'to'),toId:String(target.id),toStr:String(target.string),toFret:String(writtenFret(target))});count++;
+          }
+          if(note.durationPercent!==1||!note.isVisible){
+            written();
+            const attrs:Record<string,string>={
+              ...attributes(noteAddress(note)),
+              id:String(note.id),
+              string:String(note.string),
+              fret:String(writtenFret(note)),
+            };
+            if(note.durationPercent!==1)attrs.durationPercent=exact(note.durationPercent);
+            if(!note.isVisible)attrs.isVisible='false';
+            element(doc,items,'Note',attrs);count++;
           }
         }
       }
@@ -239,7 +255,7 @@ export function readGpifCurves(score:model.Score,doc:Document,xml:string):void {
   const written=()=>{if(!ready){const full=new DOMParser().parseFromString(xml,'application/xml');notes=byId(full,'Notes','Note');beats=byId(full,'Beats','Beat');where=placement(full);ready=true;}};
   let total=0;
   const touched=new Set<model.Note>(),beatsTouched=new Set<model.Beat>(),slurs:{staff:model.Staff;node:Element}[]=[];
-  const stale=(reason:string)=>console.warn(`Skipped a curve or slur in the GP file that no longer matches its music: ${reason}`);
+  const stale=(reason:string)=>console.warn(`Skipped an item in the GP file that no longer matches its music: ${reason}`);
   orderedTracks(doc).forEach((node,index)=>{
     const track=score.tracks[index];if(!track||!node)return;
     kids(kids(node,'Staves')[0],'Staff').forEach((staffNode,staffIndex)=>{
@@ -248,6 +264,40 @@ export function readGpifCurves(score:model.Score,doc:Document,xml:string):void {
       for(const item of kids(kids(holder,'Items')[0])){
         try{
           if(item.localName==='Slur'){slurs.push({staff,node:item});continue;}
+          if(item.localName==='Tremolo'){
+            const {beat}=locate(staff,item);written();
+            if(!beat)throw new Error('The tremolo refers to missing music.');
+            const style=whole(item.getAttribute('style'));
+            if(!enumOf(model.TremoloPickingStyle as unknown as Record<number,string>,style))throw new Error('Invalid tremolo style.');
+            if(!sameAddress(where(item.getAttribute('id'),false),position,item)){stale('the file places that id elsewhere.');continue;}
+            if(noteList(beat)!==item.getAttribute('notes')){stale('the notes differ.');continue;}
+            if(tremoloFields(beats.get(item.getAttribute('id')??''))!==item.getAttribute('fields')){stale('its ordinary fields were edited.');continue;}
+            if(!beat.tremoloPicking){stale('the beat has no tremolo.');continue;}
+            beat.tremoloPicking.style=style;
+            continue;
+          }
+          if(item.localName==='Note'){
+            const {note}=locate(staff,item);written();
+            if(!note)throw new Error('The note refers to missing music.');
+            if(!sameAddress(where(item.getAttribute('id'),true),position,item)){stale('the file places that id elsewhere.');continue;}
+            if(note.string!==number(item.getAttribute('string'))||note.fret!==number(item.getAttribute('fret'))){stale('the notes differ.');continue;}
+            let durationPercent:number|undefined;
+            if(item.hasAttribute('durationPercent')){
+              const parsed=number(item.getAttribute('durationPercent'));
+              if(!Number.isFinite(parsed)||parsed<=0||parsed>16)throw new Error('Invalid note duration percent.');
+              durationPercent=parsed;
+            }
+            let isVisible:boolean|undefined;
+            if(item.hasAttribute('isVisible')){
+              const raw=item.getAttribute('isVisible');
+              if(raw!=='true'&&raw!=='false')throw new Error('Invalid note visibility.');
+              isVisible=raw==='true';
+            }
+            if(durationPercent===undefined&&isVisible===undefined)throw new Error('Missing note properties.');
+            if(durationPercent!==undefined)note.durationPercent=durationPercent;
+            if(isVisible!==undefined)note.isVisible=isVisible;
+            continue;
+          }
           if(item.localName!=='Bend'&&item.localName!=='Whammy')throw new Error('Unknown curve item.');
           const isBend=item.localName==='Bend',{note,beat}=locate(staff,item);written();
           const target=isBend?note:beat;if(!target)throw new Error('The curve refers to missing music.');
@@ -269,7 +319,10 @@ export function readGpifCurves(score:model.Score,doc:Document,xml:string):void {
             for(const point of curve.points)beat!.addWhammyBarPoint(new model.BendPoint(point.offset,point.value));
             beatsTouched.add(beat!);
           }
-        }catch(cause){console.warn(`Skipped a malformed curve in the GP file: ${cause instanceof Error?cause.message:String(cause)}`);}
+        }catch(cause){
+          const tag=item.localName==='Tremolo'?'tremolo':item.localName==='Note'?'note property':'curve';
+          console.warn(`Skipped a malformed ${tag} in the GP file: ${cause instanceof Error?cause.message:String(cause)}`);
+        }
       }
     });
   });

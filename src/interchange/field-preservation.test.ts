@@ -997,7 +997,7 @@ describe('F27 import field preservation matrix: failing fields (real defects)', 
   // Tests for real defects stay out of the passing suite with it.fails and a one-line reason.
   // Each failing field traces to the file and line where it is lost.
 
-  it.fails('TremoloPickingEffect.style: alphaTab GPIF writer writes marks without style, and reader defaults to Default (lost: alphaTab.js:66833, alphaTab.js:20611)', () => {
+  it('TremoloPickingEffect.style: kept by the TabPlayerCurves property', () => {
     const score = createSyntheticScore();
     targetBeat(score).tremoloPicking = Object.assign(new model.TremoloPickingEffect(), {
       marks: 2,
@@ -1030,7 +1030,7 @@ describe('F27 import field preservation matrix: failing fields (real defects)', 
     expect(targetBeat(reloaded).whammyStyle).toBe(model.BendStyle.Gradual);
   });
 
-  it.fails('Note.durationPercent: alphaTab GPIF writer and reader omit note durationPercent (lost: alphaTab.js:66550, alphaTab.js:21045)', () => {
+  it('Note.durationPercent: kept by the TabPlayerCurves property', () => {
     const score = createSyntheticScore();
     targetNote(score).durationPercent = 0.5;
     score.finish(settings);
@@ -1038,7 +1038,7 @@ describe('F27 import field preservation matrix: failing fields (real defects)', 
     expect(targetNote(reloaded).durationPercent).toBe(0.5);
   });
 
-  it.fails('Note.isVisible: alphaTab GPIF writer and reader omit note isVisible flag (lost: alphaTab.js:66550, alphaTab.js:21045)', () => {
+  it('Note.isVisible: kept by the TabPlayerCurves property', () => {
     const score = createSyntheticScore();
     targetNote(score).isVisible = false;
     score.finish(settings);

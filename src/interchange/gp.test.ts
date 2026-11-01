@@ -179,7 +179,11 @@ describe('native GP channel-strip interchange',()=>{
     const reimportedBeat = reimported.tracks[0].staves[0].bars[0].voices[0].beats[0];
     expect(reimportedBeat.isTremolo).toBe(true);
     expect(reimportedBeat.tremoloPicking?.marks).toBe(2);
-    expect(reimportedBeat.tremoloPicking?.style).toBe(model.TremoloPickingStyle.Default);
+    expect(reimportedBeat.tremoloPicking?.style).toBe(model.TremoloPickingStyle.BuzzRoll);
+
+    const stock = importer.ScoreLoader.loadScoreFromBytes(bytes, settings);
+    const stockBeat = stock.tracks[0].staves[0].bars[0].voices[0].beats[0];
+    expect(stockBeat.tremoloPicking?.style).toBe(model.TremoloPickingStyle.Default);
   });
 });
 it('writes byte-identical GP archives regardless of the wall clock',()=>{

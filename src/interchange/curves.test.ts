@@ -378,3 +378,159 @@ describe('curves the first version lost or broke',()=>{
     });
   });
 });
+
+describe('F27 field preservation, safety and stale checks', () => {
+  it('round trips durationPercent, isVisible and tremolo picking style together', () => {
+    const score = music();
+    const b0 = beatsOf(score, 0)[0];
+    b0.tremoloPicking = Object.assign(new model.TremoloPickingEffect(), { marks: 2, style: model.TremoloPickingStyle.BuzzRoll });
+    const n0 = b0.notes[0];
+    n0.durationPercent = 0.5;
+    n0.isVisible = false;
+    score.finish(settings);
+
+    const loaded = roundTrip(score);
+    const loadedBeat = beatsOf(loaded, 0)[0];
+    const loadedNote = loadedBeat.notes[0];
+    expect(loadedBeat.tremoloPicking?.style).toBe(model.TremoloPickingStyle.BuzzRoll);
+    expect(loadedBeat.tremoloPicking?.marks).toBe(2);
+    expect(loadedNote.durationPercent).toBe(0.5);
+    expect(loadedNote.isVisible).toBe(false);
+  });
+
+  describe('hostile tremolo and note values', () => {
+    const tremoloRefuse: [string, string][] = [
+      ['an unknown style', '999'],
+      ['a negative style', '-1'],
+      ['a non-integer style', 'oops'],
+    ];
+    it.each(tremoloRefuse)('refuses tremolo with %s', (name, styleVal) => {
+      const score = music();
+      const b0 = beatsOf(score, 0)[0];
+      b0.tremoloPicking = Object.assign(new model.TremoloPickingEffect(), { marks: 2, style: model.TremoloPickingStyle.BuzzRoll });
+      score.finish(settings);
+
+      const warn = warnings();
+      const loaded = loadInterchangeScore(editDoc(exportGpInterchange(score, settings), doc => {
+        sidecar(doc, 'Tremolo')[0].setAttribute('style', styleVal);
+      }), settings);
+      expect(beatsOf(loaded, 0)[0].tremoloPicking?.style).toBe(model.TremoloPickingStyle.Default);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('Skipped a malformed tremolo'));
+      usable(loaded);
+    });
+
+    const noteRefuse: [string, Record<string, string>, string][] = [
+      ['a zero durationPercent', { durationPercent: '0' }, 'Invalid note duration percent.'],
+      ['a negative durationPercent', { durationPercent: '-0.5' }, 'Invalid note duration percent.'],
+      ['a non-numeric durationPercent', { durationPercent: 'oops' }, 'Invalid note duration percent.'],
+      ['a huge durationPercent', { durationPercent: '1e300' }, 'Invalid note duration percent.'],
+      ['an invalid isVisible value', { isVisible: 'maybe' }, 'Invalid note visibility.'],
+      ['missing both properties', {}, 'Missing note properties.'],
+    ];
+    it.each(noteRefuse)('refuses note property with %s', (name, attrs, expectedMsg) => {
+      const score = music();
+      const n0 = beatsOf(score, 0)[0].notes[0];
+      n0.durationPercent = 0.5;
+      n0.isVisible = false;
+      score.finish(settings);
+
+      const warn = warnings();
+      const loaded = loadInterchangeScore(editDoc(exportGpInterchange(score, settings), doc => {
+        const item = sidecar(doc, 'Note')[0];
+        item.removeAttribute('durationPercent');
+        item.removeAttribute('isVisible');
+        for (const [k, v] of Object.entries(attrs)) item.setAttribute(k, v);
+      }), settings);
+      expect(beatsOf(loaded, 0)[0].notes[0].durationPercent).toBe(1);
+      expect(beatsOf(loaded, 0)[0].notes[0].isVisible).toBe(true);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining(`Skipped a malformed note property in the GP file: ${expectedMsg}`));
+      usable(loaded);
+    });
+  });
+
+  describe('stale tremolo and note properties', () => {
+    it('does not restore note properties onto a note whose fret was edited', () => {
+      const score = music();
+      const n0 = beatsOf(score, 0)[0].notes[0];
+      n0.durationPercent = 0.5;
+      n0.isVisible = false;
+      score.finish(settings);
+
+      const warn = warnings();
+      const bytes = editDoc(exportGpInterchange(score, settings), doc => {
+        nodeById(doc, 'GPIF > Notes > Note', String(n0.id))!.querySelector('Property[name="Fret"] > Fret')!.textContent = '9';
+      });
+      const loaded = loadInterchangeScore(bytes, settings);
+      const readNote = beatsOf(loaded, 0)[0].notes[0];
+      expect(readNote.fret).toBe(9);
+      expect(readNote.durationPercent).toBe(1);
+      expect(readNote.isVisible).toBe(true);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('the notes differ'));
+      usable(loaded);
+    });
+
+    it('does not restore note properties onto a note whose string was edited', () => {
+      const score = music();
+      const n0 = beatsOf(score, 0)[0].notes[0];
+      n0.durationPercent = 0.5;
+      score.finish(settings);
+
+      const warn = warnings();
+      const bytes = editDoc(exportGpInterchange(score, settings), doc => {
+        nodeById(doc, 'GPIF > Notes > Note', String(n0.id))!.querySelector('Property[name="String"] > String')!.textContent = '2';
+      });
+      const loaded = loadInterchangeScore(bytes, settings);
+      const readNote = beatsOf(loaded, 0)[0].notes[0];
+      expect(readNote.durationPercent).toBe(1);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('the notes differ'));
+    });
+
+    it('does not restore tremolo style when tremolo was removed in ordinary fields', () => {
+      const score = music();
+      const b0 = beatsOf(score, 0)[0];
+      b0.tremoloPicking = Object.assign(new model.TremoloPickingEffect(), { marks: 2, style: model.TremoloPickingStyle.BuzzRoll });
+      score.finish(settings);
+
+      const warn = warnings();
+      const bytes = editDoc(exportGpInterchange(score, settings), doc => {
+        const beatNode = nodeById(doc, 'GPIF > Beats > Beat', String(b0.id))!;
+        beatNode.querySelector(':scope > Tremolo')!.remove();
+      });
+      const loaded = loadInterchangeScore(bytes, settings);
+      expect(beatsOf(loaded, 0)[0].tremoloPicking).toBeUndefined();
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('ordinary fields were edited'));
+    });
+
+    it('does not restore tremolo style when ordinary tremolo marks were changed', () => {
+      const score = music();
+      const b0 = beatsOf(score, 0)[0];
+      b0.tremoloPicking = Object.assign(new model.TremoloPickingEffect(), { marks: 2, style: model.TremoloPickingStyle.BuzzRoll });
+      score.finish(settings);
+
+      const warn = warnings();
+      const bytes = editDoc(exportGpInterchange(score, settings), doc => {
+        const beatNode = nodeById(doc, 'GPIF > Beats > Beat', String(b0.id))!;
+        beatNode.querySelector(':scope > Tremolo')!.textContent = '1/8';
+      });
+      const loaded = loadInterchangeScore(bytes, settings);
+      expect(beatsOf(loaded, 0)[0].tremoloPicking?.style).toBe(model.TremoloPickingStyle.Default);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('ordinary fields were edited'));
+    });
+
+    it('does not restore tremolo style when notes on the beat were changed', () => {
+      const score = music();
+      const b0 = beatsOf(score, 0)[0];
+      b0.tremoloPicking = Object.assign(new model.TremoloPickingEffect(), { marks: 2, style: model.TremoloPickingStyle.BuzzRoll });
+      score.finish(settings);
+
+      const warn = warnings();
+      const bytes = editDoc(exportGpInterchange(score, settings), doc => {
+        const n0 = b0.notes[0];
+        nodeById(doc, 'GPIF > Notes > Note', String(n0.id))!.querySelector('Property[name="Fret"] > Fret')!.textContent = '9';
+      });
+      const loaded = loadInterchangeScore(bytes, settings);
+      expect(beatsOf(loaded, 0)[0].tremoloPicking?.style).toBe(model.TremoloPickingStyle.Default);
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('the notes differ'));
+    });
+  });
+});

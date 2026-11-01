@@ -13,6 +13,7 @@ Closes the cross-voice collision gap in `setStringCount` by sharing cross-voice 
   - As with `preserveOpeningMark` on `setScoreInfo`, old project logs omitting `crossVoice` replay without cross-voice checking (placing notes voice-by-voice exactly as before S19). This guarantees old logs never fail to replay or load with shifted string assignments.
   - Single-voice string count changes that have no playable string in the new tuning continue to throw the established `A note at ... has no playable string in the new tuning.` error.
   - Validated by `src/parity-commands.ts` where `crossVoice` is accepted only as an optional boolean flag on `setStringCount`.
+- **Native command type**: edits pass through Rust, whose `EditCommand` refuses unknown fields, so `SetStringCount` in `src-tauri/src/edit_types.rs` also carries an optional `cross_voice`. Commit 2405c00 had added the field in TypeScript only, and Rust then refused every string count change from the panel with ``unknown field `crossVoice` ``. A `tests/protocol.json` example in the panel's exact shape now keeps the two sides together.
 
 ## Evidence
 
@@ -39,4 +40,6 @@ Closes the cross-voice collision gap in `setStringCount` by sharing cross-voice 
 
 ## Limits
 
-- Desktop drivers (port 9223) were not run in this session per shared rules; desktop verification remains for merge review.
+- `tests/desktop/parity-string-count.mjs` passed on a build of the fix, so a panel string count change goes through Rust in the real app. Its fixture has no overlapping voices, so the refusal message and cross-voice placement were checked in unit tests only, not in the app.
+- Old logs were tested by commands without the field, not with a real saved project from before S19.
+- The other desktop drivers were not run for this change.

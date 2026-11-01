@@ -1119,6 +1119,13 @@ pub enum EditCommand {
             skip_serializing_if = "Option::is_none"
         )]
         tuning_name: Option<String>,
+        /// Keeps voices that sound together off one string. Omitted places each voice as before, so an old log replays unchanged.
+        #[serde(
+            default,
+            deserialize_with = "present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        cross_voice: Option<bool>,
     },
     SetScoreInfo {
         title: String,
@@ -2524,6 +2531,24 @@ mod tests {
         let mut extra = base.clone();
         extra["extra"] = json!(0);
         rejected(&extra);
+    }
+
+    #[test]
+    fn string_count_cross_voice_is_an_optional_flag_and_absent_edits_keep_their_shape() {
+        let base = json!({"type": "setStringCount", "track": 0,
+            "tuning": [64, 59, 55, 50, 45, 40, 35], "keep": "high"});
+        let encoded = serde_json::to_value(accepted(&base)).unwrap();
+        assert!(encoded.get("crossVoice").is_none());
+        for flag in [true, false] {
+            let mut value = base.clone();
+            value["crossVoice"] = json!(flag);
+            assert_eq!(serde_json::to_value(accepted(&value)).unwrap(), value);
+        }
+        for invalid in [json!(null), json!(1), json!("true")] {
+            let mut value = base.clone();
+            value["crossVoice"] = invalid;
+            rejected(&value);
+        }
     }
 
     #[test]

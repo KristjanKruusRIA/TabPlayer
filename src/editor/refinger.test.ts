@@ -548,6 +548,36 @@ describe('refinger uses the current rhythm, not stale playback timing', () => {
   });
 });
 
+describe('refinger grace notes in another voice', () => {
+  const upOne: EditCommand = { type: 'setTuning', track: 0, tuning: [64, 59, 55, 50, 46, 40], keepPitch: true };
+  // Voice 1: quarter, grace on string 1 fret 3, quarter. Voice 0 has a note on string 2 at tick 960.
+  const withGrace = (graceType: model.GraceType) => projectWithEdits(
+    { type: 'addVoice', track: 0, staff: 0 },
+    ...[0, 1, 2, 3].map((beat): EditCommand => ({ type: 'insertBeat', target: at(0, beat, 1), duration: 4, dots: 0 })),
+    { type: 'setBeatRhythm', target: at(0, 1, 1), duration: 16, dots: 0, tupletNumerator: 1, tupletDenominator: 1, graceType },
+    { type: 'setNote', target: at(0, 1, 1), string: 1, fret: 3 },
+    { type: 'setNote', target: at(0, 1, 0), string: 2, fret: 0 }
+  );
+  const outcome = (graceType: model.GraceType) => {
+    const base = withGrace(graceType);
+    try {
+      const bar = previewEdit(base.project, upOne).score.tracks[0].staves[0].bars[0];
+      return { strings: [bar.voices[0].beats[1].notes[0].string, bar.voices[1].beats[1].notes[0].string] };
+    } catch (error) { return { refused: String(error) }; }
+  };
+
+  it.each([['OnBeat', model.GraceType.OnBeat], ['BendGrace', model.GraceType.BendGrace]])('a %s grace note sounds with the beat and cannot share its string', (_name, graceType) => {
+    const result = outcome(graceType);
+    if ('strings' in result) expect(result.strings[0]).not.toBe(result.strings[1]);
+    else expect(result.refused).toMatch(/Keep pitch could not move every note/);
+  });
+
+  it('a BeforeBeat grace note ends before the beat, so the two may share a string', () => {
+    const result = outcome(model.GraceType.BeforeBeat);
+    expect(result).toEqual({ strings: [1, 1] });
+  });
+});
+
 describe('refinger chord diagrams that no beat uses', () => {
   it('an unused diagram that cannot follow does not refuse the edit, and one that can is remapped', () => {
     // Both diagrams stay in the staff after their beats stop pointing at them.

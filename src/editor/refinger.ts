@@ -25,14 +25,16 @@ const sounding = (spans: Map<model.Beat, [number, number]>, a: model.Beat, b: mo
   return x[0] < y[1] && y[0] < x[1];
 };
 
-/** Where each beat of a bar sits, from its current rhythm. The model's playback timing is only rebuilt after some edits, so it can be stale here. A grace beat takes the tick before the beat it leads into. */
+/** Where each beat of a bar sits, from its current rhythm. The model's playback timing is only rebuilt after some edits, so it can be stale here. A before-beat grace note takes 120 ticks ahead of its beat; an on-beat or bend grace note takes 120 from the beat's start. */
 function beatSpans(bar: model.Bar): Map<model.Beat, [number, number]> {
   const spans = new Map<model.Beat, [number, number]>();
   for (const voice of bar.voices) {
     let at = 0;
     for (const beat of voice.beats) {
       if (beat.graceType !== model.GraceType.None) {
-        spans.set(beat, [at - 1, at]);
+        // A before-beat grace note sounds just ahead of its beat; an on-beat or bend grace note sounds from the beat's start.
+        const length = 120;
+        spans.set(beat, beat.graceType === model.GraceType.BeforeBeat ? [at - length, at] : [at, at + length]);
         continue;
       }
       const ticks = rhythmTicks(beat);

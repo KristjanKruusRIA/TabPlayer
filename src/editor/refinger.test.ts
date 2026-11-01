@@ -568,7 +568,7 @@ describe('refinger grace notes in another voice', () => {
 
   it.each([['OnBeat', model.GraceType.OnBeat], ['BendGrace', model.GraceType.BendGrace]])('a %s grace note sounds with the beat and cannot share its string', (_name, graceType) => {
     const result = outcome(graceType);
-    if ('strings' in result) expect(result.strings[0]).not.toBe(result.strings[1]);
+    if (result.strings) expect(result.strings[0]).not.toBe(result.strings[1]);
     else expect(result.refused).toMatch(/Keep pitch could not move every note/);
   });
 

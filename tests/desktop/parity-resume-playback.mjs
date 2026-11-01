@@ -7,19 +7,21 @@ import {resolve} from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {connect,directory,launch} from './harness.mjs';
 import {readDocumentRecord} from './document-context.mjs';
-import {clickWorkstationButton,revealInspector,waitForWorkspaceIdle} from './workstation-commands.mjs';
+import {clickWorkstationButton,closeWelcomeLibrary,revealInspector,waitForWorkspaceIdle} from './workstation-commands.mjs';
+import {assertStringCountBuild,validateStringCountArguments} from './parity-string-count.mjs';
 
 const digest=bytes=>createHash('sha256').update(bytes).digest('hex');
 const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 const answerHelper='tests/desktop/answer-unsaved-dialog.ps1',answerHash='436b5b19827837bc79756398ab159dc1892fb915215652f787e6121e5c5e4ef0';
-const acceptedExecutableHash='8a8cb8b4d5572ccd47d935b08006b024aa0db2102aa7fd8323c319b3487780fe';
 const ownedCheck='$p=Get-Process -Id $env:RESUME_OWNED_PID -ErrorAction SilentlyContinue; if($null -ne $p){if(-not [string]::Equals($p.Path,$env:RESUME_OWNED_EXE,[StringComparison]::OrdinalIgnoreCase) -or $p.StartTime.ToUniversalTime().Ticks.ToString() -cne $env:RESUME_OWNED_START){throw "Captured resume process identity changed"}};';
 
 // One controlled JS host-call exception; shutdown/resume/audio stay real.
 // Explicit execution is required; import and the default call are inert.
-export async function runResumePlaybackAcceptance({execute=false}={}){
-  assert.equal(execute,true,'Explicit execute:true (or CLI --run) is required');assert.equal(process.platform,'win32');
-  const executable=realpathSync(resolve(directory,'tabplayer.exe'));assert.equal(digest(readFileSync(answerHelper)),answerHash);assert.equal(digest(readFileSync(executable)),acceptedExecutableHash,'Use the root-supplied resumed-playback build');
+// The executable is bound by the current-source build packet from string-count-build.mjs instead of one pinned old binary hash.
+export async function runResumePlaybackAcceptance({execute=false,buildPath}={}){
+  assert.equal(execute,true,'Explicit execute:true (or CLI --run --build=<packet>) is required');assert.equal(process.platform,'win32');
+  assert.equal(typeof buildPath,'string','An absolute --build=<TabPlayerStringCountBuild JSON> is required');const packet=JSON.parse(readFileSync(buildPath,'utf8'));assertStringCountBuild(packet);
+  const executable=realpathSync(resolve(directory,'tabplayer.exe'));assert.equal(digest(readFileSync(answerHelper)),answerHash);assert.equal(digest(readFileSync(executable)),packet.executableSha256,'Copy the packet executable to .analysis/desktop-smoke/tabplayer.exe first');
   const nativeDirectory=mkdtempSync(resolve(directory,'resume-session-')),profilesBefore=new Set(readdirSync(directory).filter(name=>/^profile-[0-9]+$/.test(name)));
   const result={executable,executableSha256:digest(readFileSync(executable)),nativeDirectory,history:[],fault:'One rejected JS plugin:window|destroy call; not an actual OS destruction failure.',limits:['No native IPC is faked: actual session_shutdown, session_resume, audio_prepare and transport are forwarded.','No autoplay, score edit, reload or second player is used to trigger resumed preparation.','No physical audio, screenshot, true OS destruction failure or cross-platform claim.']};
   const step=(name,value)=>{result.history.push({name,atUnixMs:Date.now(),value});return value;};
@@ -46,7 +48,7 @@ export async function runResumePlaybackAcceptance({execute=false}={}){
   try{
     await new Promise((accept,reject)=>{const server=createServer();server.once('error',reject);server.listen(9223,'127.0.0.1',()=>server.close(error=>error?reject(error):accept()));});
     const pid=launch({TABPLAYER_TEST_SESSION_DIR:nativeDirectory});identity=JSON.parse(ps(`$p=Get-Process -Id ${pid} -ErrorAction Stop; if(-not [string]::Equals($p.Path,$env:RESUME_OWNED_EXE,[StringComparison]::OrdinalIgnoreCase)){throw 'Unexpected resume executable'}; @{pid=$p.Id;path=$p.Path;startTicks=$p.StartTime.ToUniversalTime().Ticks.ToString()}|ConvertTo-Json -Compress`));assert.equal(identity.pid,pid);assert.match(identity.startTicks,/^[1-9][0-9]+$/);owned();step('Owned diagnostic launch',identity);
-    browser=await connect();owned();page=browser.contexts()[0].pages()[0];assert.ok(page);page.setDefaultTimeout(20000);page.on('pageerror',error=>errors.push(error.message));await page.setViewportSize({width:1280,height:900});await idle();
+    browser=await connect();owned();page=browser.contexts()[0].pages()[0];assert.ok(page);page.setDefaultTimeout(20000);page.on('pageerror',error=>errors.push(error.message));await page.setViewportSize({width:1280,height:900});await closeWelcomeLibrary(page);await idle();
     const profiles=readdirSync(directory).filter(name=>/^profile-[0-9]+$/.test(name)&&!profilesBefore.has(name));assert.equal(profiles.length,1,'One fresh profile from the unchanged harness');result.profileDirectory=resolve(directory,profiles[0]);
     await revealInspector(page);await button('Edit');await page.getByRole('combobox',{name:'String',exact:true}).selectOption('6');
     for(const [beat,fret]of [[1,5],[2,7]]){await page.getByLabel('Beat',{exact:true}).fill(String(beat));await page.getByLabel('Fret',{exact:true}).fill(String(fret));await button('Set note');}await button('Undo');await page.getByLabel('Beat',{exact:true}).fill('1');await page.getByLabel('Zoom (%)',{exact:true}).fill(String(expectedView.zoom));assert.equal(await page.getByLabel('Zoom (%)',{exact:true}).inputValue(),'115');await page.getByLabel('Fret',{exact:true}).fill('19');
@@ -81,4 +83,4 @@ export async function runResumePlaybackAcceptance({execute=false}={}){
   }
 }
 
-if(process.argv[1]&&pathToFileURL(resolve(process.argv[1])).href===import.meta.url){assert.deepEqual(process.argv.slice(2),['--run'],'Explicit --run is required');console.log(JSON.stringify(await runResumePlaybackAcceptance({execute:true}),null,2));}
+if(process.argv[1]&&pathToFileURL(resolve(process.argv[1])).href===import.meta.url){const options=validateStringCountArguments(process.argv.slice(2));assert.equal(options.mode,'run','Explicit --run --build=<absolute packet> is required');console.log(JSON.stringify(await runResumePlaybackAcceptance({execute:true,buildPath:options.buildPath}),null,2));}

@@ -23,7 +23,11 @@ try{
   const library=page.getByRole('dialog',{name:'Library',exact:true});await library.getByRole('heading',{name:'Welcome to TabPlayer',exact:true}).waitFor();await library.getByRole('button',{name:'Close',exact:true}).click();await library.waitFor({state:'hidden'});
   const idle=async()=>{await waitForWorkspaceIdle(page);assert.deepEqual(await page.getByRole('alert').allTextContents(),[]);};
   const button=async name=>{await clickWorkstationButton(page,name,{waitForIdle:false});await idle();};
-  const control=label=>['Display mode','Displayed tracks','Default layout','Default zoom mode','Default tracks'].includes(label)?page.getByRole('combobox',{name:new RegExp(`^${label}`)}):page.getByLabel(label,{exact:true});
+  const control=label=>['Display mode','Displayed tracks','Default zoom mode'].includes(label)?page.getByRole('combobox',{name:new RegExp(`^${label}`)}):page.getByLabel(label,{exact:true});
+  // The default layout and default tracks are radio groups; read the chosen option's label and pick one by label.
+  const group=label=>page.getByRole('radiogroup',{name:label,exact:true});
+  const chosen=async label=>(await group(label).getByRole('radio',{checked:true}).innerText()).trim();
+  const choose=(label,option)=>group(label).getByRole('radio',{name:option,exact:true}).click();
   const view=async()=>[await control('Display mode').inputValue(),await control('Zoom (%)').inputValue(),await control('Displayed tracks').inputValue()];
   const settled=async expected=>{await page.waitForFunction(async expected=>{const read=label=>[...document.querySelectorAll('label')].find(node=>node.firstChild?.textContent===label)?.querySelector('select,input')?.value;return JSON.stringify([read('Display mode'),read('Zoom (%)'),read('Displayed tracks')])===JSON.stringify(expected);},expected);};
   await button('Open');await page.locator('[aria-label="Music notation"] svg').first().waitFor();
@@ -32,8 +36,9 @@ try{
   await control('Zoom (%)').fill('130');await control('Displayed tracks').selectOption('all');await settled(['parchment','130','all']);
   await page.locator('summary').filter({hasText:/^Default view$/}).first().evaluate(node=>{for(let item=node.parentElement;item;item=item.parentElement)if(item.tagName==='DETAILS')item.open=true;});
   await page.getByRole('button',{name:'Use current view',exact:true}).click();
-  assert.deepEqual([await control('Default layout').inputValue(),await control('Default zoom (%)').inputValue(),await control('Default tracks').inputValue()],['parchment','130','all']);
-  await control('Default layout').selectOption('verticalPage');
+  assert.deepEqual([await chosen('Default layout'),await control('Default zoom (%)').inputValue(),await chosen('Default tracks')],['Parchment','130','All tracks']);
+  await choose('Default layout','Vertical page');
+  assert.equal(await chosen('Default layout'),'Vertical page');
   await page.getByRole('button',{name:'Save default view',exact:true}).click();
   await page.getByText('Saved. Scores opened or created from now on start in this view.',{exact:true}).waitFor();
   assert.deepEqual(JSON.parse(await page.evaluate(()=>localStorage.getItem('tabplayer.viewDefaults'))),{layout:'verticalPage',zoomMode:'manual',zoom:130,tracks:'all'});

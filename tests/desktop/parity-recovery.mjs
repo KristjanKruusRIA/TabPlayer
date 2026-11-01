@@ -138,7 +138,12 @@ class AcceptanceContext{
     this.identity=this.inspect();assert.ok(this.identity);this.processes.push({...this.identity,nativeDirectory});
     this.browser=await connect();this.page=this.browser.contexts()[0].pages()[0];assert.ok(this.page);
     this.page.setDefaultTimeout(20000);this.page.on('pageerror',error=>this.errors.push(error.message));
-    await this.page.setViewportSize({width:1280,height:900});return this.page;
+    await this.page.setViewportSize({width:1280,height:900});await this.dismissWelcome();return this.page;
+  }
+  // A fresh session opens the Library with a welcome, which is modal and holds the workspace busy; a restored session does not, so it is closed only when it appears.
+  async dismissWelcome(){
+    const library=this.page.getByRole('dialog',{name:'Library',exact:true});
+    if(await library.getByRole('heading',{name:'Welcome to TabPlayer',exact:true}).waitFor({timeout:6000}).then(()=>true,()=>false)){await library.getByRole('button',{name:'Close',exact:true}).click();await library.waitFor({state:'hidden'});}
   }
   invoke(command,args={}){return this.page.evaluate(([command,args])=>window.__TAURI_INTERNALS__.invoke(command,args),[command,args]);}
   workspace(){return this.invoke('workspace_snapshot');}

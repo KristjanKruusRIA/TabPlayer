@@ -21,8 +21,9 @@ const target=process.env.STRING_COUNT_TARGET;
 const log=execSync(`npm run tauri -- build --no-bundle --features desktop-test --config "${configPath}"`,{encoding:'utf8',env:{...process.env,VITE_DESKTOP_TEST:'1',CARGO_TARGET_DIR:target},stdio:['ignore','pipe','pipe'],maxBuffer:1<<28});
 writeFileSync(buildLogPath,frontendLog+log);
 const executable=resolve(runtime,'tabplayer.exe');copyFileSync(resolve(target,'release/tabplayer.exe'),executable);
-// An unbundled build reads its audio and library resources from beside the executable.
-for(const name of ['audio','library'])cpSync(resolve(worktree,'src-tauri/resources',name),resolve(runtime,name),{recursive:true});
+// An unbundled build reads its audio and library resources from beside the executable. A linked worktree may hold these as
+// junctions to a shared checkout; dereference so the runtime folder owns real files instead of failing on a symlink.
+for(const name of ['audio','library'])cpSync(resolve(worktree,'src-tauri/resources',name),resolve(runtime,name),{recursive:true,dereference:true});
 const now=new Date();utimesSync(executable,now,now);await new Promise(r=>setTimeout(r,50));
 const builtAtUtc=new Date().toISOString();
 const packet={format:'TabPlayerStringCountBuild',version:1,worktree,sourceRevision,sourceHashes,buildStartedAtUtc,builtAtUtc,

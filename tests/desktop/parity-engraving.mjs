@@ -1,4 +1,4 @@
-import {waitForWorkspaceIdle,clickWorkstationButton,revealPlaybackControls} from './workstation-commands.mjs';
+import {waitForWorkspaceIdle,clickWorkstationButton,revealPlaybackControls,hidePlaybackControls} from './workstation-commands.mjs';
 import { readActiveDocument } from './document-context.mjs';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
@@ -34,7 +34,7 @@ try{
   await choose('Displayed tracks','all');await button('Track 1: Guitar6');assert.deepEqual((await snapshot()).project,baseline.project);
   await button('Presentation');await details('Engraving');await details('Stylesheet');await details('Staff profiles');
   // The fixture repeats measure 1, so Play from the score cursor needs a performed occurrence chosen first.
-  await revealPlaybackControls(page);await details('Selected playback');await page.getByRole('combobox',{name:'Cursor occurrence',exact:true}).selectOption({label:'Measure 1, occurrence 1'});
+  await revealPlaybackControls(page);await details('Selected playback');await page.getByRole('combobox',{name:'Cursor occurrence',exact:true}).selectOption({label:'Measure 1, occurrence 1'});await hidePlaybackControls(page);
   await button('Play');const playing=await waitStatus(value=>value.playing&&value.tick>0),generation=playing.generation;assert.ok(Number.isInteger(generation)&&generation>0);
   await choose('Hide dynamics','true');await choose('Single track names','allSystems');await choose('Multiple track names','allSystems');await choose('Guitar6 notation profile','standardTab');await fill('System spacing (%)',125);await button('Apply engraving');
   const afterStyle=await status();assert.equal(afterStyle.generation,generation);assert.equal(afterStyle.playing,true);assert.ok(afterStyle.tick>=playing.tick);result.presentationKeepsNativeGeneration=generation;

@@ -23,9 +23,9 @@ await buildInstrumentFixture();
 const folder=join(directory,`export-${Date.now()}-sustain-pedal`);await mkdir(folder,{recursive:true});
 const id=launch({TABPLAYER_TEST_OPEN:fixturePath,TABPLAYER_TEST_EXPORT_DIR:folder});let browser;
 try{
-  browser=await connect();const page=browser.contexts()[0].pages()[0];await waitForWorkspaceIdle(page);
+  browser=await connect();const page=browser.contexts()[0].pages()[0];
   const errors=[];page.on('pageerror',error=>errors.push(error.message));
-  const library=page.getByRole('dialog',{name:'Library',exact:true});await library.getByRole('heading',{name:'Welcome to TabPlayer',exact:true}).waitFor();await library.getByRole('button',{name:'Close',exact:true}).click();await library.waitFor({state:'hidden'});
+  const library=page.getByRole('dialog',{name:'Library',exact:true});await library.getByRole('heading',{name:'Welcome to TabPlayer',exact:true}).waitFor();await library.getByRole('button',{name:'Close',exact:true}).click();await library.waitFor({state:'hidden'});await waitForWorkspaceIdle(page);
   const button=async name=>{await clickWorkstationButton(page,name,{waitForIdle:false});await waitForWorkspaceIdle(page);assert.deepEqual(await page.getByRole('alert').allTextContents(),[]);};
   await button('Open');await button('Track 4: Keys');
   await page.locator('summary').filter({hasText:'Beat notation'}).first().evaluate(node=>{node.parentElement.open=true;});

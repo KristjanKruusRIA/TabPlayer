@@ -12,7 +12,7 @@ import { loadInterchangeScore } from '../interchange/gp';
 import { applyNoteLink,applyNoteTechniques } from './techniques';
 
 const standard=[64,59,55,50,45,40],seven=[64,59,55,50,45,40,35];
-const command=(tuning:number[],keep:'high'|'low'='high')=>({type:'setStringCount',track:0,tuning,keep}) as EditCommand;
+const command=(tuning:number[],keep:'high'|'low'='high',crossVoice?:boolean)=>({type:'setStringCount',track:0,tuning,keep,...(crossVoice!==undefined?{crossVoice}:{})} as EditCommand);
 const json=(score:model.Score)=>model.JsonConverter.scoreToJson(score);
 const allNotes=(score:model.Score)=>score.tracks[0].staves[0].bars.flatMap(bar=>bar.voices.flatMap(voice=>voice.beats.flatMap(beat=>beat.notes)));
 const place=(score:model.Score)=>allNotes(score).map(note=>`${note.string}:${note.fret}`);
@@ -228,7 +228,7 @@ it('moves a dead note off a removed string by its fret, since it has no pitch',(
 
 
 describe('S19: cross-voice collision checks in setStringCount', () => {
-  it('never puts notes of two voices that sound together on one string after a string count change', () => {
+  it('never puts notes of two voices that sound together on one string after a string count change with crossVoice: true', () => {
     // 7-string tuning [64,59,55,50,45,40,35] (strings 7 down to 1)
     // String 1 is low B1 (35), String 2 is E2 (40), String 3 is A2 (45)
     const base = sparse(seven);
@@ -248,11 +248,8 @@ describe('S19: cross-voice collision checks in setStringCount', () => {
     base.finish(new Settings());
 
     // Reduce from 7 strings to 6 (standard: [64,59,55,50,45,40]) keeping high strings (keep: 'high').
-    // String 1 (low B1) is removed. String 3 remains string 2 (A2).
-    // Voice 1 note was on string 1, so it must be relocated.
-    // In 6-string standard, A2 can be played on string 2 fret 0 (kept for voice 0), or string 1 fret 5 (low E fret 5).
-    // Because Voice 0 is sounding at the exact same beat, Voice 1 must NOT land on Voice 0's string!
-    applyStructureEdit(base, command(standard, 'high'), 1);
+    // With crossVoice: true, Voice 1 must NOT land on Voice 0's string!
+    applyStructureEdit(base, command(standard, 'high', true), 1);
 
     const first = bar.voices[0].beats[0].notes[0];
     const second = bar.voices[1].beats[0].notes[0];
@@ -261,7 +258,34 @@ describe('S19: cross-voice collision checks in setStringCount', () => {
     expect(second.realValue).toBe(45);
   });
 
-  it('refuses and lists conflicting notes when overlapping voices have no free strings', () => {
+  it('replays old logs without crossVoice exactly as before, allowing notes in different voices to land on one string without error', () => {
+    const base = sparse(seven);
+    applyStructureEdit(base, { type: 'addVoice', track: 0, staff: 0 }, 0);
+    const staff = base.tracks[0].staves[0];
+    const bar = staff.bars[0];
+
+    // Voice 0, beat 0 has A2 (pitch 45) on string 3 (open string 3)
+    add(base, 0, 3, 0);
+
+    // Voice 1, beat 0 has A2 (pitch 45) on string 1 (fret 10)
+    const n2 = new model.Note();
+    n2.string = 1;
+    n2.fret = 10;
+    bar.voices[1].beats[0].addNote(n2);
+    bar.voices[1].beats[0].isEmpty = false;
+    base.finish(new Settings());
+
+    // Replaying an old log: command without crossVoice
+    applyStructureEdit(base, command(standard, 'high'), 1);
+
+    const first = bar.voices[0].beats[0].notes[0];
+    const second = bar.voices[1].beats[0].notes[0];
+    // In the old algorithm without cross-voice checks, both voices choose string 2 (fret 0)
+    expect(first.string).toBe(2);
+    expect(second.string).toBe(2);
+  });
+
+  it('refuses and lists conflicting notes when overlapping voices have no free strings and crossVoice is true', () => {
     // 2-string tuning [45, 40] reducing to 1-string [40]
     const twoStrings = [45, 40];
     const oneString = [40];
@@ -277,9 +301,6 @@ describe('S19: cross-voice collision checks in setStringCount', () => {
     b2.voices[0].beats[0].isEmpty = false;
 
     // Voice 1 has note on string 2 (pitch 45)
-    // When reducing to 1 string [40], string 2 is removed. Pitch 45 on string 1 would be fret 5.
-    // But string 1 is already sounding Voice 0's note at beat 0!
-    // Since there is only 1 string in the new tuning, both voices cannot be placed on different strings!
     const noteV1 = new model.Note();
     noteV1.string = 2;
     noteV1.fret = 0;
@@ -287,7 +308,17 @@ describe('S19: cross-voice collision checks in setStringCount', () => {
     b2.voices[1].beats[0].isEmpty = false;
     s2.finish(new Settings());
 
-    expect(() => applyStructureEdit(s2, { type: 'setStringCount', track: 0, tuning: oneString, keep: 'low' }, 1))
+    // Without crossVoice, old behavior replays without throwing:
+    const oldScore = sparse(twoStrings);
+    applyStructureEdit(oldScore, { type: 'addVoice', track: 0, staff: 0 }, 0);
+    const oldB2 = oldScore.tracks[0].staves[0].bars[0];
+    const oV0 = new model.Note(); oV0.string = 1; oV0.fret = 0; oldB2.voices[0].beats[0].addNote(oV0); oldB2.voices[0].beats[0].isEmpty = false;
+    const oV1 = new model.Note(); oV1.string = 2; oV1.fret = 0; oldB2.voices[1].beats[0].addNote(oV1); oldB2.voices[1].beats[0].isEmpty = false;
+    oldScore.finish(new Settings());
+    expect(() => applyStructureEdit(oldScore, { type: 'setStringCount', track: 0, tuning: oneString, keep: 'low' }, 1)).not.toThrow();
+
+    // With crossVoice: true, new behavior throws and lists the conflicting notes:
+    expect(() => applyStructureEdit(s2, { type: 'setStringCount', track: 0, tuning: oneString, keep: 'low', crossVoice: true }, 1))
       .toThrow(/the notes of this beat have no free strings for all of them/);
   });
 
@@ -317,13 +348,28 @@ describe('S19: cross-voice collision checks in setStringCount', () => {
     bar.voices[1].addBeat(b1);
     base.finish(new Settings());
 
-    // Without rebuilding the model playback cache, setStringCount uses beatSpans(bar) to calculate current rhythm.
-    applyStructureEdit(base, command(standard, 'high'), 1);
+    // With crossVoice: true, setStringCount uses beatSpans(bar) to calculate current rhythm and avoids collision
+    applyStructureEdit(base, command(standard, 'high', true), 1);
 
     const first = bar.voices[0].beats[0].notes[0];
     const second = bar.voices[1].beats[1].notes[0];
     expect(first.string).not.toBe(second.string);
     expect(first.realValue).toBe(45);
     expect(second.realValue).toBe(45);
+  });
+
+  it('replays a saved project log without crossVoice via buildDocument without regression', () => {
+    const p = blankProject();
+    const doc = buildDocument(p);
+    // Apply edits to build a 2-voice score then reduce string count without crossVoice
+    const ed1: EditCommand = { type: 'addVoice', track: 0, staff: 0 };
+    const ed2: EditCommand = { type: 'setStringCount', track: 0, tuning: [64, 59, 55, 50, 45, 40, 35], keep: 'high' };
+    const ed3: EditCommand = { type: 'setStringCount', track: 0, tuning: standard, keep: 'high' };
+    const projectWithLog = {
+      ...p,
+      edits: [ed1, ed2, ed3],
+    };
+    const rebuilt = buildDocument(projectWithLog);
+    expect(rebuilt.score.tracks[0].staves[0].tuning).toEqual(standard);
   });
 });

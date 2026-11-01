@@ -99,7 +99,7 @@ export function placeBeat(notes:model.Note[],kept:(note:model.Note)=>Place|null,
 /** Changes a track's string count. Notes keep their sounding pitch: on their kept string when the fret stays
  * playable, otherwise on a free string of the same beat; chord diagrams follow the kept strings. Everything is
  * planned and checked before the score changes. */
-function setStringCount(track:model.Track,tuning:number[],keep:StringCountKeep,tuningName?:string) {
+function setStringCount(track:model.Track,tuning:number[],keep:StringCountKeep,tuningName?:string,crossVoice=false) {
   validateStringCount(tuning,keep);validateTuningName(tuningName);
   const staves=track.staves;
   if(track.isPercussion||staves.some(staff=>staff.isPercussion||!staff.tuning.length))throw new Error('Only stringed guitar or bass tracks have strings to add or remove.');
@@ -113,16 +113,16 @@ function setStringCount(track:model.Track,tuning:number[],keep:StringCountKeep,t
     const kept=(note:model.Note):Place|null=>{const index=keptIndex(from-note.string,from,to,keep);if(index===null)return null;const string=to-index;return {string,fret:note.isDead?note.fret:pitch(note)-open(string)};};
     const choices=(note:model.Note)=>Array.from({length:to},(_,i)=>to-i).map(string=>({string,fret:note.isDead?Math.min(note.fret,maxRelocatedFret):pitch(note)-open(string)})).filter(choice=>choice.fret>=0&&choice.fret<=maxRelocatedFret).sort((a,b)=>a.fret-b.fret);
     for(const bar of staff.bars){
-      const spans=beatSpans(bar);
+      const spans=crossVoice?beatSpans(bar):new Map<model.Beat,[number,number]>();
       const placed:Array<{beat:model.Beat;strings:Map<model.Note,number>}>=[];
       for(const voice of bar.voices){
         for(const beat of voice.beats){
           const notes=beat.notes.filter(note=>note.string>0),where=`bar ${bar.index+1}, beat ${beat.index+1}`;
           if(!notes.length)continue;
-          const {overlapping,keptHere,choicesHere}=crossVoicePlacement(placed,spans,voice,beat,kept,choices);
+          const {overlapping,keptHere,choicesHere}=crossVoice?crossVoicePlacement(placed,spans,voice,beat,kept,choices):{overlapping:[],keptHere:kept,choicesHere:choices};
           const planned=placeBeat(notes,keptHere,choicesHere,false,where)??placeBeat(notes,keptHere,choicesHere,true,where);
           if(!planned){
-            if(overlapping.length>0){
+            if(crossVoice&&overlapping.length>0){
               const failNotes=notes.map(note=>({
                 staff:staff.index+1,
                 voice:voice.index+1,
@@ -138,7 +138,7 @@ function setStringCount(track:model.Track,tuning:number[],keep:StringCountKeep,t
             throw new Error(`A note at ${where} has no playable string in the new tuning.`);
           }
           for(const [note,place] of planned)moves.push({note,...place});
-          placed.push({beat,strings:new Map([...planned].map(([note,place])=>[note,place.string]))});
+          if(crossVoice)placed.push({beat,strings:new Map([...planned].map(([note,place])=>[note,place.string]))});
         }
       }
     }
@@ -174,7 +174,7 @@ export function applyStructureEdit(score:model.Score,command:EditCommand,_editIn
       for(const staff of track.staves)for(const voice of staff.bars[0]?.voices??[])for(const automation of voice.beats[0]?.automations??[])if(automation.type===model.AutomationType.Instrument&&automation.ratioPosition===0)automation.value=command.program;
       return true;
     }
-    case 'setStringCount': {setStringCount(trackAt(score,command.track),command.tuning,command.keep,command.tuningName);return true;}
+    case 'setStringCount': {setStringCount(trackAt(score,command.track),command.tuning,command.keep,command.tuningName,!!command.crossVoice);return true;}
     case 'setTrackColor': {const track=trackAt(score,command.track);track.color=parseTrackColor(command.color);return true;}
     case 'setStaffSettings': {
       const staff=staffAt(score,command.track,command.staff);

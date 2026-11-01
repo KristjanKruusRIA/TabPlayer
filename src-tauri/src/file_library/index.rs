@@ -1702,7 +1702,8 @@ impl LibraryIndex {
                 }
             }
         }
-        let mut rows: Vec<(String, String, &LibraryResult, bool)> = Vec::with_capacity(unique.len());
+        let mut rows: Vec<(String, String, &LibraryResult, bool)> =
+            Vec::with_capacity(unique.len());
         let mut fields_buf = String::new();
         for (path_key, (_, row, available)) in unique {
             if !filters.matches(row) {
@@ -1727,26 +1728,40 @@ impl LibraryIndex {
             }
             let title_str = displayed_title(row);
             let sort_key = match query.sort {
-                LibrarySort::Title => if title_str.is_ascii() { title_str.to_ascii_lowercase() } else { title_str.to_lowercase() },
+                LibrarySort::Title => {
+                    if title_str.is_ascii() {
+                        title_str.to_ascii_lowercase()
+                    } else {
+                        title_str.to_lowercase()
+                    }
+                }
                 LibrarySort::Artist => row
                     .metadata
                     .as_ref()
-                    .map(|metadata| if metadata.artist.is_ascii() { metadata.artist.to_ascii_lowercase() } else { metadata.artist.to_lowercase() })
+                    .map(|metadata| {
+                        if metadata.artist.is_ascii() {
+                            metadata.artist.to_ascii_lowercase()
+                        } else {
+                            metadata.artist.to_lowercase()
+                        }
+                    })
                     .unwrap_or_default(),
                 LibrarySort::Modified => String::new(),
             };
             rows.push((sort_key, path_key, row, available));
         }
-        rows.sort_by(|(left_key, left_path, left, _), (right_key, right_path, right, _)| {
-            let primary = match query.sort {
-                LibrarySort::Modified => right.modified_unix_ms.cmp(&left.modified_unix_ms),
-                _ => left_key.cmp(right_key),
-            };
-            primary
-                .then_with(|| left_path.cmp(right_path))
-                .then_with(|| left.root_id.cmp(&right.root_id))
-                .then_with(|| left.id.cmp(&right.id))
-        });
+        rows.sort_by(
+            |(left_key, left_path, left, _), (right_key, right_path, right, _)| {
+                let primary = match query.sort {
+                    LibrarySort::Modified => right.modified_unix_ms.cmp(&left.modified_unix_ms),
+                    _ => left_key.cmp(right_key),
+                };
+                primary
+                    .then_with(|| left_path.cmp(right_path))
+                    .then_with(|| left.root_id.cmp(&right.root_id))
+                    .then_with(|| left.id.cmp(&right.id))
+            },
+        );
         warnings.sort();
         warnings.dedup();
         Ok(LibraryPage {

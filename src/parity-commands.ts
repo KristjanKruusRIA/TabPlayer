@@ -175,8 +175,10 @@ export function validateParityCommand(value:unknown):void {
   const hasKeep=type==='setTuning'&&Object.hasOwn(candidate,'keepPitch');
   // An optional field: absent is the original edit, so an old log keeps its exact shape.
   const preserving=type==='setScoreInfo'&&Object.hasOwn(candidate,'preserveOpeningMark');
-  const edit=exact(value,['type',...shapes[type],...(named?['tuningName']:[]),...(preserving?['preserveOpeningMark']:[]),...(hasKeep?['keepPitch']:[])]);
+  const hasCrossVoice=type==='setStringCount'&&Object.hasOwn(candidate,'crossVoice');
+  const edit=exact(value,['type',...shapes[type],...(named?['tuningName']:[]),...(preserving?['preserveOpeningMark']:[]),...(hasKeep?['keepPitch']:[]),...(hasCrossVoice?['crossVoice']:[])]);
   if(preserving&&typeof edit.preserveOpeningMark!=='boolean')throw new Error('Invalid edit fields.');
+  if(hasCrossVoice)flag(edit.crossVoice);
   if(named)validateTuningName(edit.tuningName===undefined?null:edit.tuningName);
   if(hasKeep)flag(edit.keepPitch);
   if(type==='setStaffSettings'||type==='addStaff'){

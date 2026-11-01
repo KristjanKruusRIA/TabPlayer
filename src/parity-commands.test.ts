@@ -52,3 +52,15 @@ it('keepPitch is an optional boolean on setTuning and staff settings only, and a
   expect(()=>validate({type:'setStringCount',track:0,tuning:[64,59,55,50,45,40,35],keep:'high',keepPitch:true})).toThrow();
   expect(()=>validate({type:'addTrack',name:'Bass',tuning:[43,38,33,28],program:33,keepPitch:true})).toThrow();
 });
+
+it('crossVoice is an optional boolean on setStringCount only, and absent edits keep their exact shape',()=>{
+  const strCount={type:'setStringCount',track:0,tuning:[64,59,55,50,45,40,35],keep:'high'};
+  expect(validate(strCount).edits).toEqual([strCount]);
+  for(const crossVoice of [true,false]){
+    expect(validate({...strCount,crossVoice}).edits).toEqual([{...strCount,crossVoice}]);
+  }
+  for(const crossVoice of [null,1,'true',undefined]){
+    expect(()=>validate({...strCount,crossVoice}),String(crossVoice)).toThrow();
+  }
+  expect(()=>validate({type:'setTuning',track:0,tuning:[64,59,55,50,45,38],crossVoice:true})).toThrow();
+});

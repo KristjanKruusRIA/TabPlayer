@@ -126,7 +126,8 @@ export type EditCommand = LyricsCommand | GestureCommand | BarGestureCommand | R
   | { type: 'duplicateTrack'; track: number }
   | { type: 'setTrackColor'; track: number; color: string }
   | { type: 'setTuning'; track: number; tuning: number[]; tuningName?: string; keepPitch?: boolean }
-  | { type: 'setStringCount'; track: number; tuning: number[]; keep: StringCountKeep; tuningName?: string }
+  /** `crossVoice`: absent places notes voice-by-voice without cross-voice checking (the original behavior, so old logs replay unchanged); true prevents two voices from landing on the same string at the same moment. */
+  | { type: 'setStringCount'; track: number; tuning: number[]; keep: StringCountKeep; tuningName?: string; crossVoice?: boolean }
   /** `preserveOpeningMark`: absent rebuilds the opening tempo mark as a plain one (the original behavior, so old logs replay unchanged); true keeps its label, gradual change and visibility and sets only its value. */
   | { type: 'setScoreInfo'; title: string; artist: string; tempo: number; preserveOpeningMark?: boolean }
   | { type: 'setScoreMetadata'; fields: ScoreMetadata }

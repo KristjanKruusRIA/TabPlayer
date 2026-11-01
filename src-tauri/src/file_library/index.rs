@@ -266,8 +266,15 @@ fn is_combining(c: char) -> bool {
 /// Case-folds for matching: compatibility width forms (fullwidth ASCII, as NFKC
 /// does), full Unicode lowercase, then base letters without combining marks.
 fn fold(value: &str) -> String {
+    if value.is_ascii() {
+        return value.to_ascii_lowercase();
+    }
     let mut out = String::with_capacity(value.len());
     for c in value.chars() {
+        if c.is_ascii() {
+            out.push(c.to_ascii_lowercase());
+            continue;
+        }
         let c = match c as u32 {
             0xFF01..=0xFF5E => char::from_u32(c as u32 - 0xFEE0).unwrap_or(c),
             0x3000 => ' ',
@@ -315,7 +322,7 @@ impl Filters {
             let value = fold(value);
             words.iter().all(|word| value.contains(word.as_str()))
         };
-        (self.title.is_empty() || hits(&self.title, &displayed_title(row)))
+        (self.title.is_empty() || hits(&self.title, displayed_title(row)))
             && (self.artist.is_empty()
                 || row
                     .metadata
@@ -331,18 +338,17 @@ impl Filters {
     }
 }
 
-fn file_name(row: &LibraryResult) -> String {
-    Path::new(&row.path)
+fn file_name_str(path: &str) -> &str {
+    Path::new(path)
         .file_name()
-        .unwrap_or_default()
-        .to_string_lossy()
-        .into_owned()
+        .and_then(|s| s.to_str())
+        .unwrap_or(path)
 }
 
-fn displayed_title(row: &LibraryResult) -> String {
+fn displayed_title<'a>(row: &'a LibraryResult) -> &'a str {
     match &row.metadata {
-        Some(metadata) if !metadata.title.is_empty() => metadata.title.clone(),
-        _ => file_name(row),
+        Some(metadata) if !metadata.title.is_empty() => metadata.title.as_str(),
+        _ => file_name_str(&row.path),
     }
 }
 
@@ -1696,46 +1702,48 @@ impl LibraryIndex {
                 }
             }
         }
-        let mut rows: Vec<(String, &LibraryResult, bool)> = unique
-            .into_values()
-            .filter(|(_, row, _)| {
-                let mut fields = file_name(row);
+        let mut rows: Vec<(String, String, &LibraryResult, bool)> = Vec::with_capacity(unique.len());
+        let mut fields_buf = String::new();
+        for (path_key, (_, row, available)) in unique {
+            if !filters.matches(row) {
+                continue;
+            }
+            if !tokens.is_empty() {
+                fields_buf.clear();
+                fields_buf.push_str(file_name_str(&row.path));
                 if let Some(metadata) = &row.metadata {
                     for field in [&metadata.title, &metadata.artist, &metadata.album]
                         .into_iter()
                         .chain(metadata.track_names.iter())
                     {
-                        fields.push('\n');
-                        fields.push_str(field);
+                        fields_buf.push('\n');
+                        fields_buf.push_str(field);
                     }
                 }
-                let fields = if tokens.is_empty() {
-                    String::new()
-                } else {
-                    fold(&fields)
-                };
-                tokens.iter().all(|token| fields.contains(token.as_str())) && filters.matches(row)
-            })
-            .map(|(_, row, available)| {
-                let sort_key = match query.sort {
-                    LibrarySort::Title => displayed_title(row).to_lowercase(),
-                    LibrarySort::Artist => row
-                        .metadata
-                        .as_ref()
-                        .map(|metadata| metadata.artist.to_lowercase())
-                        .unwrap_or_default(),
-                    LibrarySort::Modified => String::new(),
-                };
-                (sort_key, row, available)
-            })
-            .collect();
-        rows.sort_by(|(left_key, left, _), (right_key, right, _)| {
+                let fields = fold(&fields_buf);
+                if !tokens.iter().all(|token| fields.contains(token.as_str())) {
+                    continue;
+                }
+            }
+            let title_str = displayed_title(row);
+            let sort_key = match query.sort {
+                LibrarySort::Title => if title_str.is_ascii() { title_str.to_ascii_lowercase() } else { title_str.to_lowercase() },
+                LibrarySort::Artist => row
+                    .metadata
+                    .as_ref()
+                    .map(|metadata| if metadata.artist.is_ascii() { metadata.artist.to_ascii_lowercase() } else { metadata.artist.to_lowercase() })
+                    .unwrap_or_default(),
+                LibrarySort::Modified => String::new(),
+            };
+            rows.push((sort_key, path_key, row, available));
+        }
+        rows.sort_by(|(left_key, left_path, left, _), (right_key, right_path, right, _)| {
             let primary = match query.sort {
                 LibrarySort::Modified => right.modified_unix_ms.cmp(&left.modified_unix_ms),
                 _ => left_key.cmp(right_key),
             };
             primary
-                .then_with(|| key(Path::new(&left.path)).cmp(&key(Path::new(&right.path))))
+                .then_with(|| left_path.cmp(right_path))
                 .then_with(|| left.root_id.cmp(&right.root_id))
                 .then_with(|| left.id.cmp(&right.id))
         });
@@ -1748,7 +1756,7 @@ impl LibraryIndex {
                 .into_iter()
                 .skip(query.offset as usize)
                 .take(100)
-                .map(|(_, row, available)| {
+                .map(|(_, _, row, available)| {
                     let mut row = row.clone();
                     if !available {
                         row.status = LibraryResultStatus::Unavailable;
@@ -1836,7 +1844,7 @@ mod tests {
         let filters = Filters::new(&query);
         rows.iter()
             .filter(|row| filters.matches(row))
-            .map(displayed_title)
+            .map(|row| displayed_title(row).to_owned())
             .collect()
     }
 

@@ -19,3 +19,5 @@ src-tauri/icons/Square*Logo.png
 .claude/worktrees/
 .claude/settings.local.json
 .vitest/
+.impeccable/*.local.json
+.impeccable/hook.cache.json

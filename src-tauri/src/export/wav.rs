@@ -1,12 +1,14 @@
 use super::flac;
 use atomic_write_file::AtomicWriteFile;
 use serde::{Deserialize, Serialize};
+use std::{cell::RefCell, num::NonZeroU8, num::NonZeroU32, rc::Rc};
 use std::{
     fs::File,
     io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
     sync::atomic::{AtomicBool, AtomicU64, Ordering},
 };
+use vorbis_rs::{VorbisBitrateManagementStrategy, VorbisEncoder, VorbisEncoderBuilder};
 pub const BLOCK_FRAMES: usize = 512;
 /// The RMS levels, in dB relative to full scale, that normalization can aim for.
 pub const NORMALIZE_RMS_DB: std::ops::RangeInclusive<f64> = -30.0..=-6.0;
@@ -15,7 +17,11 @@ pub const NORMALIZE_CEILING_DB: f64 = -1.0;
 /// Normalization lifts the audio by at most this many dB, so a nearly silent export, such as a range holding only an
 /// effect tail, is not raised into audible noise.
 pub const NORMALIZE_MAX_GAIN_DB: f64 = 40.0;
-/// The audio file type: RIFF WAV, little-endian, AIFF, big-endian, or lossless FLAC.
+/// Ogg Vorbis quality, from -0.2 to 1: 0.6 aims near 192 kbit/s for stereo music.
+pub const OGG_QUALITY: f32 = 0.6;
+/// The Ogg stream serial number. Fixed, so the same audio always encodes to the same file.
+const OGG_SERIAL: i32 = 0x5450_4c59;
+/// The audio file type: RIFF WAV, little-endian, AIFF, big-endian, lossless FLAC, or compressed Ogg Vorbis.
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub enum AudioContainer {
@@ -23,6 +29,7 @@ pub enum AudioContainer {
     Wav,
     Aiff,
     Flac,
+    Ogg,
 }
 impl AudioContainer {
     fn is_wav(&self) -> bool {
@@ -34,15 +41,16 @@ impl AudioContainer {
             AudioContainer::Wav => "wav",
             AudioContainer::Aiff => "aiff",
             AudioContainer::Flac => "flac",
+            AudioContainer::Ogg => "ogg",
         }
     }
     /// The most sample bytes a file can hold: a RIFF size is unsigned, and an AIFF chunk size is signed. FLAC is
-    /// limited by its frame count instead.
+    /// limited by its frame count instead, and Ogg by nothing a song reaches.
     fn max_data_bytes(self) -> u64 {
         match self {
             AudioContainer::Wav => u32::MAX as u64 - 36,
             AudioContainer::Aiff => i32::MAX as u64 - 46,
-            AudioContainer::Flac => u64::MAX,
+            AudioContainer::Flac | AudioContainer::Ogg => u64::MAX,
         }
     }
     /// The header's length; the samples follow it.
@@ -51,6 +59,7 @@ impl AudioContainer {
             AudioContainer::Wav => 44,
             AudioContainer::Aiff => 54,
             AudioContainer::Flac => flac::HEADER_BYTES as u64,
+            AudioContainer::Ogg => 0,
         }
     }
 }
@@ -58,6 +67,7 @@ impl AudioContainer {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AudioFormat {
     pub sample_rate: u32,
+    /// Ogg Vorbis encodes floating-point samples, so it ignores the bit depth.
     pub bit_depth: u16,
     /// Requests and stem manifests written before AIFF read as WAV, which is not written.
     #[serde(default, skip_serializing_if = "AudioContainer::is_wav")]
@@ -74,7 +84,7 @@ impl AudioFormat {
     }
     pub fn validate(self) -> Result<(), String> {
         if ![44100, 48000].contains(&self.sample_rate) || ![16, 24].contains(&self.bit_depth) {
-            Err("Choose stereo 44.1/48 kHz, 16/24-bit WAV, AIFF or FLAC.".into())
+            Err("Choose stereo 44.1/48 kHz, 16/24-bit WAV, AIFF, FLAC or Ogg Vorbis.".into())
         } else {
             Ok(())
         }
@@ -90,6 +100,19 @@ fn extended(rate: u32) -> [u8; 10] {
     bytes[2..].copy_from_slice(&mantissa.to_be_bytes());
     bytes
 }
+/// Where the Vorbis encoder writes its pages: a buffer `PcmWriter` moves into its file after each block, so the file
+/// stays the writer's own for every container.
+#[derive(Clone, Default)]
+struct OggPages(Rc<RefCell<Vec<u8>>>);
+impl Write for OggPages {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.0.borrow_mut().extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
 pub struct PcmWriter<W: Write + Seek> {
     file: W,
     format: AudioFormat,
@@ -100,12 +123,39 @@ pub struct PcmWriter<W: Write + Seek> {
     blocks: u32,
     written: u64,
     frame_bytes: (u32, u32),
+    /// Ogg only: the encoder, the pages it has written and not yet moved to the file, and each channel's samples.
+    ogg: Option<(VorbisEncoder<OggPages>, OggPages, [Vec<f32>; 2])>,
 }
 impl<W: Write + Seek> PcmWriter<W> {
     pub fn new(mut file: W, format: AudioFormat) -> Result<Self, String> {
         format.validate()?;
         file.write_all(&vec![0; format.container.header_bytes() as usize])
             .map_err(|e| e.to_string())?;
+        let ogg = if format.container == AudioContainer::Ogg {
+            let pages = OggPages::default();
+            let encoder = VorbisEncoderBuilder::new_with_serial(
+                NonZeroU32::new(format.sample_rate).ok_or("Invalid sample rate.")?,
+                NonZeroU8::new(2).unwrap(),
+                pages.clone(),
+                OGG_SERIAL,
+            )
+            .bitrate_management_strategy(VorbisBitrateManagementStrategy::QualityVbr {
+                target_quality: OGG_QUALITY,
+            })
+            .comment_tag("ENCODER", "TabPlayer")
+            .and_then(|builder| builder.build())
+            .map_err(|e| format!("Ogg Vorbis encoder failed: {e}"))?;
+            Some((
+                encoder,
+                pages,
+                [
+                    Vec::with_capacity(BLOCK_FRAMES),
+                    Vec::with_capacity(BLOCK_FRAMES),
+                ],
+            ))
+        } else {
+            None
+        };
         Ok(Self {
             file,
             format,
@@ -115,7 +165,15 @@ impl<W: Write + Seek> PcmWriter<W> {
             blocks: 0,
             written: 0,
             frame_bytes: (u32::MAX, 0),
+            ogg,
         })
+    }
+    /// Moves the pages the Vorbis encoder has written into the file.
+    fn move_ogg_pages(file: &mut W, pages: &OggPages) -> Result<(), String> {
+        let mut pages = pages.0.borrow_mut();
+        file.write_all(&pages).map_err(|e| e.to_string())?;
+        pages.clear();
+        Ok(())
     }
     fn uniform(&mut self) -> f64 {
         self.random ^= self.random << 13;
@@ -140,8 +198,30 @@ impl<W: Write + Seek> PcmWriter<W> {
                     "AIFF exceeds the standard size limit. Export a shorter range."
                 }
                 AudioContainer::Flac => "FLAC exceeds its size limit. Export a shorter range.",
+                AudioContainer::Ogg => "Ogg Vorbis exceeds its size limit. Export a shorter range.",
             }
             .into());
+        }
+        if let Some((encoder, pages, channels)) = &mut self.ogg {
+            for channel in channels.iter_mut() {
+                channel.clear();
+            }
+            for frame in block {
+                for (channel, sample) in channels.iter_mut().zip(frame) {
+                    if !sample.is_finite() {
+                        return Err("Audio renderer produced a non-finite sample.".into());
+                    }
+                    channel.push(sample.clamp(-1.0, 1.0));
+                }
+            }
+            if !block.is_empty() {
+                encoder
+                    .encode_audio_block(&*channels)
+                    .map_err(|e| format!("Ogg Vorbis encoder failed: {e}"))?;
+            }
+            Self::move_ogg_pages(&mut self.file, pages)?;
+            self.frames = new_frames;
+            return Ok(());
         }
         let scale = (1_i64 << (self.format.bit_depth - 1)) as f64;
         let mut bytes = Vec::with_capacity(block.len() * 2 * bytes_per_sample);
@@ -164,6 +244,7 @@ impl<W: Write + Seek> PcmWriter<W> {
                     let channel = self.pending[0].len() - self.pending[1].len();
                     self.pending[channel].push(value)
                 }
+                AudioContainer::Ogg => unreachable!("Ogg blocks are encoded above"),
             }
         }
         self.file.write_all(&bytes).map_err(|e| e.to_string())?;
@@ -196,6 +277,15 @@ impl<W: Write + Seek> PcmWriter<W> {
         Ok(())
     }
     pub fn finish(mut self) -> Result<(W, u64), String> {
+        if let Some((encoder, pages, _)) = self.ogg.take() {
+            // Finishing writes the last pages, which mark the end of the stream and hold its exact length.
+            encoder
+                .finish()
+                .map_err(|e| format!("Ogg Vorbis encoder failed: {e}"))?;
+            Self::move_ogg_pages(&mut self.file, &pages)?;
+            self.file.flush().map_err(|e| e.to_string())?;
+            return Ok((self.file, self.frames));
+        }
         if self.format.container == AudioContainer::Flac {
             while !self.pending[0].is_empty() {
                 self.write_flac_block()?;
@@ -635,6 +725,108 @@ mod tests {
         }
     }
     #[test]
+    fn ogg_vorbis_decodes_independently_to_the_same_length_and_sound() {
+        let d = tempfile::tempdir().unwrap();
+        // Ten seconds of a chord with a different line in each channel, rendered in uneven blocks.
+        const N: usize = 441_000;
+        let source = |t: usize| {
+            let t = t as f32 / 44_100.0;
+            let tau = std::f32::consts::TAU;
+            [
+                0.3 * (tau * 220.0 * t).sin() + 0.2 * (tau * 330.0 * t).sin(),
+                0.25 * (tau * 440.0 * t).sin() - 0.15 * (tau * 165.0 * t).cos(),
+            ]
+        };
+        let path = d.path().join("song.ogg");
+        let mut n = 0;
+        let mut odd = false;
+        let frames = write_wav(
+            &path,
+            AudioFormat {
+                sample_rate: 44_100,
+                bit_depth: 16,
+                container: AudioContainer::Ogg,
+            },
+            |block| {
+                odd = !odd;
+                let count = (N - n).min(if odd { 300 } else { block.len() });
+                for (i, sample) in block[..count].iter_mut().enumerate() {
+                    *sample = source(n + i);
+                }
+                n += count;
+                Ok(count)
+            },
+            &AtomicBool::new(false),
+            |_| {},
+        )
+        .unwrap();
+        assert_eq!(frames, N as u64);
+        let bytes = std::fs::read(&path).unwrap();
+        assert_eq!(&bytes[..4], b"OggS");
+        // Compressed: well under a tenth of 16-bit WAV.
+        assert!(bytes.len() < N * 4 / 10, "{} bytes", bytes.len());
+        let decoded = crate::audio::decode::decode_audio(&bytes, Some("ogg")).unwrap();
+        assert_eq!((decoded.sample_rate, decoded.channels), (44_100, 2));
+        assert_eq!(decoded.frames.len(), N, "the stream keeps the exact length");
+        // Lossy but faithful: the error is more than 30 dB below the signal in each channel.
+        for channel in 0..2 {
+            let (mut signal, mut error) = (0.0f64, 0.0f64);
+            for (t, frame) in decoded.frames.iter().enumerate() {
+                let want = source(t)[channel] as f64;
+                signal += want * want;
+                error += (frame[channel] as f64 - want).powi(2);
+            }
+            let snr = 10.0 * (signal / error).log10();
+            assert!(snr > 30.0, "channel {channel}: {snr:.1} dB");
+        }
+        // The same audio, in the same blocks, encodes to the same file whatever the bit depth asked for.
+        let again = d.path().join("again.ogg");
+        let mut m = 0;
+        let mut odd = false;
+        write_wav(
+            &again,
+            AudioFormat {
+                sample_rate: 44_100,
+                bit_depth: 24,
+                container: AudioContainer::Ogg,
+            },
+            |block| {
+                odd = !odd;
+                let count = (N - m).min(if odd { 300 } else { block.len() });
+                for (i, sample) in block[..count].iter_mut().enumerate() {
+                    *sample = source(m + i);
+                }
+                m += count;
+                Ok(count)
+            },
+            &AtomicBool::new(false),
+            |_| {},
+        )
+        .unwrap();
+        assert!(
+            std::fs::read(&again).unwrap() == bytes,
+            "the two encodings differ"
+        );
+    }
+    #[test]
+    fn an_empty_ogg_export_is_a_valid_stream() {
+        let d = tempfile::tempdir().unwrap();
+        let path = d.path().join("empty.ogg");
+        let format = AudioFormat {
+            sample_rate: 48_000,
+            bit_depth: 16,
+            container: AudioContainer::Ogg,
+        };
+        assert_eq!(
+            write_wav(&path, format, |_| Ok(0), &AtomicBool::new(false), |_| {}).unwrap(),
+            0
+        );
+        let bytes = std::fs::read(&path).unwrap();
+        assert_eq!(&bytes[..4], b"OggS");
+        let mut writer = PcmWriter::new(std::io::Cursor::new(Vec::new()), format).unwrap();
+        assert!(writer.write_block(&[[f32::NAN, 0.0]]).is_err());
+    }
+    #[test]
     fn older_requests_read_as_wav_and_only_aiff_or_flac_is_written() {
         let older: AudioFormat =
             serde_json::from_str(r#"{"sampleRate":48000,"bitDepth":16}"#).unwrap();
@@ -659,7 +851,22 @@ mod tests {
             serde_json::to_string(&flac).unwrap(),
             r#"{"sampleRate":48000,"bitDepth":16,"container":"flac"}"#
         );
-        for wrong in [r#""mp3""#, r#""FLAC""#, r#""AIFF""#, "null", "1"] {
+        let ogg: AudioFormat =
+            serde_json::from_str(r#"{"sampleRate":44100,"bitDepth":16,"container":"ogg"}"#)
+                .unwrap();
+        assert_eq!(ogg.container, AudioContainer::Ogg);
+        assert_eq!(
+            serde_json::to_string(&ogg).unwrap(),
+            r#"{"sampleRate":44100,"bitDepth":16,"container":"ogg"}"#
+        );
+        for wrong in [
+            r#""mp3""#,
+            r#""FLAC""#,
+            r#""AIFF""#,
+            r#""OGG""#,
+            "null",
+            "1",
+        ] {
             assert!(
                 serde_json::from_str::<AudioFormat>(&format!(
                     r#"{{"sampleRate":48000,"bitDepth":16,"container":{wrong}}}"#
@@ -692,7 +899,11 @@ mod tests {
     }
     #[test]
     fn a_cancelled_aiff_or_flac_leaves_the_prior_file() {
-        for container in [AudioContainer::Aiff, AudioContainer::Flac] {
+        for container in [
+            AudioContainer::Aiff,
+            AudioContainer::Flac,
+            AudioContainer::Ogg,
+        ] {
             let d = tempfile::tempdir().unwrap();
             let path = d.path().join(format!("existing.{}", container.extension()));
             std::fs::write(&path, b"prior").unwrap();

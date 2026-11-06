@@ -23,6 +23,8 @@ tauri-plugin-dialog = "2"
 cpal = "=0.18.2"
 symphonia = { version = "=0.6.1", default-features = false, features = ["wav", "pcm", "flac", "mp3", "ogg", "vorbis"] }
 rustysynth = "=1.3.7"
+# Ogg Vorbis export: BSD-3-Clause bindings that build the bundled aoTuV libvorbis and libogg.
+vorbis_rs = { version = "=0.5.6", default-features = false }
 ringbuf = "=0.5.3"
 svg2pdf = "=0.13.0"
 resvg = { version = "=0.45.1", default-features = false }

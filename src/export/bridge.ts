@@ -6,7 +6,7 @@ import type { ExportProgress,PngResolution,SvgPage,TrackPages } from './types';
 import type { DocumentId } from '../workspace/types';
 export interface NativeAudioExportRequest {
   tracks:{id:string;name:string;preset:string;kind:'score'}[];
-  range:{first:number;last:number}|null;format:{sampleRate:44100|48000;bitDepth:16|24;container?:'aiff'|'flac'};speed:number;metronome:boolean;metronomeSound?:ClickSound;tailSeconds:number;includeBacking:boolean;normalizeRmsDb?:number;includeMix:boolean;
+  range:{first:number;last:number}|null;format:{sampleRate:44100|48000;bitDepth:16|24;container?:'aiff'|'flac'|'ogg'};speed:number;metronome:boolean;metronomeSound?:ClickSound;tailSeconds:number;includeBacking:boolean;normalizeRmsDb?:number;includeMix:boolean;
 }
 export interface NativeAudioExportPayload {plan:PlaybackPlan;request:NativeAudioExportRequest;settings:DocumentSettings;embeddedBytes:number[]|null;stems:boolean}
 export interface ExportNativeBridge {

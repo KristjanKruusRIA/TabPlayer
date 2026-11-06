@@ -26,7 +26,7 @@ export interface AudioDiagnostics {
   sampleRate?: number;
   bufferSize?: number;
 }
-export interface AuditionNote {key:number;startMs:number;velocity:number}
+export interface AuditionNote {key:number;startMs:number;velocity:number;/** A drum hit's sound in the recorded kit. */kitSound?:number}
 export interface AuditionRequest {voice:TrackSound;program:number;percussion:boolean;mix:ChannelMix;notes:AuditionNote[];durationMs:number}
 export interface AuditionResult {played:boolean}
 export interface NativeAudioBridge {

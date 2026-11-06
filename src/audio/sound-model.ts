@@ -132,7 +132,8 @@ export const voiceIds:readonly VoiceId[]=['green-guitar','black-guitar','darkbla
 export const voiceNames:Record<VoiceId,string>={gm:'General MIDI','green-guitar':'Green Guitar','black-guitar':'Black Guitar','darkblack-bass':'Darkblack Bass','babyblue-bass':'Babyblue Bass'};
 /** What Automatic plays a track as. This mirrors `automatic_voice_id` in `src-tauri/src/audio/voices.rs`, which decides by the
  * track's General MIDI program: 24 and 25 the green guitar, 26 to 31 the black guitar, 33 the babyblue bass, the other bass
- * programs 32 and 34 to 39 the darkblack bass, and everything else, including percussion, the General MIDI sound set. */
+ * programs 32 and 34 to 39 the darkblack bass, and everything else the General MIDI sound set. Percussion is 'gm' here; whether
+ * its notes play the recorded drum kit is `playsRecordedKit`. */
 export function automaticVoice(program:number,percussion:boolean):VoiceId {
   if(percussion)return 'gm';
   if(program===24||program===25)return 'green-guitar';
@@ -140,4 +141,9 @@ export function automaticVoice(program:number,percussion:boolean):VoiceId {
   if(program===33)return 'babyblue-bass';
   if(program>=32&&program<=39)return 'darkblack-bass';
   return 'gm';
+}
+/** Whether Automatic plays a drum track through the recorded kit, as `automatic_voice_id` in voices.rs does: every kit but
+ * the sound bank's Room (8), Jazz (32) and Brush (40), which stay General MIDI. `drumKit` is the kit chosen in the rig. */
+export function playsRecordedKit(program:number,percussion:boolean,drumKit?:number|null):boolean {
+  return percussion&&![8,32,40].includes(drumKit??program);
 }

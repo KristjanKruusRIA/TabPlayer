@@ -2,6 +2,8 @@
 
 GP8 row A23 mixes the pieces of a drum kit apart. Before, a percussion track had one volume, pan, mute and solo. Now the Mixer view of a selected percussion track also has six kit elements (kick, snare, hi-hat, toms, cymbals, other percussion), each with volume, pan, mute and solo, heard in playback and in audio export.
 
+Update 2026-11-06: the recorded Standard kit goes through the same six elements; see [2026-11-06-gp8-recorded-drums.md](2026-11-06-gp8-recorded-drums.md).
+
 ## Behavior
 
 ### What an element is

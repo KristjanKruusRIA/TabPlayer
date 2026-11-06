@@ -455,6 +455,8 @@ export const en = {
   'rig.hear_source_group': 'Hear a source',
   'rig.hear': 'Hear',
   'rig.auto': 'Auto',
+  'rig.auto_recorded_kit': 'Automatic instrument, plays as the recorded drum kit',
+  'rig.recorded_kit_short': 'Kit',
   'rig.sound_browser': 'Sound browser',
   'rig.search_sounds': 'Search sounds',
   'rig.show_sounds': 'Show sounds',

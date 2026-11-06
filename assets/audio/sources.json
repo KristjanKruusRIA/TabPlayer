@@ -371,6 +371,31 @@
           ]
         }
       ]
+    },
+    {
+      "id": "drums",
+      "repository": "sfzinstruments/virtuosity_drums",
+      "revision": "9f04cf9a734527edfbb0a4eee1f674e45bbf71bc",
+      "license": "CC0-1.0",
+      "licensePath": "LICENSE",
+      "inventoryPath": "drums-inventory.json",
+      "localRoot": "drums",
+      "instruments": [
+        {
+          "id": "virtuosity-kit",
+          "name": "Virtuosity Drums",
+          "maps": [
+            {
+              "path": "Programs/tabplayer-kit.sfz",
+              "articulation": "picked",
+              "opcodes": {
+                "ampeg_attack": 0,
+                "ampeg_release": 0.5
+              }
+            }
+          ]
+        }
+      ]
     }
   ],
   "soundFont": {

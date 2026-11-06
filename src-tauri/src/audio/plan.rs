@@ -121,6 +121,12 @@ pub struct PlanNote {
     pub locked_articulation: Option<Articulation>,
     pub legato_from: Option<String>,
     pub pitch: Vec<PitchPoint>,
+    /// A drum note's sound in the recorded kit, where the kit has one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kit_sound: Option<u8>,
+    /// A choked cymbal: stopped quickly when the note ends.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub choke: bool,
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(
@@ -329,6 +335,7 @@ impl PlaybackPlan {
                 || n.end_tick <= n.start_tick
                 || n.end_tick > self.duration_tick + 0.001
                 || n.key > 127
+                || n.kit_sound.is_some_and(|sound| sound > 127)
                 || n.velocity > 127
                 || n.channel.is_some_and(|channel| channel > 15)
                 || n.program.is_some_and(|program| program > 127)

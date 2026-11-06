@@ -40,6 +40,9 @@ pub struct AuditionNote {
     pub key: u8,
     pub start_ms: u32,
     pub velocity: u8,
+    /// A drum hit's sound in the recorded kit, as the playback plan names it.
+    #[serde(default)]
+    pub kit_sound: Option<u8>,
 }
 
 /// `voice` is the track's `TrackSound` and `mix` its `ChannelMix`, exactly as the
@@ -75,7 +78,7 @@ impl AuditionRequest {
             return Err("Audition duration must be 100–3000 ms.".into());
         }
         for note in &self.notes {
-            if note.key > 127 {
+            if note.key > 127 || note.kit_sound.is_some_and(|sound| sound > 127) {
                 return Err("Audition key must be 0–127.".into());
             }
             if note.start_ms > MAX_START_MS {
@@ -169,6 +172,8 @@ fn build(request: &AuditionRequest) -> (PlaybackPlan, DocumentSettings, f64) {
                 tick: start,
                 semitones: 0.0,
             }],
+            kit_sound: note.kit_sound,
+            choke: false,
         });
         midi.push(PlanMidiEvent::NoteOn {
             track_id: TRACK_ID.into(),

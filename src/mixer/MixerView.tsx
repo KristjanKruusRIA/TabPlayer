@@ -29,7 +29,7 @@ function baseKey(kind:'factory'|'preset',id:string):string {
 
 /** Names the instrument source and tone currently set on `track`: a factory sound or preset as it was, or the preset it
  * started from marked as edited once a control has moved it. A track with no instrument chosen plays what the native
- * player picks by program (`automatic_voice_id` in voices.rs), and percussion plays the General MIDI drums. */
+ * player picks by program (`automatic_voice_id` in voices.rs), and percussion is named Percussion, whichever kit plays it. */
 export function describeTrackSound(track:model.Track,sound?:TrackSound):{voice:string;tone:string} {
   const program=track.playbackInfo.program;
   const automatic=automaticVoice(program,track.isPercussion);

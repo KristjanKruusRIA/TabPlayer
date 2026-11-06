@@ -2,6 +2,8 @@
 
 Status: partial. Drum kit choice is built and audible. Separate rim shot, choke, half-open and similar playing styles cannot be built, because the pinned sound bank has no samples for them.
 
+Update 2026-11-06: the Standard kit now plays a recorded CC0 kit with its own rim shot and half-open hi-hat, and chokes stop at the note end; see [2026-11-06-gp8-recorded-drums.md](2026-11-06-gp8-recorded-drums.md). The limits below still hold for the Room, Jazz and Brush kits and for the sounds that report lists as General MIDI.
+
 ## Behavior
 
 What the bundled bank holds (`sonivox.sf2`, General MIDI, bank 128, read from its preset list and checked by rendering):

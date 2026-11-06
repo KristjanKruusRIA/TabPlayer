@@ -1,0 +1,98 @@
+// TabPlayer's recorded drum kit: the Virtuosity Drums mid-mic recordings, one key per kit sound.
+// Keys follow General MIDI, except 1 (snare rim shot) and 2 (half-open hi-hat), which General MIDI lacks.
+// Where the recordings sound their layers' dynamics themselves, amp_velcurve_1=1 keeps every layer at full level.
+// volume levels each sound to the General MIDI kit's peak at velocity 100, so a song keeps its balance; at most +18 dB.
+// group/off_by: a voice of group G stops the voices whose off_by is G on the same track.
+
+<group> key=35 pitch_keytrack=0 volume=-3
+#include "mappings/mid/kick_snoff_map.sfz"
+<group> key=36 pitch_keytrack=0 volume=-2.5
+#include "mappings/mid/kick_snon_map.sfz"
+
+<group> key=37 pitch_keytrack=0 amp_velcurve_1=1 volume=-12
+#include "mappings/mid/snare_crossstick_map.sfz"
+<group> key=38 pitch_keytrack=0 amp_velcurve_1=1 volume=-14.5
+#include "mappings/mid/snare_center_map.sfz"
+<group> key=1 pitch_keytrack=0 amp_velcurve_1=1 volume=-15
+#include "mappings/mid/snare_rimshot_map.sfz"
+
+<group> key=42 pitch_keytrack=0 group=1 volume=-1
+#include "mappings/mid/hh_closed_map.sfz"
+<group> key=44 pitch_keytrack=0 group=1 volume=0.5
+#include "mappings/mid/hh_pedal_map.sfz"
+<group> key=46 pitch_keytrack=0 group=2 off_by=1 ampeg_release=0.15 volume=-4.5
+#include "mappings/mid/hh_open_map.sfz"
+<group> key=2 pitch_keytrack=0 group=2 off_by=1 ampeg_release=0.15 volume=1
+#include "mappings/mid/hh_half_map.sfz"
+
+// Two recorded toms give the six General MIDI toms, each a couple of semitones apart.
+<group> key=41 pitch_keycenter=45 amp_velcurve_1=1 volume=-9
+#include "mappings/mid/ltom_center_map.sfz"
+<group> key=43 pitch_keycenter=45 amp_velcurve_1=1 volume=-11
+#include "mappings/mid/ltom_center_map.sfz"
+<group> key=45 pitch_keytrack=0 amp_velcurve_1=1 volume=-12.5
+#include "mappings/mid/ltom_center_map.sfz"
+<group> key=47 pitch_keycenter=48 amp_velcurve_1=1 volume=-16
+#include "mappings/mid/htom_center_map.sfz"
+<group> key=48 pitch_keytrack=0 amp_velcurve_1=1 volume=-14
+#include "mappings/mid/htom_center_map.sfz"
+<group> key=50 pitch_keycenter=48 amp_velcurve_1=1 volume=-13.5
+#include "mappings/mid/htom_center_map.sfz"
+
+<group> key=49 pitch_keytrack=0 volume=-7.5
+#include "mappings/mid/crash_crash_map.sfz"
+<group> key=57 pitch_keytrack=0 volume=-4.5
+#include "mappings/mid/crash_sizzle_map.sfz"
+<group> key=51 pitch_keytrack=0 volume=-1.5
+#include "mappings/mid/ride_ride_map.sfz"
+<group> key=53 pitch_keytrack=0 volume=1
+#include "mappings/mid/ride_bell_map.sfz"
+<group> key=59 pitch_keytrack=0 volume=3.5
+#include "mappings/mid/flatride_ride_map.sfz"
+<group> key=55 pitch_keytrack=0 volume=3
+#include "mappings/mid/flatride_crash_map.sfz"
+
+<group> key=54 pitch_keytrack=0 volume=3.5
+#include "mappings/perc/mid/tambourine_map.sfz"
+<group> key=56 pitch_keytrack=0 volume=-9
+#include "mappings/perc/mid/cowbell_map.sfz"
+<group> key=58 pitch_keytrack=0 volume=8
+#include "mappings/perc/mid/vibraslap_map.sfz"
+<group> key=60 pitch_keytrack=0 volume=-5
+#include "mappings/perc/mid/bongo_high_map.sfz"
+<group> key=61 pitch_keytrack=0 volume=-4.5
+#include "mappings/perc/mid/bongo_low_map.sfz"
+<group> key=62 pitch_keytrack=0 group=3 volume=14
+#include "mappings/perc/mid/conga_muted_map.sfz"
+<group> key=63 pitch_keytrack=0 group=4 off_by=3 volume=1.5
+#include "mappings/perc/mid/conga_open_map.sfz"
+<group> key=64 pitch_keytrack=0 volume=-1
+#include "mappings/perc/mid/tumba_map.sfz"
+<group> key=67 pitch_keytrack=0 volume=5
+#include "mappings/perc/mid/agogo_high_map.sfz"
+<group> key=68 pitch_keytrack=0 volume=9
+#include "mappings/perc/mid/agogo_low_map.sfz"
+<group> key=69 pitch_keytrack=0 volume=8
+#include "mappings/perc/mid/cabasa_map.sfz"
+<group> key=70 pitch_keytrack=0 volume=6.5
+#include "mappings/perc/mid/shaker_up_map.sfz"
+<group> key=71 pitch_keytrack=0 group=7 off_by=7 volume=9
+#include "mappings/perc/close/whistle_short_map.sfz"
+<group> key=72 pitch_keytrack=0 group=7 off_by=7 volume=11.5
+#include "mappings/perc/close/whistle_long_map.sfz"
+<group> key=73 pitch_keytrack=0 volume=17.5
+#include "mappings/perc/mid/guiro_fast_map.sfz"
+<group> key=74 pitch_keytrack=0 volume=23.5
+#include "mappings/perc/mid/guiro_slow_map.sfz"
+<group> key=75 pitch_keytrack=0 volume=0
+#include "mappings/perc/mid/claves_map.sfz"
+<group> key=80 pitch_keytrack=0 group=5 volume=18
+#include "mappings/perc/mid/triangle_muted_map.sfz"
+<group> key=81 pitch_keytrack=0 group=6 off_by=5 volume=12.5
+#include "mappings/perc/mid/triangle_open_map.sfz"
+<group> key=82 pitch_keytrack=0 volume=4
+#include "mappings/perc/mid/shaker_down_map.sfz"
+<group> key=83 pitch_keytrack=0 volume=9.5
+#include "mappings/perc/mid/jinglebell_map.sfz"
+<group> key=84 pitch_keytrack=0 volume=18
+#include "mappings/perc/mid/belltree_map.sfz"

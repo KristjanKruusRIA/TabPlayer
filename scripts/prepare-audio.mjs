@@ -55,7 +55,10 @@ export async function resolveSfz(sourceRoot, entry, defaults = {}) {
       attackSeconds:numeric(op.ampeg_attack,0),releaseSeconds:numeric(op.ampeg_release,0.1),gainDb:numeric(op.volume,0),
       trigger:op.trigger??'attack',pitchKeytrack:numeric(op.pitch_keytrack,100),
       velocityGainHigh:gainCap?Number(gainCap[0].slice(13)):127,
-      releaseDecayDbPerSecond:numeric(op.rt_decay,0),loopMode:op.loop_mode??'no_loop'};
+      releaseDecayDbPerSecond:numeric(op.rt_decay,0),loopMode:op.loop_mode??'no_loop',
+      // A voice of a group stops the voices whose off_by names it; the renderer applies this to drum kits.
+      group:numeric(op.group,0),offBy:numeric(op.off_by,0)};
+    for(const key of ['group','offBy'])if(!Number.isSafeInteger(item[key])||item[key]<0||item[key]>2**31)throw new Error(`Invalid ${key} in ${entry}`);
     if (numeric(op.transpose,0)!==0) throw new Error(`Unsupported recorded-region transpose in ${entry}`);
     for(const [key,value] of Object.entries(item)) if(typeof value==='number'&&!Number.isFinite(value))throw new Error(`Invalid ${key} in ${entry}`);
     for(const key of ['rootKey','keyLow','keyHigh','velocityLow','velocityHigh','velocityGainHigh']) if(!Number.isInteger(item[key])||item[key]<0||item[key]>127)throw new Error(`Invalid ${key} in ${entry}`);
@@ -107,7 +110,25 @@ function flacFrames(bytes) {
   return {frames,loop:null};
 }
 
-function normalizeWave(bytes) {
+// Some published PCM WAVs carry a 20-byte fmt chunk whose four extra bytes are zero; the decoder accepts only the
+// 16-byte PCM form, so the chunk is shortened. Any non-zero extra field is refused rather than dropped.
+export function shortenPcmFormat(bytes) {
+  for(let p=12;p+8<=bytes.length;) {
+    const size=bytes.readUInt32LE(p+4),start=p+8,end=start+size;
+    if(end>bytes.length)throw new Error('Corrupt truncated WAV sample');
+    if(bytes.toString('ascii',p,p+4)==='fmt '&&size>16&&bytes.readUInt16LE(start)===1) {
+      if(bytes.subarray(start+16,end).some(v=>v!==0))throw new Error('Unexpected PCM format extension');
+      const header=Buffer.from(bytes.subarray(p,start+16));header.writeUInt32LE(16,4);
+      const result=Buffer.concat([bytes.subarray(0,p),header,bytes.subarray(end+(size&1))]);
+      result.writeUInt32LE(result.length-8,4);return result;
+    }
+    p=end+(size&1);
+  }
+  return bytes;
+}
+
+function normalizeWave(original) {
+  const bytes=shortenPcmFormat(original);
   let block=0,pcm24=false;
   for(let p=12;p+8<=bytes.length;) {
     const size=bytes.readUInt32LE(p+4),start=p+8,end=start+size;
@@ -261,11 +282,15 @@ export async function prepareAudio({recordInventory=false,offline=false}={}) {
   const root=fileURLToPath(new URL('../',import.meta.url));
   const config=JSON.parse(await readFile(join(root,'assets/audio/sources.json'),'utf8'));
   const outputRoot=join(root,'src-tauri/resources/audio');
-  // App-owned maps and licenses are part of the preparation, so editing one prepares again.
+  // App-owned maps and licenses are part of the preparation, so editing one prepares again. A source may own its maps
+  // and take its license from the pinned repository.
   let owned='';
-  for(const source of config.sources.filter(item=>item.localRoot))for(const path of [source.licensePath,...source.instruments.flatMap(i=>i.maps.map(m=>m.path))])owned+=`
+  for(const source of config.sources.filter(item=>item.localRoot))for(const path of [source.licensePath,...source.instruments.flatMap(i=>i.maps.map(m=>m.path))]) {
+    const bytes=await localBytes(source,path,root);
+    if(bytes)owned+=`
 ${path}
-`+await readFile(confined(join(root,'assets/audio',source.localRoot),path),'utf8');
+`+bytes.toString('utf8');
+  }
   const preparationId=preparationFingerprint(config,await readFile(fileURLToPath(import.meta.url),'utf8')+owned);
   if(!recordInventory)try {
     const manifest=JSON.parse(await readFile(join(outputRoot,'manifest.json'),'utf8'));

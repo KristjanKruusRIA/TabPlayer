@@ -36,6 +36,20 @@ transposed from its end sample. The short, hammer and thump recordings are
 not used. FLAC recordings ship unchanged; the native loader decodes them.
 An `extends` instrument adds its regions to the voice of the same id.
 
+Drum tracks on the Standard kit play Virtuosity Drums, CC0 (source `drums`,
+instrument `virtuosity-kit`), recorded at Virtuosity Musical Instruments in
+Boston with drummer Austin McMahon: its mid-microphone kit and percussion,
+573 FLAC and WAV recordings (219 MB). The app-owned map
+`drums/Programs/tabplayer-kit.sfz` includes the repository's own per-sound
+mappings, one key per kit sound: General MIDI keys, plus 1 for the snare rim
+shot and 2 for the half-open hi-hat. Its two recorded toms give the six
+General MIDI toms by transposing up to four semitones. Hi-hats, congas,
+triangles and whistles carry SFZ `group`/`off_by`, so a closed hi-hat stops
+an open one. The kit's license is the repository's own `LICENSE`. Timbales,
+woodblocks, cuica, castanets, surdo, china, clap and electric snare have no
+recording and play from the General MIDI bank, as do the Room, Jazz and
+Brush kits.
+
 Several upstream PCM24 bass release WAVs include a trailing zero padding byte
 inside their data chunk length. Preparation fixes only that RIFF framing.
 The manifest retains both the original source hash and prepared sample hash;

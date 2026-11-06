@@ -54,9 +54,13 @@ pub fn voice_id_for_track<'a>(
     voice_id_for_program(track, settings, track.program)
 }
 
+/// The recorded drum kit, which plays the standard kit. The sound bank's other kits (room, jazz, brush) stay General MIDI.
+pub const RECORDED_KIT: &str = "virtuosity-kit";
+
 pub fn automatic_voice_id(program: u8, percussion: bool) -> Option<&'static str> {
     if percussion {
-        return None;
+        // Programs the sound bank has no kit for sound its standard kit, so they play the recorded one too.
+        return (!crate::settings::DRUM_KIT_PROGRAMS.contains(&program)).then_some(RECORDED_KIT);
     }
     match program {
         24..=25 => Some("green-guitar"),
@@ -263,6 +267,26 @@ pub fn resource_requests(
         .filter(|n| n.velocity > 0)
         .filter_map(|note| {
             let instrument_id = voice_id_for_note(plan, note, settings)?;
+            let drums = plan
+                .tracks
+                .iter()
+                .find(|track| track.id == note.track_id && track.percussion);
+            // A drum note asks for its own kit sound; one the kit has no recording of plays General MIDI, as does every
+            // note of a track on the Room, Jazz or Brush kit or with a guitar or bass voice.
+            if let Some(track) = drums {
+                if instrument_id != RECORDED_KIT
+                    || drum_kit_for_track(track, settings)
+                        .is_some_and(|kit| crate::settings::DRUM_KIT_PROGRAMS.contains(&kit))
+                {
+                    return None;
+                }
+                return Some(super::resources::SampleRequest {
+                    instrument_id: instrument_id.into(),
+                    key: note.kit_sound?,
+                    velocity: note.velocity,
+                    articulation: "picked".into(),
+                });
+            }
             Some(super::resources::SampleRequest {
                 instrument_id: instrument_id.into(),
                 key: note.key,
@@ -271,7 +295,8 @@ pub fn resource_requests(
             })
         })
         .collect();
-    for track in &plan.tracks {
+    // A drum track needs no placeholder: its notes play General MIDI unless they asked for a kit sound above.
+    for track in plan.tracks.iter().filter(|track| !track.percussion) {
         if let Some(instrument_id) = voice_id_for_track(track, settings) {
             if !requests.iter().any(|r| r.instrument_id == instrument_id) {
                 requests.push(super::resources::SampleRequest {

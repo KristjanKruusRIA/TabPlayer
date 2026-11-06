@@ -3,6 +3,7 @@ import type { EditCommand } from '../edit-types';
 import { resolvePercussionArticulation } from '../editor/percussion-catalog';
 import type { AuditionNote } from './bridge';
 import { fretKey } from '../editor/banjo-drone';
+import { kitSound } from './kit-sound';
 
 /** Which sound an audition uses: a track's own (by identity), or the automatic sound for a program (a track not yet added). */
 export type AuditionSource={trackId:string}|{program:number};
@@ -26,12 +27,12 @@ export function editAudition(score:model.Score,command:EditCommand):{track:numbe
   if(command.type!=='setNote'&&command.type!=='addPitchedNote'&&command.type!=='setPitchedNote'&&command.type!=='addPercussionNote'&&command.type!=='setPercussionNote')return null;
   const track=score.tracks[command.target.track],staff=track?.staves[command.target.staff];
   if(!track||!staff)return null;
-  let key:number|undefined,percussion=false;
+  let key:number|undefined,percussion=false,kit:{kitSound?:number}={};
   if(command.type==='setNote')key=fretKey(staff,command.string,command.fret);
   else if(command.type==='addPitchedNote'||command.type==='setPitchedNote')key=command.pitch-staff.transpositionPitch;
-  else {percussion=true;key=resolvePercussionArticulation(track,command.articulation)?.outputMidiNumber;}
+  else {percussion=true;key=resolvePercussionArticulation(track,command.articulation)?.outputMidiNumber;if(key!==undefined){const sound=kitSound(track,command.articulation,key).kitSound;if(sound!==undefined)kit={kitSound:sound};}}
   if(key===undefined||!Number.isInteger(key)||key<0||key>127)return null;
-  return {track:command.target.track,percussion,notes:[{key,startMs:0,velocity:AUDITION_VELOCITY}],durationMs:EDIT_HOLD_MS};
+  return {track:command.target.track,percussion,notes:[{key,startMs:0,velocity:AUDITION_VELOCITY,...kit}],durationMs:EDIT_HOLD_MS};
 }
 
 const storageKey='tabplayer.audition.whileEditing';

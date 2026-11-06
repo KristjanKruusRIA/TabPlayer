@@ -22,6 +22,7 @@ mod runtime;
 mod session;
 pub mod settings;
 pub mod style_library;
+pub mod tuner;
 pub mod tuning_library;
 pub mod workspace;
 
@@ -1057,6 +1058,7 @@ pub fn run() {
         .manage(export::jobs::ExportJobs::default())
         .manage(batch_convert::BatchState::default())
         .manage(backing_waveform::BackingWaveformService::default())
+        .manage(tuner::TunerState::default())
         .setup(|app| {
             // Files named on the command line, as an associated file's double-click passes them.
             if let Ok(directory) = std::env::current_dir() {
@@ -1227,7 +1229,11 @@ pub fn run() {
         batch_convert::batch_scan,
         batch_convert::batch_read,
         batch_convert::batch_write,
-        batch_convert::batch_reset
+        batch_convert::batch_reset,
+        tuner::tuner_inputs,
+        tuner::tuner_start,
+        tuner::tuner_stop,
+        tuner::tuner_read
     ]);
     #[cfg(feature = "desktop-test")]
     let builder = builder.invoke_handler(tauri::generate_handler![
@@ -1318,6 +1324,10 @@ pub fn run() {
         batch_convert::batch_read,
         batch_convert::batch_write,
         batch_convert::batch_reset,
+        tuner::tuner_inputs,
+        tuner::tuner_start,
+        tuner::tuner_stop,
+        tuner::tuner_read,
         desktop_test_io
     ]);
     builder
@@ -1336,6 +1346,9 @@ pub fn run() {
             }
             if matches!(event, tauri::RunEvent::Exit) {
                 clear_print_cache(app);
+                if let Some(tuner) = app.try_state::<tuner::TunerState>() {
+                    tuner.stop();
+                }
             }
         });
 }

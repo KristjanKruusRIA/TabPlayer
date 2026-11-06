@@ -11,17 +11,17 @@ export function TrackDisplayControls({ids,names,selected,view,zoom,disabled,onVi
   const current=resolveScoreDisplay(display),physical=isPhysicalPageLayout(current.layout),pageFitAvailable=physical&&!pageError,fitHelp=useId();
   useEffect(()=>setZoomDraft(String(zoom)),[zoom]);
   return <fieldset disabled={disabled} aria-label="Score display"><div className="pair">
-    <label>Display mode<select className="score-layout-select" value={current.layout} onChange={e=>{
+    <label><span className="score-tools-caption">Display mode</span><select title="Display mode" className="score-layout-select" value={current.layout} onChange={e=>{
       if(disabled)return;
       onDisplay?.(resolveScoreDisplay({...current,layout:e.target.value}));
     }}><option value="verticalPage">Vertical page</option><option value="horizontalPage">Horizontal page</option><option value="grid">Grid</option><option value="parchment">Parchment</option><option value="verticalScreen">Vertical screen</option><option value="horizontalScreen">Horizontal screen</option></select></label>
-    <label>Displayed tracks<select value={view.kind} onChange={e=>{
+    <label><span className="score-tools-caption">Displayed tracks</span><select title="Displayed tracks" value={view.kind} onChange={e=>{
       if(disabled)return;
       const kind=e.target.value;
       if(kind==='custom')onView({kind,trackIds:visible.map(index=>ids[index])});
       else if(kind==='selected'||kind==='all')onView({kind});
     }}><option value="selected">Selected track</option><option value="all">All tracks</option><option value="custom">Chosen tracks</option></select></label>
-    <label>Zoom (%)<input type="number" min={25} max={300} step="any" value={zoomDraft} onBlur={()=>setZoomDraft(String(zoom))} onChange={e=>{
+    <label><span className="score-tools-caption">Zoom (%)</span><input title="Zoom (%)" type="number" min={25} max={300} step="any" value={zoomDraft} onBlur={()=>setZoomDraft(String(zoom))} onChange={e=>{
       if(disabled)return;
       const draft=e.target.value,value=Number(draft);setZoomDraft(draft);
       if(draft.trim()&&Number.isFinite(value)&&value>=25&&value<=300)onZoom(value);

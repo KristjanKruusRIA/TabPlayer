@@ -85,7 +85,7 @@ it('switching preserves independent views and histories and mounts one keyed act
 it('connects the active tab and panel with encoded IDs and keeps focus meaningful across switching',async()=>{
   const {workspace:w,first}=await setup();await act(async()=>{await w.newDocument();});const b=current(w);const tab=screen.getAllByRole('tab')[0];tab.focus();fireEvent.click(tab);await waitFor(()=>expect(w.getState().active.documentId).toBe(first));
   const selected=screen.getByRole('tab',{selected:true}),panel=screen.getByRole('tabpanel');expect(panel).toHaveAttribute('id',`document-panel-${encodeURIComponent(first)}`);expect(panel).toHaveAttribute('aria-labelledby',`document-tab-${encodeURIComponent(first)}`);expect(selected).toHaveAttribute('aria-controls',panel.id);expect(selected).toHaveFocus();
-  await act(async()=>{await w.close(first);});expect(w.getState().active.documentId).toBe(b.id);expect(screen.getByRole('tab',{selected:true})).toHaveFocus();
+  await act(async()=>{await w.close(first);});expect(w.getState().active.documentId).toBe(b.id);expect(within(screen.getByRole('tablist',{name:'Open scores'})).getByRole('tab',{selected:true})).toHaveFocus();
 });
 it('close buttons close inactive scores without activation and active close selects its neighbor',async()=>{
   const {workspace:w,bridge,first}=await setup();await act(async()=>{await w.newDocument();});const b=current(w),owner=w.getState().active;vi.mocked(bridge.activateDocument).mockClear();
@@ -276,7 +276,7 @@ it('the real File menu restores its exact Library trigger on dismissal and focus
   try{
     const {WorkspaceApp:ActualWorkspaceApp}=await import('./WorkspaceApp');render(<ActualWorkspaceApp workspace={w} library={library}/>);const editor=document.querySelector('.app-shell');
     const opener=fileButton('Recent scores');opener.focus();fireEvent.click(opener);await waitFor(()=>expect(screen.getByRole('dialog')).toBeInTheDocument());expect(library.opener).toBe(opener);expect(screen.getByLabelText('Search recent scores')).toHaveFocus();fireEvent.keyDown(screen.getByRole('dialog'),{key:'Escape'});await waitFor(()=>expect(opener).toHaveFocus());expect(opener.closest('details')).toHaveAttribute('open');expect(document.querySelector('.app-shell')).toBe(editor);
-    fireEvent.click(opener);const dialog=screen.getByRole('dialog');fireEvent.click(within(dialog).getByRole('button',{name:/Select ensemble/}));fireEvent.click(within(dialog).getByRole('button',{name:'Open'}));await waitFor(()=>expect(screen.queryByRole('dialog')).not.toBeInTheDocument());await waitFor(()=>expect(screen.getByRole('tab',{selected:true})).toHaveFocus());expect(document.querySelector('.app-shell')).toBe(editor);expect(mocks.audio.size).toBe(1);
+    fireEvent.click(opener);const dialog=screen.getByRole('dialog');fireEvent.click(within(dialog).getByRole('button',{name:/Select ensemble/}));fireEvent.click(within(dialog).getByRole('button',{name:'Open'}));await waitFor(()=>expect(screen.queryByRole('dialog')).not.toBeInTheDocument());await waitFor(()=>expect(within(screen.getByRole('tablist',{name:'Open scores'})).getByRole('tab',{selected:true})).toHaveFocus());expect(document.querySelector('.app-shell')).toBe(editor);expect(mocks.audio.size).toBe(1);
   }finally{library.dispose();cleanup();vi.doUnmock('../App');vi.doUnmock('../ScoreView');vi.resetModules();}
 });
 

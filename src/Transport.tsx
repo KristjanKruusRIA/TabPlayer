@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from 'react';
 import type { NativePlaybackController } from './audio/NativePlaybackController';
 import type { BeatTarget } from './project';
 import type { MusicSelection } from './editor/range-types';
@@ -26,6 +26,8 @@ function BarField({label,value,min,max,onValue}:{label:string;value:number;min:n
 export interface TransportDisplay {
   /** The selected track, as "number. name". */
   track:string;
+  /** The selected track's colour as #rrggbb, drawn as a strip at the display's edge. */
+  color?:string;
   /** The time signature written at a bar, such as "4/4". */
   signatureAt:(bar:number)=>string;
 }
@@ -70,7 +72,7 @@ export function Transport({player,measures,busy,cursor,selection,display:lcd}: {
       <button className="transport-stopbutton" title={t('transport.stop')} onClick={()=>{setNextStart('cursor');act(()=>player.stop());}}><StopGlyph/><span className="transport-label">{t('transport.stop')}</span></button>
       <span className="transport-barnav" role="group" aria-label={t('transport.bar_navigation')}>{barButton(t('transport.next_bar'),shownBar+1,<NextBarGlyph/>,shownBar>=measures-1)}{barButton(t('transport.last_bar'),measures-1,<LastBarGlyph/>,shownBar>=measures-1)}</span>
     </div>
-    <div className={`transport-group transport-position${lcd?' transport-lcd':''}`} role={lcd?'group':undefined} aria-label={lcd?t('transport.position_display'):undefined}>
+    <div className={`transport-group transport-position${lcd?' transport-lcd':''}`} role={lcd?'group':undefined} aria-label={lcd?t('transport.position_display'):undefined} style={lcd?{'--lcd-track':lcd.color??'transparent','--lcd-progress':`${state.endTime>0?Math.min(100,Math.max(0,state.time/state.endTime*100)):0}%`} as CSSProperties:undefined}>
       {lcd&&<span className="transport-lcd-track" title={lcd.track}>{lcd.track}</span>}
       <span className="transport-caption transport-bar-number"><span>{t('transport.bar_n', { number: scrub ?? state.measure + 1 })}</span><span className="transport-dim transport-of">{t('transport.of_n', { total: measures })}</span></span>
       <output aria-live="off" className="transport-time"><span>{clock(state.time)}</span><span className="transport-dim"> / {clock(state.endTime)}</span></output>

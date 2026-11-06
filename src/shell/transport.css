@@ -80,7 +80,10 @@
 .transport-barnav { display:inline-flex; gap:2px; }
 .app-shell .transport .transport-barstep { width:30px; min-height:30px; padding:0; }
 .transport-lcd { display:grid; grid-template-columns:auto auto; grid-template-areas:'track track' 'bar time' 'meta meta'; align-content:center; column-gap:12px; row-gap:1px;
-  min-width:220px; margin:6px 8px; padding:4px 14px; border:1px solid var(--tp-line-strong); border-radius:var(--tp-radius-s); background:color-mix(in srgb,var(--tp-input) 70%,black); }
+  min-width:220px; margin:6px 8px; padding:4px 14px; border:1px solid var(--tp-line-strong); border-radius:var(--tp-radius-s); background:color-mix(in srgb,var(--tp-input) 70%,black);
+  position:relative; overflow:hidden; box-shadow:inset 4px 0 var(--lcd-track,transparent); }
+.transport-lcd::after { content:''; position:absolute; left:0; bottom:0; height:2px; width:var(--lcd-progress,0%); background:var(--tp-on); pointer-events:none; }
+@media (forced-colors:active) { .transport-lcd::after { background:Highlight; } }
 .transport-lcd+.transport-group { border-left:0; }
 .transport-lcd .transport-lcd-track { grid-area:track; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--tp-text); font:600 13px/16px var(--tp-font-ui); }
 .transport-lcd .transport-bar-number { grid-area:bar; align-self:baseline; color:var(--tp-on); }

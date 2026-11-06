@@ -10,6 +10,7 @@ import { followSelectedTrack,movedTrackIndex,repairMeasureSelection,repairSelect
 import { ScoreView } from './ScoreView';
 import { EditorPanel, type InspectorContextScope } from './EditorPanel';
 import { TrackPanel } from './TrackPanel';
+import { trackColorHex } from './track-color';
 import './styles.css';
 import { NativePlaybackController } from './audio/NativePlaybackController';
 import { SoundPanel } from './audio/SoundPanel';
@@ -308,7 +309,8 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   const backingEdit=(command:EditCommand,candidate?:BackingCandidate)=>controller.edit(command,candidate);
   const selectedTrack=state.score.tracks[target.track],trackId=trackIdentity(selectedTrack);
   const transportScore=state.score,transportTrack=`${target.track+1}. ${selectedTrack.name||`Track ${target.track+1}`}`;
-  const transportDisplay=useMemo(()=>({track:transportTrack,signatureAt:(bar:number)=>{const master=transportScore.masterBars[bar];return master?`${master.timeSignatureNumerator}/${master.timeSignatureDenominator}`:'';}}),[transportScore,transportTrack]);
+  const transportColor=trackColorHex(selectedTrack.color);
+  const transportDisplay=useMemo(()=>({track:transportTrack,color:transportColor,signatureAt:(bar:number)=>{const master=transportScore.masterBars[bar];return master?`${master.timeSignatureNumerator}/${master.timeSignatureDenominator}`:'';}}),[transportScore,transportTrack,transportColor]);
   const originalBacking=state.embeddedBacking&&!projectCommands(state.snapshot.project).some(edit=>edit.type==='setBacking');
   const baseKey=originalBacking&&state.snapshot.project.base.kind==='file'?state.snapshot.project.base.sha256:null;
   const [embeddedSource,setEmbeddedSource]=useState<{bytes:Uint8Array;key:string;source:WaveformSourceInput|null;error:string|null}|null>(null),[embeddedRetry,setEmbeddedRetry]=useState(0);

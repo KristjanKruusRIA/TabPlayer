@@ -45,7 +45,7 @@ const GridContent=memo(function GridContent({model,targetTrack,targetBar,focused
       const Row=controls?.Row,color=colors?.[row];
       return <div key={row} role="row" aria-rowindex={row+2} className="score-overview-row" data-selected-track={targetTrack===track.index||undefined}
         style={{top:cellSize+row*cellSize,...(color?{'--overview-track':color}:{})} as CSSProperties}>
-        <div role="rowheader" aria-colindex={1} className="score-overview-track" title={track.name} style={{width:nameWidth}}><span className="score-overview-track-name">{track.name}</span>{Row&&<Row track={track.index}/>}</div>
+        <div role="rowheader" aria-colindex={1} className="score-overview-track" title={track.name} style={{width:nameWidth}}><span className="score-overview-track-number" aria-hidden="true">{track.index+1}.</span><span className="score-overview-track-name">{track.name}</span>{Row&&<Row track={track.index}/>}</div>
         {cells.map(bar=>{
           const content=track.cells[bar],selected=targetTrack===track.index&&targetBar===bar;
           return <div key={bar} role="gridcell" aria-colindex={bar+2} aria-label={t('overview.cell_label',{track:track.name,measure:bar+1,content})}

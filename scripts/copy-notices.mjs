@@ -1,4 +1,4 @@
-import { mkdir, copyFile, readdir, readFile, writeFile } from 'node:fs/promises';
+import { access, mkdir, copyFile, readdir, readFile, writeFile } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -20,8 +20,10 @@ for(const pkg of metadata.packages.filter(pkg=>pkg.source||pkg.name==='usvg'))aw
 const audio=JSON.parse(await readFile(new URL('../assets/audio/sources.json',import.meta.url),'utf8'));
 for(const source of audio.sources) {
   const destination=new URL(`audio/${source.id}/`,output);await mkdir(destination,{recursive:true});
-  // An app-owned license is shipped from its pinned, byte-exact source.
-  await copyFile(new URL(source.localRoot?`../assets/audio/${source.localRoot}/${source.licensePath}`:`../assets/audio/licenses/${source.id}.txt`,import.meta.url),new URL('LICENSE.txt',destination));
+  // An app-owned license is shipped from its pinned, byte-exact source; one the repository holds, from its recorded copy.
+  const owned=source.localRoot?new URL(`../assets/audio/${source.localRoot}/${source.licensePath}`,import.meta.url):null;
+  const local=owned&&await access(owned).then(()=>true,()=>false);
+  await copyFile(local?owned:new URL(`../assets/audio/licenses/${source.id}.txt`,import.meta.url),new URL('LICENSE.txt',destination));
   await copyFile(new URL(`../assets/audio/${source.inventoryPath}`,import.meta.url),new URL('source-inventory.json',destination));
   inventory.push({name:source.repository,version:source.revision,license:source.license,files:[`audio/${source.id}/LICENSE.txt`,`audio/${source.id}/source-inventory.json`]});
 }

@@ -121,3 +121,18 @@ test('flac_recordings_are_kept_unchanged', async () => {
   await writeFile(join(root, 'Samples/slap.flac'), Buffer.from('fLaC-corrupt'));
   await assert.rejects(prepareLibrary({ sourceRoot: root, outputRoot: join(root, 'bad'), source: { id: 'fixture', licensePath: 'LICENSE' }, instruments: [{ id: 'bass', name: 'Bass', maps: [{ path: 'Programs/main.sfz', articulation: 'slap' }] }] }), /FLAC/);
 });
+
+test('pcm_format_chunk_with_zero_extension_is_shortened', async () => {
+  const { shortenPcmFormat } = await api();
+  const wave=(fmtExtra)=>{
+    const fmt=Buffer.alloc(16+fmtExtra.length);fmt.writeUInt16LE(1,0);fmt.writeUInt16LE(2,2);fmt.writeUInt32LE(44100,4);fmt.writeUInt32LE(44100*4,8);fmt.writeUInt16LE(4,12);fmt.writeUInt16LE(16,14);fmtExtra.copy(fmt,16);
+    const data=Buffer.from([1,0,2,0,3,0,4,0]);
+    const chunk=(id,body)=>{const h=Buffer.alloc(8);h.write(id,0,'ascii');h.writeUInt32LE(body.length,4);return Buffer.concat([h,body]);};
+    const body=Buffer.concat([Buffer.from('WAVE'),chunk('fmt ',fmt),chunk('data',data)]);
+    const riff=Buffer.alloc(8);riff.write('RIFF',0,'ascii');riff.writeUInt32LE(body.length,4);return Buffer.concat([riff,body]);
+  };
+  const plain=wave(Buffer.alloc(0));
+  assert.deepEqual(shortenPcmFormat(wave(Buffer.alloc(4))),plain);
+  assert.equal(shortenPcmFormat(plain),plain);
+  assert.throws(()=>shortenPcmFormat(wave(Buffer.from([0,0,1,0]))),/format extension/);
+});

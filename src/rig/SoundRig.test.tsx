@@ -733,7 +733,9 @@ it('says what Automatic plays the track as, by the track\'s program, and changes
   await userEvent.click(within(strip).getByRole('radio',{name:'Bass'}));
   expect(within(group).getByRole('radio',{name:'Automatic instrument, plays as Babyblue Bass'})).toBeInTheDocument();
   await userEvent.click(within(strip).getByRole('radio',{name:'Drums'}));
-  expect(within(group).getByRole('radio',{name:'Automatic instrument, plays as General MIDI'})).toBeInTheDocument();
+  // A drum track plays the recorded kit, unless the rig chose one of the sound bank's own kits.
+  expect(within(group).getByRole('radio',{name:'Automatic instrument, plays as the recorded drum kit'})).toBeInTheDocument();
+  expect(group).toHaveTextContent('Auto→Kit');
 });
 
 it('moves between sources with the arrow keys and chooses each as one edit', async()=>{

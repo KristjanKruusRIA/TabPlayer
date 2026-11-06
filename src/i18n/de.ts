@@ -457,6 +457,8 @@ export const de: MessageCatalog = {
   'rig.hear_source_group': 'Quelle vorhören',
   'rig.hear': 'Vorhören',
   'rig.auto': 'Auto',
+  'rig.auto_recorded_kit': 'Automatisches Instrument, spielt als aufgenommenes Schlagzeug',
+  'rig.recorded_kit_short': 'Kit',
   'rig.sound_browser': 'Sound-Browser',
   'rig.search_sounds': 'Sounds suchen',
   'rig.show_sounds': 'Sounds anzeigen',

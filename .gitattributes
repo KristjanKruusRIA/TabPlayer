@@ -9,3 +9,4 @@ tests/desktop/answer-unsaved-dialog.ps1 -text
 tests/desktop/cancel-dialog.ps1 -text
 # Audio source pins hash these app-owned map and license bytes on every OS.
 assets/audio/slap/** -text
+assets/audio/drums/** -text

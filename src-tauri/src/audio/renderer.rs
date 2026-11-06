@@ -4,11 +4,11 @@ use super::{
     decode::DecodedAudio,
     dsp::{FxSettings, MAX_TRACK_DELAY_SECONDS, TrackDsp},
     master::MasterBus,
-    plan::{Articulation, PlanMidiEvent, PlaybackPlan, Timeline},
+    plan::{Articulation, PlanMidiEvent, PlanNote, PlaybackPlan, Timeline},
     practice::{ClickVoice, MetronomeSettings, PulsePosition, RenderTempo},
     resources::{AudioResources, Region},
     voices::{
-        SampleVoice, VoiceParameters, articulation_name, automatic_voice_id,
+        RECORDED_KIT, SampleVoice, VoiceParameters, articulation_name, automatic_voice_id,
         effective_note_program, pitch_at, select_region, start_program, track_locked,
         voice_id_for_note, voice_id_for_track, with_drum_kits, with_locked_articulations,
     },
@@ -230,6 +230,27 @@ struct SelectedNote {
     noise: Option<VoiceSample>,
     chain: Option<usize>,
     suppress_pick: bool,
+    drum: Option<DrumVoice>,
+}
+/// How a note of the recorded kit plays: struck and left to ring out, unless it is choked, when it stops quickly at the
+/// note's end. Its group stops the voices on its track that this group cuts, as a closed hi-hat stops an open one.
+#[derive(Clone, Copy)]
+struct DrumVoice {
+    group: u32,
+    off_by: u32,
+    choke: bool,
+}
+/// How fast a choked cymbal falls silent once the hand stops it.
+const CHOKE_RELEASE_SECONDS: f64 = 0.06;
+/// How many strokes of one drum sound ring on one track at once. A cymbal rings for up to 14 s, so a ride played in
+/// eighths would otherwise keep dozens of voices running; a new stroke fades the oldest beyond this.
+const MAX_RINGING_STROKES: usize = 4;
+/// A recorded drum voice: the kit element it is mixed with, the group that stops it, and its kit sound.
+#[derive(Clone, Copy)]
+struct RingingDrum {
+    element: usize,
+    off_by: u32,
+    sound: u8,
 }
 struct ActiveVoice {
     note: usize,
@@ -241,6 +262,7 @@ struct ActiveVoice {
     release: Option<VoiceSample>,
     started_seconds: f64,
     unpitched: bool,
+    drum: Option<RingingDrum>,
 }
 #[derive(Clone, Copy)]
 struct MidiChannel {
@@ -290,10 +312,104 @@ struct Track {
     rpn_lsb: [u8; 16],
 }
 impl Track {
+    /// Whether a MIDI attack with no plan note plays a recorded voice. A drum attack never does: the kit knows its sound
+    /// only from the note.
     fn recorded_program(&self, program: u8) -> bool {
-        self.fixed_recorded
-            || self.automatic && automatic_voice_id(program, self.percussion).is_some()
+        !self.percussion
+            && (self.fixed_recorded
+                || self.automatic && automatic_voice_id(program, self.percussion).is_some())
     }
+}
+/// `settings` with the drum tracks that would play the recorded kit playing General MIDI instead, where the audio has no
+/// kit (as a test's own audio may not).
+fn without_missing_kit(
+    mut settings: DocumentSettings,
+    plan: &PlaybackPlan,
+    resources: &AudioResources,
+) -> DocumentSettings {
+    if resources
+        .manifest
+        .instruments
+        .iter()
+        .any(|i| i.id == RECORDED_KIT)
+    {
+        return settings;
+    }
+    for track in plan.tracks.iter().filter(|t| t.percussion) {
+        let sound = settings.sounds.entry(track.id.clone()).or_default();
+        if sound.voice_id.is_none() {
+            sound.voice_id = Some("gm".into());
+        }
+    }
+    settings
+}
+/// What a drum note plays from the recorded kit: the recording of its kit sound, by velocity and round robin. None, which
+/// plays it from General MIDI, for a sound the kit has no recording of, or a track on another kit.
+fn select_drum(
+    plan: &PlaybackPlan,
+    note: &PlanNote,
+    track: usize,
+    settings: &DocumentSettings,
+    resources: &AudioResources,
+    sample_rate: u32,
+    counters: &mut HashMap<(usize, usize, u8, u8, &'static str), usize>,
+) -> Result<Option<SelectedNote>, String> {
+    let (Some(id), Some(sound)) = (voice_id_for_note(plan, note, settings), note.kit_sound) else {
+        return Ok(None);
+    };
+    // A guitar or bass voice chosen for a drum track has no drums; the track plays General MIDI.
+    if id != RECORDED_KIT {
+        return Ok(None);
+    }
+    let index = resources
+        .manifest
+        .instruments
+        .iter()
+        .position(|i| i.id == id)
+        .ok_or_else(|| format!("Unknown recorded instrument {id}."))?;
+    let instrument = &resources.manifest.instruments[index];
+    let counter = counters
+        .entry((track, index, sound, note.velocity, "drum"))
+        .or_default();
+    let sequence = *counter;
+    *counter += 1;
+    // Only the sound itself: a neighbouring key's recording would be another drum.
+    let Some(region) = select_region(
+        instrument,
+        sound,
+        note.velocity,
+        Articulation::Picked,
+        sequence,
+        "attack",
+    )
+    .filter(|r| (r.key_low..=r.key_high).contains(&sound)) else {
+        return Ok(None);
+    };
+    let mut attack = VoiceSample::new(
+        resources,
+        region,
+        sound,
+        note.velocity,
+        Articulation::Picked,
+    )?;
+    if note.choke {
+        attack.parameters.release_seconds = CHOKE_RELEASE_SECONDS;
+    }
+    SampleVoice::new(attack.audio.clone(), attack.parameters, sample_rate)?;
+    Ok(Some(SelectedNote {
+        track,
+        instrument: index,
+        attack,
+        release: None,
+        noise: None,
+        chain: None,
+        suppress_pick: false,
+        drum: Some(DrumVoice {
+            group: region.group,
+            off_by: region.off_by,
+            choke: note.choke,
+        }),
+    }))
 }
 pub struct Renderer {
     plan: Arc<PlaybackPlan>,
@@ -322,6 +438,8 @@ pub struct Renderer {
     /// the sound the fade is leaving, which is a click.
     parked_mix: Option<PreparedMix>,
     scratch: Vec<[f32; 2]>,
+    /// Each track's recorded drum voices of this frame, by kit element, before the element mix.
+    kit_scratch: Vec<[[f32; 2]; KIT_ELEMENTS]>,
     backing: Option<BackingVoice>,
     configured_backing: bool,
     tail: bool,
@@ -337,6 +455,7 @@ impl Renderer {
         sample_rate: u32,
     ) -> Result<Self, String> {
         let plan = with_drum_kits(with_locked_articulations(plan, &settings), &settings);
+        let settings = without_missing_kit(settings, &plan, &resources);
         let timeline = Timeline::new(&plan)?;
         let mix = PreparedMix::prepare(&settings, &plan, sample_rate)?;
         let track_indices: HashMap<_, _> = plan
@@ -353,12 +472,15 @@ impl Renderer {
             .collect();
         let mut tracks = Vec::with_capacity(plan.tracks.len());
         for (track_index, track) in plan.tracks.iter().enumerate() {
-            if let Some(id) = voice_id_for_track(track, &settings) {
+            // A drum track loads only the kit sounds its notes ask for; any other voice on it plays General MIDI.
+            if let Some(id) = voice_id_for_track(track, &settings).filter(|_| !track.percussion) {
                 if !resources.manifest.instruments.iter().any(|i| i.id == id) {
                     return Err(format!("Unknown recorded instrument {id}."));
                 }
             }
-            let has_gm = voice_id_for_track(track, &settings).is_none()
+            // A drum track keeps General MIDI for the sounds the recorded kit lacks.
+            let has_gm = track.percussion
+                || voice_id_for_track(track, &settings).is_none()
                 || plan.notes.iter().any(|n| {
                     n.track_id == track.id && voice_id_for_note(&plan, n, &settings).is_none()
                 });
@@ -471,6 +593,18 @@ impl Renderer {
         let mut selected = Vec::with_capacity(plan.notes.len());
         for note in &plan.notes {
             let track = track_indices[note.track_id.as_str()];
+            if plan.tracks[track].percussion {
+                selected.push(select_drum(
+                    &plan,
+                    note,
+                    track,
+                    &settings,
+                    &resources,
+                    sample_rate,
+                    &mut counters,
+                )?);
+                continue;
+            }
             if let Some(id) = voice_id_for_note(&plan, note, &settings) {
                 let index = resources
                     .manifest
@@ -568,6 +702,7 @@ impl Renderer {
                         note.articulation,
                         Articulation::Legato | Articulation::Tapped
                     ) && region.articulation != "legato",
+                    drum: None,
                 }));
             } else {
                 selected.push(None);
@@ -622,6 +757,7 @@ impl Renderer {
         let capacity = plan.notes.len().saturating_mul(3).max(8);
         let slots = (0..capacity).map(|_| None).collect();
         let scratch = vec![[0.0; 2]; plan.tracks.len() + 2];
+        let kit_scratch = vec![[[0.0; 2]; KIT_ELEMENTS]; plan.tracks.len()];
         Ok(Self {
             plan,
             timeline,
@@ -646,6 +782,7 @@ impl Renderer {
             parked_mix: None,
             mix,
             scratch,
+            kit_scratch,
             backing: None,
             configured_backing: settings.backing.is_some(),
             tail: false,
@@ -667,6 +804,7 @@ impl Renderer {
         end_tick: f64,
         release: Option<VoiceSample>,
         unpitched: bool,
+        drum: Option<RingingDrum>,
     ) {
         if let Some(slot) = self.slots.iter().position(Option::is_none) {
             self.slots[slot] = Some(ActiveVoice {
@@ -679,6 +817,7 @@ impl Renderer {
                 release,
                 started_seconds: self.seconds,
                 unpitched,
+                drum,
             });
             self.active.push(slot);
         }
@@ -709,12 +848,88 @@ impl Renderer {
                 return;
             }
         }
+        if let Some(drum) = selected.drum {
+            if drum.group != 0 {
+                // A closed hi-hat stops the open one ringing: each voice this group cuts fades on its own release.
+                for &slot in &self.active {
+                    if let Some(active) = self.slots[slot].as_mut() {
+                        if active.track == selected.track
+                            && !active.released
+                            && active
+                                .drum
+                                .is_some_and(|ringing| ringing.off_by == drum.group)
+                        {
+                            active.voice.release();
+                            active.released = true;
+                        }
+                    }
+                }
+            }
+            let sound = note.kit_sound.unwrap_or(note.key);
+            // At most MAX_RINGING_STROKES of this sound ring on: fade the oldest, without allocating on the audio thread.
+            loop {
+                let mut count = 0;
+                let mut oldest: Option<(f64, usize)> = None;
+                for &slot in &self.active {
+                    if let Some(active) = &self.slots[slot] {
+                        if active.track == selected.track
+                            && !active.released
+                            && active.drum.is_some_and(|d| d.sound == sound)
+                        {
+                            count += 1;
+                            if oldest.is_none_or(|(started, _)| active.started_seconds < started) {
+                                oldest = Some((active.started_seconds, slot));
+                            }
+                        }
+                    }
+                }
+                let (true, Some((_, slot))) = (count >= MAX_RINGING_STROKES, oldest) else {
+                    break;
+                };
+                if let Some(active) = self.slots[slot].as_mut() {
+                    active.voice.release();
+                    active.released = true;
+                }
+            }
+            // A drum is struck and rings out; only a choked cymbal stops when its note ends.
+            let end = if drum.choke {
+                self.note_end_ticks[index]
+            } else {
+                f64::INFINITY
+            };
+            let element = self.note_kit[index]
+                .unwrap_or_else(|| gm_kit_element(note.key))
+                .index();
+            let voice = selected.attack.instantiate(self.rate);
+            self.spawn(
+                index,
+                selected.track,
+                voice,
+                end,
+                None,
+                true,
+                Some(RingingDrum {
+                    element,
+                    off_by: drum.off_by,
+                    sound,
+                }),
+            );
+            return;
+        }
         let end = self.note_end_ticks[index];
         let mut voice = selected.attack.instantiate(self.rate);
         if selected.suppress_pick {
             voice.seek_elapsed_seconds(0.025, pitch_at(&note.pitch, note.start_tick));
         }
-        self.spawn(index, selected.track, voice, end, selected.release, false);
+        self.spawn(
+            index,
+            selected.track,
+            voice,
+            end,
+            selected.release,
+            false,
+            None,
+        );
         if let Some(mut noise) = selected.noise {
             noise.parameters.gain_db -= 18.0;
             self.spawn(
@@ -724,6 +939,7 @@ impl Renderer {
                 end,
                 None,
                 true,
+                None,
             );
         }
     }
@@ -870,6 +1086,7 @@ impl Renderer {
             .map_or(end_tick, |end| end.min(end_tick));
         let tick = self.timeline.seconds_to_tick(self.seconds);
         self.scratch.fill([0.0; 2]);
+        self.kit_scratch.fill([[0.0; 2]; KIT_ELEMENTS]);
         if !self.tail
             && self
                 .plan
@@ -927,8 +1144,12 @@ impl Renderer {
             };
             let sample = self.tracks[voice.track].channels[voice.channel as usize]
                 .process(voice.voice.next_frame(pitch));
+            let out = match voice.drum {
+                Some(drum) => &mut self.kit_scratch[voice.track][drum.element],
+                None => &mut self.scratch[voice.track],
+            };
             for c in 0..2 {
-                self.scratch[voice.track][c] += sample[c];
+                out[c] += sample[c];
             }
             if !voice.voice.is_active() && (voice.released || voice.release.is_none()) {
                 self.slots[slot] = None;
@@ -944,6 +1165,7 @@ impl Renderer {
                     f64::INFINITY,
                     None,
                     false,
+                    None,
                 );
             }
         }
@@ -963,6 +1185,11 @@ impl Renderer {
                 // The ramp moves with the clock, struck or not, so a note struck after a change starts at the new level.
                 track.kit_rendered = true;
                 let gains = self.mix.channels[index].kit.step();
+                // Recorded drum voices take the same element mix as the General MIDI kit.
+                for (voices, gain) in self.kit_scratch[index].iter().zip(gains) {
+                    self.scratch[index][0] += voices[0] * gain[0];
+                    self.scratch[index][1] += voices[1] * gain[1];
+                }
                 if track.drum_used {
                     for (synth, gain) in synths.iter_mut().zip(gains) {
                         let mut left = [0.0];

@@ -315,6 +315,8 @@ it("reads the kit element of a track's own articulation by its element name, wha
   score.finish(settings);const plan=agree(score);
   const on=plan.midi.filter(e=>e.trackId===plan.tracks[1].id&&e.type==='noteOn');
   expect(on.map(e=>e.type==='noteOn'?[e.key,e.kitElement]:[])).toEqual([[77,'snare'],[38,'cymbals']]);
+  // Neither copies a standard articulation, so each plays its own pitch from the recorded kit, where the kit has it.
+  expect(plan.notes.filter(n=>n.trackId===plan.tracks[1].id).map(n=>[n.key,n.kitSound,n.choke])).toEqual([[77,undefined,undefined],[38,38,undefined]]);
 });
 
 it('dead_brush_negative_duration_uses_public_unbrushed_duration_after_delayed_attack', () => {

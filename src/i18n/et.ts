@@ -457,6 +457,8 @@ export const et: MessageCatalog = {
   'rig.hear_source_group': 'Kuula heliallikat',
   'rig.hear': 'Kuula',
   'rig.auto': 'Auto',
+  'rig.auto_recorded_kit': 'Automaatne pill, mängib salvestatud trummikomplektina',
+  'rig.recorded_kit_short': 'Komplekt',
   'rig.sound_browser': 'Kõlaselur',
   'rig.search_sounds': 'Otsi kõlasid',
   'rig.show_sounds': 'Näita kõlasid',

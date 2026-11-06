@@ -1,0 +1,3072 @@
+[
+  {
+    "path": "LICENSE",
+    "sha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "size": 7048
+  },
+  {
+    "path": "Programs/mappings/mid/crash_crash_map.sfz",
+    "sha256": "a11934cfe29ee8ab9ca010223e210684ed237455aab2465de0255917fdcf7844",
+    "size": 1521
+  },
+  {
+    "path": "Programs/mappings/mid/crash_sizzle_map.sfz",
+    "sha256": "27890f5e2c0e3bc8aa1e7df25d72206618c578cbe112af797b8b4533e020748e",
+    "size": 1533
+  },
+  {
+    "path": "Programs/mappings/mid/flatride_crash_map.sfz",
+    "sha256": "5548feda0169ea795c589db250c679ce59edde4015f102554fd875ccc8b1185b",
+    "size": 382
+  },
+  {
+    "path": "Programs/mappings/mid/flatride_ride_map.sfz",
+    "sha256": "c7644c944273009570a94a9c258439ce427504745ceb1e01a0ea0b732b6c45db",
+    "size": 1497
+  },
+  {
+    "path": "Programs/mappings/mid/hh_closed_map.sfz",
+    "sha256": "375bad58dd8f3763978642a9f4834953fedf5079da2e5bfae1acee3f7e7ff0cc",
+    "size": 1812
+  },
+  {
+    "path": "Programs/mappings/mid/hh_half_map.sfz",
+    "sha256": "95a082a8bf8a8de85044f3543a89701e4015adc2cbc77a469e75b55cc65f84e7",
+    "size": 1780
+  },
+  {
+    "path": "Programs/mappings/mid/hh_open_map.sfz",
+    "sha256": "a3ffe560f25daf219fc0820e4196b2d60d3c5c80a51fe4a03392c315dd8e8dd1",
+    "size": 1321
+  },
+  {
+    "path": "Programs/mappings/mid/hh_pedal_map.sfz",
+    "sha256": "d20bfc9fd2ece2ebb2aa3cccb2e0f636abc0d38d63b3d8862fa86273009f6882",
+    "size": 1365
+  },
+  {
+    "path": "Programs/mappings/mid/htom_center_map.sfz",
+    "sha256": "cead380516daf8b357af1a0939171bda9faf505f51c1c1e06a6fea4a5d92f6f5",
+    "size": 1272
+  },
+  {
+    "path": "Programs/mappings/mid/kick_snoff_map.sfz",
+    "sha256": "329713b84b9ff6e3bae42d53209eb73f1a8d71a726e676ad73b1840eeb5b151b",
+    "size": 1860
+  },
+  {
+    "path": "Programs/mappings/mid/kick_snon_map.sfz",
+    "sha256": "117647fda55b9c2b28981c5e6f4303384d8d5cce029fa1074ae531ffe94bf3d5",
+    "size": 1844
+  },
+  {
+    "path": "Programs/mappings/mid/ltom_center_map.sfz",
+    "sha256": "e9d742138ccdb3d6f1a88bb4a09316d0aa8f31a0effeec374fcf707e71e4eee8",
+    "size": 1272
+  },
+  {
+    "path": "Programs/mappings/mid/ride_bell_map.sfz",
+    "sha256": "48afd8cdcdcc06e36ebc756d1c91f8d5d52c277bb903fac3512a788f2cbda8a1",
+    "size": 1053
+  },
+  {
+    "path": "Programs/mappings/mid/ride_ride_map.sfz",
+    "sha256": "d2d799e9819dc43a62a8ae1c44a0f731b7e3bb95a28372b70b7c43459cabfa33",
+    "size": 1401
+  },
+  {
+    "path": "Programs/mappings/mid/snare_center_map.sfz",
+    "sha256": "925db156dc01567fa609723a9f4708f77cc9fbcdc456bd56fab5d91481ffe44c",
+    "size": 2971
+  },
+  {
+    "path": "Programs/mappings/mid/snare_crossstick_map.sfz",
+    "sha256": "8979c8ba8f020d0ca8e7f59d841416451b7bc778948f440f47cde0d2c1228a58",
+    "size": 1368
+  },
+  {
+    "path": "Programs/mappings/mid/snare_rimshot_map.sfz",
+    "sha256": "109c8ba4a842d0457d67d76aff4b93eada3b37ceaba8b90047703f9d89cdaa52",
+    "size": 984
+  },
+  {
+    "path": "Programs/mappings/perc/close/whistle_long_map.sfz",
+    "sha256": "57e43b102e7238da146ed8c667e0ad2d723197fcf104abafd07f82e2c8d77322",
+    "size": 196
+  },
+  {
+    "path": "Programs/mappings/perc/close/whistle_short_map.sfz",
+    "sha256": "72d14fb28602b9cfce01dec78c00d2e1f365f927ec1596c749831855152ff08d",
+    "size": 626
+  },
+  {
+    "path": "Programs/mappings/perc/mid/agogo_high_map.sfz",
+    "sha256": "fb5994eaa7965f069abc2a0ccd28aea6f62e9de41700e6f8d77ceb2c37fafb55",
+    "size": 2859
+  },
+  {
+    "path": "Programs/mappings/perc/mid/agogo_low_map.sfz",
+    "sha256": "1409fcf3958efd24cbf3db9f074b6c317ab6cb468b5b0a86118b31c337f52eaf",
+    "size": 1794
+  },
+  {
+    "path": "Programs/mappings/perc/mid/belltree_map.sfz",
+    "sha256": "c27aa06f2d2d1ff810f5b04fbdb179af481d7a45c8d4c36be96718bc2010985a",
+    "size": 1122
+  },
+  {
+    "path": "Programs/mappings/perc/mid/bongo_high_map.sfz",
+    "sha256": "a3109010bd78f029cfa183f5e28c84dee276b7d4c1900068ec80dcc6a3ad24d9",
+    "size": 2907
+  },
+  {
+    "path": "Programs/mappings/perc/mid/bongo_low_map.sfz",
+    "sha256": "47459ab340e4666cd5a811198bf425c7b7b7f0e50449767491f79dad56cf43e8",
+    "size": 2907
+  },
+  {
+    "path": "Programs/mappings/perc/mid/cabasa_map.sfz",
+    "sha256": "7eb3f36d0f11ec3d809ac87181deadc26e3270d4e016456aa4c2e9b22a905b83",
+    "size": 1842
+  },
+  {
+    "path": "Programs/mappings/perc/mid/claves_map.sfz",
+    "sha256": "f8f66e204137b0df4960449511c049e4fa89d60ec33df2aee7357b507db79141",
+    "size": 2907
+  },
+  {
+    "path": "Programs/mappings/perc/mid/conga_muted_map.sfz",
+    "sha256": "11b158c2507fddbe15cc221dcb64765d2cf4b7c18426d86f4371eda08f766df0",
+    "size": 1938
+  },
+  {
+    "path": "Programs/mappings/perc/mid/conga_open_map.sfz",
+    "sha256": "24f69b913463a43a255f999b95b4a239ead28a3b7a61a396ed8cb246939a17e4",
+    "size": 3019
+  },
+  {
+    "path": "Programs/mappings/perc/mid/cowbell_map.sfz",
+    "sha256": "96fca5f31bd33301bbdf60f249a4a70fd248365b6205d9dbb14c94e27a3c0ef8",
+    "size": 2643
+  },
+  {
+    "path": "Programs/mappings/perc/mid/guiro_fast_map.sfz",
+    "sha256": "944507cfee54e26738e3f74c0f60163c4ddf4ac833c61c88f747713208775895",
+    "size": 737
+  },
+  {
+    "path": "Programs/mappings/perc/mid/guiro_slow_map.sfz",
+    "sha256": "5e0530dc10605d507ffd8c623d5503b6600f161391ec7ae4b15176b8cf74c699",
+    "size": 729
+  },
+  {
+    "path": "Programs/mappings/perc/mid/jinglebell_map.sfz",
+    "sha256": "393fc0bcf4d970d6cb34398a21cbee65730c105afaec0e8ddc2792c1012564ba",
+    "size": 825
+  },
+  {
+    "path": "Programs/mappings/perc/mid/shaker_down_map.sfz",
+    "sha256": "decd9f080bb6f9f2ef8b63b569a24b5c1f84ab6967e9444b2a1994ef2b311869",
+    "size": 685
+  },
+  {
+    "path": "Programs/mappings/perc/mid/shaker_up_map.sfz",
+    "sha256": "e63e964c574af499833e82e95f2692820b03ea9604fb5d6b44030056ed4ff95c",
+    "size": 685
+  },
+  {
+    "path": "Programs/mappings/perc/mid/tambourine_map.sfz",
+    "sha256": "8570f9a67f1ee27ffc9139fb31d83c1df23d202573dc3e6718b323e8059cf80a",
+    "size": 997
+  },
+  {
+    "path": "Programs/mappings/perc/mid/triangle_muted_map.sfz",
+    "sha256": "eef20bef897379558e2ba99ef1efc91d64b56bd91a3c00046537eaaf657d19d2",
+    "size": 817
+  },
+  {
+    "path": "Programs/mappings/perc/mid/triangle_open_map.sfz",
+    "sha256": "79e9750d5b1e78d0bf21761712f8da24c182142cbb500f2211790ecf39329d51",
+    "size": 1906
+  },
+  {
+    "path": "Programs/mappings/perc/mid/tumba_map.sfz",
+    "sha256": "c91bef7810e6bc35ec233d43b138f76ce5b13f500e87c7a12440fe00b1c60243",
+    "size": 4116
+  },
+  {
+    "path": "Programs/mappings/perc/mid/vibraslap_map.sfz",
+    "sha256": "930fa4c485e5a9e812f282c486e04026e3ac5da421298e5013c98fa1d048fa29",
+    "size": 2018
+  },
+  {
+    "path": "Programs/tabplayer-kit.sfz",
+    "sha256": "a5d75aa1e71f112a1033945ccd5e0c299af1dc2c2c871bc5d307d7cc8dc96dee",
+    "size": 4761
+  },
+  {
+    "path": "Samples/mid/crash/mid_crash_crash_vl1_rr1.flac",
+    "sha256": "05d4849408a3ed79aa94a071482905facb948eaf5fc15650afe8b4291f73b816",
+    "size": 1431477
+  },
+  {
+    "path": "Samples/mid/crash/mid_crash_crash_vl1_rr2.flac",
+    "sha256": "61e223756a2c767f75e0ecf8ec208fe631973fdb03e6d76dd4fff153dceef1c4",
+    "size": 1486940
+  },
+  {
+    "path": "Samples/mid/crash/mid_crash_crash_vl1_rr3.flac",
+    "sha256": "4f2f1d8d8782ffa7e655487c56e32da77bc599e506144f07c70b89cdb5cb5284",
+    "size": 1374768
+  },
+  {
+    "path": "Samples/mid/crash/mid_crash_crash_vl1_rr4.flac",
+    "sha256": "1d926f33947c2cf9b8b472a5000c4ad2c0834085c7e23a2344bfb5b04dcd5e47",
+    "size": 1484048
+  },
+  {
+    "path": "Samples/mid/crash/mid_crash_crash_vl2_rr1.flac",
+    "sha256": "6e51e885a3f0fa3bfbad1349526e3781aefae4063f36691185bc176fad3ce588",
+    "size": 1609725
+  },
+  {
+    "path": "Samples/mid/crash/mid_crash_crash_vl2_rr2.flac",
+    "sha256": "2f1e15ddfb237e257b07bf5ad409a6a664644df5cd95fe11c9811d8d0cc6512b",
+    "size": 1479537
+  },
+  {
+    "path": "Samples/mid/crash/mid_crash_crash_vl2_rr3.flac",
+    "sha256": "9f4aac175d883860bf88bf16a5c93dc05428261634b3bf9737ab8fca9bce6b74",
+    "size": 1407404
+  },
+  {
+    "path": "Samples/mid/crash/mid_crash_crash_vl2_rr4.flac",
+    "sha256": "fa832501989a0da2b151d87fd59e0d22bfb4cf1b77e021d828ce4f7c8441d619",
+    "size": 1641374
+  },
+  {
+    "path": "Samples/mid/crash/mid_crash_crash_vl3_rr1.flac",
+    "sha256": "0469cb31e5228e084d839e425f76efaea093bc18b23fa3fe405d26705182024d",
+    "size": 1832655
+  },
+  {
+    "path": "Samples/mid/crash/mid_crash_crash_vl3_rr2.flac",
+    "sha256": "69922376a3428e169bc88299e11051e447b1ce150fdc89d9aa2e3ff759178e69",
+    "size": 1785775
+  },
+  {
+    "path": "Samples/mid/crash/mid_crash_crash_vl3_rr3.flac",
+    "sha256": "733e595a945995bd1dcf20729c30daf06d54ec31dfffb077b4763a602936ccfd",
+    "size": 1697299
+  },
+  {
+    "path": "Samples/mid/crash/mid_crash_crash_vl3_rr4.flac",
+    "sha256": "c15e14c4ff689dea2ec60c438b31ffcafeb043b35f7af07c88f80e20dd884972",
+    "size": 1741934
+  },
+  {
+    "path": "Samples/mid/crash/mid_crash_sizzle_vl1_rr1.flac",
+    "sha256": "408fd02a990baf8d0ed3c16304d5dc1c4647d05e639300f36fcebed20e30f2ce",
+    "size": 1203726
+  },
+  {
+    "path": "Samples/mid/crash/mid_crash_sizzle_vl1_rr2.flac",
+    "sha256": "8652919f300b66ce12e086515d829953bb86c5387f6ccc7391b3c6b3cbe2bbbf",
+    "size": 1362017
+  },
+  {
+    "path": "Samples/mid/crash/mid_crash_sizzle_vl1_rr3.flac",
+    "sha256": "c5e7ca5bb14bc2a18843ef137c46b4624417bd029af3690f1aa6782da52453e4",
+    "size": 1313089
+  },
+  {
+    "path": "Samples/mid/crash/mid_crash_sizzle_vl1_rr4.flac",
+    "sha256": "4a1daa04b60ecb9b08d830050cc0fc9a7b8c6677ff86459e79a01dcff53f5956",
+    "size": 1352228
+  },
+  {
+    "path": "Samples/mid/crash/mid_crash_sizzle_vl2_rr1.flac",
+    "sha256": "7d76342799904599c595b70c356bb044b1fac36fec6e3a4e4aa8158f86f9e6f7",
+    "size": 1390736
+  },
+  {
+    "path": "Samples/mid/crash/mid_crash_sizzle_vl2_rr2.flac",
+    "sha256": "c602b36d98382332a821c32e6e942db193231d20bde6a8214241ddf9f41c5838",
+    "size": 1379484
+  },
+  {
+    "path": "Samples/mid/crash/mid_crash_sizzle_vl2_rr3.flac",
+    "sha256": "533ef2e8152f053cef266bf56a47483503b44919f94bde92640902cac9283d93",
+    "size": 1461058
+  },
+  {
+    "path": "Samples/mid/crash/mid_crash_sizzle_vl2_rr4.flac",
+    "sha256": "ce6d85ca922447cb7b5e3286bf3dc84489840738c915fbbca013bc1318d0f6a4",
+    "size": 1365832
+  },
+  {
+    "path": "Samples/mid/crash/mid_crash_sizzle_vl3_rr1.flac",
+    "sha256": "b36b1cb6ce21c77685ec952826ec83ad9dfcc66eafd523b362da73bf0f809c40",
+    "size": 1680028
+  },
+  {
+    "path": "Samples/mid/crash/mid_crash_sizzle_vl3_rr2.flac",
+    "sha256": "76c885e93173aab0066a4ac8d96bc2d34ac6b92fc758b472bd2341d913fac89c",
+    "size": 1424887
+  },
+  {
+    "path": "Samples/mid/crash/mid_crash_sizzle_vl3_rr3.flac",
+    "sha256": "18a3d5643ebac6ff4f3913d8256b51085d9411c6d9af08bfc00a7bb09fc93203",
+    "size": 1634303
+  },
+  {
+    "path": "Samples/mid/crash/mid_crash_sizzle_vl3_rr4.flac",
+    "sha256": "5292980974ba38cf34bd6d78168b304a26c037e6dca92b7b1feac8d1c8188025",
+    "size": 1602613
+  },
+  {
+    "path": "Samples/mid/flatride/mid_flatride_crash_vl1.flac",
+    "sha256": "219da0f185b9989bfc2eed5bf34b209fc92747c9fddc7d6302b222e8f6f893b5",
+    "size": 2364184
+  },
+  {
+    "path": "Samples/mid/flatride/mid_flatride_crash_vl2.flac",
+    "sha256": "5118f62170d054643234958709678418ce0ae0a3ad4b65ea9196bc5913501d4f",
+    "size": 2315821
+  },
+  {
+    "path": "Samples/mid/flatride/mid_flatride_crash_vl3.flac",
+    "sha256": "f5c6389c7ed0437902a9d7e62e0080090fa954f46f46f17606e352d0b60de514",
+    "size": 2269876
+  },
+  {
+    "path": "Samples/mid/flatride/mid_flatride_crash_vl4.flac",
+    "sha256": "219da990d8d6bfbeca7c66c9590d52acf3ef3fc4ed144acd070190dd1dd27e34",
+    "size": 2269077
+  },
+  {
+    "path": "Samples/mid/flatride/mid_flatride_ride_vl1_rr1.flac",
+    "sha256": "201c9b368ee58d4c7ba87a967bcbc5a9d398c921ca09b46e920e82715533ced9",
+    "size": 1035850
+  },
+  {
+    "path": "Samples/mid/flatride/mid_flatride_ride_vl1_rr2.flac",
+    "sha256": "65745d4e82a5e8a9a7aad8836a2540d13d6f1a35ae7980fdb39dffc1b99e4074",
+    "size": 924313
+  },
+  {
+    "path": "Samples/mid/flatride/mid_flatride_ride_vl1_rr3.flac",
+    "sha256": "d2daf729b5104554cbf798d6dfd7d4cf8df3052033f4b47e79103be69e483b18",
+    "size": 1123267
+  },
+  {
+    "path": "Samples/mid/flatride/mid_flatride_ride_vl1_rr4.flac",
+    "sha256": "283a25b8b0b15a831b8691bcbdcd2f3dfbde70e87bb906e7a19124f33ffc0756",
+    "size": 943980
+  },
+  {
+    "path": "Samples/mid/flatride/mid_flatride_ride_vl2_rr1.flac",
+    "sha256": "b6c026cadf52b703b4870f9d7c8b0921305fe0010b016c9570de5febc2f5661e",
+    "size": 1298176
+  },
+  {
+    "path": "Samples/mid/flatride/mid_flatride_ride_vl2_rr2.flac",
+    "sha256": "ac015381f95ce2adf88897900e83fc5410064bbef1d60ecf86eb2c1a3ca1c5f6",
+    "size": 1202980
+  },
+  {
+    "path": "Samples/mid/flatride/mid_flatride_ride_vl2_rr3.flac",
+    "sha256": "3f8a8b246b0f57015fc2414e83af6a4716e5b93bead32566f6c0dbff0280f6ce",
+    "size": 1346041
+  },
+  {
+    "path": "Samples/mid/flatride/mid_flatride_ride_vl2_rr4.flac",
+    "sha256": "6935dc79ba15aeb2d72c0e62bc87db7c6df2f23e5a25258c5cff2806fc25d7d5",
+    "size": 1083207
+  },
+  {
+    "path": "Samples/mid/flatride/mid_flatride_ride_vl3_rr1.flac",
+    "sha256": "add851e752463b9cdedef8ecbab49767c781bb3279e9814f87860e767fabf6ff",
+    "size": 1540227
+  },
+  {
+    "path": "Samples/mid/flatride/mid_flatride_ride_vl3_rr2.flac",
+    "sha256": "9e56ff83fe2f859ca9068978dcf71d067ab8e54d97a11bbc0fd37e7f6658ce81",
+    "size": 1298143
+  },
+  {
+    "path": "Samples/mid/flatride/mid_flatride_ride_vl3_rr3.flac",
+    "sha256": "144426b4eec9948494a2ca1edd0553a9cfebfb2c6d92058ad5c604624ecb5a27",
+    "size": 1381333
+  },
+  {
+    "path": "Samples/mid/flatride/mid_flatride_ride_vl3_rr4.flac",
+    "sha256": "6b211eeea5e87add08a1be7a4b695e21f17088e29403d55d9d84fbd292bfa89d",
+    "size": 1523031
+  },
+  {
+    "path": "Samples/mid/hh/mid_hh_closed_vl1_rr1.flac",
+    "sha256": "04f54dc607aeee5ae8b62ba8a8db8b8444759c8dd12da534e4a1d1decb388ce7",
+    "size": 91567
+  },
+  {
+    "path": "Samples/mid/hh/mid_hh_closed_vl1_rr2.flac",
+    "sha256": "d0cfe14e23ca6c1c61b01438320040abc04349f53528d3c676df116d813ebb44",
+    "size": 69375
+  },
+  {
+    "path": "Samples/mid/hh/mid_hh_closed_vl1_rr3.flac",
+    "sha256": "dc9ef1aab3f32e672020688672036289d93dbd450b106ec98c0fbc7301fe43ae",
+    "size": 80427
+  },
+  {
+    "path": "Samples/mid/hh/mid_hh_closed_vl1_rr4.flac",
+    "sha256": "8cfe23b9a1f6c86071b9545d68c9c2c0f670ee9ed8588380e9186a63411050ab",
+    "size": 76514
+  },
+  {
+    "path": "Samples/mid/hh/mid_hh_closed_vl2_rr1.flac",
+    "sha256": "ca9a6b1ce1d274c329a987e21f22d34a9001bb1869d53f5b00cc88c0128199a3",
+    "size": 83468
+  },
+  {
+    "path": "Samples/mid/hh/mid_hh_closed_vl2_rr2.flac",
+    "sha256": "8cd1197e7726cc9bcf6b074464c4a42dc00e02a9d402f392bc9d3cb4330d4b96",
+    "size": 78372
+  },
+  {
+    "path": "Samples/mid/hh/mid_hh_closed_vl2_rr3.flac",
+    "sha256": "557b8b65ce48de37741410fd841f9b906af51a516306730ed5804149abefb283",
+    "size": 94272
+  },
+  {
+    "path": "Samples/mid/hh/mid_hh_closed_vl2_rr4.flac",
+    "sha256": "9bda8bd6a57490309067bdfdb3a933debbef8d727e4d100711e4913b02bd0b09",
+    "size": 87960
+  },
+  {
+    "path": "Samples/mid/hh/mid_hh_closed_vl3_rr1.flac",
+    "sha256": "5a747638b0acb5dc42f2e68c61b29085a489af524bdd5da180cb1de542e1bad1",
+    "size": 96320
+  },
+  {
+    "path": "Samples/mid/hh/mid_hh_closed_vl3_rr2.flac",
+    "sha256": "4d4239f3050af8ec5284ee94bd914c1726a41b0c5375552c2c3f67ff5767c228",
+    "size": 96470
+  },
+  {
+    "path": "Samples/mid/hh/mid_hh_closed_vl3_rr3.flac",
+    "sha256": "a8d635001a3b6af9cbac1cbbf4df18cfc9ff75ade17bc79182d88a4c8a0fca33",
+    "size": 100205
+  },
+  {
+    "path": "Samples/mid/hh/mid_hh_closed_vl3_rr4.flac",
+    "sha256": "9bdf0ed07bf835cd40a8a2f77a5e1e8217f2c4e1512bd71e90552a6c6e4d3e9d",
+    "size": 101244
+  },
+  {
+    "path": "Samples/mid/hh/mid_hh_closed_vl4_rr1.flac",
+    "sha256": "f4b91973f55cbfc1e424e494cb4a2e15c779967cfa4b7d28c6440337984bd440",
+    "size": 122698
+  },
+  {
+    "path": "Samples/mid/hh/mid_hh_closed_vl4_rr2.flac",
+    "sha256": "ef8cca9e89507fc69738062fcba478fc037e7220c47e040be1298f877e78c402",
+    "size": 120365
+  },
+  {
+    "path": "Samples/mid/hh/mid_hh_closed_vl4_rr3.flac",
+    "sha256": "173798eddfa5853f69e78126d89659d80583683e37ca42683e671b736b79dd81",
+    "size": 115292
+  },
+  {
+    "path": "Samples/mid/hh/mid_hh_closed_vl4_rr4.flac",
+    "sha256": "40826d62a7c6872cdcabeac553f2174b722994b8e992b1ebebd545479f801f7c",
+    "size": 120050
+  },
+  {
+    "path": "Samples/mid/hh/mid_hh_half_vl1_rr1.flac",
+    "sha256": "671a2ad3d94ceb48451f3fdf0cab9a1200c75bed456228891f2faa14272d5f9d",
+    "size": 257947
+  },
+  {
+    "path": "Samples/mid/hh/mid_hh_half_vl1_rr2.flac",
+    "sha256": "e53f5f2363cde8c8807356fac5fd59992af2e15667e925082fab918eb5c2bc2f",
+    "size": 245970
+  },
+  {
+    "path": "Samples/mid/hh/mid_hh_half_vl1_rr3.flac",
+    "sha256": "74e0b8af9dcf459963773068fadd91f48d2817c1b8b51d64bc7e22d7eb1a4313",
+    "size": 226588
+  },
+  {
+    "path": "Samples/mid/hh/mid_hh_half_vl1_rr4.flac",
+    "sha256": "6daa7b7e782026ab21161591f659d7bd8175a8448c952b4211c2e3628ce04e4e",
+    "size": 251005
+  },
+  {
+    "path": "Samples/mid/hh/mid_hh_half_vl2_rr1.flac",
+    "sha256": "78bcfea3190d1e6f6310e7548eeb62325057fe7f55f1afad8d0f6c020438cee7",
+    "size": 244539
+  },
+  {
+    "path": "Samples/mid/hh/mid_hh_half_vl2_rr2.flac",
+    "sha256": "09700b61e761f6fc39304be2380a3525c1fcf80aab72822956b5d01372b4107a",
+    "size": 258015
+  },
+  {
+    "path": "Samples/mid/hh/mid_hh_half_vl2_rr3.flac",
+    "sha256": "cbd04abdfa31d53a2b5d0dacc6ae5b3b195af05c522febad58ca49f026199140",
+    "size": 251783
+  },
+  {
+    "path": "Samples/mid/hh/mid_hh_half_vl2_rr4.flac",
+    "sha256": "73cd4f7e6a5de1951d15190c6d135264b3026af60b3a249d55f0822f7a39dded",
+    "size": 259253
+  },
+  {
+    "path": "Samples/mid/hh/mid_hh_half_vl3_rr1.flac",
+    "sha256": "0c7eb972ce0cb443773c2c13614defb66dbeef9248529b6a2bac4fd0830ec94c",
+    "size": 273358
+  },
+  {
+    "path": "Samples/mid/hh/mid_hh_half_vl3_rr2.flac",
+    "sha256": "848c10cdc7e3b3c0b1d28c7403c89279959297460e5300a77e3205ea68313a76",
+    "size": 264567
+  },
+  {
+    "path": "Samples/mid/hh/mid_hh_half_vl3_rr3.flac",
+    "sha256": "54f193a99dc9e4a5e2e4672bac309a92c70f6a256851ab32ebf92097019665aa",
+    "size": 271182
+  },
+  {
+    "path": "Samples/mid/hh/mid_hh_half_vl3_rr4.flac",
+    "sha256": "19aadfedcc72557fd837787338921dcb9bfa878f78de274f568853592d4fe2a5",
+    "size": 277689
+  },
+  {
+    "path": "Samples/mid/hh/mid_hh_half_vl4_rr1.flac",
+    "sha256": "f4d342728d9f84cb0046eb428a5b5188970aa9b323ba49fabeb89d164c6bb2b8",
+    "size": 314828
+  },
+  {
+    "path": "Samples/mid/hh/mid_hh_half_vl4_rr2.flac",
+    "sha256": "321956a484a33d523314b3be6dde99b5d8e891a10b177537f52bf7120c19e19c",
+    "size": 325961
+  },
+  {
+    "path": "Samples/mid/hh/mid_hh_half_vl4_rr3.flac",
+    "sha256": "0243f5c5715292bc624ba2a2011e665d904027129228011f2a7c27883c25c475",
+    "size": 307427
+  },
+  {
+    "path": "Samples/mid/hh/mid_hh_half_vl4_rr4.flac",
+    "sha256": "e045310062968d3e5d99966b8215b6680b5cda014fedacaf8ab967102c40bb8b",
+    "size": 325175
+  },
+  {
+    "path": "Samples/mid/hh/mid_hh_open_vl1_rr1.flac",
+    "sha256": "62b6d49fd321dc730ad4b95448e3f129655606e9958c1e30587aa7cca221cd9b",
+    "size": 1036001
+  },
+  {
+    "path": "Samples/mid/hh/mid_hh_open_vl1_rr2.flac",
+    "sha256": "01923636b2865dc88ea796fd0c1c7fc5ee438b4bd2f69ee6ffadee14af717056",
+    "size": 890035
+  },
+  {
+    "path": "Samples/mid/hh/mid_hh_open_vl1_rr3.flac",
+    "sha256": "2c2cd7766da90c4b458f3a47103300aa994625317c44024d77a77d99500c635b",
+    "size": 913193
+  },
+  {
+    "path": "Samples/mid/hh/mid_hh_open_vl2_rr1.flac",
+    "sha256": "b2ab26c09f890523c054a262993cb4f80f9de0b7272b8eb14e4770ccdb3d053a",
+    "size": 953760
+  },
+  {
+    "path": "Samples/mid/hh/mid_hh_open_vl2_rr2.flac",
+    "sha256": "38ab2fc7e4da6d93d5cbac6e6e5a80b4c660c4d1cb6848dbb7bc4529ed64725c",
+    "size": 881035
+  },
+  {
+    "path": "Samples/mid/hh/mid_hh_open_vl2_rr3.flac",
+    "sha256": "885cfd40c19fe64df50ea0da391890368b264e5c4ba2c6f45bfd702661133cdd",
+    "size": 982806
+  },
+  {
+    "path": "Samples/mid/hh/mid_hh_open_vl3_rr1.flac",
+    "sha256": "58302f8eabd04050ddb00d0f6ba907edb7996a7d36ce437e98494eec3ae9da69",
+    "size": 1187356
+  },
+  {
+    "path": "Samples/mid/hh/mid_hh_open_vl3_rr2.flac",
+    "sha256": "1e0a8a27ca3d93d07285b23eacc271ed720fc63efb980ee06e871ff7ffb4b66c",
+    "size": 1259600
+  },
+  {
+    "path": "Samples/mid/hh/mid_hh_open_vl3_rr3.flac",
+    "sha256": "0f53562496f19753eed2184f8bdc8fd961ef60acafa83d880ab8d7852358b0a5",
+    "size": 1275587
+  },
+  {
+    "path": "Samples/mid/hh/mid_hh_open_vl4_rr1.flac",
+    "sha256": "006556df13c01419b77fc0c734f9b5db79ad2a007610225ff56c9e12b1b5fd70",
+    "size": 1493113
+  },
+  {
+    "path": "Samples/mid/hh/mid_hh_open_vl4_rr2.flac",
+    "sha256": "27cad3cbd3aa85a09f01f35c256a01a8fe782485748e682509befd6086aa68ab",
+    "size": 1599469
+  },
+  {
+    "path": "Samples/mid/hh/mid_hh_open_vl4_rr3.flac",
+    "sha256": "402f656b3007cf7cb8a7bd88ba8abdbfc32af6cf681de331ff05e55973e13a83",
+    "size": 1511470
+  },
+  {
+    "path": "Samples/mid/hh/mid_hh_pedal_vl1_rr1.flac",
+    "sha256": "c74ef19c1040376a1e06646a072733634747ce98e31c49b523c0fbc3251fb464",
+    "size": 229894
+  },
+  {
+    "path": "Samples/mid/hh/mid_hh_pedal_vl1_rr2.flac",
+    "sha256": "72466d95eca41d7a623bac479b11dc177b3a1d12707b2f6ac9e7eadbedaf71d4",
+    "size": 208714
+  },
+  {
+    "path": "Samples/mid/hh/mid_hh_pedal_vl1_rr3.flac",
+    "sha256": "cf96977f338f41c538898cdc2111f526bec8b5dc653c4e5cbdb7eb2ae3c6b1fa",
+    "size": 213578
+  },
+  {
+    "path": "Samples/mid/hh/mid_hh_pedal_vl1_rr4.flac",
+    "sha256": "b0c03ccd624c80a183e777a68724d171924e4e9dbf1e18705accf25e377ae745",
+    "size": 246556
+  },
+  {
+    "path": "Samples/mid/hh/mid_hh_pedal_vl2_rr1.flac",
+    "sha256": "73515fac4850ffed2c0fa404da2359f5e10b2b7b4f3a6cbc48b0848f65052820",
+    "size": 240694
+  },
+  {
+    "path": "Samples/mid/hh/mid_hh_pedal_vl2_rr2.flac",
+    "sha256": "7b573f11a862980b4f054f749ebe5d7eb2078da4f74a122e806ce2942efacc7b",
+    "size": 223496
+  },
+  {
+    "path": "Samples/mid/hh/mid_hh_pedal_vl2_rr3.flac",
+    "sha256": "d0e776d5a19d4c5569ac10a981dfe7afda22f3b8bb17b5624ed10868d915a47e",
+    "size": 236257
+  },
+  {
+    "path": "Samples/mid/hh/mid_hh_pedal_vl2_rr4.flac",
+    "sha256": "cb28cbe12f87885667c500f763acabc1e1e4572edab764ba8ee842069a4098d2",
+    "size": 247197
+  },
+  {
+    "path": "Samples/mid/hh/mid_hh_pedal_vl3_rr1.flac",
+    "sha256": "7a80fca0c30d1bdf896b2d6d7d1057e4b2b0d6362ca129bc10cfcc5c9b18bbe2",
+    "size": 282743
+  },
+  {
+    "path": "Samples/mid/hh/mid_hh_pedal_vl3_rr2.flac",
+    "sha256": "d7a85061f890611efc1a8887e5c17e5141297584a08773f038e7e95e07872ae1",
+    "size": 293102
+  },
+  {
+    "path": "Samples/mid/hh/mid_hh_pedal_vl3_rr3.flac",
+    "sha256": "4fbaa45bcecc119b03072817c2c04f3aee40bc13952970d907d7f5983f8d0069",
+    "size": 298539
+  },
+  {
+    "path": "Samples/mid/hh/mid_hh_pedal_vl3_rr4.flac",
+    "sha256": "f3fe5d0fda8b885c3c8d5a158c35b0b259b3bc466e90adb3cddb33cece5400fc",
+    "size": 295789
+  },
+  {
+    "path": "Samples/mid/htom/mid_htom_center_vl1.flac",
+    "sha256": "e83584589fa8701a1e87838764997490445ad566b6f8fb56b3d4a23ba21bcb27",
+    "size": 233006
+  },
+  {
+    "path": "Samples/mid/htom/mid_htom_center_vl10.flac",
+    "sha256": "2c9be5002caa183582fe13bad7dc61fdf08e70e22d4d1cef8d1a050dc5498ead",
+    "size": 246326
+  },
+  {
+    "path": "Samples/mid/htom/mid_htom_center_vl11.flac",
+    "sha256": "a17949b59fb886ac260d7a89ed50e53884d4e760a243390148b556ff9eda9d99",
+    "size": 236671
+  },
+  {
+    "path": "Samples/mid/htom/mid_htom_center_vl12.flac",
+    "sha256": "adc4d06cd73e10611e6dfc31d238319c80e6c8c3e0c74d75c255820af2d1e196",
+    "size": 222272
+  },
+  {
+    "path": "Samples/mid/htom/mid_htom_center_vl13.flac",
+    "sha256": "7479cb4430fca0b055027740be929635e8147802e00b7a758ad7ca7f52742117",
+    "size": 238337
+  },
+  {
+    "path": "Samples/mid/htom/mid_htom_center_vl14.flac",
+    "sha256": "601e9e952fc42b84d584927bc2b5b1cac0352b53108becad556167f18765c195",
+    "size": 257444
+  },
+  {
+    "path": "Samples/mid/htom/mid_htom_center_vl15.flac",
+    "sha256": "1b3a76d5ec7d64bc50576ca64ee71a2008ef404a2b1a4d34e6ee7320958e7698",
+    "size": 267485
+  },
+  {
+    "path": "Samples/mid/htom/mid_htom_center_vl16.flac",
+    "sha256": "230a9e6c6b427c969834c6cb50e730b44487ae5a27f86bf87680359daa6caad9",
+    "size": 278571
+  },
+  {
+    "path": "Samples/mid/htom/mid_htom_center_vl2.flac",
+    "sha256": "a1af567b055fa1a4788360bf96fa178df55f3c8dadbe068abfd9afacc2a1d0e7",
+    "size": 201801
+  },
+  {
+    "path": "Samples/mid/htom/mid_htom_center_vl3.flac",
+    "sha256": "e65b70243e4a96c420cd97f0fa72ad0ea0780a347fc8434236b68b9b6add9d71",
+    "size": 258892
+  },
+  {
+    "path": "Samples/mid/htom/mid_htom_center_vl4.flac",
+    "sha256": "665ae1ff419cdfc0cb3b827b31b2ceacf23dabda91335df8f8520b2fb15f45fc",
+    "size": 217562
+  },
+  {
+    "path": "Samples/mid/htom/mid_htom_center_vl5.flac",
+    "sha256": "eee1325989cfbc51837ccafea34e1d31bb3eb23dd4a421b8f98b7a5eb45ea2f0",
+    "size": 238478
+  },
+  {
+    "path": "Samples/mid/htom/mid_htom_center_vl6.flac",
+    "sha256": "0d1a53f95723212f7ac67d2d35ee41d5e0c5eb7512250d00daac13b8573b4840",
+    "size": 263659
+  },
+  {
+    "path": "Samples/mid/htom/mid_htom_center_vl7.flac",
+    "sha256": "8038cf152db4ea147ca05d3f0c99b9bd7ea91f0eb5b3d3bdc2efc31c399f584c",
+    "size": 266731
+  },
+  {
+    "path": "Samples/mid/htom/mid_htom_center_vl8.flac",
+    "sha256": "8051743b60f4d8db88bda99b5af8be7d784d463975df41f54c76082864a5b247",
+    "size": 238187
+  },
+  {
+    "path": "Samples/mid/htom/mid_htom_center_vl9.flac",
+    "sha256": "f32670303ac3201fcb9f7a5239804cf34d40dcd26af2b5999baf1739b3764fbf",
+    "size": 198032
+  },
+  {
+    "path": "Samples/mid/kick/mid_kick_snoff_vl1_rr1.flac",
+    "sha256": "179252e745fe20577dc34e46e869405a9381dd1039f8269cfa0db1f7e601f93f",
+    "size": 228531
+  },
+  {
+    "path": "Samples/mid/kick/mid_kick_snoff_vl1_rr2.flac",
+    "sha256": "e9bdeb7a2ed0fcbbcce1499c8e0d6972a3f7e94d51153c44c04bf1e33c96ad90",
+    "size": 215063
+  },
+  {
+    "path": "Samples/mid/kick/mid_kick_snoff_vl1_rr3.flac",
+    "sha256": "cc0b6dbd66d0dac019401e305af813ffbb29d8d99e945097eb5efe540b966d41",
+    "size": 190396
+  },
+  {
+    "path": "Samples/mid/kick/mid_kick_snoff_vl1_rr4.flac",
+    "sha256": "c3495b99c9ccbf1d302bd042e682b88f3110b2634e20d0f41a700564ced7baca",
+    "size": 226924
+  },
+  {
+    "path": "Samples/mid/kick/mid_kick_snoff_vl2_rr1.flac",
+    "sha256": "6a38708a84957fe83116aaed6e5bcb38cb5b7c63e198dd55e10ae74600b49467",
+    "size": 233370
+  },
+  {
+    "path": "Samples/mid/kick/mid_kick_snoff_vl2_rr2.flac",
+    "sha256": "b3037b3db6de0e70f0c23523fe25b9185326b68ed00f3aebd997819bd3ac6f4f",
+    "size": 227871
+  },
+  {
+    "path": "Samples/mid/kick/mid_kick_snoff_vl2_rr3.flac",
+    "sha256": "efe079b3d80170177b2501c15a546d5309127e40369c56bd939e337324f57ce0",
+    "size": 214744
+  },
+  {
+    "path": "Samples/mid/kick/mid_kick_snoff_vl2_rr4.flac",
+    "sha256": "1eb78b22109aea661f875657aa478da61562fea398c651145a7ec4f27db90d25",
+    "size": 195387
+  },
+  {
+    "path": "Samples/mid/kick/mid_kick_snoff_vl3_rr1.flac",
+    "sha256": "f25318f16ca4e74f5575c275a24f92a7579acb8d69a078ed7db325ef483dd5ca",
+    "size": 247412
+  },
+  {
+    "path": "Samples/mid/kick/mid_kick_snoff_vl3_rr2.flac",
+    "sha256": "2680b851c9025a0a7c430ce6f7c444d0eb630c8f07255e250a57fc82d3d4f49a",
+    "size": 243582
+  },
+  {
+    "path": "Samples/mid/kick/mid_kick_snoff_vl3_rr3.flac",
+    "sha256": "17b2c45a271596c16d05161bbe3c8afb47e8734e22f87babc147638e5ee22999",
+    "size": 252615
+  },
+  {
+    "path": "Samples/mid/kick/mid_kick_snoff_vl3_rr4.flac",
+    "sha256": "f05636adc5770badc13c68188bee91b762f28d44a786a62f07b8ce65f28c6b67",
+    "size": 272222
+  },
+  {
+    "path": "Samples/mid/kick/mid_kick_snoff_vl4_rr1.flac",
+    "sha256": "44cbf44b9d6757d37f37f47d98688180f6f46bafe5cc38fa617f12268d5f4de1",
+    "size": 363384
+  },
+  {
+    "path": "Samples/mid/kick/mid_kick_snoff_vl4_rr2.flac",
+    "sha256": "bc2227318eca96c89e402885c7257b7a57dcbfaa84c93e119cbd2ab5659cb56b",
+    "size": 346875
+  },
+  {
+    "path": "Samples/mid/kick/mid_kick_snoff_vl4_rr3.flac",
+    "sha256": "bcdfa117f1e9084cc65011c463e0cd15f2f8b98e77aca882c5a70ff80b3712f9",
+    "size": 361079
+  },
+  {
+    "path": "Samples/mid/kick/mid_kick_snoff_vl4_rr4.flac",
+    "sha256": "2e5f79e98125ccc950c5f2c076372c5441fe94eec0f9aa43d74eb25d0cf044d1",
+    "size": 320896
+  },
+  {
+    "path": "Samples/mid/kick/mid_kick_snon_vl1_rr1.flac",
+    "sha256": "c077a384ddf42eeba8430fa3bf7a46d4153960a497c5f57a832b4f0c18e1f6b5",
+    "size": 274991
+  },
+  {
+    "path": "Samples/mid/kick/mid_kick_snon_vl1_rr2.flac",
+    "sha256": "053a7b4d0746d76003b99c81b150ab7a72c557a8c2ecdebc64740ef63f6f694f",
+    "size": 229175
+  },
+  {
+    "path": "Samples/mid/kick/mid_kick_snon_vl1_rr3.flac",
+    "sha256": "707cf2ad5650d2bb3019d6424b1c0a3f0a0d4985363d1bc7fd8e6ad938cbaa3e",
+    "size": 229236
+  },
+  {
+    "path": "Samples/mid/kick/mid_kick_snon_vl1_rr4.flac",
+    "sha256": "6aed6fa70732430875571eb551ce1a1378d4fa961f44dcdf58f7da5a7136b900",
+    "size": 215064
+  },
+  {
+    "path": "Samples/mid/kick/mid_kick_snon_vl2_rr1.flac",
+    "sha256": "fb2da719f0ae30f668ada98df7503e6def1ee26c53a5e183de50075e43fa597a",
+    "size": 234232
+  },
+  {
+    "path": "Samples/mid/kick/mid_kick_snon_vl2_rr2.flac",
+    "sha256": "30da88d84b4e37df87510b40ad115943056a3b5ed9b2dbcbe1266a267848c6f4",
+    "size": 221792
+  },
+  {
+    "path": "Samples/mid/kick/mid_kick_snon_vl2_rr3.flac",
+    "sha256": "299f699a43b8433d742c17a96dcc64e9ae2b328ab2813e7a28737d705ef701c4",
+    "size": 244438
+  },
+  {
+    "path": "Samples/mid/kick/mid_kick_snon_vl2_rr4.flac",
+    "sha256": "5acb1dffc5e1ca23e8085549dd39bc639d61b9757405a78c4a419a9f6d1ee371",
+    "size": 224265
+  },
+  {
+    "path": "Samples/mid/kick/mid_kick_snon_vl3_rr1.flac",
+    "sha256": "f3f6dac8ff6dae56a4c1f238e05d563a1be1ee38db60e5e97ac9081cf33d025c",
+    "size": 275974
+  },
+  {
+    "path": "Samples/mid/kick/mid_kick_snon_vl3_rr2.flac",
+    "sha256": "672384c968cea5ff84b8ebe4f3d86c75d152b4365f2f944d4afae9a4762c2dac",
+    "size": 282943
+  },
+  {
+    "path": "Samples/mid/kick/mid_kick_snon_vl3_rr3.flac",
+    "sha256": "fa75918ef535e0323bf27b37d4b88b18bba2f642c5a42c8fb28decc4bc25d7cf",
+    "size": 285870
+  },
+  {
+    "path": "Samples/mid/kick/mid_kick_snon_vl3_rr4.flac",
+    "sha256": "023d4fed5e47d8d733f08320d1e3e40061260d0c1f1e20e405cf0e88cfc32d06",
+    "size": 256933
+  },
+  {
+    "path": "Samples/mid/kick/mid_kick_snon_vl4_rr1.flac",
+    "sha256": "14b76405040ba7e6b9fca95c4f73cf99a27f36e3ec6f071050c26a46cdd3350c",
+    "size": 285149
+  },
+  {
+    "path": "Samples/mid/kick/mid_kick_snon_vl4_rr2.flac",
+    "sha256": "1fde8aeb9ed8af4e90c2df124376c88a28c218de76e4db6500f3cb8f791186d7",
+    "size": 299216
+  },
+  {
+    "path": "Samples/mid/kick/mid_kick_snon_vl4_rr3.flac",
+    "sha256": "5da7c40bc8a75426d50c6ee66daf47378a3c536cc716fd0a6b0875978ea298ba",
+    "size": 281417
+  },
+  {
+    "path": "Samples/mid/kick/mid_kick_snon_vl4_rr4.flac",
+    "sha256": "63e2730bc745ae94c4bdb0d42d6055ba6aff7765ac29358cc48c53eb44f2c6f2",
+    "size": 283260
+  },
+  {
+    "path": "Samples/mid/ltom/mid_ltom_center_vl1.flac",
+    "sha256": "565e8beeeab12f013fc01a347c136f85c3eed3dadd270a7bdc3ec82f7f24a7b6",
+    "size": 351972
+  },
+  {
+    "path": "Samples/mid/ltom/mid_ltom_center_vl10.flac",
+    "sha256": "1ff32c7954cae8c4842fca6b1f229924d3aec1b8261d5f007a15a87588a59472",
+    "size": 456263
+  },
+  {
+    "path": "Samples/mid/ltom/mid_ltom_center_vl11.flac",
+    "sha256": "afc6dcf018a19fd9c71050a1da87151fd69f15febfa7604b56652abb27115b24",
+    "size": 512794
+  },
+  {
+    "path": "Samples/mid/ltom/mid_ltom_center_vl12.flac",
+    "sha256": "42b71234a4b414858346fa4d1deb6a47d9c4b30074f2eb612b92732964229835",
+    "size": 561706
+  },
+  {
+    "path": "Samples/mid/ltom/mid_ltom_center_vl13.flac",
+    "sha256": "541450a5997a30b4482206c65d520817ff6a66f431de496a273916b9dc729fff",
+    "size": 519230
+  },
+  {
+    "path": "Samples/mid/ltom/mid_ltom_center_vl14.flac",
+    "sha256": "2ab8978ecfa614f6daba09d55e259375f60f0716f5827f4e40c9cc23a95c40a3",
+    "size": 577393
+  },
+  {
+    "path": "Samples/mid/ltom/mid_ltom_center_vl15.flac",
+    "sha256": "21aec9fc152a3a44022852a15d95a4cf6f94bf5a6c64bd412a0c882d63c166c3",
+    "size": 556866
+  },
+  {
+    "path": "Samples/mid/ltom/mid_ltom_center_vl16.flac",
+    "sha256": "924cf94d67c95ad6ee214a0b16febb89a53d21d49f5c14e3ec8622ff9da976f5",
+    "size": 502824
+  },
+  {
+    "path": "Samples/mid/ltom/mid_ltom_center_vl2.flac",
+    "sha256": "6ff4c4aa546bc1c8e4e1d9f2aee84ca04ca88d93a93453375cbe6fbcbbabb036",
+    "size": 328457
+  },
+  {
+    "path": "Samples/mid/ltom/mid_ltom_center_vl3.flac",
+    "sha256": "6419289391b4c8a9dba08884723ab59bad15daaf707b17054ee40ee28a793b1d",
+    "size": 337934
+  },
+  {
+    "path": "Samples/mid/ltom/mid_ltom_center_vl4.flac",
+    "sha256": "c4ca45a333ad94fa810d9f7dea3b1ae9c384208d4f51ca30573bd657947ce98f",
+    "size": 277591
+  },
+  {
+    "path": "Samples/mid/ltom/mid_ltom_center_vl5.flac",
+    "sha256": "60f04f2b36043099feb9845be153d745646bb08516b110f252495d8c5031823c",
+    "size": 405590
+  },
+  {
+    "path": "Samples/mid/ltom/mid_ltom_center_vl6.flac",
+    "sha256": "c793f3cb25d1f2b5f5161bf215445777e71d3a51dcdca5a9acab09eee534ea01",
+    "size": 502209
+  },
+  {
+    "path": "Samples/mid/ltom/mid_ltom_center_vl7.flac",
+    "sha256": "53eb966a99eef700dd5e55c00eeccf1c0fc19fbc4c75dd535ac5912ba6023b7e",
+    "size": 489473
+  },
+  {
+    "path": "Samples/mid/ltom/mid_ltom_center_vl8.flac",
+    "sha256": "9dcfc54b0da2a34b8cdfac1ffaf4b8fcc7055baa79d5cc7aaac78ff371382ac0",
+    "size": 568236
+  },
+  {
+    "path": "Samples/mid/ltom/mid_ltom_center_vl9.flac",
+    "sha256": "6e45180be68706530335d41aeb2bd44cf7e9854a95204c043ae1fcd4867a4967",
+    "size": 406760
+  },
+  {
+    "path": "Samples/mid/ride/mid_ride_bell_vl1_rr1.flac",
+    "sha256": "5399f1ae66c38c049ff3e94a5001f1bf23e940ea04086cea271312bff63de292",
+    "size": 690253
+  },
+  {
+    "path": "Samples/mid/ride/mid_ride_bell_vl1_rr2.flac",
+    "sha256": "a12c6d651f0db7cfd643b9eb21c89420125ed98e77dc559bd9207bcd768ed2a3",
+    "size": 579849
+  },
+  {
+    "path": "Samples/mid/ride/mid_ride_bell_vl1_rr3.flac",
+    "sha256": "da9033221d7432b56cfe33d5012a565eb20d63413f0db27cba22ace875a051af",
+    "size": 661332
+  },
+  {
+    "path": "Samples/mid/ride/mid_ride_bell_vl2_rr1.flac",
+    "sha256": "0adb696d626516bb85a9da6e136dd22084c5e78fb0db9f29b84ca772322c1f7a",
+    "size": 744941
+  },
+  {
+    "path": "Samples/mid/ride/mid_ride_bell_vl2_rr2.flac",
+    "sha256": "35f9323ecf180d0ef68180252c8e850b5dfa341de14f7b47fb781169eb67c02b",
+    "size": 769094
+  },
+  {
+    "path": "Samples/mid/ride/mid_ride_bell_vl2_rr3.flac",
+    "sha256": "8d9b14c7f02b3a15031b29984aceb5b977984bebd698bec41102d8dd4717cd03",
+    "size": 771663
+  },
+  {
+    "path": "Samples/mid/ride/mid_ride_bell_vl3_rr1.flac",
+    "sha256": "6311a95441142bca55a2e97c0670e72ebf16a25e4b17706362ea4f00de33aac1",
+    "size": 1037002
+  },
+  {
+    "path": "Samples/mid/ride/mid_ride_bell_vl3_rr2.flac",
+    "sha256": "ff94034e26383d14290f7a0855c63ac720ca680bc43f01c28801ff6a921fb3e1",
+    "size": 1073640
+  },
+  {
+    "path": "Samples/mid/ride/mid_ride_bell_vl3_rr3.flac",
+    "sha256": "6c990d0788ca4d5666c25d25c6b4d22bc7d82ee1157d66538f4d14df211ba5eb",
+    "size": 1145085
+  },
+  {
+    "path": "Samples/mid/ride/mid_ride_ride_vl1_rr1.flac",
+    "sha256": "465995b9f2ee979a0f2f26d0065c06cd11b57fd8b03a978e396abbb8ebe4284d",
+    "size": 1280792
+  },
+  {
+    "path": "Samples/mid/ride/mid_ride_ride_vl1_rr2.flac",
+    "sha256": "424828e598a8e2bbb396f1b0606497d914b5f769af773f12a78f8ae9ca99135e",
+    "size": 982174
+  },
+  {
+    "path": "Samples/mid/ride/mid_ride_ride_vl1_rr3.flac",
+    "sha256": "b54349a05a81a53bccd05731c9391caa3385944cb4ea9288bc0492e0f6a518d6",
+    "size": 1062630
+  },
+  {
+    "path": "Samples/mid/ride/mid_ride_ride_vl1_rr4.flac",
+    "sha256": "04e3985f0200a9066e3f12ab839d2dc45cb7f451a5af3f9344dc0c23cfb559f9",
+    "size": 920505
+  },
+  {
+    "path": "Samples/mid/ride/mid_ride_ride_vl2_rr1.flac",
+    "sha256": "b1b52f2f7143917cb9f38dbcab37da645d4109d0795d8cd8563a6a957ab30727",
+    "size": 1085707
+  },
+  {
+    "path": "Samples/mid/ride/mid_ride_ride_vl2_rr2.flac",
+    "sha256": "878a96721a1a50b4c0f798bb681804ce2c1e84e3675606a75aa241e132e05139",
+    "size": 1089137
+  },
+  {
+    "path": "Samples/mid/ride/mid_ride_ride_vl2_rr3.flac",
+    "sha256": "339363a26ac4ae81069f7044f76a11ac3aa39db678c01d09e9f1787825e5f421",
+    "size": 1051790
+  },
+  {
+    "path": "Samples/mid/ride/mid_ride_ride_vl2_rr4.flac",
+    "sha256": "b1e755bde86a9e66584841e2286b3aae6a0b5084142e33aa295582f9472cbef0",
+    "size": 992575
+  },
+  {
+    "path": "Samples/mid/ride/mid_ride_ride_vl3_rr1.flac",
+    "sha256": "3ba4ca0d97b7a4298d345af6855d4713db73ec4b748209e3857b77dc69fa641a",
+    "size": 1058738
+  },
+  {
+    "path": "Samples/mid/ride/mid_ride_ride_vl3_rr2.flac",
+    "sha256": "21c96c6ff845378d60ab6ffa7b6d158004a1de49d2f55bbc048479956b20a5b9",
+    "size": 888753
+  },
+  {
+    "path": "Samples/mid/ride/mid_ride_ride_vl3_rr3.flac",
+    "sha256": "792d0eb7266d4e76ba87d2e9e7ebb0dbfc5b267a86e95dd6233ecd7c29cacd4f",
+    "size": 1030050
+  },
+  {
+    "path": "Samples/mid/ride/mid_ride_ride_vl3_rr4.flac",
+    "sha256": "9c11127102e232af521e94eddc44d0c1c76c457d820eb1ab30dda02a470d5493",
+    "size": 1098415
+  },
+  {
+    "path": "Samples/mid/snare/mid_snare_center_vl1.flac",
+    "sha256": "fb7368a000e278a0eb98cd6e7be952cc6c3de4890b398564af28b0aa17421013",
+    "size": 224463
+  },
+  {
+    "path": "Samples/mid/snare/mid_snare_center_vl10.flac",
+    "sha256": "6cc5a666fb7a72817fb8abb6dd0ce19fe7b83f560eb4b8f1db6ba75f05357fc9",
+    "size": 229554
+  },
+  {
+    "path": "Samples/mid/snare/mid_snare_center_vl11.flac",
+    "sha256": "c0cf2badfb4754b1a6ec319f25e0bd163966f8d22e1f46b6b3615d667163cd0d",
+    "size": 211322
+  },
+  {
+    "path": "Samples/mid/snare/mid_snare_center_vl12.flac",
+    "sha256": "fb0ac55618a3dcd2317c74dc53c9607b0e0fe2957161d55de077794b976636a7",
+    "size": 194948
+  },
+  {
+    "path": "Samples/mid/snare/mid_snare_center_vl13.flac",
+    "sha256": "dc38d9a5fb82334cc4e355abb6637ebc647a8d0e200a40a1fe55a108ea1c97ff",
+    "size": 203246
+  },
+  {
+    "path": "Samples/mid/snare/mid_snare_center_vl14.flac",
+    "sha256": "939edc3f6391275bb5c6347999d44a7f192f56ba5c8548a771ea5d4cd19b7f9f",
+    "size": 235094
+  },
+  {
+    "path": "Samples/mid/snare/mid_snare_center_vl15.flac",
+    "sha256": "a4edeed14ddd7859be556e4de9cedc0e96b516a628dc5778cece626281a513fd",
+    "size": 206764
+  },
+  {
+    "path": "Samples/mid/snare/mid_snare_center_vl16.flac",
+    "sha256": "dd4e1de6e84465f94b26e8dbdfdf0f4e72999a7d5ed348a76ab9c8a73d74da79",
+    "size": 205928
+  },
+  {
+    "path": "Samples/mid/snare/mid_snare_center_vl17.flac",
+    "sha256": "276e357d2532f0fbb62e1ba179085450c9f70cd328b794ffeab499af66608444",
+    "size": 201211
+  },
+  {
+    "path": "Samples/mid/snare/mid_snare_center_vl18.flac",
+    "sha256": "482fe977e0d07dd85bffe94b3cecad6916ba9b7e51db24e8fcb0051171bb75b6",
+    "size": 211866
+  },
+  {
+    "path": "Samples/mid/snare/mid_snare_center_vl19.flac",
+    "sha256": "a1087c8676b6949a13b26e8856bc26da846f153c5f552276560bcc2953cf93bf",
+    "size": 204973
+  },
+  {
+    "path": "Samples/mid/snare/mid_snare_center_vl2.flac",
+    "sha256": "cd53336ce2661de9fdbdc9bf4299b0308f58650be494fad13ad042955e84debd",
+    "size": 187646
+  },
+  {
+    "path": "Samples/mid/snare/mid_snare_center_vl20.flac",
+    "sha256": "7359d9dfb4f18a05e318d4d8aff59d0f77112e973056854b478d2023b3b59af4",
+    "size": 230368
+  },
+  {
+    "path": "Samples/mid/snare/mid_snare_center_vl21.flac",
+    "sha256": "284e440372d5d654aa8b257d4616a8f07b98c601d13b5ec22f6df45f811152b5",
+    "size": 191258
+  },
+  {
+    "path": "Samples/mid/snare/mid_snare_center_vl22.flac",
+    "sha256": "7c01f6d0a6243aad309fb13e3eff881fa518ddf99fc9923e0c5a6c297fbe05e6",
+    "size": 221274
+  },
+  {
+    "path": "Samples/mid/snare/mid_snare_center_vl23.flac",
+    "sha256": "ae24195a251b7ac3616f7fd63958ed387ef8258ead28df818b4852f604d17b14",
+    "size": 242671
+  },
+  {
+    "path": "Samples/mid/snare/mid_snare_center_vl24.flac",
+    "sha256": "ecb864c8354eadb761c9b77bdbdc1b35294dc73f95e83e4ee50eb4f2b8bda21d",
+    "size": 211972
+  },
+  {
+    "path": "Samples/mid/snare/mid_snare_center_vl25.flac",
+    "sha256": "d88f0b22c50d368bf54ad0c1416a96e11933d5b69b79fd2d2ecf4e9f40689033",
+    "size": 247429
+  },
+  {
+    "path": "Samples/mid/snare/mid_snare_center_vl26.flac",
+    "sha256": "8d1d69d9f219539c395e3e0b7f5bf1966460a7b5e44268c554c98fb374b98282",
+    "size": 222679
+  },
+  {
+    "path": "Samples/mid/snare/mid_snare_center_vl27.flac",
+    "sha256": "ad8f6b22ce3c7cdc05189546a05a9de0cf26f637f5fd31251b72d131307c16ae",
+    "size": 201388
+  },
+  {
+    "path": "Samples/mid/snare/mid_snare_center_vl28.flac",
+    "sha256": "f8df18766689f44fa92ca17980555fac7e462b2f9c7afd56ef703b24bef36e03",
+    "size": 241162
+  },
+  {
+    "path": "Samples/mid/snare/mid_snare_center_vl29.flac",
+    "sha256": "e1755d79b9f06131283b09a96a7b318ad97a646e7bf8bc49dca5e7a72db1a0c6",
+    "size": 248025
+  },
+  {
+    "path": "Samples/mid/snare/mid_snare_center_vl3.flac",
+    "sha256": "14ddb03b5f58350592cb019aea6d5eeefd25a6d58b8dfeed5311981d400e678e",
+    "size": 235459
+  },
+  {
+    "path": "Samples/mid/snare/mid_snare_center_vl30.flac",
+    "sha256": "3b26473469dfdbf7de685ede8eaea791fa28d6bccb745ad72d40e20f62913e5e",
+    "size": 257525
+  },
+  {
+    "path": "Samples/mid/snare/mid_snare_center_vl31.flac",
+    "sha256": "8829bb069e3b501d583c3adb15b52b6cf04c02de4ce6b333ce94a92b65c966b4",
+    "size": 248155
+  },
+  {
+    "path": "Samples/mid/snare/mid_snare_center_vl32.flac",
+    "sha256": "eaf9025d6b879877add05f2314022f2c2b030c334780a0476a97ed1109f2755a",
+    "size": 263283
+  },
+  {
+    "path": "Samples/mid/snare/mid_snare_center_vl33.flac",
+    "sha256": "846baf072181910762da1a9bbd172b3afc8b2b1a4747658617aafcf39725092e",
+    "size": 265663
+  },
+  {
+    "path": "Samples/mid/snare/mid_snare_center_vl34.flac",
+    "sha256": "bb619e82bfb6ddd3afc1c0a37c9fd1d4caab6202290aa3eb622516f13b549f64",
+    "size": 254854
+  },
+  {
+    "path": "Samples/mid/snare/mid_snare_center_vl35.flac",
+    "sha256": "5df491351cd73a73de5919e6ed65882fa41e5ead8750796e4f3d81051fbbc9ff",
+    "size": 244295
+  },
+  {
+    "path": "Samples/mid/snare/mid_snare_center_vl36.flac",
+    "sha256": "61bfa8b38925b5a39053b30ad5640297e5ed49da3bd275a94691fee8a6f752f5",
+    "size": 249869
+  },
+  {
+    "path": "Samples/mid/snare/mid_snare_center_vl4.flac",
+    "sha256": "c460c634bd8834bbd213064f2bc2c184047722b101ffe59e7b0430b0481a0786",
+    "size": 179765
+  },
+  {
+    "path": "Samples/mid/snare/mid_snare_center_vl5.flac",
+    "sha256": "8547b8263e6e25137679ae49fb5300700926dd7596cfb3e7995655c6ddcb7cdf",
+    "size": 187440
+  },
+  {
+    "path": "Samples/mid/snare/mid_snare_center_vl6.flac",
+    "sha256": "782824f97d12d8b2a309593aebe2fd379c55652d36f480db141d4885cf8638a8",
+    "size": 179663
+  },
+  {
+    "path": "Samples/mid/snare/mid_snare_center_vl7.flac",
+    "sha256": "631e2cec78d03e4a5fc5038ac4e6f42bd496fd801dafdfa04218ffcce271a65d",
+    "size": 190484
+  },
+  {
+    "path": "Samples/mid/snare/mid_snare_center_vl8.flac",
+    "sha256": "f65954acb066c296f88e8d496775325c7e1818f97156db53699621e84147896a",
+    "size": 223143
+  },
+  {
+    "path": "Samples/mid/snare/mid_snare_center_vl9.flac",
+    "sha256": "7b09f9300b8a6c14fac6dda739b0cba6dfc8cae916aad864082e5b9f39eb1d14",
+    "size": 198833
+  },
+  {
+    "path": "Samples/mid/snare/mid_snare_crossstick_vl1.flac",
+    "sha256": "54e6ee6fa82aa2a25befe32f427000d452acc72ef28e780b6b3284675aa041ec",
+    "size": 281176
+  },
+  {
+    "path": "Samples/mid/snare/mid_snare_crossstick_vl10.flac",
+    "sha256": "e3d1d148ebd43b4a7bc19b8679ebca33a7ceebb0c587f25f4cf47d2943239995",
+    "size": 318462
+  },
+  {
+    "path": "Samples/mid/snare/mid_snare_crossstick_vl11.flac",
+    "sha256": "24a216aeb81dc988a128bbd4fbfb8a6b71f2f127290b1adea3fc8f633bb8256a",
+    "size": 345230
+  },
+  {
+    "path": "Samples/mid/snare/mid_snare_crossstick_vl12.flac",
+    "sha256": "2b8d7b1c38afe98d339cb3a82a138e1286e5d5b95ac3a71e4a8d1a8c0c2cda14",
+    "size": 341116
+  },
+  {
+    "path": "Samples/mid/snare/mid_snare_crossstick_vl13.flac",
+    "sha256": "eac55aa7a1edc33148fb316df369acc7ff54c8d990337ae25cf20d0b26955748",
+    "size": 334742
+  },
+  {
+    "path": "Samples/mid/snare/mid_snare_crossstick_vl14.flac",
+    "sha256": "0430e9be4b201e65f442a91e52a9393753fa889c1ae932b100ca3c2d53e7ba89",
+    "size": 331987
+  },
+  {
+    "path": "Samples/mid/snare/mid_snare_crossstick_vl15.flac",
+    "sha256": "78761342fccf817f03a0f8abf1cadce1c0ec557e5f66c77ee1b7069dbdcdfc9d",
+    "size": 321124
+  },
+  {
+    "path": "Samples/mid/snare/mid_snare_crossstick_vl16.flac",
+    "sha256": "b0829554fb7fef382515d78c8aa4cfe68a71f2a3aefea8623568f176b296f2fe",
+    "size": 308115
+  },
+  {
+    "path": "Samples/mid/snare/mid_snare_crossstick_vl2.flac",
+    "sha256": "51dd6a8ad67cd1b50e995e98e25d34ea9b325f45587f91c27db3b5421abe6aa3",
+    "size": 272729
+  },
+  {
+    "path": "Samples/mid/snare/mid_snare_crossstick_vl3.flac",
+    "sha256": "3b89eb2bb8e0813fcf6d9aba5bdd472db044d8afe2d790f7508c4a477b2e7549",
+    "size": 284443
+  },
+  {
+    "path": "Samples/mid/snare/mid_snare_crossstick_vl4.flac",
+    "sha256": "8961385e4415091330e506b5bd52ee9363e6bdec48641efbade5300ae6b2bba4",
+    "size": 331885
+  },
+  {
+    "path": "Samples/mid/snare/mid_snare_crossstick_vl5.flac",
+    "sha256": "228a944bb293a9dd4a0038cd0875fb3dd10351f0d5a35a643adf3b7b916dafb1",
+    "size": 320635
+  },
+  {
+    "path": "Samples/mid/snare/mid_snare_crossstick_vl6.flac",
+    "sha256": "100238e86af614ec2ed28b6b100442b6eff11b61daa21cef79a2617d5ad330d3",
+    "size": 283179
+  },
+  {
+    "path": "Samples/mid/snare/mid_snare_crossstick_vl7.flac",
+    "sha256": "8b5ea36a5f119ce0ffa257160c0ae2361d1fbdb731f3e7cc7c24de2c2dd039a2",
+    "size": 310397
+  },
+  {
+    "path": "Samples/mid/snare/mid_snare_crossstick_vl8.flac",
+    "sha256": "1e2898046bc50864f7b57dbb82a0a7396f1f85abd8e866a7da35a66bf3450ca7",
+    "size": 321069
+  },
+  {
+    "path": "Samples/mid/snare/mid_snare_crossstick_vl9.flac",
+    "sha256": "742efd555b726a38c4e01ce47f5c8d4cfb2b0eebcd5dc87483da7320fe3e6756",
+    "size": 302125
+  },
+  {
+    "path": "Samples/mid/snare/mid_snare_rimshot_vl1.flac",
+    "sha256": "7968edb18045854be61fd50ca1a43e745dade4c1dca9a78f0178eda67e76c45a",
+    "size": 328447
+  },
+  {
+    "path": "Samples/mid/snare/mid_snare_rimshot_vl10.flac",
+    "sha256": "18de2922c3433c7f96e8ff520dcd529875d4e05b0bf83faaa87098c3f8a92189",
+    "size": 290162
+  },
+  {
+    "path": "Samples/mid/snare/mid_snare_rimshot_vl11.flac",
+    "sha256": "b1e9ea8b5206472bc193bfacc808af02f4ee350b57445ce7ac1ee1bd2190b1d0",
+    "size": 287865
+  },
+  {
+    "path": "Samples/mid/snare/mid_snare_rimshot_vl12.flac",
+    "sha256": "b672eb7023adf4c392f799059454a90f409e5b3cc319bc0b4020a2cf24e66fb4",
+    "size": 260301
+  },
+  {
+    "path": "Samples/mid/snare/mid_snare_rimshot_vl2.flac",
+    "sha256": "e0c81928b5453466722cac714b5726d28ae963bfd0bee7aa9a2c6c9f05b15b2c",
+    "size": 280100
+  },
+  {
+    "path": "Samples/mid/snare/mid_snare_rimshot_vl3.flac",
+    "sha256": "a499bf7e31681f5b3ba8f7b99c3c9cdd772824930cd8b33f077c4431916d4230",
+    "size": 352760
+  },
+  {
+    "path": "Samples/mid/snare/mid_snare_rimshot_vl4.flac",
+    "sha256": "e0514bef67b5f7ee388de61ed87cfc613114c9a3c3bd324217ef59e5b5421613",
+    "size": 267017
+  },
+  {
+    "path": "Samples/mid/snare/mid_snare_rimshot_vl5.flac",
+    "sha256": "bf8aaf570bd8eeb5bbe943236df907db59590adacb1aff1cbb07767dd8831c8d",
+    "size": 326233
+  },
+  {
+    "path": "Samples/mid/snare/mid_snare_rimshot_vl6.flac",
+    "sha256": "4d75217473265ebe3b7553191bdea9eb53e5fe14739a411d9db7d7a265efe179",
+    "size": 278257
+  },
+  {
+    "path": "Samples/mid/snare/mid_snare_rimshot_vl7.flac",
+    "sha256": "e77d8b652a7efd23f7ff2d7887f933b7db231ea3571d1a3b16103fc73116f6ec",
+    "size": 304273
+  },
+  {
+    "path": "Samples/mid/snare/mid_snare_rimshot_vl8.flac",
+    "sha256": "849e6959bc6e1fd40eb9af547998380c922f2118434acf25a331e62627ecb721",
+    "size": 300066
+  },
+  {
+    "path": "Samples/mid/snare/mid_snare_rimshot_vl9.flac",
+    "sha256": "fdc42cf4e15205ed0c5e9f9ef9d5d9695694b4c04b8737dd9d6716a764ae4051",
+    "size": 260942
+  },
+  {
+    "path": "Samples/perc/close/whistle/Close_BallWhistle_Long-001.wav",
+    "sha256": "1d933ffe6d174f92beda7f7a3fcd3d3720aaec5f13141398489ebb59702f853a",
+    "size": 361336
+  },
+  {
+    "path": "Samples/perc/close/whistle/Close_BallWhistle_Long-002.wav",
+    "sha256": "6364a58a8226463f30c3d64adb46df88f0448d1c624ba1a4ce36ae5bb70ea7be",
+    "size": 428400
+  },
+  {
+    "path": "Samples/perc/close/whistle/Close_BallWhistle_Short-001.wav",
+    "sha256": "db63075fa6abe9bf68bf1adfed5a0427c90a990f837abaa4cbb035d4c64509fb",
+    "size": 192996
+  },
+  {
+    "path": "Samples/perc/close/whistle/Close_BallWhistle_Short-002.wav",
+    "sha256": "0d9b5ac6ed2421acf9c3b9bb730157fc343417d36b3a7c17fada4f96b86729b4",
+    "size": 225388
+  },
+  {
+    "path": "Samples/perc/close/whistle/Close_BallWhistle_Short-003.wav",
+    "sha256": "9cd084b390ea44747130eab2186f34bdae3e693e7bb70621713e0f9f67393902",
+    "size": 228516
+  },
+  {
+    "path": "Samples/perc/close/whistle/Close_BallWhistle_Short-004.wav",
+    "sha256": "c47257fb761c404c2ee2bd1792e5df4d7113cba4f83b75b4e866521fcd054fa2",
+    "size": 207828
+  },
+  {
+    "path": "Samples/perc/close/whistle/Close_BallWhistle_Short-005.wav",
+    "sha256": "02c219fb4c160503e923e084f3025c96c8e821dd9fe1e25b53b5967d504d61b2",
+    "size": 231556
+  },
+  {
+    "path": "Samples/perc/close/whistle/Close_BallWhistle_Short-006.wav",
+    "sha256": "6aedea43a0a4cf873d8a01d5516e98078e0f9df513b8b9bf4098071f6e49dc33",
+    "size": 305748
+  },
+  {
+    "path": "Samples/perc/mid/agogo/Agogo_High_v1_rr1_Mid.wav",
+    "sha256": "a319d68b2e38304d063531b2a152194871623bbce0dc55a870c0ab45570cbbdf",
+    "size": 196284
+  },
+  {
+    "path": "Samples/perc/mid/agogo/Agogo_High_v1_rr2_Mid.wav",
+    "sha256": "9bca95ac56e718df72e51589e98f73a5330247184ea15eb7217fc031deb8fc98",
+    "size": 208356
+  },
+  {
+    "path": "Samples/perc/mid/agogo/Agogo_High_v1_rr3_Mid.wav",
+    "sha256": "2ecb8eea84a364cdb51a342132fd98ac962eea320dbea694442fb1faad6401a6",
+    "size": 209412
+  },
+  {
+    "path": "Samples/perc/mid/agogo/Agogo_High_v1_rr4_Mid.wav",
+    "sha256": "689c03d8c71e36977549f14383ae0a085770c37a49a1990024ebbfc03a1a0f6f",
+    "size": 179660
+  },
+  {
+    "path": "Samples/perc/mid/agogo/Agogo_High_v1_rr5_Mid.wav",
+    "sha256": "2db1f8c003afcddcdeb4d8d33b38fb0b0d29592b4a3d351125f6d12b6b1a0549",
+    "size": 208876
+  },
+  {
+    "path": "Samples/perc/mid/agogo/Agogo_High_v1_rr6_Mid.wav",
+    "sha256": "24583a4e4afd34ac223f20c56c19c4f41cd7fc60e07f4d2b074d3dde2c0313af",
+    "size": 199600
+  },
+  {
+    "path": "Samples/perc/mid/agogo/Agogo_High_v1_rr7_Mid.wav",
+    "sha256": "43a299cb789dbee7abc03af4e2c34817fd42b8688bfd8674bcc2295056b82aea",
+    "size": 205796
+  },
+  {
+    "path": "Samples/perc/mid/agogo/Agogo_High_v1_rr8_Mid.wav",
+    "sha256": "662c23ed824fdd6a19a038a388a08011693b954553f7e7ebd0bcc37015c0d7ce",
+    "size": 210304
+  },
+  {
+    "path": "Samples/perc/mid/agogo/Agogo_High_v2_rr1_Mid.wav",
+    "sha256": "f74a3100634a4372f2e2f81adf2f6a7839861ec4dcf13291001a3268e37806de",
+    "size": 200936
+  },
+  {
+    "path": "Samples/perc/mid/agogo/Agogo_High_v2_rr2_Mid.wav",
+    "sha256": "54f7c0b291cd3a744a11cf2895ae3053c738e7382ec4572ae8c1f2e7e00f5a74",
+    "size": 194396
+  },
+  {
+    "path": "Samples/perc/mid/agogo/Agogo_High_v2_rr3_Mid.wav",
+    "sha256": "dc4919a89a79510ecec889b3999b40d6579b020981793ba12260ca56216677db",
+    "size": 198680
+  },
+  {
+    "path": "Samples/perc/mid/agogo/Agogo_High_v2_rr4_Mid.wav",
+    "sha256": "283e970f20e3c44fa2322950a77e5361a6f1e6a4e70b3aadbab644db3aaebdbe",
+    "size": 206176
+  },
+  {
+    "path": "Samples/perc/mid/agogo/Agogo_High_v2_rr5_Mid.wav",
+    "sha256": "e1429d600f8c5de21b36f37145eb3f3381836f0e21b8f6c3820f7c276d47940c",
+    "size": 182136
+  },
+  {
+    "path": "Samples/perc/mid/agogo/Agogo_High_v2_rr6_Mid.wav",
+    "sha256": "d6e76e14c8a73f21a85cadcfbfa1735c8eced6d222e62b5c24af4364fd456e71",
+    "size": 193704
+  },
+  {
+    "path": "Samples/perc/mid/agogo/Agogo_High_v2_rr7_Mid.wav",
+    "sha256": "6c11ac696db5aa1ebe8bcb8072a0b9858d33fc9675a3cde47be6dc9fb5d7dec4",
+    "size": 196124
+  },
+  {
+    "path": "Samples/perc/mid/agogo/Agogo_High_v2_rr8_Mid.wav",
+    "sha256": "fb4a953ab0e5a41d492a4770296e338db7565b74ba900a0ec2b468496fb36355",
+    "size": 200232
+  },
+  {
+    "path": "Samples/perc/mid/agogo/Agogo_High_v3_rr1_Mid.wav",
+    "sha256": "c7f0d2b70c6cee34beea62d7566227da2687ca5c87d72d1245f444fbe2c76b43",
+    "size": 197312
+  },
+  {
+    "path": "Samples/perc/mid/agogo/Agogo_High_v3_rr2_Mid.wav",
+    "sha256": "78e37f2c5d7f3b164157041d0f990e0d962b3496fbf11597722d04180be3920d",
+    "size": 192776
+  },
+  {
+    "path": "Samples/perc/mid/agogo/Agogo_High_v3_rr3_Mid.wav",
+    "sha256": "52fd1c3bf34b0d9f0d8dbd27d36919253f82dd403ba234b4a63c1318e6b714e6",
+    "size": 200292
+  },
+  {
+    "path": "Samples/perc/mid/agogo/Agogo_High_v3_rr4_Mid.wav",
+    "sha256": "2c9e993d6f5f00c57ec2636eeabb76fab1f0437d84e12b1be9ecddd4cad74fc4",
+    "size": 188604
+  },
+  {
+    "path": "Samples/perc/mid/agogo/Agogo_High_v3_rr5_Mid.wav",
+    "sha256": "0cdb2e20f5b53f9a69d6d2d30bdb500029f7219d1fed44237f34b9fa063ca914",
+    "size": 212180
+  },
+  {
+    "path": "Samples/perc/mid/agogo/Agogo_High_v3_rr6_Mid.wav",
+    "sha256": "bd97a79490f71db01982c111d70f220b6e26d1906dfaed5b4350a9046023c154",
+    "size": 193536
+  },
+  {
+    "path": "Samples/perc/mid/agogo/Agogo_High_v3_rr7_Mid.wav",
+    "sha256": "de4998594c9ede16d762d6bc8ba00915bdb4f470710dba459fb4c608699a5d1b",
+    "size": 204984
+  },
+  {
+    "path": "Samples/perc/mid/agogo/Agogo_High_v3_rr8_Mid.wav",
+    "sha256": "d8314a0984183e55172a93a444e5debbba716f1a812ee8c4bb1cf3ef3678b164",
+    "size": 277320
+  },
+  {
+    "path": "Samples/perc/mid/agogo/Agogo_Low_v1_rr1_Mid.wav",
+    "sha256": "7f113910f75c61825c56ee464b30cc582f915c795668e71058ede66cd842834c",
+    "size": 349748
+  },
+  {
+    "path": "Samples/perc/mid/agogo/Agogo_Low_v1_rr2_Mid.wav",
+    "sha256": "3fa04b671dce436ebee4d9ff9b8bbd9b1ca7e191625c495c917af6f23b17c7d1",
+    "size": 341076
+  },
+  {
+    "path": "Samples/perc/mid/agogo/Agogo_Low_v1_rr3_Mid.wav",
+    "sha256": "0e4e4f64abd874ffc9ce521ffc0164a0d66f1c71e93b706883ea54ff6f8bed72",
+    "size": 387688
+  },
+  {
+    "path": "Samples/perc/mid/agogo/Agogo_Low_v1_rr4_Mid.wav",
+    "sha256": "95b965f7bcd2963cc93e12f3c7372be39cf2f196ebcc59cf008758b984c1a76b",
+    "size": 360584
+  },
+  {
+    "path": "Samples/perc/mid/agogo/Agogo_Low_v1_rr5_Mid.wav",
+    "sha256": "4e0d8727ed8c9f3c74f51eac31b7d120b1016312448854eee9b2abcd8b79a818",
+    "size": 381740
+  },
+  {
+    "path": "Samples/perc/mid/agogo/Agogo_Low_v1_rr6_Mid.wav",
+    "sha256": "a7a98c3b7193b7e954b84f919688b769e40d48475c4d3dfe1eee02a47c0a1899",
+    "size": 366904
+  },
+  {
+    "path": "Samples/perc/mid/agogo/Agogo_Low_v1_rr7_Mid.wav",
+    "sha256": "275efdf177877969c649a8d0694243fef3d599ffe8d30db54417b71b02a73771",
+    "size": 325732
+  },
+  {
+    "path": "Samples/perc/mid/agogo/Agogo_Low_v1_rr8_Mid.wav",
+    "sha256": "2f89924fcb840376a6291423bf0e3545fd28b4e8f0bd33e28063b465d586cf9d",
+    "size": 356648
+  },
+  {
+    "path": "Samples/perc/mid/agogo/Agogo_Low_v2_rr1_Mid.wav",
+    "sha256": "36fb0e28c0ba39336082902d299a5b2d20b9f5f0cb448cb64e4b13837b896eea",
+    "size": 431804
+  },
+  {
+    "path": "Samples/perc/mid/agogo/Agogo_Low_v2_rr2_Mid.wav",
+    "sha256": "8eceafe7254fdccc16296ac8de29ab6877039631c92f55e8ee0f630fd6177cd1",
+    "size": 414660
+  },
+  {
+    "path": "Samples/perc/mid/agogo/Agogo_Low_v2_rr3_Mid.wav",
+    "sha256": "bc756a7886886aabca910b216e31a8c43d4cc31c675a02448312669e6339611c",
+    "size": 363328
+  },
+  {
+    "path": "Samples/perc/mid/agogo/Agogo_Low_v2_rr4_Mid.wav",
+    "sha256": "c9fed010aee96c2a465173086bd0ab294c8448a69706c575fae8eee7939f9bd4",
+    "size": 410224
+  },
+  {
+    "path": "Samples/perc/mid/agogo/Agogo_Low_v2_rr5_Mid.wav",
+    "sha256": "a440dd7c5eedd618414cd2c8b7dd15aa61a96a0314b062cc05e8ddeeae16688f",
+    "size": 410820
+  },
+  {
+    "path": "Samples/perc/mid/agogo/Agogo_Low_v2_rr6_Mid.wav",
+    "sha256": "7399c12e078f6dcae3e789606f3d13537e67bc8a0748472bd7d93225435e0945",
+    "size": 394088
+  },
+  {
+    "path": "Samples/perc/mid/agogo/Agogo_Low_v2_rr7_Mid.wav",
+    "sha256": "c43f2cfdac1ad8652d61bf2bb2708ee85d31495e02e606c598efd8d736c97f3a",
+    "size": 374932
+  },
+  {
+    "path": "Samples/perc/mid/agogo/Agogo_Low_v2_rr8_Mid.wav",
+    "sha256": "652cdaab981dd9c7601170b41df03ee9141c7138ca26fb5a715dc9559d1371ae",
+    "size": 413524
+  },
+  {
+    "path": "Samples/perc/mid/belltree/BellTree_Stroke_rr1_Mid.wav",
+    "sha256": "aae960ec30aaf8217ca6421d540adefd43012ddb12275be3022818f3a0478cdf",
+    "size": 805132
+  },
+  {
+    "path": "Samples/perc/mid/belltree/BellTree_Stroke_rr10_Mid.wav",
+    "sha256": "993374aa13fe13e9b0b7529b62d885394b427cd8c8229b7e509a5d6c57ef3a10",
+    "size": 1010744
+  },
+  {
+    "path": "Samples/perc/mid/belltree/BellTree_Stroke_rr11_Mid.wav",
+    "sha256": "4cd525bea23463954df280868fefb531e1be8b98ad9551c164c4ddc63160dfb0",
+    "size": 887168
+  },
+  {
+    "path": "Samples/perc/mid/belltree/BellTree_Stroke_rr2_Mid.wav",
+    "sha256": "af39b4a89db9a6aef28df76e7a77ade816a3e70dd764e58a4fa7a96c32205780",
+    "size": 875992
+  },
+  {
+    "path": "Samples/perc/mid/belltree/BellTree_Stroke_rr3_Mid.wav",
+    "sha256": "a9504525ecc659dee61eec54c3ce0d73ed50df32da3659b62df680d2a6a57958",
+    "size": 997272
+  },
+  {
+    "path": "Samples/perc/mid/belltree/BellTree_Stroke_rr4_Mid.wav",
+    "sha256": "27afcc092548bb62b8ede024547094c129559846bc325f825629bc535cc5b114",
+    "size": 905432
+  },
+  {
+    "path": "Samples/perc/mid/belltree/BellTree_Stroke_rr5_Mid.wav",
+    "sha256": "1c92d4abb7d65b37542711870aa4281ca38b6290cbf3bc74e26669b340b95dd2",
+    "size": 1050700
+  },
+  {
+    "path": "Samples/perc/mid/belltree/BellTree_Stroke_rr6_Mid.wav",
+    "sha256": "e84532b2c9f306baf0f02e45e451babc3a4c660ecee60dbb1af2b9ae1f06ec9b",
+    "size": 1041236
+  },
+  {
+    "path": "Samples/perc/mid/belltree/BellTree_Stroke_rr7_Mid.wav",
+    "sha256": "be0d3c9893d537f9a5d67d37b2c170387523bb6d8a3bebb4d4e6b4cbaf1a54c1",
+    "size": 1084760
+  },
+  {
+    "path": "Samples/perc/mid/belltree/BellTree_Stroke_rr8_Mid.wav",
+    "sha256": "291ea9816a8b6f2d51db8dd55fb5172c53de2873ced9ddbb74bd8731c566dee9",
+    "size": 1208740
+  },
+  {
+    "path": "Samples/perc/mid/belltree/BellTree_Stroke_rr9_Mid.wav",
+    "sha256": "ca80844fcfc43dd6375accff03c4a38e7739525c7a4925219a8cd673719f0615",
+    "size": 1050456
+  },
+  {
+    "path": "Samples/perc/mid/bongoh/BongoH_Hit1_v1_rr1_Mid.wav",
+    "sha256": "7ebcd2149e8a75189446afba67c96b58f42757bf7aa355364f2e11cee705f33f",
+    "size": 146696
+  },
+  {
+    "path": "Samples/perc/mid/bongoh/BongoH_Hit1_v1_rr2_Mid.wav",
+    "sha256": "4905c0cee5db34c8edfc49aa51d93f4a7d2a823190eaa12d2500515639a42cf3",
+    "size": 199484
+  },
+  {
+    "path": "Samples/perc/mid/bongoh/BongoH_Hit1_v1_rr3_Mid.wav",
+    "sha256": "73b1c01a7a31cee3260406bddeec8291a6a2010b1990d69b55eb05e6b942d9ed",
+    "size": 184172
+  },
+  {
+    "path": "Samples/perc/mid/bongoh/BongoH_Hit1_v1_rr4_Mid.wav",
+    "sha256": "498f3b00414539392a071dcb0c484a396efadfe5d89ca31490aefed468c3c860",
+    "size": 178184
+  },
+  {
+    "path": "Samples/perc/mid/bongoh/BongoH_Hit1_v1_rr5_Mid.wav",
+    "sha256": "aa692fb2566b301b72aefb71e38ae8374cce9ce1d5e07c774676aa5193f2e28b",
+    "size": 192400
+  },
+  {
+    "path": "Samples/perc/mid/bongoh/BongoH_Hit1_v1_rr6_Mid.wav",
+    "sha256": "a55013f067b5c2a3175d517a9f5625dbb6375d6f727c5a89762a1433bcdbf82d",
+    "size": 190896
+  },
+  {
+    "path": "Samples/perc/mid/bongoh/BongoH_Hit1_v1_rr7_Mid.wav",
+    "sha256": "4471fa8d4e0ccb70ea00abeae1467fd1b7ac3711104919cbb64af8982252759a",
+    "size": 150812
+  },
+  {
+    "path": "Samples/perc/mid/bongoh/BongoH_Hit1_v1_rr8_Mid.wav",
+    "sha256": "8240cfb63a1515a07e35092e7d686a96ea74e08c4d4c4a92b481d52f1a0c37b4",
+    "size": 190992
+  },
+  {
+    "path": "Samples/perc/mid/bongoh/BongoH_Hit1_v2_rr1_Mid.wav",
+    "sha256": "dd9b6239a151702966a995937f74ac022c9bb950c967277fbd16beaced0c9e1a",
+    "size": 209356
+  },
+  {
+    "path": "Samples/perc/mid/bongoh/BongoH_Hit1_v2_rr2_Mid.wav",
+    "sha256": "03d4653d70e2180643872da4ebb94845f4da81b8d8f9ba2c7df3a611bd9d65ac",
+    "size": 177716
+  },
+  {
+    "path": "Samples/perc/mid/bongoh/BongoH_Hit1_v2_rr3_Mid.wav",
+    "sha256": "947387d3fe5aece129a57d3b310109e417dc6b62afb2fd2498e730ceae137b72",
+    "size": 200840
+  },
+  {
+    "path": "Samples/perc/mid/bongoh/BongoH_Hit1_v2_rr4_Mid.wav",
+    "sha256": "198c2cac12eac2e70563f4d594fd4d9bf3622d58da4cf47a9088580d756ef24a",
+    "size": 181364
+  },
+  {
+    "path": "Samples/perc/mid/bongoh/BongoH_Hit1_v2_rr5_Mid.wav",
+    "sha256": "4597a310a5c521949824dfb9f5917a6cb464b86f7273b70cfc9aaaacebe2cae2",
+    "size": 189768
+  },
+  {
+    "path": "Samples/perc/mid/bongoh/BongoH_Hit1_v2_rr6_Mid.wav",
+    "sha256": "2301f3fa2e3f52bc520159527d93894062b343ea22fe1e0ad1f1261a5f939cc6",
+    "size": 180172
+  },
+  {
+    "path": "Samples/perc/mid/bongoh/BongoH_Hit1_v2_rr7_Mid.wav",
+    "sha256": "986e16141d9768fb2e0e9d2dbff3cd284baf3fb231b6f6f5acbcf29df3d089c7",
+    "size": 192828
+  },
+  {
+    "path": "Samples/perc/mid/bongoh/BongoH_Hit1_v2_rr8_Mid.wav",
+    "sha256": "b163269c16a4fafb437af3b1406f732d815f5612d835b919eec1ed54da3a807e",
+    "size": 212096
+  },
+  {
+    "path": "Samples/perc/mid/bongoh/BongoH_Hit1_v3_rr1_Mid.wav",
+    "sha256": "e93ed5c0fbafc3f122ced7c56c3f08021d8616e96c81c42aa62c5f368111d001",
+    "size": 205208
+  },
+  {
+    "path": "Samples/perc/mid/bongoh/BongoH_Hit1_v3_rr2_Mid.wav",
+    "sha256": "e0c143a2d32aca5430ffe2254c699b772ecfeaf6eef9d4c414365b538f693916",
+    "size": 186744
+  },
+  {
+    "path": "Samples/perc/mid/bongoh/BongoH_Hit1_v3_rr3_Mid.wav",
+    "sha256": "f23fe7876a6a113116cebdda4e3d1dbd83a2de278805e2ca2a70a58e1be9d29e",
+    "size": 206528
+  },
+  {
+    "path": "Samples/perc/mid/bongoh/BongoH_Hit1_v3_rr4_Mid.wav",
+    "sha256": "4e5d743f725a77d1af27ca79ad32ea80d6b3608fed85e986df1b7d9cc2fd351e",
+    "size": 196612
+  },
+  {
+    "path": "Samples/perc/mid/bongoh/BongoH_Hit1_v3_rr5_Mid.wav",
+    "sha256": "d957e35dbc596a31a2f25a02991d30eefc06fe3f3f3a353e165e9c2c75133c15",
+    "size": 207996
+  },
+  {
+    "path": "Samples/perc/mid/bongoh/BongoH_Hit1_v3_rr6_Mid.wav",
+    "sha256": "6e3777a57fb7f046a37eabe4de52cec946724c06331ee8c9a34d05bfd6540147",
+    "size": 194244
+  },
+  {
+    "path": "Samples/perc/mid/bongoh/BongoH_Hit1_v3_rr7_Mid.wav",
+    "sha256": "8c13879572d83770f91f3110de38a9cb5ebbb129eaafdbeb4baf322f63db5dbf",
+    "size": 205148
+  },
+  {
+    "path": "Samples/perc/mid/bongoh/BongoH_Hit1_v3_rr8_Mid.wav",
+    "sha256": "98331575a2f6783026e4fe20f561e96105f1c21286ac048fddb02d35066631a5",
+    "size": 220532
+  },
+  {
+    "path": "Samples/perc/mid/bongol/BongoL_Hit1_v1_rr1_Mid.wav",
+    "sha256": "746f5c4d37cf956c083f0c98b74dd7b6f7daeda6405d7b1534bbc56f1b741e4a",
+    "size": 186436
+  },
+  {
+    "path": "Samples/perc/mid/bongol/BongoL_Hit1_v1_rr2_Mid.wav",
+    "sha256": "30c83a15eb158a8114ada571c196027691cf205d9fd55423d4405a65b94dc231",
+    "size": 172984
+  },
+  {
+    "path": "Samples/perc/mid/bongol/BongoL_Hit1_v1_rr3_Mid.wav",
+    "sha256": "82e09195f9160324cdccf7cd0cc6ced481c8d952cd4e275dd653e5dac6f55adb",
+    "size": 161232
+  },
+  {
+    "path": "Samples/perc/mid/bongol/BongoL_Hit1_v1_rr4_Mid.wav",
+    "sha256": "b74b01b00c9f9f729634a07ff829c0eff1e842aebdd142dc00ff81c4f3a14e4f",
+    "size": 157720
+  },
+  {
+    "path": "Samples/perc/mid/bongol/BongoL_Hit1_v1_rr5_Mid.wav",
+    "sha256": "0e18117b7d5a1695c0a3d231122a78b7b4981a5abc5955ad7c193cd89b32ae6e",
+    "size": 154588
+  },
+  {
+    "path": "Samples/perc/mid/bongol/BongoL_Hit1_v1_rr6_Mid.wav",
+    "sha256": "ef60824a3fbbbea650ea7c09eb4b9448d84923a46b5e702fd889d2dedffa5aa1",
+    "size": 167232
+  },
+  {
+    "path": "Samples/perc/mid/bongol/BongoL_Hit1_v1_rr7_Mid.wav",
+    "sha256": "ec4944ef97a66331d54504d65bc5c67d6a5edc91a806973bbd2bed1aaa69f0eb",
+    "size": 165564
+  },
+  {
+    "path": "Samples/perc/mid/bongol/BongoL_Hit1_v1_rr8_Mid.wav",
+    "sha256": "fbd76493f2c211391c793bc26536950ccf96cc8004507a13563c909010fd8829",
+    "size": 160876
+  },
+  {
+    "path": "Samples/perc/mid/bongol/BongoL_Hit1_v2_rr1_Mid.wav",
+    "sha256": "0ee22ac30a27a1e91fbba58e0c4b36b28ea6c508dad5f11b10bdb9db07f2b443",
+    "size": 168720
+  },
+  {
+    "path": "Samples/perc/mid/bongol/BongoL_Hit1_v2_rr2_Mid.wav",
+    "sha256": "0933627d939145e57ff95e93ce3618b0c35f8de6ed6f0f4bfad42f8dd66f8fa5",
+    "size": 209296
+  },
+  {
+    "path": "Samples/perc/mid/bongol/BongoL_Hit1_v2_rr3_Mid.wav",
+    "sha256": "95e0900666af43568e71a7fbf74d9348f6ff36b5d90277cb2be3b959997c6610",
+    "size": 176920
+  },
+  {
+    "path": "Samples/perc/mid/bongol/BongoL_Hit1_v2_rr4_Mid.wav",
+    "sha256": "44d95fb9b34b3ed019eb1d0cc959123cb98dbb6ecd1f2986439b7a7410094aa3",
+    "size": 210416
+  },
+  {
+    "path": "Samples/perc/mid/bongol/BongoL_Hit1_v2_rr5_Mid.wav",
+    "sha256": "2295a40e21244b9a954bfc286755d3c6082b2fbee58895104bac5195fd794e01",
+    "size": 193860
+  },
+  {
+    "path": "Samples/perc/mid/bongol/BongoL_Hit1_v2_rr6_Mid.wav",
+    "sha256": "cd87bfa2aff30d624c93fbcccea22ace9a8597db4c9c2d69cb0d0fd01b26b85c",
+    "size": 216600
+  },
+  {
+    "path": "Samples/perc/mid/bongol/BongoL_Hit1_v2_rr7_Mid.wav",
+    "sha256": "870329ef1bff51d569eeb51b05343762a7d53bf48221d937ddc40309694155bb",
+    "size": 164860
+  },
+  {
+    "path": "Samples/perc/mid/bongol/BongoL_Hit1_v2_rr8_Mid.wav",
+    "sha256": "551a04675bfd58cdca729f00a7cf00ff1e6798e67d0ad807c68714512ede7c4e",
+    "size": 208112
+  },
+  {
+    "path": "Samples/perc/mid/bongol/BongoL_Hit1_v3_rr1_Mid.wav",
+    "sha256": "07986a1bc54b31dafd9c7dc250e42a613977b320b33b2e4652d21332064de4eb",
+    "size": 209224
+  },
+  {
+    "path": "Samples/perc/mid/bongol/BongoL_Hit1_v3_rr2_Mid.wav",
+    "sha256": "da93f8eba020d57ec57c27505f4132c346900aee6a5f76e9754d01c93658a226",
+    "size": 205936
+  },
+  {
+    "path": "Samples/perc/mid/bongol/BongoL_Hit1_v3_rr3_Mid.wav",
+    "sha256": "e09930f62a4614167f829bc54364a06ab953dba2ce28fe1af10cf68dfa959ae0",
+    "size": 212404
+  },
+  {
+    "path": "Samples/perc/mid/bongol/BongoL_Hit1_v3_rr4_Mid.wav",
+    "sha256": "8d5d48451b34042056b5106a8929914651b36577133f65d35934c877e7fdac12",
+    "size": 209036
+  },
+  {
+    "path": "Samples/perc/mid/bongol/BongoL_Hit1_v3_rr5_Mid.wav",
+    "sha256": "1e29e55a71bc7ce0bd50bb8b1c7f715e21f61fdd55ca41526cf6444c20a44ace",
+    "size": 200988
+  },
+  {
+    "path": "Samples/perc/mid/bongol/BongoL_Hit1_v3_rr6_Mid.wav",
+    "sha256": "4f334097936d405aa1901486396f2275b3c7fad31308c6ce2c361ef10b29519d",
+    "size": 211972
+  },
+  {
+    "path": "Samples/perc/mid/bongol/BongoL_Hit1_v3_rr7_Mid.wav",
+    "sha256": "ce04b4475d3481fb2c4902c7fc31b0d331f1de4a4be11dc2e9fdcf05487f034d",
+    "size": 212940
+  },
+  {
+    "path": "Samples/perc/mid/bongol/BongoL_Hit1_v3_rr8_Mid.wav",
+    "sha256": "303e343d8f6cb63f86266df02ec5887ac18720072ca61adca8442e058403098d",
+    "size": 222292
+  },
+  {
+    "path": "Samples/perc/mid/cabasa/Cabasa1_Rub_v1_rr1_Mid.wav",
+    "sha256": "4f2e5f286469423846eff578dbc7c79c280ba272913fbe1f599c3ff3a13b0027",
+    "size": 191240
+  },
+  {
+    "path": "Samples/perc/mid/cabasa/Cabasa1_Rub_v1_rr2_Mid.wav",
+    "sha256": "b467a38841c117139f741e2d65f770e3ff48be7c5cd5696a2fa45774381fa237",
+    "size": 178300
+  },
+  {
+    "path": "Samples/perc/mid/cabasa/Cabasa1_Rub_v1_rr3_Mid.wav",
+    "sha256": "e9ff7039393a06aab99ee1c13b6a58cc7df1756d7fe70af5e60b63f9f79a6072",
+    "size": 195036
+  },
+  {
+    "path": "Samples/perc/mid/cabasa/Cabasa1_Rub_v1_rr4_Mid.wav",
+    "sha256": "c7023c1b903996110b31a20dd14595fbb2b4f92bf3a523617ad14622a7a5dde5",
+    "size": 172812
+  },
+  {
+    "path": "Samples/perc/mid/cabasa/Cabasa1_Rub_v1_rr5_Mid.wav",
+    "sha256": "4cf134144ca85293410e7d821393754580299df80673be33d6e6f35ccb033e62",
+    "size": 173836
+  },
+  {
+    "path": "Samples/perc/mid/cabasa/Cabasa1_Rub_v1_rr6_Mid.wav",
+    "sha256": "4d2597f5946c7c7d48c3b84a980d48ca7c2db9c50aa21dbb8ce564c0eb5fab54",
+    "size": 157436
+  },
+  {
+    "path": "Samples/perc/mid/cabasa/Cabasa1_Rub_v1_rr7_Mid.wav",
+    "sha256": "1342928700312bb267963bebfad0580f0c5b415e4f98b22158733f133fa7e203",
+    "size": 167440
+  },
+  {
+    "path": "Samples/perc/mid/cabasa/Cabasa1_Rub_v1_rr8_Mid.wav",
+    "sha256": "689ebdfebbd429aabe30a66f831fbac0d82c9773c7bcf7cd4168b9ccee643a88",
+    "size": 212720
+  },
+  {
+    "path": "Samples/perc/mid/cabasa/Cabasa1_Rub_v2_rr1_Mid.wav",
+    "sha256": "f13cba113f7cc65b2f4949108b3aa3a6d4c64fa2cebb6cf83894bbd20f008f28",
+    "size": 173696
+  },
+  {
+    "path": "Samples/perc/mid/cabasa/Cabasa1_Rub_v2_rr2_Mid.wav",
+    "sha256": "95a9ab870a543a44104cb72810a58022fb0579bbf279decde6dd0916f2d4a895",
+    "size": 173888
+  },
+  {
+    "path": "Samples/perc/mid/cabasa/Cabasa1_Rub_v2_rr3_Mid.wav",
+    "sha256": "6c0a1bd52ea81dc7cb5475c8aee4822dd884ba313e406dce7fa90898ba3c0c59",
+    "size": 155632
+  },
+  {
+    "path": "Samples/perc/mid/cabasa/Cabasa1_Rub_v2_rr4_Mid.wav",
+    "sha256": "17162b76582c39aaf2c2d3d6d19faf00ed3c0185e621c1efcb20d098d90a12ee",
+    "size": 161044
+  },
+  {
+    "path": "Samples/perc/mid/cabasa/Cabasa1_Rub_v2_rr5_Mid.wav",
+    "sha256": "27c44e8dfc326e8eff41d0f5fe95aa1e2f3a5008974d4ba3dcb5373c95376869",
+    "size": 166916
+  },
+  {
+    "path": "Samples/perc/mid/cabasa/Cabasa1_Rub_v2_rr6_Mid.wav",
+    "sha256": "78eebbbf54b5517adcebb15fcb4fc4a4fdeb863e8ed406fdee81d0a2cc57282b",
+    "size": 166176
+  },
+  {
+    "path": "Samples/perc/mid/cabasa/Cabasa1_Rub_v2_rr7_Mid.wav",
+    "sha256": "1513cd2a4b9f69a3227f507e18b85acb3ddf7677e41cb177b6ee845a1c9ca88c",
+    "size": 164260
+  },
+  {
+    "path": "Samples/perc/mid/cabasa/Cabasa1_Rub_v2_rr8_Mid.wav",
+    "sha256": "da86dce4c8dfc4a69944f0dbcbcb88ec906628e1a3657fa47e88d80666e12a65",
+    "size": 236228
+  },
+  {
+    "path": "Samples/perc/mid/claves/Claves1_Hit_v1_rr1_Mid.wav",
+    "sha256": "19379cc794b9e50d4dc55200238e27091bedab63b7370eb625490c7a96631b34",
+    "size": 199848
+  },
+  {
+    "path": "Samples/perc/mid/claves/Claves1_Hit_v1_rr2_Mid.wav",
+    "sha256": "5c81e14b3eb04cf0ac726d9d9dd217d6f43d7052afa7c2dfceed53d19fb543c0",
+    "size": 181976
+  },
+  {
+    "path": "Samples/perc/mid/claves/Claves1_Hit_v1_rr3_Mid.wav",
+    "sha256": "35fc06e3dc1d95e6833873d5c446362eae81ddf3a8684ea3517d68add4cd4aa5",
+    "size": 184304
+  },
+  {
+    "path": "Samples/perc/mid/claves/Claves1_Hit_v1_rr4_Mid.wav",
+    "sha256": "0287e2b2b370823a1403b42c4d3bf84e86868e9df23534b8c60a0595b0f5290d",
+    "size": 176064
+  },
+  {
+    "path": "Samples/perc/mid/claves/Claves1_Hit_v1_rr5_Mid.wav",
+    "sha256": "beb5e77d2b6de5f37d4dcfabbe137e5b5b7091f5077e70376519ba0ba4328c8c",
+    "size": 198536
+  },
+  {
+    "path": "Samples/perc/mid/claves/Claves1_Hit_v1_rr6_Mid.wav",
+    "sha256": "11cd63d954d5f1a13b1bc42d4a95cefdc593cf98783d67509f1a392a08de3ab9",
+    "size": 181072
+  },
+  {
+    "path": "Samples/perc/mid/claves/Claves1_Hit_v1_rr7_Mid.wav",
+    "sha256": "5658cb7d09c21312b39111e724c4521fec74e8e1a5d32fbaf4b51b5e3c6b0883",
+    "size": 180276
+  },
+  {
+    "path": "Samples/perc/mid/claves/Claves1_Hit_v1_rr8_Mid.wav",
+    "sha256": "92cfc4b86ae64b2cc151d4deab31c76a52e60eb0b6ee08b66706509063af04b3",
+    "size": 217564
+  },
+  {
+    "path": "Samples/perc/mid/claves/Claves1_Hit_v2_rr1_Mid.wav",
+    "sha256": "bcabe27330761309eb4b4f6207e6e3b4be59815df86449ac05bfb9b81f19efc9",
+    "size": 191812
+  },
+  {
+    "path": "Samples/perc/mid/claves/Claves1_Hit_v2_rr2_Mid.wav",
+    "sha256": "a673c1d8d894a58e26522757e58b3923d9d03feadbcc9aae8ddc3f96a5ba234c",
+    "size": 187072
+  },
+  {
+    "path": "Samples/perc/mid/claves/Claves1_Hit_v2_rr3_Mid.wav",
+    "sha256": "38246a63b771b7e6595fe98cf799e692a27dcfaf13411d349f1bc81333bd03da",
+    "size": 189180
+  },
+  {
+    "path": "Samples/perc/mid/claves/Claves1_Hit_v2_rr4_Mid.wav",
+    "sha256": "3e3fc78ca075c59ca64244459d22f9332431f6bb0325e968170917b85312f1b1",
+    "size": 181476
+  },
+  {
+    "path": "Samples/perc/mid/claves/Claves1_Hit_v2_rr5_Mid.wav",
+    "sha256": "d9d8c0dfc3a71b2512a8c9b53bd47d897d71f806104a3476427ef5d39d11f93a",
+    "size": 183428
+  },
+  {
+    "path": "Samples/perc/mid/claves/Claves1_Hit_v2_rr6_Mid.wav",
+    "sha256": "d11ee517c80d8c58424bfaaad106c2a59a188becdc7dde36875136ed8fca4730",
+    "size": 180300
+  },
+  {
+    "path": "Samples/perc/mid/claves/Claves1_Hit_v2_rr7_Mid.wav",
+    "sha256": "7c029e1a82b2610ba7ae3a5b09b36b3afe70a78b22a5069283d25b7eb9519f40",
+    "size": 187132
+  },
+  {
+    "path": "Samples/perc/mid/claves/Claves1_Hit_v2_rr8_Mid.wav",
+    "sha256": "57717dac6025c08e2eec6da7d7c8ee11a48c07a618029ffa3bb746ba3aa3699e",
+    "size": 204264
+  },
+  {
+    "path": "Samples/perc/mid/claves/Claves1_Hit_v3_rr1_Mid.wav",
+    "sha256": "12285f65ed125f4140d1e8a86b2d6a08bf3283b7bf30c10d68290b8e8230a927",
+    "size": 228764
+  },
+  {
+    "path": "Samples/perc/mid/claves/Claves1_Hit_v3_rr2_Mid.wav",
+    "sha256": "bd88f4207e4b2090a56f7ced5f37a834e7b402d4e15cae3a3d3bf41b729df876",
+    "size": 267012
+  },
+  {
+    "path": "Samples/perc/mid/claves/Claves1_Hit_v3_rr3_Mid.wav",
+    "sha256": "9018eb3d2a5214a659e16a74bb9da9d0d9ac9d01e1b0a50c09387efdb7bed096",
+    "size": 234644
+  },
+  {
+    "path": "Samples/perc/mid/claves/Claves1_Hit_v3_rr4_Mid.wav",
+    "sha256": "04d104367a456df8fb1e203a56ab20af157ebe2a6537d20b074a887b2bc91eab",
+    "size": 240004
+  },
+  {
+    "path": "Samples/perc/mid/claves/Claves1_Hit_v3_rr5_Mid.wav",
+    "sha256": "15ca30b76284ce981e7ee07b44c368a33ad7d6e2d9503d71a59201c58fac487d",
+    "size": 228104
+  },
+  {
+    "path": "Samples/perc/mid/claves/Claves1_Hit_v3_rr6_Mid.wav",
+    "sha256": "5064a051eaf5d27cd81a03bc0d9d193edd23993ef1e2885ca745594ae0d8daa5",
+    "size": 257168
+  },
+  {
+    "path": "Samples/perc/mid/claves/Claves1_Hit_v3_rr7_Mid.wav",
+    "sha256": "54042bc3a251ea4bf221b2e6cc406568feb079d513b08b4e035760cd0f9ec880",
+    "size": 257856
+  },
+  {
+    "path": "Samples/perc/mid/claves/Claves1_Hit_v3_rr8_Mid.wav",
+    "sha256": "85503d04d8fd0ae42f9b090c7bc54d6eb1d46257fdea744db69dc95cb9aafdec",
+    "size": 263660
+  },
+  {
+    "path": "Samples/perc/mid/conga/Conga_17_HitHM1_1_70_rr1_Mid.wav",
+    "sha256": "406bfd279c7e5f26fac9ee011ba49f49e39abb4b65c2d582687524c846067a3a",
+    "size": 118400
+  },
+  {
+    "path": "Samples/perc/mid/conga/Conga_17_HitHM1_1_70_rr2_Mid.wav",
+    "sha256": "023741fa1dd918c7808944ca51e4b757369d28b797a84bac90456173705e2a18",
+    "size": 137088
+  },
+  {
+    "path": "Samples/perc/mid/conga/Conga_17_HitHM1_1_70_rr3_Mid.wav",
+    "sha256": "410c721b856c78729a4457afcab6276772780412feaf82580dae24a8d0f8bc97",
+    "size": 132884
+  },
+  {
+    "path": "Samples/perc/mid/conga/Conga_17_HitHM1_1_70_rr4_Mid.wav",
+    "sha256": "5cce395cd775d34c02d20d70c55b68335cc1e7be8f2393ffe31a89a6091b1aef",
+    "size": 124592
+  },
+  {
+    "path": "Samples/perc/mid/conga/Conga_17_HitHM1_1_70_rr5_Mid.wav",
+    "sha256": "c21e816a80d23442db13f3951ea8dcfc03df48bcd5823232a20cf8da0bd165c2",
+    "size": 125532
+  },
+  {
+    "path": "Samples/perc/mid/conga/Conga_17_HitHM1_1_70_rr6_Mid.wav",
+    "sha256": "d3bc4cf9bc8f22c595d1128bdafd5caf8075a8721d6577629096cfb878ea20de",
+    "size": 118416
+  },
+  {
+    "path": "Samples/perc/mid/conga/Conga_17_HitHM1_1_70_rr7_Mid.wav",
+    "sha256": "5f4b85dfe844a2cd3e40fe83e8004a0dbb18ce8678c9d6313c9002e1710e1f5a",
+    "size": 124228
+  },
+  {
+    "path": "Samples/perc/mid/conga/Conga_17_HitHM1_1_70_rr8_Mid.wav",
+    "sha256": "ffb5d2022cc3a398700b95ec3c2ad8b2045cf16cbcdb2d882a93a9042c546dad",
+    "size": 95460
+  },
+  {
+    "path": "Samples/perc/mid/conga/Conga_17_HitHM1_71_127_rr1_Mid.wav",
+    "sha256": "8e6fc3648e338dc9d14b9ee87484cf0226956d09d35a52ca2b06cd0b060e7611",
+    "size": 132260
+  },
+  {
+    "path": "Samples/perc/mid/conga/Conga_17_HitHM1_71_127_rr2_Mid.wav",
+    "sha256": "b0458256b6c3e71434de0f52f37ad18439aa2631d32c462f6fdb5ee0a71591f8",
+    "size": 123724
+  },
+  {
+    "path": "Samples/perc/mid/conga/Conga_17_HitHM1_71_127_rr3_Mid.wav",
+    "sha256": "3ff228666541ad1a993562aeeba7a5021be05c2ab26e423f43e1c294fb236792",
+    "size": 180332
+  },
+  {
+    "path": "Samples/perc/mid/conga/Conga_17_HitHM1_71_127_rr4_Mid.wav",
+    "sha256": "df0cebfb8730334d6506abe2bef81e5f735fc064586122f7b1dc36989489d922",
+    "size": 138560
+  },
+  {
+    "path": "Samples/perc/mid/conga/Conga_17_HitHM1_71_127_rr5_Mid.wav",
+    "sha256": "7ff7a3c1236175465f1973297d1cae9cbfb747ebbb2cda3f6fa6f0e264be786d",
+    "size": 131140
+  },
+  {
+    "path": "Samples/perc/mid/conga/Conga_17_HitHM1_71_127_rr6_Mid.wav",
+    "sha256": "2963caa3c51b18f72f53d336c863ea2835367bd702308460551869ae9ec36f5f",
+    "size": 127656
+  },
+  {
+    "path": "Samples/perc/mid/conga/Conga_17_HitHM1_71_127_rr7_Mid.wav",
+    "sha256": "8b68acb5d2d9080c7b05fb7887f313383123e1c588fadcfc0402ce0afd784fb8",
+    "size": 121244
+  },
+  {
+    "path": "Samples/perc/mid/conga/Conga_17_HitHM1_71_127_rr8_Mid.wav",
+    "sha256": "0c54c783434b789f0d4923975d42404602deaa5562e23387316f861f7d1241bb",
+    "size": 124060
+  },
+  {
+    "path": "Samples/perc/mid/conga/Conga_22_HitN_1_50_rr1_Mid.wav",
+    "sha256": "45c90472edb19c2dab8b373ca646cb1256a9d2614ce4ed163c635b111fe30821",
+    "size": 184968
+  },
+  {
+    "path": "Samples/perc/mid/conga/Conga_22_HitN_1_50_rr2_Mid.wav",
+    "sha256": "ee3c60f2ceb9606e25c27f20bcd26420acdabc82218837d23b2043fab8947c3a",
+    "size": 116872
+  },
+  {
+    "path": "Samples/perc/mid/conga/Conga_22_HitN_1_50_rr3_Mid.wav",
+    "sha256": "209bb9b7513d24ced412ce9739d82b4f4d25c4428de60d473362c2f114e26e7e",
+    "size": 114904
+  },
+  {
+    "path": "Samples/perc/mid/conga/Conga_22_HitN_1_50_rr4_Mid.wav",
+    "sha256": "51f3ec26348ed8c1675f015a4e67d61494f9a5fe74d6ee37335e20ac3f8d1342",
+    "size": 111924
+  },
+  {
+    "path": "Samples/perc/mid/conga/Conga_22_HitN_1_50_rr5_Mid.wav",
+    "sha256": "38922056ce339532c568ab275f0b7a94f91f1a4ec0d53cb49c268b4d1105b1d4",
+    "size": 114964
+  },
+  {
+    "path": "Samples/perc/mid/conga/Conga_22_HitN_1_50_rr6_Mid.wav",
+    "sha256": "b23bcbf8a243da2af6636026b55db55ee326ba14ac7637b9903e6b27d37f0092",
+    "size": 111040
+  },
+  {
+    "path": "Samples/perc/mid/conga/Conga_22_HitN_1_50_rr7_Mid.wav",
+    "sha256": "379fc80cd31ad820557e40a42461a45f5d7343b447238c4161d361742897fb76",
+    "size": 116808
+  },
+  {
+    "path": "Samples/perc/mid/conga/Conga_22_HitN_1_50_rr8_Mid.wav",
+    "sha256": "c0a008acd24ee3d0195c9f879191253f546dabaa68bdbbdf6c8ace5a17dc768e",
+    "size": 176092
+  },
+  {
+    "path": "Samples/perc/mid/conga/Conga_22_HitN_101_127_rr1_Mid.wav",
+    "sha256": "2867689326aea1808569a4f0fa87f7e5446908a1d3fbd5f703f74fd921f4e5b1",
+    "size": 231068
+  },
+  {
+    "path": "Samples/perc/mid/conga/Conga_22_HitN_101_127_rr2_Mid.wav",
+    "sha256": "c0c7fd0eecc709ed3c3a098b49610c2dc5671becf2e43fafc4bfaf10ba6221e5",
+    "size": 178592
+  },
+  {
+    "path": "Samples/perc/mid/conga/Conga_22_HitN_101_127_rr3_Mid.wav",
+    "sha256": "46906f7de879d3ab95294af93f813360ffae9f932dfbd73cbb863ff34fcbe872",
+    "size": 186944
+  },
+  {
+    "path": "Samples/perc/mid/conga/Conga_22_HitN_101_127_rr4_Mid.wav",
+    "sha256": "6e3d6756a67016eb8c96c2a9e57c58e030baa9fa34e0b55ead0416a24729e019",
+    "size": 192984
+  },
+  {
+    "path": "Samples/perc/mid/conga/Conga_22_HitN_101_127_rr5_Mid.wav",
+    "sha256": "5e22899ae9da95e27a50764c2c1ec744f1dc7dcbafa72bad72f5ae04facf9be8",
+    "size": 182408
+  },
+  {
+    "path": "Samples/perc/mid/conga/Conga_22_HitN_101_127_rr6_Mid.wav",
+    "sha256": "561f3ebddfc4bd151ef387a3be1990291705e135612bde405c513da19498eaee",
+    "size": 182056
+  },
+  {
+    "path": "Samples/perc/mid/conga/Conga_22_HitN_101_127_rr7_Mid.wav",
+    "sha256": "d296a11134f77b47d968efc4c9ef83d306a4f64da503047027c1116097889765",
+    "size": 189180
+  },
+  {
+    "path": "Samples/perc/mid/conga/Conga_22_HitN_101_127_rr8_Mid.wav",
+    "sha256": "503a3eba189bc45bcdbb3d600e48136fb4e74dfebaca5a1de88aa75e0448026f",
+    "size": 132072
+  },
+  {
+    "path": "Samples/perc/mid/conga/Conga_22_HitN_51_100_rr1_Mid.wav",
+    "sha256": "87ff25a92f99e56034b48c398322bfca9da9f5aab354d89bfd6491b6e05d85ae",
+    "size": 139956
+  },
+  {
+    "path": "Samples/perc/mid/conga/Conga_22_HitN_51_100_rr2_Mid.wav",
+    "sha256": "d6c27deaa98103f22f377a4b63c73e493f04e52307a93341ea556d2b12ddf864",
+    "size": 131896
+  },
+  {
+    "path": "Samples/perc/mid/conga/Conga_22_HitN_51_100_rr3_Mid.wav",
+    "sha256": "63e4d5fcad8fb9d7df97168a2ed5047c150aecce39789b49c278badf8513447d",
+    "size": 136140
+  },
+  {
+    "path": "Samples/perc/mid/conga/Conga_22_HitN_51_100_rr4_Mid.wav",
+    "sha256": "52bf6cf5a284ad67151225829d23b4b5ea3c7d5722c2f52b552fca53431d0cc1",
+    "size": 181648
+  },
+  {
+    "path": "Samples/perc/mid/conga/Conga_22_HitN_51_100_rr5_Mid.wav",
+    "sha256": "15098f575514639d61016ec86b42df4784bb34308cec285c916f770f7335287e",
+    "size": 233620
+  },
+  {
+    "path": "Samples/perc/mid/conga/Conga_22_HitN_51_100_rr6_Mid.wav",
+    "sha256": "67c16ecec0e6127e78b8d9bd0f69f076e19019c025d70da4945ebeda4a427236",
+    "size": 124728
+  },
+  {
+    "path": "Samples/perc/mid/conga/Conga_22_HitN_51_100_rr7_Mid.wav",
+    "sha256": "9f8da978c2445397bf5ca2df62dc03e9fe3845dd057bbf10d24ac87fbeab998d",
+    "size": 128120
+  },
+  {
+    "path": "Samples/perc/mid/conga/Conga_22_HitN_51_100_rr8_Mid.wav",
+    "sha256": "873560c051e295525668195f11f2aaad6f88cc0b57fe0960cf9882cff5f41d6a",
+    "size": 207784
+  },
+  {
+    "path": "Samples/perc/mid/cowbell/Cowbell1_Normal_v1_rr1_Mid.wav",
+    "sha256": "7e3b1b52ac7085e544a70c3b07e6fba59988205de9780c21bc068d343920aaaa",
+    "size": 183272
+  },
+  {
+    "path": "Samples/perc/mid/cowbell/Cowbell1_Normal_v1_rr2_Mid.wav",
+    "sha256": "411ad4d051420132c5fffaeec5acc76c4dc968902cb8c6e974ae2050f2fbe9be",
+    "size": 190964
+  },
+  {
+    "path": "Samples/perc/mid/cowbell/Cowbell1_Normal_v1_rr3_Mid.wav",
+    "sha256": "84ea2f7ef2aa618a79744b1eb7d94962c5d874de2a132b1713ae26dc10630c30",
+    "size": 183344
+  },
+  {
+    "path": "Samples/perc/mid/cowbell/Cowbell1_Normal_v1_rr4_Mid.wav",
+    "sha256": "763ebe910d9570367cb17ebbf7e2c2f05985069d81a3f590d6a95c6bc866ffeb",
+    "size": 173880
+  },
+  {
+    "path": "Samples/perc/mid/cowbell/Cowbell1_Normal_v1_rr5_Mid.wav",
+    "sha256": "0e2ae1ef0abb3bdf632e210327c6ae2c59b3015e5107d7eef4a52d72f4930103",
+    "size": 178752
+  },
+  {
+    "path": "Samples/perc/mid/cowbell/Cowbell1_Normal_v1_rr6_Mid.wav",
+    "sha256": "0b461e94ae52f6d24db2fd93b5238aa1005aeec1a892c6740a1c45ca41d8e687",
+    "size": 177744
+  },
+  {
+    "path": "Samples/perc/mid/cowbell/Cowbell1_Normal_v1_rr7_Mid.wav",
+    "sha256": "3c6e95e239c02f1ff202acc1a4498983a54d10f775292a882480ac10b58dc708",
+    "size": 185280
+  },
+  {
+    "path": "Samples/perc/mid/cowbell/Cowbell1_Normal_v2_rr1_Mid.wav",
+    "sha256": "d1f89cb17fe60091deca7ae689009ff03ed79b061b74cd3f6ef5373b5999612c",
+    "size": 174968
+  },
+  {
+    "path": "Samples/perc/mid/cowbell/Cowbell1_Normal_v2_rr2_Mid.wav",
+    "sha256": "6d7982e0be7e5da04b9e80df81c31133acaf9e8b612ca62f180756cff83df0dd",
+    "size": 182380
+  },
+  {
+    "path": "Samples/perc/mid/cowbell/Cowbell1_Normal_v2_rr3_Mid.wav",
+    "sha256": "65de950623e98ac8584fe97c8fa49d25cd102a20a645ec39505c577a9fc91542",
+    "size": 179504
+  },
+  {
+    "path": "Samples/perc/mid/cowbell/Cowbell1_Normal_v2_rr4_Mid.wav",
+    "sha256": "b8669d8bd0381033a64f6a71ce3f723688846c1d1e3527b55e518016aa088643",
+    "size": 164864
+  },
+  {
+    "path": "Samples/perc/mid/cowbell/Cowbell1_Normal_v2_rr5_Mid.wav",
+    "sha256": "3407e18c0ada9e5fb715a4c999e353f3bfc0c36cd1459e3e87e5db0db45b1147",
+    "size": 176704
+  },
+  {
+    "path": "Samples/perc/mid/cowbell/Cowbell1_Normal_v2_rr6_Mid.wav",
+    "sha256": "717a23983d70e6f1000a01aef66d059e7192e36763c7bdfe334710127c299a16",
+    "size": 175196
+  },
+  {
+    "path": "Samples/perc/mid/cowbell/Cowbell1_Normal_v2_rr7_Mid.wav",
+    "sha256": "bba329a68c8ab7ca988fab58323a85f662dbd0e5c2a2a340146e967c897bf40f",
+    "size": 181464
+  },
+  {
+    "path": "Samples/perc/mid/cowbell/Cowbell1_Normal_v3_rr1_Mid.wav",
+    "sha256": "e212cc27b3490d7927d41508bd7e90d6e09b0b8da169f0357341d3057c4910c4",
+    "size": 165900
+  },
+  {
+    "path": "Samples/perc/mid/cowbell/Cowbell1_Normal_v3_rr2_Mid.wav",
+    "sha256": "604e76579151e986540cb5d9645627c68643f89dade26bbd7d4a44eee64f6835",
+    "size": 176436
+  },
+  {
+    "path": "Samples/perc/mid/cowbell/Cowbell1_Normal_v3_rr3_Mid.wav",
+    "sha256": "83e209180e9a8495a6229edbaf6ffbdb3cf22ce5a501751475480fca641ae271",
+    "size": 259612
+  },
+  {
+    "path": "Samples/perc/mid/cowbell/Cowbell1_Normal_v3_rr4_Mid.wav",
+    "sha256": "bab96594b5380bd79483bea9dde19162d0811b3fe9b5ccba4adb31878dfd33cf",
+    "size": 171660
+  },
+  {
+    "path": "Samples/perc/mid/cowbell/Cowbell1_Normal_v3_rr5_Mid.wav",
+    "sha256": "06d4f1c13f210e38fae9347280426b551b2ed434d1baf422e360b6e072669092",
+    "size": 319684
+  },
+  {
+    "path": "Samples/perc/mid/cowbell/Cowbell1_Normal_v3_rr6_Mid.wav",
+    "sha256": "848de6b07929f0b7f391b9d13fedbafc441ac459058791f1ab60b502516b3e54",
+    "size": 175792
+  },
+  {
+    "path": "Samples/perc/mid/cowbell/Cowbell1_Normal_v3_rr7_Mid.wav",
+    "sha256": "7086851d2e8415d5c33548facaf251a63321e7af4f239f27cccc0f1bb621559e",
+    "size": 285984
+  },
+  {
+    "path": "Samples/perc/mid/guiro/Guiro_Fast_rr1_Mid.wav",
+    "sha256": "fb601ba7bf1decb62c6cbe38f4f74807e4067dcdcc967e028bd0ec75053c2c28",
+    "size": 267144
+  },
+  {
+    "path": "Samples/perc/mid/guiro/Guiro_Fast_rr2_Mid.wav",
+    "sha256": "95cd8a9a556b10317bfadb77a5eea87dea6bc7808cbf238bea5c94eb9ba61f0c",
+    "size": 272964
+  },
+  {
+    "path": "Samples/perc/mid/guiro/Guiro_Fast_rr3_Mid.wav",
+    "sha256": "8db8775325a0ff61bbaf504fc1c10bd7904110da1c22deb12db59953877fd63b",
+    "size": 221016
+  },
+  {
+    "path": "Samples/perc/mid/guiro/Guiro_Fast_rr4_Mid.wav",
+    "sha256": "a4fa2b27e6cbed95f415ad9f33576408999dac76a41511aae0eb631a06776451",
+    "size": 257364
+  },
+  {
+    "path": "Samples/perc/mid/guiro/Guiro_Fast_rr5_Mid.wav",
+    "sha256": "3aff5fadc315859b1e60de5b013977238849df8c7301af1ebcafd553174fce7c",
+    "size": 241044
+  },
+  {
+    "path": "Samples/perc/mid/guiro/Guiro_Fast_rr6_Mid.wav",
+    "sha256": "1824c364dcaab18638474336dda0e7d1565228b61fe5ecbaff563805189a7846",
+    "size": 239280
+  },
+  {
+    "path": "Samples/perc/mid/guiro/Guiro_Fast_rr7_Mid.wav",
+    "sha256": "1b68cacf14d8cefbfb46decfa36d1d3367ae54380ee15401077b1f1417f1425a",
+    "size": 256940
+  },
+  {
+    "path": "Samples/perc/mid/guiro/Guiro_Fast_rr8_Mid.wav",
+    "sha256": "77af19a86cf436203531eb7f5785d0375104406ce9c15cb3dd171f3302b1f4ce",
+    "size": 332152
+  },
+  {
+    "path": "Samples/perc/mid/guiro/Guiro_Med_rr1_Mid.wav",
+    "sha256": "b32a7fd5b8a9971ebe85313df3e7be72134c2c1eaf243d21a28dc48b77deb44c",
+    "size": 331892
+  },
+  {
+    "path": "Samples/perc/mid/guiro/Guiro_Med_rr2_Mid.wav",
+    "sha256": "748015a86fce4c39dca774819618ea5bca61c641d17606513abfdc1061501757",
+    "size": 310000
+  },
+  {
+    "path": "Samples/perc/mid/guiro/Guiro_Med_rr3_Mid.wav",
+    "sha256": "a979bebf37d2e84537dc2b88bcce6109ed0cf61e859079a1958767b8664c49a9",
+    "size": 326496
+  },
+  {
+    "path": "Samples/perc/mid/guiro/Guiro_Med_rr4_Mid.wav",
+    "sha256": "d4558bd214e3607aebe0abd5bc3f0dd5012857525b5798e3ae82a3652c1f939b",
+    "size": 309348
+  },
+  {
+    "path": "Samples/perc/mid/guiro/Guiro_Med_rr5_Mid.wav",
+    "sha256": "3180f6a663e3483eeead5bb8e16f4b9585cb72fc15163117c705bf6345a8a7b6",
+    "size": 296576
+  },
+  {
+    "path": "Samples/perc/mid/guiro/Guiro_Med_rr6_Mid.wav",
+    "sha256": "d3941f7e76259b223cc9ea64fdc9871c164cd48cbb860dc4b0d38173aefb845a",
+    "size": 329948
+  },
+  {
+    "path": "Samples/perc/mid/guiro/Guiro_Med_rr7_Mid.wav",
+    "sha256": "819eb0c580cbc0fdbb383c6aa7cca03db800914b3d0d52abc3c61d576658e17e",
+    "size": 336520
+  },
+  {
+    "path": "Samples/perc/mid/guiro/Guiro_Med_rr8_Mid.wav",
+    "sha256": "7ef3a0e521dc439eae28c9cc47d36169240540e5bc0562c4658cd171b4f4c285",
+    "size": 363180
+  },
+  {
+    "path": "Samples/perc/mid/shaker/LShaker_Shake1D_rr1_Mid.wav",
+    "sha256": "3f954be59065c92067e8739d5f082242ffc5ed3544f653fd5199ed2c5d93b166",
+    "size": 271976
+  },
+  {
+    "path": "Samples/perc/mid/shaker/LShaker_Shake1D_rr2_Mid.wav",
+    "sha256": "6f6e0d79b36003ebe396408875b3c5af173b34ff5f6e40cb84120827e8567961",
+    "size": 257972
+  },
+  {
+    "path": "Samples/perc/mid/shaker/LShaker_Shake1D_rr3_Mid.wav",
+    "sha256": "57050df72c8ce9cf620c20d89cce7be9d36237979fdf2523bbf9826f4cb7737c",
+    "size": 231648
+  },
+  {
+    "path": "Samples/perc/mid/shaker/LShaker_Shake1D_rr4_Mid.wav",
+    "sha256": "567f9ea7cd6d81443955b3af164fbdf182569c336cdfbac72313c3273cc7457b",
+    "size": 208252
+  },
+  {
+    "path": "Samples/perc/mid/shaker/LShaker_Shake1D_rr5_Mid.wav",
+    "sha256": "36beca6b81755e18ee27117e4f643c28f4d6e90fa031856b50e3b383a98c01c5",
+    "size": 234216
+  },
+  {
+    "path": "Samples/perc/mid/shaker/LShaker_Shake1D_rr6_Mid.wav",
+    "sha256": "e74e7b1226e519fe0cc7432b9639f7b1e2c56469c873251a2b55a95e6ad947c9",
+    "size": 230944
+  },
+  {
+    "path": "Samples/perc/mid/shaker/LShaker_Shake1D_rr7_Mid.wav",
+    "sha256": "961be93efe8e43c270d0ab83af53e3e3c1bcef7e99b667052f5d32747871b0f9",
+    "size": 211408
+  },
+  {
+    "path": "Samples/perc/mid/shaker/LShaker_Shake1U_rr1_Mid.wav",
+    "sha256": "649d297a994c7f10b330741144d0f48ef113805815adda852ee171d389701c4e",
+    "size": 267376
+  },
+  {
+    "path": "Samples/perc/mid/shaker/LShaker_Shake1U_rr2_Mid.wav",
+    "sha256": "87b76fa45dfb38c6c84ee3bdeb7177f99bd999c29910db73e92c5bad6a343799",
+    "size": 239676
+  },
+  {
+    "path": "Samples/perc/mid/shaker/LShaker_Shake1U_rr3_Mid.wav",
+    "sha256": "5d9bdd0c94490099dd41439cc3c843db3dacde8230ced7eee9a86c25474901f0",
+    "size": 236172
+  },
+  {
+    "path": "Samples/perc/mid/shaker/LShaker_Shake1U_rr4_Mid.wav",
+    "sha256": "ae79dfcb0478d51a2681ad206df455c6209ad735763ac5bfae42690435a21439",
+    "size": 228352
+  },
+  {
+    "path": "Samples/perc/mid/shaker/LShaker_Shake1U_rr5_Mid.wav",
+    "sha256": "e7ef600a8ef887538afeca3a4ab081139949f5c7e81a7e7ef96a66d6a1468669",
+    "size": 212364
+  },
+  {
+    "path": "Samples/perc/mid/shaker/LShaker_Shake1U_rr6_Mid.wav",
+    "sha256": "c6ae6276d7a2c1bcfe46d40a8320116705560a4eea4c5c034bc4b14d04f399b6",
+    "size": 217932
+  },
+  {
+    "path": "Samples/perc/mid/shaker/LShaker_Shake1U_rr7_Mid.wav",
+    "sha256": "075161877c7f633655a6843a456cdedaa5a67f25b8366c705b7c5767c6c4181f",
+    "size": 246812
+  },
+  {
+    "path": "Samples/perc/mid/sleighbells/Sleighbells_Hit_rr1_Mid.wav",
+    "sha256": "cc424c298ac98a783ebf37ce6f2152a19b227ff89c5c20bc2462ddc8261fefc5",
+    "size": 441104
+  },
+  {
+    "path": "Samples/perc/mid/sleighbells/Sleighbells_Hit_rr2_Mid.wav",
+    "sha256": "e28bd0095861e6ff3ddf353bb06228eccabd7feae6eebc3a9b52acd36c146617",
+    "size": 434528
+  },
+  {
+    "path": "Samples/perc/mid/sleighbells/Sleighbells_Hit_rr3_Mid.wav",
+    "sha256": "29f3d62f4c38bd8bda3e9988c9ac9fa8dae37ecb7f43b2b1314bd99d0ea21bb1",
+    "size": 398516
+  },
+  {
+    "path": "Samples/perc/mid/sleighbells/Sleighbells_Hit_rr4_Mid.wav",
+    "sha256": "83c43da2165803515a31995f05b2d93d0ff293ff5bf0c90043003b07a8a159be",
+    "size": 290820
+  },
+  {
+    "path": "Samples/perc/mid/sleighbells/Sleighbells_Hit_rr5_Mid.wav",
+    "sha256": "68fbbf4b9b61cd370f554124f1d1a66e3a4b78b453f9fbeeb3e98ddebc054f5a",
+    "size": 374332
+  },
+  {
+    "path": "Samples/perc/mid/sleighbells/Sleighbells_Hit_rr6_Mid.wav",
+    "sha256": "a8605472de2e4d31dec7213b915a4f6d7974eafc0990916b7e8e8288dd7b9604",
+    "size": 398904
+  },
+  {
+    "path": "Samples/perc/mid/sleighbells/Sleighbells_Hit_rr7_Mid.wav",
+    "sha256": "9984e0905f2680ad1429955b0f483cae78de935ac8525b6fe9a56086649d59ac",
+    "size": 441104
+  },
+  {
+    "path": "Samples/perc/mid/sleighbells/Sleighbells_Hit_rr8_Mid.wav",
+    "sha256": "187e7c1e393974fd191b5bffbd2c20aa3b841f1ed2cf57e6de1058f7e27097b7",
+    "size": 441104
+  },
+  {
+    "path": "Samples/perc/mid/tambourine/Tamb1_Shake_rr1_Mid.wav",
+    "sha256": "e70ea6217210903ba44d23eb261ebb09ee544ab7168db115cdeb83d60f620590",
+    "size": 247688
+  },
+  {
+    "path": "Samples/perc/mid/tambourine/Tamb1_Shake_rr10_Mid.wav",
+    "sha256": "59f5a7156e9d660d809995dce49cd3570234fcfdcaed2111bf599b103ac2a071",
+    "size": 284576
+  },
+  {
+    "path": "Samples/perc/mid/tambourine/Tamb1_Shake_rr2_Mid.wav",
+    "sha256": "5c2cfb094bef6e9abda5c5f404433985aaa7e239b7aae25872dd772959edbb26",
+    "size": 243288
+  },
+  {
+    "path": "Samples/perc/mid/tambourine/Tamb1_Shake_rr3_Mid.wav",
+    "sha256": "614ed3195c9b8453f272b9dcf4e0cbfbd3d84b5b39eb42a75f317accf88fd77b",
+    "size": 206188
+  },
+  {
+    "path": "Samples/perc/mid/tambourine/Tamb1_Shake_rr4_Mid.wav",
+    "sha256": "77aadf0833cb0ec1584aad4a96372681bcceea842aa03b7aade7f9a32f658fa8",
+    "size": 199480
+  },
+  {
+    "path": "Samples/perc/mid/tambourine/Tamb1_Shake_rr5_Mid.wav",
+    "sha256": "408c12bd7893af1d1fc76f0092cd38359fde724ad4bb766c79e86137c98eaa94",
+    "size": 206912
+  },
+  {
+    "path": "Samples/perc/mid/tambourine/Tamb1_Shake_rr6_Mid.wav",
+    "sha256": "6fde55ecc1999c765b686097348c095e4ae933766e565b31b886cf7afa93c179",
+    "size": 194672
+  },
+  {
+    "path": "Samples/perc/mid/tambourine/Tamb1_Shake_rr7_Mid.wav",
+    "sha256": "b8aeca59692c638b809fd91bb3b3a707a0e106ebae87c8c92320f0adcdb4f7a3",
+    "size": 190604
+  },
+  {
+    "path": "Samples/perc/mid/tambourine/Tamb1_Shake_rr8_Mid.wav",
+    "sha256": "3f77e6b250a2421aab09d6e36bcf10a08d7c725f38e6114602f2f6e3f8a7f6ea",
+    "size": 211600
+  },
+  {
+    "path": "Samples/perc/mid/tambourine/Tamb1_Shake_rr9_Mid.wav",
+    "sha256": "03431c2ccd7b0a80ee89475b9a1bd07a01de518dac7e26719a366348bddf752d",
+    "size": 194828
+  },
+  {
+    "path": "Samples/perc/mid/triangle/Triangle1_Hit_v1_rr1_Mid.wav",
+    "sha256": "0397199e59671937bde1e5d29fc2e74946e6c56889cc196e5053f33644f17ff7",
+    "size": 770316
+  },
+  {
+    "path": "Samples/perc/mid/triangle/Triangle1_Hit_v1_rr2_Mid.wav",
+    "sha256": "2a926f7a0619fad3f0deb2082f09a68379e9a331160225573a6dca0045a15bfc",
+    "size": 722212
+  },
+  {
+    "path": "Samples/perc/mid/triangle/Triangle1_Hit_v1_rr3_Mid.wav",
+    "sha256": "155ea894758c08d918ed33e5224b44ec5ccc8a3de25fc1d6997b82ece419bb7d",
+    "size": 761600
+  },
+  {
+    "path": "Samples/perc/mid/triangle/Triangle1_Hit_v1_rr4_Mid.wav",
+    "sha256": "d969f543511f7dee82c01f00481f9dfc9319d043d327389a866fa365f6771f7e",
+    "size": 727128
+  },
+  {
+    "path": "Samples/perc/mid/triangle/Triangle1_Hit_v1_rr5_Mid.wav",
+    "sha256": "2ce71d648d656e4bbad7b06522e70f338b54631455235bbf34362a60a937af22",
+    "size": 671980
+  },
+  {
+    "path": "Samples/perc/mid/triangle/Triangle1_Hit_v1_rr6_Mid.wav",
+    "sha256": "e9f39fd3373fee0a5b901c206911b0c3fbd28737ef57bdc030122437cdfec205",
+    "size": 690808
+  },
+  {
+    "path": "Samples/perc/mid/triangle/Triangle1_Hit_v1_rr7_Mid.wav",
+    "sha256": "7560d400df2c92f1ff7ab88ce016e1d5b4cf0ebe2e928fad25be3976ea158276",
+    "size": 639388
+  },
+  {
+    "path": "Samples/perc/mid/triangle/Triangle1_Hit_v1_rr8_Mid.wav",
+    "sha256": "24eee40926d10e49c7016d20a6e64cbf157484414ff341a9d7184523236a1e13",
+    "size": 674048
+  },
+  {
+    "path": "Samples/perc/mid/triangle/Triangle1_Hit_v2_rr1_Mid.wav",
+    "sha256": "bec62db48c6a052bff1b54f88c11fc6cb6131b9633da2afb35636291754971af",
+    "size": 1059424
+  },
+  {
+    "path": "Samples/perc/mid/triangle/Triangle1_Hit_v2_rr2_Mid.wav",
+    "sha256": "d4882b06475b34e4a7b248e1ca52169d74209a4226ae4ddac5a41aaaf455cbf2",
+    "size": 1000876
+  },
+  {
+    "path": "Samples/perc/mid/triangle/Triangle1_Hit_v2_rr3_Mid.wav",
+    "sha256": "fd668353479f028cb382ac18dfa2fe7e5f817ba081ce5fc0896ef6138b7cbb93",
+    "size": 1076420
+  },
+  {
+    "path": "Samples/perc/mid/triangle/Triangle1_Hit_v2_rr4_Mid.wav",
+    "sha256": "ec59ec3b609bbc9305115b5fcc5f8eafc1e0e792453c1f3651ea24b2b9d2ed94",
+    "size": 841308
+  },
+  {
+    "path": "Samples/perc/mid/triangle/Triangle1_Hit_v2_rr5_Mid.wav",
+    "sha256": "60b5f15da2aff362488dc5128a5d6c5acec4f830e81980c133c080ddd37e47e1",
+    "size": 926336
+  },
+  {
+    "path": "Samples/perc/mid/triangle/Triangle1_Hit_v2_rr6_Mid.wav",
+    "sha256": "7c3515f9801c8a4b0a84dc39c276b24b53a9b5027f00f8c4b84f74f615e7cf74",
+    "size": 1182144
+  },
+  {
+    "path": "Samples/perc/mid/triangle/Triangle1_Hit_v2_rr7_Mid.wav",
+    "sha256": "10b01f1f17cec01e102ec283da650e62fa4c3eebe4f87a1356e5cb250e9467eb",
+    "size": 835156
+  },
+  {
+    "path": "Samples/perc/mid/triangle/Triangle1_Hit_v2_rr8_Mid.wav",
+    "sha256": "24350ce97087e34e95f07e20da7aaf11e4eea33924779d6d1c0bd18f1db43933",
+    "size": 839644
+  },
+  {
+    "path": "Samples/perc/mid/triangle/Triangle1_HitM_v1_rr1_Mid.wav",
+    "sha256": "651d7c040b737af24ea6d4f68f0057bc215f49b2d73d5508cab94428345e03b7",
+    "size": 246044
+  },
+  {
+    "path": "Samples/perc/mid/triangle/Triangle1_HitM_v1_rr2_Mid.wav",
+    "sha256": "260790ef70630f0b05f63f845a775011b020aadb3389c5ca68c9f6cf58f69bfc",
+    "size": 208872
+  },
+  {
+    "path": "Samples/perc/mid/triangle/Triangle1_HitM_v1_rr3_Mid.wav",
+    "sha256": "9b01ef6943d99bb140fdd1ed7d0cc9016bcb9a808499eee46ec0e5b6096fb60e",
+    "size": 236672
+  },
+  {
+    "path": "Samples/perc/mid/triangle/Triangle1_HitM_v1_rr4_Mid.wav",
+    "sha256": "6e4f8cad1b1ee2c352988067ab541dd53758195af8a10f2d1107dd7076ef9d8a",
+    "size": 194028
+  },
+  {
+    "path": "Samples/perc/mid/triangle/Triangle1_HitM_v1_rr5_Mid.wav",
+    "sha256": "2dfdb994a7daadd318ac5e0bfd3572beb94c7face1112464cfbffe771f5ede37",
+    "size": 195036
+  },
+  {
+    "path": "Samples/perc/mid/triangle/Triangle1_HitM_v1_rr6_Mid.wav",
+    "sha256": "61ac518c1a6f955a2f65cfc4029c51fcd9254588544f6f722810eb28f8063b23",
+    "size": 183248
+  },
+  {
+    "path": "Samples/perc/mid/triangle/Triangle1_HitM_v1_rr7_Mid.wav",
+    "sha256": "6e0998a873e5c5baac22ee2fab5913d2673448dbb05b8ad26499b513a4540722",
+    "size": 219340
+  },
+  {
+    "path": "Samples/perc/mid/triangle/Triangle1_HitM_v1_rr8_Mid.wav",
+    "sha256": "f9c308bb06f8e78b51bea9b9dc666cf68e2d015d2c0e19c16e45daceb4c5745f",
+    "size": 224832
+  },
+  {
+    "path": "Samples/perc/mid/tumba/Tumba_24_HitN_1_40_rr1_Mid.wav",
+    "sha256": "a9fd61b129ec8e58974c40a870e9d8e4ca90a0cdb17081eef0f013c11193b6ce",
+    "size": 124596
+  },
+  {
+    "path": "Samples/perc/mid/tumba/Tumba_24_HitN_1_40_rr2_Mid.wav",
+    "sha256": "b35d01e8200970c0ac0044549dcf757f8a895c7a9b86a865b43e643c5beacbad",
+    "size": 123372
+  },
+  {
+    "path": "Samples/perc/mid/tumba/Tumba_24_HitN_1_40_rr3_Mid.wav",
+    "sha256": "4e2cb5d7a52c063a777081579f5c5201f0a7fce7f20e2ec69bdfdf25e5593eb5",
+    "size": 131264
+  },
+  {
+    "path": "Samples/perc/mid/tumba/Tumba_24_HitN_1_40_rr4_Mid.wav",
+    "sha256": "78f4c10c69d1330fbb49441634688808913e999ccc5e3933a5f365dd26b42088",
+    "size": 118400
+  },
+  {
+    "path": "Samples/perc/mid/tumba/Tumba_24_HitN_1_40_rr5_Mid.wav",
+    "sha256": "085ca16c41d94dc888f352858d1e65cba28b1bfe817d7edec353b5d38967bbee",
+    "size": 119580
+  },
+  {
+    "path": "Samples/perc/mid/tumba/Tumba_24_HitN_1_40_rr6_Mid.wav",
+    "sha256": "5b513154ac775fb35f65edc429f82fb750f9711a658f23e4ba4b7abbea5df545",
+    "size": 120740
+  },
+  {
+    "path": "Samples/perc/mid/tumba/Tumba_24_HitN_1_40_rr7_Mid.wav",
+    "sha256": "f719416a1b78c0b6351b2ba0e122e8b4bed0fdee55153c130000e6f43a308c83",
+    "size": 124552
+  },
+  {
+    "path": "Samples/perc/mid/tumba/Tumba_24_HitN_1_40_rr8_Mid.wav",
+    "sha256": "c1d1fa7916aaf91be1ea39c4e99272480a0b77386b2af9b72a7520b37e50a8bb",
+    "size": 110604
+  },
+  {
+    "path": "Samples/perc/mid/tumba/Tumba_24_HitN_101_127_rr1_Mid.wav",
+    "sha256": "dcb9b1edeaf04c487a87443e69e292dd8b496efaf77db7fb48a399785d092c4a",
+    "size": 161144
+  },
+  {
+    "path": "Samples/perc/mid/tumba/Tumba_24_HitN_101_127_rr2_Mid.wav",
+    "sha256": "dfa8328c2e72bebeeee909db5ee3d987e8875015f6c7f69711b68f7597aa2258",
+    "size": 200092
+  },
+  {
+    "path": "Samples/perc/mid/tumba/Tumba_24_HitN_101_127_rr3_Mid.wav",
+    "sha256": "84328d85b194e328a3dce1eca4e818f89e7ac0e33393308d091daa0b165675fd",
+    "size": 165824
+  },
+  {
+    "path": "Samples/perc/mid/tumba/Tumba_24_HitN_101_127_rr4_Mid.wav",
+    "sha256": "317e0b45c373a2346f18d47db32b2757dfeb5c1d302491b325b3fc1bab794b0e",
+    "size": 179508
+  },
+  {
+    "path": "Samples/perc/mid/tumba/Tumba_24_HitN_101_127_rr5_Mid.wav",
+    "sha256": "f71389395146490b84a97257f88c1f040298b9fdf8279dcf97c4600543c88ae4",
+    "size": 182116
+  },
+  {
+    "path": "Samples/perc/mid/tumba/Tumba_24_HitN_101_127_rr6_Mid.wav",
+    "sha256": "cd3542a01f7d02670bbf668233b56f93dbfd9de792a7cf72dbf4dea2acb64c6e",
+    "size": 185232
+  },
+  {
+    "path": "Samples/perc/mid/tumba/Tumba_24_HitN_101_127_rr7_Mid.wav",
+    "sha256": "2e78976fb1328078ef1eb31089f385d275ccf7130184864ef015cdd78ff21684",
+    "size": 174304
+  },
+  {
+    "path": "Samples/perc/mid/tumba/Tumba_24_HitN_101_127_rr8_Mid.wav",
+    "sha256": "2935b40ae5b93a5c3df6c739dc4692430179f4d777824ac9995d0501e99d45b1",
+    "size": 179960
+  },
+  {
+    "path": "Samples/perc/mid/tumba/Tumba_24_HitN_41_70_rr1_Mid.wav",
+    "sha256": "ab53b3f5228cb4b227c115a028ed4ef624576936bcd51f20e313de288b8848b7",
+    "size": 149232
+  },
+  {
+    "path": "Samples/perc/mid/tumba/Tumba_24_HitN_41_70_rr2_Mid.wav",
+    "sha256": "9c59ce119000f69a72a0084fdda5d99b9a663b9822e568d671db8bdd41969d74",
+    "size": 126560
+  },
+  {
+    "path": "Samples/perc/mid/tumba/Tumba_24_HitN_41_70_rr3_Mid.wav",
+    "sha256": "2a55da573d554c4e9b1d66c2daeff998fa4dce5408712839b266124142f00abb",
+    "size": 121412
+  },
+  {
+    "path": "Samples/perc/mid/tumba/Tumba_24_HitN_41_70_rr4_Mid.wav",
+    "sha256": "e486ae30102f57f50b4cb358c44bd2646bb0a6d2bcc286c3cafe9dab7d4a6ec1",
+    "size": 178028
+  },
+  {
+    "path": "Samples/perc/mid/tumba/Tumba_24_HitN_41_70_rr5_Mid.wav",
+    "sha256": "a3199342feeb21cc94a96d227e9cb99ef9505a31c72dcc997b674582d5281680",
+    "size": 125460
+  },
+  {
+    "path": "Samples/perc/mid/tumba/Tumba_24_HitN_41_70_rr6_Mid.wav",
+    "sha256": "5eccd172685900f1e70714305c9a32af2a6ef4ac29422684b53adcbdd1789c44",
+    "size": 126720
+  },
+  {
+    "path": "Samples/perc/mid/tumba/Tumba_24_HitN_41_70_rr7_Mid.wav",
+    "sha256": "ea0b54571a393c622467f9b62e67e5fd6964b3d4eed5c7efd4a3079f328f6ec1",
+    "size": 130196
+  },
+  {
+    "path": "Samples/perc/mid/tumba/Tumba_24_HitN_41_70_rr8_Mid.wav",
+    "sha256": "2c1d8f18fd85ea35437464af228a9e3a729ee8871b62ce0ba8f28e4472f84789",
+    "size": 121104
+  },
+  {
+    "path": "Samples/perc/mid/tumba/Tumba_24_HitN_71_100_rr1_Mid.wav",
+    "sha256": "032f396b068a83ea445b070475f1a35ea8536a114356f1650d27d53dcd4cecc7",
+    "size": 129104
+  },
+  {
+    "path": "Samples/perc/mid/tumba/Tumba_24_HitN_71_100_rr2_Mid.wav",
+    "sha256": "487ef87c51cd346532c46d487a540b29ea8ebfcd020d9df79d82951162bcc450",
+    "size": 120612
+  },
+  {
+    "path": "Samples/perc/mid/tumba/Tumba_24_HitN_71_100_rr3_Mid.wav",
+    "sha256": "191931b6753f7b2406dcaa9e329900329b6c0e888e837b2bdd9f9bf1a41d99df",
+    "size": 139216
+  },
+  {
+    "path": "Samples/perc/mid/tumba/Tumba_24_HitN_71_100_rr4_Mid.wav",
+    "sha256": "960b617e7671edd5db4483db86d093499fd5d019e3b09aa87396c8e96799eb7a",
+    "size": 123784
+  },
+  {
+    "path": "Samples/perc/mid/tumba/Tumba_24_HitN_71_100_rr5_Mid.wav",
+    "sha256": "69fd426ddf600ba2a998ce80d665db271b56e5613dc06e17cda711cb20308bdf",
+    "size": 122040
+  },
+  {
+    "path": "Samples/perc/mid/tumba/Tumba_24_HitN_71_100_rr6_Mid.wav",
+    "sha256": "4969ebb160f60f12e801b5fad7ecf1318c749af7c2e3639a185734a2562b05ad",
+    "size": 120816
+  },
+  {
+    "path": "Samples/perc/mid/tumba/Tumba_24_HitN_71_100_rr7_Mid.wav",
+    "sha256": "55609fc3c796efbceabc8f406af13160bf407bd179ce9eb26c3312a82889ff13",
+    "size": 122148
+  },
+  {
+    "path": "Samples/perc/mid/tumba/Tumba_24_HitN_71_100_rr8_Mid.wav",
+    "sha256": "1e72149da27dc70d495bced41e76fd3841a88caffb452a6025c4c72cc16778b5",
+    "size": 123872
+  },
+  {
+    "path": "Samples/perc/mid/vibraslap/Vibraslap1_1_Hit_1_70_rr1_Mid.wav",
+    "sha256": "584140e054fdba0498342e8f66900844a6ad941f7e9a8d7823920ffe3ceaf7a8",
+    "size": 228856
+  },
+  {
+    "path": "Samples/perc/mid/vibraslap/Vibraslap1_1_Hit_1_70_rr2_Mid.wav",
+    "sha256": "94a078876070c5c3660d36fff47ec4e407c171d86d5e93a862d8e6e910b3b838",
+    "size": 242304
+  },
+  {
+    "path": "Samples/perc/mid/vibraslap/Vibraslap1_1_Hit_1_70_rr3_Mid.wav",
+    "sha256": "dc3e34d064fe1adb753c973fc4ccf1b60ddb04103272349f8515b5b635c7e3db",
+    "size": 247120
+  },
+  {
+    "path": "Samples/perc/mid/vibraslap/Vibraslap1_1_Hit_1_70_rr4_Mid.wav",
+    "sha256": "3ffe5430b176aaf0cafa8c6012773e48bdbfa68af17489b0a3c4f885759514d7",
+    "size": 219500
+  },
+  {
+    "path": "Samples/perc/mid/vibraslap/Vibraslap1_1_Hit_1_70_rr5_Mid.wav",
+    "sha256": "dea55927bc436b4c1a57fa65d2333b8b0c1ac498b0009868219dfbc349edf97b",
+    "size": 219720
+  },
+  {
+    "path": "Samples/perc/mid/vibraslap/Vibraslap1_1_Hit_1_70_rr6_Mid.wav",
+    "sha256": "16f08151b1dc645553b4273923beabd373f219d37b30a3bbf84868bb423a4353",
+    "size": 242764
+  },
+  {
+    "path": "Samples/perc/mid/vibraslap/Vibraslap1_1_Hit_1_70_rr7_Mid.wav",
+    "sha256": "dafaede43b3a88a16c6097f23cd1c47b0e2f116bc1d072d7d99c9b4cbb50e619",
+    "size": 247328
+  },
+  {
+    "path": "Samples/perc/mid/vibraslap/Vibraslap1_1_Hit_1_70_rr8_Mid.wav",
+    "sha256": "62db9499a580ec951215caf81860d070a1fdf7ea05337261f25d1e1652645b14",
+    "size": 226580
+  },
+  {
+    "path": "Samples/perc/mid/vibraslap/Vibraslap1_1_Hit_71_127_rr1_Mid.wav",
+    "sha256": "81ecc62beb44d5483e9050a1f50749c59410735526327e6451aa7715882afa0f",
+    "size": 318768
+  },
+  {
+    "path": "Samples/perc/mid/vibraslap/Vibraslap1_1_Hit_71_127_rr2_Mid.wav",
+    "sha256": "74477419235db02714ceb3bdbf3f1aab830bb0e362f55fb7a15ec04d1a986212",
+    "size": 312052
+  },
+  {
+    "path": "Samples/perc/mid/vibraslap/Vibraslap1_1_Hit_71_127_rr3_Mid.wav",
+    "sha256": "c0dba82bd34df09e4ba1a3c0acdc79004778da69c03292faa0b1954e2b057320",
+    "size": 313292
+  },
+  {
+    "path": "Samples/perc/mid/vibraslap/Vibraslap1_1_Hit_71_127_rr4_Mid.wav",
+    "sha256": "4786dbd1aaa00933eb5458998d3a560ac97adf129a7f7208efd09d0b90b3d4ee",
+    "size": 320916
+  },
+  {
+    "path": "Samples/perc/mid/vibraslap/Vibraslap1_1_Hit_71_127_rr5_Mid.wav",
+    "sha256": "24e7a7bff492d8481a35298dc36dee1e10c67d1ade97ae6c06671fbb5befdb90",
+    "size": 325976
+  },
+  {
+    "path": "Samples/perc/mid/vibraslap/Vibraslap1_1_Hit_71_127_rr6_Mid.wav",
+    "sha256": "cc280c305331124f7ba8f66d8e041bb369b91a2f4f31eadd77d4b54ab2bc47b9",
+    "size": 307560
+  },
+  {
+    "path": "Samples/perc/mid/vibraslap/Vibraslap1_1_Hit_71_127_rr7_Mid.wav",
+    "sha256": "b46fd844f9a7910e7507eba25d6855347dde2783d92a3ca09fa65419fbf9604d",
+    "size": 294164
+  },
+  {
+    "path": "Samples/perc/mid/vibraslap/Vibraslap1_1_Hit_71_127_rr8_Mid.wav",
+    "sha256": "178b598dce5fb91e1c7d365ab28ea84d635f1219e09ab68c2c775119e5b9eda0",
+    "size": 345936
+  }
+]

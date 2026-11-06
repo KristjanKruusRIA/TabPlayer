@@ -31,6 +31,11 @@ pub struct Region {
     pub pitch_keytrack: f64,
     pub velocity_gain_high: u8,
     pub release_decay_db_per_second: f64,
+    /// A drum voice of this group stops the voices on its track whose `off_by` names it; 0 is no group.
+    #[serde(default)]
+    pub group: u32,
+    #[serde(default)]
+    pub off_by: u32,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]

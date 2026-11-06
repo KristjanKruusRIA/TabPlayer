@@ -14,6 +14,7 @@ import { hasNoteAudio } from '../editor/note-audio';
 import type { ReferenceLocation } from './reference-sync-types';
 import { interpretAttacks, type Attack } from './interpretation';
 import { DRUM_KIT_ELEMENTS, planKitElement } from './drum-kit';
+import { kitSound } from './kit-sound';
 import { ownerOf } from '../instruments/drum-kit';
 import type { DrumKitElement } from '../edit-types';
 
@@ -442,6 +443,7 @@ function buildWithIdentities(original: model.Score, generation: number, ids: str
           channel: nativeChannel(source.track, actual.channel), program: actual.program ?? score.tracks[source.track].playbackInfo.program,
           articulation: source.note.beat.deadSlapped ? 'dead' : articulation(source.note, actual.program ?? score.tracks[source.track].playbackInfo.program, !!from, interpretedStyle), legatoFrom: from?.id ?? null, pitch: pitchCurve({ ...isolated, channel: nativeChannel(source.track, isolated.channel), start: isolated.start + barGap, end: isolated.end + barGap }, actual, lane.bends),
         };
+        if (source.note.isPercussion) Object.assign(note, kitSound(score.tracks[source.track], source.note.percussionArticulation, actual.key));
         // What the note would sound as if its track's sound is locked: the default articulation of the start sound, not of the automated one. Left out when it is the same.
         if (!source.note.beat.deadSlapped) { const kept = articulation(source.note, startPrograms.get(`${source.track}/${nativeChannel(source.track, actual.channel)}`) ?? score.tracks[source.track].playbackInfo.program, !!from, interpretedStyle); if (kept !== note.articulation) note.lockedArticulation = kept; }
         if (styled) {
@@ -526,7 +528,7 @@ export function validatePlaybackPlan(plan: PlaybackPlan) {
   for (const n of plan.notes) {
     if (n.channel !== undefined && !integer(n.channel, 15) || n.program !== undefined && !integer(n.program, 127)) fail('note channel/program');
     if (n.endTick <= n.startTick) fail(n.endTick === n.startTick ? 'zero note duration' : 'negative note duration');
-    if (!integer(n.key, 127) || !integer(n.velocity, 127)) fail('note value');
+    if (!integer(n.key, 127) || !integer(n.velocity, 127) || n.kitSound !== undefined && !integer(n.kitSound, 127) || n.choke !== undefined && n.choke !== true) fail('note value');
     if (!n.id || ids.has(n.id) || !tracks.has(n.trackId) || plan.tracks[n.source.target.track]?.id !== n.trackId || Object.values(n.source.target).some(v => !integer(v, 0xffffffff)) || !integer(n.source.string, 0xffffffff) || n.playedBar !== undefined && (!integer(n.playedBar, 0xffffffff) || n.playedBar < n.source.target.bar) || !occurrences.has(`${n.playedBar ?? n.source.target.bar}/${n.occurrence}`) || !validTime(n.startTick) || n.startTick < previous || !validTime(n.endTick) || n.endTick > plan.durationTick || !n.pitch.length || n.pitch[0].tick !== n.startTick) fail('note structure');
     if (n.legatoFrom) { const from = ids.get(n.legatoFrom); if (!from || from.startTick >= n.startTick || from.trackId !== n.trackId || from.source.target.staff !== n.source.target.staff || from.source.target.voice !== n.source.target.voice || from.source.string !== n.source.string) fail('legato'); }
     let pitchPrevious = -1;

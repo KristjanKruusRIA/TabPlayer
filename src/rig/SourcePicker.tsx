@@ -1,5 +1,5 @@
 import { useI18n } from '../i18n';
-import { automaticVoice, voiceIds, voiceNames } from '../audio/sound-model';
+import { automaticVoice, playsRecordedKit, voiceIds, voiceNames } from '../audio/sound-model';
 import type { VoiceId } from '../audio/sound-model';
 import type { SoundEditing } from '../audio/useSoundEditing';
 import { Segmented } from '../ui';
@@ -17,15 +17,17 @@ export function SourcePicker({editing,track}:{editing:SoundEditing;track:RigTrac
   const { t } = useI18n();
   const {current,busy,previewer,showingPreview,previewChoice}=editing;
   const resolved=automaticVoice(track?.program??0,track?.percussion??false);
+  // A drum track's Automatic plays the recorded kit, unless the rig chose the Room, Jazz or Brush kit.
+  const kit=playsRecordedKit(track?.program??0,track?.percussion??false,current.drumKit);
   const chosen:Choice=current.voiceId===null?'auto':(current.voiceId as VoiceId);
-  const nameOf=(choice:Choice)=>choice==='auto'?`Automatic instrument, plays as ${voiceNames[resolved]}`:voiceNames[choice];
+  const nameOf=(choice:Choice)=>choice==='auto'?(kit?t('rig.auto_recorded_kit'):`Automatic instrument, plays as ${voiceNames[resolved]}`):voiceNames[choice];
   const choices=['auto',...voiceIds] as Choice[];
   // Radio i sits in column 2i+1 and its Hear button in 2i+2 of one grid, so the buttons stay out of the radio group yet beside their options.
   const options=choices.map((choice,index)=>({
     value:choice,ariaLabel:nameOf(choice),style:{gridColumn:index*2+1},
     label:<span className="rig-source" data-auto={choice==='auto'||undefined} title={nameOf(choice)}>
       <SourceArt source={choice==='auto'?resolved:choice} className="rig-source-art"/>
-      <span className="rig-source-name">{choice==='auto'?<>{t('rig.auto')}<span className="rig-source-to">→{shortNames[resolved]}</span></>:<><span className="rig-name-short">{shortNames[choice]}</span><span className="rig-name-full">{voiceNames[choice]}</span></>}</span>
+      <span className="rig-source-name">{choice==='auto'?<>{t('rig.auto')}<span className="rig-source-to">→{kit?t('rig.recorded_kit_short'):shortNames[resolved]}</span></>:<><span className="rig-name-short">{shortNames[choice]}</span><span className="rig-name-full">{voiceNames[choice]}</span></>}</span>
     </span>,
   }));
   return <div className="rig-source-picker">

@@ -44,7 +44,7 @@ export function TrackSettingsPanel({score,selected,busy,locked=false,onEdit,onAu
         <p className="muted" id="string-count-help">{t('track_settings.string_count_help')}</p>
       </fieldset>}
       <button disabled={locked||current.isPercussion||!current.staves[0].tuning.length} onClick={()=>applyTuning()}>{recount?t('track_settings.change_string_count'):t('track_settings.apply_tuning')}</button>
-      <details><summary>{t('track_settings.add_instrument')}</summary><label>{t('track_settings.new_track_name')}<input value={name} onChange={e=>setName(e.target.value)}/></label>
+      <details className="track-add"><summary>{t('track_settings.add_instrument')}</summary><label>{t('track_settings.new_track_name')}<input value={name} onChange={e=>setName(e.target.value)}/></label>
         <label>{t('track_settings.midi_instrument')}<select value={instrument} onChange={e=>setInstrument(Number(e.target.value))}>{midiPrograms.map((label,value)=><option key={value} value={value}>{value+1}. {label}</option>)}</select></label>
         <TuningInput label={t('track_settings.new_track_tuning')} presetLabel={t('track_settings.new_track_tuning_preset')} busy={busy} placeholder="G2 D2 A1 E1" value={newTuning} tuningName={newTuningName} onTuningNameChange={setNewTuningName} error={newTuningError} inputRef={newTuningInput} onAudition={onAudition&&((pitches,strum)=>onAudition({program:instrument},pitches,strum))} onChange={notes=>{setNewTuning(notes);setNewTuningError(null);}}/>
         <button disabled={locked} onClick={()=>applyTuning(true)}>{t('track_settings.add_track')}</button>

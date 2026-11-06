@@ -530,6 +530,7 @@ export const et: MessageCatalog = {
   'instruments.cant_enter_drums_on_pitched': 'Trummikomplektiga ei saa sisestada noote kõrgustega või astmetraatidega reale',
   'overview.written_measure_overview': 'Kirjutatud taktide ülevaade',
   'overview.track_measure': 'Rada / takt',
+  'overview.add_track': 'Lisa rada',
   'overview.mute_track': 'Vaigista {track}',
   'overview.solo_track': 'Soolo {track}',
   'overview.track_volume': '{track} helitugevus',

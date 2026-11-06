@@ -80,18 +80,17 @@ const subscribe = (listener: Listener) => {
   };
 };
 
+const translators: Partial<Record<SupportedLanguage, I18nContextValue['t']>> = {};
+const setPreference = (next: LanguagePreference): void => setLanguagePreference(next);
+
 export function useI18n(): I18nContextValue {
   const preference = useSyncExternalStore<LanguagePreference>(subscribe, getLanguagePreference, () => 'system');
   const lang = resolveLanguage(preference);
   const catalog = catalogs[lang];
 
-  const t = (key: MessageKey, params?: Record<string, string | number>): string => {
-    return getMessage(lang, key, params);
-  };
-
-  const setPreference = (next: LanguagePreference) => {
-    setLanguagePreference(next);
-  };
+  // One translator per language, made once: a stable `t` lets components list it as a dependency without rebuilding
+  // memoised children on every render.
+  const t = translators[lang] ??= (key: MessageKey, params?: Record<string, string | number>): string => getMessage(lang, key, params);
 
   return {
     lang,

@@ -155,3 +155,35 @@
 .workstation-dock .score-overview-mix input[type="range"] { height:12px; }
 .workstation-dock .score-overview-master { background:var(--ws-panel); }
 .workstation-dock .score-overview-master-name { text-transform:uppercase; letter-spacing:.06em; font-size:11px; }
+
+/* Track list rows in the GP manner: a solid colour strip, an instrument mark, icon buttons for show, mute and solo,
+   a flat fader with a pale block thumb, and a small pan knob. */
+.workstation-dock .score-overview-track { box-shadow:inset 6px 0 var(--overview-track,transparent); padding-left:14px; gap:8px; }
+.workstation-dock .dock-track-instrument { display:grid; place-items:center; flex:0 0 auto; width:18px; color:var(--ws-text); opacity:.85; }
+.workstation-dock .score-overview-track-number { min-width:1.6em; text-align:right; }
+.workstation-dock .score-overview-mix { grid-template-columns:24px 24px 24px 124px 26px; gap:4px; }
+.workstation-dock .score-overview-mix button { display:grid; place-items:center; width:24px; height:22px; padding:0; border:0; border-radius:4px; background:transparent; color:color-mix(in srgb,var(--ws-muted) 75%,transparent); }
+.workstation-dock .score-overview-mix button:not(:disabled):not([aria-disabled="true"]):hover { background:color-mix(in srgb,var(--ws-text) 10%,transparent); color:var(--ws-text); }
+.workstation-dock .score-overview-mix button[data-kind="shown"][aria-pressed="true"] { color:var(--ws-text); }
+.workstation-dock .score-overview-mix button[aria-pressed="true"][data-kind="mute"]:is(*,:hover) { background:transparent; color:var(--ws-error,#e5534b); }
+.workstation-dock .score-overview-mix button[aria-pressed="true"][data-kind="solo"]:is(*,:hover) { background:transparent; color:var(--ws-accent); }
+.workstation-dock .score-overview-mix-head { display:grid; place-items:center; font-size:11px; font-weight:600; letter-spacing:.04em; }
+/* Faders: a dark slot with a pale upright block, for tracks and master alike. */
+.app-shell .workstation-dock :is(.dock-fader,.score-overview-master-mix input[type="range"]) { -webkit-appearance:none; appearance:none; box-sizing:border-box; width:100%; min-width:0; height:22px; min-height:0; margin:0; padding:0; border:0; border-radius:0; box-shadow:none; background:transparent; cursor:pointer; }
+.workstation-dock :is(.dock-fader,.score-overview-master-mix input[type="range"])::-webkit-slider-runnable-track { height:8px; border-radius:1px; background:#0b0c0e; box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--ws-border) 70%,transparent); }
+.workstation-dock :is(.dock-fader,.score-overview-master-mix input[type="range"])::-webkit-slider-thumb { -webkit-appearance:none; appearance:none; width:7px; height:20px; margin-top:-6px; border:0; border-radius:1px; background:#e4e4e2; box-shadow:0 1px 2px rgb(0 0 0/.6); }
+.workstation-dock :is(.dock-fader,.score-overview-master-mix input[type="range"]):focus-visible { outline:2px solid var(--ws-accent); outline-offset:1px; }
+.workstation-dock :is(.dock-fader,.score-overview-master-mix input[type="range"]):disabled { opacity:.5; cursor:not-allowed; }
+/* Pan knobs: just the dial at row size; the value shows in its tooltip text and to assistive technology. */
+.workstation-dock .tp-knob.dock-pan { --knob-size:22px; --knob-body:#16171a; --knob-cap:#16171a; --knob-edge:color-mix(in srgb,var(--ws-muted) 55%,transparent); --knob-arc:var(--ws-accent); display:grid; place-items:center; gap:0; }
+.workstation-dock .tp-knob.dock-pan :is(.tp-knob-label,.tp-knob-readout) { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
+/* Header: a + button and the Tracks title. */
+.workstation-dock .dock-tracks-title { display:flex; align-items:center; gap:6px; flex:1 1 auto; min-width:0; }
+.workstation-dock .dock-add-track { display:grid; place-items:center; width:22px; height:22px; padding:0; border:0; border-radius:4px; background:transparent; color:var(--ws-text); cursor:pointer; }
+.workstation-dock .dock-add-track:hover:not(:disabled) { background:color-mix(in srgb,var(--ws-text) 10%,transparent); }
+.workstation-dock .dock-add-track:focus-visible { outline:2px solid var(--ws-accent); outline-offset:1px; }
+.workstation-dock .score-overview-corner { text-transform:none; letter-spacing:0; font-size:13px; }
+/* Master: its fader and knob line up under the track faders and knobs. */
+.workstation-dock .score-overview-master { gap:4px; }
+.workstation-dock .score-overview-master-name { width:237px; text-transform:none; letter-spacing:0; font-size:13px; color:var(--ws-text); padding-left:58px; box-sizing:border-box; }
+.workstation-dock .score-overview-master-mix { grid-template-columns:124px 26px; gap:4px; }

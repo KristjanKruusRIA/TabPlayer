@@ -2,7 +2,7 @@ import type { model } from '@coderline/alphatab';
 import { admitDocumentBase } from './interchange/archive-gate';
 import { curveLosses } from './interchange/curves';
 import { gpWarning } from './export/gp-warning';
-import { buildDocument, effectiveAudioSettings,exportGp, previewEdit, replayDocumentSettings, type BuiltDocument } from './engine';
+import { buildDocument, effectiveAudioSettings,exportGp, forgetPreview, previewEdit, replayDocumentSettings, type BuiltDocument } from './engine';
 import { appliesFilePartialCapo, type EditCommand, type ProjectSnapshot, type AssetCandidate, type DocumentLock } from './project';
 import { getPartialCapo } from './editor/partial-capo';
 import type { DocumentId,DocumentRevision,DocumentSnapshot } from './workspace/types';
@@ -93,7 +93,7 @@ export class DocumentController {
       const mark=this.needsPartialCapoMark();
       const current=mark?{...this.state.snapshot.project,partialCapo:true as const}:this.state.snapshot.project;
       const project=asset?{...current,assets:{...current.assets,[asset.assetId]:asset.info}}:current;
-      candidate=previewEdit(project,command,mark?{...this.state,snapshot:{...this.state.snapshot,project:current}}:this.state);
+      candidate=previewEdit(project,command,mark?{...this.state,snapshot:{...this.state.snapshot,project:current}}:this.state);forgetPreview();
       if(command.type==='setBacking'&&backingState(command.backing)===backingState(effectiveAudioSettings(this.state.snapshot.project,this.state).backing)){
         if(asset)await this.bridge.cancelAsset(asset.token);return;
       }

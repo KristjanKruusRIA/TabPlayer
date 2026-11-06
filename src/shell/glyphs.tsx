@@ -24,6 +24,8 @@ export const NextBarGlyph:Glyph=p=><svg {...base} {...p}><path d="M4.5 3.5v9l7-4
 export const LastBarGlyph:Glyph=p=><svg {...base} {...p}><path d="M12.5 3v10"/><path d="M3 3.5v9L10 8z" fill="currentColor" stroke="none"/></svg>;
 /** The editing palette: a grid of note cells. */
 export const PaletteGlyph:Glyph=p=><svg {...base} {...p}><path d="M2.5 2.5h11v11h-11zM2.5 6.2h11M2.5 9.8h11M6.2 2.5v11M9.8 2.5v11"/></svg>;
+/** Note entry on the score: a notehead on staff lines with a pencil stroke. */
+export const NoteEntryGlyph:Glyph=p=><svg {...base} {...p}><path d="M1.5 5h8M1.5 8h8M1.5 11h8" strokeWidth={1}/><ellipse cx="5.5" cy="9.5" rx="2.2" ry="1.5" transform="rotate(-20 5.5 9.5)" fill="currentColor"/><path d="M10 12.5l1-3 4-4.5 1.5 1.5-4 4.5z"/></svg>;
 /** Export and print: a page with a fold. */
 export const ExportGlyph:Glyph=p=><svg {...base} {...p}><path d="M3.5 1.5h6l3 3v10h-9z"/><path d="M8 6.5v5M5.8 9.5L8 11.7l2.2-2.2"/></svg>;
 /** The score view: five staff lines with a bar line. */

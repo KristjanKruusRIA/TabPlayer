@@ -167,9 +167,23 @@ function techniqueShape(value:unknown) {
   }
 }
 
+/** The most edits one `sequence` holds, and the note-entry edits it may hold; native validation agrees. */
+export const MAX_SEQUENCE_COMMANDS=8;
+export const SEQUENCE_COMMAND_TYPES:ReadonlySet<string>=new Set(['setNote','removeNote','setRest','setDuration','insertBeat','addPitchedNote','setPitchedNote','removeNoteByIndex','setNoteSpelling']);
+
 /** Exact command envelopes; score-dependent note/technique validation stays in the editor. */
 export function validateParityCommand(value:unknown):void {
   const candidate=object(value),type=candidate.type;
+  if(type==='sequence'){
+    const edit=exact(value,['type','commands']);
+    if(!Array.isArray(edit.commands)||edit.commands.length<2||edit.commands.length>MAX_SEQUENCE_COMMANDS)throw new Error(`A sequence holds 2 to ${MAX_SEQUENCE_COMMANDS} note-entry edits.`);
+    for(const command of edit.commands){
+      const inner=object(command).type;
+      if(typeof inner!=='string'||!SEQUENCE_COMMAND_TYPES.has(inner))throw new Error('A sequence holds only note-entry edits.');
+      validateParityCommand(command);
+    }
+    return;
+  }
   if(typeof type!=='string'||!Object.hasOwn(shapes,type))throw new Error('Unknown edit command in project.');
   const named=tuningNamed.has(type)&&Object.hasOwn(candidate,'tuningName');
   const hasKeep=type==='setTuning'&&Object.hasOwn(candidate,'keepPitch');

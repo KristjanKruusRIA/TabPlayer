@@ -1154,6 +1154,10 @@ it('auto-duration gives a written rest the last keypad duration, and the prefere
   fireEvent.keyDown(screen.getByRole('region',{name:'Score workspace'}),{key:'ArrowRight'});
   fireEvent.keyDown(screen.getByRole('region',{name:'Score workspace'}),{key:'Enter'});
   await waitFor(()=>expect(currentBeat(c,1).notes).toHaveLength(1));expect(currentBeat(c,1).duration).toBe(8);
+  // The rhythm and the note are one edit, so one undo takes both back.
+  expect(c.getState().snapshot.project.edits.at(-1)).toMatchObject({type:'sequence',commands:[{type:'setDuration'},{type:'setNote'}]});
+  fireEvent.keyDown(screen.getByRole('region',{name:'Score workspace'}),{key:'z',ctrlKey:true});
+  await waitFor(()=>expect(currentBeat(c,1).notes).toHaveLength(0));expect(currentBeat(c,1).duration).toBe(4);
   window.localStorage.removeItem(inputKey);
 });
 
@@ -1185,7 +1189,7 @@ it('does not remember a refused note as the entry duration, and never leaves a r
   expect(c.getState().snapshot.project.edits.map(edit=>edit.type)).toEqual(['setDuration']);expect(currentBeat(c,1).duration).toBe(4);
   change('Fret','5');fireEvent.keyDown(workspace,{key:'Enter'});
   await waitFor(()=>expect(currentBeat(c,1).notes).toHaveLength(1));
-  expect(c.getState().snapshot.project.edits.map(edit=>edit.type)).toEqual(['setDuration','setDuration','setNote']);expect(currentBeat(c,1).duration).toBe(8);
+  expect(c.getState().snapshot.project.edits.map(edit=>edit.type)).toEqual(['setDuration','sequence']);expect(currentBeat(c,1).duration).toBe(8);
   window.localStorage.removeItem(inputKey);
 });
 
@@ -1457,4 +1461,47 @@ it('opens the measure settings from the tempo link in the position display',asyn
   await waitFor(()=>expect(summary).toHaveFocus());
   expect(summary.parentElement).toHaveProperty('open',true);
   expect(screen.getByRole('button',{name:'Measure',pressed:true})).toBeInTheDocument();
+});
+
+const entryProps=()=>engravingView.mock.lastCall?.[0] as {noteEntry:{onHit:(target:unknown,step:number,options:{chord:boolean})=>void;describe:(target:unknown,step:number)=>string|null}|null;editTarget:unknown};
+it('turns note entry on the score on with N, writes typed letters one edit each and advances',async()=>{
+  window.localStorage.removeItem(inputKey);
+  const c=await setup(),workspace=screen.getByRole('region',{name:'Score workspace'});
+  expect(entryProps().noteEntry).toBeNull();
+  fireEvent.keyDown(workspace,{key:'n'});
+  expect(screen.getByRole('button',{name:'Note entry',pressed:true})).toBeInTheDocument();
+  expect(screen.getByText(/Note entry is on/)).toBeInTheDocument();
+  fireEvent.keyDown(workspace,{key:'e'});
+  await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(1));
+  await waitFor(()=>expect(entryProps().editTarget).toMatchObject({beat:1}));
+  fireEvent.keyDown(workspace,{key:'g'});
+  await waitFor(()=>expect(currentBeat(c,1).notes).toHaveLength(1));
+  expect(c.getState().snapshot.project.edits).toHaveLength(2);
+  // Shift keeps the cursor on the beat for a chord.
+  await waitFor(()=>expect(entryProps().editTarget).toMatchObject({beat:2}));
+  fireEvent.keyDown(workspace,{key:'C',shiftKey:true});await waitFor(()=>expect(currentBeat(c,2).notes).toHaveLength(1));
+  fireEvent.keyDown(workspace,{key:'E',shiftKey:true});await waitFor(()=>expect(currentBeat(c,2).notes).toHaveLength(2));
+  expect(entryProps().editTarget).toMatchObject({beat:2});
+  // + makes the beat shorter, as in Guitar Pro.
+  fireEvent.keyDown(workspace,{key:'+'});await waitFor(()=>expect(currentBeat(c,2).duration).toBe(8));
+  fireEvent.keyDown(workspace,{key:'z',ctrlKey:true});await waitFor(()=>expect(currentBeat(c,2).duration).toBe(4));
+  fireEvent.keyDown(workspace,{key:'N'});
+  expect(screen.getByRole('button',{name:'Note entry',pressed:false})).toBeInTheDocument();
+  // With entry off, letters do nothing.
+  const count=c.getState().snapshot.project.edits.length;fireEvent.keyDown(workspace,{key:'a'});await new Promise(resolve=>setTimeout(resolve,20));
+  expect(c.getState().snapshot.project.edits).toHaveLength(count);
+});
+it('writes the clicked staff position as one edit that one undo removes, and previews it',async()=>{
+  const c=await setup();
+  fireEvent.click(screen.getByRole('button',{name:'Note entry'}));
+  const entry=entryProps().noteEntry!,at={track:0,staff:0,bar:0,voice:0,beat:1};
+  expect(entry.describe(at,2)).toBe('G4');
+  act(()=>entry.onHit(at,2,{chord:false}));
+  await waitFor(()=>expect(currentBeat(c,1).notes).toHaveLength(1));
+  expect(c.getState().snapshot.project.edits).toHaveLength(1);
+  await waitFor(()=>expect(entryProps().editTarget).toMatchObject({beat:2}));
+  expect(entryProps().noteEntry!.describe(at,2)).toBe('Remove G4');
+  fireEvent.keyDown(screen.getByRole('region',{name:'Score workspace'}),{key:'z',ctrlKey:true});
+  await waitFor(()=>expect(currentBeat(c,1).notes).toHaveLength(0));
+  expect(c.getState().snapshot.project.edits).toEqual([]);
 });

@@ -2,26 +2,27 @@ import { useI18n } from '../i18n';
 import { useId, useRef, useState, type KeyboardEvent } from 'react';
 import { model } from '@coderline/alphatab';
 import { describeSelection } from '../engine';
-import type { EditCommand } from '../edit-types';
+import type { EditCommand, SequenceStep } from '../edit-types';
 import type { EntryFollow } from '../instruments/entry';
 import { entryNotes } from '../instruments/entry';
 import type { BeatTarget } from '../project';
-import { accidentalLabels, drawnSpelling, enterPitch, enteredNoteIndex, entryAccidentals, entryBlock, entryClef, entryPitch, highestStep, keyLetter, lowestStep, octaveRange, pitchStep, stepPitch, writtenPitch, type EntryAccidental, type EntryPitch } from './notation-entry';
+import { accidentalLabels, drawnSpelling, enterPitch, entryAccidentals, entryBlock, entryClef, entryPitch, highestStep, keyLetter, lowestStep, octaveRange, oneEdit, pitchStep, spellingStep, stepPitch, writtenPitch, type EntryAccidental, type EntryPitch } from './notation-entry';
 import './notation-entry.css';
 
 export interface NotationEntryPanelProps {
   score: model.Score; target: BeatTarget; busy: boolean; locked?: boolean;
   /** Sends one edit and tells whether it was accepted. */
   onEdit: (command: EditCommand, follow: EntryFollow) => Promise<boolean>;
-  /** The score as it is now, so a follow-up edit reads the note an entry just wrote. */
-  latestScore: () => model.Score;
+  /** The score as `command` would leave it; throws when the edit would be refused. The entry reads the new note's
+   * spelling from it, so a spelling change goes in the same edit as the note. */
+  preview: (command: EditCommand) => model.Score;
 }
 
 const stepHeight = 6, staffWidth = 240, left = 44, top = stepHeight;
 const stepY = (step: number) => (highestStep - step) * stepHeight + top;
 const clefLetter: Record<number, string> = { [model.Clef.G2]: '𝄞', [model.Clef.F4]: '𝄢', [model.Clef.C3]: '𝄡', [model.Clef.C4]: '𝄡' };
 
-export function NotationEntryPanel({ score, target, busy, locked = false, onEdit, latestScore }: NotationEntryPanelProps) {
+export function NotationEntryPanel({ score, target, busy, locked = false, onEdit, preview }: NotationEntryPanelProps) {
   const { t } = useI18n();
   const { staff, bar, beat } = describeSelection(score, target), clef = entryClef(bar), keySignature = bar.keySignature as number;
   const [accidental, setAccidental] = useState<EntryAccidental>('key'), [octave, setOctave] = useState(4), [cursor, setCursor] = useState(0), [status, setStatus] = useState(''), working = useRef(false);
@@ -40,16 +41,16 @@ export function NotationEntryPanel({ score, target, busy, locked = false, onEdit
     working.current = true;
     try {
       const { command, follow } = result.action;
-      if (!await onEdit(command, follow)) { setStatus(t('editor.entry_refused', { name: entered.name })); return; }
-      let message = t(result.removes ? 'editor.entry_removed' : 'editor.entry_entered', { name: entered.name });
+      let message = t(result.removes ? 'editor.entry_removed' : 'editor.entry_entered', { name: entered.name }), gesture: EditCommand = command;
       if (!result.removes) {
-        // Spelling is a second edit of the new note, made only when the note's spelling differs from what it needs.
-        const written = latestScore().tracks[target.track]?.staves[target.staff]?.bars[target.bar]?.voices[target.voice]?.beats[target.beat];
-        const index = enteredNoteIndex(written, command), note = index >= 0 ? written?.notes[index] : undefined;
-        const mode = result.spelling ?? model.NoteAccidentalMode.Default;
-        if (!note) message = t('editor.entry_spelling_missing', { name: entered.name });
-        else if (note.accidentalMode !== mode && !await onEdit({ type: 'setNoteSpelling', target, noteIndex: index, accidentalMode: mode }, {})) message = t('editor.entry_spelling_unchanged', { name: entered.name });
+        // A spelling the note needs goes in the same edit, so one entry is one undo step.
+        let written: model.Score;
+        try { written = preview(command); } catch { setStatus(t('editor.entry_refused', { name: entered.name })); return; }
+        const spelled = spellingStep(written, target, command, result.spelling ?? model.NoteAccidentalMode.Default);
+        if (!spelled.found) message = t('editor.entry_spelling_missing', { name: entered.name });
+        else if (spelled.step) gesture = oneEdit([command, spelled.step] as SequenceStep[]);
       }
+      if (!await onEdit(gesture, follow)) { setStatus(t('editor.entry_refused', { name: entered.name })); return; }
       setStatus(message);
       setAccidental('key');
       chooseOctave(entered.octave);

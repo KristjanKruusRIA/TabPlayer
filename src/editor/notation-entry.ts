@@ -1,5 +1,5 @@
 import { model } from '@coderline/alphatab';
-import type { EditCommand } from '../edit-types';
+import type { EditCommand, SequenceStep } from '../edit-types';
 import { entryNotes, keyTarget, type EntryAction, type EntryContext } from '../instruments/entry';
 import type { BeatTarget } from '../project';
 
@@ -176,6 +176,22 @@ export function enterPitch(ctx: NotationEntryContext, entered: EntryPitch): Nota
 export function enteredNoteIndex(beat: model.Beat | undefined, command: EditCommand): number {
   if (!beat) return -1;
   if (command.type === 'setNote') return beat.notes.findIndex(note => note.string === command.string);
-  if (command.type === 'addPitchedNote') return beat.notes.findIndex(note => note.octave * 12 + note.tone === command.pitch);
+  if (command.type === 'addPitchedNote' || command.type === 'setPitchedNote') return beat.notes.findIndex(note => note.octave * 12 + note.tone === command.pitch);
   return -1;
+}
+
+/** One gesture's steps as one edit: the step itself, or a sequence that history keeps as one entry. */
+export function oneEdit(steps: readonly SequenceStep[]): EditCommand {
+  return steps.length === 1 ? steps[0] : { type: 'sequence', commands: [...steps] };
+}
+
+/**
+ * The spelling step a just-written note needs, read from `written`, the score as the entry leaves it. `found` is false
+ * when the note cannot be found there; `step` is null when its spelling is already `mode`.
+ */
+export function spellingStep(written: model.Score, target: BeatTarget, command: EditCommand, mode: model.NoteAccidentalMode): { found: boolean; step: SequenceStep | null } {
+  const beat = written.tracks[target.track]?.staves[target.staff]?.bars[target.bar]?.voices[target.voice]?.beats[target.beat];
+  const index = enteredNoteIndex(beat, command), note = index >= 0 ? beat?.notes[index] : undefined;
+  if (!note) return { found: false, step: null };
+  return { found: true, step: note.accidentalMode === mode ? null : { type: 'setNoteSpelling', target, noteIndex: index, accidentalMode: mode } };
 }

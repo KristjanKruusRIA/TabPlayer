@@ -6,16 +6,16 @@ import { AUTO_DURATION_UNFIT,DEFAULT_INPUT_PREFERENCES,InputPreferencesPanel,app
 
 const target={track:0,staff:0,bar:1,voice:0,beat:2};
 const key=(code:string,extra={},value=code.replace(/^Numpad(\d)$/,'$1').replace('NumpadDecimal','.'))=>({key:value,code,ctrlKey:false,metaKey:false,altKey:false,shiftKey:false,...extra});
-const on:InputPreferences={autoDuration:true,numpadDurations:true,pasteDiagrams:true};
+const on:InputPreferences={autoDuration:true,numpadDurations:true,pasteDiagrams:true,advance:true};
 const beat=(extra:Partial<EntryBeat>={}):EntryBeat=>({duration:4,dots:0,isEmpty:false,notes:[],...extra});
 const store=(initial?:string)=>{const values=new Map<string,string>();if(initial!==undefined)values.set('tabplayer.input.preferences',initial);return {values,getItem:(name:string)=>values.get(name)??null,setItem:(name:string,value:string)=>{values.set(name,value);}};};
 
 describe('stored preferences',()=>{
   it('defaults, round-trips and repairs one field at a time',()=>{
     expect(readInputPreferences(store())).toEqual(DEFAULT_INPUT_PREFERENCES);
-    expect(DEFAULT_INPUT_PREFERENCES).toEqual({autoDuration:false,numpadDurations:false,pasteDiagrams:true});
+    expect(DEFAULT_INPUT_PREFERENCES).toEqual({autoDuration:false,numpadDurations:false,pasteDiagrams:true,advance:true});
     const kept=store();writeInputPreferences(on,kept);expect(readInputPreferences(kept)).toEqual(on);
-    expect(readInputPreferences(store('{"autoDuration":true,"numpadDurations":"yes","pasteDiagrams":false}'))).toEqual({autoDuration:true,numpadDurations:false,pasteDiagrams:false});
+    expect(readInputPreferences(store('{"autoDuration":true,"numpadDurations":"yes","pasteDiagrams":false}'))).toEqual({autoDuration:true,numpadDurations:false,pasteDiagrams:false,advance:true});
     expect(readInputPreferences(store('not json'))).toEqual(DEFAULT_INPUT_PREFERENCES);
     expect(readInputPreferences(store('[1]'))).toEqual(DEFAULT_INPUT_PREFERENCES);
     const broken={getItem:()=>{throw new Error('blocked');},setItem:()=>{throw new Error('blocked');}};

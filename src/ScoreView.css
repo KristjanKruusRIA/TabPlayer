@@ -72,3 +72,8 @@
 .score-symbol-actions { display: flex; justify-content: flex-end; gap: 6px; margin-top: 6px; }
 .score-symbol-actions button { min-height: 32px; }
 .score-symbol-popover[data-view="text"] { min-width: 260px; }
+
+/* Note entry on the score: the pointer previews the notehead it would write, with its pitch. */
+.score-presentation[data-note-entry="on"] .score-live-paper, .score-presentation[data-note-entry="on"] .score-pages { cursor: crosshair; }
+.score-entry-ghost { position: absolute; z-index: 3; box-sizing: border-box; border-radius: 50%; background: color-mix(in srgb, var(--ws-edit,#245cb2) 45%, transparent); transform: rotate(-20deg); pointer-events: none; }
+.score-entry-ghost-label { position: absolute; left: calc(100% + 6px); top: 50%; transform: translateY(-50%) rotate(20deg); padding: 1px 5px; border-radius: 3px; background: var(--ws-edit,#245cb2); color: var(--ws-paper,#fffdf5); white-space: nowrap; font-size: 11px; line-height: 1.4; }

@@ -14,7 +14,8 @@ function addTrack(score:model.Score,name:string,program:number,percussion:boolea
   const staff=new model.Staff();staff.showTablature=false;staff.showStandardNotation=true;staff.isPercussion=percussion;track.addStaff(staff);score.addTrack(track);
   for(const master of score.masterBars){const bar=new model.Bar();bar.clef=percussion?model.Clef.Neutral:model.Clef.G2;const voice=new model.Voice();for(let i=0;i<master.timeSignatureNumerator;i++){const beat=new model.Beat();beat.duration=master.timeSignatureDenominator;beat.isEmpty=false;voice.addBeat(beat);}bar.addVoice(voice);staff.addBar(bar);}
 }
-function tieChain(note:model.Note) {
+/** The notes tied to `note`, first to last. */
+export function tieChain(note:model.Note) {
   const seen=new Set<model.Note>();while(note.tieOrigin&&!seen.has(note)){seen.add(note);note=note.tieOrigin;}
   const result:model.Note[]=[];seen.clear();for(let current:model.Note|null=note;current&&!seen.has(current);current=current.tieDestination){seen.add(current);result.push(current);}return result;
 }

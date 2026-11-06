@@ -1368,7 +1368,14 @@ pub enum EditCommand {
     SetMaster {
         master: MasterSettings,
     },
+    /// One gesture written as several note-entry edits, recorded and undone as one history entry.
+    Sequence {
+        commands: Vec<EditCommand>,
+    },
 }
+
+/// The most edits one `sequence` holds.
+pub const MAX_SEQUENCE_COMMANDS: usize = 8;
 
 /// A tuning name a document can hold: any length of XML 1.0 text, including empty.
 pub fn validate_tuning_name(name: &Option<String>) -> Result<(), String> {
@@ -1491,6 +1498,30 @@ impl EditCommand {
     }
     pub fn validate(&self) -> Result<(), String> {
         match self {
+            Self::Sequence { commands } => {
+                if !(2..=MAX_SEQUENCE_COMMANDS).contains(&commands.len()) {
+                    return Err(format!(
+                        "A sequence holds 2 to {MAX_SEQUENCE_COMMANDS} note-entry edits."
+                    ));
+                }
+                for command in commands {
+                    if !matches!(
+                        command,
+                        Self::SetNote { .. }
+                            | Self::RemoveNote { .. }
+                            | Self::SetRest { .. }
+                            | Self::SetDuration { .. }
+                            | Self::InsertBeat { .. }
+                            | Self::AddPitchedNote { .. }
+                            | Self::SetPitchedNote { .. }
+                            | Self::RemoveNoteByIndex { .. }
+                            | Self::SetNoteSpelling { .. }
+                    ) {
+                        return Err("A sequence holds only note-entry edits.".into());
+                    }
+                    command.validate()?;
+                }
+            }
             Self::MoveTrack { track, to } if track == to => {
                 return Err("Choose a different track position.".into());
             }

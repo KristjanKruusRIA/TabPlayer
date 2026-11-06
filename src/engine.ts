@@ -75,8 +75,9 @@ export function validateProject(value: unknown): Project {
   for(const [id,asset] of Object.entries(p.assets)) {
     if(!/^[a-f0-9]{64}$/i.test(id) || !asset || Object.keys(asset).some(key=>!['filename','mediaType','byteLength'].includes(key)) || typeof asset.filename!=='string' || typeof asset.mediaType!=='string' || !integer(asset.byteLength)) throw refusal('engine.invalid_project_asset_metadata');
   }
+  // History entries are validated as stored, so a sequence's own shape is checked before its steps replay.
+  for(const edit of [...p.baselineEdits,...p.edits])validateParityCommand(edit);
   for(const edit of projectCommands(p)) {
-    validateParityCommand(edit);
     if(edit.type==='setBacking' && edit.backing && !p.assets[edit.backing.assetId]) throw refusal('engine.backing_asset_missing');
   }
   return structuredClone(p);
@@ -460,6 +461,14 @@ function rebuild(score: model.Score) {
   return result;
 }
 
+/**
+ * The last score edit built by previewEdit, kept for one reuse: note entry plans an edit by building it, and the
+ * controller then records that same edit on the same project, so the second build is spared. Keyed by the project
+ * object (projects are never changed in place) and the edit's JSON; taken at most once, so no two callers share a score.
+ */
+let lastBuilt:{project:ProjectInput;edit:string;built:Omit<ReturnType<typeof buildDocument>,'project'>}|null=null;
+/** Drops a kept build, so a document the caller adopts as live state is never handed out again. */
+export function forgetPreview() { lastBuilt=null; }
 export function previewEdit(project: ProjectInput, edit: EditCommand, current?:BuiltDocument) {
   const normalized=validateProject(project);
   const next: Project = {...normalized, edits:[...normalized.edits,structuredClone(edit)]};
@@ -470,8 +479,11 @@ export function previewEdit(project: ProjectInput, edit: EditCommand, current?:B
     const candidate={...current,project:next,settings:nextSettings};
     validateBackingAnchors(current.score,effectiveAudioSettings(next,candidate).backing);return candidate;
   }
+  const key=JSON.stringify(edit),reused=lastBuilt?.project===project&&lastBuilt.edit===key?lastBuilt.built:null;lastBuilt=null;
+  if(reused)return {...reused,project:next};
   const built=buildDocument(next);assertDiagramFrets(built.score,edit);
-  return {project:next,...built};
+  lastBuilt={project,edit:key,built};
+  return {...built,project:next};
 }
 
 export function exportGp(score: model.Score): Uint8Array { return exportGpInterchange(score, settings); }

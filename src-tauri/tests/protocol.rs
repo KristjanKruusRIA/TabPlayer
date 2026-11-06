@@ -104,7 +104,7 @@ fn a_track_color_must_be_six_hex_digits() {
 fn every_frontend_command_round_trips_through_rust() {
     let examples: Vec<serde_json::Value> =
         serde_json::from_str(include_str!("../../tests/protocol.json")).unwrap();
-    assert_eq!(examples.len(), 83);
+    assert_eq!(examples.len(), 84);
     for mut example in examples {
         let command: EditCommand = serde_json::from_value(example.clone()).unwrap();
         assert!(command.validate().is_ok(), "invalid fixture {example}");
@@ -268,4 +268,41 @@ fn note_techniques_take_an_optional_string_number() {
         let command = serde_json::json!({"type":"setNoteTechniquesByIndex","target":target,"noteIndex":0,"patch":{"stringNumber":bad}});
         assert!(serde_json::from_value::<EditCommand>(command).is_err());
     }
+}
+
+#[test]
+fn a_sequence_holds_two_to_eight_note_entry_edits_and_never_nests() {
+    let target = serde_json::json!({"track":0,"staff":0,"bar":0,"voice":0,"beat":0});
+    let duration = serde_json::json!({"type":"setDuration","target":target,"duration":8,"dots":0});
+    let note = serde_json::json!({"type":"setNote","target":target,"string":2,"fret":3});
+    let parse = |commands: Vec<serde_json::Value>| {
+        serde_json::from_value::<EditCommand>(
+            serde_json::json!({"type":"sequence","commands":commands}),
+        )
+    };
+    let pair = parse(vec![duration.clone(), note.clone()]).unwrap();
+    assert!(pair.validate().is_ok());
+    assert!(parse(vec![duration.clone(); 8]).unwrap().validate().is_ok());
+    for refused in [
+        vec![duration.clone()],
+        vec![duration.clone(); 9],
+        vec![
+            duration.clone(),
+            serde_json::json!({"type":"appendMeasure"}),
+        ],
+        vec![duration.clone(), serde_json::to_value(&pair).unwrap()],
+        vec![
+            duration.clone(),
+            serde_json::json!({"type":"setDuration","target":target,"duration":8,"dots":4}),
+        ],
+    ] {
+        assert!(parse(refused).unwrap().validate().is_err());
+    }
+    assert!(
+        serde_json::from_value::<EditCommand>(
+            serde_json::json!({"type":"sequence","commands":[duration, note],"extra":1})
+        )
+        .is_err()
+    );
+    assert!(serde_json::from_value::<EditCommand>(serde_json::json!({"type":"sequence"})).is_err());
 }

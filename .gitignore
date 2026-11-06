@@ -21,3 +21,4 @@ src-tauri/icons/Square*Logo.png
 .vitest/
 .impeccable/*.local.json
 .impeccable/hook.cache.json
+.agents/

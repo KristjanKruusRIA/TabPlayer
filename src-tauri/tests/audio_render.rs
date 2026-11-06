@@ -611,6 +611,7 @@ fn visual_only_pulses_and_gain_preserve_stems() {
             enabled: true,
             volume,
             visual: true,
+            sound: Default::default(),
         });
         assert_eq!(renderer.stem_count(), 2);
         let mut score = vec![[0.0; 2]; 72_000];
@@ -641,6 +642,7 @@ fn visual_only_pulses_and_gain_preserve_stems() {
         enabled: false,
         volume: 0.4,
         visual: true,
+        sound: Default::default(),
     });
     assert_eq!(renderer.stem_count(), 1);
     let mut output = vec![[0.0; 2]; 72_000];
@@ -648,6 +650,49 @@ fn visual_only_pulses_and_gain_preserve_stems() {
     assert_eq!(status.pulse_count, 3);
     assert_eq!(status.last_pulse.unwrap().beat, 2);
     assert!(output.iter().flatten().all(|sample| *sample == 0.0));
+}
+
+#[test]
+fn the_chosen_click_sound_reaches_the_metronome_stem_with_the_same_pulses() {
+    use tabplayer_lib::audio::{
+        practice::{ClickSound, ClickVoice, MetronomeSettings},
+        renderer::Renderer,
+    };
+    let (_, resources, settings) = renderer_fixture(false);
+    let plan = changing_tempo_practice_plan();
+    let mut clicks = Vec::new();
+    for sound in [
+        ClickSound::Beep,
+        ClickSound::Woodblock,
+        ClickSound::Cowbell,
+        ClickSound::Stick,
+    ] {
+        let mut renderer =
+            Renderer::new(plan.clone(), resources.clone(), settings.clone(), 48_000).unwrap();
+        renderer.set_metronome_settings(MetronomeSettings {
+            enabled: true,
+            volume: 0.4,
+            visual: true,
+            sound,
+        });
+        let mut score = vec![[0.0; 2]; 72_000];
+        let mut click = score.clone();
+        let mut mix = score.clone();
+        let status = renderer.render_stems_and_mix_into(&mut [&mut score, &mut click], &mut mix);
+        assert_eq!(status.pulse_count, 3, "{sound:?}");
+        // The first click starts on the first frame and is the voice's own accented shape.
+        let mut voice = ClickVoice::new(48_000);
+        voice.trigger(true, sound);
+        for frame in &click[..200] {
+            assert_eq!(frame[0], voice.frame(0.4), "{sound:?}");
+        }
+        clicks.push(click);
+    }
+    for (index, click) in clicks.iter().enumerate() {
+        for other in &clicks[index + 1..] {
+            assert_ne!(click, other);
+        }
+    }
 }
 
 #[test]
@@ -765,6 +810,7 @@ fn render_seek_and_prepared_mix_install_do_not_touch_heap() {
         enabled: true,
         volume: 0.4,
         visual: true,
+        sound: Default::default(),
     });
     let mut block = [[0.0; 2]; 512];
     HEAP_OPERATIONS.with(|n| n.set(0));
@@ -1251,6 +1297,7 @@ fn metronome_offline_export_keeps_eighth_pulses_across_disjoint_repeat_ranges() 
             format: AudioFormat::wav(rate, 24),
             speed: 2.0,
             metronome: true,
+            metronome_sound: Default::default(),
             tail_seconds: 0.03,
             include_backing: false,
             include_mix: true,
@@ -2080,6 +2127,7 @@ fn a_locked_track_ignores_automation_in_export_and_after_a_mix_change() {
                 format: AudioFormat::wav(48_000, 24),
                 speed: 1.0,
                 metronome: false,
+                metronome_sound: Default::default(),
                 tail_seconds: 0.0,
                 include_backing: false,
                 include_mix: true,
@@ -2330,6 +2378,7 @@ fn a_real_renderer_and_export_play_the_locked_articulation_only_when_locked() {
             format: AudioFormat::wav(48_000, 24),
             speed: 1.0,
             metronome: false,
+            metronome_sound: Default::default(),
             tail_seconds: 0.0,
             include_backing: false,
             include_mix: true,

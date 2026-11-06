@@ -21,7 +21,7 @@ import {applyReferenceSyncPlan,referenceTimingKey} from './reference-sync';
 import { focusedSettings,type TrackFocus } from './focus';
 
 let nextGeneration=0;
-function practiceKey(settings:PracticeSettings){const tempo=settings.tempo;return JSON.stringify([tempo.kind,tempo.kind==='relative'?[tempo.ratio]:tempo.kind==='fixed'?[tempo.bpm]:[tempo.start,tempo.end,tempo.step,tempo.repetitions],settings.metronome.enabled,settings.metronome.volume,settings.metronome.visual,settings.countIn.bars,settings.countIn.betweenLoops]);}
+function practiceKey(settings:PracticeSettings){const tempo=settings.tempo;return JSON.stringify([tempo.kind,tempo.kind==='relative'?[tempo.ratio]:tempo.kind==='fixed'?[tempo.bpm]:[tempo.start,tempo.end,tempo.step,tempo.repetitions],settings.metronome.enabled,settings.metronome.volume,settings.metronome.visual,settings.metronome.sound??"beep",settings.countIn.bars,settings.countIn.betweenLoops]);}
 function idlePractice(settings:PracticeSettings):PracticeStatus {return {settings:structuredClone(settings),phase:'idle',countInRemaining:0,completedPasses:0,effectiveRatio:settings.tempo.kind==='relative'?settings.tempo.ratio:settings.tempo.kind==='progressive'?settings.tempo.start:1,currentBpm:0,pulse:null};}
 
 /** `latestMix` and `latestMaster` read a track's mix and the master from the newest document, which can be ahead of the one last loaded here. */

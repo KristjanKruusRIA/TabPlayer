@@ -23,6 +23,52 @@ pub struct MetronomeSettings {
     pub enabled: bool,
     pub volume: f64,
     pub visual: bool,
+    /// Settings written before the sound could be chosen have no field and keep the original beep.
+    #[serde(default)]
+    pub sound: ClickSound,
+}
+
+/// The metronome's timbre. Each is synthesised on the audio thread without allocation or assets.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ClickSound {
+    #[default]
+    Beep,
+    Woodblock,
+    Cowbell,
+    Stick,
+}
+
+impl ClickSound {
+    pub fn code(self) -> u8 {
+        match self {
+            Self::Beep => 0,
+            Self::Woodblock => 1,
+            Self::Cowbell => 2,
+            Self::Stick => 3,
+        }
+    }
+    /// The (normal, accented) frequency in Hz and the length in seconds of one click. Every caller that needs a click's
+    /// length reads it here, so a ringing click is treated the same wherever it is started or restored.
+    pub fn shape(self) -> (f64, f64, f64) {
+        match self {
+            Self::Beep => (1800.0, 2400.0, 0.05),
+            Self::Woodblock => (1000.0, 1300.0, 0.06),
+            Self::Cowbell => (540.0, 680.0, 0.16),
+            Self::Stick => (1700.0, 2100.0, 0.03),
+        }
+    }
+    pub fn seconds(self) -> f64 {
+        self.shape().2
+    }
+    pub fn from_code(code: u8) -> Self {
+        match code {
+            1 => Self::Woodblock,
+            2 => Self::Cowbell,
+            3 => Self::Stick,
+            _ => Self::Beep,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Deserialize, Serialize)]
@@ -48,6 +94,7 @@ impl Default for PracticeSettings {
                 enabled: false,
                 volume: 0.4,
                 visual: false,
+                sound: ClickSound::Beep,
             },
             count_in: CountInSettings {
                 bars: 0,
@@ -293,6 +340,9 @@ pub struct ClickVoice {
     age: u64,
     length: u64,
     frequency: f64,
+    sound: ClickSound,
+    accent: bool,
+    noise: u32,
 }
 
 impl ClickVoice {
@@ -304,11 +354,21 @@ impl ClickVoice {
             age: length,
             length,
             frequency: 1800.0,
+            sound: ClickSound::Beep,
+            accent: false,
+            noise: 0x9E37_79B9,
         }
     }
-    pub fn trigger(&mut self, accent: bool) {
+    /// Starts a click, replacing any click still ringing. The sound is passed at each trigger, so a change of sound
+    /// takes effect on the next beat and never alters a click already sounding.
+    pub fn trigger(&mut self, accent: bool, sound: ClickSound) {
         self.age = 0;
-        self.frequency = if accent { 2400.0 } else { 1800.0 };
+        self.sound = sound;
+        self.accent = accent;
+        let (normal, accented, seconds) = sound.shape();
+        self.frequency = if accent { accented } else { normal };
+        self.length = (f64::from(self.rate) * seconds) as u64;
+        self.noise = 0x9E37_79B9;
     }
     pub fn frame(&mut self, volume: f64) -> f32 {
         if self.age >= self.length {
@@ -316,9 +376,36 @@ impl ClickVoice {
         }
         let age = self.age as f64 / f64::from(self.rate);
         self.age += 1;
-        ((std::f64::consts::TAU * self.frequency * age).sin()
-            * (-age * 100.0).exp()
-            * 0.25
-            * volume) as f32
+        let phase = std::f64::consts::TAU * self.frequency * age;
+        let sample = match self.sound {
+            ClickSound::Beep => phase.sin() * (-age * 100.0).exp(),
+            // Two inharmonic partials with a fast decay read as a struck block.
+            ClickSound::Woodblock => {
+                (phase.sin() + 0.45 * (phase * 2.76).sin()) / 1.45 * (-age * 70.0).exp()
+            }
+            // Two clipped partials a slightly flat fifth apart, the classic drum-machine bell, with a longer ring. Its
+            // gain is lower than the others' so its energy, not just its peak, stays near the beep's.
+            ClickSound::Cowbell => {
+                let square = |value: f64| (value.sin() * 4.0).clamp(-1.0, 1.0);
+                (square(phase) + square(phase * 1.48)) * 0.3 * (-age * 22.0).exp()
+            }
+            // A short noise burst over a faint tone, like a stick on a rim.
+            ClickSound::Stick => {
+                self.noise ^= self.noise << 13;
+                self.noise ^= self.noise >> 17;
+                self.noise ^= self.noise << 5;
+                let noise = f64::from(self.noise) / f64::from(u32::MAX) * 2.0 - 1.0;
+                (noise * 0.8 + phase.sin() * 0.2) * (-age * 180.0).exp()
+            }
+        };
+        // Accents on the bright sounds are carried by pitch; the noise burst is also louder.
+        let accent_gain = if self.accent && self.sound == ClickSound::Stick {
+            1.0
+        } else if self.sound == ClickSound::Stick {
+            0.7
+        } else {
+            1.0
+        };
+        (sample * 0.25 * accent_gain * volume) as f32
     }
 }

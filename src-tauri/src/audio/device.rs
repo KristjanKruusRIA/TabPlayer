@@ -285,6 +285,7 @@ struct SharedPractice {
     enabled: AtomicBool,
     volume: AtomicU64,
     visual: AtomicBool,
+    sound: AtomicU8,
     bars: AtomicU8,
     between: AtomicBool,
 }
@@ -299,6 +300,7 @@ impl SharedPractice {
             enabled: AtomicBool::new(false),
             volume: AtomicU64::new(0.4f64.to_bits()),
             visual: AtomicBool::new(false),
+            sound: AtomicU8::new(0),
             bars: AtomicU8::new(0),
             between: AtomicBool::new(false),
         }
@@ -325,6 +327,8 @@ impl SharedPractice {
         self.volume
             .store(value.metronome.volume.to_bits(), Ordering::Relaxed);
         self.visual.store(value.metronome.visual, Ordering::Relaxed);
+        self.sound
+            .store(value.metronome.sound.code(), Ordering::Relaxed);
         self.bars.store(value.count_in.bars, Ordering::Relaxed);
         self.between
             .store(value.count_in.between_loops, Ordering::Relaxed);
@@ -346,6 +350,7 @@ impl SharedPractice {
                 enabled: self.enabled.load(Ordering::Relaxed),
                 volume: f64::from_bits(self.volume.load(Ordering::Relaxed)),
                 visual: self.visual.load(Ordering::Relaxed),
+                sound: super::practice::ClickSound::from_code(self.sound.load(Ordering::Relaxed)),
             },
             count_in: super::practice::CountInSettings {
                 bars: self.bars.load(Ordering::Relaxed),
@@ -1317,7 +1322,8 @@ impl CallbackTransport {
                     continue;
                 }
                 if let Some(pulse) = frame.pulse {
-                    self.click.trigger(pulse.accent);
+                    self.click
+                        .trigger(pulse.accent, self.practice.metronome.sound);
                     self.add_pulse(pulse, true, 1);
                 }
                 let click = self.click.frame(self.practice.metronome.volume);
@@ -1442,9 +1448,12 @@ impl CallbackTransport {
                         * f64::from(self.rate))
                     .round() as u64;
                     let age = s.elapsed_frames.saturating_sub(boundary);
-                    if age < (f64::from(self.rate) * 0.05) as u64 {
-                        self.click
-                            .trigger((s.emitted_pulses - 1) % s.numerator == 0);
+                    if age < (f64::from(self.rate) * self.practice.metronome.sound.seconds()) as u64
+                    {
+                        self.click.trigger(
+                            (s.emitted_pulses - 1) % s.numerator == 0,
+                            self.practice.metronome.sound,
+                        );
                         for _ in 0..age {
                             self.click.frame(0.0);
                         }
@@ -2854,6 +2863,7 @@ mod tests {
                 enabled,
                 volume: 0.4,
                 visual: false,
+                sound: Default::default(),
             },
             count_in: super::super::practice::CountInSettings {
                 bars: 0,
@@ -3281,6 +3291,54 @@ mod tests {
                 .is_some()
         );
         assert_eq!(next.status().generation, 1);
+    }
+    #[test]
+    fn shared_practice_carries_every_metronome_sound() {
+        use super::super::practice::ClickSound;
+        let shared = SharedPractice::new();
+        assert_eq!(shared.read().metronome.sound, ClickSound::Beep);
+        for sound in [
+            ClickSound::Woodblock,
+            ClickSound::Cowbell,
+            ClickSound::Stick,
+            ClickSound::Beep,
+        ] {
+            let mut settings = practice(0.75, true);
+            settings.metronome.sound = sound;
+            shared.store(settings);
+            assert_eq!(shared.read(), settings);
+        }
+    }
+    #[test]
+    fn count_in_clicks_use_the_chosen_sound() {
+        use super::super::practice::{ClickSound, ClickVoice};
+        let mut rendered = Vec::new();
+        for sound in [ClickSound::Beep, ClickSound::Cowbell] {
+            let mut document = counted_document();
+            document.practice.metronome.sound = sound;
+            let mut transport = CallbackTransport::headless(48_000);
+            transport.install_with_practice(
+                AudioService::renderer(&document, 48_000).unwrap(),
+                1,
+                false,
+                document.practice,
+            );
+            transport
+                .command(TransportCommand::Play { generation: 1 })
+                .unwrap();
+            let mut output = [[0.0; 2]; 400];
+            transport.render_into(&mut output);
+            assert_eq!(transport.phase, PracticePhase::CountIn);
+            // The count-in starts on a downbeat, so its first click is the voice's accented shape at the practice level.
+            let mut voice = ClickVoice::new(48_000);
+            voice.trigger(true, sound);
+            for frame in output {
+                let expected = voice.frame(document.practice.metronome.volume);
+                assert_eq!(frame, [expected, expected], "{sound:?}");
+            }
+            rendered.push(output);
+        }
+        assert_ne!(rendered[0], rendered[1]);
     }
     #[test]
     fn paused_count_reselect_keeps_pulse_and_subbeat() {

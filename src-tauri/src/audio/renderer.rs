@@ -653,6 +653,7 @@ impl Renderer {
                 enabled: false,
                 volume: 0.4,
                 visual: false,
+                sound: Default::default(),
             },
             last_click: None,
             click: ClickVoice::new(sample_rate),
@@ -993,7 +994,7 @@ impl Renderer {
                 && self.seconds < self.plan.duration_ms / 1000.0
             {
                 self.last_click = Some(beat);
-                self.click.trigger(accent);
+                self.click.trigger(accent, self.metronome.sound);
                 pulse = Some(PulsePosition {
                     beat: beat.1 as u32,
                     beats_per_bar: self.meter_at(tick).0,
@@ -1487,6 +1488,7 @@ impl Renderer {
             enabled,
             volume: 0.4,
             visual: false,
+            sound: Default::default(),
         });
     }
     pub fn set_metronome_settings(&mut self, settings: MetronomeSettings) {
@@ -1739,6 +1741,7 @@ mod selection_tests {
                     enabled: true,
                     visual: true,
                     volume: 0.4,
+                    sound: Default::default(),
                 });
                 renderer.seek_tick(960.0 - 5e-8);
                 let mut output = [[1.0; 2]; 8];
@@ -1775,6 +1778,7 @@ mod selection_tests {
                     enabled: true,
                     visual: true,
                     volume: 0.4,
+                    sound: Default::default(),
                 });
                 renderer.seek_tick(end - 5e-8);
                 let mut output = [[1.0; 2]; 8];

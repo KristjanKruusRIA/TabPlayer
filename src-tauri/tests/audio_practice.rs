@@ -3,7 +3,8 @@ use std::{
     cell::Cell,
 };
 use tabplayer_lib::audio::practice::{
-    ClickVoice, CountInClock, CountInSnapshot, PracticeSettings, PracticeTempo, progressive_ratio,
+    ClickSound, ClickVoice, CountInClock, CountInSnapshot, PracticeSettings, PracticeTempo,
+    progressive_ratio,
 };
 
 thread_local! {
@@ -450,7 +451,7 @@ fn invalid_count_math_is_rejected_without_altering_a_clock() {
 
 fn click_pcm(volume: f64, accent: bool) -> Vec<f32> {
     let mut click = ClickVoice::new(48_000);
-    click.trigger(accent);
+    click.trigger(accent, ClickSound::Beep);
     (0..2_500).map(|_| click.frame(volume)).collect()
 }
 
@@ -485,16 +486,16 @@ fn click_volume_and_visual_silence() {
 fn click_retrigger_replaces_age_and_retains_existing_shape() {
     let mut click = ClickVoice::new(48_000);
     assert_eq!(click.frame(0.4), 0.0);
-    click.trigger(true);
+    click.trigger(true, ClickSound::Beep);
     for index in 0..137 {
         let age = index as f64 / 48_000.0;
         let expected =
             ((std::f64::consts::TAU * 2_400.0 * age).sin() * (-age * 100.0).exp() * 0.1) as f32;
         assert!((click.frame(0.4) - expected).abs() < 1e-8);
     }
-    click.trigger(false);
+    click.trigger(false, ClickSound::Beep);
     let mut fresh = ClickVoice::new(48_000);
-    fresh.trigger(false);
+    fresh.trigger(false, ClickSound::Beep);
     for _ in 0..2_500 {
         assert_eq!(click.frame(0.4), fresh.frame(0.4));
     }
@@ -514,7 +515,7 @@ fn count_click_and_snapshot_restoration_are_allocation_free() {
         for _ in 0..10_003 {
             let frame = clock.next_frame();
             if let Some(pulse) = frame.pulse {
-                click.trigger(pulse.accent);
+                click.trigger(pulse.accent, ClickSound::Beep);
             }
             sum += click.frame(0.4);
         }
@@ -522,4 +523,133 @@ fn count_click_and_snapshot_restoration_are_allocation_free() {
     COUNT_HEAP.with(|flag| flag.set(false));
     assert!(sum.is_finite());
     assert_eq!(HEAP_OPERATIONS.with(Cell::get), 0);
+}
+
+fn sound_pcm(sound: ClickSound, accent: bool) -> Vec<f32> {
+    let mut click = ClickVoice::new(48_000);
+    click.trigger(accent, sound);
+    (0..10_000).map(|_| click.frame(1.0)).collect()
+}
+
+#[test]
+fn each_click_sound_is_distinct_bounded_and_ends() {
+    let sounds = [
+        ClickSound::Beep,
+        ClickSound::Woodblock,
+        ClickSound::Cowbell,
+        ClickSound::Stick,
+    ];
+    let rendered: Vec<_> = sounds
+        .iter()
+        .map(|sound| sound_pcm(*sound, false))
+        .collect();
+    for (index, samples) in rendered.iter().enumerate() {
+        let peak = samples.iter().fold(0.0f32, |peak, s| peak.max(s.abs()));
+        // No sound peaks above the original beep's ceiling, so a change of sound never jumps the peak level.
+        assert!(
+            peak > 0.05 && peak <= 0.25 + 1e-6,
+            "{:?} peak {peak}",
+            sounds[index]
+        );
+        let last = samples.iter().rposition(|s| *s != 0.0).unwrap();
+        assert!(last < 8_000, "{:?} rings to {last}", sounds[index]);
+        assert!(samples[last + 1..].iter().all(|s| *s == 0.0));
+        for other in &rendered[index + 1..] {
+            assert_ne!(samples, other);
+        }
+    }
+}
+
+#[test]
+fn the_beep_is_unchanged_and_accents_raise_the_tonal_sounds() {
+    let mut old = ClickVoice::new(48_000);
+    old.trigger(true, ClickSound::default());
+    for index in 0..2_400 {
+        let age = index as f64 / 48_000.0;
+        let expected =
+            ((std::f64::consts::TAU * 2_400.0 * age).sin() * (-age * 100.0).exp() * 0.25) as f32;
+        assert_eq!(old.frame(1.0), expected);
+    }
+    for (sound, normal, accented) in [
+        (ClickSound::Woodblock, 1_000.0, 1_300.0),
+        (ClickSound::Cowbell, 540.0, 680.0),
+    ] {
+        let low = sound_pcm(sound, false);
+        let high = sound_pcm(sound, true);
+        let first_crossings = |samples: &[f32]| {
+            samples[..1_200]
+                .windows(2)
+                .filter(|pair| pair[0] < 0.0 && pair[1] >= 0.0)
+                .count() as f64
+        };
+        let ratio = first_crossings(&high) / first_crossings(&low);
+        // The clipped cowbell's second partial adds crossings, so only its direction is checked.
+        if sound == ClickSound::Cowbell {
+            assert!(ratio > 1.1, "{sound:?} ratio {ratio}");
+        } else {
+            assert!(
+                (ratio - accented / normal).abs() < 0.05,
+                "{sound:?} ratio {ratio}"
+            );
+        }
+    }
+    let energy = |samples: &[f32]| samples.iter().map(|s| f64::from(*s).powi(2)).sum::<f64>();
+    assert!(
+        energy(&sound_pcm(ClickSound::Stick, true)) > energy(&sound_pcm(ClickSound::Stick, false))
+    );
+}
+
+#[test]
+fn every_click_sound_renders_without_allocating() {
+    let mut click = ClickVoice::new(48_000);
+    click.frame(0.4);
+    HEAP_OPERATIONS.with(|count| count.set(0));
+    COUNT_HEAP.with(|flag| flag.set(true));
+    let mut sum: f32 = 0.0;
+    for sound in [
+        ClickSound::Beep,
+        ClickSound::Woodblock,
+        ClickSound::Cowbell,
+        ClickSound::Stick,
+    ] {
+        click.trigger(true, sound);
+        for _ in 0..9_000 {
+            sum += click.frame(0.4);
+        }
+    }
+    COUNT_HEAP.with(|flag| flag.set(false));
+    assert!(sum.is_finite());
+    assert_eq!(HEAP_OPERATIONS.with(Cell::get), 0);
+}
+
+#[test]
+fn practice_settings_without_a_sound_keep_the_beep_and_reject_unknown_sounds() {
+    let old: PracticeSettings = serde_json::from_str(
+        r#"{"tempo":{"kind":"relative","ratio":1},"metronome":{"enabled":true,"volume":0.4,"visual":false},"countIn":{"bars":0,"betweenLoops":false}}"#,
+    )
+    .unwrap();
+    assert_eq!(old.metronome.sound, ClickSound::Beep);
+    let chosen: PracticeSettings = serde_json::from_str(
+        r#"{"tempo":{"kind":"relative","ratio":1},"metronome":{"enabled":true,"volume":0.4,"visual":false,"sound":"cowbell"},"countIn":{"bars":0,"betweenLoops":false}}"#,
+    )
+    .unwrap();
+    assert_eq!(chosen.metronome.sound, ClickSound::Cowbell);
+    assert_eq!(
+        serde_json::to_value(chosen).unwrap()["metronome"]["sound"],
+        "cowbell"
+    );
+    assert!(
+        serde_json::from_str::<PracticeSettings>(
+            r#"{"tempo":{"kind":"relative","ratio":1},"metronome":{"enabled":true,"volume":0.4,"visual":false,"sound":"gong"},"countIn":{"bars":0,"betweenLoops":false}}"#,
+        )
+        .is_err()
+    );
+    for sound in [
+        ClickSound::Beep,
+        ClickSound::Woodblock,
+        ClickSound::Cowbell,
+        ClickSound::Stick,
+    ] {
+        assert_eq!(ClickSound::from_code(sound.code()), sound);
+    }
 }

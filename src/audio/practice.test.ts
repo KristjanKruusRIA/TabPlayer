@@ -37,3 +37,11 @@ it('rejects_fixed_with_any_backing_and_detaches_normalized_copies',()=>{
   expect(practiceForBacking(fixed,false)).toEqual({settings:fixed,notice:null});
   expect(()=>practiceForBacking({...fixed,tempo:{kind:'fixed',bpm:0}},true)).toThrow();
 });
+
+it('accepts settings with or without a metronome sound and refuses unknown sounds',()=>{
+  const base=structuredClone(DEFAULT_PRACTICE);delete base.metronome.sound;
+  expect(()=>validatePractice(base,false)).not.toThrow();
+  for(const sound of ['beep','woodblock','cowbell','stick'] as const)expect(()=>validatePractice({...base,metronome:{...base.metronome,sound}},false)).not.toThrow();
+  expect(()=>validatePractice({...base,metronome:{...base.metronome,sound:'gong' as never}},false)).toThrow('Invalid metronome sound.');
+  expect(()=>validatePractice({...base,metronome:{...base.metronome,sound:undefined}},false)).toThrow('Invalid metronome sound.');
+});

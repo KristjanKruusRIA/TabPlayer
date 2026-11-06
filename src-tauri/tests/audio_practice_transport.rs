@@ -65,6 +65,7 @@ fn settings(tempo: PracticeTempo, bars: u8, between_loops: bool) -> PracticeSett
             enabled: false,
             volume: 0.4,
             visual: true,
+            sound: Default::default(),
         },
         count_in: CountInSettings {
             bars,

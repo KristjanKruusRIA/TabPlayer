@@ -243,7 +243,7 @@ it('retains acknowledged speed and metronome across musical edit undo and redo i
   for(const document of [{project:edited.project,built:edited},{project,built:buildDocument(project)},{project:edited.project,built:buildDocument(edited.project)}]) {
     player.beforeScoreChange();await player.loadDocument(document.project,document.built,0,0);
     expect(player.getState()).toMatchObject({speed:50,metronome:true,playing:false});
-    expect(vi.mocked(bridge.prepare).mock.calls.at(-1)?.[4]).toEqual({...DEFAULT_PRACTICE,tempo:{kind:'relative',ratio:.5},metronome:{enabled:true,volume:.4,visual:false}});
+    expect(vi.mocked(bridge.prepare).mock.calls.at(-1)?.[4]).toEqual({...DEFAULT_PRACTICE,tempo:{kind:'relative',ratio:.5},metronome:{enabled:true,volume:.4,visual:false,sound:'beep'}});
   }
   player.destroy();
 });

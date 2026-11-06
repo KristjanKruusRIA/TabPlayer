@@ -16,6 +16,7 @@ fn practice(speed: f64, enabled: bool) -> PracticeSettings {
             enabled,
             volume: 0.4,
             visual: false,
+            sound: Default::default(),
         },
         count_in: tabplayer_lib::audio::practice::CountInSettings {
             bars: 0,

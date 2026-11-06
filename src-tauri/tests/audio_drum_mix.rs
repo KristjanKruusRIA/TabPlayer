@@ -495,6 +495,7 @@ fn an_export_carries_the_kit_mix() {
             format: AudioFormat::wav(RATE, 24),
             speed: 1.0,
             metronome: false,
+            metronome_sound: Default::default(),
             tail_seconds: 0.0,
             include_backing: false,
             include_mix: true,

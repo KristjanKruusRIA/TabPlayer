@@ -220,10 +220,15 @@ pub(crate) async fn workspace_drop_stage(
     app: AppHandle,
 ) -> Result<DocumentIntake, String> {
     blocking(app, move |app| {
-        app.state::<FileLibrary>().drop_stage(
+        app.state::<FileLibrary>().drop_stage_then(
             &drop_token,
             index,
             &app.state::<Arc<Mutex<DocumentWorkspace>>>(),
+            // A launched file handed to the intake is never given back, whatever its read gives.
+            || {
+                app.state::<crate::launch::LaunchFiles>()
+                    .staged(&drop_token)
+            },
         )
     })
     .await
@@ -310,12 +315,23 @@ impl DropTokens {
         })
     }
 
+    #[cfg(test)]
     pub(super) fn take(
         &mut self,
         token: &str,
         index: u32,
         now: Instant,
     ) -> Result<PathBuf, String> {
+        self.take_item(token, index, now)?
+    }
+    /// Hands out item `index` of batch `token`. The outer error means nothing was handed out (no such batch or item);
+    /// the inner result is the item itself, which may be a refusal such as an unsupported file.
+    pub(super) fn take_item(
+        &mut self,
+        token: &str,
+        index: u32,
+        now: Instant,
+    ) -> Result<Result<PathBuf, String>, String> {
         if self.batch.as_ref().is_some_and(|batch| {
             now.checked_duration_since(batch.created)
                 .is_none_or(|age| age >= Duration::from_secs(30))
@@ -333,17 +349,73 @@ impl DropTokens {
             .and_then(Option::take)
             .ok_or_else(|| {
                 "Dropped item was already consumed or is outside this batch.".to_string()
-            })?
+            })
     }
 
     pub(super) fn retire(&mut self) {
         self.batch = None;
+    }
+
+    /// Whether a drop batch is still live with items not yet staged, so another capture would replace it.
+    pub(super) fn busy(&self, now: Instant) -> bool {
+        self.batch.as_ref().is_some_and(|batch| {
+            now.checked_duration_since(batch.created)
+                .is_some_and(|age| age < Duration::from_secs(30))
+                && batch.items.iter().any(Option::is_some)
+        })
+    }
+    /// Ends batch `token`, if it is still the current one. Another batch is left alone.
+    pub(super) fn end(&mut self, token: &str) -> bool {
+        if self
+            .batch
+            .as_ref()
+            .is_some_and(|batch| batch.token == token)
+        {
+            self.batch = None;
+            return true;
+        }
+        false
     }
 }
 
 #[cfg(test)]
 mod drop_tests {
     use super::*;
+
+    #[test]
+    fn ending_a_batch_leaves_another_alone() {
+        let mut tokens = DropTokens::default();
+        let now = Instant::now();
+        let event = tokens
+            .capture(vec!["one.gp".into(), "two.gp5".into()], now, true)
+            .unwrap();
+        assert!(!tokens.end("another-token"), "another batch is left alone");
+        assert_eq!(
+            tokens.take(&event.drop_token, 0, now).unwrap(),
+            PathBuf::from("one.gp")
+        );
+        assert!(tokens.end(&event.drop_token));
+        assert!(
+            tokens.take(&event.drop_token, 1, now).is_err(),
+            "the batch has ended"
+        );
+        assert!(!tokens.end(&event.drop_token));
+    }
+
+    #[test]
+    fn a_live_batch_with_items_left_is_busy() {
+        let mut tokens = DropTokens::default();
+        let now = Instant::now();
+        assert!(!tokens.busy(now));
+        let event = tokens.capture(vec!["one.gp".into()], now, true).unwrap();
+        assert!(tokens.busy(now));
+        assert!(
+            !tokens.busy(now + Duration::from_secs(30)),
+            "an expired batch is not busy"
+        );
+        tokens.take(&event.drop_token, 0, now).unwrap();
+        assert!(!tokens.busy(now), "a batch with nothing left is not busy");
+    }
     use std::time::Duration;
 
     #[test]

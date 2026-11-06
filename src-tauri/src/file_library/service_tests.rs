@@ -159,6 +159,56 @@ fn lifecycle_epochs_retire_candidates_and_drop_tokens_without_changing_live_musi
 }
 
 #[test]
+fn launch_capture_waits_unconsumed_while_retired_or_a_drop_is_live() {
+    let (directory, library, workspace, _) = fixture();
+    let path = directory.path().join("launched.gp");
+    library.retire(&workspace).unwrap();
+    assert_eq!(
+        library.capture_launch(vec![path.clone()]).unwrap_err(),
+        vec![path.clone()]
+    );
+    library.resume();
+    let dropped = library
+        .capture_drop(vec![directory.path().join("dropped.gp")], true)
+        .unwrap();
+    assert_eq!(
+        library.capture_launch(vec![path.clone()]).unwrap_err(),
+        vec![path.clone()],
+        "a live drag-and-drop is not replaced"
+    );
+    let mut handed = false;
+    let _ = library.drop_stage_then(&dropped.drop_token, 0, &workspace, || handed = true);
+    assert!(handed, "the item was handed out, whatever its read gave");
+    let launched = library.capture_launch(vec![path]).unwrap();
+    assert_eq!(launched.count, 1);
+    library.drop_end("another-token");
+    let mut again = false;
+    let _ = library.drop_stage_then(&launched.drop_token, 0, &workspace, || again = true);
+    assert!(again, "ending another batch leaves this one");
+    library.drop_end(&launched.drop_token);
+    let unsupported = library
+        .capture_launch(vec![directory.path().join("notes.txt")])
+        .unwrap();
+    let mut refused = false;
+    assert!(
+        library
+            .drop_stage_then(&unsupported.drop_token, 0, &workspace, || refused = true)
+            .is_err()
+    );
+    assert!(
+        refused,
+        "an unsupported file is handed out too, so it is not offered again"
+    );
+    let mut ended = false;
+    assert!(
+        library
+            .drop_stage_then(&launched.drop_token, 0, &workspace, || ended = true)
+            .is_err()
+    );
+    assert!(!ended);
+}
+
+#[test]
 fn unavailable_catalog_preserves_picker_and_drop_intake_and_music_success() {
     let directory = tempfile::tempdir().unwrap();
     let root = directory.path().join("file-library-v1");

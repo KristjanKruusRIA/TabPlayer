@@ -346,6 +346,8 @@ export const de: MessageCatalog = {
   'export.measures_to_export': 'Zu exportierende Takte',
   'export.audio': 'Audio',
   'export.ogg': 'OGG Vorbis (komprimiert)',
+  'export.mp3': 'MP3 (komprimiert)',
+  'export.mp3_note': 'MP3 ist komprimiert und verlustbehaftet, mit konstant 256 kbit/s, und lässt sich fast überall abspielen. Dateien sind etwa ein Sechstel so groß wie WAV, und normalisierte Spitzen können nach der Komprimierung −1 dBFS leicht überschreiten.',
   'export.ogg_note': 'OGG Vorbis ist komprimiert und verlustbehaftet, mit etwa 192 kbit/s. Dateien sind etwa ein Siebtel so groß wie WAV, und normalisierte Spitzen können nach der Komprimierung −1 dBFS leicht überschreiten.',
 
   // Saved Tunings Dialog

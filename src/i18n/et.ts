@@ -346,6 +346,8 @@ export const et: MessageCatalog = {
   'export.measures_to_export': 'Eksporditavad taktid',
   'export.audio': 'Heli',
   'export.ogg': 'OGG Vorbis (tihendatud)',
+  'export.mp3': 'MP3 (tihendatud)',
+  'export.mp3_note': 'MP3 on tihendatud ja kadudega, püsiva bitikiirusega 256 kbit/s, ning mängib peaaegu kõikjal. Failid on umbes kuuendik WAV-i suurusest ja normaliseeritud tipud võivad pärast tihendamist −1 dBFS-i veidi ületada.',
   'export.ogg_note': 'OGG Vorbis on tihendatud ja kadudega, umbes 192 kbit/s. Failid on umbes seitsmendik WAV-i suurusest ja normaliseeritud tipud võivad pärast tihendamist −1 dBFS-i veidi ületada.',
 
   // Saved Tunings Dialog

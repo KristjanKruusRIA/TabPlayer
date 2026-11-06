@@ -8,9 +8,10 @@ async function collect(directory,name,version,license) {
   const destination=new URL(`${name.replaceAll('/','_')}-${version}/`,output);await mkdir(destination,{recursive:true});
   const files=(await readdir(directory)).filter(file=>/^(license|licence|copying|notice|authors)([.-]|$)/i.test(file));
   for(const file of files)await copyFile(join(directory,file),new URL(file,destination));
-  // A crate that builds bundled C sources keeps their licenses in its `*_vendor` folders, as the Ogg and Vorbis crates do.
+  // A crate that builds bundled C sources keeps their licenses in its `*_vendor` folders, as the Ogg and Vorbis crates do,
+  // or in the source folder itself, as mp3lame-sys does with `lame-3.100`.
   for(const entry of await readdir(directory,{withFileTypes:true})) {
-    if(!entry.isDirectory()||!entry.name.endsWith('_vendor'))continue;
+    if(!entry.isDirectory()||!(entry.name.endsWith('_vendor')||/^lame-\d/.test(entry.name)))continue;
     for(const file of (await readdir(join(directory,entry.name))).filter(file=>/^(license|licence|copying)([.-]|$)/i.test(file))) {
       const named=`${entry.name}-${file}`;await copyFile(join(directory,entry.name,file),new URL(named,destination));files.push(named);
     }

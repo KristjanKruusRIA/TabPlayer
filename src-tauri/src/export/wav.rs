@@ -1,4 +1,5 @@
 use super::flac;
+use super::mp3::Mp3Encoder;
 use atomic_write_file::AtomicWriteFile;
 use serde::{Deserialize, Serialize};
 use std::{cell::RefCell, num::NonZeroU8, num::NonZeroU32, rc::Rc};
@@ -21,7 +22,7 @@ pub const NORMALIZE_MAX_GAIN_DB: f64 = 40.0;
 pub const OGG_QUALITY: f32 = 0.6;
 /// The Ogg stream serial number. Fixed, so the same audio always encodes to the same file.
 const OGG_SERIAL: i32 = 0x5450_4c59;
-/// The audio file type: RIFF WAV, little-endian, AIFF, big-endian, lossless FLAC, or compressed Ogg Vorbis.
+/// The audio file type: RIFF WAV, little-endian, AIFF, big-endian, lossless FLAC, or compressed Ogg Vorbis or MP3.
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub enum AudioContainer {
@@ -30,6 +31,7 @@ pub enum AudioContainer {
     Aiff,
     Flac,
     Ogg,
+    Mp3,
 }
 impl AudioContainer {
     fn is_wav(&self) -> bool {
@@ -42,15 +44,16 @@ impl AudioContainer {
             AudioContainer::Aiff => "aiff",
             AudioContainer::Flac => "flac",
             AudioContainer::Ogg => "ogg",
+            AudioContainer::Mp3 => "mp3",
         }
     }
     /// The most sample bytes a file can hold: a RIFF size is unsigned, and an AIFF chunk size is signed. FLAC is
-    /// limited by its frame count instead, and Ogg by nothing a song reaches.
+    /// limited by its frame count instead, and Ogg and MP3 by nothing a song reaches.
     fn max_data_bytes(self) -> u64 {
         match self {
             AudioContainer::Wav => u32::MAX as u64 - 36,
             AudioContainer::Aiff => i32::MAX as u64 - 46,
-            AudioContainer::Flac | AudioContainer::Ogg => u64::MAX,
+            AudioContainer::Flac | AudioContainer::Ogg | AudioContainer::Mp3 => u64::MAX,
         }
     }
     /// The header's length; the samples follow it.
@@ -59,7 +62,7 @@ impl AudioContainer {
             AudioContainer::Wav => 44,
             AudioContainer::Aiff => 54,
             AudioContainer::Flac => flac::HEADER_BYTES as u64,
-            AudioContainer::Ogg => 0,
+            AudioContainer::Ogg | AudioContainer::Mp3 => 0,
         }
     }
 }
@@ -67,7 +70,7 @@ impl AudioContainer {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AudioFormat {
     pub sample_rate: u32,
-    /// Ogg Vorbis encodes floating-point samples, so it ignores the bit depth.
+    /// Ogg Vorbis and MP3 encode floating-point samples, so they ignore the bit depth.
     pub bit_depth: u16,
     /// Requests and stem manifests written before AIFF read as WAV, which is not written.
     #[serde(default, skip_serializing_if = "AudioContainer::is_wav")]
@@ -84,7 +87,7 @@ impl AudioFormat {
     }
     pub fn validate(self) -> Result<(), String> {
         if ![44100, 48000].contains(&self.sample_rate) || ![16, 24].contains(&self.bit_depth) {
-            Err("Choose stereo 44.1/48 kHz, 16/24-bit WAV, AIFF, FLAC or Ogg Vorbis.".into())
+            Err("Choose stereo 44.1/48 kHz, 16/24-bit WAV, AIFF, FLAC, Ogg Vorbis or MP3.".into())
         } else {
             Ok(())
         }
@@ -125,6 +128,8 @@ pub struct PcmWriter<W: Write + Seek> {
     frame_bytes: (u32, u32),
     /// Ogg only: the encoder, the pages it has written and not yet moved to the file, and each channel's samples.
     ogg: Option<(VorbisEncoder<OggPages>, OggPages, [Vec<f32>; 2])>,
+    /// MP3 only: the encoder, and the bytes it wrote for the current block.
+    mp3: Option<(Mp3Encoder, Vec<u8>)>,
 }
 impl<W: Write + Seek> PcmWriter<W> {
     pub fn new(mut file: W, format: AudioFormat) -> Result<Self, String> {
@@ -156,6 +161,11 @@ impl<W: Write + Seek> PcmWriter<W> {
         } else {
             None
         };
+        let mp3 = if format.container == AudioContainer::Mp3 {
+            Some((Mp3Encoder::new(format.sample_rate)?, Vec::new()))
+        } else {
+            None
+        };
         Ok(Self {
             file,
             format,
@@ -166,6 +176,7 @@ impl<W: Write + Seek> PcmWriter<W> {
             written: 0,
             frame_bytes: (u32::MAX, 0),
             ogg,
+            mp3,
         })
     }
     /// Moves the pages the Vorbis encoder has written into the file.
@@ -199,6 +210,7 @@ impl<W: Write + Seek> PcmWriter<W> {
                 }
                 AudioContainer::Flac => "FLAC exceeds its size limit. Export a shorter range.",
                 AudioContainer::Ogg => "Ogg Vorbis exceeds its size limit. Export a shorter range.",
+                AudioContainer::Mp3 => "MP3 exceeds its size limit. Export a shorter range.",
             }
             .into());
         }
@@ -223,6 +235,17 @@ impl<W: Write + Seek> PcmWriter<W> {
             self.frames = new_frames;
             return Ok(());
         }
+        if let Some((encoder, bytes)) = &mut self.mp3 {
+            if block.iter().flatten().any(|sample| !sample.is_finite()) {
+                return Err("Audio renderer produced a non-finite sample.".into());
+            }
+            bytes.clear();
+            encoder.encode(block, bytes)?;
+            self.file.write_all(bytes).map_err(|e| e.to_string())?;
+            self.written += bytes.len() as u64;
+            self.frames = new_frames;
+            return Ok(());
+        }
         let scale = (1_i64 << (self.format.bit_depth - 1)) as f64;
         let mut bytes = Vec::with_capacity(block.len() * 2 * bytes_per_sample);
         for sample in block.iter().flatten() {
@@ -244,7 +267,9 @@ impl<W: Write + Seek> PcmWriter<W> {
                     let channel = self.pending[0].len() - self.pending[1].len();
                     self.pending[channel].push(value)
                 }
-                AudioContainer::Ogg => unreachable!("Ogg blocks are encoded above"),
+                AudioContainer::Ogg | AudioContainer::Mp3 => {
+                    unreachable!("compressed blocks are encoded above")
+                }
             }
         }
         self.file.write_all(&bytes).map_err(|e| e.to_string())?;
@@ -285,6 +310,22 @@ impl<W: Write + Seek> PcmWriter<W> {
             Self::move_ogg_pages(&mut self.file, &pages)?;
             self.file.flush().map_err(|e| e.to_string())?;
             return Ok((self.file, self.frames));
+        }
+        if let Some((encoder, mut bytes)) = self.mp3.take() {
+            bytes.clear();
+            let tag = encoder.finish(&mut bytes)?;
+            self.file.write_all(&bytes).map_err(|e| e.to_string())?;
+            self.written += bytes.len() as u64;
+            let actual = self
+                .file
+                .seek(SeekFrom::End(0))
+                .map_err(|e| e.to_string())?;
+            if actual != self.written || (tag.len() as u64) > actual {
+                return Err("Audio frame verification failed.".into());
+            }
+            // LAME reserved the first frame for this tag, which holds the length and the encoder delay and padding
+            // that players skip for gapless playback.
+            return self.write_header(&tag);
         }
         if self.format.container == AudioContainer::Flac {
             while !self.pending[0].is_empty() {
@@ -826,6 +867,134 @@ mod tests {
         let mut writer = PcmWriter::new(std::io::Cursor::new(Vec::new()), format).unwrap();
         assert!(writer.write_block(&[[f32::NAN, 0.0]]).is_err());
     }
+    /// Writes `N` frames of `source` as MP3 in alternating 300 and 512 frame blocks, and returns the file's bytes.
+    fn mp3_of(path: &Path, rate: u32, n: usize, source: impl Fn(usize) -> [f32; 2]) -> Vec<u8> {
+        let mut done = 0;
+        let mut odd = false;
+        let frames = write_wav(
+            path,
+            AudioFormat {
+                sample_rate: rate,
+                bit_depth: 16,
+                container: AudioContainer::Mp3,
+            },
+            |block| {
+                odd = !odd;
+                let count = (n - done).min(if odd { 300 } else { block.len() });
+                for (i, sample) in block[..count].iter_mut().enumerate() {
+                    *sample = source(done + i);
+                }
+                done += count;
+                Ok(count)
+            },
+            &AtomicBool::new(false),
+            |_| {},
+        )
+        .unwrap();
+        assert_eq!(frames, n as u64);
+        std::fs::read(path).unwrap()
+    }
+    #[test]
+    fn mp3_decodes_independently_to_the_same_length_and_sound() {
+        let d = tempfile::tempdir().unwrap();
+        for rate in [44_100u32, 48_000] {
+            // Ten seconds of a chord with a different line in each channel.
+            let n = rate as usize * 10;
+            let source = |t: usize| {
+                let t = t as f32 / rate as f32;
+                let tau = std::f32::consts::TAU;
+                [
+                    0.3 * (tau * 220.0 * t).sin() + 0.2 * (tau * 330.0 * t).sin(),
+                    0.25 * (tau * 440.0 * t).sin() - 0.15 * (tau * 165.0 * t).cos(),
+                ]
+            };
+            let bytes = mp3_of(&d.path().join(format!("song-{rate}.mp3")), rate, n, source);
+            // An MPEG-1 Layer III frame header: sync, then MPEG-1, Layer III, no CRC.
+            assert_eq!((bytes[0], bytes[1] & 0xfe), (0xff, 0xfa), "{rate} Hz");
+            // The first frame is LAME's information tag, written over the frame it reserved.
+            let tag = &bytes[..1500];
+            assert!(
+                tag.windows(4).any(|w| w == b"Info") && tag.windows(4).any(|w| w == b"LAME"),
+                "{rate} Hz: no information tag"
+            );
+            // About 256 kbit/s: ten seconds take about 320 000 bytes.
+            assert!(
+                (310_000..340_000).contains(&bytes.len()),
+                "{rate} Hz: {} bytes",
+                bytes.len()
+            );
+            let decoded = crate::audio::decode::decode_audio(&bytes, Some("mp3")).unwrap();
+            assert_eq!((decoded.sample_rate, decoded.channels), (rate, 2));
+            assert_eq!(
+                decoded.frames.len(),
+                n,
+                "{rate} Hz: the tag's delay and padding give the exact length"
+            );
+            // Lossy but faithful: the error is more than 30 dB below the signal in each channel.
+            for channel in 0..2 {
+                let (mut signal, mut error) = (0.0f64, 0.0f64);
+                for (t, frame) in decoded.frames.iter().enumerate() {
+                    let want = source(t)[channel] as f64;
+                    signal += want * want;
+                    error += (frame[channel] as f64 - want).powi(2);
+                }
+                let snr = 10.0 * (signal / error).log10();
+                assert!(snr > 30.0, "{rate} Hz channel {channel}: {snr:.1} dB");
+            }
+            // The same audio, in the same blocks, encodes to the same file.
+            let again = mp3_of(&d.path().join(format!("again-{rate}.mp3")), rate, n, source);
+            assert!(again == bytes, "{rate} Hz: the two encodings differ");
+        }
+    }
+    #[test]
+    fn an_empty_or_clipping_mp3_export_is_handled() {
+        let d = tempfile::tempdir().unwrap();
+        let format = AudioFormat {
+            sample_rate: 44_100,
+            bit_depth: 16,
+            container: AudioContainer::Mp3,
+        };
+        let path = d.path().join("empty.mp3");
+        assert_eq!(
+            write_wav(&path, format, |_| Ok(0), &AtomicBool::new(false), |_| {}).unwrap(),
+            0
+        );
+        // Still an MPEG-1 Layer III stream whose first frame is the information tag, and it holds no audio: the decoder finds no frames.
+        let empty = std::fs::read(&path).unwrap();
+        assert_eq!((empty[0], empty[1] & 0xfe), (0xff, 0xfa));
+        assert!(empty.windows(4).any(|w| w == b"Info") && empty.windows(4).any(|w| w == b"LAME"));
+        assert_eq!(
+            crate::audio::decode::decode_audio(&empty, Some("mp3"))
+                .err()
+                .as_deref(),
+            Some("The audio file has no decodable frames")
+        );
+        let mut writer = PcmWriter::new(std::io::Cursor::new(Vec::new()), format).unwrap();
+        assert!(writer.write_block(&[[f32::NAN, 0.0]]).is_err());
+        assert!(writer.write_block(&[[0.0, f32::INFINITY]]).is_err());
+        // The encoder refuses non-finite samples itself too, before LAME sees them.
+        let mut encoder = super::super::mp3::Mp3Encoder::new(44_100).unwrap();
+        let mut bytes = Vec::new();
+        assert!(encoder.encode(&[[0.0, f32::NAN]], &mut bytes).is_err());
+        assert!(
+            encoder
+                .encode(&[[f32::NEG_INFINITY, 0.0]], &mut bytes)
+                .is_err()
+        );
+        assert!(bytes.is_empty());
+        // Samples past full scale are clamped, not wrapped.
+        let loud = mp3_of(&d.path().join("loud.mp3"), 44_100, 44_100, |t| {
+            let v = 3.0 * (std::f32::consts::TAU * 100.0 * t as f32 / 44_100.0).sin();
+            [v, -v]
+        });
+        let decoded = crate::audio::decode::decode_audio(&loud, Some("mp3")).unwrap();
+        let peak = decoded
+            .frames
+            .iter()
+            .flatten()
+            .fold(0.0f32, |m, v| m.max(v.abs()));
+        assert!((0.9..1.3).contains(&peak), "peak {peak}");
+    }
     #[test]
     fn older_requests_read_as_wav_and_only_aiff_or_flac_is_written() {
         let older: AudioFormat =
@@ -860,7 +1029,7 @@ mod tests {
             r#"{"sampleRate":44100,"bitDepth":16,"container":"ogg"}"#
         );
         for wrong in [
-            r#""mp3""#,
+            r#""MP3""#,
             r#""FLAC""#,
             r#""AIFF""#,
             r#""OGG""#,
@@ -875,6 +1044,14 @@ mod tests {
                 "{wrong}"
             );
         }
+        let mp3: AudioFormat =
+            serde_json::from_str(r#"{"sampleRate":48000,"bitDepth":24,"container":"mp3"}"#)
+                .unwrap();
+        assert_eq!(mp3.container, AudioContainer::Mp3);
+        assert_eq!(
+            serde_json::to_string(&mp3).unwrap(),
+            r#"{"sampleRate":48000,"bitDepth":24,"container":"mp3"}"#
+        );
         assert_eq!(extended(44100), [0x40, 0x0e, 0xac, 0x44, 0, 0, 0, 0, 0, 0]);
         assert_eq!(extended(48000), [0x40, 0x0e, 0xbb, 0x80, 0, 0, 0, 0, 0, 0]);
     }
@@ -903,6 +1080,7 @@ mod tests {
             AudioContainer::Aiff,
             AudioContainer::Flac,
             AudioContainer::Ogg,
+            AudioContainer::Mp3,
         ] {
             let d = tempfile::tempdir().unwrap();
             let path = d.path().join(format!("existing.{}", container.extension()));

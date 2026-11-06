@@ -344,6 +344,8 @@ export const en = {
   'export.measures_to_export': 'Measures to export',
   'export.audio': 'Audio',
   'export.ogg': 'OGG Vorbis (compressed)',
+  'export.mp3': 'MP3 (compressed)',
+  'export.mp3_note': 'MP3 is compressed and lossy, at a constant 256 kbit/s, and plays almost everywhere. Files are around a sixth of the WAV size, and normalized peaks can pass −1 dBFS slightly after compression.',
   'export.ogg_note': 'OGG Vorbis is compressed and lossy, at about 192 kbit/s. Files are around a seventh of the WAV size, and normalized peaks can pass −1 dBFS slightly after compression.',
 
   // Saved Tunings Dialog

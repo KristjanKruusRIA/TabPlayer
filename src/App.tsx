@@ -9,7 +9,10 @@ import { busyGuard } from './ui/useBusyGuard';
 import { followSelectedTrack,movedTrackIndex,repairMeasureSelection,repairSelection, validSelectionIndices } from './selection';
 import { ScoreView } from './ScoreView';
 import { EditorPanel, type InspectorContextScope } from './EditorPanel';
+import { MasterPanel } from './audio/MasterPanel';
+type InspectorTab='song'|'track'|'selection';
 import { TrackPanel } from './TrackPanel';
+import { trackColorHex } from './track-color';
 import './styles.css';
 import { NativePlaybackController } from './audio/NativePlaybackController';
 import { SoundPanel } from './audio/SoundPanel';
@@ -17,7 +20,7 @@ import { MixerView } from './mixer/MixerView';
 import { SoundRig } from './rig/SoundRig';
 import { CabinetResponse } from './audio/CabinetResponse';
 import { Segmented } from './ui';
-import { MarkGlyph,PanelBottomGlyph,PanelLeftGlyph,PanelRightGlyph,RedoGlyph,UndoGlyph } from './shell/glyphs';
+import { AmpGlyph,ExportGlyph,FretboardGlyph,MarkGlyph,MixerGlyph,PaletteGlyph,PanelBottomGlyph,PanelRightGlyph,PracticeGlyph,RedoGlyph,ScoreGlyph,UndoGlyph } from './shell/glyphs';
 import { InterpretationPanel } from './audio/InterpretationPanel';
 import { CabinetNotices } from './audio/CabinetNotices';
 import { BackingPanel } from './audio/BackingPanel';
@@ -40,7 +43,9 @@ import { trackIdentity } from './engine';
 import { ExportDialog } from './export/ExportDialog';
 import { useExportCoordinator } from './export/useExportCoordinator';
 import type { ExportOptions,ExportSelection } from './export/types';
-import { Transport } from './Transport';
+import { Transport, type TransportDisplay } from './Transport';
+import { barCompletion } from './editor/bar-completion';
+import { DockResizeHandle } from './workstation/DockResizeHandle';
 import { LiveInstrumentView } from './instruments/LiveInstrumentView';
 import { followEntry, type EntryFollow } from './instruments/entry';
 import type { MusicSelection } from './editor/range-types';
@@ -86,6 +91,7 @@ import type { HarmonyLibrary } from './editor/harmony-types';
 import { HarmonyTransposePanel } from './harmony/HarmonyTransposePanel';
 import { TrackSettingsPanel } from './workstation/TrackSettingsPanel';
 import './workstation/workstation-shell.css';
+import './workstation/gp-shell.css';
 const noPlaybackSubscribe=()=>()=>{};
 const textEntry=(target:EventTarget)=>target instanceof HTMLElement&&(['INPUT','SELECT','TEXTAREA'].includes(target.tagName)&&!(target instanceof HTMLInputElement&&target.type==='range')||target.isContentEditable);
 
@@ -116,7 +122,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   useEffect(()=>{referenceLifetime.active=true;const unbind=controller.setReferenceWaveformBridge(waveformBridge);return()=>{referenceLifetime.active=false;unbind();};},[controller,waveformBridge,referenceLifetime]);
   const [selection,setSelection]=useState<BeatTarget>(documentView.target);
   const [musicSelection,setMusicSelection]=useState<MusicSelection|null>(null),rangeAnchor=useRef<BeatTarget|null>(null);
-  const [clipboardVersion,setClipboardVersion]=useState(0),[clipboardError,setClipboardError]=useState<string|null>(null),[contextScope,setContextScope]=useState<InspectorContextScope>('all');
+  const [clipboardVersion,setClipboardVersion]=useState(0),[clipboardError,setClipboardError]=useState<string|null>(null),[contextScope,setContextScope]=useState<InspectorContextScope>('all'),[measureRequest,setMeasureRequest]=useState(0);
   const [inputPrefs,setInputPrefs]=useInputPreferences(),entryDuration=useRef<EntryDuration|null>(null),[inputNotice,setInputNotice]=useState<{text:string;at:string}|null>(null);
   const [auditionEdits,setAuditionEdits]=useState(readAuditionWhileEditing),auditionEditsNow=useRef(auditionEdits);auditionEditsNow.current=auditionEdits;
   const [markErrors,setMarkErrors]=useState(readScoreErrorDisplay),scoreErrors=useMemo(()=>findScoreErrors(state.score),[state.score]),sections=useMemo(()=>listSections(state.score),[state.score]);
@@ -135,31 +141,37 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   },[]);
   const manualZoom=(value:number)=>{setZoom(value);setScoreDisplay(old=>old&&old.zoomMode!=='manual'?{...old,zoomMode:'manual'}:old);};
   const [instrumentVisible,setInstrumentVisible]=useState(documentView.instrumentVisible);
-  const [leftTask,setLeftTask]=useState<'track'|'sound'|'backing'>('track');
-  const [leftVisible,setLeftVisible]=useState(true),[inspectorVisible,setInspectorVisible]=useState(true),[dockVisible,setDockVisible]=useState(true);
+  const [paletteVisible,setPaletteVisible]=useState(true),[paletteHost,setPaletteHost]=useState<HTMLElement|null>(null);
+  const [songHost,setSongHost]=useState<HTMLElement|null>(null),[practiceHost,setPracticeHost]=useState<HTMLElement|null>(null);
+  const [inspectorVisible,setInspectorVisible]=useState(true),[dockVisible,setDockVisible]=useState(true);
+  /** The inspector shows the whole song, the current track, or the editors for the selection, as GP's Song and Track tabs do. */
+  const [inspectorTab,setInspectorTab]=useState<InspectorTab>('selection');
   /** The centre region shows the score or the Sound rig; the transport and the rest of the shell stay as they are. */
   const [view,setView]=useState<'score'|'sound'|'mixer'>('score');
-  const [narrowPane,setNarrowPane]=useState<'track'|'sound'|'backing'|'inspector'>('inspector');
   const [viewport,setViewport]=useState(()=>({width:window.innerWidth,height:window.innerHeight}));
   const [dockMode,setDockMode]=useState<'overview'|'mixer'|'backing'>('overview'),[dockForced,setDockForced]=useState(false),[waveformOpened,setWaveformOpened]=useState(false);
   const shell=useRef<HTMLDivElement>(null),workspace=useRef<HTMLDivElement>(null),scorePane=useRef<HTMLElement>(null),commandBar=useRef<HTMLElement>(null);
-  const leftPane=useRef<HTMLElement>(null),inspectorPane=useRef<HTMLDivElement>(null),paneRail=useRef<HTMLElement>(null),viewMenu=useRef<HTMLDetailsElement>(null);
-  const paneFocusIntent=useRef<{pane:'track'|'sound'|'backing'|'inspector';trigger:boolean}|null>(null),[paneFocusTick,setPaneFocusTick]=useState(0);
+  const inspectorPane=useRef<HTMLDivElement>(null),viewMenu=useRef<HTMLDetailsElement>(null),practiceMenu=useRef<HTMLDetailsElement>(null);
+  const paneFocusIntent=useRef<InspectorTab|null>(null),[paneFocusTick,setPaneFocusTick]=useState(0);
   const [workspaceHeight,setWorkspaceHeight]=useState(Infinity),[clipboardFocus,setClipboardFocus]=useState(0);
-  const narrow=viewport.width<1180,leftShown=leftVisible&&(!narrow||narrowPane!=='inspector'),inspectorShown=inspectorVisible&&(!narrow||narrowPane==='inspector');
-  const dockHeight=instrumentVisible?(viewport.height<800?160:184):(viewport.height<800?dockMode==='backing'?176:144:viewport.width>=1440?192:176);
+  const narrow=viewport.width<1180,inspectorShown=inspectorVisible;
+  const autoDockHeight=instrumentVisible?(viewport.height<800?160:184):(viewport.height<800?dockMode==='backing'?176:144:viewport.width>=1440?192:176);
+  // A height the user dragged to stays within reach of the score: it never grows into the collapse threshold below.
+  const [dockSize,setDockSize]=useState<number|null>(null),dockMin=96,dockMax=Math.max(dockMin,Math.min(460,Number.isFinite(workspaceHeight)?workspaceHeight-200:460));
+  const dockHeight=dockSize===null?autoDockHeight:Math.min(dockMax,Math.max(dockMin,dockSize));
   const dockCollapsed=dockVisible&&!dockForced&&workspaceHeight-dockHeight<200;
   const instrumentShown=instrumentVisible&&dockVisible&&!dockCollapsed;
-  const requestPaneFocus=(pane:'track'|'sound'|'backing'|'inspector',trigger=false)=>{paneFocusIntent.current={pane,trigger};setPaneFocusTick(value=>value+1);};
-  useEffect(()=>{const resize=()=>{if(window.innerWidth<1180){if(narrowPane==='inspector'&&leftPane.current?.contains(document.activeElement))requestPaneFocus(leftTask,true);else if(narrowPane!=='inspector'&&inspectorPane.current?.contains(document.activeElement))requestPaneFocus('inspector',true);}setViewport({width:window.innerWidth,height:window.innerHeight});};window.addEventListener('resize',resize);return()=>window.removeEventListener('resize',resize);},[narrowPane,leftTask]);
+  const requestPaneFocus=(tab:InspectorTab)=>{paneFocusIntent.current=tab;setPaneFocusTick(value=>value+1);};
+  useEffect(()=>{const resize=()=>setViewport({width:window.innerWidth,height:window.innerHeight});window.addEventListener('resize',resize);return()=>window.removeEventListener('resize',resize);},[]);
   useLayoutEffect(()=>{if(!workspace.current||typeof ResizeObserver==='undefined')return;const observer=new ResizeObserver(entries=>{const height=entries[0]?.contentRect.height;if(height>0)setWorkspaceHeight(height);});observer.observe(workspace.current);return()=>observer.disconnect();},[]);
   const closeCommands=(focus=false)=>{commandBar.current?.querySelectorAll<HTMLDetailsElement>('details[open]').forEach(details=>{details.open=false;if(focus)details.querySelector('summary')?.focus();});};
   const commandToggle=(current:HTMLDetailsElement)=>{if(current.open)commandBar.current?.querySelectorAll<HTMLDetailsElement>('details[open]').forEach(other=>{if(other!==current)other.open=false;});};
   useEffect(()=>{const outside=(event:PointerEvent)=>{if(event.target instanceof Node&&!commandBar.current?.contains(event.target))closeCommands(true);};document.addEventListener('pointerdown',outside);return()=>document.removeEventListener('pointerdown',outside);},[]);
-  useLayoutEffect(()=>{const intent=paneFocusIntent.current;if(!intent)return;paneFocusIntent.current=null;if(document.activeElement instanceof Element&&document.activeElement.closest('[role="dialog"]'))return;const pane=intent.pane==='inspector'?inspectorPane.current:leftPane.current;const activeTask=intent.pane==='inspector'?pane:pane?.querySelector<HTMLElement>('.workstation-task:not([hidden])');const destination=intent.trigger?paneRail.current?.querySelector<HTMLElement>(`[data-pane="${intent.pane}"]`):activeTask?.querySelector<HTMLElement>('summary,button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled)');destination?.focus();},[paneFocusTick,leftShown,inspectorShown,leftTask,narrowPane,viewport.width]);
+  useLayoutEffect(()=>{const tab=paneFocusIntent.current;if(!tab)return;paneFocusIntent.current=null;if(document.activeElement instanceof Element&&document.activeElement.closest('[role="dialog"]'))return;inspectorPane.current?.querySelector<HTMLElement>(`[data-inspector-tab="${tab}"]`)?.focus();},[paneFocusTick,inspectorShown,inspectorTab]);
   useLayoutEffect(()=>{if(!clipboardFocus)return;const section=clipboardSection.current?.querySelector('details');if(section){for(let parent=section.parentElement;parent;parent=parent.parentElement)if(parent instanceof HTMLDetailsElement)parent.open=true;section.open=true;section.querySelector('summary')?.focus();section.scrollIntoView?.({block:'nearest'});}},[clipboardFocus]);
-  const showTask=(task:'track'|'sound'|'backing')=>{closeCommands();setLeftVisible(true);setLeftTask(task);setNarrowPane(task);requestPaneFocus(task);};
-  const showInspector=()=>{closeCommands();setInspectorVisible(true);setNarrowPane('inspector');requestPaneFocus('inspector');};
+  /** Shows the inspector on a tab and moves focus to that tab, as a menu command or toolbar button does. */
+  const openInspector=(tab:InspectorTab=inspectorTab,scope?:InspectorContextScope)=>{closeCommands();setInspectorVisible(true);setInspectorTab(tab);if(scope)setContextScope(scope);requestPaneFocus(tab);};
+  const showInspector=()=>openInspector();
   const chooseDock=(mode:'overview'|'mixer'|'instrument'|'backing')=>{setDockVisible(true);setDockForced(true);setInstrumentVisible(mode==='instrument');if(mode!=='instrument')setDockMode(mode);if(mode==='backing')setWaveformOpened(true);};
   const hideDock=()=>{setDockVisible(false);viewMenu.current?.querySelector('summary')?.focus();};
   const [harmonyOpen,setHarmonyOpen]=useState(false),[scaleOpen,setScaleOpen]=useState(false),[libraryLoading,setLibraryLoading]=useState(false),[libraryError,setLibraryError]=useState<string|null>(null);
@@ -177,6 +189,14 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   const trackIds=useMemo(()=>state.score.tracks.map(trackIdentity),[state.score]);
   const trackNames=useMemo(()=>Object.fromEntries(state.score.tracks.map(track=>[trackIdentity(track),track.name||`Track ${track.index+1}`])),[state.score]);
   const visibleTracks=useMemo(()=>resolveVisibleTracks(trackIds,target.track,trackView),[trackIds,target.track,trackView]);
+  // A dock eye shows or hides one track in the score, as Displayed tracks does; the score always keeps one track.
+  const shownTracks=useRef({visible:visibleTracks,ids:trackIds});shownTracks.current={visible:visibleTracks,ids:trackIds};
+  const toggleShownTrack=useCallback((index:number)=>{
+    const {visible,ids}=shownTracks.current,next=new Set(visible);
+    if(next.has(index)){if(next.size<=1)return;next.delete(index);}else next.add(index);
+    const list=[...next].sort((a,b)=>a-b);
+    setTrackView(list.length===ids.length?{kind:'all'}:{kind:'custom',trackIds:list.map(track=>ids[track])});
+  },[]);
   const projection=useMemo(()=>projectEngraving(state.score,trackIds,state.settings.engraving),[state.score,trackIds,state.settings.engraving]);
   const pageState=useMemo(()=>{
     try{return {page:effectivePageLayout(state.settings),error:null};}
@@ -235,7 +255,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
       edit({type:'pasteMusic',clip,options:options??{target:{...target},destinations:source!.tracks.map((track,index)=>({sourceTrack:index,track:target.track+index,staffMap:track.staves.map((_,staff)=>clip.kind==='phrase'?target.staff:staff)})),count:1,placement:clip.kind==='phrase'?'currentBar':'beforeBar',filters:{diagrams:inputPrefs.pasteDiagrams,texts:true,timers:true,trackAutomations:true,masterAutomations:multi,sections:multi}}});
     }catch(reason){setClipboardError(reason instanceof Error?reason.message:String(reason));}
   };
-  const showClipboard=()=>{setContextScope('all');showInspector();setClipboardFocus(value=>value+1);};
+  const showClipboard=()=>{setContextScope('all');setInspectorVisible(true);setInspectorTab('selection');setClipboardFocus(value=>value+1);};
   const documentAction=(job:Promise<unknown>)=>change(job);
   const [paletteOpen,setPaletteOpen]=useState(false),paletteReturn=useRef<HTMLElement|null>(null);
   const [protectionDialog,setProtectionDialog]=useState<'manage'|'unlock'|null>(null),protectionReturn=useRef<HTMLElement|null>(null);
@@ -306,6 +326,23 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   const cancelExport=()=>{exportCancelled.current=true;const running=exportRunning.current;act((async()=>{let failed=false;try{await exports.cancel();}catch(error){failed=true;setExportError(String(error));}await running;if(!failed)closeModal();})());};
   const backingEdit=(command:EditCommand,candidate?:BackingCandidate)=>controller.edit(command,candidate);
   const selectedTrack=state.score.tracks[target.track],trackId=trackIdentity(selectedTrack);
+  const transportScore=state.score,transportTrack=`${target.track+1}. ${selectedTrack.name||`Track ${target.track+1}`}`;
+  const transportColor=trackColorHex(selectedTrack.color);
+  const transportTracks=useMemo(()=>transportScore.tracks.map((track,index)=>`${index+1}. ${track.name||`Track ${index+1}`}`),[transportScore]);
+  // The display's links reuse the command palette's selection path, so moving there is the same gesture as Go to measure.
+  const displayActions=useRef({select:(_:BeatTarget)=>{},measure:(_:number)=>{}});
+  displayActions.current={
+    select:next=>runPalette({kind:'select',target:next}),
+    measure:bar=>{runPalette({kind:'select',target:{...target,bar,beat:0}});setContextScope('measure');setInspectorVisible(true);setInspectorTab('selection');setMeasureRequest(tick=>tick+1);},
+  };
+  const displayTarget=target;
+  const transportDisplay=useMemo<TransportDisplay>(()=>({track:transportTrack,color:transportColor,tracks:transportTracks,trackIndex:displayTarget.track,
+    signatureAt:(bar:number)=>{const master=transportScore.masterBars[bar];return master?`${master.timeSignatureNumerator}/${master.timeSignatureDenominator}`:'';},
+    onTrack:index=>displayActions.current.select({...displayTarget,track:index,staff:0,voice:0,beat:0}),
+    onGoTo:bar=>displayActions.current.select({...displayTarget,bar,beat:0}),
+    onMeasure:bar=>displayActions.current.measure(bar),
+    completionAt:bar=>barCompletion(transportScore,displayTarget.track,displayTarget.staff,bar),
+  }),[transportScore,transportTrack,transportColor,transportTracks,displayTarget]);
   const originalBacking=state.embeddedBacking&&!projectCommands(state.snapshot.project).some(edit=>edit.type==='setBacking');
   const baseKey=originalBacking&&state.snapshot.project.base.kind==='file'?state.snapshot.project.base.sha256:null;
   const [embeddedSource,setEmbeddedSource]=useState<{bytes:Uint8Array;key:string;source:WaveformSourceInput|null;error:string|null}|null>(null),[embeddedRetry,setEmbeddedRetry]=useState(0);
@@ -320,7 +357,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   const waveformSource:WaveformSourceInput|null=state.settings.backing?{kind:'asset',assetId:state.settings.backing.assetId}:originalBacking?currentEmbedded?.source??null:null;
   const waveformEnabled=dockVisible&&!dockCollapsed&&!instrumentVisible&&dockMode==='backing';
   const backingTimeline=player?.backingTimeline()??null;
-  const referenceVisible=leftShown&&leftTask==='backing',metadataVisible=referenceVisible||waveformEnabled;
+  const referenceVisible=waveformEnabled,metadataVisible=referenceVisible||waveformEnabled;
   const sourceAssetId=state.settings.backing&&state.snapshot.project.assets[state.settings.backing.assetId]?state.settings.backing.assetId:null;
   const sourceOwner=useRef({controller,bridge:waveformBridge,assetId:sourceAssetId});sourceOwner.current={controller,bridge:waveformBridge,assetId:sourceAssetId};
   const [sourceMetadata,setSourceMetadata]=useState<{bridge:NativeBackingWaveformBridge;assetId:string;durationMs:number|null;error:string|null}|null>(null),[sourceRetry,setSourceRetry]=useState(0);
@@ -452,7 +489,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     else if(event.key==='Escape'){editorSelection(null);event.preventDefault();}
   }
   return <div ref={shell} className="app-shell" aria-busy={controlsBusy} data-narrow={narrow} onKeyDown={selectionKeys}>
-    <header ref={commandBar} className="toolbar" onKeyDown={event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();closeCommands(true);}}} onClickCapture={event=>{if(!(event.target instanceof Element))return;if(event.target instanceof HTMLElement)onFileCommandCapture?.(event.target);const disclosure=event.target.closest('summary')?.parentElement;if(disclosure instanceof HTMLDetailsElement)commandBar.current?.querySelectorAll<HTMLDetailsElement>('details[open]').forEach(other=>{if(other!==disclosure)other.open=false;});else if(event.target.closest('button'))closeCommands(true);}}><div className="toolbar-left"><h1><MarkGlyph/>TabPlayer</h1><nav aria-label="File and history">
+    <header ref={commandBar} className="toolbar gp-menubar" onKeyDown={event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();closeCommands(true);}}} onClickCapture={event=>{if(!(event.target instanceof Element))return;if(event.target instanceof HTMLElement)onFileCommandCapture?.(event.target);const disclosure=event.target.closest('summary')?.parentElement;if(disclosure instanceof HTMLDetailsElement)commandBar.current?.querySelectorAll<HTMLDetailsElement>('details[open]').forEach(other=>{if(other!==disclosure)other.open=false;});else if(event.target.closest('button'))closeCommands(true);}}><nav className="gp-menus" aria-label="File and history"><span className="gp-brand"><MarkGlyph/><h1 className="tp-sr">TabPlayer</h1></span>
       <details className="command-menu" onToggle={event=>commandToggle(event.currentTarget)}><summary>{t('menu.file')}</summary><section aria-label={t('menu.file_commands')}>
       <button disabled={controlsBusy} onClick={()=>documentAction(onNew())}>{t('action.new')}</button>
       <button disabled={controlsBusy} onClick={()=>documentAction(onOpen())}>{t('action.open')}</button>
@@ -467,53 +504,107 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
       <button {...busyGuard({busy:controlsBusy,onClick:()=>openProtection('manage')})}>Password protection…</button>
       <button disabled={controlsBusy||exports.busy} onClick={()=>openModal('export')}>{t('action.export_score')}</button><button disabled={controlsBusy||exports.busy} onClick={directExport}>{t('action.export_gp')}</button>
       {libraryMenu}{sessionMenu}</section></details>
+      <details className="command-menu" onToggle={event=>commandToggle(event.currentTarget)}><summary>{t('menu.edit')}</summary><section aria-label={t('menu.edit')}>
+        <button type="button" {...busyGuard({busy:editBusy,disabled:!state.snapshot.canUndo,onClick:()=>{change(controller.undo());}})}>{t('menu.undo')}</button>
+        <button type="button" {...busyGuard({busy:editBusy,disabled:!state.snapshot.canRedo,onClick:()=>{change(controller.redo());}})}>{t('menu.redo')}</button>
+        <button type="button" {...busyGuard({busy:controlsBusy,unavailable:editLocked||!musicSelection,onClick:()=>{copyMusic('singleTrack',true);}})}>{t('menu.cut')}</button>
+        <button type="button" {...busyGuard({busy:controlsBusy,unavailable:!musicSelection,onClick:()=>{copyMusic('singleTrack');}})}>{t('menu.copy')}</button>
+        <button type="button" {...busyGuard({busy:controlsBusy,unavailable:editLocked,onClick:()=>{pasteMusic();}})}>{t('menu.paste')}</button>
+        <button type="button" onClick={()=>{editorSelection(selectionForTrack(state.score,target.track));}}>{t('menu.select_track')}</button>
+        <button type="button" onClick={()=>{openPalette();}}>{t('menu.command_palette')}</button>
+      </section></details>
+      <details className="command-menu" onToggle={event=>commandToggle(event.currentTarget)}><summary>{t('menu.track')}</summary><section aria-label={t('menu.track')}>
+        <button type="button" onClick={()=>{openInspector('track');}}>{t('menu.track_properties')}</button>
+        <button type="button" onClick={()=>{chooseDock('mixer');}}>{t('menu.dock_mixer')}</button>
+        <button type="button" onClick={()=>{chooseDock('instrument');}}>{t('menu.dock_instrument')}</button>
+      </section></details>
+      <details className="command-menu" onToggle={event=>commandToggle(event.currentTarget)}><summary>{t('menu.bar')}</summary><section aria-label={t('menu.bar')}>
+        <button type="button" onClick={()=>{displayActions.current.measure(target.bar);}}>{t('menu.bar_properties')}</button>
+      </section></details>
+      <details className="command-menu" onToggle={event=>commandToggle(event.currentTarget)}><summary>{t('menu.note')}</summary><section aria-label={t('menu.note')}>
+        <button type="button" onClick={()=>{openInspector('selection','note');}}>{t('menu.note_properties')}</button>
+        <button type="button" onClick={()=>{openInspector('selection','beat');}}>{t('menu.beat_properties')}</button>
+      </section></details>
+      <details className="command-menu" onToggle={event=>commandToggle(event.currentTarget)}><summary>{t('menu.effects')}</summary><section aria-label={t('menu.effects')}>
+        <button type="button" onClick={()=>{setPaletteVisible(true);setView('score');}}>{t('menu.palette_effects')}</button>
+        <button type="button" {...busyGuard({busy:controlsBusy,unavailable:!location.beat,onClick:()=>{openModal('harmony');}})}>{t('menu.chord')}</button>
+      </section></details>
+      <details className="command-menu" onToggle={event=>commandToggle(event.currentTarget)}><summary>{t('menu.section')}</summary><section aria-label={t('menu.section')}>
+        <button type="button" onClick={()=>{openInspector('selection','all');}}>{t('menu.sections')}</button>
+      </section></details>
+      <details className="command-menu" onToggle={event=>commandToggle(event.currentTarget)}><summary>{t('menu.tools')}</summary><section aria-label={t('menu.tools')}>
+        <button type="button" onClick={()=>{closeCommands();if(practiceMenu.current){practiceMenu.current.open=true;practiceMenu.current.querySelector('summary')?.focus();}}}>{t('menu.practice')}</button>
+        <button type="button" onClick={()=>{openModal('scale');}}>{t('menu.scales')}</button>
+      </section></details>
+      <details className="command-menu" onToggle={event=>commandToggle(event.currentTarget)}><summary>{t('menu.sound')}</summary><section aria-label={t('menu.sound')}>
+        <button type="button" onClick={()=>{setView('score');}}>{t('menu.show_score')}</button>
+        <button type="button" onClick={()=>{setView('sound');}}>{t('menu.show_sound')}</button>
+        <button type="button" onClick={()=>{setView('mixer');}}>{t('menu.show_mixer')}</button>
+        <button type="button" onClick={()=>{openInspector('track');}}>{t('menu.track_sound')}</button>
+        <button type="button" onClick={()=>{openInspector('song');}}>{t('menu.sound_mastering')}</button>
+      </section></details>
       <details ref={viewMenu} className="command-menu" onToggle={event=>commandToggle(event.currentTarget)}><summary>{t('menu.view')}</summary><section aria-label={t('menu.workspace_view')}>
-        <label className="check"><input type="checkbox" checked={leftVisible} onChange={event=>event.target.checked?showTask(leftTask):setLeftVisible(false)}/>{t('view.track_panel')}</label>
         <label className="check"><input type="checkbox" checked={inspectorVisible} onChange={event=>event.target.checked?showInspector():setInspectorVisible(false)}/>{t('view.inspector')}</label>
         <label className="check"><input type="checkbox" checked={dockVisible} onChange={event=>setDockVisible(event.target.checked)}/>{t('view.bottom_dock')}</label>
+        <label className="check"><input type="checkbox" checked={paletteVisible} onChange={event=>setPaletteVisible(event.target.checked)}/>{t('view.edition_palette')}</label>
         <InputPreferencesPanel preferences={inputPrefs} onChange={setInputPrefs} preview={auditionEdits} onPreview={play=>{setAuditionEdits(play);writeAuditionWhileEditing(play);}}/>
         <div className="language-setting-row"><label>{t('preferences.language')}: <select aria-label={t('preferences.language')} value={preference} onChange={e=>setPreference(e.target.value as LanguagePreference)}><option value="system">{t('preferences.lang_system')}</option><option value="en">{t('preferences.lang_en')}</option><option value="et">{t('preferences.lang_et')}</option><option value="de">{t('preferences.lang_de')}</option></select></label></div>
       </section></details>
-      <button disabled={editBusy || !state.snapshot.canUndo} onClick={()=>change(controller.undo())} title={t('action.undo_title')}><UndoGlyph/><span className="bar-label">{t('action.undo')}</span></button>
-      <button disabled={editBusy || !state.snapshot.canRedo} onClick={()=>change(controller.redo())} title={t('action.redo_title')}><RedoGlyph/><span className="bar-label">{t('action.redo')}</span></button>
-    </nav></div><Segmented className="view-switch" label={t('view.view_label')} value={view} onChange={setView} options={[{value:'score',label:t('view.score')},{value:'sound',label:t('view.sound')},{value:'mixer',label:t('view.mixer')}]}/><div className="toolbar-right"><nav className="pane-toggles" aria-label="Panels"><button type="button" data-pane-toggle="left" aria-pressed={leftShown} title={t('view.track_panel')} aria-label={t('view.toggle_track_panel')} onClick={()=>leftVisible&&leftShown?setLeftVisible(false):showTask(leftTask)}><PanelLeftGlyph/></button><button type="button" data-pane-toggle="inspector" aria-pressed={inspectorShown} title={t('view.inspector')} aria-label={t('view.toggle_inspector')} onClick={()=>inspectorVisible&&inspectorShown?setInspectorVisible(false):showInspector()}><PanelRightGlyph/></button><button type="button" data-pane-toggle="dock" aria-pressed={dockVisible} title={t('view.bottom_dock')} aria-label={t('view.toggle_bottom_dock')} onClick={()=>setDockVisible(!dockVisible)}><PanelBottomGlyph/></button></nav><details className="keyboard-help" onToggle={event=>commandToggle(event.currentTarget)} onKeyDown={event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();event.currentTarget.open=false;event.currentTarget.querySelector('summary')?.focus();}}}><summary>{t('menu.help')}</summary><section role="region" aria-label={t('help.keyboard_editing_help')}>
+      <details className="command-menu" onToggle={event=>commandToggle(event.currentTarget)}><summary>{t('menu.window')}</summary><section aria-label={t('menu.window')}>
+        <button type="button" onClick={()=>{chooseDock('overview');}}>{t('menu.dock_overview')}</button>
+        <button type="button" onClick={()=>{chooseDock('mixer');}}>{t('menu.dock_mixer_window')}</button>
+        <button type="button" onClick={()=>{chooseDock('instrument');}}>{t('menu.dock_instrument_window')}</button>
+        <button type="button" onClick={()=>{chooseDock('backing');}}>{t('menu.dock_backing')}</button>
+      </section></details>
+      <details className="keyboard-help" onToggle={event=>commandToggle(event.currentTarget)} onKeyDown={event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();event.currentTarget.open=false;event.currentTarget.querySelector('summary')?.focus();}}}><summary>{t('menu.help')}</summary><section role="region" aria-label={t('help.keyboard_editing_help')}>
       <div className="help-actions"><button type="button" onClick={()=>openHelp('start')}>{t('help.topics_f1')}</button><button type="button" onClick={()=>openHelp('about')}>{t('help.about_updates')}</button></div>
       <h2>{t('help.keyboard_editing_heading')}</h2><p>{t('help.keyboard_editing_intro')}</p>
       <dl><dt>Ctrl/Cmd + N / O</dt><dd>{t('help.shortcut_new_open')}</dd><dt>Ctrl/Cmd + S</dt><dd>{t('help.shortcut_save')}</dd><dt>Ctrl/Cmd + W</dt><dd>{t('help.shortcut_close')}</dd><dt>Ctrl/Cmd + Tab</dt><dd>{t('help.shortcut_next_score')}</dd><dt>Ctrl/Cmd + Z</dt><dd>{t('help.shortcut_undo_redo')}</dd><dt>Space</dt><dd>{t('help.shortcut_play')}</dd><dt>Ctrl/Cmd + Shift + P</dt><dd>{t('help.shortcut_palette')}</dd></dl>
       <button type="button" onClick={openPalette}>{t('help.open_command_palette')}</button>
       <h3>{t('help.score_focused_heading')}</h3><dl><dt>Left / Right</dt><dd>{t('help.shortcut_beat')}</dd><dt>Up / Down</dt><dd>{t('help.shortcut_string')}</dd><dt>Digits, then Enter</dt><dd>{t('help.shortcut_fret')}</dd><dt>Shift + Left/Right</dt><dd>{t('help.shortcut_selection')}</dd><dt>Ctrl/Cmd + A</dt><dd>{t('help.shortcut_select_track')}</dd><dt>Ctrl/Cmd + T</dt><dd>Tie the selected notes to the notes before them, giving each the earlier fret. Add Shift to untie.</dd><dt>Ctrl/Cmd + C / X / V</dt><dd>{t('help.shortcut_clipboard')}</dd><dt>Escape</dt><dd>{t('help.shortcut_clear')}</dd></dl>
       <p>{t('help.workflow_description')}</p>
-    </section></details><span className="document-title">{state.score.title || t('score.untitled')}{state.snapshot.dirty?' •':''}</span></div>
+    </section></details>
+    </nav><span className="document-title">{state.score.title || t('score.untitled')}{state.snapshot.dirty?' •':''}</span>
     </header>
+    <div className="gp-toolbar">
+      <div className="gp-toolbar-left" role="group" aria-label={t('toolbar.main')}>
+        <span className="gp-joined pane-toggles"><button type="button" data-pane-toggle="palette" aria-pressed={paletteVisible} title={t('toolbar.toggle_palette')} aria-label={t('toolbar.toggle_palette')} onClick={()=>setPaletteVisible(!paletteVisible)}><PaletteGlyph/></button><button type="button" data-pane-toggle="dock" aria-pressed={dockVisible} title={t('toolbar.toggle_dock')} aria-label={t('view.toggle_bottom_dock')} onClick={()=>setDockVisible(!dockVisible)}><PanelBottomGlyph/></button><button type="button" data-pane-toggle="inspector" aria-pressed={inspectorShown} title={t('toolbar.toggle_inspector')} aria-label={t('view.toggle_inspector')} onClick={()=>inspectorShown?setInspectorVisible(false):showInspector()}><PanelRightGlyph/></button></span>
+        <span className="gp-joined"><button type="button" disabled={editBusy || !state.snapshot.canUndo} onClick={()=>change(controller.undo())} title={t('action.undo_title')}><UndoGlyph/><span className="tp-sr">{t('action.undo')}</span></button><button type="button" disabled={editBusy || !state.snapshot.canRedo} onClick={()=>change(controller.redo())} title={t('action.redo_title')}><RedoGlyph/><span className="tp-sr">{t('action.redo')}</span></button></span>
+        <button type="button" title={t('toolbar.print')} aria-label={t('toolbar.print')} {...busyGuard({busy:controlsBusy||exports.busy,onClick:()=>openModal('export')})}><ExportGlyph/></button>
+        <span className="tp-sr score-tools">{state.score.masterBars.length} measures · {state.score.tracks.length} tracks</span>
+      </div>
+      <div className="gp-toolbar-display"><TrackDisplayControls ids={trackIds} names={state.score.tracks.map(track=>track.name)} selected={target.track} view={trackView} zoom={zoom} disabled={controlsBusy} onView={setTrackView} onZoom={manualZoom} display={display} onDisplay={setScoreDisplay} actualZoom={displayStatus?.zoomPercent} fitLimited={displayStatus?.fitLimited} pageError={displayStatus?.pageError}/></div>
+      {player && <Transport player={player} measures={state.score.masterBars.length} busy={controlsBusy} cursor={target} selection={musicSelection} display={transportDisplay}/>}
+      <div className="gp-toolbar-right">
+        <details ref={practiceMenu} className="gp-practice" onToggle={event=>{if(event.currentTarget.open)event.currentTarget.querySelectorAll<HTMLDetailsElement>('.gp-practice-body details:not([open])').forEach(inner=>{inner.open=true;});}} onKeyDown={event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();event.currentTarget.open=false;event.currentTarget.querySelector('summary')?.focus();}}}><summary title={t('toolbar.practice')} aria-label={t('toolbar.practice')}><PracticeGlyph/></summary><div ref={setPracticeHost} className="gp-practice-body"/></details>
+        <Segmented className="view-switch" label={t('view.view_label')} value={view} onChange={setView} options={[{value:'score',label:<><ScoreGlyph/><span className="tp-sr">{t('view.score')}</span></>,title:t('view.score')},{value:'sound',label:<><AmpGlyph/><span className="tp-sr">{t('view.sound')}</span></>,title:t('view.sound')},{value:'mixer',label:<><MixerGlyph/><span className="tp-sr">{t('view.mixer')}</span></>,title:t('view.mixer')}]}/>
+        <button type="button" className="gp-instrument" aria-pressed={instrumentShown} title={t('toolbar.instrument')} aria-label={instrumentShown?t('toolbar.hide_instrument'):t('toolbar.show_instrument')} onClick={()=>instrumentShown?setInstrumentVisible(false):chooseDock('instrument')}><FretboardGlyph/></button>
+      </div>
+    </div>
     {documentTabs}
     {finalized&&<div className="finalized-banner" role="status"><p>{t('status.finalized_banner')}</p><button disabled={controlsBusy||passwordLocked} onClick={()=>act(controller.setLock(null))}>{t('action.unfinalize')}</button></div>}
     {passwordLocked&&<div className="finalized-banner" role="status"><p>Locked for editing: you can play and read this score, but changes need its password.</p><button {...busyGuard({busy:controlsBusy,onClick:()=>openProtection('unlock')})}>Unlock editing…</button></div>}
     <CabinetNotices sounds={state.settings.sounds} trackNames={trackNames}/>
     {(clipboardError||workspaceError||state.error||(!exportOpen&&exportError)||pageState.error||harmonyOpen&&libraryError) && <div className="error" role="alert">{clipboardError||workspaceError||state.error||exportError||pageState.error||libraryError}</div>}
     {state.importNotice && <div className="notice" role="status">{state.importNotice}</div>}
-    <div ref={workspace} className="workspace workstation-workspace" data-view={view} data-left={leftShown} data-inspector={inspectorShown} data-dock={dockVisible} data-dock-collapsed={dockCollapsed} style={{'--dock-height':`${dockHeight}px`} as React.CSSProperties}>
-      <nav ref={paneRail} className="workstation-rail" aria-label={t('workspace.panes')}>
-        <button data-pane="track" aria-pressed={leftShown&&leftTask==='track'} onClick={()=>showTask('track')}>{t('workspace.track')}</button><button data-pane="sound" aria-pressed={leftShown&&leftTask==='sound'} onClick={()=>showTask('sound')}>{t('workspace.sound')}</button><button data-pane="backing" aria-pressed={leftShown&&leftTask==='backing'} onClick={()=>showTask('backing')}>{t('workspace.backing')}</button><button data-pane="inspector" aria-pressed={inspectorShown} onClick={showInspector}>{t('workspace.inspector')}</button>
-      </nav>
-      <section ref={leftPane} className="workstation-left" aria-label="Track tools" hidden={!leftShown}>
-        <nav aria-label={t('workspace.track_tools')}><button aria-pressed={leftTask==='track'} onClick={()=>showTask('track')}>{t('workspace.track')}</button><button aria-pressed={leftTask==='sound'} onClick={()=>showTask('sound')}>{t('workspace.sound')}</button><button aria-pressed={leftTask==='backing'} onClick={()=>showTask('backing')}>{t('workspace.backing')}</button></nav>
-        <div className="workstation-task" hidden={leftTask!=='track'}><TrackSettingsPanel key={state.documentEpoch} score={state.score} selected={target.track} busy={controlsBusy} locked={editLocked} onEdit={edit} onAudition={auditionTuning}/></div>
-        <div className="workstation-task" hidden={leftTask!=='sound'}>
-        {view==='score'&&<SoundPanel trackId={trackId} percussion={selectedTrack.isPercussion} sound={state.settings.sounds[trackId]} onEdit={command=>controller.edit(command)} playback={player} busy={editBusy} shown={leftShown&&leftTask==='sound'}/>}
-        <InterpretationPanel trackId={trackId} mix={state.settings.mixes[trackId]} stringed={selectedTrack.staves.some(staff=>staff.isStringed)} busy={controlsBusy} onEdit={command=>controller.edit(command)}/>
-        </div><div className="workstation-task" hidden={leftTask!=='backing'}><BackingPanel visible={referenceVisible} settings={originalBacking?undefined:state.settings.backing} originalSettings={state.embeddedBackingSettings?{assetId:'embedded',...state.embeddedBackingSettings}:null} assets={state.snapshot.project.assets} embedded={state.embeddedBacking} playback={player} onEdit={backingEdit} stageBacking={audioBridge.stageBacking} stageEmbeddedBacking={audioBridge.stageEmbeddedBacking} beginOperation={beginEditorOperation} busy={editBusy} durationMs={sourceDurationMs??undefined} reference={reference} onShowWaveform={()=>chooseDock('backing')}/>{referenceVisible&&sourceMetadataStatus}</div>
-      </section>
+    <div ref={workspace} className="workspace workstation-workspace" data-view={view} data-inspector={inspectorShown} data-dock={dockVisible} data-dock-collapsed={dockCollapsed} style={{'--dock-height':`${dockHeight}px`} as React.CSSProperties}>
       <section ref={scorePane} className="score-workspace" aria-label="Score workspace" tabIndex={0} onKeyDown={keys}>
-        <div className="score-tools"><span>{state.score.masterBars.length} measures · {state.score.tracks.length} tracks</span>
-          <TrackDisplayControls ids={trackIds} names={state.score.tracks.map(track=>track.name)} selected={target.track} view={trackView} zoom={zoom} disabled={controlsBusy} onView={setTrackView} onZoom={manualZoom} display={display} onDisplay={setScoreDisplay} actualZoom={displayStatus?.zoomPercent} fitLimited={displayStatus?.fitLimited} pageError={displayStatus?.pageError}/>
-          <button aria-pressed={instrumentShown} onClick={()=>instrumentShown?setInstrumentVisible(false):chooseDock('instrument')}>{instrumentShown?'Hide instrument':'Show instrument'}</button>
-        </div>
-        <div className="paper-scroll"><div className="paper score-paper-host"><ScoreView score={state.score} track={target.track} zoom={zoom} display={display} page={page} onDisplayStatus={onDisplayStatus} profile="Default" projection={projection} engraving={state.settings.engraving} visibleTracks={visibleTracks} onSelect={select} playback={player} editorSelection={musicSelection} onEditorSelection={editorSelection} editTarget={target} editString={indexed?undefined:string} editNoteIndex={noteIndex} errors={markErrors?scoreErrors:undefined} symbols={view==='score'?{busy:controlsBusy,locked:editLocked?lockedMessage:null,request:symbolRequest,onEdit:command=>{if(editLocked){setClipboardError(lockedMessage);return Promise.resolve(false);}return edit(command);},onChordEditor:chordTarget=>{editorSelection(null);select(chordTarget);openModal('harmony');}}:undefined} barDesign={barDesign?{busy:editBusy,scaleOf:bar=>barScaleOf(state.settings.engraving,bar,sourceWeight(state.score,visibleTracks,bar)),defaultOf:bar=>sourceWeight(state.score,visibleTracks,bar),onScale:(bar,scale)=>{const engraving=withBarScale(state.settings.engraving,bar,scale,sourceWeight(state.score,visibleTracks,bar));if(engraving!==state.settings.engraving)void edit({type:'setEngraving',engraving});}}:null}/></div></div>
+        <div className="score-body">{paletteVisible&&view==='score'&&<aside ref={setPaletteHost} className="score-palette" aria-label={t('view.edition_palette')}/>}<div className="paper-scroll"><div className="paper score-paper-host"><ScoreView score={state.score} track={target.track} zoom={zoom} display={display} page={page} onDisplayStatus={onDisplayStatus} profile="Default" projection={projection} engraving={state.settings.engraving} visibleTracks={visibleTracks} onSelect={select} playback={player} editorSelection={musicSelection} onEditorSelection={editorSelection} editTarget={target} editString={indexed?undefined:string} editNoteIndex={noteIndex} errors={markErrors?scoreErrors:undefined} symbols={view==='score'?{busy:controlsBusy,locked:editLocked?lockedMessage:null,request:symbolRequest,onEdit:command=>{if(editLocked){setClipboardError(lockedMessage);return Promise.resolve(false);}return edit(command);},onChordEditor:chordTarget=>{editorSelection(null);select(chordTarget);openModal('harmony');}}:undefined} barDesign={barDesign?{busy:editBusy,scaleOf:bar=>barScaleOf(state.settings.engraving,bar,sourceWeight(state.score,visibleTracks,bar)),defaultOf:bar=>sourceWeight(state.score,visibleTracks,bar),onScale:(bar,scale)=>{const engraving=withBarScale(state.settings.engraving,bar,scale,sourceWeight(state.score,visibleTracks,bar));if(engraving!==state.settings.engraving)void edit({type:'setEngraving',engraving});}}:null}/></div></div></div>
         {inputNotice&&inputNotice.at===JSON.stringify(target)&&<div className="score-hint" role="status">{inputNotice.text}</div>}
-        <div className="score-hint">Measure {target.bar+1} · Beat {target.beat+1} · {indexed?`${location.staff.isPercussion?'Percussion':'Pitched'} note ${noteIndex===null?'entry':noteIndex+1} — Click a note to edit it in the inspector.`:`String ${string} · Fret ${fret} — Click the score, then use arrow keys, digits and Enter.`}</div>
       </section>
       <div ref={inspectorPane} className="workstation-inspector" hidden={!inspectorShown}>
-      <EditorPanel documentEpoch={state.documentEpoch} contextScope={contextScope} onContextScopeChange={setContextScope} score={state.score} target={target} string={string} fret={fret} noteIndex={noteIndex} onSelectNote={setNoteIndex} busy={controlsBusy} locked={editLocked} onSelect={next=>{editorSelection(null);select(next);}} onString={s=>select(target,s)} onFret={setFret} onEdit={edit} musicSelection={musicSelection} onMusicSelection={editorSelection} onChord={()=>openModal('harmony')} onScales={()=>openModal('scale')} onAudition={auditionTuning}
+      <div className="inspector-tabs" role="tablist" aria-label={t('inspector.tabs')} onKeyDown={event=>{const order:InspectorTab[]=['song','track','selection'];const step=event.key==='ArrowRight'?1:event.key==='ArrowLeft'?-1:0;if(!step)return;event.preventDefault();const next=order[(order.indexOf(inspectorTab)+step+order.length)%order.length];setInspectorTab(next);requestPaneFocus(next);}}><button type="button" role="tab" id={`inspector-tab-song`} aria-controls={`inspector-panel-song`} data-inspector-tab="song" aria-selected={inspectorTab==='song'} tabIndex={inspectorTab==='song'?0:-1} onClick={()=>setInspectorTab('song')}>{t('inspector.song')}</button><button type="button" role="tab" id={`inspector-tab-track`} aria-controls={`inspector-panel-track`} data-inspector-tab="track" aria-selected={inspectorTab==='track'} tabIndex={inspectorTab==='track'?0:-1} onClick={()=>setInspectorTab('track')}>{t('inspector.track')}</button><button type="button" role="tab" id={`inspector-tab-selection`} aria-controls={`inspector-panel-selection`} data-inspector-tab="selection" aria-selected={inspectorTab==='selection'} tabIndex={inspectorTab==='selection'?0:-1} onClick={()=>setInspectorTab('selection')}>{t('inspector.selection')}</button></div>
+      <div className="inspector-tabpanel" role="tabpanel" id="inspector-panel-song" aria-labelledby="inspector-tab-song" hidden={inspectorTab!=='song'}>
+        <div ref={setSongHost} className="inspector-song-host"/>
+        <section className="inspector-section" aria-labelledby="inspector-sound-mastering"><h3 id="inspector-sound-mastering">{t('inspector.sound_mastering')}</h3><MasterPanel master={player?.master?.()} disabled={controlsBusy||!player?.setMaster} onChange={next=>player!.setMaster!(next)}/></section>
+      </div>
+      <div className="inspector-tabpanel" role="tabpanel" id="inspector-panel-track" aria-labelledby="inspector-tab-track" hidden={inspectorTab!=='track'}>
+        <section className="inspector-section" aria-labelledby="inspector-track-info"><h3 id="inspector-track-info">{t('inspector.information')}</h3><TrackSettingsPanel key={state.documentEpoch} score={state.score} selected={target.track} busy={controlsBusy} locked={editLocked} onEdit={edit} onAudition={auditionTuning}/></section>
+        <section className="inspector-section" aria-labelledby="inspector-track-sounds"><h3 id="inspector-track-sounds">{t('inspector.sounds')}</h3>{view==='score'&&<SoundPanel trackId={trackId} percussion={selectedTrack.isPercussion} sound={state.settings.sounds[trackId]} onEdit={command=>controller.edit(command)} playback={player} busy={editBusy} shown={inspectorShown&&inspectorTab==='track'}/>}</section>
+        <section className="inspector-section" aria-labelledby="inspector-track-interpretation"><h3 id="inspector-track-interpretation">{t('inspector.interpretation')}</h3><InterpretationPanel trackId={trackId} mix={state.settings.mixes[trackId]} stringed={selectedTrack.staves.some(staff=>staff.isStringed)} busy={controlsBusy} onEdit={command=>controller.edit(command)}/></section>
+      </div>
+      <div className="inspector-tabpanel" role="tabpanel" id="inspector-panel-selection" aria-labelledby="inspector-tab-selection" hidden={inspectorTab!=='selection'}>
+      <EditorPanel documentEpoch={state.documentEpoch} songHost={songHost} practiceHost={practiceHost} paletteHost={paletteVisible&&view==='score'?paletteHost:null} measureRequest={measureRequest} onOpenMeasure={bar=>displayActions.current.measure(bar)} contextScope={contextScope} onContextScopeChange={setContextScope} score={state.score} target={target} string={string} fret={fret} noteIndex={noteIndex} onSelectNote={setNoteIndex} busy={controlsBusy} locked={editLocked} onSelect={next=>{editorSelection(null);select(next);}} onString={s=>select(target,s)} onFret={setFret} onEdit={edit} musicSelection={musicSelection} onMusicSelection={editorSelection} onChord={()=>openModal('harmony')} onScales={()=>openModal('scale')} onAudition={auditionTuning}
         practiceTools={player&&playbackState&&<PracticePanel key={state.documentEpoch} settings={playbackState.practice.settings} busy={controlsBusy||playbackState.practicePending||!playbackState.ready} hasBacking={!!audioSettings.backing} onChange={settings=>player.setPractice(settings)}/>}
         presentationTools={<><EngravingPanel key={`engraving/${state.documentEpoch}`} score={state.score} trackIds={trackIds} value={state.settings.engraving} busy={controlsBusy} onEdit={edit}/><BarWidthsPanel value={state.settings.engraving} design={barDesign} onDesign={setBarDesign} busy={editBusy} honoured={barWidthsHonoured} onEdit={edit}/><PageLayoutPanel key={`page/${state.documentEpoch}`} value={page} busy={controlsBusy} onEdit={edit}/></>} presentationViewTools={<ViewDefaultsPanel current={{zoom,trackView,scoreDisplay}} load={currentViewDefaults} onSave={writeViewDefaults}/>}>
         <NotationEntryPanel score={state.score} target={target} busy={controlsBusy} locked={editLocked} onEdit={instrumentEdit} latestScore={()=>controller.getState().score}/>
@@ -523,24 +614,26 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
         <HarmonyTransposePanel key={`harmony/${state.documentEpoch}`} score={state.score} selection={musicSelection} busy={editBusy} onEdit={edit}/>
       </EditorPanel>
       </div>
+      </div>
       {view==='sound'&&<SoundRig trackId={trackId} sound={state.settings.sounds[trackId]} onEdit={command=>controller.edit(command)} playback={player} busy={editBusy}
         tracks={state.score.tracks.map((track,index)=>({id:trackIds[index],name:track.name||`Track ${index+1}`,program:track.playbackInfo.program,percussion:track.staves.some(staff=>staff.isPercussion)}))}
         onTrack={id=>{const index=trackIds.indexOf(id);if(index>=0)select({track:index,staff:0,bar:target.bar,voice:0,beat:0},state.score.tracks[index].staves[0].tuning.length);}}
         cabinetResponse={board=><CabinetResponse ir={board.effects.cabinet.ir} model={board.effects.cabinet.model} label={board.name} scope={`${trackId}:${board.name('Cabinet')}`} onLibraryChange={()=>{if(player&&typeof player.refreshSounds==='function')void player.refreshSounds().catch(()=>{});}} onChange={ir=>{if(!editBusy)board.write(effects=>{if(ir)effects.cabinet.ir=ir;else delete effects.cabinet.ir;});}}/>}/>}
       {view==='mixer'&&<MixerView score={state.score} sounds={state.settings.sounds} selected={target.track} busy={controlsBusy} player={player} onSelect={track=>select({track,staff:0,bar:target.bar,voice:0,beat:0},state.score.tracks[track].staves[0].tuning.length)}/>}
       <section className="workstation-dock" aria-label="Bottom dock" hidden={!dockVisible}>
+        {!dockCollapsed&&<DockResizeHandle height={dockHeight} min={dockMin} max={dockMax} onHeight={setDockSize} onReset={()=>setDockSize(null)}/>}
         <nav aria-label="Dock views"><button aria-pressed={!instrumentVisible&&dockMode==='overview'} onClick={()=>chooseDock('overview')}>Overview</button><button aria-pressed={!instrumentVisible&&dockMode==='mixer'} onClick={()=>chooseDock('mixer')}>Mixer</button><button aria-pressed={instrumentVisible} onClick={()=>chooseDock('instrument')}>Instrument</button><button aria-pressed={!instrumentVisible&&dockMode==='backing'} onClick={()=>chooseDock('backing')}>Backing</button><button className="dock-collapse" aria-label={dockCollapsed?'Expand bottom dock':'Hide bottom dock'} onClick={()=>dockCollapsed?setDockForced(true):hideDock()}>{dockCollapsed?'Expand':'Hide'}</button></nav>
         <div className="workstation-dock-content" hidden={dockCollapsed}>
-          <div className="workstation-dock-tracks" hidden={instrumentVisible||dockMode==='backing'}>{view!=='mixer'&&<TrackPanel score={state.score} selected={target.track} busy={controlsBusy} player={player} view={dockMode==='mixer'?'mixer':'overview'} target={target} onExitOverview={()=>scorePane.current?.focus()} onSelectPosition={(track,bar)=>select({track,staff:0,bar,voice:0,beat:0})} onSelect={track=>select({track,staff:0,bar:target.bar,voice:0,beat:0},state.score.tracks[track].staves[0].tuning.length)}/>}</div>
+          <div className="workstation-dock-tracks" hidden={instrumentVisible||dockMode==='backing'}>{view!=='mixer'&&<TrackPanel score={state.score} selected={target.track} busy={controlsBusy} player={player} shown={visibleTracks} onToggleShown={toggleShownTrack} view={dockMode==='mixer'?'mixer':'overview'} target={target} onExitOverview={()=>scorePane.current?.focus()} onSelectPosition={(track,bar)=>select({track,staff:0,bar,voice:0,beat:0})} onSelect={track=>select({track,staff:0,bar:target.bar,voice:0,beat:0},state.score.tracks[track].staves[0].tuning.length)}/>}</div>
           {instrumentVisible&&<LiveInstrumentView score={state.score} track={target.track} staff={target.staff} target={target} player={player} onEdit={instrumentEdit} busy={controlsBusy} locked={editLocked} string={string}/>}
           <div className="workstation-dock-backing" hidden={instrumentVisible||dockMode!=='backing'}>
-            {waveformEnabled&&!referenceVisible&&sourceMetadataStatus}
+            <div className="workstation-dock-backing-settings"><BackingPanel visible={referenceVisible} settings={originalBacking?undefined:state.settings.backing} originalSettings={state.embeddedBackingSettings?{assetId:'embedded',...state.embeddedBackingSettings}:null} assets={state.snapshot.project.assets} embedded={state.embeddedBacking} playback={player} onEdit={backingEdit} stageBacking={audioBridge.stageBacking} stageEmbeddedBacking={audioBridge.stageEmbeddedBacking} beginOperation={beginEditorOperation} busy={editBusy} durationMs={sourceDurationMs??undefined} reference={reference} onShowWaveform={()=>chooseDock('backing')}/>{referenceVisible&&sourceMetadataStatus}</div>
+
             {originalBacking&&!currentEmbedded?.source?<div className="backing-waveform-state">{currentEmbedded?.error?<><p role="alert">{currentEmbedded.error}</p><button onClick={()=>setEmbeddedRetry(value=>value+1)}>Retry</button></>:<p role="status">Loading waveform…</p>}</div>:<BackingWaveform document={{documentId:state.documentId,revision:state.revision}} source={waveformSource} filename={state.settings.backing?state.snapshot.project.assets[state.settings.backing.assetId]?.filename??'Backing audio':state.snapshot.project.base.kind==='file'?state.snapshot.project.base.filename:'Backing audio'} bridge={waveformBridge} timeline={backingTimeline} selection={backingSelection} settings={state.settings.backing} effectiveBacking={audioSettings.backing} reference={reference} scoreTimeMs={playbackState?.ready&&!playbackState.error&&!['countIn','ended'].includes(playbackState.practice.phase)?playbackState.time:null} enabled={waveformEnabled} busy={editBusy} beginOperation={beginEditorOperation} isCurrent={waveformCurrent} onEdit={command=>controller.edit(command)}/>}
           </div>
         </div>
       </section>
     </div>
-    {player && <Transport player={player} measures={state.score.masterBars.length} busy={controlsBusy} cursor={target} selection={musicSelection}/>}
     {exportOpen&&<ExportDialog layoutLocked={editLocked} layoutLockedNote={finalized?undefined:'This score is locked for editing, so exports use its current layout.'} plainNote={state.snapshot.protection&&(state.snapshot.protection.open||state.snapshot.protection.edit!=='none')?'This score is password-protected, but its exports are not: they are plain files with no password, and a Guitar Pro file opened again in TabPlayer has no edit lock.':undefined} sounds={state.settings.sounds} trackNames={trackNames} score={state.score} layout={state.settings.print} page={page} currentSpeedAvailable={practiceRatio!==null} busy={exports.busy||state.busy||exportLaunching} progress={exports.progress} failure={exportError} gpBackingIssue={gpBackingIssue} hasBacking={!!audioSettings.backing} onExport={runExport} onCancel={cancelExport}/>}
     {harmonyOpen&&location.beat&&<HarmonyChordDialog score={state.score} target={target} selection={musicSelection} value={location.beat.chord?getHarmonyChord(location.beat.chord):null} busy={state.busy||libraryLoading} library={library} onEdit={edit} onClose={closeModal} onLibraryPut={async entry=>{const revision=++libraryRevision.current,value=await putHarmonyLibraryEntry(entry);if(revision===libraryRevision.current)setLibrary(value);}} onLibraryRemove={async id=>{const revision=++libraryRevision.current,value=await removeHarmonyLibraryEntry(id);if(revision===libraryRevision.current)setLibrary(value);}}/>}
     {helpTopic!==null&&<HelpDialog initial={helpTopic} onClose={closeHelp}/>}
@@ -551,6 +644,6 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     {midiOpen&&onImportConverted&&<MidiImportDialog busy={controlsBusy} onImport={(name,bytes)=>{const job=onImportConverted(name,bytes);documentAction(job);return job;}} onClose={closeMidi}/>}
     {paletteOpen&&<CommandPalette context={{score:state.score,target,string,canUndo:state.snapshot.canUndo,canRedo:state.snapshot.canRedo,locked:editLocked,scoreHidden:view==='sound'}} busy={controlsBusy} onRun={runPalette} onClose={closePalette}/>}
     {scaleOpen&&<ScaleToolPanel score={state.score} staff={location.staff} selection={musicSelection} busy={state.busy} target={target} beat={location.beat} onEdit={editLocked?undefined:edit} onClose={closeModal}/>}
-    <footer className="statusbar">{state.busy?'Working…':state.snapshot.dirty?'Unsaved changes':state.snapshot.path?'Saved':state.snapshot.project.base.kind==='file'?'Not saved':'New score'}<span>{state.snapshot.path ?? 'Save a .tabplayer project to keep the original score and edits.'}</span>{recoveryStatus}</footer>
+    <footer className="statusbar">{state.busy?'Working…':state.snapshot.dirty?'Unsaved changes':state.snapshot.path?'Saved':state.snapshot.project.base.kind==='file'?'Not saved':'New score'}<span>{state.snapshot.path ?? 'Save a .tabplayer project to keep the original score and edits.'}</span>{recoveryStatus}<span className="score-hint statusbar-position" title={indexed?'Click a note to edit it in the inspector.':'Click the score, then use arrow keys, digits and Enter.'}>{indexed?t('status.position_note',{bar:target.bar+1,beat:target.beat+1,note:noteIndex===null?'–':noteIndex+1,voice:target.voice+1}):t('status.position',{bar:target.bar+1,beat:target.beat+1,string,voice:target.voice+1})}</span></footer>
   </div>;
 }

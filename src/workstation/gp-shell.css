@@ -1,0 +1,157 @@
+/* The Guitar Pro arrangement, in TabPlayer's colours: a menu bar, one 52px toolbar with the position display at its centre,
+ * the editing palette beside the score, an inspector with Song, Track and Selection tabs, and the global view along the bottom.
+ * Toolbar buttons are icons with tooltips; the ones that belong together are joined, with rounded outer corners. */
+
+/* Menu bar. */
+.toolbar.gp-menubar { position:relative; z-index:30; display:flex; align-items:center; gap:8px; height:28px; min-height:28px; padding:0 6px; background:var(--ws-bg); border-bottom:0; }
+.gp-menus { display:flex; align-items:center; gap:0; min-width:0; flex:1 1 auto; }
+.gp-brand { display:inline-flex; align-items:center; padding:0 8px 0 2px; color:var(--ws-text); }
+.toolbar.gp-menubar :is(.command-menu,.keyboard-help)>summary { min-height:22px; padding:0 8px; border-radius:3px; font:400 13px/1 var(--tp-font-ui); color:var(--ws-text); }
+.toolbar.gp-menubar .command-menu>section button { justify-content:flex-start; text-align:left; white-space:nowrap; }
+.toolbar.gp-menubar .document-title { margin-left:auto; flex:0 1 auto; }
+
+/* Toolbar: left tools, the transport centred on the window, the views on the right. */
+.gp-toolbar { position:relative; z-index:20; display:grid; grid-template-columns:auto auto minmax(0,1fr) auto; grid-template-areas:'left display transport right'; align-items:center; gap:4px 12px; min-height:52px; padding:2px 10px; background:var(--ws-panel); border-bottom:1px solid var(--ws-border); }
+.gp-toolbar>.gp-toolbar-left { grid-area:left; }
+.gp-toolbar>.gp-toolbar-display { grid-area:display; min-width:0; }
+.gp-toolbar>.transport { grid-area:transport; justify-self:center; }
+.gp-toolbar>.gp-toolbar-right { grid-area:right; }
+.gp-toolbar-left,.gp-toolbar-right { display:flex; align-items:center; gap:8px; min-width:0; }
+.gp-toolbar-left { justify-self:start; }
+.gp-toolbar-right { justify-self:end; }
+.gp-joined { display:inline-flex; gap:1px; }
+.app-shell .gp-toolbar :is(.gp-joined>button,.gp-toolbar-left>button,.gp-instrument,.gp-practice>summary,.view-switch .tp-seg-option) {
+  display:inline-grid; place-items:center; width:34px; height:28px; min-height:28px; padding:0; border:1px solid transparent; border-radius:5px; background:var(--ws-raised); color:var(--ws-text); }
+.app-shell .gp-toolbar .gp-joined>button { border-radius:0; }
+.app-shell .gp-toolbar .gp-joined>button:first-child { border-radius:5px 0 0 5px; }
+.app-shell .gp-toolbar .gp-joined>button:last-child { border-radius:0 5px 5px 0; }
+.app-shell .gp-toolbar :is(.gp-joined>button,.gp-toolbar-left>button,.gp-instrument):hover:enabled { border-color:var(--ws-border); background:color-mix(in srgb,var(--ws-raised) 80%,white); }
+.app-shell .gp-toolbar :is(button[aria-pressed=true],.tp-seg-option[aria-checked=true]) { background:var(--ws-accent); border-color:var(--ws-accent); color:var(--ws-accent-ink); }
+.app-shell .gp-toolbar :is(button:disabled) { opacity:.45; border-style:solid; }
+
+/* Score display: zoom and layout as compact boxes; their names stay for screen readers and tooltips. */
+.gp-toolbar .score-tools-caption { position:absolute; width:1px; height:1px; margin:-1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
+.app-shell .gp-toolbar [aria-label='Score display'] { position:relative; display:flex; flex-direction:row; flex-wrap:nowrap; align-items:center; justify-content:flex-start; gap:6px; min-width:0; margin:0; padding:0; border:0; }
+.app-shell .gp-toolbar [aria-label='Score display']>.pair { display:flex; align-items:center; gap:4px; }
+.app-shell .gp-toolbar [aria-label='Score display'] label { display:flex; flex-direction:row; flex:none; width:auto; align-items:center; gap:0; }
+.app-shell .gp-toolbar [aria-label='Score display'] .score-fit-controls { flex:none; width:auto; }
+.app-shell .gp-toolbar [aria-label='Score display']>details { flex:none; height:auto; }
+.app-shell .gp-toolbar>.gp-toolbar-display { display:flex; justify-content:center; }
+.app-shell .gp-toolbar [aria-label='Score display'] select { width:auto; max-width:132px; min-height:28px; padding:0 4px; font-size:12px; }
+.app-shell .gp-toolbar [aria-label='Score display'] input[type=number] { width:58px; min-height:28px; padding:0 4px; font:500 12px/1 var(--tp-font-mono); }
+.app-shell .gp-toolbar .score-fit-controls { display:inline-flex; gap:1px; }
+.app-shell .gp-toolbar .score-fit-controls>button { min-height:28px; padding:0 8px; font-size:12px; border-radius:0; }
+.app-shell .gp-toolbar .score-fit-controls>button:first-child { border-radius:5px 0 0 5px; }
+.app-shell .gp-toolbar .score-fit-controls>button:last-child { border-radius:0 5px 5px 0; }
+.app-shell .gp-toolbar .score-actual-zoom { font-size:11px; color:var(--ws-muted); white-space:nowrap; }
+.app-shell .gp-toolbar [aria-label='Score display']>details>summary { list-style:none; padding:0 6px; font-size:12px; color:var(--ws-muted); cursor:pointer; white-space:nowrap; }
+.app-shell .gp-toolbar [aria-label='Score display']>details[open]>.track-list { position:absolute; z-index:40; top:calc(100% + 6px); left:0; display:grid; gap:4px; min-width:200px; padding:10px; border:1px solid var(--ws-border); border-radius:var(--tp-radius-s); background:var(--ws-panel); box-shadow:0 8px 24px rgb(0 0 0/.35); }
+.app-shell .gp-toolbar [aria-label='Score display']>p.muted { position:absolute; width:1px; height:1px; margin:-1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
+.app-shell .gp-toolbar [aria-label='Score display']>p:not(.muted) { position:absolute; z-index:40; top:calc(100% + 6px); left:0; margin:0; padding:4px 8px; border-radius:var(--tp-radius-s); background:var(--ws-error-surface); color:var(--ws-error); font-size:12px; white-space:nowrap; }
+
+/* The transport sits inside the toolbar: icon buttons, captions read by screen readers only. */
+.app-shell .gp-toolbar .transport { min-height:48px; padding:0; border:0; background:transparent; }
+.app-shell .gp-toolbar .transport>.transport-primary { min-height:48px; align-items:center; }
+.app-shell .gp-toolbar .transport-group { padding:0 6px; border-left:0; }
+.gp-toolbar .transport-caption:not(.transport-bar-number) { position:absolute; width:1px; height:1px; margin:-1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
+.gp-toolbar .transport-label { position:absolute; width:1px; height:1px; margin:-1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
+.app-shell .gp-toolbar .transport button { border-color:transparent; background:transparent; }
+.app-shell .gp-toolbar .transport .transport-playbutton { width:36px; min-width:36px; height:36px; min-height:36px; padding:0; font-size:0; gap:0; border:2px solid var(--tp-on); border-radius:50%; background:transparent; color:var(--tp-on); }
+.app-shell .gp-toolbar .transport .transport-playbutton:hover:enabled:not([aria-disabled=true]) { background:color-mix(in srgb,var(--tp-on) 18%,transparent); }
+.app-shell .gp-toolbar .transport .transport-stopbutton { width:30px; min-height:30px; padding:0; }
+.app-shell .gp-toolbar .transport .transport-barstep { width:26px; min-height:30px; }
+.app-shell .gp-toolbar .transport-loop .transport-row,.app-shell .gp-toolbar .transport-speed .transport-row { gap:1px; }
+.app-shell .gp-toolbar .transport .transport-loopbutton { min-width:0; width:34px; padding:0; font-size:0; gap:0; }
+.app-shell .gp-toolbar .transport :is(.transport-toggle,.transport-step,.transport-loopbutton) { min-height:28px; border:1px solid transparent; background:var(--ws-raised); }
+.app-shell .gp-toolbar .transport .transport-metronome { width:34px; padding:0; justify-content:center; }
+.app-shell .gp-toolbar .transport-bar-field input { width:38px; min-height:28px; font-size:12px; }
+.app-shell .gp-toolbar .transport-speedvalue { min-width:44px; font-size:13px; }
+.app-shell .gp-toolbar .transport-more { margin-left:0; }
+.app-shell .gp-toolbar .transport-more>summary { font-size:0; gap:0; width:24px; padding:0; justify-content:center; }
+.app-shell .gp-toolbar .transport-messages { position:absolute; top:100%; left:50%; translate:-50% 0; z-index:30; padding:4px 10px; border-radius:0 0 var(--tp-radius-s) var(--tp-radius-s); background:var(--ws-panel); white-space:nowrap; }
+.app-shell .gp-toolbar .transport input.transport-scrub { display:none; }
+
+/* The position display: two rows, the track on top, then bar, time, completion, signature and tempo. */
+.app-shell .gp-toolbar .transport-lcd { grid-template-columns:auto auto 1fr; grid-template-areas:'track track track' 'bar time meta'; min-width:300px; width:330px; height:46px; margin:0 6px; padding:3px 12px 5px 14px; row-gap:2px; column-gap:14px; border-color:#000; border-radius:3px; background:#0d0e10; }
+.app-shell .gp-toolbar .transport-lcd .transport-lcd-track { font-size:14px; line-height:18px; }
+.app-shell .gp-toolbar .transport-lcd .transport-time { font-size:13px; line-height:16px; }
+.app-shell .gp-toolbar .transport-lcd .transport-time .transport-dim { font-size:11px; }
+.app-shell .gp-toolbar .transport-lcd .transport-lcd-meta { justify-self:end; gap:10px; }
+
+/* Practice settings open from the toolbar, under the speed. */
+.gp-practice { position:relative; }
+.gp-practice>summary { list-style:none; cursor:pointer; }
+.gp-practice>summary::-webkit-details-marker { display:none; }
+.gp-practice[open]>summary { background:var(--ws-accent); color:var(--ws-accent-ink); }
+.gp-practice-body { position:absolute; z-index:40; top:calc(100% + 8px); right:0; width:min(420px,calc(100vw - 24px)); max-height:min(70dvh,560px); overflow:auto; padding:10px 12px; border:1px solid var(--ws-border); border-radius:var(--tp-radius-s); background:var(--ws-panel); box-shadow:0 8px 24px rgb(0 0 0/.35); }
+.gp-practice-section h3 { margin:0 0 8px; font:600 12px/1.2 var(--tp-font-ui); letter-spacing:.04em; text-transform:uppercase; color:var(--ws-text); }
+.gp-practice-section>fieldset { margin:0; padding:0; border:0; min-width:0; }
+
+/* Below full HD the score display controls take a second row; in narrow windows the transport gets a row of its own. */
+@media (max-width:1879px) {
+  .gp-toolbar { grid-template-columns:auto minmax(0,1fr) auto; grid-template-areas:'left transport right' 'display display display'; }
+  .gp-toolbar>.gp-toolbar-display { padding-bottom:4px; }
+}
+@media (max-width:1339px) {
+  .gp-toolbar { grid-template-columns:auto minmax(0,1fr) auto; grid-template-areas:'transport transport transport' 'left display right'; }
+  .gp-toolbar>.gp-toolbar-display { padding-bottom:0; }
+}
+
+/* Editing palette: 232px, 8 cells of 26×30 per row, icons with tooltips. */
+.app-shell .score-palette { width:232px; padding:8px 12px; }
+.app-shell .score-palette .tp-editing-toolbar[data-orientation="vertical"] { gap:8px; }
+.app-shell .score-palette .tp-editing-toolbar[data-orientation="vertical"] .tp-toolbar-group,
+.app-shell .score-palette .tp-editing-toolbar[data-orientation="vertical"] .tp-toolbar-dynamics { grid-template-columns:repeat(8,26px); gap:0; justify-content:center; padding:0 0 8px; border-bottom-color:color-mix(in srgb,var(--ws-border) 70%,transparent); }
+.app-shell .score-palette .tp-editing-toolbar[data-orientation="vertical"] .tp-glyph-btn { width:26px; height:30px; min-height:30px; padding:0; border:0; border-radius:6px; background:transparent; color:var(--ws-text); }
+.app-shell .score-palette .tp-editing-toolbar[data-orientation="vertical"] .tp-glyph-btn:hover:enabled:not([aria-disabled=true]) { background:color-mix(in srgb,var(--ws-text) 10%,transparent); }
+.app-shell .score-palette .tp-editing-toolbar[data-orientation="vertical"] .tp-glyph-btn[aria-pressed="true"] { background:var(--ws-accent); color:var(--ws-accent-ink); }
+.app-shell .score-palette .tp-editing-toolbar[data-orientation="vertical"] .tp-glyph-btn:is(:disabled,[aria-disabled=true]) { color:var(--ws-muted); opacity:.55; }
+.app-shell .score-palette .tp-glyph-badge { display:none; }
+.app-shell .score-palette .tp-glyph-svg { width:18px; height:18px; }
+.app-shell .score-palette .tp-glyph-text { font-size:12px; }
+/* Voices are joined numbered buttons, each in its voice colour when current. */
+.app-shell .score-palette .tp-editing-toolbar[data-orientation="vertical"] .tp-toolbar-voices { grid-template-columns:repeat(4,30px); gap:1px; justify-content:start; }
+.app-shell .score-palette .tp-editing-toolbar[data-orientation="vertical"] .tp-toolbar-voices .tp-glyph-btn { width:30px; height:26px; min-height:26px; border-radius:0; background:var(--ws-raised); }
+.app-shell .score-palette .tp-toolbar-voices .tp-glyph-btn:first-child { border-radius:5px 0 0 5px; }
+.app-shell .score-palette .tp-toolbar-voices .tp-glyph-btn:last-child { border-radius:0 5px 5px 0; }
+@media (max-width:1179px) { .app-shell .score-palette { width:120px; padding:6px; } .app-shell .score-palette .tp-editing-toolbar[data-orientation="vertical"] :is(.tp-toolbar-group,.tp-toolbar-dynamics) { grid-template-columns:repeat(4,26px); } }
+
+/* Inspector tabs and sections: uppercase section heads, as Guitar Pro's inspector has. */
+.inspector-tabs { position:sticky; top:0; z-index:3; display:grid; grid-template-columns:repeat(3,1fr); gap:1px; padding:8px 8px 6px; background:var(--ws-panel); }
+.app-shell .inspector-tabs>[role=tab] { min-height:26px; padding:0 6px; border:0; border-radius:0; background:var(--ws-raised); color:var(--ws-text); font:500 12px/1 var(--tp-font-ui); letter-spacing:.04em; text-transform:uppercase; }
+.app-shell .inspector-tabs>[role=tab]:first-child { border-radius:5px 0 0 5px; }
+.app-shell .inspector-tabs>[role=tab]:last-child { border-radius:0 5px 5px 0; }
+.app-shell .inspector-tabs>[role=tab][aria-selected=true] { background:var(--ws-accent); color:var(--ws-accent-ink); }
+.inspector-tabpanel { padding:0 8px 12px; }
+.inspector-tabpanel>.inspector { padding:0; background:transparent; border:0; }
+.inspector-section { padding:6px 0 12px; }
+.inspector-section+.inspector-section { border-top:1px solid color-mix(in srgb,var(--ws-border) 60%,transparent); }
+.inspector-section>h3 { margin:6px 0 8px; font:700 13px/1.2 var(--tp-font-ui); letter-spacing:.05em; text-transform:uppercase; color:var(--ws-text); }
+.inspector-section>fieldset { margin:0; padding:0; border:0; min-width:0; display:grid; gap:6px; }
+.inspector-section :is(.sound-panel,.backing-panel,.track-settings) { border-top:0; margin:0; padding:0; }
+
+/* Status bar: the cursor's place at the right, as Guitar Pro shows it. */
+.app-shell .statusbar .statusbar-position { margin-left:auto; font-variant-numeric:tabular-nums; white-space:nowrap; }
+
+/* The global view's backing tab: settings beside the waveform. */
+.workstation-dock-backing:not([hidden]) { display:flex; }
+.workstation-dock-backing-settings { flex:0 0 300px; min-height:0; overflow:auto; padding:6px 8px; border-right:1px solid var(--ws-border); }
+.workstation-dock-backing-settings>.backing-panel { border-top:0; margin:0; padding:0; }
+.workstation-dock-backing>:not(.workstation-dock-backing-settings) { flex:1 1 auto; min-width:0; }
+
+/* Global view in the GP manner: darker grid, bars filled solid in the track colour, small bar numbers and section flags on the ruler. */
+.workstation-dock .score-overview { background:var(--ws-bg,var(--ws-panel)); }
+.workstation-dock .score-overview-ruler { background:var(--ws-panel); }
+.workstation-dock .score-overview-bar-label { padding:3px 0 0 3px; text-align:left; font-size:10px; line-height:10px; color:var(--ws-muted); border-left:1px solid color-mix(in srgb,var(--ws-border) 60%,transparent); }
+.workstation-dock .score-overview-section { top:auto; bottom:2px; left:2px; padding:2px 5px; border-radius:3px; background:color-mix(in srgb,var(--ws-accent) 22%,var(--ws-panel)); color:var(--ws-text); font-size:10px; line-height:10px; }
+.workstation-dock .score-overview-corner { font-size:11px; font-weight:600; letter-spacing:.06em; text-transform:uppercase; }
+.workstation-dock .score-overview-track { background:var(--ws-panel); box-shadow:inset 4px 0 var(--overview-track,transparent); padding-left:12px; }
+.workstation-dock .score-overview-cell { background:transparent; border-color:color-mix(in srgb,var(--ws-border) 55%,transparent); }
+.workstation-dock .score-overview-cell:hover { background:color-mix(in srgb,var(--ws-text) 6%,transparent); }
+.workstation-dock .score-overview-cell[data-content="music"] .score-overview-occupancy { inset:3px 0; border-radius:0; background:color-mix(in srgb,var(--overview-track,var(--ws-muted)) 55%,var(--ws-panel)); }
+.workstation-dock .score-overview-row[data-selected-track] .score-overview-cell[data-content="music"] .score-overview-occupancy { background:var(--overview-track,var(--ws-muted)); }
+.workstation-dock .score-overview-cell[aria-selected="true"] { box-shadow:inset 0 0 0 2px var(--ws-text); }
+.workstation-dock .score-overview-mix button { border-radius:4px; }
+.workstation-dock .score-overview-mix input[type="range"] { height:12px; }
+.workstation-dock .score-overview-master { background:var(--ws-panel); }
+.workstation-dock .score-overview-master-name { text-transform:uppercase; letter-spacing:.06em; font-size:11px; }

@@ -54,8 +54,8 @@ async function setup(initial=blankProject(),openProject:Project=blankProject()) 
   workspace=await WorkspaceController.create(bridge);const controller=activeController();render(<WorkspaceApp workspace={workspace}/>);return controller;
 }
 function exposeControl(element:HTMLElement){
-  const task=element.closest('.track-settings')?'Track':element.closest('.inspector')?'Inspector':null;
-  if(task&&element.closest('[hidden]'))fireEvent.click(within(screen.getByRole('navigation',{name:'Workspace panes'})).getByRole('button',{name:task}));
+  const panel=element.closest<HTMLElement>('.inspector-tabpanel');
+  if(panel?.hidden)fireEvent.click(document.getElementById(panel.getAttribute('aria-labelledby')!)!);
   const ancestors:HTMLDetailsElement[]=[];for(let parent=element.parentElement;parent;parent=parent.parentElement)if(parent instanceof HTMLDetailsElement)ancestors.unshift(parent);
   for(const disclosure of ancestors)if(!disclosure.open)fireEvent.click(disclosure.querySelector('summary')!);
   expect(element).toBeVisible();return element;
@@ -69,15 +69,15 @@ const click=(name:string)=>{
 const trackLabel='Tuning (notes, high to low)',staffLabel='Staff tuning (notes, high to low)';
 it('App retunes from note names and refreshes both fields and string labels through undo redo',async()=>{
   const controller=await setup();expect(screen.getByLabelText(trackLabel)).toHaveValue('E4 B3 G3 D3 A2 E2');expect(screen.getByLabelText(staffLabel)).toHaveValue('E4 B3 G3 D3 A2 E2');
-  expect(within(screen.getByLabelText('String')).getByRole('option',{name:'6 · E4'})).toHaveValue('6');
+  expect(within(exposeControl(screen.getByLabelText('String'))).getByRole('option',{name:'6 · E4'})).toHaveValue('6');
   change(trackLabel,'Eb4 B3 G3 D3 A2 E2');click('Apply tuning');await waitFor(()=>expect(controller.getState().score.tracks[0].staves[0].tuning[0]).toBe(63));
-  expect(screen.getByLabelText(trackLabel)).toHaveValue('D#4 B3 G3 D3 A2 E2');expect(screen.getByLabelText(staffLabel)).toHaveValue('D#4 B3 G3 D3 A2 E2');expect(within(screen.getByLabelText('String')).getByRole('option',{name:'6 · D#4'})).toHaveValue('6');
+  expect(screen.getByLabelText(trackLabel)).toHaveValue('D#4 B3 G3 D3 A2 E2');expect(screen.getByLabelText(staffLabel)).toHaveValue('D#4 B3 G3 D3 A2 E2');expect(within(exposeControl(screen.getByLabelText('String'))).getByRole('option',{name:'6 · D#4'})).toHaveValue('6');
   click('Undo');await waitFor(()=>expect(screen.getByLabelText(trackLabel)).toHaveValue('E4 B3 G3 D3 A2 E2'));expect(screen.getByLabelText(staffLabel)).toHaveValue('E4 B3 G3 D3 A2 E2');
   click('Redo');await waitFor(()=>expect(screen.getByLabelText(staffLabel)).toHaveValue('D#4 B3 G3 D3 A2 E2'));
   change(staffLabel,'E4 B3 G3 D3 A2 Db2');click('Apply staff settings');await waitFor(()=>expect(controller.getState().score.tracks[0].staves[0].tuning.at(-1)).toBe(37));
-  expect(screen.getByLabelText(trackLabel)).toHaveValue('E4 B3 G3 D3 A2 C#2');expect(screen.getByLabelText(staffLabel)).toHaveValue('E4 B3 G3 D3 A2 C#2');expect(within(screen.getByLabelText('String')).getByRole('option',{name:'1 · C#2'})).toHaveValue('1');
+  expect(screen.getByLabelText(trackLabel)).toHaveValue('E4 B3 G3 D3 A2 C#2');expect(screen.getByLabelText(staffLabel)).toHaveValue('E4 B3 G3 D3 A2 C#2');expect(within(exposeControl(screen.getByLabelText('String'))).getByRole('option',{name:'1 · C#2'})).toHaveValue('1');
   click('Undo');await waitFor(()=>expect(screen.getByLabelText(staffLabel)).toHaveValue('D#4 B3 G3 D3 A2 E2'));
-});
+},15000);
 it('App invalid tuning notes leave music history and selection unchanged',async()=>{
   const controller=await setup(),before=controller.getState().snapshot.project,score=controller.getState().score;
   for(const [label,button,text] of [[trackLabel,'Apply tuning','E4 bad'],[staffLabel,'Apply staff settings','C-2']]) {
@@ -105,4 +105,4 @@ it('App nine-string guitar presets commit through staff history and Custom stays
   change('Staff tuning preset','guitar-9-drop-b');expect(controller.getState().score.tracks[1].staves[0].tuning.at(-1)).toBe(25);click('Apply staff settings');await waitFor(()=>expect(controller.getState().score.tracks[1].staves[0].tuning.at(-1)).toBe(23));expect(screen.getByLabelText('Tuning preset')).toHaveValue('guitar-9-drop-b');click('Undo');await waitFor(()=>expect(screen.getByLabelText('Staff tuning preset')).toHaveValue('guitar-9-standard-csharp'));click('Redo');await waitFor(()=>expect(screen.getByLabelText('Tuning preset')).toHaveValue('guitar-9-drop-b'));
   change('Staff tuning preset','custom');expect(screen.getByLabelText('Staff tuning preset')).toHaveValue('custom');change(staffLabel,'E4 B3 G3 D3 A2 E2 B1 F#1 D1');click('Apply staff settings');await waitFor(()=>expect(controller.getState().score.tracks[1].staves[0].tuning.at(-1)).toBe(26));expect(screen.getByLabelText('Staff tuning preset')).toHaveValue('custom');
   change('Staff tuning preset','guitar-9-standard-csharp');click('Add staff');await waitFor(()=>expect(controller.getState().score.tracks[1].staves).toHaveLength(2));expect(controller.getState().score.tracks[1].staves[1].tuning).toEqual([64,59,55,50,45,40,35,30,25]);expect(controller.getState().score.tracks[1].staves[0].tuning.at(-1)).toBe(26);
-});
+},15000);

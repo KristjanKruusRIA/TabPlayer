@@ -18,6 +18,9 @@ const DURATIONS: readonly DurationSpec[] = [
   [64, 'Sixty-fourth note (1/64)', '1/64', 4, true, true],
 ];
 
+/** alphaTab's DynamicValue order, ppp = 0 to fff = 7. */
+const DYNAMICS = ['ppp', 'pp', 'p', 'mp', 'mf', 'f', 'ff', 'fff'] as const;
+
 function NoteGlyph({ filled, stem, flags }: { filled: boolean; stem: boolean; flags: number }) {
   return (
     <svg viewBox="0 0 18 18" width="15" height="15" aria-hidden="true" className="tp-glyph-svg">
@@ -98,7 +101,16 @@ export function EditingToolbar({
   onDurationChange,
   onDotsChange,
   onEdit,
+  orientation = 'horizontal',
+  onSelect,
+  onOpenMeasure,
 }: {
+  /** Vertical when shown as the palette column beside the score; arrow keys then also move up and down. */
+  orientation?: 'horizontal' | 'vertical';
+  /** Moves the cursor; with it the toolbar offers voices 1 to 4 of the bar. */
+  onSelect?: (target: BeatTarget) => void;
+  /** Opens the bar's measure settings; with it the toolbar offers time signature and tempo. */
+  onOpenMeasure?: (bar: number) => void;
 
   score: model.Score;
   target: BeatTarget;
@@ -116,7 +128,7 @@ export function EditingToolbar({
   const { t } = useI18n();
   const toolbarRef = useRef<HTMLDivElement>(null);
   const [focusIdx, setFocusIdx] = useState(0);
-  const { staff, beat } = describeSelection(score, target);
+  const { staff, beat, bar } = describeSelection(score, target);
   const indexed = staff.isPercussion || !staff.tuning.length;
   const stringed = !indexed;
   const note = indexed
@@ -193,7 +205,8 @@ export function EditingToolbar({
   }, [score, target, string, fret, noteIndex, duration, dots, busy, locked, focusIdx]);
 
   const onToolbarKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (!['ArrowRight', 'ArrowLeft', 'Home', 'End'].includes(event.key)) return;
+    const vertical = orientation === 'vertical';
+    if (!['ArrowRight', 'ArrowLeft', 'Home', 'End', ...(vertical ? ['ArrowUp', 'ArrowDown'] : [])].includes(event.key)) return;
     const buttons = Array.from(
       toolbarRef.current?.querySelectorAll<HTMLButtonElement>(
         'button.tp-glyph-btn:not(:disabled):not([aria-disabled="true"])',
@@ -203,8 +216,8 @@ export function EditingToolbar({
     event.preventDefault();
     const current = buttons.indexOf(document.activeElement as HTMLButtonElement);
     let next = current >= 0 ? current : 0;
-    if (event.key === 'ArrowRight') next = (next + 1) % buttons.length;
-    else if (event.key === 'ArrowLeft') next = (next - 1 + buttons.length) % buttons.length;
+    if (event.key === 'ArrowRight' || event.key === 'ArrowDown') next = (next + 1) % buttons.length;
+    else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') next = (next - 1 + buttons.length) % buttons.length;
     else if (event.key === 'Home') next = 0;
     else if (event.key === 'End') next = buttons.length - 1;
     const targetBtn = buttons[next];
@@ -257,9 +270,48 @@ export function EditingToolbar({
       ref={toolbarRef}
       role="toolbar"
       aria-label={t('toolbar.editing_toolbar')}
+      aria-orientation={orientation}
       className="tp-editing-toolbar"
+      data-orientation={orientation}
       onKeyDown={onToolbarKeyDown}
     >
+      {onSelect && (
+        <div className="tp-toolbar-group tp-toolbar-voices" role="group" aria-label={t('toolbar.voices')}>
+          {[0, 1, 2, 3].map(voice =>
+            glyphButton({
+              key: `voice-${voice}`,
+              label: t('toolbar.voice_n', { number: voice + 1 }),
+              pressed: target.voice === voice,
+              // Only voices the bar has can take the cursor; choosing the current one records nothing.
+              disabled: voice >= bar.voices.length,
+              onClick: () => { if (target.voice !== voice) onSelect({ ...target, voice, beat: 0 }); },
+              children: <span className="tp-glyph-text" data-voice={voice + 1}>{voice + 1}</span>,
+            }),
+          )}
+        </div>
+      )}
+
+      {onOpenMeasure && (
+        <div className="tp-toolbar-group" role="group" aria-label={t('toolbar.bar_tempo')}>
+          {glyphButton({
+            key: 'time-signature',
+            label: t('toolbar.time_signature'),
+            pressed: false,
+            disabled: false,
+            onClick: () => onOpenMeasure(target.bar),
+            children: <span className="tp-glyph-text tp-glyph-stack" aria-hidden="true"><span>4</span><span>4</span></span>,
+          })}
+          {glyphButton({
+            key: 'tempo',
+            label: t('toolbar.tempo'),
+            pressed: false,
+            disabled: false,
+            onClick: () => onOpenMeasure(target.bar),
+            children: <span className="tp-glyph-text" aria-hidden="true">♩=</span>,
+          })}
+        </div>
+      )}
+
       <div className="tp-toolbar-group" role="group" aria-label={t('toolbar.durations')}>
         {DURATIONS.map(([d, label, short, flags, filled, stem]) =>
           glyphButton({
@@ -338,6 +390,19 @@ export function EditingToolbar({
           onClick: () => toggleLink('tie'),
           children: <TieGlyph />,
         })}
+      </div>
+
+      <div className="tp-toolbar-group tp-toolbar-dynamics" role="group" aria-label={t('toolbar.dynamics')}>
+        {DYNAMICS.map((mark, value) =>
+          glyphButton({
+            key: `dyn-${mark}`,
+            label: t('toolbar.dynamic_n', { mark }),
+            pressed: note?.dynamics === value,
+            disabled: editDisabled || !note,
+            onClick: () => { if (note && note.dynamics !== value) patchNote({ dynamics: value }); },
+            children: <span className="tp-glyph-text tp-glyph-dynamic" aria-hidden="true">{mark}</span>,
+          }),
+        )}
       </div>
 
       <div className="tp-toolbar-group" role="group" aria-label={t('toolbar.common_techniques')}>

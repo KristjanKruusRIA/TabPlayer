@@ -51,19 +51,14 @@ body { overflow:hidden; }
 .app-shell .document-tab-item>button { min-height:24px; padding:2px 6px; }
 .app-shell .document-tab-dirty { background:var(--ws-accent); }
 .app-shell .document-tab-item>button:hover:enabled { color:var(--ws-text); }
-.workstation-workspace { display:grid; grid-template-columns:184px minmax(0,1fr) 284px; grid-template-rows:minmax(0,1fr) var(--dock-height); grid-template-areas:'left score inspector' 'dock dock inspector'; min-height:0; min-width:0; }
-.workstation-workspace[data-left=false] { grid-template-columns:0 minmax(0,1fr) 284px; }
-.workstation-workspace[data-inspector=false] { grid-template-columns:184px minmax(0,1fr) 0; }
-.workstation-workspace[data-left=false][data-inspector=false] { grid-template-columns:0 minmax(0,1fr) 0; }
+.workstation-workspace { display:grid; grid-template-columns:minmax(0,1fr) 304px; grid-template-rows:minmax(0,1fr) var(--dock-height); grid-template-areas:'score inspector' 'dock dock'; min-height:0; min-width:0; }
+.workstation-workspace[data-inspector=false] { grid-template-columns:minmax(0,1fr) 0; }
 .workstation-workspace[data-dock=false] { grid-template-rows:minmax(0,1fr) 0; }
 .workstation-workspace[data-dock-collapsed=true] { grid-template-rows:minmax(0,1fr) 30px; }
-.workstation-rail { display:none; }
-.workstation-left { grid-area:left; display:flex; flex-direction:column; min-width:0; min-height:0; background:var(--ws-panel); border-right:1px solid var(--ws-border); }
-.workstation-left>nav,.workstation-dock>nav { display:flex; gap:2px; align-items:stretch; flex-shrink:0; height:32px; padding:0 6px; border-bottom:1px solid var(--ws-border); }
-.workstation-left>nav>button,.workstation-dock>nav>button { min-height:0; padding:0 8px; border:0; border-bottom:2px solid transparent; border-radius:0; background:transparent; color:var(--ws-muted); font:500 13px/1 var(--tp-font-ui); }
-.workstation-left>nav>button:hover:enabled,.workstation-dock>nav>button:hover:enabled { background:transparent; border-color:transparent; color:var(--ws-text); }
-.workstation-left>nav>button[aria-pressed=true],.workstation-dock>nav>button[aria-pressed=true] { color:var(--ws-text); font-weight:600; border-bottom-color:var(--ws-accent); }
-.workstation-rail>button[aria-pressed=true] { color:var(--ws-text); background:var(--ws-raised); border-color:var(--ws-border); box-shadow:inset 2px 0 0 var(--ws-accent); }
+.workstation-dock>nav { display:flex; gap:2px; align-items:stretch; flex-shrink:0; height:28px; padding:0 6px; border-bottom:1px solid var(--ws-border); }
+.workstation-dock>nav>button { min-height:0; padding:0 8px; border:0; border-bottom:2px solid transparent; border-radius:0; background:transparent; color:var(--ws-muted); font:500 12px/1 var(--tp-font-ui); }
+.workstation-dock>nav>button:hover:enabled { background:transparent; border-color:transparent; color:var(--ws-text); }
+.workstation-dock>nav>button[aria-pressed=true] { color:var(--ws-text); font-weight:600; border-bottom-color:var(--ws-accent); }
 .workstation-task { min-width:0; min-height:0; overflow:auto; flex:1; }
 .workstation-task>.sound-panel,.workstation-task>.backing-panel { border-top:0; margin:0; padding:8px; }
 .workstation-task .backing-panel h3 { margin:0 0 8px; font-size:14px; color:var(--ws-text); }
@@ -96,24 +91,11 @@ body { overflow:hidden; }
 .workstation-dock .live-instrument-view { background:var(--ws-panel); height:100%; border:0; overflow:auto; }
 .app-shell .statusbar { min-height:24px; padding:4px 8px; gap:8px 16px; background:var(--ws-bg); color:var(--ws-muted); border-color:var(--ws-border); }
 .app-shell .error { padding:6px 8px; background:var(--ws-error-surface); color:var(--ws-error); }
-@media(min-width:1440px) {
-  .workstation-workspace { grid-template-columns:208px minmax(0,1fr) 304px; }
-  .workstation-workspace[data-left=false] { grid-template-columns:0 minmax(0,1fr) 304px; }
-  .workstation-workspace[data-inspector=false] { grid-template-columns:208px minmax(0,1fr) 0; }
-}
 @media(max-width:1179px) {
-  .workstation-workspace { grid-template-columns:64px minmax(0,1fr) 280px !important; grid-template-areas:'rail score detail' 'rail dock detail'; }
-  .workstation-workspace[data-left=false][data-inspector=false] { grid-template-columns:64px minmax(0,1fr) 0 !important; }
-  .workstation-rail { grid-area:rail; display:flex; flex-direction:column; gap:2px; padding:6px 3px; background:var(--ws-panel); border-right:1px solid var(--ws-border); }
-  .workstation-rail>button { padding:0 2px; min-height:40px; border-color:transparent; background:transparent; color:var(--ws-muted); font:500 11px/1 var(--tp-font-ui); white-space:nowrap; overflow-wrap:normal; }
-  .workstation-rail>button:hover:enabled { background:var(--ws-raised); color:var(--ws-text); }
-  .workstation-left,.workstation-inspector { grid-area:detail; border-left:1px solid var(--ws-border); border-right:0; }
-  .workstation-left>nav { display:none; }
+  .workstation-workspace { grid-template-columns:minmax(0,1fr) 264px; }
+  .workstation-workspace[data-inspector=false] { grid-template-columns:minmax(0,1fr) 0; }
   .app-shell .paper-scroll { padding:10px; }
-  .toolbar { gap:8px; }
   .toolbar .document-title { display:none; }
-  .toolbar .bar-label { position:absolute; width:1px; height:1px; margin:-1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
-  .toolbar :is(nav>button) { padding:0 7px; }
 }
 
 .finalized-banner { display:flex; align-items:center; gap:12px; padding:6px 14px; border-bottom:1px solid var(--ws-accent); background:color-mix(in srgb, var(--ws-accent) 14%, transparent); }
@@ -127,3 +109,24 @@ body { overflow:hidden; }
 .workstation-workspace[data-view=sound]>:not(.sound-view),.workstation-workspace[data-view=mixer]>:not(.mixer-view) { visibility:hidden; }
 .toolbar .view-switch { flex:none; }
 .toolbar .view-switch .tp-seg-option { min-height:24px; padding:0 10px; }
+
+/* Edition palette: Guitar Pro's narrow column of note tools at the left edge of the score. */
+.score-workspace .score-body { display:flex; flex:1 1 auto; min-height:0; min-width:0; }
+.score-workspace .score-body>.paper-scroll { flex:1 1 auto; min-width:0; }
+.score-palette { flex:0 0 auto; width:84px; min-height:0; overflow-y:auto; overflow-x:hidden; padding:8px 6px; background:var(--ws-panel); border-right:1px solid var(--ws-border); scrollbar-width:thin; scrollbar-color:var(--ws-border) var(--ws-panel); }
+.score-palette:empty { display:none; }
+.score-palette .tp-editing-toolbar[data-orientation="vertical"] { display:flex; flex-direction:column; flex-wrap:nowrap; gap:10px; padding:0; border:0; background:none; }
+.score-palette .tp-editing-toolbar[data-orientation="vertical"] .tp-toolbar-group { display:grid; grid-template-columns:repeat(2,34px); gap:4px; padding:0 0 10px; margin:0; border:0; border-bottom:1px solid var(--ws-border); }
+.score-palette .tp-editing-toolbar[data-orientation="vertical"] .tp-toolbar-group:last-child { border-bottom:0; padding-bottom:0; }
+.score-palette .tp-editing-toolbar[data-orientation="vertical"] .tp-glyph-btn { width:34px; height:34px; min-width:0; }
+.score-palette .tp-editing-toolbar[data-orientation="vertical"] .tp-glyph-btn[aria-pressed="true"] { background:var(--ws-accent); color:var(--ws-accent-ink); border-color:var(--ws-accent); }
+@media (max-width:1180px) { .score-palette { width:50px; padding:6px 4px; } .score-palette .tp-editing-toolbar[data-orientation="vertical"] .tp-toolbar-group { grid-template-columns:34px; } }
+.score-palette .tp-editing-toolbar[data-orientation="vertical"] .tp-toolbar-dynamics { grid-template-columns:repeat(2,34px); }
+/* The dock's top edge is a drag handle: a 6px band over the border, with a visible line while hovered or focused. */
+.workstation-dock { position:relative; }
+.workstation-dock>.dock-resize { position:absolute; z-index:6; top:-4px; left:0; right:0; height:8px; cursor:ns-resize; touch-action:none; }
+.workstation-dock>.dock-resize::after { content:''; position:absolute; left:0; right:0; top:3px; height:2px; background:transparent; transition:background-color .12s; }
+.workstation-dock>.dock-resize:hover::after,.workstation-dock>.dock-resize:focus-visible::after { background:var(--ws-accent); }
+.workstation-dock>.dock-resize:focus-visible { outline:none; }
+@media (forced-colors:active) { .workstation-dock>.dock-resize:is(:hover,:focus-visible)::after { background:Highlight; } }
+@media (prefers-reduced-motion:reduce) { .workstation-dock>.dock-resize::after { transition:none; } }

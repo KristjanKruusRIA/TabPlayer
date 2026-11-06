@@ -40,26 +40,41 @@ async function showPane(page,name) {
   await view.click();
 }
 
-/** @param {'Track'|'Sound'|'Backing'} task */
+/** Opens an inspector tab: Song (score settings), Track (track, sound and interpretation) or Selection (the editor). */
+export async function revealInspectorTab(page,tab) {
+  if(!['Song','Track','Selection'].includes(tab))throw new Error(`Unknown inspector tab: ${tab}`);
+  await revealInspector(page);
+  const button=page.getByRole('tablist',{name:'Inspector',exact:true}).getByRole('tab',{name:tab,exact:true});
+  if(await button.getAttribute('aria-selected')!=='true')await button.click();
+}
+
+/** The former left-pane tasks: Track and Sound live in the inspector's Track tab, Backing in the global view's Backing tab.
+ * @param {'Track'|'Sound'|'Backing'} task */
 export async function revealLeftTask(page,task) {
   if(!['Track','Sound','Backing'].includes(task))throw new Error(`Unknown left task: ${task}`);
-  const rail=page.getByRole('navigation',{name:'Workspace panes',exact:true}).getByRole('button',{name:task,exact:true});
-  if(await rail.isVisible())await rail.click();
-  else {
-    const button=page.getByRole('navigation',{name:'Track tools',exact:true}).getByRole('button',{name:task,exact:true});
-    if(!await button.isVisible())await showPane(page,'Track panel');
-    await button.click();
+  if(task==='Backing') {
+    const nav=page.getByRole('navigation',{name:'Dock views',exact:true});
+    if(!await nav.isVisible())await showPane(page,'Bottom dock');
+    const button=nav.getByRole('button',{name:'Backing',exact:true});
+    if(await button.getAttribute('aria-pressed')!=='true')await button.click();
+    const expand=page.getByRole('button',{name:'Expand bottom dock',exact:true});
+    if(await expand.isVisible())await expand.click();
+    return;
   }
+  await revealInspectorTab(page,'Track');
 }
 
 export async function revealInspector(page) {
-  if(await page.locator('.inspector').isVisible())return;
-  const rail=page.getByRole('navigation',{name:'Workspace panes',exact:true}).getByRole('button',{name:'Inspector',exact:true});
-  if(await rail.isVisible())await rail.click();
-  else await showPane(page,'Inspector');
-  await page.locator('.inspector').waitFor({state:'visible'});
+  if(await page.locator('.workstation-inspector').isVisible())return;
+  await showPane(page,'Inspector');
+  await page.locator('.workstation-inspector').waitFor({state:'visible'});
 }
 
+/** Practice settings open from the toolbar's practice button. */
+export async function revealPractice(page) {
+  const menu=page.locator('details.gp-practice');
+  if(!await menu.evaluate(node=>node.open))await menu.locator(':scope>summary').click();
+}
 /** @param {'Overview'|'Mixer'|'Instrument'} view */
 export async function revealDock(page,view) {
   if(!['Overview','Mixer','Instrument'].includes(view))throw new Error(`Unknown dock view: ${view}`);
@@ -107,7 +122,6 @@ export async function selectWorkspaceTrack(page,name) {
 const trackActions=new Set(['Apply tuning','Apply instrument settings','Add track','Remove track','Add pitched track','Add percussion track']);
 const backingActions=new Set(['Import backing','Remove backing']);
 const playbackActions=new Set(['Seek','Loop','Clear loop','Play from cursor','Play selection','Loop selection']);
-const inspectorActions=new Set(['Edit','Practice','Presentation']);
 
 // Existing acceptance wrappers use this presentation routing. Other actions keep
 // their exact existing button label; no native command or acceptance is replaced.
@@ -120,8 +134,11 @@ export async function clickWorkstationButton(page,name,{waitForIdle=true}={}) {
     if(name==='Apply instrument settings')await openDisclosure(page.locator('.track-settings summary').filter({hasText:/^Selected instrument$/}));
     if(backingActions.has(name))await revealLeftTask(page,'Backing');
     if(playbackActions.has(name))await revealPlaybackControls(page);
-    if(inspectorActions.has(name))await revealInspector(page);
-    await page.getByRole('button',{name,exact:true}).click();
+    // Edit, Practice and Presentation were inspector task buttons; they are now the Selection tab, the toolbar practice popover and the Song tab.
+    if(name==='Edit')await revealInspectorTab(page,'Selection');
+    else if(name==='Practice')await revealPractice(page);
+    else if(name==='Presentation')await revealInspectorTab(page,'Song');
+    else await page.getByRole('button',{name,exact:true}).click();
   }
   if(waitForIdle)await waitForWorkspaceIdle(page);
 }

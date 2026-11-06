@@ -1,5 +1,6 @@
 import { useI18n } from './i18n';
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { model } from '@coderline/alphatab';
 import { describeSelection } from './engine';
 import type { BeatTarget, EditCommand } from './project';
@@ -63,6 +64,11 @@ export function EditorPanel({
   contextScope: controlledScope,
   onContextScopeChange,
   documentEpoch,
+  paletteHost,
+  songHost,
+  practiceHost,
+  measureRequest = 0,
+  onOpenMeasure,
 }: {
   score: model.Score;
   target: BeatTarget;
@@ -90,6 +96,16 @@ export function EditorPanel({
   presentationViewTools?: ReactNode;
   contextScope?: InspectorContextScope;
   onContextScopeChange?: (scope: InspectorContextScope) => void;
+  /** Where the edition palette goes: beside the score, as in Guitar Pro. Without one it stays at the top of Edit. */
+  paletteHost?: HTMLElement | null;
+  /** Where the song-wide settings go: the inspector's Song tab. Without one they stay under Presentation. */
+  songHost?: HTMLElement | null;
+  /** Where the practice settings go: the toolbar's practice pop-up. Without one they stay under Practice. */
+  practiceHost?: HTMLElement | null;
+  /** Each increase opens and focuses the measure settings, as the song-position display's tempo and signature links ask. */
+  measureRequest?: number;
+  /** Opens the measure settings for a bar; the palette's time signature and tempo buttons use it. */
+  onOpenMeasure?: (bar: number) => void;
 }) {
   const { t } = useI18n();
   const busy = controlsBusy || locked;
@@ -125,6 +141,19 @@ export function EditorPanel({
     else if (scope === 'staff') openSummaryByText(t('editor.staff_voices_layout'));
     else if (scope === 'selection') openSummaryByText(t('editor.music_selection'));
   };
+
+  useEffect(() => {
+    if (!measureRequest) return;
+    const summaryText = t('editor.measure_and_notation');
+    const match = Array.from(editBodyRef.current?.querySelectorAll<HTMLElement>('details > summary') ?? []).find(el => el.textContent?.trim() === summaryText);
+    if (match?.parentElement instanceof HTMLDetailsElement) {
+      for (let section: HTMLElement | null = match.parentElement; section; section = section.parentElement?.closest('details') ?? null) {
+        if (section instanceof HTMLDetailsElement) section.open = true;
+      }
+      match.focus();
+      match.scrollIntoView?.({ block: 'nearest' });
+    }
+  }, [measureRequest]);
 
   useEffect(() => {
     if (controlledScope !== undefined) return;
@@ -227,6 +256,25 @@ export function EditorPanel({
   const showSection = (scopes: readonly InspectorContextScope[]) =>
     contextScope === 'all' || scopes.includes(contextScope);
 
+  /** Hosted, the song-wide and practice settings live in their own places (the Song tab and the toolbar), so the task links go. */
+  const hosted = songHost !== undefined;
+  const scoreInfo = (
+    <fieldset disabled={busy}>
+      <label>
+        {t('editor.title')}
+        <input value={title} onChange={e => setTitle(e.target.value)} />
+      </label>
+      <label>
+        {t('editor.artist')}
+        <input value={artist} onChange={e => setArtist(e.target.value)} />
+      </label>
+      <label>
+        {t('editor.initial_tempo')}
+        <input type="number" min={1} value={tempo} onChange={e => setTempo(Number(e.target.value))} />
+      </label>
+      <button onClick={() => onEdit({ type: 'setScoreInfo', title, artist, tempo, ...(tempo === score.tempo ? { preserveOpeningMark: true } : {}) })}>{t('editor.apply_score_info')}</button>
+    </fieldset>
+  );
   return (
     <aside className="inspector">
       <header className="inspector-heading">
@@ -238,7 +286,7 @@ export function EditorPanel({
             {indexed ? (noteIndex === null ? ' · No note selected' : ` · Note ${noteIndex + 1}`) : ` · String ${string}`}
           </span>
         </p>
-        <nav aria-label={t('editor.inspector_tasks')}>
+        {!hosted && <nav aria-label={t('editor.inspector_tasks')}>
           <button aria-controls={`${id}-edit`} onClick={() => openTask(editTask.current)}>
             {t('editor.task_edit')}
           </button>
@@ -248,26 +296,34 @@ export function EditorPanel({
           <button aria-controls={`${id}-presentation`} onClick={() => openTask(presentationTask.current)}>
             {t('editor.task_presentation')}
           </button>
-        </nav>
+        </nav>}
       </header>
       <section aria-label={t('editor.edit_tools')}>
         <details className="inspector-task" id={`${id}-edit`} ref={editTask} open>
           <summary>{t('editor.task_edit')}</summary>
           <div ref={editBodyRef} className="tp-inspector-edit-body">
-            <EditingToolbar
-              score={score}
-              target={target}
-              string={string}
-              fret={fret}
-              noteIndex={noteIndex}
-              duration={duration}
-              dots={dots}
-              busy={controlsBusy}
-              locked={locked}
-              onDurationChange={setDuration}
-              onDotsChange={setDots}
-              onEdit={onEdit}
-            />
+            {(() => {
+              const palette = (
+                <EditingToolbar
+                  score={score}
+                  target={target}
+                  string={string}
+                  fret={fret}
+                  noteIndex={noteIndex}
+                  duration={duration}
+                  dots={dots}
+                  busy={controlsBusy}
+                  locked={locked}
+                  onDurationChange={setDuration}
+                  onDotsChange={setDots}
+                  onEdit={onEdit}
+                  orientation={paletteHost ? 'vertical' : 'horizontal'}
+                  onSelect={onSelect}
+                  onOpenMeasure={onOpenMeasure}
+                />
+              );
+              return paletteHost ? createPortal(palette, paletteHost) : palette;
+            })()}
 
             <div className="tp-context-card" role="region" aria-label={t('editor.selection_context')}>
               <div className="tp-context-summary">
@@ -560,41 +616,45 @@ export function EditorPanel({
           </div>
         </details>
       </section>
-      <section aria-label={t('editor.practice_tools')}>
+      {practiceHost ? createPortal(
+        <section className="gp-practice-section" aria-label={t('editor.practice_tools')}>
+          <h3>{t('editor.task_practice')}</h3>
+          <fieldset disabled={controlsBusy}>
+            {practiceTools ?? <p className="muted">{t('editor.practice_hint')}</p>}
+          </fieldset>
+        </section>, practiceHost) : !hosted && <section aria-label={t('editor.practice_tools')}>
         <details className="inspector-task" id={`${id}-practice`} ref={practiceTask}>
           <summary>{t('editor.task_practice')}</summary>
           <fieldset disabled={controlsBusy}>
             {practiceTools ?? <p className="muted">{t('editor.practice_hint')}</p>}
           </fieldset>
         </details>
-      </section>
-      <section aria-label={t('editor.presentation_tools')}>
+      </section>}
+      {songHost ? createPortal(<>
+        <section className="inspector-section" aria-labelledby={`${id}-song-information`}>
+          <h3 id={`${id}-song-information`}>{t('inspector.information')}</h3>
+          {scoreInfo}
+          <SongPanel score={score} busy={busy} onEdit={onEdit} />
+          <AuthorDefaultsPanel score={score} load={newScoreDefaults} onSave={writeAuthorDefaults} />
+        </section>
+        <section className="inspector-section" aria-labelledby={`${id}-song-notation`}>
+          <h3 id={`${id}-song-notation`}>{t('inspector.musical_notation')}</h3>
+          <fieldset disabled={busy}>{presentationTools}</fieldset>
+          {presentationViewTools && <fieldset disabled={controlsBusy}>{presentationViewTools}</fieldset>}
+        </section>
+      </>, songHost) : !hosted && <section aria-label={t('editor.presentation_tools')}>
         <details className="inspector-task" id={`${id}-presentation`} ref={presentationTask}>
           <summary>{t('editor.task_presentation')}</summary>
           <fieldset disabled={busy}>{presentationTools}</fieldset>
           {presentationViewTools && <fieldset disabled={controlsBusy}>{presentationViewTools}</fieldset>}
           <details>
             <summary>{t('editor.score_info')}</summary>
-            <fieldset disabled={busy}>
-              <label>
-                {t('editor.title')}
-                <input value={title} onChange={e => setTitle(e.target.value)} />
-              </label>
-              <label>
-                {t('editor.artist')}
-                <input value={artist} onChange={e => setArtist(e.target.value)} />
-              </label>
-              <label>
-                {t('editor.initial_tempo')}
-                <input type="number" min={1} value={tempo} onChange={e => setTempo(Number(e.target.value))} />
-              </label>
-              <button onClick={() => onEdit({ type: 'setScoreInfo', title, artist, tempo, ...(tempo === score.tempo ? { preserveOpeningMark: true } : {}) })}>{t('editor.apply_score_info')}</button>
-            </fieldset>
+            {scoreInfo}
           </details>
           <SongPanel score={score} busy={busy} onEdit={onEdit} />
           <AuthorDefaultsPanel score={score} load={newScoreDefaults} onSave={writeAuthorDefaults} />
         </details>
-      </section>
+      </section>}
     </aside>
   );
 }

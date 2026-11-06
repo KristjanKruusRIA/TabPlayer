@@ -3,7 +3,7 @@ import type { CSSProperties, ReactNode } from 'react';
 import { busyGuard } from './useBusyGuard';
 import './ui.css';
 
-export interface SegmentedOption<T extends string|number> {value:T;label:ReactNode;/** Spoken name when `label` is not text. */ariaLabel?:string;disabled?:boolean;style?:CSSProperties}
+export interface SegmentedOption<T extends string|number> {value:T;label:ReactNode;/** Spoken name when `label` is not text. */ariaLabel?:string;/** A tooltip, for an option drawn as an icon. */title?:string;disabled?:boolean;style?:CSSProperties}
 export interface SegmentedProps<T extends string|number> {
   /** Names the group. */
   label:string;value:T;options:readonly SegmentedOption<T>[];onChange:(value:T)=>void;disabled?:boolean;className?:string;
@@ -21,7 +21,7 @@ export function Segmented<T extends string|number>({label,value,options,onChange
   };
   return <div className={`tp-segmented ${className??''}`} role="radiogroup" aria-label={label} aria-disabled={disabled||undefined}>
     {options.map((option,index)=>{
-      return <button key={String(option.value)} ref={el=>{buttons.current[index]=el;}} type="button" role="radio" aria-checked={option.value===value} aria-label={option.ariaLabel} tabIndex={index===stop?0:-1} style={option.style}
+      return <button key={String(option.value)} ref={el=>{buttons.current[index]=el;}} type="button" role="radio" aria-checked={option.value===value} aria-label={option.ariaLabel} title={option.title} tabIndex={index===stop?0:-1} style={option.style}
         {...busyGuard({busy:disabled,unavailable:option.disabled,className:'tp-seg-option',
         onClick:()=>{if(option.value!==value)onChange(option.value);},
         onKeyDown:event=>{

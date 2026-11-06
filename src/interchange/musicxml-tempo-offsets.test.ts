@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { createHash } from 'node:crypto';
-import { describe,expect,it } from 'vitest';
+import { describe,expect,it ,vi} from 'vitest';
 import { model,Settings } from '@coderline/alphatab';
 import { strFromU8,strToU8,unzipSync,zipSync } from 'fflate';
 import { buildScore,previewEdit,trackIdentity } from '../engine';
@@ -103,6 +103,15 @@ describe('MusicXML playback tempo offsets',()=>{
     const root=new DOMParser().parseFromString(strFromU8(after['scores/main.musicxml']),'application/xml');
     expect([...root.querySelectorAll('direction > offset')].map(node=>node.textContent)).toEqual(['960']);
     expect(prepareMusicXmlTempoOffsets(original,settings)).toEqual(prepared);
+  });
+
+  it('prepares the same MXL bytes at different times of day',()=>{
+    const original=mxl(musicXml(4),4);
+    vi.useFakeTimers();
+    try{
+      vi.setSystemTime(new Date(2026,10,6,10,0,0));const first=prepareMusicXmlTempoOffsets(original,settings);
+      vi.setSystemTime(new Date(2026,10,6,10,0,10));expect(prepareMusicXmlTempoOffsets(original,settings)).toEqual(first);
+    }finally{vi.useRealTimers();}
   });
 
   it('converts plain XML deterministically and only in the qualifying offset',()=>{

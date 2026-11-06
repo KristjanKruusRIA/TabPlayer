@@ -15,8 +15,9 @@ interface Command {id:string;title:string;words:string;hint:string;keys?:string;
   run:(argument:string,context:PaletteContext)=>Result}
 
 const durations=[1,2,4,8,16,32,64];
-/** The modifier the app's shortcuts use on this platform. */
-const mod=typeof navigator!=='undefined'&&/Mac|iPhone|iPad/.test(navigator.platform)?'Cmd':'Ctrl';
+/** The modifier the app's shortcuts use on a platform: Cmd on Apple systems, Ctrl elsewhere. The app accepts either key. */
+export function shortcutModifier(platform:string|undefined):'Cmd'|'Ctrl' {return /Mac|iPhone|iPad/.test(platform??'')?'Cmd':'Ctrl';}
+const mod=shortcutModifier(typeof navigator!=='undefined'?navigator.platform:undefined);
 const integer=(text:string,min:number,max:number)=>/^\d+$/.test(text)&&Number(text)>=min&&Number(text)<=max?Number(text):null;
 const beatAt=(context:PaletteContext)=>{const {track,staff,bar,voice,beat}=context.target,value=context.score.tracks[track]?.staves[staff]?.bars[bar]?.voices[voice]?.beats[beat];return value&&!value.isEmpty?value:null;};
 const edit=(command:EditCommand):Result=>({action:{kind:'edit',command}});

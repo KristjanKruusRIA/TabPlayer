@@ -1,7 +1,7 @@
 import { expect,it } from 'vitest';
 import { model,Settings } from '@coderline/alphatab';
 import { music,target } from './fixtures';
-import { searchCommands,type PaletteContext } from './command-palette';
+import { searchCommands,shortcutModifier,type PaletteContext } from './command-palette';
 import { buildScore,previewEdit } from '../engine';
 import { blankProject,type Project } from '../project';
 
@@ -56,9 +56,16 @@ it('applies every expression through the engine on a real document',()=>{
     .toEqual([2,1,model.Clef.F4,[model.Direction.JumpDaCapoAlFine],'Intro',model.DynamicValue.MF,'C']);
 });
 
+it('names the shortcut modifier Cmd on Apple platforms and Ctrl elsewhere',()=>{
+  expect(shortcutModifier('MacIntel')).toBe('Cmd');expect(shortcutModifier('iPad')).toBe('Cmd');
+  expect(shortcutModifier('Win32')).toBe('Ctrl');expect(shortcutModifier('Linux x86_64')).toBe('Ctrl');expect(shortcutModifier(undefined)).toBe('Ctrl');
+});
+
 it('lists keyboard shortcuts beside the commands that have them',()=>{
   const keys=Object.fromEntries(searchCommands('',context()).map(match=>[match.title,match.keys]));
-  expect(keys).toMatchObject({Undo:'Ctrl+Z',Redo:'Ctrl+Shift+Z','Play or pause':'Space','New score':'Ctrl+N','Open score':'Ctrl+O',Save:'Ctrl+S','Save As':'Ctrl+Shift+S','Help topics':'F1'});
+  // The labels follow the machine running the test: Cmd on macOS, Ctrl elsewhere.
+  const mod=shortcutModifier(typeof navigator!=='undefined'?navigator.platform:undefined);
+  expect(keys).toMatchObject({Undo:`${mod}+Z`,Redo:`${mod}+Shift+Z`,'Play or pause':'Space','New score':`${mod}+N`,'Open score':`${mod}+O`,Save:`${mod}+S`,'Save As':`${mod}+Shift+S`,'Help topics':'F1'});
   expect(keys['Go to measure']).toBeUndefined();
 });
 

@@ -61,11 +61,15 @@ function exposeControl(element:HTMLElement){
   expect(element).toBeVisible();return element;
 }
 const change=(label:string,value:string)=>fireEvent.change(exposeControl(screen.getByLabelText(label)),{target:{value}});
+// One role query per click: each getByRole walks the whole workspace, and a second visible-only query doubled the cost under load.
 const click=(name:string)=>{
-  if(/^Track \d+:/.test(name))fireEvent.click(screen.getByRole('button',{name:'Mixer'}));
-  else exposeControl(screen.getByRole('button',{name,hidden:true}));
-  fireEvent.click(screen.getByRole('button',{name}));
+  if(/^Track \d+:/.test(name))fireEvent.click(screen.getByRole('button',{name:'Mixer',hidden:true}));
+  const button=screen.getByRole('button',{name,hidden:true});
+  fireEvent.click(/^Track \d+:/.test(name)?(expect(button).toBeVisible(),button):exposeControl(button));
 };
+// These are behaviour tests, not budgets: each mounts the whole workspace in jsdom, where one role query costs about 300 ms.
+// The limit is a hang guard sized for loaded CI runners (Windows took 16.9 s for a test that takes 4 to 6 s here); see docs/validation/2026-11-06-ci-failures.md.
+const APP_TEST_TIMEOUT=30000;
 const trackLabel='Tuning (notes, high to low)',staffLabel='Staff tuning (notes, high to low)';
 it('App retunes from note names and refreshes both fields and string labels through undo redo',async()=>{
   const controller=await setup();expect(screen.getByLabelText(trackLabel)).toHaveValue('E4 B3 G3 D3 A2 E2');expect(screen.getByLabelText(staffLabel)).toHaveValue('E4 B3 G3 D3 A2 E2');
@@ -77,13 +81,13 @@ it('App retunes from note names and refreshes both fields and string labels thro
   change(staffLabel,'E4 B3 G3 D3 A2 Db2');click('Apply staff settings');await waitFor(()=>expect(controller.getState().score.tracks[0].staves[0].tuning.at(-1)).toBe(37));
   expect(screen.getByLabelText(trackLabel)).toHaveValue('E4 B3 G3 D3 A2 C#2');expect(screen.getByLabelText(staffLabel)).toHaveValue('E4 B3 G3 D3 A2 C#2');expect(within(exposeControl(screen.getByLabelText('String'))).getByRole('option',{name:'1 · C#2'})).toHaveValue('1');
   click('Undo');await waitFor(()=>expect(screen.getByLabelText(staffLabel)).toHaveValue('D#4 B3 G3 D3 A2 E2'));
-},15000);
+},APP_TEST_TIMEOUT);
 it('App invalid tuning notes leave music history and selection unchanged',async()=>{
   const controller=await setup(),before=controller.getState().snapshot.project,score=controller.getState().score;
   for(const [label,button,text] of [[trackLabel,'Apply tuning','E4 bad'],[staffLabel,'Apply staff settings','C-2']]) {
     change(label,text);click(button);expect(screen.getByLabelText(label)).toHaveValue(text);expect(screen.getByRole('alert')).toHaveTextContent(/note|C-1|G9/);expect(controller.getState().snapshot.project).toEqual(before);expect(controller.getState().score).toBe(score);expect(screen.getByLabelText('String')).toHaveValue('6');change(label,'E4 B3 G3 D3 A2 E2');
   }
-});
+},APP_TEST_TIMEOUT);
 it('App presets fill drafts only and rejected string counts preserve the draft, notes and history',async()=>{
   const controller=await setup();await controller.edit({type:'setNote',target:{track:0,staff:0,bar:0,voice:0,beat:0},string:6,fret:3});
   const before=controller.getState().snapshot.project;change('Tuning preset','bass-6-standard-b');expect(screen.getByLabelText(trackLabel)).toHaveValue('C3 G2 D2 A1 E1 B0');expect(screen.getByLabelText(staffLabel)).toHaveValue('E4 B3 G3 D3 A2 E2');expect(controller.getState().snapshot.project).toBe(before);
@@ -94,15 +98,15 @@ it('App presets fill drafts only and rejected string counts preserve the draft, 
   // A preset with another string count changes it explicitly; the note keeps its pitch on a playable string.
   change('Tuning preset','guitar-9-standard-csharp');click('Change string count');await waitFor(()=>expect(controller.getState().score.tracks[0].staves[0].tuning).toHaveLength(9));
   const moved=controller.getState().score.tracks[0].staves[0].bars[0].voices[0].beats[0].notes[0];expect([moved.string,moved.fret,moved.realValue]).toEqual([6,1,note.realValue]);expect(controller.getState().snapshot.project.edits.at(-1)).toEqual({type:'setStringCount',track:0,tuning:[64,59,55,50,45,40,35,30,25],keep:'high',tuningName:'Standard C#',crossVoice:true});
-});
+},APP_TEST_TIMEOUT);
 it('App new-track presets distinguish six-string bass from guitar and refresh across selection and Open',async()=>{
   const controller=await setup(),before=controller.getState().snapshot.project;fireEvent.click(screen.getByText('Add instrument'));change('New track name','Bass six');change('New track tuning preset','bass-6-standard-b');expect(controller.getState().snapshot.project).toBe(before);expect(screen.getByLabelText('New track tuning')).toHaveValue('C3 G2 D2 A1 E1 B0');change('MIDI instrument','25');expect(screen.getByLabelText('New track tuning')).toHaveValue('C3 G2 D2 A1 E1 B0');change('MIDI instrument','33');click('Add track');await waitFor(()=>expect(controller.getState().score.tracks).toHaveLength(2));click('Track 2: Bass six');expect(screen.getByLabelText('Tuning preset')).toHaveValue('bass-6-standard-b');expect(screen.getByLabelText('Staff tuning preset')).toHaveValue('bass-6-standard-b');
   change('Tuning preset','custom');expect(screen.getByLabelText('Tuning preset')).toHaveValue('custom');click('Track 1: Guitar');expect(screen.getByLabelText('Tuning preset')).toHaveValue('guitar-6-standard-e');expect(screen.getByLabelText('Staff tuning preset')).toHaveValue('guitar-6-standard-e');click('Track 2: Bass six');expect(screen.getByLabelText('Tuning preset')).toHaveValue('bass-6-standard-b');
   const retained=controller.getState();click('Open');await waitFor(()=>expect(activeController()).not.toBe(controller));expect(activeController().getState().score.tracks).toHaveLength(1);expect(controller.getState()).toBe(retained);expect(workspace.getState().documents).toHaveLength(2);expect(screen.getByLabelText(trackLabel)).toHaveValue('E4 B3 G3 D3 A2 E2');expect(screen.getByLabelText('Tuning preset')).toHaveValue('guitar-6-standard-e');expect(screen.getByLabelText('Staff tuning preset')).toHaveValue('guitar-6-standard-e');
-});
+},APP_TEST_TIMEOUT);
 it('App nine-string guitar presets commit through staff history and Custom stays editable',async()=>{
   const controller=await setup();fireEvent.click(screen.getByText('Add instrument'));change('New track name','Guitar nine');change('New track tuning preset','guitar-9-standard-csharp');change('MIDI instrument','25');click('Add track');await waitFor(()=>expect(controller.getState().score.tracks).toHaveLength(2));click('Track 2: Guitar nine');expect(screen.getByLabelText('Tuning preset')).toHaveValue('guitar-9-standard-csharp');
   change('Staff tuning preset','guitar-9-drop-b');expect(controller.getState().score.tracks[1].staves[0].tuning.at(-1)).toBe(25);click('Apply staff settings');await waitFor(()=>expect(controller.getState().score.tracks[1].staves[0].tuning.at(-1)).toBe(23));expect(screen.getByLabelText('Tuning preset')).toHaveValue('guitar-9-drop-b');click('Undo');await waitFor(()=>expect(screen.getByLabelText('Staff tuning preset')).toHaveValue('guitar-9-standard-csharp'));click('Redo');await waitFor(()=>expect(screen.getByLabelText('Tuning preset')).toHaveValue('guitar-9-drop-b'));
   change('Staff tuning preset','custom');expect(screen.getByLabelText('Staff tuning preset')).toHaveValue('custom');change(staffLabel,'E4 B3 G3 D3 A2 E2 B1 F#1 D1');click('Apply staff settings');await waitFor(()=>expect(controller.getState().score.tracks[1].staves[0].tuning.at(-1)).toBe(26));expect(screen.getByLabelText('Staff tuning preset')).toHaveValue('custom');
   change('Staff tuning preset','guitar-9-standard-csharp');click('Add staff');await waitFor(()=>expect(controller.getState().score.tracks[1].staves).toHaveLength(2));expect(controller.getState().score.tracks[1].staves[1].tuning).toEqual([64,59,55,50,45,40,35,30,25]);expect(controller.getState().score.tracks[1].staves[0].tuning.at(-1)).toBe(26);
-},15000);
+},APP_TEST_TIMEOUT);

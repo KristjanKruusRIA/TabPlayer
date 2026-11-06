@@ -187,7 +187,8 @@ function repack(bytes:Uint8Array,settings:Settings,path:string,xml:string):Uint8
   }});
   if(oversized)return bytes;
   entries[path]=strToU8(xml);
-  return zipSync(entries);
+  // A fixed DOS timestamp keeps the prepared archive byte-identical however often and whenever it is prepared.
+  return zipSync(entries,{mtime:new Date(1980,0,1)});
 }
 
 export function prepareMusicXmlTempoOffsets(bytes:Uint8Array,settings:Settings):Uint8Array {

@@ -66,6 +66,7 @@ export function EditorPanel({
   documentEpoch,
   paletteHost,
   measureRequest = 0,
+  onOpenMeasure,
 }: {
   score: model.Score;
   target: BeatTarget;
@@ -97,6 +98,8 @@ export function EditorPanel({
   paletteHost?: HTMLElement | null;
   /** Each increase opens and focuses the measure settings, as the song-position display's tempo and signature links ask. */
   measureRequest?: number;
+  /** Opens the measure settings for a bar; the palette's time signature and tempo buttons use it. */
+  onOpenMeasure?: (bar: number) => void;
 }) {
   const { t } = useI18n();
   const busy = controlsBusy || locked;
@@ -290,6 +293,8 @@ export function EditorPanel({
                   onDotsChange={setDots}
                   onEdit={onEdit}
                   orientation={paletteHost ? 'vertical' : 'horizontal'}
+                  onSelect={onSelect}
+                  onOpenMeasure={onOpenMeasure}
                 />
               );
               return paletteHost ? createPortal(palette, paletteHost) : palette;

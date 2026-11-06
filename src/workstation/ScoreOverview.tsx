@@ -14,7 +14,7 @@ export interface ScoreOverviewProps {
   /** Mixer controls beside each track name. Row is a stable component type, so clock ticks re-render the controls, not the grid. */
   controls?:{header:ReactNode;Row:ComponentType<{track:number}>};
 }
-const cellSize=28,baseNameWidth=144,controlsWidth=176;
+const cellSize=28,baseNameWidth=144,controlsWidth=202;
 type Position={track:number;bar:number};
 type Window={first:number;last:number};
 interface GridContentProps {

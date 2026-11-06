@@ -143,8 +143,9 @@ it('glyph editing toolbar dispatches one undoable edit per duration, dot, rest, 
   expect(toolbar.getByRole('button',{name:'Half note (1/2)'})).toHaveFocus();
   fireEvent.keyDown(toolbar.getByRole('button',{name:'Half note (1/2)'}),{key:'End'});
   expect(toolbar.getByRole('button',{name:'Toggle accent'})).toHaveFocus();
+  // The voices lead the toolbar, as in Guitar Pro's palette, so Home lands on Voice 1.
   fireEvent.keyDown(toolbar.getByRole('button',{name:'Toggle accent'}),{key:'Home'});
-  expect(first).toHaveFocus();
+  expect(toolbar.getByRole('button',{name:'Voice 1'})).toHaveFocus();
 });
 
 it('duration button at current duration and rest toggle on indexed-staff rest record nothing',()=>{

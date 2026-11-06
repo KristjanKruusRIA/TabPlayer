@@ -10,9 +10,11 @@ const signed = (value: number, digits: number) => `${value > 0 ? '+' : ''}${valu
 
 /** A range that follows the pointer or keys on a draft of its own, and commits once at the end of the gesture, so one
  * drag is one undoable change and one mix handed to the player. The draft is dropped when the edit settles. */
-function Slider({ label, value, min, max, step, format, disabled, commit }: {
+function Slider({ label, value, min, max, step, format, disabled, commit, compact = false }: {
   label: string; value: number; min: number; max: number; step: number; format: (value: number) => string;
   disabled: boolean; commit: (value: number) => Promise<unknown> | void;
+  /** Just the range, named by `label`, for the dock's master row. */
+  compact?: boolean;
 }): React.JSX.Element {
   const [draft, setDraft] = useState<number | null>(null);
   // A commit on its way keeps its draft, busy or not, until it settles; only a change not yet committed is dropped when the control goes busy.
@@ -26,24 +28,24 @@ function Slider({ label, value, min, max, step, format, disabled, commit }: {
     void Promise.resolve(commit(draft)).catch(() => {}).finally(() => { sending.current = false; setDraft(null); });
   };
   useEffect(() => { if (disabled && !sending.current) setDraft(null); }, [disabled]);
-  return <label className="track-channel-range">{label} <output>{format(shown)}</output>
-    <input type="range" min={min} max={max} step={step} value={shown} aria-label={label} aria-valuetext={format(shown)} aria-disabled={disabled || undefined}
-      onChange={event => { if (!disabled) setDraft(Number(event.target.value)); }} onPointerUp={finish} onKeyUp={finish} onBlur={finish} />
-  </label>;
+  const input = <input type="range" min={min} max={max} step={step} value={shown} aria-label={label} aria-valuetext={format(shown)} aria-disabled={disabled || undefined}
+    title={compact ? `${label}: ${format(shown)}` : undefined}
+    onChange={event => { if (!disabled) setDraft(Number(event.target.value)); }} onPointerUp={finish} onKeyUp={finish} onBlur={finish} />;
+  if (compact) return input;
+  return <label className="track-channel-range">{label} <output>{format(shown)}</output>{input}</label>;
 }
 
-/** The master strip of the mixer: overall level and balance, then the compressor, EQ, reverb and limiter that every
- * track and the backing pass through. The playback click joins at the limiter and the count-in click stays outside. Like the track faders it works on a finalized document, since it is
- * how a player balances playback. */
-export function MasterPanel({ master, disabled, onChange }: {
-  master: MasterSettings | undefined; disabled: boolean; onChange: Commit;
-}): React.JSX.Element {
+const masterDb = (value: number) => `${signed(value, 1)} dB`;
+function useBalanceText() {
   const { t } = useI18n();
+  return (value: number) => value === 0 ? t('audio.balance_centre') : value < 0 ? t('audio.balance_left', { pct: Math.round(Math.abs(value) * 100) }) : t('audio.balance_right', { pct: Math.round(Math.abs(value) * 100) });
+}
+
+/** A change is built on the master as it stands now, not as it was drawn: a second control touched while the first
+ * one's edit is still on its way would otherwise be built from the old master and put the first back. `latest` holds
+ * the master with every change sent so far; it follows the prop again once nothing is in flight. */
+function useMasterChange(master: MasterSettings | undefined, onChange: Commit) {
   const current = master ?? defaultMaster();
-  const neutral = masterIsNeutral(master);
-  // A change is built on the master as it stands now, not as it was drawn: a second control touched while the first
-  // one's edit is still on its way would otherwise be built from the old master and put the first back. `latest`
-  // holds the master with every change sent so far; it follows the prop again once nothing is in flight.
   const latest = useRef(current);
   const inFlight = useRef(0);
   const shown = useRef(current);
@@ -65,13 +67,38 @@ export function MasterPanel({ master, disabled, onChange }: {
     }).finally(() => { inFlight.current -= 1; });
   };
   const change = (patch: Partial<MasterSettings>) => send({ ...latest.current, ...patch });
+  return { current, latest, change, send };
+}
+
+/** The dock's master row: overall level and balance only, each drag one undoable change, as in the mixer's master strip. */
+export function DockMasterControls({ master, disabled, onChange }: {
+  master: MasterSettings | undefined; disabled: boolean; onChange: Commit;
+}): React.JSX.Element {
+  const { t } = useI18n();
+  const { current, change } = useMasterChange(master, onChange);
+  const balance = useBalanceText();
+  return <>
+    <Slider compact label={t('audio.master_level')} value={current.gainDb} min={-24} max={12} step={.5} format={masterDb} disabled={disabled} commit={value => change({ gainDb: value })} />
+    <Slider compact label={t('audio.master_balance')} value={current.balance} min={-1} max={1} step={.05} format={balance} disabled={disabled} commit={value => change({ balance: value })} />
+  </>;
+}
+
+/** The master strip of the mixer: overall level and balance, then the compressor, EQ, reverb and limiter that every
+ * track and the backing pass through. The playback click joins at the limiter and the count-in click stays outside. Like the track faders it works on a finalized document, since it is
+ * how a player balances playback. */
+export function MasterPanel({ master, disabled, onChange }: {
+  master: MasterSettings | undefined; disabled: boolean; onChange: Commit;
+}): React.JSX.Element {
+  const { t } = useI18n();
+  const neutral = masterIsNeutral(master);
+  const { current, latest, change, send } = useMasterChange(master, onChange);
   const block = <K extends 'compressor' | 'eq' | 'reverb' | 'limiter'>(name: K, patch: Partial<MasterSettings[K]>) =>
     change({ [name]: { ...latest.current[name], ...patch } } as Partial<MasterSettings>);
   const on = (name: 'compressor' | 'eq' | 'reverb' | 'limiter', title: string) =>
     <label className="master-switch"><input type="checkbox" checked={current[name].enabled} aria-disabled={disabled || undefined} onChange={event => { if (!disabled) void block(name, { enabled: event.target.checked } as never); }} />{t('audio.effect_on', { title })}</label>;
-  const db = (value: number) => `${signed(value, 1)} dB`;
+  const db = masterDb;
   const plain = (value: number) => value.toFixed(2);
-  const balance = (value: number) => value === 0 ? t('audio.balance_centre') : value < 0 ? t('audio.balance_left', { pct: Math.round(Math.abs(value) * 100) }) : t('audio.balance_right', { pct: Math.round(Math.abs(value) * 100) });
+  const balance = useBalanceText();
   return <section className="track-channel track-master" aria-label={t('audio.master')}>
     <div className="track-channel-heading"><span>{t('audio.master')}</span><span className="track-channel-status">{neutral ? t('audio.untouched') : t('audio.changed')}</span></div>
     <Slider label={t('audio.master_level')} value={current.gainDb} min={-24} max={12} step={.5} format={db} disabled={disabled} commit={value => change({ gainDb: value })} />

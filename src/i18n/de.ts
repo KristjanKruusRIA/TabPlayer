@@ -345,6 +345,8 @@ export const de: MessageCatalog = {
   'export.tracks_to_export': 'Zu exportierende Spuren',
   'export.measures_to_export': 'Zu exportierende Takte',
   'export.audio': 'Audio',
+  'export.ogg': 'OGG Vorbis (komprimiert)',
+  'export.ogg_note': 'OGG Vorbis ist komprimiert und verlustbehaftet, mit etwa 192 kbit/s. Dateien sind etwa ein Siebtel so groß wie WAV, und normalisierte Spitzen können nach der Komprimierung −1 dBFS leicht überschreiten.',
 
   // Saved Tunings Dialog
   'tuning.saved_tunings_title': 'Gespeicherte Stimmungen',

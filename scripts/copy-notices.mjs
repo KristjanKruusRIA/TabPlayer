@@ -8,6 +8,13 @@ async function collect(directory,name,version,license) {
   const destination=new URL(`${name.replaceAll('/','_')}-${version}/`,output);await mkdir(destination,{recursive:true});
   const files=(await readdir(directory)).filter(file=>/^(license|licence|copying|notice|authors)([.-]|$)/i.test(file));
   for(const file of files)await copyFile(join(directory,file),new URL(file,destination));
+  // A crate that builds bundled C sources keeps their licenses in its `*_vendor` folders, as the Ogg and Vorbis crates do.
+  for(const entry of await readdir(directory,{withFileTypes:true})) {
+    if(!entry.isDirectory()||!entry.name.endsWith('_vendor'))continue;
+    for(const file of (await readdir(join(directory,entry.name))).filter(file=>/^(license|licence|copying)([.-]|$)/i.test(file))) {
+      const named=`${entry.name}-${file}`;await copyFile(join(directory,entry.name,file),new URL(named,destination));files.push(named);
+    }
+  }
   inventory.push({name,version,license,files});
 }
 for(const name of ['@coderline/alphatab','@tauri-apps/api','@tauri-apps/plugin-dialog','react','react-dom','scheduler','fflate','@fontsource/instrument-sans','@fontsource/ibm-plex-mono']) {
@@ -35,3 +42,5 @@ await writeFile(new URL('packages.json',output),JSON.stringify(inventory,null,2)
 await copyFile(new URL('../THIRD_PARTY_NOTICES.md',import.meta.url),new URL('THIRD_PARTY_NOTICES.md',output));
 await copyFile(new URL('../legal/Apache-2.0.txt',import.meta.url),new URL('Apache-2.0.txt',output));
 await copyFile(new URL('../legal/integrated-notices.txt',import.meta.url),new URL('integrated-notices.txt',output));
+// The vorbis-rs crates publish no licence file, so their upstream BSD-3-Clause text is kept in the repository.
+await copyFile(new URL('../legal/vorbis-rs-BSD-3-Clause.txt',import.meta.url),new URL('vorbis-rs-BSD-3-Clause.txt',output));

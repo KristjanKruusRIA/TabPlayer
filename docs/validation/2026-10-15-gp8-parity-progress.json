@@ -8810,17 +8810,24 @@
       "source_evidence": [
         "formats"
       ],
-      "test_evidence": [],
+      "test_evidence": [
+        "src-tauri/src/export/wav.rs",
+        "src-tauri/src/export/stems.rs",
+        "src/export/ogg-export.test.tsx",
+        "tests/desktop/parity-ogg-export.mjs"
+      ],
       "current_behavior_or_gap": "OGG input is supported; output encoder absent.",
       "acceptance_required": "Decode OGG output independently and compare duration/audio.",
       "runtime_rechecked": false,
       "historical_status": "missing",
-      "current_status": "missing",
-      "assessment": "baseline_not_reaudited",
-      "current_proven_status": null,
-      "current_behavior": "OGG input is supported; output encoder absent.",
-      "remaining_gap": "Not re-audited in this delivery-progress audit. The original baseline behavior, gap and acceptance remain authoritative historical context; this is not a new current proof.",
-      "current_evidence": [],
+      "current_status": "implemented",
+      "assessment": "evidence_reviewed",
+      "current_proven_status": "implemented",
+      "current_behavior": "Mixed audio and stems export as Ogg Vorbis from the Export dialog's File type (quality VBR 0.6, about 192 kbit/s; bit depth hidden), with normalization as for WAV, by vorbis_rs 0.5.6 with the bundled aoTuV libvorbis and libogg (BSD-3-Clause). Native tests decode the output independently with Symphonia to the exact length at over 30 dB SNR, and a Windows desktop export of a chord decoded at the WAV's rate and exact frame count, about 28 dB SNR against it, at 3% of a 24-bit WAV's size.",
+      "remaining_gap": "Fixed quality with no quality or bitrate choice; no title or artist tags; not listened to; byte-identical output only for the same block feeding; built on Windows only.",
+      "current_evidence": [
+        "2026-11-06-gp8-ogg-export.md"
+      ],
       "runtime_rechecked_by_this_audit": false
     },
     {
@@ -8909,7 +8916,7 @@
       "assessment": "evidence_reviewed",
       "current_proven_status": "partial",
       "current_behavior": "Mixed WAV or AIFF exports can be normalized from the Export dialog to a chosen RMS level from −30 to −6 dB (default −16) with one gain, held so no peak passes −1 dBFS and raised by at most 40 dB; stems keep their levels and exports without it are unchanged. Native tests read back levels within 0.01 dB, and a desktop export of a chord reached −24.00 dB RMS and was held at −1.00 dBFS for higher targets with its dynamics unchanged.",
-      "remaining_gap": "No codec quality or bitrate options, since no compressed format is exported; RMS rather than LUFS loudness; a single gain without limiting, so peaky material stops below the target; stems are not normalized.",
+      "remaining_gap": "No codec quality or bitrate options: OGG export (F20) uses a fixed VBR 0.6; RMS rather than LUFS loudness; a single gain without limiting, so peaky material stops below the target; stems are not normalized.",
       "current_evidence": [
         "normalize_export_behavior",
         "normalize_export_evidence",

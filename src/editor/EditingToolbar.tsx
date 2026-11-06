@@ -1,10 +1,11 @@
 import { useI18n } from '../i18n';
-import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { Fragment, useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { model } from '@coderline/alphatab';
 import type { BeatTarget, EditCommand } from '../project';
 import type { IndexedNoteTarget, NoteTarget, NoteTechniques } from '../edit-types';
 import { describeSelection } from '../engine';
 import { nextLinkedNote } from './techniques';
+import { paletteGroups, type PaletteControl, type PaletteGroup, type PaletteItem, type PaletteOpen, type PaletteResult } from './palette-actions';
 
 type DurationSpec = readonly [duration: number, label: string, short: string, flags: number, filled: boolean, stem: boolean];
 
@@ -104,7 +105,10 @@ export function EditingToolbar({
   orientation = 'horizontal',
   onSelect,
   onOpenMeasure,
+  onOpenPanel,
 }: {
+  /** Opens the chord diagram, scale diagram or lyrics editor; with it the palette offers those buttons. */
+  onOpenPanel?: (panel: Exclude<PaletteOpen, 'measure'>) => void;
   /** Vertical when shown as the palette column beside the score; arrow keys then also move up and down. */
   orientation?: 'horizontal' | 'vertical';
   /** Moves the cursor; with it the toolbar offers voices 1 to 4 of the bar. */
@@ -128,6 +132,8 @@ export function EditingToolbar({
   const { t } = useI18n();
   const toolbarRef = useRef<HTMLDivElement>(null);
   const [focusIdx, setFocusIdx] = useState(0);
+  const [popover, setPopover] = useState<string | null>(null);
+  const [promptText, setPromptText] = useState('');
   const { staff, beat, bar } = describeSelection(score, target);
   const indexed = staff.isPercussion || !staff.tuning.length;
   const stringed = !indexed;
@@ -188,6 +194,29 @@ export function EditingToolbar({
     }
   };
 
+  const groups = paletteGroups(score, target, string, noteIndex);
+  const groupOf = (id: string): PaletteGroup => groups.find(g => g.id === id)!;
+  const canOpen = (panel: PaletteOpen) => (panel === 'measure' ? Boolean(onOpenMeasure) : Boolean(onOpenPanel));
+  const run = (result: PaletteResult) => {
+    if (!result || busy) return;
+    if ('open' in result) {
+      if (result.open === 'measure') onOpenMeasure?.(target.bar);
+      else onOpenPanel?.(result.open);
+    } else if (!locked) onEdit(result.edit);
+  };
+  // A popover belongs to one cursor position; moving the cursor or a new score closes it.
+  useEffect(() => { setPopover(null); }, [score, target.track, target.staff, target.bar, target.voice, target.beat, string, noteIndex]);
+  useEffect(() => {
+    if (!popover) return;
+    const panel = toolbarRef.current?.querySelector<HTMLElement>('.tp-palette-popover');
+    const items = Array.from(panel?.querySelectorAll<HTMLElement>('[role^="menuitem"]:not(:disabled), input') ?? []);
+    (items.find(item => item.getAttribute('aria-checked') === 'true') ?? items[0])?.focus();
+  }, [popover]);
+  const closePopover = (id: string) => {
+    setPopover(null);
+    toolbarRef.current?.querySelector<HTMLButtonElement>(`button[data-palette-id="${id}"]`)?.focus();
+  };
+
   const activeDuration = beat?.duration ?? duration;
   const activeDots = beat?.dots ?? dots;
 
@@ -206,6 +235,7 @@ export function EditingToolbar({
 
   const onToolbarKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     const vertical = orientation === 'vertical';
+    if ((event.target as HTMLElement).closest?.('.tp-palette-popover')) return;
     if (!['ArrowRight', 'ArrowLeft', 'Home', 'End', ...(vertical ? ['ArrowUp', 'ArrowDown'] : [])].includes(event.key)) return;
     const buttons = Array.from(
       toolbarRef.current?.querySelectorAll<HTMLButtonElement>(
@@ -238,6 +268,8 @@ export function EditingToolbar({
     onClick: () => void;
     children: ReactNode;
     badge?: string;
+    id?: string;
+    popup?: 'menu' | 'dialog';
   }) => {
     const index = btnCounter++;
     const isDisabled = opts.disabled && !busy;
@@ -258,10 +290,91 @@ export function EditingToolbar({
           opts.onClick();
         }}
         title={opts.label}
+        data-palette-id={opts.id}
+        aria-haspopup={opts.popup}
+        aria-expanded={opts.popup ? popover === opts.id : undefined}
       >
         {opts.children}
         {opts.badge && <span className="tp-glyph-badge" aria-hidden="true">{opts.badge}</span>}
       </button>
+    );
+  };
+
+  const itemName = (item: PaletteItem) => item.text ?? t(item.label);
+  const menuKeys = (event: KeyboardEvent<HTMLDivElement>, id: string) => {
+    if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closePopover(id); return; }
+    if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+    const items = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('button[role^="menuitem"]:not(:disabled)'));
+    if (!items.length) return;
+    event.preventDefault();
+    const at = items.indexOf(document.activeElement as HTMLButtonElement);
+    const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1
+      : event.key === 'ArrowDown' ? (at + 1) % items.length : (at - 1 + items.length) % items.length;
+    items[next].focus();
+  };
+  const paletteButton = (control: PaletteControl): ReactNode => {
+    const opens = control.menu ? 'menu' : control.prompt ? 'dialog' : undefined;
+    const openPanel = (() => { const result = control.enabled ? control.activate() : null; return result && 'open' in result ? result.open : null; })();
+    // Opening a panel needs its host; edits need an unlocked document.
+    const disabled = !control.enabled || (openPanel ? !canOpen(openPanel) : locked);
+    const button = glyphButton({
+      key: control.id,
+      id: control.id,
+      label: t(control.label),
+      pressed: control.pressed,
+      disabled,
+      popup: opens,
+      onClick: () => {
+        if (opens) {
+          if (popover === control.id) { setPopover(null); return; }
+          setPromptText(control.prompt?.value ?? '');
+          setPopover(control.id);
+          return;
+        }
+        run(control.activate());
+      },
+      children: <span className="tp-glyph-text tp-palette-glyph" aria-hidden="true">{control.glyph}</span>,
+    });
+    const panel = popover !== control.id ? null : control.menu ? (
+      <div key={`${control.id}-menu`} className="tp-palette-popover" role="menu" aria-label={t(control.label)} onKeyDown={event => menuKeys(event, control.id)}>
+        {control.menu.map(item => (
+          <button
+            key={item.id}
+            type="button"
+            role={control.id === 'endings' || control.id === 'directions' ? 'menuitemcheckbox' : 'menuitemradio'}
+            aria-checked={item.pressed}
+            disabled={!item.enabled}
+            className="tp-palette-menu-item"
+            onClick={() => { const result = item.activate(); closePopover(control.id); run(result); }}
+          >
+            <span className="tp-palette-menu-glyph" aria-hidden="true">{item.glyph}</span>
+            <span>{itemName(item)}</span>
+          </button>
+        ))}
+      </div>
+    ) : (
+      <form
+        key={`${control.id}-prompt`}
+        className="tp-palette-popover"
+        role="dialog"
+        aria-label={t(control.label)}
+        onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closePopover(control.id); } }}
+        onSubmit={event => { event.preventDefault(); const result = control.prompt!.submit(promptText); closePopover(control.id); run(result); }}
+      >
+        <input aria-label={t(control.label)} value={promptText} onChange={event => setPromptText(event.target.value)} />
+        <button type="submit">{t('palette.apply')}</button>
+        <button type="button" onClick={() => closePopover(control.id)}>{t('palette.cancel')}</button>
+      </form>
+    );
+    // One stable wrapper per control, so opening its list never remounts (and unfocuses) the button.
+    return <Fragment key={control.id}>{button}{panel}</Fragment>;
+  };
+  const paletteGroup = (id: string, only?: (control: PaletteControl) => boolean) => {
+    const group = groupOf(id);
+    return (
+      <div className="tp-toolbar-group" role="group" aria-label={t(group.label)} key={`group-${id}`}>
+        {group.controls.filter(control => !only || only(control)).map(paletteButton)}
+      </div>
     );
   };
 
@@ -291,26 +404,16 @@ export function EditingToolbar({
         </div>
       )}
 
-      {onOpenMeasure && (
-        <div className="tp-toolbar-group" role="group" aria-label={t('toolbar.bar_tempo')}>
-          {glyphButton({
-            key: 'time-signature',
-            label: t('toolbar.time_signature'),
-            pressed: false,
-            disabled: false,
-            onClick: () => onOpenMeasure(target.bar),
-            children: <span className="tp-glyph-text tp-glyph-stack" aria-hidden="true"><span>4</span><span>4</span></span>,
-          })}
-          {glyphButton({
-            key: 'tempo',
-            label: t('toolbar.tempo'),
-            pressed: false,
-            disabled: false,
-            onClick: () => onOpenMeasure(target.bar),
-            children: <span className="tp-glyph-text" aria-hidden="true">♩=</span>,
-          })}
+      {onOpenPanel && (
+        <div className="tp-toolbar-group tp-toolbar-panels" role="group" aria-label={t('palette.lyrics')}>
+          {glyphButton({ key: 'lyrics', id: 'lyrics', label: t('palette.lyrics'), pressed: false, disabled: false, onClick: () => onOpenPanel('lyrics'),
+            children: <span className="tp-glyph-text" aria-hidden="true">{t('palette.lyrics')}</span> })}
+          {glyphButton({ key: 'chords', id: 'chords', label: t('palette.chords'), pressed: false, disabled: !beat, onClick: () => onOpenPanel('chord'),
+            children: <span className="tp-glyph-text" aria-hidden="true">{t('palette.chords')}</span> })}
         </div>
       )}
+
+      {paletteGroup('bar')}
 
       <div className="tp-toolbar-group" role="group" aria-label={t('toolbar.durations')}>
         {DURATIONS.map(([d, label, short, flags, filled, stem]) =>
@@ -392,6 +495,8 @@ export function EditingToolbar({
         })}
       </div>
 
+      {paletteGroup('notes')}
+
       <div className="tp-toolbar-group tp-toolbar-dynamics" role="group" aria-label={t('toolbar.dynamics')}>
         {DYNAMICS.map((mark, value) =>
           glyphButton({
@@ -404,6 +509,8 @@ export function EditingToolbar({
           }),
         )}
       </div>
+
+      {paletteGroup('hairpins')}
 
       <div className="tp-toolbar-group" role="group" aria-label={t('toolbar.common_techniques')}>
         {glyphButton({
@@ -617,6 +724,20 @@ export function EditingToolbar({
               />
             </svg>
           ),
+        })}
+      </div>
+      {paletteGroup('effects')}
+      {paletteGroup('text')}
+
+      <div className="tp-toolbar-group" role="group" aria-label={t('palette.group_automation')}>
+        {glyphButton({
+          key: 'tempo',
+          id: 'tempo',
+          label: t('toolbar.tempo'),
+          pressed: false,
+          disabled: !onOpenMeasure,
+          onClick: () => onOpenMeasure?.(target.bar),
+          children: <span className="tp-glyph-text" aria-hidden="true">♩=</span>,
         })}
       </div>
     </div>

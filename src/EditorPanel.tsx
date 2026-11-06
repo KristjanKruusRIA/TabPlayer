@@ -68,6 +68,8 @@ export function EditorPanel({
   songHost,
   practiceHost,
   measureRequest = 0,
+  lyricsRequest = 0,
+  onOpenLyrics,
   onOpenMeasure,
 }: {
   score: model.Score;
@@ -104,6 +106,10 @@ export function EditorPanel({
   practiceHost?: HTMLElement | null;
   /** Each increase opens and focuses the measure settings, as the song-position display's tempo and signature links ask. */
   measureRequest?: number;
+  /** Bumped to reveal and focus the Lyrics section, as measureRequest does for Measure & notation. */
+  lyricsRequest?: number;
+  /** Reveals the lyrics editor wherever it is hosted; without it the panel reveals its own Lyrics section. */
+  onOpenLyrics?: () => void;
   /** Opens the measure settings for a bar; the palette's time signature and tempo buttons use it. */
   onOpenMeasure?: (bar: number) => void;
 }) {
@@ -142,9 +148,7 @@ export function EditorPanel({
     else if (scope === 'selection') openSummaryByText(t('editor.music_selection'));
   };
 
-  useEffect(() => {
-    if (!measureRequest) return;
-    const summaryText = t('editor.measure_and_notation');
+  const revealSummary = (summaryText: string) => {
     const match = Array.from(editBodyRef.current?.querySelectorAll<HTMLElement>('details > summary') ?? []).find(el => el.textContent?.trim() === summaryText);
     if (match?.parentElement instanceof HTMLDetailsElement) {
       for (let section: HTMLElement | null = match.parentElement; section; section = section.parentElement?.closest('details') ?? null) {
@@ -153,7 +157,21 @@ export function EditorPanel({
       match.focus();
       match.scrollIntoView?.({ block: 'nearest' });
     }
+  };
+  useEffect(() => {
+    if (!measureRequest) return;
+    revealSummary(t('editor.measure_and_notation'));
   }, [measureRequest]);
+  const [ownLyricsRequest, setOwnLyricsRequest] = useState(0);
+  useEffect(() => {
+    if (!lyricsRequest && !ownLyricsRequest) return;
+    revealSummary(t('editor.lyrics'));
+  }, [lyricsRequest, ownLyricsRequest]);
+  const openLyrics = () => {
+    if (onOpenLyrics) { onOpenLyrics(); return; }
+    setContextScope('staff');
+    setOwnLyricsRequest(tick => tick + 1);
+  };
 
   useEffect(() => {
     if (controlledScope !== undefined) return;
@@ -320,6 +338,7 @@ export function EditorPanel({
                   orientation={paletteHost ? 'vertical' : 'horizontal'}
                   onSelect={onSelect}
                   onOpenMeasure={onOpenMeasure}
+                  onOpenPanel={panel => (panel === 'chord' ? onChord() : panel === 'scales' ? onScales() : openLyrics())}
                 />
               );
               return paletteHost ? createPortal(palette, paletteHost) : palette;

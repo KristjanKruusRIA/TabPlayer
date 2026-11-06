@@ -252,3 +252,20 @@ fn drum_kit_mix_rides_the_track_mix_and_rejects_anything_non_canonical() {
         assert!(!accepted, "accepted {bad}");
     }
 }
+
+#[test]
+fn note_techniques_take_an_optional_string_number() {
+    let target = serde_json::json!({"track":0,"staff":0,"bar":0,"voice":0,"beat":0});
+    let shown = serde_json::json!({"type":"setNoteTechniques","target":target,"string":1,"patch":{"stringNumber":true}});
+    let command: EditCommand = serde_json::from_value(shown.clone()).unwrap();
+    assert!(command.validate().is_ok());
+    assert_eq!(serde_json::to_value(&command).unwrap(), shown);
+    // An older log without the field still reads, and still writes without it.
+    let older = serde_json::json!({"type":"setNoteTechniques","target":target,"string":1,"patch":{"letRing":true}});
+    let command: EditCommand = serde_json::from_value(older.clone()).unwrap();
+    assert_eq!(serde_json::to_value(&command).unwrap(), older);
+    for bad in [serde_json::Value::Null, serde_json::json!(1)] {
+        let command = serde_json::json!({"type":"setNoteTechniquesByIndex","target":target,"noteIndex":0,"patch":{"stringNumber":bad}});
+        assert!(serde_json::from_value::<EditCommand>(command).is_err());
+    }
+}

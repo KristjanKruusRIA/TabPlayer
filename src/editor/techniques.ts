@@ -44,12 +44,12 @@ export function applyNoteLink(score:model.Score,from:NoteTarget|IndexedNoteTarge
 }
 export function applyNoteTechniques(score:model.Score,target:NoteTarget|IndexedNoteTarget,patch:NoteTechniques) {
   const note=noteAt(score,target);
-  const booleans={letRing:'isLetRing',palmMute:'isPalmMute',dead:'isDead',ghost:'isGhost',staccato:'isStaccato',leftHandTapped:'isLeftHandTapped'} as const;
+  const booleans={letRing:'isLetRing',palmMute:'isPalmMute',dead:'isDead',ghost:'isGhost',staccato:'isStaccato',leftHandTapped:'isLeftHandTapped',stringNumber:'showStringNumber'} as const;
   const enums={accent:['accentuated',model.AccentuationType],dynamics:['dynamics',model.DynamicValue],leftFinger:['leftHandFinger',model.Fingers],rightFinger:['rightHandFinger',model.Fingers],slideIn:['slideInType',model.SlideInType],slideOut:['slideOutType',model.SlideOutType],vibrato:['vibrato',model.VibratoType],ornament:['ornament',model.NoteOrnament]} as const;
   for(const key of Object.keys(patch))if(!(key in booleans)&&!(key in enums)&&!['bend','harmonic','trill','audio'].includes(key))throw new Error('Unknown note technique.');
   for(const key of Object.keys(booleans) as (keyof typeof booleans)[])if(patch[key]!==undefined&&typeof patch[key]!=='boolean')throw new Error('Invalid note technique flag.');
   for(const key of Object.keys(enums) as (keyof typeof enums)[])if(patch[key]!==undefined)enumValue(patch[key]!,enums[key][1],key);
-  if(!note.isStringed&&(patch.letRing||patch.palmMute||patch.dead||patch.leftHandTapped||patch.slideIn||patch.slideOut||patch.bend||patch.harmonic))throw new Error('This technique requires a stringed guitar or bass note.');
+  if(!note.isStringed&&(patch.letRing||patch.palmMute||patch.dead||patch.leftHandTapped||patch.stringNumber||patch.slideIn||patch.slideOut||patch.bend||patch.harmonic))throw new Error('This technique requires a stringed guitar or bass note.');
   if(note.isPercussion&&((patch.leftFinger!==undefined&&patch.leftFinger>=0)||(patch.rightFinger!==undefined&&patch.rightFinger>=0)||patch.vibrato||patch.ornament||patch.trill))throw new Error('This technique is unavailable for percussion notes.');
   const slide=patch.slideOut===model.SlideOutType.Shift||patch.slideOut===model.SlideOutType.Legato?nextOnString(note):null;
   if((patch.slideOut===1||patch.slideOut===2)&&!slide)throw new Error('A linked slide needs a next note on this string.');

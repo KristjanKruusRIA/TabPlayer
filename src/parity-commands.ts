@@ -149,7 +149,7 @@ function gestureShape(value:unknown) {
   }
 }
 function techniqueShape(value:unknown) {
-  const patch=object(value),flags=['letRing','palmMute','dead','ghost','staccato','leftHandTapped'];
+  const patch=object(value),flags=['letRing','palmMute','dead','ghost','staccato','leftHandTapped','stringNumber'];
   const enums=['accent','dynamics','leftFinger','rightFinger','slideIn','slideOut','vibrato','ornament'];
   for(const [key,field]of Object.entries(patch)) {
     if(flags.includes(key)){if(typeof field!=='boolean')throw new Error('Invalid technique flag.');}

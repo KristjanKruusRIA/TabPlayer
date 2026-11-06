@@ -15,9 +15,9 @@ it('applies_one_complete_detached_relative_fixed_or_progressive_draft',()=>{
   for(const [index,value]of ['123','10','300'].entries()){change('Relative speed (%)',value);expect(changes).toHaveLength(index);apply();}
   expect(changes.map(value=>value.tempo)).toEqual([{kind:'relative',ratio:1.23},{kind:'relative',ratio:.1},{kind:'relative',ratio:3}]);
   change('Tempo mode','fixed');change('Fixed tempo (BPM)','100.5');apply();
-  expect(changes[3]).toEqual({tempo:{kind:'fixed',bpm:100.5},metronome:{enabled:false,volume:.4,visual:false},countIn:{bars:0,betweenLoops:false}});
+  expect(changes[3]).toEqual({tempo:{kind:'fixed',bpm:100.5},metronome:{enabled:false,volume:.4,visual:false,sound:'beep'},countIn:{bars:0,betweenLoops:false}});
   change('Tempo mode','progressive');change('Starting speed (%)','50');change('Finishing speed (%)','100');change('Increment (percentage points)','20');change('Repetitions per speed','2');expect(changes).toHaveLength(4);apply();
-  expect(changes[4]).toEqual({tempo:{kind:'progressive',start:.5,end:1,step:.2,repetitions:2},metronome:{enabled:false,volume:.4,visual:false},countIn:{bars:0,betweenLoops:false}});
+  expect(changes[4]).toEqual({tempo:{kind:'progressive',start:.5,end:1,step:.2,repetitions:2},metronome:{enabled:false,volume:.4,visual:false,sound:'beep'},countIn:{bars:0,betweenLoops:false}});
   expect(changes[0]).not.toBe(accepted);expect(changes[0].metronome).not.toBe(accepted.metronome);expect(changes[0].countIn).not.toBe(accepted.countIn);expect(accepted).toEqual(DEFAULT_PRACTICE);
 });
 it('rejects_incomplete_or_invalid_numeric_drafts_without_dispatch',()=>{
@@ -34,7 +34,7 @@ it('rapid_volume_visual_edits_and_mode_switches_preserve_one_draft',()=>{
   act(()=>{fireEvent.click(screen.getByLabelText('Metronome'));change('Metronome volume (%)','0');fireEvent.click(screen.getByLabelText('Visual metronome'));change('Count-in bars','2');fireEvent.click(screen.getByLabelText('Count in between loops'));});
   change('Tempo mode','fixed');change('Tempo mode','progressive');change('Tempo mode','relative');
   expect(changes).toEqual([]);apply();
-  expect(changes).toEqual([{tempo:{kind:'relative',ratio:1},metronome:{enabled:true,volume:0,visual:true},countIn:{bars:2,betweenLoops:true}}]);
+  expect(changes).toEqual([{tempo:{kind:'relative',ratio:1},metronome:{enabled:true,volume:0,visual:true,sound:'beep'},countIn:{bars:2,betweenLoops:true}}]);
   change('Metronome volume (%)','100');expect(changes[0].metronome.volume).toBe(0);
 });
 it('unchanged_accepted_status_preserves_drafts_changed_settings_and_document_key_reset_them',()=>{
@@ -52,7 +52,7 @@ it('busy_and_backing_guard_fixed_mode_and_prevent_dispatch',()=>{
   view.rerender(<PracticePanel {...props} busy/>);expect(screen.getByRole('button',{name:'Apply practice settings'})).toBeDisabled();apply();expect(changes).toEqual([]);
 });
 it('unchanged_percentage_fields_retain_the_exact_accepted_numbers',()=>{
-  const changes:PracticeSettings[]=[],accepted:PracticeSettings={tempo:{kind:'progressive',start:.10501504513540623,end:1.995987963891675,step:.03501504513540623,repetitions:2},metronome:{enabled:true,volume:.10501504513540623,visual:true},countIn:{bars:1,betweenLoops:true}};
+  const changes:PracticeSettings[]=[],accepted:PracticeSettings={tempo:{kind:'progressive',start:.10501504513540623,end:1.995987963891675,step:.03501504513540623,repetitions:2},metronome:{enabled:true,volume:.10501504513540623,visual:true,sound:'beep'},countIn:{bars:1,betweenLoops:true}};
   render(<PracticePanel settings={accepted} busy={false} hasBacking={false} onChange={value=>changes.push(value)}/>);apply();expect(changes).toEqual([accepted]);
   change('Count-in bars','2');apply();expect(changes[1]).toEqual({...accepted,countIn:{bars:2,betweenLoops:true}});
 });
@@ -60,4 +60,14 @@ it('apply_rejection_keeps_the_editable_draft_during_unchanged_status_updates',()
   const accepted=settings(),props={settings:accepted,busy:false,hasBacking:false,onChange:()=>{throw new Error('Audio command rejected.');}};
   const view=render(<PracticePanel {...props}/>);change('Relative speed (%)','123');apply();expect(screen.getByRole('alert')).toHaveTextContent('Audio command rejected.');
   view.rerender(<PracticePanel {...props} settings={structuredClone(accepted)}/>);expect(screen.getByLabelText('Relative speed (%)')).toHaveValue(123);expect(screen.getByRole('alert')).toHaveTextContent('Audio command rejected.');
+});
+it('chooses_the_metronome_sound_and_reads_old_settings_as_the_beep',()=>{
+  const changes:PracticeSettings[]=[],old=settings();delete old.metronome.sound;
+  const {rerender}=render(<PracticePanel settings={old} busy={false} hasBacking={false} onChange={value=>changes.push(value)}/>);
+  const sound=screen.getByLabelText('Metronome sound');expect(sound).toHaveValue('beep');
+  expect([...(sound as HTMLSelectElement).options].map(option=>[option.value,option.textContent])).toEqual([['beep','Beep'],['woodblock','Woodblock'],['cowbell','Cowbell'],['stick','Stick']]);
+  change('Metronome sound','woodblock');expect(changes).toEqual([]);apply();
+  expect(changes).toHaveLength(1);expect(changes[0].metronome).toEqual({enabled:false,volume:.4,visual:false,sound:'woodblock'});
+  rerender(<PracticePanel settings={{...old,metronome:{...old.metronome,sound:'cowbell'}}} busy={false} hasBacking={false} onChange={value=>changes.push(value)}/>);
+  expect(screen.getByLabelText('Metronome sound')).toHaveValue('cowbell');
 });

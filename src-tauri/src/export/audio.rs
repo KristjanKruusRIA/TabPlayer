@@ -21,6 +21,9 @@ pub struct AudioExportRequest {
     pub format: AudioFormat,
     pub speed: f64,
     pub metronome: bool,
+    /// The click the metronome stem and mix use; requests written before it was chosen keep the beep.
+    #[serde(default)]
+    pub metronome_sound: crate::audio::practice::ClickSound,
     pub tail_seconds: f64,
     pub include_backing: bool,
     pub include_mix: bool,
@@ -139,7 +142,12 @@ impl AudioExportRender {
     ) -> Result<Self, String> {
         request.format.validate()?;
         renderer.set_speed(request.speed)?;
-        renderer.set_metronome(request.metronome);
+        renderer.set_metronome_settings(crate::audio::practice::MetronomeSettings {
+            enabled: request.metronome,
+            volume: 0.4,
+            visual: false,
+            sound: request.metronome_sound,
+        });
         let schedule = RenderSchedule::new(
             plan,
             request.range,
@@ -394,6 +402,7 @@ mod tests {
             format: AudioFormat::wav(48000, 24),
             speed: 1.0,
             metronome: false,
+            metronome_sound: Default::default(),
             tail_seconds: 0.1,
             include_backing: false,
             include_mix: true,

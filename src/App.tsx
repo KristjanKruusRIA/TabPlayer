@@ -314,7 +314,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   const directExport=()=>{act((async()=>{const release=beginEditorOperation();try{await controller.export();}finally{release();}})());};
   const audioSettings=useMemo(()=>effectiveAudioSettings(state.snapshot.project,state),[state.snapshot.project,state.settings,state.embeddedBacking,state.embeddedBackingSettings,state.sourceMixes]),practiceRatio=player?player.exportPracticeRatio():1;
   const gpBackingIssue=useCallback((selection:ExportSelection)=>gpBackingSelectionIssue(state.score,audioSettings.backing,selection),[state.score,audioSettings.backing]);
-  const exports=useExportCoordinator({score:state.score,settings:audioSettings,currentSpeed:practiceRatio,bridge:documentBridge,native:exportBridge,embeddedBacking:state.embeddedBacking,revision:state.revision});
+  const exports=useExportCoordinator({score:state.score,settings:audioSettings,currentSpeed:practiceRatio,metronomeSound:player?player.getState().practice.settings.metronome.sound??'beep':'beep',bridge:documentBridge,native:exportBridge,embeddedBacking:state.embeddedBacking,revision:state.revision});
   const runExport=(options:ExportOptions)=>{if(exportRunning.current)return;setExportError(null);setExportLaunching(true);exportCancelled.current=false;const running=(async()=>{
     // A finalized document cannot change, so its exports use the layout it already has.
     if(!editLocked&&(options.format==='pdf'||options.format==='print'||options.format==='svg'||options.format==='png')){

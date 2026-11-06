@@ -1,4 +1,4 @@
-import type { PracticeSettings } from './practice-types';
+import { CLICK_SOUNDS,type ClickSound,type PracticeSettings } from './practice-types';
 
 function object(value:unknown):Record<string,unknown> {
   if(!value||typeof value!=='object'||Array.isArray(value))throw new Error('Invalid practice settings object.');
@@ -28,7 +28,9 @@ export function validatePractice(settings:PracticeSettings,hasBacking:boolean):v
     if(number(tempo.step,0,2.9,'Increment must be greater than 0 and at most 290 percentage points.')===0)throw new Error('Increment must be greater than 0 and at most 290 percentage points.');
     if(!Number.isInteger(number(tempo.repetitions,1,100,'Repetitions per speed must be a whole number from 1 to 100.')))throw new Error('Repetitions per speed must be a whole number from 1 to 100.');
   }else throw new Error('Invalid practice tempo mode.');
-  const metronome=exact(value.metronome,['enabled','volume','visual']);flag(metronome.enabled);flag(metronome.visual);number(metronome.volume,0,1,'Metronome volume must be between 0% and 100%.');
+  const metronomeValue=object(value.metronome),metronome=exact(metronomeValue,Object.hasOwn(metronomeValue,'sound')?['enabled','volume','visual','sound']:['enabled','volume','visual']);
+  if(Object.hasOwn(metronome,'sound')&&!CLICK_SOUNDS.includes(metronome.sound as ClickSound))throw new Error('Invalid metronome sound.');
+  flag(metronome.enabled);flag(metronome.visual);number(metronome.volume,0,1,'Metronome volume must be between 0% and 100%.');
   const count=exact(value.countIn,['bars','betweenLoops']);flag(count.betweenLoops);
   if(!Number.isInteger(number(count.bars,0,16,'Count-in bars must be a whole number from 0 to 16.')))throw new Error('Count-in bars must be a whole number from 0 to 16.');
   if(hasBacking&&tempo.kind==='fixed')throw new Error('Fixed tempo is unavailable while a backing track is present.');

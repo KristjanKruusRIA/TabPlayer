@@ -125,6 +125,15 @@ it('freezes one progressive coefficient and explicit audio options when the job 
   finish('frozen');await act(async()=>{expect(await pending).toBe(true);});
   expect(payload!.request.speed).toBe(.7);expect(payload!.request.metronome).toBe(true);expect(payload!.request.tailSeconds).toBe(0);
   expect(payload!.request).not.toHaveProperty('countIn');expect(payload!.request).not.toHaveProperty('practice');
+  expect(payload!.request.metronomeSound).toBe('beep');
+});
+it('sends the chosen metronome sound only with a metronome',async()=>{
+  const score=buildScore(blankProject()),api=native(),payloads:NativeAudioExportPayload[]=[];
+  api.exportAudio=async value=>{payloads.push(value);return 'sound';};api.status=async()=>({id:'sound',frames:1,totalFrames:1,status:'complete'});
+  const bridge={readBackingAsset:async()=>{throw new Error('Unexpected backing read.');},confirmExport:async()=>true,exportGp:async()=>true};
+  const {result}=renderHook(()=>useExportCoordinator({revision:7,score,settings:defaultDocumentSettings(),currentSpeed:1,metronomeSound:'stick',bridge,native:api}));
+  for(const metronome of [true,false])await act(async()=>{expect(await result.current.run({format:'wav',selection:{tracks:[0],range:null},audio:{sampleRate:48000,bitDepth:16,speed:'saved',metronome,tailSeconds:0,backing:false,includeMix:false}})).toBe(true);});
+  expect(payloads[0].request.metronomeSound).toBe('stick');expect(payloads[1].request).not.toHaveProperty('metronomeSound');
 });
 it('freezes GP music before awaiting confirmation and clears busy when destination cancels',async()=>{
   const score=buildScore(blankProject());score.title='Frozen title';let allow!:(v:boolean)=>void;let bytes:Uint8Array|undefined;

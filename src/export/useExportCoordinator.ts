@@ -1,3 +1,4 @@
+import type { ClickSound } from '../audio/practice-types';
 import { useEffect,useRef,useState } from 'react';
 import { model,Settings } from '@coderline/alphatab';
 import { exportGp,trackIdentity } from '../engine';
@@ -25,7 +26,7 @@ import { captureNoteLinks,restoreNoteLinks } from '../editor/links';
 import { effectivePageLayout } from '../engraving/page';
 export type ExportSource={score:model.Score;settings:DocumentSettings;embeddedBacking?:Uint8Array|null;revision:number};
 type ExportOperation={finished:Promise<void>;cancelRequest:Promise<void>|null};
-export function useExportCoordinator({score,settings,currentSpeed,bridge,native,embeddedBacking=null,revision}:ExportSource&{currentSpeed:number|null;bridge:Pick<NativeBridge,'confirmExport'|'exportGp'|'readBackingAsset'>;native:ExportNativeBridge}) {
+export function useExportCoordinator({score,settings,currentSpeed,metronomeSound='beep',bridge,native,embeddedBacking=null,revision}:ExportSource&{currentSpeed:number|null;metronomeSound?:ClickSound;bridge:Pick<NativeBridge,'confirmExport'|'exportGp'|'readBackingAsset'>;native:ExportNativeBridge}) {
   const [busy,setBusy]=useState(false),[progress,setProgress]=useState<ExportProgress>();
   const pending=useRef(false),cancelled=useRef(false),job=useRef<string|null>(null),alive=useRef(true),generation=useRef(0);
   const operation=useRef<ExportOperation|null>(null);
@@ -107,7 +108,7 @@ export function useExportCoordinator({score,settings,currentSpeed,bridge,native,
       }
       const plan=applyReferenceSyncPlan(buildPlaybackPlanFromJson(model.JsonConverter.scoreToJson(selected),ids,++generation.current,interpretationsOf(frozenSettings.mixes)),frozenSettings.backing);
       if(cancelled.current)return false;
-      return await watch(await native.exportAudio({plan,settings:frozenSettings,embeddedBytes:embedded?Array.from(embedded):null,stems:frozenOptions.format==='stems',request:{tracks:selection.tracks.map(i=>({id:ids[i],name:copy.tracks[i].name,preset:frozenSettings.sounds[ids[i]]?.presetId??'gm',kind:'score'})),range:selection.range,format:{sampleRate:audio.sampleRate,bitDepth:audio.bitDepth,...(audio.container?{container:audio.container}:{})},speed,metronome:audio.metronome,tailSeconds:audio.tailSeconds,includeBacking:audio.backing,includeMix:audio.includeMix,...(frozenOptions.format==='wav'&&audio.normalizeRmsDb!==undefined?{normalizeRmsDb:audio.normalizeRmsDb}:{})}},revision,name),active);
+      return await watch(await native.exportAudio({plan,settings:frozenSettings,embeddedBytes:embedded?Array.from(embedded):null,stems:frozenOptions.format==='stems',request:{tracks:selection.tracks.map(i=>({id:ids[i],name:copy.tracks[i].name,preset:frozenSettings.sounds[ids[i]]?.presetId??'gm',kind:'score'})),range:selection.range,format:{sampleRate:audio.sampleRate,bitDepth:audio.bitDepth,...(audio.container?{container:audio.container}:{})},speed,metronome:audio.metronome,...(audio.metronome?{metronomeSound}:{}),tailSeconds:audio.tailSeconds,includeBacking:audio.backing,includeMix:audio.includeMix,...(frozenOptions.format==='wav'&&audio.normalizeRmsDb!==undefined?{normalizeRmsDb:audio.normalizeRmsDb}:{})}},revision,name),active);
     }finally{if(active.cancelRequest)await active.cancelRequest.catch(()=>{});pending.current=false;job.current=null;if(alive.current)setBusy(false);operation.current=null;finish();}
   }
   return {busy,progress,run,cancel};

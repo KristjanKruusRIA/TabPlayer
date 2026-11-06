@@ -1,6 +1,6 @@
 import { useI18n } from '../i18n';
 import {memo,useCallback,useLayoutEffect,useMemo,useRef,useState} from 'react';
-import type {KeyboardEvent} from 'react';
+import type {ComponentType,CSSProperties,KeyboardEvent,ReactNode} from 'react';
 import type {BeatTarget} from '../project';
 import {overviewWindow} from './overview';
 import type {ScoreOverviewModel} from './overview';
@@ -9,23 +9,27 @@ import './score-overview.css';
 export interface ScoreOverviewProps {
   model:ScoreOverviewModel;target:BeatTarget;playbackBar:number|null;
   onSelect:(track:number,bar:number)=>void;onExit:()=>void;
+  /** Track colours by row; written measures are tinted with their track's colour, as one band per track. */
+  colors?:readonly string[];
+  /** Mixer controls beside each track name. Row is a stable component type, so clock ticks re-render the controls, not the grid. */
+  controls?:{header:ReactNode;Row:ComponentType<{track:number}>};
 }
-const cellSize=28,nameWidth=144;
+const cellSize=28,baseNameWidth=144,controlsWidth=176;
 type Position={track:number;bar:number};
 type Window={first:number;last:number};
 interface GridContentProps {
   model:ScoreOverviewModel;targetTrack:number;targetBar:number;focused:Position;
-  columns:Window;rows:Window;
+  columns:Window;rows:Window;nameWidth:number;colors?:readonly string[];controls?:ScoreOverviewProps['controls'];
   onFocus:(position:Position)=>void;onSelect:(track:number,bar:number)=>void;
 }
-const GridContent=memo(function GridContent({model,targetTrack,targetBar,focused,columns,rows,onFocus,onSelect}:GridContentProps){
+const GridContent=memo(function GridContent({model,targetTrack,targetBar,focused,columns,rows,nameWidth,colors,controls,onFocus,onSelect}:GridContentProps){
   const { t } = useI18n();
   const bars=Array.from({length:columns.last-columns.first},(_,index)=>columns.first+index);
   const tracks=Array.from({length:rows.last-rows.first},(_,index)=>rows.first+index);
   if(!tracks.includes(focused.track))tracks.push(focused.track);
   return <>
     <div className="score-overview-ruler" role="row" aria-rowindex={1}>
-      <div className="score-overview-corner" role="columnheader">{t('overview.track_measure')}</div>
+      <div className="score-overview-corner" role="columnheader" style={{width:nameWidth}}><span className="score-overview-corner-label">{t('overview.track_measure')}</span>{controls?.header}</div>
       {bars.map(bar=>{
         const section=model.sections.find(section=>section.bar===bar);
         return <div key={bar} role="columnheader" aria-colindex={bar+2} aria-label={`Measure ${bar+1}${section?`, ${section.text}`:''}`}
@@ -38,8 +42,10 @@ const GridContent=memo(function GridContent({model,targetTrack,targetBar,focused
       const track=model.tracks[row],visible=row>=rows.first&&row<rows.last;
       const cells=visible?[...bars]:[];
       if(row===focused.track&&!cells.includes(focused.bar))cells.push(focused.bar);
-      return <div key={row} role="row" aria-rowindex={row+2} className="score-overview-row" style={{top:cellSize+row*cellSize}}>
-        <div role="rowheader" aria-colindex={1} className="score-overview-track" title={track.name}>{track.name}</div>
+      const Row=controls?.Row,color=colors?.[row];
+      return <div key={row} role="row" aria-rowindex={row+2} className="score-overview-row" data-selected-track={targetTrack===track.index||undefined}
+        style={{top:cellSize+row*cellSize,...(color?{'--overview-track':color}:{})} as CSSProperties}>
+        <div role="rowheader" aria-colindex={1} className="score-overview-track" title={track.name} style={{width:nameWidth}}><span className="score-overview-track-name">{track.name}</span>{Row&&<Row track={track.index}/>}</div>
         {cells.map(bar=>{
           const content=track.cells[bar],selected=targetTrack===track.index&&targetBar===bar;
           return <div key={bar} role="gridcell" aria-colindex={bar+2} aria-label={t('overview.cell_label',{track:track.name,measure:bar+1,content})}
@@ -55,7 +61,8 @@ const GridContent=memo(function GridContent({model,targetTrack,targetBar,focused
   </>;
 });
 
-export function ScoreOverview({model,target,playbackBar,onSelect,onExit}:ScoreOverviewProps) {
+export function ScoreOverview({model,target,playbackBar,onSelect,onExit,colors,controls}:ScoreOverviewProps) {
+  const nameWidth=controls?baseNameWidth+controlsWidth:baseNameWidth;
   const { t } = useI18n();
   const grid=useRef<HTMLDivElement>(null),pendingFocus=useRef(false);
   const callbacks=useRef({onSelect,onExit});callbacks.current={onSelect,onExit};
@@ -109,7 +116,7 @@ export function ScoreOverview({model,target,playbackBar,onSelect,onExit}:ScoreOv
     className="score-overview" onScroll={readViewport} onKeyDown={keyDown}>
     <div className="score-overview-content" style={{width:nameWidth+model.barCount*cellSize,height:(model.tracks.length+1)*cellSize}}>
       <GridContent model={model} targetTrack={target.track} targetBar={target.bar} focused={focused} columns={columns} rows={rows}
-        onFocus={focusPosition} onSelect={select}/>
+        nameWidth={nameWidth} colors={colors} controls={controls} onFocus={focusPosition} onSelect={select}/>
       {playing&&<div role="img" aria-label={t('overview.playback_measure',{measure:playbackBar+1})} className="score-overview-playhead"
         style={{left:nameWidth+playbackBar*cellSize,height:model.tracks.length*cellSize}}/>}
     </div>

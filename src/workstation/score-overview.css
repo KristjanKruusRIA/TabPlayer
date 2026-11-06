@@ -34,3 +34,20 @@
   position:absolute; top:28px; width:28px; box-sizing:border-box; border-left:2px solid var(--ws-playback);
   border-right:1px solid var(--ws-playback); pointer-events:none; z-index:1;
 }
+
+/* Track dock: name and mixer controls share the sticky first column; written bars carry the track colour. */
+.score-overview-corner,.score-overview-track { display:flex; align-items:center; gap:6px; padding:0 8px; }
+.score-overview-corner-label,.score-overview-track-name { flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.score-overview-track { box-shadow:inset 3px 0 var(--overview-track,transparent); }
+.score-overview-row[data-selected-track] .score-overview-track { background:var(--ws-raised); color:var(--ws-text); font-weight:600; }
+.score-overview-cell[data-content="music"] .score-overview-occupancy { inset:4px 1px; height:auto; border-radius:2px; background:color-mix(in srgb,var(--overview-track,var(--ws-muted)) 72%,var(--ws-input)); }
+.score-overview-cell[data-content="rest"] .score-overview-occupancy { inset:auto 4px 8px; border-bottom-color:color-mix(in srgb,var(--overview-track,var(--ws-muted)) 60%,var(--ws-muted)); }
+.score-overview-mix { display:grid; grid-template-columns:22px 22px 72px 44px; align-items:center; gap:4px; flex:0 0 auto; }
+.score-overview-mix-head { color:var(--ws-muted); font-size:11px; text-align:center; }
+.score-overview-mix button { width:22px; height:20px; padding:0; border:1px solid var(--ws-border); border-radius:3px; background:var(--ws-input); color:var(--ws-muted); font:600 11px/1 inherit; cursor:pointer; }
+.score-overview-mix button[aria-pressed="true"][data-kind="mute"] { background:var(--ws-error,#c0504d); border-color:transparent; color:#fff; }
+.score-overview-mix button[aria-pressed="true"][data-kind="solo"] { background:var(--ws-accent); border-color:transparent; color:var(--ws-accent-ink); }
+.score-overview-mix input[type="range"] { width:100%; min-width:0; height:16px; margin:0; accent-color:var(--overview-track,var(--ws-accent)); }
+.score-overview-mix :is(button,input):disabled { cursor:not-allowed; opacity:.6; }
+.score-overview-mix :is(button,input):focus-visible { outline:2px solid var(--ws-accent); outline-offset:1px; }
+@media (forced-colors:active){ .score-overview-mix button[aria-pressed="true"] { forced-color-adjust:none; background:Highlight; color:HighlightText; } }

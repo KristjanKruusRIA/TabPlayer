@@ -18,3 +18,7 @@ export const PanelRightGlyph:Glyph=p=><svg {...base} {...p}><path d="M2.5 3.5h11
 export const PanelBottomGlyph:Glyph=p=><svg {...base} {...p}><path d="M2.5 3.5h11v9h-11zM2.5 9h11"/></svg>;
 /** The app mark: six tab lines with one fretted note. */
 export const MarkGlyph:Glyph=p=><svg {...base} width={18} height={18} strokeWidth={1} {...p}><path d="M1 2.5h14M1 4.7h14M1 6.9h14M1 9.1h14M1 11.3h14M1 13.5h14" opacity={.55}/><circle cx="9.5" cy="8" r="2.6" fill="var(--tp-on)" stroke="none"/></svg>;
+export const FirstBarGlyph:Glyph=p=><svg {...base} {...p}><path d="M3.5 3v10"/><path d="M13 3.5v9L6 8z" fill="currentColor" stroke="none"/></svg>;
+export const PreviousBarGlyph:Glyph=p=><svg {...base} {...p}><path d="M11.5 3.5v9L4.5 8z" fill="currentColor" stroke="none"/></svg>;
+export const NextBarGlyph:Glyph=p=><svg {...base} {...p}><path d="M4.5 3.5v9l7-4.5z" fill="currentColor" stroke="none"/></svg>;
+export const LastBarGlyph:Glyph=p=><svg {...base} {...p}><path d="M12.5 3v10"/><path d="M3 3.5v9L10 8z" fill="currentColor" stroke="none"/></svg>;

@@ -71,3 +71,20 @@
 .transport-scrub::-webkit-slider-thumb { -webkit-appearance:none; appearance:none; width:4px; height:12px; margin-top:-5px; border:0; border-radius:1px; background:var(--tp-on); opacity:0; }
 .transport-scrub:hover::-webkit-slider-thumb,.transport-scrub:focus-visible::-webkit-slider-thumb { opacity:1; }
 .app-shell .transport input.transport-scrub:focus-visible { outline:2px solid var(--tp-focus); outline-offset:0; }
+
+/* GP-style placement: the transport is the toolbar under the menu bar, with a dark position display at its centre.
+ * The scrubber runs along its bottom edge and More playback opens downward. */
+.app-shell .transport { border-top:0; border-bottom:1px solid var(--tp-line-strong); }
+.app-shell .transport input.transport-scrub { top:auto; bottom:-5px; }
+.app-shell .transport .transport-more-content { top:calc(100% + 1px); bottom:auto; }
+.transport-barnav { display:inline-flex; gap:2px; }
+.app-shell .transport .transport-barstep { width:30px; min-height:30px; padding:0; }
+.transport-lcd { display:grid; grid-template-columns:auto auto; grid-template-areas:'track track' 'bar time' 'meta meta'; align-content:center; column-gap:12px; row-gap:1px;
+  min-width:220px; margin:6px 8px; padding:4px 14px; border:1px solid var(--tp-line-strong); border-radius:var(--tp-radius-s); background:color-mix(in srgb,var(--tp-input) 70%,black); }
+.transport-lcd+.transport-group { border-left:0; }
+.transport-lcd .transport-lcd-track { grid-area:track; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--tp-text); font:600 13px/16px var(--tp-font-ui); }
+.transport-lcd .transport-bar-number { grid-area:bar; align-self:baseline; color:var(--tp-on); }
+.transport-lcd .transport-time { grid-area:time; justify-self:end; font-size:16px; line-height:20px; }
+.transport-lcd .transport-time .transport-dim { font-size:12px; }
+.transport-lcd .transport-lcd-meta { grid-area:meta; display:flex; gap:14px; color:var(--tp-muted); font:500 11px/14px var(--tp-font-mono); font-variant-numeric:tabular-nums; }
+@media (max-width:1180px) { .transport-lcd { min-width:176px; margin:6px 4px; padding:4px 10px; } .transport-barnav .transport-barstep:first-child { display:none; } }

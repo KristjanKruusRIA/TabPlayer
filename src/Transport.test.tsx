@@ -121,3 +121,16 @@ it('practice_notices_are_visible_and_control_errors_stay_inline',()=>{
   const {player}=playerFor(snapshot({practiceNotice:'Fixed tempo disabled because this score has backing audio.'}));player.setSpeed.mockImplementation(()=>{throw new Error('Practice change rejected.');});renderTransport(<Transport cursor={cursor} selection={null} player={player} measures={4} busy={false}/>);
   expect(screen.getByText('Fixed tempo disabled because this score has backing audio.')).toBeInTheDocument();fireEvent.click(screen.getByRole('button',{name:'Slower'}));expect(screen.getByRole('alert')).toHaveTextContent('Practice change rejected.');
 });
+it('steps bars from the toolbar and shows the selected track, bar, signature and tempo in the position display',()=>{
+  const {player,update}=playerFor(snapshot({measure:1}));
+  render(<Transport cursor={cursor} selection={null} player={player} measures={4} busy={false} display={{track:'2. Bass',signatureAt:bar=>bar===1?'3/4':'4/4'}}/>);
+  const lcd=screen.getByRole('group',{name:'Song position'});
+  expect(lcd).toHaveTextContent('2. Bass');expect(lcd).toHaveTextContent('Bar 2');expect(lcd).toHaveTextContent('3/4');expect(lcd).toHaveTextContent('♩ = 120');
+  fireEvent.click(screen.getByRole('button',{name:'Next bar'}));expect(player.seekToMeasure).toHaveBeenLastCalledWith(2);
+  fireEvent.click(screen.getByRole('button',{name:'Previous bar'}));expect(player.seekToMeasure).toHaveBeenLastCalledWith(0);
+  fireEvent.click(screen.getByRole('button',{name:'Last bar'}));expect(player.seekToMeasure).toHaveBeenLastCalledWith(3);
+  update(snapshot({measure:3}));
+  expect(screen.getByRole('button',{name:'Next bar'})).toHaveAttribute('aria-disabled','true');
+  fireEvent.click(screen.getByRole('button',{name:'Next bar'}));expect(player.seekToMeasure).toHaveBeenCalledTimes(3);
+  fireEvent.click(screen.getByRole('button',{name:'First bar'}));expect(player.seekToMeasure).toHaveBeenLastCalledWith(0);
+});

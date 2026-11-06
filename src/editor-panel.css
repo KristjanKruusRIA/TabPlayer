@@ -564,3 +564,22 @@
 .tp-glyph-text[data-voice="3"] { --voice-color:#6FA8FF; }
 .tp-glyph-text[data-voice="4"] { --voice-color:#B58CFF; }
 @media (forced-colors:active) { .tp-glyph-text[data-voice] { box-shadow:none; text-decoration:underline; } }
+
+/* Edition palette: list and text popovers open as a full-width row under their button. */
+.tp-glyph-btn[aria-haspopup] { position: relative; }
+.tp-glyph-btn[aria-haspopup]::after { content: ""; position: absolute; right: 1px; bottom: 1px; border: 3px solid transparent; border-right-color: currentColor; border-bottom-color: currentColor; opacity: 0.8; }
+.tp-editing-toolbar .tp-glyph-btn .tp-glyph-text.tp-palette-glyph { white-space: nowrap; font-size: 11px; letter-spacing: -0.02em; }
+.tp-palette-popover { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 2px; margin: 2px 0 4px; padding: 4px; background: var(--tp-raised); border: 1px solid var(--tp-line-subtle); border-radius: var(--tp-radius-s); max-height: 260px; overflow-y: auto; }
+form.tp-palette-popover { flex-direction: row; flex-wrap: wrap; align-items: center; }
+form.tp-palette-popover input { flex: 1 1 100%; min-width: 0; }
+.tp-palette-menu-item { display: flex; align-items: center; gap: 8px; min-height: 26px; padding: 2px 6px; border: 0; border-radius: 4px; background: transparent; color: var(--tp-text); text-align: left; font: 400 12px/1.2 var(--tp-font-ui); }
+.tp-palette-menu-item:hover:enabled, .tp-palette-menu-item:focus-visible { background: color-mix(in srgb, var(--tp-text) 10%, transparent); }
+.tp-palette-menu-item[aria-checked="true"] { background: var(--tp-on); color: var(--tp-on-ink); }
+.tp-palette-menu-item:disabled { color: var(--tp-muted); opacity: 0.55; }
+.tp-palette-menu-glyph { display: inline-block; min-width: 34px; font-weight: 600; }
+.tp-toolbar-panels { grid-template-columns: repeat(2, 1fr) !important; }
+.tp-toolbar-panels .tp-glyph-btn { width: auto !important; }
+@media (forced-colors: active) { .tp-palette-menu-item[aria-checked="true"] { outline: 2px solid Highlight; } }
+.tp-editing-toolbar .tp-glyph-btn .tp-glyph-text.tp-palette-glyph[data-size="long"] { font-size: 9px; letter-spacing: -0.04em; }
+.tp-editing-toolbar .tp-glyph-btn .tp-glyph-text.tp-palette-glyph[data-size="hairpin"] { font-size: 15px; font-weight: 300; transform: scaleX(2.6); }
+.tp-editing-toolbar .tp-glyph-btn .tp-glyph-text.tp-palette-glyph[data-size="symbol"] { font-size: 17px; font-weight: 400; line-height: 1; }

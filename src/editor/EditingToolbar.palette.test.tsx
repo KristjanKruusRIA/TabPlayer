@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import '@testing-library/jest-dom/vitest';
 import { previewEdit } from '../engine';
 import { blankProject } from '../project';
@@ -10,12 +10,12 @@ import { DockResizeHandle,InspectorResizeHandle } from '../workstation/DockResiz
 afterEach(cleanup);
 const target={track:0,staff:0,bar:0,voice:0,beat:0};
 
-function toolbar(busy=false){
+function toolbar(busy=false,{locked=false,string=1}:{locked?:boolean;string?:number}={}){
   const score=previewEdit(blankProject(),{type:'setNote',target,string:1,fret:3}).score;
-  const onEdit=vi.fn(),onSelect=vi.fn(),onOpenMeasure=vi.fn();
-  render(<EditingToolbar score={score} target={target} string={1} fret={3} noteIndex={null} duration={4} dots={0} busy={busy} locked={false}
-    onDurationChange={vi.fn()} onDotsChange={vi.fn()} onEdit={onEdit} onSelect={onSelect} onOpenMeasure={onOpenMeasure} orientation="vertical"/>);
-  return {score,onEdit,onSelect,onOpenMeasure};
+  const onEdit=vi.fn(),onSelect=vi.fn(),onOpenMeasure=vi.fn(),onOpenPanel=vi.fn();
+  render(<EditingToolbar score={score} target={target} string={string} fret={3} noteIndex={null} duration={4} dots={0} busy={busy} locked={locked}
+    onDurationChange={vi.fn()} onDotsChange={vi.fn()} onEdit={onEdit} onSelect={onSelect} onOpenMeasure={onOpenMeasure} onOpenPanel={onOpenPanel} orientation="vertical"/>);
+  return {score,onEdit,onSelect,onOpenMeasure,onOpenPanel};
 }
 
 it('offers the bar voices, with only voices the bar has taking the cursor',()=>{
@@ -76,4 +76,66 @@ it('widens the inspector with the left arrow and drags its edge within its limit
   fireEvent.pointerMove(handle,{clientX:1200,pointerId:1});expect(onWidth).toHaveBeenLastCalledWith(240);
   fireEvent.pointerUp(handle,{pointerId:1});const calls=onWidth.mock.calls.length;fireEvent.pointerMove(handle,{clientX:800,pointerId:1});expect(onWidth).toHaveBeenCalledTimes(calls);
   fireEvent.keyDown(handle,{key:'Escape'});expect(onReset).toHaveBeenCalledOnce();
+});
+
+it('applies a note articulation with one edit per click and greys note effects without a note',()=>{
+  const {onEdit}=toolbar();
+  fireEvent.click(screen.getByRole('button',{name:'Heavy accent'}));
+  expect(onEdit).toHaveBeenCalledOnce();
+  expect(onEdit).toHaveBeenLastCalledWith({type:'setNoteTechniques',target,string:1,patch:{accent:2}});
+  cleanup();
+  // String 6 holds no note at this beat: note effects grey out, beat and bar controls stay usable.
+  toolbar(false,{string:6});
+  for(const name of ['Heavy accent','Slide in from below','Trill','Spell with flat','Show string number'])expect(screen.getByRole('button',{name})).toBeDisabled();
+  for(const name of ['Start repeat','8va (octave up)','Fermata','Triplet','Fade in'])expect(screen.getByRole('button',{name})).toBeEnabled();
+});
+
+it('chooses a tuplet from its list with the keyboard, and Escape returns to the button',()=>{
+  const {onEdit}=toolbar();
+  const button=screen.getByRole('button',{name:'Tuplet'});
+  expect(button).toHaveAttribute('aria-haspopup','menu');
+  fireEvent.click(button);
+  expect(button).toHaveAttribute('aria-expanded','true');
+  const list=screen.getByRole('menu',{name:'Tuplet'});
+  expect(within(list).getByRole('menuitemradio',{name:/No tuplet/})).toHaveFocus();
+  expect(within(list).getByRole('menuitemradio',{name:/2:3/})).toBeDisabled();
+  fireEvent.keyDown(list,{key:'Escape'});
+  expect(screen.queryByRole('menu')).toBeNull();expect(button).toHaveFocus();expect(onEdit).not.toHaveBeenCalled();
+  fireEvent.click(button);
+  fireEvent.click(within(screen.getByRole('menu',{name:'Tuplet'})).getByRole('menuitemradio',{name:/5:4/}));
+  expect(onEdit).toHaveBeenCalledOnce();
+  expect(onEdit).toHaveBeenLastCalledWith(expect.objectContaining({type:'setBeatRhythm',target,tupletNumerator:5,tupletDenominator:4}));
+  expect(screen.queryByRole('menu')).toBeNull();
+});
+
+it('writes beat text from its prompt as one edit, and an unchanged text records nothing',()=>{
+  const {onEdit}=toolbar();
+  fireEvent.click(screen.getByRole('button',{name:'Text'}));
+  const field=screen.getByRole('textbox',{name:'Text'});expect(field).toHaveFocus();
+  fireEvent.click(screen.getByRole('button',{name:'Apply'}));expect(onEdit).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button',{name:'Text'}));
+  fireEvent.change(screen.getByRole('textbox',{name:'Text'}),{target:{value:'let it ring'}});
+  fireEvent.submit(screen.getByRole('dialog',{name:'Text'}));
+  expect(onEdit).toHaveBeenCalledOnce();expect(onEdit).toHaveBeenLastCalledWith({type:'setBeatText',target,text:'let it ring'});
+});
+
+it('opens lyrics, chords, clef and key from the palette',()=>{
+  const {onOpenPanel,onOpenMeasure}=toolbar();
+  fireEvent.click(screen.getByRole('button',{name:'Lyrics'}));expect(onOpenPanel).toHaveBeenLastCalledWith('lyrics');
+  fireEvent.click(screen.getByRole('button',{name:'Chords'}));expect(onOpenPanel).toHaveBeenLastCalledWith('chord');
+  fireEvent.click(screen.getByRole('button',{name:'Chord diagram'}));expect(onOpenPanel).toHaveBeenLastCalledWith('chord');
+  fireEvent.click(screen.getByRole('button',{name:'Clef'}));fireEvent.click(screen.getByRole('button',{name:'Key signature'}));
+  expect(onOpenMeasure).toHaveBeenCalledTimes(2);expect(onOpenMeasure).toHaveBeenLastCalledWith(0);
+});
+
+it('ignores palette clicks while busy without disabling them, and disables edits on a locked score',()=>{
+  const busy=toolbar(true);
+  const accent=screen.getByRole('button',{name:'Heavy accent'});
+  expect(accent).toHaveAttribute('aria-disabled','true');expect(accent).not.toBeDisabled();
+  fireEvent.click(accent);fireEvent.click(screen.getByRole('button',{name:'Tuplet'}));
+  expect(busy.onEdit).not.toHaveBeenCalled();expect(screen.queryByRole('menu')).toBeNull();
+  cleanup();
+  const locked=toolbar(false,{locked:true});
+  expect(screen.getByRole('button',{name:'Heavy accent'})).toBeDisabled();
+  fireEvent.click(screen.getByRole('button',{name:'Clef'}));expect(locked.onOpenMeasure).toHaveBeenCalledOnce();
 });

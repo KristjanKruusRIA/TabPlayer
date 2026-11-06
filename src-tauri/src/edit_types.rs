@@ -573,6 +573,13 @@ pub struct NoteTechniques {
         skip_serializing_if = "Option::is_none"
     )]
     pub left_hand_tapped: Option<bool>,
+    /// Shows the note's string number in a circle; absent leaves it as it was, so older logs replay unchanged.
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub string_number: Option<bool>,
     #[serde(
         default,
         deserialize_with = "present",

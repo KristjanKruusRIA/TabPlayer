@@ -9213,7 +9213,7 @@
       "assessment": "evidence_reviewed",
       "current_proven_status": "partial",
       "current_behavior": "View controls show/hide task panes, Inspector and bottom dock; narrow windows switch one detail pane without discarding mounted tuning/edit drafts. Recorded 960×720/1280×900/1600×1000 views retain readable controls and contained pane/dock scrolling, and Ctrl+Shift+V reveals/focuses the hidden or replaced Inspector while preserving drafts and native playback state.",
-      "remaining_gap": "User-draggable panel splitters/resizing and persisted panel widths remain absent. Responsive switching, local instrument scrolling and show/hide do not satisfy the row resize requirement. Other-OS runtime is not established by the Windows viewport batch.",
+      "remaining_gap": "2026-11-06: the edition palette now offers Guitar Pro 8's palette controls: clef, key, triplet feel, free time, double bar, simile, repeats, endings, directions and ottava; tuplets, fermata, grace notes, accidental spelling and string moves; hairpins; articulations, slides, harmonics, whammy, strokes, ornaments, fades and wah; chord and scale diagrams, barre, timer, text, section, beaming and stems. Each is one undoable edit, greyed only when the selection makes it meaningless (2026-11-06-gp8-edition-palette.md). Volume and pan automation, the multivoice toggle and palette collapse are absent. User-draggable panel splitters/resizing and persisted panel widths remain absent. Responsive switching, local instrument scrolling and show/hide do not satisfy the row resize requirement. Other-OS runtime is not established by the Windows viewport batch.",
       "current_evidence": [
         "workstation_scope_limits",
         "workstation_navigation",

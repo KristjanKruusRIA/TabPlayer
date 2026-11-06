@@ -142,9 +142,10 @@ it('glyph editing toolbar dispatches one undoable edit per duration, dot, rest, 
   fireEvent.keyDown(first,{key:'ArrowRight'});
   expect(toolbar.getByRole('button',{name:'Half note (1/2)'})).toHaveFocus();
   fireEvent.keyDown(toolbar.getByRole('button',{name:'Half note (1/2)'}),{key:'End'});
-  expect(toolbar.getByRole('button',{name:'Toggle accent'})).toHaveFocus();
+  // End lands on the palette's last usable control; without measure settings Tempo is off, so Inverted stem.
+  expect(toolbar.getByRole('button',{name:'Inverted stem'})).toHaveFocus();
   // The voices lead the toolbar, as in Guitar Pro's palette, so Home lands on Voice 1.
-  fireEvent.keyDown(toolbar.getByRole('button',{name:'Toggle accent'}),{key:'Home'});
+  fireEvent.keyDown(toolbar.getByRole('button',{name:'Inverted stem'}),{key:'Home'});
   expect(toolbar.getByRole('button',{name:'Voice 1'})).toHaveFocus();
 });
 
@@ -303,4 +304,18 @@ it('Shift+Ctrl+V reveals clipboard hidden by scope, formats double/quad rests co
   fireEvent.click(contextCard.getByRole('button', { name: 'Beat' }));
   expect(screen.getByLabelText('Pick stroke')).toBeVisible();
   expect(screen.getByText('Whammy curve')).toBeVisible();
+});
+
+it('palette Lyrics reveals and focuses the Lyrics section, and Chords and Scale diagram open their editors',()=>{
+  const input=props();
+  render(<EditorPanel {...input}/>);
+  const toolbar=within(screen.getByRole('toolbar',{name:'Editing toolbar'}));
+  fireEvent.click(screen.getByRole('button',{name:'Measure'}));
+  const summary=screen.getByText('Lyrics',{selector:'summary'});
+  expect(summary).not.toBeVisible();
+  fireEvent.click(toolbar.getByRole('button',{name:'Lyrics'}));
+  expect(summary).toBeVisible();expect(summary.parentElement).toHaveAttribute('open');expect(summary).toHaveFocus();
+  fireEvent.click(toolbar.getByRole('button',{name:'Chords'}));fireEvent.click(toolbar.getByRole('button',{name:'Scale diagram'}));
+  expect(input.onChord).toHaveBeenCalledOnce();expect(input.onScales).toHaveBeenCalledOnce();
+  expect(input.onEdit).not.toHaveBeenCalled();
 });

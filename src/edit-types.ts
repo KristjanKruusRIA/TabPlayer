@@ -22,6 +22,8 @@ export type LinkKind = 'tie' | 'hammerPull' | 'slur';
 export interface PitchCurve { type: number; style: number; points: Array<{offset: number; value: number}> }
 export interface NoteTechniques {
   letRing?: boolean; palmMute?: boolean; dead?: boolean; ghost?: boolean; staccato?: boolean; leftHandTapped?: boolean;
+  /** Shows the string number in a circle; stringed notes only. */
+  stringNumber?: boolean;
   accent?: number; dynamics?: number; leftFinger?: number; rightFinger?: number; slideIn?: number; slideOut?: number;
   vibrato?: number; ornament?: number; bend?: PitchCurve|null; harmonic?: {type:number;value:number}|null;
   trill?: {pitch:number;speed:number}|null;

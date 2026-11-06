@@ -1,0 +1,8 @@
+// App-owned map for the sustained slap recordings. Root keys were measured
+// from each recording's settled pitch; the pack has no C#.
+<region> sample=A_long.flac pitch_keycenter=33 lokey=0 hikey=33
+<region> sample=Bb_long.flac pitch_keycenter=34 lokey=34 hikey=34
+<region> sample=B_long.flac pitch_keycenter=35 lokey=35 hikey=35
+<region> sample=C_long.flac pitch_keycenter=36 lokey=36 hikey=37
+<region> sample=D_long.flac pitch_keycenter=38 lokey=38 hikey=38
+<region> sample=Eb_long.flac pitch_keycenter=39 lokey=39 hikey=127

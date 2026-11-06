@@ -1,0 +1,7 @@
+// App-owned map for the sustained pop recordings, an octave above the slaps.
+<region> sample=apop_long.flac pitch_keycenter=45 lokey=0 hikey=45
+<region> sample=bbpop_long.flac pitch_keycenter=46 lokey=46 hikey=46
+<region> sample=bpop_long.flac pitch_keycenter=47 lokey=47 hikey=47
+<region> sample=cpop_long.flac pitch_keycenter=48 lokey=48 hikey=49
+<region> sample=dpop_long.flac pitch_keycenter=50 lokey=50 hikey=50
+<region> sample=ebpop_long.flac pitch_keycenter=51 lokey=51 hikey=127

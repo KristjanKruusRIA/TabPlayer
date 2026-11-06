@@ -4,7 +4,7 @@ import type { PerformedBeat,PlaybackSpan } from './selection-playback-types';
 export type { PracticeSettings } from './practice-types';
 
 export interface PlaybackState {ready:boolean;playing:boolean;time:number;endTime:number;measure:number;speed:number;metronome:boolean;practice:PracticeStatus;practicePending:boolean;practiceNotice:string|null;loop:PracticeLoop|null;range:PlaybackSpan|null;error:string|null}
-export type Articulation = 'picked' | 'fingered' | 'muted' | 'dead' | 'ghost' | 'staccato' | 'legato' | 'tapped' | 'harmonic' | 'feedback';
+export type Articulation = 'picked' | 'fingered' | 'muted' | 'dead' | 'ghost' | 'staccato' | 'legato' | 'tapped' | 'harmonic' | 'feedback' | 'slap' | 'pop';
 export interface PlanTrack { id: string; program: number; percussion: boolean }
 export interface PlanTempo { tick: number; bpm: number }
 export interface MeasureOccurrence { bar: number; occurrence: number; meterNumerator: number; meterDenominator: number; startTick: number; endTick: number; startMs: number; endMs: number; clickTicks?: number[] }

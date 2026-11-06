@@ -251,12 +251,13 @@ fn selected_real_100bar_fourtrack_resource_budget() {
                 };
                 let techniques = [
                     "picked", "staccato", "legato", "ghost", "dead", "harmonic", "feedback",
+                    "slap", "pop",
                 ];
                 requests.push(SampleRequest {
                     instrument_id: (*voice).into(),
                     key: keys[(bar + beat) % 8],
                     velocity: [24, 55, 88, 120][(bar + beat) % 4],
-                    articulation: techniques[(bar + beat + track) % 7].into(),
+                    articulation: techniques[(bar + beat + track) % techniques.len()].into(),
                 });
             }
         }
@@ -299,5 +300,151 @@ fn selected_real_100bar_fourtrack_resource_budget() {
             )
             .is_empty()
         );
+    }
+}
+
+#[test]
+fn slap_and_pop_use_their_recordings_and_fall_back_to_the_ordinary_voice() {
+    let region = |id: &str, articulation: &str, key: u8| Region {
+        sample_id: id.into(),
+        root_key: key,
+        key_low: key,
+        key_high: key,
+        velocity_low: 1,
+        velocity_high: 127,
+        articulation: articulation.into(),
+        variant: 1,
+        sequence_length: 1,
+        trigger: "attack".into(),
+        pitch_keytrack: 100.0,
+        velocity_gain_high: 127,
+        ..Region::default()
+    };
+    let bass = Instrument {
+        id: "bass".into(),
+        name: "Bass".into(),
+        source_id: "fixture".into(),
+        regions: vec![
+            region("fingered", "fingered", 33),
+            region("slap-a", "slap", 33),
+            region("slap-d", "slap", 38),
+            region("pop-a", "pop", 45),
+        ],
+    };
+    let ids = |key, articulation| {
+        eligible_regions(&bass, key, 100, articulation, "attack")
+            .iter()
+            .map(|r| r.sample_id.clone())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(ids(37, "slap"), ["slap-d"]);
+    assert_eq!(ids(28, "slap"), ["slap-a"]);
+    assert_eq!(ids(52, "pop"), ["pop-a"]);
+    let plain = Instrument {
+        regions: vec![region("fingered", "fingered", 33)],
+        ..bass.clone()
+    };
+    for articulation in ["slap", "pop"] {
+        let selected = eligible_regions(&plain, 40, 100, articulation, "attack");
+        assert_eq!(selected[0].sample_id, "fingered");
+    }
+}
+
+#[test]
+fn recorded_sources_accept_cc0_and_cc_by_pins_only() {
+    let root = tempfile::tempdir().unwrap();
+    let wav = fs::read(fixtures().join("tone.wav")).unwrap();
+    fs::write(root.path().join("note.wav"), &wav).unwrap();
+    let sf = fs::read(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../node_modules/@coderline/alphatab/dist/soundfont/sonivox.sf2"),
+    )
+    .unwrap();
+    fs::write(root.path().join("sf.sf2"), &sf).unwrap();
+    fs::write(root.path().join("LICENSE"), b"terms").unwrap();
+    let load = |license: &str, revision: String| {
+        let manifest = serde_json::json!({"schemaVersion":1,"preparationId":"fixture","sources":[{"id":"fixture","repository":"fixture","revision":revision,"license":license,"licensePath":"LICENSE","licenseSha256":format!("{:x}",Sha256::digest(b"terms"))}],"instruments":[{"id":"fixture","name":"Fixture","sourceId":"fixture","regions":[
+            {"sampleId":"note","rootKey":40,"keyLow":40,"keyHigh":40,"velocityLow":1,"velocityHigh":127,"articulation":"slap","variant":1,"sequenceLength":1,"loopStart":null,"loopEnd":null,"attackSeconds":0.0,"releaseSeconds":0.1,"gainDb":0.0,"trigger":"attack","pitchKeytrack":100.0,"velocityGainHigh":127,"releaseDecayDbPerSecond":0.0}]}],"samples":[{"id":"note","path":"note.wav","sha256":format!("{:x}",Sha256::digest(&wav)),"size":wav.len()}],"soundFont":{"path":"sf.sf2","sha256":format!("{:x}",Sha256::digest(&sf)),"size":sf.len()}});
+        fs::write(
+            root.path().join("manifest.json"),
+            serde_json::to_vec(&manifest).unwrap(),
+        )
+        .unwrap();
+        AudioResources::load(root.path())
+    };
+    assert!(load("CC0-1.0", "a".repeat(40)).is_ok());
+    assert!(load("CC-BY-3.0", "b".repeat(64)).is_ok());
+    assert!(load("CC-BY-NC-3.0", "b".repeat(64)).is_err());
+    assert!(load("CC-BY-3.0", "b".repeat(63)).is_err());
+    assert!(load("CC-BY-3.0", "g".repeat(64)).is_err());
+}
+
+/// Autocorrelation pitch over a settled window, preferring the shortest strong lag so an
+/// octave-down period is not mistaken for the fundamental.
+fn settled_pitch(samples: &[f32], rate: f64) -> f64 {
+    let window = (0.25 * rate) as usize;
+    let start = ((0.45 * rate) as usize).min(samples.len().saturating_sub(window) / 2);
+    let x = &samples[start..(start + window).min(samples.len())];
+    let (min_lag, max_lag) = (
+        (rate / 500.0) as usize,
+        ((rate / 28.0) as usize).min(x.len() / 2),
+    );
+    let scores: Vec<f64> = (0..=max_lag + 1)
+        .map(|lag| {
+            if lag < min_lag || lag > max_lag {
+                return 0.0;
+            }
+            (0..x.len() - lag)
+                .map(|i| x[i] as f64 * x[i + lag] as f64)
+                .sum()
+        })
+        .collect();
+    let best = (min_lag..=max_lag)
+        .max_by(|a, b| scores[*a].total_cmp(&scores[*b]))
+        .unwrap();
+    let lag = (min_lag..=best)
+        .find(|&l| {
+            scores[l] >= 0.9 * scores[best]
+                && scores[l] >= scores[l - 1]
+                && scores[l] >= scores[l + 1]
+        })
+        .unwrap_or(best);
+    rate / lag as f64
+}
+
+#[test]
+#[ignore = "requires npm run prepare:audio; checks the bundled slap and pop recordings"]
+fn bundled_slap_and_pop_recordings_sound_at_their_root_keys() {
+    let resources =
+        AudioResources::load(&PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/audio"))
+            .unwrap();
+    for id in ["darkblack-bass", "babyblue-bass"] {
+        let instrument = resources
+            .manifest
+            .instruments
+            .iter()
+            .find(|i| i.id == id)
+            .unwrap();
+        for articulation in ["slap", "pop"] {
+            let regions: Vec<_> = instrument
+                .regions
+                .iter()
+                .filter(|r| r.articulation == articulation)
+                .collect();
+            assert_eq!(regions.len(), 6, "{id} {articulation}");
+            for region in regions {
+                let audio = &resources.samples[&region.sample_id];
+                let mono: Vec<f32> = audio.frames.iter().map(|f| (f[0] + f[1]) * 0.5).collect();
+                let hz = settled_pitch(&mono, audio.sample_rate as f64);
+                let measured = 69.0 + 12.0 * (hz / 440.0).log2();
+                eprintln!("{} {measured:.2}", region.sample_id);
+                assert!(
+                    (measured - region.root_key as f64).abs() < 0.5,
+                    "{} sounds at {measured:.2}, mapped to {}",
+                    region.sample_id,
+                    region.root_key
+                );
+            }
+        }
     }
 }

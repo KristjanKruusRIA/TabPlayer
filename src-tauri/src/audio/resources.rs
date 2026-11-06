@@ -278,9 +278,11 @@ impl AudioResources {
         }
         let mut sources = HashSet::new();
         for source in &manifest.sources {
+            // A repository source is pinned by its 40-digit commit, an archive by its SHA-256.
             if !sources.insert(&source.id)
-                || source.license != "CC0-1.0"
-                || source.revision.len() != 40
+                || !matches!(source.license.as_str(), "CC0-1.0" | "CC-BY-3.0")
+                || !matches!(source.revision.len(), 40 | 64)
+                || !source.revision.bytes().all(|b| b.is_ascii_hexdigit())
             {
                 return Err("Invalid recorded audio provenance".into());
             }
@@ -343,6 +345,8 @@ impl AudioResources {
                             | "feedback"
                             | "ghost"
                             | "dead"
+                            | "slap"
+                            | "pop"
                     )
                 {
                     return Err(format!(

@@ -95,6 +95,8 @@ pub enum Articulation {
     Tapped,
     Harmonic,
     Feedback,
+    Slap,
+    Pop,
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]

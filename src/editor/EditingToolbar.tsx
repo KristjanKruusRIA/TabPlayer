@@ -89,6 +89,14 @@ function TieGlyph() {
   );
 }
 
+/** Music-symbol glyphs need a larger font to read at palette size; long text a smaller one. */
+function glyphSize(control: PaletteControl): string | undefined {
+  if (control.id === 'crescendo' || control.id === 'decrescendo') return 'hairpin';
+  const chars = [...control.glyph];
+  if (chars.every(c => (c.codePointAt(0) ?? 0) >= 0x1d100 || '♭♮♯'.includes(c))) return 'symbol';
+  return chars.length >= 3 ? 'long' : undefined;
+}
+
 export function EditingToolbar({
   score,
   target,
@@ -333,7 +341,7 @@ export function EditingToolbar({
         }
         run(control.activate());
       },
-      children: <span className="tp-glyph-text tp-palette-glyph" aria-hidden="true">{control.glyph}</span>,
+      children: <span className="tp-glyph-text tp-palette-glyph" data-size={glyphSize(control)} aria-hidden="true">{control.glyph}</span>,
     });
     const panel = popover !== control.id ? null : control.menu ? (
       <div key={`${control.id}-menu`} className="tp-palette-popover" role="menu" aria-label={t(control.label)} onKeyDown={event => menuKeys(event, control.id)}>

@@ -225,8 +225,8 @@ export function paletteGroups(score: model.Score, target: BeatTarget, string: nu
   };
   const hairpinGroup: PaletteGroup = {
     id: 'hairpins', label: 'palette.group_hairpins', controls: [
-      hairpin('crescendo', 'palette.crescendo', '𝆒', model.CrescendoType.Crescendo),
-      hairpin('decrescendo', 'palette.decrescendo', '𝆓', model.CrescendoType.Decrescendo),
+      hairpin('crescendo', 'palette.crescendo', '<', model.CrescendoType.Crescendo),
+      hairpin('decrescendo', 'palette.decrescendo', '>', model.CrescendoType.Decrescendo),
     ],
   };
 
@@ -287,8 +287,8 @@ export function paletteGroups(score: model.Score, target: BeatTarget, string: nu
         ...whammyPresets.map(([value, label, glyph, points]) => ({ id: `whammy-${value}`, label, glyph, pressed: whammy === value, enabled: stringedBeat,
           activate: () => (stringedBeat && whammy !== value ? { edit: beatTech({ whammy: { type: value, style: 0, points } }) } : null) })),
       ]),
-      noteEnum('wide-vibrato', 'palette.wide_vibrato', '〰〰', 'vibrato', vibrato, model.VibratoType.Wide, Boolean(note && !staff.isPercussion)),
-      gestureEnum('whammy-vibrato', 'palette.whammy_vibrato', 'VVV', 'vibrato', beat?.vibrato ?? 0, model.VibratoType.Slight, sounding),
+      noteEnum('wide-vibrato', 'palette.wide_vibrato', '〰', 'vibrato', vibrato, model.VibratoType.Wide, Boolean(note && !staff.isPercussion)),
+      gestureEnum('whammy-vibrato', 'palette.whammy_vibrato', 'ʌʌʌ', 'vibrato', beat?.vibrato ?? 0, model.VibratoType.Slight, sounding),
       noteEnum('pick-slide-down', 'palette.pick_slide_down', 'x╲', 'slideOut', slideOut, model.SlideOutType.PickSlideDown, stringedNote),
       noteEnum('pick-slide-up', 'palette.pick_slide_up', 'x╱', 'slideOut', slideOut, model.SlideOutType.PickSlideUp, stringedNote),
       noteEnum('legato-slide', 'palette.legato_slide', '1⁀3', 'slideOut', slideOut, model.SlideOutType.Legato, stringedNote && (slideOut === model.SlideOutType.Legato || Boolean(nextOnString))),
@@ -314,10 +314,10 @@ export function paletteGroups(score: model.Score, target: BeatTarget, string: nu
         noteEdit({ trill: note?.isTrill ? null : { pitch: Math.min(127, (note?.realValue ?? 60) + 2), speed: 16 } })),
       control('tremolo-picking', 'palette.tremolo_picking', '⫽', Boolean(beat?.isTremolo), Boolean(sounding && (beat?.isTremolo || tremoloSpeed !== undefined)), () =>
         beatTech({ tremolo: beat?.isTremolo ? null : { speed: tremoloSpeed!, style: 0 } })),
-      noteEnum('upper-mordent', 'palette.upper_mordent', '𝆖', 'ornament', ornament, model.NoteOrnament.UpperMordent, Boolean(note && !staff.isPercussion)),
-      noteEnum('lower-mordent', 'palette.lower_mordent', '𝆗', 'ornament', ornament, model.NoteOrnament.LowerMordent, Boolean(note && !staff.isPercussion)),
-      noteEnum('turn', 'palette.turn', '𝆗∞', 'ornament', ornament, model.NoteOrnament.Turn, Boolean(note && !staff.isPercussion)),
-      noteEnum('inverted-turn', 'palette.inverted_turn', '∽', 'ornament', ornament, model.NoteOrnament.InvertedTurn, Boolean(note && !staff.isPercussion)),
+      noteEnum('upper-mordent', 'palette.upper_mordent', '∿∿', 'ornament', ornament, model.NoteOrnament.UpperMordent, Boolean(note && !staff.isPercussion)),
+      noteEnum('lower-mordent', 'palette.lower_mordent', '∿|∿', 'ornament', ornament, model.NoteOrnament.LowerMordent, Boolean(note && !staff.isPercussion)),
+      noteEnum('turn', 'palette.turn', '∞', 'ornament', ornament, model.NoteOrnament.Turn, Boolean(note && !staff.isPercussion)),
+      noteEnum('inverted-turn', 'palette.inverted_turn', '∞̸', 'ornament', ornament, model.NoteOrnament.InvertedTurn, Boolean(note && !staff.isPercussion)),
       gestureEnum('fade-in', 'palette.fade_in', '<', 'fade', beat?.fade ?? 0, model.FadeType.FadeIn, sounding),
       gestureEnum('fade-out', 'palette.fade_out', '>', 'fade', beat?.fade ?? 0, model.FadeType.FadeOut, sounding),
       gestureEnum('volume-swell', 'palette.volume_swell', '<>', 'fade', beat?.fade ?? 0, model.FadeType.VolumeSwell, sounding),
@@ -342,7 +342,7 @@ export function paletteGroups(score: model.Score, target: BeatTarget, string: nu
       gestureFlag('slash', 'palette.slash_notation', '𝄍', 'slashed', hasBeat),
       control('barre', 'palette.barre', 'B', hasBarre, stringedBeat && (hasBarre || Number.isFinite(barreFret)), () =>
         gesture({ barre: hasBarre ? null : { fret: barreFret, shape: 1 } })),
-      gestureFlag('timer', 'palette.timer', '0:00', 'showTimer', hasBeat),
+      gestureFlag('timer', 'palette.timer', '⏱', 'showTimer', hasBeat),
       { id: 'beat-text', label: 'palette.beat_text', glyph: 'TXT', pressed: Boolean(beat?.text), enabled: hasBeat, activate: () => null,
         prompt: { value: beat?.text ?? '', submit: text => (hasBeat && text !== (beat?.text ?? '') ? { edit: { type: 'setBeatText', target, text } } : null) } },
       { id: 'section', label: 'palette.section', glyph: 'A', pressed: Boolean(master.section), enabled: exact, activate: () => null,

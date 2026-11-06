@@ -17,6 +17,34 @@ pub fn factor_for(rate: f64) -> usize {
     }
 }
 
+/// The low-pass for decimating by `factor` (empty for 1): a Blackman-windowed sinc passing up to
+/// 0.4 of the output Nyquist band's width, about 74 dB of stop-band attenuation, unity at DC.
+pub fn design_taps(factor: usize) -> Vec<f32> {
+    if factor <= 1 {
+        return Vec::new();
+    }
+    let len = 32 * factor + 1;
+    let cutoff = 0.4 / factor as f64;
+    let centre = (len - 1) as f64 / 2.0;
+    let mut taps: Vec<f64> = (0..len)
+        .map(|i| {
+            let x = i as f64 - centre;
+            let sinc = if x == 0.0 {
+                2.0 * cutoff
+            } else {
+                (std::f64::consts::TAU * cutoff * x).sin() / (std::f64::consts::PI * x)
+            };
+            let w = i as f64 / (len - 1) as f64;
+            let window = 0.42 - 0.5 * (std::f64::consts::TAU * w).cos()
+                + 0.08 * (2.0 * std::f64::consts::TAU * w).cos();
+            sinc * window
+        })
+        .collect();
+    let gain: f64 = taps.iter().sum();
+    taps.iter_mut().for_each(|t| *t /= gain);
+    taps.into_iter().map(|t| t as f32).collect()
+}
+
 pub struct Decimator {
     factor: usize,
     taps: Vec<f32>,
@@ -26,32 +54,7 @@ pub struct Decimator {
 impl Decimator {
     pub fn new(factor: usize) -> Self {
         let factor = factor.max(1);
-        let taps = if factor == 1 {
-            Vec::new()
-        } else {
-            // Pass up to 0.4 of the output Nyquist band's width; Blackman window, about 74 dB
-            // of stop-band attenuation.
-            let len = 32 * factor + 1;
-            let cutoff = 0.4 / factor as f64;
-            let centre = (len - 1) as f64 / 2.0;
-            let mut taps: Vec<f64> = (0..len)
-                .map(|i| {
-                    let x = i as f64 - centre;
-                    let sinc = if x == 0.0 {
-                        2.0 * cutoff
-                    } else {
-                        (std::f64::consts::TAU * cutoff * x).sin() / (std::f64::consts::PI * x)
-                    };
-                    let w = i as f64 / (len - 1) as f64;
-                    let window = 0.42 - 0.5 * (std::f64::consts::TAU * w).cos()
-                        + 0.08 * (2.0 * std::f64::consts::TAU * w).cos();
-                    sinc * window
-                })
-                .collect();
-            let gain: f64 = taps.iter().sum();
-            taps.iter_mut().for_each(|t| *t /= gain);
-            taps.into_iter().map(|t| t as f32).collect()
-        };
+        let taps = design_taps(factor);
         Self {
             factor,
             taps,

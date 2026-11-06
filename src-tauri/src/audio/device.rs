@@ -4,6 +4,11 @@ use super::{
     audition::{AuditionClip, AuditionConsumer, AuditionMixer, AuditionProducer, audition_channel},
     backing::BackingMap,
     decode::{DecodedAudio, decode_audio},
+    dsp::TrackDsp,
+    line_in::{
+        FALLBACK_BPM, LineInControl, LineInMeter, LineInMonitor, LineInOutput, LineInPort,
+        LineInRetired, LineInSettings, MESSAGE_CAPACITY, MonitorRing, build_chain, line_in_channel,
+    },
     plan::PlaybackPlan,
     playback::PlaybackSpan,
     practice::{
@@ -763,6 +768,11 @@ pub struct CallbackTransport {
     frames: u64,
     peak: f64,
     audition: AuditionMixer,
+    line_in: LineInPort,
+    /// Frames of the device callback being rendered (0 when unknown: each call is a callback).
+    device_frames: usize,
+    /// Frames of it already rendered.
+    callback_pos: usize,
 }
 impl CallbackTransport {
     pub fn headless(rate: u32) -> Self {
@@ -774,6 +784,46 @@ impl CallbackTransport {
         let mut transport = Self::headless(rate);
         transport.audition.attach(consumer);
         (transport, producer)
+    }
+    /// A headless transport with a Line-In queue, for tests. The control end sends what the
+    /// service would: a monitor, a new chain, a level.
+    pub fn headless_with_line_in(rate: u32) -> (Self, LineInControl) {
+        let (control, port) = line_in_channel();
+        let mut transport = Self::headless(rate);
+        transport.line_in = port;
+        (transport, control)
+    }
+    /// A headless transport with both queues, for tests.
+    pub fn headless_with_audition_and_line_in(
+        rate: u32,
+    ) -> (Self, AuditionProducer, LineInControl) {
+        let (mut transport, producer) = Self::headless_with_audition(rate);
+        let (control, port) = line_in_channel();
+        transport.line_in = port;
+        (transport, producer, control)
+    }
+    /// Hand what the Line-In has replaced to `retire` so it is freed off the audio thread.
+    pub fn retire_line_in(&mut self, retire: impl FnMut(LineInRetired) -> Option<LineInRetired>) {
+        self.line_in.retire(retire);
+    }
+    /// Says how big the device callback is that the next `render_into` calls belong to. The
+    /// Line-In needs the whole callback's worth buffered before it starts, not just the part
+    /// being rendered.
+    pub fn set_device_frames(&mut self, frames: usize) {
+        self.device_frames = frames;
+        self.callback_pos = 0;
+    }
+    /// Renders one device callback of any size the way the output stream does: in blocks of at
+    /// most `BLOCK` frames with the callback size known throughout.
+    pub fn render_callback(&mut self, output: &mut [[f32; 2]]) {
+        self.set_device_frames(output.len());
+        for block in output.chunks_mut(BLOCK) {
+            self.render_into(block);
+        }
+    }
+    /// Whether a Line-In is attached and sounding through this transport.
+    pub fn line_in_active(&self) -> bool {
+        self.line_in.active()
     }
     /// Hand finished audition clips to `retire` so they are freed off the audio thread.
     pub fn retire_auditions(
@@ -809,6 +859,9 @@ impl CallbackTransport {
             frames: 0,
             peak: 0.0,
             audition: AuditionMixer::new(rate),
+            line_in: LineInPort::empty(),
+            device_frames: 0,
+            callback_pos: 0,
         }
     }
     pub fn status(&self) -> NativeAudioStatus {
@@ -1294,7 +1347,19 @@ impl CallbackTransport {
             self.start_count();
         }
     }
+    /// Renders the next block of the device callback (see `set_device_frames`). Blocks of one
+    /// callback follow each other; with no callback size set, every call is a whole callback.
     pub fn render_into(&mut self, output: &mut [[f32; 2]]) {
+        let left = self.device_frames.saturating_sub(self.callback_pos);
+        self.render_block(output, left);
+        if self.device_frames > 0 {
+            self.callback_pos += output.len();
+            if self.callback_pos >= self.device_frames {
+                self.callback_pos = 0;
+            }
+        }
+    }
+    fn render_block(&mut self, output: &mut [[f32; 2]], left_in_callback: usize) {
         output.fill([0.0; 2]);
         if self.shared.epoch.load(Ordering::Acquire) != self.epoch {
             return;
@@ -1403,6 +1468,21 @@ impl CallbackTransport {
         if report.started {
             self.shared.audition_serial.fetch_add(1, Ordering::Release);
         }
+        // The Line-In comes last so that what it adds to the score and any audition is held below
+        // full scale. It follows the score's tempo for tempo-synced effects, playing or not, and
+        // 120 bpm when the score has none to give.
+        let bpm = if self.line_in.active() {
+            let bpm = self.actual_bpm();
+            if bpm.is_finite() && (20.0..=400.0).contains(&bpm) {
+                bpm
+            } else {
+                FALLBACK_BPM
+            }
+        } else {
+            FALLBACK_BPM
+        };
+        self.line_in
+            .mix(output, bpm, self.device_frames, left_in_callback);
         self.publish();
     }
     fn restore(&mut self, snapshot: RuntimeSnapshot) -> Result<(), String> {
@@ -1484,6 +1564,7 @@ enum Retired {
     Renderer(Box<Renderer>),
     Mix(PreparedMix),
     Clip(Box<AuditionClip>),
+    LineIn(LineInRetired),
 }
 struct OutputCallback {
     transport: CallbackTransport,
@@ -1563,6 +1644,8 @@ impl OutputCallback {
             output.fill(T::from_sample(0.0));
             return;
         }
+        self.transport
+            .set_device_frames(output.len() / channels.max(1));
         for chunk in output.chunks_mut(BLOCK * channels) {
             let frames = chunk.len() / channels;
             // A mix parked during a crossfade takes over between blocks, once there is room to retire the one it replaces.
@@ -1587,6 +1670,16 @@ impl OutputCallback {
                         None
                     }
                 });
+            let retired = &mut self.retired;
+            self.transport
+                .retire_line_in(|item| match retired.try_push(Retired::LineIn(item)) {
+                    Ok(()) => None,
+                    Err(Retired::LineIn(item)) => Some(item),
+                    Err(other) => {
+                        std::mem::forget(other);
+                        None
+                    }
+                });
             for (frame, source) in chunk.chunks_mut(channels).zip(&self.scratch[..frames]) {
                 for (channel, sample) in frame.iter_mut().enumerate() {
                     let value = if channels == 1 {
@@ -1605,6 +1698,53 @@ impl OutputCallback {
     }
 }
 
+/// The output callback itself without a device, for tests that count what it allocates: the
+/// command queue, the retirement queue, the channel mapping and the Line-In, as a stream runs them.
+#[doc(hidden)]
+pub struct HeadlessOutput {
+    callback: OutputCallback,
+    retired: HeapCons<Retired>,
+    control: LineInControl,
+}
+#[doc(hidden)]
+impl HeadlessOutput {
+    pub fn new(rate: u32) -> Self {
+        let shared = Arc::new(SharedStatus::new());
+        let (_commands, controls) = HeapRb::new(CONTROL_CAPACITY).split();
+        let (retired_in, retired) = HeapRb::new(CONTROL_CAPACITY).split();
+        let epoch = shared.epoch.load(Ordering::Acquire);
+        let mut transport = CallbackTransport::new(rate, shared);
+        let (control, port) = line_in_channel();
+        transport.line_in = port;
+        Self {
+            callback: OutputCallback {
+                transport,
+                controls,
+                retired: retired_in,
+                scratch: [[0.0; 2]; BLOCK],
+                epoch,
+                suspended: false,
+            },
+            retired,
+            control,
+        }
+    }
+    pub fn control(&mut self) -> &mut LineInControl {
+        &mut self.control
+    }
+    /// One device callback of `output.len() / channels` frames.
+    pub fn render(&mut self, output: &mut [f32], channels: usize) {
+        self.callback.render(output, channels);
+    }
+    /// Frees what the callback retired, as the device manager thread does.
+    pub fn free_retired(&mut self) -> usize {
+        let mut freed = 0;
+        while self.retired.try_pop().is_some() {
+            freed += 1;
+        }
+        freed
+    }
+}
 #[derive(Clone)]
 struct PreparedDocument {
     plan: Arc<PlaybackPlan>,
@@ -1626,6 +1766,9 @@ struct OpenRequest {
     callback: OutputCallback,
     retired: HeapCons<Retired>,
     reply: mpsc::Sender<Result<(), String>>,
+    /// An open with no score (for the Line-In): its failure is the caller's error to report, not a
+    /// fault of the output.
+    idle: bool,
 }
 enum ManagerRequest {
     Open(OpenRequest),
@@ -1637,6 +1780,33 @@ struct AuditionSlot {
     epoch: u64,
     rate: u32,
 }
+/// The Line-In state the service keeps across prepares, scores and output devices. Its own leaf
+/// lock, taken after `control` when both are needed and never held while waiting on the audio
+/// thread. Nothing here belongs to a score.
+#[derive(Default)]
+struct LineInSlot {
+    /// What the Line-In should sound like, whether or not it is running.
+    settings: LineInSettings,
+    /// The capture currently feeding the output, if any.
+    active: Option<ActiveLineIn>,
+    /// The queue to the open stream's transport, and that stream's sample rate.
+    control: Option<LineInControl>,
+    rate: u32,
+    /// The ticket of the latest `line_in_set` applied.
+    applied: u64,
+    /// What the stream's Line-In has been told so far. It trails `settings` while the stream is not
+    /// listening (failed, reopening) or its queue is full, and is brought up to date later.
+    sent: LineInSettings,
+}
+/// What a stream's Line-In was built from, to find out afterwards what changed while it opened.
+struct LineInBuilt {
+    settings: LineInSettings,
+    ring: Option<Arc<MonitorRing>>,
+}
+struct ActiveLineIn {
+    ring: Arc<MonitorRing>,
+    meter: Arc<LineInMeter>,
+}
 pub struct AudioService {
     root: PathBuf,
     shared: Arc<SharedStatus>,
@@ -1644,6 +1814,9 @@ pub struct AudioService {
     /// Producer for the audition queue. Its own leaf lock, never held with `control`
     /// by anything that waits, so an audition never queues behind a prepare.
     audition: Mutex<Option<AuditionSlot>>,
+    line_in: Mutex<LineInSlot>,
+    /// The latest `line_in_set` ticket handed out.
+    line_in_issued: AtomicU64,
     manager: mpsc::Sender<ManagerRequest>,
 }
 impl AudioService {
@@ -1679,6 +1852,8 @@ impl AudioService {
                 next_barrier: 0,
             }),
             audition: Mutex::new(None),
+            line_in: Mutex::new(LineInSlot::default()),
+            line_in_issued: AtomicU64::new(0),
             manager,
         }
     }
@@ -1721,6 +1896,224 @@ impl AudioService {
     }
     pub fn status(&self) -> NativeAudioStatus {
         self.shared.read()
+    }
+    /// Makes sure an output stream exists for the Line-In and returns its rate. With a score
+    /// prepared the stream is already open. Without one (the application has not prepared its
+    /// first score yet) the stream is opened with nothing to play, and the first prepare installs
+    /// into it. An output that has failed stays failed until the player selects a device.
+    fn line_in_output(&self) -> Result<u32, String> {
+        let mut state = self.control.lock().unwrap();
+        if state.producer.is_none() && state.document.is_none() {
+            self.open_idle(&mut state)?;
+        } else if state.producer.is_none() || self.shared.is_faulted() {
+            return Err("Audio output stopped. Select an output device to recover.".into());
+        }
+        Ok(state.rate)
+    }
+    /// The Line-In is not part of any score: a running one is rebuilt for a new stream's rate (off
+    /// the audio thread, here) from the settings the service keeps, and installed in `transport`
+    /// before its stream starts. Returns the queue for the stream's lifetime and what the
+    /// monitor was built from. The queue replaces the old stream's only when `line_in_commit`
+    /// says the stream opened.
+    fn line_in_prepare(
+        &self,
+        transport: &mut CallbackTransport,
+        rate: u32,
+    ) -> (LineInControl, LineInBuilt) {
+        let (control, port) = line_in_channel();
+        transport.line_in = port;
+        let mut slot = self.line_in.lock().unwrap();
+        let settings = slot.settings.clone();
+        let monitor = slot.active.as_ref().and_then(|active| {
+            LineInMonitor::new(active.ring.clone(), active.meter.clone(), &settings, rate).ok()
+        });
+        if monitor.is_none() {
+            slot.active = None;
+        }
+        let ring = slot.active.as_ref().map(|active| active.ring.clone());
+        if let Some(monitor) = monitor {
+            transport.line_in.install(monitor);
+        }
+        (control, LineInBuilt { settings, ring })
+    }
+    /// Makes `control` the Line-In queue of the stream that just opened at `rate`. Whatever
+    /// happened while the stream was opening went to the old stream's queue, so the difference
+    /// is sent again: a capture attached or detached in the meantime, and any change of sound.
+    fn line_in_commit(&self, mut control: LineInControl, rate: u32, built: LineInBuilt) {
+        let mut slot = self.line_in.lock().unwrap();
+        let wanted = slot.active.as_ref().map(|active| active.ring.clone());
+        let same = match (&built.ring, &wanted) {
+            (None, None) => true,
+            (Some(a), Some(b)) => Arc::ptr_eq(a, b),
+            _ => false,
+        };
+        let mut sent = built.settings.clone();
+        if !same {
+            let handed = match slot.active.as_ref() {
+                Some(active) => LineInMonitor::new(
+                    active.ring.clone(),
+                    active.meter.clone(),
+                    &slot.settings,
+                    rate,
+                )
+                .and_then(|monitor| control.attach(monitor)),
+                None => control.detach(),
+            };
+            match handed {
+                Ok(()) => sent = slot.settings.clone(),
+                // Nothing can be heard from a capture that could not be handed over.
+                Err(_) => slot.active = None,
+            }
+        } else if slot.active.is_some() && built.settings != slot.settings {
+            let wanted = slot.settings.clone();
+            let _ = Self::line_in_send(&mut control, rate, &mut sent, &wanted, None);
+        }
+        slot.sent = sent;
+        slot.control = Some(control);
+        slot.rate = rate;
+    }
+    /// Sends what differs between `sent` (what a stream has been told) and `wanted`, bringing
+    /// `sent` up as far as it gets. `prebuilt` is a chain already made for `wanted.sound`, at
+    /// its rate.
+    fn line_in_send(
+        control: &mut LineInControl,
+        rate: u32,
+        sent: &mut LineInSettings,
+        wanted: &LineInSettings,
+        prebuilt: Option<(u32, Box<TrackDsp>)>,
+    ) -> Result<(), String> {
+        if sent.sound != wanted.sound {
+            let chain = match prebuilt {
+                Some((made_for, chain)) if made_for == rate => chain,
+                _ => build_chain(&wanted.sound, rate)?,
+            };
+            control.chain(chain)?;
+            sent.sound = wanted.sound.clone();
+        }
+        if sent.level != wanted.level || sent.monitor != wanted.monitor {
+            control.level(wanted.level as f32, wanted.monitor)?;
+            sent.level = wanted.level;
+            sent.monitor = wanted.monitor;
+        }
+        Ok(())
+    }
+    /// Brings the running stream up to the stored settings, if it can take them: it is neither
+    /// failed nor behind on its queue. What cannot be sent now stays recorded as unsent and goes
+    /// out on a later call, or with the next stream. A sound chain the audio thread gave up on
+    /// is replaced by a fresh one, built here.
+    fn line_in_flush(&self, slot: &mut LineInSlot, prebuilt: Option<(u32, Box<TrackDsp>)>) {
+        let Some(meter) = slot.active.as_ref().map(|active| active.meter.clone()) else {
+            return;
+        };
+        let rate = slot.rate;
+        let dead = self.shared.is_faulted();
+        let wanted = slot.settings.clone();
+        let mut sent = slot.sent.clone();
+        let Some(control) = slot.control.as_mut() else {
+            return;
+        };
+        if dead || control.pending() >= MESSAGE_CAPACITY / 2 {
+            return;
+        }
+        if sent != wanted {
+            let _ = Self::line_in_send(control, rate, &mut sent, &wanted, prebuilt);
+        }
+        if meter.take_broken() {
+            let sent_fresh = build_chain(&wanted.sound, rate)
+                .and_then(|chain| control.fresh(chain))
+                .is_ok();
+            if !sent_fresh {
+                meter.mark_broken();
+            }
+        }
+        slot.sent = sent;
+    }
+    /// Attaches a capture's ring to the output stream, with the service's Line-In settings.
+    fn line_in_attach(
+        &self,
+        ring: Arc<MonitorRing>,
+        meter: Arc<LineInMeter>,
+    ) -> Result<(), String> {
+        let mut slot = self.line_in.lock().unwrap();
+        let rate = slot.rate;
+        let monitor = LineInMonitor::new(ring.clone(), meter.clone(), &slot.settings, rate)?;
+        slot.control
+            .as_mut()
+            .ok_or("Audio output is not ready.")?
+            .attach(monitor)?;
+        slot.active = Some(ActiveLineIn { ring, meter });
+        slot.sent = slot.settings.clone();
+        Ok(())
+    }
+    fn line_in_detach(&self) {
+        let mut slot = self.line_in.lock().unwrap();
+        slot.active = None;
+        if let Some(control) = slot.control.as_mut() {
+            let _ = control.detach();
+        }
+    }
+    /// Checks `wanted` and takes the next ticket. Changes apply in ticket order and a change
+    /// whose ticket has been overtaken is dropped, so changes that run on different threads can
+    /// never leave an older one in place of a newer one. Take the ticket where the change is
+    /// received (the order of tickets is the order in which callers asked, which is the order of
+    /// arrival only as far as the caller keeps its own calls in order), and apply it wherever
+    /// the work is done.
+    pub fn line_in_ticket(&self, wanted: &LineInSettings) -> Result<u64, String> {
+        wanted.validate()?;
+        Ok(self.line_in_issued.fetch_add(1, Ordering::AcqRel) + 1)
+    }
+    /// Applies a change that has its ticket. The settings are always recorded. If a Line-In is
+    /// running and its stream can take the change, the sound chain is built (off the audio
+    /// thread, outside every lock) and crossfades in, and a level change glides; if the stream
+    /// is failed, reopening or behind on its queue, nothing is sent now and the difference goes
+    /// out when it can (`line_in_resync`, or the next stream). A change with an overtaken ticket
+    /// is skipped (a newer one is on its way and covers it). Choosing what is already set sends
+    /// nothing. Valid whether or not a Line-In is running: it applies to the next one too. Never
+    /// touches the score.
+    pub fn line_in_apply(&self, wanted: LineInSettings, ticket: u64) -> Result<(), String> {
+        if ticket < self.line_in_issued.load(Ordering::Acquire) {
+            return Ok(());
+        }
+        let (rate, rebuild) = {
+            let slot = self.line_in.lock().unwrap();
+            if ticket <= slot.applied {
+                return Ok(());
+            }
+            (
+                slot.rate,
+                slot.active.is_some()
+                    && slot.sent.sound != wanted.sound
+                    && !self.shared.is_faulted(),
+            )
+        };
+        let prebuilt = if rebuild && rate != 0 {
+            Some((rate, build_chain(&wanted.sound, rate)?))
+        } else {
+            None
+        };
+        let mut slot = self.line_in.lock().unwrap();
+        if ticket <= slot.applied {
+            return Ok(());
+        }
+        slot.settings = wanted;
+        slot.applied = ticket;
+        self.line_in_flush(&mut slot, prebuilt);
+        Ok(())
+    }
+    /// Takes a ticket and applies the change at once.
+    pub fn line_in_set(&self, wanted: LineInSettings) -> Result<(), String> {
+        let ticket = self.line_in_ticket(&wanted)?;
+        self.line_in_apply(wanted, ticket)
+    }
+    /// Sends whatever the stream could not take earlier, and replaces a sound chain that went
+    /// bad. Cheap when there is nothing to do.
+    pub fn line_in_resync(&self) {
+        let mut slot = self.line_in.lock().unwrap();
+        self.line_in_flush(&mut slot, None);
+    }
+    /// The settings the Line-In has now.
+    pub fn line_in_settings(&self) -> LineInSettings {
+        self.line_in.lock().unwrap().settings.clone()
     }
     /// What the open stream reported when it opened, plus the live callback size.
     /// Reads cached values only: it never probes the audio backend, so it cannot
@@ -2173,52 +2566,71 @@ impl AudioService {
         document: PreparedDocument,
         preserve: bool,
     ) -> Result<(), String> {
-        let result = self.open_current(state, document, preserve);
+        let result = self.open_current(state, Some(document), preserve);
         if result.is_err() {
             self.shared.mark_fault();
         }
         result
     }
+    /// Opens the output with no score: the stream plays nothing but audition clips and the
+    /// Line-In until a score is prepared, which then installs into it. A failure is returned
+    /// without marking the device faulted (neither here nor in the device manager), so it shows
+    /// only as the Line-In start's error and the next prepare simply tries again.
+    fn open_idle(&self, state: &mut ControlState) -> Result<(), String> {
+        self.open_current(state, None, false)
+    }
     fn open_current(
         &self,
         state: &mut ControlState,
-        document: PreparedDocument,
+        document: Option<PreparedDocument>,
         preserve: bool,
     ) -> Result<(), String> {
         let (device, config) = choose_output(state.device.as_deref())?;
         let rate = config.sample_rate();
-        let renderer = Self::renderer(&document, rate)?;
-        validate_count(&document.plan, document.practice, rate)?;
-        if document.plan.generation != self.shared.desired.load(Ordering::Acquire) {
-            return Err("A newer score preparation superseded this request.".into());
-        }
+        let renderer = match &document {
+            Some(document) => {
+                let renderer = Self::renderer(document, rate)?;
+                validate_count(&document.plan, document.practice, rate)?;
+                if document.plan.generation != self.shared.desired.load(Ordering::Acquire) {
+                    return Err("A newer score preparation superseded this request.".into());
+                }
+                Some(renderer)
+            }
+            None => None,
+        };
         let (producer, controls) = HeapRb::new(CONTROL_CAPACITY).split();
         let (retired_out, retired) = HeapRb::new(CONTROL_CAPACITY).split();
         let (epoch, snapshot) = self.shared.next_epoch_snapshot();
         // The replacement stream reports its own size on its first callback.
         self.shared.buffer_size.store(0, Ordering::Relaxed);
-        let preserve_position = preserve && snapshot.generation == document.plan.generation;
+        let preserve_position = preserve
+            && document
+                .as_ref()
+                .is_some_and(|document| snapshot.generation == document.plan.generation);
         let mut transport = CallbackTransport::new(rate, self.shared.clone());
         let (audition_producer, audition_consumer): (AuditionProducer, AuditionConsumer) =
             audition_channel();
         transport.audition.attach(audition_consumer);
-        transport.duration = renderer.duration_seconds();
-        transport.renderer = Some(renderer);
-        transport.generation = document.plan.generation;
-        transport.ready = true;
-        transport.practice = document.practice;
-        if preserve_position {
-            transport.restore(snapshot)?;
-            // A fault may have prevented an already accepted Apply from reaching
-            // its old callback. Keep the validated, queued settings on recovery.
-            if snapshot.fault && transport.practice != document.practice {
-                if transport.practice.tempo != document.practice.tempo {
-                    transport.passes = 0;
+        if let (Some(renderer), Some(document)) = (renderer, &document) {
+            transport.duration = renderer.duration_seconds();
+            transport.renderer = Some(renderer);
+            transport.generation = document.plan.generation;
+            transport.ready = true;
+            transport.practice = document.practice;
+            if preserve_position {
+                transport.restore(snapshot)?;
+                // A fault may have prevented an already accepted Apply from reaching
+                // its old callback. Keep the validated, queued settings on recovery.
+                if snapshot.fault && transport.practice != document.practice {
+                    if transport.practice.tempo != document.practice.tempo {
+                        transport.passes = 0;
+                    }
+                    transport.practice = document.practice;
                 }
-                transport.practice = document.practice;
             }
+            transport.resolve_renderer();
         }
-        transport.resolve_renderer();
+        let (line_in_control, line_in_built) = self.line_in_prepare(&mut transport, rate);
         let actual_id = device.id().map_err(|e| e.to_string())?.to_string();
         // Cached for diagnostics. `Display` for a device can panic in a backend.
         let name = device_label(&device);
@@ -2238,6 +2650,7 @@ impl AudioService {
                 callback,
                 retired,
                 reply,
+                idle: document.is_none(),
             }))
             .map_err(|_| "Audio device manager stopped.")?;
         answer
@@ -2245,16 +2658,21 @@ impl AudioService {
             .map_err(|_| "Audio device manager stopped.")??;
         *self.shared.device.lock().unwrap() = Some(actual_id);
         *self.shared.stream_name.lock().unwrap() = name;
-        self.set_backing_duration(&document);
+        if let Some(document) = &document {
+            self.set_backing_duration(document);
+        }
         *self.audition.lock().unwrap() = Some(AuditionSlot {
             producer: audition_producer,
             epoch,
             rate,
         });
         self.shared.audition_rate.store(rate, Ordering::Release);
+        self.line_in_commit(line_in_control, rate, line_in_built);
         state.rate = rate;
         state.producer = Some(producer);
-        state.document = Some(document);
+        if let Some(document) = document {
+            state.document = Some(document);
+        }
         Ok(())
     }
 }
@@ -2373,6 +2791,7 @@ fn device_manager(requests: mpsc::Receiver<ManagerRequest>, shared: Arc<SharedSt
                     callback,
                     retired: next_retired,
                     reply,
+                    idle,
                 } = request;
                 let epoch = callback.epoch;
                 let next = match config.sample_format() {
@@ -2403,7 +2822,9 @@ fn device_manager(requests: mpsc::Receiver<ManagerRequest>, shared: Arc<SharedSt
                         let _ = reply.send(Ok(()));
                     }
                     Err(error) => {
-                        shared.mark_fault_for_epoch(epoch);
+                        if !idle {
+                            shared.mark_fault_for_epoch(epoch);
+                        }
                         let _ = reply.send(Err(error));
                     }
                 }
@@ -2496,6 +2917,8 @@ mod reference_tests {
                 next_barrier: 0,
             }),
             audition: Mutex::new(None),
+            line_in: Mutex::new(LineInSlot::default()),
+            line_in_issued: AtomicU64::new(0),
             manager,
         };
         let mut candidate = original.settings.clone();
@@ -2656,6 +3079,8 @@ mod reference_tests {
                 next_barrier: 0,
             }),
             audition: Mutex::new(None),
+            line_in: Mutex::new(LineInSlot::default()),
+            line_in_issued: AtomicU64::new(0),
             manager,
         };
         // Giving the track its first kit, changing it, and taking it away again: each is a mix, never an install, which
@@ -2712,6 +3137,8 @@ mod reference_tests {
                 next_barrier: 0,
             }),
             audition: Mutex::new(None),
+            line_in: Mutex::new(LineInSlot::default()),
+            line_in_issued: AtomicU64::new(0),
             manager,
         };
         for change in 0..5 {
@@ -3936,5 +4363,535 @@ mod audition_callback_tests {
             retired += 1;
         }
         assert_eq!(retired, 2);
+    }
+}
+
+impl LineInOutput for AudioService {
+    fn prepare_output(&self) -> Result<u32, String> {
+        self.line_in_output()
+    }
+    fn attach(&self, ring: Arc<MonitorRing>, meter: Arc<LineInMeter>) -> Result<(), String> {
+        self.line_in_attach(ring, meter)
+    }
+    fn detach(&self) {
+        self.line_in_detach();
+    }
+    fn output_rate(&self) -> Option<u32> {
+        let rate = self.shared.audition_rate.load(Ordering::Acquire);
+        (rate != 0).then_some(rate)
+    }
+    fn buffer_frames(&self) -> Option<u32> {
+        let frames = self.shared.buffer_size.load(Ordering::Relaxed);
+        (frames != 0).then_some(frames)
+    }
+    fn resync(&self) {
+        self.line_in_resync();
+    }
+}
+
+#[cfg(test)]
+mod line_in_service_tests {
+    use super::*;
+    use crate::audio::line_in::monitor_channel;
+    use crate::audio_input::SampleSink;
+
+    fn service() -> AudioService {
+        AudioService::new(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/audio"),
+            Arc::new(|_| {}),
+        )
+    }
+
+    /// Opens a pretend stream at `rate`: a headless transport takes the Line-In the way
+    /// `open_current` gives it to a real one.
+    fn open(service: &AudioService, rate: u32) -> CallbackTransport {
+        let mut transport = CallbackTransport::headless(rate);
+        let (control, built) = service.line_in_prepare(&mut transport, rate);
+        service.line_in_commit(control, rate, built);
+        transport
+    }
+
+    fn tone(freq: f64, rate: f64, start: usize, count: usize) -> Vec<f32> {
+        (start..start + count)
+            .map(|n| (0.5 * (std::f64::consts::TAU * freq * n as f64 / rate).sin()) as f32)
+            .collect()
+    }
+
+    /// Runs the transport for `seconds` while a producer feeds a 330 Hz tone in real-time
+    /// order, returning the left channel.
+    fn run(
+        transport: &mut CallbackTransport,
+        producer: &mut crate::audio::line_in::LineInProducer,
+        written: &mut usize,
+        in_rate: f64,
+        out_rate: f64,
+        seconds: f64,
+    ) -> Vec<f32> {
+        let blocks = (seconds * out_rate / 480.0) as usize;
+        let mut out = Vec::new();
+        let mut block = [[0.0f32; 2]; 480];
+        for n in 0..blocks {
+            let due = *written + (480.0 / out_rate * in_rate) as usize;
+            let _ = n;
+            let count = due - *written;
+            producer.push_samples(&tone(330.0, in_rate, *written, count));
+            producer.end_block(count);
+            *written = due;
+            transport.render_into(&mut block);
+            transport.retire_line_in(|item| {
+                drop(item);
+                None
+            });
+            out.extend(block.iter().map(|f| f[0]));
+        }
+        out
+    }
+
+    fn peak(samples: &[f32]) -> f32 {
+        samples.iter().fold(0.0, |p, x| p.max(x.abs()))
+    }
+
+    #[test]
+    fn settings_are_validated_stored_and_harmless_to_repeat() {
+        let service = service();
+        assert_eq!(service.line_in_settings(), LineInSettings::default());
+        let mut louder = LineInSettings::default();
+        louder.level = 0.5;
+        service.line_in_set(louder.clone()).unwrap();
+        service.line_in_set(louder.clone()).unwrap();
+        assert_eq!(service.line_in_settings(), louder);
+        let mut bad = louder.clone();
+        bad.level = 1.5;
+        assert!(service.line_in_set(bad).is_err());
+        let mut bad = louder.clone();
+        bad.sound.preset_id = "nonsense".into();
+        assert!(service.line_in_set(bad).is_err());
+        assert_eq!(service.line_in_settings(), louder);
+    }
+
+    #[test]
+    fn changes_reach_the_stream_once_and_a_repeat_sends_nothing() {
+        let service = service();
+        let mut transport = open(&service, 48_000);
+        let (mut producer, ring, meter) = monitor_channel(48_000.0);
+        service.line_in_attach(ring, meter).unwrap();
+        let pending = |service: &AudioService| {
+            service
+                .line_in
+                .lock()
+                .unwrap()
+                .control
+                .as_ref()
+                .unwrap()
+                .pending()
+        };
+        assert_eq!(pending(&service), 1, "the attach");
+        let mut written = 0;
+        run(
+            &mut transport,
+            &mut producer,
+            &mut written,
+            48_000.0,
+            48_000.0,
+            0.2,
+        );
+        assert_eq!(pending(&service), 0);
+        let mut settings = LineInSettings::default();
+        settings.sound.effects.reverb.enabled = true;
+        service.line_in_set(settings.clone()).unwrap();
+        assert_eq!(pending(&service), 1, "one new chain");
+        service.line_in_set(settings.clone()).unwrap();
+        assert_eq!(pending(&service), 1, "setting it again sends nothing");
+        settings.level = 0.4;
+        service.line_in_set(settings.clone()).unwrap();
+        assert_eq!(pending(&service), 2, "a level change is its own message");
+        run(
+            &mut transport,
+            &mut producer,
+            &mut written,
+            48_000.0,
+            48_000.0,
+            0.2,
+        );
+        assert_eq!(pending(&service), 0);
+    }
+
+    #[test]
+    fn a_rebuilt_stream_keeps_the_sound_level_and_capture() {
+        let service = service();
+        let mut first = open(&service, 48_000);
+        let (mut producer, ring, meter) = monitor_channel(48_000.0);
+        service.line_in_attach(ring, meter).unwrap();
+        let mut settings = LineInSettings::default();
+        settings.level = 0.4;
+        service.line_in_set(settings.clone()).unwrap();
+        let mut written = 0;
+        let before = run(
+            &mut first,
+            &mut producer,
+            &mut written,
+            48_000.0,
+            48_000.0,
+            1.0,
+        );
+        assert!((peak(&before[before.len() / 2..]) - 0.5 * 0.4).abs() < 0.01);
+        // The output device changes: a stream at another rate opens, and the old one is gone.
+        drop(first);
+        let mut second = open(&service, 44_100);
+        assert!(second.line_in_active(), "rebuilt with the stream");
+        let after = run(
+            &mut second,
+            &mut producer,
+            &mut written,
+            48_000.0,
+            44_100.0,
+            1.5,
+        );
+        let tail = &after[after.len() / 2..];
+        assert!(
+            (peak(tail) - 0.5 * 0.4).abs() < 0.01,
+            "level kept: {}",
+            peak(tail)
+        );
+        // The tone is still 330 Hz at the new rate.
+        let crossings = tail
+            .windows(2)
+            .filter(|w| w[0] < 0.0 && w[1] >= 0.0)
+            .count();
+        let measured = crossings as f64 / (tail.len() as f64 / 44_100.0);
+        assert!((measured - 330.0).abs() < 2.0, "{measured}");
+        // And changes now reach the new stream.
+        settings.monitor = false;
+        service.line_in_set(settings).unwrap();
+        let muted = run(
+            &mut second,
+            &mut producer,
+            &mut written,
+            48_000.0,
+            44_100.0,
+            0.3,
+        );
+        assert!(peak(&muted[muted.len() - 4_000..]) < 1e-4);
+    }
+
+    #[test]
+    fn a_detached_capture_is_not_rebuilt() {
+        let service = service();
+        let _ = open(&service, 48_000);
+        let (_producer, ring, meter) = monitor_channel(48_000.0);
+        service.line_in_attach(ring, meter).unwrap();
+        service.line_in_detach();
+        let transport = open(&service, 44_100);
+        assert!(!transport.line_in_active());
+    }
+
+    #[test]
+    fn attaching_without_a_stream_is_a_clear_error() {
+        let service = service();
+        let (_producer, ring, meter) = monitor_channel(48_000.0);
+        assert!(service.line_in_attach(ring, meter).is_err());
+    }
+
+    #[test]
+    fn a_capture_attached_while_the_stream_reopens_is_not_lost() {
+        let service = service();
+        let _first = open(&service, 48_000);
+        // The new stream is prepared (no capture yet) ...
+        let mut second = CallbackTransport::headless(44_100);
+        let (control, built) = service.line_in_prepare(&mut second, 44_100);
+        assert!(!second.line_in_active());
+        // ... a capture attaches, and the message goes to the old stream's queue ...
+        let (mut producer, ring, meter) = monitor_channel(48_000.0);
+        service.line_in_attach(ring, meter).unwrap();
+        // ... and then the new stream opens.
+        service.line_in_commit(control, 44_100, built);
+        let mut written = 0;
+        let out = run(
+            &mut second,
+            &mut producer,
+            &mut written,
+            48_000.0,
+            44_100.0,
+            1.0,
+        );
+        assert!(second.line_in_active());
+        assert!(peak(&out[out.len() / 2..]) > 0.3, "the guitar is heard");
+    }
+
+    #[test]
+    fn a_capture_stopped_while_the_stream_reopens_is_not_left_sounding() {
+        let service = service();
+        let mut first = open(&service, 48_000);
+        let (mut producer, ring, meter) = monitor_channel(48_000.0);
+        service.line_in_attach(ring, meter).unwrap();
+        let mut written = 0;
+        run(
+            &mut first,
+            &mut producer,
+            &mut written,
+            48_000.0,
+            48_000.0,
+            0.5,
+        );
+        // The new stream is prepared with the capture, which then stops before it opens.
+        let mut second = CallbackTransport::headless(44_100);
+        let (control, built) = service.line_in_prepare(&mut second, 44_100);
+        assert!(second.line_in_active());
+        service.line_in_detach();
+        service.line_in_commit(control, 44_100, built);
+        let out = run(
+            &mut second,
+            &mut producer,
+            &mut written,
+            48_000.0,
+            44_100.0,
+            0.5,
+        );
+        assert!(
+            !second.line_in_active(),
+            "the detach reached the new stream"
+        );
+        assert!(peak(&out[out.len() / 2..]) < 1e-6);
+        assert!(service.line_in.lock().unwrap().active.is_none());
+    }
+
+    #[test]
+    fn changes_apply_in_ticket_order_and_a_stale_one_never_wins() {
+        let service = service();
+        let mut a = LineInSettings::default();
+        a.level = 0.2;
+        let mut b = LineInSettings::default();
+        b.level = 0.7;
+        let first = service.line_in_ticket(&a).unwrap();
+        let second = service.line_in_ticket(&b).unwrap();
+        assert!(second > first);
+        // The newer arrives first; the older is dropped when it comes.
+        service.line_in_apply(b.clone(), second).unwrap();
+        service.line_in_apply(a.clone(), first).unwrap();
+        assert_eq!(service.line_in_settings(), b);
+        // The older arriving first is skipped as superseded: only the latest is applied.
+        let service = self::service();
+        let first = service.line_in_ticket(&a).unwrap();
+        let second = service.line_in_ticket(&b).unwrap();
+        service.line_in_apply(a.clone(), first).unwrap();
+        assert_eq!(service.line_in_settings(), LineInSettings::default());
+        service.line_in_apply(b.clone(), second).unwrap();
+        assert_eq!(service.line_in_settings(), b);
+        // A change that fails validation takes no ticket.
+        let mut bad = b.clone();
+        bad.level = 3.0;
+        assert!(service.line_in_ticket(&bad).is_err());
+        let next = service.line_in_ticket(&a).unwrap();
+        assert_eq!(next, second + 1);
+    }
+
+    fn plan(generation: u64) -> PlaybackPlan {
+        serde_json::from_value(serde_json::json!({"generation":generation,"ppq":960,"durationTick":7680,"durationMs":8000,"tracks":[{"id":"gm","program":0,"percussion":false}],"tempos":[{"tick":0,"bpm":60}],"occurrences":[{"bar":0,"occurrence":0,"meterNumerator":4,"meterDenominator":4,"startTick":0,"endTick":3840,"startMs":0,"endMs":4000},{"bar":1,"occurrence":0,"meterNumerator":4,"meterDenominator":4,"startTick":3840,"endTick":7680,"startMs":4000,"endMs":8000}],"notes":[],"midi":[]})).unwrap()
+    }
+
+    /// A stream that opened with no score, as `line_in_start` opens one, through the real
+    /// callback: its command queue is the service's, as `open_current` makes it.
+    fn idle_stream(service: &AudioService, rate: u32) -> OutputCallback {
+        let (producer, controls) = HeapRb::new(CONTROL_CAPACITY).split();
+        let (retired, _kept) = HeapRb::new(CONTROL_CAPACITY).split();
+        let (epoch, _) = service.shared.next_epoch_snapshot();
+        let mut transport = CallbackTransport::new(rate, service.shared.clone());
+        let (control, built) = service.line_in_prepare(&mut transport, rate);
+        service.line_in_commit(control, rate, built);
+        service.shared.audition_rate.store(rate, Ordering::Release);
+        {
+            let mut state = service.control.lock().unwrap();
+            state.rate = rate;
+            state.producer = Some(producer);
+        }
+        OutputCallback {
+            transport,
+            controls,
+            retired,
+            scratch: [[0.0; 2]; BLOCK],
+            epoch,
+            suspended: false,
+        }
+    }
+
+    #[test]
+    fn the_first_prepare_installs_into_an_idle_stream_without_disturbing_the_line_in() {
+        let service = service();
+        let mut callback = idle_stream(&service, 48_000);
+        let (mut producer, ring, meter) = monitor_channel(48_000.0);
+        service.line_in_attach(ring, meter.clone()).unwrap();
+        // Device callbacks of 1536 frames, stereo.
+        let mut written = 0usize;
+        let mut play = |callback: &mut OutputCallback, calls: usize| {
+            let mut left = Vec::new();
+            for _ in 0..calls {
+                producer.push_samples(&tone(330.0, 48_000.0, written, 1536));
+                producer.end_block(1536);
+                written += 1536;
+                let mut out = vec![0.0f32; 1536 * 2];
+                callback.render(&mut out, 2);
+                left.extend(out.chunks(2).map(|f| f[0]));
+            }
+            left
+        };
+        let before = play(&mut callback, 40);
+        assert!(!callback.transport.status().ready, "no score yet");
+        assert!(peak(&before[before.len() / 2..]) > 0.3);
+        // The first score is prepared: the service queues an Install for the stream already open.
+        service
+            .prepare(plan(1), DocumentSettings::default(), None)
+            .unwrap();
+        let after = play(&mut callback, 40);
+        let status = callback.transport.status();
+        assert!(status.ready && status.generation == 1, "{status:?}");
+        assert!(peak(&after[after.len() / 2..]) > 0.3, "the guitar goes on");
+        // Nothing was lost along the way: the buffer never ran dry and no callback fell silent.
+        assert_eq!(meter.underruns(), 0);
+        let quietest = after.chunks(1536).map(peak).fold(f32::MAX, f32::min);
+        assert!(quietest > 0.3, "{quietest}");
+    }
+
+    fn reverb(mix: f64) -> LineInSettings {
+        let mut settings = LineInSettings::default();
+        settings.sound.effects.reverb.enabled = true;
+        settings.sound.effects.reverb.mix = mix;
+        settings
+    }
+    fn pending(service: &AudioService) -> usize {
+        service
+            .line_in
+            .lock()
+            .unwrap()
+            .control
+            .as_ref()
+            .unwrap()
+            .pending()
+    }
+    fn unsent(service: &AudioService) -> bool {
+        let slot = service.line_in.lock().unwrap();
+        slot.sent != slot.settings
+    }
+
+    #[test]
+    fn changes_made_while_the_stream_is_failed_are_recorded_not_queued() {
+        let service = service();
+        let mut transport = open(&service, 48_000);
+        let (mut producer, ring, meter) = monitor_channel(48_000.0);
+        service.line_in_attach(ring, meter).unwrap();
+        let mut written = 0;
+        run(
+            &mut transport,
+            &mut producer,
+            &mut written,
+            48_000.0,
+            48_000.0,
+            0.2,
+        );
+        assert_eq!(pending(&service), 0);
+        // The stream fails, so nothing drains its queue. Dozens of changes follow.
+        service.shared.mark_fault();
+        for step in 0..40 {
+            service
+                .line_in_set(reverb(0.1 + step as f64 * 0.01))
+                .unwrap();
+        }
+        assert_eq!(
+            pending(&service),
+            0,
+            "no chain was built and queued for a dead stream"
+        );
+        let wanted = reverb(0.1 + 39.0 * 0.01);
+        assert_eq!(
+            service.line_in_settings(),
+            wanted,
+            "the last one is recorded"
+        );
+        assert!(unsent(&service));
+        // A stream that opens afterwards starts from the recorded settings.
+        service.shared.fault.store(0, Ordering::Release);
+        let mut next = CallbackTransport::headless(44_100);
+        let (control, built) = service.line_in_prepare(&mut next, 44_100);
+        assert_eq!(built.settings, wanted);
+        service.line_in_commit(control, 44_100, built);
+        assert!(!unsent(&service));
+        assert!(next.line_in_active());
+    }
+
+    #[test]
+    fn a_full_queue_records_the_change_and_sends_it_when_it_drains() {
+        let service = service();
+        let mut transport = open(&service, 48_000);
+        let (mut producer, ring, meter) = monitor_channel(48_000.0);
+        service.line_in_attach(ring, meter).unwrap();
+        let mut written = 0;
+        run(
+            &mut transport,
+            &mut producer,
+            &mut written,
+            48_000.0,
+            48_000.0,
+            0.2,
+        );
+        // The callback is not draining (it is busy or suspended); changes keep coming.
+        for step in 0..30 {
+            service
+                .line_in_set(reverb(0.1 + step as f64 * 0.01))
+                .expect("a change is never refused for a backed-up queue");
+        }
+        assert!(
+            pending(&service) <= MESSAGE_CAPACITY / 2 + 2,
+            "{}",
+            pending(&service)
+        );
+        let wanted = reverb(0.1 + 29.0 * 0.01);
+        assert_eq!(service.line_in_settings(), wanted);
+        assert!(unsent(&service), "part of it is still waiting");
+        // It drains; the status poll's resync sends what is left.
+        run(
+            &mut transport,
+            &mut producer,
+            &mut written,
+            48_000.0,
+            48_000.0,
+            0.2,
+        );
+        assert_eq!(pending(&service), 0);
+        service.line_in_resync();
+        assert!(!unsent(&service));
+        assert!(pending(&service) > 0);
+        run(
+            &mut transport,
+            &mut producer,
+            &mut written,
+            48_000.0,
+            48_000.0,
+            0.2,
+        );
+        assert_eq!(pending(&service), 0);
+    }
+
+    #[test]
+    fn a_chain_the_audio_thread_gave_up_on_is_replaced_by_the_next_resync() {
+        let service = service();
+        let mut transport = open(&service, 48_000);
+        let (mut producer, ring, meter) = monitor_channel(48_000.0);
+        service.line_in_attach(ring, meter.clone()).unwrap();
+        let mut written = 0;
+        run(
+            &mut transport,
+            &mut producer,
+            &mut written,
+            48_000.0,
+            48_000.0,
+            0.2,
+        );
+        service.line_in_resync();
+        assert_eq!(pending(&service), 0, "nothing wrong, nothing sent");
+        meter.mark_broken();
+        service.line_in_resync();
+        assert_eq!(pending(&service), 1, "a fresh chain");
+        assert!(!meter.take_broken());
+        service.line_in_resync();
+        assert_eq!(pending(&service), 1, "asked for once");
     }
 }

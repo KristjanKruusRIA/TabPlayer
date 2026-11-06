@@ -4,21 +4,22 @@
 pub mod decimate;
 pub mod detect;
 
-use cpal::{
-    FromSample, Sample, SampleFormat, SizedSample,
-    traits::{DeviceTrait, HostTrait, StreamTrait},
+use crate::audio_input::{
+    AudioInput, CAPTURE_POLL, CaptureHandle, STOP_TIMEOUT, StreamFault, build_stream, choose_input,
 };
 use decimate::Decimator;
 use detect::{
     MAX_TARGET_HZ, MAX_TARGETS, MIN_TARGET_HZ, PolyAnalyzer, SILENT_DBFS, TunerPitch, detect_pitch,
     rms_dbfs, yin_frame_len,
 };
-use ringbuf::{HeapCons, HeapProd, HeapRb, traits::*};
+#[cfg(any(test, feature = "desktop-test"))]
+use ringbuf::HeapProd;
+use ringbuf::{HeapCons, HeapRb, traits::*};
 use serde::Serialize;
 use std::{
     sync::{
         Arc, Mutex, MutexGuard,
-        atomic::{AtomicU8, AtomicU64, Ordering},
+        atomic::{AtomicU64, Ordering},
         mpsc,
     },
     thread::{self, JoinHandle},
@@ -26,8 +27,6 @@ use std::{
 };
 
 const ANALYSIS_INTERVAL: Duration = Duration::from_millis(50);
-/// How often the capture thread checks for a stop request or a stream failure.
-const CAPTURE_POLL: Duration = Duration::from_millis(50);
 /// After this many analysis passes without new samples the buffer is dropped, so a stalled device
 /// does not keep reporting its last note.
 const STALL_PASSES: u32 = 10;
@@ -39,27 +38,29 @@ const UNEXPECTED_STOP_MESSAGE: &str = "The tuner stopped unexpectedly.";
 const START_TIMEOUT: Duration = Duration::from_secs(5);
 /// How often a start in progress checks that it has not been overtaken by a stop.
 const START_POLL: Duration = Duration::from_millis(50);
-/// How long shutting a capture down waits for its thread before leaving it to end by itself.
-const STOP_TIMEOUT: Duration = Duration::from_millis(500);
 /// The most `stop` takes in all, including waiting for a start in progress to let go.
 const STOP_BUDGET: Duration = Duration::from_millis(500);
 /// Analysis passes (50 ms each) a string that just dropped out of the analysis is still shown.
 const HOLD_PASSES: u32 = 20;
-/// Rates above this are refused; the ring and filter would be needlessly large.
-const MAX_INPUT_RATE: u32 = 768_000;
-/// Channels examined when choosing the loudest one.
-const MAX_CHANNELS: usize = 64;
 #[cfg(feature = "desktop-test")]
 const TEST_TONE_ID: &str = "test-tone";
 #[cfg(any(test, feature = "desktop-test"))]
 const TEST_TONE_RATE: f64 = 48_000.0;
 
-#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct TunerInput {
-    pub id: String,
-    pub name: String,
-    pub default: bool,
+pub type TunerInput = AudioInput;
+
+pub fn list_inputs() -> Result<Vec<TunerInput>, String> {
+    #[cfg_attr(not(feature = "desktop-test"), allow(unused_mut))]
+    let mut inputs = crate::audio_input::list_devices()?;
+    #[cfg(feature = "desktop-test")]
+    if test_tone_frequencies().is_some() {
+        inputs.push(TunerInput {
+            id: TEST_TONE_ID.into(),
+            name: "Test tone".into(),
+            default: false,
+        });
+    }
+    Ok(inputs)
 }
 
 #[derive(Clone, Debug, Serialize, PartialEq)]
@@ -155,266 +156,6 @@ impl Drop for ThreadGuard {
             }
         });
     }
-}
-
-/// Failure codes the stream's error callback leaves for the capture thread. Atomic only: the
-/// callback must not allocate or lock.
-#[derive(Default)]
-struct StreamFault(AtomicU8);
-
-impl StreamFault {
-    const UNAVAILABLE: u8 = 1;
-    const DENIED: u8 = 2;
-    const OTHER: u8 = 3;
-
-    fn note(&self, kind: cpal::ErrorKind) {
-        let code = match kind {
-            // Rerouting, glitches and a busy moment do not stop the capture.
-            cpal::ErrorKind::DeviceChanged
-            | cpal::ErrorKind::Xrun
-            | cpal::ErrorKind::RealtimeDenied
-            | cpal::ErrorKind::DeviceBusy => return,
-            cpal::ErrorKind::DeviceNotAvailable
-            | cpal::ErrorKind::HostUnavailable
-            | cpal::ErrorKind::StreamInvalidated => Self::UNAVAILABLE,
-            cpal::ErrorKind::PermissionDenied => Self::DENIED,
-            _ => Self::OTHER,
-        };
-        let _ = self
-            .0
-            .compare_exchange(0, code, Ordering::AcqRel, Ordering::Acquire);
-    }
-
-    fn message(&self) -> Option<&'static str> {
-        match self.0.load(Ordering::Acquire) {
-            0 => None,
-            Self::UNAVAILABLE => Some("The audio input was disconnected or became unavailable."),
-            Self::DENIED => Some("Access to the audio input was denied."),
-            _ => Some("The audio input stopped unexpectedly."),
-        }
-    }
-}
-
-fn open_error(error: &cpal::Error) -> String {
-    match error.kind() {
-        cpal::ErrorKind::PermissionDenied => {
-            "Access to the microphone was denied. Allow TabPlayer to use it in the system settings."
-                .into()
-        }
-        cpal::ErrorKind::DeviceNotAvailable | cpal::ErrorKind::HostUnavailable => {
-            "The selected audio input is unavailable.".into()
-        }
-        cpal::ErrorKind::DeviceBusy => "The audio input is in use by another application.".into(),
-        cpal::ErrorKind::UnsupportedConfig => {
-            "The audio input does not support a usable format.".into()
-        }
-        _ => format!("Could not open the audio input: {error}"),
-    }
-}
-
-/// A device's display name. `Display` can panic inside a backend, so a panic reads as no name.
-fn device_label(device: &cpal::Device) -> Option<String> {
-    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| device.to_string())).ok()
-}
-
-pub fn list_inputs() -> Result<Vec<TunerInput>, String> {
-    let host = cpal::default_host();
-    let default_id = host
-        .default_input_device()
-        .and_then(|device| device.id().ok())
-        .map(|id| id.to_string());
-    let mut inputs = Vec::new();
-    for device in host
-        .input_devices()
-        .map_err(|e| format!("Could not list audio inputs: {e}"))?
-    {
-        let Ok(id) = device.id() else { continue };
-        let id = id.to_string();
-        inputs.push(TunerInput {
-            default: default_id.as_deref() == Some(id.as_str()),
-            name: device_label(&device).unwrap_or_else(|| "Audio input".into()),
-            id,
-        });
-    }
-    #[cfg(feature = "desktop-test")]
-    if test_tone_frequencies().is_some() {
-        inputs.push(TunerInput {
-            id: TEST_TONE_ID.into(),
-            name: "Test tone".into(),
-            default: false,
-        });
-    }
-    Ok(inputs)
-}
-
-fn usable_format(format: SampleFormat) -> bool {
-    !matches!(
-        format,
-        SampleFormat::DsdU8 | SampleFormat::DsdU16 | SampleFormat::DsdU32
-    )
-}
-
-/// A config for a device whose default one cannot be used (DSD, or a rate outside 8 to 768 kHz):
-/// the channel count is kept, and the rate is the nearest to 48 kHz at or below it, otherwise
-/// the lowest the device offers.
-fn fallback_config(device: &cpal::Device, channels: u16) -> Option<cpal::SupportedStreamConfig> {
-    let ranges = device.supported_input_configs().ok()?;
-    ranges
-        .filter(|range| usable_format(range.sample_format()) && range.channels() == channels)
-        .filter_map(|range| {
-            let rate = if range.min_sample_rate() <= 48_000 {
-                range.max_sample_rate().min(48_000)
-            } else {
-                range.min_sample_rate()
-            }
-            .max(8_000);
-            let config = range.try_with_sample_rate(rate)?;
-            let key = if rate <= 48_000 {
-                (0u8, u32::MAX - rate)
-            } else {
-                (1u8, rate)
-            };
-            Some((key, config))
-        })
-        .min_by_key(|(key, _)| *key)
-        .map(|(_, config)| config)
-}
-
-fn rate_in_range(config: &cpal::SupportedStreamConfig) -> bool {
-    (8_000..=MAX_INPUT_RATE).contains(&config.sample_rate())
-}
-
-fn choose_input(id: Option<&str>) -> Result<(cpal::Device, cpal::SupportedStreamConfig), String> {
-    let host = cpal::default_host();
-    let device = if let Some(id) = id {
-        host.input_devices()
-            .map_err(|e| open_error(&e))?
-            .find(|d| d.id().is_ok_and(|x| x.to_string() == id))
-            .ok_or("The selected audio input is unavailable.")?
-    } else {
-        host.default_input_device()
-            .ok_or("No audio input device is available.")?
-    };
-    // The device's own rate, channels and format are kept whenever they can be used: on some
-    // systems opening a stream at another rate changes the device's rate for every application.
-    let default = device.default_input_config().map_err(|e| open_error(&e))?;
-    let config = if rate_in_range(&default) && usable_format(default.sample_format()) {
-        default
-    } else {
-        fallback_config(&device, default.channels()).unwrap_or(default)
-    };
-    if config.channels() == 0 || !rate_in_range(&config) {
-        return Err("The audio input runs at a sample rate the tuner cannot use.".into());
-    }
-    if !usable_format(config.sample_format()) {
-        return Err(
-            "The audio input only offers a DSD format, which the tuner cannot read.".into(),
-        );
-    }
-    Ok((device, config))
-}
-
-fn sample_f32<T>(sample: T) -> f32
-where
-    T: Sample,
-    f32: FromSample<T>,
-{
-    let value = sample.to_sample::<f32>();
-    if value.is_finite() { value } else { 0.0 }
-}
-
-/// Pushes the loudest channel of a block as mono. One guitar on an 8-channel interface would be
-/// 18 dB down in an average, so the channel with the most energy in the block is used, and it
-/// changes only when another channel is 6 dB louder. Runs on the audio thread: no allocation,
-/// lock, log or wait; samples that do not fit are dropped.
-fn capture_block<T>(data: &[T], channels: usize, producer: &mut HeapProd<f32>, chosen: &mut usize)
-where
-    T: Sample,
-    f32: FromSample<T>,
-{
-    if channels == 0 {
-        return;
-    }
-    let tracked = channels.min(MAX_CHANNELS);
-    let mut energy = [0.0f32; MAX_CHANNELS];
-    for frame in data.chunks_exact(channels) {
-        for (slot, &sample) in energy.iter_mut().zip(&frame[..tracked]) {
-            let value = sample_f32(sample);
-            *slot += value * value;
-        }
-    }
-    if *chosen >= tracked {
-        *chosen = 0;
-    }
-    let mut loudest = 0;
-    for channel in 1..tracked {
-        if energy[channel] > energy[loudest] {
-            loudest = channel;
-        }
-    }
-    if energy[loudest] > energy[*chosen] * 4.0 {
-        *chosen = loudest;
-    }
-    let channel = *chosen;
-    let mut chunk = [0.0f32; 256];
-    let mut filled = 0;
-    for frame in data.chunks_exact(channels) {
-        chunk[filled] = sample_f32(frame[channel]);
-        filled += 1;
-        if filled == chunk.len() {
-            producer.push_slice(&chunk);
-            filled = 0;
-        }
-    }
-    if filled > 0 {
-        producer.push_slice(&chunk[..filled]);
-    }
-}
-
-fn build_input<T>(
-    device: &cpal::Device,
-    config: &cpal::SupportedStreamConfig,
-    mut producer: HeapProd<f32>,
-    fault: Arc<StreamFault>,
-) -> Result<cpal::Stream, cpal::Error>
-where
-    T: SizedSample,
-    f32: FromSample<T>,
-{
-    let channels = config.channels() as usize;
-    let mut chosen = 0usize;
-    device.build_input_stream(
-        config.clone().into(),
-        move |data: &[T], _| capture_block(data, channels, &mut producer, &mut chosen),
-        move |error| fault.note(error.kind()),
-        None,
-    )
-}
-
-fn build_stream(
-    device: &cpal::Device,
-    config: &cpal::SupportedStreamConfig,
-    producer: HeapProd<f32>,
-    fault: Arc<StreamFault>,
-) -> Result<cpal::Stream, String> {
-    let stream = match config.sample_format() {
-        SampleFormat::F32 => build_input::<f32>(device, config, producer, fault),
-        SampleFormat::F64 => build_input::<f64>(device, config, producer, fault),
-        SampleFormat::I8 => build_input::<i8>(device, config, producer, fault),
-        SampleFormat::I16 => build_input::<i16>(device, config, producer, fault),
-        SampleFormat::I24 => build_input::<cpal::I24>(device, config, producer, fault),
-        SampleFormat::I32 => build_input::<i32>(device, config, producer, fault),
-        SampleFormat::I64 => build_input::<i64>(device, config, producer, fault),
-        SampleFormat::U8 => build_input::<u8>(device, config, producer, fault),
-        SampleFormat::U16 => build_input::<u16>(device, config, producer, fault),
-        SampleFormat::U24 => build_input::<cpal::U24>(device, config, producer, fault),
-        SampleFormat::U32 => build_input::<u32>(device, config, producer, fault),
-        SampleFormat::U64 => build_input::<u64>(device, config, producer, fault),
-        _ => return Err("This audio input uses a sample format the tuner cannot read.".into()),
-    }
-    .map_err(|e| open_error(&e))?;
-    stream.play().map_err(|e| open_error(&e))?;
-    Ok(stream)
 }
 
 /// Drains the ring, decimates input above 48 kHz and publishes a reading every analysis interval
@@ -684,40 +425,6 @@ fn run_capture(
     // Stop the stream first so nothing writes while the worker winds down.
     drop(live);
     stopped
-}
-
-/// A running capture thread. Shutting it down asks the thread to stop and waits a bounded time;
-/// a thread stuck in a driver is left behind (its generation is no longer current, so it can
-/// change nothing) instead of blocking the caller forever.
-struct CaptureHandle {
-    stop: Option<mpsc::Sender<()>>,
-    finished: mpsc::Receiver<()>,
-    thread: Option<JoinHandle<()>>,
-}
-
-impl CaptureHandle {
-    fn shutdown(mut self, budget: Duration) {
-        self.finish(budget);
-    }
-
-    fn finish(&mut self, budget: Duration) {
-        drop(self.stop.take());
-        let ended = matches!(
-            self.finished.recv_timeout(budget),
-            Err(mpsc::RecvTimeoutError::Disconnected)
-        );
-        if let Some(thread) = self.thread.take() {
-            if ended {
-                let _ = thread.join();
-            }
-        }
-    }
-}
-
-impl Drop for CaptureHandle {
-    fn drop(&mut self) {
-        self.finish(STOP_TIMEOUT);
-    }
 }
 
 /// Keeps a string that was just heard for a moment after it drops out of the analysis. Two
@@ -1020,6 +727,7 @@ pub fn tuner_read(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::audio_input::capture_block;
 
     fn wait_for<T>(mut probe: impl FnMut() -> Option<T>) -> T {
         let deadline = Instant::now() + Duration::from_secs(10);

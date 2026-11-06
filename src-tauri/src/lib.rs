@@ -1,5 +1,6 @@
 pub mod assets;
 pub mod audio;
+pub mod audio_input;
 pub mod backing_waveform;
 pub mod batch_convert;
 pub mod edit_types;
@@ -13,6 +14,7 @@ pub mod harmony;
 pub mod harmony_library;
 pub mod intake;
 pub mod launch;
+pub mod line_in;
 pub mod password_crypto;
 pub mod password_lock;
 pub mod project;
@@ -1059,6 +1061,7 @@ pub fn run() {
         .manage(batch_convert::BatchState::default())
         .manage(backing_waveform::BackingWaveformService::default())
         .manage(tuner::TunerState::default())
+        .manage(line_in::LineInState::default())
         .setup(|app| {
             // Files named on the command line, as an associated file's double-click passes them.
             if let Ok(directory) = std::env::current_dir() {
@@ -1233,7 +1236,12 @@ pub fn run() {
         tuner::tuner_inputs,
         tuner::tuner_start,
         tuner::tuner_stop,
-        tuner::tuner_read
+        tuner::tuner_read,
+        line_in::line_in_inputs,
+        line_in::line_in_start,
+        line_in::line_in_stop,
+        line_in::line_in_set,
+        line_in::line_in_status
     ]);
     #[cfg(feature = "desktop-test")]
     let builder = builder.invoke_handler(tauri::generate_handler![
@@ -1328,6 +1336,11 @@ pub fn run() {
         tuner::tuner_start,
         tuner::tuner_stop,
         tuner::tuner_read,
+        line_in::line_in_inputs,
+        line_in::line_in_start,
+        line_in::line_in_stop,
+        line_in::line_in_set,
+        line_in::line_in_status,
         desktop_test_io
     ]);
     builder
@@ -1348,6 +1361,12 @@ pub fn run() {
                 clear_print_cache(app);
                 if let Some(tuner) = app.try_state::<tuner::TunerState>() {
                     tuner.stop();
+                }
+                if let (Some(line_in), Some(audio)) = (
+                    app.try_state::<line_in::LineInState>(),
+                    app.try_state::<runtime::NativeAudio>(),
+                ) {
+                    line_in.stop(&audio.service);
                 }
             }
         });

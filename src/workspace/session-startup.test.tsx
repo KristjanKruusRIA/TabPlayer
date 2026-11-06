@@ -12,6 +12,7 @@ import { initialDocumentView } from './view-state';
 
 const boundary=vi.hoisted(()=>({invoke:vi.fn(),listen:vi.fn(),snapshot:vi.fn(),audio:vi.fn(),props:[] as (AppProps&{sessionMenu?:ReactNode;recoveryStatus?:ReactNode})[],onClose:null as null|((event:{preventDefault:()=>void})=>Promise<void>),destroy:vi.fn(),root:null as Root|null,creates:0}));
 vi.mock('@tauri-apps/api/core',()=>({invoke:boundary.invoke}));
+vi.mock('./launch-files',()=>({takeLaunchFiles:async()=>({event:null,waiting:false,dropped:0}),settleLaunchFiles:async()=>false}));
 vi.mock('@tauri-apps/api/event',()=>({listen:boundary.listen}));
 vi.mock('@tauri-apps/api/window',()=>({getCurrentWindow:()=>({onCloseRequested:async(callback:NonNullable<typeof boundary.onClose>)=>{boundary.onClose=callback;return()=>{};},destroy:boundary.destroy})}));
 vi.mock('react-dom/client',async()=>{const actual=await vi.importActual<typeof import('react-dom/client')>('react-dom/client');return {...actual,createRoot:(container:Element)=>{boundary.creates++;boundary.root=actual.createRoot(container);return boundary.root;}};});

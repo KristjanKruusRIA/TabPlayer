@@ -343,6 +343,9 @@ export const en = {
   'export.tracks_to_export': 'Tracks to export',
   'export.measures_to_export': 'Measures to export',
   'export.audio': 'Audio',
+  'launch.failed': 'Scores opened from outside TabPlayer could not be opened: {error}',
+  'launch.no_library': 'Scores opened from outside TabPlayer were not opened, because the Library is unavailable. Restart TabPlayer and open them again.',
+  'launch.too_many': '{count} scores opened from outside TabPlayer were not opened, because too many were waiting. Open them again.',
   'export.ogg': 'OGG Vorbis (compressed)',
   'export.ogg_note': 'OGG Vorbis is compressed and lossy, at about 192 kbit/s. Files are around a seventh of the WAV size, and normalized peaks can pass −1 dBFS slightly after compression.',
 

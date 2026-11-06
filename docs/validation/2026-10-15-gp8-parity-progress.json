@@ -2978,17 +2978,23 @@
         "nativeio",
         "app"
       ],
-      "test_evidence": [],
+      "test_evidence": [
+        "src-tauri/src/launch.rs",
+        "src/workspace/WorkspaceApp.test.tsx",
+        "tests/desktop/parity-file-association.mjs"
+      ],
       "current_behavior_or_gap": "Open picker works; no reviewed argv/second-instance association flow or installer receipt for score types.",
       "acceptance_required": "Double-click associated file with app closed and already open.",
       "runtime_rechecked": false,
       "historical_status": "unverified",
-      "current_status": "unverified",
-      "assessment": "baseline_not_reaudited",
-      "current_proven_status": null,
-      "current_behavior": "Open picker works; no reviewed argv/second-instance association flow or installer receipt for score types.",
-      "remaining_gap": "Not re-audited in this delivery-progress audit. The original baseline behavior, gap and acceptance remain authoritative historical context; this is not a new current proof.",
-      "current_evidence": [],
+      "current_status": "partial",
+      "assessment": "evidence_reviewed",
+      "current_proven_status": "partial",
+      "current_behavior": "Windows installer associates .tabplayer and .gp/.gpx/.gp5/.gp4/.gp3 with TabPlayer. A file on the command line opens once the workspace is ready, and a second launch hands its file to the running app through tauri-plugin-single-instance and exits. Files wait natively through startup, dialogs, exports and busy Library work, then go through the dropped-file intake's checks. A Windows desktop-test launch with a file and a second launch both opened their scores, and the built NSIS installer registers each extension.",
+      "remaining_gap": "The installer was not installed, so no Explorer double-click was observed; it takes over .gp* defaults where the user made no choice; macOS open events and Linux associations are untested (THE-73); a launched file opens beside the startup blank.",
+      "current_evidence": [
+        "2026-11-06-gp8-file-association.md"
+      ],
       "runtime_rechecked_by_this_audit": false
     },
     {

@@ -963,17 +963,55 @@ impl FileLibrary {
         let ready = ready && self.admit().is_ok();
         core.drops.capture(paths, Instant::now(), ready)
     }
+    /// Captures launch files as a drop batch when the Library can take them now. Readiness is checked under the same
+    /// lock as the capture, so a retire cannot land between them. When it cannot take them, the paths come back
+    /// unconsumed so they can wait.
+    pub(crate) fn capture_launch(
+        &self,
+        paths: Vec<PathBuf>,
+    ) -> Result<ScoreFilesDroppedEvent, Vec<PathBuf>> {
+        let Ok(mut core) = locked(&self.core) else {
+            return Err(paths);
+        };
+        // A live drag-and-drop batch not yet opened would be replaced, so the launch files wait for it.
+        if paths.is_empty() || self.admit().is_err() || core.drops.busy(Instant::now()) {
+            return Err(paths);
+        }
+        core.drops
+            .capture(paths.clone(), Instant::now(), true)
+            .map_err(|_| paths)
+    }
+    /// Ends drop batch `token` if it is still the current one.
+    pub(crate) fn drop_end(&self, token: &str) {
+        if let Ok(mut core) = locked(&self.core) {
+            core.drops.end(token);
+        }
+    }
+    #[cfg(test)]
     pub(crate) fn drop_stage(
         &self,
         token: &str,
         index: u32,
         workspace: &Mutex<DocumentWorkspace>,
     ) -> Result<DocumentIntake, String> {
+        self.drop_stage_then(token, index, workspace, || {})
+    }
+    /// Stages item `index` of drop batch `token`. `taken` runs, under the same lock, once the item is handed out.
+    pub(crate) fn drop_stage_then(
+        &self,
+        token: &str,
+        index: u32,
+        workspace: &Mutex<DocumentWorkspace>,
+        taken: impl FnOnce(),
+    ) -> Result<DocumentIntake, String> {
         let epoch = self.admit()?;
         let path = {
             let mut core = locked(&self.core)?;
             self.check_epoch(epoch)?;
-            core.drops.take(token, index, Instant::now())?
+            let item = core.drops.take_item(token, index, Instant::now())?;
+            // Handed out, even when refused (an unsupported file), so a launched file is never offered again.
+            taken();
+            item?
         };
         read_candidate_checked(path, workspace, None, || self.check_epoch(epoch))
     }

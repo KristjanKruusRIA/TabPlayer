@@ -345,6 +345,9 @@ export const de: MessageCatalog = {
   'export.tracks_to_export': 'Zu exportierende Spuren',
   'export.measures_to_export': 'Zu exportierende Takte',
   'export.audio': 'Audio',
+  'launch.failed': 'Von außerhalb von TabPlayer geöffnete Noten konnten nicht geöffnet werden: {error}',
+  'launch.no_library': 'Von außerhalb von TabPlayer geöffnete Noten wurden nicht geöffnet, weil die Bibliothek nicht verfügbar ist. Starte TabPlayer neu und öffne sie erneut.',
+  'launch.too_many': '{count} von außerhalb von TabPlayer geöffnete Noten wurden nicht geöffnet, weil zu viele warteten. Öffne sie erneut.',
   'export.ogg': 'OGG Vorbis (komprimiert)',
   'export.ogg_note': 'OGG Vorbis ist komprimiert und verlustbehaftet, mit etwa 192 kbit/s. Dateien sind etwa ein Siebtel so groß wie WAV, und normalisierte Spitzen können nach der Komprimierung −1 dBFS leicht überschreiten.',
 

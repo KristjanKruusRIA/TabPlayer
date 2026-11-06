@@ -345,6 +345,9 @@ export const et: MessageCatalog = {
   'export.tracks_to_export': 'Eksporditavad rajad',
   'export.measures_to_export': 'Eksporditavad taktid',
   'export.audio': 'Heli',
+  'launch.failed': 'Väljastpoolt TabPlayerit avatud noote ei õnnestunud avada: {error}',
+  'launch.no_library': 'Väljastpoolt TabPlayerit avatud noote ei avatud, sest teek pole saadaval. Käivita TabPlayer uuesti ja ava need uuesti.',
+  'launch.too_many': '{count} väljastpoolt TabPlayerit avatud nooti jäi avamata, sest ootel oli liiga palju. Ava need uuesti.',
   'export.ogg': 'OGG Vorbis (tihendatud)',
   'export.ogg_note': 'OGG Vorbis on tihendatud ja kadudega, umbes 192 kbit/s. Failid on umbes seitsmendik WAV-i suurusest ja normaliseeritud tipud võivad pärast tihendamist −1 dBFS-i veidi ületada.',
 

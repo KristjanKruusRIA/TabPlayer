@@ -83,6 +83,28 @@ export class WorkspaceLibrary {
       if(result.issues.length)this.update({error:`${this.state.error?`${this.state.error} `:''}${result.opened} score${result.opened===1?'':'s'} opened. ${result.issues.join(' ')}`});
     }catch(error){this.reportError(error);}
   }
+  /**
+   * Whether launch files must wait. An open Library dialog makes way only while idle: not opening a score, scanning,
+   * saving a template, changing its catalog or picking a folder. Otherwise the workspace must be free to change
+   * documents, as opening them requires.
+   */
+  launchBlocked():boolean{
+    if(this.disposed||this.blocked()!==null)return true;
+    // The open Library holds the editor operation itself, so only pending document actions are checked then.
+    if(this.state.open){const library=this.controller.getState();return !this.release||library.scanning||(library.pending!==null&&library.pending!=='refresh')||this.workspace.hasPendingDocumentActions();}
+    return this.workspace.changeConflict()!==null;
+  }
+  /**
+   * Opens score files the operating system asked for. They are the user's explicit choice, so an idle Library dialog,
+   * such as the first-run welcome, closes for them. Returns false, opening nothing, while they must wait; the check and
+   * the start of opening run without a pause, so nothing can start in between.
+   */
+  async openLaunched(event:ScoreFilesDroppedEvent):Promise<boolean>{
+    if(this.launchBlocked())return false;
+    if(this.state.open)this.close();
+    await this.drop(event);
+    return true;
+  }
   reportError(error:unknown):void{this.update({error:`Library: ${error instanceof Error?error.message:String(error)}`});}
   dispose():void{if(this.disposed)return;this.disposed=true;this.release?.();this.release=null;this.workspace.setLibraryObserver(null);this.controller.dispose();this.listeners.clear();}
 }

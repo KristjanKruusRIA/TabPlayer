@@ -68,6 +68,10 @@ export class WorkspaceController {
     for(const [id,unsubscribe] of this.subscriptions)if(!documents.some(entry=>entry.id===id)){unsubscribe();this.subscriptions.delete(id);this.pendingViews.delete(id);}
     this.update({documents,active:snapshot.active,busy:this.transitioning||this.editorOperation!==null,error:null,recoveryError:this.state?.recoveryError ?? null,playbackResumeEpoch:this.state?.playbackResumeEpoch ?? 0});
   }
+  /** Why documents cannot be opened or switched right now, or null when they can. */
+  changeConflict():string|null{return this.conflict();}
+  /** Whether any open document still has actions pending, which keeps documents from being opened or switched. */
+  hasPendingDocumentActions():boolean{return this.state.documents.some(entry=>entry.controller.hasPendingActions());}
   private conflict() {
     if(this.editorOperation!==null)return 'Finish or cancel the current editor operation before changing documents.';
     if(this.transitioning)return 'Wait for the current workspace transition to finish.';

@@ -1,3 +1,4 @@
+import { Knob } from '../ui/Knob';
 import { useI18n } from '../i18n';
 import { useEffect, useRef, useState } from 'react';
 import { defaultMaster, masterIsNeutral } from '../document-settings';
@@ -79,7 +80,7 @@ export function DockMasterControls({ master, disabled, onChange }: {
   const balance = useBalanceText();
   return <>
     <Slider compact label={t('audio.master_level')} value={current.gainDb} min={-24} max={12} step={.5} format={masterDb} disabled={disabled} commit={value => change({ gainDb: value })} />
-    <Slider compact label={t('audio.master_balance')} value={current.balance} min={-1} max={1} step={.05} format={balance} disabled={disabled} commit={value => change({ balance: value })} />
+    <Knob className="dock-pan" label={t('audio.master_balance')} bipolar value={current.balance} min={-1} max={1} step={.05} defaultValue={0} format={balance} disabled={disabled} onCommit={value => change({ balance: value })} />
   </>;
 }
 

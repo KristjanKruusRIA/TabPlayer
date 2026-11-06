@@ -36,3 +36,12 @@ export const MixerGlyph:Glyph=p=><svg {...base} {...p}><path d="M4 2v12M8 2v12M1
 export const FretboardGlyph:Glyph=p=><svg {...base} {...p}><path d="M1.5 4.5h13v7h-13z"/><path d="M5.5 4.5v7M9.5 4.5v7M1.5 8h13" strokeWidth={1}/></svg>;
 /** Practice: a stopwatch. */
 export const PracticeGlyph:Glyph=p=><svg {...base} {...p}><circle cx="8" cy="9" r="5"/><path d="M8 9V6.5M6.5 1.5h3M12 4.5l1-1"/></svg>;
+/** Instrument marks for the track list: a headstock, a longer bass headstock, a drum, keys, and a note for anything else. */
+export const GuitarGlyph:Glyph=p=><svg {...base} {...p}><path d="M9.5 1.5h3l-.5 5-2 1.5v6.5h-2V8L6.5 6.5z"/><path d="M10 3h2M10 5h1.5" strokeWidth={1}/></svg>;
+export const BassGlyph:Glyph=p=><svg {...base} {...p}><path d="M9 .8h3.5l-.6 4.4L10 6.5v8.7H8V6.5L6.3 5z"/><path d="M9.5 2.4h2M9.5 4h1.6" strokeWidth={1}/></svg>;
+export const DrumGlyph:Glyph=p=><svg {...base} {...p}><ellipse cx="8" cy="7" rx="5.5" ry="2"/><path d="M2.5 7v4.5c0 1.1 2.5 2 5.5 2s5.5-.9 5.5-2V7"/><path d="M4 2.5l4 3.5M12.5 1.5L9 5.5"/></svg>;
+export const KeysGlyph:Glyph=p=><svg {...base} {...p}><path d="M1.5 3.5h13v9h-13zM5.8 3.5v9M10.2 3.5v9"/><path d="M4.4 3.5v5M7.2 3.5v5M8.8 3.5v5M11.6 3.5v5" strokeWidth={1.8}/></svg>;
+export const NoteGlyph:Glyph=p=><svg {...base} {...p}><path d="M7.5 12V2.5l5 2"/><ellipse cx="5.5" cy="12" rx="2.3" ry="1.7" fill="currentColor" stroke="none"/></svg>;
+/** Mute is a speaker struck through; solo is a pair of headphones. */
+export const MuteGlyph:Glyph=p=><svg {...base} {...p}><path d="M2 6h2.5L8 3v10l-3.5-3H2z" fill="currentColor" stroke="none"/><path d="M14 2.5L2.5 14"/></svg>;
+export const SoloGlyph:Glyph=p=><svg {...base} {...p}><path d="M2.5 11V8a5.5 5.5 0 0111 0v3"/><path d="M2.5 9.5h2.5v4.5H2.5zM11 9.5h2.5v4.5H11z" fill="currentColor"/></svg>;

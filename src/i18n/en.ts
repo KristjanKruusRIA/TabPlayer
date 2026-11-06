@@ -528,6 +528,7 @@ export const en = {
   'instruments.cant_enter_drums_on_pitched': 'The drum kit cannot enter notes on a pitched or fretted staff',
   'overview.written_measure_overview': 'Written measure overview',
   'overview.track_measure': 'Track / measure',
+  'overview.add_track': 'Add a track',
   'overview.mute_track': 'Mute {track}',
   'overview.solo_track': 'Solo {track}',
   'overview.track_volume': '{track} volume',

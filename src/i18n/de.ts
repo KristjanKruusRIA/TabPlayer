@@ -530,6 +530,7 @@ export const de: MessageCatalog = {
   'instruments.cant_enter_drums_on_pitched': 'Das Schlagzeug kann keine Noten auf einem Tonhöhen- oder Bundsystem eingeben',
   'overview.written_measure_overview': 'Übersicht der notierten Takte',
   'overview.track_measure': 'Spur / Takt',
+  'overview.add_track': 'Spur hinzufügen',
   'overview.mute_track': '{track} stummschalten',
   'overview.solo_track': '{track} solo',
   'overview.track_volume': '{track} Lautstärke',

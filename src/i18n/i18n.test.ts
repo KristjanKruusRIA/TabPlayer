@@ -137,6 +137,18 @@ describe('useI18n hook and runtime switching', () => {
     localStorage.clear();
   });
 
+  it('keeps one translator per language across renders, so it can be a dependency', () => {
+    const { result, rerender } = renderHook(() => useI18n());
+    act(() => { result.current.setPreference('en'); });
+    const english = result.current.t;
+    rerender();
+    expect(result.current.t).toBe(english);
+    act(() => { result.current.setPreference('de'); });
+    expect(result.current.t).not.toBe(english);
+    expect(result.current.t('dock.tracks')).toBe('Spuren');
+    act(() => { result.current.setPreference('system'); });
+  });
+
   it('switches languages at runtime and updates messages immediately', () => {
     const { result } = renderHook(() => useI18n());
     expect(result.current.preference).toBe('system');

@@ -65,6 +65,7 @@ export function EditorPanel({
   onContextScopeChange,
   documentEpoch,
   paletteHost,
+  measureRequest = 0,
 }: {
   score: model.Score;
   target: BeatTarget;
@@ -94,6 +95,8 @@ export function EditorPanel({
   onContextScopeChange?: (scope: InspectorContextScope) => void;
   /** Where the edition palette goes: beside the score, as in Guitar Pro. Without one it stays at the top of Edit. */
   paletteHost?: HTMLElement | null;
+  /** Each increase opens and focuses the measure settings, as the song-position display's tempo and signature links ask. */
+  measureRequest?: number;
 }) {
   const { t } = useI18n();
   const busy = controlsBusy || locked;
@@ -129,6 +132,19 @@ export function EditorPanel({
     else if (scope === 'staff') openSummaryByText(t('editor.staff_voices_layout'));
     else if (scope === 'selection') openSummaryByText(t('editor.music_selection'));
   };
+
+  useEffect(() => {
+    if (!measureRequest) return;
+    const summaryText = t('editor.measure_and_notation');
+    const match = Array.from(editBodyRef.current?.querySelectorAll<HTMLElement>('details > summary') ?? []).find(el => el.textContent?.trim() === summaryText);
+    if (match?.parentElement instanceof HTMLDetailsElement) {
+      for (let section: HTMLElement | null = match.parentElement; section; section = section.parentElement?.closest('details') ?? null) {
+        if (section instanceof HTMLDetailsElement) section.open = true;
+      }
+      match.focus();
+      match.scrollIntoView?.({ block: 'nearest' });
+    }
+  }, [measureRequest]);
 
   useEffect(() => {
     if (controlledScope !== undefined) return;

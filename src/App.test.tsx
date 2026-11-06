@@ -1413,3 +1413,14 @@ it('shows the edition palette beside the score and returns it to the inspector w
   const inline=screen.getByRole('toolbar',{name:'Editing toolbar',hidden:true});
   expect(inline).toHaveAttribute('aria-orientation','horizontal');expect(inline.closest('.workstation-inspector')).not.toBeNull();
 });
+
+it('opens the measure settings from the tempo link in the position display',async()=>{
+  await setup();
+  const lcd=screen.getByRole('group',{name:'Song position'});
+  expect(within(lcd).getByRole('combobox',{name:'Current track'})).toHaveValue('0');
+  fireEvent.click(within(lcd).getByRole('button',{name:/^Tempo .* \(click to change\)$/}));
+  const summary=await screen.findByText('Measure & notation',{selector:'summary'});
+  await waitFor(()=>expect(summary).toHaveFocus());
+  expect(summary.parentElement).toHaveProperty('open',true);
+  expect(screen.getByRole('button',{name:'Measure',pressed:true})).toBeInTheDocument();
+});

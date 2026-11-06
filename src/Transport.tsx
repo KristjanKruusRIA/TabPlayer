@@ -6,6 +6,7 @@ import type { CursorPlaybackChoice,PassagePlaybackChoice } from './audio/selecti
 import { requireCursorChoice,requirePassageChoice } from './audio/selection-playback';
 import { SelectionPlaybackControls } from './audio/SelectionPlaybackControls';
 import { busyGuard } from './ui/useBusyGuard';
+import type { BarCompletion } from './editor/bar-completion';
 import { FirstBarGlyph,LastBarGlyph,LoopGlyph,MetronomeGlyph,MinusGlyph,MoreGlyph,NextBarGlyph,PauseGlyph,PlayGlyph,PlusGlyph,PreviousBarGlyph,StopGlyph } from './shell/glyphs';
 import { useI18n } from './i18n';
 import './shell/transport.css';
@@ -30,6 +31,16 @@ export interface TransportDisplay {
   color?:string;
   /** The time signature written at a bar, such as "4/4". */
   signatureAt:(bar:number)=>string;
+  /** Every track as "number. name", offered by the track name; picking one makes it current. */
+  tracks?:readonly string[];
+  trackIndex?:number;
+  onTrack?:(index:number)=>void;
+  /** Moves the cursor to a zero-based bar. */
+  onGoTo?:(bar:number)=>void;
+  /** Opens the editor for a zero-based bar's time signature and tempo. */
+  onMeasure?:(bar:number)=>void;
+  /** Whether the selected track's voices fill a bar. */
+  completionAt?:(bar:number)=>BarCompletion;
 }
 export function Transport({player,measures,busy,cursor,selection,display:lcd}: {player:Pick<NativePlaybackController,'subscribe'|'getState'|'play'|'pause'|'stop'|'setSpeed'|'setLoop'|'clearLoop'|'seekToMeasure'|'setPractice'|'generation'|'cursorPlaybackChoices'|'selectionPlaybackChoices'|'playbackOccurrences'|'playFromCursor'|'playSelection'|'loopSelection'>;measures:number;busy:boolean;cursor:BeatTarget;selection:MusicSelection|null;display?:TransportDisplay}) {
   const { t } = useI18n();
@@ -64,6 +75,12 @@ export function Transport({player,measures,busy,cursor,selection,display:lcd}: {
   const settingsBusy=busy||state.practicePending;
   const shownBar=Math.min(Math.max(0,measures-1),Math.max(0,scrub!==null?scrub-1:state.measure));
   const stepBar=(bar:number)=>{if(busy)return;const next=Math.min(Math.max(0,bar),Math.max(0,measures-1));if(act(()=>player.seekToMeasure(next)))setNextStart('position');};
+  const [goToOpen,setGoToOpen]=useState(false),[goToValue,setGoToValue]=useState(1),goToButton=useRef<HTMLButtonElement>(null),goToForm=useRef<HTMLFormElement>(null);
+  const closeGoTo=()=>{setGoToOpen(false);goToButton.current?.focus();};
+  useEffect(()=>{if(!goToOpen)return;const outside=(event:PointerEvent)=>{const target=event.target as Node;if(!goToForm.current?.contains(target)&&!goToButton.current?.contains(target))setGoToOpen(false);};document.addEventListener('pointerdown',outside);return()=>document.removeEventListener('pointerdown',outside);},[goToOpen]);
+  const completion=lcd?.completionAt?.(shownBar)??null;
+  const completionText=!completion?'':completion.kind==='complete'?t('transport.bar_complete'):completion.kind==='empty'?t('transport.bar_empty'):t(completion.kind==='short'?'transport.voice_short':'transport.voice_long',{voice:completion.voice});
+  const meta=(text:string,hint:string)=>lcd?.onMeasure?<button type="button" title={hint} aria-label={hint} {...busyGuard({busy,className:'transport-lcd-link',onClick:()=>lcd.onMeasure!(shownBar)})}>{text}</button>:<span aria-label={hint}>{text}</span>;
   const barButton=(label:string,bar:number,glyph:React.JSX.Element,unavailable:boolean)=><button {...busyGuard({busy,unavailable,className:'transport-barstep',onClick:()=>stepBar(bar)})} title={label} aria-label={label}>{glyph}</button>;
   return <div className="transport" role="group" aria-label={t('transport.aria_label')}><input type="range" className="transport-scrub" aria-label={t('transport.playback_position')} min={1} max={Math.max(1,measures)} step={1} value={scrub??Math.min(Math.max(1,measures),Math.max(1,state.measure+1))} disabled={!state.ready} aria-disabled={busy||undefined} aria-valuetext={t('transport.bar_x_of_y', { current: scrub ?? state.measure + 1, total: measures })} style={{'--progress':state.endTime>0?Math.min(1,Math.max(0,state.time/state.endTime)):0} as React.CSSProperties} onPointerDown={()=>{dragging.current=true;}} onPointerUp={()=>{dragging.current=false;commitScrub();}} onPointerCancel={()=>{dragging.current=false;setScrub(null);}} onBlur={()=>{if(!dragging.current)setScrub(null);}} onChange={event=>{if(busy)return;const value=Number(event.target.value);setScrub(value);if(!dragging.current)commitScrub(value);}}/><fieldset className="transport-primary" disabled={!state.ready}>
     <div className="transport-group transport-play">
@@ -73,10 +90,16 @@ export function Transport({player,measures,busy,cursor,selection,display:lcd}: {
       <span className="transport-barnav" role="group" aria-label={t('transport.bar_navigation')}>{barButton(t('transport.next_bar'),shownBar+1,<NextBarGlyph/>,shownBar>=measures-1)}{barButton(t('transport.last_bar'),measures-1,<LastBarGlyph/>,shownBar>=measures-1)}</span>
     </div>
     <div className={`transport-group transport-position${lcd?' transport-lcd':''}`} role={lcd?'group':undefined} aria-label={lcd?t('transport.position_display'):undefined} style={lcd?{'--lcd-track':lcd.color??'transparent','--lcd-progress':`${state.endTime>0?Math.min(100,Math.max(0,state.time/state.endTime*100)):0}%`} as CSSProperties:undefined}>
-      {lcd&&<span className="transport-lcd-track" title={lcd.track}>{lcd.track}</span>}
-      <span className="transport-caption transport-bar-number"><span>{t('transport.bar_n', { number: scrub ?? state.measure + 1 })}</span><span className="transport-dim transport-of">{t('transport.of_n', { total: measures })}</span></span>
+      {lcd&&(lcd.tracks&&lcd.onTrack?<select className="transport-lcd-track" aria-label={t('transport.current_track')} title={t('transport.current_track_hint')} value={lcd.trackIndex??0} aria-disabled={busy||undefined} onChange={event=>{if(!busy)lcd.onTrack!(Number(event.target.value));}}>{lcd.tracks.map((label,index)=><option key={index} value={index}>{label}</option>)}</select>:<span className="transport-lcd-track" title={lcd.track}>{lcd.track}</span>)}
+      {lcd?.onGoTo?<span className="transport-lcd-bar"><button ref={goToButton} type="button" title={t('transport.bar_position_hint')} aria-expanded={goToOpen} aria-haspopup="dialog" {...busyGuard({busy,className:'transport-caption transport-bar-number transport-lcd-link',onClick:()=>{setGoToValue(shownBar+1);setGoToOpen(open=>!open);}})}><span>{t('transport.bar_n', { number: scrub ?? state.measure + 1 })}</span><span className="transport-dim transport-of">{t('transport.of_n', { total: measures })}</span></button>
+        {goToOpen&&<form ref={goToForm} className="transport-goto" role="dialog" aria-label={t('transport.go_to_bar')} onKeyDown={event=>{if(event.key==='Escape'){event.preventDefault();closeGoTo();}}} onSubmit={event=>{event.preventDefault();if(busy)return;const bar=Math.min(Math.max(1,Math.round(goToValue)||1),measures)-1;stepBar(bar);lcd.onGoTo!(bar);closeGoTo();}}>
+          <label>{t('transport.go_to_bar')}<input type="number" autoFocus min={1} max={measures} value={goToValue} onChange={event=>setGoToValue(Number(event.target.value))}/></label>
+          <button type="submit" className="primary" aria-disabled={busy||undefined}>{t('transport.go')}</button></form>}</span>
+      :<span className="transport-caption transport-bar-number"><span>{t('transport.bar_n', { number: scrub ?? state.measure + 1 })}</span><span className="transport-dim transport-of">{t('transport.of_n', { total: measures })}</span></span>}
       <output aria-live="off" className="transport-time"><span>{clock(state.time)}</span><span className="transport-dim"> / {clock(state.endTime)}</span></output>
-      {lcd&&<span className="transport-lcd-meta" aria-hidden="true"><span>{lcd.signatureAt(shownBar)}</span><span>{practice.currentBpm>0?`♩ = ${Math.round(practice.currentBpm)}`:'♩ = –'}</span></span>}
+      {lcd&&<span className="transport-lcd-meta">{completion&&<span className="transport-lcd-completion" data-kind={completion.kind} role="img" aria-label={completionText} title={completionText}>{completion.kind==='complete'?'✓':'!'}</span>}
+        {meta(lcd.signatureAt(shownBar),t('transport.signature_hint',{value:lcd.signatureAt(shownBar)}))}
+        {meta(practice.currentBpm>0?`♩ = ${Math.round(practice.currentBpm)}`:'♩ = –',t('transport.tempo_hint',{value:practice.currentBpm>0?String(Math.round(practice.currentBpm)):'–'}))}</span>}
     </div>
     <div className="transport-group transport-loop" role="group" aria-label={t('transport.loop')}><span className="transport-caption">{t('transport.loop_bars')}</span>
       <div className="transport-row"><BarField label={t('transport.loop_start')} min={1} max={measures} value={start} onValue={setStart}/><span className="transport-dash" aria-hidden="true"/><BarField label={t('transport.loop_end')} min={1} max={measures} value={end} onValue={setEnd}/>

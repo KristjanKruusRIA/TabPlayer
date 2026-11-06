@@ -41,7 +41,8 @@ import { trackIdentity } from './engine';
 import { ExportDialog } from './export/ExportDialog';
 import { useExportCoordinator } from './export/useExportCoordinator';
 import type { ExportOptions,ExportSelection } from './export/types';
-import { Transport } from './Transport';
+import { Transport, type TransportDisplay } from './Transport';
+import { barCompletion } from './editor/bar-completion';
 import { LiveInstrumentView } from './instruments/LiveInstrumentView';
 import { followEntry, type EntryFollow } from './instruments/entry';
 import type { MusicSelection } from './editor/range-types';
@@ -117,7 +118,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   useEffect(()=>{referenceLifetime.active=true;const unbind=controller.setReferenceWaveformBridge(waveformBridge);return()=>{referenceLifetime.active=false;unbind();};},[controller,waveformBridge,referenceLifetime]);
   const [selection,setSelection]=useState<BeatTarget>(documentView.target);
   const [musicSelection,setMusicSelection]=useState<MusicSelection|null>(null),rangeAnchor=useRef<BeatTarget|null>(null);
-  const [clipboardVersion,setClipboardVersion]=useState(0),[clipboardError,setClipboardError]=useState<string|null>(null),[contextScope,setContextScope]=useState<InspectorContextScope>('all');
+  const [clipboardVersion,setClipboardVersion]=useState(0),[clipboardError,setClipboardError]=useState<string|null>(null),[contextScope,setContextScope]=useState<InspectorContextScope>('all'),[measureRequest,setMeasureRequest]=useState(0);
   const [inputPrefs,setInputPrefs]=useInputPreferences(),entryDuration=useRef<EntryDuration|null>(null),[inputNotice,setInputNotice]=useState<{text:string;at:string}|null>(null);
   const [auditionEdits,setAuditionEdits]=useState(readAuditionWhileEditing),auditionEditsNow=useRef(auditionEdits);auditionEditsNow.current=auditionEdits;
   const [markErrors,setMarkErrors]=useState(readScoreErrorDisplay),scoreErrors=useMemo(()=>findScoreErrors(state.score),[state.score]),sections=useMemo(()=>listSections(state.score),[state.score]);
@@ -310,7 +311,21 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   const selectedTrack=state.score.tracks[target.track],trackId=trackIdentity(selectedTrack);
   const transportScore=state.score,transportTrack=`${target.track+1}. ${selectedTrack.name||`Track ${target.track+1}`}`;
   const transportColor=trackColorHex(selectedTrack.color);
-  const transportDisplay=useMemo(()=>({track:transportTrack,color:transportColor,signatureAt:(bar:number)=>{const master=transportScore.masterBars[bar];return master?`${master.timeSignatureNumerator}/${master.timeSignatureDenominator}`:'';}}),[transportScore,transportTrack,transportColor]);
+  const transportTracks=useMemo(()=>transportScore.tracks.map((track,index)=>`${index+1}. ${track.name||`Track ${index+1}`}`),[transportScore]);
+  // The display's links reuse the command palette's selection path, so moving there is the same gesture as Go to measure.
+  const displayActions=useRef({select:(_:BeatTarget)=>{},measure:(_:number)=>{}});
+  displayActions.current={
+    select:next=>runPalette({kind:'select',target:next}),
+    measure:bar=>{runPalette({kind:'select',target:{...target,bar,beat:0}});setContextScope('measure');setInspectorVisible(true);setNarrowPane('inspector');setMeasureRequest(tick=>tick+1);},
+  };
+  const displayTarget=target;
+  const transportDisplay=useMemo<TransportDisplay>(()=>({track:transportTrack,color:transportColor,tracks:transportTracks,trackIndex:displayTarget.track,
+    signatureAt:(bar:number)=>{const master=transportScore.masterBars[bar];return master?`${master.timeSignatureNumerator}/${master.timeSignatureDenominator}`:'';},
+    onTrack:index=>displayActions.current.select({...displayTarget,track:index,staff:0,voice:0,beat:0}),
+    onGoTo:bar=>displayActions.current.select({...displayTarget,bar,beat:0}),
+    onMeasure:bar=>displayActions.current.measure(bar),
+    completionAt:bar=>barCompletion(transportScore,displayTarget.track,displayTarget.staff,bar),
+  }),[transportScore,transportTrack,transportColor,transportTracks,displayTarget]);
   const originalBacking=state.embeddedBacking&&!projectCommands(state.snapshot.project).some(edit=>edit.type==='setBacking');
   const baseKey=originalBacking&&state.snapshot.project.base.kind==='file'?state.snapshot.project.base.sha256:null;
   const [embeddedSource,setEmbeddedSource]=useState<{bytes:Uint8Array;key:string;source:WaveformSourceInput|null;error:string|null}|null>(null),[embeddedRetry,setEmbeddedRetry]=useState(0);
@@ -520,7 +535,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
         <div className="score-hint">Measure {target.bar+1} · Beat {target.beat+1} · {indexed?`${location.staff.isPercussion?'Percussion':'Pitched'} note ${noteIndex===null?'entry':noteIndex+1} — Click a note to edit it in the inspector.`:`String ${string} · Fret ${fret} — Click the score, then use arrow keys, digits and Enter.`}</div>
       </section>
       <div ref={inspectorPane} className="workstation-inspector" hidden={!inspectorShown}>
-      <EditorPanel documentEpoch={state.documentEpoch} paletteHost={paletteVisible&&view==='score'?paletteHost:null}contextScope={contextScope} onContextScopeChange={setContextScope} score={state.score} target={target} string={string} fret={fret} noteIndex={noteIndex} onSelectNote={setNoteIndex} busy={controlsBusy} locked={editLocked} onSelect={next=>{editorSelection(null);select(next);}} onString={s=>select(target,s)} onFret={setFret} onEdit={edit} musicSelection={musicSelection} onMusicSelection={editorSelection} onChord={()=>openModal('harmony')} onScales={()=>openModal('scale')} onAudition={auditionTuning}
+      <EditorPanel documentEpoch={state.documentEpoch} paletteHost={paletteVisible&&view==='score'?paletteHost:null} measureRequest={measureRequest} contextScope={contextScope} onContextScopeChange={setContextScope} score={state.score} target={target} string={string} fret={fret} noteIndex={noteIndex} onSelectNote={setNoteIndex} busy={controlsBusy} locked={editLocked} onSelect={next=>{editorSelection(null);select(next);}} onString={s=>select(target,s)} onFret={setFret} onEdit={edit} musicSelection={musicSelection} onMusicSelection={editorSelection} onChord={()=>openModal('harmony')} onScales={()=>openModal('scale')} onAudition={auditionTuning}
         practiceTools={player&&playbackState&&<PracticePanel key={state.documentEpoch} settings={playbackState.practice.settings} busy={controlsBusy||playbackState.practicePending||!playbackState.ready} hasBacking={!!audioSettings.backing} onChange={settings=>player.setPractice(settings)}/>}
         presentationTools={<><EngravingPanel key={`engraving/${state.documentEpoch}`} score={state.score} trackIds={trackIds} value={state.settings.engraving} busy={controlsBusy} onEdit={edit}/><BarWidthsPanel value={state.settings.engraving} design={barDesign} onDesign={setBarDesign} busy={editBusy} honoured={barWidthsHonoured} onEdit={edit}/><PageLayoutPanel key={`page/${state.documentEpoch}`} value={page} busy={controlsBusy} onEdit={edit}/></>} presentationViewTools={<ViewDefaultsPanel current={{zoom,trackView,scoreDisplay}} load={currentViewDefaults} onSave={writeViewDefaults}/>}>
         <NotationEntryPanel score={state.score} target={target} busy={controlsBusy} locked={editLocked} onEdit={instrumentEdit} latestScore={()=>controller.getState().score}/>

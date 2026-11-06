@@ -5,7 +5,7 @@ import '@testing-library/jest-dom/vitest';
 import { previewEdit } from '../engine';
 import { blankProject } from '../project';
 import { EditingToolbar } from './EditingToolbar';
-import { DockResizeHandle } from '../workstation/DockResizeHandle';
+import { DockResizeHandle,InspectorResizeHandle } from '../workstation/DockResizeHandle';
 
 afterEach(cleanup);
 const target={track:0,staff:0,bar:0,voice:0,beat:0};
@@ -60,4 +60,20 @@ it('resizes the dock with the keyboard within its limits and resets with Escape'
   fireEvent.keyDown(handle,{key:'Home'});expect(onHeight).toHaveBeenLastCalledWith(96);
   fireEvent.keyDown(handle,{key:'Escape'});expect(onReset).toHaveBeenCalledTimes(1);
   fireEvent.doubleClick(handle);expect(onReset).toHaveBeenCalledTimes(2);
+});
+
+it('widens the inspector with the left arrow and drags its edge within its limits',()=>{
+  const onWidth=vi.fn(),onReset=vi.fn();
+  render(<InspectorResizeHandle width={304} min={240} max={480} onWidth={onWidth} onReset={onReset}/>);
+  const handle=screen.getByRole('separator',{name:'Resize inspector'});
+  expect(handle).toHaveAttribute('aria-orientation','vertical');expect(handle).toHaveAttribute('aria-valuetext','304 px');
+  fireEvent.keyDown(handle,{key:'ArrowLeft'});expect(onWidth).toHaveBeenLastCalledWith(320);
+  fireEvent.keyDown(handle,{key:'ArrowRight'});expect(onWidth).toHaveBeenLastCalledWith(288);
+  fireEvent.keyDown(handle,{key:'ArrowUp'});expect(onWidth).toHaveBeenCalledTimes(2);
+  fireEvent.keyDown(handle,{key:'End'});expect(onWidth).toHaveBeenLastCalledWith(480);
+  fireEvent.pointerDown(handle,{button:0,clientX:900,pointerId:1});fireEvent.pointerMove(handle,{clientX:850,pointerId:1});expect(onWidth).toHaveBeenLastCalledWith(354);
+  fireEvent.pointerMove(handle,{clientX:100,pointerId:1});expect(onWidth).toHaveBeenLastCalledWith(480);
+  fireEvent.pointerMove(handle,{clientX:1200,pointerId:1});expect(onWidth).toHaveBeenLastCalledWith(240);
+  fireEvent.pointerUp(handle,{pointerId:1});const calls=onWidth.mock.calls.length;fireEvent.pointerMove(handle,{clientX:800,pointerId:1});expect(onWidth).toHaveBeenCalledTimes(calls);
+  fireEvent.keyDown(handle,{key:'Escape'});expect(onReset).toHaveBeenCalledOnce();
 });

@@ -51,7 +51,7 @@ body { overflow:hidden; }
 .app-shell .document-tab-item>button { min-height:24px; padding:2px 6px; }
 .app-shell .document-tab-dirty { background:var(--ws-accent); }
 .app-shell .document-tab-item>button:hover:enabled { color:var(--ws-text); }
-.workstation-workspace { display:grid; grid-template-columns:minmax(0,1fr) 304px; grid-template-rows:minmax(0,1fr) var(--dock-height); grid-template-areas:'score inspector' 'dock dock'; min-height:0; min-width:0; }
+.workstation-workspace { display:grid; grid-template-columns:minmax(0,1fr) var(--inspector-width,304px); grid-template-rows:minmax(0,1fr) var(--dock-height); grid-template-areas:'score inspector' 'dock dock'; min-height:0; min-width:0; }
 .workstation-workspace[data-inspector=false] { grid-template-columns:minmax(0,1fr) 0; }
 .workstation-workspace[data-dock=false] { grid-template-rows:minmax(0,1fr) 0; }
 .workstation-workspace[data-dock-collapsed=true] { grid-template-rows:minmax(0,1fr) 30px; }
@@ -85,6 +85,8 @@ body { overflow:hidden; }
 .app-shell .score-hint { padding:4px 8px; font-size:11px; background:var(--ws-panel); color:var(--ws-muted); }
 .workstation-inspector { grid-area:inspector; min-width:0; min-height:0; overflow:auto; scroll-padding-top:126px; border-left:1px solid var(--ws-border); background:var(--ws-panel); }
 .workstation-inspector>.inspector { background:transparent; width:100%; min-height:100%; padding:8px; overflow:visible; border:0; }
+/* Inside a tab panel the editor fills the inspector's width, so a wider inspector gives its fields the room, not a blank strip. */
+.workstation-inspector .inspector-tabpanel>.inspector { width:100%; }
 .workstation-dock { grid-area:dock; min-width:0; min-height:0; display:flex; flex-direction:column; background:var(--ws-panel); border-top:1px solid var(--ws-border); }
 .workstation-dock .dock-collapse { margin-left:auto; align-self:center; min-height:24px; padding:0 8px; border-bottom:0; }
 .workstation-dock-content,.workstation-dock-tracks,.workstation-dock-backing { flex:1; min-width:0; min-height:0; height:100%; overflow:hidden; }
@@ -92,7 +94,7 @@ body { overflow:hidden; }
 .app-shell .statusbar { min-height:24px; padding:4px 8px; gap:8px 16px; background:var(--ws-bg); color:var(--ws-muted); border-color:var(--ws-border); }
 .app-shell .error { padding:6px 8px; background:var(--ws-error-surface); color:var(--ws-error); }
 @media(max-width:1179px) {
-  .workstation-workspace { grid-template-columns:minmax(0,1fr) 264px; }
+  .workstation-workspace { grid-template-columns:minmax(0,1fr) var(--inspector-width,264px); }
   .workstation-workspace[data-inspector=false] { grid-template-columns:minmax(0,1fr) 0; }
   .app-shell .paper-scroll { padding:10px; }
   .toolbar .document-title { display:none; }
@@ -129,4 +131,11 @@ body { overflow:hidden; }
 .workstation-dock>.dock-resize:hover::after,.workstation-dock>.dock-resize:focus-visible::after { background:var(--ws-accent); }
 .workstation-dock>.dock-resize:focus-visible { outline:none; }
 @media (forced-colors:active) { .workstation-dock>.dock-resize:is(:hover,:focus-visible)::after { background:Highlight; } }
+/* The inspector's left edge is the same kind of handle, sharing the inspector's grid cell so it sits over the border. */
+.workstation-workspace>.inspector-resize { grid-area:inspector; justify-self:start; align-self:stretch; position:relative; z-index:6; width:8px; margin-left:-4px; cursor:ew-resize; touch-action:none; }
+.workstation-workspace>.inspector-resize::after { content:''; position:absolute; top:0; bottom:0; left:3px; width:2px; background:transparent; transition:background-color .12s; }
+.workstation-workspace>.inspector-resize:hover::after,.workstation-workspace>.inspector-resize:focus-visible::after { background:var(--ws-accent); }
+.workstation-workspace>.inspector-resize:focus-visible { outline:none; }
+@media (forced-colors:active) { .workstation-workspace>.inspector-resize:is(:hover,:focus-visible)::after { background:Highlight; } }
+@media (prefers-reduced-motion:reduce) { .workstation-workspace>.inspector-resize::after { transition:none; } }
 @media (prefers-reduced-motion:reduce) { .workstation-dock>.dock-resize::after { transition:none; } }

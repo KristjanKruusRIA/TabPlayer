@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, expect, it, vi } from 'vitest';
 import { act,cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { forgetSessionPanelSizes } from './workstation/panel-sizes';
 import '@testing-library/jest-dom/vitest';
 import userEvent from '@testing-library/user-event';
 import type { BarDesign } from './ScoreView';
@@ -881,6 +882,32 @@ it.each([960,1280,1600])('Backing waveform reveals the existing dock at %ipx and
   expect(document.querySelector('.workstation-workspace')).toHaveStyle({'--dock-height':`${window.innerHeight<800?176:width>=1440?192:176}px`});
   fireEvent.click(within(dock).getByRole('button',{name:'Overview'}));expect(screen.getByRole('grid',{name:'Written measure overview'})).toBeVisible();
   fireEvent.click(paneButton('Track'));expect(tuning).toHaveValue('E4 B3 G3 D3 A2 D2');expect(c.getState()).toBe(before);expectSilentNavigation();
+});
+it('drags the inspector and dock to sizes that are kept for the next run, clamped to the window, with no edit',async()=>{
+  const key='tabplayer.panelSizes',workspace=()=>document.querySelector<HTMLElement>('.workstation-workspace')!;
+  window.localStorage.removeItem(key);forgetSessionPanelSizes();
+  try{
+    let c=await setup(blankProject(),undefined,{width:1280,workspaceHeight:700});const before=c.getState();
+    expect(workspace()).toHaveStyle({'--inspector-width':'304px'});
+    const inspector=screen.getByRole('separator',{name:'Resize inspector'});
+    expect(inspector).toHaveAttribute('aria-valuemax','560');
+    fireEvent.keyDown(inspector,{key:'ArrowLeft'});expect(workspace()).toHaveStyle({'--inspector-width':'320px'});
+    fireEvent.keyDown(inspector,{key:'End'});expect(workspace()).toHaveStyle({'--inspector-width':'560px'});
+    fireEvent.keyDown(screen.getByRole('separator',{name:'Resize bottom dock'}),{key:'Home'});expect(workspace()).toHaveStyle({'--dock-height':'96px'});
+    expect(JSON.parse(window.localStorage.getItem(key)!)).toEqual({inspector:560,dock:96});
+    expect(c.getState()).toBe(before);expectSilentNavigation();
+    // A later run reads the kept sizes from storage alone.
+    cleanup();forgetSessionPanelSizes();
+    c=await setup(blankProject(),undefined,{width:1280,workspaceHeight:700});
+    expect(workspace()).toHaveStyle({'--inspector-width':'560px','--dock-height':'96px'});
+    // A narrow window clamps the kept width without forgetting it, so a wider window gets it back.
+    cleanup();c=await setup(blankProject(),undefined,{width:960,workspaceHeight:600});
+    expect(workspace()).toHaveStyle({'--inspector-width':'480px'});expect(JSON.parse(window.localStorage.getItem(key)!).inspector).toBe(560);
+    // Hiding the inspector removes its handle; Escape returns the width to automatic and forgets the kept one.
+    viewToggle('Inspector');expect(screen.queryByRole('separator',{name:'Resize inspector'})).not.toBeInTheDocument();viewToggle('Inspector');
+    fireEvent.keyDown(screen.getByRole('separator',{name:'Resize inspector'}),{key:'Escape'});
+    expect(workspace()).toHaveStyle({'--inspector-width':'264px'});expect(JSON.parse(window.localStorage.getItem(key)!)).toEqual({inspector:null,dock:96});
+  }finally{window.localStorage.removeItem(key);forgetSessionPanelSizes();}
 });
 const waveformProps=()=>waveform.props.at(-1)!;
 const referenceAsset='f'.repeat(64);

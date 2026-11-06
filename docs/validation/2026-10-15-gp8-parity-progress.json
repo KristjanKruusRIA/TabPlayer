@@ -7273,7 +7273,7 @@
       "assessment": "evidence_reviewed",
       "current_proven_status": "partial",
       "current_behavior": "The Mixer has per-piece drum volume, pan, mute and solo that apply during playback, stopped or paused, with one drag as one edit and no change to tracks without a kit mix.",
-      "remaining_gap": "2026-11-06: the recorded Standard kit takes the same element mix (2026-11-06-gp8-recorded-drums.md). Checked by measured audio tests, not by ear or on a real audio device; no real GP drum file was tested; a paused drag then resume leaks about 21 ms and a count-in edit about 10 ms, matching track faders.",
+      "remaining_gap": "2026-11-06: the recorded Standard kit takes the same element mix (2026-11-06-gp8-recorded-drums.md). The element mix is checked by measured audio tests, not by ear or on a real audio device; no real GP drum file was tested; a paused drag then resume leaks about 21 ms and a count-in edit about 10 ms, matching track faders.",
       "current_evidence": [
         "drum_element_mix_behavior",
         "drum_element_mix_evidence",
@@ -10800,7 +10800,7 @@
       "assessment": "evidence_reviewed",
       "current_proven_status": "partial",
       "current_behavior": "Drum tracks can choose the Standard, Room, Jazz or Brush kit in the rig, and percussion playing styles are named and shown with what each one plays.",
-      "remaining_gap": "2026-11-06: the Standard kit plays recorded Virtuosity Drums (CC0) with its own rim shot and half-open hi-hat, chokes, ringing one-shots and hi-hat cuts (2026-11-06-gp8-recorded-drums.md). Not yet checked by ear; Room, Jazz and Brush kits change only a few General MIDI keys; cowbell tip, bongo and conga mute and slap, tambourine return and roll play the plain hit; china, clap, timbales, woodblocks, cuica, castanets and surdo stay General MIDI; no brush sweep; a mid-song kit change is unsupported.",
+      "remaining_gap": "2026-11-06: the Standard kit plays recorded Virtuosity Drums (CC0) with its own rim shot and half-open hi-hat, chokes, ringing one-shots and hi-hat cuts (2026-11-06-gp8-recorded-drums.md); the kit demo was approved by ear. Room, Jazz and Brush kits change only a few General MIDI keys; cowbell tip, bongo and conga mute and slap, tambourine return and roll play the plain hit; china, clap, timbales, woodblocks, cuica, castanets and surdo stay General MIDI; no brush sweep; a mid-song kit change is unsupported.",
       "current_evidence": [
         "percussion_styles_behavior",
         "percussion_styles_evidence",

@@ -58,7 +58,7 @@ A fresh read-only review of the renderer, loader and mapping found no correctnes
 
 ## Limits
 
-- Not yet checked by ear. Levels are matched by peak only, at one velocity.
+- The user listened to the demo (groove, every kit sound, crash and choked crash) and approved it by ear on 2026-11-06. Levels were matched by peak at one velocity; no real song was judged by ear.
 - One microphone position. No snares-off kick or snare, no hi-hat pedal position (CC4), no snare roll, buzz or flam, no tom rim shots or other tom strokes. GP has no fields for most of these.
 - The cymbals and percussion have no recorded choke; a choke fades the ringing recording.
 - Six toms come from two recordings, so the transposed ones are approximations.

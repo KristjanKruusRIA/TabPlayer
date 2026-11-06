@@ -305,6 +305,72 @@
           ]
         }
       ]
+    },
+    {
+      "id": "slap",
+      "kind": "archive",
+      "repository": "https://ccmixter.org/files/bmccosar/13742",
+      "archiveUrl": "https://web.archive.org/web/20201020042708id_/http://ccmixter.org/content/bmccosar/bmccosar_-_BMC_slap_bass_samples.zip",
+      "revision": "6b2af3543dd111b9f62b53544c4a02ae633fb775e20b42591e006a3c0d610d53",
+      "archiveSize": 896296,
+      "license": "CC-BY-3.0",
+      "licensePath": "LICENSE.txt",
+      "localRoot": "slap",
+      "inventoryPath": "slap-inventory.json",
+      "instruments": [
+        {
+          "id": "darkblack-bass",
+          "extends": true,
+          "maps": [
+            {
+              "path": "maps/slap.sfz",
+              "articulation": "slap",
+              "sampleBasePath": ".",
+              "opcodes": {
+                "ampeg_attack": 0.001,
+                "ampeg_release": 0.25,
+                "volume": 10
+              }
+            },
+            {
+              "path": "maps/pop.sfz",
+              "articulation": "pop",
+              "sampleBasePath": ".",
+              "opcodes": {
+                "ampeg_attack": 0.001,
+                "ampeg_release": 0.25,
+                "volume": 11
+              }
+            }
+          ]
+        },
+        {
+          "id": "babyblue-bass",
+          "extends": true,
+          "maps": [
+            {
+              "path": "maps/slap.sfz",
+              "articulation": "slap",
+              "sampleBasePath": ".",
+              "opcodes": {
+                "ampeg_attack": 0.001,
+                "ampeg_release": 0.25,
+                "volume": 6
+              }
+            },
+            {
+              "path": "maps/pop.sfz",
+              "articulation": "pop",
+              "sampleBasePath": ".",
+              "opcodes": {
+                "ampeg_attack": 0.001,
+                "ampeg_release": 0.25,
+                "volume": 7
+              }
+            }
+          ]
+        }
+      ]
     }
   ],
   "soundFont": {

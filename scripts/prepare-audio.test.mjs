@@ -92,3 +92,32 @@ test('pinned_pcm24_zero_padding_is_normalized_without_losing_frames', async () =
   bytes[47]=1;await writeFile(join(root,'Samples/soft1.wav'),bytes);
   await assert.rejects(prepareLibrary({sourceRoot:root,outputRoot:join(root,'bad'),source:{id:'fixture',licensePath:'LICENSE'},instruments:[{id:'test',name:'Test',maps:[{path:'Programs/main.sfz',articulation:'picked'}]}]}), /PCM|corrupt/i);
 });
+
+test('archive_extraction_is_flat_and_bounded', async () => {
+  const { extractArchive } = await api();
+  const { zipSync } = await import('fflate');
+  const zip = files => Buffer.from(zipSync(files));
+  const entries = extractArchive(zip({ 'A_long.flac': new Uint8Array(10), 'B_long.flac': new Uint8Array(4) }));
+  assert.deepEqual([...entries.keys()].sort(), ['A_long.flac', 'B_long.flac']);
+  assert.equal(entries.get('A_long.flac').length, 10);
+  assert.throws(() => extractArchive(zip({ '../escape.flac': new Uint8Array(1) })), /Unexpected archive entry/);
+  assert.throws(() => extractArchive(zip({ 'sub/note.flac': new Uint8Array(1) })), /Unexpected archive entry/);
+  const limits = { entries: 1, entryBytes: 8, totalBytes: 16 };
+  assert.throws(() => extractArchive(zip({ 'a.flac': new Uint8Array(1), 'b.flac': new Uint8Array(1) }), limits), /limits/);
+  assert.throws(() => extractArchive(zip({ 'a.flac': new Uint8Array(9) }), limits), /limits/);
+});
+
+test('flac_recordings_are_kept_unchanged', async () => {
+  const { prepareLibrary } = await api();
+  const root = await fixture();
+  // Authored FLAC header: STREAMINFO only, 4,410 frames. Preparation reads its frame count, not its audio.
+  const flac = Buffer.alloc(42); flac.write('fLaC'); flac[4] = 0x80; flac.writeUIntBE(34, 5, 3);
+  flac.writeUInt32BE(4410, 22);
+  await writeFile(join(root, 'Samples/slap.flac'), flac);
+  await writeFile(join(root, 'Programs/main.sfz'), '<region> sample=../Samples/slap.flac pitch_keycenter=33');
+  const result = await prepareLibrary({ sourceRoot: root, outputRoot: join(root, 'out'), source: { id: 'fixture', licensePath: 'LICENSE' }, instruments: [{ id: 'bass', name: 'Bass', maps: [{ path: 'Programs/main.sfz', articulation: 'slap' }] }] });
+  assert.deepEqual(await readFile(join(root, 'out', result.samples[0].path)), flac);
+  assert.equal(result.instruments[0].regions[0].articulation, 'slap');
+  await writeFile(join(root, 'Samples/slap.flac'), Buffer.from('fLaC-corrupt'));
+  await assert.rejects(prepareLibrary({ sourceRoot: root, outputRoot: join(root, 'bad'), source: { id: 'fixture', licensePath: 'LICENSE' }, instruments: [{ id: 'bass', name: 'Bass', maps: [{ path: 'Programs/main.sfz', articulation: 'slap' }] }] }), /FLAC/);
+});

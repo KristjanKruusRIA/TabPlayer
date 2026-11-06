@@ -1,0 +1,77 @@
+[
+  {
+    "path": "A_long.flac",
+    "sha256": "0869526ec9312811bc7de737aca7437c8f4223862aba33b4f90f12a403c7d22e",
+    "size": 48211
+  },
+  {
+    "path": "apop_long.flac",
+    "sha256": "91b4af102bed6199f81979fb7ca99b0c825f86f33fa190dfa926467b1bf33d02",
+    "size": 45972
+  },
+  {
+    "path": "B_long.flac",
+    "sha256": "f44ebd4f85993b41cee5a0feefdf529ed75d2b294727e017b0ecd92724dfeac5",
+    "size": 67948
+  },
+  {
+    "path": "Bb_long.flac",
+    "sha256": "fbb57f93f51427e6cce24a87c164d3cf6d99aaef210f0ba026eb0b592c515fe9",
+    "size": 41898
+  },
+  {
+    "path": "bbpop_long.flac",
+    "sha256": "01d4913f6f5c9f5e09bc7a451a17f0a1278c146172b75b946e711bd4f929a359",
+    "size": 44640
+  },
+  {
+    "path": "bpop_long.flac",
+    "sha256": "82f89f1543a09839f46d3a08632f70fd2221e0ff9e13a4936fde90edeb94fc2c",
+    "size": 32110
+  },
+  {
+    "path": "C_long.flac",
+    "sha256": "fff20ad57888d6a6a193d5b2e80909f043763da9ebcdf9485282467d50d7673e",
+    "size": 92638
+  },
+  {
+    "path": "cpop_long.flac",
+    "sha256": "0f7f5e41ee9d383721e7060f667a76da054945fc1a131d405356069eaa660d19",
+    "size": 45850
+  },
+  {
+    "path": "D_long.flac",
+    "sha256": "889da3a15ec9b62f6d7dc262cf373fd69d0b5c3372fc5fc5c5973e2e970da378",
+    "size": 56104
+  },
+  {
+    "path": "dpop_long.flac",
+    "sha256": "af335408aca314200f34f6791cf5679e900a06db4ea94ae1a5b48bf023ec4610",
+    "size": 53462
+  },
+  {
+    "path": "Eb_long.flac",
+    "sha256": "e13f877511f557b8a4e5585e99fe62ed0fb17fe437f0bd0e2ae68da38a6e0442",
+    "size": 63013
+  },
+  {
+    "path": "ebpop_long.flac",
+    "sha256": "354b4b6dc8eeca655c334d80d0870b5b05d2dbd15aca7f156b771ab09d2a60cd",
+    "size": 59981
+  },
+  {
+    "path": "LICENSE.txt",
+    "sha256": "a1e02c36f556dfab9f905598b1748196c8cdd97db869d1b5ce444772a229f5c5",
+    "size": 19995
+  },
+  {
+    "path": "maps/pop.sfz",
+    "sha256": "288be9a9b536b20f4000e6e920c09c65889554622f9eb0546811ec57e0dcb16c",
+    "size": 488
+  },
+  {
+    "path": "maps/slap.sfz",
+    "sha256": "484cd405bb009d9a37d5390a2d0520fd7c28778009c8898c4c427118c713795d",
+    "size": 528
+  }
+]

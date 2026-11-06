@@ -6303,7 +6303,7 @@
       "historical_status": "missing",
       "current_status": "partial",
       "current_behavior": "Beat tap/slap/pop, finger/thumb golpe and dead-slap flags are authored without fabricated pitched notes; dead-slap and retrigger behavior have literal MIDI coverage.",
-      "remaining_gap": "Distinct slap/pop/golpe sound routes and target audible acceptance remain explicitly open. A stored symbol is not proof of a separate articulation sound.",
+      "remaining_gap": "2026-11-06: slap and pop beats play recorded bass sounds from a pinned CC BY 3.0 pack (2026-11-06-gp8-slap-pop.md). Not yet heard by ear; one velocity layer, no round robin; notes beyond A1-Eb2 (slap) and A2-Eb3 (pop) are transposed from the end samples.",
       "current_evidence": [
         "lyrics_notation",
         "lyrics_validation",
@@ -6336,7 +6336,7 @@
       "historical_status": "missing",
       "current_status": "partial",
       "current_behavior": "Beat tap/slap/pop, finger/thumb golpe and dead-slap flags are authored without fabricated pitched notes; dead-slap and retrigger behavior have literal MIDI coverage.",
-      "remaining_gap": "Distinct slap/pop/golpe sound routes and target audible acceptance remain explicitly open. A stored symbol is not proof of a separate articulation sound.",
+      "remaining_gap": "2026-11-06: slap and pop have recorded bass sounds; dead slap keeps the dead-note voice (2026-11-06-gp8-slap-pop.md). Golpe has no sound of its own, and target audible acceptance is open.",
       "current_evidence": [
         "lyrics_notation",
         "lyrics_validation",

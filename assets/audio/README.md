@@ -12,15 +12,29 @@ Run `node scripts/prepare-audio.mjs --offline` to require existing inputs and
 disable all downloading. The generated, ignored directory is
 `src-tauri/resources/audio/`, bundled by Tauri as `audio/`.
 
-The bundle contains 4,204 regions referencing 3,864 distinct recordings:
-green guitar (976 regions), black guitar (948), darkblack bass (1,512), and
-babyblue bass (768). Guitar has three recorded dynamics and ordinary,
+The bundle contains 4,228 regions referencing 3,876 distinct recordings:
+green guitar (976 regions), black guitar (948), darkblack bass (1,524), and
+babyblue bass (780). Guitar has three recorded dynamics and ordinary,
 staccato, release, feedback, plus green hammer and black behind-the-bridge
 maps. Darkblack has four recorded dynamics, ghost, staccato, release, and
 behind-the-bridge maps. Babyblue has two recorded dynamics and the default
 low-string selection. All selected round-robin slots are retained. Babyblue
 does not contain separate ghost/staccato recordings; those techniques use
 documented processing of its ordinary recorded voice.
+
+Both bass voices also have slap and pop layers from "BMC slap bass samples"
+by Bruce H. McCosar, used under CC BY 3.0 (source `slap`). Unlike the
+repository sources, it is one pinned archive: preparation downloads the
+Internet Archive copy of the ccMixter zip, checks its size and SHA-256 (the
+source `revision`), and extracts only flat entries within fixed count and
+size limits. The app-owned maps and the attribution and license file live in
+`slap/` and are hashed in `slap-inventory.json` like any other input. Twelve
+sustained recordings are used: slaps on A1, Bb1, B1, C2, D2 and Eb2, and
+pops an octave higher. Each root key is the measured settled pitch, within
+20 cents. The pack has no C#, and notes outside each set's range are
+transposed from its end sample. The short, hammer and thump recordings are
+not used. FLAC recordings ship unchanged; the native loader decodes them.
+An `extends` instrument adds its regions to the voice of the same id.
 
 Several upstream PCM24 bass release WAVs include a trailing zero padding byte
 inside their data chunk length. Preparation fixes only that RIFF framing.

@@ -321,7 +321,15 @@ it('shows a brushed chord as one onset in the next-notes instrument view', () =>
 
 it('leaves a written slap and a written pick stroke alone', () => {
   const bass = authored(1, 33, [43, 38, 33, 28]); note(bass, 0, 0, 3, 2).beat.slap = true;
-  expect(planOf(bass, { style: 'pick' }).notes[0].articulation).toBe('fingered');
+  expect(planOf(bass, { style: 'pick' }).notes[0].articulation).toBe('slap');
+  const popped = authored(1, 33, [43, 38, 33, 28]); Object.assign(note(popped, 0, 0, 1, 5), { isStaccato: true }).beat.pop = true;
+  expect(planOf(popped, { style: 'pick' }).notes[0].articulation).toBe('pop');
+  const muted = authored(1, 33, [43, 38, 33, 28]); Object.assign(note(muted, 0, 0, 3, 2), { isPalmMute: true }).beat.slap = true;
+  expect(planOf(muted).notes[0].articulation).toBe('muted');
+  const harmonic = authored(1, 33, [43, 38, 33, 28]); Object.assign(note(harmonic, 0, 0, 1, 12), { harmonicType: model.HarmonicType.Natural }).beat.slap = true;
+  expect(planOf(harmonic).notes[0].articulation).toBe('harmonic');
+  const tapped = authored(1, 33, [43, 38, 33, 28]); Object.assign(note(tapped, 0, 0, 1, 7), { isLeftHandTapped: true }).beat.pop = true;
+  expect(planOf(tapped).notes[0].articulation).toBe('tapped');
   const chord = authored(1); for (const s of [6, 5, 4]) note(chord, 0, 0, s, 2); chord.tracks[0].staves[0].bars[0].voices[0].beats[0].pickStroke = model.PickStroke.Down;
   expect(JSON.stringify(planOf(chord, { brush: 'down' }))).toBe(JSON.stringify(planOf(chord)));
 });

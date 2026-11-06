@@ -42,6 +42,8 @@ pub fn articulation_name(articulation: Articulation) -> &'static str {
         Articulation::Tapped => "tapped",
         Articulation::Harmonic => "harmonic",
         Articulation::Feedback => "feedback",
+        Articulation::Slap => "slap",
+        Articulation::Pop => "pop",
     }
 }
 
@@ -416,6 +418,9 @@ impl SampleVoice {
             Articulation::Harmonic => (f64::INFINITY, 14000.0, 0.75),
             Articulation::Feedback => (f64::INFINITY, 12000.0, 0.65),
             Articulation::Picked => (f64::INFINITY, 16000.0, 1.0),
+            // The slap and pop recordings carry the technique; a bass without them plays its
+            // ordinary voice, brighter, as slapped strings sound.
+            Articulation::Slap | Articulation::Pop => (f64::INFINITY, 16000.0, 1.0),
         };
         let coefficient =
             1.0 - (-std::f64::consts::TAU * cutoff.min(self.rate * 0.4) / self.rate).exp();

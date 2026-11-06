@@ -273,6 +273,11 @@ function articulation(note: model.Note, program: number, legato: boolean, style?
   if (note.isDead) return 'dead';
   if (note.isPalmMute) return 'muted';
   if (note.isGhost) return 'ghost';
+  // Slap and pop name how the string is struck, so they outrank the note's length and legato.
+  // A tapped note or a harmonic keeps its own voice: the slap recordings are ordinary pitches.
+  const ownVoice = note.isLeftHandTapped || note.beat.tap || note.harmonicType !== model.HarmonicType.None;
+  if (!ownVoice && note.beat.slap) return 'slap';
+  if (!ownVoice && note.beat.pop) return 'pop';
   if (note.isStaccato) return 'staccato';
   if (note.isLeftHandTapped || note.beat.tap) return 'tapped';
   if (note.harmonicType !== model.HarmonicType.None) return 'harmonic';

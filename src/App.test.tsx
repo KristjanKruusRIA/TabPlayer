@@ -1402,3 +1402,14 @@ it('switches application language at runtime through View preferences and update
   expect(screen.getByText('Help',{selector:'summary'})).toBeInTheDocument();
   window.localStorage.removeItem('tabplayer.language');
 });
+it('shows the edition palette beside the score and returns it to the inspector when hidden from View',async()=>{
+  await setup();
+  const palette=screen.getByRole('complementary',{name:'Edition palette'});
+  const toolbar=within(palette).getByRole('toolbar',{name:'Editing toolbar'});
+  expect(toolbar).toHaveAttribute('aria-orientation','vertical');
+  expect(screen.getAllByRole('toolbar',{name:'Editing toolbar',hidden:true})).toHaveLength(1);
+  fireEvent.click(screen.getByLabelText('Edition palette',{selector:'input'}));
+  expect(screen.queryByRole('complementary',{name:'Edition palette'})).not.toBeInTheDocument();
+  const inline=screen.getByRole('toolbar',{name:'Editing toolbar',hidden:true});
+  expect(inline).toHaveAttribute('aria-orientation','horizontal');expect(inline.closest('.workstation-inspector')).not.toBeNull();
+});

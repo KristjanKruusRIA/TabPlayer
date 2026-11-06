@@ -37,6 +37,7 @@ export const et: MessageCatalog = {
   'view.track_panel': 'Radade paneel',
   'view.inspector': 'Inspektor',
   'view.bottom_dock': 'Alumine dokk',
+  'view.edition_palette': 'Noodistuspalett',
   'view.view_label': 'Vaade',
   'view.score': 'Partituur',
   'view.sound': 'Heli',

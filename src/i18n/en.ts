@@ -35,6 +35,7 @@ export const en = {
   'view.track_panel': 'Track panel',
   'view.inspector': 'Inspector',
   'view.bottom_dock': 'Bottom dock',
+  'view.edition_palette': 'Edition palette',
   'view.view_label': 'View',
   'view.score': 'Score',
   'view.sound': 'Sound',

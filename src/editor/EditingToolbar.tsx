@@ -98,7 +98,10 @@ export function EditingToolbar({
   onDurationChange,
   onDotsChange,
   onEdit,
+  orientation = 'horizontal',
 }: {
+  /** Vertical when shown as the palette column beside the score; arrow keys then also move up and down. */
+  orientation?: 'horizontal' | 'vertical';
 
   score: model.Score;
   target: BeatTarget;
@@ -193,7 +196,8 @@ export function EditingToolbar({
   }, [score, target, string, fret, noteIndex, duration, dots, busy, locked, focusIdx]);
 
   const onToolbarKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (!['ArrowRight', 'ArrowLeft', 'Home', 'End'].includes(event.key)) return;
+    const vertical = orientation === 'vertical';
+    if (!['ArrowRight', 'ArrowLeft', 'Home', 'End', ...(vertical ? ['ArrowUp', 'ArrowDown'] : [])].includes(event.key)) return;
     const buttons = Array.from(
       toolbarRef.current?.querySelectorAll<HTMLButtonElement>(
         'button.tp-glyph-btn:not(:disabled):not([aria-disabled="true"])',
@@ -203,8 +207,8 @@ export function EditingToolbar({
     event.preventDefault();
     const current = buttons.indexOf(document.activeElement as HTMLButtonElement);
     let next = current >= 0 ? current : 0;
-    if (event.key === 'ArrowRight') next = (next + 1) % buttons.length;
-    else if (event.key === 'ArrowLeft') next = (next - 1 + buttons.length) % buttons.length;
+    if (event.key === 'ArrowRight' || event.key === 'ArrowDown') next = (next + 1) % buttons.length;
+    else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') next = (next - 1 + buttons.length) % buttons.length;
     else if (event.key === 'Home') next = 0;
     else if (event.key === 'End') next = buttons.length - 1;
     const targetBtn = buttons[next];
@@ -257,7 +261,9 @@ export function EditingToolbar({
       ref={toolbarRef}
       role="toolbar"
       aria-label={t('toolbar.editing_toolbar')}
+      aria-orientation={orientation}
       className="tp-editing-toolbar"
+      data-orientation={orientation}
       onKeyDown={onToolbarKeyDown}
     >
       <div className="tp-toolbar-group" role="group" aria-label={t('toolbar.durations')}>

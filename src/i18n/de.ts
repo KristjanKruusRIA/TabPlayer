@@ -37,6 +37,7 @@ export const de: MessageCatalog = {
   'view.track_panel': 'Spurenfenster',
   'view.inspector': 'Inspektor',
   'view.bottom_dock': 'Unteres Dock',
+  'view.edition_palette': 'Bearbeitungspalette',
   'view.view_label': 'Ansicht',
   'view.score': 'Partitur',
   'view.sound': 'Sound',

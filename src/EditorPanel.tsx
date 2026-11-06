@@ -1,5 +1,6 @@
 import { useI18n } from './i18n';
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { model } from '@coderline/alphatab';
 import { describeSelection } from './engine';
 import type { BeatTarget, EditCommand } from './project';
@@ -63,6 +64,7 @@ export function EditorPanel({
   contextScope: controlledScope,
   onContextScopeChange,
   documentEpoch,
+  paletteHost,
 }: {
   score: model.Score;
   target: BeatTarget;
@@ -90,6 +92,8 @@ export function EditorPanel({
   presentationViewTools?: ReactNode;
   contextScope?: InspectorContextScope;
   onContextScopeChange?: (scope: InspectorContextScope) => void;
+  /** Where the edition palette goes: beside the score, as in Guitar Pro. Without one it stays at the top of Edit. */
+  paletteHost?: HTMLElement | null;
 }) {
   const { t } = useI18n();
   const busy = controlsBusy || locked;
@@ -254,20 +258,26 @@ export function EditorPanel({
         <details className="inspector-task" id={`${id}-edit`} ref={editTask} open>
           <summary>{t('editor.task_edit')}</summary>
           <div ref={editBodyRef} className="tp-inspector-edit-body">
-            <EditingToolbar
-              score={score}
-              target={target}
-              string={string}
-              fret={fret}
-              noteIndex={noteIndex}
-              duration={duration}
-              dots={dots}
-              busy={controlsBusy}
-              locked={locked}
-              onDurationChange={setDuration}
-              onDotsChange={setDots}
-              onEdit={onEdit}
-            />
+            {(() => {
+              const palette = (
+                <EditingToolbar
+                  score={score}
+                  target={target}
+                  string={string}
+                  fret={fret}
+                  noteIndex={noteIndex}
+                  duration={duration}
+                  dots={dots}
+                  busy={controlsBusy}
+                  locked={locked}
+                  onDurationChange={setDuration}
+                  onDotsChange={setDots}
+                  onEdit={onEdit}
+                  orientation={paletteHost ? 'vertical' : 'horizontal'}
+                />
+              );
+              return paletteHost ? createPortal(palette, paletteHost) : palette;
+            })()}
 
             <div className="tp-context-card" role="region" aria-label={t('editor.selection_context')}>
               <div className="tp-context-summary">

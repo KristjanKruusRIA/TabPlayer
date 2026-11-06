@@ -127,3 +127,15 @@ body { overflow:hidden; }
 .workstation-workspace[data-view=sound]>:not(.sound-view),.workstation-workspace[data-view=mixer]>:not(.mixer-view) { visibility:hidden; }
 .toolbar .view-switch { flex:none; }
 .toolbar .view-switch .tp-seg-option { min-height:24px; padding:0 10px; }
+
+/* Edition palette: Guitar Pro's narrow column of note tools at the left edge of the score. */
+.score-workspace .score-body { display:flex; flex:1 1 auto; min-height:0; min-width:0; }
+.score-workspace .score-body>.paper-scroll { flex:1 1 auto; min-width:0; }
+.score-palette { flex:0 0 auto; width:84px; min-height:0; overflow-y:auto; overflow-x:hidden; padding:8px 6px; background:var(--ws-panel); border-right:1px solid var(--ws-border); scrollbar-width:thin; scrollbar-color:var(--ws-border) var(--ws-panel); }
+.score-palette:empty { display:none; }
+.score-palette .tp-editing-toolbar[data-orientation="vertical"] { display:flex; flex-direction:column; flex-wrap:nowrap; gap:10px; padding:0; border:0; background:none; }
+.score-palette .tp-editing-toolbar[data-orientation="vertical"] .tp-toolbar-group { display:grid; grid-template-columns:repeat(2,34px); gap:4px; padding:0 0 10px; margin:0; border:0; border-bottom:1px solid var(--ws-border); }
+.score-palette .tp-editing-toolbar[data-orientation="vertical"] .tp-toolbar-group:last-child { border-bottom:0; padding-bottom:0; }
+.score-palette .tp-editing-toolbar[data-orientation="vertical"] .tp-glyph-btn { width:34px; height:34px; min-width:0; }
+.score-palette .tp-editing-toolbar[data-orientation="vertical"] .tp-glyph-btn[aria-pressed="true"] { background:var(--ws-accent); color:var(--ws-accent-ink); border-color:var(--ws-accent); }
+@media (max-width:1180px) { .score-palette { width:50px; padding:6px 4px; } .score-palette .tp-editing-toolbar[data-orientation="vertical"] .tp-toolbar-group { grid-template-columns:34px; } }

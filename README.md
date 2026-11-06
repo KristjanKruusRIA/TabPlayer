@@ -109,3 +109,7 @@ Run desktop harnesses serially; they share one native app/debug port. The audio 
 `tests/desktop/audio.mjs` forwards to `native-audio.mjs`. The native audio smoke also saves, restarts and reopens backing audio with only its authored source WAV temporarily moved within the workspace, then restores it. `tests/desktop/review-regressions.mjs` checks the earlier editing, triple-dot export/reimport and mixer history regressions against native callback status.
 
 See the [expansion audit](docs/validation/2026-10-14-tabplayer-expansion.md), [approved expansion scope](docs/superpowers/specs/2026-10-14-tabplayer-deferred-features-design.md), and historical [first-milestone validation](docs/validation/2026-10-14-tabplayer-milestone.md).
+
+## Licence
+
+TabPlayer is released under the [MIT License](LICENSE). Bundled third-party software, fonts and recordings keep their own licences; see [third-party notices](THIRD_PARTY_NOTICES.md).

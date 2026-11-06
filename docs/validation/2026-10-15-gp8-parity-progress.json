@@ -10287,17 +10287,24 @@
         "player",
         "settings"
       ],
-      "test_evidence": [],
+      "test_evidence": [
+        "src-tauri/src/tuner/mod.rs",
+        "src-tauri/src/tuner/detect.rs",
+        "src/audio/TunerPanel.test.tsx",
+        "tests/desktop/parity-tuner.mjs"
+      ],
       "current_behavior_or_gap": "No audio input/pitch detector/tuner display.",
       "acceptance_required": "Measure known single/chord pitches and cents using authorized audio input.",
       "runtime_rechecked": false,
       "historical_status": "missing",
-      "current_status": "missing",
-      "assessment": "baseline_not_reaudited",
-      "current_proven_status": null,
-      "current_behavior": "No audio input/pitch detector/tuner display.",
-      "remaining_gap": "Not re-audited in this delivery-progress audit. The original baseline behavior, gap and acceptance remain authoritative historical context; this is not a new current proof.",
-      "current_evidence": [],
+      "current_status": "partial",
+      "assessment": "evidence_reviewed",
+      "current_proven_status": "partial",
+      "current_behavior": "Practice has a Tuner section: chromatic (nearest note and cents against a 415–466 Hz reference) and all strings of the selected track at once. Native cpal capture feeds YIN for single notes and an FFT peak search with harmonic rejection for strings; listening stops on Stop, collapse, unmount and quit. A Windows desktop-test build with a synthesized A2 nine cents sharp read +9.0 cents in both modes and heard only the A string.",
+      "remaining_gap": "Only synthetic signals were measured; no real instrument, input device or microphone permission prompt was observed, and macOS is unrun. Higher strings share partials with lower ones: a quiet E4 is heard in only 21 of 50 phase sets, and a B3 or E4 4 cents off can read as in tune (the panel says to finish them in chromatic mode); no strobe display; line-in monitoring (A28/A29) is separate.",
+      "current_evidence": [
+        "2026-11-06-gp8-tuner.md"
+      ],
       "runtime_rechecked_by_this_audit": false
     },
     {

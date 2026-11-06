@@ -59,6 +59,7 @@ export function EditorPanel({
   onAudition,
   children,
   practiceTools,
+  tunerTool,
   presentationTools,
   presentationViewTools,
   contextScope: controlledScope,
@@ -94,6 +95,8 @@ export function EditorPanel({
   onAudition?: TuningAudition;
   children?: ReactNode;
   practiceTools?: ReactNode;
+  /** The tuner, outside the busy-disabled practice controls, so it can be stopped at any time. */
+  tunerTool?: ReactNode;
   presentationTools?: ReactNode;
   presentationViewTools?: ReactNode;
   contextScope?: InspectorContextScope;
@@ -641,12 +644,14 @@ export function EditorPanel({
           <fieldset disabled={controlsBusy}>
             {practiceTools ?? <p className="muted">{t('editor.practice_hint')}</p>}
           </fieldset>
+          {tunerTool}
         </section>, practiceHost) : !hosted && <section aria-label={t('editor.practice_tools')}>
         <details className="inspector-task" id={`${id}-practice`} ref={practiceTask}>
           <summary>{t('editor.task_practice')}</summary>
           <fieldset disabled={controlsBusy}>
             {practiceTools ?? <p className="muted">{t('editor.practice_hint')}</p>}
           </fieldset>
+          {tunerTool}
         </details>
       </section>}
       {songHost ? createPortal(<>

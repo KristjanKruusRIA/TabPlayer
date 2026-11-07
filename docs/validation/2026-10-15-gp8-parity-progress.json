@@ -77,31 +77,31 @@
       "unverified": 8
     },
     "current_dispositions": {
-      "implemented": 101,
-      "partial": 140,
-      "missing": 10,
-      "unverified": 7
+      "implemented": 102,
+      "partial": 143,
+      "missing": 7,
+      "unverified": 6
     },
-    "evidence_reviewed_total": 192,
+    "evidence_reviewed_total": 196,
     "evidence_reviewed": {
-      "implemented": 59,
-      "partial": 130,
+      "implemented": 60,
+      "partial": 133,
       "missing": 0,
       "unverified": 3
     },
-    "baseline_not_reaudited_total": 66,
+    "baseline_not_reaudited_total": 62,
     "baseline_not_reaudited": {
       "implemented": 42,
       "partial": 10,
-      "missing": 10,
-      "unverified": 4
+      "missing": 7,
+      "unverified": 3
     },
-    "status_changed_total": 147,
+    "status_changed_total": 151,
     "transition_counts": {
-      "missing -> implemented": 40,
-      "missing -> partial": 96,
+      "missing -> implemented": 41,
+      "missing -> partial": 98,
       "partial -> implemented": 10,
-      "unverified -> partial": 1
+      "unverified -> partial": 2
     }
   },
   "evidence": {
@@ -8834,17 +8834,25 @@
       "source_evidence": [
         "formats"
       ],
-      "test_evidence": [],
+      "test_evidence": [
+        "src-tauri/src/export/wav.rs",
+        "src-tauri/src/export/mp3.rs",
+        "src-tauri/src/export/stems.rs",
+        "src/export/mp3-export.test.tsx",
+        "tests/desktop/parity-mp3-export.mjs"
+      ],
       "current_behavior_or_gap": "No MP3 encoder or destination.",
       "acceptance_required": "Export independent encoded MP3 with playable tags/duration/options.",
       "runtime_rechecked": false,
       "historical_status": "missing",
-      "current_status": "missing",
-      "assessment": "baseline_not_reaudited",
-      "current_proven_status": null,
-      "current_behavior": "No MP3 encoder or destination.",
-      "remaining_gap": "Not re-audited in this delivery-progress audit. The original baseline behavior, gap and acceptance remain authoritative historical context; this is not a new current proof.",
-      "current_evidence": [],
+      "current_status": "partial",
+      "assessment": "evidence_reviewed",
+      "current_proven_status": "partial",
+      "current_behavior": "Mixed audio and stems export as MP3 from the Export dialog's File type (joint stereo, constant 256 kbit/s, LAME quality 2; bit depth hidden), with normalization as for WAV, by the official LAME 3.100 built from mp3lame-sys 0.1.11 and linked statically, with LAME's information tag holding length, delay and padding. Native tests decode the output independently with Symphonia to the exact length at both rates at over 30 dB SNR, and a Windows desktop export of a chord decoded at the WAV's rate and exact frame count, about 62-64 dB SNR against it, at 11-12% of a 24-bit WAV's size.",
+      "remaining_gap": "No bitrate, VBR or quality choice; no title or artist tags; not listened to; LAME's autotools build on macOS and Linux untested here; built on Windows only.",
+      "current_evidence": [
+        "2026-11-06-gp8-mp3-export.md"
+      ],
       "runtime_rechecked_by_this_audit": false
     },
     {
@@ -8967,7 +8975,7 @@
       "assessment": "evidence_reviewed",
       "current_proven_status": "partial",
       "current_behavior": "Mixed WAV or AIFF exports can be normalized from the Export dialog to a chosen RMS level from −30 to −6 dB (default −16) with one gain, held so no peak passes −1 dBFS and raised by at most 40 dB; stems keep their levels and exports without it are unchanged. Native tests read back levels within 0.01 dB, and a desktop export of a chord reached −24.00 dB RMS and was held at −1.00 dBFS for higher targets with its dynamics unchanged.",
-      "remaining_gap": "No codec quality or bitrate options: OGG export (F20) uses a fixed VBR 0.6; RMS rather than LUFS loudness; a single gain without limiting, so peaky material stops below the target; stems are not normalized.",
+      "remaining_gap": "No codec quality or bitrate options: OGG export (F20) uses a fixed VBR 0.6 and MP3 export (F19) a fixed 256 kbit/s; RMS rather than LUFS loudness; a single gain without limiting, so peaky material stops below the target; stems are not normalized.",
       "current_evidence": [
         "normalize_export_behavior",
         "normalize_export_evidence",

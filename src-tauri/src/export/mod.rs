@@ -1,6 +1,7 @@
 pub mod audio;
 pub mod flac;
 pub mod jobs;
+pub mod mp3;
 pub mod pdf;
 pub mod png;
 pub mod print;

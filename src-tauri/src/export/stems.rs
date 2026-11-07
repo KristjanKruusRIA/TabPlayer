@@ -508,4 +508,50 @@ mod tests {
         // The tone is in the first stem only; the silent track decodes to silence.
         assert!(energy[0] > 0.07 && energy[1] < 1e-8, "{energy:?}");
     }
+    #[test]
+    fn writes_mp3_stems_that_decode_to_each_track() {
+        let root = tempfile::tempdir().unwrap();
+        let dest = root.path().join("MP3 stems");
+        let mut spec = spec();
+        spec.format.container = AudioContainer::Mp3;
+        let mut written = 0usize;
+        let rate = spec.format.sample_rate as f32;
+        let tone = |t: usize| (std::f32::consts::TAU * 440.0 * t as f32 / rate).sin() * 0.4;
+        let manifest = write_stems(
+            &dest,
+            &spec,
+            |outputs| {
+                let n = (48_000 - written).min(BLOCK_FRAMES);
+                for i in 0..n {
+                    outputs[0][i] = [tone(written + i); 2];
+                }
+                outputs[1][..n].fill([0.0, 0.0]);
+                written += n;
+                Ok(n)
+            },
+            &AtomicBool::new(false),
+            |_| {},
+        )
+        .unwrap();
+        let json: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(dest.join("manifest.json")).unwrap()).unwrap();
+        assert_eq!(json["format"]["container"], "mp3");
+        let mut energy = vec![];
+        for track in &manifest.tracks {
+            assert!(track.filename.ends_with(".mp3"), "{}", track.filename);
+            let bytes = std::fs::read(dest.join(&track.filename)).unwrap();
+            let decoded = crate::audio::decode::decode_audio(&bytes, Some("mp3")).unwrap();
+            assert_eq!(decoded.frames.len(), 48_000);
+            energy.push(
+                decoded
+                    .frames
+                    .iter()
+                    .map(|f| (f[0] * f[0]) as f64)
+                    .sum::<f64>()
+                    / 48_000.0,
+            );
+        }
+        // The tone is in the first stem only; the silent track decodes to silence.
+        assert!(energy[0] > 0.07 && energy[1] < 1e-8, "{energy:?}");
+    }
 }

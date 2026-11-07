@@ -15,7 +15,7 @@ it('exports mixed audio as AIFF and names the file .aiff',()=>{
   expect(within(format).getByRole('option',{name:'Mixed audio'})).toHaveValue('wav');expect(within(format).getByRole('option',{name:'Audio stems'})).toHaveValue('stems');
   fireEvent.change(format,{target:{value:'wav'}});
   const type=screen.getByRole('radiogroup',{name:'File type'});expect(within(type).getByRole('radio',{name:'WAV'})).toBeChecked();
-  expect(within(type).getAllByRole('radio').map(option=>option.textContent)).toEqual(['WAV','AIFF','FLAC (lossless)','OGG Vorbis (compressed)']);
+  expect(within(type).getAllByRole('radio').map(option=>option.textContent)).toEqual(['WAV','AIFF','FLAC (lossless)','OGG Vorbis (compressed)','MP3 (compressed)']);
   expect(screen.getByText(/^Saves as .*\.wav$/)).toBeInTheDocument();
   fireEvent.click(within(type).getByRole('radio',{name:'AIFF'}));
   expect(screen.getByText(/^Saves as .*\.aiff$/)).toBeInTheDocument();

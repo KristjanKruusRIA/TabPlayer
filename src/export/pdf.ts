@@ -4,7 +4,7 @@ import { validateSelection, type ExportSelection, type PrintLayout, type SvgPage
 import { selectStaves } from './selection';
 import { prepareScoreTimers } from '../editor/timers';
 import { configureEngraving,projectEngraving } from '../engraving/projection';
-import { pageGeometry,paginateEngravedSystems } from '../engraving/page';
+import { defaultMusicFont,musicFontCss,pageGeometry,paginateEngravedSystems,type MusicFont } from '../engraving/page';
 import type { EngravingOverrides,PageLayout } from '../engraving/types';
 import {pageTitleFontSize} from './page-title';
 import {headerFieldsOf} from '../engraving/header-footer';
@@ -22,7 +22,7 @@ function dimensions(layout:PrintLayout) {
   if(width-2*margin<100||height-2*margin-64<100)throw new Error('Reduce the page margins to leave usable notation width and height.');
   return {widthMm,heightMm,width,height,margin,usableWidth:width-2*margin,usableHeight:height-2*margin-64};
 }
-export function paginateSystems(systems:SvgSystem[],title:string,layout:PrintLayout):SvgPage[] {
+export function paginateSystems(systems:SvgSystem[],title:string,layout:PrintLayout,music:MusicFont=defaultMusicFont):SvgPage[] {
   const d=dimensions(layout),titleSize=pageTitleFontSize(title,d.usableWidth);const groups:SvgSystem[][]=[[]];let height=0;
   for(const system of systems) {
     if(!Number.isFinite(system.height)||system.height<=0||system.height>d.usableHeight||!Number.isFinite(system.width)||system.width>d.usableWidth+1)throw new Error('A notation system does not fit this page. Reduce print scale, use landscape, or export fewer staves.');
@@ -32,7 +32,7 @@ export function paginateSystems(systems:SvgSystem[],title:string,layout:PrintLay
   return groups.map((group,index)=>{
     let y=d.margin+40;
     const content=group.map(system=>{const at=y;y+=system.height;return `<g transform="translate(${d.margin} ${at})">${system.svg.replace(/<svg\b[^>]*>/,'').replace(/<\/svg>\s*$/,'')}</g>`;}).join('');
-    return {widthMm:d.widthMm,heightMm:d.heightMm,svg:`<svg xmlns="http://www.w3.org/2000/svg" width="${d.widthMm}mm" height="${d.heightMm}mm" viewBox="0 0 ${d.width} ${d.height}"><style>.at{font-family:Bravura;font-size:34px}text{fill:#111}</style><text x="${d.margin}" y="${d.margin+22}" font-family="Noto Sans, Noto Sans CJK JP, Noto Emoji" font-size="${titleSize}">${escaped(title)}</text>${content}<text x="${d.width/2}" y="${d.height-d.margin}" text-anchor="middle" font-family="Noto Sans, Noto Sans CJK JP, Noto Emoji" font-size="11">${index+1} / ${groups.length}</text></svg>`};
+    return {widthMm:d.widthMm,heightMm:d.heightMm,svg:`<svg xmlns="http://www.w3.org/2000/svg" width="${d.widthMm}mm" height="${d.heightMm}mm" viewBox="0 0 ${d.width} ${d.height}"><style>${musicFontCss(music.size,music.families)}text{fill:#111}</style><text x="${d.margin}" y="${d.margin+22}" font-family="Noto Sans, Noto Sans CJK JP, Noto Emoji" font-size="${titleSize}">${escaped(title)}</text>${content}<text x="${d.width/2}" y="${d.height-d.margin}" text-anchor="middle" font-family="Noto Sans, Noto Sans CJK JP, Noto Emoji" font-size="11">${index+1} / ${groups.length}</text></svg>`};
   });
 }
 /** Mirrors the native PNG limits so an oversized export is refused before the save dialog opens. */

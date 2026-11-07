@@ -1,3 +1,4 @@
+import { Settings } from '@coderline/alphatab';
 import type { PrintLayout,SvgPage,SvgSystem } from '../export/types';
 import type { PageLayout } from './types';
 import {measurePageText,pageTitleFontSize} from '../export/page-title';
@@ -97,8 +98,13 @@ export function screenPageBaselines(d:PageGeometry,titleScale:number):{headerY:n
   return {headerY:Math.max(18*titleScale*.8,d.top-8),footerY:Math.min(d.height-4,d.height-d.bottom+15)};
 }
 
+export type MusicFont={size:number;families:readonly string[]};
+/** Export draws music glyphs at the size alphaTab laid the score out with (36 px), not a fixed literal. */
+export const defaultMusicFont:MusicFont={size:new Settings().display.resources.engravingSettings.musicFontSize,families:['Bravura']};
+export function musicFontCss(size:number,families:readonly string[]):string {return `.at{font-family:${families.join(',')};font-size:${size}px}`;}
+
 /** `titleScale` enlarges the header line (base 18px) and still shrinks it to fit the page width; the footer keeps its size. */
-export function paginateEngravedSystems(systems:SvgSystem[],title:string,layout:PageLayout,fields?:HeaderFields,titleScale=1,gaps?:GapStacking):SvgPage[] {
+export function paginateEngravedSystems(systems:SvgSystem[],title:string,layout:PageLayout,fields?:HeaderFields,titleScale=1,gaps?:GapStacking,music:MusicFont=defaultMusicFont):SvgPage[] {
   const d=pageGeometry(layout),headerBase=18*titleScale,headerY=d.top+Math.min(31,Math.max(22,headerBase*.8)),footerY=d.height-d.bottom,groups:Array<Array<{system:SvgSystem;offset:number}>>=[[]];let height=0;
   const spans=gaps?systems.flatMap(s=>s.firstBar===undefined||s.lastBar===undefined?[]:[{first:s.firstBar,last:s.lastBar}]):[],offsets=systemGapOffsets(gaps,spans),scoreFirst=spans[0]?.first;
   for(const system of systems) {
@@ -115,6 +121,6 @@ export function paginateEngravedSystems(systems:SvgSystem[],title:string,layout:
     const content=group.map(({system,offset})=>{const at=y+offset;y=at+system.height;return `<g transform="translate(${d.left} ${at})">${system.svg.replace(/<svg\b[^>]*>/,'').replace(/<\/svg>\s*$/,'')}</g>`;}).join('');
     const bands=custom&&(index?custom.other:custom.first);
     const text=pageTextItems({geometry:d,bands:bands??null,title,fields:values,page:index+1,pages:groups.length,titleScale,headerY,footerY}),header=pageTextSvg(text.header),footer=pageTextSvg(text.footer);
-    return {widthMm:d.widthMm,heightMm:d.heightMm,svg:`<svg xmlns="http://www.w3.org/2000/svg" width="${d.widthMm}mm" height="${d.heightMm}mm" viewBox="0 0 ${d.width} ${d.height}"><style>.at{font-family:Bravura;font-size:34px}text{fill:#111}</style>${header}${content}${footer}</svg>`};
+    return {widthMm:d.widthMm,heightMm:d.heightMm,svg:`<svg xmlns="http://www.w3.org/2000/svg" width="${d.widthMm}mm" height="${d.heightMm}mm" viewBox="0 0 ${d.width} ${d.height}"><style>${musicFontCss(music.size,music.families)}text{fill:#111}</style>${header}${content}${footer}</svg>`};
   });
 }

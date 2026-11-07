@@ -4,7 +4,10 @@ import { buildDocument,previewEdit,replayDocumentSettings } from '../engine';
 import { blankProject } from '../project';
 import { mapEngravingBars,withBarWidths } from './bar-widths';
 import { defaultEngraving,validateEngraving } from './projection';
-import { defaultStyle,styleApplied,styleOf } from './style-library';
+import { makeMusicClip } from '../editor/clipboard-source';
+import { buildScore } from '../engine';
+import type { EditCommand } from '../project';
+import { defaultStyle,putStyleLibraryEntry,styleApplied,styleOf } from './style-library';
 import { mapSystemGaps,resetAllSystemGaps,resetSystemGap,resolveSystemGaps,setSystemGap,validateSystemGaps,withSystemGaps } from './system-gaps';
 import type { EngravingOverrides } from './types';
 
@@ -70,4 +73,42 @@ it('replays an old log without the field and a style neither carries nor clears 
   const applied=styleApplied(defaultStyle(),current);
   expect(applied.systemGaps).toEqual([{bar:4,scale:2}]);
   expect(Object.hasOwn(styleApplied(defaultStyle(),defaultEngraving()),'systemGaps')).toBe(false);
+});
+
+it('rejects a saved style that holds system gaps',async()=>{
+  const entry={id:crypto.randomUUID(),name:'Gappy',engraving:gaps([4,2])};
+  await expect(putStyleLibraryEntry(entry)).rejects.toThrow(/system gaps/);
+});
+
+it('returns the same object for no-op resets and sets, and rejects malformed systems',()=>{
+  const empty={...defaultEngraving(),systemGaps:[]};
+  expect(resetAllSystemGaps(empty)).toBe(empty);
+  const held=gaps([5,1.5]),system={first:4,last:7};
+  expect(setSystemGap(held,system,1.5)).toBe(held);
+  expect(setSystemGap(held,system,1.5+1e-10)).toBe(held);
+  expect(setSystemGap(held,system,2).systemGaps).toEqual([{bar:4,scale:2}]);
+  for(const bad of [{first:-1,last:2},{first:3,last:2},{first:1.5,last:2},{first:1,last:2.5},{first:Number.NaN,last:2}]) {
+    expect(()=>setSystemGap(held,bad,2)).toThrow();expect(()=>resetSystemGap(held,bad)).toThrow();
+  }
+  // Unsorted systems resolve the same as sorted ones.
+  expect([...resolveSystemGaps([{bar:2,scale:2},{bar:9,scale:3}],[systems[2],systems[0],systems[1]])].sort()).toEqual([[0,2],[8,3]]);
+});
+
+it('moves gaps with their bars through every engine remap site, built and replayed',()=>{
+  const built=previewEdit(blankProject(),{type:'setNote',target:{track:0,staff:0,bar:0,voice:0,beat:0},string:6,fret:5});
+  const bars=built.score.masterBars.length;
+  expect(bars).toBeGreaterThanOrEqual(4);
+  const set=gaps([0,.5],[1,2],[3,3]),styled=previewEdit(built.project,{type:'setEngraving',engraving:set},built);
+  const check=(edit:EditCommand,expected:Array<{bar:number;scale:number}>)=>{
+    const next=previewEdit(styled.project,edit,styled);
+    expect(next.settings.engraving.systemGaps).toEqual(expected);
+    expect(buildDocument(JSON.parse(JSON.stringify(next.project))).settings.engraving.systemGaps).toEqual(expected);
+    expect(replayDocumentSettings(next.project,styled).settings.engraving.systemGaps).toEqual(expected);
+  };
+  check({type:'removeMeasure',bar:1},[{bar:0,scale:.5},{bar:2,scale:3}]);
+  check({type:'removeMeasure',bar:0},[{bar:0,scale:2},{bar:2,scale:3}]);
+  check({type:'insertMeasures',beforeBar:1,count:2},[{bar:0,scale:.5},{bar:3,scale:2},{bar:5,scale:3}]);
+  check({type:'removeMeasures',firstBar:0,lastBar:1},[{bar:1,scale:3}]);
+  const clip=makeMusicClip(buildScore(blankProject()),{kind:'bars',tracks:[0],firstBar:0,lastBar:0},'singleTrack');
+  check({type:'pasteMusic',clip,options:{target:{track:0,staff:0,bar:1,voice:0,beat:0},destinations:[{sourceTrack:0,track:0,staffMap:[0]}],count:2,placement:'beforeBar',filters:{diagrams:true,texts:true,timers:true,trackAutomations:true,masterAutomations:false,sections:false}}},[{bar:0,scale:.5},{bar:3,scale:2},{bar:5,scale:3}]);
 });

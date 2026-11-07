@@ -1542,6 +1542,8 @@ pub struct TrackDsp {
     /// out over the ramp; a removed board fades out and then stands still until the next configuration leaves it.
     second: Option<Box<TrackDsp>>,
     second_gain: f32,
+    /// Samples the board had to replace because its state produced a non-finite value.
+    non_finite: u32,
     max_delay_seconds: f64,
 }
 impl TrackDsp {
@@ -1584,6 +1586,7 @@ impl TrackDsp {
         Ok(Self {
             second,
             second_gain,
+            non_finite: 0,
             max_delay_seconds,
             previous: settings.clone(),
             settings,
@@ -3027,6 +3030,9 @@ impl TrackDsp {
             x = x.map(|v| v * gain);
         }
         self.ramp_left = self.ramp_left.saturating_sub(1);
+        if !(x[0].is_finite() && x[1].is_finite()) {
+            self.non_finite = self.non_finite.saturating_add(1);
+        }
         x.map(|v| {
             if v.is_finite() {
                 v.clamp(-64.0, 64.0)
@@ -3034,6 +3040,15 @@ impl TrackDsp {
                 0.0
             }
         })
+    }
+    /// Whether the board's output had to be replaced by silence since the last call because its
+    /// state held a non-finite value (which feedback keeps producing until `reset`).
+    pub fn take_non_finite(&mut self) -> bool {
+        let second = self
+            .second
+            .as_mut()
+            .is_some_and(|second| second.take_non_finite());
+        second | (std::mem::take(&mut self.non_finite) > 0)
     }
     pub fn reset(&mut self) {
         self.gate_envelope = 1.0;

@@ -7,6 +7,7 @@ pub mod device;
 mod drum_kit_tests;
 pub mod dsp;
 pub mod ir_convolver;
+pub mod line_in;
 pub mod master;
 pub mod plan;
 pub mod playback;

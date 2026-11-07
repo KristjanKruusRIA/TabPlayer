@@ -42,6 +42,7 @@ fn gcd(mut a: u64, mut b: u64) -> u64 {
 
 struct Table {
     taps: usize,
+    #[cfg_attr(not(test), allow(dead_code))]
     phases: usize,
     interp: bool,
     /// `phases * taps` weights; each phase sums to one.
@@ -141,6 +142,7 @@ impl Resampler {
         Resampler::with_table(self.table.clone(), self.step, self.den, self.delay_in)
     }
 
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(super) fn phases(&self) -> usize {
         self.table.phases
     }

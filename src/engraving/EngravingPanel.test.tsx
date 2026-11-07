@@ -125,3 +125,12 @@ it('apply and reset keep staff groups and gaps',()=>{
   expect(commands).toHaveLength(2);
   for(const command of commands){expect(command.engraving.staffGroups).toEqual(value.staffGroups);expect(command.engraving.staffGaps).toEqual(value.staffGaps);}
 });
+
+it('apply sends the latest staff groups when only they changed',()=>{
+  const commands:Edit[]=[],first=defaultEngraving();first.staffGroups=[{trackIds:['source/guitar','b'],kind:'brace'}];
+  const props={score:music(),trackIds:['source/guitar'],busy:false,onEdit:(edit:Edit)=>commands.push(edit)},view=render(<EngravingPanel {...props} value={first}/>);
+  const next=defaultEngraving();next.staffGroups=[{trackIds:['source/guitar','c'],kind:'bracket'}];next.staffGaps=[{trackId:'source/guitar',scale:3}];
+  view.rerender(<EngravingPanel {...props} value={next}/>);
+  fireEvent.click(screen.getByRole('button',{name:'Apply engraving'}));
+  expect(commands).toHaveLength(1);expect(commands[0].engraving.staffGroups).toEqual(next.staffGroups);expect(commands[0].engraving.staffGaps).toEqual(next.staffGaps);
+});

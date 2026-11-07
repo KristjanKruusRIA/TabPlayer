@@ -83,6 +83,7 @@ export function drawnGroups(groups:readonly StaffGroup[]|undefined,trackIds:read
 
 export type GroupingProblem='tooFew'|'notContiguous'|'alreadyGrouped'|'tooMany';
 /** Why `members` cannot become a new group, or null when they can. */
+// A chosen id that names no current track counts as missing, so it reports 'tooFew'; the UI only ever passes current tracks.
 export function groupingProblem(engraving:EngravingOverrides,trackIds:readonly string[],members:readonly string[]):GroupingProblem|null {
   const distinct=[...new Set(members)],live=distinct.map(id=>trackIds.indexOf(id)).filter(index=>index>=0).sort((a,b)=>a-b);
   if(live.length<2||live.length!==distinct.length)return 'tooFew';

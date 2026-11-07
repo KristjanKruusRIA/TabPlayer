@@ -99,3 +99,7 @@ it('engravingRenderKey ignores staff gaps but not staff groups',()=>{
   expect(engravingRenderKey(withStaffGaps(e,[{trackId:'a',scale:2}]))).toBe(engravingRenderKey(e));
   expect(engravingRenderKey(withStaffGroups(e,[{trackIds:['a','b'],kind:'brace'}]))).not.toBe(engravingRenderKey(e));
 });
+it('a copy gets no gap entry when 256 gaps exist',()=>{
+  const full=withStaffGaps(defaultEngraving(),Array.from({length:256},(_,i)=>({trackId:`t${i}`,scale:2})));
+  expect(copyTrackStaffLayout(full,'t5','copy')).toBe(full);
+});

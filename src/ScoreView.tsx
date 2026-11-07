@@ -84,7 +84,7 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
   /** The rendered systems' bar intervals after each completed render in a physical page layout; null in other layouts or while no completed render exists. Not repeated for an equal value. */
   onSystems?:(systems:SystemSpan[]|null)=>void;
 }) {
-  // System gaps only move the stacked blocks, so editing them must not render the notation again (as with headers): the render path sees an engraving without them.
+  // System gaps and staff gaps only move the stacked blocks, so editing them must not render the notation again (as with headers): the render path sees an engraving without them.
   const renderKey=engravingRenderKey(engravingProp),gapKey=JSON.stringify(engravingProp?.systemGaps??null);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const engraving=useMemo(()=>engravingProp&&withoutStackingOffsets(engravingProp),[renderKey]);

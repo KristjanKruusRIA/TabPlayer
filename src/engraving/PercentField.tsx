@@ -15,7 +15,8 @@ export function PercentField({label,value,range,onCommit,onInvalid,busy=false}:P
   useEffect(()=>setText(percent(value)),[value]);
   const low=Math.round(range.min*100),high=Math.round(range.max*100);
   const commit=()=>{
-    if(busy)return;
+    // A commit refused for busy puts back what the draft holds, so the field never shows a value the draft lacks.
+    if(busy){setText(percent(value));return;}
     const trimmed=text.trim();
     if(trimmed===''){if(value!==null)onCommit(null);setText('');return;}
     const entered=Number(trimmed);

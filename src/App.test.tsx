@@ -417,6 +417,8 @@ it('applies font roles as one edit, shows the font status from the score view, a
   click('Undo');await waitFor(()=>expect(c.getState().settings.engraving.fonts).toBeUndefined());
   await waitFor(()=>expect(screen.getByLabelText('Lyrics font')).toHaveValue('inherit'));expect(screen.getByLabelText('Music font')).toHaveValue('bravura');
   click('Redo');await waitFor(()=>expect(screen.getByLabelText('Lyrics font')).toHaveValue('notoSerif'));expect(screen.getByLabelText('Music font')).toHaveValue('leland');
+  // Applying the form again with nothing changed records nothing.
+  const edits=c.getState().snapshot.project.edits.length;click('Apply engraving');await new Promise(resolve=>setTimeout(resolve,20));expect(c.getState().snapshot.project.edits).toHaveLength(edits);
 });
 
 it('keeps copied music and paste drafts across unrelated renders and New, with one repeated paste command',async()=>{

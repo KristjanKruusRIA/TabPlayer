@@ -47,14 +47,16 @@ it('invalid_spacing_does_not_dispatch_and_profiles_offer_only_applicable_choices
   const commands:Edit[]=[];render(<EngravingPanel score={score} trackIds={['g','p','d']} value={defaultEngraving()} busy={false} onEdit={edit=>commands.push(edit)}/>);
   expect(within(screen.getByLabelText('Piano notation profile')).getByRole('option',{name:'Tablature'})).toBeDisabled();expect(within(screen.getByLabelText('Drums notation profile')).getByRole('option',{name:'Numbered'})).toBeDisabled();expect(within(screen.getByLabelText('Piano notation profile')).getByRole('option',{name:'Standard + tablature'})).toBeEnabled();
   fireEvent.change(screen.getByLabelText('System spacing (%)'),{target:{value:'24.9'}});fireEvent.click(screen.getByRole('button',{name:'Apply engraving'}));expect(commands).toEqual([]);expect(screen.getByRole('alert')).toHaveTextContent('25%');
-  fireEvent.change(screen.getByLabelText('System spacing (%)'),{target:{value:''}});fireEvent.click(screen.getByRole('button',{name:'Apply engraving'}));expect(commands).toEqual([{type:'setEngraving',engraving:sourceDefaults}]);
+  fireEvent.change(screen.getByLabelText('System spacing (%)'),{target:{value:''}});fireEvent.click(screen.getByRole('button',{name:'Apply engraving'}));expect(commands).toEqual([]);
 });
 
 it('apply_and_reset_surface_controller_errors',()=>{
-  const props={score:music(),trackIds:['g'],value:defaultEngraving(),busy:false,onEdit:()=>{throw new Error('Native document changed; retry.');}};
+  const value=defaultEngraving();value.stylesheet.hideDynamics=true;
+  const props={score:music(),trackIds:['g'],value,busy:false,onEdit:()=>{throw new Error('Native document changed; retry.');}};
   render(<EngravingPanel {...props}/>);
+  fireEvent.change(screen.getByLabelText('Hide dynamics'),{target:{value:'false'}});
   fireEvent.click(screen.getByRole('button',{name:'Apply engraving'}));expect(screen.getByRole('alert')).toHaveTextContent('Native document changed; retry.');
-  fireEvent.change(screen.getByLabelText('Hide dynamics'),{target:{value:'false'}});expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText('Hide dynamics'),{target:{value:'inherit'}});expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('button',{name:'Reset to source/default'}));expect(screen.getByRole('alert')).toHaveTextContent('Native document changed; retry.');
 });
 
@@ -93,7 +95,8 @@ it('out_of_range_typography_is_reported_and_leaves_the_draft_unchanged',()=>{
   const text=screen.getByLabelText('Text size (%)'),tab=screen.getByLabelText('Tab number size (%)');
   fireEvent.change(text,{target:{value:'250'}});fireEvent.blur(text);expect(screen.getByRole('alert')).toHaveTextContent('Text size must be between 50% and 200%.');expect(text).toHaveValue(null);
   fireEvent.change(tab,{target:{value:'70'}});fireEvent.blur(tab);expect(screen.getByRole('alert')).toHaveTextContent('Tab number size must be between 75% and 150%.');
-  fireEvent.click(screen.getByRole('button',{name:'Apply engraving'}));expect(commands).toEqual([{type:'setEngraving',engraving:sourceDefaults}]);
+  // The draft is still the document's own, so Apply changes nothing and records nothing.
+  fireEvent.click(screen.getByRole('button',{name:'Apply engraving'}));expect(commands).toEqual([]);
 });
 
 it('default_typography_is_never_sent_and_an_applied_one_fills_the_form',()=>{
@@ -128,7 +131,7 @@ it('typography_and_presets_refuse_changes_while_busy_without_losing_focus',()=>{
   fireEvent.click(screen.getByRole('button',{name:'Load Classic preset'}));expect(screen.getByLabelText('Tab rhythm')).toHaveValue('inherit');
   fireEvent.change(screen.getByRole('combobox',{name:'Lyrics font'}),{target:{value:'notoSerif'}});expect(screen.getByRole('combobox',{name:'Lyrics font'})).toHaveValue('inherit');
   view.rerender(<EngravingPanel {...props}/>);fireEvent.click(screen.getByRole('button',{name:'Apply engraving'}));
-  expect(commands).toEqual([{type:'setEngraving',engraving:sourceDefaults}]);
+  expect(commands).toEqual([]);
 });
 
 it('typography_labels_unchanged_in_english',()=>{
@@ -162,8 +165,10 @@ it('apply_unchanged_fonts_records_nothing',()=>{
   fireEvent.change(screen.getByRole('combobox',{name:'Lyrics font'}),{target:{value:'notoSerif'}});fireEvent.change(screen.getByRole('combobox',{name:'Lyrics font'}),{target:{value:'inherit'}});
   fireEvent.change(screen.getByRole('combobox',{name:'Music font'}),{target:{value:'leland'}});fireEvent.change(screen.getByRole('combobox',{name:'Music font'}),{target:{value:'bravura'}});
   fireEvent.click(screen.getByRole('button',{name:'Apply engraving'}));
-  expect(commands).toEqual([{type:'setEngraving',engraving:sourceDefaults}]);expect('fonts' in commands[0].engraving).toBe(false);
-  expect(commands[0].engraving).toEqual(defaultEngraving());
+  expect(commands).toEqual([]);
+  // Applying a real change afterwards still goes out, and still without an empty fonts key.
+  fireEvent.change(screen.getByLabelText('Hide dynamics'),{target:{value:'true'}});fireEvent.click(screen.getByRole('button',{name:'Apply engraving'}));
+  expect(commands).toHaveLength(1);expect('fonts' in commands[0].engraving).toBe(false);
 });
 
 it('applied_fonts_fill_the_form_and_reset_the_draft_after_undo_or_redo',()=>{
@@ -178,7 +183,7 @@ it('applied_fonts_fill_the_form_and_reset_the_draft_after_undo_or_redo',()=>{
   view.rerender(<EngravingPanel {...props} value={defaultEngraving()}/>);
   expect(screen.getByRole('combobox',{name:'Lyrics font'})).toHaveValue('inherit');
   fireEvent.click(screen.getByRole('button',{name:'Apply engraving'}));
-  expect(commands).toEqual([{type:'setEngraving',engraving:sourceDefaults}]);
+  expect(commands).toEqual([]);
 });
 
 it('fonts_count_as_unapplied_changes_for_saved_styles',()=>{
@@ -224,4 +229,15 @@ it('role_size_errors_use_the_panel_alert',()=>{
   render(<EngravingPanel score={music()} trackIds={['source/guitar']} value={defaultEngraving()} busy={false} onEdit={()=>undefined}/>);
   const size=screen.getByLabelText('Lyrics size (%)');fireEvent.change(size,{target:{value:'300'}});fireEvent.blur(size);
   expect(screen.getByRole('alert')).toHaveTextContent('Lyrics size must be between 50% and 200%.');
+});
+
+it('reset_and_apply_that_change_nothing_record_nothing_but_still_refill_the_form',()=>{
+  const commands:Edit[]=[];
+  render(<EngravingPanel score={music()} trackIds={['source/guitar']} value={defaultEngraving()} busy={false} onEdit={edit=>commands.push(edit)}/>);
+  fireEvent.click(screen.getByRole('button',{name:'Reset to source/default'}));expect(commands).toEqual([]);
+  // An unsent draft is dropped by Reset even when the document is already at the defaults.
+  fireEvent.change(screen.getByLabelText('Hide dynamics'),{target:{value:'true'}});fireEvent.change(screen.getByRole('combobox',{name:'Lyrics font'}),{target:{value:'notoSerif'}});
+  fireEvent.click(screen.getByRole('button',{name:'Reset to source/default'}));
+  expect(commands).toEqual([]);expect(screen.getByLabelText('Hide dynamics')).toHaveValue('inherit');expect(screen.getByRole('combobox',{name:'Lyrics font'})).toHaveValue('inherit');
+  fireEvent.click(screen.getByRole('button',{name:'Apply engraving'}));expect(commands).toEqual([]);
 });

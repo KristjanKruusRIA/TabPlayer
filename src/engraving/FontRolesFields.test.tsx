@@ -69,7 +69,11 @@ it('switching_to_a_font_without_the_face_drops_italic',()=>{
   const {changes}=setup({value:{roles:{lyrics:{font:'notoSerif',italic:true,bold:true}}}});
   fireEvent.change(select('Lyrics font'),{target:{value:'notoSansMono'}});
   expect(changes.at(-1)).toEqual({roles:{lyrics:{font:'notoSansMono',bold:true}}});
-  // Off is still a legal choice for a font without an italic face.
+  // An explicit Off means nothing for a font that has no italic at all, so it goes too.
+  const off=setup({value:{roles:{staffText:{font:'notoSerif',italic:false}}}});
+  fireEvent.change(screen.getAllByRole('combobox',{name:'Staff text font'}).at(-1)!,{target:{value:'notoSansMono'}});
+  expect(off.changes.at(-1)).toEqual({roles:{staffText:{font:'notoSansMono'}}});
+  expect('italic' in off.changes.at(-1)!.roles!.staffText!).toBe(false);
 });
 
 it('bold_italic_unavailable_until_font_chosen',()=>{
@@ -161,4 +165,30 @@ it('out_of_range_role_sizes_are_reported_by_role',()=>{
   fireEvent.change(lyrics,{target:{value:'250'}});fireEvent.blur(lyrics);
   fireEvent.change(tab,{target:{value:'70'}});fireEvent.blur(tab);
   expect(invalid).toEqual(['Lyrics size must be between 50% and 200%.','Tab numbers size must be between 75% and 150%.']);expect(changes).toEqual([]);
+});
+
+it('a_refused_busy_commit_puts_the_field_back_to_the_draft_value',()=>{
+  const {changes,rerender}=setup({value:{roles:{lyrics:{size:1.25}}}});
+  const size=screen.getByLabelText('Lyrics size (%)');expect(size).toHaveValue(125);
+  // Typed before the form became busy, committed after: the refused commit must not leave a number the draft does not hold.
+  fireEvent.change(size,{target:{value:'150'}});expect(size).toHaveValue(150);
+  rerender({busy:true});
+  fireEvent.blur(size);
+  expect(changes).toEqual([]);expect(size).toHaveValue(125);
+  rerender({busy:false});expect(size).toHaveValue(125);
+});
+
+it('missing_glyph_warning_sits_in_its_role_group_and_describes_the_font_select',()=>{
+  setup({value:{roles:{lyrics:{font:'notoSerif'},markers:{font:'notoSans'}}},texts:{lyrics:['la','中'],markers:['A']}});
+  const warning=screen.getByText(/has no glyph for/),group=screen.getByRole('group',{name:'Lyrics'});
+  expect(warning).toHaveAttribute('role','status');expect(warning.closest('fieldset')).toBe(group);expect(warning.id).toBeTruthy();
+  expect(select('Lyrics font').getAttribute('aria-describedby')).toContain(warning.id);
+  // A role without a warning keeps no description from it.
+  expect(select('Markers font').getAttribute('aria-describedby')??'').not.toContain(warning.id);
+});
+
+it('the_load_failure_and_substitution_notes_are_status_messages',()=>{
+  setup({value:{music:'petaluma'},status:{failed:['Petaluma.otf'],substituted:['a']}});
+  expect(screen.getByText(/A font could not be loaded/)).toHaveAttribute('role','status');
+  expect(screen.getByText(/1 music symbol is not in Petaluma/)).toHaveAttribute('role','status');
 });

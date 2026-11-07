@@ -42,6 +42,8 @@ function changed(entry:RoleFont|undefined,change:Partial<Record<keyof RoleFont,R
   const next=merged as RoleFont;
   if(next.font===undefined){delete next.bold;delete next.italic;}
   else if(next.italic===true&&!hasFace(next.font,next.bold===true,true))delete next.italic;
+  // A font with no italic face at all (Noto Sans Mono) takes no italic choice, not even an explicit Off.
+  if(next.font!==undefined&&Object.hasOwn(change,'font')&&!textFonts[next.font].faces.some(face=>face.italic))delete next.italic;
   return Object.keys(next).length?next:undefined;
 }
 
@@ -67,17 +69,17 @@ export function FontRolesFields({value,onChange,busy,texts,status,onInvalid}:Fon
     emit({music:value?.music,roles:next});
   };
   const label=(role:FontRole)=>t(roleKey(role));
-  const warnings=missingGlyphs(value,texts),substituted=music!=='bravura'?status?.substituted.length??0:0,failed=status?.failed??[];
+  const warnings=new Map(missingGlyphs(value,texts).map(({role,chars})=>[role,chars])),substituted=music!=='bravura'?status?.substituted.length??0:0,failed=status?.failed??[];
   return <>
     <label>{t('font_roles.music')}<select {...guard} value={music} onChange={(event:ChangeEvent<HTMLSelectElement>)=>{if(!busy)emit({music:event.target.value as MusicFontId,roles:value?.roles});}}>
       {musicFontIds.map(id=><option key={id} value={id}>{musicFonts[id].family}</option>)}
     </select></label>
     <p className="muted">{t('font_roles.music_note')}</p>
-    {substituted>0&&<p className="muted">{t(substituted===1?'font_roles.substituted_one':'font_roles.substituted_other',{count:substituted,font:musicFonts[music].family})}</p>}
+    {substituted>0&&<p className="muted" role="status">{t(substituted===1?'font_roles.substituted_one':'font_roles.substituted_other',{count:substituted,font:musicFonts[music].family})}</p>}
     <p>{t('font_roles.roles_heading')}</p>
     <p className="muted">{t('font_roles.roles_note')}</p>
     {FONT_ROLES.map(role=>{
-      const entry=roles[role],font=entry?.font,reason=`${notes}-${role}`;
+      const entry=roles[role],font=entry?.font,reason=`${notes}-${role}`,glyphs=`${notes}-${role}-glyphs`,missing=warnings.get(role);
       const noFont=font===undefined,noItalic=font!==undefined&&!hasFace(font,entry?.bold===true,true);
       // Bold and italic stay in the tab order (no `disabled`) and say why they do nothing.
       const unavailable=(blocked:boolean)=>blocked?{
@@ -88,7 +90,7 @@ export function FontRolesFields({value,onChange,busy,texts,status,onInvalid}:Fon
       const reasonText=noFont?t('font_roles.needs_font',{role:label(role)}):noItalic?t('font_roles.no_italic',{font:textFonts[font].label,role:label(role)}):null;
       return <fieldset key={role}>
         <legend>{label(role)}</legend>
-        <label>{t('font_roles.font',{role:label(role)})}<select {...guard} value={font??'inherit'} onChange={event=>setRole(role,{font:event.target.value==='inherit'?null:event.target.value as TextFontId})}>
+        <label>{t('font_roles.font',{role:label(role)})}<select {...guard} aria-describedby={missing?glyphs:undefined} value={font??'inherit'} onChange={event=>setRole(role,{font:event.target.value==='inherit'?null:event.target.value as TextFontId})}>
           <option value="inherit">{t('typography.source_default')}</option>{textFontIds.map(id=><option key={id} value={id}>{textFonts[id].label}</option>)}
         </select></label>
         <PercentField label={t('font_roles.size',{role:label(role)})} value={entry?.size??null} range={sizeRange(role)} busy={busy} onInvalid={onInvalid??(()=>undefined)} onCommit={size=>setRole(role,{size})}/>
@@ -99,9 +101,9 @@ export function FontRolesFields({value,onChange,busy,texts,status,onInvalid}:Fon
           <option value="inherit">{t('typography.source_default')}</option><option value="on">{t('font_roles.on')}</option><option value="off">{t('font_roles.off')}</option>
         </select></label>
         {reasonText&&<p id={reason} className="muted">{reasonText}</p>}
+        {missing&&font!==undefined&&<p id={glyphs} className="muted" role="status">{t('font_roles.missing_glyph',{font:textFonts[font].label,chars:missing.join(' '),role:label(role)})}</p>}
       </fieldset>;
     })}
-    {warnings.map(({role,chars})=><p key={role} className="muted">{t('font_roles.missing_glyph',{font:textFonts[roles[role]!.font!].label,chars:chars.join(' '),role:label(role)})}</p>)}
-    {failed.length>0&&<p className="muted">{t('font_roles.load_failed',{files:failed.map(fileLabel).join(', ')})}</p>}
+    {failed.length>0&&<p className="muted" role="status">{t('font_roles.load_failed',{files:failed.map(fileLabel).join(', ')})}</p>}
   </>;
 }

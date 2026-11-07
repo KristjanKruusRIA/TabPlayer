@@ -87,6 +87,7 @@ import { EngravingPanel } from './engraving/EngravingPanel';
 import { PageLayoutPanel } from './engraving/PageLayoutPanel';
 import { BarWidthsPanel } from './engraving/BarWidthsPanel';
 import { SystemGapsPanel } from './engraving/SystemGapsPanel';
+import { selectedGapBar } from './engraving/selected-gap-bar';
 import type { SystemSpan } from './engraving/system-gaps';
 import { barScaleOf,sourceWeight,withBarScale } from './engraving/bar-widths';
 import { TrackDisplayControls } from './engraving/TrackDisplayControls';
@@ -232,7 +233,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   },[harmonyOpen]);
   const digits=useRef({text:'',time:0});
   const target=repairSelection(state.score,selection);
-  const gapBar=musicSelection?(musicSelection.kind==='range'?musicSelection.range.start.bar:musicSelection.kind==='bars'?musicSelection.firstBar:musicSelection.notes.length?Math.min(...musicSelection.notes.map(note=>note.target.bar)):target.bar):target.bar;
+  const gapBar=selectedGapBar(musicSelection,target.bar);
   const tunerStaff=state.score.tracks[target.track]?.staves[target.staff],tunerTuning=useMemo(()=>tunerStaff&&!tunerStaff.isPercussion?[...tunerStaff.tuning]:[],[tunerStaff]);
   useEffect(()=>{onViewChange({target,selectedString,selectedNoteIndex,zoom,trackView,instrumentVisible,...(scoreDisplay?{scoreDisplay}:{})});},[target.track,target.staff,target.bar,target.voice,target.beat,selectedString,selectedNoteIndex,zoom,trackView,instrumentVisible,scoreDisplay,onViewChange]);
   const trackIds=useMemo(()=>state.score.tracks.map(trackIdentity),[state.score]);

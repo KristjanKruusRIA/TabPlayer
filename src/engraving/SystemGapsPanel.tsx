@@ -1,4 +1,4 @@
-import { useEffect,useState } from 'react';
+import { useEffect,useId,useRef,useState } from 'react';
 import type { EngravingCommand,EngravingOverrides } from './types';
 import { resetAllSystemGaps,resetSystemGap,resolveSystemGaps,setSystemGap,SYSTEM_GAP_RANGE,type SystemSpan } from './system-gaps';
 import { busyGuard } from '../ui';
@@ -32,16 +32,20 @@ export function SystemGapsPanel({value,systems,pageLayout,bar,busy,onEdit}:Syste
   const available=reason===null;
   const shown=percent(resolved);
   const [draft,setDraft]=useState(shown),[invalid,setInvalid]=useState(false);
-  // Follow the document (undo, redo, selecting another system).
-  useEffect(()=>{setDraft(shown);setInvalid(false);},[shown,system?.first]);
+  // The system the typed text belongs to; null while the field is untouched. Only edited text is ever committed.
+  const edited=useRef<number|null>(null);
+  const ids=useId(),statusId=ids+'-status',alertId=ids+'-alert';
+  // Follow the document (undo, redo, selecting another system): typed text that has not been committed is dropped.
+  useEffect(()=>{setDraft(shown);setInvalid(false);edited.current=null;},[shown,system?.first]);
   const min=SYSTEM_GAP_RANGE.min*100,max=SYSTEM_GAP_RANGE.max*100;
+  /** true: handled (committed or nothing to do); false: the text is invalid. */
   const commit=(text:string):boolean=>{
-    if(!system||!available||busy)return false;
+    if(!system||!available||busy||edited.current!==system.first)return true;
     const number=Number(text);
     if(text.trim()===''||!Number.isFinite(number)||number<min||number>max){setInvalid(true);return false;}
-    setInvalid(false);
-    // "No change" is judged on the resolved gap, not on the stored entries.
-    if(Math.abs(number/100-resolved)<=1e-9)return true;
+    edited.current=null;setInvalid(false);
+    // "No change" is judged on the resolved gap (and on the value as shown), not on the stored entries.
+    if(text.trim()===shown||Math.abs(number/100-resolved)<=1e-9)return true;
     const engraving=setSystemGap(value,system,number/100);
     if(engraving!==value)onEdit({type:'setEngraving',engraving});
     return true;
@@ -49,12 +53,12 @@ export function SystemGapsPanel({value,systems,pageLayout,bar,busy,onEdit}:Syste
   const message=t('system_gaps.invalid',{min,max});
   return <details><summary>{t('system_gaps.title')}</summary>
     <p className="muted">{t('system_gaps.help')}</p>
-    <p role="status" className="muted">{reason?t(reason as 'system_gaps.status_layout'):t('system_gaps.selected',{first:system!.first+1,last:system!.last+1})}</p>
-    <label>{t('system_gaps.field')}<input type="number" min={min} max={max} step="any" value={draft} disabled={!available&&!busy} readOnly={busy} aria-disabled={busy||!available?'true':undefined} aria-invalid={invalid||undefined}
-      onChange={event=>{if(busy)return;setDraft(event.target.value);setInvalid(false);event.target.setCustomValidity('');}}
-      onKeyDown={event=>{if(event.key==='Enter'){event.preventDefault();if(!commit(event.currentTarget.value)){event.currentTarget.setCustomValidity(message);event.currentTarget.reportValidity();event.currentTarget.setCustomValidity('');}}}}
-      onBlur={event=>{if(!commit(event.currentTarget.value)){event.currentTarget.setCustomValidity('');setDraft(shown);setInvalid(false);}}}/></label>
-    {invalid&&<p role="alert" className="muted">{message}</p>}
+    <p id={statusId} role="status" className="muted">{reason?t(reason as 'system_gaps.status_layout'):t('system_gaps.selected',{first:system!.first+1,last:system!.last+1})}</p>
+    <label>{t('system_gaps.field')}<input type="number" min={min} max={max} step="any" value={draft} readOnly={busy||!available} aria-disabled={busy||!available?'true':undefined} aria-invalid={invalid||undefined} aria-describedby={invalid?statusId+' '+alertId:statusId}
+      onChange={event=>{if(busy||!available||!system)return;edited.current=system.first;setDraft(event.target.value);setInvalid(false);}}
+      onKeyDown={event=>{if(event.key==='Enter'){event.preventDefault();commit(event.currentTarget.value);}}}
+      onBlur={event=>{if(!commit(event.currentTarget.value)){edited.current=null;setDraft(shown);setInvalid(false);}}}/></label>
+    {invalid&&<p id={alertId} role="alert" className="muted">{message}</p>}
     <button type="button" {...busyGuard({busy,unavailable:!hasSelected,onClick:()=>{if(!system)return;const engraving=resetSystemGap(value,system);if(engraving!==value)onEdit({type:'setEngraving',engraving});}})}>{t('system_gaps.reset_selected')}</button>
     <button type="button" {...busyGuard({busy,unavailable:!entries.length,onClick:()=>{const engraving=resetAllSystemGaps(value);if(engraving!==value)onEdit({type:'setEngraving',engraving});}})}>{t('system_gaps.reset_all')}</button>
   </details>;

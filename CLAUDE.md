@@ -33,7 +33,7 @@ node tests/desktop/parity-<name>.mjs   # from the checkout root, after the deskt
 
 Keep Cargo output in each checkout's default `src-tauri/target`; `scripts/build-desktop-test.ps1` and the `tests/desktop` drivers read it from there. A clean test build is about 7 GB and a used target folder reaches 30 GB or more, so never point `CARGO_TARGET_DIR` at a scratchpad, and never give a task or subagent its own target folder. If the default is busy or stale, run `cargo clean` there or use `E:/cargo-target/slot-1` to `slot-3`, but only for `cargo test` and the like: the desktop script and drivers read just the default folder, so with a slot they silently test an old binary. A global hook enforces the folder rules.
 
-CI runs on Windows, macOS and Linux with exact Rust 1.88.0 and Node 24.20.0, and also runs the ignored `selected_real_100bar_fourtrack_resource_budget` test in `audio_resources`. Pass `--locked` after the final `--` in Tauri builds.
+CI runs on Windows, macOS and Linux with exact Rust 1.90.0 and Node 24.20.0, and also runs the ignored `selected_real_100bar_fourtrack_resource_budget` test in `audio_resources`. Pass `--locked` after the final `--` in Tauri builds.
 
 ## Desktop verification
 

@@ -25,7 +25,8 @@ So TabPlayer draws group marks itself and moves staves itself. Nothing in alphaT
   - at most 64 groups; each group names 2 to 64 track ids;
   - an id is nonempty and at most 65,536 UTF-8 bytes (identities embed one edit's JSON; the cap bounds memory, not names);
   - an id appears in at most one group (groups are flat and never overlap), and once per group;
-  - at most 256 staff gaps; ids distinct; `scale` finite, 0.25 to 4 (shown as 25 to 400%).
+  - at most 256 staff gaps; a gap id follows the group-id rule (nonempty, at most 65,536 UTF-8 bytes); ids distinct; `scale` finite, 0.25 to 4 (shown as 25 to 400%).
+  - "Nonempty" means a length above zero in both languages (no trimming), and TypeScript counts bytes with `TextEncoder`, so TypeScript and Rust agree on every id.
 - Rust checks only shape and caps, as for `profiles`. It cannot know which tracks are live or in which order.
 - Track liveness is never validated for groups or gaps, at edit time or on replay. A stored id that no longer names a track is dormant. This keeps any later `setEngraving` (which re-sends the whole object) valid after a track removal.
 - Saved styles reject both fields, as they reject profiles, bar widths and system gaps, in `style-library.ts` and `style_library.rs`. `styleOf` strips them and `styleApplied` keeps the document's own. No style-library version bump.
@@ -103,7 +104,7 @@ So TabPlayer draws group marks itself and moves staves itself. Nothing in alphaT
 - Staff gaps:
   - a track choice ("Space below"), a percentage field 25 to 400 that commits on Enter or blur, "Reset" and "Reset all staff gaps";
   - entering the current resolved value records nothing; resets are unavailable when nothing is stored for that track, or at all;
-  - the status line says when the chosen track is the last one, and when the current layout does not show staff gaps.
+  - the status line says when the chosen track is the last of the rendered tracks (so it has no boundary below it in this view), and when the current layout does not show staff gaps.
 - Names: the "Long names first, short after" button.
 - Each action is one `setEngraving`. The helpers return the same object when nothing changes, and the panel sends nothing in that case, as `SystemGapsPanel` does.
 

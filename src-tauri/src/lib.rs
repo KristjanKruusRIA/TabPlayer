@@ -1082,6 +1082,10 @@ pub fn run() {
                     .map(|directory| directory.join("cabinet-irs"));
                 audio::cabinet_ir::install(directory, bundled);
             }
+            // Captures resolve from here too; a folder that cannot be placed is tried again at the first command.
+            if let Ok(directory) = audio::nam_library::library_directory(app.handle()) {
+                audio::nam_library::install(directory);
+            }
             // Printed scores left in the cache by an earlier run are plain copies of the score; none outlives a run.
             clear_print_cache(app.handle());
             let directory = session::session_directory(app.path().app_data_dir()?)?;
@@ -1211,6 +1215,10 @@ pub fn run() {
         audio::cabinet_ir::cabinet_ir_import,
         audio::cabinet_ir::cabinet_ir_remove,
         audio::cabinet_ir::cabinet_ir_status,
+        audio::nam_library::nam_capture_list,
+        audio::nam_library::nam_capture_import,
+        audio::nam_library::nam_capture_remove,
+        audio::nam_library::nam_capture_status,
         file_library_snapshot,
         file_library_retry,
         file_library_change,
@@ -1313,6 +1321,10 @@ pub fn run() {
         audio::cabinet_ir::cabinet_ir_import,
         audio::cabinet_ir::cabinet_ir_remove,
         audio::cabinet_ir::cabinet_ir_status,
+        audio::nam_library::nam_capture_list,
+        audio::nam_library::nam_capture_import,
+        audio::nam_library::nam_capture_remove,
+        audio::nam_library::nam_capture_status,
         file_library_snapshot,
         file_library_retry,
         file_library_change,

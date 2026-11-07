@@ -1,6 +1,7 @@
 import type {AlphaTabApi,model} from '@coderline/alphatab';
 import {pageGeometry} from './page';
 import type {PageLayout} from './types';
+import {systemGapOffsets,type GapStacking} from './system-gaps';
 import type {ScoreLayoutMode,ScoreZoomMode} from './screen-view';
 
 export type ScreenRect={x:number;y:number;w:number;h:number};
@@ -26,7 +27,7 @@ function overlaps(a:ScreenRect,b:ScreenRect):boolean {
   return a.x<b.x+b.w&&b.x<a.x+a.w&&a.y<b.y+b.h&&b.y<a.y+a.h;
 }
 
-export function paginateScreenScore(chunks:readonly ScreenRenderChunk[],bounds:ScreenBounds,page:PageLayout):ScreenPagination {
+export function paginateScreenScore(chunks:readonly ScreenRenderChunk[],bounds:ScreenBounds,page:PageLayout,gaps?:GapStacking):ScreenPagination {
   const {width,height,left,top,right,bottom}=pageGeometry(page);
   const paper={width,height,left,top,right,bottom},blocks:ScreenPageBlock[]=[],ids=new Set<string>(),positions=new Set<string>(),matched=new Set<ScreenSystem>();
   for(const system of bounds.staffSystems) {
@@ -41,6 +42,7 @@ export function paginateScreenScore(chunks:readonly ScreenRenderChunk[],bounds:S
       }
     }
   }
+  const spans=gaps?chunks.filter(c=>Number.isInteger(c.firstMasterBarIndex)&&Number.isInteger(c.lastMasterBarIndex)&&c.firstMasterBarIndex>=0&&c.lastMasterBarIndex>=c.firstMasterBarIndex).map(c=>({first:c.firstMasterBarIndex,last:c.lastMasterBarIndex})).sort((a,b)=>a.first-b.first):[],offsets=systemGapOffsets(gaps,spans),scoreFirst=spans[0]?.first;
   let pageIndex=0,used=0,lastBar=-1;
   for(const chunk of [...chunks].sort((a,b)=>a.y-b.y||a.x-b.x)) {
     const rect={x:chunk.x,y:chunk.y,w:chunk.width,h:chunk.height};validRect(rect,true);
@@ -61,7 +63,10 @@ export function paginateScreenScore(chunks:readonly ScreenRenderChunk[],bounds:S
     const x=Math.min(...envelopes.map(r=>r.x)),y=Math.min(...envelopes.map(r=>r.y));
     const sourceBounds={x,y,w:Math.max(...envelopes.map(r=>r.x+r.w))-x,h:Math.max(...envelopes.map(r=>r.y+r.h))-y};
     if(sourceBounds.w>width-left-right||sourceBounds.h>height-top-bottom)throw new Error(oversize);
-    if(used+sourceBounds.h>height-top-bottom){pageIndex++;used=0;}
+    // A gap goes before a system only inside a page, never before the score's first system; a system pushed to a new page drops it.
+    let offset=first===-1||first===scoreFirst||used===0?0:offsets.get(first)??0;
+    if(used+offset+sourceBounds.h>height-top-bottom){pageIndex++;used=0;offset=0;}
+    used+=offset;
     blocks.push({chunk,system,page:pageIndex,sourceBounds,x:left,y:top+used});used+=sourceBounds.h;
   }
   if(matched.size!==bounds.staffSystems.length)throw new Error('Missing or duplicate screen system chunks.');

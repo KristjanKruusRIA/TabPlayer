@@ -283,3 +283,45 @@ describe('zoom arithmetic',()=>{
     for(const manualPercent of [24,301,NaN,Infinity])expect(()=>resolveScreenZoom({zoomMode:'manual',manualPercent,available:{width:0,height:0},natural:{width:0}})).toThrow();
   });
 });
+
+describe('per-system gaps',()=>{
+  const avail=267*px,top=15*px;
+  const bars=(i:number)=>fixture.bounds.staffSystems[i].bars[0].index;
+  const shape=(p:ScreenPagination)=>JSON.stringify([p.pageCount,p.blocks.map(b=>[b.chunk.id,b.page,b.x,b.y])]);
+  const stack=(gaps:Array<{bar:number;scale:number}>|undefined,systemSpacing:number|null=null)=>paginateScreenScore(fixture.chunks,fixture.bounds,page,{gaps,systemSpacing,scale:page.scale});
+  const blockOf=(p:ScreenPagination,i:number)=>p.blocks.find(b=>b.system===fixture.bounds.staffSystems[i])!;
+  it('is identical without gaps, with an empty list or with gaps outside every system',()=>{
+    const plain=shape(pagination);
+    expect(shape(stack(undefined))).toBe(plain);expect(shape(stack([]))).toBe(plain);expect(shape(stack([{bar:5000,scale:3}]))).toBe(plain);
+  });
+  it('moves the chosen system and every block after it on the page by (s-1) x 20 x spacing x scale',()=>{
+    const index=[1,2,3,4,5].find(i=>{const b=blockOf(pagination,i);return b.y>top+1e-9&&blockOf(pagination,i-1).page===b.page;})!;
+    for(const [scale,spacing] of [[.5,null],[1.5,null],[1.5,2]] as const) {
+      const offset=(scale-1)*20*(spacing??1)*page.scale,result=stack([{bar:bars(index),scale}],spacing);
+      const base=blockOf(pagination,index),moved=blockOf(result,index);
+      // Only the case without a page change is asserted on position; fits are covered below.
+      if(moved.page!==base.page)continue;
+      expect(moved.y).toBeCloseTo(base.y+offset);
+      for(const [n,b] of result.blocks.entries()) {
+        const old=pagination.blocks[n];
+        if(old.page!==base.page||old.y<base.y-1e-9)expect(b.y).toBeCloseTo(old.y);
+      }
+    }
+    const shrunk=stack([{bar:bars(index),scale:.25}]);
+    expect(blockOf(shrunk,index).y).toBeCloseTo(blockOf(pagination,index).y-.75*20*page.scale);
+  });
+  it('adds no offset before the first system of the score or at a page top',()=>{
+    expect(shape(stack([{bar:bars(0),scale:4}]))).toBe(shape(pagination));
+    const tops=fixture.bounds.staffSystems.map((_,i)=>i).filter(i=>i>0&&Math.abs(blockOf(pagination,i).y-top)<1e-9);
+    expect(tops.length).toBeGreaterThan(0);
+    for(const i of tops)expect(blockOf(stack([{bar:bars(i),scale:4}]),i).y).toBeCloseTo(top);
+  });
+  it('counts the offset in the page fit and drops it when the system moves to the next page',()=>{
+    // A spacing of 400% makes the offset 3 x 80 x 1.13 = 271 px, larger than any page slack left after a mid-page system.
+    const i=[1,2,3,4,5,6,7,8].find(n=>{const b=blockOf(pagination,n);return b.y>top+1e-9&&b.y-top+b.sourceBounds.h+271>avail;})!;
+    const base=blockOf(pagination,i),result=stack([{bar:bars(i),scale:4}],4),moved=blockOf(result,i);
+    expect(moved.page).toBe(base.page+1);expect(moved.y).toBeCloseTo(top);
+    expect(result.pageCount).toBeGreaterThanOrEqual(pagination.pageCount);
+    expect(top+avail).toBeGreaterThan(base.y);
+  });
+});

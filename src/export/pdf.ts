@@ -90,11 +90,11 @@ export function renderPdfPages(score:model.Score,selection:ExportSelection,layou
   const renderer=new rendering.ScoreRenderer(settings);renderer.width=d.usableWidth;
   const systems:SvgSystem[]=[];let failure:Error|undefined;
   renderer.error.on(e=>{failure=e;});
-  renderer.partialRenderFinished.on(e=>{if(typeof e.renderResult==='string'&&e.height>0)systems.push({svg:e.renderResult,width:e.width,height:e.height});});
+  renderer.partialRenderFinished.on(e=>{if(typeof e.renderResult==='string'&&e.height>0)systems.push(e.firstMasterBarIndex>=0?{svg:e.renderResult,width:e.width,height:e.height,firstBar:e.firstMasterBarIndex,lastBar:e.lastMasterBarIndex}:{svg:e.renderResult,width:e.width,height:e.height});});
   try{renderer.renderScore(copy,selection.tracks);if(failure)throw failure;
     if(renderer.boundsLookup?.staffSystems.some(system=>system.bars.some(bar=>bar.visualBounds.x<-.5||bar.visualBounds.x+bar.visualBounds.w>d.usableWidth+1)))throw new Error('A notation system does not fit this page width. Reduce print scale, use landscape, or add a system break.');
     if(!systems.length)throw new Error('Notation renderer produced no printable systems.');
     if(frozen&&!isDefaultTypography(typographyOf(frozen.engraving))){const {left,right}=pageGeometry(frozen.page);assertTextFits(systems,d.usableWidth,Math.min(left,right));}
-    return frozen?paginateEngravedSystems(systems,score.title,frozen.page,headerFieldsOf(score),typographyOf(frozen.engraving).titleScale??1):paginateSystems(systems,score.title,layout);}
+    return frozen?paginateEngravedSystems(systems,score.title,frozen.page,headerFieldsOf(score),typographyOf(frozen.engraving).titleScale??1,{gaps:frozen.engraving.systemGaps,systemSpacing:frozen.engraving.systemSpacing,scale:frozen.page.scale}):paginateSystems(systems,score.title,layout);}
   finally{renderer.destroy();}
 }

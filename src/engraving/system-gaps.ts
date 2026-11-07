@@ -74,3 +74,19 @@ export function mapSystemGaps(engraving:EngravingOverrides,oldToNew:ReadonlyArra
   moved.sort((a,b)=>a.bar-b.bar);
   return finish(engraving,moved);
 }
+
+/** What a stacker needs to add per-system gaps: the document's gaps, its system spacing and the scale the chunk heights are rendered at. */
+export interface GapStacking {gaps:readonly SystemGap[]|undefined;systemSpacing:number|null;scale:number}
+/** alphaTab's systemPaddingTop plus systemPaddingBottom, before the system-spacing factor. */
+export const STANDARD_SYSTEM_GAP=20;
+/**
+ * Extra space before each system, keyed by its first bar: (scale − 1) × standard gap × render scale. Negative below 100%.
+ * The caller skips the first system of the score and any system that starts a page.
+ */
+export function systemGapOffsets(stacking:GapStacking|undefined,systems:readonly SystemSpan[]):Map<number,number> {
+  const offsets=new Map<number,number>();
+  if(!stacking)return offsets;
+  const base=STANDARD_SYSTEM_GAP*(stacking.systemSpacing??1)*stacking.scale;
+  for(const [first,scale] of resolveSystemGaps(stacking.gaps,systems)){const offset=(scale-1)*base;if(offset!==0&&Number.isFinite(offset))offsets.set(first,offset);}
+  return offsets;
+}

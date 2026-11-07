@@ -37,12 +37,12 @@ try{
   const strings=await panel.getByRole('row').allTextContents();
   assert.equal(strings.filter(text=>text.includes('Not heard')).length,5,JSON.stringify(strings));
   await mkdir(resolve('.analysis/parity'),{recursive:true});await panel.scrollIntoViewIfNeeded();await page.screenshot({path:resolve('.analysis/parity/native-tuner.png')});
-  // Closing the Practice popover, as a user would, must release the input.
+  // Closing the Practice popover with Escape, as a user would, must release the input.
   assert.equal(await panel.evaluate(node=>!!node.closest('details.gp-practice')),true,'the tuner sits in the Practice popover');
   await panel.getByRole('button',{name:'Stop listening'}).focus();await page.keyboard.press('Escape');
   const popover=page.locator('details.gp-practice'),escapeClosed=!await popover.evaluate(node=>node.open);
-  // Escape inside the popover's portalled body does not reach the popover's own handler; close it from its button then.
-  if(!escapeClosed)await popover.locator(':scope>summary').click();
+  assert.equal(escapeClosed,true,'Escape inside the popover closes it');
+  assert.equal(await page.evaluate(()=>document.activeElement?.closest('details.gp-practice')!==null&&document.activeElement?.tagName==='SUMMARY'),true,'focus returns to the Practice button');
   const released=await page.evaluate(async()=>{const invoke=window.__TAURI_INTERNALS__.invoke;let reading;for(let attempt=0;attempt<50;attempt++){reading=await invoke('tuner_read',{strings:[]});if(!reading.running)break;await new Promise(done=>setTimeout(done,100));}return reading.running;});
   assert.equal(released,false,'closing the popover stops capture');
   await clickWorkstationButton(page,'Practice',{waitForIdle:false});await panel.getByRole('button',{name:'Start listening'}).waitFor();

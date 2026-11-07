@@ -501,7 +501,12 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
       else copyMusic(event.shiftKey?'multiTrack':'singleTrack',key==='x');
     }
     else if((event.ctrlKey||event.metaKey)&&key==='a'){editorSelection(selectionForTrack(state.score,target.track));event.preventDefault();}
-    else if(event.key==='Escape'){editorSelection(null);event.preventDefault();}
+    else if(event.key==='Escape'){
+      // The Practice popover's body is a portal, so its keys reach here rather than the popover's own handler.
+      const menu=practiceMenu.current;
+      if(menu?.open&&event.target instanceof Node&&menu.querySelector('.gp-practice-body')?.contains(event.target)){menu.open=false;menu.querySelector('summary')?.focus();event.preventDefault();return;}
+      editorSelection(null);event.preventDefault();
+    }
   }
   return <div ref={shell} className="app-shell" aria-busy={controlsBusy} data-narrow={narrow} onKeyDown={selectionKeys}>
     <header ref={commandBar} className="toolbar gp-menubar" onKeyDown={event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();closeCommands(true);}}} onClickCapture={event=>{if(!(event.target instanceof Element))return;if(event.target instanceof HTMLElement)onFileCommandCapture?.(event.target);const disclosure=event.target.closest('summary')?.parentElement;if(disclosure instanceof HTMLDetailsElement)commandBar.current?.querySelectorAll<HTMLDetailsElement>('details[open]').forEach(other=>{if(other!==disclosure)other.open=false;});else if(event.target.closest('button'))closeCommands(true);}}><nav className="gp-menus" aria-label="File and history"><span className="gp-brand"><MarkGlyph/><h1 className="tp-sr">TabPlayer</h1></span>

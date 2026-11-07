@@ -159,12 +159,19 @@ mod tests {
         p.svg = "<svg xmlns='http://www.w3.org/2000/svg' width='210mm' height='297mm' viewBox='0 0 794 1123'><style>.at{font-family:Bravura;font-size:34px}text{fill:#111}</style><g transform=\"translate(40 60)\"><defs><g id=\"export-s0-content\"><rect x=\"30\" y=\"120\" width=\"20\" height=\"20\"/><text x=\"100\" y=\"250\" font-family=\"Bravura\" font-size=\"34\">&#57424;</text></g><clipPath id=\"export-s0-c0\"><rect x=\"0\" y=\"-1\" width=\"794\" height=\"181\"/></clipPath><clipPath id=\"export-s0-c1\"><rect x=\"0\" y=\"180\" width=\"794\" height=\"1000\"/></clipPath></defs><g transform=\"translate(0 0)\"><use href=\"#export-s0-content\" clip-path=\"url(#export-s0-c0)\"/></g><g transform=\"translate(0 40)\"><use href=\"#export-s0-content\" clip-path=\"url(#export-s0-c1)\"/></g><g data-tp-accolade=\"group-brace\" transform=\"translate(10 260)\" class=\"at\" ><text style=\"font-size: 300%; stroke:none\">&#57344;</text></g></g></svg>".into();
         let tree = notation_tree(&p, &export_options(), "PDF").unwrap();
         // Each <use> must survive as a clipped group holding text, and every text must resolve to Bravura.
-        fn walk(group: &usvg::Group, tree: &usvg::Tree, clipped: &mut usize, texts: &mut usize) {
+        fn walk(
+            group: &usvg::Group,
+            tree: &usvg::Tree,
+            clipped: &mut usize,
+            texts: &mut usize,
+            glyphs: &mut usize,
+        ) {
             for node in group.children() {
                 match node {
                     usvg::Node::Text(text) => {
                         *texts += 1;
                         for glyph in text.layouted().iter().flat_map(|s| &s.positioned_glyphs) {
+                            *glyphs += 1;
                             let face = tree.fontdb().face(glyph.font).unwrap();
                             assert!(
                                 face.families.iter().any(|(name, _)| name == "Bravura"),
@@ -177,19 +184,21 @@ mod tests {
                         if inner.clip_path().is_some() {
                             *clipped += 1;
                             let mut inside = 0;
-                            walk(inner, tree, &mut 0, &mut inside);
+                            walk(inner, tree, &mut 0, &mut inside, &mut 0);
                             assert!(inside >= 1, "a clipped use holds no text");
                         }
-                        walk(inner, tree, clipped, texts);
+                        walk(inner, tree, clipped, texts, glyphs);
                     }
                     _ => {}
                 }
             }
         }
-        let (mut clipped, mut texts) = (0, 0);
-        walk(tree.root(), &tree, &mut clipped, &mut texts);
+        let (mut clipped, mut texts, mut glyphs) = (0, 0, 0);
+        walk(tree.root(), &tree, &mut clipped, &mut texts, &mut glyphs);
         assert_eq!(clipped, 2);
         assert!(texts >= 2);
+        // Two clipped uses plus the accolade each lay out a Bravura glyph.
+        assert!(glyphs >= 3, "only {glyphs} laid-out glyphs");
         let bytes = convert_pages(&[p], &AtomicBool::new(false)).unwrap();
         let content = String::from_utf8_lossy(&bytes);
         assert!(content.starts_with("%PDF-"));

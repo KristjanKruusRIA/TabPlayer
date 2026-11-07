@@ -24,6 +24,8 @@ export interface SoundRigProps {
   tracks:readonly RigTrack[];onTrack:(id:string)=>void;
   /** The control for a cabinet's impulse response, shown with that pedalboard's cabinet. */
   cabinetResponse?:(board:Board)=>ReactNode;
+  /** The control for an amp's NAM capture, shown with that pedalboard's amp. */
+  ampCapture?:(board:Board)=>ReactNode;
   /** A control for the master output, shown below the stage. Left empty until it exists. */
   master?:ReactNode;
 }
@@ -31,7 +33,7 @@ export interface SoundRigProps {
 /** The Sound view: a track's whole signal path as hardware. The chain runs across the top, the chosen block fills the
  * stage and the sound browser sits beside it. Every change goes through the shared sound editing, so each is one
  * undoable `setTrackSound` edit, exactly as in the inspector's Sound task. */
-export function SoundRig({trackId,sound,onEdit,playback,busy=false,tracks,onTrack,cabinetResponse,master}:SoundRigProps) {
+export function SoundRig({trackId,sound,onEdit,playback,busy=false,tracks,onTrack,cabinetResponse,ampCapture,master}:SoundRigProps) {
   const { t } = useI18n();
   const editing=useSoundEditing({trackId,sound,onEdit,playback,busy,shown:true});
   const {current,second,playbackState,error,status,showingPreview,previewLabel,previewReturn}=editing;
@@ -56,7 +58,7 @@ export function SoundRig({trackId,sound,onEdit,playback,busy=false,tracks,onTrac
     <div className="rig-body">
       <SoundBrowser editing={editing}/>
       <div className="rig-main">
-        <BlockStage editing={editing} selected={selected} cabinetResponse={cabinetResponse}/>
+        <BlockStage editing={editing} selected={selected} cabinetResponse={cabinetResponse} ampCapture={ampCapture}/>
         {master&&<div className="rig-slot" data-slot="master">{master}</div>}
       </div>
     </div>

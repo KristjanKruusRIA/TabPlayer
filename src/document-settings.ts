@@ -49,6 +49,11 @@ const completeEffects=(saved:FxSettings):FxSettings=>{
     const settings=effects[block] as {model?:unknown}|undefined;
     if(settings&&typeof settings==='object'&&!Array.isArray(settings)&&settings.model===undefined)effects[block]={...settings,model};
   }
+  // The native player reads a null capture or impulse response as none, so the key goes and a sound that saved one equals the same sound without it.
+  for(const [block,field] of [['amp','capture'],['cabinet','ir']]){
+    const settings=effects[block] as Record<string,unknown>|undefined;
+    if(settings&&typeof settings==='object'&&!Array.isArray(settings)&&settings[field]===null){const {[field]:_none,...rest}=settings;void _none;effects[block]=rest;}
+  }
   // The native player reads a null second pedalboard as none.
   const second=effects.second as FxSettings|null|undefined;
   if(second===null)delete effects.second;

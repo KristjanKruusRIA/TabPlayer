@@ -1473,7 +1473,11 @@ struct AmpCapture {
     live: bool,
 }
 impl AmpCapture {
-    fn run(&mut self, x: [f32; 2]) -> [f32; 2] {
+    /// One frame through the capture, scaled by `gain` after the stage's own calibrated gain. A product that leaves the
+    /// `f32` range silences the stage, which then restores itself on the next reset.
+    fn run(&mut self, x: [f32; 2], gain: f64) -> [f32; 2] {
+        // The stages take non-finite samples as silence and a signed zero as zero, so the mirror compares them so.
+        let x = x.map(CaptureStage::clean);
         // Channels that have both settled to silence hold the same state again, so they run as one.
         if !self.twin
             && x[0].to_bits() == x[1].to_bits()
@@ -1484,13 +1488,16 @@ impl AmpCapture {
         }
         if self.twin {
             if x[0].to_bits() == x[1].to_bits() {
-                let y = self.left.process(x[0]);
+                let y = self.left.process_with(x[0], gain);
                 return [y, y];
             }
             self.right.copy_from(&self.left);
             self.twin = false;
         }
-        [self.left.process(x[0]), self.right.process(x[1])]
+        [
+            self.left.process_with(x[0], gain),
+            self.right.process_with(x[1], gain),
+        ]
     }
     fn reset(&mut self) {
         self.left.reset();
@@ -1585,7 +1592,7 @@ fn amp_capture_frame(
                 capture.live = true;
             }
             let gain = 10f64.powf((db + level) / 20.0);
-            capture.run(x).map(|v| (v as f64 * gain) as f32)
+            capture.run(x, gain)
         } else if let Some(shape) = shapes[side].as_ref() {
             let gain = 10f64.powf(db / 20.0);
             chain_used = true;

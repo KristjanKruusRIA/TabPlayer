@@ -425,3 +425,91 @@ fn copy_from_a_stage_that_does_not_match_changes_nothing_and_does_not_panic() {
             .all(|(x, y)| x.to_bits() == y.to_bits())
     );
 }
+
+#[test]
+fn finite_model_output_that_overflows_after_the_gain_faults_the_stage() {
+    // The model's output on the 0.1 calibration tone is 1e37, which is finite, so calibration passes and sets the gain
+    // to -40 dB. With the level at +60 dB the gain is x10, and a louder note takes the product past the f32 range.
+    let mut stage = CaptureStage::new(scaled(1e38), 48_000, 60.0);
+    assert!(!stage.calibration_faulted());
+    assert!(!stage.faulted());
+    let out = run(&mut stage, &sine(48_000, 220.0, 0.5, 2000));
+    assert!(
+        out.iter().all(|v| v.is_finite()),
+        "no infinity leaves the stage"
+    );
+    assert!(stage.faulted());
+    assert_eq!(stage.restores(), 1, "restored once, then muted");
+    assert!(out[out.len() - 100..].iter().all(|v| v.to_bits() == 0));
+    // It recovers on reset, like every other fault.
+    stage.reset();
+    assert!(!stage.faulted());
+}
+
+#[test]
+fn a_gain_applied_by_the_caller_is_checked_too() {
+    // 1e29 on the tone, gain -40 dB: 1e27 at full scale. A caller's x1e12 takes it past the f32 range.
+    let mut stage = CaptureStage::new(scaled(1e30), 48_000, 0.0);
+    let input = sine(48_000, 220.0, 0.1, 2000);
+    let out: Vec<f32> = input.iter().map(|&x| stage.process_with(x, 1.0)).collect();
+    assert!(out.iter().all(|v| v.is_finite()) && !stage.faulted());
+    let mut loud = CaptureStage::new(scaled(1e30), 48_000, 0.0);
+    let out: Vec<f32> = input.iter().map(|&x| loud.process_with(x, 1e12)).collect();
+    assert!(out.iter().all(|v| v.is_finite()));
+    assert!(loud.faulted());
+    assert_eq!(loud.restores(), 1);
+    // process_with at unit gain is process, bit for bit.
+    let (mut a, mut b) = (
+        CaptureStage::new(deep(), 48_000, 0.0),
+        CaptureStage::new(deep(), 48_000, 0.0),
+    );
+    for &x in &input {
+        assert_eq!(a.process(x).to_bits(), b.process_with(x, 1.0).to_bits());
+    }
+}
+
+#[test]
+fn a_signed_zero_is_the_same_as_zero() {
+    assert_eq!(CaptureStage::clean(-0.0).to_bits(), 0);
+    assert_eq!(CaptureStage::clean(0.0).to_bits(), 0);
+    assert_eq!(CaptureStage::clean(f32::NAN).to_bits(), 0);
+    assert_eq!(CaptureStage::clean(f32::NEG_INFINITY).to_bits(), 0);
+    assert_eq!(CaptureStage::clean(0.25), 0.25);
+    assert_eq!(CaptureStage::clean(-0.25), -0.25);
+    for rate in [48_000u32, 44_100] {
+        let (mut plus, mut minus) = (
+            CaptureStage::new(deep(), rate, 0.0),
+            CaptureStage::new(deep(), rate, 0.0),
+        );
+        for n in 0..4000 {
+            let loud = n < 500;
+            let x = if loud {
+                0.2 * (n as f32 * 0.05).sin()
+            } else {
+                0.0
+            };
+            let y = if loud { x } else { -0.0 };
+            assert_eq!(plus.process(x).to_bits(), minus.process(y).to_bits(), "{n}");
+        }
+        assert_eq!(plus.at_rest(), minus.at_rest());
+    }
+}
+
+#[test]
+fn copy_from_a_stage_of_another_model_object_changes_nothing() {
+    // The same identity, but not the same model: a library that rebuilt the model must not have its state grafted on.
+    let mut a = CaptureStage::with_identity("ptr-a", identity(), 48_000, 0.0);
+    let other = identity();
+    let mut b = CaptureStage::with_identity("ptr-a", other.clone(), 48_000, 0.0);
+    let mut reference = CaptureStage::with_identity("ptr-a", other, 48_000, 0.0);
+    assert!(a.same_capture(&b), "same by identity");
+    run(&mut a, &sine(48_000, 196.0, 0.3, 1500));
+    b.copy_from(&a);
+    let input = sine(48_000, 330.0, 0.2, 800);
+    let (got, want) = (run(&mut b, &input), run(&mut reference, &input));
+    assert!(
+        got.iter()
+            .zip(&want)
+            .all(|(x, y)| x.to_bits() == y.to_bits())
+    );
+}

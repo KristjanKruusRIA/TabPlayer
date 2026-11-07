@@ -850,3 +850,29 @@ fn the_leaving_capture_keeps_clear_of_the_incoming_one_after_set_settings() {
         assert!(worst < peak * 1e-3, "at {rate}: {worst} on {peak}");
     }
 }
+
+#[test]
+fn signed_zeros_in_the_silence_do_not_split_the_mirror() {
+    // A host may write -0.0 into one channel and +0.0 into the other for the same silence.
+    for rate in RATES {
+        let fx = with_capture(FxSettings::default(), &ids()[0], 0.0);
+        let (mut mixed, mut plain) = (
+            TrackDsp::new(fx.clone(), rate, 1.0).unwrap(),
+            TrackDsp::new(fx, rate, 1.0).unwrap(),
+        );
+        let loud = rate as usize / 2;
+        for n in 0..rate as usize * 4 {
+            let a = if n < loud { riff(n, rate) } else { 0.0 };
+            let b = if n < loud { a } else { -0.0 };
+            let (y, p) = (mixed.process([a, b], 120.0), plain.process([a, a], 120.0));
+            assert_eq!(y[0].to_bits(), p[0].to_bits(), "left at {n} at {rate}");
+            assert_eq!(y[1].to_bits(), p[1].to_bits(), "right at {n} at {rate}");
+        }
+        assert_eq!(plain.driven_at_rest(), [true, true]);
+        assert_eq!(
+            mixed.driven_at_rest(),
+            [true, true],
+            "the channels run as one again at {rate}"
+        );
+    }
+}

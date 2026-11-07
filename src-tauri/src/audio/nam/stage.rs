@@ -358,7 +358,9 @@ impl CaptureStage {
     /// capture and rate (`same_as`). No allocation.
     pub fn copy_from(&mut self, other: &CaptureStage) {
         // Never panics on the audio thread: anything that does not match is left alone.
+        // The same model object too: stages for one identity may hold models built apart, whose state does not carry over.
         if !self.same_capture(other)
+            || !Arc::ptr_eq(&self.model, &other.model)
             || self.queue.len() != other.queue.len()
             || self.to_model.is_some() != other.to_model.is_some()
             || self.to_device.is_some() != other.to_device.is_some()
@@ -395,7 +397,31 @@ impl CaptureStage {
     }
 
     pub fn process(&mut self, x: f32) -> f32 {
-        self.tick(x) * self.gain
+        self.process_with(x, 1.0)
+    }
+
+    /// [`CaptureStage::process`] with a further gain from the caller, which the stage cannot know to keep in range.
+    /// The model's output is finite (`tick` checks), but the calibration's make-up gain (up to +40 dB), the level
+    /// (up to +60 dB) and the caller's gain can still take a large finite value past the `f32` range. Infinity is
+    /// treated like any other non-finite output: the stage restores its state once and is silent until `reset`.
+    #[inline]
+    pub fn process_with(&mut self, x: f32, extra: f64) -> f32 {
+        let y = self.tick(x) * self.gain;
+        // `extra == 1.0` leaves `y` unchanged bit for bit.
+        let z = (y as f64 * extra) as f32;
+        if z.is_finite() {
+            z
+        } else {
+            self.fault();
+            0.0
+        }
+    }
+
+    /// What the stage takes a device sample to be: a non-finite value is silence, and a signed zero is zero, so two
+    /// channels that differ only in the sign of a zero are the same input.
+    #[inline]
+    pub fn clean(x: f32) -> f32 {
+        if x.is_finite() && x != 0.0 { x } else { 0.0 }
     }
 
     /// True once silence has run long enough that the model, the converters and
@@ -471,7 +497,7 @@ impl CaptureStage {
         if self.faulted {
             return 0.0;
         }
-        let x = if x.is_finite() { x } else { 0.0 };
+        let x = Self::clean(x);
         if x == 0.0 {
             self.device_zeros = self.device_zeros.saturating_add(1);
         } else {

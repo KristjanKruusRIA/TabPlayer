@@ -14,13 +14,17 @@ export interface SystemGapsPanelProps {
   bar:number|null;
   /** The score is busy or locked: gaps cannot be recorded. The controls keep focus. */
   busy:boolean;
+  /** The document is finalized or password-locked (a reason for busy that the status line names). */
+  locked?:boolean;
+  /** Page layout failed, so no systems will be reported until the score or page setup changes. */
+  pageError?:boolean;
   onEdit:(command:Extract<EngravingCommand,{type:'setEngraving'}>)=>unknown;
 }
 
 const percent=(scale:number)=>String(Math.round(scale*10000)/100);
 
 /** Extra or reduced space above one rendered system, as a percentage of the standard gap. Saved with the document and printed. */
-export function SystemGapsPanel({value,systems,pageLayout,bar,busy,onEdit}:SystemGapsPanelProps) {
+export function SystemGapsPanel({value,systems,pageLayout,bar,busy,locked=false,pageError=false,onEdit}:SystemGapsPanelProps) {
   const {t}=useI18n();
   const ordered=systems&&[...systems].sort((a,b)=>a.first-b.first);
   const system=ordered&&bar!==null?ordered.find(span=>bar>=span.first&&bar<=span.last):undefined;
@@ -28,15 +32,15 @@ export function SystemGapsPanel({value,systems,pageLayout,bar,busy,onEdit}:Syste
   const resolved=system?resolveSystemGaps(value.systemGaps,[system]).get(system.first)??1:1;
   const entries=value.systemGaps??[];
   const hasSelected=!!system&&entries.some(entry=>entry.bar>=system.first&&entry.bar<=system.last);
-  const reason=!pageLayout?'system_gaps.status_layout':!systems?'system_gaps.status_rendering':bar===null?'system_gaps.status_no_selection':!system?'system_gaps.status_no_system':first?'system_gaps.status_first':null;
+  const reason=!pageLayout?'system_gaps.status_layout':pageError?'system_gaps.status_page_error':locked?'system_gaps.status_locked':!systems?'system_gaps.status_rendering':bar===null?'system_gaps.status_no_selection':!system?'system_gaps.status_no_system':first?'system_gaps.status_first':null;
   const available=reason===null;
   const shown=percent(resolved);
   const [draft,setDraft]=useState(shown),[invalid,setInvalid]=useState(false);
   // The system the typed text belongs to; null while the field is untouched. Only edited text is ever committed.
   const edited=useRef<number|null>(null);
   const ids=useId(),statusId=ids+'-status',alertId=ids+'-alert';
-  // Follow the document (undo, redo, selecting another system): typed text that has not been committed is dropped.
-  useEffect(()=>{setDraft(shown);setInvalid(false);edited.current=null;},[shown,system?.first]);
+  // Follow the document (undo, redo, selecting another system) and the panel's availability: typed text that has not been committed is dropped.
+  useEffect(()=>{setDraft(shown);setInvalid(false);edited.current=null;},[shown,system?.first,available,busy]);
   const min=SYSTEM_GAP_RANGE.min*100,max=SYSTEM_GAP_RANGE.max*100;
   /** true: handled (committed or nothing to do); false: the text is invalid. */
   const commit=(text:string):boolean=>{

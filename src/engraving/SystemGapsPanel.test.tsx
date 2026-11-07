@@ -68,6 +68,8 @@ it('says why the controls are unavailable',()=>{
   const cases:Array<[Partial<Parameters<typeof SystemGapsPanel>[0]>,RegExp]>=[
     [{pageLayout:false},/apply in the page layouts/],
     [{systems:null},/still rendering/],
+    [{systems:null,pageError:true},/pages cannot be arranged/],
+    [{busy:true,locked:true},/Editing is locked/],
     [{bar:null},/Select a bar/],
     [{bar:40},/not in a rendered system/],
     [{bar:1},/first system of the score has no gap/],
@@ -129,4 +131,14 @@ it('announces an invalid value once, through the alert the field points at',()=>
   setup();fireEvent.change(field(),{target:{value:'900'}});fireEvent.keyDown(field(),{key:'Enter'});
   const alert=screen.getByRole('alert');expect(field().getAttribute('aria-describedby')).toContain(alert.id);
   expect(field().validity.customError).toBe(false);expect(screen.getAllByRole('alert')).toHaveLength(1);
+});
+
+it('drops typed text when the panel becomes unavailable or busy, so a later blur commits nothing stale',()=>{
+  for(const change of [{busy:true},{pageError:true,systems:null}] as Array<Partial<Parameters<typeof SystemGapsPanel>[0]>>){
+    cleanup();const {onEdit,rerender}=setup();
+    fireEvent.change(field(),{target:{value:'250'}});expect(field().value).toBe('250');
+    rerender(<SystemGapsPanel value={defaultEngraving()} systems={systems} pageLayout bar={2} busy={false} onEdit={onEdit} {...change}/>);
+    rerender(<SystemGapsPanel value={defaultEngraving()} systems={systems} pageLayout bar={2} busy={false} onEdit={onEdit}/>);
+    expect(field().value).toBe('100');fireEvent.blur(field());expect(onEdit).not.toHaveBeenCalled();
+  }
 });

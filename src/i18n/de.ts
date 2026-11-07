@@ -1651,6 +1651,8 @@ export const de: MessageCatalog = {
   'system_gaps.field': "Systemabstand (%)",
   'system_gaps.status_layout': "Systemabstände gelten in den Seitenlayouts, nicht in diesem Partitur-Layout.",
   'system_gaps.status_rendering': "Die Partitur wird noch gezeichnet; Systemabstände sind danach verfügbar.",
+  'system_gaps.status_page_error': "Die Seiten lassen sich nicht anordnen, daher sind Systemabstände nicht verfügbar.",
+  'system_gaps.status_locked': "Die Bearbeitung ist gesperrt, daher lassen sich Systemabstände nicht ändern.",
   'system_gaps.status_no_selection': "Wähle einen Takt, um sein System zu bestimmen.",
   'system_gaps.status_no_system': "Der gewählte Takt liegt in keinem gezeichneten System.",
   'system_gaps.status_first': "Über dem ersten System der Partitur gibt es keinen Abstand, daher kann es keinen erhalten.",

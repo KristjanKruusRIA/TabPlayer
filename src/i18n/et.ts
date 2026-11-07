@@ -1651,6 +1651,8 @@ export const et: MessageCatalog = {
   'system_gaps.field': "Süsteemi vahe (%)",
   'system_gaps.status_layout': "Süsteemide vahed kehtivad lehekülje paigutustes, mitte selles partituuripaigutuses.",
   'system_gaps.status_rendering': "Partituuri joonistatakse veel; süsteemide vahed on saadaval pärast seda.",
+  'system_gaps.status_page_error': "Lehti ei saa paigutada, seega süsteemide vahed pole saadaval.",
+  'system_gaps.status_locked': "Muutmine on lukustatud, seega süsteemide vahesid ei saa muuta.",
   'system_gaps.status_no_selection': "Süsteemi valimiseks vali takt.",
   'system_gaps.status_no_system': "Valitud takt ei kuulu ühtegi joonistatud süsteemi.",
   'system_gaps.status_first': "Partituuri esimese süsteemi kohal vahet ei ole, seega ei saa seda seada.",

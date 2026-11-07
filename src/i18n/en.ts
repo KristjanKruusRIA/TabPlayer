@@ -1649,6 +1649,8 @@ export const en = {
   'system_gaps.field': "System gap (%)",
   'system_gaps.status_layout': "System gaps apply in the page layouts, not in this score layout.",
   'system_gaps.status_rendering': "The score is still rendering; system gaps are available once it has.",
+  'system_gaps.status_page_error': "The pages cannot be arranged, so system gaps are unavailable.",
+  'system_gaps.status_locked': "Editing is locked, so system gaps cannot be changed.",
   'system_gaps.status_no_selection': "Select a bar to choose its system.",
   'system_gaps.status_no_system': "The selected bar is not in a rendered system.",
   'system_gaps.status_first': "The first system of the score has no gap above it, so it cannot take one.",

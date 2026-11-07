@@ -3,7 +3,7 @@
 ## Behavior
 
 - The Presentation tools have a "Design: system gaps" panel. Select a bar, then enter "System gap (%)" from 25 to 400 for the system that contains it. 100% is the standard gap.
-- Gaps show in the physical page layouts (vertical page, horizontal page and grid) and in every export (PDF, SVG, PNG, print).
+- Gaps show in the physical page layouts (vertical page, horizontal page and grid) and in the export pages (PDF, SVG, PNG, print). On the desktop only the export pages handed to the PDF writer were checked.
 - The extra offset above a system with scale `s` is `(s - 1) x 20 x (system spacing or 1) x render scale`. It is negative below 100%. The first system of the score and a system that starts a page take no offset; a system pushed to the next page drops its offset.
 - Data: `EngravingOverrides.systemGaps`, a list of `{bar, scale}` entries carried by the existing `setEngraving` edit. It is omitted when empty. A system is identified by an anchor bar and resolved by containment in the rendered system's bar interval.
 - "Reset selected system" removes the entries inside the selected system. "Reset all system gaps" removes the field. Both are unavailable (`aria-disabled`, never `disabled`) when there is nothing to reset.
@@ -16,13 +16,14 @@
 - Vitest, Rust protocol and style-library tests cover the data model, validation, remap on bar insert and remove, pagination on screen and in export, and the panel (see the task commits on `feature/d08-system-spacing`).
 - Windows desktop test, `tests/desktop/parity-system-gaps.mjs`, on the engraving fixture (systems of bars 1-2, 3-4, 5-8, 9-10, 11-12) at A4 in the vertical page view:
   - 200% on the third system moves its on-screen top and every later system on its page by the expected offset; earlier systems do not move.
-  - The exported PDF page shows the same offset above that system.
+  - The export pages handed to the PDF writer (`window.__tabplayerTestExportPages`) show the same offset above that system. The driver checks only the `%PDF-` header of the written file. SVG, PNG and print export were not checked on the desktop.
   - A second system at 150%, Reset selected (only that system returns), Reset all (every system returns), each undone and redone.
-  - Save and reopen keep the gap on screen and in the PDF.
+  - Save and reopen keep the gap on screen and in the export pages handed to the PDF writer.
   - The native audio generation is read before and after all gap edits and does not change.
 - Driver output:
 
 ```text
+PASS baseline: the third system is not the first system of a page - screen pages [0,1,1,1,2], export pages [1,2,2,3,4]
 PASS baseline: the system gap field shows 100% for the selected third system
 PASS set 200% on the third system: one setEngraving edit carrying one gap at its first bar
 PASS set 200% on the third system: its screen top moves down by the standard gap, earlier systems do not move - moved [0,0,20,20,0] px, expected 20 px
@@ -62,3 +63,7 @@ Run on 2026-11-07 against the desktop test build of 3465e8c (app code unchanged 
 - At A4 in the desktop test the export puts the fourth system (bars 9-10) at the top of its own page, so its 150% gap is dropped there by design. The test asserts that; the second gap's offset is therefore only measured on screen.
 - The desktop test does not play audio during the edits: it checks the generation while idle.
 - No per-staff gaps and no original-GP8 comparison.
+- Exporting tracks to separate files renders each track alone (`src/export/useExportCoordinator.ts`); with alphaTab's model layout a single track may break systems differently from the full score, so a gap anchored to a bar can land on a different exported system than on screen. This is a known limit, not verified.
+- Removing a system's first bar drops that system's gap. A relayout can put two gap anchors in one system; only the lowest applies and the other stays stored but has no effect.
+- The desktop driver identifies systems by position and drops alphaTab's credit chunk by its English text. It fails safe (wrong blocks give wrong offsets), and alphaTab is pinned at 1.8.4.
+- Not proven on the desktop (unit tests cover the first three): a gap below 100%, a system pushed to the next page, a second exported system taking its gap, and gap edits while playback runs.

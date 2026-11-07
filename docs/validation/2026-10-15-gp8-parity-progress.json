@@ -1044,13 +1044,13 @@
     "systemgaps_evidence": {
       "path": "docs/validation/2026-11-07-gp8-system-gaps.md",
       "start_line": 14,
-      "end_line": 25,
+      "end_line": 53,
       "kind": "validation_report"
     },
     "systemgaps_limits": {
       "path": "docs/validation/2026-11-07-gp8-system-gaps.md",
-      "start_line": 27,
-      "end_line": 36,
+      "start_line": 55,
+      "end_line": 69,
       "kind": "validation_report"
     },
     "strokes_behavior": {

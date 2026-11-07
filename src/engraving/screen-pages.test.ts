@@ -295,16 +295,18 @@ describe('per-system gaps',()=>{
     expect(shape(stack(undefined))).toBe(plain);expect(shape(stack([]))).toBe(plain);expect(shape(stack([{bar:5000,scale:3}]))).toBe(plain);
   });
   it('moves the chosen system and every block after it on the page by (s-1) x 20 x spacing x scale',()=>{
-    const index=[1,2,3,4,5].find(i=>{const b=blockOf(pagination,i);return b.y>top+1e-9&&blockOf(pagination,i-1).page===b.page;})!;
+    // A system inside a page whose last block leaves room for the largest offset (0.5 x 20 x 2 x scale), so no case changes page.
+    const room=(page_:number)=>Math.max(...pagination.blocks.filter(b=>b.page===page_).map(b=>b.y+b.sourceBounds.h));
+    const index=[1,2,3,4,5,6,7,8].find(i=>{const b=blockOf(pagination,i);return b.y>top+1e-9&&blockOf(pagination,i-1).page===b.page&&room(b.page)+20*2*page.scale<=top+avail;})!;
+    expect(index).toBeDefined();
     for(const [scale,spacing] of [[.5,null],[1.5,null],[1.5,2]] as const) {
       const offset=(scale-1)*20*(spacing??1)*page.scale,result=stack([{bar:bars(index),scale}],spacing);
       const base=blockOf(pagination,index),moved=blockOf(result,index);
-      // Only the case without a page change is asserted on position; fits are covered below.
-      if(moved.page!==base.page)continue;
-      expect(moved.y).toBeCloseTo(base.y+offset);
+      expect(moved.page).toBe(base.page);
       for(const [n,b] of result.blocks.entries()) {
         const old=pagination.blocks[n];
-        if(old.page!==base.page||old.y<base.y-1e-9)expect(b.y).toBeCloseTo(old.y);
+        expect(b.page).toBe(old.page);
+        expect(b.y).toBeCloseTo(old.page===base.page&&old.y>=base.y-1e-9?old.y+offset:old.y);
       }
     }
     const shrunk=stack([{bar:bars(index),scale:.25}]);
@@ -322,6 +324,8 @@ describe('per-system gaps',()=>{
     const base=blockOf(pagination,i),result=stack([{bar:bars(i),scale:4}],4),moved=blockOf(result,i);
     expect(moved.page).toBe(base.page+1);expect(moved.y).toBeCloseTo(top);
     expect(result.pageCount).toBeGreaterThanOrEqual(pagination.pageCount);
-    expect(top+avail).toBeGreaterThan(base.y);
+    // The moved system opens the next page without the offset; the system before it is still on the old page.
+    expect(result.blocks.filter(b=>b.page===moved.page).find(b=>b.system)).toBe(moved);
+    expect(moved.y).toBeCloseTo(top);
   });
 });

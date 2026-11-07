@@ -7,12 +7,17 @@ mod file;
 mod lstm;
 mod model;
 mod raw;
+mod resample;
+mod stage;
 mod wavenet;
 
 pub use file::*;
 pub use model::{NamModel, NamState};
+pub use stage::CaptureStage;
 
 #[cfg(test)]
 mod engine_tests;
+#[cfg(test)]
+mod stage_tests;
 #[cfg(test)]
 mod tests;

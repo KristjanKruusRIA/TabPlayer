@@ -8,7 +8,7 @@ const LSTM_FIXTURE: &[u8] = include_bytes!("../../../tests/fixtures/nam/lstm.nam
 const TRAINER_STANDARD: &[u8] = include_bytes!("../../../tests/fixtures/nam/wavenet_standard.nam");
 const TRAINER_MINIMAL: &[u8] = include_bytes!("../../../tests/fixtures/nam/wavenet_minimal.nam");
 
-fn chirp(n: usize) -> Vec<f32> {
+pub(super) fn chirp(n: usize) -> Vec<f32> {
     // 220 Hz plus 1,370 Hz at 0.3 peak, at 48 kHz.
     (0..n)
         .map(|i| {
@@ -63,7 +63,7 @@ fn lstm_matches_reference_on_fixture() {
     assert!(max_difference(LSTM_FIXTURE, "lstm.nam") <= 1e-5);
 }
 
-fn file_from(spec: WaveNetSpec, weights: Vec<f32>) -> NamFile {
+pub(super) fn file_from(spec: WaveNetSpec, weights: Vec<f32>) -> NamFile {
     let receptive_field = 1 + spec
         .arrays
         .iter()
@@ -82,7 +82,7 @@ fn file_from(spec: WaveNetSpec, weights: Vec<f32>) -> NamFile {
     }
 }
 
-fn one_layer(
+pub(super) fn one_layer(
     kernel: usize,
     dilation: usize,
     activation: Activation,
@@ -197,7 +197,7 @@ fn lcg_weights(n: usize, seed: u64) -> Vec<f64> {
         .collect()
 }
 
-fn random_model_json(
+pub(super) fn random_model_json(
     channels: [usize; 2],
     head: usize,
     dilations: [&[usize]; 2],
@@ -237,7 +237,7 @@ fn parse_expected_count(v: &serde_json::Value) -> usize {
     }
 }
 
-fn random_lstm_json(num_layers: usize, hidden: usize) -> serde_json::Value {
+pub(super) fn random_lstm_json(num_layers: usize, hidden: usize) -> serde_json::Value {
     let mut v = json!({
         "version": "0.5.4",
         "architecture": "LSTM",
@@ -300,10 +300,13 @@ fn random_weight_models_match_reference() {
     }
 }
 
-fn built(v: &serde_json::Value) -> NamModel {
+pub(super) fn built(v: &serde_json::Value) -> NamModel {
     NamModel::build(&parse_nam(&serde_json::to_vec(v).unwrap()).unwrap())
 }
 
+// The mismatch guard is a debug assertion: a debug build panics at the first
+// misuse, a release build returns silence, and that is what this checks.
+#[cfg_attr(debug_assertions, should_panic(expected = "another model"))]
 #[test]
 fn a_state_from_another_model_is_inert() {
     let small = built(&random_model_json([2, 2], 2, [&[1], &[1]], false, "Tanh"));
@@ -339,6 +342,7 @@ fn a_state_from_another_model_is_inert() {
     }
 }
 
+#[cfg_attr(debug_assertions, should_panic(expected = "another model"))]
 #[test]
 fn two_builds_of_one_file_do_not_share_an_identity() {
     let v = random_lstm_json(1, 4);

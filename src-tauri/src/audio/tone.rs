@@ -620,7 +620,7 @@ pub fn flat_shape(rate: f64) -> Shape {
 }
 
 /// The level, at a 0.1 peak and 220 Hz, that the driven amps leave at, before a cabinet.
-const AMP_TARGET: f64 = 0.078;
+pub(crate) const AMP_TARGET: f64 = 0.078;
 /// How much the amps' input raises a sample voice. A chord's attack peaks near 1 in the chain and a held note near 0.03,
 /// so the first stage only clips on a hard attack, and the stages behind its filtering take the sustained gain.
 const PICKUP: f64 = 3.0;

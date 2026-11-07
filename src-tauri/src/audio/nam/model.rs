@@ -16,9 +16,9 @@ enum Kind {
     Lstm(LstmModel),
 }
 
-/// Weights laid out per layer for the inner loops. Share it as `Arc<NamModel>`.
 static NEXT_MODEL_ID: AtomicU64 = AtomicU64::new(1);
 
+/// Weights laid out per layer for the inner loops. Share it as `Arc<NamModel>`.
 pub struct NamModel {
     /// Unique per `build`, so a state can tell which model made it.
     id: u64,
@@ -65,6 +65,13 @@ impl NamModel {
     pub fn prewarm_samples(&self) -> usize {
         self.prewarm_samples
     }
+
+    /// Whether silence drives the state to a bitwise fixed point after
+    /// `receptive_field` zeros. True for WaveNet, whose output depends only on
+    /// that many past inputs; an LSTM's recurrent state need not settle exactly.
+    pub fn settles_exactly(&self) -> bool {
+        matches!(self.kind, Kind::WaveNet(_))
+    }
 }
 
 enum StateKind {
@@ -94,6 +101,7 @@ impl NamState {
     /// (even of the same file) returns silence and is otherwise untouched.
     #[inline]
     pub fn process(&mut self, model: &NamModel, x: f32) -> f32 {
+        debug_assert_eq!(self.model_id, model.id, "state used with another model");
         if self.model_id != model.id {
             return 0.0;
         }
@@ -107,6 +115,7 @@ impl NamState {
     /// Copies another state of the same model into this one, without
     /// allocating. A state made for a different model is left unchanged.
     pub fn snapshot_from(&mut self, other: &NamState) {
+        debug_assert_eq!(self.model_id, other.model_id, "snapshot from another model");
         if self.model_id != other.model_id {
             return;
         }

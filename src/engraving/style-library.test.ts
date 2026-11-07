@@ -57,3 +57,17 @@ it('names follow the same rules as the native store',()=>{
   for(const bad of ['',' ',' pad','pad ','﻿x','x\u0085','x'.repeat(81),'a\u0001b'])expect(styleNameError(bad)).not.toBeNull();
   expect(styleNameError('🎸'.repeat(80))).toBeNull();
 });
+// Temporary (D12 Task 3) until Task 4 adds the version 3 gate: library versions 1 and 2 never carry fonts.
+it('keeps_fonts_out_of_saved_styles_until_the_version_3_gate',async()=>{
+  const document=defaultEngraving();document.fonts={music:'petaluma',roles:{lyrics:{font:'notoSerif'}}};
+  expect('fonts' in styleOf(document)).toBe(false);expect(document.fonts.music).toBe('petaluma');
+  const withFonts=style();withFonts.fonts={roles:{lyrics:{font:'notoSerif'}}};
+  await expect(putStyleLibraryEntry(entry({engraving:withFonts}))).rejects.toThrow('fonts');
+  expect(invoke).not.toHaveBeenCalled();
+  invoke.mockResolvedValueOnce(library([entry({engraving:withFonts})]));
+  await expect(readStyleLibrary()).rejects.toThrow('fonts');
+  // An explicit default is not fonts.
+  const explicit=style();explicit.fonts={};
+  invoke.mockResolvedValueOnce(library([entry({engraving:explicit})]));
+  await expect(readStyleLibrary()).resolves.toBeDefined();
+});

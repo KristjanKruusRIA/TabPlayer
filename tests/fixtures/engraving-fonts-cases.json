@@ -50,6 +50,8 @@
     {"name": "role string", "fonts": {"roles": {"lyrics": "notoSans"}}},
     {"name": "empty role object", "fonts": {"roles": {"lyrics": {}}}},
     {"name": "unknown role", "fonts": {"roles": {"footnote": {"font": "notoSans"}}}},
+    {"name": "role key __proto__", "fonts": {"roles": {"__proto__": {"font": "notoSans"}}}},
+    {"name": "role key constructor", "fonts": {"roles": {"constructor": {"font": "notoSans"}}}},
     {"name": "role key wrong case", "fonts": {"roles": {"Lyrics": {"font": "notoSans"}}}},
     {"name": "unknown role key", "fonts": {"roles": {"lyrics": {"font": "notoSans", "extra": 1}}}},
     {"name": "font null", "fonts": {"roles": {"lyrics": {"font": null}}}},

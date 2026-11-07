@@ -1,10 +1,12 @@
 import { expect,it } from 'vitest';
-import cases from '../../tests/fixtures/engraving-fonts-cases.json';
+import { readFileSync } from 'node:fs';
 import { defaultEngraving,validateEngraving } from './projection';
 import type { EngravingFonts } from './fonts';
 import { FONT_ROLES,fontsOf,isDefaultFonts,sizeRange,validateFonts,withFonts } from './fonts';
 import { defaultTypography,validateTypography } from './typography';
 
+// Read with JSON.parse (not a module import): a bundled object literal would turn a `__proto__` key into a prototype, not an own key.
+const cases=JSON.parse(readFileSync(new URL('../../tests/fixtures/engraving-fonts-cases.json',import.meta.url),'utf8')) as {valid:{name:string;fonts:unknown}[];invalid:{name:string;fonts:unknown}[]};
 const base=()=>defaultEngraving();
 
 it('validation_cases_from_fixture',()=>{

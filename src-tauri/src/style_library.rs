@@ -80,6 +80,11 @@ impl SavedStyle {
         if !self.engraving.system_gaps.is_empty() {
             return Err("A saved style cannot hold system gaps.".into());
         }
+        // Temporary (D12 Task 3): library versions 1 and 2 must never carry fonts, or older builds would call the
+        // file damaged. Task 4 replaces this refusal with the version 3 gate.
+        if !self.engraving.fonts.is_default() {
+            return Err("A saved style cannot hold fonts yet.".into());
+        }
         Ok(())
     }
 }
@@ -374,6 +379,8 @@ mod tests {
             with(&|v| v["engraving"]["profiles"] = json!([{"trackId":"t","profile":"slash"}])),
             with(&|v| v["engraving"]["barWidths"] = json!([{"bar":1,"scale":2.0}])),
             with(&|v| v["engraving"]["systemGaps"] = json!([{"bar":1,"scale":2.0}])),
+            with(&|v| v["engraving"]["fonts"] = json!({"music":"petaluma"})),
+            with(&|v| v["engraving"]["fonts"] = json!({"roles":{"lyrics":{"font":"notoSerif"}}})),
             with(&|v| v["name"] = json!(" pad ")),
             with(&|v| v["id"] = json!("nope")),
             with(&|v| v["extra"] = json!(1)),
@@ -425,6 +432,32 @@ mod tests {
             tab_scale: Some(1.5),
         };
         entry
+    }
+
+    // Temporary (D12 Task 3) until Task 4 adds the version 3 gate: version 1 and 2 files never carry fonts.
+    #[test]
+    fn styles_with_fonts_are_refused_until_the_version_3_gate() {
+        use crate::engraving::{MusicFont, RoleFont, TextFont};
+        let root = tempdir().unwrap();
+        let dir = root.path();
+        put_entry(dir, style(A, "Plain")).unwrap();
+        let before = std::fs::read(file(dir)).unwrap();
+        let mut music = style(B, "Petaluma");
+        music.engraving.fonts.music = MusicFont::Petaluma;
+        let mut role = style(B, "Serif");
+        role.engraving.fonts.roles.lyrics = Some(RoleFont {
+            font: Some(TextFont::NotoSerif),
+            ..RoleFont::default()
+        });
+        for entry in [music, role] {
+            assert!(entry.validate().is_err());
+            assert!(put_entry(dir, entry).is_err());
+            assert_eq!(std::fs::read(file(dir)).unwrap(), before);
+        }
+        // An explicit default is not fonts.
+        let mut explicit = style(B, "Explicit");
+        explicit.engraving.fonts.music = MusicFont::Bravura;
+        put_entry(dir, explicit).unwrap();
     }
 
     #[test]

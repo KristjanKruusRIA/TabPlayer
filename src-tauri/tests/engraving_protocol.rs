@@ -600,7 +600,10 @@ fn fonts_absent_round_trips_byte_identical() {
     let plain = engraving_command();
     let first = serde_json::to_string(&accepted(&plain)).unwrap();
     assert!(!first.contains("fonts"));
-    // The bytes an old line has always produced.
+    // The bytes an old line has always produced. Checked against b4f8d3d (the last commit before D12) without
+    // building it: `git diff b4f8d3d -- src-tauri/src/engraving.rs` has no removed lines, so every existing
+    // struct keeps its field order and attributes, and edit_types.rs and project.rs are unchanged since then.
+    // The new `fonts` field is declared last and skipped while default, so the old serializer emits these same bytes.
     assert_eq!(
         first,
         r#"{"type":"setEngraving","engraving":{"stylesheet":{"hideDynamics":null,"brackets":"inherit","extendBarLines":null,"systemSeparators":null,"tuning":null,"chords":"inherit","singleNames":"inherit","multiNames":"inherit","firstNames":"inherit","otherNames":"inherit","firstNameDirection":"inherit","otherNameDirection":"inherit","barNumbers":"inherit","multiRests":"inherit","hideEmptyStaves":null,"hideEmptyFirstSystem":null,"singleStaffBrackets":null},"notation":{"tabRhythm":"inherit","fingering":"inherit","smallGraceTab":null,"extendBendArrows":null,"extendLineEffects":null,"parenthesizeTiedBends":null,"showTiedBendNumbers":null,"showDiveWhammyZeros":null},"systemSpacing":null,"profiles":[{"trackId":"base/0","profile":"source"}]}}"#
@@ -724,15 +727,38 @@ fn fonts_history_undo_redo_save_reopen() {
         last_fonts(serde_json::to_value(&reopened.snapshot().project).unwrap()),
         Some(chosen)
     );
-    // A malformed fonts edit is refused and records nothing.
-    let before = session.snapshot().project.edits.len();
-    let bad = with_fonts(json!({"roles": {"lyrics": {"bold": true}}}));
+    // Malformed fonts edits go through the real apply path: each is refused and records nothing.
+    let before = session.snapshot();
+    for bad in [
+        json!({"roles": {"lyrics": {"bold": true}}}),
+        json!({"roles": {"lyrics": {}}}),
+        json!({"roles": {"lyrics": {"font": "notoSansMono", "italic": true}}}),
+        json!({"roles": {"lyrics": {"size": 2.01}}}),
+        json!({"roles": {"tabNumbers": {"size": 1.51}}}),
+    ] {
+        let command: EditCommand = serde_json::from_value(with_fonts(bad.clone())).unwrap();
+        assert!(session.apply_edit(command).is_err(), "{bad}");
+        assert_eq!(session.snapshot(), before, "{bad}");
+    }
+    // A shape that does not even parse is refused before it can be applied.
     assert!(
-        serde_json::from_value::<EditCommand>(bad)
-            .map(|command| command.validate().is_err())
-            .unwrap_or(true)
+        serde_json::from_value::<EditCommand>(with_fonts(
+            json!({"roles": {"lyrics": {"font": null}}})
+        ))
+        .is_err()
     );
-    assert_eq!(session.snapshot().project.edits.len(), before);
+    assert_eq!(
+        session.snapshot().project.edits.len(),
+        before.project.edits.len()
+    );
+    // The session still accepts a good fonts edit afterwards.
+    session
+        .apply_edit(accepted(&with_fonts(json!({"music": "leland"}))))
+        .unwrap();
+    assert_eq!(
+        session.snapshot().project.edits.len(),
+        before.project.edits.len() + 1
+    );
 }
 
 #[test]

@@ -131,14 +131,14 @@ impl RoleFont {
             return Err("A role font must set at least one field.".into());
         }
         // Tab numbers keep the narrower range of the tab number scale.
-        let (low, high) = if role == "tabNumbers" {
-            (0.75, 1.5)
+        let range = if role == "tabNumbers" {
+            TAB_SCALE_RANGE
         } else {
-            (0.5, 2.0)
+            TEXT_SCALE_RANGE
         };
         if self
             .size
-            .is_some_and(|size| !size.is_finite() || !(low..=high).contains(&size))
+            .is_some_and(|size| !size.is_finite() || !range.contains(&size))
         {
             return Err("A role font size is outside its supported range.".into());
         }
@@ -271,6 +271,10 @@ pub struct EngravingNotation {
     pub show_dive_whammy_zeros: Option<bool>,
 }
 
+/// The supported size scales, shared by the typography scales and the font role sizes (TypeScript: `TEXT_SCALE_RANGE`, `TAB_SCALE_RANGE`).
+const TEXT_SCALE_RANGE: std::ops::RangeInclusive<f64> = 0.5..=2.0;
+const TAB_SCALE_RANGE: std::ops::RangeInclusive<f64> = 0.75..=1.5;
+
 /// Text font family and size scales. `None` and `Inherit` keep the renderer defaults.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -290,12 +294,12 @@ impl EngravingTypography {
     }
 
     pub fn validate(&self) -> Result<(), String> {
-        let fits = |value: Option<f64>, low: f64, high: f64| {
-            value.is_none_or(|value| value.is_finite() && (low..=high).contains(&value))
+        let fits = |value: Option<f64>, range: std::ops::RangeInclusive<f64>| {
+            value.is_none_or(|value| value.is_finite() && range.contains(&value))
         };
-        if !fits(self.text_scale, 0.5, 2.0)
-            || !fits(self.title_scale, 0.5, 2.0)
-            || !fits(self.tab_scale, 0.75, 1.5)
+        if !fits(self.text_scale, TEXT_SCALE_RANGE)
+            || !fits(self.title_scale, TEXT_SCALE_RANGE)
+            || !fits(self.tab_scale, TAB_SCALE_RANGE)
         {
             return Err("Typography scales must be null or within their supported range.".into());
         }

@@ -850,8 +850,9 @@ fn synthetic_standard_nam() -> Vec<u8> {
     serde_json::to_vec(&model).unwrap()
 }
 fn nam_bench_bytes(path: &str, bytes: &[u8]) {
-    use tabplayer_lib::audio::nam::{NamModel, NamState, parse_nam};
+    use tabplayer_lib::audio::nam::{NamModel, NamState, macs_per_sample, parse_nam};
     let file = parse_nam(bytes).unwrap();
+    let macs = macs_per_sample(file.spec());
     let model = NamModel::build(&file);
     let mut state = NamState::new(&model);
     state.prewarm(&model);
@@ -870,9 +871,10 @@ fn nam_bench_bytes(path: &str, bytes: &[u8]) {
     }
     let per_sample = best / samples as f64 * 1e6;
     println!(
-        "{path}: {per_sample:.3} us/sample, {:.1}x real time at {} Hz (check {guard:.3})",
+        "{path}: {per_sample:.3} us/sample, {:.1}x real time at {} Hz, {macs} estimated MACs/sample, {:.2} GMAC/s (check {guard:.3})",
         samples as f64 / RATE as f64 / best,
-        model.model_rate()
+        model.model_rate(),
+        macs as f64 / per_sample / 1e3
     );
 }
 fn main() {

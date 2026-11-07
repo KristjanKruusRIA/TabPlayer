@@ -240,3 +240,38 @@ fn a_read_that_fails_is_not_cached() {
     // The file is untouched, so its stamp is the same, and it now reads.
     assert!(library.model(&id).is_ok());
 }
+
+/// A WaveNet inside every size cap that costs about 115 times the standard model per sample.
+fn too_heavy() -> Vec<u8> {
+    let v = serde_json::json!({
+        "version": "0.5.4", "architecture": "WaveNet",
+        "config": {"layers": [{
+            "input_size": 1, "condition_size": 1, "head_size": 1, "channels": 64,
+            "kernel_size": 3, "dilations": vec![1; 32], "activation": "Tanh",
+            "gated": false, "head_bias": false
+        }], "head": null, "head_scale": 0.02},
+        "weights": vec![0.0; 64 + 32 * (12_288 + 64 + 64 + 4_096 + 64) + 64 + 1],
+    });
+    serde_json::to_vec(&v).unwrap()
+}
+
+#[test]
+fn a_capture_too_heavy_to_play_is_refused_at_import_and_unsupported_in_the_library() {
+    let (_dir, library) = library();
+    let bytes = too_heavy();
+    let problem = library.import_bytes(&bytes, "heavy.nam").unwrap_err();
+    assert_eq!(problem.kind, ProblemKind::Unsupported);
+    assert_eq!(
+        problem.message,
+        "This capture is too heavy to play in real time"
+    );
+    assert!(library.list().is_empty());
+    // One that reached the folder some other way is unsupported, not unreadable.
+    let id = plant(&library, &bytes);
+    let status = library.status(&[id]);
+    assert_eq!(status[0].state, "unsupported");
+    assert_eq!(
+        status[0].message.as_deref(),
+        Some("This capture is too heavy to play in real time")
+    );
+}

@@ -5,6 +5,7 @@
 //! computed from the config, and must equal what the forward pass consumes,
 //! before the `weights` array is converted.
 
+use super::cost::within_budget;
 use super::raw::{Scalar, read_root};
 use serde_json::{Map, Value};
 
@@ -18,8 +19,12 @@ pub const MAX_CHANNELS: usize = 64;
 pub const MAX_HEAD_SIZE: usize = 64;
 pub const MAX_KERNEL_SIZE: usize = 8;
 pub const MAX_DILATION: usize = 4096;
-/// Cap on the sum over layers of `channels * (kernel_size - 1) * dilation`.
-pub const MAX_RING_FLOATS: usize = 4_000_000;
+/// Cap on the sum over layers of `channels * (kernel_size - 1) * dilation`: the floats of history the model keeps.
+/// The standard official A1 WaveNet needs 49,104 (lite, feather and nano fewer), so this is 2.7 times that. It also
+/// bounds prewarm, which feeds the receptive field of zeros through the model: with the cost budget in `cost`, the
+/// worst model that passes both takes about 1.2 billion multiply-adds to prewarm, a fraction of a second off the
+/// audio thread. The old 4,000,000 allowed more than thirty times that.
+pub const MAX_RING_FLOATS: usize = 131_072;
 pub const MAX_WEIGHTS: usize = 2_000_000;
 pub const MAX_LSTM_LAYERS: usize = 4;
 pub const MAX_LSTM_HIDDEN: usize = 64;
@@ -105,8 +110,13 @@ pub enum NamError {
     UnsupportedVersion(String),
     UnsupportedArchitecture(String),
     Invalid(&'static str),
-    WeightCount { expected: usize, found: usize },
+    WeightCount {
+        expected: usize,
+        found: usize,
+    },
     NonFinite,
+    /// Within every cap, but needs more multiply-adds per second than `MAX_MACS_PER_SECOND`.
+    TooHeavy,
 }
 
 impl std::fmt::Display for NamError {
@@ -124,6 +134,7 @@ impl std::fmt::Display for NamError {
                 write!(f, "NAM file has {found} weights, expected {expected}")
             }
             NamError::NonFinite => write!(f, "NAM file has a weight that is not finite"),
+            NamError::TooHeavy => write!(f, "This capture is too heavy to play in real time"),
         }
     }
 }
@@ -173,6 +184,10 @@ pub fn parse_nam(bytes: &[u8]) -> Result<NamFile, NamError> {
 
     if expected > MAX_WEIGHTS {
         return Err(NamError::Invalid("too many weights"));
+    }
+    // Memory is bounded by the caps; time is bounded here, from the architecture, before the weights are used.
+    if !within_budget(&spec, model_rate) {
+        return Err(NamError::TooHeavy);
     }
     if weights.len() != expected {
         return Err(NamError::WeightCount {

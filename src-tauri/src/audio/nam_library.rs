@@ -59,9 +59,9 @@ impl CaptureProblem {
     }
     fn from_nam(error: NamError) -> Self {
         let kind = match error {
-            NamError::UnsupportedArchitecture(_) | NamError::UnsupportedVersion(_) => {
-                ProblemKind::Unsupported
-            }
+            NamError::UnsupportedArchitecture(_)
+            | NamError::UnsupportedVersion(_)
+            | NamError::TooHeavy => ProblemKind::Unsupported,
             _ => ProblemKind::Unreadable,
         };
         Self::new(kind, error.to_string())

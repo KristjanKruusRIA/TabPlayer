@@ -52,25 +52,33 @@ export function codePoints(bytes) {
   if (!inCmap(cmapOffset + 4, numSubtables * 8)) fail('cmap encoding records run past the table');
 
   const result = new Set();
-  const done = new Set();
+  // Read ONE subtable, so a hostile file cannot multiply the work by repeating full-range subtables.
+  // Preference: Windows full repertoire (3/10), Unicode 4 or 6, Windows BMP (3/1), Unicode 3, other Unicode.
+  let best = null;
   for (let i = 0; i < numSubtables; i += 1) {
     const record = cmapOffset + 4 + i * 8;
     const platform = u16(record);
     const encoding = u16(record + 2);
-    // Unicode platform, or Windows Unicode BMP (3/1) and full repertoire (3/10).
-    if (!(platform === 0 || (platform === 3 && (encoding === 1 || encoding === 10)))) continue;
+    let rank;
+    if (platform === 3 && encoding === 10) rank = 0;
+    else if (platform === 0 && (encoding === 4 || encoding === 6)) rank = 1;
+    else if (platform === 3 && encoding === 1) rank = 2;
+    else if (platform === 0 && encoding === 3) rank = 3;
+    else if (platform === 0) rank = 4;
+    else continue;
+    if (best && best.rank <= rank) continue;
     const subtable = cmapOffset + u32(record + 4);
-    if (done.has(subtable)) continue;
-    done.add(subtable);
     if (!inCmap(subtable, 4)) fail('cmap subtable offset outside the table');
     const format = u16(subtable);
-    if (format === 4) readFormat4(subtable);
-    else if (format === 12) readFormat12(subtable);
+    if (format === 4 || format === 12) best = { rank, subtable, format };
   }
+  if (best) (best.format === 4 ? readFormat4 : readFormat12)(best.subtable);
   return result;
 
   function readFormat4(start) {
     if (!inCmap(start, 16)) fail('format 4 header runs past the table');
+    // The length field is 16 bits: a font whose format 4 table exceeds 64 KB wraps it and is rejected here.
+    // The pinned fonts are well under that.
     const tableLength = u16(start + 2);
     if (tableLength < 16 || !inCmap(start, tableLength)) fail('format 4 length outside the table');
     const end = start + tableLength;
@@ -87,8 +95,9 @@ export function codePoints(bytes) {
       const last = u16(endCodes + s * 2);
       const first = u16(startCodes + s * 2);
       if (first > last) fail('format 4 segment start after end');
-      if (last <= previousEnd && !(last === 0xffff && previousEnd === 0xffff)) fail('format 4 segments not in ascending order');
-      if (first <= previousEnd && previousEnd !== -1) fail('format 4 segments overlap');
+      // Strictly ascending, so the single 0xFFFF terminator is the last segment and cannot repeat.
+      if (last <= previousEnd) fail('format 4 segments not in ascending order');
+      if (first <= previousEnd) fail('format 4 segments overlap');
       previousEnd = last;
       if (first === 0xffff) continue; // the terminating segment
       const delta = u16(idDeltas + s * 2);

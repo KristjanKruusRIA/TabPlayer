@@ -91,7 +91,7 @@ test('notices_name_every_bundled_font',()=>{
   for(const family of new Set(sources.map(entry=>entry.family)))assert.ok(notices.includes(family),`THIRD_PARTY_NOTICES.md does not name ${family}`);
   assert.match(notices,/Reserved Font Name[^.]*Leland|Leland[^.]*Reserved Font Name/);
   assert.match(notices,/Petaluma[^.]*2018/);
-  assert.match(notices,/2021/);
+  assert.match(notices,/Petaluma[^]*?2021/);
 });
 
 test('licence_and_metadata_files_exist',()=>{
@@ -144,10 +144,52 @@ test('cmap_reader_rejects_truncated_and_garbage_fonts',{timeout:20000},()=>{
   const f4=new Uint8Array(32);const fv=new DataView(f4.buffer);fv.setUint16(0,4);fv.setUint16(2,32);fv.setUint16(6,4);
   fv.setUint16(14,0x41);fv.setUint16(16,0xffff);fv.setUint16(20,0x41);fv.setUint16(22,0xffff);fv.setUint16(28,0xfff0);
   throwsMalformed(sfnt(cmapWith(f4)));
-  // Seeded garbage behind a valid header never hangs and only ever throws a clear error.
+  // Seeded garbage in the subtable behind a valid header: a single 3/10 record at offset 12, format 4 and 12 alternating.
   let seed=12345;const next=()=>(seed=(Math.imul(seed,1103515245)+12345)>>>0)>>>8&0xff;
-  for(let round=0;round<300;round++){
-    const body=Uint8Array.from({length:40+round},next);
-    try{codePoints(sfnt(body))}catch(error){assert.ok(error instanceof Error&&/Malformed font/.test(error.message),String(error))}
+  let rejected=0;
+  for(let round=0;round<400;round++){
+    const subtable=Uint8Array.from({length:30+round},next);
+    subtable[0]=0;subtable[1]=round%2===0?4:12;
+    const cmap=new Uint8Array(12+subtable.length);const cv=new DataView(cmap.buffer);
+    cv.setUint16(2,1);cv.setUint16(4,3);cv.setUint16(6,10);cv.setUint32(8,12);cmap.set(subtable,12);
+    try{codePoints(sfnt(cmap))}catch(error){rejected++;assert.ok(error instanceof Error&&/Malformed font/.test(error.message),String(error))}
   }
+  assert.ok(rejected>200,`only ${rejected} garbage rounds were rejected`);
+});
+
+test('cmap_reader_bounds_work_across_many_full_range_subtables',{timeout:20000},()=>{
+  // 256 distinct format 12 subtables, each one group spanning all of Unicode: reading them all would take seconds.
+  const count=256,size=28;
+  const cmap=new Uint8Array(4+count*8+count*size);const view=new DataView(cmap.buffer);
+  view.setUint16(2,count);
+  for(let i=0;i<count;i++){
+    const record=4+i*8,at=4+count*8+i*size;
+    view.setUint16(record,3);view.setUint16(record+2,10);view.setUint32(record+4,at);
+    view.setUint16(at,12);view.setUint32(at+4,size);view.setUint32(at+12,1);view.setUint32(at+16,0);view.setUint32(at+20,0x10ffff);view.setUint32(at+24,1);
+  }
+  const start=performance.now();
+  const result=codePoints(sfnt(cmap));
+  assert.ok(performance.now()-start<2000,'reading took too long');
+  assert.equal(result.size,0x110000); // glyph 1 from code point 0 onward, so every code point is covered
+});
+
+test('cmap_reader_returns_exact_sets_for_hand_built_tables',()=>{
+  // Format 4: an idDelta segment that wraps past 0xFFFF (0x41 maps to glyph 0 and is not covered), an idRangeOffset
+  // segment whose middle glyph index is 0 (not covered), and the 0xFFFF terminator.
+  const f4=new Uint8Array(46);const v4=new DataView(f4.buffer);
+  v4.setUint16(0,4);v4.setUint16(2,46);v4.setUint16(6,6);
+  [0x43,0x102,0xffff].forEach((value,s)=>v4.setUint16(14+s*2,value));
+  [0x41,0x100,0xffff].forEach((value,s)=>v4.setUint16(22+s*2,value));
+  [0xffbf,0,1].forEach((value,s)=>v4.setUint16(28+s*2,value));
+  [0,4,0].forEach((value,s)=>v4.setUint16(34+s*2,value));
+  [5,0,7].forEach((value,s)=>v4.setUint16(40+s*2,value));
+  assert.deepEqual(codePoints(sfnt(cmapWith(f4))),new Set([0x42,0x43,0x100,0x102]));
+  // Format 12: two groups, the first starting at glyph 0 so its first code point is not covered.
+  const f12=new Uint8Array(40);const v12=new DataView(f12.buffer);
+  v12.setUint16(0,12);v12.setUint32(4,40);v12.setUint32(12,2);
+  [[0x41,0x43,0],[0x1f600,0x1f601,10]].forEach(([first,last,glyph],g)=>{v12.setUint32(16+g*12,first);v12.setUint32(20+g*12,last);v12.setUint32(24+g*12,glyph)});
+  assert.deepEqual(codePoints(sfnt(cmapWith(f12))),new Set([0x42,0x43,0x1f600,0x1f601]));
+  // A repeated terminator is not a valid format 4 table.
+  const repeated=new Uint8Array(f4);const rv=new DataView(repeated.buffer);rv.setUint16(16,0xffff);rv.setUint16(24,0xffff);
+  throwsMalformed(sfnt(cmapWith(repeated)));
 });

@@ -1869,3 +1869,149 @@ describe('entry key queue',()=>{
     }finally{log.mockRestore();}
   });
 });
+
+describe('GP8 edit and cursor keys',()=>{
+  const pane=()=>screen.getByRole('region',{name:'Score workspace'});
+  const press=(init:Parameters<typeof fireEvent.keyDown>[1])=>fireEvent.keyDown(pane(),init);
+  const edits=(c:DocumentController)=>c.getState().snapshot.project.edits;
+  const quiet=()=>new Promise(resolve=>setTimeout(resolve,30));
+  const cursor=()=>(engravingView.mock.lastCall![0] as {editTarget:{bar:number;beat:number}}).editTarget;
+  const selection=()=>(engravingView.mock.lastCall![0] as {editorSelection:{kind:string}|null}).editorSelection;
+  const at=(beat:number,bar=0)=>({track:0,staff:0,bar,voice:0,beat});
+  const withNotes=(...more:EditCommand[])=>({...blankProject(),edits:[{type:'setNote',target:at(0),string:6,fret:3},{type:'setNote',target:at(0),string:5,fret:2},...more] as EditCommand[]});
+  const bars=(c:DocumentController)=>c.getState().score.masterBars.length;
+  const beatsIn=(c:DocumentController,bar=0)=>c.getState().score.tracks[0].staves[0].bars[bar].voices[0].beats.length;
+  function holdEdits(c:DocumentController){
+    const bridge=documentBridges.get(c.getState().documentId)!,original=bridge.applyEdit.bind(bridge);
+    const held:{pass:()=>void}[]=[];
+    vi.spyOn(bridge,'applyEdit').mockImplementation((command,expected,token)=>new Promise((resolve,reject)=>{held.push({pass:()=>void original(command,expected,token).then(resolve,reject)});}));
+    return {held,next:async()=>{await waitFor(()=>expect(held.length).toBeGreaterThan(0));held.shift()!.pass();}};
+  }
+  it('Backspace deletes the note on the active string as one undoable edit, and records nothing where there is none',async()=>{
+    const c=await setup(withNotes());
+    press({key:'Backspace'});
+    await waitFor(()=>expect(edits(c)).toHaveLength(3));
+    expect(edits(c)[2]).toMatchObject({type:'removeNote',target:at(0),string:6});
+    expect(currentBeat(c).notes.map(note=>note.string)).toEqual([5]);
+    await quiet();
+    press({key:'Backspace'});
+    expect(await screen.findByText('There is no note here to delete.')).toBeInTheDocument();
+    await quiet();expect(edits(c)).toHaveLength(3);
+    press({key:'z',ctrlKey:true});
+    await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(2));
+  });
+  it('Backspace removes the selected note of a percussion staff by its index',async()=>{
+    const c=await setup({...blankProject(),edits:[{type:'addPercussionTrack',name:'Drums',program:0},{type:'addPercussionNote',target:{track:1,staff:0,bar:0,voice:0,beat:0},articulation:36}]});
+    fireEvent.click(within(screen.getByRole('grid',{name:'Written measure overview'})).getByRole('gridcell',{name:/Drums, measure 1/}));
+    press({key:'Backspace'});
+    await waitFor(()=>expect(edits(c)).toHaveLength(3));
+    expect(edits(c)[2]).toMatchObject({type:'removeNoteByIndex',noteIndex:0});
+  });
+  it('Shift+Delete deletes the cursor beat as one edit, and refuses a selection of several beats',async()=>{
+    const c=await setup(withNotes()),before=beatsIn(c);
+    press({key:'ArrowRight',shiftKey:true});
+    expect(selection()?.kind).toBe('range');
+    press({key:'Delete',shiftKey:true});
+    expect(await screen.findByText(/removes one beat at a time, and the selection holds 2/)).toBeInTheDocument();
+    await quiet();expect(edits(c)).toHaveLength(2);expect(selection()?.kind).toBe('range');
+    press({key:'Escape'});
+    press({key:'Delete',shiftKey:true});
+    await waitFor(()=>expect(edits(c)).toHaveLength(3));
+    expect(edits(c)[2]).toEqual({type:'deleteBeat',target:at(1)});
+    expect(beatsIn(c)).toBe(before-1);
+  });
+  it('Shift+Delete deletes a selection of exactly one beat',async()=>{
+    const c=await setup(withNotes());
+    press({key:'ArrowRight'});press({key:'ArrowRight',shiftKey:true});press({key:'ArrowLeft',shiftKey:true});
+    press({key:'Delete',shiftKey:true});
+    await waitFor(()=>expect(edits(c)).toHaveLength(3));
+    expect(edits(c)[2]).toMatchObject({type:'deleteBeat'});
+  });
+  it('Ctrl+Insert inserts a beat before the cursor like the palette command',async()=>{
+    const c=await setup(withNotes({type:'setDuration',target:at(0),duration:8,dots:0})),before=beatsIn(c);
+    press({key:'Insert',ctrlKey:true});
+    await waitFor(()=>expect(edits(c)).toHaveLength(4));
+    expect(edits(c)[3]).toMatchObject({type:'insertBeat',target:at(0)});
+    expect(beatsIn(c)).toBe(before+1);
+    press({key:'Insert'});await quiet();expect(edits(c)).toHaveLength(4);
+  });
+  it('Ctrl+Shift+Delete clears the selection notes through eraseSelection, and records nothing without a selection or notes',async()=>{
+    const c=await setup(withNotes());
+    press({key:'Delete',ctrlKey:true,shiftKey:true});
+    expect(await screen.findByText('Select some music first to clear its notes.')).toBeInTheDocument();
+    await quiet();expect(edits(c)).toHaveLength(2);
+    press({key:'ArrowRight'});press({key:'ArrowRight',shiftKey:true});
+    press({key:'Delete',ctrlKey:true,shiftKey:true});
+    expect(await screen.findByText('The selection has no notes to clear.')).toBeInTheDocument();
+    await quiet();expect(edits(c)).toHaveLength(2);
+    press({key:'Escape'});press({key:'Home'});press({key:'ArrowRight',shiftKey:true});
+    press({key:'Delete',ctrlKey:true,shiftKey:true});
+    await waitFor(()=>expect(edits(c)).toHaveLength(3));
+    expect(edits(c)[2]).toMatchObject({type:'eraseSelection'});
+    expect(currentBeat(c).notes).toHaveLength(0);expect(selection()).toBeNull();
+  });
+  it('leaves Del alone to do what it did before',async()=>{
+    const c=await setup(withNotes());
+    press({key:'Delete'});await quiet();expect(edits(c)).toHaveLength(2);
+  });
+  it('Home and End go to the first and last beat of the bar; Ctrl+Home and Ctrl+End to the first and last bar',async()=>{
+    const c=await setup(),last=beatsIn(c)-1;
+    press({key:'End'});expect(cursor()).toMatchObject({bar:0,beat:last});
+    press({key:'Home'});expect(cursor()).toMatchObject({bar:0,beat:0});
+    press({key:'End',ctrlKey:true});expect(cursor()).toMatchObject({bar:bars(c)-1,beat:0});
+    press({key:'End'});expect(cursor()).toMatchObject({bar:bars(c)-1,beat:beatsIn(c,bars(c)-1)-1});
+    press({key:'Home',ctrlKey:true});expect(cursor()).toMatchObject({bar:0,beat:0});
+    expect(edits(c)).toEqual([]);
+  });
+  it('Shift+Home and Shift+End extend the selection to the bar edges',async()=>{
+    const c=await setup();
+    press({key:'ArrowRight'});
+    press({key:'End',shiftKey:true});
+    expect(selection()?.kind).toBe('range');expect(cursor()).toMatchObject({bar:0,beat:beatsIn(c)-1});
+    press({key:'Home',shiftKey:true});
+    expect(selection()?.kind).toBe('range');expect(cursor()).toMatchObject({bar:0,beat:0});
+    press({key:'Home'});expect(selection()).toBeNull();
+    expect(edits(c)).toEqual([]);
+  });
+  it('refuses the edit keys on a finalized score with the lock message, while the cursor keys still move',async()=>{
+    const c=await setup(withNotes());
+    await act(async()=>{await c.setLock({kind:'finalized'});});
+    for(const key of [{key:'Backspace'},{key:'Delete',shiftKey:true},{key:'Insert',ctrlKey:true},{key:'Delete',ctrlKey:true,shiftKey:true}]){
+      press(key);expect(await screen.findByText(FINALIZED_MESSAGE)).toBeInTheDocument();
+    }
+    await quiet();expect(edits(c)).toHaveLength(2);
+    press({key:'End'});expect(cursor().beat).toBe(beatsIn(c)-1);
+  });
+  it('refuses an edit key behind an edit in flight and behind waiting entry keys, without queueing it',async()=>{
+    window.localStorage.removeItem(inputKey);
+    const c=await setup(withNotes({type:'setDuration',target:at(0),duration:8,dots:0})),hold=holdEdits(c);
+    press({key:'Insert',ctrlKey:true});
+    await waitFor(()=>expect(hold.held).toHaveLength(1));
+    press({key:'Backspace'});
+    expect(screen.getByText(/Still entering the previous note/)).toBeInTheDocument();
+    await hold.next();await waitFor(()=>expect(edits(c)).toHaveLength(4));
+    await quiet();expect(hold.held).toHaveLength(0);expect(edits(c)).toHaveLength(4);
+    // A waiting entry key counts too.
+    press({key:'n'});press({key:'e'});press({key:'g'});
+    await waitFor(()=>expect(hold.held).toHaveLength(1));
+    press({key:'Delete',shiftKey:true});
+    expect(screen.getAllByText(/Still entering the previous note/).length).toBeGreaterThan(0);
+    await hold.next();await waitFor(()=>expect(hold.held).toHaveLength(1));await hold.next();
+    await waitFor(()=>expect(edits(c)).toHaveLength(6));
+    expect(edits(c).some(edit=>edit.type==='deleteBeat')).toBe(false);
+  });
+  it('a cursor key drops the keys that wait for the old cursor',async()=>{
+    window.localStorage.removeItem(inputKey);
+    const c=await setup(),hold=holdEdits(c);
+    press({key:'n'});press({key:'e'});press({key:'g'});
+    await waitFor(()=>expect(hold.held).toHaveLength(1));
+    press({key:'Home',ctrlKey:true});
+    await hold.next();await waitFor(()=>expect(edits(c)).toHaveLength(1));
+    await quiet();expect(hold.held).toHaveLength(0);expect(edits(c)).toHaveLength(1);
+  });
+  it('ignores the keys while focus is in a text field',async()=>{
+    const c=await setup(withNotes());
+    for(const key of [{key:'Backspace'},{key:'Delete',shiftKey:true},{key:'Insert',ctrlKey:true},{key:'Delete',ctrlKey:true,shiftKey:true},{key:'End'}])fireEvent.keyDown(screen.getByLabelText('Fret'),key);
+    await quiet();expect(edits(c)).toHaveLength(2);expect(cursor().beat).toBe(0);
+  });
+});

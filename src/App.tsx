@@ -51,7 +51,8 @@ import { readPanelSizes,writePanelSizes } from './workstation/panel-sizes';
 import { LiveInstrumentView } from './instruments/LiveInstrumentView';
 import { followEntry, type EntryFollow } from './instruments/entry';
 import type { MusicSelection } from './editor/range-types';
-import { rangeFromBeats,selectionForTrack } from './editor/range-selection';
+import { rangeFromBeats,resolveSelectionBeats,resolveSelectionNotes,selectionForTrack } from './editor/range-selection';
+import { beatAddress,gp8CursorTarget,gp8Key } from './editor/gp8-keys';
 import { planMeasureMap } from './editor/measures';
 import { ClipboardStore } from './editor/ClipboardStore';
 import { useI18n, type LanguagePreference, type MessageKey } from './i18n';
@@ -611,6 +612,32 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   useEffect(()=>{clearEntryQueue();},[noteEntryOn,view]);
   useEffect(()=>{if(entryQueue.current.length)discardEntryQueue(null,'dropped');},[editLocked,state.documentEpoch,state.documentId]);
   useEffect(()=>{ownEdits.current-=unseenSettles.current;unseenSettles.current=0;drainNow.current();},[settled,controlsBusy,workspaceBusy,editLocked,state.documentEpoch,state.documentId]);
+  /** Backspace, Shift+Delete, Ctrl+Insert and Ctrl+Shift+Delete: edits that already exist, on the cursor or the selection. They never wait in the entry queue; behind waiting keys or an edit in flight they are refused. */
+  const gp8Edit=(kind:'removeNote'|'deleteBeats'|'insertBeat'|'eraseNotes')=>{
+    const at=JSON.stringify(target);
+    if(view!=='score')return;
+    if(editLocked){refuse(lockedMessage,at);return;}
+    if(refusing.current||entryQueue.current.length||ownEdits.current>0||controlsBusy){setInputNotice({text:t('editor.entry_busy'),at});return;}
+    setInputNotice(null);
+    if(kind==='insertBeat'){const beat=location.beat;void edit({type:'insertBeat',target,duration:beat?.duration??4,dots:beat?.dots??0});return;}
+    if(kind==='removeNote'){
+      const beat=location.beat,note=beat?(indexed?selectedNote(beat,null,noteIndex):beat.notes.find(item=>item.string===string)):null;
+      if(!note){setInputNotice({text:t('editor.gp8_no_note'),at});return;}
+      void edit(indexed?{type:'removeNoteByIndex',target,noteIndex:note.index}:{type:'removeNote',target,string:note.string});return;
+    }
+    if(kind==='deleteBeats'){
+      let beats:model.Beat[];
+      try{beats=musicSelection?resolveSelectionBeats(state.score,musicSelection):location.beat?[location.beat]:[];}catch{beats=[];}
+      // `deleteBeat` is not a step a `sequence` may hold, so several beats cannot be one edit: refuse rather than split the gesture.
+      if(beats.length>1){setInputNotice({text:t('editor.gp8_delete_many',{count:beats.length}),at});return;}
+      if(!beats.length){setInputNotice({text:t('editor.gp8_no_beat'),at});return;}
+      void edit({type:'deleteBeat',target:beatAddress(beats[0])});return;
+    }
+    let notes:model.Note[];
+    try{notes=musicSelection?resolveSelectionNotes(state.score,musicSelection):[];}catch{notes=[];}
+    if(!musicSelection||!notes.length){setInputNotice({text:t(musicSelection?'editor.gp8_no_notes':'editor.gp8_no_selection'),at});return;}
+    void edit({type:'eraseSelection',selection:musicSelection});
+  };
   function keys(event:KeyboardEvent) {
     if (textEntry(event.target)||(event.target as HTMLElement).tagName==='BUTTON') return;
     // The Menu key and Shift+F10 open the score-symbol menu at the edit target, as a right-click does on the score.
@@ -628,7 +655,18 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
       return;
     }
     if(view==='score'&&(event.key==='n'||event.key==='N')&&!event.ctrlKey&&!event.metaKey&&!event.altKey){event.preventDefault();if(!event.repeat)setNoteEntryOn(on=>!on);return;}
+    const gp8=view==='score'?gp8Key(event):null;
+    if(gp8?.kind==='edit'){event.preventDefault();if(!event.repeat)gp8Edit(gp8.edit);return;}
     let next={...target};
+    if(gp8?.kind==='cursor') {
+      next=gp8CursorTarget(gp8.edge,target,location.voice.beats.length,state.score.masterBars.length);
+      if(gp8.extend){
+        const anchor=rangeAnchor.current??target;
+        try{setMusicSelection({kind:'range',range:rangeFromBeats(state.score,anchor,next,[{track:target.track,staff:target.staff,voice:target.voice}])});rangeAnchor.current=anchor;}catch{ /* An empty voice has no attack endpoint. */ }
+        select(next);event.preventDefault();return;
+      }
+      editorSelection(null);select(next);event.preventDefault();return;
+    }
     if(event.key==='ArrowRight') {
       if(next.beat<location.voice.beats.length-1) next.beat++;
       else if(next.bar<state.score.masterBars.length-1) {next.bar++;next.beat=0;}
@@ -759,7 +797,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
       <h2>{t('help.keyboard_editing_heading')}</h2><p>{t('help.keyboard_editing_intro')}</p>
       <dl><dt>Ctrl/Cmd + N / O</dt><dd>{t('help.shortcut_new_open')}</dd><dt>Ctrl/Cmd + S</dt><dd>{t('help.shortcut_save')}</dd><dt>Ctrl/Cmd + W</dt><dd>{t('help.shortcut_close')}</dd><dt>Ctrl/Cmd + Tab</dt><dd>{t('help.shortcut_next_score')}</dd><dt>Ctrl/Cmd + Z</dt><dd>{t('help.shortcut_undo_redo')}</dd><dt>Space</dt><dd>{t('help.shortcut_play')}</dd><dt>Ctrl/Cmd + Shift + P</dt><dd>{t('help.shortcut_palette')}</dd></dl>
       <button type="button" onClick={openPalette}>{t('help.open_command_palette')}</button>
-      <h3>{t('help.score_focused_heading')}</h3><dl><dt>Left / Right</dt><dd>{t('help.shortcut_beat')}</dd><dt>Up / Down</dt><dd>{t('help.shortcut_string')}</dd><dt>Digits, then Enter</dt><dd>{t('help.shortcut_fret')}</dd><dt>Shift + Left/Right</dt><dd>{t('help.shortcut_selection')}</dd><dt>Ctrl/Cmd + A</dt><dd>{t('help.shortcut_select_track')}</dd><dt>Ctrl/Cmd + T</dt><dd>Tie the selected notes to the notes before them, giving each the earlier fret. Add Shift to untie.</dd><dt>Ctrl/Cmd + C / X / V</dt><dd>{t('help.shortcut_clipboard')}</dd><dt>Escape</dt><dd>{t('help.shortcut_clear')}</dd><dt>N</dt><dd>{t('help.shortcut_note_entry')}</dd><dt>Ctrl+Alt, Alt+Shift or Ctrl+Shift + Up/Down</dt><dd>{t('help.shortcut_note_move')}</dd><dt>Ctrl/Cmd + 7 / 8 / 9, with Alt</dt><dd>{t('help.shortcut_accidental')}</dd></dl>
+      <h3>{t('help.score_focused_heading')}</h3><dl><dt>Left / Right</dt><dd>{t('help.shortcut_beat')}</dd><dt>Up / Down</dt><dd>{t('help.shortcut_string')}</dd><dt>Digits, then Enter</dt><dd>{t('help.shortcut_fret')}</dd><dt>Shift + Left/Right</dt><dd>{t('help.shortcut_selection')}</dd><dt>Ctrl/Cmd + A</dt><dd>{t('help.shortcut_select_track')}</dd><dt>Ctrl/Cmd + T</dt><dd>Tie the selected notes to the notes before them, giving each the earlier fret. Add Shift to untie.</dd><dt>Ctrl/Cmd + C / X / V</dt><dd>{t('help.shortcut_clipboard')}</dd><dt>Escape</dt><dd>{t('help.shortcut_clear')}</dd><dt>N</dt><dd>{t('help.shortcut_note_entry')}</dd><dt>Ctrl+Alt, Alt+Shift or Ctrl+Shift + Up/Down</dt><dd>{t('help.shortcut_note_move')}</dd><dt>Ctrl/Cmd + 7 / 8 / 9, with Alt</dt><dd>{t('help.shortcut_accidental')}</dd><dt>Backspace, Shift + Delete, Ctrl + Insert, Ctrl + Shift + Delete</dt><dd>{t('help.shortcut_gp8_edit')}</dd><dt>Home / End, Ctrl + Home / End, Shift + Home / End</dt><dd>{t('help.shortcut_gp8_cursor')}</dd></dl>
       <p>{t('help.workflow_description')}</p>
     </section></details>
     </nav><span className="document-title">{state.score.title || t('score.untitled')}{state.snapshot.dirty?' •':''}</span>

@@ -8,6 +8,8 @@ export interface ThreeTrackOptions {bars?:number;names?:[string,string,string];s
  * - Track 0 "Guitar6": one staff showing standard notation and tablature, Drop D tuning.
  * - Track 1 "Grand Piano": two standard-notation staves (treble and bass), so alphaTab draws a brace.
  * - Track 2 "Drums": one percussion staff.
+ * - alphaTab numbers strings from the top: string 6 is the high E (pitch = tuning[tuning.length - string] + fret),
+ *   so the fixture's string-6 notes are NOT the low D. Do not assume the low string in later tasks.
  * - Short names Gtr., Pno., Dr.; ids are `base/0`, `base/1` and `base/2`.
  * - 12 bars by default, laid out through the model layout (`systemsLayout`, as the desktop engraving
  *   fixture does) as systems of 2, 2, 4, 2 and 2 bars. Other bar counts follow the same pattern, then two bars each.

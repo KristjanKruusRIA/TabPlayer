@@ -39,11 +39,12 @@ export function planAccolades(input:AccoladeInput):AccoladePlan|null {
   return {groups,nativeMode,singleStaffBrackets,braceTracks,inner,outer,reserve:pad+inner+pad+outer};
 }
 
-/** null becomes four zeros, one value four equal ones, `[h,v]` becomes `[h,v,h,v]`. */
+/** null becomes four zeros, one value four equal ones, `[h,v]` becomes `[h,v,h,v]`, three values fill the left from the right-hand side's CSS rule (index 3 = index 1). */
 export function normalizedPadding(padding:readonly number[]|null|undefined):[number,number,number,number] {
   if(!padding||!padding.length)return [0,0,0,0];
   if(padding.length===1)return [padding[0],padding[0],padding[0],padding[0]];
   if(padding.length===2)return [padding[0],padding[1],padding[0],padding[1]];
+  if(padding.length===3)return [padding[0],padding[1],padding[2],padding[1]];
   return [padding[0],padding[1],padding[2],padding[3]];
 }
 

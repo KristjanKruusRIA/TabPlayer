@@ -152,5 +152,6 @@ it('source_track_maps_follow_surviving_identity_and_validate_before_mutation',()
 
 it('projectEngraving reports the effective bracket mode',()=>{
   const source=music(),mode=(brackets:EngravingOverrides['stylesheet']['brackets'])=>projectEngraving(source,ids,{...defaultEngraving(),stylesheet:{...defaultEngraving().stylesheet,brackets}}).bracketMode;
-  expect(mode('none')).toBe(0);expect(mode('staves')).toBe(1);expect(mode('inherit')).toBe(source.stylesheet.bracketExtendMode);
+  expect(mode('none')).toBe(0);expect(mode('staves')).toBe(1);
+  for(const native of [2,0]){source.stylesheet.bracketExtendMode=native;expect(mode('inherit')).toBe(native);}
 });

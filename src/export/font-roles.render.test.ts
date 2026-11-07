@@ -96,6 +96,11 @@ describe('export with role fonts',()=>{
     render({roles:{lyrics:{font:'notoSerif'}}});expect(bounds.assertTextFits).toHaveBeenCalledTimes(1);
     // A size-only role is checked too: a 200% annotation is exactly what overflows.
     render({roles:{staffText:{size:2}}});expect(bounds.assertTextFits).toHaveBeenCalledTimes(2);
-    render({roles:{pageFooter:{size:1.5}}});expect(bounds.assertTextFits).toHaveBeenCalledTimes(3);
+    // The page header and footer never touch the notation: choosing only those must not start refusing an export that worked before.
+    render({roles:{pageFooter:{size:1.5}}});render({roles:{pageHeader:{font:'notoSerif',bold:true},pageFooter:{font:'notoSansMono'}}});
+    expect(bounds.assertTextFits).toHaveBeenCalledTimes(2);
+    // Together with a notation role the check runs, and is told which role sizes may be the cause.
+    render({roles:{pageFooter:{size:1.5},lyrics:{size:1.2},markers:{font:'notoSerif'}}});
+    expect(bounds.assertTextFits).toHaveBeenCalledTimes(3);expect(vi.mocked(bounds.assertTextFits).mock.calls[2][4]).toEqual(['Lyrics']);
   });
 });

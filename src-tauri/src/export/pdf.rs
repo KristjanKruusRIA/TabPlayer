@@ -384,6 +384,17 @@ mod tests {
             ),
             ("TabPlayer Mono", "font-weight='700'", "NotoSansMono-Bold"),
             ("TabPlayer Mono", "", "NotoSansMono-Regular"),
+            // Noto Sans Mono has no italic face: a slant asks for the nearest face, which keeps the requested weight.
+            (
+                "TabPlayer Mono",
+                "font-style='italic'",
+                "NotoSansMono-Regular",
+            ),
+            (
+                "TabPlayer Mono",
+                "font-weight='700' font-style='italic'",
+                "NotoSansMono-Bold",
+            ),
         ] {
             let faces = serving_faces(
                 &options,
@@ -423,10 +434,32 @@ mod tests {
         }
     }
     #[test]
+    fn leland_resolves_by_name_and_falls_back_to_bravura() {
+        let options = export_options();
+        let faces = serving_faces(
+            &options,
+            "font-family='Leland, Bravura'",
+            "\u{e050}\u{e0a4}",
+        );
+        assert_eq!(faces.len(), 2);
+        assert!(faces.iter().all(|(_, face)| face == "Leland"), "{faces:?}");
+        // A symbol Leland lacks is drawn from Bravura, never from another new face.
+        let each = serving_faces_each(
+            &options,
+            "font-family='Leland, Bravura'",
+            (0xe000u32..0xf400).filter_map(char::from_u32),
+        );
+        assert!(each.iter().any(|(_, face)| face == "Leland"));
+        assert!(each.iter().all(|(_, face)| {
+            let face = face.trim_start_matches("missing:");
+            face == "Leland" || face == "Bravura"
+        }));
+    }
+    #[test]
     fn default_requests_keep_pre_d12_faces() {
         let before = pre_d12_options();
         let after = export_options();
-        let sample = "Abc \u{d6}\u{f6} \u{540c}\u{3058}\u{697d}\u{8b5c} \u{1f3b8} \u{266f}\u{266d}\u{266e} \u{e050}";
+        let sample = "Abc \u{d6}\u{f6} \u{540c}\u{3058}\u{697d}\u{8b5c} \u{1f3b8} \u{266f}\u{266d}\u{266e} \u{e050} \u{219c}";
         for attributes in [
             "font-family='Noto Sans'",
             "font-family='Noto Sans' font-style='italic'",
@@ -565,8 +598,7 @@ mod tests {
             "TabPlayer Ä",
             "Öölaul — 同じ楽譜 🎸 · A very long independently authored document title for horizontal score tab overflow",
         );
-        let mut options = usvg::Options::default();
-        load_export_fonts(options.fontdb_mut());
+        let options = export_options();
         let tree = usvg::Tree::from_str(&p.svg, &options).unwrap();
         fn assert_resolved(group: &usvg::Group, tree: &usvg::Tree) {
             for node in group.children() {
@@ -606,8 +638,7 @@ mod tests {
     }
     #[test]
     fn bundled_unicode_fallback_has_nonzero_glyphs_and_vector_outlines() {
-        let mut options = usvg::Options::default();
-        load_export_fonts(options.fontdb_mut());
+        let options = export_options();
         for (family, text) in [
             ("Noto Sans", "Öö—·"),
             ("Noto Sans CJK JP", "同じ楽譜"),
@@ -649,8 +680,7 @@ mod tests {
     }
     #[test]
     fn preserves_latin_ligatures_across_multiple_unicode_fallbacks() {
-        let mut options = usvg::Options::default();
-        load_export_fonts(options.fontdb_mut());
+        let options = export_options();
         let parse = |value: &str| {
             usvg::Tree::from_str(&format!("<svg xmlns='http://www.w3.org/2000/svg' width='600' height='100'><text x='10' y='50' font-family='Noto Sans' font-size='24'>{value}</text></svg>"), &options).unwrap()
         };

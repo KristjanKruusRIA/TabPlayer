@@ -434,53 +434,72 @@ it('asks the native exporter to normalize mixed audio only',async()=>{
 // ---- D12 Task 7: every rendering export site waits for the role faces and the music font, and renders with that music font ----
 const chosenFonts={music:'petaluma' as const,roles:{lyrics:{font:'notoSerif' as const}}};
 const petalumaData:MusicFontData={id:'petaluma',families:['Petaluma','TabPlayer Bravura'],metadata:null,substituted:[]};
+type Gate<T> = {promise:Promise<T>;resolve:(value:T)=>void;reject:(error:Error)=>void};
+function gate<T>():Gate<T>{let resolve!:(value:T)=>void,reject!:(error:Error)=>void;const promise=new Promise<T>((done,fail)=>{resolve=done;reject=fail;});return {promise,resolve,reject};}
+/** A coordinator whose three loaders each wait on a gate the test opens, so nothing can be rendered by accident before the awaited loads finish. */
 function fontsHook(score:model.Score,api:ExportNativeBridge){
   const settings=defaultDocumentSettings();settings.engraving={...settings.engraving,fonts:chosenFonts};
-  const order:string[]=[];
-  vi.spyOn(pdf,'loadExportFonts').mockImplementation(async()=>{order.push('fonts');});
-  const roles=vi.spyOn(fontLoading,'loadRoleFaces').mockImplementation(async()=>{order.push('roles');return {failed:[]};});
-  const loadMusic=vi.spyOn(fontLoading,'loadMusicFont').mockImplementation(async()=>{order.push('music');return petalumaData;});
-  const render=vi.spyOn(pdf,'renderPdfPages').mockImplementation(()=>{order.push('render');return [{widthMm:210,heightMm:297,svg:'<svg/>'}];});
+  const gates={fonts:gate<void>(),roles:gate<{failed:string[]}>(),music:gate<MusicFontData>()};
+  vi.spyOn(pdf,'loadExportFonts').mockImplementation(()=>gates.fonts.promise);
+  const roles=vi.spyOn(fontLoading,'loadRoleFaces').mockImplementation(()=>gates.roles.promise);
+  const loadMusic=vi.spyOn(fontLoading,'loadMusicFont').mockImplementation(()=>gates.music.promise);
+  const render=vi.spyOn(pdf,'renderPdfPages').mockImplementation(()=>[{widthMm:210,heightMm:297,svg:'<svg/>'}]);
   const hook=renderHook(()=>useExportCoordinator({revision:7,score,settings,currentSpeed:1,bridge:{readBackingAsset:async()=>{throw new Error('Unexpected backing read.');},confirmExport:async()=>true,exportGp:async()=>true},native:api}));
-  return {...hook,order,roles,loadMusic,render};
+  const settle=async()=>{await act(async()=>{await new Promise(resolve=>setTimeout(resolve,0));});};
+  /** Opens the gates one at a time and keeps `last` shut until the end: no render may start while any awaited load is still pending. */
+  const open=async(pending:Promise<boolean>,last:'roles'|'music')=>{
+    const finish={roles:()=>gates.roles.resolve({failed:[]}),music:()=>gates.music.resolve(petalumaData)},first=last==='roles'?'music':'roles';
+    await settle();expect(render).not.toHaveBeenCalled();
+    gates.fonts.resolve();await settle();expect(render).not.toHaveBeenCalled();
+    finish[first]();await settle();expect(render).not.toHaveBeenCalled();
+    finish[last]();
+    await act(async()=>{await pending;});
+  };
+  return {...hook,gates,roles,loadMusic,render,open};
 }
-const loadedBeforeEveryRender=(order:string[],renders:number)=>{
-  expect(order.filter(step=>step==='render')).toHaveLength(renders);
-  order.forEach((step,index)=>{if(step==='render')expect(order.slice(0,index)).toEqual(expect.arrayContaining(['fonts','roles','music']));});
-};
 describe('export_awaits_role_faces_and_music',()=>{
   it('PDF and print',async()=>{
-    for(const format of ['pdf','print'] as const){
-      const api=native(),{result,order,roles,loadMusic,render}=fontsHook(music(),api);
-      await act(async()=>{await result.current.run({format,selection:{tracks:[0],range:null},layout:pageLayout});});
+    for(const [format,last] of [['pdf','roles'],['print','music']] as const){
+      const api=native(),{result,roles,loadMusic,render,open}=fontsHook(music(),api);
+      let pending!:Promise<boolean>;act(()=>{pending=result.current.run({format,selection:{tracks:[0],range:null},layout:pageLayout});});
+      await open(pending,last);
       expect(roles).toHaveBeenCalledWith(chosenFonts);expect(loadMusic).toHaveBeenCalledWith('petaluma');
-      loadedBeforeEveryRender(order,1);
-      expect(render.mock.calls[0][3]?.music).toBe(petalumaData);
-      vi.restoreAllMocks();
+      expect(render).toHaveBeenCalledTimes(1);expect(render.mock.calls[0][3]?.music).toBe(petalumaData);
+      vi.restoreAllMocks();cleanup();
     }
   });
   it('SVG and PNG',async()=>{
-    for(const format of ['svg','png'] as const){
-      const api=native(),{result,order,roles,loadMusic,render}=fontsHook(music(),api);
-      await act(async()=>{await result.current.run(format==='png'?{format,selection:{tracks:[0],range:null},layout:pageLayout,transparent:true,dpi:72 as const}:{format,selection:{tracks:[0],range:null},layout:pageLayout,transparent:true});});
+    for(const [format,last] of [['svg','roles'],['png','music']] as const){
+      const api=native(),{result,roles,loadMusic,render,open}=fontsHook(music(),api);
+      let pending!:Promise<boolean>;act(()=>{pending=result.current.run(format==='png'?{format,selection:{tracks:[0],range:null},layout:pageLayout,transparent:true,dpi:72 as const}:{format,selection:{tracks:[0],range:null},layout:pageLayout,transparent:true});});
+      await open(pending,last);
       expect(roles).toHaveBeenCalledWith(chosenFonts);expect(loadMusic).toHaveBeenCalledWith('petaluma');
-      loadedBeforeEveryRender(order,1);
-      expect(render.mock.calls[0][3]?.music).toBe(petalumaData);
-      vi.restoreAllMocks();
+      expect(render).toHaveBeenCalledTimes(1);expect(render.mock.calls[0][3]?.music).toBe(petalumaData);
+      vi.restoreAllMocks();cleanup();
     }
   });
-  it('per-track export, once for all tracks, before the first render',async()=>{
-    const api=native(),{result,order,roles,loadMusic,render}=fontsHook(tracks(['Lead','Bass']),api);
-    await act(async()=>{await result.current.run({format:'pdf',selection:{tracks:[0,1],range:null},layout:pageLayout,perTrack:true});});
-    expect(roles).toHaveBeenCalledWith(chosenFonts);expect(loadMusic).toHaveBeenCalledWith('petaluma');
-    loadedBeforeEveryRender(order,2);
-    expect(render.mock.calls.map(call=>call[3]?.music)).toEqual([petalumaData,petalumaData]);
+  it('per-track export loads once for all tracks, before the first render',async()=>{
+    const api=native(),{result,roles,loadMusic,render,open}=fontsHook(tracks(['Lead','Bass']),api);
+    let pending!:Promise<boolean>;act(()=>{pending=result.current.run({format:'pdf',selection:{tracks:[0,1],range:null},layout:pageLayout,perTrack:true});});
+    await open(pending,'roles');
+    expect(roles).toHaveBeenCalledTimes(1);expect(loadMusic).toHaveBeenCalledTimes(1);expect(roles).toHaveBeenCalledWith(chosenFonts);expect(loadMusic).toHaveBeenCalledWith('petaluma');
+    expect(render).toHaveBeenCalledTimes(2);expect(render.mock.calls.map(call=>call[3]?.music)).toEqual([petalumaData,petalumaData]);
   });
-  it('a face or the music font that cannot be loaded stops the export before anything is rendered',async()=>{
-    const api=native(),{result,render,roles}=fontsHook(music(),api);
-    roles.mockResolvedValue({failed:['NotoSerif-Italic.ttf']});
+  it('a face that cannot be loaded stops the export before anything is rendered',async()=>{
+    const api=native(),{result,render,gates}=fontsHook(music(),api);
+    gates.fonts.resolve();gates.roles.resolve({failed:['NotoSerif-Italic.ttf']});gates.music.resolve(petalumaData);
     await act(async()=>{await expect(result.current.run({format:'pdf',selection:{tracks:[0],range:null},layout:pageLayout})).rejects.toThrow(/NotoSerif-Italic\.ttf/);});
     expect(render).not.toHaveBeenCalled();expect(result.current.busy).toBe(false);
+  });
+  it('a music font that cannot be loaded stops every kind of export before anything is rendered',async()=>{
+    const jobs:ExportOptions[]=[{format:'pdf',selection:{tracks:[0],range:null},layout:pageLayout},{format:'svg',selection:{tracks:[0],range:null},layout:pageLayout,transparent:true},{format:'pdf',selection:{tracks:[0],range:null},layout:pageLayout,perTrack:true}];
+    for(const job of jobs){
+      const api=native(),save=vi.fn(async()=>true),{result,render,gates}=fontsHook(music(),api);api.exportTrackFiles=save;
+      gates.fonts.resolve();gates.roles.resolve({failed:[]});gates.music.reject(new Error('Music font metadata petaluma_metadata.json could not be loaded.'));
+      await act(async()=>{await expect(result.current.run(job)).rejects.toThrow(/petaluma_metadata\.json/);});
+      expect(render).not.toHaveBeenCalled();expect(save).not.toHaveBeenCalled();expect(result.current.busy).toBe(false);
+      vi.restoreAllMocks();cleanup();
+    }
   });
   it('default documents get Bravura without loading anything extra',async()=>{
     vi.spyOn(pdf,'loadExportFonts').mockResolvedValue();const render=vi.spyOn(pdf,'renderPdfPages').mockReturnValue([{widthMm:210,heightMm:297,svg:'<svg/>'}]);

@@ -78,3 +78,17 @@ it('export_refuses_enlarged_text_that_would_run_past_the_page_and_accepts_text_t
     expect(()=>renderPdfPages(long,{tracks:[0],range:null},layout,options({}))).not.toThrow();
   }
 });
+
+it('assertTextFits_mentions_a_role_size_only_when_one_is_set',()=>{
+  const systems=[{svg:'<svg/>',width:700,height:50}],over=()=>[{text:'Intro',left:650,right:760}];
+  expect(()=>assertTextFits(systems,700,0,over)).toThrow(/Reduce Text size/);
+  expect(()=>assertTextFits(systems,700,0,over)).not.toThrow(/role/);
+  expect(()=>assertTextFits(systems,700,0,over,['Lyrics','Staff text'])).toThrow(/Reduce Text size.*size chosen for Lyrics and Staff text/);
+});
+
+it('export_refuses_an_enlarged_role_and_names_it',()=>{
+  const long=withText('A long annotation line that surely needs more than the room left at the end of the bar, and then some more words');
+  const fonts=(size:number)=>({...defaultEngraving(),fonts:{roles:{staffText:{size}}}});
+  expect(()=>renderPdfPages(long,{tracks:[0],range:null},layout,{page,engraving:fonts(2),trackIds:['base/0']})).toThrow(/does not fit the page width.*size chosen for Staff text/);
+  expect(()=>renderPdfPages(withText('Short'),{tracks:[0],range:null},layout,{page,engraving:fonts(2),trackIds:['base/0']})).not.toThrow();
+});

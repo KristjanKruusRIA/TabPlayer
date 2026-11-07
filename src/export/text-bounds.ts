@@ -30,9 +30,9 @@ export function measureSystemText(system:SvgSystem):TextBox[] {
  * Refuses an export whose text would be clipped. The exporter only checks that bars fit, but enlarged annotations,
  * chord names and track names can run past the last bar. Refusing names the text and the settings that cause it.
  */
-export function assertTextFits(systems:readonly SvgSystem[],width:number,margin=0,measure:(system:SvgSystem)=>TextBox[]=measureSystemText):void {
+export function assertTextFits(systems:readonly SvgSystem[],width:number,margin=0,measure:(system:SvgSystem)=>TextBox[]=measureSystemText,sizedRoles:readonly string[]=[]):void {
   for(const system of systems){
     const [first]=overflowingText(measure(system),width,margin);
-    if(first!==undefined)throw new Error(`The text "${first.length>30?`${first.slice(0,29)}…`:first}" does not fit the page width. Reduce Text size or Tab number size, or the print scale, or use a wider page.`);
+    if(first!==undefined)throw new Error(`The text "${first.length>30?`${first.slice(0,29)}…`:first}" does not fit the page width. Reduce Text size or Tab number size, or the print scale, or use a wider page.${sizedRoles.length?` A font size chosen for ${sizedRoles.join(' and ')} also enlarges text: lower it.`:''}`);
   }
 }

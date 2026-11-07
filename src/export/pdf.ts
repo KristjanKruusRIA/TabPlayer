@@ -75,6 +75,8 @@ export function applyExportFamilies(settings:Settings,fonts:EngravingFonts|undef
   for(const [element,font] of settings.display.resources.elementFonts)if(!kept.has(element))font.families=[...FALLBACK_FAMILIES];
   if(!chosen('tabNumbers'))for(const key of TAB_NUMBER_FONTS)settings.display.resources[key].families=[...FALLBACK_FAMILIES];
 }
+/** How a role is named in the message that tells the user which size to lower. */
+const roleNames:Record<FontRole,string>={titleBlock:'Title block',pageHeader:'Page header',pageFooter:'Page footer',chordNames:'Chord names',staffText:'Staff text',lyrics:'Lyrics',trackNames:'Track names',barNumbers:'Bar numbers',markers:'Markers',tabNumbers:'Tab numbers'};
 /** The page music CSS for a loaded music font: the native names, with Bravura behind a font that may lack a symbol (the screen's alias stack is webview-only). */
 const exportMusicFont=(id:MusicFontId):MusicFont=>id==='bravura'?defaultMusicFont:{size:defaultMusicFont.size,families:[musicFonts[id].family,musicFonts.bravura.family]};
 export function renderPdfPages(score:model.Score,selection:ExportSelection,layout:PrintLayout,options?:{page:PageLayout;engraving:EngravingOverrides;trackIds:string[];music?:MusicFontData}):SvgPage[] {
@@ -110,7 +112,11 @@ export function renderPdfPages(score:model.Score,selection:ExportSelection,layou
   try{renderer.renderScore(copy,selection.tracks);if(failure)throw failure;
     if(renderer.boundsLookup?.staffSystems.some(system=>system.bars.some(bar=>bar.visualBounds.x<-.5||bar.visualBounds.x+bar.visualBounds.w>d.usableWidth+1)))throw new Error('A notation system does not fit this page width. Reduce print scale, use landscape, or add a system break.');
     if(!systems.length)throw new Error('Notation renderer produced no printable systems.');
-    if(frozen&&(!isDefaultTypography(typographyOf(frozen.engraving))||Object.keys(fontsOf(frozen.engraving).roles).length>0)){const {left,right}=pageGeometry(frozen.page);assertTextFits(systems,d.usableWidth,Math.min(left,right));}
+    if(frozen){
+      // Only roles that touch the notation can push text past the page: the page header and footer are placed and fitted separately.
+      const roles=fontsOf(frozen.engraving).roles,notation=FONT_ROLES.filter(role=>role!=='pageHeader'&&role!=='pageFooter'&&roles[role]!==undefined);
+      if(!isDefaultTypography(typographyOf(frozen.engraving))||notation.length>0){const {left,right}=pageGeometry(frozen.page);assertTextFits(systems,d.usableWidth,Math.min(left,right),undefined,notation.filter(role=>roles[role]!.size!==undefined).map(role=>roleNames[role]));}
+    }
     return frozen?paginateEngravedSystems(systems,score.title,frozen.page,headerFieldsOf(score),typographyOf(frozen.engraving).titleScale??1,{gaps:frozen.engraving.systemGaps,systemSpacing:frozen.engraving.systemSpacing,scale:frozen.page.scale},exportMusicFont(fontsOf(frozen.engraving).music),pageRoleFont(frozen.engraving.fonts,'pageHeader'),pageRoleFont(frozen.engraving.fonts,'pageFooter')):paginateSystems(systems,score.title,layout);}
   finally{renderer.destroy();}
 }

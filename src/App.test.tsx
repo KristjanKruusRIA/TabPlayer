@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import {withSystemGaps} from './engraving/system-gaps';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act,cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { forgetSessionPanelSizes } from './workstation/panel-sizes';
@@ -369,6 +370,14 @@ it('persists layout and fit choices, retains manual percent and restores them ac
   await act(async()=>{await testWorkspace.activate(id);});
   expect(screen.getByLabelText('Display mode')).toHaveValue('horizontalPage');expect(screen.getByLabelText('Zoom (%)')).toHaveValue(142.75);
   expect(screen.getByRole('button',{name:'Fit width'})).toHaveAttribute('aria-pressed','true');expect(c.getState()).toBe(before);
+});
+it('keeps the projected score for a gap-only engraving edit but not for another engraving edit',async()=>{
+  const c=await setup(),projection=()=>(engravingView.mock.lastCall![0] as {projection:unknown}).projection,before=projection();
+  await act(async()=>{await c.edit({type:'setEngraving',engraving:withSystemGaps(c.getState().settings.engraving,[{bar:1,scale:2}])});});
+  await waitFor(()=>expect(c.getState().settings.engraving.systemGaps).toEqual([{bar:1,scale:2}]));
+  expect(engravingView.mock.lastCall![0].engraving.systemGaps).toEqual([{bar:1,scale:2}]);expect(projection()===before).toBe(true);
+  await act(async()=>{await c.edit({type:'setEngraving',engraving:{...c.getState().settings.engraving,systemSpacing:2}});});
+  await waitFor(()=>expect(projection()===before).toBe(false));
 });
 it('wires Design mode bar widths: handles only while on, one edit per width, imported weights as the base, restore clears, busy refuses',async()=>{
   const c=await setup(),original=c.getState().score,last=()=>engravingView.mock.lastCall![0] as {barDesign:BarDesign|null};

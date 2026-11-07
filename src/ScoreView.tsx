@@ -7,7 +7,7 @@ import type { MusicSelection, VoiceAddress } from './editor/range-types';
 import { rangeFromBeats, resolveSelectionBeats, resolveSelectionNotes, selectionForBars, selectionForTrack } from './editor/range-selection';
 import { configureEngraving, type EngravingProjection } from './engraving/projection';
 import type { EngravingOverrides,PageLayout } from './engraving/types';
-import type {SystemSpan} from './engraving/system-gaps';
+import {engravingRenderKey,withoutSystemGaps,type SystemSpan} from './engraving/system-gaps';
 import {pageGeometry,pageTextFontFamily,pageTextItems,screenPageBaselines} from './engraving/page';
 import {headerFieldsOf} from './engraving/header-footer';
 import {typographyOf} from './engraving/typography';
@@ -85,9 +85,9 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
   onSystems?:(systems:SystemSpan[]|null)=>void;
 }) {
   // System gaps only move the stacked blocks, so editing them must not render the notation again (as with headers): the render path sees an engraving without them.
-  const renderKey=JSON.stringify(engravingProp&&{...engravingProp,systemGaps:undefined}),gapKey=JSON.stringify(engravingProp?.systemGaps??null);
+  const renderKey=engravingRenderKey(engravingProp),gapKey=JSON.stringify(engravingProp?.systemGaps??null);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const engraving=useMemo(()=>{if(!engravingProp)return undefined;const {systemGaps:_gaps,...rest}=engravingProp;void _gaps;return rest as EngravingOverrides;},[renderKey]);
+  const engraving=useMemo(()=>engravingProp&&withoutSystemGaps(engravingProp),[renderKey]);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const gaps=useMemo(()=>engravingProp?.systemGaps,[gapKey]);
   const wrapper=useRef<HTMLDivElement>(null),container=useRef<HTMLDivElement>(null),api=useRef<AlphaTabApi|null>(null);
@@ -96,21 +96,25 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
   const pageKey=JSON.stringify({...pageInput,headerFooter:undefined}),page=useMemo(()=>pageInput,[pageKey]);
   const geometry=useMemo(()=>pageGeometry(page),[page]),physicalRequested=isPhysicalPageLayout(display.layout);
   const scrollHost=useRef<HTMLElement|null>(null),[available,setAvailable]=useState({width:0,height:0});
-  const [completed,setCompleted]=useState<{score:model.Score;tracks:string;page:PageLayout;engraving:EngravingOverrides|undefined;pagination:ScreenPagination|null;chunks:readonly ScreenRenderChunk[];bounds:ScreenBounds|null;error:string|null}|null>(null);
+  const [completed,setCompleted]=useState<{score:model.Score;tracks:string;page:PageLayout;engraving:EngravingOverrides|undefined;chunks:readonly ScreenRenderChunk[];bounds:ScreenBounds}|null>(null);
+  // A completion whose arrangement failed stays through the next render start, so the continuous fallback does not flicker.
+  const failedCompletion=useRef<unknown>(null);
   const [natural,setNatural]=useState<{score:model.Score;tracks:string;layout:string;width:number;engraving:EngravingOverrides|undefined;profile:string;value:number}|null>(null);
   const validCompletion=completed?.score===renderedScore&&completed.tracks===trackKey&&completed.page===page&&completed.engraving===engraving?completed:null;
-  const pageError=physicalRequested?validCompletion?.error??null:null;
-  // A gap-only edit repaginates the chunks and bounds of the last completed render; the notation is not rendered again.
-  const pagination=useMemo(()=>{
-    if(!physicalRequested||!validCompletion?.pagination)return null;
-    const {chunks,bounds,pagination:first}=validCompletion;if(!bounds)return first;
-    try{return paginateScreenScore(chunks,bounds,validCompletion.page,{gaps,systemSpacing:engraving?.systemSpacing??null,scale:validCompletion.page.scale});}catch{return first;}
+  // Paginated once, here: a completed render and a gap-only edit both come through this memo, so the notation is not rendered again for gaps.
+  const paged=useMemo(()=>{
+    if(!physicalRequested||!validCompletion)return null;
+    try{return {pagination:paginateScreenScore(validCompletion.chunks,validCompletion.bounds,validCompletion.page,{gaps,systemSpacing:engraving?.systemSpacing??null,scale:validCompletion.page.scale}),error:null};}
+    catch(error){return {pagination:null,error:error instanceof Error?error.message:'Unable to arrange this score on paper.'};}
   },[physicalRequested,validCompletion,gaps,engraving?.systemSpacing]);
+  failedCompletion.current=paged?.error?validCompletion:null;
+  const pageError=paged?.error??null,pagination=paged?.pagination??null;
   const reportSystems=useRef(onSystems),reported=useRef<string|undefined>(undefined);reportSystems.current=onSystems;
-  useEffect(()=>{
-    const systems=physicalRequested&&validCompletion&&!validCompletion.error&&validCompletion.pagination?validCompletion.chunks.filter(c=>c.firstMasterBarIndex>=0).map(c=>({first:c.firstMasterBarIndex,last:c.lastMasterBarIndex})).sort((a,b)=>a.first-b.first):null,key=JSON.stringify(systems);
-    if(reported.current===key)return;reported.current=key;reportSystems.current?.(systems);
-  },[physicalRequested,validCompletion]);
+  const systems=useMemo(()=>physicalRequested&&validCompletion&&pagination?validCompletion.chunks.filter(c=>c.firstMasterBarIndex>=0).map(c=>({first:c.firstMasterBarIndex,last:c.lastMasterBarIndex})).sort((a,b)=>a.first-b.first):null,[physicalRequested,validCompletion,!!pagination]);
+  // A newly attached handler gets the current value; an equal value is not reported again; unmounting reports null.
+  useEffect(()=>{reported.current=undefined;},[onSystems]);
+  useEffect(()=>{const key=JSON.stringify(systems);if(reported.current===key)return;reported.current=key;reportSystems.current?.(systems);},[systems,onSystems]);
+  useEffect(()=>()=>{if(reported.current!==undefined&&reported.current!=='null')reportSystems.current?.(null);},[]);
   const screenLayout=display.layout==='verticalScreen'||display.layout==='horizontalScreen';
   const baseWidth=natural?.score===renderedScore&&natural.tracks===trackKey&&natural.layout===display.layout&&natural.width===available.width&&natural.engraving===engraving&&natural.profile===profile?natural.value:null;
   const fitMode=pageError?'manual':display.zoomMode;
@@ -138,7 +142,6 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
   const presentation=useRef<ScreenPlaybackContext>({renderedScore,wrapper:null,scrollHost:null,physical:null,barElement:null,beatElement:null});
   presentation.current={renderedScore,wrapper:wrapper.current,scrollHost:scrollHost.current,physical:pagination&&arrangement?{pagination,arrangement,roots:roots.current}:null,barElement:barElement.current,beatElement:beatElement.current};
   const playbackPresentation=useRef<ReturnType<typeof installScreenPlayback>|null>(null);
-  const gapsCurrent=useRef(gaps);gapsCurrent.current=gaps;
   const layoutCurrent=useRef({renderedScore,trackKey,page,engraving,profile,display,available,sourcePhysical,baseWidth});layoutCurrent.current={renderedScore,trackKey,page,engraving,profile,display,available,sourcePhysical,baseWidth};
   const pointerActions=useRef({downBeat:(_beat:model.Beat)=>{},downNote:(_note:model.Note)=>{},move:(_beat:model.Beat)=>{}});
   const [rangeBlocks,setRangeBlocks]=useState<Marker[]>([]),[surfaceClass,setSurfaceClass]=useState('');
@@ -343,13 +346,13 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
     };
     pointerActions.current={downBeat,downNote,move};
     const subscriptions=[view.beatMouseDown.on(downBeat),view.noteMouseDown.on(downNote),view.beatMouseMove.on(move),view.beatMouseUp.on(()=>{drag.current=null;}),view.renderStarted.on(()=>{
-      collecting=true;chunks=[];generation=layoutCurrent.current;rendering.current=true;setCompleted(previous=>previous?.error?previous:null);setCaret(null);setMarkers([]);setHandles(null);setRangeBlocks([]);setErrorBlocks([]);setDiagramBlocks([]);setOpenDiagram(null);adapter.renderStarted();
+      collecting=true;chunks=[];generation=layoutCurrent.current;rendering.current=true;setCompleted(previous=>previous&&previous===failedCompletion.current?previous:null);setCaret(null);setMarkers([]);setHandles(null);setRangeBlocks([]);setErrorBlocks([]);setDiagramBlocks([]);setOpenDiagram(null);adapter.renderStarted();
     }),view.renderer.partialRenderFinished.on(event=>{
       if(collecting&&typeof event.renderResult==='string')chunks.push({id:event.id,x:event.x,y:event.y,width:event.width,height:event.height,firstMasterBarIndex:event.firstMasterBarIndex,lastMasterBarIndex:event.lastMasterBarIndex,svg:event.renderResult});
     }),view.postRenderFinished.on(()=>{
       collecting=false;const c=generation,latest=layoutCurrent.current;rendering.current=false;adapter.renderCompleted();
       if(c&&c.renderedScore===latest.renderedScore&&c.trackKey===latest.trackKey&&c.page===latest.page&&c.engraving===latest.engraving&&c.sourcePhysical===latest.sourcePhysical&&view.score===c.renderedScore&&view.boundsLookup){
-        if(c.sourcePhysical){try{setCompleted({score:c.renderedScore,tracks:c.trackKey,page:c.page,engraving:c.engraving,pagination:paginateScreenScore(chunks,view.boundsLookup,c.page,{gaps:gapsCurrent.current,systemSpacing:c.engraving?.systemSpacing??null,scale:c.page.scale}),chunks:[...chunks],bounds:view.boundsLookup,error:null});}catch(error){setCompleted({score:c.renderedScore,tracks:c.trackKey,page:c.page,engraving:c.engraving,pagination:null,chunks:[],bounds:null,error:error instanceof Error?error.message:'Unable to arrange this score on paper.'});}}
+        if(c.sourcePhysical)setCompleted({score:c.renderedScore,tracks:c.trackKey,page:c.page,engraving:c.engraving,chunks:[...chunks],bounds:view.boundsLookup});
         if((c.display.layout==='verticalScreen'||c.display.layout==='horizontalScreen')&&c.display.zoomMode!=='manual'&&c.baseWidth===null){
           const width=Math.max(1,...chunks.map(chunk=>chunk.x+chunk.width),...view.boundsLookup.staffSystems.map(system=>system.realBounds.x+system.realBounds.w));
           setNatural({score:c.renderedScore,tracks:c.trackKey,layout:c.display.layout,width:c.available.width,engraving:c.engraving,profile:c.profile,value:width});

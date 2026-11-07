@@ -90,3 +90,8 @@ export function systemGapOffsets(stacking:GapStacking|undefined,systems:readonly
   for(const [first,scale] of resolveSystemGaps(stacking.gaps,systems)){const offset=(scale-1)*base;if(offset!==0&&Number.isFinite(offset))offsets.set(first,offset);}
   return offsets;
 }
+
+/** `engraving` without its system gaps. Gaps only move stacked systems, so everything that renders or projects the notation works from this and ignores a gap-only edit. */
+export function withoutSystemGaps(engraving:EngravingOverrides):EngravingOverrides {const {systemGaps:_gaps,...rest}=engraving;void _gaps;return rest;}
+/** A key that changes with every engraving field except the system gaps. Memoize notation work on it. */
+export const engravingRenderKey=(engraving:EngravingOverrides|undefined):string=>JSON.stringify(engraving&&withoutSystemGaps(engraving));

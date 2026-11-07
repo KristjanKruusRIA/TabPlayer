@@ -186,11 +186,35 @@ it('still renders again for a non-gap engraving change',()=>{
  rerender(tree({...props,engraving:{...engraving,systemSpacing:2}}));
  expect(state.renders.mock.calls.length).toBeGreaterThan(calls);
 });
-it('reports the rendered systems in a page layout and null in parchment, without repeating a value',()=>{
+it('reports the rendered systems in a page layout and null in parchment',()=>{
  const {props}=gapped();
  expect(props.onSystems).toHaveBeenLastCalledWith([{first:0,last:0},{first:1,last:1},{first:2,last:2}]);
- const reports=props.onSystems.mock.calls.length;
- expect(props.onSystems.mock.calls.filter(([v],i,all)=>i>0&&JSON.stringify(v)===JSON.stringify(all[i-1][0]))).toHaveLength(0);
  cleanup();
- const parchment=gapped('parchment');expect(parchment.props.onSystems).toHaveBeenLastCalledWith(null);void reports;
+ const parchment=gapped('parchment');expect(parchment.props.onSystems).toHaveBeenLastCalledWith(null);
+});
+it('does not report systems again for a gap-only change',()=>{
+ const {props,tree,rerender,engraving}=gapped(),reports=props.onSystems.mock.calls.length;
+ rerender(tree({...props,engraving:withSystemGaps(engraving,[{bar:1,scale:3}])}));
+ rerender(tree({...props,engraving}));
+ expect(props.onSystems).toHaveBeenCalledTimes(reports);
+});
+it('reports null and then the new intervals when the system spacing renders again',()=>{
+ const {props,tree,rerender,engraving}=gapped();props.onSystems.mockClear();
+ rerender(tree({...props,engraving:{...engraving,systemSpacing:2}}));
+ expect(props.onSystems.mock.calls.map(([v])=>v)).toEqual([null,[{first:0,last:0},{first:1,last:1},{first:2,last:2}]]);
+});
+it('gives a newly attached handler the current value and reports null on unmount',()=>{
+ const {props,tree,rerender,unmount}=gapped(),late=vi.fn();
+ rerender(tree({...props,onSystems:late}));
+ expect(late).toHaveBeenLastCalledWith([{first:0,last:0},{first:1,last:1},{first:2,last:2}]);
+ unmount();expect(late).toHaveBeenLastCalledWith(null);
+});
+it('hit-tests the moved third block after a gap-only change',()=>{
+ const {props,tree,rerender,engraving}=gapped(),pages=screen.getByTestId('score-pages'),margin=15*96/25.4,center=(880-210*96/25.4)/2;
+ rerender(tree({...props,engraving:withSystemGaps(engraving,[{bar:2,scale:3}])}));
+ // The third block moved down 40px: this point lies below where the block used to end.
+ props.onSelect.mockClear();fireEvent.mouseDown(pages,{clientX:center+margin+66,clientY:margin+1230,button:0});
+ expect(props.onSelect).toHaveBeenLastCalledWith(expect.objectContaining({bar:2}),undefined,undefined);
+ props.onSelect.mockClear();rerender(tree({...props,engraving}));fireEvent.mouseDown(pages,{clientX:center+margin+66,clientY:margin+1230,button:0});
+ expect(props.onSelect).not.toHaveBeenCalled();
 });

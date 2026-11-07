@@ -89,6 +89,7 @@ import { BarWidthsPanel } from './engraving/BarWidthsPanel';
 import { barScaleOf,sourceWeight,withBarScale } from './engraving/bar-widths';
 import { TrackDisplayControls } from './engraving/TrackDisplayControls';
 import { projectEngraving } from './engraving/projection';
+import { engravingRenderKey } from './engraving/system-gaps';
 import { effectivePageLayout } from './engraving/page';
 import { resolveVisibleTracks,type TrackView } from './engraving/view';
 import { resolveScoreDisplay,type ScoreDisplayPreferences } from './engraving/screen-view';
@@ -241,7 +242,10 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     const list=[...next].sort((a,b)=>a-b);
     setTrackView(list.length===ids.length?{kind:'all'}:{kind:'custom',trackIds:list.map(track=>ids[track])});
   },[]);
-  const projection=useMemo(()=>projectEngraving(state.score,trackIds,state.settings.engraving),[state.score,trackIds,state.settings.engraving]);
+  // projectEngraving ignores system gaps, so a gap-only edit keeps the projected score (and so the notation render and the audio load).
+  const engravingKey=engravingRenderKey(state.settings.engraving);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const projection=useMemo(()=>projectEngraving(state.score,trackIds,state.settings.engraving),[state.score,trackIds,engravingKey]);
   const pageState=useMemo(()=>{
     try{return {page:effectivePageLayout(state.settings),error:null};}
     catch(error){return {page:effectivePageLayout({page:null,print:defaultPrintLayout()}),error:`Saved print layout cannot be exported: ${error instanceof Error?error.message:String(error)} Apply a valid page layout.`};}

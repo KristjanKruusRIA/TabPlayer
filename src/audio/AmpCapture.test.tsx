@@ -10,11 +10,11 @@ import {ExportDialog} from '../export/ExportDialog';
 import type {AmpCapture as AmpCaptureRef,TrackSound} from '../edit-types';
 import type {CaptureEntry,CaptureStatus} from './amp-capture';
 
-const library:{entries:CaptureEntry[];status:Record<string,CaptureStatus>;importing:CaptureEntry|null|Error;gate:Promise<void>|null;asked:string[][]}={entries:[],status:{},importing:null,gate:null,asked:[]};
+const library:{entries:CaptureEntry[];status:Record<string,CaptureStatus>;importing:CaptureEntry|null|Error;gate:Promise<void>|null;statusGate:Promise<void>|null;asked:string[][]}={entries:[],status:{},importing:null,gate:null,statusGate:null,asked:[]};
 const calls={remove:[] as string[]};
 const native=async(command:string,args?:{id?:string;ids?:string[]})=>{
   if(command==='nam_capture_list')return structuredClone(library.entries);
-  if(command==='nam_capture_status'){library.asked.push(args!.ids!);return (args!.ids!).map(id=>library.status[id]??{id,state:library.entries.some(e=>e.id===id)?'ready':'missing',message:null});}
+  if(command==='nam_capture_status'){library.asked.push(args!.ids!);await library.statusGate;return (args!.ids!).map(id=>library.status[id]??{id,state:library.entries.some(e=>e.id===id)?'ready':'missing',message:null});}
   if(command==='nam_capture_import'){await library.gate;const importing=library.importing;if(importing instanceof Error)throw importing;if(importing&&!library.entries.some(entry=>entry.id===importing.id))library.entries.push(importing);return importing;}
   if(command==='nam_capture_remove'){calls.remove.push(args!.id!);library.entries=library.entries.filter(e=>e.id!==args!.id);return;}
   return [];
@@ -22,7 +22,7 @@ const native=async(command:string,args?:{id?:string;ids?:string[]})=>{
 vi.mock('@tauri-apps/api/core',()=>({invoke:vi.fn((command:string,args?:unknown)=>native(command,args as {id?:string;ids?:string[]}))}));
 const entry=(id:string,name:string):CaptureEntry=>({id,name,bytes:1000});
 const A='a'.repeat(32),B='b'.repeat(32),GONE='d'.repeat(32);
-beforeEach(()=>{library.entries=[entry(A,'Plexi crunch'),entry(B,'JCM lead')];library.status={};library.importing=null;library.gate=null;library.asked=[];calls.remove.length=0;});
+beforeEach(()=>{library.entries=[entry(A,'Plexi crunch'),entry(B,'JCM lead')];library.status={};library.importing=null;library.gate=null;library.statusGate=null;library.asked=[];calls.remove.length=0;});
 afterEach(()=>{cleanup();localStorage.clear();});
 const ref=(id=A,levelDb=0,name='Plexi crunch'):AmpCaptureRef=>({id,name,levelDb});
 const soundWith=(capture?:AmpCaptureRef):TrackSound=>{const sound=soundPreset('crunch');sound.effects.amp.enabled=true;if(capture)sound.effects.amp.capture=capture;return sound;};
@@ -36,7 +36,41 @@ it('lists the library and offers the built-in amp',async()=>{
   await waitFor(()=>expect([...select.querySelectorAll('option')].map(o=>o.textContent)).toEqual(['Built-in amp (model above)','Plexi crunch','JCM lead']));
   expect(select).toHaveValue(B);
   await new Promise(done=>setTimeout(done,20));expect(notice()).toBeNull();
-  expect(screen.getByText('The drive knob is not used while a capture plays.')).toBeInTheDocument();
+  expect(await screen.findByText('The drive knob is not used while a capture plays.')).toBeInTheDocument();
+});
+it('shows the drive note only while the capture can play',async()=>{
+  const drive='The drive knob is not used while a capture plays.';
+  const {rerender}=render(<AmpCapture value={ref(GONE,0,'Gone')} onChange={vi.fn()}/>);
+  await waitFor(()=>expect(notice()).not.toBeNull());
+  expect(screen.queryByText(drive)).toBeNull();
+  library.status[A]={id:A,state:'unreadable',message:null};
+  rerender(<AmpCapture value={ref(A)} onChange={vi.fn()}/>);
+  await waitFor(()=>expect(notice()?.textContent).toMatch(/cannot be read/));
+  expect(screen.queryByText(drive)).toBeNull();
+  library.status[B]={id:B,state:'unsupported',message:null};
+  rerender(<AmpCapture value={ref(B,0,'JCM lead')} onChange={vi.fn()}/>);
+  await waitFor(()=>expect(notice()?.textContent).toMatch(/cannot play/));
+  expect(screen.queryByText(drive)).toBeNull();
+  library.status={};
+  rerender(<AmpCapture value={ref(A)} onChange={vi.fn()}/>);
+  expect(await screen.findByText(drive)).toBeInTheDocument();expect(notice()).toBeNull();
+});
+it('keeps the notice through a library refresh, and never shows the status of another capture',async()=>{
+  let release!:()=>void;
+  const {rerender}=render(<AmpCapture value={ref(GONE,0,'Gone')} onChange={vi.fn()}/>);
+  await waitFor(()=>expect(notice()).not.toBeNull());
+  const asked=library.asked.length;
+  library.statusGate=new Promise<void>(done=>{release=done;});
+  const {announceCaptureLibrary}=await import('./amp-capture');announceCaptureLibrary();
+  await waitFor(()=>expect(library.asked.length).toBeGreaterThan(asked));
+  // The answer for the refresh has not arrived: the notice stays, and does not blink away and back.
+  expect(notice()).not.toBeNull();
+  library.status[A]={id:A,state:'unreadable',message:null};
+  rerender(<AmpCapture value={ref(A)} onChange={vi.fn()}/>);
+  await waitFor(()=>expect(library.asked.some(ids=>ids[0]===A)).toBe(true));
+  expect(notice()).toBeNull();
+  release();
+  await waitFor(()=>expect(notice()?.textContent).toMatch(/“Plexi crunch” cannot be read/));
 });
 it('writes one edit with the capture when one is picked, keeping the level, and none for the current one',async()=>{
   const onEdit=vi.fn();
@@ -100,6 +134,28 @@ it('writes nothing when the track changed while the file dialog was open, and wh
   fireEvent.click(screen.getByRole('button',{name:'Import capture…'}));
   expect((await screen.findByRole('alert')).textContent).toBe('This file is not a NAM capture.');
   expect(onEdit).not.toHaveBeenCalled();
+});
+it('writes nothing when the picker is gone before the file dialog closes',async()=>{
+  const onEdit=vi.fn();let open!:()=>void;
+  library.gate=new Promise<void>(done=>{open=done;});library.importing=entry('c'.repeat(32),'Vox AC30');
+  const view=render(<SoundPanel trackId="t" sound={soundWith(ref(A))} onEdit={onEdit}/>);
+  fireEvent.click(await screen.findByRole('button',{name:'Import capture…'}));
+  view.unmount();
+  open();
+  await new Promise(done=>setTimeout(done,30));
+  expect(onEdit).not.toHaveBeenCalled();
+  const {invoke}=await import('@tauri-apps/api/core');
+  expect(vi.mocked(invoke).mock.calls.some(call=>call[0]==='nam_capture_import')).toBe(true);
+});
+it('says to choose the capture from the list when an edit was busy as the dialog closed',async()=>{
+  const onChange=vi.fn();let open!:()=>void;
+  library.gate=new Promise<void>(done=>{open=done;});library.importing=entry('c'.repeat(32),'Vox AC30');
+  const {rerender}=render(<AmpCapture value={ref(A)} scope="t" onChange={onChange}/>);
+  fireEvent.click(await screen.findByRole('button',{name:'Import capture…'}));
+  rerender(<AmpCapture value={ref(A)} scope="t" busy onChange={onChange}/>);
+  open();
+  expect(await screen.findByText(/Imported “Vox AC30”\. .*choose it from the list/)).toBeInTheDocument();
+  expect(onChange).not.toHaveBeenCalled();
 });
 it('removes a library capture without touching the sound, and cannot remove what the library lacks',async()=>{
   const onEdit=vi.fn();

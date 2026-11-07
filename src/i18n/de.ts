@@ -1361,6 +1361,7 @@ export const de: MessageCatalog = {
   'sound.capture_not_in_library': "{name} (nicht in dieser Bibliothek)",
   'sound.capture_imported': "„{name}“ importiert.",
   'sound.capture_track_changed': "Die Spur hat sich inzwischen geändert, daher wurde kein Sound geändert; wähle es aus der Liste.",
+  'sound.capture_busy': "Das Capture wurde nicht angewendet, weil gerade eine Änderung lief; wähle es aus der Liste.",
   'sound.capture_removed': "„{name}“ wurde aus der Bibliothek entfernt. Sounds, die es nutzen, spielen den integrierten Verstärker.",
   'sound.capture_help': "NAM-Captures (.nam-Dateien). Importierte Dateien werden in deine Bibliothek kopiert. Dokumente nennen ein Capture nur beim Namen.",
   'sound.capture_drive_unused': "Der Drive-Regler wird nicht verwendet, solange ein Capture spielt.",

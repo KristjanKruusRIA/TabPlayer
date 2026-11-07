@@ -1359,6 +1359,7 @@ export const en = {
   'sound.capture_not_in_library': "{name} (not in this library)",
   'sound.capture_imported': "Imported “{name}”.",
   'sound.capture_track_changed': "The track changed meanwhile, so no sound was changed; choose it from the list.",
+  'sound.capture_busy': "The capture was not applied because an edit was in progress; choose it from the list.",
   'sound.capture_removed': "Removed “{name}” from the library. Sounds that use it play the built-in amp.",
   'sound.capture_help': "NAM captures (.nam files). Imported files are copied into your library. Documents only name a capture.",
   'sound.capture_drive_unused': "The drive knob is not used while a capture plays.",

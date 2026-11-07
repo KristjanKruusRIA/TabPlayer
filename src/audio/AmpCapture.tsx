@@ -19,7 +19,7 @@ export function AmpCapture({value,busy=false,label=text=>text,scope,onChange,onL
   onLibraryChange?:()=>void;
 }) {
   const {t}=useI18n();
-  const [entries,setEntries]=useState<CaptureEntry[]>([]),[status,setStatus]=useState<CaptureStatus>(),[message,setMessage]=useState(''),[problem,setProblem]=useState('');
+  const [entries,setEntries]=useState<CaptureEntry[]>([]),[found,setStatus]=useState<CaptureStatus>(),[message,setMessage]=useState(''),[problem,setProblem]=useState('');
   const [draft,setDraft]=useState<string|null>(null);
   const refresh=useCallback(()=>ampCaptures.list().then(setEntries,()=>setEntries([])),[]);
   useEffect(()=>{void refresh();},[refresh]);
@@ -27,8 +27,13 @@ export function AmpCapture({value,busy=false,label=text=>text,scope,onChange,onL
   const id=value?.id;
   // The file dialog is modal to the user, not to the app: when it closes the sound may have changed, so what follows reads this.
   const latest=useRef({value,scope,onChange,busy});latest.current={value,scope,onChange,busy};
+  // The picker can be gone by then (another track or block was opened), and then nothing is written.
+  const mounted=useRef(true);
+  useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;};},[]);
+  // The previous answer stays until the new one arrives, so a refresh does not blink the notice; one that belongs to another capture is never shown.
+  const status=found&&found.id===id?found:undefined;
   useEffect(()=>{
-    let alive=true;setStatus(undefined);
+    let alive=true;
     if(id)ampCaptures.status([id]).then(found=>{if(alive)setStatus(found.find(item=>item.id===id));},()=>{});
     return()=>{alive=false;};
   },[id,entries]);
@@ -42,11 +47,15 @@ export function AmpCapture({value,busy=false,label=text=>text,scope,onChange,onL
       const entry=await ampCaptures.import();
       if(!entry)return;
       await refresh();announceCaptureLibrary();onLibraryChange?.();
+      if(!mounted.current)return;
       // The sound as it is now, not as it was when the dialog opened. A file that is the capture already named is not a
       // change; if the track changed meanwhile, nothing is written.
       const now=latest.current;let note='';
       if(now.scope!==opened)note=` ${t('sound.capture_track_changed')}`;
-      else if(now.value?.id!==entry.id&&!now.busy)now.onChange({id:entry.id,name:entry.name,levelDb:now.value?.levelDb??0});
+      else if(now.value?.id!==entry.id){
+        if(now.busy)note=` ${t('sound.capture_busy')}`;
+        else now.onChange({id:entry.id,name:entry.name,levelDb:now.value?.levelDb??0});
+      }
       setMessage(`${t('sound.capture_imported',{name:entry.name})}${note}`);
     } catch(e) { setProblem(String(e instanceof Error?e.message:e)); }
   };
@@ -79,7 +88,7 @@ export function AmpCapture({value,busy=false,label=text=>text,scope,onChange,onL
     <button type="button" aria-label={label(t('sound.capture_remove'))} {...busyGuard({busy,unavailable:!listed,onClick:()=>void remove()})}>{t('sound.capture_remove')}</button>
     {value&&<label>{t('sound.capture_level')}<input aria-label={label(t('sound.capture_level'))} type="number" min={-12} max={12} step={.5} value={draft??value.levelDb} aria-disabled={busy||undefined}
       onChange={e=>{if(!busy)setDraft(e.target.value);}} onBlur={commit} onKeyDown={e=>{if(e.key==='Enter')commit();else if(e.key==='Escape')setDraft(null);}}/></label>}
-    {value&&<p className="muted">{t('sound.capture_drive_unused')}</p>}
+    {value&&status?.state==='ready'&&<p className="muted">{t('sound.capture_drive_unused')}</p>}
     {warning&&<p className="sound-ir-notice" role="status">{warning}</p>}
     {message&&<p className="muted" role="status">{message}</p>}
     {problem&&<p className="sound-ir-problem" role="alert">{problem}</p>}

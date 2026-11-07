@@ -11,6 +11,7 @@ export type ScreenBounds=NonNullable<AlphaTabApi['boundsLookup']>;
 export type ScreenSystem=ScreenBounds['staffSystems'][number];
 /** `height` is the render-space height. `shift` (render coordinates) opens staff gaps in the composed SVG, whose height is `height + shiftTotal(shift)`. */
 export type ScreenRenderChunk={id:string;x:number;y:number;width:number;height:number;firstMasterBarIndex:number;lastMasterBarIndex:number;svg:string;shift?:StaffShift};
+/** `sourceBounds` x and w are render pixels. With `chunk.shift`, y and h are composed pixels (the opened gaps are included); the DOM box must be `chunk.height + shiftTotal(chunk.shift)` tall. */
 export type ScreenPageBlock={chunk:ScreenRenderChunk;system:ScreenSystem|null;page:number;sourceBounds:ScreenRect;x:number;y:number};
 export type ScreenPagination={paper:{width:number;height:number;left:number;top:number;right:number;bottom:number};pageCount:number;blocks:ScreenPageBlock[]};
 export type ScreenPageArrangement={scale:number;width:number;height:number;pages:Array<{index:number;x:number;y:number;width:number;height:number}>};

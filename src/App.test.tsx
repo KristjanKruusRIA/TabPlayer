@@ -1828,10 +1828,13 @@ describe('entry key queue',()=>{
     press({key:'+'});for(const key of ['-','+','-','+','-','+','-','+'])press({key:key});
     press({key:'-'});
     await hold.next();await waitFor(()=>expect(edits(c)).toHaveLength(1));
-    // A slot is free now, but the refused key must not be followed by one that assumed it landed.
+    // The drain has taken a key off the queue (its edit is held), so a slot is free; the refused key must still not be followed by one that assumed it landed.
+    await waitFor(()=>expect(hold.held).toHaveLength(1));
     press({key:'+'});
     for(let step=1;step<9;step++){await hold.next();if(step<8)await waitFor(()=>expect(edits(c)).toHaveLength(step+1));}
     await waitFor(()=>expect(edits(c)).toHaveLength(9));await quiet();expect(hold.held).toHaveLength(0);expect(edits(c)).toHaveLength(9);
+    // Once the queue is empty the refusal is over: the next key is recorded.
+    press({key:'-'});await hold.next();await waitFor(()=>expect(edits(c)).toHaveLength(10));
   });
   it('refuses keys typed during a save while keys wait, and those after it until the queue is empty',async()=>{
     const c=await entryOn(),hold=holdEdits(c);
@@ -1848,5 +1851,21 @@ describe('entry key queue',()=>{
     press({key:'b'});
     await hold.next();await waitFor(()=>expect(edits(c)).toHaveLength(2));await quiet();
     expect(hold.held).toHaveLength(0);expect(edits(c)).toHaveLength(2);
+    // Once the queue is empty the refusal is over: the next key is recorded.
+    press({key:'c'});await hold.next();await waitFor(()=>expect(edits(c)).toHaveLength(3));
+  });
+  it('counts the key that threw in the discarded total, logs it and keeps the app running',async()=>{
+    const c=await entryOn(),hold=holdEdits(c),log=vi.spyOn(console,'error').mockImplementation(()=>{});
+    try{
+      press({key:'e'});press({key:'g'});press({key:'a'});
+      await waitFor(()=>expect(hold.held).toHaveLength(1));
+      vi.spyOn(c,'edit').mockImplementationOnce(()=>{throw new Error('boom');});
+      await hold.next();
+      expect(await screen.findByText(/2 queued keys were discarded/)).toBeInTheDocument();
+      expect(log).toHaveBeenCalled();expect(edits(c)).toHaveLength(1);
+      await quiet();expect(hold.held).toHaveLength(0);
+      // The counter did not stick: the next key is recorded at once, not queued.
+      press({key:'b'});await hold.next();await waitFor(()=>expect(edits(c)).toHaveLength(2));
+    }finally{log.mockRestore();}
   });
 });

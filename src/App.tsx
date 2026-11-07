@@ -583,8 +583,8 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     if(queue.length>=ENTRY_QUEUE_MAX){refusing.current=true;setInputNotice({text:t('editor.entry_busy'),at:JSON.stringify(target)});return;}
     queue.push({item,at:Date.now(),documentId:state.documentId});
   };
-  const discardEntryQueue=(reason:string|null,why:'discarded'|'stale'|'dropped')=>{
-    const count=entryQueue.current.length;clearEntryQueue();
+  const discardEntryQueue=(reason:string|null,why:'discarded'|'stale'|'dropped',extra=0)=>{
+    const count=entryQueue.current.length+extra;clearEntryQueue();
     const message=t(`editor.entry_queue_${why}_${count===1?'one':'other'}` as MessageKey,{count});
     setInputNotice({text:reason?`${reason} ${message}`:message,at:JSON.stringify(target)});
   };
@@ -603,7 +603,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     const next=queue.shift()!,before=ownEdits.current;
     draining.current=true;
     try{performItem(next.item,next.at);}
-    catch(error){console.error('A queued entry key failed.',error);discardEntryQueue(null,'discarded');return;}
+    catch(error){console.error('A queued entry key failed.',error);discardEntryQueue(null,'discarded',1);return;}
     finally{draining.current=false;}
     if(ownEdits.current===before)setSettled(count=>count+1);
   };

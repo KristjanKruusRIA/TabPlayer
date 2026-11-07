@@ -6,7 +6,7 @@ import { entryNotes, maxEntryFret, type EntryFollow } from '../instruments/entry
 import { droneString, getBanjoDrone } from './banjo-drone';
 import { openStringKey } from './partial-capo';
 import { AUTO_DURATION_UNFIT, autoDurationEdit, type EntryDuration, type InputPreferences } from './input-preferences';
-import { canSpell, drawnSpelling, enteredNoteIndex, enterPitch, entryClef, entryPitch, keyLetter, oneEdit, soundingKey, spellingFor, spellingStep, stepPitch, writtenPitch, type EntryAccidental, type EntryPitch } from './notation-entry';
+import { alterationMarks, canSpell, drawnSpelling, enteredNoteIndex, enterPitch, entryClef, entryPitch, keyLetter, letters, letterSemitone, oneEdit, soundingKey, spellingFor, spellingStep, stepPitch, writtenPitch, type EntryAccidental, type EntryPitch } from './notation-entry';
 import { voiceTicks } from './score-errors';
 import { tieChain } from './non-tab';
 import { MAX_SEQUENCE_COMMANDS } from '../parity-commands';
@@ -251,11 +251,9 @@ export function planNoteMove(project: Project, score: model.Score, target: BeatT
 export type RespellResult =
   | { mode: model.NoteAccidentalMode; name: string }
   | { same: true }
-  | { refused: 'no_spelling' | 'one_spelling'; name: string };
+  | { refused: 'no_spelling'; name: string };
 
-const letterSemitones = [0, 2, 4, 5, 7, 9, 11], letterNames = 'CDEFGAB';
 const accidentalAlterations: Record<AccidentalChord | 'cycle', number> = { doubleFlat: -2, flat: -1, natural: 0, sharp: 1, doubleSharp: 2, cycle: 0 };
-const alterationMarks = (alteration: number) => alteration >= 2 ? '##' : alteration === 1 ? '#' : alteration <= -2 ? 'bb' : alteration === -1 ? 'b' : '';
 
 /**
  * The spelling a note takes when re-spelled as `accidental`, or the next of its spellings (flats before naturals before
@@ -269,20 +267,20 @@ export function respellNote(staff: model.Staff, bar: model.Bar, beat: model.Beat
   const base = entryPitch(drawn.letter, drawn.octave, 'natural', keySignature);
   if (!base) return null;
   const current = written - base.pitch;
-  const currentName = `${letterNames[drawn.letter]}${alterationMarks(current)}${drawn.octave}`;
+  const currentName = `${letters[drawn.letter]}${alterationMarks(current)}${drawn.octave}`;
   const named = (alteration: number) => {
-    const letter = letterSemitones.findIndex(semitone => (((semitone + alteration) % 12) + 12) % 12 === pitchClass);
-    return letter < 0 ? null : { letter, alteration, octave: Math.floor((written - alteration - letterSemitones[letter]) / 12) - 1 };
+    const letter = letterSemitone.findIndex(semitone => (((semitone + alteration) % 12) + 12) % 12 === pitchClass);
+    return letter < 0 ? null : { letter, alteration, octave: Math.floor((written - alteration - letterSemitone[letter]) / 12) - 1 };
   };
   let wanted: number;
   if (accidental === 'cycle') {
     const options = [-2, -1, 0, 1, 2].filter(alteration => canSpell(pitchClass, alteration));
-    if (options.length < 2) return { refused: 'one_spelling', name: currentName };
+    if (options.length < 2) return { refused: 'no_spelling', name: currentName };
     wanted = options[(Math.max(0, options.indexOf(current)) + 1) % options.length];
   } else wanted = accidentalAlterations[accidental];
   if (wanted === current) return { same: true };
   const spelled = named(wanted);
   if (!spelled || !canSpell(pitchClass, wanted)) return { refused: 'no_spelling', name: currentName };
-  const entered: EntryPitch = { letter: spelled.letter, octave: spelled.octave, alteration: wanted, pitch: written, name: `${letterNames[spelled.letter]}${alterationMarks(wanted)}${spelled.octave}` };
+  const entered: EntryPitch = { letter: spelled.letter, octave: spelled.octave, alteration: wanted, pitch: written, name: `${letters[spelled.letter]}${alterationMarks(wanted)}${spelled.octave}` };
   return { mode: spellingFor(entered, keySignature), name: entered.name };
 }

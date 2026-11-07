@@ -1615,8 +1615,12 @@ it('writes the clicked staff position as one edit that one undo removes, and pre
     window.localStorage.removeItem(inputKey);
     const c=await setup(),workspace=screen.getByRole('region',{name:'Score workspace'});
     fireEvent.keyDown(workspace,{key:'n'});
-    fireEvent.keyDown(screen.getByLabelText('Fret'),{code:'Digit9',key:'9',ctrlKey:true});
-    fireEvent.keyDown(screen.getByLabelText('Fret'),{code:'Digit8',key:'8',ctrlKey:true,altKey:true});
+    // The field sits inside the score pane, so the keydown does reach the pane's handler and only its text-field guard stops it.
+    const field=document.createElement('input');workspace.appendChild(field);
+    try{
+      fireEvent.keyDown(field,{code:'Digit9',key:'9',ctrlKey:true});
+      fireEvent.keyDown(field,{code:'Digit8',key:'8',ctrlKey:true,altKey:true});
+    }finally{field.remove();}
     expect(screen.queryByText(/Next note/)).toBeNull();expect(screen.getByText(/Note entry is on/)).toBeInTheDocument();
     expect(c.getState().snapshot.project.edits).toEqual([]);
   });
@@ -1887,6 +1891,10 @@ describe('GP8 edit and cursor keys',()=>{
     vi.spyOn(bridge,'applyEdit').mockImplementation((command,expected,token)=>new Promise((resolve,reject)=>{held.push({pass:()=>void original(command,expected,token).then(resolve,reject)});}));
     return {held,next:async()=>{await waitFor(()=>expect(held.length).toBeGreaterThan(0));held.shift()!.pass();}};
   }
+  const entryOn=async(prefs?:string)=>{
+    if(prefs)window.localStorage.setItem(inputKey,prefs);else window.localStorage.removeItem(inputKey);
+    const c=await setup();press({key:'n'});return c;
+  };
   it('Backspace deletes the note on the active string as one undoable edit, and records nothing where there is none',async()=>{
     const c=await setup(withNotes());
     press({key:'Backspace'});
@@ -2009,13 +2017,54 @@ describe('GP8 edit and cursor keys',()=>{
     await hold.next();await waitFor(()=>expect(edits(c)).toHaveLength(1));
     await quiet();expect(hold.held).toHaveLength(0);expect(edits(c)).toHaveLength(1);
   });
+  it.each([{name:'Ctrl+Home',key:{key:'Home',ctrlKey:true},beat:0},{name:'an arrow',key:{key:'ArrowLeft'},beat:1}])('$name pressed while an entry edit is in flight keeps the cursor there, and the next letter lands there',async({key,beat})=>{
+    const c=await entryOn(),hold=holdEdits(c);
+    press({key:'e'});await hold.next();
+    await waitFor(()=>expect(edits(c)).toHaveLength(1));
+    press({key:'g'});await hold.next();
+    await waitFor(()=>expect(edits(c)).toHaveLength(2));await waitFor(()=>expect(cursor().beat).toBe(2));
+    press({key:'a'});await waitFor(()=>expect(hold.held).toHaveLength(1));
+    press(key);expect(cursor().beat).toBe(beat);
+    press({key:'b'});
+    await hold.next();
+    await waitFor(()=>expect(hold.held).toHaveLength(1));
+    // The landed note must not pull the cursor back; the letter typed after the move is written at the new cursor.
+    await hold.next();await waitFor(()=>expect(edits(c)).toHaveLength(4));
+    expect(JSON.stringify(edits(c)[3])).toContain(`"beat":${beat}`);
+    expect(currentBeat(c,beat).notes.length).toBeGreaterThan(0);
+  });
+  it('a refused edit key behind waiting entry keys also refuses the keys typed after it',async()=>{
+    const c=await entryOn(),hold=holdEdits(c);
+    press({key:'e'});press({key:'g'});
+    press({key:'Insert',ctrlKey:true});
+    expect(screen.getAllByText(/Still entering the previous note/).length).toBeGreaterThan(0);
+    press({key:'a'});
+    await hold.next();await waitFor(()=>expect(hold.held).toHaveLength(1));await hold.next();
+    await waitFor(()=>expect(edits(c)).toHaveLength(2));
+    await quiet();expect(hold.held).toHaveLength(0);expect(edits(c)).toHaveLength(2);
+    // Once the queue is empty, entry works again.
+    press({key:'a'});await hold.next();await waitFor(()=>expect(edits(c)).toHaveLength(3));
+  });
+  it('Backspace clears typed fret digits instead of deleting the note on the string',async()=>{
+    const c=await setup(withNotes());
+    press({key:'1'});press({key:'2'});
+    press({key:'Backspace'});await quiet();expect(edits(c)).toHaveLength(2);
+    press({key:'Backspace'});
+    await waitFor(()=>expect(edits(c)).toHaveLength(3));
+    expect(edits(c)[2]).toMatchObject({type:'removeNote'});
+  });
+  it('shows the hint for the swapped Plus/Minus preference',async()=>{
+    await entryOn(JSON.stringify({swapPlusMinus:true}));
+    expect(screen.getByText(/- and \+ make the beat shorter and longer/)).toBeInTheDocument();
+  });
   it('ignores the keys while focus is in a text field inside the score pane',async()=>{
     const c=await setup(withNotes());
     for(const tag of ['input','textarea','select']){
       const field=document.createElement(tag);pane().appendChild(field);
-      try{for(const key of [{key:'Backspace'},{key:'Delete',shiftKey:true},{key:'Insert',ctrlKey:true},{key:'Delete',ctrlKey:true,shiftKey:true},{key:'End'},{key:'Home',ctrlKey:true}])fireEvent.keyDown(field,key);}
+      try{for(const key of [{key:'Backspace'},{key:'Delete',shiftKey:true},{key:'Insert',ctrlKey:true},{key:'Delete',ctrlKey:true,shiftKey:true},{key:'Home',ctrlKey:true},{key:'End'}])fireEvent.keyDown(field,key);}
       finally{field.remove();}
     }
+    // End is last: unguarded, it would leave the cursor on the last beat.
     await quiet();expect(edits(c)).toHaveLength(2);expect(cursor().beat).toBe(0);
   });
   it('Shift+Delete on the last beat of a bar keeps the cursor on a beat that exists',async()=>{
@@ -2035,6 +2084,13 @@ describe('GP8 edit and cursor keys',()=>{
     press({key:'Delete',shiftKey:true});
     await waitFor(()=>expect(edits(c)).toHaveLength(3));
     expect(edits(c)[2]).toEqual({type:'deleteBeat',target:at(1)});
+  });
+  it('Shift+Delete refuses a selection that cannot be resolved instead of deleting the cursor beat',async()=>{
+    const c=await setup(withNotes());
+    act(()=>{(engravingView.mock.lastCall![0] as {onEditorSelection:(value:unknown)=>void}).onEditorSelection({kind:'bars',firstBar:99,lastBar:99,tracks:[0]});});
+    press({key:'Delete',shiftKey:true});
+    expect(await screen.findByText('The selection has no notes to clear.')).toBeInTheDocument();
+    await quiet();expect(edits(c)).toHaveLength(2);
   });
   it('Ctrl+Home and Ctrl+End still land on beat 0 of the first and last bar when a bar has been emptied',async()=>{
     const c=await setup(withNotes());

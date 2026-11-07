@@ -13,7 +13,9 @@ export const accidentalLabelKeys = {
 } as const satisfies Record<EntryAccidental, string>;
 const accidentalAlteration: Record<Exclude<EntryAccidental, 'key'>, number> = { natural: 0, sharp: 1, flat: -1, doubleSharp: 2, doubleFlat: -2 };
 
-const letters = ['C', 'D', 'E', 'F', 'G', 'A', 'B'], letterSemitone = [0, 2, 4, 5, 7, 9, 11];
+export const letters = ['C', 'D', 'E', 'F', 'G', 'A', 'B'], letterSemitone = [0, 2, 4, 5, 7, 9, 11];
+/** The mark a note name carries for an alteration: # and ## up, b and bb down. */
+export const alterationMarks = (alteration: number) => alteration >= 2 ? '##' : alteration > 0 ? '#' : alteration <= -2 ? 'bb' : alteration < 0 ? 'b' : '';
 const sharpOrder = [3, 0, 4, 1, 5, 2, 6], flatOrder = [6, 2, 5, 1, 4, 0, 3];
 
 /** What alphaTab adds to a note value for an ottava mark (see `Note.displayValueWithoutBend`). */
@@ -64,7 +66,7 @@ export function entryPitch(letter: number, octave: number, accidental: EntryAcci
   const alteration = accidental === 'key' ? keyAlteration(keySignature, letter) : accidentalAlteration[accidental];
   const pitch = (octave + 1) * 12 + letterSemitone[letter] + alteration;
   if (pitch < 0 || pitch > 127) return null;
-  return { letter, octave, alteration, pitch, name: `${letters[letter]}${alteration >= 2 ? '##' : alteration > 0 ? '#' : alteration <= -2 ? 'bb' : alteration < 0 ? 'b' : ''}${octave}` };
+  return { letter, octave, alteration, pitch, name: `${letters[letter]}${alterationMarks(alteration)}${octave}` };
 }
 
 /** The pitch at a step of the entry staff, counted up from its bottom line. */

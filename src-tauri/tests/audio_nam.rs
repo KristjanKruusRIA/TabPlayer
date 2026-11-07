@@ -61,3 +61,41 @@ fn process_stays_off_the_heap() {
         assert_eq!(operations, 0);
     }
 }
+
+#[test]
+fn an_old_edit_log_replays_beside_one_that_names_a_capture() {
+    use tabplayer_lib::audio::dsp::{CaptureRef, FxSettings};
+    use tabplayer_lib::edit_types::EditCommand;
+    use tabplayer_lib::settings::TrackSound;
+    let sound = |fx: FxSettings| TrackSound {
+        voice_id: None,
+        preset_id: "lead".into(),
+        effects: fx,
+        ..Default::default()
+    };
+    let mut plain = FxSettings::default();
+    plain.amp.model = "lead".into();
+    let mut named = plain.clone();
+    named.amp.capture = Some(CaptureRef {
+        id: "ab".repeat(16),
+        name: "Plexi".into(),
+        level_db: 2.5,
+    });
+    for fx in [plain.clone(), named] {
+        let edit =
+            serde_json::json!({"type":"setTrackSound","trackId":"t","sound":sound(fx.clone())});
+        let command: EditCommand = serde_json::from_value(edit.clone()).unwrap();
+        assert_eq!(serde_json::to_value(&command).unwrap(), edit);
+        let EditCommand::SetTrackSound { sound, .. } = command else {
+            panic!("not a sound edit")
+        };
+        sound.validate().unwrap();
+        assert_eq!(sound.effects, fx);
+    }
+    let old = serde_json::to_string(&sound(plain)).unwrap();
+    assert!(!old.contains("capture"));
+    assert_eq!(
+        serde_json::to_string(&serde_json::from_str::<TrackSound>(&old).unwrap()).unwrap(),
+        old
+    );
+}

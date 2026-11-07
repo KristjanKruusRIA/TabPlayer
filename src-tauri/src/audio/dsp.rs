@@ -1,5 +1,6 @@
 use super::cabinet_ir;
 use super::ir_convolver::{IrEngine, IrKernel};
+use super::nam_library;
 use super::tone;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -36,17 +37,81 @@ block!(Compressor {
     release_ms: f64 = 100.0,
     makeup_db: f64 = 0.0
 });
-block!(Amp {
-    model: String = "clean".into(),
-    drive: f64 = 0.1,
-    gain_db: f64 = 0.0
-} later {
+/// A NAM capture the user loaded, named by the identity it has in their library. A document never holds the capture:
+/// where the library has no such file, the amp's built-in model plays instead and the document is unchanged.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CaptureRef {
+    pub id: String,
+    /// What the capture was called when it was picked, so a machine without it can say which one is missing.
+    pub name: String,
+    pub level_db: f64,
+}
+impl CaptureRef {
+    /// The longest name, in characters.
+    pub const MAX_NAME: usize = 64;
+    fn validate(&self) -> Result<(), String> {
+        let xml = |c: char| {
+            matches!(
+                c,
+                '\u{9}' | '\u{A}' | '\u{D}' | '\u{20}'..='\u{D7FF}' | '\u{E000}'..='\u{FFFD}' | '\u{10000}'..='\u{10FFFF}'
+            )
+        };
+        if !nam_library::valid_id(&self.id) {
+            return Err("Invalid amp capture identity.".into());
+        }
+        // Names are validated, not normalized. JS and Rust trim differ only at U+0085 and U+FEFF.
+        if self.name.is_empty()
+            || self.name.trim() != self.name
+            || self.name.starts_with(['\u{feff}', '\u{85}'])
+            || self.name.ends_with(['\u{feff}', '\u{85}'])
+            || self.name.chars().count() > Self::MAX_NAME
+            || !self.name.chars().all(xml)
+        {
+            return Err("Invalid amp capture name.".into());
+        }
+        if !self.level_db.is_finite() || !(-12.0..=12.0).contains(&self.level_db) {
+            return Err("Invalid amp capture level: expected -12..12 dB.".into());
+        }
+        Ok(())
+    }
+}
+/// The amp block. Fields added after sounds could be saved default to 0 (or none) and are not written while so, so
+/// amps saved before them load and save unchanged. `capture`, when the library holds it, plays in place of `model`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Amp {
+    pub enabled: bool,
+    pub model: String,
+    pub drive: f64,
+    pub gain_db: f64,
     // The tone stack after the preamp, in dB: a bass shelf, a mid peak, a treble shelf and a presence peak.
-    bass_db,
-    mid_db,
-    treble_db,
-    presence_db
-});
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub bass_db: f64,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub mid_db: f64,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub treble_db: f64,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub presence_db: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub capture: Option<CaptureRef>,
+}
+impl Default for Amp {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            model: "clean".into(),
+            drive: 0.1,
+            gain_db: 0.0,
+            bass_db: 0.0,
+            mid_db: 0.0,
+            treble_db: 0.0,
+            presence_db: 0.0,
+            capture: None,
+        }
+    }
+}
 /// A cabinet impulse response the user loaded, named by the identity it has in their library. A document never holds
 /// the audio: where the library has no such response, the cabinet's model plays instead and the document is unchanged.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1195,6 +1260,9 @@ impl FxSettings {
         }
         if let Some(ir) = &self.cabinet.ir {
             ir.validate()?;
+        }
+        if let Some(capture) = &self.amp.capture {
+            capture.validate()?;
         }
         if let Some(second) = &self.second {
             if second.second.is_some() {

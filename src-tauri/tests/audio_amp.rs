@@ -355,3 +355,63 @@ fn an_amp_switched_on_with_a_tone_plays_that_tone_at_once() {
     }
     assert!(worst < peak * 1e-4, "{worst} against a peak of {peak}");
 }
+
+fn with_capture(id: &str, name: &str, level_db: f64) -> FxSettings {
+    let mut fx = FxSettings::default();
+    fx.amp.capture = Some(tabplayer_lib::audio::dsp::CaptureRef {
+        id: id.into(),
+        name: name.into(),
+        level_db,
+    });
+    fx
+}
+
+#[test]
+fn amps_without_a_capture_keep_their_exact_wire_format() {
+    for json in [
+        r#"{"enabled":false,"model":"clean","drive":0.1,"gainDb":0.0}"#,
+        r#"{"enabled":true,"model":"crunch","drive":0.4,"gainDb":2.0}"#,
+        r#"{"enabled":true,"model":"lead","drive":0.75,"gainDb":-3.5,"bassDb":3.0,"midDb":-2.5,"trebleDb":12.0,"presenceDb":-12.0}"#,
+        r#"{"enabled":true,"model":"bass","drive":0.2,"gainDb":0.0,"midDb":1.5}"#,
+    ] {
+        let amp: tabplayer_lib::audio::dsp::Amp = serde_json::from_str(json).unwrap();
+        assert!(amp.capture.is_none());
+        assert_eq!(serde_json::to_string(&amp).unwrap(), json);
+    }
+    let default = serde_json::to_value(FxSettings::default()).unwrap();
+    assert!(default["amp"].get("capture").is_none());
+}
+
+#[test]
+fn an_amp_with_a_capture_round_trips_and_a_bad_one_is_refused() {
+    let id = "0f".repeat(16);
+    let ok = with_capture(&id, "Fender Deluxe", -12.0);
+    assert!(ok.validate().is_ok());
+    let json = serde_json::to_value(&ok).unwrap();
+    assert_eq!(
+        json["amp"]["capture"],
+        serde_json::json!({"id": id, "name": "Fender Deluxe", "levelDb": -12.0})
+    );
+    assert_eq!(serde_json::from_value::<FxSettings>(json).unwrap(), ok);
+    assert!(with_capture(&id, &"x".repeat(64), 12.0).validate().is_ok());
+    for (id, name, db) in [
+        ("0f".repeat(15), "x".to_string(), 0.0),
+        ("0F".repeat(16), "x".to_string(), 0.0),
+        ("0f".repeat(16), String::new(), 0.0),
+        ("0f".repeat(16), " padded".into(), 0.0),
+        ("0f".repeat(16), "bell\u{7}".into(), 0.0),
+        ("0f".repeat(16), "x".repeat(65), 0.0),
+        ("0f".repeat(16), "x".into(), 12.5),
+        ("0f".repeat(16), "x".into(), -12.5),
+        ("0f".repeat(16), "x".into(), f64::NAN),
+    ] {
+        let error = with_capture(&id, &name, db).validate().unwrap_err();
+        assert!(
+            error.starts_with("Invalid amp capture"),
+            "{id} {name:?} {db}: {error}"
+        );
+    }
+    let mut unknown = serde_json::to_value(&ok).unwrap();
+    unknown["amp"]["capture"]["extra"] = serde_json::json!(1);
+    assert!(serde_json::from_value::<FxSettings>(unknown).is_err());
+}

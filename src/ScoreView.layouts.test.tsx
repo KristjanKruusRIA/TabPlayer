@@ -121,3 +121,28 @@ it('measures screen fit at base scale even when host height is not available yet
  rerender(tree({...props,display:{layout:'horizontalScreen',zoomMode:'fitWidth'} as never}));
  expect(props.onDisplayStatus).toHaveBeenLastCalledWith({zoomPercent:176,fitLimited:false,pageError:null});
 });
+const overlays=()=>Array.from(document.querySelectorAll<SVGSVGElement>('.score-page-text'));
+const texts=(svg:SVGSVGElement)=>Array.from(svg.querySelectorAll('text')).map(t=>t.textContent);
+function titled(layout:ScoreLayoutMode='verticalPage'){const s=setup(layout);s.props.score.title='Etude';s.rerender(s.tree({...s.props,score:s.props.score}));return s;}
+it('draws the default header title and N / total footer on every page sheet',()=>{
+ titled();const svgs=overlays();expect(svgs).toHaveLength(3);
+ svgs.forEach((svg,i)=>{expect(texts(svg)).toEqual(['Etude',`${i+1} / 3`]);expect(svg.getAttribute('aria-hidden')).toBe('true');expect(svg.getAttribute('class')).toBe('score-page-text');});
+});
+it('uses the first-page and other-page bands from the page layout',()=>{
+ const {props,tree,rerender}=titled(),bands=(h:string,f:string)=>({header:{left:h,center:'',right:''},footer:{left:'',center:f,right:''}});
+ rerender(tree({...props,page:{...page,headerFooter:{first:bands('First','F%PAGE%'),other:bands('Other','O%PAGE%/%PAGES%')}}}));
+ const svgs=overlays();expect(texts(svgs[0])).toEqual(['First','F1']);expect(texts(svgs[1])).toEqual(['Other','O2/3']);expect(texts(svgs[2])).toEqual(['Other','O3/3']);
+});
+it('redraws a header-only edit without rendering notation again',()=>{
+ const {props,tree,rerender}=titled(),calls=state.renders.mock.calls.length,bands=(h:string)=>({header:{left:h,center:'',right:''},footer:{left:'',center:'',right:''}});
+ rerender(tree({...props,page:{...page,headerFooter:{first:bands('One'),other:bands('Two')}}}));
+ expect(texts(overlays()[0])).toEqual(['One']);expect(state.renders).toHaveBeenCalledTimes(calls);expect(state.loads).toHaveBeenCalledTimes(1);
+});
+it('is click-through via CSS and only resizes with zoom',()=>{
+ const {props,tree,rerender}=titled();const css=require('node:fs').readFileSync('src/ScoreView.css','utf8') as string;
+ expect(css).toMatch(/\.score-page-text\s*\{[^}]*pointer-events:\s*none/);
+ const before=overlays()[0],calls=state.renders.mock.calls.length,width=before.getAttribute('width'),view=before.getAttribute('viewBox');
+ rerender(tree({...props,zoom:200}));const after=overlays()[0];
+ expect(after.getAttribute('viewBox')).toBe(view);expect(Number(after.getAttribute('width'))).toBeCloseTo(Number(width)*2);expect(state.renders).toHaveBeenCalledTimes(calls);
+});
+it.each(['parchment','verticalScreen','horizontalScreen'] as const)('draws no page text in %s',layout=>{titled(layout);expect(overlays()).toHaveLength(0);});

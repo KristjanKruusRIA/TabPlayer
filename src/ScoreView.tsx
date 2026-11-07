@@ -7,7 +7,10 @@ import type { MusicSelection, VoiceAddress } from './editor/range-types';
 import { rangeFromBeats, resolveSelectionBeats, resolveSelectionNotes, selectionForBars, selectionForTrack } from './editor/range-selection';
 import { configureEngraving, type EngravingProjection } from './engraving/projection';
 import type { EngravingOverrides,PageLayout } from './engraving/types';
-import {pageGeometry} from './engraving/page';
+import {pageGeometry,pageTextFontFamily,pageTextItems,screenPageBaselines} from './engraving/page';
+import {headerFieldsOf} from './engraving/header-footer';
+import {typographyOf} from './engraving/typography';
+import {loadExportFonts} from './export/pdf';
 import {isPhysicalPageLayout,type ScoreDisplayPreferences} from './engraving/screen-view';
 import {arrangeScreenPages,hitTestScreenPages,mapScreenRect,paginateScreenScore,resolveScreenZoom,unmapScreenPoint,type ScreenPagination,type ScreenRenderChunk,type ScreenRect,type ScreenSystem} from './engraving/screen-pages';
 import {installScreenPlayback,type ScreenPlaybackContext} from './engraving/screen-playback';
@@ -99,6 +102,18 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
   const sourceWidth=sourcePhysical?geometry.usableWidth:screenLayout?available.width:geometry.width*factor;
   const sourceScale=sourcePhysical?page.scale:screenLayout?factor:page.scale*factor;
   const arrangement=useMemo(()=>pagination?arrangeScreenPages(pagination,display.layout as 'verticalPage'|'horizontalPage'|'grid',factor,available.width):null,[pagination,display.layout,factor,available.width]);
+  const [fontsReady,setFontsReady]=useState(0);
+  useEffect(()=>{if(!physicalRequested)return;let live=true;loadExportFonts().then(()=>{if(live)setFontsReady(count=>count+1);},()=>{ /* The fallback face stays; the screen does not report it. */ });return()=>{live=false;};},[physicalRequested]);
+  // Read from the unmemoized prop: header edits must not re-render the notation, but must redraw this text.
+  const bandSet=pageInput.headerFooter,fields=useMemo(()=>headerFieldsOf(score),[score,score.title,score.subTitle,score.artist,score.album,score.words,score.music,score.copyright,score.tab,score.instructions,score.notices]),title=score.title;
+  const titleScale=engraving?typographyOf(engraving).titleScale??1:1,pageCount=pagination?.pageCount??0;
+  const pageTexts=useMemo(()=>{
+    if(!pageCount)return [];
+    const {headerY,footerY}=screenPageBaselines(geometry,titleScale);
+    return Array.from({length:pageCount},(_,index)=>{const {header,footer}=pageTextItems({geometry,bands:bandSet?(index===0?bandSet.first:bandSet.other):null,title,fields,page:index+1,pages:pageCount,titleScale,headerY,footerY});return [...header,...footer];});
+    // fontsReady re-measures once the page font has loaded.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[bandSet,fields,title,geometry,titleScale,pageCount,fontsReady]);
   const roots=useRef(new Map<string,HTMLElement>()),barElement=useRef<HTMLSpanElement>(null),beatElement=useRef<HTMLSpanElement>(null);
   const presentation=useRef<ScreenPlaybackContext>({renderedScore,wrapper:null,scrollHost:null,physical:null,barElement:null,beatElement:null});
   presentation.current={renderedScore,wrapper:wrapper.current,scrollHost:scrollHost.current,physical:pagination&&arrangement?{pagination,arrangement,roots:roots.current}:null,barElement:barElement.current,beatElement:beatElement.current};
@@ -512,6 +527,9 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
     {pagination&&arrangement&&<div data-testid="score-pages" className={`score-pages ${surfaceClass}`} style={{width:arrangement.width,height:arrangement.height}} onMouseDown={physicalDown}>
       {arrangement.pages.map(sheet=><div key={sheet.index} className="score-sheet" aria-label={`Score page ${sheet.index+1}`} style={{left:sheet.x,top:sheet.y,width:sheet.width,height:sheet.height}}>
         {pagination.blocks.filter(block=>block.page===sheet.index).map(block=><div key={block.chunk.id} ref={element=>{if(element)roots.current.set(block.chunk.id,element);else roots.current.delete(block.chunk.id);}} className="score-svg-chunk at-surface-svg" style={{left:(block.x+block.chunk.x-block.sourceBounds.x)*factor,top:(block.y+block.chunk.y-block.sourceBounds.y)*factor,width:block.chunk.width,height:block.chunk.height,transform:`scale(${factor})`}} dangerouslySetInnerHTML={{__html:block.chunk.svg}}/>)}
+        <svg className="score-page-text" aria-hidden="true" viewBox={`0 0 ${geometry.width} ${geometry.height}`} width={sheet.width} height={sheet.height}>
+          {(pageTexts[sheet.index]??[]).map((item,index)=><text key={index} x={item.x} y={item.y} fontSize={item.size} fontFamily={pageTextFontFamily} fill="#111" textAnchor={item.anchor}>{item.text}</text>)}
+        </svg>
       </div>)}
     </div>}
     <span ref={barElement} hidden className="score-playback-bar" aria-hidden="true"/>

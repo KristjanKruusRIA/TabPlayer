@@ -10,6 +10,12 @@ The user loads one VST3 effect onto a track, in place of the built-in drive, amp
 
 - **Licence.** The VST3 SDK has been MIT since 3.8.0 (2025-10-20, [vst3sdk README](https://github.com/steinbergmedia/vst3sdk/blob/master/README.md), [Steinberg forum](https://forums.steinberg.net/t/vst-3-8-0-sdk-released/1011988)). Pre-3.8 copies were GPLv3 or proprietary and must not be used. CLAP is MIT. VST2 cannot be supported: its SDK and licences were withdrawn in 2018, and no new host licences are issued.
 - **No hosting crate is ready to depend on.** Every Rust VST3 host crate is from 2026, small, and untested on Windows or Linux. The raw `vst3` bindings (coupler-rs, MIT OR Apache-2.0, 0.3.0, no SDK checkout needed) and `clack-host` for CLAP (MIT OR Apache-2.0) are usable building blocks. `vst3-sys` is GPLv3 and dormant, so it is rejected. JUCE is AGPL or commercial, so it is rejected.
+- **Soundcraft's host is reusable code, not a dependency** (github.com/storytold/soundcraft, MIT/Apache-2.0, read at b6f9f15 on 2026-11-07). Its `crates/vst3-host` is a pure-Rust VST3 host on the `vst3` 0.3 bindings (no `vst3-sys`).
+  - **It has:** module entry and exit; the Windows bundle layout; factory enumeration; split component and controller with connection points; `setupProcessing` with offline mode; latency re-read on `kLatencyChanged`; bounded `IBStream` state; and a Windows `IPlugView` editor with resize.
+  - **It can't be a dependency.** It needs Rust 1.90 (TabPlayer is 1.88), runs in-process only with no isolation, depends on Soundcraft's DSP `Plugin` trait, and keeps process-global state.
+  - **Decision:** spike 1's Rust option vendors its `src/ffi` layer (about 1,900 lines) and its bundle resolution into `tabplayer-plugin-host`, keeping its MIT notice.
+  - **Gaps we must add:** the out-of-process ring and watchdog, DPI and size constraints, a DLL search path for plug-in dependencies, restart-flag handling, multi-point parameter queues, and `catch_unwind` around calls into the plug-in.
+  - **The C++ SDK helper** stays the comparison and the fallback.
 - **The renderer is per-sample with zero latency, and has no delay compensation** (`audio/renderer.rs:1109`, `audio/ir_convolver.rs:1`, `audio/master.rs:72-75`). The audio thread never allocates, locks or loads (`audio/tone.rs:3-4`, `audio/midi_out.rs:15-18`).
 - **The callback renders its whole device buffer in a burst** (`audio/device.rs:1401-1415, 1758`). So a plug-in's wet output for one callback can only be ready for the next one.
 - **Precedents to copy:**

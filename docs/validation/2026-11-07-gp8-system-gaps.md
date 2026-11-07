@@ -22,7 +22,34 @@
   - The native audio generation is read before and after all gap edits and does not change.
 - Driver output:
 
-<!-- controller fills after run -->
+```text
+PASS baseline: the system gap field shows 100% for the selected third system
+PASS set 200% on the third system: one setEngraving edit carrying one gap at its first bar
+PASS set 200% on the third system: its screen top moves down by the standard gap, earlier systems do not move - moved [0,0,20,20,0] px, expected 20 px
+PASS set 200% on the third system: the exported PDF shows the same extra offset above it - moved [0,0,20,0,0], expected 20
+PASS choosing the current value records nothing
+PASS set 150% on a second system: one more edit and both gaps are carried
+PASS reset selected system: only the fourth system returns, the third keeps its gap
+PASS reset all: every system returns to its baseline top, on screen and in the PDF
+PASS the reset buttons are unavailable once nothing is left to reset
+PASS undo 1/4 restores the earlier state
+PASS undo 2/4 restores the earlier state
+PASS undo 3/4 restores the earlier state
+PASS undo 4/4 restores the earlier state
+PASS redo 1/4 replays the step
+PASS redo 2/4 replays the step
+PASS redo 3/4 replays the step
+PASS redo 4/4 replays the step
+PASS save leaves the document clean with the gap in it
+PASS native playback generation is unchanged across every gap edit, undo and redo - generation 6 (idle; no playback was started)
+PASS no page errors
+PASS reopen: the project (history and gaps) is identical
+PASS reopen: the saved gap is on screen and in the exported PDF
+PASS reopen: the saved gap shows in the panel and resets
+system-gaps: 24 passed, 0 failed.
+```
+
+Run on 2026-11-07 against the desktop test build of 3465e8c (app code unchanged by e96b844, which fixed only the driver). Evidence: `.analysis/parity/system-gaps-result.json` (not committed). The same result held on three consecutive earlier runs.
 
 ## Limits
 

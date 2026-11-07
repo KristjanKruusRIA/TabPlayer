@@ -1032,7 +1032,7 @@
     "screenheaderfooter_limits": {
       "path": "docs/validation/2026-11-07-gp8-screen-header-footer.md",
       "start_line": 39,
-      "end_line": 46,
+      "end_line": 47,
       "kind": "validation_report"
     },
     "strokes_behavior": {

@@ -29,7 +29,10 @@ describe('shared page text items',()=>{
     const stub=()=>vi.stubGlobal('document',{createElement:()=>{const ctx={font:'',measureText:(t:string)=>({width:width(t,parseFloat(ctx.font))})};return {getContext:()=>ctx};}});
     const sys=[{width:300,height:100,svg:'<svg xmlns="http://www.w3.org/2000/svg"></svg>'}];
     const sections=(svg:string)=>({head:svg.slice(svg.indexOf('</style>')+8,svg.indexOf('<g transform')),foot:svg.slice(svg.lastIndexOf('</g>')+4,svg.length-'</svg>'.length)});
-    const compare=(l:PageLayout)=>{
+    // Literal text captured from the export code before the shared items existed (develop at 1b79f74), so a change on
+    // both sides of the shared path still fails here.
+    const golden={"default": {"head": "<text x=\"56.69291338582678\" y=\"78.69291338582678\" font-family=\"Noto Sans, Noto Sans CJK JP, Noto Emoji\" font-size=\"18\">Song</text>", "foot": "<text x=\"340.15748031496065\" y=\"850.3937007874017\" text-anchor=\"middle\" font-family=\"Noto Sans, Noto Sans CJK JP, Noto Emoji\" font-size=\"11\">1 / 1</text>"}, "custom": {"head": "<text x=\"56.69291338582678\" y=\"78.69291338582678\" font-family=\"Noto Sans, Noto Sans CJK JP, Noto Emoji\" font-size=\"18\">a&amp;b</text><text x=\"340.15748031496065\" y=\"78.69291338582678\" text-anchor=\"middle\" font-family=\"Noto Sans, Noto Sans CJK JP, Noto Emoji\" font-size=\"18\">mid</text><text x=\"623.6220472440946\" y=\"78.69291338582678\" text-anchor=\"end\" font-family=\"Noto Sans, Noto Sans CJK JP, Noto Emoji\" font-size=\"18\">z</text>", "foot": "<text x=\"56.69291338582678\" y=\"850.3937007874017\" font-family=\"Noto Sans, Noto Sans CJK JP, Noto Emoji\" font-size=\"11\">L</text><text x=\"340.15748031496065\" y=\"850.3937007874017\" text-anchor=\"middle\" font-family=\"Noto Sans, Noto Sans CJK JP, Noto Emoji\" font-size=\"11\">1 of 1</text><text x=\"623.6220472440946\" y=\"850.3937007874017\" text-anchor=\"end\" font-family=\"Noto Sans, Noto Sans CJK JP, Noto Emoji\" font-size=\"11\">R</text>"}};
+    const compare=(l:PageLayout,expected:{head:string;foot:string})=>{
       stub();
       const g=pageGeometry(l),[page]=paginateEngravedSystems(sys,'Song',l,fields),bands=l.headerFooter?.first??null;
       const items=pageTextItems({geometry:g,bands,title:'Song',fields,page:1,pages:1,titleScale:1,headerY:g.top+22,footerY:g.height-g.bottom});
@@ -37,12 +40,13 @@ describe('shared page text items',()=>{
       expect(head).toBe(pageTextSvg(items.header));
       expect(foot).toBe(pageTextSvg(items.footer));
       expect(head).toContain('font-family="'+pageTextFontFamily+'"');
+      expect({head,foot}).toEqual(expected);
     };
     it('prints custom bands exactly as export does',()=>{
       const hf=defaultHeaderFooter();hf.first.header={left:'a&b',center:'mid',right:'z'};hf.first.footer={left:'L',center:'%PAGE% of %PAGES%',right:'R'};
-      compare({...layout(),headerFooter:hf});
+      compare({...layout(),headerFooter:hf},golden.custom);
     });
-    it('prints the default title and footer exactly as export does',()=>compare(layout()));
+    it('prints the default title and footer exactly as export does',()=>compare(layout(),golden.default));
     it('shrinks then shortens a long centre slot and keeps the sides clear of it',()=>{
       stub();
       const hf=defaultHeaderFooter();hf.first.header={left:'Left',center:'X'.repeat(200),right:'Right'};

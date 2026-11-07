@@ -9,14 +9,14 @@
 - A document without saved header and footer fields shows the established title and `page / pages`, the same as print.
 - The text is a decorative overlay. It is hidden from assistive technology, it lets clicks through to the notation, and it adds no UI strings.
 - Header-only edits update the overlay without re-rendering the notation. Zoom changes only the overlay size.
-- Export loads its Noto fonts once, as one memoized promise that adds the faces only after all of them have loaded. The screen uses the same promise and re-fits the text when the fonts are ready. If the fonts fail to load, the fallback face stays and the user sees no error.
-- Export output is unchanged. Export and screen share `pageTextItems` in `src/engraving/page.ts`, and a test compares its items byte for byte with the export page text.
+- Export loads its fonts (Noto Sans, Noto Sans CJK JP, Noto Emoji and Bravura) once, as one memoized promise that adds the faces only after all of them have loaded. The screen uses the same promise and re-fits the text when the fonts are ready. If the fonts fail to load, the fallback face stays and the user sees no error.
+- Export output is unchanged. Export and screen share `pageTextItems` in `src/engraving/page.ts`. A test pins the export page text to literal strings captured from the export code before this change, and checks that the shared items render to the same text.
 
 ## Evidence
 
 - Vitest:
-  - `src/engraving/page-text.test.ts` covers shrink and ellipsis, slot clearance, byte equality with export for custom and default bands, and the screen baselines at 15 mm and 0 mm margins.
-  - `src/export/pdf-fonts.test.ts` covers the font memo, atomic adding, retry after failure, and a missing `FontFace`.
+  - `src/engraving/page-text.test.ts` covers shrink and ellipsis, slot clearance, export text pinned to pre-change literals for custom and default bands, and the screen baselines at 15 mm and 0 mm margins.
+  - `src/export/pdf-fonts.test.ts` covers the font memo, adding no face when any one fails, retry after failure, and a missing `FontFace`.
   - `src/ScoreView.layouts.test.tsx` covers:
     - the default and custom bands on pages 1 and 2;
     - a header-only change without another notation render;
@@ -44,3 +44,4 @@
 - Page 1 on screen shows the title twice: once in alphaTab's title block and once in the default header. This is not worked around.
 - With very small top or bottom margins the header or footer can touch the music; the baselines are clamped only to stay on the page.
 - There is no original-GP8 comparison of on-screen placement.
+- The first page view in a session loads all export fonts, about 18.6 MB including the 15.7 MB CJK face, though plain text needs only Noto Sans. Before this change they loaded only on export.

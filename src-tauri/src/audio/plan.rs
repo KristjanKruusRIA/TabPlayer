@@ -194,6 +194,17 @@ impl PlanMidiEvent {
             | Self::NoteBend { tick, .. } => *tick,
         }
     }
+    /// The plan channel the event is on.
+    pub fn channel(&self) -> u8 {
+        match self {
+            Self::NoteOn { channel, .. }
+            | Self::NoteOff { channel, .. }
+            | Self::Program { channel, .. }
+            | Self::Controller { channel, .. }
+            | Self::Bend { channel, .. }
+            | Self::NoteBend { channel, .. } => *channel,
+        }
+    }
     pub fn track_id(&self) -> &str {
         match self {
             Self::NoteOn { track_id, .. }

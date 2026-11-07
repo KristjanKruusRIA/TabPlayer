@@ -176,9 +176,13 @@ export function masterProblem(value:unknown):string|null {
 export const defaultPrintLayout = (): PrintLayout => ({paper:'A4',orientation:'portrait',marginMm:15,scale:1,profile:'ScoreTab'});
 export const defaultDocumentSettings = (): DocumentSettings => ({sounds:{},mixes:{},backing:null,print:defaultPrintLayout(),engraving:defaultEngraving(),page:null});
 
+/** A MIDI output port name: 1 to 256 characters, none of them a control or format (Unicode Cc, Cf) character. Mirrors the native validation. */
+export const validMidiPortName=(name:unknown):name is string=>typeof name==='string'&&name.length>0&&[...name].length<=256&&!/[\p{Cc}\p{Cf}]/u.test(name);
+
 export function validateMix(mix: ChannelMix) {
   if (!mix || !Number.isFinite(mix.gain) || mix.gain<0 || mix.gain>1 || !Number.isFinite(mix.pan) || Math.abs(mix.pan)>1 || typeof mix.mute!=='boolean' || typeof mix.solo!=='boolean') throw new Error('Invalid mixer settings.');
-  if (Object.keys(mix).some(key=>!['gain','pan','mute','solo','interpretation','drumKit'].includes(key))) throw new Error('Invalid mixer settings.');
+  if (Object.keys(mix).some(key=>!['gain','pan','mute','solo','interpretation','drumKit','midiPort'].includes(key))) throw new Error('Invalid mixer settings.');
+  if (Object.hasOwn(mix,'midiPort')&&!validMidiPortName(mix.midiPort)) throw new Error('Invalid MIDI output port name.');
   if (Object.hasOwn(mix,'drumKit')) validateDrumKit(mix.drumKit);
   if (Object.hasOwn(mix,'interpretation')) validateInterpretation(mix.interpretation);
 }

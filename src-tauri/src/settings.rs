@@ -23,6 +23,31 @@ pub struct ChannelMix {
         deserialize_with = "present"
     )]
     pub drum_kit: Option<DrumKitMix>,
+    /// The name of the system MIDI output port this track plays through instead of the internal sound. Absent is the internal
+    /// sound. A port is matched by name, so a score keeps its routing across sessions and machines that name a port alike.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub midi_port: Option<String>,
+}
+/// The longest port name a mix may carry.
+pub const MAX_MIDI_PORT_NAME: usize = 256;
+/// Whether `c` is a Unicode format character (general category Cf): bidirectional overrides and isolates, zero-width
+/// joiners and spaces, the byte order mark, tag characters and the like, which can make one name read as another.
+fn is_format_char(c: char) -> bool {
+    matches!(u32::from(c),
+        0x00AD | 0x0600..=0x0605 | 0x061C | 0x06DD | 0x070F | 0x0890..=0x0891 | 0x08E2 | 0x180E
+        | 0x200B..=0x200F | 0x202A..=0x202E | 0x2060..=0x2064 | 0x2066..=0x206F | 0xFEFF
+        | 0xFFF9..=0xFFFB | 0x110BD | 0x110CD | 0x13430..=0x1343F | 0x1BCA0..=0x1BCA3
+        | 0x1D173..=0x1D17A | 0xE0001 | 0xE0020..=0xE007F)
+}
+/// Whether `name` can name a MIDI output port: not empty, bounded, and free of control and format characters.
+pub fn valid_midi_port_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.chars().count() <= MAX_MIDI_PORT_NAME
+        && !name.chars().any(|c| c.is_control() || is_format_char(c))
 }
 impl Default for ChannelMix {
     fn default() -> Self {
@@ -33,6 +58,7 @@ impl Default for ChannelMix {
             solo: false,
             interpretation: None,
             drum_kit: None,
+            midi_port: None,
         }
     }
 }
@@ -50,6 +76,16 @@ impl ChannelMix {
         }
         if let Some(drum_kit) = &self.drum_kit {
             drum_kit.validate()?;
+        }
+        if self
+            .midi_port
+            .as_deref()
+            .is_some_and(|name| !valid_midi_port_name(name))
+        {
+            return Err(
+                "A MIDI output port name must be 1–256 characters without control or format characters."
+                    .into(),
+            );
         }
         Ok(())
     }
@@ -527,6 +563,9 @@ impl BackingSettings {
         if self.mix.interpretation.is_some() {
             return Err("A backing track has no interpretation.".into());
         }
+        if self.mix.midi_port.is_some() {
+            return Err("A backing track cannot be sent to a MIDI output.".into());
+        }
         self.mix.validate()
     }
 }
@@ -699,5 +738,104 @@ impl DocumentSettings {
             master.validate()?;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod midi_port_tests {
+    use super::*;
+
+    #[test]
+    fn a_mix_saved_before_midi_output_loads_unchanged_and_saves_without_the_field() {
+        let old = r#"{"gain":0.5,"pan":-0.25,"mute":true,"solo":false}"#;
+        let mix: ChannelMix = serde_json::from_str(old).unwrap();
+        assert_eq!(mix.midi_port, None);
+        assert!(mix.validate().is_ok());
+        assert_eq!(
+            serde_json::to_string(&mix).unwrap(),
+            old,
+            "an unrouted mix serializes exactly as before"
+        );
+        let with_kit =
+            r#"{"gain":1,"pan":0,"mute":false,"solo":false,"interpretation":{"style":"pick"}}"#;
+        let mix: ChannelMix = serde_json::from_str(with_kit).unwrap();
+        assert_eq!(mix.midi_port, None);
+        // A whole document saved before the field replays the same.
+        let settings: DocumentSettings = serde_json::from_value(serde_json::json!({
+            "sounds": {}, "mixes": {"base/0": {"gain":1,"pan":0,"mute":false,"solo":false}},
+            "backing": null, "print": serde_json::to_value(PrintLayout::default()).unwrap()
+        }))
+        .unwrap();
+        assert_eq!(settings.mixes["base/0"].midi_port, None);
+    }
+
+    #[test]
+    fn a_routed_mix_round_trips_and_a_port_name_is_checked() {
+        let routed = r#"{"gain":1,"pan":0,"mute":false,"solo":false,"midiPort":"Microsoft GS Wavetable Synth"}"#;
+        let mix: ChannelMix = serde_json::from_str(routed).unwrap();
+        assert_eq!(
+            mix.midi_port.as_deref(),
+            Some("Microsoft GS Wavetable Synth")
+        );
+        assert!(mix.validate().is_ok());
+        assert_eq!(
+            serde_json::to_string(&mix).unwrap(),
+            routed.replace("\"gain\":1,\"pan\":0,", "\"gain\":1.0,\"pan\":0.0,")
+        );
+        let named = |name: &str| ChannelMix {
+            midi_port: Some(name.into()),
+            ..ChannelMix::default()
+        };
+        assert!(named("Port 1 \u{00e4}\u{00f6}").validate().is_ok());
+        assert!(named(&"x".repeat(256)).validate().is_ok());
+        for bad in [
+            String::new(),
+            "x".repeat(257),
+            "line\nbreak".into(),
+            "tab\there".into(),
+            "nul\0".into(),
+            "del\u{7f}".into(),
+            "c1\u{85}".into(),
+            "rlo\u{202e}name".into(),
+            "zero\u{200b}width".into(),
+            "bom\u{feff}".into(),
+            "isolate\u{2066}x".into(),
+            "soft\u{ad}hyphen".into(),
+            "tag\u{e0041}".into(),
+        ] {
+            assert!(named(&bad).validate().is_err(), "{bad:?}");
+        }
+        // An explicit null is refused, as for the other optional fields.
+        assert!(
+            serde_json::from_str::<ChannelMix>(
+                r#"{"gain":1,"pan":0,"mute":false,"solo":false,"midiPort":null}"#
+            )
+            .is_err()
+        );
+        // A backing track cannot be routed.
+        let mut backing: BackingSettings = serde_json::from_value(serde_json::json!({
+            "assetId":"a","offsetMs":0,"anchors":[],"mix":{"gain":1,"pan":0,"mute":false,"solo":false}
+        }))
+        .unwrap();
+        assert!(backing.validate().is_ok());
+        backing.mix.midi_port = Some("Port".into());
+        assert!(backing.validate().is_err());
+    }
+
+    #[test]
+    fn routing_a_track_is_a_mix_edit_that_validates_and_replays() {
+        use crate::edit_types::EditCommand;
+        let edit: EditCommand = serde_json::from_value(serde_json::json!({
+            "type":"setTrackMix","trackId":"base/0",
+            "mix":{"gain":1,"pan":0,"mute":false,"solo":false,"midiPort":"Synth"}
+        }))
+        .unwrap();
+        assert!(edit.validate().is_ok());
+        let bad: EditCommand = serde_json::from_value(serde_json::json!({
+            "type":"setTrackMix","trackId":"base/0",
+            "mix":{"gain":1,"pan":0,"mute":false,"solo":false,"midiPort":""}
+        }))
+        .unwrap();
+        assert!(bad.validate().is_err());
     }
 }

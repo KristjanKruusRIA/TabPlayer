@@ -15,6 +15,7 @@ pub mod harmony_library;
 pub mod intake;
 pub mod launch;
 pub mod line_in;
+pub mod midi_out;
 pub mod password_crypto;
 pub mod password_lock;
 pub mod project;
@@ -1241,7 +1242,10 @@ pub fn run() {
         line_in::line_in_start,
         line_in::line_in_stop,
         line_in::line_in_set,
-        line_in::line_in_status
+        line_in::line_in_status,
+        midi_out::midi_out_ports,
+        midi_out::midi_out_set_delay,
+        midi_out::midi_out_status
     ]);
     #[cfg(feature = "desktop-test")]
     let builder = builder.invoke_handler(tauri::generate_handler![
@@ -1341,6 +1345,10 @@ pub fn run() {
         line_in::line_in_stop,
         line_in::line_in_set,
         line_in::line_in_status,
+        midi_out::midi_out_ports,
+        midi_out::midi_out_set_delay,
+        midi_out::midi_out_status,
+        midi_out::midi_out_test_log,
         desktop_test_io
     ]);
     builder
@@ -1367,6 +1375,10 @@ pub fn run() {
                     app.try_state::<runtime::NativeAudio>(),
                 ) {
                     line_in.stop(&audio.service);
+                }
+                // Every note a port is holding is released and the ports are closed.
+                if let Some(audio) = app.try_state::<runtime::NativeAudio>() {
+                    audio.service.midi_out().shutdown();
                 }
             }
         });

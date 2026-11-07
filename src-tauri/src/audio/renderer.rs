@@ -4,6 +4,7 @@ use super::{
     decode::DecodedAudio,
     dsp::{FxSettings, MAX_TRACK_DELAY_SECONDS, TrackDsp},
     master::MasterBus,
+    midi_out::MidiTap,
     plan::{Articulation, PlanMidiEvent, PlanNote, PlaybackPlan, Timeline},
     practice::{ClickVoice, MetronomeSettings, PulsePosition, RenderTempo},
     resources::{AudioResources, Region},
@@ -433,6 +434,14 @@ pub struct Renderer {
     active: Vec<usize>,
     next_note: usize,
     next_midi: usize,
+    /// The plan track of each MIDI event, to find a track's events without comparing names.
+    midi_track: Vec<u16>,
+    /// External MIDI output: the tracks routed to a port. Offline exports never have one, so they render every track.
+    midi: Option<Box<MidiTap>>,
+    /// How much of each track's internal sound is heard: 1 normally, ramping to 0 over a few milliseconds when the
+    /// track moves to a MIDI port and back when it returns, so the change is never a click.
+    midi_fade: Vec<f32>,
+    midi_fade_step: f32,
     mix: PreparedMix,
     /// The mix that arrived while this one was crossfading, waiting for that to end. Taking over mid-fade would drop
     /// the sound the fade is leaving, which is a click.
@@ -754,6 +763,12 @@ impl Renderer {
                 }
             })
             .collect();
+        let midi_track: Vec<u16> = plan
+            .midi
+            .iter()
+            .map(|event| track_indices[event.track_id()] as u16)
+            .collect();
+        let track_count = plan.tracks.len();
         let capacity = plan.notes.len().saturating_mul(3).max(8);
         let slots = (0..capacity).map(|_| None).collect();
         let scratch = vec![[0.0; 2]; plan.tracks.len() + 2];
@@ -779,6 +794,10 @@ impl Renderer {
             active: Vec::with_capacity(capacity),
             next_note: 0,
             next_midi: 0,
+            midi_track,
+            midi: None,
+            midi_fade: vec![1.0; track_count],
+            midi_fade_step: (1.0 / (f64::from(sample_rate) * 0.005)) as f32,
             parked_mix: None,
             mix,
             scratch,
@@ -826,6 +845,14 @@ impl Renderer {
         let Some(selected) = self.selected[index].clone() else {
             return;
         };
+        // A track routed to a MIDI port plays there, not here.
+        if self
+            .midi
+            .as_ref()
+            .is_some_and(|tap| tap.silences(selected.track))
+        {
+            return;
+        }
         let note = &self.plan.notes[index];
         if let Some(origin) = selected.chain {
             if let Some(slot) = self.active.iter().copied().find(|&i| {
@@ -1095,6 +1122,12 @@ impl Renderer {
         {
             return ([0.0; 2], None);
         }
+        if let Some(tap) = &mut self.midi {
+            tap.rendering();
+            if tap.resync_due() {
+                tap.resync(&self.plan.midi, &self.midi_track, self.next_midi);
+            }
+        }
         if !self.tail {
             while self.next_note < self.plan.notes.len()
                 && self.plan.notes[self.next_note].start_tick <= tick + 1e-7
@@ -1114,11 +1147,21 @@ impl Renderer {
                     .iter()
                     .position(|t| t.id == event.track_id())
                 {
-                    Self::midi_event(
-                        &mut self.tracks[index],
-                        event,
-                        self.midi_attacks[self.next_midi],
-                    );
+                    let silenced = match &mut self.midi {
+                        Some(tap) => {
+                            tap.event(index, event);
+                            tap.silences(index)
+                        }
+                        None => false,
+                    };
+                    // The internal synthesizer keeps the track's settings but strikes no note a port is playing.
+                    if !(silenced && matches!(event, PlanMidiEvent::NoteOn { .. })) {
+                        Self::midi_event(
+                            &mut self.tracks[index],
+                            event,
+                            self.midi_attacks[self.next_midi],
+                        );
+                    }
                 }
                 self.next_midi += 1;
             }
@@ -1204,6 +1247,21 @@ impl Renderer {
             self.scratch[index] = channel
                 .gain
                 .process(channel.dsp.process(self.scratch[index], bpm));
+            let routed = self.midi.as_ref().is_some_and(|tap| tap.silences(index));
+            let fade = &mut self.midi_fade[index];
+            let target = if routed { 0.0 } else { 1.0 };
+            if *fade != target {
+                *fade = if routed {
+                    (*fade - self.midi_fade_step).max(0.0)
+                } else {
+                    (*fade + self.midi_fade_step).min(1.0)
+                };
+            }
+            if *fade != 1.0 {
+                let gain = *fade;
+                self.scratch[index] =
+                    [self.scratch[index][0] * gain, self.scratch[index][1] * gain];
+            }
         }
         let backing_index = self.plan.tracks.len();
         if let Some(backing) = &mut self.backing {
@@ -1307,6 +1365,9 @@ impl Renderer {
         for chunk in output.chunks_mut(512) {
             for sample in chunk {
                 let (value, pulse) = self.frame(end_tick);
+                if let Some(tap) = &mut self.midi {
+                    tap.advance_cursor();
+                }
                 *sample = value;
                 if pulse.is_some() {
                     pulse_count = pulse_count.saturating_add(1);
@@ -1372,6 +1433,9 @@ impl Renderer {
         } else {
             0.0
         };
+        if let Some(tap) = &mut self.midi {
+            tap.on_seek();
+        }
         self.seconds = self.timeline.tick_to_seconds(tick);
         self.reset_clock_origin();
         self.tail = false;
@@ -1479,9 +1543,13 @@ impl Renderer {
                     }
                 }
             }
+            let routed = self
+                .midi
+                .as_ref()
+                .is_some_and(|tap| tap.silences(track_index));
             for c in 0..16 {
                 for key in 0..128 {
-                    if held[c][key] > 0 || sustained[c][key] {
+                    if !routed && (held[c][key] > 0 || sustained[c][key]) {
                         Self::gm_note_on(
                             track,
                             c as u8,
@@ -1516,7 +1584,10 @@ impl Renderer {
                         .unwrap()
                         .voice
                         .seek_elapsed_seconds(elapsed, pitch_at(&note.pitch, tick));
-                } else if self.selected[index].is_none() && self.note_has_midi[index] {
+                } else if self.selected[index].is_none()
+                    && self.note_has_midi[index]
+                    && !self.midi_silences(self.plan.notes[index].source.target.track as usize)
+                {
                     let note = &self.plan.notes[index];
                     Self::gm_note_on(
                         &mut self.tracks[note.source.target.track as usize],
@@ -1533,6 +1604,31 @@ impl Renderer {
             backing.seek(self.seconds);
         }
         self.reset_click_position();
+    }
+    /// Routes tracks to MIDI ports, replacing any earlier routing. The tap is built off the audio thread; what comes back
+    /// (the earlier one) is dropped off it too. Notes the earlier routing had sounding are released first.
+    pub fn replace_midi(&mut self, mut tap: Box<MidiTap>) -> Option<Box<MidiTap>> {
+        if tap.track_count() != self.tracks.len() {
+            return Some(tap);
+        }
+        let mut old = self.midi.take();
+        tap.adopt(old.as_deref_mut());
+        self.midi = Some(tap);
+        old
+    }
+    /// The MIDI routing, where there is any.
+    pub fn midi_tap(&mut self) -> Option<&mut MidiTap> {
+        self.midi.as_deref_mut()
+    }
+    /// Says which output frame the next rendered frame is, on the stream's count, so its MIDI messages are stamped.
+    pub fn midi_set_cursor(&mut self, frame: u64) {
+        if let Some(tap) = &mut self.midi {
+            tap.set_cursor(frame);
+        }
+    }
+    /// Whether `track` plays on a MIDI port and is silent here.
+    pub fn midi_silences(&self, track: usize) -> bool {
+        self.midi.as_ref().is_some_and(|tap| tap.silences(track))
     }
     pub fn set_speed(&mut self, speed: f64) -> Result<(), String> {
         self.set_practice_tempo(RenderTempo::Relative { ratio: speed })

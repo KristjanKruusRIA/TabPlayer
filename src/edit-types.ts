@@ -54,7 +54,7 @@ export interface TrackInterpretation { style?: 'pick'|'fingers'; palmMute?: 'lig
 export type DrumKitElement = 'kick'|'snare'|'hats'|'toms'|'cymbals'|'other';
 export interface DrumElementMix { gain: number; pan: number; mute: boolean; solo: boolean }
 export interface DrumKitMix { kick?: DrumElementMix; snare?: DrumElementMix; hats?: DrumElementMix; toms?: DrumElementMix; cymbals?: DrumElementMix; other?: DrumElementMix }
-export interface ChannelMix { gain: number; pan: number; mute: boolean; solo: boolean; interpretation?: TrackInterpretation; drumKit?: DrumKitMix }
+export interface ChannelMix { gain: number; pan: number; mute: boolean; solo: boolean; interpretation?: TrackInterpretation; drumKit?: DrumKitMix; /** The system MIDI output port (by name) this track plays through instead of the internal sound. Absent is the internal sound; never null. */ midiPort?: string }
 /** A cabinet impulse response by the identity it has in a user's library (32 hex digits of the file's hash), with the name it was picked under and a level trim. Documents never hold the audio. */
 export interface CabinetIrRef { id:string;name:string;levelDb:number }
 export interface FxSettings {

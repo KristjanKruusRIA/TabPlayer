@@ -1017,6 +1017,24 @@
       "end_line": 83,
       "kind": "validation_report"
     },
+    "screenheaderfooter_behavior": {
+      "path": "docs/validation/2026-11-07-gp8-screen-header-footer.md",
+      "start_line": 3,
+      "end_line": 13,
+      "kind": "validation_report"
+    },
+    "screenheaderfooter_evidence": {
+      "path": "docs/validation/2026-11-07-gp8-screen-header-footer.md",
+      "start_line": 15,
+      "end_line": 37,
+      "kind": "validation_report"
+    },
+    "screenheaderfooter_limits": {
+      "path": "docs/validation/2026-11-07-gp8-screen-header-footer.md",
+      "start_line": 39,
+      "end_line": 46,
+      "kind": "validation_report"
+    },
     "strokes_behavior": {
       "path": "docs/validation/2026-10-22-gp8-stroke-patterns.md",
       "start_line": 5,
@@ -9443,12 +9461,15 @@
       "current_status": "partial",
       "assessment": "evidence_reviewed",
       "current_proven_status": "partial",
-      "current_behavior": "Page layout (Presentation and the Export score custom page) has a header and footer for the first page and for the other pages, each with left, center and right text using %TITLE%, %SUBTITLE%, %ARTIST%, %ALBUM%, %WORDS%, %MUSIC%, %COPYRIGHT%, %TABBER%, %INSTRUCTIONS%, %NOTICES%, %PAGE% and %PAGES% (%% for a percent sign). PDF, SVG, PNG and print fill the fields from the score, keep slots clear of each other, and fit or ellipsize long text; unknown fields and unprintable text are refused in the panel and by Rust. Defaults are saved implicitly so existing documents print unchanged. A Windows desktop-test PDF export of the five-page engraving fixture shows the substituted first-page and other-page bands, survives undo, save and reopen.",
-      "remaining_gap": "Field names and syntax are not verified against GP8; the on-screen page view does not draw headers and footers; no per-field fonts, styles, images or multi-line text; most score fields are only editable through imported files; no original-GP8 comparison.",
+      "current_behavior": "Page layout (Presentation and the Export score custom page) has a header and footer for the first page and for the other pages, each with left, center and right text using %TITLE%, %SUBTITLE%, %ARTIST%, %ALBUM%, %WORDS%, %MUSIC%, %COPYRIGHT%, %TABBER%, %INSTRUCTIONS%, %NOTICES%, %PAGE% and %PAGES% (%% for a percent sign). PDF, SVG, PNG and print fill the fields from the score, keep slots clear of each other, and fit or ellipsize long text; unknown fields and unprintable text are refused in the panel and by Rust. Defaults are saved implicitly so existing documents print unchanged. A Windows desktop-test PDF export of the five-page engraving fixture shows the substituted first-page and other-page bands, survives undo, save and reopen. The vertical page, horizontal page and grid views draw the same headers and footers in the page margins without moving the music, and the desktop test checks them on screen through edit, undo and redo.",
+      "remaining_gap": "Field names and syntax are not verified against GP8; on screen the header and footer sit in the page margins rather than at export's positions, `%PAGES%` counts screen pages and page 1 shows the title twice; no per-field fonts, styles, images or multi-line text; most score fields are only editable through imported files; no original-GP8 comparison.",
       "current_evidence": [
         "headerfooter_behavior",
         "headerfooter_evidence",
-        "headerfooter_limits"
+        "headerfooter_limits",
+        "screenheaderfooter_behavior",
+        "screenheaderfooter_evidence",
+        "screenheaderfooter_limits"
       ],
       "runtime_rechecked_by_this_audit": false
     },

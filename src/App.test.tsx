@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act,cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { forgetSessionPanelSizes } from './workstation/panel-sizes';
 import '@testing-library/jest-dom/vitest';
@@ -37,6 +37,8 @@ vi.mock('./harmony/library',async original=>({...await original<typeof import('.
 
 const integration=vi.hoisted(()=>({running:false,players:[] as {getState:()=>PlaybackState;publish:(patch:Partial<PlaybackState>)=>void;generation:number;built:BuiltDocument|null}[],seekToMeasure:vi.fn(),setLoop:vi.fn(),clearLoop:vi.fn(),loadDocument:vi.fn(),beforeScoreChange:vi.fn(),destroy:vi.fn(),playerOptions:vi.fn(),stop:vi.fn(),stageBacking:vi.fn<NativeAudioBridge['stageBacking']>(),commits:vi.fn(),audition:vi.fn(),activeNotes:vi.fn((_trackId:string)=>[]),practiceSpeed:100,practiceFixed:false,setPractice:vi.fn(),play:vi.fn(),pause:vi.fn(),playFromCursor:vi.fn(),playSelection:vi.fn(),loopSelection:vi.fn(),exportOptions:vi.fn(),exportBusy:false,exportRun:vi.fn(async(_options:unknown,_source?:unknown)=>true),exportCancel:vi.fn(async()=>{})}));
 vi.mock('./audio/bridge',()=>({createDocumentAudioBridge:vi.fn(()=>({prepare:vi.fn(async()=>{}),command:vi.fn(async()=>{}),setMix:vi.fn(async()=>{}),devices:vi.fn(async()=>[]),status:vi.fn(async()=>null),subscribe:vi.fn(async()=>()=>{}),stageBacking:integration.stageBacking,stageEmbeddedBacking:vi.fn(async()=>null)} satisfies NativeAudioBridge))}));
+// No MIDI service in jsdom: the inspector's MIDI output panel finds no ports instead of showing a listing error.
+vi.mock('./audio/midi-out',async original=>({...await original<typeof import('./audio/midi-out')>(),nativeMidiOut:{ports:async()=>[],setDelay:async()=>{},status:async()=>({ports:[],sent:0,dropped:0,late:0,maxLateMs:0}),testLog:async()=>[]}}));
 vi.mock('./export/bridge',()=>({createDocumentExportBridge:vi.fn(()=>({exportPdf:vi.fn(async()=>null),exportMidi:vi.fn(async()=>false),exportMusicXml:vi.fn(async()=>false),exportAsciiTab:vi.fn(async()=>false),exportGp5:vi.fn(async()=>false),exportSvg:vi.fn(async()=>false),exportPng:vi.fn(async()=>false),exportTrackFiles:vi.fn(async()=>false),exportAudio:vi.fn(async()=>null),status:vi.fn(async()=>null),cancel:vi.fn(async()=>{})} satisfies ExportNativeBridge))}));
 vi.mock('./export/useExportCoordinator',()=>({useExportCoordinator:(options:unknown)=>{integration.exportOptions(options);return {busy:integration.exportBusy,progress:undefined,run:integration.exportRun,cancel:integration.exportCancel};}}));
 vi.mock('./audio/NativePlaybackController',()=>({NativePlaybackController:class {
@@ -1669,6 +1671,11 @@ it('writes the clicked staff position as one edit that one undo removes, and pre
   });
 
 describe('entry key queue',()=>{
+  // Keys older than two seconds are dropped by design. The clock stands still here so a slow runner cannot age the queued keys;
+  // the test for that rule moves the clock itself.
+  let clock:ReturnType<typeof vi.spyOn>|undefined;
+  beforeEach(()=>{clock=vi.spyOn(Date,'now').mockReturnValue(1_700_000_000_000);});
+  afterEach(()=>{clock?.mockRestore();});
   const pane=()=>screen.getByRole('region',{name:'Score workspace'});
   const press=(init:Parameters<typeof fireEvent.keyDown>[1])=>fireEvent.keyDown(pane(),init);
   const edits=(c:DocumentController)=>c.getState().snapshot.project.edits;

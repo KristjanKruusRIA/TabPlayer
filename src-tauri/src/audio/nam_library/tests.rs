@@ -1,4 +1,10 @@
 use super::*;
+use std::cell::Cell;
+
+thread_local! {
+    /// Makes the next `read_bounded` on this thread fail as a sharing violation would.
+    pub(super) static FAIL_NEXT_READ: Cell<bool> = const { Cell::new(false) };
+}
 
 const WAVENET: &[u8] = include_bytes!("../../../tests/fixtures/nam/wavenet.nam");
 const LSTM: &[u8] = include_bytes!("../../../tests/fixtures/nam/lstm.nam");
@@ -78,8 +84,8 @@ fn an_oversized_file_is_refused_by_the_bounded_read() {
 #[test]
 fn a_directory_is_not_a_file() {
     let (dir, library) = library();
-    // Windows refuses to open a directory as a file; elsewhere the handle says it is not one.
-    assert!(library.import_path(dir.path()).is_err());
+    let problem = library.import_path(dir.path()).unwrap_err();
+    assert_eq!(problem.kind, ProblemKind::Refused);
 }
 
 #[test]
@@ -119,9 +125,8 @@ fn resolve_returns_the_same_model_on_a_hit_and_holds_twelve() {
     let second = library.model(&id).unwrap();
     assert!(Arc::ptr_eq(&first, &second));
 
-    // Twelve other entries push the first out; failures take places too.
+    // Twelve other entries push the first out.
     for n in 0..CACHE_SIZE {
-        let _ = library.model(&format!("{n:032x}"));
         let mut v: serde_json::Value = serde_json::from_slice(LSTM).unwrap();
         v["metadata"] = serde_json::json!({ "n": n });
         let id = plant(&library, &serde_json::to_vec(&v).unwrap());
@@ -222,4 +227,16 @@ fn problem_of(library: &CaptureLibrary, id: &str) -> CaptureProblem {
         Ok(_) => panic!("expected a problem"),
         Err(problem) => problem,
     }
+}
+
+#[test]
+fn a_read_that_fails_is_not_cached() {
+    let (_dir, library) = library();
+    let id = library.import_bytes(WAVENET, "a.nam").unwrap().id;
+    FAIL_NEXT_READ.with(|f| f.set(true));
+    let problem = problem_of(&library, &id);
+    assert_eq!(problem.kind, ProblemKind::Unreadable);
+    assert!(library.cache().is_empty());
+    // The file is untouched, so its stamp is the same, and it now reads.
+    assert!(library.model(&id).is_ok());
 }

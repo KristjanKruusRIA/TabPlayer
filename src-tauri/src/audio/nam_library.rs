@@ -159,6 +159,17 @@ fn too_large() -> CaptureProblem {
 /// Reads a file whole, but not past `MAX_FILE_BYTES`. The size is taken from the open handle, and the read is
 /// capped regardless, so a file that grows after the check cannot be read past the bound.
 fn read_bounded(path: &Path) -> Result<Vec<u8>, CaptureProblem> {
+    #[cfg(test)]
+    if tests::FAIL_NEXT_READ.with(|f| f.replace(false)) {
+        return Err(CaptureProblem::unreadable("The file is held open."));
+    }
+    // Opening a named pipe waits for a writer, so a path that is not a file is refused before it is opened.
+    match std::fs::metadata(path) {
+        Ok(metadata) if !metadata.is_file() => {
+            return Err(CaptureProblem::refused("This is not a file."));
+        }
+        _ => {}
+    }
     let file = std::fs::File::open(path).map_err(|e| match e.kind() {
         std::io::ErrorKind::NotFound => {
             CaptureProblem::new(ProblemKind::Missing, "The file is missing.")
@@ -386,8 +397,18 @@ impl CaptureLibrary {
                 return outcome;
             }
         }
-        let outcome = Self::build(&path, id);
+        // A file that cannot be read now may be read in a moment; only what the bytes say is kept.
+        let bytes = read_bounded(&path).map_err(|mut p| {
+            if p.kind == ProblemKind::Refused {
+                p.kind = ProblemKind::Unreadable;
+            }
+            p
+        })?;
+        let outcome = Self::build(&bytes, id);
         let mut cache = self.cache();
+        if let Some(found) = cache.iter().find(|c| c.id == id && c.stamp == stamp) {
+            return found.outcome.clone();
+        }
         cache.retain(|c| c.id != id);
         cache.push(Cached {
             id: id.into(),
@@ -400,19 +421,13 @@ impl CaptureLibrary {
         outcome
     }
 
-    fn build(path: &Path, id: &str) -> Result<Arc<NamModel>, CaptureProblem> {
-        let bytes = read_bounded(path).map_err(|mut p| {
-            if p.kind == ProblemKind::Refused {
-                p.kind = ProblemKind::Unreadable;
-            }
-            p
-        })?;
-        if identity(&bytes) != id {
+    fn build(bytes: &[u8], id: &str) -> Result<Arc<NamModel>, CaptureProblem> {
+        if identity(bytes) != id {
             return Err(CaptureProblem::unreadable(
                 "The capture file has changed since it was imported. Import it again.",
             ));
         }
-        let file = parse_nam(&bytes).map_err(CaptureProblem::from_nam)?;
+        let file = parse_nam(bytes).map_err(CaptureProblem::from_nam)?;
         Ok(Arc::new(NamModel::build(&file)))
     }
 
@@ -572,13 +587,12 @@ pub async fn nam_capture_status(
     app: tauri::AppHandle,
     ids: Vec<String>,
 ) -> Result<Vec<CaptureStatus>, String> {
-    if ids.len() > MAX_STATUS_IDS {
-        return Err(format!("At most {MAX_STATUS_IDS} captures at a time."));
-    }
     let library = library_for(&app)?;
-    tauri::async_runtime::spawn_blocking(move || library.status(&ids))
-        .await
-        .map_err(|e| e.to_string())
+    tauri::async_runtime::spawn_blocking(move || {
+        library.status(&ids[..ids.len().min(MAX_STATUS_IDS)])
+    })
+    .await
+    .map_err(|e| e.to_string())
 }
 
 #[cfg(test)]

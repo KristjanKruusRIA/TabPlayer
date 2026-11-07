@@ -8,7 +8,10 @@ import { rangeFromBeats, resolveSelectionBeats, resolveSelectionNotes, selection
 import { configureEngraving, type EngravingProjection } from './engraving/projection';
 import type { EngravingOverrides,PageLayout } from './engraving/types';
 import {engravingRenderKey,withoutSystemGaps,type SystemSpan} from './engraving/system-gaps';
-import {pageGeometry,pageTextFontFamily,pageTextItems,screenPageBaselines} from './engraving/page';
+import {headerScaleOf,pageGeometry,pageTextFontFamily,pageTextItems,screenPageBaselines} from './engraving/page';
+import {fontStack} from './engraving/font-catalog';
+import {pageRoleFont} from './engraving/fonts';
+import {loadRoleFaces,roleFacesPending} from './engraving/font-loading';
 import {headerFieldsOf} from './engraving/header-footer';
 import {typographyOf} from './engraving/typography';
 import {loadExportFonts} from './export/pdf';
@@ -66,7 +69,7 @@ export interface ScoreNoteEntry {
 const defaultDisplay:ScoreDisplayPreferences={layout:'parchment',zoomMode:'manual'};
 const defaultPage:PageLayout={widthMm:210,heightMm:297,marginsMm:{top:15,right:15,bottom:15,left:15},scale:1,profile:'document'};
 
-export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSelection=null,onEditorSelection,projection,visibleTracks,engraving:engravingProp,editTarget,editString,editNoteIndex,display=defaultDisplay,page:pageInput=defaultPage,onDisplayStatus,errors=noErrors,barDesign=null,symbols,noteEntry=null,onSystems}: {
+export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSelection=null,onEditorSelection,projection,visibleTracks,engraving:engravingProp,editTarget,editString,editNoteIndex,display=defaultDisplay,page:pageInput=defaultPage,onDisplayStatus,errors=noErrors,barDesign=null,symbols,noteEntry=null,onSystems,onFontStatus}: {
   score:model.Score;track:number;zoom:number;profile:string;onSelect:(target:BeatTarget,string?:number,noteIndex?:number)=>void;
   playback:NativePlaybackController|null;
   editorSelection?:MusicSelection|null;onEditorSelection?:(selection:MusicSelection|null)=>void;
@@ -83,6 +86,8 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
   noteEntry?:ScoreNoteEntry|null;
   /** The rendered systems' bar intervals after each completed render in a physical page layout; null in other layouts or while no completed render exists. Not repeated for an equal value. */
   onSystems?:(systems:SystemSpan[]|null)=>void;
+  /** The role fonts that could not be loaded (by file name) and the music symbols drawn from Bravura, after each render that waited for fonts. Not repeated for an equal value. */
+  onFontStatus?:(status:{failed:string[];substituted:string[]})=>void;
 }) {
   // System gaps only move the stacked blocks, so editing them must not render the notation again (as with headers): the render path sees an engraving without them.
   const renderKey=engravingRenderKey(engravingProp),gapKey=JSON.stringify(engravingProp?.systemGaps??null);
@@ -131,13 +136,17 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
   // Read from the unmemoized prop: header edits must not re-render the notation, but must redraw this text.
   const bandSet=pageInput.headerFooter,fields=useMemo(()=>headerFieldsOf(score),[score,score.title,score.subTitle,score.artist,score.album,score.words,score.music,score.copyright,score.tab,score.instructions,score.notices]),title=score.title;
   const titleScale=engraving?typographyOf(engraving).titleScale??1:1,pageCount=pagination?.pageCount??0;
+  // The Page header and footer roles draw the overlay; the key keeps the memo from changing on every render of an equal choice.
+  const fontsKey=JSON.stringify(engraving?.fonts??null);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const headerFont=useMemo(()=>pageRoleFont(engraving?.fonts,'pageHeader'),[fontsKey]),footerFont=useMemo(()=>pageRoleFont(engraving?.fonts,'pageFooter'),[fontsKey]);
   const pageTexts=useMemo(()=>{
     if(!pageCount)return [];
-    const {headerY,footerY}=screenPageBaselines(geometry,titleScale);
-    return Array.from({length:pageCount},(_,index)=>{const {header,footer}=pageTextItems({geometry,bands:bandSet?(index===0?bandSet.first:bandSet.other):null,title,fields,page:index+1,pages:pageCount,titleScale,headerY,footerY});return [...header,...footer];});
-    // fontsReady re-measures once the page font has loaded.
+    const {headerY,footerY}=screenPageBaselines(geometry,headerScaleOf(titleScale,headerFont));
+    return Array.from({length:pageCount},(_,index)=>{const {header,footer}=pageTextItems({geometry,bands:bandSet?(index===0?bandSet.first:bandSet.other):null,title,fields,page:index+1,pages:pageCount,titleScale,headerY,footerY,headerFont,footerFont});return [...header,...footer];});
+    // fontsReady re-measures once the page font or a role face has loaded.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[bandSet,fields,title,geometry,titleScale,pageCount,fontsReady]);
+  },[bandSet,fields,title,geometry,titleScale,headerFont,footerFont,pageCount,fontsReady]);
   const roots=useRef(new Map<string,HTMLElement>()),barElement=useRef<HTMLSpanElement>(null),beatElement=useRef<HTMLSpanElement>(null);
   const presentation=useRef<ScreenPlaybackContext>({renderedScore,wrapper:null,scrollHost:null,physical:null,barElement:null,beatElement:null});
   presentation.current={renderedScore,wrapper:wrapper.current,scrollHost:scrollHost.current,physical:pagination&&arrangement?{pagination,arrangement,roots:roots.current}:null,barElement:barElement.current,beatElement:beatElement.current};
@@ -373,17 +382,32 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
   useEffect(()=>{if(caret&&revealCaret.current&&caretElement.current){const host=scrollHost.current;if(host){const box=caretElement.current.getBoundingClientRect(),viewport=host.getBoundingClientRect();if(box.top<viewport.top)host.scrollTop+=box.top-viewport.top;else if(box.bottom>viewport.bottom)host.scrollTop+=box.bottom-viewport.bottom;if(box.left<viewport.left)host.scrollLeft+=box.left-viewport.left;else if(box.right>viewport.right)host.scrollLeft+=box.right-viewport.right;}revealCaret.current=false;}},[caret]);
   useEffect(()=>{if(playback&&api.current)playback.attachView(api.current);},[playback]);
   const loaded=useRef<{score:model.Score;tracks:string}|null>(null);
+  // Counts render requests that were superseded or abandoned: a font load that finishes under an older count paints nothing.
+  const renderGeneration=useRef(0),fontStatusKey=useRef(JSON.stringify({failed:[],substituted:[]})),fontStatusHandler=useRef(onFontStatus);fontStatusHandler.current=onFontStatus;
   useEffect(()=>{
     const view=api.current!;if(sourceWidth<=0)return;
-    view.settings.display.scale=sourceScale;
-    if(engraving)configureEngraving(view.settings,engraving);else view.settings.display.staveProfile=StaveProfile[profile as keyof typeof StaveProfile] as StaveProfile;
-    view.settings.display.layoutMode=display.layout==='horizontalScreen'?LayoutMode.Horizontal:display.layout==='verticalScreen'?LayoutMode.Page:LayoutMode.Parchment;
-    view.settings.display.systemsLayoutMode=display.layout==='verticalScreen'?SystemsLayoutMode.Automatic:SystemsLayoutMode.UseModelLayout;
-    view.settings.display.padding=sourcePhysical||screenLayout?[0,0,0,0]:[geometry.left*factor,geometry.top*factor,geometry.right*factor,geometry.bottom*factor];
-    view.renderer.width=sourceWidth;view.updateSettings();
-    const old=loaded.current;
-    if(!old||old.score!==renderedScore||old.tracks!==trackKey){loaded.current={score:renderedScore,tracks:trackKey};if(playback)playback.setRenderedScore(renderedScore,tracks);else view.renderScore(renderedScore,tracks);}
-    else view.render();
+    const draw=()=>{
+      view.settings.display.scale=sourceScale;
+      if(engraving)configureEngraving(view.settings,engraving);else view.settings.display.staveProfile=StaveProfile[profile as keyof typeof StaveProfile] as StaveProfile;
+      view.settings.display.layoutMode=display.layout==='horizontalScreen'?LayoutMode.Horizontal:display.layout==='verticalScreen'?LayoutMode.Page:LayoutMode.Parchment;
+      view.settings.display.systemsLayoutMode=display.layout==='verticalScreen'?SystemsLayoutMode.Automatic:SystemsLayoutMode.UseModelLayout;
+      view.settings.display.padding=sourcePhysical||screenLayout?[0,0,0,0]:[geometry.left*factor,geometry.top*factor,geometry.right*factor,geometry.bottom*factor];
+      view.renderer.width=sourceWidth;view.updateSettings();
+      const old=loaded.current;
+      if(!old||old.score!==renderedScore||old.tracks!==trackKey){loaded.current={score:renderedScore,tracks:trackKey};if(playback)playback.setRenderedScore(renderedScore,tracks);else view.renderScore(renderedScore,tracks);}
+      else view.render();
+    };
+    const reportFonts=(failed:string[])=>{const status={failed,substituted:[] as string[]},key=JSON.stringify(status);if(key===fontStatusKey.current)return;fontStatusKey.current=key;fontStatusHandler.current?.(status);};
+    // alphaTab caches a text width table per font family, so a role face has to be in before the first render that uses it.
+    // Nothing to load (every document without role fonts) keeps the render synchronous.
+    const fonts=engraving?.fonts;
+    if(!roleFacesPending(fonts)){draw();reportFonts([]);return;}
+    const generation=renderGeneration.current;
+    void loadRoleFaces(fonts).then(({failed})=>{
+      if(generation!==renderGeneration.current)return;
+      setFontsReady(count=>count+1);reportFonts(failed);draw();
+    });
+    return()=>{renderGeneration.current++;};
   },[renderedScore,trackKey,playback,sourceWidth,sourceScale,sourcePhysical,measureBase,screenLayout,display.layout==='verticalScreen',display.layout==='horizontalScreen',engraving,profile,page]);
   useLayoutEffect(()=>{playbackPresentation.current?.presentationChanged();refresh.current();refreshCaret.current();refreshErrors.current();refreshDiagrams.current();refreshDesign.current();},[pagination,arrangement,pageError]);
   designing.current=barDesign;
@@ -552,7 +576,7 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
       {arrangement.pages.map(sheet=><div key={sheet.index} className="score-sheet" aria-label={`Score page ${sheet.index+1}`} style={{left:sheet.x,top:sheet.y,width:sheet.width,height:sheet.height}}>
         {pagination.blocks.filter(block=>block.page===sheet.index).map(block=><div key={block.chunk.id} ref={element=>{if(element)roots.current.set(block.chunk.id,element);else roots.current.delete(block.chunk.id);}} className="score-svg-chunk at-surface-svg" style={{left:(block.x+block.chunk.x-block.sourceBounds.x)*factor,top:(block.y+block.chunk.y-block.sourceBounds.y)*factor,width:block.chunk.width,height:block.chunk.height,transform:`scale(${factor})`}} dangerouslySetInnerHTML={{__html:block.chunk.svg}}/>)}
         <svg className="score-page-text" aria-hidden="true" viewBox={`0 0 ${geometry.width} ${geometry.height}`} width={sheet.width} height={sheet.height}>
-          {(pageTexts[sheet.index]??[]).map((item,index)=><text key={index} x={item.x} y={item.y} fontSize={item.size} fontFamily={pageTextFontFamily} fill="#111" textAnchor={item.anchor}>{item.text}</text>)}
+          {(pageTexts[sheet.index]??[]).map((item,index)=><text key={index} x={item.x} y={item.y} fontSize={item.size} fontFamily={item.family?fontStack(item.family).join(', '):pageTextFontFamily} fontWeight={item.bold?700:undefined} fontStyle={item.italic?'italic':undefined} fill="#111" textAnchor={item.anchor}>{item.text}</text>)}
         </svg>
       </div>)}
     </div>}

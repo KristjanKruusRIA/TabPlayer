@@ -2,16 +2,18 @@
 import {afterEach,expect,it,vi} from 'vitest';
 import {StrictMode} from 'react';
 import {act,cleanup,fireEvent,render,screen} from '@testing-library/react';
-import {LayoutMode,Settings,SystemsLayoutMode,model,rendering,type PlaybackHighlightChangeEventArgs} from '@coderline/alphatab';
+import {LayoutMode,NotationElement,Settings,SystemsLayoutMode,model,rendering,type PlaybackHighlightChangeEventArgs} from '@coderline/alphatab';
 import {ScoreView} from './ScoreView';
 import {music} from './editor/fixtures';
 import type {EngravingOverrides,PageLayout} from './engraving/types';
+import type {EngravingFonts} from './engraving/fonts';
 import type {SystemSpan} from './engraving/system-gaps';
 import type {ScoreLayoutMode} from './engraving/screen-view';
 import {defaultEngraving} from './engraving/projection';
 import {withSystemGaps} from './engraving/system-gaps';
-const state=vi.hoisted(()=>({fonts:(()=>new Promise<void>(()=>{})) as ()=>Promise<void>,api:null as unknown,width:900,height:700,resize:()=>{},loads:vi.fn(),renders:vi.fn()}));
+const state=vi.hoisted(()=>({roles:((_fonts?:unknown)=>new Promise<{failed:string[]}>(()=>{})) as (fonts?:unknown)=>Promise<{failed:string[]}>,fonts:(()=>new Promise<void>(()=>{})) as ()=>Promise<void>,api:null as unknown,width:900,height:700,resize:()=>{},loads:vi.fn(),renders:vi.fn()}));
 function event<T>(){const handlers=new Set<(e:T)=>void>();return {on:(fn:(e:T)=>void)=>{handlers.add(fn);return()=>handlers.delete(fn);},emit:(e:T)=>{for(const fn of handlers)fn(e);}};}
+vi.mock('./engraving/font-loading',async original=>({...await original<typeof import('./engraving/font-loading')>(),loadRoleFaces:(fonts?:unknown)=>state.roles(fonts)}));
 vi.mock('./export/pdf',async original=>({...await original<typeof import('./export/pdf')>(),loadExportFonts:()=>state.fonts()}));
 vi.mock('@coderline/alphatab',async original=>({...await original<typeof import('@coderline/alphatab')>(),AlphaTabApi:class {
  settings=new Settings();score:model.Score|null=null;constructor(){state.api=this;}
@@ -30,7 +32,7 @@ vi.mock('@coderline/alphatab',async original=>({...await original<typeof import(
  }this.postRenderFinished.emit();}
 }}));
 const page:PageLayout={widthMm:210,heightMm:210,marginsMm:{top:15,right:15,bottom:15,left:15},scale:1,profile:'document'};
-function setup(layout:ScoreLayoutMode='verticalPage',zoom=100,extra:{page?:PageLayout;engraving?:EngravingOverrides;onSystems?:(systems:SystemSpan[]|null)=>void}={}){
+function setup(layout:ScoreLayoutMode='verticalPage',zoom=100,extra:{page?:PageLayout;engraving?:EngravingOverrides;onSystems?:(systems:SystemSpan[]|null)=>void;onFontStatus?:(status:{failed:string[];substituted:string[]})=>void}={}){
  vi.spyOn(HTMLElement.prototype,'clientWidth','get').mockImplementation(function(this:HTMLElement){return this.classList.contains('paper-scroll')?state.width:0;});
  vi.spyOn(HTMLElement.prototype,'clientHeight','get').mockImplementation(function(this:HTMLElement){return this.classList.contains('paper-scroll')?state.height:0;});
  vi.stubGlobal('ResizeObserver',class {constructor(fn:()=>void){state.resize=fn;}observe(){}disconnect(){}});
@@ -38,7 +40,7 @@ function setup(layout:ScoreLayoutMode='verticalPage',zoom=100,extra:{page?:PageL
  const tree=(p=props)=><div className="paper-scroll" style={{padding:10}}><div className="paper score-paper-host"><ScoreView {...p}/></div></div>;
  const result=render(tree());return {...result,props,tree,api:state.api as {settings:Settings;renderer:{width:number}}};
 }
-afterEach(()=>{cleanup();vi.restoreAllMocks();vi.unstubAllGlobals();state.loads.mockClear();state.renders.mockClear();state.width=900;state.height=700;state.fonts=()=>new Promise<void>(()=>{});});
+afterEach(()=>{cleanup();vi.restoreAllMocks();vi.unstubAllGlobals();state.loads.mockClear();state.renders.mockClear();state.width=900;state.height=700;state.fonts=()=>new Promise<void>(()=>{});state.roles=()=>new Promise<{failed:string[]}>(()=>{});});
 it.each(['verticalPage','horizontalPage','grid','parchment','verticalScreen','horizontalScreen'] as const)('renders %s without a playback controller',layout=>{
  const {api}=setup(layout);expect(state.loads).toHaveBeenCalledTimes(1);
  expect(api.settings.display.layoutMode).toBe(layout==='horizontalScreen'?LayoutMode.Horizontal:layout==='verticalScreen'?LayoutMode.Page:LayoutMode.Parchment);
@@ -217,4 +219,80 @@ it('hit-tests the moved third block after a gap-only change',()=>{
  expect(props.onSelect).toHaveBeenLastCalledWith(expect.objectContaining({bar:2}),undefined,undefined);
  props.onSelect.mockClear();rerender(tree({...props,engraving}));fireEvent.mouseDown(pages,{clientX:center+margin+66,clientY:margin+1230,button:0});
  expect(props.onSelect).not.toHaveBeenCalled();
+});
+
+// ---- D12 role fonts: the first render waits for the chosen faces (Task 5) ----
+const withFonts=(fonts:EngravingFonts):EngravingOverrides=>({...defaultEngraving(),fonts});
+const serif:EngravingFonts={roles:{lyrics:{font:'notoSerif'}}},mono:EngravingFonts={roles:{lyrics:{font:'notoSansMono'}}};
+const lyricsFamily=(api:{settings:Settings})=>api.settings.display.resources.elementFonts.get(NotationElement.EffectLyrics)!.families[0];
+function deferred(){let resolve!:(value:{failed:string[]})=>void;const promise=new Promise<{failed:string[]}>(done=>{resolve=done;});return {promise,resolve};}
+it('render_waits_for_role_faces_before_first_render',async()=>{
+ const gate=deferred(),seen:unknown[]=[];state.roles=fonts=>{seen.push(fonts);return gate.promise;};
+ const {api}=setup('verticalPage',100,{engraving:withFonts(serif)});
+ expect(seen).toEqual([serif]);expect(state.loads).not.toHaveBeenCalled();expect(state.renders).not.toHaveBeenCalled();
+ await act(async()=>{gate.resolve({failed:[]});await gate.promise;});
+ expect(state.loads).toHaveBeenCalledTimes(1);
+ // The fonts were configured when the render ran, after the faces were in.
+ expect(lyricsFamily(api)).toBe('TabPlayer Serif');
+});
+it('default_documents_render_without_waiting_or_loading_roles',()=>{
+ const roles=vi.fn(()=>new Promise<{failed:string[]}>(()=>{}));state.roles=roles;
+ setup('verticalPage',100,{engraving:defaultEngraving()});
+ expect(roles).not.toHaveBeenCalled();expect(state.loads).toHaveBeenCalledTimes(1);
+ // A size-only role needs no face either.
+ cleanup();state.loads.mockClear();
+ setup('verticalPage',100,{engraving:withFonts({roles:{lyrics:{size:1.5}}})});
+ expect(roles).not.toHaveBeenCalled();expect(state.loads).toHaveBeenCalledTimes(1);
+});
+it('fonts_change_rerenders_once',async()=>{
+ const {props,tree,rerender,api}=setup('verticalPage',100,{engraving:defaultEngraving()});
+ const renders=state.renders.mock.calls.length,gate=deferred();state.roles=()=>gate.promise;
+ rerender(tree({...props,engraving:withFonts(serif)}));
+ expect(state.renders).toHaveBeenCalledTimes(renders);
+ await act(async()=>{gate.resolve({failed:[]});await gate.promise;});
+ expect(state.renders).toHaveBeenCalledTimes(renders+1);expect(state.loads).toHaveBeenCalledTimes(1);expect(lyricsFamily(api)).toBe('TabPlayer Serif');
+ // Choosing the same fonts again is the same render key, so nothing renders.
+ rerender(tree({...props,engraving:withFonts(serif)}));
+ await act(async()=>{await Promise.resolve();});
+ expect(state.renders).toHaveBeenCalledTimes(renders+1);
+});
+it('a_slow_font_load_never_paints_an_older_choice',async()=>{
+ const first=deferred(),second=deferred(),queue=[first,second];state.roles=()=>queue.shift()!.promise;
+ const {props,tree,rerender,api}=setup('verticalPage',100,{engraving:withFonts(serif)});
+ rerender(tree({...props,engraving:withFonts(mono)}));
+ await act(async()=>{second.resolve({failed:[]});await second.promise;});
+ expect(state.loads).toHaveBeenCalledTimes(1);expect(lyricsFamily(api)).toBe('TabPlayer Mono');
+ const renders=state.renders.mock.calls.length;
+ await act(async()=>{first.resolve({failed:[]});await first.promise;});
+ expect(state.renders).toHaveBeenCalledTimes(renders);expect(lyricsFamily(api)).toBe('TabPlayer Mono');
+});
+it('a_load_that_ends_after_unmount_renders_nothing',async()=>{
+ const gate=deferred();state.roles=()=>gate.promise;
+ const {unmount}=setup('verticalPage',100,{engraving:withFonts(serif)});
+ unmount();
+ await act(async()=>{gate.resolve({failed:[]});await gate.promise;});
+ expect(state.loads).not.toHaveBeenCalled();expect(state.renders).not.toHaveBeenCalled();
+});
+it('font_failures_are_reported_and_the_render_still_happens',async()=>{
+ const gate=deferred(),status=vi.fn();state.roles=()=>gate.promise;
+ setup('verticalPage',100,{engraving:withFonts(serif),onFontStatus:status});
+ await act(async()=>{gate.resolve({failed:['NotoSerif-Italic.ttf']});await gate.promise;});
+ expect(state.loads).toHaveBeenCalledTimes(1);expect(status).toHaveBeenLastCalledWith({failed:['NotoSerif-Italic.ttf'],substituted:[]});
+});
+it('page_overlay_uses_header_and_footer_role_fonts',async()=>{
+ const gate=deferred();state.roles=()=>gate.promise;
+ setup('verticalPage',100,{engraving:withFonts({roles:{pageHeader:{font:'notoSerif',bold:true,italic:true,size:1.5},pageFooter:{font:'notoSansMono'}}})});
+ await act(async()=>{gate.resolve({failed:[]});await gate.promise;});
+ const texts=[...screen.getAllByLabelText('Score page 1')[0].querySelectorAll('.score-page-text text')];
+ expect(texts).toHaveLength(2);
+ const [header,footer]=texts;
+ expect(header.getAttribute('font-family')).toBe('TabPlayer Serif, Noto Sans, Noto Sans CJK JP, Noto Emoji');
+ expect(header.getAttribute('font-weight')).toBe('700');expect(header.getAttribute('font-style')).toBe('italic');expect(header.getAttribute('font-size')).toBe('27');
+ expect(footer.getAttribute('font-family')).toBe('TabPlayer Mono, Noto Sans, Noto Sans CJK JP, Noto Emoji');expect(footer.getAttribute('font-weight')).toBeNull();
+});
+it('page_overlay_keeps_the_default_stack_without_role_fonts',()=>{
+ setup('verticalPage',100,{engraving:defaultEngraving()});
+ const [header,footer]=[...screen.getAllByLabelText('Score page 1')[0].querySelectorAll('.score-page-text text')];
+ for(const text of [header,footer]){expect(text.getAttribute('font-family')).toBe('Noto Sans, Noto Sans CJK JP, Noto Emoji');expect(text.getAttribute('font-weight')).toBeNull();expect(text.getAttribute('font-style')).toBeNull();}
+ expect(header.getAttribute('font-size')).toBe('18');expect(footer.getAttribute('font-size')).toBe('11');
 });

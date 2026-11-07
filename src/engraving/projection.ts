@@ -6,7 +6,7 @@ import { copyGpInterchangeSource } from '../interchange/gp';
 import { configureTypography,typographyOf,validateTypography } from './typography';
 import { validateBarWidths } from './bar-widths';
 import { validateSystemGaps } from './system-gaps';
-import { validateFonts } from './fonts';
+import { configureRoleFonts,validateFonts } from './fonts';
 
 export interface EngravingProjection {
   score:model.Score;
@@ -88,7 +88,7 @@ export function configureEngraving(settings:Settings,value:EngravingOverrides):v
   for(const [key,mapping]of Object.entries(notationEnums)){const override=value.notation[key as keyof typeof notationEnums];Object.assign(settings.notation,{[mapping.field]:override==='inherit'?defaults.notation[mapping.field]:(mapping.values as Record<string,number>)[override]});}
   for(const [key,element]of Object.entries(elementKeys)){const override=value.notation[key as keyof typeof elementKeys];if(override!==null)settings.notation.elements.set(element,override);else if(defaults.notation.elements.has(element))settings.notation.elements.set(element,defaults.notation.elements.get(element)!);else settings.notation.elements.delete(element);}
   for(const field of ['systemPaddingTop','systemPaddingBottom','lastSystemPaddingBottom'] as const)settings.display[field]=defaults.display[field]*(value.systemSpacing??1);
-  configureTypography(settings,typographyOf(value));
+  const typography=typographyOf(value);configureTypography(settings,typography);configureRoleFonts(settings,value.fonts,typography);
   settings.display.staveProfile=StaveProfile.Default;settings.display.systemsLayoutMode=SystemsLayoutMode.UseModelLayout;
 }
 /** Gives the track inserted after `source` a copy of its per-track style and shifts later tracks. */

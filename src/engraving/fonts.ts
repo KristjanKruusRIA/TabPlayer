@@ -1,9 +1,12 @@
-import { hasFace,textFonts,musicFonts } from './font-catalog';
+import { model,Settings } from '@coderline/alphatab';
+import { FALLBACK_FAMILIES,fontStack,hasFace,textFonts,musicFonts } from './font-catalog';
 import type { MusicFontId,TextFontId } from './font-catalog';
-import type { EngravingOverrides } from './types';
-import { TAB_SCALE_RANGE,TEXT_SCALE_RANGE } from './typography';
+import { roleElements,TAB_NUMBER_FONTS } from './role-elements';
+import type { EngravingOverrides,EngravingTypography } from './types';
+import { scaled,TAB_SCALE_RANGE,TEXT_SCALE_RANGE } from './typography';
 
 export type { MusicFontId,TextFontId };
+export { FALLBACK_FAMILIES,roleElements,TAB_NUMBER_FONTS };
 export type FontRole='titleBlock'|'pageHeader'|'pageFooter'|'chordNames'|'staffText'|'lyrics'|'trackNames'|'barNumbers'|'markers'|'tabNumbers';
 export const FONT_ROLES:readonly FontRole[]=['titleBlock','pageHeader','pageFooter','chordNames','staffText','lyrics','trackNames','barNumbers','markers','tabNumbers'];
 
@@ -87,4 +90,66 @@ export function withFonts(engraving:EngravingOverrides,fonts:EngravingFonts):Eng
   const {fonts:_dropped,...rest}=structuredClone(engraving);void _dropped;
   const next=normalizeFonts(fonts);
   return next?{...rest,fonts:structuredClone(next)}:rest;
+}
+
+/**
+ * The weight and slant a chosen font draws an element with: the role's own flag when it has one, else the element's default.
+ * A slant the font has no face for is dropped (Noto Sans Mono has no italic), because only bundled faces exist on both sides.
+ */
+export function effectiveStyle(entry:RoleFont&{font:TextFontId},defaultBold:boolean,defaultItalic:boolean):{bold:boolean;italic:boolean} {
+  const bold=entry.bold??defaultBold,wanted=entry.italic??defaultItalic;
+  return {bold,italic:wanted&&hasFace(entry.font,bold,true)};
+}
+
+/** The (bold, italic) each of a role's elements has before any role choice, one per distinct style. */
+const defaultStyles=new Map<FontRole,Array<{bold:boolean;italic:boolean}>>();
+export function roleDefaultStyles(role:FontRole):Array<{bold:boolean;italic:boolean}> {
+  const cached=defaultStyles.get(role);if(cached)return cached.map(style=>({...style}));
+  const resources=new Settings().display.resources;
+  const fonts=role==='pageHeader'||role==='pageFooter'?[]:role==='tabNumbers'?TAB_NUMBER_FONTS.map(key=>resources[key]):roleElements[role].map(element=>resources.elementFonts.get(element)!);
+  const found:Array<{bold:boolean;italic:boolean}>=[];
+  // The page header and footer are TabPlayer's own text: regular and upright until the role says otherwise.
+  for(const style of fonts.length?fonts.map(font=>({bold:font.isBold,italic:font.isItalic})):[{bold:false,italic:false}])if(!found.some(known=>known.bold===style.bold&&known.italic===style.italic))found.push(style);
+  defaultStyles.set(role,found);
+  return found.map(style=>({...style}));
+}
+
+const groupScale=(role:FontRole,typography:EngravingTypography)=>role==='tabNumbers'?typography.tabScale:role==='titleBlock'?typography.titleScale:typography.textScale;
+
+/**
+ * Applies the chosen text roles to alphaTab's element fonts. Call it after `configureTypography`, which rebuilds every
+ * font from the renderer defaults: a role that is absent keeps that result, so a later call without fonts restores it.
+ * A chosen font gets `[alias, ...FALLBACK_FAMILIES]`; a role size replaces the group scale and a size-only role keeps the
+ * typography family and style.
+ */
+export function configureRoleFonts(settings:Settings,fonts:EngravingFonts|undefined,typography:EngravingTypography):void {
+  const roles=fonts?.roles;if(!roles)return;
+  const defaults=new Settings().display.resources,resources=settings.display.resources;
+  const restyle=(current:model.Font,original:model.Font,entry:RoleFont):model.Font=>{
+    const next=current.withSize(scaled(original.size,entry.size??null));
+    if(entry.font===undefined)return next;
+    const {bold,italic}=effectiveStyle({...entry,font:entry.font},original.isBold,original.isItalic);
+    next.families=fontStack(textFonts[entry.font].alias);
+    next.style=italic?model.FontStyle.Italic:model.FontStyle.Plain;next.weight=bold?model.FontWeight.Bold:model.FontWeight.Regular;
+    return next;
+  };
+  // A role without its own size takes the group scale that configureTypography already applied.
+  const sized=(current:model.Font,original:model.Font,role:FontRole,entry:RoleFont)=>restyle(current,original,{...entry,size:entry.size??groupScale(role,typography)??undefined});
+  for(const role of FONT_ROLES){
+    const entry=roles[role];if(!entry)continue;
+    if(role==='tabNumbers')for(const key of TAB_NUMBER_FONTS)resources[key]=sized(resources[key],defaults[key],role,entry);
+    else if(role!=='pageHeader'&&role!=='pageFooter')for(const element of roleElements[role]){
+      const current=resources.elementFonts.get(element),original=defaults.elementFonts.get(element);
+      if(current&&original)resources.elementFonts.set(element,sized(current,original,role,entry));
+    }
+  }
+}
+
+/** How the page header or footer text is drawn. `family` is the alias, or null for the default Noto stack; `scale` null means no role size. */
+export interface PageRoleFont {family:string|null;bold:boolean;italic:boolean;scale:number|null}
+export function pageRoleFont(fonts:EngravingFonts|undefined,role:'pageHeader'|'pageFooter'):PageRoleFont {
+  const entry=fonts?.roles?.[role],scale=entry?.size??null;
+  if(!entry||entry.font===undefined)return {family:null,bold:false,italic:false,scale};
+  const {bold,italic}=effectiveStyle({...entry,font:entry.font},false,false);
+  return {family:textFonts[entry.font].alias,bold,italic,scale};
 }

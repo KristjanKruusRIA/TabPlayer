@@ -1,10 +1,11 @@
-import { LayoutMode, model, rendering, Settings, SystemsLayoutMode,NotationElement } from '@coderline/alphatab';
+import { LayoutMode, model, rendering, Settings, SystemsLayoutMode } from '@coderline/alphatab';
 import '../tremolo-guard';
 import { validateSelection, type ExportSelection, type PrintLayout, type SvgPage, type SvgSystem } from './types';
 import { selectStaves } from './selection';
 import { prepareScoreTimers } from '../editor/timers';
 import { configureEngraving,projectEngraving } from '../engraving/projection';
-import { defaultMusicFont,musicFontCss,pageGeometry,paginateEngravedSystems,type MusicFont } from '../engraving/page';
+import { defaultMusicFont,musicFontCss,pageGeometry,pageTextFontFamily,paginateEngravedSystems,type MusicFont } from '../engraving/page';
+import { FALLBACK_FAMILIES,roleElements,TAB_NUMBER_FONTS } from '../engraving/fonts';
 import type { EngravingOverrides,PageLayout } from '../engraving/types';
 import {pageTitleFontSize} from './page-title';
 import {headerFieldsOf} from '../engraving/header-footer';
@@ -32,7 +33,7 @@ export function paginateSystems(systems:SvgSystem[],title:string,layout:PrintLay
   return groups.map((group,index)=>{
     let y=d.margin+40;
     const content=group.map(system=>{const at=y;y+=system.height;return `<g transform="translate(${d.margin} ${at})">${system.svg.replace(/<svg\b[^>]*>/,'').replace(/<\/svg>\s*$/,'')}</g>`;}).join('');
-    return {widthMm:d.widthMm,heightMm:d.heightMm,svg:`<svg xmlns="http://www.w3.org/2000/svg" width="${d.widthMm}mm" height="${d.heightMm}mm" viewBox="0 0 ${d.width} ${d.height}"><style>${musicFontCss(music.size,music.families)}text{fill:#111}</style><text x="${d.margin}" y="${d.margin+22}" font-family="Noto Sans, Noto Sans CJK JP, Noto Emoji" font-size="${titleSize}">${escaped(title)}</text>${content}<text x="${d.width/2}" y="${d.height-d.margin}" text-anchor="middle" font-family="Noto Sans, Noto Sans CJK JP, Noto Emoji" font-size="11">${index+1} / ${groups.length}</text></svg>`};
+    return {widthMm:d.widthMm,heightMm:d.heightMm,svg:`<svg xmlns="http://www.w3.org/2000/svg" width="${d.widthMm}mm" height="${d.heightMm}mm" viewBox="0 0 ${d.width} ${d.height}"><style>${musicFontCss(music.size,music.families)}text{fill:#111}</style><text x="${d.margin}" y="${d.margin+22}" font-family="${pageTextFontFamily}" font-size="${titleSize}">${escaped(title)}</text>${content}<text x="${d.width/2}" y="${d.height-d.margin}" text-anchor="middle" font-family="${pageTextFontFamily}" font-size="11">${index+1} / ${groups.length}</text></svg>`};
   });
 }
 /** Mirrors the native PNG limits so an oversized export is refused before the save dialog opens. */
@@ -81,12 +82,12 @@ export function renderPdfPages(score:model.Score,selection:ExportSelection,layou
   copy.title='';
   if(!frozen)for(const track of copy.tracks)for(const staff of track.staves){staff.showStandardNotation=layout.profile!=='Tab';staff.showTablature=layout.profile!=='Score';}
   const settings=new Settings();settings.core.engine='svg';settings.core.useWorkers=false;settings.core.enableLazyLoading=false;
-  if(frozen){configureEngraving(settings,frozen.engraving);for(const element of [NotationElement.ScoreTitle,NotationElement.ScoreSubTitle,NotationElement.ScoreArtist,NotationElement.ScoreAlbum,NotationElement.ScoreWords,NotationElement.ScoreMusic,NotationElement.ScoreWordsAndMusic,NotationElement.ScoreCopyright])settings.notation.elements.set(element,false);}
+  if(frozen){configureEngraving(settings,frozen.engraving);for(const element of roleElements.titleBlock)settings.notation.elements.set(element,false);}
   settings.display.scale=frozen?.page.scale??layout.scale;settings.display.padding=[0];settings.display.layoutMode=LayoutMode.Page;
   settings.display.systemsLayoutMode=SystemsLayoutMode.UseModelLayout;
   settings.display.startBar=(selection.range?.first??0)+1;settings.display.barCount=selection.range?selection.range.last-selection.range.first+1:-1;
-  for(const font of settings.display.resources.elementFonts.values())font.families=['Noto Sans','Noto Sans CJK JP','Noto Emoji'];
-  for(const key of ['tablatureFont','graceFont','numberedNotationFont','numberedNotationGraceFont'] as const)settings.display.resources[key].families=['Noto Sans','Noto Sans CJK JP','Noto Emoji'];
+  for(const font of settings.display.resources.elementFonts.values())font.families=[...FALLBACK_FAMILIES];
+  for(const key of TAB_NUMBER_FONTS)settings.display.resources[key].families=[...FALLBACK_FAMILIES];
   const renderer=new rendering.ScoreRenderer(settings);renderer.width=d.usableWidth;
   const systems:SvgSystem[]=[];let failure:Error|undefined;
   renderer.error.on(e=>{failure=e;});

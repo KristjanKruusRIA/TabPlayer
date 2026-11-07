@@ -29,6 +29,11 @@ export const musicFonts:Record<MusicFontId,MusicFont>={
 /** Bundled files that are export fallbacks, not choosable fonts (they have a `sources.json` entry but no catalog role). */
 export const fallbackFiles:readonly string[]=['NotoSansCJKjp-Regular.otf','NotoEmoji.ttf'];
 
+/** The faces every text stack falls back through, in order: the chosen face's own glyph gaps, CJK, then emoji. Real family names, never aliases. */
+export const FALLBACK_FAMILIES=['Noto Sans','Noto Sans CJK JP','Noto Emoji'] as const;
+/** A text font stack: the role's alias first (when a font is chosen), then the fallback faces. */
+export const fontStack=(alias:string|null):string[]=>alias?[alias,...FALLBACK_FAMILIES]:[...FALLBACK_FAMILIES];
+
 /** The one face of `font` with exactly this weight and slant, or undefined when it is not bundled. */
 export function faceFor(font:TextFontId,bold:boolean,italic:boolean):TextFace|undefined {
   return textFonts[font].faces.find(face=>face.bold===bold&&face.italic===italic);

@@ -59,6 +59,170 @@ named_enum!(PageProfile {
     Document = "document", ScoreTab = "ScoreTab", Score = "Score", Tab = "Tab"
 });
 
+named_enum!(TextFont {
+    NotoSans = "notoSans", NotoSerif = "notoSerif", NotoSansMono = "notoSansMono"
+});
+named_enum!(MusicFont { Bravura = "bravura", Petaluma = "petaluma", Leland = "leland" });
+
+/// Deserializes a present, non-null value for an optional field. A missing field is `None` through `#[serde(default)]`.
+fn non_null<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    T::deserialize(deserializer).map(Some)
+}
+
+/// Accepts only a JSON object. Derived struct deserializers also accept an array as positional fields, which TypeScript refuses.
+fn object_only<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: serde::de::DeserializeOwned,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    if !value.is_object() {
+        return Err(serde::de::Error::custom("Expected an object."));
+    }
+    T::deserialize(value).map_err(serde::de::Error::custom)
+}
+
+/// `object_only` for an optional field that is present: `null` and arrays are refused.
+fn non_null_object<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: serde::de::DeserializeOwned,
+{
+    object_only(deserializer).map(Some)
+}
+
+/// One role's font choices. Every field is optional; an absent field keeps the element's own default.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RoleFont {
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub font: Option<TextFont>,
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub size: Option<f64>,
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub bold: Option<bool>,
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub italic: Option<bool>,
+}
+
+impl RoleFont {
+    fn validate(&self, role: &str) -> Result<(), String> {
+        if *self == Self::default() {
+            return Err("A role font must set at least one field.".into());
+        }
+        // Tab numbers keep the narrower range of the tab number scale.
+        let (low, high) = if role == "tabNumbers" {
+            (0.75, 1.5)
+        } else {
+            (0.5, 2.0)
+        };
+        if self
+            .size
+            .is_some_and(|size| !size.is_finite() || !(low..=high).contains(&size))
+        {
+            return Err("A role font size is outside its supported range.".into());
+        }
+        if self.font.is_none() && (self.bold.is_some() || self.italic.is_some()) {
+            return Err("Bold and italic need a chosen font.".into());
+        }
+        // Noto Sans Mono has no italic face (and so no bold italic).
+        if self.font == Some(TextFont::NotoSansMono) && self.italic == Some(true) {
+            return Err("Noto Sans Mono has no italic face.".into());
+        }
+        Ok(())
+    }
+}
+
+macro_rules! role_fonts {
+    ($($field:ident = $name:literal),+ $(,)?) => {
+        /// The ten font roles; an absent role keeps today's look.
+        #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+        #[serde(rename_all = "camelCase", deny_unknown_fields)]
+        pub struct RoleFonts {
+            $(
+                #[serde(default, deserialize_with = "non_null_object", skip_serializing_if = "Option::is_none")]
+                pub $field: Option<RoleFont>,
+            )+
+        }
+
+        impl RoleFonts {
+            pub fn is_default(&self) -> bool {
+                $(self.$field.is_none())&&+
+            }
+
+            fn validate(&self) -> Result<(), String> {
+                $(if let Some(role) = &self.$field {
+                    role.validate($name)?;
+                })+
+                Ok(())
+            }
+        }
+    };
+}
+
+role_fonts!(
+    title_block = "titleBlock",
+    page_header = "pageHeader",
+    page_footer = "pageFooter",
+    chord_names = "chordNames",
+    staff_text = "staffText",
+    lyrics = "lyrics",
+    track_names = "trackNames",
+    bar_numbers = "barNumbers",
+    markers = "markers",
+    tab_numbers = "tabNumbers",
+);
+
+/// Text font roles and the music font. The default (Bravura, no roles) is never written.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct EngravingFonts {
+    #[serde(default, skip_serializing_if = "MusicFont::is_default")]
+    pub music: MusicFont,
+    #[serde(
+        default,
+        deserialize_with = "object_only",
+        skip_serializing_if = "RoleFonts::is_default"
+    )]
+    pub roles: RoleFonts,
+}
+
+impl MusicFont {
+    fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
+impl EngravingFonts {
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+
+    pub fn validate(&self) -> Result<(), String> {
+        self.roles.validate()
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct EngravingStylesheet {
@@ -183,6 +347,13 @@ pub struct EngravingOverrides {
     /// Absent (and omitted again when empty) in documents saved before system gaps existed. Entries run in bar order.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub system_gaps: Vec<SystemGap>,
+    /// Absent (and omitted again when default) in documents saved before font roles existed.
+    #[serde(
+        default,
+        deserialize_with = "object_only",
+        skip_serializing_if = "EngravingFonts::is_default"
+    )]
+    pub fonts: EngravingFonts,
 }
 
 impl EngravingOverrides {
@@ -240,6 +411,7 @@ impl EngravingOverrides {
         self.typography.validate()?;
         self.validate_bar_widths()?;
         self.validate_system_gaps()?;
+        self.fonts.validate()?;
         let mut ids = HashSet::new();
         if self
             .profiles

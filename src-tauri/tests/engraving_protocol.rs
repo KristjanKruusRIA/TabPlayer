@@ -534,6 +534,243 @@ fn engraving_system_gaps_survive_history_undo_redo_save_and_reopen_beside_an_old
     assert_eq!(reopened_old.snapshot().project, old);
 }
 
+fn with_fonts(fonts: Value) -> Value {
+    let mut value = engraving_command();
+    value["engraving"]["fonts"] = fonts;
+    value
+}
+
+/// JSON `1` and `1.0` are the same number to TypeScript; compare them as the same here.
+fn floats(value: &Value) -> Value {
+    match value {
+        Value::Number(number) => json!(number.as_f64().unwrap()),
+        Value::Array(items) => Value::Array(items.iter().map(floats).collect()),
+        Value::Object(map) => {
+            Value::Object(map.iter().map(|(k, v)| (k.clone(), floats(v))).collect())
+        }
+        other => other.clone(),
+    }
+}
+
+fn font_cases() -> Value {
+    let path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../tests/fixtures/engraving-fonts-cases.json"
+    );
+    serde_json::from_str(&std::fs::read_to_string(path).expect("fonts fixture")).expect("fixture")
+}
+
+#[test]
+fn fonts_validation_matches_typescript_cases() {
+    // The TypeScript test reads this same file: both sides must accept and refuse exactly these cases.
+    let cases = font_cases();
+    let plain = engraving_command();
+    let valid = cases["valid"].as_array().unwrap();
+    let invalid = cases["invalid"].as_array().unwrap();
+    assert!(valid.len() > 10 && invalid.len() > 30);
+    for case in valid {
+        let command = with_fonts(case["fonts"].clone());
+        let written = serde_json::to_value(accepted(&command))
+            .unwrap_or_else(|error| panic!("{}: {error}", case["name"]));
+        // Defaults are never written; everything else is written back as it came.
+        if matches!(
+            case["name"].as_str().unwrap(),
+            "empty fonts" | "explicit default music" | "explicit empty roles"
+        ) {
+            assert_eq!(written, plain, "{}", case["name"]);
+        } else {
+            assert_eq!(floats(&written), floats(&command), "{}", case["name"]);
+        }
+    }
+    for case in invalid {
+        let command = with_fonts(case["fonts"].clone());
+        assert!(
+            serde_json::from_value::<EditCommand>(command.clone())
+                .map(|command| command.validate().is_err())
+                .unwrap_or(true),
+            "Accepted invalid fonts case {}",
+            case["name"]
+        );
+    }
+}
+
+#[test]
+fn fonts_absent_round_trips_byte_identical() {
+    // An old setEngraving line (no fonts field) serializes with no fonts, byte for byte, and again after a second pass.
+    let plain = engraving_command();
+    let first = serde_json::to_string(&accepted(&plain)).unwrap();
+    assert!(!first.contains("fonts"));
+    // The bytes an old line has always produced.
+    assert_eq!(
+        first,
+        r#"{"type":"setEngraving","engraving":{"stylesheet":{"hideDynamics":null,"brackets":"inherit","extendBarLines":null,"systemSeparators":null,"tuning":null,"chords":"inherit","singleNames":"inherit","multiNames":"inherit","firstNames":"inherit","otherNames":"inherit","firstNameDirection":"inherit","otherNameDirection":"inherit","barNumbers":"inherit","multiRests":"inherit","hideEmptyStaves":null,"hideEmptyFirstSystem":null,"singleStaffBrackets":null},"notation":{"tabRhythm":"inherit","fingering":"inherit","smallGraceTab":null,"extendBendArrows":null,"extendLineEffects":null,"parenthesizeTiedBends":null,"showTiedBendNumbers":null,"showDiveWhammyZeros":null},"systemSpacing":null,"profiles":[{"trackId":"base/0","profile":"source"}]}}"#
+    );
+    let reparsed: Value = serde_json::from_str(&first).unwrap();
+    assert_eq!(serde_json::to_string(&accepted(&reparsed)).unwrap(), first);
+    // A whole stored project with an old log is byte-identical after a replay.
+    let mut session = ProjectSession::new(Project::blank(), None).unwrap();
+    session.apply_edit(accepted(&plain)).unwrap();
+    let stored = serde_json::to_string(&session.stored_project()).unwrap();
+    assert!(!stored.contains("fonts"));
+    let reopened = ProjectSession::new(serde_json::from_str(&stored).unwrap(), None).unwrap();
+    assert_eq!(
+        serde_json::to_string(&reopened.stored_project()).unwrap(),
+        stored
+    );
+}
+
+#[test]
+fn default_fonts_never_serialized() {
+    use tabplayer_lib::engraving::{EngravingFonts, MusicFont, RoleFont, RoleFonts, TextFont};
+    let mut overrides = EngravingOverrides::default();
+    assert!(overrides.fonts.is_default());
+    assert!(
+        serde_json::to_value(&overrides)
+            .unwrap()
+            .get("fonts")
+            .is_none()
+    );
+    overrides.fonts = EngravingFonts {
+        music: MusicFont::Bravura,
+        roles: RoleFonts::default(),
+    };
+    assert!(overrides.fonts.is_default());
+    assert!(
+        serde_json::to_value(&overrides)
+            .unwrap()
+            .get("fonts")
+            .is_none()
+    );
+    // Only the chosen parts are written: no default music, no empty roles, no absent role or null field.
+    overrides.fonts.roles.lyrics = Some(RoleFont {
+        font: Some(TextFont::NotoSerif),
+        ..RoleFont::default()
+    });
+    assert!(!overrides.fonts.is_default());
+    assert_eq!(
+        serde_json::to_value(&overrides).unwrap()["fonts"],
+        json!({"roles": {"lyrics": {"font": "notoSerif"}}})
+    );
+    overrides.fonts.music = MusicFont::Leland;
+    overrides.fonts.roles = RoleFonts::default();
+    assert_eq!(
+        serde_json::to_value(&overrides).unwrap()["fonts"],
+        json!({"music": "leland"})
+    );
+    // An explicit default read from JSON is written back without the field.
+    for explicit in [
+        json!({}),
+        json!({"music": "bravura"}),
+        json!({"roles": {}}),
+        json!({"music": "bravura", "roles": {}}),
+    ] {
+        let read: EditCommand = serde_json::from_value(with_fonts(explicit)).unwrap();
+        assert!(
+            serde_json::to_value(&read).unwrap()["engraving"]
+                .get("fonts")
+                .is_none()
+        );
+    }
+    // Non-finite sizes (impossible in JSON) are refused by validation.
+    for size in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        let mut bad = EngravingOverrides::default();
+        bad.fonts.roles.lyrics = Some(RoleFont {
+            size: Some(size),
+            ..RoleFont::default()
+        });
+        assert!(bad.validate().is_err());
+    }
+}
+
+#[test]
+fn fonts_history_undo_redo_save_reopen() {
+    let mut session = ProjectSession::new(Project::blank(), None).unwrap();
+    let last_fonts = |project: Value| {
+        project["edits"]
+            .as_array()
+            .and_then(|edits| edits.last().cloned())
+            .and_then(|edit| edit["engraving"].get("fonts").cloned())
+    };
+    session.apply_edit(accepted(&engraving_command())).unwrap();
+    let old = session.snapshot().project;
+    assert_eq!(last_fonts(serde_json::to_value(&old).unwrap()), None);
+    let chosen = json!({"music": "petaluma", "roles": {"lyrics": {"font": "notoSerif", "size": 1.2, "italic": true}}});
+    session
+        .apply_edit(accepted(&with_fonts(chosen.clone())))
+        .unwrap();
+    let fonted = session.snapshot().project;
+    assert_eq!(fonted.edits.len(), 2);
+    assert_eq!(
+        last_fonts(serde_json::to_value(&fonted).unwrap()),
+        Some(chosen.clone())
+    );
+    // Resetting the fonts is one more edit that leaves the field out.
+    session.apply_edit(accepted(&engraving_command())).unwrap();
+    assert_eq!(session.snapshot().project.edits.len(), 3);
+    assert_eq!(
+        last_fonts(serde_json::to_value(&session.snapshot().project).unwrap()),
+        None
+    );
+    session.undo().unwrap();
+    assert_eq!(session.snapshot().project, fonted);
+    session.undo().unwrap();
+    assert_eq!(session.snapshot().project, old);
+    session.redo().unwrap();
+    assert_eq!(session.snapshot().project, fonted);
+    let stored = serde_json::to_value(session.stored_project()).unwrap();
+    let reopened = ProjectSession::new(serde_json::from_value(stored).unwrap(), None).unwrap();
+    assert_eq!(reopened.snapshot().project, fonted);
+    assert_eq!(
+        last_fonts(serde_json::to_value(&reopened.snapshot().project).unwrap()),
+        Some(chosen)
+    );
+    // A malformed fonts edit is refused and records nothing.
+    let before = session.snapshot().project.edits.len();
+    let bad = with_fonts(json!({"roles": {"lyrics": {"bold": true}}}));
+    assert!(
+        serde_json::from_value::<EditCommand>(bad)
+            .map(|command| command.validate().is_err())
+            .unwrap_or(true)
+    );
+    assert_eq!(session.snapshot().project.edits.len(), before);
+}
+
+#[test]
+fn old_log_replays_beside_fonts() {
+    let mut session = ProjectSession::new(Project::blank(), None).unwrap();
+    // A log written before fonts existed: typography, then a bar width, then a plain engraving edit.
+    let mut typed = engraving_command();
+    typed["engraving"]["typography"] = typography("serif", json!(1.5), json!(null), json!(0.75));
+    session.apply_edit(accepted(&typed)).unwrap();
+    session
+        .apply_edit(accepted(&widths(json!([{"bar": 1, "scale": 1.5}]))))
+        .unwrap();
+    session.apply_edit(accepted(&engraving_command())).unwrap();
+    let old_stored = serde_json::to_value(session.stored_project()).unwrap();
+    assert!(!old_stored.to_string().contains("\"fonts\""));
+    let old = session.snapshot().project;
+    // The old log still opens with no fonts anywhere, and a fonts edit appends to it.
+    let mut reopened =
+        ProjectSession::new(serde_json::from_value(old_stored.clone()).unwrap(), None).unwrap();
+    assert_eq!(reopened.snapshot().project, old);
+    let mut both =
+        with_fonts(json!({"roles": {"markers": {"font": "notoSansMono", "bold": true}}}));
+    both["engraving"]["typography"] = typography("serif", json!(1.5), json!(null), json!(0.75));
+    both["engraving"]["barWidths"] = json!([{"bar": 1, "scale": 1.5}]);
+    reopened.apply_edit(accepted(&both)).unwrap();
+    assert_eq!(reopened.snapshot().project.edits.len(), 4);
+    let stored = serde_json::to_value(reopened.stored_project()).unwrap();
+    let again = ProjectSession::new(serde_json::from_value(stored.clone()).unwrap(), None).unwrap();
+    assert_eq!(again.snapshot().project, reopened.snapshot().project);
+    // The earlier lines of the log are unchanged by the new edit.
+    assert_eq!(
+        stored["edits"].as_array().unwrap()[..3],
+        old_stored["edits"].as_array().unwrap()[..]
+    );
+    reopened.undo().unwrap();
+    assert_eq!(reopened.snapshot().project, old);
+}
+
 #[test]
 fn engraving_system_spacing_requires_null_or_a_bounded_factor() {
     for valid in [json!(null), json!(0.25), json!(4.0)] {

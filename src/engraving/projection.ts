@@ -6,6 +6,7 @@ import { copyGpInterchangeSource } from '../interchange/gp';
 import { configureTypography,typographyOf,validateTypography } from './typography';
 import { validateBarWidths } from './bar-widths';
 import { validateSystemGaps } from './system-gaps';
+import { validateFonts } from './fonts';
 
 export interface EngravingProjection {
   score:model.Score;
@@ -34,7 +35,7 @@ function object(value:unknown,keys:string[]):Record<string,unknown> {
 const validBool=(value:unknown)=>value===null||typeof value==='boolean';
 function choice(value:unknown,choices:string[]):void {if(typeof value!=='string'||!choices.includes(value))throw new Error('Invalid engraving choice.');}
 export function validateEngraving(value:unknown):asserts value is EngravingOverrides {
-  const defaults=defaultEngraving(),hasTypography=!!value&&typeof value==='object'&&Object.hasOwn(value,'typography'),hasWidths=!!value&&typeof value==='object'&&Object.hasOwn(value,'barWidths'),hasGaps=!!value&&typeof value==='object'&&Object.hasOwn(value,'systemGaps'),root=object(value,[...Object.keys(defaults),...hasTypography?['typography']:[],...hasWidths?['barWidths']:[],...hasGaps?['systemGaps']:[]]),style=object(root.stylesheet,Object.keys(defaults.stylesheet)),notation=object(root.notation,Object.keys(defaults.notation));
+  const defaults=defaultEngraving(),hasTypography=!!value&&typeof value==='object'&&Object.hasOwn(value,'typography'),hasWidths=!!value&&typeof value==='object'&&Object.hasOwn(value,'barWidths'),hasGaps=!!value&&typeof value==='object'&&Object.hasOwn(value,'systemGaps'),hasFonts=!!value&&typeof value==='object'&&Object.hasOwn(value,'fonts'),root=object(value,[...Object.keys(defaults),...hasTypography?['typography']:[],...hasWidths?['barWidths']:[],...hasGaps?['systemGaps']:[],...hasFonts?['fonts']:[]]),style=object(root.stylesheet,Object.keys(defaults.stylesheet)),notation=object(root.notation,Object.keys(defaults.notation));
   for(const [section,keys]of [[style,Object.keys(styleBooleans)],[notation,[...Object.keys(notationBooleans),...Object.keys(elementKeys)]]] as const)for(const key of keys)if(!validBool(section[key]))throw new Error('Invalid engraving boolean.');
   for(const [section,mappings]of [[style,styleEnums],[notation,notationEnums]] as const)for(const [key,mapping]of Object.entries(mappings))choice(section[key],['inherit',...Object.keys(mapping.values)]);
   choice(style.chords,['inherit','hidden','top','inline','both']);choice(style.multiRests,['inherit','off','on']);
@@ -42,6 +43,7 @@ export function validateEngraving(value:unknown):asserts value is EngravingOverr
   if(hasTypography)validateTypography(root.typography);
   if(hasWidths)validateBarWidths(root.barWidths);
   if(hasGaps)validateSystemGaps(root.systemGaps);
+  if(hasFonts)validateFonts(root.fonts);
   if(!Array.isArray(root.profiles))throw new Error('Invalid engraving profiles.');
   const ids=new Set<string>();for(const entry of root.profiles){const profile=object(entry,['trackId','profile']);if(typeof profile.trackId!=='string'||!profile.trackId.trim()||ids.has(profile.trackId))throw new Error('Engraving track IDs must be nonempty and unique.');ids.add(profile.trackId);choice(profile.profile,['source','standard','tablature','standardTab','slash','numbered']);}
 }

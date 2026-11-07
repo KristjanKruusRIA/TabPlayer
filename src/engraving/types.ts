@@ -1,3 +1,4 @@
+import type { EngravingFonts } from './fonts';
 import type { HeaderFooter } from './header-footer';
 
 export type InheritBool=boolean|null;
@@ -53,6 +54,8 @@ export interface EngravingOverrides {
   barWidths?:BarWidth[];
   /** Absent means every system keeps the standard gap. Entries run in bar order. */
   systemGaps?:SystemGap[];
+  /** Absent means every role keeps today's font and the music font is Bravura; documents saved before font roles existed have no such field. */
+  fonts?:EngravingFonts;
 }
 
 export interface PageLayout {

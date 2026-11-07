@@ -22,7 +22,8 @@ static WRITES: Mutex<()> = Mutex::new(());
 pub struct SavedStyle {
     pub id: String,
     pub name: String,
-    /// The stylesheet, notation and system spacing. A style never names tracks, so `profiles` must be empty.
+    /// The stylesheet, notation, system spacing, typography and fonts. A style never names tracks or bars, so
+    /// `profiles`, `bar_widths` and `system_gaps` must be empty.
     pub engraving: EngravingOverrides,
 }
 
@@ -117,7 +118,7 @@ fn parse_library(bytes: &[u8]) -> Result<StyleLibrary, String> {
     let mut value: serde_json::Value =
         serde_json::from_slice(bytes).map_err(|error| format!("Invalid style library: {error}"))?;
     let version = value.get("version").and_then(|version| version.as_u64());
-    if matches!(version, Some(1 | 2)) {
+    if let Some(old @ (1 | 2)) = version {
         let carries = |key: &str| {
             value["entries"].as_array().is_some_and(|entries| {
                 entries
@@ -125,13 +126,12 @@ fn parse_library(bytes: &[u8]) -> Result<StyleLibrary, String> {
                     .any(|entry| entry["engraving"].get(key).is_some())
             })
         };
-        if version == Some(1) && carries("typography") {
+        if old == 1 && carries("typography") {
             return Err("Invalid style library: version 1 styles cannot hold typography.".into());
         }
         if carries("fonts") {
             return Err(format!(
-                "Invalid style library: version {} styles cannot hold fonts.",
-                version.unwrap_or(0)
+                "Invalid style library: version {old} styles cannot hold fonts."
             ));
         }
         value["version"] = VERSION.into();
@@ -523,6 +523,22 @@ mod tests {
         std::fs::write(file(dir), &bytes).unwrap();
         assert!(read_library(dir).is_err());
         assert!(put_entry(dir, style(B, "New")).is_err());
+        assert_eq!(std::fs::read(file(dir)).unwrap(), bytes);
+    }
+
+    #[test]
+    fn v2_typography_file_reads_as_v3_without_rewrite() {
+        let root = tempdir().unwrap();
+        let dir = root.path();
+        let bytes = serde_json::to_vec_pretty(&json!({
+            "format":"tabplayer-style-library","version":2,
+            "entries":[serde_json::to_value(typed(A, "Typed")).unwrap()]
+        }))
+        .unwrap();
+        std::fs::write(file(dir), &bytes).unwrap();
+        let read = read_library(dir).unwrap();
+        assert_eq!((read.version, read.entries), (3, vec![typed(A, "Typed")]));
+        assert_eq!(remove_entry(dir, B).unwrap().version, 3);
         assert_eq!(std::fs::read(file(dir)).unwrap(), bytes);
     }
 

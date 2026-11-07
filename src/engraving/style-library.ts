@@ -5,7 +5,7 @@ import type { EngravingOverrides } from './types';
 import { withBarWidths } from './bar-widths';
 import { withSystemGaps } from './system-gaps';
 
-/** The stylesheet, notation and system spacing of a document. A style never names tracks or bars, so it holds no profiles and no bar widths. */
+/** The stylesheet, notation, system spacing, typography and fonts of a document. A style never names tracks or bars, so it holds no profiles and no bar widths. */
 export type StyleEngraving=EngravingOverrides;
 export interface SavedStyle { id:string;name:string;engraving:StyleEngraving }
 /** Version 2 added `engraving.typography` and version 3 `engraving.fonts`. The native store reads older files as version 3 and writes the lowest version that fits the content, so only version 3 ever reaches here. */

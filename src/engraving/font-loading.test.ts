@@ -159,11 +159,11 @@ it('merge_treats_tab_clef_aliases_as_present',()=>{
   expect(lacking.metadata.glyphsWithAnchors.FourStringTabClef).toEqual({x:[1,1]});
 });
 
-it('real_petaluma_metadata_merges_to_the_reviewed_substitute_list',async()=>{
+it.each(['petaluma','leland'] as const)('real_%s_metadata_merges_to_the_reviewed_substitute_list',async id=>{
   const {loadMusicFont}=await load();
-  const data=await loadMusicFont('petaluma');
+  const data=await loadMusicFont(id);
   const reviewed=JSON.parse(readFileSync('scripts/music-substitutes.json','utf8'));
-  expect(data.substituted).toEqual(reviewed.petaluma);
+  expect(data.substituted).toEqual(reviewed[id]);
   // Every glyph Bravura draws now has a box, so nothing can be blank.
   const have=new Set(neededGlyphs(data.metadata!));
   expect(neededGlyphs(EngravingSettings.bravuraMetadata).filter(name=>!have.has(name))).toEqual([]);

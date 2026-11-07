@@ -5,7 +5,9 @@ import { selectStaves } from './selection';
 import { prepareScoreTimers } from '../editor/timers';
 import { configureEngraving,projectEngraving } from '../engraving/projection';
 import { defaultMusicFont,musicFontCss,pageGeometry,pageTextFontFamily,paginateEngravedSystems,type MusicFont } from '../engraving/page';
-import { FALLBACK_FAMILIES,roleElements,TAB_NUMBER_FONTS } from '../engraving/fonts';
+import { FALLBACK_FAMILIES,FONT_ROLES,fontsOf,pageRoleFont,roleElements,TAB_NUMBER_FONTS,type EngravingFonts,type FontRole } from '../engraving/fonts';
+import { musicFonts,type MusicFontId } from '../engraving/font-catalog';
+import type { MusicFontData } from '../engraving/font-loading';
 import type { EngravingOverrides,PageLayout } from '../engraving/types';
 import {pageTitleFontSize} from './page-title';
 import {headerFieldsOf} from '../engraving/header-footer';
@@ -62,9 +64,23 @@ export function loadExportFonts():Promise<void> {
   })().catch(error=>{fontsLoading=null;throw error;});
   return fontsLoading;
 }
-export function renderPdfPages(score:model.Score,selection:ExportSelection,layout:PrintLayout,options?:{page:PageLayout;engraving:EngravingOverrides;trackIds:string[]}):SvgPage[] {
+/**
+ * Export draws every text role the Noto stack unless the role chose a font: a chosen role keeps `[alias, ...Noto stack]` (the native side maps the
+ * alias to its real face), and a role with only a size, or with nothing, gets the stack. Elements that belong to no role always get it.
+ */
+export function applyExportFamilies(settings:Settings,fonts:EngravingFonts|undefined):void {
+  const chosen=(role:FontRole)=>fonts?.roles?.[role]?.font!==undefined;
+  const kept=new Set<unknown>();
+  for(const role of FONT_ROLES)if(role!=='tabNumbers'&&role!=='pageHeader'&&role!=='pageFooter'&&chosen(role))for(const element of roleElements[role])kept.add(element);
+  for(const [element,font] of settings.display.resources.elementFonts)if(!kept.has(element))font.families=[...FALLBACK_FAMILIES];
+  if(!chosen('tabNumbers'))for(const key of TAB_NUMBER_FONTS)settings.display.resources[key].families=[...FALLBACK_FAMILIES];
+}
+/** The page music CSS for a loaded music font: the native names, with Bravura behind a font that may lack a symbol (the screen's alias stack is webview-only). */
+const exportMusicFont=(id:MusicFontId):MusicFont=>id==='bravura'?defaultMusicFont:{size:defaultMusicFont.size,families:[musicFonts[id].family,musicFonts.bravura.family]};
+export function renderPdfPages(score:model.Score,selection:ExportSelection,layout:PrintLayout,options?:{page:PageLayout;engraving:EngravingOverrides;trackIds:string[];music?:MusicFontData}):SvgPage[] {
   validateSelection(score.tracks.length,score.masterBars.length,selection,score.tracks.map(t=>t.staves.length));
-  const frozen=options?structuredClone(options):null,d=frozen?pageGeometry(frozen.page):dimensions(layout);
+  // The music font data carries the whole SMuFL metadata; it is only read, so it is not cloned with the frozen options.
+  const music=options?.music,frozen=options?structuredClone({page:options.page,engraving:options.engraving,trackIds:options.trackIds}):null,d=frozen?pageGeometry(frozen.page):dimensions(layout);
   // Export modifies only a transient clone; screen zoom and staff visibility stay session state.
   let copy=selectStaves(score,selection);
   if(frozen){
@@ -82,12 +98,11 @@ export function renderPdfPages(score:model.Score,selection:ExportSelection,layou
   copy.title='';
   if(!frozen)for(const track of copy.tracks)for(const staff of track.staves){staff.showStandardNotation=layout.profile!=='Tab';staff.showTablature=layout.profile!=='Score';}
   const settings=new Settings();settings.core.engine='svg';settings.core.useWorkers=false;settings.core.enableLazyLoading=false;
-  if(frozen){configureEngraving(settings,frozen.engraving);for(const element of roleElements.titleBlock)settings.notation.elements.set(element,false);}
+  if(frozen){configureEngraving(settings,frozen.engraving,music);for(const element of roleElements.titleBlock)settings.notation.elements.set(element,false);}
   settings.display.scale=frozen?.page.scale??layout.scale;settings.display.padding=[0];settings.display.layoutMode=LayoutMode.Page;
   settings.display.systemsLayoutMode=SystemsLayoutMode.UseModelLayout;
   settings.display.startBar=(selection.range?.first??0)+1;settings.display.barCount=selection.range?selection.range.last-selection.range.first+1:-1;
-  for(const font of settings.display.resources.elementFonts.values())font.families=[...FALLBACK_FAMILIES];
-  for(const key of TAB_NUMBER_FONTS)settings.display.resources[key].families=[...FALLBACK_FAMILIES];
+  applyExportFamilies(settings,frozen?.engraving.fonts);
   const renderer=new rendering.ScoreRenderer(settings);renderer.width=d.usableWidth;
   const systems:SvgSystem[]=[];let failure:Error|undefined;
   renderer.error.on(e=>{failure=e;});
@@ -95,7 +110,7 @@ export function renderPdfPages(score:model.Score,selection:ExportSelection,layou
   try{renderer.renderScore(copy,selection.tracks);if(failure)throw failure;
     if(renderer.boundsLookup?.staffSystems.some(system=>system.bars.some(bar=>bar.visualBounds.x<-.5||bar.visualBounds.x+bar.visualBounds.w>d.usableWidth+1)))throw new Error('A notation system does not fit this page width. Reduce print scale, use landscape, or add a system break.');
     if(!systems.length)throw new Error('Notation renderer produced no printable systems.');
-    if(frozen&&!isDefaultTypography(typographyOf(frozen.engraving))){const {left,right}=pageGeometry(frozen.page);assertTextFits(systems,d.usableWidth,Math.min(left,right));}
-    return frozen?paginateEngravedSystems(systems,score.title,frozen.page,headerFieldsOf(score),typographyOf(frozen.engraving).titleScale??1,{gaps:frozen.engraving.systemGaps,systemSpacing:frozen.engraving.systemSpacing,scale:frozen.page.scale}):paginateSystems(systems,score.title,layout);}
+    if(frozen&&(!isDefaultTypography(typographyOf(frozen.engraving))||Object.keys(fontsOf(frozen.engraving).roles).length>0)){const {left,right}=pageGeometry(frozen.page);assertTextFits(systems,d.usableWidth,Math.min(left,right));}
+    return frozen?paginateEngravedSystems(systems,score.title,frozen.page,headerFieldsOf(score),typographyOf(frozen.engraving).titleScale??1,{gaps:frozen.engraving.systemGaps,systemSpacing:frozen.engraving.systemSpacing,scale:frozen.page.scale},exportMusicFont(fontsOf(frozen.engraving).music),pageRoleFont(frozen.engraving.fonts,'pageHeader'),pageRoleFont(frozen.engraving.fonts,'pageFooter')):paginateSystems(systems,score.title,layout);}
   finally{renderer.destroy();}
 }

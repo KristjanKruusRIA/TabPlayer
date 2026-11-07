@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react';
-import { AlphaTabApi, LayoutMode, SystemsLayoutMode, type model, StaveProfile, type PlaybackHighlightChangeEventArgs } from '@coderline/alphatab';
+import { AlphaTabApi, EngravingSettings, LayoutMode, SystemsLayoutMode, type model, StaveProfile, type PlaybackHighlightChangeEventArgs } from '@coderline/alphatab';
 import './tremolo-guard';
 import type { BeatTarget } from './project';
 import type { NativePlaybackController } from './audio/NativePlaybackController';
@@ -409,7 +409,9 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
     const draw=(music:MusicFontData,drawn=engraving)=>{
       view.settings.display.scale=sourceScale;
       setMusicShown(music.id);musicSubstituted.current=music.substituted;
-      if(drawn)configureEngraving(view.settings,drawn,music);else view.settings.display.staveProfile=StaveProfile[profile as keyof typeof StaveProfile] as StaveProfile;
+      if(drawn)configureEngraving(view.settings,drawn,music);
+      // Without an engraving nothing runs configureEngraving, so a previous music font's metrics would stay: restore Bravura's.
+      else{view.settings.display.resources.engravingSettings=EngravingSettings.bravuraDefaults;view.settings.display.staveProfile=StaveProfile[profile as keyof typeof StaveProfile] as StaveProfile;}
       view.settings.display.layoutMode=display.layout==='horizontalScreen'?LayoutMode.Horizontal:display.layout==='verticalScreen'?LayoutMode.Page:LayoutMode.Parchment;
       view.settings.display.systemsLayoutMode=display.layout==='verticalScreen'?SystemsLayoutMode.Automatic:SystemsLayoutMode.UseModelLayout;
       view.settings.display.padding=sourcePhysical||screenLayout?[0,0,0,0]:[geometry.left*factor,geometry.top*factor,geometry.right*factor,geometry.bottom*factor];

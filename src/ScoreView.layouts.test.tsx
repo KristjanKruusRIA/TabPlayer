@@ -455,6 +455,16 @@ it('music_change_rerenders_after_load',async()=>{
  rerender(tree({...props,engraving:withMusic('petaluma')}));
  expect(loadMusic).toHaveBeenCalledTimes(1);expect(state.renders).toHaveBeenCalledTimes(renders+3);expect(musicRoot(container).getAttribute('data-music-font')).toBe('petaluma');
 });
+it('a_view_without_engraving_returns_to_bravura_metrics',async()=>{
+ const {props,tree,rerender,api,container}=setup('verticalPage',100,{engraving:defaultEngraving()});
+ const gate=deferredMusic();state.music=()=>gate.promise;
+ rerender(tree({...props,engraving:withMusic('petaluma')}));
+ await act(async()=>{gate.resolve(petalumaData());await gate.promise;});
+ expect(api.settings.display.resources.engravingSettings).not.toEqual(EngravingSettings.bravuraDefaults);
+ // With no engraving at all configureEngraving is skipped, so the Petaluma metrics would stay behind unless they are reset here.
+ rerender(tree({...props,engraving:undefined}));
+ expect(api.settings.display.resources.engravingSettings).toEqual(EngravingSettings.bravuraDefaults);expect(musicRoot(container).getAttribute('data-music-font')).toBeNull();
+});
 it('a_slow_music_load_never_paints_an_older_choice',async()=>{
  const slow=deferredMusic(),loads=[slow];state.music=()=>loads.shift()!.promise;
  const {props,tree,rerender,api,container}=setup('verticalPage',100,{engraving:withMusic('petaluma')});

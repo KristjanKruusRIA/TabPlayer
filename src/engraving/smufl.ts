@@ -39,8 +39,8 @@ function keysBySymbol(record:Readonly<Record<string,unknown>>|undefined):Map<str
 
 /**
  * `chosen` with every glyph alphaTab draws and `chosen` lacks (no box, or an all-zero box that alphaTab skips) taken from `base` (Bravura):
- * its box and its anchors. A glyph keeps one key: the chosen font's own key is replaced in place, so alphaTab's `FourStringTabClef`
- * and SMuFL's `4stringTabClef` never both appear. `substituted` lists the SMuFL names that were filled. Neither input is changed.
+ * its box and its anchors. A glyph keeps one key: any key the chosen font has for it is removed and Bravura's key is inserted (for example
+ * `FourStringTabClef` where the font had `4stringTabClef`; alphaTab maps both names), so the two spellings never both appear. `substituted` lists the SMuFL names that were filled. Neither input is changed.
  */
 export function mergeSmuflMetadata(chosen:SmuflMetadata,base:SmuflMetadata,needed:readonly string[]=neededGlyphs(base)):{metadata:SmuflMetadata;substituted:string[]} {
   const present=new Set(neededGlyphs(chosen)),baseBoxes=keysBySymbol(base.glyphBBoxes),baseAnchors=keysBySymbol(base.glyphsWithAnchors);

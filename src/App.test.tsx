@@ -1582,16 +1582,15 @@ it('writes the clicked staff position as one edit that one undo removes, and pre
     const pitch=sounding(firstNote(c));
     // D natural is already what Ctrl+8 asks for: nothing is recorded.
     fireEvent.keyDown(workspace,{code:'Digit8',key:'8',ctrlKey:true});
-    await act(async()=>{await Promise.resolve();});
-    expect(c.getState().snapshot.project.edits).toHaveLength(1);
-    // A sharp does not exist for D: the message says so and nothing is recorded.
+    // A sharp does not exist for D: the message says so.
     fireEvent.keyDown(workspace,{code:'Digit9',key:'9',ctrlKey:true});
     expect(await screen.findByText(/cannot be spelled that way/)).toBeInTheDocument();
-    expect(c.getState().snapshot.project.edits).toHaveLength(1);
+    // Neither refused chord recorded anything: the next real re-spell is the second edit, and nothing sits between.
     // A double sharp is C##: one setNoteSpelling edit, same sounding pitch.
     fireEvent.keyDown(workspace,{code:'Digit9',key:'{',ctrlKey:true,altKey:true});
     await waitFor(()=>expect(c.getState().snapshot.project.edits).toHaveLength(2));
     expect(c.getState().snapshot.project.edits[1]).toMatchObject({type:'setNoteSpelling',accidentalMode:4});
+    expect(c.getState().snapshot.project.edits).toHaveLength(2);
     expect(sounding(firstNote(c))).toBe(pitch);
     // Change Accidental cycles to the next spelling; one undo takes each back.
     fireEvent.keyDown(workspace,{code:'Digit8',key:'8',ctrlKey:true,altKey:true});
@@ -1601,3 +1600,66 @@ it('writes the clicked staff position as one edit that one undo removes, and pre
     await waitFor(()=>expect(c.getState().snapshot.project.edits).toHaveLength(2));
   });
 
+  it('shows the Next note hint after an earlier refusal notice on the same beat',async()=>{
+    window.localStorage.removeItem(inputKey);
+    const c=await setup(),workspace=screen.getByRole('region',{name:'Score workspace'});
+    fireEvent.keyDown(workspace,{key:'n'});
+    fireEvent.keyDown(workspace,{code:'Digit8',key:'8',ctrlKey:true,altKey:true});
+    expect(screen.getByText(/Select a note on this beat to re-spell it/)).toBeInTheDocument();
+    fireEvent.keyDown(workspace,{code:'Digit9',key:'9',ctrlKey:true});
+    expect(screen.getByText(/Next note: Sharp/)).toBeInTheDocument();
+    expect(screen.queryByText(/Select a note on this beat/)).toBeNull();
+    expect(c.getState().snapshot.project.edits).toEqual([]);
+  });
+  it('ignores the chords while focus is in a text input',async()=>{
+    window.localStorage.removeItem(inputKey);
+    const c=await setup(),workspace=screen.getByRole('region',{name:'Score workspace'});
+    fireEvent.keyDown(workspace,{key:'n'});
+    fireEvent.keyDown(screen.getByLabelText('Fret'),{code:'Digit9',key:'9',ctrlKey:true});
+    fireEvent.keyDown(screen.getByLabelText('Fret'),{code:'Digit8',key:'8',ctrlKey:true,altKey:true});
+    expect(screen.queryByText(/Next note/)).toBeNull();expect(screen.getByText(/Note entry is on/)).toBeInTheDocument();
+    expect(c.getState().snapshot.project.edits).toEqual([]);
+  });
+  it('clears a pending accidental on a mouse selection and on a document switch',async()=>{
+    window.localStorage.removeItem(inputKey);
+    const c=await setup(),workspace=screen.getByRole('region',{name:'Score workspace'});
+    fireEvent.keyDown(workspace,{key:'n'});
+    fireEvent.keyDown(workspace,{code:'Digit9',key:'9',ctrlKey:true});
+    expect(screen.getByText(/Next note: Sharp/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button',{name:'Select rendered note'}));
+    expect(screen.queryByText(/Next note/)).toBeNull();expect(screen.getByText(/Note entry is on/)).toBeInTheDocument();
+    fireEvent.keyDown(workspace,{code:'Digit9',key:'9',ctrlKey:true});
+    expect(screen.getByText(/Next note: Sharp/)).toBeInTheDocument();
+    click('New');await waitFor(()=>expect(activeController()).not.toBe(c));
+    // Whether the new document remounts the score or keeps it, the pending accidental is gone.
+    if(!screen.queryByRole('button',{name:'Note entry',pressed:true}))fireEvent.keyDown(screen.getByRole('region',{name:'Score workspace'}),{key:'n'});
+    expect(screen.getByText(/Note entry is on/)).toBeInTheDocument();expect(screen.queryByText(/Next note/)).toBeNull();
+  });
+  it('re-spells the note in the cursor slot with entry on, as one edit that keeps the pitch and one undo takes back',async()=>{
+    window.localStorage.removeItem(inputKey);
+    const c=await setup(),workspace=screen.getByRole('region',{name:'Score workspace'});
+    fireEvent.keyDown(workspace,{key:'n'});fireEvent.keyDown(workspace,{key:'d'});
+    await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(1));
+    await waitFor(()=>expect(entryProps().editTarget).toMatchObject({beat:1}));
+    fireEvent.keyDown(workspace,{key:'ArrowLeft'});
+    const written=firstNote(c),pitch=written.realValue,editString=()=>(engravingView.mock.lastCall?.[0] as {editString:number}).editString;
+    for(let guard=0;editString()!==written.string&&guard<8;guard++)fireEvent.keyDown(workspace,{key:editString()<written.string?'ArrowUp':'ArrowDown'});
+    expect(editString()).toBe(written.string);
+    // The cursor slot holds the note, so the chord re-spells it rather than setting a pending accidental.
+    fireEvent.keyDown(workspace,{code:'Digit9',key:'9',ctrlKey:true,altKey:true});
+    await waitFor(()=>expect(c.getState().snapshot.project.edits).toHaveLength(2));
+    expect(c.getState().snapshot.project.edits[1]).toMatchObject({type:'setNoteSpelling',accidentalMode:4});
+    expect(screen.queryByText(/Next note/)).toBeNull();expect(firstNote(c).realValue).toBe(pitch);
+    fireEvent.keyDown(workspace,{key:'z',ctrlKey:true});
+    await waitFor(()=>expect(c.getState().snapshot.project.edits).toHaveLength(1));
+    expect(firstNote(c).accidentalMode).toBe(0);
+  });
+  it('says percussion has no accidental to change instead of asking for a note',async()=>{
+    window.localStorage.removeItem(inputKey);
+    const c=await setup({...blankProject(),edits:[{type:'addPercussionTrack',name:'Drums',program:0}]}),workspace=screen.getByRole('region',{name:'Score workspace'});
+    const grid=screen.getByRole('grid',{name:'Written measure overview'});fireEvent.click(within(grid).getByRole('gridcell',{name:'Drums, measure 1, rest'}));
+    const before=c.getState().snapshot.project.edits.length;
+    fireEvent.keyDown(workspace,{code:'Digit9',key:'9',ctrlKey:true});
+    expect(screen.getByText(/Percussion notes have no accidental/)).toBeInTheDocument();expect(screen.queryByText(/Select a note on this beat/)).toBeNull();
+    expect(c.getState().snapshot.project.edits).toHaveLength(before);
+  });

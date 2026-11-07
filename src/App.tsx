@@ -482,10 +482,11 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     event.preventDefault();if(event.repeat)return;
     const beat=location.beat,at=JSON.stringify(target);
     const slot=beat?(indexed?selectedNote(beat,null,noteIndex):beat.notes.find(item=>item.string===string)):null;
-    if(noteEntryOn&&key.kind==='accidental'&&!slot){setPendingAccidental(old=>old===key.value?null:key.value);return;}
+    if(noteEntryOn&&key.kind==='accidental'&&!slot){setInputNotice(null);setPendingAccidental(old=>old===key.value?null:key.value);return;}
     if(entryBlocked(target))return;
     if(!beat){setInputNotice({text:t('score_entry.no_beat'),at});return;}
-    const note=location.staff.isPercussion?null:selectedNote(beat,indexed?null:string,noteIndex);
+    if(location.staff.isPercussion){setInputNotice({text:t('score_entry.percussion_respell'),at});return;}
+    const note=selectedNote(beat,indexed?null:string,noteIndex);
     if(!note){setInputNotice({text:t('score_entry.select_note_respell'),at});return;}
     const result=respellNote(location.staff,location.bar,beat,note,key.kind==='respell'?'cycle':key.value);
     if(!result||'same' in result){setInputNotice(null);return;}

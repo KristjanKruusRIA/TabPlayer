@@ -261,7 +261,9 @@ export function respellNote(staff: model.Staff, bar: model.Bar, beat: model.Beat
   if (key === undefined) return null;
   const keySignature = bar.keySignature as number, written = writtenPitch(staff, bar, beat, key), pitchClass = ((written % 12) + 12) % 12;
   const drawn = drawnSpelling(keySignature, written, note.accidentalMode);
-  const current = written - entryPitch(drawn.letter, drawn.octave, 'natural', keySignature)!.pitch;
+  const base = entryPitch(drawn.letter, drawn.octave, 'natural', keySignature);
+  if (!base) return null;
+  const current = written - base.pitch;
   const currentName = `${letterNames[drawn.letter]}${alterationMarks(current)}${drawn.octave}`;
   const named = (alteration: number) => {
     const letter = letterSemitones.findIndex(semitone => (((semitone + alteration) % 12) + 12) % 12 === pitchClass);

@@ -89,6 +89,34 @@ describe('compose a system SVG',()=>{
     expect(out.svg).toContain('clip-path="url(#c-c0)"');expect(out.svg).toContain('<use href="#c-content"');
     expect(out.svg).toContain('translate(0 0)');expect(out.svg).toContain('translate(0 -30)');
   });
+  it('rewrites only the real root attributes, whatever the quotes and values hold',()=>{
+    const tricky=composeSystemSvg({svg:`<svg data-x="a>b" data-height="1" title='height="9"' height='400' viewBox='0 0 500 400'><rect/></svg>`,id:'q',left:0,top:0,width:500,height:400,shift:{cuts:[180],offsets:[40]},marks:[]});
+    const doc=new DOMParser().parseFromString(tricky.svg,'image/svg+xml'),root=doc.documentElement;
+    expect(doc.querySelector('parsererror')).toBeNull();
+    expect(root.getAttribute('height')).toBe('440');expect(root.getAttribute('viewBox')).toBe('0 0 500 440');
+    expect(root.getAttribute('data-x')).toBe('a>b');expect(root.getAttribute('data-height')).toBe('1');expect(root.getAttribute('title')).toBe('height="9"');
+    expect([...root.attributes].filter(a=>a.name==='height')).toHaveLength(1);
+    expect(root.querySelector('defs > g#q-content > rect')).not.toBeNull();
+  });
+  it('composes defs, then translated clipped uses, then the marks',()=>{
+    const out=composeSystem({svg:'<svg width="500" height="400"><rect/></svg>',id:'z',left:0,top:0,width:500,height:400,system,plan:{groups:[{index:0,kind:'bracket',tracks:[0,1]}],nativeMode:1,singleStaffBrackets:false,braceTracks:new Set<number>(),inner:0,outer:1,reserve:0},gaps:new Map([[0,2]]),metrics});
+    const doc=new DOMParser().parseFromString(out.svg,'image/svg+xml'),root=doc.documentElement,defs=root.querySelectorAll(':scope > defs');
+    expect(defs).toHaveLength(1);
+    expect([...defs[0].children].map(node=>node.tagName)).toEqual(['g','clipPath','clipPath']);
+    expect(defs[0].children[0].getAttribute('id')).toBe('z-content');
+    const uses=[...root.querySelectorAll('use')];
+    expect(uses).toHaveLength(2);
+    uses.forEach((use,k)=>{
+      expect(use.closest('defs')).toBeNull();
+      expect(use.parentElement!.tagName).toBe('g');expect(use.parentElement!.parentElement).toBe(root);
+      expect(use.parentElement!.getAttribute('transform')).toMatch(/^translate\(0 -?\d+(\.\d+)?\)$/);
+      expect(use.getAttribute('href')).toBe('#z-content');expect(use.getAttribute('clip-path')).toBe(`url(#z-c${k})`);
+      expect(doc.getElementById(`z-c${k}`)!.parentElement).toBe(defs[0]);
+    });
+    const marks=[...root.querySelectorAll(':scope > [data-tp-accolade]')];
+    expect(marks.length).toBeGreaterThan(0);
+    for(const mark of marks)expect(uses[1].parentElement!.compareDocumentPosition(mark)&Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
   it('inserts marks without bands when there is no shift',()=>{
     const out=composeSystemSvg({svg:'<svg width="500" height="400"><text>x</text></svg>',id:'s0',left:0,top:0,width:500,height:400,shift:null,marks:[{role:'group',kind:'brace',x:10,top:100,bottom:300,width:20}]});
     expect(out.height).toBe(400);expect(out.svg).not.toContain('<defs>');expect(out.svg).toMatch(/<text>x<\/text><g data-tp-accolade="group-brace"[\s\S]*&#57344;[\s\S]*<\/svg>$/);
@@ -155,6 +183,33 @@ describe('accolade marks',()=>{
   it('draws nothing for a group none of whose tracks has a band in the system',()=>{
     const only=fakeSystem([{track:2,staff:0,y:100,h:60}]);
     expect(systemAccoladeMarks(plan({singleStaffBrackets:true}),systemTrackBands(only),metrics,60).filter(m=>m.role==='group')).toEqual([]);
+  });
+  it('stretches a brace group over a gap opened below the guitar',()=>{
+    const p=plan({groups:[{index:0,kind:'brace',tracks:[0,1]}],braceTracks:new Set<number>(),inner:0});
+    const spanFor=(scale:number)=>{
+      const out=composeSystem({svg:'<svg width="500" height="400"></svg>',id:'s',left:0,top:0,width:500,height:400,system,plan:p,gaps:new Map([[0,scale]]),metrics});
+      return markBoxes(out.svg).find(m=>m.kind==='brace')!;
+    };
+    const wide=spanFor(2),narrow=spanFor(.25);
+    expect(wide.top).toBeCloseTo(100,6);expect(wide.bottom).toBeCloseTo(340,6);
+    expect(narrow.top).toBeCloseTo(100,6);expect(narrow.bottom).toBeCloseTo(270,6);
+    // The right edge stays at the column edge whatever the height.
+    for(const brace of [wide,narrow])expect(brace.x+brace.width).toBeCloseTo(60-metrics.pad-metrics.pad,6);
+  });
+  it('scales the bracket bar overflow of 3 by the render scale',()=>{
+    const settings=new Settings();settings.display.scale=1.5;
+    const scaled=accoladeMetrics(settings),p=plan({inner:0,outer:scaled.bracketThickness/scaled.scale});
+    const out=composeSystem({svg:'<svg width="500" height="400"></svg>',id:'s',left:0,top:0,width:500,height:400,system,plan:p,gaps:new Map(),metrics:scaled});
+    const group=markBoxes(out.svg).find(m=>m.role==='group')!;
+    expect(group.top).toBeCloseTo(100-scaled.staffSpace/4-3*1.5,6);expect(group.bottom).toBeCloseTo(300+scaled.staffSpace/4+3*1.5,6);
+  });
+  it('draws a track bracket only over two or more visible staves, even with single staff brackets on',()=>{
+    const p=plan({groups:[{index:0,kind:'bracket',tracks:[0,1]}],singleStaffBrackets:true,braceTracks:new Set<number>()});
+    const lonely=fakeSystem([{track:2,staff:0,y:100,h:60},{track:3,staff:0,y:200,h:40},{track:3,staff:1,y:260,h:40}]);
+    const kinds=(sys:ScreenSystem)=>systemAccoladeMarks(p,systemTrackBands(sys),metrics,60).filter(m=>m.role==='track').map(m=>m.kind);
+    expect(kinds(lonely)).toEqual(['bracket']); // track 3 has two staves; track 2 has one and gets nothing
+    expect(systemAccoladeMarks(p,systemTrackBands(lonely),metrics,60).filter(m=>m.role==='track')[0].top).toBeLessThan(200);
+    expect(systemAccoladeMarks(p,systemTrackBands(lonely),metrics,60).filter(m=>m.role==='track')[0].top).toBeGreaterThan(190);
   });
   it('composes nothing new without a plan and without a shift',()=>{
     const svg='<svg width="500" height="400"><text>x</text></svg>';

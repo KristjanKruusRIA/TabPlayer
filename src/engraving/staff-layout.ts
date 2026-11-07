@@ -60,30 +60,40 @@ export function unshiftY(shift:StaffShift|null|undefined,y:number):number|null {
 }
 export const shiftTotal=(shift:StaffShift|null|undefined):number=>shift&&shift.offsets.length?shift.offsets[shift.offsets.length-1]:0;
 
-export interface ComposeSvgInput {svg:string;id:string;left:number;top:number;width:number;height:number;shift:StaffShift|null;marks:readonly AccoladeMark[]}
+export interface ComposeSvgInput {svg:string;id:string;left:number;top:number;width:number;height:number;shift:StaffShift|null;marks:readonly AccoladeMark[];marksShifted?:boolean}
 
+const OPEN_SVG=/^\s*<svg\b(?:[^>"']|"[^"]*"|'[^']*')*>/;
+const ATTRIBUTE=/(\s)([^\s=\/>"']+)(\s*=\s*)("[^"]*"|'[^']*'|[^\s"'>]+)/g;
+const unquoted=(value:string)=>/^["']/.test(value)?value.slice(1,-1):value;
+const quoted=(original:string,value:string)=>original.startsWith("'")?`'${value}'`:`"${value}"`;
+
+/** Sets `height` and the viewBox height on the root tag, reading attributes quote-aware so values never match as attributes. */
 function withRootHeight(open:string,height:number):string {
-  let tag=open.replace(/(\sheight=")([^"]*)(")/,(_all,head:string,old:string,tail:string)=>`${head}${height}${/[a-z%]+$/i.exec(old)?.[0]??''}${tail}`);
-  if(tag===open&&!/\sheight="/.test(open))tag=open.replace(/>$/,` height="${height}">`);
-  return tag.replace(/(\sviewBox=")([^"]*)(")/,(_all,head:string,old:string,tail:string)=>{
-    const parts=old.trim().split(/[\s,]+/);if(parts.length!==4)return `${head}${old}${tail}`;
-    parts[3]=String(height);return `${head}${parts.join(' ')}${tail}`;
+  let found=false;
+  const tag=open.replace(ATTRIBUTE,(all,space:string,name:string,equals:string,value:string)=>{
+    if(name==='height'){found=true;return `${space}${name}${equals}${quoted(value,`${height}${/[a-z%]+$/i.exec(unquoted(value))?.[0]??''}`)}`;}
+    if(name==='viewBox') {
+      const parts=unquoted(value).trim().split(/[\s,]+/);if(parts.length!==4)return all;
+      parts[3]=String(height);return `${space}${name}${equals}${quoted(value,parts.join(' '))}`;
+    }
+    return all;
   });
+  return found?tag:tag.replace(/>$/,` height="${height}">`);
 }
 
 /**
  * The one place a system's SVG is rewritten. With a shift the content is defined once and shown through one clipped, translated
  * `<use>` per band; marks (given in unshifted render pixels) are drawn after the shift. With only marks they are inserted before the
- * final `</svg>`; with neither the string is returned unchanged.
+ * final `</svg>`; with neither the string is returned unchanged. `marksShifted` says the marks are already in shifted pixels.
  */
 export function composeSystemSvg(input:ComposeSvgInput):{svg:string;height:number} {
   const {svg,id,left,top,width,height,shift,marks}=input;
   if(!shift&&!marks.length)return {svg,height};
-  const moved=marks.map(mark=>({...mark,top:shiftY(shift,mark.top,'top'),bottom:shiftY(shift,mark.bottom,'bottom')}));
+  const moved=input.marksShifted?marks:marks.map(mark=>({...mark,top:shiftY(shift,mark.top,'top'),bottom:shiftY(shift,mark.bottom,'bottom')}));
   const drawn=accoladeSvg(moved,{left,top}),close=svg.lastIndexOf('</svg>');
   if(close<0)throw new Error('Cannot compose a system without a closing svg tag.');
   if(!shift)return {svg:`${svg.slice(0,close)}${drawn}${svg.slice(close)}`,height};
-  const open=/^\s*<svg\b[^>]*>/.exec(svg);
+  const open=OPEN_SVG.exec(svg);
   if(!open||open[0].endsWith('/>'))throw new Error('Cannot compose a system without an svg root.');
   const total=shiftTotal(shift),newHeight=height+total,edges=[-1,...shift.cuts.map(cut=>cut-top),height+1];
   const clips=edges.slice(0,-1).map((start,k)=>`<clipPath id="${id}-c${k}"><rect x="0" y="${start}" width="${width}" height="${edges[k+1]-start}"/></clipPath>`).join('');
@@ -92,9 +102,13 @@ export function composeSystemSvg(input:ComposeSvgInput):{svg:string;height:numbe
 }
 
 export interface ComposeInput {svg:string;id:string;left:number;top:number;width:number;height:number;system:ScreenSystem;plan:AccoladePlan|null;gaps:ReadonlyMap<number,number>;metrics:AccoladeMetrics}
-/** Bands, then the shift, then the marks, then the composition: the only path both screen and export take. */
+/**
+ * Bands, then the shift, then the marks, then the composition: the only path both screen and export take. Marks are built from the
+ * bands after the shift, so a brace or bracket over several tracks is sized to the moved staves, not to the original span.
+ */
 export function composeSystem(input:ComposeInput):{svg:string;height:number;shift:StaffShift|null} {
   const {system,plan,gaps,metrics,...rest}=input,bands=systemTrackBands(system),shift=staffShift(bands,gaps,metrics.scale);
-  const marks=plan?systemAccoladeMarks(plan,bands,metrics,staffLeftOf(system)):[];
-  return {...composeSystemSvg({...rest,shift,marks}),shift};
+  const moved=bands.map(band=>({...band,top:shiftY(shift,band.top,'top'),bottom:shiftY(shift,band.bottom,'bottom')}));
+  const marks=plan?systemAccoladeMarks(plan,moved,metrics,staffLeftOf(system)):[];
+  return {...composeSystemSvg({...rest,shift,marks,marksShifted:true}),shift};
 }

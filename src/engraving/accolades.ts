@@ -63,12 +63,13 @@ export function configureAccolades(settings:Settings,score:model.Score,plan:Acco
 
 /**
  * One drawn accolade in render pixels. A bracket's `top` and `bottom` already include alphaTab's quarter-staff-space overflow
- * (the bar's extra 3 and the spikes are added when it is written); a brace's are the staff span. `width` is the drawn width.
+ * (the bar's extra 3 render-scaled units and the spikes are added when it is written); a brace's are the staff span. `width` is the drawn width.
  * `glyphScale` is the font-size multiplier of the glyph (render scale times the brace's vertical factor; 1 when absent) and
  * `xScale` a horizontal compression for a brace taller than `BRACE_MAX_X_SCALE` (1 when absent).
  */
 export interface AccoladeMark {role:'group'|'track';kind:'bracket'|'brace';x:number;top:number;bottom:number;width:number;glyphScale?:number;xScale?:number}
 
+/** alphaTab's bracket bar overflow, in alphaTab units; a mark scales it by its `glyphScale` (the render scale). */
 const BRACKET_BAR_SHIFT=3;
 
 function braceMark(role:AccoladeMark['role'],right:number,top:number,bottom:number,metrics:AccoladeMetrics):AccoladeMark {
@@ -94,7 +95,7 @@ export function systemAccoladeMarks(plan:AccoladePlan,bands:readonly TrackBand[]
     for(const band of bands) {
       if(groupKind.get(band.track)==='brace'||!canPaint(band.staves))continue;
       if(plan.braceTracks.has(band.track))marks.push(braceMark('track',innerRight,band.top,band.bottom,metrics));
-      else if(!groupKind.has(band.track))marks.push(bracketMark('track',innerRight,band.top,band.bottom,metrics));
+      else if(!groupKind.has(band.track)&&band.staves>=2)marks.push(bracketMark('track',innerRight,band.top,band.bottom,metrics));
     }
   }
   for(const group of plan.groups) {
@@ -112,8 +113,8 @@ const glyph=(x:number,y:number,scale:number,symbol:model.MusicFontSymbol,xScale=
 /** Marks already shifted by the caller, written in alphaTab's glyph markup in the coordinates of the chunk at `origin`. */
 export function accoladeSvg(marks:readonly AccoladeMark[],origin:{left:number;top:number}):string {
   return marks.map(mark=>{
-    const x=mark.x-origin.left,top=mark.top-origin.top,bottom=mark.bottom-origin.top,scale=mark.glyphScale??1,name=`${mark.role}-${mark.kind}`;
+    const x=mark.x-origin.left,top=mark.top-origin.top,bottom=mark.bottom-origin.top,scale=mark.glyphScale??1,name=`${mark.role}-${mark.kind}`,barShift=BRACKET_BAR_SHIFT*scale;
     if(mark.kind==='brace')return `<g data-tp-accolade="${name}">${glyph(x,bottom,scale,model.MusicFontSymbol.Brace,mark.xScale??1)}</g>`;
-    return `<g data-tp-accolade="${name}"><rect x="${x}" y="${top-BRACKET_BAR_SHIFT}" width="${mark.width}" height="${bottom-top+BRACKET_BAR_SHIFT*2}" fill="#000000" />\n${glyph(x,top,scale,model.MusicFontSymbol.BracketTop)}${glyph(x,bottom,scale,model.MusicFontSymbol.BracketBottom)}</g>`;
+    return `<g data-tp-accolade="${name}"><rect x="${x}" y="${top-barShift}" width="${mark.width}" height="${bottom-top+barShift*2}" fill="#000000" />\n${glyph(x,top,scale,model.MusicFontSymbol.BracketTop)}${glyph(x,bottom,scale,model.MusicFontSymbol.BracketBottom)}</g>`;
   }).join('');
 }

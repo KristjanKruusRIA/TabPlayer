@@ -341,3 +341,87 @@ fn a_copy_continues_exactly_where_the_source_is() {
         assert!(x.iter().zip(&y).all(|(p, q)| p.to_bits() == q.to_bits()));
     }
 }
+
+#[test]
+fn a_second_stage_for_the_same_capture_and_rate_skips_calibration() {
+    use super::stage::calibration_runs;
+    let model = identity();
+    let before = calibration_runs();
+    let first = CaptureStage::with_identity("cal-cache-a", model.clone(), 48_000, 0.0);
+    assert_eq!(calibration_runs(), before + 1);
+    // Another level, and another Arc of the same content: no run, the same base.
+    let second = CaptureStage::with_identity("cal-cache-a", identity(), 48_000, 6.0);
+    assert_eq!(calibration_runs(), before + 1);
+    assert!((db(second.gain() as f64 / first.gain() as f64) - 6.0).abs() < 0.01);
+    assert!(first.calibrated() && second.calibrated());
+    // Another rate is another measurement; so is another capture.
+    CaptureStage::with_identity("cal-cache-a", model.clone(), 44_100, 0.0);
+    assert_eq!(calibration_runs(), before + 2);
+    CaptureStage::with_identity("cal-cache-b", model, 48_000, 0.0);
+    assert_eq!(calibration_runs(), before + 3);
+    // A capture built without an identity is always measured.
+    CaptureStage::new(identity(), 48_000, 0.0);
+    assert_eq!(calibration_runs(), before + 4);
+}
+
+#[test]
+fn a_capture_is_the_same_by_identity_and_rate_not_by_arc_or_level() {
+    let a = CaptureStage::with_identity("same-a", identity(), 48_000, 0.0);
+    let b = CaptureStage::with_identity("same-a", identity(), 48_000, 9.0);
+    assert!(a.same_as(&b));
+    assert!(!a.same_as(&CaptureStage::with_identity(
+        "same-b",
+        identity(),
+        48_000,
+        0.0
+    )));
+    assert!(!a.same_as(&CaptureStage::with_identity(
+        "same-a",
+        identity(),
+        44_100,
+        0.0
+    )));
+    // Without an identity only the very model is the same.
+    let model = identity();
+    let c = CaptureStage::new(model.clone(), 48_000, 0.0);
+    assert!(c.same_as(&CaptureStage::new(model, 48_000, 3.0)));
+    assert!(!c.same_as(&CaptureStage::new(identity(), 48_000, 0.0)));
+}
+
+#[test]
+fn a_faulted_stage_is_not_the_same_and_a_faulting_calibration_is_reported() {
+    let good = CaptureStage::with_identity("fault-a", identity(), 48_000, 0.0);
+    assert!(!good.calibration_faulted());
+    let mut bad = CaptureStage::with_identity("fault-b", scaled(f32::NAN), 48_000, 0.0);
+    assert!(bad.calibration_faulted());
+    // Its fault is cached with its calibration.
+    assert!(
+        CaptureStage::with_identity("fault-b", scaled(f32::NAN), 48_000, 0.0).calibration_faulted()
+    );
+    let twin = CaptureStage::with_identity("fault-b", scaled(f32::NAN), 48_000, 0.0);
+    assert!(bad.same_capture(&twin) && bad.same_as(&twin));
+    run(&mut bad, &sine(48_000, 220.0, 0.1, 10));
+    assert!(bad.faulted());
+    assert!(!bad.same_as(&twin) && !twin.same_as(&bad));
+    assert!(bad.same_capture(&twin));
+}
+
+#[test]
+fn copy_from_a_stage_that_does_not_match_changes_nothing_and_does_not_panic() {
+    let mut a = CaptureStage::with_identity("copy-a", deep(), 48_000, 0.0);
+    let other_rate = CaptureStage::with_identity("copy-a", deep(), 44_100, 0.0);
+    let other_capture = CaptureStage::with_identity("copy-b", deep(), 48_000, 0.0);
+    let input = sine(48_000, 196.0, 0.2, 500);
+    let mut reference = a.duplicate();
+    run(&mut a, &input);
+    let want = run(&mut reference, &input);
+    let mut c = a.duplicate();
+    c.copy_from(&other_rate);
+    c.copy_from(&other_capture);
+    let got = run(&mut c, &input);
+    assert!(
+        want.iter()
+            .zip(&got)
+            .all(|(x, y)| x.to_bits() == y.to_bits())
+    );
+}

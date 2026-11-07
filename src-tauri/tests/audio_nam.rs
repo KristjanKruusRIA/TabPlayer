@@ -226,32 +226,32 @@ fn capture_plays_and_repeats_exactly() {
 
 #[test]
 fn a_stereo_track_runs_each_channel_through_its_own_stage() {
-    let rate = 48_000;
-    let fx = with_capture(FxSettings::default(), &ids()[0], 0.0);
-    let (mut stereo, mut left, mut right) = (
-        TrackDsp::new(fx.clone(), rate, 1.0).unwrap(),
-        TrackDsp::new(fx.clone(), rate, 1.0).unwrap(),
-        TrackDsp::new(fx, rate, 1.0).unwrap(),
-    );
-    // Mono for a while, then a pan splits the channels; each then plays as a track of its own would.
-    // Past a long silence the channels run as one again, and a note after it still plays as two tracks would.
-    for n in 0..rate as usize * 5 {
-        let loud = n < rate as usize || n >= rate as usize * 4;
-        let a = if loud {
-            riff(n % rate as usize, rate)
-        } else {
-            0.0
-        };
-        let b = if n < 9_000 || n >= rate as usize * 4 + 9_000 {
-            a
-        } else {
-            a * 0.5
-        };
-        let y = stereo.process([a, b], 120.0);
-        let l = left.process([a, a], 120.0);
-        let r = right.process([b, b], 120.0);
-        assert_eq!(y[0].to_bits(), l[0].to_bits(), "left at {n}");
-        assert_eq!(y[1].to_bits(), r[0].to_bits(), "right at {n}");
+    // 44.1 kHz brings the resamplers in; the realistic model has a long history to copy across.
+    for (rate, id) in [(48_000u32, 0), (44_100, 0), (44_100, 2)] {
+        let fx = with_capture(FxSettings::default(), &ids()[id], 0.0);
+        let (mut stereo, mut left, mut right) = (
+            TrackDsp::new(fx.clone(), rate, 1.0).unwrap(),
+            TrackDsp::new(fx.clone(), rate, 1.0).unwrap(),
+            TrackDsp::new(fx, rate, 1.0).unwrap(),
+        );
+        let second = rate as usize;
+        // Mono for a while, then a pan splits the channels. Past a long silence the channels run as one again, and
+        // a note after it still plays as two tracks would.
+        let (silent_from, silent_to) = (second, second * 3);
+        for n in 0..second * 4 {
+            let loud = n < silent_from || n >= silent_to;
+            let a = if loud { riff(n % second, rate) } else { 0.0 };
+            let b = if n < 9_000 || n >= silent_to + 9_000 {
+                a
+            } else {
+                a * 0.5
+            };
+            let y = stereo.process([a, b], 120.0);
+            let l = left.process([a, a], 120.0);
+            let r = right.process([b, b], 120.0);
+            assert_eq!(y[0].to_bits(), l[0].to_bits(), "left at {n} at {rate}");
+            assert_eq!(y[1].to_bits(), r[0].to_bits(), "right at {n} at {rate}");
+        }
     }
 }
 
@@ -439,7 +439,7 @@ fn export_render_equals_playback() {
 
 #[test]
 fn rested_equals_never_rested() {
-    for id in [&ids()[0], &ids()[3]] {
+    for id in [&ids()[0], &ids()[3], &ids()[2]] {
         let fx = with_capture(amp("crunch", 0.5), id, 0.0);
         let (mut resting, mut running) = (
             TrackDsp::new(fx.clone(), 48_000, 1.0).unwrap(),
@@ -547,6 +547,17 @@ fn capture_switch_is_smooth() {
     tweaked.amp.drive = 0.2;
     tweaked.amp.gain_db = 3.0;
     assert_smooth(&a, &tweaked, "the same capture with other knobs");
+    // A realistic model, with thousands of samples of history.
+    let real = with_capture(driven.clone(), &ids[2], 0.0);
+    assert_smooth(&real, &a, "a realistic capture to a small one");
+    assert_smooth(&a, &real, "and back");
+    assert_smooth(&driven, &real, "built-in to a realistic capture");
+    assert_smooth(&real, &driven, "a realistic capture undone");
+    assert_smooth(
+        &real,
+        &with_capture(driven.clone(), &ids[2], -6.0),
+        "a realistic capture's level",
+    );
 }
 
 /// Boards to move through one after another, as a player editing the sound would.
@@ -562,6 +573,9 @@ fn boards() -> Vec<FxSettings> {
         FxSettings::default(),
         with_capture(amp("clean", 0.3), &"0".repeat(32), 0.0),
         with_capture(amp("metal", 0.8), &ids[0], 0.0),
+        with_capture(amp("lead", 0.5), &ids[2], 1.0),
+        with_capture(amp("lead", 0.5), &ids[2], -2.0),
+        with_capture(amp("crunch", 0.5), &ids[1], 0.0),
     ]
 }
 #[test]
@@ -702,4 +716,137 @@ fn the_stage_rate_limits_are_those_the_track_relies_on() {
         assert!(CaptureStage::rate_supported(rate));
     }
     assert!(!CaptureStage::rate_supported(384_001));
+}
+
+/// The hostile capture: a real model with its weights scaled until it overflows.
+fn hostile_id() -> String {
+    let mut file: serde_json::Value = serde_json::from_slice(FIXTURES[0]).unwrap();
+    for w in file["weights"].as_array_mut().unwrap() {
+        *w = serde_json::json!(w.as_f64().unwrap() * 1e30);
+    }
+    let bytes = serde_json::to_vec(&file).unwrap();
+    nam_library::library()
+        .unwrap()
+        .import_bytes(&bytes, "Hostile.nam")
+        .unwrap()
+        .id
+}
+
+#[test]
+fn a_capture_whose_calibration_faults_plays_the_built_in_amp() {
+    let _ = ids();
+    let hostile = hostile_id();
+    let plain = amp("lead", 0.7);
+    for rate in RATES {
+        let named = with_capture(plain.clone(), &hostile, 3.0);
+        let expected = play(&plain, rate, rate as usize / 2);
+        assert!(rms(&expected) > 0.01);
+        assert!(same_bits(&expected, &play(&named, rate, rate as usize / 2)));
+    }
+}
+
+/// Plays `frames` of a held two-tone note, from frame `from`, through `dsp`.
+fn hold(dsp: &mut TrackDsp, rate: u32, from: usize, frames: usize) -> Vec<f32> {
+    (from..from + frames)
+        .map(|n| {
+            let x = ((TAU * 110.0 * n as f64 / rate as f64).sin() * 0.2) as f32;
+            dsp.process([x; 2], 120.0)[0]
+        })
+        .collect()
+}
+
+#[test]
+fn a_level_change_keeps_the_running_stage_and_ramps_to_the_new_level() {
+    let ids = ids();
+    for rate in RATES {
+        for id in [&ids[0], &ids[2]] {
+            for path in ["set_settings", "transition_from"] {
+                let (quiet, loud) = (
+                    with_capture(amp("clean", 0.3), id, 0.0),
+                    with_capture(amp("clean", 0.3), id, 6.0),
+                );
+                // One that was at the new level all along has the stage in the state the changed one must keep.
+                let mut always = TrackDsp::new(loud.clone(), rate, 1.0).unwrap();
+                let mut dsp = TrackDsp::new(quiet, rate, 1.0).unwrap();
+                let start = rate as usize / 2;
+                let want_early = hold(&mut always, rate, 0, start);
+                let early = hold(&mut dsp, rate, 0, start);
+                assert!(early.iter().zip(&want_early).any(|(a, b)| a != b));
+                if path == "set_settings" {
+                    dsp.set_settings(loud).unwrap();
+                } else {
+                    let mut new = TrackDsp::new(loud, rate, 1.0).unwrap();
+                    new.transition_from(&mut dsp);
+                    dsp = new;
+                }
+                let ramp = rate as usize / 100;
+                let during = hold(&mut dsp, rate, start, ramp + 5);
+                let during_want = hold(&mut always, rate, start, ramp + 5);
+                let (after, after_want) = (
+                    hold(&mut dsp, rate, start + ramp + 5, rate as usize / 4),
+                    hold(&mut always, rate, start + ramp + 5, rate as usize / 4),
+                );
+                let peak = after_want.iter().fold(0.0f32, |m, v| m.max(v.abs()));
+                assert!(peak > 0.02);
+                for (n, (a, b)) in after.iter().zip(&after_want).enumerate() {
+                    assert!(
+                        (a - b).abs() < peak * 1e-3,
+                        "{path} at {rate}: frame {n}: {a} against {b}"
+                    );
+                }
+                // The way there is smooth: no step beyond the settled sound's own.
+                let steps =
+                    |v: &[f32]| v.windows(2).fold(0.0f32, |m, w| m.max((w[1] - w[0]).abs()));
+                let settled = steps(&after_want);
+                let crossing: Vec<f32> = early[early.len() - 2..]
+                    .iter()
+                    .chain(&during)
+                    .copied()
+                    .collect();
+                assert!(
+                    steps(&crossing) <= settled * 1.5 + 0.002,
+                    "{path} at {rate}: step {} against {settled}",
+                    steps(&crossing)
+                );
+                let _ = during_want;
+            }
+        }
+    }
+}
+
+#[test]
+fn the_leaving_capture_keeps_clear_of_the_incoming_one_after_set_settings() {
+    let ids = ids();
+    for rate in RATES {
+        let (old_fx, own_fx) = (
+            with_capture(amp("lead", 0.7), &ids[1], 0.0),
+            with_capture(amp("lead", 0.7), &ids[0], 0.0),
+        );
+        // `set_settings` puts the incoming capture in the second slot's partner; `transition_from` must not put the
+        // leaving one over it.
+        let build = |settings_first: bool| {
+            let mut old = TrackDsp::new(old_fx.clone(), rate, 1.0).unwrap();
+            hold(&mut old, rate, 0, rate as usize / 4);
+            let mut new = if settings_first {
+                let mut base =
+                    TrackDsp::new(with_capture(amp("lead", 0.7), &ids[3], 0.0), rate, 1.0).unwrap();
+                base.set_settings(own_fx.clone()).unwrap();
+                base
+            } else {
+                TrackDsp::new(own_fx.clone(), rate, 1.0).unwrap()
+            };
+            new.transition_from(&mut old);
+            hold(&mut new, rate, rate as usize / 4, rate as usize / 2)
+        };
+        let (a, b) = (build(true), build(false));
+        let peak = b.iter().fold(0.0f32, |m, v| m.max(v.abs()));
+        assert!(peak > 0.02);
+        // Past the crossfade both play the incoming capture, whichever slot it sits in.
+        let tail = a.len() - rate as usize / 8;
+        let worst = a[tail..]
+            .iter()
+            .zip(&b[tail..])
+            .fold(0.0f32, |m, (x, y)| m.max((x - y).abs()));
+        assert!(worst < peak * 1e-3, "at {rate}: {worst} on {peak}");
+    }
 }

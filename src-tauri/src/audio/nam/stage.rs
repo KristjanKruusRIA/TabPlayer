@@ -16,7 +16,21 @@
 use super::model::{NamModel, NamState};
 use super::resample::Resampler;
 use crate::audio::tone::AMP_TARGET;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
+
+/// What calibrating a capture found, kept so that a later stage for the same capture and rate skips the run.
+#[derive(Clone, Copy)]
+struct Calibration {
+    /// The gain at 0 dB, or `None` when the capture could not be calibrated.
+    base: Option<f64>,
+    /// The capture produced non-finite output while it was measured.
+    faulted: bool,
+}
+/// Calibrations by (library identity, device rate), oldest first. Taken only off the audio thread.
+static CALIBRATIONS: Mutex<Vec<((String, u32), Calibration)>> = Mutex::new(Vec::new());
+const CALIBRATION_CACHE: usize = 64;
+#[cfg(test)]
+thread_local! {static CALIBRATION_RUNS: std::cell::Cell<u32> = const {std::cell::Cell::new(0)};}
 
 /// The amps' own reference tone: 220 Hz at a 0.1 peak.
 const CAL_HZ: f64 = 220.0;
@@ -56,7 +70,11 @@ pub struct CaptureStage {
     calibrated: bool,
     /// Non-finite output met: the stage restored its state once, and is silent until `reset`.
     faulted: bool,
+    /// Calibration met non-finite output, so the capture is not fit to play.
+    calibration_faulted: bool,
     level_db: f64,
+    /// The library identity this stage was built for; stages with one are the same capture when it and the rate agree.
+    key: Option<String>,
     /// Consecutive exact zeros: device input, model input, and input of the
     /// converter back to the device rate.
     device_zeros: u32,
@@ -74,6 +92,26 @@ pub struct CaptureStage {
 
 impl CaptureStage {
     pub fn new(model: Arc<NamModel>, device_rate: u32, level_db: f64) -> CaptureStage {
+        Self::build(None, model, device_rate, level_db)
+    }
+
+    /// A stage for the library capture `id`. Stages for the same identity and rate are the same capture
+    /// (`same_as`), and share one calibration: the first creation measures it, later ones reuse the result.
+    pub fn with_identity(
+        id: &str,
+        model: Arc<NamModel>,
+        device_rate: u32,
+        level_db: f64,
+    ) -> CaptureStage {
+        Self::build(Some(id.to_owned()), model, device_rate, level_db)
+    }
+
+    fn build(
+        key: Option<String>,
+        model: Arc<NamModel>,
+        device_rate: u32,
+        level_db: f64,
+    ) -> CaptureStage {
         let device_rate = device_rate.clamp(RATE_RANGE.0, RATE_RANGE.1);
         let model_rate = model.model_rate().clamp(RATE_RANGE.0, RATE_RANGE.1);
         let (to_model, to_device) = if device_rate == model_rate {
@@ -128,7 +166,9 @@ impl CaptureStage {
             gain: 1.0,
             calibrated: false,
             faulted: false,
+            calibration_faulted: false,
             level_db: 0.0,
+            key: None,
             device_zeros: 0,
             model_zeros: 0,
             out_zeros: 0,
@@ -148,9 +188,30 @@ impl CaptureStage {
             0.0
         };
         stage.level_db = level;
-        let base = stage.calibration();
-        stage.calibrated = base.is_some();
-        let base = base.unwrap_or(1.0);
+        stage.key = key.clone();
+        let cache_key = key.map(|id| (id, stage.device_rate));
+        let cached = cache_key.as_ref().and_then(|wanted| {
+            CALIBRATIONS
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .iter()
+                .find(|(key, _)| key == wanted)
+                .map(|(_, found)| *found)
+        });
+        let found = cached.unwrap_or_else(|| {
+            let found = stage.calibration();
+            if let Some(wanted) = cache_key {
+                let mut cache = CALIBRATIONS.lock().unwrap_or_else(PoisonError::into_inner);
+                if cache.len() >= CALIBRATION_CACHE {
+                    cache.remove(0);
+                }
+                cache.push((wanted, found));
+            }
+            found
+        });
+        stage.calibrated = found.base.is_some();
+        stage.calibration_faulted = found.faulted;
+        let base = found.base.unwrap_or(1.0);
         stage.gain = (base * 10f64.powf(level / 20.0)) as f32;
         stage
     }
@@ -180,7 +241,9 @@ impl CaptureStage {
             gain: 1.0,
             calibrated: false,
             faulted: false,
+            calibration_faulted: false,
             level_db: 0.0,
+            key: None,
             device_zeros: 0,
             model_zeros: 0,
             out_zeros: 0,
@@ -193,13 +256,21 @@ impl CaptureStage {
             #[cfg(test)]
             overflows: 0,
         }
+        .keyed(self.key.clone())
+    }
+
+    fn keyed(mut self, key: Option<String>) -> CaptureStage {
+        self.key = key;
+        self
     }
 
     /// The factor that brings the capture's steady peak on the reference tone
     /// to the amps' target, limited to `CAL_LIMIT_DB` either way. `None` when the capture
     /// cannot be calibrated: non-finite output, or a reference peak more than
     /// `CAL_GIVE_UP_DB` under the target.
-    fn calibration(&self) -> Option<f64> {
+    fn calibration(&self) -> Calibration {
+        #[cfg(test)]
+        CALIBRATION_RUNS.with(|runs| runs.set(runs.get() + 1));
         let rate = self.device_rate as usize;
         let mut scratch = self.scratch();
         let (settle, window) = (rate * 3 / 4, rate / 4);
@@ -212,14 +283,24 @@ impl CaptureStage {
                 peak = peak.max(y.abs());
             }
         }
-        if scratch.faulted || !peak.is_finite() || peak <= 0.0 {
-            return None;
+        let faulted = scratch.faulted;
+        if faulted || !peak.is_finite() || peak <= 0.0 {
+            return Calibration {
+                base: None,
+                faulted,
+            };
         }
         let wanted_db = 20.0 * (AMP_TARGET / peak).log10();
         if wanted_db > CAL_GIVE_UP_DB {
-            return None;
+            return Calibration {
+                base: None,
+                faulted,
+            };
         }
-        Some(10f64.powf(wanted_db.clamp(-CAL_LIMIT_DB, CAL_LIMIT_DB) / 20.0))
+        Calibration {
+            base: Some(10f64.powf(wanted_db.clamp(-CAL_LIMIT_DB, CAL_LIMIT_DB) / 20.0)),
+            faulted,
+        }
     }
 
     /// False when the capture could not be calibrated and runs at unit gain
@@ -242,12 +323,26 @@ impl CaptureStage {
         self.faulted
     }
 
-    /// Whether `other` is the same capture at the same rate and level, so that
-    /// one running stage can stand for both.
+    /// True when calibration met non-finite output: the capture is not fit to play.
+    pub fn calibration_faulted(&self) -> bool {
+        self.calibration_faulted
+    }
+
+    /// The same capture at the same rate: the same library identity, or the same model where there is none.
+    /// The level is not part of it; callers apply it.
+    pub fn same_capture(&self, other: &CaptureStage) -> bool {
+        self.device_rate == other.device_rate
+            && match (&self.key, &other.key) {
+                (Some(a), Some(b)) => a == b,
+                (None, None) => Arc::ptr_eq(&self.model, &other.model),
+                _ => false,
+            }
+    }
+
+    /// Whether one running stage can stand for both: the same capture, and neither has faulted. A faulted stage
+    /// is silent until reset, so an edit rebuilds it.
     pub fn same_as(&self, other: &CaptureStage) -> bool {
-        Arc::ptr_eq(&self.model, &other.model)
-            && self.device_rate == other.device_rate
-            && self.level_db.to_bits() == other.level_db.to_bits()
+        self.same_capture(other) && !self.faulted && !other.faulted
     }
 
     /// A fresh stage like this one just after `new`, without calibrating again.
@@ -262,6 +357,24 @@ impl CaptureStage {
     /// Takes over everything `other` holds, which must come from the same
     /// capture and rate (`same_as`). No allocation.
     pub fn copy_from(&mut self, other: &CaptureStage) {
+        // Never panics on the audio thread: anything that does not match is left alone.
+        if !self.same_capture(other)
+            || self.queue.len() != other.queue.len()
+            || self.to_model.is_some() != other.to_model.is_some()
+            || self.to_device.is_some() != other.to_device.is_some()
+        {
+            return;
+        }
+        if let (Some(a), Some(b)) = (self.to_model.as_ref(), other.to_model.as_ref()) {
+            if !a.same_shape(b) {
+                return;
+            }
+        }
+        if let (Some(a), Some(b)) = (self.to_device.as_ref(), other.to_device.as_ref()) {
+            if !a.same_shape(b) {
+                return;
+            }
+        }
         self.state.snapshot_from(&other.state);
         if let (Some(a), Some(b)) = (self.to_model.as_mut(), other.to_model.as_ref()) {
             a.copy_from(b);
@@ -502,4 +615,10 @@ impl CaptureStage {
             self.at_rest = true;
         }
     }
+}
+
+/// Calibration runs on this thread so far.
+#[cfg(test)]
+pub(super) fn calibration_runs() -> u32 {
+    CALIBRATION_RUNS.with(|runs| runs.get())
 }

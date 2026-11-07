@@ -156,8 +156,19 @@ impl Resampler {
         self.delay_in
     }
 
-    /// Takes over `other`'s running state; both must share one table.
+    /// Whether `copy_from` can take `other`'s state: the same step, ratio and history length.
+    pub(super) fn same_shape(&self, other: &Resampler) -> bool {
+        self.ring.len() == other.ring.len()
+            && self.step == other.step
+            && self.den == other.den
+            && self.table.taps == other.table.taps
+    }
+
+    /// Takes over `other`'s running state; check `same_shape` first, or nothing is copied.
     pub(super) fn copy_from(&mut self, other: &Resampler) {
+        if !self.same_shape(other) {
+            return;
+        }
         self.ring.copy_from_slice(&other.ring);
         self.seen = other.seen;
         self.at = other.at;

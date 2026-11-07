@@ -1500,9 +1500,13 @@ impl AmpCapture {
     /// Whether it holds nothing, and whether it runs one channel for both.
     fn at_rest(&self) -> [bool; 2] {
         [
-            self.left.at_rest() && (self.twin || self.right.at_rest()),
+            self.left.is_blank() && (self.twin || self.right.is_blank()),
             self.twin,
         ]
+    }
+    /// Whether this running capture can stand for `other`'s: the same capture, neither faulted.
+    fn same_as(&self, other: &AmpCapture) -> bool {
+        self.left.same_as(&other.left) && self.right.same_as(&other.right)
     }
     fn never_rest(&mut self) {
         self.left.set_never_rest(true);
@@ -1518,7 +1522,11 @@ fn amp_capture_for(amp: &Amp, rate: u32) -> Option<Box<AmpCapture>> {
     }
     let capture = amp.capture.as_ref()?;
     let model = nam_library::resolve(&capture.id)?;
-    let left = CaptureStage::new(model, rate, capture.level_db);
+    // The level is applied by the amp stage, which ramps it; the stage plays at its calibrated gain.
+    let left = CaptureStage::with_identity(&capture.id, model, rate, 0.0);
+    if left.calibration_faulted() {
+        return None;
+    }
     let right = left.duplicate();
     Some(Box::new(AmpCapture {
         left,
@@ -1562,7 +1570,13 @@ fn amp_capture_frame(
         } else {
             amps[0].gain_db + (amps[1].gain_db - amps[0].gain_db) * t
         };
-        let gain = 10f64.powf(db / 20.0);
+        let level = |amp: &Amp| amp.capture.as_ref().map_or(0.0, |c| c.level_db);
+        // The level ramps as the gain does when one stage plays through the change, else it is the end's own.
+        let level = if !two && cap_side[0].is_some() && cap_side[0] == cap_side[1] {
+            level(amps[0]) + (level(amps[1]) - level(amps[0])) * t
+        } else {
+            level(amp)
+        };
         let capture = cap_side[side].and_then(|slot| caps[slot].as_mut().map(|c| (slot, c)));
         outs[k] = if let Some((slot, capture)) = capture {
             used[slot] = true;
@@ -1570,8 +1584,10 @@ fn amp_capture_frame(
                 capture.reset();
                 capture.live = true;
             }
+            let gain = 10f64.powf((db + level) / 20.0);
             capture.run(x).map(|v| (v as f64 * gain) as f32)
         } else if let Some(shape) = shapes[side].as_ref() {
+            let gain = 10f64.powf(db / 20.0);
             chain_used = true;
             if !chain.live {
                 chain.reset();
@@ -1579,6 +1595,7 @@ fn amp_capture_frame(
             }
             chain.process(shape, x, 0.0).map(|v| (v * gain) as f32)
         } else {
+            let gain = 10f64.powf(db / 20.0);
             plain_used = true;
             let pre = 1.0 + amp.drive * if amp.model == "bass" { 3.0 } else { 1.0 };
             let bias = 0.02 * amp.drive;
@@ -1982,7 +1999,7 @@ impl TrackDsp {
         if capture
             .as_ref()
             .zip(held)
-            .is_some_and(|(new, held)| new.left.same_as(&held.left))
+            .is_some_and(|(new, held)| new.same_as(held))
         {
             // The same capture carries on as one running stage.
             self.amp_cap_side = [current, current];
@@ -2056,15 +2073,17 @@ impl TrackDsp {
         let same = own
             .and_then(|slot| self.amp_caps[slot].as_ref())
             .zip(taken.and_then(|slot| old.amp_caps[slot].as_ref()))
-            .is_some_and(|(new, held)| new.left.same_as(&held.left));
+            .is_some_and(|(new, held)| new.same_as(held));
+        // The leaving capture goes where this configuration's own does not sit.
+        let leaving = if own == Some(0) { 1 } else { 0 };
         match (own, taken) {
             (Some(own), Some(taken)) if same => {
                 std::mem::swap(&mut self.amp_caps[own], &mut old.amp_caps[taken]);
                 self.amp_cap_side = [Some(own), Some(own)];
             }
             (_, Some(taken)) if old.amp_caps[taken].is_some() => {
-                std::mem::swap(&mut self.amp_caps[0], &mut old.amp_caps[taken]);
-                self.amp_cap_side = [Some(0), own];
+                std::mem::swap(&mut self.amp_caps[leaving], &mut old.amp_caps[taken]);
+                self.amp_cap_side = [Some(leaving), own];
             }
             _ => self.amp_cap_side = [None, own],
         }
@@ -3350,8 +3369,8 @@ impl TrackDsp {
         self.amp_dc = [0.0; 2];
         self.amp_chain.reset();
         self.amp_chain.live = false;
+        // The first frame that plays a capture resets it, once; one that never plays again is left alone.
         for capture in self.amp_caps.iter_mut().flatten() {
-            capture.reset();
             capture.live = false;
         }
         self.amp_leaving.reset();

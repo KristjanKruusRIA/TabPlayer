@@ -7,8 +7,9 @@ import {ScoreView} from './ScoreView';
 import {music} from './editor/fixtures';
 import type {PageLayout} from './engraving/types';
 import type {ScoreLayoutMode} from './engraving/screen-view';
-const state=vi.hoisted(()=>({api:null as unknown,width:900,height:700,resize:()=>{},loads:vi.fn(),renders:vi.fn()}));
+const state=vi.hoisted(()=>({fonts:(()=>new Promise<void>(()=>{})) as ()=>Promise<void>,api:null as unknown,width:900,height:700,resize:()=>{},loads:vi.fn(),renders:vi.fn()}));
 function event<T>(){const handlers=new Set<(e:T)=>void>();return {on:(fn:(e:T)=>void)=>{handlers.add(fn);return()=>handlers.delete(fn);},emit:(e:T)=>{for(const fn of handlers)fn(e);}};}
+vi.mock('./export/pdf',async original=>({...await original<typeof import('./export/pdf')>(),loadExportFonts:()=>state.fonts()}));
 vi.mock('@coderline/alphatab',async original=>({...await original<typeof import('@coderline/alphatab')>(),AlphaTabApi:class {
  settings=new Settings();score:model.Score|null=null;constructor(){state.api=this;}
  beatMouseDown=event<model.Beat>();noteMouseDown=event<model.Note>();beatMouseMove=event<model.Beat>();beatMouseUp=event<void>();renderStarted=event<void>();postRenderFinished=event<void>();playbackRangeHighlightChanged=event<PlaybackHighlightChangeEventArgs>();
@@ -34,7 +35,7 @@ function setup(layout:ScoreLayoutMode='verticalPage',zoom=100){
  const tree=(p=props)=><div className="paper-scroll" style={{padding:10}}><div className="paper score-paper-host"><ScoreView {...p}/></div></div>;
  const result=render(tree());return {...result,props,tree,api:state.api as {settings:Settings;renderer:{width:number}}};
 }
-afterEach(()=>{cleanup();vi.restoreAllMocks();vi.unstubAllGlobals();state.loads.mockClear();state.renders.mockClear();state.width=900;state.height=700;});
+afterEach(()=>{cleanup();vi.restoreAllMocks();vi.unstubAllGlobals();state.loads.mockClear();state.renders.mockClear();state.width=900;state.height=700;state.fonts=()=>new Promise<void>(()=>{});});
 it.each(['verticalPage','horizontalPage','grid','parchment','verticalScreen','horizontalScreen'] as const)('renders %s without a playback controller',layout=>{
  const {api}=setup(layout);expect(state.loads).toHaveBeenCalledTimes(1);
  expect(api.settings.display.layoutMode).toBe(layout==='horizontalScreen'?LayoutMode.Horizontal:layout==='verticalScreen'?LayoutMode.Page:LayoutMode.Parchment);
@@ -146,3 +147,17 @@ it('is click-through via CSS and only resizes with zoom',()=>{
  expect(after.getAttribute('viewBox')).toBe(view);expect(Number(after.getAttribute('width'))).toBeCloseTo(Number(width)*2);expect(state.renders).toHaveBeenCalledTimes(calls);
 });
 it.each(['parchment','verticalScreen','horizontalScreen'] as const)('draws no page text in %s',layout=>{titled(layout);expect(overlays()).toHaveLength(0);});
+
+it('re-fits page text when the fonts resolve and ignores a font failure',async()=>{
+ const measure={k:.3};
+ vi.spyOn(HTMLCanvasElement.prototype,'getContext').mockImplementation((()=>({font:'',measureText(this:{font:string},text:string){return {width:text.length*(parseFloat(this.font)||18)*measure.k};}})) as never);
+ let resolve=()=>{};state.fonts=()=>new Promise<void>(done=>{resolve=done;});
+ const s=setup();s.props.score.title='T'.repeat(40);s.rerender(s.tree({...s.props,score:s.props.score}));
+ const size=()=>Number(overlays()[0].querySelector('text')!.getAttribute('font-size')),calls=state.renders.mock.calls.length;
+ expect(size()).toBe(18);
+ measure.k=1.2;await act(async()=>{resolve();});
+ expect(size()).toBeLessThan(18);expect(state.renders).toHaveBeenCalledTimes(calls);
+ cleanup();state.fonts=()=>Promise.reject(new Error('no fonts'));
+ const failed=setup();await act(async()=>{});
+ expect(screen.queryByRole('alert')).toBeNull();expect(overlays()).toHaveLength(3);failed.unmount();
+});

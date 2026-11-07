@@ -54,8 +54,10 @@ let fontsLoading:Promise<void>|null=null;
 export function loadExportFonts():Promise<void> {
   if(typeof document==='undefined'||typeof FontFace==='undefined')return Promise.resolve();
   fontsLoading??=(async()=>{
-    const fonts=[new FontFace('Noto Sans','url(/export-fonts/NotoSans-Regular.ttf)'),new FontFace('Bravura','url(/export-fonts/Bravura.otf)'),new FontFace('Noto Sans CJK JP','url(/export-fonts/NotoSansCJKjp-Regular.otf)'),new FontFace('Noto Emoji','url(/export-fonts/NotoEmoji.ttf)')];
-    for(const font of fonts){await font.load();document.fonts.add(font);}
+    const faces=[new FontFace('Noto Sans','url(/export-fonts/NotoSans-Regular.ttf)'),new FontFace('Bravura','url(/export-fonts/Bravura.otf)'),new FontFace('Noto Sans CJK JP','url(/export-fonts/NotoSansCJKjp-Regular.otf)'),new FontFace('Noto Emoji','url(/export-fonts/NotoEmoji.ttf)')];
+    // Add only after every face has loaded, so a partial failure adds nothing.
+    await Promise.all(faces.map(face=>face.load()));
+    for(const face of faces)document.fonts.add(face);
   })().catch(error=>{fontsLoading=null;throw error;});
   return fontsLoading;
 }

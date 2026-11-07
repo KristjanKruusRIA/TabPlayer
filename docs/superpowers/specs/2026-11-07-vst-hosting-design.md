@@ -1,6 +1,6 @@
 # Plug-in hosting on tracks: design (THE-71)
 
-Status: draft for decision, 2026-11-07. Requested on 2026-10-30 so a full guitar amp plug-in can run on the clean tone (`docs/backlog.md`, "Load VST plug-ins on a track"). The research behind this design was read from the code at `0f43a53` and from web sources accessed on 2026-11-07. Citations below are repo `file:line` or URLs.
+Status: decided, 2026-11-07 (see "Decisions by the user"). Requested on 2026-10-30 so a full guitar amp plug-in can run on the clean tone (`docs/backlog.md`, "Load VST plug-ins on a track"). The research behind this design was read from the code at `0f43a53` and from web sources accessed on 2026-11-07. Citations below are repo `file:line` or URLs.
 
 ## Goal
 
@@ -109,11 +109,11 @@ The user loads one VST3 effect onto a track, in place of the built-in drive, amp
 5. CLAP through `clack-host`, using the same helper protocol.
 6. Later: macro knobs and automation, `.vstpreset`, A/B against the built-in tone, Line-In through a plug-in, shared helpers, several plug-ins per track, and freezing a plug-in track to audio.
 
-## Decisions for the user
+## Decisions by the user (2026-11-07)
 
-1. Ship Windows first (recommended), or wait for all three platforms?
-2. Also, or instead, load **NAM captures** (`.nam`, Neural Amp Modeler Core is MIT) through the built-in amp slot. This gives "a full amp" with no plug-in hosting, no helper process and no added latency. It is a separate, much smaller feature. Recommended as a cheaper first step that does not replace VST3 hosting.
-3. Is a Rust-only host required, or may the helper use the SDK's C++ hosting classes? C++ adds CMake and a C++ toolchain to the build. Recommended: decide after spike 1, with Rust preferred.
+1. **Windows only for the first version.** macOS and Linux build the `unsupportedPlatform` stub until slice 4.
+2. **NAM captures too.** `.nam` files (Neural Amp Modeler Core, MIT) load through the built-in amp slot, in-process, with no helper and no added latency. This is its own feature and ships before VST3 hosting. The `.nam` file is untrusted input: the parser bounds file size, JSON depth, layer counts and weight counts before allocating, and rejects non-finite weights. Like the cabinet IR, the document names the capture by content hash, and a missing capture falls back to the built-in amp with a notice.
+3. **The helper may use the SDK's C++ hosting classes.** Spike 1 still compares the two, but the C++ path no longer needs a separate approval. It is Windows-only for now, built with MSVC from the installed VS 2022 Build Tools and CMake. Its build must be pinned and reproducible in CI.
 
 ## Rulings already made (recommendations from the research, adopted)
 

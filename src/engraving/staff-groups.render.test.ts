@@ -6,7 +6,7 @@ import { defaultEngraving } from './projection';
 import { withLongFirstShortAfter,withStaffGaps,withStaffGroups } from './staff-groups';
 import { withSystemGaps } from './system-gaps';
 import { threeTrackScore } from './staff-fixtures';
-import { braceGlyphs,countText,exportPages,exportWithBounds,installTextMeasure,markBoxes,nameBoxes,pagesHash,stablePages,systemBoxes,usableRight,withoutMarks } from './staff-render-helpers';
+import { braceGlyphs,countText,exportPages,exportWithBounds,installTextMeasure,markBoxes,nameBoxes,pagesHash,stablePages,systemBoxes,trackNames,usableRight,withoutMarks } from './staff-render-helpers';
 import type { StaffGroupKind } from './types';
 
 // SHA-256 of JSON.stringify(stablePages(exportPages({engraving:defaultEngraving()}))), recorded at a04f3c3 before any export code changed.
@@ -68,8 +68,8 @@ it('names end left of every mark and systems fit the page with the reserve',()=>
   const {score,ids}=threeTrackScore({names:['A very long guitar part name','Grand Piano','Drums']});
   for(const direction of ['horizontal','vertical'] as const){
     const e=grouped('brace',['base/1','base/2'],withLongFirstShortAfter({...defaultEngraving(),stylesheet:{...defaultEngraving().stylesheet,firstNameDirection:direction,otherNameDirection:direction}}));
-    for(const page of exportPages({engraving:e,score,ids})){const names=nameBoxes(page.svg),marks=markBoxes(page.svg);
-      expect(names.length).toBeGreaterThan(0);expect(marks.length).toBeGreaterThan(0);
+    for(const page of exportPages({engraving:e,score,ids})){const names=nameBoxes(page.svg,trackNames(score)),marks=markBoxes(page.svg);
+      expect(names.length).toBeGreaterThan(0);expect(names.every(n=>trackNames(score).includes(n.text))).toBe(true);expect(marks.length).toBeGreaterThan(0);
       for(const system of new Set(names.map(n=>n.system)))
         expect(Math.max(...names.filter(n=>n.system===system).map(n=>n.right))).toBeLessThanOrEqual(Math.min(...marks.filter(m=>m.system===system).map(m=>m.x))+.5);
       for(const s of systemBoxes(page.svg))expect(s.left+s.width).toBeLessThanOrEqual(usableRight(page)+1);}
@@ -96,4 +96,22 @@ it('keeps refusing text that does not fit when staff gaps are set',()=>{
   const long=threeTrackScore();long.score.tracks[0].staves[0].bars[0].voices[0].beats[0].text='A long annotation line that surely needs more than the room left at the end of the bar, and then some more words';
   expect(()=>exportPages({engraving:gapped,score:long.score,ids:long.ids})).toThrow(/The text .* does not fit the page width/);
   expect(()=>exportPages({engraving:withStaffGaps(defaultEngraving(),[{trackId:'base/0',scale:2}]),score:long.score,ids:long.ids})).not.toThrow();
+});
+
+// alphaTab ends a chunk at the last bar of a multi-bar rest but records the rest in its bounds under the first bar.
+const multiRestScore=()=>{
+  const fixture=threeTrackScore();
+  for(const track of fixture.score.tracks)for(const staff of track.staves)for(const bar of staff.bars.slice(6))for(const voice of bar.voices)for(const beat of voice.beats)beat.notes.length=0;
+  return fixture;
+};
+const multiRests=()=>{const e=defaultEngraving();e.stylesheet.multiRests='on';return e;};
+it('composes staff gaps and groups when a multi-bar rest ends a system',()=>{
+  const {score,ids}=multiRestScore(),plain=exportWithBounds({engraving:multiRests(),score,ids});
+  // Bars 6 and 7 close the third system as one rest, so that system's chunk ends past the bar its bounds end on.
+  expect(plain.systemHeights.length).toBeGreaterThan(2);
+  const gapped=exportWithBounds({engraving:withStaffGaps(multiRests(),[{trackId:'base/0',scale:2}]),score,ids});
+  const measured=plain.bounds.map(b=>b.pianoTop-b.guitarBottom);
+  gapped.systemHeights.forEach((height,i)=>expect(height-plain.systemHeights[i]).toBeCloseTo(measured[i],0));
+  const group=exportPages({engraving:grouped('bracket',['base/0','base/1'],multiRests()),score,ids}).map(p=>p.svg).join('');
+  expect(countText(group,'data-tp-accolade="group-bracket"')).toBe(systemBoxes(group).length);
 });

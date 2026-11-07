@@ -243,7 +243,16 @@ describe('composeEngravedSystems',()=>{
     const [out]=composeEngravedSystems([chunk(0)],bounds,{plan,gaps:new Map(),metrics,idPrefix:'export'});
     expect(out.svg).toContain('data-tp-accolade="group-bracket"');expect(out.svg).not.toContain('<defs>');expect(out.height).toBe(400);
   });
-  it('refuses a system chunk that has no staff bounds',()=>{
+  it('refuses a system chunk whose first bar starts no system in the bounds',()=>{
     expect(()=>composeEngravedSystems([chunk(8)],bounds,{plan:null,gaps:new Map([[0,2]]),metrics,idPrefix:'export'})).toThrow(/staff bounds/);
+  });
+  it('matches a chunk that ends past the last bar its bounds record, as a multi-bar rest makes it',()=>{
+    const [out]=composeEngravedSystems([{...chunk(4),lastBar:7}],bounds,{plan:null,gaps:new Map([[0,2]]),metrics,idPrefix:'export'});
+    expect(out.svg).toContain('id="export-s4-content"');expect(out.height).toBeGreaterThan(400);
+  });
+  it('refuses a chunk that ends before the last bar its bounds record',()=>{
+    const wide={staffSystems:[indexed(0,rows),Object.assign(indexed(4,rows),{bars:[{...(indexed(4,rows) as unknown as {bars:object[]}).bars[0],index:4},{...(indexed(4,rows) as unknown as {bars:object[]}).bars[0],index:6}]})]} as unknown as ScreenBounds;
+    expect(()=>composeEngravedSystems([{...chunk(4),lastBar:5}],wide,{plan:null,gaps:new Map([[0,2]]),metrics,idPrefix:'export'})).toThrow(/staff bounds/);
+    expect(composeEngravedSystems([{...chunk(4),lastBar:6}],wide,{plan:null,gaps:new Map([[0,2]]),metrics,idPrefix:'export'})[0].svg).toContain('export-s4-content');
   });
 });

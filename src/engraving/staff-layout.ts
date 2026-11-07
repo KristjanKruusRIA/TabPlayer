@@ -116,7 +116,7 @@ export function composeSystem(input:ComposeInput):{svg:string;height:number;shif
 
 /**
  * Composes every system chunk of an export through `composeSystem` (the one core the screen uses too), matching each to its staff bounds by
- * first bar and giving it the id `<idPrefix>-s<firstBar>`. Chunks without a first bar (title, tunings) are untouched; the input array is
+ * first bar (a multi-bar rest closing a system makes the chunk's last bar later than the last bar its bounds record) and giving it the id `<idPrefix>-s<firstBar>`. Chunks without a first bar (title, tunings) are untouched; the input array is
  * returned when nothing composes. Run the width and text-fit checks on the raw chunks first: text moved under `<defs>` has no box.
  */
 export function composeEngravedSystems(systems:SvgSystem[],bounds:ScreenBounds,input:{plan:AccoladePlan|null;gaps:ReadonlyMap<number,number>;metrics:AccoladeMetrics;idPrefix:string}):SvgSystem[] {
@@ -126,7 +126,7 @@ export function composeEngravedSystems(systems:SvgSystem[],bounds:ScreenBounds,i
   const composed=systems.map(system=>{
     const first=system.firstBar;
     if(first===undefined)return system;
-    const found=bounds.staffSystems.filter(candidate=>candidate.bars[0].index===first&&(system.lastBar===undefined||candidate.bars.at(-1)!.index===system.lastBar));
+    const found=bounds.staffSystems.filter(candidate=>candidate.bars[0].index===first&&(system.lastBar===undefined||candidate.bars.at(-1)!.index<=system.lastBar));
     if(found.length!==1)throw new Error('A rendered system has no matching staff bounds.');
     const out=composeSystem({svg:system.svg,id:`${idPrefix}-s${first}`,left:system.left??0,top:system.top??0,width:system.width,height:system.height,system:found[0],plan,gaps,metrics});
     if(out.svg===system.svg)return system;

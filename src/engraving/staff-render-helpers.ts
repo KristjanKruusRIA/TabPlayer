@@ -120,14 +120,17 @@ export function markBoxes(svg:string):MarkBox[] {
   });
 }
 
+/** The names and short names of a score's tracks. */
+export const trackNames=(score:model.Score):string[]=>score.tracks.flatMap(track=>[track.name,track.shortName]).filter(name=>name.length>0);
+
 export interface NameBox {system:number;text:string;left:number;right:number}
 /**
- * Track names in page pixels: the text items alphaTab fills with its name colour. A horizontal name ends where `text-anchor` puts it
+ * Track names in page pixels: the text items alphaTab fills with its name colour whose content is one of `names` (see `trackNames`). A horizontal name ends where `text-anchor` puts it
  * (width 0.55 em per character, as the test text measure assumes); a vertical name is a rotated text whose baseline is the translate x.
  */
-export function nameBoxes(svg:string):NameBox[] {
+export function nameBoxes(svg:string,names:readonly string[]):NameBox[] {
   const doc=parse(svg),frames=framesOf(doc);
-  return [...doc.querySelectorAll('text')].filter(node=>node.getAttribute('fill')==='#222211'&&node.textContent?.trim()).map(node=>{
+  return [...doc.querySelectorAll('text')].filter(node=>node.getAttribute('fill')==='#222211'&&names.includes(node.textContent?.trim()??'')).map(node=>{
     const system=frames.findIndex(frame=>frame.wrapper.contains(node)),text=node.textContent!.trim(),[ox]=offsetOf(node),x=ox+Number(node.getAttribute('x')??0);
     if(/rotate/.test(node.parentElement?.getAttribute('transform')??''))return {system,text,left:ox-sizeOf(node),right:ox};
     const width=[...text].length*sizeOf(node)*.55,anchor=node.getAttribute('text-anchor')??'start';

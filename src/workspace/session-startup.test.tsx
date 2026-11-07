@@ -18,8 +18,6 @@ vi.mock('@tauri-apps/api/window',()=>({getCurrentWindow:()=>({onCloseRequested:a
 vi.mock('react-dom/client',async()=>{const actual=await vi.importActual<typeof import('react-dom/client')>('react-dom/client');return {...actual,createRoot:(container:Element)=>{boundary.creates++;boundary.root=actual.createRoot(container);return boundary.root;}};});
 vi.mock('../bridge',()=>({nativeWorkspaceBridge:{snapshot:boundary.snapshot},createDocumentBridge:(documentId:string)=>({documentId,confirmExport:async()=>true,exportGp:async()=>true})}));
 vi.mock('../audio/bridge',()=>({createDocumentAudioBridge:boundary.audio}));
-// No MIDI service in jsdom: the inspector's MIDI output panel finds no ports instead of showing a listing error.
-vi.mock('../audio/midi-out',async original=>({...await original<typeof import('../audio/midi-out')>(),nativeMidiOut:{ports:async()=>[],setDelay:async()=>{},status:async()=>({ports:[],sent:0,dropped:0,late:0,maxLateMs:0}),testLog:async()=>[]}}));
 vi.mock('../export/bridge',()=>({createDocumentExportBridge:()=>({})}));
 vi.mock('../App',()=>({App:(props:AppProps&{sessionMenu?:ReactNode;recoveryStatus?:ReactNode})=>{boundary.props.push(props);return <main aria-label="Score editor">{props.documentTabs}{props.sessionMenu}{props.recoveryStatus}<p aria-label="Restored score">{props.controller.getState().score.title}</p></main>;}}));
 function deferred<T>(){let resolve!:(value:T)=>void,reject!:(error:unknown)=>void;const promise=new Promise<T>((r,j)=>{resolve=r;reject=j;});return {promise,resolve,reject};}

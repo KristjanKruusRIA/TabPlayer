@@ -1,17 +1,27 @@
 //! Capture stage tests: level, rate adaptation, rest, reset and DC.
 
 use super::engine_tests::{built, file_from, one_layer, random_lstm_json, random_model_json};
+use super::resample::Resampler;
 use super::*;
 use std::sync::Arc;
 
-/// Half-gain identity model at 48 kHz (receptive field 1).
-fn identity() -> Arc<NamModel> {
+/// Identity model with the given head scale (receptive field 1). A scale of
+/// 0.5 is a half-gain pass-through.
+fn scaled_file(scale: f32) -> NamFile {
     let spec = WaveNetSpec {
         arrays: vec![one_layer(1, 1, Activation::Hardtanh, false)],
-        head_scale: 0.5,
+        head_scale: scale,
     };
-    let file = file_from(spec, vec![1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.5]);
-    Arc::new(NamModel::build(&file))
+    file_from(spec, vec![1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, scale])
+}
+
+fn scaled(scale: f32) -> Arc<NamModel> {
+    Arc::new(NamModel::build(&scaled_file(scale)))
+}
+
+/// Half-gain identity model at 48 kHz.
+fn identity() -> Arc<NamModel> {
+    scaled(0.5)
 }
 
 /// A bigger WaveNet with a deep receptive field and a nonzero silent output.
@@ -78,6 +88,7 @@ fn calibrated_to_amp_target() {
         let input = sine(rate, 220.0, 0.1, rate as usize * 2);
         let tail = rate as usize;
         let mut flat = CaptureStage::new(model.clone(), rate, 0.0);
+        assert!(flat.calibrated());
         let p0 = peak(&run(&mut flat, &input)[tail..]);
         assert!(
             db(p0 / 0.078).abs() <= 0.5,
@@ -90,7 +101,58 @@ fn calibrated_to_amp_target() {
             "rate {rate}: +6 dB gave x{}",
             p6 / p0
         );
-        assert_eq!(flat.underruns(), 0);
+        assert_eq!((flat.underruns(), flat.overflows()), (0, 0));
+    }
+}
+
+#[test]
+fn calibration_gain_does_not_depend_on_device_rate() {
+    let reference = CaptureStage::new(identity(), 48_000, 0.0).gain() as f64;
+    for rate in [44_100, 22_050, 96_000, 192_000] {
+        let gain = CaptureStage::new(identity(), rate, 0.0).gain() as f64;
+        assert!(
+            db(gain / reference).abs() <= 0.1,
+            "rate {rate}: gain {gain} vs {reference}"
+        );
+    }
+}
+
+#[test]
+fn calibration_is_limited_and_gives_up_on_near_silence() {
+    // Reference peak 1e-4: 57.8 dB under the target. Corrected, but only by 40 dB.
+    let quiet = CaptureStage::new(scaled(1e-3), 48_000, 0.0);
+    assert!(quiet.calibrated());
+    assert!((quiet.gain() - 100.0).abs() < 0.05, "gain {}", quiet.gain());
+    // Reference peak 1e-6: 98 dB under. Not calibrated, unit gain.
+    let silent = CaptureStage::new(scaled(1e-5), 48_000, 0.0);
+    assert!(!silent.calibrated());
+    assert_eq!(silent.gain(), 1.0);
+    // A level offset still applies on top.
+    let offset = CaptureStage::new(scaled(1e-5), 48_000, 6.0);
+    assert!((db(offset.gain() as f64) - 6.0).abs() < 0.01);
+}
+
+#[test]
+fn non_finite_output_is_silenced_and_uncalibrated() {
+    for scale in [f32::NAN, f32::INFINITY] {
+        let mut stage = CaptureStage::new(scaled(scale), 48_000, 0.0);
+        assert!(!stage.calibrated(), "scale {scale}");
+        let out = run(&mut stage, &sine(48_000, 220.0, 0.1, 2000));
+        assert!(out.iter().all(|v| v.to_bits() == 0), "scale {scale}");
+    }
+}
+
+#[test]
+fn a_non_finite_input_does_not_latch() {
+    for rate in [48_000u32, 44_100] {
+        let mut stage = CaptureStage::new(identity(), rate, 0.0);
+        let mut input = sine(rate, 220.0, 0.1, 4000);
+        input[1000] = f32::NAN;
+        input[1500] = f32::INFINITY;
+        let out = run(&mut stage, &input);
+        assert!(out.iter().all(|v| v.is_finite()), "rate {rate}");
+        let clean = peak(&out[3000..]);
+        assert!(db(clean / 0.078).abs() <= 0.5, "rate {rate}: {clean}");
     }
 }
 
@@ -100,7 +162,11 @@ fn other_device_rate_keeps_pitch_and_level() {
     let measure = |rate: u32| {
         let mut stage = CaptureStage::new(model.clone(), rate, 0.0);
         let out = run(&mut stage, &sine(rate, 440.0, 0.1, rate as usize * 3));
-        assert_eq!(stage.underruns(), 0, "rate {rate}");
+        assert_eq!(
+            (stage.underruns(), stage.overflows()),
+            (0, 0),
+            "rate {rate}"
+        );
         let window = &out[rate as usize..rate as usize * 2];
         (
             spectral_peak(window, rate, 420.0, 460.0),
@@ -111,7 +177,7 @@ fn other_device_rate_keeps_pitch_and_level() {
     let (f_ref, level_ref, latency_ref) = measure(48_000);
     assert_eq!(latency_ref, 0);
     assert!((f_ref - 440.0).abs() <= 2.0);
-    for rate in [44_100, 22_050, 96_000, 32_000, 88_200] {
+    for rate in [44_100, 22_050, 96_000, 32_000, 88_200, 192_000] {
         let (f, level, latency) = measure(rate);
         assert!((f - 440.0).abs() <= 2.0, "rate {rate}: peak at {f}");
         assert!(
@@ -121,6 +187,26 @@ fn other_device_rate_keeps_pitch_and_level() {
         );
         assert!(latency > 0, "rate {rate}");
     }
+}
+
+#[test]
+fn odd_model_rate_keeps_the_phase_table_bounded() {
+    for (a, b) in [(48_000, 383_999), (383_999, 48_000), (44_100, 44_101)] {
+        let r = Resampler::new(a, b);
+        assert!(r.phases() <= 1025, "{a}->{b}: {} phases", r.phases());
+        assert!(r.phases() * r.taps() * 4 <= 1025 * 1536 * 4);
+    }
+    // A model rate the exact table would need ~380k phases for.
+    let mut file = scaled_file(0.5);
+    file.model_rate = 383_999;
+    let model = Arc::new(NamModel::build(&file));
+    let mut stage = CaptureStage::new(model, 48_000, 0.0);
+    let out = run(&mut stage, &sine(48_000, 440.0, 0.1, 48_000 * 2));
+    assert_eq!((stage.underruns(), stage.overflows()), (0, 0));
+    let f = spectral_peak(&out[48_000..], 48_000, 420.0, 460.0);
+    assert!((f - 440.0).abs() <= 2.0, "peak at {f}");
+    let level = peak(&out[48_000..]);
+    assert!(level > 0.05 && level < 0.1, "peak {level}");
 }
 
 #[test]
@@ -138,22 +224,24 @@ fn silent_input_rests_and_matches_never_rested() {
         input.extend(sine(rate, 150.0, 0.15, 1500));
         input.extend(&silence);
 
-        let (mut zeros, mut rest_at, mut compared) = (0usize, None, 0usize);
+        let (mut zeros, mut was_resting, mut transitions, mut compared) = (0usize, false, 0, 0);
         for (n, &x) in input.iter().enumerate() {
             let a = rested.process(x);
             let b = twin.process(x);
             zeros = if x == 0.0 { zeros + 1 } else { 0 };
-            if rested.at_rest() {
+            let resting = rested.at_rest();
+            if resting {
                 compared += 1;
-                if rest_at.is_none() {
-                    rest_at = Some(n);
+                if !was_resting {
+                    transitions += 1;
                     assert!(zeros > rf, "rested after {zeros} zeros, rf {rf}");
                 }
             }
+            was_resting = resting;
             assert_eq!(a.to_bits(), b.to_bits(), "rate {rate} sample {n}");
             assert!(!twin.at_rest());
         }
-        assert!(rest_at.is_some(), "rate {rate} never rested");
+        assert_eq!(transitions, 2, "rate {rate}: rest after each silence");
         assert!(compared > 1000, "rate {rate}: compared only {compared}");
         assert_eq!(rested.underruns(), 0);
     }

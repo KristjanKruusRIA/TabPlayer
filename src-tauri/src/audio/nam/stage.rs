@@ -21,9 +21,13 @@ use std::sync::Arc;
 /// The amps' own reference tone: 220 Hz at a 0.1 peak.
 const CAL_HZ: f64 = 220.0;
 const CAL_PEAK: f64 = 0.1;
-/// A capture quieter than this on the reference tone cannot be scaled
-/// sensibly and keeps unit gain.
-const CAL_FLOOR: f64 = 1e-6;
+/// Largest correction calibration applies, in dB either way.
+const CAL_LIMIT_DB: f64 = 40.0;
+/// A capture whose reference peak is further than this below the target (or
+/// that produces non-finite output) is left at unit gain, not calibrated.
+const CAL_GIVE_UP_DB: f64 = 60.0;
+/// Device rates accepted; others are clamped into this range.
+const RATE_RANGE: (u32, u32) = (8_000, 384_000);
 /// Largest level offset taken from the caller, in dB either way.
 const LEVEL_LIMIT_DB: f64 = 60.0;
 /// High-pass corner of the DC blocker.
@@ -49,6 +53,9 @@ pub struct CaptureStage {
     dc_x1: f32,
     dc_y1: f32,
     gain: f32,
+    calibrated: bool,
+    /// Non-finite samples met and replaced by silence.
+    faults: u32,
     /// Consecutive exact zeros: device input, model input, and input of the
     /// converter back to the device rate.
     device_zeros: u32,
@@ -59,12 +66,14 @@ pub struct CaptureStage {
     never_rest: bool,
     #[cfg(test)]
     underruns: u32,
+    #[cfg(test)]
+    overflows: u32,
 }
 
 impl CaptureStage {
     pub fn new(model: Arc<NamModel>, device_rate: u32, level_db: f64) -> CaptureStage {
-        let device_rate = device_rate.max(1);
-        let model_rate = model.model_rate().max(1);
+        let device_rate = device_rate.clamp(RATE_RANGE.0, RATE_RANGE.1);
+        let model_rate = model.model_rate().clamp(RATE_RANGE.0, RATE_RANGE.1);
         let (to_model, to_device) = if device_rate == model_rate {
             (None, None)
         } else {
@@ -78,7 +87,9 @@ impl CaptureStage {
         state.prewarm(&model);
         let mut snapshot = NamState::new(&model);
         snapshot.snapshot_from(&state);
-        let steady = state.process(&model, 0.0);
+        let steady = Some(state.process(&model, 0.0))
+            .filter(|v| v.is_finite())
+            .unwrap_or(0.0);
         // Back to exactly the snapshot.
         state.snapshot_from(&snapshot);
 
@@ -113,6 +124,8 @@ impl CaptureStage {
             dc_x1: 0.0,
             dc_y1: 0.0,
             gain: 1.0,
+            calibrated: false,
+            faults: 0,
             device_zeros: 0,
             model_zeros: 0,
             out_zeros: 0,
@@ -121,6 +134,8 @@ impl CaptureStage {
             never_rest: false,
             #[cfg(test)]
             underruns: 0,
+            #[cfg(test)]
+            overflows: 0,
         };
 
         let level = if level_db.is_finite() {
@@ -128,7 +143,10 @@ impl CaptureStage {
         } else {
             0.0
         };
-        stage.gain = (stage.calibration() * 10f64.powf(level / 20.0)) as f32;
+        let base = stage.calibration();
+        stage.calibrated = base.is_some();
+        let base = base.unwrap_or(1.0);
+        stage.gain = (base * 10f64.powf(level / 20.0)) as f32;
         stage
     }
 
@@ -155,6 +173,8 @@ impl CaptureStage {
             dc_x1: 0.0,
             dc_y1: 0.0,
             gain: 1.0,
+            calibrated: false,
+            faults: 0,
             device_zeros: 0,
             model_zeros: 0,
             out_zeros: 0,
@@ -163,12 +183,16 @@ impl CaptureStage {
             never_rest: false,
             #[cfg(test)]
             underruns: 0,
+            #[cfg(test)]
+            overflows: 0,
         }
     }
 
     /// The factor that brings the capture's steady peak on the reference tone
-    /// to the amps' target.
-    fn calibration(&self) -> f64 {
+    /// to the amps' target, limited to `CAL_LIMIT_DB` either way. `None` when the capture
+    /// cannot be calibrated: non-finite output, or a reference peak more than
+    /// `CAL_GIVE_UP_DB` under the target.
+    fn calibration(&self) -> Option<f64> {
         let rate = self.device_rate as usize;
         let mut scratch = self.scratch();
         let (settle, window) = (rate * 3 / 4, rate / 4);
@@ -181,11 +205,20 @@ impl CaptureStage {
                 peak = peak.max(y.abs());
             }
         }
-        if peak.is_finite() && peak > CAL_FLOOR {
-            AMP_TARGET / peak
-        } else {
-            1.0
+        if scratch.faults > 0 || !peak.is_finite() || peak <= 0.0 {
+            return None;
         }
+        let wanted_db = 20.0 * (AMP_TARGET / peak).log10();
+        if wanted_db > CAL_GIVE_UP_DB {
+            return None;
+        }
+        Some(10f64.powf(wanted_db.clamp(-CAL_LIMIT_DB, CAL_LIMIT_DB) / 20.0))
+    }
+
+    /// False when the capture could not be calibrated and runs at unit gain
+    /// (before the level offset), so callers can report it.
+    pub fn calibrated(&self) -> bool {
+        self.calibrated
     }
 
     pub fn process(&mut self, x: f32) -> f32 {
@@ -231,6 +264,16 @@ impl CaptureStage {
     }
 
     #[cfg(test)]
+    pub(super) fn overflows(&self) -> u32 {
+        self.overflows
+    }
+
+    #[cfg(test)]
+    pub(super) fn gain(&self) -> f32 {
+        self.gain
+    }
+
+    #[cfg(test)]
     pub(super) fn underruns(&self) -> u32 {
         self.underruns
     }
@@ -257,6 +300,12 @@ impl CaptureStage {
 
         let z = self.pop();
         let y = z - self.dc_x1 + self.dc_r * self.dc_y1;
+        if !y.is_finite() {
+            self.faults = self.faults.saturating_add(1);
+            self.dc_x1 = 0.0;
+            self.dc_y1 = 0.0;
+            return 0.0;
+        }
         let y = if y.abs() < 1e-20 { 0.0 } else { y };
         self.dc_x1 = z;
         self.dc_y1 = y;
@@ -277,7 +326,15 @@ impl CaptureStage {
             } else {
                 self.model_zeros = 0;
             }
-            self.state.process(&self.model, m) - self.steady
+            let v = self.state.process(&self.model, m) - self.steady;
+            if v.is_finite() {
+                v
+            } else {
+                // A poisoned model state would keep returning NaN: start over.
+                self.faults = self.faults.saturating_add(1);
+                self.state.snapshot_from(&self.snapshot);
+                0.0
+            }
         };
         if let Some(b) = self.to_device.as_mut() {
             if y == 0.0 {
@@ -299,6 +356,10 @@ impl CaptureStage {
         let cap = self.queue.len();
         if self.queue_len == cap {
             // Cannot happen with the sizing in `new`; drop the oldest.
+            #[cfg(test)]
+            {
+                self.overflows += 1;
+            }
             self.queue_head = (self.queue_head + 1) % cap;
             self.queue_len -= 1;
         }

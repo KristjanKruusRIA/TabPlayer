@@ -304,9 +304,6 @@ pub(super) fn built(v: &serde_json::Value) -> NamModel {
     NamModel::build(&parse_nam(&serde_json::to_vec(v).unwrap()).unwrap())
 }
 
-// The mismatch guard is a debug assertion: a debug build panics at the first
-// misuse, a release build returns silence, and that is what this checks.
-#[cfg_attr(debug_assertions, should_panic(expected = "another model"))]
 #[test]
 fn a_state_from_another_model_is_inert() {
     let small = built(&random_model_json([2, 2], 2, [&[1], &[1]], false, "Tanh"));
@@ -342,7 +339,6 @@ fn a_state_from_another_model_is_inert() {
     }
 }
 
-#[cfg_attr(debug_assertions, should_panic(expected = "another model"))]
 #[test]
 fn two_builds_of_one_file_do_not_share_an_identity() {
     let v = random_lstm_json(1, 4);

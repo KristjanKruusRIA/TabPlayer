@@ -11,9 +11,14 @@ use std::sync::Arc;
 
 const SIDE: f64 = 16.0;
 const BETA: f64 = 8.0;
-/// Cutoff in cycles per sample of the lower rate. The Kaiser transition band at
-/// this length is about 0.16 wide, so the stopband starts near Nyquist.
-const CUTOFF: f64 = 0.45;
+/// Cutoff in cycles per sample of the lower rate. With 32 taps at the lower rate and beta 8 the Kaiser
+/// transition band is about 0.16 wide, so the stopband starts near 0.5 and reaches Nyquist.
+const CUTOFF: f64 = 0.42;
+/// Most phases a table holds. A rate pair whose reduced denominator is larger
+/// (an odd rate in an untrusted file) uses this many plus one and interpolates
+/// linearly between neighbouring phases, so memory is bounded by
+/// `(MAX_PHASES + 1) * taps * 4` bytes per converter.
+const MAX_PHASES: usize = 1024;
 
 /// The zeroth-order modified Bessel function, by its series.
 fn bessel_i0(x: f64) -> f64 {
@@ -37,6 +42,8 @@ fn gcd(mut a: u64, mut b: u64) -> u64 {
 
 struct Table {
     taps: usize,
+    phases: usize,
+    interp: bool,
     /// `phases * taps` weights; each phase sums to one.
     weights: Vec<f32>,
 }
@@ -69,10 +76,19 @@ impl Resampler {
         let cutoff = CUTOFF * scale;
         let half = SIDE / scale;
         let taps = 2 * half.ceil() as usize;
-        let mut weights = vec![0.0f32; den as usize * taps];
+        // Past the cap the table samples the fraction at MAX_PHASES + 1 points and
+        // `pull` interpolates; the stepping itself stays exact.
+        let interp = den as usize > MAX_PHASES;
+        let phases = if interp { MAX_PHASES + 1 } else { den as usize };
+        let span = if interp {
+            MAX_PHASES as f64
+        } else {
+            den as f64
+        };
+        let mut weights = vec![0.0f32; phases * taps];
         let norm = bessel_i0(BETA);
-        for phase in 0..den as usize {
-            let f = phase as f64 / den as f64;
+        for phase in 0..phases {
+            let f = phase as f64 / span;
             let row = &mut weights[phase * taps..(phase + 1) * taps];
             let mut raw = vec![0.0f64; taps];
             let mut total = 0.0;
@@ -97,7 +113,12 @@ impl Resampler {
                 *dst = (w / total) as f32;
             }
         }
-        let table = Arc::new(Table { taps, weights });
+        let table = Arc::new(Table {
+            taps,
+            phases,
+            interp,
+            weights,
+        });
         Resampler::with_table(table, step, den, half)
     }
 
@@ -118,6 +139,10 @@ impl Resampler {
     /// A second converter of the same ratio that shares the phase tables.
     pub(super) fn duplicate(&self) -> Resampler {
         Resampler::with_table(self.table.clone(), self.step, self.den, self.delay_in)
+    }
+
+    pub(super) fn phases(&self) -> usize {
+        self.table.phases
     }
 
     pub(super) fn taps(&self) -> usize {
@@ -160,12 +185,25 @@ impl Resampler {
             let oldest = self.at + 1 - (taps / 2) as u64;
             let s = (oldest % taps as u64) as usize;
             let window = &self.ring[s..s + taps];
-            let row = &self.table.weights[self.frac as usize * taps..][..taps];
-            let mut acc = 0.0f32;
-            for (a, b) in window.iter().zip(row) {
-                acc += a * b;
+            let dot = |row: usize| {
+                let weights = &self.table.weights[row * taps..][..taps];
+                let mut acc = 0.0f32;
+                for (a, b) in window.iter().zip(weights) {
+                    acc += a * b;
+                }
+                acc
+            };
+            if !self.table.interp {
+                dot(self.frac as usize)
+            } else {
+                let at = self.frac * MAX_PHASES as u64;
+                let (row, t) = (
+                    (at / self.den) as usize,
+                    (at % self.den) as f32 / self.den as f32,
+                );
+                let lo = dot(row);
+                lo + t * (dot(row + 1) - lo)
             }
-            acc
         };
         let next = self.frac + self.step;
         self.at += next / self.den;

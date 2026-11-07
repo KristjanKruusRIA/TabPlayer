@@ -101,7 +101,6 @@ impl NamState {
     /// (even of the same file) returns silence and is otherwise untouched.
     #[inline]
     pub fn process(&mut self, model: &NamModel, x: f32) -> f32 {
-        debug_assert_eq!(self.model_id, model.id, "state used with another model");
         if self.model_id != model.id {
             return 0.0;
         }
@@ -115,7 +114,6 @@ impl NamState {
     /// Copies another state of the same model into this one, without
     /// allocating. A state made for a different model is left unchanged.
     pub fn snapshot_from(&mut self, other: &NamState) {
-        debug_assert_eq!(self.model_id, other.model_id, "snapshot from another model");
         if self.model_id != other.model_id {
             return;
         }

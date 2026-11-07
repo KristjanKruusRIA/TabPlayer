@@ -20,6 +20,7 @@ import type { EditCommand } from './edit-types';
 import { targetSymbols,type SymbolRef } from './editor/symbol-edit';
 import { resolveSymbol,systemAt } from './editor/symbol-hit';
 import { SymbolPopover,type SymbolView } from './SymbolPopover';
+import { entryLayoutOf,scoreEntryHit,type MasterBarBox } from './engraving/score-entry-hit';
 import './ScoreView.css';
 /** A scale diagram is a compact chip above the staff at its beat; hovering or focusing it opens the diagram at this fraction of its natural size. */
 const diagramScale=.45,chipHeight=16,chipGap=2;
@@ -50,10 +51,18 @@ export interface SymbolEditing {
   request?:number;
 }
 type BarHandle={bar:number;x:number;y:number;h:number;width:number};
+/** Note entry on the rendered score. Present means entry mode is on: a click on a line or space of a notation staff
+ * reports the beat and staff position instead of selecting, and the pointer previews the note it would write. */
+export interface ScoreNoteEntry {
+  /** Writes at a staff position: 0 is the bottom line, each line or space adds one. `chord` asks to keep the cursor on the beat. */
+  onHit:(target:BeatTarget,step:number,options:{chord:boolean})=>void;
+  /** What a click there would do, for the preview label (a pitch name, or a removal); null shows no preview. */
+  describe:(target:BeatTarget,step:number)=>string|null;
+}
 const defaultDisplay:ScoreDisplayPreferences={layout:'parchment',zoomMode:'manual'};
 const defaultPage:PageLayout={widthMm:210,heightMm:297,marginsMm:{top:15,right:15,bottom:15,left:15},scale:1,profile:'document'};
 
-export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSelection=null,onEditorSelection,projection,visibleTracks,engraving,editTarget,editString,editNoteIndex,display=defaultDisplay,page:pageInput=defaultPage,onDisplayStatus,errors=noErrors,barDesign=null,symbols}: {
+export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSelection=null,onEditorSelection,projection,visibleTracks,engraving,editTarget,editString,editNoteIndex,display=defaultDisplay,page:pageInput=defaultPage,onDisplayStatus,errors=noErrors,barDesign=null,symbols,noteEntry=null}: {
   score:model.Score;track:number;zoom:number;profile:string;onSelect:(target:BeatTarget,string?:number,noteIndex?:number)=>void;
   playback:NativePlaybackController|null;
   editorSelection?:MusicSelection|null;onEditorSelection?:(selection:MusicSelection|null)=>void;
@@ -66,6 +75,8 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
   barDesign?:BarDesign|null;
   /** Double-click and context-menu editing of score symbols; absent, the score only selects. */
   symbols?:SymbolEditing;
+  /** Note entry on the score; absent, clicks select. */
+  noteEntry?:ScoreNoteEntry|null;
 }) {
   const wrapper=useRef<HTMLDivElement>(null),container=useRef<HTMLDivElement>(null),api=useRef<AlphaTabApi|null>(null);
   const tracks=visibleTracks??[track],renderedScore=projection?.score??score,trackKey=tracks.join(',');
@@ -148,6 +159,27 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
     const delta=offset();return {...box,x:delta.x+box.x,y:delta.y+box.y};
   };
   const beatSystem=(beat:model.Beat)=>api.current?.boundsLookup?.findBeats(beat)?.find(bound=>bound.beat===beat)?.barBounds?.masterBarBounds?.staffSystemBounds;
+  /** The notation-staff position under a client point: the source beat, the step, and the preview box in overlay space. */
+  const entryHitAt=(clientX:number,clientY:number):{target:BeatTarget;step:number;ghost:Marker}|null=>{
+    const view=api.current,root=wrapper.current,layout=view?entryLayoutOf(view.renderer):null;if(!view||!root||!layout||rendering.current)return null;
+    const physical=presentation.current.physical;let masters:readonly MasterBarBox[],point:{x:number;y:number},system:ScreenSystem|null=null;
+    if(physical){const rect=root.getBoundingClientRect(),source=unmapScreenPoint(physical.pagination,physical.arrangement,{x:clientX-rect.left,y:clientY-rect.top});if(!source)return null;system=source.system;masters=source.system.bars as unknown as MasterBarBox[];point=source.point;}
+    else{if(layoutCurrent.current.sourcePhysical||!view.boundsLookup)return null;const canvas=view.uiFacade.getOffset(null,view.canvasElement);masters=view.boundsLookup.staffSystems.flatMap(item=>item.bars) as unknown as MasterBarBox[];point={x:clientX+window.scrollX-canvas.x,y:clientY+window.scrollY-canvas.y};}
+    const hit=scoreEntryHit(layout,masters,point,{scale:view.settings.display.scale,voice:current.current.editTarget?.voice??0}),source=hit?canonicalBeat(hit.beat):null;
+    if(!hit||!source)return null;
+    const ghost=mapped({x:hit.at.x-hit.half*1.3,y:hit.at.y-hit.half,w:hit.half*2.6,h:hit.half*2},system);
+    return ghost?{target:address(source),step:hit.step,ghost}:null;
+  };
+  const entering=useRef<ScoreNoteEntry|null>(null);entering.current=noteEntry;
+  const [ghost,setGhost]=useState<(Marker&{label:string})|null>(null);
+  useEffect(()=>{if(!noteEntry)setGhost(null);},[!!noteEntry]);
+  const previewEntry=(event:ReactMouseEvent)=>{
+    const entry=entering.current;if(!entry||event.buttons!==0){setGhost(old=>old&&null);return;}
+    const hit=entryHitAt(event.clientX,event.clientY),label=hit?entry.describe(hit.target,hit.step):null;
+    const next=hit&&label?{...hit.ghost,label}:null;
+    // Most moves stay on the same line or space: keep the ghost, and the render, as they are.
+    setGhost(old=>old===next||old&&next&&old.label===next.label&&old.x===next.x&&old.y===next.y&&old.w===next.w&&old.h===next.h?old:next);
+  };
   refreshCaret.current=()=>{
     const value=current.current,point=value.editTarget,view=api.current;
     const source=point&&value.tracks.includes(point.track)?value.score.tracks[point.track]?.staves[point.staff]?.bars[point.bar]?.voices[point.voice]?.beats[point.beat]:null;
@@ -343,7 +375,10 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
   },[]);
   useEffect(()=>{refreshErrors.current();},[errors,score,track,zoom,profile,projection,visibleTracks]);
   useEffect(()=>{refreshDiagrams.current();},[score,track,zoom,profile,projection,visibleTracks]);
-  const capture=(event:ReactMouseEvent<HTMLDivElement>)=>{if(event.button!==0||(event.target instanceof Element&&event.target.closest('.score-bar-handle,.score-symbol-popover')))return;event.preventDefault();event.currentTarget.focus({preventScroll:true});modifiers.current={shift:event.shiftKey,toggle:event.ctrlKey||event.metaKey,detail:event.detail};drag.current=null;};
+  const capture=(event:ReactMouseEvent<HTMLDivElement>)=>{if(event.button!==0||(event.target instanceof Element&&event.target.closest('.score-bar-handle,.score-symbol-popover,.score-scale-diagram')))return;
+    // In entry mode a click on a notation staff writes there; anywhere else it selects as usual.
+    const entry=entering.current,hit=entry&&!event.ctrlKey&&!event.metaKey&&!event.altKey?entryHitAt(event.clientX,event.clientY):null;
+    if(entry&&hit){event.preventDefault();event.stopPropagation();event.currentTarget.focus({preventScroll:true});drag.current=null;setGhost(null);entry.onHit(hit.target,hit.step,{chord:event.shiftKey});return;}event.preventDefault();event.currentTarget.focus({preventScroll:true});modifiers.current={shift:event.shiftKey,toggle:event.ctrlKey||event.metaKey,detail:event.detail};drag.current=null;};
   const resize=(edge:'start'|'end',event:ReactMouseEvent)=>{
     event.preventDefault();event.stopPropagation();if(event.button!==0||!handles||!editorSelection||editorSelection.kind==='notes')return;
     const fixed=handles[edge==='start'?'end':'start'].target;
@@ -469,7 +504,7 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
     if(!symbols||event.target!==event.currentTarget||!(event.key==='ContextMenu'||(event.key==='F10'&&event.shiftKey)))return;
     event.preventDefault();event.stopPropagation();if(editTarget)openTargetMenu();
   };
-  return <div ref={wrapper} tabIndex={-1} className="score-presentation" data-layout={display.layout} onMouseDownCapture={capture} onDoubleClick={symbolDoubleClick} onContextMenu={symbolContextMenu} onKeyDown={symbolKey}>
+  return <div ref={wrapper} tabIndex={-1} className="score-presentation" data-layout={display.layout} data-note-entry={noteEntry?'on':undefined} onMouseDownCapture={capture} onMouseMove={noteEntry?previewEntry:undefined} onMouseLeave={()=>setGhost(null)} onDoubleClick={symbolDoubleClick} onContextMenu={symbolContextMenu} onKeyDown={symbolKey}>
     {pageError&&<p className="score-page-error" role="alert">{pageError} Continuous view is shown at {zoom}%.</p>}
     <div className={sourcePhysical?'score-source-staging':'score-live-paper'} style={{width:sourceWidth||undefined}} aria-hidden={sourcePhysical||undefined} inert={sourcePhysical||undefined}>
       <div ref={container} data-testid="score-source" aria-hidden={sourcePhysical||undefined} aria-label="Music notation"/>
@@ -497,6 +532,7 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
     {symbolUi&&symbols&&<SymbolPopover state={symbolUi} score={score} targets={symbolUi.ref||!editTarget?[]:targetSymbols(score,editTarget,tracks)} busy={symbols.busy} locked={symbols.locked} onEdit={symbols.onEdit} onChordEditor={ref=>symbols.onChordEditor(ref.target)} onView={next=>setSymbolUi(old=>({...next,id:old?.id}))} onClose={closeSymbol}/>}
     <span className="score-edit-announcement" role="status" aria-live="polite" aria-atomic="true">{editLocation}</span>
     {caret&&<span ref={caretElement} role="img" aria-label="Edit target" className="score-edit-target" style={{left:caret.x,top:caret.y,width:caret.w,height:caret.h}}>{caret.entry&&<span className="score-edit-entry" aria-hidden="true">{editString?`String ${editString}`:'Entry'}</span>}</span>}
+    {ghost&&<span className="score-entry-ghost" aria-hidden="true" style={{left:ghost.x,top:ghost.y,width:ghost.w,height:ghost.h}}><span className="score-entry-ghost-label">{ghost.label}</span></span>}
     {markers.map((marker,index)=><span key={index} role="img" aria-label={`Selected note ${index+1}`} style={{position:'absolute',left:marker.x,top:marker.y,width:marker.w,height:marker.h,boxSizing:'border-box',border:'2px solid #9aaf38',background:'rgba(185,205,105,.3)',borderRadius:3,pointerEvents:'none'}}/>)}
     {handles&&(['start','end'] as const).map(edge=><button key={edge} type="button" aria-label={`Resize selection ${edge}`} onMouseDown={event=>resize(edge,event)} style={{position:'absolute',left:handles[edge].x-6,top:handles[edge].y+handles[edge].h/2-12,width:12,height:24,padding:0,border:'2px solid #60712b',borderRadius:3,background:'#bccf6e',cursor:'ew-resize',zIndex:4}}/>)}
   </div>;

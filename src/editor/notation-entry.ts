@@ -1,14 +1,21 @@
 import { model } from '@coderline/alphatab';
-import type { EditCommand } from '../edit-types';
+import type { EditCommand, SequenceStep } from '../edit-types';
 import { entryNotes, keyTarget, type EntryAction, type EntryContext } from '../instruments/entry';
 import type { BeatTarget } from '../project';
 
 /** What an entered note shows: the key signature's own accidental, or one chosen for this note. */
-export type EntryAccidental = 'key' | 'natural' | 'sharp' | 'flat';
-export const entryAccidentals: readonly EntryAccidental[] = ['key', 'natural', 'sharp', 'flat'];
-export const accidentalLabels: Record<EntryAccidental, string> = { key: 'Key signature', natural: 'Natural', sharp: 'Sharp', flat: 'Flat' };
+export type EntryAccidental = 'key' | 'natural' | 'sharp' | 'flat' | 'doubleSharp' | 'doubleFlat';
+export const entryAccidentals: readonly EntryAccidental[] = ['key', 'natural', 'sharp', 'flat', 'doubleSharp', 'doubleFlat'];
+/** The i18n key of each accidental's label. */
+export const accidentalLabelKeys = {
+  key: 'editor.accidental_key', natural: 'editor.accidental_natural', sharp: 'editor.accidental_sharp', flat: 'editor.accidental_flat',
+  doubleSharp: 'editor.accidental_double_sharp', doubleFlat: 'editor.accidental_double_flat'
+} as const satisfies Record<EntryAccidental, string>;
+const accidentalAlteration: Record<Exclude<EntryAccidental, 'key'>, number> = { natural: 0, sharp: 1, flat: -1, doubleSharp: 2, doubleFlat: -2 };
 
-const letters = ['C', 'D', 'E', 'F', 'G', 'A', 'B'], letterSemitone = [0, 2, 4, 5, 7, 9, 11];
+export const letters = ['C', 'D', 'E', 'F', 'G', 'A', 'B'], letterSemitone = [0, 2, 4, 5, 7, 9, 11];
+/** The mark a note name carries for an alteration: # and ## up, b and bb down. */
+export const alterationMarks = (alteration: number) => alteration >= 2 ? '##' : alteration > 0 ? '#' : alteration <= -2 ? 'bb' : alteration < 0 ? 'b' : '';
 const sharpOrder = [3, 0, 4, 1, 5, 2, 6], flatOrder = [6, 2, 5, 1, 4, 0, 3];
 
 /** What alphaTab adds to a note value for an ottava mark (see `Note.displayValueWithoutBend`). */
@@ -56,10 +63,10 @@ export interface EntryPitch { letter: number; octave: number; alteration: number
 
 export function entryPitch(letter: number, octave: number, accidental: EntryAccidental, keySignature: number): EntryPitch | null {
   if (!Number.isInteger(letter) || letter < 0 || letter > 6 || !Number.isInteger(octave)) return null;
-  const alteration = accidental === 'key' ? keyAlteration(keySignature, letter) : accidental === 'sharp' ? 1 : accidental === 'flat' ? -1 : 0;
+  const alteration = accidental === 'key' ? keyAlteration(keySignature, letter) : accidentalAlteration[accidental];
   const pitch = (octave + 1) * 12 + letterSemitone[letter] + alteration;
   if (pitch < 0 || pitch > 127) return null;
-  return { letter, octave, alteration, pitch, name: `${letters[letter]}${alteration > 0 ? '#' : alteration < 0 ? 'b' : ''}${octave}` };
+  return { letter, octave, alteration, pitch, name: `${letters[letter]}${alterationMarks(alteration)}${octave}` };
 }
 
 /** The pitch at a step of the entry staff, counted up from its bottom line. */
@@ -85,6 +92,14 @@ const spellingOf = (pitchClass: number, alteration: number): Spelling | null => 
   const letter = letterSemitone.findIndex(semitone => (((semitone + alteration) % 12) + 12) % 12 === pitchClass);
   return letter < 0 ? null : { letter, alteration };
 };
+/**
+ * Whether some letter carries this alteration on this pitch class. G sharp has no double spelling, nor does C as a double
+ * sharp. alphaTab silently falls back to its automatic spelling for one that does not exist, so callers refuse first.
+ * Letter entry always names a spelling that exists; re-spelling a fixed pitch is where this can say no.
+ */
+export function canSpell(pitchClass: number, alteration: number): boolean {
+  return spellingOf(((pitchClass % 12) + 12) % 12, alteration) !== null;
+}
 /** The spelling alphaTab gives a pitch class with the Default mode: the one the key signature spells, else a sharp or flat. */
 export function automaticSpelling(keySignature: number, pitchClass: number): Spelling {
   for (let letter = 0; letter < 7; letter++) {
@@ -122,6 +137,8 @@ export function drawnSpelling(keySignature: number, value: number, mode: model.N
 export function spellingFor(entered: EntryPitch, keySignature: number): model.NoteAccidentalMode {
   const automatic = automaticSpelling(keySignature, entered.pitch % 12);
   if (automatic.letter === entered.letter && automatic.alteration === entered.alteration) return model.NoteAccidentalMode.Default;
+  if (entered.alteration >= 2) return model.NoteAccidentalMode.ForceDoubleSharp;
+  if (entered.alteration <= -2) return model.NoteAccidentalMode.ForceDoubleFlat;
   return entered.alteration > 0 ? model.NoteAccidentalMode.ForceSharp : entered.alteration < 0 ? model.NoteAccidentalMode.ForceFlat : model.NoteAccidentalMode.ForceNatural;
 }
 
@@ -133,6 +150,8 @@ export interface NotationEntryResult {
   /** The spelling to set on the new note once it has landed, or null when automatic spelling is right. */
   spelling: model.NoteAccidentalMode | null;
   removes: boolean;
+  /** True when alphaTab has no way to draw the entered spelling (a double on G sharp or A flat), so nothing was planned. */
+  unspellable?: boolean;
 }
 
 /** Why this staff cannot take a pitch, or null when it can. */
@@ -165,6 +184,7 @@ export function enterPitch(ctx: NotationEntryContext, entered: EntryPitch): Nota
   const block = entryBlock(ctx.staff, ctx.beat);
   if (block || !ctx.beat) return { name: entered.name, action: null, spelling: null, removes: false };
   const context: EntryContext = { target: ctx.target, staff: ctx.staff, notes: entryNotes(ctx.staff, ctx.beat) };
+  if (!canSpell(entered.pitch, entered.alteration)) return { name: entered.name, action: null, spelling: null, removes: false, unspellable: true };
   const key = soundingKey(ctx.staff, ctx.bar, ctx.beat, entered.pitch), target = keyTarget(context, key);
   if (!target.action) return { name: target.name.startsWith('No free string') ? `No free string can play ${entered.name}` : target.name, action: null, spelling: null, removes: false };
   const command = target.action.command, removes = command.type === 'removeNote' || command.type === 'removeNoteByIndex';
@@ -176,6 +196,22 @@ export function enterPitch(ctx: NotationEntryContext, entered: EntryPitch): Nota
 export function enteredNoteIndex(beat: model.Beat | undefined, command: EditCommand): number {
   if (!beat) return -1;
   if (command.type === 'setNote') return beat.notes.findIndex(note => note.string === command.string);
-  if (command.type === 'addPitchedNote') return beat.notes.findIndex(note => note.octave * 12 + note.tone === command.pitch);
+  if (command.type === 'addPitchedNote' || command.type === 'setPitchedNote') return beat.notes.findIndex(note => note.octave * 12 + note.tone === command.pitch);
   return -1;
+}
+
+/** One gesture's steps as one edit: the step itself, or a sequence that history keeps as one entry. */
+export function oneEdit(steps: readonly SequenceStep[]): EditCommand {
+  return steps.length === 1 ? steps[0] : { type: 'sequence', commands: [...steps] };
+}
+
+/**
+ * The spelling step a just-written note needs, read from `written`, the score as the entry leaves it. `found` is false
+ * when the note cannot be found there; `step` is null when its spelling is already `mode`.
+ */
+export function spellingStep(written: model.Score, target: BeatTarget, command: EditCommand, mode: model.NoteAccidentalMode): { found: boolean; step: SequenceStep | null } {
+  const beat = written.tracks[target.track]?.staves[target.staff]?.bars[target.bar]?.voices[target.voice]?.beats[target.beat];
+  const index = enteredNoteIndex(beat, command), note = index >= 0 ? beat?.notes[index] : undefined;
+  if (!note) return { found: false, step: null };
+  return { found: true, step: note.accidentalMode === mode ? null : { type: 'setNoteSpelling', target, noteIndex: index, accidentalMode: mode } };
 }

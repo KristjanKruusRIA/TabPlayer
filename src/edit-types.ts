@@ -111,7 +111,11 @@ export interface DocumentSettings {
   master?:MasterSettings;
 }
 
-export type EditCommand = LyricsCommand | GestureCommand | BarGestureCommand | RangeCommand | MeasureCommand | ClipboardCommand | EngravingCommand | HarmonyCommand | ScaleDiagramCommand | ReplaceTempoAutomations
+/** One gesture written as several note-entry edits, recorded and undone as one history entry. */
+export type SequenceCommand = { type: 'sequence'; commands: SequenceStep[] };
+export type SequenceStep = Extract<SingleCommand, { type: 'setNote' | 'removeNote' | 'setRest' | 'setDuration' | 'insertBeat' | 'addPitchedNote' | 'setPitchedNote' | 'removeNoteByIndex' | 'setNoteSpelling' }>;
+export type EditCommand = SequenceCommand | SingleCommand;
+export type SingleCommand = LyricsCommand | GestureCommand | BarGestureCommand | RangeCommand | MeasureCommand | ClipboardCommand | EngravingCommand | HarmonyCommand | ScaleDiagramCommand | ReplaceTempoAutomations
   | { type: 'setNote'; target: BeatTarget; string: number; fret: number }
   | { type: 'removeNote'; target: BeatTarget; string: number }
   | { type: 'setRest'; target: BeatTarget }

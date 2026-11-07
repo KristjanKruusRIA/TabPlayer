@@ -1,21 +1,24 @@
 // @vitest-environment jsdom
-import { fireEvent,render,screen } from '@testing-library/react';
+import { fireEvent,render,screen,within } from '@testing-library/react';
 import { describe,expect,it } from 'vitest';
 import { blankProject } from '../project';
 import { AUTO_DURATION_UNFIT,DEFAULT_INPUT_PREFERENCES,InputPreferencesPanel,applyInOrder,autoDurationEdit,autoDurationSkip,entryAfterWrite,numpadDurationEdit,numpadKey,readInputPreferences,writeInputPreferences,type EntryBeat,type InputPreferences } from './input-preferences';
 
 const target={track:0,staff:0,bar:1,voice:0,beat:2};
 const key=(code:string,extra={},value=code.replace(/^Numpad(\d)$/,'$1').replace('NumpadDecimal','.'))=>({key:value,code,ctrlKey:false,metaKey:false,altKey:false,shiftKey:false,...extra});
-const on:InputPreferences={autoDuration:true,numpadDurations:true,pasteDiagrams:true};
+const on:InputPreferences={autoDuration:true,numpadDurations:true,pasteDiagrams:true,advance:true,swapPlusMinus:true};
 const beat=(extra:Partial<EntryBeat>={}):EntryBeat=>({duration:4,dots:0,isEmpty:false,notes:[],...extra});
 const store=(initial?:string)=>{const values=new Map<string,string>();if(initial!==undefined)values.set('tabplayer.input.preferences',initial);return {values,getItem:(name:string)=>values.get(name)??null,setItem:(name:string,value:string)=>{values.set(name,value);}};};
 
 describe('stored preferences',()=>{
   it('defaults, round-trips and repairs one field at a time',()=>{
     expect(readInputPreferences(store())).toEqual(DEFAULT_INPUT_PREFERENCES);
-    expect(DEFAULT_INPUT_PREFERENCES).toEqual({autoDuration:false,numpadDurations:false,pasteDiagrams:true});
+    expect(DEFAULT_INPUT_PREFERENCES).toEqual({autoDuration:false,numpadDurations:false,pasteDiagrams:true,advance:true,swapPlusMinus:false});
     const kept=store();writeInputPreferences(on,kept);expect(readInputPreferences(kept)).toEqual(on);
-    expect(readInputPreferences(store('{"autoDuration":true,"numpadDurations":"yes","pasteDiagrams":false}'))).toEqual({autoDuration:true,numpadDurations:false,pasteDiagrams:false});
+    expect(readInputPreferences(store('{"autoDuration":true,"numpadDurations":"yes","pasteDiagrams":false}'))).toEqual({autoDuration:true,numpadDurations:false,pasteDiagrams:false,advance:true,swapPlusMinus:false});
+    expect(readInputPreferences(store('{"autoDuration":true,"numpadDurations":true,"pasteDiagrams":true,"advance":false}')).swapPlusMinus).toBe(false);
+    expect(readInputPreferences(store('{"swapPlusMinus":true}')).swapPlusMinus).toBe(true);
+    expect(readInputPreferences(store('{"swapPlusMinus":"yes"}')).swapPlusMinus).toBe(false);
     expect(readInputPreferences(store('not json'))).toEqual(DEFAULT_INPUT_PREFERENCES);
     expect(readInputPreferences(store('[1]'))).toEqual(DEFAULT_INPUT_PREFERENCES);
     const broken={getItem:()=>{throw new Error('blocked');},setItem:()=>{throw new Error('blocked');}};
@@ -103,5 +106,11 @@ describe('InputPreferencesPanel',()=>{
     expect((screen.getByLabelText(/^Paste includes chord diagrams/) as HTMLInputElement).checked).toBe(true);
     fireEvent.click(screen.getByLabelText(/^Auto-duration/));fireEvent.click(screen.getByLabelText(/^Keypad sets duration/));fireEvent.click(screen.getByLabelText(/^Paste includes chord diagrams/));fireEvent.click(screen.getByLabelText('Play notes while editing'));
     expect(changes).toEqual([{autoDuration:true},{numpadDurations:true},{pasteDiagrams:false}]);expect(previews).toEqual([false]);
+  });
+  it('offers the Plus/Minus swap, off by default',()=>{
+    const changes:Partial<InputPreferences>[]=[];
+    const view=render(<InputPreferencesPanel preferences={DEFAULT_INPUT_PREFERENCES} onChange={change=>changes.push(change)} preview onPreview={()=>{}}/>);
+    const box=within(view.container).getByLabelText(/^Plus\/Minus keys/) as HTMLInputElement;expect(box.checked).toBe(false);
+    fireEvent.click(box);expect(changes).toEqual([{swapPlusMinus:true}]);
   });
 });

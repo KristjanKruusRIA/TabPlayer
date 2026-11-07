@@ -619,7 +619,8 @@ impl ProjectSession {
             self.project.assets.entry(id).or_insert(asset);
         }
         // A mixer edit on a finalized document clears the redo stack like any edit. List positions are
-        // persisted identity (added tracks are keyed by the edit's position), so they must never shift.
+        // persisted identity (added tracks are keyed by the edit's position
+        // in the replay, where a `sequence` counts once per step), so they must never shift.
         self.project.edits.truncate(self.cursor);
         self.project.edits.push(command);
         self.cursor += 1;

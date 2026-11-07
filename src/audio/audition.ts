@@ -24,6 +24,8 @@ export function tuningAudition(pitches:readonly number[],strum:boolean):{notes:A
 
 /** What an edit sounds like once applied: the track's identity index and the keys of the notes it set. Null for every other edit. */
 export function editAudition(score:model.Score,command:EditCommand):{track:number;percussion:boolean;notes:AuditionNote[];durationMs:number}|null {
+  // A sequence sounds like the note it writes.
+  if(command.type==='sequence'){for(const step of command.commands){const heard=editAudition(score,step);if(heard)return heard;}return null;}
   if(command.type!=='setNote'&&command.type!=='addPitchedNote'&&command.type!=='setPitchedNote'&&command.type!=='addPercussionNote'&&command.type!=='setPercussionNote')return null;
   const track=score.tracks[command.target.track],staff=track?.staves[command.target.staff];
   if(!track||!staff)return null;

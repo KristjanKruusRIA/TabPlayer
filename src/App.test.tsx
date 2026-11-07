@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act,cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { forgetSessionPanelSizes } from './workstation/panel-sizes';
 import '@testing-library/jest-dom/vitest';
@@ -1154,6 +1154,10 @@ it('auto-duration gives a written rest the last keypad duration, and the prefere
   fireEvent.keyDown(screen.getByRole('region',{name:'Score workspace'}),{key:'ArrowRight'});
   fireEvent.keyDown(screen.getByRole('region',{name:'Score workspace'}),{key:'Enter'});
   await waitFor(()=>expect(currentBeat(c,1).notes).toHaveLength(1));expect(currentBeat(c,1).duration).toBe(8);
+  // The rhythm and the note are one edit, so one undo takes both back.
+  expect(c.getState().snapshot.project.edits.at(-1)).toMatchObject({type:'sequence',commands:[{type:'setDuration'},{type:'setNote'}]});
+  fireEvent.keyDown(screen.getByRole('region',{name:'Score workspace'}),{key:'z',ctrlKey:true});
+  await waitFor(()=>expect(currentBeat(c,1).notes).toHaveLength(0));expect(currentBeat(c,1).duration).toBe(4);
   window.localStorage.removeItem(inputKey);
 });
 
@@ -1175,6 +1179,16 @@ it('does not remember a refused keypad duration as the entry duration',async()=>
   expect(c.getState().snapshot.project.edits.map(edit=>edit.type)).toEqual(['setNote']);expect(currentBeat(c,1).duration).toBe(4);
   window.localStorage.removeItem(inputKey);
 });
+it('types a fret only from a plain digit, never from Ctrl or Alt with one',()=>{
+  return setup().then(()=>{
+    const workspace=screen.getByRole('region',{name:'Score workspace'}),fret=screen.getByLabelText('Fret');
+    const before=(fret as HTMLInputElement).value;
+    fireEvent.keyDown(workspace,{key:'5',ctrlKey:true});expect(fret).toHaveValue(Number(before));
+    fireEvent.keyDown(workspace,{key:'5',altKey:true});expect(fret).toHaveValue(Number(before));
+    fireEvent.keyDown(workspace,{key:'5',metaKey:true});expect(fret).toHaveValue(Number(before));
+    fireEvent.keyDown(workspace,{key:'5'});expect(fret).toHaveValue(5);
+  });
+});
 it('does not remember a refused note as the entry duration, and never leaves a rhythm change without its note',async()=>{
   window.localStorage.setItem(inputKey,keypadOn);
   const c=await setup(),workspace=screen.getByRole('region',{name:'Score workspace'});
@@ -1185,7 +1199,7 @@ it('does not remember a refused note as the entry duration, and never leaves a r
   expect(c.getState().snapshot.project.edits.map(edit=>edit.type)).toEqual(['setDuration']);expect(currentBeat(c,1).duration).toBe(4);
   change('Fret','5');fireEvent.keyDown(workspace,{key:'Enter'});
   await waitFor(()=>expect(currentBeat(c,1).notes).toHaveLength(1));
-  expect(c.getState().snapshot.project.edits.map(edit=>edit.type)).toEqual(['setDuration','setDuration','setNote']);expect(currentBeat(c,1).duration).toBe(8);
+  expect(c.getState().snapshot.project.edits.map(edit=>edit.type)).toEqual(['setDuration','sequence']);expect(currentBeat(c,1).duration).toBe(8);
   window.localStorage.removeItem(inputKey);
 });
 
@@ -1457,4 +1471,648 @@ it('opens the measure settings from the tempo link in the position display',asyn
   await waitFor(()=>expect(summary).toHaveFocus());
   expect(summary.parentElement).toHaveProperty('open',true);
   expect(screen.getByRole('button',{name:'Measure',pressed:true})).toBeInTheDocument();
+});
+
+const entryProps=()=>engravingView.mock.lastCall?.[0] as {noteEntry:{onHit:(target:unknown,step:number,options:{chord:boolean})=>void;describe:(target:unknown,step:number)=>string|null}|null;editTarget:unknown};
+it('turns note entry on the score on with N, writes typed letters one edit each and advances',async()=>{
+  window.localStorage.removeItem(inputKey);
+  const c=await setup(),workspace=screen.getByRole('region',{name:'Score workspace'});
+  expect(entryProps().noteEntry).toBeNull();
+  fireEvent.keyDown(workspace,{key:'n'});
+  expect(screen.getByRole('button',{name:'Note entry',pressed:true})).toBeInTheDocument();
+  expect(screen.getByText(/Note entry is on/)).toBeInTheDocument();
+  fireEvent.keyDown(workspace,{key:'e'});
+  await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(1));
+  await waitFor(()=>expect(entryProps().editTarget).toMatchObject({beat:1}));
+  fireEvent.keyDown(workspace,{key:'g'});
+  await waitFor(()=>expect(currentBeat(c,1).notes).toHaveLength(1));
+  expect(c.getState().snapshot.project.edits).toHaveLength(2);
+  // Shift keeps the cursor on the beat for a chord.
+  await waitFor(()=>expect(entryProps().editTarget).toMatchObject({beat:2}));
+  fireEvent.keyDown(workspace,{key:'C',shiftKey:true});await waitFor(()=>expect(currentBeat(c,2).notes).toHaveLength(1));
+  fireEvent.keyDown(workspace,{key:'E',shiftKey:true});await waitFor(()=>expect(currentBeat(c,2).notes).toHaveLength(2));
+  expect(entryProps().editTarget).toMatchObject({beat:2});
+  // + makes the beat shorter, as in Guitar Pro.
+  fireEvent.keyDown(workspace,{key:'+'});await waitFor(()=>expect(currentBeat(c,2).duration).toBe(8));
+  fireEvent.keyDown(workspace,{key:'z',ctrlKey:true});await waitFor(()=>expect(currentBeat(c,2).duration).toBe(4));
+  fireEvent.keyDown(workspace,{key:'N'});
+  expect(screen.getByRole('button',{name:'Note entry',pressed:false})).toBeInTheDocument();
+  // With entry off, letters do nothing.
+  const count=c.getState().snapshot.project.edits.length;fireEvent.keyDown(workspace,{key:'a'});await new Promise(resolve=>setTimeout(resolve,20));
+  expect(c.getState().snapshot.project.edits).toHaveLength(count);
+});
+it('writes the clicked staff position as one edit that one undo removes, and previews it',async()=>{
+  const c=await setup();
+  fireEvent.click(screen.getByRole('button',{name:'Note entry'}));
+  const entry=entryProps().noteEntry!,at={track:0,staff:0,bar:0,voice:0,beat:1};
+  expect(entry.describe(at,2)).toBe('G4');
+  act(()=>entry.onHit(at,2,{chord:false}));
+  await waitFor(()=>expect(currentBeat(c,1).notes).toHaveLength(1));
+  expect(c.getState().snapshot.project.edits).toHaveLength(1);
+  await waitFor(()=>expect(entryProps().editTarget).toMatchObject({beat:2}));
+  expect(entryProps().noteEntry!.describe(at,2)).toBe('Remove G4');
+  fireEvent.keyDown(screen.getByRole('region',{name:'Score workspace'}),{key:'z',ctrlKey:true});
+  await waitFor(()=>expect(currentBeat(c,1).notes).toHaveLength(0));
+  expect(c.getState().snapshot.project.edits).toEqual([]);
+});
+  const spellings=(c:DocumentController)=>c.getState().snapshot.project.edits.map(edit=>edit.type);
+  const firstNote=(c:DocumentController)=>currentBeat(c).notes[0];
+  it('sets a pending accidental with a chord, writes the next letter as one spelled edit that one undo removes, and clears it',async()=>{
+    window.localStorage.removeItem(inputKey);
+    const c=await setup(),workspace=screen.getByRole('region',{name:'Score workspace'});
+    fireEvent.keyDown(workspace,{key:'n'});
+    // AltGr reports a brace as the key and ctrl+alt; the chord is read from the physical key.
+    fireEvent.keyDown(workspace,{key:'{',code:'Digit7',ctrlKey:true,altKey:true});
+    expect(screen.getByText(/Next note: Double flat/)).toBeInTheDocument();
+    // The same chord again clears it, and so does Escape.
+    fireEvent.keyDown(workspace,{key:'{',code:'Digit7',ctrlKey:true,altKey:true});
+    expect(screen.getByText(/Note entry is on/)).toBeInTheDocument();
+    fireEvent.keyDown(workspace,{code:'Digit9',key:'9',ctrlKey:true});
+    expect(screen.getByText(/Next note: Sharp/)).toBeInTheDocument();
+    fireEvent.keyDown(workspace,{key:'Escape'});
+    expect(screen.getByText(/Note entry is on/)).toBeInTheDocument();
+    expect(spellings(c)).toEqual([]);
+    fireEvent.keyDown(workspace,{code:'Digit9',key:'9',ctrlKey:true,altKey:true});
+    expect(screen.getByText(/Next note: Double sharp/)).toBeInTheDocument();
+    fireEvent.keyDown(workspace,{key:'d'});
+    await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(1));
+    // One gesture, one edit: the note and its spelling travel in one sequence.
+    const edits=c.getState().snapshot.project.edits;expect(edits).toHaveLength(1);
+    expect(edits[0]).toMatchObject({type:'sequence'});
+    expect((edits[0] as {commands:{type:string;accidentalMode?:number}[]}).commands.some(step=>step.type==='setNoteSpelling'&&step.accidentalMode===4)).toBe(true);
+    expect(screen.getByText(/Note entry is on/)).toBeInTheDocument();
+    // It was used up: the next letter takes the key signature.
+    await waitFor(()=>expect(entryProps().editTarget).toMatchObject({beat:1}));
+    fireEvent.keyDown(workspace,{key:'d'});
+    await waitFor(()=>expect(currentBeat(c,1).notes).toHaveLength(1));
+    expect(c.getState().snapshot.project.edits).toHaveLength(2);
+    expect(currentBeat(c,1).notes[0].accidentalMode).toBe(0);
+    fireEvent.keyDown(workspace,{key:'z',ctrlKey:true});
+    await waitFor(()=>expect(currentBeat(c,1).notes).toHaveLength(0));
+    fireEvent.keyDown(workspace,{key:'z',ctrlKey:true});
+    await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(0));
+    expect(c.getState().snapshot.project.edits).toEqual([]);
+  });
+  it('clears a pending accidental when entry is turned off, when the selection moves, and clicks use it',async()=>{
+    window.localStorage.removeItem(inputKey);
+    const c=await setup(),workspace=screen.getByRole('region',{name:'Score workspace'});
+    fireEvent.keyDown(workspace,{key:'n'});
+    fireEvent.keyDown(workspace,{code:'Digit9',key:'9',ctrlKey:true});
+    fireEvent.keyDown(workspace,{key:'ArrowRight'});
+    expect(screen.getByText(/Note entry is on/)).toBeInTheDocument();
+    fireEvent.keyDown(workspace,{code:'Digit9',key:'9',ctrlKey:true});
+    fireEvent.keyDown(workspace,{key:'n'});fireEvent.keyDown(workspace,{key:'n'});
+    expect(screen.getByText(/Note entry is on/)).toBeInTheDocument();
+    fireEvent.keyDown(workspace,{code:'Digit9',key:'9',ctrlKey:true});
+    const at={track:0,staff:0,bar:0,voice:0,beat:1};
+    expect(entryProps().noteEntry!.describe(at,2)).toBe('G#4');
+    act(()=>entryProps().noteEntry!.onHit(at,2,{chord:false}));
+    await waitFor(()=>expect(currentBeat(c,1).notes).toHaveLength(1));
+    expect(c.getState().snapshot.project.edits).toHaveLength(1);
+    expect(screen.queryByText(/Next note/)).toBeNull();
+  });
+  it('re-spells the selected note with entry off, as one edit, and records nothing for the spelling it has',async()=>{
+    window.localStorage.removeItem(inputKey);
+    const c=await setup(blankProject()),workspace=screen.getByRole('region',{name:'Score workspace'});
+    fireEvent.keyDown(workspace,{key:'n'});fireEvent.keyDown(workspace,{key:'d'});
+    await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(1));
+    fireEvent.keyDown(workspace,{key:'n'});
+    fireEvent.keyDown(workspace,{key:'ArrowLeft'});
+    const sounding=(n:{realValue:number})=>n.realValue;
+    const pitch=sounding(firstNote(c));
+    // D natural is already what Ctrl+8 asks for: nothing is recorded.
+    fireEvent.keyDown(workspace,{code:'Digit8',key:'8',ctrlKey:true});
+    // A sharp does not exist for D: the message says so.
+    fireEvent.keyDown(workspace,{code:'Digit9',key:'9',ctrlKey:true});
+    expect(await screen.findByText(/cannot be spelled that way/)).toBeInTheDocument();
+    // Neither refused chord recorded anything: the next real re-spell is the second edit, and nothing sits between.
+    // A double sharp is C##: one setNoteSpelling edit, same sounding pitch.
+    fireEvent.keyDown(workspace,{code:'Digit9',key:'{',ctrlKey:true,altKey:true});
+    await waitFor(()=>expect(c.getState().snapshot.project.edits).toHaveLength(2));
+    expect(c.getState().snapshot.project.edits[1]).toMatchObject({type:'setNoteSpelling',accidentalMode:4});
+    expect(c.getState().snapshot.project.edits).toHaveLength(2);
+    expect(sounding(firstNote(c))).toBe(pitch);
+    // Change Accidental cycles to the next spelling; one undo takes each back.
+    fireEvent.keyDown(workspace,{code:'Digit8',key:'8',ctrlKey:true,altKey:true});
+    await waitFor(()=>expect(c.getState().snapshot.project.edits).toHaveLength(3));
+    expect(c.getState().snapshot.project.edits[2]).toMatchObject({type:'setNoteSpelling',accidentalMode:6});
+    fireEvent.keyDown(workspace,{key:'z',ctrlKey:true});
+    await waitFor(()=>expect(c.getState().snapshot.project.edits).toHaveLength(2));
+  });
+
+  it('shows the Next note hint after an earlier refusal notice on the same beat',async()=>{
+    window.localStorage.removeItem(inputKey);
+    const c=await setup(),workspace=screen.getByRole('region',{name:'Score workspace'});
+    fireEvent.keyDown(workspace,{key:'n'});
+    fireEvent.keyDown(workspace,{code:'Digit8',key:'8',ctrlKey:true,altKey:true});
+    expect(screen.getByText(/Select a note on this beat to re-spell it/)).toBeInTheDocument();
+    fireEvent.keyDown(workspace,{code:'Digit9',key:'9',ctrlKey:true});
+    expect(screen.getByText(/Next note: Sharp/)).toBeInTheDocument();
+    expect(screen.queryByText(/Select a note on this beat/)).toBeNull();
+    expect(c.getState().snapshot.project.edits).toEqual([]);
+  });
+  it('ignores the chords while focus is in a text input',async()=>{
+    window.localStorage.removeItem(inputKey);
+    const c=await setup(),workspace=screen.getByRole('region',{name:'Score workspace'});
+    fireEvent.keyDown(workspace,{key:'n'});
+    // The field sits inside the score pane, so the keydown does reach the pane's handler and only its text-field guard stops it.
+    const field=document.createElement('input');workspace.appendChild(field);
+    try{
+      fireEvent.keyDown(field,{code:'Digit9',key:'9',ctrlKey:true});
+      fireEvent.keyDown(field,{code:'Digit8',key:'8',ctrlKey:true,altKey:true});
+    }finally{field.remove();}
+    expect(screen.queryByText(/Next note/)).toBeNull();expect(screen.getByText(/Note entry is on/)).toBeInTheDocument();
+    expect(c.getState().snapshot.project.edits).toEqual([]);
+  });
+  it('clears a pending accidental on a mouse selection and on a document switch',async()=>{
+    window.localStorage.removeItem(inputKey);
+    const c=await setup(),workspace=screen.getByRole('region',{name:'Score workspace'});
+    fireEvent.keyDown(workspace,{key:'n'});
+    fireEvent.keyDown(workspace,{code:'Digit9',key:'9',ctrlKey:true});
+    expect(screen.getByText(/Next note: Sharp/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button',{name:'Select rendered note'}));
+    expect(screen.queryByText(/Next note/)).toBeNull();expect(screen.getByText(/Note entry is on/)).toBeInTheDocument();
+    fireEvent.keyDown(workspace,{code:'Digit9',key:'9',ctrlKey:true});
+    expect(screen.getByText(/Next note: Sharp/)).toBeInTheDocument();
+    click('New');await waitFor(()=>expect(activeController()).not.toBe(c));
+    // Whether the new document remounts the score or keeps it, the pending accidental is gone.
+    if(!screen.queryByRole('button',{name:'Note entry',pressed:true}))fireEvent.keyDown(screen.getByRole('region',{name:'Score workspace'}),{key:'n'});
+    expect(screen.getByText(/Note entry is on/)).toBeInTheDocument();expect(screen.queryByText(/Next note/)).toBeNull();
+  });
+  it('re-spells the note in the cursor slot with entry on, as one edit that keeps the pitch and one undo takes back',async()=>{
+    window.localStorage.removeItem(inputKey);
+    const c=await setup(),workspace=screen.getByRole('region',{name:'Score workspace'});
+    fireEvent.keyDown(workspace,{key:'n'});fireEvent.keyDown(workspace,{key:'d'});
+    await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(1));
+    await waitFor(()=>expect(entryProps().editTarget).toMatchObject({beat:1}));
+    fireEvent.keyDown(workspace,{key:'ArrowLeft'});
+    const written=firstNote(c),pitch=written.realValue,editString=()=>(engravingView.mock.lastCall?.[0] as {editString:number}).editString;
+    for(let guard=0;editString()!==written.string&&guard<8;guard++)fireEvent.keyDown(workspace,{key:editString()<written.string?'ArrowUp':'ArrowDown'});
+    expect(editString()).toBe(written.string);
+    // The cursor slot holds the note, so the chord re-spells it rather than setting a pending accidental.
+    fireEvent.keyDown(workspace,{code:'Digit9',key:'9',ctrlKey:true,altKey:true});
+    await waitFor(()=>expect(c.getState().snapshot.project.edits).toHaveLength(2));
+    expect(c.getState().snapshot.project.edits[1]).toMatchObject({type:'setNoteSpelling',accidentalMode:4});
+    expect(screen.queryByText(/Next note/)).toBeNull();expect(firstNote(c).realValue).toBe(pitch);
+    fireEvent.keyDown(workspace,{key:'z',ctrlKey:true});
+    await waitFor(()=>expect(c.getState().snapshot.project.edits).toHaveLength(1));
+    expect(firstNote(c).accidentalMode).toBe(0);
+  });
+  it('says percussion has no accidental to change instead of asking for a note',async()=>{
+    window.localStorage.removeItem(inputKey);
+    const c=await setup({...blankProject(),edits:[{type:'addPercussionTrack',name:'Drums',program:0}]}),workspace=screen.getByRole('region',{name:'Score workspace'});
+    const grid=screen.getByRole('grid',{name:'Written measure overview'});fireEvent.click(within(grid).getByRole('gridcell',{name:'Drums, measure 1, rest'}));
+    const before=c.getState().snapshot.project.edits.length;
+    fireEvent.keyDown(workspace,{code:'Digit9',key:'9',ctrlKey:true});
+    expect(screen.getByText(/Percussion notes have no accidental/)).toBeInTheDocument();expect(screen.queryByText(/Select a note on this beat/)).toBeNull();
+    expect(c.getState().snapshot.project.edits).toHaveLength(before);
+  });
+
+describe('entry key queue',()=>{
+  const pane=()=>screen.getByRole('region',{name:'Score workspace'});
+  const press=(init:Parameters<typeof fireEvent.keyDown>[1])=>fireEvent.keyDown(pane(),init);
+  const edits=(c:DocumentController)=>c.getState().snapshot.project.edits;
+  const quiet=()=>new Promise(resolve=>setTimeout(resolve,30));
+  /** Holds every edit the document is asked to record until the test lets it through (or refuses it), one at a time. */
+  function holdEdits(c:DocumentController){
+    const bridge=documentBridges.get(c.getState().documentId)!,original=bridge.applyEdit.bind(bridge);
+    const held:{pass:()=>void;refuse:()=>void}[]=[];
+    vi.spyOn(bridge,'applyEdit').mockImplementation((command,expected,token)=>new Promise((resolve,reject)=>{
+      held.push({pass:()=>void original(command,expected,token).then(resolve,reject),refuse:()=>reject(new Error('The edit was refused.'))});
+    }));
+    return {held,next:async(how:'pass'|'refuse'='pass')=>{await waitFor(()=>expect(held.length).toBeGreaterThan(0));held.shift()![how]();}};
+  }
+  const entryOn=async(prefs?:string)=>{
+    if(prefs)window.localStorage.setItem(inputKey,prefs);else window.localStorage.removeItem(inputKey);
+    const c=await setup();press({key:'n'});return c;
+  };
+  it('lands three fast letters as three notes on three successive beats, each its own undo',async()=>{
+    const c=await entryOn(),hold=holdEdits(c);
+    press({key:'e'});press({key:'g'});press({key:'a'});
+    // The two later keys wait: no busy notice, and nothing is recorded until the first edit is.
+    expect(screen.queryByText(/Still entering/)).toBeNull();await waitFor(()=>expect(hold.held).toHaveLength(1));
+    await hold.next();await waitFor(()=>expect(hold.held).toHaveLength(1));
+    await hold.next();await waitFor(()=>expect(hold.held).toHaveLength(1));
+    await hold.next();
+    await waitFor(()=>expect(currentBeat(c,2).notes).toHaveLength(1));
+    expect(currentBeat(c,0).notes).toHaveLength(1);expect(currentBeat(c,1).notes).toHaveLength(1);expect(currentBeat(c,3).notes).toHaveLength(0);
+    expect(edits(c)).toHaveLength(3);
+    await waitFor(()=>expect(entryProps().editTarget).toMatchObject({beat:3}));
+    for(const left of [2,1,0]){press({key:'z',ctrlKey:true});await waitFor(()=>expect(edits(c)).toHaveLength(left));}
+  });
+  it('discards the keys behind an edit that was refused, and says how many',async()=>{
+    const c=await entryOn(),hold=holdEdits(c);
+    press({key:'e'});press({key:'g'});press({key:'a'});
+    await hold.next('refuse');
+    expect(await screen.findByText(/2 queued keys were discarded/)).toBeInTheDocument();
+    await quiet();expect(hold.held).toHaveLength(0);expect(edits(c)).toEqual([]);
+  });
+  it('discards the rest when a queued key is itself refused',async()=>{
+    const c=await entryOn(),hold=holdEdits(c);
+    press({key:'e'});press({key:'g'});press({key:'a'});press({key:'b'});
+    await hold.next();await waitFor(()=>expect(hold.held).toHaveLength(1));await hold.next('refuse');
+    expect(await screen.findByText(/was not entered: the edit was refused\. 2 queued keys were discarded/)).toBeInTheDocument();
+    await quiet();expect(hold.held).toHaveLength(0);expect(edits(c)).toHaveLength(1);
+  });
+  it('says "key" for a single discarded key',async()=>{
+    const c=await entryOn(),hold=holdEdits(c);
+    press({key:'e'});press({key:'g'});await hold.next('refuse');
+    expect(await screen.findByText(/1 queued key was discarded/)).toBeInTheDocument();expect(edits(c)).toEqual([]);
+  });
+  it.each([
+    ['a mouse selection',()=>fireEvent.click(screen.getByRole('button',{name:'Select rendered note'}))],
+    ['an arrow key',()=>press({key:'ArrowRight'})],
+    ['Escape',()=>press({key:'Escape'})],
+    ['undo',()=>press({key:'z',ctrlKey:true})],
+    ['the score pane losing focus',()=>fireEvent.blur(pane())],
+    ['turning entry off',()=>press({key:'n'})],
+  ])('drops the waiting keys on %s',async(_name,clear)=>{
+    const c=await entryOn(),hold=holdEdits(c);
+    press({key:'e'});press({key:'g'});press({key:'a'});
+    act(()=>{clear();});
+    await hold.next();
+    await waitFor(()=>expect(edits(c)).toHaveLength(1));
+    await quiet();expect(hold.held).toHaveLength(0);expect(edits(c)).toHaveLength(1);
+  });
+  it('drops the waiting keys when the view changes',async()=>{
+    const c=await entryOn(),hold=holdEdits(c);
+    press({key:'e'});press({key:'g'});
+    fireEvent.click(screen.getByRole('radio',{name:'Sound'}));
+    await hold.next();await waitFor(()=>expect(edits(c)).toHaveLength(1));
+    await quiet();expect(hold.held).toHaveLength(0);
+  });
+  it('never lands a waiting key on another document',async()=>{
+    const c=await entryOn(),hold=holdEdits(c);
+    press({key:'e'});press({key:'g'});
+    // The same app is handed another document while the second key waits; the key belongs to the first one.
+    act(()=>{(c as unknown as {update(change:{documentId:string}):void}).update({documentId:'another-document'});});
+    await hold.next();await quiet();
+    expect(hold.held).toHaveLength(0);expect(edits(c)).toHaveLength(1);
+  });
+  it('clears the waiting keys and the pending accidental when the document epoch changes on the same controller, and keeps entry on',async()=>{
+    const c=await entryOn(),hold=holdEdits(c);
+    press({code:'Digit9',key:'9',ctrlKey:true});
+    expect(screen.getByText(/Next note: Sharp/)).toBeInTheDocument();
+    // A duration key leaves the pending accidental alone; its edit is the one in flight while the letter waits.
+    press({key:'+'});press({key:'g'});
+    act(()=>{(c as unknown as {update(change:{documentEpoch:number}):void}).update({documentEpoch:1});});
+    expect(screen.queryByText(/Next note/)).toBeNull();
+    expect(screen.getByRole('button',{name:'Note entry',pressed:true})).toBeInTheDocument();expect(screen.getByText(/1 queued key was dropped: the score was locked or changed/)).toBeInTheDocument();
+    await hold.next();await waitFor(()=>expect(edits(c)).toHaveLength(1));
+    await quiet();expect(hold.held).toHaveLength(0);expect(edits(c)).toHaveLength(1);expect(edits(c)[0].type).toBe('setDuration');
+  });
+  it('drops a key that waited more than two seconds, and says so',async()=>{
+    const c=await entryOn(),hold=holdEdits(c);let now=1_700_000_000_000;const clock=vi.spyOn(Date,'now').mockImplementation(()=>now);
+    try{
+      press({key:'e'});press({key:'g'});
+      now+=2500;
+      await hold.next();
+      expect(await screen.findByText(/1 queued key was dropped: it waited too long/)).toBeInTheDocument();
+      await quiet();expect(hold.held).toHaveLength(0);expect(edits(c)).toHaveLength(1);
+    }finally{clock.mockRestore();}
+  });
+  it('keeps the oldest eight waiting keys and shows the busy notice for the ninth',async()=>{
+    const c=await entryOn(),hold=holdEdits(c);
+    // + and - alternate the beat between two durations, so every key is a real edit that lands on the same beat.
+    press({key:'+'});for(const key of ['-','+','-','+','-','+','-','+'])press({key:key});
+    expect(screen.queryByText(/Still entering/)).toBeNull();
+    press({key:'-'});
+    expect(await screen.findByText(/Still entering the previous note/)).toBeInTheDocument();
+    for(let step=0;step<9;step++){await hold.next();if(step<8)await waitFor(()=>expect(edits(c)).toHaveLength(step+1));}
+    await waitFor(()=>expect(edits(c)).toHaveLength(9));
+    await quiet();expect(hold.held).toHaveLength(0);expect(edits(c)).toHaveLength(9);
+    expect(currentBeat(c,0).duration).toBe(8);
+  });
+  it('queues keypad durations, digits and Enter instead of dropping them',async()=>{
+    const c=await entryOn(JSON.stringify({autoDuration:false,numpadDurations:true,pasteDiagrams:true})),hold=holdEdits(c);
+    press({key:'e'});
+    keypad('Numpad4');press({key:'5'});press({key:'Enter'});
+    await waitFor(()=>expect(hold.held).toHaveLength(1));
+    for(let step=0;step<3;step++){await hold.next();if(step<2)await waitFor(()=>expect(edits(c)).toHaveLength(step+1));}
+    await waitFor(()=>expect(edits(c)).toHaveLength(3));
+    expect(edits(c)[1]).toMatchObject({type:'setDuration',target:{beat:1}});
+    expect(edits(c)[2]).toMatchObject({type:'setNote',target:{beat:1},fret:5});
+    window.localStorage.removeItem(inputKey);
+  });
+  it('still refuses a key while something other than our own edit is busy',async()=>{
+    const c=await entryOn();
+    const bridge=documentBridges.get(c.getState().documentId)!;let finish!:()=>void;
+    vi.spyOn(bridge,'saveProject').mockImplementation(()=>new Promise(resolve=>{finish=()=>resolve(null);}));
+    act(()=>{void c.save();});
+    await waitFor(()=>expect(c.getState().busy).toBe(true));
+    press({key:'e'});
+    expect(screen.getByText(/Still entering the previous note/)).toBeInTheDocument();
+    await act(async()=>{finish();});await waitFor(()=>expect(c.getState().busy).toBe(false));
+    await quiet();expect(edits(c)).toEqual([]);
+  });
+  it('queues a key pressed after the edit settled but before its render committed, and plans it on the new beat',async()=>{
+    const c=await entryOn(),hold=holdEdits(c);
+    const spin=async(n=300)=>{for(let i=0;i<n;i++)await Promise.resolve();};
+    press({key:'e'});await waitFor(()=>expect(hold.held).toHaveLength(1));
+    // Let the edit through without act or a macrotask: its follow-up has run, React has not rendered the new cursor.
+    hold.held.shift()!.pass();await spin();
+    press({key:'g'});
+    await waitFor(()=>expect(hold.held.length).toBeGreaterThan(0));hold.held.shift()!.pass();
+    await waitFor(()=>expect(edits(c)).toHaveLength(2));
+    expect(currentBeat(c,1).notes).toHaveLength(1);expect(edits(c)[1]).toMatchObject({type:'setNote',target:{beat:1}});
+  });
+  it('drops the waiting keys on a pointer press in the score pane, in flight and between the edit and its render',async()=>{
+    const c=await entryOn(),hold=holdEdits(c);
+    const spin=async(n=300)=>{for(let i=0;i<n;i++)await Promise.resolve();};
+    press({key:'e'});press({key:'g'});
+    fireEvent.pointerDown(pane());
+    await hold.next();await waitFor(()=>expect(edits(c)).toHaveLength(1));await quiet();expect(hold.held).toHaveLength(0);
+    press({key:'a'});await waitFor(()=>expect(hold.held).toHaveLength(1));press({key:'b'});
+    hold.held.shift()!.pass();await spin();
+    fireEvent.pointerDown(pane());
+    await waitFor(()=>expect(edits(c)).toHaveLength(2));await quiet();expect(hold.held).toHaveLength(0);expect(edits(c)).toHaveLength(2);
+  });
+  it('refuses every later key after an overflow until the queue is empty, so no hole appears',async()=>{
+    const c=await entryOn(),hold=holdEdits(c);
+    press({key:'+'});for(const key of ['-','+','-','+','-','+','-','+'])press({key:key});
+    press({key:'-'});
+    await hold.next();await waitFor(()=>expect(edits(c)).toHaveLength(1));
+    // The drain has taken a key off the queue (its edit is held), so a slot is free; the refused key must still not be followed by one that assumed it landed.
+    await waitFor(()=>expect(hold.held).toHaveLength(1));
+    press({key:'+'});
+    for(let step=1;step<9;step++){await hold.next();if(step<8)await waitFor(()=>expect(edits(c)).toHaveLength(step+1));}
+    await waitFor(()=>expect(edits(c)).toHaveLength(9));await quiet();expect(hold.held).toHaveLength(0);expect(edits(c)).toHaveLength(9);
+    // Once the queue is empty the refusal is over: the next key is recorded.
+    press({key:'-'});await hold.next();await waitFor(()=>expect(edits(c)).toHaveLength(10));
+  });
+  it('refuses keys typed during a save while keys wait, and those after it until the queue is empty',async()=>{
+    const c=await entryOn(),hold=holdEdits(c);
+    const bridge=documentBridges.get(c.getState().documentId)!;let finish!:()=>void;
+    vi.spyOn(bridge,'saveProject').mockImplementation(()=>new Promise(resolve=>{finish=()=>resolve(null);}));
+    press({key:'e'});press({key:'g'});
+    act(()=>{void c.save();});
+    await hold.next();await waitFor(()=>expect(edits(c)).toHaveLength(1));
+    await waitFor(()=>expect(c.getState().busy).toBe(true));
+    press({key:'a'});
+    expect(screen.getByText(/Still entering the previous note/)).toBeInTheDocument();
+    await act(async()=>{finish();});
+    await waitFor(()=>expect(hold.held).toHaveLength(1));
+    press({key:'b'});
+    await hold.next();await waitFor(()=>expect(edits(c)).toHaveLength(2));await quiet();
+    expect(hold.held).toHaveLength(0);expect(edits(c)).toHaveLength(2);
+    // Once the queue is empty the refusal is over: the next key is recorded.
+    press({key:'c'});await hold.next();await waitFor(()=>expect(edits(c)).toHaveLength(3));
+  });
+  it('counts the key that threw in the discarded total, logs it and keeps the app running',async()=>{
+    const c=await entryOn(),hold=holdEdits(c),log=vi.spyOn(console,'error').mockImplementation(()=>{});
+    try{
+      press({key:'e'});press({key:'g'});press({key:'a'});
+      await waitFor(()=>expect(hold.held).toHaveLength(1));
+      vi.spyOn(c,'edit').mockImplementationOnce(()=>{throw new Error('boom');});
+      await hold.next();
+      expect(await screen.findByText(/2 queued keys were discarded/)).toBeInTheDocument();
+      expect(log).toHaveBeenCalled();expect(edits(c)).toHaveLength(1);
+      await quiet();expect(hold.held).toHaveLength(0);
+      // The counter did not stick: the next key is recorded at once, not queued.
+      press({key:'b'});await hold.next();await waitFor(()=>expect(edits(c)).toHaveLength(2));
+    }finally{log.mockRestore();}
+  });
+});
+
+describe('GP8 edit and cursor keys',()=>{
+  const pane=()=>screen.getByRole('region',{name:'Score workspace'});
+  const press=(init:Parameters<typeof fireEvent.keyDown>[1])=>fireEvent.keyDown(pane(),init);
+  const edits=(c:DocumentController)=>c.getState().snapshot.project.edits;
+  const quiet=()=>new Promise(resolve=>setTimeout(resolve,30));
+  const cursor=()=>(engravingView.mock.lastCall![0] as {editTarget:{bar:number;beat:number}}).editTarget;
+  const selection=()=>(engravingView.mock.lastCall![0] as {editorSelection:{kind:string}|null}).editorSelection;
+  const at=(beat:number,bar=0)=>({track:0,staff:0,bar,voice:0,beat});
+  const withNotes=(...more:EditCommand[])=>({...blankProject(),edits:[{type:'setNote',target:at(0),string:6,fret:3},{type:'setNote',target:at(0),string:5,fret:2},...more] as EditCommand[]});
+  const bars=(c:DocumentController)=>c.getState().score.masterBars.length;
+  const beatsIn=(c:DocumentController,bar=0)=>c.getState().score.tracks[0].staves[0].bars[bar].voices[0].beats.length;
+  function holdEdits(c:DocumentController){
+    const bridge=documentBridges.get(c.getState().documentId)!,original=bridge.applyEdit.bind(bridge);
+    const held:{pass:()=>void}[]=[];
+    vi.spyOn(bridge,'applyEdit').mockImplementation((command,expected,token)=>new Promise((resolve,reject)=>{held.push({pass:()=>void original(command,expected,token).then(resolve,reject)});}));
+    return {held,next:async()=>{await waitFor(()=>expect(held.length).toBeGreaterThan(0));held.shift()!.pass();}};
+  }
+  const entryOn=async(prefs?:string)=>{
+    if(prefs)window.localStorage.setItem(inputKey,prefs);else window.localStorage.removeItem(inputKey);
+    const c=await setup();press({key:'n'});return c;
+  };
+  it('Backspace deletes the note on the active string as one undoable edit, and records nothing where there is none',async()=>{
+    const c=await setup(withNotes());
+    press({key:'Backspace'});
+    await waitFor(()=>expect(edits(c)).toHaveLength(3));
+    expect(edits(c)[2]).toMatchObject({type:'removeNote',target:at(0),string:6});
+    expect(currentBeat(c).notes.map(note=>note.string)).toEqual([5]);
+    await quiet();
+    press({key:'Backspace'});
+    expect(await screen.findByText('There is no note here to delete.')).toBeInTheDocument();
+    await quiet();expect(edits(c)).toHaveLength(3);
+    press({key:'z',ctrlKey:true});
+    await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(2));
+  });
+  it('Backspace removes the selected note of a percussion staff by its index',async()=>{
+    const c=await setup({...blankProject(),edits:[{type:'addPercussionTrack',name:'Drums',program:0},{type:'addPercussionNote',target:{track:1,staff:0,bar:0,voice:0,beat:0},articulation:36}]});
+    fireEvent.click(within(screen.getByRole('grid',{name:'Written measure overview'})).getByRole('gridcell',{name:/Drums, measure 1/}));
+    press({key:'Backspace'});
+    await waitFor(()=>expect(edits(c)).toHaveLength(3));
+    expect(edits(c)[2]).toMatchObject({type:'removeNoteByIndex',noteIndex:0});
+  });
+  it('Shift+Delete deletes the cursor beat as one edit, and refuses a selection of several beats',async()=>{
+    const c=await setup(withNotes()),before=beatsIn(c);
+    press({key:'ArrowRight',shiftKey:true});
+    expect(selection()?.kind).toBe('range');
+    press({key:'Delete',shiftKey:true});
+    expect(await screen.findByText(/removes one beat at a time, and the selection holds 2/)).toBeInTheDocument();
+    await quiet();expect(edits(c)).toHaveLength(2);expect(selection()?.kind).toBe('range');
+    press({key:'Escape'});
+    press({key:'Delete',shiftKey:true});
+    await waitFor(()=>expect(edits(c)).toHaveLength(3));
+    expect(edits(c)[2]).toEqual({type:'deleteBeat',target:at(1)});
+    expect(beatsIn(c)).toBe(before-1);
+  });
+  it('Shift+Delete deletes a selection of exactly one beat',async()=>{
+    const c=await setup(withNotes());
+    press({key:'ArrowRight'});press({key:'ArrowRight',shiftKey:true});press({key:'ArrowLeft',shiftKey:true});
+    press({key:'Delete',shiftKey:true});
+    await waitFor(()=>expect(edits(c)).toHaveLength(3));
+    expect(edits(c)[2]).toMatchObject({type:'deleteBeat'});
+  });
+  it('Ctrl+Insert inserts a beat before the cursor like the palette command',async()=>{
+    const c=await setup(withNotes({type:'setDuration',target:at(0),duration:8,dots:0})),before=beatsIn(c);
+    press({key:'Insert',ctrlKey:true});
+    await waitFor(()=>expect(edits(c)).toHaveLength(4));
+    expect(edits(c)[3]).toMatchObject({type:'insertBeat',target:at(0)});
+    expect(beatsIn(c)).toBe(before+1);
+    press({key:'Insert'});await quiet();expect(edits(c)).toHaveLength(4);
+  });
+  it('Ctrl+Shift+Delete clears the selection notes through eraseSelection, and records nothing without a selection or notes',async()=>{
+    const c=await setup(withNotes());
+    press({key:'Delete',ctrlKey:true,shiftKey:true});
+    expect(await screen.findByText('Select some music first to clear its notes.')).toBeInTheDocument();
+    await quiet();expect(edits(c)).toHaveLength(2);
+    press({key:'ArrowRight'});press({key:'ArrowRight',shiftKey:true});
+    press({key:'Delete',ctrlKey:true,shiftKey:true});
+    expect(await screen.findByText('The selection has no notes to clear.')).toBeInTheDocument();
+    await quiet();expect(edits(c)).toHaveLength(2);
+    press({key:'Escape'});press({key:'Home'});press({key:'ArrowRight',shiftKey:true});
+    press({key:'Delete',ctrlKey:true,shiftKey:true});
+    await waitFor(()=>expect(edits(c)).toHaveLength(3));
+    expect(edits(c)[2]).toMatchObject({type:'eraseSelection'});
+    expect(currentBeat(c).notes).toHaveLength(0);expect(selection()).toBeNull();
+  });
+  it('leaves Del alone to do what it did before',async()=>{
+    const c=await setup(withNotes());
+    press({key:'Delete'});await quiet();expect(edits(c)).toHaveLength(2);
+  });
+  it('Home and End go to the first and last beat of the bar; Ctrl+Home and Ctrl+End to the first and last bar',async()=>{
+    const c=await setup(),last=beatsIn(c)-1;
+    press({key:'End'});expect(cursor()).toMatchObject({bar:0,beat:last});
+    press({key:'Home'});expect(cursor()).toMatchObject({bar:0,beat:0});
+    press({key:'End',ctrlKey:true});expect(cursor()).toMatchObject({bar:bars(c)-1,beat:0});
+    press({key:'End'});expect(cursor()).toMatchObject({bar:bars(c)-1,beat:beatsIn(c,bars(c)-1)-1});
+    press({key:'Home',ctrlKey:true});expect(cursor()).toMatchObject({bar:0,beat:0});
+    expect(edits(c)).toEqual([]);
+  });
+  it('Shift+Home and Shift+End extend the selection to the bar edges',async()=>{
+    const c=await setup();
+    press({key:'ArrowRight'});
+    press({key:'End',shiftKey:true});
+    expect(selection()?.kind).toBe('range');expect(cursor()).toMatchObject({bar:0,beat:beatsIn(c)-1});
+    press({key:'Home',shiftKey:true});
+    expect(selection()?.kind).toBe('range');expect(cursor()).toMatchObject({bar:0,beat:0});
+    press({key:'Home'});expect(selection()).toBeNull();
+    expect(edits(c)).toEqual([]);
+  });
+  it('refuses the edit keys on a finalized score with the lock message, while the cursor keys still move',async()=>{
+    const c=await setup(withNotes());
+    await act(async()=>{await c.setLock({kind:'finalized'});});
+    for(const key of [{key:'Backspace'},{key:'Delete',shiftKey:true},{key:'Insert',ctrlKey:true},{key:'Delete',ctrlKey:true,shiftKey:true}]){
+      press(key);expect(await screen.findByText(FINALIZED_MESSAGE)).toBeInTheDocument();
+    }
+    await quiet();expect(edits(c)).toHaveLength(2);
+    press({key:'End'});expect(cursor().beat).toBe(beatsIn(c)-1);
+  });
+  it('refuses an edit key behind an edit in flight and behind waiting entry keys, without queueing it',async()=>{
+    window.localStorage.removeItem(inputKey);
+    const c=await setup(withNotes({type:'setDuration',target:at(0),duration:8,dots:0})),hold=holdEdits(c);
+    press({key:'Insert',ctrlKey:true});
+    await waitFor(()=>expect(hold.held).toHaveLength(1));
+    press({key:'Backspace'});
+    expect(screen.getByText(/Still entering the previous note/)).toBeInTheDocument();
+    await hold.next();await waitFor(()=>expect(edits(c)).toHaveLength(4));
+    await quiet();expect(hold.held).toHaveLength(0);expect(edits(c)).toHaveLength(4);
+    // A waiting entry key counts too.
+    press({key:'n'});press({key:'e'});press({key:'g'});
+    await waitFor(()=>expect(hold.held).toHaveLength(1));
+    press({key:'Delete',shiftKey:true});
+    expect(screen.getAllByText(/Still entering the previous note/).length).toBeGreaterThan(0);
+    await hold.next();await waitFor(()=>expect(hold.held).toHaveLength(1));await hold.next();
+    await waitFor(()=>expect(edits(c)).toHaveLength(6));
+    expect(edits(c).some(edit=>edit.type==='deleteBeat')).toBe(false);
+  });
+  it('a cursor key drops the keys that wait for the old cursor',async()=>{
+    window.localStorage.removeItem(inputKey);
+    const c=await setup(),hold=holdEdits(c);
+    press({key:'n'});press({key:'e'});press({key:'g'});
+    await waitFor(()=>expect(hold.held).toHaveLength(1));
+    press({key:'Home',ctrlKey:true});
+    await hold.next();await waitFor(()=>expect(edits(c)).toHaveLength(1));
+    await quiet();expect(hold.held).toHaveLength(0);expect(edits(c)).toHaveLength(1);
+  });
+  it.each([{name:'Ctrl+Home',key:{key:'Home',ctrlKey:true},beat:0},{name:'an arrow',key:{key:'ArrowLeft'},beat:1}])('$name pressed while an entry edit is in flight keeps the cursor there, and the next letter lands there',async({key,beat})=>{
+    const c=await entryOn(),hold=holdEdits(c);
+    press({key:'e'});await hold.next();
+    await waitFor(()=>expect(edits(c)).toHaveLength(1));
+    press({key:'g'});await hold.next();
+    await waitFor(()=>expect(edits(c)).toHaveLength(2));await waitFor(()=>expect(cursor().beat).toBe(2));
+    press({key:'a'});await waitFor(()=>expect(hold.held).toHaveLength(1));
+    press(key);expect(cursor().beat).toBe(beat);
+    press({key:'b'});
+    await hold.next();
+    await waitFor(()=>expect(hold.held).toHaveLength(1));
+    // The landed note must not pull the cursor back; the letter typed after the move is written at the new cursor.
+    await hold.next();await waitFor(()=>expect(edits(c)).toHaveLength(4));
+    expect(JSON.stringify(edits(c)[3])).toContain(`"beat":${beat}`);
+    expect(currentBeat(c,beat).notes.length).toBeGreaterThan(0);
+  });
+  it('a cursor that leaves the entry beat and comes back is still a cursor the user moved',async()=>{
+    const c=await entryOn(),hold=holdEdits(c);
+    press({key:'e'});await waitFor(()=>expect(hold.held).toHaveLength(1));
+    press({key:'ArrowRight'});press({key:'ArrowLeft'});expect(cursor().beat).toBe(0);
+    press({key:'9',code:'Digit9',ctrlKey:true});
+    await hold.next();await waitFor(()=>expect(edits(c)).toHaveLength(1));
+    // The landed note must not advance a cursor the user has moved; the chord then acts on the beat the user is on.
+    await quiet();expect(cursor().beat).toBe(0);
+  });
+  it('a refused edit key behind waiting entry keys also refuses the keys typed after it',async()=>{
+    const c=await entryOn(),hold=holdEdits(c);
+    press({key:'e'});press({key:'g'});
+    press({key:'Insert',ctrlKey:true});
+    expect(screen.getAllByText(/Still entering the previous note/).length).toBeGreaterThan(0);
+    press({key:'a'});
+    await hold.next();await waitFor(()=>expect(hold.held).toHaveLength(1));await hold.next();
+    await waitFor(()=>expect(edits(c)).toHaveLength(2));
+    await quiet();expect(hold.held).toHaveLength(0);expect(edits(c)).toHaveLength(2);
+    // Once the queue is empty, entry works again.
+    press({key:'a'});await hold.next();await waitFor(()=>expect(edits(c)).toHaveLength(3));
+  });
+  it('Backspace clears typed fret digits instead of deleting the note on the string',async()=>{
+    const c=await setup(withNotes());
+    press({key:'1'});press({key:'2'});
+    press({key:'Backspace'});await quiet();expect(edits(c)).toHaveLength(2);
+    press({key:'Backspace'});
+    await waitFor(()=>expect(edits(c)).toHaveLength(3));
+    expect(edits(c)[2]).toMatchObject({type:'removeNote'});
+  });
+  it('shows the hint for the swapped Plus/Minus preference',async()=>{
+    await entryOn(JSON.stringify({swapPlusMinus:true}));
+    expect(screen.getByText(/- and \+ make the beat shorter and longer/)).toBeInTheDocument();
+  });
+  it('ignores the keys while focus is in a text field inside the score pane',async()=>{
+    const c=await setup(withNotes());
+    for(const tag of ['input','textarea','select']){
+      const field=document.createElement(tag);pane().appendChild(field);
+      try{for(const key of [{key:'Backspace'},{key:'Delete',shiftKey:true},{key:'Insert',ctrlKey:true},{key:'Delete',ctrlKey:true,shiftKey:true},{key:'Home',ctrlKey:true},{key:'End'}])fireEvent.keyDown(field,key);}
+      finally{field.remove();}
+    }
+    // End is last: unguarded, it would leave the cursor on the last beat.
+    await quiet();expect(edits(c)).toHaveLength(2);expect(cursor().beat).toBe(0);
+  });
+  it('Shift+Delete on the last beat of a bar keeps the cursor on a beat that exists',async()=>{
+    const c=await setup(withNotes());
+    press({key:'End'});const last=beatsIn(c)-1;expect(cursor().beat).toBe(last);
+    press({key:'Delete',shiftKey:true});
+    await waitFor(()=>expect(edits(c)).toHaveLength(3));
+    expect(edits(c)[2]).toEqual({type:'deleteBeat',target:at(last)});
+    expect(beatsIn(c)).toBe(last);
+    await waitFor(()=>expect(cursor().beat).toBeLessThan(beatsIn(c)));
+  });
+  it('Shift+Delete falls back to the cursor beat when the selection holds no beats',async()=>{
+    const c=await setup(withNotes());
+    press({key:'ArrowRight'});
+    // A bar selection of a bar the cursor is not in still resolves beats, so use an empty note selection.
+    act(()=>{(engravingView.mock.lastCall![0] as {onEditorSelection:(value:unknown)=>void}).onEditorSelection({kind:'notes',notes:[]});});
+    press({key:'Delete',shiftKey:true});
+    await waitFor(()=>expect(edits(c)).toHaveLength(3));
+    expect(edits(c)[2]).toEqual({type:'deleteBeat',target:at(1)});
+  });
+  it('Shift+Delete refuses a selection that cannot be resolved instead of deleting the cursor beat',async()=>{
+    const c=await setup(withNotes());
+    act(()=>{(engravingView.mock.lastCall![0] as {onEditorSelection:(value:unknown)=>void}).onEditorSelection({kind:'bars',firstBar:99,lastBar:99,tracks:[0]});});
+    press({key:'Delete',shiftKey:true});
+    expect(await screen.findByText('The selection cannot be resolved, so no beat was deleted.')).toBeInTheDocument();
+    await quiet();expect(edits(c)).toHaveLength(2);
+  });
+  it('Ctrl+Home and Ctrl+End still land on beat 0 of the first and last bar when a bar has been emptied',async()=>{
+    const c=await setup(withNotes());
+    press({key:'End',ctrlKey:true});const lastBar=bars(c)-1;
+    // Delete until nothing is left to delete: the last press is the no-beat notice and records nothing.
+    for(let guard=0;guard<8;guard++){
+      const before=edits(c).length;press({key:'Delete',shiftKey:true});await quiet();await quiet();
+      if(edits(c).length===before)break;
+    }
+    expect(screen.getByText('There is no beat here to delete.')).toBeInTheDocument();
+    press({key:'Home',ctrlKey:true});expect(cursor()).toMatchObject({bar:0,beat:0});
+    press({key:'End',ctrlKey:true});expect(cursor()).toMatchObject({bar:lastBar,beat:0});
+    press({key:'End'});expect(cursor()).toMatchObject({bar:lastBar});
+    press({key:'Home',ctrlKey:true});expect(cursor()).toMatchObject({bar:0,beat:0});
+  });
 });

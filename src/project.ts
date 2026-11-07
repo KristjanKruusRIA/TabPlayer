@@ -1,4 +1,4 @@
-import type { EditCommand } from './edit-types';
+import type { EditCommand, SingleCommand } from './edit-types';
 export type { EditCommand } from './edit-types';
 export interface BeatTarget { track: number; staff: number; bar: number; voice: number; beat: number }
 export type BaseDocument =
@@ -18,7 +18,8 @@ export type Project = ProjectView;
 export const appliesFilePartialCapo=(project:{partialCapo?:true;baselineEdits?:readonly unknown[];edits:readonly unknown[]},canRedo=false)=>project.partialCapo===true||!project.baselineEdits?.length&&!project.edits.length&&!canRedo;
 export type ProjectInput = ProjectView | Omit<ProjectView,'schemaVersion'|'assets'|'baselineEdits'> & {schemaVersion:1}
   | Omit<ProjectView,'schemaVersion'|'baselineEdits'> & {schemaVersion:2};
-export const projectCommands=(project:ProjectInput):EditCommand[]=>[...('baselineEdits' in project?project.baselineEdits:[]),...project.edits];
+/** The edits a project replays, in order. A `sequence` is one history entry, replayed as the edits it holds. */
+export const projectCommands=(project:ProjectInput):SingleCommand[]=>[...('baselineEdits' in project?project.baselineEdits:[]),...project.edits].flatMap(edit=>edit.type==='sequence'?edit.commands:[edit]);
 /** Where a document stands with its password to edit: none set, set and not yet given this session (edits refused), or given. */
 export type EditProtection = 'none' | 'locked' | 'unlocked';
 /** The password protections of a document. Only the state is ever sent here, never a hash, a key or a password. */

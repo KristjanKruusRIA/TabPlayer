@@ -25,7 +25,7 @@ function Harness({ target, edits: first = base, locked = false, busy = false, re
     log.push(command); list.current = next; setEdits(next);
     return true;
   };
-  return <NotationEntryPanel score={score} target={target} busy={busy} locked={locked} onEdit={onEdit} latestScore={() => stale ? buildScore({ ...blankProject(), edits: first }) : latest.current} />;
+  return <NotationEntryPanel score={score} target={target} busy={busy} locked={locked} onEdit={onEdit} preview={command => stale ? buildScore({ ...blankProject(), edits: first }) : buildScore({ ...blankProject(), edits: [...list.current, command] })} />;
 }
 const staff = () => screen.getByRole('group', { name: 'Pitch entry staff' });
 const target = (name: string) => screen.getByRole('button', { name });
@@ -53,18 +53,32 @@ it('enters letters in the chosen octave with accidentals that last for one note'
   expect(screen.getByRole('button', { name: 'Key signature' })).toHaveAttribute('aria-pressed', 'true');
   await press('PageUp'); expect(screen.getByTestId('entry-octave')).toHaveTextContent('Octave 5');
   await press('-'); await press('B');
-  // Bb5 reads as a flat in a key without flats, so the new note gets a spelling edit of its own; F# does not.
-  expect(log.map(command => command.type === 'addPitchedNote' ? command.pitch : command.type)).toEqual([60, 66, 82, 'setNoteSpelling']);
+  // Bb5 reads as a flat in a key without flats, so its spelling goes in the same edit as the note; F# needs none.
+  expect(log.map(command => command.type === 'addPitchedNote' ? command.pitch : command.type === 'sequence' ? command.commands.map(step => step.type) : command.type)).toEqual([60, 66, ['addPitchedNote', 'setNoteSpelling']]);
   await press('PageDown'); await press('PageDown'); await press('b');
   expect(screen.getByRole('button', { name: 'Remove B3' })).toBeInTheDocument();
 });
-it('sets the spelling of a flat as a second edit when automatic spelling would read a sharp', async () => {
+it('writes a flat and its spelling as one edit when automatic spelling would read a sharp', async () => {
   const log: EditCommand[] = [];
   render(<Harness target={pitched} log={log} />);
   await press('-'); await press('b');
-  expect(log).toEqual([{ type: 'addPitchedNote', target: pitched, pitch: 70 }, { type: 'setNoteSpelling', target: pitched, noteIndex: 0, accidentalMode: 5 }]);
+  expect(log).toEqual([{ type: 'sequence', commands: [{ type: 'addPitchedNote', target: pitched, pitch: 70 }, { type: 'setNoteSpelling', target: pitched, noteIndex: 0, accidentalMode: 5 }] }]);
   await press('#'); await press('f');
-  expect(log).toHaveLength(3);
+  expect(log).toHaveLength(2);
+});
+it('offers both doubles and writes them as one spelled edit', async () => {
+  const log: EditCommand[] = [];
+  render(<Harness target={pitched} log={log} />);
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Double sharp' })); });
+  expect(screen.getByRole('button', { name: 'Double sharp' })).toHaveAttribute('aria-pressed', 'true');
+  await press('c');
+  expect(log).toEqual([{ type: 'sequence', commands: [{ type: 'addPitchedNote', target: pitched, pitch: 62 }, { type: 'setNoteSpelling', target: pitched, noteIndex: 0, accidentalMode: 4 }] }]);
+  expect(screen.getByRole('status')).toHaveTextContent('Entered C##4');
+  expect(screen.getByRole('button', { name: 'Key signature' })).toHaveAttribute('aria-pressed', 'true');
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Double flat' })); });
+  await press('b');
+  expect(log).toHaveLength(2);
+  expect(log[1]).toEqual({ type: 'sequence', commands: [{ type: 'addPitchedNote', target: pitched, pitch: 69 }, { type: 'setNoteSpelling', target: pitched, noteIndex: 1, accidentalMode: 6 }] });
 });
 it('moves to the octave of a clicked note', async () => {
   const log: EditCommand[] = [];

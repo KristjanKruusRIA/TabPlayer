@@ -134,3 +134,37 @@ describe('engraved system pagination',()=>{
     expect(pages).toHaveLength(1);expect(pages[0].svg).toContain('>Empty</text>');expect(pages[0].svg).toContain('1 / 1');
   });
 });
+
+describe('per-system gaps in export',()=>{
+  const sys=(height:number,id:string,firstBar?:number,lastBar?:number):SvgSystem=>({...system(height,id),...(firstBar===undefined?{}:{firstBar,lastBar})});
+  const page=():PageLayout=>({...custom(),scale:1.5});
+  const ys=(p:ReturnType<typeof paginateEngravedSystems>)=>p.map(x=>[...x.svg.matchAll(/translate\(([\d.]+) ([\d.]+)\)/g)].map(m=>Number(m[2])));
+  const systems=[sys(40,'title'),sys(100,'a',0,1),sys(100,'b',2,3),sys(100,'c',4,5)];
+  const gap=(bar:number,scale:number,spacing:number|null=null)=>({gaps:[{bar,scale}],systemSpacing:spacing,scale:1.5});
+  const base=ys(paginateEngravedSystems(systems,'T',page()))[0];
+  it('is byte-identical without gaps or with gaps outside every system',()=>{
+    const plain=paginateEngravedSystems(systems,'T',page());
+    expect(paginateEngravedSystems(systems,'T',page(),undefined,1,{gaps:undefined,systemSpacing:null,scale:1.5})).toEqual(plain);
+    expect(paginateEngravedSystems(systems,'T',page(),undefined,1,gap(90,3))).toEqual(plain);
+  });
+  it('offsets the chosen system and later ones by (s-1) x 20 x spacing x scale, shrinking below 100%',()=>{
+    for(const [scale,spacing] of [[2,null],[.5,null],[2,2]] as const) {
+      const offset=(scale-1)*20*(spacing??1)*1.5,got=ys(paginateEngravedSystems(systems,'T',page(),undefined,1,gap(2,scale,spacing)))[0];
+      expect(got.slice(0,2)).toEqual(base.slice(0,2));
+      expect(got[2]).toBeCloseTo(base[2]+offset);expect(got[3]).toBeCloseTo(base[3]+offset);
+    }
+  });
+  it('adds nothing before the first system of the score or a page top',()=>{
+    expect(ys(paginateEngravedSystems(systems,'T',page(),undefined,1,gap(0,4)))[0]).toEqual(base);
+    const d=pageGeometry(page()),tall=[sys(d.usableHeight-150,'a',0,1),sys(100,'b',2,3),sys(100,'c',4,5)];
+    const plain=ys(paginateEngravedSystems(tall,'T',page()));expect(plain).toHaveLength(2);
+    expect(ys(paginateEngravedSystems(tall,'T',page(),undefined,1,gap(4,4,4)))).toEqual(plain);
+  });
+  it('counts the offset in the page fit and drops it on the new page',()=>{
+    const d=pageGeometry(page()),tall=[sys(d.usableHeight-250,'a',0,1),sys(100,'b',2,3)];
+    expect(ys(paginateEngravedSystems(tall,'T',page()))).toHaveLength(1);
+    // Offset 3 x 20 x 4 x 1.5 = 360 px pushes the second system over.
+    const pages=ys(paginateEngravedSystems(tall,'T',page(),undefined,1,gap(2,4,4)));
+    expect(pages).toHaveLength(2);expect(pages[1][0]).toBeCloseTo(page().marginsMm.top*96/25.4+40);
+  });
+});

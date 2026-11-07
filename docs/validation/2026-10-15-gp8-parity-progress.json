@@ -1035,6 +1035,24 @@
       "end_line": 47,
       "kind": "validation_report"
     },
+    "systemgaps_behavior": {
+      "path": "docs/validation/2026-11-07-gp8-system-gaps.md",
+      "start_line": 3,
+      "end_line": 12,
+      "kind": "validation_report"
+    },
+    "systemgaps_evidence": {
+      "path": "docs/validation/2026-11-07-gp8-system-gaps.md",
+      "start_line": 14,
+      "end_line": 53,
+      "kind": "validation_report"
+    },
+    "systemgaps_limits": {
+      "path": "docs/validation/2026-11-07-gp8-system-gaps.md",
+      "start_line": 55,
+      "end_line": 69,
+      "kind": "validation_report"
+    },
     "strokes_behavior": {
       "path": "docs/validation/2026-10-22-gp8-stroke-patterns.md",
       "start_line": 5,
@@ -9392,12 +9410,15 @@
       "runtime_rechecked": false,
       "historical_status": "missing",
       "current_status": "partial",
-      "current_behavior": "A finite global system-spacing override and reset-to-inherit state are stored in document history.",
-      "remaining_gap": "Independent per-system/per-staff gaps and selected-system reset tools are not delivered.",
+      "current_behavior": "A finite global system-spacing override and reset-to-inherit state are stored in document history. A \"Design: system gaps\" panel sets the space above one system (25 to 400% of the standard gap, one undoable edit, saved with the document), with Reset selected system and Reset all system gaps. The gaps show in the vertical page, horizontal page and grid views and in PDF, SVG, PNG and print, and a desktop test checks screen and PDF offsets, reset, undo, redo, save and reopen.",
+      "remaining_gap": "Gaps do not show in parchment, vertical screen or horizontal screen; older builds refuse the new field; not in GP export or saved styles; screen and export page breaks differ; no per-staff gaps.",
       "current_evidence": [
         "engraving",
         "engraving_limits",
-        "engraving_source"
+        "engraving_source",
+        "systemgaps_behavior",
+        "systemgaps_evidence",
+        "systemgaps_limits"
       ],
       "assessment": "evidence_reviewed",
       "current_proven_status": "partial",

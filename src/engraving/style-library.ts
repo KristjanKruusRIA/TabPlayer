@@ -3,6 +3,7 @@ import { isXmlText } from '../tuning/library';
 import { defaultEngraving,validateEngraving } from './projection';
 import type { EngravingOverrides } from './types';
 import { withBarWidths } from './bar-widths';
+import { withSystemGaps } from './system-gaps';
 
 /** The stylesheet, notation and system spacing of a document. A style never names tracks or bars, so it holds no profiles and no bar widths. */
 export type StyleEngraving=EngravingOverrides;
@@ -15,11 +16,11 @@ const exact=(value:unknown,keys:string[]):value is Record<string,unknown>=>value
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** The style a document carries, without its track-bound staff profiles and its bar-bound widths. */
-export const styleOf=(engraving:EngravingOverrides):StyleEngraving=>withBarWidths({...structuredClone(engraving),profiles:[]},[]);
+export const styleOf=(engraving:EngravingOverrides):StyleEngraving=>withSystemGaps(withBarWidths({...structuredClone(engraving),profiles:[]},[]),[]);
 /** The factory style: every choice left to the source or renderer default. */
 export const defaultStyle=():StyleEngraving=>styleOf(defaultEngraving());
 /** `style` applied to a document, keeping that document's own staff profiles and bar widths. */
-export const styleApplied=(style:StyleEngraving,current:EngravingOverrides):EngravingOverrides=>withBarWidths({...structuredClone(style),profiles:structuredClone(current.profiles)},current.barWidths??[]);
+export const styleApplied=(style:StyleEngraving,current:EngravingOverrides):EngravingOverrides=>withSystemGaps(withBarWidths({...structuredClone(style),profiles:structuredClone(current.profiles)},current.barWidths??[]),current.systemGaps??[]);
 
 /** Returns an error message for an invalid personal style name, or null when it is valid. */
 export function styleNameError(name:string):string|null {
@@ -40,6 +41,7 @@ function validateEntry(entry:unknown):asserts entry is SavedStyle {
   validateEngraving(entry.engraving);
   if(entry.engraving.profiles.length)throw new Error('A saved style cannot hold track profiles.');
   if(entry.engraving.barWidths?.length)throw new Error('A saved style cannot hold bar widths.');
+  if(entry.engraving.systemGaps?.length)throw new Error('A saved style cannot hold system gaps.');
 }
 function checkedLibrary(value:unknown):StyleLibrary {
   if(!exact(value,['format','version','entries'])||value.format!=='tabplayer-style-library'||value.version!==2||!Array.isArray(value.entries))throw new Error('Unsupported style library format or version.');

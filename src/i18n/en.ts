@@ -1643,6 +1643,20 @@ export const en = {
   'palette.stem_up': "Stem up",
   'palette.stem_down': "Stem down",
   'palette.stem_inverted': "Inverted stem",
+  'system_gaps.title': "Design: system gaps",
+  'system_gaps.help': "Set the space above one system, as a percentage of the standard gap (25 to 400). Select a bar in the system, then enter a value. Gaps are saved with the document and printed; they never change timing. The first system of the score has no gap above it.",
+  'system_gaps.selected': "Selected system: bars {first} to {last}.",
+  'system_gaps.field': "System gap (%)",
+  'system_gaps.status_layout': "System gaps apply in the page layouts, not in this score layout.",
+  'system_gaps.status_rendering': "The score is still rendering; system gaps are available once it has.",
+  'system_gaps.status_page_error': "The pages cannot be arranged, so system gaps are unavailable.",
+  'system_gaps.status_locked': "Editing is locked, so system gaps cannot be changed.",
+  'system_gaps.status_no_selection': "Select a bar to choose its system.",
+  'system_gaps.status_no_system': "The selected bar is not in a rendered system.",
+  'system_gaps.status_first': "The first system of the score has no gap above it, so it cannot take one.",
+  'system_gaps.invalid': "Enter a number from {min} to {max}.",
+  'system_gaps.reset_selected': "Reset selected system",
+  'system_gaps.reset_all': "Reset all system gaps",
 } as const;
 
 export type MessageKey = keyof typeof en;

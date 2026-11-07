@@ -149,6 +149,15 @@ pub struct BarWidth {
 
 pub const MAX_BAR_INDEX: u32 = 99_999;
 pub const MAX_BAR_WIDTHS: usize = 10_000;
+pub const MAX_SYSTEM_GAPS: usize = 10_000;
+
+/// A system's gap as a factor of the standard gap (1 is the default). `bar` is an anchor bar; the gap applies to the rendered system that contains it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SystemGap {
+    pub bar: u32,
+    pub scale: f64,
+}
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -171,6 +180,9 @@ pub struct EngravingOverrides {
     /// Absent (and omitted again when empty) in documents saved before bar widths existed. Entries run in bar order.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub bar_widths: Vec<BarWidth>,
+    /// Absent (and omitted again when empty) in documents saved before system gaps existed. Entries run in bar order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub system_gaps: Vec<SystemGap>,
 }
 
 impl EngravingOverrides {
@@ -196,6 +208,28 @@ impl EngravingOverrides {
         Ok(())
     }
 
+    fn validate_system_gaps(&self) -> Result<(), String> {
+        if self.system_gaps.len() > MAX_SYSTEM_GAPS {
+            return Err("Too many system gaps.".into());
+        }
+        let ordered = self
+            .system_gaps
+            .windows(2)
+            .all(|pair| pair[0].bar < pair[1].bar);
+        let fits = self.system_gaps.iter().all(|entry| {
+            entry.bar <= MAX_BAR_INDEX
+                && entry.scale.is_finite()
+                && (0.25..=4.0).contains(&entry.scale)
+        });
+        if !ordered || !fits {
+            return Err(
+                "System gaps must be 25% to 400% of the standard gap, one per bar, in bar order."
+                    .into(),
+            );
+        }
+        Ok(())
+    }
+
     pub fn validate(&self) -> Result<(), String> {
         if self
             .system_spacing
@@ -205,6 +239,7 @@ impl EngravingOverrides {
         }
         self.typography.validate()?;
         self.validate_bar_widths()?;
+        self.validate_system_gaps()?;
         let mut ids = HashSet::new();
         if self
             .profiles

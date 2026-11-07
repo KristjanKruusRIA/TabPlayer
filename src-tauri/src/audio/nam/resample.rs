@@ -156,6 +156,14 @@ impl Resampler {
         self.delay_in
     }
 
+    /// Takes over `other`'s running state; both must share one table.
+    pub(super) fn copy_from(&mut self, other: &Resampler) {
+        self.ring.copy_from_slice(&other.ring);
+        self.seen = other.seen;
+        self.at = other.at;
+        self.frac = other.frac;
+    }
+
     pub(super) fn reset(&mut self) {
         let half = self.table.taps / 2;
         self.ring.fill(0.0);

@@ -301,3 +301,43 @@ fn dc_settles_to_zero() {
         assert_eq!(tail[rate as usize * 4 - 1].to_bits(), 0);
     }
 }
+
+#[test]
+fn a_faulting_model_restores_once_and_stays_muted_until_reset() {
+    let mut stage = CaptureStage::new(scaled(f32::NAN), 48_000, 0.0);
+    assert!(!stage.faulted());
+    let out = run(&mut stage, &sine(48_000, 220.0, 0.1, 5000));
+    assert!(out.iter().all(|v| v.to_bits() == 0));
+    assert!(stage.faulted());
+    assert_eq!(
+        stage.restores(),
+        1,
+        "repeated faults must not restore again"
+    );
+    stage.reset();
+    assert!(!stage.faulted());
+    run(&mut stage, &sine(48_000, 220.0, 0.1, 100));
+    assert_eq!(stage.restores(), 2);
+}
+
+#[test]
+fn rate_support_matches_the_accepted_range() {
+    assert!(!CaptureStage::rate_supported(7_999));
+    assert!(CaptureStage::rate_supported(8_000));
+    assert!(CaptureStage::rate_supported(384_000));
+    assert!(!CaptureStage::rate_supported(384_001));
+}
+
+#[test]
+fn a_copy_continues_exactly_where_the_source_is() {
+    for rate in [48_000u32, 44_100] {
+        let mut a = CaptureStage::new(deep(), rate, 3.0);
+        let input = sine(rate, 196.0, 0.2, 3000);
+        run(&mut a, &input[..1500]);
+        let mut b = a.duplicate();
+        assert!(a.same_as(&b));
+        b.copy_from(&a);
+        let (x, y) = (run(&mut a, &input[1500..]), run(&mut b, &input[1500..]));
+        assert!(x.iter().zip(&y).all(|(p, q)| p.to_bits() == q.to_bits()));
+    }
+}

@@ -106,8 +106,7 @@ export const cabinetIrFits=(value:unknown):boolean=>{
   const {id,name,levelDb}=value as Record<string,unknown>;
   return typeof id==='string'&&/^[0-9a-f]{32}$/.test(id)&&typeof name==='string'&&name===name.trim()&&!/^[\u0085﻿]|[\u0085﻿]$/.test(name)&&[...name].length>=1&&[...name].length<=MAX_IR_NAME_LENGTH&&irText(name)&&typeof levelDb==='number'&&Number.isFinite(levelDb)&&levelDb>=-12&&levelDb<=12;
 };
-/** Whether `value` is an amp capture reference the native player accepts. It follows the cabinet reference's rules: a library identity, a name and a level trim. */
-export const captureFits=cabinetIrFits;
+// An amp capture reference and a cabinet impulse response reference share one rule (a library identity, a name and a level trim), so `capture` is marked `cabinetIr` above and checked by `cabinetIrFits`.
 const fits=(value:unknown,rule:FieldRule):boolean=>'cabinetIr' in rule?cabinetIrFits(value):'one' in rule?rule.one.includes(value as string|number):'each' in rule?Array.isArray(value)&&value.length===rule.length&&value.every(item=>fits(item,rule.each)):typeof value==='number'&&Number.isFinite(value)&&value>=rule.low&&value<=rule.high;
 /** Why a sound cannot be applied, or null. It is checked as completed with any blocks it lacks, against the native rules. */
 export function soundProblem(sound: TrackSound): string|null {

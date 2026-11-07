@@ -54,16 +54,18 @@ pub struct CaptureStage {
     dc_y1: f32,
     gain: f32,
     calibrated: bool,
-    /// Non-finite samples met and replaced by silence.
-    faults: u32,
+    /// Non-finite output met: the stage restored its state once, and is silent until `reset`.
+    faulted: bool,
+    level_db: f64,
     /// Consecutive exact zeros: device input, model input, and input of the
     /// converter back to the device rate.
     device_zeros: u32,
     model_zeros: u32,
     out_zeros: u32,
     at_rest: bool,
-    #[cfg(test)]
     never_rest: bool,
+    #[cfg(test)]
+    restores: u32,
     #[cfg(test)]
     underruns: u32,
     #[cfg(test)]
@@ -125,13 +127,15 @@ impl CaptureStage {
             dc_y1: 0.0,
             gain: 1.0,
             calibrated: false,
-            faults: 0,
+            faulted: false,
+            level_db: 0.0,
             device_zeros: 0,
             model_zeros: 0,
             out_zeros: 0,
             at_rest: false,
-            #[cfg(test)]
             never_rest: false,
+            #[cfg(test)]
+            restores: 0,
             #[cfg(test)]
             underruns: 0,
             #[cfg(test)]
@@ -143,6 +147,7 @@ impl CaptureStage {
         } else {
             0.0
         };
+        stage.level_db = level;
         let base = stage.calibration();
         stage.calibrated = base.is_some();
         let base = base.unwrap_or(1.0);
@@ -174,13 +179,15 @@ impl CaptureStage {
             dc_y1: 0.0,
             gain: 1.0,
             calibrated: false,
-            faults: 0,
+            faulted: false,
+            level_db: 0.0,
             device_zeros: 0,
             model_zeros: 0,
             out_zeros: 0,
             at_rest: false,
-            #[cfg(test)]
             never_rest: false,
+            #[cfg(test)]
+            restores: 0,
             #[cfg(test)]
             underruns: 0,
             #[cfg(test)]
@@ -205,7 +212,7 @@ impl CaptureStage {
                 peak = peak.max(y.abs());
             }
         }
-        if scratch.faults > 0 || !peak.is_finite() || peak <= 0.0 {
+        if scratch.faulted || !peak.is_finite() || peak <= 0.0 {
             return None;
         }
         let wanted_db = 20.0 * (AMP_TARGET / peak).log10();
@@ -216,9 +223,62 @@ impl CaptureStage {
     }
 
     /// False when the capture could not be calibrated and runs at unit gain
-    /// (before the level offset), so callers can report it.
+    /// (before the level offset), so callers can report it. A capture measured
+    /// 40 to 60 dB under the target is clamped to +40 dB and still reports
+    /// calibrated, so it may play up to 20 dB quiet.
     pub fn calibrated(&self) -> bool {
         self.calibrated
+    }
+
+    /// Whether a stage can be built for this device rate. Callers that cannot
+    /// support it play the built-in circuit instead of a clamped stage.
+    pub fn rate_supported(device_rate: u32) -> bool {
+        (RATE_RANGE.0..=RATE_RANGE.1).contains(&device_rate)
+    }
+
+    /// True after the model produced a non-finite value: the stage restored its
+    /// state once and stays silent, at no cost, until [`CaptureStage::reset`].
+    pub fn faulted(&self) -> bool {
+        self.faulted
+    }
+
+    /// Whether `other` is the same capture at the same rate and level, so that
+    /// one running stage can stand for both.
+    pub fn same_as(&self, other: &CaptureStage) -> bool {
+        Arc::ptr_eq(&self.model, &other.model)
+            && self.device_rate == other.device_rate
+            && self.level_db.to_bits() == other.level_db.to_bits()
+    }
+
+    /// A fresh stage like this one just after `new`, without calibrating again.
+    pub fn duplicate(&self) -> CaptureStage {
+        let mut copy = self.scratch();
+        copy.gain = self.gain;
+        copy.calibrated = self.calibrated;
+        copy.level_db = self.level_db;
+        copy
+    }
+
+    /// Takes over everything `other` holds, which must come from the same
+    /// capture and rate (`same_as`). No allocation.
+    pub fn copy_from(&mut self, other: &CaptureStage) {
+        self.state.snapshot_from(&other.state);
+        if let (Some(a), Some(b)) = (self.to_model.as_mut(), other.to_model.as_ref()) {
+            a.copy_from(b);
+        }
+        if let (Some(a), Some(b)) = (self.to_device.as_mut(), other.to_device.as_ref()) {
+            a.copy_from(b);
+        }
+        self.queue.copy_from_slice(&other.queue);
+        self.queue_head = other.queue_head;
+        self.queue_len = other.queue_len;
+        self.dc_x1 = other.dc_x1;
+        self.dc_y1 = other.dc_y1;
+        self.device_zeros = other.device_zeros;
+        self.model_zeros = other.model_zeros;
+        self.out_zeros = other.out_zeros;
+        self.at_rest = other.at_rest;
+        self.faulted = other.faulted;
     }
 
     pub fn process(&mut self, x: f32) -> f32 {
@@ -231,6 +291,13 @@ impl CaptureStage {
     /// that never settle exactly (LSTM) never rest.
     pub fn at_rest(&self) -> bool {
         self.at_rest
+    }
+
+    /// At rest with nothing left in the DC blocker either: everything the stage
+    /// holds is the same for any history that led here, so two such stages are
+    /// interchangeable.
+    pub fn is_blank(&self) -> bool {
+        self.at_rest && self.dc_x1 == 0.0 && self.dc_y1 == 0.0
     }
 
     /// Back to the prewarmed state, as after `new`. No allocation.
@@ -251,6 +318,7 @@ impl CaptureStage {
         self.model_zeros = 0;
         self.out_zeros = 0;
         self.at_rest = false;
+        self.faulted = false;
     }
 
     /// Delay the converters add, in device samples; 0 when the rates match.
@@ -258,9 +326,15 @@ impl CaptureStage {
         self.prime as u32
     }
 
-    #[cfg(test)]
-    pub(super) fn set_never_rest(&mut self, never: bool) {
+    /// Runs the model and converters on every sample, with no rest shortcut, to
+    /// compare against it.
+    pub fn set_never_rest(&mut self, never: bool) {
         self.never_rest = never;
+    }
+
+    #[cfg(test)]
+    pub(super) fn restores(&self) -> u32 {
+        self.restores
     }
 
     #[cfg(test)]
@@ -281,6 +355,10 @@ impl CaptureStage {
     /// One device sample through everything but the gain.
     #[inline]
     fn tick(&mut self, x: f32) -> f32 {
+        if self.faulted {
+            return 0.0;
+        }
+        let x = if x.is_finite() { x } else { 0.0 };
         if x == 0.0 {
             self.device_zeros = self.device_zeros.saturating_add(1);
         } else {
@@ -298,12 +376,13 @@ impl CaptureStage {
             self.model_step(x, silent);
         }
 
+        if self.faulted {
+            return 0.0;
+        }
         let z = self.pop();
         let y = z - self.dc_x1 + self.dc_r * self.dc_y1;
         if !y.is_finite() {
-            self.faults = self.faults.saturating_add(1);
-            self.dc_x1 = 0.0;
-            self.dc_y1 = 0.0;
+            self.fault();
             return 0.0;
         }
         let y = if y.abs() < 1e-20 { 0.0 } else { y };
@@ -314,6 +393,24 @@ impl CaptureStage {
             self.check_rest();
         }
         y
+    }
+
+    /// A poisoned model state would keep returning NaN: restore it once and
+    /// stay silent until `reset`, so a hostile model cannot make every sample
+    /// pay for a copy of its whole state.
+    #[cold]
+    fn fault(&mut self) {
+        if self.faulted {
+            return;
+        }
+        self.faulted = true;
+        self.state.snapshot_from(&self.snapshot);
+        self.dc_x1 = 0.0;
+        self.dc_y1 = 0.0;
+        #[cfg(test)]
+        {
+            self.restores += 1;
+        }
     }
 
     #[inline]
@@ -330,9 +427,7 @@ impl CaptureStage {
             if v.is_finite() {
                 v
             } else {
-                // A poisoned model state would keep returning NaN: start over.
-                self.faults = self.faults.saturating_add(1);
-                self.state.snapshot_from(&self.snapshot);
+                self.fault();
                 0.0
             }
         };
@@ -384,7 +479,6 @@ impl CaptureStage {
     }
 
     fn check_rest(&mut self) {
-        #[cfg(test)]
         if self.never_rest {
             return;
         }

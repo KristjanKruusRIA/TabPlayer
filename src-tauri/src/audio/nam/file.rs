@@ -22,7 +22,7 @@ pub const MAX_DILATION: usize = 4096;
 /// Cap on the sum over layers of `channels * (kernel_size - 1) * dilation`: the floats of history the model keeps.
 /// The standard official A1 WaveNet needs 49,104 (lite, feather and nano fewer), so this is 2.7 times that. It also
 /// bounds prewarm, which feeds the receptive field of zeros through the model: with the cost budget in `cost`, the
-/// worst model that passes both takes about 1.2 billion multiply-adds to prewarm, a fraction of a second off the
+/// worst model that passes both takes about 0.78 billion multiply-adds to prewarm, a fraction of a second off the
 /// audio thread. The old 4,000,000 allowed more than thirty times that.
 pub const MAX_RING_FLOATS: usize = 131_072;
 pub const MAX_WEIGHTS: usize = 2_000_000;

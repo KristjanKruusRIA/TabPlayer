@@ -84,8 +84,22 @@ fn the_standard_constant_is_what_the_estimator_says_of_the_standard_fixture() {
     );
     assert_eq!(
         MAX_MACS_PER_SECOND,
-        4 * STANDARD_A1_MACS_PER_SAMPLE * 48_000
+        2 * STANDARD_A1_MACS_PER_SAMPLE * 48_000
     );
+    assert_eq!(BUDGET_FACTOR, 2);
+    // A WaveNet's cost is its multiply-adds; an LSTM's is weighted by its measured ratio (about 2.1).
+    assert_eq!(
+        cost_per_second(file.spec(), 48_000),
+        macs_per_second(file.spec(), 48_000)
+    );
+    let lstm = parse_nam(LSTM_FIXTURE).unwrap();
+    assert_eq!(
+        cost_per_second(lstm.spec(), 48_000),
+        macs_per_second(lstm.spec(), 48_000) * 21 / 10
+    );
+    let ratio = LSTM_COST_NUM as f64 / LSTM_COST_DEN as f64;
+    let measured = (12.94 / 49_472.0) / (6.44 / 52_753.0);
+    assert!((ratio - measured).abs() < 0.1, "{ratio} vs {measured}");
 }
 
 #[test]
@@ -156,8 +170,47 @@ fn standard_lstm_sizes_are_admitted() {
             "{layers} x 24"
         );
     }
-    // Two layers of 64 units are the largest LSTM the budget allows; three are not.
-    assert!(parse_nam(&lstm_bytes(2, 64)).is_ok());
+    // Weighted by 2.1, the budget is 12,686 raw multiply-adds per sample at 48 kHz. Three layers of 25 units
+    // (12,625) are the largest LSTM it admits; one more unit, or the old largest, are not.
+    assert_eq!(lstm_macs_of(3, 25), 12_625);
+    assert!(parse_nam(&lstm_bytes(3, 25)).is_ok());
+    assert_eq!(parse_nam(&lstm_bytes(3, 26)), Err(NamError::TooHeavy));
+    assert_eq!(parse_nam(&lstm_bytes(2, 33)), Err(NamError::TooHeavy));
+    assert!(parse_nam(&lstm_bytes(2, 32)).is_ok());
+    assert!(parse_nam(&lstm_bytes(1, 55)).is_ok());
+    assert_eq!(parse_nam(&lstm_bytes(1, 56)), Err(NamError::TooHeavy));
+}
+
+/// Raw multiply-adds per sample of an LSTM file, through the parser.
+fn lstm_macs_of(layers: usize, hidden: usize) -> u64 {
+    macs_per_sample(parse_nam(&lstm_bytes(layers, hidden)).unwrap().spec())
+}
+
+#[test]
+fn an_lstm_is_weighted_against_a_wavenet_of_the_same_multiply_adds() {
+    // 49,472 raw multiply-adds: admitted as a WaveNet's weight at the old budget, refused as an LSTM at the new one.
+    assert_eq!(lstm_macs_of_spec(2, 64), 49_472);
+    let lstm = lstm_spec(2, 64);
+    let wavenet = a1([24, 8], 8, [&D10, &D10]);
+    assert!(within_budget(&wavenet, 48_000));
+    assert!(macs_per_sample(&lstm) > macs_per_sample(&wavenet));
+    assert!(!within_budget(&lstm, 48_000));
+    // The same raw count of a smaller LSTM sits at 2.1 times its multiply-adds.
+    let small = lstm_spec(3, 25);
+    assert!(within_budget(&small, 48_000));
+    assert!(cost_per_second(&small, 48_000) > macs_per_second(&small, 48_000) * 2);
+    assert!(cost_per_second(&small, 48_000) <= MAX_MACS_PER_SECOND);
+}
+
+fn lstm_spec(layers: usize, hidden: usize) -> NamSpec {
+    NamSpec::Lstm(LstmSpec {
+        num_layers: layers,
+        input_size: 1,
+        hidden_size: hidden,
+    })
+}
+fn lstm_macs_of_spec(layers: usize, hidden: usize) -> u64 {
+    macs_per_sample(&lstm_spec(layers, hidden))
 }
 
 #[test]
@@ -188,24 +241,37 @@ fn a_64_channel_32_layer_wavenet_inside_every_other_cap_is_refused() {
 
 #[test]
 fn big_lstms_are_refused() {
-    assert_eq!(parse_nam(&lstm_bytes(4, 64)), Err(NamError::TooHeavy));
-    assert_eq!(parse_nam(&lstm_bytes(3, 64)), Err(NamError::TooHeavy));
+    for (layers, hidden) in [(4, 64), (3, 64), (2, 64), (1, 64)] {
+        assert_eq!(
+            parse_nam(&lstm_bytes(layers, hidden)),
+            Err(NamError::TooHeavy),
+            "{layers} x {hidden}"
+        );
+    }
 }
 
 #[test]
 fn the_budget_is_per_second_so_the_model_rate_counts() {
     let standard = a1([16, 8], 8, [&D10, &D10]);
+    // Exactly twice the standard model: still admitted; a hair more is not.
     assert!(within_budget(&standard, 96_000));
-    // Exactly four times the standard model: still admitted; a hair more is not.
-    assert!(within_budget(&standard, 192_000));
-    assert!(!within_budget(&standard, 192_001));
-    // 3.3x the standard model per sample: fine at 48 kHz, too much at 96 kHz.
-    let wide = a1([32, 8], 8, [&D10, &D10]);
+    assert!(!within_budget(&standard, 96_001));
+    assert!(!within_budget(&standard, 192_000));
+    // The largest admitted WaveNet (channels 24 then 8, head 8, 1.98x the standard model): fine at 48 kHz, not at 96.
+    let wide = a1([24, 8], 8, [&D10, &D10]);
+    assert_eq!(macs_per_sample(&wide), 26_337);
     assert!(within_budget(&wide, 48_000));
     assert!(!within_budget(&wide, 96_000));
+    // One channel more is over at 48 kHz.
+    assert!(!within_budget(&a1([25, 8], 8, [&D10, &D10]), 48_000));
     // The same in a file that states its rate.
     let mut v = random_model_json([16, 8], 8, [&D10, &D10], false, "Tanh");
     v["sample_rate"] = json!(384_000);
+    assert_eq!(
+        parse_nam(&serde_json::to_vec(&v).unwrap()),
+        Err(NamError::TooHeavy)
+    );
+    v["sample_rate"] = json!(192_000);
     assert_eq!(
         parse_nam(&serde_json::to_vec(&v).unwrap()),
         Err(NamError::TooHeavy)
@@ -214,9 +280,9 @@ fn the_budget_is_per_second_so_the_model_rate_counts() {
     assert!(parse_nam(&serde_json::to_vec(&v).unwrap()).is_ok());
 }
 
-/// The most multiply-adds prewarm may need for any admitted WaveNet: about 0.3 s at the standard model's measured
+/// The most multiply-adds prewarm may need for any admitted WaveNet: about 0.15 s at the standard model's measured
 /// 6.7 GMAC/s, spent off the audio thread, once per stage.
-const PREWARM_WORK_LIMIT: u128 = 2_000_000_000;
+const PREWARM_WORK_LIMIT: u128 = 1_000_000_000;
 
 #[test]
 fn the_history_cap_admits_the_official_presets_and_bounds_prewarm() {

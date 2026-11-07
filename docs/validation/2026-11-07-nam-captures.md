@@ -9,7 +9,7 @@ Branch `feature/nam-captures`. A track's Amp stage can play a Neural Amp Modeler
 - The document stores only `amp.capture = { id, name, levelDb }`. It never holds the file or a path. The field is omitted when absent, so old projects and edit logs replay byte for byte, and older builds refuse a document that uses it.
 - Inference is TabPlayer's own Rust port (WaveNet A1 and LSTM), run as dual mono: the left and right channels each have their own stage, so a stereo track whose channels differ runs the model twice. While both channels carry bit-identical input (a signed zero counts as zero) the right stage is not run, and the left stage's output goes to both channels. The capture is calibrated once to the same steady level as the built-in amps (`AMP_TARGET`), then `levelDb`, `gainDb` and the four-band tone stack apply after it. The amp model and drive are kept in the document but not played while a capture plays.
 - When the library lacks the capture (missing, unreadable, an unsupported kind of model, too heavy to play, or a capture that reads but produces non-finite sound when its level is measured) the built-in amp plays, a notice says so, and the document is unchanged. The measuring failure has its own state, `uncalibrated`, in `nam_capture_status`; the picker names the capture and hides the drive note, as for the other states that are not ready.
-- A capture is refused at import, with "This capture is too heavy to play in real time", when its estimated multiply-adds per second (per-sample multiply-adds times the model's own sample rate) are over 4 times those of the standard official A1 WaveNet at 48 kHz (`MAX_MACS_PER_SECOND` = 2,557,440,000). The caps in the parser bound memory; this one bounds time.
+- A capture is refused at import, with "This capture is too heavy to play in real time", when its estimated multiply-adds per second (per-sample multiply-adds times the model's own sample rate) are over 2 times those of the standard official A1 WaveNet at 48 kHz (`MAX_MACS_PER_SECOND` = 1,278,720,000), with an LSTM's multiply-adds weighted by 2.1, its measured cost relative to a WaveNet's. The caps in the parser bound memory; this one bounds time.
 - Untrusted input is bounded before any allocation; the audio thread allocates nothing (counting-allocator tests). Output is checked for finiteness after every gain, including the calibration, level and amp gains: a product past the `f32` range silences the stage until the next reset, like any other non-finite output.
 
 ## Evidence
@@ -73,36 +73,45 @@ the `nam-bench <file>` subcommand of `src-tauri/examples/tone_ab`; release, 48 k
 
 The target was 3 us/sample or less for a standard model, and it is met. The figures exclude resampling and calibration, and cover one voice (one channel); a stereo track with different channels runs two stages. These are the Task 2 figures; the final-review run below repeats them.
 
-### CPU cost budget (final-review fix)
+### CPU cost budget (final-review fix, tightened)
 
-The parser's caps bounded memory only. A 64-channel, kernel 3, 32-layer WaveNet fits every cap (about 530,000 weights) and has about 40 times the standard model's multiply-adds per sample (the review measured about 115 times its time); a 4 x 64 LSTM has about 8.6 times. `parse_nam` now estimates multiply-adds per sample (`audio/nam/cost.rs`, a pure function with unit tests: products of the convolutions, mixins, 1x1s, heads and LSTM gates; biases and activations not counted) and refuses a model whose multiply-adds per second are over 4 times the standard A1 WaveNet's at 48 kHz.
+The parser's caps bounded memory only. A 64-channel, kernel 3, 32-layer WaveNet fits every cap (about 530,000 weights) and has about 40 times the standard model's multiply-adds per sample (the review measured about 115 times its time); a 4 x 64 LSTM has about 8.6 times. `parse_nam` estimates multiply-adds per sample (`audio/nam/cost.rs`, a pure function with unit tests: products of the convolutions, mixins, 1x1s, heads and LSTM gates; biases and activations not counted) and refuses a model whose cost per second is over 2 times the standard A1 WaveNet's at 48 kHz.
 
-- Standard A1 (`wavenet_standard.nam`, 13,802 weights): 13,321 multiply-adds per sample, 639,408,000 per second. Budget: 2,557,440,000 per second. The constant is pinned to the estimator and the fixture by a test.
-- The budget is per second of the model's own rate, so a 96 kHz standard model (2x) passes and a 384 kHz one (8x) does not.
-- Admitted by tests: standard, lite, feather and nano WaveNet (the standard through the fixture and the real parser; the smaller three as the trainer's presets with channels 12/6, 8/4 and 4/2, through the parser with random weights, each costing less than the standard one), the Core LSTM fixture, and LSTMs of 1 to 3 layers of 24 units. The lite, feather and nano shapes are written from the trainer's published presets as I know them; only the standard one has a fixture here, so those three are not checked against a file. Because each is narrower than the standard model with no more layers, the margin to the budget is large whatever their exact dilations.
-- Refused by tests: the 64-channel, 32-layer case (with the exact weight count, so only the budget can be the reason), 3 x 64 and 4 x 64 LSTMs. The largest LSTM the budget admits is 2 x 64 (49,472 multiply-adds per sample).
-- History cap `MAX_RING_FLOATS`: 4,000,000 -> 131,072 floats. The standard A1 needs 49,104 (the others fewer), so the cap is 2.7 times the largest official need. Prewarm feeds the receptive field of zeros through the model, so its work is receptive field x multiply-adds per sample. A search over every width, kernel, gating and array count at the longest dilations the cap allows found the worst admitted WaveNet at 1.16 billion multiply-adds to prewarm (4 arrays of 4 channels, kernel 8, gated, dilation 36), about 0.17 s at the standard model's 6.8 GMAC/s, off the audio thread, once per stage. The old cap allowed about 36 billion (over 5 s). LSTM prewarm is half a second of the model rate, so its work is half the multiply-adds per second the budget allows: at most 1.28 billion.
+The first ruling was 4 times, with multiply-adds counted alike for both architectures. Measured, that admitted a WaveNet that took 31% of a sample period and an LSTM that took 62%, and four tracks of either overran one thread (see the first table). The controller then tightened it: the factor is 2 (`BUDGET_FACTOR`) and an LSTM multiply-add is weighted by its measured cost ratio to a WaveNet one, 2.1 (`LSTM_COST_NUM / LSTM_COST_DEN` = 21 / 10). The ratio comes from that first bench: WaveNet 6.44 us over 52,753 multiply-adds is 0.122 ns each, LSTM 12.94 us over 49,472 is 0.262 ns each, which is 2.14, taken as 2.1 (a test checks the constant against those figures).
 
-Measured with the same bench after the change (`nam-bench`, release, 48 kHz, best of 5 over 10 s, engine only, one thread, shared development machine; the models above the first two are random-weight files made for this run and not kept):
+- Standard A1 (`wavenet_standard.nam`, 13,802 weights): 13,321 multiply-adds per sample, 639,408,000 per second. Budget: 1,278,720,000 WaveNet-equivalent multiply-adds per second. The constant is pinned to the estimator and the fixture by a test.
+- The budget is per second of the model's own rate, so a 96 kHz standard model (2x) passes exactly and a 192 kHz one does not.
+- Admitted by tests: standard, lite, feather and nano WaveNet (the standard through the fixture and the real parser; the smaller three as the trainer's presets with channels 12/6, 8/4 and 4/2, through the parser with random weights, each costing less than the standard one, so each is under half the budget), the Core LSTM fixture, and LSTMs of 1 to 3 layers of 24 units. The standard LSTM's size is not known to me; 1 x 24 costs 5,090 weighted multiply-adds per sample (19% of the 26,642 budget) and 3 x 24 costs 24,444 (92%), so any LSTM up to those fits. The lite, feather and nano shapes are written from the trainer's published presets as I know them; only the standard one has a fixture here.
+- Largest admitted: WaveNet with channels 24 then 8, head 8, dilations 1..512 twice, 26,337 multiply-adds per sample (1.98x the standard; one more channel is refused). LSTM 3 x 25 units, 12,625 multiply-adds, 26,512 weighted (2 x 32 and 1 x 55 are admitted too; 3 x 26, 2 x 33 and 1 x 56 are refused).
+- Refused by tests: the 64-channel, 32-layer case (with the exact weight count, so only the budget can be the reason), and LSTMs of 1, 2, 3 and 4 x 64 (the old largest, 2 x 64, now costs 103,891 weighted per sample).
+- History cap `MAX_RING_FLOATS`: 4,000,000 -> 131,072 floats. The standard A1 needs 49,104 (the others fewer), so the cap is 2.7 times the largest official need. Prewarm feeds the receptive field of zeros through the model, so its work is receptive field x multiply-adds per sample. A search over every width, kernel, gating and array count at the longest dilations the cap allows found the worst admitted WaveNet at 0.78 billion multiply-adds to prewarm (4 arrays of 4 channels, kernel 5, gated, dilation 64; 1.16 billion at the 4x budget), about 0.12 s at 6.6 GMAC/s, off the audio thread, once per stage. The old cap allowed about 36 billion (over 5 s). LSTM prewarm is half a second of the model rate, so at most 0.3 billion.
+
+Measured with the same bench (`nam-bench`, release, 48 kHz, best of 5 over 10 s, engine only, one thread, shared development machine; the two largest files are random-weight files made for this run and not kept). The first rows are from the 4x budget, kept to show why it was tightened:
 
 | Model | Multiply-adds/sample | us/sample | Real time | GMAC/s |
 |---|---|---|---|---|
-| `wavenet_standard.nam` | 13,321 | 1.95 | 10.7x | 6.8 |
+| `wavenet_standard.nam` | 13,321 | 2.01 (1.95 earlier) | 10.4x | 6.6 |
 | synthetic standard-size A1 | 13,321 | 2.59 | 8.0x | 5.1 |
-| largest admitted WaveNet: channels 32 then 16, head 16, dilations 1..512 twice (3.96x the standard) | 52,753 | 6.44 | 3.2x | 8.2 |
-| largest admitted LSTM: 2 x 64 (3.7x the standard) | 49,472 | 12.94 | 1.6x | 3.8 |
+| largest admitted WaveNet now: channels 24 then 8, head 8 | 26,337 | 4.00 | 5.2x | 6.6 |
+| largest admitted LSTM now: 3 x 25 | 12,625 | 3.50 | 6.0x | 3.6 |
+| (4x budget) largest WaveNet: channels 32 then 16, head 16 | 52,753 | 6.44 | 3.2x | 8.2 |
+| (4x budget) largest LSTM: 2 x 64 | 49,472 | 12.94 | 1.6x | 3.8 |
 
-What that means for a session, with the sample period at 48 kHz being 20.8 us. Four tracks each playing the largest admitted capture, with the two channels of each track different (dual mono, so 4 x 2 = 8 voices):
+The weighting does what it should: the largest admitted WaveNet and LSTM now take 4.00 and 3.50 us, about twice the standard model's 2.0 us, where before they took 3.3 and 6.6 times it.
+
+What that means for a session, with the sample period at 48 kHz being 20.8 us. Four tracks each playing the same capture, with the two channels of each track mirrored (4 voices) or different (dual mono, so 4 x 2 = 8 voices):
 
 | Capture on every track | One voice | 4 tracks, channels mirrored (x4) | 4 tracks, channels different (x8) |
 |---|---|---|---|
-| standard A1 | 1.95 us (9%) | 7.8 us (37%) | 15.6 us (75%) |
-| largest admitted WaveNet | 6.44 us (31%) | 25.8 us (124%) | 51.5 us (247%) |
-| largest admitted LSTM | 12.94 us (62%) | 51.8 us (249%) | 103.5 us (497%) |
+| standard A1 | 2.01 us (10%) | 8.0 us (39%) | 16.1 us (77%) |
+| largest admitted WaveNet | 4.00 us (19%) | 16.0 us (77%) | 32.0 us (154%) |
+| largest admitted LSTM | 3.50 us (17%) | 14.0 us (67%) | 28.0 us (134%) |
+| (4x budget) largest WaveNet | 6.44 us (31%) | 25.8 us (124%) | 51.5 us (247%) |
+| (4x budget) largest LSTM | 12.94 us (62%) | 51.8 us (249%) | 103.5 us (497%) |
 
-Percentages are of one sample period on one thread, engine only, excluding resampling, calibration and the rest of the chain. So the ruled budget keeps one capture playable on one track, and four tracks of standard captures fit, but four tracks of captures at the budget do not. The budget is a per-capture guard against the pathological cases (115x), not a guarantee for a full session. If a tighter bound is wanted, the factor is the single constant `BUDGET_FACTOR`; 2x would put four mirrored tracks of the largest WaveNet at about 62%. An LSTM costs about twice as much per multiply-add as a WaveNet here (3.8 against 8 GMAC/s), which the estimator does not model.
+Percentages are of one sample period on one thread, engine only, excluding resampling, calibration and the rest of the chain. So four mirrored tracks of the largest admitted captures fit, with about a quarter of the thread to spare; four tracks of such captures with differing stereo channels still do not, and neither does a mix of several heavy captures. The budget guards each capture, not the session: captures on several tracks together are not budgeted.
 
-Calibration runs one second of audio through the stage when a stage is first built for a capture and rate, off the audio thread (the library status measures at the capture's own rate and the amp reuses that unless the device rate differs): about 0.3 s for the largest admitted WaveNet and 0.6 s for the largest LSTM, and 0.1 s for the standard model. The result is kept per capture and rate.
+Calibration runs one second of audio through the stage when a stage is first built for a capture and rate, off the audio thread (the library status measures at the capture's own rate and the amp reuses that unless the device rate differs): about 0.2 s for the largest admitted WaveNet or LSTM and 0.1 s for the standard model. The result is kept per capture and rate.
 
 ### Automated checks
 
@@ -130,7 +139,7 @@ Run on the worktree (Rust 1.88.0 via `RUSTUP_TOOLCHAIN`), after the desktop proo
 - The calibration cache can see a duplicate insert under a race, and evicts first in, first out. This does not affect correctness as reviewed. (The copy guard now also requires the same model by `Arc`.)
 - The `uncalibrated` status is measured at the capture's own rate and the amp measures at the device rate; a model that faults at one and not the other would show the wrong state. No such model is known.
 - The detail of a refusal or unsupported capture (`{detail}` in the notices) is the native English message, also in the Estonian and German texts. The rest of those notices is translated.
-- The cost budget is per capture. It does not bound a session: see the four-track table above.
+- The cost budget is per capture. Captures on several tracks together are not budgeted: four tracks of the largest admitted captures with differing stereo channels take more than the audio thread has (see the four-track table above), and the estimator ignores resampling and the rest of the chain.
 - The cabinet picker has no busy note like the amp capture picker's (it has no busy path of its own); it is left for its own follow-up.
 
 ## Environment notes

@@ -1515,3 +1515,89 @@ it('writes the clicked staff position as one edit that one undo removes, and pre
   await waitFor(()=>expect(currentBeat(c,1).notes).toHaveLength(0));
   expect(c.getState().snapshot.project.edits).toEqual([]);
 });
+  const spellings=(c:DocumentController)=>c.getState().snapshot.project.edits.map(edit=>edit.type);
+  const firstNote=(c:DocumentController)=>currentBeat(c).notes[0];
+  it('sets a pending accidental with a chord, writes the next letter as one spelled edit that one undo removes, and clears it',async()=>{
+    window.localStorage.removeItem(inputKey);
+    const c=await setup(),workspace=screen.getByRole('region',{name:'Score workspace'});
+    fireEvent.keyDown(workspace,{key:'n'});
+    // AltGr reports a brace as the key and ctrl+alt; the chord is read from the physical key.
+    fireEvent.keyDown(workspace,{key:'{',code:'Digit7',ctrlKey:true,altKey:true});
+    expect(screen.getByText(/Next note: Double flat/)).toBeInTheDocument();
+    // The same chord again clears it, and so does Escape.
+    fireEvent.keyDown(workspace,{key:'{',code:'Digit7',ctrlKey:true,altKey:true});
+    expect(screen.getByText(/Note entry is on/)).toBeInTheDocument();
+    fireEvent.keyDown(workspace,{code:'Digit9',key:'9',ctrlKey:true});
+    expect(screen.getByText(/Next note: Sharp/)).toBeInTheDocument();
+    fireEvent.keyDown(workspace,{key:'Escape'});
+    expect(screen.getByText(/Note entry is on/)).toBeInTheDocument();
+    expect(spellings(c)).toEqual([]);
+    fireEvent.keyDown(workspace,{code:'Digit9',key:'9',ctrlKey:true,altKey:true});
+    expect(screen.getByText(/Next note: Double sharp/)).toBeInTheDocument();
+    fireEvent.keyDown(workspace,{key:'d'});
+    await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(1));
+    // One gesture, one edit: the note and its spelling travel in one sequence.
+    const edits=c.getState().snapshot.project.edits;expect(edits).toHaveLength(1);
+    expect(edits[0]).toMatchObject({type:'sequence'});
+    expect((edits[0] as {commands:{type:string;accidentalMode?:number}[]}).commands.some(step=>step.type==='setNoteSpelling'&&step.accidentalMode===4)).toBe(true);
+    expect(screen.getByText(/Note entry is on/)).toBeInTheDocument();
+    // It was used up: the next letter takes the key signature.
+    await waitFor(()=>expect(entryProps().editTarget).toMatchObject({beat:1}));
+    fireEvent.keyDown(workspace,{key:'d'});
+    await waitFor(()=>expect(currentBeat(c,1).notes).toHaveLength(1));
+    expect(c.getState().snapshot.project.edits).toHaveLength(2);
+    expect(currentBeat(c,1).notes[0].accidentalMode).toBe(0);
+    fireEvent.keyDown(workspace,{key:'z',ctrlKey:true});
+    await waitFor(()=>expect(currentBeat(c,1).notes).toHaveLength(0));
+    fireEvent.keyDown(workspace,{key:'z',ctrlKey:true});
+    await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(0));
+    expect(c.getState().snapshot.project.edits).toEqual([]);
+  });
+  it('clears a pending accidental when entry is turned off, when the selection moves, and clicks use it',async()=>{
+    window.localStorage.removeItem(inputKey);
+    const c=await setup(),workspace=screen.getByRole('region',{name:'Score workspace'});
+    fireEvent.keyDown(workspace,{key:'n'});
+    fireEvent.keyDown(workspace,{code:'Digit9',key:'9',ctrlKey:true});
+    fireEvent.keyDown(workspace,{key:'ArrowRight'});
+    expect(screen.getByText(/Note entry is on/)).toBeInTheDocument();
+    fireEvent.keyDown(workspace,{code:'Digit9',key:'9',ctrlKey:true});
+    fireEvent.keyDown(workspace,{key:'n'});fireEvent.keyDown(workspace,{key:'n'});
+    expect(screen.getByText(/Note entry is on/)).toBeInTheDocument();
+    fireEvent.keyDown(workspace,{code:'Digit9',key:'9',ctrlKey:true});
+    const at={track:0,staff:0,bar:0,voice:0,beat:1};
+    expect(entryProps().noteEntry!.describe(at,2)).toBe('G#4');
+    act(()=>entryProps().noteEntry!.onHit(at,2,{chord:false}));
+    await waitFor(()=>expect(currentBeat(c,1).notes).toHaveLength(1));
+    expect(c.getState().snapshot.project.edits).toHaveLength(1);
+    expect(screen.queryByText(/Next note/)).toBeNull();
+  });
+  it('re-spells the selected note with entry off, as one edit, and records nothing for the spelling it has',async()=>{
+    window.localStorage.removeItem(inputKey);
+    const c=await setup(blankProject()),workspace=screen.getByRole('region',{name:'Score workspace'});
+    fireEvent.keyDown(workspace,{key:'n'});fireEvent.keyDown(workspace,{key:'d'});
+    await waitFor(()=>expect(currentBeat(c).notes).toHaveLength(1));
+    fireEvent.keyDown(workspace,{key:'n'});
+    fireEvent.keyDown(workspace,{key:'ArrowLeft'});
+    const sounding=(n:{realValue:number})=>n.realValue;
+    const pitch=sounding(firstNote(c));
+    // D natural is already what Ctrl+8 asks for: nothing is recorded.
+    fireEvent.keyDown(workspace,{code:'Digit8',key:'8',ctrlKey:true});
+    await act(async()=>{await Promise.resolve();});
+    expect(c.getState().snapshot.project.edits).toHaveLength(1);
+    // A sharp does not exist for D: the message says so and nothing is recorded.
+    fireEvent.keyDown(workspace,{code:'Digit9',key:'9',ctrlKey:true});
+    expect(await screen.findByText(/cannot be spelled that way/)).toBeInTheDocument();
+    expect(c.getState().snapshot.project.edits).toHaveLength(1);
+    // A double sharp is C##: one setNoteSpelling edit, same sounding pitch.
+    fireEvent.keyDown(workspace,{code:'Digit9',key:'{',ctrlKey:true,altKey:true});
+    await waitFor(()=>expect(c.getState().snapshot.project.edits).toHaveLength(2));
+    expect(c.getState().snapshot.project.edits[1]).toMatchObject({type:'setNoteSpelling',accidentalMode:4});
+    expect(sounding(firstNote(c))).toBe(pitch);
+    // Change Accidental cycles to the next spelling; one undo takes each back.
+    fireEvent.keyDown(workspace,{code:'Digit8',key:'8',ctrlKey:true,altKey:true});
+    await waitFor(()=>expect(c.getState().snapshot.project.edits).toHaveLength(3));
+    expect(c.getState().snapshot.project.edits[2]).toMatchObject({type:'setNoteSpelling',accidentalMode:6});
+    fireEvent.keyDown(workspace,{key:'z',ctrlKey:true});
+    await waitFor(()=>expect(c.getState().snapshot.project.edits).toHaveLength(2));
+  });
+

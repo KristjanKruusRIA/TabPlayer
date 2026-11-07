@@ -69,13 +69,13 @@ it('writes a flat and its spelling as one edit when automatic spelling would rea
 it('offers both doubles and writes them as one spelled edit', async () => {
   const log: EditCommand[] = [];
   render(<Harness target={pitched} log={log} />);
-  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Spell with double sharp' })); });
-  expect(screen.getByRole('button', { name: 'Spell with double sharp' })).toHaveAttribute('aria-pressed', 'true');
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Double sharp' })); });
+  expect(screen.getByRole('button', { name: 'Double sharp' })).toHaveAttribute('aria-pressed', 'true');
   await press('c');
   expect(log).toEqual([{ type: 'sequence', commands: [{ type: 'addPitchedNote', target: pitched, pitch: 62 }, { type: 'setNoteSpelling', target: pitched, noteIndex: 0, accidentalMode: 4 }] }]);
   expect(screen.getByRole('status')).toHaveTextContent('Entered C##4');
   expect(screen.getByRole('button', { name: 'Key signature' })).toHaveAttribute('aria-pressed', 'true');
-  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Spell with double flat' })); });
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Double flat' })); });
   await press('b');
   expect(log).toHaveLength(2);
   expect(log[1]).toEqual({ type: 'sequence', commands: [{ type: 'addPitchedNote', target: pitched, pitch: 69 }, { type: 'setNoteSpelling', target: pitched, noteIndex: 1, accidentalMode: 6 }] });

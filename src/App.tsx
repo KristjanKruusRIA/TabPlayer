@@ -55,7 +55,8 @@ import { rangeFromBeats,selectionForTrack } from './editor/range-selection';
 import { planMeasureMap } from './editor/measures';
 import { ClipboardStore } from './editor/ClipboardStore';
 import { useI18n, type LanguagePreference, type MessageKey } from './i18n';
-import { durationKeyEdit,letterPitch,movedPitch,planNoteMove,planScoreEntry,scoreEntryKey,selectedNote,stepEntryPitch,type EntryPlan,type EntryRefusal } from './editor/score-entry';
+import { durationKeyEdit,letterPitch,movedPitch,planNoteMove,planScoreEntry,respellNote,scoreEntryKey,selectedNote,stepEntryPitch,type AccidentalChord,type EntryPlan,type EntryRefusal,type ScoreEntryKey } from './editor/score-entry';
+import { accidentalLabelKeys } from './editor/notation-entry';
 import { enterPitch } from './editor/notation-entry';
 import { AUTO_DURATION_UNFIT,InputPreferencesPanel,applyInOrder,autoDurationEdit,autoDurationSkip,entryAfterWrite,numpadDurationEdit,numpadKey,useInputPreferences,type EntryDuration } from './editor/input-preferences';
 import { ClipboardPanel } from './editor/ClipboardPanel';
@@ -132,6 +133,8 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   const [inputPrefs,setInputPrefs]=useInputPreferences(),entryDuration=useRef<EntryDuration|null>(null),[inputNotice,setInputNotice]=useState<{text:string;at:string}|null>(null);
   // Note entry on the score: a viewer mode, off at start. `entryNear` is the written pitch letters are entered near.
   const [noteEntryOn,setNoteEntryOn]=useState(false),entryNear=useRef(64);
+  // The accidental a Ctrl+7/8/9 chord set for the next note typed or clicked; cleared by use, Escape, entry off, a selection change and a document switch.
+  const [pendingAccidental,setPendingAccidental]=useState<AccidentalChord|null>(null);
   const [auditionEdits,setAuditionEdits]=useState(readAuditionWhileEditing),auditionEditsNow=useRef(auditionEdits);auditionEditsNow.current=auditionEdits;
   const [markErrors,setMarkErrors]=useState(readScoreErrorDisplay),scoreErrors=useMemo(()=>findScoreErrors(state.score),[state.score]),sections=useMemo(()=>listSections(state.score),[state.score]);
   const clip=useMemo(()=>clipboard.get(),[clipboard,clipboardVersion]),clipboardSection=useRef<HTMLDivElement>(null);
@@ -433,7 +436,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   const [symbolRequest,setSymbolRequest]=useState(0);
   const select=(next:BeatTarget,s=string,index?:number)=>{
     if (!validSelectionIndices(next) || !Number.isInteger(s)) return;
-    entryFret.current=null;const fixed=repairSelection(state.score,next);setSelection(fixed);
+    entryFret.current=null;setPendingAccidental(null);const fixed=repairSelection(state.score,next);setSelection(fixed);
     setNoteIndex(index!==undefined&&Number.isInteger(index)&&index>=0?index:null);
     const beat=describeSelection(state.score,fixed).beat;
     const count=state.score.tracks[fixed.track].staves[fixed.staff].tuning.length;
@@ -455,24 +458,46 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   };
   const writeEntry=(point:BeatTarget,entered:ReturnType<typeof stepEntryPitch>,chord:boolean)=>{
     if(entryBlocked(point))return;
+    setPendingAccidental(null);
     if(!entered){select(point);setInputNotice({text:t('editor.entry_out_of_range'),at:JSON.stringify(point)});return;}
     const current=controller.getState();
     runEntryPlan(point,planScoreEntry({project:current.snapshot.project,score:current.score,target:point,entered,preferences:inputPrefs,entry:entryDuration.current,chord}),entered.pitch);
   };
   const scoreNoteEntry=noteEntryOn&&view==='score'?{
-    onHit:(point:BeatTarget,step:number,{chord}:{chord:boolean})=>writeEntry(point,stepEntryPitch(controller.getState().score,point,step),chord),
+    onHit:(point:BeatTarget,step:number,{chord}:{chord:boolean})=>writeEntry(point,stepEntryPitch(controller.getState().score,point,step,pendingAccidental??'key'),chord),
     describe:(point:BeatTarget,step:number)=>{
-      const entered=stepEntryPitch(state.score,point,step);if(!entered)return null;
+      const entered=stepEntryPitch(state.score,point,step,pendingAccidental??'key');if(!entered)return null;
       const {staff,bar,beat}=describeSelection(state.score,point),result=enterPitch({staff,bar,beat:beat??null,target:point,keySignature:bar.keySignature as number},entered);
       return result.action?result.removes?t('score_entry.remove',{name:entered.name}):entered.name:null;
     },
   }:null;
+  useEffect(()=>{if(!noteEntryOn||view!=='score')setPendingAccidental(null);},[noteEntryOn,view]);
+  useEffect(()=>{setPendingAccidental(null);},[state.documentEpoch]);
+  /**
+   * Ctrl+7/8/9 (flat, natural, sharp; Alt for the doubles; Ctrl+Alt+8 changes the accidental). With note entry on and nothing
+   * at the cursor's string or line they set the accidental of the next note; otherwise they re-spell the selected note
+   * (spelling only, one edit, nothing recorded for the spelling it already has).
+   */
+  const accidentalKeys=(key:Extract<ScoreEntryKey,{kind:'accidental'|'respell'}>,event:KeyboardEvent)=>{
+    event.preventDefault();if(event.repeat)return;
+    const beat=location.beat,at=JSON.stringify(target);
+    const slot=beat?(indexed?selectedNote(beat,null,noteIndex):beat.notes.find(item=>item.string===string)):null;
+    if(noteEntryOn&&key.kind==='accidental'&&!slot){setPendingAccidental(old=>old===key.value?null:key.value);return;}
+    if(entryBlocked(target))return;
+    if(!beat){setInputNotice({text:t('score_entry.no_beat'),at});return;}
+    const note=location.staff.isPercussion?null:selectedNote(beat,indexed?null:string,noteIndex);
+    if(!note){setInputNotice({text:t('score_entry.select_note_respell'),at});return;}
+    const result=respellNote(location.staff,location.bar,beat,note,key.kind==='respell'?'cycle':key.value);
+    if(!result||'same' in result){setInputNotice(null);return;}
+    if('refused' in result){setInputNotice({text:result.refused==='no_spelling'?t('editor.entry_no_spelling',{name:result.name}):t('score_entry.one_spelling',{name:result.name}),at});return;}
+    setInputNotice(null);void edit({type:'setNoteSpelling',target,noteIndex:note.index,accidentalMode:result.mode});
+  };
   /** Note-entry keys on the focused score; true when the key was one of them. */
   const entryKeys=(event:KeyboardEvent):boolean=>{
     const key=scoreEntryKey(event);if(!key)return false;
     event.preventDefault();if(event.repeat)return true;
     const beat=location.beat;
-    if(key.kind==='letter'){writeEntry(target,letterPitch(key.letter,entryNear.current,location.bar.keySignature as number),event.shiftKey);return true;}
+    if(key.kind==='letter'){writeEntry(target,letterPitch(key.letter,entryNear.current,location.bar.keySignature as number,pendingAccidental??'key'),event.shiftKey);return true;}
     if(entryBlocked(target))return true;
     if(!beat){setInputNotice({text:t('score_entry.no_beat'),at:JSON.stringify(target)});return true;}
     if(key.kind==='rest'){
@@ -496,6 +521,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     if ((event.key==='ContextMenu'||(event.key==='F10'&&event.shiftKey))&&!event.ctrlKey&&!event.metaKey&&!event.altKey&&view==='score') {event.preventDefault();setSymbolRequest(count=>count+1);return;}
     const keypad=numpadKey(event,inputPrefs);
     if(keypad){event.preventDefault();const change=location.beat&&!editBusy?numpadDurationEdit(keypad,target,location.beat):null;if(change)void edit(change.command).then(accepted=>{if(accepted)entryDuration.current=change.entry;});return;}
+    if(view==='score'){const chord=scoreEntryKey(event);if(chord&&(chord.kind==='accidental'||chord.kind==='respell')){accidentalKeys(chord,event);return;}}
     if(view==='score'&&(event.key==='n'||event.key==='N')&&!event.ctrlKey&&!event.metaKey&&!event.altKey){event.preventDefault();if(!event.repeat)setNoteEntryOn(on=>!on);return;}
     if(noteEntryOn&&view==='score'&&entryKeys(event))return;
     let next={...target};
@@ -506,6 +532,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
       if(next.beat>0) next.beat--;
       else if(next.bar>0) {next.bar--;next.beat=state.score.tracks[next.track].staves[next.staff].bars[next.bar].voices[next.voice].beats.length-1;}
     } else if(event.key==='ArrowDown'||event.key==='ArrowUp') {
+      setPendingAccidental(null);
       if(indexed)setNoteIndex(Math.max(0,Math.min((location.beat?.notes.length??1)-1,(noteIndex??0)+(event.key==='ArrowUp'?1:-1))));
       else select(next,string+(event.key==='ArrowUp'?1:-1));event.preventDefault();return;
     }
@@ -563,7 +590,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
       // The Practice popover's body is a portal, so its keys reach here rather than the popover's own handler.
       const menu=practiceMenu.current;
       if(menu?.open&&event.target instanceof Node&&menu.querySelector('.gp-practice-body')?.contains(event.target)){menu.open=false;menu.querySelector('summary')?.focus();event.preventDefault();return;}
-      editorSelection(null);event.preventDefault();
+      editorSelection(null);setPendingAccidental(null);event.preventDefault();
     }
   }
   return <div ref={shell} className="app-shell" aria-busy={controlsBusy} data-narrow={narrow} onKeyDown={selectionKeys}>
@@ -639,7 +666,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
       <h2>{t('help.keyboard_editing_heading')}</h2><p>{t('help.keyboard_editing_intro')}</p>
       <dl><dt>Ctrl/Cmd + N / O</dt><dd>{t('help.shortcut_new_open')}</dd><dt>Ctrl/Cmd + S</dt><dd>{t('help.shortcut_save')}</dd><dt>Ctrl/Cmd + W</dt><dd>{t('help.shortcut_close')}</dd><dt>Ctrl/Cmd + Tab</dt><dd>{t('help.shortcut_next_score')}</dd><dt>Ctrl/Cmd + Z</dt><dd>{t('help.shortcut_undo_redo')}</dd><dt>Space</dt><dd>{t('help.shortcut_play')}</dd><dt>Ctrl/Cmd + Shift + P</dt><dd>{t('help.shortcut_palette')}</dd></dl>
       <button type="button" onClick={openPalette}>{t('help.open_command_palette')}</button>
-      <h3>{t('help.score_focused_heading')}</h3><dl><dt>Left / Right</dt><dd>{t('help.shortcut_beat')}</dd><dt>Up / Down</dt><dd>{t('help.shortcut_string')}</dd><dt>Digits, then Enter</dt><dd>{t('help.shortcut_fret')}</dd><dt>Shift + Left/Right</dt><dd>{t('help.shortcut_selection')}</dd><dt>Ctrl/Cmd + A</dt><dd>{t('help.shortcut_select_track')}</dd><dt>Ctrl/Cmd + T</dt><dd>Tie the selected notes to the notes before them, giving each the earlier fret. Add Shift to untie.</dd><dt>Ctrl/Cmd + C / X / V</dt><dd>{t('help.shortcut_clipboard')}</dd><dt>Escape</dt><dd>{t('help.shortcut_clear')}</dd><dt>N</dt><dd>{t('help.shortcut_note_entry')}</dd><dt>Ctrl+Alt, Alt+Shift or Ctrl+Shift + Up/Down</dt><dd>{t('help.shortcut_note_move')}</dd></dl>
+      <h3>{t('help.score_focused_heading')}</h3><dl><dt>Left / Right</dt><dd>{t('help.shortcut_beat')}</dd><dt>Up / Down</dt><dd>{t('help.shortcut_string')}</dd><dt>Digits, then Enter</dt><dd>{t('help.shortcut_fret')}</dd><dt>Shift + Left/Right</dt><dd>{t('help.shortcut_selection')}</dd><dt>Ctrl/Cmd + A</dt><dd>{t('help.shortcut_select_track')}</dd><dt>Ctrl/Cmd + T</dt><dd>Tie the selected notes to the notes before them, giving each the earlier fret. Add Shift to untie.</dd><dt>Ctrl/Cmd + C / X / V</dt><dd>{t('help.shortcut_clipboard')}</dd><dt>Escape</dt><dd>{t('help.shortcut_clear')}</dd><dt>N</dt><dd>{t('help.shortcut_note_entry')}</dd><dt>Ctrl+Alt, Alt+Shift or Ctrl+Shift + Up/Down</dt><dd>{t('help.shortcut_note_move')}</dd><dt>Ctrl/Cmd + 7 / 8 / 9, with Alt</dt><dd>{t('help.shortcut_accidental')}</dd></dl>
       <p>{t('help.workflow_description')}</p>
     </section></details>
     </nav><span className="document-title">{state.score.title || t('score.untitled')}{state.snapshot.dirty?' •':''}</span>
@@ -668,7 +695,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     <div ref={workspace} className="workspace workstation-workspace" data-view={view} data-inspector={inspectorShown} data-dock={dockVisible} data-dock-collapsed={dockCollapsed} style={{'--dock-height':`${dockHeight}px`,'--inspector-width':`${inspectorWidth}px`} as React.CSSProperties}>
       <section ref={scorePane} className="score-workspace" aria-label="Score workspace" tabIndex={0} onKeyDown={keys}>
         <div className="score-body">{paletteVisible&&view==='score'&&<aside ref={setPaletteHost} className="score-palette" aria-label={t('view.edition_palette')}/>}<div className="paper-scroll"><div className="paper score-paper-host"><ScoreView score={state.score} track={target.track} zoom={zoom} display={display} page={page} onDisplayStatus={onDisplayStatus} profile="Default" projection={projection} engraving={state.settings.engraving} visibleTracks={visibleTracks} onSelect={select} playback={player} editorSelection={musicSelection} onEditorSelection={editorSelection} editTarget={target} editString={indexed?undefined:string} editNoteIndex={noteIndex} errors={markErrors?scoreErrors:undefined} noteEntry={scoreNoteEntry} symbols={view==='score'?{busy:controlsBusy,locked:editLocked?lockedMessage:null,request:symbolRequest,onEdit:command=>{if(editLocked){setClipboardError(lockedMessage);return Promise.resolve(false);}return edit(command);},onChordEditor:chordTarget=>{editorSelection(null);select(chordTarget);openModal('harmony');}}:undefined} barDesign={barDesign?{busy:editBusy,scaleOf:bar=>barScaleOf(state.settings.engraving,bar,sourceWeight(state.score,visibleTracks,bar)),defaultOf:bar=>sourceWeight(state.score,visibleTracks,bar),onScale:(bar,scale)=>{const engraving=withBarScale(state.settings.engraving,bar,scale,sourceWeight(state.score,visibleTracks,bar));if(engraving!==state.settings.engraving)void edit({type:'setEngraving',engraving});}}:null}/></div></div></div>
-        {inputNotice&&inputNotice.at===JSON.stringify(target)?<div className="score-hint" role="status">{inputNotice.text}</div>:noteEntryOn&&view==='score'&&<div className="score-hint" role="status">{t('score_entry.on')}</div>}
+        {inputNotice&&inputNotice.at===JSON.stringify(target)?<div className="score-hint" role="status">{inputNotice.text}</div>:noteEntryOn&&view==='score'&&<div className="score-hint" role="status">{pendingAccidental?t('score_entry.pending',{accidental:t(accidentalLabelKeys[pendingAccidental])}):t('score_entry.on')}</div>}
       </section>
       {inspectorShown&&<InspectorResizeHandle width={inspectorWidth} min={inspectorMin} max={inspectorMax} onWidth={setInspectorSize} onReset={()=>setInspectorSize(null)}/>}
       <div ref={inspectorPane} className="workstation-inspector" hidden={!inspectorShown}>

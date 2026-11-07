@@ -9,7 +9,7 @@ export const entryAccidentals: readonly EntryAccidental[] = ['key', 'natural', '
 /** The i18n key of each accidental's label. */
 export const accidentalLabelKeys = {
   key: 'editor.accidental_key', natural: 'editor.accidental_natural', sharp: 'editor.accidental_sharp', flat: 'editor.accidental_flat',
-  doubleSharp: 'palette.double_sharp', doubleFlat: 'palette.double_flat'
+  doubleSharp: 'editor.accidental_double_sharp', doubleFlat: 'editor.accidental_double_flat'
 } as const satisfies Record<EntryAccidental, string>;
 const accidentalAlteration: Record<Exclude<EntryAccidental, 'key'>, number> = { natural: 0, sharp: 1, flat: -1, doubleSharp: 2, doubleFlat: -2 };
 

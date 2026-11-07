@@ -6,7 +6,7 @@ import { entryNotes, maxEntryFret, type EntryFollow } from '../instruments/entry
 import { droneString, getBanjoDrone } from './banjo-drone';
 import { openStringKey } from './partial-capo';
 import { AUTO_DURATION_UNFIT, autoDurationEdit, type EntryDuration, type InputPreferences } from './input-preferences';
-import { drawnSpelling, enteredNoteIndex, enterPitch, entryClef, entryPitch, keyLetter, oneEdit, soundingKey, spellingFor, spellingStep, stepPitch, writtenPitch, type EntryAccidental, type EntryPitch } from './notation-entry';
+import { canSpell, drawnSpelling, enteredNoteIndex, enterPitch, entryClef, entryPitch, keyLetter, oneEdit, soundingKey, spellingFor, spellingStep, stepPitch, writtenPitch, type EntryAccidental, type EntryPitch } from './notation-entry';
 import { voiceTicks } from './score-errors';
 import { tieChain } from './non-tab';
 import { MAX_SEQUENCE_COMMANDS } from '../parity-commands';
@@ -15,20 +15,35 @@ import { MAX_SEQUENCE_COMMANDS } from '../parity-commands';
 export type ScoreEntryKey =
   | { kind: 'letter'; letter: number }
   | { kind: 'shorter' } | { kind: 'longer' } | { kind: 'dot'; double: boolean } | { kind: 'triplet' } | { kind: 'rest' }
-  | { kind: 'step'; by: 1 | -1 } | { kind: 'semitone'; by: 1 | -1 } | { kind: 'octave'; by: 1 | -1 };
+  | { kind: 'step'; by: 1 | -1 } | { kind: 'semitone'; by: 1 | -1 } | { kind: 'octave'; by: 1 | -1 }
+  | { kind: 'accidental'; value: AccidentalChord } | { kind: 'respell' };
+
+/** The accidentals the Ctrl+7, 8 and 9 chords name, plain and with Alt. */
+export type AccidentalChord = Extract<EntryAccidental, 'flat' | 'natural' | 'sharp' | 'doubleFlat' | 'doubleSharp'>;
+const chordDigits: Record<string, { plain: AccidentalChord; alt: AccidentalChord | 'respell' }> = {
+  Digit7: { plain: 'flat', alt: 'doubleFlat' }, Digit8: { plain: 'natural', alt: 'respell' }, Digit9: { plain: 'sharp', alt: 'doubleSharp' }
+};
+
 
 /**
  * What a key does on the score in entry mode. Letters write pitches; `+` and `-` make the beat shorter and longer, `.`
  * dots it (Ctrl+`.` double-dots), `/` makes a triplet and R a rest, as in Guitar Pro; Ctrl+Alt+Up/Down moves the
- * selected note a staff step, Alt+Shift+Up/Down a semitone, and Ctrl+Shift+Up/Down an octave. Anything else is null.
+ * selected note a staff step, Alt+Shift+Up/Down a semitone, and Ctrl+Shift+Up/Down an octave. Ctrl+7, 8 and 9 are flat,
+ * natural and sharp, with Alt double flat, change accidental and double sharp; they are read from `code`, because AltGr
+ * makes `key` a brace or bracket on some layouts. Anything else is null.
  */
-export function scoreEntryKey(event: { key: string; ctrlKey: boolean; altKey: boolean; shiftKey: boolean; metaKey: boolean }): ScoreEntryKey | null {
+export function scoreEntryKey(event: { key: string; code?: string; ctrlKey: boolean; altKey: boolean; shiftKey: boolean; metaKey: boolean }): ScoreEntryKey | null {
   const ctrl = event.ctrlKey || event.metaKey, vertical = event.key === 'ArrowUp' ? 1 : event.key === 'ArrowDown' ? -1 : 0;
   if (vertical) {
     if (ctrl && event.altKey && !event.shiftKey) return { kind: 'step', by: vertical };
     if (event.altKey && event.shiftKey && !ctrl) return { kind: 'semitone', by: vertical };
     if (ctrl && event.shiftKey && !event.altKey) return { kind: 'octave', by: vertical };
     return null;
+  }
+  const chord = event.code ? chordDigits[event.code] : undefined;
+  if (chord && ctrl && !event.shiftKey) {
+    const value = event.altKey ? chord.alt : chord.plain;
+    return value === 'respell' ? { kind: 'respell' } : { kind: 'accidental', value };
   }
   if (event.altKey) return null;
   if (event.key === '.') return { kind: 'dot', double: ctrl };
@@ -66,20 +81,20 @@ export function durationKeyEdit(key: ScoreEntryKey, target: BeatTarget, beat: mo
   return null;
 }
 
-/** The pitch for a letter key: in the key signature, in the octave that puts it nearest the previous entry. */
-export function letterPitch(letter: number, near: number, keySignature: number): EntryPitch | null {
+/** The pitch for a letter key: in the key signature unless an accidental is pending, in the octave nearest the previous entry. */
+export function letterPitch(letter: number, near: number, keySignature: number, accidental: EntryAccidental = 'key'): EntryPitch | null {
   let best: EntryPitch | null = null;
   for (let octave = 0; octave <= 9; octave++) {
-    const candidate = entryPitch(letter, octave, 'key', keySignature);
+    const candidate = entryPitch(letter, octave, accidental, keySignature);
     if (candidate && candidate.pitch <= 127 && (!best || Math.abs(candidate.pitch - near) < Math.abs(best.pitch - near))) best = candidate;
   }
   return best;
 }
 
 /** The written pitch a staff position on the rendered score stands for, in the bar's clef and key signature. */
-export function stepEntryPitch(score: model.Score, target: BeatTarget, step: number): EntryPitch | null {
+export function stepEntryPitch(score: model.Score, target: BeatTarget, step: number, accidental: EntryAccidental = 'key'): EntryPitch | null {
   const { bar } = describeSelection(score, target);
-  return stepPitch(entryClef(bar), step, 'key', bar.keySignature as number);
+  return stepPitch(entryClef(bar), step, accidental, bar.keySignature as number);
 }
 
 export interface EntryPlan {
@@ -225,4 +240,42 @@ export function planNoteMove(project: Project, score: model.Score, target: BeatT
     steps.push({ type: 'setNoteSpelling', target: { track: bar.staff.track.index, staff: bar.staff.index, bar: bar.index, voice: at.voice.index, beat: at.index }, noteIndex: member.index, accidentalMode: mode });
   }
   return { command: oneEdit(steps), follow, next: target, name: entered.name, removes: false, notice: null, entry: null };
+}
+
+/** What a re-spell would do to the selected note, or why it cannot. Spelling only: the sounding pitch never changes. */
+export type RespellResult =
+  | { mode: model.NoteAccidentalMode; name: string }
+  | { same: true }
+  | { refused: 'no_spelling' | 'one_spelling'; name: string };
+
+const letterSemitones = [0, 2, 4, 5, 7, 9, 11], letterNames = 'CDEFGAB';
+const accidentalAlterations: Record<AccidentalChord | 'cycle', number> = { doubleFlat: -2, flat: -1, natural: 0, sharp: 1, doubleSharp: 2, cycle: 0 };
+const alterationMarks = (alteration: number) => alteration >= 2 ? '##' : alteration === 1 ? '#' : alteration <= -2 ? 'bb' : alteration === -1 ? 'b' : '';
+
+/**
+ * The spelling a note takes when re-spelled as `accidental`, or the next of its spellings (flats before naturals before
+ * sharps, wrapping) for `'cycle'`. A spelling the note already has is `same`; one alphaTab cannot draw is refused.
+ */
+export function respellNote(staff: model.Staff, bar: model.Bar, beat: model.Beat, note: model.Note, accidental: AccidentalChord | 'cycle'): RespellResult | null {
+  const key = entryNotes(staff, beat).find(item => item.index === note.index)?.key;
+  if (key === undefined) return null;
+  const keySignature = bar.keySignature as number, written = writtenPitch(staff, bar, beat, key), pitchClass = ((written % 12) + 12) % 12;
+  const drawn = drawnSpelling(keySignature, written, note.accidentalMode);
+  const current = written - entryPitch(drawn.letter, drawn.octave, 'natural', keySignature)!.pitch;
+  const currentName = `${letterNames[drawn.letter]}${alterationMarks(current)}${drawn.octave}`;
+  const named = (alteration: number) => {
+    const letter = letterSemitones.findIndex(semitone => (((semitone + alteration) % 12) + 12) % 12 === pitchClass);
+    return letter < 0 ? null : { letter, alteration, octave: Math.floor((written - alteration - letterSemitones[letter]) / 12) - 1 };
+  };
+  let wanted: number;
+  if (accidental === 'cycle') {
+    const options = [-2, -1, 0, 1, 2].filter(alteration => canSpell(pitchClass, alteration));
+    if (options.length < 2) return { refused: 'one_spelling', name: currentName };
+    wanted = options[(Math.max(0, options.indexOf(current)) + 1) % options.length];
+  } else wanted = accidentalAlterations[accidental];
+  if (wanted === current) return { same: true };
+  const spelled = named(wanted);
+  if (!spelled || !canSpell(pitchClass, wanted)) return { refused: 'no_spelling', name: currentName };
+  const entered: EntryPitch = { letter: spelled.letter, octave: spelled.octave, alteration: wanted, pitch: written, name: `${letterNames[spelled.letter]}${alterationMarks(wanted)}${spelled.octave}` };
+  return { mode: spellingFor(entered, keySignature), name: entered.name };
 }

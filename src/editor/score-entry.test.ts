@@ -5,12 +5,12 @@ import { blankProject, projectCommands, type BeatTarget, type Project } from '..
 import { DEFAULT_INPUT_PREFERENCES } from './input-preferences';
 import { drawnSpelling, entryPitch, writtenPitch } from './notation-entry';
 import { entryNotes } from '../instruments/entry';
-import { durationKeyEdit, letterPitch, movedPitch, planNoteMove, planScoreEntry, scoreEntryKey, selectedNote, stepEntryPitch, type EntryPlan } from './score-entry';
+import { durationKeyEdit, letterPitch, movedPitch, planNoteMove, planScoreEntry, respellNote, scoreEntryKey, selectedNote, stepEntryPitch, type EntryPlan } from './score-entry';
 
 const piano = (beat: number, bar = 0): BeatTarget => ({ track: 1, staff: 0, bar, voice: 0, beat });
 const guitar = (beat: number): BeatTarget => ({ track: 0, staff: 0, bar: 0, voice: 0, beat });
 const project = (...edits: EditCommand[]): Project => ({ ...blankProject(), edits: [{ type: 'addPitchedTrack', name: 'Piano', program: 0 }, ...edits] });
-const keys = (key: string, mods: Partial<Record<'ctrlKey' | 'altKey' | 'shiftKey' | 'metaKey', boolean>> = {}) => scoreEntryKey({ key, ctrlKey: false, altKey: false, shiftKey: false, metaKey: false, ...mods });
+const keys = (key: string, mods: Partial<Record<'ctrlKey' | 'altKey' | 'shiftKey' | 'metaKey', boolean>> = {}, code?: string) => scoreEntryKey({ key, code, ctrlKey: false, altKey: false, shiftKey: false, metaKey: false, ...mods });
 const plan = (base: Project, target: BeatTarget, pitch: ReturnType<typeof entryPitch>, options: { autoDuration?: boolean; advance?: boolean; chord?: boolean; entry?: { duration: number; dots: number } | null } = {}) => {
   const result = planScoreEntry({ project: base, score: buildDocument(base).score, target, entered: pitch!, preferences: { ...DEFAULT_INPUT_PREFERENCES, autoDuration: options.autoDuration ?? false, advance: options.advance ?? true }, entry: options.entry ?? null, chord: options.chord ?? false });
   if ('refused' in result) throw new Error(result.refused);
@@ -177,4 +177,64 @@ it('spells the tied notes a move carries, and refuses a move a tied beat already
   const keys = entryNotes(fAt.staff, describeSelection(fScore, guitar(1)).beat!).map(item => item.key);
   expect(keys).toContain(entryNotes(fAt.staff, fAt.beat!)[0].key + 1);
   expect(planNoteMove(fretted, fScore, guitar(0), fNote, up)).toMatchObject({ refused: 'present' });
+});
+
+it('maps the Ctrl+7/8/9 accidental chords from the physical key, with Meta as Ctrl', () => {
+  expect(keys('7', { ctrlKey: true }, 'Digit7')).toEqual({ kind: 'accidental', value: 'flat' });
+  expect(keys('8', { ctrlKey: true }, 'Digit8')).toEqual({ kind: 'accidental', value: 'natural' });
+  expect(keys('9', { ctrlKey: true }, 'Digit9')).toEqual({ kind: 'accidental', value: 'sharp' });
+  expect(keys('7', { ctrlKey: true, altKey: true }, 'Digit7')).toEqual({ kind: 'accidental', value: 'doubleFlat' });
+  expect(keys('9', { ctrlKey: true, altKey: true }, 'Digit9')).toEqual({ kind: 'accidental', value: 'doubleSharp' });
+  expect(keys('8', { ctrlKey: true, altKey: true }, 'Digit8')).toEqual({ kind: 'respell' });
+  expect(keys('9', { metaKey: true }, 'Digit9')).toEqual({ kind: 'accidental', value: 'sharp' });
+  // AltGr reports a brace as the key with ctrl and alt set; the code still says Digit7.
+  expect(keys('{', { ctrlKey: true, altKey: true }, 'Digit7')).toEqual({ kind: 'accidental', value: 'doubleFlat' });
+  for (const [key, mods, code] of [['7', {}, 'Digit7'], ['7', { altKey: true }, 'Digit7'], ['7', { ctrlKey: true, shiftKey: true }, 'Digit7'], ['7', { ctrlKey: true }, 'Numpad7'], ['7', { ctrlKey: true }, undefined], ['0', { ctrlKey: true }, 'Digit0']] as const) expect(keys(key, mods, code)).toBeNull();
+});
+
+it('writes a pending accidental with the note and its spelling as one sequence', () => {
+  const base = project(), flat = letterPitch(1, 62, 0, 'doubleSharp')!;
+  expect(flat).toMatchObject({ name: 'D##4', pitch: 64 });
+  const planned = plan(base, piano(0), flat);
+  expect(planned.command).toEqual({ type: 'sequence', commands: [{ type: 'addPitchedNote', target: piano(0), pitch: 64 }, { type: 'setNoteSpelling', target: piano(0), noteIndex: 0, accidentalMode: 4 }] });
+  expect(record(base, planned).score.tracks[1].staves[0].bars[0].voices[0].beats[0].notes[0].accidentalMode).toBe(4);
+  expect(letterPitch(6, 60, -1, 'natural')?.name).toBe('B3');
+  expect(stepEntryPitch(buildDocument(base).score, piano(0), 2, 'sharp')?.name).toBe('G#4');
+});
+
+it('keeps the double when a note spelled with one moves an octave', () => {
+  for (const [mode, name] of [[4, 'C##'], [6, 'Ebb']] as const) {
+    const base = project({ type: 'addPitchedNote', target: piano(0), pitch: 62 }, { type: 'setNoteSpelling', target: piano(0), noteIndex: 0, accidentalMode: mode });
+    const { staff, bar, beat } = describeSelection(buildDocument(base).score, piano(0)), note = beat!.notes[0];
+    const up = movedPitch(staff, bar, beat!, note, { kind: 'octave', by: 1 })!, down = movedPitch(staff, bar, beat!, note, { kind: 'octave', by: -1 })!;
+    expect([up.pitch, up.name, up.alteration]).toEqual([74, `${name}5`, mode === 4 ? 2 : -2]);
+    expect([down.pitch, down.name]).toEqual([50, `${name}3`]);
+  }
+});
+
+it('re-spells a note without changing its pitch, and refuses or ignores what it cannot or need not do', () => {
+  const spelled = (pitch: number, mode?: number) => {
+    const base = project({ type: 'addPitchedNote', target: piano(0), pitch }, ...(mode ? [{ type: 'setNoteSpelling', target: piano(0), noteIndex: 0, accidentalMode: mode } as EditCommand] : []));
+    const { staff, bar, beat } = describeSelection(buildDocument(base).score, piano(0));
+    return { base, args: [staff, bar, beat!, beat!.notes[0]] as const };
+  };
+  const d = spelled(62);
+  expect(respellNote(...d.args, 'natural')).toEqual({ same: true });
+  expect(respellNote(...d.args, 'sharp')).toEqual({ refused: 'no_spelling', name: 'D4' });
+  expect(respellNote(...d.args, 'flat')).toEqual({ refused: 'no_spelling', name: 'D4' });
+  const sharp = respellNote(...d.args, 'doubleSharp');
+  expect(sharp).toEqual({ mode: 4, name: 'C##4' });
+  const written = previewEdit(d.base, { type: 'setNoteSpelling', target: piano(0), noteIndex: 0, accidentalMode: 4 }).score;
+  const note = written.tracks[1].staves[0].bars[0].voices[0].beats[0].notes[0];
+  expect(note.realValue).toBe(spelled(62).args[3].realValue);
+  // Change Accidental walks D (natural) to C##, then Ebb, then back to D, one edit each.
+  expect(respellNote(...d.args, 'cycle')).toEqual({ mode: 4, name: 'C##4' });
+  expect(respellNote(...spelled(62, 4).args, 'cycle')).toEqual({ mode: 6, name: 'Ebb4' });
+  expect(respellNote(...spelled(62, 6).args, 'cycle')).toEqual({ mode: 0, name: 'D4' });
+  // C sharp has a flat and a double-sharp B, and its current spelling is the sharp.
+  const cSharp = spelled(61);
+  expect(respellNote(...cSharp.args, 'sharp')).toEqual({ same: true });
+  expect(respellNote(...cSharp.args, 'flat')).toMatchObject({ mode: 5, name: 'Db4' });
+  expect(respellNote(...cSharp.args, 'natural')).toEqual({ refused: 'no_spelling', name: 'C#4' });
+  expect(respellNote(...spelled(68).args, 'doubleFlat')).toEqual({ refused: 'no_spelling', name: 'G#4' });
 });

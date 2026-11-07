@@ -2009,9 +2009,45 @@ describe('GP8 edit and cursor keys',()=>{
     await hold.next();await waitFor(()=>expect(edits(c)).toHaveLength(1));
     await quiet();expect(hold.held).toHaveLength(0);expect(edits(c)).toHaveLength(1);
   });
-  it('ignores the keys while focus is in a text field',async()=>{
+  it('ignores the keys while focus is in a text field inside the score pane',async()=>{
     const c=await setup(withNotes());
-    for(const key of [{key:'Backspace'},{key:'Delete',shiftKey:true},{key:'Insert',ctrlKey:true},{key:'Delete',ctrlKey:true,shiftKey:true},{key:'End'}])fireEvent.keyDown(screen.getByLabelText('Fret'),key);
+    for(const tag of ['input','textarea','select']){
+      const field=document.createElement(tag);pane().appendChild(field);
+      try{for(const key of [{key:'Backspace'},{key:'Delete',shiftKey:true},{key:'Insert',ctrlKey:true},{key:'Delete',ctrlKey:true,shiftKey:true},{key:'End'},{key:'Home',ctrlKey:true}])fireEvent.keyDown(field,key);}
+      finally{field.remove();}
+    }
     await quiet();expect(edits(c)).toHaveLength(2);expect(cursor().beat).toBe(0);
+  });
+  it('Shift+Delete on the last beat of a bar keeps the cursor on a beat that exists',async()=>{
+    const c=await setup(withNotes());
+    press({key:'End'});const last=beatsIn(c)-1;expect(cursor().beat).toBe(last);
+    press({key:'Delete',shiftKey:true});
+    await waitFor(()=>expect(edits(c)).toHaveLength(3));
+    expect(edits(c)[2]).toEqual({type:'deleteBeat',target:at(last)});
+    expect(beatsIn(c)).toBe(last);
+    await waitFor(()=>expect(cursor().beat).toBeLessThan(beatsIn(c)));
+  });
+  it('Shift+Delete falls back to the cursor beat when the selection holds no beats',async()=>{
+    const c=await setup(withNotes());
+    press({key:'ArrowRight'});
+    // A bar selection of a bar the cursor is not in still resolves beats, so use an empty note selection.
+    act(()=>{(engravingView.mock.lastCall![0] as {onEditorSelection:(value:unknown)=>void}).onEditorSelection({kind:'notes',notes:[]});});
+    press({key:'Delete',shiftKey:true});
+    await waitFor(()=>expect(edits(c)).toHaveLength(3));
+    expect(edits(c)[2]).toEqual({type:'deleteBeat',target:at(1)});
+  });
+  it('Ctrl+Home and Ctrl+End still land on beat 0 of the first and last bar when a bar has been emptied',async()=>{
+    const c=await setup(withNotes());
+    press({key:'End',ctrlKey:true});const lastBar=bars(c)-1;
+    // Delete until nothing is left to delete: the last press is the no-beat notice and records nothing.
+    for(let guard=0;guard<8;guard++){
+      const before=edits(c).length;press({key:'Delete',shiftKey:true});await quiet();await quiet();
+      if(edits(c).length===before)break;
+    }
+    expect(screen.getByText('There is no beat here to delete.')).toBeInTheDocument();
+    press({key:'Home',ctrlKey:true});expect(cursor()).toMatchObject({bar:0,beat:0});
+    press({key:'End',ctrlKey:true});expect(cursor()).toMatchObject({bar:lastBar,beat:0});
+    press({key:'End'});expect(cursor()).toMatchObject({bar:lastBar});
+    press({key:'Home',ctrlKey:true});expect(cursor()).toMatchObject({bar:0,beat:0});
   });
 });

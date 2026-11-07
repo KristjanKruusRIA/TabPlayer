@@ -627,7 +627,9 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     }
     if(kind==='deleteBeats'){
       let beats:model.Beat[];
-      try{beats=musicSelection?resolveSelectionBeats(state.score,musicSelection):location.beat?[location.beat]:[];}catch{beats=[];}
+      try{beats=musicSelection?resolveSelectionBeats(state.score,musicSelection):[];}catch{beats=[];}
+      // A selection that holds no beats leaves the cursor beat to delete.
+      if(!beats.length&&location.beat)beats=[location.beat];
       // `deleteBeat` is not a step a `sequence` may hold, so several beats cannot be one edit: refuse rather than split the gesture.
       if(beats.length>1){setInputNotice({text:t('editor.gp8_delete_many',{count:beats.length}),at});return;}
       if(!beats.length){setInputNotice({text:t('editor.gp8_no_beat'),at});return;}

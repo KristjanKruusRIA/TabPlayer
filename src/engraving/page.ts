@@ -1,6 +1,7 @@
 import { Settings } from '@coderline/alphatab';
 import type { PrintLayout,SvgPage,SvgSystem } from '../export/types';
 import type { PageLayout } from './types';
+import { MUSIC_FONT_NAME } from './typography';
 import {measurePageText,pageTitleFontSize} from '../export/page-title';
 import {systemGapOffsets,type GapStacking} from './system-gaps';
 import {fillHeaderField,validateHeaderFooter,type HeaderFields,type PageBand,type PageBands} from './header-footer';
@@ -100,7 +101,7 @@ export function screenPageBaselines(d:PageGeometry,titleScale:number):{headerY:n
 
 export type MusicFont={size:number;families:readonly string[]};
 /** Export draws music glyphs at the size alphaTab laid the score out with (36 px), not a fixed literal. */
-export const defaultMusicFont:MusicFont={size:new Settings().display.resources.engravingSettings.musicFontSize,families:['Bravura']};
+export const defaultMusicFont:MusicFont={size:new Settings().display.resources.engravingSettings.musicFontSize,families:[MUSIC_FONT_NAME]};
 export function musicFontCss(size:number,families:readonly string[]):string {return `.at{font-family:${families.join(',')};font-size:${size}px}`;}
 
 /** `titleScale` enlarges the header line (base 18px) and still shrinks it to fit the page width; the footer keeps its size. */

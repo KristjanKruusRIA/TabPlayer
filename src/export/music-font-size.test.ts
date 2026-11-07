@@ -4,7 +4,8 @@ import { buildScore,trackIdentity } from '../engine';
 import { blankProject } from '../project';
 import { defaultPrintLayout } from '../document-settings';
 import { configureEngraving,defaultEngraving,projectEngraving } from '../engraving/projection';
-import { renderPdfPages } from './pdf';
+import { musicFontCss } from '../engraving/page';
+import { paginateSystems,renderPdfPages } from './pdf';
 
 const scoreWithQuarter=()=>{
   const score=buildScore(blankProject()),beat=score.tracks[0].staves[0].bars[0].voices[0].beats[0],note=new model.Note();
@@ -12,6 +13,7 @@ const scoreWithQuarter=()=>{
   return score;
 };
 
+// The regexes below depend on alphaTab's SVG output; an upgrade that changes it fails loudly here (null match or wrong count).
 it('layout_uses_alphatab_music_font_size',()=>{
   const score=scoreWithQuarter(),ids=score.tracks.map(trackIdentity),engraving=defaultEngraving();
   const copy=projectEngraving(score,ids,engraving).score,settings=new Settings();
@@ -27,7 +29,7 @@ it('layout_uses_alphatab_music_font_size',()=>{
   const musicFontSize=settings.display.resources.engravingSettings.musicFontSize,anchor=EngravingSettings.bravuraMetadata.glyphsWithAnchors.noteheadBlack.stemUpSE![0];
   expect(musicFontSize).toBe(36);
   const stemRight=Number(stems[0][1])+Number(stems[0][2]);
-  expect(Math.abs(stemRight-(Number(head![1])+anchor*musicFontSize/4*settings.display.scale))).toBeLessThan(0.5);
+  expect(Math.abs(stemRight-(Number(head![1])+anchor*musicFontSize/4*settings.display.scale))).toBeLessThan(0.2);
 });
 
 it('export_page_css_matches_layout_size',()=>{
@@ -35,4 +37,10 @@ it('export_page_css_matches_layout_size',()=>{
   const pages=renderPdfPages(score,{tracks:[0],range:null},defaultPrintLayout(),{page,engraving:defaultEngraving(),trackIds:ids});
   expect(pages.length).toBeGreaterThan(0);
   for(const p of pages)expect(p.svg).toContain('.at{font-family:Bravura;font-size:36px}');
+});
+
+it('musicFontCss joins families and sizes',()=>{expect(musicFontCss(40,['A','B'])).toBe('.at{font-family:A,B;font-size:40px}');});
+it('legacy paginateSystems defaults the music size to 36px',()=>{
+  const pages=paginateSystems([{width:500,height:100,svg:'<svg xmlns="http://www.w3.org/2000/svg"></svg>'}],'T',defaultPrintLayout());
+  expect(pages[0].svg).toContain('.at{font-family:Bravura;font-size:36px}');
 });

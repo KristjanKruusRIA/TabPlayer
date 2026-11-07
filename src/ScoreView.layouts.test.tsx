@@ -5,8 +5,11 @@ import {act,cleanup,fireEvent,render,screen} from '@testing-library/react';
 import {LayoutMode,Settings,SystemsLayoutMode,model,rendering,type PlaybackHighlightChangeEventArgs} from '@coderline/alphatab';
 import {ScoreView} from './ScoreView';
 import {music} from './editor/fixtures';
-import type {PageLayout} from './engraving/types';
+import type {EngravingOverrides,PageLayout} from './engraving/types';
+import type {SystemSpan} from './engraving/system-gaps';
 import type {ScoreLayoutMode} from './engraving/screen-view';
+import {defaultEngraving} from './engraving/projection';
+import {withSystemGaps} from './engraving/system-gaps';
 const state=vi.hoisted(()=>({fonts:(()=>new Promise<void>(()=>{})) as ()=>Promise<void>,api:null as unknown,width:900,height:700,resize:()=>{},loads:vi.fn(),renders:vi.fn()}));
 function event<T>(){const handlers=new Set<(e:T)=>void>();return {on:(fn:(e:T)=>void)=>{handlers.add(fn);return()=>handlers.delete(fn);},emit:(e:T)=>{for(const fn of handlers)fn(e);}};}
 vi.mock('./export/pdf',async original=>({...await original<typeof import('./export/pdf')>(),loadExportFonts:()=>state.fonts()}));
@@ -27,11 +30,11 @@ vi.mock('@coderline/alphatab',async original=>({...await original<typeof import(
  }this.postRenderFinished.emit();}
 }}));
 const page:PageLayout={widthMm:210,heightMm:210,marginsMm:{top:15,right:15,bottom:15,left:15},scale:1,profile:'document'};
-function setup(layout:ScoreLayoutMode='verticalPage',zoom=100){
+function setup(layout:ScoreLayoutMode='verticalPage',zoom=100,extra:{page?:PageLayout;engraving?:EngravingOverrides;onSystems?:(systems:SystemSpan[]|null)=>void}={}){
  vi.spyOn(HTMLElement.prototype,'clientWidth','get').mockImplementation(function(this:HTMLElement){return this.classList.contains('paper-scroll')?state.width:0;});
  vi.spyOn(HTMLElement.prototype,'clientHeight','get').mockImplementation(function(this:HTMLElement){return this.classList.contains('paper-scroll')?state.height:0;});
  vi.stubGlobal('ResizeObserver',class {constructor(fn:()=>void){state.resize=fn;}observe(){}disconnect(){}});
- const props={score:music(),track:0,zoom,profile:'ScoreTab',playback:null,onSelect:vi.fn(),page,display:{layout,zoomMode:'manual' as const},onDisplayStatus:vi.fn()};
+ const props={score:music(),track:0,zoom,profile:'ScoreTab',playback:null,onSelect:vi.fn(),page,display:{layout,zoomMode:'manual' as const},onDisplayStatus:vi.fn(),...extra};
  const tree=(p=props)=><div className="paper-scroll" style={{padding:10}}><div className="paper score-paper-host"><ScoreView {...p}/></div></div>;
  const result=render(tree());return {...result,props,tree,api:state.api as {settings:Settings;renderer:{width:number}}};
 }
@@ -160,4 +163,34 @@ it('re-fits page text when the fonts resolve and ignores a font failure',async()
  cleanup();state.fonts=()=>Promise.reject(new Error('no fonts'));
  const failed=setup();await act(async()=>{});
  expect(screen.queryByRole('alert')).toBeNull();expect(overlays()).toHaveLength(3);failed.unmount();
+});
+
+// System gaps: a tall page keeps all three one-bar systems on one sheet so a gap moves the blocks that follow it.
+const tallPage:PageLayout={...page,heightMm:600};
+const tops=()=>Array.from(document.querySelectorAll<HTMLElement>('.score-svg-chunk')).map(chunk=>parseFloat(chunk.style.top));
+function gapped(layout:ScoreLayoutMode='verticalPage'){
+ const engraving=defaultEngraving(),onSystems=vi.fn(),s=setup(layout,100,{page:tallPage,engraving,onSystems});
+ return {...s,props:{...s.props,onSystems},engraving};
+}
+it('moves the following blocks for a gap-only change without rendering or loading again, and restores them',()=>{
+ const {props,tree,rerender,engraving}=gapped(),calls=state.renders.mock.calls.length,loads=state.loads.mock.calls.length,before=tops();
+ expect(before).toHaveLength(3);
+ rerender(tree({...props,engraving:withSystemGaps(engraving,[{bar:1,scale:3}])}));
+ const moved=tops();expect(moved[0]).toBe(before[0]);expect(moved[1]-before[1]).toBeCloseTo(40);expect(moved[2]-before[2]).toBeCloseTo(40);
+ expect(state.renders).toHaveBeenCalledTimes(calls);expect(state.loads).toHaveBeenCalledTimes(loads);
+ rerender(tree({...props,engraving}));
+ expect(tops()).toEqual(before);expect(state.renders).toHaveBeenCalledTimes(calls);expect(state.loads).toHaveBeenCalledTimes(loads);
+});
+it('still renders again for a non-gap engraving change',()=>{
+ const {props,tree,rerender,engraving}=gapped(),calls=state.renders.mock.calls.length;
+ rerender(tree({...props,engraving:{...engraving,systemSpacing:2}}));
+ expect(state.renders.mock.calls.length).toBeGreaterThan(calls);
+});
+it('reports the rendered systems in a page layout and null in parchment, without repeating a value',()=>{
+ const {props}=gapped();
+ expect(props.onSystems).toHaveBeenLastCalledWith([{first:0,last:0},{first:1,last:1},{first:2,last:2}]);
+ const reports=props.onSystems.mock.calls.length;
+ expect(props.onSystems.mock.calls.filter(([v],i,all)=>i>0&&JSON.stringify(v)===JSON.stringify(all[i-1][0]))).toHaveLength(0);
+ cleanup();
+ const parchment=gapped('parchment');expect(parchment.props.onSystems).toHaveBeenLastCalledWith(null);void reports;
 });

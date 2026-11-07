@@ -25,7 +25,7 @@ function practiceKey(settings:PracticeSettings){const tempo=settings.tempo;retur
 function idlePractice(settings:PracticeSettings):PracticeStatus {return {settings:structuredClone(settings),phase:'idle',countInRemaining:0,completedPasses:0,effectiveRatio:settings.tempo.kind==='relative'?settings.tempo.ratio:settings.tempo.kind==='progressive'?settings.tempo.start:1,currentBpm:0,pulse:null};}
 
 /** `latestMix` and `latestMaster` read a track's mix and the master from the newest document, which can be ahead of the one last loaded here. */
-const mixKey=(mix:ChannelMix|undefined)=>{const m=mix??defaultMix();return JSON.stringify([m.gain,m.pan,m.mute,m.solo,m.drumKit??null]);};
+const mixKey=(mix:ChannelMix|undefined)=>{const m=mix??defaultMix();return JSON.stringify([m.gain,m.pan,m.mute,m.solo,m.drumKit??null,m.midiPort??null]);};
 /** Whether the loaded document holds the edit that a dragged mix became: it is another project than the edit began from (a track-selection reload keeps the same one), so the edit or an undo of it has been loaded; or its mix for the track moved off what the edit began from, or is the one heard. */
 const mixLanded=(heard:{track:string;mix:ChannelMix;landing:{key:string;project:ProjectView|null}|null},built:BuiltDocument|null,project:ProjectView|null)=>{if(heard.landing===null||!built)return false;if(project!==heard.landing.project)return true;const key=mixKey(built.settings.mixes[heard.track]);return key!==heard.landing.key||key===mixKey(heard.mix);};
 type Options={bridge:NativeAudioBridge;onEdit:(edit:EditCommand)=>void|Promise<void>;preparePlan?:typeof preparePlan;latestMix?:(trackId:string)=>ChannelMix|undefined;latestMaster?:()=>MasterSettings|undefined};

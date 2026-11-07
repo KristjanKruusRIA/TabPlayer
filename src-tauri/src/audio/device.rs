@@ -9,6 +9,7 @@ use super::{
         FALLBACK_BPM, LineInControl, LineInMeter, LineInMonitor, LineInOutput, LineInPort,
         LineInRetired, LineInSettings, MESSAGE_CAPACITY, MonitorRing, build_chain, line_in_channel,
     },
+    midi_out::{MidiOutPort, MidiOutShared, MidiTap},
     plan::PlaybackPlan,
     playback::PlaybackSpan,
     practice::{
@@ -20,7 +21,10 @@ use super::{
     resources::AudioResources,
     voices::{drum_kit_for_track, resource_requests, track_locked, voice_id_for_track},
 };
-use crate::settings::{ChannelMix, DocumentSettings};
+use crate::{
+    midi_out::{Ensure, MidiOut, PendingRoute},
+    settings::{ChannelMix, DocumentSettings},
+};
 use cpal::{
     FromSample, SampleFormat, SizedSample,
     traits::{DeviceTrait, HostTrait, StreamTrait},
@@ -769,6 +773,10 @@ pub struct CallbackTransport {
     peak: f64,
     audition: AuditionMixer,
     line_in: LineInPort,
+    /// The MIDI output: counts the stream's output frames and carries routed tracks' messages to the sender.
+    midi: MidiOutPort,
+    /// The output frame the transport is at, on the stream's count, for stamping MIDI messages.
+    midi_cursor: u64,
     /// Frames of the device callback being rendered (0 when unknown: each call is a callback).
     device_frames: usize,
     /// Frames of it already rendered.
@@ -801,6 +809,19 @@ impl CallbackTransport {
         let (control, port) = line_in_channel();
         transport.line_in = port;
         (transport, producer, control)
+    }
+    /// A headless transport whose MIDI messages go to the returned ring, for tests.
+    pub fn headless_with_midi(rate: u32) -> (Self, Arc<MidiOutShared>) {
+        let shared = MidiOutShared::new();
+        let mut transport = Self::headless(rate);
+        transport.midi = MidiOutPort::attached(shared.clone(), rate);
+        (transport, shared)
+    }
+    /// A headless transport whose MIDI messages go to `shared`, for tests that run the sender's side too.
+    pub fn headless_with_midi_shared(rate: u32, shared: Arc<MidiOutShared>) -> Self {
+        let mut transport = Self::headless(rate);
+        transport.midi = MidiOutPort::attached(shared, rate);
+        transport
     }
     /// Hand what the Line-In has replaced to `retire` so it is freed off the audio thread.
     pub fn retire_line_in(&mut self, retire: impl FnMut(LineInRetired) -> Option<LineInRetired>) {
@@ -860,6 +881,8 @@ impl CallbackTransport {
             peak: 0.0,
             audition: AuditionMixer::new(rate),
             line_in: LineInPort::empty(),
+            midi: MidiOutPort::empty(rate),
+            midi_cursor: 0,
             device_frames: 0,
             callback_pos: 0,
         }
@@ -1056,6 +1079,15 @@ impl CallbackTransport {
         self.duration = renderer.duration_seconds();
         self.ready = true;
         self.shared.fault.store(0, Ordering::Release);
+        // Whatever the replaced renderer left sounding on a MIDI port is released before the new one speaks.
+        if let Some(old) = self.renderer.as_mut() {
+            old.midi_set_cursor(self.midi.frames());
+            if let Some(tap) = old.midi_tap() {
+                tap.release_all();
+                self.midi.flush(tap);
+            }
+        }
+        renderer.midi_set_cursor(self.midi.frames());
         let previous = self.renderer.replace(renderer);
         self.resolve_renderer();
         self.publish();
@@ -1118,6 +1150,21 @@ impl CallbackTransport {
         let old = renderer.replace_mix(mix);
         if !playing {
             renderer.settle_idle_kit();
+        }
+        old
+    }
+    /// Takes new MIDI routing for the playing document; what comes back is retired off the audio thread.
+    pub fn replace_midi(&mut self, tap: Box<MidiTap>, generation: u64) -> Option<Box<MidiTap>> {
+        if generation != self.generation {
+            return Some(tap);
+        }
+        let Some(renderer) = self.renderer.as_mut() else {
+            return Some(tap);
+        };
+        renderer.midi_set_cursor(self.midi_cursor);
+        let old = renderer.replace_midi(tap);
+        if let Some(tap) = renderer.midi_tap() {
+            self.midi.flush(tap);
         }
         old
     }
@@ -1313,6 +1360,7 @@ impl CallbackTransport {
     }
     fn seek(&mut self, tick: f64) {
         if let Some(renderer) = &mut self.renderer {
+            renderer.midi_set_cursor(self.midi_cursor);
             renderer.seek_tick(tick);
             self.seconds = renderer.tick_to_seconds(tick);
         }
@@ -1351,6 +1399,13 @@ impl CallbackTransport {
     /// callback follow each other; with no callback size set, every call is a whole callback.
     pub fn render_into(&mut self, output: &mut [[f32; 2]]) {
         let left = self.device_frames.saturating_sub(self.callback_pos);
+        if self.callback_pos == 0 {
+            self.midi.begin_callback(if self.device_frames > 0 {
+                self.device_frames
+            } else {
+                output.len()
+            });
+        }
         self.render_block(output, left);
         if self.device_frames > 0 {
             self.callback_pos += output.len();
@@ -1373,11 +1428,14 @@ impl CallbackTransport {
         if self.shared.is_faulted() {
             self.fault();
             self.publish();
+            self.midi_end_block(false, 0, 0, output.len());
             return;
         }
         let mut offset = 0;
+        let mut rendered = 0;
         let was_playing = self.playing;
         while self.playing && offset < output.len() {
+            self.midi_cursor = self.midi.frames() + offset as u64;
             if let Some(clock) = &mut self.count {
                 let frame = clock.next_frame();
                 if frame.finished {
@@ -1425,6 +1483,7 @@ impl CallbackTransport {
                 self.pulse = None;
                 break;
             }
+            renderer.midi_set_cursor(self.midi_cursor);
             let status = if let Some(end) = ceiling {
                 renderer.render_until(&mut output[offset..offset + count], end)
             } else {
@@ -1433,6 +1492,9 @@ impl CallbackTransport {
             self.tick = status.tick;
             self.seconds = status.seconds;
             offset += count;
+            rendered += count;
+            // A seek, a wrap or the end that follows is at the frame the rendering reached, not where it began.
+            self.midi_cursor = self.midi.frames() + offset as u64;
             if let Some(pulse) = status.last_pulse {
                 self.add_pulse(pulse, false, status.pulse_count);
             }
@@ -1448,6 +1510,7 @@ impl CallbackTransport {
                 }
             }
         }
+        self.midi_end_block(was_playing || self.playing, rendered, offset, output.len());
         if offset > 0 {
             self.frames = self.frames.saturating_add(offset as u64);
             let peak = output[..offset]
@@ -1484,6 +1547,39 @@ impl CallbackTransport {
         self.line_in
             .mix(output, bpm, self.device_frames, left_in_callback);
         self.publish();
+    }
+    /// The end of a block: applies a port failure the sender found, lets go of every note once the score stops
+    /// rendering, and hands the messages the block staged to the sender. `playing` is the transport playing (counting in
+    /// or not), `rendered` of the block's `len` frames came from the renderer; the block's counting frames end at `offset`.
+    fn midi_end_block(&mut self, playing: bool, rendered: usize, offset: usize, len: usize) {
+        let mask = self.midi.fault_mask();
+        let at = self.midi.frames() + offset as u64;
+        let mut routed = false;
+        if let Some(renderer) = &mut self.renderer {
+            if let Some(tap) = renderer.midi_tap() {
+                tap.set_cursor(at);
+                if self.midi.take_reset() {
+                    // The sender threw away what had been queued: let go of the notes, and state the position again.
+                    tap.on_seek();
+                }
+                tap.set_fault_mask(mask);
+                if rendered == 0 {
+                    tap.idle();
+                }
+                tap.service();
+                self.midi.flush(tap);
+                if tap.has_routes() {
+                    routed = true;
+                    // Every callback of a routed score gives the sender its clock, not only the ones with notes.
+                    self.midi.keep_clock();
+                }
+            }
+        }
+        // The sender stays ready for as long as the score plays (a count-in is playing too: nothing renders, and the
+        // first chord follows its last click), and only if something is routed.
+        self.midi.set_rendering(playing && routed);
+        self.midi.advance(len);
+        self.midi_cursor = self.midi.frames();
     }
     fn restore(&mut self, snapshot: RuntimeSnapshot) -> Result<(), String> {
         self.frames = snapshot.frames;
@@ -1556,6 +1652,11 @@ enum CallbackCommand {
         mix: PreparedMix,
         generation: u64,
     },
+    /// New MIDI routing for the document of `generation`.
+    MidiRoute {
+        tap: Box<MidiTap>,
+        generation: u64,
+    },
     Transport(TransportCommand),
     Barrier(u64),
 }
@@ -1565,6 +1666,7 @@ enum Retired {
     Mix(PreparedMix),
     Clip(Box<AuditionClip>),
     LineIn(LineInRetired),
+    MidiTap(Box<MidiTap>),
 }
 struct OutputCallback {
     transport: CallbackTransport,
@@ -1616,6 +1718,11 @@ impl OutputCallback {
                         let _ = self.retired.try_push(Retired::Mix(old));
                     }
                 }
+                CallbackCommand::MidiRoute { tap, generation } => {
+                    if let Some(old) = self.transport.replace_midi(tap, generation) {
+                        let _ = self.retired.try_push(Retired::MidiTap(old));
+                    }
+                }
                 CallbackCommand::Transport(command) => {
                     let _ = self.transport.command(command);
                 }
@@ -1641,6 +1748,8 @@ impl OutputCallback {
             }
         }
         if self.suspended {
+            // A frozen stream renders nothing, whatever it was doing when it was frozen.
+            self.transport.midi.set_rendering(false);
             output.fill(T::from_sample(0.0));
             return;
         }
@@ -1817,6 +1926,9 @@ pub struct AudioService {
     line_in: Mutex<LineInSlot>,
     /// The latest `line_in_set` ticket handed out.
     line_in_issued: AtomicU64,
+    /// External MIDI output: its ports, sender thread and routing. Its own leaf locks; nothing here is held across a
+    /// wait on the audio thread.
+    midi: MidiOut,
     manager: mpsc::Sender<ManagerRequest>,
 }
 impl AudioService {
@@ -1854,8 +1966,50 @@ impl AudioService {
             audition: Mutex::new(None),
             line_in: Mutex::new(LineInSlot::default()),
             line_in_issued: AtomicU64::new(0),
+            midi: MidiOut::default(),
             manager,
         }
+    }
+    /// External MIDI output.
+    pub fn midi_out(&self) -> &MidiOut {
+        &self.midi
+    }
+    /// Called when the interface refreshes the port list: tries again the ports the open document sends tracks to that
+    /// are not working. Does nothing while every port works, and never waits for a port to open.
+    pub fn midi_refresh(&self) {
+        let Some(settings) = self
+            .control
+            .lock()
+            .unwrap()
+            .document
+            .as_ref()
+            .map(|d| d.settings.clone())
+        else {
+            return;
+        };
+        let names = MidiOut::port_names(&settings);
+        if self.midi.any_unavailable(&names) {
+            // The tracks are routed already: the port's bit moves them over when it opens. Nothing waits here.
+            self.midi.ensure_ports(&names, Ensure::Refresh);
+        }
+    }
+    /// A renderer for `document` with its tracks routed to the MIDI ports its mixes name, and the routing to record
+    /// once the renderer has been accepted. The ports were started opening before the control lock was taken (see
+    /// `MidiOut::ensure_ports`), and the tracks are routed to them whether or not they have opened: a track plays on
+    /// the internal sound until its port's bit says the port works, so nothing here waits.
+    fn routed_renderer(
+        &self,
+        document: &PreparedDocument,
+        rate: u32,
+    ) -> Result<(Box<Renderer>, PendingRoute), String> {
+        let mut renderer = Self::renderer(document, rate)?;
+        let mut pending = self
+            .midi
+            .build_route(&document.plan, &document.settings, false);
+        if let Some(tap) = pending.tap.take() {
+            renderer.replace_midi(tap);
+        }
+        Ok((renderer, pending))
     }
     /// Sample rate to render an audition for, or None when no output stream has ever
     /// opened or the device has failed. Reads atomics only.
@@ -2229,6 +2383,8 @@ impl AudioService {
         practice: PracticeSettings,
     ) -> Result<(), String> {
         let generation = plan.generation;
+        self.midi
+            .ensure_ports(&MidiOut::port_names(&settings), Ensure::Prepare);
         let mut state = self.control.lock().unwrap();
         if generation != self.shared.desired.load(Ordering::Acquire) {
             return Err("A newer score preparation superseded this request.".into());
@@ -2260,7 +2416,7 @@ impl AudioService {
                 return Err(error);
             }
         } else {
-            let renderer = Self::renderer(&document, state.rate)?;
+            let (renderer, route) = self.routed_renderer(&document, state.rate)?;
             if generation != self.shared.desired.load(Ordering::Acquire) {
                 return Err("A newer score preparation superseded this request.".into());
             }
@@ -2273,6 +2429,7 @@ impl AudioService {
                     practice,
                 },
             )?;
+            self.midi.commit(route);
             self.set_backing_duration(&document);
             state.document = Some(document);
         }
@@ -2405,6 +2562,8 @@ impl AudioService {
         generation: u64,
         backing_bytes: Option<Option<Vec<u8>>>,
     ) -> Result<(), String> {
+        self.midi
+            .ensure_ports(&MidiOut::port_names(&settings), Ensure::Mix);
         let mut state = self.control.lock().unwrap();
         let old = state
             .document
@@ -2475,7 +2634,7 @@ impl AudioService {
                 settings,
                 practice: old.practice,
             };
-            let renderer = Self::renderer(&document, state.rate)?;
+            let (renderer, route) = self.routed_renderer(&document, state.rate)?;
             Self::enqueue(
                 &mut state,
                 CallbackCommand::Install {
@@ -2485,16 +2644,28 @@ impl AudioService {
                     practice: document.practice,
                 },
             )?;
+            self.midi.commit(route);
             self.set_backing_duration(&document);
             state.document = Some(document);
         } else {
             let mix = PreparedMix::prepare(&settings, &old.plan, state.rate)?;
+            let mut route = self
+                .midi
+                .build_route(&old.plan, &settings, self.midi.routed());
             Self::enqueue(&mut state, CallbackCommand::Mix { mix, generation })?;
+            if let Some(tap) = route.tap.take() {
+                Self::enqueue(&mut state, CallbackCommand::MidiRoute { tap, generation })?;
+                // A new routing is about to be stated to its ports.
+                self.midi.wake();
+            }
+            self.midi.commit(route);
             state.document.as_mut().unwrap().settings = settings;
         }
         Ok(())
     }
     pub fn command(&self, command: TransportCommand) -> Result<(), String> {
+        // The sender looks for new records at once, whatever this turns out to start.
+        self.midi.wake();
         if let TransportCommand::Invalidate { generation } = command {
             self.shared.desired.fetch_max(generation, Ordering::AcqRel);
             self.shared
@@ -2543,7 +2714,11 @@ impl AudioService {
                 backing: document.backing.clone(),
                 practice: document.practice,
             };
-            self.synchronize_callback(&mut state, Duration::from_secs(1))?;
+            let frozen = self.synchronize_callback(&mut state, Duration::from_secs(1));
+            // The old callback is frozen (or did not answer, and is not to be trusted) and will never release what it
+            // holds on a port, whether or not the new device opens.
+            self.midi.reset();
+            frozen?;
             state.device = device_id;
             return self.open(&mut state, saved, true);
         }
@@ -2569,6 +2744,8 @@ impl AudioService {
         let result = self.open_current(state, Some(document), preserve);
         if result.is_err() {
             self.shared.mark_fault();
+            // Nothing is playing any more: whatever a stream left sounding on a port is silenced.
+            self.midi.reset();
         }
         result
     }
@@ -2587,16 +2764,16 @@ impl AudioService {
     ) -> Result<(), String> {
         let (device, config) = choose_output(state.device.as_deref())?;
         let rate = config.sample_rate();
-        let renderer = match &document {
+        let (renderer, route) = match &document {
             Some(document) => {
-                let renderer = Self::renderer(document, rate)?;
+                let (renderer, route) = self.routed_renderer(document, rate)?;
                 validate_count(&document.plan, document.practice, rate)?;
                 if document.plan.generation != self.shared.desired.load(Ordering::Acquire) {
                     return Err("A newer score preparation superseded this request.".into());
                 }
-                Some(renderer)
+                (Some(renderer), Some(route))
             }
-            None => None,
+            None => (None, None),
         };
         let (producer, controls) = HeapRb::new(CONTROL_CAPACITY).split();
         let (retired_out, retired) = HeapRb::new(CONTROL_CAPACITY).split();
@@ -2608,6 +2785,7 @@ impl AudioService {
                 .as_ref()
                 .is_some_and(|document| snapshot.generation == document.plan.generation);
         let mut transport = CallbackTransport::new(rate, self.shared.clone());
+        transport.midi = MidiOutPort::attached(self.midi.shared(), rate);
         let (audition_producer, audition_consumer): (AuditionProducer, AuditionConsumer) =
             audition_channel();
         transport.audition.attach(audition_consumer);
@@ -2656,6 +2834,12 @@ impl AudioService {
         answer
             .recv()
             .map_err(|_| "Audio device manager stopped.")??;
+        // The stream that fed the ports is gone: whatever it left queued or sounding is dropped, and the new stream
+        // states its position afresh once the sender says it has finished.
+        self.midi.reset();
+        if let Some(route) = route {
+            self.midi.commit(route);
+        }
         *self.shared.device.lock().unwrap() = Some(actual_id);
         *self.shared.stream_name.lock().unwrap() = name;
         if let Some(document) = &document {
@@ -2743,14 +2927,25 @@ fn device_label(device: &cpal::Device) -> Option<String> {
 /// Handles a backend notification for the stream of `epoch`. Allocation- and lock-free.
 /// Rerouting and xruns do not mean playback has failed; a reroute only makes the cached
 /// device name unreliable until the next open.
-fn stream_notice(shared: &SharedStatus, epoch: u64, kind: cpal::ErrorKind) {
+fn stream_notice(
+    shared: &SharedStatus,
+    midi: Option<&MidiOutShared>,
+    epoch: u64,
+    kind: cpal::ErrorKind,
+) {
     if shared.epoch.load(Ordering::Acquire) != epoch {
         return;
     }
     match kind {
         cpal::ErrorKind::DeviceChanged => shared.mark_name_stale_for_epoch(epoch),
         cpal::ErrorKind::Xrun | cpal::ErrorKind::RealtimeDenied => {}
-        _ => shared.mark_fault_for_epoch(epoch),
+        _ => {
+            shared.mark_fault_for_epoch(epoch);
+            // The stream may never call back again to release its notes: the sender silences the ports.
+            if let Some(midi) = midi {
+                midi.request_reset();
+            }
+        }
     }
 }
 fn build_stream<T: SizedSample + FromSample<f32>>(
@@ -2760,13 +2955,14 @@ fn build_stream<T: SizedSample + FromSample<f32>>(
 ) -> Result<cpal::Stream, String> {
     let channels = config.channels() as usize;
     let shared = callback.transport.shared.clone();
+    let midi = callback.transport.midi.shared().cloned();
     let epoch = callback.epoch;
     device
         .build_output_stream(
             config.clone().into(),
             move |data: &mut [T], _| callback.render(data, channels),
             move |error| {
-                stream_notice(&shared, epoch, error.kind());
+                stream_notice(&shared, midi.as_deref(), epoch, error.kind());
             },
             None,
         )
@@ -2919,6 +3115,7 @@ mod reference_tests {
             audition: Mutex::new(None),
             line_in: Mutex::new(LineInSlot::default()),
             line_in_issued: AtomicU64::new(0),
+            midi: MidiOut::default(),
             manager,
         };
         let mut candidate = original.settings.clone();
@@ -3058,6 +3255,390 @@ mod reference_tests {
         assert!(AudioService::renderer(&candidate, 48_000).is_err());
     }
     #[test]
+    fn routing_a_track_to_a_port_reaches_a_playing_document_as_a_route_beside_the_mix() {
+        use crate::{
+            midi_out::{ListedPorts, MidiOut},
+            settings::ChannelMix,
+        };
+        let original = document();
+        let shared = Arc::new(SharedStatus::new());
+        shared.desired.store(1, Ordering::Release);
+        let (producer, mut commands) = HeapRb::new(CONTROL_CAPACITY).split();
+        let (manager, _requests) = mpsc::channel();
+        let ports = Arc::new(ListedPorts(Mutex::new(Vec::new())));
+        let service = AudioService {
+            root: PathBuf::new(),
+            shared,
+            control: Mutex::new(ControlState {
+                producer: Some(producer),
+                document: Some(original.clone()),
+                rate: 48_000,
+                device: None,
+                next_barrier: 0,
+            }),
+            audition: Mutex::new(None),
+            line_in: Mutex::new(LineInSlot::default()),
+            line_in_issued: AtomicU64::new(0),
+            midi: MidiOut::with_backend(ports.clone()).with_retry_interval(Duration::ZERO),
+            manager,
+        };
+        let route = |port: Option<&str>| {
+            let mut settings = original.settings.clone();
+            settings.mixes.insert(
+                "gm".into(),
+                ChannelMix {
+                    midi_port: port.map(str::to_string),
+                    ..Default::default()
+                },
+            );
+            settings
+        };
+        let next_tap = |commands: &mut HeapCons<CallbackCommand>| {
+            assert!(matches!(
+                commands.try_pop(),
+                Some(CallbackCommand::Mix { generation: 1, .. })
+            ));
+            match commands.try_pop() {
+                Some(CallbackCommand::MidiRoute { tap, generation: 1 }) => Some(tap),
+                None => None,
+                _ => panic!("unexpected command"),
+            }
+        };
+        // A port the system does not have: the mix goes through with the track routed to it, but nothing is sounded
+        // there and the internal sound stays, and the status says why.
+        service.set_mix(route(Some("Synth")), 1).unwrap();
+        let tap = next_tap(&mut commands).expect("the track is routed to the port it asked for");
+        assert!(tap.has_routes() && !tap.silences(0));
+        service.midi_out().settle();
+        let status = service.midi_out().status();
+        assert!(!status.ports[0].open && status.ports[0].error.is_some());
+        // A refresh while the port is still missing from the system changes nothing.
+        service.midi_refresh();
+        service.midi_out().settle();
+        assert!(commands.try_pop().is_none());
+        // The device appears; refreshing the list opens it, and the track moves over by itself: no new route is sent,
+        // the audio thread follows the port's bit.
+        lock_ports(&ports).push("Synth".into());
+        service.midi_refresh();
+        service.midi_out().settle();
+        assert!(commands.try_pop().is_none());
+        assert!(service.midi_out().status().ports[0].open);
+        assert_eq!(
+            service.midi_out().shared().faulted.load(Ordering::Acquire) & 1,
+            0
+        );
+        service.midi_refresh();
+        assert!(
+            commands.try_pop().is_none(),
+            "everything works: nothing to do"
+        );
+        // A mix change while routed carries the route, so levels and mute reach the port.
+        let tap = {
+            service.set_mix(route(Some("Synth")), 1).unwrap();
+            next_tap(&mut commands).unwrap()
+        };
+        assert_eq!(tap.destination(0), Some((0, 0)));
+        // Taking the routing away sends an empty route once, so the port is released, then only mixes.
+        service.set_mix(route(None), 1).unwrap();
+        assert!(!next_tap(&mut commands).unwrap().has_routes());
+        service.set_mix(route(None), 1).unwrap();
+        assert!(next_tap(&mut commands).is_none());
+        assert!(commands.try_pop().is_none());
+    }
+    fn lock_ports(ports: &crate::midi_out::ListedPorts) -> std::sync::MutexGuard<'_, Vec<String>> {
+        ports.0.lock().unwrap()
+    }
+    /// A document with one track on General MIDI that strikes a note at the start and never ends it, sent to "Synth".
+    fn held_note_document() -> PreparedDocument {
+        let plan: PlaybackPlan = serde_json::from_value(serde_json::json!({
+            "generation": 1, "ppq": 960, "durationTick": 7680, "durationMs": 4000,
+            "tracks": [{"id": "gm", "program": 0, "percussion": false}],
+            "tempos": [{"tick": 0, "bpm": 120}],
+            "occurrences": [
+                {"bar":0,"occurrence":0,"meterNumerator":4,"meterDenominator":4,"startTick":0,"endTick":3840,"startMs":0,"endMs":2000},
+                {"bar":1,"occurrence":0,"meterNumerator":4,"meterDenominator":4,"startTick":3840,"endTick":7680,"startMs":2000,"endMs":4000}
+            ],
+            "notes": [],
+            "midi": [{"type":"noteOn","trackId":"gm","tick":0,"channel":0,"key":60,"velocity":90}]
+        }))
+        .unwrap();
+        let mut settings = DocumentSettings::default();
+        settings.mixes.insert(
+            "gm".into(),
+            ChannelMix {
+                midi_port: Some("Synth".into()),
+                ..Default::default()
+            },
+        );
+        settings.sounds.insert(
+            "gm".into(),
+            crate::settings::TrackSound {
+                voice_id: Some("gm".into()),
+                ..Default::default()
+            },
+        );
+        PreparedDocument {
+            plan: Arc::new(plan),
+            settings,
+            resources: Arc::new(
+                AudioResources::load_for_requests(
+                    &PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/audio"),
+                    &[],
+                )
+                .unwrap(),
+            ),
+            backing: None,
+            practice: PracticeSettings::default(),
+        }
+    }
+    fn settled(log: &Arc<Mutex<Vec<Vec<u8>>>>, mut done: impl FnMut(&[Vec<u8>]) -> bool) -> bool {
+        let until = std::time::Instant::now() + Duration::from_secs(2);
+        while std::time::Instant::now() < until {
+            if done(&log.lock().unwrap()) {
+                return true;
+            }
+            thread::sleep(Duration::from_millis(5));
+        }
+        false
+    }
+    /// A service whose "Synth" port records what it is sent, with the document above playing on a transport the
+    /// caller drives, and the note sounding on the port.
+    fn sounding_service() -> (
+        AudioService,
+        CallbackTransport,
+        Arc<Mutex<Vec<Vec<u8>>>>,
+        PreparedDocument,
+    ) {
+        use crate::midi_out::{RecordingPorts, sounding};
+        let log = Arc::new(Mutex::new(Vec::new()));
+        let mut service = AudioService::new(PathBuf::new(), Arc::new(|_| {}));
+        service.midi = MidiOut::with_backend(Arc::new(RecordingPorts {
+            names: vec!["Synth".into()],
+            log: log.clone(),
+        }));
+        let document = held_note_document();
+        service.shared.desired.store(1, Ordering::Release);
+        service
+            .midi
+            .ensure_ports(&MidiOut::port_names(&document.settings), Ensure::Prepare);
+        service.midi.settle();
+        let (renderer, route) = service.routed_renderer(&document, 48_000).unwrap();
+        service.midi.commit(route);
+        let mut transport = CallbackTransport::new(48_000, service.shared.clone());
+        transport.midi = MidiOutPort::attached(service.midi.shared(), 48_000);
+        transport.install_with_practice(renderer, 1, false, document.practice);
+        transport
+            .command(TransportCommand::Play { generation: 1 })
+            .unwrap();
+        for _ in 0..4 {
+            transport.render_callback(&mut [[0.0; 2]; 480]);
+        }
+        service.midi.wake();
+        assert!(
+            settled(&log, |log| sounding(log) == vec![(0, 60)]),
+            "the note sounds on the port"
+        );
+        (service, transport, log, document)
+    }
+    #[test]
+    fn a_failed_device_switch_leaves_nothing_sounding_on_a_port() {
+        use crate::midi_out::sounding;
+        let (service, transport, log, document) = sounding_service();
+        let (producer, controls) = HeapRb::new(CONTROL_CAPACITY).split();
+        let (retired, retirement_queue) = HeapRb::new(CONTROL_CAPACITY).split();
+        {
+            let mut state = service.control.lock().unwrap();
+            state.producer = Some(producer);
+            state.document = Some(document);
+        }
+        let mut callback = OutputCallback {
+            transport,
+            controls,
+            retired,
+            scratch: [[0.0; 2]; BLOCK],
+            epoch: 0,
+            suspended: false,
+        };
+        let worker = thread::spawn(move || {
+            let _retirement_queue = retirement_queue;
+            let until = std::time::Instant::now() + Duration::from_secs(3);
+            let mut output = [0.0f32; BLOCK * 2];
+            while !callback.suspended {
+                callback.render(&mut output, 2);
+                assert!(std::time::Instant::now() < until);
+                thread::sleep(Duration::from_millis(1));
+            }
+        });
+        // The old callback is frozen for the switch, and the new device will not open.
+        let result = service.command(TransportCommand::SelectDevice {
+            generation: 1,
+            device_id: Some("no-such-device".into()),
+        });
+        assert!(result.is_err(), "{result:?}");
+        worker.join().unwrap();
+        assert!(
+            settled(&log, |log| sounding(log).is_empty()),
+            "still sounding: {:?}",
+            sounding(&log.lock().unwrap())
+        );
+        service.midi.shutdown();
+    }
+    #[test]
+    fn a_stream_error_leaves_nothing_sounding_on_a_port_but_an_xrun_does_not() {
+        use crate::midi_out::sounding;
+        let (service, _transport, log, _document) = sounding_service();
+        let epoch = service.shared.epoch.load(Ordering::Acquire);
+        let midi = service.midi.shared();
+        // A glitch is not a failure.
+        stream_notice(&service.shared, Some(&midi), epoch, cpal::ErrorKind::Xrun);
+        thread::sleep(Duration::from_millis(150));
+        assert_eq!(sounding(&log.lock().unwrap()), vec![(0, 60)]);
+        // The device going away is: nothing will call back to release the note, so the sender does.
+        stream_notice(
+            &service.shared,
+            Some(&midi),
+            epoch,
+            cpal::ErrorKind::DeviceNotAvailable,
+        );
+        assert!(
+            settled(&log, |log| sounding(log).is_empty()),
+            "still sounding: {:?}",
+            sounding(&log.lock().unwrap())
+        );
+        service.midi.shutdown();
+    }
+    fn bare_service(
+        document: &PreparedDocument,
+        backend: Arc<dyn crate::midi_out::MidiBackend>,
+    ) -> (AudioService, HeapCons<CallbackCommand>) {
+        let shared = Arc::new(SharedStatus::new());
+        shared.desired.store(1, Ordering::Release);
+        let (producer, commands) = HeapRb::new(CONTROL_CAPACITY).split();
+        let (manager, _requests) = mpsc::channel();
+        let service = AudioService {
+            root: PathBuf::new(),
+            shared,
+            control: Mutex::new(ControlState {
+                producer: Some(producer),
+                document: Some(document.clone()),
+                rate: 48_000,
+                device: None,
+                next_barrier: 0,
+            }),
+            audition: Mutex::new(None),
+            line_in: Mutex::new(LineInSlot::default()),
+            line_in_issued: AtomicU64::new(0),
+            midi: MidiOut::with_backend(backend),
+            manager,
+        };
+        (service, commands)
+    }
+    #[test]
+    fn a_device_switch_whose_barrier_times_out_still_silences_the_ports() {
+        let original = held_note_document();
+        let (service, _commands) = bare_service(
+            &original,
+            Arc::new(crate::midi_out::ListedPorts(Mutex::new(Vec::new()))),
+        );
+        let before = service
+            .midi_out()
+            .shared()
+            .reset_requested
+            .load(Ordering::Acquire);
+        // Nobody answers the barrier: the old callback is not to be trusted to release anything.
+        let result = service.command(TransportCommand::SelectDevice {
+            generation: 1,
+            device_id: None,
+        });
+        assert!(result.is_err(), "{result:?}");
+        assert!(
+            service
+                .midi_out()
+                .shared()
+                .reset_requested
+                .load(Ordering::Acquire)
+                > before
+        );
+    }
+    #[test]
+    fn a_mix_routed_to_a_port_that_will_not_open_is_applied_at_once_with_the_track_routed() {
+        let original = held_note_document();
+        let (service, mut commands) =
+            bare_service(&original, Arc::new(crate::midi_out::HangingPorts));
+        let mut settings = original.settings.clone();
+        settings.mixes.get_mut("gm").unwrap().midi_port = Some("Hang".into());
+        let started = std::time::Instant::now();
+        service.set_mix(settings, 1).unwrap();
+        // Nothing waited for the port, and nothing needs to be prepared again when it opens.
+        assert!(
+            started.elapsed() < Duration::from_millis(300),
+            "{:?}",
+            started.elapsed()
+        );
+        assert!(matches!(
+            commands.try_pop(),
+            Some(CallbackCommand::Mix { .. })
+        ));
+        match commands.try_pop() {
+            Some(CallbackCommand::MidiRoute { tap, .. }) => {
+                assert!(tap.has_routes());
+                assert!(!tap.silences(0), "internal sound until the port is there");
+            }
+            _ => panic!("the track should be routed"),
+        }
+        service.midi_out().shutdown();
+    }
+    #[test]
+    fn a_route_that_could_not_be_queued_is_not_remembered() {
+        use crate::midi_out::ListedPorts;
+        let original = held_note_document();
+        let shared = Arc::new(SharedStatus::new());
+        shared.desired.store(1, Ordering::Release);
+        // A control queue with room for the mix and nothing else.
+        let (producer, mut commands) = HeapRb::new(1).split();
+        let (manager, _requests) = mpsc::channel();
+        let service = AudioService {
+            root: PathBuf::new(),
+            shared,
+            control: Mutex::new(ControlState {
+                producer: Some(producer),
+                document: Some(original.clone()),
+                rate: 48_000,
+                device: None,
+                next_barrier: 0,
+            }),
+            audition: Mutex::new(None),
+            line_in: Mutex::new(LineInSlot::default()),
+            line_in_issued: AtomicU64::new(0),
+            midi: MidiOut::with_backend(Arc::new(ListedPorts(Mutex::new(vec!["Synth".into()])))),
+            manager,
+        };
+        let mut settings = original.settings.clone();
+        settings.mixes.get_mut("gm").unwrap().gain = 0.5;
+        let error = service.set_mix(settings, 1).unwrap_err();
+        assert!(error.contains("queue is full"), "{error}");
+        // It was the route that did not fit: the mix went in.
+        assert!(matches!(
+            commands.try_pop(),
+            Some(CallbackCommand::Mix { .. })
+        ));
+        assert!(!service.midi_out().routed());
+        assert!(service.midi_out().status().ports.is_empty());
+        assert_eq!(
+            service
+                .control
+                .lock()
+                .unwrap()
+                .document
+                .as_ref()
+                .unwrap()
+                .settings,
+            original.settings,
+            "and the mix is not taken as applied either"
+        );
+        service.midi_out().shutdown();
+    }
+    #[test]
     fn a_drum_kit_edit_reaches_a_playing_document_as_a_mix_and_never_rebuilds_it() {
         use crate::settings::{ChannelMix, DrumElementMix, DrumKitMix};
         let mut original = document();
@@ -3081,6 +3662,7 @@ mod reference_tests {
             audition: Mutex::new(None),
             line_in: Mutex::new(LineInSlot::default()),
             line_in_issued: AtomicU64::new(0),
+            midi: MidiOut::default(),
             manager,
         };
         // Giving the track its first kit, changing it, and taking it away again: each is a mix, never an install, which
@@ -3139,6 +3721,7 @@ mod reference_tests {
             audition: Mutex::new(None),
             line_in: Mutex::new(LineInSlot::default()),
             line_in_issued: AtomicU64::new(0),
+            midi: MidiOut::default(),
             manager,
         };
         for change in 0..5 {
@@ -4184,12 +4767,17 @@ mod diagnostics_and_test_tone_tests {
         *service.shared.stream_name.lock().unwrap() = Some("Speakers".into());
         let epoch = service.shared.epoch.load(Ordering::Acquire);
         let name = |s: &AudioService| s.diagnostics().unwrap().device_name;
-        stream_notice(&service.shared, epoch, cpal::ErrorKind::Xrun);
+        stream_notice(&service.shared, None, epoch, cpal::ErrorKind::Xrun);
         assert_eq!(name(&service).as_deref(), Some("Speakers"));
         // A retired stream's notice changes nothing.
-        stream_notice(&service.shared, epoch + 1, cpal::ErrorKind::DeviceChanged);
+        stream_notice(
+            &service.shared,
+            None,
+            epoch + 1,
+            cpal::ErrorKind::DeviceChanged,
+        );
         assert_eq!(name(&service).as_deref(), Some("Speakers"));
-        stream_notice(&service.shared, epoch, cpal::ErrorKind::DeviceChanged);
+        stream_notice(&service.shared, None, epoch, cpal::ErrorKind::DeviceChanged);
         let diagnostics = service.diagnostics().expect("a reroute is not a fault");
         assert_eq!(diagnostics.device_name, None);
         assert_eq!(diagnostics.sample_rate, Some(48_000));
@@ -4197,7 +4785,7 @@ mod diagnostics_and_test_tone_tests {
         service.shared.next_epoch_snapshot();
         assert_eq!(name(&service).as_deref(), Some("Speakers"));
         // A notice from the old stream racing that open cannot mark the new one.
-        stream_notice(&service.shared, epoch, cpal::ErrorKind::DeviceChanged);
+        stream_notice(&service.shared, None, epoch, cpal::ErrorKind::DeviceChanged);
         assert_eq!(name(&service).as_deref(), Some("Speakers"));
     }
 
@@ -4205,9 +4793,9 @@ mod diagnostics_and_test_tone_tests {
     fn other_backend_errors_still_fault_the_live_stream() {
         let shared = SharedStatus::new();
         let epoch = shared.epoch.load(Ordering::Acquire);
-        stream_notice(&shared, epoch, cpal::ErrorKind::RealtimeDenied);
+        stream_notice(&shared, None, epoch, cpal::ErrorKind::RealtimeDenied);
         assert!(!shared.is_faulted());
-        stream_notice(&shared, epoch, cpal::ErrorKind::DeviceNotAvailable);
+        stream_notice(&shared, None, epoch, cpal::ErrorKind::DeviceNotAvailable);
         assert!(shared.is_faulted());
     }
 

@@ -239,6 +239,20 @@ impl NativeAudio {
         }
         Ok(())
     }
+    /// Tries again the MIDI ports the open score sends tracks to that were not working. For the owner of the score only.
+    pub(crate) fn midi_refresh(
+        &self,
+        workspace: &Mutex<DocumentWorkspace>,
+        owner: &AudioOwner,
+    ) -> Result<(), String> {
+        let _access = self.access.lock().map_err(|e| e.to_string())?;
+        {
+            let workspace = workspace.lock().map_err(|e| e.to_string())?;
+            Self::check_owner(&workspace, owner)?;
+        }
+        self.service.midi_refresh();
+        Ok(())
+    }
     fn launch_export(
         &self,
         jobs: &ExportJobs,

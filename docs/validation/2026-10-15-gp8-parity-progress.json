@@ -78,28 +78,28 @@
     },
     "current_dispositions": {
       "implemented": 101,
-      "partial": 139,
-      "missing": 11,
+      "partial": 140,
+      "missing": 10,
       "unverified": 7
     },
-    "evidence_reviewed_total": 191,
+    "evidence_reviewed_total": 192,
     "evidence_reviewed": {
       "implemented": 59,
-      "partial": 129,
+      "partial": 130,
       "missing": 0,
       "unverified": 3
     },
-    "baseline_not_reaudited_total": 67,
+    "baseline_not_reaudited_total": 66,
     "baseline_not_reaudited": {
       "implemented": 42,
       "partial": 10,
-      "missing": 11,
+      "missing": 10,
       "unverified": 4
     },
-    "status_changed_total": 146,
+    "status_changed_total": 147,
     "transition_counts": {
       "missing -> implemented": 40,
-      "missing -> partial": 95,
+      "missing -> partial": 96,
       "partial -> implemented": 10,
       "unverified -> partial": 1
     }
@@ -7360,17 +7360,25 @@
         "settings",
         "player"
       ],
-      "test_evidence": [],
+      "test_evidence": [
+        "src-tauri/src/audio/midi_out.rs",
+        "src-tauri/src/midi_out.rs",
+        "src-tauri/tests/audio_midi_out.rs",
+        "src/audio/MidiOutPanel.test.tsx",
+        "tests/desktop/parity-midi-out.mjs"
+      ],
       "current_behavior_or_gap": "Internal MIDI synthesis/export exists; hardware MIDI output/routing absent.",
       "acceptance_required": "Send programs/controllers/notes to configured ports with RSE alignment.",
       "runtime_rechecked": false,
       "historical_status": "missing",
-      "current_status": "missing",
-      "assessment": "baseline_not_reaudited",
-      "current_proven_status": null,
-      "current_behavior": "Internal MIDI synthesis/export exists; hardware MIDI output/routing absent.",
-      "remaining_gap": "Not re-audited in this delivery-progress audit. The original baseline behavior, gap and acceptance remain authoritative historical context; this is not a new current proof.",
-      "current_evidence": [],
+      "current_status": "partial",
+      "assessment": "evidence_reviewed",
+      "current_proven_status": "partial",
+      "current_behavior": "The Track inspector routes a track to a system MIDI port, saved as midiPort in the track mix (one undoable edit). A routed track is silent internally and sends notes, program, CC7 volume, CC10 pan, sustain, bends and vibrato in time with playback, each track on its own channel and percussion on channel 10, with mute and solo applied and every note released on stop, seek, loop and port loss. A sender thread times messages from the audio callback clock plus a 0-500 ms user delay. A Windows desktop-test build routed four tracks to a logging test port in 3 runs out of 3: the internal output stayed silent, the second chord came 5000 ms +/- 0.05 after the first with and without a count-in, nothing was late or dropped and no note was left held; the Microsoft GS Wavetable port opened without error.",
+      "remaining_gap": "No real external synth or hardware was tested, CoreMIDI and ALSA are unrun, and there is no ear check. Device and converter latency are not measured; the user delay lines them up. Up to 4 callbacks of messages can go out early after a stall under 50 ms. Silencing a port holds up the others briefly. Drum-element mix, effects, master, metronome and auditions are not sent, exports never send MIDI, and there is no MIDI input. Ports are matched by name. Builds from before A26 refuse projects with a routed track.",
+      "current_evidence": [
+        "2026-11-07-gp8-midi-out.md"
+      ],
       "runtime_rechecked_by_this_audit": false
     },
     {

@@ -22,6 +22,9 @@ import { CabinetResponse } from './audio/CabinetResponse';
 import { Segmented } from './ui';
 import { AmpGlyph,ExportGlyph,FretboardGlyph,MarkGlyph,MixerGlyph,PaletteGlyph,PanelBottomGlyph,PanelRightGlyph,PracticeGlyph,RedoGlyph,ScoreGlyph,UndoGlyph } from './shell/glyphs';
 import { InterpretationPanel } from './audio/InterpretationPanel';
+import { MidiOutPanel } from './audio/MidiOutPanel';
+import { nativeMidiOut } from './audio/midi-out';
+import { readMidiOutDelay } from './audio/midi-out-preferences';
 import { CabinetNotices } from './audio/CabinetNotices';
 import { BackingPanel } from './audio/BackingPanel';
 import { BackingWaveform } from './audio/BackingWaveform';
@@ -156,6 +159,8 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   const shell=useRef<HTMLDivElement>(null),workspace=useRef<HTMLDivElement>(null),scorePane=useRef<HTMLElement>(null),commandBar=useRef<HTMLElement>(null);
   const inspectorPane=useRef<HTMLDivElement>(null),viewMenu=useRef<HTMLDetailsElement>(null),practiceMenu=useRef<HTMLDetailsElement>(null);
   const lineInOn=useLineInRunning();
+  // The MIDI output delay is kept with the app; the native side starts at none until it is told.
+  useEffect(()=>{void nativeMidiOut.setDelay(readMidiOutDelay()).catch(()=>{});},[]);
   const paneFocusIntent=useRef<InspectorTab|null>(null),[paneFocusTick,setPaneFocusTick]=useState(0);
   const [workspaceHeight,setWorkspaceHeight]=useState(Infinity),[workspaceWidth,setWorkspaceWidth]=useState(Infinity),[clipboardFocus,setClipboardFocus]=useState(0);
   const narrow=viewport.width<1180,inspectorShown=inspectorVisible;
@@ -623,6 +628,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
         <section className="inspector-section" aria-labelledby="inspector-track-info"><h3 id="inspector-track-info">{t('inspector.information')}</h3><TrackSettingsPanel key={state.documentEpoch} score={state.score} selected={target.track} busy={controlsBusy} locked={editLocked} onEdit={edit} onAudition={auditionTuning}/></section>
         <section className="inspector-section" aria-labelledby="inspector-track-sounds"><h3 id="inspector-track-sounds">{t('inspector.sounds')}</h3>{view==='score'&&<SoundPanel trackId={trackId} percussion={selectedTrack.isPercussion} sound={state.settings.sounds[trackId]} onEdit={command=>controller.edit(command)} playback={player} busy={editBusy} shown={inspectorShown&&inspectorTab==='track'}/>}</section>
         <section className="inspector-section" aria-labelledby="inspector-track-interpretation"><h3 id="inspector-track-interpretation">{t('inspector.interpretation')}</h3><InterpretationPanel trackId={trackId} mix={state.settings.mixes[trackId]} stringed={selectedTrack.staves.some(staff=>staff.isStringed)} busy={controlsBusy} onEdit={command=>controller.edit(command)}/></section>
+        <section className="inspector-section" aria-labelledby="inspector-track-midi-out"><h3 id="inspector-track-midi-out">{t('inspector.midi_out')}</h3><MidiOutPanel key={trackId} owner={waveformBridge.owner} trackId={trackId} mix={state.settings.mixes[trackId]} busy={controlsBusy} onEdit={command=>controller.edit(command)}/></section>
       </div>
       <div className="inspector-tabpanel" role="tabpanel" id="inspector-panel-selection" aria-labelledby="inspector-tab-selection" hidden={inspectorTab!=='selection'}>
       <EditorPanel documentEpoch={state.documentEpoch} songHost={songHost} practiceHost={practiceHost} paletteHost={paletteVisible&&view==='score'?paletteHost:null} measureRequest={measureRequest} lyricsRequest={lyricsRequest} onOpenLyrics={()=>{setContextScope('staff');setInspectorVisible(true);setInspectorTab('selection');setLyricsRequest(tick=>tick+1);}} onOpenMeasure={bar=>displayActions.current.measure(bar)} contextScope={contextScope} onContextScopeChange={setContextScope} score={state.score} target={target} string={string} fret={fret} noteIndex={noteIndex} onSelectNote={setNoteIndex} busy={controlsBusy} locked={editLocked} onSelect={next=>{editorSelection(null);select(next);}} onString={s=>select(target,s)} onFret={setFret} onEdit={edit} musicSelection={musicSelection} onMusicSelection={editorSelection} onChord={()=>openModal('harmony')} onScales={()=>openModal('scale')} onAudition={auditionTuning}

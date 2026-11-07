@@ -329,6 +329,149 @@ impl AudioExportRender {
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// Exports run the same renderer the speakers use, but a score that sends tracks to MIDI ports exports every track
+    /// and sends nothing: the mix and the stems are bit for bit what they are for the same score without routing.
+    #[test]
+    fn a_score_routed_to_midi_ports_exports_every_track_exactly_as_it_would_unrouted() {
+        use crate::{
+            audio::resources::AudioResources,
+            settings::{ChannelMix, DocumentSettings, TrackSound},
+        };
+        use std::sync::Arc;
+        let plan: PlaybackPlan = serde_json::from_value(serde_json::json!({
+            "generation": 1, "ppq": 960, "durationTick": 3840, "durationMs": 2000,
+            "tracks": [{"id":"a","program":24,"percussion":false},{"id":"b","program":33,"percussion":false}],
+            "tempos": [{"tick":0,"bpm":120}],
+            "occurrences": [{"bar":0,"occurrence":0,"meterNumerator":4,"meterDenominator":4,"startTick":0,"endTick":3840,"startMs":0,"endMs":2000}],
+            "notes": [],
+            "midi": [
+                {"type":"noteOn","trackId":"a","tick":0,"channel":0,"key":60,"velocity":100},
+                {"type":"noteOn","trackId":"b","tick":480,"channel":0,"key":40,"velocity":100},
+                {"type":"noteOff","trackId":"a","tick":1920,"channel":0,"key":60,"velocity":0},
+                {"type":"noteOff","trackId":"b","tick":2400,"channel":0,"key":40,"velocity":0}
+            ]
+        }))
+        .unwrap();
+        let resources = Arc::new(
+            AudioResources::load_for_requests(
+                &std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/audio"),
+                &[],
+            )
+            .unwrap(),
+        );
+        let settings = |routed: bool| {
+            let mut settings = DocumentSettings::default();
+            for track in ["a", "b"] {
+                settings.sounds.insert(
+                    track.into(),
+                    TrackSound {
+                        voice_id: Some("gm".into()),
+                        ..TrackSound::default()
+                    },
+                );
+                if routed {
+                    settings.mixes.insert(
+                        track.into(),
+                        ChannelMix {
+                            midi_port: Some("Some port".into()),
+                            ..ChannelMix::default()
+                        },
+                    );
+                }
+            }
+            settings
+        };
+        let request = AudioExportRequest {
+            tracks: ["a", "b"]
+                .iter()
+                .map(|id| StemTrack {
+                    id: (*id).into(),
+                    name: (*id).into(),
+                    preset: "clean".into(),
+                    kind: StemKind::Score,
+                })
+                .collect(),
+            range: None,
+            format: AudioFormat::wav(48000, 24),
+            speed: 1.0,
+            metronome: false,
+            metronome_sound: Default::default(),
+            tail_seconds: 0.1,
+            include_backing: false,
+            include_mix: true,
+            normalize_rms_db: None,
+        };
+        let render = |routed: bool| {
+            let mut export = AudioExportRender::new(
+                Renderer::new(
+                    Arc::new(plan.clone()),
+                    resources.clone(),
+                    settings(routed),
+                    48000,
+                )
+                .unwrap(),
+                &plan,
+                request.clone(),
+            )
+            .unwrap();
+            assert!(
+                export.renderer.midi_tap().is_none(),
+                "an export has no MIDI routing to send anything with"
+            );
+            let mut mix = Vec::new();
+            let mut buffer = vec![[0.0f32; 2]; 4096];
+            loop {
+                let n = export.render_mix(&mut buffer).unwrap();
+                if n == 0 {
+                    break;
+                }
+                mix.extend_from_slice(&buffer[..n]);
+            }
+            let mut stems = AudioExportRender::new(
+                Renderer::new(
+                    Arc::new(plan.clone()),
+                    resources.clone(),
+                    settings(routed),
+                    48000,
+                )
+                .unwrap(),
+                &plan,
+                request.clone(),
+            )
+            .unwrap();
+            let mut stem_samples: Vec<Vec<[f32; 2]>> = vec![Vec::new(); 3];
+            let mut outputs = vec![vec![[0.0f32; 2]; BLOCK_FRAMES]; 3];
+            loop {
+                let n = stems.render_stems(&mut outputs).unwrap();
+                if n == 0 {
+                    break;
+                }
+                for (collected, output) in stem_samples.iter_mut().zip(&outputs) {
+                    collected.extend_from_slice(&output[..n]);
+                }
+            }
+            (mix, stem_samples)
+        };
+        let (plain_mix, plain_stems) = render(false);
+        let (routed_mix, routed_stems) = render(true);
+        let peak =
+            |frames: &[[f32; 2]]| frames.iter().flatten().fold(0.0f32, |p, x| p.max(x.abs()));
+        assert!(peak(&plain_mix) > 0.01, "the score makes sound");
+        assert!(
+            peak(&routed_stems[0]) > 0.01 && peak(&routed_stems[1]) > 0.01,
+            "every track is in the export"
+        );
+        let same = |a: &[[f32; 2]], b: &[[f32; 2]]| {
+            a.len() == b.len()
+                && a.iter().zip(b).all(|(x, y)| {
+                    x[0].to_bits() == y[0].to_bits() && x[1].to_bits() == y[1].to_bits()
+                })
+        };
+        assert!(same(&plain_mix, &routed_mix));
+        for (plain, routed) in plain_stems.iter().zip(&routed_stems) {
+            assert!(same(plain, routed));
+        }
+    }
     #[test]
     fn exported_native_mix_and_stems_decode_with_aligned_onsets_pitch_and_tail_frames() {
         use crate::audio::{

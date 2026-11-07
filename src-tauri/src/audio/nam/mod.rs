@@ -15,7 +15,7 @@ mod wavenet;
 pub use cost::*;
 pub use file::*;
 pub use model::{NamModel, NamState};
-pub use stage::CaptureStage;
+pub use stage::{CaptureStage, OUTPUT_CEILING};
 
 #[cfg(test)]
 mod cost_tests;

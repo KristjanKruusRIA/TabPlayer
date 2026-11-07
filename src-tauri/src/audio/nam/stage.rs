@@ -54,6 +54,11 @@ const CAL_GIVE_UP_DB: f64 = 60.0;
 const RATE_RANGE: (u32, u32) = (8_000, 384_000);
 /// Largest level offset taken from the caller, in dB either way.
 const LEVEL_LIMIT_DB: f64 = 60.0;
+/// Largest output the stage lets through, after every gain. The amps peak near 0.1 and a +36 dB gain stage on top is
+/// below 10, so 1e4 is far beyond any sound a capture should make; past it the stage faults. This bounds what the tone
+/// stack, the crossfade and the cabinet can be handed: a value between `f32::MAX / 4` and `f32::MAX` is finite here
+/// and overflows there.
+pub const OUTPUT_CEILING: f32 = 1e4;
 /// High-pass corner of the DC blocker.
 const DC_HZ: f64 = 5.0;
 
@@ -417,14 +422,16 @@ impl CaptureStage {
 
     /// [`CaptureStage::process`] with a further gain from the caller, which the stage cannot know to keep in range.
     /// The model's output is finite (`tick` checks), but the calibration's make-up gain (up to +40 dB), the level
-    /// (up to +60 dB) and the caller's gain can still take a large finite value past the `f32` range. Infinity is
-    /// treated like any other non-finite output: the stage restores its state once and is silent until `reset`.
+    /// (up to +60 dB) and the caller's gain can still take a large finite value past the `f32` range. Infinity, NaN and
+    /// anything past [`OUTPUT_CEILING`] are treated like any other non-finite output: the stage restores its state
+    /// once and is silent until `reset`.
     #[inline]
     pub fn process_with(&mut self, x: f32, extra: f64) -> f32 {
         let y = self.tick(x) * self.gain;
         // `extra == 1.0` leaves `y` unchanged bit for bit.
         let z = (y as f64 * extra) as f32;
-        if z.is_finite() {
+        // One compare: false for infinity, NaN and anything past the ceiling.
+        if z.abs() <= OUTPUT_CEILING {
             z
         } else {
             self.fault();

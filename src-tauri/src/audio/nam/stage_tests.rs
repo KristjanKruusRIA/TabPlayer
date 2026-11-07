@@ -448,12 +448,14 @@ fn finite_model_output_that_overflows_after_the_gain_faults_the_stage() {
 
 #[test]
 fn a_gain_applied_by_the_caller_is_checked_too() {
-    // 1e29 on the tone, gain -40 dB: 1e27 at full scale. A caller's x1e12 takes it past the f32 range.
-    let mut stage = CaptureStage::new(scaled(1e30), 48_000, 0.0);
+    // 1e6 on the tone, gain -40 dB: about 1e3 at full scale, well inside the ceiling.
+    let mut stage = CaptureStage::new(scaled(1e6), 48_000, 0.0);
     let input = sine(48_000, 220.0, 0.1, 2000);
     let out: Vec<f32> = input.iter().map(|&x| stage.process_with(x, 1.0)).collect();
     assert!(out.iter().all(|v| v.is_finite()) && !stage.faulted());
-    let mut loud = CaptureStage::new(scaled(1e30), 48_000, 0.0);
+    assert!(peak(&out) > 100.0, "a loud but sane output plays");
+    // A caller x1e12 takes it past the f32 range, and past the ceiling long before that.
+    let mut loud = CaptureStage::new(scaled(1e6), 48_000, 0.0);
     let out: Vec<f32> = input.iter().map(|&x| loud.process_with(x, 1e12)).collect();
     assert!(out.iter().all(|v| v.is_finite()));
     assert!(loud.faulted());
@@ -465,6 +467,41 @@ fn a_gain_applied_by_the_caller_is_checked_too() {
     );
     for &x in &input {
         assert_eq!(a.process(x).to_bits(), b.process_with(x, 1.0).to_bits());
+    }
+}
+
+#[test]
+fn a_runaway_output_below_the_float_limit_faults_the_stage() {
+    // The model is finite at 5e29 and so is the product with the gain (5e27), but nothing downstream (tone stack,
+    // crossfade, cabinet) is safe with that: past the ceiling the stage restores once and is silent until reset.
+    assert_eq!(OUTPUT_CEILING, 1e4);
+    let mut stage = CaptureStage::new(scaled(1e30), 48_000, 0.0);
+    assert!(!stage.calibration_faulted());
+    let out = run(&mut stage, &sine(48_000, 220.0, 0.5, 2000));
+    assert!(out.iter().all(|v| v.abs() <= OUTPUT_CEILING));
+    assert!(stage.faulted());
+    assert_eq!(stage.restores(), 1);
+    assert!(out[out.len() - 100..].iter().all(|v| v.to_bits() == 0));
+    stage.reset();
+    assert!(!stage.faulted());
+    // The ceiling is a single compare: an output of 0.9 times it plays, and one of 1.1 times it does not.
+    let input = sine(48_000, 220.0, 0.1, 2000);
+    let p = peak(&run(
+        &mut CaptureStage::new(identity(), 48_000, 0.0),
+        &input,
+    ));
+    for (fraction, faults) in [(0.9, false), (1.1, true)] {
+        let mut stage = CaptureStage::new(identity(), 48_000, 0.0);
+        let extra = fraction * OUTPUT_CEILING as f64 / p;
+        let out: Vec<f32> = input
+            .iter()
+            .map(|&x| stage.process_with(x, extra))
+            .collect();
+        assert_eq!(stage.faulted(), faults, "{fraction} of the ceiling");
+        assert!(out.iter().all(|v| v.abs() <= OUTPUT_CEILING));
+        if !faults {
+            assert!(peak(&out) > 0.85 * OUTPUT_CEILING as f64);
+        }
     }
 }
 

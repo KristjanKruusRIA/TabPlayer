@@ -8,7 +8,7 @@
 //! Everything here runs off the audio thread. Files are untrusted: they are read with a bound, parsed by
 //! `parse_nam` (which has its own caps), and checked against the identity they are filed under before use. Paths are
 //! only ever built from ids that are 32 lowercase hexadecimal digits, inside the library folder.
-use super::nam::{MAX_FILE_BYTES as MAX_NAM_BYTES, NamError, NamModel, parse_nam};
+use super::nam::{CaptureStage, MAX_FILE_BYTES as MAX_NAM_BYTES, NamError, NamModel, parse_nam};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
@@ -99,7 +99,7 @@ struct Sidecar {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct CaptureStatus {
     pub id: String,
-    /// `ready`, `missing`, `unreadable` or `unsupported`.
+    /// `ready`, `missing`, `unreadable`, `unsupported`, or `uncalibrated` (it reads, but fails its level test).
     pub state: &'static str,
     pub message: Option<String>,
 }
@@ -436,9 +436,15 @@ impl CaptureLibrary {
         ids.iter()
             .take(MAX_STATUS_IDS)
             .map(|id| match self.model(id) {
-                Ok(_) => CaptureStatus {
+                Ok(model) => CaptureStatus {
                     id: id.clone(),
-                    state: "ready",
+                    // A capture that reads but produces non-finite sound when its level is measured is not played:
+                    // the built-in amp is. Measured here, off the audio thread, and kept for the amp to reuse.
+                    state: if CaptureStage::calibration_faulted_for(id, &model) {
+                        "uncalibrated"
+                    } else {
+                        "ready"
+                    },
                     message: None,
                 },
                 Err(problem) => CaptureStatus {

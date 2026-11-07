@@ -275,3 +275,30 @@ fn a_capture_too_heavy_to_play_is_refused_at_import_and_unsupported_in_the_libra
         Some("This capture is too heavy to play in real time")
     );
 }
+
+/// The Core WaveNet with every weight multiplied by 1e30: it reads fine and produces infinity once played.
+fn hostile() -> Vec<u8> {
+    let mut file: serde_json::Value = serde_json::from_slice(WAVENET).unwrap();
+    for w in file["weights"].as_array_mut().unwrap() {
+        *w = serde_json::json!(w.as_f64().unwrap() * 1e30);
+    }
+    serde_json::to_vec(&file).unwrap()
+}
+
+#[test]
+fn a_capture_that_fails_its_level_test_is_uncalibrated_and_one_that_passes_is_ready() {
+    let (_dir, library) = library();
+    let good = library.import_bytes(WAVENET, "good.nam").unwrap().id;
+    let lstm = library.import_bytes(LSTM, "lstm.nam").unwrap().id;
+    let bad = library.import_bytes(&hostile(), "bad.nam").unwrap().id;
+    let status = library.status(&[good.clone(), bad.clone(), lstm]);
+    assert_eq!(status[0].state, "ready", "{status:?}");
+    assert_eq!(status[1].state, "uncalibrated", "{status:?}");
+    assert_eq!(status[1].message, None);
+    assert_eq!(status[2].state, "ready", "{status:?}");
+    // Asking again measures nothing more, and says the same.
+    let again = library.status(&[bad.clone()]);
+    assert_eq!(again[0].state, "uncalibrated");
+    // Playback resolves it as a model all the same; the amp falls back after its own measurement at the device rate.
+    assert!(library.model(&bad).is_ok());
+}

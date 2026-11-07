@@ -32,6 +32,16 @@ const CALIBRATION_CACHE: usize = 64;
 #[cfg(test)]
 thread_local! {static CALIBRATION_RUNS: std::cell::Cell<u32> = const {std::cell::Cell::new(0)};}
 
+/// What an earlier stage for the same capture and rate found, if it is still kept.
+fn cached_calibration(wanted: &(String, u32)) -> Option<Calibration> {
+    CALIBRATIONS
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .iter()
+        .find(|(key, _)| key == wanted)
+        .map(|(_, found)| *found)
+}
+
 /// The amps' own reference tone: 220 Hz at a 0.1 peak.
 const CAL_HZ: f64 = 220.0;
 const CAL_PEAK: f64 = 0.1;
@@ -190,14 +200,7 @@ impl CaptureStage {
         stage.level_db = level;
         stage.key = key.clone();
         let cache_key = key.map(|id| (id, stage.device_rate));
-        let cached = cache_key.as_ref().and_then(|wanted| {
-            CALIBRATIONS
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .iter()
-                .find(|(key, _)| key == wanted)
-                .map(|(_, found)| *found)
-        });
+        let cached = cache_key.as_ref().and_then(cached_calibration);
         let found = cached.unwrap_or_else(|| {
             let found = stage.calibration();
             if let Some(wanted) = cache_key {
@@ -303,12 +306,24 @@ impl CaptureStage {
         }
     }
 
-    /// False when the capture could not be calibrated and runs at unit gain
-    /// (before the level offset), so callers can report it. A capture measured
-    /// 40 to 60 dB under the target is clamped to +40 dB and still reports
+    /// Whether calibration found a gain. False for a capture that gave up (its reference peak is more than 60 dB under
+    /// the target, so it runs at unit gain before the level offset) and for one that faulted; playback and the
+    /// library's status act on [`CaptureStage::calibration_faulted`] alone, because only that one falls back to the
+    /// built-in amp. A capture measured 40 to 60 dB under the target is clamped to +40 dB and still reports
     /// calibrated, so it may play up to 20 dB quiet.
     pub fn calibrated(&self) -> bool {
         self.calibrated
+    }
+
+    /// Whether the library capture `id` fails calibration, so that the amp plays the built-in circuit instead of it.
+    /// Measured at the capture's own rate, once: the result is kept with the stage calibrations, and the first stage
+    /// the amp builds for the same rate reuses it. Off the audio thread only.
+    pub fn calibration_faulted_for(id: &str, model: &Arc<NamModel>) -> bool {
+        let rate = model.model_rate().clamp(RATE_RANGE.0, RATE_RANGE.1);
+        match cached_calibration(&(id.to_owned(), rate)) {
+            Some(found) => found.faulted,
+            None => Self::with_identity(id, model.clone(), rate, 0.0).calibration_faulted(),
+        }
     }
 
     /// Whether a stage can be built for this device rate. Callers that cannot

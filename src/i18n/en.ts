@@ -1366,6 +1366,7 @@ export const en = {
   'sound.capture_notice_missing': "The capture “{name}” is not in this computer's capture library, so the built-in amp plays instead. Import the file to use it; the document is unchanged.",
   'sound.capture_notice_unreadable': "The capture “{name}” cannot be read{detail}, so the built-in amp plays instead. The document is unchanged.",
   'sound.capture_notice_unsupported': "The capture “{name}” is a kind of NAM model this version of TabPlayer cannot play{detail}, so the built-in amp plays instead. The document is unchanged.",
+  'sound.capture_notice_uncalibrated': "The capture “{name}” produces invalid sound when it is tested, so the built-in amp plays instead. The document is unchanged.",
   'sound.tempo_sync': "Tempo sync",
   'sound.tempo_sync_named': "{block} tempo sync",
   'sound.sync_off': "Off (free rate)",

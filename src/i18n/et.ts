@@ -1368,6 +1368,7 @@ export const et: MessageCatalog = {
   'sound.capture_notice_missing': "Jäädvustust „{name}“ pole selle arvuti jäädvustuste kogus, seega mängib selle asemel sisseehitatud võimendi. Kasutamiseks impordi fail; dokument jääb samaks.",
   'sound.capture_notice_unreadable': "Jäädvustust „{name}“ ei saa lugeda{detail}, seega mängib selle asemel sisseehitatud võimendi. Dokument jääb samaks.",
   'sound.capture_notice_unsupported': "Jäädvustus „{name}“ on NAM-i mudeli liik, mida see TabPlayeri versioon ei oska mängida{detail}, seega mängib selle asemel sisseehitatud võimendi. Dokument jääb samaks.",
+  'sound.capture_notice_uncalibrated': "Jäädvustus „{name}“ annab testimisel vigast heli, seega mängib selle asemel sisseehitatud võimendi. Dokument jääb samaks.",
   'sound.tempo_sync': "Tempo sünkroonimine",
   'sound.tempo_sync_named': "{block} tempo sünkroonimine",
   'sound.sync_off': "Väljas (vaba kiirus)",

@@ -51,9 +51,19 @@ it('shows the drive note only while the capture can play',async()=>{
   rerender(<AmpCapture value={ref(B,0,'JCM lead')} onChange={vi.fn()}/>);
   await waitFor(()=>expect(notice()?.textContent).toMatch(/cannot play/));
   expect(screen.queryByText(drive)).toBeNull();
+  const C='c'.repeat(32);
+  library.status[C]={id:C,state:'uncalibrated',message:null};
+  rerender(<AmpCapture value={ref(C,0,'Fizz')} onChange={vi.fn()}/>);
+  await waitFor(()=>expect(notice()?.textContent).toMatch(/invalid sound/));
+  expect(screen.queryByText(drive)).toBeNull();
   library.status={};
   rerender(<AmpCapture value={ref(A)} onChange={vi.fn()}/>);
   expect(await screen.findByText(drive)).toBeInTheDocument();expect(notice()).toBeNull();
+});
+it('says by name that a capture that fails its level test plays the built-in amp',async()=>{
+  library.status[A]={id:A,state:'uncalibrated',message:null};
+  render(<AmpCapture value={ref(A)} onChange={vi.fn()}/>);
+  await waitFor(()=>expect(notice()?.textContent).toBe('The capture “Plexi crunch” produces invalid sound when it is tested, so the built-in amp plays instead. The document is unchanged.'));
 });
 it('keeps the notice through a library refresh, and never shows the status of another capture',async()=>{
   let release!:()=>void;

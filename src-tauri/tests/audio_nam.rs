@@ -736,6 +736,9 @@ fn hostile_id() -> String {
 fn a_capture_whose_calibration_faults_plays_the_built_in_amp() {
     let _ = ids();
     let hostile = hostile_id();
+    // The library says so too, so the picker can tell the user that the built-in amp plays.
+    let status = nam_library::library().unwrap().status(&[hostile.clone()]);
+    assert_eq!(status[0].state, "uncalibrated");
     let plain = amp("lead", 0.7);
     for rate in RATES {
         let named = with_capture(plain.clone(), &hostile, 3.0);

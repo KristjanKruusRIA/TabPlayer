@@ -3,8 +3,8 @@ import { listen } from '@tauri-apps/api/event';
 
 /** A NAM capture in the user's library, as the native player describes it. The file's path never reaches the page. */
 export interface CaptureEntry { id:string;name:string;bytes:number }
-/** Whether the library can supply a capture: `missing` when it holds none under that identity, `unreadable` when the file is damaged or has changed, `unsupported` when it is a model this version cannot play. */
-export interface CaptureStatus { id:string;state:'ready'|'missing'|'unreadable'|'unsupported';message:string|null }
+/** Whether the library can supply a capture: `missing` when it holds none under that identity, `unreadable` when the file is damaged or has changed, `unsupported` when it is a model this version cannot play, `uncalibrated` when it can be read but produces invalid sound when its level is measured, so the built-in amp plays. */
+export interface CaptureStatus { id:string;state:'ready'|'missing'|'unreadable'|'unsupported'|'uncalibrated';message:string|null }
 
 /** The capture library: the user's own NAM captures, which live in the app's data folder. A document names a capture by identity and never holds it. */
 export const ampCaptures={
@@ -27,10 +27,11 @@ export const onCaptureLibrary=(listener:()=>void)=>{
 };
 
 /** Translates a notice key with its values, as `useI18n().t` does. */
-export type Say=(key:'sound.capture_notice_missing'|'sound.capture_notice_unreadable'|'sound.capture_notice_unsupported',values:Record<string,string>)=>string;
+export type Say=(key:'sound.capture_notice_missing'|'sound.capture_notice_unreadable'|'sound.capture_notice_unsupported'|'sound.capture_notice_uncalibrated',values:Record<string,string>)=>string;
 /** The notice for a capture the library cannot supply, saying the built-in amp plays instead; null while it can. */
 export function captureNotice(name:string,status:CaptureStatus|undefined,say:Say):string|null {
   if(!status||status.state==='ready')return null;
   const detail=status.message?` (${status.message.replace(/\.$/,'')})`:'';
-  return say(status.state==='missing'?'sound.capture_notice_missing':status.state==='unsupported'?'sound.capture_notice_unsupported':'sound.capture_notice_unreadable',{name,detail});
+  const key={missing:'sound.capture_notice_missing',unsupported:'sound.capture_notice_unsupported',uncalibrated:'sound.capture_notice_uncalibrated',unreadable:'sound.capture_notice_unreadable'} as const;
+  return say(key[status.state],{name,detail});
 }

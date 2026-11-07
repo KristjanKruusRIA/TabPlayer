@@ -1368,6 +1368,7 @@ export const de: MessageCatalog = {
   'sound.capture_notice_missing': "Das Capture „{name}“ ist nicht in der Capture-Bibliothek dieses Computers, daher spielt stattdessen der integrierte Verstärker. Importiere die Datei, um es zu nutzen; das Dokument bleibt unverändert.",
   'sound.capture_notice_unreadable': "Das Capture „{name}“ kann nicht gelesen werden{detail}, daher spielt stattdessen der integrierte Verstärker. Das Dokument bleibt unverändert.",
   'sound.capture_notice_unsupported': "Das Capture „{name}“ ist ein NAM-Modelltyp, den diese Version von TabPlayer nicht abspielen kann{detail}, daher spielt stattdessen der integrierte Verstärker. Das Dokument bleibt unverändert.",
+  'sound.capture_notice_uncalibrated': "Das Capture „{name}“ erzeugt beim Test ungültigen Klang, daher spielt stattdessen der integrierte Verstärker. Das Dokument bleibt unverändert.",
   'sound.tempo_sync': "Temposynchronisation",
   'sound.tempo_sync_named': "{block}-Temposynchronisation",
   'sound.sync_off': "Aus (freie Rate)",

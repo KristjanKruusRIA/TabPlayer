@@ -7,7 +7,7 @@ import type { MusicSelection, VoiceAddress } from './editor/range-types';
 import { rangeFromBeats, resolveSelectionBeats, resolveSelectionNotes, selectionForBars, selectionForTrack } from './editor/range-selection';
 import { configureEngraving, type EngravingProjection } from './engraving/projection';
 import type { EngravingOverrides,PageLayout } from './engraving/types';
-import {engravingRenderKey,withoutSystemGaps,type SystemSpan} from './engraving/system-gaps';
+import {engravingRenderKey,withoutStackingOffsets,type SystemSpan} from './engraving/system-gaps';
 import {pageGeometry,pageTextFontFamily,pageTextItems,screenPageBaselines} from './engraving/page';
 import {headerFieldsOf} from './engraving/header-footer';
 import {typographyOf} from './engraving/typography';
@@ -87,7 +87,7 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
   // System gaps only move the stacked blocks, so editing them must not render the notation again (as with headers): the render path sees an engraving without them.
   const renderKey=engravingRenderKey(engravingProp),gapKey=JSON.stringify(engravingProp?.systemGaps??null);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const engraving=useMemo(()=>engravingProp&&withoutSystemGaps(engravingProp),[renderKey]);
+  const engraving=useMemo(()=>engravingProp&&withoutStackingOffsets(engravingProp),[renderKey]);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const gaps=useMemo(()=>engravingProp?.systemGaps,[gapKey]);
   const wrapper=useRef<HTMLDivElement>(null),container=useRef<HTMLDivElement>(null),api=useRef<AlphaTabApi|null>(null);

@@ -117,3 +117,11 @@ it('typography_and_presets_are_disabled_while_busy',()=>{
   render(<EngravingPanel score={music()} trackIds={['source/guitar']} value={defaultEngraving()} busy onEdit={()=>undefined}/>);
   for(const control of [screen.getByRole('combobox',{name:'Text font'}),screen.getByLabelText('Text size (%)'),screen.getByRole('button',{name:'Load Classic preset'})])expect(control).toBeDisabled();
 });
+
+it('apply and reset keep staff groups and gaps',()=>{
+  const commands:Edit[]=[],value=defaultEngraving();value.staffGroups=[{trackIds:['source/guitar','b'],kind:'brace'}];value.staffGaps=[{trackId:'source/guitar',scale:2}];
+  render(<EngravingPanel score={music()} trackIds={['source/guitar']} value={value} busy={false} onEdit={edit=>commands.push(edit)}/>);
+  fireEvent.click(screen.getByRole('button',{name:'Apply engraving'}));fireEvent.click(screen.getByRole('button',{name:'Reset to source/default'}));
+  expect(commands).toHaveLength(2);
+  for(const command of commands){expect(command.engraving.staffGroups).toEqual(value.staffGroups);expect(command.engraving.staffGaps).toEqual(value.staffGaps);}
+});

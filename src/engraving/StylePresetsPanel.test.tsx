@@ -16,7 +16,7 @@ vi.mock('@tauri-apps/api/core',()=>({invoke}));
 type Edit=Extract<EngravingCommand,{type:'setEngraving'}>;
 const idA='ca4af764-86e2-4ddd-9c26-a1be3368bdf7';
 let store:SavedStyle[]=[];
-const reply=()=>({format:'tabplayer-style-library',version:2,entries:structuredClone(store)});
+const reply=()=>({format:'tabplayer-style-library',version:3,entries:structuredClone(store)});
 const styled=(patch:(value:EngravingOverrides)=>void)=>{const value=defaultEngraving();patch(value);return value;};
 beforeEach(()=>{
   store=[];invoke.mockReset();

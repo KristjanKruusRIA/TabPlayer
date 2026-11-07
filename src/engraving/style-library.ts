@@ -4,13 +4,12 @@ import { defaultEngraving,validateEngraving } from './projection';
 import type { EngravingOverrides } from './types';
 import { withBarWidths } from './bar-widths';
 import { withSystemGaps } from './system-gaps';
-import { isDefaultFonts } from './fonts';
 
 /** The stylesheet, notation and system spacing of a document. A style never names tracks or bars, so it holds no profiles and no bar widths. */
 export type StyleEngraving=EngravingOverrides;
 export interface SavedStyle { id:string;name:string;engraving:StyleEngraving }
-/** Version 2 added `engraving.typography`. The native store reads version 1 files as version 2 and upgrades them on the next write, so only version 2 ever reaches here. */
-export interface StyleLibrary { format:'tabplayer-style-library';version:2;entries:SavedStyle[] }
+/** Version 2 added `engraving.typography` and version 3 `engraving.fonts`. The native store reads older files as version 3 and writes the lowest version that fits the content, so only version 3 ever reaches here. */
+export interface StyleLibrary { format:'tabplayer-style-library';version:3;entries:SavedStyle[] }
 
 export const MAX_STYLE_NAME_LENGTH=80;
 const exact=(value:unknown,keys:string[]):value is Record<string,unknown>=>value!==null&&typeof value==='object'&&!Array.isArray(value)&&Object.keys(value).length===keys.length&&keys.every(key=>Object.hasOwn(value,key));
@@ -18,9 +17,7 @@ const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** The style a document carries, without its track-bound staff profiles and its bar-bound widths. */
 export const styleOf=(engraving:EngravingOverrides):StyleEngraving=>{
-  // Temporary (D12 Task 3): library versions 1 and 2 never carry fonts. Task 4 keeps fonts here and adds the version 3 gate.
-  const {fonts:_fonts,...rest}=structuredClone(engraving);void _fonts;
-  return withSystemGaps(withBarWidths({...rest,profiles:[]},[]),[]);
+  return withSystemGaps(withBarWidths({...structuredClone(engraving),profiles:[]},[]),[]);
 };
 /** The factory style: every choice left to the source or renderer default. */
 export const defaultStyle=():StyleEngraving=>styleOf(defaultEngraving());
@@ -47,11 +44,9 @@ function validateEntry(entry:unknown):asserts entry is SavedStyle {
   if(entry.engraving.profiles.length)throw new Error('A saved style cannot hold track profiles.');
   if(entry.engraving.barWidths?.length)throw new Error('A saved style cannot hold bar widths.');
   if(entry.engraving.systemGaps?.length)throw new Error('A saved style cannot hold system gaps.');
-  // Temporary (D12 Task 3): Task 4 replaces this refusal with the version 3 gate.
-  if(!isDefaultFonts(entry.engraving.fonts))throw new Error('A saved style cannot hold fonts yet.');
 }
 function checkedLibrary(value:unknown):StyleLibrary {
-  if(!exact(value,['format','version','entries'])||value.format!=='tabplayer-style-library'||value.version!==2||!Array.isArray(value.entries))throw new Error('Unsupported style library format or version.');
+  if(!exact(value,['format','version','entries'])||value.format!=='tabplayer-style-library'||value.version!==3||!Array.isArray(value.entries))throw new Error('Unsupported style library format or version.');
   const seen=new Set<string>();
   for(const entry of value.entries){validateEntry(entry);const id=entry.id.toLowerCase();if(seen.has(id))throw new Error('Style library identities must be distinct.');seen.add(id);}
   return structuredClone(value) as unknown as StyleLibrary;

@@ -54,7 +54,8 @@ export function paginateScreenScore(chunks:readonly ScreenRenderChunk[],bounds:S
     if(typeof chunk.svg!=='string'||!/^\s*<svg\b[^>]*>[\s\S]*<\/svg>\s*$/.test(chunk.svg))throw new Error('A screen chunk is missing its SVG string.');
     const first=chunk.firstMasterBarIndex,last=chunk.lastMasterBarIndex;
     if(!Number.isInteger(first)||!Number.isInteger(last)||first< -1||last<first||(first===-1&&last!==-1))throw new Error('Invalid screen chunk bar interval.');
-    const candidates=first===-1?[]:bounds.staffSystems.filter(s=>s.bars[0].index===first&&s.bars.at(-1)!.index===last);
+    // A multi-bar rest closing a system makes the chunk end at the rest's last bar while the bounds record the rest under its first bar.
+    const candidates=first===-1?[]:bounds.staffSystems.filter(s=>s.bars[0].index===first&&s.bars.at(-1)!.index<=last);
     if(first!==-1&&(candidates.length!==1||matched.has(candidates[0])))throw new Error('Missing, duplicate or ambiguous screen system chunk association.');
     const system=candidates[0]??null;
     if(system&&(!overlaps(rect,system.realBounds)||!overlaps(rect,system.visualBounds)||first<=lastBar))throw new Error('Invalid screen system chunk geometry or musical order.');

@@ -7,8 +7,9 @@ import {ScoreView} from './ScoreView';
 import {music} from './editor/fixtures';
 import type {PageLayout} from './engraving/types';
 import type {ScoreLayoutMode} from './engraving/screen-view';
-const state=vi.hoisted(()=>({api:null as unknown,width:900,height:700,resize:()=>{},loads:vi.fn(),renders:vi.fn()}));
+const state=vi.hoisted(()=>({fonts:(()=>new Promise<void>(()=>{})) as ()=>Promise<void>,api:null as unknown,width:900,height:700,resize:()=>{},loads:vi.fn(),renders:vi.fn()}));
 function event<T>(){const handlers=new Set<(e:T)=>void>();return {on:(fn:(e:T)=>void)=>{handlers.add(fn);return()=>handlers.delete(fn);},emit:(e:T)=>{for(const fn of handlers)fn(e);}};}
+vi.mock('./export/pdf',async original=>({...await original<typeof import('./export/pdf')>(),loadExportFonts:()=>state.fonts()}));
 vi.mock('@coderline/alphatab',async original=>({...await original<typeof import('@coderline/alphatab')>(),AlphaTabApi:class {
  settings=new Settings();score:model.Score|null=null;constructor(){state.api=this;}
  beatMouseDown=event<model.Beat>();noteMouseDown=event<model.Note>();beatMouseMove=event<model.Beat>();beatMouseUp=event<void>();renderStarted=event<void>();postRenderFinished=event<void>();playbackRangeHighlightChanged=event<PlaybackHighlightChangeEventArgs>();
@@ -34,7 +35,7 @@ function setup(layout:ScoreLayoutMode='verticalPage',zoom=100){
  const tree=(p=props)=><div className="paper-scroll" style={{padding:10}}><div className="paper score-paper-host"><ScoreView {...p}/></div></div>;
  const result=render(tree());return {...result,props,tree,api:state.api as {settings:Settings;renderer:{width:number}}};
 }
-afterEach(()=>{cleanup();vi.restoreAllMocks();vi.unstubAllGlobals();state.loads.mockClear();state.renders.mockClear();state.width=900;state.height=700;});
+afterEach(()=>{cleanup();vi.restoreAllMocks();vi.unstubAllGlobals();state.loads.mockClear();state.renders.mockClear();state.width=900;state.height=700;state.fonts=()=>new Promise<void>(()=>{});});
 it.each(['verticalPage','horizontalPage','grid','parchment','verticalScreen','horizontalScreen'] as const)('renders %s without a playback controller',layout=>{
  const {api}=setup(layout);expect(state.loads).toHaveBeenCalledTimes(1);
  expect(api.settings.display.layoutMode).toBe(layout==='horizontalScreen'?LayoutMode.Horizontal:layout==='verticalScreen'?LayoutMode.Page:LayoutMode.Parchment);
@@ -120,4 +121,43 @@ it('measures screen fit at base scale even when host height is not available yet
  state.height=0;const {props,tree,rerender}=setup('horizontalScreen',137.5);
  rerender(tree({...props,display:{layout:'horizontalScreen',zoomMode:'fitWidth'} as never}));
  expect(props.onDisplayStatus).toHaveBeenLastCalledWith({zoomPercent:176,fitLimited:false,pageError:null});
+});
+const overlays=()=>Array.from(document.querySelectorAll<SVGSVGElement>('.score-page-text'));
+const texts=(svg:SVGSVGElement)=>Array.from(svg.querySelectorAll('text')).map(t=>t.textContent);
+function titled(layout:ScoreLayoutMode='verticalPage'){const s=setup(layout);s.props.score.title='Etude';s.rerender(s.tree({...s.props,score:s.props.score}));return s;}
+it('draws the default header title and N / total footer on every page sheet',()=>{
+ titled();const svgs=overlays();expect(svgs).toHaveLength(3);
+ svgs.forEach((svg,i)=>{expect(texts(svg)).toEqual(['Etude',`${i+1} / 3`]);expect(svg.getAttribute('aria-hidden')).toBe('true');expect(svg.getAttribute('class')).toBe('score-page-text');});
+});
+it('uses the first-page and other-page bands from the page layout',()=>{
+ const {props,tree,rerender}=titled(),bands=(h:string,f:string)=>({header:{left:h,center:'',right:''},footer:{left:'',center:f,right:''}});
+ rerender(tree({...props,page:{...page,headerFooter:{first:bands('First','F%PAGE%'),other:bands('Other','O%PAGE%/%PAGES%')}}}));
+ const svgs=overlays();expect(texts(svgs[0])).toEqual(['First','F1']);expect(texts(svgs[1])).toEqual(['Other','O2/3']);expect(texts(svgs[2])).toEqual(['Other','O3/3']);
+});
+it('redraws a header-only edit without rendering notation again',()=>{
+ const {props,tree,rerender}=titled(),calls=state.renders.mock.calls.length,bands=(h:string)=>({header:{left:h,center:'',right:''},footer:{left:'',center:'',right:''}});
+ rerender(tree({...props,page:{...page,headerFooter:{first:bands('One'),other:bands('Two')}}}));
+ expect(texts(overlays()[0])).toEqual(['One']);expect(state.renders).toHaveBeenCalledTimes(calls);expect(state.loads).toHaveBeenCalledTimes(1);
+});
+it('is click-through via CSS and only resizes with zoom',()=>{
+ const {props,tree,rerender}=titled();const css=require('node:fs').readFileSync('src/ScoreView.css','utf8') as string;
+ expect(css).toMatch(/\.score-page-text\s*\{[^}]*pointer-events:\s*none/);
+ const before=overlays()[0],calls=state.renders.mock.calls.length,width=before.getAttribute('width'),view=before.getAttribute('viewBox');
+ rerender(tree({...props,zoom:200}));const after=overlays()[0];
+ expect(after.getAttribute('viewBox')).toBe(view);expect(Number(after.getAttribute('width'))).toBeCloseTo(Number(width)*2);expect(state.renders).toHaveBeenCalledTimes(calls);
+});
+it.each(['parchment','verticalScreen','horizontalScreen'] as const)('draws no page text in %s',layout=>{titled(layout);expect(overlays()).toHaveLength(0);});
+
+it('re-fits page text when the fonts resolve and ignores a font failure',async()=>{
+ const measure={k:.3};
+ vi.spyOn(HTMLCanvasElement.prototype,'getContext').mockImplementation((()=>({font:'',measureText(this:{font:string},text:string){return {width:text.length*(parseFloat(this.font)||18)*measure.k};}})) as never);
+ let resolve=()=>{};state.fonts=()=>new Promise<void>(done=>{resolve=done;});
+ const s=setup();s.props.score.title='T'.repeat(40);s.rerender(s.tree({...s.props,score:s.props.score}));
+ const size=()=>Number(overlays()[0].querySelector('text')!.getAttribute('font-size')),calls=state.renders.mock.calls.length;
+ expect(size()).toBe(18);
+ measure.k=1.2;await act(async()=>{resolve();});
+ expect(size()).toBeLessThan(18);expect(state.renders).toHaveBeenCalledTimes(calls);
+ cleanup();state.fonts=()=>Promise.reject(new Error('no fonts'));
+ const failed=setup();await act(async()=>{});
+ expect(screen.queryByRole('alert')).toBeNull();expect(overlays()).toHaveLength(3);failed.unmount();
 });

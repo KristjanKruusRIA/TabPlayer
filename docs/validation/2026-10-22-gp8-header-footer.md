@@ -78,6 +78,6 @@ GP8's stylesheet sets separate headers and footers for the first page and for th
 ## Limits
 - D10 is partial:
   - There is no original-GP8 comparison. The field names and `%…%` syntax follow GP8's concept, not a verified GP8 token list.
-  - Header and footer show only in exports and print. The on-screen page view does not draw them.
+  - The on-screen page view draws headers and footers in the page margins, not at export's positions; see [2026-11-07-gp8-screen-header-footer.md](2026-11-07-gp8-screen-header-footer.md).
   - There are no per-field fonts, styles, images or multi-line text.
   - Score fields other than title and artist come only from imported files.

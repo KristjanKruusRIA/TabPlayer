@@ -149,3 +149,8 @@ it('source_track_maps_follow_surviving_identity_and_validate_before_mutation',()
   remapStylesheetTracks(style,[1,0]);expect(style.perTrackDisplayTuning).toEqual(new Map([[1,false],[0,true]]));expect(style.perTrackChordDiagramsOnTop).toEqual(new Map([[1,false]]));
   const before=[...style.perTrackDisplayTuning];for(const invalid of [[0,0],[-1,0],[0,.5],[0,NaN],[0,2],[0,undefined]]){expect(()=>remapStylesheetTracks(style,invalid as Array<number|null>)).toThrow();expect([...style.perTrackDisplayTuning]).toEqual(before);}
 });
+
+it('projectEngraving reports the effective bracket mode',()=>{
+  const source=music(),mode=(brackets:EngravingOverrides['stylesheet']['brackets'])=>projectEngraving(source,ids,{...defaultEngraving(),stylesheet:{...defaultEngraving().stylesheet,brackets}}).bracketMode;
+  expect(mode('none')).toBe(0);expect(mode('staves')).toBe(1);expect(mode('inherit')).toBe(source.stylesheet.bracketExtendMode);
+});

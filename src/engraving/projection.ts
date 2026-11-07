@@ -12,6 +12,8 @@ export interface EngravingProjection {
   score:model.Score;
   beats:Map<number,{source:model.Beat;rendered:model.Beat}>;
   notes:Map<number,{source:model.Note;rendered:model.Note}>;
+  /** The rendered score's `stylesheet.bracketExtendMode` after overrides. */
+  bracketMode:number;
 }
 export function defaultEngraving():EngravingOverrides {
   return {stylesheet:{hideDynamics:null,brackets:'inherit',extendBarLines:null,systemSeparators:null,tuning:null,chords:'inherit',singleNames:'inherit',multiNames:'inherit',firstNames:'inherit',otherNames:'inherit',firstNameDirection:'inherit',otherNameDirection:'inherit',barNumbers:'inherit',multiRests:'inherit',hideEmptyStaves:null,hideEmptyFirstSystem:null,singleStaffBrackets:null},notation:{tabRhythm:'inherit',fingering:'inherit',smallGraceTab:null,extendBendArrows:null,extendLineEffects:null,parenthesizeTiedBends:null,showTiedBendNumbers:null,showDiveWhammyZeros:null},systemSpacing:null,profiles:[]};
@@ -81,7 +83,7 @@ export function projectEngraving(source:model.Score,ids:readonly string[],value:
   if(overrides.multiRests!=='inherit'){style.multiTrackMultiBarRest=overrides.multiRests==='on';style.perTrackMultiBarRest=new Set(overrides.multiRests==='on'?score.tracks.map((_,i)=>i):[]);}
   // A bar's width is its weight in the system: master bars decide it when several staves show, each bar when one does. Only the copy changes, so playback and MIDI read the unchanged source.
   for(const {bar,scale} of value.barWidths??[]){const master=score.masterBars[bar];if(!master)continue;master.displayScale=scale;for(const track of score.tracks)for(const staff of track.staves){const copy=staff.bars[bar];if(copy)copy.displayScale=scale;}}
-  return {score,beats,notes};
+  return {score,beats,notes,bracketMode:score.stylesheet.bracketExtendMode};
 }
 export function configureEngraving(settings:Settings,value:EngravingOverrides):void {
   validateEngraving(value);const defaults=new Settings();

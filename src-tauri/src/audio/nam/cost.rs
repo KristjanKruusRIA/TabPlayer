@@ -1,7 +1,7 @@
 //! What a capture costs to play, estimated from its architecture alone.
 //!
 //! The caps in `file` bound memory. They do not bound time: a WaveNet of 64 channels and 32 layers fits every cap
-//! and still costs about 115 times the standard model per sample, enough to overrun the audio callback for good.
+//! and still has about 40 times the standard model's multiply-adds per sample (the review measured about 115 times its time), enough to overrun the audio callback for good.
 //! This module turns a parsed architecture into multiply-adds per sample, and `parse_nam` refuses a model whose
 //! multiply-adds per second are over [`MAX_MACS_PER_SECOND`]. Pure arithmetic: no allocation, no file access.
 

@@ -162,7 +162,7 @@ fn standard_lstm_sizes_are_admitted() {
 
 #[test]
 fn a_64_channel_32_layer_wavenet_inside_every_other_cap_is_refused() {
-    // The reviewer's case: 64 channels, kernel 3, 32 layers, one array. About 115x the standard model per sample.
+    // The reviewer's case: 64 channels, kernel 3, 32 layers, one array. About 40x the standard model's multiply-adds (115x its time, measured in review).
     let spec = wavenet(vec![array(1, 64, 1, 3, vec![1; 32], false)]);
     let ratio = macs_per_sample(&spec) as f64 / STANDARD_A1_MACS_PER_SAMPLE as f64;
     assert!(ratio > 30.0, "{ratio}x");

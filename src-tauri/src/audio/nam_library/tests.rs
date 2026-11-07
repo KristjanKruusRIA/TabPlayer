@@ -241,7 +241,7 @@ fn a_read_that_fails_is_not_cached() {
     assert!(library.model(&id).is_ok());
 }
 
-/// A WaveNet inside every size cap that costs about 115 times the standard model per sample.
+/// A WaveNet inside every size cap with about 40 times the standard model's multiply-adds per sample.
 fn too_heavy() -> Vec<u8> {
     let v = serde_json::json!({
         "version": "0.5.4", "architecture": "WaveNet",

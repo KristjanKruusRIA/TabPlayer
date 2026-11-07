@@ -10,8 +10,10 @@ import { directory,launch,connect,stop } from './harness.mjs';
 // NAM capture in the amp slot: a user imports a .nam file, chooses it for the track's amp, plays it, undoes and redoes the
 // choice, saves and reopens the document, and hears the capture in the exported WAV. With the file deleted from the library,
 // the document reopens unchanged, says the built-in amp plays instead, and still exports sound. The file picker is replaced by
-// TABPLAYER_TEST_NAM_CAPTURE, a list of paths joined by `|`. The audio status carries no non-finite counter, so "no
-// non-finite" is checked as: no native error, a finite output peak, and a finite, non-silent export.
+// TABPLAYER_TEST_NAM_CAPTURE, a list of paths joined by `|`. The audio status carries no non-finite counter. The live
+// output peak cannot see a NaN (it is a running f64 `max`, which skips NaN), so the real guard is the WAV writer, which refuses to write
+// a non-finite sample (export/wav.rs) and fails the export; the per-sample finite check below repeats it on the files read
+// back, and the live checks only show no native error and a peak above the floor.
 const fixture=resolve(directory,'nam-capture-fixture.gp');
 const capture=resolve('src-tauri/tests/fixtures/nam/wavenet.nam');
 const run=resolve(directory,`nam-capture-${Date.now()}`),exportDir=join(run,'export'),appData=join(run,'app-data'),saved=join(run,'saved');
@@ -113,6 +115,7 @@ try{
   results.notice=text;
   const missing=await a.exportWav('missing'),fallback=stats(channels(missing));assert.ok(fallback.rms>.001,'fallback is not silent');
   results.export.missing=fallback;results.missingEqualsBuiltin=missing.equals(builtin);
+  assert.equal(results.missingEqualsBuiltin,true,'a missing capture exports exactly the built-in amp');
   await play(a);
   assert.deepEqual((await readActiveDocument(a.page)).project,doc.project,'viewing changes nothing');
   assert.ok((await readFile(savedPath)).equals(before),'saved file untouched');

@@ -1,6 +1,6 @@
 # NAM test fixtures
 
-Two small models from NAM Core, used only to test the `.nam` parser.
+Two small models from NAM Core. They test the `.nam` parser and drive the engine parity tests against nam-rs, the `nam-bench` timings and the desktop proof (`tests/desktop/parity-nam-capture.mjs`, which imports `wavenet.nam`). The trainer exports below are used by the parser, parity and budget tests.
 
 - Source: https://github.com/sdatkinson/NeuralAmpModelerCore/tree/0b3d3c97b0859a3a8c92a8628c4dd89a25eb5842/example_models
 - Commit: `0b3d3c97b0859a3a8c92a8628c4dd89a25eb5842`

@@ -10,6 +10,7 @@ pub mod ir_convolver;
 pub mod line_in;
 pub mod master;
 pub mod midi_out;
+pub mod nam;
 pub mod plan;
 pub mod playback;
 pub mod practice;

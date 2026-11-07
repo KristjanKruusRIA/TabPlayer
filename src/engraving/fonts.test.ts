@@ -2,7 +2,10 @@ import { expect,it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { defaultEngraving,validateEngraving } from './projection';
 import type { EngravingFonts } from './fonts';
-import { FONT_ROLES,fontsOf,isDefaultFonts,sizeRange,validateFonts,withFonts,withoutMusicFont,withoutPageFonts } from './fonts';
+import { FONT_ROLES,fontsOf,isDefaultFonts,missingGlyphs,roleTexts,sizeRange,validateFonts,withFonts,withoutMusicFont,withoutPageFonts } from './fonts';
+import { model } from '@coderline/alphatab';
+import { music } from '../editor/fixtures';
+import { defaultHeaderFooter,headerFieldsOf } from './header-footer';
 import { engravingRenderKey } from './system-gaps';
 import { defaultTypography,validateTypography } from './typography';
 
@@ -112,4 +115,53 @@ it('without_music_font_keeps_role_choices_and_drops_the_music_choice',()=>{
   const plain=withFonts(base(),{roles:{lyrics:{size:1.5}}});
   expect(withoutMusicFont(plain)).toBe(plain);
   expect(both.fonts?.music).toBe('petaluma');
+});
+
+const scoreWithText=()=>{
+  const score=music(),track=score.tracks[0],staff=track.staves[0],beats=staff.bars[0].voices[0].beats;
+  score.title='Tiitel';score.artist='Ä Band';track.name='Kitarr';track.shortName='Kit';
+  beats[0].lyrics=['la','中'];beats[1].text='rit.';
+  const chord=new model.Chord();chord.name='Cmaj7';beats[2].chordId='c1';staff.addChord('c1',chord);
+  const section=new model.Section();section.marker='A';section.text='Verse ŋ';score.masterBars[0].section=section;
+  return score;
+};
+
+it('role_texts_collect_the_scores_own_text_per_role',()=>{
+  const score=scoreWithText(),texts=roleTexts(score,headerFieldsOf(score));
+  expect(texts.titleBlock).toEqual(expect.arrayContaining(['Tiitel','Ä Band']));
+  expect(texts.lyrics).toEqual(['la','中']);
+  expect(texts.staffText).toEqual(['rit.']);
+  expect(texts.chordNames).toEqual(['Cmaj7']);
+  expect(texts.trackNames).toEqual(expect.arrayContaining(['Kitarr','Kit']));
+  expect(texts.markers).toEqual(expect.arrayContaining(['A','Verse ŋ']));
+  // The default page puts the title in the header and "page / pages" in the footer.
+  expect(texts.pageHeader).toEqual(['Tiitel']);expect(texts.pageFooter).toEqual(['1 / 1']);
+  // Numbers-only roles are not listed, and empty roles are left out.
+  expect(texts.barNumbers).toBeUndefined();expect(texts.tabNumbers).toBeUndefined();
+});
+
+it('role_texts_use_the_given_header_and_footer_bands_and_skip_empty_roles',()=>{
+  const score=music(),bands=defaultHeaderFooter();
+  bands.other.header.right='%ARTIST% ŋ';bands.first.footer.left='%COPYRIGHT%';
+  score.artist='Zoë';score.copyright='© me';
+  const texts=roleTexts(score,headerFieldsOf(score),bands);
+  expect(texts.pageHeader).toEqual(expect.arrayContaining(['Zoë ŋ']));expect(texts.pageFooter).toEqual(expect.arrayContaining(['© me']));
+  // A score with no text has only the page numbers and the track name.
+  expect(Object.keys(roleTexts(music(),headerFieldsOf(music())))).toEqual(['pageFooter','trackNames']);
+});
+
+it('missing_glyphs_name_the_role_and_every_missing_character_once',()=>{
+  const texts={lyrics:['la','中中','x 中 日'],staffText:['中'],trackNames:['Ä']};
+  // No role has a font: nothing to warn about.
+  expect(missingGlyphs(undefined,texts)).toEqual([]);expect(missingGlyphs({roles:{lyrics:{size:1.5}}},texts)).toEqual([]);
+  expect(missingGlyphs({roles:{lyrics:{font:'notoSerif'},trackNames:{font:'notoSans'}}},texts)).toEqual([{role:'lyrics',chars:['中','日']}]);
+  // Latin letters with diacritics are in every bundled face.
+  expect(missingGlyphs({roles:{trackNames:{font:'notoSansMono'}}},{trackNames:['Ä ŋ']})).toEqual([]);
+  // Roles come out in role order.
+  expect(missingGlyphs({roles:{staffText:{font:'notoSerif'},lyrics:{font:'notoSerif'}}},texts).map(entry=>entry.role)).toEqual(['staffText','lyrics']);
+});
+
+it('missing_glyphs_ignore_spaces_and_controls_and_count_astral_characters_once',()=>{
+  expect(missingGlyphs({roles:{lyrics:{font:'notoSerif'}}},{lyrics:['a\tb\u0085  ']})).toEqual([]);
+  expect(missingGlyphs({roles:{lyrics:{font:'notoSans'}}},{lyrics:['\u{1F600}']})).toEqual([{role:'lyrics',chars:['\u{1F600}']}]);
 });

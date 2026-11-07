@@ -1,7 +1,9 @@
 import { model,Settings } from '@coderline/alphatab';
-import { FALLBACK_FAMILIES,fontStack,hasFace,textFonts,musicFonts } from './font-catalog';
+import { covers,faceFor,FALLBACK_FAMILIES,fontStack,hasFace,textFonts,musicFonts } from './font-catalog';
 import type { MusicFontId,TextFontId } from './font-catalog';
 import { roleElements,TAB_NUMBER_FONTS } from './role-elements';
+import { defaultHeaderFooter,fillHeaderField } from './header-footer';
+import type { HeaderFields,HeaderFooter } from './header-footer';
 import type { EngravingOverrides,EngravingTypography } from './types';
 import { scaled,TAB_SCALE_RANGE,TEXT_SCALE_RANGE } from './typography';
 
@@ -168,4 +170,58 @@ export function pageRoleFont(fonts:EngravingFonts|undefined,role:'pageHeader'|'p
   if(!entry||entry.font===undefined)return {family:null,bold:false,italic:false,scale};
   const {bold,italic}=effectiveStyle({...entry,font:entry.font},false,false);
   return {family:textFonts[entry.font].alias,bold,italic,scale};
+}
+
+/**
+ * The score's own text per role, for the missing-glyph warning: title fields, page header and footer text (first and other
+ * pages), chord names, beat text, lyrics, track names, and section markers and text. Roles with no text are left out, and so
+ * are the numbers-only roles (bar numbers, tab numbers).
+ */
+export function roleTexts(score:model.Score,fields:HeaderFields,headerFooter?:HeaderFooter):Partial<Record<FontRole,string[]>> {
+  const found:Record<FontRole,Set<string>>=Object.fromEntries(FONT_ROLES.map(role=>[role,new Set<string>()])) as Record<FontRole,Set<string>>;
+  const add=(role:FontRole,text:string|null|undefined)=>{if(text&&text.trim())found[role].add(text);};
+  for(const name of ['TITLE','SUBTITLE','ARTIST','ALBUM','WORDS','MUSIC','COPYRIGHT'] as const)add('titleBlock',fields[name]);
+  const bands=headerFooter??defaultHeaderFooter();
+  for(const page of [bands.first,bands.other])for(const [band,role] of [[page.header,'pageHeader'],[page.footer,'pageFooter']] as const)
+    for(const slot of ['left','center','right'] as const)add(role,fillHeaderField(band[slot],fields,1,1));
+  for(const track of score.tracks){
+    add('trackNames',track.name);add('trackNames',track.shortName);
+    for(const staff of track.staves){
+      for(const chord of staff.chords?.values()??[])add('chordNames',chord.name);
+      for(const bar of staff.bars)for(const voice of bar.voices)for(const beat of voice.beats){
+        add('staffText',beat.text);
+        for(const syllable of beat.lyrics??[])add('lyrics',syllable);
+      }
+    }
+  }
+  for(const masterBar of score.masterBars){add('markers',masterBar.section?.marker);add('markers',masterBar.section?.text);}
+  const result:Partial<Record<FontRole,string[]>>={};
+  for(const role of FONT_ROLES)if(found[role].size)result[role]=[...found[role]];
+  return result;
+}
+
+const invisible=/[\p{Cc}\p{Z}]/u;
+/**
+ * Characters the chosen face of each role has no glyph for (from the generated `font-coverage.json`), in role order. A role with
+ * no chosen font draws with the fallback stack as today and is never listed. The text of a role is checked against every face
+ * the role's elements draw with, so a bold and an italic element are both covered.
+ */
+export function missingGlyphs(fonts:EngravingFonts|undefined,texts:Partial<Record<FontRole,string[]>>):Array<{role:FontRole;chars:string[]}> {
+  const result:Array<{role:FontRole;chars:string[]}>=[];
+  for(const role of FONT_ROLES){
+    const entry=fonts?.roles?.[role],list=texts[role];
+    if(!entry||entry.font===undefined||!list?.length)continue;
+    const font=entry.font,files:string[]=[];
+    for(const style of roleDefaultStyles(role)){
+      const {bold,italic}=effectiveStyle({...entry,font},style.bold,style.italic),face=faceFor(font,bold,italic);
+      if(face&&!files.includes(face.file))files.push(face.file);
+    }
+    const chars=new Set<string>();
+    for(const text of list)for(const char of text){
+      if(invisible.test(char))continue;
+      if(files.some(file=>!covers(file,char.codePointAt(0)!)))chars.add(char);
+    }
+    if(chars.size)result.push({role,chars:[...chars]});
+  }
+  return result;
 }

@@ -7,6 +7,8 @@ import { music } from '../editor/fixtures';
 import { scoreFromJson } from '../model-clone';
 import type { EngravingCommand,EngravingOverrides } from './types';
 import { defaultEngraving } from './projection';
+import { withFonts } from './fonts';
+import { defaultHeaderFooter } from './header-footer';
 import { EngravingPanel } from './EngravingPanel';
 
 afterEach(cleanup);
@@ -29,7 +31,10 @@ it('engraving_panel_roundtrips_source_choices_and_profiles_as_one_complete_comma
 it('reset_emits_source_defaults_once_and_applied_value_or_document_resets_drafts',()=>{
   const score=music(),commands:Edit[]=[],value=defaultEngraving();value.stylesheet.hideDynamics=true;value.profiles=[{trackId:'removed',profile:'numbered'},{trackId:'source/guitar',profile:'standard'}];
   const props={score,trackIds:['source/guitar'],value,busy:false,onEdit:(edit:Edit)=>commands.push(edit)},view=render(<EngravingPanel {...props}/>);
-  fireEvent.change(screen.getByLabelText('Hide dynamics'),{target:{value:'false'}});view.rerender(<EngravingPanel {...props} busy/>);expect(screen.getByLabelText('Hide dynamics')).toBeDisabled();expect(screen.getByRole('button',{name:'Apply engraving'})).toBeDisabled();expect(screen.getByRole('button',{name:'Reset to source/default'})).toBeDisabled();
+  fireEvent.change(screen.getByLabelText('Hide dynamics'),{target:{value:'false'}});view.rerender(<EngravingPanel {...props} busy/>);
+  for(const control of [screen.getByLabelText('Hide dynamics'),screen.getByRole('button',{name:'Apply engraving'}),screen.getByRole('button',{name:'Reset to source/default'})])expect(control).not.toBeDisabled();
+  for(const button of [screen.getByRole('button',{name:'Apply engraving'}),screen.getByRole('button',{name:'Reset to source/default'})])expect(button).toHaveAttribute('aria-disabled','true');
+  fireEvent.click(screen.getByRole('button',{name:'Apply engraving'}));fireEvent.click(screen.getByRole('button',{name:'Reset to source/default'}));expect(commands).toEqual([]);
   view.rerender(<EngravingPanel {...props} value={defaultEngraving()}/>);expect(screen.getByLabelText('Hide dynamics')).toHaveValue('inherit');expect(screen.getByLabelText('Guitar notation profile')).toHaveValue('source');
   view.rerender(<EngravingPanel {...props}/>);fireEvent.click(screen.getByRole('button',{name:'Apply engraving'}));expect(commands[0].engraving.profiles).toEqual([{trackId:'source/guitar',profile:'standard'}]);
   fireEvent.click(screen.getByRole('button',{name:'Reset to source/default'}));expect(commands[1]).toEqual({type:'setEngraving',engraving:sourceDefaults});expect(screen.getByLabelText('Hide dynamics')).toHaveValue('inherit');
@@ -70,7 +75,7 @@ it('equivalent_accepted_values_and_parent_renders_preserve_unsubmitted_drafts',(
 it('typography_fields_commit_on_blur_or_enter_and_apply_as_one_command',()=>{
   const score=music(),commands:Edit[]=[];
   render(<EngravingPanel score={score} trackIds={['source/guitar']} value={defaultEngraving()} busy={false} onEdit={edit=>commands.push(edit)}/>);
-  expect(screen.getByText(/Music font: Bravura/)).toBeInTheDocument();
+  expect(screen.getByRole('combobox',{name:'Music font'})).toHaveValue('bravura');
   fireEvent.change(screen.getByRole('combobox',{name:'Text font'}),{target:{value:'serif'}});
   const text=screen.getByLabelText('Text size (%)'),title=screen.getByLabelText('Title size (%)'),tab=screen.getByLabelText('Tab number size (%)');
   // Typing alone changes nothing: half a number must not rewrite the setting.
@@ -113,7 +118,110 @@ it('loading_a_preset_fills_the_form_without_editing_and_keeps_spacing_and_profil
   expect([commands[0].engraving.systemSpacing,commands[0].engraving.profiles]).toEqual([1.5,[{trackId:'source/guitar',profile:'slash'}]]);
 });
 
-it('typography_and_presets_are_disabled_while_busy',()=>{
-  render(<EngravingPanel score={music()} trackIds={['source/guitar']} value={defaultEngraving()} busy onEdit={()=>undefined}/>);
-  for(const control of [screen.getByRole('combobox',{name:'Text font'}),screen.getByLabelText('Text size (%)'),screen.getByRole('button',{name:'Load Classic preset'})])expect(control).toBeDisabled();
+it('typography_and_presets_refuse_changes_while_busy_without_losing_focus',()=>{
+  const commands:Edit[]=[],props={score:music(),trackIds:['source/guitar'],value:defaultEngraving(),busy:false,onEdit:(edit:Edit)=>commands.push(edit)},view=render(<EngravingPanel {...props}/>);
+  const family=screen.getByRole('combobox',{name:'Text font'});family.focus();
+  view.rerender(<EngravingPanel {...props} busy/>);
+  expect(family).toHaveFocus();expect(family).toBeEnabled();expect(family).toHaveAttribute('aria-disabled','true');
+  fireEvent.change(family,{target:{value:'mono'}});expect(family).toHaveValue('inherit');
+  const text=screen.getByLabelText('Text size (%)');fireEvent.change(text,{target:{value:'150'}});fireEvent.blur(text);
+  fireEvent.click(screen.getByRole('button',{name:'Load Classic preset'}));expect(screen.getByLabelText('Tab rhythm')).toHaveValue('inherit');
+  fireEvent.change(screen.getByRole('combobox',{name:'Lyrics font'}),{target:{value:'notoSerif'}});expect(screen.getByRole('combobox',{name:'Lyrics font'})).toHaveValue('inherit');
+  view.rerender(<EngravingPanel {...props}/>);fireEvent.click(screen.getByRole('button',{name:'Apply engraving'}));
+  expect(commands).toEqual([{type:'setEngraving',engraving:sourceDefaults}]);
+});
+
+it('typography_labels_unchanged_in_english',()=>{
+  render(<EngravingPanel score={music()} trackIds={['source/guitar']} value={defaultEngraving()} busy={false} onEdit={()=>undefined}/>);
+  expect(screen.getByText('Typography')).toBeInTheDocument();
+  expect(screen.getByRole('combobox',{name:'Text font'})).toBeInTheDocument();
+  for(const label of ['Text size (%)','Title size (%)','Tab number size (%)'])expect(screen.getByLabelText(label)).toBeInTheDocument();
+  expect(within(screen.getByRole('combobox',{name:'Text font'})).getAllByRole('option').map(option=>option.textContent)).toEqual(['Source/default','Sans-serif','Serif','Monospace']);
+  expect(screen.getByLabelText('Text size (%)')).toHaveAttribute('placeholder','Source/default (100%)');
+});
+
+it('role_grid_fills_draft_and_apply_sends_one_set_engraving',()=>{
+  const commands:Edit[]=[];
+  render(<EngravingPanel score={music()} trackIds={['source/guitar']} value={defaultEngraving()} busy={false} onEdit={edit=>commands.push(edit)}/>);
+  fireEvent.change(screen.getByRole('combobox',{name:'Lyrics font'}),{target:{value:'notoSerif'}});
+  fireEvent.change(screen.getByRole('combobox',{name:'Lyrics italic'}),{target:{value:'on'}});
+  fireEvent.change(screen.getByRole('combobox',{name:'Markers font'}),{target:{value:'notoSansMono'}});
+  fireEvent.change(screen.getByRole('combobox',{name:'Markers bold'}),{target:{value:'off'}});
+  const header=screen.getByLabelText('Page header size (%)');fireEvent.change(header,{target:{value:'150'}});fireEvent.blur(header);
+  fireEvent.change(screen.getByRole('combobox',{name:'Music font'}),{target:{value:'petaluma'}});
+  // Nothing is sent until Apply.
+  expect(commands).toEqual([]);
+  fireEvent.click(screen.getByRole('button',{name:'Apply engraving'}));
+  expect(commands).toEqual([{type:'setEngraving',engraving:{...sourceDefaults,fonts:{music:'petaluma',roles:{lyrics:{font:'notoSerif',italic:true},markers:{font:'notoSansMono',bold:false},pageHeader:{size:1.5}}}}}]);
+});
+
+it('apply_unchanged_fonts_records_nothing',()=>{
+  const commands:Edit[]=[];
+  render(<EngravingPanel score={music()} trackIds={['source/guitar']} value={defaultEngraving()} busy={false} onEdit={edit=>commands.push(edit)}/>);
+  // Choosing and un-choosing leaves an empty draft ({}), which must go out exactly as the document already is: no fonts key at all.
+  fireEvent.change(screen.getByRole('combobox',{name:'Lyrics font'}),{target:{value:'notoSerif'}});fireEvent.change(screen.getByRole('combobox',{name:'Lyrics font'}),{target:{value:'inherit'}});
+  fireEvent.change(screen.getByRole('combobox',{name:'Music font'}),{target:{value:'leland'}});fireEvent.change(screen.getByRole('combobox',{name:'Music font'}),{target:{value:'bravura'}});
+  fireEvent.click(screen.getByRole('button',{name:'Apply engraving'}));
+  expect(commands).toEqual([{type:'setEngraving',engraving:sourceDefaults}]);expect('fonts' in commands[0].engraving).toBe(false);
+  expect(commands[0].engraving).toEqual(defaultEngraving());
+});
+
+it('applied_fonts_fill_the_form_and_reset_the_draft_after_undo_or_redo',()=>{
+  const commands:Edit[]=[],applied=withFonts(defaultEngraving(),{music:'leland',roles:{lyrics:{font:'notoSerif',bold:false}}}),props={score:music(),trackIds:['source/guitar'],busy:false,onEdit:(edit:Edit)=>commands.push(edit)};
+  const view=render(<EngravingPanel {...props} value={applied}/>);
+  expect(screen.getByRole('combobox',{name:'Music font'})).toHaveValue('leland');expect(screen.getByRole('combobox',{name:'Lyrics font'})).toHaveValue('notoSerif');expect(screen.getByRole('combobox',{name:'Lyrics bold'})).toHaveValue('off');
+  // An equal value keeps an unsent draft; a different font choice (undo or redo) replaces it.
+  fireEvent.change(screen.getByRole('combobox',{name:'Markers font'}),{target:{value:'notoSans'}});
+  view.rerender(<EngravingPanel {...props} value={structuredClone(applied)}/>);expect(screen.getByRole('combobox',{name:'Markers font'})).toHaveValue('notoSans');
+  view.rerender(<EngravingPanel {...props} value={withFonts(defaultEngraving(),{roles:{lyrics:{font:'notoSerif',bold:true}}})}/>);
+  expect(screen.getByRole('combobox',{name:'Markers font'})).toHaveValue('inherit');expect(screen.getByRole('combobox',{name:'Music font'})).toHaveValue('bravura');expect(screen.getByRole('combobox',{name:'Lyrics bold'})).toHaveValue('on');
+  view.rerender(<EngravingPanel {...props} value={defaultEngraving()}/>);
+  expect(screen.getByRole('combobox',{name:'Lyrics font'})).toHaveValue('inherit');
+  fireEvent.click(screen.getByRole('button',{name:'Apply engraving'}));
+  expect(commands).toEqual([{type:'setEngraving',engraving:sourceDefaults}]);
+});
+
+it('fonts_count_as_unapplied_changes_for_saved_styles',()=>{
+  render(<EngravingPanel score={music()} trackIds={['source/guitar']} value={defaultEngraving()} busy={false} onEdit={()=>undefined}/>);
+  expect(screen.queryByText(/Apply or reset your engraving changes/)).not.toBeInTheDocument();
+  fireEvent.change(screen.getByRole('combobox',{name:'Lyrics font'}),{target:{value:'notoSerif'}});expect(screen.getByText(/Apply or reset your engraving changes/)).toBeInTheDocument();
+  // An emptied draft is the same as no fonts.
+  fireEvent.change(screen.getByRole('combobox',{name:'Lyrics font'}),{target:{value:'inherit'}});expect(screen.queryByText(/Apply or reset your engraving changes/)).not.toBeInTheDocument();
+});
+
+it('reset_clears_fonts_and_sends_the_default',()=>{
+  const commands:Edit[]=[],value=withFonts(defaultEngraving(),{roles:{lyrics:{font:'notoSerif'}}});
+  render(<EngravingPanel score={music()} trackIds={['source/guitar']} value={value} busy={false} onEdit={edit=>commands.push(edit)}/>);
+  fireEvent.click(screen.getByRole('button',{name:'Reset to source/default'}));
+  expect(commands).toEqual([{type:'setEngraving',engraving:sourceDefaults}]);expect(screen.getByRole('combobox',{name:'Lyrics font'})).toHaveValue('inherit');
+});
+
+it('font_notes_come_from_the_score_text_and_the_font_status',()=>{
+  const score=music();score.tracks[0].staves[0].bars[0].voices[0].beats[0].lyrics=['中'];
+  const value=withFonts(defaultEngraving(),{music:'petaluma',roles:{lyrics:{font:'notoSerif'}}});
+  const props={score,trackIds:['source/guitar'],value,busy:false,onEdit:()=>undefined},view=render(<EngravingPanel {...props} fontStatus={{failed:['NotoSerif-Italic.ttf'],substituted:['a','b']}}/>);
+  expect(screen.getByText('Noto Serif has no glyph for ‘中’ (Lyrics); it is drawn from the fallback font.')).toBeInTheDocument();
+  expect(screen.getByText('2 music symbols are not in Petaluma and are drawn from Bravura.')).toBeInTheDocument();
+  expect(screen.getByText(/A font could not be loaded: Noto Serif Italic\./)).toBeInTheDocument();
+  // The substitution count belongs to the font on screen, not to an unapplied choice in the form.
+  fireEvent.change(screen.getByRole('combobox',{name:'Music font'}),{target:{value:'leland'}});
+  expect(screen.queryByText(/music symbols are not in/)).not.toBeInTheDocument();
+  fireEvent.change(screen.getByRole('combobox',{name:'Music font'}),{target:{value:'petaluma'}});
+  expect(screen.getByText('2 music symbols are not in Petaluma and are drawn from Bravura.')).toBeInTheDocument();
+  view.rerender(<EngravingPanel {...props}/>);expect(screen.queryByText(/could not be loaded/)).not.toBeInTheDocument();
+});
+
+it('page_header_and_footer_text_comes_from_the_given_bands',()=>{
+  const score=music(),bands=defaultHeaderFooter();bands.first.header.right='中';
+  const value=withFonts(defaultEngraving(),{roles:{pageHeader:{font:'notoSerif'}}});
+  const props={score,trackIds:['source/guitar'],value,busy:false,onEdit:()=>undefined},view=render(<EngravingPanel {...props}/>);
+  expect(screen.queryByText(/has no glyph/)).not.toBeInTheDocument();
+  view.rerender(<EngravingPanel {...props} headerFooter={bands}/>);
+  expect(screen.getByText('Noto Serif has no glyph for ‘中’ (Page header); it is drawn from the fallback font.')).toBeInTheDocument();
+});
+
+it('role_size_errors_use_the_panel_alert',()=>{
+  render(<EngravingPanel score={music()} trackIds={['source/guitar']} value={defaultEngraving()} busy={false} onEdit={()=>undefined}/>);
+  const size=screen.getByLabelText('Lyrics size (%)');fireEvent.change(size,{target:{value:'300'}});fireEvent.blur(size);
+  expect(screen.getByRole('alert')).toHaveTextContent('Lyrics size must be between 50% and 200%.');
 });

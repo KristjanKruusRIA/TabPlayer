@@ -426,6 +426,114 @@ fn engraving_bar_widths_survive_history_undo_redo_save_and_reopen_beside_an_old_
     assert_eq!(reopened_old.snapshot().project, old);
 }
 
+fn gaps(entries: Value) -> Value {
+    let mut value = engraving_command();
+    value["engraving"]["systemGaps"] = entries;
+    value
+}
+
+#[test]
+fn engraving_system_gaps_are_optional_ordered_bounded_and_round_trip_only_when_set() {
+    // A command from before system gaps existed stays valid and serializes unchanged.
+    let plain = engraving_command();
+    assert!(plain["engraving"].get("systemGaps").is_none());
+    assert_eq!(serde_json::to_value(accepted(&plain)).unwrap(), plain);
+    let set = gaps(
+        json!([{"bar": 0, "scale": 1.5}, {"bar": 1, "scale": 1.0}, {"bar": 3, "scale": 0.25}, {"bar": 99999, "scale": 4.0}]),
+    );
+    assert_eq!(serde_json::to_value(accepted(&set)).unwrap(), set);
+    // An explicit empty list is accepted and is written back without the field.
+    assert_eq!(
+        serde_json::to_value(accepted(&gaps(json!([])))).unwrap(),
+        plain
+    );
+    for invalid in [
+        json!([{"bar": 1, "scale": 0.249}]),
+        json!([{"bar": 1, "scale": 4.01}]),
+        json!([{"bar": 1, "scale": 0.0}]),
+        json!([{"bar": 1, "scale": -1.5}]),
+        json!([{"bar": 1, "scale": "2"}]),
+        json!([{"bar": 1, "scale": null}]),
+        json!([{"bar": 100000, "scale": 2.0}]),
+        json!([{"bar": -1, "scale": 2.0}]),
+        json!([{"bar": 1.5, "scale": 2.0}]),
+        json!([{"bar": 4294967296u64, "scale": 2.0}]),
+        json!([{"bar": 2, "scale": 2.0}, {"bar": 1, "scale": 2.0}]),
+        json!([{"bar": 2, "scale": 2.0}, {"bar": 2, "scale": 1.5}]),
+        json!([{"bar": 1}]),
+        json!([{"scale": 2.0}]),
+        json!([{"bar": 1, "scale": 2.0, "extra": true}]),
+        json!({"bar": 1, "scale": 2.0}),
+        json!(null),
+    ] {
+        rejected(&gaps(invalid));
+    }
+    // Hostile sizes are refused: one entry past the cap, however well formed.
+    let many = |count: u32| {
+        Value::Array(
+            (0..count)
+                .map(|bar| json!({"bar": bar, "scale": 2.0}))
+                .collect(),
+        )
+    };
+    accepted(&gaps(many(10_000)));
+    rejected(&gaps(many(10_001)));
+    let mut non_finite = EngravingOverrides::default();
+    for scale in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        non_finite.system_gaps = vec![tabplayer_lib::engraving::SystemGap { bar: 0, scale }];
+        assert!(non_finite.validate().is_err());
+    }
+}
+
+#[test]
+fn engraving_system_gaps_survive_history_undo_redo_save_and_reopen_beside_an_old_log() {
+    let mut session = ProjectSession::new(Project::blank(), None).unwrap();
+    let last_gaps = |project: Value| {
+        project["edits"]
+            .as_array()
+            .and_then(|edits| edits.last().cloned())
+            .and_then(|edit| edit["engraving"].get("systemGaps").cloned())
+    };
+    // An old log: a setEngraving written before system gaps existed is retained and replayed unchanged.
+    session.apply_edit(accepted(&engraving_command())).unwrap();
+    let old = session.snapshot().project;
+    let old_stored = serde_json::to_value(session.stored_project()).unwrap();
+    assert_eq!(last_gaps(serde_json::to_value(&old).unwrap()), None);
+    session
+        .apply_edit(accepted(&gaps(json!([{"bar": 2, "scale": 1.7}]))))
+        .unwrap();
+    let gapped = session.snapshot().project;
+    assert_eq!(gapped.edits.len(), 2);
+    assert_eq!(
+        last_gaps(serde_json::to_value(&gapped).unwrap()),
+        Some(json!([{"bar": 2, "scale": 1.7}]))
+    );
+    // Resetting the gaps is one more edit that leaves the field out.
+    session.apply_edit(accepted(&engraving_command())).unwrap();
+    assert_eq!(session.snapshot().project.edits.len(), 3);
+    assert_eq!(
+        last_gaps(serde_json::to_value(&session.snapshot().project).unwrap()),
+        None
+    );
+    session.undo().unwrap();
+    assert_eq!(session.snapshot().project, gapped);
+    session.undo().unwrap();
+    assert_eq!(session.snapshot().project, old);
+    session.redo().unwrap();
+    assert_eq!(session.snapshot().project, gapped);
+    let stored = serde_json::to_value(session.stored_project()).unwrap();
+    let reopened = ProjectSession::new(serde_json::from_value(stored).unwrap(), None).unwrap();
+    assert_eq!(reopened.snapshot().project, gapped);
+    assert_eq!(
+        last_gaps(serde_json::to_value(&reopened.snapshot().project).unwrap()),
+        Some(json!([{"bar": 2, "scale": 1.7}]))
+    );
+    // The old log alone still opens.
+    let reopened_old =
+        ProjectSession::new(serde_json::from_value(old_stored).unwrap(), None).unwrap();
+    assert_eq!(reopened_old.snapshot().project, old);
+}
+
 #[test]
 fn engraving_system_spacing_requires_null_or_a_bounded_factor() {
     for valid in [json!(null), json!(0.25), json!(4.0)] {

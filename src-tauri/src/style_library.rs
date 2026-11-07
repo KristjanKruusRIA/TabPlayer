@@ -77,6 +77,9 @@ impl SavedStyle {
         if !self.engraving.bar_widths.is_empty() {
             return Err("A saved style cannot hold bar widths.".into());
         }
+        if !self.engraving.system_gaps.is_empty() {
+            return Err("A saved style cannot hold system gaps.".into());
+        }
         Ok(())
     }
 }
@@ -370,6 +373,7 @@ mod tests {
             with(&|v| v["engraving"]["systemSpacing"] = json!(9)),
             with(&|v| v["engraving"]["profiles"] = json!([{"trackId":"t","profile":"slash"}])),
             with(&|v| v["engraving"]["barWidths"] = json!([{"bar":1,"scale":2.0}])),
+            with(&|v| v["engraving"]["systemGaps"] = json!([{"bar":1,"scale":2.0}])),
             with(&|v| v["name"] = json!(" pad ")),
             with(&|v| v["id"] = json!("nope")),
             with(&|v| v["extra"] = json!(1)),

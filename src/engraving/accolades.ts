@@ -1,6 +1,7 @@
 import { model,type Settings } from '@coderline/alphatab';
 import type { EngravingOverrides } from './types';
 import { drawnGroups,type ResolvedGroup } from './staff-groups';
+import type { TrackBand } from './staff-layout';
 
 /** Brace glyphs stretch horizontally with their height, capped at this factor of the glyph width. */
 export const BRACE_MAX_X_SCALE=4;
@@ -58,4 +59,61 @@ export function configureAccolades(settings:Settings,score:model.Score,plan:Acco
   if(!plan)return;
   const padding=normalizedPadding(settings.display.padding);padding[0]+=plan.reserve*settings.display.scale;
   settings.display.padding=padding;
+}
+
+/**
+ * One drawn accolade in render pixels. A bracket's `top` and `bottom` already include alphaTab's quarter-staff-space overflow
+ * (the bar's extra 3 and the spikes are added when it is written); a brace's are the staff span. `width` is the drawn width.
+ * `glyphScale` is the font-size multiplier of the glyph (render scale times the brace's vertical factor; 1 when absent) and
+ * `xScale` a horizontal compression for a brace taller than `BRACE_MAX_X_SCALE` (1 when absent).
+ */
+export interface AccoladeMark {role:'group'|'track';kind:'bracket'|'brace';x:number;top:number;bottom:number;width:number;glyphScale?:number;xScale?:number}
+
+const BRACKET_BAR_SHIFT=3;
+
+function braceMark(role:AccoladeMark['role'],right:number,top:number,bottom:number,metrics:AccoladeMetrics):AccoladeMark {
+  const factor=metrics.brace.height>0?(bottom-top)/metrics.brace.height:1,widthFactor=Math.min(factor,BRACE_MAX_X_SCALE);
+  const width=metrics.brace.width*widthFactor;
+  return {role,kind:'brace',x:right-width,top,bottom,width,glyphScale:metrics.scale*factor,...(factor>BRACE_MAX_X_SCALE?{xScale:BRACE_MAX_X_SCALE/factor}:{})};
+}
+function bracketMark(role:AccoladeMark['role'],right:number,top:number,bottom:number,metrics:AccoladeMetrics):AccoladeMark {
+  const overflow=metrics.staffSpace/4;
+  return {role,kind:'bracket',x:right-metrics.bracketThickness,top:top-overflow,bottom:bottom+overflow,width:metrics.bracketThickness,glyphScale:metrics.scale};
+}
+
+/**
+ * The marks of one system, from its track bands (unshifted render pixels). The inner column's right edge is `staffLeft - pad` and the
+ * outer column's right edge is the inner column's left edge minus `pad`; plan widths are alphaTab units, so they are scaled here.
+ */
+export function systemAccoladeMarks(plan:AccoladePlan,bands:readonly TrackBand[],metrics:AccoladeMetrics,staffLeft:number):AccoladeMark[] {
+  const innerRight=staffLeft-metrics.pad,outerRight=innerRight-plan.inner*metrics.scale-metrics.pad;
+  const groupKind=new Map<number,'bracket'|'brace'>();
+  for(const group of plan.groups)for(const track of group.tracks)groupKind.set(track,group.kind);
+  const canPaint=(staves:number)=>staves>=2||plan.singleStaffBrackets,marks:AccoladeMark[]=[];
+  if(plan.nativeMode!==0) {
+    for(const band of bands) {
+      if(groupKind.get(band.track)==='brace'||!canPaint(band.staves))continue;
+      if(plan.braceTracks.has(band.track))marks.push(braceMark('track',innerRight,band.top,band.bottom,metrics));
+      else if(!groupKind.has(band.track))marks.push(bracketMark('track',innerRight,band.top,band.bottom,metrics));
+    }
+  }
+  for(const group of plan.groups) {
+    const members=new Set(group.tracks),present=bands.filter(band=>members.has(band.track));
+    if(!present.length||!canPaint(present.reduce((sum,band)=>sum+band.staves,0)))continue;
+    const top=Math.min(...present.map(band=>band.top)),bottom=Math.max(...present.map(band=>band.bottom));
+    marks.push(group.kind==='brace'?braceMark('group',outerRight,top,bottom,metrics):bracketMark('group',outerRight,top,bottom,metrics));
+  }
+  return marks;
+}
+
+const glyph=(x:number,y:number,scale:number,symbol:model.MusicFontSymbol,xScale=1)=>
+  `<g transform="translate(${x} ${y})${xScale===1?'':` scale(${xScale} 1)`}" class="at" ><text style="${scale===1?'':`font-size: ${scale*100}%; `}stroke:none">&#${symbol};</text></g>`;
+
+/** Marks already shifted by the caller, written in alphaTab's glyph markup in the coordinates of the chunk at `origin`. */
+export function accoladeSvg(marks:readonly AccoladeMark[],origin:{left:number;top:number}):string {
+  return marks.map(mark=>{
+    const x=mark.x-origin.left,top=mark.top-origin.top,bottom=mark.bottom-origin.top,scale=mark.glyphScale??1,name=`${mark.role}-${mark.kind}`;
+    if(mark.kind==='brace')return `<g data-tp-accolade="${name}">${glyph(x,bottom,scale,model.MusicFontSymbol.Brace,mark.xScale??1)}</g>`;
+    return `<g data-tp-accolade="${name}"><rect x="${x}" y="${top-BRACKET_BAR_SHIFT}" width="${mark.width}" height="${bottom-top+BRACKET_BAR_SHIFT*2}" fill="#000000" />\n${glyph(x,top,scale,model.MusicFontSymbol.BracketTop)}${glyph(x,bottom,scale,model.MusicFontSymbol.BracketBottom)}</g>`;
+  }).join('');
 }

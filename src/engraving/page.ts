@@ -47,7 +47,8 @@ export function pageGeometry(layout:PageLayout):PageGeometry {
   return {widthMm,heightMm,width,height,left,top,right,bottom,usableWidth:width-(left+right),usableHeight:height-(top+bottom)-64};
 }
 
-const font='font-family="Noto Sans, Noto Sans CJK JP, Noto Emoji"';
+export const pageTextFontFamily='Noto Sans, Noto Sans CJK JP, Noto Emoji';
+const font=`font-family="${pageTextFontFamily}"`;
 const gap=12,minimumSize=5;
 /** Score metadata may hold line breaks or characters XML cannot carry; a page line prints them as spaces. */
 const printable=(text:string)=>text.replace(/[\t\n\r]+/g,' ').replace(/[^\t\n\r\u0020-\uD7FF\uE000-\uFFFD\u{10000}-\u{10FFFF}]/gu,'');

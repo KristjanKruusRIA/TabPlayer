@@ -1753,7 +1753,7 @@ describe('entry key queue',()=>{
     press({key:'+'});press({key:'g'});
     act(()=>{(c as unknown as {update(change:{documentEpoch:number}):void}).update({documentEpoch:1});});
     expect(screen.queryByText(/Next note/)).toBeNull();
-    expect(screen.getByRole('button',{name:'Note entry',pressed:true})).toBeInTheDocument();expect(screen.getByText(/Note entry is on/)).toBeInTheDocument();
+    expect(screen.getByRole('button',{name:'Note entry',pressed:true})).toBeInTheDocument();expect(screen.getByText(/1 queued key was dropped: the score was locked or changed/)).toBeInTheDocument();
     await hold.next();await waitFor(()=>expect(edits(c)).toHaveLength(1));
     await quiet();expect(hold.held).toHaveLength(0);expect(edits(c)).toHaveLength(1);expect(edits(c)[0].type).toBe('setDuration');
   });
@@ -1800,5 +1800,53 @@ describe('entry key queue',()=>{
     expect(screen.getByText(/Still entering the previous note/)).toBeInTheDocument();
     await act(async()=>{finish();});await waitFor(()=>expect(c.getState().busy).toBe(false));
     await quiet();expect(edits(c)).toEqual([]);
+  });
+  it('queues a key pressed after the edit settled but before its render committed, and plans it on the new beat',async()=>{
+    const c=await entryOn(),hold=holdEdits(c);
+    const spin=async(n=300)=>{for(let i=0;i<n;i++)await Promise.resolve();};
+    press({key:'e'});await waitFor(()=>expect(hold.held).toHaveLength(1));
+    // Let the edit through without act or a macrotask: its follow-up has run, React has not rendered the new cursor.
+    hold.held.shift()!.pass();await spin();
+    press({key:'g'});
+    await waitFor(()=>expect(hold.held.length).toBeGreaterThan(0));hold.held.shift()!.pass();
+    await waitFor(()=>expect(edits(c)).toHaveLength(2));
+    expect(currentBeat(c,1).notes).toHaveLength(1);expect(edits(c)[1]).toMatchObject({type:'setNote',target:{beat:1}});
+  });
+  it('drops the waiting keys on a pointer press in the score pane, in flight and between the edit and its render',async()=>{
+    const c=await entryOn(),hold=holdEdits(c);
+    const spin=async(n=300)=>{for(let i=0;i<n;i++)await Promise.resolve();};
+    press({key:'e'});press({key:'g'});
+    fireEvent.pointerDown(pane());
+    await hold.next();await waitFor(()=>expect(edits(c)).toHaveLength(1));await quiet();expect(hold.held).toHaveLength(0);
+    press({key:'a'});await waitFor(()=>expect(hold.held).toHaveLength(1));press({key:'b'});
+    hold.held.shift()!.pass();await spin();
+    fireEvent.pointerDown(pane());
+    await waitFor(()=>expect(edits(c)).toHaveLength(2));await quiet();expect(hold.held).toHaveLength(0);expect(edits(c)).toHaveLength(2);
+  });
+  it('refuses every later key after an overflow until the queue is empty, so no hole appears',async()=>{
+    const c=await entryOn(),hold=holdEdits(c);
+    press({key:'+'});for(const key of ['-','+','-','+','-','+','-','+'])press({key:key});
+    press({key:'-'});
+    await hold.next();await waitFor(()=>expect(edits(c)).toHaveLength(1));
+    // A slot is free now, but the refused key must not be followed by one that assumed it landed.
+    press({key:'+'});
+    for(let step=1;step<9;step++){await hold.next();if(step<8)await waitFor(()=>expect(edits(c)).toHaveLength(step+1));}
+    await waitFor(()=>expect(edits(c)).toHaveLength(9));await quiet();expect(hold.held).toHaveLength(0);expect(edits(c)).toHaveLength(9);
+  });
+  it('refuses keys typed during a save while keys wait, and those after it until the queue is empty',async()=>{
+    const c=await entryOn(),hold=holdEdits(c);
+    const bridge=documentBridges.get(c.getState().documentId)!;let finish!:()=>void;
+    vi.spyOn(bridge,'saveProject').mockImplementation(()=>new Promise(resolve=>{finish=()=>resolve(null);}));
+    press({key:'e'});press({key:'g'});
+    act(()=>{void c.save();});
+    await hold.next();await waitFor(()=>expect(edits(c)).toHaveLength(1));
+    await waitFor(()=>expect(c.getState().busy).toBe(true));
+    press({key:'a'});
+    expect(screen.getByText(/Still entering the previous note/)).toBeInTheDocument();
+    await act(async()=>{finish();});
+    await waitFor(()=>expect(hold.held).toHaveLength(1));
+    press({key:'b'});
+    await hold.next();await waitFor(()=>expect(edits(c)).toHaveLength(2));await quiet();
+    expect(hold.held).toHaveLength(0);expect(edits(c)).toHaveLength(2);
   });
 });

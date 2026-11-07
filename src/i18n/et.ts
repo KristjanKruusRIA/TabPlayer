@@ -1122,6 +1122,8 @@ export const et: MessageCatalog = {
   'editor.entry_queue_discarded_other': '{count} järjekorras olevat klahvi jäeti kasutamata.',
   'editor.entry_queue_stale_one': '{count} järjekorras olev klahv jäeti kasutamata: see ootas liiga kaua.',
   'editor.entry_queue_stale_other': '{count} järjekorras olevat klahvi jäeti kasutamata: esimene ootas liiga kaua.',
+  'editor.entry_queue_dropped_one': '{count} järjekorras olev klahv jäeti kasutamata: partituur lukustati või muutus.',
+  'editor.entry_queue_dropped_other': '{count} järjekorras olevat klahvi jäeti kasutamata: partituur lukustati või muutus.',
   'editor.entry_out_of_range': 'See helikõrgus jääb MIDI-vahemikust välja.',
   'editor.entry_no_spelling': "{name} ei saa nii kirjutada: sellele helikõrgusele ei saa sellist muutemärki joonistada.",
   'editor.entry_cannot_enter': '{name} ei saa siia sisestada.',

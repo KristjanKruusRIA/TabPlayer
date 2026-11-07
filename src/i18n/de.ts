@@ -1122,6 +1122,8 @@ export const de: MessageCatalog = {
   'editor.entry_queue_discarded_other': '{count} vorgemerkte Tasten wurden verworfen.',
   'editor.entry_queue_stale_one': '{count} vorgemerkte Taste wurde verworfen: sie hat zu lange gewartet.',
   'editor.entry_queue_stale_other': '{count} vorgemerkte Tasten wurden verworfen: die erste hat zu lange gewartet.',
+  'editor.entry_queue_dropped_one': '{count} vorgemerkte Taste wurde verworfen: die Partitur wurde gesperrt oder gewechselt.',
+  'editor.entry_queue_dropped_other': '{count} vorgemerkte Tasten wurden verworfen: die Partitur wurde gesperrt oder gewechselt.',
   'editor.entry_out_of_range': 'Diese Tonhöhe liegt außerhalb des MIDI-Bereichs.',
   'editor.entry_no_spelling': "{name} lässt sich so nicht schreiben: Auf dieser Tonhöhe ist dieses Vorzeichen nicht darstellbar.",
   'editor.entry_cannot_enter': '{name} kann hier nicht eingegeben werden.',

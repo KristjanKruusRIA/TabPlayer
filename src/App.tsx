@@ -100,7 +100,7 @@ import { TrackSettingsPanel } from './workstation/TrackSettingsPanel';
 import './workstation/workstation-shell.css';
 import './workstation/gp-shell.css';
 const noPlaybackSubscribe=()=>()=>{};
-/** A keyboard entry key that waits for the edit before it. Keys are kept as typed and read the preferences and the pending accidental when their turn comes. */
+/** A keyboard entry key that waits for the edit before it. Which key it is (the Plus/Minus swap, the keypad durations) is settled when it is pressed; the cursor, the pending accidental and the fret are read when its turn comes. */
 type EntryItem=
   |{kind:'keypad';keypad:NonNullable<ReturnType<typeof numpadKey>>}
   |{kind:'entry';key:ScoreEntryKey;shift:boolean}
@@ -147,7 +147,10 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   // `ownEdits` counts the edits `edit` has started and not yet finished following up (selection moved); `settled` is bumped right after each one,
   // so the drain never plans a key against a cursor the previous edit has not moved yet. `entryFailure` records that the previous key was refused or did not land.
   const entryQueue=useRef<QueuedEntryKey[]>([]),ownEdits=useRef(0),draining=useRef(false),entryFailure=useRef<{text:string|null}|null>(null),[settled,setSettled]=useState(0);
-  const clearEntryQueue=()=>{entryQueue.current=[];};
+  // `unseenSettles` are edits whose follow-up has run but whose render has not committed yet; they stay in `ownEdits` until the drain effect (which runs after that commit) takes them off.
+  const unseenSettles=useRef(0),refusing=useRef(false);
+  // Clearing the queue also lifts the refusal latch (see `refusing` in `keys`).
+  const clearEntryQueue=()=>{entryQueue.current=[];refusing.current=false;};
   const [auditionEdits,setAuditionEdits]=useState(readAuditionWhileEditing),auditionEditsNow=useRef(auditionEdits);auditionEditsNow.current=auditionEdits;
   const [markErrors,setMarkErrors]=useState(readScoreErrorDisplay),scoreErrors=useMemo(()=>findScoreErrors(state.score),[state.score]),sections=useMemo(()=>listSections(state.score),[state.score]);
   const clip=useMemo(()=>clipboard.get(),[clipboard,clipboardVersion]),clipboardSection=useRef<HTMLDivElement>(null);
@@ -255,8 +258,9 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     setClipboardError(null);
     const oldCount=state.score.masterBars.length;
     const wasPlaying=player?.getState().playing??false;
-    ownEdits.current++;let recorded=false;
-    const landed=controller.edit(command),done=landed.then(()=>{
+    let recorded=false;
+    const landed=controller.edit(command);ownEdits.current++;
+    const done=landed.then(()=>{
       recorded=true;
       const score=controller.getState().score,map=command.type==='insertMeasures'||command.type==='removeMeasures'?planMeasureMap(oldCount,command):null;
       setSelection(old=>map?repairMeasureSelection(score,old,map):repairSelection(score,command.type==='moveTrack'?{...old,track:movedTrackIndex(old.track,command)}:command.type==='duplicateTrack'?{...old,track:command.track+1}:old));
@@ -267,7 +271,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
       if(auditionEditsNow.current&&player&&!wasPlaying&&!player.getState().playing){const heard=editAudition(score,command);if(heard){const current=controller.getState();player.audition({trackId:trackIdentity(score.tracks[heard.track])},heard.notes,heard.durationMs,{project:current.snapshot.project,built:current});}}
     });
     // The edit is finished only once its follow-up has moved the selection: that, not the controller going idle, is when the next queued key may run.
-    const settle=()=>{ownEdits.current--;if(!recorded)entryFailure.current={text:null};setSettled(count=>count+1);};
+    const settle=()=>{unseenSettles.current++;if(!recorded)entryFailure.current={text:null};setSettled(count=>count+1);};
     done.then(settle,settle);
     // The outcome is the edit's own: a failing follow-up (selection, audition) does not make a landed edit a refusal.
     act(done);return landed.then(()=>true,()=>false);
@@ -574,11 +578,12 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   const entryQueueing=()=>!workspaceBusy&&!editLocked&&(ownEdits.current>0||entryQueue.current.length>0&&!controlsBusy);
   const enqueueEntry=(item:EntryItem)=>{
     const queue=entryQueue.current;
-    if(queue.length>=ENTRY_QUEUE_MAX){setInputNotice({text:t('editor.entry_busy'),at:JSON.stringify(target)});return;}
     if(!queue.length)entryFailure.current=null;
+    // A refused key must not be followed by keys that assume it landed: once one is refused, the rest are too until the queue is empty and its last key has finished (the drain lifts it).
+    if(queue.length>=ENTRY_QUEUE_MAX){refusing.current=true;setInputNotice({text:t('editor.entry_busy'),at:JSON.stringify(target)});return;}
     queue.push({item,at:Date.now(),documentId:state.documentId});
   };
-  const discardEntryQueue=(reason:string|null,why:'discarded'|'stale')=>{
+  const discardEntryQueue=(reason:string|null,why:'discarded'|'stale'|'dropped')=>{
     const count=entryQueue.current.length;clearEntryQueue();
     const message=t(`editor.entry_queue_${why}_${count===1?'one':'other'}` as MessageKey,{count});
     setInputNotice({text:reason?`${reason} ${message}`:message,at:JSON.stringify(target)});
@@ -591,18 +596,21 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   const drainEntry=()=>{
     if(ownEdits.current>0||controlsBusy)return;
     const queue=entryQueue.current,failure=entryFailure.current;entryFailure.current=null;
-    if(!queue.length)return;
-    if(editLocked||workspaceBusy||queue[0].documentId!==state.documentId){clearEntryQueue();return;}
+    if(!queue.length){refusing.current=false;return;}
+    if(editLocked||workspaceBusy||queue[0].documentId!==state.documentId){discardEntryQueue(null,'dropped');return;}
     if(failure){discardEntryQueue(failure.text,'discarded');return;}
     if(Date.now()-queue[0].at>ENTRY_QUEUE_STALE_MS){discardEntryQueue(null,'stale');return;}
     const next=queue.shift()!,before=ownEdits.current;
     draining.current=true;
-    try{performItem(next.item,next.at);}finally{draining.current=false;}
+    try{performItem(next.item,next.at);}
+    catch(error){console.error('A queued entry key failed.',error);discardEntryQueue(null,'discarded');return;}
+    finally{draining.current=false;}
     if(ownEdits.current===before)setSettled(count=>count+1);
   };
   const drainNow=useRef(drainEntry);drainNow.current=drainEntry;
-  useEffect(()=>{clearEntryQueue();},[noteEntryOn,view,editLocked,state.documentEpoch,state.documentId]);
-  useEffect(()=>{drainNow.current();},[settled,controlsBusy,workspaceBusy,editLocked,state.documentEpoch,state.documentId]);
+  useEffect(()=>{clearEntryQueue();},[noteEntryOn,view]);
+  useEffect(()=>{if(entryQueue.current.length)discardEntryQueue(null,'dropped');},[editLocked,state.documentEpoch,state.documentId]);
+  useEffect(()=>{ownEdits.current-=unseenSettles.current;unseenSettles.current=0;drainNow.current();},[settled,controlsBusy,workspaceBusy,editLocked,state.documentEpoch,state.documentId]);
   function keys(event:KeyboardEvent) {
     if (textEntry(event.target)||(event.target as HTMLElement).tagName==='BUTTON') return;
     // The Menu key and Shift+F10 open the score-symbol menu at the edit target, as a right-click does on the score.
@@ -612,6 +620,10 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
       event.preventDefault();
       // Held letters and chords never repeat, and a key that has to wait is queued once, never from key repeat.
       if(event.repeat&&(item.kind==='entry'||entryQueueing()))return;
+      if(refusing.current||entryQueue.current.length&&!entryQueueing()){
+        // Keys are waiting and this one cannot join them: refuse it, and every later one until the queue is empty, so the music has no hole.
+        refusing.current=true;if(!entryBlocked(target))setInputNotice({text:t('editor.entry_busy'),at:JSON.stringify(target)});return;
+      }
       if(entryQueueing())enqueueEntry(item);else performItem(item,Date.now());
       return;
     }
@@ -774,7 +786,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     {(clipboardError||workspaceError||state.error||(!exportOpen&&exportError)||pageState.error||harmonyOpen&&libraryError) && <div className="error" role="alert">{clipboardError||workspaceError||state.error||exportError||pageState.error||libraryError}</div>}
     {state.importNotice && <div className="notice" role="status">{state.importNotice}</div>}
     <div ref={workspace} className="workspace workstation-workspace" data-view={view} data-inspector={inspectorShown} data-dock={dockVisible} data-dock-collapsed={dockCollapsed} style={{'--dock-height':`${dockHeight}px`,'--inspector-width':`${inspectorWidth}px`} as React.CSSProperties}>
-      <section ref={scorePane} className="score-workspace" aria-label="Score workspace" tabIndex={0} onKeyDown={keys} onBlur={event=>{if(!(event.relatedTarget instanceof Node&&event.currentTarget.contains(event.relatedTarget)))clearEntryQueue();}}>
+      <section ref={scorePane} className="score-workspace" aria-label="Score workspace" tabIndex={0} onKeyDown={keys} onPointerDownCapture={clearEntryQueue} onBlur={event=>{if(!(event.relatedTarget instanceof Node&&event.currentTarget.contains(event.relatedTarget)))clearEntryQueue();}}>
         <div className="score-body">{paletteVisible&&view==='score'&&<aside ref={setPaletteHost} className="score-palette" aria-label={t('view.edition_palette')}/>}<div className="paper-scroll"><div className="paper score-paper-host"><ScoreView score={state.score} track={target.track} zoom={zoom} display={display} page={page} onDisplayStatus={onDisplayStatus} profile="Default" projection={projection} engraving={state.settings.engraving} visibleTracks={visibleTracks} onSelect={select} playback={player} editorSelection={musicSelection} onEditorSelection={editorSelection} editTarget={target} editString={indexed?undefined:string} editNoteIndex={noteIndex} errors={markErrors?scoreErrors:undefined} noteEntry={scoreNoteEntry} symbols={view==='score'?{busy:controlsBusy,locked:editLocked?lockedMessage:null,request:symbolRequest,onEdit:command=>{if(editLocked){setClipboardError(lockedMessage);return Promise.resolve(false);}return edit(command);},onChordEditor:chordTarget=>{editorSelection(null);select(chordTarget);openModal('harmony');}}:undefined} barDesign={barDesign?{busy:editBusy,scaleOf:bar=>barScaleOf(state.settings.engraving,bar,sourceWeight(state.score,visibleTracks,bar)),defaultOf:bar=>sourceWeight(state.score,visibleTracks,bar),onScale:(bar,scale)=>{const engraving=withBarScale(state.settings.engraving,bar,scale,sourceWeight(state.score,visibleTracks,bar));if(engraving!==state.settings.engraving)void edit({type:'setEngraving',engraving});}}:null}/></div></div></div>
         {inputNotice&&inputNotice.at===JSON.stringify(target)?<div className="score-hint" role="status">{inputNotice.text}</div>:noteEntryOn&&view==='score'&&<div className="score-hint" role="status">{pendingAccidental?t('score_entry.pending',{accidental:t(accidentalLabelKeys[pendingAccidental])}):t('score_entry.on')}</div>}
       </section>

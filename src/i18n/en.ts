@@ -1120,6 +1120,8 @@ export const en = {
   'editor.entry_queue_discarded_other': '{count} queued keys were discarded.',
   'editor.entry_queue_stale_one': '{count} queued key was dropped: it waited too long.',
   'editor.entry_queue_stale_other': '{count} queued keys were dropped: the first waited too long.',
+  'editor.entry_queue_dropped_one': '{count} queued key was dropped: the score was locked or changed.',
+  'editor.entry_queue_dropped_other': '{count} queued keys were dropped: the score was locked or changed.',
   'editor.entry_out_of_range': 'That pitch is outside the MIDI range.',
   'editor.entry_no_spelling': "{name} cannot be spelled that way: no such accidental draws on that pitch.",
   'editor.entry_cannot_enter': '{name} cannot be entered here.',

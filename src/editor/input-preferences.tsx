@@ -14,8 +14,10 @@ export interface InputPreferences {
   pasteDiagrams:boolean;
   /** Note entry on the score moves to the next beat after writing a note. */
   advance:boolean;
+  /** Guitar Pro's Plus/Minus Keys Behavior: + makes the beat longer and - shorter, instead of the other way round. */
+  swapPlusMinus:boolean;
 }
-export const DEFAULT_INPUT_PREFERENCES:InputPreferences={autoDuration:false,numpadDurations:false,pasteDiagrams:true,advance:true};
+export const DEFAULT_INPUT_PREFERENCES:InputPreferences={autoDuration:false,numpadDurations:false,pasteDiagrams:true,advance:true,swapPlusMinus:false};
 /** The duration last chosen from the keypad or last written onto, which auto-duration applies. */
 export interface EntryDuration {duration:number;dots:number}
 /** The part of a beat these rules read. */
@@ -34,7 +36,7 @@ export function readInputPreferences(storage:PreferenceStorage|undefined=browser
   try{const text=storage?.getItem(storageKey);if(text)stored=JSON.parse(text);}catch{/* Unreadable storage keeps the defaults. */}
   const object=stored&&typeof stored==='object'?stored as Record<string,unknown>:{};
   const read=(key:keyof InputPreferences)=>typeof object[key]==='boolean'?object[key] as boolean:DEFAULT_INPUT_PREFERENCES[key];
-  return {autoDuration:read('autoDuration'),numpadDurations:read('numpadDurations'),pasteDiagrams:read('pasteDiagrams'),advance:read('advance')};
+  return {autoDuration:read('autoDuration'),numpadDurations:read('numpadDurations'),pasteDiagrams:read('pasteDiagrams'),advance:read('advance'),swapPlusMinus:read('swapPlusMinus')};
 }
 export function writeInputPreferences(preferences:InputPreferences,storage:PreferenceStorage|undefined=browserStorage()):void {
   try{storage?.setItem(storageKey,JSON.stringify(preferences));}catch{/* Storage can be unavailable; the choice then lasts for this session only. */}
@@ -98,6 +100,7 @@ export function InputPreferencesPanel({preferences,onChange,preview,onPreview}:I
     <label className="check"><input type="checkbox" checked={preferences.autoDuration} onChange={event=>onChange({autoDuration:event.target.checked})}/>{t('preferences.auto_duration')}</label>
     <label className="check"><input type="checkbox" checked={preferences.numpadDurations} onChange={event=>onChange({numpadDurations:event.target.checked})}/>{t('preferences.numpad_durations')}</label>
     <label className="check"><input type="checkbox" checked={preferences.advance} onChange={event=>onChange({advance:event.target.checked})}/>{t('preferences.advance')}</label>
+    <label className="check"><input type="checkbox" checked={preferences.swapPlusMinus} onChange={event=>onChange({swapPlusMinus:event.target.checked})}/>{t('preferences.swap_plus_minus')}</label>
     <label className="check"><input type="checkbox" checked={preferences.pasteDiagrams} onChange={event=>onChange({pasteDiagrams:event.target.checked})}/>{t('preferences.paste_diagrams')}</label>
   </fieldset>;
 }

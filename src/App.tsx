@@ -495,7 +495,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   };
   /** Note-entry keys on the focused score; true when the key was one of them. */
   const entryKeys=(event:KeyboardEvent):boolean=>{
-    const key=scoreEntryKey(event);if(!key)return false;
+    const key=scoreEntryKey(event,inputPrefs.swapPlusMinus);if(!key)return false;
     event.preventDefault();if(event.repeat)return true;
     const beat=location.beat;
     if(key.kind==='letter'){writeEntry(target,letterPitch(key.letter,entryNear.current,location.bar.keySignature as number,pendingAccidental??'key'),event.shiftKey);return true;}

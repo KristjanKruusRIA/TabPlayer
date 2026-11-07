@@ -26,13 +26,13 @@ const chordDigits: Record<string, { plain: AccidentalChord; alt: AccidentalChord
 
 
 /**
- * What a key does on the score in entry mode. Letters write pitches; `+` and `-` make the beat shorter and longer, `.`
- * dots it (Ctrl+`.` double-dots), `/` makes a triplet and R a rest, as in Guitar Pro; Ctrl+Alt+Up/Down moves the
+ * What a key does on the score in entry mode. Letters write pitches; `+` and `-` (also `=` and `_`) make the beat shorter and longer, or the reverse with `swapPlusMinus`, `.`
+ * (also Shift+`.`) dots it (Ctrl+`.` double-dots), `/` (also Shift+`/`) makes a triplet and R a rest, as in Guitar Pro; Ctrl+Alt+Up/Down moves the
  * selected note a staff step, Alt+Shift+Up/Down a semitone, and Ctrl+Shift+Up/Down an octave. Ctrl+7, 8 and 9 are flat,
  * natural and sharp, with Alt double flat, change accidental and double sharp; they are read from `code`, because AltGr
  * makes `key` a brace or bracket on some layouts. Anything else is null.
  */
-export function scoreEntryKey(event: { key: string; code?: string; ctrlKey: boolean; altKey: boolean; shiftKey: boolean; metaKey: boolean }): ScoreEntryKey | null {
+export function scoreEntryKey(event: { key: string; code?: string; ctrlKey: boolean; altKey: boolean; shiftKey: boolean; metaKey: boolean }, swapPlusMinus = false): ScoreEntryKey | null {
   const ctrl = event.ctrlKey || event.metaKey, vertical = event.key === 'ArrowUp' ? 1 : event.key === 'ArrowDown' ? -1 : 0;
   if (vertical) {
     if (ctrl && event.altKey && !event.shiftKey) return { kind: 'step', by: vertical };
@@ -47,11 +47,15 @@ export function scoreEntryKey(event: { key: string; code?: string; ctrlKey: bool
   }
   if (event.altKey) return null;
   if (event.key === '.') return { kind: 'dot', double: ctrl };
+  // Guitar Pro also takes Shift+. for `.` and Shift+/ for `/`, whatever character the layout types there.
+  if (!ctrl && event.shiftKey && event.code === 'Period') return { kind: 'dot', double: false };
+  if (!ctrl && event.shiftKey && event.code === 'Slash') return { kind: 'triplet' };
   if (ctrl) return null;
   const letter = keyLetter(event.key);
   if (letter >= 0) return { kind: 'letter', letter };
-  if (event.key === '+') return { kind: 'shorter' };
-  if (event.key === '-') return { kind: 'longer' };
+  // `=` and `_` are the same keys as `+` and `-` without or with Shift, so they follow them.
+  const plus = event.key === '+' || event.key === '=', minus = event.key === '-' || event.key === '_';
+  if (plus || minus) return { kind: plus !== swapPlusMinus ? 'shorter' : 'longer' };
   if (event.key === '/') return { kind: 'triplet' };
   if (event.key === 'r' || event.key === 'R') return { kind: 'rest' };
   return null;

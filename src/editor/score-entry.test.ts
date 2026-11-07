@@ -31,6 +31,25 @@ it('maps Guitar Pro style keys and leaves the rest alone', () => {
   for (const [key, mods] of [['ArrowUp', {}], ['h', {}], ['c', { ctrlKey: true }], ['c', { altKey: true }], ['1', {}], ['Enter', {}]] as const) expect(keys(key, mods)).toBeNull();
 });
 
+it('takes the Guitar Pro key aliases and the Plus/Minus swap, without catching modified chords', () => {
+  expect(keys('=')).toEqual({ kind: 'shorter' }); expect(keys('_', { shiftKey: true })).toEqual({ kind: 'longer' });
+  expect(keys('+', { shiftKey: true })).toEqual({ kind: 'shorter' }); expect(keys('-')).toEqual({ kind: 'longer' });
+  expect(keys('>', { shiftKey: true }, 'Period')).toEqual({ kind: 'dot', double: false });
+  expect(keys('?', { shiftKey: true }, 'Slash')).toEqual({ kind: 'triplet' });
+  expect(keys(':', { shiftKey: true }, 'Period')).toEqual({ kind: 'dot', double: false });
+  const swapped = (key: string, mods: Partial<Record<'ctrlKey' | 'altKey' | 'shiftKey' | 'metaKey', boolean>> = {}) => scoreEntryKey({ key, ctrlKey: false, altKey: false, shiftKey: false, metaKey: false, ...mods }, true);
+  expect(swapped('+')).toEqual({ kind: 'longer' }); expect(swapped('=')).toEqual({ kind: 'longer' });
+  expect(swapped('-')).toEqual({ kind: 'shorter' }); expect(swapped('_', { shiftKey: true })).toEqual({ kind: 'shorter' });
+  expect(swapped('.')).toEqual({ kind: 'dot', double: false }); expect(swapped('/')).toEqual({ kind: 'triplet' });
+  // A modifier turns an alias into something else, or nothing.
+  for (const [key, mods, code] of [['=', { ctrlKey: true }], ['_', { altKey: true }], ['-', { metaKey: true }], ['>', { shiftKey: true, ctrlKey: true }, 'Period'], ['?', { shiftKey: true, altKey: true }, 'Slash'], ['?', { ctrlKey: true, shiftKey: true }, 'Slash']] as const)
+    expect(keys(key, mods, code)).toBeNull();
+  expect(keys('>', {}, 'Period')).toBeNull(); expect(keys('?', {}, 'Slash')).toBeNull();
+  // The accidental chords still win over the aliases.
+  expect(keys('7', { ctrlKey: true }, 'Digit7')).toEqual({ kind: 'accidental', value: 'flat' });
+  expect(keys('8', { ctrlKey: true, altKey: true }, 'Digit8')).toEqual({ kind: 'respell' });
+});
+
 it('changes durations as Guitar Pro does and records nothing outside the plain range', () => {
   const beat = describeSelection(buildDocument(project()).score, piano(0)).beat!;
   expect(durationKeyEdit({ kind: 'shorter' }, piano(0), beat)?.command).toEqual({ type: 'setDuration', target: piano(0), duration: 8, dots: 0 });

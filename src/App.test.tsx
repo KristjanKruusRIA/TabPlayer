@@ -2033,6 +2033,15 @@ describe('GP8 edit and cursor keys',()=>{
     expect(JSON.stringify(edits(c)[3])).toContain(`"beat":${beat}`);
     expect(currentBeat(c,beat).notes.length).toBeGreaterThan(0);
   });
+  it('a cursor that leaves the entry beat and comes back is still a cursor the user moved',async()=>{
+    const c=await entryOn(),hold=holdEdits(c);
+    press({key:'e'});await waitFor(()=>expect(hold.held).toHaveLength(1));
+    press({key:'ArrowRight'});press({key:'ArrowLeft'});expect(cursor().beat).toBe(0);
+    press({key:'9',code:'Digit9',ctrlKey:true});
+    await hold.next();await waitFor(()=>expect(edits(c)).toHaveLength(1));
+    // The landed note must not advance a cursor the user has moved; the chord then acts on the beat the user is on.
+    await quiet();expect(cursor().beat).toBe(0);
+  });
   it('a refused edit key behind waiting entry keys also refuses the keys typed after it',async()=>{
     const c=await entryOn(),hold=holdEdits(c);
     press({key:'e'});press({key:'g'});
@@ -2089,7 +2098,7 @@ describe('GP8 edit and cursor keys',()=>{
     const c=await setup(withNotes());
     act(()=>{(engravingView.mock.lastCall![0] as {onEditorSelection:(value:unknown)=>void}).onEditorSelection({kind:'bars',firstBar:99,lastBar:99,tracks:[0]});});
     press({key:'Delete',shiftKey:true});
-    expect(await screen.findByText('The selection has no notes to clear.')).toBeInTheDocument();
+    expect(await screen.findByText('The selection cannot be resolved, so no beat was deleted.')).toBeInTheDocument();
     await quiet();expect(edits(c)).toHaveLength(2);
   });
   it('Ctrl+Home and Ctrl+End still land on beat 0 of the first and last bar when a bar has been emptied',async()=>{

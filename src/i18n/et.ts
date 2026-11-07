@@ -1123,6 +1123,7 @@ export const et: MessageCatalog = {
   'editor.gp8_delete_many': 'Shift + Delete eemaldab ühe löögi korraga ja valikus on neid {count}. Vali üks löök.',
   'editor.gp8_no_selection': 'Vali kõigepealt muusika, mille noodid kustutada.',
   'editor.gp8_no_notes': 'Valikus pole nooti, mida kustutada.',
+  'editor.gp8_bad_selection': 'Valikut ei saa tuvastada, seega ühtegi lööki ei kustutatud.',
   'help.shortcut_gp8_edit': 'Backspace kustutab kursori keelel oleva noodi (või valitud noodi). Shift + Delete kustutab kursori all oleva löögi või ainsa valitud löögi; mitme löögi valiku puhul keeldub. Ctrl + Insert lisab kursori ette löögi. Ctrl + Shift + Delete kustutab valiku noodid.',
   'help.shortcut_gp8_cursor': 'Home / End viivad takti esimese / viimase löögini ja Shift laiendab valiku sinna. Ctrl + Home viib esimesse takti ja Ctrl + End viimasesse takti.',
   'editor.entry_queue_discarded_one': '{count} järjekorras olev klahv jäeti kasutamata.',

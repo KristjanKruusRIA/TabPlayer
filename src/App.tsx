@@ -458,6 +458,8 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   const [symbolRequest,setSymbolRequest]=useState(0);
   // The cursor as last rendered: an entry edit that lands moves it on only when the user has not moved it meanwhile.
   const cursorNow=useRef(selection);cursorNow.current=selection;
+  // How many times the user has chosen a place; a cursor that left a beat and came back is not one that stayed.
+  const userMoves=useRef(0);
   const sameBeat=(a:BeatTarget,b:BeatTarget)=>a.track===b.track&&a.staff===b.staff&&a.bar===b.bar&&a.voice===b.voice&&a.beat===b.beat;
   const moveTo=(next:BeatTarget,s=string,index?:number)=>{
     if (!validSelectionIndices(next) || !Number.isInteger(s)) return;
@@ -469,16 +471,16 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     setFret(beat?.notes.find(n=>n.string===chosen)?.fret ?? 0);digits.current.text='';
   };
   /** A selection the user made: it also drops any keys still waiting, which were typed for the old cursor. Entry itself moves the cursor with `moveTo`. */
-  const select=(next:BeatTarget,s=string,index?:number)=>{clearEntryQueue();moveTo(next,s,index);};
+  const select=(next:BeatTarget,s=string,index?:number)=>{userMoves.current++;clearEntryQueue();moveTo(next,s,index);};
   /** Shows why a key did nothing; for a queued key it also records that the rest of the queue was typed for a result that did not happen. */
   const refuse=(text:string,at:string)=>{setInputNotice({text,at});if(draining.current)entryFailure.current={text};};
   /** Records a planned entry as one edit, then moves the cursor where the plan says; a refusal keeps the cursor on the beat and says why. */
   const runEntryPlan=(point:BeatTarget,plan:EntryPlan|EntryRefusal,pitch?:number)=>{
-    const placed=repairSelection(state.score,point);
+    const placed=repairSelection(state.score,point),moves=userMoves.current;
     moveTo(point);
     if('refused' in plan){refuse(t(`score_entry.${plan.refused}` as MessageKey,{name:plan.name}),JSON.stringify(point));return;}
     setInputNotice(plan.notice?{text:plan.notice,at:JSON.stringify(plan.next)}:null);
-    void edit(plan.command,score=>{if(sameBeat(cursorNow.current,placed)){setSelection(repairSelection(score,plan.next));setNoteIndex(null);}if(plan.entry)entryDuration.current=plan.entry;if(pitch!==undefined&&!plan.removes)entryNear.current=pitch;})
+    void edit(plan.command,score=>{if(sameBeat(cursorNow.current,placed)&&userMoves.current===moves){setSelection(repairSelection(score,plan.next));setNoteIndex(null);}if(plan.entry)entryDuration.current=plan.entry;if(pitch!==undefined&&!plan.removes)entryNear.current=pitch;})
       .then(landed=>{if(!landed){const text=t('score_entry.refused',{name:plan.name});setInputNotice({text,at:JSON.stringify(point)});if(entryFailure.current)entryFailure.current.text=text;}});
   };
   const entryBlocked=(point:BeatTarget)=>{
@@ -503,13 +505,13 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
   }:null;
   useEffect(()=>{if(!noteEntryOn||view!=='score')setPendingAccidental(null);},[noteEntryOn,view]);
   useEffect(()=>{setPendingAccidental(null);},[state.documentEpoch]);
+  /** The note the cursor is on: the chosen note on an indexed staff, otherwise the one on the cursor string. */
+  const noteAtCursor=(beat:model.Beat)=>indexed?selectedNote(beat,null,noteIndex):beat.notes.find(item=>item.string===string);
   /**
    * Ctrl+7/8/9 (flat, natural, sharp; Alt for the doubles; Ctrl+Alt+8 changes the accidental). With note entry on and nothing
    * at the cursor's string or line they set the accidental of the next note; otherwise they re-spell the selected note
    * (spelling only, one edit, nothing recorded for the spelling it already has).
    */
-  /** The note the cursor is on: the chosen note on an indexed staff, otherwise the one on the cursor string. */
-  const noteAtCursor=(beat:model.Beat)=>indexed?selectedNote(beat,null,noteIndex):beat.notes.find(item=>item.string===string);
   const accidentalKeys=(key:Extract<ScoreEntryKey,{kind:'accidental'|'respell'}>)=>{
     const beat=location.beat,at=JSON.stringify(target);
     const slot=beat?noteAtCursor(beat):null;
@@ -532,7 +534,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     if(entryBlocked(target))return;
     if(!beat){refuse(t('score_entry.no_beat'),JSON.stringify(target));return;}
     if(key.kind==='rest'){
-      if(!beat.isRest){const placed=target;void edit({type:'setRest',target},score=>{const voice=score.tracks[target.track].staves[target.staff].bars[target.bar].voices[target.voice];if(inputPrefs.advance&&sameBeat(cursorNow.current,placed)&&target.beat<voice.beats.length-1)setSelection(repairSelection(score,{...target,beat:target.beat+1}));});}
+      if(!beat.isRest){const placed=target,moves=userMoves.current;void edit({type:'setRest',target},score=>{const voice=score.tracks[target.track].staves[target.staff].bars[target.bar].voices[target.voice];if(inputPrefs.advance&&sameBeat(cursorNow.current,placed)&&userMoves.current===moves&&target.beat<voice.beats.length-1)setSelection(repairSelection(score,{...target,beat:target.beat+1}));});}
       return;
     }
     if(key.kind==='step'||key.kind==='semitone'||key.kind==='octave'){
@@ -637,8 +639,8 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
     }
     if(kind==='deleteBeats'){
       let beats:model.Beat[];
-      try{beats=musicSelection&&!(musicSelection.kind==='notes'&&!musicSelection.notes.length)?resolveSelectionBeats(state.score,musicSelection):[];}catch{setInputNotice({text:t('editor.gp8_no_notes'),at});return;}
-      // No selection, or an empty note selection, leaves the cursor beat to delete; a selection that cannot be resolved was refused above.
+      try{beats=musicSelection&&!(musicSelection.kind==='notes'&&!musicSelection.notes.length)?resolveSelectionBeats(state.score,musicSelection):[];}catch{setInputNotice({text:t('editor.gp8_bad_selection'),at});return;}
+      // Any selection that resolves to no beats (or no selection at all) falls back to the cursor beat; one that throws when resolved was refused above.
       if(!beats.length&&location.beat)beats=[location.beat];
       // `deleteBeat` is not a step a `sequence` may hold, so several beats cannot be one edit: refuse rather than split the gesture.
       if(beats.length>1){setInputNotice({text:t('editor.gp8_delete_many',{count:beats.length}),at});return;}

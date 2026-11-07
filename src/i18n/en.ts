@@ -1121,6 +1121,7 @@ export const en = {
   'editor.gp8_delete_many': 'Shift + Delete removes one beat at a time, and the selection holds {count}. Select a single beat.',
   'editor.gp8_no_selection': 'Select some music first to clear its notes.',
   'editor.gp8_no_notes': 'The selection has no notes to clear.',
+  'editor.gp8_bad_selection': 'The selection cannot be resolved, so no beat was deleted.',
   'help.shortcut_gp8_edit': 'Backspace deletes the note on the cursor string (or the selected note). Shift + Delete deletes the cursor beat, or the one beat that is selected; it refuses a selection of several beats. Ctrl + Insert inserts a beat before the cursor. Ctrl + Shift + Delete clears the notes of the selection.',
   'help.shortcut_gp8_cursor': 'Home / End move to the first / last beat of the bar, and Shift extends the selection there. Ctrl + Home goes to the first bar, and Ctrl + End to the last bar.',
   'editor.entry_queue_discarded_one': '{count} queued key was discarded.',

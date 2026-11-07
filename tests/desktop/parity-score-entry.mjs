@@ -73,9 +73,55 @@ try{
   await page.screenshot({path:resolve(directory,'score-entry-after.png')});
   await page.keyboard.press('Control+z');await idle();assert.equal((await edits()).length,before,'one Undo takes the whole move back');
 
+  // GP8 keys. Start from an empty score again, with the cursor on the first beat.
+  const pitchOf=edit=>{const note=edit.type==='sequence'?edit.commands.find(step=>step.type==='setNote'):edit;return [64,59,55,50,45,40][note.string-1]+note.fret;};
+  const home=async()=>{await workspace.focus();await page.keyboard.press('Control+Home');await idle();};
+  const undoAll=async()=>{await workspace.focus();for(let count=(await edits()).length;count>0;count--){await page.keyboard.press('Control+z');await idle();}assert.deepEqual(await edits(),[],'every edit undone');};
+  await undoAll();await home();
+
+  // Ctrl+9 then a letter: one edit holding the note and its sharp spelling (mode 3); one Undo removes it.
+  // E sharp: the plan leaves out the spelling step when the pitch is already drawn that way (F sharp is), so E is the letter that shows it.
+  await page.keyboard.press('Control+Digit9');await page.keyboard.press('e');await idle();
+  list=await edits();assert.equal(list.length,1,'a pending accidental and its letter are one edit');
+  assert.equal(list[0].type,'sequence');assert.ok(stepsOf(list[0]).includes('setNote')&&stepsOf(list[0]).includes('setNoteSpelling'),`steps ${stepsOf(list[0])}`);
+  assert.equal(list[0].commands.find(step=>step.type==='setNoteSpelling').accidentalMode,3,'ForceSharp');
+  assert.equal(pitchOf(list[0])%12,5,'E sharp sounds as F');
+  await page.keyboard.press('Control+z');await idle();assert.deepEqual(await edits(),[],'one Undo removes the sharp note');
+  await home();
+
+  // Ctrl+Alt+9 then a letter: a double sharp (mode 4), two semitones above the letter. WebView2 may take Ctrl+Alt chords as accelerators.
+  await page.keyboard.press('Control+Alt+Digit9');await page.keyboard.press('f');await idle();
+  list=await edits();assert.equal(list.length,1,'a pending double sharp and its letter are one edit');
+  assert.equal(list[0].type,'sequence');assert.equal(list[0].commands.find(step=>step.type==='setNoteSpelling').accidentalMode,4,'ForceDoubleSharp');
+  assert.equal(pitchOf(list[0])%12,7,'F raised two semitones sounds as G');
+  await page.keyboard.press('Control+z');await idle();assert.deepEqual(await edits(),[],'one Undo removes the double sharp note');
+  await home();
+
+  // A burst with no waits: three letters are three edits on three successive beats, and three Undos clear them.
+  await page.keyboard.type('CDE');await idle();
+  list=await edits();assert.equal(list.length,3,'a fast burst of three letters is three edits');assert.ok(list.every(edit=>edit.type==='setNote'));
+  assert.deepEqual(list.map(edit=>[edit.target.bar,edit.target.beat]),[[0,0],[0,1],[0,2]],'on three successive beats');
+  await page.screenshot({path:resolve(directory,'score-entry-gp8-keys.png')});
+  for(const left of [2,1,0]){await page.keyboard.press('Control+z');await idle();assert.equal((await edits()).length,left);}
+  await home();
+
+  // Backspace removes the note under the cursor as one edit.
+  await page.keyboard.press('c');await idle();await page.keyboard.press('ArrowLeft');await idle();
+  await page.keyboard.press('Backspace');await idle();
+  list=await edits();assert.equal(list.length,2,'Backspace is one edit');assert.equal(list[1].type,'removeNote');assert.deepEqual(list[1].target,list[0].target,'on the note that was entered');
+  await page.keyboard.press('Control+z');await idle();assert.equal((await edits()).length,1,'one Undo puts the note back');
+  await undoAll();await home();
+
+  // = is the + key and _ the - key: shorter and longer.
+  await page.keyboard.press('=');await idle();list=await edits();
+  assert.deepEqual(list.map(edit=>[edit.type,edit.duration,edit.dots]),[['setDuration',8,0]],'= makes the beat shorter');
+  await page.keyboard.press('_');await idle();list=await edits();
+  assert.deepEqual(list.slice(1).map(edit=>[edit.type,edit.duration,edit.dots]),[['setDuration',4,0]],'_ makes the beat longer');
+  await undoAll();
+
   // Turning entry off gives letters back to nothing and clicks back to selecting.
   await page.keyboard.press('n');await idle();assert.equal(await toggle.getAttribute('aria-pressed'),'false');
-  await page.keyboard.press('a');await idle();assert.equal((await edits()).length,before,'letters write nothing with entry off');
+  await page.keyboard.press('a');await idle();assert.deepEqual(await edits(),[],'letters write nothing with entry off');
   assert.deepEqual(errors,[]);
-  console.log('score entry: preview names lines and spaces; a click wrote G4 as one edit and one undo removed it; five letters wrote five edits across the barline; + and . changed the rhythm; a flat move was one edit.');
+  console.log('score entry: preview names lines and spaces; a click wrote G4 as one edit and one undo removed it; five letters wrote five edits across the barline; + and . changed the rhythm; a flat move was one edit; Ctrl+9 and Ctrl+Alt+9 set a pending sharp and double sharp for the next letter as one edit; a fast CDE burst gave three edits; Backspace removed a note; = and _ changed the rhythm.');
 }finally{await browser?.close().catch(()=>{});stop(id);}

@@ -1123,6 +1123,7 @@ export const de: MessageCatalog = {
   'editor.gp8_delete_many': 'Umschalt + Entf entfernt jeweils einen Schlag, die Auswahl enthält {count}. Wählen Sie einen einzelnen Schlag.',
   'editor.gp8_no_selection': 'Wählen Sie zuerst Musik aus, deren Noten gelöscht werden sollen.',
   'editor.gp8_no_notes': 'Die Auswahl enthält keine Noten zum Löschen.',
+  'editor.gp8_bad_selection': 'Die Auswahl lässt sich nicht auflösen, deshalb wurde kein Schlag gelöscht.',
   'help.shortcut_gp8_edit': 'Rücktaste löscht die Note auf der Cursor-Saite (oder die gewählte Note). Umschalt + Entf löscht den Cursor-Schlag oder den einen gewählten Schlag; bei mehreren gewählten Schlägen wird abgelehnt. Strg + Einfg fügt vor dem Cursor einen Schlag ein. Strg + Umschalt + Entf löscht die Noten der Auswahl.',
   'help.shortcut_gp8_cursor': 'Pos1 / Ende springen zum ersten / letzten Schlag des Takts, mit Umschalt wird die Auswahl bis dorthin erweitert. Strg + Pos1 geht zum ersten Takt, Strg + Ende zum letzten Takt.',
   'editor.entry_queue_discarded_one': '{count} vorgemerkte Taste wurde verworfen.',

@@ -58,6 +58,17 @@ fn rejected(value: &Value) {
     );
 }
 
+/// The command parses but validation refuses it with exactly `message`.
+fn rejected_with(value: &Value, message: &str) {
+    let command: EditCommand = serde_json::from_value(value.clone())
+        .unwrap_or_else(|error| panic!("Expected a parsable command {value}: {error}"));
+    assert_eq!(
+        command.validate().unwrap_err().to_string(),
+        message,
+        "for {value}"
+    );
+}
+
 #[test]
 fn engraving_commands_roundtrip_complete_nullable_and_explicit_overrides() {
     let mut styled = engraving_command();
@@ -586,6 +597,13 @@ fn engraving_staff_groups_are_optional_flat_bounded_and_round_trip_only_when_set
         json!([{"trackIds": ["\u{e9}".repeat(32_769), "b"], "kind": "brace"}]),
         pairs(65),
         json!([{"trackIds": ids(65), "kind": "bracket"}]),
+    ] {
+        rejected_with(
+            &groups(invalid),
+            "Staff groups must name 2 to 64 distinct tracks, each in one group only.",
+        );
+    }
+    for invalid in [
         json!([{"trackIds": ["a", "b"], "kind": "curly"}]),
         json!([{"trackIds": ["a", "b"]}]),
         json!([{"kind": "brace"}]),
@@ -619,11 +637,18 @@ fn engraving_staff_gaps_are_optional_distinct_bounded_and_round_trip_only_when_s
         json!([{"trackId": "a", "scale": 0.24}]),
         json!([{"trackId": "a", "scale": 4.01}]),
         json!([{"trackId": "a", "scale": 0.0}]),
-        json!([{"trackId": "a", "scale": "2"}]),
-        json!([{"trackId": "a", "scale": null}]),
         json!([{"trackId": "a", "scale": 2.0}, {"trackId": "a", "scale": 1.5}]),
         json!([{"trackId": "", "scale": 2.0}]),
         json!([{"trackId": "a".repeat(65_537), "scale": 2.0}]),
+    ] {
+        rejected_with(
+            &gaps(invalid),
+            "Staff gaps must be 25% to 400% of the default, one per track.",
+        );
+    }
+    for invalid in [
+        json!([{"trackId": "a", "scale": "2"}]),
+        json!([{"trackId": "a", "scale": null}]),
         json!([{"trackId": "a"}]),
         json!([{"scale": 2.0}]),
         json!([{"trackId": "a", "scale": 2.0, "extra": true}]),
@@ -643,14 +668,21 @@ fn engraving_staff_gaps_are_optional_distinct_bounded_and_round_trip_only_when_s
         )
     };
     accepted(&gaps(many(256)));
-    rejected(&gaps(many(257)));
+    rejected_with(
+        &gaps(many(257)),
+        "Staff gaps must be 25% to 400% of the default, one per track.",
+    );
     let mut non_finite = EngravingOverrides::default();
+    assert!(non_finite.validate().is_ok());
     for scale in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
         non_finite.staff_gaps = vec![tabplayer_lib::engraving::StaffGap {
             track_id: "a".into(),
             scale,
         }];
-        assert!(non_finite.validate().is_err());
+        assert_eq!(
+            non_finite.validate().unwrap_err(),
+            "Staff gaps must be 25% to 400% of the default, one per track."
+        );
     }
 }
 

@@ -15,6 +15,7 @@ export function validStaffTrackId(id:unknown):id is string {
   return typeof id==='string'&&id.length>0&&encoder.encode(id).length<=MAX_TRACK_ID_BYTES;
 }
 
+// An explicit empty list is valid here; Rust drops it on write, and the TS helpers (withStaffGroups) never produce one.
 export function validateStaffGroups(value:unknown):asserts value is StaffGroup[] {
   if(!Array.isArray(value)||value.length>MAX_STAFF_GROUPS)throw new Error('Invalid staff groups.');
   const seen=new Set<string>();

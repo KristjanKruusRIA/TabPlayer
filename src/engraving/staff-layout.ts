@@ -1,5 +1,5 @@
 import { accoladeSvg,systemAccoladeMarks,type AccoladeMark,type AccoladeMetrics,type AccoladePlan } from './accolades';
-import type { ScreenBounds,ScreenSystem } from './screen-pages';
+import type { ScreenBounds,ScreenRenderChunk,ScreenSystem } from './screen-pages';
 import type { SvgSystem } from '../export/types';
 
 /** One track's vertical extent in a system, in render pixels of the whole render. `staves` counts its visible staves. */
@@ -134,4 +134,27 @@ export function composeEngravedSystems(systems:SvgSystem[],bounds:ScreenBounds,i
     return {...system,svg:out.svg,height:out.height};
   });
   return changed?composed:systems;
+}
+
+/**
+ * Composes every system chunk of the paginated screen through `composeSystem` (the one core export uses too) with the id `tp-<chunk.id>`,
+ * the chunk's own origin as `left` and `top`, and its `shift` attached. `height` stays render-space: the composed box is `height + shiftTotal(shift)` tall.
+ * A chunk is matched to its bounds by first bar, as `paginateScreenScore` does, so a multi-bar rest closing a system composes. Chunks without a system
+ * (title, tunings) and chunks no bounds match are left as they are, and pagination reports the latter. The input array is returned when nothing composes.
+ */
+export function composeScreenChunks(chunks:readonly ScreenRenderChunk[],bounds:ScreenBounds,input:{plan:AccoladePlan|null;gaps:ReadonlyMap<number,number>;metrics:AccoladeMetrics}):ScreenRenderChunk[] {
+  const {plan,gaps,metrics}=input;
+  if(!plan&&!gaps.size)return chunks as ScreenRenderChunk[];
+  let changed=false;
+  const composed=chunks.map(chunk=>{
+    const first=chunk.firstMasterBarIndex;
+    if(first<0)return chunk;
+    const found=bounds.staffSystems.filter(candidate=>candidate.bars[0].index===first&&candidate.bars.at(-1)!.index<=chunk.lastMasterBarIndex);
+    if(found.length!==1)return chunk;
+    const out=composeSystem({svg:chunk.svg,id:`tp-${chunk.id}`,left:chunk.x,top:chunk.y,width:chunk.width,height:chunk.height,system:found[0],plan,gaps,metrics});
+    if(out.svg===chunk.svg)return chunk;
+    changed=true;
+    return {...chunk,svg:out.svg,...(out.shift?{shift:out.shift}:{})};
+  });
+  return changed?composed:chunks as ScreenRenderChunk[];
 }

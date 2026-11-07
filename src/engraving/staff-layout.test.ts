@@ -2,8 +2,8 @@
 import { describe,expect,it } from 'vitest';
 import { Settings } from '@coderline/alphatab';
 import { accoladeMetrics,accoladeSvg,BRACE_MAX_X_SCALE,systemAccoladeMarks,type AccoladePlan } from './accolades';
-import { composeEngravedSystems,composeSystem,composeSystemSvg,shiftTotal,shiftY,staffLeftOf,staffShift,systemTrackBands,TRACK_STAFF_PADDING,unshiftY } from './staff-layout';
-import type { ScreenBounds,ScreenSystem } from './screen-pages';
+import { composeEngravedSystems,composeScreenChunks,composeSystem,composeSystemSvg,shiftTotal,shiftY,staffLeftOf,staffShift,systemTrackBands,TRACK_STAFF_PADDING,unshiftY } from './staff-layout';
+import type { ScreenBounds,ScreenRenderChunk,ScreenSystem } from './screen-pages';
 import type { SvgSystem } from '../export/types';
 
 type Row={track:number;staff:number;y:number;h:number};
@@ -254,5 +254,42 @@ describe('composeEngravedSystems',()=>{
     const wide={staffSystems:[indexed(0,rows),Object.assign(indexed(4,rows),{bars:[{...(indexed(4,rows) as unknown as {bars:object[]}).bars[0],index:4},{...(indexed(4,rows) as unknown as {bars:object[]}).bars[0],index:6}]})]} as unknown as ScreenBounds;
     expect(()=>composeEngravedSystems([{...chunk(4),lastBar:5}],wide,{plan:null,gaps:new Map([[0,2]]),metrics,idPrefix:'export'})).toThrow(/staff bounds/);
     expect(composeEngravedSystems([{...chunk(4),lastBar:6}],wide,{plan:null,gaps:new Map([[0,2]]),metrics,idPrefix:'export'})[0].svg).toContain('export-s4-content');
+  });
+});
+
+describe('composeScreenChunks',()=>{
+  const indexed=(index:number,rows:Row[])=>{const sys=fakeSystem(rows) as unknown as {bars:Array<{index:number}>};sys.bars[0].index=index;return sys as unknown as ScreenSystem;};
+  const rows:Row[]=[{track:0,staff:0,y:100,h:60},{track:1,staff:0,y:200,h:100},{track:2,staff:0,y:340,h:40}];
+  const bounds={staffSystems:[indexed(0,rows),indexed(1,rows)]} as unknown as ScreenBounds;
+  const chunk=(index:number,first=index,last=first):ScreenRenderChunk=>({id:`chunk-${index}`,x:0,y:index*450,width:500,height:400,firstMasterBarIndex:first,lastMasterBarIndex:last,svg:'<svg width="500" height="400"><text>x</text></svg>'});
+  const gap2=new Map([[0,2]]);
+  it('composeScreenChunks keeps render-space height and attaches the shift',()=>{
+    const [out]=composeScreenChunks([chunk(0)],bounds,{plan:null,gaps:gap2,metrics});
+    expect(out.height).toBe(400);expect(out.shift).toEqual({cuts:[180],offsets:[40]});
+    expect(out.svg).toContain('id="tp-chunk-0-content"');expect(out.svg).toContain('<defs>');
+    const input=[chunk(0),chunk(1)];
+    expect(composeScreenChunks(input,bounds,{plan:null,gaps:new Map(),metrics})).toBe(input);
+  });
+  it('gives every chunk its own id and shift, and leaves the input chunks unchanged',()=>{
+    const input=[chunk(0),chunk(1)],out=composeScreenChunks(input,bounds,{plan:null,gaps:gap2,metrics});
+    expect(out).not.toBe(input);expect(out[1].svg).toContain('id="tp-chunk-1-content"');expect(out[1].svg).not.toContain('tp-chunk-0');
+    expect(out[1].shift).toEqual({cuts:[180],offsets:[40]});expect(out.map(item=>item.y)).toEqual([0,450]);
+    expect(input[0].shift).toBeUndefined();expect(input[0].svg).not.toContain('<defs>');
+  });
+  it('returns the input array when the gap moves nothing, and leaves unmatched and title chunks as they are',()=>{
+    const input=[chunk(0),chunk(1)];
+    expect(composeScreenChunks(input,bounds,{plan:null,gaps:new Map([[2,3],[9,2]]),metrics})).toBe(input); // the last track and an absent track
+    const title=chunk(5,-1,-1),stray=chunk(6,6,6),mixed=composeScreenChunks([title,chunk(0),stray],bounds,{plan:null,gaps:gap2,metrics});
+    expect(mixed[0]).toBe(title);expect(mixed[2]).toBe(stray);expect(mixed[1].shift).toBeDefined();
+  });
+  it('draws the marks of a plan without a shift and keeps the chunk as it is otherwise',()=>{
+    const plan:AccoladePlan={groups:[{index:0,kind:'bracket',tracks:[0,1]}],nativeMode:1,singleStaffBrackets:false,braceTracks:new Set<number>(),inner:0,outer:metrics.bracketThickness/metrics.scale,reserve:0};
+    const [out]=composeScreenChunks([chunk(0)],bounds,{plan,gaps:new Map(),metrics});
+    expect(out.svg).toContain('data-tp-accolade="group-bracket"');expect(out.svg).not.toContain('<defs>');expect(out.shift).toBeUndefined();expect(out.height).toBe(400);
+  });
+  it('matches a chunk that ends past the last bar its bounds record, as a multi-bar rest makes it',()=>{
+    const wide={staffSystems:[indexed(0,rows),indexed(4,rows)]} as unknown as ScreenBounds;
+    const [, out]=composeScreenChunks([chunk(0),chunk(1,4,9)],wide,{plan:null,gaps:gap2,metrics});
+    expect(out.svg).toContain('id="tp-chunk-1-content"');expect(out.shift).toEqual({cuts:[180],offsets:[40]});
   });
 });

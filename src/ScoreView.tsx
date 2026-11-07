@@ -15,6 +15,9 @@ import {loadExportFonts} from './export/pdf';
 import {isPhysicalPageLayout,type ScoreDisplayPreferences} from './engraving/screen-view';
 import {arrangeScreenPages,hitTestScreenPages,mapScreenRect,paginateScreenScore,resolveScreenZoom,unmapScreenPoint,type ScreenBounds,type ScreenPagination,type ScreenRenderChunk,type ScreenRect,type ScreenSystem} from './engraving/screen-pages';
 import {installScreenPlayback,type ScreenPlaybackContext} from './engraving/screen-playback';
+import {accoladeMetrics,accoladeSvg,configureAccolades,planAccolades,systemAccoladeMarks,type AccoladeMetrics,type AccoladePlan} from './engraving/accolades';
+import {composeScreenChunks,shiftTotal,staffLeftOf,systemTrackBands} from './engraving/staff-layout';
+import {resolveStaffGaps} from './engraving/staff-groups';
 import { describeScoreError,type ScoreError } from './editor/score-errors';
 import { BAR_SCALE_BIG_STEP,BAR_SCALE_RANGE,BAR_SCALE_STEP,clampBarScale,scaleAfterDrag } from './engraving/bar-widths';
 import { busyGuard } from './ui/useBusyGuard';
@@ -63,14 +66,18 @@ export interface ScoreNoteEntry {
   /** What a click there would do, for the preview label (a pitch name, or a removal); null shows no preview. */
   describe:(target:BeatTarget,step:number)=>string|null;
 }
+/** The accolade marks of every system in a continuous layout, in the coordinates of alphaTab's surface. */
+const accoladeOverlay=(plan:AccoladePlan,metrics:AccoladeMetrics,systems:readonly ScreenSystem[])=>systems.map(system=>accoladeSvg(systemAccoladeMarks(plan,systemTrackBands(system),metrics,staffLeftOf(system)),{left:0,top:0})).join('');
 const defaultDisplay:ScoreDisplayPreferences={layout:'parchment',zoomMode:'manual'};
 const defaultPage:PageLayout={widthMm:210,heightMm:297,marginsMm:{top:15,right:15,bottom:15,left:15},scale:1,profile:'document'};
 
-export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSelection=null,onEditorSelection,projection,visibleTracks,engraving:engravingProp,editTarget,editString,editNoteIndex,display=defaultDisplay,page:pageInput=defaultPage,onDisplayStatus,errors=noErrors,barDesign=null,symbols,noteEntry=null,onSystems}: {
+export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSelection=null,onEditorSelection,projection,trackIds,visibleTracks,engraving:engravingProp,editTarget,editString,editNoteIndex,display=defaultDisplay,page:pageInput=defaultPage,onDisplayStatus,errors=noErrors,barDesign=null,symbols,noteEntry=null,onSystems}: {
   score:model.Score;track:number;zoom:number;profile:string;onSelect:(target:BeatTarget,string?:number,noteIndex?:number)=>void;
   playback:NativePlaybackController|null;
   editorSelection?:MusicSelection|null;onEditorSelection?:(selection:MusicSelection|null)=>void;
   projection?:EngravingProjection;visibleTracks?:number[];engraving?:EngravingOverrides;
+  /** The document's track identities, in track order. With `projection` they let staff groups and staff gaps be drawn; without either, neither is. */
+  trackIds?:readonly string[];
   display?:ScoreDisplayPreferences;page?:PageLayout;onDisplayStatus?:(status:{zoomPercent:number;fitLimited:boolean;pageError:string|null})=>void;
   editTarget?:BeatTarget;editString?:number;editNoteIndex?:number|null;
   /** Measures to mark as score errors; empty when the viewer turned marking off. */
@@ -90,13 +97,17 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
   const engraving=useMemo(()=>engravingProp&&withoutStackingOffsets(engravingProp),[renderKey]);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const gaps=useMemo(()=>engravingProp?.systemGaps,[gapKey]);
+  // Staff gaps recompose the held chunks in the paged memo below, so editing them does not render the notation again either.
+  const staffGapKey=JSON.stringify(engravingProp?.staffGaps??null),idsKey=JSON.stringify(trackIds??null);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const staffGaps=useMemo(()=>resolveStaffGaps(engravingProp?.staffGaps,trackIds??[]),[staffGapKey,idsKey]);
   const wrapper=useRef<HTMLDivElement>(null),container=useRef<HTMLDivElement>(null),api=useRef<AlphaTabApi|null>(null);
   const tracks=visibleTracks??[track],renderedScore=projection?.score??score,trackKey=tracks.join(',');
   // Headers and footers only print, so editing them keeps the on-screen pages as they are.
   const pageKey=JSON.stringify({...pageInput,headerFooter:undefined}),page=useMemo(()=>pageInput,[pageKey]);
   const geometry=useMemo(()=>pageGeometry(page),[page]),physicalRequested=isPhysicalPageLayout(display.layout);
   const scrollHost=useRef<HTMLElement|null>(null),[available,setAvailable]=useState({width:0,height:0});
-  const [completed,setCompleted]=useState<{score:model.Score;tracks:string;page:PageLayout;engraving:EngravingOverrides|undefined;chunks:readonly ScreenRenderChunk[];bounds:ScreenBounds}|null>(null);
+  const [completed,setCompleted]=useState<{score:model.Score;tracks:string;page:PageLayout;engraving:EngravingOverrides|undefined;chunks:readonly ScreenRenderChunk[];bounds:ScreenBounds;plan:AccoladePlan|null;metrics:AccoladeMetrics}|null>(null);
   // A completion whose arrangement failed stays through the next render start, so the continuous fallback does not flicker.
   const failedCompletion=useRef<unknown>(null);
   const [natural,setNatural]=useState<{score:model.Score;tracks:string;layout:string;width:number;engraving:EngravingOverrides|undefined;profile:string;value:number}|null>(null);
@@ -104,9 +115,13 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
   // Paginated once, here: a completed render and a gap-only edit both come through this memo, so the notation is not rendered again for gaps.
   const paged=useMemo(()=>{
     if(!physicalRequested||!validCompletion)return null;
-    try{return {pagination:paginateScreenScore(validCompletion.chunks,validCompletion.bounds,validCompletion.page,{gaps,systemSpacing:engraving?.systemSpacing??null,scale:validCompletion.page.scale}),error:null};}
+    try{
+      // Staff gaps and group marks are composed into the held chunks first, so pagination stacks the composed heights.
+      const chunks=composeScreenChunks(validCompletion.chunks,validCompletion.bounds,{plan:validCompletion.plan,gaps:staffGaps,metrics:validCompletion.metrics});
+      return {pagination:paginateScreenScore(chunks,validCompletion.bounds,validCompletion.page,{gaps,systemSpacing:engraving?.systemSpacing??null,scale:validCompletion.page.scale}),error:null};
+    }
     catch(error){return {pagination:null,error:error instanceof Error?error.message:'Unable to arrange this score on paper.'};}
-  },[physicalRequested,validCompletion,gaps,engraving?.systemSpacing]);
+  },[physicalRequested,validCompletion,gaps,staffGaps,engraving?.systemSpacing]);
   failedCompletion.current=paged?.error?validCompletion:null;
   const pageError=paged?.error??null,pagination=paged?.pagination??null;
   const reportSystems=useRef(onSystems),reported=useRef<string|undefined>(undefined);reportSystems.current=onSystems;
@@ -144,6 +159,8 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
   const playbackPresentation=useRef<ReturnType<typeof installScreenPlayback>|null>(null);
   const layoutCurrent=useRef({renderedScore,trackKey,page,engraving,profile,display,available,sourcePhysical,baseWidth});layoutCurrent.current={renderedScore,trackKey,page,engraving,profile,display,available,sourcePhysical,baseWidth};
   const pointerActions=useRef({downBeat:(_beat:model.Beat)=>{},downNote:(_note:model.Note)=>{},move:(_beat:model.Beat)=>{}});
+  // What the last render pass was configured with (the accolade plan and the pixel metrics after scale and padding were set), and the marks drawn over a continuous layout.
+  const accolade=useRef<{plan:AccoladePlan|null;metrics:AccoladeMetrics}|null>(null),[overlay,setOverlay]=useState<string|null>(null);
   const [rangeBlocks,setRangeBlocks]=useState<Marker[]>([]),[surfaceClass,setSurfaceClass]=useState('');
   useLayoutEffect(()=>{
     const host=wrapper.current?.closest<HTMLElement>('.paper-scroll')??wrapper.current?.parentElement??null;scrollHost.current=host;
@@ -317,7 +334,7 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
     view.settings.player.enableCursor=true;
     // Reuse the facade's public DOM surface classes so its instance-specific font CSS also applies to copied SVGs.
     setSurfaceClass(container.current?.querySelector('.at-surface')?.className??'');
-    let chunks:ScreenRenderChunk[]=[],collecting=false,generation:typeof layoutCurrent.current|null=null;
+    let chunks:ScreenRenderChunk[]=[],collecting=false,generation:typeof layoutCurrent.current|null=null,planned:{plan:AccoladePlan|null;metrics:AccoladeMetrics}|null=null;
     const publish=(next:MusicSelection|null)=>{current.current.editorSelection=next;current.current.onEditorSelection?.(next);};
     const chooseRange=(from:BeatTarget,to:BeatTarget,lanes:VoiceAddress[])=>{try{publish({kind:'range',range:rangeFromBeats(current.current.score,from,to,lanes)});}catch{return false;}return true;};
     const move=(beat:model.Beat)=>{
@@ -346,13 +363,14 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
     };
     pointerActions.current={downBeat,downNote,move};
     const subscriptions=[view.beatMouseDown.on(downBeat),view.noteMouseDown.on(downNote),view.beatMouseMove.on(move),view.beatMouseUp.on(()=>{drag.current=null;}),view.renderStarted.on(()=>{
-      collecting=true;chunks=[];generation=layoutCurrent.current;rendering.current=true;setCompleted(previous=>previous&&previous===failedCompletion.current?previous:null);setCaret(null);setMarkers([]);setHandles(null);setRangeBlocks([]);setErrorBlocks([]);setDiagramBlocks([]);setOpenDiagram(null);adapter.renderStarted();
+      collecting=true;chunks=[];generation=layoutCurrent.current;planned=accolade.current??{plan:null,metrics:accoladeMetrics(view.settings)};rendering.current=true;setOverlay(null);setCompleted(previous=>previous&&previous===failedCompletion.current?previous:null);setCaret(null);setMarkers([]);setHandles(null);setRangeBlocks([]);setErrorBlocks([]);setDiagramBlocks([]);setOpenDiagram(null);adapter.renderStarted();
     }),view.renderer.partialRenderFinished.on(event=>{
       if(collecting&&typeof event.renderResult==='string')chunks.push({id:event.id,x:event.x,y:event.y,width:event.width,height:event.height,firstMasterBarIndex:event.firstMasterBarIndex,lastMasterBarIndex:event.lastMasterBarIndex,svg:event.renderResult});
     }),view.postRenderFinished.on(()=>{
       collecting=false;const c=generation,latest=layoutCurrent.current;rendering.current=false;adapter.renderCompleted();
       if(c&&c.renderedScore===latest.renderedScore&&c.trackKey===latest.trackKey&&c.page===latest.page&&c.engraving===latest.engraving&&c.sourcePhysical===latest.sourcePhysical&&view.score===c.renderedScore&&view.boundsLookup){
-        if(c.sourcePhysical)setCompleted({score:c.renderedScore,tracks:c.trackKey,page:c.page,engraving:c.engraving,chunks:[...chunks],bounds:view.boundsLookup});
+        if(c.sourcePhysical){if(planned)setCompleted({score:c.renderedScore,tracks:c.trackKey,page:c.page,engraving:c.engraving,chunks:[...chunks],bounds:view.boundsLookup,plan:planned.plan,metrics:planned.metrics});}
+        else if(planned?.plan){try{setOverlay(accoladeOverlay(planned.plan,planned.metrics,view.boundsLookup.staffSystems));}catch{setOverlay(null);}}
         if((c.display.layout==='verticalScreen'||c.display.layout==='horizontalScreen')&&c.display.zoomMode!=='manual'&&c.baseWidth===null){
           const width=Math.max(1,...chunks.map(chunk=>chunk.x+chunk.width),...view.boundsLookup.staffSystems.map(system=>system.realBounds.x+system.realBounds.w));
           setNatural({score:c.renderedScore,tracks:c.trackKey,layout:c.display.layout,width:c.available.width,engraving:c.engraving,profile:c.profile,value:width});
@@ -380,11 +398,18 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
     view.settings.display.layoutMode=display.layout==='horizontalScreen'?LayoutMode.Horizontal:display.layout==='verticalScreen'?LayoutMode.Page:LayoutMode.Parchment;
     view.settings.display.systemsLayoutMode=display.layout==='verticalScreen'?SystemsLayoutMode.Automatic:SystemsLayoutMode.UseModelLayout;
     view.settings.display.padding=sourcePhysical||screenLayout?[0,0,0,0]:[geometry.left*factor,geometry.top*factor,geometry.right*factor,geometry.bottom*factor];
+    // Groups switch alphaTab's brackets off and reserve room beside the staves; written as absolute values after padding and scale, on every pass.
+    let plan:AccoladePlan|null=null;
+    if(projection&&trackIds){
+      if(engraving)plan=planAccolades({engraving,trackIds,rendered:tracks,score:projection.score,nativeMode:projection.bracketMode,settings:view.settings});
+      configureAccolades(view.settings,projection.score,plan,projection.bracketMode);
+    }
     view.renderer.width=sourceWidth;view.updateSettings();
+    accolade.current={plan,metrics:accoladeMetrics(view.settings)};
     const old=loaded.current;
     if(!old||old.score!==renderedScore||old.tracks!==trackKey){loaded.current={score:renderedScore,tracks:trackKey};if(playback)playback.setRenderedScore(renderedScore,tracks);else view.renderScore(renderedScore,tracks);}
     else view.render();
-  },[renderedScore,trackKey,playback,sourceWidth,sourceScale,sourcePhysical,measureBase,screenLayout,display.layout==='verticalScreen',display.layout==='horizontalScreen',engraving,profile,page]);
+  },[renderedScore,trackKey,playback,sourceWidth,sourceScale,sourcePhysical,measureBase,screenLayout,display.layout==='verticalScreen',display.layout==='horizontalScreen',engraving,profile,page,idsKey]);
   useLayoutEffect(()=>{playbackPresentation.current?.presentationChanged();refresh.current();refreshCaret.current();refreshErrors.current();refreshDiagrams.current();refreshDesign.current();},[pagination,arrangement,pageError]);
   designing.current=barDesign;
   const tabBar=barHandles.some(handle=>handle.bar===activeBar)?activeBar:barHandles[0]?.bar;
@@ -545,12 +570,13 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
   };
   return <div ref={wrapper} tabIndex={-1} className="score-presentation" data-layout={display.layout} data-note-entry={noteEntry?'on':undefined} onMouseDownCapture={capture} onMouseMove={noteEntry?previewEntry:undefined} onMouseLeave={()=>setGhost(null)} onDoubleClick={symbolDoubleClick} onContextMenu={symbolContextMenu} onKeyDown={symbolKey}>
     {pageError&&<p className="score-page-error" role="alert">{pageError} Continuous view is shown at {zoom}%.</p>}
-    <div className={sourcePhysical?'score-source-staging':'score-live-paper'} style={{width:sourceWidth||undefined}} aria-hidden={sourcePhysical||undefined} inert={sourcePhysical||undefined}>
+    <div className={sourcePhysical?'score-source-staging':'score-live-paper'} style={{width:sourceWidth||undefined,...(overlay&&!sourcePhysical?{position:'relative' as const}:{})}} aria-hidden={sourcePhysical||undefined} inert={sourcePhysical||undefined}>
       <div ref={container} data-testid="score-source" aria-hidden={sourcePhysical||undefined} aria-label="Music notation"/>
+      {overlay&&!sourcePhysical&&<svg data-tp-accolades className={`score-accolades ${surfaceClass}`} aria-hidden="true" width={1} height={1} style={{position:'absolute',left:0,top:0,overflow:'visible',pointerEvents:'none'}} dangerouslySetInnerHTML={{__html:overlay}}/>}
     </div>
     {pagination&&arrangement&&<div data-testid="score-pages" className={`score-pages ${surfaceClass}`} style={{width:arrangement.width,height:arrangement.height}} onMouseDown={physicalDown}>
       {arrangement.pages.map(sheet=><div key={sheet.index} className="score-sheet" aria-label={`Score page ${sheet.index+1}`} style={{left:sheet.x,top:sheet.y,width:sheet.width,height:sheet.height}}>
-        {pagination.blocks.filter(block=>block.page===sheet.index).map(block=><div key={block.chunk.id} ref={element=>{if(element)roots.current.set(block.chunk.id,element);else roots.current.delete(block.chunk.id);}} className="score-svg-chunk at-surface-svg" style={{left:(block.x+block.chunk.x-block.sourceBounds.x)*factor,top:(block.y+block.chunk.y-block.sourceBounds.y)*factor,width:block.chunk.width,height:block.chunk.height,transform:`scale(${factor})`}} dangerouslySetInnerHTML={{__html:block.chunk.svg}}/>)}
+        {pagination.blocks.filter(block=>block.page===sheet.index).map(block=><div key={block.chunk.id} ref={element=>{if(element)roots.current.set(block.chunk.id,element);else roots.current.delete(block.chunk.id);}} className="score-svg-chunk at-surface-svg" style={{left:(block.x+block.chunk.x-block.sourceBounds.x)*factor,top:(block.y+block.chunk.y-block.sourceBounds.y)*factor,width:block.chunk.width,height:block.chunk.height+shiftTotal(block.chunk.shift),transform:`scale(${factor})`}} dangerouslySetInnerHTML={{__html:block.chunk.svg}}/>)}
         <svg className="score-page-text" aria-hidden="true" viewBox={`0 0 ${geometry.width} ${geometry.height}`} width={sheet.width} height={sheet.height}>
           {(pageTexts[sheet.index]??[]).map((item,index)=><text key={index} x={item.x} y={item.y} fontSize={item.size} fontFamily={pageTextFontFamily} fill="#111" textAnchor={item.anchor}>{item.text}</text>)}
         </svg>

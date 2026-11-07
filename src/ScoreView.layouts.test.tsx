@@ -357,3 +357,25 @@ it('strict_mode_loads_once_and_renders_once_after_the_faces_arrive',async()=>{
  await act(async()=>{gate.resolve({failed:[]});await gate.promise;});
  expect(state.loads).toHaveBeenCalledTimes(1);expect(state.renders).toHaveBeenCalledTimes(1);
 });
+// ---- fix round 2: page header and footer face failures are reported ----
+it('a_failed_page_font_face_is_reported_and_a_later_load_clears_it',async()=>{
+ const first=deferred(),second=deferred(),queue=[first,second],status=vi.fn();state.roles=()=>queue.shift()!.promise;
+ const {props,tree,rerender}=setup('verticalPage',100,{engraving:defaultEngraving(),onFontStatus:status});
+ rerender(tree({...props,engraving:withFonts({roles:{pageHeader:{font:'notoSerif'}}})}));
+ await act(async()=>{first.resolve({failed:['NotoSerif-Regular.ttf']});await first.promise;});
+ expect(status).toHaveBeenLastCalledWith({failed:['NotoSerif-Regular.ttf'],substituted:[]});
+ const reports=status.mock.calls.length;
+ // The same choice again is not reported twice; a changed choice that loads clears the failure.
+ rerender(tree({...props,engraving:withFonts({roles:{pageHeader:{font:'notoSansMono'}}})}));
+ await act(async()=>{second.resolve({failed:[]});await second.promise;});
+ expect(status).toHaveBeenCalledTimes(reports+1);expect(status).toHaveBeenLastCalledWith({failed:[],substituted:[]});
+});
+it('notation_and_page_font_failures_are_reported_together_and_independently',async()=>{
+ const notation=deferred(),page=deferred(),status=vi.fn();
+ state.roles=fonts=>(fonts as EngravingFonts).roles?.lyrics?notation.promise:page.promise;
+ setup('verticalPage',100,{engraving:withFonts({roles:{...serif.roles,pageFooter:{font:'notoSansMono'}}}),onFontStatus:status});
+ await act(async()=>{page.resolve({failed:['NotoSansMono-Regular.ttf']});await page.promise;});
+ expect(status).toHaveBeenLastCalledWith({failed:['NotoSansMono-Regular.ttf'],substituted:[]});
+ await act(async()=>{notation.resolve({failed:['NotoSerif-Italic.ttf']});await notation.promise;});
+ expect(status).toHaveBeenLastCalledWith({failed:['NotoSerif-Italic.ttf','NotoSansMono-Regular.ttf'],substituted:[]});
+});

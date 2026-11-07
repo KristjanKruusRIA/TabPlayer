@@ -145,12 +145,16 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
     // eslint-disable-next-line react-hooks/exhaustive-deps
   },[pageFontsKey]);
   const headerFont=useMemo(()=>pageRoleFont(pageFonts,'pageHeader'),[pageFonts]),footerFont=useMemo(()=>pageRoleFont(pageFonts,'pageFooter'),[pageFonts]);
+  // Faces that failed to load, kept per source so the notation's and the overlay's loads report independently; the status is their union.
+  const fontStatusKey=useRef(JSON.stringify({failed:[],substituted:[]})),fontStatusHandler=useRef(onFontStatus);fontStatusHandler.current=onFontStatus;
+  const notationFailed=useRef<string[]>([]),overlayFailed=useRef<string[]>([]);
+  const reportFonts=useCallback(()=>{const status={failed:[...new Set([...notationFailed.current,...overlayFailed.current])],substituted:[] as string[]},key=JSON.stringify(status);if(key===fontStatusKey.current)return;fontStatusKey.current=key;fontStatusHandler.current?.(status);},[]);
   useEffect(()=>{
-    if(!roleFacesPending(pageFonts))return;
+    if(!roleFacesPending(pageFonts)){overlayFailed.current=[];reportFonts();return;}
     let live=true;
-    void loadRoleFaces(pageFonts).then(()=>{if(live)setFontsReady(count=>count+1);});
+    void loadRoleFaces(pageFonts).then(({failed})=>{if(!live)return;overlayFailed.current=failed;setFontsReady(count=>count+1);reportFonts();});
     return()=>{live=false;};
-  },[pageFonts]);
+  },[pageFonts,reportFonts]);
   const pageTexts=useMemo(()=>{
     if(!pageCount)return [];
     const {headerY,footerY}=screenPageBaselines(geometry,headerScaleOf(titleScale,headerFont));
@@ -395,7 +399,7 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
   const loaded=useRef<{score:model.Score;tracks:string}|null>(null);
   // Counts render requests that were superseded or abandoned: a font load that finishes under an older count paints nothing.
   const [drawFailure,setDrawFailure]=useState<{error:unknown}|null>(null);
-  const renderGeneration=useRef(0),fontStatusKey=useRef(JSON.stringify({failed:[],substituted:[]})),fontStatusHandler=useRef(onFontStatus);fontStatusHandler.current=onFontStatus;
+  const renderGeneration=useRef(0);
   useEffect(()=>{
     const view=api.current!;if(sourceWidth<=0)return;
     const draw=()=>{
@@ -409,15 +413,14 @@ export function ScoreView({score,track,zoom,profile,onSelect,playback,editorSele
       if(!old||old.score!==renderedScore||old.tracks!==trackKey){loaded.current={score:renderedScore,tracks:trackKey};if(playback)playback.setRenderedScore(renderedScore,tracks);else view.renderScore(renderedScore,tracks);}
       else view.render();
     };
-    const reportFonts=(failed:string[])=>{const status={failed,substituted:[] as string[]},key=JSON.stringify(status);if(key===fontStatusKey.current)return;fontStatusKey.current=key;fontStatusHandler.current?.(status);};
     // alphaTab caches a text width table per font family, so a role face has to be in before the first render that uses it.
     // Nothing to load (every document without role fonts) keeps the render synchronous.
     const fonts=engraving?.fonts;
-    if(!roleFacesPending(fonts)){draw();reportFonts([]);return;}
+    if(!roleFacesPending(fonts)){draw();notationFailed.current=[];reportFonts();return;}
     const generation=renderGeneration.current;
     void loadRoleFaces(fonts).then(({failed})=>{
       if(generation!==renderGeneration.current)return;
-      setFontsReady(count=>count+1);reportFonts(failed);
+      notationFailed.current=failed;setFontsReady(count=>count+1);reportFonts();
       // A synchronous draw that throws reaches the error boundary from the effect; here it is kept and thrown while rendering instead of becoming an unhandled rejection.
       try{draw();}catch(error){setDrawFailure({error});}
     });

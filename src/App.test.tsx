@@ -1179,6 +1179,16 @@ it('does not remember a refused keypad duration as the entry duration',async()=>
   expect(c.getState().snapshot.project.edits.map(edit=>edit.type)).toEqual(['setNote']);expect(currentBeat(c,1).duration).toBe(4);
   window.localStorage.removeItem(inputKey);
 });
+it('types a fret only from a plain digit, never from Ctrl or Alt with one',()=>{
+  return setup().then(()=>{
+    const workspace=screen.getByRole('region',{name:'Score workspace'}),fret=screen.getByLabelText('Fret');
+    const before=(fret as HTMLInputElement).value;
+    fireEvent.keyDown(workspace,{key:'5',ctrlKey:true});expect(fret).toHaveValue(Number(before));
+    fireEvent.keyDown(workspace,{key:'5',altKey:true});expect(fret).toHaveValue(Number(before));
+    fireEvent.keyDown(workspace,{key:'5',metaKey:true});expect(fret).toHaveValue(Number(before));
+    fireEvent.keyDown(workspace,{key:'5'});expect(fret).toHaveValue(5);
+  });
+});
 it('does not remember a refused note as the entry duration, and never leaves a rhythm change without its note',async()=>{
   window.localStorage.setItem(inputKey,keypadOn);
   const c=await setup(),workspace=screen.getByRole('region',{name:'Score workspace'});

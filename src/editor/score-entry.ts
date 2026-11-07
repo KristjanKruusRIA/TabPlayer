@@ -161,7 +161,7 @@ export function movedPitch(staff: model.Staff, bar: model.Bar, beat: model.Beat,
   if (key === undefined) return null;
   const keySignature = bar.keySignature as number, written = writtenPitch(staff, bar, beat, key), drawn = drawnSpelling(keySignature, written, note.accidentalMode);
   const natural = (letter: number, octave: number) => entryPitch(letter, octave, 'natural', keySignature)!;
-  const accidentalOf = (alteration: number): EntryAccidental | null => alteration === 1 ? 'sharp' : alteration === -1 ? 'flat' : alteration === 0 ? 'natural' : null;
+  const accidentalOf = (alteration: number): EntryAccidental | null => alteration === 1 ? 'sharp' : alteration === -1 ? 'flat' : alteration === 0 ? 'natural' : alteration === 2 ? 'doubleSharp' : alteration === -2 ? 'doubleFlat' : null;
   let result: EntryPitch | null = null;
   if (move.kind === 'step') {
     const index = drawn.octave * 7 + drawn.letter + move.by;

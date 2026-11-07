@@ -2,7 +2,7 @@ import { expect,it } from 'vitest';
 import { model } from '@coderline/alphatab';
 import { buildScore } from '../engine';
 import { blankProject,type EditCommand } from '../project';
-import { automaticSpelling,bottomLine,displayOffset,drawnSpelling,enterPitch,enteredNoteIndex,entryBlock,entryClef,entryPitch,keyAlteration,keyLetter,pitchStep,soundingKey,spellingFor,stepPitch,writtenPitch } from './notation-entry';
+import { automaticSpelling,bottomLine,canSpell,displayOffset,drawnSpelling,enterPitch,enteredNoteIndex,entryBlock,entryClef,entryPitch,keyAlteration,keyLetter,pitchStep,soundingKey,spellingFor,stepPitch,writtenPitch } from './notation-entry';
 
 const target={track:0,staff:0,bar:0,voice:0,beat:0};
 const build=(edits:EditCommand[])=>buildScore({...blankProject(),edits});
@@ -107,4 +107,37 @@ it('refuses percussion and a missing beat',()=>{
   const drums=build([{type:'addPercussionTrack',name:'Drums',program:0}]).tracks[1].staves[0];expect(entryBlock(drums,null)).toMatch(/drum kit/);
   expect(entryClef(score.tracks[0].staves[0].bars[0])).toBe(model.Clef.G2);
   expect(enterPitch({...context(score),beat:null},entryPitch(0,4,'natural',0)!).action).toBeNull();
+});
+it('gives every letter every accidental, double ones included, and stays inside the MIDI range',()=>{
+  const cases:[Parameters<typeof entryPitch>[2],number,string][]=[['natural',0,''],['sharp',1,'#'],['flat',-1,'b'],['doubleSharp',2,'##'],['doubleFlat',-2,'bb']];
+  const semitone=[0,2,4,5,7,9,11],letters='CDEFGAB';
+  for(const [accidental,alteration,mark] of cases)for(let letter=0;letter<7;letter++){
+    const entered=entryPitch(letter,4,accidental,0)!;
+    expect(entered).toMatchObject({alteration,pitch:60+semitone[letter]+alteration,name:`${letters[letter]}${mark}4`});
+    const mode=spellingFor(entered,0),{Default,ForceNatural,ForceSharp,ForceFlat,ForceDoubleSharp,ForceDoubleFlat}=model.NoteAccidentalMode;
+    // A double is never what automatic spelling gives, and every one lands on a pitch class alphaTab can draw.
+    if(alteration===2)expect(mode).toBe(ForceDoubleSharp);
+    if(alteration===-2)expect(mode).toBe(ForceDoubleFlat);
+    if(alteration===1)expect([Default,ForceSharp]).toContain(mode);
+    if(alteration===-1)expect([Default,ForceFlat]).toContain(mode);
+    if(alteration===0)expect([Default,ForceNatural]).toContain(mode);
+    expect(canSpell(entered.pitch,alteration)).toBe(true);
+    expect(drawnSpelling(0,entered.pitch,mode)).toEqual({letter,octave:4});
+  }
+  // A double is never automatic, even in a key that already alters the letter.
+  expect(spellingFor(entryPitch(3,4,'doubleSharp',1)!,1)).toBe(model.NoteAccidentalMode.ForceDoubleSharp);
+  expect(spellingFor(entryPitch(6,4,'doubleFlat',-5)!,-5)).toBe(model.NoteAccidentalMode.ForceDoubleFlat);
+  // The MIDI bound counts the alteration: C## in octave -1 is 2, Cbb there is -2; G9 is 127, so only F## and G reach it.
+  expect(entryPitch(0,-1,'doubleSharp',0)).toMatchObject({pitch:2});expect(entryPitch(0,-1,'doubleFlat',0)).toBeNull();
+  expect(entryPitch(3,9,'doubleSharp',0)).toMatchObject({pitch:127,name:'F##9'});expect(entryPitch(4,9,'natural',0)!.pitch).toBe(127);
+  expect(entryPitch(4,9,'doubleSharp',0)).toBeNull();expect(entryPitch(5,9,'doubleFlat',0)!.pitch).toBe(127);expect(entryPitch(5,9,'doubleSharp',0)).toBeNull();
+});
+it('refuses a double spelling alphaTab cannot draw instead of letting it fall back silently',()=>{
+  // A double is spelled from a letter two semitones away, so only the pitch classes such a letter reaches have one.
+  const semis=[0,2,4,5,7,9,11],reach=(pitchClass:number,alteration:number)=>semis.some(semitone=>((semitone+alteration)%12+12)%12===pitchClass);
+  for(let pitchClass=0;pitchClass<12;pitchClass++)for(const alteration of [2,-2])expect(canSpell(pitchClass,alteration)).toBe(reach(pitchClass,alteration));
+  expect(canSpell(8,2)).toBe(false);expect(canSpell(8,-2)).toBe(false);expect(canSpell(68,2)).toBe(false);expect(canSpell(8,1)).toBe(true);
+  const score=build([]),synthetic={letter:3,octave:4,alteration:2,pitch:68,name:'F##4'};
+  expect(enterPitch(context(score),synthetic)).toMatchObject({action:null,unspellable:true,removes:false});
+  expect(enterPitch(context(score),entryPitch(3,4,'doubleSharp',0)!).action).not.toBeNull();
 });

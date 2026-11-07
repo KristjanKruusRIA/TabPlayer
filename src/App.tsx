@@ -509,7 +509,7 @@ export function App({controller,audioBridge,waveformBridge,exportBridge,document
       if(indexed)setNoteIndex(Math.max(0,Math.min((location.beat?.notes.length??1)-1,(noteIndex??0)+(event.key==='ArrowUp'?1:-1))));
       else select(next,string+(event.key==='ArrowUp'?1:-1));event.preventDefault();return;
     }
-    else if(/^\d$/.test(event.key)&&!indexed) {
+    else if(/^\d$/.test(event.key)&&!event.ctrlKey&&!event.metaKey&&!event.altKey&&!indexed) {
       const now=Date.now();digits.current.text=(now-digits.current.time<1000?digits.current.text:'')+event.key;
       digits.current.text=digits.current.text.slice(-2);digits.current.time=now;setFret(Number(digits.current.text));event.preventDefault();return;
     } else if(event.key==='Enter' && location.beat && !editBusy&&!indexed) {

@@ -6,7 +6,7 @@ import type { EditCommand, SequenceStep } from '../edit-types';
 import type { EntryFollow } from '../instruments/entry';
 import { entryNotes } from '../instruments/entry';
 import type { BeatTarget } from '../project';
-import { accidentalLabels, drawnSpelling, enterPitch, entryAccidentals, entryBlock, entryClef, entryPitch, highestStep, keyLetter, lowestStep, octaveRange, oneEdit, pitchStep, spellingStep, stepPitch, writtenPitch, type EntryAccidental, type EntryPitch } from './notation-entry';
+import { accidentalLabelKeys, drawnSpelling, enterPitch, entryAccidentals, entryBlock, entryClef, entryPitch, highestStep, keyLetter, lowestStep, octaveRange, oneEdit, pitchStep, spellingStep, stepPitch, writtenPitch, type EntryAccidental, type EntryPitch } from './notation-entry';
 import './notation-entry.css';
 
 export interface NotationEntryPanelProps {
@@ -37,6 +37,7 @@ export function NotationEntryPanel({ score, target, busy, locked = false, onEdit
     if (working.current) { setStatus(t('editor.entry_busy')); return; }
     if (!entered) { setStatus(t('editor.entry_out_of_range')); return; }
     const result = enterPitch(context, entered);
+    if (result.unspellable) { setStatus(t('editor.entry_no_spelling', { name: entered.name })); return; }
     if (!result.action) { setStatus(result.name.startsWith('No free string') ? result.name : t('editor.entry_cannot_enter', { name: result.name })); return; }
     working.current = true;
     try {
@@ -80,7 +81,7 @@ export function NotationEntryPanel({ score, target, busy, locked = false, onEdit
   const stepId = (step: number) => `${id}-step${step - lowestStep}`;
   return <details open className="notation-entry"><summary>{t('editor.standard_notation_entry')}</summary>
     <fieldset disabled={disabled}>
-      <div role="group" aria-label={t('editor.accidental_group')} className="notation-entry-accidentals">{entryAccidentals.map(value => <button key={value} type="button" aria-pressed={accidental === value} onClick={() => setAccidental(value)}>{accidentalLabels[value]}</button>)}</div>
+      <div role="group" aria-label={t('editor.accidental_group')} className="notation-entry-accidentals">{entryAccidentals.map(value => <button key={value} type="button" aria-pressed={accidental === value} onClick={() => setAccidental(value)}>{t(accidentalLabelKeys[value])}</button>)}</div>
       <div className="notation-entry-octave"><button type="button" aria-label={t('editor.octave_down')} disabled={octave <= octaveRange.min} onClick={() => chooseOctave(octave - 1)}>−</button><span data-testid="entry-octave">{t('editor.octave_n', { octave })}</span><button type="button" aria-label={t('editor.octave_up')} disabled={octave >= octaveRange.max} onClick={() => chooseOctave(octave + 1)}>+</button></div>
     </fieldset>
     <div ref={staffBox} className="notation-entry-staff" role="group" aria-label={t('editor.pitch_entry_staff')} aria-disabled={disabled} aria-activedescendant={stepId(cursor)} tabIndex={0} aria-keyshortcuts="A B C D E F G" onKeyDown={keys}>

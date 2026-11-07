@@ -47,9 +47,6 @@ export function scoreEntryKey(event: { key: string; code?: string; ctrlKey: bool
   }
   if (event.altKey) return null;
   if (event.key === '.') return { kind: 'dot', double: ctrl };
-  // Guitar Pro also takes Shift+. for `.` and Shift+/ for `/`, whatever character the layout types there.
-  if (!ctrl && event.shiftKey && event.code === 'Period') return { kind: 'dot', double: false };
-  if (!ctrl && event.shiftKey && event.code === 'Slash') return { kind: 'triplet' };
   if (ctrl) return null;
   const letter = keyLetter(event.key);
   if (letter >= 0) return { kind: 'letter', letter };
@@ -58,6 +55,10 @@ export function scoreEntryKey(event: { key: string; code?: string; ctrlKey: bool
   if (plus || minus) return { kind: plus !== swapPlusMinus ? 'shorter' : 'longer' };
   if (event.key === '/') return { kind: 'triplet' };
   if (event.key === 'r' || event.key === 'R') return { kind: 'rest' };
+  // Guitar Pro also takes Shift+. for `.` and Shift+/ for `/`, whatever character the layout types there. The physical
+  // key is only a fallback: on German and Estonian layouts Slash is the `-` key, so a recognised `key` always wins.
+  if (event.shiftKey && event.code === 'Period') return { kind: 'dot', double: false };
+  if (event.shiftKey && event.code === 'Slash') return { kind: 'triplet' };
   return null;
 }
 

@@ -41,6 +41,10 @@ it('takes the Guitar Pro key aliases and the Plus/Minus swap, without catching m
   expect(swapped('+')).toEqual({ kind: 'longer' }); expect(swapped('=')).toEqual({ kind: 'longer' });
   expect(swapped('-')).toEqual({ kind: 'shorter' }); expect(swapped('_', { shiftKey: true })).toEqual({ kind: 'shorter' });
   expect(swapped('.')).toEqual({ kind: 'dot', double: false }); expect(swapped('/')).toEqual({ kind: 'triplet' });
+  // German and Estonian layouts: Slash is the `-` key, and a recognised key wins over the physical key.
+  expect(keys('_', { shiftKey: true }, 'Slash')).toEqual({ kind: 'longer' }); expect(scoreEntryKey({ key: '_', code: 'Slash', ctrlKey: false, altKey: false, shiftKey: true, metaKey: false }, true)).toEqual({ kind: 'shorter' });
+  expect(keys('-', {}, 'Slash')).toEqual({ kind: 'longer' }); expect(keys('?', { shiftKey: true }, 'Minus')).toBeNull();
+  expect(keys('/', { shiftKey: true }, 'Digit7')).toEqual({ kind: 'triplet' });
   // A modifier turns an alias into something else, or nothing.
   for (const [key, mods, code] of [['=', { ctrlKey: true }], ['_', { altKey: true }], ['-', { metaKey: true }], ['>', { shiftKey: true, ctrlKey: true }, 'Period'], ['?', { shiftKey: true, altKey: true }, 'Slash'], ['?', { ctrlKey: true, shiftKey: true }, 'Slash']] as const)
     expect(keys(key, mods, code)).toBeNull();

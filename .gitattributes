@@ -10,3 +10,5 @@ tests/desktop/cancel-dialog.ps1 -text
 # Audio source pins hash these app-owned map and license bytes on every OS.
 assets/audio/slap/** -text
 assets/audio/drums/** -text
+# SMuFL metadata is hashed in assets/fonts/sources.json and shipped byte for byte (Reserved Font Names).
+assets/fonts/*_metadata.json -text
